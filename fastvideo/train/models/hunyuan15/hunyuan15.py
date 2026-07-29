@@ -24,9 +24,12 @@ import torch
 
 from fastvideo.train.models.wan.wan import WanModel
 from fastvideo.forward_context import set_forward_context
+from fastvideo.logger import init_logger
 from fastvideo.pipelines import TrainingBatch
 from fastvideo.training.training_utils import (
     normalize_dit_input, )
+
+logger = init_logger(__name__)
 
 if TYPE_CHECKING:
     from fastvideo.train.utils.lora import LoraConfig
@@ -84,6 +87,28 @@ class Hunyuan15Model(WanModel):
         pipeline_config.text_encoder_configs[0].arch_config.text_len = (text_len)
         super().init_preprocessors(training_config)
 
+    @torch.no_grad()
+    def decode_latents(
+        self,
+        latents_b_t_c_h_w: torch.Tensor,
+    ) -> torch.Tensor:
+        """Decode HY1.5 latents back to pixels.
+
+        The Wan path denormalises with per-channel ``latents_mean`` /
+        ``latents_std``, which ``AutoencoderKLHunyuanVideo15`` does not
+        expose: it normalises by a single scaling factor instead, so undo
+        that rather than inheriting the Wan implementation.
+        """
+        if self.vae is None:
+            raise RuntimeError("HunyuanVideo 1.5 VAE is not initialized")
+        latents = latents_b_t_c_h_w.permute(0, 2, 1, 3, 4).float()
+        if bool(getattr(self.vae, "handles_latent_denorm", False)):
+            denorm = latents
+        else:
+            denorm = latents / self.vae.scaling_factor
+        media = self.vae.to(latents.device).decode(denorm)
+        return (media / 2 + 0.5).clamp(0, 1)
+
     def prepare_batch(
         self,
         raw_batch: dict[str, Any],
@@ -130,7 +155,19 @@ class Hunyuan15Model(WanModel):
         # The HY1.5 DiT has no text-mask input; leftover padding would
         # dilute the token refiner's mean-pool. With B=1 this equals the
         # exact-length behaviour of the inference path.
-        max_len = int(encoder_attention_mask.sum(dim=1).max().item())
+        prompt_lengths = encoder_attention_mask.sum(dim=1)
+        max_len = int(prompt_lengths.max().item())
+        min_len = int(prompt_lengths.min().item())
+        if min_len != max_len:
+            logger.warning(
+                "Batch mixes prompt lengths (%s..%s tokens). HY1.5's DiT takes "
+                "no text mask and mean-pools every token it is given, so the "
+                "shorter prompts keep padding and their conditioning depends "
+                "on the longest prompt in the batch. Use train_batch_size=1 "
+                "or bucket samples by prompt length.",
+                min_len,
+                max_len,
+            )
         encoder_hidden_states = encoder_hidden_states[:, :max_len]
         encoder_attention_mask = encoder_attention_mask[:, :max_len]
         max_len_2 = int(encoder_attention_mask_2.sum(dim=1).max().item())
