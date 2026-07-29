@@ -1,9 +1,12 @@
 # HunyuanVideo 1.5 480p T2V overfitting test config.
 #
 # Overfits on a single short video (480x832, 81 frames) to verify the
-# HunyuanVideo 1.5 training plugin works end-to-end.
+# HunyuanVideo 1.5 training plugin works end-to-end. LoRA keeps the run
+# within a single 80GB card (~30GB); see fine_tuning/hunyuan15/t2v.yaml
+# for the multi-GPU full-parameter setup.
 #
-# Preprocess data first:
+# Preprocess data first (the script expects the clip under
+# data/hunyuan15_overfit/videos/ next to videos2caption.json):
 #   CUDA_VISIBLE_DEVICES=0 python fastvideo/pipelines/preprocess/preprocess_hunyuan15_overfit.py
 #
 # Run:
@@ -16,11 +19,22 @@ models:
     trainable: true
     enable_gradient_checkpointing_type: full
     flow_shift: 5.0
+    # Full-parameter 8B training needs ~80GB before activations (weights +
+    # grads + both AdamW states are 66.8GB on their own), which does not fit
+    # a single 80GB card; LoRA keeps this run at ~30GB. HY1.5 names its
+    # attention projections differently from Wan/Flux, so the default
+    # target_modules find no matching layers.
+    lora:
+      enable: true
+      rank: 64
+      alpha: 64
+      target_modules: [img_attn_qkv, txt_attn_qkv, img_attn_proj, txt_attn_proj]
 
 method:
   _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
 
 training:
+  dit_precision: bf16
   distributed:
     num_gpus: 1
     sp_size: 1
@@ -69,13 +83,19 @@ callbacks:
   grad_clip:
     _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
     max_grad_norm: 1.0
-  validation:
-    _target_: fastvideo.train.callbacks.validation.ValidationCallback
-    pipeline_target: fastvideo.pipelines.basic.hunyuan15.hunyuan15_pipeline.HunyuanVideo15Pipeline
-    dataset_file: data/hunyuan15_overfit_preprocessed/validation_prompts.json
-    every_steps: 150
-    sampling_steps: [50]
-    guidance_scale: 7.0
+  # Validation is left out on purpose. TextEncodingStage sizes the
+  # zero-length ByT5 placeholder from the static T5 config default (512)
+  # rather than HY1.5's 1472, so decoding a caption without glyph text
+  # raises "expected input with shape [*, 1472] ... got [1, 0, 512]".
+  # Re-enable this block once that inference-side sizing is fixed:
+  #
+  # validation:
+  #   _target_: fastvideo.train.callbacks.validation.ValidationCallback
+  #   pipeline_target: fastvideo.pipelines.basic.hunyuan15.hunyuan15_pipeline.HunyuanVideo15Pipeline
+  #   dataset_file: data/hunyuan15_overfit_preprocessed/validation_prompts.json
+  #   every_steps: 150
+  #   sampling_steps: [50]
+  #   guidance_scale: 7.0
 
 pipeline:
   flow_shift: 5.0
