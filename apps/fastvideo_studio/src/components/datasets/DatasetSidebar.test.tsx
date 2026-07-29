@@ -47,6 +47,7 @@ describe('DatasetSidebar', () => {
     });
     expect(drawer).toHaveStyle({ width: '100%', maxWidth: 'none' });
     expect(drawer).toHaveAttribute('aria-modal', 'true');
+    expect(drawer).toHaveFocus();
     expect(onWidthChange).toHaveBeenCalledWith(0);
   });
 

@@ -14,6 +14,7 @@ import {
   type Dataset,
 } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { useDrawerFocus } from '@/hooks/useDrawerFocus';
 
 const SIDEBAR_MIN_WIDTH = 320;
 const SIDEBAR_MAX_WIDTH = 900;
@@ -123,6 +124,7 @@ export default function DatasetSidebar({
   onClose: () => void;
   onWidthChange?: (w: number) => void;
 }) {
+  const drawerRef = useDrawerFocus<HTMLElement>(isMobile);
   const [width, setWidth] = React.useState(400);
   const [isDragging, setIsDragging] = React.useState(false);
   const [fileNames, setFileNames] = React.useState<string[]>([]);
@@ -271,6 +273,8 @@ export default function DatasetSidebar({
 
   return (
     <aside
+      ref={drawerRef}
+      tabIndex={-1}
       role="dialog"
       aria-label={`${dataset.name} dataset details`}
       aria-modal={isMobile || undefined}

@@ -4,6 +4,7 @@ import * as React from 'react';
 import { X } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import { useDrawerFocus } from '@/hooks/useDrawerFocus';
 import { useResizable } from '@/hooks/useResizable';
 import { downloadJobLog, getJobLogs } from '@/lib/api';
 import type { Job } from '@/lib/types';
@@ -24,6 +25,7 @@ export default function JobDetailsSidebar({
   onClose: () => void;
   onWidthChange?: (w: number) => void;
 }) {
+  const drawerRef = useDrawerFocus<HTMLElement>(isMobile);
   const [width, setWidth] = React.useState(360);
   const [isDragging, setIsDragging] = React.useState(false);
   const [isLoading, setIsLoading] = React.useState(false);
@@ -139,6 +141,8 @@ export default function JobDetailsSidebar({
 
   return (
     <aside
+      ref={drawerRef}
+      tabIndex={-1}
       role="dialog"
       aria-label="Job details"
       aria-modal={isMobile || undefined}
