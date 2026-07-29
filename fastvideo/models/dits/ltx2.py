@@ -333,6 +333,7 @@ class GELUApprox(nn.Module):
         self,
         in_features: int,
         out_features: int,
+        bias: bool = True,
         quant_config: QuantizationConfig | None = None,
         prefix: str = "",
     ):
@@ -340,6 +341,7 @@ class GELUApprox(nn.Module):
         self.proj = ReplicatedLinear(
             in_features,
             out_features,
+            bias=bias,
             quant_config=quant_config,
             prefix=f"{prefix}.fc_in",
         )
@@ -357,6 +359,7 @@ class FeedForward(nn.Module):
         dim: int,
         dim_out: int,
         mult: int = 4,
+        bias: bool = True,
         quant_config: QuantizationConfig | None = None,
         prefix: str = "",
     ) -> None:
@@ -365,12 +368,14 @@ class FeedForward(nn.Module):
         project_in = GELUApprox(
             dim,
             inner_dim,
+            bias=bias,
             quant_config=quant_config,
             prefix=f"{prefix}.ffn",
         )
         project_out = ReplicatedLinear(
             inner_dim,
             dim_out,
+            bias=bias,
             quant_config=quant_config,
             prefix=f"{prefix}.ffn.fc_out",
         )
@@ -1206,6 +1211,9 @@ class TransformerConfig:
     # LTX-2.3 gated extensions (default OFF == LTX-2.0 behavior).
     apply_gated_attention: bool = False
     cross_attention_adaln: bool = False
+    # FFN bias is per stream: a checkpoint may drop it on video while keeping
+    # it on audio. Default True preserves existing behavior.
+    ff_bias: bool = True
 
 
 class LTXDistributedAttention(DistributedAttention):
@@ -1846,6 +1854,7 @@ class BasicAVTransformerBlock(torch.nn.Module):
             self.ff = FeedForward(
                 video.dim,
                 dim_out=video.dim,
+                bias=video.ff_bias,
                 quant_config=quant_config,
                 prefix=f"{prefix}.blocks.{idx}",
             )
@@ -1884,6 +1893,7 @@ class BasicAVTransformerBlock(torch.nn.Module):
             self.audio_ff = FeedForward(
                 audio.dim,
                 dim_out=audio.dim,
+                bias=audio.ff_bias,
                 quant_config=quant_config,
                 prefix=f"{prefix}.blocks.{idx}.audio",
             )
@@ -2353,6 +2363,8 @@ class LTXModel(torch.nn.Module):
         cross_attention_adaln: bool = False,
         caption_proj_before_connector: bool = False,
         apply_gated_attention: bool = False,
+        ff_bias: bool = True,
+        audio_ff_bias: bool = True,
         stg_block_idx: int = 29,
         use_distributed_attention: bool = False,
         quant_config: QuantizationConfig | None = None,
@@ -2364,6 +2376,9 @@ class LTXModel(torch.nn.Module):
         self.cross_attention_adaln = cross_attention_adaln
         self.caption_proj_before_connector = caption_proj_before_connector
         self.apply_gated_attention = apply_gated_attention
+        # Per-stream FFN bias; default True preserves existing behavior.
+        self.ff_bias = ff_bias
+        self.audio_ff_bias = audio_ff_bias
         self.stg_block_idx = stg_block_idx
         self.use_middle_indices_grid = use_middle_indices_grid
         self.rope_type = rope_type
@@ -2584,6 +2599,7 @@ class LTXModel(torch.nn.Module):
             context_dim=cross_attention_dim,
             apply_gated_attention=self.apply_gated_attention,
             cross_attention_adaln=self.cross_attention_adaln,
+            ff_bias=self.ff_bias,
         ) if self.model_type.is_video_enabled() else None)
         audio_config = (TransformerConfig(
             dim=self.audio_inner_dim,
@@ -2592,6 +2608,7 @@ class LTXModel(torch.nn.Module):
             context_dim=audio_cross_attention_dim,
             apply_gated_attention=self.apply_gated_attention,
             cross_attention_adaln=self.cross_attention_adaln,
+            ff_bias=self.audio_ff_bias,
         ) if self.model_type.is_audio_enabled() else None)
         self.use_distributed_attention = use_distributed_attention
         self.transformer_blocks = torch.nn.ModuleList([
@@ -2778,6 +2795,8 @@ class LTX2Transformer3DModel(BaseDiT):
             cross_attention_adaln=arch.cross_attention_adaln,
             caption_proj_before_connector=arch.caption_proj_before_connector,
             apply_gated_attention=arch.apply_gated_attention,
+            ff_bias=arch.ff_bias,
+            audio_ff_bias=arch.audio_ff_bias,
             stg_block_idx=arch.stg_block_idx,
             use_distributed_attention=use_distributed_attention,
             quant_config=config.quant_config,

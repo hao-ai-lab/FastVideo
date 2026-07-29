@@ -1,0 +1,130 @@
+# Dual-stream T2V NVFP4 quantization-aware fine-tune (QAT).
+#
+# Adapted from fine_tuning/ltx2_3/nvfp4_qat_t2v.yaml. The quantization wiring
+# is UNCHANGED and deliberately so: the curated linear prefix set in
+# fastvideo/layers/quantization/nvfp4_config.py targets
+# ltx2.blocks.{0..47}.* and attaches to this architecture unmodified --
+# verified against the constructed module tree, 576 linears / 12.9B params,
+# the same 12 suffix classes x 48 blocks as before. Do NOT narrow the set for
+# this architecture: the cross-modal projections it targets
+# (audio_to_video_attn, video_to_audio_attn) are deliberately enumerated in the
+# DEPLOYMENT set, so dropping them in training would break train/deploy
+# symmetry.
+#
+# What is NOT targeted, and why (all deliberate, none accidental):
+#   * head-dim-64 audio self/cross attention -- same constraint that kept it
+#     dense before;
+#   * per-head gate projections (to_gate_logits, [32, width]) -- tiny and
+#     precision-sensitive;
+#   * the embeddings connectors -- they live in the TEXT ENCODER, not the DiT,
+#     so deployment targeting must not reach across the component boundary.
+# The coverage audit prints these as skipped-by-rule so a reader can see the
+# exclusions were chosen, and FAILS if any declared class matches zero modules.
+#
+# Video attention uses ATTN_QAT_TRAIN (quantized forward, STE backward).
+#
+# Data paths, step counts and learning rate below are placeholders to adapt.
+
+models:
+  student:
+    _target_: fastvideo.train.models.ltx2.LTX2Model
+    # REQUIRED: single-file bundle path. The config parser does NOT expand
+    # environment interpolations, so override this on the command line:
+    #   --models.student.init_from /path/to/bundle.safetensors
+    init_from: SET_ME_ON_THE_COMMAND_LINE
+    trainable: true
+    enable_gradient_checkpointing_type: full
+    attention_backend: ATTN_QAT_TRAIN
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
+
+training:
+  distributed:
+    # ~19B params: bf16 weights 35.4 GiB + bf16 grads 35.4 GiB + Adam fp32
+    # m/v 141.5 GiB = ~212 GiB, against ~173 GiB usable per GPU. Single-GPU is
+    # arithmetically impossible; 4-way shard puts it at ~53 GiB/GPU.
+    num_gpus: 4
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 4
+
+  data:
+    # REQUIRED: path to your preprocessed dataset.
+    data_path: data/your_dataset_preprocessed
+    dataloader_num_workers: 4
+    train_batch_size: 1
+    # LTX2Model requires 0.0: CFG dropout would zero post-connector
+    # embeddings, which is not the model's unconditional input.
+    training_cfg_rate: 0.0
+    seed: 42
+    # Must match your preprocessed resolution/length.
+    # num_latent_t = (num_frames - 1) / 8 + 1.
+    num_latent_t: 11
+    num_height: 480
+    num_width: 832
+    num_frames: 81
+
+  optimizer:
+    # Carried from the validated LTX-2.0 QAT overfit run as a starting
+    # point; tune for your dataset size and batch configuration.
+    learning_rate: 5.0e-5
+    betas: [0.9, 0.999]
+    weight_decay: 0.0
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    # Workload-dependent: set from your dataset size and target epochs.
+    max_train_steps: 2000
+    gradient_accumulation_steps: 1
+
+  checkpoint:
+    output_dir: outputs/dual_stream_t2v_nvfp4_qat_finetune
+    # A full training-state checkpoint is ~150GB for the 13B trainable
+    # video branch — size the interval and total limit to your storage.
+    training_state_checkpointing_steps: 500
+    checkpoints_total_limit: 2
+    resume_from_checkpoint: latest
+
+  tracker:
+    # No experiment tracking.
+    # It must be ["none"], NOT []: build_tracker appends wandb whenever the
+    # list is empty and project_name is non-empty, so [] silently means wandb.
+    trackers: ["none"]
+
+  model:
+    # LTX2Model.predict_noise converts the DiT's x0 output to velocity,
+    # so the default noise-minus-clean target reproduces the official
+    # unweighted masked-MSE (mask is all-ones for plain T2V).
+    precondition_outputs: false
+    enable_gradient_checkpointing_type: full
+
+callbacks:
+  grad_clip:
+    _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
+    max_grad_norm: 1.0
+  validation:
+    _target_: fastvideo.train.callbacks.validation.ValidationCallback
+    pipeline_target: fastvideo.pipelines.basic.ltx2.ltx2_pipeline.LTX2Pipeline
+    # REQUIRED: prompts to sample during training.
+    dataset_file: data/your_dataset_preprocessed/validation_prompts.json
+    every_steps: 250
+    # 8-step single-pass sampling matches the distilled checkpoint
+    # (validated in the LTX-2.3 overfit runs).
+    sampling_steps: [8]
+    guidance_scale: 1.0
+    num_frames: 81
+    # Validation reuses the live transformer and temporarily replaces its
+    # ATTN_QAT_TRAIN implementations with the sm120 inference kernel.
+    # Set false on GB200 (see header).
+    attn_qat_infer: true
+
+# quant_config selects NVFP4 QAT for the same curated linear prefixes as
+# LTX-2 NVFP4 deployment (see the LTX-2.3 applicability note in the
+# header). They fake-quantize through real FP4 GEMMs with an STE
+# backward. The string resolves to NVFP4QATTrainConfig at parse.
+pipeline:
+  dit_config:
+    quant_config: nvfp4_qat_train

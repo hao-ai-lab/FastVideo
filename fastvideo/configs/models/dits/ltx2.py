@@ -55,6 +55,13 @@ class LTX2VideoArchConfig(DiTArchConfig):
     # LTX-2.3 gated extensions. All default OFF == LTX-2.0 behavior.
     cross_attention_adaln: bool = False
     caption_proj_before_connector: bool = False
+    # FFN bias, per stream. Some checkpoints ship the video FFN without bias
+    # (``ff_bias: false`` in their metadata), which drops the 96
+    # ``transformer_blocks.*.ff.net.{0.proj,2}.bias`` tensors; the audio FFN is
+    # configured independently and commonly keeps its biases. Both default True,
+    # which is the existing behavior.
+    ff_bias: bool = True
+    audio_ff_bias: bool = True
 
     positional_embedding_theta: float = 10000.0
     positional_embedding_max_pos: list[int] = field(default_factory=lambda: [20, 2048, 2048])

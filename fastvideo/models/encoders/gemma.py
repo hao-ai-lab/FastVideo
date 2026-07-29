@@ -7,7 +7,7 @@ from typing import Any, Iterable
 
 import torch
 from torch import nn
-from transformers import AutoTokenizer, Gemma3ForConditionalGeneration
+from transformers import AutoModelForImageTextToText, AutoTokenizer
 
 from fastvideo.configs.models.encoders import BaseEncoderOutput, TextEncoderConfig
 from fastvideo.models.encoders.base import TextEncoder
@@ -398,7 +398,7 @@ class LTX2GemmaTextEncoderModel(TextEncoder):
         self.gemma_model_path = arch.gemma_model_path
         self.gemma_dtype = arch.gemma_dtype
         self.padding_side = arch.padding_side
-        self._gemma_model: Gemma3ForConditionalGeneration | None = None
+        self._gemma_model: nn.Module | None = None
 
     def named_parameters(self, prefix: str = "", recurse: bool = True):
         for name, param in super().named_parameters(prefix=prefix, recurse=recurse):
@@ -436,17 +436,22 @@ class LTX2GemmaTextEncoderModel(TextEncoder):
             )
 
     @property
-    def gemma_model(self) -> Gemma3ForConditionalGeneration:
+    def gemma_model(self) -> nn.Module:
         if self._gemma_model is None:
             gemma_path = self.gemma_model_path
             if not gemma_path:
                 raise ValueError("gemma_model_path must be set (expected text_encoder/gemma).")
             dtype = getattr(torch, self.gemma_dtype, torch.bfloat16)
-            self._gemma_model = Gemma3ForConditionalGeneration.from_pretrained(
+            # Resolve the class from the root config's own ``model_type``
+            # instead of hardcoding one: a checkpoint may declare its own
+            # encoder pairing. The auto class still resolves to the previously
+            # hardcoded class for the roots shipped so far.
+            self._gemma_model = AutoModelForImageTextToText.from_pretrained(
                 gemma_path,
                 local_files_only=True,
                 torch_dtype=dtype,
             )
+            self._sync_arch_from_gemma_config(self._gemma_model.config)
             # Configure model-level attention implementation when using TORCH_SDPA.
             # Note: torch.backends.cuda.enable_*_sdp() settings should be configured
             # at application/pipeline initialization level, not here, to avoid
@@ -463,6 +468,33 @@ class LTX2GemmaTextEncoderModel(TextEncoder):
             self._gemma_model.to(device=device)
             self._gemma_model.eval()
         return self._gemma_model
+
+    def _sync_arch_from_gemma_config(self, gemma_config: Any) -> None:
+        """Take language-model geometry from the loaded Gemma config.
+
+        A multimodal root nests it under ``text_config``; a text-only config
+        carries it at the root. The dataclass defaults hold for every encoder
+        root shipped so far, so this is not a behavior change -- it just stops
+        the defaults from being authoritative.
+        The feature-extractor linears are sized in ``__init__`` from
+        ``feature_extractor_in_features``, before the Gemma weights load, so a
+        geometry mismatch is raised here rather than surfacing later as an
+        opaque matmul shape error.
+        """
+        text_config = getattr(gemma_config, "text_config", gemma_config)
+        arch = self.config.arch_config
+        arch.hidden_size = text_config.hidden_size
+        arch.num_hidden_layers = text_config.num_hidden_layers
+        # +1: the stacked hidden states include the embedding output.
+        expected_in_features = arch.hidden_size * (arch.num_hidden_layers + 1)
+        if expected_in_features != arch.feature_extractor_in_features:
+            raise ValueError(
+                "Gemma geometry does not match the configured feature "
+                f"extractor: loaded config gives hidden_size={arch.hidden_size} "
+                f"x (num_hidden_layers={arch.num_hidden_layers} + 1) = "
+                f"{expected_in_features}, but feature_extractor_in_features is "
+                f"{arch.feature_extractor_in_features}."
+            )
 
     def _run_feature_extractor(
         self,
@@ -670,6 +702,10 @@ class LTX2GemmaTextEncoderModel(TextEncoder):
                 name = "feature_extractor_linear.aggregate_embed.weight"
             elif name.startswith("video_connector."):
                 name = name.replace("video_connector.", "embeddings_connector.", 1)
+            elif name.startswith("video_embeddings_connector."):
+                # Some checkpoints name the video connector sub-tree after its
+                # modality; the module is just ``embeddings_connector``.
+                name = name.replace("video_embeddings_connector.", "embeddings_connector.", 1)
             elif name.startswith("audio_connector."):
                 name = name.replace("audio_connector.", "audio_embeddings_connector.", 1)
             if name not in params_dict:

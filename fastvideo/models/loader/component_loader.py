@@ -33,6 +33,10 @@ from fastvideo.logger import init_logger
 from fastvideo.models.encoders.base import TextEncoder
 from fastvideo.models.hf_transformer_utils import get_diffusers_config
 from fastvideo.models.loader.fsdp_load import maybe_load_fsdp_model, shard_model
+from fastvideo.models.loader.ltx_single_file import (
+    component_weights,
+    read_ltx_metadata,
+)
 from fastvideo.models.loader.utils import set_default_torch_dtype
 from fastvideo.models.loader.weight_utils import (
     filter_duplicate_safetensors_files,
@@ -290,6 +294,18 @@ class TextEncoderLoader(ComponentLoader):
                     rope_type = transformer_config.get("rope_type")
                     if rope_type is not None:
                         model_config["connector_rope_type"] = rope_type
+                # Each per-modality projection feeds its connector, so its
+                # output width is that stream's cross-attention width, which
+                # only the transformer config declares. Absent from both
+                # configs -> the arch config default stands.
+                for src, dst in (
+                    ("cross_attention_dim",
+                     "video_feature_extractor_out_features"),
+                    ("audio_cross_attention_dim",
+                     "audio_feature_extractor_out_features"),
+                ):
+                    if dst not in model_config and src in transformer_config:
+                        model_config[dst] = transformer_config[src]
             except json.JSONDecodeError:
                 pass
         logger.info("HF Model config: %s", model_config)
@@ -974,7 +990,16 @@ class TransformerLoader(ComponentLoader):
 
     def load(self, model_path: str, fastvideo_args: FastVideoArgs):
         """Load the transformer based on the model path, and inference args."""
-        config = get_diffusers_config(model=model_path)
+        # LTX ships one bundle holding every component instead of a
+        # per-component directory: the config lives in the file's
+        # ``__metadata__`` and the transformer's tensors are selected by their
+        # top-level key prefix.
+        single_file = str(model_path).endswith(".safetensors")
+        if single_file:
+            config = deepcopy(
+                read_ltx_metadata(model_path).config["transformer"])
+        else:
+            config = get_diffusers_config(model=model_path)
         hf_config = deepcopy(config)
         cls_name = config.pop("_class_name")
         config.pop("_name_or_path", None)
@@ -1008,9 +1033,12 @@ class TransformerLoader(ComponentLoader):
         model_cls, _ = ModelRegistry.resolve_model_cls(cls_name)
 
         # Find all safetensors files
-        safetensors_list = glob.glob(os.path.join(str(model_path), "*.safetensors"))
-        if not safetensors_list:
-            raise ValueError(f"No safetensors files found in {model_path}")
+        if single_file:
+            safetensors_list = [str(model_path)]
+        else:
+            safetensors_list = glob.glob(os.path.join(str(model_path), "*.safetensors"))
+            if not safetensors_list:
+                raise ValueError(f"No safetensors files found in {model_path}")
 
         # arch_config can infer architecture from weight keys (e.g. Flux2 layer counts)
         update_fn = getattr(dit_config.arch_config, "update_from_weight_keys", None)
@@ -1065,6 +1093,11 @@ class TransformerLoader(ComponentLoader):
                     "hf_config": hf_config
                 },
                 weight_dir_list=safetensors_list,
+                # Route the bundle's tensors to the transformer, prefix
+                # stripped. Skipped when custom init weights replaced the
+                # file list above.
+                weight_iterator=(component_weights(model_path, "transformer")
+                                 if single_file and not use_custom_weights else None),
                 device=get_local_torch_device(),
                 hsdp_replicate_dim=fastvideo_args.hsdp_replicate_dim,
                 hsdp_shard_dim=fastvideo_args.hsdp_shard_dim,

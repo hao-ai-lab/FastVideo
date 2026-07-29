@@ -7,7 +7,7 @@
 from __future__ import annotations
 import os
 import contextlib
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Iterable
 from itertools import chain
 from typing import Any
 
@@ -136,9 +136,15 @@ def maybe_load_fsdp_model(
     pin_cpu_memory: bool = True,
     enable_torch_compile: bool = False,
     torch_compile_kwargs: dict[str, Any] | None = None,
+    weight_iterator: Iterable[tuple[str, torch.Tensor]] | None = None,
 ) -> torch.nn.Module:
     """
     Load the model with FSDP if is training, else load the model without FSDP.
+
+    ``weight_iterator`` overrides reading ``weight_dir_list``, for checkpoints
+    whose keys need routing before they reach the model (see
+    ``ltx_single_file.component_weights``). It must yield the same
+    ``(name, cpu_tensor)`` pairs that ``safetensors_weights_iterator`` does.
     """
     # NOTE(will): cast_forward_inputs=True shouldn't be needed as we are
     # manually casting the inputs to the model
@@ -201,7 +207,8 @@ def maybe_load_fsdp_model(
                     fsdp_shard_conditions=model._fsdp_shard_conditions,
                     pin_cpu_memory=pin_cpu_memory)
 
-    weight_iterator = safetensors_weights_iterator(weight_dir_list, to_cpu=True)
+    if weight_iterator is None:
+        weight_iterator = safetensors_weights_iterator(weight_dir_list, to_cpu=True)
     param_names_mapping_fn = get_param_names_mapping(model.param_names_mapping)
     load_model_from_full_model_state_dict(
         model,
