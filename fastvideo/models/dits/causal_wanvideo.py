@@ -74,7 +74,7 @@ class CausalWanSelfAttention(nn.Module):
             supported_attention_backends=(AttentionBackendEnum.FLASH_ATTN,
                                           AttentionBackendEnum.TORCH_SDPA))
 
-    def forward(self, 
+    def forward(self,
                 q: torch.Tensor,
                 k: torch.Tensor,
                 v: torch.Tensor,
@@ -83,7 +83,8 @@ class CausalWanSelfAttention(nn.Module):
                 kv_cache: dict | None = None,
                 current_start: int = 0,
                 cache_start: int | None = None,
-                frame_seqlen: int = 1560):
+                frame_seqlen: int = 1560,
+                is_chunk_start: bool | None = None):
         r"""
         Args:
             x(Tensor): Shape [B, L, num_heads, C / num_heads]
@@ -92,6 +93,14 @@ class CausalWanSelfAttention(nn.Module):
             freqs(Tensor): Rope freqs, shape [1024, C / num_heads / 2]
             frame_seqlen (int): Number of tokens per latent frame,
                 e.g. 1560 for 480x832 resolution.
+            is_chunk_start: Whether this call is the first step of a new
+                autoregressive chunk (as opposed to a later denoising step
+                refining the same chunk). Callers that already know this
+                (e.g. the causal denoising stage) should pass it explicitly,
+                which lets CUDA-graph capture avoid re-deriving it from the
+                cache counters on every replay. Callers that don't pass it
+                (e.g. training) fall back to deriving it from
+                ``current_end > global_end_index``, exactly as before.
         """
         if cache_start is None:
             cache_start = current_start
@@ -159,32 +168,25 @@ class CausalWanSelfAttention(nn.Module):
                 if isinstance(kv_cache["local_end_index"], torch.Tensor)
                 else int(kv_cache["local_end_index"])
             )
-            if self.local_attn_size != -1 and (current_end > global_end_index) and (
-                    num_new_tokens + local_end_index_prev > kv_cache_size):
-                # Calculate the number of new tokens added in this step
-                # Shift existing cache content left to discard oldest tokens
-                # Clone the source slice to avoid overlapping memory error
-                num_evicted_tokens = num_new_tokens + local_end_index_prev - kv_cache_size
-                num_rolled_tokens = local_end_index_prev - num_evicted_tokens - sink_tokens
-                kv_cache["k"][:, sink_tokens:sink_tokens + num_rolled_tokens] = \
-                    kv_cache["k"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
-                kv_cache["v"][:, sink_tokens:sink_tokens + num_rolled_tokens] = \
-                    kv_cache["v"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
-                # Insert the new keys/values at the end
-                local_end_index = local_end_index_prev + current_end - \
-                    global_end_index - num_evicted_tokens
-                local_start_index = local_end_index - num_new_tokens
-                kv_cache["k"][:, local_start_index:local_end_index] = stored_key
-                kv_cache["v"][:, local_start_index:local_end_index] = v
+            # A chunk-start step is one where new tokens extend the sequence
+            # (current_end > global_end_index); later steps within the same
+            # chunk only refine tokens already written. The caller already
+            # knows which kind of step this is from its own loop position, so
+            # prefer that over re-deriving it here -- re-deriving it is also
+            # what a CUDA-graph replay cannot do, since only the caller's
+            # Python loop (not the captured tensor ops) runs on every replay.
+            chunk_start = (current_end >
+                           global_end_index) if is_chunk_start is None else is_chunk_start
+            needs_eviction = num_new_tokens + local_end_index_prev > kv_cache_size
+
+            if self.local_attn_size != -1 and chunk_start and needs_eviction:
+                local_start_index, local_end_index = self._evict_and_write(
+                    kv_cache, stored_key, v, sink_tokens, num_new_tokens,
+                    local_end_index_prev, kv_cache_size)
             else:
-                # Assign new keys/values directly up to current_end
-                local_end_index = local_end_index_prev + current_end - global_end_index
-                local_start_index = local_end_index - num_new_tokens
-                kv_cache["k"] = kv_cache["k"].detach()
-                kv_cache["v"] = kv_cache["v"].detach()
-                # logger.info("kv_cache['k'] is in comp graph: %s", kv_cache["k"].requires_grad or kv_cache["k"].grad_fn is not None)
-                kv_cache["k"][:, local_start_index:local_end_index] = stored_key
-                kv_cache["v"][:, local_start_index:local_end_index] = v
+                local_start_index, local_end_index = self._write_in_place(
+                    kv_cache, stored_key, v, current_end, global_end_index,
+                    local_end_index_prev, num_new_tokens)
             key_window = kv_cache["k"][:, max(0, local_end_index - max_attention_size):local_end_index]
             value_window = kv_cache["v"][:, max(0, local_end_index - max_attention_size):local_end_index]
             if relativistic:
@@ -197,16 +199,71 @@ class CausalWanSelfAttention(nn.Module):
                     key_window, cos[:window_len], sin[:window_len],
                     is_neox_style=False).type_as(v)
             x = self.attn(roped_query, key_window, value_window)
-            if isinstance(kv_cache["global_end_index"], torch.Tensor):
-                kv_cache["global_end_index"].fill_(current_end)
-            else:
-                kv_cache["global_end_index"] = current_end
-            if isinstance(kv_cache["local_end_index"], torch.Tensor):
-                kv_cache["local_end_index"].fill_(local_end_index)
-            else:
-                kv_cache["local_end_index"] = local_end_index
+            self._update_cache_counters(kv_cache, current_end, local_end_index)
 
         return x
+
+    @staticmethod
+    def _evict_and_write(kv_cache: dict, key_to_store: torch.Tensor, v: torch.Tensor,
+                         sink_tokens: int, num_new_tokens: int,
+                         local_end_index_prev: int, kv_cache_size: int) -> tuple[int, int]:
+        """Shift the local window left to discard the oldest tokens, then write the new chunk at the freed slot.
+
+        Only called at a chunk-start step whose new tokens would overflow the
+        fixed-size cache. Once the cache has filled once, this always evicts
+        exactly ``num_new_tokens`` tokens and writes to the same physical
+        slot on every subsequent call -- see ``causal_denoising.py`` for the
+        steady-state argument this relies on.
+        """
+        num_evicted_tokens = num_new_tokens + local_end_index_prev - kv_cache_size
+        num_rolled_tokens = local_end_index_prev - num_evicted_tokens - sink_tokens
+        # Clone the source slice to avoid an overlapping-memory error.
+        kv_cache["k"][:, sink_tokens:sink_tokens + num_rolled_tokens] = \
+            kv_cache["k"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
+        kv_cache["v"][:, sink_tokens:sink_tokens + num_rolled_tokens] = \
+            kv_cache["v"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
+        local_end_index = local_end_index_prev + num_new_tokens - num_evicted_tokens
+        local_start_index = local_end_index - num_new_tokens
+        kv_cache["k"][:, local_start_index:local_end_index] = key_to_store
+        kv_cache["v"][:, local_start_index:local_end_index] = v
+        return local_start_index, local_end_index
+
+    @staticmethod
+    def _write_in_place(kv_cache: dict, key_to_store: torch.Tensor, v: torch.Tensor,
+                        current_end: int, global_end_index: int,
+                        local_end_index_prev: int, num_new_tokens: int) -> tuple[int, int]:
+        """Write the chunk without evicting anything.
+
+        Covers two cases with the same math: a continuation step refining
+        tokens already written this chunk (``current_end == global_end_index``,
+        so the write lands on the same slot as last time), and a chunk-start
+        step while the cache is still filling up (``current_end >
+        global_end_index``, so the write extends the filled region).
+        """
+        local_end_index = local_end_index_prev + current_end - global_end_index
+        local_start_index = local_end_index - num_new_tokens
+        kv_cache["k"] = kv_cache["k"].detach()
+        kv_cache["v"] = kv_cache["v"].detach()
+        kv_cache["k"][:, local_start_index:local_end_index] = key_to_store
+        kv_cache["v"][:, local_start_index:local_end_index] = v
+        return local_start_index, local_end_index
+
+    @staticmethod
+    def _update_cache_counters(kv_cache: dict, current_end: int, local_end_index: int) -> None:
+        """Record the new cache extent for the next call to read back.
+
+        Accepts either plain ints (inference) or 0-d tensors (training, which
+        snapshots these for gradient checkpointing) -- see the training
+        limitation noted in FlashDreams.md item 1.
+        """
+        if isinstance(kv_cache["global_end_index"], torch.Tensor):
+            kv_cache["global_end_index"].fill_(current_end)
+        else:
+            kv_cache["global_end_index"] = current_end
+        if isinstance(kv_cache["local_end_index"], torch.Tensor):
+            kv_cache["local_end_index"].fill_(local_end_index)
+        else:
+            kv_cache["local_end_index"] = local_end_index
 
 class CausalWanTransformerBlock(nn.Module):
 
@@ -293,6 +350,7 @@ class CausalWanTransformerBlock(nn.Module):
         current_start: int = 0,
         cache_start: int | None = None,
         frame_seqlen: int | None = None,
+        is_chunk_start: bool | None = None,
     ) -> torch.Tensor:
         # hidden_states.shape: [batch_size, seq_length, inner_dim]
         # temb.shape: [batch_size, temb_seq_len, 6, inner_dim]
@@ -341,12 +399,16 @@ class CausalWanTransformerBlock(nn.Module):
             current_start,
             cache_start,
             frame_seqlen=frame_seqlen,
+            is_chunk_start=is_chunk_start,
         )
         attn_output = attn_output.flatten(2)
         attn_output, _ = self.to_out(attn_output)
         attn_output = attn_output.squeeze(1)
 
-        null_shift = null_scale = torch.tensor([0], device=hidden_states.device)
+        # torch.zeros(...) allocates directly on-device; torch.tensor([0], ...)
+        # builds the literal on CPU first and copies it over, which CUDA graph
+        # capture forbids unless the CPU side is pinned.
+        null_shift = null_scale = torch.zeros(1, device=hidden_states.device, dtype=torch.long)
         norm_hidden_states, hidden_states = self.self_attn_residual_norm(
             hidden_states, attn_output, gate_msa, null_shift, null_scale)
         norm_hidden_states, hidden_states = norm_hidden_states.to(
@@ -577,6 +639,7 @@ class CausalWanTransformer3DModel(BaseDiT):
                 current_start: int = 0,
                 cache_start: int = 0,
                 start_frame: int = 0,
+                is_chunk_start: bool | None = None,
                 **kwargs) -> torch.Tensor:
         r"""
         Run the diffusion model with kv caching.
@@ -622,8 +685,12 @@ class CausalWanTransformer3DModel(BaseDiT):
             rope_theta=10000,
             start_frame=rope_start_frame
         )
-        freqs_cos = freqs_cos.to(hidden_states.device)
-        freqs_sin = freqs_sin.to(hidden_states.device)
+        # non_blocking=True: without it, .to() issues a synchronous copy even
+        # from pinned memory, and a synchronous copy isn't a capturable
+        # operation -- CUDA graph capture (once the KV cache is in steady
+        # state) needs this to be the async pinned-memory path.
+        freqs_cos = freqs_cos.to(hidden_states.device, non_blocking=True)
+        freqs_sin = freqs_sin.to(hidden_states.device, non_blocking=True)
         freqs_cis = (freqs_cos,
                      freqs_sin) if freqs_cos is not None else None
 
@@ -657,6 +724,7 @@ class CausalWanTransformer3DModel(BaseDiT):
                     "cache_start": cache_start,
                     "block_mask": self.block_mask,
                     "frame_seqlen": post_patch_height * post_patch_width,
+                    "is_chunk_start": is_chunk_start,
                 }
                 hidden_states = self._gradient_checkpointing_func(
                     block, hidden_states, encoder_hidden_states,
@@ -671,6 +739,7 @@ class CausalWanTransformer3DModel(BaseDiT):
                     "cache_start": cache_start,
                     "block_mask": self.block_mask,
                     "frame_seqlen": post_patch_height * post_patch_width,
+                    "is_chunk_start": is_chunk_start,
                 }
                 hidden_states = block(hidden_states, encoder_hidden_states,
                                         timestep_proj, freqs_cis,

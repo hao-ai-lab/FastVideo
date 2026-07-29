@@ -553,6 +553,13 @@ def get_rotary_pos_embed(
         start_frame=start_frame,
         use_real=use_real,
     )
+    # Pin CPU tables so callers' later `.to(device)` is a pinned-memory H2D
+    # copy, not a pageable one. Callers that run inside CUDA graph capture
+    # (e.g. the causal denoising loop, once its KV cache reaches steady
+    # state) need this: capture forbids copying from pageable CPU memory.
+    if freqs_cos.device.type == "cpu" and torch.cuda.is_available():
+        freqs_cos = freqs_cos.pin_memory()
+        freqs_sin = freqs_sin.pin_memory()
     # The returned tensors are shared cache entries: callers must never mutate
     # them in place. Note .to(device) is an identity alias when the tensor is
     # already on the target device (e.g. CPU runs), so it does NOT guarantee a

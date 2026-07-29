@@ -6,6 +6,7 @@ from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.utils import pred_noise_to_pred_video, pred_noise_to_x_bound
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.pipelines.stages.causal_cuda_graph import CausalCudaGraphDispatch
 from fastvideo.pipelines.stages.denoising import DenoisingStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
@@ -60,6 +61,76 @@ class CausalDMDDenosingStage(DenoisingStage):
         self.local_attn_size = _get_transformer_attr(self.transformer, "local_attn_size", -1)
         self.sink_size = _get_transformer_attr(self.transformer, "sink_size", 0)
 
+    def _resolve_cuda_graph_enabled(self, fastvideo_args: FastVideoArgs, boundary_timestep) -> bool:
+        """Return whether this run may attempt CUDA graph capture, logging why not otherwise.
+
+        Capture needs a fixed-size KV window whose write positions become
+        constant once full (``local_attn_size != -1``), position embeddings
+        that don't depend on the per-chunk ``start_frame``
+        (``rope_cache_policy == "relativistic"``), a single transformer
+        (the dual-transformer MoE path's "which model is at chunk-start"
+        bookkeeping isn't handled yet), and weights that stay put on the GPU
+        (CPU/layerwise offload swaps parameter storage between layers, which
+        breaks the stable memory addresses a captured graph depends on).
+        See FlashDreams.md item 2.
+        """
+        if not fastvideo_args.enable_causal_cuda_graph:
+            return False
+        reason = None
+        if fastvideo_args.dit_cpu_offload or fastvideo_args.dit_layerwise_offload:
+            reason = "dit_cpu_offload/dit_layerwise_offload moves weights during forward"
+        elif self.local_attn_size == -1:
+            reason = "local_attn_size=-1 (no fixed-size KV window)"
+        else:
+            rope_cache_policy = getattr(self.transformer.config.arch_config, "rope_cache_policy", "absolute")
+            if rope_cache_policy != "relativistic":
+                reason = f"rope_cache_policy={rope_cache_policy!r} (requires 'relativistic')"
+            elif boundary_timestep is not None:
+                reason = "dual-transformer MoE pipeline (boundary_timestep is set)"
+        if reason is not None:
+            logger.warning(
+                "CUDA graph capture requested (enable_causal_cuda_graph=True) but disabled: %s. "
+                "Falling back to eager execution.", reason)
+            return False
+        logger.info("CUDA graph capture enabled for causal denoising; "
+                    "will engage once the KV cache reaches steady state.")
+        return True
+
+    def _kv_cache_is_steady_state(self, kv_cache: list[dict]) -> bool:
+        """Return whether the KV cache window is already full.
+
+        Once full, every subsequent write lands on the same fixed slot
+        (see FlashDreams.md item 2's derivation), which is what makes
+        capture safe from that point on. With no fixed window
+        (``local_attn_size == -1``) there's no "full" to reach, so this is
+        always False there -- callers must not treat -1 as a size.
+        """
+        if self.local_attn_size == -1:
+            return False
+        kv_cache_size = self.local_attn_size * self.frame_seq_length
+        return kv_cache[0]["local_end_index"] >= kv_cache_size
+
+    def _finalize_kv_cache_counters(self, kv_cache: list[dict], current_end: int) -> None:
+        """Advance every layer's cache counters after a steady-state call.
+
+        ``CausalWanSelfAttention.forward`` normally updates these counters
+        itself, but that update is inside the region a CUDA graph replay
+        skips entirely -- replaying only reruns the recorded tensor kernels,
+        never the Python that recorded them. Call this unconditionally after
+        every steady-state call (whether it went eager, warmed up, or
+        replayed) to keep the counters correct regardless.
+
+        Both values are knowable in advance once steady state is reached:
+        ``local_end_index`` is always the full buffer size (see
+        ``_kv_cache_is_steady_state``'s derivation), and ``global_end_index``
+        is always this call's ``current_end``. Setting them here is
+        idempotent when the model's own update already ran.
+        """
+        kv_cache_size = self.local_attn_size * self.frame_seq_length
+        for layer_cache in kv_cache:
+            layer_cache["global_end_index"] = current_end
+            layer_cache["local_end_index"] = kv_cache_size
+
     def forward(
         self,
         batch: ForwardBatch,
@@ -88,6 +159,12 @@ class CausalDMDDenosingStage(DenoisingStage):
         else:
             boundary_timestep = None
             high_noise_timesteps = None
+
+        # Scoped to this forward() call, not stored on self: a captured
+        # graph's static buffers are tied to this call's KV cache tensors,
+        # and a later generate_video() call gets a fresh KV cache.
+        cuda_graph_enabled = self._resolve_cuda_graph_enabled(fastvideo_args, boundary_timestep)
+        cuda_graph_dispatch = CausalCudaGraphDispatch(self.transformer, enabled=cuda_graph_enabled)
 
         # Image kwargs (kept empty unless caller provides compatible args)
         image_kwargs: dict = {}
@@ -182,6 +259,7 @@ class CausalDMDDenosingStage(DenoisingStage):
                     crossattn_cache=crossattn_cache,
                     current_start=(pos_start_base + start_index) * self.frame_seq_length,
                     start_frame=start_index,
+                    is_chunk_start=True,
                     **image_kwargs,
                     **pos_cond_kwargs,
                 )
@@ -194,6 +272,7 @@ class CausalDMDDenosingStage(DenoisingStage):
                         crossattn_cache=crossattn_cache,
                         current_start=(pos_start_base + start_index) * self.frame_seq_length,
                         start_frame=start_index,
+                        is_chunk_start=True,
                         **image_kwargs,
                         **pos_cond_kwargs,
                     )
@@ -252,17 +331,33 @@ class CausalDMDDenosingStage(DenoisingStage):
                         # Run transformer; follow DMD stage pattern
                         t_expanded_noise = t_cur * torch.ones(
                             (latent_model_input.shape[0], 1), device=latent_model_input.device, dtype=torch.long)
-                        pred_noise_btchw = current_model(
+                        # Only the single-transformer case can say for certain
+                        # which model's first call this is -- with two
+                        # transformers alternating on a shared timestep list,
+                        # each one's true chunk-start can land at a different
+                        # i, so leave it None there and let the fallback
+                        # derivation (unchanged from before) handle it.
+                        is_chunk_start = (i == 0) if boundary_timestep is None else None
+                        kv_cache_for_call = _get_kv_cache(t_cur)
+                        is_steady_state = (cuda_graph_dispatch.enabled and boundary_timestep is None
+                                           and self._kv_cache_is_steady_state(kv_cache_for_call))
+                        call_current_end = (pos_start_base + start_index + current_num_frames) * self.frame_seq_length
+                        pred_noise_btchw = cuda_graph_dispatch.call(
+                            current_model,
                             latent_model_input,
                             prompt_embeds,
                             t_expanded_noise,
-                            kv_cache=_get_kv_cache(t_cur),
+                            kv_cache=kv_cache_for_call,
                             crossattn_cache=crossattn_cache,
                             current_start=(pos_start_base + start_index) * self.frame_seq_length,
                             start_frame=start_index,
+                            is_chunk_start=is_chunk_start,
+                            is_steady_state=is_steady_state,
                             **image_kwargs,
                             **pos_cond_kwargs,
                         ).permute(0, 2, 1, 3, 4)
+                        if is_steady_state:
+                            self._finalize_kv_cache_counters(kv_cache_for_call, call_current_end)
 
                     # Convert pred noise to pred video with FM Euler scheduler utilities
                     if boundary_timestep is not None and t_cur >= boundary_timestep:
@@ -330,11 +425,15 @@ class CausalDMDDenosingStage(DenoisingStage):
                             crossattn_cache=crossattn_cache,
                             current_start=(pos_start_base + start_index) * self.frame_seq_length,
                             start_frame=start_index,
+                            is_chunk_start=False,
                             **image_kwargs,
                             **pos_cond_kwargs,
                         )
 
-                    self.transformer(
+                    context_is_steady_state = (cuda_graph_dispatch.enabled and boundary_timestep is None
+                                               and self._kv_cache_is_steady_state(kv_cache1))
+                    cuda_graph_dispatch.call(
+                        self.transformer,
                         context_bcthw,
                         prompt_embeds,
                         t_expanded_context,
@@ -342,9 +441,13 @@ class CausalDMDDenosingStage(DenoisingStage):
                         crossattn_cache=crossattn_cache,
                         current_start=(pos_start_base + start_index) * self.frame_seq_length,
                         start_frame=start_index,
+                        is_chunk_start=False,
+                        is_steady_state=context_is_steady_state,
                         **image_kwargs,
                         **pos_cond_kwargs,
                     )
+                    if context_is_steady_state:
+                        self._finalize_kv_cache_counters(kv_cache1, call_current_end)
 
                 start_index += current_num_frames
 
@@ -479,6 +582,11 @@ class CausalDenoisingStage(CausalDMDDenosingStage):
             device=latents.device,
         )
 
+        # This stage always has a single transformer, so boundary_timestep
+        # (the dual-transformer MoE gate) is never set here.
+        cuda_graph_enabled = self._resolve_cuda_graph_enabled(fastvideo_args, boundary_timestep=None)
+        cuda_graph_dispatch = CausalCudaGraphDispatch(self.transformer, enabled=cuda_graph_enabled)
+
         # Determine block sizes
         if t % self.num_frames_per_block != 0:
             raise ValueError("num_frames must be divisible by "
@@ -535,7 +643,11 @@ class CausalDenoisingStage(CausalDMDDenosingStage):
                         # Transformer returns [B, C, T, H, W],
                         # permute to [B, T, C, H, W] then flatten
                         # B*T for the scheduler.
-                        noise_pred = self.transformer(
+                        step_is_steady_state = (cuda_graph_dispatch.enabled
+                                                and self._kv_cache_is_steady_state(kv_cache))
+                        step_current_end = (pos_start_base + start_index + current_num_frames) * self.frame_seq_length
+                        noise_pred = cuda_graph_dispatch.call(
+                            self.transformer,
                             latent_model_input,
                             prompt_embeds,
                             t_expanded,
@@ -543,8 +655,12 @@ class CausalDenoisingStage(CausalDMDDenosingStage):
                             crossattn_cache=crossattn_cache,
                             current_start=((pos_start_base + start_index) * self.frame_seq_length),
                             start_frame=start_index,
+                            is_chunk_start=(i == 0),
+                            is_steady_state=step_is_steady_state,
                             **pos_cond_kwargs,
                         )
+                        if step_is_steady_state:
+                            self._finalize_kv_cache_counters(kv_cache, step_current_end)
 
                     # Flatten [B,C,T,H,W] -> [B*T,C,H,W] for
                     # scheduler, then unflatten back.
@@ -590,7 +706,10 @@ class CausalDenoisingStage(CausalDMDDenosingStage):
                             forward_batch=batch,
                         ),
                 ):
-                    self.transformer(
+                    context_is_steady_state = (cuda_graph_dispatch.enabled and self._kv_cache_is_steady_state(kv_cache))
+                    context_current_end = (pos_start_base + start_index + current_num_frames) * self.frame_seq_length
+                    cuda_graph_dispatch.call(
+                        self.transformer,
                         context_bcthw,
                         prompt_embeds,
                         t_context.unsqueeze(1),
@@ -598,8 +717,12 @@ class CausalDenoisingStage(CausalDMDDenosingStage):
                         crossattn_cache=crossattn_cache,
                         current_start=((pos_start_base + start_index) * self.frame_seq_length),
                         start_frame=start_index,
+                        is_chunk_start=False,
+                        is_steady_state=context_is_steady_state,
                         **pos_cond_kwargs,
                     )
+                    if context_is_steady_state:
+                        self._finalize_kv_cache_counters(kv_cache, context_current_end)
 
                 start_index += current_num_frames
 
