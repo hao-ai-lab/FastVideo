@@ -285,22 +285,23 @@ class Embeddings1DConnector(nn.Module):
         learnable_registers = torch.tile(
             self.learnable_registers, (num_registers_duplications, 1)
         )
-        attention_mask_binary = (
-            attention_mask.squeeze(1).squeeze(1).unsqueeze(-1) >= -9000.0
-        ).int()
+        seq_len = hidden_states.shape[1]
+        valid = attention_mask.squeeze(1).squeeze(1) >= -9000.0  # (batch, seq)
 
-        non_zero_hidden_states = hidden_states[
-            :, attention_mask_binary.squeeze().bool(), :
-        ]
-        non_zero_nums = non_zero_hidden_states.shape[1]
-        pad_length = hidden_states.shape[1] - non_zero_nums
-        adjusted_hidden_states = torch.nn.functional.pad(
-            non_zero_hidden_states, pad=(0, 0, 0, pad_length), value=0
-        )
-        flipped_mask = torch.flip(attention_mask_binary, dims=[1])
-        hidden_states = flipped_mask * adjusted_hidden_states + (
-            1 - flipped_mask
-        ) * learnable_registers
+        # Left-align each row's valid tokens, then fill the tail with registers.
+        # A boolean index cannot express this: every row may keep a different
+        # number of tokens, so the result is not rectangular. Gathering a stable
+        # descending argsort of the mask moves the valid tokens to the front of
+        # each row while preserving their original relative order.
+        order = torch.argsort(valid.to(torch.int8), dim=1, descending=True, stable=True)
+        adjusted_hidden_states = torch.gather(hidden_states, 1, order.unsqueeze(-1).expand_as(hidden_states))
+
+        # After the gather, row b holds its valid tokens in slots
+        # [0, valid[b].sum()). Deriving the keep-mask from that per-row count is
+        # what makes this correct when rows have different token counts.
+        keep = (torch.arange(seq_len, device=hidden_states.device).unsqueeze(0)
+                < valid.sum(dim=1, keepdim=True)).unsqueeze(-1).to(hidden_states.dtype)
+        hidden_states = keep * adjusted_hidden_states + (1 - keep) * learnable_registers
 
         attention_mask = torch.full_like(
             attention_mask,
