@@ -274,9 +274,7 @@ def encode_video_latent(
 
     # HunyuanVideo 1.5 VAE currently returns
     # DiagonalGaussianDistribution directly.
-    latent_dist = (
-        encoded.latent_dist if hasattr(encoded, "latent_dist") else encoded
-    )
+    latent_dist = (encoded.latent_dist if hasattr(encoded, "latent_dist") else encoded)
 
     if hasattr(latent_dist, "mode"):
         latent = latent_dist.mode()
