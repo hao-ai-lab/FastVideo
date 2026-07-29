@@ -29,7 +29,6 @@ from fastvideo.dataset.dataloader.schema import pyarrow_schema_t2v
 from fastvideo.models.vaes.hunyuan15vae import AutoencoderKLHunyuanVideo15
 from fastvideo.utils import maybe_download_model
 
-
 NUM_FRAMES = 81
 MAX_HEIGHT = 480
 MAX_WIDTH = 832
@@ -233,39 +232,26 @@ def load_hunyuan15_vae(
 
     vae = AutoencoderKLHunyuanVideo15(vae_config)
 
-    weight_files = sorted(
-        glob.glob(os.path.join(vae_path, "*.safetensors"))
-    )
+    weight_files = sorted(glob.glob(os.path.join(vae_path, "*.safetensors")))
     if not weight_files:
-        raise FileNotFoundError(
-            f"No VAE safetensors files found under {vae_path}"
-        )
+        raise FileNotFoundError(f"No VAE safetensors files found under {vae_path}")
 
     state_dict: dict[str, torch.Tensor] = {}
     for weight_file in weight_files:
-        state_dict.update(
-            safetensors_load_file(weight_file, device="cpu")
-        )
+        state_dict.update(safetensors_load_file(weight_file, device="cpu"))
 
     missing_keys, unexpected_keys = vae.load_state_dict(
         state_dict,
         strict=False,
     )
 
-    encoder_missing = [
-        key for key in missing_keys
-        if not key.startswith("decoder.")
-    ]
+    encoder_missing = [key for key in missing_keys if not key.startswith("decoder.")]
     if encoder_missing:
-        raise RuntimeError(
-            f"Missing VAE encoder weights: {encoder_missing[:20]}"
-        )
+        raise RuntimeError(f"Missing VAE encoder weights: {encoder_missing[:20]}")
 
     if unexpected_keys:
-        print(
-            "Ignored checkpoint keys not used by the encoder-only VAE: "
-            f"{len(unexpected_keys)}"
-        )
+        print("Ignored checkpoint keys not used by the encoder-only VAE: "
+              f"{len(unexpected_keys)}")
 
     del state_dict
     clear_cuda()
@@ -298,10 +284,8 @@ def encode_video_latent(
     elif hasattr(latent_dist, "mean"):
         latent = latent_dist.mean
     else:
-        raise TypeError(
-            "Unsupported VAE encode output type: "
-            f"{type(encoded).__name__}"
-        )
+        raise TypeError("Unsupported VAE encode output type: "
+                        f"{type(encoded).__name__}")
 
     return latent.squeeze(0).float().cpu()
 
@@ -318,20 +302,17 @@ def main() -> None:
     caption_data = load_caption_data()
     captions = [item["cap"][0] for item in caption_data]
 
-    records: list[dict[str, Any]] = [
-        {
-            "id": f"{index:06d}_{item['path']}",
-            "file_name": item["path"],
-            "caption": item["cap"][0],
-            "media_type": "video",
-            "width": MAX_WIDTH,
-            "height": MAX_HEIGHT,
-            "num_frames": NUM_FRAMES,
-            "duration_sec": NUM_FRAMES / TRAIN_FPS,
-            "fps": TRAIN_FPS,
-        }
-        for index, item in enumerate(caption_data)
-    ]
+    records: list[dict[str, Any]] = [{
+        "id": f"{index:06d}_{item['path']}",
+        "file_name": item["path"],
+        "caption": item["cap"][0],
+        "media_type": "video",
+        "width": MAX_WIDTH,
+        "height": MAX_HEIGHT,
+        "num_frames": NUM_FRAMES,
+        "duration_sec": NUM_FRAMES / TRAIN_FPS,
+        "fps": TRAIN_FPS,
+    } for index, item in enumerate(caption_data)]
 
     print("Loading Qwen2.5-VL text encoder...")
     qwen_tokenizer = AutoTokenizer.from_pretrained(
@@ -344,9 +325,7 @@ def main() -> None:
         local_files_only=True,
     ).to(device).eval()
 
-    qwen_max_length = int(
-        pipeline_config.text_encoder_max_lengths[0]
-    )
+    qwen_max_length = int(pipeline_config.text_encoder_max_lengths[0])
 
     for index, caption in enumerate(captions):
         embedding = encode_qwen_caption(
@@ -356,13 +335,9 @@ def main() -> None:
             device,
             qwen_max_length,
         )
-        records[index].update(
-            tensor_to_record(embedding, "text_embedding")
-        )
-        print(
-            f"[Qwen {index + 1}/{len(records)}] "
-            f"{tuple(embedding.shape)}"
-        )
+        records[index].update(tensor_to_record(embedding, "text_embedding"))
+        print(f"[Qwen {index + 1}/{len(records)}] "
+              f"{tuple(embedding.shape)}")
 
     del qwen_encoder, qwen_tokenizer
     clear_cuda()
@@ -378,9 +353,7 @@ def main() -> None:
         local_files_only=True,
     ).to(device).eval()
 
-    byt5_max_length = int(
-        pipeline_config.text_encoder_max_lengths[1]
-    )
+    byt5_max_length = int(pipeline_config.text_encoder_max_lengths[1])
 
     for index, caption in enumerate(captions):
         embedding = encode_byt5_caption(
@@ -390,13 +363,9 @@ def main() -> None:
             device,
             byt5_max_length,
         )
-        records[index].update(
-            tensor_to_record(embedding, "text_embedding_2")
-        )
-        print(
-            f"[ByT5 {index + 1}/{len(records)}] "
-            f"{tuple(embedding.shape)}"
-        )
+        records[index].update(tensor_to_record(embedding, "text_embedding_2"))
+        print(f"[ByT5 {index + 1}/{len(records)}] "
+              f"{tuple(embedding.shape)}")
 
     del byt5_encoder, byt5_tokenizer
     clear_cuda()
@@ -421,13 +390,9 @@ def main() -> None:
         )
 
         latent = encode_video_latent(vae, video)
-        records[index].update(
-            tensor_to_record(latent, "vae_latent")
-        )
-        print(
-            f"[VAE {index + 1}/{len(records)}] "
-            f"{tuple(latent.shape)}"
-        )
+        records[index].update(tensor_to_record(latent, "vae_latent"))
+        print(f"[VAE {index + 1}/{len(records)}] "
+              f"{tuple(latent.shape)}")
 
         del video, latent
         clear_cuda()
@@ -435,13 +400,7 @@ def main() -> None:
     del vae
     clear_cuda()
 
-    columns = {
-        field.name: [
-            record.get(field.name)
-            for record in records
-        ]
-        for field in pyarrow_schema_t2v
-    }
+    columns = {field.name: [record.get(field.name) for record in records] for field in pyarrow_schema_t2v}
 
     table = pa.Table.from_pydict(
         columns,
@@ -463,17 +422,14 @@ def main() -> None:
         "validation_prompts.json",
     )
     with open(
-        validation_path,
-        "w",
-        encoding="utf-8",
+            validation_path,
+            "w",
+            encoding="utf-8",
     ) as file:
         json.dump(
-            {
-                "data": [
-                    {"caption": caption}
-                    for caption in captions
-                ]
-            },
+            {"data": [{
+                "caption": caption
+            } for caption in captions]},
             file,
             ensure_ascii=False,
             indent=2,
