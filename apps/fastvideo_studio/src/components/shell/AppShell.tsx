@@ -34,6 +34,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const datasetSidebarOpen =
     pathname === '/datasets' && activeDataset != null;
   const secondaryOpen = jobSidebarOpen || datasetSidebarOpen;
+  // Mobile detail drawers claim aria-modal, so everything behind them must
+  // actually be inert — the platform enforces what the ARIA claims.
+  const drawerModal = isMobile && secondaryOpen;
 
   React.useEffect(() => {
     initDefaultOptions();
@@ -59,10 +62,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <HeaderActionsProvider>
-      <Header
-        navigationOpen={primaryOpen}
-        onNavigationToggle={() => setPrimaryOpen((open) => !open)}
-      />
+      <div
+        style={{ display: 'contents' }}
+        inert={drawerModal ? true : undefined}
+      >
+        <Header
+          navigationOpen={primaryOpen}
+          onNavigationToggle={() => setPrimaryOpen((open) => !open)}
+        />
+      </div>
       <div
         className="flex overflow-hidden"
         style={{
@@ -86,6 +94,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         )}
         <main
           className="flex min-w-0 flex-1 flex-col overflow-auto"
+          inert={drawerModal ? true : undefined}
           style={{
             marginLeft: isMobile ? 0 : primaryWidth,
             marginRight: isMobile || !secondaryOpen ? 0 : secondaryWidth,
