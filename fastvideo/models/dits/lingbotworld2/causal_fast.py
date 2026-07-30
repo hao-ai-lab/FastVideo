@@ -392,7 +392,11 @@ class WanCrossAttention(CausalWanSelfAttention):
         else:
             k = self.norm_k(self.k(context)).view(b, -1, n, d)
             v = self.v(context).view(b, -1, n, d)
-        x = flash_attention(q, k, v, k_lens=context_lens)
+        # Dispatch through `attention` so the TORCH_SDPA backend this model
+        # advertises actually works; self-attention already does the same. The
+        # SDPA path ignores `k_lens`, which is safe here because the caller
+        # always passes `context_lens=None`.
+        x = attention(q, k, v, k_lens=context_lens)
         return self.o(x.flatten(2))
 
 
