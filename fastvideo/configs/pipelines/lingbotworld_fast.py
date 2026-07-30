@@ -20,5 +20,4 @@ class LingBotWorldFastI2V480PConfig(LingBotWorld2CausalFastI2V480PConfig):
     """
 
     dit_config: DiTConfig = field(default_factory=LingBotWorldFastVideoConfig)
-    text_encoder_configs: tuple[EncoderConfig, ...] = field(
-        default_factory=lambda: (T5Config(), ))
+    text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (T5Config(), ))
