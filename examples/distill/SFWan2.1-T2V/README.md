@@ -5,7 +5,7 @@ These scripts demonstrate self-forcing distillation (SFwan) for the causal Wan2.
 ## Run the recipe
 1. Download the preprocessed text-video dataset:
    ```bash
-   bash examples/distill/SFWan2.1-T2V/download_dataset.sh
+   bash examples/datasets/crush-smol/download_dataset.sh
    ```
 2. (Optional) Regenerate parquet shards locally:
    ```bash

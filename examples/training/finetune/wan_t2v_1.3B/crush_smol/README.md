@@ -5,7 +5,7 @@ These are e2e example scripts for finetuning Wan2.1 T2V 1.3B on the crush-smol d
 
 ### Download crush-smol dataset:
 
-`bash examples/training/finetune/wan_t2v_1.3B/crush_smol/download_dataset.sh`
+`bash examples/datasets/crush-smol/download_dataset.sh`
 
 ### Preprocess the videos and captions into latents:
 
