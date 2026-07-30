@@ -14,6 +14,7 @@ import torch
 from safetensors.torch import save_file
 
 from fastvideo.models.loader.ltx_single_file import (
+    LTXCheckpointMetadata,
     resolve_text_encoder_root,
     build_dit_config,
     component_weights,
@@ -40,7 +41,10 @@ TRANSFORMER_SECTION = {
 }
 
 
-def _write_bundle(path: Path, *, with_gemma_source: bool) -> None:
+def _write_bundle(path: Path,
+                  *,
+                  with_gemma_source: bool,
+                  transformer_cls: str = "AVTransformer3DModel") -> None:
     tensors = {
         "model.diffusion_model.patchify_proj.weight": torch.zeros(2, 2),
         "model.diffusion_model.transformer_blocks.0.ff.net.2.weight": torch.zeros(2, 2),
@@ -53,8 +57,9 @@ def _write_bundle(path: Path, *, with_gemma_source: bool) -> None:
         "text_embedding_projection.video_aggregate_embed.weight": torch.zeros(2),
         "duration_head.linear.weight": torch.zeros(2),
     }
+    section = dict(TRANSFORMER_SECTION, _class_name=transformer_cls)
     metadata = {
-        "config": json.dumps({"transformer": TRANSFORMER_SECTION, "vae": {}}),
+        "config": json.dumps({"transformer": section, "vae": {}}),
         "model_version": "9.9.9",
         "license": "x" * 128,
     }
@@ -131,14 +136,6 @@ def test_defaults_unchanged_without_metadata() -> None:
     assert arch.audio_ff_bias is True
 
 
-if __name__ == "__main__":
-    test_read_metadata_and_routing()
-    test_missing_gemma_source_is_none()
-    test_dit_config_takes_ff_bias_from_metadata()
-    test_defaults_unchanged_without_metadata()
-    print("ok")
-
-
 def test_encoder_root_requires_an_explicit_declaration() -> None:
     """Neither source set -> raise, naming both. Never guess from the filesystem."""
     import pytest
@@ -172,3 +169,44 @@ def test_declared_root_survives_a_version_mismatch() -> None:
             config={}, model_version="9.9.9",
             gemma_source_checkpoint={"gemma_version": "fake-encoder-v0"})
         assert resolve_text_encoder_root(str(root), None, meta) == str(root)
+
+
+def test_bundle_resolves_its_pipeline_config_from_declared_transformer_class() -> None:
+    """A bundle path resolves through the alias table, not through model_index.json."""
+    from fastvideo.pipelines.basic.ltx2.pipeline_configs import LTX2T2VConfig
+    from fastvideo.registry import get_pipeline_config_cls_from_name
+
+    with tempfile.TemporaryDirectory() as tmp:
+        # Deliberately uninformative name: resolution must not read the file name.
+        path = Path(tmp) / "anonymous.safetensors"
+        _write_bundle(path, with_gemma_source=True)
+        assert get_pipeline_config_cls_from_name(str(path)) is LTX2T2VConfig
+
+
+def test_unknown_bundle_transformer_class_raises_naming_table_and_override() -> None:
+    """No wildcard fallback: an unmapped class fails loud and says how to fix it."""
+    import pytest
+
+    from fastvideo.registry import get_pipeline_config_cls_from_name
+
+    with tempfile.TemporaryDirectory() as tmp:
+        # Name it after a model the detectors DO know, to prove the file name
+        # is not consulted -- only the class the checkpoint declares.
+        path = Path(tmp) / "ltx2-distilled.safetensors"
+        _write_bundle(path, with_gemma_source=True, transformer_cls="NotAModel")
+        with pytest.raises(ValueError) as excinfo:
+            get_pipeline_config_cls_from_name(str(path))
+        message = str(excinfo.value)
+        assert "_BUNDLE_TRANSFORMER_TO_CONFIG" in message
+        assert "override_pipeline_cls_name" in message
+
+
+if __name__ == "__main__":
+    test_read_metadata_and_routing()
+    test_missing_gemma_source_is_none()
+    test_dit_config_takes_ff_bias_from_metadata()
+    test_defaults_unchanged_without_metadata()
+    test_encoder_root_override_beats_config()
+    test_bundle_resolves_its_pipeline_config_from_declared_transformer_class()
+    test_unknown_bundle_transformer_class_raises_naming_table_and_override()
+    print("ok")

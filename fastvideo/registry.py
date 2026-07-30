@@ -142,6 +142,18 @@ _MODEL_HF_PATH_TO_NAME: dict[str, str] = {}
 # Detectors to identify model families from paths or class names
 _MODEL_NAME_DETECTORS: list[tuple[str, Callable[[str], bool]]] = []
 
+# Single-file checkpoint bundles carry no `model_index.json`, so their pipeline
+# config is resolved from the transformer class the file declares about itself.
+# Keyed on that `_class_name` -- a stable, checkpoint-declared identifier --
+# and NOT on `model_id`, which is a positional index (`str(len(_CONFIG_REGISTRY))`)
+# and would silently rebind whenever registration order changes. The value pins
+# the ConfigInfo by its stable `(model_family, default_preset)` pair. A bundle's
+# file NAME is never consulted.
+_BUNDLE_TRANSFORMER_TO_CONFIG: dict[str, tuple[str, str]] = {
+    # transformer _class_name -> (model_family, default_preset)
+    "AVTransformer3DModel": ("ltx2", "ltx2_distilled"),
+}
+
 
 def register_configs(
     sampling_param_cls: type[SamplingParam] | None,
@@ -187,6 +199,50 @@ def get_model_short_name(model_id: str) -> str:
     return model_id
 
 
+def _bundle_config_info(model_path: str) -> ConfigInfo:
+    """Resolve the pipeline config for a single-file checkpoint bundle.
+
+    The bundle declares its own component classes in ``__metadata__``; reading
+    that is the only inference done here. The transformer's ``_class_name`` is
+    mapped through :data:`_BUNDLE_TRANSFORMER_TO_CONFIG`, an explicit table, to
+    the ``(model_family, default_preset)`` of a registered config. Nothing is
+    matched by wildcard, and nothing is read off the file name -- a file name is
+    incidental, and making resolution depend on it makes correct loading depend
+    on what a checkpoint happens to be called.
+
+    An unrecognized transformer class raises, naming both the table to extend
+    and the per-run override, rather than falling through to a guess.
+
+    ponytail: LTX is the only family shipping a bundle, so this reads LTX
+    metadata directly. Dispatch on a per-format reader if a second bundle
+    format ever appears.
+    """
+    from fastvideo.models.loader.ltx_single_file import read_ltx_metadata
+
+    try:
+        cls_name = read_ltx_metadata(model_path).config.get("transformer", {}).get("_class_name")
+    except KeyError:  # no `config` section: not a bundle we know how to read
+        cls_name = None
+
+    entry = _BUNDLE_TRANSFORMER_TO_CONFIG.get(cls_name) if cls_name else None
+    if entry is None:
+        raise ValueError(
+            f"Single-file checkpoint {model_path} declares transformer class {cls_name!r}, which is not in "
+            f"_BUNDLE_TRANSFORMER_TO_CONFIG (known: {sorted(_BUNDLE_TRANSFORMER_TO_CONFIG)}). Add the class to that "
+            "table, or select the pipeline explicitly for this run with `override_pipeline_cls_name`. The pipeline is "
+            "never inferred from the checkpoint's file name.")
+
+    model_family, default_preset = entry
+    for config_info in _CONFIG_REGISTRY.values():
+        if config_info.model_family == model_family and config_info.default_preset == default_preset:
+            return config_info
+
+    raise ValueError(
+        f"_BUNDLE_TRANSFORMER_TO_CONFIG maps {cls_name!r} to model_family={model_family!r} "
+        f"default_preset={default_preset!r}, but no registered config declares that pair. "
+        "Fix the table or the registration.")
+
+
 def _get_config_info(
     model_path: str,
     *,
@@ -209,7 +265,13 @@ def _get_config_info(
             model_id = _MODEL_HF_PATH_TO_NAME[registered_model_hf_id]
             return _CONFIG_REGISTRY.get(model_id)
 
-    # 3. Use detectors (path or model_index pipeline name).
+    # 3. A single-file bundle is a FILE, so it would take the directory branch
+    #    below and be rejected for having no model_index.json. Its config lives
+    #    in its own `__metadata__` instead.
+    if model_path.endswith(".safetensors"):
+        return _bundle_config_info(model_path)
+
+    # 4. Use detectors (path or model_index pipeline name).
     if os.path.exists(model_path):
         config = verify_model_config_and_directory(model_path, required_component_dirs=[])
     else:
