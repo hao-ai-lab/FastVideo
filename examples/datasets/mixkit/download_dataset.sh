@@ -3,7 +3,8 @@
 #
 # This is the MixKit subset already VAE-encoded (Wan2.1-T2V-1.3B) and text-embedded
 # into Parquet shards, so it can be fed straight to training with no further
-# preprocessing. To build the Parquet from raw videos yourself, see README.md.
+# preprocessing. To build the Parquet from raw videos yourself, see
+# examples/training/finetune/wan_t2v_1.3B/mixkit/README.md.
 #
 # Usage (run from the repo root):
 #   bash examples/datasets/mixkit/download_dataset.sh [DATA_ROOT]
