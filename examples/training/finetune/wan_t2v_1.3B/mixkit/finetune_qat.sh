@@ -8,7 +8,7 @@
 # of fighting it. SM100 selects the optimized kernels; RTX 5090 keeps the
 # previous Triton implementation.
 #
-# Data: run download_mixkit_data.sh first (preprocessed Parquet).
+# Data: run examples/datasets/mixkit/download_dataset.sh first (preprocessed Parquet).
 #
 # Verified end-to-end on Blackwell (GB200/sm_100): the ATTN_QAT_TRAIN backend is
 # selected (not a fallback), forward+backward run, loss/grad are healthy, and

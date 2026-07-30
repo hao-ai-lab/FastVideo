@@ -6,7 +6,7 @@
 # preprocessing. To build the Parquet from raw videos yourself, see README.md.
 #
 # Usage (run from the repo root):
-#   bash examples/training/finetune/wan_t2v_1.3B/mixkit/download_mixkit_data.sh [DATA_ROOT]
+#   bash examples/datasets/mixkit/download_dataset.sh [DATA_ROOT]
 set -euo pipefail
 
 DATA_ROOT=${1:-data/HD-Mixkit-Finetune-Wan}
