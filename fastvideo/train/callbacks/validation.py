@@ -1079,6 +1079,28 @@ class ValidationCallback(Callback):
         return pipeline_config
 
     @staticmethod
+    def _keep_loaded_text_encoder_configs(
+        validation_config: Any,
+        loaded_config: Any,
+    ) -> None:
+        """Carry the loader-populated text encoder configs into the swap.
+
+        ``_validation_pipeline_config`` deep-copies the training-side pipeline
+        config, which never passes through ``ModelConfig.update_model_arch``,
+        so its encoder arch fields still hold the dataclass defaults. The
+        pipeline's own config does carry the checkpoint values, and stages read
+        those defaults directly: HunyuanVideo 1.5 sizes its zero-length ByT5
+        placeholder from ``hidden_size``, and the stale 512 default makes the
+        transformer reject it against its real width of 1472.
+        """
+        loaded_encoders = getattr(loaded_config, "text_encoder_configs", None)
+        if loaded_encoders is None:
+            return
+        if not hasattr(validation_config, "text_encoder_configs"):
+            return
+        validation_config.text_encoder_configs = loaded_encoders
+
+    @staticmethod
     def _sync_runtime_dit_arch_config(
         pipeline_config: Any,
         transformer: torch.nn.Module,
@@ -1148,7 +1170,13 @@ class ValidationCallback(Callback):
             **kwargs,
         )
         if tc.pipeline_config is not None:
-            self._pipeline.fastvideo_args.pipeline_config = self._validation_pipeline_config(transformer)
+            loaded_config = self._pipeline.fastvideo_args.pipeline_config
+            validation_config = self._validation_pipeline_config(transformer)
+            self._keep_loaded_text_encoder_configs(
+                validation_config,
+                loaded_config,
+            )
+            self._pipeline.fastvideo_args.pipeline_config = validation_config
             arch_config = self._pipeline.fastvideo_args.pipeline_config.dit_config.arch_config
             logger.info(
                 "Validation pipeline runtime config: local_attn_size=%s sink_size=%s boundary_ratio=%s",
