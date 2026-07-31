@@ -84,6 +84,11 @@ MODELS = {
     # fresh 14B base with the FIXED-overfit (step A, ckpt-2000) encoder + gate merged in — this
     # is the candidate stage-1 init; its per-sample track grad decides whether it will train.
     "14b_merged_fixed2000": "/mnt/lustre/vlm-s4duan/models/trackwan_14b_i2v_d64_merged_from_fixed2000_bias",
+    # MotionStream-faithful init: track slot warm-started from Wan2.1-Fun-14B-Control's PRETRAINED
+    # control channels (48ch -> our 52ch remap), track proj zero-init. Should train with no overfit.
+    "14b_from_fun_control": "/mnt/lustre/vlm-s4duan/models/trackwan_14b_i2v_d64_from_fun_control_init",
+    # bs=16 random-overfit (ckpt-1200) encoder+gate merged into a fresh 14B base -> stage-1 candidate
+    "14b_merged_bs16_1200": "/mnt/lustre/vlm-s4duan/models/trackwan_14b_i2v_d64_merged_from_bs16_1200_bias",
 }
 
 # Custom-model parameter names we snapshot per sample.

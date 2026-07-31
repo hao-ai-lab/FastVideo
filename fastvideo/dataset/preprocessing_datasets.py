@@ -602,6 +602,14 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
         if batch.points_path:
             result["points_path"] = batch.points_path
 
+        # The transform stages write the decoded clip back onto the PERSISTENT
+        # processed_batches[idx] object, so without this the float32 pixels
+        # (1.34 GB/clip at 720p) are retained for the process's whole life ->
+        # RSS grows ~unboundedly with clips processed. ``result`` already holds
+        # the tensor, so dropping the stored reference is free; each item is
+        # visited once and process() always re-decodes from batch.path.
+        batch.pixel_values = None
+
         return result
 
     def state_dict(self) -> dict[str, Any]:

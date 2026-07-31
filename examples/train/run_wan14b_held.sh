@@ -7,11 +7,16 @@
 #
 #   A (fixed overfit)  : WANTRACK_FIXED_SAMPLE=1 FREEZE_HEAD=0
 #   B (random overfit) : WANTRACK_FIXED_SAMPLE=0 FREEZE_HEAD=0
-#   D (stage-1 openvid): FREEZE_HEAD=1, no dropping
+#   D (stage-1 openvid): FREEZE_HEAD=0, no dropping        <-- CORRECTED 2026-07-31 (was 1)
 #   E (stage-2 synth)  : FREEZE_HEAD=1 TRACK_DROP=0.5 MOTION_DROP=0.3 PMASK=0.2 MASK_CHUNK=8
 #
-# FREEZE_HEAD is the important one: the overfit stages MUST train track_encoder (that is the
-# whole point — co-adapting it with the patch_embedding track slot), while stages D/E freeze it.
+# FREEZE_HEAD is the important one: stages A/B/D MUST train track_encoder (A/B co-adapt it with
+# the patch_embedding track slot; D keeps refining it), and only E (and stage-3) freeze it.
+# D said FREEZE_HEAD=1 here until 2026-07-31, contradicting the 1.3B run D is the analog of:
+# run_openvid_bidir_held.sh never sets the var (wantrack.py defaults it to "0") and the 1.3B
+# logs contain zero "FROZE track_encoder" lines. run_openvid_stage3_slurm.sh freezes with the
+# comment "head is converged" — it converges BECAUSE stage-1/D trains it, and wantrack.py notes
+# the head only plateaus by step ~4700 of D's 4800 steps.
 #
 # Usage:
 #   ALLOC=728 NODES=4 JOB=wan14b_stepA PORT=30910 \
