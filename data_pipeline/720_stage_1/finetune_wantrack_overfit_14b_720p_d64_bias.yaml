@@ -1,0 +1,85 @@
+# Phase 0 overfit — 14B/720p, d64 + bias, sparse conditioning, HEAD TRAINABLE.
+# Goal: co-adapt the track pathway (track_encoder + patch-embed track slot) on a small subset so
+# the model follows tracks. The base is DISCARDED by the Phase-1 merge (only the track pathway is
+# lifted), so dit_precision: bf16 here is fine + faster. Sparse/bias/freeze knobs come from the
+# launch script (02_run_overfit.sh), not this file.
+models:
+  student:
+    _target_: fastvideo.train.models.wantrack.wantrack.WanTrackModel
+    init_from: /home/hal-kevin/models/trackwan_14b_i2v_d64_bias_init
+    trainable: true
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
+
+training:
+  model_path: /home/hal-kevin/models/trackwan_14b_i2v_d64_bias_init
+  dit_precision: bf16     # overfit base is thrown away by the merge; bf16 for speed
+
+  distributed:
+    num_gpus: 8
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 2   # across the 2 racks
+    hsdp_shard_dim: 4       # within each rack
+
+  data:
+    data_path: /home/hal-kevin/data/motion-stream-synth/preprocessed_i2v_track/combined_parquet_dataset
+    dataloader_num_workers: 2
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    seed: 1000
+    num_latent_t: 31
+    num_height: 720
+    num_width: 1280
+    num_frames: 121
+
+  optimizer:
+    learning_rate: 1.0e-4   # upstream overfit LR (synth_sparse_*_14b), constant
+    betas: [0.9, 0.999]
+    weight_decay: 0.01
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 2000            # upstream overfit steps (per stage); stop earlier if tracks lock in
+    gradient_accumulation_steps: 1   # 1 x 8 GPU x 1 = global batch 8 (fine on a tiny subset)
+
+  checkpoint:
+    output_dir: /home/hal-kevin/data/motion-stream-test/overfit_14b_720p_d64_bias_out
+    training_state_checkpointing_steps: 100
+    checkpoints_total_limit: 3
+    resume_from_checkpoint: latest
+
+  tracker:
+    trackers: [wandb]
+    project_name: wantrack-bidir
+    run_name: overfit-14b-720p-d64-bias
+    entity: s4duan-uc-san-diego
+
+  model:
+    enable_gradient_checkpointing_type: full
+
+callbacks:
+  grad_clip:
+    _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
+    max_grad_norm: 1.0
+  track_validation:
+    _target_: fastvideo.train.callbacks.track_validation.TrackValidationCallback
+    # Validate on the overfit clips themselves — you want to SEE track-following emerge. The
+    # with-track vs no-track/adversarial deltas are the signal to stop the overfit.
+    every_steps: 200
+    num_val_samples: 2
+    val_sample_indices: [0, 10]
+    num_inference_steps: 20
+    guidance_scale: 3.0
+    motion_guidance_scale: 1.5
+    fps: 24
+    grid_stride: 3
+    tail: 12
+    include_heldout: false
+    validate_at_start: false
+    seed: 1000
+
+pipeline:
+  flow_shift: 6

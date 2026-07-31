@@ -68,10 +68,13 @@ def build_track_encoder_state() -> dict[str, torch.Tensor]:
     gradient is gated by the other being nonzero -> both stay exactly 0 forever and the
     track pathway never learns (observed: proj & patch-embed[36:52] frozen at 0.0 after
     4000 steps). So leave proj at its default Conv init here."""
-    # NOTE(local): TrackEncoder builds BOTH convs with bias=False (load-bearing in the
-    # model — see dits/trackwan/track_encoder.py). Match that exactly: bias-free convs,
-    # emit only the .weight keys (no spurious .bias params that the model has no home for).
-    temporal_conv = nn.Conv3d(ID_DIM, TRACK_CHANNELS, kernel_size=(VAE_T_COMP, 1, 1), stride=(VAE_T_COMP, 1, 1), bias=False)
+    # bias=False MUST match the model (fastvideo/models/dits/trackwan/track_encoder.py): TrackEncoder
+    # omits the conv bias (a bias broadcasts to every latent cell and densifies the sparse track
+    # signal -- load-bearing). Emitting bias tensors breaks strict loading with
+    # "track_encoder.proj.bias not found in custom model state dict", so build bias-free and write
+    # only the two weight tensors the model actually has.
+    temporal_conv = nn.Conv3d(ID_DIM, TRACK_CHANNELS, kernel_size=(VAE_T_COMP, 1, 1),
+                              stride=(VAE_T_COMP, 1, 1), bias=False)
     proj = nn.Conv3d(TRACK_CHANNELS, TRACK_CHANNELS, kernel_size=1, bias=False)  # default init (NOT zero) -> breaks the deadlock
     return {
         "track_encoder.temporal_conv.weight": temporal_conv.weight.detach().clone(),

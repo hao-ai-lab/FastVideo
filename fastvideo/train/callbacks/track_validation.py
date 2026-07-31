@@ -116,6 +116,7 @@ class TrackValidationCallback(Callback):
         val_sample_indices: list[int] | None = None,
         heldout_data_path: str | None = None,
         heldout_sample_indices: list[int] | None = None,
+        include_heldout: bool = True,
     ) -> None:
         self.every_steps = int(every_steps)
         self.val_sample_indices: list[int] | None = [int(i) for i in val_sample_indices] if val_sample_indices is not None else None
@@ -125,6 +126,9 @@ class TrackValidationCallback(Callback):
         self.heldout_data_path: str | None = str(heldout_data_path) if heldout_data_path else None
         self.heldout_sample_indices: list[int] | None = [int(i) for i in heldout_sample_indices
                                                          ] if heldout_sample_indices is not None else None
+        # CLI toggle: --callbacks.track_validation.include_heldout false validates only on the
+        # train-set samples and skips the held-out (generalization) set entirely.
+        self.include_heldout: bool = bool(include_heldout)
         self.num_val_samples = len(self.val_sample_indices) if self.val_sample_indices is not None else int(num_val_samples)
         self.num_inference_steps = int(num_inference_steps)
         # ``guidance_scale`` is TEXT CFG (v_uncond + s_text*(v_text - v_uncond)); at 1.0 == disabled.
@@ -170,7 +174,10 @@ class TrackValidationCallback(Callback):
         run = False
         if self.validate_at_start and not self._did_start_val:
             run = True
-        if self.every_steps > 0 and iteration % self.every_steps == 0:
+        # iteration > 0: step 0 is divisible by every_steps, so without this guard the periodic
+        # branch fires a validation at start even when validate_at_start is False. Step-0
+        # validation is controlled solely by validate_at_start above.
+        if self.every_steps > 0 and iteration > 0 and iteration % self.every_steps == 0:
             run = True
         if not run:
             return
@@ -186,7 +193,7 @@ class TrackValidationCallback(Callback):
     def _load_validation_samples(self, method: TrainingMethod) -> None:
         tc = self.training_config
         self._append_samples(str(tc.data.data_path), self.val_sample_indices, self.num_val_samples, prefix="sample")
-        if self.heldout_data_path:
+        if self.heldout_data_path and self.include_heldout:
             idx = self.heldout_sample_indices
             n = len(idx) if idx is not None else self.num_val_samples
             try:
@@ -205,15 +212,29 @@ class TrackValidationCallback(Callback):
         if not files:
             raise FileNotFoundError(f"no parquet under {data_path}")
 
-        all_rows: list[dict[str, Any]] = []
-        for f in files:
-            tbl = pq.read_table(f)
-            all_rows.extend(tbl.to_pylist())
-
-        if indices is not None:
-            rows = [all_rows[i] for i in indices]
-        else:
-            rows = all_rows[:num]
+        # Read ONLY the rows we actually need. data_path may be the full ~259k-clip training set
+        # (8k+ parquet files, ~57MB/row): reading every file into a Python list here OOM-kills the
+        # process. Walk files in sorted order using footer row-counts and materialize just the
+        # requested global indices (or the first ``num``), reading each needed file at most once.
+        needed = sorted({int(i) for i in indices}) if indices is not None else list(range(int(num)))
+        rows_by_global: dict[int, dict[str, Any]] = {}
+        if needed:
+            max_needed = max(needed)
+            cumulative = 0
+            for f in files:
+                pf = pq.ParquetFile(f)
+                n_rows = pf.metadata.num_rows
+                lo, hi = cumulative, cumulative + n_rows
+                local = [(g, g - lo) for g in needed if lo <= g < hi]
+                if local:
+                    plist = pf.read().to_pylist()
+                    for g, li in local:
+                        rows_by_global[g] = plist[li]
+                cumulative = hi
+                if cumulative > max_needed:
+                    break
+        order = [int(i) for i in indices] if indices is not None else list(range(int(num)))
+        rows = [rows_by_global[g] for g in order if g in rows_by_global]
 
         text_len = int(tc.pipeline_config.text_encoder_configs[0].arch_config.text_len)
         batch = collate_rows_from_parquet_schema(rows,

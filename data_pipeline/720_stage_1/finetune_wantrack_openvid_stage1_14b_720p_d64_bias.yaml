@@ -1,0 +1,86 @@
+# Step 05 config — OpenVid Stage 1. 14B/720p, merged d64+bias init, HEAD FROZEN, sparse.
+# The big run: the DiT learns to USE the frozen (merged) track pathway on the full 720p openvid set.
+#
+# BATCH: upstream recipe = global bs 128 on 32 GPUs (8 nodes x 4). This config targets that: 4800
+# steps x 128 = 614k samples = 2.4 epochs over 259k, ~12 days on 32 GPUs. (On only 8 GPUs, bs 128
+# would be grad_accum 16 = ~49 days; if you drop back to 8 nodes/GPUs, use grad_accum 2 = global
+# bs 16 and ~8000 steps for a ~10-day half-epoch instead.)
+models:
+  student:
+    _target_: fastvideo.train.models.wantrack.wantrack.WanTrackModel
+    init_from: /home/hal-kevin/models/trackwan_14b_i2v_d64_merged_from_overfit_bias   # from 04_merge.sh
+    trainable: true
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
+
+training:
+  model_path: /home/hal-kevin/models/trackwan_14b_i2v_d64_merged_from_overfit_bias
+  # dit_precision: fp32 master (default) for the real teacher (standard MFU / stable updates at lr 1e-5).
+  # upstream sets bf16; flip only if memory-blocked (see notes/trackwan_14b_720p_teacher_merge_plan.md).
+
+  distributed:
+    num_gpus: 32
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 8   # across the 8 nodes
+    hsdp_shard_dim: 4       # within each node (over NVLink)
+
+  data:
+    data_path: /home/hal-shared/motionstream/data/openvid-wantrack-parquets   # full 259k, 720p
+    dataloader_num_workers: 2
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    seed: 1000
+    num_latent_t: 31
+    num_height: 720
+    num_width: 1280
+    num_frames: 121
+
+  optimizer:
+    learning_rate: 1.0e-5    # MotionStream teacher stage-1
+    betas: [0.9, 0.999]
+    weight_decay: 0.01
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 4800            # upstream stage-1: 2.4 epochs over 259k at bs128; ~12 days on 32 GPUs; resumable
+    gradient_accumulation_steps: 4   # 1 x 32 GPU x 4 = global batch 128
+
+  checkpoint:
+    output_dir: /home/hal-kevin/data/motion-stream-test/openvid_stage1_14b_720p_out
+    training_state_checkpointing_steps: 200
+    checkpoints_total_limit: 5
+    resume_from_checkpoint: latest
+
+  tracker:
+    trackers: [wandb]
+    project_name: wantrack-bidir
+    run_name: openvid-stage1-14b-720p-d64-bias
+    entity: s4duan-uc-san-diego
+
+  model:
+    enable_gradient_checkpointing_type: full
+
+callbacks:
+  grad_clip:
+    _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
+    max_grad_norm: 1.0
+  track_validation:
+    _target_: fastvideo.train.callbacks.track_validation.TrackValidationCallback
+    every_steps: 2000            # 14B/720p validation is a multi-hour job; keep it rare
+    num_val_samples: 1
+    val_sample_indices: [28]
+    num_inference_steps: 20
+    guidance_scale: 3.0
+    motion_guidance_scale: 1.5
+    fps: 24
+    grid_stride: 3
+    tail: 12
+    include_heldout: false
+    validate_at_start: false
+    seed: 1000
+
+pipeline:
+  flow_shift: 6

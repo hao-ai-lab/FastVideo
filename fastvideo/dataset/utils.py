@@ -45,13 +45,20 @@ def get_torch_tensors_from_row_dict(row_dict,
             shape = row_dict[f"{key}_shape"]
             bytes = row_dict[f"{key}_bytes"]
 
-        # TODO (peiyuan): read precision
+        # Honor the per-field stored dtype (defaults to float32). numpy has no bfloat16,
+        # so decode via torch.frombuffer (resolves the old "read precision" TODO).
+        dtype_str = row_dict.get(f"{key}_dtype") or "float32"
+        torch_dtype = _PARQUET_DTYPE_TO_TORCH.get(dtype_str)
+        if torch_dtype is None:
+            raise ValueError(
+                f"Unsupported stored dtype {dtype_str!r} for field {key!r}; "
+                f"add it to _PARQUET_DTYPE_TO_TORCH.")
+        shp = tuple(int(s) for s in shape)
         if key == 'text_embedding' and (rng.random()
                                         if rng else random.random()) < cfg_rate:
-            data = np.zeros(shape, dtype=np.float32)
+            data = torch.zeros(shp, dtype=torch_dtype)
         else:
-            data = np.frombuffer(bytes, dtype=np.float32).reshape(shape).copy()
-        data = torch.from_numpy(data)
+            data = torch.frombuffer(bytearray(bytes), dtype=torch_dtype).reshape(shp)
         if len(data.shape) == 3:
             B, L, D = data.shape
             assert B == 1, "Batch size must be 1"
@@ -94,6 +101,19 @@ def collate_latents_embs_masks(
     all_masks = torch.stack(all_masks)
 
     return all_latents, all_embs, all_masks, caption_text
+
+
+_PARQUET_DTYPE_TO_TORCH: dict[str, torch.dtype] = {
+    "float32": torch.float32,
+    "float64": torch.float64,
+    "float16": torch.float16,
+    "bfloat16": torch.bfloat16,
+    "uint8": torch.uint8,
+    "int8": torch.int8,
+    "int16": torch.int16,
+    "int32": torch.int32,
+    "int64": torch.int64,
+}
 
 
 def collate_rows_from_parquet_schema(rows,
@@ -142,6 +162,7 @@ def collate_rows_from_parquet_schema(rows,
             # Get tensor data from row using the existing helper function pattern
             shape_key = f"{tensor_name}_shape"
             bytes_key = f"{tensor_name}_bytes"
+            dtype_key = f"{tensor_name}_dtype"
 
             if shape_key in row and bytes_key in row:
                 shape = row[shape_key]
@@ -166,14 +187,23 @@ def collate_rows_from_parquet_schema(rows,
                                      if rng else
                                      random.random())
                                     < cfg_rate)
+                    # Honor the per-field stored dtype (defaults to float32 for legacy
+                    # parquets). numpy has no bfloat16, so decode via torch.frombuffer;
+                    # bytearray() yields a writable copy that does not alias the row buffer.
+                    dtype_str = row.get(dtype_key) or "float32"
+                    torch_dtype = _PARQUET_DTYPE_TO_TORCH.get(dtype_str)
+                    if torch_dtype is None:
+                        raise ValueError(
+                            f"Unsupported stored dtype {dtype_str!r} for field "
+                            f"{tensor_name!r}; add it to _PARQUET_DTYPE_TO_TORCH.")
+                    shp = tuple(int(s) for s in shape)
                     if drop:
-                        data = np.zeros(shape, dtype=np.float32)
+                        tensor = torch.zeros(shp, dtype=torch_dtype)
                     else:
-                        data = np.frombuffer(
-                            bytes_data,
-                            dtype=np.float32,
-                        ).reshape(shape).copy()
-                    tensor = torch.from_numpy(data)
+                        tensor = torch.frombuffer(
+                            bytearray(bytes_data),
+                            dtype=torch_dtype,
+                        ).reshape(shp)
                     # if len(data.shape) == 3:
                     #     B, L, D = tensor.shape
                     #     assert B == 1, "Batch size must be 1"
