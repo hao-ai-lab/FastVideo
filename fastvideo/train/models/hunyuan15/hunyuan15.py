@@ -70,6 +70,13 @@ class Hunyuan15Model(WanModel):
             lora=lora,
         )
         self.negative_prompt_embeds_2: torch.Tensor | None = None
+        # No negative-prompt cache: FineTuneMethod hard-codes
+        # conditional=True, so encoding the negative prompt would load the
+        # ~16GB Qwen encoder on every rank for an embedding nothing reads.
+        # DMD2 re-enables this from its own __init__ when its cfg_uncond
+        # policy needs negative prompts. Mirrors ltx2.py, which opts out the
+        # same way rather than load Gemma.
+        self.set_requires_negative_conditioning(False)
 
     def init_preprocessors(self, training_config: TrainingConfig) -> None:
         """Fix the dataloader text padding length before the base
