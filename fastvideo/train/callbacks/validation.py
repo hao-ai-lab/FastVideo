@@ -1079,27 +1079,52 @@ class ValidationCallback(Callback):
         return pipeline_config
 
     @staticmethod
-    def _keep_loaded_text_encoder_configs(
+    def _keep_loaded_encoder_widths(
         validation_config: Any,
         loaded_config: Any,
     ) -> None:
-        """Carry the loader-populated text encoder configs onto a config.
+        """Carry the loader-populated encoder widths onto ``validation_config``.
 
-        Validation reaches the stages through two configs that never pass
-        through ``ModelConfig.update_model_arch``: the deep copy
+        Validation reaches the stages through two pipeline configs that never
+        pass through ``ModelConfig.update_model_arch``: the deep copy
         ``_validation_pipeline_config`` makes of the training-side config, and
-        the fresh ``make_inference_args`` result handed to
-        ``pipeline.forward``. Both start from the encoder dataclass defaults,
-        and stages read those directly. HunyuanVideo 1.5 sizes its zero-length
-        ByT5 placeholder from ``hidden_size``, so the stale 512 default makes
-        the transformer reject it against its real width of 1472.
+        ``tc.pipeline_config`` itself, which ``make_inference_args`` hands to
+        ``pipeline.forward`` by reference. Both still hold the encoder dataclass
+        defaults for whatever the checkpoint would have supplied.
+
+        Stages read ``hidden_size`` only when they have to synthesise an
+        embedding instead of measuring one: HunyuanVideo 1.5 sizes its
+        zero-length ByT5 placeholder from it, so the generic ``T5ArchConfig``
+        default of 512 collides with the checkpoint's real width of 1472.
+
+        Only ``hidden_size`` is copied. Training owns the rest: model plugins
+        set ``text_len`` from ``text_encoder_max_lengths`` to size the parquet
+        text padding, and ``tokenizer_kwargs`` carry run-specific settings, so
+        both keep their training values. A falsy width means the loader never
+        populated that encoder, so there is nothing to carry over.
         """
         loaded_encoders = getattr(loaded_config, "text_encoder_configs", None)
-        if loaded_encoders is None:
+        validation_encoders = getattr(
+            validation_config,
+            "text_encoder_configs",
+            None,
+        )
+        if not loaded_encoders or not validation_encoders:
             return
-        if not hasattr(validation_config, "text_encoder_configs"):
-            return
-        validation_config.text_encoder_configs = loaded_encoders
+
+        for validation_encoder, loaded_encoder in zip(
+                validation_encoders,
+                loaded_encoders,
+                strict=False,
+        ):
+            hidden_size = getattr(
+                getattr(loaded_encoder, "arch_config", None),
+                "hidden_size",
+                None,
+            )
+            arch_config = getattr(validation_encoder, "arch_config", None)
+            if hidden_size and arch_config is not None:
+                arch_config.hidden_size = hidden_size
 
     @staticmethod
     def _sync_runtime_dit_arch_config(
@@ -1173,7 +1198,7 @@ class ValidationCallback(Callback):
         if tc.pipeline_config is not None:
             loaded_config = self._pipeline.fastvideo_args.pipeline_config
             validation_config = self._validation_pipeline_config(transformer)
-            self._keep_loaded_text_encoder_configs(
+            self._keep_loaded_encoder_widths(
                 validation_config,
                 loaded_config,
             )
@@ -1334,7 +1359,7 @@ class ValidationCallback(Callback):
             inference_args.pipeline_config,
             transformer,
         )
-        self._keep_loaded_text_encoder_configs(
+        self._keep_loaded_encoder_widths(
             inference_args.pipeline_config,
             pipeline.fastvideo_args.pipeline_config,
         )

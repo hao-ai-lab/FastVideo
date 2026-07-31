@@ -638,3 +638,93 @@ class TestActionOverlay:
         )
 
         assert overlay is None
+
+
+class TestKeepLoadedEncoderWidths:
+    """``_keep_loaded_encoder_widths`` merges the two config sources.
+
+    Validation runs the encoder weights the loader brought in, but reaches
+    the stages through configs derived from the training side, which never
+    see the checkpoint's ``config.json``. Each side therefore holds the
+    real value for a different set of fields: the loader knows the widths,
+    training knows the FastVideo-only fields HF configs never carry.
+    """
+
+    @staticmethod
+    def _encoder(hidden_size: int, text_len: int = 0) -> SimpleNamespace:
+        return SimpleNamespace(arch_config=SimpleNamespace(
+            hidden_size=hidden_size,
+            text_len=text_len,
+        ))
+
+    def test_copies_loaded_width(self) -> None:
+        # ByT5 at the generic T5 default vs the checkpoint's real width.
+        validation = SimpleNamespace(text_encoder_configs=(self._encoder(512), ))
+        loaded = SimpleNamespace(text_encoder_configs=(self._encoder(1472), ))
+
+        ValidationCallback._keep_loaded_encoder_widths(validation, loaded)
+
+        assert validation.text_encoder_configs[0].arch_config.hidden_size == 1472
+
+    def test_preserves_training_owned_fields(self) -> None:
+        # ``text_len`` is a FastVideo-only field absent from HF configs, so
+        # the loader never populates it and the training value must survive.
+        validation = SimpleNamespace(text_encoder_configs=(self._encoder(512, text_len=1000), ))
+        loaded = SimpleNamespace(text_encoder_configs=(self._encoder(1472, text_len=0), ))
+
+        ValidationCallback._keep_loaded_encoder_widths(validation, loaded)
+
+        assert validation.text_encoder_configs[0].arch_config.text_len == 1000
+
+    def test_keeps_config_objects_unshared(self) -> None:
+        # The second call site writes into ``tc.pipeline_config`` itself, so
+        # the merge must not alias the loaded encoder objects into it.
+        validation = SimpleNamespace(text_encoder_configs=(self._encoder(512), ))
+        original = validation.text_encoder_configs
+        loaded = SimpleNamespace(text_encoder_configs=(self._encoder(1472), ))
+
+        ValidationCallback._keep_loaded_encoder_widths(validation, loaded)
+
+        assert validation.text_encoder_configs is original
+        assert validation.text_encoder_configs[0] is not loaded.text_encoder_configs[0]
+
+    def test_skips_unpopulated_loaded_width(self) -> None:
+        # ``TextEncoderArchConfig.hidden_size`` defaults to 0; a loader that
+        # never filled it must not clobber a real training-side width.
+        validation = SimpleNamespace(text_encoder_configs=(self._encoder(3584), ))
+        loaded = SimpleNamespace(text_encoder_configs=(self._encoder(0), ))
+
+        ValidationCallback._keep_loaded_encoder_widths(validation, loaded)
+
+        assert validation.text_encoder_configs[0].arch_config.hidden_size == 3584
+
+    def test_multiple_encoders_are_matched_by_index(self) -> None:
+        validation = SimpleNamespace(text_encoder_configs=(
+            self._encoder(512),
+            self._encoder(512),
+        ))
+        loaded = SimpleNamespace(text_encoder_configs=(
+            self._encoder(3584),
+            self._encoder(1472),
+        ))
+
+        ValidationCallback._keep_loaded_encoder_widths(validation, loaded)
+
+        widths = [e.arch_config.hidden_size for e in validation.text_encoder_configs]
+        assert widths == [3584, 1472]
+
+    @pytest.mark.parametrize(
+        "validation, loaded",
+        [
+            (SimpleNamespace(), SimpleNamespace(text_encoder_configs=())),
+            (SimpleNamespace(text_encoder_configs=()), SimpleNamespace()),
+            (SimpleNamespace(text_encoder_configs=()), SimpleNamespace(text_encoder_configs=())),
+        ],
+    )
+    def test_missing_or_empty_encoders_is_noop(
+        self,
+        validation: SimpleNamespace,
+        loaded: SimpleNamespace,
+    ) -> None:
+        # Pipelines without text encoders must not raise here.
+        ValidationCallback._keep_loaded_encoder_widths(validation, loaded)
