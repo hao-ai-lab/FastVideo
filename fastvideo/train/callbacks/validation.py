@@ -1083,15 +1083,16 @@ class ValidationCallback(Callback):
         validation_config: Any,
         loaded_config: Any,
     ) -> None:
-        """Carry the loader-populated text encoder configs into the swap.
+        """Carry the loader-populated text encoder configs onto a config.
 
-        ``_validation_pipeline_config`` deep-copies the training-side pipeline
-        config, which never passes through ``ModelConfig.update_model_arch``,
-        so its encoder arch fields still hold the dataclass defaults. The
-        pipeline's own config does carry the checkpoint values, and stages read
-        those defaults directly: HunyuanVideo 1.5 sizes its zero-length ByT5
-        placeholder from ``hidden_size``, and the stale 512 default makes the
-        transformer reject it against its real width of 1472.
+        Validation reaches the stages through two configs that never pass
+        through ``ModelConfig.update_model_arch``: the deep copy
+        ``_validation_pipeline_config`` makes of the training-side config, and
+        the fresh ``make_inference_args`` result handed to
+        ``pipeline.forward``. Both start from the encoder dataclass defaults,
+        and stages read those directly. HunyuanVideo 1.5 sizes its zero-length
+        ByT5 placeholder from ``hidden_size``, so the stale 512 default makes
+        the transformer reject it against its real width of 1472.
         """
         loaded_encoders = getattr(loaded_config, "text_encoder_configs", None)
         if loaded_encoders is None:
@@ -1332,6 +1333,10 @@ class ValidationCallback(Callback):
         self._sync_runtime_dit_arch_config(
             inference_args.pipeline_config,
             transformer,
+        )
+        self._keep_loaded_text_encoder_configs(
+            inference_args.pipeline_config,
+            pipeline.fastvideo_args.pipeline_config,
         )
 
         # Propagate sampling_timesteps to pipeline_config so
