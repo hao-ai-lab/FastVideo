@@ -17,6 +17,7 @@ from fastvideo.models.loader.ltx_single_file import (
     LTXCheckpointMetadata,
     resolve_text_encoder_root,
     build_dit_config,
+    bundle_model_index,
     component_weights,
     read_ltx_metadata,
 )
@@ -58,8 +59,15 @@ def _write_bundle(path: Path,
         "duration_head.linear.weight": torch.zeros(2),
     }
     section = dict(TRANSFORMER_SECTION, _class_name=transformer_cls)
+    config = {
+        "transformer": section,
+        # Declares its class: a component that can be built from the bundle.
+        "vae": {"_class_name": "CausalVideoAutoencoder", "dims": 3},
+        # Present and carrying weights, but naming no class.
+        "audio_vae": {},
+    }
     metadata = {
-        "config": json.dumps({"transformer": section, "vae": {}}),
+        "config": json.dumps(config),
         "model_version": "9.9.9",
         "license": "x" * 128,
     }
@@ -80,7 +88,7 @@ def test_read_metadata_and_routing() -> None:
             "ltx_version": "9.9.9",
             "gemma_version": "fake-encoder-v0",
         }
-        assert set(meta.config) == {"transformer", "vae"}
+        assert set(meta.config) == {"transformer", "vae", "audio_vae"}
         # frequencies_precision is the checkpoint's name for double_precision_rope.
         assert meta.config["transformer"]["double_precision_rope"] is True
 
@@ -103,6 +111,29 @@ def test_read_metadata_and_routing() -> None:
             }),
         ):
             assert {n for n, _ in component_weights(str(path), component)} == expected
+
+
+def test_bundle_model_index_declares_what_the_metadata_declares() -> None:
+    """The model_index a bundle stands in for: same shape, same libraries."""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "bundle.safetensors"
+        _write_bundle(path, with_gemma_source=True)
+        index = bundle_model_index(str(path))
+
+        # A section that names a class is a component we can build.
+        assert index["transformer"] == ["diffusers", "AVTransformer3DModel"]
+        assert index["vae"] == ["diffusers", "CausalVideoAutoencoder"]
+        # A section that names none stays declared with a null library, so
+        # `load_modules` drops it from the required set on its own. Omitting
+        # the key instead would trip its required-module check.
+        assert index["audio_vae"] == [None, None]
+        # Both live outside the bundle, but the pipeline requires them.
+        assert index["text_encoder"] == [
+            "transformers", "LTX2GemmaTextEncoderModel"
+        ]
+        assert index["tokenizer"] == ["transformers", "AutoTokenizer"]
+        # `load_modules` pops both of these without a default.
+        assert "_class_name" in index and "_diffusers_version" in index
 
 
 def test_missing_gemma_source_is_none() -> None:
@@ -203,6 +234,7 @@ def test_unknown_bundle_transformer_class_raises_naming_table_and_override() -> 
 
 if __name__ == "__main__":
     test_read_metadata_and_routing()
+    test_bundle_model_index_declares_what_the_metadata_declares()
     test_missing_gemma_source_is_none()
     test_dit_config_takes_ff_bias_from_metadata()
     test_defaults_unchanged_without_metadata()
@@ -210,3 +242,34 @@ if __name__ == "__main__":
     test_bundle_resolves_its_pipeline_config_from_declared_transformer_class()
     test_unknown_bundle_transformer_class_raises_naming_table_and_override()
     print("ok")
+
+
+def test_connector_factorization_must_match_its_stream_width() -> None:
+    """A connector's heads x head_dim must equal the width of the stream it feeds.
+
+    This is the mistake that loads cleanly and computes wrong, so it fails loud
+    and names both numbers. A field the checkpoint does not declare is not
+    checked -- the arch default applies and there is nothing to contradict.
+    """
+    import pytest
+
+    from fastvideo.models.loader.component_loader import _check_connector_widths
+
+    declared = {
+        "connector_num_attention_heads": 32,
+        "connector_attention_head_dim": 128,
+        "cross_attention_dim": 4096,
+        "audio_connector_num_attention_heads": 32,
+        "audio_connector_attention_head_dim": 64,
+        "audio_cross_attention_dim": 2048,
+    }
+    _check_connector_widths(declared)
+    _check_connector_widths({})
+    _check_connector_widths({"connector_num_attention_heads": 32})
+
+    # The audio connector inheriting the video head_dim is the exact failure
+    # this exists to stop: 32 x 128 = 4096, but the audio stream is 2048.
+    with pytest.raises(ValueError, match="audio"):
+        _check_connector_widths(dict(declared, audio_connector_attention_head_dim=128))
+    with pytest.raises(ValueError, match="video"):
+        _check_connector_widths(dict(declared, connector_num_attention_heads=30))

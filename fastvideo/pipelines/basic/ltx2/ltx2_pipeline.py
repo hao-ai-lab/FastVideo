@@ -277,7 +277,7 @@ class LTX2Pipeline(LoRAPipeline):
                 modules[module_name] = loaded_modules[module_name]
                 continue
 
-            component_model_path = os.path.join(self.model_path, module_name)
+            component_model_path = self._component_path(module_name, fastvideo_args)
             if module_name == "tokenizer" and not os.path.isdir(component_model_path):
                 gemma_path = os.path.join(self.model_path, "text_encoder", "gemma")
                 if os.path.isdir(gemma_path):

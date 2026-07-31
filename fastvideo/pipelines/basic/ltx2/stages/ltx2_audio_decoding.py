@@ -49,6 +49,16 @@ class LTX2AudioDecodingStage(PipelineStage):
         audio_latents = batch.extra.get("ltx2_audio_latents")
         if audio_latents is None:
             return batch
+        # A checkpoint that declares no audio decoder builds these as None
+        # (``get_module`` returns its default), while the transformer is still
+        # audio-video and still produces audio latents. Having latents is
+        # therefore not evidence that anything can decode them -- guard on the
+        # modules too, and leave the video path unaffected.
+        if self.audio_decoder is None or self.vocoder is None:
+            logger.info(
+                "Skipping audio decoding: this checkpoint declares no audio "
+                "decoder/vocoder. Video output is unaffected.")
+            return batch
 
         device = get_local_torch_device()
         self.audio_decoder = self.audio_decoder.to(device)

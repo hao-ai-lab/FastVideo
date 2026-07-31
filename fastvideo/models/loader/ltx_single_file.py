@@ -55,6 +55,11 @@ TEXT_STACK_SUBPREFIXES: tuple[str, ...] = (
 )
 
 
+def is_single_file_bundle(path: str) -> bool:
+    """True when a model path names a bundle rather than a component directory."""
+    return str(path).endswith(".safetensors")
+
+
 @dataclass(frozen=True)
 class LTXCheckpointMetadata:
     """Parsed ``__metadata__`` of a single-file LTX checkpoint.
@@ -99,6 +104,44 @@ def read_ltx_metadata(path: str) -> LTXCheckpointMetadata:
         gemma_source_checkpoint=(json.loads(gemma_source)
                                  if gemma_source is not None else None),
     )
+
+
+def bundle_model_index(path: str) -> dict[str, Any]:
+    """Build a ``model_index.json``-shaped dict out of a bundle's own metadata.
+
+    The pipeline loader is written against a diffusers repo layout, which
+    answers two questions: which components exist, and what class is each. A
+    bundle already answers both in its ``__metadata__``, so this only reshapes
+    the answer -- it mirrors the entries
+    ``convert_ltx2_weights.py::_build_model_index`` writes for the converted
+    directory layout, including the library each is declared under.
+
+    A section that exists but declares no class is emitted as ``[None, None]``
+    rather than dropped. ``ComposedPipelineBase.load_modules`` already treats a
+    null library as "declared, but not something to build" and removes the
+    component from the required set; dropping the key instead would fail its
+    required-module check for a component the checkpoint does carry.
+
+    ``text_encoder`` and ``tokenizer`` are always declared: they live outside
+    the bundle, but the pipeline needs both.
+    """
+    model_index: dict[str, Any] = {
+        # ponytail: the pipeline class is selected by the caller through
+        # `override_pipeline_cls_name` (see `registry._bundle_config_info`),
+        # and `load_modules` pops both of these without reading them. Nothing
+        # here is entitled to name a pipeline, so these are placeholders --
+        # they exist only because those pops have no default.
+        "_class_name": None,
+        "_diffusers_version": None,
+    }
+    for component, section in read_ltx_metadata(path).config.items():
+        cls_name = (section.get("_class_name")
+                    if isinstance(section, dict) else None)
+        model_index[component] = (["diffusers", cls_name]
+                                  if cls_name else [None, None])
+    model_index["text_encoder"] = ["transformers", "LTX2GemmaTextEncoderModel"]
+    model_index["tokenizer"] = ["transformers", "AutoTokenizer"]
+    return model_index
 
 
 def build_dit_config(metadata: LTXCheckpointMetadata) -> LTX2VideoConfig:

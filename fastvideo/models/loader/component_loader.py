@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Generator, Iterable
 from contextlib import nullcontext
 from copy import deepcopy
-from typing import cast
+from typing import Any, cast
 
 import torch
 import torch.distributed as dist
@@ -35,6 +35,7 @@ from fastvideo.models.hf_transformer_utils import get_diffusers_config
 from fastvideo.models.loader.fsdp_load import maybe_load_fsdp_model, shard_model
 from fastvideo.models.loader.ltx_single_file import (
     component_weights,
+    is_single_file_bundle,
     read_ltx_metadata,
 )
 from fastvideo.models.loader.utils import set_default_torch_dtype
@@ -140,6 +141,41 @@ class ComponentLoader(ABC):
             module_type,
         )
         return GenericComponentLoader(transformers_or_diffusers)
+
+
+def _check_connector_widths(transformer_config: dict[str, Any]) -> None:
+    """Fail loudly when a connector's declared factorization is inconsistent.
+
+    A connector's width is ``num_attention_heads * attention_head_dim``, and it
+    has to equal the cross-attention width of the stream it feeds. This is the
+    class of mistake that loads cleanly and computes wrong -- a factorization
+    that multiplies out to the wrong number produces correctly shaped tensors
+    everywhere except the one parameter it silently mis-sizes. Check it while
+    both numbers are still in hand rather than discovering it as a shape
+    assertion thousands of tensors later, or not at all.
+
+    Only checks what the checkpoint actually declares; a missing field means
+    the arch default applies and there is nothing to contradict.
+    """
+    for heads_key, dim_key, width_key, label in (
+        ("connector_num_attention_heads", "connector_attention_head_dim",
+         "cross_attention_dim", "video"),
+        ("audio_connector_num_attention_heads",
+         "audio_connector_attention_head_dim", "audio_cross_attention_dim",
+         "audio"),
+    ):
+        heads = transformer_config.get(heads_key)
+        head_dim = transformer_config.get(dim_key)
+        width = transformer_config.get(width_key)
+        if heads is None or head_dim is None or width is None:
+            continue
+        if heads * head_dim != width:
+            raise ValueError(
+                f"Checkpoint declares an inconsistent {label} connector shape: "
+                f"{heads_key}={heads} x {dim_key}={head_dim} = {heads * head_dim}, "
+                f"but {width_key}={width}. The connector feeds that stream, so "
+                "the two must agree; refusing to build a model whose weights "
+                "would load into mis-sized parameters.")
 
 
 class TextEncoderLoader(ComponentLoader):
@@ -255,6 +291,13 @@ class TextEncoderLoader(ComponentLoader):
         #     revision=fastvideo_args.revision,
         #     model_override_args=None,
         # )
+        # For a bundle, `model_path` is the declared text-encoder root rather
+        # than a `text_encoder/` directory: the language model lives there, its
+        # projection and connectors live inside the bundle, and the fields the
+        # directory layout reads out of `<repo>/transformer/config.json` come
+        # from the bundle's metadata instead.
+        bundle_path = fastvideo_args.model_path
+        single_file = is_single_file_bundle(bundle_path)
         model_config = get_diffusers_config(model=model_path)
         model_config.pop("_name_or_path", None)
         model_config.pop("transformers_version", None)
@@ -281,6 +324,15 @@ class TextEncoderLoader(ComponentLoader):
         if gemma_path and not gemma_path_from_candidate:
             if not os.path.isabs(gemma_path):
                 model_config["gemma_model_path"] = os.path.normpath(os.path.join(repo_root, gemma_path))
+        if single_file:
+            # The encoder root was declared, not discovered, so it wins over
+            # anything the probing above turned up.
+            model_config["gemma_model_path"] = model_path
+            # That root's config.json describes the language model it holds,
+            # which is not the class to build here: the root supplies the
+            # encoder's dimensions, the wrapper class supplies the connectors,
+            # and only the wrapper is buildable from this loader.
+            model_config["architectures"] = ["LTX2GemmaTextEncoderModel"]
         transformer_config_path = os.path.join(repo_root, "transformer", "config.json")
         if os.path.isfile(transformer_config_path):
             try:
@@ -303,9 +355,31 @@ class TextEncoderLoader(ComponentLoader):
                      "video_feature_extractor_out_features"),
                     ("audio_cross_attention_dim",
                      "audio_feature_extractor_out_features"),
+                    # The rest of the text stack's shape is declared under these
+                    # exact names too. Leaving any of them to the arch default
+                    # builds a DIFFERENT model than the checkpoint describes:
+                    # the audio connector silently inherits the video
+                    # connector's width, and the feature extractor is built in
+                    # the wrong one of its two forms. Same names on both sides,
+                    # so the mapping is identity.
+                    *((name, name) for name in (
+                        "connector_num_attention_heads",
+                        "connector_attention_head_dim",
+                        "connector_num_layers",
+                        "connector_num_learnable_registers",
+                        "connector_positional_embedding_theta",
+                        "connector_positional_embedding_max_pos",
+                        "connector_apply_gated_attention",
+                        "audio_connector_num_attention_heads",
+                        "audio_connector_attention_head_dim",
+                        "audio_connector_num_layers",
+                        # Selects which feature-extractor form is built.
+                        "caption_proj_before_connector",
+                    )),
                 ):
                     if dst not in model_config and src in transformer_config:
                         model_config[dst] = transformer_config[src]
+                _check_connector_widths(transformer_config)
             except json.JSONDecodeError:
                 pass
         logger.info("HF Model config: %s", model_config)
@@ -348,6 +422,12 @@ class TextEncoderLoader(ComponentLoader):
             fastvideo_args,
             encoder_precision,
             use_text_encoder_override=True,
+            # Everything this model owns is inside the bundle: the projection
+            # and both connectors. The language model at the encoder root is
+            # loaded separately and lazily by the model itself, and is filtered
+            # out of `named_parameters`, so it must not be routed through here.
+            weight_iterator=(component_weights(bundle_path, "text_encoder")
+                             if single_file else None),
         )
 
     def load_model(
@@ -359,6 +439,7 @@ class TextEncoderLoader(ComponentLoader):
             dtype: str = "fp16",
             use_text_encoder_override: bool = False,  # prevent subclasses from misusing
             cpu_offload: bool | None = None,
+            weight_iterator: Iterable[tuple[str, torch.Tensor]] | None = None,
     ):
         if cpu_offload is None:
             cpu_offload = fastvideo_args.text_encoder_cpu_offload
@@ -402,6 +483,12 @@ class TextEncoderLoader(ComponentLoader):
                         [fastvideo_args.override_text_encoder_safetensors],
                         to_cpu=use_cpu_offload,
                     ))  # type: ignore
+            elif weight_iterator is not None:
+                # Same contract as `maybe_load_fsdp_model`'s `weight_iterator`:
+                # already-routed `(name, cpu_tensor)` pairs, for checkpoints
+                # that are not a directory of per-component weight files.
+                self.counter_before_loading_weights = time.perf_counter()
+                loaded_weights: set[str] = model.load_weights(weight_iterator)  # type: ignore
             else:
                 loaded_weights: set[str] = model.load_weights(
                     self._get_all_weights(
@@ -714,7 +801,17 @@ class VAELoader(ComponentLoader):
 
     def load(self, model_path: str, fastvideo_args: FastVideoArgs):
         """Load the VAE based on the model path, and inference args."""
-        config = get_diffusers_config(model=model_path)
+        if is_single_file_bundle(model_path):
+            # The bundle stores the VAE config flat; the converted directory
+            # layout nests the same fields under "vae" and hoists the class out
+            # (`convert_ltx2_weights.py::_wrap_component_config`), and the build
+            # path below keys off that nesting. Match the shape rather than
+            # forking the build path.
+            section = deepcopy(read_ltx_metadata(model_path).config["vae"])
+            declared_class = section.pop("_class_name", None)
+            config = {"_class_name": declared_class, "vae": section}
+        else:
+            config = get_diffusers_config(model=model_path)
         class_name = config.pop("_class_name")
         config.pop("_name_or_path", None)
         assert class_name is not None, (
@@ -833,15 +930,21 @@ class VAELoader(ComponentLoader):
                 vae_cls, _ = ModelRegistry.resolve_model_cls(class_name)
                 vae = vae_cls(vae_config).to(target_device)
 
-        # Find all safetensors files
-        safetensors_list = glob.glob(os.path.join(str(model_path), "*.safetensors"))
-        if not safetensors_list:
-            raise ValueError(f"No safetensors files found in {model_path}")
-        # Common case: a single `.safetensors` checkpoint file.
-        # Some models may be sharded into multiple files; in that case we merge.
-        loaded = {}
-        for sf_file in safetensors_list:
-            loaded.update(safetensors_load_file(sf_file))
+        if is_single_file_bundle(model_path):
+            # `safetensors_load_file` takes a path, not an iterator, so the
+            # bundle's prefix-routed tensors are materialized here instead.
+            # The VAE is small enough for that (see `component_weights`).
+            loaded = dict(component_weights(model_path, "vae"))
+        else:
+            # Find all safetensors files
+            safetensors_list = glob.glob(os.path.join(str(model_path), "*.safetensors"))
+            if not safetensors_list:
+                raise ValueError(f"No safetensors files found in {model_path}")
+            # Common case: a single `.safetensors` checkpoint file.
+            # Some models may be sharded into multiple files; in that case we merge.
+            loaded = {}
+            for sf_file in safetensors_list:
+                loaded.update(safetensors_load_file(sf_file))
 
         # LTX-2 CausalVideoAutoencoder needs per_channel_statistics remapping
         if class_name == "CausalVideoAutoencoder" and "vae" in config:
@@ -994,7 +1097,7 @@ class TransformerLoader(ComponentLoader):
         # per-component directory: the config lives in the file's
         # ``__metadata__`` and the transformer's tensors are selected by their
         # top-level key prefix.
-        single_file = str(model_path).endswith(".safetensors")
+        single_file = is_single_file_bundle(model_path)
         if single_file:
             config = deepcopy(
                 read_ltx_metadata(model_path).config["transformer"])
@@ -1142,7 +1245,12 @@ class SchedulerLoader(ComponentLoader):
 
     def load(self, model_path: str, fastvideo_args: FastVideoArgs):
         """Load the scheduler based on the model path, and inference args."""
-        config = get_diffusers_config(model=model_path)
+        # A bundle keeps the scheduler's config in its own metadata; there is
+        # no `scheduler/` directory holding a `scheduler_config.json`.
+        if is_single_file_bundle(model_path):
+            config = deepcopy(read_ltx_metadata(model_path).config["scheduler"])
+        else:
+            config = get_diffusers_config(model=model_path)
 
         class_name = config.pop("_class_name")
         assert class_name is not None, (

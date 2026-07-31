@@ -20,6 +20,8 @@ from fastvideo.hooks.activation_trace import attach_activation_trace, detach_act
 from fastvideo.logger import init_logger
 from fastvideo.profiler import get_or_create_profiler
 from fastvideo.models.loader.component_loader import PipelineComponentLoader
+from fastvideo.models.loader.ltx_single_file import (bundle_model_index, is_single_file_bundle, read_ltx_metadata,
+                                                     resolve_text_encoder_root)
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages import PipelineStage
 import fastvideo.envs as envs
@@ -79,6 +81,7 @@ class ComposedPipelineBase(ABC):
 
         self.model_path: str = model_path
         self._stages: list[PipelineStage] = []
+        self._bundle_encoder_root: str | None = None
         self._stage_name_mapping: dict[str, PipelineStage] = {}
         self._trace_mgr = None
 
@@ -328,11 +331,49 @@ class ComposedPipelineBase(ABC):
         self.model_path = model_path
         # fastvideo_args.downloaded_model_path = model_path
         logger.info("Model path: %s", model_path)
+        if is_single_file_bundle(model_path):
+            # A bundle is a file, so there is no directory to verify and no
+            # model_index.json to read; it declares the same thing itself.
+            return bundle_model_index(model_path)
         config = verify_model_config_and_directory(
             model_path,
             required_component_dirs=self.get_hf_download_component_dirs(),
         )
         return cast(dict[str, Any], config)
+
+    def _text_encoder_root(self, fastvideo_args: FastVideoArgs) -> str:
+        """Where a bundle's text encoder lives -- it is not in the bundle.
+
+        Declared, never discovered: a per-run environment override first, then
+        the encoder path the pipeline config already carries.
+        """
+        encoder_configs = getattr(fastvideo_args.pipeline_config, "text_encoder_configs", ())
+        return resolve_text_encoder_root(
+            configured_path=(getattr(encoder_configs[0].arch_config, "gemma_model_path", None)
+                             if encoder_configs else None),
+            override_path=os.environ.get("FASTVIDEO_LTX_ENCODER_ROOT") or None,
+            metadata=read_ltx_metadata(self.model_path),
+        )
+
+    def _component_path(self, module_name: str, fastvideo_args: FastVideoArgs) -> str:
+        """Where one component's config and weights live.
+
+        A directory repo puts each component in its own subdirectory. A bundle
+        holds all of them in one file except the text stack, which is declared
+        separately. Subclasses that override ``load_modules`` must route
+        through here rather than joining the path themselves, or a bundle
+        silently falls back to the directory layout and fails looking for a
+        subdirectory of a file.
+        """
+        if not is_single_file_bundle(self.model_path):
+            return os.path.join(self.model_path, module_name)
+        if module_name in ("text_encoder", "tokenizer"):
+            # Resolved once: it raises when undeclared, and doing that per
+            # component would report the same failure several times.
+            if self._bundle_encoder_root is None:
+                self._bundle_encoder_root = self._text_encoder_root(fastvideo_args)
+            return self._bundle_encoder_root
+        return self.model_path
 
     @property
     def required_config_modules(self) -> list[str]:
@@ -465,7 +506,7 @@ class ComposedPipelineBase(ABC):
             else:
                 load_module_name = module_name
 
-            component_model_path = os.path.join(self.model_path, load_module_name)
+            component_model_path = self._component_path(load_module_name, fastvideo_args)
             module = PipelineComponentLoader.load_module(
                 module_name=load_module_name,
                 component_model_path=component_model_path,
