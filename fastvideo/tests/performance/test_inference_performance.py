@@ -518,6 +518,20 @@ def _build_result_record(
 
 # -- Test -------------------------------------------------------------------
 
+def _gpu_type_skip_reason(cfg, run_config, device_name):
+    """Return a skip reason if the config restricts itself to GPU types the
+    current device does not match, else None.
+
+    ``run_config.gpu_types`` is an optional list of substrings matched against
+    the CUDA device name, so a hardware-specific config (e.g. a DGX Spark GB10
+    single-GPU workload) does not run on the shared H100/L40S lanes. Configs
+    without ``gpu_types`` run on any device, as before.
+    """
+    gpu_types = run_config.get("gpu_types")
+    if gpu_types and not any(g in device_name for g in gpu_types):
+        return (f"{cfg['benchmark_id']} is restricted to gpu_types={gpu_types}, "
+                f"current device is {device_name!r}")
+    return None
 
 def _run_benchmark(cfg):
     run_config = cfg.get("run_config") or {}
@@ -529,6 +543,11 @@ def _run_benchmark(cfg):
     available = torch.cuda.device_count()
     if available < num_gpus:
         pytest.skip(f"Need {num_gpus} GPUs, only {available} available")
+
+    skip_reason = _gpu_type_skip_reason(cfg, run_config,
+                                        torch.cuda.get_device_name())
+    if skip_reason:
+        pytest.skip(skip_reason)
 
     gen_kwargs = dict(cfg.get("generation_kwargs", {}))
     prompts = cfg.get("test_prompts", ["A cinematic video."])

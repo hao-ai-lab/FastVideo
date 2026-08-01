@@ -1,0 +1,51 @@
+{
+  "benchmark_id": "wan-t2v-1.3b-1gpu-gb10",
+  "config_schema_version": 2,
+  "workload_id": "wan-t2v",
+  "variant_id": "1.3b-sp1",
+  "benchmark_version": 3,
+  "description": "Wan2.1 T2V 1.3B single-GPU inference performance on NVIDIA DGX Spark (GB10). Single-GPU variant of wan-t2v-1.3b (same workload_id for dashboard comparability). Gated to the GB10 via run_config.gpu_types so it does not run on the shared H100/L40S lanes.",
+  "model": {
+    "model_path": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+    "model_short_name": "Wan2.1-T2V-1.3B"
+  },
+  "init_kwargs": {
+    "num_gpus": 1,
+    "flow_shift": 7.0,
+    "sp_size": 1,
+    "tp_size": 1,
+    "vae_sp": false,
+    "vae_tiling": true,
+    "text_encoder_precisions": ["fp32"]
+  },
+  "generation_kwargs": {
+    "height": 480,
+    "width": 832,
+    "num_frames": 45,
+    "num_inference_steps": 4,
+    "guidance_scale": 3,
+    "embedded_cfg_scale": 6,
+    "seed": 1024,
+    "fps": 24,
+    "neg_prompt": "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
+  },
+  "test_prompts": [
+    "Will Smith casually eats noodles, his relaxed demeanor contrasting with the energetic background of a bustling street food market. The scene captures a mix of humor and authenticity. Mid-shot framing, vibrant lighting."
+  ],
+  "run_config": {
+    "num_warmup_runs": 2,
+    "num_measurement_runs": 5,
+    "required_gpus": 1,
+    "gpu_types": ["GB10"]
+  },
+  "thresholds": {
+    "GB10": {
+      "max_generation_time_s": 90.0,
+      "max_peak_memory_mb": 40000.0
+    },
+    "default": {
+      "max_generation_time_s": 120.0,
+      "max_peak_memory_mb": 40000.0
+    }
+  }
+}
