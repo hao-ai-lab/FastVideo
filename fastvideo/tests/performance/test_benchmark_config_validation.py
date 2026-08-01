@@ -121,3 +121,28 @@ def test_regression_thresholds_validate_without_forcing_v2_schema():
     cfg["regression_thresholds"] = []
     with pytest.raises(ValueError, match="benchmark config field 'regression_thresholds' must be an object"):
         _validate_benchmark_config(cfg, "legacy.json")
+
+
+def test_gpu_type_gate_skips_non_matching_device():
+    from fastvideo.tests.performance.test_inference_performance import (
+        _gpu_type_skip_reason,
+    )
+
+    cfg = {"benchmark_id": "wan-t2v-1.3b-1gpu-gb10"}
+    run_config = {"gpu_types": ["GB10"]}
+
+    # Matching device (substring) runs; non-matching devices skip.
+    assert _gpu_type_skip_reason(cfg, run_config, "NVIDIA GB10") is None
+    assert _gpu_type_skip_reason(cfg, run_config, "NVIDIA H100 80GB HBM3") is not None
+    assert _gpu_type_skip_reason(cfg, run_config, "NVIDIA L40S") is not None
+
+
+def test_gpu_type_gate_absent_field_runs_everywhere():
+    from fastvideo.tests.performance.test_inference_performance import (
+        _gpu_type_skip_reason,
+    )
+
+    cfg = {"benchmark_id": "wan-t2v-1.3b-2gpu"}
+    # No gpu_types key, and an empty list, both run on any device.
+    assert _gpu_type_skip_reason(cfg, {}, "NVIDIA H100 80GB HBM3") is None
+    assert _gpu_type_skip_reason(cfg, {"gpu_types": []}, "NVIDIA H100") is None
