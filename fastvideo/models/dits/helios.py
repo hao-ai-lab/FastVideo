@@ -577,6 +577,16 @@ class HeliosTransformer3DModel(BaseDiT):
         del dtype
         self.rope.materialize_buffers(device)
 
+    @staticmethod
+    def _validate_history_pair(
+        history: torch.Tensor | None,
+        history_indices: torch.Tensor | None,
+        history_name: str,
+        history_indices_name: str,
+    ) -> None:
+        if (history is None) != (history_indices is None):
+            raise ValueError(f"{history_name} and {history_indices_name} must be provided together")
+
     def _patch_history(
         self,
         hidden_states: torch.Tensor,
@@ -629,6 +639,24 @@ class HeliosTransformer3DModel(BaseDiT):
         **kwargs,
     ) -> torch.Tensor:
         del kwargs
+        self._validate_history_pair(
+            latents_history_short,
+            indices_latents_history_short,
+            "latents_history_short",
+            "indices_latents_history_short",
+        )
+        self._validate_history_pair(
+            latents_history_mid,
+            indices_latents_history_mid,
+            "latents_history_mid",
+            "indices_latents_history_mid",
+        )
+        self._validate_history_pair(
+            latents_history_long,
+            indices_latents_history_long,
+            "latents_history_long",
+            "indices_latents_history_long",
+        )
         if isinstance(encoder_hidden_states, list):
             encoder_hidden_states = encoder_hidden_states[0]
         batch_size = hidden_states.shape[0]
