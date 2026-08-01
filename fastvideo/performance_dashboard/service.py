@@ -13,19 +13,18 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any
 
+from fastvideo.performance.cohort import (
+    COMPARISON_IDENTITY_KEYS,
+    cohort_descriptor,
+    cohort_key,
+    cohort_value,
+)
 from fastvideo.performance.hf_store import is_baseline_eligible_record, safe_float
 from fastvideo.performance.metric_policy import regression_delta, resolve_metric_policies
 
 Record = dict[str, Any]
-CohortKey = tuple[str, ...]
-COMPARISON_COHORT_KEYS = (
-    "workload_id",
-    "variant_id",
-    "benchmark_version",
-    "recipe_fingerprint",
-    "hardware_profile_id",
-    "software_profile_id",
-)
+CohortKey = str
+COMPARISON_COHORT_KEYS = COMPARISON_IDENTITY_KEYS
 
 
 def parse_timestamp(value: Any) -> datetime | None:
@@ -94,27 +93,18 @@ def _cohort_metadata_value(value: Any) -> Any:
     return value
 
 
-def _cohort_key_value(value: Any) -> str:
-    return str(_cohort_metadata_value(value))
-
-
 def record_comparison_metadata(record: Record) -> Record:
-    return {key: _cohort_metadata_value(record.get(key)) for key in COMPARISON_COHORT_KEYS}
-
-
-def _record_has_complete_v2_identity(record: Record) -> bool:
-    return all(_cohort_metadata_value(record.get(key)) != "" for key in COMPARISON_COHORT_KEYS)
+    return {
+        **{
+            key: _cohort_metadata_value(record.get(key))
+            for key in COMPARISON_COHORT_KEYS
+        },
+        "cohort": cohort_descriptor(record),
+    }
 
 
 def comparison_cohort_key(record: Record) -> CohortKey:
-    if _record_has_complete_v2_identity(record):
-        return ("v2", *(_cohort_key_value(record.get(key)) for key in COMPARISON_COHORT_KEYS))
-    return (
-        "legacy",
-        str(record.get("model_id") or "unknown"),
-        str(record.get("gpu_type") or "unknown"),
-        *(_cohort_key_value(record.get(key)) for key in COMPARISON_COHORT_KEYS),
-    )
+    return cohort_key(record)
 
 
 def group_by_comparison_cohort(records: list[Record]) -> dict[CohortKey, list[Record]]:
@@ -128,12 +118,85 @@ def comparison_sort_key(record: Record) -> tuple[str, ...]:
     return (
         str(record.get("model_id") or "unknown"),
         str(record.get("gpu_type") or "unknown"),
-        *(_cohort_key_value(record.get(key)) for key in COMPARISON_COHORT_KEYS),
+        *(cohort_value(record.get(key)) for key in COMPARISON_COHORT_KEYS),
     )
 
 
 def latest_row_sort_key(row: Record) -> tuple[Any, ...]:
     return (row["status"] != "fail", *comparison_sort_key(row))
+
+
+def _latest_baseline_record(records: list[Record]) -> Record | None:
+    eligible = [record for record in records if record.get("success", True) and is_baseline_eligible_record(record)]
+    return eligible[-1] if eligible else None
+
+
+def build_cohort_catalog(
+    records: list[Record],
+    *,
+    model_id: str | None = None,
+    gpu_key: str | None = None,
+) -> Record:
+    """Build cascading model/GPU/cohort options and a deterministic default."""
+    groups = list(group_by_comparison_cohort(records).values())
+    latest_records = [group[-1] for group in groups]
+    models = sorted({str(record.get("model_id") or "unknown") for record in latest_records})
+
+    model_groups = [
+        group for group in groups if not model_id or str(group[-1].get("model_id") or "unknown") == model_id
+    ]
+    gpu_records: dict[str, Record] = {}
+    for group in model_groups:
+        latest = group[-1]
+        descriptor = cohort_descriptor(latest)
+        current = gpu_records.get(descriptor["gpu_key"])
+        if current is None or record_sort_key(latest) > record_sort_key(current):
+            gpu_records[descriptor["gpu_key"]] = latest
+    gpus = sorted(
+        ({
+            "key": descriptor["gpu_key"],
+            "label": descriptor["gpu_label"],
+            "gpu_type": str(record.get("gpu_type") or "unknown"),
+        } for record in gpu_records.values() for descriptor in (cohort_descriptor(record), )),
+        key=lambda option: (option["label"], option["key"]),
+    )
+
+    selected_groups = [
+        group for group in model_groups if not gpu_key or cohort_descriptor(group[-1])["gpu_key"] == gpu_key
+    ]
+    cohorts = []
+    for group in selected_groups:
+        latest = group[-1]
+        baseline_record = _latest_baseline_record(group)
+        cohorts.append({
+            **cohort_descriptor(latest),
+            "model_id":
+            str(latest.get("model_id") or "unknown"),
+            "gpu_type":
+            str(latest.get("gpu_type") or "unknown"),
+            "latest_timestamp":
+            latest.get("timestamp"),
+            "latest_baseline_timestamp":
+            None if baseline_record is None else baseline_record.get("timestamp"),
+            "baseline_eligible":
+            baseline_record is not None,
+        })
+    cohorts.sort(key=lambda option: (option["title"], option["gpu_label"], option["key"]))
+
+    baseline_groups = [group for group in selected_groups if _latest_baseline_record(group) is not None]
+    if baseline_groups:
+        default_group = max(baseline_groups, key=lambda group: record_sort_key(_latest_baseline_record(group) or {}))
+    elif selected_groups:
+        default_group = max(selected_groups, key=lambda group: record_sort_key(group[-1]))
+    else:
+        default_group = None
+
+    return {
+        "models": models,
+        "gpus": gpus,
+        "cohorts": cohorts,
+        "default_cohort_key": None if default_group is None else cohort_key(default_group[-1]),
+    }
 
 
 def baseline_value(records: list[Record], metric_key: str) -> float | None:

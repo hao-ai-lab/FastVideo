@@ -84,9 +84,18 @@ h3 {
 
 .filters {
   display: grid;
-  grid-template-columns: 120px minmax(200px, 1fr) minmax(200px, 1fr) minmax(180px, 0.8fr);
+  grid-template-columns: 100px minmax(170px, 0.8fr) minmax(220px, 1fr) minmax(320px, 1.4fr) minmax(160px, 0.7fr);
   gap: 14px;
   margin-bottom: 18px;
+}
+
+.selected-cohort {
+  border: 1px solid #b7c7d6;
+  border-left: 4px solid #0f6b8f;
+  border-radius: 6px;
+  margin-bottom: 18px;
+  padding: 12px 14px;
+  background: #ffffff;
 }
 
 .filters label {
@@ -217,6 +226,7 @@ td {
 .cohort-cell {
   display: grid;
   gap: 2px;
+  white-space: normal;
 }
 
 .cohort-cell strong,
@@ -226,11 +236,28 @@ td {
   font-weight: 700;
 }
 
-.cohort-cell span,
-.trend-card p span + span {
+.cohort-cell span {
   color: #607080;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   font-size: 0.72rem;
+}
+
+.cohort-cell code,
+.point-tooltip code {
+  color: #536171;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 0.68rem;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.cohort-legacy {
+  border-left: 3px solid #b7791f;
+  padding-left: 8px;
+}
+
+.cohort-invalid_v2 {
+  border-left: 3px solid #b91c1c;
+  padding-left: 8px;
 }
 
 .badge {

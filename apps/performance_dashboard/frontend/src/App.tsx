@@ -1,7 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { fetchSummary, fetchTrends, refreshData } from "./api";
-import type { CohortValue, RunSource, SummaryResponse, TrendGroup, TrendPoint } from "./api";
+import { fetchCohorts, fetchSummary, fetchTrends, refreshData } from "./api";
+import type {
+  CohortCatalogResponse,
+  CohortDescriptor,
+  RunSource,
+  SummaryResponse,
+  TrendGroup,
+  TrendPoint
+} from "./api";
+import {
+  ALL_COHORTS,
+  readDashboardUrl,
+  resolveCohortSelection,
+  writeDashboardUrl
+} from "./dashboardState";
 
 const METRIC_KEYS = ["latency", "throughput", "memory", "text_encoder_time_s", "dit_time_s", "vae_decode_time_s"];
 const RUN_SOURCES: Array<{ value: "" | RunSource; label: string }> = [
@@ -110,59 +123,21 @@ function metricLabel(metricKey: string) {
   return METRIC_DEFINITIONS[metricKey]?.label ?? metricKey;
 }
 
-type CohortFields = {
-  model_id: string;
-  gpu_type: string;
-  workload_id: CohortValue;
-  variant_id: CohortValue;
-  benchmark_version: CohortValue;
-  recipe_fingerprint: CohortValue;
-  hardware_profile_id: CohortValue;
-  software_profile_id: CohortValue;
-};
-
-function cohortValue(value: CohortValue) {
-  if (value === null || value === undefined || value === "") {
-    return "legacy";
-  }
-  return String(value);
+function cohortIdentifiers(cohort: CohortDescriptor) {
+  const { hardware_profile_id, software_profile_id, recipe_fingerprint } = cohort.raw_ids;
+  return (
+    [hardware_profile_id, software_profile_id, recipe_fingerprint].filter(Boolean).join(" · ") || "Legacy identity"
+  );
 }
 
-function shortCohortValue(value: CohortValue) {
-  const text = cohortValue(value);
-  if (text === "legacy" || text.length <= 14) {
-    return text;
-  }
-  return text.slice(0, 12);
-}
-
-function cohortKey(cohort: CohortFields) {
-  return [
-    cohort.model_id,
-    cohort.gpu_type,
-    cohortValue(cohort.workload_id),
-    cohortValue(cohort.variant_id),
-    cohortValue(cohort.benchmark_version),
-    cohortValue(cohort.recipe_fingerprint),
-    cohortValue(cohort.hardware_profile_id),
-    cohortValue(cohort.software_profile_id)
-  ].join("|");
-}
-
-function cohortTitle(cohort: CohortFields) {
-  const workload = cohortValue(cohort.workload_id);
-  const variant = cohortValue(cohort.variant_id);
-  const version = cohortValue(cohort.benchmark_version);
-  const versionLabel = version === "legacy" ? version : `v${version}`;
-  return `${workload} / ${variant} / ${versionLabel}`;
-}
-
-function cohortDetail(cohort: CohortFields) {
-  return [
-    `recipe ${shortCohortValue(cohort.recipe_fingerprint)}`,
-    shortCohortValue(cohort.hardware_profile_id),
-    shortCohortValue(cohort.software_profile_id)
-  ].join(" | ");
+function CohortLabel({ cohort, compact = false }: { cohort: CohortDescriptor; compact?: boolean }) {
+  return (
+    <div className={`cohort-cell cohort-${cohort.schema}`}>
+      <strong>{cohort.title}</strong>
+      <span>{compact ? cohort.gpu_label : `${cohort.gpu_label} · ${cohort.software_label}`}</span>
+      {!compact ? <code>{cohortIdentifiers(cohort)}</code> : null}
+    </div>
+  );
 }
 
 function formatMetricValue(metricKey: string, value: number | null | undefined, tooltip = false) {
@@ -227,9 +202,9 @@ function TrendChart({ group, metricKey }: { group: TrendGroup; metricKey: string
         top: `${(activePoint.y / height) * 100}%`
       }
     : undefined;
-  const ariaLabel = `${metricLabel(metricKey)} trend for ${group.model_id} on ${group.gpu_type}, ${cohortTitle(
-    group
-  )}`;
+  const ariaLabel = `${metricLabel(metricKey)} trend for ${group.model_id}, ${group.cohort.title}, ${
+    group.cohort.gpu_label
+  }`;
 
   return (
     <div className="chart-shell">
@@ -271,9 +246,13 @@ function TrendChart({ group, metricKey }: { group: TrendGroup; metricKey: string
           strokeWidth="2.2"
         />
         {chartPoints.map((point) => {
-          const pointLabel = `${metricLabel(metricKey)} ${formatMetricValue(metricKey, point.value, true)} at ${formatTime(
-            point.point.timestamp
-          )}, commit ${shortSha(point.point.commit_sha)}, ${runSourceLabel(point.point.run_source)}`;
+          const pointLabel = `${metricLabel(metricKey)} ${formatMetricValue(
+            metricKey,
+            point.value,
+            true
+          )} at ${formatTime(point.point.timestamp)}, commit ${shortSha(point.point.commit_sha)}, ${runSourceLabel(
+            point.point.run_source
+          )}`;
           return (
             <g
               key={`${point.plotIndex}-${point.value}-${point.point.commit_sha ?? ""}`}
@@ -317,6 +296,9 @@ function TrendChart({ group, metricKey }: { group: TrendGroup; metricKey: string
         <span>{formatTime(selectedPoint.point.timestamp)}</span>
         <span>Commit {shortSha(selectedPoint.point.commit_sha)}</span>
         <span>{runSourceLabel(selectedPoint.point.run_source)}</span>
+        <span>{group.cohort.hardware_label}</span>
+        <span>{group.cohort.software_label}</span>
+        <code>{cohortIdentifiers(group.cohort)}</code>
         <span>{selectedPoint.point.success ? "Stored status: pass" : "Stored status: fail"}</span>
         <span>{selectedPoint.point.baseline_eligible ? "Baseline eligible" : "Not baseline eligible"}</span>
         {selectedPoint.point.pr_number ? <span>PR #{selectedPoint.point.pr_number}</span> : null}
@@ -332,39 +314,27 @@ function TrendChart({ group, metricKey }: { group: TrendGroup; metricKey: string
 }
 
 export default function App() {
-  const [days, setDays] = useState(90);
-  const [modelFilter, setModelFilter] = useState("");
-  const [gpuFilter, setGpuFilter] = useState("");
-  const [sourceFilter, setSourceFilter] = useState<"" | RunSource>("");
+  const initialUrlState = useMemo(() => readDashboardUrl(new URL(window.location.href)), []);
+  const [days, setDays] = useState(initialUrlState.days);
+  const [modelFilter, setModelFilter] = useState(initialUrlState.model);
+  const [gpuFilter, setGpuFilter] = useState(initialUrlState.gpu);
+  const [cohortFilter, setCohortFilter] = useState<string | null>(initialUrlState.cohort);
+  const [sourceFilter, setSourceFilter] = useState<"" | RunSource>(initialUrlState.source);
+  const [catalog, setCatalog] = useState<CohortCatalogResponse | null>(null);
+  const [catalogResolved, setCatalogResolved] = useState(false);
   const [summary, setSummary] = useState<SummaryResponse | null>(null);
   const [trends, setTrends] = useState<TrendGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [refreshVersion, setRefreshVersion] = useState(0);
   const [error, setError] = useState<string | null>(null);
-
-  async function load() {
-    setLoading(true);
-    setError(null);
-    try {
-      const [summaryData, trendData] = await Promise.all([
-        fetchSummary(days, modelFilter || undefined, gpuFilter || undefined, sourceFilter || undefined),
-        fetchTrends(days, modelFilter || undefined, gpuFilter || undefined, sourceFilter || undefined)
-      ]);
-      setSummary(summaryData);
-      setTrends(trendData.groups);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
-    }
-  }
 
   async function refresh() {
     setRefreshing(true);
     setError(null);
     try {
       await refreshData();
-      await load();
+      setRefreshVersion((version) => version + 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -373,26 +343,98 @@ export default function App() {
   }
 
   useEffect(() => {
+    let cancelled = false;
+    setCatalogResolved(false);
+    fetchCohorts(modelFilter || undefined, gpuFilter || undefined)
+      .then((data) => {
+        if (cancelled) {
+          return;
+        }
+        if (modelFilter && !data.models.includes(modelFilter)) {
+          setModelFilter("");
+          setGpuFilter("");
+          return;
+        }
+        if (gpuFilter && !data.gpus.some((gpu) => gpu.key === gpuFilter)) {
+          setGpuFilter("");
+          return;
+        }
+        setCatalog(data);
+        setCohortFilter((current) =>
+          resolveCohortSelection(current, data.cohorts.map((cohort) => cohort.key), data.default_cohort_key)
+        );
+        setCatalogResolved(true);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : String(err));
+          setCatalogResolved(true);
+          setLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [modelFilter, gpuFilter, refreshVersion]);
+
+  useEffect(() => {
+    if (!catalogResolved || cohortFilter === null) {
+      return;
+    }
+    let cancelled = false;
+    const cohortKey = cohortFilter === ALL_COHORTS ? undefined : cohortFilter;
+    const query = {
+      days,
+      modelId: modelFilter || undefined,
+      gpuKey: gpuFilter || undefined,
+      cohortKey,
+      runSource: sourceFilter || undefined
+    };
+    async function load() {
+      setLoading(true);
+      setError(null);
+      try {
+        const [summaryData, trendData] = await Promise.all([fetchSummary(query), fetchTrends(query)]);
+        if (!cancelled) {
+          setSummary(summaryData);
+          setTrends(trendData.groups);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
     load();
     const interval = window.setInterval(load, 5 * 60 * 1000);
-    return () => window.clearInterval(interval);
-  }, [days, modelFilter, gpuFilter, sourceFilter]);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [catalogResolved, cohortFilter, days, modelFilter, gpuFilter, sourceFilter, refreshVersion]);
 
-  const models = useMemo(() => {
-    const values = new Set(summary?.rows.map((row) => row.model_id) ?? []);
-    trends.forEach((trend) => values.add(trend.model_id));
-    return [...values].sort();
-  }, [summary, trends]);
-
-  const gpus = useMemo(() => {
-    const values = new Set(summary?.rows.map((row) => row.gpu_type) ?? []);
-    trends.forEach((trend) => values.add(trend.gpu_type));
-    return [...values].sort();
-  }, [summary, trends]);
+  useEffect(() => {
+    if (!catalogResolved || cohortFilter === null) {
+      return;
+    }
+    const next = writeDashboardUrl(new URL(window.location.href), {
+      days,
+      model: modelFilter,
+      gpu: gpuFilter,
+      cohort: cohortFilter,
+      source: sourceFilter
+    });
+    window.history.replaceState(null, "", `${next.pathname}${next.search}${next.hash}`);
+  }, [catalogResolved, cohortFilter, days, modelFilter, gpuFilter, sourceFilter]);
 
   const latestRows = summary?.rows ?? [];
   const totalRuns = trends.reduce((total, group) => total + group.points.length, 0);
   const sync = summary?.sync;
+  const selectedCohort = catalog?.cohorts.find((cohort) => cohort.key === cohortFilter);
 
   return (
     <main className="dashboard">
@@ -419,9 +461,15 @@ export default function App() {
         </label>
         <label>
           Model
-          <select value={modelFilter} onChange={(event) => setModelFilter(event.target.value)}>
+          <select
+            value={modelFilter}
+            onChange={(event) => {
+              setModelFilter(event.target.value);
+              setGpuFilter("");
+            }}
+          >
             <option value="">All models</option>
-            {models.map((model) => (
+            {(catalog?.models ?? []).map((model) => (
               <option key={model} value={model}>
                 {model}
               </option>
@@ -432,9 +480,25 @@ export default function App() {
           GPU
           <select value={gpuFilter} onChange={(event) => setGpuFilter(event.target.value)}>
             <option value="">All GPUs</option>
-            {gpus.map((gpu) => (
-              <option key={gpu} value={gpu}>
-                {gpu}
+            {(catalog?.gpus ?? []).map((gpu) => (
+              <option key={gpu.key} value={gpu.key}>
+                {gpu.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="cohort-filter">
+          Benchmark cohort
+          <select
+            value={cohortFilter ?? ""}
+            onChange={(event) => setCohortFilter(event.target.value)}
+            disabled={!catalogResolved}
+          >
+            <option value={ALL_COHORTS}>All cohorts</option>
+            {(catalog?.cohorts ?? []).map((cohort) => (
+              <option key={cohort.key} value={cohort.key}>
+                {cohort.schema === "legacy" ? "Legacy · " : ""}
+                {cohort.title} — {cohort.gpu_label} — {cohort.software_label} — {cohortIdentifiers(cohort)}
               </option>
             ))}
           </select>
@@ -451,12 +515,18 @@ export default function App() {
         </label>
       </section>
 
+      {selectedCohort ? (
+        <section className="selected-cohort" aria-label="Selected benchmark cohort">
+          <CohortLabel cohort={selectedCohort} />
+        </section>
+      ) : null}
+
       {error && <div className="notice error">Failed to load dashboard data: {error}</div>}
       {loading && <div className="notice">Loading performance data</div>}
 
       <section className="cards" aria-label="Overview">
         <div className="stat">
-          <span>Groups</span>
+          <span>Cohorts</span>
           <strong>{summary?.count ?? 0}</strong>
         </div>
         <div className="stat">
@@ -493,6 +563,7 @@ export default function App() {
                   <th>Cohort</th>
                   <th>Commit</th>
                   <th>Source</th>
+                  <th>Schedule / Run type</th>
                   <th>Baseline</th>
                   <th>Baseline N</th>
                   <th>Latency</th>
@@ -505,7 +576,7 @@ export default function App() {
               </thead>
               <tbody>
                 {latestRows.map((row) => (
-                  <tr key={cohortKey(row)}>
+                  <tr key={row.cohort.key}>
                     <td>
                       <span className={`badge ${row.status}`}>{row.status}</span>
                     </td>
@@ -515,17 +586,13 @@ export default function App() {
                       </span>
                     </td>
                     <td>{row.model_id}</td>
-                    <td>{row.gpu_type}</td>
-                    <td>
-                      <div className="cohort-cell">
-                        <strong>{cohortTitle(row)}</strong>
-                        <span>{cohortDetail(row)}</span>
-                      </div>
-                    </td>
+                    <td>{row.cohort.gpu_label}</td>
+                    <td><CohortLabel cohort={row.cohort} /></td>
                     <td>{shortSha(row.commit_sha)}</td>
                     <td>
                       <span className={`source-badge source-${row.run_source}`}>{runSourceLabel(row.run_source)}</span>
                     </td>
+                    <td>{row.test_scope || "Unavailable"}</td>
                     <td>{row.baseline_eligible ? "eligible" : "excluded"}</td>
                     <td>{row.baseline_n}</td>
                     <td>{formatNumber(row.metrics.latency?.current, 3)}</td>
@@ -560,14 +627,11 @@ export default function App() {
           ) : (
             trends.map((group) =>
               METRIC_KEYS.map((metricKey) => (
-                <article className="trend-card" key={`${cohortKey(group)}-${metricKey}`}>
+                <article className="trend-card" key={`${group.cohort.key}-${metricKey}`}>
                   <div>
                     <h3>{metricLabel(metricKey)}</h3>
-                    <p>
-                      {group.model_id} | {group.gpu_type}
-                      <span>{cohortTitle(group)}</span>
-                      <span>{cohortDetail(group)}</span>
-                    </p>
+                    <p>{group.model_id}</p>
+                    <CohortLabel cohort={group.cohort} compact />
                   </div>
                   <TrendChart group={group} metricKey={metricKey} />
                 </article>

@@ -80,7 +80,20 @@ endpoints from the same local port.
 
 ## Dashboard Behavior
 
-The dashboard supports model, GPU, source, and day-window filters.
+The dashboard supports cascading Model, GPU configuration, Benchmark cohort,
+Source, and day-window filters. The backend owns the canonical cohort key used
+for grouping, API filtering, React keys, and URL state. V2 keys use the exact CI
+comparison identity; legacy records use a separate legacy identity and are
+never merged with v2 records.
+
+The Benchmark cohort selector defaults to the cohort with the most recent
+successful baseline-eligible observation, falling back to the cohort with the
+most recent record. `All cohorts` remains an explicit option. Model constrains
+GPU configurations, and Model plus GPU constrain cohorts. Source and Date
+change displayed observations without redefining cohort availability.
+
+Selected filters are encoded in the URL. Unknown or stale Model, GPU, and
+cohort values fall back safely to available options.
 
 Trend charts show metric-specific axes and exact point details on hover/focus:
 
@@ -100,9 +113,15 @@ and does not override stored status.
 
 - `GET /api/performance/health`
 - `POST /api/performance/refresh`
+- `GET /api/performance/cohorts?model_id=wan-t2v-1.3b-2gpu&gpu_key=gpu%3A...`
 - `GET /api/performance/summary?days=90&run_source=pr`
 - `GET /api/performance/trends?days=90&run_source=scheduled_main`
 - `GET /api/performance/records?days=90&run_source=local`
+
+Summary, trend, and raw-record endpoints also accept opaque `gpu_key` and
+`cohort_key` values returned by `/api/performance/cohorts`. Cohort descriptors
+include readable recipe, hardware, software, and GPU configuration labels plus
+the full raw hardware, software, and recipe identifiers for debugging.
 
 V2 records use the same comparison cohort as CI: `workload_id`, `variant_id`,
 `benchmark_version`, `recipe_fingerprint`, `hardware_profile_id`, and

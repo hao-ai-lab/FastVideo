@@ -22,6 +22,10 @@ from datetime import datetime, timezone
 from typing import Any
 
 try:
+    from fastvideo.performance.cohort import (
+        comparison_identity_filters as canonical_comparison_identity_filters,
+        record_uses_v2_identity,
+    )
     from fastvideo.performance.hf_store import (
         load_records_for_identity,
         safe_float,
@@ -39,6 +43,10 @@ except ImportError:
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
     if repo_root not in sys.path:
         sys.path.insert(0, repo_root)
+    from fastvideo.performance.cohort import (
+        comparison_identity_filters as canonical_comparison_identity_filters,
+        record_uses_v2_identity,
+    )
     from fastvideo.performance.hf_store import (
         load_records_for_identity,
         safe_float,
@@ -80,14 +88,6 @@ IDENTITY_KEYS = (
     "environment_fingerprint",
     "quality_metadata",
     "variant_metadata",
-)
-COMPARISON_IDENTITY_KEYS = (
-    "workload_id",
-    "variant_id",
-    "benchmark_version",
-    "recipe_fingerprint",
-    "hardware_profile_id",
-    "software_profile_id",
 )
 STATUS_PASS = "PASS"
 STATUS_REGRESSION = "REGRESSION"
@@ -201,21 +201,11 @@ def _identity_metadata(result: dict[str, Any]) -> dict[str, Any]:
 
 
 def _comparison_identity_filters(record: dict[str, Any]) -> dict[str, str]:
-    missing = [
-        key for key in COMPARISON_IDENTITY_KEYS
-        if key not in record or record[key] is None or (isinstance(record[key], str) and not record[key].strip())
-    ]
-    if missing:
-        raise ValueError("Performance record missing required comparison identity fields: " + ", ".join(missing))
-    return {
-        key: str(record[key])
-        for key in COMPARISON_IDENTITY_KEYS
-    }
+    return canonical_comparison_identity_filters(record)
 
 
 def _record_uses_v2_identity(record: dict[str, Any]) -> bool:
-    schema_version = record.get("result_schema_version")
-    return str(schema_version) == "2" or any(key in record for key in COMPARISON_IDENTITY_KEYS)
+    return record_uses_v2_identity(record)
 
 
 def _recipe_cohort_filters(record: dict[str, Any]) -> dict[str, str]:

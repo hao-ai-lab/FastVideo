@@ -14,8 +14,10 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from fastvideo.performance import hf_store
+from fastvideo.performance.cohort import cohort_key as record_cohort_key
+from fastvideo.performance.cohort import gpu_key as record_gpu_key
 
-from .service import build_latest_summary, build_trends, filter_records
+from .service import build_cohort_catalog, build_latest_summary, build_trends, filter_records
 
 DEFAULT_TRACKING_ROOT = "/tmp/fastvideo-perf-dashboard"
 DEFAULT_DAYS = 90
@@ -23,8 +25,19 @@ FRONTEND_DIST = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "performance_dashboard", "frontend", "dist"))
 
 
-def _matches_display_filters(record: dict[str, Any], model_id: str | None, gpu_type: str | None) -> bool:
-    return (not model_id or record.get("model_id") == model_id) and (not gpu_type or record.get("gpu_type") == gpu_type)
+def _matches_dashboard_filters(
+    record: dict[str, Any],
+    *,
+    model_id: str | None,
+    gpu_type: str | None,
+    gpu_key: str | None,
+    cohort_key: str | None,
+) -> bool:
+    cohort = record.get("cohort") if isinstance(record.get("cohort"), dict) else {}
+    return ((not model_id or record.get("model_id") == model_id)
+            and (not gpu_type or record.get("gpu_type") == gpu_type)
+            and (not gpu_key or cohort.get("gpu_key") == gpu_key)
+            and (not cohort_key or cohort.get("key") == cohort_key))
 
 
 class PerformanceDataStore:
@@ -110,11 +123,30 @@ def create_app(store: PerformanceDataStore | None = None) -> FastAPI:
     def refresh() -> dict[str, Any]:
         return data_store.sync()
 
+    @app.get("/api/performance/cohorts")
+    def cohorts(
+        model_id: str | None = None,
+        gpu_key: str | None = None,
+    ) -> dict[str, Any]:
+        # Cohort availability and defaults intentionally ignore Source and Date.
+        # Those filters control displayed observations, not comparison identity.
+        loaded = data_store.load_records(days=None)
+        return {
+            **build_cohort_catalog(loaded, model_id=model_id, gpu_key=gpu_key),
+            "filters": {
+                "model_id": model_id,
+                "gpu_key": gpu_key,
+            },
+            "sync": data_store.health(),
+        }
+
     @app.get("/api/performance/records")
     def records(
         days: int = Query(DEFAULT_DAYS, ge=1, le=3650),
         model_id: str | None = None,
         gpu_type: str | None = None,
+        gpu_key: str | None = None,
+        cohort_key: str | None = None,
         run_source: str | None = None,
         success: bool | None = None,
     ) -> dict[str, Any]:
@@ -126,6 +158,10 @@ def create_app(store: PerformanceDataStore | None = None) -> FastAPI:
             run_source=run_source,
             success=success,
         )
+        if gpu_key:
+            filtered = [record for record in filtered if record_gpu_key(record) == gpu_key]
+        if cohort_key:
+            filtered = [record for record in filtered if record_cohort_key(record) == cohort_key]
         return {
             "records": filtered,
             "count": len(filtered),
@@ -133,6 +169,8 @@ def create_app(store: PerformanceDataStore | None = None) -> FastAPI:
                 "days": days,
                 "model_id": model_id,
                 "gpu_type": gpu_type,
+                "gpu_key": gpu_key,
+                "cohort_key": cohort_key,
                 "run_source": run_source,
                 "success": success,
             },
@@ -144,6 +182,8 @@ def create_app(store: PerformanceDataStore | None = None) -> FastAPI:
         days: int = Query(DEFAULT_DAYS, ge=1, le=3650),
         model_id: str | None = None,
         gpu_type: str | None = None,
+        gpu_key: str | None = None,
+        cohort_key: str | None = None,
         run_source: str | None = None,
     ) -> dict[str, Any]:
         # Latest status should be stable when users change the trend window.
@@ -152,8 +192,13 @@ def create_app(store: PerformanceDataStore | None = None) -> FastAPI:
         # endpoints without affecting the summary semantics.
         loaded = data_store.load_records(days=None)
         rows = [
-            row for row in build_latest_summary(loaded, run_source=run_source)
-            if _matches_display_filters(row, model_id, gpu_type)
+            row for row in build_latest_summary(loaded, run_source=run_source) if _matches_dashboard_filters(
+                row,
+                model_id=model_id,
+                gpu_type=gpu_type,
+                gpu_key=gpu_key,
+                cohort_key=cohort_key,
+            )
         ]
         return {
             "rows": rows,
@@ -167,6 +212,8 @@ def create_app(store: PerformanceDataStore | None = None) -> FastAPI:
                 "trend_window_days": days,
                 "model_id": model_id,
                 "gpu_type": gpu_type,
+                "gpu_key": gpu_key,
+                "cohort_key": cohort_key,
                 "run_source": run_source,
             },
             "sync": data_store.health(),
@@ -177,12 +224,20 @@ def create_app(store: PerformanceDataStore | None = None) -> FastAPI:
         days: int = Query(DEFAULT_DAYS, ge=1, le=3650),
         model_id: str | None = None,
         gpu_type: str | None = None,
+        gpu_key: str | None = None,
+        cohort_key: str | None = None,
         run_source: str | None = None,
     ) -> dict[str, Any]:
         loaded = data_store.load_records(days=days)
         source_filtered = filter_records(loaded, run_source=run_source)
         groups = [
-            group for group in build_trends(source_filtered) if _matches_display_filters(group, model_id, gpu_type)
+            group for group in build_trends(source_filtered) if _matches_dashboard_filters(
+                group,
+                model_id=model_id,
+                gpu_type=gpu_type,
+                gpu_key=gpu_key,
+                cohort_key=cohort_key,
+            )
         ]
         return {
             "groups": groups,
@@ -191,6 +246,8 @@ def create_app(store: PerformanceDataStore | None = None) -> FastAPI:
                 "days": days,
                 "model_id": model_id,
                 "gpu_type": gpu_type,
+                "gpu_key": gpu_key,
+                "cohort_key": cohort_key,
                 "run_source": run_source,
             },
             "sync": data_store.health(),
