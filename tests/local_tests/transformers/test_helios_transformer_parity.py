@@ -230,7 +230,7 @@ def _assert_real_bf16_parity(
     assert_close(actual, expected, atol=5e-2, rtol=5e-2)
 
 
-def test_helios_distilled_config_matches_pinned_checkpoint():
+def test_helios_distilled_config_defaults_match_distilled_variant():
     HeliosArchConfig, _, _ = _native_types()
     config = HeliosArchConfig()
     assert config.patch_size == (1, 2, 2)
@@ -247,18 +247,47 @@ def test_helios_distilled_config_matches_pinned_checkpoint():
     assert config.has_multi_term_memory_patch is True
     assert config.guidance_cross_attn is True
 
+
+def test_helios_distilled_config_matches_local_pinned_checkpoint():
+    HeliosArchConfig, _, _ = _native_types()
+    config = HeliosArchConfig()
     config_path = TRANSFORMER_DIR / "config.json"
-    if config_path.is_file():
-        checkpoint_config = json.loads(config_path.read_text(encoding="utf-8"))
-        assert checkpoint_config.pop("_class_name") == "HeliosTransformer3DModel"
-        checkpoint_config.pop("_diffusers_version", None)
-        arch_fields = {field.name for field in fields(HeliosArchConfig)}
-        assert set(checkpoint_config) <= arch_fields
-        for name, expected in checkpoint_config.items():
-            actual = getattr(config, name)
-            if isinstance(actual, tuple):
-                expected = tuple(expected)
-            assert actual == expected, f"unexpected Helios config {name}={actual!r}"
+    if not config_path.is_file():
+        pytest.skip(
+            "Pinned Helios transformer config is absent; set HELIOS_TRANSFORMER_DIR "
+            f"to BestWishYsh/Helios-Distilled@{HF_REVISION}/transformer")
+    checkpoint_config = json.loads(config_path.read_text(encoding="utf-8"))
+    assert checkpoint_config.pop("_class_name") == "HeliosTransformer3DModel"
+    checkpoint_config.pop("_diffusers_version", None)
+    arch_fields = {field.name for field in fields(HeliosArchConfig)}
+    assert set(checkpoint_config) <= arch_fields
+    for name, expected in checkpoint_config.items():
+        actual = getattr(config, name)
+        if isinstance(actual, tuple):
+            expected = tuple(expected)
+        assert actual == expected, f"unexpected Helios config {name}={actual!r}"
+
+
+@pytest.mark.parametrize(
+    ("history_name", "indices_name"),
+    [
+        ("latents_history_short", "indices_latents_history_short"),
+        ("latents_history_mid", "indices_latents_history_mid"),
+        ("latents_history_long", "indices_latents_history_long"),
+    ],
+)
+@pytest.mark.parametrize("missing_input", ["history", "indices"])
+def test_helios_history_tensor_and_indices_must_be_paired(
+    history_name: str,
+    indices_name: str,
+    missing_input: str,
+):
+    _, _, FastVideoHeliosTransformer = _native_types()
+    history = torch.empty(1) if missing_input == "indices" else None
+    indices = torch.empty(1, dtype=torch.long) if missing_input == "history" else None
+
+    with pytest.raises(ValueError, match=rf"{history_name}.*{indices_name}"):
+        FastVideoHeliosTransformer._validate_history_pair(history, indices, history_name, indices_name)
 
 
 @pytest.mark.parametrize(
