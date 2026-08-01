@@ -151,6 +151,11 @@ class TrackValidationCallback(Callback):
         self._samples: list[dict[str, Any]] = []
         self._ref_logged = False
         self._did_start_val = False
+        # True until the first on_validation_begin call. The trainer makes a pre-loop
+        # on_validation_begin(start_step) call at the (re)start point; we skip the *periodic*
+        # validation there so resuming from a checkpoint whose step is a multiple of every_steps
+        # doesn't re-run the (expensive) validation. validate_at_start is unaffected.
+        self._first_val_call = True
 
     # ------------------------------------------------------------------
     # Hooks
@@ -171,13 +176,15 @@ class TrackValidationCallback(Callback):
     def on_validation_begin(self, method: TrainingMethod, iteration: int = 0) -> None:
         if not self._samples:
             return
+        first_call = self._first_val_call   # the trainer's pre-loop (start/resume) call
+        self._first_val_call = False
         run = False
         if self.validate_at_start and not self._did_start_val:
             run = True
-        # iteration > 0: step 0 is divisible by every_steps, so without this guard the periodic
-        # branch fires a validation at start even when validate_at_start is False. Step-0
-        # validation is controlled solely by validate_at_start above.
-        if self.every_steps > 0 and iteration > 0 and iteration % self.every_steps == 0:
+        # iteration > 0 guards step 0 (divisible by every_steps); `not first_call` skips the
+        # periodic validation on the trainer's pre-loop call at the (re)start step, so resuming
+        # from a checkpoint at a multiple of every_steps doesn't re-run validation.
+        if self.every_steps > 0 and iteration > 0 and iteration % self.every_steps == 0 and not first_call:
             run = True
         if not run:
             return

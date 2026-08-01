@@ -164,6 +164,7 @@ class Trainer:
         progress = tqdm(
             range(start_step + 1, max_steps + 1),
             initial=start_step,
+            total=max_steps,  # absolute max; without this tqdm uses len(range)=max_steps-start_step on resume, skewing the bar/ETA
             desc="Steps",
             disable=self.local_rank > 0,
         )

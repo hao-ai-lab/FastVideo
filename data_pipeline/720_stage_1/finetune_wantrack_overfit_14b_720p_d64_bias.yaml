@@ -48,7 +48,7 @@ training:
   checkpoint:
     output_dir: /home/hal-kevin/data/motion-stream-test/overfit_14b_720p_d64_bias_out
     training_state_checkpointing_steps: 100
-    checkpoints_total_limit: 3
+    checkpoints_total_limit: 30    # keep effectively all (20 ckpts @ every-100 for 2000 steps) so you can export the BEST, not just the latest
     resume_from_checkpoint: latest
 
   tracker:
