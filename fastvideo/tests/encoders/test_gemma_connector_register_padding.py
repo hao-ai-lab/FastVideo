@@ -21,17 +21,21 @@ class _Stub:
 
     def __init__(self, num_registers: int, hidden: int) -> None:
         self.num_learnable_registers = num_registers
-        # Distinct from any hidden state below, so register slots are obvious.
-        self.learnable_registers = torch.full((num_registers, hidden), -1.0)
+        # Register i holds -(i+1) in every channel: distinct from any hidden
+        # state below, and distinct from each other, so an assertion can pin
+        # not just "a register landed here" but *which* register landed here.
+        self.learnable_registers = -(torch.arange(num_registers, dtype=torch.float32) +
+                                     1.0).unsqueeze(-1).expand(num_registers, hidden).contiguous()
 
 
-def _run(hidden_states: torch.Tensor, valid_lengths: list[int]):
+def _run(hidden_states: torch.Tensor, valid_lengths: list[int], num_registers: int | None = None):
     """Drive the real method with a left-padded mask (Gemma pads on the left)."""
     batch, seq_len, hidden = hidden_states.shape
-    mask = torch.full((batch, 1, 1, seq_len), -10000.0)
+    mask = torch.full((batch, 1, 1, seq_len), -10000.0, device=hidden_states.device)
     for row, n in enumerate(valid_lengths):
         mask[row, 0, 0, seq_len - n:] = 0.0  # left padding: valid tokens at the end
-    stub = _Stub(num_registers=seq_len, hidden=hidden)
+    stub = _Stub(num_registers=num_registers or seq_len, hidden=hidden)
+    stub.learnable_registers = stub.learnable_registers.to(hidden_states.device)
     return Embeddings1DConnector._replace_padded_with_learnable_registers(stub, hidden_states, mask)
 
 
@@ -53,11 +57,12 @@ def test_ragged_batch_left_aligns_each_row_independently() -> None:
     assert out[0, 0].tolist() == [11.0, 11.0]
     assert out[0, 1].tolist() == [12.0, 12.0]
     assert out[0, 2].tolist() == [13.0, 13.0]
-    assert out[0, 3].tolist() == [-1.0, -1.0]  # register
+    assert out[0, 3].tolist() == [-4.0, -4.0]  # register 3, not just "a register"
 
-    # Row 1 keeps only the last token; the other three slots are registers.
+    # Row 1 keeps only the last token; the other three slots take registers
+    # 1, 2 and 3 -- the register bank is indexed by slot, not by fill order.
     assert out[1, 0].tolist() == [23.0, 23.0]
-    assert out[1, 1:].tolist() == [[-1.0, -1.0]] * 3
+    assert out[1, 1:].tolist() == [[-2.0, -2.0], [-3.0, -3.0], [-4.0, -4.0]]
 
 
 def test_row_with_no_padding_is_unchanged() -> None:
@@ -65,6 +70,23 @@ def test_row_with_no_padding_is_unchanged() -> None:
     hidden_states = torch.arange(seq_len * hidden, dtype=torch.float32).reshape(1, seq_len, hidden)
     out, _ = _run(hidden_states, valid_lengths=[seq_len])
     assert torch.equal(out, hidden_states)
+
+
+def test_registers_tile_across_the_sequence() -> None:
+    """The shipped ratio is 8 duplications (1024 slots / 128 registers), not 1.
+
+    Every other test here uses ``num_registers == seq_len``, where the tile is
+    a no-op -- so a wrong tile, or no tile at all, would pass them. With fewer
+    registers than slots, padded slot ``i`` must hold register ``i % n``.
+    """
+    hidden_states = torch.tensor([[[10.0, 10.0], [11.0, 11.0], [12.0, 12.0], [13.0, 13.0]]])
+    out, _ = _run(hidden_states, valid_lengths=[1], num_registers=2)
+
+    assert out[0, 0].tolist() == [13.0, 13.0]  # the single valid token, left-aligned
+    # Tiled bank is [r0, r1, r0, r1], so the padded tail reads r1, r0, r1.
+    assert out[0, 1].tolist() == [-2.0, -2.0]
+    assert out[0, 2].tolist() == [-1.0, -1.0]
+    assert out[0, 3].tolist() == [-2.0, -2.0]
 
 
 def test_single_row_matches_ragged_batch_row() -> None:
