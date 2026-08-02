@@ -1127,12 +1127,15 @@ class FastVideoArgs:
                     "MiniMax-H3 h3_encoder_split: ignoring sp_size=%d; the denoise ranks run SP with "
                     "num_gpus - h3_encoder_workers.", self.sp_size)
         else:
-            assert self.sp_size <= self.num_gpus and self.num_gpus % self.sp_size == 0, "num_gpus must >= and be divisible by sp_size"
+            if self.sp_size < 1:
+                raise ValueError(f"sp_size must be >= 1 after automatic resolution, got {self.sp_size}.")
+            if self.sp_size > self.num_gpus:
+                raise ValueError(f"sp_size ({self.sp_size}) cannot exceed num_gpus ({self.num_gpus}).")
+            if self.num_gpus % self.sp_size != 0:
+                raise ValueError(f"num_gpus ({self.num_gpus}) must be divisible by sp_size ({self.sp_size}).")
+
         assert self.hsdp_replicate_dim <= self.num_gpus and self.num_gpus % self.hsdp_replicate_dim == 0, "num_gpus must >= and be divisible by hsdp_replicate_dim"
         assert self.hsdp_shard_dim <= self.num_gpus and self.num_gpus % self.hsdp_shard_dim == 0, "num_gpus must >= and be divisible by hsdp_shard_dim"
-
-        if self.num_gpus < max(self.tp_size, self.sp_size):
-            self.num_gpus = max(self.tp_size, self.sp_size)
 
         self._check_ring_attention_args()
 
