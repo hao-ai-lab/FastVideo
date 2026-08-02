@@ -1079,6 +1079,54 @@ class ValidationCallback(Callback):
         return pipeline_config
 
     @staticmethod
+    def _keep_loaded_encoder_widths(
+        validation_config: Any,
+        loaded_config: Any,
+    ) -> None:
+        """Carry the loader-populated encoder widths onto ``validation_config``.
+
+        Validation reaches the stages through two pipeline configs that never
+        pass through ``ModelConfig.update_model_arch``: the deep copy
+        ``_validation_pipeline_config`` makes of the training-side config, and
+        ``tc.pipeline_config`` itself, which ``make_inference_args`` hands to
+        ``pipeline.forward`` by reference. Both still hold the encoder dataclass
+        defaults for whatever the checkpoint would have supplied.
+
+        Stages read ``hidden_size`` only when they have to synthesise an
+        embedding instead of measuring one: HunyuanVideo 1.5 sizes its
+        zero-length ByT5 placeholder from it, so the generic ``T5ArchConfig``
+        default of 512 collides with the checkpoint's real width of 1472.
+
+        Only ``hidden_size`` is copied. Training owns the rest: model plugins
+        set ``text_len`` from ``text_encoder_max_lengths`` to size the parquet
+        text padding, and ``tokenizer_kwargs`` carry run-specific settings, so
+        both keep their training values. A falsy width means the loader never
+        populated that encoder, so there is nothing to carry over.
+        """
+        loaded_encoders = getattr(loaded_config, "text_encoder_configs", None)
+        validation_encoders = getattr(
+            validation_config,
+            "text_encoder_configs",
+            None,
+        )
+        if not loaded_encoders or not validation_encoders:
+            return
+
+        for validation_encoder, loaded_encoder in zip(
+                validation_encoders,
+                loaded_encoders,
+                strict=False,
+        ):
+            hidden_size = getattr(
+                getattr(loaded_encoder, "arch_config", None),
+                "hidden_size",
+                None,
+            )
+            arch_config = getattr(validation_encoder, "arch_config", None)
+            if hidden_size and arch_config is not None:
+                arch_config.hidden_size = hidden_size
+
+    @staticmethod
     def _sync_runtime_dit_arch_config(
         pipeline_config: Any,
         transformer: torch.nn.Module,
@@ -1148,7 +1196,13 @@ class ValidationCallback(Callback):
             **kwargs,
         )
         if tc.pipeline_config is not None:
-            self._pipeline.fastvideo_args.pipeline_config = self._validation_pipeline_config(transformer)
+            loaded_config = self._pipeline.fastvideo_args.pipeline_config
+            validation_config = self._validation_pipeline_config(transformer)
+            self._keep_loaded_encoder_widths(
+                validation_config,
+                loaded_config,
+            )
+            self._pipeline.fastvideo_args.pipeline_config = validation_config
             arch_config = self._pipeline.fastvideo_args.pipeline_config.dit_config.arch_config
             logger.info(
                 "Validation pipeline runtime config: local_attn_size=%s sink_size=%s boundary_ratio=%s",
@@ -1304,6 +1358,10 @@ class ValidationCallback(Callback):
         self._sync_runtime_dit_arch_config(
             inference_args.pipeline_config,
             transformer,
+        )
+        self._keep_loaded_encoder_widths(
+            inference_args.pipeline_config,
+            pipeline.fastvideo_args.pipeline_config,
         )
 
         # Propagate sampling_timesteps to pipeline_config so
