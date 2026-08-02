@@ -50,6 +50,57 @@ function renderModal(
 }
 
 describe('CreateJobModal', () => {
+  it('shows a model loading error instead of an empty model list', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.mocked(getModels).mockRejectedValueOnce(new Error('network down'));
+
+    renderModal();
+
+    expect(
+      await screen.findByText(/Models could not be loaded/),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText('Model')).toHaveAttribute(
+      'aria-invalid',
+      'true',
+    );
+  });
+
+  it('keeps the form open and reports job creation failures', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.mocked(createJob).mockRejectedValueOnce(new Error('API rejected job'));
+    const user = userEvent.setup();
+    const { onClose, onSuccess } = renderModal();
+
+    await screen.findByRole('option', { name: 'Wan T2V (wan/t2v-1.3b)' });
+    await user.type(screen.getByLabelText('Prompt'), 'a careful test prompt');
+    await user.click(screen.getByRole('button', { name: 'Create Job' }));
+
+    expect(
+      await screen.findByText(/API rejected job.*then try again/),
+    ).toBeInTheDocument();
+    expect(onSuccess).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('reports image upload failures next to the file input', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.mocked(uploadImage).mockRejectedValueOnce(new Error('Upload failed'));
+    const user = userEvent.setup();
+    renderModal({ workloadType: 'i2v' });
+
+    await screen.findByRole('option', { name: 'Wan T2V (wan/t2v-1.3b)' });
+    const input = screen.getByLabelText('Image');
+    await user.upload(
+      input,
+      new File(['image'], 'input.png', { type: 'image/png' }),
+    );
+
+    expect(
+      await screen.findByText(/Upload failed.*Choose the image again/),
+    ).toBeInTheDocument();
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+  });
+
   it('renders the form fields for an inference job', async () => {
     renderModal();
 

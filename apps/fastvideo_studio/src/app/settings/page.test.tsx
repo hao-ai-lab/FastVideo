@@ -52,6 +52,20 @@ describe('Settings page', () => {
     expect(updateOption).toHaveBeenCalledWith('numFrames', expect.any(Number));
   });
 
+  it('gives every slider an accessible name', () => {
+    renderPage();
+
+    const sliders = screen.getAllByRole('slider');
+    expect(sliders).toHaveLength(11);
+    for (const slider of sliders) {
+      expect(slider).toHaveAccessibleName();
+    }
+    expect(screen.getByRole('slider', { name: 'Frames' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('slider', { name: 'Guidance Scale' }),
+    ).toBeInTheDocument();
+  });
+
   it('calls resetToDefaults when Reset to Defaults is clicked', () => {
     renderPage();
     fireEvent.click(screen.getByRole('button', { name: 'Reset to Defaults' }));

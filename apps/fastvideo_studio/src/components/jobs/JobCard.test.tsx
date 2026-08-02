@@ -20,6 +20,14 @@ vi.mock('@/lib/api', () => ({
   downloadJobVideo: vi.fn(),
 }));
 
+vi.mock('@/lib/utils', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/utils')>();
+  return {
+    ...actual,
+    downloadBlob: vi.fn(),
+  };
+});
+
 const makeJob = (overrides: Partial<Job> = {}): Job =>
   makeBaseJob({
     model_id: 'Wan2.1-T2V',
@@ -46,6 +54,16 @@ beforeEach(() => {
 });
 
 describe('JobCard', () => {
+  it('keeps selection and job action buttons as semantic siblings', () => {
+    render(<JobCard job={makeJob()} />);
+
+    const selectButton = screen.getByRole('button', { pressed: false });
+    const deleteButton = screen.getByRole('button', { name: 'Delete' });
+
+    expect(selectButton).toHaveTextContent('Wan2.1-T2V');
+    expect(selectButton).not.toContainElement(deleteButton);
+  });
+
   it('renders the model, prompt, status and inference meta', () => {
     render(<JobCard job={makeJob()} />);
     expect(screen.getByText('Wan2.1-T2V')).toBeInTheDocument();
