@@ -18,6 +18,13 @@ COMPARISON_IDENTITY_KEYS = (
     "hardware_profile_id",
     "software_profile_id",
 )
+COMPARISON_COMPATIBILITY_KEYS = (
+    "workload_id",
+    "variant_id",
+    "benchmark_version",
+    "recipe_fingerprint",
+)
+COMPARISON_METRIC_SCHEMA = "fastvideo-performance-metrics-v1"
 
 
 def cohort_value(value: Any) -> str:
@@ -170,6 +177,40 @@ def recipe_configuration_label(record: Record) -> str:
     return " · ".join(parts)
 
 
+def comparison_compatibility(record: Record) -> dict[str, Any]:
+    """Describe whether and how a cohort can participate in direct comparison.
+
+    The recipe fingerprint owns input shape and execution recipe differences.
+    Hardware and software are intentionally excluded so users can compare
+    environments without weakening workload or metric comparability.
+    """
+    schema = cohort_schema(record)
+    identity = {key: cohort_value(record.get(key)) for key in COMPARISON_COMPATIBILITY_KEYS}
+    if schema != "v2":
+        reason = ("Legacy records do not declare benchmark and metric compatibility metadata."
+                  if schema == "legacy" else "This record has an incomplete v2 comparison identity.")
+        return {
+            "eligible": False,
+            "key": None,
+            "reason": reason,
+            "metric_schema": COMPARISON_METRIC_SCHEMA,
+            "identity": identity,
+        }
+
+    payload = {
+        "schema": schema,
+        "metric_schema": COMPARISON_METRIC_SCHEMA,
+        **identity,
+    }
+    return {
+        "eligible": True,
+        "key": _stable_key("compare", payload),
+        "reason": None,
+        "metric_schema": COMPARISON_METRIC_SCHEMA,
+        "identity": identity,
+    }
+
+
 def cohort_descriptor(record: Record) -> dict[str, Any]:
     """Return the reusable API/UI description for one canonical cohort."""
     schema = cohort_schema(record)
@@ -188,17 +229,21 @@ def cohort_descriptor(record: Record) -> dict[str, Any]:
         "software_label": software_configuration_label(record),
         "recipe_label": recipe_configuration_label(record),
         "raw_ids": raw_ids,
+        "comparison": comparison_compatibility(record),
     }
 
 
 __all__ = [
     "COMPARISON_IDENTITY_KEYS",
+    "COMPARISON_COMPATIBILITY_KEYS",
+    "COMPARISON_METRIC_SCHEMA",
     "cohort_descriptor",
     "cohort_identity",
     "cohort_key",
     "cohort_schema",
     "cohort_value",
     "comparison_identity_filters",
+    "comparison_compatibility",
     "gpu_configuration_label",
     "gpu_key",
     "record_uses_v2_identity",

@@ -38,6 +38,18 @@ export type CohortDescriptor = {
     software_profile_id: string;
     recipe_fingerprint: string;
   };
+  comparison: {
+    eligible: boolean;
+    key: string | null;
+    reason: string | null;
+    metric_schema: string;
+    identity: {
+      workload_id: string;
+      variant_id: string;
+      benchmark_version: string;
+      recipe_fingerprint: string;
+    };
+  };
 };
 
 export type SummaryRow = {

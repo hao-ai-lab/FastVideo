@@ -5,6 +5,7 @@ from fastvideo.performance.cohort import (
     cohort_descriptor,
     cohort_key,
     cohort_schema,
+    comparison_compatibility,
     comparison_identity_filters,
     gpu_key,
 )
@@ -77,3 +78,22 @@ def test_cohort_descriptor_exposes_readable_labels_and_raw_ids():
         "software_profile_id": "sw-cu126",
         "recipe_fingerprint": "recipe-a",
     }
+
+
+def test_comparison_compatibility_allows_environment_changes_only():
+    original = comparison_compatibility(_v2_record())
+    different_environment = comparison_compatibility(
+        _v2_record(hardware_profile_id="hw-h100", software_profile_id="sw-cu130"))
+    different_recipe = comparison_compatibility(_v2_record(recipe_fingerprint="recipe-b"))
+
+    assert original["eligible"] is True
+    assert original["key"] == different_environment["key"]
+    assert original["key"] != different_recipe["key"]
+
+
+def test_legacy_comparison_is_rejected_with_an_explicit_reason():
+    compatibility = comparison_compatibility({"model_id": "wan", "gpu_type": "NVIDIA L40S"})
+
+    assert compatibility["eligible"] is False
+    assert compatibility["key"] is None
+    assert "Legacy" in compatibility["reason"]

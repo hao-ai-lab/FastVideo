@@ -19,7 +19,9 @@ test("dashboard URL state round-trips exact cohort and cascading filters", () =>
     source: "scheduled_main",
     hardware: "hw-l40s",
     software: "sw-cu130",
-    recipe: "recipe-sp2"
+    recipe: "recipe-sp2",
+    compareMode: true,
+    compareCohorts: ["v2:def", "v2:ghi"]
   });
 
   assert.deepEqual(readDashboardUrl(written), {
@@ -30,7 +32,9 @@ test("dashboard URL state round-trips exact cohort and cascading filters", () =>
     source: "scheduled_main",
     hardware: "hw-l40s",
     software: "sw-cu130",
-    recipe: "recipe-sp2"
+    recipe: "recipe-sp2",
+    compareMode: true,
+    compareCohorts: ["v2:def", "v2:ghi"]
   });
   assert.equal(written.searchParams.get("unrelated"), "kept");
 });
@@ -50,7 +54,9 @@ test("all cohorts remains an explicit shareable selection", () => {
     source: "",
     hardware: "",
     software: "",
-    recipe: ""
+    recipe: "",
+    compareMode: false,
+    compareCohorts: []
   });
   assert.equal(written.searchParams.get("cohort"), ALL_COHORTS);
 });
@@ -63,10 +69,21 @@ test("invalid URL values safely use dashboard defaults", () => {
   assert.equal(state.hardware, "");
   assert.equal(state.software, "");
   assert.equal(state.recipe, "");
+  assert.equal(state.compareMode, false);
+  assert.deepEqual(state.compareCohorts, []);
 });
 
 test("stale advanced filters clear while valid raw IDs remain selected", () => {
   assert.equal(resolveAdvancedFilterSelection("hw-active", ["hw-active", "hw-other"]), "hw-active");
   assert.equal(resolveAdvancedFilterSelection("hw-stale", ["hw-active"]), "");
   assert.equal(resolveAdvancedFilterSelection("", ["hw-active"]), "");
+});
+
+test("comparison URL input removes duplicates and caps selection at three cohorts", () => {
+  const state = readDashboardUrl(
+    new URL("https://dashboard.example/performance?mode=compare&compare=a,a,b,c,d")
+  );
+
+  assert.equal(state.compareMode, true);
+  assert.deepEqual(state.compareCohorts, ["a", "b", "c"]);
 });

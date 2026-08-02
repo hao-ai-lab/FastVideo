@@ -109,6 +109,22 @@ latest run, latency, throughput, and memory columns are sortable; unavailable
 metrics remain explicit instead of being rendered as zero. Select a row with a
 pointer, Enter, or Space to open that exact cohort and its detailed trends.
 
+`Compare cohorts` opens an explicit comparison workspace for two or three
+cohorts. The active Model, GPU, Source, date, and advanced filters determine
+which cohorts have observations available. Compatible v2 cohorts must share
+the workload, variant, benchmark version, recipe fingerprint, and dashboard
+metric schema; hardware and software profiles may differ. Legacy and malformed
+v2 cohorts are shown with an explanation but cannot be selected for a direct
+comparison.
+
+Each metric uses one shared axis and a stable color per cohort. Lines break at
+missing observations, unavailable metrics are called out, and point hover or
+keyboard focus exposes the exact environment, recipe IDs, commit, source, and
+timestamp. Compare mode and up to three canonical cohort keys are persisted in
+the URL. Duplicate, stale, filtered, excessive, or incompatible keys are
+discarded safely; fewer than two valid cohorts leaves the selection prompt
+visible instead of rendering a misleading chart.
+
 Trend charts show metric-specific axes and exact point details on hover/focus:
 
 - metric value and unit
@@ -140,6 +156,12 @@ All cohort/data endpoints also accept `hardware_profile_id`,
 `software_profile_id`, and `recipe_fingerprint`. The cohort catalog returns
 faceted options in `advanced_filters`, including an explicit legacy/unavailable
 value for records without v2 profile IDs.
+
+Cohort descriptors also include server-owned `comparison` metadata. Its
+compatibility key intentionally excludes hardware and software while including
+the benchmark workload/variant/version, recipe, and metric schema. Consumers
+should use this contract rather than recreating compatibility rules in chart
+code.
 
 V2 records use the same comparison cohort as CI: `workload_id`, `variant_id`,
 `benchmark_version`, `recipe_fingerprint`, `hardware_profile_id`, and

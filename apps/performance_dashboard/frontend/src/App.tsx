@@ -4,6 +4,7 @@ import { fetchCohorts, fetchSummary, fetchTrends, refreshData } from "./api";
 import type {
   AdvancedFilterOption,
   CohortCatalogResponse,
+  CohortCatalogItem,
   CohortDescriptor,
   RunSource,
   SummaryRow,
@@ -13,6 +14,13 @@ import type {
 } from "./api";
 import { sortCohortOverview } from "./cohortOverview";
 import type { OverviewSortKey, SortDirection } from "./cohortOverview";
+import {
+  comparisonUnavailableReason,
+  MAX_COMPARE_COHORTS,
+  metricSegments,
+  resolveCompatibleCompareSelection,
+  stableCohortColor
+} from "./comparison";
 import {
   ALL_COHORTS,
   readDashboardUrl,
@@ -348,6 +356,164 @@ function TrendChart({ group, metricKey }: { group: TrendGroup; metricKey: string
   );
 }
 
+type ComparePoint = {
+  group: TrendGroup;
+  point: TrendPoint;
+  value: number;
+  x: number;
+  y: number;
+};
+
+function CompareChart({ groups, metricKey }: { groups: TrendGroup[]; metricKey: string }) {
+  const [activePoint, setActivePoint] = useState<ComparePoint | null>(null);
+  const timestamps = [...new Set(groups.flatMap((group) => group.points.map((point) => point.timestamp).filter(Boolean)))]
+    .sort() as string[];
+  const values = groups.flatMap((group) =>
+    group.points
+      .map((point) => point.metrics[metricKey])
+      .filter((value): value is number => value !== null && value !== undefined)
+  );
+
+  if (!timestamps.length || !values.length) {
+    return <div className="empty-chart">Metric unavailable for every selected cohort.</div>;
+  }
+
+  const width = 760;
+  const height = 280;
+  const margin = { top: 18, right: 22, bottom: 42, left: 68 };
+  const plotWidth = width - margin.left - margin.right;
+  const plotHeight = height - margin.top - margin.bottom;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min || 1;
+  const xDenominator = Math.max(timestamps.length - 1, 1);
+  const xFor = (timestamp: string) => margin.left + (timestamps.indexOf(timestamp) / xDenominator) * plotWidth;
+  const yFor = (value: number) => margin.top + (1 - (value - min) / span) * plotHeight;
+  const yTicks = [max, min + span / 2, min];
+  const rawXTicks = timestamps.length === 1
+    ? [timestamps[0]]
+    : [timestamps[0], timestamps[Math.floor((timestamps.length - 1) / 2)], timestamps[timestamps.length - 1]];
+  const xTicks = [...new Set(rawXTicks)];
+  const unavailableGroups = groups.filter((group) =>
+    group.points.every((point) => point.metrics[metricKey] === null || point.metrics[metricKey] === undefined)
+  );
+
+  return (
+    <div className="compare-chart-shell">
+      <svg
+        className="compare-chart"
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-label={`${metricLabel(metricKey)} comparison for ${groups.length} cohorts`}
+      >
+        <line className="axis-line" x1={margin.left} y1={margin.top} x2={margin.left} y2={height - margin.bottom} />
+        <line
+          className="axis-line"
+          x1={margin.left}
+          y1={height - margin.bottom}
+          x2={width - margin.right}
+          y2={height - margin.bottom}
+        />
+        {yTicks.map((tick) => {
+          const y = yFor(tick);
+          return (
+            <g key={`y-${tick}`}>
+              <line className="grid-line" x1={margin.left} y1={y} x2={width - margin.right} y2={y} />
+              <text className="axis-label" x={margin.left - 8} y={y + 4} textAnchor="end">
+                {formatMetricValue(metricKey, tick)}
+              </text>
+            </g>
+          );
+        })}
+        {xTicks.map((timestamp, index) => (
+          <text
+            className="axis-label"
+            key={timestamp}
+            x={xFor(timestamp)}
+            y={height - 12}
+            textAnchor={index === 0 ? "start" : index === xTicks.length - 1 ? "end" : "middle"}
+          >
+            {formatDate(timestamp)}
+          </text>
+        ))}
+        {groups.map((group) => {
+          const color = stableCohortColor(group.cohort.key);
+          const segments = metricSegments(group.points, metricKey, timestamps);
+          return (
+            <g key={group.cohort.key} style={{ color }}>
+              {segments.map((segment, index) => (
+                <polyline
+                  key={`${group.cohort.key}-${index}`}
+                  points={segment
+                    .map((point) => `${xFor(point.timestamp ?? "")},${yFor(point.metrics[metricKey] as number)}`)
+                    .join(" ")}
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.4"
+                />
+              ))}
+              {segments.flat().map((point) => {
+                const value = point.metrics[metricKey] as number;
+                const chartPoint = { group, point, value, x: xFor(point.timestamp ?? ""), y: yFor(value) };
+                const pointLabel = `${group.cohort.title}; ${formatMetricValue(metricKey, value, true)}; ${
+                  group.cohort.hardware_label
+                }; ${group.cohort.software_label}; recipe ${group.cohort.raw_ids.recipe_fingerprint}; commit ${shortSha(
+                  point.commit_sha
+                )}; ${runSourceLabel(point.run_source)}; ${formatTime(point.timestamp)}`;
+                return (
+                  <g
+                    key={`${group.cohort.key}-${point.timestamp ?? ""}`}
+                    onMouseEnter={() => setActivePoint(chartPoint)}
+                    onMouseLeave={() => setActivePoint(null)}
+                  >
+                    <title>{pointLabel}</title>
+                    <circle
+                      className="point-hit-area"
+                      cx={chartPoint.x}
+                      cy={chartPoint.y}
+                      r="12"
+                      tabIndex={0}
+                      aria-label={pointLabel}
+                      onFocus={() => setActivePoint(chartPoint)}
+                      onBlur={() => setActivePoint(null)}
+                    />
+                    <circle
+                      className="compare-point-marker"
+                      cx={chartPoint.x}
+                      cy={chartPoint.y}
+                      r="4"
+                      fill="currentColor"
+                    />
+                  </g>
+                );
+              })}
+            </g>
+          );
+        })}
+      </svg>
+      {unavailableGroups.length ? (
+        <div className="metric-unavailable">
+          Unavailable for {unavailableGroups.map((group) => group.cohort.title).join(", ")}.
+        </div>
+      ) : null}
+      {activePoint ? (
+        <div className="compare-point-details" aria-live="polite">
+          <strong style={{ color: stableCohortColor(activePoint.group.cohort.key) }}>
+            {activePoint.group.cohort.title} · {formatMetricValue(metricKey, activePoint.value, true)}
+          </strong>
+          <span>{activePoint.group.cohort.hardware_label}</span>
+          <span>{activePoint.group.cohort.software_label}</span>
+          <code>{cohortIdentifiers(activePoint.group.cohort)}</code>
+          <span>Commit {shortSha(activePoint.point.commit_sha)}</span>
+          <span>{runSourceLabel(activePoint.point.run_source)} · {formatTime(activePoint.point.timestamp)}</span>
+        </div>
+      ) : (
+        <div className="compare-point-hint">Hover or focus a point for exact environment and run details.</div>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   const initialUrlState = useMemo(() => readDashboardUrl(new URL(window.location.href)), []);
   const [days, setDays] = useState(initialUrlState.days);
@@ -358,6 +524,8 @@ export default function App() {
   const [hardwareFilter, setHardwareFilter] = useState(initialUrlState.hardware);
   const [softwareFilter, setSoftwareFilter] = useState(initialUrlState.software);
   const [recipeFilter, setRecipeFilter] = useState(initialUrlState.recipe);
+  const [compareMode, setCompareMode] = useState(initialUrlState.compareMode);
+  const [compareCohortKeys, setCompareCohortKeys] = useState(initialUrlState.compareCohorts);
   const [catalog, setCatalog] = useState<CohortCatalogResponse | null>(null);
   const [catalogResolved, setCatalogResolved] = useState(false);
   const [summary, setSummary] = useState<SummaryResponse | null>(null);
@@ -388,7 +556,7 @@ export default function App() {
     fetchCohorts({
       modelId: modelFilter || undefined,
       gpuKey: gpuFilter || undefined,
-      cohortKey: cohortFilter && cohortFilter !== ALL_COHORTS ? cohortFilter : undefined,
+      cohortKey: !compareMode && cohortFilter && cohortFilter !== ALL_COHORTS ? cohortFilter : undefined,
       runSource: sourceFilter || undefined,
       hardwareProfileId: hardwareFilter || undefined,
       softwareProfileId: softwareFilter || undefined,
@@ -449,6 +617,7 @@ export default function App() {
     hardwareFilter,
     softwareFilter,
     recipeFilter,
+    compareMode,
     refreshVersion
   ]);
 
@@ -457,7 +626,7 @@ export default function App() {
       return;
     }
     let cancelled = false;
-    const cohortKey = cohortFilter === ALL_COHORTS ? undefined : cohortFilter;
+    const cohortKey = compareMode || cohortFilter === ALL_COHORTS ? undefined : cohortFilter;
     const query = {
       days,
       modelId: modelFilter || undefined,
@@ -503,6 +672,7 @@ export default function App() {
     hardwareFilter,
     softwareFilter,
     recipeFilter,
+    compareMode,
     refreshVersion
   ]);
 
@@ -518,7 +688,9 @@ export default function App() {
       source: sourceFilter,
       hardware: hardwareFilter,
       software: softwareFilter,
-      recipe: recipeFilter
+      recipe: recipeFilter,
+      compareMode,
+      compareCohorts: compareCohortKeys
     });
     window.history.replaceState(null, "", `${next.pathname}${next.search}${next.hash}`);
   }, [
@@ -530,7 +702,9 @@ export default function App() {
     sourceFilter,
     hardwareFilter,
     softwareFilter,
-    recipeFilter
+    recipeFilter,
+    compareMode,
+    compareCohortKeys
   ]);
 
   const latestRows = summary?.rows ?? [];
@@ -542,6 +716,31 @@ export default function App() {
     () => sortCohortOverview(latestRows, overviewSortKey, overviewSortDirection),
     [latestRows, overviewSortKey, overviewSortDirection]
   );
+  const observationCohortKeys = useMemo(
+    () => new Set(trends.map((group) => group.cohort.key)),
+    [trends]
+  );
+  const selectedCompareCohorts = useMemo(() => {
+    const cohortsByKey = new Map((catalog?.cohorts ?? []).map((cohort) => [cohort.key, cohort]));
+    return compareCohortKeys
+      .map((key) => cohortsByKey.get(key))
+      .filter((cohort): cohort is CohortCatalogItem => Boolean(cohort));
+  }, [catalog, compareCohortKeys]);
+  const selectedCompareGroups = useMemo(() => {
+    const groupsByKey = new Map(trends.map((group) => [group.cohort.key, group]));
+    return compareCohortKeys
+      .map((key) => groupsByKey.get(key))
+      .filter((group): group is TrendGroup => Boolean(group));
+  }, [compareCohortKeys, trends]);
+
+  useEffect(() => {
+    if (!compareMode || !catalogResolved || loading || !catalog) {
+      return;
+    }
+    setCompareCohortKeys((current) =>
+      resolveCompatibleCompareSelection(current, catalog.cohorts, observationCohortKeys)
+    );
+  }, [compareMode, catalogResolved, loading, catalog, observationCohortKeys]);
 
   function changeOverviewSort(key: OverviewSortKey) {
     if (key === overviewSortKey) {
@@ -556,6 +755,25 @@ export default function App() {
     setCohortFilter(row.cohort.key);
   }
 
+  function enterCompareMode(seedKey?: string) {
+    const defaultSeed = cohortFilter && cohortFilter !== ALL_COHORTS ? cohortFilter : undefined;
+    const seed = seedKey ?? defaultSeed;
+    setCompareCohortKeys(seed ? [seed] : []);
+    setCompareMode(true);
+  }
+
+  function toggleCompareCohort(cohort: CohortCatalogItem) {
+    setCompareCohortKeys((current) => {
+      if (current.includes(cohort.key)) {
+        return current.filter((key) => key !== cohort.key);
+      }
+      if (current.length >= MAX_COMPARE_COHORTS) {
+        return current;
+      }
+      return [...current, cohort.key];
+    });
+  }
+
   return (
     <main className="dashboard">
       <header className="topbar">
@@ -563,9 +781,16 @@ export default function App() {
           <p className="eyebrow">FastVideo CI</p>
           <h1>Performance Dashboard</h1>
         </div>
-        <button className="refresh-button" onClick={refresh} disabled={refreshing || loading}>
-          {refreshing ? "Refreshing" : "Refresh"}
-        </button>
+        <div className="topbar-actions">
+          {!compareMode ? (
+            <button className="compare-button" type="button" onClick={() => enterCompareMode()}>
+              Compare cohorts
+            </button>
+          ) : null}
+          <button className="refresh-button" onClick={refresh} disabled={refreshing || loading}>
+            {refreshing ? "Refreshing" : "Refresh"}
+          </button>
+        </div>
       </header>
 
       <section className="filters" aria-label="Filters">
@@ -612,7 +837,7 @@ export default function App() {
           <select
             value={cohortFilter ?? ""}
             onChange={(event) => setCohortFilter(event.target.value)}
-            disabled={!catalogResolved}
+            disabled={!catalogResolved || compareMode}
           >
             <option value={ALL_COHORTS}>All cohorts</option>
             {(catalog?.cohorts ?? []).map((cohort) => (
@@ -689,7 +914,7 @@ export default function App() {
         </div>
       </details>
 
-      {selectedCohort ? (
+      {selectedCohort && !compareMode ? (
         <section className="selected-cohort" aria-label="Selected benchmark cohort">
           <CohortLabel cohort={selectedCohort} />
         </section>
@@ -718,11 +943,97 @@ export default function App() {
         </div>
       </section>
 
-      {allCohortsSelected ? (
+      {compareMode ? (
+        <section className="panel compare-panel">
+          <div className="panel-header compare-header">
+            <div>
+              <h2>Compare Cohorts</h2>
+              <span>Select two or three compatible exact cohorts.</span>
+            </div>
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() => setCompareMode(false)}
+            >
+              Exit compare mode
+            </button>
+          </div>
+          <div className="compare-picker" aria-label="Comparison cohorts">
+            <div className="compare-picker-heading">
+              <strong>{compareCohortKeys.length} of {MAX_COMPARE_COHORTS} selected</strong>
+              <span>Availability reflects Model, GPU, Source, date, and advanced filters.</span>
+            </div>
+            {(catalog?.cohorts ?? []).length === 0 ? (
+              <div className="empty">No cohorts match the active filters.</div>
+            ) : (
+              <div className="compare-options">
+                {(catalog?.cohorts ?? []).map((cohort) => {
+                  const selected = compareCohortKeys.includes(cohort.key);
+                  const reason = selected
+                    ? null
+                    : comparisonUnavailableReason(cohort, selectedCompareCohorts, observationCohortKeys);
+                  const atLimit = !selected && compareCohortKeys.length >= MAX_COMPARE_COHORTS;
+                  return (
+                    <label className={`compare-option ${reason || atLimit ? "compare-option-disabled" : ""}`} key={cohort.key}>
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        disabled={Boolean(reason) || atLimit}
+                        onChange={() => toggleCompareCohort(cohort)}
+                      />
+                      <span className="legend-swatch" style={{ background: stableCohortColor(cohort.key) }} />
+                      <span className="compare-option-label">
+                        <strong>{cohort.title} · {cohort.gpu_label}</strong>
+                        <span>{cohort.hardware_label}</span>
+                        <span>{cohort.software_label}</span>
+                        <code>{cohortIdentifiers(cohort)}</code>
+                        {reason ? <em>{reason}</em> : null}
+                        {atLimit ? <em>Remove a selected cohort before adding another.</em> : null}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          {selectedCompareGroups.length < 2 ? (
+            <div className="compare-prompt" role="status">
+              Select at least two compatible cohorts to render a comparison. Up to three cohorts are supported.
+            </div>
+          ) : (
+            <div className="compare-results">
+              <div className="compare-legend" aria-label="Cohort legend">
+                {selectedCompareCohorts.map((cohort) => (
+                  <div key={cohort.key}>
+                    <span className="legend-swatch" style={{ background: stableCohortColor(cohort.key) }} />
+                    <span>
+                      <strong>{cohort.title}</strong>
+                      <small>{cohort.gpu_label} · {cohort.software_label}</small>
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <div className="compare-chart-grid">
+                {METRIC_KEYS.map((metricKey) => (
+                  <article className="compare-chart-card" key={metricKey}>
+                    <h3>{metricLabel(metricKey)}</h3>
+                    <CompareChart groups={selectedCompareGroups} metricKey={metricKey} />
+                  </article>
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
+      ) : allCohortsSelected ? (
         <section className="panel cohort-overview-panel">
           <div className="panel-header">
             <h2>Cohort Overview</h2>
-            <span>{latestRows.length} exact comparison cohorts</span>
+            <div className="panel-header-actions">
+              <span>{latestRows.length} exact comparison cohorts</span>
+              <button className="secondary-button" type="button" onClick={() => enterCompareMode()}>
+                Compare cohorts
+              </button>
+            </div>
           </div>
           {latestRows.length === 0 ? (
             <div className="empty">No cohorts match the selected filters.</div>
