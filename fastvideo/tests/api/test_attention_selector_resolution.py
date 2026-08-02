@@ -44,6 +44,15 @@ class _FakePlatform:
     device_name = "fake"
 
     @classmethod
+    def is_mps(cls) -> bool:
+        # Not decoration. The autouse fixture swaps this stub in process-wide,
+        # so anything that constructs FastVideoArgs under it reaches
+        # check_fastvideo_args, which calls current_platform.is_mps(). Without
+        # this, the two env-folding tests raise AttributeError before they
+        # assert anything.
+        return False
+
+    @classmethod
     def get_attn_backend_cls(
         cls,
         selected_backend: AttentionBackendEnum | None,
