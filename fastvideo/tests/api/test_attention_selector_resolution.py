@@ -61,18 +61,16 @@ def _fake_platform(monkeypatch):
     monkeypatch.setattr(platforms, "_current_platform", _FakePlatform())
     monkeypatch.setattr(selector, "resolve_obj_by_qualname", lambda name: name)
     monkeypatch.delenv("FASTVIDEO_ATTENTION_BACKEND", raising=False)
-    selector.global_force_attn_backend(None)
     selector._cached_get_attn_backend.cache_clear()
     yield
-    selector.global_force_attn_backend(None)
     # Fake-platform resolutions must not outlive the test: mutations no
     # longer flush the cache (that is the feature), so evict explicitly.
     selector._cached_get_attn_backend.cache_clear()
 
 
-def _oracle(forced, requested, env, default):
-    """Today's documented precedence, spelled out independently."""
-    selected = forced if forced is not None else requested
+def _oracle(requested, env, default):
+    """The documented precedence, spelled out independently."""
+    selected = requested
     if selected is None and env is not None:
         selected = AttentionBackendEnum[env]
     if selected is None and default is not None:
@@ -82,26 +80,36 @@ def _oracle(forced, requested, env, default):
     return (selected or FLASH).name
 
 
-@pytest.mark.parametrize("forced", [None, SDPA])
 @pytest.mark.parametrize("scoped", [None, "unset", SAGE])
 @pytest.mark.parametrize("env", [None, "TORCH_SDPA"])
 @pytest.mark.parametrize("default", [None, SAGE])
-def test_precedence_matrix_matches_previous_semantics(monkeypatch, forced, scoped, env, default) -> None:
+def test_precedence_matrix_matches_previous_semantics(monkeypatch, scoped, env, default) -> None:
     if env is not None:
         monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", env)
-    selector.global_force_attn_backend(forced)
 
     if scoped == "unset":
-        # No scope: env is consulted (legacy behavior preserved).
+        # No scope and no explicit request: env is consulted.
         got = selector.get_attn_backend(default_backend=default, **KWARGS)
-        expected = _oracle(forced, None, env, default)
+        expected = _oracle(None, env, default)
     else:
-        # Scope active: env suppressed; scoped request sits in the position
-        # the global force held for per-role loads.
+        # Scope active: env suppressed, scoped request used.
         with selector._component_attention_backend_scope(scoped, component="dit"):
             got = selector.get_attn_backend(default_backend=default, **KWARGS)
-        expected = _oracle(forced, scoped, None, default)
+        expected = _oracle(scoped, None, default)
     assert got == expected
+
+
+@pytest.mark.parametrize("requested", [None, SAGE])
+@pytest.mark.parametrize("env", [None, "TORCH_SDPA"])
+@pytest.mark.parametrize("default", [None, SAGE])
+def test_explicit_request_matches_the_same_oracle(monkeypatch, requested, env, default) -> None:
+    """An explicit `requested=` resolves exactly as the same request would via
+    a scope, and never consults the environment behind it."""
+    if env is not None:
+        monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", env)
+
+    got = selector.get_attn_backend(default_backend=default, requested=requested, **KWARGS)
+    assert got == _oracle(requested, None, default)
 
 
 def test_scope_none_ignores_env_request(monkeypatch) -> None:
@@ -138,13 +146,26 @@ def test_scope_is_exception_safe(monkeypatch) -> None:
     assert selector.get_attn_backend(**KWARGS) == "SAGE_ATTN"
 
 
-def test_global_force_wins_without_cache_clear() -> None:
-    with selector._component_attention_backend_scope(SAGE, component="dit"):
-        assert selector.get_attn_backend(**KWARGS) == "SAGE_ATTN"
-        selector.global_force_attn_backend(SDPA)
+def test_explicit_none_means_auto_not_absence(monkeypatch) -> None:
+    """`requested=None` is an answer ("this component resolved to automatic
+    selection"), so the env var must NOT be consulted behind it. Omitting the
+    argument is the absence, and still falls back to the env."""
+    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "SAGE_ATTN")
+
+    # Explicit "automatic selection" -> the fake platform's auto answer.
+    assert selector.get_attn_backend(requested=None, **KWARGS) == "FLASH_ATTN"
+    # Counterfactual: same call, no opinion -> env still wins.
+    assert selector.get_attn_backend(**KWARGS) == "SAGE_ATTN"
+    assert selector.get_attn_backend(requested=selector.NO_REQUEST, **KWARGS) == "SAGE_ATTN"
+
+
+def test_explicit_request_outranks_the_construction_scope(monkeypatch) -> None:
+    """A caller that knows its component's decision is not overridden by an
+    ambient scope that happens to be active."""
+    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
+    with selector._component_attention_backend_scope(SDPA, component="dit"):
         assert selector.get_attn_backend(**KWARGS) == "TORCH_SDPA"
-        selector.global_force_attn_backend(None)
-        assert selector.get_attn_backend(**KWARGS) == "SAGE_ATTN"
+        assert selector.get_attn_backend(requested=SAGE, **KWARGS) == "SAGE_ATTN"
 
 
 def test_env_change_takes_effect_without_cache_clear(monkeypatch) -> None:
@@ -258,3 +279,54 @@ def test_no_request_records_no_decision():
     config = TextEncoderConfig()
     assert selector.record_resolved_attention_backend(config) is None
     assert config._resolved_attention_backend is None
+
+
+# ---------------------------------------------------------------------------
+# Reading the component's recorded decision back
+# ---------------------------------------------------------------------------
+
+
+def test_component_attention_backend_reads_the_recorded_decision():
+    from fastvideo.configs.models.dits.base import DiTConfig
+
+    class _Component:
+
+        def __init__(self, config):
+            self.config = config
+
+    config = DiTConfig()
+    with selector._component_attention_backend_scope(SAGE, component="transformer"):
+        selector.record_resolved_attention_backend(config)
+
+    assert selector.component_attention_backend(_Component(config)) == SAGE
+
+
+def test_component_that_resolved_to_auto_reports_none_not_absence():
+    """A component the loader stamped with "no request" reports None — an
+    answer — so its stage gets automatic selection rather than the env var."""
+    from fastvideo.configs.models.dits.base import DiTConfig
+
+    class _Component:
+
+        def __init__(self, config):
+            self.config = config
+
+    config = DiTConfig()
+    assert selector.record_resolved_attention_backend(config) is None
+    assert selector.component_attention_backend(_Component(config)) is None
+
+
+def test_component_without_a_recorded_decision_reports_no_request():
+    """A transformer built outside a loader (or carrying a non-FastVideo
+    config) has no decision, so callers keep the previous fallback."""
+
+    class _Bare:
+        pass
+
+    class _HFStyle:
+
+        def __init__(self):
+            self.config = object()
+
+    assert selector.component_attention_backend(_Bare()) is selector.NO_REQUEST
+    assert selector.component_attention_backend(_HFStyle()) is selector.NO_REQUEST

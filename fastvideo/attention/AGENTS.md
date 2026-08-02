@@ -43,6 +43,21 @@ A loader may narrow the request for one component — the DMD teacher/critic
 transformers build dense — and the recorded value is what that component
 actually resolved, not what the run asked for globally.
 
+A call site that already knows its component passes the decision explicitly:
+
+```python
+get_attn_backend(..., requested=component_attention_backend(self.transformer))
+```
+
+`requested` distinguishes three cases, and the distinction matters — `None` is
+an answer, not an absence:
+
+| value | meaning |
+|---|---|
+| a backend | use it; ignore the scope and the environment |
+| `None` | this component resolved to *automatic selection*; do **not** consult the environment behind it |
+| omitted (`NO_REQUEST`) | the caller has no opinion; fall back to the scope, then the environment |
+
 Nothing switches backends at runtime and nothing should: every request is an
 input to *construction*.
 
@@ -51,12 +66,12 @@ input to *construction*.
 `get_attn_backend()` reads every selection input, then resolves via, in
 precedence order:
 
-1. `global_force_attn_backend(...)` — deprecated process-global override, still
-   the training stack's mechanism.
-2. The per-component request resolved at load time.
+1. An explicit `requested=` argument — the component's own recorded decision.
+2. The per-component request carried by the construction scope.
 3. Env-var `FASTVIDEO_ATTENTION_BACKEND` (see `STR_BACKEND_ENV_VAR` in
-   `fastvideo/utils.py`), for layers built outside a loader — the denoising
-   stages, and direct model construction in tests.
+   `fastvideo/utils.py`), consulted only when the caller supplied no request
+   and no scope is active — layers built outside a loader, and direct model
+   construction in tests.
 4. The layer-declared `default_backend`.
 5. Per-platform automatic selection from `fastvideo/platforms/`, which probes
    the *current device's* capability.
