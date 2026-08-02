@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   ALL_COHORTS,
   readDashboardUrl,
+  resolveAdvancedFilterSelection,
   resolveCohortSelection,
   writeDashboardUrl
 } from "./dashboardState.ts";
@@ -15,7 +16,10 @@ test("dashboard URL state round-trips exact cohort and cascading filters", () =>
     model: "wan-t2v",
     gpu: "gpu:abc",
     cohort: "v2:def",
-    source: "scheduled_main"
+    source: "scheduled_main",
+    hardware: "hw-l40s",
+    software: "sw-cu130",
+    recipe: "recipe-sp2"
   });
 
   assert.deepEqual(readDashboardUrl(written), {
@@ -23,7 +27,10 @@ test("dashboard URL state round-trips exact cohort and cascading filters", () =>
     model: "wan-t2v",
     gpu: "gpu:abc",
     cohort: "v2:def",
-    source: "scheduled_main"
+    source: "scheduled_main",
+    hardware: "hw-l40s",
+    software: "sw-cu130",
+    recipe: "recipe-sp2"
   });
   assert.equal(written.searchParams.get("unrelated"), "kept");
 });
@@ -40,7 +47,10 @@ test("all cohorts remains an explicit shareable selection", () => {
     model: "",
     gpu: "",
     cohort: ALL_COHORTS,
-    source: ""
+    source: "",
+    hardware: "",
+    software: "",
+    recipe: ""
   });
   assert.equal(written.searchParams.get("cohort"), ALL_COHORTS);
 });
@@ -50,4 +60,13 @@ test("invalid URL values safely use dashboard defaults", () => {
 
   assert.equal(state.days, 90);
   assert.equal(state.source, "");
+  assert.equal(state.hardware, "");
+  assert.equal(state.software, "");
+  assert.equal(state.recipe, "");
+});
+
+test("stale advanced filters clear while valid raw IDs remain selected", () => {
+  assert.equal(resolveAdvancedFilterSelection("hw-active", ["hw-active", "hw-other"]), "hw-active");
+  assert.equal(resolveAdvancedFilterSelection("hw-stale", ["hw-active"]), "");
+  assert.equal(resolveAdvancedFilterSelection("", ["hw-active"]), "");
 });

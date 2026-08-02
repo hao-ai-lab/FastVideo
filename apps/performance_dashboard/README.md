@@ -95,6 +95,13 @@ change displayed observations without redefining cohort availability.
 Selected filters are encoded in the URL. Unknown or stale Model, GPU, and
 cohort values fall back safely to available options.
 
+The collapsed `Advanced filters` section can refine the dashboard by exact
+hardware profile, software profile, and recipe fingerprint. Options cascade to
+valid combinations under the active Model, GPU, cohort, and Source filters;
+each option includes both its readable label and raw identity. Advanced filter
+selections are shareable in the URL, apply to cohorts and displayed records,
+and can be cleared without resetting the primary filters.
+
 Selecting `All cohorts` shows a compact, sortable overview with one row per
 exact comparison cohort and deliberately hides the detailed trend grid. Failed
 cohorts appear first by default, followed by the newest observation. Status,
@@ -129,6 +136,10 @@ Summary, trend, and raw-record endpoints also accept opaque `gpu_key` and
 `cohort_key` values returned by `/api/performance/cohorts`. Cohort descriptors
 include readable recipe, hardware, software, and GPU configuration labels plus
 the full raw hardware, software, and recipe identifiers for debugging.
+All cohort/data endpoints also accept `hardware_profile_id`,
+`software_profile_id`, and `recipe_fingerprint`. The cohort catalog returns
+faceted options in `advanced_filters`, including an explicit legacy/unavailable
+value for records without v2 profile IDs.
 
 V2 records use the same comparison cohort as CI: `workload_id`, `variant_id`,
 `benchmark_version`, `recipe_fingerprint`, `hardware_profile_id`, and

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { fetchCohorts, fetchSummary, fetchTrends, refreshData } from "./api";
 import type {
+  AdvancedFilterOption,
   CohortCatalogResponse,
   CohortDescriptor,
   RunSource,
@@ -15,6 +16,7 @@ import type { OverviewSortKey, SortDirection } from "./cohortOverview";
 import {
   ALL_COHORTS,
   readDashboardUrl,
+  resolveAdvancedFilterSelection,
   resolveCohortSelection,
   writeDashboardUrl
 } from "./dashboardState";
@@ -131,6 +133,10 @@ function cohortIdentifiers(cohort: CohortDescriptor) {
   return (
     [hardware_profile_id, software_profile_id, recipe_fingerprint].filter(Boolean).join(" · ") || "Legacy identity"
   );
+}
+
+function advancedOptionLabel(option: AdvancedFilterOption) {
+  return option.raw_id ? `${option.label} — ${option.raw_id}` : `${option.label} — no raw ID`;
 }
 
 function CohortLabel({ cohort, compact = false }: { cohort: CohortDescriptor; compact?: boolean }) {
@@ -349,6 +355,9 @@ export default function App() {
   const [gpuFilter, setGpuFilter] = useState(initialUrlState.gpu);
   const [cohortFilter, setCohortFilter] = useState<string | null>(initialUrlState.cohort);
   const [sourceFilter, setSourceFilter] = useState<"" | RunSource>(initialUrlState.source);
+  const [hardwareFilter, setHardwareFilter] = useState(initialUrlState.hardware);
+  const [softwareFilter, setSoftwareFilter] = useState(initialUrlState.software);
+  const [recipeFilter, setRecipeFilter] = useState(initialUrlState.recipe);
   const [catalog, setCatalog] = useState<CohortCatalogResponse | null>(null);
   const [catalogResolved, setCatalogResolved] = useState(false);
   const [summary, setSummary] = useState<SummaryResponse | null>(null);
@@ -376,7 +385,15 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     setCatalogResolved(false);
-    fetchCohorts(modelFilter || undefined, gpuFilter || undefined)
+    fetchCohorts({
+      modelId: modelFilter || undefined,
+      gpuKey: gpuFilter || undefined,
+      cohortKey: cohortFilter && cohortFilter !== ALL_COHORTS ? cohortFilter : undefined,
+      runSource: sourceFilter || undefined,
+      hardwareProfileId: hardwareFilter || undefined,
+      softwareProfileId: softwareFilter || undefined,
+      recipeFingerprint: recipeFilter || undefined
+    })
       .then((data) => {
         if (cancelled) {
           return;
@@ -391,6 +408,24 @@ export default function App() {
           return;
         }
         setCatalog(data);
+        const nextHardware = resolveAdvancedFilterSelection(
+          hardwareFilter,
+          data.advanced_filters.hardware_profiles.map((option) => option.value)
+        );
+        const nextSoftware = resolveAdvancedFilterSelection(
+          softwareFilter,
+          data.advanced_filters.software_profiles.map((option) => option.value)
+        );
+        const nextRecipe = resolveAdvancedFilterSelection(
+          recipeFilter,
+          data.advanced_filters.recipes.map((option) => option.value)
+        );
+        if (nextHardware !== hardwareFilter || nextSoftware !== softwareFilter || nextRecipe !== recipeFilter) {
+          setHardwareFilter(nextHardware);
+          setSoftwareFilter(nextSoftware);
+          setRecipeFilter(nextRecipe);
+          return;
+        }
         setCohortFilter((current) =>
           resolveCohortSelection(current, data.cohorts.map((cohort) => cohort.key), data.default_cohort_key)
         );
@@ -406,7 +441,16 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [modelFilter, gpuFilter, refreshVersion]);
+  }, [
+    modelFilter,
+    gpuFilter,
+    cohortFilter,
+    sourceFilter,
+    hardwareFilter,
+    softwareFilter,
+    recipeFilter,
+    refreshVersion
+  ]);
 
   useEffect(() => {
     if (!catalogResolved || cohortFilter === null) {
@@ -419,7 +463,10 @@ export default function App() {
       modelId: modelFilter || undefined,
       gpuKey: gpuFilter || undefined,
       cohortKey,
-      runSource: sourceFilter || undefined
+      runSource: sourceFilter || undefined,
+      hardwareProfileId: hardwareFilter || undefined,
+      softwareProfileId: softwareFilter || undefined,
+      recipeFingerprint: recipeFilter || undefined
     };
     async function load() {
       setLoading(true);
@@ -446,7 +493,18 @@ export default function App() {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [catalogResolved, cohortFilter, days, modelFilter, gpuFilter, sourceFilter, refreshVersion]);
+  }, [
+    catalogResolved,
+    cohortFilter,
+    days,
+    modelFilter,
+    gpuFilter,
+    sourceFilter,
+    hardwareFilter,
+    softwareFilter,
+    recipeFilter,
+    refreshVersion
+  ]);
 
   useEffect(() => {
     if (!catalogResolved || cohortFilter === null) {
@@ -457,10 +515,23 @@ export default function App() {
       model: modelFilter,
       gpu: gpuFilter,
       cohort: cohortFilter,
-      source: sourceFilter
+      source: sourceFilter,
+      hardware: hardwareFilter,
+      software: softwareFilter,
+      recipe: recipeFilter
     });
     window.history.replaceState(null, "", `${next.pathname}${next.search}${next.hash}`);
-  }, [catalogResolved, cohortFilter, days, modelFilter, gpuFilter, sourceFilter]);
+  }, [
+    catalogResolved,
+    cohortFilter,
+    days,
+    modelFilter,
+    gpuFilter,
+    sourceFilter,
+    hardwareFilter,
+    softwareFilter,
+    recipeFilter
+  ]);
 
   const latestRows = summary?.rows ?? [];
   const totalRuns = trends.reduce((total, group) => total + group.points.length, 0);
@@ -563,6 +634,60 @@ export default function App() {
           </select>
         </label>
       </section>
+
+      <details className="advanced-filters">
+        <summary>
+          Advanced filters
+          {hardwareFilter || softwareFilter || recipeFilter ? <span className="active-filter-count">Active</span> : null}
+        </summary>
+        <div className="advanced-filter-grid">
+          <label>
+            Hardware profile
+            <select value={hardwareFilter} onChange={(event) => setHardwareFilter(event.target.value)}>
+              <option value="">All hardware profiles</option>
+              {(catalog?.advanced_filters.hardware_profiles ?? []).map((option) => (
+                <option key={option.value} value={option.value}>
+                  {advancedOptionLabel(option)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Software profile
+            <select value={softwareFilter} onChange={(event) => setSoftwareFilter(event.target.value)}>
+              <option value="">All software profiles</option>
+              {(catalog?.advanced_filters.software_profiles ?? []).map((option) => (
+                <option key={option.value} value={option.value}>
+                  {advancedOptionLabel(option)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Recipe
+            <select value={recipeFilter} onChange={(event) => setRecipeFilter(event.target.value)}>
+              <option value="">All recipes</option>
+              {(catalog?.advanced_filters.recipes ?? []).map((option) => (
+                <option key={option.value} value={option.value}>
+                  {advancedOptionLabel(option)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            className="clear-advanced-button"
+            type="button"
+            disabled={!hardwareFilter && !softwareFilter && !recipeFilter}
+            onClick={() => {
+              setHardwareFilter("");
+              setSoftwareFilter("");
+              setRecipeFilter("");
+            }}
+          >
+            Clear advanced filters
+          </button>
+        </div>
+      </details>
 
       {selectedCohort ? (
         <section className="selected-cohort" aria-label="Selected benchmark cohort">

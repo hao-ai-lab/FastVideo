@@ -25,6 +25,7 @@ from fastvideo.performance.metric_policy import regression_delta, resolve_metric
 Record = dict[str, Any]
 CohortKey = str
 COMPARISON_COHORT_KEYS = COMPARISON_IDENTITY_KEYS
+ADVANCED_FILTER_LEGACY = "__legacy__"
 
 
 def parse_timestamp(value: Any) -> datetime | None:
@@ -107,6 +108,27 @@ def comparison_cohort_key(record: Record) -> CohortKey:
     return cohort_key(record)
 
 
+def advanced_filter_value(record: Record, field: str) -> str:
+    """Return a URL-safe facet value, including records without v2 IDs."""
+    return cohort_value(record.get(field)) or ADVANCED_FILTER_LEGACY
+
+
+def matches_advanced_filters(
+    record: Record,
+    *,
+    hardware_profile_id: str | None = None,
+    software_profile_id: str | None = None,
+    recipe_fingerprint: str | None = None,
+) -> bool:
+    """Return whether a record matches all selected advanced identity facets."""
+    selected = {
+        "hardware_profile_id": hardware_profile_id,
+        "software_profile_id": software_profile_id,
+        "recipe_fingerprint": recipe_fingerprint,
+    }
+    return all(not value or advanced_filter_value(record, field) == value for field, value in selected.items())
+
+
 def group_by_comparison_cohort(records: list[Record]) -> dict[CohortKey, list[Record]]:
     groups: dict[CohortKey, list[Record]] = defaultdict(list)
     for record in records:
@@ -136,8 +158,13 @@ def build_cohort_catalog(
     *,
     model_id: str | None = None,
     gpu_key: str | None = None,
+    cohort_key: str | None = None,
+    run_source: str | None = None,
+    hardware_profile_id: str | None = None,
+    software_profile_id: str | None = None,
+    recipe_fingerprint: str | None = None,
 ) -> Record:
-    """Build cascading model/GPU/cohort options and a deterministic default."""
+    """Build cascading cohort options, advanced facets, and a default."""
     groups = list(group_by_comparison_cohort(records).values())
     latest_records = [group[-1] for group in groups]
     models = sorted({str(record.get("model_id") or "unknown") for record in latest_records})
@@ -161,9 +188,62 @@ def build_cohort_catalog(
         key=lambda option: (option["label"], option["key"]),
     )
 
+    base_groups = [group for group in model_groups if not gpu_key or cohort_descriptor(group[-1])["gpu_key"] == gpu_key]
+    selected_advanced_filters = {
+        "hardware_profile_id": hardware_profile_id,
+        "software_profile_id": software_profile_id,
+        "recipe_fingerprint": recipe_fingerprint,
+    }
     selected_groups = [
-        group for group in model_groups if not gpu_key or cohort_descriptor(group[-1])["gpu_key"] == gpu_key
+        group for group in base_groups if matches_advanced_filters(group[-1], **selected_advanced_filters)
     ]
+
+    facet_groups = [
+        group for group in base_groups
+        if (not cohort_key or comparison_cohort_key(group[-1]) == cohort_key) and (not run_source or any(
+            record_run_source(record) == run_source for record in group))
+    ]
+
+    def advanced_options(field: str) -> list[Record]:
+        matching_groups = [
+            group for group in facet_groups if matches_advanced_filters(
+                group[-1],
+                **{
+                    key: value
+                    for key, value in selected_advanced_filters.items() if key != field
+                },
+            )
+        ]
+        records_by_value: dict[str, Record] = {}
+        for group in matching_groups:
+            latest = group[-1]
+            value = advanced_filter_value(latest, field)
+            current = records_by_value.get(value)
+            if current is None or record_sort_key(latest) > record_sort_key(current):
+                records_by_value[value] = latest
+
+        label_key = {
+            "hardware_profile_id": "hardware_label",
+            "software_profile_id": "software_label",
+            "recipe_fingerprint": "recipe_label",
+        }[field]
+        unavailable_label = {
+            "hardware_profile_id": "Hardware profile unavailable",
+            "software_profile_id": "Software profile unavailable",
+            "recipe_fingerprint": "Legacy benchmark recipe",
+        }[field]
+        options = []
+        for value, record in records_by_value.items():
+            descriptor = cohort_descriptor(record)
+            raw_id = cohort_value(record.get(field))
+            options.append({
+                "value": value,
+                "label": descriptor[label_key] if raw_id else unavailable_label,
+                "raw_id": raw_id,
+                "schema": descriptor["schema"],
+            })
+        return sorted(options, key=lambda option: (option["label"], option["value"]))
+
     cohorts = []
     for group in selected_groups:
         latest = group[-1]
@@ -195,7 +275,12 @@ def build_cohort_catalog(
         "models": models,
         "gpus": gpus,
         "cohorts": cohorts,
-        "default_cohort_key": None if default_group is None else cohort_key(default_group[-1]),
+        "advanced_filters": {
+            "hardware_profiles": advanced_options("hardware_profile_id"),
+            "software_profiles": advanced_options("software_profile_id"),
+            "recipes": advanced_options("recipe_fingerprint"),
+        },
+        "default_cohort_key": None if default_group is None else comparison_cohort_key(default_group[-1]),
     }
 
 

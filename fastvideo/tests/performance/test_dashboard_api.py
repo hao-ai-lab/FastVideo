@@ -304,3 +304,57 @@ def test_unknown_cohort_key_returns_an_empty_safe_result():
 
     assert summary["count"] == 0
     assert trends["count"] == 0
+
+
+def test_advanced_profile_filters_refine_catalog_summary_trends_and_records():
+    common = {
+        "result_schema_version": 2,
+        "workload_id": "wan-t2v",
+        "variant_id": "1.3b-sp2",
+        "benchmark_version": 2,
+        "model_id": "wan",
+        "gpu_type": "NVIDIA L40S",
+    }
+    profile_a = _record(
+        "wan",
+        "NVIDIA L40S",
+        "2026-01-01T00:00:00+00:00",
+        "a" * 40,
+        10.0,
+        10.0,
+        hardware_profile_id="hw-a",
+        software_profile_id="sw-a",
+        recipe_fingerprint="recipe-a",
+        run_source="pr",
+        **{key: value for key, value in common.items() if key not in {"model_id", "gpu_type"}},
+    )
+    profile_b = _record(
+        "wan",
+        "NVIDIA L40S",
+        "2026-01-02T00:00:00+00:00",
+        "b" * 40,
+        20.0,
+        5.0,
+        hardware_profile_id="hw-b",
+        software_profile_id="sw-b",
+        recipe_fingerprint="recipe-b",
+        run_source="scheduled_main",
+        **{key: value for key, value in common.items() if key not in {"model_id", "gpu_type"}},
+    )
+    client = TestClient(create_app(FakeStore([profile_a, profile_b])))
+    selected = {
+        "hardware_profile_id": "hw-a",
+        "software_profile_id": "sw-a",
+        "recipe_fingerprint": "recipe-a",
+    }
+
+    catalog = client.get("/api/performance/cohorts", params={"model_id": "wan", **selected}).json()
+    summary = client.get("/api/performance/summary", params=selected).json()
+    trends = client.get("/api/performance/trends", params=selected).json()
+    records = client.get("/api/performance/records", params=selected).json()
+
+    assert [cohort["raw_ids"]["hardware_profile_id"] for cohort in catalog["cohorts"]] == ["hw-a"]
+    assert summary["count"] == trends["count"] == records["count"] == 1
+    assert summary["rows"][0]["recipe_fingerprint"] == "recipe-a"
+    assert trends["groups"][0]["software_profile_id"] == "sw-a"
+    assert records["records"][0]["hardware_profile_id"] == "hw-a"

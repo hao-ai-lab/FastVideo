@@ -8,6 +8,9 @@ export type DashboardUrlState = {
   gpu: string;
   cohort: string | null;
   source: "" | RunSource;
+  hardware: string;
+  software: string;
+  recipe: string;
 };
 
 const RUN_SOURCES = new Set<RunSource>(["scheduled_main", "pr", "local", "unknown"]);
@@ -21,13 +24,16 @@ export function readDashboardUrl(url: URL): DashboardUrlState {
     model: url.searchParams.get("model") ?? "",
     gpu: url.searchParams.get("gpu") ?? "",
     cohort: url.searchParams.get("cohort"),
-    source: rawSource && RUN_SOURCES.has(rawSource) ? rawSource : ""
+    source: rawSource && RUN_SOURCES.has(rawSource) ? rawSource : "",
+    hardware: url.searchParams.get("hardware") ?? "",
+    software: url.searchParams.get("software") ?? "",
+    recipe: url.searchParams.get("recipe") ?? ""
   };
 }
 
 export function writeDashboardUrl(url: URL, state: DashboardUrlState) {
   const next = new URL(url);
-  for (const key of ["days", "model", "gpu", "cohort", "source"]) {
+  for (const key of ["days", "model", "gpu", "cohort", "source", "hardware", "software", "recipe"]) {
     next.searchParams.delete(key);
   }
   if (state.days !== 90) {
@@ -45,7 +51,20 @@ export function writeDashboardUrl(url: URL, state: DashboardUrlState) {
   if (state.source) {
     next.searchParams.set("source", state.source);
   }
+  if (state.hardware) {
+    next.searchParams.set("hardware", state.hardware);
+  }
+  if (state.software) {
+    next.searchParams.set("software", state.software);
+  }
+  if (state.recipe) {
+    next.searchParams.set("recipe", state.recipe);
+  }
   return next;
+}
+
+export function resolveAdvancedFilterSelection(current: string, validValues: readonly string[]) {
+  return current && validValues.includes(current) ? current : "";
 }
 
 export function resolveCohortSelection(

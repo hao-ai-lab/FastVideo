@@ -17,7 +17,13 @@ from fastvideo.performance import hf_store
 from fastvideo.performance.cohort import cohort_key as record_cohort_key
 from fastvideo.performance.cohort import gpu_key as record_gpu_key
 
-from .service import build_cohort_catalog, build_latest_summary, build_trends, filter_records
+from .service import (
+    build_cohort_catalog,
+    build_latest_summary,
+    build_trends,
+    filter_records,
+    matches_advanced_filters,
+)
 
 DEFAULT_TRACKING_ROOT = "/tmp/fastvideo-perf-dashboard"
 DEFAULT_DAYS = 90
@@ -32,12 +38,20 @@ def _matches_dashboard_filters(
     gpu_type: str | None,
     gpu_key: str | None,
     cohort_key: str | None,
+    hardware_profile_id: str | None,
+    software_profile_id: str | None,
+    recipe_fingerprint: str | None,
 ) -> bool:
     cohort = record.get("cohort") if isinstance(record.get("cohort"), dict) else {}
     return ((not model_id or record.get("model_id") == model_id)
             and (not gpu_type or record.get("gpu_type") == gpu_type)
             and (not gpu_key or cohort.get("gpu_key") == gpu_key)
-            and (not cohort_key or cohort.get("key") == cohort_key))
+            and (not cohort_key or cohort.get("key") == cohort_key) and matches_advanced_filters(
+                record,
+                hardware_profile_id=hardware_profile_id,
+                software_profile_id=software_profile_id,
+                recipe_fingerprint=recipe_fingerprint,
+            ))
 
 
 class PerformanceDataStore:
@@ -127,15 +141,34 @@ def create_app(store: PerformanceDataStore | None = None) -> FastAPI:
     def cohorts(
         model_id: str | None = None,
         gpu_key: str | None = None,
+        cohort_key: str | None = None,
+        run_source: str | None = None,
+        hardware_profile_id: str | None = None,
+        software_profile_id: str | None = None,
+        recipe_fingerprint: str | None = None,
     ) -> dict[str, Any]:
-        # Cohort availability and defaults intentionally ignore Source and Date.
-        # Those filters control displayed observations, not comparison identity.
+        # Source constrains advanced facet availability, but never changes the
+        # comparison identity or the cohort list on its own.
         loaded = data_store.load_records(days=None)
         return {
-            **build_cohort_catalog(loaded, model_id=model_id, gpu_key=gpu_key),
+            **build_cohort_catalog(
+                loaded,
+                model_id=model_id,
+                gpu_key=gpu_key,
+                cohort_key=cohort_key,
+                run_source=run_source,
+                hardware_profile_id=hardware_profile_id,
+                software_profile_id=software_profile_id,
+                recipe_fingerprint=recipe_fingerprint,
+            ),
             "filters": {
                 "model_id": model_id,
                 "gpu_key": gpu_key,
+                "cohort_key": cohort_key,
+                "run_source": run_source,
+                "hardware_profile_id": hardware_profile_id,
+                "software_profile_id": software_profile_id,
+                "recipe_fingerprint": recipe_fingerprint,
             },
             "sync": data_store.health(),
         }
@@ -149,6 +182,9 @@ def create_app(store: PerformanceDataStore | None = None) -> FastAPI:
         cohort_key: str | None = None,
         run_source: str | None = None,
         success: bool | None = None,
+        hardware_profile_id: str | None = None,
+        software_profile_id: str | None = None,
+        recipe_fingerprint: str | None = None,
     ) -> dict[str, Any]:
         loaded = data_store.load_records(days=days)
         filtered = filter_records(
@@ -162,6 +198,14 @@ def create_app(store: PerformanceDataStore | None = None) -> FastAPI:
             filtered = [record for record in filtered if record_gpu_key(record) == gpu_key]
         if cohort_key:
             filtered = [record for record in filtered if record_cohort_key(record) == cohort_key]
+        filtered = [
+            record for record in filtered if matches_advanced_filters(
+                record,
+                hardware_profile_id=hardware_profile_id,
+                software_profile_id=software_profile_id,
+                recipe_fingerprint=recipe_fingerprint,
+            )
+        ]
         return {
             "records": filtered,
             "count": len(filtered),
@@ -173,6 +217,9 @@ def create_app(store: PerformanceDataStore | None = None) -> FastAPI:
                 "cohort_key": cohort_key,
                 "run_source": run_source,
                 "success": success,
+                "hardware_profile_id": hardware_profile_id,
+                "software_profile_id": software_profile_id,
+                "recipe_fingerprint": recipe_fingerprint,
             },
             "sync": data_store.health(),
         }
@@ -185,6 +232,9 @@ def create_app(store: PerformanceDataStore | None = None) -> FastAPI:
         gpu_key: str | None = None,
         cohort_key: str | None = None,
         run_source: str | None = None,
+        hardware_profile_id: str | None = None,
+        software_profile_id: str | None = None,
+        recipe_fingerprint: str | None = None,
     ) -> dict[str, Any]:
         # Latest status should be stable when users change the trend window.
         # Use all cached records for latest/baseline computation; the ``days``
@@ -198,6 +248,9 @@ def create_app(store: PerformanceDataStore | None = None) -> FastAPI:
                 gpu_type=gpu_type,
                 gpu_key=gpu_key,
                 cohort_key=cohort_key,
+                hardware_profile_id=hardware_profile_id,
+                software_profile_id=software_profile_id,
+                recipe_fingerprint=recipe_fingerprint,
             )
         ]
         return {
@@ -215,6 +268,9 @@ def create_app(store: PerformanceDataStore | None = None) -> FastAPI:
                 "gpu_key": gpu_key,
                 "cohort_key": cohort_key,
                 "run_source": run_source,
+                "hardware_profile_id": hardware_profile_id,
+                "software_profile_id": software_profile_id,
+                "recipe_fingerprint": recipe_fingerprint,
             },
             "sync": data_store.health(),
         }
@@ -227,6 +283,9 @@ def create_app(store: PerformanceDataStore | None = None) -> FastAPI:
         gpu_key: str | None = None,
         cohort_key: str | None = None,
         run_source: str | None = None,
+        hardware_profile_id: str | None = None,
+        software_profile_id: str | None = None,
+        recipe_fingerprint: str | None = None,
     ) -> dict[str, Any]:
         loaded = data_store.load_records(days=days)
         source_filtered = filter_records(loaded, run_source=run_source)
@@ -237,6 +296,9 @@ def create_app(store: PerformanceDataStore | None = None) -> FastAPI:
                 gpu_type=gpu_type,
                 gpu_key=gpu_key,
                 cohort_key=cohort_key,
+                hardware_profile_id=hardware_profile_id,
+                software_profile_id=software_profile_id,
+                recipe_fingerprint=recipe_fingerprint,
             )
         ]
         return {
@@ -249,6 +311,9 @@ def create_app(store: PerformanceDataStore | None = None) -> FastAPI:
                 "gpu_key": gpu_key,
                 "cohort_key": cohort_key,
                 "run_source": run_source,
+                "hardware_profile_id": hardware_profile_id,
+                "software_profile_id": software_profile_id,
+                "recipe_fingerprint": recipe_fingerprint,
             },
             "sync": data_store.health(),
         }
