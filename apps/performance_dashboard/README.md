@@ -95,6 +95,13 @@ change displayed observations without redefining cohort availability.
 Selected filters are encoded in the URL. Unknown or stale Model, GPU, and
 cohort values fall back safely to available options.
 
+Selecting `All cohorts` shows a compact, sortable overview with one row per
+exact comparison cohort and deliberately hides the detailed trend grid. Failed
+cohorts appear first by default, followed by the newest observation. Status,
+latest run, latency, throughput, and memory columns are sortable; unavailable
+metrics remain explicit instead of being rendered as zero. Select a row with a
+pointer, Enter, or Space to open that exact cohort and its detailed trends.
+
 Trend charts show metric-specific axes and exact point details on hover/focus:
 
 - metric value and unit

@@ -204,6 +204,10 @@ table {
   border-collapse: collapse;
 }
 
+.cohort-overview-table {
+  min-width: 1180px;
+}
+
 th,
 td {
   border-bottom: 1px solid #e6ebf0;
@@ -218,9 +222,51 @@ th {
   text-transform: uppercase;
 }
 
+.sort-button {
+  border: 0;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+
+.sort-button:focus-visible {
+  border-radius: 3px;
+  outline: 2px solid #0f6b8f;
+  outline-offset: 3px;
+}
+
 td {
   color: #1b2836;
   font-size: 0.9rem;
+}
+
+.selectable-row {
+  cursor: pointer;
+}
+
+.selectable-row:hover,
+.selectable-row:focus-visible {
+  background: #eef7fa;
+  outline: 2px solid #0f6b8f;
+  outline-offset: -2px;
+}
+
+.schedule-label {
+  display: block;
+  margin-top: 5px;
+  color: #607080;
+  font-size: 0.75rem;
+}
+
+.single-cohort-note {
+  border-bottom: 1px solid #d5dde5;
+  padding: 10px 16px;
+  color: #425466;
+  background: #f8fafc;
+  font-size: 0.82rem;
 }
 
 .cohort-cell {

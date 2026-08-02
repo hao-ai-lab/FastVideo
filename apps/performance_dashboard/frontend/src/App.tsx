@@ -5,10 +5,13 @@ import type {
   CohortCatalogResponse,
   CohortDescriptor,
   RunSource,
+  SummaryRow,
   SummaryResponse,
   TrendGroup,
   TrendPoint
 } from "./api";
+import { sortCohortOverview } from "./cohortOverview";
+import type { OverviewSortKey, SortDirection } from "./cohortOverview";
 import {
   ALL_COHORTS,
   readDashboardUrl,
@@ -147,6 +150,32 @@ function formatMetricValue(metricKey: string, value: number | null | undefined, 
   }
   const formatted = formatNumber(value, tooltip ? definition.tooltipPrecision : definition.precision);
   return formatted === "n/a" ? formatted : `${formatted} ${definition.unit}`;
+}
+
+function formatOverviewMetric(metricKey: string, value: number | null | undefined) {
+  return value === null || value === undefined ? "Unavailable" : formatMetricValue(metricKey, value);
+}
+
+function SortHeader({
+  label,
+  sortKey,
+  activeKey,
+  direction,
+  onChange
+}: {
+  label: string;
+  sortKey: OverviewSortKey;
+  activeKey: OverviewSortKey;
+  direction: SortDirection;
+  onChange: (key: OverviewSortKey) => void;
+}) {
+  const active = sortKey === activeKey;
+  return (
+    <button className="sort-button" type="button" onClick={() => onChange(sortKey)}>
+      {label}
+      {active ? <span aria-hidden="true">{direction === "asc" ? " ↑" : " ↓"}</span> : null}
+    </button>
+  );
 }
 
 type ChartPoint = {
@@ -328,6 +357,8 @@ export default function App() {
   const [refreshing, setRefreshing] = useState(false);
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [overviewSortKey, setOverviewSortKey] = useState<OverviewSortKey>("status");
+  const [overviewSortDirection, setOverviewSortDirection] = useState<SortDirection>("asc");
 
   async function refresh() {
     setRefreshing(true);
@@ -435,6 +466,24 @@ export default function App() {
   const totalRuns = trends.reduce((total, group) => total + group.points.length, 0);
   const sync = summary?.sync;
   const selectedCohort = catalog?.cohorts.find((cohort) => cohort.key === cohortFilter);
+  const allCohortsSelected = cohortFilter === ALL_COHORTS;
+  const overviewRows = useMemo(
+    () => sortCohortOverview(latestRows, overviewSortKey, overviewSortDirection),
+    [latestRows, overviewSortKey, overviewSortDirection]
+  );
+
+  function changeOverviewSort(key: OverviewSortKey) {
+    if (key === overviewSortKey) {
+      setOverviewSortDirection((direction) => (direction === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setOverviewSortKey(key);
+    setOverviewSortDirection(key === "status" ? "asc" : "desc");
+  }
+
+  function selectOverviewCohort(row: SummaryRow) {
+    setCohortFilter(row.cohort.key);
+  }
 
   return (
     <main className="dashboard">
@@ -544,102 +593,217 @@ export default function App() {
         </div>
       </section>
 
-      <section className="panel">
-        <div className="panel-header">
-          <h2>Latest Status</h2>
-          <span>{latestRows.length} comparison cohorts</span>
-        </div>
-        {latestRows.length === 0 ? (
-          <div className="empty">No records match the selected filters.</div>
-        ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Stored Status</th>
-                  <th>Recomputed</th>
-                  <th>Model</th>
-                  <th>GPU</th>
-                  <th>Cohort</th>
-                  <th>Commit</th>
-                  <th>Source</th>
-                  <th>Schedule / Run type</th>
-                  <th>Baseline</th>
-                  <th>Baseline N</th>
-                  <th>Latency</th>
-                  <th>Throughput</th>
-                  <th>Memory</th>
-                  <th>Worst</th>
-                  <th>Exceeded</th>
-                  <th>Failing</th>
-                </tr>
-              </thead>
-              <tbody>
-                {latestRows.map((row) => (
-                  <tr key={row.cohort.key}>
-                    <td>
-                      <span className={`badge ${row.status}`}>{row.status}</span>
-                    </td>
-                    <td>
-                      <span className={`badge muted ${row.computed_regression_status}`}>
-                        {row.computed_regression_status}
-                      </span>
-                    </td>
-                    <td>{row.model_id}</td>
-                    <td>{row.cohort.gpu_label}</td>
-                    <td><CohortLabel cohort={row.cohort} /></td>
-                    <td>{shortSha(row.commit_sha)}</td>
-                    <td>
-                      <span className={`source-badge source-${row.run_source}`}>{runSourceLabel(row.run_source)}</span>
-                    </td>
-                    <td>{row.test_scope || "Unavailable"}</td>
-                    <td>{row.baseline_eligible ? "eligible" : "excluded"}</td>
-                    <td>{row.baseline_n}</td>
-                    <td>{formatNumber(row.metrics.latency?.current, 3)}</td>
-                    <td>{formatNumber(row.metrics.throughput?.current, 3)}</td>
-                    <td>{formatNumber(row.metrics.memory?.current, 1)}</td>
-                    <td>{formatNumber(row.worst_regression_pct, 1)}%</td>
-                    <td>
-                      {row.threshold_exceeded_metrics.length
-                        ? row.threshold_exceeded_metrics.join(", ")
-                        : "none"}
-                    </td>
-                    <td>{row.failing_metrics.length ? row.failing_metrics.join(", ") : "none"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      {allCohortsSelected ? (
+        <section className="panel cohort-overview-panel">
+          <div className="panel-header">
+            <h2>Cohort Overview</h2>
+            <span>{latestRows.length} exact comparison cohorts</span>
           </div>
-        )}
-      </section>
-
-      <section className="panel">
-        <div className="panel-header">
-          <h2>Trends</h2>
-          <span>{days} day window</span>
-        </div>
-        <div className="trend-grid">
-          {trends.length === 0 ? (
-            <div className="empty full-width">
-              No trend records found in the selected time window. Increase the day range or refresh after new CI
-              performance records are uploaded.
-            </div>
+          {latestRows.length === 0 ? (
+            <div className="empty">No cohorts match the selected filters.</div>
           ) : (
-            trends.map((group) =>
-              METRIC_KEYS.map((metricKey) => (
-                <article className="trend-card" key={`${group.cohort.key}-${metricKey}`}>
-                  <div>
-                    <h3>{metricLabel(metricKey)}</h3>
-                    <p>{group.model_id}</p>
-                    <CohortLabel cohort={group.cohort} compact />
-                  </div>
-                  <TrendChart group={group} metricKey={metricKey} />
-                </article>
-              ))
-            )
+            <>
+              {latestRows.length === 1 ? (
+                <div className="single-cohort-note">One exact cohort matches. Select its row to inspect detailed trends.</div>
+              ) : null}
+              <div className="table-wrap">
+                <table className="cohort-overview-table">
+                  <thead>
+                    <tr>
+                      <th aria-sort={overviewSortKey === "status" ? (overviewSortDirection === "asc" ? "ascending" : "descending") : "none"}>
+                        <SortHeader
+                          label="Status"
+                          sortKey="status"
+                          activeKey={overviewSortKey}
+                          direction={overviewSortDirection}
+                          onChange={changeOverviewSort}
+                        />
+                      </th>
+                      <th>Model</th>
+                      <th>GPU configuration</th>
+                      <th>Benchmark cohort</th>
+                      <th aria-sort={overviewSortKey === "latest" ? (overviewSortDirection === "asc" ? "ascending" : "descending") : "none"}>
+                        <SortHeader
+                          label="Latest run"
+                          sortKey="latest"
+                          activeKey={overviewSortKey}
+                          direction={overviewSortDirection}
+                          onChange={changeOverviewSort}
+                        />
+                      </th>
+                      <th>Source / schedule</th>
+                      <th aria-sort={overviewSortKey === "latency" ? (overviewSortDirection === "asc" ? "ascending" : "descending") : "none"}>
+                        <SortHeader
+                          label="Latency"
+                          sortKey="latency"
+                          activeKey={overviewSortKey}
+                          direction={overviewSortDirection}
+                          onChange={changeOverviewSort}
+                        />
+                      </th>
+                      <th aria-sort={overviewSortKey === "throughput" ? (overviewSortDirection === "asc" ? "ascending" : "descending") : "none"}>
+                        <SortHeader
+                          label="Throughput"
+                          sortKey="throughput"
+                          activeKey={overviewSortKey}
+                          direction={overviewSortDirection}
+                          onChange={changeOverviewSort}
+                        />
+                      </th>
+                      <th aria-sort={overviewSortKey === "memory" ? (overviewSortDirection === "asc" ? "ascending" : "descending") : "none"}>
+                        <SortHeader
+                          label="Memory"
+                          sortKey="memory"
+                          activeKey={overviewSortKey}
+                          direction={overviewSortDirection}
+                          onChange={changeOverviewSort}
+                        />
+                      </th>
+                      <th>Baseline</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {overviewRows.map((row) => (
+                      <tr
+                        className="selectable-row"
+                        key={row.cohort.key}
+                        tabIndex={0}
+                        onClick={() => selectOverviewCohort(row)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            selectOverviewCohort(row);
+                          }
+                        }}
+                        aria-label={`Inspect ${row.model_id}, ${row.cohort.title}, ${row.cohort.gpu_label}`}
+                      >
+                        <td>
+                          <span className={`badge ${row.status}`}>{row.status}</span>
+                        </td>
+                        <td>{row.model_id}</td>
+                        <td>{row.cohort.gpu_label}</td>
+                        <td><CohortLabel cohort={row.cohort} /></td>
+                        <td>{formatTime(row.timestamp)}</td>
+                        <td>
+                          <span className={`source-badge source-${row.run_source}`}>
+                            {runSourceLabel(row.run_source)}
+                          </span>
+                          <span className="schedule-label">{row.test_scope || "Unavailable"}</span>
+                        </td>
+                        <td>{formatOverviewMetric("latency", row.metrics.latency?.current)}</td>
+                        <td>{formatOverviewMetric("throughput", row.metrics.throughput?.current)}</td>
+                        <td>{formatOverviewMetric("memory", row.metrics.memory?.current)}</td>
+                        <td>{row.baseline_eligible ? "Eligible" : "Excluded"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
-        </div>
-      </section>
+        </section>
+      ) : (
+        <>
+          <section className="panel">
+            <div className="panel-header">
+              <h2>Latest Status</h2>
+              <span>{latestRows.length} comparison cohorts</span>
+            </div>
+            {latestRows.length === 0 ? (
+              <div className="empty">No records match the selected filters.</div>
+            ) : (
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Stored Status</th>
+                      <th>Recomputed</th>
+                      <th>Model</th>
+                      <th>GPU</th>
+                      <th>Cohort</th>
+                      <th>Commit</th>
+                      <th>Source</th>
+                      <th>Schedule / Run type</th>
+                      <th>Baseline</th>
+                      <th>Baseline N</th>
+                      <th>Latency</th>
+                      <th>Throughput</th>
+                      <th>Memory</th>
+                      <th>Worst</th>
+                      <th>Exceeded</th>
+                      <th>Failing</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {latestRows.map((row) => (
+                      <tr key={row.cohort.key}>
+                        <td>
+                          <span className={`badge ${row.status}`}>{row.status}</span>
+                        </td>
+                        <td>
+                          <span className={`badge muted ${row.computed_regression_status}`}>
+                            {row.computed_regression_status}
+                          </span>
+                        </td>
+                        <td>{row.model_id}</td>
+                        <td>{row.cohort.gpu_label}</td>
+                        <td><CohortLabel cohort={row.cohort} /></td>
+                        <td>{shortSha(row.commit_sha)}</td>
+                        <td>
+                          <span className={`source-badge source-${row.run_source}`}>
+                            {runSourceLabel(row.run_source)}
+                          </span>
+                        </td>
+                        <td>{row.test_scope || "Unavailable"}</td>
+                        <td>{row.baseline_eligible ? "eligible" : "excluded"}</td>
+                        <td>{row.baseline_n}</td>
+                        <td>{formatNumber(row.metrics.latency?.current, 3)}</td>
+                        <td>{formatNumber(row.metrics.throughput?.current, 3)}</td>
+                        <td>{formatNumber(row.metrics.memory?.current, 1)}</td>
+                        <td>{formatNumber(row.worst_regression_pct, 1)}%</td>
+                        <td>
+                          {row.threshold_exceeded_metrics.length
+                            ? row.threshold_exceeded_metrics.join(", ")
+                            : "none"}
+                        </td>
+                        <td>{row.failing_metrics.length ? row.failing_metrics.join(", ") : "none"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+
+          <section className="panel">
+            <div className="panel-header">
+              <h2>Trends</h2>
+              <span>{days} day window</span>
+            </div>
+            <div className="trend-grid">
+              {trends.length === 0 ? (
+                <div className="empty full-width">
+                  No trend records found in the selected time window. Increase the day range or refresh after new CI
+                  performance records are uploaded.
+                </div>
+              ) : (
+                trends.map((group) =>
+                  METRIC_KEYS.map((metricKey) => (
+                    <article className="trend-card" key={`${group.cohort.key}-${metricKey}`}>
+                      <div>
+                        <h3>{metricLabel(metricKey)}</h3>
+                        <p>{group.model_id}</p>
+                        <CohortLabel cohort={group.cohort} compact />
+                      </div>
+                      <TrendChart group={group} metricKey={metricKey} />
+                    </article>
+                  ))
+                )
+              )}
+            </div>
+          </section>
+        </>
+      )}
     </main>
   );
 }
