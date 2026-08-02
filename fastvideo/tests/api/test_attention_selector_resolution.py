@@ -310,9 +310,41 @@ def test_component_attention_backend_reads_the_recorded_decision():
     assert selector.component_attention_backend(_Component(config)) == SAGE
 
 
-def test_component_that_resolved_to_auto_reports_none_not_absence():
-    """A component the loader stamped with "no request" reports None — an
-    answer — so its stage gets automatic selection rather than the env var."""
+def test_component_with_no_concrete_decision_reports_no_request(monkeypatch):
+    """"Stamped with no request" and "never stamped" are the SAME stored value.
+
+    ``ModelConfig._resolved_attention_backend`` is a field defaulting to None,
+    so the attribute always exists and ``record_resolved_attention_backend``
+    writes None whenever no scope is active. Neither state may suppress the env
+    var at a call site that previously honoured it, so both report NO_REQUEST.
+    """
+    from fastvideo.configs.models.dits.base import DiTConfig
+
+    class _Component:
+
+        def __init__(self, config):
+            self.config = config
+
+    # (a) stamped outside any scope -> stored None -> NO_REQUEST
+    stamped = DiTConfig()
+    assert selector.record_resolved_attention_backend(stamped) is None
+    assert selector.component_attention_backend(_Component(stamped)) is selector.NO_REQUEST
+
+    # (b) never stamped at all -> same stored value, same answer
+    untouched = DiTConfig()
+    assert untouched._resolved_attention_backend is None  # the field always exists
+    assert selector.component_attention_backend(_Component(untouched)) is selector.NO_REQUEST
+
+    # (c) and it does NOT suppress the env var, which is the whole point
+    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
+    selector._cached_get_attn_backend.cache_clear()
+    passthrough = selector.get_attn_backend(
+        requested=selector.component_attention_backend(_Component(untouched)), **KWARGS)
+    assert passthrough == selector.get_attn_backend(**KWARGS)
+
+
+def test_component_with_a_concrete_decision_reports_it():
+    """A real recorded backend is an answer, and overrides the ambient fallback."""
     from fastvideo.configs.models.dits.base import DiTConfig
 
     class _Component:
@@ -321,8 +353,9 @@ def test_component_that_resolved_to_auto_reports_none_not_absence():
             self.config = config
 
     config = DiTConfig()
-    assert selector.record_resolved_attention_backend(config) is None
-    assert selector.component_attention_backend(_Component(config)) is None
+    with selector._component_attention_backend_scope(SAGE, component="transformer"):
+        assert selector.record_resolved_attention_backend(config) == SAGE
+    assert selector.component_attention_backend(_Component(config)) == SAGE
 
 
 def test_component_without_a_recorded_decision_reports_no_request():

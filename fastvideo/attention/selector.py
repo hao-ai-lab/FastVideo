@@ -153,15 +153,25 @@ def record_resolved_attention_backend(config: object) -> AttentionBackendEnum | 
     return resolved
 
 
-def component_attention_backend(component: object) -> AttentionBackendEnum | None | _NoRequest:
+def component_attention_backend(component: object) -> AttentionBackendEnum | _NoRequest:
     """Read back the decision :func:`record_resolved_attention_backend` wrote.
 
-    Returns ``NO_REQUEST`` when ``component`` carries no recorded decision — it
-    was not built through a loader, or its config is not a FastVideo
-    ``ModelConfig`` — so the caller keeps today's fallback behavior rather than
-    being told "automatic selection" by something that was never asked.
+    Returns ``NO_REQUEST`` unless the component recorded a *concrete* backend,
+    so a caller that passes this through only overrides the ambient fallback
+    when there is a real decision to override it with.
+
+    ``NO_REQUEST`` rather than ``None`` for the no-decision case is deliberate,
+    and cannot be derived from the attribute's presence: ``ModelConfig`` declares
+    ``_resolved_attention_backend`` as a field defaulting to ``None``, so the
+    attribute always exists and a ``getattr`` default can never fire. Worse,
+    ``record_resolved_attention_backend`` writes ``None`` whenever no scope is
+    active, so "resolved to automatic selection" and "never recorded" are the
+    same stored value. Neither state should suppress the environment variable at
+    a call site that previously honoured it, and collapsing both to
+    ``NO_REQUEST`` keeps that behavior identical.
     """
-    return getattr(getattr(component, "config", None), "_resolved_attention_backend", NO_REQUEST)
+    resolved = getattr(getattr(component, "config", None), "_resolved_attention_backend", None)
+    return NO_REQUEST if resolved is None else resolved
 
 
 def get_attn_backend(
