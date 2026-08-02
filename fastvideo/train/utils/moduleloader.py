@@ -9,8 +9,8 @@ from typing import Any, TYPE_CHECKING
 import torch
 
 from fastvideo.attention.selector import (
+    _component_attention_backend_scope,
     coerce_attn_backend,
-    global_force_attn_backend_context_manager,
 )
 from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.fastvideo_args import ExecutionMode, TrainingArgs
@@ -131,8 +131,11 @@ def load_module_from_path(
         raise ValueError("attention_backend can only be set when loading "
                          f"a transformer, got module_type={module_type!r}")
     resolved_attention_backend = coerce_attn_backend(attention_backend)
-    attention_context = (nullcontext() if resolved_attention_backend is None else
-                         global_force_attn_backend_context_manager(resolved_attention_backend))
+    # Per-role request delivered as a construction scope: process-local,
+    # exception-safe, and part of the selector's cache key (no global
+    # mutation, no cache flushes between roles).
+    attention_context = (nullcontext() if resolved_attention_backend is None else _component_attention_backend_scope(
+        resolved_attention_backend, component=module_type))
 
     if disable_custom_init_weights:
         fastvideo_args._loading_teacher_critic_model = True
