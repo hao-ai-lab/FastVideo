@@ -108,7 +108,7 @@ def test_fsdp_loader_materializes_h3_mixed_dtype_islands(tmp_path) -> None:
     _validate_transformer_parameter_dtypes(loaded, torch.bfloat16, torch.bfloat16)
     assert loaded.proj_in.weight.dtype == torch.float32
     assert loaded.audio_proj_in.weight.dtype == torch.float32
-    assert loaded.time_embedder.linear_1.weight.dtype == torch.float32
+    assert loaded.time_embedder.fc_in.weight.dtype == torch.float32
     assert loaded.proj_out.weight.dtype == torch.float32
     assert loaded.audio_proj_out.weight.dtype == torch.float32
     assert loaded.rope.inv_freq.dtype == torch.float32

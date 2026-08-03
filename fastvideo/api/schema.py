@@ -4,6 +4,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+import PIL.Image
+import torch
+
 
 @dataclass
 class ServerConfig:
@@ -125,12 +128,10 @@ class InputConfig:
     image_path: str | list[str] | None = None
     video_path: str | list[str] | None = None
     pil_image: Any | None = None
-    # Model-family request bridges keep media opaque here. The owning pipeline
-    # validates and decodes it in an explicit stage.
-    last_image: Any | None = None
+    last_image: torch.Tensor | PIL.Image.Image | None = None
     references: list[Any] | None = None
     latents: Any | None = None
-    audio_latents: Any | None = None
+    audio_latents: torch.Tensor | None = None
     pose: str | None = None
     mouse_cond: Any | None = None
     keyboard_cond: Any | None = None

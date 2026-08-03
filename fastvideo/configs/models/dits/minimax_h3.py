@@ -22,15 +22,22 @@ class MiniMaxH3ArchConfig(DiTArchConfig):
     """One-to-one representation of the released transformer config."""
 
     _fsdp_shard_conditions: list = field(default_factory=lambda: [_is_minimax_h3_block])
+    _compile_conditions: list = field(default_factory=lambda: [_is_minimax_h3_block])
     _supported_attention_backends: tuple[AttentionBackendEnum, ...] = (
         AttentionBackendEnum.TORCH_SDPA,
         AttentionBackendEnum.FLASH_ATTN,
     )
 
-    # The native module keeps the Diffusers state-dict surface, so converted
-    # transformer weights require no loader-side rename.
-    param_names_mapping: dict = field(default_factory=dict)
+    param_names_mapping: dict = field(
+        default_factory=lambda: {
+            r"^time_embedder\.linear_1\.(.*)$": r"time_embedder.fc_in.\1",
+            r"^time_embedder\.linear_2\.(.*)$": r"time_embedder.fc_out.\1",
+            r"^(.*)\.attn\.to_out\.0\.(.*)$": r"\1.attn.to_out.\2",
+            r"^(.*)\.ff\.net\.0\.proj\.(.*)$": r"\1.ff.fc_in.\2",
+            r"^(.*)\.ff\.net\.2\.(.*)$": r"\1.ff.fc_out.\2",
+        })
     reverse_param_names_mapping: dict = field(default_factory=dict)
+    lora_param_names_mapping: dict = field(default_factory=dict)
 
     num_attention_heads: int = 56
     attention_head_dim: int = 128
@@ -68,5 +75,5 @@ class MiniMaxH3ArchConfig(DiTArchConfig):
 class MiniMaxH3Config(DiTConfig):
     """FastVideo component configuration for MiniMax H3 transformers."""
 
-    arch_config: DiTArchConfig = field(default_factory=MiniMaxH3ArchConfig)
+    arch_config: MiniMaxH3ArchConfig = field(default_factory=MiniMaxH3ArchConfig)
     prefix: str = "minimax_h3"

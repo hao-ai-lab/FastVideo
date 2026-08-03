@@ -47,9 +47,12 @@ from fastvideo.distributed import (  # noqa: E402
     maybe_init_distributed_environment_and_model_parallel,
 )
 from fastvideo.forward_context import set_forward_context  # noqa: E402
+from fastvideo.layers.linear import ReplicatedLinear  # noqa: E402
 from fastvideo.models.dits.minimax_h3 import (  # noqa: E402
     MiniMaxH3Transformer3DModel as FastVideoMiniMaxH3Transformer,
 )
+from fastvideo.models.loader.fsdp_load import load_model_from_full_model_state_dict  # noqa: E402
+from fastvideo.models.loader.utils import get_param_names_mapping, hf_to_custom_state_dict  # noqa: E402
 from fastvideo.platforms import current_platform  # noqa: E402
 
 
@@ -82,7 +85,7 @@ def distributed_runtime():
     cleanup_dist_env_and_memory()
 
 
-def _build_models() -> tuple[torch.nn.Module, torch.nn.Module]:
+def _build_models(param_dtype: torch.dtype = torch.float32) -> tuple[torch.nn.Module, torch.nn.Module]:
     """Strict-load one deterministic official random state into both models."""
     torch.manual_seed(20260802)
     official = OfficialMiniMaxH3Transformer(**TINY_CONFIG).eval()
@@ -101,9 +104,20 @@ def _build_models() -> tuple[torch.nn.Module, torch.nn.Module]:
 
     official_state = official.state_dict()
     fastvideo_state = fastvideo.state_dict()
-    assert list(fastvideo_state) == list(official_state)
-    assert all(fastvideo_state[name].shape == official_state[name].shape for name in official_state)
-    incompatible = fastvideo.load_state_dict(official_state, strict=True)
+    mapped_state, _ = hf_to_custom_state_dict(
+        official_state,
+        get_param_names_mapping(fastvideo.param_names_mapping),
+    )
+    assert set(mapped_state) == set(fastvideo_state)
+    assert all(fastvideo_state[name].shape == mapped_state[name].shape for name in mapped_state)
+    incompatible = load_model_from_full_model_state_dict(
+        fastvideo,
+        iter(official_state.items()),
+        device=torch.device("cpu"),
+        param_dtype=param_dtype,
+        strict=True,
+        param_names_mapping=get_param_names_mapping(fastvideo.param_names_mapping),
+    )
     assert not incompatible.missing_keys
     assert not incompatible.unexpected_keys
     return official, fastvideo
@@ -153,7 +167,6 @@ def _make_inputs() -> dict[str, torch.Tensor]:
         "video_indices": video_indices,
         "audio_indices": audio_indices,
         "text_indices": text_indices,
-        "return_dict": False,
     }
 
 
@@ -162,6 +175,8 @@ def _capture_activations(model: torch.nn.Module, names: tuple[str, ...]) -> tupl
 
     def capture(name: str):
         def hook(_module, _inputs, output) -> None:
+            if isinstance(output, tuple):
+                output = output[0]
             assert isinstance(output, torch.Tensor)
             activations[name].append(output.detach().clone())
 
@@ -189,7 +204,7 @@ def test_minimax_h3_transformer_matches_pinned_diffusers() -> None:
     fastvideo_activations, fastvideo_handles = _capture_activations(fastvideo, activation_names)
 
     with torch.inference_mode():
-        official_video, official_audio = official(**inputs)
+        official_video, official_audio = official(**inputs, return_dict=False)
         with set_forward_context(current_timestep=0, attn_metadata=None):
             fastvideo_video, fastvideo_audio = fastvideo(**inputs)
     for handle in official_handles + fastvideo_handles:
@@ -204,13 +219,12 @@ def test_minimax_h3_transformer_matches_pinned_diffusers() -> None:
 
 
 def test_minimax_h3_transformer_preserves_mixed_dtype_islands() -> None:
-    """Keep only the released input/time/output modules in FP32."""
-    _, fastvideo = _build_models()
-    fastvideo.to(dtype=torch.bfloat16)
+    """Keep only the released input/time/output modules in FP32 during loading."""
+    _, fastvideo = _build_models(param_dtype=torch.bfloat16)
 
     assert fastvideo.proj_in.weight.dtype == torch.float32
     assert fastvideo.audio_proj_in.weight.dtype == torch.float32
-    assert fastvideo.time_embedder.linear_1.weight.dtype == torch.float32
+    assert fastvideo.time_embedder.fc_in.weight.dtype == torch.float32
     assert fastvideo.proj_out.weight.dtype == torch.float32
     assert fastvideo.audio_proj_out.weight.dtype == torch.float32
     assert fastvideo.rope.inv_freq.dtype == torch.float32
@@ -235,12 +249,20 @@ def test_minimax_h3_arch_defaults_match_pinned_reference() -> None:
     assert 2 * 3 * config.rope_freq_dim == 96
 
 
-def test_minimax_h3_transformer_rejects_semantic_padding() -> None:
-    """Keep tag -1 out of the model-owned sequence-parallel padding path."""
+def test_minimax_h3_transformer_uses_native_projection_surface() -> None:
+    """Keep Diffusers container names at the loader boundary."""
     _, fastvideo = _build_models()
-    inputs = _make_inputs()
-    inputs["token_tags"] = inputs["token_tags"].clone()
-    inputs["token_tags"][-1] = -1
+    block = fastvideo.transformer_blocks[0]
 
-    with pytest.raises(ValueError, match="semantically padless"):
-        fastvideo(**inputs)
+    assert isinstance(fastvideo.time_embedder.fc_in, ReplicatedLinear)
+    assert isinstance(block.attn.to_out, ReplicatedLinear)
+    assert isinstance(block.ff.fc_in, ReplicatedLinear)
+    assert isinstance(block.ff.fc_out, ReplicatedLinear)
+    assert block.ff.fc_in.prefix == "minimax_h3.transformer_blocks.0.ff.fc_in"
+    assert block.attn.to_out.prefix == "minimax_h3.transformer_blocks.0.attn.to_out"
+
+    mapping = get_param_names_mapping(fastvideo.param_names_mapping)
+    assert mapping("time_embedder.linear_1.weight")[0] == "time_embedder.fc_in.weight"
+    assert mapping("transformer_blocks.0.attn.to_out.0.weight")[0] == "transformer_blocks.0.attn.to_out.weight"
+    assert mapping("transformer_blocks.0.ff.net.0.proj.weight")[0] == "transformer_blocks.0.ff.fc_in.weight"
+    assert mapping("transformer_blocks.0.ff.net.2.weight")[0] == "transformer_blocks.0.ff.fc_out.weight"

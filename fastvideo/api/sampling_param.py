@@ -5,6 +5,9 @@ import copy
 from dataclasses import dataclass, field, fields
 from typing import TYPE_CHECKING, Any
 
+import PIL.Image
+import torch
+
 from fastvideo.logger import init_logger
 from fastvideo.utils import StoreBoolean
 
@@ -25,7 +28,7 @@ class SamplingParam:
     # Image inputs
     image_path: str | None = None
     pil_image: Any | None = None
-    last_image: Any | None = None
+    last_image: torch.Tensor | PIL.Image.Image | None = None
     references: list[Any] | None = None
 
     # Video inputs
@@ -34,7 +37,7 @@ class SamplingParam:
     # Optional pre-generated diffusion latents. Used by parity/debug harnesses
     # and advanced callers that need deterministic latent reuse.
     latents: Any | None = None
-    audio_latents: Any | None = None
+    audio_latents: torch.Tensor | None = None
 
     # Action control inputs (Matrix-Game)
     mouse_cond: Any | None = None  # Shape: (B, T, 2)

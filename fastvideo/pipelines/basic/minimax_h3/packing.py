@@ -196,6 +196,12 @@ def build_packed_sequence(
         patch_size: tuple[int, int, int],
         keyframe_anchors: tuple[str, ...] = (),
 ) -> MiniMaxH3PackedSequence:
+    if text_token_tags.ndim != 1:
+        raise ValueError(f"text_token_tags must be one-dimensional, got {tuple(text_token_tags.shape)}.")
+    valid_text_tags = (text_token_tags == MINIMAX_H3_TEXT_TAG) | (text_token_tags == MINIMAX_H3_VIDEO_TAG)
+    if not bool(valid_text_tags.all()):
+        raise ValueError("text_token_tags may contain only text and vision tags; semantic padding is not allowed.")
+
     _, patch_h, patch_w = patch_size
     rows_per_frame = (latent_height // patch_h) * (latent_width // patch_w)
     num_text_tokens = text_token_tags.shape[0]

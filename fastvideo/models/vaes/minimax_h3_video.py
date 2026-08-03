@@ -3,8 +3,7 @@
 """Native MiniMax-H3 video VAE.
 
 The encoder is a causal 3D CNN while the decoder is a full-attention ViT.
-This module intentionally uses only PyTorch and FastVideo configuration types;
-checkpoint-format adaptation belongs in the conversion layer.
+This module intentionally uses only PyTorch and FastVideo configuration types.
 """
 
 import math

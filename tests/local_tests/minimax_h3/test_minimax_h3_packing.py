@@ -78,6 +78,18 @@ def test_condition_noise_preserves_draw_order() -> None:
     assert_close(torch.randn(5, generator=actual_generator), torch.randn(5, generator=reference_generator), rtol=0, atol=0)
 
 
+def test_layout_rejects_semantic_padding_tags() -> None:
+    with pytest.raises(ValueError, match="semantic padding"):
+        actual.build_packed_sequence(
+            text_token_tags=torch.tensor([1, -1]),
+            num_latent_frames=2,
+            latent_height=4,
+            latent_width=4,
+            num_audio_latents=2,
+            patch_size=(1, 2, 2),
+        )
+
+
 def test_stereo_audio_rows_unpack_channel_major() -> None:
     rows = torch.arange(2 * 5 * 3).reshape(10, 3)
     assert_close(actual.unpack_audio_tokens(rows, 5), reference.unpack_audio_tokens(rows, 5), rtol=0, atol=0)

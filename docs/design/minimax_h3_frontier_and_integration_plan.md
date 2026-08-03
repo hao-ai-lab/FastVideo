@@ -13,29 +13,28 @@ The smallest coherent FastVideo design is:
 2. Reuse FastVideo's stage composition, model registry, distributed attention, FSDP/offload, result object, and
    existing audio/video mux.
 3. Add native H3 Transformer, video VAE, audio VAE, scheduler, conditioner, packing, and joint-denoise stages.
-4. **Proposed FastVideo packaging:** publish two mutually exclusive workflow snapshots, one for `t2va/fl2va` and
-   one for `ref2va`. The Diffusers PR instead describes one Modular repository with `transformer/` and
-   `transformer_ref/`; never load both partitions, which the PR author reports are roughly 62 GB each in BF16,
-   into one pipeline.
-5. Reuse FastVideo's existing umbrella-repository and lazy-component patterns instead of implementing Modular
-   Diffusers as a second pipeline runtime.
+4. Load the Diffusers component layout directly. `t2va/fl2va` selects `transformer/`; `ref2va` selects
+   `transformer_ref/`. Never load both partitions into one pipeline.
+5. Reuse FastVideo's component loaders and stage runtime. `modular_model_index.json` describes upstream execution;
+   it is not a second runtime inside FastVideo.
 6. Ship inference first. Training, LoRA, quantization, VSA, 2K regeneration, and full-graph compilation are not v1
    scope.
 
 ## Current constraint
 
-**MiniMax H3 has not released its model weights yet.** Therefore we cannot run real-weight component parity,
-end-to-end parity, quality comparison, or meaningful performance tests now. The architecture below comes from
+The MiniMax H3 checkpoint is not available in this workspace. Therefore real-weight component parity, end-to-end
+parity, quality comparison, and performance remain unverified. The architecture below comes from
 [Diffusers PR #14355](https://github.com/huggingface/diffusers/pull/14355), which is still a draft implementation.
 
-Before the weights are released, parity means:
+Without real checkpoint access, parity means:
 
 - exact packing, tensor shape, position, modality-tag, timestep, scheduler, and RNG-order tests;
 - reference-vs-FastVideo component tests using the same synthetic or tiny random weights;
-- conversion tests using synthetic checkpoint fixtures;
+- strict-load tests using synthetic Diffusers component folders;
 - pipeline tests with tiny components to prove that data and state flow are correct.
 
-After the weights are released, add real component parity, end-to-end media parity, and Shifu performance tests.
+After real checkpoint access is available, add real component parity, end-to-end media parity, and Shifu performance
+tests.
 Until then, any quality, memory, or speed claim remains unverified.
 
 ## 1. What MiniMax H3 actually computes
@@ -302,38 +301,19 @@ The audio VAE is waveform-in/waveform-out:
 The PR author reports that BF16 audio decode is roughly 20 dB quieter. This is author-reported and must be
 independently checked, but it makes the FP32 rule an explicit acceptance contract.
 
-### 1.9 Conversion and upstream review gaps
+### 1.9 Weight and upstream review gaps
 
-The conversion script in the Diffusers PR shows several nontrivial weight contracts:
+The Diffusers component state carries several nontrivial contracts:
 
-- raw QKV is interleaved per head and must be reordered before Q/K/V splitting or FastVideo fusion;
-- fused SwiGLU halves change from source `[gate, value]` to the target implementation's expected order;
-- `rope.inv_freq` is recomputed;
+- Q/K/V and fused SwiGLU ordering must match the published tensors exactly;
+- `rope.inv_freq` is analytic state and must be rebuilt after meta-device initialization;
 - Transformer input projections, timestep MLP, and output heads stay FP32 while the block stack is BF16;
-- video VAE QKV/FFN needs the same ordering work;
-- audio VAE mapping is mostly identity and must retain weight-normalization and filter buffers.
+- video-VAE projection ordering is part of strict loading;
+- audio-VAE weight-normalization and filter buffers must be retained.
 
-The draft conversion CLI only writes the supplied Transformer as `transformer/`; it does not directly assemble
-`transformer_ref/` or copy the shared Qwen/tokenizer/processor. A complete two-partition repository still requires
-an external assembly step. This is a code-coverage gap, not proof that the eventual published repository is wrong.
-
-The PR author reports bitwise reference trajectories across 15 cases, packing suites with 68 + 211 checks, and 69
-modular tests. Those artifacts are not checked into the PR as a full-weight reproducible gate. Current public CI
-runs [Fast tests](https://github.com/huggingface/diffusers/actions/runs/30755942845) and
-[Modular fast tests](https://github.com/huggingface/diffusers/actions/runs/30755942838) failed at a doc-builder style
-quality gate, causing functional fanout to be skipped. This is not evidence of a model numerical failure, but it also
-is not a green functional test result.
-
-Other open risks in the draft:
-
-- the tiny modular checkpoint did not yet exist when the PR was written;
-- no dedicated scheduler or converter test file;
-- no checked-in full-weight GPU integration test;
-- mixed-dtype casts under quantized loading need review;
-- multi-GPU `device_map` for the video-VAE ViT decoder is unverified;
-- full-graph compile/export is blocked by a data-dependent padding branch;
-- no LoRA loader;
-- a documented two-second lower bound for video references is not explicitly enforced by code.
+The PR author reports bitwise reference trajectories and broad packing coverage, but no full-weight reproducible GPU
+gate is available in this workspace. Other open risks are mixed-dtype behavior under quantized loading, multi-GPU
+video-VAE decode, full-graph compilation, LoRA support, and enforcement of reference-duration limits.
 
 ## 2. Frontier interpretation
 
@@ -444,7 +424,7 @@ The H3 audio decoder should use the same contract.
 
 | Current assumption | H3 conflict | Required response |
 |---|---|---|
-| Root `model_index.json` and full-snapshot download | upstream uses `modular_model_index.json` in a reported 210 GB repo | publish workflow-scoped FastVideo manifests; download only one variant |
+| Root `model_index.json` and full-snapshot download | upstream places both Transformer partitions in one Diffusers component tree | select only the workflow's Transformer subfolder and the shared components |
 | module kind inferred from directory key | no `audio_scheduler` semantic role; `transformer_ref` is an alternative source partition | add role-aware audio-scheduler loading and normalize the selected Transformer partition to logical `transformer` |
 | `SchedulerLoader` reapplies one global `pipeline_config.flow_shift` | H3 must retain video shift 12 and audio shift 3 simultaneously | instantiate both H3 schedulers from their own checkpoint configs without the generic global override; assert both roles and shifts |
 | `audio_vae` loader is decoder-oriented | H3 must encode reference audio and decode targets | add a full audio-VAE loader/config path |
@@ -453,7 +433,7 @@ The H3 audio decoder should use the same contract.
 | generic decoder maps `image / 2 + 0.5` | H3 uses ImageNet normalization over `[0,1]` | add an H3 video-decode stage |
 | current LingBot Qwen3-VL model removes the vision tower | FL2VA/Ref2VA require Qwen vision tokens | add a full H3 conditioner; reuse only exact language-body primitives |
 | first Transformer parameter is expected to match one default dtype | H3 starts with intentional FP32 islands in a BF16 model | validate an explicit mixed-dtype contract |
-| base request has no `last_image`, ordered heterogeneous references, or inference audio latents | H3 cannot express its inputs | add an H3-specific sampling/input schema |
+| base request has no `last_image`, `references`, or inference `audio_latents` | H3 cannot express all inputs | preserve all three fields through the typed request path; validate reference contents in Ref2VA stages |
 
 FastVideo's LTX-2 DiT must not be reused:
 
@@ -478,36 +458,32 @@ FastVideo's Wan DiT must not be reused:
 3. **One typed family state.** Do not add dozens of H3-only tensors to `ForwardBatch`.
 4. **No second pipeline runtime.** Translate the computation into FastVideo stages.
 5. **No silent approximation.** Reject unsupported guidance, duration, reference, dtype, or backend combinations.
-6. **No public registry activation before released-weight E2E acceptance.**
+6. **No public registry activation before real-checkpoint E2E acceptance.**
 
-### 4.2 Checkpoint layout
+### 4.2 Diffusers component layout
 
-Use FastVideo's existing umbrella-repository convention:
+The Diffusers repository is the loading boundary:
 
 ```text
-FastVideo/MiniMax-H3-Diffusers/
-  fl2va/
-    model_index.json
-    transformer/
-    scheduler/
-    audio_scheduler/
-  ref2va/
-    model_index.json
-    transformer/
-    scheduler/
-    audio_scheduler/
+MiniMaxAI/MiniMax-H3/
+  transformer/
+  transformer_ref/
+  vae/
+  audio_vae/
+  scheduler/
+  audio_scheduler/
+  text_encoder/
+  tokenizer/
+  processor/
+  video_processor/
 ```
 
-`fl2va/` serves both text-only and first/last-frame requests. `ref2va/` contains the Ref2VA Transformer converted
-under the logical `transformer/` role, so generic downstream code never sees `transformer_2`.
+`t2va/fl2va` resolves `transformer/`; `ref2va` resolves `transformer_ref/`. FastVideo exposes the selected instance
+as the logical `modules["transformer"]` and never loads the other partition. Shared components load from their
+published subfolders through the existing component loaders.
 
-The shared conditioner, tokenizer, processor, video VAE, and audio VAE should be lazy-loaded from one immutable
-upstream revision, following the existing MagiHuman pattern. If the eventual official license/layout makes that
-unsafe, bundle the shared components in each workflow snapshot instead; do not invent an unpinned moving dependency.
-
-This deliberately avoids consuming `modular_model_index.json` in v1. A generic Modular Diffusers adapter would add
-a second component-resolution and execution model to FastVideo for one checkpoint. The existing umbrella and
-lazy-load primitives solve the concrete download problem with less blast radius.
+FastVideo reads each component's config and state directly. Pipeline stages remain native FastVideo stages; the
+upstream Modular graph is an architecture reference, not a runtime dependency.
 
 ### 4.3 Pipeline classes and stages
 
@@ -540,21 +516,22 @@ source. They share layout primitives, schedule logic, denoiser, and decoders.
 
 Add family-local dataclasses:
 
-- `MiniMaxH3Reference`: ordered image, video, or audio input plus explicit rates;
+- `MiniMaxH3Reference`: an ordered image, video, or audio input with explicit media metadata;
 - `MiniMaxH3Layout`: positions, tags, row indices, and condition-row counts;
-- `MiniMaxH3State`: layout plus video/audio target and condition latents.
+- `MiniMaxH3State`: layout plus references and video/audio target and condition latents.
 
 Store one typed object under `batch.extra["minimax_h3"]`. Stage validators assert its type and required fields.
 Public outputs keep the existing generic audio/video fields.
 
 Do not rely on an H3-only `SamplingParam` subclass: the current typed request path constructs the base
-`SamplingParam` and then expands it directly into `ForwardBatch`. Make the narrow request contract reachable by:
+`SamplingParam` and then expands it directly into `ForwardBatch`. Keep the request surface narrow:
 
-- adding `last_image`, ordered typed media `references`, and optional `audio_latents` to `InputConfig`,
-  `SamplingParam`, and `ForwardBatch` (the existing `latents` field remains the video-latent override);
-- teaching the compatibility layer to preserve those fields end to end;
-- enforcing H3 duration/canvas/reference constraints in the first H3 stage;
-- moving only derived tensors and layout state into `batch.extra["minimax_h3"]`.
+- preserve `last_image`, `references`, and optional `audio_latents` through `InputConfig`, `SamplingParam`, and
+  `ForwardBatch`;
+- keep the existing `latents` field as the video-latent override;
+- enforce H3 duration and canvas constraints in the first H3 stage, and normalize and validate reference contents in
+  the Ref2VA stage;
+- move only derived tensors and layout state into `batch.extra["minimax_h3"]`.
 
 Media decoding and resampling should happen in an explicit stage, not inside the reference dataclass constructor.
 That keeps I/O observable, testable, and separate from immutable request description.
@@ -571,7 +548,7 @@ Required native components:
 
 Transformer requirements:
 
-- fused/sharded QKV with the source interleave conversion proven independently;
+- FastVideo-native projections with checkpoint key/order differences expressed through `param_names_mapping`;
 - attention inner width 7,168 mapped back to residual width 5,376;
 - partial 96-of-128 RoPE;
 - row-indexed AdaLN;
@@ -628,7 +605,6 @@ fastvideo/pipelines/basic/minimax_h3/
   packing.py
   packing_ref2va.py
   stages/
-scripts/checkpoint_conversion/convert_minimax_h3_to_diffusers.py
 tests/local_tests/minimax_h3/
 ```
 
@@ -644,22 +620,22 @@ All implementation stays on `feat/kaiqin/minimax-h3`. These are engineering stag
 
 ### Stage 1: contracts, native components, and synthetic parity
 
-Implement the Transformer, video VAE, audio VAE, scheduler, packer, converter, mixed-dtype loading, and the minimal
-API plumbing.
+Implement the Transformer, video VAE, audio VAE, scheduler, FL2VA packer, direct component loading, and the minimal
+`last_image`/`references`/`audio_latents` request plumbing.
 
-Because the real weights are not released, acceptance uses:
+Without real checkpoint access, acceptance uses:
 
-- no-skip CPU geometry, packing, scheduler, and conversion tests;
+- no-skip CPU geometry, packing, scheduler, and component-loading tests;
 - the same tiny random weights loaded into the Diffusers reference and FastVideo implementations;
 - activation/output parity for the tiny Transformer and both VAEs;
 - independent reference and FastVideo packers;
-- synthetic checkpoint fixtures that verify QKV, FFN, key, shape, and dtype conversion.
+- synthetic Diffusers component folders that verify keys, shapes, dtypes, and strict loading.
 
 ### Stage 2: T2VA and first/last-frame pipeline
 
 Implement the FL2VA pipeline, Qwen3-VL conditioner, family state, dual denoising loop, decoders, and result/mux path.
 
-Acceptance before weight release:
+Acceptance without real checkpoint access:
 
 - text-only, first-frame, last-frame, and first+last-frame requests all reach the correct path;
 - row order, tags, positions, timesteps, and RNG draws match the reference implementation;
@@ -671,18 +647,18 @@ Acceptance before weight release:
 Implement ordered image/video/audio references, media decoding and resampling, Qwen vision presentation, dense VAE
 conditions, the Ref2VA packer, and the separate Ref2VA pipeline.
 
-Acceptance before weight release:
+Acceptance without real checkpoint access:
 
 - multiple ordered images, video with soundtrack, image plus audio, and mixed references build the expected layout;
 - changing reference order changes prompt presentation and layout deterministically;
 - reference count, pairing, duration, and rate errors are rejected;
 - the Ref2VA path never loads the FL2VA Transformer partition.
 
-### Stage 4: released-weight parity, Shifu acceptance, and activation
+### Stage 4: real-checkpoint parity, Shifu acceptance, and activation
 
 Start this stage only after the model weights and license are available.
 
-- convert both Transformer partitions and load the real shared components;
+- load each Transformer partition and the real shared components directly from their Diffusers subfolders;
 - run real component parity and end-to-end audio/video parity;
 - run SP, FSDP, and offload acceptance on Shifu;
 - measure memory and latency, then inspect generated motion, audio, and synchronization;
@@ -709,9 +685,9 @@ All must run without skip:
 - conditioning time values and fixed rows;
 - RNG draw order;
 - explicit rejection of CFG and negative prompt;
-- conversion key, shape, ordering, and dtype map.
+- strict component keys, shapes, dtypes, and parameter-name mappings.
 
-### 6.2 Parity before weights are released
+### 6.2 Parity without real checkpoint access
 
 Run the Diffusers reference and FastVideo with the same tiny configuration and random weights:
 
@@ -724,7 +700,7 @@ Run the Diffusers reference and FastVideo with the same tiny configuration and r
 The reference and FastVideo packers must be independent. Sharing one packer only proves that both paths consume the
 same output; it does not prove that the output is correct.
 
-### 6.3 Parity after weights are released
+### 6.3 Parity with the real checkpoint
 
 Run the real checkpoint on Shifu:
 
@@ -753,7 +729,7 @@ Use the same seed and inputs in upstream and FastVideo. Check:
 - A/V durations agree within the explicit frame/hop tolerance;
 - human inspection for motion, soundtrack content, and synchronization.
 
-Thresholds must be set from measured reference variance. Do not invent them in advance or convert an estimate into a
+Thresholds must be set from measured reference variance. Do not invent them in advance or present an estimate as a
 result.
 
 ## 7. Go/no-go conditions
@@ -761,10 +737,10 @@ result.
 Do not activate the model publicly until:
 
 - public or authorized checkpoint access and license are confirmed;
-- both partition conversions are reproducible;
+- both Transformer partitions strict-load from their published subfolders;
 - full audio-VAE encode/decode works;
 - mixed FP32/BF16 loading passes;
-- FL2VA released-weight E2E passes on Shifu;
+- FL2VA real-checkpoint E2E passes on Shifu;
 - SP parity passes at more than one world size;
 - one joint video/audio regression artifact is reviewed.
 

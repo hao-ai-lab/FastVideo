@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
 from typing import Any
 
 import torch
@@ -12,27 +11,21 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from fastvideo.attention import DistributedAttention
-from fastvideo.configs.models.dits.minimax_h3 import MiniMaxH3Config, _is_minimax_h3_block
+from fastvideo.configs.models.dits.minimax_h3 import MiniMaxH3Config
 from fastvideo.distributed.communication_op import (
     sequence_model_parallel_all_gather_with_unpad,
     sequence_model_parallel_shard,
 )
 from fastvideo.distributed.parallel_state import get_sp_world_size, model_parallel_is_initialized
 from fastvideo.layers.linear import ReplicatedLinear
+from fastvideo.layers.quantization import QuantizationConfig
 from fastvideo.layers.visual_embedding import Timesteps
 from fastvideo.models.dits.base import BaseDiT
 from fastvideo.platforms import AttentionBackendEnum
 
 
 MINIMAX_H3_MODALITY_NUM = 3
-
-
-@dataclass
-class MiniMaxH3TransformerOutput:
-    """Video and audio velocity predictions selected from the packed rows."""
-
-    sample: torch.Tensor
-    audio_sample: torch.Tensor
+_CFG = MiniMaxH3Config()
 
 
 _FP32_MODULE_NAMES = {
@@ -53,14 +46,6 @@ def _keep_in_fp32(name: str) -> bool:
 def _sequence_parallel_world_size() -> int:
     """Use standalone single-rank geometry before distributed initialization."""
     return get_sp_world_size() if model_parallel_is_initialized() else 1
-
-
-class MiniMaxH3Linear(ReplicatedLinear):
-    """Replicated linear with the tensor-only call contract used by the reference."""
-
-    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        output, _ = super().forward(hidden_states)
-        return output
 
 
 def _apply_partial_rotary_emb(
@@ -100,43 +85,69 @@ class MiniMaxH3RotaryPosEmbed(nn.Module):
 
 
 class MiniMaxH3TimestepEmbedding(nn.Module):
-    """Linear-SiLU-linear timestep MLP with checkpoint-compatible names."""
+    """Linear-SiLU-linear timestep MLP."""
 
-    def __init__(self, input_dim: int, hidden_dim: int, output_dim: int) -> None:
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dim: int,
+        output_dim: int,
+        quant_config: QuantizationConfig | None = None,
+        prefix: str = "",
+    ) -> None:
         super().__init__()
-        self.linear_1 = MiniMaxH3Linear(input_dim, hidden_dim, bias=True)
-        self.linear_2 = MiniMaxH3Linear(hidden_dim, output_dim, bias=True)
+        self.fc_in = ReplicatedLinear(
+            input_dim,
+            hidden_dim,
+            bias=True,
+            quant_config=quant_config,
+            prefix=f"{prefix}.fc_in",
+        )
+        self.fc_out = ReplicatedLinear(
+            hidden_dim,
+            output_dim,
+            bias=True,
+            quant_config=quant_config,
+            prefix=f"{prefix}.fc_out",
+        )
 
     def forward(self, sample: torch.Tensor) -> torch.Tensor:
-        return self.linear_2(F.silu(self.linear_1(sample)))
-
-
-class MiniMaxH3SwiGLU(nn.Module):
-    """SwiGLU projection whose state lives under `proj`."""
-
-    def __init__(self, hidden_size: int, ffn_dim: int) -> None:
-        super().__init__()
-        self.proj = MiniMaxH3Linear(hidden_size, 2 * ffn_dim, bias=False)
-
-    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        hidden_states, gate = self.proj(hidden_states).chunk(2, dim=-1)
-        return hidden_states * F.silu(gate)
+        hidden_states, _ = self.fc_in(sample)
+        hidden_states, _ = self.fc_out(F.silu(hidden_states))
+        return hidden_states
 
 
 class MiniMaxH3FeedForward(nn.Module):
-    """Bias-free SwiGLU feed-forward with Diffusers-compatible state names."""
+    """Bias-free H3 SwiGLU with value-first packed halves."""
 
-    def __init__(self, hidden_size: int, ffn_dim: int) -> None:
+    def __init__(
+        self,
+        hidden_size: int,
+        ffn_dim: int,
+        quant_config: QuantizationConfig | None = None,
+        prefix: str = "",
+    ) -> None:
         super().__init__()
-        self.net = nn.ModuleList([
-            MiniMaxH3SwiGLU(hidden_size, ffn_dim),
-            nn.Dropout(0.0),
-            MiniMaxH3Linear(ffn_dim, hidden_size, bias=False),
-        ])
+        self.fc_in = ReplicatedLinear(
+            hidden_size,
+            2 * ffn_dim,
+            bias=False,
+            quant_config=quant_config,
+            prefix=f"{prefix}.fc_in",
+        )
+        self.fc_out = ReplicatedLinear(
+            ffn_dim,
+            hidden_size,
+            bias=False,
+            quant_config=quant_config,
+            prefix=f"{prefix}.fc_out",
+        )
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        for module in self.net:
-            hidden_states = module(hidden_states)
+        hidden_states, _ = self.fc_in(hidden_states)
+        hidden_states, gate = hidden_states.chunk(2, dim=-1)
+        hidden_states = hidden_states * F.silu(gate)
+        hidden_states, _ = self.fc_out(hidden_states)
         return hidden_states
 
 
@@ -150,21 +161,43 @@ class MiniMaxH3Attention(nn.Module):
         attention_head_dim: int,
         qk_norm_eps: float,
         supported_attention_backends: tuple[AttentionBackendEnum, ...],
+        quant_config: QuantizationConfig | None,
         prefix: str,
     ) -> None:
         super().__init__()
         self.num_attention_heads = num_attention_heads
         self.attention_head_dim = attention_head_dim
         inner_dim = num_attention_heads * attention_head_dim
-        self.to_q = MiniMaxH3Linear(hidden_size, inner_dim, bias=False, prefix=f"{prefix}.to_q")
-        self.to_k = MiniMaxH3Linear(hidden_size, inner_dim, bias=False, prefix=f"{prefix}.to_k")
-        self.to_v = MiniMaxH3Linear(hidden_size, inner_dim, bias=False, prefix=f"{prefix}.to_v")
+        self.to_q = ReplicatedLinear(
+            hidden_size,
+            inner_dim,
+            bias=False,
+            quant_config=quant_config,
+            prefix=f"{prefix}.to_q",
+        )
+        self.to_k = ReplicatedLinear(
+            hidden_size,
+            inner_dim,
+            bias=False,
+            quant_config=quant_config,
+            prefix=f"{prefix}.to_k",
+        )
+        self.to_v = ReplicatedLinear(
+            hidden_size,
+            inner_dim,
+            bias=False,
+            quant_config=quant_config,
+            prefix=f"{prefix}.to_v",
+        )
         self.norm_q = nn.RMSNorm(attention_head_dim, eps=qk_norm_eps)
         self.norm_k = nn.RMSNorm(attention_head_dim, eps=qk_norm_eps)
-        self.to_out = nn.ModuleList([
-            MiniMaxH3Linear(inner_dim, hidden_size, bias=False, prefix=f"{prefix}.to_out.0"),
-            nn.Dropout(0.0),
-        ])
+        self.to_out = ReplicatedLinear(
+            inner_dim,
+            hidden_size,
+            bias=False,
+            quant_config=quant_config,
+            prefix=f"{prefix}.to_out",
+        )
         self.distributed_attention = DistributedAttention(
             num_heads=num_attention_heads,
             head_size=attention_head_dim,
@@ -179,9 +212,12 @@ class MiniMaxH3Attention(nn.Module):
         rotary_emb: tuple[torch.Tensor, torch.Tensor] | None,
         original_seq_len: int,
     ) -> torch.Tensor:
-        query = self.to_q(hidden_states).unflatten(-1, (self.num_attention_heads, self.attention_head_dim))
-        key = self.to_k(hidden_states).unflatten(-1, (self.num_attention_heads, self.attention_head_dim))
-        value = self.to_v(hidden_states).unflatten(-1, (self.num_attention_heads, self.attention_head_dim))
+        query, _ = self.to_q(hidden_states)
+        key, _ = self.to_k(hidden_states)
+        value, _ = self.to_v(hidden_states)
+        query = query.unflatten(-1, (self.num_attention_heads, self.attention_head_dim))
+        key = key.unflatten(-1, (self.num_attention_heads, self.attention_head_dim))
+        value = value.unflatten(-1, (self.num_attention_heads, self.attention_head_dim))
         query = self.norm_q(query)
         key = self.norm_k(key)
         if rotary_emb is not None:
@@ -198,8 +234,8 @@ class MiniMaxH3Attention(nn.Module):
             freqs_cis=None,
         )
         hidden_states = hidden_states.flatten(2, 3).type_as(query)
-        hidden_states = self.to_out[0](hidden_states)
-        return self.to_out[1](hidden_states)
+        hidden_states, _ = self.to_out(hidden_states)
+        return hidden_states
 
 
 class MiniMaxH3TokenRefinerBlock(nn.Module):
@@ -214,6 +250,7 @@ class MiniMaxH3TokenRefinerBlock(nn.Module):
         norm_eps: float,
         qk_norm_eps: float,
         supported_attention_backends: tuple[AttentionBackendEnum, ...],
+        quant_config: QuantizationConfig | None,
         prefix: str,
     ) -> None:
         super().__init__()
@@ -224,10 +261,16 @@ class MiniMaxH3TokenRefinerBlock(nn.Module):
             attention_head_dim,
             qk_norm_eps,
             supported_attention_backends,
+            quant_config,
             prefix=f"{prefix}.attn",
         )
         self.norm2 = nn.RMSNorm(hidden_size, eps=norm_eps)
-        self.ff = MiniMaxH3FeedForward(hidden_size, ffn_dim)
+        self.ff = MiniMaxH3FeedForward(
+            hidden_size,
+            ffn_dim,
+            quant_config=quant_config,
+            prefix=f"{prefix}.ff",
+        )
 
     def forward(self, hidden_states: torch.Tensor, original_seq_len: int) -> torch.Tensor:
         hidden_states = hidden_states + self.attn(self.norm1(hidden_states), None, original_seq_len)
@@ -248,6 +291,8 @@ class MiniMaxH3TokenRefiner(nn.Module):
         qk_norm_eps: float,
         final_norm_eps: float,
         supported_attention_backends: tuple[AttentionBackendEnum, ...],
+        quant_config: QuantizationConfig | None,
+        prefix: str,
     ) -> None:
         super().__init__()
         self.refiner_blocks = nn.ModuleList([
@@ -259,7 +304,8 @@ class MiniMaxH3TokenRefiner(nn.Module):
                 norm_eps,
                 qk_norm_eps,
                 supported_attention_backends,
-                prefix=f"token_refiner.refiner_blocks.{index}",
+                quant_config,
+                prefix=f"{prefix}.refiner_blocks.{index}",
             ) for index in range(num_layers)
         ])
         self.final_norm = nn.RMSNorm(hidden_size, eps=final_norm_eps)
@@ -273,27 +319,48 @@ class MiniMaxH3TokenRefiner(nn.Module):
 class MiniMaxH3AdaLayerNormModulation(nn.Module):
     """Produce six modulation tables for every `(timestep, modality)` pair."""
 
-    def __init__(self, time_embed_dim: int, hidden_size: int) -> None:
+    def __init__(
+        self,
+        time_embed_dim: int,
+        hidden_size: int,
+        quant_config: QuantizationConfig | None = None,
+        prefix: str = "",
+    ) -> None:
         super().__init__()
         self.hidden_size = hidden_size
-        self.linear = MiniMaxH3Linear(
+        self.linear = ReplicatedLinear(
             time_embed_dim,
             6 * hidden_size * MINIMAX_H3_MODALITY_NUM,
             bias=True,
+            quant_config=quant_config,
+            prefix=f"{prefix}.linear",
         )
 
     def forward(self, temb: torch.Tensor) -> tuple[torch.Tensor, ...]:
-        temb = self.linear(F.silu(temb).to(self.linear.weight.dtype))
+        temb, _ = self.linear(F.silu(temb).to(self.linear.weight.dtype))
         return temb.view(-1, 6 * self.hidden_size).chunk(6, dim=-1)
 
 
 class MiniMaxH3AdaLayerNormOut(nn.Module):
     """Final RMSNorm with per-timestep row modulation."""
 
-    def __init__(self, hidden_size: int, time_embed_dim: int, eps: float) -> None:
+    def __init__(
+        self,
+        hidden_size: int,
+        time_embed_dim: int,
+        eps: float,
+        quant_config: QuantizationConfig | None = None,
+        prefix: str = "",
+    ) -> None:
         super().__init__()
         self.norm = nn.RMSNorm(hidden_size, eps=eps)
-        self.linear = MiniMaxH3Linear(time_embed_dim, 2 * hidden_size, bias=True)
+        self.linear = ReplicatedLinear(
+            time_embed_dim,
+            2 * hidden_size,
+            bias=True,
+            quant_config=quant_config,
+            prefix=f"{prefix}.linear",
+        )
 
     def forward(
         self,
@@ -301,7 +368,8 @@ class MiniMaxH3AdaLayerNormOut(nn.Module):
         temb: torch.Tensor,
         timestep_indices: torch.Tensor,
     ) -> torch.Tensor:
-        shift, scale = self.linear(F.silu(temb).to(self.linear.weight.dtype)).chunk(2, dim=-1)
+        shift_scale, _ = self.linear(F.silu(temb).to(self.linear.weight.dtype))
+        shift, scale = shift_scale.chunk(2, dim=-1)
         hidden_states = self.norm(hidden_states)
         return hidden_states * (1.0 + scale.index_select(0, timestep_indices)) + shift.index_select(
             0, timestep_indices
@@ -321,6 +389,7 @@ class MiniMaxH3TransformerBlock(nn.Module):
         norm_eps: float,
         qk_norm_eps: float,
         supported_attention_backends: tuple[AttentionBackendEnum, ...],
+        quant_config: QuantizationConfig | None,
         prefix: str,
     ) -> None:
         super().__init__()
@@ -331,11 +400,22 @@ class MiniMaxH3TransformerBlock(nn.Module):
             attention_head_dim,
             qk_norm_eps,
             supported_attention_backends,
+            quant_config,
             prefix=f"{prefix}.attn",
         )
         self.norm2 = nn.RMSNorm(hidden_size, eps=norm_eps)
-        self.ff = MiniMaxH3FeedForward(hidden_size, ffn_dim)
-        self.adaln_proj = MiniMaxH3AdaLayerNormModulation(time_embed_dim, hidden_size)
+        self.ff = MiniMaxH3FeedForward(
+            hidden_size,
+            ffn_dim,
+            quant_config=quant_config,
+            prefix=f"{prefix}.ff",
+        )
+        self.adaln_proj = MiniMaxH3AdaLayerNormModulation(
+            time_embed_dim,
+            hidden_size,
+            quant_config=quant_config,
+            prefix=f"{prefix}.adaln_proj",
+        )
 
     def forward(
         self,
@@ -367,26 +447,23 @@ class MiniMaxH3TransformerBlock(nn.Module):
 class MiniMaxH3Transformer3DModel(BaseDiT):
     """Joint H3 Transformer over one padless text/audio/video document.
 
-    Semantic padding rows are rejected. Sequence-parallel transport padding is
-    created only after every row-aligned tensor has been padded and sharded in
-    the same order, and `DistributedAttention` trims it before attention.
+    The layout builder validates semantic rows before denoising. Sequence-
+    parallel padding is transport-only and `DistributedAttention` trims it
+    before attention.
     """
 
-    _fsdp_shard_conditions = [_is_minimax_h3_block]
-    _compile_conditions = [_is_minimax_h3_block]
-    _supported_attention_backends = (
-        AttentionBackendEnum.TORCH_SDPA,
-        AttentionBackendEnum.FLASH_ATTN,
-    )
-    param_names_mapping: dict = {}
-    reverse_param_names_mapping: dict = {}
+    _fsdp_shard_conditions = _CFG._fsdp_shard_conditions
+    _compile_conditions = _CFG._compile_conditions
+    _supported_attention_backends = _CFG._supported_attention_backends
+    param_names_mapping = _CFG.param_names_mapping
+    reverse_param_names_mapping = _CFG.reverse_param_names_mapping
+    lora_param_names_mapping = _CFG.lora_param_names_mapping
 
     def _get_parameter_dtype(self, name: str, default_dtype: torch.dtype) -> torch.dtype:
         """Keep the released input, timestep, and output projections in FP32."""
         return torch.float32 if _keep_in_fp32(name) else default_dtype
 
     def __init__(self, config: MiniMaxH3Config, hf_config: dict[str, Any]) -> None:
-        config.update_model_arch(hf_config)
         super().__init__(config, hf_config)
         arch = config.arch_config
         sp_world_size = _sequence_parallel_world_size()
@@ -401,18 +478,26 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         self.num_channels_latents = arch.in_channels
         video_patch_dim = arch.in_channels * math.prod(arch.patch_size)
 
-        self.proj_in = MiniMaxH3Linear(video_patch_dim, arch.hidden_size, bias=True, prefix="proj_in")
-        self.audio_proj_in = MiniMaxH3Linear(
+        self.proj_in = ReplicatedLinear(
+            video_patch_dim,
+            arch.hidden_size,
+            bias=True,
+            quant_config=config.quant_config,
+            prefix=f"{config.prefix}.proj_in",
+        )
+        self.audio_proj_in = ReplicatedLinear(
             arch.audio_in_channels,
             arch.hidden_size,
             bias=True,
-            prefix="audio_proj_in",
+            quant_config=config.quant_config,
+            prefix=f"{config.prefix}.audio_proj_in",
         )
-        self.context_embedder = MiniMaxH3Linear(
+        self.context_embedder = ReplicatedLinear(
             arch.text_dim,
             arch.hidden_size,
             bias=True,
-            prefix="context_embedder",
+            quant_config=config.quant_config,
+            prefix=f"{config.prefix}.context_embedder",
         )
         self.time_proj = Timesteps(
             num_channels=arch.freq_dim,
@@ -423,6 +508,8 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
             arch.freq_dim,
             arch.time_embed_hidden_dim,
             arch.time_embed_dim,
+            quant_config=config.quant_config,
+            prefix=f"{config.prefix}.time_embedder",
         )
         self.rope = MiniMaxH3RotaryPosEmbed(arch.rope_freq_dim, arch.rope_theta)
         self.token_refiner = MiniMaxH3TokenRefiner(
@@ -435,6 +522,8 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
             arch.qk_norm_eps,
             arch.final_norm_eps,
             self.supported_attention_backends,
+            config.quant_config,
+            prefix=f"{config.prefix}.token_refiner",
         )
         self.transformer_blocks = nn.ModuleList([
             MiniMaxH3TransformerBlock(
@@ -446,43 +535,32 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
                 arch.norm_eps,
                 arch.qk_norm_eps,
                 self.supported_attention_backends,
-                prefix=f"transformer_blocks.{index}",
+                config.quant_config,
+                prefix=f"{config.prefix}.transformer_blocks.{index}",
             ) for index in range(arch.num_layers)
         ])
         self.norm_out = MiniMaxH3AdaLayerNormOut(
             arch.hidden_size,
             arch.time_embed_dim,
             arch.final_norm_eps,
+            quant_config=config.quant_config,
+            prefix=f"{config.prefix}.norm_out",
         )
-        self.proj_out = MiniMaxH3Linear(arch.hidden_size, video_patch_dim, bias=True, prefix="proj_out")
-        self.audio_proj_out = MiniMaxH3Linear(
+        self.proj_out = ReplicatedLinear(
+            arch.hidden_size,
+            video_patch_dim,
+            bias=True,
+            quant_config=config.quant_config,
+            prefix=f"{config.prefix}.proj_out",
+        )
+        self.audio_proj_out = ReplicatedLinear(
             arch.hidden_size,
             arch.audio_in_channels,
             bias=True,
-            prefix="audio_proj_out",
+            quant_config=config.quant_config,
+            prefix=f"{config.prefix}.audio_proj_out",
         )
         self.__post_init__()
-
-    def to(self, *args: Any, **kwargs: Any) -> MiniMaxH3Transformer3DModel:
-        """Cast bulk weights while preserving the released FP32 islands."""
-        device, dtype, non_blocking, _ = torch._C._nn._parse_to(*args, **kwargs)
-        if dtype is None or dtype == torch.float32:
-            return super().to(*args, **kwargs)
-        if not torch.is_floating_point(torch.empty((), dtype=dtype)):
-            return super().to(*args, **kwargs)
-        if device is not None:
-            super().to(device=device, non_blocking=non_blocking)
-        for name, parameter in self.named_parameters():
-            if torch.is_floating_point(parameter):
-                target_dtype = torch.float32 if _keep_in_fp32(name) else dtype
-                parameter.data = parameter.data.to(target_dtype, non_blocking=non_blocking)
-                if parameter.grad is not None:
-                    parameter.grad.data = parameter.grad.data.to(target_dtype, non_blocking=non_blocking)
-        for name, buffer in self.named_buffers():
-            if torch.is_floating_point(buffer):
-                target_dtype = torch.float32 if _keep_in_fp32(name) else dtype
-                buffer.data = buffer.data.to(target_dtype, non_blocking=non_blocking)
-        return self
 
     def materialize_non_persistent_buffers(
         self,
@@ -514,18 +592,13 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         video_indices: torch.Tensor,
         audio_indices: torch.Tensor,
         text_indices: torch.Tensor,
-        return_dict: bool = True,
-        **kwargs: Any,
-    ) -> MiniMaxH3TransformerOutput | tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Predict video and audio velocities from one caller-defined packed layout."""
-        del kwargs
         if position_ids.ndim != 2 or position_ids.shape[-1] != 3:
             raise ValueError(f"position_ids must have shape (seq_len, 3), got {tuple(position_ids.shape)}.")
         sequence_length = position_ids.shape[0]
         if token_tags.shape != (sequence_length,) or timestep_indices.shape != (sequence_length,):
             raise ValueError("token_tags and timestep_indices must both match the packed sequence length.")
-        if bool((token_tags < 0).any()):
-            raise ValueError("MiniMax H3 FastVideo inputs must be semantically padless; remove tag -1 rows.")
         if hidden_states.shape[1] != video_indices.numel():
             raise ValueError("hidden_states row count must match video_indices.")
         if audio_hidden_states.shape[1] != audio_indices.numel():
@@ -534,9 +607,9 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
             raise ValueError("encoder_hidden_states row count must match text_indices.")
 
         rotary_emb = self.rope(position_ids)
-        video_embeds = self.proj_in(hidden_states.to(self.proj_in.weight.dtype))
-        audio_embeds = self.audio_proj_in(audio_hidden_states.to(self.audio_proj_in.weight.dtype))
-        text_embeds = self.context_embedder(encoder_hidden_states.to(self.context_embedder.weight.dtype))
+        video_embeds, _ = self.proj_in(hidden_states.to(self.proj_in.weight.dtype))
+        audio_embeds, _ = self.audio_proj_in(audio_hidden_states.to(self.audio_proj_in.weight.dtype))
+        text_embeds, _ = self.context_embedder(encoder_hidden_states.to(self.context_embedder.weight.dtype))
 
         text_original_seq_len = text_embeds.shape[1]
         sp_world_size = _sequence_parallel_world_size()
@@ -558,7 +631,7 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         packed_hidden_states = packed_hidden_states.index_copy(1, audio_indices, audio_embeds.to(text_embeds.dtype))
 
         temb = self.time_proj(timestep)
-        temb = self.time_embedder(temb.to(self.time_embedder.linear_1.weight.dtype))
+        temb = self.time_embedder(temb.to(self.time_embedder.fc_in.weight.dtype))
         adaln_indices = timestep_indices * MINIMAX_H3_MODALITY_NUM + token_tags
         local_timestep_indices = timestep_indices
         original_seq_len = sequence_length
@@ -585,17 +658,15 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
             temb,
             local_timestep_indices,
         ).to(self.proj_out.weight.dtype)
-        video_output = self.proj_out(packed_hidden_states)
-        audio_output = self.audio_proj_out(packed_hidden_states)
+        video_output, _ = self.proj_out(packed_hidden_states)
+        audio_output, _ = self.audio_proj_out(packed_hidden_states)
         if sp_world_size > 1:
             video_output = sequence_model_parallel_all_gather_with_unpad(video_output, original_seq_len, dim=1)
             audio_output = sequence_model_parallel_all_gather_with_unpad(audio_output, original_seq_len, dim=1)
         video_output = video_output.index_select(1, video_indices)
         audio_output = audio_output.index_select(1, audio_indices)
 
-        if not return_dict:
-            return video_output, audio_output
-        return MiniMaxH3TransformerOutput(sample=video_output, audio_sample=audio_output)
+        return video_output, audio_output
 
 
 EntryClass = MiniMaxH3Transformer3DModel

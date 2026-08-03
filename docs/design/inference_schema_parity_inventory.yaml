@@ -445,7 +445,10 @@ surfaces:
     moved:
       image_path: request.inputs.image_path
       pil_image: request.inputs.pil_image
+      last_image: request.inputs.last_image
+      references: request.inputs.references
       video_path: request.inputs.video_path
+      audio_latents: request.inputs.audio_latents
       mouse_cond: request.inputs.mouse_cond
       keyboard_cond: request.inputs.keyboard_cond
       grid_sizes: request.inputs.grid_sizes
