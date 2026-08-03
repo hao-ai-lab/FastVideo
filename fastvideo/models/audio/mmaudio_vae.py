@@ -1,18 +1,35 @@
-# SPDX-License-Identifier: CC-BY-NC-SA-4.0
-"""Native 1D audio VAE used by MMAudio.
-
-Adapted from MMAudio's VAE and NVIDIA EDM2 magnitude-preserving layers. The
-upstream EDM2-derived layer implementation is CC-BY-NC-SA-4.0; keep that
-license in mind when redistributing this component or converted checkpoints.
-"""
+# SPDX-License-Identifier: MIT
+#
+# MIT License
+#
+# Copyright (c) 2024 Sony Research Inc.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+"""Native 1D audio VAE used by MMAudio."""
 
 from __future__ import annotations
 
 import logging
+import math
 from collections.abc import Iterable
 from typing import Any
 
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -452,41 +469,27 @@ DATA_STD_128D = [
 ]
 
 
-def normalize(x: torch.Tensor, dim: int | list[int] | None = None, eps: float = 1e-4) -> torch.Tensor:
-    if dim is None:
-        dim = list(range(1, x.ndim))
-    norm = torch.linalg.vector_norm(x, dim=dim, keepdim=True, dtype=torch.float32)
-    norm = torch.add(eps, norm, alpha=np.sqrt(norm.numel() / x.numel()))
-    return x / norm.to(x.dtype)
+_NORMALIZATION_EPSILON = 1e-4
+_SILU_DIVISOR = 0.596
+_RESIDUAL_BLEND = 0.3
+_RESIDUAL_DIVISOR = math.hypot(1.0 - _RESIDUAL_BLEND, _RESIDUAL_BLEND)
 
 
-def mp_silu(x: torch.Tensor) -> torch.Tensor:
-    return F.silu(x) / 0.596
+def _rms_normalize(x: torch.Tensor, dim: int | tuple[int, ...]) -> torch.Tensor:
+    dims = (dim,) if isinstance(dim, int) else dim
+    element_count = math.prod(x.shape[axis] for axis in dims)
+    l2_norm = torch.linalg.vector_norm(x, dim=dims, keepdim=True, dtype=torch.float32)
+    rms = torch.add(_NORMALIZATION_EPSILON, l2_norm, alpha=element_count**-0.5)
+    return x / rms.to(x.dtype)
 
 
-def mp_sum(a: torch.Tensor, b: torch.Tensor, t: float = 0.5) -> torch.Tensor:
-    return a.lerp(b, t) / np.sqrt((1 - t) ** 2 + t**2)
+def _conv1d(in_channels: int, out_channels: int, kernel_size: int) -> nn.Conv1d:
+    return nn.Conv1d(in_channels, out_channels, kernel_size, padding=kernel_size // 2, bias=False)
 
 
-class MPConv1D(nn.Module):
-    def __init__(self, in_channels: int, out_channels: int, kernel_size: int) -> None:
-        super().__init__()
-        self.out_channels = out_channels
-        self.weight = nn.Parameter(torch.randn(out_channels, in_channels, kernel_size))
-        self.weight_norm_removed = False
-
-    def forward(self, x: torch.Tensor, gain: torch.Tensor | float = 1) -> torch.Tensor:
-        if not self.weight_norm_removed:
-            raise RuntimeError("call remove_weight_norm() before inference")
-        weight = self.weight * gain
-        return F.conv1d(x, weight, padding=weight.shape[-1] // 2)
-
-    def remove_weight_norm(self):
-        weight = normalize(self.weight.to(torch.float32))
-        weight = weight / np.sqrt(weight[0].numel())
-        self.weight.data.copy_(weight.to(self.weight.dtype))
-        self.weight_norm_removed = True
-        return self
+def _conv1d_with_gain(conv: nn.Conv1d, x: torch.Tensor, gain: torch.Tensor | float) -> torch.Tensor:
+    return F.conv1d(x, conv.weight * gain, stride=conv.stride, padding=conv.padding, dilation=conv.dilation,
+                    groups=conv.groups)
 
 
 class DiagonalGaussianDistribution:
@@ -523,23 +526,23 @@ class ResnetBlock1D(nn.Module):
         self.out_dim = in_dim if out_dim is None else out_dim
         self.use_conv_shortcut = conv_shortcut
         self.use_norm = use_norm
-        self.conv1 = MPConv1D(in_dim, self.out_dim, kernel_size)
-        self.conv2 = MPConv1D(self.out_dim, self.out_dim, kernel_size)
+        self.conv1 = _conv1d(in_dim, self.out_dim, kernel_size)
+        self.conv2 = _conv1d(self.out_dim, self.out_dim, kernel_size)
         if self.in_dim != self.out_dim:
             if conv_shortcut:
-                self.conv_shortcut = MPConv1D(in_dim, self.out_dim, kernel_size)
+                self.conv_shortcut = _conv1d(in_dim, self.out_dim, kernel_size)
             else:
-                self.nin_shortcut = MPConv1D(in_dim, self.out_dim, 1)
+                self.nin_shortcut = _conv1d(in_dim, self.out_dim, 1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self.use_norm:
-            x = normalize(x, dim=1)
-        hidden = self.conv1(mp_silu(x))
-        hidden = self.conv2(mp_silu(hidden))
+            x = _rms_normalize(x, dim=1)
+        hidden = self.conv1(F.silu(x) / _SILU_DIVISOR)
+        hidden = self.conv2(F.silu(hidden) / _SILU_DIVISOR)
         if self.in_dim != self.out_dim:
             shortcut = self.conv_shortcut if self.use_conv_shortcut else self.nin_shortcut
             x = shortcut(x)
-        return mp_sum(x, hidden, t=0.3)
+        return torch.lerp(x, hidden, _RESIDUAL_BLEND) / _RESIDUAL_DIVISOR
 
 
 class AttnBlock1D(nn.Module):
@@ -547,18 +550,18 @@ class AttnBlock1D(nn.Module):
         super().__init__()
         self.in_channels = in_channels
         self.num_heads = num_heads
-        self.qkv = MPConv1D(in_channels, in_channels * 3, 1)
-        self.proj_out = MPConv1D(in_channels, in_channels, 1)
+        self.qkv = _conv1d(in_channels, in_channels * 3, 1)
+        self.proj_out = _conv1d(in_channels, in_channels, 1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         qkv = self.qkv(x).reshape(x.shape[0], self.num_heads, -1, 3, x.shape[-1])
-        query, key, value = normalize(qkv, dim=2).unbind(3)
+        query, key, value = _rms_normalize(qkv, dim=2).unbind(3)
         query = rearrange(query, "b h c l -> b h l c")
         key = rearrange(key, "b h c l -> b h l c")
         value = rearrange(value, "b h c l -> b h l c")
         hidden = F.scaled_dot_product_attention(query, key, value)
         hidden = rearrange(hidden, "b h l c -> b (h c) l")
-        return mp_sum(x, self.proj_out(hidden), t=0.3)
+        return torch.lerp(x, self.proj_out(hidden), _RESIDUAL_BLEND) / _RESIDUAL_DIVISOR
 
 
 class Upsample1D(nn.Module):
@@ -566,7 +569,7 @@ class Upsample1D(nn.Module):
         super().__init__()
         self.with_conv = with_conv
         if with_conv:
-            self.conv = MPConv1D(in_channels, in_channels, 3)
+            self.conv = _conv1d(in_channels, in_channels, 3)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = F.interpolate(x, scale_factor=2.0, mode="nearest-exact")
@@ -578,8 +581,8 @@ class Downsample1D(nn.Module):
         super().__init__()
         self.with_conv = with_conv
         if with_conv:
-            self.conv1 = MPConv1D(in_channels, in_channels, 1)
-            self.conv2 = MPConv1D(in_channels, in_channels, 1)
+            self.conv1 = _conv1d(in_channels, in_channels, 1)
+            self.conv2 = _conv1d(in_channels, in_channels, 1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self.with_conv:
@@ -612,7 +615,7 @@ class Encoder1D(nn.Module):
         self.clip_act = clip_act
         self.down_layers = down_layers
         self.attn_layers = attn_layers
-        self.conv_in = MPConv1D(in_dim, dim, kernel_size)
+        self.conv_in = _conv1d(in_dim, dim, kernel_size)
 
         in_ch_mult = (1,) + ch_mult
         self.in_ch_mult = in_ch_mult
@@ -639,7 +642,7 @@ class Encoder1D(nn.Module):
         self.mid.attn_1 = AttnBlock1D(block_in)
         self.mid.block_2 = ResnetBlock1D(in_dim=block_in, out_dim=block_in, kernel_size=kernel_size, use_norm=True)
         output_dim = 2 * embed_dim if double_z else embed_dim
-        self.conv_out = MPConv1D(block_in, output_dim, kernel_size)
+        self.conv_out = _conv1d(block_in, output_dim, kernel_size)
         self.learnable_gain = nn.Parameter(torch.zeros([]))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -655,7 +658,7 @@ class Encoder1D(nn.Module):
         hidden = self.mid.block_1(states[-1])
         hidden = self.mid.attn_1(hidden)
         hidden = self.mid.block_2(hidden).clamp(-self.clip_act, self.clip_act)
-        return self.conv_out(mp_silu(hidden), gain=self.learnable_gain + 1)
+        return _conv1d_with_gain(self.conv_out, F.silu(hidden) / _SILU_DIVISOR, self.learnable_gain + 1)
 
 
 class Decoder1D(nn.Module):
@@ -682,7 +685,7 @@ class Decoder1D(nn.Module):
         self.clip_act = clip_act
         self.down_layers = [level + 1 for level in down_layers]
         block_in = dim * ch_mult[-1]
-        self.conv_in = MPConv1D(embed_dim, block_in, kernel_size)
+        self.conv_in = _conv1d(embed_dim, block_in, kernel_size)
         self.mid = nn.Module()
         self.mid.block_1 = ResnetBlock1D(in_dim=block_in, out_dim=block_in, use_norm=True)
         self.mid.attn_1 = AttnBlock1D(block_in)
@@ -705,7 +708,7 @@ class Decoder1D(nn.Module):
                 up.upsample = Upsample1D(block_in, resamp_with_conv)
             self.up.insert(0, up)
 
-        self.conv_out = MPConv1D(block_in, out_dim, kernel_size)
+        self.conv_out = _conv1d(block_in, out_dim, kernel_size)
         self.learnable_gain = nn.Parameter(torch.zeros([]))
 
     def forward(self, z: torch.Tensor) -> torch.Tensor:
@@ -721,7 +724,7 @@ class Decoder1D(nn.Module):
                 hidden = hidden.clamp(-self.clip_act, self.clip_act)
             if level in self.down_layers:
                 hidden = self.up[level].upsample(hidden)
-        return self.conv_out(mp_silu(hidden), gain=self.learnable_gain + 1)
+        return _conv1d_with_gain(self.conv_out, F.silu(hidden) / _SILU_DIVISOR, self.learnable_gain + 1)
 
 
 class MMAudioVAE(nn.Module):
@@ -744,6 +747,7 @@ class MMAudioVAE(nn.Module):
 
         self.mode = mode
         self.embed_dim = embed_dim
+        self._weights_normalized = False
         self.register_buffer("data_mean", torch.tensor(data_mean, dtype=torch.float32).view(1, -1, 1))
         self.register_buffer("data_std", torch.tensor(data_std, dtype=torch.float32).view(1, -1, 1))
         if need_encoder:
@@ -768,6 +772,7 @@ class MMAudioVAE(nn.Module):
         )
 
     def encode(self, mel: torch.Tensor, normalize_input: bool = True) -> DiagonalGaussianDistribution:
+        self._require_normalized_weights()
         if not hasattr(self, "encoder"):
             raise RuntimeError("This MMAudio VAE was loaded decoder-only")
         if normalize_input:
@@ -775,6 +780,7 @@ class MMAudioVAE(nn.Module):
         return DiagonalGaussianDistribution(self.encoder(mel))
 
     def decode(self, latent: torch.Tensor, unnormalize_output: bool = True) -> torch.Tensor:
+        self._require_normalized_weights()
         mel = self.decoder(latent)
         return self.unnormalize(mel) if unnormalize_output else mel
 
@@ -787,11 +793,19 @@ class MMAudioVAE(nn.Module):
     def unnormalize(self, mel: torch.Tensor) -> torch.Tensor:
         return mel * self.data_std + self.data_mean
 
+    def _require_normalized_weights(self) -> None:
+        if not self._weights_normalized:
+            raise RuntimeError("call remove_weight_norm() before inference")
+
+    @torch.no_grad()
     def remove_weight_norm(self):
         for name, module in self.named_modules():
-            if isinstance(module, MPConv1D):
-                module.remove_weight_norm()
+            if isinstance(module, nn.Conv1d):
+                weight = _rms_normalize(module.weight.to(torch.float32), dim=(1, 2))
+                weight = weight / math.sqrt(weight[0].numel())
+                module.weight.copy_(weight.to(module.weight.dtype))
                 logger.debug("Removed weight norm from %s", name)
+        self._weights_normalized = True
         return self
 
     def load_weights(

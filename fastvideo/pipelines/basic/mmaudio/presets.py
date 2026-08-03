@@ -30,14 +30,11 @@ MMAUDIO_LARGE_44K_V2 = InferencePreset(
     name="mmaudio_large_44k_v2",
     version=1,
     model_family="mmaudio",
-    description=(
-        "MMAudio large-44k-v2 video-to-audio generation with DFN5B CLIP, "
-        "Synchformer, a 44.1 kHz audio VAE, and BigVGAN-v2."
-    ),
+    description=("MMAudio large-44k-v2 video-to-audio generation with DFN5B CLIP, "
+                 "Synchformer, a 44.1 kHz audio VAE, and BigVGAN-v2."),
     workload_type="v2a",
-    stage_schemas=(_DENOISE_STAGE,),
+    stage_schemas=(_DENOISE_STAGE, ),
     defaults=dict(_DEFAULTS),
 )
 
-ALL_PRESETS = (MMAUDIO_LARGE_44K_V2,)
-
+ALL_PRESETS = (MMAUDIO_LARGE_44K_V2, )

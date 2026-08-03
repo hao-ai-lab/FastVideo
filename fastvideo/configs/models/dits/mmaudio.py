@@ -17,7 +17,7 @@ def _is_mmaudio_transformer_block(name: str, module) -> bool:
 class MMAudioArchConfig(DiTArchConfig):
     _fsdp_shard_conditions: list = field(default_factory=lambda: [_is_mmaudio_transformer_block])
     param_names_mapping: dict = field(default_factory=lambda: {r"^(.*)$": r"\1"})
-    _supported_attention_backends: tuple[AttentionBackendEnum, ...] = (AttentionBackendEnum.TORCH_SDPA,)
+    _supported_attention_backends: tuple[AttentionBackendEnum, ...] = (AttentionBackendEnum.TORCH_SDPA, )
 
     latent_dim: int = 40
     clip_dim: int = 1024

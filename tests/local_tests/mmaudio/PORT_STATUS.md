@@ -17,7 +17,7 @@
 | MMAudio transformer | `fastvideo/models/dits/mmaudio.py` | Native 1D multimodal DiT | exact |
 | DFN5B text/vision | `fastvideo/models/encoders/mmaudio_clip.py` | Shared native CLIP core, MMAudio adapters | exact |
 | Synchformer visual encoder | `fastvideo/models/encoders/mmaudio_synchformer.py` | Shared backbone under `fastvideo/third_party/synchformer` | exact, including 16-frame/stride-8 usage contract |
-| 44.1 kHz VAE | `fastvideo/models/audio/mmaudio_vae.py` | Native audio component | exact |
+| 44.1 kHz VAE | `fastvideo/models/audio/mmaudio_vae.py` | Native audio component | state structure plus FP32/BF16 random-weight decoder parity pass; real-weight rerun pending |
 | BigVGAN-v2 | `fastvideo/models/audio/bigvgan.py` | Shared native vocoder | exact |
 | Euler flow schedule | shared `FlowMatchEulerDiscreteScheduler` | Reuse schedule; preserve official BF16 scalar update in MMAudio stage | exact |
 
@@ -60,7 +60,8 @@ The V2A preprocessing contract is identical to official MMAudio:
 | Final 2-second V2A waveform (89,088 samples) | exact (`atol=0`, `rtol=0`) |
 | Real 10-second variable-duration V2A | pass (441,344 samples, 10.0078 s) |
 | Default FastVideo offload path | real one-step smoke pass |
-| Local suite | `18 passed, 1 skipped` (the skipped test is the opt-in full gate) |
+| Local suite | full rerun pending; VAE FP32/BF16 decoder cases pass |
+| VAE component parity | state structure and FP32/BF16 random-weight decoder parity pass on GB200 (`atol=1e-6`, `rtol=1e-6`); real-weight rerun pending |
 
 Commands:
 
@@ -85,6 +86,13 @@ official `large_44k_v2`, DFN5B, Synchformer, VAE, and BigVGAN assets.
   are rebuilt in FP32 exactly as official `update_seq_lengths` does.
 - MMAudio VAE and BigVGAN weight norm is removed on CPU in FP32 before casting to
   BF16, matching the official feature utility construction order.
+
+## Issues and Decisions
+
+| ID | Issue | Status | Resolution |
+|---|---|---|---|
+| Q001 | Can the final real-weight VAE parity gate download the public 44.1-kHz checkpoint? | awaiting author approval | Recommended: download the 1.2-GB `v1-44.pth` into `/mnt/MMAudio/ext_weights/`, verify MD5 `fab020275fa44c6589820ce025191600`, then run the existing numerical parity test. |
+| E001 | Large checkpoint download required by Q001. | awaiting author approval | No matching VAE checkpoint exists on GB200 scratch; do not claim real-weight parity until Q001 is resolved. |
 
 ## Deferred Scope
 
