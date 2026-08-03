@@ -5,7 +5,7 @@
 - workloads: T2VA, FL2VA, Ref2VA joint video/audio generation
 - component parity: complete
 - FastVideo runtime acceptance: complete
-- official end-to-end pipeline parity: T2VA complete; FL2VA/Ref2VA pending
+- official end-to-end pipeline parity: complete
 
 ## Coverage
 
@@ -20,11 +20,11 @@
 | Ref2VA media and packing | pinned media and packing parity | complete |
 | Public surface | manifest resolution, pipeline registration, and three presets | complete |
 | FastVideo distributed runtime | valid joint AV outputs; SP=1/SP=4 latent consistency | complete |
-| Official end-to-end pipeline | T2VA video/audio latents are exact; FL2VA/Ref2VA remain pending | partial |
+| Official end-to-end pipeline | exact T2VA, FL2VA, and Ref2VA video/audio latents | complete |
 
 ## Current validation
 
-T2VA matches the official video/audio latents exactly. Validate FL2VA and Ref2VA only after deciding to expand scope.
+T2VA, FL2VA, and Ref2VA match the official video/audio latents exactly.
 
 ## Decisions
 
@@ -37,5 +37,5 @@ T2VA matches the official video/audio latents exactly. Validate FL2VA and Ref2VA
 
 ## Evidence boundary
 
-Completed rows summarize recorded component and FastVideo runtime runs. T2VA parity does not establish FL2VA or
-Ref2VA parity; registry smoke, generated media, and FastVideo SP consistency are not substitutes for either.
+Completed rows summarize recorded component and FastVideo runtime runs. Registry smoke, generated media, and
+FastVideo SP consistency are supporting checks, not substitutes for the recorded official comparisons.

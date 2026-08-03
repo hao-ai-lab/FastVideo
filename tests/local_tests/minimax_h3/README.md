@@ -51,6 +51,5 @@ pytest \
 With a gate enabled, missing CUDA, source, or weights is a failure. Recorded component evidence is exact for both DiT
 partitions, the video VAE, and all Qwen3-VL hidden states; audio decode has maximum absolute drift `2.4e-7`.
 
-FastVideo joint audio/video generation and SP=1/SP=4 latent consistency have been validated. The gated
-Diffusers-vs-FastVideo FL2VA/Ref2VA pipeline comparison is being revalidated in this round; no new result is recorded
-until that run completes without skip.
+FastVideo joint audio/video generation and SP=1/SP=4 latent consistency have been validated. T2VA, FL2VA, and
+Ref2VA video/audio latents match the pinned Diffusers pipeline exactly.
