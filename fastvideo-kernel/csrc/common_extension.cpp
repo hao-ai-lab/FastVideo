@@ -22,6 +22,14 @@ extern std::vector<torch::Tensor> block_sparse_attention_backward(
 );
 #endif
 
+#ifdef TK_COMPILE_BLOCK_CAUSAL_SINK_SM100A
+extern std::vector<torch::Tensor> block_causal_sink_sm100a_fwd(
+    torch::Tensor q, torch::Tensor k, torch::Tensor v,
+    c10::optional<torch::Tensor> q_sink,
+    int64_t tokens_per_block, int64_t sink_tokens, int64_t rolling_window_tokens,
+    double sm_scale, bool need_lse);
+#endif
+
 // TurboDiffusion kernels
 void register_quant(pybind11::module_ &);
 void register_rms_norm(pybind11::module_ &);
@@ -38,6 +46,12 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
 #ifdef TK_COMPILE_BLOCK_SPARSE
     m.def("block_sparse_fwd", torch::wrap_pybind_function(block_sparse_attention_forward), "block sparse attention forward (Hopper)");
     m.def("block_sparse_bwd", torch::wrap_pybind_function(block_sparse_attention_backward), "block sparse attention backward (Hopper)");
+#endif
+
+#ifdef TK_COMPILE_BLOCK_CAUSAL_SINK_SM100A
+    m.def("block_causal_sink_sm100a_fwd",
+          torch::wrap_pybind_function(block_causal_sink_sm100a_fwd),
+          "block-causal + sink + sliding-window attention forward (Blackwell sm100a)");
 #endif
 
     // TurboDiffusion

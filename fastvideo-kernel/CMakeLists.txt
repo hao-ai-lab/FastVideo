@@ -308,6 +308,21 @@ if(BUILD_CXX_KERNELS)
         csrc/turbodiffusion/quant/quant.cu
     )
     
+    # Blackwell block-causal + sink + sliding-window attention (sm_100a only).
+    # NOTE the "a" suffix: -arch=sm_100a is NOT enough -- it emits a plain sm_100 target and
+    # ptxas rejects every tcgen05 / setmaxnreg / .cta_group instruction. The explicit gencode
+    # spelling below is required, and matches the 10.0a entry in TORCH_CUDA_ARCH_LIST.
+    set(ENABLE_BCS_SM100A OFF)
+    if(TORCH_CUDA_ARCH_LIST MATCHES "(^|[; ,])(10\\.0a|100a|sm_100a)([; ,]|$)")
+        set(ENABLE_BCS_SM100A ON)
+    endif()
+    if(ENABLE_BCS_SM100A)
+        message(STATUS "fastvideo-kernel: building block_causal_sink_sm100a (Blackwell)")
+        list(APPEND EXTENSION_SOURCES csrc/attention/block_causal_sink_sm100a.cu)
+        set_source_files_properties(csrc/attention/block_causal_sink_sm100a.cu PROPERTIES
+            COMPILE_OPTIONS "-gencode;arch=compute_100a,code=sm_100a")
+    endif()
+
     # Conditionally add TK kernels
     if(ENABLE_TK_KERNELS)
         list(APPEND EXTENSION_SOURCES
@@ -336,6 +351,9 @@ if(BUILD_CXX_KERNELS)
     if(ENABLE_TK_KERNELS)
         list(APPEND COMPILE_DEFS TK_COMPILE_ST_ATTN TK_COMPILE_BLOCK_SPARSE)
     endif()
+    if(ENABLE_BCS_SM100A)
+        list(APPEND COMPILE_DEFS TK_COMPILE_BLOCK_CAUSAL_SINK_SM100A)
+    endif()
 
     target_compile_definitions(fastvideo_kernel_ops PRIVATE ${COMPILE_DEFS})
 
@@ -346,6 +364,13 @@ if(BUILD_CXX_KERNELS)
     # Link against Torch libraries to avoid undefined symbols at import time
     # (e.g., torch::autograd vtables) when loading the extension module.
     target_link_libraries(fastvideo_kernel_ops PRIVATE ${TORCH_LIBRARIES})
+
+    # The Blackwell kernel builds its TMA descriptors with cuTensorMapEncodeTiled, a CUDA
+    # DRIVER API entry point -- it is not in libcudart, so the module fails to import with
+    # "undefined symbol: cuTensorMapEncodeTiled" unless libcuda is linked explicitly.
+    if(ENABLE_BCS_SM100A)
+        target_link_libraries(fastvideo_kernel_ops PRIVATE cuda)
+    endif()
 
     # Also link against libtorch_python to satisfy Python-binding symbols
     # (e.g., torch::PyWarningHandler) required by torch/extension.h.
