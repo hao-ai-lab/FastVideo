@@ -78,6 +78,8 @@ class ForwardBatch:
     image_path: str | None = None
     image_embeds: list[torch.Tensor] = field(default_factory=list)
     pil_image: torch.Tensor | PIL.Image.Image | None = None
+    last_image: Any | None = None
+    references: list[Any] | None = None
     preprocessed_image: torch.Tensor | None = None
     # Text inputs
     prompt: str | list[str] | None = None
@@ -125,6 +127,7 @@ class ForwardBatch:
 
     # Latent tensors
     latents: torch.Tensor | None = None
+    audio_latents: torch.Tensor | None = None
     lq_latents: torch.Tensor | None = None
     raw_latent_shape: tuple[int, ...] | None = None
     noise_pred: torch.Tensor | None = None

@@ -6,6 +6,11 @@ from fastvideo.configs.models.vaes.glm_image import GlmImageVAEConfig
 from fastvideo.configs.models.vaes.hunyuanvae import HunyuanVAEConfig
 from fastvideo.configs.models.vaes.hunyuan15vae import Hunyuan15VAEConfig
 from fastvideo.configs.models.vaes.ltx2vae import LTX2VAEConfig
+from fastvideo.configs.models.vaes.minimax_h3_audio import MiniMaxH3AudioVAEArchConfig, MiniMaxH3AudioVAEConfig
+from fastvideo.configs.models.vaes.minimax_h3_video import (
+    MiniMaxH3VideoVAEArchConfig,
+    MiniMaxH3VideoVAEConfig,
+)
 from fastvideo.configs.models.vaes.oobleck import OobleckVAEArchConfig, OobleckVAEConfig
 from fastvideo.configs.models.vaes.flux2vae import Flux2VAEConfig
 from fastvideo.configs.models.vaes.wanvae import WanVAEConfig
@@ -19,6 +24,10 @@ __all__ = [
     "Gen3CVAEConfig",
     "Hunyuan15VAEConfig",
     "LTX2VAEConfig",
+    "MiniMaxH3AudioVAEArchConfig",
+    "MiniMaxH3AudioVAEConfig",
+    "MiniMaxH3VideoVAEArchConfig",
+    "MiniMaxH3VideoVAEConfig",
     "OobleckVAEArchConfig",
     "OobleckVAEConfig",
     "Flux2VAEConfig",

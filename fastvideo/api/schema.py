@@ -125,6 +125,12 @@ class InputConfig:
     image_path: str | list[str] | None = None
     video_path: str | list[str] | None = None
     pil_image: Any | None = None
+    # Model-family request bridges keep media opaque here. The owning pipeline
+    # validates and decodes it in an explicit stage.
+    last_image: Any | None = None
+    references: list[Any] | None = None
+    latents: Any | None = None
+    audio_latents: Any | None = None
     pose: str | None = None
     mouse_cond: Any | None = None
     keyboard_cond: Any | None = None

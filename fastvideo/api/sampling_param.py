@@ -25,6 +25,8 @@ class SamplingParam:
     # Image inputs
     image_path: str | None = None
     pil_image: Any | None = None
+    last_image: Any | None = None
+    references: list[Any] | None = None
 
     # Video inputs
     video_path: str | None = None
@@ -32,6 +34,7 @@ class SamplingParam:
     # Optional pre-generated diffusion latents. Used by parity/debug harnesses
     # and advanced callers that need deterministic latent reuse.
     latents: Any | None = None
+    audio_latents: Any | None = None
 
     # Action control inputs (Matrix-Game)
     mouse_cond: Any | None = None  # Shape: (B, T, 2)
