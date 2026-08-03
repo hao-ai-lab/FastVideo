@@ -129,9 +129,8 @@ class Hunyuan15Model(WanModel):
         """
         tc = self.training_config
         assert tc is not None
-        return int(
-            tc.pipeline_config.dit_config.arch_config.text_embed_2_dim  # type: ignore[union-attr]
-        )
+        arch = tc.pipeline_config.dit_config.arch_config  # type: ignore[union-attr]
+        return int(arch.text_embed_2_dim)
 
     def prepare_batch(
         self,
