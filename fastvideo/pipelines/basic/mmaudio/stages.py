@@ -63,10 +63,8 @@ def _read_frames_at_fps(
                         next_times[index] += deltas[index]
 
     if any(not frames for frames in outputs):
-        raise ValueError(
-            f"Could not decode enough video frames from {video_path} in "
-            f"[{start_s}, {end_s}] seconds."
-        )
+        raise ValueError(f"Could not decode enough video frames from {video_path} in "
+                         f"[{start_s}, {end_s}] seconds.")
     return [np.stack(frames) for frames in outputs]
 
 
@@ -93,22 +91,18 @@ def preprocess_mmaudio_video(
     clip_frames = torch.from_numpy(clip_array).permute(0, 3, 1, 2)
     sync_frames = torch.from_numpy(sync_array).permute(0, 3, 1, 2)
 
-    clip_transform = v2.Compose(
-        [
-            v2.Resize((clip_size, clip_size), interpolation=v2.InterpolationMode.BICUBIC),
-            v2.ToImage(),
-            v2.ToDtype(torch.float32, scale=True),
-        ]
-    )
-    sync_transform = v2.Compose(
-        [
-            v2.Resize(sync_size, interpolation=v2.InterpolationMode.BICUBIC),
-            v2.CenterCrop(sync_size),
-            v2.ToImage(),
-            v2.ToDtype(torch.float32, scale=True),
-            v2.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
-        ]
-    )
+    clip_transform = v2.Compose([
+        v2.Resize((clip_size, clip_size), interpolation=v2.InterpolationMode.BICUBIC),
+        v2.ToImage(),
+        v2.ToDtype(torch.float32, scale=True),
+    ])
+    sync_transform = v2.Compose([
+        v2.Resize(sync_size, interpolation=v2.InterpolationMode.BICUBIC),
+        v2.CenterCrop(sync_size),
+        v2.ToImage(),
+        v2.ToDtype(torch.float32, scale=True),
+        v2.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
+    ])
     clip_frames = clip_transform(clip_frames)
     sync_frames = sync_transform(sync_frames)
 
@@ -117,20 +111,16 @@ def preprocess_mmaudio_video(
         clip_frames.shape[0] / clip_fps,
         sync_frames.shape[0] / sync_fps,
     )
-    clip_frames = clip_frames[: int(clip_fps * effective_duration)]
-    sync_frames = sync_frames[: int(sync_fps * effective_duration)]
+    clip_frames = clip_frames[:int(clip_fps * effective_duration)]
+    sync_frames = sync_frames[:int(sync_fps * effective_duration)]
     return clip_frames, sync_frames, effective_duration
 
 
 def mmaudio_sequence_lengths(duration_s: float, pc) -> tuple[int, int, int]:
-    latent_length = math.ceil(
-        duration_s * pc.sampling_rate / pc.spectrogram_frame_rate / pc.latent_downsample_rate
-    )
+    latent_length = math.ceil(duration_s * pc.sampling_rate / pc.spectrogram_frame_rate / pc.latent_downsample_rate)
     clip_length = int(duration_s * pc.clip_frame_rate)
     sync_frame_count = duration_s * pc.sync_frame_rate
-    sync_segments = (
-        (sync_frame_count - pc.sync_segment_size) // pc.sync_segment_stride + 1
-    )
+    sync_segments = ((sync_frame_count - pc.sync_segment_size) // pc.sync_segment_stride + 1)
     sync_length = int(sync_segments * pc.sync_segment_size / pc.sync_downsample_rate)
     return latent_length, clip_length, sync_length
 
@@ -154,15 +144,9 @@ class MMAudioInputValidationStage(PipelineStage):
         if isinstance(batch.negative_prompt, list) and len(batch.negative_prompt) != 1:
             raise ValueError("MMAudio currently supports one negative prompt per request.")
 
-        direct_video = (
-            batch.extra.get("mmaudio_clip_frames") is not None
-            and batch.extra.get("mmaudio_sync_frames") is not None
-        )
-        if (
-            fastvideo_args.workload_type is WorkloadType.V2A
-            and batch.video_path is None
-            and not direct_video
-        ):
+        direct_video = (batch.extra.get("mmaudio_clip_frames") is not None
+                        and batch.extra.get("mmaudio_sync_frames") is not None)
+        if (fastvideo_args.workload_type is WorkloadType.V2A and batch.video_path is None and not direct_video):
             raise ValueError("MMAudio V2A requires `video_path` or preprocessed MMAudio frame tensors.")
 
         pc = fastvideo_args.pipeline_config
@@ -173,16 +157,12 @@ class MMAudioInputValidationStage(PipelineStage):
             raise ValueError("MMAudio currently generates from time zero; audio_start_in_s must be 0.")
         max_duration_s = pc.max_audio_duration_s
         if max_duration_s is not None and duration_s > max_duration_s:
-            raise ValueError(
-                f"MMAudio duration {duration_s}s exceeds this checkpoint's "
-                f"{max_duration_s}s maximum."
-            )
+            raise ValueError(f"MMAudio duration {duration_s}s exceeds this checkpoint's "
+                             f"{max_duration_s}s maximum.")
         minimum_duration = pc.sync_segment_size / pc.sync_frame_rate
         if duration_s < minimum_duration:
-            raise ValueError(
-                f"MMAudio needs at least {minimum_duration:.2f}s "
-                f"({pc.sync_segment_size} sync frames), got {duration_s}s."
-            )
+            raise ValueError(f"MMAudio needs at least {minimum_duration:.2f}s "
+                             f"({pc.sync_segment_size} sync frames), got {duration_s}s.")
         batch.extra["mmaudio_duration_s"] = duration_s
         batch.seed = 0 if batch.seed is None else int(batch.seed)
         return batch
@@ -234,8 +214,8 @@ class MMAudioVideoConditioningStage(PipelineStage):
                 clip_frames.shape[0] / pc.clip_frame_rate,
                 sync_frames.shape[0] / pc.sync_frame_rate,
             )
-            clip_frames = clip_frames[: int(duration_s * pc.clip_frame_rate)]
-            sync_frames = sync_frames[: int(duration_s * pc.sync_frame_rate)]
+            clip_frames = clip_frames[:int(duration_s * pc.clip_frame_rate)]
+            sync_frames = sync_frames[:int(duration_s * pc.sync_frame_rate)]
 
         latent_length, clip_length, sync_length = mmaudio_sequence_lengths(duration_s, pc)
         if clip_length <= 0 or sync_length <= 0:
@@ -253,15 +233,12 @@ class MMAudioVideoConditioningStage(PipelineStage):
         if clip_frames.shape != (clip_length, 3, pc.clip_image_size, pc.clip_image_size):
             raise ValueError(
                 "MMAudio CLIP frames must have shape "
-                f"[{clip_length},3,{pc.clip_image_size},{pc.clip_image_size}], got {tuple(clip_frames.shape)}."
-            )
+                f"[{clip_length},3,{pc.clip_image_size},{pc.clip_image_size}], got {tuple(clip_frames.shape)}.")
         expected_sync_frames = int(duration_s * pc.sync_frame_rate)
         if sync_frames.shape != (expected_sync_frames, 3, pc.sync_image_size, pc.sync_image_size):
-            raise ValueError(
-                "MMAudio sync frames must have shape "
-                f"[{expected_sync_frames},3,{pc.sync_image_size},{pc.sync_image_size}], "
-                f"got {tuple(sync_frames.shape)}."
-            )
+            raise ValueError("MMAudio sync frames must have shape "
+                             f"[{expected_sync_frames},3,{pc.sync_image_size},{pc.sync_image_size}], "
+                             f"got {tuple(sync_frames.shape)}.")
 
         device = get_local_torch_device()
         model_dtype = next(self.transformer.parameters()).dtype
@@ -275,7 +252,7 @@ class MMAudioVideoConditioningStage(PipelineStage):
         chunk_size = pc.clip_batch_size_multiplier
         with set_forward_context(current_timestep=0, attn_metadata=None):
             for start in range(0, clip_length, chunk_size):
-                encoded = self.image_encoder(clip_video[start : start + chunk_size]).last_hidden_state
+                encoded = self.image_encoder(clip_video[start:start + chunk_size]).last_hidden_state
                 clip_outputs.append(encoded)
         clip_features = torch.cat(clip_outputs, dim=0).unsqueeze(0)
         if fastvideo_args.image_encoder_cpu_offload:
@@ -289,9 +266,7 @@ class MMAudioVideoConditioningStage(PipelineStage):
             self.sync_encoder = self.sync_encoder.to("cpu")
 
         if sync_features.shape[1] != sync_length:
-            raise RuntimeError(
-                f"Synchformer produced {sync_features.shape[1]} tokens; expected {sync_length}."
-            )
+            raise RuntimeError(f"Synchformer produced {sync_features.shape[1]} tokens; expected {sync_length}.")
         batch.extra["mmaudio_clip_features"] = clip_features
         batch.extra["mmaudio_sync_features"] = sync_features
         return batch
@@ -465,9 +440,7 @@ class MMAudioDecodingStage(PipelineStage):
         expected_samples = batch.extra["mmaudio_sequence_lengths"][0]
         expected_samples *= pc.spectrogram_frame_rate * pc.latent_downsample_rate
         if audio.shape[-1] != expected_samples:
-            raise RuntimeError(
-                f"MMAudio vocoder produced {audio.shape[-1]} samples; expected {expected_samples}."
-            )
+            raise RuntimeError(f"MMAudio vocoder produced {audio.shape[-1]} samples; expected {expected_samples}.")
 
         decoded_audio = audio.detach().float().cpu()
         batch.extra["audio"] = decoded_audio[0].T.contiguous().numpy()

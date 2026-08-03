@@ -61,4 +61,3 @@ class MMAudioPipeline(ComposedPipelineBase):
 
 
 EntryClass = MMAudioPipeline
-

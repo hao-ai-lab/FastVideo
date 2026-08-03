@@ -7,6 +7,7 @@ added after the converted component directory exists.
 
 from __future__ import annotations
 
+import gc
 import os
 from pathlib import Path
 
@@ -23,35 +24,47 @@ OFFICIAL_WEIGHTS = Path(
 )
 
 
-def _models():
-    from mmaudio.ext.autoencoder.vae import VAE_44k
+def _official_model():
+    official_vae = pytest.importorskip("mmaudio.ext.autoencoder.vae")
+    return official_vae.VAE_44k()
 
+
+def _fastvideo_model(*, need_encoder: bool):
     from fastvideo.models.audio.mmaudio_vae import MMAudioVAE
 
-    return VAE_44k(), MMAudioVAE(mode="44k", need_encoder=True)
+    return MMAudioVAE(mode="44k", need_encoder=need_encoder)
 
 
 def test_mmaudio_44k_audio_vae_state_structure() -> None:
-    official, fastvideo = _models()
-    assert {name: tensor.shape for name, tensor in official.state_dict().items()} == {
+    official = _official_model()
+    expected = {name: tensor.shape for name, tensor in official.state_dict().items()}
+    del official
+    gc.collect()
+    fastvideo = _fastvideo_model(need_encoder=True)
+    assert expected == {
         name: tensor.shape for name, tensor in fastvideo.state_dict().items()
     }
 
 
-def test_mmaudio_44k_audio_vae_decoder_implementation_parity() -> None:
+@pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16], ids=["fp32", "bf16"])
+def test_mmaudio_44k_audio_vae_decoder_implementation_parity(dtype: torch.dtype) -> None:
     if not torch.cuda.is_available():
         pytest.skip("MMAudio audio VAE implementation parity requires CUDA")
 
-    official, fastvideo = _models()
-    fastvideo.load_state_dict(official.state_dict(), strict=True)
-    # This test exercises decoder math using the same randomly initialized
-    # parameters. Drop both unused encoders before moving the large VAE to GPU.
+    official = _official_model()
     del official.encoder
-    del fastvideo.encoder
+    gc.collect()
+    fastvideo = _fastvideo_model(need_encoder=False)
+    fastvideo.load_state_dict(official.state_dict(), strict=True)
     device = torch.device("cuda:0")
-    official.remove_weight_norm().to(device).eval()
-    fastvideo.remove_weight_norm().to(device).eval()
-    latent = torch.randn((1, 40, 4), generator=torch.Generator(device=device).manual_seed(1234), device=device)
+    official.remove_weight_norm().to(device=device, dtype=dtype).eval()
+    fastvideo.remove_weight_norm().to(device=device, dtype=dtype).eval()
+    latent = torch.randn(
+        (1, 40, 4),
+        generator=torch.Generator(device=device).manual_seed(1234),
+        device=device,
+        dtype=dtype,
+    )
 
     with torch.inference_mode():
         expected = official.decode(latent)
@@ -69,7 +82,8 @@ def test_mmaudio_44k_audio_vae_numerical_parity() -> None:
         )
 
     device = torch.device("cuda:0")
-    official, fastvideo = _models()
+    official = _official_model()
+    fastvideo = _fastvideo_model(need_encoder=True)
     state = torch.load(OFFICIAL_WEIGHTS, map_location="cpu", weights_only=True)
     official.load_state_dict(state, strict=True)
     fastvideo.load_state_dict(state, strict=True)

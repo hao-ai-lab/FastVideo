@@ -3,4 +3,3 @@
 from fastvideo.pipelines.basic.mmaudio.mmaudio_pipeline import MMAudioPipeline
 
 __all__ = ["MMAudioPipeline"]
-

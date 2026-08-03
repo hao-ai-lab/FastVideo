@@ -218,7 +218,5 @@ ffmpeg -y \
 
 ## License and Attribution
 
-The upstream MMAudio checkpoint is distributed as CC-BY-NC 4.0. The native
-audio VAE implementation also contains EDM2-derived code marked
-CC-BY-NC-SA-4.0. Review and preserve the upstream licenses and attribution
-before redistributing raw or converted checkpoints.
+The upstream MMAudio checkpoint is distributed as CC-BY-NC 4.0. Preserve its
+license and attribution when redistributing raw or converted checkpoints.
