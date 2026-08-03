@@ -66,20 +66,13 @@ callbacks:
   grad_clip:
     _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
     max_grad_norm: 1.0
-  # Validation is left out on purpose, same as the overfit config: the
-  # training-side validation pipeline overwrites the loaded text-encoder
-  # config, so the zero-length ByT5 placeholder is sized from the static
-  # T5 default (512) instead of HY1.5's 1472 and a prompt without glyph
-  # text raises "expected input with shape [*, 1472] ... got [1, 0, 512]".
-  # Re-enable this block once that is fixed:
-  #
-  # validation:
-  #   _target_: fastvideo.train.callbacks.validation.ValidationCallback
-  #   pipeline_target: fastvideo.pipelines.basic.hunyuan15.hunyuan15_pipeline.HunyuanVideo15Pipeline
-  #   dataset_file: data/hunyuan15_preprocessed/validation_prompts.json
-  #   every_steps: 100
-  #   sampling_steps: [50]
-  #   guidance_scale: 7.0
+  validation:
+    _target_: fastvideo.train.callbacks.validation.ValidationCallback
+    pipeline_target: fastvideo.pipelines.basic.hunyuan15.hunyuan15_pipeline.HunyuanVideo15Pipeline
+    dataset_file: data/hunyuan15_preprocessed/validation_prompts.json
+    every_steps: 100
+    sampling_steps: [50]
+    guidance_scale: 7.0
 
 pipeline:
   flow_shift: 5.0

@@ -175,7 +175,7 @@ is fp32, which doubles weights, gradients, and optimizer state.
 | Symptom | Cause and fix |
 |---|---|
 | `wandb.errors.UsageError: No API key configured` | Setting `tracker.project_name` enables W&B automatically. Use `export WANDB_MODE=offline` or `wandb login`. |
-| `RuntimeError: Given normalized_shape=[1472] ... got [1, 0, 512]` during validation | `TextEncodingStage` sizes the zero-length ByT5 placeholder from the static T5 config default rather than HY1.5's 1472, so captions without glyph text fail. The overfit config leaves validation disabled for this reason. |
+| `RuntimeError: Given normalized_shape=[1472] ... got [1, 0, 512]` during validation | Fixed upstream: the validation pipeline used to overwrite the loader-populated text-encoder config, so the zero-length ByT5 placeholder was sized from the static T5 default (512) instead of HY1.5's 1472. If you still see this, your branch predates that fix. |
 | `OutOfMemoryError` at `optimizer.step()` | Optimizer state does not fit. Use the LoRA config, shard across GPUs, or switch optimizers — see the table above. |
 | `No LoRA-compatible layers were found for the requested target modules` | HY1.5 names its attention projections `img_attn_qkv` / `txt_attn_qkv` / `img_attn_proj` / `txt_attn_proj`, which the default target list does not cover. The shipped config sets them explicitly. |
 | `ValueError: No frames could be decoded from ...` | The clip must live under `data/hunyuan15_overfit/videos/`, not the manifest directory itself. |
