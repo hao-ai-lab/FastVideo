@@ -1,8 +1,8 @@
 # MiniMax H3 Local Tests
 
-Local component and contract tests for the FastVideo-native `minimax_h3` port.
-Stage 1 covers native components, FL2VA packing, both schedulers, direct Diffusers component loading, and the minimal
-`last_image`/`references`/`audio_latents` request bridge. Pipeline composition starts in Stage 2.
+Local component and contract tests for `minimax_h3` in FastVideo.
+Stage 1 covers model components, FL2VA packing, both schedulers, direct Diffusers component loading, and the minimal
+`last_image`/`references`/`audio_latents` request bridge. Stage 2 adds the internal T2VA/FL2VA composed pipeline.
 
 Progress and blockers live in `tests/local_tests/minimax_h3/PORT_STATUS.md`.
 
@@ -46,10 +46,30 @@ PYTHONPATH=DiffusersMiniMaxH3/src pytest \
 These tests establish synthetic CPU parity only. They do not establish real-checkpoint compatibility, generated
 media quality, CUDA behavior, memory use, or performance.
 
+## Stage 2 tests
+
+| Scope | Test | Evidence |
+|---|---|---|
+| Qwen3-VL encoder and conditioning | `tests/local_tests/minimax_h3/test_minimax_h3_conditioner.py` | standard `BaseEncoderOutput`; stage-owned picture presentation, tags, multimodal IDs, and layer-50 selection |
+| T2VA/FL2VA pipeline | `tests/local_tests/minimax_h3/test_minimax_h3_pipeline.py` | private factory, offload lifecycle, four paths, dual schedules, executor-safe result, and stereo MP4 mux |
+
+Run Stage 2 from the repository root:
+
+```bash
+pytest \
+  tests/local_tests/minimax_h3/test_minimax_h3_conditioner.py \
+  tests/local_tests/minimax_h3/test_minimax_h3_pipeline.py -q
+```
+
+The pipeline remains internal until real-checkpoint and distributed acceptance. Stage 2 evidence uses synthetic tiny
+components; real-checkpoint, CUDA, model-output, and media-quality behavior are unverified.
+
 ## Review notes
 
 - Keep the FastVideo and reference packers independent.
 - Keep Transformer FP32 islands and both FP32 VAEs explicit.
 - Keep `last_image`, `references`, and `audio_latents` in the typed request bridge.
+- Keep the isolated Transformers Qwen3-VL base-model passthrough adapter on the standard FastVideo encoder contract;
+  H3 presentation and layer selection belong to the conditioning stage.
 - Decode, normalize, and validate reference contents in the Ref2VA stages.
-- Stage 1 does not activate a pipeline, preset, conditioner, denoising loop, or public registry entry.
+- Stage 2 does not add a public preset or registry detector.

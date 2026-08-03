@@ -10,4 +10,14 @@
 - **Meta loading:** rebuild non-persistent RoPE buffers after meta-device initialization.
 - **Audio VAE:** H3 needs encode and decode; a decoder-only loader breaks Ref2VA.
 - **Partitions:** FL2VA and Ref2VA Transformers are alternatives, not two simultaneous denoisers.
+- **Registry:** `EntryClass` is public activation; omit it before Stage 4.
+- **Factory:** an explicit private config must reach the modular manifest directly.
+- **Offload:** CPU-parked Qwen and VAEs must move for forward, then return.
+- **Keyframes:** each keyframe conditions both Qwen3-VL and the video VAE.
+- **Encoder boundary:** the adapter returns `BaseEncoderOutput`; H3 presentation and layer 50 stay in conditioning.
+- **RNG:** seed-42 posterior sampling is separate; request RNG starts at condition noise.
+- **CFG:** clear the default negative prompt; H3 has no unconditional branch.
+- **Audio output:** decoded audio is `[samples, 2]`; latent mode still uses the public audio fields.
+- **Executor:** drop internal embeddings and latents before returning the batch.
+- **Canvas:** entrypoint defaults erase whether size was omitted; do not guess auto-canvas intent.
 - **Evidence:** synthetic parity does not establish real-weight or CUDA compatibility.

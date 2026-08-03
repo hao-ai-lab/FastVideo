@@ -93,17 +93,28 @@ def test_minimax_h3_audio_vae_encode_and_decode_match_reference() -> None:
     with torch.inference_mode():
         official_posterior = official.encode(waveform, return_dict=False)[0]
         fastvideo_posterior = fastvideo.encode(waveform, return_dict=False)[0]
-        official_decode = official.decode(latents, return_dict=False)[0]
-        fastvideo_decode = fastvideo.decode(latents, return_dict=False)[0]
+        official_decode = official.decode(latents).sample
+        fastvideo_decode = fastvideo.decode(latents).sample
         official_round_trip = official(waveform, sample_posterior=False, return_dict=False)[0]
         fastvideo_round_trip = fastvideo(waveform, sample_posterior=False, return_dict=False)[0]
+        official_generator = torch.Generator(device="cpu").manual_seed(42)
+        fastvideo_generator = torch.Generator(device="cpu").manual_seed(42)
+        official_sample = official_posterior.sample(generator=official_generator)
+        fastvideo_sample = fastvideo_posterior.sample(generator=fastvideo_generator)
     for handle in official_handles + fastvideo_handles:
         handle.remove()
 
     assert_close(fastvideo_posterior.mode(), official_posterior.mode(), atol=0.0, rtol=0.0)
     assert_close(fastvideo_posterior.logs, official_posterior.logs, atol=0.0, rtol=0.0)
+    assert_close(fastvideo_sample, official_sample, atol=0.0, rtol=0.0)
     assert_close(fastvideo_decode, official_decode, atol=0.0, rtol=0.0)
     assert_close(fastvideo_round_trip, official_round_trip, atol=0.0, rtol=0.0)
+    assert_close(
+        torch.randn(8, generator=fastvideo_generator),
+        torch.randn(8, generator=official_generator),
+        atol=0,
+        rtol=0,
+    )
 
     assert fastvideo.hop_length == 4
     assert fastvideo.sampling_rate == 32000

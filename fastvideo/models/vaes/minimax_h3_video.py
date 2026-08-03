@@ -560,7 +560,7 @@ class AutoencoderKLMiniMaxH3(nn.Module):
             torch.tensor((0.229, 0.224, 0.225), dtype=torch.float32).view(1, -1, 1, 1, 1),
             persistent=False,
         )
-        # The release checkpoint is FP32; only the CUDA decode autocast changes compute precision.
+        # The released encoder and decoder stay in FP32 for both weights and compute.
         self.float()
 
     def to(self, *args, **kwargs) -> "AutoencoderKLMiniMaxH3":
@@ -797,6 +797,23 @@ class AutoencoderKLMiniMaxH3(nn.Module):
             moments = torch.cat([self._encode(x_slice) for x_slice in x.split(1)])
         else:
             moments = self._encode(x)
+        posterior = DiagonalGaussianDistribution(moments)
+        if not return_dict:
+            return (posterior,)
+        return AutoencoderKLOutput(latent_dist=posterior)
+
+    def encode_keyframe(
+        self,
+        x: torch.Tensor,
+        return_dict: bool = True,
+    ) -> AutoencoderKLOutput | tuple[DiagonalGaussianDistribution]:
+        """Encode one-frame conditioning inputs without video chunk padding."""
+        if x.ndim != 5 or x.shape[2] != 1:
+            raise ValueError(f"`x` must contain exactly one video frame, got shape {tuple(x.shape)}.")
+        if self.use_slicing and x.shape[0] > 1:
+            moments = torch.cat([self._encode_clip(x_slice) for x_slice in x.split(1)])
+        else:
+            moments = self._encode_clip(x)
         posterior = DiagonalGaussianDistribution(moments)
         if not return_dict:
             return (posterior,)

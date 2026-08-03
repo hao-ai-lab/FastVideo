@@ -17,6 +17,9 @@ assert_pinned_reference(
 sys.path.insert(0, str(REFERENCE_SRC))
 
 from diffusers import AutoencoderKLMiniMaxH3 as ReferenceAutoencoderKLMiniMaxH3  # noqa: E402
+from diffusers.models.autoencoders.vae import (  # noqa: E402
+    DiagonalGaussianDistribution as ReferenceDiagonalGaussianDistribution,
+)
 
 from fastvideo.configs.models.vaes.minimax_h3_video import (  # noqa: E402
     MiniMaxH3VideoVAEArchConfig,
@@ -94,8 +97,8 @@ def test_minimax_h3_video_vae_encode_decode_and_geometry_match_reference() -> No
     with torch.inference_mode():
         reference_latents = reference.encode(video, return_dict=False)[0].mode()
         fastvideo_latents = fastvideo.encode(video, return_dict=False)[0].mode()
-        reference_decoded = reference.decode(reference_latents, return_dict=False)[0]
-        fastvideo_decoded = fastvideo.decode(reference_latents, return_dict=False)[0]
+        reference_decoded = reference.decode(reference_latents).sample
+        fastvideo_decoded = fastvideo.decode(reference_latents).sample
     for handle in reference_handles + fastvideo_handles:
         handle.remove()
 
@@ -134,6 +137,36 @@ def test_minimax_h3_video_vae_normalization_tiling_and_fp32_contract() -> None:
         assert_close(value, original_state[key], atol=0, rtol=0)
 
 
+def test_minimax_h3_video_vae_keyframe_sampling_matches_reference() -> None:
+    """The public one-frame path preserves H3's fixed-generator posterior sample."""
+
+    reference, fastvideo = _build_models()
+    pixels = torch.randn(
+        (1, 3, 1, 8, 8),
+        generator=torch.Generator(device="cpu").manual_seed(17),
+        dtype=torch.float32,
+    )
+
+    with torch.inference_mode():
+        reference_posterior = ReferenceDiagonalGaussianDistribution(reference._encode_clip(pixels))
+        fastvideo_posterior = fastvideo.encode_keyframe(pixels).latent_dist
+        reference_generator = torch.Generator(device="cpu").manual_seed(42)
+        fastvideo_generator = torch.Generator(device="cpu").manual_seed(42)
+        reference_sample = reference_posterior.sample(generator=reference_generator)
+        fastvideo_sample = fastvideo_posterior.sample(generator=fastvideo_generator)
+
+    assert_close(fastvideo_posterior.mean, reference_posterior.mean, atol=1e-6, rtol=1e-6)
+    assert_close(fastvideo_posterior.logvar, reference_posterior.logvar, atol=1e-6, rtol=1e-6)
+    assert_close(fastvideo_sample, reference_sample, atol=1e-6, rtol=1e-6)
+    assert fastvideo_sample.dtype == torch.float32
+    assert_close(
+        torch.randn(8, generator=fastvideo_generator),
+        torch.randn(8, generator=reference_generator),
+        atol=0,
+        rtol=0,
+    )
+
+
 def test_minimax_h3_video_vae_small_multitile_path_matches_reference() -> None:
     reference, fastvideo = _build_models()
     reference.enable_tiling(8, 8, 4, 4)
@@ -144,8 +177,8 @@ def test_minimax_h3_video_vae_small_multitile_path_matches_reference() -> None:
     with torch.inference_mode():
         reference_latents = reference.encode(video, return_dict=False)[0].mode()
         fastvideo_latents = fastvideo.encode(video, return_dict=False)[0].mode()
-        reference_decoded = reference.decode(reference_latents, return_dict=False)[0]
-        fastvideo_decoded = fastvideo.decode(reference_latents, return_dict=False)[0]
+        reference_decoded = reference.decode(reference_latents).sample
+        fastvideo_decoded = fastvideo.decode(reference_latents).sample
 
     assert_close(fastvideo_latents, reference_latents, atol=1e-6, rtol=1e-6)
     assert_close(fastvideo_decoded, reference_decoded, atol=1e-6, rtol=1e-6)

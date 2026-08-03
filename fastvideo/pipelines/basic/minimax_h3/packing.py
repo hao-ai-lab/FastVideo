@@ -26,6 +26,9 @@ MINIMAX_H3_LATENTS_PER_CHUNK = 5
 MINIMAX_H3_PIXEL_MEAN = (0.485, 0.456, 0.406)
 MINIMAX_H3_PIXEL_STD = (0.229, 0.224, 0.225)
 MINIMAX_H3_TEXT_ENCODER_LAYER = 50
+MINIMAX_H3_VISION_START_TOKEN = "<|vision_start|>"
+MINIMAX_H3_IMAGE_PAD_TOKEN = "<|image_pad|>"
+MINIMAX_H3_VISION_END_TOKEN = "<|vision_end|>"
 MINIMAX_H3_AUDIO_LATENTS_PER_SECOND = 40
 MINIMAX_H3_AUDIO_CHANNELS = 2
 MINIMAX_H3_KEYFRAME_NOISE_AUG = 0.999
@@ -38,7 +41,7 @@ _ROPE_SPATIAL_SCALE = 32
 MiniMaxH3PackedSequence: TypeAlias = MiniMaxH3Layout
 
 
-def _randn_tensor(
+def randn_tensor(
     shape: tuple[int, ...],
     generator: torch.Generator | list[torch.Generator] | None,
     device: torch.device | None,
@@ -291,7 +294,7 @@ def keyframe_condition_noise(
 ) -> torch.Tensor:
     rows = []
     for num_latent_frames, latent_height, latent_width in condition_latent_shapes:
-        noise = _randn_tensor(
+        noise = randn_tensor(
             (1, latent_channels, num_latent_frames, latent_height, latent_width),
             generator=generator,
             device=device,

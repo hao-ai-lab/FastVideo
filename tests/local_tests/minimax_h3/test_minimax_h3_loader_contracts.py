@@ -166,12 +166,24 @@ def test_audio_vae_loader_keeps_full_fp32_checkpoint(tmp_path, monkeypatch) -> N
         "resolve_model_cls",
         lambda _: (MiniMaxH3AudioVAE, None),
     )
-    args = SimpleNamespace(pipeline_config=SimpleNamespace())
+    configured_audio_vae = MiniMaxH3AudioVAEConfig()
+    args = SimpleNamespace(
+        vae_cpu_offload=True,
+        pipeline_config=SimpleNamespace(audio_vae_config=configured_audio_vae),
+    )
     loaded = AudioDecoderLoader().load(str(tmp_path), args)
 
     assert set(loaded.state_dict()) == set(source.state_dict())
     assert hasattr(loaded, "encoder") and hasattr(loaded, "decoder")
+    assert isinstance(loaded.config, MiniMaxH3AudioVAEConfig)
+    assert loaded.config is not configured_audio_vae
     assert all(parameter.dtype == torch.float32 for parameter in loaded.parameters())
+    offload_device_type = "mps" if current_platform.is_mps() else "cpu"
+    assert all(parameter.device.type == offload_device_type for parameter in loaded.parameters())
+
+    configured_audio_vae.pretrained_dtype = "bf16"
+    with pytest.raises(ValueError, match="must load in FP32"):
+        AudioDecoderLoader().load(str(tmp_path), args)
 
 
 def test_video_vae_loader_strict_loads_native_checkpoint(tmp_path, monkeypatch) -> None:

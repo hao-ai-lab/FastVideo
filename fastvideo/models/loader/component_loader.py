@@ -936,12 +936,21 @@ class AudioDecoderLoader(ComponentLoader):
 
         if class_name == "AutoencoderKLMiniMaxH3Audio":
             from fastvideo.configs.models.vaes.minimax_h3_audio import MiniMaxH3AudioVAEConfig
+            from fastvideo.platforms import current_platform
 
-            audio_vae_config = MiniMaxH3AudioVAEConfig()
+            configured_audio_vae = getattr(fastvideo_args.pipeline_config, "audio_vae_config", None)
+            audio_vae_config = deepcopy(configured_audio_vae or MiniMaxH3AudioVAEConfig())
             audio_vae_config.update_model_arch(config)
+            if getattr(fastvideo_args, "vae_cpu_offload", False):
+                target_device = torch.device("mps") if current_platform.is_mps() else torch.device("cpu")
+            dtype_name = str(getattr(audio_vae_config, "pretrained_dtype", "float32")).removeprefix("torch.")
+            if dtype_name not in {"float32", "fp32"}:
+                raise ValueError(f"MiniMax-H3 audio VAE must load in FP32, got {dtype_name!r}.")
+            dtype = torch.float32
             # The DAC encoder, posterior projections, and BigVGAN decoder are
             # one checkpoint contract; Ref2VA needs the encoder as well as decode.
-            audio_vae = model_cls(audio_vae_config).to(device=target_device, dtype=torch.float32)
+            with set_default_torch_dtype(dtype):
+                audio_vae = model_cls(audio_vae_config).to(device=target_device, dtype=dtype)
             safetensors_list = glob.glob(os.path.join(str(model_path), "*.safetensors"))
             if not safetensors_list:
                 raise ValueError(f"No safetensors files found in {model_path}")
