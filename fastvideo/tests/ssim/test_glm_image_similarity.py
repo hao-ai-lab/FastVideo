@@ -10,8 +10,7 @@ import torch
 
 from fastvideo.logger import init_logger
 from fastvideo.tests.ssim.inference_similarity_utils import (
-    run_text_to_video_similarity_test,
-)
+    run_text_to_video_similarity_test, )
 from fastvideo.tests.ssim.reference_utils import (
     get_cuda_device_name,
     resolve_device_reference_folder,
@@ -22,9 +21,7 @@ logger = init_logger(__name__)
 REQUIRED_GPUS = 1
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-LOCAL_WEIGHTS_DIR = Path(
-    os.getenv("GLM_IMAGE_LOCAL_WEIGHTS_DIR",
-              REPO_ROOT / "official_weights" / "glm_image"))
+LOCAL_WEIGHTS_DIR = Path(os.getenv("GLM_IMAGE_LOCAL_WEIGHTS_DIR", REPO_ROOT / "official_weights" / "glm_image"))
 GLM_IMAGE_MODEL_PATH = os.getenv("GLM_IMAGE_MODEL_DIR", str(LOCAL_WEIGHTS_DIR))
 
 device_reference_folder = resolve_device_reference_folder(
@@ -33,6 +30,10 @@ device_reference_folder = resolve_device_reference_folder(
         ("L40S", "L40S"),
         ("H100", "H100"),
         ("H200", "H200"),
+        # GB200 must precede B200: the lookup is a substring scan and
+        # "B200" matches "NVIDIA GB200", so the coarser pattern would
+        # otherwise claim every Grace-Blackwell host.
+        ("GB200", "GB200"),
         ("B200", "B200"),
     ),
     device_name=get_cuda_device_name(),
@@ -87,9 +88,7 @@ GLM_IMAGE_FULL_QUALITY_MODEL_TO_PARAMS = {
 
 
 def _has_weights() -> bool:
-    required = ["transformer", "vae", "text_encoder",
-                "vision_language_encoder", "processor", "tokenizer",
-                "scheduler"]
+    required = ["transformer", "vae", "text_encoder", "vision_language_encoder", "processor", "tokenizer", "scheduler"]
     return all((LOCAL_WEIGHTS_DIR / r).exists() for r in required)
 
 
