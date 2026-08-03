@@ -137,3 +137,8 @@ def test_hunyuan15_finetune_single_train_step(
     assert any_nonzero, (
         "all layer-0 grads are exactly zero; backward did not "
         "reach the first transformer block")
+
+    # Device-keyed grad-norm regression, same as the five sibling per-method
+    # tests. Skips cleanly on a device with no seeded reference, so it costs
+    # nothing until one exists.
+    check_grad_norm_regression("test_hunyuan15_finetune", model.transformer)

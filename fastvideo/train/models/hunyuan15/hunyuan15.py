@@ -70,6 +70,10 @@ class Hunyuan15Model(WanModel):
             lora=lora,
         )
         self.negative_prompt_embeds_2: torch.Tensor | None = None
+        # Warn once per model, not once per step: the condition is a
+        # property of the dataset, so repeating it every iteration would
+        # bury the log it is meant to surface.
+        self._warned_missing_byt5 = False
         # No negative-prompt cache: FineTuneMethod hard-codes
         # conditional=True, so encoding the negative prompt would load the
         # ~16GB Qwen encoder on every rank for an embedding nothing reads.
@@ -116,6 +120,19 @@ class Hunyuan15Model(WanModel):
         media = self.vae.to(latents.device).decode(denorm)
         return (media / 2 + 0.5).clamp(0, 1)
 
+    def _byt5_embed_dim(self) -> int:
+        """Width of the ByT5 stream, from the config that actually constrains it.
+
+        ``HunyuanVideo15ArchConfig.text_embed_2_dim`` is what builds the
+        ``nn.LayerNorm`` this tensor has to satisfy, so it is the authority. The
+        encoder-side ``T5ArchConfig`` default of 512 is unrelated to it.
+        """
+        tc = self.training_config
+        assert tc is not None
+        return int(
+            tc.pipeline_config.dit_config.arch_config.text_embed_2_dim  # type: ignore[union-attr]
+        )
+
     def prepare_batch(
         self,
         raw_batch: dict[str, Any],
@@ -146,10 +163,28 @@ class Hunyuan15Model(WanModel):
         if (encoder_hidden_states_2 is None or encoder_attention_mask_2 is None):
             # Legacy parquet without the ByT5 field: zero-token
             # embedding, matching the inference empty-ByT5 convention.
+            #
+            # Say so. This is indistinguishable from healthy training -- finite
+            # grads, falling loss, full speed -- so without a line in the log a
+            # run conditioned on nothing looks exactly like a run that works.
+            # It also fires when the dataset's schema simply lacks the columns,
+            # because the collator derives its tensor fields from the schema.
+            if not self._warned_missing_byt5:
+                self._warned_missing_byt5 = True
+                logger.warning(
+                    "No ByT5 embeddings in this batch (text_embedding_2=%s, "
+                    "text_attention_mask_2=%s); training with glyph "
+                    "conditioning DISABLED. Expected for data preprocessed "
+                    "without the secondary text encoder; if you did "
+                    "preprocess it, check that the dataset schema declares "
+                    "the text_embedding_2 columns.",
+                    "missing" if encoder_hidden_states_2 is None else "present",
+                    "missing" if encoder_attention_mask_2 is None else "present",
+                )
             encoder_hidden_states_2 = torch.zeros(
                 batch_size,
                 0,
-                1472,
+                self._byt5_embed_dim(),
                 dtype=encoder_hidden_states.dtype,
             )
             encoder_attention_mask_2 = torch.zeros(
@@ -431,12 +466,10 @@ class Hunyuan15Model(WanModel):
         self.negative_prompt_attention_mask = (neg_mask.to(device=device, dtype=dtype))
         # The negative prompt carries no glyph text: inference uses a
         # zero-length ByT5 tensor, not an encoded empty string.
-        # 1472 is ByT5's d_model (the static T5ArchConfig default is
-        # 512, so it cannot be derived from the config here).
         self.negative_prompt_embeds_2 = torch.zeros(
             1,
             0,
-            1472,
+            self._byt5_embed_dim(),
             device=device,
             dtype=dtype,
         )
