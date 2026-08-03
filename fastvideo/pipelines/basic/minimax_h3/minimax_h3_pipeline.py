@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""FastVideo composed T2VA/FL2VA pipeline for MiniMax H3."""
+"""Private FastVideo composed pipelines for MiniMax H3."""
 
 from __future__ import annotations
 
@@ -17,9 +17,14 @@ from fastvideo.pipelines.basic.minimax_h3.stages import (
     MiniMaxH3AudioDecodingStage,
     MiniMaxH3ConditioningStage,
     MiniMaxH3DenoisingStage,
+    MiniMaxH3FL2VALayoutPreparationStage,
     MiniMaxH3InputPreparationStage,
     MiniMaxH3KeyframeEncodingStage,
     MiniMaxH3LatentPreparationStage,
+    MiniMaxH3Ref2VAConditioningStage,
+    MiniMaxH3Ref2VALayoutPreparationStage,
+    MiniMaxH3ReferenceEncodingStage,
+    MiniMaxH3ReferencePreparationStage,
     MiniMaxH3TimestepPreparationStage,
     MiniMaxH3VideoDecodingStage,
 )
@@ -51,15 +56,15 @@ def _normalize_modular_model_index(config: dict[str, Any]) -> dict[str, Any]:
         subfolder = loading.get("subfolder")
         if isinstance(subfolder, str) and subfolder != name:
             raise ValueError(f"Modular component {name!r} uses subfolder {subfolder!r}; "
-                             "FastVideo Stage 2 requires component names and subfolders to match.")
+                             "FastVideo requires component names and subfolders to match.")
 
     if "_diffusers_version" not in normalized:
         raise ValueError("modular_model_index.json does not contain _diffusers_version")
     return normalized
 
 
-class MiniMaxH3Pipeline(ComposedPipelineBase):
-    """One-request joint video/stereo-audio pipeline for T2VA and FL2VA."""
+class MiniMaxH3BasePipeline(ComposedPipelineBase):
+    """Shared private loading and target-generation path for MiniMax H3."""
 
     pipeline_config_cls: type[MiniMaxH3PipelineConfig] = MiniMaxH3PipelineConfig
     _required_config_modules = [
@@ -84,7 +89,7 @@ class MiniMaxH3Pipeline(ComposedPipelineBase):
         required_config_modules: list[str] | None = None,
         loaded_modules: dict[str, torch.nn.Module] | None = None,
         **kwargs: Any,
-    ) -> MiniMaxH3Pipeline:
+    ) -> MiniMaxH3BasePipeline:
         """Load the private pipeline without requiring a public config detector."""
         if pipeline_config is None:
             pipeline_config = MiniMaxH3PipelineConfig()
@@ -103,7 +108,7 @@ class MiniMaxH3Pipeline(ComposedPipelineBase):
             loaded_modules=loaded_modules,
             **kwargs,
         )
-        return cast("MiniMaxH3Pipeline", pipeline)
+        return cast("MiniMaxH3BasePipeline", pipeline)
 
     def _load_config(self, model_path: str) -> dict[str, Any]:
         """Load a canonical or modular Diffusers component manifest."""
@@ -128,6 +133,37 @@ class MiniMaxH3Pipeline(ComposedPipelineBase):
             if shift is None or float(shift) != expected_shift:
                 raise ValueError(f"MiniMax-H3 {modality} scheduler must expose shift={expected_shift:g}, got {shift}.")
 
+    def _add_target_generation_stages(
+        self,
+        transformer: Any,
+        vae: Any,
+        audio_vae: Any,
+        scheduler: Any,
+        audio_scheduler: Any,
+    ) -> None:
+        self.add_stage(
+            "latent_preparation_stage",
+            MiniMaxH3LatentPreparationStage(transformer=transformer, vae=vae, audio_vae=audio_vae),
+        )
+        self.add_stage(
+            "timestep_preparation_stage",
+            MiniMaxH3TimestepPreparationStage(scheduler=scheduler, audio_scheduler=audio_scheduler),
+        )
+        self.add_stage(
+            "denoising_stage",
+            MiniMaxH3DenoisingStage(
+                transformer=transformer,
+                scheduler=scheduler,
+                audio_scheduler=audio_scheduler,
+            ),
+        )
+        self.add_stage("video_decoding_stage", MiniMaxH3VideoDecodingStage(vae=vae, transformer=transformer))
+        self.add_stage("audio_decoding_stage", MiniMaxH3AudioDecodingStage(audio_vae=audio_vae))
+
+
+class MiniMaxH3Pipeline(MiniMaxH3BasePipeline):
+    """One-request joint video/stereo-audio pipeline for T2VA and FL2VA."""
+
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
         del fastvideo_args
         transformer = self.get_module("transformer")
@@ -150,23 +186,63 @@ class MiniMaxH3Pipeline(ComposedPipelineBase):
             MiniMaxH3KeyframeEncodingStage(vae=vae, transformer=transformer, scheduler=scheduler),
         )
         self.add_stage(
-            "latent_preparation_stage",
-            MiniMaxH3LatentPreparationStage(transformer=transformer, vae=vae, audio_vae=audio_vae),
+            "layout_preparation_stage",
+            MiniMaxH3FL2VALayoutPreparationStage(transformer=transformer),
+        )
+        self._add_target_generation_stages(
+            transformer,
+            vae,
+            audio_vae,
+            scheduler,
+            audio_scheduler,
+        )
+
+
+class MiniMaxH3RefPipeline(MiniMaxH3BasePipeline):
+    """Ordered-reference joint video/stereo-audio pipeline for Ref2VA."""
+
+    _extra_config_module_map = {"transformer": "transformer_ref"}
+
+    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
+        del fastvideo_args
+        transformer = self.get_module("transformer")
+        vae = self.get_module("vae")
+        audio_vae = self.get_module("audio_vae")
+        scheduler = self.get_module("scheduler")
+        audio_scheduler = self.get_module("audio_scheduler")
+
+        self.add_stage(
+            "reference_preparation_stage",
+            MiniMaxH3ReferencePreparationStage(vae=vae, audio_vae=audio_vae),
         )
         self.add_stage(
-            "timestep_preparation_stage",
-            MiniMaxH3TimestepPreparationStage(scheduler=scheduler, audio_scheduler=audio_scheduler),
-        )
-        self.add_stage(
-            "denoising_stage",
-            MiniMaxH3DenoisingStage(
-                transformer=transformer,
-                scheduler=scheduler,
-                audio_scheduler=audio_scheduler,
+            "conditioning_stage",
+            MiniMaxH3Ref2VAConditioningStage(
+                conditioner=self.get_module("text_encoder"),
+                tokenizer=self.get_module("tokenizer"),
+                processor=self.get_module("processor"),
             ),
         )
-        self.add_stage("video_decoding_stage", MiniMaxH3VideoDecodingStage(vae=vae, transformer=transformer))
-        self.add_stage("audio_decoding_stage", MiniMaxH3AudioDecodingStage(audio_vae=audio_vae))
+        self.add_stage(
+            "reference_encoding_stage",
+            MiniMaxH3ReferenceEncodingStage(
+                vae=vae,
+                audio_vae=audio_vae,
+                transformer=transformer,
+                scheduler=scheduler,
+            ),
+        )
+        self.add_stage(
+            "layout_preparation_stage",
+            MiniMaxH3Ref2VALayoutPreparationStage(transformer=transformer),
+        )
+        self._add_target_generation_stages(
+            transformer,
+            vae,
+            audio_vae,
+            scheduler,
+            audio_scheduler,
+        )
 
 
-__all__ = ["MiniMaxH3Pipeline"]
+__all__ = ["MiniMaxH3BasePipeline", "MiniMaxH3Pipeline", "MiniMaxH3RefPipeline"]

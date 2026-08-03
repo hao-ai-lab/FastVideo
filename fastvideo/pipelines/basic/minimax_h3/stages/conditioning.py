@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
 import torch
 
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -17,11 +18,15 @@ from fastvideo.pipelines.basic.minimax_h3.packing import (
     MINIMAX_H3_VISION_END_TOKEN,
     MINIMAX_H3_VISION_START_TOKEN,
 )
+from fastvideo.pipelines.basic.minimax_h3.packing_ref2va import (
+    build_ref2va_presentation,
+    sample_reference_video_frames,
+)
 from fastvideo.pipelines.basic.minimax_h3.stages._module_lifecycle import (
     maybe_offload_module,
     move_module_to_local_device,
 )
-from fastvideo.pipelines.basic.minimax_h3.types import get_minimax_h3_state
+from fastvideo.pipelines.basic.minimax_h3.types import MiniMaxH3PreparedReference, get_minimax_h3_state
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
@@ -80,14 +85,6 @@ class MiniMaxH3ConditioningStage(PipelineStage):
         if not isinstance(prompt, str):
             raise ValueError(f"MiniMax H3 requires `prompt` to be a single string, got {type(prompt)}.")
 
-        hidden_state_index = MINIMAX_H3_TEXT_ENCODER_LAYER
-        num_hidden_layers = getattr(self.conditioner, "num_hidden_layers", None)
-        if num_hidden_layers is None:
-            num_hidden_layers = getattr(self.conditioner.config, "num_hidden_layers", None)
-        if num_hidden_layers is None or num_hidden_layers <= hidden_state_index:
-            raise ValueError(f"MiniMax H3 requires more than {hidden_state_index} Qwen3-VL decoder layers to read "
-                             f"`hidden_states[{hidden_state_index}]`, got {num_hidden_layers}.")
-
         token_ids: list[int] = []
         token_tags: list[int] = []
         pixel_values = None
@@ -115,6 +112,31 @@ class MiniMaxH3ConditioningStage(PipelineStage):
         token_ids.extend(prompt_ids)
         token_tags.extend([MINIMAX_H3_TEXT_TAG] * len(prompt_ids))
 
+        return self._encode_tokens(
+            token_ids,
+            token_tags,
+            device,
+            pixel_values=pixel_values,
+            image_grid_thw=image_grid_thw,
+        )
+
+    def _encode_tokens(
+        self,
+        token_ids: list[int],
+        token_tags: list[int],
+        device: torch.device,
+        **vision_inputs: torch.Tensor | None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        hidden_state_index = MINIMAX_H3_TEXT_ENCODER_LAYER
+        num_hidden_layers = getattr(self.conditioner, "num_hidden_layers", None)
+        if num_hidden_layers is None:
+            config = getattr(self.conditioner, "config", None)
+            arch = getattr(config, "arch_config", config)
+            num_hidden_layers = getattr(arch, "num_hidden_layers", None)
+        if num_hidden_layers is None or num_hidden_layers <= hidden_state_index:
+            raise ValueError(f"MiniMax H3 requires more than {hidden_state_index} Qwen3-VL decoder layers to read "
+                             f"`hidden_states[{hidden_state_index}]`, got {num_hidden_layers}.")
+
         input_ids = torch.tensor([token_ids], dtype=torch.long, device=device)
         mm_token_type_ids = torch.as_tensor(self.processor.create_mm_token_type_ids([token_ids]),
                                             dtype=torch.long,
@@ -124,10 +146,16 @@ class MiniMaxH3ConditioningStage(PipelineStage):
             input_ids=input_ids,
             attention_mask=torch.ones_like(input_ids),
             mm_token_type_ids=mm_token_type_ids,
-            pixel_values=None if pixel_values is None else pixel_values.to(device=device, dtype=dtype),
-            image_grid_thw=None if image_grid_thw is None else image_grid_thw.to(device=device),
             use_cache=False,
             output_hidden_states=True,
+            **{
+                name:
+                None if value is None else value.to(
+                    device=device,
+                    dtype=dtype if name in {"pixel_values", "pixel_values_videos"} else None,
+                )
+                for name, value in vision_inputs.items()
+            },
         )
         if outputs.hidden_states is None or len(outputs.hidden_states) <= hidden_state_index:
             raise ValueError(f"Qwen3-VL did not return `hidden_states[{hidden_state_index}]`.")
@@ -151,4 +179,97 @@ class MiniMaxH3ConditioningStage(PipelineStage):
         return batch
 
 
-__all__ = ["MiniMaxH3ConditioningStage"]
+class MiniMaxH3Ref2VAConditioningStage(MiniMaxH3ConditioningStage):
+    """Encode the ordered Ref2VA presentation with Qwen3-VL image and video inputs."""
+
+    def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+        state = get_minimax_h3_state(batch)
+        result = VerificationResult()
+        result.add_check("prompt", batch.prompt, lambda value: isinstance(value, str))
+        result.add_check("prepared_references", state.prepared_references, V.list_not_empty)
+        return result
+
+    def _encode_references(
+        self,
+        prompt: str | list[str] | None,
+        references: list[MiniMaxH3PreparedReference],
+        device: torch.device,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if not isinstance(prompt, str):
+            raise ValueError(f"MiniMax H3 requires `prompt` to be a single string, got {type(prompt)}.")
+
+        merge_area = int(self.processor.image_processor.merge_size)**2
+        pixel_values = None
+        image_grid_thw = None
+        image_token_counts: list[int] = []
+        images = [reference.image for reference in references if reference.media_type == "image"]
+        if any(image is None for image in images):
+            raise ValueError("MiniMax-H3 reference images must be prepared before conditioning.")
+        if images:
+            vision = self.processor.image_processor(images=images, return_tensors="pt")
+            pixel_values = vision["pixel_values"]
+            image_grid_thw = vision["image_grid_thw"]
+            image_token_counts = [int(grid.prod().item()) // merge_area for grid in image_grid_thw]
+
+        pixel_values_videos = None
+        video_grid_thw = None
+        video_block_token_counts: list[int] = []
+        videos = [reference for reference in references if reference.media_type == "video"]
+        if videos:
+            if any(reference.frames is None for reference in videos):
+                raise ValueError("MiniMax-H3 reference videos must be prepared before conditioning.")
+            sampled = [sample_reference_video_frames(reference.frames) for reference in videos]
+            for reference, (_, timestamps) in zip(videos, sampled, strict=True):
+                reference.block_timestamps = timestamps
+            vision = self.processor.video_processor(
+                videos=[np.stack(frames) for frames, _ in sampled],
+                do_sample_frames=False,
+                return_tensors="pt",
+            )
+            pixel_values_videos = vision["pixel_values_videos"]
+            video_grid_thw = vision["video_grid_thw"]
+            video_block_token_counts = [int(grid[1]) * int(grid[2]) // merge_area for grid in video_grid_thw]
+            for reference, grid in zip(videos, video_grid_thw, strict=True):
+                if int(grid[0]) != len(reference.block_timestamps):
+                    raise ValueError(f"Qwen3-VL produced {int(grid[0])} blocks for a reference video, but "
+                                     f"MiniMax-H3 labels {len(reference.block_timestamps)}.")
+
+        token_ids, token_tags = build_ref2va_presentation(
+            self.tokenizer,
+            prompt,
+            references,
+            image_token_counts,
+            video_block_token_counts,
+        )
+        return self._encode_tokens(
+            token_ids,
+            token_tags,
+            device,
+            pixel_values=pixel_values,
+            image_grid_thw=image_grid_thw,
+            pixel_values_videos=pixel_values_videos,
+            video_grid_thw=video_grid_thw,
+        )
+
+    @torch.no_grad()
+    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+        state = get_minimax_h3_state(batch)
+        self.conditioner, device, moved_for_forward = move_module_to_local_device(self.conditioner)
+        try:
+            prompt_embeds, text_token_tags = self._encode_references(
+                batch.prompt,
+                state.prepared_references,
+                device,
+            )
+        finally:
+            self.conditioner = maybe_offload_module(
+                self.conditioner,
+                enabled=moved_for_forward and bool(getattr(fastvideo_args, "text_encoder_cpu_offload", False)),
+            )
+        state.prompt_embeds = prompt_embeds
+        state.text_token_tags = text_token_tags
+        batch.prompt_embeds = [prompt_embeds]
+        return batch
+
+
+__all__ = ["MiniMaxH3ConditioningStage", "MiniMaxH3Ref2VAConditioningStage"]

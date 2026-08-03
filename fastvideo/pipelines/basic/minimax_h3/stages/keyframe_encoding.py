@@ -21,30 +21,12 @@ from fastvideo.pipelines.basic.minimax_h3.stages._module_lifecycle import (
     module_device,
     move_module_to_local_device,
 )
+from fastvideo.pipelines.basic.minimax_h3.stages._vae_conditioning import arch_value, latent_stats, sample_posterior
 from fastvideo.pipelines.basic.minimax_h3.types import get_minimax_h3_state
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
-
-
-def _arch_value(module: Any, name: str) -> Any:
-    config = getattr(module, "config", None)
-    arch = getattr(config, "arch_config", config)
-    value = getattr(arch, name, None)
-    if value is None:
-        raise ValueError(f"MiniMax-H3 component {type(module).__name__} does not expose `{name}`.")
-    return value
-
-
-def _latent_stats(vae: Any) -> tuple[torch.Tensor, torch.Tensor]:
-    mean = getattr(vae, "latents_mean", None)
-    std = getattr(vae, "latents_std", None)
-    if mean is None:
-        mean = torch.tensor(_arch_value(vae, "latents_mean"), dtype=torch.float32).view(1, -1, 1, 1, 1)
-    if std is None:
-        std = torch.tensor(_arch_value(vae, "latents_std"), dtype=torch.float32).view(1, -1, 1, 1, 1)
-    return mean.detach().float().cpu(), std.detach().float().cpu()
 
 
 class MiniMaxH3KeyframeEncodingStage(PipelineStage):
@@ -80,19 +62,18 @@ class MiniMaxH3KeyframeEncodingStage(PipelineStage):
         if state.latent_height is None or state.latent_width is None:
             raise ValueError("MiniMax-H3 input geometry must be prepared before keyframe encoding.")
 
-        patch_size = tuple(int(value) for value in _arch_value(self.transformer, "patch_size"))
-        latent_channels = int(_arch_value(self.vae, "latent_channels"))
+        patch_size = tuple(int(value) for value in arch_value(self.transformer, "patch_size"))
+        latent_channels = int(arch_value(self.vae, "latent_channels"))
         self.vae, vae_device, _ = move_module_to_local_device(self.vae)
         try:
-            latents_mean, latents_std = _latent_stats(self.vae)
+            latents_mean, latents_std = latent_stats(self.vae, (1, -1, 1, 1, 1))
             clean_rows = []
             for image in state.keyframes:
                 pixels = torch.from_numpy(np.asarray(image).copy()).permute(2, 0, 1)[None, :, None]
                 pixels = pixels.to(device=vae_device, dtype=torch.float32).div_(255.0)
                 pixels = self.vae.normalize_pixels(pixels)
-                generator = torch.Generator("cpu").manual_seed(MINIMAX_H3_KEYFRAME_ENCODE_SEED)
                 posterior = self.vae.encode_keyframe(pixels).latent_dist
-                latents = posterior.sample(generator=generator)
+                latents = sample_posterior(posterior, MINIMAX_H3_KEYFRAME_ENCODE_SEED)
                 latents = latents.to(torch.float16).float().cpu()
                 clean_rows.append(patchify_video_latents((latents - latents_mean) / latents_std, patch_size))
         finally:

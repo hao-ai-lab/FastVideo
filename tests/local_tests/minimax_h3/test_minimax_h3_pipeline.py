@@ -36,6 +36,7 @@ from fastvideo.pipelines.basic.minimax_h3.stages import (
     MiniMaxH3AudioDecodingStage,
     MiniMaxH3ConditioningStage,
     MiniMaxH3DenoisingStage,
+    MiniMaxH3FL2VALayoutPreparationStage,
     MiniMaxH3InputPreparationStage,
     MiniMaxH3KeyframeEncodingStage,
     MiniMaxH3LatentPreparationStage,
@@ -358,6 +359,7 @@ def _prepare_latents(batch: ForwardBatch, components: SimpleNamespace, args: Sim
             components.processor,
         ),
         MiniMaxH3KeyframeEncodingStage(components.vae, components.transformer, components.scheduler),
+        MiniMaxH3FL2VALayoutPreparationStage(components.transformer),
         MiniMaxH3LatentPreparationStage(components.transformer, components.vae, components.audio_vae),
     )
     for stage in stages:
@@ -376,6 +378,7 @@ def test_composed_pipeline_runs_stage2_end_to_end() -> None:
         "input_preparation_stage",
         "conditioning_stage",
         "keyframe_encoding_stage",
+        "layout_preparation_stage",
         "latent_preparation_stage",
         "timestep_preparation_stage",
         "denoising_stage",
@@ -491,6 +494,7 @@ def test_private_pipeline_factory_loads_modular_manifest(tmp_path, monkeypatch, 
         "input_preparation_stage",
         "conditioning_stage",
         "keyframe_encoding_stage",
+        "layout_preparation_stage",
         "latent_preparation_stage",
         "timestep_preparation_stage",
         "denoising_stage",
@@ -519,11 +523,14 @@ def test_pipeline_requires_exact_scheduler_shifts() -> None:
 
 
 def test_component_forwards_follow_cpu_offload_lifecycle(monkeypatch) -> None:
-    """CPU-parked Qwen and both VAEs move for forward, then return to CPU."""
+    """CPU-parked H3 components move for forward, then return to CPU."""
     monkeypatch.setattr(module_lifecycle, "get_local_torch_device", lambda: torch.device("cuda"))
     args = _fastvideo_args()
     args.text_encoder_cpu_offload = True
     args.vae_cpu_offload = True
+    args.dit_cpu_offload = True
+    args.dit_layerwise_offload = False
+    args.use_fsdp_inference = False
     components = _components()
 
     def record_moves(module: nn.Module) -> list[torch.device]:
@@ -540,6 +547,7 @@ def test_component_forwards_follow_cpu_offload_lifecycle(monkeypatch) -> None:
     conditioner_moves = record_moves(components.conditioner)
     video_vae_moves = record_moves(components.vae)
     audio_vae_moves = record_moves(components.audio_vae)
+    transformer_moves = record_moves(components.transformer)
 
     output = _composed_pipeline(components, args).forward(_make_batch("both", inject_latents=True), args)
 
@@ -552,6 +560,7 @@ def test_component_forwards_follow_cpu_offload_lifecycle(monkeypatch) -> None:
         torch.device("cpu"),
     ]
     assert audio_vae_moves == [torch.device("cuda"), torch.device("cpu")]
+    assert transformer_moves == [torch.device("cuda"), torch.device("cpu")]
 
 
 def test_conditioning_keeps_text_encoder_dtype() -> None:

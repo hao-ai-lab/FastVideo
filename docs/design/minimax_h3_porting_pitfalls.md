@@ -16,6 +16,10 @@
 - **Keyframes:** each keyframe conditions both Qwen3-VL and the video VAE.
 - **Encoder boundary:** the adapter returns `BaseEncoderOutput`; H3 presentation and layer 50 stay in conditioning.
 - **RNG:** seed-42 posterior sampling is separate; request RNG starts at condition noise.
+- **Ref order:** order changes both Qwen labels and the rotary clock.
+- **Soundtrack:** a video's audio rows come first and share its rotary origin.
+- **Ref clock:** use sequential temporal summation; FL2VA's pairwise sum differs.
+- **Ref loader:** expose `transformer_ref/` as logical `transformer`; never load both partitions.
 - **CFG:** clear the default negative prompt; H3 has no unconditional branch.
 - **Audio output:** decoded audio is `[samples, 2]`; latent mode still uses the public audio fields.
 - **Executor:** drop internal embeddings and latents before returning the batch.

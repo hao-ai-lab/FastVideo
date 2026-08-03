@@ -10,7 +10,6 @@ import torch
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.pipelines.basic.minimax_h3.packing import (
     MINIMAX_H3_AUDIO_CHANNELS,
-    build_packed_sequence,
     patchify_video_latents,
     randn_tensor,
 )
@@ -43,7 +42,7 @@ def _arch_value(module: Any, name: str) -> Any:
 
 
 class MiniMaxH3LatentPreparationStage(PipelineStage):
-    """Build the FL2VA row layout and draw target video then target audio noise."""
+    """Draw target video then target audio noise and prepend condition rows."""
 
     def __init__(self, transformer: Any, vae: Any, audio_vae: Any) -> None:
         super().__init__()
@@ -54,7 +53,7 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         state = get_minimax_h3_state(batch)
         result = VerificationResult()
-        result.add_check("text_token_tags", state.text_token_tags, V.with_dims(1))
+        result.add_check("layout", state.layout, V.not_none)
         result.add_check("num_latent_frames", state.num_latent_frames, V.positive_int)
         result.add_check("latent_height", state.latent_height, V.positive_int)
         result.add_check("latent_width", state.latent_width, V.positive_int)
@@ -66,7 +65,6 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
     def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         state = get_minimax_h3_state(batch)
         result = VerificationResult()
-        result.add_check("layout", state.layout, V.not_none)
         result.add_check("video_latents", state.video_latents, V.with_dims(2))
         result.add_check("audio_latents", state.audio_latents, V.with_dims(2))
         result.add_check("batch.latents", batch.latents, lambda value: value is None)
@@ -77,8 +75,8 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         del fastvideo_args
         state = get_minimax_h3_state(batch)
-        if state.text_token_tags is None:
-            raise ValueError("MiniMax-H3 conditioning must run before latent preparation.")
+        if state.layout is None:
+            raise ValueError("MiniMax-H3 layout must be prepared before target latents.")
         geometry = (state.num_latent_frames, state.latent_height, state.latent_width, state.num_audio_latents)
         if any(value is None for value in geometry):
             raise ValueError("MiniMax-H3 input geometry is incomplete.")
@@ -89,16 +87,6 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
         video_channels = int(_arch_value(self.vae, "latent_channels"))
         audio_channels = int(_arch_value(self.audio_vae, "latent_channels"))
         device = _module_device(self.transformer)
-
-        state.layout = build_packed_sequence(
-            state.text_token_tags,
-            num_latent_frames,
-            latent_height,
-            latent_width,
-            num_audio_latents,
-            patch_size,
-            state.keyframe_anchors,
-        )
 
         video_noise = batch.latents
         expected_video_shape = (1, video_channels, num_latent_frames, latent_height, latent_width)

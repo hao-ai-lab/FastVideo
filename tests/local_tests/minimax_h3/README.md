@@ -3,6 +3,7 @@
 Local component and contract tests for `minimax_h3` in FastVideo.
 Stage 1 covers model components, FL2VA packing, both schedulers, direct Diffusers component loading, and the minimal
 `last_image`/`references`/`audio_latents` request bridge. Stage 2 adds the internal T2VA/FL2VA composed pipeline.
+Stage 3 adds ordered Ref2VA media, condition encoding, packing, and its separate private pipeline.
 
 Progress and blockers live in `tests/local_tests/minimax_h3/PORT_STATUS.md`.
 
@@ -64,6 +65,28 @@ pytest \
 The pipeline remains internal until real-checkpoint and distributed acceptance. Stage 2 evidence uses synthetic tiny
 components; real-checkpoint, CUDA, model-output, and media-quality behavior are unverified.
 
+## Stage 3 tests
+
+| Scope | Test | Evidence |
+|---|---|---|
+| Ref2VA media | `tests/local_tests/minimax_h3/test_minimax_h3_ref2va_media.py` | image/video/audio normalization, rate handling, and local decode |
+| Ref2VA packing | `tests/local_tests/minimax_h3/test_minimax_h3_ref2va_packing.py` | handwritten oracle plus independent exact reference parity |
+| Transformer partition | `tests/local_tests/minimax_h3/test_minimax_h3_ref_loader.py` | logical `transformer` loads only from `transformer_ref/` |
+| Ref2VA pipeline | `tests/local_tests/minimax_h3/test_minimax_h3_ref2va_pipeline.py` | ordered presentation, VAE conditions, RNG, validation, and joint AV output |
+
+Run Stage 3 from the repository root:
+
+```bash
+PYTHONPATH=DiffusersMiniMaxH3/src pytest \
+  tests/local_tests/minimax_h3/test_minimax_h3_ref2va_media.py \
+  tests/local_tests/minimax_h3/test_minimax_h3_ref2va_packing.py \
+  tests/local_tests/minimax_h3/test_minimax_h3_ref_loader.py \
+  tests/local_tests/minimax_h3/test_minimax_h3_ref2va_pipeline.py -q
+```
+
+Stage 3 evidence remains synthetic CPU evidence. Real weights, CUDA, distributed execution, output quality, memory,
+and performance remain unverified.
+
 ## Review notes
 
 - Keep the FastVideo and reference packers independent.
@@ -71,5 +94,5 @@ components; real-checkpoint, CUDA, model-output, and media-quality behavior are 
 - Keep `last_image`, `references`, and `audio_latents` in the typed request bridge.
 - Keep the isolated Transformers Qwen3-VL base-model passthrough adapter on the standard FastVideo encoder contract;
   H3 presentation and layer selection belong to the conditioning stage.
-- Decode, normalize, and validate reference contents in the Ref2VA stages.
-- Stage 2 does not add a public preset or registry detector.
+- Keep media I/O in reference preparation, not in the immutable request object.
+- Neither private pipeline adds a public preset or registry detector.

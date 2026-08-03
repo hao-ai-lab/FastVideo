@@ -7,7 +7,7 @@
 - implementation_reference: `https://github.com/huggingface/diffusers/pull/14355`
 - checkpoint: `MiniMaxAI/MiniMax-H3`; not available in this workspace
 - loading_boundary: Diffusers component folders
-- current_phase: Stage 2 T2VA/FL2VA pipeline and synthetic parity
+- current_phase: Stage 3 Ref2VA pipeline and synthetic parity
 - status: `in_review`
 
 ## Component matrix
@@ -24,7 +24,9 @@
 | Qwen3-VL encoder | `fastvideo/models/encoders/minimax_h3_qwen3_vl.py` | `text_encoder/`, `tokenizer/`, `processor/` | isolated Transformers base-model passthrough | synthetic standard-forward contract | I001 |
 | T2VA/FL2VA pipeline | `fastvideo/pipelines/basic/minimax_h3/` | `transformer/` partition | implemented, internal | private factory, offload, and four-path contracts | I001 |
 | Joint AV result | existing `GenerationResult` and save path | decoded video and stereo audio | wired | tiny decoded output through typed result and real MP4 mux | I001 |
-| Ref2VA references | `fastvideo/pipelines/basic/minimax_h3/types.py` | reference media schema | carrier implemented | request round trip | media processing starts in Stage 3 |
+| Ref2VA media | `fastvideo/pipelines/basic/minimax_h3/` | ordered reference schema and media | implemented | synthetic decode and preparation contracts | I001 |
+| Ref2VA packer | `fastvideo/pipelines/basic/minimax_h3/packing_ref2va.py` | reference packing code | implemented | handwritten oracle and independent exact parity | none |
+| Ref2VA pipeline | `fastvideo/pipelines/basic/minimax_h3/` | `transformer_ref/` partition | implemented, internal | ordered conditions, RNG, validation, and joint AV contracts | I001 |
 
 ## Validation commands
 
@@ -37,6 +39,7 @@
 | Stage 1 | command in `README.md` | all synthetic CPU tests pass without skip |
 | Conditioner | `pytest tests/local_tests/minimax_h3/test_minimax_h3_conditioner.py -q` | `BaseEncoderOutput` plus stage-owned picture presentation, tags, and layer-50 selection |
 | Stage 2 pipeline | `pytest tests/local_tests/minimax_h3/test_minimax_h3_pipeline.py -q` | private factory, offload, four paths, dual denoise, decode, and mux |
+| Stage 3 pipeline | command in `README.md` | ordered media, Ref2VA packing, partition isolation, condition encoding, and joint AV output |
 
 ## Issues and blockers
 
@@ -56,11 +59,13 @@
 | Rebuild analytic RoPE state after meta initialization. | Non-persistent buffers are absent from the checkpoint. | `rope.inv_freq` is materialized in FP32. |
 | Keep H3 state in `batch.extra["minimax_h3"]`. | Packed joint state is family-specific. | Stages share one typed source, then decoding removes it before executor return. |
 | Reuse `GenerationResult` and the existing mux path. | H3 only needs to expose decoded video plus a 2D stereo waveform. | No family-specific result or container writer is introduced. |
-| Keep the Stage 2 pipeline direct-import only. | Public registry activation belongs to Stage 4 acceptance. | No `EntryClass`, preset, or detector is added. |
+| Keep both pipelines direct-import only. | Public registry activation belongs to Stage 4 acceptance. | No `EntryClass`, preset, or detector is added. |
 | Isolate Qwen3-VL as a Transformers base-model passthrough adapter. | The encoder should expose the standard FastVideo `forward` contract only. | It returns `BaseEncoderOutput`; H3 picture presentation, tags, and layer-50 selection stay in the conditioning stage. |
 | Follow FastVideo CPU-offload lifecycle. | Qwen and both VAEs are CPU-parked by default. | Each component moves only for its forward and then returns to CPU. |
+| Keep Ref2VA order semantic. | Order controls both presentation labels and the shared rotary clock. | Media preparation, modality rows, and layout preserve request order. |
+| Resolve `transformer_ref/` as logical `transformer`. | The two Transformer partitions are alternative workloads. | Ref2VA never loads the FL2VA partition. |
 
 ## Evidence boundary
 
-Stage 2 evidence is synthetic CPU parity plus a tiny generated MP4 container contract. Real-checkpoint, CUDA,
+Stage 3 evidence is synthetic CPU parity plus a tiny generated MP4 container contract. Real-checkpoint, CUDA,
 sequence-parallel, FSDP, model-generated media, quality, memory, and performance remain unverified.
