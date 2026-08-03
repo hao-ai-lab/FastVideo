@@ -172,7 +172,10 @@ def collate_rows_from_parquet_schema(rows,
                     # Preserve the full shape (e.g. [0, D]) so downstream
                     # padding knows the embedding dimension even when there
                     # are zero tokens (e.g. ByT5 embedding with no glyph text).
-                    tensor = torch.empty(tuple(shape), dtype=torch.float32)
+                    # zeros, not empty: a truncated row can declare a non-empty
+                    # shape with no payload, and uninitialized memory would be
+                    # stacked silently instead of failing.
+                    tensor = torch.zeros(tuple(shape), dtype=torch.float32)
                 else:
                     drop = (
                         tensor_name in ("text_embedding", "text_embedding_2")
