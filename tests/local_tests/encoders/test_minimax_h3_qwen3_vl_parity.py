@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Released-weight parity for MiniMax-H3's Qwen3-VL conditioner.
+"""Production-loader parity for MiniMax-H3's Qwen3-VL conditioner.
 
 The test compares the exact Transformers base model used by the official
 pipeline with FastVideo's production ``TextEncoderLoader`` path.  It covers
@@ -26,7 +26,7 @@ from fastvideo.distributed import cleanup_dist_env_and_memory, maybe_init_distri
 from fastvideo.models.loader.component_loader import TextEncoderLoader
 
 
-PARITY_SCOPE = "component_output"
+PARITY_SCOPE = "production_loader"
 MINIMAX_H3_TEXT_ENCODER_LAYER = 50
 
 
@@ -34,16 +34,16 @@ def _require_assets() -> tuple[torch.device, Path]:
     if os.environ.get("MINIMAX_H3_RUN_ENCODER_PARITY") != "1":
         pytest.skip("set MINIMAX_H3_RUN_ENCODER_PARITY=1 on an allocated GPU node")
     if not torch.cuda.is_available() or not torch.cuda.is_bf16_supported():
-        pytest.skip("MiniMax-H3 Qwen3-VL parity requires a bf16-capable CUDA GPU")
+        pytest.fail("MiniMax-H3 Qwen3-VL parity requires a bf16-capable CUDA GPU", pytrace=False)
 
     model_root = os.environ.get("MINIMAX_H3_MODEL_ROOT")
     if not model_root:
-        pytest.skip("set MINIMAX_H3_MODEL_ROOT to the downloaded MiniMax-H3 checkpoint")
+        pytest.fail("set MINIMAX_H3_MODEL_ROOT to the downloaded MiniMax-H3 checkpoint", pytrace=False)
     root = Path(model_root)
     required = (root / "text_encoder", root / "tokenizer", root / "processor")
     missing = [str(path) for path in required if not path.is_dir()]
     if missing:
-        pytest.skip(f"MiniMax-H3 component directories are missing: {missing}")
+        pytest.fail(f"MiniMax-H3 component directories are missing: {missing}", pytrace=False)
     return torch.device("cuda"), root
 
 
@@ -189,7 +189,7 @@ def _production_loader_args() -> SimpleNamespace:
     )
 
 
-def test_minimax_h3_qwen3_vl_released_weight_parity() -> None:
+def test_minimax_h3_qwen3_vl_parity() -> None:
     """Match official layer-50 states for text, image, and video inputs."""
     from transformers import Qwen3VLForConditionalGeneration
 

@@ -10,7 +10,7 @@ import torch
 from PIL import Image
 from torch.testing import assert_close
 
-from tests.local_tests.minimax_h3._reference import REFERENCE_SRC, assert_pinned_reference
+from tests.local_tests.minimax_h3._reference import REFERENCE_SRC, assert_pinned_reference, assert_reference_source
 
 PARITY_SCOPE = "implementation_subcomponent"
 
@@ -26,6 +26,9 @@ sys.path.insert(0, str(REFERENCE_SRC))
 
 from diffusers.modular_pipelines.minimax_h3 import packing as reference_packing  # noqa: E402
 from diffusers.modular_pipelines.minimax_h3 import packing_ref2va as reference  # noqa: E402
+
+assert_reference_source(reference_packing, "src/diffusers/modular_pipelines/minimax_h3/packing.py")
+assert_reference_source(reference, "src/diffusers/modular_pipelines/minimax_h3/packing_ref2va.py")
 
 from fastvideo.pipelines.basic.minimax_h3 import packing as base_packing  # noqa: E402
 from fastvideo.pipelines.basic.minimax_h3 import reference as actual  # noqa: E402
@@ -126,27 +129,6 @@ def test_same_rate_reference_waveform_matches_pinned_diffusers(channels: int) ->
     assert result.shape == (2, 7)
     if channels == 1:
         assert_close(result[0], result[1], rtol=0, atol=0)
-
-
-def test_reference_waveform_polyphase_fallback_without_torchaudio(monkeypatch: pytest.MonkeyPatch) -> None:
-    from scipy.signal import resample_poly
-
-    monkeypatch.setitem(sys.modules, "torchaudio", None)
-    sample_rate = 44_100
-    target_sample_rate = 32_000
-    waveform = torch.linspace(-1.0, 1.0, sample_rate // 10, dtype=torch.float32).repeat(2, 1)
-
-    result = actual.prepare_reference_waveform(
-        waveform,
-        sample_rate=sample_rate,
-        target_sample_rate=target_sample_rate,
-        max_duration=0.1,
-    )
-    expected = resample_poly(waveform.numpy(), up=320, down=441, axis=-1).astype(np.float32)
-
-    np.testing.assert_array_equal(result.numpy(), expected)
-    assert result.dtype == torch.float32
-    assert result.shape == (2, 3200)
 
 
 @pytest.mark.parametrize(

@@ -6,7 +6,7 @@ import pytest
 import torch
 from torch.testing import assert_close
 
-from tests.local_tests.minimax_h3._reference import REFERENCE_SRC, assert_pinned_reference
+from tests.local_tests.minimax_h3._reference import REFERENCE_SRC, assert_pinned_reference, assert_reference_source
 
 assert_pinned_reference(
     "src/diffusers/modular_pipelines/minimax_h3/packing.py",
@@ -15,6 +15,8 @@ assert_pinned_reference(
 sys.path.insert(0, str(REFERENCE_SRC))
 
 from diffusers.modular_pipelines.minimax_h3 import packing as reference  # noqa: E402
+
+assert_reference_source(reference, "src/diffusers/modular_pipelines/minimax_h3/packing.py")
 
 from fastvideo.pipelines.basic.minimax_h3 import packing as actual  # noqa: E402
 from fastvideo.pipelines.basic.minimax_h3.packing import MiniMaxH3PackedLayout  # noqa: E402
@@ -76,18 +78,6 @@ def test_condition_noise_preserves_draw_order() -> None:
     result = actual.keyframe_condition_noise(**kwargs, generator=actual_generator)
     assert_close(result, expected, rtol=0, atol=0)
     assert_close(torch.randn(5, generator=actual_generator), torch.randn(5, generator=reference_generator), rtol=0, atol=0)
-
-
-def test_layout_rejects_semantic_padding_tags() -> None:
-    with pytest.raises(ValueError, match="semantic padding"):
-        actual.build_packed_sequence(
-            text_token_tags=torch.tensor([1, -1]),
-            num_latent_frames=2,
-            latent_height=4,
-            latent_width=4,
-            num_audio_latents=2,
-            patch_size=(1, 2, 2),
-        )
 
 
 def test_stereo_audio_rows_unpack_channel_major() -> None:

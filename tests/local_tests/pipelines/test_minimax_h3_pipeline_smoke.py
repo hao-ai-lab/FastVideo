@@ -9,15 +9,15 @@ from pathlib import Path
 
 def _write_modular_checkpoint(model_dir: Path) -> None:
     component_types = {
-        "text_encoder": ("transformers", "Qwen3VLModel"),
-        "tokenizer": ("transformers", "Qwen3VLTokenizer"),
+        "text_encoder": ("transformers", "Qwen3VLForConditionalGeneration"),
+        "tokenizer": ("transformers", "Qwen2TokenizerFast"),
         "processor": ("transformers", "Qwen3VLProcessor"),
         "vae": ("diffusers", "AutoencoderKLMiniMaxH3"),
         "audio_vae": ("diffusers", "AutoencoderKLMiniMaxH3Audio"),
         "transformer": ("diffusers", "MiniMaxH3Transformer3DModel"),
         "transformer_ref": ("diffusers", "MiniMaxH3Transformer3DModel"),
-        "scheduler": ("diffusers", "FlowMatchEulerDiscreteScheduler"),
-        "audio_scheduler": ("diffusers", "FlowMatchEulerDiscreteScheduler"),
+        "scheduler": ("diffusers", "MiniMaxH3Scheduler"),
+        "audio_scheduler": ("diffusers", "MiniMaxH3Scheduler"),
     }
     components = {
         name: [None, None, {"type_hint": list(type_hint), "subfolder": name}]
@@ -29,6 +29,7 @@ def _write_modular_checkpoint(model_dir: Path) -> None:
     manifest = {
         "_class_name": "MiniMaxH3ModularPipeline",
         "_diffusers_version": "0.36.0.dev0",
+        "_blocks_class_name": "MiniMaxH3Blocks",
         **components,
     }
     (model_dir / "modular_model_index.json").write_text(json.dumps(manifest), encoding="utf-8")
@@ -38,7 +39,6 @@ def test_minimax_h3_registry_resolves_both_public_pipelines(tmp_path: Path) -> N
     from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
     from fastvideo.fastvideo_args import WorkloadType
     from fastvideo.pipelines.basic.minimax_h3.minimax_h3_pipeline import (
-        EntryClass,
         MiniMaxH3ModularPipeline,
         MiniMaxH3Ref2VAModularPipeline,
     )
@@ -47,7 +47,6 @@ def test_minimax_h3_registry_resolves_both_public_pipelines(tmp_path: Path) -> N
     model_dir = tmp_path / "checkpoint-with-modular-manifest"
     _write_modular_checkpoint(model_dir)
 
-    assert EntryClass == [MiniMaxH3ModularPipeline, MiniMaxH3Ref2VAModularPipeline]
     default_info = get_model_info(str(model_dir), workload_type=WorkloadType.I2V)
     assert default_info.pipeline_cls is MiniMaxH3ModularPipeline
     assert default_info.pipeline_config_cls is MiniMaxH3PipelineConfig

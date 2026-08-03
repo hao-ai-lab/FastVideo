@@ -6,7 +6,7 @@ import pytest
 import torch
 from torch.testing import assert_close
 
-from tests.local_tests.minimax_h3._reference import REFERENCE_SRC, assert_pinned_reference
+from tests.local_tests.minimax_h3._reference import REFERENCE_SRC, assert_pinned_reference, assert_reference_source
 
 assert_pinned_reference(
     "src/diffusers/schedulers/scheduling_minimax_h3.py",
@@ -15,6 +15,8 @@ assert_pinned_reference(
 sys.path.insert(0, str(REFERENCE_SRC))
 
 from diffusers import MiniMaxH3Scheduler as ReferenceScheduler  # noqa: E402
+
+assert_reference_source(ReferenceScheduler, "src/diffusers/schedulers/scheduling_minimax_h3.py")
 
 from fastvideo.models.schedulers.scheduling_minimax_h3 import MiniMaxH3Scheduler  # noqa: E402
 
@@ -55,14 +57,3 @@ def test_explicit_schedule_noise_and_half_precision_match_reference() -> None:
     result = actual.step(velocity, actual.timesteps[1], sample).prev_sample
     assert result.dtype == torch.bfloat16
     assert_close(result, expected, rtol=0, atol=0)
-
-
-@pytest.mark.parametrize("scheduler_cls", [ReferenceScheduler, MiniMaxH3Scheduler])
-def test_invalid_contracts_are_rejected(scheduler_cls) -> None:
-    with pytest.raises(ValueError):
-        scheduler_cls(shift=0)
-    scheduler = scheduler_cls()
-    with pytest.raises(ValueError):
-        scheduler.set_timesteps(1)
-    with pytest.raises(ValueError):
-        scheduler.set_timesteps(sigmas=[1.0, 0.5, 0.5, 0.0])

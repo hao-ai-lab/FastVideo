@@ -1,186 +1,175 @@
 # Copyright 2026 The MiniMax and HuggingFace Teams. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
+"""Production-loader parity for the MiniMax H3 video VAE."""
 
-"""CPU synthetic parity for the native MiniMax-H3 video VAE."""
+from __future__ import annotations
 
+import gc
+import os
 import sys
+from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
 import torch
 from torch.testing import assert_close
 
-from tests.local_tests.minimax_h3._reference import REFERENCE_SRC, assert_pinned_reference
 
-assert_pinned_reference(
-    "src/diffusers/models/autoencoders/autoencoder_kl_minimax_h3.py",
-    "e59dc54caebff9ecb6d88c957b1ff189bf6a88419ed3551f84d3f68c20ce3192",
-)
-sys.path.insert(0, str(REFERENCE_SRC))
+REPO_ROOT = Path(__file__).resolve().parents[3]
+OFFICIAL_REF_DIR = Path(os.environ.get("MINIMAX_H3_OFFICIAL_REF_DIR", REPO_ROOT / "DiffusersMiniMaxH3"))
+OFFICIAL_SRC = OFFICIAL_REF_DIR / "src"
+MODEL_ROOT = Path(os.environ.get("MINIMAX_H3_MODEL_ROOT", REPO_ROOT / "official_weights" / "MiniMax-H3"))
+RUN_ENV = "MINIMAX_H3_RUN_VIDEO_VAE_PARITY"
+PARITY_SCOPE = "production_loader"
 
-from diffusers import AutoencoderKLMiniMaxH3 as ReferenceAutoencoderKLMiniMaxH3  # noqa: E402
-from diffusers.models.autoencoders.vae import (  # noqa: E402
-    DiagonalGaussianDistribution as ReferenceDiagonalGaussianDistribution,
-)
-
-from fastvideo.configs.models.vaes.minimax_h3_video import (  # noqa: E402
-    MiniMaxH3VideoVAEArchConfig,
-    MiniMaxH3VideoVAEConfig,
-)
-from fastvideo.models.vaes.minimax_h3_video import AutoencoderKLMiniMaxH3  # noqa: E402
+if os.environ.get(RUN_ENV) == "1":
+    os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
+    os.environ.setdefault("MASTER_PORT", "29663")
+    os.environ.setdefault("RANK", "0")
+    os.environ.setdefault("WORLD_SIZE", "1")
+    os.environ.setdefault("LOCAL_RANK", "0")
+    if OFFICIAL_SRC.is_dir():
+        sys.path.insert(0, str(OFFICIAL_SRC))
 
 
-TINY_ARCH = {
-    "in_channels": 3,
-    "out_channels": 3,
-    "latent_channels": 4,
-    "block_out_channels": (8, 16),
-    "layers_per_block": 1,
-    "spatial_downsample_factors": (2, 2),
-    "temporal_downsample_factors": (2, 2),
-    "norm_num_groups": 8,
-    "decoder_num_layers": 2,
-    "decoder_num_attention_heads": 2,
-    "decoder_attention_head_dim": 8,
-    "decoder_num_register_tokens": 2,
-    "decoder_ffn_mult": 2,
-    "clip_length": 17,
-    "token_drop": 3,
-    "latents_mean": (0.5, -0.25, 1.0, -1.5),
-    "latents_std": (2.0, 0.5, 1.5, 4.0),
-}
+@pytest.fixture(scope="module", autouse=True)
+def _distributed_runtime():
+    if os.environ.get(RUN_ENV) != "1":
+        yield
+        return
+
+    from fastvideo.distributed import cleanup_dist_env_and_memory, maybe_init_distributed_environment_and_model_parallel
+
+    maybe_init_distributed_environment_and_model_parallel(1, 1)
+    yield
+    cleanup_dist_env_and_memory()
 
 
-def _build_models() -> tuple[ReferenceAutoencoderKLMiniMaxH3, AutoencoderKLMiniMaxH3]:
-    torch.manual_seed(1234)
-    reference = ReferenceAutoencoderKLMiniMaxH3(**TINY_ARCH).float().eval()
-    fastvideo = AutoencoderKLMiniMaxH3(
-        MiniMaxH3VideoVAEConfig(arch_config=MiniMaxH3VideoVAEArchConfig(**TINY_ARCH))
-    ).eval()
+def _require_assets() -> tuple[torch.device, Path]:
+    if os.environ.get(RUN_ENV) != "1":
+        pytest.skip(f"set {RUN_ENV}=1 on an allocated CUDA node")
+    if not torch.cuda.is_available():
+        pytest.fail("MiniMax H3 video VAE parity requires CUDA", pytrace=False)
+    if not OFFICIAL_SRC.is_dir():
+        pytest.fail(f"pinned Diffusers MiniMax H3 checkout is missing: {OFFICIAL_REF_DIR}", pytrace=False)
 
-    reference_state = reference.state_dict()
-    fastvideo_state = fastvideo.state_dict()
-    assert reference_state.keys() == fastvideo_state.keys()
-    assert {key: value.shape for key, value in reference_state.items()} == {
-        key: value.shape for key, value in fastvideo_state.items()
+    component_dir = MODEL_ROOT / "vae"
+    required = (component_dir / "config.json", component_dir / "diffusion_pytorch_model.safetensors.index.json")
+    missing = [str(path) for path in required if not path.is_file()]
+    if missing:
+        pytest.fail(f"MiniMax H3 video VAE assets are missing: {missing}", pytrace=False)
+    return torch.device("cuda:0"), component_dir
+
+
+def _load_official(component_dir: Path, device: torch.device) -> torch.nn.Module:
+    from diffusers.models.autoencoders.autoencoder_kl_minimax_h3 import AutoencoderKLMiniMaxH3
+    from tests.local_tests.minimax_h3._reference import assert_reference_source
+
+    assert_reference_source(
+        AutoencoderKLMiniMaxH3,
+        "src/diffusers/models/autoencoders/autoencoder_kl_minimax_h3.py",
+    )
+
+    model, loading_info = AutoencoderKLMiniMaxH3.from_pretrained(
+        component_dir,
+        local_files_only=True,
+        low_cpu_mem_usage=True,
+        torch_dtype=torch.float32,
+        device_map=device,
+        output_loading_info=True,
+    )
+    load_errors = {
+        name: loading_info.get(name, [])
+        for name in ("missing_keys", "unexpected_keys", "mismatched_keys", "error_msgs")
+        if loading_info.get(name)
     }
-    fastvideo.load_state_dict(reference_state, strict=True)
-    return reference, fastvideo
+    assert not load_errors, f"official MiniMax H3 video VAE did not load strictly: {load_errors}"
+    model = model.eval()
+    assert all(parameter.dtype == torch.float32 for parameter in model.parameters())
+    return model
 
 
-def _capture_activations(model: torch.nn.Module, names: tuple[str, ...]) -> tuple[dict[str, list[torch.Tensor]], list]:
-    activations: dict[str, list[torch.Tensor]] = {name: [] for name in names}
+def _load_fastvideo(component_dir: Path) -> torch.nn.Module:
+    from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
+    from fastvideo.models.loader.component_loader import VAELoader
 
-    def capture(name: str):
-        def hook(_module, _inputs, output) -> None:
-            assert isinstance(output, torch.Tensor)
-            activations[name].append(output.detach().clone())
-
-        return hook
-
-    modules = dict(model.named_modules())
-    handles = [modules[name].register_forward_hook(capture(name)) for name in names]
-    return activations, handles
-
-
-def test_minimax_h3_video_vae_encode_decode_and_geometry_match_reference() -> None:
-    reference, fastvideo = _build_models()
-    generator = torch.Generator(device="cpu").manual_seed(2026)
-    video = torch.randn((1, 3, 22, 8, 8), generator=generator, dtype=torch.float32)
-
-    activation_names = (
-        "encoder.down_blocks.0",
-        "quant_conv",
-        "decoder.transformer_blocks.0",
-        "decoder.proj_out",
+    args = SimpleNamespace(
+        pipeline_config=MiniMaxH3PipelineConfig(),
+        model_paths={},
+        vae_cpu_offload=False,
     )
-    reference_activations, reference_handles = _capture_activations(reference, activation_names)
-    fastvideo_activations, fastvideo_handles = _capture_activations(fastvideo, activation_names)
-    with torch.inference_mode():
-        reference_latents = reference.encode(video, return_dict=False)[0].mode()
-        fastvideo_latents = fastvideo.encode(video, return_dict=False)[0].mode()
-        reference_decoded = reference.decode(reference_latents).sample
-        fastvideo_decoded = fastvideo.decode(reference_latents).sample
-    for handle in reference_handles + fastvideo_handles:
-        handle.remove()
+    model = VAELoader().load(str(component_dir), args)
+    assert all(parameter.dtype == torch.float32 for parameter in model.parameters())
+    return model
 
-    assert_close(fastvideo_latents, reference_latents, atol=1e-6, rtol=1e-6)
-    assert_close(fastvideo_decoded, reference_decoded, atol=1e-6, rtol=1e-6)
-    assert fastvideo_latents.shape == (1, 4, 7, 2, 2)
-    assert fastvideo_decoded.shape == video.shape
-    assert fastvideo.spatial_compression_ratio == 4
+
+def _make_video() -> torch.Tensor:
+    generator = torch.Generator(device="cpu").manual_seed(20260803)
+    # Two logical 17-frame clips after padding are required for H3's three-token
+    # temporal overlap contract; 32 px remains safely above reflect-pad minima.
+    return torch.randn(1, 3, 22, 32, 32, generator=generator, dtype=torch.float32)
+
+
+def _run(model: torch.nn.Module, video: torch.Tensor) -> dict[str, torch.Tensor]:
+    with torch.inference_mode():
+        posterior = model.encode(video, return_dict=False)[0]
+        latents = posterior.mode()
+        if hasattr(model, "normalize_latents"):
+            normalized = model.normalize_latents(latents)
+        else:
+            mean = torch.tensor(model.config.latents_mean, device=latents.device, dtype=latents.dtype).view(
+                1, -1, 1, 1, 1
+            )
+            std = torch.tensor(model.config.latents_std, device=latents.device, dtype=latents.dtype).view(
+                1, -1, 1, 1, 1
+            )
+            normalized = (latents - mean) / std
+        decoded = model.decode(latents, return_dict=False)[0]
+    return {
+        "mean": posterior.mean.detach().cpu(),
+        "logvar": posterior.logvar.detach().cpu(),
+        "normalized": normalized.detach().cpu(),
+        "decoded": decoded.detach().cpu(),
+    }
+
+
+def _reclaim_vram() -> None:
+    gc.collect()
+    torch.cuda.empty_cache()
+
+
+def _assert_tensor_parity(name: str, actual: torch.Tensor, expected: torch.Tensor, tolerance: float) -> None:
+    assert actual.shape == expected.shape
+    drift = (actual.float() - expected.float()).abs()
+    reference_abs_mean = expected.float().abs().mean().item()
+    relative_mean_drift = drift.mean().item() / max(reference_abs_mean, 1e-8)
+    print(
+        f"{name}: reference_abs_mean={reference_abs_mean:.8f} "
+        f"max_abs={drift.max().item():.8f} mean_abs={drift.mean().item():.8f} "
+        f"relative_mean={relative_mean_drift:.8f}",
+        flush=True,
+    )
+    assert_close(actual, expected, atol=tolerance, rtol=tolerance)
+
+
+def test_minimax_h3_video_vae_parity() -> None:
+    """Match posterior, normalization, geometry, and deterministic decode."""
+    device, component_dir = _require_assets()
+    video = _make_video()
+
+    official = _load_official(component_dir, device)
+    expected = _run(official, video.to(device))
+    del official
+    _reclaim_vram()
+
+    fastvideo = _load_fastvideo(component_dir)
+    actual = _run(fastvideo, video.to(device))
     assert fastvideo.temporal_compression_ratio == 4
-    for name in activation_names:
-        assert len(fastvideo_activations[name]) == len(reference_activations[name])
-        for result, expected in zip(fastvideo_activations[name], reference_activations[name], strict=True):
-            assert_close(result, expected, atol=1e-6, rtol=1e-6)
+    assert fastvideo.spatial_compression_ratio == 16
+    del fastvideo
+    _reclaim_vram()
 
-
-def test_minimax_h3_video_vae_normalization_tiling_and_fp32_contract() -> None:
-    _, fastvideo = _build_models()
-    generator = torch.Generator(device="cpu").manual_seed(7)
-    latents = torch.randn((1, 4, 7, 2, 2), generator=generator, dtype=torch.float32)
-    original_state = {key: value.clone() for key, value in fastvideo.state_dict().items()}
-
-    normalized = fastvideo.normalize_latents(latents)
-    assert_close(fastvideo.denormalize_latents(normalized), latents, atol=1e-6, rtol=1e-6)
-    assert_close(normalized, (latents - fastvideo.latents_mean) / fastvideo.latents_std, atol=0, rtol=0)
-
-    assert fastvideo.use_tiling
-    assert fastvideo.tile_sample_min_height == 256
-    assert fastvideo.tile_sample_min_width == 256
-    assert fastvideo.tile_sample_min_overlap_height == 64
-    assert fastvideo.tile_sample_min_overlap_width == 64
-
-    fastvideo.to(dtype=torch.bfloat16)
-    assert all(parameter.dtype == torch.float32 for parameter in fastvideo.parameters())
-    assert all(buffer.dtype == torch.float32 for buffer in fastvideo.buffers() if buffer.is_floating_point())
-    for key, value in fastvideo.state_dict().items():
-        assert_close(value, original_state[key], atol=0, rtol=0)
-
-
-def test_minimax_h3_video_vae_keyframe_sampling_matches_reference() -> None:
-    """The public one-frame path preserves H3's fixed-generator posterior sample."""
-
-    reference, fastvideo = _build_models()
-    pixels = torch.randn(
-        (1, 3, 1, 8, 8),
-        generator=torch.Generator(device="cpu").manual_seed(17),
-        dtype=torch.float32,
-    )
-
-    with torch.inference_mode():
-        reference_posterior = ReferenceDiagonalGaussianDistribution(reference._encode_clip(pixels))
-        fastvideo_posterior = fastvideo.encode_keyframe(pixels).latent_dist
-        reference_generator = torch.Generator(device="cpu").manual_seed(42)
-        fastvideo_generator = torch.Generator(device="cpu").manual_seed(42)
-        reference_sample = reference_posterior.sample(generator=reference_generator)
-        fastvideo_sample = fastvideo_posterior.sample(generator=fastvideo_generator)
-
-    assert_close(fastvideo_posterior.mean, reference_posterior.mean, atol=1e-6, rtol=1e-6)
-    assert_close(fastvideo_posterior.logvar, reference_posterior.logvar, atol=1e-6, rtol=1e-6)
-    assert_close(fastvideo_sample, reference_sample, atol=1e-6, rtol=1e-6)
-    assert fastvideo_sample.dtype == torch.float32
-    assert_close(
-        torch.randn(8, generator=fastvideo_generator),
-        torch.randn(8, generator=reference_generator),
-        atol=0,
-        rtol=0,
-    )
-
-
-def test_minimax_h3_video_vae_small_multitile_path_matches_reference() -> None:
-    reference, fastvideo = _build_models()
-    reference.enable_tiling(8, 8, 4, 4)
-    fastvideo.enable_tiling(8, 8, 4, 4)
-    generator = torch.Generator(device="cpu").manual_seed(99)
-    video = torch.randn((1, 3, 22, 12, 12), generator=generator, dtype=torch.float32)
-
-    with torch.inference_mode():
-        reference_latents = reference.encode(video, return_dict=False)[0].mode()
-        fastvideo_latents = fastvideo.encode(video, return_dict=False)[0].mode()
-        reference_decoded = reference.decode(reference_latents).sample
-        fastvideo_decoded = fastvideo.decode(reference_latents).sample
-
-    assert_close(fastvideo_latents, reference_latents, atol=1e-6, rtol=1e-6)
-    assert_close(fastvideo_decoded, reference_decoded, atol=1e-6, rtol=1e-6)
-    assert fastvideo_latents.shape == (1, 4, 7, 3, 3)
-    assert fastvideo_decoded.shape == video.shape
+    _assert_tensor_parity("video_vae.mean", actual["mean"], expected["mean"], 0.0)
+    _assert_tensor_parity("video_vae.logvar", actual["logvar"], expected["logvar"], 0.0)
+    _assert_tensor_parity("video_vae.normalized", actual["normalized"], expected["normalized"], 0.0)
+    _assert_tensor_parity("video_vae.decode", actual["decoded"], expected["decoded"], 0.0)
