@@ -151,13 +151,9 @@ class MiniMaxH3Qwen3VLConfig(TextEncoderConfig):
         flattened = dict(source_model_dict)
 
         text_config = flattened.pop("text_config", {})
-        if not isinstance(text_config, Mapping):
-            raise TypeError("MiniMax H3 Qwen3-VL text_config must be a mapping.")
         flattened.update(dict(text_config))
 
         vision_config = flattened.pop("vision_config", {})
-        if not isinstance(vision_config, Mapping):
-            raise TypeError("MiniMax H3 Qwen3-VL vision_config must be a mapping.")
         for source_name, target_name in _VISION_CONFIG_MAPPING.items():
             if source_name in vision_config:
                 flattened[target_name] = vision_config[source_name]

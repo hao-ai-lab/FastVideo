@@ -7,6 +7,7 @@ from typing import Any
 
 import numpy as np
 import torch
+from torch.distributed.tensor import DTensor
 
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -303,7 +304,10 @@ class MiniMaxH3ConditioningStage(PipelineStage):
     @torch.no_grad()
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         device = get_local_torch_device()
-        if fastvideo_args.text_encoder_cpu_offload:
+        first_param = next(self.conditioner.parameters(), None)
+        moved_for_forward = (fastvideo_args.text_encoder_cpu_offload and first_param is not None
+                             and not isinstance(first_param, DTensor))
+        if moved_for_forward:
             self.conditioner.to(device)
         try:
             if self.ref2va:
@@ -311,7 +315,7 @@ class MiniMaxH3ConditioningStage(PipelineStage):
             else:
                 prompt_embeds, text_token_tags = self._encode_fl2va(batch, device)
         finally:
-            if fastvideo_args.text_encoder_cpu_offload:
+            if moved_for_forward:
                 self.conditioner.to("cpu")
         batch.prompt_embeds = [prompt_embeds]
         batch.extra[MINIMAX_H3_TEXT_TOKEN_TAGS_KEY] = text_token_tags

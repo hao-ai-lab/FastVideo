@@ -1156,10 +1156,10 @@ class TransformerLoader(ComponentLoader):
         total_params = sum(p.numel() for p in model.parameters())
         logger.info("Loaded model with %.2fB parameters", total_params / 1e9)
 
-        if not callable(getattr(model, "_get_parameter_dtype", None)):
-            assert next(model.parameters()).dtype == default_dtype, (
-                "Model dtype does not match default dtype"
-            )
+        first_name, first_parameter = next(model.named_parameters())
+        dtype_selector = getattr(model, "_get_parameter_dtype", None)
+        expected_dtype = dtype_selector(first_name, default_dtype) if callable(dtype_selector) else default_dtype
+        assert first_parameter.dtype == expected_dtype, "Model dtype does not match the configured parameter dtype"
 
         model = model.eval()
 

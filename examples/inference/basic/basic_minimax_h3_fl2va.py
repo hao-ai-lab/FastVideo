@@ -76,7 +76,11 @@ def main() -> None:
                     batch_cfg=False,
                     seed=args.seed,
                 ),
-                output=OutputConfig(output_path=str(output_dir), save_video=True, return_frames=False),
+                output=OutputConfig(
+                    output_path=str(output_dir / "minimax_h3_fl2va.mp4"),
+                    save_video=True,
+                    return_frames=False,
+                ),
             ))
         print(f"Output written to: {result.video_path}")
     finally:

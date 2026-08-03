@@ -30,6 +30,7 @@ Ref2VA requests.
 ## Decisions
 
 - Preserve each H3 scheduler's configured shift; global `flow_shift` is invalid.
+- Let FSDP move CPU-offloaded Qwen parameters; do not move the wrapped conditioner as a whole.
 - Load `transformer/` for T2VA/FL2VA and `transformer_ref/` for Ref2VA.
 - Keep `last_image`, `references`, and `audio_latents` on the typed request path.
 - Treat the published component folders as the loading boundary.
