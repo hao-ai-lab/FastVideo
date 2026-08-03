@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Internal Stage-2 pipeline configuration for MiniMax H3."""
+"""Pipeline configuration for MiniMax H3 joint video/audio generation."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from fastvideo.configs.pipelines.base import PipelineConfig
 
 @dataclass
 class MiniMaxH3PipelineConfig(PipelineConfig):
-    """Component and precision policy for the private T2VA/FL2VA pipeline."""
+    """Component and precision policy shared by T2VA, FL2VA, and Ref2VA."""
 
     dit_config: MiniMaxH3Config = field(default_factory=MiniMaxH3Config)
     vae_config: VAEConfig = field(default_factory=MiniMaxH3VideoVAEConfig)

@@ -96,6 +96,15 @@ class _FakeProcessor:
         return [[int(token == 202) for token in token_ids[0]]]
 
 
+class _LegacyFakeProcessor:
+    """Models Transformers releases before ProcessorMixin gained modality IDs."""
+
+    def __init__(self) -> None:
+        self.image_processor = _FakeImageProcessor()
+        self.image_token_id = 202
+        self.video_token_id = 204
+
+
 def _conditioner(
     num_hidden_layers: int = 51,
     hidden_state_count: int = 52,
@@ -113,7 +122,7 @@ def _conditioner(
 def _run_stage(
     conditioner: MiniMaxH3Qwen3VLConditioner,
     tokenizer: _FakeTokenizer,
-    processor: _FakeProcessor,
+    processor: Any,
     prompt: Any = "prompt",
     images: list[Any] | None = None,
 ) -> tuple[ForwardBatch, Any]:
@@ -141,7 +150,7 @@ def test_config_maps_upstream_architecture_to_fastvideo_adapter() -> None:
     assert architecture == "MiniMaxH3Qwen3VLConditioner"
 
 
-def test_hf_loader_loads_only_the_base_qwen3_vl_model(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_hf_loader_strictly_loads_full_checkpoint_then_keeps_base_model(monkeypatch: pytest.MonkeyPatch) -> None:
     import transformers
 
     hf_model = _FakeQwen3VLModel()
@@ -149,11 +158,11 @@ def test_hf_loader_loads_only_the_base_qwen3_vl_model(monkeypatch: pytest.Monkey
 
     class _FakeQwen3VLFactory:
         @classmethod
-        def from_pretrained(cls, model_path: str, **kwargs: Any) -> _FakeQwen3VLModel:
+        def from_pretrained(cls, model_path: str, **kwargs: Any) -> tuple[Any, dict[str, list[str]]]:
             calls.append((model_path, kwargs))
-            return hf_model
+            return SimpleNamespace(model=hf_model), {}
 
-    monkeypatch.setattr(transformers, "Qwen3VLModel", _FakeQwen3VLFactory, raising=False)
+    monkeypatch.setattr(transformers, "Qwen3VLForConditionalGeneration", _FakeQwen3VLFactory, raising=False)
     config = MiniMaxH3Qwen3VLConfig()
 
     conditioner = MiniMaxH3Qwen3VLConditioner.from_pretrained_local(
@@ -173,8 +182,28 @@ def test_hf_loader_loads_only_the_base_qwen3_vl_model(monkeypatch: pytest.Monkey
             "local_files_only": True,
             "dtype": torch.bfloat16,
             "low_cpu_mem_usage": True,
+            "output_loading_info": True,
         },
     )]
+
+
+def test_hf_loader_rejects_partial_checkpoint_load(monkeypatch: pytest.MonkeyPatch) -> None:
+    import transformers
+
+    class _FakeQwen3VLFactory:
+        @classmethod
+        def from_pretrained(cls, model_path: str, **kwargs: Any) -> tuple[Any, dict[str, list[str]]]:
+            return SimpleNamespace(model=_FakeQwen3VLModel()), {"missing_keys": ["model.language_model.norm.weight"]}
+
+    monkeypatch.setattr(transformers, "Qwen3VLForConditionalGeneration", _FakeQwen3VLFactory, raising=False)
+
+    with pytest.raises(RuntimeError, match="did not load strictly"):
+        MiniMaxH3Qwen3VLConditioner.from_pretrained_local(
+            "/tmp/fake-minimax-h3",
+            MiniMaxH3Qwen3VLConfig(),
+            dtype=torch.bfloat16,
+            device=torch.device("cpu"),
+        )
 
 
 def test_component_forward_returns_fastvideo_encoder_output() -> None:
@@ -267,6 +296,18 @@ def test_keyframes_build_exact_picture_and_vision_blocks() -> None:
     assert call["pixel_values"].dtype == torch.float32
     assert torch.equal(call["pixel_values"], torch.arange(12, dtype=torch.float32).reshape(2, 2, 3))
     assert torch.equal(call["image_grid_thw"], torch.tensor([[1, 4, 4], [1, 2, 4]]))
+
+
+def test_legacy_processor_builds_modality_ids_without_new_transformers_helper() -> None:
+    conditioner, hf_model = _conditioner()
+    processor = _LegacyFakeProcessor()
+
+    _run_stage(conditioner, _FakeTokenizer(), processor, images=[object(), object()])
+
+    expected_ids = [101, 201, 202, 202, 202, 202, 203, 102, 103, 201, 202, 202, 203, 301, 302]
+    assert torch.equal(hf_model.calls[0]["mm_token_type_ids"], torch.tensor([[0, 0, 1, 1, 1, 1, 0, 0, 0,
+                                                                             0, 1, 1, 0, 0, 0]]))
+    assert torch.equal(hf_model.calls[0]["input_ids"], torch.tensor([expected_ids]))
 
 
 @pytest.mark.parametrize("num_hidden_layers", [0, 50])

@@ -40,6 +40,7 @@ from fastvideo.configs.pipelines.flux_2 import (
 )
 from fastvideo.configs.pipelines.matrixgame2 import MatrixGame2I2V480PConfig
 from fastvideo.configs.pipelines.matrixgame3 import MatrixGame3I2V720PConfig
+from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
 from fastvideo.configs.pipelines.turbodiffusion import (
     TurboDiffusionI2V_A14B_Config,
     TurboDiffusionT2V_14B_Config,
@@ -1102,6 +1103,24 @@ def _register_configs() -> None:
         default_preset="sf_wan_2_2_i2v_a14b",
     )
 
+    # MiniMax H3
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=MiniMaxH3PipelineConfig,
+        workload_types=(WorkloadType.T2V, WorkloadType.I2V),
+        hf_model_paths=["MiniMaxAI/MiniMax-H3"],
+        model_detectors=[
+            lambda path: any(token in path.lower() for token in (
+                "minimax-h3",
+                "minimax_h3",
+                "minimaxh3modularpipeline",
+                "minimaxh3ref2vamodularpipeline",
+            )),
+        ],
+        model_family="minimax_h3",
+        default_preset="minimax_h3_t2va",
+    )
+
     # SD3.5
     register_configs(
         sampling_param_cls=None,
@@ -1279,6 +1298,8 @@ def _register_presets() -> None:
         ALL_PRESETS as MATRIXGAME2_PRESETS, )
     from fastvideo.pipelines.basic.matrixgame3.presets import (
         ALL_PRESETS as MATRIXGAME3_PRESETS, )
+    from fastvideo.pipelines.basic.minimax_h3.presets import (
+        ALL_PRESETS as MINIMAX_H3_PRESETS, )
     from fastvideo.pipelines.basic.sd35.presets import (
         ALL_PRESETS as SD35_PRESETS, )
     from fastvideo.pipelines.basic.stable_audio.presets import (
@@ -1309,6 +1330,7 @@ def _register_presets() -> None:
         LTX2_PRESETS,
         MATRIXGAME2_PRESETS,
         MATRIXGAME3_PRESETS,
+        MINIMAX_H3_PRESETS,
         SD35_PRESETS,
         STABLE_AUDIO_PRESETS,
         TURBODIFFUSION_PRESETS,

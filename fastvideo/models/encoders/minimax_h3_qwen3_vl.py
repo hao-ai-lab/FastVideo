@@ -36,14 +36,27 @@ class MiniMaxH3Qwen3VLConditioner(TextEncoder):
         dtype: torch.dtype,
         device: torch.device,
     ) -> nn.Module:
-        from transformers import Qwen3VLModel
+        from transformers import Qwen3VLForConditionalGeneration
 
-        hf_model = Qwen3VLModel.from_pretrained(
+        full_model, loading_info = Qwen3VLForConditionalGeneration.from_pretrained(
             model_path,
             local_files_only=True,
             dtype=dtype,
             low_cpu_mem_usage=True,
-        ).eval()
+            output_loading_info=True,
+        )
+        load_errors = {
+            name: loading_info.get(name, [])
+            for name in ("missing_keys", "unexpected_keys", "mismatched_keys", "error_msgs")
+            if loading_info.get(name)
+        }
+        if load_errors:
+            raise RuntimeError(f"MiniMax H3 Qwen3-VL checkpoint did not load strictly: {load_errors}")
+
+        # MiniMax-H3 reads an intermediate decoder state and never uses the
+        # vocabulary projection, but its released checkpoint is saved with the
+        # full conditional-generation model's `model.*` key prefix.
+        hf_model = full_model.model.eval()
         if device.type != "cpu":
             hf_model = hf_model.to(device)
         return cls(model_config, hf_model=hf_model).eval()

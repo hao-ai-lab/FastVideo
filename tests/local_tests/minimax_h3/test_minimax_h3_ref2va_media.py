@@ -128,6 +128,27 @@ def test_same_rate_reference_waveform_matches_pinned_diffusers(channels: int) ->
         assert_close(result[0], result[1], rtol=0, atol=0)
 
 
+def test_reference_waveform_polyphase_fallback_without_torchaudio(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scipy.signal import resample_poly
+
+    monkeypatch.setitem(sys.modules, "torchaudio", None)
+    sample_rate = 44_100
+    target_sample_rate = 32_000
+    waveform = torch.linspace(-1.0, 1.0, sample_rate // 10, dtype=torch.float32).repeat(2, 1)
+
+    result = actual.prepare_reference_waveform(
+        waveform,
+        sample_rate=sample_rate,
+        target_sample_rate=target_sample_rate,
+        max_duration=0.1,
+    )
+    expected = resample_poly(waveform.numpy(), up=320, down=441, axis=-1).astype(np.float32)
+
+    np.testing.assert_array_equal(result.numpy(), expected)
+    assert result.dtype == torch.float32
+    assert result.shape == (2, 3200)
+
+
 @pytest.mark.parametrize(
     ("num_frames", "expected"),
     [(1, 22), (5, 22), (21, 22), (22, 22), (23, 22), (39, 39), (56, 56), (120, 107)],

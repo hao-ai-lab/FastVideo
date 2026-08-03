@@ -52,6 +52,25 @@ def _module_dtype(module: Any) -> torch.dtype:
     return torch.float32 if parameter is None else parameter.dtype
 
 
+def _create_mm_token_type_ids(processor: Any, token_ids: list[int]) -> list[list[int]]:
+    """Build Qwen3-VL modality IDs across old and new Transformers releases."""
+    create_ids = getattr(processor, "create_mm_token_type_ids", None)
+    if callable(create_ids):
+        return create_ids([token_ids])
+
+    modality_ids = [0] * len(token_ids)
+    for modality, modality_type in (("image", 1), ("video", 2), ("audio", 3)):
+        special_ids = getattr(processor, f"{modality}_token_ids", None)
+        if special_ids is None:
+            special_id = getattr(processor, f"{modality}_token_id", None)
+            special_ids = [] if special_id is None else [special_id]
+        special_ids = {int(special_id) for special_id in special_ids if special_id is not None}
+        for index, token_id in enumerate(token_ids):
+            if token_id in special_ids:
+                modality_ids[index] = modality_type
+    return [modality_ids]
+
+
 class MiniMaxH3ConditioningStage(PipelineStage):
     """Encode the verbatim prompt and optional keyframes with Qwen3-VL."""
 
@@ -138,7 +157,7 @@ class MiniMaxH3ConditioningStage(PipelineStage):
                              f"`hidden_states[{hidden_state_index}]`, got {num_hidden_layers}.")
 
         input_ids = torch.tensor([token_ids], dtype=torch.long, device=device)
-        mm_token_type_ids = torch.as_tensor(self.processor.create_mm_token_type_ids([token_ids]),
+        mm_token_type_ids = torch.as_tensor(_create_mm_token_type_ids(self.processor, token_ids),
                                             dtype=torch.long,
                                             device=device)
         dtype = _module_dtype(self.conditioner)

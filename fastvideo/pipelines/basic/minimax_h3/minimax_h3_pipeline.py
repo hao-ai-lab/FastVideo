@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Private FastVideo composed pipelines for MiniMax H3."""
+"""FastVideo composed pipelines for MiniMax H3."""
 
 from __future__ import annotations
 
@@ -64,7 +64,7 @@ def _normalize_modular_model_index(config: dict[str, Any]) -> dict[str, Any]:
 
 
 class MiniMaxH3BasePipeline(ComposedPipelineBase):
-    """Shared private loading and target-generation path for MiniMax H3."""
+    """Shared loading and target-generation path for MiniMax H3."""
 
     pipeline_config_cls: type[MiniMaxH3PipelineConfig] = MiniMaxH3PipelineConfig
     _required_config_modules = [
@@ -90,7 +90,7 @@ class MiniMaxH3BasePipeline(ComposedPipelineBase):
         loaded_modules: dict[str, torch.nn.Module] | None = None,
         **kwargs: Any,
     ) -> MiniMaxH3BasePipeline:
-        """Load the private pipeline without requiring a public config detector."""
+        """Load MiniMax H3 from its canonical modular Diffusers manifest."""
         if pipeline_config is None:
             pipeline_config = MiniMaxH3PipelineConfig()
         elif isinstance(pipeline_config, str):
@@ -245,4 +245,21 @@ class MiniMaxH3RefPipeline(MiniMaxH3BasePipeline):
         )
 
 
-__all__ = ["MiniMaxH3BasePipeline", "MiniMaxH3Pipeline", "MiniMaxH3RefPipeline"]
+class MiniMaxH3ModularPipeline(MiniMaxH3Pipeline):
+    """Public T2VA/FL2VA entry matching the official manifest class name."""
+
+
+class MiniMaxH3Ref2VAModularPipeline(MiniMaxH3RefPipeline):
+    """Public Ref2VA entry using the checkpoint's ``transformer_ref`` partition."""
+
+
+EntryClass = [MiniMaxH3ModularPipeline, MiniMaxH3Ref2VAModularPipeline]
+
+__all__ = [
+    "EntryClass",
+    "MiniMaxH3BasePipeline",
+    "MiniMaxH3ModularPipeline",
+    "MiniMaxH3Pipeline",
+    "MiniMaxH3Ref2VAModularPipeline",
+    "MiniMaxH3RefPipeline",
+]

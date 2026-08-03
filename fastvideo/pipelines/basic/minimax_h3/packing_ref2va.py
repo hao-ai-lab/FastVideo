@@ -338,8 +338,23 @@ def prepare_reference_waveform(
         return waveform
     try:
         import torchaudio
-    except ImportError as error:
-        raise ImportError("Resampling MiniMax-H3 reference audio requires torchaudio.") from error
+    except (ImportError, OSError):
+        # NVIDIA development PyTorch images do not always publish a matching
+        # torchaudio wheel. SciPy's polyphase windowed-sinc implementation is
+        # a deterministic, high-quality fallback and is a core FastVideo
+        # dependency. Reduce the rational ratio to keep its FIR inexpensive.
+        from math import gcd
+
+        from scipy.signal import resample_poly
+
+        divisor = gcd(sample_rate, target_sample_rate)
+        resampled = resample_poly(
+            waveform.numpy(),
+            up=target_sample_rate // divisor,
+            down=sample_rate // divisor,
+            axis=-1,
+        )
+        return torch.from_numpy(np.asarray(resampled, dtype=np.float32))
     return torchaudio.transforms.Resample(sample_rate, target_sample_rate)(waveform)
 
 
