@@ -610,9 +610,42 @@ def maybe_download_lora(model_name_or_path: str, local_dir: str | None = None, d
     return os.path.join(local_path, weight_name)
 
 
+def resolve_diffusers_component_spec(
+    component_name: str,
+    component_spec: list[Any] | tuple[Any, ...],
+) -> tuple[Any, Any, dict[str, Any]]:
+    """Resolve legacy and modular Diffusers component specifications.
+
+    Legacy manifests store ``[library, class_name]``. Modular manifests may
+    append loading metadata whose ``type_hint`` identifies the concrete
+    component type FastVideo should load.
+    """
+    if len(component_spec) not in (2, 3):
+        raise ValueError(f"Invalid Diffusers component specification for {component_name!r}: {component_spec!r}")
+
+    library, class_name = component_spec[:2]
+    loading_method: dict[str, Any] = {}
+    if len(component_spec) == 3:
+        candidate = component_spec[2]
+        if not isinstance(candidate, dict):
+            raise ValueError(f"Invalid Diffusers loading method for {component_name!r}: {candidate!r}")
+        loading_method = candidate
+        type_hint = loading_method.get("type_hint", (library, class_name))
+        if not isinstance(type_hint, list | tuple) or len(type_hint) != 2:
+            raise ValueError(f"Invalid Diffusers type_hint for {component_name!r}: {type_hint!r}")
+        library, class_name = type_hint
+
+    return library, class_name, loading_method
+
+
 def verify_model_config_and_directory(model_path: str) -> dict[str, Any]:
     """
-    Verify that the model directory contains a valid diffusers configuration.
+    Verify a materialized local Diffusers checkpoint.
+
+    FastVideo accepts legacy component pairs and modular component triples, but
+    every loadable component must already exist in this resolved checkpoint.
+    Per-component external repositories, revisions, and variants are not
+    followed by this local loader.
     
     Args:
         model_path: Path to the model directory
@@ -621,14 +654,20 @@ def verify_model_config_and_directory(model_path: str) -> dict[str, Any]:
         The loaded model configuration as a dictionary
     """
 
-    # Check for model_index.json which is required for diffusers models
-    config_path = os.path.join(model_path, "model_index.json")
-    if not os.path.exists(config_path):
-        raise ValueError(f"Model directory {model_path} does not contain model_index.json. "
-                         "Only Hugging Face diffusers format is supported.")
+    # Diffusers pipelines may publish either the legacy or modular manifest.
+    # Prefer the legacy filename when both are present for backward compatibility.
+    config_filename = next(
+        (name for name in ("model_index.json", "modular_model_index.json")
+         if os.path.exists(os.path.join(model_path, name))),
+        None,
+    )
+    if config_filename is None:
+        raise ValueError(f"Model directory {model_path} does not contain model_index.json or "
+                         "modular_model_index.json. Only Hugging Face Diffusers format is supported.")
+    config_path = os.path.join(model_path, config_filename)
 
-    # Load the config first so directory checks below can be conditional
-    # on what model_index.json actually declares.
+    # Load the config first so directory checks can follow what the manifest
+    # actually declares.
     with open(config_path) as f:
         config = json.load(f)
 
@@ -638,8 +677,9 @@ def verify_model_config_and_directory(model_path: str) -> dict[str, Any]:
     if not os.path.exists(transformer_dir):
         raise ValueError(f"Model directory {model_path} does not contain a transformer/ directory.")
 
-    # Diffusers convention: model_index.json entries are [library, class]
-    # pairs for on-disk components. Non-list entries are scalar metadata
+    # Diffusers convention: manifest entries are [library, class] pairs or
+    # modular [library, class, loading_kwargs] triples for on-disk components.
+    # Non-list entries are scalar metadata
     # (e.g. boundary_ratio); a None first element marks a disabled
     # component (matches composed_pipeline_base.py). Pipelines that
     # lazy-load shared components from upstream HF repos simply omit the
@@ -651,16 +691,27 @@ def verify_model_config_and_directory(model_path: str) -> dict[str, Any]:
     for key, value in config.items():
         if key.startswith("_") or key == "transformer" or key.startswith("tokenizer"):
             continue
-        if not isinstance(value, list) or len(value) < 1 or value[0] is None:
+        if not isinstance(value, list):
             continue
-        subdir = os.path.join(model_path, key)
+        library, _, loading_method = resolve_diffusers_component_spec(key, value)
+        if library is None:
+            continue
+        subfolder = key
+        configured_subfolder = loading_method.get("subfolder")
+        if isinstance(configured_subfolder, str):
+            subfolder = configured_subfolder
+        if subfolder != key:
+            raise ValueError(f"Diffusers component {key!r} uses subfolder {subfolder!r}; "
+                             "FastVideo requires component names and subfolders to match.")
+        subdir = os.path.join(model_path, subfolder)
         if not os.path.exists(subdir):
             raise ValueError(f"Model directory {model_path} declares `{key}` in "
-                             f"model_index.json but is missing the {key}/ subfolder.")
+                             f"{config_filename} but is missing the materialized {subfolder}/ subfolder. "
+                             "FastVideo does not fetch per-component external repositories from modular manifests.")
 
     # Verify diffusers version exists
     if "_diffusers_version" not in config:
-        raise ValueError("model_index.json does not contain _diffusers_version")
+        raise ValueError(f"{config_filename} does not contain _diffusers_version")
 
     logger.info("Diffusers version: %s", config["_diffusers_version"])
     return cast(dict[str, Any], config)
@@ -668,13 +719,13 @@ def verify_model_config_and_directory(model_path: str) -> dict[str, Any]:
 
 def maybe_download_model_index(model_name_or_path: str) -> dict[str, Any]:
     """
-    Download and extract just the model_index.json for a Hugging Face model.
+    Download and extract a Diffusers model manifest for a Hugging Face model.
     
     Args:
         model_name_or_path: Path or HF Hub model ID
         
     Returns:
-        The parsed model_index.json as a dictionary
+        The parsed model_index.json or modular_model_index.json dictionary
     """
     import tempfile
 
@@ -684,33 +735,47 @@ def maybe_download_model_index(model_name_or_path: str) -> dict[str, Any]:
     if os.path.exists(model_name_or_path):
         return verify_model_config_and_directory(model_name_or_path)
 
-    # For remote models, download just the model_index.json
+    # For remote models, download only the small manifest. Legacy manifests
+    # remain preferred when a repository publishes both forms.
     try:
         with tempfile.TemporaryDirectory() as tmp_dir:
-            # Download just the model_index.json file
-            model_index_path = hf_hub_download(repo_id=model_name_or_path,
-                                               filename="model_index.json",
-                                               local_dir=tmp_dir)
+            model_index_path: str | None = None
+            config_filename: str | None = None
+            last_download_error: Exception | None = None
+            for candidate in ("model_index.json", "modular_model_index.json"):
+                try:
+                    model_index_path = hf_hub_download(repo_id=model_name_or_path,
+                                                       filename=candidate,
+                                                       local_dir=tmp_dir)
+                    config_filename = candidate
+                    break
+                except Exception as error:
+                    last_download_error = error
+            if model_index_path is None or config_filename is None:
+                raise ValueError("repository has neither model_index.json nor modular_model_index.json") from \
+                    last_download_error
 
-            # Load the model_index.json
+            # Load the selected manifest.
             with open(model_index_path) as f:
                 config: dict[str, Any] = json.load(f)
 
             # Verify it has the required fields
             if "_class_name" not in config:
-                raise ValueError(f"model_index.json for {model_name_or_path} does not contain _class_name field")
+                raise ValueError(f"{config_filename} for {model_name_or_path} does not contain _class_name field")
 
             if "_diffusers_version" not in config:
-                raise ValueError(f"model_index.json for {model_name_or_path} does not contain _diffusers_version field")
+                raise ValueError(
+                    f"{config_filename} for {model_name_or_path} does not contain _diffusers_version field")
 
             # Add the pipeline name for downstream use
             config["pipeline_name"] = config["_class_name"]
 
-            logger.info("Downloaded model_index.json for %s, pipeline: %s", model_name_or_path, config["_class_name"])
+            logger.info("Downloaded %s for %s, pipeline: %s", config_filename, model_name_or_path,
+                        config["_class_name"])
             return config
 
     except Exception as e:
-        raise ValueError(f"Failed to download or parse model_index.json for {model_name_or_path}: {e}") from e
+        raise ValueError(f"Failed to download or parse a Diffusers manifest for {model_name_or_path}: {e}") from e
 
 
 _HF_TOKEN_ENV_VARS = ("HF_TOKEN", "HUGGINGFACE_HUB_TOKEN", "HF_API_KEY")
@@ -773,7 +838,8 @@ def kill_itself_when_parent_died() -> None:
     import platform
     if platform.system() == "Linux":
         libc = ctypes.CDLL("libc.so.6")
-        libc.prctl(PR_SET_PDEATHSIG, signal.SIGKILL)
+        sigkill = getattr(signal, "SIGKILL", signal.SIGTERM)
+        libc.prctl(PR_SET_PDEATHSIG, sigkill)
     # elif platform.system() == "Darwin":
     #     libc = ctypes.CDLL("libc.dylib")
     #     logger.warning("kill_itself_when_parent_died is only supported in linux.")

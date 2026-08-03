@@ -17,7 +17,7 @@ sys.path.insert(0, str(REFERENCE_SRC))
 from diffusers.modular_pipelines.minimax_h3 import packing as reference  # noqa: E402
 
 from fastvideo.pipelines.basic.minimax_h3 import packing as actual  # noqa: E402
-from fastvideo.pipelines.basic.minimax_h3.types import MiniMaxH3Layout  # noqa: E402
+from fastvideo.pipelines.basic.minimax_h3.packing import MiniMaxH3PackedLayout  # noqa: E402
 
 
 @pytest.mark.parametrize("ratio", [(16, 9), (9, 16), (1, 1), (4, 1), (1, 4)])
@@ -54,7 +54,7 @@ def test_layout_position_tags_indices_and_timesteps_match_reference(anchors: tup
     }
     expected = reference.build_packed_sequence(**kwargs)
     result = actual.build_packed_sequence(**kwargs)
-    assert isinstance(result, MiniMaxH3Layout)
+    assert isinstance(result, MiniMaxH3PackedLayout)
     assert result.sequence_length == expected.sequence_length
     for field in ("position_ids", "token_tags", "video_indices", "audio_indices", "text_indices"):
         assert_close(getattr(result, field), getattr(expected, field), rtol=0, atol=0)

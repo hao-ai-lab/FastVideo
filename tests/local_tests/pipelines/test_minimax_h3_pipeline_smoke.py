@@ -8,24 +8,20 @@ from pathlib import Path
 
 
 def _write_modular_checkpoint(model_dir: Path) -> None:
+    component_types = {
+        "text_encoder": ("transformers", "Qwen3VLModel"),
+        "tokenizer": ("transformers", "Qwen3VLTokenizer"),
+        "processor": ("transformers", "Qwen3VLProcessor"),
+        "vae": ("diffusers", "AutoencoderKLMiniMaxH3"),
+        "audio_vae": ("diffusers", "AutoencoderKLMiniMaxH3Audio"),
+        "transformer": ("diffusers", "MiniMaxH3Transformer3DModel"),
+        "transformer_ref": ("diffusers", "MiniMaxH3Transformer3DModel"),
+        "scheduler": ("diffusers", "FlowMatchEulerDiscreteScheduler"),
+        "audio_scheduler": ("diffusers", "FlowMatchEulerDiscreteScheduler"),
+    }
     components = {
-        "text_encoder": ["transformers", "Qwen3VLModel", {"subfolder": "text_encoder"}],
-        "tokenizer": ["transformers", "Qwen3VLTokenizer", {"subfolder": "tokenizer"}],
-        "processor": ["transformers", "Qwen3VLProcessor", {"subfolder": "processor"}],
-        "vae": ["diffusers", "AutoencoderKLMiniMaxH3", {"subfolder": "vae"}],
-        "audio_vae": ["diffusers", "AutoencoderKLMiniMaxH3Audio", {"subfolder": "audio_vae"}],
-        "transformer": ["diffusers", "MiniMaxH3Transformer3DModel", {"subfolder": "transformer"}],
-        "transformer_ref": [
-            "diffusers",
-            "MiniMaxH3Transformer3DModel",
-            {"subfolder": "transformer_ref"},
-        ],
-        "scheduler": ["diffusers", "FlowMatchEulerDiscreteScheduler", {"subfolder": "scheduler"}],
-        "audio_scheduler": [
-            "diffusers",
-            "FlowMatchEulerDiscreteScheduler",
-            {"subfolder": "audio_scheduler"},
-        ],
+        name: [None, None, {"type_hint": list(type_hint), "subfolder": name}]
+        for name, type_hint in component_types.items()
     }
     model_dir.mkdir()
     for component in components:

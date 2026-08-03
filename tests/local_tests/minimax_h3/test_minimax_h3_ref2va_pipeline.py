@@ -15,8 +15,7 @@ import torch.nn.functional as F
 from PIL import Image
 from torch.testing import assert_close
 
-import fastvideo.pipelines.basic.minimax_h3.stages._module_lifecycle as module_lifecycle
-import fastvideo.pipelines.basic.minimax_h3.stages.reference_preparation as reference_preparation
+import fastvideo.pipelines.basic.minimax_h3.reference as reference_helpers
 from fastvideo.models.schedulers.scheduling_minimax_h3 import MiniMaxH3Scheduler
 from fastvideo.models.vaes.minimax_h3_audio import (
     MiniMaxH3AudioDiagonalGaussianDistribution,
@@ -29,16 +28,20 @@ from fastvideo.pipelines.basic.minimax_h3.packing import (
     patchify_video_latents,
 )
 from fastvideo.pipelines.basic.minimax_h3.stages import (
+    MiniMaxH3ConditioningStage,
     MiniMaxH3DenoisingStage,
+    MiniMaxH3InputPreparationStage,
     MiniMaxH3LatentPreparationStage,
-    MiniMaxH3Ref2VAConditioningStage,
-    MiniMaxH3Ref2VALayoutPreparationStage,
-    MiniMaxH3ReferenceEncodingStage,
-    MiniMaxH3ReferencePreparationStage,
-    MiniMaxH3TimestepPreparationStage,
 )
-from fastvideo.pipelines.basic.minimax_h3.types import MiniMaxH3Reference, get_minimax_h3_state
+from fastvideo.pipelines.basic.minimax_h3.reference import (
+    MiniMaxH3PreparedReference,
+    MiniMaxH3Reference,
+    prepare_reference,
+    validate_references,
+)
+from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_latent_preparation import MINIMAX_H3_LAYOUT_KEY
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.pipelines.stages import utils as stage_utils
 from tests.local_tests.minimax_h3.test_minimax_h3_pipeline import (
     _AUDIO_CHANNELS,
     _AUDIO_HOP_LENGTH,
@@ -65,14 +68,14 @@ _REFERENCE_AUDIO_HOP_LENGTH = 4
 @pytest.fixture(autouse=True)
 def _keep_reference_acceptance_tiny(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep production reference semantics while replacing only released canvas sizes."""
-    monkeypatch.setattr(module_lifecycle, "get_local_torch_device", lambda: torch.device("cpu"))
+    monkeypatch.setattr(stage_utils, "get_local_torch_device", lambda: torch.device("cpu"))
     monkeypatch.setattr(
-        reference_preparation,
+        reference_helpers,
         "prepare_reference_image",
         lambda image, height, width: image.resize((_WIDTH, _HEIGHT)),
     )
     monkeypatch.setattr(
-        reference_preparation,
+        reference_helpers,
         "prepare_reference_frames",
         lambda frames, num_frames: frames[:num_frames],
     )
@@ -292,33 +295,37 @@ def _prepare_reference_latents(
     batch: ForwardBatch,
     components: SimpleNamespace,
     args: SimpleNamespace,
-) -> None:
+) -> list[MiniMaxH3PreparedReference]:
     stages = (
-        MiniMaxH3ReferencePreparationStage(components.vae, components.audio_vae),
-        MiniMaxH3Ref2VAConditioningStage(
+        MiniMaxH3InputPreparationStage(components.vae, components.audio_vae, ref2va=True),
+        MiniMaxH3ConditioningStage(
             components.conditioner,
             components.tokenizer,
             components.processor,
+            ref2va=True,
         ),
-        MiniMaxH3ReferenceEncodingStage(
-            components.vae,
-            components.audio_vae,
-            components.transformer,
-            components.scheduler,
-        ),
-        MiniMaxH3Ref2VALayoutPreparationStage(components.transformer),
-        MiniMaxH3LatentPreparationStage(components.transformer, components.vae, components.audio_vae),
     )
     for stage in stages:
         stage(batch, args)
+    prepared_references = list(batch.references or [])
+    MiniMaxH3LatentPreparationStage(
+            components.transformer,
+            components.vae,
+            components.audio_vae,
+            components.scheduler,
+            ref2va=True,
+    )(batch, args)
+    return prepared_references
 
 
-def _expected_condition_indices(state: Any) -> tuple[torch.Tensor, torch.Tensor]:
-    assert state.text_token_tags is not None
-    cursor = int(state.text_token_tags.shape[0])
+def _expected_condition_indices(
+    text_token_tags: torch.Tensor,
+    prepared_references: list[MiniMaxH3PreparedReference],
+) -> tuple[torch.Tensor, torch.Tensor]:
+    cursor = int(text_token_tags.shape[0])
     video_indices: list[int] = []
     audio_indices: list[int] = []
-    for reference in state.prepared_references:
+    for reference in prepared_references:
         if reference.media_type == "image":
             count = reference.num_latent_frames * (reference.latent_height // 2) * (reference.latent_width // 2)
             video_indices.extend(range(cursor, cursor + count))
@@ -348,12 +355,9 @@ def test_ref_pipeline_stage_chain_runs_multiple_images_end_to_end() -> None:
     output = pipeline.forward(batch, args)
 
     assert list(pipeline._stage_name_mapping) == [
-        "reference_preparation_stage",
+        "input_preparation_stage",
         "conditioning_stage",
-        "reference_encoding_stage",
-        "layout_preparation_stage",
         "latent_preparation_stage",
-        "timestep_preparation_stage",
         "denoising_stage",
         "video_decoding_stage",
         "audio_decoding_stage",
@@ -382,62 +386,44 @@ def test_reference_combinations_build_fixed_condition_rows_and_layout(scenario: 
     components = _components()
     batch = _make_batch(references, inject_latents=True)
 
-    _prepare_reference_latents(batch, components, args)
-    state = get_minimax_h3_state(batch)
+    prepared_references = _prepare_reference_latents(batch, components, args)
+    layout = batch.extra[MINIMAX_H3_LAYOUT_KEY]
 
-    assert [reference.media_type for reference in state.prepared_references] == [
+    assert [reference.media_type for reference in prepared_references] == [
         reference.media_type for reference in references
     ]
-    assert state.layout is not None
-    assert state.video_latents is not None
-    assert state.audio_latents is not None
-    assert state.condition_video_latents is not None
-    assert state.layout.num_condition_video_rows == expected_video_rows
-    assert state.layout.num_condition_audio_rows == expected_audio_rows
-    assert state.video_latents.shape[0] == expected_video_rows + _NUM_LATENT_FRAMES
-    assert state.audio_latents.shape[0] == expected_audio_rows + 2 * _NUM_AUDIO_LATENTS
-    assert_close(
-        state.video_latents[:expected_video_rows],
-        state.condition_video_latents,
-        rtol=0,
-        atol=0,
-    )
-    if expected_audio_rows:
-        assert state.condition_audio_latents is not None
-        assert_close(
-            state.audio_latents[:expected_audio_rows],
-            state.condition_audio_latents,
-            rtol=0,
-            atol=0,
-        )
-    else:
-        assert state.condition_audio_latents is None
+    assert batch.latents is not None
+    assert batch.audio_latents is not None
+    assert layout.num_condition_video_rows == expected_video_rows
+    assert layout.num_condition_audio_rows == expected_audio_rows
+    assert batch.latents.shape[0] == expected_video_rows + _NUM_LATENT_FRAMES
+    assert batch.audio_latents.shape[0] == expected_audio_rows + 2 * _NUM_AUDIO_LATENTS
 
-    expected_video_indices, expected_audio_indices = _expected_condition_indices(state)
+    text_token_tags = layout.token_tags[layout.text_indices]
+    expected_video_indices, expected_audio_indices = _expected_condition_indices(text_token_tags, prepared_references)
     assert_close(
-        state.layout.video_indices[:expected_video_rows],
+        layout.video_indices[:expected_video_rows],
         expected_video_indices,
         rtol=0,
         atol=0,
     )
     assert_close(
-        state.layout.audio_indices[:expected_audio_rows],
+        layout.audio_indices[:expected_audio_rows],
         expected_audio_indices,
         rtol=0,
         atol=0,
     )
 
-    fixed_video = state.video_latents[:expected_video_rows].clone()
-    fixed_audio = state.audio_latents[:expected_audio_rows].clone()
-    target_video = state.video_latents[expected_video_rows:].clone()
-    target_audio = state.audio_latents[expected_audio_rows:].clone()
-    MiniMaxH3TimestepPreparationStage(components.scheduler, components.audio_scheduler)(batch, args)
+    fixed_video = batch.latents[:expected_video_rows].clone()
+    fixed_audio = batch.audio_latents[:expected_audio_rows].clone()
+    target_video = batch.latents[expected_video_rows:].clone()
+    target_audio = batch.audio_latents[expected_audio_rows:].clone()
     MiniMaxH3DenoisingStage(components.transformer, components.scheduler, components.audio_scheduler)(batch, args)
 
-    assert_close(state.video_latents[:expected_video_rows], fixed_video, rtol=0, atol=0)
-    assert_close(state.audio_latents[:expected_audio_rows], fixed_audio, rtol=0, atol=0)
-    assert not torch.equal(state.video_latents[expected_video_rows:], target_video)
-    assert not torch.equal(state.audio_latents[expected_audio_rows:], target_audio)
+    assert_close(batch.latents[:expected_video_rows], fixed_video, rtol=0, atol=0)
+    assert_close(batch.audio_latents[:expected_audio_rows], fixed_audio, rtol=0, atol=0)
+    assert not torch.equal(batch.latents[expected_video_rows:], target_video)
+    assert not torch.equal(batch.audio_latents[expected_audio_rows:], target_audio)
     for call in components.transformer.calls:
         assert_close(call["hidden_states"][0, :expected_video_rows], fixed_video, rtol=0, atol=0)
         assert_close(call["audio_hidden_states"][0, :expected_audio_rows], fixed_audio, rtol=0, atol=0)
@@ -448,21 +434,19 @@ def test_video_soundtrack_is_one_audio_then_video_reference_block() -> None:
     components = _components()
     batch = _make_batch([_video(soundtrack=True)], inject_latents=True)
 
-    _prepare_reference_latents(batch, components, args)
-    state = get_minimax_h3_state(batch)
+    prepared_references = _prepare_reference_latents(batch, components, args)
+    layout = batch.extra[MINIMAX_H3_LAYOUT_KEY]
 
-    assert state.layout is not None
-    assert state.text_token_tags is not None
-    text_rows = state.text_token_tags.shape[0]
-    assert state.layout.audio_indices[:4].tolist() == list(range(text_rows, text_rows + 4))
-    assert state.layout.video_indices[:2].tolist() == [text_rows + 4, text_rows + 5]
+    text_rows = layout.text_indices.numel()
+    assert layout.audio_indices[:4].tolist() == list(range(text_rows, text_rows + 4))
+    assert layout.video_indices[:2].tolist() == [text_rows + 4, text_rows + 5]
     assert components.tokenizer.calls[:4] == [
         "<Audio 1>: ",
         "<Video 1>: ",
         "<0.2 seconds>",
         "<1.0 seconds>",
     ]
-    assert state.prepared_references[0].block_timestamps == [0.25, 1.0]
+    assert prepared_references[0].block_timestamps == [0.25, 1.0]
 
 
 def test_mixed_reference_order_changes_presentation_and_layout() -> None:
@@ -471,12 +455,10 @@ def test_mixed_reference_order_changes_presentation_and_layout() -> None:
     first_components = _components()
     first_batch = _make_batch([_image((200, 0, 0)), _audio()], inject_latents=True)
     _prepare_reference_latents(first_batch, first_components, args)
-    first_state = get_minimax_h3_state(first_batch)
 
     second_components = _components()
     second_batch = _make_batch([_audio(), _image((200, 0, 0))], inject_latents=True)
     _prepare_reference_latents(second_batch, second_components, args)
-    second_state = get_minimax_h3_state(second_batch)
 
     assert first_components.tokenizer.calls[:2] == ["<Picture 1>: ", "<Audio 1>: "]
     assert second_components.tokenizer.calls[:2] == ["<Audio 1>: ", "<Picture 1>: "]
@@ -485,10 +467,11 @@ def test_mixed_reference_order_changes_presentation_and_layout() -> None:
     assert isinstance(first_input_ids, torch.Tensor)
     assert isinstance(second_input_ids, torch.Tensor)
     assert not torch.equal(first_input_ids, second_input_ids)
-    assert first_state.layout is not None and second_state.layout is not None
-    assert not torch.equal(first_state.layout.position_ids, second_state.layout.position_ids)
-    assert first_state.layout.video_indices[0] < first_state.layout.audio_indices[0]
-    assert second_state.layout.audio_indices[0] < second_state.layout.video_indices[0]
+    first_layout = first_batch.extra[MINIMAX_H3_LAYOUT_KEY]
+    second_layout = second_batch.extra[MINIMAX_H3_LAYOUT_KEY]
+    assert not torch.equal(first_layout.position_ids, second_layout.position_ids)
+    assert first_layout.video_indices[0] < first_layout.audio_indices[0]
+    assert second_layout.audio_indices[0] < second_layout.video_indices[0]
 
 
 def test_request_rng_draws_each_visual_condition_then_video_then_audio() -> None:
@@ -498,12 +481,11 @@ def test_request_rng_draws_each_visual_condition_then_video_then_audio() -> None
     batch = _make_batch(references, inject_latents=False)
 
     _prepare_reference_latents(batch, components, args)
-    state = get_minimax_h3_state(batch)
+    layout = batch.extra[MINIMAX_H3_LAYOUT_KEY]
 
-    assert state.layout is not None
-    assert state.video_latents is not None
-    assert state.audio_latents is not None
-    assert state.layout.num_condition_video_rows == 2
+    assert batch.latents is not None
+    assert batch.audio_latents is not None
+    assert layout.num_condition_video_rows == 2
 
     expected_generator = torch.Generator("cpu").manual_seed(_REQUEST_SEED)
     for _ in references:
@@ -524,12 +506,12 @@ def test_request_rng_draws_each_visual_condition_then_video_then_audio() -> None
     )
 
     assert_close(
-        state.video_latents[state.layout.num_condition_video_rows:],
+        batch.latents[layout.num_condition_video_rows:],
         patchify_video_latents(expected_video, _PATCH_SIZE),
         rtol=0,
         atol=0,
     )
-    assert_close(state.audio_latents, expected_audio, rtol=0, atol=0)
+    assert_close(batch.audio_latents, expected_audio, rtol=0, atol=0)
     assert_close(
         torch.randn(8, generator=batch.generator),
         torch.randn(8, generator=expected_generator),
@@ -577,7 +559,7 @@ def test_reference_count_and_pairing_validation(
     message: str,
 ) -> None:
     with pytest.raises(error_type, match=message):
-        MiniMaxH3ReferencePreparationStage._validate_references(references)
+        validate_references(references)
 
 
 @pytest.mark.parametrize(
@@ -601,14 +583,13 @@ def test_reference_metadata_rejects_invalid_pairing_and_rates(kwargs: dict[str, 
 
 
 def test_silent_video_rate_and_waveform_channel_validation() -> None:
-    stage = MiniMaxH3ReferencePreparationStage(_RefVideoVAE(), _RefAudioVAE())
     silent_video = MiniMaxH3Reference(
         source=np.zeros((2, _HEIGHT, _WIDTH, 3), dtype=np.uint8),
         media_type="video",
         sample_rate=_AUDIO_SAMPLE_RATE,
     )
     with pytest.raises(ValueError, match="silent video.*sample_rate"):
-        stage._prepare_reference(silent_video, _NUM_FRAMES, _AUDIO_SAMPLE_RATE)
+        prepare_reference(silent_video, _NUM_FRAMES, _AUDIO_SAMPLE_RATE)
 
     invalid_audio = MiniMaxH3Reference(
         source=torch.zeros(3, 8),
@@ -616,7 +597,7 @@ def test_silent_video_rate_and_waveform_channel_validation() -> None:
         sample_rate=_AUDIO_SAMPLE_RATE,
     )
     with pytest.raises(ValueError, match="mono or stereo"):
-        stage._prepare_reference(invalid_audio, _NUM_FRAMES, _AUDIO_SAMPLE_RATE)
+        prepare_reference(invalid_audio, _NUM_FRAMES, _AUDIO_SAMPLE_RATE)
 
 
 def test_reference_fps_and_sample_rate_are_resolved_before_encoding(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -641,7 +622,7 @@ def test_reference_fps_and_sample_rate_are_resolved_before_encoding(monkeypatch:
         "torchaudio",
         SimpleNamespace(transforms=SimpleNamespace(Resample=_Resample)),
     )
-    stage = MiniMaxH3ReferencePreparationStage(_RefVideoVAE(), _RefAudioVAE())
+    stage = MiniMaxH3InputPreparationStage(_RefVideoVAE(), _RefAudioVAE(), ref2va=True)
     args = _fastvideo_args()
 
     frames = np.zeros((3, _HEIGHT, _WIDTH, 3), dtype=np.uint8)
@@ -654,7 +635,7 @@ def test_reference_fps_and_sample_rate_are_resolved_before_encoding(monkeypatch:
         inject_latents=True,
     )
     stage(resampled_batch, args)
-    resampled = get_minimax_h3_state(resampled_batch).prepared_references
+    resampled = resampled_batch.references
 
     assert resampled[0].frames is not None and resampled[0].frames.shape[0] == 6
     assert resampled[1].waveform is not None and resampled[1].waveform.shape == (2, 16)
@@ -668,7 +649,7 @@ def test_reference_fps_and_sample_rate_are_resolved_before_encoding(monkeypatch:
         inject_latents=True,
     )
     stage(default_batch, args)
-    defaulted = get_minimax_h3_state(default_batch).prepared_references
+    defaulted = default_batch.references
 
     assert defaulted[0].frames is not None and defaulted[0].frames.shape[0] == 3
     assert defaulted[1].waveform is not None and defaulted[1].waveform.shape == (2, 8)

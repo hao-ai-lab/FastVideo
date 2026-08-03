@@ -43,6 +43,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-gpus", type=int, default=4)
     parser.add_argument("--sp-size", type=int, default=4)
     parser.add_argument("--attention-backend", default="FLASH_ATTN")
+    parser.add_argument("--output-type", choices=("pil", "latent"), default="pil")
     return parser.parse_args()
 
 
@@ -138,10 +139,11 @@ def main() -> None:
         vae_cpu_offload=True,
         pin_cpu_memory=False,
         attention_backend=args.attention_backend,
-        output_type="pil",
+        output_type=args.output_type,
     )
 
     joint_output: tuple[list[Any], torch.Tensor, int] | None = None
+    latent_output: dict[str, torch.Tensor] | None = None
     is_main_process = _rank() == 0
     try:
         start = time.perf_counter()
@@ -149,8 +151,18 @@ def main() -> None:
         elapsed = time.perf_counter() - start
         output_path = Path(args.output)
         if is_main_process:
-            joint_output = _prepare_joint_output(output_batch)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
             assert output_batch.output is not None
+            if args.output_type == "latent":
+                audio_latents = output_batch.extra.get("audio")
+                if not isinstance(audio_latents, torch.Tensor):
+                    raise RuntimeError("MiniMax-H3 pipeline returned no audio latents.")
+                latent_output = {
+                    "video": output_batch.output.detach().float().cpu(),
+                    "audio": audio_latents.detach().float().cpu(),
+                }
+            else:
+                joint_output = _prepare_joint_output(output_batch)
             metadata = {
                 "mode": args.mode,
                 "model_path": args.model_path,
@@ -162,6 +174,7 @@ def main() -> None:
                 "num_gpus": args.num_gpus,
                 "sp_size": args.sp_size,
                 "attention_backend": args.attention_backend,
+                "output_type": args.output_type,
                 "pipeline_seconds": elapsed,
                 "image": args.image,
                 "last_image": args.last_image,
@@ -180,16 +193,20 @@ def main() -> None:
     # still sharing a live NCCL process. Encode only after every rank has
     # released the distributed runtime; the media already resides on CPU.
     if is_main_process:
-        assert joint_output is not None
-        frames, audio, sample_rate = joint_output
-        if not VideoGenerator._save_video_with_audio_single_pass(
-            output_path=str(output_path),
-            frames=frames,
-            fps=24,
-            audio=audio,
-            sample_rate=sample_rate,
-        ):
-            raise RuntimeError(f"Failed to mux MiniMax-H3 output at {output_path}.")
+        if args.output_type == "latent":
+            assert latent_output is not None
+            torch.save(latent_output, output_path)
+        else:
+            assert joint_output is not None
+            frames, audio, sample_rate = joint_output
+            if not VideoGenerator._save_video_with_audio_single_pass(
+                output_path=str(output_path),
+                frames=frames,
+                fps=24,
+                audio=audio,
+                sample_rate=sample_rate,
+            ):
+                raise RuntimeError(f"Failed to mux MiniMax-H3 output at {output_path}.")
         print(f"STAGE4_OUTPUT={output_path}")
         print(f"STAGE4_PIPELINE_SECONDS={elapsed:.3f}")
 

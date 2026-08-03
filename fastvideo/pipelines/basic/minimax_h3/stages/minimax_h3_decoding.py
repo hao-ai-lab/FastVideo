@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""MiniMax H3 video and stereo-audio decoding stages."""
+"""MiniMax H3 video and stereo-audio decoding."""
 
 from __future__ import annotations
 
@@ -10,31 +10,28 @@ import torch
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.models.vaes.minimax_h3_audio import MiniMaxH3AudioVAE
 from fastvideo.models.vaes.minimax_h3_video import AutoencoderKLMiniMaxH3
-from fastvideo.pipelines.basic.minimax_h3.packing import unpack_audio_tokens, unpatchify_video_tokens
-from fastvideo.pipelines.basic.minimax_h3.stages._module_lifecycle import (
-    maybe_offload_module,
-    move_module_to_local_device,
+from fastvideo.pipelines.basic.minimax_h3.packing import (
+    MiniMaxH3PackedLayout,
+    unpack_audio_tokens,
+    unpatchify_video_tokens,
 )
-from fastvideo.pipelines.basic.minimax_h3.types import MINIMAX_H3_STATE_KEY, get_minimax_h3_state
+from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_latent_preparation import MINIMAX_H3_LAYOUT_KEY
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
+from fastvideo.pipelines.stages.utils import maybe_offload_module, move_module_to_local_device
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 
 
-def _arch_value(module: Any, name: str) -> Any:
-    value = getattr(module, name, None)
-    if value is None:
-        config = getattr(module, "config", None)
-        arch = getattr(config, "arch_config", config)
-        value = getattr(arch, name, None)
-    if value is None:
-        raise ValueError(f"MiniMax-H3 component {type(module).__name__} does not expose `{name}`.")
-    return value
+def _layout(batch: ForwardBatch) -> MiniMaxH3PackedLayout:
+    layout = batch.extra.get(MINIMAX_H3_LAYOUT_KEY)
+    if not isinstance(layout, MiniMaxH3PackedLayout):
+        raise ValueError("MiniMax-H3 packed layout is missing at decode.")
+    return layout
 
 
 class MiniMaxH3VideoDecodingStage(PipelineStage):
-    """Drop condition rows, unpatchify, and reverse H3 latent/pixel normalization."""
+    """Drop visual condition rows, unpatchify, and decode the target video."""
 
     performance_component_metric = "vae_decode_time_s"
 
@@ -44,13 +41,10 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
         self.transformer = transformer
 
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
-        state = get_minimax_h3_state(batch)
         result = VerificationResult()
-        result.add_check("layout", state.layout, V.not_none)
-        result.add_check("video_latents", state.video_latents, V.with_dims(2))
-        result.add_check("num_latent_frames", state.num_latent_frames, V.positive_int)
-        result.add_check("latent_height", state.latent_height, V.positive_int)
-        result.add_check("latent_width", state.latent_width, V.positive_int)
+        result.add_check("layout", batch.extra.get(MINIMAX_H3_LAYOUT_KEY), V.not_none)
+        result.add_check("latents", batch.latents, V.with_dims(2))
+        result.add_check("raw_latent_shape", batch.raw_latent_shape, V.not_none)
         return result
 
     def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
@@ -60,23 +54,17 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
 
     @torch.no_grad()
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
-        state = get_minimax_h3_state(batch)
-        if state.layout is None or state.video_latents is None:
-            raise ValueError("MiniMax-H3 video latents are missing at decode.")
-        geometry = (state.num_latent_frames, state.latent_height, state.latent_width)
-        if any(value is None for value in geometry):
-            raise ValueError("MiniMax-H3 video geometry is incomplete at decode.")
-        num_frames, latent_height, latent_width = (int(value) for value in geometry if value is not None)
-        patch_size = tuple(int(value) for value in _arch_value(self.transformer, "patch_size"))
-        latent_channels = int(_arch_value(self.vae, "latent_channels"))
-
+        layout = _layout(batch)
+        if batch.latents is None or batch.raw_latent_shape is None or len(batch.raw_latent_shape) != 5:
+            raise ValueError("MiniMax-H3 video latents or raw geometry are missing at decode.")
+        _, channels, num_frames, latent_height, latent_width = batch.raw_latent_shape
         latents = unpatchify_video_tokens(
-            state.video_latents[state.layout.num_condition_video_rows:],
+            batch.latents[layout.num_condition_video_rows:],
             num_frames,
             latent_height,
             latent_width,
-            latent_channels,
-            patch_size,
+            channels,
+            self.transformer.patch_size,
         )
         self.vae, device, _ = move_module_to_local_device(self.vae)
         try:
@@ -96,7 +84,7 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
 
 
 class MiniMaxH3AudioDecodingStage(PipelineStage):
-    """Decode channel-major rows and expose FastVideo's joint-AV output keys."""
+    """Drop audio condition rows and decode the target stereo waveform."""
 
     performance_component_metric = "audio_decode_time_s"
 
@@ -105,11 +93,9 @@ class MiniMaxH3AudioDecodingStage(PipelineStage):
         self.audio_vae = audio_vae
 
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
-        state = get_minimax_h3_state(batch)
         result = VerificationResult()
-        result.add_check("layout", state.layout, V.not_none)
-        result.add_check("audio_latents", state.audio_latents, V.with_dims(2))
-        result.add_check("num_audio_latents", state.num_audio_latents, V.positive_int)
+        result.add_check("layout", batch.extra.get(MINIMAX_H3_LAYOUT_KEY), V.not_none)
+        result.add_check("audio_latents", batch.audio_latents, V.with_dims(2))
         return result
 
     def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
@@ -120,27 +106,20 @@ class MiniMaxH3AudioDecodingStage(PipelineStage):
 
     @torch.no_grad()
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
-        state = get_minimax_h3_state(batch)
-        if state.layout is None or state.audio_latents is None or state.num_audio_latents is None:
+        layout = _layout(batch)
+        if batch.audio_latents is None:
             raise ValueError("MiniMax-H3 audio latents are missing at decode.")
-        latent_channels = int(_arch_value(self.audio_vae, "latent_channels"))
         latents = unpack_audio_tokens(
-            state.audio_latents[state.layout.num_condition_audio_rows:],
-            state.num_audio_latents,
+            batch.audio_latents[layout.num_condition_audio_rows:],
+            layout.num_audio_latents,
         )
-        mean = torch.as_tensor(_arch_value(self.audio_vae, "latents_mean"), dtype=torch.float32).view(1, -1, 1)
-        std = torch.as_tensor(_arch_value(self.audio_vae, "latents_std"), dtype=torch.float32).view(1, -1, 1)
-        if mean.shape[1] != latent_channels or std.shape[1] != latent_channels:
-            raise ValueError("MiniMax-H3 audio latent statistics do not match the audio VAE channels.")
-
         self.audio_vae, device, _ = move_module_to_local_device(self.audio_vae)
         try:
-            latents = latents.to(device=device, dtype=torch.float32) * std.to(device) + mean.to(device)
+            latents = self.audio_vae.denormalize_latents(latents.to(device=device, dtype=torch.float32))
             if fastvideo_args.output_type == "latent":
                 batch.extra["audio"] = latents.detach().float().cpu()
-                batch.extra["audio_sample_rate"] = int(_arch_value(self.audio_vae, "sampling_rate"))
-                batch.prompt_embeds = []
-                batch.extra.pop(MINIMAX_H3_STATE_KEY, None)
+                batch.extra["audio_sample_rate"] = self.audio_vae.sampling_rate
+                self._clear_runtime(batch)
                 return batch
 
             decoded = self.audio_vae.decode(latents).sample.float()
@@ -148,15 +127,24 @@ class MiniMaxH3AudioDecodingStage(PipelineStage):
                 raise ValueError("MiniMax-H3 audio VAE must decode stereo channels as two mono batch items; "
                                  f"got {tuple(decoded.shape)}.")
             batch.extra["audio"] = decoded[:, 0].transpose(0, 1).contiguous().cpu()
-            batch.extra["audio_sample_rate"] = int(_arch_value(self.audio_vae, "sampling_rate"))
-            batch.prompt_embeds = []
-            batch.extra.pop(MINIMAX_H3_STATE_KEY, None)
+            batch.extra["audio_sample_rate"] = self.audio_vae.sampling_rate
+            self._clear_runtime(batch)
             return batch
         finally:
             self.audio_vae = maybe_offload_module(
                 self.audio_vae,
                 enabled=bool(getattr(fastvideo_args, "vae_cpu_offload", False)),
             )
+
+    @staticmethod
+    def _clear_runtime(batch: ForwardBatch) -> None:
+        batch.prompt_embeds = []
+        batch.latents = None
+        batch.audio_latents = None
+        batch.references = None
+        for key in tuple(batch.extra):
+            if key.startswith("minimax_h3_"):
+                batch.extra.pop(key)
 
 
 __all__ = ["MiniMaxH3AudioDecodingStage", "MiniMaxH3VideoDecodingStage"]

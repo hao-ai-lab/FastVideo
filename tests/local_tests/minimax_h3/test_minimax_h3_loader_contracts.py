@@ -54,12 +54,14 @@ class _MixedDtypeModule(nn.Module):
         return torch.float32 if name.startswith("fp32_projection") else default_dtype
 
 
-def test_mixed_dtype_validation_checks_every_named_parameter() -> None:
+@pytest.mark.parametrize("default_dtype", [torch.bfloat16, torch.float16])
+def test_mixed_dtype_validation_checks_every_named_parameter(default_dtype: torch.dtype) -> None:
     model = _MixedDtypeModule()
-    _validate_transformer_parameter_dtypes(model, torch.bfloat16, torch.bfloat16)
+    model.body.to(default_dtype)
+    _validate_transformer_parameter_dtypes(model, default_dtype)
     model.body.float()
     with pytest.raises(AssertionError, match="body.weight"):
-        _validate_transformer_parameter_dtypes(model, torch.bfloat16, torch.bfloat16)
+        _validate_transformer_parameter_dtypes(model, default_dtype)
 
 
 def test_fsdp_loader_materializes_h3_mixed_dtype_islands(tmp_path) -> None:
@@ -105,7 +107,7 @@ def test_fsdp_loader_materializes_h3_mixed_dtype_islands(tmp_path) -> None:
             pin_cpu_memory=False,
         )
 
-    _validate_transformer_parameter_dtypes(loaded, torch.bfloat16, torch.bfloat16)
+    _validate_transformer_parameter_dtypes(loaded, torch.bfloat16)
     assert loaded.proj_in.weight.dtype == torch.float32
     assert loaded.audio_proj_in.weight.dtype == torch.float32
     assert loaded.time_embedder.fc_in.weight.dtype == torch.float32
@@ -182,7 +184,7 @@ def test_audio_vae_loader_keeps_full_fp32_checkpoint(tmp_path, monkeypatch) -> N
     assert all(parameter.device.type == offload_device_type for parameter in loaded.parameters())
 
     configured_audio_vae.pretrained_dtype = "bf16"
-    with pytest.raises(ValueError, match="must load in FP32"):
+    with pytest.raises(ValueError, match="only supports audio VAE dtype"):
         AudioDecoderLoader().load(str(tmp_path), args)
 
 
@@ -210,6 +212,14 @@ def test_video_vae_loader_strict_loads_native_checkpoint(tmp_path, monkeypatch) 
     save_file(source.state_dict(), tmp_path / "diffusion_pytorch_model.safetensors")
 
     monkeypatch.setattr(component_loader, "get_local_torch_device", lambda: torch.device("cpu"))
+    strict_values: list[bool] = []
+    original_load_state_dict = AutoencoderKLMiniMaxH3.load_state_dict
+
+    def load_state_dict(module, state_dict, strict=True, assign=False):
+        strict_values.append(strict)
+        return original_load_state_dict(module, state_dict, strict=strict, assign=assign)
+
+    monkeypatch.setattr(AutoencoderKLMiniMaxH3, "load_state_dict", load_state_dict)
     args = SimpleNamespace(
         model_paths={},
         vae_cpu_offload=False,
@@ -219,3 +229,4 @@ def test_video_vae_loader_strict_loads_native_checkpoint(tmp_path, monkeypatch) 
 
     assert set(loaded.state_dict()) == set(source.state_dict())
     assert all(torch.equal(loaded.state_dict()[key], tensor) for key, tensor in source.state_dict().items())
+    assert strict_values == [True]

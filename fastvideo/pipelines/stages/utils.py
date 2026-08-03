@@ -7,6 +7,48 @@ import inspect
 from typing import Any
 
 import torch
+from torch.distributed.tensor import DTensor
+
+from fastvideo.distributed import get_local_torch_device
+
+
+def module_device(module: Any, fallback: torch.device | None = None) -> torch.device:
+    parameters = getattr(module, "parameters", None)
+    parameter_iterator = iter(()) if parameters is None else iter(parameters())
+    first_parameter = next(parameter_iterator, None)
+    if first_parameter is not None:
+        distributed_parameter = (first_parameter if isinstance(first_parameter, DTensor) else next(
+            (parameter for parameter in parameter_iterator if isinstance(parameter, DTensor)), None))
+        parameter = distributed_parameter if distributed_parameter is not None else first_parameter
+        return torch.device(parameter.device)
+    configured = getattr(module, "_fastvideo_input_device", None)
+    if configured is not None:
+        return torch.device(configured)
+    return torch.device("cpu") if fallback is None else fallback
+
+
+def move_module_to_local_device(module: Any) -> tuple[Any, torch.device, bool]:
+    """Move a CPU-parked component to FastVideo's execution device."""
+    target_device = get_local_torch_device()
+    parameters = iter(module.parameters())
+    first_parameter = next(parameters, None)
+    distributed_parameter = (first_parameter if isinstance(first_parameter, DTensor) else next(
+        (parameter for parameter in parameters if isinstance(parameter, DTensor)), None))
+    if distributed_parameter is not None:
+        # FSDP2 with CPU offload streams each layer to the execution device. Moving
+        # the wrapped root would instead replicate it and can invalidate its mesh.
+        # Scan beyond the first parameter because FP32 islands may be ignored by
+        # FSDP while the remainder of the same root is represented by DTensors.
+        return module, torch.device(distributed_parameter.device), False
+    moved_for_forward = module_device(module) != target_device
+    if moved_for_forward:
+        module = module.to(target_device)
+    return module, module_device(module, fallback=target_device), moved_for_forward
+
+
+def maybe_offload_module(module: Any, enabled: bool) -> Any:
+    """Return a component to CPU after its last forward in the request."""
+    return module.to("cpu") if enabled else module
 
 
 def retrieve_timesteps(

@@ -28,13 +28,13 @@ from diffusers.modular_pipelines.minimax_h3 import packing as reference_packing 
 from diffusers.modular_pipelines.minimax_h3 import packing_ref2va as reference  # noqa: E402
 
 from fastvideo.pipelines.basic.minimax_h3 import packing as base_packing  # noqa: E402
-from fastvideo.pipelines.basic.minimax_h3 import packing_ref2va as actual  # noqa: E402
-from fastvideo.pipelines.basic.minimax_h3.stages.reference_preparation import (  # noqa: E402
-    MiniMaxH3ReferencePreparationStage,
+from fastvideo.pipelines.basic.minimax_h3 import reference as actual  # noqa: E402
+from fastvideo.pipelines.basic.minimax_h3.reference import (  # noqa: E402
+    MiniMaxH3Reference,
     decode_reference_audio,
     decode_reference_video,
+    prepare_reference,
 )
-from fastvideo.pipelines.basic.minimax_h3.types import MiniMaxH3Reference  # noqa: E402
 
 
 @pytest.mark.parametrize("size", [(80, 48), (48, 80), (64, 64), (128, 32)])
@@ -243,9 +243,8 @@ def test_deferred_stage_decodes_local_video_soundtrack_and_audio(
 
     monkeypatch.setattr(base_packing, "MINIMAX_H3_SHORT_EDGE", 32)
     monkeypatch.setattr(base_packing, "MINIMAX_H3_MAX_PIXELS", 32 * 64)
-    stage = MiniMaxH3ReferencePreparationStage(vae=None, audio_vae=None)
-    prepared_video = stage._prepare_reference(video_reference, num_frames=22, target_sample_rate=_FIXTURE_SAMPLE_RATE)
-    prepared_audio = stage._prepare_reference(audio_reference, num_frames=22, target_sample_rate=_FIXTURE_SAMPLE_RATE)
+    prepared_video = prepare_reference(video_reference, num_frames=22, target_sample_rate=_FIXTURE_SAMPLE_RATE)
+    prepared_audio = prepare_reference(audio_reference, num_frames=22, target_sample_rate=_FIXTURE_SAMPLE_RATE)
 
     expected_samples = int(22 / 24 * _FIXTURE_SAMPLE_RATE)
     assert prepared_video.frames.shape == (22, 32, 64, 3)

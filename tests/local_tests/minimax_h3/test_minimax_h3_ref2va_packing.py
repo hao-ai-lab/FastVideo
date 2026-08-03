@@ -23,8 +23,11 @@ sys.path.insert(0, str(REFERENCE_SRC))
 from diffusers.modular_pipelines.minimax_h3 import packing_ref2va as reference  # noqa: E402
 
 from fastvideo.pipelines.basic.minimax_h3 import packing as base_packing  # noqa: E402
-from fastvideo.pipelines.basic.minimax_h3 import packing_ref2va as actual  # noqa: E402
-from fastvideo.pipelines.basic.minimax_h3.types import MiniMaxH3PreparedReference  # noqa: E402
+from fastvideo.pipelines.basic.minimax_h3 import packing as actual  # noqa: E402
+from fastvideo.pipelines.basic.minimax_h3.reference import MiniMaxH3PreparedReference  # noqa: E402
+from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_conditioning import (  # noqa: E402
+    build_ref2va_presentation,
+)
 
 
 def _actual_mixed_references() -> list[MiniMaxH3PreparedReference]:
@@ -340,7 +343,7 @@ def test_presentation_preserves_reference_and_soundtrack_order() -> None:
     actual_tokenizer = _PresentationTokenizer()
     reference_tokenizer = _PresentationTokenizer()
 
-    result = actual.build_ref2va_presentation(
+    result = build_ref2va_presentation(
         actual_tokenizer,
         "dance",
         actual_references,

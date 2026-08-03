@@ -15,7 +15,7 @@ from torch import nn
 from torch.testing import assert_close
 
 import fastvideo.pipelines.composed_pipeline_base as composed_pipeline_base
-import fastvideo.pipelines.basic.minimax_h3.stages._module_lifecycle as module_lifecycle
+from fastvideo.pipelines.stages import utils as stage_utils
 from fastvideo.api.results import GenerationResult
 from fastvideo.configs.models.encoders import BaseEncoderOutput
 from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
@@ -36,14 +36,11 @@ from fastvideo.pipelines.basic.minimax_h3.stages import (
     MiniMaxH3AudioDecodingStage,
     MiniMaxH3ConditioningStage,
     MiniMaxH3DenoisingStage,
-    MiniMaxH3FL2VALayoutPreparationStage,
     MiniMaxH3InputPreparationStage,
-    MiniMaxH3KeyframeEncodingStage,
     MiniMaxH3LatentPreparationStage,
-    MiniMaxH3TimestepPreparationStage,
     MiniMaxH3VideoDecodingStage,
 )
-from fastvideo.pipelines.basic.minimax_h3.types import get_minimax_h3_state
+from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_latent_preparation import MINIMAX_H3_LAYOUT_KEY
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.pipeline_registry import PipelineType, import_pipeline_classes
 
@@ -63,7 +60,7 @@ _REQUEST_SEED = 73
 
 @pytest.fixture(autouse=True)
 def _keep_synthetic_pipeline_on_cpu(monkeypatch) -> None:
-    monkeypatch.setattr(module_lifecycle, "get_local_torch_device", lambda: torch.device("cpu"))
+    monkeypatch.setattr(stage_utils, "get_local_torch_device", lambda: torch.device("cpu"))
 
 
 class _TinyConditioner(nn.Module):
@@ -148,6 +145,7 @@ class _TinyTransformer(nn.Module):
         super().__init__()
         self.marker = nn.Parameter(torch.zeros(()))
         self.config = SimpleNamespace(arch_config=SimpleNamespace(patch_size=_PATCH_SIZE))
+        self.patch_size = _PATCH_SIZE
         self.calls: list[dict[str, torch.Tensor]] = []
 
     def forward(self, **kwargs: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -216,6 +214,11 @@ class _TinyAudioVAE(nn.Module):
             latents_std=[1.0] * _AUDIO_CHANNELS,
             sampling_rate=_AUDIO_SAMPLE_RATE,
         )
+        self.register_buffer("latents_mean", torch.zeros(2, _AUDIO_CHANNELS, 1))
+        self.register_buffer("latents_std", torch.ones(2, _AUDIO_CHANNELS, 1))
+
+    def denormalize_latents(self, latents: torch.Tensor) -> torch.Tensor:
+        return latents * self.latents_std + self.latents_mean
 
     def decode(self, latents: torch.Tensor) -> MiniMaxH3AudioDecoderOutput:
         mono = latents.mean(dim=1, keepdim=True).tanh()
@@ -230,6 +233,9 @@ def _fastvideo_args() -> SimpleNamespace:
         output_type="pt",
         text_encoder_cpu_offload=False,
         vae_cpu_offload=False,
+        dit_cpu_offload=False,
+        dit_layerwise_offload=False,
+        use_fsdp_inference=False,
     )
 
 
@@ -338,6 +344,7 @@ def _write_modular_manifest(path) -> dict[str, tuple[str, str]]:
         "_blocks_class_name": "MiniMaxH3Blocks",
     }
     for name, (library, class_name) in component_types.items():
+        (path / name).mkdir()
         manifest[name] = [
             library,
             class_name,
@@ -358,16 +365,19 @@ def _prepare_latents(batch: ForwardBatch, components: SimpleNamespace, args: Sim
             components.tokenizer,
             components.processor,
         ),
-        MiniMaxH3KeyframeEncodingStage(components.vae, components.transformer, components.scheduler),
-        MiniMaxH3FL2VALayoutPreparationStage(components.transformer),
-        MiniMaxH3LatentPreparationStage(components.transformer, components.vae, components.audio_vae),
+        MiniMaxH3LatentPreparationStage(
+            components.transformer,
+            components.vae,
+            components.audio_vae,
+            components.scheduler,
+        ),
     )
     for stage in stages:
         stage(batch, args)
 
 
 def test_composed_pipeline_runs_stage2_end_to_end() -> None:
-    """The private pipeline owns the tested stages in their execution order."""
+    """The composed pipeline owns the tested stages in their execution order."""
     args = _fastvideo_args()
     batch = _make_batch("both", inject_latents=True)
     pipeline = _composed_pipeline(_components(), args)
@@ -377,10 +387,7 @@ def test_composed_pipeline_runs_stage2_end_to_end() -> None:
     assert list(pipeline._stage_name_mapping) == [
         "input_preparation_stage",
         "conditioning_stage",
-        "keyframe_encoding_stage",
-        "layout_preparation_stage",
         "latent_preparation_stage",
-        "timestep_preparation_stage",
         "denoising_stage",
         "video_decoding_stage",
         "audio_decoding_stage",
@@ -400,12 +407,18 @@ def test_pipeline_reads_diffusers_modular_manifest(tmp_path) -> None:
     config = pipeline._load_config(str(tmp_path))
 
     assert config["_class_name"] == "MiniMaxH3ModularPipeline"
-    assert set(config) == {"_class_name", "_diffusers_version", *component_types}
+    assert set(config) == {"_class_name", "_diffusers_version", "_blocks_class_name", *component_types}
     for name, component_type in component_types.items():
-        assert config[name] == list(component_type)
+        assert config[name][:2] == list(component_type)
+        assert config[name][2] == {
+            "type_hint": list(component_type),
+            "subfolder": name,
+        }
 
 
 def test_pipeline_accepts_standard_and_hintless_modular_specs(tmp_path) -> None:
+    (tmp_path / "transformer").mkdir()
+    (tmp_path / "scheduler").mkdir()
     manifest = {
         "_class_name": "MiniMaxH3ModularPipeline",
         "_diffusers_version": "0.36.0.dev0",
@@ -423,16 +436,20 @@ def test_pipeline_accepts_standard_and_hintless_modular_specs(tmp_path) -> None:
     config = pipeline._load_config(str(tmp_path))
 
     assert config["transformer"] == ["diffusers", "MiniMaxH3Transformer3DModel"]
-    assert config["scheduler"] == ["diffusers", "MiniMaxH3Scheduler"]
+    assert config["scheduler"] == [
+        "diffusers",
+        "MiniMaxH3Scheduler",
+        {"subfolder": "scheduler"},
+    ]
 
 
 @pytest.mark.parametrize(
     "spec,error",
     [
-        (["diffusers", "MiniMaxH3Scheduler", []], "Invalid modular component specification"),
+        (["diffusers", "MiniMaxH3Scheduler", []], "Invalid Diffusers loading method"),
         (
             ["diffusers", "MiniMaxH3Scheduler", {"type_hint": ["diffusers"]}],
-            "Invalid modular type_hint",
+            "Invalid Diffusers type_hint",
         ),
         (
             ["diffusers", "MiniMaxH3Scheduler", {"subfolder": "video_scheduler"}],
@@ -441,6 +458,7 @@ def test_pipeline_accepts_standard_and_hintless_modular_specs(tmp_path) -> None:
     ],
 )
 def test_pipeline_rejects_unsupported_modular_specs(tmp_path, spec: list[object], error: str) -> None:
+    (tmp_path / "transformer").mkdir()
     manifest = {
         "_class_name": "MiniMaxH3ModularPipeline",
         "_diffusers_version": "0.36.0.dev0",
@@ -455,8 +473,8 @@ def test_pipeline_rejects_unsupported_modular_specs(tmp_path, spec: list[object]
 
 
 @pytest.mark.parametrize("config_source", ["default", "json", "instance"])
-def test_private_pipeline_factory_loads_modular_manifest(tmp_path, monkeypatch, config_source: str) -> None:
-    """Direct class loading reaches the modular manifest without public registration."""
+def test_pipeline_factory_loads_modular_manifest(tmp_path, monkeypatch, config_source: str) -> None:
+    """Direct class loading reaches the modular manifest with the selected H3 config."""
     _write_modular_manifest(tmp_path)
     components = _components()
     monkeypatch.setattr(
@@ -493,18 +511,15 @@ def test_private_pipeline_factory_loads_modular_manifest(tmp_path, monkeypatch, 
     assert list(pipeline._stage_name_mapping) == [
         "input_preparation_stage",
         "conditioning_stage",
-        "keyframe_encoding_stage",
-        "layout_preparation_stage",
         "latent_preparation_stage",
-        "timestep_preparation_stage",
         "denoising_stage",
         "video_decoding_stage",
         "audio_decoding_stage",
     ]
 
 
-def test_private_pipeline_is_not_publicly_registered() -> None:
-    """Stage 2 remains direct-import only until public activation."""
+def test_internal_pipeline_base_is_not_publicly_registered() -> None:
+    """Only the manifest-compatible public subclasses are registry entrypoints."""
     basic_pipelines = import_pipeline_classes(PipelineType.BASIC)[PipelineType.BASIC.value]
     assert "MiniMaxH3Pipeline" not in basic_pipelines
 
@@ -524,7 +539,7 @@ def test_pipeline_requires_exact_scheduler_shifts() -> None:
 
 def test_component_forwards_follow_cpu_offload_lifecycle(monkeypatch) -> None:
     """CPU-parked H3 components move for forward, then return to CPU."""
-    monkeypatch.setattr(module_lifecycle, "get_local_torch_device", lambda: torch.device("cuda"))
+    monkeypatch.setattr(stage_utils, "get_local_torch_device", lambda: torch.device("cuda"))
     args = _fastvideo_args()
     args.text_encoder_cpu_offload = True
     args.vae_cpu_offload = True
@@ -577,9 +592,8 @@ def test_conditioning_keeps_text_encoder_dtype() -> None:
         components.processor,
     )(batch, args)
 
-    state = get_minimax_h3_state(batch)
-    assert state.prompt_embeds is not None
-    assert state.prompt_embeds.dtype == torch.bfloat16
+    assert batch.prompt_embeds
+    assert batch.prompt_embeds[0].dtype == torch.bfloat16
 
 
 @pytest.mark.parametrize(
@@ -601,9 +615,7 @@ def test_t2va_fl2va_pipeline_contracts(
     batch = _make_batch(mode, inject_latents=True)
     components = _components()
     _prepare_latents(batch, components, args)
-    state = get_minimax_h3_state(batch)
 
-    assert state.keyframe_anchors == expected_anchors
     assert len(components.conditioner.calls) == 1
     pixel_values = components.conditioner.calls[0]["pixel_values"]
     if expected_condition_rows:
@@ -611,14 +623,14 @@ def test_t2va_fl2va_pipeline_contracts(
         assert pixel_values.shape[0] == expected_condition_rows
     else:
         assert pixel_values is None
-    assert state.layout is not None
-    assert state.text_token_tags is not None
-    assert state.video_latents is not None
-    assert state.audio_latents is not None
-    assert state.layout.num_condition_video_rows == expected_condition_rows
+    layout = batch.extra[MINIMAX_H3_LAYOUT_KEY]
+    assert batch.latents is not None
+    assert batch.audio_latents is not None
+    assert layout.num_condition_video_rows == expected_condition_rows
+    text_token_tags = layout.token_tags[layout.text_indices]
 
     expected_layout = build_packed_sequence(
-        state.text_token_tags,
+        text_token_tags,
         _NUM_LATENT_FRAMES,
         2,
         2,
@@ -626,38 +638,31 @@ def test_t2va_fl2va_pipeline_contracts(
         _PATCH_SIZE,
         expected_anchors,
     )
-    assert state.layout.sequence_length == expected_layout.sequence_length
+    assert layout.sequence_length == expected_layout.sequence_length
     for name in ("position_ids", "token_tags", "video_indices", "audio_indices", "text_indices"):
-        assert_close(getattr(state.layout, name), getattr(expected_layout, name), rtol=0, atol=0)
-    assert state.layout.position_ids.dtype == torch.float64
-    assert_close(state.layout.token_tags[state.layout.text_indices], state.text_token_tags, rtol=0, atol=0)
-    assert set(state.layout.token_tags[state.layout.audio_indices].tolist()) == {MINIMAX_H3_AUDIO_TAG}
-    assert set(state.layout.token_tags[state.layout.video_indices].tolist()) == {MINIMAX_H3_VIDEO_TAG}
+        assert_close(getattr(layout, name), getattr(expected_layout, name), rtol=0, atol=0)
+    assert layout.position_ids.dtype == torch.float64
+    assert set(layout.token_tags[layout.audio_indices].tolist()) == {MINIMAX_H3_AUDIO_TAG}
+    assert set(layout.token_tags[layout.video_indices].tolist()) == {MINIMAX_H3_VIDEO_TAG}
 
-    initial_video_rows = state.video_latents.clone()
-    initial_audio_rows = state.audio_latents.clone()
+    initial_video_rows = batch.latents.clone()
+    initial_audio_rows = batch.audio_latents.clone()
     condition_prefix = initial_video_rows[:expected_condition_rows].clone()
 
-    MiniMaxH3TimestepPreparationStage(components.scheduler, components.audio_scheduler)(batch, args)
-    assert state.video_timesteps is not None
-    assert state.audio_timesteps is not None
-    assert len(state.video_timesteps) == len(state.audio_timesteps) == batch.num_inference_steps - 1
     MiniMaxH3DenoisingStage(components.transformer, components.scheduler, components.audio_scheduler)(batch, args)
 
+    assert batch.timesteps is not None
+    assert len(batch.timesteps) == batch.num_inference_steps - 1
     assert len(components.transformer.calls) == batch.num_inference_steps - 1
-    for call, (unique_timesteps, timestep_indices) in zip(
-        components.transformer.calls,
-        state.row_timestep_plan,
-        strict=True,
-    ):
-        assert_close(call["timestep"], unique_timesteps, rtol=0, atol=0)
-        assert_close(call["timestep_indices"], timestep_indices, rtol=0, atol=0)
-        assert_close(call["position_ids"], state.layout.position_ids, rtol=0, atol=0)
-        assert_close(call["token_tags"], state.layout.token_tags, rtol=0, atol=0)
+    for call in components.transformer.calls:
+        assert call["timestep"].ndim == 1
+        assert call["timestep_indices"].shape == layout.token_tags.shape
+        assert_close(call["position_ids"], layout.position_ids, rtol=0, atol=0)
+        assert_close(call["token_tags"], layout.token_tags, rtol=0, atol=0)
         assert_close(call["hidden_states"][0, :expected_condition_rows], condition_prefix, rtol=0, atol=0)
-    assert_close(state.video_latents[:expected_condition_rows], condition_prefix, rtol=0, atol=0)
-    assert not torch.equal(state.video_latents[expected_condition_rows:], initial_video_rows[expected_condition_rows:])
-    assert not torch.equal(state.audio_latents, initial_audio_rows)
+    assert_close(batch.latents[:expected_condition_rows], condition_prefix, rtol=0, atol=0)
+    assert not torch.equal(batch.latents[expected_condition_rows:], initial_video_rows[expected_condition_rows:])
+    assert not torch.equal(batch.audio_latents, initial_audio_rows)
 
     # Injecting both target streams skips their draws. Only one request-generator
     # draw per keyframe condition is allowed; fixed-seed posterior samples do not
@@ -691,9 +696,8 @@ def test_target_noise_draws_video_then_audio() -> None:
     batch = _make_batch("text", inject_latents=False)
     components = _components()
     _prepare_latents(batch, components, args)
-    state = get_minimax_h3_state(batch)
-    assert state.video_latents is not None
-    assert state.audio_latents is not None
+    assert batch.latents is not None
+    assert batch.audio_latents is not None
 
     expected_generator = torch.Generator("cpu").manual_seed(_REQUEST_SEED)
     expected_video = torch.randn(
@@ -706,8 +710,8 @@ def test_target_noise_draws_video_then_audio() -> None:
         generator=expected_generator,
         dtype=torch.float32,
     )
-    assert_close(state.video_latents, patchify_video_latents(expected_video, _PATCH_SIZE), rtol=0, atol=0)
-    assert_close(state.audio_latents, expected_audio, rtol=0, atol=0)
+    assert_close(batch.latents, patchify_video_latents(expected_video, _PATCH_SIZE), rtol=0, atol=0)
+    assert_close(batch.audio_latents, expected_audio, rtol=0, atol=0)
     assert_close(
         torch.randn(8, generator=batch.generator),
         torch.randn(8, generator=expected_generator),
@@ -746,7 +750,6 @@ def test_joint_output_muxes_one_video_and_stereo_audio_stream(tmp_path) -> None:
     batch = _make_batch("both", inject_latents=True)
     components = _components()
     _prepare_latents(batch, components, args)
-    MiniMaxH3TimestepPreparationStage(components.scheduler, components.audio_scheduler)(batch, args)
     MiniMaxH3DenoisingStage(components.transformer, components.scheduler, components.audio_scheduler)(batch, args)
     MiniMaxH3VideoDecodingStage(components.vae, components.transformer)(batch, args)
     MiniMaxH3AudioDecodingStage(components.audio_vae)(batch, args)

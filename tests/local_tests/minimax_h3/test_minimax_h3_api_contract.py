@@ -5,7 +5,7 @@ from PIL import Image
 
 from fastvideo.api.compat import normalize_generation_request, request_to_sampling_param
 from fastvideo.api.sampling_param import SamplingParam
-from fastvideo.pipelines.basic.minimax_h3.types import MiniMaxH3Reference
+from fastvideo.pipelines.basic.minimax_h3.reference import MiniMaxH3Reference
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.utils import shallow_asdict
 

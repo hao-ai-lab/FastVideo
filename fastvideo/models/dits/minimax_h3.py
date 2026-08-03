@@ -28,43 +28,6 @@ MINIMAX_H3_MODALITY_NUM = 3
 _CFG = MiniMaxH3Config()
 
 
-_FP32_MODULE_NAMES = {
-    "proj_in",
-    "audio_proj_in",
-    "time_embedder",
-    "proj_out",
-    "audio_proj_out",
-    "rope",
-}
-
-
-def _keep_in_fp32(name: str) -> bool:
-    """Return whether a checkpoint parameter or buffer belongs to an FP32 island."""
-    return name.split(".", 1)[0] in _FP32_MODULE_NAMES
-
-
-def _sequence_parallel_world_size() -> int:
-    """Use standalone single-rank geometry before distributed initialization."""
-    return get_sp_world_size() if model_parallel_is_initialized() else 1
-
-
-def _apply_partial_rotary_emb(
-    hidden_states: torch.Tensor,
-    cos: torch.Tensor,
-    sin: torch.Tensor,
-) -> torch.Tensor:
-    """Rotate the leading channels and leave the remainder of each head unchanged."""
-    rotary_dim = cos.shape[-1]
-    hidden_states_rotary = hidden_states[..., :rotary_dim]
-    hidden_states_pass = hidden_states[..., rotary_dim:]
-    cos = cos.to(hidden_states.dtype)[None, :, None, :]
-    sin = sin.to(hidden_states.dtype)[None, :, None, :]
-    x1, x2 = hidden_states_rotary.chunk(2, dim=-1)
-    hidden_states_rotated = torch.cat((-x2, x1), dim=-1)
-    hidden_states_rotary = hidden_states_rotary * cos + hidden_states_rotated * sin
-    return torch.cat((hidden_states_rotary, hidden_states_pass), dim=-1).contiguous()
-
-
 class MiniMaxH3RotaryPosEmbed(nn.Module):
     """Three-axis rotary frequencies over packed `(t, h, w)` coordinates."""
 
@@ -206,6 +169,23 @@ class MiniMaxH3Attention(nn.Module):
             prefix=prefix,
         )
 
+    @staticmethod
+    def _apply_rotary_emb(
+        hidden_states: torch.Tensor,
+        rotary_emb: tuple[torch.Tensor, torch.Tensor],
+    ) -> torch.Tensor:
+        """Rotate the RoPE prefix while preserving the rest of each attention head."""
+        cos, sin = rotary_emb
+        rotary_dim = cos.shape[-1]
+        hidden_states_rotary = hidden_states[..., :rotary_dim]
+        hidden_states_pass = hidden_states[..., rotary_dim:]
+        cos = cos.to(hidden_states.dtype)[None, :, None, :]
+        sin = sin.to(hidden_states.dtype)[None, :, None, :]
+        first_half, second_half = hidden_states_rotary.chunk(2, dim=-1)
+        hidden_states_rotated = torch.cat((-second_half, first_half), dim=-1)
+        hidden_states_rotary = hidden_states_rotary * cos + hidden_states_rotated * sin
+        return torch.cat((hidden_states_rotary, hidden_states_pass), dim=-1).contiguous()
+
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -221,8 +201,8 @@ class MiniMaxH3Attention(nn.Module):
         query = self.norm_q(query)
         key = self.norm_k(key)
         if rotary_emb is not None:
-            query = _apply_partial_rotary_emb(query, *rotary_emb)
-            key = _apply_partial_rotary_emb(key, *rotary_emb)
+            query = self._apply_rotary_emb(query, rotary_emb)
+            key = self._apply_rotary_emb(key, rotary_emb)
 
         # H3 rotates only 96/128 channels, which the generic `freqs_cis`
         # branch cannot express. Apply it above, then pass no RoPE here.
@@ -458,15 +438,23 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
     param_names_mapping = _CFG.param_names_mapping
     reverse_param_names_mapping = _CFG.reverse_param_names_mapping
     lora_param_names_mapping = _CFG.lora_param_names_mapping
+    _keep_in_fp32_modules = frozenset({
+        "proj_in",
+        "audio_proj_in",
+        "time_embedder",
+        "proj_out",
+        "audio_proj_out",
+        "rope",
+    })
 
     def _get_parameter_dtype(self, name: str, default_dtype: torch.dtype) -> torch.dtype:
         """Keep the released input, timestep, and output projections in FP32."""
-        return torch.float32 if _keep_in_fp32(name) else default_dtype
+        return torch.float32 if name.split(".", 1)[0] in self._keep_in_fp32_modules else default_dtype
 
     def __init__(self, config: MiniMaxH3Config, hf_config: dict[str, Any]) -> None:
         super().__init__(config, hf_config)
         arch = config.arch_config
-        sp_world_size = _sequence_parallel_world_size()
+        sp_world_size = get_sp_world_size() if model_parallel_is_initialized() else 1
         if arch.num_attention_heads % sp_world_size:
             raise ValueError(
                 f"MiniMax H3 attention heads ({arch.num_attention_heads}) must be divisible by "
@@ -476,6 +464,7 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         self.hidden_size = arch.hidden_size
         self.num_attention_heads = arch.num_attention_heads
         self.num_channels_latents = arch.in_channels
+        self.patch_size = tuple(int(value) for value in arch.patch_size)
         video_patch_dim = arch.in_channels * math.prod(arch.patch_size)
 
         self.proj_in = ReplicatedLinear(
@@ -612,7 +601,7 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         text_embeds, _ = self.context_embedder(encoder_hidden_states.to(self.context_embedder.weight.dtype))
 
         text_original_seq_len = text_embeds.shape[1]
-        sp_world_size = _sequence_parallel_world_size()
+        sp_world_size = get_sp_world_size() if model_parallel_is_initialized() else 1
         if sp_world_size > 1:
             text_embeds, _ = sequence_model_parallel_shard(text_embeds, dim=1)
         text_embeds = self.token_refiner(text_embeds, text_original_seq_len)

@@ -448,6 +448,7 @@ surfaces:
       last_image: request.inputs.last_image
       references: request.inputs.references
       video_path: request.inputs.video_path
+      latents: request.inputs.latents
       audio_latents: request.inputs.audio_latents
       mouse_cond: request.inputs.mouse_cond
       keyboard_cond: request.inputs.keyboard_cond
@@ -528,7 +529,6 @@ surfaces:
       inpaint_mask: request.extensions.stable_audio.inpaint_mask
     internal_only:
       data_type: "Derived from the request shape and not a public input."
-      latents: "Pre-generated diffusion latents supplied by parity/debug harnesses; not a public input."
 
   sampling_param_extensions: {}
 

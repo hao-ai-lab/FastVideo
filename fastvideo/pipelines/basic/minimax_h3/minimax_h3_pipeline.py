@@ -3,64 +3,17 @@
 
 from __future__ import annotations
 
-import argparse
-import json
-from pathlib import Path
-from typing import Any, cast
-
-import torch
-
-from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.pipelines.basic.minimax_h3.stages import (
     MiniMaxH3AudioDecodingStage,
     MiniMaxH3ConditioningStage,
     MiniMaxH3DenoisingStage,
-    MiniMaxH3FL2VALayoutPreparationStage,
     MiniMaxH3InputPreparationStage,
-    MiniMaxH3KeyframeEncodingStage,
     MiniMaxH3LatentPreparationStage,
-    MiniMaxH3Ref2VAConditioningStage,
-    MiniMaxH3Ref2VALayoutPreparationStage,
-    MiniMaxH3ReferenceEncodingStage,
-    MiniMaxH3ReferencePreparationStage,
-    MiniMaxH3TimestepPreparationStage,
     MiniMaxH3VideoDecodingStage,
 )
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
-from fastvideo.utils import maybe_download_model
-
-
-def _normalize_modular_model_index(config: dict[str, Any]) -> dict[str, Any]:
-    """Translate H3's modular component specs at the family loading boundary."""
-    normalized: dict[str, Any] = {}
-    for name, entry in config.items():
-        if name.startswith("_") and name not in {"_class_name", "_diffusers_version"}:
-            continue
-        if not isinstance(entry, list | tuple):
-            normalized[name] = entry
-            continue
-        if len(entry) == 2:
-            normalized[name] = list(entry)
-            continue
-        if len(entry) != 3 or not isinstance(entry[2], dict):
-            raise ValueError(f"Invalid modular component specification for {name!r}: {entry!r}")
-
-        library, class_name, loading = entry
-        type_hint = loading.get("type_hint", (library, class_name))
-        if not isinstance(type_hint, list | tuple) or len(type_hint) != 2:
-            raise ValueError(f"Invalid modular type_hint for {name!r}: {type_hint!r}")
-        normalized[name] = list(type_hint)
-
-        subfolder = loading.get("subfolder")
-        if isinstance(subfolder, str) and subfolder != name:
-            raise ValueError(f"Modular component {name!r} uses subfolder {subfolder!r}; "
-                             "FastVideo requires component names and subfolders to match.")
-
-    if "_diffusers_version" not in normalized:
-        raise ValueError("modular_model_index.json does not contain _diffusers_version")
-    return normalized
 
 
 class MiniMaxH3BasePipeline(ComposedPipelineBase):
@@ -78,51 +31,6 @@ class MiniMaxH3BasePipeline(ComposedPipelineBase):
         "audio_scheduler",
     ]
 
-    @classmethod
-    def from_pretrained(
-        cls,
-        model_path: str,
-        device: str | None = None,
-        torch_dtype: torch.dtype | None = None,
-        pipeline_config: str | PipelineConfig | None = None,
-        args: argparse.Namespace | None = None,
-        required_config_modules: list[str] | None = None,
-        loaded_modules: dict[str, torch.nn.Module] | None = None,
-        **kwargs: Any,
-    ) -> MiniMaxH3BasePipeline:
-        """Load MiniMax H3 from its canonical modular Diffusers manifest."""
-        if pipeline_config is None:
-            pipeline_config = MiniMaxH3PipelineConfig()
-        elif isinstance(pipeline_config, str):
-            config_path = pipeline_config
-            pipeline_config = MiniMaxH3PipelineConfig()
-            pipeline_config.load_from_json(config_path)
-            pipeline_config.pipeline_config_path = config_path
-        pipeline = super().from_pretrained(
-            model_path=model_path,
-            device=device,
-            torch_dtype=torch_dtype,
-            pipeline_config=pipeline_config,
-            args=args,
-            required_config_modules=required_config_modules,
-            loaded_modules=loaded_modules,
-            **kwargs,
-        )
-        return cast("MiniMaxH3BasePipeline", pipeline)
-
-    def _load_config(self, model_path: str) -> dict[str, Any]:
-        """Load a canonical or modular Diffusers component manifest."""
-        resolved = Path(maybe_download_model(model_path, revision=getattr(self.fastvideo_args, "revision", None)))
-        self.model_path = str(resolved)
-        if (resolved / "model_index.json").is_file():
-            return super()._load_config(str(resolved))
-
-        modular_path = resolved / "modular_model_index.json"
-        if not modular_path.is_file():
-            raise ValueError(f"MiniMax-H3 model directory {resolved} has no component manifest.")
-        with modular_path.open(encoding="utf-8") as file:
-            return _normalize_modular_model_index(json.load(file))
-
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs) -> None:
         del fastvideo_args
         for module_name, modality, expected_shift in (
@@ -133,21 +41,39 @@ class MiniMaxH3BasePipeline(ComposedPipelineBase):
             if shift is None or float(shift) != expected_shift:
                 raise ValueError(f"MiniMax-H3 {modality} scheduler must expose shift={expected_shift:g}, got {shift}.")
 
-    def _add_target_generation_stages(
-        self,
-        transformer: Any,
-        vae: Any,
-        audio_vae: Any,
-        scheduler: Any,
-        audio_scheduler: Any,
-    ) -> None:
+    def _add_stages(self, *, ref2va: bool) -> None:
+        transformer = self.get_module("transformer")
+        vae = self.get_module("vae")
+        audio_vae = self.get_module("audio_vae")
+        scheduler = self.get_module("scheduler")
+        audio_scheduler = self.get_module("audio_scheduler")
+
         self.add_stage(
-            "latent_preparation_stage",
-            MiniMaxH3LatentPreparationStage(transformer=transformer, vae=vae, audio_vae=audio_vae),
+            "input_preparation_stage",
+            MiniMaxH3InputPreparationStage(
+                vae=vae,
+                audio_vae=audio_vae if ref2va else None,
+                ref2va=ref2va,
+            ),
         )
         self.add_stage(
-            "timestep_preparation_stage",
-            MiniMaxH3TimestepPreparationStage(scheduler=scheduler, audio_scheduler=audio_scheduler),
+            "conditioning_stage",
+            MiniMaxH3ConditioningStage(
+                conditioner=self.get_module("text_encoder"),
+                tokenizer=self.get_module("tokenizer"),
+                processor=self.get_module("processor"),
+                ref2va=ref2va,
+            ),
+        )
+        self.add_stage(
+            "latent_preparation_stage",
+            MiniMaxH3LatentPreparationStage(
+                transformer=transformer,
+                vae=vae,
+                audio_vae=audio_vae,
+                scheduler=scheduler,
+                ref2va=ref2va,
+            ),
         )
         self.add_stage(
             "denoising_stage",
@@ -166,36 +92,7 @@ class MiniMaxH3Pipeline(MiniMaxH3BasePipeline):
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
         del fastvideo_args
-        transformer = self.get_module("transformer")
-        vae = self.get_module("vae")
-        audio_vae = self.get_module("audio_vae")
-        scheduler = self.get_module("scheduler")
-        audio_scheduler = self.get_module("audio_scheduler")
-
-        self.add_stage("input_preparation_stage", MiniMaxH3InputPreparationStage(vae=vae))
-        self.add_stage(
-            "conditioning_stage",
-            MiniMaxH3ConditioningStage(
-                conditioner=self.get_module("text_encoder"),
-                tokenizer=self.get_module("tokenizer"),
-                processor=self.get_module("processor"),
-            ),
-        )
-        self.add_stage(
-            "keyframe_encoding_stage",
-            MiniMaxH3KeyframeEncodingStage(vae=vae, transformer=transformer, scheduler=scheduler),
-        )
-        self.add_stage(
-            "layout_preparation_stage",
-            MiniMaxH3FL2VALayoutPreparationStage(transformer=transformer),
-        )
-        self._add_target_generation_stages(
-            transformer,
-            vae,
-            audio_vae,
-            scheduler,
-            audio_scheduler,
-        )
+        self._add_stages(ref2va=False)
 
 
 class MiniMaxH3RefPipeline(MiniMaxH3BasePipeline):
@@ -205,44 +102,7 @@ class MiniMaxH3RefPipeline(MiniMaxH3BasePipeline):
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
         del fastvideo_args
-        transformer = self.get_module("transformer")
-        vae = self.get_module("vae")
-        audio_vae = self.get_module("audio_vae")
-        scheduler = self.get_module("scheduler")
-        audio_scheduler = self.get_module("audio_scheduler")
-
-        self.add_stage(
-            "reference_preparation_stage",
-            MiniMaxH3ReferencePreparationStage(vae=vae, audio_vae=audio_vae),
-        )
-        self.add_stage(
-            "conditioning_stage",
-            MiniMaxH3Ref2VAConditioningStage(
-                conditioner=self.get_module("text_encoder"),
-                tokenizer=self.get_module("tokenizer"),
-                processor=self.get_module("processor"),
-            ),
-        )
-        self.add_stage(
-            "reference_encoding_stage",
-            MiniMaxH3ReferenceEncodingStage(
-                vae=vae,
-                audio_vae=audio_vae,
-                transformer=transformer,
-                scheduler=scheduler,
-            ),
-        )
-        self.add_stage(
-            "layout_preparation_stage",
-            MiniMaxH3Ref2VALayoutPreparationStage(transformer=transformer),
-        )
-        self._add_target_generation_stages(
-            transformer,
-            vae,
-            audio_vae,
-            scheduler,
-            audio_scheduler,
-        )
+        self._add_stages(ref2va=True)
 
 
 class MiniMaxH3ModularPipeline(MiniMaxH3Pipeline):

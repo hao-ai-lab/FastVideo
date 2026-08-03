@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import ClassVar
 
 from fastvideo.configs.models.vaes.base import VAEArchConfig, VAEConfig
 
@@ -59,3 +60,6 @@ class MiniMaxH3AudioVAEConfig(VAEConfig):
 
     # The released DAC/BigVGAN stack is an FP32 component.
     pretrained_dtype: str = "float32"
+    supported_pretrained_dtypes: ClassVar[frozenset[str]] = frozenset({"fp32"})
+    load_full_checkpoint: ClassVar[bool] = True
+    load_weights_strict: ClassVar[bool] = True

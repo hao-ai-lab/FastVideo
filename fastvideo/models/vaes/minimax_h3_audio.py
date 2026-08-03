@@ -32,12 +32,15 @@ class MiniMaxH3AudioDiagonalGaussianDistribution:
         return self.mean
 
     def sample(self, generator: torch.Generator | None = None) -> torch.Tensor:
+        noise_device = self.mean.device
+        if generator is not None and generator.device.type == "cpu":
+            noise_device = torch.device("cpu")
         noise = torch.randn(
             self.mean.shape,
             generator=generator,
-            device=self.mean.device,
+            device=noise_device,
             dtype=self.mean.dtype,
-        )
+        ).to(self.mean.device)
         return self.mean + self.std * noise
 
 
@@ -407,6 +410,18 @@ class MiniMaxH3AudioVAE(nn.Module):
         self.sampling_rate = int(arch.sampling_rate)
         self.latent_channels = int(arch.latent_channels)
         self.audio_channels = 1
+        latents_mean = arch.latents_mean if arch.latents_mean is not None else [0.0] * self.latent_channels
+        latents_std = arch.latents_std if arch.latents_std is not None else [1.0] * self.latent_channels
+        self.register_buffer(
+            "latents_mean",
+            torch.tensor(latents_mean, dtype=torch.float32).view(1, -1, 1),
+            persistent=False,
+        )
+        self.register_buffer(
+            "latents_std",
+            torch.tensor(latents_std, dtype=torch.float32).view(1, -1, 1),
+            persistent=False,
+        )
 
         if math.prod(decoder_rates) != self.hop_length:
             raise ValueError(
@@ -472,6 +487,12 @@ class MiniMaxH3AudioVAE(nn.Module):
         if not return_dict:
             return (posterior,)
         return MiniMaxH3AudioEncoderOutput(latent_dist=posterior)
+
+    def normalize_latents(self, latents: torch.Tensor) -> torch.Tensor:
+        return (latents - self.latents_mean) / self.latents_std
+
+    def denormalize_latents(self, latents: torch.Tensor) -> torch.Tensor:
+        return latents * self.latents_std + self.latents_mean
 
     def decode(
         self,

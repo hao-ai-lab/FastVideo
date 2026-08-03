@@ -30,6 +30,11 @@ class _MiniMaxH3FLLoaderPipeline(_ManifestPipeline):
     pass
 
 
+class _LightVaeLoaderPipeline(_ManifestPipeline):
+    _required_config_modules = ["vae"]
+    _extra_config_module_map = {"vae": "light_vae"}
+
+
 def _make_pipeline(
     pipeline_cls: type[_ManifestPipeline],
     model_path: Path,
@@ -106,5 +111,26 @@ def test_fl_loader_uses_only_standard_transformer(tmp_path: Path, monkeypatch: p
         "module_name": "transformer",
         "component_model_path": str(tmp_path / "transformer"),
         "transformers_or_diffusers": "standard-library",
+        "fastvideo_args": ANY,
+    }]
+
+
+def test_logical_vae_uses_mapped_light_vae_subfolder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls, loaded_vae = _record_component_loads(monkeypatch)
+    manifest = {
+        "_class_name": "MatrixGame3I2VPipeline",
+        "_diffusers_version": "0.36.0.dev0",
+        "light_vae": ["diffusers", "AutoencoderKLWan"],
+        "scheduler": ["diffusers", "FlowUniPCMultistepScheduler"],
+    }
+    pipeline = _make_pipeline(_LightVaeLoaderPipeline, tmp_path, manifest)
+
+    modules = pipeline.load_modules(SimpleNamespace())
+
+    assert modules == {"vae": loaded_vae}
+    assert calls == [{
+        "module_name": "vae",
+        "component_model_path": str(tmp_path / "light_vae"),
+        "transformers_or_diffusers": "diffusers",
         "fastvideo_args": ANY,
     }]

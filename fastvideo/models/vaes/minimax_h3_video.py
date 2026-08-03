@@ -32,12 +32,15 @@ class DiagonalGaussianDistribution:
             self.var = torch.zeros_like(self.mean)
 
     def sample(self, generator: torch.Generator | None = None) -> torch.Tensor:
+        noise_device = self.mean.device
+        if generator is not None and generator.device.type == "cpu":
+            noise_device = torch.device("cpu")
         noise = torch.randn(
             self.mean.shape,
             generator=generator,
-            device=self.mean.device,
+            device=noise_device,
             dtype=self.mean.dtype,
-        )
+        ).to(self.mean.device)
         return self.mean + self.std * noise
 
     def mode(self) -> torch.Tensor:
@@ -495,6 +498,7 @@ class AutoencoderKLMiniMaxH3(nn.Module):
         self.model_config = config
         self.config = config.arch_config
         arch = config.arch_config
+        self.latent_channels = int(arch.latent_channels)
         self.spatial_compression_ratio = math.prod(arch.spatial_downsample_factors)
         self.temporal_compression_ratio = math.prod(arch.temporal_downsample_factors)
 

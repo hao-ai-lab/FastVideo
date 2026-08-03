@@ -3,6 +3,7 @@
 
 import math
 from dataclasses import dataclass, field
+from typing import ClassVar
 
 from fastvideo.configs.models.vaes.base import VAEArchConfig, VAEConfig
 
@@ -78,3 +79,5 @@ class MiniMaxH3VideoVAEConfig(VAEConfig):
     use_temporal_tiling: bool = False
     use_parallel_tiling: bool = False
     use_temporal_scaling_frames: bool = False
+    supported_pretrained_dtypes: ClassVar[frozenset[str]] = frozenset({"fp32"})
+    load_weights_strict: ClassVar[bool] = True

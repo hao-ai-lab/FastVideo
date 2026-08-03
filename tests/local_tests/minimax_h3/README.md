@@ -2,7 +2,7 @@
 
 Local component and contract tests for `minimax_h3` in FastVideo.
 Stage 1 covers model components, FL2VA packing, both schedulers, direct Diffusers component loading, and the minimal
-`last_image`/`references`/`audio_latents` request bridge. Stage 2 adds the internal T2VA/FL2VA composed pipeline.
+`last_image`/`references`/`audio_latents` request bridge. Stage 2 adds the T2VA/FL2VA composed pipeline.
 Stage 3 adds ordered Ref2VA media, condition encoding, packing, and its separate pipeline. Stage 4 adds public
 registration and real-weight distributed T2VA, FL2VA, and Ref2VA acceptance.
 
@@ -53,7 +53,7 @@ media quality, CUDA behavior, memory use, or performance.
 | Scope | Test | Evidence |
 |---|---|---|
 | Qwen3-VL encoder and conditioning | `tests/local_tests/minimax_h3/test_minimax_h3_conditioner.py` | standard `BaseEncoderOutput`; stage-owned picture presentation, tags, multimodal IDs, and layer-50 selection |
-| T2VA/FL2VA pipeline | `tests/local_tests/minimax_h3/test_minimax_h3_pipeline.py` | private factory, offload lifecycle, four paths, dual schedules, executor-safe result, and stereo MP4 mux |
+| T2VA/FL2VA pipeline | `tests/local_tests/minimax_h3/test_minimax_h3_pipeline.py` | factory loading, offload lifecycle, four paths, dual schedules, executor-safe result, and stereo MP4 mux |
 
 Run Stage 2 from the repository root:
 
@@ -110,8 +110,8 @@ Accepted seed-0 evidence:
 | Audio | AAC, 32 kHz stereo, 5.216 seconds; finite and non-silent |
 | Output SHA-256 | `ea1dbfeb37fd9036f2f6d8ce1d9ffb20c39dbd54d5b5381fa4c3b33bdfeaff6a` |
 
-This proves the real distributed T2VA path; component-level Diffusers numerical parity and SP=1 versus SP=4 parity
-remain separate follow-up gates.
+This proves the real distributed T2VA path. Released component and SP parity are recorded below as separate,
+reproducible gates.
 
 FL2VA and Ref2VA use the public manifest-compatible classes through the conditioned runner:
 
@@ -146,14 +146,62 @@ Both outputs decode without errors and have non-silent audio (mean -14.8 dB, pea
 Ref2VA completes in 276.582 seconds after module loading; its measured stages include 55.592 seconds of multimodal
 conditioning, 11.467 seconds of reference encoding, and 193.615 seconds of denoising.
 
+## Released component parity
+
+The gated tests load the official checkpoint and the corresponding FastVideo component through its production
+loader. They are intentionally skipped unless their `MINIMAX_H3_RUN_*_PARITY` variable is set.
+
+```bash
+PYTHONPATH="$PWD/DiffusersMiniMaxH3/src:$PWD" \
+MINIMAX_H3_MODEL_ROOT=/mnt/lustre/vlm-k1kong/models/MiniMax-H3 \
+MINIMAX_H3_RUN_ENCODER_PARITY=1 \
+pytest tests/local_tests/encoders/test_minimax_h3_qwen3_vl_parity.py -v -s
+
+PYTHONPATH="$PWD/DiffusersMiniMaxH3/src:$PWD" \
+MINIMAX_H3_MODEL_ROOT=/mnt/lustre/vlm-k1kong/models/MiniMax-H3 \
+MINIMAX_H3_RUN_DIT_PARITY=1 \
+MINIMAX_H3_RUN_VIDEO_VAE_PARITY=1 \
+MINIMAX_H3_RUN_AUDIO_VAE_PARITY=1 \
+pytest \
+  tests/local_tests/transformers/test_minimax_h3_released_transformer_parity.py \
+  tests/local_tests/vaes/test_minimax_h3_released_video_vae_parity.py \
+  tests/local_tests/vaes/test_minimax_h3_released_audio_vae_parity.py -v -s
+```
+
+Accepted released-weight evidence on one GB200:
+
+| Component | Result |
+|---|---|
+| Native Qwen3-VL | text, image, and video cases; all 65 hidden states bitwise exact |
+| `transformer/` and `transformer_ref/` | both video/audio output heads bitwise exact |
+| Video VAE | posterior mean/logvar, normalized latents, and decode bitwise exact |
+| Audio VAE | posterior mean/log-scale and normalized latents exact; decode `max_abs=2.4e-7` |
+
+The combined DiT/VAE run reports `4 passed in 154.75s`; the encoder run reports `1 passed in 80.94s`.
+
+## Sequence-parallel parity
+
+FL2VA and Ref2VA use the same official prompts and media shown above. Run the conditioned runner with
+`--output-type latent --num-inference-steps 2`, first with `--num-gpus 1 --sp-size 1`, then with
+`--num-gpus 4 --sp-size 4`. The seed remains zero and FlashAttention-2 is used in both runs.
+
+| Workload | Tensor | Shape | SP=1 vs SP=4 | Pipeline seconds (SP=1 / SP=4) |
+|---|---|---|---|---|
+| FL2VA | video | `[1, 24, 57, 48, 84]` | bitwise exact; `max_abs=0` | 17.058 / 7.767 |
+| FL2VA | audio | `[2, 32, 320]` | bitwise exact; `max_abs=0` | same run |
+| Ref2VA | video | `[1, 24, 37, 48, 84]` | bitwise exact; `max_abs=0` | 41.676 / 24.556 |
+| Ref2VA | audio | `[2, 32, 207]` | bitwise exact; `max_abs=0` | same run |
+
+The final focused CPU/reference suite reports `128 passed`; it includes manifest discovery, logical-to-physical
+component mapping, FSDP lifecycle, packing, scheduler, synthetic components, and all pipeline-stage contracts.
+
 ## Review notes
 
 - Keep the FastVideo and reference packers independent.
 - Keep Transformer FP32 islands and both FP32 VAEs explicit.
 - Keep `last_image`, `references`, and `audio_latents` in the typed request bridge.
-- Keep the isolated Transformers Qwen3-VL base-model passthrough adapter on the standard FastVideo encoder contract;
-  load the released full checkpoint strictly before retaining its base model, while H3 presentation and layer
-  selection remain in the conditioning stage.
+- Keep Qwen3-VL native to FastVideo and omit the unused language-model head; H3 presentation and layer selection
+  remain in the conditioning stage.
 - Keep media I/O in reference preparation, not in the immutable request object.
 - Keep the public class names aligned with the official modular manifest; Ref2VA explicitly selects its alternate
   class so only `transformer_ref/` is loaded.

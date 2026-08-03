@@ -19,6 +19,7 @@ class MiniMaxH3Scheduler(SchedulerMixin, ConfigMixin):
 
     _compatibles: list[str] = []
     order = 1
+    allow_pipeline_shift_override = False
 
     @register_to_config
     def __init__(self, shift: float = 12.0) -> None:
