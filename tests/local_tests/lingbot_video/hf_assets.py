@@ -28,11 +28,11 @@ OFFICIAL_MOE = HubModel(
 )
 FASTVIDEO_DENSE = HubModel(
     "FastVideo/LingBot-Video-Dense-1.3B-Diffusers",
-    "743ed04b96d77150d952eb08a59a56ee61b9bc95",
+    "efca07f906aa17a9b03380e2fc58ef17089b4e91",
 )
 FASTVIDEO_MOE = HubModel(
     "FastVideo/LingBot-Video-MoE-30B-A3B-Diffusers",
-    "401dce84db5897cb950969e766410c8eadd4fbdf",
+    "575e01b56b39f8fc31a8029ab1789339de078663",
 )
 
 

@@ -3,17 +3,68 @@
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import torch
 import torch.nn.functional as F
+from PIL import Image
+from torch.distributed.tensor import DTensor
 
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.forward_context import set_forward_context
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.input_validation import InputValidationStage
+from fastvideo.pipelines.stages.text_encoding import TextEncodingStage
 
 LINGBOT_VIDEO_REFINER_TAIL_STEPS = 2
+LINGBOT_VIDEO_IMAGE_TEMPLATE = "<|vision_start|><|image_pad|><|vision_end|>"
+LINGBOT_VIDEO_IMAGE_MIN_TOKENS = 4
+LINGBOT_VIDEO_IMAGE_MAX_TOKENS = 16384
+LINGBOT_VIDEO_IMAGE_MAX_RATIO = 200
+
+
+def _smart_resize_image(height: int, width: int, factor: int) -> tuple[int, int]:
+    """Match Qwen3-VL's bounded patch-grid resize used by LingBot-Video."""
+    if max(height, width) / min(height, width) > LINGBOT_VIDEO_IMAGE_MAX_RATIO:
+        raise ValueError(f"absolute image aspect ratio must be smaller than {LINGBOT_VIDEO_IMAGE_MAX_RATIO}")
+    min_pixels = LINGBOT_VIDEO_IMAGE_MIN_TOKENS * factor**2
+    max_pixels = LINGBOT_VIDEO_IMAGE_MAX_TOKENS * factor**2
+    resized_height = max(factor, round(height / factor) * factor)
+    resized_width = max(factor, round(width / factor) * factor)
+    if resized_height * resized_width > max_pixels:
+        beta = math.sqrt((height * width) / max_pixels)
+        resized_height = math.floor(height / beta / factor) * factor
+        resized_width = math.floor(width / beta / factor) * factor
+    elif resized_height * resized_width < min_pixels:
+        beta = math.sqrt(min_pixels / (height * width))
+        resized_height = math.ceil(height * beta / factor) * factor
+        resized_width = math.ceil(width * beta / factor) * factor
+    return resized_height, resized_width
+
+
+def _preprocess_condition_image(image: Image.Image, height: int, width: int) -> torch.Tensor:
+    """Resize and center-crop the clean condition with released uint8 arithmetic."""
+    raw = torch.from_numpy(np.array(image.convert("RGB"))).permute(2, 0, 1).unsqueeze(0).contiguous()
+    source_height, source_width = raw.shape[-2:]
+    scale = max(height / source_height, width / source_width)
+    resized_height = max(math.ceil(source_height * scale), height)
+    resized_width = max(math.ceil(source_width * scale), width)
+    resized = F.interpolate(raw, size=(resized_height, resized_width), mode="bilinear", align_corners=False)
+    top = int(round((resized_height - height) / 2.0))
+    left = int(round((resized_width - width) / 2.0))
+    return resized[:, :, top:top + height, left:left + width].float().div(255.0).unsqueeze(2)
+
+
+def _condition_tensor_to_vlm_image(pixel: torch.Tensor, patch_size: int) -> Image.Image:
+    """Convert the base condition tensor to the processor's exact RGB image."""
+    frame = pixel[0, :, 0].detach().cpu().clamp(0, 1)
+    array = frame.permute(1, 2, 0).mul(255).byte().numpy()
+    image = Image.fromarray(array, mode="RGB")
+    target_height, target_width = _smart_resize_image(image.height, image.width, patch_size * 2)
+    return image.resize((target_width, target_height))
 
 
 def _compute_refiner_sigmas(
@@ -78,6 +129,151 @@ class LingBotVideoInputValidationStage(InputValidationStage):
         return batch
 
 
+class LingBotVideoImageInputValidationStage(LingBotVideoInputValidationStage):
+    """Validate TI2V input and prepare its shared base-resolution condition."""
+
+    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+        """Load one RGB image and preserve both raw and preprocessed representations."""
+        batch = super().forward(batch, fastvideo_args)
+        if not isinstance(batch.pil_image, Image.Image):
+            raise ValueError("LingBot-Video TI2V requires image_path or one PIL image")
+        if not isinstance(batch.height, int) or not isinstance(batch.width, int):
+            raise TypeError("LingBot-Video TI2V requires integer height and width")
+        batch.preprocessed_image = _preprocess_condition_image(batch.pil_image, batch.height, batch.width)
+        return batch
+
+
+class LingBotVideoImagePromptEncodingStage(PipelineStage):
+    """Encode positive and negative TI2V prompts with the same Qwen3-VL image."""
+
+    performance_component_metric = "text_encoder_time_s"
+
+    def __init__(self, text_encoder, processor) -> None:
+        self.text_encoder = text_encoder
+        self.processor = processor
+
+    def _encode(
+        self,
+        text: str,
+        image: Image.Image,
+        fastvideo_args: FastVideoArgs,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Run the released processor call and native compound encoder once."""
+        encoder_config = fastvideo_args.pipeline_config.text_encoder_configs[0]
+        processed_text = fastvideo_args.pipeline_config.preprocess_text_funcs[0](LINGBOT_VIDEO_IMAGE_TEMPLATE + text)
+        target_device = get_local_torch_device()
+        first_parameter = next(self.text_encoder.parameters(), None)
+        encoder_device = first_parameter.device if first_parameter is not None else target_device
+        moved_for_forward = False
+        if (first_parameter is not None and not isinstance(first_parameter, DTensor)
+                and encoder_device.type != target_device.type):
+            self.text_encoder.to(target_device)
+            encoder_device = target_device
+            moved_for_forward = True
+        inputs = self.processor(
+            text=[processed_text],
+            images=[image],
+            videos=None,
+            video_metadata=None,
+            do_resize=False,
+            truncation=True,
+            max_length=encoder_config.text_len,
+            padding="longest",
+            return_tensors="pt",
+        ).to(encoder_device)
+        with set_forward_context(current_timestep=0, attn_metadata=None):
+            outputs = self.text_encoder(**inputs, output_hidden_states=True)
+        prompt_embeds, prompt_mask = fastvideo_args.pipeline_config.postprocess_text_funcs[0](
+            outputs,
+            inputs["attention_mask"],
+        )
+        if moved_for_forward and fastvideo_args.text_encoder_cpu_offload:
+            self.text_encoder.to("cpu")
+        return prompt_embeds.to(target_device), prompt_mask.to(target_device)
+
+    @torch.no_grad()
+    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+        """Populate both CFG branches with image-conditioned prompt embeddings."""
+        if not isinstance(batch.prompt, str) or not isinstance(batch.negative_prompt, str):
+            raise TypeError("LingBot-Video TI2V requires string positive and negative prompts")
+        if batch.preprocessed_image is None:
+            raise ValueError("LingBot-Video TI2V prompt encoding requires the preprocessed image")
+        vision_config = fastvideo_args.pipeline_config.text_encoder_configs[0].vision_config
+        patch_size = int(vision_config["patch_size"])
+        vlm_image = _condition_tensor_to_vlm_image(batch.preprocessed_image, patch_size)
+        prompt_embeds, prompt_mask = self._encode(batch.prompt, vlm_image, fastvideo_args)
+        batch.prompt_embeds.append(prompt_embeds)
+        if batch.prompt_attention_mask is not None:
+            batch.prompt_attention_mask.append(prompt_mask)
+        if batch.do_classifier_free_guidance:
+            negative_embeds, negative_mask = self._encode(batch.negative_prompt, vlm_image, fastvideo_args)
+            if batch.negative_prompt_embeds is not None:
+                batch.negative_prompt_embeds.append(negative_embeds)
+            if batch.negative_attention_mask is not None:
+                batch.negative_attention_mask.append(negative_mask)
+        return batch
+
+
+class LingBotVideoImageLatentPreparationStage(PipelineStage):
+    """Encode the clean first frame before base diffusion noise is generated."""
+
+    performance_component_metric = "vae_encode_time_s"
+
+    def __init__(self, vae) -> None:
+        self.vae = vae
+
+    @torch.no_grad()
+    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+        """Sample and normalize the released VAE posterior with the shared RNG."""
+        if batch.preprocessed_image is None or not isinstance(batch.generator, torch.Generator):
+            raise ValueError("LingBot-Video TI2V requires a condition image and device generator")
+        device = get_local_torch_device()
+        if isinstance(self.vae, torch.nn.Module):
+            self.vae.to(device)
+        pixels = batch.preprocessed_image.to(device=device, dtype=torch.float32)
+        normalized = (pixels - 0.5) / 0.5
+        with torch.autocast(device_type=device.type, dtype=torch.bfloat16, enabled=device.type == "cuda"):
+            encoded = self.vae.encode(normalized)
+        distribution = encoded.latent_dist if hasattr(encoded, "latent_dist") else encoded
+        if not hasattr(distribution, "sample") or not callable(distribution.sample):
+            raise TypeError("LingBot-Video TI2V requires a VAE posterior distribution")
+        latents = distribution.sample(batch.generator)
+        mean = torch.tensor(self.vae.config.latents_mean, device=device, dtype=torch.float32).view(1, -1, 1, 1, 1)
+        std_inverse = 1.0 / torch.tensor(
+            self.vae.config.latents_std,
+            device=device,
+            dtype=torch.float32,
+        ).view(1, -1, 1, 1, 1)
+        batch.image_latent = (latents.float() - mean) * std_inverse
+        if getattr(fastvideo_args, "vae_cpu_offload", False):
+            self.vae.to("cpu")
+        return batch
+
+
+class LingBotVideoRefinerTextEncodingStage(PipelineStage):
+    """Replace image-conditioned embeddings with original text-only refiner input."""
+
+    performance_component_metric = "text_encoder_time_s"
+
+    def __init__(self, text_encoder, processor) -> None:
+        self.text_stage = TextEncodingStage([text_encoder], [processor])
+
+    @torch.no_grad()
+    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+        """Re-encode only the positive prompt; refiner CFG clones it as zeros."""
+        if not isinstance(batch.prompt, str):
+            raise TypeError("LingBot-Video refiner requires one string prompt")
+        embeds, masks = self.text_stage.encode_text(
+            batch.prompt,
+            fastvideo_args,
+            encoder_index=0,
+            return_attention_mask=True,
+        )
+        batch.prompt_embeds = embeds
+        batch.prompt_attention_mask = masks
+        return batch
+
+
 class LingBotVideoLatentPreparationStage(PipelineStage):
     """Prepare fp32 latents in the released 4x temporal and 8x spatial geometry."""
 
@@ -108,6 +304,9 @@ class LingBotVideoLatentPreparationStage(PipelineStage):
             if tuple(batch.latents.shape) != shape:
                 raise ValueError(f"supplied latent shape {tuple(batch.latents.shape)} does not match {shape}")
             batch.latents = batch.latents.to(device=device, dtype=torch.float32)
+        if batch.image_latent is not None:
+            condition_frames = batch.image_latent.shape[2]
+            batch.latents[:, :, :condition_frames] = batch.image_latent.float()
         batch.raw_latent_shape = shape
         return batch
 
@@ -129,6 +328,32 @@ class LingBotVideoRefinerPreparationStage(PipelineStage):
         resized = F.interpolate(flat, size=(height, width), mode="bicubic", align_corners=False).clamp(0.0, 1.0)
         return resized.reshape(batch, frames, channels, height, width).permute(0, 2, 1, 3, 4).contiguous()
 
+    @staticmethod
+    def _resize_clean_condition(
+        image: Image.Image,
+        target_height: int,
+        target_width: int,
+        geometry_height: int,
+        geometry_width: int,
+    ) -> torch.Tensor:
+        """Center-crop to base aspect before the released bicubic refiner resize."""
+        image = image.convert("RGB")
+        image_width, image_height = image.size
+        geometry_aspect = float(geometry_width) / float(geometry_height)
+        image_aspect = float(image_width) / float(image_height)
+        if image_aspect > geometry_aspect:
+            crop_height = image_height
+            crop_width = max(1, int(round(crop_height * geometry_aspect)))
+            left, top = int(round((image_width - crop_width) / 2.0)), 0
+        else:
+            crop_width = image_width
+            crop_height = max(1, int(round(crop_width / geometry_aspect)))
+            left, top = 0, int(round((image_height - crop_height) / 2.0))
+        crop = image.crop((left, top, left + crop_width, top + crop_height))
+        crop = crop.resize((target_width, target_height), resample=Image.BICUBIC)
+        frame = torch.from_numpy(np.asarray(crop, dtype=np.float32) / 255.0).permute(2, 0, 1).unsqueeze(0)
+        return frame.contiguous().permute(1, 0, 2, 3).unsqueeze(0)
+
     def _encode_video(
         self,
         video: torch.Tensor,
@@ -148,8 +373,12 @@ class LingBotVideoRefinerPreparationStage(PipelineStage):
         else:
             latents = encoded
         mean = torch.tensor(self.vae.config.latents_mean, device=device, dtype=torch.float32).view(1, -1, 1, 1, 1)
-        std = torch.tensor(self.vae.config.latents_std, device=device, dtype=torch.float32).view(1, -1, 1, 1, 1)
-        return ((latents.float() - mean) / std).to(latents)
+        std_inverse = 1.0 / torch.tensor(
+            self.vae.config.latents_std,
+            device=device,
+            dtype=torch.float32,
+        ).view(1, -1, 1, 1, 1)
+        return ((latents.float() - mean) * std_inverse).to(latents)
 
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         """Prepare high-resolution refiner latents and its exact truncated sigma schedule."""
@@ -167,6 +396,21 @@ class LingBotVideoRefinerPreparationStage(PipelineStage):
         generator = torch.Generator(device=device).manual_seed(batch.seed)
         resized = self._resize_video(batch.output, batch.height_sr, batch.width_sr)
         encoded = self._encode_video(resized, generator, device)
+        if batch.preprocessed_image is not None:
+            if not isinstance(batch.pil_image, Image.Image):
+                raise TypeError("LingBot-Video TI2V refiner requires the original PIL condition")
+            clean_pixels = self._resize_clean_condition(
+                batch.pil_image,
+                batch.height_sr,
+                batch.width_sr,
+                batch.height,
+                batch.width,
+            )
+            clean_latent = self._encode_video(clean_pixels, generator, device)[:, :, :1].contiguous()
+            encoded[:, :, :1] = clean_latent.to(encoded.dtype)
+            batch.image_latent = clean_latent.float()
+        else:
+            batch.image_latent = None
         noise = torch.randn(encoded.shape, generator=generator, device=device, dtype=encoded.dtype)
         batch.latents = ((1.0 - batch.t_thresh) * encoded + batch.t_thresh * noise).float()
         batch.generator = generator
@@ -285,6 +529,9 @@ class LingBotVideoDenoisingStage(PipelineStage):
         transformer_dtype = next(self.transformer.parameters()).dtype
         condition, condition_mask = self._prepare_conditions(batch, transformer_dtype, device)
         latents = batch.latents.to(device=device, dtype=torch.float32)
+        if batch.image_latent is not None:
+            condition_frames = batch.image_latent.shape[2]
+            latents[:, :, :condition_frames] = batch.image_latent.float()
         do_cfg = self._uses_cfg(batch)
         negative = negative_mask = None
         if do_cfg and not batch.batch_cfg:
@@ -335,6 +582,9 @@ class LingBotVideoDenoisingStage(PipelineStage):
                 return_dict=False,
                 generator=batch.generator,
             )[0].float()
+            if batch.image_latent is not None:
+                condition_frames = batch.image_latent.shape[2]
+                latents[:, :, :condition_frames] = batch.image_latent.float()
             if batch.return_trajectory_latents:
                 trajectory.append(latents.detach().cpu())
                 trajectory_timesteps.append(timestep.detach().cpu())

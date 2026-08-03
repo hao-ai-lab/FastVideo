@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Stage-composed LingBot-Video Dense and MoE/refiner T2V pipeline."""
+"""Stage-composed LingBot-Video T2V and TI2V pipelines."""
 
 from typing import Any
 
@@ -7,9 +7,13 @@ from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
 from fastvideo.pipelines.basic.lingbot_video.stages import (
     LingBotVideoDenoisingStage,
+    LingBotVideoImageInputValidationStage,
+    LingBotVideoImageLatentPreparationStage,
+    LingBotVideoImagePromptEncodingStage,
     LingBotVideoInputValidationStage,
     LingBotVideoLatentPreparationStage,
     LingBotVideoRefinerPreparationStage,
+    LingBotVideoRefinerTextEncodingStage,
 )
 from fastvideo.pipelines.stages import (
     ConditioningStage,
@@ -103,4 +107,74 @@ class LingBotVideoPipeline(LoRAPipeline, ComposedPipelineBase):
             )
 
 
-EntryClass = LingBotVideoPipeline
+class LingBotVideoImageToVideoPipeline(LingBotVideoPipeline):
+    """TI2V pipeline with fixed clean frame-zero conditioning in both stages."""
+
+    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
+        """Create image-conditioned base stages and optional text-only refinement."""
+        refiner = self.get_module("transformer_2")
+        self.add_stage(
+            "input_validation_stage",
+            LingBotVideoImageInputValidationStage(refiner_enabled=refiner is not None),
+        )
+        self.add_stage(
+            "prompt_encoding_stage",
+            LingBotVideoImagePromptEncodingStage(
+                text_encoder=self.get_module("text_encoder"),
+                processor=self.get_module("tokenizer"),
+            ),
+        )
+        self.add_stage("conditioning_stage", ConditioningStage())
+        self.add_stage(
+            "image_latent_preparation_stage",
+            LingBotVideoImageLatentPreparationStage(vae=self.get_module("vae")),
+        )
+        self.add_stage(
+            "timestep_preparation_stage",
+            TimestepPreparationStage(scheduler=self.get_module("scheduler")),
+        )
+        self.add_stage(
+            "latent_preparation_stage",
+            LingBotVideoLatentPreparationStage(transformer=self.get_module("transformer")),
+        )
+        self.add_stage(
+            "denoising_stage",
+            LingBotVideoDenoisingStage(
+                transformer=self.get_module("transformer"),
+                scheduler=self.get_module("scheduler"),
+            ),
+        )
+        self.add_stage(
+            "decoding_stage",
+            DecodingStage(vae=self.get_module("vae"), pipeline=self),
+        )
+        if refiner is not None:
+            self.add_stage(
+                "refiner_preparation_stage",
+                LingBotVideoRefinerPreparationStage(
+                    vae=self.get_module("vae"),
+                    scheduler=self.get_module("scheduler"),
+                ),
+            )
+            self.add_stage(
+                "refiner_prompt_encoding_stage",
+                LingBotVideoRefinerTextEncodingStage(
+                    text_encoder=self.get_module("text_encoder"),
+                    processor=self.get_module("tokenizer"),
+                ),
+            )
+            self.add_stage(
+                "refiner_denoising_stage",
+                LingBotVideoDenoisingStage(
+                    transformer=refiner,
+                    scheduler=self.get_module("scheduler"),
+                    refiner=True,
+                ),
+            )
+            self.add_stage(
+                "refiner_decoding_stage",
+                DecodingStage(vae=self.get_module("vae"), pipeline=self),
+            )
+
+
+EntryClass = [LingBotVideoPipeline, LingBotVideoImageToVideoPipeline]

@@ -15,9 +15,10 @@ import torch
 from safetensors.torch import load_file, save_file
 
 from fastvideo.configs.models.dits.lingbot_video import LingBotVideoConfig
-from fastvideo.configs.models.encoders.lingbot_video import LingBotVideoQwen3VLTextConfig
+from fastvideo.configs.models.encoders.lingbot_video import LingBotVideoQwen3VLConfig
 
 LANGUAGE_PREFIX = "model.language_model."
+VISION_PREFIX = "model.visual."
 PASSTHROUGH_COMPONENTS = ("transformer", "vae", "scheduler")
 DENSE_PIPELINE_CLASS = "LingBotVideoDensePipeline"
 MOE_PIPELINE_CLASS = "LingBotVideoMoePipeline"
@@ -38,11 +39,14 @@ def _copy_tree_with_weight_links(source: Path, destination: Path) -> None:
 
 
 def _fuse_language_shard(state: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-    """Filter Qwen3-VL language tensors and fuse native QKV and gate/up weights."""
+    """Keep vision tensors and fuse native QKV and gate/up language weights."""
     converted = {
         name[len(LANGUAGE_PREFIX):]: tensor
         for name, tensor in state.items() if name.startswith(LANGUAGE_PREFIX)
     }
+    converted.update(
+        {f"visual.{name[len(VISION_PREFIX) :]}": tensor for name, tensor in state.items() if name.startswith(VISION_PREFIX)}
+    )
     layer_ids = {int(name.split(".")[1]) for name in converted if name.startswith("layers.")}
     for layer_id in sorted(layer_ids):
         attention = f"layers.{layer_id}.self_attn"
@@ -87,23 +91,30 @@ def _convert_text_encoder(source: Path, destination: Path) -> dict[str, str]:
 
 
 def _write_text_encoder_config(source: Path, destination: Path) -> dict:
-    """Flatten the compound Qwen3-VL config into FastVideo's text-model bucket."""
+    """Keep the compound Qwen3-VL architecture in FastVideo's encoder bucket."""
     official = json.loads((source / "config.json").read_text())
     text = dict(official["text_config"])
-    valid = {item.name for item in fields(LingBotVideoQwen3VLTextConfig().arch_config)}
+    valid = {item.name for item in fields(LingBotVideoQwen3VLConfig().arch_config)}
     config = {key: value for key, value in text.items() if key in valid}
-    config.update({
-        "_class_name": "LingBotVideoQwen3VLTextModel",
-        "architectures": ["LingBotVideoQwen3VLTextModel"],
-        "pad_token_id": 151643,
-        "text_len": 37698,
-        "output_hidden_states": True,
-        "require_processor": True,
-        "rope_scaling": None,
-        "mrope_interleaved": True,
-        "mrope_section": [24, 20, 20],
-    })
-    LingBotVideoQwen3VLTextConfig().update_model_arch(config)
+    config.update(
+        {
+            "_class_name": "LingBotVideoQwen3VLModel",
+            "architectures": ["LingBotVideoQwen3VLModel"],
+            "vision_config": official["vision_config"],
+            "image_token_id": official["image_token_id"],
+            "video_token_id": official["video_token_id"],
+            "vision_start_token_id": official["vision_start_token_id"],
+            "vision_end_token_id": official["vision_end_token_id"],
+            "pad_token_id": 151643,
+            "text_len": 37698,
+            "output_hidden_states": True,
+            "require_processor": True,
+            "rope_scaling": None,
+            "mrope_interleaved": True,
+            "mrope_section": [24, 20, 20],
+        }
+    )
+    LingBotVideoQwen3VLConfig().update_model_arch(config)
     (destination / "config.json").write_text(json.dumps(config, indent=2, sort_keys=True) + "\n")
     for filename in ("generation_config.json", ):
         candidate = source / filename
@@ -121,14 +132,14 @@ def _validate_transformer_config(path: Path) -> None:
 
 
 def _write_model_index(destination: Path, *, has_refiner: bool) -> None:
-    """Declare the native T2V components, including an optional refiner DiT."""
+    """Declare native T2V/TI2V components, including an optional refiner DiT."""
     model_index = {
         "_class_name": MOE_PIPELINE_CLASS if has_refiner else DENSE_PIPELINE_CLASS,
         "_diffusers_version": "0.39.0",
         "workload_type": "video-generation",
         "transformer": ["diffusers", "LingBotVideoTransformer3DModel"],
         "vae": ["diffusers", "AutoencoderKLWan"],
-        "text_encoder": ["transformers", "LingBotVideoQwen3VLTextModel"],
+        "text_encoder": ["transformers", "LingBotVideoQwen3VLModel"],
         "tokenizer": ["transformers", "Qwen3VLProcessor"],
         "scheduler": ["diffusers", "FlowUniPCMultistepScheduler"],
     }
@@ -138,7 +149,7 @@ def _write_model_index(destination: Path, *, has_refiner: bool) -> None:
 
 
 def convert(source: Path, destination: Path) -> None:
-    """Create a Dense or MoE/refiner T2V layout without altering source assets."""
+    """Create a Dense or MoE/refiner T2V/TI2V layout without altering source assets."""
     required = (*PASSTHROUGH_COMPONENTS, "text_encoder", "processor")
     missing = [name for name in required if not (source / name).is_dir()]
     if missing:

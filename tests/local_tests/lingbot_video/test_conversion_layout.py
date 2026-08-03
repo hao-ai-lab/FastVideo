@@ -6,8 +6,42 @@ import os
 from pathlib import Path
 
 import pytest
+import torch
 
 from scripts.checkpoint_conversion import lingbot_video_to_diffusers as converter
+
+
+def test_converter_keeps_visual_tensors_beside_fused_language_tensors() -> None:
+    """Preserve the compound Qwen3-VL tower while fusing native language projections."""
+    state = {
+        "model.visual.patch_embed.proj.weight": torch.ones(2, 1),
+        "model.language_model.layers.0.self_attn.q_proj.weight": torch.full((2, 2), 1.0),
+        "model.language_model.layers.0.self_attn.k_proj.weight": torch.full((1, 2), 2.0),
+        "model.language_model.layers.0.self_attn.v_proj.weight": torch.full((1, 2), 3.0),
+        "model.language_model.layers.0.mlp.gate_proj.weight": torch.full((2, 2), 4.0),
+        "model.language_model.layers.0.mlp.up_proj.weight": torch.full((2, 2), 5.0),
+    }
+    converted = converter._fuse_language_shard(state)
+    assert torch.equal(converted["visual.patch_embed.proj.weight"], state["model.visual.patch_embed.proj.weight"])
+    assert torch.equal(
+        converted["layers.0.self_attn.qkv_proj.weight"],
+        torch.cat(
+            [
+                state["model.language_model.layers.0.self_attn.q_proj.weight"],
+                state["model.language_model.layers.0.self_attn.k_proj.weight"],
+                state["model.language_model.layers.0.self_attn.v_proj.weight"],
+            ]
+        ),
+    )
+    assert torch.equal(
+        converted["layers.0.mlp.gate_up_proj.weight"],
+        torch.cat(
+            [
+                state["model.language_model.layers.0.mlp.gate_proj.weight"],
+                state["model.language_model.layers.0.mlp.up_proj.weight"],
+            ]
+        ),
+    )
 
 
 def _make_source(tmp_path: Path, has_refiner: bool) -> Path:
@@ -38,7 +72,7 @@ def _fake_convert_text_encoder(_source: Path, destination: Path) -> dict[str, st
 
 def _fake_write_text_encoder_config(_source: Path, _destination: Path) -> dict:
     """Return the metadata consumed by the converter's completion message."""
-    return {"architectures": ["LingBotVideoQwen3VLTextModel"]}
+    return {"architectures": ["LingBotVideoQwen3VLModel"]}
 
 
 @pytest.mark.parametrize("has_refiner", [False, True])

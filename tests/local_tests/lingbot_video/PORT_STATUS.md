@@ -3,7 +3,7 @@
 ## Summary
 
 - model_family: `lingbot_video`
-- workload_types: T2V first, then T2I and TI2V (`WorkloadType.I2V`)
+- workload_types: T2V and TI2V (`WorkloadType.I2V`); T2I remains deferred
 - official_ref: `https://github.com/robbyant/lingbot-video` at `a638721cf2271804d02738b69f2ad788c4a559fc`
 - official_weights: `robbyant/lingbot-video-dense-1.3b`; `robbyant/lingbot-video-moe-30b-a3b`
 - fastvideo_weights: `FastVideo/LingBot-Video-Dense-1.3B-Diffusers`; `FastVideo/LingBot-Video-MoE-30B-A3B-Diffusers`
@@ -13,7 +13,7 @@
 
 ## Current Phase
 
-- phase: `t2v_complete`
+- phase: `ti2v_complete`
 - status: `complete`
 - owner: `pipeline`
 - last_updated: `2026-07-13`
@@ -26,11 +26,14 @@
 | MoE DiT          | DiT       | port       | `fastvideo/models/dits/lingbot_video.py`              | pass      | pass        | full 48-block exact pass       | none                   |
 | MoE DiT refiner  | DiT       | port       | `fastvideo/models/dits/lingbot_video.py`              | pass      | pass        | full 48-block exact pass       | none                   |
 | Qwen3-VL text    | encoder   | reuse/port | `fastvideo/models/encoders/lingbot_video.py`          | pass      | pass        | production exact pass          | none                   |
-| Qwen3-VL vision  | encoder   | deferred   | `fastvideo/models/encoders/lingbot_video.py`          | deferred  | not_started | outside current T2V scope      | TI2V phase             |
+| Qwen3-VL vision  | encoder   | reuse/port | `fastvideo/models/encoders/lingbot_video.py`          | pass      | pass        | TI2V exact                     | none                   |
 | Wan VAE          | VAE       | reuse      | `fastvideo/models/vaes/wanvae.py`                     | pass      | passthrough | non-skip pass (`2/2`)          | none                   |
 | Flow-UniPC       | scheduler | reuse      | `fastvideo/models/schedulers/`                        | pass      | not_needed  | exact schedule/update pass     | none                   |
 | Base pipeline    | pipeline  | port       | `fastvideo/pipelines/basic/lingbot_video/`            | pass      | pass        | Dense exact; MoE smoke pass    | none                   |
 | Refiner pipeline | pipeline  | port       | `fastvideo/pipelines/basic/lingbot_video/`            | pass      | pass        | FSDP plus SP=8 smoke pass      | none                   |
+| TI2V VAE encode  | VAE       | reuse      | `fastvideo/models/vaes/wanvae.py`                     | pass      | passthrough | exact condition-latent pass    | none                   |
+| TI2V base        | pipeline  | port       | `fastvideo/pipelines/basic/lingbot_video/`            | pass      | pass        | Dense and MoE exact pass       | none                   |
+| TI2V refiner     | pipeline  | port       | `fastvideo/pipelines/basic/lingbot_video/`            | pass      | pass        | FSDP plus SP=8 smoke pass      | none                   |
 
 ## Checkpoint Conversion
 
@@ -51,10 +54,10 @@ What changes:
 
 - Text encoder conversion: `scripts/checkpoint_conversion/lingbot_video_to_diffusers.py`
   converts the official Qwen3-VL checkpoint into the format loaded by FastVideo's
-  `LingBotVideoQwen3VLTextModel`. The official checkpoint is multimodal: it
+  `LingBotVideoQwen3VLModel`. The official checkpoint is multimodal: it
   contains both a vision encoder and a language model. The current port supports
-  text-to-video generation, so the converter keeps the language-model weights and
-  omits the unused vision-encoder weights. Within each language-model layer,
+  T2V and TI2V, so the converter preserves the vision encoder and converts the
+  language-model weights. Within each language-model layer,
   "projection weights" are the learned matrices used by the attention and MLP
   computations. Qwen3-VL stores the attention matrices separately as `q_proj`,
   `k_proj`, and `v_proj`; FastVideo reads the same values stacked into one
@@ -111,6 +114,19 @@ LingBot-Video implementation.
 | One MoE transformer block     | Yes            | Yes                                                 | `scripts/slurm/lingbot_video_moe_block_parity.sbatch`, Slurm `1859113`                          |
 | Complete MoE base transformer | Yes            | Yes                                                 | `scripts/slurm/lingbot_video_moe_dit_parity.sbatch`, Slurm `1859114`                            |
 | Complete MoE refiner          | Yes            | Yes                                                 | `scripts/slurm/lingbot_video_moe_refiner_dit_parity.sbatch`, Slurm `1859145`                    |
+
+#### Exact TI2V base-pipeline parity
+
+Dense and MoE both match the official implementation exactly for processor
+inputs, Qwen3-VL embeddings, conditional and unconditional DiT outputs, the
+one-step result, all 40 denoising states, and decoded floating-point pixels.
+The test uses official TI2V example 4, sequential CFG, no refiner, and SDPA for
+Qwen3-VL on both sides. MP4 encoding is not part of this comparison.
+
+- Baseline: `tests/local_tests/lingbot_video/generate_ti2v_reference_baseline.py`
+- Test: `tests/local_tests/pipelines/test_lingbot_video_ti2v_pipeline_parity.py`
+- Dense result: `outputs/lingbot-video/validation/ti2v_exact_parity/fastvideo/dense/result.json`
+- MoE result: `outputs/lingbot-video/validation/ti2v_exact_parity/fastvideo/moe/result.json`
 
 ### Functional tests without an original-output comparison
 
@@ -249,7 +265,7 @@ NOTE: Component-level numerical parity was achieved. Full MoE/refiner end-to-end
 - Canonical Slurm `1859167` completed a 1920x1088, 121-frame, 24-FPS generation in 341.71 FastVideo seconds with a 63,450.65 MB rank-zero worker lifetime peak. Its bytes match superseded Slurm `1859144`.
 - The final targeted CPU/API regression passed 127 tests with 3 expected GPU-gated skips; targeted Ruff and tracked/untracked whitespace validation pass.
 
-## Remaining T2V Gates
+## Remaining Gates
 
 - Attach reviewer-visible official and FastVideo comparison videos.
-- T2I/TI2V and Qwen3-VL vision conditioning remain outside the completed T2V scope.
+- T2I remains outside the completed scope.

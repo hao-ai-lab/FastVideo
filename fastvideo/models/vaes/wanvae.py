@@ -232,8 +232,16 @@ class WanRMS_norm(nn.Module):
         self.bias = nn.Parameter(torch.zeros(shape)) if bias else 0.0
 
     def forward(self, x):
-        return F.normalize(x, dim=(1 if self.channel_first else
-                                   -1)) * self.scale * self.gamma + self.bias
+        # Match Diffusers v0.39.0 WanRMS_norm.forward for exact numerical alignment:
+        # https://github.com/huggingface/diffusers/blob/v0.39.0/src/diffusers/models/autoencoders/autoencoder_kl_wan.py#L199-L205
+        needs_fp32_normalize = x.dtype in (torch.float16, torch.bfloat16) or any(
+            value in str(x.dtype) for value in ("float4_", "float8_")
+        )
+        normalized = F.normalize(
+            x.float() if needs_fp32_normalize else x,
+            dim=(1 if self.channel_first else -1),
+        ).to(x.dtype)
+        return normalized * self.scale * self.gamma + self.bias
 
 
 class WanUpsample(nn.Upsample):

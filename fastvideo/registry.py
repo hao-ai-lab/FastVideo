@@ -29,7 +29,7 @@ from fastvideo.configs.pipelines.hunyuan15 import (Hunyuan15T2V480PConfig, Hunyu
                                                    Hunyuan15SR1080PConfig)
 from fastvideo.configs.pipelines.hyworld import HYWorldConfig
 from fastvideo.configs.pipelines.kandinsky5 import Kandinsky5I2VConfig, Kandinsky5T2VConfig
-from fastvideo.configs.pipelines.lingbot_video import LingBotVideoT2VConfig
+from fastvideo.configs.pipelines.lingbot_video import LingBotVideoT2VConfig, LingBotVideoTI2VConfig
 from fastvideo.configs.pipelines.lingbotworld import LingBotWorldI2V480PConfig
 from fastvideo.configs.pipelines.lingbotworld2 import LingBotWorld2CausalFastI2V480PConfig
 from fastvideo.configs.pipelines.longcat import LongCatT2V480PConfig
@@ -129,6 +129,9 @@ class ConfigInfo:
     # Lets a model family map to a specific pipeline class by path/detector
     # (e.g. a T2V and I2V checkpoint that share a `_class_name`).
     pipeline_cls_name: str | None = None
+    pipeline_config_cls_by_workload: dict[WorkloadType, type[PipelineConfig]] = dataclasses.field(default_factory=dict)
+    default_preset_by_workload: dict[WorkloadType, str] = dataclasses.field(default_factory=dict)
+    pipeline_cls_name_by_workload: dict[WorkloadType, str] = dataclasses.field(default_factory=dict)
 
 
 # The central registry mapping a model name to its configuration information
@@ -150,6 +153,9 @@ def register_configs(
     model_family: str | None = None,
     default_preset: str | None = None,
     pipeline_cls_name: str | None = None,
+    pipeline_config_cls_by_workload: dict[WorkloadType, type[PipelineConfig]] | None = None,
+    default_preset_by_workload: dict[WorkloadType, str] | None = None,
+    pipeline_cls_name_by_workload: dict[WorkloadType, str] | None = None,
 ) -> None:
     """Register config classes for a model family.
 
@@ -165,6 +171,9 @@ def register_configs(
         model_family=model_family,
         default_preset=default_preset,
         pipeline_cls_name=pipeline_cls_name,
+        pipeline_config_cls_by_workload=pipeline_config_cls_by_workload or {},
+        default_preset_by_workload=default_preset_by_workload or {},
+        pipeline_cls_name_by_workload=pipeline_cls_name_by_workload or {},
     )
 
     if hf_model_paths:
@@ -522,27 +531,33 @@ def _register_configs() -> None:
         model_family="lingbotworld",
         default_preset="lingbotworld_i2v",
     )
-    # LingBot-Video MoE T2V with the released second-stage refiner.
+    # LingBot-Video MoE T2V/TI2V with the released second-stage refiner.
     register_configs(
         sampling_param_cls=None,
         pipeline_config_cls=LingBotVideoT2VConfig,
-        workload_types=(WorkloadType.T2V, ),
+        workload_types=(WorkloadType.T2V, WorkloadType.I2V),
         hf_model_paths=["FastVideo/LingBot-Video-MoE-30B-A3B-Diffusers"],
         model_detectors=[lambda path: "lingbotvideomoepipeline" in path.lower()],
         model_family="lingbot_video",
         default_preset="lingbot_video_moe_refiner_t2v",
         pipeline_cls_name="LingBotVideoPipeline",
+        pipeline_config_cls_by_workload={WorkloadType.I2V: LingBotVideoTI2VConfig},
+        default_preset_by_workload={WorkloadType.I2V: "lingbot_video_moe_refiner_ti2v"},
+        pipeline_cls_name_by_workload={WorkloadType.I2V: "LingBotVideoImageToVideoPipeline"},
     )
-    # LingBot-Video Dense T2V
+    # LingBot-Video Dense T2V/TI2V
     register_configs(
         sampling_param_cls=None,
         pipeline_config_cls=LingBotVideoT2VConfig,
-        workload_types=(WorkloadType.T2V, ),
+        workload_types=(WorkloadType.T2V, WorkloadType.I2V),
         hf_model_paths=["FastVideo/LingBot-Video-Dense-1.3B-Diffusers"],
         model_detectors=[lambda path: "lingbotvideodensepipeline" in path.lower()],
         model_family="lingbot_video",
         default_preset="lingbot_video_dense_t2v",
         pipeline_cls_name="LingBotVideoPipeline",
+        pipeline_config_cls_by_workload={WorkloadType.I2V: LingBotVideoTI2VConfig},
+        default_preset_by_workload={WorkloadType.I2V: "lingbot_video_dense_ti2v"},
+        pipeline_cls_name_by_workload={WorkloadType.I2V: "LingBotVideoImageToVideoPipeline"},
     )
 
     def _kandinsky5_detector(require: tuple[str, ...] = (), exclude: tuple[str, ...] = ()) -> Callable[[str], bool]:
@@ -1205,12 +1220,14 @@ def get_model_info(
             config = maybe_download_model_index(model_path)
 
         pipeline_name = config.get("_class_name")
-        if config_info.pipeline_cls_name is not None:
+        workload_pipeline_name = config_info.pipeline_cls_name_by_workload.get(workload_type)
+        pinned_pipeline_name = workload_pipeline_name or config_info.pipeline_cls_name
+        if pinned_pipeline_name is not None:
             # The resolved (path/detector-based) config pins the pipeline class,
             # e.g. an I2V checkpoint whose `_class_name` would otherwise resolve
             # to the T2V pipeline.
-            logger.info("Pinning pipeline class name from %s to %s", pipeline_name, config_info.pipeline_cls_name)
-            pipeline_name = config_info.pipeline_cls_name
+            logger.info("Pinning pipeline class name from %s to %s", pipeline_name, pinned_pipeline_name)
+            pipeline_name = pinned_pipeline_name
 
     if pipeline_name is None:
         raise ValueError("Model config does not contain a _class_name attribute. "
@@ -1224,16 +1241,27 @@ def get_model_info(
     return ModelInfo(
         pipeline_cls=pipeline_cls,
         sampling_param_cls=sampling_param_cls,
-        pipeline_config_cls=config_info.pipeline_config_cls,
+        pipeline_config_cls=config_info.pipeline_config_cls_by_workload.get(
+            workload_type,
+            config_info.pipeline_config_cls,
+        ),
     )
 
 
-def get_pipeline_config_cls_from_name(pipeline_name_or_path: str) -> type[PipelineConfig]:
+def get_pipeline_config_cls_from_name(
+    pipeline_name_or_path: str,
+    workload_type: WorkloadType | str | None = None,
+) -> type[PipelineConfig]:
+    """Resolve a model's pipeline config, including workload-specific variants."""
     config_info = _get_config_info(pipeline_name_or_path, raise_on_missing=False)
     if config_info is None:
         raise ValueError(
             f"No match found for pipeline {pipeline_name_or_path}, please check the pipeline name or path.")
-    return config_info.pipeline_config_cls
+    if isinstance(workload_type, str):
+        workload_type = WorkloadType.from_string(workload_type)
+    if workload_type is None:
+        return config_info.pipeline_config_cls
+    return config_info.pipeline_config_cls_by_workload.get(workload_type, config_info.pipeline_config_cls)
 
 
 def get_sampling_param_cls_for_name(pipeline_name_or_path: str) -> Any | None:
@@ -1331,15 +1359,22 @@ def get_model_family(model_path: str) -> str | None:
     return config_info.model_family
 
 
-def get_default_preset(model_path: str) -> str | None:
+def get_default_preset(model_path: str, workload_type: WorkloadType | str | None = None) -> str | None:
     """Return the ``default_preset`` name for a model path."""
     config_info = _get_config_info(model_path, raise_on_missing=False)
     if config_info is None:
         return None
+    if isinstance(workload_type, str):
+        workload_type = WorkloadType.from_string(workload_type)
+    if workload_type is not None:
+        return config_info.default_preset_by_workload.get(workload_type, config_info.default_preset)
     return config_info.default_preset
 
 
-def get_preset_selection(model_path: str) -> tuple[str | None, str | None]:
+def get_preset_selection(
+    model_path: str,
+    workload_type: WorkloadType | str | None = None,
+) -> tuple[str | None, str | None]:
     """Return ``(default_preset, model_family)`` for a model path.
 
     Single-lookup variant of :func:`get_default_preset` +
@@ -1349,7 +1384,12 @@ def get_preset_selection(model_path: str) -> tuple[str | None, str | None]:
     config_info = _get_config_info(model_path, raise_on_missing=False)
     if config_info is None:
         return None, None
-    return config_info.default_preset, config_info.model_family
+    if isinstance(workload_type, str):
+        workload_type = WorkloadType.from_string(workload_type)
+    preset = config_info.default_preset
+    if workload_type is not None:
+        preset = config_info.default_preset_by_workload.get(workload_type, preset)
+    return preset, config_info.model_family
 
 
 def get_registered_model_paths() -> list[str]:
