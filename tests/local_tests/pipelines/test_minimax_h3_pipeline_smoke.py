@@ -20,8 +20,8 @@ def _write_modular_checkpoint(model_dir: Path) -> None:
         "audio_scheduler": ("diffusers", "MiniMaxH3Scheduler"),
     }
     components = {
-        name: [None, None, {"type_hint": list(type_hint), "subfolder": name}]
-        for name, type_hint in component_types.items()
+        name: [*component_type, {"type_hint": list(component_type), "subfolder": name}]
+        for name, component_type in component_types.items()
     }
     model_dir.mkdir()
     for component in components:

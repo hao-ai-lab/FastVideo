@@ -86,6 +86,7 @@ class ComponentLoader(ABC):
             "scheduler": (SchedulerLoader, "diffusers"),
             "audio_scheduler": (SchedulerLoader, "diffusers"),
             "transformer": (TransformerLoader, "diffusers"),
+            "transformer_ref": (TransformerLoader, "diffusers"),
             "sr_transformer": (TransformerLoader, "diffusers"),
             "transformer_2": (TransformerLoader, "diffusers"),
             "transformer_3": (TransformerLoader, "diffusers"),
@@ -912,7 +913,7 @@ class VAELoader(ComponentLoader):
 
         # Diffusers-format AutoencoderKL checkpoints should match exactly; load
         # strictly so missing/unexpected keys are surfaced early.
-        strict_load = class_name == "AutoencoderKL"
+        strict_load = class_name in {"AutoencoderKL", "AutoencoderKLMiniMaxH3"}
         vae.load_state_dict(loaded, strict=strict_load)
         if (class_name == "AutoencoderKLWan"
                 and getattr(vae.config, "use_light_vae", False)
@@ -932,10 +933,10 @@ class AudioDecoderLoader(ComponentLoader):
         model_cls, _ = ModelRegistry.resolve_model_cls(class_name)
         target_device = get_local_torch_device()
 
-        configured_audio_vae = getattr(fastvideo_args.pipeline_config, "audio_vae_config", None)
         if class_name == "AutoencoderKLMiniMaxH3Audio":
             from fastvideo.platforms import current_platform
 
+            configured_audio_vae = getattr(fastvideo_args.pipeline_config, "audio_vae_config", None)
             if configured_audio_vae is None:
                 raise ValueError("MiniMax H3 requires audio_vae_config.")
             config.pop("_name_or_path", None)
@@ -943,10 +944,8 @@ class AudioDecoderLoader(ComponentLoader):
             audio_vae_config.update_model_arch(config)
             if getattr(fastvideo_args, "vae_cpu_offload", False):
                 target_device = torch.device("mps") if current_platform.is_mps() else torch.device("cpu")
-            precision = fastvideo_args.pipeline_config.vae_precision or "fp32"
-            dtype = PRECISION_TO_TYPE[precision]
-            with set_default_torch_dtype(dtype):
-                audio_vae = model_cls(audio_vae_config).to(device=target_device, dtype=dtype)
+            with set_default_torch_dtype(torch.float32):
+                audio_vae = model_cls(audio_vae_config).to(device=target_device, dtype=torch.float32)
             safetensors_list = glob.glob(os.path.join(str(model_path), "*.safetensors"))
             if not safetensors_list:
                 raise ValueError(f"No safetensors files found in {model_path}")

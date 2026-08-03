@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-from contextlib import nullcontext
 from typing import Any
 
 import torch
@@ -22,7 +21,6 @@ from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
-from fastvideo.utils import PRECISION_TO_TYPE
 
 
 class MiniMaxH3DenoisingStage(PipelineStage):
@@ -100,21 +98,15 @@ class MiniMaxH3DenoisingStage(PipelineStage):
         text_indices = layout.text_indices.to(device)
         prompt_embeds = batch.prompt_embeds[0].to(device)
 
-        precision = getattr(fastvideo_args.pipeline_config, "dit_precision", "bf16")
-        target_dtype = PRECISION_TO_TYPE.get(precision, torch.bfloat16)
-        autocast_enabled = device.type == "cuda" and target_dtype != torch.float32 and not fastvideo_args.disable_autocast
-
         try:
             for index, (video_timestep, audio_timestep) in enumerate(zip(video_timesteps, audio_timesteps,
                                                                          strict=True)):
                 unique_timesteps, timestep_indices = row_timestep_plan[index]
-                autocast = (torch.autocast(device_type="cuda", dtype=target_dtype, enabled=True)
-                            if autocast_enabled else nullcontext())
                 with trace_step(index), set_forward_context(
                         current_timestep=index,
                         attn_metadata=None,
                         forward_batch=batch,
-                ), autocast:
+                ):
                     video_velocity, audio_velocity = self.transformer(
                         hidden_states=batch.latents[None],
                         audio_hidden_states=batch.audio_latents[None],

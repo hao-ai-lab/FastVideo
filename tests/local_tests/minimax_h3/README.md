@@ -1,8 +1,7 @@
-# MiniMax H3 local tests
+# MiniMax H3 validation
 
-This suite follows the same boundary as LingBot Video: keep official component parity and one small public
-pipeline smoke test. Development-only runners, synthetic component duplicates, and fake end-to-end pipelines are not
-retained.
+Local tests keep checks that need the pinned Diffusers source, published weights, or the public registry surface.
+FastVideo-owned unit contracts belong under `fastvideo/tests/`.
 
 ## Reference
 
@@ -13,13 +12,10 @@ retained.
 The reference helper verifies the pinned source and import origin. A missing checkout may skip a source-parity module;
 that skip is not parity evidence.
 
-## CPU and public smoke
+## Registry smoke
 
 ```bash
-pytest \
-  fastvideo/tests/inference/test_model_manifest_resolution.py \
-  fastvideo/tests/stages/test_utils.py \
-  tests/local_tests/pipelines/test_minimax_h3_pipeline_smoke.py -q
+pytest tests/local_tests/pipelines/test_minimax_h3_pipeline_smoke.py -q
 ```
 
 ## Pinned implementation parity
@@ -32,7 +28,7 @@ PYTHONPATH="${MINIMAX_H3_OFFICIAL_REF_DIR:-$PWD/DiffusersMiniMaxH3}/src:$PWD" py
   tests/local_tests/minimax_h3/test_minimax_h3_ref2va_media.py -v -s
 ```
 
-## Component parity
+## Checkpoint component parity
 
 ```bash
 export MINIMAX_H3_MODEL_ROOT=/path/to/MiniMax-H3
@@ -55,5 +51,6 @@ pytest \
 With a gate enabled, missing CUDA, source, or weights is a failure. Recorded component evidence is exact for both DiT
 partitions, the video VAE, and all Qwen3-VL hidden states; audio decode has maximum absolute drift `2.4e-7`.
 
-Official-vs-FastVideo FL2VA/Ref2VA pipeline latent parity remains pending. FastVideo-only output generation and SP
-consistency do not establish that comparison.
+FastVideo joint audio/video generation and SP=1/SP=4 latent consistency have been validated. The gated
+Diffusers-vs-FastVideo FL2VA/Ref2VA pipeline comparison is being revalidated in this round; no new result is recorded
+until that run completes without skip.

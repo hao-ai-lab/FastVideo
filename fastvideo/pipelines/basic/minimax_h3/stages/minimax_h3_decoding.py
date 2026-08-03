@@ -74,7 +74,9 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
                 batch.output = latents.detach().float().cpu()
                 return batch
 
-            video = self.vae.decode(latents).sample
+            # The published decode recipe uses FP16 autocast over FP32 weights.
+            with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=device.type == "cuda"):
+                video = self.vae.decode(latents).sample
             batch.output = self.vae.denormalize_pixels(video.float()).clamp_(0, 1).cpu()
             return batch
         finally:

@@ -23,7 +23,7 @@ from fastvideo.models.loader.component_loader import PipelineComponentLoader
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages import PipelineStage
 import fastvideo.envs as envs
-from fastvideo.utils import (maybe_download_model, resolve_diffusers_component_spec, verify_model_config_and_directory)
+from fastvideo.utils import (maybe_download_model, verify_model_config_and_directory)
 
 logger = init_logger(__name__)
 
@@ -39,7 +39,6 @@ class ComposedPipelineBase(ABC):
 
     is_video_pipeline: bool = False  # To be overridden by video pipelines
     _required_config_modules: list[str] = []
-    # Logical component name -> alternate manifest key and weight subfolder.
     _extra_config_module_map: dict[str, str] = {}
     training_args: TrainingArgs | None = None
     fastvideo_args: FastVideoArgs | TrainingArgs | None = None
@@ -388,15 +387,20 @@ class ComposedPipelineBase(ABC):
         # some sanity checks
         assert len(model_index) > 1, "model_index.json must contain at least one pipeline module"
 
-        for logical_module_name in self.required_config_modules:
-            if logical_module_name not in self._extra_config_module_map:
-                continue
-            source_module_name = self._extra_config_module_map[logical_module_name]
-            if source_module_name not in model_index:
-                raise ValueError(f"Required source module {source_module_name!r} for logical module "
-                                 f"{logical_module_name!r} was not found in model_index.json.")
-            logger.info("Using source module %s for logical module %s", source_module_name, logical_module_name)
-            model_index[logical_module_name] = model_index[source_module_name]
+        for module_name in self.required_config_modules:
+            if module_name not in model_index and module_name in self._extra_config_module_map:
+                extra_module_value = self._extra_config_module_map[module_name]
+                logger.warning(
+                    "model_index.json does not contain a %s module, but found {%s: %s} in _extra_config_module_map, adding to model_index.",
+                    module_name, module_name, extra_module_value)
+                if extra_module_value in model_index:
+                    logger.info("Using module %s for %s", extra_module_value, module_name)
+                    model_index[module_name] = model_index[extra_module_value]
+                    continue
+                else:
+                    raise ValueError(
+                        f"Required module key: {module_name} value: {model_index.get(module_name)} was not found in loaded modules {model_index.keys()}"
+                    )
 
         # all the component models used by the pipeline
         required_modules = self.required_config_modules
@@ -411,15 +415,21 @@ class ComposedPipelineBase(ABC):
                     module_spec,
                 )
                 continue
-            if module_name not in required_modules:
-                logger.info("Skipping module %s", module_name)
+            if len(module_spec) < 1:
+                logger.warning(
+                    "Skipping module %s due to invalid empty spec in model_index.json",
+                    module_name,
+                )
                 continue
-            transformers_or_diffusers, _, _ = resolve_diffusers_component_spec(module_name, module_spec)
+            transformers_or_diffusers = module_spec[0]
             if transformers_or_diffusers is None:
                 logger.warning("Module %s in model_index.json has null value, removing from required_config_modules",
                                module_name)
                 if module_name in self.required_config_modules:
                     self.required_config_modules.remove(module_name)
+                continue
+            if module_name not in required_modules:
+                logger.info("Skipping module %s", module_name)
                 continue
             if loaded_modules is not None and module_name in loaded_modules:
                 logger.info("Using module %s already provided", module_name)
@@ -434,7 +444,7 @@ class ComposedPipelineBase(ABC):
 
             component_model_path = os.path.join(self.model_path, load_module_name)
             module = PipelineComponentLoader.load_module(
-                module_name=module_name,
+                module_name=load_module_name,
                 component_model_path=component_model_path,
                 transformers_or_diffusers=transformers_or_diffusers,
                 fastvideo_args=fastvideo_args,

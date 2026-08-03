@@ -610,56 +610,9 @@ def maybe_download_lora(model_name_or_path: str, local_dir: str | None = None, d
     return os.path.join(local_path, weight_name)
 
 
-def resolve_diffusers_component_spec(
-    component_name: str,
-    component_spec: list[Any] | tuple[Any, ...],
-) -> tuple[str | None, str | None, dict[str, Any]]:
-    """Resolve legacy pairs and modular Diffusers component triples."""
-    if len(component_spec) not in (2, 3):
-        raise ValueError(f"Invalid Diffusers component specification for {component_name!r}: {component_spec!r}")
-
-    library, class_name = component_spec[:2]
-    loading_method: dict[str, Any] = {}
-    if len(component_spec) == 3:
-        candidate = component_spec[2]
-        if not isinstance(candidate, dict):
-            raise ValueError(f"Invalid Diffusers loading method for {component_name!r}: {candidate!r}")
-        loading_method = candidate
-        type_hint = loading_method.get("type_hint")
-        if type_hint is not None:
-            if not isinstance(type_hint, list | tuple) or len(type_hint) != 2:
-                raise ValueError(f"Invalid Diffusers type_hint for {component_name!r}: {type_hint!r}")
-            library, class_name = type_hint
-
-    return library, class_name, loading_method
-
-
-def _looks_like_diffusers_component_spec(value: Any) -> bool:
-    """Distinguish component entries from list-valued modular config."""
-    if not isinstance(value, list | tuple) or len(value) not in (2, 3):
-        return False
-    if len(value) == 3 and not isinstance(value[2], dict):
-        return False
-    library = value[0]
-    if len(value) == 3 and "type_hint" in value[2]:
-        type_hint = value[2]["type_hint"]
-        if not isinstance(type_hint, list | tuple) or len(type_hint) != 2:
-            return False
-        library = type_hint[0]
-
-    def supported_library(candidate: Any) -> bool:
-        return isinstance(candidate, str) and (
-            candidate in {"diffusers", "fastvideo", "transformers"} or candidate.startswith("fastvideo.")
-        )
-
-    return supported_library(library) or library is None
-
-
 def verify_model_config_and_directory(model_path: str) -> dict[str, Any]:
     """
-    Verify a materialized local Diffusers checkpoint.
-
-    FastVideo accepts legacy component pairs and modular component triples.
+    Verify that the model directory contains a valid Diffusers configuration.
     
     Args:
         model_path: Path to the model directory
@@ -668,10 +621,9 @@ def verify_model_config_and_directory(model_path: str) -> dict[str, Any]:
         The loaded model configuration as a dictionary
     """
 
-    # Match Diffusers ModularPipeline: prefer the modular manifest and fall back
-    # to the legacy file only when modular_model_index.json is absent.
+    # Some Diffusers checkpoints publish a modular manifest instead of model_index.json.
     config_filename = next(
-        (name for name in ("modular_model_index.json", "model_index.json")
+        (name for name in ("model_index.json", "modular_model_index.json")
          if os.path.isfile(os.path.join(model_path, name))),
         None,
     )
@@ -680,19 +632,20 @@ def verify_model_config_and_directory(model_path: str) -> dict[str, Any]:
                          "modular_model_index.json. Only Hugging Face Diffusers format is supported.")
     config_path = os.path.join(model_path, config_filename)
 
-    # Load the config first so directory checks can follow what the manifest
-    # actually declares.
+    # Load the config first so directory checks below can be conditional on
+    # what the manifest actually declares.
     with open(config_path) as f:
         config = json.load(f)
 
     # transformer/ is mandatory for every supported pipeline; the variant-
     # specific DiT weights live there.
     transformer_dir = os.path.join(model_path, "transformer")
-    if not os.path.isdir(transformer_dir):
+    if not os.path.exists(transformer_dir):
         raise ValueError(f"Model directory {model_path} does not contain a transformer/ directory.")
 
-    # Diffusers convention: manifest entries are [library, class] pairs or
-    # modular [library, class, loading_kwargs] triples for on-disk components.
+    # Diffusers convention: component entries start with [library, class].
+    # Modular manifests may append loading metadata, which FastVideo does not
+    # need because published component subfolders match their manifest keys.
     # Non-list entries are scalar metadata
     # (e.g. boundary_ratio); a None first element marks a disabled
     # component (matches composed_pipeline_base.py). Pipelines that
@@ -703,18 +656,14 @@ def verify_model_config_and_directory(model_path: str) -> dict[str, Any]:
     # text_encoder/gemma/); the pipeline subclass resolves that fallback
     # at load time.
     for key, value in config.items():
-        if key.startswith("_") or key.startswith("tokenizer"):
+        if key.startswith("_") or key == "transformer" or key.startswith("tokenizer"):
             continue
-        if not _looks_like_diffusers_component_spec(value):
+        if not isinstance(value, list) or len(value) < 1 or value[0] is None:
             continue
-        library, _, loading_method = resolve_diffusers_component_spec(key, value)
-        if library is None:
-            continue
-        subfolder = loading_method.get("subfolder", key)
-        subdir = os.path.join(model_path, subfolder)
-        if not os.path.isdir(subdir):
+        subdir = os.path.join(model_path, key)
+        if not os.path.exists(subdir):
             raise ValueError(f"Model directory {model_path} declares `{key}` in "
-                             f"{config_filename} but is missing the {subfolder}/ subfolder.")
+                             f"{config_filename} but is missing the {key}/ subfolder.")
 
     # Verify diffusers version exists
     if "_diffusers_version" not in config:
@@ -742,35 +691,28 @@ def maybe_download_model_index(model_name_or_path: str) -> dict[str, Any]:
     if os.path.exists(model_name_or_path):
         return verify_model_config_and_directory(model_name_or_path)
 
-    # For remote models, download only the small manifest using the same
-    # modular-first order as Diffusers.
+    # For remote models, download only the small manifest.
     try:
         with tempfile.TemporaryDirectory() as tmp_dir:
             from huggingface_hub.utils import EntryNotFoundError
 
-            model_index_path: str | None = None
-            config_filename: str | None = None
-            last_download_error: Exception | None = None
-            for candidate in ("modular_model_index.json", "model_index.json"):
-                try:
-                    model_index_path = hf_hub_download(repo_id=model_name_or_path,
-                                                       filename=candidate,
-                                                       local_dir=tmp_dir)
-                    config_filename = candidate
-                    break
-                except EntryNotFoundError as error:
-                    last_download_error = error
-            if model_index_path is None or config_filename is None:
-                raise ValueError("repository has neither model_index.json nor modular_model_index.json") from \
-                    last_download_error
+            config_filename = "model_index.json"
+            try:
+                model_index_path = hf_hub_download(repo_id=model_name_or_path,
+                                                   filename=config_filename,
+                                                   local_dir=tmp_dir)
+            except EntryNotFoundError:
+                config_filename = "modular_model_index.json"
+                model_index_path = hf_hub_download(repo_id=model_name_or_path,
+                                                   filename=config_filename,
+                                                   local_dir=tmp_dir)
 
             # Load the selected manifest.
             with open(model_index_path) as f:
                 config: dict[str, Any] = json.load(f)
 
             # Verify it has the required fields
-            class_name = config.get("_class_name")
-            if not isinstance(class_name, str) or not class_name:
+            if "_class_name" not in config:
                 raise ValueError(f"{config_filename} for {model_name_or_path} does not contain _class_name field")
 
             if "_diffusers_version" not in config:
