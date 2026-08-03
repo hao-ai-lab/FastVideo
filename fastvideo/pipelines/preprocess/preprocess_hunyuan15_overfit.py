@@ -34,8 +34,11 @@ MAX_HEIGHT = 480
 MAX_WIDTH = 832
 TRAIN_FPS = 16.0
 
-DATA_DIR = "data/hunyuan15_overfit"
-OUTPUT_DIR = "data/hunyuan15_overfit_preprocessed"
+# Overridable so a test can point at its own directories. Without this the
+# only usable paths are the documented recipe's, and anything automated ends up
+# writing over whatever clips and captions a user has prepared there.
+DATA_DIR = os.environ.get("HY15_OVERFIT_DATA_DIR", "data/hunyuan15_overfit")
+OUTPUT_DIR = os.environ.get("HY15_OVERFIT_OUTPUT_DIR", "data/hunyuan15_overfit_preprocessed")
 MODEL_REPO = "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v"
 
 MAX_SAMPLES: int | None = 1
