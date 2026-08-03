@@ -15,6 +15,7 @@ import numpy as np
 from tqdm.auto import tqdm
 
 from fastvideo.attention import get_attn_backend
+from fastvideo.attention.selector import component_attention_backend
 from fastvideo.distributed import (get_local_torch_device, get_world_group)
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
@@ -63,7 +64,10 @@ class SRDenoisingStage(PipelineStage):
             dtype=torch.float16,  # TODO(will): hack
             supported_attention_backends=(AttentionBackendEnum.VIDEO_SPARSE_ATTN, AttentionBackendEnum.VMOBA_ATTN,
                                           AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA,
-                                          AttentionBackendEnum.SAGE_ATTN_THREE)  # hack
+                                          AttentionBackendEnum.SAGE_ATTN_THREE),  # hack
+            # See DenoisingStage: use this transformer's recorded decision
+            # rather than the environment.
+            requested=component_attention_backend(self.transformer),
         )
 
     def add_noise_to_lq(self, lq_latents: torch.Tensor, strength: float = 0.7) -> torch.Tensor:
