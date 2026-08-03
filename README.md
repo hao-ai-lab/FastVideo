@@ -33,7 +33,7 @@ FastVideo has the following features:
   - [Sparse distillation](https://hao-ai-lab.github.io/blogs/fastvideo_post_training/) to achieve >50x denoising speedup
   - Scalable training with FSDP2, sequence parallelism, and selective activation checkpointing.
   - Causal distillation through Self-Forcing
-  - See this [page](https://hao-ai-lab.github.io/FastVideo/training/overview/) for full list of supported models and recipes.
+  - See this [page](https://hao-ai-lab.github.io/FastVideo/training/overview/) for the supported training workflows, and the [support matrix](https://hao-ai-lab.github.io/FastVideo/inference/support_matrix/) for supported models.
 - State-of-the-art performance optimizations for inference
   - Sequence Parallelism for distributed inference
   - Multiple state-of-the-art attention backends

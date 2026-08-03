@@ -163,8 +163,11 @@ nav:
     - CLI: inference/cli.md
     - Add Pipeline: inference/add_pipeline.md
     - Examples:
+      - Examples Index: inference/examples/examples_inference_index.md
       - Basic: inference/examples/basic.md
       - Optimizations: inference/examples/optimizations.md
+      - LTX-2.3: inference/examples/ltx2_3.md
+      - LTX-2.3 Gradio Demo: inference/examples/gradio_local_demo_ltx2_3.md
       - STA Mask Search (Archived): inference/examples/sta_mask_search.md
   - Training:
     - Overview: training/overview.md
