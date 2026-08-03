@@ -137,25 +137,6 @@ class ComponentLoader(ABC):
         return GenericComponentLoader(transformers_or_diffusers)
 
 
-def _resolve_component_dtype(precision: str, model_config: object, component_name: str) -> torch.dtype:
-    aliases = {
-        "float32": "fp32",
-        "float16": "fp16",
-        "bfloat16": "bf16",
-    }
-    precision_name = str(precision).removeprefix("torch.")
-    normalized = aliases.get(precision_name, precision_name)
-    supported = getattr(model_config, "supported_pretrained_dtypes", None)
-    if supported is not None and normalized not in supported:
-        supported_names = ", ".join(sorted(supported))
-        raise ValueError(f"{type(model_config).__name__} only supports {component_name} dtype(s) "
-                         f"{supported_names}, got {precision!r}.")
-    try:
-        return PRECISION_TO_TYPE[normalized]
-    except KeyError as error:
-        raise ValueError(f"Unsupported {component_name} precision: {precision!r}.") from error
-
-
 class TextEncoderLoader(ComponentLoader):
     """Loader for text encoders."""
 
@@ -771,10 +752,11 @@ class VAELoader(ComponentLoader):
         else:
             target_device = get_local_torch_device()
 
-        configured_vae = fastvideo_args.pipeline_config.vae_config
-        vae_precision = fastvideo_args.pipeline_config.vae_precision or "bf16"
-        vae_dtype = _resolve_component_dtype(vae_precision, configured_vae, "VAE")
-        with set_default_torch_dtype(vae_dtype):
+        with set_default_torch_dtype(
+            PRECISION_TO_TYPE[fastvideo_args.pipeline_config.vae_precision]
+            if fastvideo_args.pipeline_config.vae_precision
+            else torch.bfloat16
+        ):
             pipeline_name = fastvideo_args.pipeline_config.__class__.__name__
             is_gen3c = pipeline_name.startswith("Gen3C")
             is_cosmos25 = pipeline_name == "Cosmos25Config"
@@ -930,8 +912,7 @@ class VAELoader(ComponentLoader):
 
         # Diffusers-format AutoencoderKL checkpoints should match exactly; load
         # strictly so missing/unexpected keys are surfaced early.
-        model_config = getattr(vae, "model_config", getattr(vae, "config", None))
-        strict_load = class_name == "AutoencoderKL" or bool(getattr(model_config, "load_weights_strict", False))
+        strict_load = class_name == "AutoencoderKL"
         vae.load_state_dict(loaded, strict=strict_load)
         if (class_name == "AutoencoderKLWan"
                 and getattr(vae.config, "use_light_vae", False)
@@ -948,21 +929,22 @@ class AudioDecoderLoader(ComponentLoader):
     def load(self, model_path: str, fastvideo_args: FastVideoArgs):
         config = get_diffusers_config(model=model_path)
         class_name = config.pop("_class_name", None) or "LTX2AudioDecoder"
-        config.pop("_name_or_path", None)
-
         model_cls, _ = ModelRegistry.resolve_model_cls(class_name)
         target_device = get_local_torch_device()
 
         configured_audio_vae = getattr(fastvideo_args.pipeline_config, "audio_vae_config", None)
-        if configured_audio_vae is not None and getattr(configured_audio_vae, "load_full_checkpoint", False):
+        if class_name == "AutoencoderKLMiniMaxH3Audio":
             from fastvideo.platforms import current_platform
 
+            if configured_audio_vae is None:
+                raise ValueError("MiniMax H3 requires audio_vae_config.")
+            config.pop("_name_or_path", None)
             audio_vae_config = deepcopy(configured_audio_vae)
             audio_vae_config.update_model_arch(config)
             if getattr(fastvideo_args, "vae_cpu_offload", False):
                 target_device = torch.device("mps") if current_platform.is_mps() else torch.device("cpu")
-            precision = getattr(audio_vae_config, "pretrained_dtype", "fp32")
-            dtype = _resolve_component_dtype(precision, audio_vae_config, "audio VAE")
+            precision = fastvideo_args.pipeline_config.vae_precision or "fp32"
+            dtype = PRECISION_TO_TYPE[precision]
             with set_default_torch_dtype(dtype):
                 audio_vae = model_cls(audio_vae_config).to(device=target_device, dtype=dtype)
             safetensors_list = glob.glob(os.path.join(str(model_path), "*.safetensors"))
@@ -971,8 +953,7 @@ class AudioDecoderLoader(ComponentLoader):
             loaded: dict[str, torch.Tensor] = {}
             for sf_file in safetensors_list:
                 loaded.update(safetensors_load_file(sf_file))
-            strict_load = bool(getattr(audio_vae_config, "load_weights_strict", False))
-            audio_vae.load_state_dict(loaded, strict=strict_load)
+            audio_vae.load_state_dict(loaded, strict=True)
             return audio_vae.eval()
 
         precision = getattr(
@@ -1038,30 +1019,6 @@ def _collect_safetensors_keys(safetensors_list: list) -> set:
         except Exception as e:
             logger.warning("Could not read keys from %s: %s", path, e)
     return all_keys
-
-
-def _validate_transformer_parameter_dtypes(
-    model: nn.Module,
-    default_dtype: torch.dtype,
-) -> None:
-    """Validate loader output without assuming the first parameter is representative."""
-    dtype_selector = getattr(model, "_get_parameter_dtype", None)
-    if not callable(dtype_selector):
-        first_parameter = next(model.parameters(), None)
-        if first_parameter is not None and first_parameter.dtype != default_dtype:
-            raise AssertionError(
-                f"Model dtype {first_parameter.dtype} does not match default dtype {default_dtype}"
-            )
-        return
-
-    mismatches = [
-        (name, parameter.dtype, dtype_selector(name, default_dtype))
-        for name, parameter in model.named_parameters()
-        if parameter.dtype != dtype_selector(name, default_dtype)
-    ]
-    if mismatches:
-        details = ", ".join(f"{name}: got {actual}, expected {expected}" for name, actual, expected in mismatches[:8])
-        raise AssertionError(f"Model-selected parameter dtype mismatch: {details}")
 
 
 class TransformerLoader(ComponentLoader):
@@ -1169,7 +1126,6 @@ class TransformerLoader(ComponentLoader):
         )
         attention_context = (_component_attention_backend_scope(None, component="transformer")
                              if _qat_generator_only else nullcontext())
-        parameter_dtype = torch.bfloat16
         with attention_context:
             # dit_config is what the model is handed and keeps as `self.config`,
             # so recording here makes the decision readable from the loaded
@@ -1189,7 +1145,7 @@ class TransformerLoader(ComponentLoader):
                 fsdp_inference=fastvideo_args.use_fsdp_inference,
                 # TODO(will): make these configurable
                 default_dtype=default_dtype,
-                param_dtype=parameter_dtype,
+                param_dtype=torch.bfloat16,
                 reduce_dtype=torch.float32,
                 output_dtype=None,
                 training_mode=fastvideo_args.training_mode,
@@ -1200,7 +1156,10 @@ class TransformerLoader(ComponentLoader):
         total_params = sum(p.numel() for p in model.parameters())
         logger.info("Loaded model with %.2fB parameters", total_params / 1e9)
 
-        _validate_transformer_parameter_dtypes(model, default_dtype)
+        if not callable(getattr(model, "_get_parameter_dtype", None)):
+            assert next(model.parameters()).dtype == default_dtype, (
+                "Model dtype does not match default dtype"
+            )
 
         model = model.eval()
 
@@ -1235,8 +1194,7 @@ class SchedulerLoader(ComponentLoader):
         scheduler_cls, _ = ModelRegistry.resolve_model_cls(class_name)
 
         scheduler = scheduler_cls(**config)
-        if (getattr(scheduler, "allow_pipeline_shift_override", True)
-                and fastvideo_args.pipeline_config.flow_shift is not None):
+        if fastvideo_args.pipeline_config.flow_shift is not None:
             scheduler.set_shift(fastvideo_args.pipeline_config.flow_shift)
         return scheduler
 

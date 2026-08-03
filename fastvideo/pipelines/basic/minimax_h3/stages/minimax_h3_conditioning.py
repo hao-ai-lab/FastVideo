@@ -8,6 +8,7 @@ from typing import Any
 import numpy as np
 import torch
 
+from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.models.encoders.minimax_h3_qwen3_vl import MiniMaxH3Qwen3VLConditioner
 from fastvideo.pipelines.basic.minimax_h3.packing import (
@@ -23,7 +24,6 @@ from fastvideo.pipelines.basic.minimax_h3.reference import MiniMaxH3PreparedRefe
 from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_input_preparation import MINIMAX_H3_KEYFRAMES_KEY
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
-from fastvideo.pipelines.stages.utils import maybe_offload_module, move_module_to_local_device
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 
@@ -302,17 +302,17 @@ class MiniMaxH3ConditioningStage(PipelineStage):
 
     @torch.no_grad()
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
-        self.conditioner, device, moved_for_forward = move_module_to_local_device(self.conditioner)
+        device = get_local_torch_device()
+        if fastvideo_args.text_encoder_cpu_offload:
+            self.conditioner.to(device)
         try:
             if self.ref2va:
                 prompt_embeds, text_token_tags = self._encode_ref2va(batch, device)
             else:
                 prompt_embeds, text_token_tags = self._encode_fl2va(batch, device)
         finally:
-            self.conditioner = maybe_offload_module(
-                self.conditioner,
-                enabled=moved_for_forward and bool(getattr(fastvideo_args, "text_encoder_cpu_offload", False)),
-            )
+            if fastvideo_args.text_encoder_cpu_offload:
+                self.conditioner.to("cpu")
         batch.prompt_embeds = [prompt_embeds]
         batch.extra[MINIMAX_H3_TEXT_TOKEN_TAGS_KEY] = text_token_tags
         return batch

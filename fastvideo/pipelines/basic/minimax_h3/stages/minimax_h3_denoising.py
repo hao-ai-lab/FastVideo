@@ -8,6 +8,7 @@ from typing import Any
 
 import torch
 
+from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.hooks.activation_trace import trace_step
@@ -19,7 +20,6 @@ from fastvideo.pipelines.basic.minimax_h3.packing import (
 from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_latent_preparation import MINIMAX_H3_LAYOUT_KEY
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
-from fastvideo.pipelines.stages.utils import maybe_offload_module, move_module_to_local_device
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 from fastvideo.utils import PRECISION_TO_TYPE
@@ -64,13 +64,11 @@ class MiniMaxH3DenoisingStage(PipelineStage):
         full_cpu_offload = (bool(getattr(fastvideo_args, "dit_cpu_offload", False))
                             and not bool(getattr(fastvideo_args, "dit_layerwise_offload", False))
                             and not bool(getattr(fastvideo_args, "use_fsdp_inference", False)))
-        moved_for_forward = False
+        device = get_local_torch_device()
         if full_cpu_offload:
-            self.transformer, device, moved_for_forward = move_module_to_local_device(self.transformer)
+            self.transformer.to(device)
             batch.latents = batch.latents.to(device)
             batch.audio_latents = batch.audio_latents.to(device)
-        else:
-            device = batch.latents.device
 
         self.scheduler.set_timesteps(batch.num_inference_steps, device=device)
         self.audio_scheduler.set_timesteps(batch.num_inference_steps, device=device)
@@ -151,8 +149,8 @@ class MiniMaxH3DenoisingStage(PipelineStage):
                 manager = getattr(self.transformer, "_layerwise_offload_manager", None)
                 if manager is not None and getattr(manager, "enabled", False):
                     manager.release_all()
-            if moved_for_forward:
-                self.transformer = maybe_offload_module(self.transformer, enabled=True)
+            if full_cpu_offload:
+                self.transformer.to("cpu")
         return batch
 
 

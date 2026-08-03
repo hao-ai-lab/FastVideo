@@ -66,13 +66,11 @@ class ComposedPipelineBase(ABC):
         self._stage_name_mapping: dict[str, PipelineStage] = {}
         self._trace_mgr = None
 
-        selected_config_modules = (required_config_modules
-                                   if required_config_modules is not None else self._required_config_modules)
-        if selected_config_modules is None:
+        if required_config_modules is not None:
+            self._required_config_modules = required_config_modules
+
+        if self._required_config_modules is None:
             raise NotImplementedError("Subclass must set _required_config_modules")
-        # Loading may remove disabled components or add MoE partitions. Keep
-        # those mutations local to this pipeline instance.
-        self._required_config_modules = list(selected_config_modules)
 
         maybe_init_distributed_environment_and_model_parallel(fastvideo_args.tp_size, fastvideo_args.sp_size)
 
@@ -272,8 +270,6 @@ class ComposedPipelineBase(ABC):
         if args is None or args.inference_mode:
 
             kwargs['model_path'] = model_path
-            if pipeline_config is not None:
-                kwargs['pipeline_config'] = pipeline_config
             fastvideo_args = FastVideoArgs.from_kwargs(**kwargs)
         else:
             assert args is not None, "args must be provided for training mode"
@@ -309,7 +305,7 @@ class ComposedPipelineBase(ABC):
 
     def _load_config(self, model_path: str) -> dict[str, Any]:
         revision = getattr(self.fastvideo_args, "revision", None)
-        model_path = maybe_download_model(model_path, revision=revision)
+        model_path = maybe_download_model(self.model_path, revision=revision)
         self.model_path = model_path
         # fastvideo_args.downloaded_model_path = model_path
         logger.info("Model path: %s", model_path)
@@ -389,8 +385,8 @@ class ComposedPipelineBase(ABC):
         # HF metadata (e.g. Flux2 Klein is_distilled); not a loadable module
         model_index.pop("is_distilled", None)
 
-        if not model_index:
-            raise ValueError("The Diffusers manifest does not contain any pipeline modules.")
+        # some sanity checks
+        assert len(model_index) > 1, "model_index.json must contain at least one pipeline module"
 
         for logical_module_name in self.required_config_modules:
             if logical_module_name not in self._extra_config_module_map:

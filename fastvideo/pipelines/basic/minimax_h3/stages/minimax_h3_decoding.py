@@ -7,6 +7,7 @@ from typing import Any
 
 import torch
 
+from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.models.vaes.minimax_h3_audio import MiniMaxH3AudioVAE
 from fastvideo.models.vaes.minimax_h3_video import AutoencoderKLMiniMaxH3
@@ -18,7 +19,6 @@ from fastvideo.pipelines.basic.minimax_h3.packing import (
 from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_latent_preparation import MINIMAX_H3_LAYOUT_KEY
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
-from fastvideo.pipelines.stages.utils import maybe_offload_module, move_module_to_local_device
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 
@@ -66,7 +66,8 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
             channels,
             self.transformer.patch_size,
         )
-        self.vae, device, _ = move_module_to_local_device(self.vae)
+        device = get_local_torch_device()
+        self.vae.to(device)
         try:
             latents = self.vae.denormalize_latents(latents.to(device=device, dtype=torch.float32))
             if fastvideo_args.output_type == "latent":
@@ -77,10 +78,8 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
             batch.output = self.vae.denormalize_pixels(video.float()).clamp_(0, 1).cpu()
             return batch
         finally:
-            self.vae = maybe_offload_module(
-                self.vae,
-                enabled=bool(getattr(fastvideo_args, "vae_cpu_offload", False)),
-            )
+            if fastvideo_args.vae_cpu_offload:
+                self.vae.to("cpu")
 
 
 class MiniMaxH3AudioDecodingStage(PipelineStage):
@@ -113,7 +112,8 @@ class MiniMaxH3AudioDecodingStage(PipelineStage):
             batch.audio_latents[layout.num_condition_audio_rows:],
             layout.num_audio_latents,
         )
-        self.audio_vae, device, _ = move_module_to_local_device(self.audio_vae)
+        device = get_local_torch_device()
+        self.audio_vae.to(device)
         try:
             latents = self.audio_vae.denormalize_latents(latents.to(device=device, dtype=torch.float32))
             if fastvideo_args.output_type == "latent":
@@ -131,10 +131,8 @@ class MiniMaxH3AudioDecodingStage(PipelineStage):
             self._clear_runtime(batch)
             return batch
         finally:
-            self.audio_vae = maybe_offload_module(
-                self.audio_vae,
-                enabled=bool(getattr(fastvideo_args, "vae_cpu_offload", False)),
-            )
+            if fastvideo_args.vae_cpu_offload:
+                self.audio_vae.to("cpu")
 
     @staticmethod
     def _clear_runtime(batch: ForwardBatch) -> None:

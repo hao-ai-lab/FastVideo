@@ -22,7 +22,6 @@ class MiniMaxH3ArchConfig(DiTArchConfig):
     """One-to-one representation of the released transformer config."""
 
     _fsdp_shard_conditions: list = field(default_factory=lambda: [_is_minimax_h3_block])
-    _compile_conditions: list = field(default_factory=lambda: [_is_minimax_h3_block])
     _supported_attention_backends: tuple[AttentionBackendEnum, ...] = (
         AttentionBackendEnum.TORCH_SDPA,
         AttentionBackendEnum.FLASH_ATTN,
@@ -36,9 +35,6 @@ class MiniMaxH3ArchConfig(DiTArchConfig):
             r"^(.*)\.ff\.net\.0\.proj\.(.*)$": r"\1.ff.fc_in.\2",
             r"^(.*)\.ff\.net\.2\.(.*)$": r"\1.ff.fc_out.\2",
         })
-    reverse_param_names_mapping: dict = field(default_factory=dict)
-    lora_param_names_mapping: dict = field(default_factory=dict)
-
     num_attention_heads: int = 56
     attention_head_dim: int = 128
     hidden_size: int = 5376

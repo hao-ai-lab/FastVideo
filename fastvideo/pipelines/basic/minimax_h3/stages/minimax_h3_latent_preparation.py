@@ -9,6 +9,7 @@ import numpy as np
 import torch
 from diffusers.utils.torch_utils import randn_tensor
 
+from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.pipelines.basic.minimax_h3.packing import (
     MINIMAX_H3_AUDIO_CHANNELS,
@@ -32,7 +33,6 @@ from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_input_preparation im
 )
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
-from fastvideo.pipelines.stages.utils import maybe_offload_module, module_device, move_module_to_local_device
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 
@@ -157,7 +157,8 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
         if not keyframes:
             return None, None
 
-        self.vae, vae_device, _ = move_module_to_local_device(self.vae)
+        vae_device = get_local_torch_device()
+        self.vae.to(vae_device)
         try:
             mean = self.vae.latents_mean.detach().float().cpu()
             std = self.vae.latents_std.detach().float().cpu()
@@ -169,10 +170,8 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
                 latents = _sample_visual_posterior(posterior).to(torch.float16).float().cpu()
                 clean_rows.append(patchify_video_latents((latents - mean) / std, self.transformer.patch_size))
         finally:
-            self.vae = maybe_offload_module(
-                self.vae,
-                enabled=bool(getattr(fastvideo_args, "vae_cpu_offload", False)),
-            )
+            if fastvideo_args.vae_cpu_offload:
+                self.vae.to("cpu")
 
         _, _, latent_height, latent_width = _video_geometry(batch)
         shapes = ((1, latent_height, latent_width), ) * len(keyframes)
@@ -202,25 +201,23 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
         if not references or not all(isinstance(item, MiniMaxH3PreparedReference) for item in references):
             raise TypeError("MiniMax-H3 Ref2VA latent preparation requires prepared references.")
 
-        self.vae, vae_device, _ = move_module_to_local_device(self.vae)
+        vae_device = get_local_torch_device()
+        self.vae.to(vae_device)
         try:
             video_rows = self._encode_visual_rows(references, vae_device)
         finally:
-            self.vae = maybe_offload_module(
-                self.vae,
-                enabled=bool(getattr(fastvideo_args, "vae_cpu_offload", False)),
-            )
+            if fastvideo_args.vae_cpu_offload:
+                self.vae.to("cpu")
 
         audio_rows: list[torch.Tensor] = []
         if any(reference.has_audio for reference in references):
-            self.audio_vae, audio_device, _ = move_module_to_local_device(self.audio_vae)
+            audio_device = get_local_torch_device()
+            self.audio_vae.to(audio_device)
             try:
                 audio_rows = self._encode_audio_rows(references, audio_device)
             finally:
-                self.audio_vae = maybe_offload_module(
-                    self.audio_vae,
-                    enabled=bool(getattr(fastvideo_args, "vae_cpu_offload", False)),
-                )
+                if fastvideo_args.vae_cpu_offload:
+                    self.audio_vae.to("cpu")
 
         if not video_rows:
             raise ValueError("MiniMax-H3 Ref2VA requires at least one visual reference.")
@@ -282,7 +279,7 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         video_noise = batch.latents
         audio_noise = batch.audio_latents
-        device = module_device(self.transformer)
+        device = get_local_torch_device()
         if self.ref2va:
             condition_video, condition_audio = self._encode_ref2va_conditions(batch, fastvideo_args, device)
         else:

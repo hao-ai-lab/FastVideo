@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import ClassVar
 
 from fastvideo.configs.models.vaes.base import VAEArchConfig, VAEConfig
 
@@ -36,10 +35,6 @@ class MiniMaxH3AudioVAEArchConfig(VAEArchConfig):
     latents_mean: tuple[float, ...] | list[float] | None = None
     latents_std: tuple[float, ...] | list[float] | None = None
 
-    # The source and FastVideo state-dict surfaces are intentionally identical.
-    param_names_mapping: dict[str, str] = field(default_factory=lambda: {r"^(.*)$": r"\1"})
-
-    # Audio normalization is per channel and is applied by the pipeline.
     scaling_factor: float = 1.0
     temporal_compression_ratio: int = 1
     spatial_compression_ratio: int = 1
@@ -51,15 +46,6 @@ class MiniMaxH3AudioVAEConfig(VAEConfig):
 
     arch_config: MiniMaxH3AudioVAEArchConfig = field(default_factory=MiniMaxH3AudioVAEArchConfig)
 
-    load_encoder: bool = True
-    load_decoder: bool = True
     use_tiling: bool = False
     use_temporal_tiling: bool = False
     use_parallel_tiling: bool = False
-    use_temporal_scaling_frames: bool = False
-
-    # The released DAC/BigVGAN stack is an FP32 component.
-    pretrained_dtype: str = "float32"
-    supported_pretrained_dtypes: ClassVar[frozenset[str]] = frozenset({"fp32"})
-    load_full_checkpoint: ClassVar[bool] = True
-    load_weights_strict: ClassVar[bool] = True

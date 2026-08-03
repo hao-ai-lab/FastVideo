@@ -23,18 +23,16 @@ class MiniMaxH3PipelineConfig(PipelineConfig):
     text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (MiniMaxH3Qwen3VLConfig(), ))
 
     flow_shift: float | None = None
-    embedded_cfg_scale: float = 1.0
+    embedded_cfg_scale: float | None = None
     dit_precision: str = "bf16"
     vae_precision: str = "fp32"
     text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("bf16", ))
-    vae_tiling: bool = True
     vae_sp: bool = False
 
-    def __post_init__(self) -> None:
-        self.vae_config.load_encoder = True
-        self.vae_config.load_decoder = True
-        self.audio_vae_config.load_encoder = True
-        self.audio_vae_config.load_decoder = True
+    def check_pipeline_config(self) -> None:
+        super().check_pipeline_config()
+        if self.flow_shift is not None:
+            raise ValueError("MiniMax-H3 uses fixed video/audio scheduler shifts; flow_shift must remain unset.")
 
 
 __all__ = ["MiniMaxH3PipelineConfig"]

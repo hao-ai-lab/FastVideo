@@ -232,25 +232,22 @@ class PipelineConfig:
         if model_path is None:
             raise ValueError("model_path is required in kwargs")
 
-        # An explicit config is authoritative; registry detection is only the
-        # default when the caller did not select a pipeline configuration.
-        if isinstance(pipeline_config_or_path, PipelineConfig):
-            pipeline_config = pipeline_config_or_path
-        else:
-            # 1. Get the pipeline config class from the registry
-            pipeline_config_cls = get_pipeline_config_cls_from_name(model_path)
+        # 1. Get the pipeline config class from the registry
+        pipeline_config_cls = get_pipeline_config_cls_from_name(model_path)
 
-            # 2. Instantiate PipelineConfig
-            if pipeline_config_cls is None:
-                logger.warning("Couldn't find pipeline config for %s. Using the default pipeline config.", model_path)
-                pipeline_config = cls()
-            else:
-                pipeline_config = pipeline_config_cls()
+        # 2. Instantiate PipelineConfig
+        if pipeline_config_cls is None:
+            logger.warning("Couldn't find pipeline config for %s. Using the default pipeline config.", model_path)
+            pipeline_config = cls()
+        else:
+            pipeline_config = pipeline_config_cls()
 
         # 3. Load PipelineConfig from a json file or a PipelineConfig object if provided
         if isinstance(pipeline_config_or_path, str):
             pipeline_config.load_from_json(pipeline_config_or_path)
             kwargs[prefix_with_dot + 'pipeline_config_path'] = pipeline_config_or_path
+        elif isinstance(pipeline_config_or_path, PipelineConfig):
+            pipeline_config = pipeline_config_or_path
         elif isinstance(pipeline_config_or_path, dict):
             pipeline_config.update_pipeline_config(pipeline_config_or_path)
 

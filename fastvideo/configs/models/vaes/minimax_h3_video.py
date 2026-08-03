@@ -3,7 +3,6 @@
 
 import math
 from dataclasses import dataclass, field
-from typing import ClassVar
 
 from fastvideo.configs.models.vaes.base import VAEArchConfig, VAEConfig
 
@@ -68,16 +67,5 @@ class MiniMaxH3VideoVAEConfig(VAEConfig):
 
     arch_config: MiniMaxH3VideoVAEArchConfig = field(default_factory=MiniMaxH3VideoVAEArchConfig)
 
-    # The released decode path uses 256 px tiles with at least 64 px overlap.
-    tile_sample_min_height: int = 256
-    tile_sample_min_width: int = 256
-    tile_sample_stride_height: int = 192
-    tile_sample_stride_width: int = 192
     tile_sample_min_overlap_height: int = 64
     tile_sample_min_overlap_width: int = 64
-    use_tiling: bool = True
-    use_temporal_tiling: bool = False
-    use_parallel_tiling: bool = False
-    use_temporal_scaling_frames: bool = False
-    supported_pretrained_dtypes: ClassVar[frozenset[str]] = frozenset({"fp32"})
-    load_weights_strict: ClassVar[bool] = True

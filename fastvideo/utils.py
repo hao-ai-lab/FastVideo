@@ -613,13 +613,8 @@ def maybe_download_lora(model_name_or_path: str, local_dir: str | None = None, d
 def resolve_diffusers_component_spec(
     component_name: str,
     component_spec: list[Any] | tuple[Any, ...],
-) -> tuple[Any, Any, dict[str, Any]]:
-    """Resolve legacy and modular Diffusers component specifications.
-
-    Legacy manifests store ``[library, class_name]``. Modular manifests may
-    append loading metadata whose ``type_hint`` identifies the concrete
-    component type FastVideo should load.
-    """
+) -> tuple[str | None, str | None, dict[str, Any]]:
+    """Resolve legacy pairs and modular Diffusers component triples."""
     if len(component_spec) not in (2, 3):
         raise ValueError(f"Invalid Diffusers component specification for {component_name!r}: {component_spec!r}")
 
@@ -630,22 +625,41 @@ def resolve_diffusers_component_spec(
         if not isinstance(candidate, dict):
             raise ValueError(f"Invalid Diffusers loading method for {component_name!r}: {candidate!r}")
         loading_method = candidate
-        type_hint = loading_method.get("type_hint", (library, class_name))
-        if not isinstance(type_hint, list | tuple) or len(type_hint) != 2:
-            raise ValueError(f"Invalid Diffusers type_hint for {component_name!r}: {type_hint!r}")
-        library, class_name = type_hint
+        type_hint = loading_method.get("type_hint")
+        if type_hint is not None:
+            if not isinstance(type_hint, list | tuple) or len(type_hint) != 2:
+                raise ValueError(f"Invalid Diffusers type_hint for {component_name!r}: {type_hint!r}")
+            library, class_name = type_hint
 
     return library, class_name, loading_method
+
+
+def _looks_like_diffusers_component_spec(value: Any) -> bool:
+    """Distinguish component entries from list-valued modular config."""
+    if not isinstance(value, list | tuple) or len(value) not in (2, 3):
+        return False
+    if len(value) == 3 and not isinstance(value[2], dict):
+        return False
+    library = value[0]
+    if len(value) == 3 and "type_hint" in value[2]:
+        type_hint = value[2]["type_hint"]
+        if not isinstance(type_hint, list | tuple) or len(type_hint) != 2:
+            return False
+        library = type_hint[0]
+
+    def supported_library(candidate: Any) -> bool:
+        return isinstance(candidate, str) and (
+            candidate in {"diffusers", "fastvideo", "transformers"} or candidate.startswith("fastvideo.")
+        )
+
+    return supported_library(library) or library is None
 
 
 def verify_model_config_and_directory(model_path: str) -> dict[str, Any]:
     """
     Verify a materialized local Diffusers checkpoint.
 
-    FastVideo accepts legacy component pairs and modular component triples, but
-    every loadable component must already exist in this resolved checkpoint.
-    Per-component external repositories, revisions, and variants are not
-    followed by this local loader.
+    FastVideo accepts legacy component pairs and modular component triples.
     
     Args:
         model_path: Path to the model directory
@@ -654,11 +668,11 @@ def verify_model_config_and_directory(model_path: str) -> dict[str, Any]:
         The loaded model configuration as a dictionary
     """
 
-    # Diffusers pipelines may publish either the legacy or modular manifest.
-    # Prefer the legacy filename when both are present for backward compatibility.
+    # Match Diffusers ModularPipeline: prefer the modular manifest and fall back
+    # to the legacy file only when modular_model_index.json is absent.
     config_filename = next(
-        (name for name in ("model_index.json", "modular_model_index.json")
-         if os.path.exists(os.path.join(model_path, name))),
+        (name for name in ("modular_model_index.json", "model_index.json")
+         if os.path.isfile(os.path.join(model_path, name))),
         None,
     )
     if config_filename is None:
@@ -674,7 +688,7 @@ def verify_model_config_and_directory(model_path: str) -> dict[str, Any]:
     # transformer/ is mandatory for every supported pipeline; the variant-
     # specific DiT weights live there.
     transformer_dir = os.path.join(model_path, "transformer")
-    if not os.path.exists(transformer_dir):
+    if not os.path.isdir(transformer_dir):
         raise ValueError(f"Model directory {model_path} does not contain a transformer/ directory.")
 
     # Diffusers convention: manifest entries are [library, class] pairs or
@@ -689,25 +703,18 @@ def verify_model_config_and_directory(model_path: str) -> dict[str, Any]:
     # text_encoder/gemma/); the pipeline subclass resolves that fallback
     # at load time.
     for key, value in config.items():
-        if key.startswith("_") or key == "transformer" or key.startswith("tokenizer"):
+        if key.startswith("_") or key.startswith("tokenizer"):
             continue
-        if not isinstance(value, list):
+        if not _looks_like_diffusers_component_spec(value):
             continue
         library, _, loading_method = resolve_diffusers_component_spec(key, value)
         if library is None:
             continue
-        subfolder = key
-        configured_subfolder = loading_method.get("subfolder")
-        if isinstance(configured_subfolder, str):
-            subfolder = configured_subfolder
-        if subfolder != key:
-            raise ValueError(f"Diffusers component {key!r} uses subfolder {subfolder!r}; "
-                             "FastVideo requires component names and subfolders to match.")
+        subfolder = loading_method.get("subfolder", key)
         subdir = os.path.join(model_path, subfolder)
-        if not os.path.exists(subdir):
+        if not os.path.isdir(subdir):
             raise ValueError(f"Model directory {model_path} declares `{key}` in "
-                             f"{config_filename} but is missing the materialized {subfolder}/ subfolder. "
-                             "FastVideo does not fetch per-component external repositories from modular manifests.")
+                             f"{config_filename} but is missing the {subfolder}/ subfolder.")
 
     # Verify diffusers version exists
     if "_diffusers_version" not in config:
@@ -735,21 +742,23 @@ def maybe_download_model_index(model_name_or_path: str) -> dict[str, Any]:
     if os.path.exists(model_name_or_path):
         return verify_model_config_and_directory(model_name_or_path)
 
-    # For remote models, download only the small manifest. Legacy manifests
-    # remain preferred when a repository publishes both forms.
+    # For remote models, download only the small manifest using the same
+    # modular-first order as Diffusers.
     try:
         with tempfile.TemporaryDirectory() as tmp_dir:
+            from huggingface_hub.utils import EntryNotFoundError
+
             model_index_path: str | None = None
             config_filename: str | None = None
             last_download_error: Exception | None = None
-            for candidate in ("model_index.json", "modular_model_index.json"):
+            for candidate in ("modular_model_index.json", "model_index.json"):
                 try:
                     model_index_path = hf_hub_download(repo_id=model_name_or_path,
                                                        filename=candidate,
                                                        local_dir=tmp_dir)
                     config_filename = candidate
                     break
-                except Exception as error:
+                except EntryNotFoundError as error:
                     last_download_error = error
             if model_index_path is None or config_filename is None:
                 raise ValueError("repository has neither model_index.json nor modular_model_index.json") from \
@@ -760,7 +769,8 @@ def maybe_download_model_index(model_name_or_path: str) -> dict[str, Any]:
                 config: dict[str, Any] = json.load(f)
 
             # Verify it has the required fields
-            if "_class_name" not in config:
+            class_name = config.get("_class_name")
+            if not isinstance(class_name, str) or not class_name:
                 raise ValueError(f"{config_filename} for {model_name_or_path} does not contain _class_name field")
 
             if "_diffusers_version" not in config:
@@ -838,8 +848,7 @@ def kill_itself_when_parent_died() -> None:
     import platform
     if platform.system() == "Linux":
         libc = ctypes.CDLL("libc.so.6")
-        sigkill = getattr(signal, "SIGKILL", signal.SIGTERM)
-        libc.prctl(PR_SET_PDEATHSIG, sigkill)
+        libc.prctl(PR_SET_PDEATHSIG, signal.SIGKILL)
     # elif platform.system() == "Darwin":
     #     libc = ctypes.CDLL("libc.dylib")
     #     logger.warning("kill_itself_when_parent_died is only supported in linux.")
