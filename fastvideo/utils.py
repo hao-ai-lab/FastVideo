@@ -612,7 +612,7 @@ def maybe_download_lora(model_name_or_path: str, local_dir: str | None = None, d
 
 def verify_model_config_and_directory(model_path: str) -> dict[str, Any]:
     """
-    Verify that the model directory contains a valid diffusers configuration.
+    Verify that the model directory contains a valid Diffusers configuration.
     
     Args:
         model_path: Path to the model directory
@@ -621,14 +621,19 @@ def verify_model_config_and_directory(model_path: str) -> dict[str, Any]:
         The loaded model configuration as a dictionary
     """
 
-    # Check for model_index.json which is required for diffusers models
-    config_path = os.path.join(model_path, "model_index.json")
-    if not os.path.exists(config_path):
-        raise ValueError(f"Model directory {model_path} does not contain model_index.json. "
-                         "Only Hugging Face diffusers format is supported.")
+    # Some Diffusers checkpoints publish a modular manifest instead of model_index.json.
+    config_filename = next(
+        (name for name in ("model_index.json", "modular_model_index.json")
+         if os.path.isfile(os.path.join(model_path, name))),
+        None,
+    )
+    if config_filename is None:
+        raise ValueError(f"Model directory {model_path} does not contain model_index.json or "
+                         "modular_model_index.json. Only Hugging Face Diffusers format is supported.")
+    config_path = os.path.join(model_path, config_filename)
 
-    # Load the config first so directory checks below can be conditional
-    # on what model_index.json actually declares.
+    # Load the config first so directory checks below can be conditional on
+    # what the manifest actually declares.
     with open(config_path) as f:
         config = json.load(f)
 
@@ -638,8 +643,10 @@ def verify_model_config_and_directory(model_path: str) -> dict[str, Any]:
     if not os.path.exists(transformer_dir):
         raise ValueError(f"Model directory {model_path} does not contain a transformer/ directory.")
 
-    # Diffusers convention: model_index.json entries are [library, class]
-    # pairs for on-disk components. Non-list entries are scalar metadata
+    # Diffusers convention: component entries start with [library, class].
+    # Modular manifests may append loading metadata, which FastVideo does not
+    # need because published component subfolders match their manifest keys.
+    # Non-list entries are scalar metadata
     # (e.g. boundary_ratio); a None first element marks a disabled
     # component (matches composed_pipeline_base.py). Pipelines that
     # lazy-load shared components from upstream HF repos simply omit the
@@ -656,11 +663,11 @@ def verify_model_config_and_directory(model_path: str) -> dict[str, Any]:
         subdir = os.path.join(model_path, key)
         if not os.path.exists(subdir):
             raise ValueError(f"Model directory {model_path} declares `{key}` in "
-                             f"model_index.json but is missing the {key}/ subfolder.")
+                             f"{config_filename} but is missing the {key}/ subfolder.")
 
     # Verify diffusers version exists
     if "_diffusers_version" not in config:
-        raise ValueError("model_index.json does not contain _diffusers_version")
+        raise ValueError(f"{config_filename} does not contain _diffusers_version")
 
     logger.info("Diffusers version: %s", config["_diffusers_version"])
     return cast(dict[str, Any], config)
@@ -668,13 +675,13 @@ def verify_model_config_and_directory(model_path: str) -> dict[str, Any]:
 
 def maybe_download_model_index(model_name_or_path: str) -> dict[str, Any]:
     """
-    Download and extract just the model_index.json for a Hugging Face model.
+    Download and extract a Diffusers model manifest for a Hugging Face model.
     
     Args:
         model_name_or_path: Path or HF Hub model ID
         
     Returns:
-        The parsed model_index.json as a dictionary
+        The parsed model_index.json or modular_model_index.json dictionary
     """
     import tempfile
 
@@ -684,33 +691,43 @@ def maybe_download_model_index(model_name_or_path: str) -> dict[str, Any]:
     if os.path.exists(model_name_or_path):
         return verify_model_config_and_directory(model_name_or_path)
 
-    # For remote models, download just the model_index.json
+    # For remote models, download only the small manifest.
     try:
         with tempfile.TemporaryDirectory() as tmp_dir:
-            # Download just the model_index.json file
-            model_index_path = hf_hub_download(repo_id=model_name_or_path,
-                                               filename="model_index.json",
-                                               local_dir=tmp_dir)
+            from huggingface_hub.utils import EntryNotFoundError
 
-            # Load the model_index.json
+            config_filename = "model_index.json"
+            try:
+                model_index_path = hf_hub_download(repo_id=model_name_or_path,
+                                                   filename=config_filename,
+                                                   local_dir=tmp_dir)
+            except EntryNotFoundError:
+                config_filename = "modular_model_index.json"
+                model_index_path = hf_hub_download(repo_id=model_name_or_path,
+                                                   filename=config_filename,
+                                                   local_dir=tmp_dir)
+
+            # Load the selected manifest.
             with open(model_index_path) as f:
                 config: dict[str, Any] = json.load(f)
 
             # Verify it has the required fields
             if "_class_name" not in config:
-                raise ValueError(f"model_index.json for {model_name_or_path} does not contain _class_name field")
+                raise ValueError(f"{config_filename} for {model_name_or_path} does not contain _class_name field")
 
             if "_diffusers_version" not in config:
-                raise ValueError(f"model_index.json for {model_name_or_path} does not contain _diffusers_version field")
+                raise ValueError(
+                    f"{config_filename} for {model_name_or_path} does not contain _diffusers_version field")
 
             # Add the pipeline name for downstream use
             config["pipeline_name"] = config["_class_name"]
 
-            logger.info("Downloaded model_index.json for %s, pipeline: %s", model_name_or_path, config["_class_name"])
+            logger.info("Downloaded %s for %s, pipeline: %s", config_filename, model_name_or_path,
+                        config["_class_name"])
             return config
 
     except Exception as e:
-        raise ValueError(f"Failed to download or parse model_index.json for {model_name_or_path}: {e}") from e
+        raise ValueError(f"Failed to download or parse a Diffusers manifest for {model_name_or_path}: {e}") from e
 
 
 _HF_TOKEN_ENV_VARS = ("HF_TOKEN", "HUGGINGFACE_HUB_TOKEN", "HF_API_KEY")
