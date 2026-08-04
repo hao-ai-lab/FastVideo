@@ -5,9 +5,9 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+import pyarrow.parquet as pq
 import pytest
 import torch
-import pyarrow.parquet as pq
 
 from fastvideo.dataset.dataloader.parquet_io import records_to_table
 from fastvideo.dataset.dataloader.schema import pyarrow_schema_t2v
