@@ -100,6 +100,15 @@ def _validate_benchmark_config(cfg, path="<memory>"):
         if field in cfg and not isinstance(cfg[field], Mapping):
             raise ValueError(f"{path}: benchmark config field {field!r} must be an object")
 
+    run_config = cfg.get("run_config")
+    if isinstance(run_config, Mapping):
+        gpu_types = run_config.get("gpu_types")
+        if gpu_types is not None and (
+                not isinstance(gpu_types, (list, tuple))
+                or any(not isinstance(g, str) or not g for g in gpu_types)):
+            raise ValueError(
+                f"{path}: run_config.gpu_types must be a list of non-empty strings")
+
     schema_version = cfg.get("config_schema_version")
     if schema_version is None:
         if _has_v2_fields(cfg):
