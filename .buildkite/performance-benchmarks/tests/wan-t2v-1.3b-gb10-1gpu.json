@@ -40,8 +40,8 @@
   },
   "thresholds": {
     "GB10": {
-      "max_generation_time_s": 90.0,
-      "max_peak_memory_mb": 40000.0
+      "max_generation_time_s": 55.0,
+      "max_peak_memory_mb": 12000.0
     },
     "default": {
       "max_generation_time_s": 120.0,
