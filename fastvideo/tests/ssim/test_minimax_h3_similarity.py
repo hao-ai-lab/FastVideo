@@ -42,7 +42,7 @@ FULL_QUALITY_MINIMAX_H3_MODEL_TO_PARAMS = {
 }
 
 MINIMAX_H3_TEST_PROMPTS = [
-    "A blue-white FastVideo logo forms from glowing particles in a black futuristic digital city.",
+    "A blue-white FastVideo logo forms from glowing particles in a black futuristic digital city",
 ]
 
 
