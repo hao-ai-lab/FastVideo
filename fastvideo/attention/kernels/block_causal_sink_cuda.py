@@ -25,7 +25,7 @@ except ImportError:  # pragma: no cover - extension not built
     _C = None
     _HAS_CUDA_BCS = False
 
-_SM100 = (10, 0)   # compiled for Blackwell only
+_SM100 = (10, 0)  # compiled for Blackwell only
 HEAD_DIM = 128
 K_TILE = 128
 
@@ -37,17 +37,17 @@ def is_supported(plan, q: torch.Tensor) -> bool:
     if torch.cuda.get_device_capability(q.device) != _SM100:
         return False
     if plan.kind != "blockwise":
-        return False                      # teacher_forcing is a separate kernel
+        return False  # teacher_forcing is a separate kernel
     if q.dtype != torch.bfloat16 or q.shape[-1] != HEAD_DIM:
         return False
     if q.stride(-1) != 1:
-        return False                      # head_dim contiguous; outer strides are free
+        return False  # head_dim contiguous; outer strides are free
     if plan.local_attn_size is None or plan.local_attn_size < 0:
         return False
     if plan.num_frames % plan.num_frame_per_block != 0:
-        return False                      # partial last block is out of spec
+        return False  # partial last block is out of spec
     if (plan.sink_size - plan.num_frame_per_block) * plan.frame_seqlen > K_TILE:
-        return False                      # large-sink regime is out of spec
+        return False  # large-sink regime is out of spec
     return plan.num_frame_per_block * plan.frame_seqlen > 0
 
 
@@ -59,12 +59,14 @@ def block_causal_sink_forward_cuda(q, k, v, q_sink, plan):
     ``[B*H, L]`` float32, identical in meaning to the Triton forward's.
     """
     out, lse = _C.block_causal_sink_sm100a_fwd(
-        q, k, v,
+        q,
+        k,
+        v,
         q_sink if q_sink is not None and q_sink is not q else None,
-        plan.num_frame_per_block * plan.frame_seqlen,   # tokens_per_block
-        plan.sink_size * plan.frame_seqlen,             # sink_tokens
-        plan.local_attn_size * plan.frame_seqlen,       # rolling_window_tokens
+        plan.num_frame_per_block * plan.frame_seqlen,  # tokens_per_block
+        plan.sink_size * plan.frame_seqlen,  # sink_tokens
+        plan.local_attn_size * plan.frame_seqlen,  # rolling_window_tokens
         float(plan.sm_scale),
-        True,                                           # need_lse (backward consumes it)
+        True,  # need_lse (backward consumes it)
     )
     return out, lse
