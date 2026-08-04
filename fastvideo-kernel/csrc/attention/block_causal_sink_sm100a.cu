@@ -22,15 +22,10 @@ void check_qkv(const torch::Tensor& t, const char* name, int64_t B, int64_t H, i
   TORCH_CHECK(t.dim() == 4, name, " must be [B, H, L, D], got ", t.dim(), " dims");
   TORCH_CHECK(t.size(0) == B && t.size(1) == H && t.size(2) == L && t.size(3) == D, name,
               " has shape ", t.sizes(), ", expected [", B, ",", H, ",", L, ",", D, "]");
-  // head_dim contiguous is the ONLY layout requirement -- it is what lets the TMA descriptor
-  // index the caller's tensor directly instead of forcing a .contiguous() copy.
-  TORCH_CHECK(t.stride(3) == 1, name,
-              " must have a contiguous head_dim (stride(-1) == 1); "
-              "permuted views are fine, .contiguous() is not required");
-  // TMA requires 16-byte aligned strides; bf16 -> multiples of 8 elements.
-  for (int d = 0; d < 3; ++d)
-    TORCH_CHECK(t.stride(d) % 8 == 0, name, " stride(", d, ")=", t.stride(d),
-                " must be a multiple of 8 elements (16 B) for TMA");
+  // TODO: the TMA descriptors are built for a contiguous [B, H, L, D] tensor. Plumbing the
+  // caller's strides through BlockCausalSinkArgs would make any permutation of B/H/L free,
+  // as long as head_dim stays innermost.
+  TORCH_CHECK(t.is_contiguous(), name, " must be contiguous [B, H, L, D]");
 }
 
 }  // namespace
