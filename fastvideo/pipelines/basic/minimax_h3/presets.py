@@ -15,7 +15,7 @@ _SHARED_DEFAULTS = {
     "guidance_scale": 1.0,
     "batch_cfg": False,
     "negative_prompt": "",
-    "num_inference_steps": 30,
+    "num_inference_steps": 50,
     "seed": 0,
 }
 

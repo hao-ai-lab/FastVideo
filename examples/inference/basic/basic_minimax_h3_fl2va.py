@@ -30,7 +30,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", default="outputs/minimax_h3_fl2va")
     parser.add_argument("--prompt", required=True)
     parser.add_argument("--num-frames", type=int, default=192, help="192 frames is exactly 8 seconds at 24 fps.")
-    parser.add_argument("--steps", type=int, default=30)
+    parser.add_argument("--steps", type=int, default=50)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--num-gpus", type=int, default=4)
     return parser.parse_args()

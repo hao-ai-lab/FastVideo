@@ -31,7 +31,7 @@ MINIMAX_H3_PARAMS = {
 }
 MINIMAX_H3_FULL_QUALITY_PARAMS = {
     **MINIMAX_H3_PARAMS,
-    "num_inference_steps": 30,
+    "num_inference_steps": 50,
 }
 
 MINIMAX_H3_MODEL_TO_PARAMS = {
