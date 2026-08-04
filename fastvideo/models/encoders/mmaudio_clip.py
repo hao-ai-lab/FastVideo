@@ -60,6 +60,7 @@ class MMAudioDFNCLIPTextEncoder(CLIPTextModel):
         metadata = SDPAMetadata(
             current_timestep=0,
             attn_mask=causal_mask[None, None],
+            is_causal=True,
         )
         with set_forward_context(current_timestep=0, attn_metadata=metadata):
             output = super().forward(
