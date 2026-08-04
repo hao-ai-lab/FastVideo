@@ -7,7 +7,9 @@ from typing import Any
 import numpy as np
 import pytest
 import torch
+import pyarrow.parquet as pq
 
+from fastvideo.dataset.dataloader.parquet_io import records_to_table
 from fastvideo.dataset.dataloader.schema import pyarrow_schema_t2v
 from fastvideo.dataset.utils import collate_rows_from_parquet_schema
 
@@ -102,6 +104,20 @@ def _collate(
         seed=seed,
     )
 
+def _write_and_read_parquet(
+    tmp_path,
+    rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    parquet_path = tmp_path / "data_00000.parquet"
+
+    table = records_to_table(
+        rows,
+        pyarrow_schema_t2v,
+    )
+    pq.write_table(table, parquet_path)
+
+    loaded_table = pq.read_table(parquet_path)
+    return loaded_table.to_pylist()
 
 def test_dual_text_embeddings_are_padded_independently() -> None:
     rows = [
@@ -312,4 +328,88 @@ def test_cfg_rate_one_drops_both_text_conditions() -> None:
 
     assert torch.count_nonzero(
         batch["text_embedding_2"]
+    ).item() == 0
+
+def test_dual_text_embeddings_parquet_round_trip(tmp_path) -> None:
+    rows = [
+        _make_row(
+            sample_index=0,
+            qwen_tokens=3,
+            byt5_tokens=2,
+            qwen_value=1.0,
+            byt5_value=2.0,
+        ),
+        _make_row(
+            sample_index=1,
+            qwen_tokens=5,
+            byt5_tokens=4,
+            qwen_value=3.0,
+            byt5_value=4.0,
+        ),
+    ]
+
+    loaded_rows = _write_and_read_parquet(tmp_path, rows)
+    batch = _collate(loaded_rows)
+
+    assert batch["text_embedding"].shape == (
+        2,
+        TEXT_PADDING_LENGTH,
+        QWEN_DIM,
+    )
+    assert batch["text_embedding_2"].shape == (
+        2,
+        TEXT_PADDING_LENGTH,
+        BYT5_DIM,
+    )
+
+    assert batch["text_attention_mask"][0].sum().item() == 3
+    assert batch["text_attention_mask"][1].sum().item() == 5
+    assert batch["text_attention_mask_2"][0].sum().item() == 2
+    assert batch["text_attention_mask_2"][1].sum().item() == 4
+
+    torch.testing.assert_close(
+        batch["text_embedding"][0, :3],
+        torch.ones(
+            (3, QWEN_DIM),
+            dtype=torch.float32,
+        ),
+    )
+
+    torch.testing.assert_close(
+        batch["text_embedding_2"][0, :2],
+        torch.full(
+            (2, BYT5_DIM),
+            2.0,
+            dtype=torch.float32,
+        ),
+    )
+
+def test_empty_byt5_embedding_parquet_round_trip(tmp_path) -> None:
+    rows = [
+        _make_row(
+            sample_index=0,
+            qwen_tokens=3,
+            byt5_tokens=0,
+        ),
+        _make_row(
+            sample_index=1,
+            qwen_tokens=4,
+            byt5_tokens=2,
+        ),
+    ]
+
+    loaded_rows = _write_and_read_parquet(tmp_path, rows)
+    batch = _collate(loaded_rows)
+
+    assert batch["text_embedding_2"].shape == (
+        2,
+        TEXT_PADDING_LENGTH,
+        BYT5_DIM,
+    )
+
+    assert batch["text_attention_mask_2"][0].sum().item() == 0
+    assert batch["text_attention_mask_2"][1].sum().item() == 2
+
+    assert torch.count_nonzero(
+        batch["text_embedding_2"][0]
     ).item() == 0
