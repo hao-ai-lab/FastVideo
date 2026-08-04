@@ -25,8 +25,18 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+def make_delta(num_frames, num_frame_per_block):
+    num_blocks = num_frames // num_frame_per_block
+    inv_freq = 1.0 / (10000.0**(torch.arange(0, HEAD_DIM, 2, device="cuda").float() / HEAD_DIM))
+    angle = torch.arange(num_blocks, device="cuda").float()[:, None] * inv_freq[None, :]
+    angle = torch.cat([angle, angle], dim=-1)
+    return angle.cos().float().contiguous(), angle.sin().float().contiguous()
+
+
 def make_plan(num_frames=6, frame_seqlen=1456, num_frame_per_block=3, sink_size=1,
-              local_attn_size=6):
+              local_attn_size=6, rope_delta=False):
+    delta_cos, delta_sin = (make_delta(num_frames, num_frame_per_block) if rope_delta else
+                            (None, None))
     return CausalTrainAttentionPlan(
         kind="blockwise",
         impl="triton",
@@ -36,6 +46,8 @@ def make_plan(num_frames=6, frame_seqlen=1456, num_frame_per_block=3, sink_size=
         local_attn_size=local_attn_size,
         sink_size=sink_size,
         sm_scale=1.0 / (HEAD_DIM**0.5),
+        delta_cos=delta_cos,
+        delta_sin=delta_sin,
     )
 
 
@@ -87,6 +99,30 @@ def test_matches_triton_across_sequence_lengths(num_frames):
 
     assert_close(run(plan, q, k, v, grad_out, use_cuda=True),
                  run(plan, q, k, v, grad_out, use_cuda=False))
+
+
+@pytest.mark.parametrize("num_frames", [6, 21])
+def test_rope_delta_matches_triton(num_frames):
+    plan = make_plan(num_frames=num_frames, rope_delta=True)
+    q, k, v = make_qkv(plan, 8)
+    torch.manual_seed(1)
+    grad_out = torch.randn_like(q, dtype=torch.bfloat16)
+
+    assert bcs_cuda.is_supported(plan, q)
+    assert_close(run(plan, q, k, v, grad_out, use_cuda=True),
+                 run(plan, q, k, v, grad_out, use_cuda=False))
+
+
+def test_rope_delta_changes_the_result():
+    q, k, v = make_qkv(make_plan(), 8)
+    out_plain = bcs_cuda.block_causal_sink_forward_cuda(q, k, v, None, make_plan())[0]
+
+    plan = make_plan(rope_delta=True)
+    q_sink = bcs._rotated_sink_queries(q, plan.delta_cos, plan.delta_sin,
+                                       bcs._plan_scalars(plan))
+    out_rope = bcs_cuda.block_causal_sink_forward_cuda(q, k, v, q_sink, plan)[0]
+
+    assert (out_plain.float() - out_rope.float()).abs().max().item() > 1e-3
 
 
 def test_non_contiguous_input_is_rejected():

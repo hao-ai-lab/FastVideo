@@ -19,7 +19,7 @@ from __future__ import annotations
 import torch
 
 try:
-    import fastvideo_kernel._C as _C
+    from fastvideo_kernel._C import fastvideo_kernel_ops as _C
     _HAS_CUDA_BCS = hasattr(_C, "block_causal_sink_sm100a_fwd")
 except ImportError:  # pragma: no cover - extension not built
     _C = None
