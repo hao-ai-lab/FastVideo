@@ -54,6 +54,9 @@ device_reference_folder = resolve_device_reference_folder(
         ("A40", "A40"),
         ("L40S", "L40S"),
         ("H100", "H100"),
+        # GB200 must precede any bare "B200" pattern: the lookup is a
+        # substring scan and "B200" is a substring of "NVIDIA GB200"
+        ("GB200", "GB200"),
         ("H200", "H200"),
     ),
     device_name=device_name,

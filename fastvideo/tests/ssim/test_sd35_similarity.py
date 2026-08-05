@@ -30,6 +30,7 @@ device_reference_folder = resolve_device_reference_folder(
         ("A40", "A40"),
         ("L40S", "L40S"),
         ("H100", "H100"),
+        ("GB200", "GB200"),
         ("H200", "H200"),
         ("RTX 4090", "RTX4090"),
         ("4090", "RTX4090"),
