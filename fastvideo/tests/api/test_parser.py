@@ -163,6 +163,7 @@ def test_load_run_config_supports_yaml_roundtrip(tmp_path) -> None:
                 "prompt_path": None,
                 "image_path": None,
                 "video_path": None,
+                "audio_path": None,
                 "pil_image": None,
                 "last_image": None,
                 "references": None,

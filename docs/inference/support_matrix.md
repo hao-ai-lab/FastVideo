@@ -84,6 +84,7 @@ column links a runnable script in `examples/inference/basic/` where one exists.
 | wan | `Wan-AI/Wan2.2-TI2V-5B-Diffusers` | T2V, I2V | [basic_wan2_2_ti2v.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_wan2_2_ti2v.py) |
 | wan | `FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers`<br>`FastVideo/FastWan2.2-TI2V-5B-Diffusers` | T2V, I2V | [basic_dmd.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_dmd.py) |
 | wan | `decart-ai/Lucy-Edit-Dev`<br>`decart-ai/Lucy-Edit-1.1-Dev` | — | [basic_lucy_edit.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_lucy_edit.py) |
+| wan | `FastVideo/Wan2.2-S2V-14B-Diffusers` | I2V | [basic_wan_s2v.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_wan_s2v.py) |
 | wan | `Wan-AI/Wan2.2-T2V-A14B-Diffusers` | T2V | [basic_wan2_2.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_wan2_2.py) |
 | wan | `Wan-AI/Wan2.2-I2V-A14B-Diffusers` | I2V | [basic_wan2_2_i2v.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_wan2_2_i2v.py) |
 | wan | `wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers` | T2V | [basic_self_forcing_causal.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_self_forcing_causal.py) |
@@ -160,6 +161,7 @@ optimizations: absence means **untested**, not incompatible.
 | DreamX-World 5B Cam | `FastVideo/DreamX-World-5B-Cam-Diffusers` | 480P | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
 | DreamX-World 5B AR | `FastVideo/DreamX-World-5B-Diffusers` | 704px1280p | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
 | Lucy Edit Dev 5B*** | `decart-ai/Lucy-Edit-Dev` | 480P | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
+| Wan2.2 S2V 14B**** | `FastVideo/Wan2.2-S2V-14B-Diffusers` | 480P | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
 | Wan2.2 T2V A14B | `Wan-AI/Wan2.2-T2V-A14B-Diffusers` | 480P<br>720P | ❌ | ❌ | ✅ | ⭕ | ⭕ |
 | Wan2.2 I2V A14B | `Wan-AI/Wan2.2-I2V-A14B-Diffusers` | 480P<br>720P | ❌ | ❌ | ✅ | ⭕ | ⭕ |
 | HunyuanVideo | `hunyuanvideo-community/HunyuanVideo` | 720px1280p<br>544px960p | ❌ | ✅ | ✅ | ⭕ | ⭕ |
@@ -195,6 +197,13 @@ Apple Silicon uses FastMetal-QAD. CUDA FastWan-QAD (`FastVideo/FastWan-QAD-1.3B`
 
 ***Lucy Edit Dev uses a non-commercial model license. FastVideo support is
 focused on inference integration for video editing workflows.
+
+****Wan2.2 S2V is audio-driven: it takes a reference image plus a speech/audio
+track and animates the subject in sync with it. The official checkpoint ships
+in native Wan format; `scripts/checkpoint_conversion/wan_s2v_to_diffusers.py`
+repackages it into the Diffusers layout this repo id refers to (bundling the
+`wav2vec2-large-xlsr-53-english` audio encoder). Sequence parallelism is not
+yet wired up for this pipeline.
 
 `Sliding Tile Attn (Legacy Branch)` entries refer to the archived
 `sta_do_not_delete` branch workflow, not active `main` inference wiring.

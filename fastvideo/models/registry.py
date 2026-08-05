@@ -29,6 +29,7 @@ _TEXT_TO_VIDEO_DIT_MODELS = {
     "HunyuanVideo15Transformer3DModel": ("dits", "hunyuanvideo15", "HunyuanVideo15Transformer3DModel"),
     "HYWorldTransformer3DModel": ("dits", "hyworld", "HYWorldTransformer3DModel"),
     "WanTransformer3DModel": ("dits", "wanvideo", "WanTransformer3DModel"),
+    "WanModel_S2V": ("dits", "wan_s2v", "WanS2VTransformer3DModel"),
     "DreamXWorldTransformer3DModel": ("dits", "dreamx_world", "DreamXWorldTransformer3DModel"),
     "DreamXWorldARTransformer3DModel": ("dits", "dreamx_world_ar", "DreamXWorldARTransformer3DModel"),
     "CausalWanTransformer3DModel": ("dits", "causal_wanvideo", "CausalWanTransformer3DModel"),
@@ -53,6 +54,7 @@ _TEXT_TO_VIDEO_DIT_MODELS = {
 _IMAGE_TO_VIDEO_DIT_MODELS = {
     # "HunyuanVideoTransformer3DModel": ("dits", "hunyuanvideo", "HunyuanVideoDiT"),
     "WanTransformer3DModel": ("dits", "wanvideo", "WanTransformer3DModel"),
+    "WanModel_S2V": ("dits", "wan_s2v", "WanS2VTransformer3DModel"),
     "DreamXWorldTransformer3DModel": ("dits", "dreamx_world", "DreamXWorldTransformer3DModel"),
     "DreamXWorldARTransformer3DModel": ("dits", "dreamx_world_ar", "DreamXWorldARTransformer3DModel"),
     "CausalWanTransformer3DModel": ("dits", "causal_wanvideo", "CausalWanTransformer3DModel"),

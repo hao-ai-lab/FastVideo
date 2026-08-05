@@ -31,6 +31,11 @@ class SamplingParam:
     # Video inputs
     video_path: str | None = None
 
+    # Audio inputs. `audio_path` drives audio-conditioned generation (Wan S2V):
+    # the waveform is encoded and cross-attended to per video frame. Distinct
+    # from the Stable Audio `init_audio` fields below, which seed audio output.
+    audio_path: str | None = None
+
     # Optional pre-generated diffusion latents. Used by parity/debug harnesses
     # and advanced callers that need deterministic latent reuse.
     latents: Any | None = None
