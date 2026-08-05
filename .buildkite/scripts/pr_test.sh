@@ -187,6 +187,10 @@ case "$TEST_TYPE" in
         log "Running transformer tests..."
         MODAL_COMMAND="$MODAL_ENV HF_API_KEY=$HF_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_transformer_tests"
         ;;
+    "golden_gate")
+        log "Running golden-gate tests..."
+        MODAL_COMMAND="$MODAL_ENV HF_API_KEY=$HF_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_golden_gate_tests"
+        ;;
     "ssim")
         log "Running SSIM tests..."
         SSIM_BOOTSTRAP_ARGS=$(ssim_bootstrap_args)

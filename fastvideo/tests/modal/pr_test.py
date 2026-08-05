@@ -286,6 +286,21 @@ def run_vae_tests():
               timeout=900,
               secrets=[hf_secret, ci_env_secret],
               volumes={"/root/data": model_vol})
+def run_golden_gate_tests():
+    # Single-layer bitwise DiT fingerprints (~40s/model on GPU): a green gate
+    # means the compute path is bit-identical to the golden, so the expensive
+    # SSIM generation for that model cannot have regressed. Downloads only the
+    # shards holding the gated layer, never full checkpoints.
+    run_test(
+        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/golden_gate -vs"
+    )
+
+
+@app.function(gpu="L40S:1",
+              image=image,
+              timeout=900,
+              secrets=[hf_secret, ci_env_secret],
+              volumes={"/root/data": model_vol})
 def run_transformer_tests():
     run_test(
         "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && "
