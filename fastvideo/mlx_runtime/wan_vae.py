@@ -55,6 +55,18 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _verify_checkpoint(path: Path, expected_digest: str) -> None:
+    """Verify checkpoint sha256 if expected_digest is nonempty."""
+    if expected_digest:
+        actual = _sha256(path)
+        if actual != expected_digest:
+            raise RuntimeError(
+                f"TAEHV checkpoint at {path} failed sha256 verification "
+                f"(expected {expected_digest}, got {actual}). "
+                "Delete the file to re-download it."
+            )
+
+
 def ensure_taehv_checkpoint(*, z_dim: int, checkpoint_path: Path | None = None) -> Path:
     """Return a TAEHV weight file for the given latent channel count."""
     if checkpoint_path is not None:
@@ -71,11 +83,31 @@ def ensure_taehv_checkpoint(*, z_dim: int, checkpoint_path: Path | None = None) 
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
         print(f"Downloading {url} -> {path}")
-        urllib.request.urlretrieve(url, path)  # noqa: S310 - public pinned artifact.
-    if expect:
-        actual = _sha256(path)
-        if actual != expect:
-            raise RuntimeError(f"TAEHV {path} sha256 mismatch (expected {expect}, got {actual})")
+        import socket
+        import tempfile
+        # Download to a temporary file, verify, then atomically rename.
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            dir=path.parent,
+            prefix=f".tmp_{name}_",
+            suffix=".pth",
+            delete=False,
+        ) as tmp_file:
+            tmp_path = Path(tmp_file.name)
+            try:
+                old_timeout = socket.getdefaulttimeout()
+                socket.setdefaulttimeout(300)
+                try:
+                    urllib.request.urlretrieve(url, tmp_path)  # noqa: S310 - public pinned artifact.
+                finally:
+                    socket.setdefaulttimeout(old_timeout)
+                _verify_checkpoint(tmp_path, expect)
+                tmp_path.replace(path)
+            except Exception:
+                tmp_path.unlink(missing_ok=True)
+                raise
+    else:
+        _verify_checkpoint(path, expect)
     return path
 
 
@@ -154,13 +186,13 @@ def _load_torch_state(path: Path) -> dict[str, np.ndarray]:
 class MLXTAEHVDecoder:
     """Minimal MLX port of TAEHV ``decoder`` (parallel-over-time MemBlocks)."""
 
-    def __init__(self, checkpoint_path: Path) -> None:
+    def __init__(self, checkpoint_path: Path, *, z_dim: int) -> None:
         import mlx.core as mx
 
         self.checkpoint_path = Path(checkpoint_path)
-        name = self.checkpoint_path.name
-        self.patch_size = 2 if "taew2_2" in name else 1
-        self.latent_channels = 48 if "taew2_2" in name else 16
+        self.latent_channels = z_dim
+        # Derive patch_size from z_dim: 48 channels → patch_size=2, 16 → patch_size=1
+        self.patch_size = 2 if z_dim == 48 else 1
         self.image_channels = 3
         self.frames_to_trim = 3  # TGrow strides (1,2,2) → 2**2 - 1 for w2.1/w2.2 defaults
 
@@ -275,7 +307,7 @@ def decode_latents_taehv_mlx(
     c = latents_np.shape[1]
     z = z_dim if z_dim is not None else c
     ckpt = ensure_taehv_checkpoint(z_dim=z, checkpoint_path=checkpoint_path)
-    dec = MLXTAEHVDecoder(ckpt)
+    dec = MLXTAEHVDecoder(ckpt, z_dim=z)
     # NTCHW
     x = mx.array(latents_np.transpose(0, 2, 1, 3, 4).astype(np.float32))
     out = dec.decode_ntchw(x)  # N T C H W

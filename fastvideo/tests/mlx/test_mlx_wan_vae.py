@@ -41,8 +41,11 @@ def test_taehv_mlx_matches_torch(z_dim: int) -> None:
         out_t = model.decode_video(torch.from_numpy(lat).transpose(1, 2), parallel=True, show_progress_bar=False)
     torch_np = out_t[0].permute(0, 2, 3, 1).float().numpy()
     mlx_np = decode_latents_taehv_mlx(lat, z_dim=z_dim)[0]
-    tmin = min(torch_np.shape[0], mlx_np.shape[0])
-    np.testing.assert_allclose(mlx_np[:tmin], torch_np[:tmin], atol=1e-5, rtol=1e-5)
+    # Validate complete temporal output shape before comparing values.
+    assert mlx_np.shape[0] == torch_np.shape[0], (
+        f"MLX output frame count {mlx_np.shape[0]} != torch {torch_np.shape[0]}"
+    )
+    np.testing.assert_allclose(mlx_np, torch_np, atol=1e-5, rtol=1e-5)
 
 
 def test_denormalize_matches_prompt_to_video_formula() -> None:

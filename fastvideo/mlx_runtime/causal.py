@@ -137,6 +137,13 @@ def causal_self_attention_step(
         local_end = local_end_prev + current_end - global_end
     local_start = local_end - num_new
 
+    # Validate write bounds before assignment for the local_attn_size == -1 path.
+    if local_start < 0 or local_end > kv_cache_size:
+        raise ValueError(
+            f"Cache write range [{local_start}:{local_end}] exceeds allocated "
+            f"capacity [0:{kv_cache_size}]; increase cache size or reduce chunk."
+        )
+
     cache.k[:, local_start:local_end] = roped_key
     cache.v[:, local_start:local_end] = v
 

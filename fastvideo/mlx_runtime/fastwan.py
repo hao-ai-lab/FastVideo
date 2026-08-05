@@ -754,6 +754,39 @@ def _eval_loaded_weight(value) -> None:
         mx.eval(value)
 
 
+# Diffusers-to-FastVideo key mapping for WanTransformerBlock weights.
+# Shared by both MLX and torch block loaders to keep mappings synchronized.
+_WAN_BLOCK_KEY_MAP = {
+    "scale_shift_table": "scale_shift_table",
+    "attn1.to_q.weight": "to_q.weight",
+    "attn1.to_q.bias": "to_q.bias",
+    "attn1.to_k.weight": "to_k.weight",
+    "attn1.to_k.bias": "to_k.bias",
+    "attn1.to_v.weight": "to_v.weight",
+    "attn1.to_v.bias": "to_v.bias",
+    "attn1.to_out.0.weight": "to_out.weight",
+    "attn1.to_out.0.bias": "to_out.bias",
+    "attn1.norm_q.weight": "norm_q.weight",
+    "attn1.norm_k.weight": "norm_k.weight",
+    "attn2.to_q.weight": "attn2.to_q.weight",
+    "attn2.to_q.bias": "attn2.to_q.bias",
+    "attn2.to_k.weight": "attn2.to_k.weight",
+    "attn2.to_k.bias": "attn2.to_k.bias",
+    "attn2.to_v.weight": "attn2.to_v.weight",
+    "attn2.to_v.bias": "attn2.to_v.bias",
+    "attn2.to_out.0.weight": "attn2.to_out.weight",
+    "attn2.to_out.0.bias": "attn2.to_out.bias",
+    "attn2.norm_q.weight": "attn2.norm_q.weight",
+    "attn2.norm_k.weight": "attn2.norm_k.weight",
+    "ffn.net.0.proj.weight": "ffn.fc_in.weight",
+    "ffn.net.0.proj.bias": "ffn.fc_in.bias",
+    "ffn.net.2.weight": "ffn.fc_out.weight",
+    "ffn.net.2.bias": "ffn.fc_out.bias",
+    "norm2.weight": "self_attn_residual_norm.norm.weight",
+    "norm2.bias": "self_attn_residual_norm.norm.bias",
+}
+
+
 def mlx_block_weights_from_diffusers_safetensors(
     checkpoint_path: str | Path,
     *,
@@ -766,35 +799,7 @@ def mlx_block_weights_from_diffusers_safetensors(
     from safetensors import safe_open
 
     prefix = f"blocks.{block_index}."
-    key_map = {
-        "scale_shift_table": "scale_shift_table",
-        "attn1.to_q.weight": "to_q.weight",
-        "attn1.to_q.bias": "to_q.bias",
-        "attn1.to_k.weight": "to_k.weight",
-        "attn1.to_k.bias": "to_k.bias",
-        "attn1.to_v.weight": "to_v.weight",
-        "attn1.to_v.bias": "to_v.bias",
-        "attn1.to_out.0.weight": "to_out.weight",
-        "attn1.to_out.0.bias": "to_out.bias",
-        "attn1.norm_q.weight": "norm_q.weight",
-        "attn1.norm_k.weight": "norm_k.weight",
-        "attn2.to_q.weight": "attn2.to_q.weight",
-        "attn2.to_q.bias": "attn2.to_q.bias",
-        "attn2.to_k.weight": "attn2.to_k.weight",
-        "attn2.to_k.bias": "attn2.to_k.bias",
-        "attn2.to_v.weight": "attn2.to_v.weight",
-        "attn2.to_v.bias": "attn2.to_v.bias",
-        "attn2.to_out.0.weight": "attn2.to_out.weight",
-        "attn2.to_out.0.bias": "attn2.to_out.bias",
-        "attn2.norm_q.weight": "attn2.norm_q.weight",
-        "attn2.norm_k.weight": "attn2.norm_k.weight",
-        "ffn.net.0.proj.weight": "ffn.fc_in.weight",
-        "ffn.net.0.proj.bias": "ffn.fc_in.bias",
-        "ffn.net.2.weight": "ffn.fc_out.weight",
-        "ffn.net.2.bias": "ffn.fc_out.bias",
-        "norm2.weight": "self_attn_residual_norm.norm.weight",
-        "norm2.bias": "self_attn_residual_norm.norm.bias",
-    }
+    key_map = _WAN_BLOCK_KEY_MAP
 
     spec = MLXQuantizationSpec.from_name(quantization) if (quantization is None or isinstance(quantization, str)) else quantization
     ensure_quantization_supported(spec)
@@ -908,38 +913,17 @@ def torch_block_state_from_diffusers_safetensors(
     from safetensors import safe_open
 
     prefix = f"blocks.{block_index}."
-    key_map = {
-        "scale_shift_table": "scale_shift_table",
-        "attn1.to_q.weight": "to_q.weight",
-        "attn1.to_q.bias": "to_q.bias",
-        "attn1.to_k.weight": "to_k.weight",
-        "attn1.to_k.bias": "to_k.bias",
-        "attn1.to_v.weight": "to_v.weight",
-        "attn1.to_v.bias": "to_v.bias",
-        "attn1.to_out.0.weight": "to_out.weight",
-        "attn1.to_out.0.bias": "to_out.bias",
-        "attn1.norm_q.weight": "norm_q.weight",
-        "attn1.norm_k.weight": "norm_k.weight",
-        "attn2.to_q.weight": "attn2.to_q.weight",
-        "attn2.to_q.bias": "attn2.to_q.bias",
-        "attn2.to_k.weight": "attn2.to_k.weight",
-        "attn2.to_k.bias": "attn2.to_k.bias",
-        "attn2.to_v.weight": "attn2.to_v.weight",
-        "attn2.to_v.bias": "attn2.to_v.bias",
-        "attn2.to_out.0.weight": "attn2.to_out.weight",
-        "attn2.to_out.0.bias": "attn2.to_out.bias",
-        "attn2.norm_q.weight": "attn2.norm_q.weight",
-        "attn2.norm_k.weight": "attn2.norm_k.weight",
-        "ffn.net.0.proj.weight": "ffn.fc_in.weight",
-        "ffn.net.0.proj.bias": "ffn.fc_in.bias",
-        "ffn.net.2.weight": "ffn.fc_out.weight",
-        "ffn.net.2.bias": "ffn.fc_out.bias",
-        "norm2.weight": "self_attn_residual_norm.norm.weight",
-        "norm2.bias": "self_attn_residual_norm.norm.bias",
-    }
+    key_map = _WAN_BLOCK_KEY_MAP
 
     state = {}
     with safe_open(str(checkpoint_path), framework="pt", device="cpu") as handle:
+        available = set(handle.keys())
         for source_name, target_name in key_map.items():
-            state[target_name] = handle.get_tensor(prefix + source_name).float()
+            full = prefix + source_name
+            if full not in available:
+                # Biases are optional: e.g. Wan2.1-14B has bias-free attention/FFN.
+                if source_name.endswith(".bias"):
+                    continue
+                raise KeyError(f"missing required block weight: {full}")
+            state[target_name] = handle.get_tensor(full).float()
     return state

@@ -26,12 +26,45 @@ _CONFIG = _ROOT / "transformer" / "config.json"
 _HAS_METAL = bool(getattr(mx, "metal", None) and mx.metal.is_available())
 _HAS_WEIGHTS = _CHECKPOINT.exists() and _CONFIG.exists() and _CHECKPOINT.stat().st_size > 1_000_000_000
 
+# The real-weight test loads ~10 GB fp16 weights + activations. Gate on the
+# documented 36 GB requirement unless explicitly opted in.
+def _check_memory_requirement() -> bool:
+    """Return True if available memory meets the 36 GB requirement or opt-in is set."""
+    if os.environ.get("FASTVIDEO_WAN22_5B_ALLOW_LOW_MEMORY") == "1":
+        return True
+    try:
+        # On macOS, check unified memory via sysctl.
+        import subprocess
+        result = subprocess.run(
+            ["sysctl", "-n", "hw.memsize"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            mem_bytes = int(result.stdout.strip())
+            mem_gib = mem_bytes / (1024**3)
+            return mem_gib >= 36.0
+    except Exception:
+        pass
+    # Conservative fallback: require opt-in if we can't detect memory.
+    return False
+
+
+_HAS_SUFFICIENT_MEMORY = _check_memory_requirement()
+
 pytestmark = [
     pytest.mark.skipif(not _HAS_METAL, reason="Metal required for real 5B fp16 parity"),
     pytest.mark.skipif(
         not _HAS_WEIGHTS,
         reason=f"Wan2.2-5B checkpoint not found/incomplete under {_ROOT} "
         "(set FASTVIDEO_WAN22_5B_ROOT; expected ~10 GB safetensors)",
+    ),
+    pytest.mark.skipif(
+        not _HAS_SUFFICIENT_MEMORY,
+        reason="Real-weight 5B test requires >= 36 GB unified memory "
+        "(set FASTVIDEO_WAN22_5B_ALLOW_LOW_MEMORY=1 to override)",
     ),
 ]
 
@@ -75,11 +108,20 @@ def _load_torch_wan22_from_diffusers(checkpoint: Path, config_path: Path, *, dty
     mapping = get_param_names_mapping(model.param_names_mapping)
     custom_sd, _ = hf_to_custom_state_dict(raw.items(), mapping)
     missing, unexpected = model.load_state_dict(custom_sd, strict=False)
-    # Diffusers layout should map cleanly; allow empty buffers only.
+    # Diffusers layout should map cleanly; unexpected keys are always an error.
     assert not unexpected, f"unexpected keys: {unexpected[:8]}"
-    # Missing keys are rare (e.g. unused image embedder); warn via print if any.
+    # Missing keys must be either empty buffers or explicitly approved. Reject
+    # missing parameters to prevent parity checks from running with uninitialized weights.
     if missing:
-        print(f"[wan22 real parity] missing torch keys ({len(missing)}): {missing[:6]}...")
+        # Allowlist for known empty buffers (if any exist for Wan2.2-5B).
+        # Update this list if legitimate empty buffers are identified.
+        allowed_missing = set()
+        unapproved = [k for k in missing if k not in allowed_missing]
+        assert not unapproved, (
+            f"Missing keys in Wan2.2-5B state dict load: {unapproved[:8]}. "
+            "Cannot proceed with parity check; uninitialized parameters would "
+            "invalidate results."
+        )
     return model.to(dtype=dtype)
 
 

@@ -101,18 +101,19 @@ def apply_memory_limits(
         if mx_module is None:
             import mlx.core as mx_module
 
-        if memory_bytes is not None:
-            previous["mlx_memory_limit"] = int(mx_module.set_memory_limit(memory_bytes))
-            applied["mlx_memory_limit"] = memory_bytes
-        if cache_bytes is not None:
-            previous["mlx_cache_limit"] = int(mx_module.set_cache_limit(cache_bytes))
-            applied["mlx_cache_limit"] = cache_bytes
-        if wired_bytes is not None:
-            try:
-                previous["mlx_wired_limit"] = int(mx_module.set_wired_limit(wired_bytes))
-                applied["mlx_wired_limit"] = wired_bytes
-            except Exception as exc:  # noqa: BLE001 - macOS/system-limit dependent.
-                errors["mlx_wired_limit"] = f"{type(exc).__name__}: {exc}"
+        # Apply each limit independently; record failures without stopping.
+        limits = [
+            ("mlx_memory_limit", memory_bytes, mx_module.set_memory_limit),
+            ("mlx_cache_limit", cache_bytes, mx_module.set_cache_limit),
+            ("mlx_wired_limit", wired_bytes, mx_module.set_wired_limit),
+        ]
+        for name, value, setter in limits:
+            if value is not None:
+                try:
+                    previous[name] = int(setter(value))
+                    applied[name] = value
+                except Exception as exc:  # noqa: BLE001 - macOS/system-limit dependent.
+                    errors[name] = f"{type(exc).__name__}: {exc}"
 
     return AppliedMemoryLimits(
         mlx_memory_limit_gib=mlx_memory_limit_gib,
