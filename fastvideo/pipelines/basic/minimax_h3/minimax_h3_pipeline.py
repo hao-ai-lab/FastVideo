@@ -31,6 +31,10 @@ class MiniMaxH3BasePipeline(ComposedPipelineBase):
         "audio_scheduler",
     ]
 
+    @classmethod
+    def get_hf_download_component_dirs(cls) -> tuple[str, ...]:
+        return tuple(sorted(cls._extra_config_module_map.get(name, name) for name in cls._required_config_modules))
+
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs) -> None:
         del fastvideo_args
         for module_name, modality, expected_shift in (

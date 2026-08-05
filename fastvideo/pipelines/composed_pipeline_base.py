@@ -48,6 +48,11 @@ class ComposedPipelineBase(ABC):
     trainable_transformer_modules: dict[str, torch.nn.Module] = {}
     post_init_called: bool = False
 
+    @classmethod
+    def get_hf_download_component_dirs(cls) -> tuple[str, ...] | None:
+        """Return component directories for an opt-in partial Hub download."""
+        return None
+
     # TODO(will): args should support both inference args and training args
     def __init__(self,
                  model_path: str,
@@ -308,7 +313,10 @@ class ComposedPipelineBase(ABC):
         self.model_path = model_path
         # fastvideo_args.downloaded_model_path = model_path
         logger.info("Model path: %s", model_path)
-        config = verify_model_config_and_directory(model_path)
+        config = verify_model_config_and_directory(
+            model_path,
+            required_component_dirs=self.get_hf_download_component_dirs(),
+        )
         return cast(dict[str, Any], config)
 
     @property
