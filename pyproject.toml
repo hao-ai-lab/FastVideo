@@ -237,7 +237,9 @@ skip = "./data,./wandb,apps/fastvideo_studio/package-lock.json,apps/performance_
 # "tread" matches daVinci-MagiHuman's acronym "TReAD" (Token Routing and
 # Early Drop). codespell lowercases ignore-words entries, so the single
 # lowercase form silences all case variants.
-ignore-words-list = "tread,passt,dout"
+# "padd" is the literal value of Wan2.2-S2V's ``framepack_drop_mode`` in the
+# published checkpoint config; it must be spelled exactly to match.
+ignore-words-list = "tread,passt,dout,padd"
 
 [tool.ruff]
 # Allow lines to be as long as 120.
