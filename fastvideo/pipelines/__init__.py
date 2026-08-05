@@ -48,18 +48,10 @@ def build_pipeline(fastvideo_args: FastVideoArgs,
     )
     pipeline_cls = model_info.pipeline_cls
 
-    component_dirs = pipeline_cls.get_hf_download_component_dirs()
-    allow_patterns = None
-    if component_dirs is not None:
-        allow_patterns = [
-            "model_index.json",
-            "modular_model_index.json",
-            *(f"{component_dir}/**" for component_dir in component_dirs),
-        ]
     model_path = maybe_download_model(
         model_path,
         revision=fastvideo_args.revision,
-        allow_patterns=allow_patterns,
+        allow_patterns=pipeline_cls.get_hf_download_allow_patterns(),
     )
     logger.info("Model path: %s", model_path)
 

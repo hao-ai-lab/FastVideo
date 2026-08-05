@@ -53,6 +53,18 @@ class ComposedPipelineBase(ABC):
         """Return component directories for an opt-in partial Hub download."""
         return None
 
+    @classmethod
+    def get_hf_download_allow_patterns(cls) -> list[str] | None:
+        """Return Hub patterns for the manifest and selected components."""
+        component_dirs = cls.get_hf_download_component_dirs()
+        if component_dirs is None:
+            return None
+        return [
+            "model_index.json",
+            "modular_model_index.json",
+            *(f"{component_dir}/**" for component_dir in component_dirs),
+        ]
+
     # TODO(will): args should support both inference args and training args
     def __init__(self,
                  model_path: str,
@@ -309,7 +321,11 @@ class ComposedPipelineBase(ABC):
 
     def _load_config(self, model_path: str) -> dict[str, Any]:
         revision = getattr(self.fastvideo_args, "revision", None)
-        model_path = maybe_download_model(self.model_path, revision=revision)
+        model_path = maybe_download_model(
+            self.model_path,
+            revision=revision,
+            allow_patterns=self.get_hf_download_allow_patterns(),
+        )
         self.model_path = model_path
         # fastvideo_args.downloaded_model_path = model_path
         logger.info("Model path: %s", model_path)

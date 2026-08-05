@@ -532,6 +532,8 @@ def maybe_download_model(
         download: Whether to download the model from Hugging Face Hub
         revision: Optional immutable Hub revision.
         allow_patterns: Optional Hub glob patterns limiting downloaded files.
+            Local paths are returned unchanged. For umbrella references, the
+            patterns are interpreted relative to the selected subfolder.
 
     Returns:
         Local path to the model (or to the subfolder inside the snapshot).
@@ -552,10 +554,12 @@ def maybe_download_model(
     try:
         if subfolder is not None:
             logger.info("Downloading umbrella-repo subfolder %s/%s from HF Hub...", repo_id, subfolder)
+            subfolder_allow_patterns = ([f"{subfolder}/{pattern}" for pattern in allow_patterns]
+                                        if allow_patterns is not None else [f"{subfolder}/**"])
             with get_lock(model_name_or_path):
                 snapshot_root = snapshot_download(
                     repo_id=repo_id,
-                    allow_patterns=[f"{subfolder}/**"],
+                    allow_patterns=subfolder_allow_patterns,
                     local_dir=local_dir,
                     revision=revision,
                 )
