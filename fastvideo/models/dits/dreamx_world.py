@@ -416,11 +416,9 @@ class DreamXWorldTransformer3DModel(WanTransformer3DModel):
         if encoder_hidden_states is not None and not isinstance(
                 encoder_hidden_states, torch.Tensor):
             encoder_hidden_states = encoder_hidden_states[0]
-        if isinstance(encoder_hidden_states_image,
-                      list) and len(encoder_hidden_states_image) > 0:
-            encoder_hidden_states_image = encoder_hidden_states_image[0]
-        else:
-            encoder_hidden_states_image = None
+        if isinstance(encoder_hidden_states_image, list):
+            encoder_hidden_states_image = (encoder_hidden_states_image[0]
+                                           if len(encoder_hidden_states_image) > 0 else None)
 
         batch_size, _, num_frames, height, width = hidden_states.shape
         p_t, p_h, p_w = self.patch_size
