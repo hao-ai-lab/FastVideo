@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 from fastvideo.api.schema import (
+    BatchingConfig,
     CompileConfig,
     ComponentConfig,
     ContinuationState,
@@ -57,6 +58,7 @@ from fastvideo.api.results import (
 from fastvideo.api.sampling_param import SamplingParam
 
 __all__ = [
+    "BatchingConfig",
     "CompileConfig",
     "ComponentConfig",
     "ContinuationState",

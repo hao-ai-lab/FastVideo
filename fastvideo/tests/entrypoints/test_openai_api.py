@@ -1,10 +1,16 @@
 """Unit tests for the OpenAI-compatible API server helpers (no GPU needed)."""
 
+import asyncio
 import os
+import time
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
+from fastvideo.entrypoints.openai import api_server
+from fastvideo.configs.pipelines.base import PipelineConfig
+from fastvideo.entrypoints.openai.batching import VideoBatchScheduler, _VideoBatchJob
 from fastvideo.api.parser import parse_config
 from fastvideo.api.schema import GenerationRequest
 from fastvideo.entrypoints.openai.protocol import (
@@ -20,6 +26,265 @@ from fastvideo.entrypoints.openai.utils import (
     merge_image_input_list,
     parse_size,
 )
+
+
+class _FakeBatchGenerator:
+
+    def __init__(self):
+        self.calls = []
+
+    def generate_video_batch(self, request_kwargs, *, _capture_postprocess_errors=False):
+        self.calls.append([dict(item) for item in request_kwargs])
+        return [{"prompts": item["prompt"], "video_path": item["output_path"]} for item in request_kwargs]
+
+
+def _make_batch_job(request_id, kwargs):
+    loop = asyncio.get_running_loop()
+    return _VideoBatchJob(
+        request_id=request_id,
+        kwargs=dict(kwargs),
+        future=loop.create_future(),
+        enqueue_time=time.perf_counter(),
+    )
+
+
+def _batch_scheduler_args(**overrides):
+    defaults = dict(
+        model_path="test-model",
+        batching_mode="dynamic",
+        batching_max_size=2,
+        batching_delay_ms=25.0,
+        enable_batching_metrics=False,
+        pipeline_config=PipelineConfig(supports_dynamic_batching=True),
+    )
+    defaults.update(overrides)
+    return SimpleNamespace(**defaults)
+
+
+def test_video_batch_scheduler_groups_compatible_requests(tmp_path):
+    async def run():
+        generator = _FakeBatchGenerator()
+        scheduler = VideoBatchScheduler(generator, _batch_scheduler_args())
+        await scheduler.start()
+        try:
+            first = {
+                "prompt": "first",
+                "height": 256,
+                "width": 256,
+                "num_frames": 1,
+                "num_inference_steps": 2,
+                "seed": 1,
+                "output_path": str(tmp_path / "first.mp4"),
+                "save_video": False,
+            }
+            second = {
+                "prompt": "second",
+                "height": 256,
+                "width": 256,
+                "num_frames": 1,
+                "num_inference_steps": 2,
+                "seed": 2,
+                "output_path": str(tmp_path / "second.mp4"),
+                "save_video": False,
+            }
+            results = await asyncio.gather(
+                scheduler.submit("req-1", first),
+                scheduler.submit("req-2", second),
+            )
+        finally:
+            await scheduler.stop()
+        return generator.calls, results
+
+    calls, results = asyncio.run(run())
+
+    assert len(calls) == 1
+    assert [item["prompt"] for item in calls[0]] == ["first", "second"]
+    assert [result["prompts"] for result in results] == ["first", "second"]
+
+
+def test_video_batch_scheduler_keeps_incompatible_requests_separate(tmp_path):
+    async def run():
+        generator = _FakeBatchGenerator()
+        scheduler = VideoBatchScheduler(generator, _batch_scheduler_args())
+        await scheduler.start()
+        try:
+            text_only = {
+                "prompt": "first",
+                "height": 256,
+                "width": 256,
+                "num_frames": 1,
+                "num_inference_steps": 2,
+                "seed": 1,
+                "output_path": str(tmp_path / "first.mp4"),
+                "save_video": False,
+            }
+            image_conditioned = {
+                "prompt": "second",
+                "height": 256,
+                "width": 256,
+                "num_frames": 1,
+                "num_inference_steps": 2,
+                "seed": 2,
+                "image_path": str(tmp_path / "input.png"),
+                "output_path": str(tmp_path / "second.mp4"),
+                "save_video": False,
+            }
+            results = await asyncio.gather(
+                scheduler.submit("req-1", text_only),
+                scheduler.submit("req-2", image_conditioned),
+            )
+        finally:
+            await scheduler.stop()
+        return generator.calls, results
+
+    calls, results = asyncio.run(run())
+
+    assert len(calls) == 2
+    assert [[item["prompt"] for item in call] for call in calls] == [["first"], ["second"]]
+    assert [result["prompts"] for result in results] == ["first", "second"]
+
+
+def test_video_batch_scheduler_requeues_incompatible_pending_job_at_front(tmp_path):
+    async def run():
+        generator = _FakeBatchGenerator()
+        scheduler = VideoBatchScheduler(generator, _batch_scheduler_args())
+        first = {
+            "prompt": "first",
+            "height": 256,
+            "width": 256,
+            "num_frames": 1,
+            "num_inference_steps": 2,
+            "seed": 1,
+            "output_path": str(tmp_path / "first.mp4"),
+            "save_video": False,
+        }
+        incompatible = {
+            "prompt": "second",
+            "height": 256,
+            "width": 256,
+            "num_frames": 1,
+            "num_inference_steps": 2,
+            "seed": 2,
+            "image_path": str(tmp_path / "input.png"),
+            "output_path": str(tmp_path / "second.mp4"),
+            "save_video": False,
+        }
+        newer = {
+            "prompt": "third",
+            "height": 256,
+            "width": 256,
+            "num_frames": 1,
+            "num_inference_steps": 2,
+            "seed": 3,
+            "output_path": str(tmp_path / "third.mp4"),
+            "save_video": False,
+        }
+
+        scheduler._pending.extend([
+            _make_batch_job("req-2", incompatible),
+            _make_batch_job("req-3", newer),
+        ])
+        batch = await scheduler._collect_batch(_make_batch_job("req-1", first))
+        return [job.request_id for job in batch], [job.request_id for job in scheduler._pending]
+
+    batch_ids, pending_ids = asyncio.run(run())
+
+    assert batch_ids == ["req-1"]
+    assert pending_ids == ["req-2", "req-3"]
+
+
+def test_lifespan_releases_generator_and_state_when_scheduler_stop_fails(monkeypatch):
+    calls = []
+
+    class _Generator:
+
+        def shutdown(self):
+            calls.append("generator.shutdown")
+
+    class _Scheduler:
+
+        async def start(self):
+            calls.append("scheduler.start")
+
+        async def stop(self):
+            calls.append("scheduler.stop")
+            raise RuntimeError("scheduler stop failed")
+
+    generator = _Generator()
+    scheduler = _Scheduler()
+    args = _batch_scheduler_args()
+    app = SimpleNamespace(
+        state=SimpleNamespace(
+            fastvideo_args=args,
+            output_dir="outputs",
+            default_request=None,
+        ))
+    monkeypatch.setattr(api_server.VideoGenerator, "from_fastvideo_args", lambda _args: generator)
+    monkeypatch.setattr(api_server, "VideoBatchScheduler", lambda _generator, _args: scheduler)
+    monkeypatch.setattr(api_server, "set_state", lambda *args, **kwargs: calls.append("set_state"))
+    monkeypatch.setattr(api_server, "clear_state", lambda: calls.append("clear_state"))
+
+    async def run():
+        context = api_server.lifespan(app)
+        await context.__aenter__()
+        with pytest.raises(RuntimeError, match="scheduler stop failed"):
+            await context.__aexit__(None, None, None)
+
+    asyncio.run(run())
+
+    assert calls == [
+        "scheduler.start",
+        "set_state",
+        "scheduler.stop",
+        "generator.shutdown",
+        "clear_state",
+    ]
+
+
+def test_lifespan_releases_generator_when_scheduler_start_fails(monkeypatch):
+    calls = []
+
+    class _Generator:
+
+        def shutdown(self):
+            calls.append("generator.shutdown")
+
+    class _Scheduler:
+
+        async def start(self):
+            calls.append("scheduler.start")
+            raise RuntimeError("unsupported pipeline")
+
+        async def stop(self):
+            calls.append("scheduler.stop")
+
+    generator = _Generator()
+    scheduler = _Scheduler()
+    app = SimpleNamespace(
+        state=SimpleNamespace(
+            fastvideo_args=_batch_scheduler_args(),
+            output_dir="outputs",
+            default_request=None,
+        ))
+    monkeypatch.setattr(api_server.VideoGenerator, "from_fastvideo_args", lambda _args: generator)
+    monkeypatch.setattr(api_server, "VideoBatchScheduler", lambda _generator, _args: scheduler)
+    monkeypatch.setattr(api_server, "set_state", lambda *args, **kwargs: calls.append("set_state"))
+    monkeypatch.setattr(api_server, "clear_state", lambda: calls.append("clear_state"))
+
+    async def run():
+        with pytest.raises(RuntimeError, match="unsupported pipeline"):
+            async with api_server.lifespan(app):
+                pytest.fail("lifespan yielded after scheduler startup failed")
+
+    asyncio.run(run())
+
+    assert calls == [
+        "scheduler.start",
+        "scheduler.stop",
+        "generator.shutdown",
+        "clear_state",
+    ]
+
 
 # ---------------------------------------------------------------------------
 # parse_size
@@ -487,3 +752,36 @@ class TestProtocolModels:
                 id="a"), VideoResponse(id="b")])
         assert len(resp.data) == 2
         assert resp.object == "list"
+
+
+def test_run_generation_updates_store_with_successful_result_path(monkeypatch, tmp_path):
+    from fastvideo.entrypoints.openai import video_api
+
+    updates = []
+
+    class _Store:
+
+        async def update_fields(self, request_id, update):
+            updates.append((request_id, update))
+
+    class _Generator:
+
+        def generate_video(self, **kwargs):
+            return {
+                "generation_time": 1.25,
+                "video_path": str(tmp_path / "request_1.mp4"),
+            }
+
+    monkeypatch.setattr(video_api, "VIDEO_STORE", _Store())
+    monkeypatch.setattr(video_api, "get_generator", lambda: _Generator())
+    monkeypatch.setattr(video_api, "get_video_batch_scheduler", lambda: None)
+
+    asyncio.run(video_api._run_generation("request", {"output_path": str(tmp_path / "request.mp4")}))
+
+    assert updates == [("request", {
+        "status": "completed",
+        "progress": 100,
+        "completed_at": updates[0][1]["completed_at"],
+        "inference_time_s": 1.25,
+        "file_path": str(tmp_path / "request_1.mp4"),
+    })]

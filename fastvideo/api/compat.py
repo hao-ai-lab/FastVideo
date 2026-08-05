@@ -159,6 +159,16 @@ def legacy_from_pretrained_to_config(
             preset_refine["guidance_scale"] = value
         elif key in {"enable_stage_verification", "use_fsdp_inference", "disable_autocast"}:
             engine[key] = value
+        elif key == "batching_mode":
+            engine.setdefault("batching", {})["mode"] = value
+        elif key == "batching_max_size":
+            engine.setdefault("batching", {})["max_size"] = value
+        elif key == "batching_delay_ms":
+            engine.setdefault("batching", {})["delay_ms"] = value
+        elif key == "batching_config":
+            engine.setdefault("batching", {})["config_path"] = value
+        elif key == "enable_batching_metrics":
+            engine.setdefault("batching", {})["enable_metrics"] = value
         elif key == "override_text_encoder_quant":
             quantization["text_encoder_quant"] = value
         elif key == "workload_type":
@@ -244,6 +254,11 @@ def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, An
         "enable_stage_verification": engine.enable_stage_verification,
         "use_fsdp_inference": engine.use_fsdp_inference,
         "disable_autocast": engine.disable_autocast,
+        "batching_mode": engine.batching.mode,
+        "batching_max_size": engine.batching.max_size,
+        "batching_delay_ms": engine.batching.delay_ms,
+        "batching_config": engine.batching.config_path,
+        "enable_batching_metrics": engine.batching.enable_metrics,
     }
     if normalized.pipeline.workload_type is not None:
         kwargs["workload_type"] = normalized.pipeline.workload_type

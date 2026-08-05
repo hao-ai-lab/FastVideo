@@ -90,6 +90,17 @@ steps:
             limit: 2
       agents:
         queue: "default"
+    - label: ":microscope: Dynamic Batching Parity"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "dynamic_batching_parity"
+      command: "timeout 45m .buildkite/scripts/pr_test.sh"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+      agents:
+        queue: "default"
 
   # --- Full-suite-scope direct tests ---
     - label: ":bar_chart: SSIM Tests"
@@ -312,6 +323,44 @@ steps:
                 agents:
                   queue: "default"
             - path:
+                - ".buildkite/pipeline.yml"
+                - ".buildkite/scripts/pr_test.sh"
+                - "fastvideo/batching/**"
+                - "fastvideo/api/**"
+                - "fastvideo/attention/**"
+                - "fastvideo/configs/**"
+                - "fastvideo/distributed/**"
+                - "fastvideo/fastvideo_args.py"
+                - "fastvideo/entrypoints/video_generator.py"
+                - "fastvideo/entrypoints/openai/**"
+                - "fastvideo/hooks/**"
+                - "fastvideo/layers/**"
+                - "fastvideo/models/**"
+                - "fastvideo/pipelines/**"
+                - "fastvideo/platforms/**"
+                - "fastvideo/registry.py"
+                - "fastvideo/tests/batching/**"
+                - "fastvideo/tests/modal/modal_image_utils.py"
+                - "fastvideo/tests/modal/pr_test.py"
+                - "fastvideo/worker/**"
+                - "fastvideo/envs.py"
+                - "fastvideo/logger.py"
+                - "fastvideo/profiler.py"
+                - "fastvideo/utils.py"
+                - "pyproject.toml"
+                - "docker/Dockerfile"
+              config:
+                command: "timeout 45m .buildkite/scripts/pr_test.sh"
+                label: ":microscope: Dynamic Batching Parity"
+                env:
+                  - TEST_TYPE=dynamic_batching_parity
+                retry:
+                  automatic:
+                    - exit_status: 1
+                      limit: 1
+                agents:
+                  queue: "default"
+            - path:
                 - "fastvideo/**"
                 - ".buildkite/**"
                 - ".github/**"
@@ -367,6 +416,44 @@ steps:
                   automatic:
                     - exit_status: 1
                       limit: 2
+                agents:
+                  queue: "default"
+            - path:
+                - ".buildkite/pipeline.yml"
+                - ".buildkite/scripts/pr_test.sh"
+                - "fastvideo/batching/**"
+                - "fastvideo/api/**"
+                - "fastvideo/attention/**"
+                - "fastvideo/configs/**"
+                - "fastvideo/distributed/**"
+                - "fastvideo/fastvideo_args.py"
+                - "fastvideo/entrypoints/video_generator.py"
+                - "fastvideo/entrypoints/openai/**"
+                - "fastvideo/hooks/**"
+                - "fastvideo/layers/**"
+                - "fastvideo/models/**"
+                - "fastvideo/pipelines/**"
+                - "fastvideo/platforms/**"
+                - "fastvideo/registry.py"
+                - "fastvideo/tests/batching/**"
+                - "fastvideo/tests/modal/modal_image_utils.py"
+                - "fastvideo/tests/modal/pr_test.py"
+                - "fastvideo/worker/**"
+                - "fastvideo/envs.py"
+                - "fastvideo/logger.py"
+                - "fastvideo/profiler.py"
+                - "fastvideo/utils.py"
+                - "pyproject.toml"
+                - "docker/Dockerfile"
+              config:
+                command: "timeout 45m .buildkite/scripts/pr_test.sh"
+                label: ":bar_chart: Dynamic Batching Parity"
+                env:
+                  - TEST_TYPE=dynamic_batching_parity
+                retry:
+                  automatic:
+                    - exit_status: 1
+                      limit: 1
                 agents:
                   queue: "default"
             - path:

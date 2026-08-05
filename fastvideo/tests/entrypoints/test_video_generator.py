@@ -1,6 +1,8 @@
 import os
-from types import SimpleNamespace
+import stat
+import threading
 import warnings
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -12,10 +14,12 @@ from fastvideo.api import (
     GenerationResult,
     GeneratorConfig,
     InputConfig,
+    OutputConfig,
     SamplingConfig,
     load_run_config,
 )
 from fastvideo.api.sampling_param import SamplingParam
+from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.entrypoints.video_generator import VideoGenerator, _resolve_output_size
 from fastvideo.fastvideo_args import WorkloadType
 from fastvideo.pipelines import ForwardBatch
@@ -41,6 +45,26 @@ def _new_runtime_video_generator() -> VideoGenerator:
     )
     generator.config = None
     return generator
+
+
+def _batching_fastvideo_args(**overrides):
+    defaults = dict(
+        model_path="test-model",
+        prompt_txt=None,
+        workload_type=SimpleNamespace(value="t2v"),
+        batching_mode="dynamic",
+        batching_max_size=4,
+        batching_config=None,
+        enable_batching_metrics=False,
+        dit_cpu_offload=False,
+        dit_layerwise_offload=False,
+        output_type="latent",
+        pin_cpu_memory=False,
+        VSA_sparsity=0.0,
+        pipeline_config=PipelineConfig(supports_dynamic_batching=True),
+    )
+    defaults.update(overrides)
+    return SimpleNamespace(**defaults)
 
 
 def _patch_from_fastvideo_args(monkeypatch):
@@ -253,6 +277,48 @@ def test_generate_single_video_metadata_only_skips_output_materialization(monkey
     assert empty_calls == [((0,), {"device": "cpu"})]
 
 
+def test_run_forward_batch_overlaps_pixel_allocation_with_forward(monkeypatch):
+    generator = _new_video_generator()
+    forward_started = threading.Event()
+    allocation_started = threading.Event()
+    expected_shape = (1, 3, 2, 16, 16)
+
+    def execute_forward(batch, fastvideo_args):
+        forward_started.set()
+        assert allocation_started.wait(timeout=5)
+        return ForwardBatch(data_type=batch.data_type, output=torch.ones(expected_shape))
+
+    generator.executor = SimpleNamespace(execute_forward=execute_forward)
+    real_empty = video_generator_module.torch.empty
+
+    def track_empty(shape, *args, **kwargs):
+        if shape == expected_shape:
+            assert forward_started.wait(timeout=5)
+            allocation_started.set()
+        return real_empty(shape, *args, **kwargs)
+
+    monkeypatch.setattr(video_generator_module.torch, "empty", track_empty)
+    batch = ForwardBatch(
+        data_type="video",
+        prompt="overlap",
+        height=16,
+        width=16,
+        num_frames=2,
+        save_video=False,
+        return_frames=True,
+    )
+
+    output_batch, _, _ = generator._run_forward_batch(
+        batch,
+        _single_video_args(),
+    )
+
+    assert allocation_started.is_set()
+    assert output_batch.output is not None
+    assert output_batch.output.shape == expected_shape
+    assert output_batch.output.device.type == "cpu"
+
+
 def test_generate_single_video_return_frames_still_materializes_output(tmp_path):
     output = torch.ones((1, 3, 2, 16, 16), dtype=torch.float32) * 0.5
     output_batch = _single_video_output_batch(output)
@@ -283,6 +349,8 @@ def test_generate_single_video_save_video_still_builds_frames(monkeypatch, tmp_p
         saved["frame_count"] = len(frames)
         saved["fps"] = fps
         saved["format"] = format
+        with open(path, "wb") as output_file:
+            output_file.write(b"video")
 
     monkeypatch.setattr(video_generator_module.imageio, "mimsave", fake_mimsave)
 
@@ -297,12 +365,75 @@ def test_generate_single_video_save_video_still_builds_frames(monkeypatch, tmp_p
     assert result["samples"] is None
     assert result["frames"] is None
     assert result["video_path"] == output_path
-    assert saved == {
-        "path": output_path,
-        "frame_count": 2,
-        "fps": 8,
-        "format": "mp4",
-    }
+    assert saved["frame_count"] == 2
+    assert saved["fps"] == 8
+    assert saved["format"] == "mp4"
+    assert saved["path"] != output_path
+    assert os.path.dirname(saved["path"]) == str(tmp_path)
+    with open(output_path, "rb") as output_file:
+        assert output_file.read() == b"video"
+
+
+
+def test_write_video_atomic_removes_partial_temporary_file_on_failure(monkeypatch, tmp_path):
+    output_path = str(tmp_path / "broken.mp4")
+
+    def fail_after_partial_write(path, frames, *, fps, format):
+        with open(path, "wb") as output_file:
+            output_file.write(b"partial")
+        raise OSError("encoder failed")
+
+    monkeypatch.setattr(video_generator_module.imageio, "mimsave", fail_after_partial_write)
+
+    with pytest.raises(OSError, match="encoder failed"):
+        VideoGenerator._write_video_atomic(output_path, [torch.zeros((1, 1)).numpy()], 8)
+
+    assert not os.path.exists(output_path)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_write_video_atomic_applies_umask_to_new_output(monkeypatch, tmp_path):
+    output_path = tmp_path / "new.mp4"
+    temporary_modes = []
+
+    def write_video(path, frames, *, fps, format):
+        temporary_modes.append(stat.S_IMODE(os.stat(path).st_mode))
+        with open(path, "wb") as output_file:
+            output_file.write(b"video")
+
+    monkeypatch.setattr(video_generator_module.imageio, "mimsave", write_video)
+    real_umask = os.umask
+    previous_umask = real_umask(0o027)
+    umask_calls = []
+    monkeypatch.setattr(video_generator_module.os, "umask", lambda mode: umask_calls.append(mode))
+    try:
+        VideoGenerator._write_video_atomic(str(output_path), [torch.zeros((1, 1)).numpy()], 8)
+    finally:
+        real_umask(previous_umask)
+
+    assert umask_calls == []
+    assert temporary_modes == [0o600]
+    assert stat.S_IMODE(output_path.stat().st_mode) == 0o640
+
+
+def test_write_video_atomic_preserves_existing_output_permissions(monkeypatch, tmp_path):
+    output_path = tmp_path / "existing.mp4"
+    output_path.write_bytes(b"old")
+    output_path.chmod(0o604)
+    temporary_modes = []
+
+    def write_video(path, frames, *, fps, format):
+        temporary_modes.append(stat.S_IMODE(os.stat(path).st_mode))
+        with open(path, "wb") as output_file:
+            output_file.write(b"video")
+
+    monkeypatch.setattr(video_generator_module.imageio, "mimsave", write_video)
+
+    VideoGenerator._write_video_atomic(str(output_path), [torch.zeros((1, 1)).numpy()], 8)
+
+    assert output_path.read_bytes() == b"video"
+    assert temporary_modes == [0o600]
+    assert stat.S_IMODE(output_path.stat().st_mode) == 0o604
 
 
 def test_generate_single_video_audio_only_metadata_returns_audio_without_frames(tmp_path):
@@ -431,6 +562,291 @@ def test_generate_single_video_latent_metadata_skips_cpu_materialization(tmp_pat
     assert result["samples"] is None
     assert result["frames"] is None
     assert result["video_path"] is None
+
+def test_generate_prepared_work_items_merges_compatible_latent_requests(monkeypatch, tmp_path):
+    vg = _new_video_generator()
+    vg.fastvideo_args = _batching_fastvideo_args()
+    calls = []
+
+    def fake_device_memory(gpu_id):
+        return 48.0
+
+    def fake_run_forward(batch, fastvideo_args):
+        calls.append(batch)
+        batch_size = len(batch.prompt) if isinstance(batch.prompt, list) else 1
+        output = torch.arange(batch_size * 4, dtype=torch.float32).reshape(batch_size, 4, 1, 1, 1)
+        return ForwardBatch(data_type=batch.data_type, output=output, extra={"peak_memory_mb": 1.0}), 0.5, 10.0
+
+    monkeypatch.setattr(
+        "fastvideo.batching.admission.BatchAdmissionController._get_device_memory_gb",
+        staticmethod(fake_device_memory),
+    )
+    monkeypatch.setattr(vg, "_run_forward_batch", fake_run_forward)
+
+    first = SamplingParam(prompt="one", height=8, width=8, num_frames=1, seed=11, return_frames=True, save_video=False)
+    second = SamplingParam(prompt="two", height=8, width=8, num_frames=1, seed=22, return_frames=True, save_video=False)
+    work_items = [
+        vg._prepare_generation_work_item("one", first, vg.fastvideo_args, output_path=str(tmp_path / "one.mp4")),
+        vg._prepare_generation_work_item("two", second, vg.fastvideo_args, output_path=str(tmp_path / "two.mp4")),
+    ]
+
+    results = vg._generate_prepared_work_items(work_items)
+
+    assert len(calls) == 1
+    assert calls[0].prompt == ["one", "two"]
+    assert calls[0].seeds == [11, 22]
+    assert [result["prompts"] for result in results] == ["one", "two"]
+    assert [result["samples"].shape for result in results] == [(1, 4, 1, 1, 1), (1, 4, 1, 1, 1)]
+    assert results[0]["samples"].flatten().tolist() == [0.0, 1.0, 2.0, 3.0]
+    assert results[1]["samples"].flatten().tolist() == [4.0, 5.0, 6.0, 7.0]
+
+
+@pytest.mark.parametrize(
+    ("return_frame_values", "save_video_values"),
+    [
+        ((False, True), (False, False)),
+        ((True, False), (False, False)),
+        ((False, False), (False, True)),
+        ((False, False), (True, False)),
+    ],
+)
+def test_merge_work_items_aggregates_output_requirements_in_both_orders(
+    tmp_path,
+    return_frame_values,
+    save_video_values,
+):
+    vg = _new_video_generator()
+    vg.fastvideo_args = _batching_fastvideo_args()
+    prompts = ("one", "two")
+    params = [
+        _small_sampling_param(save_video=save_video, return_frames=return_frames)
+        for return_frames, save_video in zip(return_frame_values, save_video_values, strict=True)
+    ]
+    work_items = [
+        vg._prepare_generation_work_item(
+            prompt,
+            param,
+            vg.fastvideo_args,
+            output_path=str(tmp_path / f"{prompt}.mp4"),
+        ) for prompt, param in zip(prompts, params, strict=True)
+    ]
+
+    merged = vg._merge_work_items(work_items)
+
+    assert merged.batch.return_frames is any(return_frame_values)
+    assert merged.batch.save_video is any(save_video_values)
+
+
+def test_generate_prepared_work_items_falls_back_for_incompatible_requests(monkeypatch, tmp_path):
+    vg = _new_video_generator()
+    vg.fastvideo_args = _batching_fastvideo_args()
+    calls = []
+
+    def fake_run_forward(batch, fastvideo_args):
+        calls.append(batch)
+        output = torch.zeros((1, 4, 1, 1, 1), dtype=torch.float32)
+        return ForwardBatch(data_type=batch.data_type, output=output), 0.5, 10.0
+
+    monkeypatch.setattr(vg, "_run_forward_batch", fake_run_forward)
+
+    first = SamplingParam(prompt="one", height=8, width=8, num_frames=1, guidance_scale=1.0, save_video=False)
+    second = SamplingParam(prompt="two", height=8, width=8, num_frames=1, guidance_scale=3.0, save_video=False)
+    work_items = [
+        vg._prepare_generation_work_item("one", first, vg.fastvideo_args, output_path=str(tmp_path / "one.mp4")),
+        vg._prepare_generation_work_item("two", second, vg.fastvideo_args, output_path=str(tmp_path / "two.mp4")),
+    ]
+
+    results = vg._generate_prepared_work_items(work_items)
+
+    assert len(calls) == 2
+    assert all(isinstance(call.prompt, str) for call in calls)
+    assert [result["prompts"] for result in results] == ["one", "two"]
+
+
+def test_generate_prepared_work_items_retries_failed_group_per_prompt(monkeypatch, tmp_path):
+    vg = _new_video_generator()
+    vg.fastvideo_args = _batching_fastvideo_args()
+    calls = []
+
+    def fake_run_forward(batch, fastvideo_args):
+        calls.append(batch.prompt)
+        if isinstance(batch.prompt, list):
+            raise RuntimeError("merged generation failed")
+        if batch.prompt == "two":
+            raise ValueError("bad second prompt")
+        output = torch.arange(4, dtype=torch.float32).reshape(1, 4, 1, 1, 1)
+        return ForwardBatch(data_type=batch.data_type, output=output), 0.5, 10.0
+
+    monkeypatch.setattr(vg, "_run_forward_batch", fake_run_forward)
+    params = [
+        SamplingParam(prompt="one", height=8, width=8, num_frames=1, return_frames=True, save_video=False),
+        SamplingParam(prompt="two", height=8, width=8, num_frames=1, return_frames=True, save_video=False),
+    ]
+    work_items = [
+        vg._prepare_generation_work_item(
+            param.prompt,
+            param,
+            vg.fastvideo_args,
+            output_path=str(tmp_path / f"{param.prompt}.mp4"),
+        ) for param in params
+    ]
+
+    results = vg._generate_prepared_work_items(work_items, tolerate_failures=True)
+
+    assert calls == [["one", "two"], "one", "two"]
+    assert results[0]["prompts"] == "one"
+    assert results[0]["samples"].flatten().tolist() == [0.0, 1.0, 2.0, 3.0]
+    assert results[1] == {"error": "bad second prompt", "prompt": "two"}
+
+
+def test_run_work_item_group_captures_postprocess_errors_per_item(monkeypatch, tmp_path):
+    generator = _new_video_generator()
+    generator.fastvideo_args = _batching_fastvideo_args()
+
+    def fake_run_forward(batch, fastvideo_args):
+        output = torch.zeros((2, 4, 1, 1, 1), dtype=torch.float32)
+        return ForwardBatch(data_type=batch.data_type, output=output), 0.5, 10.0
+
+    def fake_postprocess(work_item, output_batch, gen_time, start_time):
+        if work_item.prompt == "two":
+            raise OSError("second save failed")
+        return {
+            "prompts": work_item.prompt,
+            "video_path": work_item.output_path,
+        }
+
+    monkeypatch.setattr(generator, "_run_forward_batch", fake_run_forward)
+    monkeypatch.setattr(generator, "_postprocess_generation_output", fake_postprocess)
+    params = [
+        SamplingParam(prompt="one", height=8, width=8, num_frames=1, save_video=True),
+        SamplingParam(prompt="two", height=8, width=8, num_frames=1, save_video=True),
+    ]
+    work_items = [
+        generator._prepare_generation_work_item(
+            param.prompt,
+            param,
+            generator.fastvideo_args,
+            output_path=str(tmp_path / f"{param.prompt}.mp4"),
+        ) for param in params
+    ]
+
+    results = generator._run_work_item_group(
+        work_items,
+        capture_postprocess_errors=True,
+    )
+
+    assert results[0]["prompts"] == "one"
+    assert results[0]["video_path"] == str(tmp_path / "one.mp4")
+    assert isinstance(results[1]["_postprocess_error"], OSError)
+    assert str(results[1]["_postprocess_error"]) == "second save failed"
+
+
+def test_video_generator_validates_batching_config_before_executor_start(tmp_path):
+    config_path = tmp_path / "batching.json"
+    config_path.write_text('{"rules": {"model": "test-model"}}', encoding="utf-8")
+    executor_started = False
+
+    class _Executor:
+
+        def __init__(self, *args, **kwargs):
+            nonlocal executor_started
+            executor_started = True
+
+    with pytest.raises(ValueError, match="rules must be a list"):
+        VideoGenerator(_batching_fastvideo_args(batching_config=str(config_path)), _Executor, log_stats=False)
+    assert executor_started is False
+
+
+def test_generate_prepared_work_items_uses_startup_cached_admission_config(monkeypatch, tmp_path):
+    config_path = tmp_path / "batching.json"
+    config_path.write_text(
+        '{"rules": [{"model": "test-model", "max_batch_size": 1}]}',
+        encoding="utf-8",
+    )
+
+    class _Executor:
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+    args = _batching_fastvideo_args(batching_config=str(config_path))
+    generator = VideoGenerator(args, _Executor, log_stats=False)
+    config_path.unlink()
+    request_args = _batching_fastvideo_args(batching_config=str(config_path))
+    calls = []
+
+    def fake_run_forward(batch, fastvideo_args):
+        calls.append(batch.prompt)
+        output = torch.zeros((1, 4, 1, 1, 1), dtype=torch.float32)
+        return ForwardBatch(data_type=batch.data_type, output=output), 0.5, 10.0
+
+    monkeypatch.setattr(generator, "_run_forward_batch", fake_run_forward)
+    params = [
+        SamplingParam(prompt="one", height=8, width=8, num_frames=1, return_frames=True, save_video=False),
+        SamplingParam(prompt="two", height=8, width=8, num_frames=1, return_frames=True, save_video=False),
+    ]
+    work_items = [
+        generator._prepare_generation_work_item(
+            param.prompt,
+            param,
+            request_args,
+            output_path=str(tmp_path / f"{param.prompt}.mp4"),
+        ) for param in params
+    ]
+
+    results = generator._generate_prepared_work_items(work_items)
+
+    assert calls == ["one", "two"]
+    assert [result["prompts"] for result in results] == ["one", "two"]
+
+
+def test_generate_video_batch_routes_compat_kwargs(monkeypatch, tmp_path):
+    vg = _new_video_generator()
+    vg.fastvideo_args = _batching_fastvideo_args()
+    calls = []
+
+    def fake_device_memory(gpu_id):
+        return 48.0
+
+    def fake_run_forward(batch, fastvideo_args):
+        calls.append((batch, fastvideo_args))
+        output = torch.zeros((len(batch.prompt), 4, 1, 1, 1), dtype=torch.float32)
+        return ForwardBatch(data_type=batch.data_type, output=output), 0.5, 10.0
+
+    monkeypatch.setattr(
+        "fastvideo.batching.admission.BatchAdmissionController._get_device_memory_gb",
+        staticmethod(fake_device_memory),
+    )
+    monkeypatch.setattr(vg, "_run_forward_batch", fake_run_forward)
+
+    results = vg.generate_video_batch([
+        {
+            "prompt": "one",
+            "height": 8,
+            "width": 8,
+            "num_frames": 1,
+            "embedded_cfg_scale": 7.5,
+            "save_video": False,
+            "return_frames": True,
+            "output_path": str(tmp_path / "one.mp4"),
+        },
+        {
+            "prompt": "two",
+            "height": 8,
+            "width": 8,
+            "num_frames": 1,
+            "embedded_cfg_scale": 7.5,
+            "save_video": False,
+            "return_frames": True,
+            "output_path": str(tmp_path / "two.mp4"),
+        },
+    ])
+
+    assert len(calls) == 1
+    batch, fastvideo_args = calls[0]
+    assert batch.prompt == ["one", "two"]
+    assert fastvideo_args.pipeline_config.embedded_cfg_scale == 7.5
+    assert [result["prompts"] for result in results] == ["one", "two"]
 
 
 def test_from_config_normalizes_and_translates(monkeypatch):
@@ -824,6 +1240,40 @@ def test_generate_batch_prompt_file_returns_typed_results(tmp_path, monkeypatch)
     assert captured_prompts == ["first prompt", "second prompt"]
 
 
+def test_generate_prompt_file_clears_source_path_and_batches_prompts(monkeypatch, tmp_path):
+    generator = _new_video_generator()
+    generator.fastvideo_args = _batching_fastvideo_args()
+    prompt_file = tmp_path / "prompts.txt"
+    prompt_file.write_text("first prompt\nsecond prompt\n", encoding="utf-8")
+    calls = []
+
+    def fake_run_forward(batch, fastvideo_args):
+        calls.append(batch)
+        output = torch.arange(8, dtype=torch.float32).reshape(2, 4, 1, 1, 1)
+        return ForwardBatch(data_type=batch.data_type, output=output), 0.5, 10.0
+
+    monkeypatch.setattr(generator, "_run_forward_batch", fake_run_forward)
+    sampling_param = SamplingParam(
+        prompt_path=str(prompt_file),
+        output_path=str(tmp_path / "outputs"),
+        height=8,
+        width=8,
+        num_frames=1,
+        return_frames=True,
+        save_video=False,
+    )
+
+    results = generator._generate_video_impl(
+        sampling_param=sampling_param,
+        fastvideo_args=generator.fastvideo_args,
+    )
+
+    assert len(calls) == 1
+    assert calls[0].prompt == ["first prompt", "second prompt"]
+    assert [result["prompt"] for result in results] == ["first prompt", "second prompt"]
+    assert sampling_param.prompt_path == str(prompt_file)
+
+
 def test_generate_batched_request_fans_out_media_inputs(monkeypatch):
     generator = _new_runtime_video_generator()
     _patch_sampling_param_from_pretrained(monkeypatch)
@@ -851,6 +1301,46 @@ def test_generate_batched_request_fans_out_media_inputs(monkeypatch):
     ]
 
 
+def test_generate_typed_prompt_list_routes_through_dynamic_batching(monkeypatch, tmp_path):
+    generator = _new_video_generator()
+    generator.fastvideo_args = _batching_fastvideo_args()
+    _patch_sampling_param_from_pretrained(monkeypatch)
+    calls = []
+
+    def fake_device_memory(gpu_id):
+        return 48.0
+
+    def fake_run_forward(batch, fastvideo_args):
+        calls.append(batch)
+        batch_size = len(batch.prompt) if isinstance(batch.prompt, list) else 1
+        output = torch.arange(batch_size * 4, dtype=torch.float32).reshape(batch_size, 4, 1, 1, 1)
+        return ForwardBatch(data_type=batch.data_type, output=output), 0.5, 10.0
+
+    monkeypatch.setattr(
+        "fastvideo.batching.admission.BatchAdmissionController._get_device_memory_gb",
+        staticmethod(fake_device_memory),
+    )
+    monkeypatch.setattr(generator, "_run_forward_batch", fake_run_forward)
+
+    results = generator.generate(
+        GenerationRequest(
+            prompt=["first prompt", "second prompt"],
+            sampling=SamplingConfig(num_frames=1, height=8, width=8),
+            output=OutputConfig(
+                output_path=str(tmp_path),
+                save_video=False,
+                return_frames=True,
+            ),
+        )
+    )
+
+    assert len(calls) == 1
+    assert calls[0].prompt == ["first prompt", "second prompt"]
+    assert [result.prompt for result in results] == ["first prompt", "second prompt"]
+    assert [result.prompt_index for result in results] == [0, 1]
+    assert all(isinstance(result, GenerationResult) for result in results)
+
+
 def test_generate_batched_request_rejects_mismatched_media_inputs(monkeypatch):
     generator = _new_runtime_video_generator()
     _patch_sampling_param_from_pretrained(monkeypatch)
@@ -860,4 +1350,98 @@ def test_generate_batched_request_rejects_mismatched_media_inputs(monkeypatch):
             GenerationRequest(
                 prompt=["first prompt", "second prompt"],
                 inputs=InputConfig(image_path=["first.png"]),
-            ))
+            )
+        )
+
+
+def test_split_output_batch_isolates_logging_info_per_result():
+    generator = _new_video_generator()
+    output_batch = ForwardBatch(
+        data_type="video",
+        output=torch.zeros((2, 4, 1, 1, 1)),
+    )
+    output_batch.logging_info.add_stage_execution_time("DenoisingStage", 1.0)
+
+    first = generator._split_output_batch(output_batch, index=0, batch_size=2)
+    second = generator._split_output_batch(output_batch, index=1, batch_size=2)
+    first.logging_info.add_stage_execution_time("PostDecodeFrameProcessStage", 2.0)
+    second.logging_info.add_stage_execution_time("PostDecodeFrameProcessStage", 3.0)
+
+    assert first.logging_info is not second.logging_info
+    assert first.logging_info is not output_batch.logging_info
+    assert first.logging_info.get_stage_info("PostDecodeFrameProcessStage")["execution_time"] == 2.0
+    assert second.logging_info.get_stage_info("PostDecodeFrameProcessStage")["execution_time"] == 3.0
+    assert output_batch.logging_info.get_stage_info("PostDecodeFrameProcessStage") == {}
+
+
+def test_run_forward_batch_metrics_report_actual_group_utilization(monkeypatch):
+    generator = _new_video_generator()
+    output = torch.zeros((2, 4, 1, 1, 1))
+    generator.executor = SimpleNamespace(
+        execute_forward=lambda batch, fastvideo_args: ForwardBatch(
+            data_type=batch.data_type,
+            output=output,
+        ))
+    info_logs = []
+    monkeypatch.setattr(
+        video_generator_module.logger,
+        "info",
+        lambda message, *args: info_logs.append((message, args)),
+    )
+    batch = ForwardBatch(
+        data_type="video",
+        prompt=["one", "two"],
+        save_video=False,
+        return_frames=True,
+    )
+
+    generator._run_forward_batch(
+        batch,
+        _batching_fastvideo_args(
+            enable_batching_metrics=True,
+            batching_max_size=4,
+        ),
+    )
+
+    assert (
+        "Executing dynamic video forward batch: size=%d max_size=%d utilization=%.2f",
+        (2, 4, 0.5),
+    ) in info_logs
+
+
+def test_generate_prepared_work_items_metrics_report_rejection_reason(monkeypatch, tmp_path):
+    generator = _new_video_generator()
+    generator.fastvideo_args = _batching_fastvideo_args(enable_batching_metrics=True)
+    info_logs = []
+    monkeypatch.setattr(
+        video_generator_module.logger,
+        "info",
+        lambda message, *args: info_logs.append((message, args)),
+    )
+
+    def fake_run_forward(batch, fastvideo_args):
+        return ForwardBatch(
+            data_type=batch.data_type,
+            output=torch.zeros((1, 4, 1, 1, 1)),
+        ), 0.5, 10.0
+
+    monkeypatch.setattr(generator, "_run_forward_batch", fake_run_forward)
+    params = [
+        SamplingParam(prompt="one", height=8, width=8, num_frames=1, guidance_scale=1.0, save_video=False),
+        SamplingParam(prompt="two", height=8, width=8, num_frames=1, guidance_scale=3.0, save_video=False),
+    ]
+    work_items = [
+        generator._prepare_generation_work_item(
+            param.prompt,
+            param,
+            generator.fastvideo_args,
+            output_path=str(tmp_path / f"{param.prompt}.mp4"),
+        ) for param in params
+    ]
+
+    generator._generate_prepared_work_items(work_items)
+
+    assert (
+        "Dynamic batch candidate rejected: reason=%s current_size=%d max_size=%d",
+        ("sampling_params.guidance_scale", 1, 4),
+    ) in info_logs

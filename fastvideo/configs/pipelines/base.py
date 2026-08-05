@@ -75,6 +75,12 @@ class PipelineConfig:
     # DMD parameters
     dmd_denoising_steps: list[int] | None = field(default=None)
 
+    # Whether this pipeline family is verified to merge multiple requests into
+    # one forward pass (dynamic batching). Conservative default: several
+    # pipelines are structurally batch-size-1, so each family must opt in
+    # explicitly after verifying output parity.
+    supports_dynamic_batching: bool = False
+
     # Wan2.2 task modifiers
     ti2v_task: bool = False
     lucy_edit_task: bool = False
@@ -275,6 +281,37 @@ class PipelineConfig:
             raise ValueError(
                 f"Length of text postprocess functions ({len(self.postprocess_text_funcs)}) must be equal to length of text preprocessing functions ({len(self.preprocess_text_funcs)})"
             )
+
+    def dynamic_batching_supported(self) -> bool:
+        """Whether the loaded pipeline may merge requests via dynamic batching.
+
+        Conservative gate: a pipeline family must opt in explicitly, and DMD /
+        causal denoising variants are always excluded because those denoising
+        stages do not consume per-item generators, so merged requests would
+        share RNG.
+        """
+        return (self.supports_dynamic_batching and self.dmd_denoising_steps is None and not self.is_causal)
+
+    def estimate_request_cost(self, request: Any) -> float:
+        """Estimate relative memory/compute cost for batching admission.
+
+        The default is intentionally simple and model-agnostic: pixel count
+        times frame count. Pipeline subclasses can override this when they have
+        calibrated costs.
+        """
+        height = getattr(request, "height", None)
+        width = getattr(request, "width", None)
+        num_frames = getattr(request, "num_frames", None)
+        if isinstance(height, list):
+            height = height[0] if height else None
+        if isinstance(width, list):
+            width = width[0] if width else None
+        if isinstance(num_frames, list):
+            num_frames = num_frames[0] if num_frames else None
+        height = int(height or 1)
+        width = int(width or 1)
+        num_frames = int(num_frames or 1)
+        return float(max(1, height) * max(1, width) * max(1, num_frames))
 
     def dump_to_json(self, file_path: str):
         output_dict = shallow_asdict(self)
