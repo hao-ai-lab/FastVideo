@@ -44,6 +44,7 @@ LEGACY_VARIANTS = (
     ("wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers", "SelfForcingWanT2V480PConfig", "sf_wan_t2v_1_3b", ("t2v",)),
     ("rand0nmr/SFWan2.2-T2V-A14B-Diffusers", "SelfForcingWan2_2_T2V480PConfig", "sf_wan_2_2_t2v_a14b", ("t2v",)),
     ("FastVideo/SFWan2.2-I2V-A14B-Preview-Diffusers", "SelfForcingWan2_2_T2V480PConfig", "sf_wan_2_2_i2v_a14b", ("i2v",)),
+    ("FastVideo/Wan2.2-S2V-14B-Diffusers", "WanS2V14BConfig", "wan_s2v_14b", ()),
 )
 
 
@@ -141,6 +142,7 @@ def test_manifest_selection_and_explicit_override_are_not_pinned(monkeypatch, tm
     ("Wan2_2_I2V_A14B_Config", 5.0, None, True),
     ("SelfForcingWanT2V480PConfig", 5.0, [1000, 750, 500, 250], False),
     ("SelfForcingWan2_2_T2V480PConfig", 12.0, [1000, 850, 700, 550, 350, 275, 200, 125], True),
+    ("WanS2V14BConfig", 5.0, None, True),
 ])
 def test_component_precision_and_sampling_defaults(config_name, flow_shift, dmd_steps, load_encoder):
     config_cls = getattr(pipeline_config, config_name)

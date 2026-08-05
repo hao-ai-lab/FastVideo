@@ -346,6 +346,24 @@ SF_WAN_2_2_I2V_A14B = InferencePreset(
     },
 )
 
+WAN_S2V_14B = InferencePreset(
+    name="wan_s2v_14b",
+    version=1,
+    model_family="wan",
+    description="Wan 2.2 S2V 14B audio-driven video at 480p",
+    workload_type="i2v",
+    stage_schemas=(_DENOISE_STAGE, ),
+    defaults={
+        "height": 480,
+        "width": 832,
+        "num_frames": 80,
+        "fps": 16,
+        "guidance_scale": 5.0,
+        "num_inference_steps": 40,
+        "negative_prompt": _NEGATIVE_PROMPT_CN,
+    },
+)
+
 # Collect all presets for bulk registration.
 ALL_PRESETS = (
     WAN_T2V_1_3B,
@@ -360,6 +378,7 @@ ALL_PRESETS = (
     WAN_2_2_TI2V_5B,
     FAST_WAN_2_2_TI2V_5B,
     LUCY_EDIT_DEV,
+    WAN_S2V_14B,
     SF_WAN_T2V_1_3B,
     SF_WAN_2_2_T2V_A14B,
     SF_WAN_2_2_I2V_A14B,

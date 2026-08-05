@@ -92,6 +92,12 @@ class ForwardBatch:
     video_path: str | None = None
     video_latent: torch.Tensor | None = None
 
+    # Audio-driven inputs (Wan S2V). `audio_embeds` holds the stacked wav2vec2
+    # hidden states [B, num_layers, C_a, T] produced by the audio encoding stage
+    # and consumed by the DiT's audio injector.
+    audio_path: str | None = None
+    audio_embeds: torch.Tensor | None = None
+
     # Refine inputs (LongCat)
     refine_from: str | None = None
     t_thresh: float = 0.5

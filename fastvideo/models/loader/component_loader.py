@@ -108,6 +108,9 @@ class ComponentLoader(ABC):
             "image_encoder": (ImageEncoderLoader, "transformers"),
             "image_encoder_2": (ImageEncoderLoader, "transformers"),
             "image_encoder_3": (ImageEncoderLoader, "transformers"),
+            # Wan-S2V speech conditioning: wav2vec2 encoder + its feature extractor.
+            "audio_encoder": (AudioEncoderLoader, "transformers"),
+            "audio_processor": (AudioProcessorLoader, "transformers"),
             "vision_language_encoder": (VisionLanguageEncoderLoader, "transformers"),
             "processor": (ProcessorLoader, "transformers"),
             "upsampler": (UpsamplerLoader, "diffusers"),
@@ -602,6 +605,49 @@ class ProcessorLoader(ComponentLoader):
         )
         logger.info("Loaded processor: %s", processor.__class__.__name__)
         return processor
+
+
+class AudioEncoderLoader(ComponentLoader):
+    """Loader for the wav2vec2 speech encoder used by audio-driven pipelines.
+
+    Loaded straight from transformers rather than reimplemented: it is small
+    (~300M), runs once per generation rather than once per denoising step, and
+    is not tensor-parallel sensitive, so a native port would add risk and no
+    throughput. Wan-S2V bundles its encoder inside the model repo, so the path
+    is normally ``<model>/wav2vec2-large-xlsr-53-english``.
+    """
+
+    def load(self, model_path: str, fastvideo_args: FastVideoArgs):
+        from transformers import Wav2Vec2Model
+
+        logger.info("Loading audio encoder from %s", model_path)
+        encoder = Wav2Vec2Model.from_pretrained(
+            model_path,
+            torch_dtype=PRECISION_TO_TYPE[fastvideo_args.pipeline_config.audio_encoder_precision],
+        )
+        encoder = encoder.eval().to(get_local_torch_device())
+        encoder.requires_grad_(False)
+        logger.info("Loaded audio encoder: %s", encoder.__class__.__name__)
+        return encoder
+
+
+class AudioProcessorLoader(ComponentLoader):
+    """Loader for the wav2vec2 feature extractor.
+
+    Deliberately not ``AutoProcessor``: the bundled wav2vec2-large-xlsr-53-english
+    ships an ``alphabet.json`` and a ``language_model/`` folder, so AutoProcessor
+    resolves ``Wav2Vec2ProcessorWithLM`` and then requires pyctcdecode + kenlm --
+    neither of which we depend on, and neither of which we need. Only the feature
+    extractor's ``input_values`` is ever used.
+    """
+
+    def load(self, model_path: str, fastvideo_args: FastVideoArgs):
+        from transformers import Wav2Vec2FeatureExtractor
+
+        logger.info("Loading audio feature extractor from %s", model_path)
+        extractor = Wav2Vec2FeatureExtractor.from_pretrained(model_path)
+        logger.info("Loaded audio feature extractor: %s", extractor.__class__.__name__)
+        return extractor
 
 
 class ImageProcessorLoader(ComponentLoader):
