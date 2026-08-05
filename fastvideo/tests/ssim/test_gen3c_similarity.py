@@ -57,6 +57,10 @@ if "A40" in device_name:
     device_reference_folder = "A40" + device_reference_folder_suffix
 elif "L40S" in device_name:
     device_reference_folder = "L40S" + device_reference_folder_suffix
+elif "GB200" in device_name:
+    # must be checked before any future bare-"B200" branch: these are
+    # substring tests and "B200" is a substring of "NVIDIA GB200"
+    device_reference_folder = "GB200" + device_reference_folder_suffix
 else:
     device_reference_folder = None
     logger.warning(f"Unsupported device for GEN3C SSIM tests: {device_name}")
