@@ -275,9 +275,11 @@ class MiniMaxH3AdaLayerNormModulation(nn.Module):
         hidden_size: int,
         quant_config: QuantizationConfig | None = None,
         prefix: str = "",
+        apply_silu: bool = True,
     ) -> None:
         super().__init__()
         self.hidden_size = hidden_size
+        self.apply_silu = apply_silu
         self.linear = ReplicatedLinear(
             time_embed_dim,
             6 * hidden_size * MINIMAX_H3_MODALITY_NUM,
@@ -287,7 +289,9 @@ class MiniMaxH3AdaLayerNormModulation(nn.Module):
         )
 
     def forward(self, temb: torch.Tensor) -> tuple[torch.Tensor, ...]:
-        temb, _ = self.linear(F.silu(temb).to(self.linear.weight.dtype))
+        if self.apply_silu:
+            temb = F.silu(temb)
+        temb, _ = self.linear(temb.to(self.linear.weight.dtype))
         return temb.view(-1, 6 * self.hidden_size).chunk(6, dim=-1)
 
 
@@ -301,9 +305,11 @@ class MiniMaxH3AdaLayerNormOut(nn.Module):
         eps: float,
         quant_config: QuantizationConfig | None = None,
         prefix: str = "",
+        apply_silu: bool = True,
     ) -> None:
         super().__init__()
         self.norm = nn.RMSNorm(hidden_size, eps=eps)
+        self.apply_silu = apply_silu
         self.linear = ReplicatedLinear(
             time_embed_dim,
             2 * hidden_size,
@@ -318,7 +324,9 @@ class MiniMaxH3AdaLayerNormOut(nn.Module):
         temb: torch.Tensor,
         timestep_indices: torch.Tensor,
     ) -> torch.Tensor:
-        shift_scale, _ = self.linear(F.silu(temb).to(self.linear.weight.dtype))
+        if self.apply_silu:
+            temb = F.silu(temb)
+        shift_scale, _ = self.linear(temb.to(self.linear.weight.dtype))
         shift, scale = shift_scale.chunk(2, dim=-1)
         hidden_states = self.norm(hidden_states)
         return hidden_states * (1.0 + scale.index_select(0, timestep_indices)) + shift.index_select(0, timestep_indices)
@@ -339,6 +347,7 @@ class MiniMaxH3TransformerBlock(nn.Module):
         supported_attention_backends: tuple[AttentionBackendEnum, ...],
         quant_config: QuantizationConfig | None,
         prefix: str,
+        adaln_apply_silu: bool = True,
     ) -> None:
         super().__init__()
         self.norm1 = nn.RMSNorm(hidden_size, eps=norm_eps)
@@ -363,6 +372,7 @@ class MiniMaxH3TransformerBlock(nn.Module):
             hidden_size,
             quant_config=quant_config,
             prefix=f"{prefix}.adaln_proj",
+            apply_silu=adaln_apply_silu,
         )
 
     def forward(
@@ -373,7 +383,8 @@ class MiniMaxH3TransformerBlock(nn.Module):
         rotary_emb: tuple[torch.Tensor, torch.Tensor],
         original_seq_len: int,
     ) -> torch.Tensor:
-        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaln_proj(temb)
+        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (
+            t.to(hidden_states.dtype) for t in self.adaln_proj(temb))
 
         residual = hidden_states
         norm_hidden_states = self.norm1(hidden_states)
@@ -414,12 +425,28 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
     })
 
     def _get_parameter_dtype(self, name: str, default_dtype: torch.dtype) -> torch.dtype:
-        """Select a uniform Fully Sharded Data Parallel dtype or H3's inference dtype.
+        """Per-parameter dtype overrides.
 
-        FastVideo's Fully Sharded Data Parallel loading path requires one dtype
-        for every trainable parameter. H3 inference preserves FP32 input, timestep,
-        and output projections because those boundaries are part of its numerical policy.
+        The released input, timestep, and output projections stay FP32.
+        Factorized AdaLN is FP16 -- not FP32 -- because FP16 tracks the released
+        BF16 full-rank error, while BF16 is ~1.7x worse there (the
+        factorization sums few large cancelling terms instead of many small
+        ones) and FP32 is more accurate than the model being reproduced.
+        ``uniform_parameter_dtype`` (the Fully Sharded Data Parallel training
+        path, which needs one dtype for every trainable parameter) applies to
+        everything else.
         """
+        # Precedence: the factorized-AdaLN FP16 pin wins over
+        # uniform_parameter_dtype on purpose. Under FSDP's one-dtype rule the
+        # resulting mix hard-fails at load time, which beats silently training
+        # AdaLN in BF16 (~1.7x worse than the FP16 the factorization was fit
+        # for). Rank-reduced checkpoints are inference artifacts -- train from
+        # the full-rank release.
+        if getattr(self, "adaln_rank", None) is not None and (name.endswith("adaln_proj.linear.weight")
+                                                              or name.endswith("adaln_proj.linear.bias")
+                                                              or name.startswith("norm_out.linear.")
+                                                              or name.startswith("adaln_basis.")):
+            return torch.float16
         if self.config.uniform_parameter_dtype:
             return default_dtype
         return torch.float32 if name.split(".", 1)[0] in self._keep_in_fp32_modules else default_dtype
@@ -472,6 +499,16 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
             quant_config=config.quant_config,
             prefix=f"{config.prefix}.time_embedder",
         )
+        self.adaln_rank: int | None = arch.adaln_rank
+        adaln_dim = self.adaln_rank or arch.time_embed_dim
+        self.adaln_basis = ReplicatedLinear(
+            arch.time_embed_dim,
+            self.adaln_rank,
+            bias=False,
+            quant_config=None,
+            prefix=f"{config.prefix}.adaln_basis",
+        ) if self.adaln_rank else None
+
         self.rope = MiniMaxH3RotaryPosEmbed(arch.rope_freq_dim, arch.rope_theta)
         # per-generation caches for loop-invariant work (see _rotary_for /
         # _refined_text); plain attrs, never in state_dict
@@ -496,20 +533,22 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
                 arch.num_attention_heads,
                 arch.attention_head_dim,
                 arch.ffn_dim,
-                arch.time_embed_dim,
+                adaln_dim,
                 arch.norm_eps,
                 arch.qk_norm_eps,
                 self.supported_attention_backends,
                 config.quant_config,
                 prefix=f"{config.prefix}.transformer_blocks.{index}",
+                adaln_apply_silu=self.adaln_rank is None,
             ) for index in range(arch.num_layers)
         ])
         self.norm_out = MiniMaxH3AdaLayerNormOut(
             arch.hidden_size,
-            arch.time_embed_dim,
+            adaln_dim,
             arch.final_norm_eps,
             quant_config=config.quant_config,
             prefix=f"{config.prefix}.norm_out",
+            apply_silu=self.adaln_rank is None,
         )
         self.proj_out = ReplicatedLinear(
             arch.hidden_size,
@@ -631,6 +670,8 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
 
         temb = self.time_proj(timestep)
         temb = self.time_embedder(temb.to(self.time_embedder.fc_in.weight.dtype))
+        if self.adaln_basis is not None:
+            temb, _ = self.adaln_basis(F.silu(temb).to(self.adaln_basis.weight.dtype))
         adaln_indices = timestep_indices * MINIMAX_H3_MODALITY_NUM + token_tags
         local_timestep_indices = timestep_indices
         original_seq_len = sequence_length
