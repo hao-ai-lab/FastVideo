@@ -459,19 +459,12 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
     })
 
     def _get_parameter_dtype(self, name: str, default_dtype: torch.dtype) -> torch.dtype:
-        """Per-parameter dtype overrides.
+        """Keep the released input, timestep, and output projections in FP32.
 
-        The released input, timestep, and output projections stay FP32.
-        Factorized AdaLN is FP16 -- not FP32 -- because FP16 tracks the released
-        BF16 full-rank error, while BF16 is ~1.7x worse there (the
-        factorization sums few large cancelling terms instead of many small
-        ones) and FP32 is more accurate than the model being reproduced.
-        Everything else follows the requested default dtype.
+        Factorized AdaLN uses FP16; BF16 is ~1.7x worse there.
         """
-        if getattr(self, "adaln_rank", None) is not None and (name.endswith("adaln_proj.linear.weight")
-                                                              or name.endswith("adaln_proj.linear.bias")
-                                                              or name.startswith("norm_out.linear.")
-                                                              or name.startswith("adaln_basis.")):
+        if getattr(self, "adaln_rank", None) is not None and (
+                ".adaln_proj." in name or name.startswith(("norm_out.linear.", "adaln_basis."))):
             return torch.float16
         return torch.float32 if name.split(".", 1)[0] in self._keep_in_fp32_modules else default_dtype
 
