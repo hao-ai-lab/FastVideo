@@ -703,8 +703,6 @@ def maybe_download_model_index(model_name_or_path: str, revision: str | None = N
     Returns:
         The parsed model_index.json or modular_model_index.json dictionary
     """
-    import tempfile
-
     from huggingface_hub import hf_hub_download
 
     # This helper resolves manifests only; component validation happens after
@@ -712,45 +710,44 @@ def maybe_download_model_index(model_name_or_path: str, revision: str | None = N
     if os.path.exists(model_name_or_path):
         return verify_model_config_and_directory(model_name_or_path, required_component_dirs=[])
 
-    # For remote models, download only the small manifest.
+    # For remote models, download only the small manifest. No ``local_dir``:
+    # the default path serves from (and populates) the shared HF cache, so
+    # repeat builds skip the copy and a warm cache keeps working offline.
     try:
         repo_id, subfolder = _split_hf_repo_subfolder(model_name_or_path)
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            from huggingface_hub.utils import EntryNotFoundError
+        from huggingface_hub.utils import EntryNotFoundError
 
-            config_filename = "model_index.json"
-            try:
-                filename = f"{subfolder}/{config_filename}" if subfolder else config_filename
-                model_index_path = hf_hub_download(repo_id=repo_id,
-                                                   filename=filename,
-                                                   local_dir=tmp_dir,
-                                                   revision=revision)
-            except EntryNotFoundError:
-                config_filename = "modular_model_index.json"
-                filename = f"{subfolder}/{config_filename}" if subfolder else config_filename
-                model_index_path = hf_hub_download(repo_id=repo_id,
-                                                   filename=filename,
-                                                   local_dir=tmp_dir,
-                                                   revision=revision)
+        config_filename = "model_index.json"
+        try:
+            filename = f"{subfolder}/{config_filename}" if subfolder else config_filename
+            model_index_path = hf_hub_download(repo_id=repo_id,
+                                               filename=filename,
+                                               revision=revision)
+        except EntryNotFoundError:
+            config_filename = "modular_model_index.json"
+            filename = f"{subfolder}/{config_filename}" if subfolder else config_filename
+            model_index_path = hf_hub_download(repo_id=repo_id,
+                                               filename=filename,
+                                               revision=revision)
 
-            # Load the selected manifest.
-            with open(model_index_path) as f:
-                config: dict[str, Any] = json.load(f)
+        # Load the selected manifest.
+        with open(model_index_path) as f:
+            config: dict[str, Any] = json.load(f)
 
-            # Verify it has the required fields
-            if "_class_name" not in config:
-                raise ValueError(f"{config_filename} for {model_name_or_path} does not contain _class_name field")
+        # Verify it has the required fields
+        if "_class_name" not in config:
+            raise ValueError(f"{config_filename} for {model_name_or_path} does not contain _class_name field")
 
-            if "_diffusers_version" not in config:
-                raise ValueError(
-                    f"{config_filename} for {model_name_or_path} does not contain _diffusers_version field")
+        if "_diffusers_version" not in config:
+            raise ValueError(
+                f"{config_filename} for {model_name_or_path} does not contain _diffusers_version field")
 
-            # Add the pipeline name for downstream use
-            config["pipeline_name"] = config["_class_name"]
+        # Add the pipeline name for downstream use
+        config["pipeline_name"] = config["_class_name"]
 
-            logger.info("Downloaded %s for %s, pipeline: %s", config_filename, model_name_or_path,
-                        config["_class_name"])
-            return config
+        logger.info("Downloaded %s for %s, pipeline: %s", config_filename, model_name_or_path,
+                    config["_class_name"])
+        return config
 
     except Exception as e:
         raise ValueError(f"Failed to download or parse a Diffusers manifest for {model_name_or_path}: {e}") from e
