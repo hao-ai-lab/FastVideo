@@ -2,6 +2,7 @@
 # adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/docs/source/generate_examples.py
 
 import itertools
+import json
 import os
 import re
 from dataclasses import dataclass, field
@@ -19,6 +20,40 @@ GENERATED_DOC_PREFIXES = (
     "training/examples/",
     "distillation/examples/",
 )
+COOKBOOK_DATA = ROOT_DIR / "docs/assets/cookbook-recipes.json"
+COOKBOOK_SOURCE_ROOTS = (
+    ROOT_DIR / "examples/inference",
+    ROOT_DIR / "scripts/inference",
+)
+
+
+def validate_cookbook() -> None:
+    """Keep cookbook entries tied to checked-in runnable sources."""
+    recipes = json.loads(COOKBOOK_DATA.read_text(encoding="utf-8")).get("recipes")
+    if not isinstance(recipes, list) or not recipes:
+        raise ValueError(f"{COOKBOOK_DATA}: recipes must be a non-empty list")
+
+    seen: set[str] = set()
+    for recipe in recipes:
+        required = ("id", "task", "label", "model", "source", "command")
+        missing = {key for key in required if not recipe.get(key)}
+        if missing:
+            raise ValueError(f"Cookbook recipe is missing: {', '.join(sorted(missing))}")
+        if recipe["id"] in seen:
+            raise ValueError(f"Duplicate cookbook recipe id: {recipe['id']}")
+        seen.add(recipe["id"])
+
+        source = (ROOT_DIR / recipe["source"]).resolve()
+        if not any(source.is_relative_to(root.resolve()) for root in COOKBOOK_SOURCE_ROOTS):
+            raise ValueError(f"Cookbook source is outside an approved directory: {recipe['source']}")
+        if not source.is_file():
+            raise ValueError(f"Cookbook source does not exist: {recipe['source']}")
+
+        source_text = source.read_text(encoding="utf-8")
+        if recipe["model"] not in source_text:
+            raise ValueError(f"Cookbook model is not present in {recipe['source']}: {recipe['model']}")
+        if recipe["source"] not in recipe["command"]:
+            raise ValueError(f"Cookbook command does not invoke its source: {recipe['id']}")
 
 
 def fix_case(text: str) -> str:
@@ -536,6 +571,7 @@ def on_pre_build(config, **kwargs):
     MkDocs hook to generate examples before building the documentation.
     This function is called automatically by MkDocs' native hook system.
     """
+    validate_cookbook()
     print("Generating example documentation...")
     generate_examples(generate_main_index=True)
     print("Example documentation generated successfully!")
@@ -549,6 +585,7 @@ def on_page_context(context, page, **kwargs):
 
 
 if __name__ == "__main__":
+    validate_cookbook()
     print("Generating example documentation...")
     generate_examples(generate_main_index=True)
     print("Example documentation generated successfully!")
