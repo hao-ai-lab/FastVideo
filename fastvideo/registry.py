@@ -32,6 +32,7 @@ from fastvideo.configs.pipelines.kandinsky5 import Kandinsky5I2VConfig, Kandinsk
 from fastvideo.configs.pipelines.lingbotworld import LingBotWorldI2V480PConfig
 from fastvideo.configs.pipelines.longcat import LongCatT2V480PConfig
 from fastvideo.pipelines.basic.ltx2.pipeline_configs import LTX2T2VConfig
+from fastvideo.configs.pipelines.magi2 import Magi2PreviewPipelineConfig
 from fastvideo.configs.pipelines.flux_2 import (
     Flux2KleinPipelineConfig,
     Flux2PipelineConfig,
@@ -297,6 +298,17 @@ def _register_configs() -> None:
         ],
         model_family="ltx2",
         default_preset="ltx2_base",
+    )
+
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=Magi2PreviewPipelineConfig,
+        workload_types=(WorkloadType.T2V, WorkloadType.I2V),
+        model_detectors=[
+            lambda path: "magi2pipeline" in path.lower(),
+        ],
+        model_family="magi2",
+        default_preset="magi2_preview_1080p",
     )
 
     # Stable Audio Open (text-to-audio). Both variants must be loaded
@@ -1214,6 +1226,8 @@ def _register_presets() -> None:
         ALL_PRESETS as LONGCAT_PRESETS, )
     from fastvideo.pipelines.basic.ltx2.presets import (
         ALL_PRESETS as LTX2_PRESETS, )
+    from fastvideo.pipelines.basic.magi2.presets import (
+        ALL_PRESETS as MAGI2_PRESETS, )
     from fastvideo.pipelines.basic.matrixgame2.presets import (
         ALL_PRESETS as MATRIXGAME2_PRESETS, )
     from fastvideo.pipelines.basic.matrixgame3.presets import (
@@ -1242,6 +1256,7 @@ def _register_presets() -> None:
         LINGBOTWORLD_PRESETS,
         LONGCAT_PRESETS,
         LTX2_PRESETS,
+        MAGI2_PRESETS,
         MATRIXGAME2_PRESETS,
         MATRIXGAME3_PRESETS,
         SD35_PRESETS,

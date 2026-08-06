@@ -104,6 +104,11 @@ class ForwardBatch:
     negative_attention_mask: list[torch.Tensor] | None = None
     clip_embedding_pos: list[torch.Tensor] | None = None
     clip_embedding_neg: list[torch.Tensor] | None = None
+    magi2_text_context: torch.Tensor | None = None
+    magi2_negative_context: torch.Tensor | None = None
+    magi2_ref_image_feat: torch.Tensor | None = None
+    magi2_ref_image_feat_len: torch.Tensor | None = None
+    magi2_ref_image_special_tokens: torch.Tensor | None = None
 
     # Additional text-related parameters
     max_sequence_length: int | None = None
@@ -125,6 +130,7 @@ class ForwardBatch:
 
     # Latent tensors
     latents: torch.Tensor | None = None
+    audio_latents: torch.Tensor | None = None
     lq_latents: torch.Tensor | None = None
     raw_latent_shape: tuple[int, ...] | None = None
     noise_pred: torch.Tensor | None = None

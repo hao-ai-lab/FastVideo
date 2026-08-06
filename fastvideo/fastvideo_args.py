@@ -152,6 +152,7 @@ class FastVideoArgs:
     torch_compile_kwargs_audio_vae: dict[str, Any] = field(default_factory=dict)
 
     disable_autocast: bool = False
+    deterministic: bool = False
 
     # VSA parameters
     VSA_sparsity: float = 0.0  # inference/validation sparsity
@@ -595,6 +596,12 @@ class FastVideoArgs:
             "--disable-autocast",
             action=StoreBoolean,
             help="Disable autocast for denoising loop and vae decoding in pipeline sampling",
+        )
+        parser.add_argument(
+            "--deterministic",
+            action=StoreBoolean,
+            default=FastVideoArgs.deterministic,
+            help="Enable deterministic model kernels when the pipeline supports them",
         )
 
         # VSA parameters

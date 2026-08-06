@@ -16,6 +16,8 @@ cache_dir/
 wandb/
 venv/
 .venv/
+/venv-port-magi-2/
+/archived/
 runs/
 samples/
 Miniconda3-latest-Linux-x86_64.sh

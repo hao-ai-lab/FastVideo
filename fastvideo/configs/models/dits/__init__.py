@@ -10,6 +10,7 @@ from fastvideo.configs.models.dits.hunyuanvideo15 import HunyuanVideo15Config
 from fastvideo.configs.models.dits.longcat import LongCatVideoConfig
 from fastvideo.configs.models.dits.ltx2 import LTX2VideoConfig
 from fastvideo.configs.models.dits.magi_human import MagiHumanVideoConfig
+from fastvideo.configs.models.dits.magi2 import Magi2PreviewVideoConfig, Magi2RefinerVideoConfig
 from fastvideo.configs.models.dits.stable_audio import StableAudioConfig
 from fastvideo.configs.models.dits.wanvideo import WanVideoConfig
 from fastvideo.configs.models.dits.hyworld import HYWorldConfig
@@ -19,5 +20,6 @@ __all__ = [
     "HunyuanVideoConfig", "HunyuanVideo15Config", "HunyuanGameCraftConfig", "WanVideoConfig", "DreamXWorldConfig",
     "DreamXWorldARConfig", "CosmosVideoConfig", "Cosmos25VideoConfig", "FluxDiTConfig", "Flux2Config",
     "LongCatVideoConfig", "LTX2VideoConfig", "HYWorldConfig", "Kandinsky5VideoConfig", "MagiHumanVideoConfig",
+    "Magi2PreviewVideoConfig", "Magi2RefinerVideoConfig",
     "StableAudioConfig", "GlmImageDiTConfig"
 ]

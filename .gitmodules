@@ -7,3 +7,12 @@
 [submodule "fastvideo/third_party/eval/vbench"]
 	path = fastvideo/third_party/eval/vbench
 	url = https://github.com/Vchitect/VBench.git
+[submodule "fastvideo/third_party/magi_attention"]
+	path = fastvideo/third_party/magi_attention
+	url = https://github.com/SandAI-org/MagiAttention.git
+[submodule "fastvideo/third_party/magi_compiler"]
+	path = fastvideo/third_party/magi_compiler
+	url = https://github.com/SandAI-org/MagiCompiler.git
+[submodule "fastvideo/third_party/flash_attention"]
+	path = fastvideo/third_party/flash_attention
+	url = https://github.com/Dao-AILab/flash-attention.git

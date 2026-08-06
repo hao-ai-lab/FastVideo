@@ -46,6 +46,9 @@ if TYPE_CHECKING:
     FASTVIDEO_CFG_GATE_STEP: float = 1.0
     FASTVIDEO_HOST_IP: str = ""
     FASTVIDEO_LOOPBACK_IP: str = ""
+    MAGI2_DETERMINISTIC: bool = False
+    MAGI2_SAVE_LATENT_PATH: str | None = None
+    MAGI_ATTENTION_DETERMINISTIC_MODE: bool = False
 
 
 def get_default_cache_root() -> str:
@@ -320,6 +323,14 @@ environment_variables: dict[str, Callable[[], Any]] = {
     #   - Wan2.2 high/low-noise expert switch invalidates the cache.
     "FASTVIDEO_CFG_GATE_STEP":
     lambda: float(os.getenv("FASTVIDEO_CFG_GATE_STEP", "1.0")),
+
+    # MAGI-2 reproducibility and post-refiner latent capture.
+    "MAGI2_DETERMINISTIC":
+    lambda: os.getenv("MAGI2_DETERMINISTIC", "0") == "1",
+    "MAGI2_SAVE_LATENT_PATH":
+    lambda: os.getenv("MAGI2_SAVE_LATENT_PATH"),
+    "MAGI_ATTENTION_DETERMINISTIC_MODE":
+    lambda: os.getenv("MAGI_ATTENTION_DETERMINISTIC_MODE", "0") == "1",
 }
 
 # end-env-vars-definition
