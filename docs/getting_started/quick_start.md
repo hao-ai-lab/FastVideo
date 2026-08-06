@@ -23,26 +23,21 @@ Also optionally install flash-attn:
 uv pip install flash-attn --no-build-isolation -v
 ```
 
-## ⚡ Generate Your Command
+## Choose a maintained recipe
 
-Select your task, model profile, and GPU count to get a ready-to-run command:
+The cookbook selects complete, checked-in recipes instead of mixing model,
+parallelism, offload, and attention settings independently.
 
-<div class="quick-start-guide-wrap">
-  <iframe
-    class="quick-start-guide-frame"
-    src="../../config-generator/"
-    title="FastVideo Guided Config Generator"
-    data-config-generator
-    loading="lazy"
-  ></iframe>
-</div>
+[Open the inference cookbook](../cookbook/index.md){ .md-button .md-button--primary }
 
 !!! tip "Need more control?"
-    Use the [Advanced Tuning Guide](advanced_tuning_guide.md) to tune all parameters — resolution, attention backend, memory offloading, and more.
+    Start from a maintained recipe, then use the
+    [configuration](../inference/configuration.md) and
+    [optimization](../inference/optimizations.md) guides for supported changes.
 
 ## Next Steps
 
-- [Advanced Tuning Guide](advanced_tuning_guide.md) - Fine-grained parameter tuning
+- [Inference Cookbook](../cookbook/index.md) - Choose a maintained recipe
 - [Installation Guide](installation.md) - Detailed installation instructions
 - [Configuration](../inference/configuration.md) - Learn about configuration options
 - [Examples](../inference/examples/examples_inference_index.md) - Explore more

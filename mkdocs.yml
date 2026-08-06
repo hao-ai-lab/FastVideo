@@ -78,7 +78,7 @@ plugins:
       minify_js: true
       minify_css: true
       cache_safe: true
-      js_files: [assets/copy-page.js, assets/config-generator.js]
+      js_files: [assets/copy-page.js, assets/cookbook.js]
       css_files: [assets/custom.css]
   - api-autonav:
       modules: ["fastvideo"]
@@ -153,7 +153,7 @@ nav:
     - Installation: getting_started/installation.md
     - Quick Start: getting_started/quick_start.md
     - V1 API: getting_started/v1_api.md
-    - Advanced Tuning Guide: getting_started/advanced_tuning_guide.md
+  - Cookbook: cookbook/index.md
   - Inference:
     - Quick Start: inference/inference_quick_start.md
     - Configuration: inference/configuration.md
@@ -238,4 +238,4 @@ extra_css:
 # Custom JavaScript
 extra_javascript:
   - assets/copy-page.js
-  - assets/config-generator.js
+  - assets/cookbook.js
