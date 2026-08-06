@@ -8,6 +8,7 @@ from pathlib import Path
 
 from fastvideo import VideoGenerator
 from fastvideo.api import (
+    CompileConfig,
     EngineConfig,
     GenerationRequest,
     GeneratorConfig,
@@ -29,6 +30,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--steps", type=int, default=50)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--num-gpus", type=int, default=4)
+    parser.add_argument("--torch-compile", action="store_true",
+                        help="torch.compile the DiT transformer path")
+    parser.add_argument("--compile-mode", default=None,
+                        help='torch.compile mode, e.g. "reduce-overhead" for CUDA graphs')
+    parser.add_argument("--repeats", type=int, default=1,
+                        help="generate N times; with --torch-compile the first run pays "
+                             "compilation, so steady-state is the last repeat")
     return parser.parse_args()
 
 
@@ -51,11 +59,14 @@ def main() -> None:
                     vae=True,
                     pin_cpu_memory=False,
                 ),
+                compile=CompileConfig(
+                    enabled=args.torch_compile,
+                    mode=args.compile_mode,
+                ),
             ),
         ))
     try:
-        result = generator.generate(
-            GenerationRequest(
+        request = GenerationRequest(
                 prompt=args.prompt,
                 negative_prompt="",
                 sampling=SamplingConfig(
@@ -73,8 +84,17 @@ def main() -> None:
                     save_video=True,
                     return_frames=False,
                 ),
-            ))
+            )
+        result = generator.generate(request)
         print(f"Output written to: {result.video_path}")
+        if result.generation_time is not None:
+            # machine-readable: benchmark harnesses parse this line to separate
+            # generation from model-load time (last occurrence = steady state)
+            print(f"Generation time: {result.generation_time:.2f}s")
+        for _ in range(args.repeats - 1):
+            result = generator.generate(request)
+            if result.generation_time is not None:
+                print(f"Generation time: {result.generation_time:.2f}s")
     finally:
         generator.shutdown()
 

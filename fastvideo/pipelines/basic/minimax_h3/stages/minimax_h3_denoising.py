@@ -3,13 +3,16 @@
 
 from __future__ import annotations
 
+import contextlib
 from typing import Any
+
 
 import torch
 
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
+from fastvideo.profiler import get_global_controller
 from fastvideo.hooks.activation_trace import trace_step
 from fastvideo.pipelines.basic.minimax_h3.packing import (
     MINIMAX_H3_KEYFRAME_NOISE_AUG,
@@ -98,44 +101,54 @@ class MiniMaxH3DenoisingStage(PipelineStage):
         text_indices = layout.text_indices.to(device)
         prompt_embeds = batch.prompt_embeds[0].to(device)
 
+        controller = get_global_controller()
+        denoise_region = (controller.region("profiler_region_inference_denoising")
+                          if controller is not None else contextlib.nullcontext())
         try:
-            for index, (video_timestep, audio_timestep) in enumerate(zip(video_timesteps, audio_timesteps,
-                                                                         strict=True)):
-                unique_timesteps, timestep_indices = row_timestep_plan[index]
-                with trace_step(index), set_forward_context(
-                        current_timestep=index,
-                        attn_metadata=None,
-                        forward_batch=batch,
-                ):
-                    video_velocity, audio_velocity = self.transformer(
-                        hidden_states=batch.latents[None],
-                        audio_hidden_states=batch.audio_latents[None],
-                        encoder_hidden_states=prompt_embeds,
-                        timestep=unique_timesteps,
-                        timestep_indices=timestep_indices,
-                        token_tags=token_tags,
-                        position_ids=position_ids,
-                        video_indices=video_indices,
-                        audio_indices=audio_indices,
-                        text_indices=text_indices,
-                    )
+            with denoise_region:
+                for index, (video_timestep, audio_timestep) in enumerate(zip(video_timesteps, audio_timesteps,
+                                                                             strict=True)):
+                    unique_timesteps, timestep_indices = row_timestep_plan[index]
+                    # Under torch.compile(mode="reduce-overhead") each denoising
+                    # step must be marked, or cudagraph trees flag cross-step
+                    # reuse of pooled outputs as "accessing tensor output of
+                    # CUDAGraphs that has been overwritten" (surfaces at sp=1;
+                    # sp>1 is masked by collective-induced graph breaks).
+                    torch.compiler.cudagraph_mark_step_begin()
+                    with trace_step(index), set_forward_context(
+                            current_timestep=index,
+                            attn_metadata=None,
+                            forward_batch=batch,
+                    ):
+                        video_velocity, audio_velocity = self.transformer(
+                            hidden_states=batch.latents[None],
+                            audio_hidden_states=batch.audio_latents[None],
+                            encoder_hidden_states=prompt_embeds,
+                            timestep=unique_timesteps,
+                            timestep_indices=timestep_indices,
+                            token_tags=token_tags,
+                            position_ids=position_ids,
+                            video_indices=video_indices,
+                            audio_indices=audio_indices,
+                            text_indices=text_indices,
+                        )
 
-                video_start = layout.num_condition_video_rows
-                audio_start = layout.num_condition_audio_rows
-                batch.latents[video_start:] = self.scheduler.step(
-                    video_velocity[0, video_start:].float(),
-                    video_timestep,
-                    batch.latents[video_start:],
-                    return_dict=False,
-                )[0]
-                batch.audio_latents[audio_start:] = self.audio_scheduler.step(
-                    audio_velocity[0, audio_start:].float(),
-                    audio_timestep,
-                    batch.audio_latents[audio_start:],
-                    return_dict=False,
-                )[0]
-                batch.step_index = index
-                batch.timestep = video_timestep
+                    video_start = layout.num_condition_video_rows
+                    audio_start = layout.num_condition_audio_rows
+                    batch.latents[video_start:] = self.scheduler.step(
+                        video_velocity[0, video_start:].float(),
+                        video_timestep,
+                        batch.latents[video_start:],
+                        return_dict=False,
+                    )[0]
+                    batch.audio_latents[audio_start:] = self.audio_scheduler.step(
+                        audio_velocity[0, audio_start:].float(),
+                        audio_timestep,
+                        batch.audio_latents[audio_start:],
+                        return_dict=False,
+                    )[0]
+                    batch.step_index = index
+                    batch.timestep = video_timestep
         finally:
             if bool(getattr(fastvideo_args, "dit_layerwise_offload", False)):
                 manager = getattr(self.transformer, "_layerwise_offload_manager", None)
