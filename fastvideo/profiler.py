@@ -21,6 +21,7 @@ and wrap the corresponding code in :meth:`TorchProfilerController.region`.
 from __future__ import annotations
 
 import contextlib
+import fnmatch
 from dataclasses import dataclass
 from typing import Any
 from collections.abc import Callable
@@ -124,19 +125,18 @@ register_profiler_region(
     description="Module/model loading during pipeline initialization.",
     default_enabled=False,
 )
-# register_profiler_region(
-#     name="profiler_region_inference_pre_denoising",
-#     description="Pre-denoising inference steps (conditioning, preprocessing).",
-# )
-# register_profiler_region(
-#     name="profiler_region_inference_denoising",
-#     description="The main inference denoising loop.",
-# )
-# register_profiler_region(
-#     name="profiler_region_inference_post_denoising",
-#     description=
-#     "Post-processing after denoising (decoder, conditioning restores).",
-# )
+register_profiler_region(
+    name="profiler_region_inference_pre_denoising",
+    description="Pre-denoising inference steps (conditioning, preprocessing).",
+)
+register_profiler_region(
+    name="profiler_region_inference_denoising",
+    description="The main inference denoising loop.",
+)
+register_profiler_region(
+    name="profiler_region_inference_post_denoising",
+    description="Post-processing after denoising (decoder, conditioning restores).",
+)
 register_profiler_region(
     name="profiler_region_training_save_checkpoint",
     description="Training save checkpoint operations.",
@@ -249,11 +249,24 @@ class TorchProfilerConfig:
         available_names = ", ".join(region.name for region in available_regions)
 
         for token in requested_regions:
+            # Exact match first (preserves existing behaviour for
+            # callers that pass concrete region names).
             resolved = resolve_profiler_region(token)
-            if resolved is None:
-                logger.warning("Unknown profiler region '%s'; available regions: %s", token, available_names)
+            if resolved is not None:
+                regions[resolved.name] = True
                 continue
-            regions[resolved.name] = True
+            # Otherwise interpret the token as an fnmatch glob so that
+            # convenient bulk selections like
+            # ``profiler_region_inference_*`` enable every region whose
+            # canonical name matches the pattern. We use
+            # ``fnmatchcase`` because region names are already
+            # lower-case-normalised by ``register_profiler_region``.
+            glob_matches = [r for r in available_regions if fnmatch.fnmatchcase(r.name, token)]
+            if glob_matches:
+                for r in glob_matches:
+                    regions[r.name] = True
+                continue
+            logger.warning("Unknown profiler region '%s'; available regions: %s", token, available_names)
 
         if not regions:
             raise ValueError("FASTVIDEO_TORCH_PROFILE_REGIONS did not match any known regions; "
