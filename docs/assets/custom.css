@@ -62,11 +62,11 @@ img {
 }
 
 .adv-tuning-guide-wrap {
-  width: calc(100vw - 26rem);
+  width: 100%;
   max-width: none;
   overflow: hidden;
   background: #fff;
-  margin-right: 1rem;
+  margin-right: 0;
 }
 
 .adv-tuning-guide-frame {

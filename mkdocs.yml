@@ -78,7 +78,7 @@ plugins:
       minify_js: true
       minify_css: true
       cache_safe: true
-      js_files: [assets/copy-page.js]
+      js_files: [assets/copy-page.js, assets/config-generator.js]
       css_files: [assets/custom.css]
   - api-autonav:
       modules: ["fastvideo"]
@@ -238,3 +238,4 @@ extra_css:
 # Custom JavaScript
 extra_javascript:
   - assets/copy-page.js
+  - assets/config-generator.js
