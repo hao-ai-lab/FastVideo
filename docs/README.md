@@ -3,10 +3,10 @@
 This directory contains the FastVideo documentation built with MkDocs.
 
 The Quick Start and Advanced Tuning pages embed an interactive **config
-generator** — a separate Next.js app in [`consumer-guide/`](../consumer-guide/)
-that is built independently and copied into the docs site under
-`/config-generator/`. To work on that app itself, see
-[`consumer-guide/README.md`](../consumer-guide/README.md).
+generator** — a separate Next.js app documented in
+[`consumer-guide/README.md`](../consumer-guide/README.md). It is built
+independently and copied into the docs artifact under `config-generator/`. Its
+asset URLs use the GitHub Pages base path reported by `actions/configure-pages`.
 
 ## Build the docs locally
 

@@ -54,6 +54,7 @@ jobs:
         run: uv pip install --system -r requirements-mkdocs.txt
 
       - name: Setup Pages
+        id: pages
         uses: actions/configure-pages@v4
 
       - name: Build documentation
@@ -65,7 +66,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Enable pnpm
         run: corepack enable
@@ -76,12 +77,18 @@ jobs:
 
       - name: Build config generator
         working-directory: consumer-guide
-        run: NEXT_BASE_PATH=/config-generator pnpm build
+        env:
+          NEXT_BASE_PATH: ${{ steps.pages.outputs.base_path }}/config-generator
+          NEXT_TELEMETRY_DISABLED: '1'
+        run: pnpm build
 
       - name: Copy config generator into docs site
         run: |
           mkdir -p site/config-generator
           cp -R consumer-guide/out/. site/config-generator/
+
+      - name: Verify config generator asset paths
+        run: grep -Fq "${{ steps.pages.outputs.base_path }}/config-generator/_next/" site/config-generator/index.html
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
