@@ -190,6 +190,7 @@ def _get_config_info(
     model_path: str,
     *,
     raise_on_missing: bool = True,
+    revision: str | None = None,
 ) -> ConfigInfo | None:
     # 1. Exact match
     if model_path in _MODEL_HF_PATH_TO_NAME:
@@ -209,9 +210,9 @@ def _get_config_info(
 
     # 3. Use detectors (path or model_index pipeline name).
     if os.path.exists(model_path):
-        config = verify_model_config_and_directory(model_path)
+        config = verify_model_config_and_directory(model_path, required_component_dirs=[])
     else:
-        config = maybe_download_model_index(model_path)
+        config = maybe_download_model_index(model_path, revision=revision)
 
     pipeline_name = config.get("_class_name", "").lower()
 
@@ -1197,6 +1198,7 @@ def get_model_info(
     pipeline_type: PipelineType | str | None = None,
     workload_type: WorkloadType | None = None,
     override_pipeline_cls_name: str | None = None,
+    revision: str | None = None,
 ) -> ModelInfo:
     from fastvideo.pipelines.pipeline_registry import (PipelineType, get_pipeline_registry)
 
@@ -1208,7 +1210,7 @@ def get_model_info(
     if workload_type is None:
         workload_type = WorkloadType.T2V
 
-    config_info = _get_config_info(model_path, raise_on_missing=True)
+    config_info = _get_config_info(model_path, raise_on_missing=True, revision=revision)
     assert config_info is not None, "config_info must be resolved"
 
     if override_pipeline_cls_name:
@@ -1219,9 +1221,9 @@ def get_model_info(
         logger.info("Using override pipeline class name %s", pipeline_name)
     else:
         if os.path.exists(model_path):
-            config = verify_model_config_and_directory(model_path)
+            config = verify_model_config_and_directory(model_path, required_component_dirs=[])
         else:
-            config = maybe_download_model_index(model_path)
+            config = maybe_download_model_index(model_path, revision=revision)
 
         pipeline_name = config.get("_class_name")
         if config_info.pipeline_cls_name is not None:

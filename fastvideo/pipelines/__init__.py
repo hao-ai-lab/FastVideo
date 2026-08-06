@@ -29,16 +29,13 @@ def build_pipeline(fastvideo_args: FastVideoArgs,
     """
     Only works with valid hf diffusers configs. (model_index.json)
     We want to build a pipeline based on the inference args mode_path:
-    1. download the model from the hub if it's not already downloaded
-    2. verify the model config and directory
-    3. based on the config, determine the pipeline class 
+    1. resolve the pipeline class from the small Hub manifest
+    2. download the required model components if needed
+    3. verify the selected model components and build the pipeline
     """
-    # Get pipeline type
+    # Resolve the concrete pipeline from the small Hub manifest before
+    # downloading large component weights.
     model_path = fastvideo_args.model_path
-    model_path = maybe_download_model(model_path, revision=fastvideo_args.revision)
-    # fastvideo_args.downloaded_model_path = model_path
-    logger.info("Model path: %s", model_path)
-
     logger.info("Building pipeline of type: %s",
                 pipeline_type.value if isinstance(pipeline_type, PipelineType) else pipeline_type)
 
@@ -47,8 +44,16 @@ def build_pipeline(fastvideo_args: FastVideoArgs,
         pipeline_type=pipeline_type,
         workload_type=fastvideo_args.workload_type,
         override_pipeline_cls_name=fastvideo_args.override_pipeline_cls_name,
+        revision=fastvideo_args.revision,
     )
     pipeline_cls = model_info.pipeline_cls
+
+    model_path = maybe_download_model(
+        model_path,
+        revision=fastvideo_args.revision,
+        allow_patterns=pipeline_cls.get_hf_download_allow_patterns(),
+    )
+    logger.info("Model path: %s", model_path)
 
     # instantiate the pipelines
     pipeline = pipeline_cls(model_path, fastvideo_args)
