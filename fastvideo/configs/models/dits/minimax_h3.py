@@ -25,6 +25,7 @@ class MiniMaxH3ArchConfig(DiTArchConfig):
     _supported_attention_backends: tuple[AttentionBackendEnum, ...] = (
         AttentionBackendEnum.TORCH_SDPA,
         AttentionBackendEnum.FLASH_ATTN,
+        AttentionBackendEnum.VIDEO_SPARSE_ATTN_H3,
     )
 
     param_names_mapping: dict = field(
