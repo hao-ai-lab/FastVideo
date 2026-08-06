@@ -425,27 +425,17 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
     })
 
     def _get_parameter_dtype(self, name: str, default_dtype: torch.dtype) -> torch.dtype:
-        """Per-parameter dtype overrides.
+        """Keep the released input, timestep, and output projections in FP32.
 
-        The released input, timestep, and output projections stay FP32.
-        Factorized AdaLN is FP16 -- not FP32 -- because FP16 tracks the released
-        BF16 full-rank error, while BF16 is ~1.7x worse there (the
-        factorization sums few large cancelling terms instead of many small
-        ones) and FP32 is more accurate than the model being reproduced.
-        ``uniform_parameter_dtype`` (the Fully Sharded Data Parallel training
-        path, which needs one dtype for every trainable parameter) applies to
-        everything else.
+        Factorized AdaLN uses FP16; BF16 is ~1.7x worse there.
         """
         # Precedence: the factorized-AdaLN FP16 pin wins over
         # uniform_parameter_dtype on purpose. Under FSDP's one-dtype rule the
         # resulting mix hard-fails at load time, which beats silently training
-        # AdaLN in BF16 (~1.7x worse than the FP16 the factorization was fit
-        # for). Rank-reduced checkpoints are inference artifacts -- train from
-        # the full-rank release.
-        if getattr(self, "adaln_rank", None) is not None and (name.endswith("adaln_proj.linear.weight")
-                                                              or name.endswith("adaln_proj.linear.bias")
-                                                              or name.startswith("norm_out.linear.")
-                                                              or name.startswith("adaln_basis.")):
+        # AdaLN in BF16. Rank-reduced checkpoints are inference artifacts --
+        # train from the full-rank release.
+        if getattr(self, "adaln_rank", None) is not None and (
+                ".adaln_proj." in name or name.startswith(("norm_out.linear.", "adaln_basis."))):
             return torch.float16
         if self.config.uniform_parameter_dtype:
             return default_dtype
