@@ -109,7 +109,7 @@ this hardware, for reasons specific to it:
 | Building FlashAttention | **no speedup** — Torch SDPA already hits an efficient flash kernel on `sm_121`, and FA2 ties it | ❌ not worth building |
 | `torch.compile` of the VAE decode | recompile storm (per-frame varying shapes) → ~1.1× | ❌ dead end |
 | Linear (fp8 / nvfp4) quantization on long-sequence models (e.g. Cosmos) | ~nothing — see below | ❌ wrong lever here |
-| FP4 attention (`ATTN_QAT_INFER`) | works on `sm_121` (#1598); helps, but needs a QAT-trained checkpoint | ⚠️ opt-in — see below |
+| FP4 attention (`ATTN_QAT_INFER`) | works on `sm_121` (runtime allowlist landed in #1647; kernel build is #1598); helps, but needs a QAT-trained checkpoint | ⚠️ opt-in — see below |
 | FP4 linear on short-sequence models (LTX2) | up to −24% denoise at 1080p (#1594) | ⚠️ model/resolution-dependent |
 
 ### Why linear quantization is the wrong lever on long-sequence models
@@ -132,7 +132,7 @@ there (#1594). The rule: **on the GB10, the lever that matters is attention
 Block-scaled FP4 works on `sm_121` under CUDA 13:
 
 - **FP4 attention** (`FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_INFER`, #1598) is
-  numerically correct on the GB10 and ~6% faster denoise, but it only preserves
+  numerically correct on the GB10 and ~6% faster end-to-end generation, but it only preserves
   quality on a **quantization-aware-distilled checkpoint** (e.g.
   `FastVideo/FastWan-QAD-1.3B`) — stock weights aren't trained to tolerate it.
 - **FP4 linear** helps only where sequences are short (LTX2, above).

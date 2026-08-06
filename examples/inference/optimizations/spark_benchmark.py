@@ -93,11 +93,16 @@ def bench_generation(args) -> None:
                                           save_video=True,
                                           sampling_param=sampling_param)
         torch.cuda.synchronize()
-        dt = getattr(video, "generation_time", time.perf_counter() - t0)
+        # generate_video returns a plain dict (legacy result), not an object —
+        # attribute access would silently fall back to wall time / None.
+        dt = video.get("generation_time") if isinstance(video, dict) else None
+        if dt is None:
+            dt = time.perf_counter() - t0
         # Peak memory is measured *inside the worker process* that runs the
         # pipeline and surfaced on the result; reading torch's allocator in this
         # (main) process would report ~0 because the allocations aren't here.
-        return dt, getattr(video, "peak_memory_mb", None)
+        peak = video.get("peak_memory_mb") if isinstance(video, dict) else None
+        return dt, peak
 
     for _ in range(args.warmup):
         _gen()

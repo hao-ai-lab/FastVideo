@@ -26,9 +26,10 @@ FP4 attention — works on sm_121). This script still runs exactly ONE arm per
 invocation and dumps a C stack on any hard crash, so a single misbehaving arm
 can never take the others down with it; the runbook loops it four times with
 different env. Quality is the eye/ear on the saved mp4 + a matching-frame still;
-timing is the mean generation_time over the measured runs.
+timing is the mean generation_time (full pipeline: text-encode +
+denoise + VAE decode) over the measured runs.
 
-On the GB10, expect FP4 attention ~6% faster denoise vs bf16 and quality-neutral
+On the GB10, expect FP4 attention ~6% faster end-to-end generation vs bf16 and quality-neutral
 by eye on the QAD checkpoint (both share the 3-step distill's quality ceiling).
 FP4 *linear* is roughly break-even at 1.3B/480p (the per-call quantize overhead
 eats the small-GEMM saving in eager mode); its win shows at higher resolution
@@ -183,9 +184,12 @@ def main() -> None:
         last = _generate()
         torch.cuda.synchronize()
         wall = time.perf_counter() - t0
-        denoise_times.append(getattr(last, "generation_time", wall))
+        # generate_video returns a plain dict; attribute access would always
+        # fall back to wall time.
+        gen_t = last.get("generation_time") if isinstance(last, dict) else None
+        denoise_times.append(gen_t if gen_t is not None else wall)
         print(f"[qad] {tag} run {i + 1}/{runs}: {wall:.2f}s wall "
-              f"(denoise {denoise_times[-1]:.2f}s)")
+              f"(gen {denoise_times[-1]:.2f}s)")
 
     # The pipeline wrote the mp4 (full known-good encode) into arm_dir; report
     # it and pull a matching-frame still from the [b,c,t,h,w] samples tensor
@@ -206,7 +210,7 @@ def main() -> None:
         print("[qad] note: no 5-D samples tensor; grab a frame from the mp4 above")
 
     mean = sum(denoise_times) / len(denoise_times)
-    print(f"\n[qad][{tag}] denoise mean {mean:.2f}s over {runs} runs "
+    print(f"\n[qad][{tag}] generation mean {mean:.2f}s over {runs} runs "
           f"({warmup} warmup, {steps} steps)")
     generator.shutdown()
 
