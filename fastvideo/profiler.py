@@ -6,7 +6,7 @@ controller that gates collection based on named *regions*. Regions may be
 enabled through dedicated environment variables (e.g.
 ``FASTVIDEO_TORCH_PROFILE_MODEL_LOADING=1``) or via the consolidated
 ``FASTVIDEO_TORCH_PROFILE_REGIONS`` comma-separated list (e.g.
-``FASTVIDEO_TORCH_PROFILE_REGIONS=model_loading,training_dit``).
+``FASTVIDEO_TORCH_PROFILE_REGIONS=profiler_region_model_loading,profiler_region_training_train``).
 
 Typical usage from client code::
 
@@ -149,11 +149,11 @@ register_profiler_region(
 )
 register_profiler_region(
     name="profiler_region_training_train_one_step",
-    description="High-level step orchestration in the training loop.",
+    description="Single optimizer step including forward/backward passes.",
 )
 register_profiler_region(
     name="profiler_region_training_train",
-    description="Single optimizer step including forward/backward passes.",
+    description="High-level step orchestration in the training loop.",
 )
 
 # distillation specific regions
@@ -204,15 +204,17 @@ def get_or_create_profiler(trace_dir: str | None) -> TorchProfilerController:
         profile_memory=envs.FASTVIDEO_TORCH_PROFILER_WITH_PROFILE_MEMORY,
         with_stack=envs.FASTVIDEO_TORCH_PROFILER_WITH_STACK,
         with_flops=envs.FASTVIDEO_TORCH_PROFILER_WITH_FLOPS,
-        schedule=torch.profiler.schedule(
-            wait=envs.FASTVIDEO_TORCH_PROFILER_WAIT_STEPS,
-            warmup=envs.FASTVIDEO_TORCH_PROFILER_WARMUP_STEPS,
-            active=envs.FASTVIDEO_TORCH_PROFILER_ACTIVE_STEPS,
-        ),
+        # No schedule: nothing in the codebase calls profiler.step(), so a
+        # wait/warmup schedule never advances and the profiler records nothing.
+        # Region toggling gates collection; the single trace exports at stop().
         on_trace_ready=torch.profiler.tensorboard_trace_handler(trace_dir, use_gzip=True),
     )
     controller = TorchProfilerController(profiler, _DEFAULT_ACTIVITIES)
     controller.start()
+    # The trace only exports at stop(); inference paths have no shutdown hook
+    # that calls it, so register one. stop() is idempotent.
+    import atexit
+    atexit.register(controller.stop)
     logger.info("Torch profiler started")
     return controller
 
@@ -317,7 +319,10 @@ class TorchProfilerController:
         self._profiler = profiler
         self._activities = activities_tuple
         self._config = config or TorchProfilerConfig.from_env()
-        self._collection_enabled = False
+        # torch.profiler collects from start(); reflect that so the initial
+        # _set_collection(False) in start() actually toggles it off instead of
+        # short-circuiting (which captured everything before the first region).
+        self._collection_enabled = True
         self._active_region_depth = 0
         logger.info("PROFILER: TorchProfilerController initialized with config: %s", self._config)
         set_global_profiler(self._profiler)
@@ -396,6 +401,7 @@ class TorchProfilerController:
 
         logger.info("PROFILER: Stopping profiler...")
         self._profiler.stop()
+        self._profiler = None  # makes stop() idempotent (atexit may re-enter)
         logger.info("PROFILER: Profiler stopped")
         self._active_region_depth = 0
         set_global_profiler(None)
