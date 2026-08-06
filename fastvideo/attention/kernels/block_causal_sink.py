@@ -1033,6 +1033,12 @@ def _rotated_sink_queries(q, dc, ds, sc) -> torch.Tensor:
     return q_sink
 
 
+try:
+    from fastvideo.attention.kernels import block_causal_sink_cuda as _bcs_cuda
+except ImportError:  # extension not built for this arch
+    _bcs_cuda = None
+
+
 class _BlockCausalSinkAttention(torch.autograd.Function):
 
     @staticmethod
@@ -1048,6 +1054,17 @@ class _BlockCausalSinkAttention(torch.autograd.Function):
         dc = delta_cos if has_delta else q.new_empty((1, D), dtype=torch.float32)
         ds = delta_sin if has_delta else q.new_empty((1, D), dtype=torch.float32)
         q_sink = _rotated_sink_queries(q, dc, ds, sc) if has_delta else q
+
+        # sm_100a CUDA forward when the shape/regime allows it. It writes `out` and `lse` in
+        # exactly the form _fwd_kernel does -- lse = max(qk*qk_scale) + log2(l) in the exp2
+        # domain -- so the Triton backward below runs unchanged. is_supported() is
+        # conservative: anything outside the verified regime falls through to Triton.
+        if _bcs_cuda is not None and _bcs_cuda.is_supported(plan, q):
+            out, lse = _bcs_cuda.block_causal_sink_forward_cuda(q, k, v, q_sink if has_delta else None, plan)
+            ctx.save_for_backward(q, q_sink, k, v, out, lse, dc, ds)
+            ctx.plan = plan
+            ctx.has_delta = has_delta
+            return out
 
         grid = lambda META: (triton.cdiv(L, META["BM"]), B * H)  # noqa: E731
         _fwd_kernel[grid](
