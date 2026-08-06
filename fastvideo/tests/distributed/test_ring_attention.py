@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import signal
 import socket
 import subprocess
 from pathlib import Path
@@ -58,10 +59,6 @@ def _make_qkv(
     device: torch.device,
     dtype: torch.dtype = torch.bfloat16,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Create deterministic Q/K/V tensors."""
-
-    generator = torch.Generator(device="cpu").manual_seed(SEED)
-
     shape = (
         batch_size,
         sequence_length,
@@ -71,19 +68,19 @@ def _make_qkv(
 
     q = torch.randn(
         shape,
-        generator=generator,
+        generator=torch.Generator(device="cpu").manual_seed(SEED),
         dtype=dtype,
     ).to(device)
 
     k = torch.randn(
         shape,
-        generator=generator,
+        generator=torch.Generator(device="cpu").manual_seed(SEED + 1),
         dtype=dtype,
     ).to(device)
 
     v = torch.randn(
         shape,
-        generator=generator,
+        generator=torch.Generator(device="cpu").manual_seed(SEED + 2),
         dtype=dtype,
     ).to(device)
 
@@ -106,35 +103,35 @@ def _assert_attention_close(
     )
 
 
-def test_ring_attention_world_size_one_matches_flash_attention() -> None:
-    """A one-rank Ring must reduce to ordinary FlashAttention."""
+def _log(rank: int, message: str) -> None:
+    """Print an unbuffered worker log line for hang diagnosis."""
+    print(f"[rank {rank}] {message}", flush=True)
 
+
+def test_ring_attention_world_size_one_matches_flash_attention() -> None:
     if not torch.cuda.is_available():
         pytest.skip("This test requires CUDA.")
 
+    import torch.distributed as dist
     from flash_attn import flash_attn_func
 
     from fastvideo.attention.ring import ring_flash_attn_func
-    from fastvideo.distributed import (
-        cleanup_dist_env_and_memory,
-        get_sp_group,
-        maybe_init_distributed_environment_and_model_parallel,
-    )
 
-    os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
-    os.environ.setdefault("MASTER_PORT", str(_free_port()))
-    os.environ.setdefault("RANK", "0")
-    os.environ.setdefault("LOCAL_RANK", "0")
-    os.environ.setdefault("WORLD_SIZE", "1")
+    os.environ["MASTER_ADDR"] = "127.0.0.1"
+    os.environ["MASTER_PORT"] = str(_free_port())
+    os.environ["RANK"] = "0"
+    os.environ["LOCAL_RANK"] = "0"
+    os.environ["WORLD_SIZE"] = "1"
 
     device = torch.device("cuda:0")
     torch.cuda.set_device(device)
 
     try:
-        maybe_init_distributed_environment_and_model_parallel(
-            tp_size=1,
-            sp_size=1,
-            ring_size=1,
+        dist.init_process_group(
+            backend="nccl",
+            init_method="env://",
+            rank=0,
+            world_size=1,
         )
 
         q, k, v = _make_qkv(
@@ -156,8 +153,6 @@ def test_ring_attention_world_size_one_matches_flash_attention() -> None:
             causal=False,
         )
 
-        # ring_size=1 disables the configured Ring group, so use the
-        # one-rank SP process group directly to test kernel degeneration.
         ring_output = ring_flash_attn_func(
             q,
             k,
@@ -165,16 +160,14 @@ def test_ring_attention_world_size_one_matches_flash_attention() -> None:
             dropout_p=0.0,
             softmax_scale=softmax_scale,
             causal=False,
-            group=get_sp_group().device_group,
+            group=dist.group.WORLD,
         )
 
-        _assert_attention_close(
-            ring_output,
-            reference,
-        )
+        _assert_attention_close(ring_output, reference)
 
     finally:
-        cleanup_dist_env_and_memory()
+        if dist.is_available() and dist.is_initialized():
+            dist.destroy_process_group()
 
 
 def test_blockwise_lse_merge_matches_full_attention() -> None:
@@ -301,31 +294,32 @@ def test_blockwise_lse_merge_matches_full_attention() -> None:
 
 
 def _run_multi_gpu_worker(output_path: Path) -> None:
-    """Run the actual distributed Ring Attention parity test."""
-
     import torch.distributed as dist
     from flash_attn import flash_attn_func
 
     from fastvideo.attention.ring import ring_flash_attn_func
-    from fastvideo.distributed import (
-        cleanup_dist_env_and_memory,
-        get_ring_group,
-        maybe_init_distributed_environment_and_model_parallel,
-    )
 
-    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
-    rank = int(os.environ.get("RANK", "0"))
-    world_size = int(os.environ.get("WORLD_SIZE", "1"))
+    local_rank = int(os.environ["LOCAL_RANK"])
+    rank = int(os.environ["RANK"])
+    world_size = int(os.environ["WORLD_SIZE"])
 
     device = torch.device(f"cuda:{local_rank}")
     torch.cuda.set_device(device)
 
+    def log(message: str) -> None:
+        print(f"[rank {rank}] {message}", flush=True)
+
     try:
-        maybe_init_distributed_environment_and_model_parallel(
-            tp_size=1,
-            sp_size=world_size,
-            ring_size=world_size,
+        log("initializing torch distributed process group")
+
+        dist.init_process_group(
+            backend="nccl",
+            init_method="env://",
+            rank=rank,
+            world_size=world_size,
         )
+
+        log("torch distributed process group initialized")
 
         if GLOBAL_SEQ_LEN % world_size != 0:
             raise ValueError(
@@ -335,6 +329,7 @@ def _run_multi_gpu_worker(output_path: Path) -> None:
 
         local_seq_len = GLOBAL_SEQ_LEN // world_size
 
+        # Every rank generates identical Q/K/V independently.
         q_global, k_global, v_global = _make_qkv(
             batch_size=BATCH_SIZE,
             sequence_length=GLOBAL_SEQ_LEN,
@@ -343,10 +338,47 @@ def _run_multi_gpu_worker(output_path: Path) -> None:
             device=device,
         )
 
-        # Ensure all ranks use identical global tensors.
-        dist.broadcast(q_global, src=0)
-        dist.broadcast(k_global, src=0)
-        dist.broadcast(v_global, src=0)
+        torch.cuda.synchronize(device)
+        log("deterministic global QKV created")
+
+        # Temporary NCCL P2P sanity check.
+        send_tensor = torch.tensor(
+            [float(rank)],
+            device=device,
+            dtype=torch.float32,
+        )
+        recv_tensor = torch.empty_like(send_tensor)
+
+        next_rank = (rank + 1) % world_size
+        prev_rank = (rank - 1 + world_size) % world_size
+
+        log(
+            f"submitting raw P2P: send->{next_rank}, "
+            f"recv<-{prev_rank}"
+        )
+
+        requests = dist.batch_isend_irecv(
+            [
+                dist.P2POp(
+                    dist.isend,
+                    send_tensor,
+                    next_rank,
+                ),
+                dist.P2POp(
+                    dist.irecv,
+                    recv_tensor,
+                    prev_rank,
+                ),
+            ]
+        )
+
+        for request in requests:
+            request.wait()
+
+        torch.cuda.synchronize(device)
+
+        assert recv_tensor.item() == float(prev_rank)
+        log("minimal raw P2P test passed")
 
         start = rank * local_seq_len
         end = start + local_seq_len
@@ -357,6 +389,8 @@ def _run_multi_gpu_worker(output_path: Path) -> None:
 
         softmax_scale = HEAD_SIZE**-0.5
 
+        log("entering ring_flash_attn_func")
+
         ring_output_local = ring_flash_attn_func(
             q_local,
             k_local,
@@ -364,8 +398,11 @@ def _run_multi_gpu_worker(output_path: Path) -> None:
             dropout_p=0.0,
             softmax_scale=softmax_scale,
             causal=False,
-            group=get_ring_group(),
+            group=dist.group.WORLD,
         )
+
+        torch.cuda.synchronize(device)
+        log("ring_flash_attn_func complete")
 
         gathered_outputs = [
             torch.empty_like(ring_output_local)
@@ -376,6 +413,9 @@ def _run_multi_gpu_worker(output_path: Path) -> None:
             gathered_outputs,
             ring_output_local,
         )
+
+        torch.cuda.synchronize(device)
+        log("all_gather complete")
 
         ring_output_global = torch.cat(
             gathered_outputs,
@@ -392,6 +432,8 @@ def _run_multi_gpu_worker(output_path: Path) -> None:
                 causal=False,
             )
 
+            torch.cuda.synchronize(device)
+
             torch.save(
                 {
                     "ring_output": ring_output_global.cpu(),
@@ -400,10 +442,12 @@ def _run_multi_gpu_worker(output_path: Path) -> None:
                 output_path,
             )
 
-        dist.barrier()
+            log("reference saved")
 
     finally:
-        cleanup_dist_env_and_memory()
+        if dist.is_available() and dist.is_initialized():
+            log("destroying torch distributed process group")
+            dist.destroy_process_group()
 
 
 def _run_torchrun(
@@ -413,30 +457,81 @@ def _run_torchrun(
 ) -> None:
     cmd = [
         "torchrun",
-        "--nnodes",
-        "1",
-        "--nproc_per_node",
-        str(nproc_per_node),
-        "--master_port",
-        str(_free_port()),
+        "--standalone",
+        "--nnodes=1",
+        f"--nproc_per_node={nproc_per_node}",
         str(script_path),
         "--ring-worker",
         "--output",
         str(output_path),
     ]
 
-    process = subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        check=False,
+    env = os.environ.copy()
+
+    # The single-GPU test initializes an env:// process group in the pytest
+    # process. Do not pass those one-rank values into the torchrun launcher.
+    # torchrun will generate the correct rendezvous and rank variables.
+    for name in (
+        "RANK",
+        "LOCAL_RANK",
+        "WORLD_SIZE",
+        "LOCAL_WORLD_SIZE",
+        "GROUP_RANK",
+        "ROLE_RANK",
+        "ROLE_WORLD_SIZE",
+        "MASTER_ADDR",
+        "MASTER_PORT",
+    ):
+        env.pop(name, None)
+
+    env.update(
+        {
+            "PYTHONUNBUFFERED": "1",
+            "NCCL_DEBUG": env.get("NCCL_DEBUG", "INFO"),
+            "TORCH_DISTRIBUTED_DEBUG": env.get(
+                "TORCH_DISTRIBUTED_DEBUG",
+                "DETAIL",
+            ),
+            "NCCL_ASYNC_ERROR_HANDLING": "1",
+        }
     )
 
-    if process.returncode != 0:
+    # Some multi-GPU hosts advertise CUDA peer access between devices that
+    # are not actually NVLink/PCIe-bridge connected (e.g. topology "SYS",
+    # crossing NUMA nodes). Real P2P there can hang indefinitely. Default to
+    # disabling NCCL P2P so the test is hang-safe on such hosts, but respect
+    # an explicit caller override.
+    env.setdefault("NCCL_P2P_DISABLE", "1")
+
+    # torchrun spawns the per-rank worker processes as children that stay in
+    # this process's group. Launch it as its own session leader so a timeout
+    # can kill the whole tree via killpg -- subprocess.run(timeout=...) only
+    # terminates the torchrun launcher itself, leaving orphaned rank workers
+    # that keep the GPUs pegged at 100% util for every subsequent test run.
+    proc = subprocess.Popen(
+        cmd,
+        env=env,
+        start_new_session=True,
+    )
+
+    try:
+        # Do not capture stdout/stderr: per-rank progress logs must remain
+        # visible so a communication hang can be located immediately.
+        returncode = proc.wait(timeout=120)
+    except subprocess.TimeoutExpired as exc:
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        proc.wait()
         raise RuntimeError(
-            f"Ring worker failed with code {process.returncode}\n"
-            f"STDOUT:\n{process.stdout}\n"
-            f"STDERR:\n{process.stderr}"
+            "The multi-GPU Ring Attention worker timed out after 120 seconds "
+            "and its process group was killed. Use the last printed per-rank "
+            "stage to determine whether the hang occurred during "
+            "initialization, Ring P2P communication, all_gather, or the "
+            "final barrier."
+        ) from exc
+
+    if returncode != 0:
+        raise RuntimeError(
+            f"Ring Attention worker exited with code {returncode}."
         )
 
 
