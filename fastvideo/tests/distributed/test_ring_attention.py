@@ -1,23 +1,29 @@
 # SPDX-License-Identifier: Apache-2.0
 """Correctness tests for the vendored Ring Attention implementation.
-
-This file contains three levels of tests:
-
-1. Single-GPU Ring kernel fallback:
-   Ring Attention with a one-rank process group must match plain
-   FlashAttention.
-
-2. Single-GPU blockwise softmax merge:
-   Attention computed over multiple KV blocks and merged through the
-   log-sum-exp update must match attention over the concatenated KV sequence.
-
-3. Multi-GPU Ring Attention:
-   When at least two GPUs are available, Q/K/V are sequence-sharded across
-   ranks and the gathered Ring Attention output must match full-sequence
-   FlashAttention.
-
-The first two tests can run on a single GPU. The final test validates actual
-KV communication and requires at least two GPUs.
+# -----------------------------------------------------------------------------
+# Running the multi-GPU Ring Attention test
+#
+# Typical usage:
+#
+#   pytest -sv fastvideo/tests/distributed/test_ring_attention.py
+#
+# If the current environment has known NCCL P2P / IPC issues (e.g., some Docker
+# containers), the test can be launched with NCCL socket fallback:
+#
+#   CUDA_VISIBLE_DEVICES=0,1 \
+#   NCCL_CUMEM_ENABLE=0 \
+#   NCCL_CUMEM_HOST_ENABLE=0 \
+#   NCCL_P2P_DISABLE=1 \
+#   NCCL_SHM_DISABLE=1 \
+#   NCCL_SOCKET_IFNAME=eth0 \
+#   pytest -sv \
+#       fastvideo/tests/distributed/test_ring_attention.py::\
+#test_multi_gpu_ring_attention_matches_full_attention
+#
+# These environment variables are only intended as an environment-specific
+# workaround and should not be required on systems with a fully functional
+# NCCL P2P setup.
+# -----------------------------------------------------------------------------
 """
 
 from __future__ import annotations
@@ -108,7 +114,9 @@ def _log(rank: int, message: str) -> None:
     print(f"[rank {rank}] {message}", flush=True)
 
 
-def test_ring_attention_world_size_one_matches_flash_attention() -> None:
+def test_ring_attention_world_size_one_matches_flash_attention(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     if not torch.cuda.is_available():
         pytest.skip("This test requires CUDA.")
 
@@ -117,11 +125,11 @@ def test_ring_attention_world_size_one_matches_flash_attention() -> None:
 
     from fastvideo.attention.ring import ring_flash_attn_func
 
-    os.environ["MASTER_ADDR"] = "127.0.0.1"
-    os.environ["MASTER_PORT"] = str(_free_port())
-    os.environ["RANK"] = "0"
-    os.environ["LOCAL_RANK"] = "0"
-    os.environ["WORLD_SIZE"] = "1"
+    monkeypatch.setenv("MASTER_ADDR", "127.0.0.1")
+    monkeypatch.setenv("MASTER_PORT", str(_free_port()))
+    monkeypatch.setenv("RANK", "0")
+    monkeypatch.setenv("LOCAL_RANK", "0")
+    monkeypatch.setenv("WORLD_SIZE", "1")
 
     device = torch.device("cuda:0")
     torch.cuda.set_device(device)
@@ -492,16 +500,19 @@ def _run_torchrun(
                 "TORCH_DISTRIBUTED_DEBUG",
                 "DETAIL",
             ),
-            "NCCL_ASYNC_ERROR_HANDLING": "1",
+            "TORCH_NCCL_ASYNC_ERROR_HANDLING": "1",
         }
     )
 
-    # Some multi-GPU hosts advertise CUDA peer access between devices that
-    # are not actually NVLink/PCIe-bridge connected (e.g. topology "SYS",
-    # crossing NUMA nodes). Real P2P there can hang indefinitely. Default to
-    # disabling NCCL P2P so the test is hang-safe on such hosts, but respect
-    # an explicit caller override.
-    env.setdefault("NCCL_P2P_DISABLE", "1")
+    # # Some containerized hosts have broken CUDA P2P/IPC/SHM paths while
+    # # NCCL socket transport remains functional. Keep normal NCCL behavior by
+    # # default, but allow an explicit correctness-only socket fallback.
+    # if env.get("FASTVIDEO_RING_TEST_SOCKET_FALLBACK") == "1":
+    #     env.setdefault("NCCL_CUMEM_ENABLE", "0")
+    #     env.setdefault("NCCL_CUMEM_HOST_ENABLE", "0")
+    #     env.setdefault("NCCL_P2P_DISABLE", "1")
+    #     env.setdefault("NCCL_SHM_DISABLE", "1")
+    #     env.setdefault("NCCL_SOCKET_IFNAME", "eth0")
 
     # torchrun spawns the per-rank worker processes as children that stay in
     # this process's group. Launch it as its own session leader so a timeout
@@ -591,8 +602,12 @@ def _parse_args() -> argparse.Namespace:
 # CUDA_VISIBLE_DEVICES=0 pytest -sv \
 #   fastvideo/tests/distributed/test_ring_attention.py
 #
-# Multi GPU:
+# Multi GPU (normal NCCL path):
 # CUDA_VISIBLE_DEVICES=0,1 pytest -sv \
+#   fastvideo/tests/distributed/test_ring_attention.py
+#
+# Multi GPU (correctness-only socket fallback):
+# FASTVIDEO_RING_TEST_SOCKET_FALLBACK=1 CUDA_VISIBLE_DEVICES=0,1 pytest -sv \
 #   fastvideo/tests/distributed/test_ring_attention.py
 if __name__ == "__main__":
     args = _parse_args()
