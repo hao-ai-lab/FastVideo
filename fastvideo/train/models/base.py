@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Literal, TYPE_CHECKING
+from typing import Any, Literal, TYPE_CHECKING, TypeAlias
 
 import torch
 
@@ -17,6 +17,10 @@ if TYPE_CHECKING:
         TrainingConfig, )
     from fastvideo.train.utils.lora import LoraConfig
     from fastvideo.pipelines import TrainingBatch
+
+# Video models return one flow tensor. Joint video/audio models return an
+# ordered pair so training methods can apply each modality's scheduler target.
+NoisePrediction: TypeAlias = torch.Tensor | tuple[torch.Tensor, torch.Tensor]
 
 
 class ModelBase(ABC):
@@ -159,8 +163,8 @@ class ModelBase(ABC):
         conditional: bool,
         cfg_uncond: dict[str, Any] | None = None,
         attn_kind: Literal["dense", "vsa"] = "dense",
-    ) -> torch.Tensor:
-        """Predict noise/flow for the given noisy latents."""
+    ) -> NoisePrediction:
+        """Predict video flow or an ordered ``(video, audio)`` flow pair."""
 
     def predict_x0(
         self,
@@ -172,7 +176,12 @@ class ModelBase(ABC):
         cfg_uncond: dict[str, Any] | None = None,
         attn_kind: Literal["dense", "vsa"] = "dense",
     ) -> torch.Tensor:
-        """Predict x0 via ``predict_noise`` + conversion."""
+        """Convert a video-only flow prediction to clean video latents.
+
+        This helper owns one noisy video tensor and one video scheduler. Joint
+        video/audio callers apply their modality-specific conversions where
+        both noisy tensors and both schedulers are available.
+        """
         pred_noise = self.predict_noise(
             noisy_latents,
             timestep,
@@ -181,6 +190,8 @@ class ModelBase(ABC):
             cfg_uncond=cfg_uncond,
             attn_kind=attn_kind,
         )
+        if isinstance(pred_noise, tuple):
+            raise TypeError("predict_x0 requires one video prediction tensor")
         return pred_noise_to_pred_video(
             pred_noise=pred_noise.flatten(0, 1),
             noise_input_latent=noisy_latents.flatten(0, 1),

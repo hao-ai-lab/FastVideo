@@ -294,6 +294,9 @@ class TrainingBatch:
     audio_latents: torch.Tensor | None = None
     audio_noisy_model_input: torch.Tensor | None = None
     audio_timesteps: torch.Tensor | None = None
+    # Audio follows an independent noise schedule, so multimodal supervised
+    # fine-tuning needs its own sigma to reconstruct the clean-audio target.
+    audio_sigmas: torch.Tensor | None = None
     audio_noise: torch.Tensor | None = None
     audio_encoder_hidden_states: torch.Tensor | None = None
     audio_encoder_attention_mask: torch.Tensor | None = None
@@ -314,6 +317,10 @@ class TrainingBatch:
     timesteps: torch.Tensor | None = None
     sigmas: torch.Tensor | None = None
     noise: torch.Tensor | None = None
+
+    # MiniMax H3 reuses the packed row boundaries from batch preparation to
+    # split the transformer's joint sequence back into video and audio outputs.
+    minimax_h3_layout: Any | None = None
 
     attn_metadata_vsa: AttentionMetadata | None = None
     attn_metadata: AttentionMetadata | None = None
