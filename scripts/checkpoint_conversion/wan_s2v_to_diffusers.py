@@ -73,7 +73,15 @@ def build(source: str, aux_source: str, output: str, link: bool) -> None:
     from huggingface_hub import snapshot_download
 
     if not os.path.isdir(source):
-        source = snapshot_download(source)
+        # Only fetch what the conversion uses. The official repo also carries
+        # ~13GB of .pth duplicates of the text encoder and VAE plus demo
+        # assets; downloading those wastes half an hour and disk for nothing.
+        source = snapshot_download(source,
+                                   allow_patterns=[
+                                       "diffusion_pytorch_model*",
+                                       "config.json",
+                                       "wav2vec2-large-xlsr-53-english/*",
+                                   ])
     if not os.path.isdir(aux_source):
         aux_source = snapshot_download(aux_source, allow_patterns=[f"{c}/*" for c in AUX_COMPONENTS])
 
