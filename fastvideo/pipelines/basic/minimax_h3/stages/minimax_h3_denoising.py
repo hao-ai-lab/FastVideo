@@ -13,6 +13,7 @@ import torch
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
+from fastvideo.logger import init_logger
 from fastvideo.hooks.activation_trace import trace_step
 from fastvideo.pipelines.basic.minimax_h3.packing import (
     MINIMAX_H3_KEYFRAME_NOISE_AUG,
@@ -24,6 +25,8 @@ from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
+
+logger = init_logger(__name__)
 
 
 class MiniMaxH3DenoisingStage(PipelineStage):
@@ -101,9 +104,14 @@ class MiniMaxH3DenoisingStage(PipelineStage):
         text_indices = layout.text_indices.to(device)
         prompt_embeds = batch.prompt_embeds[0].to(device)
 
-        profile_steps = int(os.environ.get("FASTVIDEO_PROFILE_STEPS", "0"))
+        try:
+            profile_steps = int(os.environ.get("FASTVIDEO_PROFILE_STEPS", "0"))
+        except ValueError:
+            profile_steps = 0
+        # clamp so the dump index is always reachable (step 0 is skipped as warmup)
+        profile_steps = min(profile_steps, max(len(video_timesteps) - 2, 0))
         profiler = None
-        if profile_steps:
+        if profile_steps > 0:
             # skip step 0 (allocator/lazy-init noise), capture the next N steps,
             # then stop — generation continues unprofiled. record_shapes lets the
             # analyzer attribute gemms to attention vs MLP by their K/N dims.
@@ -119,19 +127,22 @@ class MiniMaxH3DenoisingStage(PipelineStage):
                         profiler.start()
                     elif index == 1 + profile_steps:
                         profiler.stop()
-                        rank = os.environ.get("RANK", "0")
-                        out_dir = os.environ.get("FASTVIDEO_PROFILE_DIR", "/tmp")
-                        rows = [{
-                            "name": e.key,
-                            "shapes": str(e.input_shapes),
-                            "cuda_us": e.device_time_total,
-                            "count": e.count,
-                        } for e in profiler.key_averages(group_by_input_shape=True)]
-                        with open(f"{out_dir}/h3_profile_rank{rank}.json", "w") as fh:
-                            json.dump({"profiled_steps": profile_steps, "rows": rows}, fh)
-                        with open(f"{out_dir}/h3_profile_rank{rank}.txt", "w") as fh:
-                            fh.write(profiler.key_averages(group_by_input_shape=True).table(
-                                sort_by="cuda_time_total", row_limit=60))
+                        try:
+                            rank = os.environ.get("RANK", "0")
+                            out_dir = os.environ.get("FASTVIDEO_PROFILE_DIR", "/tmp")
+                            rows = [{
+                                "name": e.key,
+                                "shapes": str(e.input_shapes),
+                                "cuda_us": e.device_time_total,
+                                "count": e.count,
+                            } for e in profiler.key_averages(group_by_input_shape=True)]
+                            with open(f"{out_dir}/h3_profile_rank{rank}.json", "w") as fh:
+                                json.dump({"profiled_steps": profile_steps, "rows": rows}, fh)
+                            with open(f"{out_dir}/h3_profile_rank{rank}.txt", "w") as fh:
+                                fh.write(profiler.key_averages(group_by_input_shape=True).table(
+                                    sort_by="cuda_time_total", row_limit=60))
+                        except Exception:  # noqa: BLE001 -- profiling must never kill generation
+                            logger.exception("profile dump failed; continuing generation")
                         profiler = None
                 unique_timesteps, timestep_indices = row_timestep_plan[index]
                 # Under torch.compile(mode="reduce-overhead") each denoising
@@ -175,6 +186,12 @@ class MiniMaxH3DenoisingStage(PipelineStage):
                 batch.step_index = index
                 batch.timestep = video_timestep
         finally:
+            if profiler is not None:
+                # exception path: stop the leaked profiler (no dump; partial data)
+                try:
+                    profiler.stop()
+                except Exception:  # noqa: BLE001
+                    pass
             if bool(getattr(fastvideo_args, "dit_layerwise_offload", False)):
                 manager = getattr(self.transformer, "_layerwise_offload_manager", None)
                 if manager is not None and getattr(manager, "enabled", False):
