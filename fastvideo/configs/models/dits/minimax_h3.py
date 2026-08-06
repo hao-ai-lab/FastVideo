@@ -25,6 +25,10 @@ class MiniMaxH3ArchConfig(DiTArchConfig):
     _supported_attention_backends: tuple[AttentionBackendEnum, ...] = (
         AttentionBackendEnum.TORCH_SDPA,
         AttentionBackendEnum.FLASH_ATTN,
+        # FP4-quantized QK attention (fa4_fp4 on sm_100/sm_103, cutlass on
+        # sm_12x). Enabled for speed experiments; output quality against the
+        # SSIM references is not yet validated.
+        AttentionBackendEnum.ATTN_QAT_INFER,
     )
 
     param_names_mapping: dict = field(

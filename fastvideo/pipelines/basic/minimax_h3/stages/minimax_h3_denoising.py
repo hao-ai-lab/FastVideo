@@ -5,6 +5,9 @@ from __future__ import annotations
 
 from typing import Any
 
+import json
+import os
+
 import torch
 
 from fastvideo.distributed import get_local_torch_device
@@ -98,10 +101,45 @@ class MiniMaxH3DenoisingStage(PipelineStage):
         text_indices = layout.text_indices.to(device)
         prompt_embeds = batch.prompt_embeds[0].to(device)
 
+        profile_steps = int(os.environ.get("FASTVIDEO_PROFILE_STEPS", "0"))
+        profiler = None
+        if profile_steps:
+            # skip step 0 (allocator/lazy-init noise), capture the next N steps,
+            # then stop — generation continues unprofiled. record_shapes lets the
+            # analyzer attribute gemms to attention vs MLP by their K/N dims.
+            profiler = torch.profiler.profile(
+                activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
+                record_shapes=True,
+            )
         try:
             for index, (video_timestep, audio_timestep) in enumerate(zip(video_timesteps, audio_timesteps,
                                                                          strict=True)):
+                if profiler is not None:
+                    if index == 1:
+                        profiler.start()
+                    elif index == 1 + profile_steps:
+                        profiler.stop()
+                        rank = os.environ.get("RANK", "0")
+                        out_dir = os.environ.get("FASTVIDEO_PROFILE_DIR", "/tmp")
+                        rows = [{
+                            "name": e.key,
+                            "shapes": str(e.input_shapes),
+                            "cuda_us": e.device_time_total,
+                            "count": e.count,
+                        } for e in profiler.key_averages(group_by_input_shape=True)]
+                        with open(f"{out_dir}/h3_profile_rank{rank}.json", "w") as fh:
+                            json.dump({"profiled_steps": profile_steps, "rows": rows}, fh)
+                        with open(f"{out_dir}/h3_profile_rank{rank}.txt", "w") as fh:
+                            fh.write(profiler.key_averages(group_by_input_shape=True).table(
+                                sort_by="cuda_time_total", row_limit=60))
+                        profiler = None
                 unique_timesteps, timestep_indices = row_timestep_plan[index]
+                # Under torch.compile(mode="reduce-overhead") each denoising
+                # step must be marked, or cudagraph trees flag cross-step
+                # reuse of pooled outputs as "accessing tensor output of
+                # CUDAGraphs that has been overwritten" (surfaces at sp=1;
+                # sp>1 is masked by collective-induced graph breaks).
+                torch.compiler.cudagraph_mark_step_begin()
                 with trace_step(index), set_forward_context(
                         current_timestep=index,
                         attn_metadata=None,
