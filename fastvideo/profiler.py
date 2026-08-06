@@ -128,10 +128,10 @@ register_profiler_region(
 #     name="profiler_region_inference_pre_denoising",
 #     description="Pre-denoising inference steps (conditioning, preprocessing).",
 # )
-# register_profiler_region(
-#     name="profiler_region_inference_denoising",
-#     description="The main inference denoising loop.",
-# )
+register_profiler_region(
+    name="profiler_region_inference_denoising",
+    description="The main inference denoising loop.",
+)
 # register_profiler_region(
 #     name="profiler_region_inference_post_denoising",
 #     description=
