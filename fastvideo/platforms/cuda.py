@@ -146,9 +146,12 @@ class CudaPlatformBase(Platform):
             if is_attn_qat_infer_available():
                 logger.info("Using Attn-QAT inference backend (%s).", attn_qat_infer_receipt())
                 return "fastvideo.attention.backends.attn_qat_infer.AttnQatInferBackend"
-            # Keep the trailing sentence stable: downstream receipts grep for it.
-            logger.info("Attn-QAT inference kernel is not built (%s). Fall back to Flash Attention.",
-                        attn_qat_infer_receipt())
+            raise ImportError(
+                f"ATTN_QAT_INFER selected but the inference kernel is not usable ({attn_qat_infer_receipt()}). "
+                "Silent fallback would run plain FlashAttention while the caller believes it is measuring "
+                "FP4-QAT attention — an A/B comparison would silently benchmark bf16 against bf16; "
+                "refusing to proceed. Build the fastvideo-kernel attn_qat_infer target for this arch "
+                "or pick a different FASTVIDEO_ATTENTION_BACKEND.")
         elif selected_backend == AttentionBackendEnum.ATTN_QAT_TRAIN:
             from fastvideo.attention.backends.attn_qat_train import (  # noqa: F401
                 AttnQatTrainBackend, is_attn_qat_train_available)
