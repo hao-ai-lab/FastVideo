@@ -65,8 +65,7 @@ uv pip install flash-attn --no-build-isolation -v
 
 ## Next Steps
 
-Now that FastVideo is installed, head to the [Quick Start](quick_start.md) to generate your first video.
-
-!!! tip "Not sure which command to run?"
-    - The [Quick Start](quick_start.md) page has an interactive Config Generator. Select your task, maintained model profile, and GPU count to get a ready-to-copy `fastvideo generate` command.
-    - For fine-grained control over all parameters, use the [Advanced Tuning Guide](advanced_tuning_guide.md).
+- [Quick Start](quick_start.md) - Generate your first video
+- [Inference Cookbook](../cookbook/index.md) - Choose a maintained recipe
+- [Configuration](../inference/configuration.md) - Learn about configuration options
+- [Examples](../inference/examples/examples_inference_index.md) - Explore scripts and notebooks

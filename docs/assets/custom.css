@@ -42,55 +42,44 @@ img {
     margin: 0 auto;
 }
 
-/* ===== Advanced Tuning Guide (standalone, full-bleed page) ===== */
-.md-content__inner:has(.adv-tuning-guide-wrap) > h1 {
-  display: none;
+.cookbook-picker {
+    padding: 1rem;
+    border: 0.05rem solid var(--md-default-fg-color--lightest);
+    border-radius: 0.2rem;
 }
 
-.md-content:has(.adv-tuning-guide-wrap) ~ .md-sidebar--secondary {
-  display: none;
+.cookbook-picker select {
+    width: 100%;
+    padding: 0.6rem;
+    color: var(--md-default-fg-color);
+    background: var(--md-default-bg-color);
+    border: 0.05rem solid var(--md-default-fg-color--lighter);
+    border-radius: 0.2rem;
 }
 
-.md-content:has(.adv-tuning-guide-wrap) {
-  max-width: none;
+.cookbook-picker dl {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.25rem 1rem;
 }
 
-.md-content__inner:has(.adv-tuning-guide-wrap) {
-  max-width: none;
-  margin: 0;
-  padding: 0;
+.cookbook-picker dt {
+    font-weight: 700;
 }
 
-.adv-tuning-guide-wrap {
-  width: 100%;
-  max-width: none;
-  overflow: hidden;
-  background: #fff;
-  margin-right: 0;
+.cookbook-picker dd {
+    margin: 0;
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
-.adv-tuning-guide-frame {
-  width: 100%;
-  height: 1250px; /* fallback before postMessage adjusts to actual content height */
-  border: 0;
-  display: block;
-  background: #fff;
-}
-
-/* ===== Quick Start embedded guide ===== */
-.quick-start-guide-wrap {
-  width: 100%;
-  max-width: 100%;
-  overflow: hidden;
-  background: #fff;
-}
-
-.quick-start-guide-frame {
-  width: 100%;
-  height: 1205px; /* fallback before postMessage adjusts to actual content height */
-  border: 0;
-  display: block;
-  background: #fff;
+.cookbook-picker__status {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
 }
 
 .md-typeset .copy-page-button.md-button {
