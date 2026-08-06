@@ -184,6 +184,21 @@ class CudaPlatformBase(Platform):
                 raise ImportError("The Video Sparse Attention backend is not installed. "
                                   "To install it, please follow the instructions at: "
                                   "https://hao-ai-lab.github.io/FastVideo/video_sparse_attention/installation ") from e
+        elif selected_backend == AttentionBackendEnum.VIDEO_SPARSE_ATTN_H3:
+            try:
+                from fastvideo_kernel.block_sparse_attn_256 import (  # noqa: F401
+                    block_sparse_attn_256_bshd)
+
+                from fastvideo.attention.backends.video_sparse_attn_h3 import (  # noqa: F401
+                    MiniMaxH3VSABackend)
+                logger.info("Using MiniMax-H3 Video Sparse Attention backend.")
+
+                return "fastvideo.attention.backends.video_sparse_attn_h3.MiniMaxH3VSABackend"
+            except ImportError as e:
+                logger.error("Failed to import H3 Video Sparse Attention backend: %s", str(e))
+                raise ImportError("VIDEO_SPARSE_ATTN_H3 selected but fastvideo_kernel's block-sparse "
+                                  "kernels are unavailable. Install fastvideo-kernel or pick a different "
+                                  "FASTVIDEO_ATTENTION_BACKEND.") from e
         elif selected_backend == AttentionBackendEnum.BSA_ATTN:
             try:
                 from fastvideo.attention.backends.bsa_attn import (  # noqa: F401

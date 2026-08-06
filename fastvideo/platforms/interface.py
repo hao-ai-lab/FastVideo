@@ -18,6 +18,7 @@ class AttentionBackendEnum(enum.Enum):
     ATTN_QAT_INFER = enum.auto()
     ATTN_QAT_TRAIN = enum.auto()
     VIDEO_SPARSE_ATTN = enum.auto()
+    VIDEO_SPARSE_ATTN_H3 = enum.auto()
     BSA_ATTN = enum.auto()
     VMOBA_ATTN = enum.auto()
     SLA_ATTN = enum.auto()

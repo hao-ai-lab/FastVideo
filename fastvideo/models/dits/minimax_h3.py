@@ -11,6 +11,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from fastvideo.attention import DistributedAttention
+from fastvideo.attention.layer import DistributedAttention_VSA
+from fastvideo.attention.selector import get_attn_backend
 from fastvideo.configs.models.dits.minimax_h3 import MiniMaxH3Config
 from fastvideo.distributed.communication_op import (
     sequence_model_parallel_all_gather_with_unpad,
@@ -23,6 +25,7 @@ from fastvideo.layers.quantization import QuantizationConfig
 from fastvideo.layers.visual_embedding import Timesteps
 from fastvideo.models.dits.base import BaseDiT
 from fastvideo.platforms import AttentionBackendEnum
+from fastvideo.utils import get_compute_dtype
 
 MINIMAX_H3_MODALITY_NUM = 3
 _CFG = MiniMaxH3Config()
@@ -131,13 +134,53 @@ class MiniMaxH3Attention(nn.Module):
             quant_config=quant_config,
             prefix=f"{prefix}.to_out",
         )
-        self.distributed_attention = DistributedAttention(
+        # VSA carries a learned gate on its pooled-compression branch. The H3
+        # checkpoint has no such weight, so the loader zero-initializes it
+        # (ALLOWED_NEW_PARAM_PATTERNS) and the branch is exactly disabled
+        # until finetuned. Built only when VSA-H3 actually resolves, keeping
+        # the FLASH/SDPA paths and their state_dict untouched.
+        resolved_backend = get_attn_backend(attention_head_dim,
+                                            get_compute_dtype(),
+                                            supported_attention_backends=supported_attention_backends)
+        use_vsa = resolved_backend.get_name() == "VIDEO_SPARSE_ATTN_H3"
+        attention_cls = DistributedAttention_VSA if use_vsa else DistributedAttention
+        self.distributed_attention = attention_cls(
             num_heads=num_attention_heads,
             head_size=attention_head_dim,
             causal=False,
             supported_attention_backends=supported_attention_backends,
             prefix=prefix,
         )
+        self.to_gate_compress: ReplicatedLinear | None = None
+        # None = unchecked; the first forward tests the loaded weight once and
+        # skips the gate branch entirely while it is structurally zero.
+        self._gate_compress_active: bool | None = None
+        if use_vsa:
+            self.to_gate_compress = ReplicatedLinear(
+                hidden_size,
+                inner_dim,
+                bias=False,
+                quant_config=quant_config,
+                prefix=f"{prefix}.to_gate_compress",
+            )
+
+    def _gate_active(self) -> bool:
+        """True when the compression gate can contribute.
+
+        The zero-initialized (not-yet-finetuned) gate makes the whole branch
+        a guaranteed zero — a full GEMM plus a third more all-to-all/tile
+        traffic per layer for nothing — so test the loaded weight once and
+        cache the answer. Under grad the branch always runs (gradients must
+        reach a zero gate for it to ever train).
+        """
+        if torch.is_grad_enabled():
+            return True
+        if self._gate_compress_active is None:
+            weight = self.to_gate_compress.weight
+            # bool() on a DTensor reduction resolves collectively, so every
+            # rank caches the same answer.
+            self._gate_compress_active = bool((weight != 0).any())
+        return self._gate_compress_active
 
     @staticmethod
     def _apply_rotary_emb(
@@ -176,12 +219,18 @@ class MiniMaxH3Attention(nn.Module):
 
         # H3 rotates only 96/128 channels, which the generic `freqs_cis`
         # branch cannot express. Apply it above, then pass no RoPE here.
+        extra_attention_kwargs = {}
+        if self.to_gate_compress is not None and self._gate_active():
+            gate_compress, _ = self.to_gate_compress(hidden_states)
+            extra_attention_kwargs["gate_compress"] = gate_compress.unflatten(
+                -1, (self.num_attention_heads, self.attention_head_dim))
         hidden_states, _ = self.distributed_attention(
             query,
             key,
             value,
             original_seq_len=original_seq_len,
             freqs_cis=None,
+            **extra_attention_kwargs,
         )
         hidden_states = hidden_states.flatten(2, 3).type_as(query)
         hidden_states, _ = self.to_out(hidden_states)
@@ -521,7 +570,10 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
             arch.norm_eps,
             arch.qk_norm_eps,
             arch.final_norm_eps,
-            self.supported_attention_backends,
+            # The refiner attends over the text stream only; the packed-sequence
+            # VSA backend must never be selected for it.
+            tuple(backend for backend in self.supported_attention_backends
+                  if backend != AttentionBackendEnum.VIDEO_SPARSE_ATTN_H3),
             config.quant_config,
             prefix=f"{config.prefix}.token_refiner",
         )
