@@ -108,7 +108,7 @@ class TimestepEmbedder(nn.Module):
         return torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
 
     def forward(self, timestep: torch.Tensor) -> torch.Tensor:
-        embedding = self.timestep_embedding(timestep).to(timestep.dtype)
+        embedding = self.timestep_embedding(timestep).to(self.mlp[0].weight.dtype)
         return self.mlp(embedding)
 
 
