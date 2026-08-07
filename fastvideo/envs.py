@@ -239,11 +239,11 @@ environment_variables: dict[str, Callable[[], Any]] = {
     "FASTVIDEO_TORCH_PROFILER_WITH_PROFILE_MEMORY":
     lambda: bool(os.getenv("FASTVIDEO_TORCH_PROFILER_WITH_PROFILE_MEMORY", "0") != "0"),
 
-    # Enable torch profiler to profile stack if set
-    # FASTVIDEO_TORCH_PROFILER_WITH_STACK=1. If not set, torch profiler WILL
-    # profile stack by default.
+    # Enable torch profiler stack capture with
+    # FASTVIDEO_TORCH_PROFILER_WITH_STACK=1. Off by default: stack capture
+    # costs ~1.5x runtime overhead and ~1.4x trace size.
     "FASTVIDEO_TORCH_PROFILER_WITH_STACK":
-    lambda: bool(os.getenv("FASTVIDEO_TORCH_PROFILER_WITH_STACK", "1") != "0"),
+    lambda: bool(os.getenv("FASTVIDEO_TORCH_PROFILER_WITH_STACK", "0") != "0"),
 
     # Enable torch profiler to profile flops if set
     # FASTVIDEO_TORCH_PROFILER_WITH_FLOPS=1. If not set, torch profiler will
