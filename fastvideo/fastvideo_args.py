@@ -163,6 +163,14 @@ class FastVideoArgs:
     torch_compile_kwargs_vae: dict[str, Any] = field(default_factory=dict)
     torch_compile_kwargs_audio_vae: dict[str, Any] = field(default_factory=dict)
 
+    # CUDA graph capture for the causal Wan denoising loop (item 2 of the
+    # FlashDreams port). Only takes effect once the KV cache window has
+    # filled and its write positions become fixed; falls back to eager
+    # execution with a log message if the pipeline/config doesn't meet the
+    # preconditions (local_attn_size == -1, rope_cache_policy != "relativistic",
+    # or a dual-transformer MoE boundary_timestep).
+    enable_causal_cuda_graph: bool = False
+
     disable_autocast: bool = False
 
     # VSA parameters
@@ -588,6 +596,14 @@ class FastVideoArgs:
             default=None,
             help=
             "JSON string of kwargs to pass to torch.compile. Example: '{\"backend\":\"inductor\",\"mode\":\"reduce-overhead\"}'",
+        )
+        parser.add_argument(
+            "--enable-causal-cuda-graph",
+            action=StoreBoolean,
+            default=FastVideoArgs.enable_causal_cuda_graph,
+            help="Capture the causal Wan denoising step into a CUDA graph once its KV cache "
+            "window reaches steady state, to cut per-op dispatch overhead. Falls back to eager "
+            "execution automatically if the pipeline doesn't meet the preconditions.",
         )
 
         parser.add_argument(

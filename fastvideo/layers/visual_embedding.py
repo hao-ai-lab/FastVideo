@@ -134,23 +134,38 @@ class TimestepEmbedder(nn.Module):
         return t_emb
 
 
+_TIMESTEP_EMBED_FREQS_CACHE: dict[tuple, torch.Tensor] = {}
+
+
 def timestep_embedding(t: torch.Tensor,
                        dim: int,
                        max_period: int = 10000,
                        dtype: torch.dtype = torch.float32) -> torch.Tensor:
     """
     Create sinusoidal timestep embeddings.
-    
+
     Args:
         t: Tensor of shape [B] with timesteps
         dim: Embedding dimension
         max_period: Controls the minimum frequency of the embeddings
-        
+
     Returns:
         Tensor of shape [B, dim] with embeddings
     """
     half = dim // 2
-    freqs = torch.exp(-math.log(max_period) * torch.arange(start=0, end=half, dtype=dtype) / half).to(device=t.device)
+    # The frequency basis only depends on (half, max_period, dtype), so cache
+    # it instead of rebuilding + re-transferring a CPU tensor every call.
+    # Pinned so the transfer is also valid inside CUDA graph capture (e.g.
+    # the causal denoising loop once its KV cache reaches steady state),
+    # which forbids copies from pageable CPU memory.
+    cache_key = (half, max_period, dtype)
+    freqs = _TIMESTEP_EMBED_FREQS_CACHE.get(cache_key)
+    if freqs is None:
+        freqs = torch.exp(-math.log(max_period) * torch.arange(start=0, end=half, dtype=dtype) / half)
+        if torch.cuda.is_available():
+            freqs = freqs.pin_memory()
+        _TIMESTEP_EMBED_FREQS_CACHE[cache_key] = freqs
+    freqs = freqs.to(device=t.device, non_blocking=True)
     args = t[:, None].float() * freqs[None]
     embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
     if dim % 2:
