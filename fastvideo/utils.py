@@ -720,15 +720,11 @@ def maybe_download_model_index(model_name_or_path: str, revision: str | None = N
         config_filename = "model_index.json"
         try:
             filename = f"{subfolder}/{config_filename}" if subfolder else config_filename
-            model_index_path = hf_hub_download(repo_id=repo_id,
-                                               filename=filename,
-                                               revision=revision)
+            model_index_path = hf_hub_download(repo_id=repo_id, filename=filename, revision=revision)
         except EntryNotFoundError:
             config_filename = "modular_model_index.json"
             filename = f"{subfolder}/{config_filename}" if subfolder else config_filename
-            model_index_path = hf_hub_download(repo_id=repo_id,
-                                               filename=filename,
-                                               revision=revision)
+            model_index_path = hf_hub_download(repo_id=repo_id, filename=filename, revision=revision)
 
         # Load the selected manifest.
         with open(model_index_path) as f:
@@ -739,14 +735,12 @@ def maybe_download_model_index(model_name_or_path: str, revision: str | None = N
             raise ValueError(f"{config_filename} for {model_name_or_path} does not contain _class_name field")
 
         if "_diffusers_version" not in config:
-            raise ValueError(
-                f"{config_filename} for {model_name_or_path} does not contain _diffusers_version field")
+            raise ValueError(f"{config_filename} for {model_name_or_path} does not contain _diffusers_version field")
 
         # Add the pipeline name for downstream use
         config["pipeline_name"] = config["_class_name"]
 
-        logger.info("Downloaded %s for %s, pipeline: %s", config_filename, model_name_or_path,
-                    config["_class_name"])
+        logger.info("Downloaded %s for %s, pipeline: %s", config_filename, model_name_or_path, config["_class_name"])
         return config
 
     except Exception as e:
