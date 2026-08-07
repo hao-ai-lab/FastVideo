@@ -92,8 +92,9 @@ All supported `/test` names and their `TEST_TYPE` mappings are listed in
 [CI/CD Architecture](ci_architecture.md#slash-commands).
 
 When a direct test succeeds, the aggregate `fastcheck-passed` or
-`full-suite-passed` status is refreshed automatically if all jobs in that tier
-are now green.
+`full-suite-passed` status is refreshed automatically if that tier previously
+failed and all its jobs are now green. A targeted test cannot replace an
+initial Fastcheck or Full Suite run.
 
 ## Troubleshooting
 
