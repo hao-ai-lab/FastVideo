@@ -875,23 +875,3 @@ class MatrixGame2SelfForcingDistillationPipeline(SelfForcingDistillationPipeline
 
         return batch
 
-
-def main(args) -> None:
-    logger.info("Starting Matrix-Game 2.0 self-forcing distillation pipeline...")
-
-    pipeline = MatrixGame2SelfForcingDistillationPipeline.from_pretrained(args.pretrained_model_name_or_path, args=args)
-
-    args = pipeline.training_args
-    pipeline.train()
-    logger.info("Matrix-Game 2.0 self-forcing distillation pipeline completed")
-
-
-if __name__ == "__main__":
-    argv = sys.argv
-    from fastvideo.fastvideo_args import TrainingArgs
-    from fastvideo.utils import FlexibleArgumentParser
-    parser = FlexibleArgumentParser()
-    parser = TrainingArgs.add_cli_args(parser)
-    parser = FastVideoArgs.add_cli_args(parser)
-    args = parser.parse_args()
-    main(args)

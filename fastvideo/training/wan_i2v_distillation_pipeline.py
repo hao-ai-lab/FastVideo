@@ -174,27 +174,3 @@ class WanI2VDistillationPipeline(DistillationPipeline):
 
         return training_batch
 
-
-def main(args) -> None:
-    logger.info("Starting Wan distillation pipeline...")
-
-    # Create pipeline with original args
-    pipeline = WanI2VDistillationPipeline.from_pretrained(args.pretrained_model_name_or_path, args=args)
-
-    args = pipeline.training_args
-
-    # Start training
-    pipeline.train()
-    logger.info("Wan distillation pipeline completed")
-
-
-if __name__ == "__main__":
-    argv = sys.argv
-    from fastvideo.fastvideo_args import TrainingArgs
-    from fastvideo.utils import FlexibleArgumentParser
-    parser = FlexibleArgumentParser()
-    parser = TrainingArgs.add_cli_args(parser)
-    parser = FastVideoArgs.add_cli_args(parser)
-    args = parser.parse_args()
-    args.dit_cpu_offload = False
-    main(args)
