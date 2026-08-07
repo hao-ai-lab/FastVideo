@@ -11,6 +11,7 @@ from __future__ import annotations
 import threading
 import time
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -35,6 +36,7 @@ def runner():
     r._generator_state = "empty"
     r._generator_error = None
     r._generator_lock = threading.Lock()
+    r._load_lock = threading.Lock()
     return r
 
 
@@ -183,6 +185,40 @@ def test_job_with_different_config_replaces_slot(runner, monkeypatch):
     assert gen is made[1][1]
     assert made[0][1].shutdown_calls == 1  # old released before new load
     assert runner.list_generators()[0]["model_id"] == "org/b"
+
+
+def test_job_during_replace_never_sees_half_replaced_slot(runner, monkeypatch):
+    """Regression: user restarted a stale 1-gpu job while an 8-gpu generator
+    was resident; the replace nulled the generator with state still 'ready',
+    and the next (correct) job grabbed None -> AttributeError on
+    generate_video. All transitions now serialize under the load lock."""
+    made = []
+    gate = threading.Event()
+    _install_fake_loader(runner, monkeypatch, made=made)
+    runner.preload_generator(model_id="org/h3", workload_type="t2v", num_gpus=8)
+    _wait_state(runner, "ready")
+
+    _install_fake_loader(runner, monkeypatch, made=made, gate=gate)
+    results: dict[str, Any] = {}
+
+    def job_a():  # stale job: mismatching config triggers a slow replace
+        results["a"] = runner._get_or_create_generator("org/h3", "t2v", 1)
+
+    def job_b():  # correct job arriving mid-replace
+        time.sleep(0.3)
+        results["b"] = runner._get_or_create_generator("org/h3", "t2v", 8)
+
+    ta = threading.Thread(target=job_a, daemon=True)
+    tb = threading.Thread(target=job_b, daemon=True)
+    ta.start(); tb.start()
+    time.sleep(0.6)
+    gate.set()
+    ta.join(10); tb.join(10)
+
+    assert results["a"] is not None and hasattr(results["a"], "shutdown")
+    assert results["b"] is not None and hasattr(results["b"], "shutdown")
+    # b arrived second, so the slot ends at b's 8-gpu config
+    assert runner.list_generators()[0]["num_gpus"] == 8
 
 
 def test_config_dict_matches_request_defaults(runner):

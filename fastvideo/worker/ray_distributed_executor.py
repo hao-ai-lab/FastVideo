@@ -392,6 +392,18 @@ class RayDistributedExecutor(Executor):
         if pg is not None:
             try:
                 ray.util.remove_placement_group(pg)
+                # Removal is async; a generator created right after shutdown
+                # races the teardown and fails "no GPU available". Wait for
+                # the resources to actually free.
+                import time as _time
+                from ray.util import placement_group_table
+                deadline = _time.monotonic() + 30
+                while _time.monotonic() < deadline:
+                    if placement_group_table(pg).get("state") == "REMOVED":
+                        break
+                    _time.sleep(0.5)
+                else:
+                    logger.warning("Placement group still not removed after 30s")
             except Exception:  # noqa: BLE001 -- already-removed / cluster gone
                 logger.warning("Failed to remove ray placement group", exc_info=True)
             self.fastvideo_args.ray_placement_group = None

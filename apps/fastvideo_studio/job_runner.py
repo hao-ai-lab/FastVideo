@@ -266,7 +266,10 @@ class JobRunner:
         self._generator_config: dict[str, Any] | None = None
         self._generator_state: str = "empty"  # empty | loading | ready | failed
         self._generator_error: str | None = None
-        self._generator_lock = threading.Lock()
+        self._generator_lock = threading.Lock()  # guards the fields above
+        # Serializes every slot transition (preload, job-triggered replace,
+        # unload). Held for the full duration of a load.
+        self._load_lock = threading.Lock()
 
         # Shared Manager for log queues (avoids spawning a new process per job)
         self._mp_manager = get_mp_context().Manager()
@@ -664,52 +667,47 @@ class JobRunner:
             return [j.id for j in self._jobs.values()
                     if j.status == JobStatus.RUNNING and j.job_type == "inference"]
 
-    def _release_generator(self) -> None:
-        """Shut down and delete the resident generator (caller holds no lock)."""
-        with self._generator_lock:
-            gen = self._generator
-            self._generator = None
-            self._generator_state = "empty"
-            self._generator_config = None
-            self._generator_error = None
-        if gen is not None:
-            logger.info("Releasing resident generator")
-            gen.shutdown()
-            del gen
-
     def preload_generator(self, **params: Any) -> dict[str, Any]:
         """Load a model into memory ahead of time. One load at a time; loading
         a different config always releases the current instance first."""
         config = self._generator_config_dict(**params)
         with self._generator_lock:
-            if self._generator_state == "loading":
-                raise RuntimeError("a model load is already in progress")
             if self._generator_state == "ready" and self._generator_config == config:
                 return self._slot_entry()
+        if not self._load_lock.acquire(blocking=False):
+            raise RuntimeError("a model load is already in progress")
+        try:
             if self._running_inference_jobs():
                 raise RuntimeError("cannot swap models while inference jobs are running")
-            self._generator_state = "loading"
-            self._generator_config = config
-            self._generator_error = None
-            entry = self._slot_entry()
+            with self._generator_lock:
+                self._generator_state = "loading"
+                self._generator_config = config
+                self._generator_error = None
+                entry = self._slot_entry()
+        except BaseException:
+            self._load_lock.release()
+            raise
 
         def _load() -> None:
-            try:
-                self._create_generator_into_slot(config)
-            except Exception as exc:  # noqa: BLE001 -- surfaced via the API
-                logger.exception("Preload failed for %s", config["model_id"])
-                with self._generator_lock:
-                    self._generator_state = "failed"
-                    self._generator_error = str(exc)
+            try:  # the preload owns _load_lock until the load resolves
+                self._load_into_slot_locked(config)
+            except Exception:  # noqa: BLE001 -- state already set to failed
+                pass
+            finally:
+                self._load_lock.release()
 
         threading.Thread(target=_load, daemon=True, name="generator-preload").start()
         return entry
 
-    def _create_generator_into_slot(self, config: dict[str, Any]) -> Any:
-        """Release whatever is resident, load ``config``, make it THE instance."""
+    def _load_into_slot_locked(self, config: dict[str, Any]) -> Any:
+        """Release whatever is resident and load ``config``. Caller MUST hold
+        ``_load_lock``. State is 'loading' on entry or set here."""
         with self._generator_lock:
             gen = self._generator
             self._generator = None
+            self._generator_state = "loading"
+            self._generator_config = config
+            self._generator_error = None
         if gen is not None:
             logger.info("Releasing resident generator before loading a new one")
             gen.shutdown()
@@ -735,21 +733,28 @@ class JobRunner:
 
         logger.info("Loading model %s (%s)", config["model_id"],
                     ", ".join(f"{k}={v}" for k, v in config.items() if k != "model_id"))
-        new_gen = VideoGenerator.from_pretrained(
-            model_path,
-            workload_type=config["workload_type"],
-            num_gpus=config["num_gpus"],
-            dit_cpu_offload=config["dit_cpu_offload"],
-            text_encoder_cpu_offload=config["text_encoder_cpu_offload"],
-            vae_cpu_offload=config["vae_cpu_offload"],
-            image_encoder_cpu_offload=config["image_encoder_cpu_offload"],
-            use_fsdp_inference=config["use_fsdp_inference"],
-            enable_torch_compile=config["enable_torch_compile"],
-            VSA_sparsity=config["vsa_sparsity"],
-            tp_size=config["tp_size"],
-            sp_size=config["sp_size"],
-            **executor_kwargs,
-        )
+        try:
+            new_gen = VideoGenerator.from_pretrained(
+                model_path,
+                workload_type=config["workload_type"],
+                num_gpus=config["num_gpus"],
+                dit_cpu_offload=config["dit_cpu_offload"],
+                text_encoder_cpu_offload=config["text_encoder_cpu_offload"],
+                vae_cpu_offload=config["vae_cpu_offload"],
+                image_encoder_cpu_offload=config["image_encoder_cpu_offload"],
+                use_fsdp_inference=config["use_fsdp_inference"],
+                enable_torch_compile=config["enable_torch_compile"],
+                VSA_sparsity=config["vsa_sparsity"],
+                tp_size=config["tp_size"],
+                sp_size=config["sp_size"],
+                **executor_kwargs,
+            )
+        except Exception as exc:
+            logger.exception("Model load failed for %s", config["model_id"])
+            with self._generator_lock:
+                self._generator_state = "failed"
+                self._generator_error = str(exc)
+            raise
         with self._generator_lock:
             self._generator = new_gen
             self._generator_config = config
@@ -766,16 +771,28 @@ class JobRunner:
 
     def unload_generator(self, **_ignored: Any) -> bool:
         """Shut down and delete the resident generator, freeing GPU memory."""
-        with self._generator_lock:
-            if self._generator_state == "loading":
-                raise RuntimeError("cannot unload while a model load is in progress")
-            if self._generator_state == "empty":
+        if not self._load_lock.acquire(blocking=False):
+            raise RuntimeError("cannot unload while a model load is in progress")
+        try:
+            running = self._running_inference_jobs()
+            if running:
+                raise RuntimeError(f"cannot unload while inference jobs are running: {running}")
+            with self._generator_lock:
+                gen = self._generator
+                empty = self._generator_state == "empty"
+                self._generator = None
+                self._generator_state = "empty"
+                self._generator_config = None
+                self._generator_error = None
+            if empty:
                 return False
-        running = self._running_inference_jobs()
-        if running:
-            raise RuntimeError(f"cannot unload while inference jobs are running: {running}")
-        self._release_generator()
-        return True
+            if gen is not None:
+                logger.info("Releasing resident generator")
+                gen.shutdown()
+                del gen
+            return True
+        finally:
+            self._load_lock.release()
 
     def _get_or_create_generator(
         self,
@@ -794,7 +811,9 @@ class JobRunner:
         log_queue: mp.Queue | None = None,
     ) -> Any:
         """Return the resident generator if the config matches; otherwise
-        replace the slot (waiting out an in-flight preload first)."""
+        replace the slot. Blocks behind any in-flight load — every slot
+        transition happens under ``_load_lock``, so a job can never observe a
+        half-replaced slot."""
         del log_queue  # single-slot generators log via the engine tee
         config = self._generator_config_dict(
             model_id=model_id,
@@ -810,21 +829,13 @@ class JobRunner:
             tp_size=tp_size,
             sp_size=sp_size,
         )
-        # A preload may be in flight (possibly for exactly this config): wait
-        # for it rather than racing it for the GPUs.
-        deadline = time.time() + 3600
-        while time.time() < deadline:
+        with self._load_lock:  # waits out preloads / other jobs' replaces
             with self._generator_lock:
-                state = self._generator_state
-                if state != "loading":
-                    if state == "ready" and self._generator_config == config:
-                        return self._generator
-                    break
-            time.sleep(1.0)
-        else:
-            raise RuntimeError("timed out waiting for the in-flight model load")
-
-        return self._create_generator_into_slot(config)
+                if (self._generator_state == "ready"
+                        and self._generator_config == config
+                        and self._generator is not None):
+                    return self._generator
+            return self._load_into_slot_locked(config)
 
     def _run_job(self, job: Job):
         if job.job_type == "inference":
