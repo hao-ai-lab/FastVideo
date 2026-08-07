@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 import os
-import sys
 from copy import deepcopy
 from pathlib import Path
 import torch
@@ -473,24 +472,3 @@ class LTX2TrainingPipeline(TrainingPipeline):
             grad_norm = 0.0
         training_batch.grad_norm = grad_norm
         return training_batch
-
-
-def main(args) -> None:
-    logger.info("Starting LTX-2 training pipeline...")
-    pipeline = LTX2TrainingPipeline.from_pretrained(args.pretrained_model_name_or_path, args=args)
-    args = pipeline.training_args
-    pipeline.train()
-    logger.info("Training pipeline done")
-
-
-if __name__ == "__main__":
-    argv = sys.argv
-    from fastvideo.fastvideo_args import TrainingArgs
-    from fastvideo.utils import FlexibleArgumentParser
-
-    parser = FlexibleArgumentParser()
-    parser = TrainingArgs.add_cli_args(parser)
-    parser = FastVideoArgs.add_cli_args(parser)
-    args = parser.parse_args()
-    args.dit_cpu_offload = False
-    main(args)

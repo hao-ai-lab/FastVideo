@@ -1,8 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-import sys
 from copy import deepcopy
 
-from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
+from fastvideo.fastvideo_args import TrainingArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.basic.wan.wan_causal_dmd_pipeline import (WanCausalDMDPipeline)
 from fastvideo.training.self_forcing_distillation_pipeline import (SelfForcingDistillationPipeline)
@@ -53,24 +52,3 @@ class WanSelfForcingDistillationPipeline(SelfForcingDistillationPipeline):
             dit_cpu_offload=True)
 
         self.validation_pipeline = validation_pipeline
-
-
-def main(args) -> None:
-    logger.info("Starting Wan self-forcing distillation pipeline...")
-
-    pipeline = WanSelfForcingDistillationPipeline.from_pretrained(args.pretrained_model_name_or_path, args=args)
-
-    args = pipeline.training_args
-    pipeline.train()
-    logger.info("Wan self-forcing distillation pipeline completed")
-
-
-if __name__ == "__main__":
-    argv = sys.argv
-    from fastvideo.fastvideo_args import TrainingArgs
-    from fastvideo.utils import FlexibleArgumentParser
-    parser = FlexibleArgumentParser()
-    parser = TrainingArgs.add_cli_args(parser)
-    parser = FastVideoArgs.add_cli_args(parser)
-    args = parser.parse_args()
-    main(args)
