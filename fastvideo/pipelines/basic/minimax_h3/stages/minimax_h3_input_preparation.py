@@ -34,18 +34,6 @@ MINIMAX_H3_KEYFRAMES_KEY = "minimax_h3_keyframes"
 MINIMAX_H3_KEYFRAME_ANCHORS_KEY = "minimax_h3_keyframe_anchors"
 
 
-def _component_value(module: Any, name: str) -> Any:
-    value = getattr(module, name, None)
-    if value is not None:
-        return value
-    config = getattr(module, "config", None)
-    for owner in (getattr(config, "arch_config", None), config):
-        value = getattr(owner, name, None)
-        if value is not None:
-            return value
-    raise ValueError(f"MiniMax-H3 component {type(module).__name__} does not expose `{name}`.")
-
-
 def _has_negative_prompt(value: str | list[str] | None) -> bool:
     if value is None:
         return False
@@ -81,7 +69,7 @@ def prepare_common_request(batch: ForwardBatch) -> None:
     batch.fps = MINIMAX_H3_FPS
 
 
-def resolve_target_canvas(batch: ForwardBatch, vae: object, default_aspect: tuple[int, int]) -> tuple[int, int, int]:
+def resolve_target_canvas(batch: ForwardBatch, vae: Any, default_aspect: tuple[int, int]) -> tuple[int, int, int]:
     """Resolve target geometry independently of the selected condition mode."""
     if (batch.height is None) != (batch.width is None):
         raise ValueError("MiniMax-H3 `height` and `width` must be passed together, or neither.")
@@ -95,7 +83,7 @@ def resolve_target_canvas(batch: ForwardBatch, vae: object, default_aspect: tupl
             raise ValueError(f"MiniMax-H3 `height` and `width` must be positive multiples of "
                              f"{MINIMAX_H3_CANVAS_MULTIPLE}, got {height}x{width}.")
 
-    ratio = int(_component_value(vae, "spatial_compression_ratio"))
+    ratio = int(vae.spatial_compression_ratio)
     if height % ratio or width % ratio:
         raise ValueError(f"MiniMax-H3 canvas {height}x{width} is not divisible by VAE ratio {ratio}.")
     return height, width, ratio
@@ -116,7 +104,7 @@ def resolve_target_num_frames(num_frames: object) -> int:
 class MiniMaxH3InputPreparationStage(PipelineStage):
     """Prepare FL2VA/T2VA or Ref2VA inputs without a parallel family state object."""
 
-    def __init__(self, vae: object, audio_vae: object | None = None, *, ref2va: bool = False) -> None:
+    def __init__(self, vae: Any, audio_vae: Any | None = None, *, ref2va: bool = False) -> None:
         super().__init__()
         if ref2va and audio_vae is None:
             raise ValueError("MiniMax-H3 Ref2VA input preparation requires an audio VAE.")
@@ -169,7 +157,7 @@ class MiniMaxH3InputPreparationStage(PipelineStage):
         latent_height = height // ratio
         latent_width = width // ratio
         num_latent_frames = video_latent_num_frames(num_frames)
-        latent_channels = int(_component_value(self.vae, "latent_channels"))
+        latent_channels = int(self.vae.latent_channels)
 
         batch.height = height
         batch.width = width
@@ -211,7 +199,7 @@ class MiniMaxH3InputPreparationStage(PipelineStage):
 
         height, width, ratio = resolve_target_canvas(batch, self.vae, (16, 9))
         num_frames = resolve_target_num_frames(batch.num_frames)
-        target_sample_rate = int(_component_value(self.audio_vae, "sampling_rate"))
+        target_sample_rate = int(self.audio_vae.sampling_rate)
         batch.references = [prepare_reference(reference, num_frames, target_sample_rate) for reference in references]
         self._write_target_geometry(batch, height, width, ratio, num_frames)
         batch.extra[MINIMAX_H3_KEYFRAMES_KEY] = []

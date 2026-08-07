@@ -61,9 +61,8 @@ class MiniMaxH3DenoisingStage(PipelineStage):
         if not batch.prompt_embeds or batch.latents is None or batch.audio_latents is None:
             raise ValueError("MiniMax-H3 conditioning and packed latents must precede denoising.")
 
-        full_cpu_offload = (bool(getattr(fastvideo_args, "dit_cpu_offload", False))
-                            and not bool(getattr(fastvideo_args, "dit_layerwise_offload", False))
-                            and not bool(getattr(fastvideo_args, "use_fsdp_inference", False)))
+        full_cpu_offload = (fastvideo_args.dit_cpu_offload and not fastvideo_args.dit_layerwise_offload
+                            and not fastvideo_args.use_fsdp_inference)
         device = get_local_torch_device()
         if full_cpu_offload:
             self.transformer.to(device)

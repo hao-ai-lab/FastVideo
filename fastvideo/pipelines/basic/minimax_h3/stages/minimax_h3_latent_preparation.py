@@ -93,14 +93,20 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
         result.add_check("audio_latents", batch.audio_latents, V.with_dims(2))
         return result
 
+    def _encode_keyframe_latents(self, image, device: torch.device) -> torch.Tensor:
+        """Encode one keyframe image to normalized latents (fp16 round-trip
+        preserved for parity with the seeded references)."""
+        pixels = torch.from_numpy(np.asarray(image).copy()).permute(2, 0, 1)[None, :, None]
+        pixels = pixels.to(device=device, dtype=torch.float32).div_(255.0)
+        posterior = self.vae.encode_keyframe(self.vae.normalize_pixels(pixels)).latent_dist
+        return self.vae.normalize_latents(_sample_visual_posterior(posterior).to(torch.float16).float()).cpu()
+
     def _encode_visual_rows(
         self,
         references: list[MiniMaxH3PreparedReference],
         device: torch.device,
     ) -> list[torch.Tensor]:
         patch_size = self.transformer.patch_size
-        mean = self.vae.latents_mean.detach().float().cpu()
-        std = self.vae.latents_std.detach().float().cpu()
         rows: list[torch.Tensor] = []
         for reference in references:
             if reference.media_type == "audio":
@@ -108,22 +114,20 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
             if reference.media_type == "image":
                 if reference.image is None:
                     raise ValueError("MiniMax-H3 reference image pixels are missing.")
-                pixels = torch.from_numpy(np.asarray(reference.image).copy()).permute(2, 0, 1)[None, :, None]
-                encode = self.vae.encode_keyframe
+                latents = self._encode_keyframe_latents(reference.image, device)
             else:
                 if reference.frames is None:
                     raise ValueError("MiniMax-H3 reference video frames are missing.")
                 frames = reference.frames[:trim_reference_num_frames(reference.frames.shape[0])]
                 pixels = torch.from_numpy(frames.copy()).permute(3, 0, 1, 2)[None]
-                encode = self.vae.encode
-
-            pixels = pixels.to(device=device, dtype=torch.float32).div_(255.0)
-            posterior = encode(self.vae.normalize_pixels(pixels)).latent_dist
-            latents = _sample_visual_posterior(posterior).to(torch.float16).float().cpu()
+                pixels = pixels.to(device=device, dtype=torch.float32).div_(255.0)
+                posterior = self.vae.encode(self.vae.normalize_pixels(pixels)).latent_dist
+                latents = self.vae.normalize_latents(_sample_visual_posterior(posterior).to(
+                    torch.float16).float()).cpu()
             reference.num_latent_frames = int(latents.shape[2])
             reference.latent_height = int(latents.shape[3])
             reference.latent_width = int(latents.shape[4])
-            rows.append(patchify_video_latents((latents - mean) / std, patch_size))
+            rows.append(patchify_video_latents(latents, patch_size))
         return rows
 
     def _encode_audio_rows(
@@ -131,8 +135,6 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
         references: list[MiniMaxH3PreparedReference],
         device: torch.device,
     ) -> list[torch.Tensor]:
-        mean = self.audio_vae.latents_mean.detach().float().cpu().transpose(1, 2)
-        std = self.audio_vae.latents_std.detach().float().cpu().transpose(1, 2)
         rows: list[torch.Tensor] = []
         for reference in references:
             if not reference.has_audio:
@@ -140,9 +142,9 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
             if reference.waveform is None:
                 raise ValueError("MiniMax-H3 reference waveform is missing.")
             posterior = self.audio_vae.encode(reference.waveform.to(device)[:, None]).latent_dist
-            latents = posterior.mode().float().cpu().transpose(1, 2)
+            latents = self.audio_vae.normalize_latents(posterior.mode().float()).cpu().transpose(1, 2)
             reference.num_audio_latents = int(latents.shape[1])
-            rows.append(((latents - mean) / std).reshape(-1, self.audio_vae.latent_channels))
+            rows.append(latents.reshape(-1, self.audio_vae.latent_channels))
         return rows
 
     def _encode_fl2va_conditions(
@@ -160,15 +162,11 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
         vae_device = get_local_torch_device()
         self.vae.to(vae_device)
         try:
-            mean = self.vae.latents_mean.detach().float().cpu()
-            std = self.vae.latents_std.detach().float().cpu()
             clean_rows: list[torch.Tensor] = []
             for image in keyframes:
-                pixels = torch.from_numpy(np.asarray(image).copy()).permute(2, 0, 1)[None, :, None]
-                pixels = pixels.to(device=vae_device, dtype=torch.float32).div_(255.0)
-                posterior = self.vae.encode_keyframe(self.vae.normalize_pixels(pixels)).latent_dist
-                latents = _sample_visual_posterior(posterior).to(torch.float16).float().cpu()
-                clean_rows.append(patchify_video_latents((latents - mean) / std, self.transformer.patch_size))
+                clean_rows.append(
+                    patchify_video_latents(self._encode_keyframe_latents(image, vae_device),
+                                           self.transformer.patch_size))
         finally:
             if fastvideo_args.vae_cpu_offload:
                 self.vae.to("cpu")
