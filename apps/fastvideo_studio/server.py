@@ -32,7 +32,7 @@ from fastapi.responses import FileResponse
 
 from fastvideo.registry import (get_registered_model_paths, get_registered_models_with_workloads)
 from fastvideo_studio.database import Database, _get_db_path
-from fastvideo_studio.gpu import get_gpu_snapshot
+from fastvideo_studio.gpu import get_cluster_snapshot, get_gpu_snapshot
 from fastvideo_studio.job_runner import JobRunner, JobStatus
 from fastvideo_studio.models import (CreateDatasetRequest, CreateJobRequest, GeneratorRequest, SettingsUpdate,
                                      UpdateCaptionRequest, model_label)
@@ -162,6 +162,13 @@ def update_settings(settings: SettingsUpdate) -> dict[str, Any]:
 def list_gpus() -> dict[str, Any]:
     """Return an NVML snapshot of every GPU on the API server host."""
     return get_gpu_snapshot()
+
+
+@app.get("/api/cluster")
+def cluster_status() -> dict[str, Any]:
+    """Cluster-wide GPU/host telemetry (per-node NVML via ray when connected,
+    the local host otherwise)."""
+    return get_cluster_snapshot()
 
 
 @app.get("/api/models")
