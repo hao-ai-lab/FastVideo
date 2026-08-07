@@ -259,7 +259,9 @@ def create_job(req: CreateJobRequest) -> dict[str, Any]:
     job_type = req.job_type or "inference"
     if job_type == "inference":
         valid_ids = {m["id"] for m in _available_models}
-        if req.model_id not in valid_ids:
+        # A local weights directory is as valid as a registered hub id —
+        # the registry resolves the pipeline from its model_index.
+        if req.model_id not in valid_ids and not os.path.isdir(req.model_id):
             raise HTTPException(
                 status_code=400,
                 detail=(f"Unknown model_id '{req.model_id}'. "

@@ -656,6 +656,21 @@ class JobRunner:
         # Import lazily so starting the server is fast even without a GPU.
         from fastvideo import VideoGenerator
 
+        # Deployment-level knobs (set where the API server is launched):
+        # FASTVIDEO_STUDIO_MODEL_PATHS="id=/local/dir,..." serves a registered
+        # model id from local weights instead of the HF hub;
+        # FASTVIDEO_STUDIO_EXECUTOR_BACKEND=ray runs workers on an existing
+        # Ray cluster (the multi-node path — "mp" spawns local processes only).
+        model_path = model_id
+        for pair in os.environ.get("FASTVIDEO_STUDIO_MODEL_PATHS", "").split(","):
+            mid, sep, path = pair.partition("=")
+            if sep and mid.strip() == model_id:
+                model_path = path.strip()
+        executor_kwargs: dict[str, Any] = {}
+        backend = os.environ.get("FASTVIDEO_STUDIO_EXECUTOR_BACKEND")
+        if backend:
+            executor_kwargs["distributed_executor_backend"] = backend
+
         logger.info(
             "Loading model %s (workload=%s, num_gpus=%d, offloads: "
             "dit=%s text_encoder=%s vae=%s image_encoder=%s, fsdp=%s, "
@@ -675,8 +690,9 @@ class JobRunner:
         )
 
         gen = VideoGenerator.from_pretrained(
-            model_id,
+            model_path,
             workload_type=workload_type,
+            num_gpus=num_gpus,
             dit_cpu_offload=dit_cpu_offload,
             text_encoder_cpu_offload=text_encoder_cpu_offload,
             vae_cpu_offload=vae_cpu_offload,
@@ -687,6 +703,7 @@ class JobRunner:
             tp_size=tp_size,
             sp_size=sp_size,
             log_queue=log_queue,
+            **executor_kwargs,
         )
 
         with self._generators_lock:
