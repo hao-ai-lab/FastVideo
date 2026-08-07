@@ -52,6 +52,7 @@ class MiniMaxH3ArchConfig(DiTArchConfig):
     freq_dim: int = 256
     time_embed_hidden_dim: int = 5376
     time_embed_dim: int = 2688
+    adaln_rank: int | None = None
     rope_freq_dim: int = 16
     rope_theta: float = 10000.0
     norm_eps: float = 1e-5
@@ -65,6 +66,9 @@ class MiniMaxH3ArchConfig(DiTArchConfig):
         self.patch_size = (self.patch_size[0], self.patch_size[1], self.patch_size[2])
         self.num_channels_latents = self.in_channels
         self.out_channels = self.in_channels
+        if self.adaln_rank is not None and not 0 < self.adaln_rank <= self.time_embed_dim:
+            raise ValueError(f"MiniMax H3 adaln_rank must be in (0, time_embed_dim={self.time_embed_dim}], "
+                             f"got {self.adaln_rank}.")
         rotary_dim = 2 * 3 * self.rope_freq_dim
         if rotary_dim > self.attention_head_dim or rotary_dim % 2:
             raise ValueError(f"MiniMax H3 rotary width must be even and no larger than the head width; got "

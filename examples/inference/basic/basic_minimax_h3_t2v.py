@@ -22,6 +22,7 @@ from fastvideo.api import (
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model-path", default="MiniMaxAI/MiniMax-H3")
+    # parser.add_argument("--model-path", default="noctuashap/MiniMax-H3-pruned-r16")  # rank-16 AdaLN: -39% params, -23 GiB VRAM
     parser.add_argument("--prompt", required=True)
     parser.add_argument("--output", default="outputs/minimax_h3_t2v")
     parser.add_argument("--height", type=int, default=768)
