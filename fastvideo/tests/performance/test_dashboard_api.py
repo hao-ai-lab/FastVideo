@@ -69,6 +69,10 @@ def test_summary_endpoint_returns_latest_group_status():
             recipe_fingerprint="recipe-a",
             hardware_profile_id="hw-l40s",
             software_profile_id="sw-cu130",
+            result_schema_version=2,
+            comparison_status="PASS",
+            comparison_status_reason="Comparable baseline found",
+            baseline_status="compared",
         ),
         _record(
             "wan",
@@ -83,11 +87,16 @@ def test_summary_endpoint_returns_latest_group_status():
             recipe_fingerprint="recipe-a",
             hardware_profile_id="hw-l40s",
             software_profile_id="sw-cu130",
+            result_schema_version=2,
+            comparison_status="CALIBRATION_NEEDED",
+            comparison_status_reason="No seeded baseline exists",
+            baseline_status="initialized_new_cohort",
         ),
     ]))
     client = TestClient(app)
 
     response = client.get("/api/performance/summary")
+    trends = client.get("/api/performance/trends").json()
 
     assert response.status_code == 200
     body = response.json()
@@ -101,6 +110,13 @@ def test_summary_endpoint_returns_latest_group_status():
     assert body["rows"][0]["variant_id"] == "1.3b-sp2"
     assert body["rows"][0]["benchmark_version"] == 2
     assert body["rows"][0]["recipe_fingerprint"] == "recipe-a"
+    assert body["rows"][0]["cohort_kind"] == "v2"
+    assert body["rows"][0]["comparison_status"] == "CALIBRATION_NEEDED"
+    assert body["rows"][0]["comparison_status_reason"] == "No seeded baseline exists"
+    assert body["rows"][0]["baseline_status"] == "initialized_new_cohort"
+    assert trends["groups"][0]["comparison_status"] == "CALIBRATION_NEEDED"
+    assert trends["groups"][0]["points"][0]["comparison_status"] == "PASS"
+    assert trends["groups"][0]["points"][1]["baseline_status"] == "initialized_new_cohort"
 
 
 def test_summary_status_is_independent_of_days_window():

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { fetchSummary, fetchTrends, refreshData } from "./api";
-import type { CohortValue, RunSource, SummaryResponse, TrendGroup, TrendPoint } from "./api";
+import type { CohortKind, CohortValue, RunSource, SummaryResponse, TrendGroup, TrendPoint } from "./api";
 
 const METRIC_KEYS = ["latency", "throughput", "memory", "text_encoder_time_s", "dit_time_s", "vae_decode_time_s"];
 const RUN_SOURCES: Array<{ value: "" | RunSource; label: string }> = [
@@ -113,6 +113,7 @@ function metricLabel(metricKey: string) {
 type CohortFields = {
   model_id: string;
   gpu_type: string;
+  cohort_kind: CohortKind;
   workload_id: CohortValue;
   variant_id: CohortValue;
   benchmark_version: CohortValue;
@@ -121,48 +122,82 @@ type CohortFields = {
   software_profile_id: CohortValue;
 };
 
-function cohortValue(value: CohortValue) {
+function rawCohortValue(value: CohortValue) {
   if (value === null || value === undefined || value === "") {
-    return "legacy";
+    return "";
   }
   return String(value);
 }
 
+function displayCohortValue(value: CohortValue) {
+  return rawCohortValue(value) || "missing";
+}
+
 function shortCohortValue(value: CohortValue) {
-  const text = cohortValue(value);
-  if (text === "legacy" || text.length <= 14) {
-    return text;
-  }
-  return text.slice(0, 12);
+  const text = displayCohortValue(value);
+  return text.length <= 14 ? text : text.slice(0, 12);
 }
 
 function cohortKey(cohort: CohortFields) {
   return [
+    cohort.cohort_kind,
     cohort.model_id,
     cohort.gpu_type,
-    cohortValue(cohort.workload_id),
-    cohortValue(cohort.variant_id),
-    cohortValue(cohort.benchmark_version),
-    cohortValue(cohort.recipe_fingerprint),
-    cohortValue(cohort.hardware_profile_id),
-    cohortValue(cohort.software_profile_id)
+    rawCohortValue(cohort.workload_id),
+    rawCohortValue(cohort.variant_id),
+    rawCohortValue(cohort.benchmark_version),
+    rawCohortValue(cohort.recipe_fingerprint),
+    rawCohortValue(cohort.hardware_profile_id),
+    rawCohortValue(cohort.software_profile_id)
   ].join("|");
 }
 
 function cohortTitle(cohort: CohortFields) {
-  const workload = cohortValue(cohort.workload_id);
-  const variant = cohortValue(cohort.variant_id);
-  const version = cohortValue(cohort.benchmark_version);
-  const versionLabel = version === "legacy" ? version : `v${version}`;
-  return `${workload} / ${variant} / ${versionLabel}`;
+  if (cohort.cohort_kind === "legacy_v1") {
+    return "Legacy v1";
+  }
+
+  const workload = displayCohortValue(cohort.workload_id);
+  const variant = displayCohortValue(cohort.variant_id);
+  const version = displayCohortValue(cohort.benchmark_version);
+  const versionLabel = version === "missing" ? version : "v" + version;
+  const identity = [workload, variant, versionLabel].join(" / ");
+  return cohort.cohort_kind === "invalid_v2" ? "Invalid v2: " + identity : identity;
 }
 
 function cohortDetail(cohort: CohortFields) {
+  if (cohort.cohort_kind === "legacy_v1") {
+    return "";
+  }
   return [
-    `recipe ${shortCohortValue(cohort.recipe_fingerprint)}`,
+    "recipe " + shortCohortValue(cohort.recipe_fingerprint),
     shortCohortValue(cohort.hardware_profile_id),
     shortCohortValue(cohort.software_profile_id)
   ].join(" | ");
+}
+
+function statusLabel(value: string, fallback: string) {
+  if (!value) {
+    return fallback;
+  }
+  return value
+    .toLowerCase()
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function comparisonStatusLabel(status: string, cohortKind: CohortKind) {
+  return statusLabel(status, cohortKind === "legacy_v1" ? "Historical" : "Unknown");
+}
+
+function comparisonStatusClass(status: string, cohortKind: CohortKind) {
+  const normalized = status.toLowerCase().replaceAll("_", "-");
+  return normalized
+    ? "comparison-" + normalized
+    : cohortKind === "legacy_v1"
+      ? "comparison-historical"
+      : "comparison-unknown";
 }
 
 function formatMetricValue(metricKey: string, value: number | null | undefined, tooltip = false) {
@@ -273,7 +308,9 @@ function TrendChart({ group, metricKey }: { group: TrendGroup; metricKey: string
         {chartPoints.map((point) => {
           const pointLabel = `${metricLabel(metricKey)} ${formatMetricValue(metricKey, point.value, true)} at ${formatTime(
             point.point.timestamp
-          )}, commit ${shortSha(point.point.commit_sha)}, ${runSourceLabel(point.point.run_source)}`;
+          )}, commit ${shortSha(point.point.commit_sha)}, ${runSourceLabel(
+            point.point.run_source
+          )}, comparison ${comparisonStatusLabel(point.point.comparison_status, point.point.cohort_kind)}`;
           return (
             <g
               key={`${point.plotIndex}-${point.value}-${point.point.commit_sha ?? ""}`}
@@ -307,6 +344,9 @@ function TrendChart({ group, metricKey }: { group: TrendGroup; metricKey: string
           {metric?.secondary ? <span>{metric.secondary(activePoint.value)}</span> : null}
           <span>{shortSha(activePoint.point.commit_sha)}</span>
           <span>{runSourceLabel(activePoint.point.run_source)}</span>
+          <span>
+            {comparisonStatusLabel(activePoint.point.comparison_status, activePoint.point.cohort_kind)}
+          </span>
         </div>
       ) : null}
       <div className="point-tooltip" aria-live="polite">
@@ -318,6 +358,13 @@ function TrendChart({ group, metricKey }: { group: TrendGroup; metricKey: string
         <span>Commit {shortSha(selectedPoint.point.commit_sha)}</span>
         <span>{runSourceLabel(selectedPoint.point.run_source)}</span>
         <span>{selectedPoint.point.success ? "Stored status: pass" : "Stored status: fail"}</span>
+        <span>
+          Comparison: {comparisonStatusLabel(selectedPoint.point.comparison_status, selectedPoint.point.cohort_kind)}
+        </span>
+        <span>Baseline status: {statusLabel(selectedPoint.point.baseline_status, "Unavailable")}</span>
+        {selectedPoint.point.comparison_status_reason ? (
+          <span className="tooltip-wide">{selectedPoint.point.comparison_status_reason}</span>
+        ) : null}
         <span>{selectedPoint.point.baseline_eligible ? "Baseline eligible" : "Not baseline eligible"}</span>
         {selectedPoint.point.pr_number ? <span>PR #{selectedPoint.point.pr_number}</span> : null}
         {selectedPoint.point.branch ? <span>Branch {selectedPoint.point.branch}</span> : null}
@@ -486,6 +533,7 @@ export default function App() {
             <table>
               <thead>
                 <tr>
+                  <th>Comparison</th>
                   <th>Stored Status</th>
                   <th>Recomputed</th>
                   <th>Model</th>
@@ -507,6 +555,16 @@ export default function App() {
                 {latestRows.map((row) => (
                   <tr key={cohortKey(row)}>
                     <td>
+                      <div className="status-cell">
+                        <span className={`badge ${comparisonStatusClass(row.comparison_status, row.cohort_kind)}`}>
+                          {comparisonStatusLabel(row.comparison_status, row.cohort_kind)}
+                        </span>
+                        {row.comparison_status_reason ? (
+                          <span className="status-reason">{row.comparison_status_reason}</span>
+                        ) : null}
+                      </div>
+                    </td>
+                    <td>
                       <span className={`badge ${row.status}`}>{row.status}</span>
                     </td>
                     <td>
@@ -519,7 +577,7 @@ export default function App() {
                     <td>
                       <div className="cohort-cell">
                         <strong>{cohortTitle(row)}</strong>
-                        <span>{cohortDetail(row)}</span>
+                        {cohortDetail(row) ? <span>{cohortDetail(row)}</span> : null}
                       </div>
                     </td>
                     <td>{shortSha(row.commit_sha)}</td>
@@ -566,7 +624,7 @@ export default function App() {
                     <p>
                       {group.model_id} | {group.gpu_type}
                       <span>{cohortTitle(group)}</span>
-                      <span>{cohortDetail(group)}</span>
+                      {cohortDetail(group) ? <span>{cohortDetail(group)}</span> : null}
                     </p>
                   </div>
                   <TrendChart group={group} metricKey={metricKey} />
