@@ -42,7 +42,9 @@ _TQDM_FRAC_RE = re.compile(r"\b(\d+)/(\d+)\b")
 _MAX_LOG_LINES = 2000  # ring-buffer cap per job
 
 # ray's log relay prefixes worker lines like "(RayWorkerWrapper pid=123, ip=…)"
+# — usually wrapped in ANSI color codes, which must be stripped before matching.
 _RAY_RELAY_RE = re.compile(r"^\(\w+ pid=")
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 
 class JobStatus(str, enum.Enum):
@@ -854,7 +856,10 @@ class JobRunner:
         logging handlers already).
         """
         job = self._active_inference_job
-        if job is None or not _RAY_RELAY_RE.match(line):
+        if job is None:
+            return
+        line = _ANSI_RE.sub("", line)
+        if not _RAY_RELAY_RE.match(line):
             return
         try:
             job._log_buf.write(line)

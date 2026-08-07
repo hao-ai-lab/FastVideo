@@ -9,10 +9,11 @@ from typing import Any
 
 import torch
 
-from fastvideo.distributed import get_local_torch_device
+from fastvideo.distributed import get_local_torch_device, get_world_group
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.profiler import get_global_controller
+from tqdm.auto import tqdm
 from fastvideo.hooks.activation_trace import trace_step
 from fastvideo.pipelines.basic.minimax_h3.packing import (
     MINIMAX_H3_KEYFRAME_NOISE_AUG,
@@ -104,6 +105,11 @@ class MiniMaxH3DenoisingStage(PipelineStage):
         controller = get_global_controller()
         denoise_region = (controller.region("profiler_region_inference_denoising")
                           if controller is not None else contextlib.nullcontext())
+        # rank-0 step progress, mirroring the shared denoising stage; on a
+        # non-tty each refresh is a plain line, so ray's log relay (and the
+        # studio progress parser behind it) sees per-step updates.
+        steps_bar = (tqdm(total=len(video_timesteps), desc="denoising")
+                     if get_world_group().local_rank == 0 else None)
         try:
             with denoise_region:
                 for index, (video_timestep, audio_timestep) in enumerate(zip(video_timesteps, audio_timesteps,
@@ -149,7 +155,11 @@ class MiniMaxH3DenoisingStage(PipelineStage):
                     )[0]
                     batch.step_index = index
                     batch.timestep = video_timestep
+                    if steps_bar is not None:
+                        steps_bar.update()
         finally:
+            if steps_bar is not None:
+                steps_bar.close()
             if bool(getattr(fastvideo_args, "dit_layerwise_offload", False)):
                 manager = getattr(self.transformer, "_layerwise_offload_manager", None)
                 if manager is not None and getattr(manager, "enabled", False):

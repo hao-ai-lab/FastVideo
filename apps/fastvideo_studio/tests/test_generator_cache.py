@@ -253,7 +253,8 @@ def test_engine_feed_drives_job_progress(runner):
 
     job = Job(id="j-prog", model_id="m", prompt="p")
     runner._active_inference_job = job
-    runner.feed_engine_line("(RayWorkerWrapper pid=123, ip=10.0.0.2)  40%|████      | 20/50 [00:30<00:45,  1.5s/it]")
+    # ray wraps relayed lines in ANSI color codes — the bridge must strip them
+    runner.feed_engine_line("\x1b[36m(RayWorkerWrapper pid=123, ip=10.0.0.2)\x1b[0m denoising:  40%|████      | 20/50 [00:30<00:45,  1.5s/it]")
     assert job._log_buf.progress == 40.0
     assert job._log_buf.progress_msg == "20/50 steps"
 
