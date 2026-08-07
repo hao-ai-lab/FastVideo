@@ -9,6 +9,7 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <cuda_bf16.h>
+#include <cfloat>
 #include <cstdio>
 #include <cstdlib>
 #include <cstdint>
@@ -330,10 +331,21 @@ fmha_context_bf16_gen_kernel(const __grid_constant__ CUtensorMap tmap_q,
             kv_tok[h] = k_start + get_kv_block_id(mtile_idx, ktile_idx * BLOCKS_PER_KTILE + 2 * h + p) * BLOCK;
           if (elect_one_sync()) {
             mbarrier_arrive_expect_tx(smem_ptr_u32(&full_bar[kv_stage]), KV_RING_SLOT_BYTES);
-            #pragma unroll
-            for (int h = 0; h < 2; ++h)
-              tma_load_2d(smem_ptr_u32((sKV + kv_stage * KV_RING_SLOT_BYTES) + h * V_BLK_BYTES), &tmap_v_t,
-                          smem_ptr_u32(&full_bar[kv_stage]), kv_tok[h], it.head * HEAD_DIM);
+
+              #pragma unroll
+              for (int h = 0; h < 2; ++h) {
+                #pragma unroll
+                for (int s2 = 0; s2 < K_SUBTILES; ++s2) {
+                  const uint32_t dst = smem_ptr_u32((sKV + kv_stage * KV_RING_SLOT_BYTES)
+                                                    + h * V_BLK_BYTES + s2 * (BLOCK * SUB_COLS_BYTES));
+                  if constexpr (BHSD)
+                    tma_load_4d(dst, &tmap_v, smem_ptr_u32(&full_bar[kv_stage]),
+                                0, kv_tok[h] - k_start, s2, it.sample * num_heads + it.head);
+                  else
+                    tma_load_3d(dst, &tmap_v, smem_ptr_u32(&full_bar[kv_stage]),
+                                0, kv_tok[h], it.head * K_SUBTILES + s2);
+                }
+              }
           }
         }
       };
@@ -387,9 +399,9 @@ fmha_context_bf16_gen_kernel(const __grid_constant__ CUtensorMap tmap_q,
 
     const uint32_t idesc_qk = make_idesc_bf16_f32(M_TILE, K_TILE, false, false);
     const uint32_t idesc_pv = make_idesc_bf16_f32(M_TILE, BLK128 ? HEAD_DIM : 2 * HEAD_DIM,
-                                                 false, BLK128);
+                                                 false, true);
 
-    constexpr uint32_t DESC_LBO_MN = (uint32_t)(K_TILE * SUB_COLS_BF16 * 2);
+    constexpr uint32_t DESC_LBO_MN = (uint32_t)((BLK128 ? K_TILE : BLOCK) * SUB_COLS_BF16 * 2);
     const uint64_t desc_v0 = build_smem_desc_blackwell(smem_ptr_u32(sKV), DESC_SBO, DESC_LBO_MN,
                                                        SmemSwizzleBlackwell::B128);
     constexpr uint32_t PV_DESC_STEP = (uint32_t)((16 * SUB_COLS_BF16 * 2) >> 4);
@@ -455,9 +467,9 @@ fmha_context_bf16_gen_kernel(const __grid_constant__ CUtensorMap tmap_q,
             mbarrier_wait_parity(smem_ptr_u32(&full_bar[slot]), kv_ph.get_phase());
             kv_ph.advance();
           }
-            if constexpr (BLK128) {
-
-              if (p == 0) { desc_bv.u64 = desc_v0; desc_bv.w.x += (uint32_t)(slot * (int)KV_DESC_DELTA); }
+            if (!BLK128 || p == 0) {
+              desc_bv.u64 = desc_v0;
+              desc_bv.w.x += (uint32_t)(slot * (int)KV_DESC_DELTA);
             }
           const uint64_t dbV = desc_kv0 + (uint64_t)slot * KV_DESC_DELTA
                              + (BLK128 ? (uint64_t)p * (V_BLK_BYTES >> 4) : 0u);
@@ -472,7 +484,8 @@ fmha_context_bf16_gen_kernel(const __grid_constant__ CUtensorMap tmap_q,
                 tcgen05_mma_f16_ts_1sm_lead(lead, o_tmem_addr, s_tmem_addr + (uint32_t)(a * 8), desc_bv.u64, idesc_pv, accumulate);
                 desc_add_lo(desc_bv, PV_DESC_STEP);
               } else {
-                tcgen05_mma_ws_f16_ts_1sm_lead(lead, o_tmem_addr, s_tmem_addr + (uint32_t)(a * 8), dbV + 2 * ki, idesc_pv, accumulate);
+                tcgen05_mma_ws_f16_ts_1sm_lead(lead, o_tmem_addr, s_tmem_addr + (uint32_t)(a * 8), desc_bv.u64, idesc_pv, accumulate);
+                desc_add_lo(desc_bv, PV_DESC_STEP);
               }
           }
 
@@ -890,6 +903,8 @@ fmha_context_bf16_gen_kernel(const __grid_constant__ CUtensorMap tmap_q,
           rmax3 = fmaxf(fmaxf(rmax3, scores[j + 6]), scores[j + 7]);
         }
         float new_m = fmaxf(fmaxf(rmax0, rmax1), fmaxf(rmax2, rmax3));
+
+          new_m = fmaxf(new_m, -FLT_MAX);
         float alpha = 0.0f;
         if constexpr (!IS_FIRST) {
 

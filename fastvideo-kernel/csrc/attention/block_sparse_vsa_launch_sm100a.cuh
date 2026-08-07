@@ -18,7 +18,7 @@ struct BlockSparseVsaArgs {
   const __nv_bfloat16* q;
   const __nv_bfloat16* k;
   const __nv_bfloat16* v;      // natural layout; only blk128 reads it (blk64 still needs v_t)
-  const __nv_bfloat16* v_t;    // [num_heads*head_dim, batch*seqlen]; blk64 only
+  const __nv_bfloat16* v_t;    // unused: kept so the bench's V_T buffer still binds
   __nv_bfloat16* o;
   float* lse;                  // [batch, num_heads, seqlen] fp32, or nullptr
 
@@ -46,10 +46,8 @@ __host__ inline cudaError_t block_sparse_vsa_supported(const BlockSparseVsaArgs&
   if (a.q2k_idx == nullptr || a.q2k_num == nullptr) return cudaErrorInvalidValue;
   // FastVideo always supplies this; without it padded keys would be attended as real zeros.
   if (a.variable_block_sizes == nullptr) return cudaErrorInvalidValue;
-  // blk64 reads V through a pre-transposed V_T. FastVideo cannot supply one cheaply, which is
-  // why blk128 is the shippable configuration until MN-major V works against the ws form.
-  if (!BLK128 && a.v_t == nullptr) return cudaErrorInvalidValue;
-  if (BLK128 && a.v == nullptr) return cudaErrorInvalidValue;
+  // V is read MN-major at BOTH block sizes now, so no pre-transposed V_T is ever needed.
+  if (a.v == nullptr) return cudaErrorInvalidValue;
   return cudaSuccess;
 }
 

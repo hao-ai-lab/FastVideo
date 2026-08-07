@@ -22,8 +22,8 @@ HEAD_DIM = 128
 
 # (label, latent (T,H,W), tile, heads). The latents are Wan's; heads is per-rank.
 CASES = [
-    ("480P", (21, 30, 52), (4, 4, 8), 40),
-    ("720P", (21, 45, 80), (4, 4, 8), 40),
+    ("480P", (21, 30, 52), (4, 4, 4), 40),
+    ("720P", (21, 45, 80), (4, 4, 4), 40),
 ]
 
 
@@ -65,7 +65,7 @@ def main():
         ours = timed(lambda: vsa.block_sparse_attn_vsa_sm100a(q, k, v, idx, num, vbs)) if ok else float("nan")
 
         # Triton needs 64-token blocks: expand each 128-block into its two halves.
-        if block == 128:
+        if block == 128:   # Triton is 64-granular; expand only when we run 128
             keep64 = keep.repeat_interleave(2, dim=-1).repeat_interleave(2, dim=-2)
             vbs64 = torch.stack([vbs.clamp(max=64), (vbs - 64).clamp(min=0)], dim=-1).flatten()
             i64, n64 = map_to_index(keep64)

@@ -29,7 +29,7 @@ except ImportError:  # pragma: no cover - extension not built
 _SM100 = (10, 0)
 HEAD_DIM = 128
 # Must match the -DVSA_BLK128 / -DVSA_BHSD the extension was compiled with (see CMakeLists).
-BLOCK_SIZE = 128
+BLOCK_SIZE = 64
 BHSD = True
 
 

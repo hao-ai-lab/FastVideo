@@ -325,7 +325,8 @@ if(BUILD_CXX_KERNELS)
     # ptxas rejects every tcgen05 / setmaxnreg instruction. The explicit gencode spelling
     # below is required, and matches the 10.0a entry in TORCH_CUDA_ARCH_LIST.
     #
-    # VSA_BLK128 selects the 128-token sparse block (FastVideo tile volume 128); VSA_BHSD
+    # Built for 64-token sparse blocks -- FastVideo's default (4,4,4) tiling, so no
+    # tile-size change and no top-k granularity change is needed. VSA_BHSD
     # selects [B, H, S, D]. Both are compile-time; the Python is_supported() checks incoming
     # tensors against them so callers fall back to Triton rather than getting a wrong answer.
     # Read the ENVIRONMENT as well as the cache variable. When TORCH_CUDA_ARCH_LIST is
@@ -344,7 +345,7 @@ if(BUILD_CXX_KERNELS)
         message(STATUS "fastvideo-kernel: building block_sparse_vsa_sm100a (Blackwell)")
         list(APPEND EXTENSION_SOURCES csrc/attention/block_sparse_vsa_sm100a.cu)
         set_source_files_properties(csrc/attention/block_sparse_vsa_sm100a.cu PROPERTIES
-            COMPILE_OPTIONS "-gencode;arch=compute_100a,code=sm_100a;-DVSA_BLK128=true;-DVSA_BHSD=true")
+            COMPILE_OPTIONS "-gencode;arch=compute_100a,code=sm_100a;-DVSA_BHSD=true")
     endif()
 
     Python_add_library(fastvideo_kernel_ops MODULE USE_SABI ${SKBUILD_SABI_VERSION} WITH_SOABI
