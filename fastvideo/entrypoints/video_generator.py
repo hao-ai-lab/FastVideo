@@ -860,12 +860,21 @@ class VideoGenerator:
             frames = None
         else:
             videos = rearrange(samples, "b c t h w -> t b c h w")
-            frames = []
-            for x in videos:
+            # Transfer the frames in one copy. Reading them back individually
+            # blocks on the device once per frame, which serializes the
+            # remaining frames' device-side work behind each transfer.
+            # Each frame is written straight into one preallocated buffer
+            # rather than collected in a list and stacked afterwards, so only
+            # one full-size copy of the frames is ever live on the device.
+            stacked_frames = None
+            for frame_index, x in enumerate(videos):
                 x = torchvision.utils.make_grid(x, nrow=6)
                 x = x.permute(1, 2, 0).squeeze(-1)
                 x = (x * 255).to(torch.uint8)
-                frames.append(x.contiguous().cpu().numpy())
+                if stacked_frames is None:
+                    stacked_frames = torch.empty((videos.shape[0], *x.shape), dtype=torch.uint8, device=x.device)
+                stacked_frames[frame_index] = x
+            frames = (list(stacked_frames.cpu().numpy()) if stacked_frames is not None else [])
         postprocess_time = time.perf_counter() - postprocess_start
         logger.info("PostDecodeFrameProcessStage completed in %.3f s", postprocess_time)
         if logging_info is not None:
