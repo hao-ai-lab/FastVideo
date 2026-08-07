@@ -106,6 +106,11 @@ class FastVideoArgs:
     num_gpus: int = 1
     tp_size: int = -1
     sp_size: int = -1
+    # Number of ranks within the sequence-parallel group used by pure Ring
+    # Attention. ``1`` disables Ring Attention (default Ulysses-only SP).
+    # The initial implementation supports pure Ring only, so when > 1 it
+    # must equal ``sp_size`` (see ``_check_ring_attention_args``).
+    ring_size: int = 1
     hsdp_replicate_dim: int = 1
     hsdp_shard_dim: int = -1
     dist_timeout: int | None = None  # timeout for torch.distributed
@@ -437,6 +442,14 @@ class FastVideoArgs:
             type=int,
             default=FastVideoArgs.sp_size,
             help="The sequence parallelism size.",
+        )
+        parser.add_argument(
+            "--ring-size",
+            type=int,
+            default=FastVideoArgs.ring_size,
+            help=("Number of ranks used by Ring Attention within the sequence-parallel "
+                  "group. Set to 1 to disable Ring Attention. In the initial pure-Ring "
+                  "implementation, ring_size must equal sp_size."),
         )
         parser.add_argument(
             "--hsdp-replicate-dim",
@@ -810,12 +823,18 @@ class FastVideoArgs:
         if self.hsdp_shard_dim == -1:
             self.hsdp_shard_dim = self.num_gpus
 
-        assert self.sp_size <= self.num_gpus and self.num_gpus % self.sp_size == 0, "num_gpus must >= and be divisible by sp_size"
-        assert self.hsdp_replicate_dim <= self.num_gpus and self.num_gpus % self.hsdp_replicate_dim == 0, "num_gpus must >= and be divisible by hsdp_replicate_dim"
-        assert self.hsdp_shard_dim <= self.num_gpus and self.num_gpus % self.hsdp_shard_dim == 0, "num_gpus must >= and be divisible by hsdp_shard_dim"
+        if self.sp_size < 1:
+            raise ValueError(f"sp_size must be >= 1 after automatic resolution, got {self.sp_size}.")
 
-        if self.num_gpus < max(self.tp_size, self.sp_size):
-            self.num_gpus = max(self.tp_size, self.sp_size)
+        if self.sp_size > self.num_gpus:
+            raise ValueError(f"sp_size ({self.sp_size}) cannot exceed "
+                             f"num_gpus ({self.num_gpus}).")
+
+        if self.num_gpus % self.sp_size != 0:
+            raise ValueError(f"num_gpus ({self.num_gpus}) must be divisible by "
+                             f"sp_size ({self.sp_size}).")
+
+        self._check_ring_attention_args()
 
         if self.pipeline_config is None:
             raise ValueError("pipeline_config is not set in FastVideoArgs")
@@ -831,6 +850,32 @@ class FastVideoArgs:
             if not self.pipeline_config.vae_config.load_encoder:
                 self.pipeline_config.vae_config.load_encoder = True
             self.preprocess_config.check_preprocess_config()
+
+    def _check_ring_attention_args(self) -> None:
+        """Validate Ring Attention configuration.
+
+        The initial FastVideo integration only supports pure Ring Attention:
+        the entire sequence-parallel group is used as the Ring group, and
+        Ring Attention training/backward is not supported.
+        """
+        if self.ring_size < 1:
+            raise ValueError(f"ring_size must be >= 1, got {self.ring_size}.")
+
+        if self.ring_size == 1:
+            return
+
+        if self.sp_size <= 1:
+            raise ValueError(f"Ring Attention requires sequence parallelism. Got ring_size={self.ring_size}, "
+                             f"sp_size={self.sp_size}.")
+
+        if self.ring_size != self.sp_size:
+            raise NotImplementedError(
+                "The initial Ring Attention implementation supports pure Ring only: ring_size must equal "
+                f"sp_size. Got ring_size={self.ring_size}, sp_size={self.sp_size}.")
+
+        if not self.inference_mode:
+            raise NotImplementedError("Ring Attention training/backward is not supported in the initial "
+                                      "FastVideo integration. Set ring_size=1 for training.")
 
 
 _current_fastvideo_args = None
