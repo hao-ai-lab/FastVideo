@@ -263,6 +263,8 @@ class JobRunner:
         # the model-loading cost once per model configuration.
         self._generators: dict[tuple, Any] = {}
         self._generators_lock = threading.Lock()
+        # Explicit preloads in flight/failed, keyed like _generators.
+        self._preloads: dict[tuple, dict[str, Any]] = {}
 
         # Shared Manager for log queues (avoids spawning a new process per job)
         self._mp_manager = get_mp_context().Manager()
@@ -617,6 +619,104 @@ class JobRunner:
             "phase": job._log_buf.phase,
         }
 
+    @staticmethod
+    def _generator_cache_key(
+        model_id: str,
+        workload_type: str,
+        num_gpus: int,
+        dit_cpu_offload: bool = False,
+        text_encoder_cpu_offload: bool = False,
+        vae_cpu_offload: bool = False,
+        image_encoder_cpu_offload: bool = False,
+        use_fsdp_inference: bool = False,
+        enable_torch_compile: bool = False,
+        vsa_sparsity: float = 0.0,
+        tp_size: int = -1,
+        sp_size: int = -1,
+    ) -> tuple:
+        return (
+            model_id,
+            workload_type,
+            num_gpus,
+            dit_cpu_offload,
+            text_encoder_cpu_offload,
+            vae_cpu_offload,
+            image_encoder_cpu_offload,
+            use_fsdp_inference,
+            enable_torch_compile,
+            vsa_sparsity,
+            tp_size,
+            sp_size,
+        )
+
+    @staticmethod
+    def _generator_key_dict(key: tuple) -> dict[str, Any]:
+        names = ("model_id", "workload_type", "num_gpus", "dit_cpu_offload",
+                 "text_encoder_cpu_offload", "vae_cpu_offload",
+                 "image_encoder_cpu_offload", "use_fsdp_inference",
+                 "enable_torch_compile", "vsa_sparsity", "tp_size", "sp_size")
+        return dict(zip(names, key, strict=True))
+
+    def preload_generator(self, **params: Any) -> dict[str, Any]:
+        """Load a generator into the cache without running a job, so the first
+        generation doesn't pay the model load. Returns the preload state dict
+        (state: loading | ready | failed)."""
+        key = self._generator_cache_key(**params)
+        with self._generators_lock:
+            if key in self._generators:
+                return {"state": "ready", **self._generator_key_dict(key)}
+            entry = self._preloads.get(key)
+            if entry is not None and entry["state"] == "loading":
+                return entry
+            entry = {
+                "state": "loading",
+                "started_at": time.time(),
+                "error": None,
+                **self._generator_key_dict(key),
+            }
+            self._preloads[key] = entry
+
+        def _load() -> None:
+            try:
+                self._get_or_create_generator(**params)
+                entry["state"] = "ready"
+            except Exception as exc:  # noqa: BLE001 -- surfaced via the API
+                logger.exception("Preload failed for %s", params.get("model_id"))
+                entry["state"] = "failed"
+                entry["error"] = str(exc)
+
+        threading.Thread(target=_load, daemon=True, name="generator-preload").start()
+        return entry
+
+    def list_generators(self) -> list[dict[str, Any]]:
+        """Resident generators plus preloads in flight or failed."""
+        out: list[dict[str, Any]] = []
+        with self._generators_lock:
+            resident = set(self._generators)
+            for key in resident:
+                out.append({"state": "ready", **self._generator_key_dict(key)})
+            for key, entry in self._preloads.items():
+                if key not in resident and entry["state"] != "ready":
+                    out.append(entry)
+        return out
+
+    def unload_generator(self, **params: Any) -> bool:
+        """Shut down a cached generator and free its GPU memory. Refuses while
+        any inference job is running (the job may be using it)."""
+        with self._jobs_lock:
+            running = [j.id for j in self._jobs.values()
+                       if j.status == JobStatus.RUNNING and j.job_type == "inference"]
+        if running:
+            raise RuntimeError(f"cannot unload while inference jobs are running: {running}")
+        key = self._generator_cache_key(**params)
+        with self._generators_lock:
+            gen = self._generators.pop(key, None)
+            self._preloads.pop(key, None)
+        if gen is None:
+            return False
+        gen.shutdown()
+        return True
+
     def _get_or_create_generator(
         self,
         model_id: str,
@@ -633,19 +733,19 @@ class JobRunner:
         sp_size: int = -1,
         log_queue: mp.Queue | None = None,
     ) -> Any:
-        cache_key = (
-            model_id,
-            workload_type,
-            num_gpus,
-            dit_cpu_offload,
-            text_encoder_cpu_offload,
-            vae_cpu_offload,
-            image_encoder_cpu_offload,
-            use_fsdp_inference,
-            enable_torch_compile,
-            vsa_sparsity,
-            tp_size,
-            sp_size,
+        cache_key = self._generator_cache_key(
+            model_id=model_id,
+            workload_type=workload_type,
+            num_gpus=num_gpus,
+            dit_cpu_offload=dit_cpu_offload,
+            text_encoder_cpu_offload=text_encoder_cpu_offload,
+            vae_cpu_offload=vae_cpu_offload,
+            image_encoder_cpu_offload=image_encoder_cpu_offload,
+            use_fsdp_inference=use_fsdp_inference,
+            enable_torch_compile=enable_torch_compile,
+            vsa_sparsity=vsa_sparsity,
+            tp_size=tp_size,
+            sp_size=sp_size,
         )
 
         # Generators are cached by model_id and configuration parameters

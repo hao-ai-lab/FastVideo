@@ -3,6 +3,7 @@
 usable by both the real server and the dependency-light mock server."""
 
 from fastvideo_studio.models.create_job_request import CreateJobRequest
+from fastvideo_studio.models.generator_request import GeneratorRequest
 from fastvideo_studio.models.settings_update import SettingsUpdate
 from fastvideo_studio.models.create_dataset_request import CreateDatasetRequest
 from fastvideo_studio.models.update_caption_request import UpdateCaptionRequest
@@ -15,6 +16,7 @@ def model_label(model_path: str) -> str:
 
 __all__ = [
     "CreateJobRequest",
+    "GeneratorRequest",
     "SettingsUpdate",
     "CreateDatasetRequest",
     "UpdateCaptionRequest",

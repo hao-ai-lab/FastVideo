@@ -34,7 +34,7 @@ from fastvideo.registry import (get_registered_model_paths, get_registered_model
 from fastvideo_studio.database import Database, _get_db_path
 from fastvideo_studio.gpu import get_gpu_snapshot
 from fastvideo_studio.job_runner import JobRunner, JobStatus
-from fastvideo_studio.models import (CreateDatasetRequest, CreateJobRequest, SettingsUpdate, UpdateCaptionRequest,
+from fastvideo_studio.models import (CreateDatasetRequest, CreateJobRequest, GeneratorRequest, SettingsUpdate, UpdateCaptionRequest,
                                      model_label)
 
 logging.basicConfig(
@@ -251,6 +251,38 @@ def get_job(job_id: str) -> dict[str, Any]:
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
     return job.to_dict()
+
+
+@app.get("/api/generators")
+def list_generators() -> list[dict[str, Any]]:
+    """Generators resident in memory plus preloads in flight or failed."""
+    return job_runner.list_generators()
+
+
+@app.post("/api/generators/preload", status_code=202)
+def preload_generator(req: GeneratorRequest) -> dict[str, Any]:
+    """Load a model into memory ahead of time so the first generation with
+    this configuration skips the model-load wait. Idempotent."""
+    valid_ids = {m["id"] for m in _available_models}
+    if req.model_id not in valid_ids and not os.path.isdir(req.model_id):
+        raise HTTPException(
+            status_code=400,
+            detail=(f"Unknown model_id '{req.model_id}'. "
+                    f"Valid options: {sorted(valid_ids)}"),
+        )
+    return job_runner.preload_generator(**req.model_dump())
+
+
+@app.post("/api/generators/unload")
+def unload_generator(req: GeneratorRequest) -> dict[str, Any]:
+    """Shut down a resident generator and free its GPU memory."""
+    try:
+        unloaded = job_runner.unload_generator(**req.model_dump())
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if not unloaded:
+        raise HTTPException(status_code=404, detail="No such resident generator")
+    return {"unloaded": True}
 
 
 @app.post("/api/jobs", status_code=201)
