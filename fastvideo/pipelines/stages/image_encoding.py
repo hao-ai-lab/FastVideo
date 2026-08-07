@@ -15,6 +15,7 @@ import torch
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import ExecutionMode, FastVideoArgs
 from fastvideo.forward_context import set_forward_context
+from fastvideo.image_processor import ImageProcessor
 from fastvideo.logger import init_logger
 from fastvideo.models.vaes.common import ParallelTiledVAE
 from fastvideo.models.vision_utils import (get_default_height_width, normalize, numpy_to_pt, pil_to_numpy, resize,
@@ -97,22 +98,94 @@ class ImageEncodingStage(PipelineStage):
 class Hy15ImageEncodingStage(ImageEncodingStage):
     """
     Stage for encoding image prompts into embeddings for HunyuanVideo1.5 models.
+
+    Without a reference image (T2V and the super-resolution pipelines) the
+    conditioning slots are zero-filled and the transformer takes its T2V branch.
+    With one, SigLIP supplies ``image_embeds`` and the VAE supplies the first
+    frame of the conditioning latent, which is what turns that branch off.
     """
+
+    def __init__(self, image_encoder=None, image_processor=None, vae=None):
+        super().__init__(image_encoder=image_encoder, image_processor=image_processor)
+        self.vae = vae
 
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify image encoding stage inputs."""
         return VerificationResult()
 
+    @torch.no_grad()
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         """
         Encode the prompt into image encoder hidden states.
         """
-        if batch.pil_image is None:
-            batch.image_embeds = [torch.zeros(1, 729, 1152, device=get_local_torch_device())]
+        device = get_local_torch_device()
 
-        raw_latent_shape = list(batch.raw_latent_shape)
-        raw_latent_shape[1] = 1
-        batch.video_latent = torch.zeros(tuple(raw_latent_shape), device=get_local_torch_device())
+        if batch.pil_image is None:
+            batch.image_embeds = [torch.zeros(1, 729, 1152, device=device)]
+            raw_latent_shape = list(batch.raw_latent_shape)
+            raw_latent_shape[1] = 1
+            batch.video_latent = torch.zeros(tuple(raw_latent_shape), device=device)
+            return batch
+
+        if self.image_encoder is None or self.image_processor is None or self.vae is None:
+            raise ValueError("HunyuanVideo 1.5 needs an image encoder, its processor and the VAE to condition on a "
+                             "reference image, but this pipeline was built without them. Image-to-video requires "
+                             "HunyuanVideo15ImageToVideoPipeline and an i2v checkpoint.")
+
+        _, latent_channels, latent_temporal, latent_height, latent_width = batch.raw_latent_shape
+
+        # 1. SigLIP hidden states. The transformer reads all-zero image
+        # embeddings as "this is T2V", so this is what selects the I2V branch.
+        self.image_encoder = self.image_encoder.to(device)
+        encoder_dtype = next(self.image_encoder.parameters()).dtype
+        image_inputs = self.image_processor.preprocess(
+            images=batch.pil_image,
+            do_resize=True,
+            do_convert_rgb=True,
+            return_tensors="pt",
+        ).to(device=device, dtype=encoder_dtype)
+        with set_forward_context(current_timestep=0, attn_metadata=None):
+            batch.image_embeds = [self.image_encoder(**image_inputs).last_hidden_state]
+        if fastvideo_args.image_encoder_cpu_offload:
+            self.image_encoder.to("cpu")
+
+        # 2. The reference image occupies the first latent frame of the
+        # conditioning stream; every later frame is zero and the mask channel
+        # marks which one is real.
+        vae_dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.vae_precision]
+        vae_autocast_enabled = (vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
+
+        image_processor = ImageProcessor(vae_scale_factor=8)
+        pixels = image_processor.preprocess(batch.pil_image, batch.height, batch.width)
+        pixels = pixels.unsqueeze(2).to(device=device, dtype=vae_dtype)
+
+        self.vae = self.vae.to(device)
+        with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
+            cond_latents = self.vae.encode(pixels).mode()
+            cond_latents = cond_latents * self.vae.config.scaling_factor
+        if fastvideo_args.vae_cpu_offload:
+            self.vae.to("cpu")
+
+        cond_latents = cond_latents.repeat(1, 1, latent_temporal, 1, 1)
+        cond_latents[:, :, 1:] = 0.0
+
+        mask = torch.zeros(
+            1,
+            1,
+            latent_temporal,
+            latent_height,
+            latent_width,
+            device=device,
+            dtype=cond_latents.dtype,
+        )
+        mask[:, :, 0] = 1.0
+
+        # Latents, then conditioning, then mask: the denoising stage appends
+        # ``image_latent`` as one block, so the channel order has to be built
+        # here. Leaving ``video_latent`` unset keeps it out of the earlier
+        # branch, which would append the mask before the conditioning.
+        batch.image_latent = torch.cat([cond_latents, mask], dim=1)
+        assert batch.image_latent.shape[1] == latent_channels + 1
         return batch
 
 
