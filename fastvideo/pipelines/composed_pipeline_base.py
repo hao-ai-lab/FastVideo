@@ -94,7 +94,6 @@ class ComposedPipelineBase(ABC):
         # FASTVIDEO_TORCH_PROFILER_DIR=/path/to/save/trace
         trace_dir = envs.FASTVIDEO_TORCH_PROFILER_DIR
         self.profiler_controller = get_or_create_profiler(trace_dir)
-        self.profiler = self.profiler_controller.profiler
 
         self.local_rank = get_world_group().local_rank
 
@@ -497,17 +496,6 @@ class ComposedPipelineBase(ABC):
         self._stages.append(stage)
         self._stage_name_mapping[stage_name] = stage
         setattr(self, stage_name, stage)
-
-    def profile(self, is_start: bool = True):
-        if self.profiler is None:
-            raise RuntimeError("Profiler is not enabled.")
-        if is_start:
-            self.profiler.start()
-        else:
-            self.profiler.stop()
-            # only print profiler results on rank 0
-            if self.local_rank == 0:
-                print(self.profiler.key_averages().table(sort_by="self_cuda_time_total"))
 
     # TODO(will): don't hardcode no_grad
     @torch.no_grad()
