@@ -488,6 +488,22 @@ def run_h100_2(
                         local_patch_b64, commit_volume)
 
 
+@app.function(gpu="H100:8", **COMMON_FUNCTION_KWARGS)
+def run_h100_8(
+    command: str,
+    git_repo: str,
+    git_commit: str,
+    pr_number: str,
+    install_extra: str,
+    build_kernel: bool,
+    env_vars: str,
+    local_patch_b64: str,
+    commit_volume: bool,
+):
+    return _run_gpu_job(command, git_repo, git_commit, pr_number, install_extra, build_kernel, env_vars,
+                        local_patch_b64, commit_volume)
+
+
 def _select_runner(gpu_type: str, num_gpus: int) -> Callable[..., Any]:
     normalized_gpu_type = gpu_type.upper()
     runners = {
@@ -497,6 +513,7 @@ def _select_runner(gpu_type: str, num_gpus: int) -> Callable[..., Any]:
         ("L40S", 8): run_l40s_8,
         ("H100", 1): run_h100_1,
         ("H100", 2): run_h100_2,
+        ("H100", 8): run_h100_8,
     }
     try:
         return runners[(normalized_gpu_type, num_gpus)]
@@ -526,6 +543,13 @@ def main(
     resolved_git_commit = _resolve_git_commit(git_commit)
     resolved_pr_number = _resolve_pull_request(pr_number)
     runner = _select_runner(normalized_gpu_type, num_gpus)
+    named_secrets = [
+        modal.Secret.from_name(name.strip())
+        for name in os.environ.get("FASTVIDEO_MODAL_SECRETS", "").split(",")
+        if name.strip()
+    ]
+    if named_secrets:
+        runner = runner.with_options(secrets=[local_secrets, *named_secrets])
 
     print(f"Launching {normalized_gpu_type}:{num_gpus} job")
     print(f"Command: {command}")
