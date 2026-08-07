@@ -13,7 +13,7 @@ from fastvideo.configs.pipelines.base import PipelineConfig
 
 def t5_large_postprocess_text(outputs: BaseEncoderOutput) -> torch.Tensor:
     """Postprocess T5 Large text encoder outputs for Cosmos pipeline.
-    
+
     Return raw last_hidden_state without truncation/padding.
     """
     hidden_state = outputs.last_hidden_state
@@ -43,13 +43,14 @@ class CosmosConfig(PipelineConfig):
 
     vae_config: VAEConfig = field(default_factory=CosmosVAEConfig)
 
-    text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (T5LargeConfig(), ))
-    postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.Tensor],
-                                  ...] = field(default_factory=lambda: (t5_large_postprocess_text, ))
+    text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (T5LargeConfig(),))
+    postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.Tensor], ...] = field(
+        default_factory=lambda: (t5_large_postprocess_text,)
+    )
 
     dit_precision: str = "bf16"
     vae_precision: str = "fp16"
-    text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("bf16", ))
+    text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("bf16",))
 
     conditioning_strategy: str = "frame_replace"
     min_num_conditional_frames: int = 1

@@ -76,6 +76,7 @@ def _limit_gpu_ids(gpu_ids: list[int]) -> list[int]:
 
 class CommandType(Enum):
     """Commands sent from main process to GPU worker."""
+
     INIT = "init"
     WARMUP = "warmup"
     SHUTDOWN = "shutdown"
@@ -95,6 +96,7 @@ class Command:
     Commands that don't (INIT, SHUTDOWN, USER_JOIN, USER_LEAVE)
     leave ``payload`` as ``None``.
     """
+
     type: CommandType
     payload: CommandPayload | None = None
     user_id: str | None = None
@@ -180,8 +182,9 @@ def gpu_worker_process(
 
             elif cmd.type == CommandType.USER_STEP:
                 try:
-                    assert isinstance(cmd.payload, UserStepPayload), (f"USER_STEP requires UserStepPayload, "
-                                                                      f"got {type(cmd.payload).__name__}")
+                    assert isinstance(cmd.payload, UserStepPayload), (
+                        f"USER_STEP requires UserStepPayload, got {type(cmd.payload).__name__}"
+                    )
                     payload = cmd.payload
                     segment_idx = payload.segment_idx
                     step_result = worker.generate_step(
@@ -193,16 +196,20 @@ def gpu_worker_process(
                     head_trim_frames = step_result.head_trim_frames
                     head_trim_audio_frames = step_result.head_trim_audio_frames
                     if head_trim_frames > 0 or head_trim_audio_frames > 0:
-                        print(f"[GPU {gpu_id}] Segment {segment_idx}: "
-                              f"trimming video={head_trim_frames} "
-                              f"audio={head_trim_audio_frames} "
-                              f"overlap frames from AV output")
+                        print(
+                            f"[GPU {gpu_id}] Segment {segment_idx}: "
+                            f"trimming video={head_trim_frames} "
+                            f"audio={head_trim_audio_frames} "
+                            f"overlap frames from AV output"
+                        )
                     audio_shape = getattr(step_result.audio, "shape", None)
-                    print(f"[GPU {gpu_id}] AV attempt segment "
-                          f"{segment_idx}: "
-                          f"audio_present={step_result.audio is not None}, "
-                          f"audio_shape={audio_shape}, "
-                          f"audio_sample_rate={step_result.audio_sample_rate}")
+                    print(
+                        f"[GPU {gpu_id}] AV attempt segment "
+                        f"{segment_idx}: "
+                        f"audio_present={step_result.audio is not None}, "
+                        f"audio_shape={audio_shape}, "
+                        f"audio_sample_rate={step_result.audio_sample_rate}"
+                    )
                     stream_id = generate_stream_id(segment_idx)
 
                     def _publish(event: StreamEvent) -> None:
@@ -223,29 +230,34 @@ def gpu_worker_process(
                     )
                     if not av_ok:
                         raise RuntimeError(av_error or "worker av_fmp4 stream failed")
-                    print(f"[GPU {gpu_id}] AV streamed segment {segment_idx}: "
-                          f"encode_total={step_result.timings.get('av_encode_stream_ms', 0):.0f}ms "
-                          f"wav_write={step_result.timings.get('av_wav_write_ms', 0):.1f}ms "
-                          f"spawn={step_result.timings.get('av_ffmpeg_spawn_ms', 0):.1f}ms "
-                          f"first_chunk={step_result.timings.get('av_first_chunk_ms', 0):.0f}ms "
-                          f"chunk_interval_med={step_result.timings.get('av_chunk_interval_ms_median', 0):.1f}ms "
-                          f"chunk_interval_p95={step_result.timings.get('av_chunk_interval_ms_p95', 0):.1f}ms "
-                          f"publish_med={step_result.timings.get('av_chunk_publish_ms_median', 0):.2f}ms "
-                          f"read_med={step_result.timings.get('av_chunk_read_ms_median', 0):.1f}ms")
+                    print(
+                        f"[GPU {gpu_id}] AV streamed segment {segment_idx}: "
+                        f"encode_total={step_result.timings.get('av_encode_stream_ms', 0):.0f}ms "
+                        f"wav_write={step_result.timings.get('av_wav_write_ms', 0):.1f}ms "
+                        f"spawn={step_result.timings.get('av_ffmpeg_spawn_ms', 0):.1f}ms "
+                        f"first_chunk={step_result.timings.get('av_first_chunk_ms', 0):.0f}ms "
+                        f"chunk_interval_med={step_result.timings.get('av_chunk_interval_ms_median', 0):.1f}ms "
+                        f"chunk_interval_p95={step_result.timings.get('av_chunk_interval_ms_p95', 0):.1f}ms "
+                        f"publish_med={step_result.timings.get('av_chunk_publish_ms_median', 0):.2f}ms "
+                        f"read_med={step_result.timings.get('av_chunk_read_ms_median', 0):.1f}ms"
+                    )
                     step_result.timings["ipc_put_start_ns"] = time.time_ns()
                     response_queue.put(
                         StepComplete(
                             user_id=cmd.user_id,
                             segment_idx=segment_idx,
                             timings=step_result.timings,
-                        ))
+                        )
+                    )
                 except Exception as e:
                     print(f"[GPU {gpu_id}] Step error: {e}")
                     traceback.print_exc()
-                    response_queue.put(WorkerError(
-                        user_id=cmd.user_id,
-                        message=str(e),
-                    ))
+                    response_queue.put(
+                        WorkerError(
+                            user_id=cmd.user_id,
+                            message=str(e),
+                        )
+                    )
 
             elif cmd.type == CommandType.USER_LEAVE:
                 print(f"[GPU {gpu_id}] User {cmd.user_id[:8]} left")
@@ -257,53 +269,65 @@ def gpu_worker_process(
 
             elif cmd.type == CommandType.WARMUP:
                 try:
-                    assert isinstance(cmd.payload, WarmupPayload), (f"WARMUP requires WarmupPayload, "
-                                                                    f"got {type(cmd.payload).__name__}")
+                    assert isinstance(cmd.payload, WarmupPayload), (
+                        f"WARMUP requires WarmupPayload, got {type(cmd.payload).__name__}"
+                    )
                     timings = worker.warmup(cmd.payload.prompt)
-                    response_queue.put(WarmupComplete(
-                        user_id=cmd.user_id,
-                        timings=timings,
-                    ))
+                    response_queue.put(
+                        WarmupComplete(
+                            user_id=cmd.user_id,
+                            timings=timings,
+                        )
+                    )
                 except Exception as e:
                     print(f"[GPU {gpu_id}] Warmup error: {e}")
                     traceback.print_exc()
-                    response_queue.put(WorkerError(
-                        user_id=cmd.user_id,
-                        message=str(e),
-                    ))
+                    response_queue.put(
+                        WorkerError(
+                            user_id=cmd.user_id,
+                            message=str(e),
+                        )
+                    )
 
             elif cmd.type == CommandType.RELOAD_MODEL:
                 try:
-                    assert isinstance(cmd.payload, ReloadModelPayload), (f"RELOAD_MODEL requires ReloadModelPayload, "
-                                                                         f"got {type(cmd.payload).__name__}")
+                    assert isinstance(cmd.payload, ReloadModelPayload), (
+                        f"RELOAD_MODEL requires ReloadModelPayload, got {type(cmd.payload).__name__}"
+                    )
                     worker.initialize(cmd.payload.model_config)
                     response_queue.put(ReloadAck(user_id=cmd.user_id))
                 except Exception as e:
                     print(f"[GPU {gpu_id}] Reload error: {e}")
                     traceback.print_exc()
-                    response_queue.put(WorkerError(
-                        user_id=cmd.user_id,
-                        message=str(e),
-                    ))
+                    response_queue.put(
+                        WorkerError(
+                            user_id=cmd.user_id,
+                            message=str(e),
+                        )
+                    )
 
             elif cmd.type == CommandType.APPLY_LORA:
                 try:
-                    assert isinstance(cmd.payload, LoraStackPayload), (f"APPLY_LORA requires LoraStackPayload, "
-                                                                       f"got {type(cmd.payload).__name__}")
+                    assert isinstance(cmd.payload, LoraStackPayload), (
+                        f"APPLY_LORA requires LoraStackPayload, got {type(cmd.payload).__name__}"
+                    )
                     trigger, position = worker.apply_lora_stack(cmd.payload.stack)
                     response_queue.put(
                         LoraAck(
                             user_id=cmd.user_id,
                             style_trigger=trigger,
                             style_trigger_position=position,
-                        ))
+                        )
+                    )
                 except Exception as e:
                     print(f"[GPU {gpu_id}] Apply LoRA error: {e}")
                     traceback.print_exc()
-                    response_queue.put(WorkerError(
-                        user_id=cmd.user_id,
-                        message=str(e),
-                    ))
+                    response_queue.put(
+                        WorkerError(
+                            user_id=cmd.user_id,
+                            message=str(e),
+                        )
+                    )
 
             return True  # Continue loop
 
@@ -315,6 +339,7 @@ def gpu_worker_process(
             handle_command(first_cmd)
 
         import queue as queue_module
+
         while True:
             try:
                 cmd = command_queue.get(timeout=1.0)
@@ -353,53 +378,65 @@ def gpu_worker_process(
 
             elif cmd.type == CommandType.WARMUP:
                 try:
-                    assert isinstance(cmd.payload, WarmupPayload), (f"WARMUP requires WarmupPayload, "
-                                                                    f"got {type(cmd.payload).__name__}")
+                    assert isinstance(cmd.payload, WarmupPayload), (
+                        f"WARMUP requires WarmupPayload, got {type(cmd.payload).__name__}"
+                    )
                     timings = worker.warmup(cmd.payload.prompt)
-                    response_queue.put(WarmupComplete(
-                        user_id=cmd.user_id,
-                        timings=timings,
-                    ))
+                    response_queue.put(
+                        WarmupComplete(
+                            user_id=cmd.user_id,
+                            timings=timings,
+                        )
+                    )
                 except Exception as e:
                     print(f"[GPU {gpu_id}] Warmup error: {e}")
                     traceback.print_exc()
-                    response_queue.put(WorkerError(
-                        user_id=cmd.user_id,
-                        message=str(e),
-                    ))
+                    response_queue.put(
+                        WorkerError(
+                            user_id=cmd.user_id,
+                            message=str(e),
+                        )
+                    )
 
             elif cmd.type == CommandType.RELOAD_MODEL:
                 try:
-                    assert isinstance(cmd.payload, ReloadModelPayload), (f"RELOAD_MODEL requires ReloadModelPayload, "
-                                                                         f"got {type(cmd.payload).__name__}")
+                    assert isinstance(cmd.payload, ReloadModelPayload), (
+                        f"RELOAD_MODEL requires ReloadModelPayload, got {type(cmd.payload).__name__}"
+                    )
                     worker.initialize(cmd.payload.model_config)
                     response_queue.put(ReloadAck(user_id=cmd.user_id))
                 except Exception as e:
                     print(f"[GPU {gpu_id}] Reload error: {e}")
                     traceback.print_exc()
-                    response_queue.put(WorkerError(
-                        user_id=cmd.user_id,
-                        message=str(e),
-                    ))
+                    response_queue.put(
+                        WorkerError(
+                            user_id=cmd.user_id,
+                            message=str(e),
+                        )
+                    )
 
             elif cmd.type == CommandType.APPLY_LORA:
                 try:
-                    assert isinstance(cmd.payload, LoraStackPayload), (f"APPLY_LORA requires LoraStackPayload, "
-                                                                       f"got {type(cmd.payload).__name__}")
+                    assert isinstance(cmd.payload, LoraStackPayload), (
+                        f"APPLY_LORA requires LoraStackPayload, got {type(cmd.payload).__name__}"
+                    )
                     trigger, position = worker.apply_lora_stack(cmd.payload.stack)
                     response_queue.put(
                         LoraAck(
                             user_id=cmd.user_id,
                             style_trigger=trigger,
                             style_trigger_position=position,
-                        ))
+                        )
+                    )
                 except Exception as e:
                     print(f"[GPU {gpu_id}] Apply LoRA error: {e}")
                     traceback.print_exc()
-                    response_queue.put(WorkerError(
-                        user_id=cmd.user_id,
-                        message=str(e),
-                    ))
+                    response_queue.put(
+                        WorkerError(
+                            user_id=cmd.user_id,
+                            message=str(e),
+                        )
+                    )
 
             elif cmd.type in (CommandType.USER_JOIN, CommandType.USER_STEP, CommandType.USER_LEAVE):
                 event_loop(first_cmd=cmd)
@@ -487,8 +524,11 @@ class GPUSlot:
         # Send init command and wait for response
         init_response = await self._send_command(Command(CommandType.INIT), timeout=600.0)
         if not isinstance(init_response, InitAck) or not init_response.success:
-            error_msg = (init_response.error if isinstance(init_response, InitAck) else
-                         f"unexpected init response: {type(init_response).__name__}")
+            error_msg = (
+                init_response.error
+                if isinstance(init_response, InitAck)
+                else f"unexpected init response: {type(init_response).__name__}"
+            )
             raise RuntimeError(f"GPU {self.gpu_id} failed to initialize: {error_msg}")
 
         if self.warmup_enabled:
@@ -507,20 +547,17 @@ class GPUSlot:
             match warmup_response:
                 case WarmupComplete(timings=timings):
                     self.warmup_timings = {
-                        key: float(value)
-                        for key, value in timings.items() if isinstance(value, (int, float))
+                        key: float(value) for key, value in timings.items() if isinstance(value, (int, float))
                     }
                     self.warmup_success = True
                 case WorkerError(message=msg):
                     self.warmup_error = msg or "Warmup failed."
                     raise RuntimeError(f"GPU {self.gpu_id} warmup failed: {self.warmup_error}")
                 case _:
-                    self.warmup_error = (f"unexpected warmup response: "
-                                         f"{type(warmup_response).__name__}")
+                    self.warmup_error = f"unexpected warmup response: {type(warmup_response).__name__}"
                     raise RuntimeError(f"GPU {self.gpu_id} warmup failed: {self.warmup_error}")
         else:
-            print(f"[GPU {self.gpu_id}] Startup warmup disabled by "
-                  "FASTVIDEO_ENABLE_STARTUP_WARMUP")
+            print(f"[GPU {self.gpu_id}] Startup warmup disabled by FASTVIDEO_ENABLE_STARTUP_WARMUP")
 
         self.ready = True
 
@@ -559,14 +596,14 @@ class GPUSlot:
         try:
             done, _ = await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED)
         finally:
-            if (sentinel_fd is not None and death_fut is not None and not death_fut.done()):
+            if sentinel_fd is not None and death_fut is not None and not death_fut.done():
                 try:
                     loop.remove_reader(sentinel_fd)
                 except (ValueError, OSError):
                     pass
                 death_fut.cancel()
 
-        if (death_fut is not None and death_fut in done and response_fut not in done):
+        if death_fut is not None and death_fut in done and response_fut not in done:
             try:
                 return self.response_queue.get_nowait()
             except Exception:
@@ -582,8 +619,7 @@ class GPUSlot:
                 except Exception:
                     pass
             exitcode = process.exitcode if process is not None else None
-            raise RuntimeError(f"GPU {self.gpu_id} worker died during command "
-                               f"(pid={pid}, exitcode={exitcode})")
+            raise RuntimeError(f"GPU {self.gpu_id} worker died during command (pid={pid}, exitcode={exitcode})")
 
         return response_fut.result()
 
@@ -608,7 +644,7 @@ class GPUSlot:
         try:
             response = await asyncio.wait_for(future, timeout=timeout)
         except asyncio.TimeoutError:
-            if (cmd.user_id in self._pending_futures and self._pending_futures[cmd.user_id] is future):
+            if cmd.user_id in self._pending_futures and self._pending_futures[cmd.user_id] is future:
                 self._pending_futures.pop(cmd.user_id, None)
             raise
 
@@ -620,7 +656,7 @@ class GPUSlot:
             self._reader_lock = asyncio.Lock()
 
         async with self._reader_lock:
-            if (self._response_reader_task is None or self._response_reader_task.done()):
+            if self._response_reader_task is None or self._response_reader_task.done():
                 self._response_reader_task = asyncio.create_task(self._response_reader())
 
     async def _response_reader(self):
@@ -647,15 +683,13 @@ class GPUSlot:
                     if stream_queue is not None:
                         await stream_queue.put(event)
                     else:
-                        print(f"[GPU {self.gpu_id}] Unmatched stream event for user "
-                              f"{event.user_id[:8]}")
+                        print(f"[GPU {self.gpu_id}] Unmatched stream event for user {event.user_id[:8]}")
                     continue
 
                 # System-level acks shouldn't reach the tagged router; they
                 # belong to the untagged `_send_command` path.
                 if isinstance(event, (InitAck, ShutdownAck)):
-                    print(f"[GPU {self.gpu_id}] System event leaked into "
-                          f"tagged reader: {type(event).__name__}")
+                    print(f"[GPU {self.gpu_id}] System event leaked into tagged reader: {type(event).__name__}")
                     continue
 
                 # Late-mutation of timings for observability.  Only events
@@ -669,8 +703,7 @@ class GPUSlot:
                     if not future.done():
                         future.set_result(event)
                 else:
-                    print(f"[GPU {self.gpu_id}] Unmatched response for user "
-                          f"{user_id[:8] if user_id else 'None'}")
+                    print(f"[GPU {self.gpu_id}] Unmatched response for user {user_id[:8] if user_id else 'None'}")
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -694,8 +727,7 @@ class GPUSlot:
 
         # Reload model if a different one is requested
         if model_id != self.current_model_id and model_id in MODEL_REGISTRY:
-            print(f"[GPU {self.gpu_id}] Model switch: "
-                  f"{self.current_model_id} -> {model_id}")
+            print(f"[GPU {self.gpu_id}] Model switch: {self.current_model_id} -> {model_id}")
 
             for uid, future in list(self._pending_futures.items()):
                 if not future.done():
@@ -705,18 +737,21 @@ class GPUSlot:
             self.connected_users.clear()
 
             model_config = MODEL_REGISTRY[model_id]
-            reload_response = await self._send_command(Command(CommandType.RELOAD_MODEL,
-                                                               payload=ReloadModelPayload(model_config=model_config),
-                                                               user_id="__reload__"),
-                                                       timeout=600.0)
+            reload_response = await self._send_command(
+                Command(
+                    CommandType.RELOAD_MODEL,
+                    payload=ReloadModelPayload(model_config=model_config),
+                    user_id="__reload__",
+                ),
+                timeout=600.0,
+            )
             match reload_response:
                 case ReloadAck():
                     pass
                 case WorkerError(message=msg):
                     raise RuntimeError(f"Model reload failed: {msg}")
                 case _:
-                    raise RuntimeError(f"Unexpected reload response: "
-                                       f"{type(reload_response).__name__}")
+                    raise RuntimeError(f"Unexpected reload response: {type(reload_response).__name__}")
 
             self.current_model_id = model_id
             print(f"[GPU {self.gpu_id}] Model reloaded: {model_id}")
@@ -733,8 +768,7 @@ class GPUSlot:
                     raise RuntimeError(f"User join failed for {user_id[:8]}: {msg}")
                 case _:
                     self.connected_users.discard(user_id)
-                    raise RuntimeError(f"Unexpected join response for {user_id[:8]}: "
-                                       f"{type(response).__name__}")
+                    raise RuntimeError(f"Unexpected join response for {user_id[:8]}: {type(response).__name__}")
         except Exception:
             self.connected_users.discard(user_id)
             raise
@@ -760,16 +794,16 @@ class GPUSlot:
             image_path=image_path,
             reset_conditioning=bool(reset_conditioning),
         )
-        response = await self._send_command_tagged(Command(CommandType.USER_STEP, payload=payload, user_id=user_id),
-                                                   timeout=1800.0)
+        response = await self._send_command_tagged(
+            Command(CommandType.USER_STEP, payload=payload, user_id=user_id), timeout=1800.0
+        )
         match response:
             case StepComplete(timings=timings):
                 return timings
             case WorkerError(message=msg):
                 raise RuntimeError(f"User step failed for {user_id[:8]}: {msg}")
             case _:
-                raise RuntimeError(f"Unexpected step response for {user_id[:8]}: "
-                                   f"{type(response).__name__}")
+                raise RuntimeError(f"Unexpected step response for {user_id[:8]}: {type(response).__name__}")
 
     async def apply_lora_stack(
         self,
@@ -779,16 +813,16 @@ class GPUSlot:
         self._active = True
         user_id = "__lora__"
         payload = LoraStackPayload(stack=stack)
-        response = await self._send_command_tagged(Command(CommandType.APPLY_LORA, payload=payload, user_id=user_id),
-                                                   timeout=120.0)
+        response = await self._send_command_tagged(
+            Command(CommandType.APPLY_LORA, payload=payload, user_id=user_id), timeout=120.0
+        )
         match response:
             case LoraAck() as ack:
                 return ack
             case WorkerError(message=msg):
                 raise RuntimeError(f"Apply LoRA failed on GPU {self.gpu_id}: {msg}")
             case _:
-                raise RuntimeError(f"Unexpected LoRA response on GPU {self.gpu_id}: "
-                                   f"{type(response).__name__}")
+                raise RuntimeError(f"Unexpected LoRA response on GPU {self.gpu_id}: {type(response).__name__}")
 
     async def leave_user(self, user_id: str) -> None:
         """Remove a user from this GPU."""
@@ -847,13 +881,15 @@ class GPUPool:
 
     def __init__(self, gpu_ids: list[int]):
         sp_size = DREAMVERSE_SP_SIZE
-        groups = [gpu_ids[i:i + sp_size] for i in range(0, len(gpu_ids), sp_size)]
+        groups = [gpu_ids[i : i + sp_size] for i in range(0, len(gpu_ids), sp_size)]
         groups = [g for g in groups if len(g) == sp_size]
         if not groups:
             raise RuntimeError(f"Not enough GPUs for DREAMVERSE_SP_SIZE={sp_size}: available={gpu_ids}")
         if sp_size > 1:
-            print(f"[INFO] Sequence-parallel slots (sp_size={sp_size}): " + ", ".join("{" + ",".join(map(str, g)) + "}"
-                                                                                      for g in groups))
+            print(
+                f"[INFO] Sequence-parallel slots (sp_size={sp_size}): "
+                + ", ".join("{" + ",".join(map(str, g)) + "}" for g in groups)
+            )
         self.gpu_ids = [g[0] for g in groups]
         self.slots: dict[int, GPUSlot] = {g[0]: GPUSlot(g[0], ",".join(str(x) for x in g)) for g in groups}
         self.waiting_list: list[tuple[str, asyncio.Event, WebSocket]] = []
@@ -878,8 +914,7 @@ class GPUPool:
             await self.slots[gpu_id].shutdown()
             raise
 
-        print(f"GPU pool: {gpu_id} ready "
-              f"({sum(1 for s in self.slots.values() if s.ready)}/{len(self.gpu_ids)})")
+        print(f"GPU pool: {gpu_id} ready ({sum(1 for s in self.slots.values() if s.ready)}/{len(self.gpu_ids)})")
 
         # Check if anyone is waiting for a GPU
         async with self._pool_lock:
@@ -902,8 +937,7 @@ class GPUPool:
                     return gpu_id, slot
 
         # No slot available, wait in queue
-        print(f"Client {client_id[:8]} waiting in queue "
-              f"(all {len(self.gpu_ids)} GPUs at capacity)")
+        print(f"Client {client_id[:8]} waiting in queue (all {len(self.gpu_ids)} GPUs at capacity)")
         ready_event = asyncio.Event()
         async with self._pool_lock:
             self.waiting_list.append((client_id, ready_event, websocket))
@@ -963,12 +997,14 @@ class GPUPool:
         for i, (cid, _, ws) in enumerate(self.waiting_list):
             if ws is not None:
                 try:
-                    await ws.send_json({
-                        "type": "queue_status",
-                        "position": i + 1,
-                        "total_gpus": len(self.gpu_ids),
-                        "available_gpus": 0,
-                    })
+                    await ws.send_json(
+                        {
+                            "type": "queue_status",
+                            "position": i + 1,
+                            "total_gpus": len(self.gpu_ids),
+                            "available_gpus": 0,
+                        }
+                    )
                 except Exception:
                     pass
 
@@ -993,8 +1029,9 @@ class GPUPool:
     def get_status(self) -> dict:
         """Get the current status of the GPU pool."""
         warmed_count = sum(1 for slot in self.slots.values() if slot.warmup_success)
-        warmup_failures = sum(1 for slot in self.slots.values()
-                              if slot.warmup_enabled and slot.warmup_error is not None)
+        warmup_failures = sum(
+            1 for slot in self.slots.values() if slot.warmup_enabled and slot.warmup_error is not None
+        )
         return {
             "total_gpus": len(self.gpu_ids),
             "available_gpus": sum(1 for slot in self.slots.values() if slot.is_available),
@@ -1015,7 +1052,7 @@ class GPUPool:
                     "warmup_timings": slot.warmup_timings,
                 }
                 for gpu_id, slot in self.slots.items()
-            }
+            },
         }
 
 
@@ -1028,9 +1065,9 @@ def get_available_gpus() -> list[int]:
 
     # Auto-detect available GPUs
     try:
-        result = subprocess.run(["nvidia-smi", "--query-gpu=index", "--format=csv,noheader"],
-                                capture_output=True,
-                                text=True)
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=index", "--format=csv,noheader"], capture_output=True, text=True
+        )
         if result.returncode == 0:
             detected_gpu_ids = [int(x.strip()) for x in result.stdout.strip().split("\n") if x.strip()]
             print(f"Auto-detected GPU IDs: {detected_gpu_ids}")

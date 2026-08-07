@@ -10,7 +10,8 @@ from typing import Any, Literal
 import torch
 
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
-    FlowMatchEulerDiscreteScheduler, )
+    FlowMatchEulerDiscreteScheduler,
+)
 from fastvideo.pipelines import TrainingBatch
 from fastvideo.train.models.base import ModelBase
 
@@ -45,18 +46,21 @@ class SamplingConfig:
         }
         unsupported_keys = sorted(set(raw) - supported_keys)
         if unsupported_keys:
-            raise ValueError(f"Unsupported method.sampling key(s): {unsupported_keys}. "
-                             f"Supported keys: {sorted(supported_keys)}")
+            raise ValueError(
+                f"Unsupported method.sampling key(s): {unsupported_keys}. Supported keys: {sorted(supported_keys)}"
+            )
         scheduler = str(raw.get("scheduler", "model_default") or "model_default").strip().lower()
         if scheduler not in {"flow_match_euler", "model_default"}:
-            raise ValueError("method.sampling.scheduler must be one of "
-                             "{flow_match_euler, model_default}, got "
-                             f"{raw.get('scheduler')!r}")
+            raise ValueError(
+                "method.sampling.scheduler must be one of "
+                "{flow_match_euler, model_default}, got "
+                f"{raw.get('scheduler')!r}"
+            )
         trajectory = str(raw.get("trajectory", "ode") or "ode").strip().lower()
         if trajectory not in {"ode", "sde_reflow"}:
-            raise ValueError("method.sampling.trajectory must be one of "
-                             "{ode, sde_reflow}, got "
-                             f"{raw.get('trajectory')!r}")
+            raise ValueError(
+                f"method.sampling.trajectory must be one of {{ode, sde_reflow}}, got {raw.get('trajectory')!r}"
+            )
         timesteps = raw.get("timesteps")
         sigmas = raw.get("sigmas")
         if timesteps is not None:

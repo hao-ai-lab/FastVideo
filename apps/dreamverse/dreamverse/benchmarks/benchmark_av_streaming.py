@@ -21,6 +21,7 @@ Skips ``h264_nvenc`` automatically if the binary lacks the encoder. This is
 the regression guard for software-encoding overhead that can drain the
 inter-segment playback buffer.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -93,8 +94,9 @@ def _ffmpeg_supports(codec: str, ffmpeg_bin: str) -> bool:
     return any(needle in line for line in out.splitlines())
 
 
-def _run_one(frames: list[np.ndarray], audio: torch.Tensor, sample_rate: int, codec: str,
-             preset: str) -> tuple[float, int, int, str | None]:
+def _run_one(
+    frames: list[np.ndarray], audio: torch.Tensor, sample_rate: int, codec: str, preset: str
+) -> tuple[float, int, int, str | None]:
     timings: dict = {}
     chunks: list = []
 
@@ -145,34 +147,45 @@ def _run_one(frames: list[np.ndarray], audio: torch.Tensor, sample_rate: int, co
     return wall_ms, total_bytes, len(chunks), None
 
 
-def benchmark(codecs: Iterable[str], runs: int, frames_n: int, width: int, height: int, fps: int, sample_rate: int,
-              x264_preset: str, nvenc_preset: str, seed: int, ffmpeg_bin: str) -> list[BenchResult]:
+def benchmark(
+    codecs: Iterable[str],
+    runs: int,
+    frames_n: int,
+    width: int,
+    height: int,
+    fps: int,
+    sample_rate: int,
+    x264_preset: str,
+    nvenc_preset: str,
+    seed: int,
+    ffmpeg_bin: str,
+) -> list[BenchResult]:
     print(f"[bench] ffmpeg_bin={ffmpeg_bin}")
-    print(f"[bench] frames={frames_n} {width}x{height} fps={fps} "
-          f"audio_sr={sample_rate} runs/codec={runs}")
+    print(f"[bench] frames={frames_n} {width}x{height} fps={fps} audio_sr={sample_rate} runs/codec={runs}")
     frames = _make_synthetic_frames(frames_n, width, height, seed)
     audio = _make_synthetic_audio(frames_n, fps, sample_rate, seed)
     playable_s = frames_n / fps
-    print(f"[bench] playable={playable_s:.3f}s "
-          f"(realtime_ratio = playable / wall_time; >= 1.0 means no "
-          f"buffer drain)")
+    print(f"[bench] playable={playable_s:.3f}s (realtime_ratio = playable / wall_time; >= 1.0 means no buffer drain)")
 
     results: list[BenchResult] = []
     for codec in codecs:
         preset = nvenc_preset if codec.endswith("_nvenc") else x264_preset
         if not _ffmpeg_supports(codec, ffmpeg_bin):
             results.append(
-                BenchResult(codec=codec,
-                            preset=preset,
-                            runs=0,
-                            wall_ms_min=0,
-                            wall_ms_median=0,
-                            wall_ms_p95=0,
-                            wall_ms_max=0,
-                            bytes_median=0,
-                            chunks_median=0,
-                            realtime_ratio_median=0,
-                            error=f"{codec} not in ffmpeg"))
+                BenchResult(
+                    codec=codec,
+                    preset=preset,
+                    runs=0,
+                    wall_ms_min=0,
+                    wall_ms_median=0,
+                    wall_ms_p95=0,
+                    wall_ms_max=0,
+                    bytes_median=0,
+                    chunks_median=0,
+                    realtime_ratio_median=0,
+                    error=f"{codec} not in ffmpeg",
+                )
+            )
             continue
         walls: list[float] = []
         sizes: list[int] = []
@@ -180,11 +193,13 @@ def benchmark(codecs: Iterable[str], runs: int, frames_n: int, width: int, heigh
         last_err: str | None = None
         for run in range(runs):
             wall_ms, total_bytes, chunk_count, err = _run_one(frames, audio, sample_rate, codec, preset)
-            print(f"[bench] codec={codec:12s} preset={preset:9s} "
-                  f"run={run + 1}/{runs}  wall={wall_ms:7.1f}ms  "
-                  f"bytes={total_bytes:>9d}  chunks={chunk_count:>3d}  "
-                  f"realtime={playable_s / (wall_ms / 1000.0):5.2f}x"
-                  f"{'  ERR=' + err if err else ''}")
+            print(
+                f"[bench] codec={codec:12s} preset={preset:9s} "
+                f"run={run + 1}/{runs}  wall={wall_ms:7.1f}ms  "
+                f"bytes={total_bytes:>9d}  chunks={chunk_count:>3d}  "
+                f"realtime={playable_s / (wall_ms / 1000.0):5.2f}x"
+                f"{'  ERR=' + err if err else ''}"
+            )
             if err is not None:
                 last_err = err
                 continue
@@ -193,17 +208,20 @@ def benchmark(codecs: Iterable[str], runs: int, frames_n: int, width: int, heigh
             chunkcounts.append(chunk_count)
         if not walls:
             results.append(
-                BenchResult(codec=codec,
-                            preset=preset,
-                            runs=0,
-                            wall_ms_min=0,
-                            wall_ms_median=0,
-                            wall_ms_p95=0,
-                            wall_ms_max=0,
-                            bytes_median=0,
-                            chunks_median=0,
-                            realtime_ratio_median=0,
-                            error=last_err or "all runs failed"))
+                BenchResult(
+                    codec=codec,
+                    preset=preset,
+                    runs=0,
+                    wall_ms_min=0,
+                    wall_ms_median=0,
+                    wall_ms_p95=0,
+                    wall_ms_max=0,
+                    bytes_median=0,
+                    chunks_median=0,
+                    realtime_ratio_median=0,
+                    error=last_err or "all runs failed",
+                )
+            )
             continue
         walls_sorted = sorted(walls)
         p95_idx = max(0, int(round(0.95 * (len(walls_sorted) - 1))))
@@ -220,28 +238,33 @@ def benchmark(codecs: Iterable[str], runs: int, frames_n: int, width: int, heigh
                 bytes_median=int(statistics.median(sizes)),
                 chunks_median=statistics.median(chunkcounts),
                 realtime_ratio_median=playable_s / (wall_med / 1000.0),
-            ))
+            )
+        )
     return results
 
 
 def _print_summary(results: list[BenchResult]) -> None:
     print()
     print("=== summary ===")
-    header = (f"{'codec':14s} {'preset':10s} {'runs':>4s} "
-              f"{'wall_med_ms':>11s} {'wall_p95_ms':>11s} "
-              f"{'bytes_med':>10s} {'realtime':>8s}  notes")
+    header = (
+        f"{'codec':14s} {'preset':10s} {'runs':>4s} "
+        f"{'wall_med_ms':>11s} {'wall_p95_ms':>11s} "
+        f"{'bytes_med':>10s} {'realtime':>8s}  notes"
+    )
     print(header)
     print("-" * len(header))
     for r in results:
         if r.error is not None:
-            print(f"{r.codec:14s} {r.preset:10s} {r.runs:>4d} "
-                  f"{'-':>11s} {'-':>11s} {'-':>10s} {'-':>8s}  "
-                  f"ERR: {r.error}")
+            print(
+                f"{r.codec:14s} {r.preset:10s} {r.runs:>4d} {'-':>11s} {'-':>11s} {'-':>10s} {'-':>8s}  ERR: {r.error}"
+            )
             continue
-        print(f"{r.codec:14s} {r.preset:10s} {r.runs:>4d} "
-              f"{r.wall_ms_median:>11.1f} {r.wall_ms_p95:>11.1f} "
-              f"{r.bytes_median:>10d} {r.realtime_ratio_median:>7.2f}x  "
-              f"{'OK' if r.realtime_ratio_median >= 1.0 else 'BUFFER DRAINS'}")
+        print(
+            f"{r.codec:14s} {r.preset:10s} {r.runs:>4d} "
+            f"{r.wall_ms_median:>11.1f} {r.wall_ms_p95:>11.1f} "
+            f"{r.bytes_median:>10d} {r.realtime_ratio_median:>7.2f}x  "
+            f"{'OK' if r.realtime_ratio_median >= 1.0 else 'BUFFER DRAINS'}"
+        )
 
 
 def main() -> int:
@@ -252,10 +275,9 @@ def main() -> int:
     p.add_argument("--fps", type=int, default=24)
     p.add_argument("--sample-rate", type=int, default=24000)
     p.add_argument("--runs", type=int, default=3, help="runs per codec (default: 3 — 1 warmup + 2 timed in median)")
-    p.add_argument("--codecs",
-                   nargs="+",
-                   default=["libx264", "h264_nvenc"],
-                   help="codecs to benchmark; missing ones are skipped")
+    p.add_argument(
+        "--codecs", nargs="+", default=["libx264", "h264_nvenc"], help="codecs to benchmark; missing ones are skipped"
+    )
     p.add_argument("--x264-preset", default="ultrafast")
     p.add_argument("--nvenc-preset", default="p1")
     p.add_argument("--seed", type=int, default=0)

@@ -4,14 +4,16 @@ import torch
 from sageattention import sageattn
 
 from fastvideo.attention.backends.abstract import (  # FlashAttentionMetadata,
-    AttentionBackend, AttentionImpl, AttentionMetadata)
+    AttentionBackend,
+    AttentionImpl,
+    AttentionMetadata,
+)
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 
 
 class SageAttentionBackend(AttentionBackend):
-
     accept_output_buffer: bool = True
 
     @staticmethod
@@ -32,7 +34,6 @@ class SageAttentionBackend(AttentionBackend):
 
 
 class SageAttentionImpl(AttentionImpl):
-
     def __init__(
         self,
         num_heads: int,
@@ -60,5 +61,6 @@ class SageAttentionImpl(AttentionImpl):
             value,
             # since input is (batch_size, seq_len, head_num, head_dim)
             tensor_layout="NHD",
-            is_causal=self.causal)
+            is_causal=self.causal,
+        )
         return output

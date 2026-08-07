@@ -33,9 +33,11 @@ class Flux2ArchConfig(DiTArchConfig):
     ff_context_swiglu_fp32: bool = False
 
     # Parameter name mapping for loading HuggingFace checkpoints
-    param_names_mapping: dict = field(default_factory=lambda: {
-        r"transformer\.(\w*)\.(.*)$": r"\1.\2",
-    })
+    param_names_mapping: dict = field(
+        default_factory=lambda: {
+            r"transformer\.(\w*)\.(.*)$": r"\1.\2",
+        }
+    )
 
     def __post_init__(self) -> None:
         super().__post_init__()

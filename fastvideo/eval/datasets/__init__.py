@@ -12,8 +12,9 @@ datasets self-register at import time. To add one, drop a module into
 this package that subclasses :class:`PromptDataset` and decorates with
 ``@register_dataset("name")`` — auto-discovery picks it up.
 """
-from fastvideo.eval.datasets.base import (BasePromptDataset, PromptDataset, Sample)
-from fastvideo.eval.datasets.registry import (get_dataset, list_datasets, register_dataset)
+
+from fastvideo.eval.datasets.base import BasePromptDataset, PromptDataset, Sample
+from fastvideo.eval.datasets.registry import get_dataset, list_datasets, register_dataset
 
 
 def _autodiscover() -> None:
@@ -29,9 +30,9 @@ def _autodiscover() -> None:
             continue
         if entry.endswith(".py"):
             importlib.import_module(f"{__name__}.{entry[:-3]}")
-        elif os.path.isdir(os.path.join(os.path.dirname(__file__), entry)) \
-                and os.path.exists(os.path.join(
-                    os.path.dirname(__file__), entry, "__init__.py")):
+        elif os.path.isdir(os.path.join(os.path.dirname(__file__), entry)) and os.path.exists(
+            os.path.join(os.path.dirname(__file__), entry, "__init__.py")
+        ):
             importlib.import_module(f"{__name__}.{entry}")
 
 

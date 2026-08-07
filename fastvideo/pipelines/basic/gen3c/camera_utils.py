@@ -71,8 +71,9 @@ def create_horizontal_trajectory(
         elif camera_rotation == "no_rotation":
             _look_at = look_at_target + pos
         else:
-            raise ValueError(f"camera_rotation should be center_facing, trajectory_aligned, "
-                             f"or no_rotation, got {camera_rotation}")
+            raise ValueError(
+                f"camera_rotation should be center_facing, trajectory_aligned, or no_rotation, got {camera_rotation}"
+            )
         view_matrix = look_at_matrix(camera_pos, _look_at)
         trajectory.append(view_matrix)
 
@@ -120,8 +121,9 @@ def create_spiral_trajectory(
         elif camera_rotation == "no_rotation":
             view_matrix = look_at_matrix(camera_pos, look_at_target + pos)
         else:
-            raise ValueError(f"camera_rotation should be center_facing, trajectory_aligned, "
-                             f"or no_rotation, got {camera_rotation}")
+            raise ValueError(
+                f"camera_rotation should be center_facing, trajectory_aligned, or no_rotation, got {camera_rotation}"
+            )
         trajectory.append(view_matrix)
 
     trajectory = torch.stack(trajectory)

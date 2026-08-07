@@ -61,12 +61,15 @@ def _init_single_process_distributed() -> None:
     os.environ.setdefault("WORLD_SIZE", "1")
     os.environ.setdefault("LOCAL_RANK", "0")
     from fastvideo.distributed import (
-        maybe_init_distributed_environment_and_model_parallel, )
+        maybe_init_distributed_environment_and_model_parallel,
+    )
+
     maybe_init_distributed_environment_and_model_parallel(1, 1)
 
 
-def load_video(path: str, num_frames: int, target_fps: float, height: int,
-               width: int) -> tuple[torch.Tensor, np.ndarray]:
+def load_video(
+    path: str, num_frames: int, target_fps: float, height: int, width: int
+) -> tuple[torch.Tensor, np.ndarray]:
     """Load a video as [1, C, T, H, W] in [-1, 1], resampled to target_fps.
 
     Also returns the uint8 RGB frames [T, H, W, C] for reference-video export.
@@ -90,9 +93,9 @@ def load_video(path: str, num_frames: int, target_fps: float, height: int,
     frames = torch.nn.functional.interpolate(frames, size=(new_h, new_w), mode="bilinear", antialias=True)
     top = (new_h - height) // 2
     left = (new_w - width) // 2
-    frames = frames[:, :, top:top + height, left:left + width]
+    frames = frames[:, :, top : top + height, left : left + width]
 
-    frames_np = (frames.permute(0, 2, 3, 1).clamp(0, 255).round().to(torch.uint8).numpy())
+    frames_np = frames.permute(0, 2, 3, 1).clamp(0, 255).round().to(torch.uint8).numpy()
     video = frames / 127.5 - 1.0  # [0,255] -> [-1,1]
     video = video.permute(1, 0, 2, 3).unsqueeze(0)  # [1,C,T,H,W]
     return video, frames_np
@@ -103,7 +106,8 @@ def main() -> None:
 
     from fastvideo.fastvideo_args import FastVideoArgs
     from fastvideo.models.loader.component_loader import (
-        PipelineComponentLoader, )
+        PipelineComponentLoader,
+    )
     from fastvideo.pipelines.basic.ltx2.pipeline_configs import LTX2T2VConfig
 
     device = torch.device("cuda:0")
@@ -142,7 +146,7 @@ def main() -> None:
     print("Loading LTX-2 VAE...")
     vae = load_component("vae")
     vae_dtype = next(vae.parameters()).dtype
-    print(f"VAE loaded ({sum(p.numel() for p in vae.parameters())/1e6:.0f}M, {vae_dtype})")
+    print(f"VAE loaded ({sum(p.numel() for p in vae.parameters()) / 1e6:.0f}M, {vae_dtype})")
 
     print("Loading Gemma text encoder + tokenizer...")
     text_encoder = load_component("text_encoder")
@@ -213,6 +217,7 @@ def main() -> None:
         # Save the preprocessed clip so overfit tests can compare
         # validation output against the memorization target.
         import imageio
+
         ref_path = os.path.join(OUTPUT_DIR, f"training_sample_{idx}.mp4")
         with imageio.get_writer(ref_path, fps=TRAIN_FPS) as writer:
             for frame in frames_np:
@@ -231,20 +236,21 @@ def main() -> None:
             row["id"] = f"{r['id']}_copy{copy_idx}"
             replicated.append(row)
     table = pa.table(
-        {k: [r[k] for r in replicated]
-         for k in replicated[0]},
+        {k: [r[k] for r in replicated] for k in replicated[0]},
         schema=pyarrow_schema_t2v,
     )
     output_path = os.path.join(OUTPUT_DIR, "data_00000.parquet")
     pq.write_table(table, output_path)
-    print(f"\nWrote {len(replicated)} records "
-          f"({len(records)} unique x {max(1, NUM_COPIES)} copies) to {output_path}")
+    print(f"\nWrote {len(replicated)} records ({len(records)} unique x {max(1, NUM_COPIES)} copies) to {output_path}")
 
     # Write validation prompts for the validation callback
     val_prompts = {
-        "data": [{
-            "caption": (item["cap"][0] if isinstance(item["cap"], list) else item["cap"]),
-        } for item in caption_data],
+        "data": [
+            {
+                "caption": (item["cap"][0] if isinstance(item["cap"], list) else item["cap"]),
+            }
+            for item in caption_data
+        ],
     }
     val_path = os.path.join(OUTPUT_DIR, "validation_prompts.json")
     with open(val_path, "w") as f:

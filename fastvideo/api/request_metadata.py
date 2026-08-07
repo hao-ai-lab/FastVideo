@@ -15,6 +15,7 @@ this set.
 The set holds leaf paths only. Nested dataclass or mapping assignments
 are flattened to their leaves at record time.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping

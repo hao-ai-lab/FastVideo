@@ -65,22 +65,20 @@ def _find_score_token_index(prompt_text: str, tokenizer, gen_ids: list[int]) -> 
     match = re.search(pattern, gen_str, flags=re.IGNORECASE)
     if not match:
         return -1
-    after = gen_str[match.end():]
+    after = gen_str[match.end() :]
     num_match = re.search(r"\d", after)
     if not num_match:
         return -1
-    target = gen_str[:match.end() + num_match.start() + 1]
+    target = gen_str[: match.end() + num_match.start() + 1]
     for i in range(len(gen_ids)):
-        if tokenizer.decode(gen_ids[:i + 1], skip_special_tokens=False) == target:
+        if tokenizer.decode(gen_ids[: i + 1], skip_special_tokens=False) == target:
             return i
     return -1
 
 
-def _ll_based_soft_score_normed(hard_val: int | None,
-                                token_idx: int,
-                                scores,
-                                tokenizer,
-                                seq_idx: int = 0) -> float | None:
+def _ll_based_soft_score_normed(
+    hard_val: int | None, token_idx: int, scores, tokenizer, seq_idx: int = 0
+) -> float | None:
     """Upstream VideoScore2's soft score: argmax_score × (argmax_prob / Σprob).
 
     Matches ``ll_based_soft_score_normed`` in
@@ -218,11 +216,9 @@ class VideoScore2Metric(BaseMetric):
         frames = (video.permute(0, 2, 3, 1).cpu().numpy() * 255).astype(np.uint8)
         return [Image.fromarray(frames[t]) for t in range(frames.shape[0])]
 
-    def _subsample_frames(self,
-                          pil_frames: list[Image.Image],
-                          source_fps: float | None,
-                          max_frames: int = 64,
-                          max_resolution: int = 960) -> list[Image.Image]:
+    def _subsample_frames(
+        self, pil_frames: list[Image.Image], source_fps: float | None, max_frames: int = 64, max_resolution: int = 960
+    ) -> list[Image.Image]:
         """Subsample to ``infer_fps`` worth of frames, capped at ``max_frames``.
 
         Mirrors upstream's path-based qwen_vl_utils flow, which samples at
@@ -269,21 +265,15 @@ class VideoScore2Metric(BaseMetric):
         )
         user_prompt = VS2_QUERY_TEMPLATE.substitute(t2v_prompt=text)
 
-        messages = [{
-            "role":
-            "user",
-            "content": [
-                {
-                    "type": "video",
-                    "video": pil_frames,
-                    "fps": self.infer_fps
-                },
-                {
-                    "type": "text",
-                    "text": user_prompt
-                },
-            ]
-        }]
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "video", "video": pil_frames, "fps": self.infer_fps},
+                    {"type": "text", "text": user_prompt},
+                ],
+            }
+        ]
         chat_text = self._processor.apply_chat_template(
             messages,
             tokenize=False,
@@ -324,7 +314,8 @@ class VideoScore2Metric(BaseMetric):
             seq_idx=0,
         )
         soft_vals = [
-            v for v in (parsed["visual_quality"], parsed["text_alignment"], parsed["physical_consistency"])
+            v
+            for v in (parsed["visual_quality"], parsed["text_alignment"], parsed["physical_consistency"])
             if v is not None
         ]
         combined = sum(soft_vals) / len(soft_vals) if soft_vals else 0.0

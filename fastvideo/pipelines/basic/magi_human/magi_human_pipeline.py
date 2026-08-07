@@ -20,6 +20,7 @@ variant's converted repo at ~5-30 GB (transformer + scheduler +
 model_index.json) instead of ~30-55 GB, and lets all variants share
 the same ~25 GB of cached upstream weights.
 """
+
 from __future__ import annotations
 
 import json
@@ -36,7 +37,8 @@ from fastvideo.logger import init_logger
 from fastvideo.models.encoders.t5gemma import T5GemmaEncoderModel
 from fastvideo.models.vaes.sa_audio import SAAudioVAEModel
 from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (
-    FlowUniPCMultistepScheduler, )
+    FlowUniPCMultistepScheduler,
+)
 from fastvideo.pipelines.basic.magi_human.stages import (
     MagiHumanAudioDecodingStage,
     MagiHumanDenoisingStage,
@@ -136,7 +138,7 @@ class MagiHumanPipeline(ComposedPipelineBase):
 
         def _is_bundled(key: str) -> bool:
             spec = model_index.get(key)
-            return (isinstance(spec, list | tuple) and len(spec) >= 1 and spec[0] is not None)
+            return isinstance(spec, list | tuple) and len(spec) >= 1 and spec[0] is not None
 
         deferred = []
         for key in ("text_encoder", "tokenizer", "audio_vae", "vae"):
@@ -178,8 +180,7 @@ class MagiHumanPipeline(ComposedPipelineBase):
 
         if not _resolve("audio_vae"):
             logger.info(
-                "Building Stable Audio Open 1.0 VAE (lazy-load from %s) — "
-                "requires HF terms accepted for gated repo",
+                "Building Stable Audio Open 1.0 VAE (lazy-load from %s) — requires HF terms accepted for gated repo",
                 _SA_AUDIO_HF_ID,
             )
             audio_config = OobleckVAEConfig()
@@ -223,7 +224,8 @@ class MagiHumanPipeline(ComposedPipelineBase):
             raise RuntimeError(
                 f"snapshot_download returned {snapshot} but no vae/ "
                 f"subfolder was found inside it. Check that {_WAN_VAE_HF_ID} "
-                "still exposes a Diffusers-format vae/ folder.", )
+                "still exposes a Diffusers-format vae/ folder.",
+            )
         return VAELoader().load(vae_dir, fastvideo_args)
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs) -> None:
@@ -297,7 +299,9 @@ class MagiHumanPipeline(ComposedPipelineBase):
 
         self.add_stage(
             stage_name="audio_decoding_stage",
-            stage=MagiHumanAudioDecodingStage(audio_vae=self.get_module("audio_vae"), ),
+            stage=MagiHumanAudioDecodingStage(
+                audio_vae=self.get_module("audio_vae"),
+            ),
         )
 
     def _add_reference_image_stage(self, fastvideo_args: FastVideoArgs) -> None:

@@ -10,8 +10,8 @@ from fastvideo.dataset.dataloader.schema import pyarrow_schema_i2v
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.logger import init_logger
-from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (FlowUniPCMultistepScheduler)
-from fastvideo.pipelines.basic.wan.wan_i2v_pipeline import (WanImageToVideoPipeline)
+from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import FlowUniPCMultistepScheduler
+from fastvideo.pipelines.basic.wan.wan_i2v_pipeline import WanImageToVideoPipeline
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, TrainingBatch
 from fastvideo.training.training_pipeline import TrainingPipeline
 from fastvideo.utils import is_vsa_available, shallow_asdict
@@ -28,6 +28,7 @@ class WanI2VTrainingPipeline(TrainingPipeline):
     """
     A training pipeline for Wan.
     """
+
     _required_config_modules = ["scheduler", "transformer", "vae"]
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
@@ -50,17 +51,18 @@ class WanI2VTrainingPipeline(TrainingPipeline):
         args_copy.dit_cpu_offload = True
         # args_copy.pipeline_config.vae_config.load_encoder = False
         # validation_pipeline = WanImageToVideoValidationPipeline.from_pretrained(
-        self.validation_pipeline = WanImageToVideoPipeline.from_pretrained(training_args.model_path,
-                                                                           args=None,
-                                                                           inference_mode=True,
-                                                                           loaded_modules={
-                                                                               "transformer":
-                                                                               self.get_module("transformer"),
-                                                                           },
-                                                                           tp_size=training_args.tp_size,
-                                                                           sp_size=training_args.sp_size,
-                                                                           num_gpus=training_args.num_gpus,
-                                                                           dit_cpu_offload=True)
+        self.validation_pipeline = WanImageToVideoPipeline.from_pretrained(
+            training_args.model_path,
+            args=None,
+            inference_mode=True,
+            loaded_modules={
+                "transformer": self.get_module("transformer"),
+            },
+            tp_size=training_args.tp_size,
+            sp_size=training_args.sp_size,
+            num_gpus=training_args.num_gpus,
+            dit_cpu_offload=True,
+        )
 
     def _get_next_batch(self, training_batch: TrainingBatch) -> TrainingBatch:
         batch = next(self.train_loader_iter, None)  # type: ignore
@@ -72,20 +74,21 @@ class WanI2VTrainingPipeline(TrainingPipeline):
             # Get first batch of new epoch
             batch = next(self.train_loader_iter)
 
-        latents = batch['vae_latent']
-        latents = latents[:, :, :self.training_args.num_latent_t]
-        encoder_hidden_states = batch['text_embedding']
-        encoder_attention_mask = batch['text_attention_mask']
-        clip_features = batch['clip_feature']
-        image_latents = batch['first_frame_latent']
-        image_latents = image_latents[:, :, :self.training_args.num_latent_t]
-        pil_image = batch['pil_image']
-        infos = batch['info_list']
+        latents = batch["vae_latent"]
+        latents = latents[:, :, : self.training_args.num_latent_t]
+        encoder_hidden_states = batch["text_embedding"]
+        encoder_attention_mask = batch["text_attention_mask"]
+        clip_features = batch["clip_feature"]
+        image_latents = batch["first_frame_latent"]
+        image_latents = image_latents[:, :, : self.training_args.num_latent_t]
+        pil_image = batch["pil_image"]
+        infos = batch["info_list"]
 
         training_batch.latents = latents.to(get_local_torch_device(), dtype=torch.bfloat16)
         training_batch.encoder_hidden_states = encoder_hidden_states.to(get_local_torch_device(), dtype=torch.bfloat16)
-        training_batch.encoder_attention_mask = encoder_attention_mask.to(get_local_torch_device(),
-                                                                          dtype=torch.bfloat16)
+        training_batch.encoder_attention_mask = encoder_attention_mask.to(
+            get_local_torch_device(), dtype=torch.bfloat16
+        )
         training_batch.preprocessed_image = pil_image.to(get_local_torch_device())
         training_batch.image_embeds = clip_features.to(get_local_torch_device())
         training_batch.image_latents = image_latents.to(get_local_torch_device())
@@ -115,13 +118,13 @@ class WanI2VTrainingPipeline(TrainingPipeline):
         mask_lat_size = mask_lat_size.transpose(1, 2)
         mask_lat_size = mask_lat_size.to(image_latents.device).to(dtype=torch.bfloat16)
 
-        training_batch.noisy_model_input = torch.cat([training_batch.noisy_model_input, mask_lat_size, image_latents],
-                                                     dim=1)
+        training_batch.noisy_model_input = torch.cat(
+            [training_batch.noisy_model_input, mask_lat_size, image_latents], dim=1
+        )
 
         return training_batch
 
     def _build_input_kwargs(self, training_batch: TrainingBatch) -> TrainingBatch:
-
         # Image Embeds for conditioning
         image_embeds = training_batch.image_embeds
         assert torch.isnan(image_embeds).sum() == 0
@@ -139,12 +142,17 @@ class WanI2VTrainingPipeline(TrainingPipeline):
         }
         return training_batch
 
-    def _prepare_validation_batch(self, sampling_param: SamplingParam, training_args: TrainingArgs,
-                                  validation_batch: dict[str, Any], num_inference_steps: int) -> ForwardBatch:
-        sampling_param.prompt = validation_batch['prompt']
+    def _prepare_validation_batch(
+        self,
+        sampling_param: SamplingParam,
+        training_args: TrainingArgs,
+        validation_batch: dict[str, Any],
+        num_inference_steps: int,
+    ) -> ForwardBatch:
+        sampling_param.prompt = validation_batch["prompt"]
         sampling_param.height = training_args.num_height
         sampling_param.width = training_args.num_width
-        sampling_param.image_path = validation_batch['video_path']
+        sampling_param.image_path = validation_batch["video_path"]
         sampling_param.num_inference_steps = num_inference_steps
         sampling_param.data_type = "video"
         assert self.seed is not None
@@ -179,6 +187,7 @@ if __name__ == "__main__":
     argv = sys.argv
     from fastvideo.fastvideo_args import TrainingArgs
     from fastvideo.utils import FlexibleArgumentParser
+
     parser = FlexibleArgumentParser()
     parser = TrainingArgs.add_cli_args(parser)
     parser = FastVideoArgs.add_cli_args(parser)

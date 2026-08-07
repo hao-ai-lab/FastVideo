@@ -73,20 +73,27 @@ def main() -> None:
     print("Loading Cosmos VAE (AutoencoderKLWan)...")
     vae_path = maybe_download_model(VAE_REPO)
     from diffusers import AutoencoderKLWan
-    vae = AutoencoderKLWan.from_pretrained(
-        vae_path,
-        subfolder="vae",
-        torch_dtype=torch.float16,
-    ).to(device).eval()
-    print(f"VAE loaded "
-          f"({sum(p.numel() for p in vae.parameters())/1e6:.0f}M)")
+
+    vae = (
+        AutoencoderKLWan.from_pretrained(
+            vae_path,
+            subfolder="vae",
+            torch_dtype=torch.float16,
+        )
+        .to(device)
+        .eval()
+    )
+    print(f"VAE loaded ({sum(p.numel() for p in vae.parameters()) / 1e6:.0f}M)")
 
     # --- Load Reason1 (Qwen2.5-VL) text encoder ---
     print("Loading Reason1 text encoder...")
     from fastvideo.configs.pipelines.cosmos2_5 import (
-        Cosmos25Config, )
+        Cosmos25Config,
+    )
     from fastvideo.models.encoders.reason1 import (
-        Reason1TextEncoder, )
+        Reason1TextEncoder,
+    )
+
     pipeline_cfg = Cosmos25Config()
     text_enc_cfg = pipeline_cfg.text_encoder_configs[0]
     text_enc_path = os.path.join(model_path, "text_encoder")
@@ -103,6 +110,7 @@ def main() -> None:
     text_encoder = text_encoder.to(torch.bfloat16)
     import glob
     from safetensors.torch import load_file
+
     sd: dict[str, torch.Tensor] = {}
     for sf in sorted(glob.glob(os.path.join(text_enc_path, "*.safetensors"))):
         sd.update(load_file(sf, device=str(device)))
@@ -167,8 +175,7 @@ def main() -> None:
 
     # Write parquet
     table = pa.table(
-        {k: [r[k] for r in records]
-         for k in records[0]},
+        {k: [r[k] for r in records] for k in records[0]},
         schema=pyarrow_schema_t2v,
     )
     output_path = os.path.join(OUTPUT_DIR, "data_00000.parquet")
@@ -177,9 +184,12 @@ def main() -> None:
 
     # Write T2W validation prompts (no image_path for T2W)
     val_prompts = {
-        "data": [{
-            "caption": item["cap"][0],
-        } for item in caption_data],
+        "data": [
+            {
+                "caption": item["cap"][0],
+            }
+            for item in caption_data
+        ],
     }
     val_path = os.path.join(OUTPUT_DIR, "validation_prompts.json")
     with open(val_path, "w") as f:

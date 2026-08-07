@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from fastvideo.configs.models.vaes.autoencoder_kl import (AutoencoderKLArchConfig, AutoencoderKLVAEConfig)
+from fastvideo.configs.models.vaes.autoencoder_kl import AutoencoderKLArchConfig, AutoencoderKLVAEConfig
 
 _GLM_IMAGE_LATENTS_MEAN: tuple[float, ...] = (
     -0.2080078125,

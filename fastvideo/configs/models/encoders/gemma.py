@@ -10,8 +10,11 @@ from fastvideo.configs.models.encoders.base import (
 def _is_feature_extractor_linear(n: str, m) -> bool:
     # LTX-2.3 (caption_proj_before_connector) introduces separate
     # video/audio feature extractor linears; keep the LTX-2.0 name too.
-    return (n.endswith("feature_extractor_linear") or n.endswith("video_feature_extractor_linear")
-            or n.endswith("audio_feature_extractor_linear"))
+    return (
+        n.endswith("feature_extractor_linear")
+        or n.endswith("video_feature_extractor_linear")
+        or n.endswith("audio_feature_extractor_linear")
+    )
 
 
 def _is_embeddings(n: str, m) -> bool:
@@ -61,7 +64,8 @@ class LTX2GemmaArchConfig(TextEncoderArchConfig):
     connector_num_learnable_registers: int | None = 128
 
     _fsdp_shard_conditions: list = field(
-        default_factory=lambda: [_is_feature_extractor_linear, _is_embeddings, _is_gemma_model])
+        default_factory=lambda: [_is_feature_extractor_linear, _is_embeddings, _is_gemma_model]
+    )
 
     def __post_init__(self) -> None:
         super().__post_init__()

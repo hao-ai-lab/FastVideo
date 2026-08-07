@@ -15,7 +15,8 @@ from fastvideo.train.utils.instantiate import instantiate
 if TYPE_CHECKING:
     from fastvideo.train.methods.base import TrainingMethod
     from fastvideo.train.utils.training_config import (
-        TrainingConfig, )
+        TrainingConfig,
+    )
 
 logger = init_logger(__name__)
 
@@ -116,11 +117,10 @@ class CallbackDict:
             cb_cfg = dict(cb_cfg)
             if "_target_" not in cb_cfg:
                 if name in _BUILTIN_CALLBACKS:
-                    cb_cfg["_target_"] = (_BUILTIN_CALLBACKS[name])
+                    cb_cfg["_target_"] = _BUILTIN_CALLBACKS[name]
                 else:
                     logger.warning(
-                        "Callback %r is missing "
-                        "'_target_', skipping: %s",
+                        "Callback %r is missing '_target_', skipping: %s",
                         name,
                         cb_cfg,
                     )
@@ -132,9 +132,7 @@ class CallbackDict:
             )
             cb = instantiate(cb_cfg)
             if not isinstance(cb, Callback):
-                raise TypeError(f"Callback {name!r} resolved to "
-                                f"{type(cb).__name__}, expected a "
-                                f"Callback subclass.")
+                raise TypeError(f"Callback {name!r} resolved to {type(cb).__name__}, expected a Callback subclass.")
             cb.training_config = training_config
             cb._callback_dict = self
             cb.name = name
@@ -156,14 +154,15 @@ class CallbackDict:
 
         if method_name == "load_state_dict":
 
-            def _load_state_dict(state_dict: dict[str, Any], ) -> None:
+            def _load_state_dict(
+                state_dict: dict[str, Any],
+            ) -> None:
                 for n, cb in self._callbacks.items():
                     if n in state_dict:
                         cb.load_state_dict(state_dict[n])
                     else:
                         logger.warning(
-                            "Callback %r not found in "
-                            "checkpoint.",
+                            "Callback %r not found in checkpoint.",
                             n,
                         )
 

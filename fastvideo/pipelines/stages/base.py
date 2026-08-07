@@ -23,17 +23,19 @@ logger = init_logger(__name__)
 
 class StageVerificationError(Exception):
     """Exception raised when stage verification fails."""
+
     pass
 
 
 class PipelineStage(ABC):
     """
     Abstract base class for all pipeline stages.
-    
+
     A pipeline stage represents a discrete step in the diffusion process that can be
     composed with other stages to create a complete pipeline. Each stage is responsible
     for a specific part of the process, such as prompt encoding, latent preparation, etc.
     """
+
     performance_component_metric: str | None = None
 
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
@@ -42,7 +44,7 @@ class PipelineStage(ABC):
 
         Example:
             from fastvideo.pipelines.stages.validators import V, VerificationResult
-            
+
             def verify_input(self, batch, fastvideo_args):
                 result = VerificationResult()
                 result.add_check("height", batch.height, V.positive_int_divisible(8))
@@ -56,7 +58,7 @@ class PipelineStage(ABC):
 
         Returns:
             A VerificationResult containing the verification status.
-        
+
         """
         # Default implementation - no verification
         return VerificationResult()
@@ -75,11 +77,12 @@ class PipelineStage(ABC):
         # Default implementation - no verification
         return VerificationResult()
 
-    def _run_verification(self, verification_result: VerificationResult, stage_name: str,
-                          verification_type: str) -> None:
+    def _run_verification(
+        self, verification_result: VerificationResult, stage_name: str, verification_type: str
+    ) -> None:
         """
         Run verification and raise errors if any checks fail.
-        
+
         Args:
             verification_result: Results from verify_input or verify_output
             stage_name: Name of the current stage
@@ -92,9 +95,11 @@ class PipelineStage(ABC):
                 detailed_summary = verification_result.get_failure_summary()
 
                 failed_fields_str = ", ".join(failed_fields)
-                error_msg = (f"{verification_type.capitalize()} verification failed for {stage_name}: "
-                             f"Failed fields: {failed_fields_str}\n"
-                             f"Details: {detailed_summary}")
+                error_msg = (
+                    f"{verification_type.capitalize()} verification failed for {stage_name}: "
+                    f"Failed fields: {failed_fields_str}\n"
+                    f"Details: {detailed_summary}"
+                )
                 raise StageVerificationError(error_msg)
 
     @property
@@ -105,7 +110,7 @@ class PipelineStage(ABC):
     def set_logging(self, enable: bool):
         """
         Enable or disable logging for this stage.
-        
+
         Args:
             enable: Whether to enable logging.
         """
@@ -119,11 +124,11 @@ class PipelineStage(ABC):
         """
         Execute the stage's processing on the batch with optional verification and logging.
         Should not be overridden by subclasses.
-        
+
         Args:
             batch: The current batch information.
             fastvideo_args: The inference arguments.
-            
+
         Returns:
             The updated batch information after this stage's processing.
         """
@@ -132,7 +137,7 @@ class PipelineStage(ABC):
         stage_name = f"{stage_key}|{stage_class_name}"
 
         # Check if verification is enabled (simple approach for prototype)
-        enable_verification = getattr(fastvideo_args, 'enable_stage_verification', False)
+        enable_verification = getattr(fastvideo_args, "enable_stage_verification", False)
 
         if enable_verification:
             # Pre-execution input verification
@@ -188,14 +193,14 @@ class PipelineStage(ABC):
     ) -> ForwardBatch:
         """
         Forward pass of the stage's processing.
-        
+
         This method should be implemented by subclasses to provide the forward
         processing logic for the stage.
-        
+
         Args:
             batch: The current batch information.
             fastvideo_args: The inference arguments.
-            
+
         Returns:
             The updated batch information after this stage's processing.
         """

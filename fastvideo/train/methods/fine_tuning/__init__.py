@@ -20,7 +20,8 @@ def __getattr__(name: str) -> object:
     # Lazy import to avoid circular imports during registry bring-up.
     if name == "DiffusionForcingSFTMethod":
         from fastvideo.train.methods.fine_tuning.dfsft import (
-            DiffusionForcingSFTMethod, )
+            DiffusionForcingSFTMethod,
+        )
 
         return DiffusionForcingSFTMethod
     if name == "FineTuneMethod":
@@ -29,7 +30,8 @@ def __getattr__(name: str) -> object:
         return FineTuneMethod
     if name == "TeacherForcingSFTMethod":
         from fastvideo.train.methods.fine_tuning.tfsft import (
-            TeacherForcingSFTMethod, )
+            TeacherForcingSFTMethod,
+        )
 
         return TeacherForcingSFTMethod
     raise AttributeError(name)

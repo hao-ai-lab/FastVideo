@@ -117,7 +117,7 @@ def prepare_pair(
 def select_window(frames: np.ndarray, *, target_frames: int, selection: str = "first") -> np.ndarray:
     if selection != "first":
         start = max(frames.shape[0] - target_frames, 0)
-        return frames[start:start + target_frames]
+        return frames[start : start + target_frames]
     return frames[:target_frames]
 
 
@@ -185,10 +185,12 @@ def infer_real_mask_path(video_source: Any) -> str | None:
     fps_dir = video_path.parent.name
     for ancestor in video_path.parents:
         if ancestor.name == "split-videos":
-            candidates.extend([
-                ancestor.parent / "video-masks" / "real" / fps_dir / mask_name,
-                ancestor.parent / "video_masks" / "real" / fps_dir / mask_name,
-            ])
+            candidates.extend(
+                [
+                    ancestor.parent / "video-masks" / "real" / fps_dir / mask_name,
+                    ancestor.parent / "video_masks" / "real" / fps_dir / mask_name,
+                ]
+            )
             break
 
     for candidate in candidates:
@@ -251,7 +253,7 @@ def compute_mse(video1_frames: np.ndarray, video2_frames: np.ndarray) -> list[fl
     for frame1, frame2 in zip(video1_frames, video2_frames, strict=False):
         if frame1.shape != frame2.shape:
             raise ValueError("Frames must have the same dimensions.")
-        mse = np.mean((frame1.astype(np.float32) - frame2.astype(np.float32))**2)
+        mse = np.mean((frame1.astype(np.float32) - frame2.astype(np.float32)) ** 2)
         frame_mses.append(round(float(mse), 4))
     return frame_mses
 
@@ -326,36 +328,46 @@ def prepare_pair_inputs(
     generated_quarter = resize_frames(generated_frames, target_size).astype(np.float32) / 255.0
     reference_quarter = resize_frames(reference_frames, target_size).astype(np.float32) / 255.0
 
-    generated_masks = (load_mask_frames(generated_mask, target_frames=consider_frames, target_size=target_size)
-                       if generated_mask is not None else rebinarize_masks(
-                           resize_frames(
-                               roundtrip_mask_frames(
-                                   generate_motion_mask(
-                                       generated_frames,
-                                       threshold=threshold,
-                                       alpha=alpha,
-                                       color_order=generated_color,
-                                   ),
-                                   fps=target_fps,
-                               ) if roundtrip_generated_masks else generate_motion_mask(
-                                   generated_frames,
-                                   threshold=threshold,
-                                   alpha=alpha,
-                                   color_order=generated_color,
-                               ),
-                               target_size,
-                           )))
-    reference_masks = (load_mask_frames(reference_mask, target_frames=consider_frames, target_size=target_size)
-                       if reference_mask is not None else rebinarize_masks(
-                           resize_frames(
-                               generate_motion_mask(
-                                   reference_frames,
-                                   threshold=threshold,
-                                   alpha=alpha,
-                                   color_order=reference_color,
-                               ),
-                               target_size,
-                           )))
+    generated_masks = (
+        load_mask_frames(generated_mask, target_frames=consider_frames, target_size=target_size)
+        if generated_mask is not None
+        else rebinarize_masks(
+            resize_frames(
+                roundtrip_mask_frames(
+                    generate_motion_mask(
+                        generated_frames,
+                        threshold=threshold,
+                        alpha=alpha,
+                        color_order=generated_color,
+                    ),
+                    fps=target_fps,
+                )
+                if roundtrip_generated_masks
+                else generate_motion_mask(
+                    generated_frames,
+                    threshold=threshold,
+                    alpha=alpha,
+                    color_order=generated_color,
+                ),
+                target_size,
+            )
+        )
+    )
+    reference_masks = (
+        load_mask_frames(reference_mask, target_frames=consider_frames, target_size=target_size)
+        if reference_mask is not None
+        else rebinarize_masks(
+            resize_frames(
+                generate_motion_mask(
+                    reference_frames,
+                    threshold=threshold,
+                    alpha=alpha,
+                    color_order=reference_color,
+                ),
+                target_size,
+            )
+        )
+    )
     return PreparedPhysicsIQPair(
         generated_quarter=generated_quarter,
         reference_quarter=reference_quarter,
@@ -400,18 +412,21 @@ def prepare_triplet_inputs(
     target_size = (pair.reference_quarter.shape[2], pair.reference_quarter.shape[1])
     reference_take2_mask = reference_take2_mask or infer_real_mask_path(reference_take2)
     reference_take2_quarter = resize_frames(reference_take2_frames, target_size).astype(np.float32) / 255.0
-    reference_take2_masks = (load_mask_frames(
-        reference_take2_mask, target_frames=consider_frames, target_size=target_size)
-                             if reference_take2_mask is not None else rebinarize_masks(
-                                 resize_frames(
-                                     generate_motion_mask(
-                                         reference_take2_frames,
-                                         threshold=threshold,
-                                         alpha=alpha,
-                                         color_order=reference_take2_color,
-                                     ),
-                                     target_size,
-                                 )))
+    reference_take2_masks = (
+        load_mask_frames(reference_take2_mask, target_frames=consider_frames, target_size=target_size)
+        if reference_take2_mask is not None
+        else rebinarize_masks(
+            resize_frames(
+                generate_motion_mask(
+                    reference_take2_frames,
+                    threshold=threshold,
+                    alpha=alpha,
+                    color_order=reference_take2_color,
+                ),
+                target_size,
+            )
+        )
+    )
     return PreparedPhysicsIQTriplet(
         generated_quarter=pair.generated_quarter,
         reference_quarter=pair.reference_quarter,

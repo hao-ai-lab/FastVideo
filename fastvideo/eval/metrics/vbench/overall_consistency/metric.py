@@ -31,7 +31,6 @@ def _clip_transform(frames: torch.Tensor) -> torch.Tensor:
 
 @register("vbench.overall_consistency")
 class OverallConsistencyMetric(BaseMetric):
-
     name = "vbench.overall_consistency"
     requires_reference = False
     higher_is_better = True
@@ -61,9 +60,11 @@ class OverallConsistencyMetric(BaseMetric):
         # — no separate download is needed; the model loader only handles
         # the actual .pth weights.
         from clip.simple_tokenizer import default_bpe
+
         self._tokenizer = SimpleTokenizer(default_bpe())
 
         from fastvideo.eval.models import ensure_checkpoint
+
         ckpt = ensure_checkpoint(
             "ViClip-InternVid-10M-FLT.pth",
             source="OpenGVLab/VBench_Used_Models",

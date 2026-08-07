@@ -4,7 +4,7 @@ import torch
 
 from fastvideo.logger import init_logger
 from fastvideo.platforms import AttentionBackendEnum
-from fastvideo.platforms.interface import (DeviceCapability, Platform, PlatformEnum)
+from fastvideo.platforms.interface import DeviceCapability, Platform, PlatformEnum
 
 logger = init_logger(__name__)
 
@@ -35,9 +35,11 @@ class MpsPlatform(Platform):
     @classmethod
     def is_async_output_supported(cls, enforce_eager: bool | None) -> bool:
         if enforce_eager:
-            logger.warning("To see benefits of async output processing, enable MPS "
-                           "graph. Since, enforce-eager is enabled, async output "
-                           "processor cannot be used")
+            logger.warning(
+                "To see benefits of async output processing, enable MPS "
+                "graph. Since, enforce-eager is enabled, async output "
+                "processor cannot be used"
+            )
             return False
         return True
 
@@ -46,8 +48,9 @@ class MpsPlatform(Platform):
         return 0.0
 
     @classmethod
-    def get_attn_backend_cls(cls, selected_backend: AttentionBackendEnum | None, head_size: int,
-                             dtype: torch.dtype) -> str:
+    def get_attn_backend_cls(
+        cls, selected_backend: AttentionBackendEnum | None, head_size: int, dtype: torch.dtype
+    ) -> str:
         # MPS supports SDPA (Scaled Dot-Product Attention) which is the most compatible
         logger.info("Using Torch SDPA backend for MPS.")
         return "fastvideo.attention.backends.sdpa.SDPABackend"
@@ -64,6 +67,7 @@ class MpsPlatform(Platform):
             import random
 
             import numpy as np
+
             random.seed(seed)
             np.random.seed(seed)
             torch.manual_seed(seed)

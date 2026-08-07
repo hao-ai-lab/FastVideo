@@ -6,6 +6,7 @@ jointly. Text embeddings are already pad-or-trimmed to `t5_gemma_target_length`
 by `MagiHumanLatentPreparationStage`; the original context lengths are
 stashed on the batch as `magi_original_text_lens` / `magi_original_neg_text_lens`.
 """
+
 from __future__ import annotations
 
 import copy
@@ -142,8 +143,9 @@ class MagiHumanDenoisingStage(PipelineStage):
         if self.cfg_number == 2:
             neg_list = batch.negative_prompt_embeds or []
             if not neg_list:
-                raise ValueError("CFG=2 requires negative prompt embeddings; got None. "
-                                 "Did the prompt encoding stage run?")
+                raise ValueError(
+                    "CFG=2 requires negative prompt embeddings; got None. Did the prompt encoding stage run?"
+                )
             else:
                 neg_txt_feat = neg_list[0]
                 neg_txt_feat_len = int(batch.magi_original_neg_text_lens[0])
@@ -164,9 +166,12 @@ class MagiHumanDenoisingStage(PipelineStage):
                 coords_style=self.coords_style,
                 layout=getattr(batch, "magi_static_packed_layout", None),
             )
-            with trace_step(idx), set_forward_context(
+            with (
+                trace_step(idx),
+                set_forward_context(
                     current_timestep=int(t.item()) if torch.is_tensor(t) else int(t),
                     attn_metadata=None,
+                ),
             ):
                 v_cond_video, v_cond_audio = _dit_forward(
                     self.transformer,
@@ -199,8 +204,11 @@ class MagiHumanDenoisingStage(PipelineStage):
                     v_uncond_audio = None
 
             if self.cfg_number == 2:
-                video_guidance = (self.video_txt_guidance_scale
-                                  if t > self.video_guidance_high_t_threshold else self.video_guidance_low_t_value)
+                video_guidance = (
+                    self.video_txt_guidance_scale
+                    if t > self.video_guidance_high_t_threshold
+                    else self.video_guidance_low_t_value
+                )
                 assert v_uncond_video is not None and v_uncond_audio is not None
                 v_video = v_uncond_video + video_guidance * (v_cond_video - v_uncond_video)
                 v_audio = v_uncond_audio + self.audio_txt_guidance_scale * (v_cond_audio - v_uncond_audio)

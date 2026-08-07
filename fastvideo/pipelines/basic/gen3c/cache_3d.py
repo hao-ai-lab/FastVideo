@@ -22,14 +22,14 @@ def inverse_with_conversion(mtx: torch.Tensor) -> torch.Tensor:
 def create_grid(b: int, h: int, w: int, device: str = "cpu", dtype: torch.dtype = torch.float32) -> torch.Tensor:
     """
     Create a dense grid of (x, y) coordinates of shape (b, 2, h, w).
-    
+
     Args:
         b: Batch size
         h: Height
         w: Width
         device: Device for tensor creation
         dtype: Data type for tensor
-        
+
     Returns:
         Grid tensor of shape (b, 2, h, w)
     """
@@ -47,14 +47,14 @@ def unproject_points(
 ) -> torch.Tensor:
     """
     Unproject depth map to 3D world points.
-    
+
     Args:
         depth: (b, 1, h, w) depth map
         w2c: (b, 4, 4) world-to-camera transformation matrix
         intrinsic: (b, 3, 3) camera intrinsic matrix
         is_depth: If True, depth is z-depth; if False, depth is distance to camera
         mask: Optional (b, h, w) or (b, 1, h, w) mask for valid pixels
-        
+
     Returns:
         world_points: (b, h, w, 3) 3D world coordinates
     """
@@ -111,12 +111,12 @@ def project_points(
 ) -> torch.Tensor:
     """
     Project 3D world points to 2D pixel coordinates.
-    
+
     Args:
         world_points: (b, h, w, 3) 3D world coordinates
         w2c: (b, 4, 4) world-to-camera transformation matrix
         intrinsic: (b, 3, 3) camera intrinsic matrix
-        
+
     Returns:
         projected_points: (b, h, w, 3, 1) projected 2D coordinates (x, y, z)
     """
@@ -147,7 +147,7 @@ def bilinear_splatting(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Bilinear splatting for forward warping.
-    
+
     Args:
         frame1: (b, c, h, w) source frame
         mask1: (b, 1, h, w) valid pixel mask (1 for known, 0 for unknown)
@@ -156,7 +156,7 @@ def bilinear_splatting(
         flow12_mask: (b, 1, h, w) flow validity mask
         is_image: If True, output will be clipped to (-1, 1) range
         depth_weight_scale: Scale factor for depth weighting
-        
+
     Returns:
         warped_frame2: (b, c, h, w) warped frame
         mask2: (b, 1, h, w) validity mask for warped frame
@@ -178,27 +178,31 @@ def bilinear_splatting(
     trans_pos_ceil = torch.ceil(trans_pos_offset).long()
 
     trans_pos_offset = torch.stack(
-        [torch.clamp(trans_pos_offset[:, 0], min=0, max=w + 1),
-         torch.clamp(trans_pos_offset[:, 1], min=0, max=h + 1)],
-        dim=1)
+        [torch.clamp(trans_pos_offset[:, 0], min=0, max=w + 1), torch.clamp(trans_pos_offset[:, 1], min=0, max=h + 1)],
+        dim=1,
+    )
     trans_pos_floor = torch.stack(
-        [torch.clamp(trans_pos_floor[:, 0], min=0, max=w + 1),
-         torch.clamp(trans_pos_floor[:, 1], min=0, max=h + 1)],
-        dim=1)
+        [torch.clamp(trans_pos_floor[:, 0], min=0, max=w + 1), torch.clamp(trans_pos_floor[:, 1], min=0, max=h + 1)],
+        dim=1,
+    )
     trans_pos_ceil = torch.stack(
-        [torch.clamp(trans_pos_ceil[:, 0], min=0, max=w + 1),
-         torch.clamp(trans_pos_ceil[:, 1], min=0, max=h + 1)],
-        dim=1)
+        [torch.clamp(trans_pos_ceil[:, 0], min=0, max=w + 1), torch.clamp(trans_pos_ceil[:, 1], min=0, max=h + 1)],
+        dim=1,
+    )
 
     # Bilinear weights
-    prox_weight_nw = (1 - (trans_pos_offset[:, 1:2] - trans_pos_floor[:, 1:2])) * \
-                     (1 - (trans_pos_offset[:, 0:1] - trans_pos_floor[:, 0:1]))
-    prox_weight_sw = (1 - (trans_pos_ceil[:, 1:2] - trans_pos_offset[:, 1:2])) * \
-                     (1 - (trans_pos_offset[:, 0:1] - trans_pos_floor[:, 0:1]))
-    prox_weight_ne = (1 - (trans_pos_offset[:, 1:2] - trans_pos_floor[:, 1:2])) * \
-                     (1 - (trans_pos_ceil[:, 0:1] - trans_pos_offset[:, 0:1]))
-    prox_weight_se = (1 - (trans_pos_ceil[:, 1:2] - trans_pos_offset[:, 1:2])) * \
-                     (1 - (trans_pos_ceil[:, 0:1] - trans_pos_offset[:, 0:1]))
+    prox_weight_nw = (1 - (trans_pos_offset[:, 1:2] - trans_pos_floor[:, 1:2])) * (
+        1 - (trans_pos_offset[:, 0:1] - trans_pos_floor[:, 0:1])
+    )
+    prox_weight_sw = (1 - (trans_pos_ceil[:, 1:2] - trans_pos_offset[:, 1:2])) * (
+        1 - (trans_pos_offset[:, 0:1] - trans_pos_floor[:, 0:1])
+    )
+    prox_weight_ne = (1 - (trans_pos_offset[:, 1:2] - trans_pos_floor[:, 1:2])) * (
+        1 - (trans_pos_ceil[:, 0:1] - trans_pos_offset[:, 0:1])
+    )
+    prox_weight_se = (1 - (trans_pos_ceil[:, 1:2] - trans_pos_offset[:, 1:2])) * (
+        1 - (trans_pos_ceil[:, 0:1] - trans_pos_offset[:, 0:1])
+    )
 
     # Depth weighting for occlusion handling
     clamped_depth1 = torch.clamp(depth1, min=0)
@@ -219,18 +223,18 @@ def bilinear_splatting(
     frame1_cl = torch.moveaxis(frame1, [0, 1, 2, 3], [0, 3, 1, 2])
     batch_indices = torch.arange(b, device=device, dtype=torch.long)[:, None, None]
 
-    warped_frame.index_put_((batch_indices, trans_pos_floor[:, 1], trans_pos_floor[:, 0]),
-                            frame1_cl * weight_nw,
-                            accumulate=True)
-    warped_frame.index_put_((batch_indices, trans_pos_ceil[:, 1], trans_pos_floor[:, 0]),
-                            frame1_cl * weight_sw,
-                            accumulate=True)
-    warped_frame.index_put_((batch_indices, trans_pos_floor[:, 1], trans_pos_ceil[:, 0]),
-                            frame1_cl * weight_ne,
-                            accumulate=True)
-    warped_frame.index_put_((batch_indices, trans_pos_ceil[:, 1], trans_pos_ceil[:, 0]),
-                            frame1_cl * weight_se,
-                            accumulate=True)
+    warped_frame.index_put_(
+        (batch_indices, trans_pos_floor[:, 1], trans_pos_floor[:, 0]), frame1_cl * weight_nw, accumulate=True
+    )
+    warped_frame.index_put_(
+        (batch_indices, trans_pos_ceil[:, 1], trans_pos_floor[:, 0]), frame1_cl * weight_sw, accumulate=True
+    )
+    warped_frame.index_put_(
+        (batch_indices, trans_pos_floor[:, 1], trans_pos_ceil[:, 0]), frame1_cl * weight_ne, accumulate=True
+    )
+    warped_frame.index_put_(
+        (batch_indices, trans_pos_ceil[:, 1], trans_pos_ceil[:, 0]), frame1_cl * weight_se, accumulate=True
+    )
 
     warped_weights.index_put_((batch_indices, trans_pos_floor[:, 1], trans_pos_floor[:, 0]), weight_nw, accumulate=True)
     warped_weights.index_put_((batch_indices, trans_pos_ceil[:, 1], trans_pos_floor[:, 0]), weight_sw, accumulate=True)
@@ -270,7 +274,7 @@ def forward_warp(
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None, torch.Tensor]:
     """
     Forward warp frame1 to a new view defined by transformation2.
-    
+
     Args:
         frame1: (b, c, h, w) source frame in range [-1, 1] for images
         mask1: (b, 1, h, w) valid pixel mask
@@ -283,7 +287,7 @@ def forward_warp(
         is_depth: If True, depth1 is z-depth; if False, it's distance
         render_depth: If True, also return the warped depth map
         world_points1: (b, h, w, 3) pre-computed world points (alternative to depth1)
-        
+
     Returns:
         warped_frame2: (b, c, h, w) warped frame
         mask2: (b, 1, h, w) validity mask
@@ -342,13 +346,13 @@ def reliable_depth_mask_range_batch(
 ) -> torch.Tensor:
     """
     Compute a mask for reliable depth values based on local variation.
-    
+
     Args:
         depth: (b, h, w) or (b, 1, h, w) depth map
         window_size: Size of the local window (must be odd)
         ratio_thresh: Threshold for depth variation ratio
         eps: Small epsilon for numerical stability
-        
+
     Returns:
         reliable_mask: Boolean mask where True indicates reliable depth
     """
@@ -374,7 +378,7 @@ def reliable_depth_mask_range_batch(
 class Cache3DBase:
     """
     Base class for 3D cache management.
-    
+
     The cache maintains:
     - input_image: RGB images stored in the cache
     - input_points: 3D world coordinates for each pixel
@@ -397,7 +401,7 @@ class Cache3DBase:
     ):
         """
         Initialize the 3D cache.
-        
+
         Args:
             input_image: Input image tensor with varying dimensions
             input_depth: Depth map tensor
@@ -468,20 +472,25 @@ class Cache3DBase:
             if weight_dtype == torch.float16:
                 input_depth = torch.clamp(input_depth, max=70)
 
-            self.input_points = (unproject_points(
-                input_depth.reshape(-1, 1, H, W),
-                input_w2c.reshape(-1, 4, 4),
-                input_intrinsics.reshape(-1, 3, 3),
-                is_depth=self.is_depth,
-            ).to(weight_dtype).reshape(B, F, N, V, H, W, 3).to("cpu"))
+            self.input_points = (
+                unproject_points(
+                    input_depth.reshape(-1, 1, H, W),
+                    input_w2c.reshape(-1, 4, 4),
+                    input_intrinsics.reshape(-1, 3, 3),
+                    is_depth=self.is_depth,
+                )
+                .to(weight_dtype)
+                .reshape(B, F, N, V, H, W, 3)
+                .to("cpu")
+            )
             self.input_depth = input_depth
 
         # Filter unreliable depth
         if self.filter_points_threshold < 1.0 and input_depth is not None:
             input_depth = input_depth.reshape(-1, 1, H, W)
-            depth_mask = reliable_depth_mask_range_batch(input_depth,
-                                                         ratio_thresh=self.filter_points_threshold).reshape(
-                                                             B, F, N, V, 1, H, W)
+            depth_mask = reliable_depth_mask_range_batch(
+                input_depth, ratio_thresh=self.filter_points_threshold
+            ).reshape(B, F, N, V, 1, H, W)
             if self.input_mask is None:
                 self.input_mask = depth_mask.to("cpu")
             else:
@@ -504,13 +513,13 @@ class Cache3DBase:
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Render the cached 3D points from new camera viewpoints.
-        
+
         Args:
             target_w2cs: (b, F_target, 4, 4) target camera transformations
             target_intrinsics: (b, F_target, 3, 3) target camera intrinsics
             render_depth: If True, return depth instead of RGB
             start_frame_idx: Starting frame index in the cache
-            
+
         Returns:
             pixels: (b, F_target, N, c, h, w) rendered images or depth
             masks: (b, F_target, N, 1, h, w) validity masks
@@ -520,19 +529,27 @@ class Cache3DBase:
         assert bs == B
 
         target_w2cs = target_w2cs.reshape(B, F_target, 1, 4, 4).expand(B, F_target, N, 4, 4).reshape(-1, 4, 4)
-        target_intrinsics = target_intrinsics.reshape(B, F_target, 1, 3, 3).expand(B, F_target, N, 3,
-                                                                                   3).reshape(-1, 3, 3)
+        target_intrinsics = (
+            target_intrinsics.reshape(B, F_target, 1, 3, 3).expand(B, F_target, N, 3, 3).reshape(-1, 3, 3)
+        )
 
         # Prepare inputs
         first_images = rearrange(
-            self.input_image[:, start_frame_idx:start_frame_idx + F_target].expand(B, F_target, N, V, C, H, W),
-            "B F N V C H W -> (B F N) V C H W")
+            self.input_image[:, start_frame_idx : start_frame_idx + F_target].expand(B, F_target, N, V, C, H, W),
+            "B F N V C H W -> (B F N) V C H W",
+        )
         first_points = rearrange(
-            self.input_points[:, start_frame_idx:start_frame_idx + F_target].expand(B, F_target, N, V, H, W, 3),
-            "B F N V H W C -> (B F N) V H W C")
-        first_masks = rearrange(
-            self.input_mask[:, start_frame_idx:start_frame_idx + F_target].expand(B, F_target, N, V, 1, H, W),
-            "B F N V C H W -> (B F N) V C H W") if self.input_mask is not None else None
+            self.input_points[:, start_frame_idx : start_frame_idx + F_target].expand(B, F_target, N, V, H, W, 3),
+            "B F N V H W C -> (B F N) V H W C",
+        )
+        first_masks = (
+            rearrange(
+                self.input_mask[:, start_frame_idx : start_frame_idx + F_target].expand(B, F_target, N, V, 1, H, W),
+                "B F N V C H W -> (B F N) V C H W",
+            )
+            if self.input_mask is not None
+            else None
+        )
 
         # Process in chunks for memory efficiency
         if first_images.shape[1] == 1:
@@ -547,10 +564,13 @@ class Cache3DBase:
 
             for i in range(0, first_images.shape[0], warp_chunk_size):
                 with torch.no_grad():
-                    imgs_chunk = first_images[i:i + warp_chunk_size].to(self.device, non_blocking=True)
-                    pts_chunk = first_points[i:i + warp_chunk_size].to(self.device, non_blocking=True)
-                    masks_chunk = (first_masks[i:i + warp_chunk_size].to(self.device, non_blocking=True)
-                                   if first_masks is not None else None)
+                    imgs_chunk = first_images[i : i + warp_chunk_size].to(self.device, non_blocking=True)
+                    pts_chunk = first_points[i : i + warp_chunk_size].to(self.device, non_blocking=True)
+                    masks_chunk = (
+                        first_masks[i : i + warp_chunk_size].to(self.device, non_blocking=True)
+                        if first_masks is not None
+                        else None
+                    )
 
                     (
                         rendered_warp_images_chunk,
@@ -562,9 +582,9 @@ class Cache3DBase:
                         mask1=masks_chunk,
                         depth1=None,
                         transformation1=None,
-                        transformation2=target_w2cs[i:i + warp_chunk_size],
-                        intrinsic1=target_intrinsics[i:i + warp_chunk_size],
-                        intrinsic2=target_intrinsics[i:i + warp_chunk_size],
+                        transformation2=target_w2cs[i : i + warp_chunk_size],
+                        intrinsic1=target_intrinsics[i : i + warp_chunk_size],
+                        intrinsic2=target_intrinsics[i : i + warp_chunk_size],
                         render_depth=render_depth,
                         world_points1=pts_chunk,
                     )
@@ -596,7 +616,7 @@ class Cache3DBase:
 class Cache3DBuffer(Cache3DBase):
     """
     3D cache with frame buffer support.
-    
+
     This class manages multiple frame buffers for temporal consistency
     and supports noise augmentation for training stability.
     """
@@ -610,7 +630,7 @@ class Cache3DBuffer(Cache3DBase):
     ):
         """
         Initialize the buffered 3D cache.
-        
+
         Args:
             frame_buffer_max: Maximum number of frames to buffer
             noise_aug_strength: Strength of noise augmentation per buffer
@@ -632,7 +652,7 @@ class Cache3DBuffer(Cache3DBase):
     ):
         """
         Update the cache with a new frame.
-        
+
         Args:
             new_image: (B, C, H, W) new RGB image
             new_depth: (B, 1, H, W) new depth map
@@ -657,8 +677,9 @@ class Cache3DBuffer(Cache3DBase):
 
         if self.filter_points_threshold < 1.0:
             new_depth = new_depth.reshape(-1, 1, H, W)
-            depth_mask = reliable_depth_mask_range_batch(new_depth,
-                                                         ratio_thresh=self.filter_points_threshold).reshape(B, 1, H, W)
+            depth_mask = reliable_depth_mask_range_batch(new_depth, ratio_thresh=self.filter_points_threshold).reshape(
+                B, 1, H, W
+            )
             new_mask = depth_mask.to("cpu") if new_mask is None else new_mask * depth_mask.to(new_mask.device)
         if new_mask is not None:
             new_mask = new_mask.cpu()
@@ -688,13 +709,13 @@ class Cache3DBuffer(Cache3DBase):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Render the cache with optional noise augmentation.
-        
+
         Args:
             target_w2cs: (b, F_target, 4, 4) target camera transformations
             target_intrinsics: (b, F_target, 3, 3) target camera intrinsics
             render_depth: If True, return depth instead of RGB
             start_frame_idx: Starting frame index (must be 0 for this class)
-            
+
         Returns:
             pixels: (b, F_target, N, c, h, w) rendered images
             masks: (b, F_target, N, 1, h, w) validity masks
@@ -713,8 +734,9 @@ class Cache3DBuffer(Cache3DBase):
         # Apply noise augmentation (stronger for older buffers)
         if not render_depth and self.noise_aug_strength > 0:
             noise = torch.randn(pixels.shape, generator=self.generator, device=pixels.device, dtype=pixels.dtype)
-            per_buffer_noise = (torch.arange(start=pixels.shape[2] - 1, end=-1, step=-1, device=pixels.device) *
-                                self.noise_aug_strength)
+            per_buffer_noise = (
+                torch.arange(start=pixels.shape[2] - 1, end=-1, step=-1, device=pixels.device) * self.noise_aug_strength
+            )
             pixels = pixels + noise * per_buffer_noise.reshape(1, 1, -1, 1, 1, 1)
 
         return pixels, masks

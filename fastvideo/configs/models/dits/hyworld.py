@@ -31,40 +31,29 @@ class HYWorldArchConfig(DiTArchConfig):
             r"^txt_in\.c_embedder\.linear_2\.(.*)$": r"txt_in.c_embedder.fc_out.\1",
             r"^txt_in\.individual_token_refiner\.blocks\.(\d+)\.norm1\.(.*)$": r"txt_in.refiner_blocks.\1.norm1.\2",
             r"^txt_in\.individual_token_refiner\.blocks\.(\d+)\.norm2\.(.*)$": r"txt_in.refiner_blocks.\1.norm2.\2",
-            r"^txt_in\.individual_token_refiner\.blocks\.(\d+)\.self_attn_qkv\.(.*)$":
-            r"txt_in.refiner_blocks.\1.self_attn_qkv.\2",
-            r"^txt_in\.individual_token_refiner\.blocks\.(\d+)\.self_attn_proj\.(.*)$":
-            r"txt_in.refiner_blocks.\1.self_attn_proj.\2",
-            r"^txt_in\.individual_token_refiner\.blocks\.(\d+)\.mlp\.fc1\.(.*)$":
-            r"txt_in.refiner_blocks.\1.mlp.fc_in.\2",
-            r"^txt_in\.individual_token_refiner\.blocks\.(\d+)\.mlp\.fc2\.(.*)$":
-            r"txt_in.refiner_blocks.\1.mlp.fc_out.\2",
-            r"^txt_in\.individual_token_refiner\.blocks\.(\d+)\.adaLN_modulation\.1\.(.*)$":
-            r"txt_in.refiner_blocks.\1.adaLN_modulation.linear.\2",
-
+            r"^txt_in\.individual_token_refiner\.blocks\.(\d+)\.self_attn_qkv\.(.*)$": r"txt_in.refiner_blocks.\1.self_attn_qkv.\2",
+            r"^txt_in\.individual_token_refiner\.blocks\.(\d+)\.self_attn_proj\.(.*)$": r"txt_in.refiner_blocks.\1.self_attn_proj.\2",
+            r"^txt_in\.individual_token_refiner\.blocks\.(\d+)\.mlp\.fc1\.(.*)$": r"txt_in.refiner_blocks.\1.mlp.fc_in.\2",
+            r"^txt_in\.individual_token_refiner\.blocks\.(\d+)\.mlp\.fc2\.(.*)$": r"txt_in.refiner_blocks.\1.mlp.fc_out.\2",
+            r"^txt_in\.individual_token_refiner\.blocks\.(\d+)\.adaLN_modulation\.1\.(.*)$": r"txt_in.refiner_blocks.\1.adaLN_modulation.linear.\2",
             # 2. time_in mappings:
             r"^time_in\.mlp\.0\.(.*)$": r"time_in.timestep_embedder.mlp.fc_in.\1",
             r"^time_in\.mlp\.2\.(.*)$": r"time_in.timestep_embedder.mlp.fc_out.\1",
-
             # 3. action_in mappings:
             r"^action_in\.mlp\.0\.(.*)$": r"action_in.mlp.fc_in.\1",
             r"^action_in\.mlp\.2\.(.*)$": r"action_in.mlp.fc_out.\1",
-
             # 4. byt5_in -> txt_in_2 mappings:
             r"^byt5_in\.layernorm\.(.*)$": r"txt_in_2.norm.\1",
             r"^byt5_in\.fc1\.(.*)$": r"txt_in_2.linear_1.\1",
             r"^byt5_in\.fc2\.(.*)$": r"txt_in_2.linear_2.\1",
             r"^byt5_in\.fc3\.(.*)$": r"txt_in_2.linear_3.\1",
-
             # 5. cond_type_embedding -> cond_type_embed:
             r"^cond_type_embedding\.(.*)$": r"cond_type_embed.\1",
-
             # 6. vision_in -> image_embedder mappings:
             r"^vision_in\.proj\.0\.(.*)$": r"image_embedder.norm_in.\1",
             r"^vision_in\.proj\.1\.(.*)$": r"image_embedder.linear_1.\1",
             r"^vision_in\.proj\.3\.(.*)$": r"image_embedder.linear_2.\1",
             r"^vision_in\.proj\.4\.(.*)$": r"image_embedder.norm_out.\1",
-
             # 7. double_blocks mapping:
             r"^double_blocks\.(\d+)\.img_attn_q\.(.*)$": (r"double_blocks.\1.img_attn_qkv.\2", 0, 3),
             r"^double_blocks\.(\d+)\.img_attn_k\.(.*)$": (r"double_blocks.\1.img_attn_qkv.\2", 1, 3),
@@ -76,10 +65,10 @@ class HYWorldArchConfig(DiTArchConfig):
             r"^double_blocks\.(\d+)\.img_mlp\.fc2\.(.*)$": r"double_blocks.\1.img_mlp.fc_out.\2",
             r"^double_blocks\.(\d+)\.txt_mlp\.fc1\.(.*)$": r"double_blocks.\1.txt_mlp.fc_in.\2",
             r"^double_blocks\.(\d+)\.txt_mlp\.fc2\.(.*)$": r"double_blocks.\1.txt_mlp.fc_out.\2",
-
             # 8. Final layer mapping:
             r"^final_layer\.adaLN_modulation\.1\.(.*)$": r"final_layer.adaLN_modulation.linear.\1",
-        })
+        }
+    )
 
     # Reverse mapping for saving checkpoints: custom -> hf
     reverse_param_names_mapping: dict = field(default_factory=lambda: {})
@@ -150,7 +139,7 @@ class HYWorldArchConfig(DiTArchConfig):
             self.patch_size_t: int = self.patch_size[0]
             # assume square patch size for height and width
             patch_size_hw: int = self.patch_size[1]
-            object.__setattr__(self, 'patch_size', patch_size_hw)
+            object.__setattr__(self, "patch_size", patch_size_hw)
         else:
             self.patch_size_t = 1
 

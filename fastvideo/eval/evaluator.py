@@ -13,13 +13,14 @@ point: pass kwargs for one sample, or pass a list of sample dicts to
 fan-out across GPU replicas with pipelined decoding — same method,
 return type follows the input shape.
 """
+
 from __future__ import annotations
 
 import threading
 from collections.abc import Iterable
 from typing import Any
 
-from fastvideo.eval.registry import (list_metrics, missing_dependencies, resolve_group)
+from fastvideo.eval.registry import list_metrics, missing_dependencies, resolve_group
 from fastvideo.eval.types import EvalResults, MetricResult
 from fastvideo.eval.worker import EvalWorker
 from fastvideo.logger import init_logger
@@ -80,11 +81,10 @@ class Evaluator:
         names = _resolve_metric_names(metrics, skip_missing_deps=skip_missing_deps)
         if num_gpus > 1:
             self._workers = [
-                EvalWorker(names,
-                           f"cuda:{i}",
-                           compile=compile,
-                           pre_upload=pre_upload,
-                           skip_missing_deps=skip_missing_deps) for i in range(num_gpus)
+                EvalWorker(
+                    names, f"cuda:{i}", compile=compile, pre_upload=pre_upload, skip_missing_deps=skip_missing_deps
+                )
+                for i in range(num_gpus)
             ]
         else:
             self._workers = [
@@ -151,8 +151,10 @@ class Evaluator:
         if metrics is not None:
             unknown = [m for m in metrics if m not in self.metric_names]
             if unknown:
-                raise ValueError(f"metrics filter contains names not registered on this Evaluator: "
-                                 f"{unknown}; registered: {self.metric_names}")
+                raise ValueError(
+                    f"metrics filter contains names not registered on this Evaluator: "
+                    f"{unknown}; registered: {self.metric_names}"
+                )
 
         single = samples is None
         sample_list: list[dict] = [kwargs] if samples is None else list(samples)
@@ -161,14 +163,16 @@ class Evaluator:
 
         if single:
             set_names = self._workers[0].set_metrics().keys()
-            active_set = (set_names if metrics is None else (set_names & set(metrics)))
+            active_set = set_names if metrics is None else (set_names & set(metrics))
             if active_set:
                 # Set metrics need a population. A single sample can't produce a
                 # meaningful corpus result, and silently discarding it (return
                 # ``per_sample[0]`` only) hides the no-op. Force the list form.
-                raise ValueError("Set-vs-set metrics require samples=[...] with >=2 entries; "
-                                 "the kwargs form (single sample) cannot produce a corpus "
-                                 f"result. Active set metrics: {sorted(active_set)}")
+                raise ValueError(
+                    "Set-vs-set metrics require samples=[...] with >=2 entries; "
+                    "the kwargs form (single sample) cannot produce a corpus "
+                    f"result. Active set metrics: {sorted(active_set)}"
+                )
 
         per_sample, corpus = self._run(sample_list, metric_filter=metrics)
 
@@ -217,9 +221,9 @@ class Evaluator:
                 errors: list[BaseException] = []
                 threads: list[threading.Thread] = []
                 for w in self._workers:
-                    t = threading.Thread(target=self._consumer_loop,
-                                         args=(w, pool, per_sample, errors, metric_filter),
-                                         daemon=True)
+                    t = threading.Thread(
+                        target=self._consumer_loop, args=(w, pool, per_sample, errors, metric_filter), daemon=True
+                    )
                     t.start()
                     threads.append(t)
                 for t in threads:
@@ -285,11 +289,9 @@ def create_evaluator(
     *,
     skip_missing_deps: bool = False,
 ) -> Evaluator:
-    return Evaluator(metrics=metrics,
-                     device=device,
-                     num_gpus=num_gpus,
-                     compile=compile,
-                     skip_missing_deps=skip_missing_deps)
+    return Evaluator(
+        metrics=metrics, device=device, num_gpus=num_gpus, compile=compile, skip_missing_deps=skip_missing_deps
+    )
 
 
 def _resolve_metric_names(metrics: list[str] | str, *, skip_missing_deps: bool = False) -> list[str]:

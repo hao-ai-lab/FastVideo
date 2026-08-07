@@ -83,9 +83,11 @@ def build_ref2va_presentation(
         return ids, [MINIMAX_H3_TEXT_TAG] * len(ids)
 
     def vision(pad_token: str, count: int) -> tuple[list[int], list[int]]:
-        ids = ([int(tokenizer.convert_tokens_to_ids(MINIMAX_H3_VISION_START_TOKEN))] +
-               [int(tokenizer.convert_tokens_to_ids(pad_token))] * count +
-               [int(tokenizer.convert_tokens_to_ids(MINIMAX_H3_VISION_END_TOKEN))])
+        ids = (
+            [int(tokenizer.convert_tokens_to_ids(MINIMAX_H3_VISION_START_TOKEN))]
+            + [int(tokenizer.convert_tokens_to_ids(pad_token))] * count
+            + [int(tokenizer.convert_tokens_to_ids(MINIMAX_H3_VISION_END_TOKEN))]
+        )
         return ids, [MINIMAX_H3_VIDEO_TAG] * len(ids)
 
     token_ids: list[int] = []
@@ -170,8 +172,10 @@ class MiniMaxH3ConditioningStage(PipelineStage):
             arch = getattr(config, "arch_config", config)
             num_hidden_layers = getattr(arch, "num_hidden_layers", None)
         if num_hidden_layers is None or num_hidden_layers <= hidden_state_index:
-            raise ValueError(f"MiniMax H3 requires more than {hidden_state_index} Qwen3-VL decoder layers to read "
-                             f"`hidden_states[{hidden_state_index}]`, got {num_hidden_layers}.")
+            raise ValueError(
+                f"MiniMax H3 requires more than {hidden_state_index} Qwen3-VL decoder layers to read "
+                f"`hidden_states[{hidden_state_index}]`, got {num_hidden_layers}."
+            )
 
         input_ids = torch.tensor([token_ids], dtype=torch.long, device=device)
         mm_token_type_ids = torch.as_tensor(
@@ -187,8 +191,9 @@ class MiniMaxH3ConditioningStage(PipelineStage):
             use_cache=False,
             output_hidden_states=True,
             **{
-                name:
-                None if value is None else value.to(
+                name: None
+                if value is None
+                else value.to(
                     device=device,
                     dtype=dtype if name in {"pixel_values", "pixel_values_videos"} else None,
                 )
@@ -217,7 +222,7 @@ class MiniMaxH3ConditioningStage(PipelineStage):
             vision_inputs = self.processor.image_processor(images=images, return_tensors="pt")
             pixel_values = vision_inputs["pixel_values"]
             image_grid_thw = vision_inputs["image_grid_thw"]
-            merge_area = int(self.processor.image_processor.merge_size)**2
+            merge_area = int(self.processor.image_processor.merge_size) ** 2
             vision_start_id = int(self.tokenizer.convert_tokens_to_ids(MINIMAX_H3_VISION_START_TOKEN))
             image_pad_id = int(self.tokenizer.convert_tokens_to_ids(MINIMAX_H3_IMAGE_PAD_TOKEN))
             vision_end_id = int(self.tokenizer.convert_tokens_to_ids(MINIMAX_H3_VISION_END_TOKEN))
@@ -248,7 +253,7 @@ class MiniMaxH3ConditioningStage(PipelineStage):
         if not references or not all(isinstance(item, MiniMaxH3PreparedReference) for item in references):
             raise TypeError("MiniMax-H3 Ref2VA conditioning requires prepared references.")
 
-        merge_area = int(self.processor.image_processor.merge_size)**2
+        merge_area = int(self.processor.image_processor.merge_size) ** 2
         pixel_values = None
         image_grid_thw = None
         image_token_counts: list[int] = []
@@ -281,8 +286,10 @@ class MiniMaxH3ConditioningStage(PipelineStage):
             video_block_token_counts = [int(grid[1]) * int(grid[2]) // merge_area for grid in video_grid_thw]
             for reference, grid in zip(videos, video_grid_thw, strict=True):
                 if int(grid[0]) != len(reference.block_timestamps):
-                    raise ValueError(f"Qwen3-VL produced {int(grid[0])} blocks for a reference video, but "
-                                     f"MiniMax-H3 labels {len(reference.block_timestamps)}.")
+                    raise ValueError(
+                        f"Qwen3-VL produced {int(grid[0])} blocks for a reference video, but "
+                        f"MiniMax-H3 labels {len(reference.block_timestamps)}."
+                    )
 
         token_ids, token_tags = build_ref2va_presentation(
             self.tokenizer,
@@ -305,8 +312,9 @@ class MiniMaxH3ConditioningStage(PipelineStage):
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         device = get_local_torch_device()
         first_param = next(self.conditioner.parameters(), None)
-        moved_for_forward = (fastvideo_args.text_encoder_cpu_offload and first_param is not None
-                             and not isinstance(first_param, DTensor))
+        moved_for_forward = (
+            fastvideo_args.text_encoder_cpu_offload and first_param is not None and not isinstance(first_param, DTensor)
+        )
         if moved_for_forward:
             self.conditioner.to(device)
         try:

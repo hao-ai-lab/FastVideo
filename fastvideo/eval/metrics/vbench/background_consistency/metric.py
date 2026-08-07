@@ -33,7 +33,6 @@ def _clip_transform(frames: torch.Tensor) -> torch.Tensor:
 
 @register("vbench.background_consistency")
 class BackgroundConsistencyMetric(BaseMetric):
-
     name = "vbench.background_consistency"
     requires_reference = False
     higher_is_better = True
@@ -56,6 +55,7 @@ class BackgroundConsistencyMetric(BaseMetric):
             return
         import clip
         from fastvideo.eval.models import get_cache_dir
+
         model, _ = clip.load(
             "ViT-B/32",
             device=self.device,
@@ -72,7 +72,7 @@ class BackgroundConsistencyMetric(BaseMetric):
         chunk = self._chunk_size or 64
         feats = []
         for i in range(0, frames.shape[0], chunk):
-            f = self._model.encode_image(frames[i:i + chunk]).float()
+            f = self._model.encode_image(frames[i : i + chunk]).float()
             f = F.normalize(f, dim=-1, p=2)
             feats.append(f)
         all_feats = torch.cat(feats, dim=0)  # (T, D)

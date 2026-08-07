@@ -32,6 +32,7 @@ Usage::
 This benchmark is the source of truth for the pipeline timing breakdown used
 when investigating inter-segment buffer drain.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -52,11 +53,18 @@ import torch  # noqa: E402
 
 from fastvideo import VideoGenerator  # noqa: E402
 from fastvideo.api import (  # noqa: E402
-    ComponentConfig, CompileConfig, EngineConfig, GeneratorConfig, OffloadConfig, PipelineSelection, QuantizationConfig,
+    ComponentConfig,
+    CompileConfig,
+    EngineConfig,
+    GeneratorConfig,
+    OffloadConfig,
+    PipelineSelection,
+    QuantizationConfig,
 )
 
-DEFAULT_PROMPT = ("A cinematic drone shot over coastal cliffs at sunrise, golden "
-                  "light, gentle ocean waves, ultra detailed")
+DEFAULT_PROMPT = (
+    "A cinematic drone shot over coastal cliffs at sunrise, golden light, gentle ocean waves, ultra detailed"
+)
 DEFAULT_MODEL = "FastVideo/LTX2-Distilled-Diffusers"
 
 
@@ -104,12 +112,14 @@ def _build_generator_config(model_path: str, enable_compile: bool, num_gpus: int
         engine=EngineConfig(
             num_gpus=num_gpus,
             offload=OffloadConfig(dit=False, dit_layerwise=False, text_encoder=False, vae=False, pin_cpu_memory=True),
-            compile=CompileConfig(enabled=enable_compile,
-                                  text_encoder_enabled=enable_compile,
-                                  backend="inductor",
-                                  fullgraph=True,
-                                  mode="max-autotune-no-cudagraphs",
-                                  dynamic=False),
+            compile=CompileConfig(
+                enabled=enable_compile,
+                text_encoder_enabled=enable_compile,
+                backend="inductor",
+                fullgraph=True,
+                mode="max-autotune-no-cudagraphs",
+                dynamic=False,
+            ),
             use_fsdp_inference=False,
             quantization=QuantizationConfig(transformer_quant="NVFP4"),
         ),
@@ -157,8 +167,16 @@ def _reset_peak_gpu() -> None:
             torch.cuda.reset_peak_memory_stats()
 
 
-def _do_one_run(generator: VideoGenerator, prompt: str, *, height: int, width: int, num_frames: int, seed: int,
-                num_inference_steps: int) -> RunResult:
+def _do_one_run(
+    generator: VideoGenerator,
+    prompt: str,
+    *,
+    height: int,
+    width: int,
+    num_frames: int,
+    seed: int,
+    num_inference_steps: int,
+) -> RunResult:
     _reset_peak_gpu()
     t0 = time.perf_counter()
     try:
@@ -178,10 +196,12 @@ def _do_one_run(generator: VideoGenerator, prompt: str, *, height: int, width: i
         if torch.cuda.is_available():
             torch.cuda.synchronize()
     except Exception as exc:
-        return RunResult(wall_ms=(time.perf_counter() - t0) * 1000.0,
-                         stage_times_ms=OrderedDict(),
-                         peak_gpu_mb=0.0,
-                         error=f"{type(exc).__name__}: {exc}")
+        return RunResult(
+            wall_ms=(time.perf_counter() - t0) * 1000.0,
+            stage_times_ms=OrderedDict(),
+            peak_gpu_mb=0.0,
+            error=f"{type(exc).__name__}: {exc}",
+        )
     wall_ms = (time.perf_counter() - t0) * 1000.0
     return RunResult(
         wall_ms=wall_ms,
@@ -190,63 +210,77 @@ def _do_one_run(generator: VideoGenerator, prompt: str, *, height: int, width: i
     )
 
 
-def benchmark_scenario(scenario: ScenarioConfig, model_path: str, num_gpus: int, prompt: str, num_runs: int,
-                       num_frames: int, height: int, width: int, num_inference_steps: int, seed: int) -> ScenarioResult:
+def benchmark_scenario(
+    scenario: ScenarioConfig,
+    model_path: str,
+    num_gpus: int,
+    prompt: str,
+    num_runs: int,
+    num_frames: int,
+    height: int,
+    width: int,
+    num_inference_steps: int,
+    seed: int,
+) -> ScenarioResult:
     print()
-    print(f"=== scenario: {scenario.name} "
-          f"(compile={scenario.enable_compile} warmup={scenario.do_warmup}) ===")
+    print(f"=== scenario: {scenario.name} (compile={scenario.enable_compile} warmup={scenario.do_warmup}) ===")
 
     config = _build_generator_config(model_path, scenario.enable_compile, num_gpus)
     generator = VideoGenerator.from_config(config)
 
     if scenario.do_warmup:
-        print(f"[{scenario.name}] warmup: 2 generate calls "
-              "(triggers compile + first-shape graphs)")
+        print(f"[{scenario.name}] warmup: 2 generate calls (triggers compile + first-shape graphs)")
         for warmup_idx in range(2):
             t0 = time.perf_counter()
-            _do_one_run(generator,
-                        prompt,
-                        height=height,
-                        width=width,
-                        num_frames=num_frames,
-                        seed=seed + 100 + warmup_idx,
-                        num_inference_steps=num_inference_steps)
-            print(f"[{scenario.name}] warmup {warmup_idx + 1}: "
-                  f"{(time.perf_counter() - t0) * 1000:.0f}ms")
+            _do_one_run(
+                generator,
+                prompt,
+                height=height,
+                width=width,
+                num_frames=num_frames,
+                seed=seed + 100 + warmup_idx,
+                num_inference_steps=num_inference_steps,
+            )
+            print(f"[{scenario.name}] warmup {warmup_idx + 1}: {(time.perf_counter() - t0) * 1000:.0f}ms")
 
     runs: list[RunResult] = []
     last_error: str | None = None
     for run_idx in range(num_runs):
-        result = _do_one_run(generator,
-                             prompt,
-                             height=height,
-                             width=width,
-                             num_frames=num_frames,
-                             seed=seed + run_idx,
-                             num_inference_steps=num_inference_steps)
+        result = _do_one_run(
+            generator,
+            prompt,
+            height=height,
+            width=width,
+            num_frames=num_frames,
+            seed=seed + run_idx,
+            num_inference_steps=num_inference_steps,
+        )
         if result.error is not None:
-            print(f"[{scenario.name}] run {run_idx + 1}: "
-                  f"ERROR {result.error}")
+            print(f"[{scenario.name}] run {run_idx + 1}: ERROR {result.error}")
             last_error = result.error
             continue
         playable_s = num_frames / 24.0
         rt = playable_s / (result.wall_ms / 1000.0)
-        print(f"[{scenario.name}] run {run_idx + 1}/{num_runs}: "
-              f"wall={result.wall_ms:.0f}ms peak={result.peak_gpu_mb:.0f}MB "
-              f"realtime={rt:.2f}x stages={len(result.stage_times_ms)}")
+        print(
+            f"[{scenario.name}] run {run_idx + 1}/{num_runs}: "
+            f"wall={result.wall_ms:.0f}ms peak={result.peak_gpu_mb:.0f}MB "
+            f"realtime={rt:.2f}x stages={len(result.stage_times_ms)}"
+        )
         runs.append(result)
 
     if not runs:
-        return ScenarioResult(name=scenario.name,
-                              enable_compile=scenario.enable_compile,
-                              do_warmup=scenario.do_warmup,
-                              runs=0,
-                              wall_ms_median=0.0,
-                              wall_ms_p95=0.0,
-                              stage_means_ms=OrderedDict(),
-                              realtime_ratio_median=0.0,
-                              peak_gpu_mb_max=0.0,
-                              error=last_error or "all runs failed")
+        return ScenarioResult(
+            name=scenario.name,
+            enable_compile=scenario.enable_compile,
+            do_warmup=scenario.do_warmup,
+            runs=0,
+            wall_ms_median=0.0,
+            wall_ms_p95=0.0,
+            stage_means_ms=OrderedDict(),
+            realtime_ratio_median=0.0,
+            peak_gpu_mb_max=0.0,
+            error=last_error or "all runs failed",
+        )
 
     walls = [r.wall_ms for r in runs]
     walls_sorted = sorted(walls)
@@ -272,26 +306,25 @@ def benchmark_scenario(scenario: ScenarioConfig, model_path: str, num_gpus: int,
 def _print_summary(results: list[ScenarioResult]) -> None:
     print()
     print("=== summary ===")
-    header = (f"{'scenario':14s} {'runs':>4s} "
-              f"{'wall_med_ms':>11s} {'wall_p95_ms':>11s} "
-              f"{'peak_mb':>8s} {'realtime':>8s}")
+    header = f"{'scenario':14s} {'runs':>4s} {'wall_med_ms':>11s} {'wall_p95_ms':>11s} {'peak_mb':>8s} {'realtime':>8s}"
     print(header)
     print("-" * len(header))
     for r in results:
         if r.error is not None:
             print(f"{r.name:14s} {r.runs:>4d} ERR: {r.error}")
             continue
-        print(f"{r.name:14s} {r.runs:>4d} "
-              f"{r.wall_ms_median:>11.0f} {r.wall_ms_p95:>11.0f} "
-              f"{r.peak_gpu_mb_max:>8.0f} {r.realtime_ratio_median:>7.2f}x")
+        print(
+            f"{r.name:14s} {r.runs:>4d} "
+            f"{r.wall_ms_median:>11.0f} {r.wall_ms_p95:>11.0f} "
+            f"{r.peak_gpu_mb_max:>8.0f} {r.realtime_ratio_median:>7.2f}x"
+        )
     for r in results:
         if r.error is not None or not r.stage_means_ms:
             continue
         print()
         print(f"=== {r.name} per-stage means (ms) ===")
         for stage, mean_ms in r.stage_means_ms.items():
-            pct = 100.0 * mean_ms / r.wall_ms_median if r.wall_ms_median > 0 \
-                else 0.0
+            pct = 100.0 * mean_ms / r.wall_ms_median if r.wall_ms_median > 0 else 0.0
             print(f"  {stage:35s} {mean_ms:>9.1f}ms  ({pct:5.1f}%)")
 
 
@@ -299,11 +332,13 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--model", default=DEFAULT_MODEL)
     p.add_argument("--prompt", default=DEFAULT_PROMPT)
-    p.add_argument("--scenarios",
-                   nargs="+",
-                   default=[s.name for s in DEFAULT_SCENARIOS],
-                   choices=[s.name for s in DEFAULT_SCENARIOS],
-                   help="which scenarios to run")
+    p.add_argument(
+        "--scenarios",
+        nargs="+",
+        default=[s.name for s in DEFAULT_SCENARIOS],
+        choices=[s.name for s in DEFAULT_SCENARIOS],
+        help="which scenarios to run",
+    )
     p.add_argument("--runs", type=int, default=3)
     p.add_argument("--num-frames", type=int, default=121)
     p.add_argument("--height", type=int, default=1088)
@@ -320,26 +355,40 @@ def main() -> int:
 
     selected = [s for s in DEFAULT_SCENARIOS if s.name in args.scenarios]
     print(f"[bench] model={args.model} num_gpus={args.num_gpus}")
-    print(f"[bench] frames={args.num_frames} {args.width}x{args.height} "
-          f"steps={args.num_inference_steps} runs/scenario={args.runs}")
+    print(
+        f"[bench] frames={args.num_frames} {args.width}x{args.height} "
+        f"steps={args.num_inference_steps} runs/scenario={args.runs}"
+    )
     print(f"[bench] scenarios={[s.name for s in selected]}")
 
     results: list[ScenarioResult] = []
     for scenario in selected:
         try:
-            result = benchmark_scenario(scenario, args.model, args.num_gpus, args.prompt, args.runs, args.num_frames,
-                                        args.height, args.width, args.num_inference_steps, args.seed)
+            result = benchmark_scenario(
+                scenario,
+                args.model,
+                args.num_gpus,
+                args.prompt,
+                args.runs,
+                args.num_frames,
+                args.height,
+                args.width,
+                args.num_inference_steps,
+                args.seed,
+            )
         except Exception as exc:
-            result = ScenarioResult(name=scenario.name,
-                                    enable_compile=scenario.enable_compile,
-                                    do_warmup=scenario.do_warmup,
-                                    runs=0,
-                                    wall_ms_median=0.0,
-                                    wall_ms_p95=0.0,
-                                    stage_means_ms=OrderedDict(),
-                                    realtime_ratio_median=0.0,
-                                    peak_gpu_mb_max=0.0,
-                                    error=f"{type(exc).__name__}: {exc}")
+            result = ScenarioResult(
+                name=scenario.name,
+                enable_compile=scenario.enable_compile,
+                do_warmup=scenario.do_warmup,
+                runs=0,
+                wall_ms_median=0.0,
+                wall_ms_p95=0.0,
+                stage_means_ms=OrderedDict(),
+                realtime_ratio_median=0.0,
+                peak_gpu_mb_max=0.0,
+                error=f"{type(exc).__name__}: {exc}",
+            )
         results.append(result)
 
     _print_summary(results)

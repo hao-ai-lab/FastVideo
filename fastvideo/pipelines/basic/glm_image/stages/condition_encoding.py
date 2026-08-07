@@ -15,7 +15,6 @@ _CONDITION_MULTIPLE_OF = 16  # vae_scale_factor (8) * DiT patch_size (2)
 
 
 class GlmImageConditionEncodingStage(PipelineStage):
-
     def __init__(self, vae, transformer) -> None:
         super().__init__()
         self.vae = vae
@@ -39,8 +38,9 @@ class GlmImageConditionEncodingStage(PipelineStage):
         src_grid = batch.extra["glm_source_image_grid_thw"][0]
         cond_h = int(src_grid[1]) * _CONDITION_MULTIPLE_OF
         cond_w = int(src_grid[2]) * _CONDITION_MULTIPLE_OF
-        cond_img = self.image_processor.preprocess(batch.pil_image, cond_h, cond_w).to(device=device,
-                                                                                       dtype=torch.float32)
+        cond_img = self.image_processor.preprocess(batch.pil_image, cond_h, cond_w).to(
+            device=device, dtype=torch.float32
+        )
         latent = self.vae.encode(cond_img).latent_dist.mode()
         # NOTE: at runtime self.vae.config is a diffusers FrozenDict with flat
         # latents_mean/latents_std fields. Access the flat fields directly.
@@ -56,8 +56,8 @@ class GlmImageConditionEncodingStage(PipelineStage):
                 hidden_states=latent,
                 encoder_hidden_states=empty_text,
                 prior_token_id=prior_ids,
-                prior_token_drop=torch.zeros((prior_ids.shape[0], ), dtype=torch.bool, device=device),
-                timestep=torch.zeros((1, ), device=device),
+                prior_token_drop=torch.zeros((prior_ids.shape[0],), dtype=torch.bool, device=device),
+                timestep=torch.zeros((1,), device=device),
                 target_size=torch.tensor([tuple(cond_img.shape[-2:])], device=device, dtype=torch.long),
                 crop_coords=torch.zeros((1, 2), device=device, dtype=torch.long),
                 kv_caches=kv_caches,

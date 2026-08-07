@@ -288,8 +288,9 @@ class LingBotVideoDenoisingStage(PipelineStage):
         do_cfg = self._uses_cfg(batch)
         negative = negative_mask = None
         if do_cfg and not batch.batch_cfg:
-            negative, negative_mask = self._negative_condition(batch, condition, condition_mask, transformer_dtype,
-                                                               device)
+            negative, negative_mask = self._negative_condition(
+                batch, condition, condition_mask, transformer_dtype, device
+            )
         trajectory: list[torch.Tensor] = []
         trajectory_timesteps: list[torch.Tensor] = []
         for timestep in batch.timesteps:
@@ -312,9 +313,9 @@ class LingBotVideoDenoisingStage(PipelineStage):
                     conditional, unconditional = prediction.chunk(2, dim=0)
                 else:
                     with torch.autocast(
-                            device_type=device.type,
-                            dtype=transformer_dtype,
-                            enabled=autocast_enabled,
+                        device_type=device.type,
+                        dtype=transformer_dtype,
+                        enabled=autocast_enabled,
                     ):
                         unconditional = self.transformer(
                             latents,

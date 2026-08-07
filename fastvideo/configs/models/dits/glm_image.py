@@ -10,7 +10,6 @@ def is_blocks(n: str, m) -> bool:
 
 @dataclass
 class GlmImageDiTArchConfig(DiTArchConfig):
-
     _fsdp_shard_conditions: list = field(default_factory=lambda: [is_blocks])
 
     hidden_size: int = 4096
@@ -35,7 +34,8 @@ class GlmImageDiTArchConfig(DiTArchConfig):
     eps: float = 1e-5
 
     exclude_lora_layers: list[str] = field(
-        default_factory=lambda: ["image_projector", "glyph_projector", "prior_token_embedding"])
+        default_factory=lambda: ["image_projector", "glyph_projector", "prior_token_embedding"]
+    )
 
     param_names_mapping: dict = field(
         default_factory=lambda: {
@@ -45,7 +45,8 @@ class GlmImageDiTArchConfig(DiTArchConfig):
             r"^prior_projector\.net\.2\.(.*)$": r"prior_projector.fc_out.\1",
             r"^transformer_blocks\.(\d+)\.ff\.net\.0\.proj\.(.*)$": r"transformer_blocks.\1.ff.fc_in.\2",
             r"^transformer_blocks\.(\d+)\.ff\.net\.2\.(.*)$": r"transformer_blocks.\1.ff.fc_out.\2",
-        })
+        }
+    )
 
     reverse_param_names_mapping: dict = field(default_factory=dict)
     lora_param_names_mapping: dict = field(default_factory=dict)

@@ -15,7 +15,6 @@ from fastvideo.eval.types import MetricResult
 
 @register("vbench.multiple_objects")
 class MultipleObjectsMetric(BaseMetric):
-
     name = "vbench.multiple_objects"
     requires_reference = False
     higher_is_better = True
@@ -30,6 +29,7 @@ class MultipleObjectsMetric(BaseMetric):
         if self._model is not None:
             return
         from fastvideo.eval.metrics.vbench._grit_helper import load_grit_model
+
         # VBench's multiple_objects uses ObjectDet head
         self._model = load_grit_model(self.device, task="ObjectDet")
 
@@ -66,8 +66,5 @@ class MultipleObjectsMetric(BaseMetric):
         return MetricResult(
             name=self.name,
             score=float(score),
-            details={
-                "matching_frames": matching,
-                "total_frames": total
-            },
+            details={"matching_frames": matching, "total_frames": total},
         )

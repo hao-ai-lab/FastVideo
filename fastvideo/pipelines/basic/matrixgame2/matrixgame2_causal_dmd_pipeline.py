@@ -6,10 +6,16 @@ import torch
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import ComposedPipelineBase, ForwardBatch, LoRAPipeline
 
-from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage, InputValidationStage, LatentPreparationStage,
-                                        TextEncodingStage, MatrixGame2ImageEncodingStage,
-                                        MatrixGame2CausalDenoisingStage)
-from fastvideo.pipelines.stages.image_encoding import (MatrixGame2ImageVAEEncodingStage)
+from fastvideo.pipelines.stages import (
+    ConditioningStage,
+    DecodingStage,
+    InputValidationStage,
+    LatentPreparationStage,
+    TextEncodingStage,
+    MatrixGame2ImageEncodingStage,
+    MatrixGame2CausalDenoisingStage,
+)
+from fastvideo.pipelines.stages.image_encoding import MatrixGame2ImageVAEEncodingStage
 
 logger = init_logger(__name__)
 
@@ -20,36 +26,48 @@ class MatrixGame2CausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
         self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())
 
-        if (self.get_module("text_encoder", None) is not None and self.get_module("tokenizer", None) is not None):
-            self.add_stage(stage_name="prompt_encoding_stage",
-                           stage=TextEncodingStage(
-                               text_encoders=[self.get_module("text_encoder")],
-                               tokenizers=[self.get_module("tokenizer")],
-                           ))
+        if self.get_module("text_encoder", None) is not None and self.get_module("tokenizer", None) is not None:
+            self.add_stage(
+                stage_name="prompt_encoding_stage",
+                stage=TextEncodingStage(
+                    text_encoders=[self.get_module("text_encoder")],
+                    tokenizers=[self.get_module("tokenizer")],
+                ),
+            )
 
-        if (self.get_module("image_encoder", None) is not None
-                and self.get_module("image_processor", None) is not None):
-            self.add_stage(stage_name="image_encoding_stage",
-                           stage=MatrixGame2ImageEncodingStage(
-                               image_encoder=self.get_module("image_encoder"),
-                               image_processor=self.get_module("image_processor"),
-                           ))
+        if self.get_module("image_encoder", None) is not None and self.get_module("image_processor", None) is not None:
+            self.add_stage(
+                stage_name="image_encoding_stage",
+                stage=MatrixGame2ImageEncodingStage(
+                    image_encoder=self.get_module("image_encoder"),
+                    image_processor=self.get_module("image_processor"),
+                ),
+            )
 
         self.add_stage(stage_name="conditioning_stage", stage=ConditioningStage())
 
-        self.add_stage(stage_name="latent_preparation_stage",
-                       stage=LatentPreparationStage(scheduler=self.get_module("scheduler"),
-                                                    transformer=self.get_module("transformer", None)))
+        self.add_stage(
+            stage_name="latent_preparation_stage",
+            stage=LatentPreparationStage(
+                scheduler=self.get_module("scheduler"), transformer=self.get_module("transformer", None)
+            ),
+        )
 
-        self.add_stage(stage_name="image_latent_preparation_stage",
-                       stage=MatrixGame2ImageVAEEncodingStage(vae=self.get_module("vae")))
+        self.add_stage(
+            stage_name="image_latent_preparation_stage",
+            stage=MatrixGame2ImageVAEEncodingStage(vae=self.get_module("vae")),
+        )
 
-        self.add_stage(stage_name="denoising_stage",
-                       stage=MatrixGame2CausalDenoisingStage(transformer=self.get_module("transformer"),
-                                                             transformer_2=self.get_module("transformer_2", None),
-                                                             scheduler=self.get_module("scheduler"),
-                                                             pipeline=self,
-                                                             vae=self.get_module("vae")))
+        self.add_stage(
+            stage_name="denoising_stage",
+            stage=MatrixGame2CausalDenoisingStage(
+                transformer=self.get_module("transformer"),
+                transformer_2=self.get_module("transformer_2", None),
+                scheduler=self.get_module("scheduler"),
+                pipeline=self,
+                vae=self.get_module("vae"),
+            ),
+        )
 
         self.add_stage(stage_name="decoding_stage", stage=DecodingStage(vae=self.get_module("vae")))
 
@@ -62,8 +80,12 @@ class MatrixGame2CausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
 
         # 1. Run Pre-processing stages
         stages_to_run = [
-            "input_validation_stage", "prompt_encoding_stage", "image_encoding_stage", "conditioning_stage",
-            "latent_preparation_stage", "image_latent_preparation_stage"
+            "input_validation_stage",
+            "prompt_encoding_stage",
+            "image_encoding_stage",
+            "conditioning_stage",
+            "latent_preparation_stage",
+            "image_latent_preparation_stage",
         ]
 
         for stage_name in stages_to_run:
@@ -91,10 +113,9 @@ class MatrixGame2CausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
             current_latents = batch.latents[:, :, start_idx:end_idx, :, :]
             args = ctx.fastvideo_args
             decoder = self._stage_name_mapping["decoding_stage"]
-            decoded_frames, self._vae_cache = decoder.streaming_decode(current_latents,
-                                                                       args,
-                                                                       cache=self._vae_cache,
-                                                                       is_first_chunk=(start_idx == 0))
+            decoded_frames, self._vae_cache = decoder.streaming_decode(
+                current_latents, args, cache=self._vae_cache, is_first_chunk=(start_idx == 0)
+            )
             batch.output = decoded_frames
         else:
             batch.output = None

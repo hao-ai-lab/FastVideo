@@ -62,9 +62,11 @@ class MiniMaxH3DenoisingStage(PipelineStage):
         if not batch.prompt_embeds or batch.latents is None or batch.audio_latents is None:
             raise ValueError("MiniMax-H3 conditioning and packed latents must precede denoising.")
 
-        full_cpu_offload = (bool(getattr(fastvideo_args, "dit_cpu_offload", False))
-                            and not bool(getattr(fastvideo_args, "dit_layerwise_offload", False))
-                            and not bool(getattr(fastvideo_args, "use_fsdp_inference", False)))
+        full_cpu_offload = (
+            bool(getattr(fastvideo_args, "dit_cpu_offload", False))
+            and not bool(getattr(fastvideo_args, "dit_layerwise_offload", False))
+            and not bool(getattr(fastvideo_args, "use_fsdp_inference", False))
+        )
         device = get_local_torch_device()
         if full_cpu_offload:
             self.transformer.to(device)
@@ -102,12 +104,16 @@ class MiniMaxH3DenoisingStage(PipelineStage):
         prompt_embeds = batch.prompt_embeds[0].to(device)
 
         controller = get_global_controller()
-        denoise_region = (controller.region("profiler_region_inference_denoising")
-                          if controller is not None else contextlib.nullcontext())
+        denoise_region = (
+            controller.region("profiler_region_inference_denoising")
+            if controller is not None
+            else contextlib.nullcontext()
+        )
         try:
             with denoise_region:
-                for index, (video_timestep, audio_timestep) in enumerate(zip(video_timesteps, audio_timesteps,
-                                                                             strict=True)):
+                for index, (video_timestep, audio_timestep) in enumerate(
+                    zip(video_timesteps, audio_timesteps, strict=True)
+                ):
                     unique_timesteps, timestep_indices = row_timestep_plan[index]
                     # Under torch.compile(mode="reduce-overhead") each denoising
                     # step must be marked, or cudagraph trees flag cross-step
@@ -115,10 +121,13 @@ class MiniMaxH3DenoisingStage(PipelineStage):
                     # CUDAGraphs that has been overwritten" (surfaces at sp=1;
                     # sp>1 is masked by collective-induced graph breaks).
                     torch.compiler.cudagraph_mark_step_begin()
-                    with trace_step(index), set_forward_context(
+                    with (
+                        trace_step(index),
+                        set_forward_context(
                             current_timestep=index,
                             attn_metadata=None,
                             forward_batch=batch,
+                        ),
                     ):
                         video_velocity, audio_velocity = self.transformer(
                             hidden_states=batch.latents[None],

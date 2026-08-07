@@ -15,7 +15,7 @@ from fastvideo.pipelines.stages.validators import VerificationResult
 class ConditioningStage(PipelineStage):
     """
     Stage for applying conditioning to the diffusion process.
-    
+
     This stage handles the application of conditioning, such as classifier-free guidance,
     to the diffusion process.
     """
@@ -28,11 +28,11 @@ class ConditioningStage(PipelineStage):
     ) -> ForwardBatch:
         """
         Apply conditioning to the diffusion process.
-        
+
         Args:
             batch: The current batch information.
             fastvideo_args: The inference arguments.
-            
+
         Returns:
             The batch with applied conditioning.
         """
@@ -56,8 +56,11 @@ class ConditioningStage(PipelineStage):
         # embeddings when CFG isn't enabled.
         if batch.do_classifier_free_guidance or batch.prompt_embeds:
             result.add_check("prompt_embeds", batch.prompt_embeds, V.list_not_empty)
-            result.add_check("negative_prompt_embeds", batch.negative_prompt_embeds,
-                             lambda x: not batch.do_classifier_free_guidance or V.list_not_empty(x))
+            result.add_check(
+                "negative_prompt_embeds",
+                batch.negative_prompt_embeds,
+                lambda x: not batch.do_classifier_free_guidance or V.list_not_empty(x),
+            )
         return result
 
     def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:

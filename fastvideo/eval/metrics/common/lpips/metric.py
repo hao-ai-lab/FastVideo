@@ -35,6 +35,7 @@ class LPIPSMetric(BaseMetric):
         if self._model is not None:
             return
         import lpips as lpips_lib
+
         self._model = lpips_lib.LPIPS(net=self.net).to(self.device)
         self._model.eval()
 
@@ -52,7 +53,7 @@ class LPIPSMetric(BaseMetric):
         all_scores = []
         with torch.no_grad():
             for i in range(0, n, chunk):
-                s = self._model(gen[i:i + chunk], ref[i:i + chunk]).squeeze()
+                s = self._model(gen[i : i + chunk], ref[i : i + chunk]).squeeze()
                 if s.dim() == 0:
                     s = s.unsqueeze(0)
                 all_scores.append(s)

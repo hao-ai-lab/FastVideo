@@ -55,7 +55,7 @@ def method_has_implemented_embedding(method_class: type[QuantizeMethodBase]) -> 
     base_embedding = inspect.getattr_static(QuantizeMethodBase, "embedding", None)
     class_embedding = inspect.getattr_static(method_class, "embedding", None)
 
-    return (class_embedding is not None and class_embedding is not base_embedding)
+    return class_embedding is not None and class_embedding is not base_embedding
 
 
 class QuantizationConfig(ABC):
@@ -102,10 +102,10 @@ class QuantizationConfig(ABC):
     @classmethod
     def override_quantization_method(cls, hf_quant_cfg, user_quant) -> QuantizationMethods | None:
         """
-           Detects if this quantization method can support a given checkpoint
-           format by overriding the user specified quantization method -- 
-           this method should only be overwritten by subclasses in exceptional 
-           circumstances
+        Detects if this quantization method can support a given checkpoint
+        format by overriding the user specified quantization method --
+        this method should only be overwritten by subclasses in exceptional
+        circumstances
         """
         return None
 
@@ -115,8 +115,7 @@ class QuantizationConfig(ABC):
         for key in keys:
             if key in config:
                 return config[key]
-        raise ValueError(f"Cannot find any of {keys} in the model's "
-                         "quantization config.")
+        raise ValueError(f"Cannot find any of {keys} in the model's quantization config.")
 
     @staticmethod
     def get_from_keys_or(config: dict[str, Any], keys: list[str], default: Any) -> Any:
@@ -129,7 +128,7 @@ class QuantizationConfig(ABC):
     @abstractmethod
     def get_quant_method(self, layer: torch.nn.Module, prefix: str) -> QuantizeMethodBase | None:
         """Get the quantize method to use for the quantized layer.
-        
+
         Args:
             layer: The layer for the quant method.
             prefix: The full name of the layer in the state dict

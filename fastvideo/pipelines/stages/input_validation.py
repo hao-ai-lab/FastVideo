@@ -12,7 +12,7 @@ from fastvideo.logger import init_logger
 from fastvideo.models.vision_utils import load_image, load_video, pil_to_numpy, numpy_to_pt, normalize, resize
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
-from fastvideo.pipelines.stages.validators import (StageValidators, VerificationResult)
+from fastvideo.pipelines.stages.validators import StageValidators, VerificationResult
 from fastvideo.utils import best_output_size
 
 logger = init_logger(__name__)
@@ -24,7 +24,7 @@ V = StageValidators
 class InputValidationStage(PipelineStage):
     """
     Stage for validating and preparing inputs for diffusion pipelines.
-    
+
     This stage validates that all required inputs are present and properly formatted
     before proceeding with the diffusion process.
     """
@@ -48,11 +48,11 @@ class InputValidationStage(PipelineStage):
     ) -> ForwardBatch:
         """
         Validate and prepare inputs.
-        
+
         Args:
             batch: The current batch information.
             fastvideo_args: The inference arguments.
-            
+
         Returns:
             The validated batch information.
         """
@@ -64,10 +64,10 @@ class InputValidationStage(PipelineStage):
             raise ValueError("Either `prompt` or `prompt_embeds` must be provided")
 
         # Ensure negative prompt is properly formatted if using classifier-free guidance
-        if (batch.do_classifier_free_guidance and batch.negative_prompt is None
-                and batch.negative_prompt_embeds is None):
-            raise ValueError("For classifier-free guidance, either `negative_prompt` or "
-                             "`negative_prompt_embeds` must be provided")
+        if batch.do_classifier_free_guidance and batch.negative_prompt is None and batch.negative_prompt_embeds is None:
+            raise ValueError(
+                "For classifier-free guidance, either `negative_prompt` or `negative_prompt_embeds` must be provided"
+            )
 
         # Validate height and width
         if batch.height is None or batch.width is None:
@@ -93,13 +93,14 @@ class InputValidationStage(PipelineStage):
             batch.pil_image = image
 
         # further processing for ti2v task
-        if (fastvideo_args.pipeline_config.ti2v_task
-                or fastvideo_args.pipeline_config.is_causal) and batch.pil_image is not None:
+        if (
+            fastvideo_args.pipeline_config.ti2v_task or fastvideo_args.pipeline_config.is_causal
+        ) and batch.pil_image is not None:
             img = batch.pil_image
             ih, iw = img.height, img.width
 
             pipeline_class_name = type(fastvideo_args.pipeline_config).__name__
-            if 'MatrixGame' in pipeline_class_name or 'MatrixCausal' in pipeline_class_name:
+            if "MatrixGame" in pipeline_class_name or "MatrixCausal" in pipeline_class_name:
                 oh, ow = batch.height, batch.width
                 img = img.resize((ow, oh), Image.LANCZOS)
             else:
@@ -144,8 +145,9 @@ class InputValidationStage(PipelineStage):
                 if frame_skip > 1:
                     pil_images = pil_images[::frame_skip]
                     effective_fps = original_fps / frame_skip
-                    logger.info("Resampled video from %.1f fps to %.1f fps (skip=%s)", original_fps, effective_fps,
-                                frame_skip)
+                    logger.info(
+                        "Resampled video from %.1f fps to %.1f fps (skip=%s)", original_fps, effective_fps, frame_skip
+                    )
 
             # Limit to target number of frames
             if target_num_frames is not None and len(pil_images) > target_num_frames:
@@ -178,8 +180,9 @@ class InputValidationStage(PipelineStage):
             if batch.keyboard_cond.dim() != 3:
                 raise ValueError(f"keyboard_cond must have 3 dimensions (B, T, K), but got {batch.keyboard_cond.dim()}")
             keyboard_dim = batch.keyboard_cond.shape[-1]
-            logger.info("Action control: keyboard_cond validated - shape %s (dim=%d)", batch.keyboard_cond.shape,
-                        keyboard_dim)
+            logger.info(
+                "Action control: keyboard_cond validated - shape %s (dim=%d)", batch.keyboard_cond.shape, keyboard_dim
+            )
 
         if batch.grid_sizes is not None:
             if not isinstance(batch.grid_sizes, list | tuple | torch.Tensor):
@@ -200,13 +203,19 @@ class InputValidationStage(PipelineStage):
         # Cosmos-Predict2.5 default seed is 0; allow non-negative seeds here.
         result.add_check("seed", batch.seed, [V.not_none, V.non_negative_int])
         result.add_check("num_videos_per_prompt", batch.num_videos_per_prompt, V.positive_int)
-        result.add_check("prompt_or_embeds", None,
-                         lambda _: V.string_or_list_strings(batch.prompt) or V.list_not_empty(batch.prompt_embeds))
+        result.add_check(
+            "prompt_or_embeds",
+            None,
+            lambda _: V.string_or_list_strings(batch.prompt) or V.list_not_empty(batch.prompt_embeds),
+        )
         result.add_check("height", batch.height, V.positive_int)
         result.add_check("width", batch.width, V.positive_int)
         result.add_check("num_inference_steps", batch.num_inference_steps, V.positive_int)
-        result.add_check("guidance_scale", batch.guidance_scale,
-                         lambda x: not batch.do_classifier_free_guidance or V.positive_float(x))
+        result.add_check(
+            "guidance_scale",
+            batch.guidance_scale,
+            lambda x: not batch.do_classifier_free_guidance or V.positive_float(x),
+        )
         return result
 
     def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:

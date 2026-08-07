@@ -130,24 +130,27 @@ class DiffusionNFTMethod(TrainingMethod):
         self._ema_update_count = 0
         self._trained_prompt_hashes: set[int] = set()
         if self._adv_mode not in {"all", "positive_only", "negative_only", "one_only", "binary"}:
-            raise ValueError("method.adv_mode must be one of "
-                             "{all, positive_only, negative_only, one_only, binary}")
+            raise ValueError("method.adv_mode must be one of {all, positive_only, negative_only, one_only, binary}")
 
         reward_fn = self.method_config.get("reward_fn", None)
         if not isinstance(reward_fn, dict) or not reward_fn:
-            raise ValueError("method.reward_fn must be a non-empty mapping, "
-                             "for example {pickscore: 1.0, clipscore: 1.0}")
+            raise ValueError(
+                "method.reward_fn must be a non-empty mapping, for example {pickscore: 1.0, clipscore: 1.0}"
+            )
         self._reward_fn_config = {str(k): float(v) for k, v in reward_fn.items()}
         unsupported = sorted(set(self._reward_fn_config) - {"pickscore", "clipscore"})
         if unsupported:
-            raise ValueError(f"Unsupported DiffusionNFT reward(s): {unsupported}. "
-                             "Only pickscore and clipscore are currently ported.")
+            raise ValueError(
+                f"Unsupported DiffusionNFT reward(s): {unsupported}. Only pickscore and clipscore are currently ported."
+            )
 
         self._reward_scorer: Any | None = None
         self._init_optimizer_and_scheduler()
 
     @property
-    def _optimizer_dict(self, ) -> dict[str, torch.optim.Optimizer]:
+    def _optimizer_dict(
+        self,
+    ) -> dict[str, torch.optim.Optimizer]:
         return {"student": self._student_optimizer}
 
     @property
@@ -170,8 +173,9 @@ class DiffusionNFTMethod(TrainingMethod):
         data_stream: Iterator[dict[str, Any]],
         iteration: int,
     ) -> tuple[dict[str, torch.Tensor], dict[str, Any], dict[str, LogScalar]]:
-        self._log_progress(f"[DiffusionNFT] outer step {iteration}: start sampling "
-                           f"{self._num_batches_per_epoch} batches")
+        self._log_progress(
+            f"[DiffusionNFT] outer step {iteration}: start sampling {self._num_batches_per_epoch} batches"
+        )
         sample_items = self._sample_epoch(data_stream, iteration)
         self._log_progress(f"[DiffusionNFT] outer step {iteration}: scoring rewards")
         rewards = self._score_samples(sample_items)
@@ -253,11 +257,11 @@ class DiffusionNFTMethod(TrainingMethod):
         sample_items: list[dict[str, Any]] = []
         with torch.no_grad():
             for batch_idx in tqdm(
-                    range(self._num_batches_per_epoch),
-                    desc=f"DiffusionNFT step {iteration}: sampling",
-                    position=1,
-                    leave=False,
-                    disable=not self._show_terminal_progress(),
+                range(self._num_batches_per_epoch),
+                desc=f"DiffusionNFT step {iteration}: sampling",
+                position=1,
+                leave=False,
+                disable=not self._show_terminal_progress(),
             ):
                 raw_batch = self._sample_prompt_batch(data_stream, iteration, batch_idx)
                 prompts = self._extract_prompts(raw_batch)
@@ -272,16 +276,18 @@ class DiffusionNFTMethod(TrainingMethod):
                     generator=self.cuda_generator,
                 )
                 latents_clean = sampling_result.latents
-                train_timesteps = sampling_result.timesteps[:self._num_train_timesteps()]
+                train_timesteps = sampling_result.timesteps[: self._num_train_timesteps()]
                 media = self.student.decode_latents(latents_clean)
-                sample_items.append({
-                    "encoder_hidden_states": batch.encoder_hidden_states.detach(),
-                    "encoder_attention_mask": batch.encoder_attention_mask.detach(),
-                    "latents_clean": latents_clean.detach(),
-                    "timesteps": train_timesteps.detach().unsqueeze(0).repeat(latents_clean.shape[0], 1),
-                    "media": media.detach().cpu(),
-                    "prompts": prompts,
-                })
+                sample_items.append(
+                    {
+                        "encoder_hidden_states": batch.encoder_hidden_states.detach(),
+                        "encoder_attention_mask": batch.encoder_attention_mask.detach(),
+                        "latents_clean": latents_clean.detach(),
+                        "timesteps": train_timesteps.detach().unsqueeze(0).repeat(latents_clean.shape[0], 1),
+                        "media": media.detach().cpu(),
+                        "prompts": prompts,
+                    }
+                )
         return sample_items
 
     def _sample_prompt_batch(
@@ -292,7 +298,8 @@ class DiffusionNFTMethod(TrainingMethod):
     ) -> dict[str, Any]:
         dataset = getattr(getattr(self.student, "dataloader", None), "dataset", None)
         if dataset is None or not all(
-                hasattr(dataset, attr) for attr in ("parquet_files", "lengths", "parquet_schema")):
+            hasattr(dataset, attr) for attr in ("parquet_files", "lengths", "parquet_schema")
+        ):
             return self._repeat_first_prompt(next(data_stream), self._sample_train_batch_size)
 
         rank = dist.get_rank() if dist.is_available() and dist.is_initialized() else 0
@@ -332,8 +339,10 @@ class DiffusionNFTMethod(TrainingMethod):
 
         use_ema = self._validation_use_ema and self._student_ema is not None
         suffix = " with EMA" if use_ema else ""
-        self._log_progress(f"[DiffusionNFT] validation step {iteration}: start "
-                           f"{config.num_prompts} prompts, {config.num_steps} sampling steps{suffix}")
+        self._log_progress(
+            f"[DiffusionNFT] validation step {iteration}: start "
+            f"{config.num_prompts} prompts, {config.num_steps} sampling steps{suffix}"
+        )
         with self._ema_context():
             return self._run_validation(iteration)
 
@@ -354,14 +363,14 @@ class DiffusionNFTMethod(TrainingMethod):
 
         total_batches = max(1, (len(items) + config.batch_size - 1) // config.batch_size)
         for start in tqdm(
-                range(0, len(items), config.batch_size),
-                total=total_batches,
-                desc=f"DiffusionNFT validation {iteration}",
-                position=1,
-                leave=False,
-                disable=not self._show_terminal_progress(),
+            range(0, len(items), config.batch_size),
+            total=total_batches,
+            desc=f"DiffusionNFT validation {iteration}",
+            position=1,
+            leave=False,
+            disable=not self._show_terminal_progress(),
         ):
-            batch_items = items[start:start + config.batch_size]
+            batch_items = items[start : start + config.batch_size]
             raw_batch = self._collate_validation_rows([item[2] for item in batch_items])
             prompts = self._extract_prompts(raw_batch)
             batch = self.student.prepare_batch(
@@ -379,9 +388,9 @@ class DiffusionNFTMethod(TrainingMethod):
             # DiffusionNFT's original ``train_nft_sd3.py::eval_fn`` scores
             # validation samples and puts reward values in sample captions.
             rewards = self._reward_scorer(media, prompts)
-            valid_mask = torch.tensor([item[1] for item in batch_items],
-                                      device=self.student.device,
-                                      dtype=torch.float32)
+            valid_mask = torch.tensor(
+                [item[1] for item in batch_items], device=self.student.device, dtype=torch.float32
+            )
             local_masks.append(valid_mask)
             for key, value in rewards.items():
                 local_rewards[key].append(value.to(device=self.student.device, dtype=torch.float32))
@@ -390,15 +399,16 @@ class DiffusionNFTMethod(TrainingMethod):
                 for sample_idx, (global_idx, valid, _) in enumerate(batch_items):
                     if not valid:
                         continue
-                    local_logs.append({
-                        "index": int(global_idx),
-                        "prompt": prompts[sample_idx],
-                        "media": media[sample_idx],
-                        "rewards": {
-                            key: float(value[sample_idx].detach().float().cpu())
-                            for key, value in rewards.items()
-                        },
-                    })
+                    local_logs.append(
+                        {
+                            "index": int(global_idx),
+                            "prompt": prompts[sample_idx],
+                            "media": media[sample_idx],
+                            "rewards": {
+                                key: float(value[sample_idx].detach().float().cpu()) for key, value in rewards.items()
+                            },
+                        }
+                    )
 
         if not local_rewards or not local_masks:
             return {}
@@ -550,11 +560,11 @@ class DiffusionNFTMethod(TrainingMethod):
         total_train_batches = self._num_inner_epochs * num_batches
 
         with tqdm(
-                total=total_train_batches,
-                desc=f"DiffusionNFT step {iteration}: training",
-                position=1,
-                leave=False,
-                disable=not self._show_terminal_progress(),
+            total=total_train_batches,
+            desc=f"DiffusionNFT step {iteration}: training",
+            position=1,
+            leave=False,
+            disable=not self._show_terminal_progress(),
         ) as progress:
             for _ in range(self._num_inner_epochs):
                 perm = torch.randperm(
@@ -564,10 +574,12 @@ class DiffusionNFTMethod(TrainingMethod):
                 )
                 shuffled = {k: v[perm] for k, v in samples.items()}
                 shuffled_adv = advantages[perm]
-                perms_time = torch.stack([
-                    torch.randperm(num_train_timesteps, device=self.student.device, generator=self.cuda_generator)
-                    for _ in range(total_samples)
-                ])
+                perms_time = torch.stack(
+                    [
+                        torch.randperm(num_train_timesteps, device=self.student.device, generator=self.cuda_generator)
+                        for _ in range(total_samples)
+                    ]
+                )
                 shuffled["timesteps"] = shuffled["timesteps"][
                     torch.arange(total_samples, device=self.student.device)[:, None],
                     perms_time,
@@ -614,8 +626,10 @@ class DiffusionNFTMethod(TrainingMethod):
             self._student_optimizer.zero_grad(set_to_none=True)
             optimizer_steps += 1
 
-        self._log_progress(f"[DiffusionNFT] outer step {iteration}: finished inner training "
-                           f"({current_accum} micro-steps, {optimizer_steps} optimizer steps)")
+        self._log_progress(
+            f"[DiffusionNFT] outer step {iteration}: finished inner training "
+            f"({current_accum} micro-steps, {optimizer_steps} optimizer steps)"
+        )
 
         reduced_local = {
             key: torch.stack(values).mean() if values else torch.zeros((), device=self.student.device)
@@ -709,8 +723,9 @@ class DiffusionNFTMethod(TrainingMethod):
         elif self._adv_mode == "negative_only":
             advantages_clip = torch.clamp(advantages_clip, -self._adv_clip_max, 0)
         elif self._adv_mode == "one_only":
-            advantages_clip = torch.where(advantages_clip > 0, torch.ones_like(advantages_clip),
-                                          torch.zeros_like(advantages_clip))
+            advantages_clip = torch.where(
+                advantages_clip > 0, torch.ones_like(advantages_clip), torch.zeros_like(advantages_clip)
+            )
         elif self._adv_mode == "binary":
             advantages_clip = torch.sign(advantages_clip)
 
@@ -718,34 +733,36 @@ class DiffusionNFTMethod(TrainingMethod):
         r = torch.clamp(normalized_advantages_clip, 0, 1)
 
         positive_prediction = self._nft_beta * forward_prediction + (1 - self._nft_beta) * old_prediction.detach()
-        implicit_negative_prediction = ((1.0 + self._nft_beta) * old_prediction.detach() -
-                                        self._nft_beta * forward_prediction)
+        implicit_negative_prediction = (
+            1.0 + self._nft_beta
+        ) * old_prediction.detach() - self._nft_beta * forward_prediction
 
         x0_prediction = xt - t_expanded * positive_prediction
         with torch.no_grad():
             weight_factor = torch.abs(x0_prediction.double() - x0.double())
             weight_factor = weight_factor.mean(dim=tuple(range(1, x0.ndim)), keepdim=True).clip(min=0.00001)
-        positive_loss = ((x0_prediction - x0)**2 / weight_factor).mean(dim=tuple(range(1, x0.ndim)))
+        positive_loss = ((x0_prediction - x0) ** 2 / weight_factor).mean(dim=tuple(range(1, x0.ndim)))
 
         negative_x0_prediction = xt - t_expanded * implicit_negative_prediction
         with torch.no_grad():
             negative_weight_factor = torch.abs(negative_x0_prediction.double() - x0.double())
-            negative_weight_factor = negative_weight_factor.mean(dim=tuple(range(1, x0.ndim)),
-                                                                 keepdim=True).clip(min=0.00001)
-        negative_loss = ((negative_x0_prediction - x0)**2 / negative_weight_factor).mean(dim=tuple(range(1, x0.ndim)))
+            negative_weight_factor = negative_weight_factor.mean(dim=tuple(range(1, x0.ndim)), keepdim=True).clip(
+                min=0.00001
+            )
+        negative_loss = ((negative_x0_prediction - x0) ** 2 / negative_weight_factor).mean(dim=tuple(range(1, x0.ndim)))
 
         ori_policy_loss = r * positive_loss / self._nft_beta + (1.0 - r) * negative_loss / self._nft_beta
         policy_loss = (ori_policy_loss * self._adv_clip_max).mean()
 
-        kl_div_loss = ((forward_prediction - ref_forward_prediction)**2).mean(dim=tuple(range(1, x0.ndim))).mean()
+        kl_div_loss = ((forward_prediction - ref_forward_prediction) ** 2).mean(dim=tuple(range(1, x0.ndim))).mean()
         total_loss = policy_loss + self._kl_beta * kl_div_loss
         losses = {
             "total_loss": total_loss,
             "policy_loss": policy_loss,
             "unweighted_policy_loss": ori_policy_loss.mean(),
             "kl_div_loss": kl_div_loss,
-            "old_deviate": ((forward_prediction - old_prediction)**2).mean(),
-            "old_kl_div": ((old_prediction - ref_forward_prediction)**2).mean(),
+            "old_deviate": ((forward_prediction - old_prediction) ** 2).mean(),
+            "old_kl_div": ((old_prediction - ref_forward_prediction) ** 2).mean(),
             "x0_norm": torch.mean(x0**2),
         }
         return losses, (batch.timesteps, batch.attn_metadata)
@@ -758,7 +775,7 @@ class DiffusionNFTMethod(TrainingMethod):
         out: dict[str, Any] = {}
         for key, value in raw_batch.items():
             if torch.is_tensor(value) and value.shape[0] > 0:
-                out[key] = value[:1].repeat((repeat, ) + (1, ) * (value.ndim - 1))
+                out[key] = value[:1].repeat((repeat,) + (1,) * (value.ndim - 1))
             elif key == "info_list" and isinstance(value, list) and value:
                 out[key] = [dict(value[0]) for _ in range(repeat)]
             elif isinstance(value, list) and value:

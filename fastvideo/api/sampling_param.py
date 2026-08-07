@@ -19,6 +19,7 @@ class SamplingParam:
     """
     Sampling parameters for video generation.
     """
+
     # All fields below are copied from ForwardBatch
     data_type: str = "video"
 
@@ -198,11 +199,13 @@ class SamplingParam:
         valid_fields = {f.name for f in fields(self)}
         unknown = [key for key in source_dict if key not in valid_fields]
         if unknown:
-            raise ValueError(f"{type(self).__name__}.update() received unknown field(s): "
-                             f"{sorted(unknown)}. All kwargs must correspond to declared "
-                             f"SamplingParam fields. If a kwarg is meant to flow into "
-                             f"ForwardBatch.extra (e.g. LTX2 audio conditioning), route it "
-                             f"via VideoGenerator._BATCH_EXTRA_PASSTHROUGH_KEYS instead.")
+            raise ValueError(
+                f"{type(self).__name__}.update() received unknown field(s): "
+                f"{sorted(unknown)}. All kwargs must correspond to declared "
+                f"SamplingParam fields. If a kwarg is meant to flow into "
+                f"ForwardBatch.extra (e.g. LTX2 audio conditioning), route it "
+                f"via VideoGenerator._BATCH_EXTRA_PASSTHROUGH_KEYS instead."
+            )
         for key, value in source_dict.items():
             setattr(self, key, value)
 
@@ -215,8 +218,7 @@ class SamplingParam:
             return sampling_param
 
         logger.warning(
-            "Couldn't find a preset for %s."
-            " Using the default sampling param.",
+            "Couldn't find a preset for %s. Using the default sampling param.",
             model_path,
         )
         return cls()

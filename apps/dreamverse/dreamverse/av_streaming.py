@@ -9,6 +9,7 @@ chunk as a ``StreamEvent`` via the caller-supplied ``publish``
 callback.  Knows nothing about multiprocessing queues, the GPU pool,
 or individual users — the caller decides what "publish" means.
 """
+
 import fcntl
 import os
 import shutil
@@ -38,14 +39,18 @@ X264_PROFILE = os.getenv("FASTVIDEO_X264_PROFILE", "baseline").strip().lower()
 if X264_PROFILE not in {"baseline", "main", "high", "main10", "high10"}:
     print(f"[WARN] Unsupported FASTVIDEO_X264_PROFILE={X264_PROFILE}; using baseline")
     X264_PROFILE = "baseline"
-USE_SHARED_STREAM_BUFFER = (os.getenv("FASTVIDEO_USE_SHARED_STREAM_BUFFER", "1").strip().lower()
-                            not in {"0", "false", "no"})
+USE_SHARED_STREAM_BUFFER = os.getenv("FASTVIDEO_USE_SHARED_STREAM_BUFFER", "1").strip().lower() not in {
+    "0",
+    "false",
+    "no",
+}
 SHARED_STREAM_BUFFER_BYTES = int(os.getenv("FASTVIDEO_SHARED_STREAM_BUFFER_BYTES", str(256 * 1024 * 1024)))
 
 
 @dataclass
 class StreamInit:
     """First event emitted — tells the consumer the stream is starting."""
+
     stream_id: str
     mime: str
     uses_shared_buffer: bool
@@ -56,6 +61,7 @@ class StreamChunk:
     """One fMP4 chunk.  Either ``chunk`` (raw bytes) or
     ``chunk_offset``+``chunk_length`` (read from the shared buffer)
     will be populated, never both."""
+
     stream_id: str
     chunk: bytes | None = None
     chunk_offset: int | None = None
@@ -66,6 +72,7 @@ class StreamChunk:
 @dataclass
 class StreamComplete:
     """Final event emitted — muxing finished successfully."""
+
     stream_id: str
     chunks: int
 
@@ -183,29 +190,27 @@ def stream_fmp4(
     audio_int16, num_channels = normalized_audio
 
     if head_trim_frames < 0:
-        return False, (f"head_trim_frames must be >= 0, "
-                       f"got {head_trim_frames}")
+        return False, (f"head_trim_frames must be >= 0, got {head_trim_frames}")
     if head_trim_frames >= len(frames):
-        return False, (f"head_trim_frames={head_trim_frames} removes "
-                       f"all {len(frames)} frames in segment")
+        return False, (f"head_trim_frames={head_trim_frames} removes all {len(frames)} frames in segment")
 
-    out_frames = (frames[head_trim_frames:] if head_trim_frames > 0 else frames)
+    out_frames = frames[head_trim_frames:] if head_trim_frames > 0 else frames
     sample_rate = int(audio_sample_rate)
     if head_trim_audio_frames > 0:
         trim_start_samples = int(round((head_trim_audio_frames / float(TARGET_FPS)) * sample_rate))
         if trim_start_samples >= audio_int16.shape[0]:
-            return False, ("audio too short after overlap trim: "
-                           f"trim_start_samples={trim_start_samples}"
-                           f", audio_samples={audio_int16.shape[0]}")
+            return False, (
+                "audio too short after overlap trim: "
+                f"trim_start_samples={trim_start_samples}"
+                f", audio_samples={audio_int16.shape[0]}"
+            )
         keep_samples = int(round((len(out_frames) / float(TARGET_FPS)) * sample_rate))
         trim_end_samples = min(
             audio_int16.shape[0],
             trim_start_samples + keep_samples,
         )
         if trim_end_samples <= trim_start_samples:
-            return False, ("invalid audio trim range: "
-                           f"start={trim_start_samples}, "
-                           f"end={trim_end_samples}")
+            return False, (f"invalid audio trim range: start={trim_start_samples}, end={trim_end_samples}")
         audio_int16 = audio_int16[trim_start_samples:trim_end_samples]
 
     height = int(out_frames[0].shape[0])
@@ -290,14 +295,18 @@ def stream_fmp4(
     stderr_chunks: list[bytes] = []
     writer_error: list[Exception | None] = [None]
     t_stream_start = time.perf_counter()
-    use_shared_buffer = (USE_SHARED_STREAM_BUFFER and shared_buffer is not None and shared_buffer_bytes > 0)
+    use_shared_buffer = USE_SHARED_STREAM_BUFFER and shared_buffer is not None and shared_buffer_bytes > 0
     shared_write_offset = 0
     shared_buffer_fallback = False
-    shared_np = (np.frombuffer(
-        shared_buffer,
-        dtype=np.uint8,
-        count=shared_buffer_bytes,
-    ) if use_shared_buffer else None)
+    shared_np = (
+        np.frombuffer(
+            shared_buffer,
+            dtype=np.uint8,
+            count=shared_buffer_bytes,
+        )
+        if use_shared_buffer
+        else None
+    )
     chunk_intervals_ms: list[float] = []
     chunk_publish_ms: list[float] = []
     chunk_read_ms: list[float] = []
@@ -346,11 +355,13 @@ def stream_fmp4(
         writer_thread.start()
         stderr_thread.start()
 
-        publish(StreamInit(
-            stream_id=stream_id,
-            mime=AV_MEDIA_MIME,
-            uses_shared_buffer=use_shared_buffer,
-        ))
+        publish(
+            StreamInit(
+                stream_id=stream_id,
+                mime=AV_MEDIA_MIME,
+                uses_shared_buffer=use_shared_buffer,
+            )
+        )
 
         chunk_count = 0
         total_bytes = 0
@@ -380,19 +391,24 @@ def stream_fmp4(
                             chunk_offset=shared_write_offset,
                             chunk_length=chunk_len,
                             uses_shared_buffer=True,
-                        ))
+                        )
+                    )
                     shared_write_offset = write_end
                     chunk_publish_ms.append((time.perf_counter() - t_publish_start) * 1000)
                     last_chunk_emit_t = time.perf_counter()
                     continue
                 shared_buffer_fallback = True
-                print(f"{log_prefix} Shared stream buffer exhausted at "
-                      f"{shared_write_offset / (1024 * 1024):.1f}MB; "
-                      "falling back to queue chunk bytes")
-            publish(StreamChunk(
-                stream_id=stream_id,
-                chunk=chunk,
-            ))
+                print(
+                    f"{log_prefix} Shared stream buffer exhausted at "
+                    f"{shared_write_offset / (1024 * 1024):.1f}MB; "
+                    "falling back to queue chunk bytes"
+                )
+            publish(
+                StreamChunk(
+                    stream_id=stream_id,
+                    chunk=chunk,
+                )
+            )
             chunk_publish_ms.append((time.perf_counter() - t_publish_start) * 1000)
             last_chunk_emit_t = time.perf_counter()
 
@@ -411,14 +427,14 @@ def stream_fmp4(
         timings["av_trim_head_frames"] = head_trim_frames
         timings["av_trim_head_audio_frames"] = head_trim_audio_frames
         timings["av_frames_encoded"] = len(out_frames)
-        timings["av_shared_buffer_used"] = (bool(use_shared_buffer and not shared_buffer_fallback))
+        timings["av_shared_buffer_used"] = bool(use_shared_buffer and not shared_buffer_fallback)
         timings["av_wav_write_ms"] = wav_write_ms
         timings["av_ffmpeg_spawn_ms"] = ffmpeg_spawn_ms
         timings["av_first_chunk_ms"] = first_chunk_ms or 0.0
         if chunk_intervals_ms:
             timings["av_chunk_interval_ms_min"] = min(chunk_intervals_ms)
             timings["av_chunk_interval_ms_median"] = float(np.median(chunk_intervals_ms))
-            timings["av_chunk_interval_ms_p95"] = (float(np.percentile(chunk_intervals_ms, 95)))
+            timings["av_chunk_interval_ms_p95"] = float(np.percentile(chunk_intervals_ms, 95))
             timings["av_chunk_interval_ms_max"] = max(chunk_intervals_ms)
         if chunk_publish_ms:
             timings["av_chunk_publish_ms_median"] = float(np.median(chunk_publish_ms))
@@ -426,10 +442,12 @@ def stream_fmp4(
         if chunk_read_ms:
             timings["av_chunk_read_ms_median"] = float(np.median(chunk_read_ms))
             timings["av_chunk_read_ms_p95"] = float(np.percentile(chunk_read_ms, 95))
-        publish(StreamComplete(
-            stream_id=stream_id,
-            chunks=chunk_count,
-        ))
+        publish(
+            StreamComplete(
+                stream_id=stream_id,
+                chunks=chunk_count,
+            )
+        )
         return True, None
     except Exception as exc:
         return False, str(exc)

@@ -36,8 +36,8 @@ class PipelineLoggingInfo:
         """Add execution time for a stage."""
         if stage_name not in self.stages:
             self.stages[stage_name] = {}
-        self.stages[stage_name]['execution_time'] = execution_time
-        self.stages[stage_name]['timestamp'] = time.time()
+        self.stages[stage_name]["execution_time"] = execution_time
+        self.stages[stage_name]["timestamp"] = time.time()
 
     def add_stage_metric(self, stage_name: str, metric_name: str, value: Any):
         """Add any metric for a stage."""
@@ -55,18 +55,19 @@ class PipelineLoggingInfo:
 
     def get_total_execution_time(self) -> float:
         """Get total pipeline execution time."""
-        return sum(stage.get('execution_time', 0) for stage in self.stages.values())
+        return sum(stage.get("execution_time", 0) for stage in self.stages.values())
 
 
 @dataclass
 class ForwardBatch:
     """
     Complete state passed through the pipeline execution.
-    
+
     This dataclass contains all information needed during the diffusion pipeline
     execution, allowing methods to update specific components without needing
     to manage numerous individual parameters.
     """
+
     # TODO(will): double check that args are separate from fastvideo_args
     # properly. Also maybe think about providing an abstraction for pipeline
     # specific arguments.
@@ -265,7 +266,7 @@ class ForwardBatch:
 
         # LTX-2 text CFG scales; FLUX uses ``use_embedded_guidance`` so ``guidance_scale > 1`` alone
         # does not enable classifier-free guidance.
-        ltx2_text_cfg_enabled = (self.ltx2_cfg_scale_video != 1.0 or self.ltx2_cfg_scale_audio != 1.0)
+        ltx2_text_cfg_enabled = self.ltx2_cfg_scale_video != 1.0 or self.ltx2_cfg_scale_audio != 1.0
         if self.use_embedded_guidance:
             self.do_classifier_free_guidance = (self.true_cfg_scale > 1.0) or ltx2_text_cfg_enabled
         elif self.guidance_scale > 1.0 or ltx2_text_cfg_enabled:

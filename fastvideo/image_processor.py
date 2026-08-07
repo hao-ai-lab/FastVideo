@@ -51,8 +51,9 @@ class ImageProcessor:
         elif isinstance(image, torch.Tensor):
             return self._preprocess_tensor(image, height, width)
         else:
-            raise ValueError(f"Unsupported image type: {type(image)}. "
-                             "Supported types: PIL.Image.Image, np.ndarray, torch.Tensor")
+            raise ValueError(
+                f"Unsupported image type: {type(image)}. Supported types: PIL.Image.Image, np.ndarray, torch.Tensor"
+            )
 
     def _preprocess_pil(
         self,

@@ -41,10 +41,12 @@ from fastvideo.distributed import (
 )
 from fastvideo.forward_context import set_forward_context
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
-    FlowMatchEulerDiscreteScheduler, )
+    FlowMatchEulerDiscreteScheduler,
+)
 from fastvideo.pipelines import TrainingBatch
 from fastvideo.training.activation_checkpoint import (
-    apply_activation_checkpointing, )
+    apply_activation_checkpointing,
+)
 from fastvideo.training.training_utils import (
     compute_density_for_timestep_sampling,
     get_sigmas,
@@ -54,7 +56,8 @@ from fastvideo.training.training_utils import (
 
 from fastvideo.train.models.base import ModelBase
 from fastvideo.train.utils.module_state import (
-    apply_trainable, )
+    apply_trainable,
+)
 from fastvideo.train.utils.moduleloader import (
     load_module_from_path,
     make_inference_args,
@@ -62,7 +65,8 @@ from fastvideo.train.utils.moduleloader import (
 
 if TYPE_CHECKING:
     from fastvideo.train.utils.training_config import (
-        TrainingConfig, )
+        TrainingConfig,
+    )
     from fastvideo.train.utils.lora import LoraConfig
 
 # 480p is the only supported resolution band for this recipe. Matches
@@ -87,10 +91,8 @@ class Kandinsky5Model(ModelBase):
         trainable: bool = True,
         disable_custom_init_weights: bool = False,
         flow_shift: float = 5.0,
-        enable_gradient_checkpointing_type: str
-        | None = None,
-        transformer_override_safetensor: str
-        | None = None,
+        enable_gradient_checkpointing_type: str | None = None,
+        transformer_override_safetensor: str | None = None,
         lora: LoraConfig | dict[str, Any] | None = None,
     ) -> None:
         super().__init__(
@@ -108,7 +110,7 @@ class Kandinsky5Model(ModelBase):
             transformer_override_safetensor=(transformer_override_safetensor),
         )
 
-        self.noise_scheduler = (FlowMatchEulerDiscreteScheduler(shift=float(flow_shift)))
+        self.noise_scheduler = FlowMatchEulerDiscreteScheduler(shift=float(flow_shift))
 
         # Filled by init_preprocessors (student only).
         self.vae: Any = None
@@ -121,9 +123,9 @@ class Kandinsky5Model(ModelBase):
         self.sp_group: Any = None
 
         # Qwen sequence embeds + mask, and CLIP pooled projection.
-        self.negative_prompt_embeds: (torch.Tensor | None) = None
-        self.negative_prompt_attention_mask: (torch.Tensor | None) = None
-        self.negative_pooled_embeds: (torch.Tensor | None) = None
+        self.negative_prompt_embeds: torch.Tensor | None = None
+        self.negative_prompt_attention_mask: torch.Tensor | None = None
+        self.negative_pooled_embeds: torch.Tensor | None = None
         self._requires_negative_conditioning = True
 
         # Timestep mechanics.
@@ -150,11 +152,11 @@ class Kandinsky5Model(ModelBase):
             override_transformer_cls_name=(self._transformer_cls_name),
             transformer_override_safetensor=(transformer_override_safetensor),
         )
-        ckpt_type = (enable_gradient_checkpointing_type or getattr(
+        ckpt_type = enable_gradient_checkpointing_type or getattr(
             getattr(training_config, "model", None),
             "enable_gradient_checkpointing_type",
             None,
-        ))
+        )
         if trainable and ckpt_type:
             transformer = apply_activation_checkpointing(
                 transformer,
@@ -183,21 +185,30 @@ class Kandinsky5Model(ModelBase):
 
         from fastvideo.dataset.dataloader.schema import pyarrow_schema_t2v
         from fastvideo.train.utils.dataloader import (
-            build_parquet_t2v_train_dataloader, )
+            build_parquet_t2v_train_dataloader,
+        )
 
-        preprocessed_data_type = str(getattr(
-            training_config.data,
-            "preprocessed_data_type",
-            "t2v",
-        )).strip().lower()
+        preprocessed_data_type = (
+            str(
+                getattr(
+                    training_config.data,
+                    "preprocessed_data_type",
+                    "t2v",
+                )
+            )
+            .strip()
+            .lower()
+        )
         if preprocessed_data_type != "t2v":
-            raise ValueError("Unsupported Kandinsky5 preprocessed_data_type: "
-                             f"{preprocessed_data_type!r}")
+            raise ValueError(f"Unsupported Kandinsky5 preprocessed_data_type: {preprocessed_data_type!r}")
 
         # Qwen's usable (post-template-trim) embedding length, +1 for the
         # prepended CLIP pooled row (see module docstring / prepare_batch).
-        qwen_text_len = int(training_config.pipeline_config.text_encoder_configs[  # type: ignore[union-attr]
-            0].arch_config.text_len)
+        qwen_text_len = int(
+            training_config.pipeline_config.text_encoder_configs[  # type: ignore[union-attr]
+                0
+            ].arch_config.text_len
+        )
         self.dataloader = build_parquet_t2v_train_dataloader(
             training_config.data,
             text_len=qwen_text_len + 1,
@@ -265,8 +276,9 @@ class Kandinsky5Model(ModelBase):
         # sequence embeddings. See module docstring.
         packed_embeds = raw_batch["text_embedding"]
         packed_mask = raw_batch["text_attention_mask"]
-        pooled_dim = int(tc.pipeline_config.dit_config.arch_config.in_text_dim2  # type: ignore[union-attr]
-                         )
+        pooled_dim = int(
+            tc.pipeline_config.dit_config.arch_config.in_text_dim2  # type: ignore[union-attr]
+        )
         pooled_projections = packed_embeds[:, 0, :pooled_dim]
         qwen_embeds = packed_embeds[:, 1:, :]
         qwen_mask = packed_mask[:, 1:]
@@ -284,9 +296,9 @@ class Kandinsky5Model(ModelBase):
             # Kandinsky5-Lite checkpoint has in_visual_dim=16, vs. the
             # dataclass default of 4).
             num_channels = int(self.transformer.in_visual_dim)
-            spatial_compression_ratio = (vae_config.spatial_compression_ratio)
-            latent_height = (tc.data.num_height // spatial_compression_ratio)
-            latent_width = (tc.data.num_width // spatial_compression_ratio)
+            spatial_compression_ratio = vae_config.spatial_compression_ratio
+            latent_height = tc.data.num_height // spatial_compression_ratio
+            latent_width = tc.data.num_width // spatial_compression_ratio
             latents = torch.zeros(
                 batch_size,
                 num_channels,
@@ -298,14 +310,12 @@ class Kandinsky5Model(ModelBase):
             )
         elif latents_source == "data":
             if "vae_latent" not in raw_batch:
-                raise ValueError("vae_latent not found in batch "
-                                 "and latents_source='data'")
+                raise ValueError("vae_latent not found in batch and latents_source='data'")
             latents = raw_batch["vae_latent"]
-            latents = latents[:, :, :tc.data.num_latent_t]
+            latents = latents[:, :, : tc.data.num_latent_t]
             latents = latents.to(device, dtype=dtype)
         else:
-            raise ValueError(f"Unknown latents_source: "
-                             f"{latents_source!r}")
+            raise ValueError(f"Unknown latents_source: {latents_source!r}")
 
         training_batch.latents = latents
         training_batch.encoder_hidden_states = qwen_embeds.to(device, dtype=dtype)
@@ -352,8 +362,7 @@ class Kandinsky5Model(ModelBase):
         if conditional:
             text_dict = batch.conditional_dict
             if text_dict is None:
-                raise RuntimeError("Missing conditional_dict in "
-                                   "TrainingBatch")
+                raise RuntimeError("Missing conditional_dict in TrainingBatch")
         else:
             text_dict = self._get_uncond_text_dict(batch, cfg_uncond=cfg_uncond)
 
@@ -367,11 +376,14 @@ class Kandinsky5Model(ModelBase):
         if noisy_latents.is_floating_point():
             noisy_latents = noisy_latents.to(dtype=dtype)
 
-        with torch.autocast(device_type, dtype=dtype), set_forward_context(
+        with (
+            torch.autocast(device_type, dtype=dtype),
+            set_forward_context(
                 current_timestep=batch.timesteps,
                 attn_metadata=attn_metadata,
+            ),
         ):
-            input_kwargs = (self._build_distill_input_kwargs(noisy_latents, timestep, text_dict))
+            input_kwargs = self._build_distill_input_kwargs(noisy_latents, timestep, text_dict)
             transformer = self._get_transformer(timestep)
             out = transformer(**input_kwargs)
             sample = out.sample if hasattr(out, "sample") else out
@@ -390,8 +402,8 @@ class Kandinsky5Model(ModelBase):
     ) -> None:
         timesteps, attn_metadata = ctx
         with set_forward_context(
-                current_timestep=timesteps,
-                attn_metadata=attn_metadata,
+            current_timestep=timesteps,
+            attn_metadata=attn_metadata,
         ):
             (loss / max(1, int(grad_accum_rounds))).backward()
 
@@ -405,8 +417,9 @@ class Kandinsky5Model(ModelBase):
     def _init_timestep_mechanics(self) -> None:
         assert self.training_config is not None
         tc = self.training_config
-        self.timestep_shift = float(tc.pipeline_config.flow_shift  # type: ignore[union-attr]
-                                    )
+        self.timestep_shift = float(
+            tc.pipeline_config.flow_shift  # type: ignore[union-attr]
+        )
         self.num_train_timestep = int(self.noise_scheduler.num_train_timesteps)
         self.min_timestep = 0
         self.max_timestep = self.num_train_timestep
@@ -455,10 +468,14 @@ class Kandinsky5Model(ModelBase):
         loader = TextEncoderLoader()
 
         # --- Qwen / Reason1 ---
-        qwen_enc = loader.load(
-            os.path.join(model_path, "text_encoder"),
-            inference_args,
-        ).to(device).eval()
+        qwen_enc = (
+            loader.load(
+                os.path.join(model_path, "text_encoder"),
+                inference_args,
+            )
+            .to(device)
+            .eval()
+        )
         qwen_tok = AutoTokenizer.from_pretrained(os.path.join(model_path, "tokenizer"))
         qwen_tok_kwargs = dict(qwen_cfg.tokenizer_kwargs)
         qwen_text = kandinsky5_qwen_preprocess_text(negative_prompt)
@@ -475,10 +492,14 @@ class Kandinsky5Model(ModelBase):
         del qwen_enc, qwen_tok
 
         # --- CLIP ---
-        clip_enc = loader.load(
-            os.path.join(model_path, "text_encoder_2"),
-            inference_args,
-        ).to(device).eval()
+        clip_enc = (
+            loader.load(
+                os.path.join(model_path, "text_encoder_2"),
+                inference_args,
+            )
+            .to(device)
+            .eval()
+        )
         clip_tok = AutoTokenizer.from_pretrained(os.path.join(model_path, "tokenizer_2"))
         clip_tok_kwargs = dict(clip_cfg.tokenizer_kwargs)
         clip_text = preprocess_text(negative_prompt)
@@ -540,11 +561,13 @@ class Kandinsky5Model(ModelBase):
         num_height = int(tc.data.num_height)
         num_width = int(tc.data.num_width)
         if not (_MIN_480P_SIDE <= num_height <= _MAX_480P_SIDE and _MIN_480P_SIDE <= num_width <= _MAX_480P_SIDE):
-            raise ValueError("Kandinsky5Model only supports 480p training "
-                             f"(height/width in [{_MIN_480P_SIDE}, {_MAX_480P_SIDE}]); "
-                             f"got num_height={num_height}, num_width={num_width}. "
-                             "A larger resolution needs a different visual RoPE "
-                             "scale_factor, which this wrapper does not implement.")
+            raise ValueError(
+                "Kandinsky5Model only supports 480p training "
+                f"(height/width in [{_MIN_480P_SIDE}, {_MAX_480P_SIDE}]); "
+                f"got num_height={num_height}, num_width={num_width}. "
+                "A larger resolution needs a different visual RoPE "
+                "scale_factor, which this wrapper does not implement."
+            )
 
         noise = torch.randn(
             latents.shape,
@@ -563,7 +586,7 @@ class Kandinsky5Model(ModelBase):
             n_dim=latents.ndim,
             dtype=latents.dtype,
         )
-        noisy_model_input = ((1.0 - sigmas) * latents + sigmas * noise)
+        noisy_model_input = (1.0 - sigmas) * latents + sigmas * noise
 
         training_batch.noisy_model_input = noisy_model_input
         training_batch.timesteps = timesteps
@@ -613,8 +636,11 @@ class Kandinsky5Model(ModelBase):
             "sparse_params": None,
         }
 
-        if (self.negative_prompt_embeds is not None and self.negative_prompt_attention_mask is not None
-                and self.negative_pooled_embeds is not None):
+        if (
+            self.negative_prompt_embeds is not None
+            and self.negative_prompt_attention_mask is not None
+            and self.negative_pooled_embeds is not None
+        ):
             neg_embeds = self.negative_prompt_embeds
             neg_mask = self.negative_prompt_attention_mask
             neg_pooled = self.negative_pooled_embeds
@@ -635,7 +661,7 @@ class Kandinsky5Model(ModelBase):
                 "sparse_params": None,
             }
 
-        training_batch.latents = (training_batch.latents.permute(0, 2, 1, 3, 4))
+        training_batch.latents = training_batch.latents.permute(0, 2, 1, 3, 4)
         return training_batch
 
     def _build_distill_input_kwargs(
@@ -645,8 +671,7 @@ class Kandinsky5Model(ModelBase):
         text_dict: dict[str, torch.Tensor] | None,
     ) -> dict[str, Any]:
         if text_dict is None:
-            raise ValueError("text_dict cannot be None for "
-                             "Kandinsky5 distillation")
+            raise ValueError("text_dict cannot be None for Kandinsky5 distillation")
         # noise_input is [B, T, C, H, W] (common ModelBase convention);
         # Kandinsky5's transformer expects channel-last [B, T, H, W, C].
         hidden_states = noise_input.permute(0, 1, 3, 4, 2)
@@ -685,21 +710,19 @@ class Kandinsky5Model(ModelBase):
         if cfg_uncond is None:
             text_dict = getattr(batch, "unconditional_dict", None)
             if text_dict is None:
-                raise RuntimeError("Missing unconditional_dict; "
-                                   "ensure_negative_conditioning() "
-                                   "may have failed")
+                raise RuntimeError("Missing unconditional_dict; ensure_negative_conditioning() may have failed")
             return text_dict
 
         on_missing_raw = cfg_uncond.get("on_missing", "error")
         if not isinstance(on_missing_raw, str):
-            raise ValueError("method_config.cfg_uncond.on_missing "
-                             "must be a string, got "
-                             f"{type(on_missing_raw).__name__}")
+            raise ValueError(
+                f"method_config.cfg_uncond.on_missing must be a string, got {type(on_missing_raw).__name__}"
+            )
         on_missing = on_missing_raw.strip().lower()
         if on_missing not in {"error", "ignore"}:
-            raise ValueError("method_config.cfg_uncond.on_missing "
-                             "must be one of {error, ignore}, got "
-                             f"{on_missing_raw!r}")
+            raise ValueError(
+                f"method_config.cfg_uncond.on_missing must be one of {{error, ignore}}, got {on_missing_raw!r}"
+            )
 
         for channel, policy_raw in cfg_uncond.items():
             if channel in {"on_missing", "text"}:
@@ -707,54 +730,48 @@ class Kandinsky5Model(ModelBase):
             if policy_raw is None:
                 continue
             if not isinstance(policy_raw, str):
-                raise ValueError("method_config.cfg_uncond values "
-                                 "must be strings, got "
-                                 f"{channel}="
-                                 f"{type(policy_raw).__name__}")
+                raise ValueError(
+                    f"method_config.cfg_uncond values must be strings, got {channel}={type(policy_raw).__name__}"
+                )
             policy = policy_raw.strip().lower()
             if policy == "keep":
                 continue
             if on_missing == "ignore":
                 continue
-            raise ValueError("Kandinsky5Model does not support "
-                             "cfg_uncond channel "
-                             f"{channel!r} (policy={policy!r}). "
-                             "Set cfg_uncond.on_missing=ignore or "
-                             "remove the channel.")
+            raise ValueError(
+                "Kandinsky5Model does not support "
+                "cfg_uncond channel "
+                f"{channel!r} (policy={policy!r}). "
+                "Set cfg_uncond.on_missing=ignore or "
+                "remove the channel."
+            )
 
         text_policy_raw = cfg_uncond.get("text", None)
         if text_policy_raw is None:
             text_policy = "negative_prompt"
         elif not isinstance(text_policy_raw, str):
-            raise ValueError("method_config.cfg_uncond.text must be "
-                             "a string, got "
-                             f"{type(text_policy_raw).__name__}")
+            raise ValueError(f"method_config.cfg_uncond.text must be a string, got {type(text_policy_raw).__name__}")
         else:
-            text_policy = (text_policy_raw.strip().lower())
+            text_policy = text_policy_raw.strip().lower()
 
         if text_policy in {"negative_prompt"}:
             text_dict = getattr(batch, "unconditional_dict", None)
             if text_dict is None:
-                raise RuntimeError("Missing unconditional_dict; "
-                                   "ensure_negative_conditioning() "
-                                   "may have failed")
+                raise RuntimeError("Missing unconditional_dict; ensure_negative_conditioning() may have failed")
             return text_dict
         if text_policy == "keep":
             if batch.conditional_dict is None:
-                raise RuntimeError("Missing conditional_dict in "
-                                   "TrainingBatch")
+                raise RuntimeError("Missing conditional_dict in TrainingBatch")
             return batch.conditional_dict
         if text_policy == "zero":
             if batch.conditional_dict is None:
-                raise RuntimeError("Missing conditional_dict in "
-                                   "TrainingBatch")
+                raise RuntimeError("Missing conditional_dict in TrainingBatch")
             cond = batch.conditional_dict
             enc = cond["encoder_hidden_states"]
             mask = cond["encoder_attention_mask"]
             pooled = cond["pooled_projections"]
             if not torch.is_tensor(enc) or not torch.is_tensor(mask) or not torch.is_tensor(pooled):
-                raise TypeError("conditional_dict must contain "
-                                "tensor text inputs")
+                raise TypeError("conditional_dict must contain tensor text inputs")
             return {
                 "encoder_hidden_states": torch.zeros_like(enc),
                 "encoder_attention_mask": torch.zeros_like(mask),
@@ -765,9 +782,7 @@ class Kandinsky5Model(ModelBase):
                 "sparse_params": cond["sparse_params"],
             }
         if text_policy == "drop":
-            raise ValueError("cfg_uncond.text=drop is not supported "
-                             "for Kandinsky5. Use "
-                             "{negative_prompt, keep, zero}.")
-        raise ValueError("cfg_uncond.text must be one of "
-                         "{negative_prompt, keep, zero, drop}, got "
-                         f"{text_policy_raw!r}")
+            raise ValueError("cfg_uncond.text=drop is not supported for Kandinsky5. Use {negative_prompt, keep, zero}.")
+        raise ValueError(
+            f"cfg_uncond.text must be one of {{negative_prompt, keep, zero, drop}}, got {text_policy_raw!r}"
+        )

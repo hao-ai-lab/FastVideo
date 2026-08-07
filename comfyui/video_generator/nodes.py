@@ -11,7 +11,7 @@ NODE_CLASS_MAPPINGS = {
     "VAEConfig": VAEConfig,
     "TextEncoderConfig": TextEncoderConfig,
     "DITConfig": DITConfig,
-    "LoadImagePath": LoadImagePath
+    "LoadImagePath": LoadImagePath,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -20,5 +20,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "VAEConfig": "VAE Config",
     "TextEncoderConfig": "Text Encoder Config",
     "DITConfig": "DIT Config",
-    "LoadImagePath": "Load Image Path"
+    "LoadImagePath": "Load Image Path",
 }

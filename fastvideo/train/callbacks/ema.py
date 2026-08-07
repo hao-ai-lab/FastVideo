@@ -67,8 +67,7 @@ class EMACallback(Callback):
             raise ValueError("No student transformer found on method, cannot initialize EMA")
 
         logger.info(
-            "Initializing EMA (local_shard) with "
-            "decay=%s from student transformer",
+            "Initializing EMA (local_shard) with decay=%s from student transformer",
             self._decay,
         )
         self.student_ema = EMA_FSDP(
@@ -77,8 +76,7 @@ class EMACallback(Callback):
             mode="local_shard",
         )
         logger.info(
-            "EMA callback enabled (decay=%s, "
-            "start_iter=%d).",
+            "EMA callback enabled (decay=%s, start_iter=%d).",
             self._decay,
             self._start_iter,
         )
@@ -96,15 +94,17 @@ class EMACallback(Callback):
             return
         if not self._ema_started:
             logger.info(
-                "Starting EMA updates at iteration %d "
-                "(re-initializing shadow from current "
-                "model).",
+                "Starting EMA updates at iteration %d (re-initializing shadow from current model).",
                 iteration,
             )
-            self.student_ema._init_shadow(method.student.transformer, )
+            self.student_ema._init_shadow(
+                method.student.transformer,
+            )
             self._ema_started = True
 
-        self.student_ema.update(method.student.transformer, )
+        self.student_ema.update(
+            method.student.transformer,
+        )
 
         tracker = getattr(method, "tracker", None)
         if tracker is not None:
@@ -126,8 +126,10 @@ class EMACallback(Callback):
 
         If EMA is not active, yields the transformer unchanged.
         """
-        if (self.student_ema is not None and self._ema_started):
-            with self.student_ema.apply_to_model(transformer, ):
+        if self.student_ema is not None and self._ema_started:
+            with self.student_ema.apply_to_model(
+                transformer,
+            ):
                 yield transformer
         else:
             yield transformer
@@ -149,6 +151,8 @@ class EMACallback(Callback):
         state_dict: dict[str, Any],
     ) -> None:
         ema_state = state_dict.get("student_ema")
-        if (ema_state is not None and self.student_ema is not None):
+        if ema_state is not None and self.student_ema is not None:
             self.student_ema.load_state_dict(ema_state)
-        self._ema_started = bool(state_dict.get("ema_started", False), )
+        self._ema_started = bool(
+            state_dict.get("ema_started", False),
+        )

@@ -25,7 +25,7 @@ logger = init_logger(__name__)
 class HunyuanGameCraftPipeline(ComposedPipelineBase):
     """
     Pipeline for HunyuanGameCraft video generation.
-    
+
     This pipeline supports:
     - Text-to-video generation with camera/action conditioning
     - Autoregressive generation with history frames

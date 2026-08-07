@@ -41,16 +41,20 @@ _MISSING = object()
 _LEGACY_REQUEST_ALIASES = {
     "neg_prompt": "negative_prompt",
 }
-_REQUEST_PIPELINE_OVERRIDE_FIELDS = frozenset({
-    "embedded_cfg_scale",
-})
+_REQUEST_PIPELINE_OVERRIDE_FIELDS = frozenset(
+    {
+        "embedded_cfg_scale",
+    }
+)
 # torch.compile kwargs that map to first-class CompileConfig fields.
 _COMPILE_TYPED_KEYS = ("backend", "fullgraph", "mode", "dynamic")
 # LTX-2 refine flat kwargs (init + per-request) known to FastVideoArgs.
-_LTX2_REFINE_FLAT_KEYS = (refine_preset_override_fields() | refine_stage_override_fields())
+_LTX2_REFINE_FLAT_KEYS = refine_preset_override_fields() | refine_stage_override_fields()
 
 
-def normalize_generator_config(config: GeneratorConfig | Mapping[str, Any], ) -> GeneratorConfig:
+def normalize_generator_config(
+    config: GeneratorConfig | Mapping[str, Any],
+) -> GeneratorConfig:
     if isinstance(config, GeneratorConfig):
         return config
     return parse_config(GeneratorConfig, config)
@@ -71,7 +75,7 @@ def load_generator_config_from_file(
     if normalized_overrides:
         adjusted = normalized_overrides
         if all(key.startswith("generator.") for key in adjusted):
-            adjusted = {key[len("generator."):]: value for key, value in adjusted.items()}
+            adjusted = {key[len("generator.") :]: value for key, value in adjusted.items()}
         raw = apply_overrides(raw, adjusted)
 
     return parse_config(GeneratorConfig, raw)
@@ -125,20 +129,21 @@ def legacy_from_pretrained_to_config(
         elif key == "enable_torch_compile_audio_vae":
             compile_config["audio_vae_enabled"] = value
         elif key == "torch_compile_kwargs":
-            remaining: dict[str, Any] = (dict(deepcopy(value)) if isinstance(value, Mapping) else {})
+            remaining: dict[str, Any] = dict(deepcopy(value)) if isinstance(value, Mapping) else {}
             for first_class in _COMPILE_TYPED_KEYS:
                 if first_class in remaining:
                     compile_config[first_class] = remaining.pop(first_class)
             if remaining:
                 compile_config["extras"] = remaining
         elif key in {
-                "torch_compile_kwargs_dit",
-                "torch_compile_kwargs_text_encoder",
-                "torch_compile_kwargs_vae",
-                "torch_compile_kwargs_audio_vae",
+            "torch_compile_kwargs_dit",
+            "torch_compile_kwargs_text_encoder",
+            "torch_compile_kwargs_vae",
+            "torch_compile_kwargs_audio_vae",
         }:
-            compile_config[key[len("torch_compile_kwargs_"):] +
-                           "_kwargs"] = (dict(deepcopy(value)) if isinstance(value, Mapping) else {})
+            compile_config[key[len("torch_compile_kwargs_") :] + "_kwargs"] = (
+                dict(deepcopy(value)) if isinstance(value, Mapping) else {}
+            )
         elif key == "ltx2_vae_tiling":
             pipeline["vae_tiling"] = value
         elif key == "config_model_path":
@@ -208,7 +213,9 @@ def legacy_from_pretrained_to_config(
     return parse_config(GeneratorConfig, raw)
 
 
-def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, Any], ) -> FastVideoArgs:
+def generator_config_to_fastvideo_args(
+    config: GeneratorConfig | Mapping[str, Any],
+) -> FastVideoArgs:
     normalized = normalize_generator_config(config)
     unsupported = []
     if normalized.pipeline.preset is not None:
@@ -250,11 +257,11 @@ def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, An
     if normalized.pipeline.vae_tiling is not None:
         kwargs["ltx2_vae_tiling"] = normalized.pipeline.vae_tiling
     if engine.compile.text_encoder_enabled is not None:
-        kwargs["enable_torch_compile_text_encoder"] = (engine.compile.text_encoder_enabled)
+        kwargs["enable_torch_compile_text_encoder"] = engine.compile.text_encoder_enabled
     if engine.compile.vae_enabled is not None:
         kwargs["enable_torch_compile_vae"] = engine.compile.vae_enabled
     if engine.compile.audio_vae_enabled is not None:
-        kwargs["enable_torch_compile_audio_vae"] = (engine.compile.audio_vae_enabled)
+        kwargs["enable_torch_compile_audio_vae"] = engine.compile.audio_vae_enabled
     if engine.compile.dit_kwargs:
         kwargs["torch_compile_kwargs_dit"] = deepcopy(engine.compile.dit_kwargs)
     if engine.compile.text_encoder_kwargs:
@@ -275,6 +282,7 @@ def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, An
         # typed surface accepts a string and does the wiring here so
         # downstream code can rely on a single source of truth.
         from fastvideo.layers.quantization import get_quantization_config
+
         _resolved_quant_cls = get_quantization_config(quantization.transformer_quant)
         kwargs["transformer_quant"] = _resolved_quant_cls()
 
@@ -311,8 +319,10 @@ def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, An
     return FastVideoArgs.from_kwargs(**kwargs)
 
 
-def normalize_generation_request(request: GenerationRequest | Mapping[str, Any], ) -> GenerationRequest:
-    normalized = (request if isinstance(request, GenerationRequest) else parse_config(GenerationRequest, request))
+def normalize_generation_request(
+    request: GenerationRequest | Mapping[str, Any],
+) -> GenerationRequest:
+    normalized = request if isinstance(request, GenerationRequest) else parse_config(GenerationRequest, request)
 
     if not hasattr(normalized, EXPLICIT_PATHS_ATTR):
         # Request wasn't bound through the parser (e.g. constructed
@@ -383,7 +393,9 @@ def request_to_sampling_param(
     return sampling_param
 
 
-def expand_request_prompt_batch(request: GenerationRequest, ) -> list[GenerationRequest]:
+def expand_request_prompt_batch(
+    request: GenerationRequest,
+) -> list[GenerationRequest]:
     if not isinstance(request.prompt, list):
         return [request]
 
@@ -404,7 +416,9 @@ def _looks_like_run_or_serve_config(raw: Mapping[str, Any]) -> bool:
     return isinstance(raw.get("generator"), Mapping)
 
 
-def _compile_config_to_torch_kwargs(compile_config: CompileConfig, ) -> dict[str, Any]:
+def _compile_config_to_torch_kwargs(
+    compile_config: CompileConfig,
+) -> dict[str, Any]:
     """Flatten typed ``CompileConfig`` back to a ``torch_compile_kwargs``
     dict that the legacy ``FastVideoArgs`` path still expects.
 
@@ -423,7 +437,9 @@ def _compile_config_to_torch_kwargs(compile_config: CompileConfig, ) -> dict[str
     return out
 
 
-def _sampling_param_to_request_raw(sampling_param: SamplingParam | None, ) -> dict[str, Any]:
+def _sampling_param_to_request_raw(
+    sampling_param: SamplingParam | None,
+) -> dict[str, Any]:
     if sampling_param is None:
         return {}
 
@@ -485,10 +501,11 @@ def explicit_request_updates(request: GenerationRequest) -> dict[str, Any]:
     :func:`fastvideo.api.compat.normalize_generation_request`. Calling on
     a raw ``GenerationRequest()`` asserts.
     """
-    assert hasattr(request,
-                   EXPLICIT_PATHS_ATTR), ("GenerationRequest reached explicit_request_updates without tracking; "
-                                          "every entry point must route through normalize_generation_request "
-                                          "or parse_config first")
+    assert hasattr(request, EXPLICIT_PATHS_ATTR), (
+        "GenerationRequest reached explicit_request_updates without tracking; "
+        "every entry point must route through normalize_generation_request "
+        "or parse_config first"
+    )
     paths = get_explicit_paths(request)
     raw = _build_sparse_raw_from_paths(request, paths)
     return _extract_request_updates(raw)
@@ -602,17 +619,17 @@ def register_continuation_kind(kind: str) -> None:
 
 def _validate_continuation_state(state: ContinuationState) -> None:
     if not isinstance(state.kind, str) or not state.kind:
-        raise ValueError("GenerationRequest.state.kind must be a non-empty string; got "
-                         f"{state.kind!r}")
+        raise ValueError(f"GenerationRequest.state.kind must be a non-empty string; got {state.kind!r}")
     if not isinstance(state.payload, Mapping):
-        raise ValueError(f"GenerationRequest.state.payload must be a mapping; got "
-                         f"{type(state.payload).__name__}")
+        raise ValueError(f"GenerationRequest.state.payload must be a mapping; got {type(state.payload).__name__}")
     if state.kind not in _KNOWN_CONTINUATION_KINDS:
         known = sorted(_KNOWN_CONTINUATION_KINDS)
-        raise ValueError(f"Unknown ContinuationState kind {state.kind!r}; registered "
-                         f"kinds: {known}. Import the model family that owns this kind "
-                         "(e.g. `import fastvideo.pipelines.basic.ltx2.continuation`) "
-                         "to register it, or drop the state field.")
+        raise ValueError(
+            f"Unknown ContinuationState kind {state.kind!r}; registered "
+            f"kinds: {known}. Import the model family that owns this kind "
+            "(e.g. `import fastvideo.pipelines.basic.ltx2.continuation`) "
+            "to register it, or drop the state field."
+        )
 
 
 def _fan_out_batched_input_value(

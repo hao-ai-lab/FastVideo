@@ -52,6 +52,7 @@ class ClapScoreMetric(BaseMetric):
         if self._model is not None:
             return
         from transformers import ClapModel, ClapProcessor
+
         self._processor = ClapProcessor.from_pretrained(self._model_name)
         self._model = ClapModel.from_pretrained(self._model_name).to(self.device)
         self._model.eval()
@@ -59,6 +60,7 @@ class ClapScoreMetric(BaseMetric):
     def _load_audio(self, audio_path: str):
         import librosa
         import pyloudnorm as pyln
+
         audio, _ = librosa.load(audio_path, sr=CLAP_SAMPLE_RATE, mono=True)
         return pyln.normalize.peak(audio, -1.0)
 

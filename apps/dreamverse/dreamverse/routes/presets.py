@@ -4,6 +4,7 @@ Exports two routers:
 - ``prompt_config_router``: always registered.
 - ``curated_presets_router``: registered only when ``DEVTOOLS_ENABLED``.
 """
+
 from __future__ import annotations
 # pyright: reportMissingTypeArgument=false
 
@@ -130,10 +131,10 @@ async def save_prompt_system_config(payload: PromptConfigUpdateRequest):
 async def get_curated_presets():
     """Get curated presets with devtools overlays applied."""
     file_path = Path(CURATED_PRESETS_FILE_PATH)
-    fallback_path = (Path(CURATED_PRESETS_FALLBACK_FILE_PATH) if CURATED_PRESETS_FALLBACK_FILE_PATH else None)
+    fallback_path = Path(CURATED_PRESETS_FALLBACK_FILE_PATH) if CURATED_PRESETS_FALLBACK_FILE_PATH else None
     try:
         overlay_presets = _load_curated_presets_file(file_path)
-        fallback_presets = (_load_curated_presets_file(fallback_path) if fallback_path is not None else [])
+        fallback_presets = _load_curated_presets_file(fallback_path) if fallback_path is not None else []
         presets = _merge_curated_presets(
             fallback_presets,
             overlay_presets,
@@ -164,22 +165,22 @@ async def append_curated_preset(payload: AppendCuratedPresetRequest):
         )
 
     file_path = Path(CURATED_PRESETS_FILE_PATH)
-    fallback_path = (Path(CURATED_PRESETS_FALLBACK_FILE_PATH) if CURATED_PRESETS_FALLBACK_FILE_PATH else None)
+    fallback_path = Path(CURATED_PRESETS_FALLBACK_FILE_PATH) if CURATED_PRESETS_FALLBACK_FILE_PATH else None
     try:
         overlay_presets = _load_curated_presets_file(file_path)
-        fallback_presets = (_load_curated_presets_file(fallback_path) if fallback_path is not None else [])
+        fallback_presets = _load_curated_presets_file(fallback_path) if fallback_path is not None else []
         existing_ids = {
             str(item.get("id", "")).strip().lower()
             for item in _merge_curated_presets(
                 fallback_presets,
                 overlay_presets,
-            ) if isinstance(item, dict)
+            )
+            if isinstance(item, dict)
         }
         if preset_id.lower() in existing_ids:
             raise HTTPException(
                 status_code=409,
-                detail=("Preset id already exists in curated presets file: "
-                        f"{preset_id}"),
+                detail=(f"Preset id already exists in curated presets file: {preset_id}"),
             )
 
         next_entry = {
@@ -192,10 +193,12 @@ async def append_curated_preset(payload: AppendCuratedPresetRequest):
         return {
             "type": "curated_preset_appended",
             "preset": next_entry,
-            "count": len(_merge_curated_presets(
-                fallback_presets,
-                overlay_presets,
-            )),
+            "count": len(
+                _merge_curated_presets(
+                    fallback_presets,
+                    overlay_presets,
+                )
+            ),
             "file_path": str(file_path),
             "fallback_file_path": (str(fallback_path) if fallback_path is not None else None),
         }

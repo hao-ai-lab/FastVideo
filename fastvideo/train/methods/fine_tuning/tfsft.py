@@ -8,11 +8,11 @@ from typing import Any
 import torch
 
 from fastvideo.train.methods.fine_tuning.dfsft import (
-    DiffusionForcingSFTMethod, )
+    DiffusionForcingSFTMethod,
+)
 
 
 class TeacherForcingSFTMethod(DiffusionForcingSFTMethod):
-
     def _predict_noise(
         self,
         noisy_latents: torch.Tensor,

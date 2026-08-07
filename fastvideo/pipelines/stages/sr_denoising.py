@@ -16,7 +16,7 @@ from tqdm.auto import tqdm
 
 from fastvideo.attention import get_attn_backend
 from fastvideo.attention.selector import component_attention_backend
-from fastvideo.distributed import (get_local_torch_device, get_world_group)
+from fastvideo.distributed import get_local_torch_device, get_world_group
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
@@ -30,12 +30,14 @@ from fastvideo.platforms import AttentionBackendEnum
 try:
     from fastvideo.attention.backends.vmoba import VMOBAAttentionBackend
     from fastvideo.utils import is_vmoba_available
+
     vmoba_attn_available = is_vmoba_available()
 except ImportError:
     vmoba_attn_available = False
 
 try:
-    from fastvideo.attention.backends.video_sparse_attn import (VideoSparseAttentionBackend)
+    from fastvideo.attention.backends.video_sparse_attn import VideoSparseAttentionBackend
+
     vsa_available = True
 except ImportError:
     vsa_available = False
@@ -46,7 +48,7 @@ logger = init_logger(__name__)
 class SRDenoisingStage(PipelineStage):
     """
     Stage for running the denoising loop in SR diffusion pipelines. Used by Hunyuan15 SR pipeline.
-    
+
     This stage handles the iterative denoising process that transforms
     the initial noise into the final output.
     """
@@ -62,18 +64,21 @@ class SRDenoisingStage(PipelineStage):
         self.attn_backend = get_attn_backend(
             head_size=attn_head_size,
             dtype=torch.float16,  # TODO(will): hack
-            supported_attention_backends=(AttentionBackendEnum.VIDEO_SPARSE_ATTN, AttentionBackendEnum.VMOBA_ATTN,
-                                          AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA,
-                                          AttentionBackendEnum.SAGE_ATTN_THREE),  # hack
+            supported_attention_backends=(
+                AttentionBackendEnum.VIDEO_SPARSE_ATTN,
+                AttentionBackendEnum.VMOBA_ATTN,
+                AttentionBackendEnum.FLASH_ATTN,
+                AttentionBackendEnum.TORCH_SDPA,
+                AttentionBackendEnum.SAGE_ATTN_THREE,
+            ),  # hack
             # See DenoisingStage: use this transformer's recorded decision
             # rather than the environment.
             requested=component_attention_backend(self.transformer),
         )
 
     def add_noise_to_lq(self, lq_latents: torch.Tensor, strength: float = 0.7) -> torch.Tensor:
-
         def expand_dims(tensor: torch.Tensor, ndim: int):
-            shape = tensor.shape + (1, ) * (ndim - tensor.ndim)
+            shape = tensor.shape + (1,) * (ndim - tensor.ndim)
             return tensor.reshape(shape)
 
         noise = torch.randn_like(lq_latents)
@@ -88,11 +93,11 @@ class SRDenoisingStage(PipelineStage):
     ) -> ForwardBatch:
         """
         Run the denoising loop.
-        
+
         Args:
             batch: The current batch information.
             fastvideo_args: The inference arguments.
-            
+
         Returns:
             The batch with denoised latents.
         """
@@ -124,7 +129,9 @@ class SRDenoisingStage(PipelineStage):
         logger.info("timesteps: %s", timesteps)
         num_inference_steps = len(timesteps)
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
-        assert num_inference_steps == batch.num_inference_steps_sr, "num_inference_steps_sr must match the number of timesteps"
+        assert num_inference_steps == batch.num_inference_steps_sr, (
+            "num_inference_steps_sr must match the number of timesteps"
+        )
 
         pos_cond_kwargs = self.prepare_extra_func_kwargs(
             self.transformer.forward,
@@ -168,7 +175,7 @@ class SRDenoisingStage(PipelineStage):
         cond_latents = torch.cat([batch.video_latent, torch.zeros_like(latents)], dim=1).to(target_dtype)
         condition = torch.concat([cond_latents, lq_cond_latents], dim=1)
         zero_lq_condition = condition.clone()
-        zero_lq_condition[:, c + 1:2 * c + 1] = torch.zeros_like(lq_latents)
+        zero_lq_condition[:, c + 1 : 2 * c + 1] = torch.zeros_like(lq_latents)
         zero_lq_condition[:, 2 * c + 1] = 0
 
         latent_model_input = latents.to(target_dtype)
@@ -178,7 +185,7 @@ class SRDenoisingStage(PipelineStage):
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 # Skip if interrupted
-                if hasattr(self, 'interrupt') and self.interrupt:
+                if hasattr(self, "interrupt") and self.interrupt:
                     continue
 
                 latent_model_input = latents.to(target_dtype)
@@ -199,15 +206,20 @@ class SRDenoisingStage(PipelineStage):
                 latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
 
                 # Prepare inputs for transformer
-                guidance_expand = (torch.tensor(
-                    [fastvideo_args.pipeline_config.embedded_cfg_scale] * latent_model_input.shape[0],
-                    dtype=torch.float32,
-                    device=get_local_torch_device(),
-                ).to(target_dtype) * 1000.0 if fastvideo_args.pipeline_config.embedded_cfg_scale is not None else None)
+                guidance_expand = (
+                    torch.tensor(
+                        [fastvideo_args.pipeline_config.embedded_cfg_scale] * latent_model_input.shape[0],
+                        dtype=torch.float32,
+                        device=get_local_torch_device(),
+                    ).to(target_dtype)
+                    * 1000.0
+                    if fastvideo_args.pipeline_config.embedded_cfg_scale is not None
+                    else None
+                )
 
                 # Predict noise residual
                 with torch.autocast(device_type="cuda", dtype=target_dtype, enabled=autocast_enabled):
-                    if (vsa_available and self.attn_backend == VideoSparseAttentionBackend):
+                    if vsa_available and self.attn_backend == VideoSparseAttentionBackend:
                         self.attn_metadata_builder_cls = self.attn_backend.get_builder_cls()
 
                         if self.attn_metadata_builder_cls is not None:
@@ -224,18 +236,20 @@ class SRDenoisingStage(PipelineStage):
                             assert attn_metadata is not None, "attn_metadata cannot be None"
                         else:
                             attn_metadata = None
-                    elif (vmoba_attn_available and self.attn_backend == VMOBAAttentionBackend):
+                    elif vmoba_attn_available and self.attn_backend == VMOBAAttentionBackend:
                         self.attn_metadata_builder_cls = self.attn_backend.get_builder_cls()
                         if self.attn_metadata_builder_cls is not None:
                             self.attn_metadata_builder = self.attn_metadata_builder_cls()
                             # Prepare V-MoBA parameters from config
                             moba_params = fastvideo_args.moba_config.copy()
-                            moba_params.update({
-                                "current_timestep": i,
-                                "raw_latent_shape": batch.raw_latent_shape[2:5],
-                                "patch_size": fastvideo_args.pipeline_config.dit_config.patch_size,
-                                "device": get_local_torch_device(),
-                            })
+                            moba_params.update(
+                                {
+                                    "current_timestep": i,
+                                    "raw_latent_shape": batch.raw_latent_shape[2:5],
+                                    "patch_size": fastvideo_args.pipeline_config.dit_config.patch_size,
+                                    "device": get_local_torch_device(),
+                                }
+                            )
                             attn_metadata = self.attn_metadata_builder.build(**moba_params)
                             assert attn_metadata is not None, "attn_metadata cannot be None"
                         else:
@@ -248,26 +262,29 @@ class SRDenoisingStage(PipelineStage):
                     # fastvideo_args or training_args, and attn_metadata.
                     batch.is_cfg_negative = False
                     with set_forward_context(
-                            current_timestep=i,
-                            attn_metadata=attn_metadata,
-                            forward_batch=batch,
-                            # fastvideo_args=fastvideo_args
+                        current_timestep=i,
+                        attn_metadata=attn_metadata,
+                        forward_batch=batch,
+                        # fastvideo_args=fastvideo_args
                     ):
                         # Run transformer
-                        noise_pred = self.transformer(latent_model_input,
-                                                      prompt_embeds,
-                                                      t_expand,
-                                                      guidance=guidance_expand,
-                                                      timestep_r=timesteps_r,
-                                                      **pos_cond_kwargs,
-                                                      **image_kwargs)
+                        noise_pred = self.transformer(
+                            latent_model_input,
+                            prompt_embeds,
+                            t_expand,
+                            guidance=guidance_expand,
+                            timestep_r=timesteps_r,
+                            **pos_cond_kwargs,
+                            **image_kwargs,
+                        )
 
                     # Compute the previous noisy sample
                     latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
 
                 # Update progress bar
-                if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and
-                                               (i + 1) % self.scheduler.order == 0 and progress_bar is not None):
+                if i == len(timesteps) - 1 or (
+                    (i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0 and progress_bar is not None
+                ):
                     progress_bar.update()
 
         # Update batch with final latents
@@ -287,11 +304,11 @@ class SRDenoisingStage(PipelineStage):
     def prepare_extra_func_kwargs(self, func, kwargs) -> dict[str, Any]:
         """
         Prepare extra kwargs for the scheduler step / denoise step.
-        
+
         Args:
             func: The function to prepare kwargs for.
             kwargs: The kwargs to prepare.
-            
+
         Returns:
             The prepared kwargs.
         """
@@ -305,11 +322,11 @@ class SRDenoisingStage(PipelineStage):
     def progress_bar(self, iterable: Iterable | None = None, total: int | None = None) -> tqdm:
         """
         Create a progress bar for the denoising process.
-        
+
         Args:
             iterable: The iterable to iterate over.
             total: The total number of items.
-            
+
         Returns:
             A tqdm progress bar.
         """
@@ -332,8 +349,11 @@ class SRDenoisingStage(PipelineStage):
         result.add_check("eta", batch.eta, V.non_negative_float)
         result.add_check("generator", batch.generator, V.generator_or_list_generators)
         result.add_check("do_classifier_free_guidance", batch.do_classifier_free_guidance, V.bool_value)
-        result.add_check("negative_prompt_embeds", batch.negative_prompt_embeds,
-                         lambda x: not batch.do_classifier_free_guidance or V.list_not_empty(x))
+        result.add_check(
+            "negative_prompt_embeds",
+            batch.negative_prompt_embeds,
+            lambda x: not batch.do_classifier_free_guidance or V.list_not_empty(x),
+        )
         return result
 
     def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:

@@ -56,10 +56,13 @@ class LTX2AudioDecodingStage(PipelineStage):
         audio_latents = audio_latents.to(device)
 
         disable_autocast = os.getenv("LTX2_DISABLE_AUDIO_AUTOCAST", "1") == "1"
-        with torch.no_grad(), torch.autocast(
+        with (
+            torch.no_grad(),
+            torch.autocast(
                 device_type="cuda",
                 dtype=audio_latents.dtype,
                 enabled=not disable_autocast,
+            ),
         ):
             decoded_spec = self.audio_decoder(audio_latents)
             audio_wave = self.vocoder(decoded_spec).squeeze(0).float()

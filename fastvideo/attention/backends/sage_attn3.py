@@ -3,15 +3,18 @@
 import torch
 from sageattn3 import sageattn3_blackwell
 
-from fastvideo.attention.backends.abstract import (AttentionBackend, AttentionImpl, AttentionMetadata,
-                                                   AttentionMetadataBuilder)
+from fastvideo.attention.backends.abstract import (
+    AttentionBackend,
+    AttentionImpl,
+    AttentionMetadata,
+    AttentionMetadataBuilder,
+)
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 
 
 class SageAttention3Backend(AttentionBackend):
-
     accept_output_buffer: bool = True
 
     @staticmethod
@@ -40,7 +43,6 @@ class SageAttention3Backend(AttentionBackend):
 
 
 class SageAttention3Impl(AttentionImpl):
-
     def __init__(
         self,
         num_heads: int,

@@ -9,6 +9,7 @@ This file captures only configuration. The module implementation lives in
 fastvideo/models/dits/magi_human.py and the pipeline wiring in
 fastvideo/pipelines/basic/magi_human/.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -19,7 +20,7 @@ from fastvideo.configs.models.dits.base import DiTArchConfig, DiTConfig
 def _is_block_layer(n: str, m) -> bool:
     # Match "block.layers.<idx>" — the FSDP shard boundary for MagiHuman.
     parts = n.split(".")
-    return (len(parts) >= 3 and parts[0] == "block" and parts[1] == "layers" and str.isdigit(parts[2]))
+    return len(parts) >= 3 and parts[0] == "block" and parts[1] == "layers" and str.isdigit(parts[2])
 
 
 @dataclass

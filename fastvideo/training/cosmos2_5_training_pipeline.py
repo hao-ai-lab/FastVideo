@@ -9,6 +9,7 @@ Follows the same structure as wan_training_pipeline.py. Key Cosmos 2.5 specifics
 - Timesteps are sigma values in [0, 1] (flow matching); (B,) is auto-expanded
   inside the model to (B, 1).
 """
+
 from copy import deepcopy
 
 import torch
@@ -16,7 +17,7 @@ import torch
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.logger import init_logger
-from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (FlowUniPCMultistepScheduler)
+from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import FlowUniPCMultistepScheduler
 from fastvideo.pipelines.basic.cosmos.cosmos2_5_pipeline import Cosmos2_5Pipeline
 from fastvideo.pipelines.pipeline_batch_info import TrainingBatch
 from fastvideo.training.training_pipeline import TrainingPipeline

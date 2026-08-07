@@ -18,7 +18,6 @@ from fastvideo.eval.types import MetricResult
 
 @register("vbench.imaging_quality")
 class ImagingQualityMetric(BaseMetric):
-
     name = "vbench.imaging_quality"
     requires_reference = False
     higher_is_better = True
@@ -39,6 +38,7 @@ class ImagingQualityMetric(BaseMetric):
         if self._model is not None:
             return
         import pyiqa
+
         self._model = pyiqa.create_metric("musiq-spaq", device=self.device)
         self._model.eval()
 
@@ -61,7 +61,7 @@ class ImagingQualityMetric(BaseMetric):
         chunk = self._chunk_size or 32
         chunks: list[torch.Tensor] = []
         for i in range(0, T, chunk):
-            scores = self._model(frames[i:i + chunk])
+            scores = self._model(frames[i : i + chunk])
             chunks.append(scores.squeeze(-1))
         per_frame = torch.cat(chunks, dim=0)  # (T,)
         return MetricResult(

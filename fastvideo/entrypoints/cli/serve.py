@@ -36,12 +36,15 @@ class ServeSubcommand(CLISubcommand):
         # its deps stay out of REST-only deployments via lazy import.
         if serve_config.streaming is not None:
             from fastvideo.entrypoints.streaming.server import (
-                run_server as run_streaming_server, )
+                run_server as run_streaming_server,
+            )
+
             run_streaming_server(serve_config)
             return
 
         from fastvideo.entrypoints.openai.api_server import (
-            run_server, )
+            run_server,
+        )
 
         logger.info(
             "Server will listen on %s:%d",
@@ -60,8 +63,9 @@ class ServeSubcommand(CLISubcommand):
 
     def validate(self, args: argparse.Namespace) -> None:
         if not args.config:
-            raise ValueError("fastvideo serve requires --config PATH; use a nested "
-                             "serve config plus optional dotted overrides")
+            raise ValueError(
+                "fastvideo serve requires --config PATH; use a nested serve config plus optional dotted overrides"
+            )
         if not os.path.exists(args.config):
             raise ValueError(f"Config file not found: {args.config}")
         setattr(

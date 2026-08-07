@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """Persist the initial-image blob attached to a streaming session."""
+
 from __future__ import annotations
 
 import base64
@@ -59,8 +60,7 @@ def persist_session_init_image(
 
     mime = payload.get("mime")
     if mime not in _ACCEPTED_MIMES:
-        raise ValueError(f"session init image mime {mime!r} is not one of "
-                         f"{sorted(_ACCEPTED_MIMES)}")
+        raise ValueError(f"session init image mime {mime!r} is not one of {sorted(_ACCEPTED_MIMES)}")
     data_b64 = payload.get("data")
     if not isinstance(data_b64, str):
         raise ValueError("session init image data must be a base64 string")
@@ -69,8 +69,7 @@ def persist_session_init_image(
     except (binascii.Error, ValueError) as exc:
         raise ValueError(f"session init image data is not valid base64: {exc}") from exc
     if len(data) > _MAX_IMAGE_BYTES:
-        raise ValueError(f"session init image is {len(data)} bytes; limit is "
-                         f"{_MAX_IMAGE_BYTES}")
+        raise ValueError(f"session init image is {len(data)} bytes; limit is {_MAX_IMAGE_BYTES}")
     if len(data) == 0:
         raise ValueError("session init image data is empty")
 

@@ -17,6 +17,7 @@ and can be hot-reloaded via :meth:`PromptEnhancer.reload_system_prompts`.
 The streaming server's management endpoint calls that method in
 response to a ``rewrite_seed_prompts_started`` frame.
 """
+
 from __future__ import annotations
 
 import enum
@@ -50,16 +51,22 @@ class _SystemPrompts:
 
 
 _DEFAULT_SYSTEM_PROMPTS = _SystemPrompts(
-    enhance=("You are a prompt enhancer for cinematic video generation. Given "
-             "a user prompt, produce an enhanced prompt that is more vivid, "
-             "specific, and concrete. Keep the subject intact; add lighting, "
-             "camera, and motion detail. Reply with just the enhanced prompt."),
-    auto_extend=("You are a video continuation assistant. Given the current "
-                 "sequence of prompts, produce one new prompt that naturally "
-                 "continues the sequence. Reply with just the next prompt."),
-    rewrite=("You are a creative prompt rewriter. Given a seed prompt, produce "
-             "a set of alternative prompts that explore different angles, "
-             "styles, and moods. Reply with one prompt per line."),
+    enhance=(
+        "You are a prompt enhancer for cinematic video generation. Given "
+        "a user prompt, produce an enhanced prompt that is more vivid, "
+        "specific, and concrete. Keep the subject intact; add lighting, "
+        "camera, and motion detail. Reply with just the enhanced prompt."
+    ),
+    auto_extend=(
+        "You are a video continuation assistant. Given the current "
+        "sequence of prompts, produce one new prompt that naturally "
+        "continues the sequence. Reply with just the next prompt."
+    ),
+    rewrite=(
+        "You are a creative prompt rewriter. Given a seed prompt, produce "
+        "a set of alternative prompts that explore different angles, "
+        "styles, and moods. Reply with one prompt per line."
+    ),
 )
 
 

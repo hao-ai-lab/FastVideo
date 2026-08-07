@@ -39,7 +39,7 @@ class LongCatKVCacheInitStage(PipelineStage):
         """Initialize KV cache from conditioning latents."""
 
         # Check if KV cache is enabled
-        use_kv_cache = getattr(fastvideo_args.pipeline_config, 'use_kv_cache', True)
+        use_kv_cache = getattr(fastvideo_args.pipeline_config, "use_kv_cache", True)
         if not use_kv_cache:
             batch.kv_cache_dict = {}
             batch.use_kv_cache = False
@@ -47,7 +47,7 @@ class LongCatKVCacheInitStage(PipelineStage):
             return batch
 
         batch.use_kv_cache = True
-        offload_kv_cache = getattr(fastvideo_args.pipeline_config, 'offload_kv_cache', False)
+        offload_kv_cache = getattr(fastvideo_args.pipeline_config, "offload_kv_cache", False)
 
         # Get conditioning latents
         num_cond_latents = batch.num_cond_latents
@@ -59,8 +59,9 @@ class LongCatKVCacheInitStage(PipelineStage):
         # Extract conditioning latents
         cond_latents = batch.latents[:, :, :num_cond_latents].clone()
 
-        logger.info("Initializing KV cache for %d conditioning latents, shape: %s", num_cond_latents,
-                    cond_latents.shape)
+        logger.info(
+            "Initializing KV cache for %d conditioning latents, shape: %s", num_cond_latents, cond_latents.shape
+        )
 
         # Timestep = 0 for conditioning (they are "clean")
         B = cond_latents.shape[0]
@@ -74,20 +75,20 @@ class LongCatKVCacheInitStage(PipelineStage):
         empty_embeds = torch.zeros(B, max_seq_len, caption_dim, device=cond_latents.device, dtype=cond_latents.dtype)
 
         # Get transformer dtype
-        if hasattr(self.transformer, 'module'):
+        if hasattr(self.transformer, "module"):
             transformer_dtype = next(self.transformer.module.parameters()).dtype
         else:
             transformer_dtype = next(self.transformer.parameters()).dtype
 
         # Run transformer with return_kv=True, skip_crs_attn=True
         with (
-                torch.no_grad(),
-                set_forward_context(
-                    current_timestep=0,
-                    attn_metadata=None,
-                    forward_batch=batch,
-                ),
-                torch.autocast(device_type='cuda', dtype=transformer_dtype),
+            torch.no_grad(),
+            set_forward_context(
+                current_timestep=0,
+                attn_metadata=None,
+                forward_batch=batch,
+            ),
+            torch.autocast(device_type="cuda", dtype=transformer_dtype),
         ):
             _, kv_cache_dict = self.transformer(
                 hidden_states=cond_latents.to(transformer_dtype),
@@ -106,7 +107,11 @@ class LongCatKVCacheInitStage(PipelineStage):
         # After this, batch.latents contains ONLY noise frames
         batch.latents = batch.latents[:, :, num_cond_latents:]
 
-        logger.info("KV cache initialized: %d blocks, offload=%s, remaining latents shape: %s", len(kv_cache_dict),
-                    offload_kv_cache, batch.latents.shape)
+        logger.info(
+            "KV cache initialized: %d blocks, offload=%s, remaining latents shape: %s",
+            len(kv_cache_dict),
+            offload_kv_cache,
+            batch.latents.shape,
+        )
 
         return batch

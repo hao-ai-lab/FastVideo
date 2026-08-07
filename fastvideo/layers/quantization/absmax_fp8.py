@@ -47,7 +47,6 @@ class AbsMaxFP8Config(QuantizationConfig):
 
 
 class AbsMaxFP8Parameter(nn.Parameter):
-
     def weight_loader(
         self,
         param: nn.Parameter,
@@ -57,13 +56,13 @@ class AbsMaxFP8Parameter(nn.Parameter):
         if len(loaded_weight.shape) == 0:
             loaded_weight = loaded_weight.reshape(1)
 
-        assert param.size() == loaded_weight.size(), (f"Tried to load weights of size {loaded_weight.size()}"
-                                                      f"to a parameter of size {param.size()}")
+        assert param.size() == loaded_weight.size(), (
+            f"Tried to load weights of size {loaded_weight.size()}to a parameter of size {param.size()}"
+        )
         param.data.copy_(loaded_weight)
 
 
 class AbsMaxFP8MergedParameter(nn.Parameter):
-
     def weight_loader(
         self,
         param: nn.Parameter,
@@ -91,7 +90,8 @@ class AbsMaxFP8MergedParameter(nn.Parameter):
             end_idx = start_idx + output_partition_sizes[share_id]
         else:
             raise ValueError(
-                f"AbsMaxFP8MergedParameter requires share_id to be ['q', 'k', 'v'] or int, got {share_id}.")
+                f"AbsMaxFP8MergedParameter requires share_id to be ['q', 'k', 'v'] or int, got {share_id}."
+            )
         if len(loaded_weight.shape) == 0:
             loaded_weight = loaded_weight.reshape(1)
         assert loaded_weight.numel() == 1
@@ -113,7 +113,9 @@ class AbsMaxFP8LinearMethod(LinearMethodBase):
         return AbsMaxFP8Parameter(scale, requires_grad=False)
 
     @staticmethod
-    def _merged_placeholder(output_partition_sizes: list[int], ) -> torch.nn.Parameter:
+    def _merged_placeholder(
+        output_partition_sizes: list[int],
+    ) -> torch.nn.Parameter:
         scale = torch.ones(
             sum(output_partition_sizes),
             dtype=torch.float32,
@@ -140,9 +142,9 @@ class AbsMaxFP8LinearMethod(LinearMethodBase):
         params_dtype: torch.dtype,
         **extra_weight_attrs,
     ) -> None:
-        assert params_dtype in [
-            torch.bfloat16, torch.float16, torch.float32
-        ], (f"AbsMaxFP8LinearMethod only supports bfloat16, float16, or float32 original dtype, got {params_dtype}.")
+        assert params_dtype in [torch.bfloat16, torch.float16, torch.float32], (
+            f"AbsMaxFP8LinearMethod only supports bfloat16, float16, or float32 original dtype, got {params_dtype}."
+        )
         weight = nn.Parameter(
             torch.empty(
                 sum(output_partition_sizes),
@@ -152,7 +154,9 @@ class AbsMaxFP8LinearMethod(LinearMethodBase):
             requires_grad=False,
         )
         if isinstance(layer, QKVParallelLinear | MergedColumnParallelLinear):
-            scale_weight = self._merged_placeholder(output_partition_sizes, )
+            scale_weight = self._merged_placeholder(
+                output_partition_sizes,
+            )
         else:
             scale_weight = self._convert_scale(extra_weight_attrs.get("scale_weight"))
         scale_input = self._convert_scale(extra_weight_attrs.get("scale_input"))

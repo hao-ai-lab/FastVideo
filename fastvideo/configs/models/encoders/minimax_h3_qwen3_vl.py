@@ -23,8 +23,9 @@ def _is_embeddings(name: str, module: Any) -> bool:
 
 def _is_vision_merger(name: str, module: Any) -> bool:
     parts = name.split(".")
-    return name.endswith("visual.merger") or (len(parts) >= 2 and parts[-2] == "deepstack_merger_list"
-                                              and parts[-1].isdigit())
+    return name.endswith("visual.merger") or (
+        len(parts) >= 2 and parts[-2] == "deepstack_merger_list" and parts[-1].isdigit()
+    )
 
 
 def _is_final_norm(name: str, module: Any) -> bool:
@@ -73,11 +74,13 @@ class MiniMaxH3Qwen3VLArchConfig(TextEncoderArchConfig):
     attention_bias: bool = False
     attention_dropout: float = 0.0
     rope_theta: float = 5000000.0
-    rope_scaling: dict[str, Any] | None = field(default_factory=lambda: {
-        "mrope_interleaved": True,
-        "mrope_section": [24, 20, 20],
-        "rope_type": "default",
-    })
+    rope_scaling: dict[str, Any] | None = field(
+        default_factory=lambda: {
+            "mrope_interleaved": True,
+            "mrope_section": [24, 20, 20],
+            "rope_type": "default",
+        }
+    )
     mrope_interleaved: bool = True
     mrope_section: tuple[int, int, int] = (24, 20, 20)
 
@@ -106,13 +109,15 @@ class MiniMaxH3Qwen3VLArchConfig(TextEncoderArchConfig):
 
     output_hidden_states: bool = True
     stacked_params_mapping: list[tuple[str, str, str | int]] = field(default_factory=list)
-    _fsdp_shard_conditions: list = field(default_factory=lambda: [
-        _is_language_transformer_layer,
-        _is_vision_transformer_layer,
-        _is_embeddings,
-        _is_vision_merger,
-        _is_final_norm,
-    ])
+    _fsdp_shard_conditions: list = field(
+        default_factory=lambda: [
+            _is_language_transformer_layer,
+            _is_vision_transformer_layer,
+            _is_embeddings,
+            _is_vision_merger,
+            _is_final_norm,
+        ]
+    )
 
     def __post_init__(self) -> None:
         rope_scaling = dict(self.rope_scaling or {})
@@ -131,8 +136,10 @@ class MiniMaxH3Qwen3VLArchConfig(TextEncoderArchConfig):
         self.rope_scaling = rope_scaling
 
         if self.vision_out_hidden_size != self.hidden_size:
-            raise ValueError("MiniMax H3 Qwen3-VL vision_out_hidden_size must match the language hidden_size "
-                             "for visual-token and DeepStack injection.")
+            raise ValueError(
+                "MiniMax H3 Qwen3-VL vision_out_hidden_size must match the language hidden_size "
+                "for visual-token and DeepStack injection."
+            )
 
         # H3 builds its presentation in the pipeline stage and tokenizes each
         # segment verbatim without adding tokenizer-owned presentation tokens.
@@ -161,8 +168,9 @@ class MiniMaxH3Qwen3VLConfig(TextEncoderConfig):
         architectures = flattened.get("architectures")
         if isinstance(architectures, str):
             architectures = [architectures]
-        if isinstance(architectures, list | tuple) and any(architecture in _OFFICIAL_ARCHITECTURES
-                                                           for architecture in architectures):
+        if isinstance(architectures, list | tuple) and any(
+            architecture in _OFFICIAL_ARCHITECTURES for architecture in architectures
+        ):
             flattened["architectures"] = ["MiniMaxH3Qwen3VLConditioner"]
 
         section = flattened.get("mrope_section")

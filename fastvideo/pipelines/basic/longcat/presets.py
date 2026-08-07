@@ -1,15 +1,18 @@
 # SPDX-License-Identifier: Apache-2.0
 """LongCat model family pipeline presets."""
+
 from fastvideo.api.presets import InferencePreset, PresetStageSpec
 
 _DENOISE_STAGE = PresetStageSpec(
     name="denoise",
     kind="denoising",
     description="Main denoising pass",
-    allowed_overrides=frozenset({
-        "num_inference_steps",
-        "guidance_scale",
-    }),
+    allowed_overrides=frozenset(
+        {
+            "num_inference_steps",
+            "guidance_scale",
+        }
+    ),
 )
 
 LONGCAT_T2V = InferencePreset(
@@ -18,7 +21,7 @@ LONGCAT_T2V = InferencePreset(
     model_family="longcat",
     description="LongCat-Video T2V at 480p",
     workload_type="t2v",
-    stage_schemas=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE,),
     defaults={
         "height": 480,
         "width": 848,
@@ -35,7 +38,7 @@ LONGCAT_I2V = InferencePreset(
     model_family="longcat",
     description="LongCat-Video I2V at 480p",
     workload_type="i2v",
-    stage_schemas=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE,),
     defaults={
         "height": 480,
         "width": 848,
@@ -51,7 +54,7 @@ LONGCAT_VC = InferencePreset(
     version=1,
     model_family="longcat",
     description="LongCat-Video continuation at 480p",
-    stage_schemas=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE,),
     defaults={
         "height": 480,
         "width": 848,

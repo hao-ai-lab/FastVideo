@@ -144,10 +144,9 @@ def baseline_value(records: list[Record], metric_key: str) -> float | None:
     return float(statistics.median(values))
 
 
-def build_latest_summary(records: list[Record],
-                         *,
-                         baseline_window: int = 5,
-                         run_source: str | None = None) -> list[Record]:
+def build_latest_summary(
+    records: list[Record], *, baseline_window: int = 5, run_source: str | None = None
+) -> list[Record]:
     rows: list[Record] = []
     for group in group_by_comparison_cohort(records).values():
         latest_candidates = group
@@ -161,7 +160,8 @@ def build_latest_summary(records: list[Record],
         gpu_type = str(latest.get("gpu_type") or "unknown")
         latest_index = next(index for index, record in enumerate(group) if record is latest)
         baseline_pool = [
-            record for record in group[:latest_index]
+            record
+            for record in group[:latest_index]
             if record.get("success", True) and is_baseline_eligible_record(record)
         ]
         baseline_records = baseline_pool[-baseline_window:]
@@ -203,22 +203,24 @@ def build_latest_summary(records: list[Record],
         success = bool(latest.get("success", True))
         status = "pass" if success else "fail"
 
-        rows.append({
-            "model_id": model_id,
-            "gpu_type": gpu_type,
-            "timestamp": latest.get("timestamp"),
-            "commit_sha": latest.get("commit_sha"),
-            **record_metadata(latest),
-            **record_comparison_metadata(latest),
-            "success": success,
-            "baseline_n": len(baseline_records),
-            "worst_regression_pct": worst_regression,
-            "threshold_exceeded_metrics": threshold_exceeded_metrics,
-            "failing_metrics": failing_metrics,
-            "computed_regression_status": "fail" if failing_metrics else "pass",
-            "status": status,
-            "metrics": metrics,
-        })
+        rows.append(
+            {
+                "model_id": model_id,
+                "gpu_type": gpu_type,
+                "timestamp": latest.get("timestamp"),
+                "commit_sha": latest.get("commit_sha"),
+                **record_metadata(latest),
+                **record_comparison_metadata(latest),
+                "success": success,
+                "baseline_n": len(baseline_records),
+                "worst_regression_pct": worst_regression,
+                "threshold_exceeded_metrics": threshold_exceeded_metrics,
+                "failing_metrics": failing_metrics,
+                "computed_regression_status": "fail" if failing_metrics else "pass",
+                "status": status,
+                "metrics": metrics,
+            }
+        )
 
     return sorted(rows, key=latest_row_sort_key)
 
@@ -238,16 +240,15 @@ def build_trends(records: list[Record]) -> list[Record]:
                 **record_metadata(record),
                 **record_comparison_metadata(record),
                 "success": bool(record.get("success", True)),
-                "metrics": {
-                    policy.key: safe_float(record.get(policy.key))
-                    for policy in metric_policies
-                },
+                "metrics": {policy.key: safe_float(record.get(policy.key)) for policy in metric_policies},
             }
             points.append(point)
-        trends.append({
-            "model_id": model_id,
-            "gpu_type": gpu_type,
-            **record_comparison_metadata(latest),
-            "points": points,
-        })
+        trends.append(
+            {
+                "model_id": model_id,
+                "gpu_type": gpu_type,
+                **record_comparison_metadata(latest),
+                "points": points,
+            }
+        )
     return sorted(trends, key=comparison_sort_key)

@@ -21,7 +21,6 @@ logger = init_logger(__name__)
 
 
 class IncrementalVideoWriter:
-
     def __init__(self, path: str, fps: int = 24, block_dir: str | None = None):
         self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="video_write_")
         self._path = path
@@ -76,11 +75,13 @@ class StreamingVideoGenerator(VideoGenerator):
     allowing incremental video generation with step-by-step control.
     """
 
-    def __init__(self,
-                 fastvideo_args: FastVideoArgs,
-                 executor_class: type[Executor],
-                 log_stats: bool,
-                 use_queue_mode: bool = True):
+    def __init__(
+        self,
+        fastvideo_args: FastVideoArgs,
+        executor_class: type[Executor],
+        log_stats: bool,
+        use_queue_mode: bool = True,
+    ):
         super().__init__(fastvideo_args, executor_class, log_stats)
         self.accumulated_frames: list[np.ndarray] = []
         self.sampling_param: SamplingParam | None = None
@@ -100,11 +101,12 @@ class StreamingVideoGenerator(VideoGenerator):
         )
 
     def reset(
-            self,
-            prompt: str = "A gameplay video of a cyberpunk city",
-            image_path: str | None = None,
-            num_frames: int = 120,  # Default max frames
-            **kwargs):
+        self,
+        prompt: str = "A gameplay video of a cyberpunk city",
+        image_path: str | None = None,
+        num_frames: int = 120,  # Default max frames
+        **kwargs,
+    ):
         self.accumulated_frames = []
         self.block_idx = 0
         self.block_dir = None
@@ -136,8 +138,11 @@ class StreamingVideoGenerator(VideoGenerator):
         self.sampling_param.height = align_to(self.sampling_param.height, 16)
         self.sampling_param.width = align_to(self.sampling_param.width, 16)
 
-        latents_size = [(self.sampling_param.num_frames - 1) // 4 + 1, self.sampling_param.height // 8,
-                        self.sampling_param.width // 8]
+        latents_size = [
+            (self.sampling_param.num_frames - 1) // 4 + 1,
+            self.sampling_param.height // 8,
+            self.sampling_param.width // 8,
+        ]
         n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
 
         self.sampling_param.return_frames = True
@@ -183,8 +188,9 @@ class StreamingVideoGenerator(VideoGenerator):
 
         return frames, block_future
 
-    async def step_async(self, keyboard_cond: torch.Tensor,
-                         mouse_cond: torch.Tensor) -> tuple[list[np.ndarray], Future | None]:
+    async def step_async(
+        self, keyboard_cond: torch.Tensor, mouse_cond: torch.Tensor
+    ) -> tuple[list[np.ndarray], Future | None]:
         if self.batch is None:
             raise RuntimeError("Call reset() before step_async()")
 

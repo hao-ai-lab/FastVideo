@@ -34,7 +34,8 @@ class CosmosArchConfig(DiTArchConfig):
             r"^transformer_blocks\.(\d+)\.ff\.net\.2\.(.*)$": r"transformer_blocks.\1.ff.fc_out.\2",
             r"^norm_out\.(.*)$": r"norm_out.\1",
             r"^proj_out\.(.*)$": r"proj_out.\1",
-        })
+        }
+    )
 
     lora_param_names_mapping: dict = field(
         default_factory=lambda: {
@@ -47,7 +48,8 @@ class CosmosArchConfig(DiTArchConfig):
             r"^transformer_blocks\.(\d+)\.attn2\.to_v\.(.*)$": r"transformer_blocks.\1.attn2.to_v.\2",
             r"^transformer_blocks\.(\d+)\.attn2\.to_out\.(.*)$": r"transformer_blocks.\1.attn2.to_out.\2",
             r"^transformer_blocks\.(\d+)\.ff\.(.*)$": r"transformer_blocks.\1.ff.\2",
-        })
+        }
+    )
 
     # Cosmos-specific config parameters based on transformer_cosmos.py
     # in_channels includes the condition_mask channel (16 latent + 1 cond = 17)

@@ -16,7 +16,6 @@ from fastvideo.eval.types import MetricResult
 
 @register("vbench.temporal_flickering")
 class TemporalFlickeringMetric(BaseMetric):
-
     name = "vbench.temporal_flickering"
     requires_reference = False
     higher_is_better = True

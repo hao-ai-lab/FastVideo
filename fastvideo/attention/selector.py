@@ -30,11 +30,12 @@ def backend_name_to_enum(backend_name: str) -> AttentionBackendEnum | None:
             loaded.
     """
     assert backend_name is not None
-    return AttentionBackendEnum[backend_name] if backend_name in AttentionBackendEnum.__members__ else \
-          None
+    return AttentionBackendEnum[backend_name] if backend_name in AttentionBackendEnum.__members__ else None
 
 
-def coerce_attn_backend(attn_backend: AttentionBackendEnum | str | None, ) -> AttentionBackendEnum | None:
+def coerce_attn_backend(
+    attn_backend: AttentionBackendEnum | str | None,
+) -> AttentionBackendEnum | None:
     """Normalize an explicit backend selection.
 
     Environment-variable parsing remains permissive via
@@ -44,19 +45,21 @@ def coerce_attn_backend(attn_backend: AttentionBackendEnum | str | None, ) -> At
     if attn_backend is None or isinstance(attn_backend, AttentionBackendEnum):
         return attn_backend
     if not isinstance(attn_backend, str) or not attn_backend.strip():
-        raise ValueError("attention backend must be a non-empty string, "
-                         f"an AttentionBackendEnum, or None; got {attn_backend!r}")
+        raise ValueError(
+            f"attention backend must be a non-empty string, an AttentionBackendEnum, or None; got {attn_backend!r}"
+        )
 
     backend_name = attn_backend.strip().upper()
     backend = backend_name_to_enum(backend_name)
     if backend is None:
-        raise ValueError(f"Unknown attention backend {attn_backend!r}. "
-                         f"Expected one of {sorted(AttentionBackendEnum.__members__)}")
+        raise ValueError(
+            f"Unknown attention backend {attn_backend!r}. Expected one of {sorted(AttentionBackendEnum.__members__)}"
+        )
     return backend
 
 
 def get_env_variable_attn_backend() -> AttentionBackendEnum | None:
-    '''
+    """
     Get the backend override specified by the FastVideo attention
     backend environment variable, if one is specified.
 
@@ -64,9 +67,9 @@ def get_env_variable_attn_backend() -> AttentionBackendEnum | None:
 
     * _Backend enum value if an override is specified
     * None otherwise
-    '''
+    """
     backend_name = os.environ.get(STR_BACKEND_ENV_VAR)
-    return (None if backend_name is None else backend_name_to_enum(backend_name))
+    return None if backend_name is None else backend_name_to_enum(backend_name)
 
 
 class _NoRequest:
@@ -76,6 +79,7 @@ class _NoRequest:
     resolved to automatic selection" — and a caller passing it wants automatic
     selection, not a fallback to whatever the environment says.
     """
+
     __slots__ = ()
 
     def __repr__(self) -> str:
@@ -177,8 +181,7 @@ def component_attention_backend(component: object) -> AttentionBackendEnum | _No
 def get_attn_backend(
     head_size: int,
     dtype: torch.dtype,
-    supported_attention_backends: tuple[AttentionBackendEnum, ...]
-    | None = None,
+    supported_attention_backends: tuple[AttentionBackendEnum, ...] | None = None,
     default_backend: AttentionBackendEnum | None = None,
     *,
     requested: AttentionBackendEnum | None | _NoRequest = NO_REQUEST,
@@ -239,8 +242,7 @@ def get_attn_backend(
 def _cached_get_attn_backend(
     head_size: int,
     dtype: torch.dtype,
-    supported_attention_backends: tuple[AttentionBackendEnum, ...]
-    | None = None,
+    supported_attention_backends: tuple[AttentionBackendEnum, ...] | None = None,
     default_backend: AttentionBackendEnum | None = None,
     *,
     requested: AttentionBackendEnum | None = None,
@@ -276,8 +278,8 @@ def _cached_get_attn_backend(
     # get device-specific attn_backend
     from fastvideo.platforms import current_platform
 
-    if (selected_backend is not None and selected_backend not in supported_attention_backends):
-        fallback_backend = (default_backend if default_backend in supported_attention_backends else None)
+    if selected_backend is not None and selected_backend not in supported_attention_backends:
+        fallback_backend = default_backend if default_backend in supported_attention_backends else None
         logger.warning(
             "Requested attention backend %s is not supported by this "
             "layer; supported backends are %s. Falling back to %s.",

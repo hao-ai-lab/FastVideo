@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """Flux2 text encoding stages."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -12,28 +13,27 @@ from fastvideo.forward_context import set_forward_context
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.text_encoding import TextEncodingStage
 
-FLUX2_SYSTEM_MESSAGE = ("You are an AI that reasons about image descriptions. You give structured "
-                        "responses focusing on object relationships, object\nattribution and actions "
-                        "without speculation.")
+FLUX2_SYSTEM_MESSAGE = (
+    "You are an AI that reasons about image descriptions. You give structured "
+    "responses focusing on object relationships, object\nattribution and actions "
+    "without speculation."
+)
 
 
 def _format_flux2_full_input(prompts: list[str], system_message: str) -> list[list[dict[str, Any]]]:
-    return [[
-        {
-            "role": "system",
-            "content": [{
-                "type": "text",
-                "text": system_message
-            }],
-        },
-        {
-            "role": "user",
-            "content": [{
-                "type": "text",
-                "text": prompt.replace("[IMG]", "")
-            }],
-        },
-    ] for prompt in prompts]
+    return [
+        [
+            {
+                "role": "system",
+                "content": [{"type": "text", "text": system_message}],
+            },
+            {
+                "role": "user",
+                "content": [{"type": "text", "text": prompt.replace("[IMG]", "")}],
+            },
+        ]
+        for prompt in prompts
+    ]
 
 
 def _prepare_flux2_text_ids(prompt_embeds: torch.Tensor) -> torch.Tensor:

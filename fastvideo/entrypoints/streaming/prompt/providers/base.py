@@ -8,6 +8,7 @@ instance. The shipped providers live in sibling modules
 provider layer is intentionally thin so the enhancer stays
 provider-agnostic.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -71,8 +72,7 @@ class LLMProvider(Protocol):
 
     name: str
 
-    async def complete(self, request: LLMRequest) -> LLMResponse:
-        ...
+    async def complete(self, request: LLMRequest) -> LLMResponse: ...
 
 
 __all__ = [

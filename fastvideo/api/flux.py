@@ -9,7 +9,6 @@ from fastvideo.api.sampling_param import SamplingParam
 
 @dataclass
 class FluxSamplingParam(SamplingParam):
-
     prompt: str | None = "a photo of a cat"
     negative_prompt: str = ""
 

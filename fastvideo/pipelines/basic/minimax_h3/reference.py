@@ -49,11 +49,16 @@ class MiniMaxH3Reference:
             raise ValueError(f"Unsupported MiniMax-H3 reference type: {self.media_type!r}.")
         if self.soundtrack is not None and self.media_type != "video":
             raise ValueError("Only a video reference may carry a separate soundtrack.")
-        if self.fps is not None and (self.media_type != "video" or isinstance(self.fps, bool)
-                                     or not isinstance(self.fps, Real) or self.fps <= 0):
+        if self.fps is not None and (
+            self.media_type != "video" or isinstance(self.fps, bool) or not isinstance(self.fps, Real) or self.fps <= 0
+        ):
             raise ValueError("Reference `fps` must be positive and is only valid for video.")
-        if self.sample_rate is not None and (self.media_type == "image" or isinstance(self.sample_rate, bool)
-                                             or not isinstance(self.sample_rate, Integral) or self.sample_rate <= 0):
+        if self.sample_rate is not None and (
+            self.media_type == "image"
+            or isinstance(self.sample_rate, bool)
+            or not isinstance(self.sample_rate, Integral)
+            or self.sample_rate <= 0
+        ):
             raise ValueError("Reference `sample_rate` must be positive and is only valid for audio-bearing media.")
 
 
@@ -168,10 +173,8 @@ def resolve_reference_image_size(width: int, height: int) -> tuple[int, int]:
     scale = MINIMAX_H3_REFERENCE_IMAGE_SHORT_EDGE / min(width, height)
     multiple = MINIMAX_H3_CANVAS_MULTIPLE
     return (
-        max(multiple,
-            round(height * scale / multiple) * multiple),
-        max(multiple,
-            round(width * scale / multiple) * multiple),
+        max(multiple, round(height * scale / multiple) * multiple),
+        max(multiple, round(width * scale / multiple) * multiple),
     )
 
 
@@ -219,7 +222,8 @@ def prepare_reference_frames(frames: np.ndarray, num_frames: int) -> np.ndarray:
     if frames.shape[1:3] == (height, width):
         return frames
     return np.stack(
-        [np.asarray(Image.fromarray(frame).resize((width, height), Image.Resampling.LANCZOS)) for frame in frames])
+        [np.asarray(Image.fromarray(frame).resize((width, height), Image.Resampling.LANCZOS)) for frame in frames]
+    )
 
 
 def sample_reference_video_frames(frames: np.ndarray) -> tuple[list[np.ndarray], list[float]]:
@@ -235,8 +239,10 @@ def sample_reference_video_frames(frames: np.ndarray) -> tuple[list[np.ndarray],
         cursor += stride
     timestamps = [index / MINIMAX_H3_QWEN_VIDEO_SAMPLE_FPS for index in range(len(indices))]
     timestamps += [timestamps[-1]] * (-len(timestamps) % MINIMAX_H3_QWEN_TEMPORAL_PATCH)
-    block_timestamps = [(timestamps[index] + timestamps[index + MINIMAX_H3_QWEN_TEMPORAL_PATCH - 1]) / 2
-                        for index in range(0, len(timestamps), MINIMAX_H3_QWEN_TEMPORAL_PATCH)]
+    block_timestamps = [
+        (timestamps[index] + timestamps[index + MINIMAX_H3_QWEN_TEMPORAL_PATCH - 1]) / 2
+        for index in range(0, len(timestamps), MINIMAX_H3_QWEN_TEMPORAL_PATCH)
+    ]
     return [frames[index] for index in indices], block_timestamps
 
 
@@ -250,12 +256,13 @@ def prepare_reference_waveform(
     waveform = torch.as_tensor(waveform).detach().cpu()
     if waveform.ndim != 2 or waveform.shape[0] not in (1, MINIMAX_H3_AUDIO_CHANNELS):
         raise ValueError(
-            f"A reference soundtrack must be mono or stereo [channels, samples], got {tuple(waveform.shape)}.")
+            f"A reference soundtrack must be mono or stereo [channels, samples], got {tuple(waveform.shape)}."
+        )
     if waveform.shape[-1] == 0:
         raise ValueError("A reference soundtrack must contain samples.")
     if sample_rate <= 0 or target_sample_rate <= 0:
         raise ValueError("Reference audio sample rates must be positive.")
-    waveform = waveform.to(torch.float32)[:, :int(max_duration * sample_rate)]
+    waveform = waveform.to(torch.float32)[:, : int(max_duration * sample_rate)]
     if waveform.shape[0] == 1:
         waveform = waveform.expand(MINIMAX_H3_AUDIO_CHANNELS, -1).contiguous()
     if sample_rate == target_sample_rate:
@@ -283,9 +290,9 @@ def trim_reference_num_frames(num_frames: int) -> int:
     if num_frames < 1:
         raise ValueError(f"A reference video must have at least one frame, got {num_frames}.")
     return (
-        max(1,
-            (num_frames - MINIMAX_H3_LATENTS_PER_CHUNK) // MINIMAX_H3_FRAMES_PER_CHUNK) * MINIMAX_H3_FRAMES_PER_CHUNK +
-        MINIMAX_H3_LATENTS_PER_CHUNK)
+        max(1, (num_frames - MINIMAX_H3_LATENTS_PER_CHUNK) // MINIMAX_H3_FRAMES_PER_CHUNK) * MINIMAX_H3_FRAMES_PER_CHUNK
+        + MINIMAX_H3_LATENTS_PER_CHUNK
+    )
 
 
 def _resolve_audio_source(source: Any) -> tuple[torch.Tensor, int | None]:

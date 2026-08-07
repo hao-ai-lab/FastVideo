@@ -69,9 +69,11 @@ class FluxInputValidationStage(InputValidationStage):
         batch: ForwardBatch,
         fastvideo_args: FastVideoArgs,
     ) -> ForwardBatch:
-        if (batch.height is not None and batch.width is not None and (batch.height % 16 != 0 or batch.width % 16 != 0)):
-            raise ValueError("FLUX expects height and width divisible by 16 "
-                             f"(VAE latent grid × 2× packing); got {batch.height}×{batch.width}.")
+        if batch.height is not None and batch.width is not None and (batch.height % 16 != 0 or batch.width % 16 != 0):
+            raise ValueError(
+                "FLUX expects height and width divisible by 16 "
+                f"(VAE latent grid × 2× packing); got {batch.height}×{batch.width}."
+            )
         return super().forward(batch, fastvideo_args)
 
 
@@ -81,8 +83,10 @@ class FluxConditioningStage(PipelineStage):
     @torch.no_grad()
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         if len(batch.prompt_embeds) < 2:
-            raise ValueError("FluxConditioningStage expects 2 prompt_embeds (CLIP pooled, T5 sequence), "
-                             f"got {len(batch.prompt_embeds)}")
+            raise ValueError(
+                "FluxConditioningStage expects 2 prompt_embeds (CLIP pooled, T5 sequence), "
+                f"got {len(batch.prompt_embeds)}"
+            )
 
         device = get_local_torch_device()
         target_dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.dit_precision]
@@ -129,7 +133,8 @@ class FluxTimestepPreparationStage(TimestepPreparationStage):
                 "FLUX timestep prep: scheduler %s.set_timesteps does not accept 'mu'; falling back to the base "
                 "timestep schedule. FLUX expects a FlowMatchEulerDiscreteScheduler with resolution-dependent "
                 "dynamic shifting — output quality may degrade.",
-                type(self.scheduler).__name__)
+                type(self.scheduler).__name__,
+            )
             return super().forward(batch, fastvideo_args)
 
         cfg = getattr(self.scheduler, "config", None)
@@ -138,7 +143,8 @@ class FluxTimestepPreparationStage(TimestepPreparationStage):
             logger.warning(
                 "FLUX timestep prep: scheduler has use_dynamic_shifting=False; falling back to the base timestep "
                 "schedule and skipping the resolution-dependent 'mu' shift. FLUX requires dynamic shifting for "
-                "correct timesteps — output quality may degrade.")
+                "correct timesteps — output quality may degrade."
+            )
             return super().forward(batch, fastvideo_args)
 
         if batch.height is None or batch.width is None:
@@ -173,7 +179,6 @@ class FluxTimestepPreparationStage(TimestepPreparationStage):
 
 
 class FluxLatentPreparationStage(PipelineStage):
-
     def __init__(self, scheduler) -> None:
         super().__init__()
         self.scheduler = scheduler
@@ -239,7 +244,6 @@ class FluxLatentPreparationStage(PipelineStage):
 
 
 class FluxDenoisingStage(PipelineStage):
-
     def __init__(self, transformer, scheduler) -> None:
         super().__init__()
         self.transformer = transformer
@@ -285,7 +289,7 @@ class FluxDenoisingStage(PipelineStage):
 
         bs = packed.shape[0]
         if guidance_embeds:
-            guidance = torch.full((bs, ), float(batch.guidance_scale), device=device, dtype=torch.float32)
+            guidance = torch.full((bs,), float(batch.guidance_scale), device=device, dtype=torch.float32)
         else:
             guidance = None
 
@@ -302,16 +306,16 @@ class FluxDenoisingStage(PipelineStage):
 
             ts_ctx = int(t_scalar.reshape(-1)[0].item())
             with (
-                    torch.autocast(
-                        device_type="cuda",
-                        dtype=target_dtype,
-                        enabled=autocast_enabled and device.type == "cuda",
-                    ),
-                    set_forward_context(
-                        current_timestep=ts_ctx,
-                        attn_metadata=None,
-                        forward_batch=batch,
-                    ),
+                torch.autocast(
+                    device_type="cuda",
+                    dtype=target_dtype,
+                    enabled=autocast_enabled and device.type == "cuda",
+                ),
+                set_forward_context(
+                    current_timestep=ts_ctx,
+                    attn_metadata=None,
+                    forward_batch=batch,
+                ),
             ):
                 if use_true_cfg:
                     assert neg_enc is not None and neg_pooled is not None
@@ -410,9 +414,9 @@ class FluxDecodingStage(PipelineStage):
         use_cuda_autocast = autocast_enabled and vae_device.type == "cuda"
 
         with torch.autocast(
-                device_type="cuda",
-                dtype=vae_dtype,
-                enabled=use_cuda_autocast,
+            device_type="cuda",
+            dtype=vae_dtype,
+            enabled=use_cuda_autocast,
         ):
             if not autocast_enabled:
                 latents_4d = latents_4d.to(dtype=vae_dtype)

@@ -24,6 +24,7 @@ def _patch_detectron2_registries() -> None:
     # fvcore Registry (META_ARCH, ROI_HEADS, BACKBONE, PROPOSAL_GENERATOR, ...)
     try:
         from fvcore.common.registry import Registry
+
         orig = Registry._do_register
         if not getattr(orig, "_patched_idempotent", False):
 
@@ -40,6 +41,7 @@ def _patch_detectron2_registries() -> None:
     # detectron2 DatasetCatalog (object365_train, vg_train, etc.)
     try:
         from detectron2.data import DatasetCatalog
+
         orig_ds = DatasetCatalog.register
         if not getattr(orig_ds, "_patched_idempotent", False):
 

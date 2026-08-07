@@ -6,9 +6,11 @@ import torch
 import torch.nn as nn
 
 from fastvideo.attention.selector import backend_name_to_enum, get_attn_backend
-from fastvideo.distributed.communication_op import (sequence_model_parallel_all_gather,
-                                                    sequence_model_parallel_all_to_all_4D)
-from fastvideo.distributed.parallel_state import (get_sp_parallel_rank, get_sp_world_size)
+from fastvideo.distributed.communication_op import (
+    sequence_model_parallel_all_gather,
+    sequence_model_parallel_all_to_all_4D,
+)
+from fastvideo.distributed.parallel_state import get_sp_parallel_rank, get_sp_world_size
 from fastvideo.forward_context import ForwardContext, get_forward_context
 from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.utils import get_compute_dtype
@@ -36,19 +38,19 @@ def _maybe_compiler_disable(fn):
 
 
 class DistributedAttention(nn.Module):
-    """Distributed attention layer.
-    """
+    """Distributed attention layer."""
 
-    def __init__(self,
-                 num_heads: int,
-                 head_size: int,
-                 num_kv_heads: int | None = None,
-                 softmax_scale: float | None = None,
-                 causal: bool = False,
-                 supported_attention_backends: tuple[AttentionBackendEnum, ...]
-                 | None = None,
-                 prefix: str = "",
-                 **extra_impl_args) -> None:
+    def __init__(
+        self,
+        num_heads: int,
+        head_size: int,
+        num_kv_heads: int | None = None,
+        softmax_scale: float | None = None,
+        causal: bool = False,
+        supported_attention_backends: tuple[AttentionBackendEnum, ...] | None = None,
+        prefix: str = "",
+        **extra_impl_args,
+    ) -> None:
         super().__init__()
         if softmax_scale is None:
             self.softmax_scale = head_size**-0.5
@@ -61,17 +63,19 @@ class DistributedAttention(nn.Module):
         dtype = get_compute_dtype()
         attn_backend = get_attn_backend(head_size, dtype, supported_attention_backends=supported_attention_backends)
         impl_cls = attn_backend.get_impl_cls()
-        self.attn_impl = impl_cls(num_heads=num_heads,
-                                  head_size=head_size,
-                                  causal=causal,
-                                  softmax_scale=self.softmax_scale,
-                                  num_kv_heads=num_kv_heads,
-                                  prefix=f"{prefix}.impl",
-                                  **extra_impl_args)
+        self.attn_impl = impl_cls(
+            num_heads=num_heads,
+            head_size=head_size,
+            causal=causal,
+            softmax_scale=self.softmax_scale,
+            num_kv_heads=num_kv_heads,
+            prefix=f"{prefix}.impl",
+            **extra_impl_args,
+        )
         # Register attn_impl as submodule if it has learnable parameters (e.g., SLA's proj_l)
         # This ensures its parameters are included in state_dict() for saving/loading
         if isinstance(self.attn_impl, nn.Module):
-            self.add_module('attn_impl', self.attn_impl)
+            self.add_module("attn_impl", self.attn_impl)
         self.num_heads = num_heads
         self.head_size = head_size
         self.num_kv_heads = num_kv_heads
@@ -91,7 +95,7 @@ class DistributedAttention(nn.Module):
         freqs_cis: tuple[torch.Tensor, torch.Tensor] | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """Forward pass for distributed attention.
-        
+
         Args:
             q (torch.Tensor): Query tensor [batch_size, seq_len, num_heads, head_dim]
             k (torch.Tensor): Key tensor [batch_size, seq_len, num_heads, head_dim]
@@ -100,7 +104,7 @@ class DistributedAttention(nn.Module):
             replicated_q (Optional[torch.Tensor]): Replicated query tensor, typically for text tokens
             replicated_k (Optional[torch.Tensor]): Replicated key tensor
             replicated_v (Optional[torch.Tensor]): Replicated value tensor
-            
+
         Returns:
             Tuple[torch.Tensor, Optional[torch.Tensor]]: A tuple containing:
                 - o (torch.Tensor): Output tensor after attention for the main sequence
@@ -129,17 +133,18 @@ class DistributedAttention(nn.Module):
 
         if freqs_cis is not None:
             cos, sin = freqs_cis
-            qkv[:batch_size * 2] = _apply_rotary_emb(qkv[:batch_size * 2], cos, sin, is_neox_style=False)
+            qkv[: batch_size * 2] = _apply_rotary_emb(qkv[: batch_size * 2], cos, sin, is_neox_style=False)
         # Apply backend-specific preprocess_qkv
         qkv = self.attn_impl.preprocess_qkv(qkv, ctx_attn_metadata)
 
         # Concatenate with replicated QKV if provided
         if replicated_q is not None:
             assert replicated_k is not None and replicated_v is not None
-            replicated_qkv = torch.cat([replicated_q, replicated_k, replicated_v],
-                                       dim=0)  # [3, seq_len, num_heads, head_dim]
+            replicated_qkv = torch.cat(
+                [replicated_q, replicated_k, replicated_v], dim=0
+            )  # [3, seq_len, num_heads, head_dim]
             heads_per_rank = num_heads // world_size
-            replicated_qkv = replicated_qkv[:, :, local_rank * heads_per_rank:(local_rank + 1) * heads_per_rank]
+            replicated_qkv = replicated_qkv[:, :, local_rank * heads_per_rank : (local_rank + 1) * heads_per_rank]
             qkv = torch.cat([qkv, replicated_qkv], dim=1)
 
         q, k, v = qkv.chunk(3, dim=0)
@@ -165,8 +170,7 @@ class DistributedAttention(nn.Module):
 
 
 class DistributedAttention_VSA(DistributedAttention):
-    """Distributed attention layer with VSA support.
-    """
+    """Distributed attention layer with VSA support."""
 
     @_maybe_compiler_disable
     def forward(
@@ -182,7 +186,7 @@ class DistributedAttention_VSA(DistributedAttention):
         freqs_cis: tuple[torch.Tensor, torch.Tensor] | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """Forward pass for distributed attention.
-        
+
         Args:
             q (torch.Tensor): Query tensor [batch_size, seq_len, num_heads, head_dim]
             k (torch.Tensor): Key tensor [batch_size, seq_len, num_heads, head_dim]
@@ -192,14 +196,16 @@ class DistributedAttention_VSA(DistributedAttention):
             replicated_q (Optional[torch.Tensor]): Replicated query tensor, typically for text tokens
             replicated_k (Optional[torch.Tensor]): Replicated key tensor
             replicated_v (Optional[torch.Tensor]): Replicated value tensor
-            
+
         Returns:
             Tuple[torch.Tensor, Optional[torch.Tensor]]: A tuple containing:
                 - o (torch.Tensor): Output tensor after attention for the main sequence
                 - replicated_o (Optional[torch.Tensor]): Output tensor for replicated tokens, if provided
         """
         # Check text tokens are not supported for VSA now
-        assert replicated_q is None and replicated_k is None and replicated_v is None, "Replicated QKV is not supported for VSA now"
+        assert replicated_q is None and replicated_k is None and replicated_v is None, (
+            "Replicated QKV is not supported for VSA now"
+        )
         # Check input shapes
         assert q.dim() == 4 and k.dim() == 4 and v.dim() == 4, "Expected 4D tensors"
 
@@ -221,7 +227,7 @@ class DistributedAttention_VSA(DistributedAttention):
 
         if freqs_cis is not None:
             cos, sin = freqs_cis
-            qkvg[:batch_size * 2] = _apply_rotary_emb(qkvg[:batch_size * 2], cos, sin, is_neox_style=False)
+            qkvg[: batch_size * 2] = _apply_rotary_emb(qkvg[: batch_size * 2], cos, sin, is_neox_style=False)
 
         qkvg = self.attn_impl.preprocess_qkv(qkvg, ctx_attn_metadata)
 
@@ -241,19 +247,19 @@ class DistributedAttention_VSA(DistributedAttention):
 
 
 class LocalAttention(nn.Module):
-    """Attention layer.
-    """
+    """Attention layer."""
 
-    def __init__(self,
-                 num_heads: int,
-                 head_size: int,
-                 num_kv_heads: int | None = None,
-                 softmax_scale: float | None = None,
-                 causal: bool = False,
-                 supported_attention_backends: tuple[AttentionBackendEnum, ...]
-                 | None = None,
-                 default_backend: AttentionBackendEnum | None = None,
-                 **extra_impl_args) -> None:
+    def __init__(
+        self,
+        num_heads: int,
+        head_size: int,
+        num_kv_heads: int | None = None,
+        softmax_scale: float | None = None,
+        causal: bool = False,
+        supported_attention_backends: tuple[AttentionBackendEnum, ...] | None = None,
+        default_backend: AttentionBackendEnum | None = None,
+        **extra_impl_args,
+    ) -> None:
         super().__init__()
         if softmax_scale is None:
             self.softmax_scale = head_size**-0.5
@@ -263,17 +269,18 @@ class LocalAttention(nn.Module):
             num_kv_heads = num_heads
 
         dtype = get_compute_dtype()
-        attn_backend = get_attn_backend(head_size,
-                                        dtype,
-                                        supported_attention_backends=supported_attention_backends,
-                                        default_backend=default_backend)
+        attn_backend = get_attn_backend(
+            head_size, dtype, supported_attention_backends=supported_attention_backends, default_backend=default_backend
+        )
         impl_cls = attn_backend.get_impl_cls()
-        self.attn_impl = impl_cls(num_heads=num_heads,
-                                  head_size=head_size,
-                                  softmax_scale=self.softmax_scale,
-                                  num_kv_heads=num_kv_heads,
-                                  causal=causal,
-                                  **extra_impl_args)
+        self.attn_impl = impl_cls(
+            num_heads=num_heads,
+            head_size=head_size,
+            softmax_scale=self.softmax_scale,
+            num_kv_heads=num_kv_heads,
+            causal=causal,
+            **extra_impl_args,
+        )
         self.num_heads = num_heads
         self.head_size = head_size
         self.num_kv_heads = num_kv_heads
@@ -289,12 +296,12 @@ class LocalAttention(nn.Module):
     ) -> torch.Tensor:
         """
         Apply local attention between query, key and value tensors.
-        
+
         Args:
             q (torch.Tensor): Query tensor of shape [batch_size, seq_len, num_heads, head_dim]
-            k (torch.Tensor): Key tensor of shape [batch_size, seq_len, num_heads, head_dim] 
+            k (torch.Tensor): Key tensor of shape [batch_size, seq_len, num_heads, head_dim]
             v (torch.Tensor): Value tensor of shape [batch_size, seq_len, num_heads, head_dim]
-            
+
         Returns:
             torch.Tensor: Output tensor after local attention
         """

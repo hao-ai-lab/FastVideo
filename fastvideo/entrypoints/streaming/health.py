@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """Health, readiness, and status routes for streaming servers."""
+
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
@@ -14,15 +15,11 @@ SERVICE_NAME = "ltx2-streaming-backend"
 
 
 class _StatusPool(Protocol):
-
-    def get_status(self) -> Mapping[str, Any]:
-        ...
+    def get_status(self) -> Mapping[str, Any]: ...
 
 
 class _HealthPool(Protocol):
-
-    def health(self) -> PoolHealth:
-        ...
+    def health(self) -> PoolHealth: ...
 
 
 _PoolLike: TypeAlias = _StatusPool | _HealthPool

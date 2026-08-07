@@ -34,8 +34,8 @@ class MiniMaxH3VideoVAEArchConfig(VAEArchConfig):
 
     clip_length: int = 17
     token_drop: int = 3
-    latents_mean: tuple[float, ...] = (0.0, ) * 24
-    latents_std: tuple[float, ...] = (1.0, ) * 24
+    latents_mean: tuple[float, ...] = (0.0,) * 24
+    latents_std: tuple[float, ...] = (1.0,) * 24
 
     # MiniMax-H3 uses per-channel mean/std instead of a scalar latent scale.
     scaling_factor: float = 1.0

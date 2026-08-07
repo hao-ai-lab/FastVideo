@@ -15,22 +15,30 @@ import torch
 from tqdm.auto import tqdm
 
 import fastvideo.envs as envs
-from fastvideo.attention.backends.video_sparse_attn import (VideoSparseAttentionMetadataBuilder)
+from fastvideo.attention.backends.video_sparse_attn import VideoSparseAttentionMetadataBuilder
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
-from fastvideo.pipelines.basic.ltx2.stages.ltx2_image_conditioning import (LTX2_CONTINUATION_STAGE2_LAST_LATENT_KEY,
-                                                                           LTX2_VIDEO_CLEAN_LATENT_KEY,
-                                                                           LTX2_VIDEO_DENOISE_MASK_KEY,
-                                                                           apply_ltx2_gaussian_noiser,
-                                                                           post_process_ltx2_denoised)
+from fastvideo.pipelines.basic.ltx2.stages.ltx2_image_conditioning import (
+    LTX2_CONTINUATION_STAGE2_LAST_LATENT_KEY,
+    LTX2_VIDEO_CLEAN_LATENT_KEY,
+    LTX2_VIDEO_DENOISE_MASK_KEY,
+    apply_ltx2_gaussian_noiser,
+    post_process_ltx2_denoised,
+)
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 from fastvideo.logger import init_logger
-from fastvideo.models.dits.ltx2 import (AudioLatentShape, DEFAULT_LTX2_AUDIO_CHANNELS, DEFAULT_LTX2_AUDIO_DOWNSAMPLE,
-                                        DEFAULT_LTX2_AUDIO_HOP_LENGTH, DEFAULT_LTX2_AUDIO_MEL_BINS,
-                                        DEFAULT_LTX2_AUDIO_SAMPLE_RATE, VideoLatentShape)
+from fastvideo.models.dits.ltx2 import (
+    AudioLatentShape,
+    DEFAULT_LTX2_AUDIO_CHANNELS,
+    DEFAULT_LTX2_AUDIO_DOWNSAMPLE,
+    DEFAULT_LTX2_AUDIO_HOP_LENGTH,
+    DEFAULT_LTX2_AUDIO_MEL_BINS,
+    DEFAULT_LTX2_AUDIO_SAMPLE_RATE,
+    VideoLatentShape,
+)
 from fastvideo.utils import is_vsa_available
 
 LTX2_AUDIO_CLEAN_LATENT_KEY = "ltx2_audio_clean_latent"
@@ -181,8 +189,9 @@ class LTX2DenoisingStage(PipelineStage):
         video_clean_latent = batch.extra.get(LTX2_VIDEO_CLEAN_LATENT_KEY)
         video_denoise_mask = batch.extra.get(LTX2_VIDEO_DENOISE_MASK_KEY)
         if (video_clean_latent is None) != (video_denoise_mask is None):
-            raise ValueError("LTX-2 i2v conditioning state is inconsistent: clean_latent/mask "
-                             "must both be set or both be unset.")
+            raise ValueError(
+                "LTX-2 i2v conditioning state is inconsistent: clean_latent/mask must both be set or both be unset."
+            )
         if video_clean_latent is not None and video_denoise_mask is not None:
             if not torch.is_tensor(video_clean_latent) or not torch.is_tensor(video_denoise_mask):
                 raise TypeError("LTX-2 i2v conditioning tensors must be Tensors.")
@@ -198,8 +207,11 @@ class LTX2DenoisingStage(PipelineStage):
         prompt_embeds = batch.prompt_embeds[0]
         prompt_mask = None
 
-        num_inference_steps = (self.num_inference_steps_override
-                               if self.num_inference_steps_override is not None else batch.num_inference_steps)
+        num_inference_steps = (
+            self.num_inference_steps_override
+            if self.num_inference_steps_override is not None
+            else batch.num_inference_steps
+        )
 
         cfg_scale_video = batch.ltx2_cfg_scale_video
         cfg_scale_audio = batch.ltx2_cfg_scale_audio
@@ -217,8 +229,9 @@ class LTX2DenoisingStage(PipelineStage):
             if batch.negative_prompt_embeds is not None and batch.negative_prompt_embeds:
                 neg_prompt_embeds = batch.negative_prompt_embeds[0]
             else:
-                logger.warning("[LTX2] CFG requested but negative_prompt_embeds missing; "
-                               "falling back to no-CFG for this stage.")
+                logger.warning(
+                    "[LTX2] CFG requested but negative_prompt_embeds missing; falling back to no-CFG for this stage."
+                )
                 use_cfg = False
 
         # Ensure text conditioning is on the same device as latents.
@@ -243,8 +256,9 @@ class LTX2DenoisingStage(PipelineStage):
             logger.info("[LTX2] Using override sigma schedule, %s", self.sigmas_override)
         else:
             # Use distilled hardcoded schedule (or subsets) when enabled.
-            use_distilled_sigmas = (fastvideo_args.ltx2_use_distilled_sigmas
-                                    and os.getenv("LTX2_USE_DISTILLED_SIGMAS", "1") == "1")
+            use_distilled_sigmas = (
+                fastvideo_args.ltx2_use_distilled_sigmas and os.getenv("LTX2_USE_DISTILLED_SIGMAS", "1") == "1"
+            )
             max_distilled_steps = len(DISTILLED_SIGMA_VALUES) - 1
             if use_distilled_sigmas and num_inference_steps <= max_distilled_steps:
                 sigmas, distilled_indices = _distilled_subset_sigmas(
@@ -256,8 +270,7 @@ class LTX2DenoisingStage(PipelineStage):
                 else:
                     gaps = sigmas[:-1] - sigmas[1:]
                     logger.info(
-                        "[LTX2] Using distilled sigma subset for %d steps "
-                        "(indices=%s max_gap=%.6f tail_gap=%.6f)",
+                        "[LTX2] Using distilled sigma subset for %d steps (indices=%s max_gap=%.6f tail_gap=%.6f)",
                         num_inference_steps,
                         distilled_indices,
                         float(gaps.max().item()),
@@ -269,8 +282,7 @@ class LTX2DenoisingStage(PipelineStage):
                     latent=None,
                     device=latents.device,
                 )
-                logger.info("[LTX2] Using computed sigma schedule, "
-                            "num_inference_steps=%s", num_inference_steps)
+                logger.info("[LTX2] Using computed sigma schedule, num_inference_steps=%s", num_inference_steps)
         if hasattr(self.transformer, "patchifier"):
             video_shape = VideoLatentShape.from_torch_shape(latents.shape)
             token_count = self.transformer.patchifier.get_token_count(video_shape)
@@ -290,8 +302,10 @@ class LTX2DenoisingStage(PipelineStage):
             else:
                 flat_mask = video_denoise_mask.reshape(video_denoise_mask.shape[0], -1).to(torch.float32)
                 if flat_mask.shape[1] != token_count:
-                    raise ValueError("LTX-2 i2v timestep mask token count mismatch: "
-                                     f"expected {token_count}, got {flat_mask.shape[1]}")
+                    raise ValueError(
+                        "LTX-2 i2v timestep mask token count mismatch: "
+                        f"expected {token_count}, got {flat_mask.shape[1]}"
+                    )
                 timestep_template = flat_mask
         audio_prompt_embeds = batch.extra.get("ltx2_audio_prompt_embeds")
         audio_neg_embeds = batch.extra.get("ltx2_audio_negative_embeds")
@@ -341,18 +355,22 @@ class LTX2DenoisingStage(PipelineStage):
                 audio_shape.mel_bins,
             )
             audio_latent_path = fastvideo_args.ltx2_audio_latent_path
-            audio_latents = self._load_audio_latents(
-                audio_latent_path,
-                device=latents.device,
-                dtype=latents.dtype,
-                expected_shape=expected_shape,
-            ) if audio_latent_path else None
+            audio_latents = (
+                self._load_audio_latents(
+                    audio_latent_path,
+                    device=latents.device,
+                    dtype=latents.dtype,
+                    expected_shape=expected_shape,
+                )
+                if audio_latent_path
+                else None
+            )
             if audio_latents is None:
                 audio_generator = None
                 if fastvideo_args.ltx2_initial_latent_path and batch.seed is not None:
                     audio_generator = torch.Generator(device=latents.device).manual_seed(batch.seed)
                 elif batch.generator is not None:
-                    audio_generator = (batch.generator[0] if isinstance(batch.generator, list) else batch.generator)
+                    audio_generator = batch.generator[0] if isinstance(batch.generator, list) else batch.generator
                 if audio_generator is not None and audio_generator.device.type != latents.device.type:
                     if batch.seed is None:
                         audio_generator = torch.Generator(device=latents.device)
@@ -372,12 +390,16 @@ class LTX2DenoisingStage(PipelineStage):
                 if hasattr(self.transformer, "audio_patchifier"):
                     audio_latents = self.transformer.audio_patchifier.unpatchify(audio_latents_patch, audio_shape)
                 else:
-                    audio_latents = audio_latents_patch.view(
-                        audio_shape.batch,
-                        audio_shape.frames,
-                        audio_shape.channels,
-                        audio_shape.mel_bins,
-                    ).permute(0, 2, 1, 3).contiguous()
+                    audio_latents = (
+                        audio_latents_patch.view(
+                            audio_shape.batch,
+                            audio_shape.frames,
+                            audio_shape.channels,
+                            audio_shape.mel_bins,
+                        )
+                        .permute(0, 2, 1, 3)
+                        .contiguous()
+                    )
                 if audio_latent_path:
                     self._save_audio_latents(audio_latent_path, audio_latents)
             audio_timestep_template = torch.ones(
@@ -386,20 +408,21 @@ class LTX2DenoisingStage(PipelineStage):
                 dtype=torch.float32,
             )
         # Apply audio conditioning mask (mirrors video i2v approach).
-        if (audio_latents is not None and audio_clean_latent is not None and audio_denoise_mask is not None):
+        if audio_latents is not None and audio_clean_latent is not None and audio_denoise_mask is not None:
             audio_T = audio_latents.shape[2]
             cond_T = audio_clean_latent.shape[2]
             if audio_T != cond_T:
                 logger.warning(
-                    "[LTX2] Audio conditioning T mismatch: "
-                    "latents=%d, clean=%d; skipping audio "
-                    "conditioning.", audio_T, cond_T)
+                    "[LTX2] Audio conditioning T mismatch: latents=%d, clean=%d; skipping audio conditioning.",
+                    audio_T,
+                    cond_T,
+                )
                 audio_clean_latent = None
                 audio_denoise_mask = None
             else:
                 # audio_denoise_mask: [B, 1, T, 1] → [B, T]
                 # for timestep template.
-                audio_timestep_template = (audio_denoise_mask[:, 0, :, 0])
+                audio_timestep_template = audio_denoise_mask[:, 0, :, 0]
                 audio_latents = apply_ltx2_gaussian_noiser(
                     noise=audio_latents,
                     clean_latent=audio_clean_latent,
@@ -432,9 +455,11 @@ class LTX2DenoisingStage(PipelineStage):
         do_guidance = do_cfg_text or do_mod or do_stg
 
         if do_cfg_text and neg_prompt_embeds is None:
-            raise ValueError("LTX-2 text CFG is enabled "
-                             "(ltx2_cfg_scale_video/audio != 1.0), "
-                             "but negative prompt embeddings are missing")
+            raise ValueError(
+                "LTX-2 text CFG is enabled "
+                "(ltx2_cfg_scale_video/audio != 1.0), "
+                "but negative prompt embeddings are missing"
+            )
 
         logger.info(
             "[LTX2] Denoising start: steps=%d dtype=%s "
@@ -458,7 +483,7 @@ class LTX2DenoisingStage(PipelineStage):
         )
         # Hint runtime FP4 layer gating (single shared transformer path):
         # stage-1 denoising uses "base", stage-2 refine uses "refine".
-        batch.extra["ltx2_fp4_stage_profile"] = ("refine" if self.sigmas_override is not None else "base")
+        batch.extra["ltx2_fp4_stage_profile"] = "refine" if self.sigmas_override is not None else "base"
         attention_backend = os.getenv("FASTVIDEO_ATTENTION_BACKEND", envs.FASTVIDEO_ATTENTION_BACKEND)
         wants_vsa_metadata = attention_backend in (
             "VIDEO_SPARSE_ATTN",
@@ -468,9 +493,11 @@ class LTX2DenoisingStage(PipelineStage):
         # SAGE_ATTN_THREE VSA+QAT only needs VSA metadata and its own kernel path.
         use_vsa = wants_vsa_metadata and (attention_backend != "VIDEO_SPARSE_ATTN" or vsa_available)
         if attention_backend == "VIDEO_SPARSE_ATTN" and not vsa_available:
-            logger.warning("FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN but VSA kernel "
-                           "is unavailable; disabling VSA metadata for this run.")
-        vsa_metadata_builder = (VideoSparseAttentionMetadataBuilder() if use_vsa else None)
+            logger.warning(
+                "FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN but VSA kernel "
+                "is unavailable; disabling VSA metadata for this run."
+            )
+        vsa_metadata_builder = VideoSparseAttentionMetadataBuilder() if use_vsa else None
 
         for step_index in tqdm(range(len(sigmas) - 1)):
             sigma = sigmas[step_index]
@@ -479,7 +506,7 @@ class LTX2DenoisingStage(PipelineStage):
             # timestep. Ignored by LTX-2.0 (prompt_adaln is None).
             sigma_batch = sigma.reshape(1).expand(latents.shape[0])
             timestep = timestep_template * sigma
-            audio_timestep = (audio_timestep_template * sigma if audio_timestep_template is not None else None)
+            audio_timestep = audio_timestep_template * sigma if audio_timestep_template is not None else None
             latent_model_input = latents.to(target_dtype)
             attn_metadata = None
             if vsa_metadata_builder is not None:
@@ -491,14 +518,17 @@ class LTX2DenoisingStage(PipelineStage):
                     device=latents.device,
                 )
 
-            with torch.autocast(
+            with (
+                torch.autocast(
                     device_type="cuda",
                     dtype=target_dtype,
                     enabled=autocast_enabled,
-            ), set_forward_context(
+                ),
+                set_forward_context(
                     current_timestep=sigma,
                     attn_metadata=attn_metadata,
                     forward_batch=batch,
+                ),
             ):
                 # Pass 1: Full conditioning (text + cross-modal)
                 with _nvtx_range("ltx2.denoise.pass.pos"):
@@ -595,14 +625,20 @@ class LTX2DenoisingStage(PipelineStage):
                             ptb_audio = None
 
                     # Multi-modal guidance formula per stream.
-                    vid = (pos_denoised + (cfg_scale_video - 1) * (pos_denoised - neg_denoised) +
-                           (modality_scale_video - 1) * (pos_denoised - mod_denoised) + stg_scale_video *
-                           (pos_denoised - ptb_denoised))
+                    vid = (
+                        pos_denoised
+                        + (cfg_scale_video - 1) * (pos_denoised - neg_denoised)
+                        + (modality_scale_video - 1) * (pos_denoised - mod_denoised)
+                        + stg_scale_video * (pos_denoised - ptb_denoised)
+                    )
                     aud = None
                     if pos_audio is not None:
-                        aud = (pos_audio + (cfg_scale_audio - 1) * (pos_audio - neg_audio) +
-                               (modality_scale_audio - 1) * (pos_audio - mod_audio) + stg_scale_audio *
-                               (pos_audio - ptb_audio))
+                        aud = (
+                            pos_audio
+                            + (cfg_scale_audio - 1) * (pos_audio - neg_audio)
+                            + (modality_scale_audio - 1) * (pos_audio - mod_audio)
+                            + stg_scale_audio * (pos_audio - ptb_audio)
+                        )
 
                     # Guidance rescaling (prevents saturation).
                     if rescale_scale > 0:
@@ -623,17 +659,21 @@ class LTX2DenoisingStage(PipelineStage):
                     denoise_mask=video_denoise_mask,
                     clean_latent=video_clean_latent,
                 )
-            if (audio_clean_latent is not None and audio_denoise_mask is not None and pos_audio is not None):
+            if audio_clean_latent is not None and audio_denoise_mask is not None and pos_audio is not None:
                 pos_audio = post_process_ltx2_denoised(
                     denoised=pos_audio,
                     denoise_mask=audio_denoise_mask,
                     clean_latent=audio_clean_latent,
                 )
 
-            sigma_value = sigma.to(torch.float32) if isinstance(sigma, torch.Tensor) else torch.tensor(
-                float(sigma),
-                device=latents.device,
-                dtype=torch.float32,
+            sigma_value = (
+                sigma.to(torch.float32)
+                if isinstance(sigma, torch.Tensor)
+                else torch.tensor(
+                    float(sigma),
+                    device=latents.device,
+                    dtype=torch.float32,
+                )
             )
             dt = sigma_next - sigma
             with _nvtx_range("ltx2.denoise.scheduler_update"):
@@ -644,8 +684,8 @@ class LTX2DenoisingStage(PipelineStage):
                     audio_latents = (audio_latents.float() + audio_velocity.float() * dt).to(audio_latents.dtype)
 
         batch.latents = latents
-        if (batch.return_continuation_state and self.sigmas_override is not None):
-            batch.extra[LTX2_CONTINUATION_STAGE2_LAST_LATENT_KEY] = (latents[:, :, -1:, :, :].detach().clone())
+        if batch.return_continuation_state and self.sigmas_override is not None:
+            batch.extra[LTX2_CONTINUATION_STAGE2_LAST_LATENT_KEY] = latents[:, :, -1:, :, :].detach().clone()
         batch.extra[self.initial_audio_latents_key] = audio_latents
         if self.initial_audio_latents_key != "ltx2_audio_latents":
             batch.extra["ltx2_audio_latents"] = audio_latents
@@ -667,14 +707,15 @@ class LTX2DenoisingStage(PipelineStage):
             return None
         payload = torch.load(path, map_location=device)
         if isinstance(payload, dict):
-            latent = (payload.get("audio_latent") or payload.get("latent") or payload.get("audio"))
+            latent = payload.get("audio_latent") or payload.get("latent") or payload.get("audio")
         else:
             latent = payload
         if not torch.is_tensor(latent):
             raise TypeError(f"Expected tensor audio latent in {path}")
         if tuple(latent.shape) != tuple(expected_shape):
             raise ValueError(
-                f"Audio latent shape mismatch for {path}: expected {expected_shape}, got {tuple(latent.shape)}")
+                f"Audio latent shape mismatch for {path}: expected {expected_shape}, got {tuple(latent.shape)}"
+            )
         logger.info("[LTX2] Loaded audio latent from %s", path)
         return latent.to(device=device, dtype=dtype)
 

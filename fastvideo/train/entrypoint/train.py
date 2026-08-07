@@ -38,7 +38,8 @@ def run_training_from_config(
     """YAML-only training entrypoint (schema v2)."""
 
     from fastvideo.distributed import (
-        maybe_init_distributed_environment_and_model_parallel, )
+        maybe_init_distributed_environment_and_model_parallel,
+    )
     from fastvideo.train import Trainer
     from fastvideo.train.utils.checkpoint import (
         CheckpointConfig,
@@ -63,7 +64,7 @@ def run_training_from_config(
             "FASTVIDEO_ATTENTION_BACKEND",
             "VIDEO_SPARSE_ATTN",
         )
-    elif ("turbodiffusion" in model_path_lower or "turbowan" in model_path_lower):
+    elif "turbodiffusion" in model_path_lower or "turbowan" in model_path_lower:
         os.environ.setdefault(
             "FASTVIDEO_ATTENTION_BACKEND",
             "SLA_ATTN",
@@ -77,8 +78,7 @@ def run_training_from_config(
     _, method, dataloader, start_step = build_from_config(cfg)
 
     if dry_run:
-        logger.info("Dry-run: config parsed and "
-                    "build_from_config succeeded.")
+        logger.info("Dry-run: config parsed and build_from_config succeeded.")
         return
 
     trainer = Trainer(
@@ -137,7 +137,9 @@ def main(
 
 if __name__ == "__main__":
     argv = sys.argv
-    parser = argparse.ArgumentParser(description="YAML-only training entrypoint.", )
+    parser = argparse.ArgumentParser(
+        description="YAML-only training entrypoint.",
+    )
     parser.add_argument(
         "--config",
         type=str,
@@ -147,8 +149,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help=("Parse config and build runtime, "
-              "but do not start training."),
+        help=("Parse config and build runtime, but do not start training."),
     )
     args, unknown = parser.parse_known_args(argv[1:])
     main(args, overrides=unknown if unknown else None)

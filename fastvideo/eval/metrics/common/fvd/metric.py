@@ -76,7 +76,7 @@ import scipy.linalg
 import torch
 
 from fastvideo.eval.metrics.base import BaseMetric
-from fastvideo.eval.metrics.common.fvd.extractors import (_BaseExtractor, available_extractors, load_extractor)
+from fastvideo.eval.metrics.common.fvd.extractors import _BaseExtractor, available_extractors, load_extractor
 from fastvideo.eval.registry import register
 from fastvideo.eval.types import MetricResult
 
@@ -133,12 +133,13 @@ def _extract_chunked(
     """Run *extractor* over *video* in chunks of *chunk* to bound VRAM."""
     if video.shape[0] <= chunk:
         return extractor.forward(video)
-    parts = [extractor.forward(video[i:i + chunk]) for i in range(0, video.shape[0], chunk)]
+    parts = [extractor.forward(video[i : i + chunk]) for i in range(0, video.shape[0], chunk)]
     return np.concatenate(parts, axis=0)
 
 
 def _default_cache_path(extractor_name: str) -> str:
     from fastvideo.eval.models import get_cache_dir
+
     return str(get_cache_dir() / "fvd" / f"real_features_{extractor_name}.pt")
 
 
@@ -189,8 +190,7 @@ class FVDMetric(BaseMetric):
     ) -> None:
         super().__init__()
         if extractor not in available_extractors():
-            raise ValueError(f"Unknown FVD extractor '{extractor}'. "
-                             f"Available: {available_extractors()}")
+            raise ValueError(f"Unknown FVD extractor '{extractor}'. Available: {available_extractors()}")
         if cache_mode not in {"off", "read", "read_write"}:
             raise ValueError(f"cache_mode must be one of 'off', 'read', 'read_write'; got {cache_mode!r}")
         self._extractor_name = extractor
@@ -305,9 +305,11 @@ class FVDMetric(BaseMetric):
                 name=self.name,
                 score=None,
                 details={
-                    "skipped": ("No reference features available. Pass role='reference' samples "
-                                "(or a paired samples list with 'reference' key) to "
-                                f"Evaluator.evaluate(), or pre-build the cache at: {self.cache_path}")
+                    "skipped": (
+                        "No reference features available. Pass role='reference' samples "
+                        "(or a paired samples list with 'reference' key) to "
+                        f"Evaluator.evaluate(), or pre-build the cache at: {self.cache_path}"
+                    )
                 },
             )
 
@@ -346,7 +348,8 @@ class FVDMetric(BaseMetric):
         """
         assert isinstance(other, FVDMetric)
         assert other._extractor_name == self._extractor_name, (
-            f"merge_from extractor mismatch: {other._extractor_name!r} vs {self._extractor_name!r}")
+            f"merge_from extractor mismatch: {other._extractor_name!r} vs {self._extractor_name!r}"
+        )
         self._gen_buf.extend(other._gen_buf)
         self._real_buf.extend(other._real_buf)
         if self._cached_real is None and other._cached_real is not None:

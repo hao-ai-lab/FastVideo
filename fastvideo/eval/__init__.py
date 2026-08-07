@@ -15,6 +15,7 @@ def _redirect_third_party_caches() -> None:
     ``download_root=str(get_cache_dir() / "<library>")`` directly.
     """
     import os
+
     root = get_cache_dir()
     os.environ.setdefault("TORCH_HOME", str(root / "torch"))
 

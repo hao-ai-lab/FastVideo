@@ -98,11 +98,13 @@ def _euler_to_quaternion(angles: np.ndarray) -> list[float]:
 
 def _quaternion_to_rotation_matrix(quaternion: list[float]) -> np.ndarray:
     qw, qx, qy, qz = quaternion
-    return np.array([
-        [1 - 2 * (qy**2 + qz**2), 2 * (qx * qy - qw * qz), 2 * (qx * qz + qw * qy)],
-        [2 * (qx * qy + qw * qz), 1 - 2 * (qx**2 + qz**2), 2 * (qy * qz - qw * qx)],
-        [2 * (qx * qz - qw * qy), 2 * (qy * qz + qw * qx), 1 - 2 * (qx**2 + qy**2)],
-    ])
+    return np.array(
+        [
+            [1 - 2 * (qy**2 + qz**2), 2 * (qx * qy - qw * qz), 2 * (qx * qz + qw * qy)],
+            [2 * (qx * qy + qw * qz), 1 - 2 * (qx**2 + qz**2), 2 * (qy * qz - qw * qx)],
+            [2 * (qx * qz - qw * qy), 2 * (qy * qz + qw * qx), 1 - 2 * (qx**2 + qy**2)],
+        ]
+    )
 
 
 def _pose_rows_from_actions(action_seq: list[str], action_speed_list: list[float], duration: int) -> list[list[float]]:
@@ -121,8 +123,9 @@ def _pose_rows_from_actions(action_seq: list[str], action_speed_list: list[float
         translation_step = np.zeros(3)
         rotation_step = np.zeros(3)
         for motion_type in motion_types:
-            translation_step += _translation_step(motion_type, current_pose,
-                                                  float(speed) * _TRANSLATION_BASE_UNIT, duration)
+            translation_step += _translation_step(
+                motion_type, current_pose, float(speed) * _TRANSLATION_BASE_UNIT, duration
+            )
             rotation_step += _rotation_step(motion_type, float(speed) * _ROTATION_BASE_UNIT, duration)
 
         segment_positions = []
@@ -135,8 +138,9 @@ def _pose_rows_from_actions(action_seq: list[str], action_speed_list: list[float
         positions.extend(segment_positions)
         rotations.extend(segment_rotations)
 
-    rows: list[list[float]] = [[0.0] + _INTRINSIC_ROW + [0.0, 0.0] +
-                               [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0]]
+    rows: list[list[float]] = [
+        [0.0] + _INTRINSIC_ROW + [0.0, 0.0] + [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+    ]
     for index, (position, rotation) in enumerate(zip(positions, rotations, strict=False)):
         rotation_matrix = _quaternion_to_rotation_matrix(_euler_to_quaternion(rotation))
         translation = -rotation_matrix @ position
@@ -161,8 +165,9 @@ def _interpolate_camera_poses(
         flip_mat = np.diag([1.0, 1.0, -1.0]).astype(src_rot_mat.dtype)
         src_rot_mat = src_rot_mat @ flip_mat
 
-    trans = interp1d(src_indices, src_trans_vec, axis=0, kind="linear", bounds_error=False,
-                     fill_value="extrapolate")(tgt_indices)
+    trans = interp1d(src_indices, src_trans_vec, axis=0, kind="linear", bounds_error=False, fill_value="extrapolate")(
+        tgt_indices
+    )
     quats = Rotation.from_matrix(src_rot_mat).as_quat().copy()
     for index in range(1, len(quats)):
         if np.dot(quats[index], quats[index - 1]) < 0:

@@ -16,13 +16,13 @@ from torchdata.stateful_dataloader import StatefulDataLoader
 from tqdm import tqdm
 
 from fastvideo.dataset import gettextdataset
-from fastvideo.dataset.dataloader.parquet_io import (ParquetDatasetWriter, records_to_table)
+from fastvideo.dataset.dataloader.parquet_io import ParquetDatasetWriter, records_to_table
 from fastvideo.dataset.dataloader.record_schema import text_only_record_creator
 from fastvideo.dataset.dataloader.schema import pyarrow_schema_text_only
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
-from fastvideo.pipelines.preprocess.preprocess_pipeline_base import (BasePreprocessPipeline)
+from fastvideo.pipelines.preprocess.preprocess_pipeline_base import BasePreprocessPipeline
 from fastvideo.pipelines.stages import TextEncodingStage
 
 logger = init_logger(__name__)
@@ -43,11 +43,13 @@ class PreprocessPipeline_Text(BasePreprocessPipeline):
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         """Set up pipeline stages with proper dependency injection."""
-        self.add_stage(stage_name="prompt_encoding_stage",
-                       stage=TextEncodingStage(
-                           text_encoders=[self.get_module("text_encoder")],
-                           tokenizers=[self.get_module("tokenizer")],
-                       ))
+        self.add_stage(
+            stage_name="prompt_encoding_stage",
+            stage=TextEncodingStage(
+                text_encoders=[self.get_module("text_encoder")],
+                tokenizers=[self.get_module("tokenizer")],
+            ),
+        )
 
     def preprocess_text_only(self, fastvideo_args: FastVideoArgs, args):
         """Preprocess text-only data."""
@@ -115,7 +117,7 @@ class PreprocessPipeline_Text(BasePreprocessPipeline):
                     write_pbar.update(1)
                     write_pbar.close()
 
-                    if not hasattr(self, 'dataset_writer'):
+                    if not hasattr(self, "dataset_writer"):
                         self.dataset_writer = ParquetDatasetWriter(
                             out_dir=self.combined_parquet_dir,
                             samples_per_file=args.samples_per_file,
@@ -130,7 +132,7 @@ class PreprocessPipeline_Text(BasePreprocessPipeline):
                     self.num_processed_samples = 0
 
         # Final flush for any remaining samples
-        if hasattr(self, 'dataset_writer'):
+        if hasattr(self, "dataset_writer"):
             written = self.dataset_writer.flush(write_remainder=True)
             if written:
                 logger.info("Final flush wrote %s samples", written)
@@ -160,10 +162,9 @@ class PreprocessPipeline_Text(BasePreprocessPipeline):
 
         self.num_processed_samples = 0
         # Add progress bar for text preprocessing
-        self.pbar = tqdm(self.preprocess_loader_iter,
-                         desc="Processing text",
-                         unit="batch",
-                         disable=self.local_rank != 0)
+        self.pbar = tqdm(
+            self.preprocess_loader_iter, desc="Processing text", unit="batch", disable=self.local_rank != 0
+        )
 
         # Initialize class variables for data sharing
         self.text_data: dict[str, Any] = {}  # Store text metadata and paths

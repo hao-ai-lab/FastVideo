@@ -20,13 +20,15 @@ import torch
 
 from fastvideo.pipelines import TrainingBatch
 from fastvideo.training.training_utils import (
-    normalize_dit_input, )
+    normalize_dit_input,
+)
 
 from fastvideo.train.models.wan.wan import WanModel
 
 if TYPE_CHECKING:
     from fastvideo.train.utils.training_config import (
-        TrainingConfig, )
+        TrainingConfig,
+    )
     from fastvideo.train.utils.lora import LoraConfig
 
 
@@ -48,10 +50,8 @@ class HunyuanModel(WanModel):
         trainable: bool = True,
         disable_custom_init_weights: bool = False,
         flow_shift: float = 7.0,
-        enable_gradient_checkpointing_type: str
-        | None = None,
-        transformer_override_safetensor: str
-        | None = None,
+        enable_gradient_checkpointing_type: str | None = None,
+        transformer_override_safetensor: str | None = None,
         lora: LoraConfig | dict[str, Any] | None = None,
     ) -> None:
         super().__init__(
@@ -91,17 +91,15 @@ class HunyuanModel(WanModel):
 
         if latents_source == "zeros":
             batch_size = encoder_hidden_states.shape[0]
-            vae_config = (
-                tc.pipeline_config.vae_config  # type: ignore[union-attr]
-                .arch_config)
+            vae_config = tc.pipeline_config.vae_config.arch_config  # type: ignore[union-attr]
             num_channels = getattr(
                 vae_config,
                 "latent_channels",
                 getattr(vae_config, "z_dim", 16),
             )
-            spatial_compression_ratio = (vae_config.spatial_compression_ratio)
-            latent_height = (tc.data.num_height // spatial_compression_ratio)
-            latent_width = (tc.data.num_width // spatial_compression_ratio)
+            spatial_compression_ratio = vae_config.spatial_compression_ratio
+            latent_height = tc.data.num_height // spatial_compression_ratio
+            latent_width = tc.data.num_width // spatial_compression_ratio
             latents = torch.zeros(
                 batch_size,
                 num_channels,
@@ -113,18 +111,16 @@ class HunyuanModel(WanModel):
             )
         elif latents_source == "data":
             if "vae_latent" not in raw_batch:
-                raise ValueError("vae_latent not found in batch "
-                                 "and latents_source='data'")
+                raise ValueError("vae_latent not found in batch and latents_source='data'")
             latents = raw_batch["vae_latent"]
-            latents = latents[:, :, :tc.data.num_latent_t]
+            latents = latents[:, :, : tc.data.num_latent_t]
             latents = latents.to(device, dtype=dtype)
         else:
-            raise ValueError(f"Unknown latents_source: "
-                             f"{latents_source!r}")
+            raise ValueError(f"Unknown latents_source: {latents_source!r}")
 
         training_batch.latents = latents
-        training_batch.encoder_hidden_states = (encoder_hidden_states.to(device, dtype=dtype))
-        training_batch.encoder_attention_mask = (encoder_attention_mask.to(device, dtype=dtype))
+        training_batch.encoder_hidden_states = encoder_hidden_states.to(device, dtype=dtype)
+        training_batch.encoder_attention_mask = encoder_attention_mask.to(device, dtype=dtype)
         training_batch.infos = infos
 
         # KEY DIFFERENCE: "hunyuan" normalisation
@@ -158,8 +154,7 @@ class HunyuanModel(WanModel):
         or return_dict in its forward signature.
         """
         if text_dict is None:
-            raise ValueError("text_dict cannot be None for "
-                             "Hunyuan forward pass")
+            raise ValueError("text_dict cannot be None for Hunyuan forward pass")
         return {
             "hidden_states": noise_input.permute(0, 2, 1, 3, 4),
             "encoder_hidden_states": text_dict["encoder_hidden_states"],
@@ -181,7 +176,7 @@ class HunyuanModel(WanModel):
         device = self.device
         dtype = self._get_training_dtype()
 
-        from transformers import (AutoTokenizer, CLIPTextModel, LlamaModel)
+        from transformers import AutoTokenizer, CLIPTextModel, LlamaModel
 
         from fastvideo.configs.pipelines.hunyuan import (
             clip_preprocess_text,
@@ -189,7 +184,7 @@ class HunyuanModel(WanModel):
             llama_preprocess_text,
             llama_postprocess_text,
         )
-        from fastvideo.utils import (PRECISION_TO_TYPE, maybe_download_model)
+        from fastvideo.utils import PRECISION_TO_TYPE, maybe_download_model
 
         model_path = maybe_download_model(tc.model_path)
 
@@ -200,10 +195,14 @@ class HunyuanModel(WanModel):
 
         # --- LLaMA ---
         llama_tok = AutoTokenizer.from_pretrained(os.path.join(model_path, "tokenizer"))
-        llama_enc = LlamaModel.from_pretrained(
-            os.path.join(model_path, "text_encoder"),
-            torch_dtype=llama_dtype,
-        ).to(device).eval()
+        llama_enc = (
+            LlamaModel.from_pretrained(
+                os.path.join(model_path, "text_encoder"),
+                torch_dtype=llama_dtype,
+            )
+            .to(device)
+            .eval()
+        )
 
         llama_cfg = tc.pipeline_config.text_encoder_configs[0]
         llama_tok_kwargs = dict(llama_cfg.tokenizer_kwargs)
@@ -220,10 +219,14 @@ class HunyuanModel(WanModel):
 
         # --- CLIP ---
         clip_tok = AutoTokenizer.from_pretrained(os.path.join(model_path, "tokenizer_2"))
-        clip_enc = CLIPTextModel.from_pretrained(
-            os.path.join(model_path, "text_encoder_2"),
-            torch_dtype=clip_dtype,
-        ).to(device).eval()
+        clip_enc = (
+            CLIPTextModel.from_pretrained(
+                os.path.join(model_path, "text_encoder_2"),
+                torch_dtype=clip_dtype,
+            )
+            .to(device)
+            .eval()
+        )
 
         clip_cfg = tc.pipeline_config.text_encoder_configs[1]
         clip_tok_kwargs = dict(clip_cfg.tokenizer_kwargs)
@@ -239,11 +242,15 @@ class HunyuanModel(WanModel):
         # --- Combine: [pooled_clip_row, llama_embeds] ---
         llama_dim = llama_embeds.shape[-1]
         pooled_row = torch.zeros(llama_dim, device=device)
-        pooled_row[:clip_pooled.shape[-1]] = clip_pooled
-        neg_embeds = torch.cat(
-            [pooled_row.unsqueeze(0), llama_embeds],
-            dim=0,
-        ).unsqueeze(0).to(device=device, dtype=dtype)
+        pooled_row[: clip_pooled.shape[-1]] = clip_pooled
+        neg_embeds = (
+            torch.cat(
+                [pooled_row.unsqueeze(0), llama_embeds],
+                dim=0,
+            )
+            .unsqueeze(0)
+            .to(device=device, dtype=dtype)
+        )
 
         # Attention mask: all ones for the combined sequence.
         neg_mask = torch.ones(neg_embeds.shape[:2], device=device, dtype=dtype)

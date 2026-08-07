@@ -22,13 +22,15 @@ import torch
 from fastvideo.forward_context import set_forward_context
 from fastvideo.pipelines import TrainingBatch
 from fastvideo.training.training_utils import (
-    normalize_dit_input, )
+    normalize_dit_input,
+)
 
 from fastvideo.train.models.wan.wan import WanModel
 
 if TYPE_CHECKING:
     from fastvideo.train.utils.training_config import (
-        TrainingConfig, )
+        TrainingConfig,
+    )
 
 
 class CosmosModel(WanModel):
@@ -56,10 +58,8 @@ class CosmosModel(WanModel):
         trainable: bool = True,
         disable_custom_init_weights: bool = False,
         flow_shift: float = 1.0,
-        enable_gradient_checkpointing_type: str
-        | None = None,
-        transformer_override_safetensor: str
-        | None = None,
+        enable_gradient_checkpointing_type: str | None = None,
+        transformer_override_safetensor: str | None = None,
     ) -> None:
         super().__init__(
             init_from=init_from,
@@ -98,17 +98,15 @@ class CosmosModel(WanModel):
 
         if latents_source == "zeros":
             batch_size = encoder_hidden_states.shape[0]
-            vae_config = (
-                tc.pipeline_config.vae_config  # type: ignore[union-attr]
-                .arch_config)
+            vae_config = tc.pipeline_config.vae_config.arch_config  # type: ignore[union-attr]
             num_channels = getattr(
                 vae_config,
                 "z_dim",
                 getattr(vae_config, "latent_channels", 16),
             )
-            spatial_compression_ratio = (vae_config.spatial_compression_ratio)
-            latent_height = (tc.data.num_height // spatial_compression_ratio)
-            latent_width = (tc.data.num_width // spatial_compression_ratio)
+            spatial_compression_ratio = vae_config.spatial_compression_ratio
+            latent_height = tc.data.num_height // spatial_compression_ratio
+            latent_width = tc.data.num_width // spatial_compression_ratio
             latents = torch.zeros(
                 batch_size,
                 num_channels,
@@ -120,18 +118,16 @@ class CosmosModel(WanModel):
             )
         elif latents_source == "data":
             if "vae_latent" not in raw_batch:
-                raise ValueError("vae_latent not found in batch "
-                                 "and latents_source='data'")
+                raise ValueError("vae_latent not found in batch and latents_source='data'")
             latents = raw_batch["vae_latent"]
-            latents = latents[:, :, :tc.data.num_latent_t]
+            latents = latents[:, :, : tc.data.num_latent_t]
             latents = latents.to(device, dtype=dtype)
         else:
-            raise ValueError(f"Unknown latents_source: "
-                             f"{latents_source!r}")
+            raise ValueError(f"Unknown latents_source: {latents_source!r}")
 
         training_batch.latents = latents
-        training_batch.encoder_hidden_states = (encoder_hidden_states.to(device, dtype=dtype))
-        training_batch.encoder_attention_mask = (encoder_attention_mask.to(device, dtype=dtype))
+        training_batch.encoder_hidden_states = encoder_hidden_states.to(device, dtype=dtype)
+        training_batch.encoder_attention_mask = encoder_attention_mask.to(device, dtype=dtype)
         training_batch.infos = infos
 
         # KEY DIFFERENCE: "cosmos" normalisation
@@ -201,18 +197,18 @@ class CosmosModel(WanModel):
         #   pred_x0 = (x_0 + sigma*eps) - eps*sigma = x_0  ✓
         # ----------------------------------------------------------
         assert batch.sigmas is not None
-        sigma_1d = batch.sigmas.flatten()[:noisy_latents.shape[0]]
+        sigma_1d = batch.sigmas.flatten()[: noisy_latents.shape[0]]
 
         # Cosmos 2.5 timestep = raw sigma (matching inference
         # convention where scheduler timestep * 0.001 = sigma).
         cosmos_timestep = sigma_1d
 
         with (
-                torch.autocast(device_type, dtype=dtype),
-                set_forward_context(
-                    current_timestep=batch.timesteps,
-                    attn_metadata=attn_metadata,
-                ),
+            torch.autocast(device_type, dtype=dtype),
+            set_forward_context(
+                current_timestep=batch.timesteps,
+                attn_metadata=attn_metadata,
+            ),
         ):
             input_kwargs = self._build_distill_input_kwargs(
                 noisy_latents,
@@ -327,13 +323,15 @@ class CosmosModel(WanModel):
 
         cfg_rate = float(tc.data.training_cfg_rate or 0.0)
         if cfg_rate > 0.0:
-            raise NotImplementedError("Cosmos 2.5 currently only supports training_cfg_rate=0; "
-                                      f"got training_cfg_rate={cfg_rate}. Real negative-prompt "
-                                      "embeddings via Reason1 (Qwen2.5-VL) are not implemented "
-                                      "yet — using the zero placeholder with CFG dropout would "
-                                      "train against zero-vector \"unconditional\" inputs and "
-                                      "produce wrong gradients. Set "
-                                      "training.data.training_cfg_rate=0.")
+            raise NotImplementedError(
+                "Cosmos 2.5 currently only supports training_cfg_rate=0; "
+                f"got training_cfg_rate={cfg_rate}. Real negative-prompt "
+                "embeddings via Reason1 (Qwen2.5-VL) are not implemented "
+                "yet — using the zero placeholder with CFG dropout would "
+                'train against zero-vector "unconditional" inputs and '
+                "produce wrong gradients. Set "
+                "training.data.training_cfg_rate=0."
+            )
 
         device = self.device
         dtype = self._get_training_dtype()

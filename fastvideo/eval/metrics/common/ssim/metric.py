@@ -39,7 +39,7 @@ def _ssim_per_frame(
 
 def _gaussian_kernel(size: int, sigma: float, channels: int, device, dtype):
     coords = torch.arange(size, device=device, dtype=dtype) - size // 2
-    g = torch.exp(-coords**2 / (2 * sigma**2))
+    g = torch.exp(-(coords**2) / (2 * sigma**2))
     g = g / g.sum()
     kernel_2d = g.unsqueeze(1) * g.unsqueeze(0)
     kernel = kernel_2d.unsqueeze(0).unsqueeze(0).repeat(channels, 1, 1, 1)
@@ -70,7 +70,7 @@ class SSIMMetric(BaseMetric):
         chunk = self._chunk_size or n
         parts = []
         for i in range(0, n, chunk):
-            parts.append(_ssim_per_frame(gen[i:i + chunk], ref[i:i + chunk], self.window_size))
+            parts.append(_ssim_per_frame(gen[i : i + chunk], ref[i : i + chunk], self.window_size))
         per_frame = torch.cat(parts)  # (n,)
 
         return MetricResult(

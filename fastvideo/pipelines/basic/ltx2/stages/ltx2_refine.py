@@ -78,15 +78,15 @@ class LTX2RefineInitStage(PipelineStage):
             raise ValueError("LTX-2 refinement expects scalar height/width.")
 
         if height % 2 != 0 or width % 2 != 0:
-            raise ValueError("LTX-2 refinement requires even height/width so stage1 can be "
-                             "half resolution.")
+            raise ValueError("LTX-2 refinement requires even height/width so stage1 can be half resolution.")
 
-        spatial_ratio = (fastvideo_args.pipeline_config.vae_config.arch_config.spatial_compression_ratio)
+        spatial_ratio = fastvideo_args.pipeline_config.vae_config.arch_config.spatial_compression_ratio
         stage1_height = height // 2
         stage1_width = width // 2
         if stage1_height % spatial_ratio != 0 or stage1_width % spatial_ratio != 0:
-            raise ValueError(f"LTX-2 refinement requires height/width divisible by "
-                             f"{2 * spatial_ratio} (got {height}x{width}).")
+            raise ValueError(
+                f"LTX-2 refinement requires height/width divisible by {2 * spatial_ratio} (got {height}x{width})."
+            )
 
         batch.extra["ltx2_refine_target_height"] = height
         batch.extra["ltx2_refine_target_width"] = width
@@ -145,7 +145,7 @@ class LTX2UpsampleStage(PipelineStage):
 
         latents = batch.latents
         if batch.return_continuation_state:
-            batch.extra[LTX2_CONTINUATION_STAGE1_LAST_LATENT_KEY] = (latents[:, :, -1:, :, :].detach().clone())
+            batch.extra[LTX2_CONTINUATION_STAGE1_LAST_LATENT_KEY] = latents[:, :, -1:, :, :].detach().clone()
 
         orig_dtype = latents.dtype
         orig_device = latents.device
@@ -156,7 +156,7 @@ class LTX2UpsampleStage(PipelineStage):
                     latents = latents.to(device=first_param.device)
                 if first_param.dtype != latents.dtype:
                     latents = latents.to(dtype=first_param.dtype)
-                if (latents.dtype != orig_dtype or latents.device != orig_device):
+                if latents.dtype != orig_dtype or latents.device != orig_device:
                     logger.info(
                         "[LTX2] Cast latents to %s on %s for upsampler.",
                         latents.dtype,
@@ -213,13 +213,17 @@ class LTX2UpsampleStage(PipelineStage):
                 video_shape = VideoLatentShape.from_torch_shape(latents.shape)
                 patch_noise_shape = patchifier.patchify(latents).shape
             noise_path = fastvideo_args.ltx2_refine_noise_path
-            noise = self._load_noise(
-                noise_path,
-                device=latents.device,
-                dtype=latents.dtype,
-                expected_shape=latents.shape,
-                alternate_shape=patch_noise_shape,
-            ) if noise_path else None
+            noise = (
+                self._load_noise(
+                    noise_path,
+                    device=latents.device,
+                    dtype=latents.dtype,
+                    expected_shape=latents.shape,
+                    alternate_shape=patch_noise_shape,
+                )
+                if noise_path
+                else None
+            )
             if noise is None:
                 noise = randn_tensor(
                     latents.shape,
@@ -229,8 +233,12 @@ class LTX2UpsampleStage(PipelineStage):
                 )
                 if noise_path:
                     self._save_noise(noise_path, noise)
-            elif (patchifier is not None and patch_noise_shape is not None and video_shape is not None
-                  and noise.shape == patch_noise_shape):
+            elif (
+                patchifier is not None
+                and patch_noise_shape is not None
+                and video_shape is not None
+                and noise.shape == patch_noise_shape
+            ):
                 noise = patchifier.unpatchify(noise, video_shape)
 
             latents = apply_ltx2_gaussian_noiser(
@@ -251,14 +259,18 @@ class LTX2UpsampleStage(PipelineStage):
                     audio_shape = AudioLatentShape.from_torch_shape(audio_latents.shape)
                     audio_patch = audio_patchifier.patchify(audio_latents)
                     audio_noise_shape = audio_patch.shape
-                    audio_noise_path = (fastvideo_args.ltx2_refine_audio_noise_path)
-                    audio_noise = self._load_noise(
-                        audio_noise_path,
-                        device=audio_latents.device,
-                        dtype=audio_latents.dtype,
-                        expected_shape=audio_noise_shape,
-                        alternate_shape=audio_latents.shape,
-                    ) if audio_noise_path else None
+                    audio_noise_path = fastvideo_args.ltx2_refine_audio_noise_path
+                    audio_noise = (
+                        self._load_noise(
+                            audio_noise_path,
+                            device=audio_latents.device,
+                            dtype=audio_latents.dtype,
+                            expected_shape=audio_noise_shape,
+                            alternate_shape=audio_latents.shape,
+                        )
+                        if audio_noise_path
+                        else None
+                    )
                     if audio_noise is None:
                         audio_noise = randn_tensor(
                             audio_noise_shape,
@@ -273,13 +285,17 @@ class LTX2UpsampleStage(PipelineStage):
                     audio_noised_patch = audio_noise * sigma0 + audio_patch * (1.0 - sigma0)
                     audio_latents = audio_patchifier.unpatchify(audio_noised_patch, audio_shape)
                 else:
-                    audio_noise_path = (fastvideo_args.ltx2_refine_audio_noise_path)
-                    audio_noise = self._load_noise(
-                        audio_noise_path,
-                        device=audio_latents.device,
-                        dtype=audio_latents.dtype,
-                        expected_shape=audio_latents.shape,
-                    ) if audio_noise_path else None
+                    audio_noise_path = fastvideo_args.ltx2_refine_audio_noise_path
+                    audio_noise = (
+                        self._load_noise(
+                            audio_noise_path,
+                            device=audio_latents.device,
+                            dtype=audio_latents.dtype,
+                            expected_shape=audio_latents.shape,
+                        )
+                        if audio_noise_path
+                        else None
+                    )
                     if audio_noise is None:
                         audio_noise = randn_tensor(
                             audio_latents.shape,
@@ -326,17 +342,19 @@ class LTX2UpsampleStage(PipelineStage):
             return None
         payload = torch.load(path, map_location=device)
         if isinstance(payload, dict):
-            noise = (payload.get("noise") or payload.get("latent_noise") or payload.get("latent")
-                     or payload.get("video_noise"))
+            noise = (
+                payload.get("noise")
+                or payload.get("latent_noise")
+                or payload.get("latent")
+                or payload.get("video_noise")
+            )
         else:
             noise = payload
         if not torch.is_tensor(noise):
             raise TypeError(f"Expected tensor noise in {path}")
         noise_shape = tuple(noise.shape)
-        if (noise_shape != tuple(expected_shape)
-                and (alternate_shape is None or noise_shape != tuple(alternate_shape))):
-            raise ValueError(f"Noise shape mismatch for {path}: expected "
-                             f"{tuple(expected_shape)}, got {noise_shape}")
+        if noise_shape != tuple(expected_shape) and (alternate_shape is None or noise_shape != tuple(alternate_shape)):
+            raise ValueError(f"Noise shape mismatch for {path}: expected {tuple(expected_shape)}, got {noise_shape}")
         logger.info("[LTX2] Loaded refine noise from %s", path)
         return noise.to(device=device, dtype=dtype)
 
@@ -360,7 +378,7 @@ class LTX2RefineLoRAStage(PipelineStage):
         lora_nickname: str = "ltx2_refine",
     ) -> None:
         super().__init__()
-        self._pipeline_ref = (weakref.ref(pipeline) if pipeline is not None else None)
+        self._pipeline_ref = weakref.ref(pipeline) if pipeline is not None else None
         self._lora_path = lora_path
         self._lora_nickname = lora_nickname
         self._applied = False
@@ -376,10 +394,9 @@ class LTX2RefineLoRAStage(PipelineStage):
         if not lora_path or self._applied:
             return batch
 
-        pipeline = (self._pipeline_ref() if self._pipeline_ref is not None else None)
+        pipeline = self._pipeline_ref() if self._pipeline_ref is not None else None
         if pipeline is None or not hasattr(pipeline, "set_lora_adapter"):
-            raise ValueError("LTX2 refinement LoRA requested but pipeline does not "
-                             "support LoRA adapters.")
+            raise ValueError("LTX2 refinement LoRA requested but pipeline does not support LoRA adapters.")
 
         pipeline.set_lora_adapter(self._lora_nickname, lora_path)
         self._applied = True

@@ -1,15 +1,18 @@
 # SPDX-License-Identifier: Apache-2.0
 """Matrix-Game 2.0 pipeline presets."""
+
 from fastvideo.api.presets import InferencePreset, PresetStageSpec
 
 _DENOISE_STAGE = PresetStageSpec(
     name="denoise",
     kind="denoising",
     description="Causal denoising pass",
-    allowed_overrides=frozenset({
-        "num_inference_steps",
-        "guidance_scale",
-    }),
+    allowed_overrides=frozenset(
+        {
+            "num_inference_steps",
+            "guidance_scale",
+        }
+    ),
 )
 
 MATRIXGAME2_I2V = InferencePreset(
@@ -18,7 +21,7 @@ MATRIXGAME2_I2V = InferencePreset(
     model_family="matrixgame",
     description="Matrix-Game 2.0 I2V",
     workload_type="i2v",
-    stage_schemas=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE,),
     defaults={
         "height": 352,
         "width": 640,
@@ -30,4 +33,4 @@ MATRIXGAME2_I2V = InferencePreset(
     },
 )
 
-ALL_PRESETS = (MATRIXGAME2_I2V, )
+ALL_PRESETS = (MATRIXGAME2_I2V,)

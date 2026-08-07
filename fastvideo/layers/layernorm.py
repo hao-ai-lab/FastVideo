@@ -29,13 +29,14 @@ class RMSNorm(CustomOp):
 
         self.hidden_size = hidden_size
         self.variance_epsilon = eps
-        self.variance_size_override = (None if var_hidden_size == hidden_size else var_hidden_size)
+        self.variance_size_override = None if var_hidden_size == hidden_size else var_hidden_size
         self.has_weight = has_weight
 
         from fastvideo.platforms import current_platform
 
-        self.weight = torch.ones(hidden_size) if current_platform.is_cuda_alike() else torch.ones(hidden_size,
-                                                                                                  dtype=dtype)
+        self.weight = (
+            torch.ones(hidden_size) if current_platform.is_cuda_alike() else torch.ones(hidden_size, dtype=dtype)
+        )
         if self.has_weight:
             self.weight = nn.Parameter(self.weight)
 
@@ -59,17 +60,17 @@ class RMSNorm(CustomOp):
 
         hidden_size = x.shape[-1]
         if hidden_size != self.hidden_size:
-            raise ValueError("Expected hidden_size to be "
-                             f"{self.hidden_size}, but found: {hidden_size}")
+            raise ValueError(f"Expected hidden_size to be {self.hidden_size}, but found: {hidden_size}")
 
         if self.variance_size_override is None:
             x_var = x
         else:
             if hidden_size < self.variance_size_override:
-                raise ValueError("Expected hidden_size to be at least "
-                                 f"{self.variance_size_override}, but found: {hidden_size}")
+                raise ValueError(
+                    f"Expected hidden_size to be at least {self.variance_size_override}, but found: {hidden_size}"
+                )
 
-            x_var = x[:, :, :self.variance_size_override]
+            x_var = x[:, :, : self.variance_size_override]
 
         variance = x_var.pow(2).mean(dim=-1, keepdim=True)
 
@@ -113,7 +114,6 @@ class ScaleResidual(nn.Module):
 # NOTE(will): Needed to match behavior of diffusers and wan2.1 even while using
 # FSDP's MixedPrecisionPolicy
 class FP32LayerNorm(nn.LayerNorm):
-
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         origin_dtype = inputs.dtype
         return F.layer_norm(
@@ -131,7 +131,7 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
     1. Gated residual connection
     2. LayerNorm
     3. Scale and shift operations
-    
+
     This reduces memory bandwidth by combining memory-bound operations.
     """
 
@@ -156,21 +156,23 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
         else:
             raise NotImplementedError(f"Norm type {norm_type} not implemented")
 
-    def forward(self,
-                residual: torch.Tensor,
-                x: torch.Tensor,
-                gate: torch.Tensor | int,
-                shift: torch.Tensor,
-                scale: torch.Tensor,
-                convert_modulation_dtype: bool = False) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(
+        self,
+        residual: torch.Tensor,
+        x: torch.Tensor,
+        gate: torch.Tensor | int,
+        shift: torch.Tensor,
+        scale: torch.Tensor,
+        convert_modulation_dtype: bool = False,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
-        Apply gated residual connection, followed by layernorm and 
+        Apply gated residual connection, followed by layernorm and
         scale/shift in a single fused operation.
-        
+
         Returns:
             Tuple containing:
             - normalized and modulated output
-            - residual value (value after residual connection 
+            - residual value (value after residual connection
               but before normalization)
         """
         # x.shape: [batch_size, seq_len, inner_dim]
@@ -207,7 +209,8 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
             num_frames = scale.shape[1]
             frame_seqlen = normalized.shape[1] // num_frames
             modulated = (normalized.unflatten(dim=1, sizes=(num_frames, frame_seqlen)) * (1.0 + scale) + shift).flatten(
-                1, 2)
+                1, 2
+            )
         else:
             modulated = normalized * (1.0 + scale) + shift
         return modulated, residual_output
@@ -241,11 +244,9 @@ class LayerNormScaleShift(nn.Module):
         else:
             raise NotImplementedError(f"Norm type {norm_type} not implemented")
 
-    def forward(self,
-                x: torch.Tensor,
-                shift: torch.Tensor,
-                scale: torch.Tensor,
-                convert_modulation_dtype: bool = False) -> torch.Tensor:
+    def forward(
+        self, x: torch.Tensor, shift: torch.Tensor, scale: torch.Tensor, convert_modulation_dtype: bool = False
+    ) -> torch.Tensor:
         """Apply ln followed by scale and shift in a single fused operation."""
         # x.shape: [batch_size, seq_len, inner_dim]
         normalized = self.norm(x)
@@ -261,7 +262,8 @@ class LayerNormScaleShift(nn.Module):
             num_frames = scale.shape[1]
             frame_seqlen = normalized.shape[1] // num_frames
             output = (normalized.unflatten(dim=1, sizes=(num_frames, frame_seqlen)) * (1.0 + scale) + shift).flatten(
-                1, 2)
+                1, 2
+            )
         else:
             # scale.shape: [batch_size, 1, inner_dim]
             # shift.shape: [batch_size, 1, inner_dim]

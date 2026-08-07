@@ -17,24 +17,32 @@ __all__ = [
 def __getattr__(name: str) -> object:
     if name == "DMD2Method":
         from fastvideo.train.methods.distribution_matching.dmd2 import DMD2Method
+
         return DMD2Method
     if name == "FineTuneMethod":
         from fastvideo.train.methods.fine_tuning.finetune import FineTuneMethod
+
         return FineTuneMethod
     if name == "KDMethod":
         from fastvideo.train.methods.knowledge_distillation.kd import KDMethod
+
         return KDMethod
     if name == "SelfForcingMethod":
         from fastvideo.train.methods.distribution_matching.self_forcing import SelfForcingMethod
+
         return SelfForcingMethod
     if name == "DiffusionForcingSFTMethod":
         from fastvideo.train.methods.fine_tuning.dfsft import DiffusionForcingSFTMethod
+
         return DiffusionForcingSFTMethod
     if name == "TeacherForcingSFTMethod":
         from fastvideo.train.methods.fine_tuning.tfsft import TeacherForcingSFTMethod
+
         return TeacherForcingSFTMethod
     if name == "CausalConsistencyDistillationMethod":
         from fastvideo.train.methods.consistency_model.causal_cd import (
-            CausalConsistencyDistillationMethod, )
+            CausalConsistencyDistillationMethod,
+        )
+
         return CausalConsistencyDistillationMethod
     raise AttributeError(name)

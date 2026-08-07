@@ -37,29 +37,39 @@ class DreamXWorldARPipeline(LoRAPipeline, ComposedPipelineBase):
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
         self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())
-        self.add_stage(stage_name="prompt_encoding_stage",
-                       stage=TextEncodingStage(
-                           text_encoders=[self.get_module("text_encoder")],
-                           tokenizers=[self.get_module("tokenizer")],
-                       ))
+        self.add_stage(
+            stage_name="prompt_encoding_stage",
+            stage=TextEncodingStage(
+                text_encoders=[self.get_module("text_encoder")],
+                tokenizers=[self.get_module("tokenizer")],
+            ),
+        )
         self.add_stage(stage_name="conditioning_stage", stage=ConditioningStage())
-        self.add_stage(stage_name="timestep_preparation_stage",
-                       stage=TimestepPreparationStage(scheduler=self.get_module("scheduler")))
-        self.add_stage(stage_name="latent_preparation_stage",
-                       stage=LatentPreparationStage(
-                           scheduler=self.get_module("scheduler"),
-                           transformer=self.get_module("transformer", None),
-                       ))
-        self.add_stage(stage_name="image_latent_preparation_stage",
-                       stage=DreamXWorldImageVAEEncodingStage(vae=self.get_module("vae")))
+        self.add_stage(
+            stage_name="timestep_preparation_stage",
+            stage=TimestepPreparationStage(scheduler=self.get_module("scheduler")),
+        )
+        self.add_stage(
+            stage_name="latent_preparation_stage",
+            stage=LatentPreparationStage(
+                scheduler=self.get_module("scheduler"),
+                transformer=self.get_module("transformer", None),
+            ),
+        )
+        self.add_stage(
+            stage_name="image_latent_preparation_stage",
+            stage=DreamXWorldImageVAEEncodingStage(vae=self.get_module("vae")),
+        )
         self.add_stage(stage_name="dreamx_camera_conditioning_stage", stage=DreamXWorldCameraConditioningStage())
-        self.add_stage(stage_name="denoising_stage",
-                       stage=DreamXWorldARCausalDenoisingStage(
-                           transformer=self.get_module("transformer"),
-                           scheduler=self.get_module("scheduler"),
-                           vae=self.get_module("vae"),
-                           pipeline=self,
-                       ))
+        self.add_stage(
+            stage_name="denoising_stage",
+            stage=DreamXWorldARCausalDenoisingStage(
+                transformer=self.get_module("transformer"),
+                scheduler=self.get_module("scheduler"),
+                vae=self.get_module("vae"),
+                pipeline=self,
+            ),
+        )
         self.add_stage(stage_name="decoding_stage", stage=DecodingStage(vae=self.get_module("vae"), pipeline=self))
         logger.info("DreamXWorldARPipeline initialized with autoregressive causal denoising")
 

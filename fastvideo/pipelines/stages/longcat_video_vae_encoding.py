@@ -25,7 +25,7 @@ logger = init_logger(__name__)
 class LongCatVideoVAEEncodingStage(PipelineStage):
     """
     Encode video frames to latent space for VC conditioning.
-    
+
     This stage:
     1. Loads video frames from path or uses provided frames
     2. Takes the last num_cond_frames from the video
@@ -47,8 +47,8 @@ class LongCatVideoVAEEncodingStage(PipelineStage):
         """Encode video frames to latent for VC conditioning."""
 
         # Get video from batch - can be path, list of PIL images, or already loaded
-        video = getattr(batch, 'video_frames', None) or getattr(batch, 'video_path', None)
-        num_cond_frames = getattr(batch, 'num_cond_frames', 13)  # Default 13 for VC
+        video = getattr(batch, "video_frames", None) or getattr(batch, "video_path", None)
+        num_cond_frames = getattr(batch, "num_cond_frames", 13)  # Default 13 for VC
 
         if video is None:
             raise ValueError("video_frames or video_path must be provided for VC")
@@ -56,6 +56,7 @@ class LongCatVideoVAEEncodingStage(PipelineStage):
         # Load video if path
         if isinstance(video, str):
             from diffusers.utils import load_video
+
             video = load_video(video)
             logger.info("Loaded video from path: %d frames", len(video))
 
@@ -124,8 +125,12 @@ class LongCatVideoVAEEncodingStage(PipelineStage):
         batch.num_cond_frames = num_cond_frames
         batch.num_cond_latents = num_cond_latents
 
-        logger.info("VC: Encoded %d frames to latent shape %s, num_cond_latents=%d", num_cond_frames, latent.shape,
-                    num_cond_latents)
+        logger.info(
+            "VC: Encoded %d frames to latent shape %s, num_cond_latents=%d",
+            num_cond_frames,
+            latent.shape,
+            num_cond_latents,
+        )
 
         # Offload VAE if needed
         if fastvideo_args.vae_cpu_offload:
@@ -135,11 +140,11 @@ class LongCatVideoVAEEncodingStage(PipelineStage):
 
     def retrieve_latents(self, encoder_output: Any, generator: torch.Generator | None) -> torch.Tensor:
         """Sample from VAE posterior."""
-        if hasattr(encoder_output, 'sample'):
+        if hasattr(encoder_output, "sample"):
             return encoder_output.sample(generator)
-        elif hasattr(encoder_output, 'latent_dist'):
+        elif hasattr(encoder_output, "latent_dist"):
             return encoder_output.latent_dist.sample(generator)
-        elif hasattr(encoder_output, 'latents'):
+        elif hasattr(encoder_output, "latents"):
             return encoder_output.latents
         else:
             raise AttributeError("Could not access latents from encoder output")
@@ -147,17 +152,22 @@ class LongCatVideoVAEEncodingStage(PipelineStage):
     def normalize_latents(self, latents: torch.Tensor) -> torch.Tensor:
         """
         Apply LongCat-specific latent normalization.
-        
+
         Formula: (latents - mean) / std
         """
-        if not hasattr(self.vae.config, 'latents_mean') or not hasattr(self.vae.config, 'latents_std'):
-            raise ValueError("VAE config must have 'latents_mean' and 'latents_std' "
-                             "for LongCat normalization")
+        if not hasattr(self.vae.config, "latents_mean") or not hasattr(self.vae.config, "latents_std"):
+            raise ValueError("VAE config must have 'latents_mean' and 'latents_std' for LongCat normalization")
 
-        latents_mean = torch.tensor(self.vae.config.latents_mean).view(1, self.vae.config.z_dim, 1, 1,
-                                                                       1).to(latents.device, latents.dtype)
+        latents_mean = (
+            torch.tensor(self.vae.config.latents_mean)
+            .view(1, self.vae.config.z_dim, 1, 1, 1)
+            .to(latents.device, latents.dtype)
+        )
 
-        latents_std = torch.tensor(self.vae.config.latents_std).view(1, self.vae.config.z_dim, 1, 1,
-                                                                     1).to(latents.device, latents.dtype)
+        latents_std = (
+            torch.tensor(self.vae.config.latents_std)
+            .view(1, self.vae.config.z_dim, 1, 1, 1)
+            .to(latents.device, latents.dtype)
+        )
 
         return (latents - latents_mean) / latents_std

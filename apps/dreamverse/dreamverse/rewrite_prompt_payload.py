@@ -3,8 +3,9 @@ from __future__ import annotations
 import json
 from typing import Any
 
-REWRITE_REQUEST_TEXT = ("Rewrite all segment prompts with improved continuity and cinematic detail. "
-                        "Keep count and ordering identical.")
+REWRITE_REQUEST_TEXT = (
+    "Rewrite all segment prompts with improved continuity and cinematic detail. Keep count and ordering identical."
+)
 DEFAULT_REWRITE_SEGMENT_COUNT = 6
 REWRITE_MODE_NEW = "new_rollout"
 REWRITE_MODE_EDIT_EXISTING = "edit_existing_rollout"
@@ -35,7 +36,7 @@ def build_rewrite_user_payload(
 ) -> dict[str, Any]:
     rollout_id = (preset_id or "").strip() or DEFAULT_REWRITE_ROLLOUT_ID
     rollout_label = (preset_label or "").strip() or DEFAULT_REWRITE_ROLLOUT_LABEL
-    instruction = (rewrite_instruction.strip() if isinstance(rewrite_instruction, str) else "")
+    instruction = rewrite_instruction.strip() if isinstance(rewrite_instruction, str) else ""
     if len(prompt_window_prompts) == 0:
         return {
             "mode": REWRITE_MODE_NEW,
@@ -75,15 +76,10 @@ def build_rewrite_request_body(
         rewrite_instruction=rewrite_instruction,
     )
     return {
-        "model":
-        model,
-        "temperature":
-        temperature,
-        "max_completion_tokens":
-        max_completion_tokens,
-        "response_format": {
-            "type": "json_object"
-        },
+        "model": model,
+        "temperature": temperature,
+        "max_completion_tokens": max_completion_tokens,
+        "response_format": {"type": "json_object"},
         "messages": [
             {
                 "role": "system",

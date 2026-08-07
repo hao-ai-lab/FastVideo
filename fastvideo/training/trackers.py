@@ -185,13 +185,17 @@ def _select_tracker_artifact(value: Any, tracker_index: int) -> Any:
         return selected_dict if selected_dict else _MISSING_ARTIFACT
     if isinstance(value, list):
         selected_list = [
-            selected for item in value
+            selected
+            for item in value
             if (selected := _select_tracker_artifact(item, tracker_index)) is not _MISSING_ARTIFACT
         ]
         return selected_list if selected_list else _MISSING_ARTIFACT
     if isinstance(value, tuple):
-        selected_tuple = tuple(selected for item in value
-                               if (selected := _select_tracker_artifact(item, tracker_index)) is not _MISSING_ARTIFACT)
+        selected_tuple = tuple(
+            selected
+            for item in value
+            if (selected := _select_tracker_artifact(item, tracker_index)) is not _MISSING_ARTIFACT
+        )
         return selected_tuple if selected_tuple else _MISSING_ARTIFACT
     return value
 
@@ -336,7 +340,7 @@ class WandbTracker(BaseTracker):
 
         normalized_artifacts = dict(artifacts)
         if "validation_ref_videos" in normalized_artifacts:
-            normalized_artifacts["reference_video/videos"] = (normalized_artifacts.pop("validation_ref_videos"))
+            normalized_artifacts["reference_video/videos"] = normalized_artifacts.pop("validation_ref_videos")
 
         self.log(normalized_artifacts, step)
 
@@ -445,9 +449,11 @@ class SwanlabTracker(BaseTracker):
         except ModuleNotFoundError as error:
             if error.name != "swanlab":
                 raise
-            raise ModuleNotFoundError("SwanLab tracking requires the optional 'swanlab' dependency. "
-                                      "Install it with `uv pip install 'fastvideo[swanlab]'` (or "
-                                      "`uv pip install -e '.[swanlab]'` from a source checkout).") from error
+            raise ModuleNotFoundError(
+                "SwanLab tracking requires the optional 'swanlab' dependency. "
+                "Install it with `uv pip install 'fastvideo[swanlab]'` (or "
+                "`uv pip install -e '.[swanlab]'` from a source checkout)."
+            ) from error
 
         pathlib.Path(log_dir).mkdir(parents=True, exist_ok=True)
 
@@ -529,7 +535,8 @@ def initialize_trackers(
     unsupported = [name for name in tracker_names if name not in SUPPORTED_TRACKERS]
     if unsupported:
         raise ValueError(
-            f"Unsupported tracker(s) provided: {unsupported}. Supported trackers: {sorted(SUPPORTED_TRACKERS)}")
+            f"Unsupported tracker(s) provided: {unsupported}. Supported trackers: {sorted(SUPPORTED_TRACKERS)}"
+        )
 
     tracker_instances: list[BaseTracker] = []
     for tracker_name in tracker_names:
@@ -543,7 +550,8 @@ def initialize_trackers(
                     config=config,
                     entity=entity,
                     run_name=run_name,
-                ))
+                )
+            )
         elif tracker_name == Trackers.SWANLAB.value:
             tracker_instances.append(
                 SwanlabTracker(
@@ -551,7 +559,8 @@ def initialize_trackers(
                     os.path.abspath(log_dir),
                     config=config,
                     run_name=run_name,
-                ))
+                )
+            )
 
     if not tracker_instances:
         return DummyTracker()

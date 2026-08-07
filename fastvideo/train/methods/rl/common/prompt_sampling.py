@@ -52,12 +52,16 @@ def distributed_k_repeat_indices(
 
     total_samples = world_size * batch_size
     if total_samples % repeats_per_prompt != 0:
-        raise ValueError("world_size * batch_size must be divisible by repeats_per_prompt "
-                         f"({world_size} * {batch_size} vs {repeats_per_prompt})")
+        raise ValueError(
+            "world_size * batch_size must be divisible by repeats_per_prompt "
+            f"({world_size} * {batch_size} vs {repeats_per_prompt})"
+        )
     unique_prompt_count = total_samples // repeats_per_prompt
     if unique_prompt_count > dataset_length:
-        raise ValueError("K-repeat sampling needs at least as many rows as unique prompts "
-                         f"per sampling batch ({dataset_length} < {unique_prompt_count})")
+        raise ValueError(
+            "K-repeat sampling needs at least as many rows as unique prompts "
+            f"per sampling batch ({dataset_length} < {unique_prompt_count})"
+        )
 
     generator = torch.Generator()
     generator.manual_seed(int(seed))

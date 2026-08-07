@@ -16,7 +16,8 @@ logger = init_logger(__name__)
 @dataclass
 class ArchConfig:
     stacked_params_mapping: list[tuple[str, str, str]] = field(
-        default_factory=list)  # mapping from huggingface weight names to custom names
+        default_factory=list
+    )  # mapping from huggingface weight names to custom names
 
 
 @dataclass

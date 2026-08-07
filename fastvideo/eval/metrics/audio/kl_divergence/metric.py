@@ -40,12 +40,12 @@ def _collect_logits(
     win_samples = int(window_size * SAMPLING_RATE)
     per_window: list[torch.Tensor] = []
     for i in range(0, max(step_size, len(audio) - step_size), step_size):
-        window = audio[i:i + win_samples]
+        window = audio[i : i + win_samples]
         # Pad short tail windows up to the model's expected length, but
         # only if the tail is at least 15% of a window — mirrors AudioGen.
         if len(window) < win_samples and len(window) > int(win_samples * 0.15):
             tmp = np.zeros(win_samples, dtype=np.float32)
-            tmp[:len(window)] = window
+            tmp[: len(window)] = window
             window = tmp
         wav = torch.from_numpy(np.asarray(window, dtype=np.float32)).unsqueeze(0).to(device)
         with torch.no_grad():
@@ -68,17 +68,20 @@ def _kl_softmax(pred_logits: torch.Tensor, gt_logits: torch.Tensor) -> float:
             F.log_softmax(gt_logits, dim=-1),
             reduction="sum",
             log_target=True,
-        ))
+        )
+    )
 
 
 def _kl_sigmoid(pred_logits: torch.Tensor, gt_logits: torch.Tensor) -> float:
     """``KL(gt || pred)`` over per-class Bernoulli sigmoid (multi-label variant)."""
-    return float(F.kl_div(
-        F.logsigmoid(pred_logits),
-        F.logsigmoid(gt_logits),
-        reduction="sum",
-        log_target=True,
-    ))
+    return float(
+        F.kl_div(
+            F.logsigmoid(pred_logits),
+            F.logsigmoid(gt_logits),
+            reduction="sum",
+            log_target=True,
+        )
+    )
 
 
 @register("audio.kl_divergence")
@@ -110,6 +113,7 @@ class KLDivergenceMetric(BaseMetric):
         if self._model is not None:
             return
         from hear21passt.base import get_basic_model
+
         model = get_basic_model(mode="logits")
         model.eval()
         model = model.to(self.device)
@@ -142,8 +146,5 @@ class KLDivergenceMetric(BaseMetric):
         return MetricResult(
             name=self.name,
             score=kl_sm,
-            details={
-                "kl_softmax": kl_sm,
-                "kl_sigmoid": kl_sg
-            },
+            details={"kl_softmax": kl_sm, "kl_sigmoid": kl_sg},
         )

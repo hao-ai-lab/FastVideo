@@ -92,8 +92,10 @@ def resolve_target_canvas(batch: ForwardBatch, vae: object, default_aspect: tupl
             raise TypeError("MiniMax-H3 `height` and `width` must be integers.")
         height, width = batch.height, batch.width
         if height <= 0 or width <= 0 or height % MINIMAX_H3_CANVAS_MULTIPLE or width % MINIMAX_H3_CANVAS_MULTIPLE:
-            raise ValueError(f"MiniMax-H3 `height` and `width` must be positive multiples of "
-                             f"{MINIMAX_H3_CANVAS_MULTIPLE}, got {height}x{width}.")
+            raise ValueError(
+                f"MiniMax-H3 `height` and `width` must be positive multiples of "
+                f"{MINIMAX_H3_CANVAS_MULTIPLE}, got {height}x{width}."
+            )
 
     ratio = int(_component_value(vae, "spatial_compression_ratio"))
     if height % ratio or width % ratio:
@@ -108,8 +110,10 @@ def resolve_target_num_frames(num_frames: object) -> int:
     aligned = align_num_frames(num_frames)
     duration = aligned / MINIMAX_H3_FPS
     if not MINIMAX_H3_MIN_DURATION <= duration <= MINIMAX_H3_MAX_DURATION:
-        raise ValueError(f"MiniMax-H3 generates {MINIMAX_H3_MIN_DURATION:g}-{MINIMAX_H3_MAX_DURATION:g} seconds at "
-                         f"{MINIMAX_H3_FPS} fps; aligned num_frames={aligned}.")
+        raise ValueError(
+            f"MiniMax-H3 generates {MINIMAX_H3_MIN_DURATION:g}-{MINIMAX_H3_MAX_DURATION:g} seconds at "
+            f"{MINIMAX_H3_FPS} fps; aligned num_frames={aligned}."
+        )
     return aligned
 
 
@@ -147,8 +151,9 @@ class MiniMaxH3InputPreparationStage(PipelineStage):
         result.add_check(
             "raw_latent_shape",
             batch.raw_latent_shape,
-            lambda value: isinstance(value, tuple) and len(value) == 5 and all(
-                isinstance(item, int) and item > 0 for item in value),
+            lambda value: isinstance(value, tuple)
+            and len(value) == 5
+            and all(isinstance(item, int) and item > 0 for item in value),
         )
         result.add_check("keyframes", batch.extra.get(MINIMAX_H3_KEYFRAMES_KEY), V.is_list)
         result.add_check(
@@ -160,8 +165,9 @@ class MiniMaxH3InputPreparationStage(PipelineStage):
             result.add_check(
                 "prepared_references",
                 batch.references,
-                lambda value: isinstance(value, list) and bool(value) and all(
-                    isinstance(reference, MiniMaxH3PreparedReference) for reference in value),
+                lambda value: isinstance(value, list)
+                and bool(value)
+                and all(isinstance(reference, MiniMaxH3PreparedReference) for reference in value),
             )
         return result
 
@@ -188,9 +194,11 @@ class MiniMaxH3InputPreparationStage(PipelineStage):
             if image is not None and not isinstance(image, Image.Image):
                 raise TypeError(f"MiniMax-H3 `{name}` must be a PIL image, got {type(image).__name__}.")
 
-        raw_keyframes = [(anchor, ImageOps.exif_transpose(image).convert("RGB"))
-                         for anchor, image in (("first", batch.pil_image), ("last", batch.last_image))
-                         if image is not None]
+        raw_keyframes = [
+            (anchor, ImageOps.exif_transpose(image).convert("RGB"))
+            for anchor, image in (("first", batch.pil_image), ("last", batch.last_image))
+            if image is not None
+        ]
         default_aspect = raw_keyframes[0][1].size if raw_keyframes else (16, 9)
         height, width, ratio = resolve_target_canvas(batch, self.vae, default_aspect)
         num_frames = resolve_target_num_frames(batch.num_frames)

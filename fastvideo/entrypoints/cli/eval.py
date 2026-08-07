@@ -66,27 +66,25 @@ class EvalSubcommand(CLISubcommand):
 
         # `eval run`
         run_p = sub.add_parser("run", help="Evaluate videos against one or more metrics")
-        run_p.add_argument("--videos",
-                           type=str,
-                           nargs="+",
-                           required=False,
-                           help="Path, glob, or directory of generated videos.")
-        run_p.add_argument("--reference",
-                           type=str,
-                           default=None,
-                           help="Path / glob / dir of reference videos (for paired metrics).")
+        run_p.add_argument(
+            "--videos", type=str, nargs="+", required=False, help="Path, glob, or directory of generated videos."
+        )
+        run_p.add_argument(
+            "--reference", type=str, default=None, help="Path / glob / dir of reference videos (for paired metrics)."
+        )
         run_p.add_argument("--metrics", type=str, default="all", help="Comma-separated metric names, or 'all'.")
         run_p.add_argument("--device", type=str, default="cuda", help="Torch device (e.g. 'cuda', 'cuda:0', 'cpu').")
-        run_p.add_argument("--text-prompt",
-                           type=str,
-                           nargs="*",
-                           default=None,
-                           help="Prompt(s) for text-conditioned metrics. One per video.")
+        run_p.add_argument(
+            "--text-prompt",
+            type=str,
+            nargs="*",
+            default=None,
+            help="Prompt(s) for text-conditioned metrics. One per video.",
+        )
         run_p.add_argument("--fps", type=float, default=None, help="Frame-rate annotation passed to fps-aware metrics.")
-        run_p.add_argument("--output",
-                           type=str,
-                           default=None,
-                           help="Write results as JSON to this path (default: stdout).")
+        run_p.add_argument(
+            "--output", type=str, default=None, help="Write results as JSON to this path (default: stdout)."
+        )
 
         # Stash the parser so cmd() can re-print help on no-action.
         self._parser = eval_parser  # type: ignore[attr-defined]
@@ -95,6 +93,7 @@ class EvalSubcommand(CLISubcommand):
 
 def _cmd_list(args: argparse.Namespace) -> None:
     from fastvideo.eval import list_metrics
+
     names = list_metrics()
     if args.group:
         prefix = args.group.rstrip(".") + "."
@@ -115,8 +114,9 @@ def _cmd_run(args: argparse.Namespace) -> None:
         raise SystemExit(f"No videos matched: {args.videos}")
     ref_paths = _expand_paths([args.reference]) if args.reference else None
 
-    metrics_arg: list[str] | str = ("all" if args.metrics == "all" else
-                                    [m.strip() for m in args.metrics.split(",") if m.strip()])
+    metrics_arg: list[str] | str = (
+        "all" if args.metrics == "all" else [m.strip() for m in args.metrics.split(",") if m.strip()]
+    )
 
     evaluator = create_evaluator(metrics=metrics_arg, device=args.device)
 
@@ -128,15 +128,17 @@ def _cmd_run(args: argparse.Namespace) -> None:
             ref = ref_paths[i] if i < len(ref_paths) else ref_paths[0]
             kwargs["reference"] = load_video(ref)
         if args.text_prompt is not None:
-            kwargs["text_prompt"] = (args.text_prompt[i] if i < len(args.text_prompt) else args.text_prompt[0])
+            kwargs["text_prompt"] = args.text_prompt[i] if i < len(args.text_prompt) else args.text_prompt[0]
         if args.fps is not None:
             kwargs["fps"] = args.fps
 
         results = evaluator.evaluate(**kwargs)
-        all_results.append({
-            "video": str(vp),
-            "scores": _serialize_results(results),
-        })
+        all_results.append(
+            {
+                "video": str(vp),
+                "scores": _serialize_results(results),
+            }
+        )
 
     payload = json.dumps(all_results, indent=2, default=_jsonable)
     if args.output:

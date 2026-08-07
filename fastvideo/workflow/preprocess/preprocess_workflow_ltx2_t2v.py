@@ -14,8 +14,7 @@ from fastvideo.configs.configs import PreprocessConfig
 from fastvideo.distributed.parallel_state import get_world_rank
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.pipeline_batch_info import PreprocessBatch
-from fastvideo.workflow.preprocess.components import (PreprocessingDataValidator, VideoForwardBatchBuilder,
-                                                      build_dataset)
+from fastvideo.workflow.preprocess.components import PreprocessingDataValidator, VideoForwardBatchBuilder, build_dataset
 from fastvideo.workflow.preprocess.preprocess_workflow import PreprocessWorkflow
 
 if TYPE_CHECKING:

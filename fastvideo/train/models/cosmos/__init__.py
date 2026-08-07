@@ -2,4 +2,5 @@
 """Cosmos model plugin package."""
 
 from fastvideo.train.models.cosmos.cosmos import (
-    CosmosModel as CosmosModel, )
+    CosmosModel as CosmosModel,
+)

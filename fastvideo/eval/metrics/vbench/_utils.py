@@ -21,8 +21,8 @@ def consistency_score(features: torch.Tensor) -> float:
     total_sim = 0.0
     count = 0
     for t in range(1, features.shape[0]):
-        curr = features[t:t + 1]
-        prev = features[t - 1:t]
+        curr = features[t : t + 1]
+        prev = features[t - 1 : t]
         sim_prev = max(0.0, F.cosine_similarity(prev, curr).item())
         sim_first = max(0.0, F.cosine_similarity(first, curr).item())
         total_sim += (sim_prev + sim_first) / 2

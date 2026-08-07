@@ -40,17 +40,21 @@ from fastvideo.models.dits.ltx2 import VideoLatentShape
 from fastvideo.pipelines import ForwardBatch, TrainingBatch
 from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.training.activation_checkpoint import (
-    apply_activation_checkpointing, )
+    apply_activation_checkpointing,
+)
 
 from fastvideo.train.models.wan.wan import WanModel
 from fastvideo.train.utils.module_state import (
-    apply_trainable, )
+    apply_trainable,
+)
 from fastvideo.train.utils.moduleloader import (
-    load_module_from_path, )
+    load_module_from_path,
+)
 
 if TYPE_CHECKING:
     from fastvideo.train.utils.training_config import (
-        TrainingConfig, )
+        TrainingConfig,
+    )
     from fastvideo.train.utils.lora import LoraConfig
 
 logger = init_logger(__name__)
@@ -90,27 +94,29 @@ class LTX2Model(WanModel):
         training_config: TrainingConfig,
         trainable: bool = True,
         disable_custom_init_weights: bool = False,
-        enable_gradient_checkpointing_type: str
-        | None = None,
-        transformer_override_safetensor: str
-        | None = None,
+        enable_gradient_checkpointing_type: str | None = None,
+        transformer_override_safetensor: str | None = None,
         lora: LoraConfig | dict[str, Any] | None = None,
         attention_backend: AttentionBackendEnum | str | None = None,
         train_audio: bool = False,
         timestep_uniform_prob: float = 0.1,
     ) -> None:
         if train_audio:
-            raise NotImplementedError("LTX2Model only supports video-only training; "
-                                      "train_audio=True requires audio batch, forward, "
-                                      "and loss plumbing.")
+            raise NotImplementedError(
+                "LTX2Model only supports video-only training; "
+                "train_audio=True requires audio batch, forward, "
+                "and loss plumbing."
+            )
 
         cfg_rate = float(getattr(training_config.data, "training_cfg_rate", 0.0) or 0.0)
         if cfg_rate > 0.0:
-            raise NotImplementedError("LTX2Model only supports training_cfg_rate=0. CFG dropout "
-                                      "zeroes the post-connector text embeddings, which is not "
-                                      "what LTX-2 inference uses as the unconditional input "
-                                      "(an empty prompt encoded through Gemma + connector). Set "
-                                      "training.data.training_cfg_rate: 0.0.")
+            raise NotImplementedError(
+                "LTX2Model only supports training_cfg_rate=0. CFG dropout "
+                "zeroes the post-connector text embeddings, which is not "
+                "what LTX-2 inference uses as the unconditional input "
+                "(an empty prompt encoded through Gemma + connector). Set "
+                "training.data.training_cfg_rate: 0.0."
+            )
 
         self._timestep_uniform_prob = float(timestep_uniform_prob)
         self._rope_fps: float = _DEFAULT_ROPE_FPS
@@ -163,11 +169,11 @@ class LTX2Model(WanModel):
             transformer_override_safetensor=(transformer_override_safetensor),
             attention_backend=attention_backend,
         )
-        ckpt_type = (enable_gradient_checkpointing_type or getattr(
+        ckpt_type = enable_gradient_checkpointing_type or getattr(
             getattr(training_config, "model", None),
             "enable_gradient_checkpointing_type",
             None,
-        ))
+        )
         if trainable and ckpt_type:
             # LTX-2 nests transformer_blocks under ``.model``; applying
             # checkpointing at the wrapper level raises because no block
@@ -188,8 +194,7 @@ class LTX2Model(WanModel):
                 param.requires_grad_(False)
                 frozen_params += param.numel()
         logger.info(
-            "LTX2Model: froze %.2fB audio/cross-modal parameters "
-            "(video-only training)",
+            "LTX2Model: froze %.2fB audio/cross-modal parameters (video-only training)",
             frozen_params / 1e9,
         )
 
@@ -198,8 +203,7 @@ class LTX2Model(WanModel):
     # ------------------------------------------------------------------
 
     def ensure_negative_conditioning(self) -> None:
-        raise NotImplementedError("LTX2Model does not implement negative conditioning; "
-                                  "training_cfg_rate must stay 0.")
+        raise NotImplementedError("LTX2Model does not implement negative conditioning; training_cfg_rate must stay 0.")
 
     @torch.no_grad()
     def decode_latents(
@@ -221,7 +225,7 @@ class LTX2Model(WanModel):
         # inline by the pipeline); the inherited shift/clamp helpers
         # are unused for fine-tuning, so default to identity shift.
         flow_shift = tc.pipeline_config.flow_shift  # type: ignore[union-attr]
-        self.timestep_shift = (float(flow_shift) if flow_shift is not None else 1.0)
+        self.timestep_shift = float(flow_shift) if flow_shift is not None else 1.0
         self.num_train_timestep = int(self.noise_scheduler.num_train_timesteps)
         self.min_timestep = 0
         self.max_timestep = self.num_train_timestep
@@ -258,9 +262,9 @@ class LTX2Model(WanModel):
                 "z_dim",
                 getattr(vae_config, "latent_channels", 128),
             )
-            spatial_compression_ratio = (vae_config.spatial_compression_ratio)
-            latent_height = (tc.data.num_height // spatial_compression_ratio)
-            latent_width = (tc.data.num_width // spatial_compression_ratio)
+            spatial_compression_ratio = vae_config.spatial_compression_ratio
+            latent_height = tc.data.num_height // spatial_compression_ratio
+            latent_width = tc.data.num_width // spatial_compression_ratio
             latents = torch.zeros(
                 batch_size,
                 num_channels,
@@ -272,22 +276,20 @@ class LTX2Model(WanModel):
             )
         elif latents_source == "data":
             if "vae_latent" not in raw_batch:
-                raise ValueError("vae_latent not found in batch "
-                                 "and latents_source='data'")
+                raise ValueError("vae_latent not found in batch and latents_source='data'")
             latents = raw_batch["vae_latent"]
-            latents = latents[:, :, :tc.data.num_latent_t]
+            latents = latents[:, :, : tc.data.num_latent_t]
             latents = latents.to(device, dtype=dtype)
         else:
-            raise ValueError(f"Unknown latents_source: "
-                             f"{latents_source!r}")
+            raise ValueError(f"Unknown latents_source: {latents_source!r}")
 
         self._check_text_embedding_dim(encoder_hidden_states)
 
         # LTX-2 VAE encode() already applies per-channel normalization
         # (scaling_factor is 1.0); latents are used as stored.
         training_batch.latents = latents
-        training_batch.encoder_hidden_states = (encoder_hidden_states.to(device, dtype=dtype))
-        training_batch.encoder_attention_mask = (encoder_attention_mask.to(device, dtype=dtype))
+        training_batch.encoder_hidden_states = encoder_hidden_states.to(device, dtype=dtype)
+        training_batch.encoder_attention_mask = encoder_attention_mask.to(device, dtype=dtype)
         training_batch.infos = infos
 
         self._update_rope_fps(infos)
@@ -317,8 +319,7 @@ class LTX2Model(WanModel):
         if conditional:
             text_dict = batch.conditional_dict
             if text_dict is None:
-                raise RuntimeError("Missing conditional_dict in "
-                                   "TrainingBatch")
+                raise RuntimeError("Missing conditional_dict in TrainingBatch")
         else:
             text_dict = self._get_uncond_text_dict(batch, cfg_uncond=cfg_uncond)
 
@@ -331,10 +332,13 @@ class LTX2Model(WanModel):
         # DiT expects (B, C, T, H, W).
         noisy_bcthw = noisy_latents.permute(0, 2, 1, 3, 4).to(dtype)
 
-        with torch.autocast(device_type, dtype=dtype), set_forward_context(
+        with (
+            torch.autocast(device_type, dtype=dtype),
+            set_forward_context(
                 current_timestep=batch.timesteps,
                 attn_metadata=attn_metadata,
                 forward_batch=self._make_rope_forward_batch(),
+            ),
         ):
             input_kwargs = self._build_distill_input_kwargs(
                 noisy_bcthw,
@@ -367,9 +371,9 @@ class LTX2Model(WanModel):
         # Re-enter the forward context with the same fps-carrying batch
         # so activation-checkpoint recompute sees identical RoPE inputs.
         with set_forward_context(
-                current_timestep=timesteps,
-                attn_metadata=attn_metadata,
-                forward_batch=self._make_rope_forward_batch(),
+            current_timestep=timesteps,
+            attn_metadata=attn_metadata,
+            forward_batch=self._make_rope_forward_batch(),
         ):
             (loss / max(1, int(grad_accum_rounds))).backward()
 
@@ -392,12 +396,14 @@ class LTX2Model(WanModel):
             expected_dim = int(arch.caption_channels)
         actual_dim = int(encoder_hidden_states.shape[-1])
         if actual_dim != expected_dim:
-            raise ValueError(f"text_embedding width {actual_dim} does not match the "
-                             f"checkpoint's expected text context dim {expected_dim}. "
-                             "The parquet was likely preprocessed with a different "
-                             "LTX-2 version (2.0 stores 3840-d, 2.3 stores 4096-d); "
-                             "re-run preprocess_ltx2_overfit.py with LTX2_OVERFIT_MODEL "
-                             "set to the same checkpoint as models.student.init_from.")
+            raise ValueError(
+                f"text_embedding width {actual_dim} does not match the "
+                f"checkpoint's expected text context dim {expected_dim}. "
+                "The parquet was likely preprocessed with a different "
+                "LTX-2 version (2.0 stores 3840-d, 2.3 stores 4096-d); "
+                "re-run preprocess_ltx2_overfit.py with LTX2_OVERFIT_MODEL "
+                "set to the same checkpoint as models.student.init_from."
+            )
 
     def _update_rope_fps(self, infos: list[dict[str, Any]] | None) -> None:
         fps: float | None = None
@@ -434,15 +440,19 @@ class LTX2Model(WanModel):
         0.5%/99.9% percentiles, and 10% of samples are replaced by
         U(eps, 1).
         """
-        slope = ((_SIGMA_MAX_SHIFT - _SIGMA_MIN_SHIFT) / (_SIGMA_MAX_TOKENS - _SIGMA_MIN_TOKENS))
+        slope = (_SIGMA_MAX_SHIFT - _SIGMA_MIN_SHIFT) / (_SIGMA_MAX_TOKENS - _SIGMA_MIN_TOKENS)
         mu = slope * float(token_count) + (_SIGMA_MIN_SHIFT - slope * _SIGMA_MIN_TOKENS)
 
-        normal = torch.randn(
-            (batch_size, ),
-            generator=generator,
-            device=device,
-            dtype=torch.float32,
-        ) * _SIGMA_STD + mu
+        normal = (
+            torch.randn(
+                (batch_size,),
+                generator=generator,
+                device=device,
+                dtype=torch.float32,
+            )
+            * _SIGMA_STD
+            + mu
+        )
         sigmas = torch.sigmoid(normal)
 
         lo = torch.sigmoid(torch.tensor(mu + _SIGMA_Z_LO * _SIGMA_STD, device=device))
@@ -453,15 +463,19 @@ class LTX2Model(WanModel):
 
         if self._timestep_uniform_prob > 0.0:
             prob = torch.rand(
-                (batch_size, ),
+                (batch_size,),
                 generator=generator,
                 device=device,
             )
-            uniform = torch.rand(
-                (batch_size, ),
-                generator=generator,
-                device=device,
-            ) * (1.0 - _SIGMA_EPS) + _SIGMA_EPS
+            uniform = (
+                torch.rand(
+                    (batch_size,),
+                    generator=generator,
+                    device=device,
+                )
+                * (1.0 - _SIGMA_EPS)
+                + _SIGMA_EPS
+            )
             stretched = torch.where(
                 prob > self._timestep_uniform_prob,
                 stretched,
@@ -505,7 +519,8 @@ class LTX2Model(WanModel):
         )
         sigmas_expanded = sigmas.view(-1, 1, 1, 1, 1)
         noisy_model_input = ((1.0 - sigmas_expanded) * latents.float() + sigmas_expanded * noise.float()).to(
-            latents.dtype)
+            latents.dtype
+        )
 
         training_batch.noisy_model_input = noisy_model_input
         # Keep the framework-wide "timesteps ~ sigma * 1000" convention
@@ -521,7 +536,7 @@ class LTX2Model(WanModel):
             "encoder_attention_mask": (training_batch.encoder_attention_mask),
         }
 
-        training_batch.latents = (training_batch.latents.permute(0, 2, 1, 3, 4))
+        training_batch.latents = training_batch.latents.permute(0, 2, 1, 3, 4)
         return training_batch
 
     def _build_attention_metadata(self, training_batch: TrainingBatch) -> TrainingBatch:
