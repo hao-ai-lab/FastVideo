@@ -341,6 +341,16 @@ class RayDistributedExecutor(Executor):
             if response["status"] != "lora_adapter_merged":
                 raise RuntimeError(f"Worker {i} failed to merge LoRA weights")
 
+    def set_log_queue(self, log_queue) -> None:
+        # A multiprocessing.Manager queue cannot reach ray actors on other
+        # nodes; worker logs stay in ray's per-worker log files instead.
+        if log_queue is not None:
+            logger.warning("set_log_queue is a no-op on the ray backend; "
+                           "worker logs remain in the ray session log dir")
+
+    def clear_log_queue(self) -> None:
+        pass
+
     def collective_rpc(self,
                        method: str | Callable,
                        timeout: float | None = None,
