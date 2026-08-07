@@ -1359,9 +1359,6 @@ class ValidationCallback(Callback):
             tc,
             model_path=tc.model_path,
         )
-        # Validation reuses Fully Sharded Data Parallel (FSDP) transformer
-        # shards, which remain on their training devices.
-        inference_args.dit_cpu_offload = False
 
         batch = ForwardBatch(
             **shallow_asdict(sampling_param),
@@ -1459,9 +1456,6 @@ class ValidationCallback(Callback):
             tc,
             model_path=tc.model_path,
         )
-        # Pipeline.forward consumes these inference arguments directly. FSDP
-        # keeps the shared training transformer on its managed CUDA devices.
-        inference_args.dit_cpu_offload = False
         self._sync_runtime_dit_arch_config(
             inference_args.pipeline_config,
             transformer,

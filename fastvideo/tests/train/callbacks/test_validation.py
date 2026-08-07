@@ -350,7 +350,6 @@ class TestH3ValidationContract:
 
             def forward(self, batch, inference_args):
                 """Produce media whose values identify the source prompt."""
-                assert inference_args.dit_cpu_offload is False
                 prompt_index = int(batch.prompt.rsplit("-", 1)[1])
                 return SimpleNamespace(
                     output=torch.full((1, 3, 2, 2, 2), prompt_index / 8),
