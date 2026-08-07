@@ -219,6 +219,19 @@ instances. The main files are:
 For exact tier membership, path filters, slash commands, and aggregate statuses,
 see [CI/CD Architecture](ci_architecture.md).
 
+Modal pytest commands use `pytest-rerunfailures` with the shared
+infrastructure-pattern policy in `fastvideo/tests/modal/pytest_retry.py`. The
+retry layer reruns an individual failure only when it reaches pytest and its
+report text matches an infrastructure-style connection, NCCL, or CUDA pattern.
+Each rerun preserves
+the prior attempt's traceback. Plain, nonmatching assertion and numerical
+parity failures fail immediately, while matching messages may be rerun even
+when their underlying cause is deterministic.
+
+Killed or preempted Modal workers and containers cannot be recovered by this
+pytest policy. Modal and Buildkite handle those failures outside the test
+process.
+
 ### Adding A New CI Test Category
 
 If a new test does not fit an existing lane:

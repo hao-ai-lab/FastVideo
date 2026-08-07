@@ -680,7 +680,7 @@ def _build_pytest_extra_args(
     ssim_bootstrap_mode: bool,
     pytest_k: str,
 ) -> list[str]:
-    args = []
+    args = _build_pytest_rerun_args()
     if ssim_full_quality:
         args.append("--ssim-full-quality")
     if ssim_reference_repo.strip():
@@ -692,6 +692,21 @@ def _build_pytest_extra_args(
     if pytest_k.strip():
         args.extend(["-k", pytest_k.strip()])
     return args
+
+
+def _build_pytest_rerun_args() -> list[str]:
+    helper_paths = [
+        os.path.dirname(os.path.abspath(__file__)),
+        os.path.join("/FastVideo", "fastvideo", "tests", "modal"),
+    ]
+    for helper_path in helper_paths:
+        if helper_path not in sys.path:
+            sys.path.insert(0, helper_path)
+
+    from pytest_retry import build_pytest_rerun_args, describe_pytest_reruns  # noqa: E402
+
+    print(describe_pytest_reruns())
+    return build_pytest_rerun_args()
 
 
 def _schedule_ssim_tasks(
