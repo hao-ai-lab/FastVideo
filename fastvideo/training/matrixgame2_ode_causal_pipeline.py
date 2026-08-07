@@ -394,3 +394,22 @@ class MatrixGame2ODEInitTrainingPipeline(TrainingPipeline):
         if self.global_rank == 0 and tracker_loss_dict:
             self.tracker.log_artifacts(tracker_loss_dict, step)
 
+
+def main(args) -> None:
+    logger.info("Starting ODE-init training pipeline...")
+    pipeline = MatrixGame2ODEInitTrainingPipeline.from_pretrained(args.pretrained_model_name_or_path, args=args)
+    args = pipeline.training_args
+    pipeline.train()
+    logger.info("ODE-init training pipeline done")
+
+
+if __name__ == "__main__":
+    argv = sys.argv
+    from fastvideo.fastvideo_args import TrainingArgs
+    from fastvideo.utils import FlexibleArgumentParser
+    parser = FlexibleArgumentParser()
+    parser = TrainingArgs.add_cli_args(parser)
+    parser = FastVideoArgs.add_cli_args(parser)
+    args = parser.parse_args()
+    args.dit_cpu_offload = False
+    main(args)
