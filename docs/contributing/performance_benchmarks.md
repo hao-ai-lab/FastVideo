@@ -75,9 +75,16 @@ fastvideo/tests/performance/
     │       └── builds time-series Plotly HTML from HF history
 
 fastvideo/performance/
+    ├── cohort.py                 # canonical comparison identity + dashboard labels
     ├── hf_store.py               # shared HF I/O + DataFrame helpers
     └── metric_policy.py          # shared rolling-baseline threshold policy
 ```
+
+`fastvideo/performance/cohort.py` is the single owner of canonical dashboard
+cohort keys. Complete v2 records use the six-field CI comparison identity;
+legacy and malformed-v2 records receive distinct schemas so they cannot be
+silently merged. The dashboard treats returned cohort and GPU keys as opaque
+URL-safe identifiers.
 
 The HF dataset (`FastVideo/performance-tracking` by default) holds one
 normalized JSON per run. For v2 records, the rolling baseline is the median of

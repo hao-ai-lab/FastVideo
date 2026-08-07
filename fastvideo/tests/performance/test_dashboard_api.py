@@ -2,6 +2,7 @@
 from fastapi.testclient import TestClient
 from datetime import datetime, timedelta
 
+from fastvideo.performance.cohort import cohort_key, gpu_key
 from fastvideo.performance_dashboard.api import PerformanceDataStore, create_app
 
 
@@ -234,3 +235,126 @@ def test_refresh_endpoint_reports_sync_metadata():
 
     assert response.status_code == 200
     assert response.json()["ok"] is True
+
+
+def test_cohort_catalog_and_exact_filters_share_server_owned_keys():
+    identity = {
+        "result_schema_version": 2,
+        "workload_id": "wan-t2v",
+        "variant_id": "1.3b-sp2",
+        "benchmark_version": 2,
+        "hardware_profile_id": "hw-l40s",
+        "software_profile_id": "sw-cu126",
+        "hardware_profile": {
+            "gpu_count": 2,
+            "gpus": [{"name": "NVIDIA L40S", "memory_gb": 48}] * 2,
+            "interconnect": "full_nvlink",
+        },
+        "software_profile": {"cuda": "12.6", "pytorch": "2.7"},
+    }
+    recipe_a = _record(
+        "wan",
+        "NVIDIA L40S",
+        "2026-01-01T00:00:00+00:00",
+        "a" * 40,
+        10.0,
+        10.0,
+        recipe_fingerprint="recipe-a",
+        run_source="scheduled_main",
+        baseline_eligible=True,
+        **identity,
+    )
+    recipe_b = _record(
+        "wan",
+        "NVIDIA L40S",
+        "2026-01-02T00:00:00+00:00",
+        "b" * 40,
+        20.0,
+        5.0,
+        recipe_fingerprint="recipe-b",
+        run_source="pr",
+        baseline_eligible=False,
+        **identity,
+    )
+    client = TestClient(create_app(FakeStore([recipe_a, recipe_b])))
+
+    catalog = client.get("/api/performance/cohorts", params={"model_id": "wan"}).json()
+    summary = client.get(
+        "/api/performance/summary",
+        params={"gpu_key": gpu_key(recipe_a), "cohort_key": cohort_key(recipe_a)},
+    ).json()
+    trends = client.get("/api/performance/trends", params={"cohort_key": cohort_key(recipe_a)}).json()
+
+    assert len(catalog["cohorts"]) == 2
+    assert catalog["default_cohort_key"] == cohort_key(recipe_a)
+    assert catalog["gpus"][0]["label"] == "2× NVIDIA L40S · 48 GB · full nvlink"
+    assert summary["count"] == 1
+    assert summary["rows"][0]["cohort"]["key"] == cohort_key(recipe_a)
+    assert trends["count"] == 1
+    assert trends["groups"][0]["cohort"]["key"] == cohort_key(recipe_a)
+
+
+def test_unknown_cohort_key_returns_an_empty_safe_result():
+    client = TestClient(create_app(FakeStore([
+        _record("wan", "NVIDIA L40S", "2026-01-01T00:00:00+00:00", "a" * 40, 10.0, 10.0),
+    ])))
+
+    summary = client.get("/api/performance/summary", params={"cohort_key": "v2:stale"}).json()
+    trends = client.get("/api/performance/trends", params={"cohort_key": "v2:stale"}).json()
+
+    assert summary["count"] == 0
+    assert trends["count"] == 0
+
+
+def test_advanced_profile_filters_refine_catalog_summary_trends_and_records():
+    common = {
+        "result_schema_version": 2,
+        "workload_id": "wan-t2v",
+        "variant_id": "1.3b-sp2",
+        "benchmark_version": 2,
+        "model_id": "wan",
+        "gpu_type": "NVIDIA L40S",
+    }
+    profile_a = _record(
+        "wan",
+        "NVIDIA L40S",
+        "2026-01-01T00:00:00+00:00",
+        "a" * 40,
+        10.0,
+        10.0,
+        hardware_profile_id="hw-a",
+        software_profile_id="sw-a",
+        recipe_fingerprint="recipe-a",
+        run_source="pr",
+        **{key: value for key, value in common.items() if key not in {"model_id", "gpu_type"}},
+    )
+    profile_b = _record(
+        "wan",
+        "NVIDIA L40S",
+        "2026-01-02T00:00:00+00:00",
+        "b" * 40,
+        20.0,
+        5.0,
+        hardware_profile_id="hw-b",
+        software_profile_id="sw-b",
+        recipe_fingerprint="recipe-b",
+        run_source="scheduled_main",
+        **{key: value for key, value in common.items() if key not in {"model_id", "gpu_type"}},
+    )
+    client = TestClient(create_app(FakeStore([profile_a, profile_b])))
+    selected = {
+        "hardware_profile_id": "hw-a",
+        "software_profile_id": "sw-a",
+        "recipe_fingerprint": "recipe-a",
+    }
+
+    catalog = client.get("/api/performance/cohorts", params={"model_id": "wan", **selected}).json()
+    summary = client.get("/api/performance/summary", params=selected).json()
+    trends = client.get("/api/performance/trends", params=selected).json()
+    records = client.get("/api/performance/records", params=selected).json()
+
+    assert [cohort["raw_ids"]["hardware_profile_id"] for cohort in catalog["cohorts"]] == ["hw-a"]
+    assert summary["count"] == trends["count"] == records["count"] == 1
+    assert summary["rows"][0]["recipe_fingerprint"] == "recipe-a"
+    assert trends["groups"][0]["software_profile_id"] == "sw-a"
+    assert records["records"][0]["hardware_profile_id"] == "hw-a"

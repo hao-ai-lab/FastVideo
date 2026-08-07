@@ -24,6 +24,34 @@ export type ComparisonCohort = {
   software_profile_id: CohortValue;
 };
 
+export type CohortDescriptor = {
+  key: string;
+  schema: "v2" | "legacy" | "invalid_v2";
+  title: string;
+  gpu_key: string;
+  gpu_label: string;
+  hardware_label: string;
+  software_label: string;
+  recipe_label: string;
+  raw_ids: {
+    hardware_profile_id: string;
+    software_profile_id: string;
+    recipe_fingerprint: string;
+  };
+  comparison: {
+    eligible: boolean;
+    key: string | null;
+    reason: string | null;
+    metric_schema: string;
+    identity: {
+      workload_id: string;
+      variant_id: string;
+      benchmark_version: string;
+      recipe_fingerprint: string;
+    };
+  };
+};
+
 export type SummaryRow = {
   model_id: string;
   gpu_type: string;
@@ -45,6 +73,7 @@ export type SummaryRow = {
   build_id: string;
   job_id: string;
   metrics: Record<string, MetricValue>;
+  cohort: CohortDescriptor;
 } & ComparisonCohort;
 
 export type RunSource = "pr" | "local" | "scheduled_main" | "unknown";
@@ -61,6 +90,8 @@ export type SummaryResponse = {
     trend_window_days?: number;
     model_id: string | null;
     gpu_type: string | null;
+    gpu_key: string | null;
+    cohort_key: string | null;
     run_source: string | null;
   };
   sync: SyncState;
@@ -79,13 +110,47 @@ export type TrendPoint = {
   build_id: string;
   job_id: string;
   metrics: Record<string, number | null>;
+  cohort: CohortDescriptor;
 } & ComparisonCohort;
 
 export type TrendGroup = {
   model_id: string;
   gpu_type: string;
   points: TrendPoint[];
+  cohort: CohortDescriptor;
 } & ComparisonCohort;
+
+export type CohortCatalogItem = CohortDescriptor & {
+  model_id: string;
+  gpu_type: string;
+  latest_timestamp: string | null;
+  latest_baseline_timestamp: string | null;
+  baseline_eligible: boolean;
+};
+
+export type AdvancedFilterOption = {
+  value: string;
+  label: string;
+  raw_id: string;
+  schema: "v2" | "legacy" | "invalid_v2";
+};
+
+export type CohortCatalogResponse = {
+  models: string[];
+  gpus: Array<{
+    key: string;
+    label: string;
+    gpu_type: string;
+  }>;
+  cohorts: CohortCatalogItem[];
+  advanced_filters: {
+    hardware_profiles: AdvancedFilterOption[];
+    software_profiles: AdvancedFilterOption[];
+    recipes: AdvancedFilterOption[];
+  };
+  default_cohort_key: string | null;
+  sync: SyncState;
+};
 
 export type TrendsResponse = {
   groups: TrendGroup[];
@@ -123,15 +188,84 @@ async function getJson<T>(path: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export async function fetchSummary(days = 90, modelId?: string, gpuType?: string, runSource?: string) {
-  return getJson<SummaryResponse>(
-    `/api/performance/summary?${params({ days, model_id: modelId, gpu_type: gpuType, run_source: runSource })}`
+type DashboardQuery = {
+  days?: number;
+  modelId?: string;
+  gpuKey?: string;
+  cohortKey?: string;
+  runSource?: string;
+  hardwareProfileId?: string;
+  softwareProfileId?: string;
+  recipeFingerprint?: string;
+};
+
+export async function fetchCohorts({
+  modelId,
+  gpuKey,
+  cohortKey,
+  runSource,
+  hardwareProfileId,
+  softwareProfileId,
+  recipeFingerprint
+}: DashboardQuery = {}) {
+  return getJson<CohortCatalogResponse>(
+    `/api/performance/cohorts?${params({
+      model_id: modelId,
+      gpu_key: gpuKey,
+      cohort_key: cohortKey,
+      run_source: runSource,
+      hardware_profile_id: hardwareProfileId,
+      software_profile_id: softwareProfileId,
+      recipe_fingerprint: recipeFingerprint
+    })}`
   );
 }
 
-export async function fetchTrends(days = 90, modelId?: string, gpuType?: string, runSource?: string) {
+export async function fetchSummary({
+  days = 90,
+  modelId,
+  gpuKey,
+  cohortKey,
+  runSource,
+  hardwareProfileId,
+  softwareProfileId,
+  recipeFingerprint
+}: DashboardQuery = {}) {
+  return getJson<SummaryResponse>(
+    `/api/performance/summary?${params({
+      days,
+      model_id: modelId,
+      gpu_key: gpuKey,
+      cohort_key: cohortKey,
+      run_source: runSource,
+      hardware_profile_id: hardwareProfileId,
+      software_profile_id: softwareProfileId,
+      recipe_fingerprint: recipeFingerprint
+    })}`
+  );
+}
+
+export async function fetchTrends({
+  days = 90,
+  modelId,
+  gpuKey,
+  cohortKey,
+  runSource,
+  hardwareProfileId,
+  softwareProfileId,
+  recipeFingerprint
+}: DashboardQuery = {}) {
   return getJson<TrendsResponse>(
-    `/api/performance/trends?${params({ days, model_id: modelId, gpu_type: gpuType, run_source: runSource })}`
+    `/api/performance/trends?${params({
+      days,
+      model_id: modelId,
+      gpu_key: gpuKey,
+      cohort_key: cohortKey,
+      run_source: runSource,
+      hardware_profile_id: hardwareProfileId,
+      software_profile_id: softwareProfileId,
+      recipe_fingerprint: recipeFingerprint
+    })}`
   );
 }
 

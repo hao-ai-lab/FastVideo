@@ -80,7 +80,50 @@ endpoints from the same local port.
 
 ## Dashboard Behavior
 
-The dashboard supports model, GPU, source, and day-window filters.
+The dashboard supports cascading Model, GPU configuration, Benchmark cohort,
+Source, and day-window filters. The backend owns the canonical cohort key used
+for grouping, API filtering, React keys, and URL state. V2 keys use the exact CI
+comparison identity; legacy records use a separate legacy identity and are
+never merged with v2 records.
+
+The Benchmark cohort selector defaults to the cohort with the most recent
+successful baseline-eligible observation, falling back to the cohort with the
+most recent record. `All cohorts` remains an explicit option. Model constrains
+GPU configurations, and Model plus GPU constrain cohorts. Source and Date
+change displayed observations without redefining cohort availability.
+
+Selected filters are encoded in the URL. Unknown or stale Model, GPU, and
+cohort values fall back safely to available options.
+
+The collapsed `Advanced filters` section can refine the dashboard by exact
+hardware profile, software profile, and recipe fingerprint. Options cascade to
+valid combinations under the active Model, GPU, cohort, and Source filters;
+each option includes both its readable label and raw identity. Advanced filter
+selections are shareable in the URL, apply to cohorts and displayed records,
+and can be cleared without resetting the primary filters.
+
+Selecting `All cohorts` shows a compact, sortable overview with one row per
+exact comparison cohort and deliberately hides the detailed trend grid. Failed
+cohorts appear first by default, followed by the newest observation. Status,
+latest run, latency, throughput, and memory columns are sortable; unavailable
+metrics remain explicit instead of being rendered as zero. Select a row with a
+pointer, Enter, or Space to open that exact cohort and its detailed trends.
+
+`Compare cohorts` opens an explicit comparison workspace for two or three
+cohorts. The active Model, GPU, Source, date, and advanced filters determine
+which cohorts have observations available. Compatible v2 cohorts must share
+the workload, variant, benchmark version, recipe fingerprint, and dashboard
+metric schema; hardware and software profiles may differ. Legacy and malformed
+v2 cohorts are shown with an explanation but cannot be selected for a direct
+comparison.
+
+Each metric uses one shared axis and a stable color per cohort. Lines break at
+missing observations, unavailable metrics are called out, and point hover or
+keyboard focus exposes the exact environment, recipe IDs, commit, source, and
+timestamp. Compare mode and up to three canonical cohort keys are persisted in
+the URL. Duplicate, stale, filtered, excessive, or incompatible keys are
+discarded safely; fewer than two valid cohorts leaves the selection prompt
+visible instead of rendering a misleading chart.
 
 Trend charts show metric-specific axes and exact point details on hover/focus:
 
@@ -100,9 +143,25 @@ and does not override stored status.
 
 - `GET /api/performance/health`
 - `POST /api/performance/refresh`
+- `GET /api/performance/cohorts?model_id=wan-t2v-1.3b-2gpu&gpu_key=gpu%3A...`
 - `GET /api/performance/summary?days=90&run_source=pr`
 - `GET /api/performance/trends?days=90&run_source=scheduled_main`
 - `GET /api/performance/records?days=90&run_source=local`
+
+Summary, trend, and raw-record endpoints also accept opaque `gpu_key` and
+`cohort_key` values returned by `/api/performance/cohorts`. Cohort descriptors
+include readable recipe, hardware, software, and GPU configuration labels plus
+the full raw hardware, software, and recipe identifiers for debugging.
+All cohort/data endpoints also accept `hardware_profile_id`,
+`software_profile_id`, and `recipe_fingerprint`. The cohort catalog returns
+faceted options in `advanced_filters`, including an explicit legacy/unavailable
+value for records without v2 profile IDs.
+
+Cohort descriptors also include server-owned `comparison` metadata. Its
+compatibility key intentionally excludes hardware and software while including
+the benchmark workload/variant/version, recipe, and metric schema. Consumers
+should use this contract rather than recreating compatibility rules in chart
+code.
 
 V2 records use the same comparison cohort as CI: `workload_id`, `variant_id`,
 `benchmark_version`, `recipe_fingerprint`, `hardware_profile_id`, and

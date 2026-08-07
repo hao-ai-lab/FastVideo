@@ -1,6 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 from fastvideo.performance import hf_store
-from fastvideo.performance_dashboard.service import build_latest_summary, build_trends, filter_records
+from fastvideo.performance_dashboard.service import (
+    ADVANCED_FILTER_LEGACY,
+    build_cohort_catalog,
+    build_latest_summary,
+    build_trends,
+    filter_records,
+)
 
 
 def _record(ts, commit, latency, throughput, success=True, **metadata):
@@ -588,3 +594,209 @@ def test_load_records_for_model_filters_identity_cohort(tmp_path):
 
     assert len(records) == 1
     assert records[0]["recipe_fingerprint"] == "recipe-a"
+
+
+def test_build_cohort_catalog_cascades_gpu_options_and_preserves_exact_cohorts():
+    shared_identity = {
+        "result_schema_version": 2,
+        "workload_id": "wan-t2v",
+        "variant_id": "1.3b-sp2",
+        "benchmark_version": 2,
+        "software_profile_id": "sw-cu126",
+        "software_profile": {"cuda": "12.6", "pytorch": "2.7"},
+    }
+    records = [
+        _record(
+            "2026-01-01T00:00:00+00:00",
+            "a" * 40,
+            10.0,
+            10.0,
+            recipe_fingerprint="recipe-a",
+            hardware_profile_id="hw-l40s-2",
+            hardware_profile={
+                "gpu_count": 2,
+                "gpus": [{"name": "NVIDIA L40S", "memory_gb": 48}] * 2,
+                "interconnect": "full_nvlink",
+            },
+            run_source="scheduled_main",
+            baseline_eligible=True,
+            **shared_identity,
+        ),
+        _record(
+            "2026-01-02T00:00:00+00:00",
+            "b" * 40,
+            11.0,
+            9.0,
+            recipe_fingerprint="recipe-b",
+            hardware_profile_id="hw-l40s-2",
+            hardware_profile={
+                "gpu_count": 2,
+                "gpus": [{"name": "NVIDIA L40S", "memory_gb": 48}] * 2,
+                "interconnect": "full_nvlink",
+            },
+            **shared_identity,
+        ),
+        _record(
+            "2026-01-03T00:00:00+00:00",
+            "c" * 40,
+            12.0,
+            8.0,
+            model_id="ltx-video",
+            gpu_type="NVIDIA H100",
+            workload_id="ltx-t2v",
+            variant_id="2b-tp1",
+            benchmark_version=2,
+            recipe_fingerprint="recipe-c",
+            hardware_profile_id="hw-h100-1",
+            software_profile_id="sw-cu126",
+            hardware_profile={
+                "gpu_count": 1,
+                "gpus": [{"name": "NVIDIA H100", "memory_gb": 80}],
+                "interconnect": "single_gpu",
+            },
+            software_profile={"cuda": "12.6", "pytorch": "2.7"},
+            result_schema_version=2,
+        ),
+    ]
+
+    all_options = build_cohort_catalog(records)
+    wan_options = build_cohort_catalog(records, model_id="wan-t2v-1.3b-2gpu")
+
+    assert all_options["models"] == ["ltx-video", "wan-t2v-1.3b-2gpu"]
+    assert len(all_options["gpus"]) == 2
+    assert len(all_options["cohorts"]) == 3
+    assert len(wan_options["gpus"]) == 1
+    assert len(wan_options["cohorts"]) == 2
+    assert wan_options["gpus"][0]["label"] == "2× NVIDIA L40S · 48 GB · full nvlink"
+
+
+def test_build_cohort_catalog_prefers_most_recent_baseline_eligible_cohort():
+    identity = {
+        "result_schema_version": 2,
+        "workload_id": "wan-t2v",
+        "variant_id": "1.3b-sp2",
+        "benchmark_version": 2,
+        "hardware_profile_id": "hw-l40s",
+        "software_profile_id": "sw-cu126",
+    }
+    baseline = _record(
+        "2026-01-01T00:00:00+00:00",
+        "a" * 40,
+        10.0,
+        10.0,
+        recipe_fingerprint="recipe-baseline",
+        run_source="scheduled_main",
+        baseline_eligible=True,
+        **identity,
+    )
+    newer_pr = _record(
+        "2026-01-03T00:00:00+00:00",
+        "b" * 40,
+        11.0,
+        9.0,
+        recipe_fingerprint="recipe-pr",
+        run_source="pr",
+        baseline_eligible=False,
+        **identity,
+    )
+
+    catalog = build_cohort_catalog([baseline, newer_pr])
+    baseline_option = next(option for option in catalog["cohorts"] if option["baseline_eligible"])
+
+    assert catalog["default_cohort_key"] == baseline_option["key"]
+
+
+def test_build_cohort_catalog_falls_back_to_most_recent_record():
+    identity = {
+        "result_schema_version": 2,
+        "workload_id": "wan-t2v",
+        "variant_id": "1.3b-sp2",
+        "benchmark_version": 2,
+        "hardware_profile_id": "hw-l40s",
+        "software_profile_id": "sw-cu126",
+        "run_source": "pr",
+        "baseline_eligible": False,
+    }
+    older = _record(
+        "2026-01-01T00:00:00+00:00",
+        "a" * 40,
+        10.0,
+        10.0,
+        recipe_fingerprint="recipe-older",
+        **identity,
+    )
+    newer = _record(
+        "2026-01-02T00:00:00+00:00",
+        "b" * 40,
+        11.0,
+        9.0,
+        recipe_fingerprint="recipe-newer",
+        **identity,
+    )
+
+    catalog = build_cohort_catalog([older, newer])
+    newer_option = next(
+        option for option in catalog["cohorts"]
+        if option["raw_ids"]["recipe_fingerprint"] == "recipe-newer")
+
+    assert catalog["default_cohort_key"] == newer_option["key"]
+
+
+def test_build_cohort_catalog_returns_cascading_advanced_filter_options():
+    common = {
+        "result_schema_version": 2,
+        "workload_id": "wan-t2v",
+        "variant_id": "1.3b-sp2",
+        "benchmark_version": 2,
+        "model_id": "wan",
+        "gpu_type": "NVIDIA L40S",
+    }
+    profile_a = _record(
+        "2026-01-01T00:00:00+00:00",
+        "a" * 40,
+        10.0,
+        10.0,
+        hardware_profile_id="hw-a",
+        software_profile_id="sw-a",
+        recipe_fingerprint="recipe-a",
+        run_source="pr",
+        **common,
+    )
+    profile_b = _record(
+        "2026-01-02T00:00:00+00:00",
+        "b" * 40,
+        11.0,
+        9.0,
+        hardware_profile_id="hw-b",
+        software_profile_id="sw-b",
+        recipe_fingerprint="recipe-b",
+        run_source="scheduled_main",
+        **common,
+    )
+    legacy = _record(
+        "2026-01-03T00:00:00+00:00",
+        "c" * 40,
+        12.0,
+        8.0,
+        model_id="legacy-model",
+        gpu_type="NVIDIA A100",
+    )
+
+    catalog = build_cohort_catalog([profile_a, profile_b, legacy], model_id="wan")
+    software_filtered = build_cohort_catalog(
+        [profile_a, profile_b, legacy],
+        model_id="wan",
+        software_profile_id="sw-a",
+    )
+    source_filtered = build_cohort_catalog([profile_a, profile_b, legacy], model_id="wan", run_source="pr")
+    legacy_catalog = build_cohort_catalog([profile_a, profile_b, legacy], model_id="legacy-model")
+
+    assert {option["value"] for option in catalog["advanced_filters"]["hardware_profiles"]} == {
+        "hw-a",
+        "hw-b",
+    }
+    assert [option["value"] for option in software_filtered["advanced_filters"]["hardware_profiles"]
+            ] == ["hw-a"]
+    assert [cohort["raw_ids"]["software_profile_id"] for cohort in software_filtered["cohorts"]] == ["sw-a"]
+    assert [option["value"] for option in source_filtered["advanced_filters"]["recipes"]] == ["recipe-a"]
+    assert legacy_catalog["advanced_filters"]["hardware_profiles"][0]["value"] == ADVANCED_FILTER_LEGACY
