@@ -24,8 +24,7 @@ import torch
 
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.entrypoints.video_generator import (
-    _BATCH_EXTRA_PASSTHROUGH_KEYS,
-)
+    _BATCH_EXTRA_PASSTHROUGH_KEYS, )
 from fastvideo.pipelines import ForwardBatch
 from fastvideo.utils import shallow_asdict
 
@@ -37,6 +36,10 @@ def test_passthrough_keys_cover_ltx2_audio_conditioning() -> None:
         "ltx2_audio_denoise_mask",
         "audio_num_frames",
         "video_position_offset_sec",
+        # MiniMax-H3 VSA per-request knobs (consumed by MiniMaxH3DenoisingStage)
+        "vsa_mode",
+        "vsa_dense_first_n_steps",
+        "vsa_dense_layers",
     }
     assert set(_BATCH_EXTRA_PASSTHROUGH_KEYS) == expected
 
@@ -48,9 +51,8 @@ def test_passthrough_keys_are_not_sampling_param_fields() -> None:
     import dataclasses
     sp_fields = {f.name for f in dataclasses.fields(SamplingParam())}
     leaked = sp_fields & set(_BATCH_EXTRA_PASSTHROUGH_KEYS)
-    assert not leaked, (
-        f"Passthrough keys collide with SamplingParam fields: {leaked}. "
-        "Remove from _BATCH_EXTRA_PASSTHROUGH_KEYS or rename the field.")
+    assert not leaked, (f"Passthrough keys collide with SamplingParam fields: {leaked}. "
+                        "Remove from _BATCH_EXTRA_PASSTHROUGH_KEYS or rename the field.")
 
 
 def test_sampling_param_update_rejects_unknown_keys() -> None:

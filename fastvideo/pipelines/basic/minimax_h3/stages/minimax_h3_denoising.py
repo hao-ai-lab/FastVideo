@@ -7,6 +7,7 @@ from typing import Any
 
 import torch
 
+from fastvideo.attention.selector import component_attention_backend, get_attn_backend
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
@@ -21,6 +22,40 @@ from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
+from fastvideo.utils import get_compute_dtype
+
+
+def _h3_vsa_metadata_builder(transformer: Any, fastvideo_args: FastVideoArgs) -> Any:
+    """Builder instance when the transformer resolved to VSA-H3, else None.
+
+    Resolves through the same selector record the attention layers used
+    (``component_attention_backend``) instead of introspecting module
+    internals, mirroring the generic DenoisingStage.
+    """
+    dit_config = fastvideo_args.pipeline_config.dit_config
+    backend = get_attn_backend(
+        head_size=dit_config.attention_head_dim,
+        dtype=get_compute_dtype(),
+        supported_attention_backends=dit_config._supported_attention_backends,
+        requested=component_attention_backend(transformer),
+    )
+    if backend.get_name() != "VIDEO_SPARSE_ATTN_H3":
+        return None
+    return backend.get_builder_cls()()
+
+
+def _h3_vsa_prefix_segments(layout: MiniMaxH3PackedLayout, patch_size: tuple[int, int, int]) -> tuple[int, ...]:
+    """Segment sizes preceding the generated-video tail, validated against the layout."""
+    n_text = int(layout.text_indices.numel())
+    n_cond = int(layout.num_condition_video_rows)
+    n_audio = int(layout.audio_indices.numel())
+    n_video = ((layout.num_video_latent_frames // patch_size[0]) * (layout.latent_height // patch_size[1]) *
+               (layout.latent_width // patch_size[2]))
+    if n_text + n_cond + n_audio + n_video != layout.sequence_length:
+        raise ValueError("VSA-H3 supports the standard [text|cond|audio|video] packing only; "
+                         f"segments ({n_text}, {n_cond}, {n_audio}) + video {n_video} do not sum to "
+                         f"sequence length {layout.sequence_length}.")
+    return n_text, n_cond, n_audio
 
 
 class MiniMaxH3DenoisingStage(PipelineStage):
@@ -98,13 +133,40 @@ class MiniMaxH3DenoisingStage(PipelineStage):
         text_indices = layout.text_indices.to(device)
         prompt_embeds = batch.prompt_embeds[0].to(device)
 
+        vsa_metadata_builder = _h3_vsa_metadata_builder(self.transformer, fastvideo_args)
+        if vsa_metadata_builder is not None:
+            vsa_patch_size = fastvideo_args.pipeline_config.dit_config.patch_size
+            vsa_prefix_segments = _h3_vsa_prefix_segments(layout, vsa_patch_size)
+            # Per-request knobs (sweeps flip these between generate_video calls
+            # without respawning workers); mode None defers to the env default.
+            vsa_mode = batch.extra.get("vsa_mode")
+            vsa_exempt = None if vsa_mode is None else vsa_mode == "exempt"
+            vsa_dense_layers = tuple(int(layer) for layer in batch.extra.get("vsa_dense_layers", ()))
+            vsa_dense_first_n = int(batch.extra.get("vsa_dense_first_n_steps", 0))
+
         try:
             for index, (video_timestep, audio_timestep) in enumerate(zip(video_timesteps, audio_timesteps,
                                                                          strict=True)):
                 unique_timesteps, timestep_indices = row_timestep_plan[index]
+                attn_metadata = None
+                if vsa_metadata_builder is not None:
+                    # Optional schedule: run the first N steps dense (sparsity 0
+                    # selects every tile — parity-proven ≡ dense ≤2e-4); early
+                    # steps set global structure and are the most damage-prone.
+                    vsa_sparsity = 0.0 if index < vsa_dense_first_n else float(batch.VSA_sparsity)
+                    attn_metadata = vsa_metadata_builder.build(
+                        current_timestep=index,
+                        raw_latent_shape=(layout.num_video_latent_frames, layout.latent_height, layout.latent_width),
+                        patch_size=vsa_patch_size,
+                        VSA_sparsity=vsa_sparsity,
+                        prefix_segments=vsa_prefix_segments,
+                        device=device,
+                        exempt=vsa_exempt,
+                        dense_layers=vsa_dense_layers,
+                    )
                 with trace_step(index), set_forward_context(
                         current_timestep=index,
-                        attn_metadata=None,
+                        attn_metadata=attn_metadata,
                         forward_batch=batch,
                 ):
                     video_velocity, audio_velocity = self.transformer(

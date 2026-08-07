@@ -71,6 +71,11 @@ _BATCH_EXTRA_PASSTHROUGH_KEYS: tuple[str, ...] = (
     "ltx2_audio_denoise_mask",
     "audio_num_frames",
     "video_position_offset_sec",
+    # MiniMax-H3 VSA per-request knobs (read by the H3 denoising stage;
+    # sparsity itself flows through the existing ForwardBatch.VSA_sparsity)
+    "vsa_mode",
+    "vsa_dense_first_n_steps",
+    "vsa_dense_layers",
 )
 
 _FROM_PRETRAINED_CONVENIENCE_KWARGS = frozenset({

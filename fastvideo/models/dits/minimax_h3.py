@@ -11,6 +11,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from fastvideo.attention import DistributedAttention
+from fastvideo.attention.layer import DistributedAttention_VSA
+from fastvideo.attention.selector import get_attn_backend
 from fastvideo.configs.models.dits.minimax_h3 import MiniMaxH3Config
 from fastvideo.distributed.communication_op import (
     sequence_model_parallel_all_gather_with_unpad,
@@ -22,7 +24,7 @@ from fastvideo.layers.quantization import QuantizationConfig
 from fastvideo.layers.visual_embedding import Timesteps
 from fastvideo.models.dits.base import BaseDiT
 from fastvideo.platforms import AttentionBackendEnum
-
+from fastvideo.utils import get_compute_dtype
 
 MINIMAX_H3_MODALITY_NUM = 3
 _CFG = MiniMaxH3Config()
@@ -33,9 +35,8 @@ class MiniMaxH3RotaryPosEmbed(nn.Module):
 
     def __init__(self, rope_freq_dim: int, rope_theta: float) -> None:
         super().__init__()
-        inv_freq = 1.0 / (
-            rope_theta ** (torch.arange(0, 2 * rope_freq_dim, 2, dtype=torch.float32) / (2 * rope_freq_dim))
-        )
+        inv_freq = 1.0 / (rope_theta**(torch.arange(0, 2 * rope_freq_dim, 2, dtype=torch.float32) /
+                                       (2 * rope_freq_dim)))
         self.register_buffer("inv_freq", inv_freq, persistent=False)
 
     def forward(self, position_ids: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -165,13 +166,53 @@ class MiniMaxH3Attention(nn.Module):
             quant_config=quant_config,
             prefix=f"{prefix}.to_out",
         )
-        self.distributed_attention = DistributedAttention(
+        # VSA carries a learned gate on its pooled-compression branch. The H3
+        # checkpoint has no such weight, so the loader zero-initializes it
+        # (ALLOWED_NEW_PARAM_PATTERNS) and the branch is exactly disabled
+        # until finetuned. Built only when VSA-H3 actually resolves, keeping
+        # the FLASH/SDPA paths and their state_dict untouched.
+        resolved_backend = get_attn_backend(attention_head_dim,
+                                            get_compute_dtype(),
+                                            supported_attention_backends=supported_attention_backends)
+        use_vsa = resolved_backend.get_name() == "VIDEO_SPARSE_ATTN_H3"
+        attention_cls = DistributedAttention_VSA if use_vsa else DistributedAttention
+        self.distributed_attention = attention_cls(
             num_heads=num_attention_heads,
             head_size=attention_head_dim,
             causal=False,
             supported_attention_backends=supported_attention_backends,
             prefix=prefix,
         )
+        self.to_gate_compress: ReplicatedLinear | None = None
+        # None = unchecked; the first forward tests the loaded weight once and
+        # skips the gate branch entirely while it is structurally zero.
+        self._gate_compress_active: bool | None = None
+        if use_vsa:
+            self.to_gate_compress = ReplicatedLinear(
+                hidden_size,
+                inner_dim,
+                bias=False,
+                quant_config=quant_config,
+                prefix=f"{prefix}.to_gate_compress",
+            )
+
+    def _gate_active(self) -> bool:
+        """True when the compression gate can contribute.
+
+        The zero-initialized (not-yet-finetuned) gate makes the whole branch
+        a guaranteed zero — a full GEMM plus a third more all-to-all/tile
+        traffic per layer for nothing — so test the loaded weight once and
+        cache the answer. Under grad the branch always runs (gradients must
+        reach a zero gate for it to ever train).
+        """
+        if torch.is_grad_enabled():
+            return True
+        if self._gate_compress_active is None:
+            weight = self.to_gate_compress.weight
+            # bool() on a DTensor reduction resolves collectively, so every
+            # rank caches the same answer.
+            self._gate_compress_active = bool((weight != 0).any())
+        return self._gate_compress_active
 
     @staticmethod
     def _apply_rotary_emb(
@@ -210,12 +251,18 @@ class MiniMaxH3Attention(nn.Module):
 
         # H3 rotates only 96/128 channels, which the generic `freqs_cis`
         # branch cannot express. Apply it above, then pass no RoPE here.
+        extra_attention_kwargs = {}
+        if self.to_gate_compress is not None and self._gate_active():
+            gate_compress, _ = self.to_gate_compress(hidden_states)
+            extra_attention_kwargs["gate_compress"] = gate_compress.unflatten(
+                -1, (self.num_attention_heads, self.attention_head_dim))
         hidden_states, _ = self.distributed_attention(
             query,
             key,
             value,
             original_seq_len=original_seq_len,
             freqs_cis=None,
+            **extra_attention_kwargs,
         )
         hidden_states = hidden_states.flatten(2, 3).type_as(query)
         hidden_states, _ = self.to_out(hidden_states)
@@ -355,9 +402,7 @@ class MiniMaxH3AdaLayerNormOut(nn.Module):
         shift_scale, _ = self.linear(F.silu(temb).to(self.linear.weight.dtype))
         shift, scale = shift_scale.chunk(2, dim=-1)
         hidden_states = self.norm(hidden_states)
-        return hidden_states * (1.0 + scale.index_select(0, timestep_indices)) + shift.index_select(
-            0, timestep_indices
-        )
+        return hidden_states * (1.0 + scale.index_select(0, timestep_indices)) + shift.index_select(0, timestep_indices)
 
 
 class MiniMaxH3TransformerBlock(nn.Module):
@@ -414,16 +459,14 @@ class MiniMaxH3TransformerBlock(nn.Module):
         residual = hidden_states
         norm_hidden_states = self.norm1(hidden_states)
         norm_hidden_states = norm_hidden_states * (
-            1.0 + scale_msa.index_select(0, adaln_indices)
-        ) + shift_msa.index_select(0, adaln_indices)
+            1.0 + scale_msa.index_select(0, adaln_indices)) + shift_msa.index_select(0, adaln_indices)
         attention_output = self.attn(norm_hidden_states, rotary_emb, original_seq_len)
         hidden_states = residual + gate_msa.index_select(0, adaln_indices) * attention_output
 
         residual = hidden_states
         norm_hidden_states = self.norm2(hidden_states)
         norm_hidden_states = norm_hidden_states * (
-            1.0 + scale_mlp.index_select(0, adaln_indices)
-        ) + shift_mlp.index_select(0, adaln_indices)
+            1.0 + scale_mlp.index_select(0, adaln_indices)) + shift_mlp.index_select(0, adaln_indices)
         feed_forward_output = self.ff(norm_hidden_states)
         return residual + gate_mlp.index_select(0, adaln_indices) * feed_forward_output
 
@@ -467,10 +510,8 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         arch = config.arch_config
         sp_world_size = get_sp_world_size() if model_parallel_is_initialized() else 1
         if arch.num_attention_heads % sp_world_size:
-            raise ValueError(
-                f"MiniMax H3 attention heads ({arch.num_attention_heads}) must be divisible by "
-                f"sequence parallel size ({sp_world_size})."
-            )
+            raise ValueError(f"MiniMax H3 attention heads ({arch.num_attention_heads}) must be divisible by "
+                             f"sequence parallel size ({sp_world_size}).")
 
         self.hidden_size = arch.hidden_size
         self.num_attention_heads = arch.num_attention_heads
@@ -521,7 +562,10 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
             arch.norm_eps,
             arch.qk_norm_eps,
             arch.final_norm_eps,
-            self.supported_attention_backends,
+            # The refiner attends over the text stream only; the packed-sequence
+            # VSA backend must never be selected for it.
+            tuple(backend for backend in self.supported_attention_backends
+                  if backend != AttentionBackendEnum.VIDEO_SPARSE_ATTN_H3),
             config.quant_config,
             prefix=f"{config.prefix}.token_refiner",
         )
@@ -576,13 +620,9 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         del dtype
         if self.rope.inv_freq.is_meta or self.rope.inv_freq.device != device:
             arch = self.config.arch_config
-            inv_freq = 1.0 / (
-                arch.rope_theta
-                ** (
-                    torch.arange(0, 2 * arch.rope_freq_dim, 2, device=device, dtype=torch.float32)
-                    / (2 * arch.rope_freq_dim)
-                )
-            )
+            inv_freq = 1.0 / (arch.rope_theta
+                              **(torch.arange(0, 2 * arch.rope_freq_dim, 2, device=device, dtype=torch.float32) /
+                                 (2 * arch.rope_freq_dim)))
             self.rope._buffers["inv_freq"] = inv_freq
 
     def forward(
@@ -602,7 +642,7 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         if position_ids.ndim != 2 or position_ids.shape[-1] != 3:
             raise ValueError(f"position_ids must have shape (seq_len, 3), got {tuple(position_ids.shape)}.")
         sequence_length = position_ids.shape[0]
-        if token_tags.shape != (sequence_length,) or timestep_indices.shape != (sequence_length,):
+        if token_tags.shape != (sequence_length, ) or timestep_indices.shape != (sequence_length, ):
             raise ValueError("token_tags and timestep_indices must both match the packed sequence length.")
         if hidden_states.shape[1] != video_indices.numel():
             raise ValueError("hidden_states row count must match video_indices.")
@@ -628,9 +668,7 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
                 dim=1,
             )
 
-        packed_hidden_states = text_embeds.new_zeros(
-            (text_embeds.shape[0], sequence_length, text_embeds.shape[-1])
-        )
+        packed_hidden_states = text_embeds.new_zeros((text_embeds.shape[0], sequence_length, text_embeds.shape[-1]))
         packed_hidden_states = packed_hidden_states.index_copy(1, text_indices, text_embeds)
         packed_hidden_states = packed_hidden_states.index_copy(1, video_indices, video_embeds.to(text_embeds.dtype))
         packed_hidden_states = packed_hidden_states.index_copy(1, audio_indices, audio_embeds.to(text_embeds.dtype))
