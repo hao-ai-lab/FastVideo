@@ -72,7 +72,8 @@ def _load_pr_test_module(monkeypatch):
     return module
 
 
-def test_checkout_repository_retries_clone_and_fetches_pr_ref(monkeypatch):
+def test_checkout_repository_retries_clone_and_fetches_exact_pr_commit(
+        monkeypatch):
     module = _load_pr_test_module(monkeypatch)
     commands = []
     cleanup_paths = []
@@ -131,7 +132,7 @@ def test_checkout_repository_retries_clone_and_fetches_pr_ref(monkeypatch):
     fetch_command = commands[2][0]
     assert fetch_command[-2:] == [
         "origin",
-        "refs/pull/1584/head",
+        "0123456789abcdef0123456789abcdef01234567",
     ]
     assert "--depth=1" in fetch_command
     assert "--filter=blob:none" in fetch_command
@@ -211,8 +212,11 @@ def test_git_retry_exhaustion_is_bounded_and_cleans_each_attempt(monkeypatch):
         ("-bad-option", "0123456789abcdef", "false"),
         ("https://example.com/repo.git", "", "false"),
         ("https://example.com/repo.git", "not-a-commit", "false"),
-        ("https://example.com/repo.git", "0123456789abcdef", "not-a-pr"),
-        ("https://example.com/repo.git", "0123456789abcdef", "0"),
+        ("https://example.com/repo.git", "0123456789abcdef", "1584"),
+        ("https://example.com/repo.git",
+         "0123456789abcdef0123456789abcdef01234567", "not-a-pr"),
+        ("https://example.com/repo.git",
+         "0123456789abcdef0123456789abcdef01234567", "0"),
     ],
 )
 def test_checkout_repository_rejects_invalid_buildkite_values(

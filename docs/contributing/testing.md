@@ -33,6 +33,20 @@ pytest fastvideo/tests/vaes -vs
 GPU-heavy suites need the right hardware, credentials, local caches, and
 sometimes custom kernels. Document those assumptions in new tests.
 
+## Transformer Fingerprints
+
+An exact transformer fingerprint runs a fixed, production-shaped one-layer
+forward on a pinned GPU/software/backend profile and compares SHA-256 hashes of
+the complete output tensors. It loads only the checkpoint tensors used by that
+forward. This is the normal Fastcheck gate for a covered DiT; it is bit-exact
+within that surface and cheaper than generating media.
+
+The fingerprint must exercise every implementation file that it exempts from
+SSIM. Keep pipeline, sequence packing, scheduler, encoder, VAE, and shared
+layer changes on the SSIM path. Updating an expected hash requires official
+parity evidence and an end-to-end SSIM run; the fingerprint test remains an
+SSIM-watched path so such updates escalate automatically.
+
 ## SSIM Tests
 
 SSIM tests generate videos using specific models and parameters, then compare

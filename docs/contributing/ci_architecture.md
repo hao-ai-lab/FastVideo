@@ -82,10 +82,14 @@ status.
 |---|---|---|
 | Encoder Tests | `encoder` | `fastvideo/models/encoders/**`, `fastvideo/models/loader/**`, `fastvideo/tests/encoders/**`, `pyproject.toml`, `docker/Dockerfile` |
 | VAE Tests | `vae` | `fastvideo/models/vaes/**`, `fastvideo/models/loader/**`, `fastvideo/tests/vaes/**`, `pyproject.toml`, `docker/Dockerfile` |
-| Transformer Tests | `transformer` | `fastvideo/models/dits/**`, `fastvideo/models/loader/**`, `fastvideo/tests/transformers/**`, `fastvideo/layers/**`, `fastvideo/attention/**`, `pyproject.toml`, `docker/Dockerfile` |
+| Transformer Tests | `transformer` | DiT configs/models, loader, transformer tests, layers, attention, distributed/platform runtime, forward context/env, checkpoint converters, dependencies, and container |
 | Kernel Tests | `kernel_tests` | `fastvideo-kernel/**`, `pyproject.toml`, `docker/Dockerfile` |
 | Unit Tests | `unit_test` | `fastvideo/**`, `.buildkite/**`, `.github/**`, `pyproject.toml`, `docker/Dockerfile` |
 | DreamVerse App Tests | `dreamverse_app` | `apps/dreamverse/**`, `pyproject.toml` |
+
+The transformer launcher has a 25-minute Buildkite timeout around a 20-minute
+Modal function. The five-minute margin covers checkout, dependency setup, and
+Modal teardown without racing the remote timeout.
 
 ### Tier 3: Full Suite
 
@@ -108,7 +112,7 @@ it), while a GitHub outage or a >25 min wait lets it run anyway (fail open).
 
 | Buildkite label | `TEST_TYPE` | Main watched paths |
 |---|---|---|
-| SSIM Tests | `ssim` | `fastvideo/**/*.py`, `pyproject.toml`, `docker/Dockerfile` |
+| SSIM Tests | `ssim` | `fastvideo/**/*.py`, except the fingerprint-gated Cosmos3 DiT/config files; also `pyproject.toml` and `docker/Dockerfile` |
 | LoRA Inference Tests | `inference_lora` | LoRA tests, loader, transformer tests, pipelines, LoRA layers |
 | LoRA Extraction Tests | `lora_extraction` | LoRA extraction scripts/tests, loader, training utilities, LoRA layers |
 | Training Tests | `training` | `fastvideo/**`, `pyproject.toml`, `docker/Dockerfile` |
@@ -121,6 +125,13 @@ it), while a GitHub outage or a >25 min wait lets it run anyway (fail open).
 | API Server Tests | `api_server` | OpenAI entrypoints, serve CLI, OpenAI API integration test |
 | Train Framework Tests | `train_framework` | `fastvideo/train/**`, train model/method tests, model loader, DiTs |
 | Eval Metrics Tests | `eval` | `fastvideo/eval/**`, `fastvideo/tests/eval/**`, `pyproject.toml`, `docker/Dockerfile` |
+
+Cosmos3's DiT implementation and DiT config are guarded in Fastcheck by an
+exact one-layer transformer fingerprint. A PR that changes only those two
+files does not schedule SSIM. The fingerprint test itself is not excluded, so
+changing its expected hashes schedules SSIM automatically. Pipeline, packing,
+scheduler, encoder, VAE, shared-layer, dependency, and container changes still
+schedule end-to-end SSIM.
 
 See [Performance Benchmarks](performance_benchmarks.md) for the performance
 lane's thresholds, rolling baseline, artifacts, and reseeding process.
@@ -240,6 +251,10 @@ All Buildkite test jobs go through `.buildkite/scripts/pr_test.sh`, which:
 4. Runs the selected test command from `fastvideo/tests/modal/pr_test.py` or
    `fastvideo/tests/modal/ssim_test.py`.
 5. Uploads performance artifacts for `TEST_TYPE=performance`.
+
+The Modal runner fetches the immutable `BUILDKITE_COMMIT` recorded for the
+build. It does not follow a live pull-request ref that may have advanced while
+the job was queued.
 
 If you add a new CI test category:
 
