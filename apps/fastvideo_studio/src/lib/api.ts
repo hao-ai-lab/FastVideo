@@ -202,6 +202,33 @@ export async function getModels(workloadType?: string): Promise<Model[]> {
 	return response.json();
 }
 
+/**
+ * A model's recommended sampling settings. Keys the backend has no value
+ * for are absent; the UI leaves those form fields untouched.
+ */
+export interface ModelPresets {
+	height?: number;
+	width?: number;
+	num_frames?: number;
+	fps?: number;
+	num_inference_steps?: number;
+	guidance_scale?: number;
+	guidance_rescale?: number;
+	negative_prompt?: string;
+	seed?: number;
+}
+
+export async function getModelPresets(modelId: string): Promise<ModelPresets> {
+	const baseApiUrl = getApiBaseUrl();
+	const response = await fetch(
+		`${baseApiUrl}/models/presets?model_id=${encodeURIComponent(modelId)}`,
+	);
+	if (!response.ok) {
+		throw new Error("Failed to fetch model presets");
+	}
+	return response.json();
+}
+
 export async function getGpus(): Promise<GpuSnapshot> {
 	const baseApiUrl = getApiBaseUrl();
 	const response = await fetch(`${baseApiUrl}/gpus`);

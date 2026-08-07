@@ -399,6 +399,56 @@ def list_models(workload_type: str | None = None) -> list[dict[str, Any]]:
     return _models_for(workload_type)
 
 
+# Per-model sampling presets, mirroring the real /api/models/presets shape
+# (keys the model has no recommendation for are simply absent).
+_MODEL_PRESETS: dict[str, dict[str, Any]] = {
+    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers": {
+        "height": 480,
+        "width": 832,
+        "num_frames": 81,
+        "fps": 16,
+        "num_inference_steps": 50,
+        "guidance_scale": 3.0,
+        "guidance_rescale": 0.0,
+        "negative_prompt": "Bright tones, overexposed, static, blurred details",
+        "seed": 1024,
+    },
+    "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers": {
+        "height": 480,
+        "width": 832,
+        "num_frames": 81,
+        "fps": 16,
+        "num_inference_steps": 40,
+        "guidance_scale": 5.0,
+        "seed": 1024,
+    },
+    "black-forest-labs/FLUX.1-schnell": {
+        "height": 1024,
+        "width": 1024,
+        "num_frames": 1,
+        "num_inference_steps": 4,
+        "guidance_scale": 0.0,
+        "seed": 42,
+    },
+}
+_GENERIC_PRESETS: dict[str, Any] = {
+    "height": 720,
+    "width": 1280,
+    "num_frames": 81,
+    "fps": 24,
+    "num_inference_steps": 50,
+    "guidance_scale": 5.0,
+    "guidance_rescale": 0.0,
+    "seed": 1024,
+}
+
+
+@app.get("/api/models/presets")
+def model_presets(model_id: str) -> dict[str, Any]:
+    """Recommended sampling settings; unknown models get generic defaults."""
+    return _MODEL_PRESETS.get(model_id, _GENERIC_PRESETS)
+
+
 # --- GPUs -------------------------------------------------------------------
 
 

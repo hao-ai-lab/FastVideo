@@ -23,9 +23,12 @@ import { defaultOptionsStore } from '@/stores/defaultOptions';
 import {
   createJob,
   getDatasets,
+  getModelPresets,
   getModels,
+  listGenerators,
   uploadImage,
   type CreateJobRequest,
+  type GeneratorInfo,
   type Model,
 } from '@/lib/api';
 import { getDefaultModelForWorkload } from '@/lib/defaultOptions';
@@ -55,6 +58,9 @@ export default function CreateJobModal({
 
   const [models, setModels] = React.useState<Model[]>([]);
   const [modelId, setModelId] = React.useState('');
+  // The engine's resident slot (null when empty/failed), fetched on open so
+  // jobs against the warm model can adopt its engine config.
+  const [warmSlot, setWarmSlot] = React.useState<GeneratorInfo | null>(null);
   const [prompt, setPrompt] = React.useState('');
   const [imagePath, setImagePath] = React.useState('');
   const [imageFileName, setImageFileName] = React.useState('');
@@ -178,17 +184,34 @@ export default function CreateJobModal({
     let stale = false;
     setIsLoadingModels(true);
     setModelLoadError(null);
-    getModels(inferenceWorkload)
-      .then((list) => {
+    // For inference jobs, prefer the warm resident model (if any) over the
+    // persisted default so new jobs hit the already-loaded engine. The warm
+    // slot is a nice-to-have: if the lookup fails, fall back silently.
+    const warmSlotPromise = isInference
+      ? listGenerators()
+          .then((gens) =>
+            gens[0] && gens[0].state !== 'failed' ? gens[0] : null,
+          )
+          .catch(() => null)
+      : Promise.resolve(null);
+    Promise.all([getModels(inferenceWorkload), warmSlotPromise])
+      .then(([list, slot]) => {
         if (stale) return;
         setModels(list);
+        setWarmSlot(slot);
         const ids = list.map((m) => m.id);
         const opts = defaultOptionsStore.get().options;
         const defaultId = getDefaultModelForWorkload(
           opts,
           inferenceWorkload as 't2v' | 'i2v' | 't2i',
         );
-        const chosen = ids.includes(defaultId) ? defaultId : (list[0]?.id ?? '');
+        const warmId = slot?.model_id ?? '';
+        const chosen =
+          warmId && ids.includes(warmId)
+            ? warmId
+            : ids.includes(defaultId)
+              ? defaultId
+              : (list[0]?.id ?? '');
         setModelId(chosen);
         if (workloadType === 'dmd_t2v') {
           setRealScoreModelPath(chosen);
@@ -210,7 +233,78 @@ export default function CreateJobModal({
     return () => {
       stale = true;
     };
-  }, [isOpen, inferenceWorkload, workloadType]);
+  }, [isOpen, isInference, inferenceWorkload, workloadType]);
+
+  // Whenever the selected model changes (including the initial selection on
+  // open), populate the sampling fields from that model's presets. Missing
+  // keys leave the field as-is; engine fields (GPUs, parallelism, offloads)
+  // come from the warm slot or persisted defaults (effect below). Latest
+  // selection wins: the cleanup marks superseded fetches stale, same as the
+  // model-list effect.
+  React.useEffect(() => {
+    if (!isOpen || !isInference || !modelId) return;
+    let stale = false;
+    getModelPresets(modelId)
+      .then((p) => {
+        if (stale) return;
+        if (p.height !== undefined) setHeight(p.height);
+        if (p.width !== undefined) setWidth(p.width);
+        if (p.num_frames !== undefined)
+          setNumFrames(workloadType === 't2i' ? 1 : p.num_frames);
+        if (p.fps !== undefined) setFps(p.fps);
+        if (p.num_inference_steps !== undefined)
+          setNumInferenceSteps(p.num_inference_steps);
+        if (p.guidance_scale !== undefined) setGuidanceScale(p.guidance_scale);
+        if (p.guidance_rescale !== undefined)
+          setGuidanceRescale(p.guidance_rescale);
+        if (p.negative_prompt !== undefined)
+          setNegativePrompt(p.negative_prompt);
+        if (p.seed !== undefined) setSeed(p.seed);
+      })
+      .catch((e) => {
+        // Presets are a convenience; on failure keep the current values.
+        console.error('Failed to load model presets:', e);
+      });
+    return () => {
+      stale = true;
+    };
+  }, [isOpen, isInference, modelId, workloadType]);
+
+  // When the selected model IS the warm resident one, adopt the slot's engine
+  // config so the job reuses the loaded instance instead of silently replacing
+  // it (e.g. persisted num_gpus=1 vs a warm 8-GPU slot). Switching away from
+  // the warm model restores the persisted-default engine fields; non-warm to
+  // non-warm switches leave the user's engine edits alone (today's behavior).
+  const wasWarmRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!isOpen || !isInference || !modelId) return;
+    const isWarm = warmSlot?.model_id === modelId;
+    if (isWarm && warmSlot) {
+      setNumGpus(warmSlot.num_gpus);
+      setTpSize(warmSlot.tp_size);
+      setSpSize(warmSlot.sp_size);
+      setDitCpuOffload(warmSlot.dit_cpu_offload);
+      setTextEncoderCpuOffload(warmSlot.text_encoder_cpu_offload);
+      setVaeCpuOffload(warmSlot.vae_cpu_offload);
+      setImageEncoderCpuOffload(warmSlot.image_encoder_cpu_offload);
+      setUseFsdpInference(warmSlot.use_fsdp_inference);
+      setEnableTorchCompile(warmSlot.enable_torch_compile);
+      setVsaSparsity(warmSlot.vsa_sparsity);
+    } else if (wasWarmRef.current) {
+      const opts = defaultOptionsStore.get().options;
+      setNumGpus(opts.numGpus);
+      setTpSize(opts.tpSize);
+      setSpSize(opts.spSize);
+      setDitCpuOffload(opts.ditCpuOffload);
+      setTextEncoderCpuOffload(opts.textEncoderCpuOffload);
+      setVaeCpuOffload(opts.vaeCpuOffload);
+      setImageEncoderCpuOffload(opts.imageEncoderCpuOffload);
+      setUseFsdpInference(opts.useFsdpInference);
+      setEnableTorchCompile(opts.enableTorchCompile);
+      setVsaSparsity(opts.vsaSparsity);
+    }
+    wasWarmRef.current = isWarm;
+  }, [isOpen, isInference, modelId, warmSlot]);
 
   // Training jobs need a dataset; load the ready datasets when relevant.
   React.useEffect(() => {

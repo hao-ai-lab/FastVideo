@@ -4,14 +4,24 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import CreateJobModal from './CreateJobModal';
-import { createJob, getDatasets, getModels, uploadImage } from '@/lib/api';
+import {
+  createJob,
+  getDatasets,
+  getModelPresets,
+  getModels,
+  listGenerators,
+  uploadImage,
+  type GeneratorInfo,
+} from '@/lib/api';
 import { defaultOptionsStore } from '@/stores/defaultOptions';
 import { DEFAULT_OPTIONS } from '@/lib/defaultOptions';
 
 vi.mock('@/lib/api', () => ({
   createJob: vi.fn(),
   getModels: vi.fn(),
+  getModelPresets: vi.fn(),
   getDatasets: vi.fn(),
+  listGenerators: vi.fn(),
   uploadImage: vi.fn(),
   getSettings: vi.fn(),
   updateSettings: vi.fn(),
@@ -22,11 +32,32 @@ const MODELS = [
   { id: 'wan/t2v-14b', label: 'Wan T2V Large', type: 't2v' },
 ];
 
+// A resident engine slot whose engine config differs from the persisted
+// defaults on every field the modal adopts.
+const WARM_SLOT: GeneratorInfo = {
+  state: 'ready',
+  model_id: 'wan/t2v-14b',
+  workload_type: 't2v',
+  num_gpus: 8,
+  dit_cpu_offload: true,
+  text_encoder_cpu_offload: true,
+  vae_cpu_offload: true,
+  image_encoder_cpu_offload: false,
+  use_fsdp_inference: true,
+  enable_torch_compile: true,
+  vsa_sparsity: 0.5,
+  tp_size: 1,
+  sp_size: 8,
+  error: null,
+};
+
 beforeEach(() => {
   // Reset the shared options store to a known baseline for test isolation.
   defaultOptionsStore.set({ options: DEFAULT_OPTIONS });
   vi.mocked(getModels).mockResolvedValue(MODELS);
+  vi.mocked(getModelPresets).mockResolvedValue({});
   vi.mocked(getDatasets).mockResolvedValue([]);
+  vi.mocked(listGenerators).mockResolvedValue([]);
   vi.mocked(uploadImage).mockResolvedValue({ path: '/uploads/x.png' });
   vi.mocked(createJob).mockResolvedValue({ id: 'job-1' } as never);
 });
@@ -205,5 +236,124 @@ describe('CreateJobModal', () => {
     expect(payload).not.toHaveProperty('num_inference_steps');
 
     await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
+  });
+
+  it('defaults to the warm resident model and adopts its engine config', async () => {
+    vi.mocked(listGenerators).mockResolvedValue([WARM_SLOT]);
+
+    const user = userEvent.setup();
+    renderModal();
+
+    // Without a warm model the default logic picks the first model
+    // (wan/t2v-1.3b, covered by the seeding test above); the warm slot wins.
+    await waitFor(() =>
+      expect(screen.getByLabelText('Model')).toHaveValue('wan/t2v-14b'),
+    );
+    // The warm selection also triggers its presets fetch.
+    await waitFor(() =>
+      expect(getModelPresets).toHaveBeenCalledWith('wan/t2v-14b'),
+    );
+
+    await user.type(screen.getByLabelText('Prompt'), 'warm run');
+    await user.click(screen.getByRole('button', { name: 'Create Job' }));
+
+    await waitFor(() => expect(createJob).toHaveBeenCalledTimes(1));
+    // The engine fields mirror the resident slot (not the persisted defaults:
+    // num_gpus 1, all offloads/fsdp/compile false) so the job reuses the warm
+    // instance instead of replacing it.
+    expect(vi.mocked(createJob).mock.calls[0][0]).toMatchObject({
+      model_id: 'wan/t2v-14b',
+      num_gpus: 8,
+      tp_size: 1,
+      sp_size: 8,
+      dit_cpu_offload: true,
+      text_encoder_cpu_offload: true,
+      vae_cpu_offload: true,
+      image_encoder_cpu_offload: false,
+      use_fsdp_inference: true,
+      enable_torch_compile: true,
+      vsa_sparsity: 0.5,
+    });
+  });
+
+  it('restores persisted-default engine fields when switching away from the warm model', async () => {
+    defaultOptionsStore.set({
+      options: { ...DEFAULT_OPTIONS, numGpus: 2, tpSize: 2 },
+    });
+    vi.mocked(listGenerators).mockResolvedValue([WARM_SLOT]);
+
+    const user = userEvent.setup();
+    renderModal();
+
+    await waitFor(() =>
+      expect(screen.getByLabelText('Model')).toHaveValue('wan/t2v-14b'),
+    );
+    await user.selectOptions(screen.getByLabelText('Model'), 'wan/t2v-1.3b');
+    await user.type(screen.getByLabelText('Prompt'), 'cold run');
+    await user.click(screen.getByRole('button', { name: 'Create Job' }));
+
+    await waitFor(() => expect(createJob).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(createJob).mock.calls[0][0]).toMatchObject({
+      model_id: 'wan/t2v-1.3b',
+      num_gpus: 2,
+      tp_size: 2,
+      use_fsdp_inference: false,
+      enable_torch_compile: false,
+    });
+  });
+
+  it('populates sampling fields from the selected model presets; engine fields stay from defaults', async () => {
+    defaultOptionsStore.set({
+      options: { ...DEFAULT_OPTIONS, numGpus: 4, tpSize: 2, seed: 999 },
+    });
+    vi.mocked(getModelPresets).mockImplementation(async (id) =>
+      id === 'wan/t2v-14b'
+        ? {
+            height: 720,
+            width: 1280,
+            num_frames: 121,
+            fps: 30,
+            num_inference_steps: 40,
+            guidance_scale: 6,
+            guidance_rescale: 0.5,
+            negative_prompt: 'blurry, low quality',
+            seed: 7,
+          }
+        : {},
+    );
+
+    const user = userEvent.setup();
+    renderModal();
+
+    await screen.findByRole('option', { name: 'Wan T2V Large (wan/t2v-14b)' });
+    await user.selectOptions(screen.getByLabelText('Model'), 'wan/t2v-14b');
+    // The negative prompt is the easiest preset-populated field to observe.
+    await waitFor(() =>
+      expect(screen.getByLabelText('Negative Prompt')).toHaveValue(
+        'blurry, low quality',
+      ),
+    );
+
+    await user.type(screen.getByLabelText('Prompt'), 'preset test');
+    await user.click(screen.getByRole('button', { name: 'Create Job' }));
+
+    await waitFor(() => expect(createJob).toHaveBeenCalledTimes(1));
+    const payload = vi.mocked(createJob).mock.calls[0][0];
+    expect(payload).toMatchObject({
+      model_id: 'wan/t2v-14b',
+      // Sampling fields come from the model presets…
+      height: 720,
+      width: 1280,
+      num_frames: 121,
+      fps: 30,
+      num_inference_steps: 40,
+      guidance_scale: 6,
+      guidance_rescale: 0.5,
+      negative_prompt: 'blurry, low quality',
+      seed: 7,
+      // …while engine fields still come from the persisted defaults.
+      num_gpus: 4,
+      tp_size: 2,
+    });
   });
 });
