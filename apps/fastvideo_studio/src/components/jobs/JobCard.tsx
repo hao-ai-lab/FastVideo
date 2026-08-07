@@ -142,7 +142,7 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
   return (
     <article
       className={cn(
-        'mb-3 flex cursor-pointer flex-col gap-2.5 rounded-lg border bg-background p-4 transition-colors last:mb-0',
+        'mb-1.5 flex cursor-pointer flex-col gap-1 rounded-lg border bg-background px-3 py-1.5 transition-colors last:mb-0',
         isSelected
           ? 'border-accent-blue bg-accent-blue/5'
           : 'border-border hover:border-muted-foreground/40',
@@ -152,20 +152,18 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
         type="button"
         aria-pressed={isSelected}
         onClick={handleSelectJob}
-        className="flex w-full flex-col gap-2.5 rounded-md text-left"
+        className="flex w-full min-w-0 items-center gap-2 rounded-md text-left"
       >
-        <span className="flex flex-wrap items-center justify-between gap-2">
-          <span className="text-[0.95rem] font-semibold text-foreground">
-            {job.model_id}
-          </span>
-          <Badge variant={BADGE_VARIANTS[job.status] ?? 'secondary'}>
-            {job.status}
-          </Badge>
+        <span className="shrink-0 text-sm font-semibold text-foreground">
+          {job.model_id}
         </span>
-        <span className="max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-sm text-muted-foreground">
+        <Badge variant={BADGE_VARIANTS[job.status] ?? 'secondary'}>
+          {job.status}
+        </Badge>
+        <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-muted-foreground">
           {job.prompt}
         </span>
-        <span className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
+        <span className="ml-auto flex shrink-0 items-center gap-3 text-xs text-muted-foreground">
           {job.job_type === 'inference' ? (
             <>
               <span>{job.num_frames} frames</span>
@@ -190,7 +188,7 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
             size="sm"
             onClick={handleStop}
             disabled={isLoading}
-            className="border-transparent bg-amber-500 text-black shadow-md hover:bg-amber-400"
+            className="h-6 px-2 text-xs border-transparent bg-amber-500 text-black shadow-md hover:bg-amber-400"
           >
             Stop
           </Button>
@@ -199,7 +197,7 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
             size="sm"
             onClick={handleStart}
             disabled={isLoading}
-            className="border-transparent bg-emerald-600 text-white shadow-md hover:bg-emerald-500"
+            className="h-6 px-2 text-xs border-transparent bg-emerald-600 text-white shadow-md hover:bg-emerald-500"
           >
             Restart
           </Button>
@@ -208,7 +206,7 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
             size="sm"
             onClick={handleStart}
             disabled={isLoading}
-            className="border-transparent bg-emerald-600 text-white shadow-md hover:bg-emerald-500"
+            className="h-6 px-2 text-xs border-transparent bg-emerald-600 text-white shadow-md hover:bg-emerald-500"
           >
             Start
           </Button>
@@ -222,6 +220,7 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
               onClick={handleDownloadVideo}
               disabled={isLoading}
               title="Download video"
+              className="h-6 px-2 text-xs"
             >
               Download Video
             </Button>
@@ -231,6 +230,7 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
           variant="destructive"
           onClick={handleDelete}
           disabled={isLoading}
+          className="h-6 px-2 text-xs"
         >
           Delete
         </Button>
