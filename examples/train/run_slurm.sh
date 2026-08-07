@@ -20,7 +20,7 @@
 #   OUTPUT_DIR      Directory for slurm logs  (default: slurm_logs)
 #   MASTER_PORT     Rendezvous port           (default: 29500)
 #   EXCLUDE         Nodes to exclude          (default: "")
-#   WANDB_API_KEY   W&B API key               (default: "")
+#   WANDB_API_KEY   Exported W&B API key required for online logging
 #   WANDB_MODE      W&B mode                  (default: online)
 #   SBATCH_CONSTRAINT Slurm node constraint    (default: "")
 #   SBATCH_TIMELIMIT Slurm time limit          (default: "")

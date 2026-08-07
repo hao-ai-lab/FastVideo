@@ -342,7 +342,8 @@ def test_h3_slurm_scripts_preserve_inherited_wandb_key(
     run_slurm = _REPO_ROOT / "examples/train/run_slurm.sh"
     launcher = _REPO_ROOT / "examples/train/launch_minimax_h3_t2va_crush_smol_validation.sh"
     setup = _REPO_ROOT / "examples/train/setup_minimax_h3_t2va_crush_smol_single_sample.sh"
-    subprocess.run(["bash", "-n", str(run_slurm), str(launcher), str(setup)], check=True)
+    for script in (run_slurm, launcher, setup):
+        subprocess.run(["bash", "-n", str(script)], check=True)
 
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
