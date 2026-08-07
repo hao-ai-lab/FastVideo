@@ -35,7 +35,7 @@ from fastvideo.models.audio.ltx2_audio_vae import LTX2AudioEncoder
 from fastvideo.models.hf_transformer_utils import get_diffusers_config
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, PreprocessBatch
-from fastvideo.pipelines.preprocess.preprocess_stages import (TextTransformStage, VideoTransformStage)
+from fastvideo.pipelines.preprocess.preprocess_stages import TextTransformStage, VideoTransformStage
 from fastvideo.pipelines.stages import EncodingStage, PipelineStage
 
 logger = init_logger(__name__)
@@ -74,12 +74,12 @@ class LTX2TextPrecomputeStage(PipelineStage):
             processed_prompt = self.preprocess_text_fn(prompt)
             prompts.append(processed_prompt if processed_prompt is not None else "")
 
-        prompt_embeds, prompt_attention_mask = (self.text_encoder.preprocess_text_embeddings(
+        prompt_embeds, prompt_attention_mask = self.text_encoder.preprocess_text_embeddings(
             prompts=prompts,
             tokenizer=self.tokenizer,
             tokenizer_kwargs=self.tokenizer_kwargs,
             padding_side=self.padding_side,
-        ))
+        )
         batch.prompt_embeds = [prompt_embeds]
         batch.prompt_attention_mask = [prompt_attention_mask]
         return batch
@@ -157,9 +157,9 @@ class LTX2AudioEncodingStage(PipelineStage):
 
             waveform, sample_rate = audio_data
             waveform = waveform.unsqueeze(0).to(device=self.audio_device, dtype=self.audio_dtype)
-            mel = self.audio_processor.waveform_to_mel(waveform,
-                                                       waveform_sample_rate=sample_rate).to(device=self.audio_device,
-                                                                                            dtype=self.audio_dtype)
+            mel = self.audio_processor.waveform_to_mel(waveform, waveform_sample_rate=sample_rate).to(
+                device=self.audio_device, dtype=self.audio_dtype
+            )
             latents = self.audio_encoder(mel).squeeze(0).detach().cpu()
             audio_latents.append(latents)
 

@@ -14,6 +14,7 @@ State machine per replica::
 Where N = :attr:`RouterConfig.failure_threshold` and
 M = :attr:`RouterConfig.recovery_threshold`.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -138,9 +139,10 @@ class ReplicaRegistry:
                 logger.info("router: replica %s initial probe ok, marking HEALTHY", replica.url)
                 h.status = ReplicaStatus.HEALTHY
                 h.consecutive_successes = 0
-            elif (h.status is ReplicaStatus.UNHEALTHY and h.consecutive_successes >= recovery_threshold):
-                logger.info("router: replica %s recovered to HEALTHY after %d successes", replica.url,
-                            h.consecutive_successes)
+            elif h.status is ReplicaStatus.UNHEALTHY and h.consecutive_successes >= recovery_threshold:
+                logger.info(
+                    "router: replica %s recovered to HEALTHY after %d successes", replica.url, h.consecutive_successes
+                )
                 h.status = ReplicaStatus.HEALTHY
                 h.consecutive_successes = 0
 
@@ -156,9 +158,13 @@ class ReplicaRegistry:
             h.last_failure_at = time.time()
             h.consecutive_successes = 0
             h.consecutive_failures += 1
-            if (h.status is not ReplicaStatus.UNHEALTHY and h.consecutive_failures >= failure_threshold):
-                logger.warning("router: replica %s marked UNHEALTHY after %d failures: %s", replica.url,
-                               h.consecutive_failures, reason)
+            if h.status is not ReplicaStatus.UNHEALTHY and h.consecutive_failures >= failure_threshold:
+                logger.warning(
+                    "router: replica %s marked UNHEALTHY after %d failures: %s",
+                    replica.url,
+                    h.consecutive_failures,
+                    reason,
+                )
                 h.status = ReplicaStatus.UNHEALTHY
 
 
@@ -235,12 +241,14 @@ async def _run_loop(
 
 @contextlib.asynccontextmanager
 async def _build_default_probe(
-    config: RouterConfig, ) -> AsyncIterator[Callable[..., Awaitable[tuple[float, str | None]]]]:
+    config: RouterConfig,
+) -> AsyncIterator[Callable[..., Awaitable[tuple[float, str | None]]]]:
     try:
         import httpx
     except ImportError as exc:  # pragma: no cover - optional extra
-        raise RuntimeError("router health checks require httpx; install with "
-                           "`pip install fastvideo[streaming]` or `pip install httpx`") from exc
+        raise RuntimeError(
+            "router health checks require httpx; install with `pip install fastvideo[streaming]` or `pip install httpx`"
+        ) from exc
 
     async with httpx.AsyncClient(timeout=config.health_check_timeout_seconds) as client:
 

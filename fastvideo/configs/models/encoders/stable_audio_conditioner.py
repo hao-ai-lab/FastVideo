@@ -8,41 +8,21 @@ DiT consumes. The architecture is fully specified by the official
 `stable_audio_tools` `MultiConditioner` config; the constants here
 mirror that.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
 from fastvideo.configs.models.base import ArchConfig
-from fastvideo.configs.models.encoders.base import (EncoderArchConfig, EncoderConfig)
+from fastvideo.configs.models.encoders.base import EncoderArchConfig, EncoderConfig
 
 
 def _default_configs() -> list[dict]:
     """Default = `stable-audio-open-1.0`'s three sub-conditioners."""
     return [
-        {
-            "id": "prompt",
-            "type": "t5",
-            "config": {
-                "t5_model_name": "t5-base",
-                "max_length": 128
-            }
-        },
-        {
-            "id": "seconds_start",
-            "type": "number",
-            "config": {
-                "min_val": 0,
-                "max_val": 512
-            }
-        },
-        {
-            "id": "seconds_total",
-            "type": "number",
-            "config": {
-                "min_val": 0,
-                "max_val": 512
-            }
-        },
+        {"id": "prompt", "type": "t5", "config": {"t5_model_name": "t5-base", "max_length": 128}},
+        {"id": "seconds_start", "type": "number", "config": {"min_val": 0, "max_val": 512}},
+        {"id": "seconds_total", "type": "number", "config": {"min_val": 0, "max_val": 512}},
     ]
 
 

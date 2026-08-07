@@ -14,7 +14,7 @@ from typing_extensions import ParamSpec
 
 import fastvideo.envs as envs
 from fastvideo.logger import init_logger
-from fastvideo.platforms.interface import (AttentionBackendEnum, DeviceCapability, Platform, PlatformEnum)
+from fastvideo.platforms.interface import AttentionBackendEnum, DeviceCapability, Platform, PlatformEnum
 from fastvideo.utils import import_pynvml
 
 logger = init_logger(__name__)
@@ -33,12 +33,14 @@ def device_id_to_physical_device_id(device_id: int) -> int:
     if "CUDA_VISIBLE_DEVICES" in os.environ:
         device_ids = os.environ["CUDA_VISIBLE_DEVICES"].split(",")
         if device_ids == [""]:
-            msg = ("CUDA_VISIBLE_DEVICES is set to empty string, which means"
-                   " GPU support is disabled. If you are using ray, please unset"
-                   " the environment variable `CUDA_VISIBLE_DEVICES` inside the"
-                   " worker/actor. "
-                   "Check https://github.com/vllm-project/vllm/issues/8402 for"
-                   " more information.")
+            msg = (
+                "CUDA_VISIBLE_DEVICES is set to empty string, which means"
+                " GPU support is disabled. If you are using ray, please unset"
+                " the environment variable `CUDA_VISIBLE_DEVICES` inside the"
+                " worker/actor. "
+                "Check https://github.com/vllm-project/vllm/issues/8402 for"
+                " more information."
+            )
             raise RuntimeError(msg)
         physical_device_id = device_ids[device_id]
         return int(physical_device_id)
@@ -47,7 +49,6 @@ def device_id_to_physical_device_id(device_id: int) -> int:
 
 
 def with_nvml_context(fn: Callable[_P, _R]) -> Callable[_P, _R]:
-
     @wraps(fn)
     def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
         pynvml.nvmlInit()
@@ -82,9 +83,11 @@ class CudaPlatformBase(Platform):
     @classmethod
     def is_async_output_supported(cls, enforce_eager: bool | None) -> bool:
         if enforce_eager:
-            logger.warning("To see benefits of async output processing, enable CUDA "
-                           "graph. Since, enforce-eager is enabled, async output "
-                           "processor cannot be used")
+            logger.warning(
+                "To see benefits of async output processing, enable CUDA "
+                "graph. Since, enforce-eager is enabled, async output "
+                "processor cannot be used"
+            )
             return False
         return True
 
@@ -109,8 +112,9 @@ class CudaPlatformBase(Platform):
         return torch.cuda
 
     @classmethod
-    def get_attn_backend_cls(cls, selected_backend: AttentionBackendEnum | None, head_size: int,
-                             dtype: torch.dtype) -> str:
+    def get_attn_backend_cls(
+        cls, selected_backend: AttentionBackendEnum | None, head_size: int, dtype: torch.dtype
+    ) -> str:
         # TODO(will): maybe come up with a more general interface for local attention
         # if distributed is False, we always try to use Flash attn
 
@@ -121,7 +125,9 @@ class CudaPlatformBase(Platform):
                 from sageattention import sageattn  # noqa: F401
 
                 from fastvideo.attention.backends.sage_attn import (  # noqa: F401
-                    SageAttentionBackend)
+                    SageAttentionBackend,
+                )
+
                 logger.info("Using Sage Attention backend.")
 
                 return "fastvideo.attention.backends.sage_attn.SageAttentionBackend"
@@ -133,7 +139,9 @@ class CudaPlatformBase(Platform):
                 from sageattn3 import sageattn3_blackwell  # noqa: F401
 
                 from fastvideo.attention.backends.sage_attn3 import (  # noqa: F401
-                    SageAttention3Backend)
+                    SageAttention3Backend,
+                )
+
                 logger.info("Using Sage Attention 3 backend.")
 
                 return "fastvideo.attention.backends.sage_attn3.SageAttention3Backend"
@@ -142,7 +150,11 @@ class CudaPlatformBase(Platform):
                 logger.info("Sage Attention 3 backend is not installed. Fall back to Flash Attention.")
         elif selected_backend == AttentionBackendEnum.ATTN_QAT_INFER:
             from fastvideo.attention.backends.attn_qat_infer import (  # noqa: F401
-                AttnQatInferBackend, attn_qat_infer_receipt, is_attn_qat_infer_available)
+                AttnQatInferBackend,
+                attn_qat_infer_receipt,
+                is_attn_qat_infer_available,
+            )
+
             if is_attn_qat_infer_available():
                 logger.info("Using Attn-QAT inference backend (%s).", attn_qat_infer_receipt())
                 return "fastvideo.attention.backends.attn_qat_infer.AttnQatInferBackend"
@@ -151,43 +163,57 @@ class CudaPlatformBase(Platform):
                 "Silent fallback would run plain FlashAttention while the caller believes it is measuring "
                 "FP4-QAT attention — an A/B comparison would silently benchmark bf16 against bf16; "
                 "refusing to proceed. Build the fastvideo-kernel attn_qat_infer target for this arch "
-                "or pick a different FASTVIDEO_ATTENTION_BACKEND.")
+                "or pick a different FASTVIDEO_ATTENTION_BACKEND."
+            )
         elif selected_backend == AttentionBackendEnum.ATTN_QAT_TRAIN:
             from fastvideo.attention.backends.attn_qat_train import (  # noqa: F401
-                AttnQatTrainBackend, is_attn_qat_train_available)
+                AttnQatTrainBackend,
+                is_attn_qat_train_available,
+            )
+
             if is_attn_qat_train_available():
                 logger.info("Using Attn-QAT training (fake-quantized attention) backend.")
                 return "fastvideo.attention.backends.attn_qat_train.AttnQatTrainBackend"
             raise ImportError(
                 "ATTN_QAT_TRAIN selected but fastvideo_kernel.triton_kernels.attn_qat_train is not built. "
                 "Silent fallback would produce a non-QAT training run; refusing to proceed. "
-                "Install the training kernel or pick a different FASTVIDEO_ATTENTION_BACKEND.")
+                "Install the training kernel or pick a different FASTVIDEO_ATTENTION_BACKEND."
+            )
         elif selected_backend == AttentionBackendEnum.NABLA_ATTN:
             from fastvideo.attention.backends.nabla import CAN_USE_FLEX_ATTN
+
             if CAN_USE_FLEX_ATTN:
                 logger.info("Using NABLA block-sparse flex-attention backend.")
                 return "fastvideo.attention.backends.nabla.NablaAttentionBackend"
-            raise ImportError("NABLA_ATTN selected but torch.nn.attention.flex_attention is unavailable in this "
-                              "PyTorch build. Silent fallback to dense attention would be orders of magnitude "
-                              "slower and diverge from the reference; upgrade PyTorch or pick a different backend.")
+            raise ImportError(
+                "NABLA_ATTN selected but torch.nn.attention.flex_attention is unavailable in this "
+                "PyTorch build. Silent fallback to dense attention would be orders of magnitude "
+                "slower and diverge from the reference; upgrade PyTorch or pick a different backend."
+            )
         elif selected_backend == AttentionBackendEnum.VIDEO_SPARSE_ATTN:
             try:
                 from fastvideo_kernel import video_sparse_attn  # noqa: F401
 
                 from fastvideo.attention.backends.video_sparse_attn import (  # noqa: F401
-                    VideoSparseAttentionBackend)
+                    VideoSparseAttentionBackend,
+                )
+
                 logger.info("Using Video Sparse Attention backend.")
 
                 return "fastvideo.attention.backends.video_sparse_attn.VideoSparseAttentionBackend"
             except ImportError as e:
                 logger.error("Failed to import Video Sparse Attention backend: %s", str(e))
-                raise ImportError("The Video Sparse Attention backend is not installed. "
-                                  "To install it, please follow the instructions at: "
-                                  "https://hao-ai-lab.github.io/FastVideo/video_sparse_attention/installation ") from e
+                raise ImportError(
+                    "The Video Sparse Attention backend is not installed. "
+                    "To install it, please follow the instructions at: "
+                    "https://hao-ai-lab.github.io/FastVideo/video_sparse_attention/installation "
+                ) from e
         elif selected_backend == AttentionBackendEnum.BSA_ATTN:
             try:
                 from fastvideo.attention.backends.bsa_attn import (  # noqa: F401
-                    BSAAttentionBackend)
+                    BSAAttentionBackend,
+                )
+
                 logger.info("Using BSA Attention backend.")
 
                 return "fastvideo.attention.backends.bsa_attn.BSAAttentionBackend"
@@ -198,7 +224,9 @@ class CudaPlatformBase(Platform):
             try:
                 from fastvideo_kernel import moba_attn_varlen  # noqa: F401
                 from fastvideo.attention.backends.vmoba import (  # noqa: F401
-                    VMOBAAttentionBackend)
+                    VMOBAAttentionBackend,
+                )
+
                 logger.info("Using Video MOBA Attention backend.")
 
                 return "fastvideo.attention.backends.vmoba.VMOBAAttentionBackend"
@@ -208,7 +236,9 @@ class CudaPlatformBase(Platform):
         elif selected_backend == AttentionBackendEnum.SLA_ATTN:
             try:
                 from fastvideo.attention.backends.sla import (  # noqa: F401
-                    SLAAttentionBackend)
+                    SLAAttentionBackend,
+                )
+
                 logger.info("Using SLA (Sparse-Linear Attention) backend.")
 
                 return "fastvideo.attention.backends.sla.SLAAttentionBackend"
@@ -218,14 +248,18 @@ class CudaPlatformBase(Platform):
         elif selected_backend == AttentionBackendEnum.SAGE_SLA_ATTN:
             try:
                 from fastvideo.attention.backends.sla import (  # noqa: F401
-                    SageSLAAttentionBackend)
+                    SageSLAAttentionBackend,
+                )
+
                 logger.info("Using SageSLA (Quantized Sparse-Linear Attention) backend.")
 
                 return "fastvideo.attention.backends.sla.SageSLAAttentionBackend"
             except ImportError as e:
                 logger.error("Failed to import SageSLA Attention backend: %s", str(e))
-                raise ImportError("SageSLA Attention backend requires spas_sage_attn. "
-                                  "Install with: uv pip install git+https://github.com/thu-ml/SpargeAttn.git") from e
+                raise ImportError(
+                    "SageSLA Attention backend requires spas_sage_attn. "
+                    "Install with: uv pip install git+https://github.com/thu-ml/SpargeAttn.git"
+                ) from e
         elif selected_backend == AttentionBackendEnum.TORCH_SDPA:
             logger.info("Using Torch SDPA backend.")
             return "fastvideo.attention.backends.sdpa.SDPABackend"
@@ -236,12 +270,10 @@ class CudaPlatformBase(Platform):
 
         target_backend = AttentionBackendEnum.FLASH_ATTN
         if not cls.has_device_capability(80):
-            logger.info("Cannot use FlashAttention-2 backend for Volta and Turing "
-                        "GPUs.")
+            logger.info("Cannot use FlashAttention-2 backend for Volta and Turing GPUs.")
             target_backend = AttentionBackendEnum.TORCH_SDPA
         elif dtype not in (torch.float16, torch.bfloat16):
-            logger.info("Cannot use FlashAttention-2 backend for dtype other than "
-                        "torch.float16 or torch.bfloat16.")
+            logger.info("Cannot use FlashAttention-2 backend for dtype other than torch.float16 or torch.bfloat16.")
             target_backend = AttentionBackendEnum.TORCH_SDPA
 
         # FlashAttn is valid for the model, checking if the package is
@@ -251,18 +283,20 @@ class CudaPlatformBase(Platform):
                 import flash_attn  # noqa: F401
 
                 from fastvideo.attention.backends.flash_attn import (  # noqa: F401
-                    FlashAttentionBackend)
+                    FlashAttentionBackend,
+                )
 
-                supported_sizes = \
-                    FlashAttentionBackend.get_supported_head_sizes()
+                supported_sizes = FlashAttentionBackend.get_supported_head_sizes()
                 if head_size not in supported_sizes:
                     logger.info("Cannot use FlashAttention-2 backend for head size %d.", head_size)
                     target_backend = AttentionBackendEnum.TORCH_SDPA
             except ImportError:
-                logger.info("Cannot use FlashAttention-2 backend because the "
-                            "flash_attn package is not found. "
-                            "Make sure that flash_attn was built and installed "
-                            "(on by default).")
+                logger.info(
+                    "Cannot use FlashAttention-2 backend because the "
+                    "flash_attn package is not found. "
+                    "Make sure that flash_attn was built and installed "
+                    "(on by default)."
+                )
                 target_backend = AttentionBackendEnum.TORCH_SDPA
 
         if target_backend == AttentionBackendEnum.TORCH_SDPA:
@@ -284,7 +318,6 @@ class CudaPlatformBase(Platform):
 # all the related functions work on real physical device ids.
 # the major benefit of using NVML is that it will not initialize CUDA
 class NvmlCudaPlatform(CudaPlatformBase):
-
     @classmethod
     @lru_cache(maxsize=8)
     @with_nvml_context
@@ -352,8 +385,9 @@ class NvmlCudaPlatform(CudaPlatformBase):
                         if p2p_status != pynvml.NVML_P2P_STATUS_OK:
                             return False
                     except pynvml.NVMLError:
-                        logger.exception("NVLink detection failed. This is normal if"
-                                         " your machine has no NVLink equipped.")
+                        logger.exception(
+                            "NVLink detection failed. This is normal if your machine has no NVLink equipped."
+                        )
                         return False
         return True
 
@@ -368,7 +402,7 @@ class NvmlCudaPlatform(CudaPlatformBase):
         device_ids: int = pynvml.nvmlDeviceGetCount()
         if device_ids > 1:
             device_names = [cls._get_physical_device_name(i) for i in range(device_ids)]
-            if (len(set(device_names)) > 1 and os.environ.get("CUDA_DEVICE_ORDER") != "PCI_BUS_ID"):
+            if len(set(device_names)) > 1 and os.environ.get("CUDA_DEVICE_ORDER") != "PCI_BUS_ID":
                 logger.warning(
                     "Detected different devices in the system: %s. Please"
                     " make sure to set `CUDA_DEVICE_ORDER=PCI_BUS_ID` to "
@@ -378,7 +412,6 @@ class NvmlCudaPlatform(CudaPlatformBase):
 
 
 class NonNvmlCudaPlatform(CudaPlatformBase):
-
     @classmethod
     def get_device_capability(cls, device_id: int = 0) -> DeviceCapability:
         major, minor = torch.cuda.get_device_capability(device_id)
@@ -395,8 +428,9 @@ class NonNvmlCudaPlatform(CudaPlatformBase):
 
     @classmethod
     def is_full_nvlink(cls, physical_device_ids: list[int]) -> bool:
-        logger.exception("NVLink detection not possible, as context support was"
-                         " not found. Assuming no NVLink available.")
+        logger.exception(
+            "NVLink detection not possible, as context support was not found. Assuming no NVLink available."
+        )
         return False
 
 

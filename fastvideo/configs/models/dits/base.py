@@ -19,14 +19,18 @@ class DiTArchConfig(ArchConfig):
     # to bf16 before denoising); models with fp32 text encoders (Wan, Hunyuan15,
     # SD3.5) leave it False to preserve full-precision embeddings.
     cast_prompt_embeds_to_dit_dtype: bool = False
-    _supported_attention_backends: tuple[AttentionBackendEnum,
-                                         ...] = (AttentionBackendEnum.SAGE_ATTN, AttentionBackendEnum.FLASH_ATTN,
-                                                 AttentionBackendEnum.TORCH_SDPA,
-                                                 AttentionBackendEnum.VIDEO_SPARSE_ATTN,
-                                                 AttentionBackendEnum.VMOBA_ATTN, AttentionBackendEnum.SAGE_ATTN_THREE,
-                                                 AttentionBackendEnum.ATTN_QAT_INFER,
-                                                 AttentionBackendEnum.ATTN_QAT_TRAIN, AttentionBackendEnum.SLA_ATTN,
-                                                 AttentionBackendEnum.SAGE_SLA_ATTN)
+    _supported_attention_backends: tuple[AttentionBackendEnum, ...] = (
+        AttentionBackendEnum.SAGE_ATTN,
+        AttentionBackendEnum.FLASH_ATTN,
+        AttentionBackendEnum.TORCH_SDPA,
+        AttentionBackendEnum.VIDEO_SPARSE_ATTN,
+        AttentionBackendEnum.VMOBA_ATTN,
+        AttentionBackendEnum.SAGE_ATTN_THREE,
+        AttentionBackendEnum.ATTN_QAT_INFER,
+        AttentionBackendEnum.ATTN_QAT_TRAIN,
+        AttentionBackendEnum.SLA_ATTN,
+        AttentionBackendEnum.SAGE_SLA_ATTN,
+    )
 
     hidden_size: int = 0
     num_attention_heads: int = 0

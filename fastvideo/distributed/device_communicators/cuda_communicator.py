@@ -4,19 +4,20 @@
 import torch
 from torch.distributed import ProcessGroup
 
-from fastvideo.distributed.device_communicators.base_device_communicator import (DeviceCommunicatorBase)
+from fastvideo.distributed.device_communicators.base_device_communicator import DeviceCommunicatorBase
 
 
 class CudaCommunicator(DeviceCommunicatorBase):
-
-    def __init__(self,
-                 cpu_group: ProcessGroup,
-                 device: torch.device | None = None,
-                 device_group: ProcessGroup | None = None,
-                 unique_name: str = ""):
+    def __init__(
+        self,
+        cpu_group: ProcessGroup,
+        device: torch.device | None = None,
+        device_group: ProcessGroup | None = None,
+        unique_name: str = "",
+    ):
         super().__init__(cpu_group, device, device_group, unique_name)
 
-        from fastvideo.distributed.device_communicators.pynccl import (PyNcclCommunicator)
+        from fastvideo.distributed.device_communicators.pynccl import PyNcclCommunicator
 
         self.pynccl_comm: PyNcclCommunicator | None = None
         if self.world_size > 1:

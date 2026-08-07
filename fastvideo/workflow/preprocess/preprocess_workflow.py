@@ -4,21 +4,24 @@ from typing import cast
 from torch.utils.data import DataLoader
 
 from fastvideo.configs.configs import PreprocessConfig
-from fastvideo.dataset.dataloader.record_schema import (basic_t2v_record_creator, i2v_record_creator)
-from fastvideo.dataset.dataloader.schema import (pyarrow_schema_i2v, pyarrow_schema_t2v)
+from fastvideo.dataset.dataloader.record_schema import basic_t2v_record_creator, i2v_record_creator
+from fastvideo.dataset.dataloader.schema import pyarrow_schema_i2v, pyarrow_schema_t2v
 from fastvideo.distributed.parallel_state import get_world_rank
 from fastvideo.fastvideo_args import FastVideoArgs, WorkloadType
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.pipeline_registry import PipelineType
-from fastvideo.workflow.preprocess.components import (ParquetDatasetSaver, PreprocessingDataValidator,
-                                                      VideoForwardBatchBuilder, build_dataset)
+from fastvideo.workflow.preprocess.components import (
+    ParquetDatasetSaver,
+    PreprocessingDataValidator,
+    VideoForwardBatchBuilder,
+    build_dataset,
+)
 from fastvideo.workflow.workflow_base import WorkflowBase
 
 logger = init_logger(__name__)
 
 
 class PreprocessWorkflow(WorkflowBase):
-
     def register_pipelines(self) -> None:
         self.add_pipeline_config("preprocess_pipeline", (PipelineType.PREPROCESS, self.fastvideo_args))
 
@@ -95,8 +98,9 @@ class PreprocessWorkflow(WorkflowBase):
         dataset_output_dir = self.fastvideo_args.preprocess_config.dataset_output_dir
         os.makedirs(dataset_output_dir, exist_ok=True)
 
-        validation_dataset_output_dir = os.path.join(dataset_output_dir, "validation_dataset",
-                                                     f"worker_{get_world_rank()}")
+        validation_dataset_output_dir = os.path.join(
+            dataset_output_dir, "validation_dataset", f"worker_{get_world_rank()}"
+        )
         os.makedirs(validation_dataset_output_dir, exist_ok=True)
         self.validation_dataset_output_dir = validation_dataset_output_dir
 
@@ -106,17 +110,23 @@ class PreprocessWorkflow(WorkflowBase):
 
     @classmethod
     def get_workflow_cls(cls, fastvideo_args: FastVideoArgs) -> "PreprocessWorkflow":
-        is_ltx2_t2v = (fastvideo_args.workload_type == WorkloadType.T2V
-                       and fastvideo_args.pipeline_config.__class__.__name__ == "LTX2T2VConfig")
+        is_ltx2_t2v = (
+            fastvideo_args.workload_type == WorkloadType.T2V
+            and fastvideo_args.pipeline_config.__class__.__name__ == "LTX2T2VConfig"
+        )
         if is_ltx2_t2v:
-            from fastvideo.workflow.preprocess.preprocess_workflow_ltx2_t2v import (PreprocessWorkflowLTX2T2V)
+            from fastvideo.workflow.preprocess.preprocess_workflow_ltx2_t2v import PreprocessWorkflowLTX2T2V
+
             return cast(PreprocessWorkflow, PreprocessWorkflowLTX2T2V)
         if fastvideo_args.workload_type == WorkloadType.T2V:
-            from fastvideo.workflow.preprocess.preprocess_workflow_t2v import (PreprocessWorkflowT2V)
+            from fastvideo.workflow.preprocess.preprocess_workflow_t2v import PreprocessWorkflowT2V
+
             return cast(PreprocessWorkflow, PreprocessWorkflowT2V)
         elif fastvideo_args.workload_type == WorkloadType.I2V:
-            from fastvideo.workflow.preprocess.preprocess_workflow_i2v import (PreprocessWorkflowI2V)
+            from fastvideo.workflow.preprocess.preprocess_workflow_i2v import PreprocessWorkflowI2V
+
             return cast(PreprocessWorkflow, PreprocessWorkflowI2V)
         else:
             raise ValueError(
-                f"Workload type: {fastvideo_args.workload_type} is not supported in preprocessing workflow.")
+                f"Workload type: {fastvideo_args.workload_type} is not supported in preprocessing workflow."
+            )

@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from torch.utils.data import DataLoader
 
     from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
-    from fastvideo.workflow.preprocess.components import (VideoForwardBatchBuilder)
+    from fastvideo.workflow.preprocess.components import VideoForwardBatchBuilder
 
 
 class PreprocessWorkflowI2V(PreprocessWorkflow):
@@ -39,7 +39,8 @@ class PreprocessWorkflowI2V(PreprocessWorkflow):
 
                 forward_batch = self.preprocess_pipeline.forward(forward_batch, self.fastvideo_args)
 
-                self.processed_dataset_saver.save_and_write_parquet_batch(forward_batch,
-                                                                          self.validation_dataset_output_dir)
+                self.processed_dataset_saver.save_and_write_parquet_batch(
+                    forward_batch, self.validation_dataset_output_dir
+                )
             self.processed_dataset_saver.flush_tables()
             self.processed_dataset_saver.clean_up()

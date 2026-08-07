@@ -18,7 +18,7 @@ logger = init_logger(__name__)
 class LongCatDenoisingStage(DenoisingStage):
     """
     LongCat denoising stage with CFG-zero optimized guidance scale.
-    
+
     Implements:
     1. Optimized CFG scale from CFG-zero paper
     2. Negation of noise prediction before scheduler step (flow matching convention)
@@ -28,13 +28,13 @@ class LongCatDenoisingStage(DenoisingStage):
     def optimized_scale(self, positive_flat, negative_flat) -> torch.Tensor:
         """
         Calculate optimized scale from CFG-zero paper.
-        
+
         st_star = (v_cond^T * v_uncond) / ||v_uncond||^2
-        
+
         Args:
             positive_flat: Conditional prediction, flattened [B, -1]
             negative_flat: Unconditional prediction, flattened [B, -1]
-        
+
         Returns:
             st_star: Optimized scale [B, 1]
         """
@@ -53,16 +53,17 @@ class LongCatDenoisingStage(DenoisingStage):
     ) -> ForwardBatch:
         """
         Run LongCat denoising loop with optimized CFG.
-        
+
         Args:
             batch: The current batch information.
             fastvideo_args: The inference arguments.
-            
+
         Returns:
             The batch with denoised latents.
         """
         if not fastvideo_args.model_loaded["transformer"]:
             from fastvideo.models.loader.component_loader import TransformerLoader
+
             loader = TransformerLoader()
             self.transformer = loader.load(fastvideo_args.model_paths["transformer"], fastvideo_args)
             pipeline = self.pipeline() if self.pipeline else None
@@ -91,13 +92,13 @@ class LongCatDenoisingStage(DenoisingStage):
         # Get negative prompts if doing CFG
         if do_classifier_free_guidance:
             negative_prompt_embeds = batch.negative_prompt_embeds[0]
-            negative_prompt_attention_mask = (batch.negative_attention_mask[0]
-                                              if batch.negative_attention_mask else None)
+            negative_prompt_attention_mask = batch.negative_attention_mask[0] if batch.negative_attention_mask else None
             # Concatenate for batched processing
             prompt_embeds_combined = torch.cat([negative_prompt_embeds, prompt_embeds], dim=0)
             if prompt_attention_mask is not None:
-                prompt_attention_mask_combined = torch.cat([negative_prompt_attention_mask, prompt_attention_mask],
-                                                           dim=0)
+                prompt_attention_mask_combined = torch.cat(
+                    [negative_prompt_attention_mask, prompt_attention_mask], dim=0
+                )
             else:
                 prompt_attention_mask_combined = None
         else:
@@ -118,11 +119,14 @@ class LongCatDenoisingStage(DenoisingStage):
 
                 # Run transformer with context
                 batch.is_cfg_negative = False
-                with set_forward_context(
+                with (
+                    set_forward_context(
                         current_timestep=i,
                         attn_metadata=None,
                         forward_batch=batch,
-                ), torch.autocast(device_type='cuda', dtype=target_dtype, enabled=autocast_enabled):
+                    ),
+                    torch.autocast(device_type="cuda", dtype=target_dtype, enabled=autocast_enabled),
+                ):
                     noise_pred = self.transformer(
                         hidden_states=latent_model_input,
                         encoder_hidden_states=prompt_embeds_combined,
@@ -145,8 +149,9 @@ class LongCatDenoisingStage(DenoisingStage):
                     st_star = st_star.view(B, 1, 1, 1, 1)
 
                     # Apply optimized CFG formula
-                    noise_pred = (noise_pred_uncond * st_star + guidance_scale *
-                                  (noise_pred_cond - noise_pred_uncond * st_star))
+                    noise_pred = noise_pred_uncond * st_star + guidance_scale * (
+                        noise_pred_cond - noise_pred_uncond * st_star
+                    )
 
                 # CRITICAL: Negate noise prediction for flow matching scheduler
                 noise_pred = -noise_pred

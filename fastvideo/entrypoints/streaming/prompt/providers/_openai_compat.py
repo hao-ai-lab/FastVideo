@@ -6,6 +6,7 @@ the request shape, error mapping, and response decoding are identical
 between them. This module centralizes that logic; the per-provider
 modules stay thin (just defaults + env var wiring).
 """
+
 from __future__ import annotations
 
 import time
@@ -29,8 +30,7 @@ async def complete_openai_compatible(
     """Issue a chat-completions call and decode the OpenAI response."""
     if not api_key:
         raise LLMProviderError(
-            f"{provider_name} provider requires {api_key_hint} "
-            "(or explicit api_key=...)",
+            f"{provider_name} provider requires {api_key_hint} (or explicit api_key=...)",
             retryable=False,
         )
     try:
@@ -53,10 +53,7 @@ async def complete_openai_compatible(
                 },
                 json={
                     "model": request.model,
-                    "messages": [{
-                        "role": m.role,
-                        "content": m.content
-                    } for m in request.messages],
+                    "messages": [{"role": m.role, "content": m.content} for m in request.messages],
                     "max_tokens": request.max_tokens,
                     "temperature": request.temperature,
                 },
@@ -70,10 +67,9 @@ async def complete_openai_compatible(
         # 5xx and 429 (rate-limit) are retryable: another provider may
         # succeed. 4xx (auth, bad-request, etc.) are client errors —
         # the enhancer should stop fallback traversal.
-        retryable = (response.status_code >= 500 or response.status_code == 429)
+        retryable = response.status_code >= 500 or response.status_code == 429
         raise LLMProviderError(
-            f"{provider_name} returned {response.status_code}: "
-            f"{response.text[:200]}",
+            f"{provider_name} returned {response.status_code}: {response.text[:200]}",
             retryable=retryable,
         )
 

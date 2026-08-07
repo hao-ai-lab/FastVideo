@@ -59,7 +59,8 @@ class DreamXWorldARArchConfig(DreamXWorldArchConfig):
             r"^blocks\.(\d+)\.modulation$": r"blocks.\1.modulation",
             r"^head\.head\.(.*)$": r"head.head.\1",
             r"^head\.modulation$": r"head.modulation",
-        })
+        }
+    )
     reverse_param_names_mapping: dict = field(default_factory=dict)
     lora_param_names_mapping: dict = field(default_factory=dict)
 

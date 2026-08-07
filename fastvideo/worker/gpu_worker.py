@@ -4,7 +4,7 @@ from typing import Any, cast
 
 import torch
 
-from fastvideo.distributed import (cleanup_dist_env_and_memory, maybe_init_distributed_environment_and_model_parallel)
+from fastvideo.distributed import cleanup_dist_env_and_memory, maybe_init_distributed_environment_and_model_parallel
 from fastvideo.distributed.parallel_state import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
@@ -14,7 +14,6 @@ logger = init_logger(__name__)
 
 
 class Worker:
-
     def __init__(self, fastvideo_args: FastVideoArgs, local_rank: int, rank: int, distributed_init_method: str):
         self.fastvideo_args = fastvideo_args
         self.local_rank = local_rank
@@ -66,16 +65,19 @@ class Worker:
             self.init_gpu_memory = 0
 
         # Initialize the distributed environment.
-        maybe_init_distributed_environment_and_model_parallel(self.fastvideo_args.tp_size, self.fastvideo_args.sp_size,
-                                                              self.distributed_init_method)
+        maybe_init_distributed_environment_and_model_parallel(
+            self.fastvideo_args.tp_size, self.fastvideo_args.sp_size, self.distributed_init_method
+        )
 
         self.pipeline = build_pipeline(self.fastvideo_args)
 
     def execute_forward(self, forward_batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         output_batch = self.pipeline.forward(forward_batch, self.fastvideo_args)
-        needs_output = forward_batch.return_frames or (forward_batch.save_video
-                                                       and fastvideo_args.output_type != "latent"
-                                                       and not output_batch.extra.get("audio_only"))
+        needs_output = forward_batch.return_frames or (
+            forward_batch.save_video
+            and fastvideo_args.output_type != "latent"
+            and not output_batch.extra.get("audio_only")
+        )
         if output_batch.output is not None and not needs_output:
             # Drop the decoded tensor before multiprocessing or Ray transports
             # the worker result back to the generator.
@@ -86,7 +88,7 @@ class Worker:
         """Gracefully shut down the worker process"""
         logger.info("Worker %d shutting down...", self.rank, local_main_process_only=False)
         # Clean up resources
-        if hasattr(self, 'pipeline') and self.pipeline is not None:
+        if hasattr(self, "pipeline") and self.pipeline is not None:
             # Clean up pipeline resources if needed
             pass
 
@@ -96,11 +98,9 @@ class Worker:
         logger.info("Worker %d shutdown complete", self.rank, local_main_process_only=False)
         return {"status": "shutdown_complete"}
 
-    def set_lora_adapter(self,
-                         lora_nickname: str,
-                         lora_path: str | None = None,
-                         strength: float = 1.0,
-                         accumulate: bool = False) -> dict[str, Any]:
+    def set_lora_adapter(
+        self, lora_nickname: str, lora_path: str | None = None, strength: float = 1.0, accumulate: bool = False
+    ) -> dict[str, Any]:
         if isinstance(self.pipeline, LoRAPipeline):
             self.pipeline.set_lora_adapter(lora_nickname, lora_path, strength=strength, accumulate=accumulate)
             logger.info("Worker %d set LoRA adapter %s with path %s", self.rank, lora_nickname, lora_path)

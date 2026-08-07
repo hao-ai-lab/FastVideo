@@ -13,6 +13,7 @@ import torch
 
 class AttentionBackend(ABC):
     """Abstract class for attention backends."""
+
     # For some attention backends, we allocate an output tensor before
     # calling the custom op. When piecewise cudagraph is enabled, this
     # makes sure the output tensor is allocated inside the cudagraph.
@@ -51,6 +52,7 @@ class AttentionBackend(ABC):
 @dataclass
 class AttentionMetadata:
     """Attention metadata for prefill and decode batched together."""
+
     # Current step of diffusion process
     current_timestep: int
     VSA_sparsity: float = field(default=0.0, kw_only=True)
@@ -93,7 +95,6 @@ class AttentionMetadataBuilder(ABC, Generic[T]):
 
 
 class AttentionLayer(Protocol):
-
     _k_scale: torch.Tensor
     _v_scale: torch.Tensor
     _k_scale_float: float
@@ -106,12 +107,10 @@ class AttentionLayer(Protocol):
         value: torch.Tensor,
         kv_cache: torch.Tensor,
         attn_metadata: AttentionMetadata,
-    ) -> torch.Tensor:
-        ...
+    ) -> torch.Tensor: ...
 
 
 class AttentionImpl(ABC, Generic[T]):
-
     @abstractmethod
     def __init__(
         self,
@@ -133,11 +132,11 @@ class AttentionImpl(ABC, Generic[T]):
         like reshaping, tiling, scaling, or other transformations.
 
         Called AFTER all_to_all for distributed attention
-        
+
         Args:
             qkv: The query-key-value tensor
             attn_metadata: Metadata for the attention operation
-            
+
         Returns:
             Processed QKV tensor
         """

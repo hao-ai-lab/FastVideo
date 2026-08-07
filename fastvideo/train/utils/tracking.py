@@ -34,14 +34,14 @@ def build_tracker(
     if world_group.rank != 0:
         trackers = []
 
-    tracker_log_dir = (checkpoint_config.output_dir or os.getcwd())
+    tracker_log_dir = checkpoint_config.output_dir or os.getcwd()
     if trackers:
         tracker_log_dir = os.path.join(tracker_log_dir, "tracker")
 
     tracker_config_dict = config if trackers else None
     tracker_entity = tracker_config.entity or None
     tracker_run_name = tracker_config.run_name or None
-    project = (tracker_config.project_name or "fastvideo")
+    project = tracker_config.project_name or "fastvideo"
 
     return initialize_trackers(
         trackers,

@@ -12,6 +12,7 @@ class MetricResult:
     ``score`` is ``None`` when the metric was skipped (e.g. missing
     required input).  Check ``details["skipped"]`` for the reason.
     """
+
     name: str
     score: float | None
     details: dict[str, Any] = field(default_factory=dict)

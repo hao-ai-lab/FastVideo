@@ -22,19 +22,24 @@ from tqdm.auto import tqdm
 import fastvideo.envs as envs
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.dataset.validation_dataset import ValidationDataset
-from fastvideo.distributed import (cleanup_dist_env_and_memory, get_local_torch_device, get_sp_group, get_world_group)
+from fastvideo.distributed import cleanup_dist_env_and_memory, get_local_torch_device, get_sp_group, get_world_group
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
-from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (FlowMatchEulerDiscreteScheduler)
+from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler
 from fastvideo.models.utils import pred_noise_to_pred_video
-from fastvideo.pipelines import (ComposedPipelineBase, ForwardBatch, TrainingBatch)
-from fastvideo.training.activation_checkpoint import (apply_activation_checkpointing)
+from fastvideo.pipelines import ComposedPipelineBase, ForwardBatch, TrainingBatch
+from fastvideo.training.activation_checkpoint import apply_activation_checkpointing
 from fastvideo.training.training_pipeline import TrainingPipeline
-from fastvideo.training.training_utils import (EMA_FSDP, clip_grad_norm_while_handling_failing_dtensor_cases,
-                                               get_scheduler, load_distillation_checkpoint,
-                                               save_distillation_checkpoint, shift_timestep)
-from fastvideo.utils import (is_vsa_available, maybe_download_model, set_random_seed, verify_model_config_and_directory)
+from fastvideo.training.training_utils import (
+    EMA_FSDP,
+    clip_grad_norm_while_handling_failing_dtensor_cases,
+    get_scheduler,
+    load_distillation_checkpoint,
+    save_distillation_checkpoint,
+    shift_timestep,
+)
+from fastvideo.utils import is_vsa_available, maybe_download_model, set_random_seed, verify_model_config_and_directory
 
 try:
     vsa_available = is_vsa_available()
@@ -49,6 +54,7 @@ class DistillationPipeline(TrainingPipeline):
     A distillation pipeline for training a 3 step model.
     Inherits from TrainingPipeline to reuse training infrastructure.
     """
+
     _required_config_modules = [
         "scheduler",
         "transformer",
@@ -97,12 +103,14 @@ class DistillationPipeline(TrainingPipeline):
             logger.info("Loading real score transformer from: %s", training_args.real_score_model_path)
             training_args.override_transformer_cls_name = "WanTransformer3DModel"
             # TODO(will): can use deepcopy instead if the model is the same
-            self.real_score_transformer = self.load_module_from_path(training_args.real_score_model_path, "transformer",
-                                                                     training_args)
+            self.real_score_transformer = self.load_module_from_path(
+                training_args.real_score_model_path, "transformer", training_args
+            )
             modules["real_score_transformer"] = self.real_score_transformer
             try:
-                self.real_score_transformer_2 = self.load_module_from_path(training_args.real_score_model_path,
-                                                                           "transformer_2", training_args)
+                self.real_score_transformer_2 = self.load_module_from_path(
+                    training_args.real_score_model_path, "transformer_2", training_args
+                )
                 logger.info("Loaded real score transformer_2 for MoE support")
                 modules["real_score_transformer_2"] = self.real_score_transformer_2
             except Exception:
@@ -114,12 +122,14 @@ class DistillationPipeline(TrainingPipeline):
         if training_args.fake_score_model_path:
             logger.info("Loading fake score transformer from: %s", training_args.fake_score_model_path)
             training_args.override_transformer_cls_name = "WanTransformer3DModel"
-            self.fake_score_transformer = self.load_module_from_path(training_args.fake_score_model_path, "transformer",
-                                                                     training_args)
+            self.fake_score_transformer = self.load_module_from_path(
+                training_args.fake_score_model_path, "transformer", training_args
+            )
             modules["fake_score_transformer"] = self.fake_score_transformer
             try:
-                self.fake_score_transformer_2 = self.load_module_from_path(training_args.fake_score_model_path,
-                                                                           "transformer_2", training_args)
+                self.fake_score_transformer_2 = self.load_module_from_path(
+                    training_args.fake_score_model_path, "transformer_2", training_args
+                )
                 logger.info("Loaded fake score transformer_2 for MoE support")
                 modules["fake_score_transformer_2"] = self.fake_score_transformer_2
             except Exception:
@@ -157,16 +167,20 @@ class DistillationPipeline(TrainingPipeline):
 
         if training_args.enable_gradient_checkpointing_type is not None:
             self.fake_score_transformer = apply_activation_checkpointing(
-                self.fake_score_transformer, checkpointing_type=training_args.enable_gradient_checkpointing_type)
+                self.fake_score_transformer, checkpointing_type=training_args.enable_gradient_checkpointing_type
+            )
             if self.fake_score_transformer_2 is not None:
                 self.fake_score_transformer_2 = apply_activation_checkpointing(
-                    self.fake_score_transformer_2, checkpointing_type=training_args.enable_gradient_checkpointing_type)
+                    self.fake_score_transformer_2, checkpointing_type=training_args.enable_gradient_checkpointing_type
+                )
 
             self.real_score_transformer = apply_activation_checkpointing(
-                self.real_score_transformer, checkpointing_type=training_args.enable_gradient_checkpointing_type)
+                self.real_score_transformer, checkpointing_type=training_args.enable_gradient_checkpointing_type
+            )
             if self.real_score_transformer_2 is not None:
                 self.real_score_transformer_2 = apply_activation_checkpointing(
-                    self.real_score_transformer_2, checkpointing_type=training_args.enable_gradient_checkpointing_type)
+                    self.real_score_transformer_2, checkpointing_type=training_args.enable_gradient_checkpointing_type
+                )
 
         # Initialize optimizers
         fake_score_params = list(filter(lambda p: p.requires_grad, self.fake_score_transformer.parameters()))
@@ -221,12 +235,13 @@ class DistillationPipeline(TrainingPipeline):
         logger.info("Distillation optimizers initialized: generator and fake_score")
 
         self.generator_update_interval = self.training_args.generator_update_interval
-        logger.info("Distillation pipeline initialized with generator_update_interval=%s",
-                    self.generator_update_interval)
+        logger.info(
+            "Distillation pipeline initialized with generator_update_interval=%s", self.generator_update_interval
+        )
 
-        self.denoising_step_list = torch.tensor(self.training_args.pipeline_config.dmd_denoising_steps,
-                                                dtype=torch.long,
-                                                device=get_local_torch_device())
+        self.denoising_step_list = torch.tensor(
+            self.training_args.pipeline_config.dmd_denoising_steps, dtype=torch.long, device=get_local_torch_device()
+        )
 
         if training_args.warp_denoising_step:  # Warp the denoising step according to the scheduler time shift
             timesteps = torch.cat((self.noise_scheduler.timesteps.cpu(), torch.tensor([0], dtype=torch.float32))).cuda()
@@ -234,8 +249,11 @@ class DistillationPipeline(TrainingPipeline):
             logger.info("Warping denoising_step_list")
 
         self.denoising_step_list = self.denoising_step_list.to(get_local_torch_device())
-        logger.info("Distillation generator model to %s denoising steps: %s", len(self.denoising_step_list),
-                    self.denoising_step_list)
+        logger.info(
+            "Distillation generator model to %s denoising steps: %s",
+            len(self.denoising_step_list),
+            self.denoising_step_list,
+        )
         self.num_train_timestep = self.noise_scheduler.num_train_timesteps
 
         self.min_timestep = int(self.training_args.min_timestep_ratio * self.num_train_timestep)
@@ -253,20 +271,22 @@ class DistillationPipeline(TrainingPipeline):
             # Defer construction to the lazy block in the train loop, which builds the EMA AT
             # ema_start_step from the already-trained weights. Eager-constructing here would anchor
             # the shadow to the cold init and leave it base-contaminated (blurry) on short runs.
-            logger.info("Generator EMA deferred: built lazily at ema_start_step=%s from trained weights",
-                        self.training_args.ema_start_step)
+            logger.info(
+                "Generator EMA deferred: built lazily at ema_start_step=%s from trained weights",
+                self.training_args.ema_start_step,
+            )
         else:
             logger.info("Generator EMA disabled (ema_decay <= 0.0)")
 
     def load_module_from_path(self, model_path: str, module_type: str, training_args: "TrainingArgs"):
         """
         Load a module from a specific path using the same loading logic as the pipeline.
-        
+
         Args:
             model_path: Path to the model
             module_type: Type of module to load (e.g., "transformer")
             training_args: Training arguments
-            
+
         Returns:
             The loaded module
         """
@@ -275,7 +295,7 @@ class DistillationPipeline(TrainingPipeline):
         training_args._loading_teacher_critic_model = True
 
         try:
-            from fastvideo.models.loader.component_loader import (PipelineComponentLoader)
+            from fastvideo.models.loader.component_loader import PipelineComponentLoader
 
             # Download the model if it's a Hugging Face model ID
             local_model_path = maybe_download_model(model_path)
@@ -283,7 +303,7 @@ class DistillationPipeline(TrainingPipeline):
             config = verify_model_config_and_directory(local_model_path)
 
             if module_type not in config:
-                if hasattr(self, '_extra_config_module_map') and module_type in self._extra_config_module_map:
+                if hasattr(self, "_extra_config_module_map") and module_type in self._extra_config_module_map:
                     extra_module = self._extra_config_module_map[module_type]
                     if extra_module in config:
                         module_type = extra_module
@@ -310,8 +330,8 @@ class DistillationPipeline(TrainingPipeline):
             return module
         finally:
             # Always clean up the flag
-            if hasattr(training_args, '_loading_teacher_critic_model'):
-                delattr(training_args, '_loading_teacher_critic_model')
+            if hasattr(training_args, "_loading_teacher_critic_model"):
+                delattr(training_args, "_loading_teacher_critic_model")
 
     @abstractmethod
     def initialize_validation_pipeline(self, training_args: TrainingArgs):
@@ -331,8 +351,8 @@ class DistillationPipeline(TrainingPipeline):
     def is_ema_ready(self, current_step: int | None = None):
         """Check if EMA is ready for use (after ema_start_step)."""
         if current_step is None:
-            current_step = getattr(self, 'current_trainstep', 0)
-        return (self.generator_ema is not None and current_step >= self.training_args.ema_start_step)
+            current_step = getattr(self, "current_trainstep", 0)
+        return self.generator_ema is not None and current_step >= self.training_args.ema_start_step
 
     def save_ema_weights(self, output_dir: str, step: int):
         """Save EMA weights separately for inference purposes."""
@@ -353,7 +373,8 @@ class DistillationPipeline(TrainingPipeline):
                 # save as diffusers format
                 from safetensors.torch import save_file
 
-                from fastvideo.training.training_utils import (custom_to_hf_state_dict, gather_state_dict_on_cpu_rank0)
+                from fastvideo.training.training_utils import custom_to_hf_state_dict, gather_state_dict_on_cpu_rank0
+
                 # Swap EMA weights into the live FSDP module in place (no deepcopy) and gather the
                 # full state dict within the context; weights are restored on exit.
                 with self.generator_ema.apply_to_model(self.transformer):
@@ -361,8 +382,9 @@ class DistillationPipeline(TrainingPipeline):
 
                 if self.global_rank == 0:
                     weight_path = os.path.join(ema_save_dir, "diffusion_pytorch_model.safetensors")
-                    diffusers_state_dict = custom_to_hf_state_dict(cpu_state,
-                                                                   self.transformer.reverse_param_names_mapping)
+                    diffusers_state_dict = custom_to_hf_state_dict(
+                        cpu_state, self.transformer.reverse_param_names_mapping
+                    )
                     save_file(diffusers_state_dict, weight_path)
 
                     # deepcopy so deleting "dtype" doesn't mutate the live model's hf_config
@@ -383,14 +405,16 @@ class DistillationPipeline(TrainingPipeline):
                 # save as diffusers format
                 from safetensors.torch import save_file
 
-                from fastvideo.training.training_utils import (custom_to_hf_state_dict, gather_state_dict_on_cpu_rank0)
+                from fastvideo.training.training_utils import custom_to_hf_state_dict, gather_state_dict_on_cpu_rank0
+
                 with self.generator_ema_2.apply_to_model(self.transformer_2):
                     cpu_state_2 = gather_state_dict_on_cpu_rank0(self.transformer_2, device=None)
 
                 if self.global_rank == 0:
                     weight_path_2 = os.path.join(ema_2_save_dir, "diffusion_pytorch_model.safetensors")
-                    diffusers_state_dict_2 = custom_to_hf_state_dict(cpu_state_2,
-                                                                     self.transformer_2.reverse_param_names_mapping)
+                    diffusers_state_dict_2 = custom_to_hf_state_dict(
+                        cpu_state_2, self.transformer_2.reverse_param_names_mapping
+                    )
                     save_file(diffusers_state_dict_2, weight_path_2)
 
                     # deepcopy so deleting "dtype" doesn't mutate the live model's hf_config
@@ -483,9 +507,13 @@ class DistillationPipeline(TrainingPipeline):
             self.train_fake_score_transformer_2 = False
             return self.fake_score_transformer
 
-    def _build_distill_input_kwargs(self, noise_input: torch.Tensor, timestep: torch.Tensor,
-                                    text_dict: dict[str, torch.Tensor] | None,
-                                    training_batch: TrainingBatch) -> TrainingBatch:
+    def _build_distill_input_kwargs(
+        self,
+        noise_input: torch.Tensor,
+        timestep: torch.Tensor,
+        text_dict: dict[str, torch.Tensor] | None,
+        training_batch: TrainingBatch,
+    ) -> TrainingBatch:
         if text_dict is None:
             raise ValueError("text_dict cannot be None for distillation pipeline")
 
@@ -500,7 +528,6 @@ class DistillationPipeline(TrainingPipeline):
         return training_batch
 
     def _generator_forward(self, training_batch: TrainingBatch) -> torch.Tensor:
-
         latents = training_batch.latents
         dtype = latents.dtype
         index = torch.randint(0, len(self.denoising_step_list), [1], device=self.device, dtype=torch.long)
@@ -508,17 +535,21 @@ class DistillationPipeline(TrainingPipeline):
         training_batch.dmd_latent_vis_dict["generator_timestep"] = timestep
 
         noise = torch.randn(self.video_latent_shape, device=self.device, dtype=dtype)
-        noisy_latent = self.noise_scheduler.add_noise(latents.flatten(0, 1), noise.flatten(0, 1),
-                                                      timestep).unflatten(0, (1, latents.shape[1]))
+        noisy_latent = self.noise_scheduler.add_noise(latents.flatten(0, 1), noise.flatten(0, 1), timestep).unflatten(
+            0, (1, latents.shape[1])
+        )
 
-        training_batch = self._build_distill_input_kwargs(noisy_latent, timestep, training_batch.conditional_dict,
-                                                          training_batch)
+        training_batch = self._build_distill_input_kwargs(
+            noisy_latent, timestep, training_batch.conditional_dict, training_batch
+        )
 
         pred_noise = self.transformer(**training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
-        pred_video = pred_noise_to_pred_video(pred_noise=pred_noise.flatten(0, 1),
-                                              noise_input_latent=noisy_latent.flatten(0, 1),
-                                              timestep=timestep,
-                                              scheduler=self.noise_scheduler).unflatten(0, pred_noise.shape[:2])
+        pred_video = pred_noise_to_pred_video(
+            pred_noise=pred_noise.flatten(0, 1),
+            noise_input_latent=noisy_latent.flatten(0, 1),
+            timestep=timestep,
+            scheduler=self.noise_scheduler,
+        ).unflatten(0, pred_noise.shape[:2])
 
         return pred_video
 
@@ -548,23 +579,24 @@ class DistillationPipeline(TrainingPipeline):
                     current_timestep = self.denoising_step_list[step_idx]
                     current_timestep_tensor = current_timestep * torch.ones(1, device=self.device, dtype=torch.long)
                     # Run student model to get flow prediction
-                    training_batch_temp = self._build_distill_input_kwargs(current_noise_latents,
-                                                                           current_timestep_tensor,
-                                                                           training_batch.conditional_dict,
-                                                                           training_batch)
+                    training_batch_temp = self._build_distill_input_kwargs(
+                        current_noise_latents, current_timestep_tensor, training_batch.conditional_dict, training_batch
+                    )
                     pred_flow = self.transformer(**training_batch_temp.input_kwargs).permute(0, 2, 1, 3, 4)
-                    pred_clean = pred_noise_to_pred_video(pred_noise=pred_flow.flatten(0, 1),
-                                                          noise_input_latent=current_noise_latents.flatten(0, 1),
-                                                          timestep=current_timestep_tensor,
-                                                          scheduler=self.noise_scheduler).unflatten(
-                                                              0, pred_flow.shape[:2])
+                    pred_clean = pred_noise_to_pred_video(
+                        pred_noise=pred_flow.flatten(0, 1),
+                        noise_input_latent=current_noise_latents.flatten(0, 1),
+                        timestep=current_timestep_tensor,
+                        scheduler=self.noise_scheduler,
+                    ).unflatten(0, pred_flow.shape[:2])
 
                     # Add noise for the next timestep
                     next_timestep = self.denoising_step_list[step_idx + 1]
                     next_timestep_tensor = next_timestep * torch.ones(1, device=self.device, dtype=torch.long)
                     noise = torch.randn(self.video_latent_shape, device=self.device, dtype=pred_clean.dtype)
-                    current_noise_latents = self.noise_scheduler.add_noise(pred_clean.flatten(0, 1), noise.flatten(
-                        0, 1), next_timestep_tensor).unflatten(0, pred_clean.shape[:2])
+                    current_noise_latents = self.noise_scheduler.add_noise(
+                        pred_clean.flatten(0, 1), noise.flatten(0, 1), next_timestep_tensor
+                    ).unflatten(0, pred_clean.shape[:2])
                     latent_copy = current_noise_latents.clone()
                     noise_latents.append(latent_copy)
 
@@ -578,13 +610,16 @@ class DistillationPipeline(TrainingPipeline):
             noisy_input = current_noise_latents_copy
 
         # Step 4: Final student prediction (this is what we train on)
-        training_batch = self._build_distill_input_kwargs(noisy_input, target_timestep, training_batch.conditional_dict,
-                                                          training_batch)
+        training_batch = self._build_distill_input_kwargs(
+            noisy_input, target_timestep, training_batch.conditional_dict, training_batch
+        )
         pred_noise = self.transformer(**training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
-        pred_video = pred_noise_to_pred_video(pred_noise=pred_noise.flatten(0, 1),
-                                              noise_input_latent=noisy_input.flatten(0, 1),
-                                              timestep=target_timestep,
-                                              scheduler=self.noise_scheduler).unflatten(0, pred_noise.shape[:2])
+        pred_video = pred_noise_to_pred_video(
+            pred_noise=pred_noise.flatten(0, 1),
+            noise_input_latent=noisy_input.flatten(0, 1),
+            timestep=target_timestep,
+            scheduler=self.noise_scheduler,
+        ).unflatten(0, pred_noise.shape[:2])
         training_batch.dmd_latent_vis_dict["generator_timestep"] = target_timestep.float().detach()
         return pred_video
 
@@ -597,80 +632,99 @@ class DistillationPipeline(TrainingPipeline):
             timestep = shift_timestep(
                 timestep,
                 self.timestep_shift,  # type: ignore
-                self.num_train_timestep)
+                self.num_train_timestep,
+            )
 
             timestep = timestep.clamp(self.min_timestep, self.max_timestep)
 
             noise = torch.randn(self.video_latent_shape, device=self.device, dtype=generator_pred_video.dtype)
 
-            noisy_latent = self.noise_scheduler.add_noise(generator_pred_video.flatten(0, 1), noise.flatten(0, 1),
-                                                          timestep).detach().unflatten(
-                                                              0, (1, generator_pred_video.shape[1]))
+            noisy_latent = (
+                self.noise_scheduler.add_noise(generator_pred_video.flatten(0, 1), noise.flatten(0, 1), timestep)
+                .detach()
+                .unflatten(0, (1, generator_pred_video.shape[1]))
+            )
 
             # fake_score_transformer forward
-            training_batch = self._build_distill_input_kwargs(noisy_latent, timestep, training_batch.conditional_dict,
-                                                              training_batch)
+            training_batch = self._build_distill_input_kwargs(
+                noisy_latent, timestep, training_batch.conditional_dict, training_batch
+            )
             current_fake_score_transformer = self._get_fake_score_transformer(timestep)
             fake_score_pred_noise = current_fake_score_transformer(**training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
 
-            faker_score_pred_video = pred_noise_to_pred_video(pred_noise=fake_score_pred_noise.flatten(0, 1),
-                                                              noise_input_latent=noisy_latent.flatten(0, 1),
-                                                              timestep=timestep,
-                                                              scheduler=self.noise_scheduler).unflatten(
-                                                                  0, fake_score_pred_noise.shape[:2])
+            faker_score_pred_video = pred_noise_to_pred_video(
+                pred_noise=fake_score_pred_noise.flatten(0, 1),
+                noise_input_latent=noisy_latent.flatten(0, 1),
+                timestep=timestep,
+                scheduler=self.noise_scheduler,
+            ).unflatten(0, fake_score_pred_noise.shape[:2])
 
             # real_score_transformer cond forward
-            training_batch = self._build_distill_input_kwargs(noisy_latent, timestep, training_batch.conditional_dict,
-                                                              training_batch)
+            training_batch = self._build_distill_input_kwargs(
+                noisy_latent, timestep, training_batch.conditional_dict, training_batch
+            )
             current_real_score_transformer = self._get_real_score_transformer(timestep)
             real_score_pred_noise_cond = current_real_score_transformer(**training_batch.input_kwargs).permute(
-                0, 2, 1, 3, 4)
+                0, 2, 1, 3, 4
+            )
 
-            pred_real_video_cond = pred_noise_to_pred_video(pred_noise=real_score_pred_noise_cond.flatten(0, 1),
-                                                            noise_input_latent=noisy_latent.flatten(0, 1),
-                                                            timestep=timestep,
-                                                            scheduler=self.noise_scheduler).unflatten(
-                                                                0, real_score_pred_noise_cond.shape[:2])
+            pred_real_video_cond = pred_noise_to_pred_video(
+                pred_noise=real_score_pred_noise_cond.flatten(0, 1),
+                noise_input_latent=noisy_latent.flatten(0, 1),
+                timestep=timestep,
+                scheduler=self.noise_scheduler,
+            ).unflatten(0, real_score_pred_noise_cond.shape[:2])
 
             # real_score_transformer uncond forward
-            training_batch = self._build_distill_input_kwargs(noisy_latent, timestep, training_batch.unconditional_dict,
-                                                              training_batch)
+            training_batch = self._build_distill_input_kwargs(
+                noisy_latent, timestep, training_batch.unconditional_dict, training_batch
+            )
             # Use same transformer as conditional forward for consistency
             real_score_pred_noise_uncond = current_real_score_transformer(**training_batch.input_kwargs).permute(
-                0, 2, 1, 3, 4)
+                0, 2, 1, 3, 4
+            )
 
-            pred_real_video_uncond = pred_noise_to_pred_video(pred_noise=real_score_pred_noise_uncond.flatten(0, 1),
-                                                              noise_input_latent=noisy_latent.flatten(0, 1),
-                                                              timestep=timestep,
-                                                              scheduler=self.noise_scheduler).unflatten(
-                                                                  0, real_score_pred_noise_uncond.shape[:2])
+            pred_real_video_uncond = pred_noise_to_pred_video(
+                pred_noise=real_score_pred_noise_uncond.flatten(0, 1),
+                noise_input_latent=noisy_latent.flatten(0, 1),
+                timestep=timestep,
+                scheduler=self.noise_scheduler,
+            ).unflatten(0, real_score_pred_noise_uncond.shape[:2])
 
             # CFG on the real-score teacher. Uses the DMD2 parameterization
             # x_cond + w * (x_cond - x_uncond), which is offset by 1 from the
             # Ho & Salimans form x_uncond + w * (x_cond - x_uncond):
             # w=0 -> cond, w=-1 -> uncond, w_standard = w + 1.
-            real_score_pred_video = pred_real_video_cond + (pred_real_video_cond -
-                                                            pred_real_video_uncond) * self.real_score_guidance_scale
+            real_score_pred_video = (
+                pred_real_video_cond + (pred_real_video_cond - pred_real_video_uncond) * self.real_score_guidance_scale
+            )
 
-            grad = (faker_score_pred_video - real_score_pred_video) / torch.abs(original_latent -
-                                                                                real_score_pred_video).mean()
+            grad = (faker_score_pred_video - real_score_pred_video) / torch.abs(
+                original_latent - real_score_pred_video
+            ).mean()
             grad = torch.nan_to_num(grad)
 
         dmd_loss = 0.5 * F.mse_loss(original_latent.float(), (original_latent.float() - grad.float()).detach())
 
-        training_batch.dmd_latent_vis_dict.update({
-            "training_batch_dmd_fwd_clean_latent": training_batch.latents,
-            "generator_pred_video": original_latent.detach(),
-            "real_score_pred_video": real_score_pred_video.detach(),
-            "faker_score_pred_video": faker_score_pred_video.detach(),
-            "dmd_timestep": timestep.detach(),
-        })
+        training_batch.dmd_latent_vis_dict.update(
+            {
+                "training_batch_dmd_fwd_clean_latent": training_batch.latents,
+                "generator_pred_video": original_latent.detach(),
+                "real_score_pred_video": real_score_pred_video.detach(),
+                "faker_score_pred_video": faker_score_pred_video.detach(),
+                "dmd_timestep": timestep.detach(),
+            }
+        )
 
         return dmd_loss
 
     def faker_score_forward(self, training_batch: TrainingBatch) -> tuple[TrainingBatch, torch.Tensor]:
-        with torch.no_grad(), set_forward_context(current_timestep=training_batch.timesteps,
-                                                  attn_metadata=training_batch.attn_metadata_vsa):
+        with (
+            torch.no_grad(),
+            set_forward_context(
+                current_timestep=training_batch.timesteps, attn_metadata=training_batch.attn_metadata_vsa
+            ),
+        ):
             if self.training_args.simulate_generator_forward:
                 generator_pred_video = self._generator_multi_step_simulation_forward(training_batch)
             else:
@@ -681,26 +735,27 @@ class DistillationPipeline(TrainingPipeline):
         fake_score_timestep = shift_timestep(
             fake_score_timestep,
             self.timestep_shift,  # type: ignore
-            self.num_train_timestep)
+            self.num_train_timestep,
+        )
 
         fake_score_timestep = fake_score_timestep.clamp(self.min_timestep, self.max_timestep)
 
         fake_score_noise = torch.randn(self.video_latent_shape, device=self.device, dtype=generator_pred_video.dtype)
 
-        noisy_generator_pred_video = self.noise_scheduler.add_noise(generator_pred_video.flatten(0, 1),
-                                                                    fake_score_noise.flatten(0, 1),
-                                                                    fake_score_timestep).unflatten(
-                                                                        0, (1, generator_pred_video.shape[1]))
+        noisy_generator_pred_video = self.noise_scheduler.add_noise(
+            generator_pred_video.flatten(0, 1), fake_score_noise.flatten(0, 1), fake_score_timestep
+        ).unflatten(0, (1, generator_pred_video.shape[1]))
 
         with set_forward_context(current_timestep=training_batch.timesteps, attn_metadata=training_batch.attn_metadata):
-            training_batch = self._build_distill_input_kwargs(noisy_generator_pred_video, fake_score_timestep,
-                                                              training_batch.conditional_dict, training_batch)
+            training_batch = self._build_distill_input_kwargs(
+                noisy_generator_pred_video, fake_score_timestep, training_batch.conditional_dict, training_batch
+            )
 
             current_fake_score_transformer = self._get_fake_score_transformer(fake_score_timestep)
             fake_score_pred_noise = current_fake_score_transformer(**training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
 
         target = fake_score_noise - generator_pred_video
-        flow_matching_loss = torch.mean((fake_score_pred_noise - target)**2)
+        flow_matching_loss = torch.mean((fake_score_pred_noise - target) ** 2)
 
         training_batch.fake_score_latent_vis_dict = {
             "training_batch_fakerscore_fwd_clean_latent": training_batch.latents,
@@ -711,7 +766,6 @@ class DistillationPipeline(TrainingPipeline):
         return training_batch, flow_matching_loss
 
     def _clip_model_grad_norm_(self, training_batch: TrainingBatch, transformer) -> TrainingBatch:
-
         max_grad_norm = self.training_args.max_grad_norm
 
         if max_grad_norm is not None:
@@ -722,7 +776,7 @@ class DistillationPipeline(TrainingPipeline):
                 foreach=None,
             )
             if grad_norm is not None:
-                assert torch.isfinite(grad_norm), (f"grad_norm is not finite: {grad_norm}")
+                assert torch.isfinite(grad_norm), f"grad_norm is not finite: {grad_norm}"
                 grad_norm = grad_norm.item()
             else:
                 grad_norm = 0.0
@@ -769,9 +823,9 @@ class DistillationPipeline(TrainingPipeline):
             device = get_local_torch_device()
             dtype = torch.bfloat16
 
-            encoder_hidden_states = batch['text_embedding']
-            encoder_attention_mask = batch['text_attention_mask']
-            infos = batch['info_list']
+            encoder_hidden_states = batch["text_embedding"]
+            encoder_attention_mask = batch["text_attention_mask"]
+            infos = batch["info_list"]
 
             if self.training_args.simulate_generator_forward:
                 batch_size = encoder_hidden_states.shape[0]
@@ -792,10 +846,10 @@ class DistillationPipeline(TrainingPipeline):
                     dtype=dtype,
                 )
             else:
-                if 'vae_latent' not in batch:
+                if "vae_latent" not in batch:
                     raise ValueError("vae_latent not found in batch and simulate_generator_forward is False")
-                latents = batch['vae_latent']
-                latents = latents[:, :, :self.training_args.num_latent_t]
+                latents = batch["vae_latent"]
+                latents = latents[:, :, : self.training_args.num_latent_t]
                 latents = latents.to(device, dtype=dtype)
 
             training_batch.latents = latents
@@ -805,7 +859,7 @@ class DistillationPipeline(TrainingPipeline):
         return training_batch
 
     def train_one_step(self, training_batch: TrainingBatch) -> TrainingBatch:
-        gradient_accumulation_steps = getattr(self.training_args, 'gradient_accumulation_steps', 1)
+        gradient_accumulation_steps = getattr(self.training_args, "gradient_accumulation_steps", 1)
         batches = []
         # Collect N batches for gradient accumulation
         for _ in range(gradient_accumulation_steps):
@@ -822,12 +876,13 @@ class DistillationPipeline(TrainingPipeline):
         total_dmd_loss = 0.0
         dmd_latent_vis_dict = {}
         fake_score_latent_vis_dict = {}
-        if (self.current_trainstep % self.generator_update_interval == 0):
+        if self.current_trainstep % self.generator_update_interval == 0:
             for batch in batches:
                 batch_gen = self._clone_training_batch(batch)
 
-                with set_forward_context(current_timestep=batch_gen.timesteps,
-                                         attn_metadata=batch_gen.attn_metadata_vsa):
+                with set_forward_context(
+                    current_timestep=batch_gen.timesteps, attn_metadata=batch_gen.attn_metadata_vsa
+                ):
                     if self.training_args.simulate_generator_forward:
                         generator_pred_video = self._generator_multi_step_simulation_forward(batch_gen)
                     else:
@@ -836,8 +891,9 @@ class DistillationPipeline(TrainingPipeline):
                 with set_forward_context(current_timestep=batch_gen.timesteps, attn_metadata=batch_gen.attn_metadata):
                     dmd_loss = self._dmd_forward(generator_pred_video=generator_pred_video, training_batch=batch_gen)
 
-                with set_forward_context(current_timestep=batch_gen.timesteps,
-                                         attn_metadata=batch_gen.attn_metadata_vsa):
+                with set_forward_context(
+                    current_timestep=batch_gen.timesteps, attn_metadata=batch_gen.attn_metadata_vsa
+                ):
                     (dmd_loss / gradient_accumulation_steps).backward()
                 total_dmd_loss += dmd_loss.detach().item()
 
@@ -920,13 +976,17 @@ class DistillationPipeline(TrainingPipeline):
 
         ema_shard_dir = os.path.join(self.training_args.resume_from_checkpoint, "ema_local_shard")
 
-        if (self.generator_ema is None
-                and os.path.exists(os.path.join(ema_shard_dir, f"generator_ema_rank{self.global_rank}.pt"))):
+        if self.generator_ema is None and os.path.exists(
+            os.path.join(ema_shard_dir, f"generator_ema_rank{self.global_rank}.pt")
+        ):
             self.generator_ema = EMA_FSDP(self.transformer, decay=self.training_args.ema_decay)
             logger.info("Pre-built generator EMA for resume from existing shard")
 
-        if (self.transformer_2 is not None and self.generator_ema_2 is None
-                and os.path.exists(os.path.join(ema_shard_dir, f"generator_ema_2_rank{self.global_rank}.pt"))):
+        if (
+            self.transformer_2 is not None
+            and self.generator_ema_2 is None
+            and os.path.exists(os.path.join(ema_shard_dir, f"generator_ema_2_rank{self.global_rank}.pt"))
+        ):
             self.generator_ema_2 = EMA_FSDP(self.transformer_2, decay=self.training_args.ema_decay)
             logger.info("Pre-built generator EMA_2 for resume from existing shard")
 
@@ -950,14 +1010,15 @@ class DistillationPipeline(TrainingPipeline):
             self.noise_random_generator,
             self.generator_ema,
             # MoE support
-            generator_transformer_2=getattr(self, 'transformer_2', None),
-            real_score_transformer_2=getattr(self, 'real_score_transformer_2', None),
-            fake_score_transformer_2=getattr(self, 'fake_score_transformer_2', None),
-            generator_optimizer_2=getattr(self, 'optimizer_2', None),
-            fake_score_optimizer_2=getattr(self, 'fake_score_optimizer_2', None),
-            generator_scheduler_2=getattr(self, 'lr_scheduler_2', None),
-            fake_score_scheduler_2=getattr(self, 'fake_score_lr_scheduler_2', None),
-            generator_ema_2=getattr(self, 'generator_ema_2', None))
+            generator_transformer_2=getattr(self, "transformer_2", None),
+            real_score_transformer_2=getattr(self, "real_score_transformer_2", None),
+            fake_score_transformer_2=getattr(self, "fake_score_transformer_2", None),
+            generator_optimizer_2=getattr(self, "optimizer_2", None),
+            fake_score_optimizer_2=getattr(self, "fake_score_optimizer_2", None),
+            generator_scheduler_2=getattr(self, "lr_scheduler_2", None),
+            fake_score_scheduler_2=getattr(self, "fake_score_lr_scheduler_2", None),
+            generator_ema_2=getattr(self, "generator_ema_2", None),
+        )
 
         if resumed_step > 0:
             self.init_steps = resumed_step
@@ -977,20 +1038,28 @@ class DistillationPipeline(TrainingPipeline):
         assert isinstance(self.training_args, TrainingArgs)
         logger.info("  Max gradient norm: %s", self.training_args.max_grad_norm)
 
-        logger.info("  Real score transformer (high noise expert) parameters: %s B",
-                    sum(p.numel() for p in self.real_score_transformer.parameters()) / 1e9)
+        logger.info(
+            "  Real score transformer (high noise expert) parameters: %s B",
+            sum(p.numel() for p in self.real_score_transformer.parameters()) / 1e9,
+        )
 
         if self.real_score_transformer_2 is not None:
-            logger.info("  Real score transformer_2 (low noise expert) parameters: %s B",
-                        sum(p.numel() for p in self.real_score_transformer_2.parameters()) / 1e9)
+            logger.info(
+                "  Real score transformer_2 (low noise expert) parameters: %s B",
+                sum(p.numel() for p in self.real_score_transformer_2.parameters()) / 1e9,
+            )
             logger.info("  Real score MoE enabled with boundary_timestep: %s", self.boundary_timestep)
 
-        logger.info("  Fake score transformer (high noise expert) parameters: %s B",
-                    sum(p.numel() for p in self.fake_score_transformer.parameters()) / 1e9)
+        logger.info(
+            "  Fake score transformer (high noise expert) parameters: %s B",
+            sum(p.numel() for p in self.fake_score_transformer.parameters()) / 1e9,
+        )
 
         if self.fake_score_transformer_2 is not None:
-            logger.info("  Fake score transformer_2 (low noise expert) parameters: %s B",
-                        sum(p.numel() for p in self.fake_score_transformer_2.parameters()) / 1e9)
+            logger.info(
+                "  Fake score transformer_2 (low noise expert) parameters: %s B",
+                sum(p.numel() for p in self.fake_score_transformer_2.parameters()) / 1e9,
+            )
             logger.info("  Fake score MoE enabled with boundary_timestep: %s", self.boundary_timestep)
 
         if self.generator_ema is not None:
@@ -1024,20 +1093,22 @@ class DistillationPipeline(TrainingPipeline):
         logger.info("Using validation seed: %s", self.seed)
 
         # Prepare validation prompts
-        logger.info('rank: %s: fastvideo_args.validation_dataset_file: %s',
-                    self.global_rank,
-                    training_args.validation_dataset_file,
-                    local_main_process_only=False)
+        logger.info(
+            "rank: %s: fastvideo_args.validation_dataset_file: %s",
+            self.global_rank,
+            training_args.validation_dataset_file,
+            local_main_process_only=False,
+        )
         validation_dataset = ValidationDataset(training_args.validation_dataset_file)
         validation_dataloader = DataLoader(validation_dataset, batch_size=None, num_workers=0)
 
         # Set both transformers to eval mode
         transformer.eval()
-        if hasattr(self, 'transformer_2') and self.transformer_2 is not None:
+        if hasattr(self, "transformer_2") and self.transformer_2 is not None:
             self.transformer_2.eval()
 
         # Optionally use EMA model for validation if available and ready
-        use_ema_for_validation = (self.training_args.use_ema and self.is_ema_ready(global_step))
+        use_ema_for_validation = self.training_args.use_ema and self.is_ema_ready(global_step)
         ema_context = None
         ema_2_context = None
 
@@ -1049,7 +1120,7 @@ class DistillationPipeline(TrainingPipeline):
                 ema_context = self.generator_ema.apply_to_model(validation_transformer)
 
             # Handle transformer_2 EMA if available
-            if hasattr(self, 'transformer_2') and self.transformer_2 is not None and self.generator_ema_2 is not None:
+            if hasattr(self, "transformer_2") and self.transformer_2 is not None and self.generator_ema_2 is not None:
                 ema_2_context = self.generator_ema_2.apply_to_model(self.transformer_2)
                 logger.info("Using EMA_2 model for transformer_2 validation")
         else:
@@ -1064,10 +1135,12 @@ class DistillationPipeline(TrainingPipeline):
         num_sp_groups = world_group.world_size // self.sp_group.world_size
         # Process each validation prompt for each validation step
         for num_inference_steps in validation_steps:
-            logger.info("rank: %s: num_inference_steps: %s",
-                        self.global_rank,
-                        num_inference_steps,
-                        local_main_process_only=False)
+            logger.info(
+                "rank: %s: num_inference_steps: %s",
+                self.global_rank,
+                num_inference_steps,
+                local_main_process_only=False,
+            )
             step_videos: list[np.ndarray] = []
             step_captions: list[str] = []
 
@@ -1088,15 +1161,20 @@ class DistillationPipeline(TrainingPipeline):
                         prompt_attention_mask=[],
                     )
                     result_batch = self.validation_pipeline.prompt_encoding_stage(  # type: ignore
-                        batch_negative, training_args)
-                    self.negative_prompt_embeds, self.negative_prompt_attention_mask = result_batch.prompt_embeds[
-                        0], result_batch.prompt_attention_mask[0]
+                        batch_negative, training_args
+                    )
+                    self.negative_prompt_embeds, self.negative_prompt_attention_mask = (
+                        result_batch.prompt_embeds[0],
+                        result_batch.prompt_attention_mask[0],
+                    )
 
-                    logger.info("rank: %s: rank_in_sp_group: %s, batch.prompt: %s",
-                                self.global_rank,
-                                self.rank_in_sp_group,
-                                batch.prompt,
-                                local_main_process_only=False)
+                    logger.info(
+                        "rank: %s: rank_in_sp_group: %s, batch.prompt: %s",
+                        self.global_rank,
+                        self.rank_in_sp_group,
+                        batch.prompt,
+                        local_main_process_only=False,
+                    )
 
                     assert batch.prompt is not None and isinstance(batch.prompt, str)
                     captions.append(batch.prompt)
@@ -1124,19 +1202,23 @@ class DistillationPipeline(TrainingPipeline):
             # Apply EMA contexts if available (nested context managers)
             if ema_context is not None and ema_2_context is not None:
                 with ema_context, ema_2_context:
-                    (step_videos, step_captions, step_audios,
-                     step_audio_sample_rates) = run_validation_with_ema(num_inference_steps)
+                    (step_videos, step_captions, step_audios, step_audio_sample_rates) = run_validation_with_ema(
+                        num_inference_steps
+                    )
             elif ema_context is not None:
                 with ema_context:
-                    (step_videos, step_captions, step_audios,
-                     step_audio_sample_rates) = run_validation_with_ema(num_inference_steps)
+                    (step_videos, step_captions, step_audios, step_audio_sample_rates) = run_validation_with_ema(
+                        num_inference_steps
+                    )
             elif ema_2_context is not None:
                 with ema_2_context:
-                    (step_videos, step_captions, step_audios,
-                     step_audio_sample_rates) = run_validation_with_ema(num_inference_steps)
+                    (step_videos, step_captions, step_audios, step_audio_sample_rates) = run_validation_with_ema(
+                        num_inference_steps
+                    )
             else:
-                (step_videos, step_captions, step_audios,
-                 step_audio_sample_rates) = run_validation_with_ema(num_inference_steps)
+                (step_videos, step_captions, step_audios, step_audio_sample_rates) = run_validation_with_ema(
+                    num_inference_steps
+                )
 
             # Log validation results for this step
             world_group = get_world_group()
@@ -1166,16 +1248,22 @@ class DistillationPipeline(TrainingPipeline):
 
                     video_filenames = []
                     for i, (video, caption, audio, audio_sample_rate) in enumerate(
-                            zip(all_videos, all_captions, all_audios, all_audio_sample_rates, strict=True)):
+                        zip(all_videos, all_captions, all_audios, all_audio_sample_rates, strict=True)
+                    ):
                         os.makedirs(training_args.output_dir, exist_ok=True)
                         filename = os.path.join(
                             training_args.output_dir,
-                            f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4")
+                            f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4",
+                        )
                         imageio.mimsave(filename, video, fps=sampling_param.fps)
-                        if (audio is not None and audio_sample_rate is not None
-                                and not self._mux_audio(filename, audio, audio_sample_rate)):
-                            logger.warning("Audio mux failed for validation video %s; saved video without audio.",
-                                           filename)
+                        if (
+                            audio is not None
+                            and audio_sample_rate is not None
+                            and not self._mux_audio(filename, audio, audio_sample_rate)
+                        ):
+                            logger.warning(
+                                "Audio mux failed for validation video %s; saved video without audio.", filename
+                            )
                         video_filenames.append(filename)
 
                     artifacts = []
@@ -1195,7 +1283,7 @@ class DistillationPipeline(TrainingPipeline):
 
         # Re-enable gradients for training - set both transformers back to train mode
         transformer.train()
-        if hasattr(self, 'transformer_2') and self.transformer_2 is not None:
+        if hasattr(self, "transformer_2") and self.transformer_2 is not None:
             self.transformer_2.train()
         gc.collect()
         torch.cuda.empty_cache()
@@ -1222,8 +1310,8 @@ class DistillationPipeline(TrainingPipeline):
         tracker_loss_dict: dict[str, Any] = {}
         dmd_latents_vis_dict = training_batch.dmd_latent_vis_dict
         fake_score_latents_vis_dict = training_batch.fake_score_latent_vis_dict
-        fake_score_log_keys = ['generator_pred_video']
-        dmd_log_keys = ['faker_score_pred_video', 'real_score_pred_video']
+        fake_score_log_keys = ["generator_pred_video"]
+        dmd_log_keys = ["faker_score_pred_video", "real_score_pred_video"]
 
         for latent_key in fake_score_log_keys:
             latents = fake_score_latents_vis_dict[latent_key]
@@ -1231,7 +1319,7 @@ class DistillationPipeline(TrainingPipeline):
             latents = _apply_vae_scale(latents)
 
             # Apply shifting if needed
-            if (hasattr(self.vae, "shift_factor") and self.vae.shift_factor is not None):
+            if hasattr(self.vae, "shift_factor") and self.vae.shift_factor is not None:
                 if isinstance(self.vae.shift_factor, torch.Tensor):
                     latents += self.vae.shift_factor.to(latents.device, latents.dtype)
                 else:
@@ -1249,7 +1337,7 @@ class DistillationPipeline(TrainingPipeline):
                 del video, latents
 
         # Process DMD training data if available - use decode_stage instead of self.vae.decode
-        if 'generator_pred_video' in dmd_latents_vis_dict:
+        if "generator_pred_video" in dmd_latents_vis_dict:
             for latent_key in dmd_log_keys:
                 latents = dmd_latents_vis_dict[latent_key]
                 latents = _prepare_vae_latents(latents)
@@ -1257,7 +1345,7 @@ class DistillationPipeline(TrainingPipeline):
                 latents = _apply_vae_scale(latents)
 
                 # Apply shifting if needed
-                if (hasattr(self.vae, "shift_factor") and self.vae.shift_factor is not None):
+                if hasattr(self.vae, "shift_factor") and self.vae.shift_factor is not None:
                     if isinstance(self.vae.shift_factor, torch.Tensor):
                         latents += self.vae.shift_factor.to(latents.device, latents.dtype)
                     else:
@@ -1299,7 +1387,7 @@ class DistillationPipeline(TrainingPipeline):
         logger.info("Initialized random seeds with seed: %s", seed + self.global_rank)
 
         # Initialize current_trainstep for EMA ready checks
-        #TODO: check if needed
+        # TODO: check if needed
         self.current_trainstep = self.init_steps
 
         # Resume from checkpoint if specified (this will restore random states)
@@ -1360,15 +1448,17 @@ class DistillationPipeline(TrainingPipeline):
             step_times.append(step_time)
             avg_step_time = sum(step_times) / len(step_times)
 
-            progress_bar.set_postfix({
-                "total_loss": f"{total_loss:.4f}",
-                "generator_loss": f"{generator_loss:.4f}",
-                "fake_score_loss": f"{fake_score_loss:.4f}",
-                "step_time": f"{step_time:.2f}s",
-                "grad_norm": grad_norm,
-                "ema": "✓" if (self.generator_ema is not None and self.is_ema_ready()) else "✗",
-                "ema2": "✓" if (self.generator_ema_2 is not None and self.is_ema_ready()) else "✗",
-            })
+            progress_bar.set_postfix(
+                {
+                    "total_loss": f"{total_loss:.4f}",
+                    "generator_loss": f"{generator_loss:.4f}",
+                    "fake_score_loss": f"{fake_score_loss:.4f}",
+                    "step_time": f"{step_time:.2f}s",
+                    "grad_norm": grad_norm,
+                    "ema": "✓" if (self.generator_ema is not None and self.is_ema_ready()) else "✗",
+                    "ema2": "✓" if (self.generator_ema_2 is not None and self.is_ema_ready()) else "✗",
+                }
+            )
             progress_bar.update(1)
 
             if self.global_rank == 0:
@@ -1383,7 +1473,7 @@ class DistillationPipeline(TrainingPipeline):
                     "grad_norm": grad_norm,
                 }
                 # Only log generator loss when generator is actually trained
-                if (step % self.generator_update_interval == 0):
+                if step % self.generator_update_interval == 0:
                     log_data["train_generator_loss"] = generator_loss
                 if use_vsa:
                     log_data["VSA_train_sparsity"] = current_vsa_sparsity
@@ -1414,8 +1504,10 @@ class DistillationPipeline(TrainingPipeline):
                 self.tracker.log(log_data, step)
 
             # Save training state checkpoint (for resuming training)
-            if (self.training_args.training_state_checkpointing_steps > 0
-                    and step % self.training_args.training_state_checkpointing_steps == 0):
+            if (
+                self.training_args.training_state_checkpointing_steps > 0
+                and step % self.training_args.training_state_checkpointing_steps == 0
+            ):
                 print("rank", self.global_rank, "save training state checkpoint at step", step)
                 save_distillation_checkpoint(
                     self.transformer,
@@ -1431,22 +1523,25 @@ class DistillationPipeline(TrainingPipeline):
                     self.noise_random_generator,
                     self.generator_ema,
                     # MoE support
-                    generator_transformer_2=getattr(self, 'transformer_2', None),
-                    real_score_transformer_2=getattr(self, 'real_score_transformer_2', None),
-                    fake_score_transformer_2=getattr(self, 'fake_score_transformer_2', None),
-                    generator_optimizer_2=getattr(self, 'optimizer_2', None),
-                    fake_score_optimizer_2=getattr(self, 'fake_score_optimizer_2', None),
-                    generator_scheduler_2=getattr(self, 'lr_scheduler_2', None),
-                    fake_score_scheduler_2=getattr(self, 'fake_score_lr_scheduler_2', None),
-                    generator_ema_2=getattr(self, 'generator_ema_2', None))
+                    generator_transformer_2=getattr(self, "transformer_2", None),
+                    real_score_transformer_2=getattr(self, "real_score_transformer_2", None),
+                    fake_score_transformer_2=getattr(self, "fake_score_transformer_2", None),
+                    generator_optimizer_2=getattr(self, "optimizer_2", None),
+                    fake_score_optimizer_2=getattr(self, "fake_score_optimizer_2", None),
+                    generator_scheduler_2=getattr(self, "lr_scheduler_2", None),
+                    fake_score_scheduler_2=getattr(self, "fake_score_lr_scheduler_2", None),
+                    generator_ema_2=getattr(self, "generator_ema_2", None),
+                )
 
                 if self.transformer:
                     self.transformer.train()
                 self.sp_group.barrier()
 
             # Save weight-only checkpoint
-            if (self.training_args.weight_only_checkpointing_steps > 0
-                    and step % self.training_args.weight_only_checkpointing_steps == 0):
+            if (
+                self.training_args.weight_only_checkpointing_steps > 0
+                and step % self.training_args.weight_only_checkpointing_steps == 0
+            ):
                 print("rank", self.global_rank, "save weight-only checkpoint at step", step)
                 save_distillation_checkpoint(
                     self.transformer,
@@ -1457,14 +1552,15 @@ class DistillationPipeline(TrainingPipeline):
                     only_save_generator_weight=True,
                     generator_ema=self.generator_ema,
                     # MoE support
-                    generator_transformer_2=getattr(self, 'transformer_2', None),
-                    real_score_transformer_2=getattr(self, 'real_score_transformer_2', None),
-                    fake_score_transformer_2=getattr(self, 'fake_score_transformer_2', None),
-                    generator_optimizer_2=getattr(self, 'optimizer_2', None),
-                    fake_score_optimizer_2=getattr(self, 'fake_score_optimizer_2', None),
-                    generator_scheduler_2=getattr(self, 'lr_scheduler_2', None),
-                    fake_score_scheduler_2=getattr(self, 'fake_score_lr_scheduler_2', None),
-                    generator_ema_2=getattr(self, 'generator_ema_2', None))
+                    generator_transformer_2=getattr(self, "transformer_2", None),
+                    real_score_transformer_2=getattr(self, "real_score_transformer_2", None),
+                    fake_score_transformer_2=getattr(self, "fake_score_transformer_2", None),
+                    generator_optimizer_2=getattr(self, "optimizer_2", None),
+                    fake_score_optimizer_2=getattr(self, "fake_score_optimizer_2", None),
+                    generator_scheduler_2=getattr(self, "lr_scheduler_2", None),
+                    fake_score_scheduler_2=getattr(self, "fake_score_lr_scheduler_2", None),
+                    generator_ema_2=getattr(self, "generator_ema_2", None),
+                )
 
                 if self.training_args.use_ema and self.is_ema_ready():
                     self.save_ema_weights(self.training_args.output_dir, step)
@@ -1477,8 +1573,9 @@ class DistillationPipeline(TrainingPipeline):
         self.tracker.finish()
 
         # Save final training state checkpoint
-        print("rank", self.global_rank, "save final training state checkpoint at step",
-              self.training_args.max_train_steps)
+        print(
+            "rank", self.global_rank, "save final training state checkpoint at step", self.training_args.max_train_steps
+        )
         save_distillation_checkpoint(
             self.transformer,
             self.fake_score_transformer,
@@ -1493,14 +1590,15 @@ class DistillationPipeline(TrainingPipeline):
             self.noise_random_generator,
             self.generator_ema,
             # MoE support
-            generator_transformer_2=getattr(self, 'transformer_2', None),
-            real_score_transformer_2=getattr(self, 'real_score_transformer_2', None),
-            fake_score_transformer_2=getattr(self, 'fake_score_transformer_2', None),
-            generator_optimizer_2=getattr(self, 'optimizer_2', None),
-            fake_score_optimizer_2=getattr(self, 'fake_score_optimizer_2', None),
-            generator_scheduler_2=getattr(self, 'lr_scheduler_2', None),
-            fake_score_scheduler_2=getattr(self, 'fake_score_lr_scheduler_2', None),
-            generator_ema_2=getattr(self, 'generator_ema_2', None))
+            generator_transformer_2=getattr(self, "transformer_2", None),
+            real_score_transformer_2=getattr(self, "real_score_transformer_2", None),
+            fake_score_transformer_2=getattr(self, "fake_score_transformer_2", None),
+            generator_optimizer_2=getattr(self, "optimizer_2", None),
+            fake_score_optimizer_2=getattr(self, "fake_score_optimizer_2", None),
+            generator_scheduler_2=getattr(self, "lr_scheduler_2", None),
+            fake_score_scheduler_2=getattr(self, "fake_score_lr_scheduler_2", None),
+            generator_ema_2=getattr(self, "generator_ema_2", None),
+        )
 
         if self.training_args.use_ema and self.is_ema_ready():
             self.save_ema_weights(self.training_args.output_dir, self.training_args.max_train_steps)

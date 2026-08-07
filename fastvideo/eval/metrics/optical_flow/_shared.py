@@ -158,10 +158,10 @@ def compute_frame_metrics(
 
     valid = mag_mask & (gt_mag_map > 0.5) & (gen_mag_map > 0.5)
     if valid.sum() > 0:
-        dot = (flow_gt[:, :, 0] * flow_gen[:, :, 0] + flow_gt[:, :, 1] * flow_gen[:, :, 1])
+        dot = flow_gt[:, :, 0] * flow_gen[:, :, 0] + flow_gt[:, :, 1] * flow_gen[:, :, 1]
         cos_map = np.clip(dot / (gt_mag_map * gen_mag_map + 1e-8), -1.0, 1.0)
         angle_map = np.degrees(np.arccos(cos_map))
-        metrics["px_angle_rmse"] = float(np.sqrt((angle_map[valid]**2).mean()))
+        metrics["px_angle_rmse"] = float(np.sqrt((angle_map[valid] ** 2).mean()))
     else:
         metrics["px_angle_rmse"] = 0.0
 
@@ -170,8 +170,8 @@ def compute_frame_metrics(
     grid_vals = []
     for gi in range(grid_size):
         for gj in range(grid_size):
-            cell_mask = mag_mask[gi * gh:(gi + 1) * gh, gj * gw:(gj + 1) * gw]
-            cell_epe = epe_map[gi * gh:(gi + 1) * gh, gj * gw:(gj + 1) * gw]
+            cell_mask = mag_mask[gi * gh : (gi + 1) * gh, gj * gw : (gj + 1) * gw]
+            cell_epe = epe_map[gi * gh : (gi + 1) * gh, gj * gw : (gj + 1) * gw]
             if cell_mask.sum() > 0:
                 grid_vals.append(float(cell_epe[cell_mask].mean()))
             else:
@@ -188,13 +188,15 @@ def compute_frame_metrics(
 
     foe_gt_x, foe_gt_y = _estimate_foe(flow_gt)
     foe_gen_x, foe_gen_y = _estimate_foe(flow_gen)
-    metrics["foe_dist"] = float(np.sqrt((foe_gt_x - foe_gen_x)**2 + (foe_gt_y - foe_gen_y)**2))
+    metrics["foe_dist"] = float(np.sqrt((foe_gt_x - foe_gen_x) ** 2 + (foe_gt_y - foe_gen_y) ** 2))
 
     metrics["flow_kl_2d"] = _flow_kl_2d(flow_gt, flow_gen)
     return metrics
 
 
-def aggregate_temporal(per_frame: list[dict[str, float]], ) -> dict[str, float | int | None]:
+def aggregate_temporal(
+    per_frame: list[dict[str, float]],
+) -> dict[str, float | int | None]:
     """Aggregate per-frame metric dicts into mean/std/max/auc/onset summaries.
 
     Port of mhuo's compute_temporal_metrics.
@@ -245,6 +247,7 @@ def tensor_to_bgr_list(video: torch.Tensor) -> list[np.ndarray]:
 def load_ptlflow_model(model_name: str, ckpt: str, device: torch.device):
     """Load a ``ptlflow`` model on *device* in eval mode."""
     import ptlflow
+
     model = ptlflow.get_model(model_name, ckpt_path=ckpt)
     model.eval()
     return model.to(device)

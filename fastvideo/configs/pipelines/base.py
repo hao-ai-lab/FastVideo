@@ -6,7 +6,7 @@ from typing import Any, cast
 
 import torch
 
-from fastvideo.configs.models import (DiTConfig, EncoderConfig, ModelConfig, VAEConfig, UpsamplerConfig)
+from fastvideo.configs.models import DiTConfig, EncoderConfig, ModelConfig, VAEConfig, UpsamplerConfig
 from fastvideo.configs.models.encoders import BaseEncoderOutput
 from fastvideo.configs.utils import update_config_from_args
 from fastvideo.logger import init_logger
@@ -27,6 +27,7 @@ def postprocess_text(output: BaseEncoderOutput) -> torch.tensor:
 @dataclass
 class PipelineConfig:
     """Base configuration for all pipeline architectures."""
+
     model_path: str = ""
     pipeline_config_path: str | None = None
 
@@ -65,12 +66,13 @@ class PipelineConfig:
     image_encoder_precision: str = "fp32"
 
     # Text encoder configuration
-    DEFAULT_TEXT_ENCODER_PRECISIONS = ("fp32", )
-    text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (EncoderConfig(), ))
-    text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("fp32", ))
-    preprocess_text_funcs: tuple[Callable[[str], str], ...] = field(default_factory=lambda: (preprocess_text, ))
-    postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.tensor],
-                                  ...] = field(default_factory=lambda: (postprocess_text, ))
+    DEFAULT_TEXT_ENCODER_PRECISIONS = ("fp32",)
+    text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (EncoderConfig(),))
+    text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("fp32",))
+    preprocess_text_funcs: tuple[Callable[[str], str], ...] = field(default_factory=lambda: (preprocess_text,))
+    postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.tensor], ...] = field(
+        default_factory=lambda: (postprocess_text,)
+    )
 
     # DMD parameters
     dmd_denoising_steps: list[int] | None = field(default=None)
@@ -145,8 +147,7 @@ class PipelineConfig:
             dest=f"{prefix_with_dot.replace('-', '_')}vae_decode_precision",
             default=PipelineConfig.vae_decode_precision,
             choices=["fp32", "fp16", "bf16"],
-            help="Optional decode-only VAE precision override (falls back to "
-            "--vae-precision when unset)",
+            help="Optional decode-only VAE precision override (falls back to --vae-precision when unset)",
         )
         parser.add_argument(
             f"--{prefix_with_dot}vae-tiling",
@@ -192,10 +193,12 @@ class PipelineConfig:
 
         # Add VAE configuration arguments
         from fastvideo.configs.models.vaes.base import VAEConfig
+
         VAEConfig.add_cli_args(parser, prefix=f"{prefix_with_dot}vae-config")
 
         # Add DiT configuration arguments
         from fastvideo.configs.models.dits.base import DiTConfig
+
         DiTConfig.add_cli_args(parser, prefix=f"{prefix_with_dot}dit-config")
 
         return parser
@@ -212,6 +215,7 @@ class PipelineConfig:
         use the pipeline class setting from model_path to match the pipeline config
         """
         from fastvideo.registry import get_pipeline_config_cls_from_name
+
         pipeline_config_cls = get_pipeline_config_cls_from_name(model_path)
 
         return cast(PipelineConfig, pipeline_config_cls(model_path=model_path))
@@ -226,9 +230,10 @@ class PipelineConfig:
         from fastvideo.registry import get_pipeline_config_cls_from_name
 
         prefix_with_dot = f"{config_cli_prefix}." if (config_cli_prefix.strip() != "") else ""
-        model_path: str | None = kwargs.get(prefix_with_dot + 'model_path', None) or kwargs.get('model_path')
+        model_path: str | None = kwargs.get(prefix_with_dot + "model_path", None) or kwargs.get("model_path")
         pipeline_config_or_path: str | PipelineConfig | dict[str, Any] | None = kwargs.get(
-            prefix_with_dot + 'pipeline_config', None) or kwargs.get('pipeline_config')
+            prefix_with_dot + "pipeline_config", None
+        ) or kwargs.get("pipeline_config")
         if model_path is None:
             raise ValueError("model_path is required in kwargs")
 
@@ -245,14 +250,14 @@ class PipelineConfig:
         # 3. Load PipelineConfig from a json file or a PipelineConfig object if provided
         if isinstance(pipeline_config_or_path, str):
             pipeline_config.load_from_json(pipeline_config_or_path)
-            kwargs[prefix_with_dot + 'pipeline_config_path'] = pipeline_config_or_path
+            kwargs[prefix_with_dot + "pipeline_config_path"] = pipeline_config_or_path
         elif isinstance(pipeline_config_or_path, PipelineConfig):
             pipeline_config = pipeline_config_or_path
         elif isinstance(pipeline_config_or_path, dict):
             pipeline_config.update_pipeline_config(pipeline_config_or_path)
 
         # 4. Update PipelineConfig from CLI arguments if provided
-        kwargs[prefix_with_dot + 'model_path'] = model_path
+        kwargs[prefix_with_dot + "model_path"] = model_path
         pipeline_config.update_config_from_dict(kwargs, config_cli_prefix)
 
         return pipeline_config
@@ -319,8 +324,9 @@ class PipelineConfig:
                 if isinstance(current_value, ModelConfig):
                     current_value.update_model_config(new_value)
                 elif isinstance(current_value, tuple) and all(isinstance(v, ModelConfig) for v in current_value):
-                    assert len(current_value) == len(
-                        new_value), "Users shouldn't delete or add text encoder config objects in your json"
+                    assert len(current_value) == len(new_value), (
+                        "Users shouldn't delete or add text encoder config objects in your json"
+                    )
                     for target_config, source_config in zip(current_value, new_value, strict=True):
                         target_config.update_model_config(source_config)
                 else:

@@ -8,6 +8,7 @@ RGB frames into an ffmpeg subprocess configured for fragmented output
 via ``-movflags empty_moov+default_base_moof+frag_keyframe+faststart``
 and stream the bytes back out.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -201,8 +202,7 @@ def _write_frame(stdin, frame: np.ndarray) -> None:
     if frame.dtype != np.uint8:
         frame = frame.astype(np.uint8)
     if frame.ndim != 3 or frame.shape[-1] != 3:
-        raise ValueError("fMP4 encoder frames must be HxWx3 uint8 RGB; got "
-                         f"shape={frame.shape}, dtype={frame.dtype}")
+        raise ValueError(f"fMP4 encoder frames must be HxWx3 uint8 RGB; got shape={frame.shape}, dtype={frame.dtype}")
     with contextlib.suppress(BrokenPipeError):
         stdin.write(frame.tobytes())
 

@@ -50,7 +50,7 @@ def _to_char_level(text: str) -> str:
 def _prepare_for_wer(reference: str, hypothesis: str, force_char_level: bool | None) -> tuple[str, str, bool]:
     ref = _normalize_text(reference)
     hyp = _normalize_text(hypothesis)
-    char_level = (force_char_level if force_char_level is not None else (_contains_cjk(ref) or _contains_cjk(hyp)))
+    char_level = force_char_level if force_char_level is not None else (_contains_cjk(ref) or _contains_cjk(hyp))
     if char_level:
         ref, hyp = _to_char_level(ref), _to_char_level(hyp)
     return ref, hyp, char_level
@@ -95,8 +95,7 @@ class WERMetric(BaseMetric):
     ) -> None:
         super().__init__()
         if asr_backend not in ("whisper", "glm_asr", "sensevoice"):
-            raise ValueError(f"Unknown ASR backend '{asr_backend}'. "
-                             "Supported: ['whisper', 'glm_asr', 'sensevoice']")
+            raise ValueError(f"Unknown ASR backend '{asr_backend}'. Supported: ['whisper', 'glm_asr', 'sensevoice']")
         self._asr_backend = asr_backend
         self._model_name = model_name
         self._instruction = instruction
@@ -130,6 +129,7 @@ class WERMetric(BaseMetric):
         # transformers ≤ 4.57 doesn't register ``model_type=glmasr`` and
         # the HF repo ships no remote modeling code; use our vendored copy.
         from fastvideo.third_party.eval.glmasr import register_with_auto
+
         register_with_auto()
 
         from transformers import AutoModel, AutoProcessor
@@ -145,8 +145,9 @@ class WERMetric(BaseMetric):
         try:
             from funasr import AutoModel
         except ImportError as e:
-            raise ImportError("SenseVoice backend requires `funasr`. Install it or "
-                              "switch to asr_backend='glm_asr'.") from e
+            raise ImportError(
+                "SenseVoice backend requires `funasr`. Install it or switch to asr_backend='glm_asr'."
+            ) from e
 
         model_name = self._model_name or "FunAudioLLM/SenseVoiceSmall"
         self._model = AutoModel(
@@ -187,10 +188,13 @@ class WERMetric(BaseMetric):
         # and call ``processor.__call__`` directly so it expands the
         # ``<|pad|>`` placeholder and extracts log-mel features in one pass.
         import librosa
-        prompt = (f"<|user|>\n"
-                  f"<|begin_of_audio|>{self._processor.audio_token}<|end_of_audio|>\n"
-                  f"{self._instruction}\n"
-                  f"<|assistant|>\n")
+
+        prompt = (
+            f"<|user|>\n"
+            f"<|begin_of_audio|>{self._processor.audio_token}<|end_of_audio|>\n"
+            f"{self._instruction}\n"
+            f"<|assistant|>\n"
+        )
         audio, _ = librosa.load(audio_path, sr=16000, mono=True)
         inputs = self._processor(text=prompt, audio=audio, return_tensors="pt")
         inputs = self._move_to_device(inputs)
@@ -201,6 +205,7 @@ class WERMetric(BaseMetric):
 
     def _transcribe_whisper(self, audio_path: str) -> str:
         import librosa
+
         audio, _ = librosa.load(audio_path, sr=16000, mono=True)
         inputs = self._processor(audio, sampling_rate=16000, return_tensors="pt")
         input_features = inputs.input_features.to(self.device)
@@ -212,6 +217,7 @@ class WERMetric(BaseMetric):
 
     def _transcribe_sensevoice(self, audio_path: str) -> str:
         from funasr.utils.postprocess_utils import rich_transcription_postprocess
+
         res = self._model.generate(
             input=audio_path,
             cache={},

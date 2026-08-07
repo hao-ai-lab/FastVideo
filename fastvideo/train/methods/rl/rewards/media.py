@@ -23,8 +23,7 @@ def select_first_frame(media: torch.Tensor) -> torch.Tensor:
         return media[:, :, 0]
     if media.ndim == 4:
         return media
-    raise ValueError("media must have shape [B, C, H, W] or [B, C, T, H, W], "
-                     f"got {tuple(media.shape)}")
+    raise ValueError(f"media must have shape [B, C, H, W] or [B, C, T, H, W], got {tuple(media.shape)}")
 
 
 class MultiRewardScorer:
@@ -47,8 +46,7 @@ class MultiRewardScorer:
         self.scorers = dict(scorers)
         unsupported = sorted(set(self.reward_weights) - set(self.scorers))
         if unsupported:
-            raise ValueError(f"Unsupported reward(s): {unsupported}. "
-                             f"Available rewards: {sorted(self.scorers)}")
+            raise ValueError(f"Unsupported reward(s): {unsupported}. Available rewards: {sorted(self.scorers)}")
 
     @torch.no_grad()
     def __call__(

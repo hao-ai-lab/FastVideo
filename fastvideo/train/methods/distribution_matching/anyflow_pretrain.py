@@ -68,8 +68,9 @@ def _sample_pair_timesteps(
     if diffusion_ratio < 0.0 or consistency_ratio < 0.0:
         raise ValueError("diffusion_ratio and consistency_ratio must be non-negative")
     if diffusion_ratio + consistency_ratio > 1.0:
-        raise ValueError("diffusion_ratio + consistency_ratio must be <= 1, "
-                         f"got {diffusion_ratio} + {consistency_ratio}")
+        raise ValueError(
+            f"diffusion_ratio + consistency_ratio must be <= 1, got {diffusion_ratio} + {consistency_ratio}"
+        )
 
     u1 = torch.rand(batch_size, device=device, generator=generator)
     u2 = torch.rand(batch_size, device=device, generator=generator)
@@ -81,7 +82,7 @@ def _sample_pair_timesteps(
     is_diffusion = torch.zeros(batch_size, dtype=torch.bool, device=device)
     is_consistency = torch.zeros(batch_size, dtype=torch.bool, device=device)
     is_diffusion[:n_diff] = True
-    is_consistency[n_diff:n_diff + n_cons] = True
+    is_consistency[n_diff : n_diff + n_cons] = True
 
     # Override per the AnyFlow paper:
     # - diffusion entries: r = t (plain flow matching)
@@ -160,13 +161,17 @@ class AnyFlowPretrainMethod(TrainingMethod):
 
         mcfg = self.method_config
         self._diffusion_ratio = float(
-            get_optional_float(mcfg, "diffusion_ratio", where="method.diffusion_ratio") or 0.5)
+            get_optional_float(mcfg, "diffusion_ratio", where="method.diffusion_ratio") or 0.5
+        )
         self._consistency_ratio = float(
-            get_optional_float(mcfg, "consistency_ratio", where="method.consistency_ratio") or 0.25)
+            get_optional_float(mcfg, "consistency_ratio", where="method.consistency_ratio") or 0.25
+        )
         if self._diffusion_ratio + self._consistency_ratio > 1.0:
-            raise ValueError("method.diffusion_ratio + method.consistency_ratio must "
-                             f"be <= 1, got {self._diffusion_ratio} + "
-                             f"{self._consistency_ratio}")
+            raise ValueError(
+                "method.diffusion_ratio + method.consistency_ratio must "
+                f"be <= 1, got {self._diffusion_ratio} + "
+                f"{self._consistency_ratio}"
+            )
 
         # δ: finite-difference step in absolute train-timestep units.
         epsilon = get_optional_int(mcfg, "epsilon", where="method.epsilon")
@@ -175,21 +180,19 @@ class AnyFlowPretrainMethod(TrainingMethod):
         # Loss weighting scheme (uniform / gaussian / beta08).
         raw_weight_type = mcfg.get("weight_type", "beta08")
         if not isinstance(raw_weight_type, str):
-            raise ValueError("method.weight_type must be a string, got "
-                             f"{type(raw_weight_type).__name__}")
+            raise ValueError(f"method.weight_type must be a string, got {type(raw_weight_type).__name__}")
         weight_type = raw_weight_type.strip().lower()
         if weight_type not in {"uniform", "gaussian", "beta08"}:
-            raise ValueError("method.weight_type must be one of "
-                             "{uniform, gaussian, beta08}, "
-                             f"got {raw_weight_type!r}")
+            raise ValueError(
+                f"method.weight_type must be one of {{uniform, gaussian, beta08}}, got {raw_weight_type!r}"
+            )
         self._weight_type = weight_type
 
         # Guidance fused into the training target (default 1.0 = unused).
         fg = get_optional_float(mcfg, "fuse_guidance_scale", where="method.fuse_guidance_scale")
         self._fuse_guidance_scale = float(fg) if fg is not None else 1.0
         if self._fuse_guidance_scale <= 0.0:
-            raise ValueError("method.fuse_guidance_scale must be positive, "
-                             f"got {self._fuse_guidance_scale}")
+            raise ValueError(f"method.fuse_guidance_scale must be positive, got {self._fuse_guidance_scale}")
 
         # Flow-map scheduler — uses pipeline_config.flow_shift if present
         # and falls back to method.shift (and finally 1.0).
@@ -201,7 +204,9 @@ class AnyFlowPretrainMethod(TrainingMethod):
 
         # Lazy-imported to avoid circular imports on package load.
         from fastvideo.models.schedulers.scheduling_flow_map_euler_discrete import (
-            FlowMapEulerDiscreteScheduler, )
+            FlowMapEulerDiscreteScheduler,
+        )
+
         self._flow_map_scheduler = FlowMapEulerDiscreteScheduler(
             num_train_timesteps=int(self.student.num_train_timesteps),
             shift=self._shift,
@@ -234,9 +239,9 @@ class AnyFlowPretrainMethod(TrainingMethod):
         batch: dict[str, Any],
         iteration: int,
     ) -> tuple[
-            dict[str, torch.Tensor],
-            dict[str, Any],
-            dict[str, LogScalar],
+        dict[str, torch.Tensor],
+        dict[str, Any],
+        dict[str, LogScalar],
     ]:
         del iteration  # AnyFlow pretrain has no iteration-dependent dispatch.
 
@@ -247,9 +252,11 @@ class AnyFlowPretrainMethod(TrainingMethod):
         )
         latents = training_batch.latents  # [B, T, C, H, W] (post-permute in prepare_batch).
         if latents is None or latents.ndim != 5:
-            raise RuntimeError("AnyFlow pretrain expects TrainingBatch.latents of shape "
-                               "[B, T, C, H, W] after prepare_batch; got "
-                               f"{None if latents is None else tuple(latents.shape)}")
+            raise RuntimeError(
+                "AnyFlow pretrain expects TrainingBatch.latents of shape "
+                "[B, T, C, H, W] after prepare_batch; got "
+                f"{None if latents is None else tuple(latents.shape)}"
+            )
         device = latents.device
         dtype = latents.dtype
         batch_size = int(latents.shape[0])
@@ -334,7 +341,7 @@ class AnyFlowPretrainMethod(TrainingMethod):
         # so the non-diffusion branches stay on the same magnitude as the
         # diffusion branch (matches AnyFlow's stop-grad rescaling).
         per_sample = torch.mean(
-            ((noise_pred.float() - target.float())**2).reshape(batch_size, -1),
+            ((noise_pred.float() - target.float()) ** 2).reshape(batch_size, -1),
             dim=-1,
         )
         weight = sched.get_train_weight(t, weight_type=self._weight_type)

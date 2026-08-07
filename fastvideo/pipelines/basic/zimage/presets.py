@@ -7,12 +7,14 @@ _DENOISE_STAGE = PresetStageSpec(
     name="denoise",
     kind="denoising",
     description="Z-Image denoising pass",
-    allowed_overrides=frozenset({
-        "num_inference_steps",
-        "guidance_scale",
-        "cfg_normalization",
-        "cfg_truncation",
-    }),
+    allowed_overrides=frozenset(
+        {
+            "num_inference_steps",
+            "guidance_scale",
+            "cfg_normalization",
+            "cfg_truncation",
+        }
+    ),
 )
 
 ZIMAGE_TURBO = InferencePreset(
@@ -21,7 +23,7 @@ ZIMAGE_TURBO = InferencePreset(
     model_family="zimage",
     description="Z-Image-Turbo text-to-image generation",
     workload_type="t2i",
-    stage_schemas=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE,),
     defaults={
         "height": 1024,
         "width": 1024,
@@ -37,4 +39,4 @@ ZIMAGE_TURBO = InferencePreset(
     },
 )
 
-ALL_PRESETS = (ZIMAGE_TURBO, )
+ALL_PRESETS = (ZIMAGE_TURBO,)

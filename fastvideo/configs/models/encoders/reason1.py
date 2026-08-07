@@ -48,10 +48,9 @@ class Reason1ArchConfig(TextEncoderArchConfig):
     vision_config: dict[str, Any] | None = None
 
     rope_theta: float = 1000000.0
-    rope_scaling: dict[str, Any] | None = field(default_factory=lambda: {
-        "type": "mrope",
-        "mrope_section": [16, 24, 24]
-    })
+    rope_scaling: dict[str, Any] | None = field(
+        default_factory=lambda: {"type": "mrope", "mrope_section": [16, 24, 24]}
+    )
     max_position_embeddings: int = 128000
     max_window_layers: int = 28
 
@@ -74,7 +73,8 @@ class Reason1ArchConfig(TextEncoderArchConfig):
     torch_dtype: str = "bfloat16"
     _attn_implementation: str = "flash_attention_2"
     _fsdp_shard_conditions: list = field(
-        default_factory=lambda: [_is_transformer_layer, _is_embeddings, _is_final_norm])
+        default_factory=lambda: [_is_transformer_layer, _is_embeddings, _is_final_norm]
+    )
 
 
 @dataclass

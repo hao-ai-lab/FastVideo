@@ -1,4 +1,5 @@
 """Dataclasses for the prompt-submission pipeline queues."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

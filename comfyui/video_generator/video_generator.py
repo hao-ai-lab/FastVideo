@@ -23,7 +23,6 @@ class GenerationInterruptedException(Exception):
 
 # Custom exception for interruption that ComfyUI will recognize
 class GenerationCancelledException(Exception):
-
     def __init__(self, message: str = "Generation was cancelled by user") -> None:
         self.message = message
         super().__init__(self.message)
@@ -32,7 +31,7 @@ class GenerationCancelledException(Exception):
 def update_config_from_args(config: Any, args_dict: dict[str, Any]) -> None:
     """
     Update configuration object from arguments dictionary.
-    
+
     Args:
         config: The configuration object to update
         args_dict: Dictionary containing arguments
@@ -46,72 +45,46 @@ def update_config_from_args(config: Any, args_dict: dict[str, Any]) -> None:
 
 
 class VideoGenerator:
-
     @classmethod
     def INPUT_TYPES(s):
         return {
             "required": {
-                "prompt": ("STRING", {
-                    "multiline":
-                    True,
-                    "default":
-                    "A ripe orange tumbles gently from a tree and lands on the head of a lounging capybara, "
-                    "who blinks slowly in response. The moment is quietly humorous and oddly serene, framed by "
-                    "lush green foliage and dappled sunlight. Mid-shot, warm and whimsical tones."
-                }),
-                "output_path": ("STRING", {
-                    "default": "/workspace/ComfyUI/outputs_video/"
-                }),
-                "num_gpus": ("INT", {
-                    "default": 2,
-                    "min": 1,
-                    "max": 16
-                }),
-                "model_path": ("STRING", {
-                    "default": "FastVideo/FastHunyuan-diffusers"
-                })
+                "prompt": (
+                    "STRING",
+                    {
+                        "multiline": True,
+                        "default": "A ripe orange tumbles gently from a tree and lands on the head of a lounging capybara, "
+                        "who blinks slowly in response. The moment is quietly humorous and oddly serene, framed by "
+                        "lush green foliage and dappled sunlight. Mid-shot, warm and whimsical tones.",
+                    },
+                ),
+                "output_path": ("STRING", {"default": "/workspace/ComfyUI/outputs_video/"}),
+                "num_gpus": ("INT", {"default": 2, "min": 1, "max": 16}),
+                "model_path": ("STRING", {"default": "FastVideo/FastHunyuan-diffusers"}),
             },
             "optional": {
-                "inference_args": ("INFERENCE_ARGS", ),
-                "embedded_cfg_scale": ("FLOAT", {
-                    "default": 6.0
-                }),
-                "sp_size": ("INT", {
-                    "default": 2
-                }),
-                "tp_size": ("INT", {
-                    "default": 2
-                }),
-                "vae_config": ("VAE_CONFIG", ),
-                "vae_precision": (["fp16", "bf16"], {
-                    "default": "fp16"
-                }),
-                "vae_tiling": ([True, False], {
-                    "default": True
-                }),
-                "vae_sp": ([True, False], {
-                    "default": False
-                }),
-                "text_encoder_config": ("TEXT_ENCODER_CONFIG", ),
-                "text_encoder_precision": (["fp16", "bf16"], {
-                    "default": "fp16"
-                }),
-                "dit_config": ("DIT_CONFIG", ),
-                "precision": (["fp16", "bf16"], {
-                    "default": "fp16"
-                }),
-                "dit_cpu_offload": ([True, False], {
-                    "default": False
-                }),
-            }
+                "inference_args": ("INFERENCE_ARGS",),
+                "embedded_cfg_scale": ("FLOAT", {"default": 6.0}),
+                "sp_size": ("INT", {"default": 2}),
+                "tp_size": ("INT", {"default": 2}),
+                "vae_config": ("VAE_CONFIG",),
+                "vae_precision": (["fp16", "bf16"], {"default": "fp16"}),
+                "vae_tiling": ([True, False], {"default": True}),
+                "vae_sp": ([True, False], {"default": False}),
+                "text_encoder_config": ("TEXT_ENCODER_CONFIG",),
+                "text_encoder_precision": (["fp16", "bf16"], {"default": "fp16"}),
+                "dit_config": ("DIT_CONFIG",),
+                "precision": (["fp16", "bf16"], {"default": "fp16"}),
+                "dit_cpu_offload": ([True, False], {"default": False}),
+            },
         }
 
     @classmethod
     def VALIDATE_INPUTS(cls, **kwargs):
         return True
 
-    RETURN_TYPES = ("STRING", )
-    RETURN_NAMES = ("video_path", )
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("video_path",)
     FUNCTION = "launch_inference"
     CATEGORY = "fastvideo"
 
@@ -134,10 +107,10 @@ class VideoGenerator:
                 self._generation_interrupted = True
 
                 # Try to send interrupt signal to worker processes
-                if self.generator is not None and hasattr(self.generator, 'executor'):
+                if self.generator is not None and hasattr(self.generator, "executor"):
                     try:
                         # The MultiprocExecutor has a workers attribute
-                        if hasattr(self.generator.executor, 'workers'):
+                        if hasattr(self.generator.executor, "workers"):
                             for worker in self.generator.executor.workers:
                                 if worker.is_alive():
                                     os.kill(worker.pid, signal.SIGINT)
@@ -196,7 +169,7 @@ class VideoGenerator:
         dit_config=None,
         dit_cpu_offload=None,
     ):
-        print('Running FastVideo inference')
+        print("Running FastVideo inference")
 
         # Reset interruption flag and event
         self._generation_interrupted = False
@@ -206,7 +179,7 @@ class VideoGenerator:
 
         # Load pipeline config from model path
         pipeline_config = PipelineConfig.from_pretrained(model_path)
-        print('pipeline_config', pipeline_config)
+        print("pipeline_config", pipeline_config)
 
         # Update configs with provided config dictionaries
         if dit_config is not None:
@@ -221,17 +194,17 @@ class VideoGenerator:
         # Update top-level pipeline config with remaining arguments
         raw_pipeline_args = {}
         if embedded_cfg_scale is not None:
-            raw_pipeline_args['embedded_cfg_scale'] = embedded_cfg_scale
+            raw_pipeline_args["embedded_cfg_scale"] = embedded_cfg_scale
         if precision is not None:
-            raw_pipeline_args['precision'] = precision
+            raw_pipeline_args["precision"] = precision
         if vae_precision is not None:
-            raw_pipeline_args['vae_precision'] = vae_precision
+            raw_pipeline_args["vae_precision"] = vae_precision
         if vae_tiling is not None:
-            raw_pipeline_args['vae_tiling'] = vae_tiling
+            raw_pipeline_args["vae_tiling"] = vae_tiling
         if vae_sp is not None:
-            raw_pipeline_args['vae_sp'] = vae_sp
+            raw_pipeline_args["vae_sp"] = vae_sp
         if text_encoder_precision is not None:
-            raw_pipeline_args['text_encoder_precision'] = text_encoder_precision
+            raw_pipeline_args["text_encoder_precision"] = text_encoder_precision
 
         # Filter out any value explicitly set to -99999 (auto values)
         pipeline_args = {k: v for k, v in raw_pipeline_args.items() if str(int(v)) != str(-99999)}
@@ -240,29 +213,29 @@ class VideoGenerator:
 
         raw_generation_args = {}
         if num_gpus is not None:
-            raw_generation_args['num_gpus'] = num_gpus
+            raw_generation_args["num_gpus"] = num_gpus
         if tp_size is not None:
-            raw_generation_args['tp_size'] = tp_size
+            raw_generation_args["tp_size"] = tp_size
         if sp_size is not None:
-            raw_generation_args['sp_size'] = sp_size
+            raw_generation_args["sp_size"] = sp_size
         if dit_cpu_offload is not None:
-            raw_generation_args['dit_cpu_offload'] = dit_cpu_offload
+            raw_generation_args["dit_cpu_offload"] = dit_cpu_offload
 
         generation_args = {k: v for k, v in raw_generation_args.items() if str(int(v)) != str(-99999)}
 
         if self.generator is None:
-            print('generation_args', generation_args)
-            print('pipeline_config', pipeline_config)
-            self.generator = FastVideoGenerator.from_pretrained(model_path=model_path,
-                                                                **generation_args,
-                                                                pipeline_config=pipeline_config)
+            print("generation_args", generation_args)
+            print("pipeline_config", pipeline_config)
+            self.generator = FastVideoGenerator.from_pretrained(
+                model_path=model_path, **generation_args, pipeline_config=pipeline_config
+            )
 
-        print('inference_args', inference_args)
+        print("inference_args", inference_args)
 
         # Start a thread to run the generation
-        self._generation_thread = threading.Thread(target=self._run_generation,
-                                                   args=(prompt, output_path, inference_args),
-                                                   daemon=True)
+        self._generation_thread = threading.Thread(
+            target=self._run_generation, args=(prompt, output_path, inference_args), daemon=True
+        )
         self._generation_thread.start()
 
         # Start a background thread to monitor for interruptions
@@ -286,7 +259,7 @@ class VideoGenerator:
             # Re-raise the exception from the generation thread
             raise self._generation_exception
         elif self._generation_result:
-            return (self._generation_result, )
+            return (self._generation_result,)
         else:
             # This shouldn't happen, but just in case
             print("Generation completed but no result was produced")

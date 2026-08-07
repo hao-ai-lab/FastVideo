@@ -78,7 +78,8 @@ class Cosmos25VAEArchConfig(VAEArchConfig):
             r"^encoder\.head\.2\.(.*)$": r"encoder.conv_out.\1",
             r"^decoder\.head\.0\.gamma$": r"decoder.norm_out.gamma",
             r"^decoder\.head\.2\.(.*)$": r"decoder.conv_out.\1",
-        })
+        }
+    )
 
     @staticmethod
     def map_official_key(key: str) -> str | None:

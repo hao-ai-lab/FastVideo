@@ -6,9 +6,11 @@ _SERVER_ROOT = Path(__file__).resolve().parent
 _FASTVIDEO_DREAMVERSE_HOME = os.environ.get("FASTVIDEO_DREAMVERSE_HOME")
 _FASTVIDEO_DREAMVERSE_FRONTEND_ROOT = os.environ.get("FASTVIDEO_DREAMVERSE_FRONTEND_ROOT")
 _XDG_STATE_HOME = os.environ.get("XDG_STATE_HOME")
-_DEFAULT_STATE_ROOT = (Path(_FASTVIDEO_DREAMVERSE_HOME) if _FASTVIDEO_DREAMVERSE_HOME else
-                       (Path(_XDG_STATE_HOME) if _XDG_STATE_HOME else Path.home() / ".local/state") /
-                       "fastvideo/dreamverse")
+_DEFAULT_STATE_ROOT = (
+    Path(_FASTVIDEO_DREAMVERSE_HOME)
+    if _FASTVIDEO_DREAMVERSE_HOME
+    else (Path(_XDG_STATE_HOME) if _XDG_STATE_HOME else Path.home() / ".local/state") / "fastvideo/dreamverse"
+)
 _OUTPUTS_ROOT = _DEFAULT_STATE_ROOT / "outputs"
 _PROMPTS_ROOT = _SERVER_ROOT / "prompts"
 _PROMPTS_LOCAL_ROOT = _SERVER_ROOT / "prompts.local"
@@ -17,9 +19,9 @@ _APP_ROOT = _REPO_ROOT
 
 def _resolve_frontend_root() -> Path:
     for candidate in (
-            Path(_FASTVIDEO_DREAMVERSE_FRONTEND_ROOT) if _FASTVIDEO_DREAMVERSE_FRONTEND_ROOT else None,
-            _APP_ROOT / "web",
-            _APP_ROOT / "prod-ui",
+        Path(_FASTVIDEO_DREAMVERSE_FRONTEND_ROOT) if _FASTVIDEO_DREAMVERSE_FRONTEND_ROOT else None,
+        _APP_ROOT / "web",
+        _APP_ROOT / "prod-ui",
     ):
         if candidate is not None and candidate.is_dir():
             return candidate
@@ -69,7 +71,7 @@ MODEL_REGISTRY = {
 
 DEFAULT_MODEL_ID = "fast-ltx2"
 
-ACTIVE_MODEL_ID = (os.getenv("DREAMVERSE_MODEL_ID", "").strip() or DEFAULT_MODEL_ID)
+ACTIVE_MODEL_ID = os.getenv("DREAMVERSE_MODEL_ID", "").strip() or DEFAULT_MODEL_ID
 if ACTIVE_MODEL_ID not in MODEL_REGISTRY:
     ACTIVE_MODEL_ID = DEFAULT_MODEL_ID
 
@@ -173,7 +175,7 @@ PROMPT_SAFETY_ENABLED = _env_bool("FASTVIDEO_ENABLE_PROMPT_SAFETY", False)
 DREAMVERSE_MAX_AUTOTUNE = _env_bool("DREAMVERSE_MAX_AUTOTUNE", True)
 DREAMVERSE_SP_SIZE = max(1, _env_int("DREAMVERSE_SP_SIZE", 1))
 
-DREAMVERSE_MODEL_PATH = (os.getenv("DREAMVERSE_MODEL_PATH", "").strip() or None)
+DREAMVERSE_MODEL_PATH = os.getenv("DREAMVERSE_MODEL_PATH", "").strip() or None
 if DREAMVERSE_MODEL_PATH:
     MODEL_CONFIG = {
         **MODEL_CONFIG,
@@ -237,7 +239,7 @@ def _parse_lora_stack(raw: str) -> list[tuple[str, float]]:
 
 
 DREAMVERSE_LORA_PATH = _resolve_lora_spec(os.getenv("DREAMVERSE_LORA_PATH", ""))
-DREAMVERSE_LORA_NICKNAME = (os.getenv("DREAMVERSE_LORA_NICKNAME", "omninft").strip() or "omninft")
+DREAMVERSE_LORA_NICKNAME = os.getenv("DREAMVERSE_LORA_NICKNAME", "omninft").strip() or "omninft"
 DREAMVERSE_LORA_STRENGTH = _env_float("DREAMVERSE_LORA_STRENGTH", 1.0)
 DREAMVERSE_LORA_STACK = _parse_lora_stack(os.getenv("DREAMVERSE_LORA_STACK", ""))
 
@@ -267,36 +269,41 @@ if os.getenv("FASTVIDEO_PROMPT_PROVIDER") is not None:
         PROMPT_SUPPORTED_PROVIDERS,
     )
 PROMPT_PROVIDER = "cerebras"
-PROMPT_PROVIDER_RUNTIME_STAGES = (("cerebras", "groq"), )
+PROMPT_PROVIDER_RUNTIME_STAGES = (("cerebras", "groq"),)
 PROMPT_PROVIDER_PRIORITY = (
     "cerebras",
     "groq",
 )
 PROMPT_PROVIDER_API_KEY_NAMES = {
-    "cerebras": ("CEREBRAS_API_KEY", ),
-    "groq": ("GROQ_API_KEY", ),
+    "cerebras": ("CEREBRAS_API_KEY",),
+    "groq": ("GROQ_API_KEY",),
 }
 PROMPT_API_KEYS = {
-    provider: _optional_env(*PROMPT_PROVIDER_API_KEY_NAMES[provider])
-    for provider in PROMPT_SUPPORTED_PROVIDERS
+    provider: _optional_env(*PROMPT_PROVIDER_API_KEY_NAMES[provider]) for provider in PROMPT_SUPPORTED_PROVIDERS
 }
 PROMPT_API_BASE_URLS = {
     "cerebras": (os.getenv("FASTVIDEO_PROMPT_CEREBRAS_API_BASE_URL", "").strip() or None),
-    "groq": (os.getenv(
-        "FASTVIDEO_PROMPT_GROQ_API_BASE_URL",
-        "https://api.groq.com/openai/v1",
-    ).strip() or None),
+    "groq": (
+        os.getenv(
+            "FASTVIDEO_PROMPT_GROQ_API_BASE_URL",
+            "https://api.groq.com/openai/v1",
+        ).strip()
+        or None
+    ),
 }
 PROMPT_API_KEY = PROMPT_API_KEYS[PROMPT_PROVIDER]
 PROMPT_API_BASE_URL = PROMPT_API_BASE_URLS[PROMPT_PROVIDER]
-PROMPT_MODEL = (os.getenv("FASTVIDEO_PROMPT_MODEL", "gpt-oss-120b").strip() or "gpt-oss-120b")
-_PROMPT_CEREBRAS_REQUEST_MODEL = (os.getenv("FASTVIDEO_PROMPT_CEREBRAS_MODEL", PROMPT_MODEL).strip() or PROMPT_MODEL)
+PROMPT_MODEL = os.getenv("FASTVIDEO_PROMPT_MODEL", "gpt-oss-120b").strip() or "gpt-oss-120b"
+_PROMPT_CEREBRAS_REQUEST_MODEL = os.getenv("FASTVIDEO_PROMPT_CEREBRAS_MODEL", PROMPT_MODEL).strip() or PROMPT_MODEL
 PROMPT_PROVIDER_MODELS = {
     "cerebras": _PROMPT_CEREBRAS_REQUEST_MODEL,
-    "groq": (os.getenv(
-        "FASTVIDEO_PROMPT_GROQ_MODEL",
-        f"openai/{PROMPT_MODEL}",
-    ).strip() or f"openai/{PROMPT_MODEL}"),
+    "groq": (
+        os.getenv(
+            "FASTVIDEO_PROMPT_GROQ_MODEL",
+            f"openai/{PROMPT_MODEL}",
+        ).strip()
+        or f"openai/{PROMPT_MODEL}"
+    ),
 }
 PROMPT_REWRITE_MODEL = PROMPT_MODEL
 PROMPT_REWRITE_MODEL_OPTIONS = [PROMPT_REWRITE_MODEL]
@@ -373,7 +380,6 @@ GENERATION_SEGMENT_CAP = max(0, _env_int("FASTVIDEO_GENERATION_SEGMENT_CAP", 6))
 STARTUP_WARMUP_ENABLED = _env_bool("FASTVIDEO_ENABLE_STARTUP_WARMUP", True)
 STARTUP_WARMUP_PROMPT = os.getenv(
     "FASTVIDEO_STARTUP_WARMUP_PROMPT",
-    ("A cinematic drone shot over coastal cliffs at sunrise, "
-     "golden light, gentle ocean waves, ultra detailed"),
+    ("A cinematic drone shot over coastal cliffs at sunrise, golden light, gentle ocean waves, ultra detailed"),
 ).strip()
 STARTUP_WARMUP_TIMEOUT_SECONDS = max(1, _env_int("FASTVIDEO_STARTUP_WARMUP_TIMEOUT_SECONDS", 2400))

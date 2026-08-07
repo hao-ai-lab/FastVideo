@@ -227,7 +227,7 @@ def _save_prompt(path: str, prompt_text: str, prompt_name: str) -> None:
 def _build_prompt_backup_path(prompt_path: Path) -> Path:
     timestamp = time.strftime("%Y%m%d_%H%M%S", time.localtime())
     suffix = "".join(prompt_path.suffixes)
-    stem = (prompt_path.name[:-len(suffix)] if suffix else prompt_path.name)
+    stem = prompt_path.name[: -len(suffix)] if suffix else prompt_path.name
     return prompt_path.with_name(f"{stem}.{timestamp}.bak{suffix}")
 
 
@@ -275,8 +275,9 @@ def _extract_assistant_content(response_json: dict[str, Any]) -> str:
             return "".join(chunks)
     finish_reason = choices[0].get("finish_reason")
     refusal = message.get("refusal")
-    raise ValueError("Missing assistant content in chat completion response. "
-                     f"finish_reason={finish_reason!r}, refusal={refusal!r}")
+    raise ValueError(
+        f"Missing assistant content in chat completion response. finish_reason={finish_reason!r}, refusal={refusal!r}"
+    )
 
 
 def _dump_response_json(response: Any) -> dict[str, Any]:
@@ -287,8 +288,7 @@ def _dump_response_json(response: Any) -> dict[str, Any]:
     elif hasattr(response, "dict"):
         payload = response.dict()
     else:
-        raise TypeError("Unsupported chat completion response type. "
-                        f"type={type(response)!r}")
+        raise TypeError(f"Unsupported chat completion response type. type={type(response)!r}")
 
     if not isinstance(payload, dict):
         raise TypeError("Chat completion response did not serialize to a JSON object.")
@@ -301,7 +301,7 @@ def _extract_content_or_empty(response_json: dict[str, Any]) -> str:
     except Exception as exc:
         choices = response_json.get("choices")
         choice0 = choices[0] if isinstance(choices, list) and choices else {}
-        message = (choice0.get("message", {}) if isinstance(choice0, dict) else {})
+        message = choice0.get("message", {}) if isinstance(choice0, dict) else {}
         usage = response_json.get("usage")
         _enhance_print(
             "WARN",
@@ -375,12 +375,12 @@ def _resolve_rollout_label(value: Any) -> str:
 def _format_locked_segments(locked_segments: list[str]) -> str:
     if not locked_segments:
         return "(none)"
-    return "\n".join(f'segment_{i + 1} ({i * 5}-{(i + 1) * 5}s): "{segment}"'
-                     for i, segment in enumerate(locked_segments))
+    return "\n".join(
+        f'segment_{i + 1} ({i * 5}-{(i + 1) * 5}s): "{segment}"' for i, segment in enumerate(locked_segments)
+    )
 
 
 class PromptEnhancer:
-
     def __init__(self):
         self.provider = PROMPT_PROVIDER
         self.provider_label = _resolve_provider_label(PROMPT_PROVIDER)
@@ -406,13 +406,13 @@ class PromptEnhancer:
         self.rewrite_default_temperature = self.resolve_rewrite_temperature(PROMPT_TEMPERATURE)
         self.max_completion_tokens = PROMPT_MAX_COMPLETION_TOKENS
         self.enhance_system_prompt_path = PROMPT_ENHANCE_SYSTEM_PROMPT_PATH
-        self.enhance_system_prompt_fallback_path = (PROMPT_ENHANCE_SYSTEM_PROMPT_FALLBACK_PATH)
+        self.enhance_system_prompt_fallback_path = PROMPT_ENHANCE_SYSTEM_PROMPT_FALLBACK_PATH
         self.auto_system_prompt_path = PROMPT_AUTO_SYSTEM_PROMPT_PATH
-        self.auto_system_prompt_fallback_path = (PROMPT_AUTO_SYSTEM_PROMPT_FALLBACK_PATH)
+        self.auto_system_prompt_fallback_path = PROMPT_AUTO_SYSTEM_PROMPT_FALLBACK_PATH
         self.rewrite_all_system_prompt_path = PROMPT_REWRITE_ALL_SYSTEM_PROMPT_PATH
-        self.rewrite_all_system_prompt_fallback_path = (PROMPT_REWRITE_ALL_SYSTEM_PROMPT_FALLBACK_PATH)
-        self.rewrite_user_system_prompt_path = (PROMPT_REWRITE_USER_SYSTEM_PROMPT_PATH)
-        self.rewrite_user_system_prompt_fallback_path = (PROMPT_REWRITE_USER_SYSTEM_PROMPT_FALLBACK_PATH)
+        self.rewrite_all_system_prompt_fallback_path = PROMPT_REWRITE_ALL_SYSTEM_PROMPT_FALLBACK_PATH
+        self.rewrite_user_system_prompt_path = PROMPT_REWRITE_USER_SYSTEM_PROMPT_PATH
+        self.rewrite_user_system_prompt_fallback_path = PROMPT_REWRITE_USER_SYSTEM_PROMPT_FALLBACK_PATH
         self.reload_system_prompts()
 
     def _build_provider_runtimes(self) -> list[ProviderRuntime]:
@@ -422,8 +422,7 @@ class PromptEnhancer:
             api_base_url = PROMPT_API_BASE_URLS[provider_name]
             if not isinstance(api_key, str) or not api_key.strip():
                 env_names = ", ".join(PROMPT_PROVIDER_API_KEY_NAMES[provider_name])
-                raise RuntimeError("Missing required environment variable: one of "
-                                   f"{env_names}")
+                raise RuntimeError(f"Missing required environment variable: one of {env_names}")
             runtimes.append(
                 ProviderRuntime(
                     name=provider_name,
@@ -438,7 +437,8 @@ class PromptEnhancer:
                         api_key=api_key,
                         api_base_url=api_base_url,
                     ),
-                ))
+                )
+            )
         return runtimes
 
     def _build_provider_runtime_stages(self) -> list[list[ProviderRuntime]]:
@@ -488,43 +488,32 @@ class PromptEnhancer:
 
     def get_prompt_config(self) -> dict[str, Any]:
         return {
-            "next_segment_system_prompt_path":
-            getattr(
+            "next_segment_system_prompt_path": getattr(
                 self,
                 "enhance_system_prompt_source_path",
                 self.enhance_system_prompt_path,
             ),
-            "auto_extension_system_prompt_path":
-            getattr(
+            "auto_extension_system_prompt_path": getattr(
                 self,
                 "auto_system_prompt_source_path",
                 self.auto_system_prompt_path,
             ),
-            "rewrite_window_system_prompt_path":
-            getattr(
+            "rewrite_window_system_prompt_path": getattr(
                 self,
                 "rewrite_all_system_prompt_source_path",
                 self.rewrite_all_system_prompt_path,
             ),
-            "rewrite_user_system_prompt_path":
-            _resolve_prompt_save_path(
+            "rewrite_user_system_prompt_path": _resolve_prompt_save_path(
                 self.rewrite_user_system_prompt_path,
                 self.rewrite_user_system_prompt_fallback_path,
             ),
-            "next_segment_system_prompt":
-            self.enhance_system_prompt,
-            "auto_extension_system_prompt":
-            self.auto_system_prompt,
-            "rewrite_window_system_prompt":
-            self.rewrite_all_system_prompt,
-            "rewrite_user_system_prompt":
-            self.rewrite_user_system_prompt,
-            "rewrite_model":
-            self.rewrite_default_model,
-            "rewrite_model_options":
-            list(self.rewrite_model_options),
-            "rewrite_temperature":
-            getattr(
+            "next_segment_system_prompt": self.enhance_system_prompt,
+            "auto_extension_system_prompt": self.auto_system_prompt,
+            "rewrite_window_system_prompt": self.rewrite_all_system_prompt,
+            "rewrite_user_system_prompt": self.rewrite_user_system_prompt,
+            "rewrite_model": self.rewrite_default_model,
+            "rewrite_model_options": list(self.rewrite_model_options),
+            "rewrite_temperature": getattr(
                 self,
                 "rewrite_default_temperature",
                 self.temperature,
@@ -636,17 +625,19 @@ class PromptEnhancer:
         provider_name = provider or self.provider
         provider_family = _resolve_provider_family(provider_name)
         provider_api_key = api_key or self.api_key
-        resolved_api_base_url = (self.api_base_url if api_base_url is None else api_base_url)
+        resolved_api_base_url = self.api_base_url if api_base_url is None else api_base_url
         if provider_family == "cerebras":
             if Cerebras is None:
-                raise RuntimeError("Cerebras SDK is not installed. Install "
-                                   "'cerebras-cloud-sdk' to use prompt enhancement.")
+                raise RuntimeError(
+                    "Cerebras SDK is not installed. Install 'cerebras-cloud-sdk' to use prompt enhancement."
+                )
             return Cerebras(api_key=provider_api_key)
 
         if provider_family == "groq":
             if OpenAI is None:
-                raise RuntimeError("OpenAI SDK is not installed. Install 'openai' to use "
-                                   f"the {provider_name} prompt provider.")
+                raise RuntimeError(
+                    f"OpenAI SDK is not installed. Install 'openai' to use the {provider_name} prompt provider."
+                )
             client_kwargs = {
                 "api_key": provider_api_key,
             }
@@ -691,11 +682,11 @@ class PromptEnhancer:
         normalized: dict[str, int] = {}
         for provider_name in PROMPT_PROVIDER_PRIORITY:
             raw_value = counts.get(provider_name, 0)
-            normalized[provider_name] = (raw_value if isinstance(raw_value, int) and raw_value >= 0 else 0)
+            normalized[provider_name] = raw_value if isinstance(raw_value, int) and raw_value >= 0 else 0
         for provider_name, raw_value in counts.items():
             if provider_name in normalized:
                 continue
-            normalized[provider_name] = (raw_value if isinstance(raw_value, int) and raw_value >= 0 else 0)
+            normalized[provider_name] = raw_value if isinstance(raw_value, int) and raw_value >= 0 else 0
         return normalized
 
     def _resolve_provider_request_model(
@@ -708,7 +699,7 @@ class PromptEnhancer:
             "provider_request_models",
             {},
         )
-        candidate = (requested_model.strip() if isinstance(requested_model, str) else "")
+        candidate = requested_model.strip() if isinstance(requested_model, str) else ""
         if not candidate:
             return provider_request_models.get(
                 provider_name,
@@ -730,15 +721,10 @@ class PromptEnhancer:
         temperature: float | None = None,
     ) -> dict[str, Any]:
         return {
-            "model":
-            model or self.model,
-            "temperature":
-            self.temperature if temperature is None else temperature,
-            "max_completion_tokens":
-            self.max_completion_tokens,
-            "response_format": {
-                "type": "json_object"
-            },
+            "model": model or self.model,
+            "temperature": self.temperature if temperature is None else temperature,
+            "max_completion_tokens": self.max_completion_tokens,
+            "response_format": {"type": "json_object"},
             "messages": [
                 {
                     "role": "system",
@@ -805,7 +791,7 @@ class PromptEnhancer:
 
             async def _runner(runtime: ProviderRuntime) -> None:
                 try:
-                    if (isinstance(stage_timeout_seconds, (int, float)) and stage_timeout_seconds > 0):
+                    if isinstance(stage_timeout_seconds, (int, float)) and stage_timeout_seconds > 0:
                         result = await asyncio.wait_for(
                             attempt_factory(runtime),
                             timeout=stage_timeout_seconds,
@@ -813,12 +799,13 @@ class PromptEnhancer:
                     else:
                         result = await attempt_factory(runtime)
                 except asyncio.TimeoutError:
-                    await queue.put((
-                        "error",
-                        runtime.name,
-                        RuntimeError("timed out after "
-                                     f"{stage_timeout_seconds:.2f}s"),
-                    ))
+                    await queue.put(
+                        (
+                            "error",
+                            runtime.name,
+                            RuntimeError(f"timed out after {stage_timeout_seconds:.2f}s"),
+                        )
+                    )
                 except Exception as exc:
                     await queue.put(("error", runtime.name, exc))
                 else:
@@ -838,8 +825,7 @@ class PromptEnhancer:
                     stage_errors.append(f"provider={provider_name} error={payload}")
                     _enhance_print(
                         "WARN",
-                        f"{operation_name} failed for provider="
-                        f"{provider_name}: {payload}",
+                        f"{operation_name} failed for provider={provider_name}: {payload}",
                     )
             finally:
                 for task in tasks:
@@ -1067,11 +1053,11 @@ class PromptEnhancer:
             return None
 
         for key in (
-                "prompt",
-                "text",
-                "segment_prompt",
-                "content",
-                "description",
+            "prompt",
+            "text",
+            "segment_prompt",
+            "content",
+            "description",
         ):
             value = item.get(key)
             if isinstance(value, str) and value.strip():
@@ -1147,8 +1133,10 @@ class PromptEnhancer:
                 line,
             )
             match = re.match(
-                (r'^(?:\*\*)?(?:segment|scene|shot|prompt)?\s*[_ -]?(\d+)'
-                 r'(?:\*\*)?\s*[:.)-]\s*(.+)$'),
+                (
+                    r"^(?:\*\*)?(?:segment|scene|shot|prompt)?\s*[_ -]?(\d+)"
+                    r"(?:\*\*)?\s*[:.)-]\s*(.+)$"
+                ),
                 normalized_line,
                 flags=re.IGNORECASE,
             )
@@ -1189,10 +1177,10 @@ class PromptEnhancer:
 
         for candidate in candidate_dicts:
             for key in (
-                    "segment_prompts",
-                    "rewritten_prompts",
-                    "prompts",
-                    "segments",
+                "segment_prompts",
+                "rewritten_prompts",
+                "prompts",
+                "segments",
             ):
                 prompts = self._maybe_extract_rewrite_prompt_list(
                     candidate.get(key),
@@ -1246,13 +1234,19 @@ class PromptEnhancer:
                 continue
 
         rollout_id = next(
-            (value for value in (self._optional_prompt_field(candidate, "id")
-                                 for candidate in candidate_dicts) if value is not None),
+            (
+                value
+                for value in (self._optional_prompt_field(candidate, "id") for candidate in candidate_dicts)
+                if value is not None
+            ),
             _resolve_rollout_id(preset_id),
         )
         rollout_label = next(
-            (value for value in (self._optional_prompt_field(candidate, "label")
-                                 for candidate in candidate_dicts) if value is not None),
+            (
+                value
+                for value in (self._optional_prompt_field(candidate, "label") for candidate in candidate_dicts)
+                if value is not None
+            ),
             _resolve_rollout_label(preset_label),
         )
         prompts = self._extract_rewrite_segment_prompts_lenient(
@@ -1286,7 +1280,7 @@ class PromptEnhancer:
                 preset_label=preset_label,
             )
         except ValueError as exc:
-            if (parse_error is not None and str(exc) == "No rewrite segment prompts found in assistant response."):
+            if parse_error is not None and str(exc) == "No rewrite segment prompts found in assistant response.":
                 raise parse_error from exc
             raise
 
@@ -1299,13 +1293,12 @@ class PromptEnhancer:
         return self._require_prompt_field(parsed, "prompt")
 
     def set_rewrite_default_model(self, rewrite_model: str) -> str:
-        normalized = (rewrite_model.strip() if isinstance(rewrite_model, str) else "")
+        normalized = rewrite_model.strip() if isinstance(rewrite_model, str) else ""
         if not normalized:
             raise ValueError("rewrite_model cannot be empty.")
         if normalized not in self.rewrite_model_options:
             allowed = ", ".join(self.rewrite_model_options)
-            raise ValueError(f"Unsupported rewrite_model {normalized!r}. "
-                             f"Expected one of: {allowed}.")
+            raise ValueError(f"Unsupported rewrite_model {normalized!r}. Expected one of: {allowed}.")
         self.rewrite_default_model = normalized
         return self.rewrite_default_model
 
@@ -1381,8 +1374,11 @@ class PromptEnhancer:
         timeout_ms: int | None = None,
     ) -> EnhanceResult:
         cleaned = _normalize_prompt(conditioning_prompt)
-        resolved_model = (self.resolve_rewrite_model(model)
-                          if isinstance(model, str) and model.strip() else self.resolve_rewrite_model(None))
+        resolved_model = (
+            self.resolve_rewrite_model(model)
+            if isinstance(model, str) and model.strip()
+            else self.resolve_rewrite_model(None)
+        )
         is_single_clip_mode = mode in {"single_clip", "simple5s", "single5s"}
         if not cleaned:
             return EnhanceResult(
@@ -1403,14 +1399,13 @@ class PromptEnhancer:
                     "single 5-second LTX-2.3 video clip. Respond with "
                     'valid JSON only as {"prompt": "..."}.'  # noqa: E501
                 ),
-                "user_prompt":
-                cleaned,
+                "user_prompt": cleaned,
             }
         else:
             locked_segments_clean = [
                 segment for segment in (_normalize_prompt(item) for item in (locked_segments or [])) if segment
             ]
-            resolved_next_segment_idx = (next_segment_idx if isinstance(next_segment_idx, int) else None)
+            resolved_next_segment_idx = next_segment_idx if isinstance(next_segment_idx, int) else None
             if resolved_next_segment_idx is None or resolved_next_segment_idx < 1:
                 resolved_next_segment_idx = len(locked_segments_clean) + 1
             next_segment_key = f"segment_{resolved_next_segment_idx}"
@@ -1432,17 +1427,18 @@ class PromptEnhancer:
         try:
             _enhance_print(
                 "INFO",
-                "Enhancing prompt: "
-                f"{cleaned}, system_prompt: {request_system_prompt}, "
-                f"mode={mode}",
+                f"Enhancing prompt: {cleaned}, system_prompt: {request_system_prompt}, mode={mode}",
             )
             _enhance_print("INFO", f"user_payload: {user_payload}")
             runtimes = self._get_provider_runtimes()
             if runtimes:
-                timeout_seconds = max(
-                    effective_timeout_ms,
-                    self.http_timeout_ms,
-                ) / 1000.0
+                timeout_seconds = (
+                    max(
+                        effective_timeout_ms,
+                        self.http_timeout_ms,
+                    )
+                    / 1000.0
+                )
                 request_body = self._build_body(
                     system_prompt=request_system_prompt,
                     user_payload=user_payload,
@@ -1468,9 +1464,10 @@ class PromptEnhancer:
                         return _resolve_provider_label(runtime.name), prompt
                     except Exception as exc:
                         error_detail = str(exc)
-                        if (isinstance(response_content, str) and response_content.strip()):
-                            error_detail = (f"{error_detail} | assistant_response="
-                                            f"{_preview_text(response_content, limit=240)}")
+                        if isinstance(response_content, str) and response_content.strip():
+                            error_detail = (
+                                f"{error_detail} | assistant_response={_preview_text(response_content, limit=240)}"
+                            )
                         raise RuntimeError(error_detail) from exc
 
                 provider_name, enhanced_prompt = await self._run_provider_race(
@@ -1524,7 +1521,7 @@ class PromptEnhancer:
         locked_segments_clean = [
             segment for segment in (_normalize_prompt(item) for item in (locked_segments or [])) if segment
         ]
-        resolved_next_segment_idx = (next_segment_idx if isinstance(next_segment_idx, int) else None)
+        resolved_next_segment_idx = next_segment_idx if isinstance(next_segment_idx, int) else None
         if resolved_next_segment_idx is None or resolved_next_segment_idx < 1:
             resolved_next_segment_idx = len(locked_segments_clean) + 1
         next_segment_key = f"segment_{resolved_next_segment_idx}"
@@ -1544,8 +1541,11 @@ class PromptEnhancer:
         }
 
         t0 = time.perf_counter()
-        resolved_model = (self.resolve_rewrite_model(model)
-                          if isinstance(model, str) and model.strip() else self.resolve_rewrite_model(None))
+        resolved_model = (
+            self.resolve_rewrite_model(model)
+            if isinstance(model, str) and model.strip()
+            else self.resolve_rewrite_model(None)
+        )
         try:
             _enhance_print(
                 "INFO",
@@ -1556,10 +1556,13 @@ class PromptEnhancer:
             _enhance_print("INFO", f"auto_user_payload: {user_payload}")
             runtimes = self._get_provider_runtimes()
             if runtimes:
-                timeout_seconds = max(
-                    effective_timeout_ms,
-                    self.http_timeout_ms,
-                ) / 1000.0
+                timeout_seconds = (
+                    max(
+                        effective_timeout_ms,
+                        self.http_timeout_ms,
+                    )
+                    / 1000.0
+                )
                 request_body = self._build_body(
                     system_prompt=self.auto_system_prompt,
                     user_payload=user_payload,
@@ -1582,9 +1585,10 @@ class PromptEnhancer:
                         return _resolve_provider_label(runtime.name), prompt
                     except Exception as exc:
                         error_detail = str(exc)
-                        if (isinstance(response_content, str) and response_content.strip()):
-                            error_detail = (f"{error_detail} | assistant_response="
-                                            f"{_preview_text(response_content, limit=240)}")
+                        if isinstance(response_content, str) and response_content.strip():
+                            error_detail = (
+                                f"{error_detail} | assistant_response={_preview_text(response_content, limit=240)}"
+                            )
                         raise RuntimeError(error_detail) from exc
 
                 provider_name, next_prompt = await self._run_provider_race(
@@ -1653,7 +1657,7 @@ class PromptEnhancer:
                 rollout_label=_resolve_rollout_label(preset_label),
                 raw_response_text=None,
             )
-        expected_len = (len(cleaned_prompts) if cleaned_prompts else DEFAULT_REWRITE_SEGMENT_COUNT)
+        expected_len = len(cleaned_prompts) if cleaned_prompts else DEFAULT_REWRITE_SEGMENT_COUNT
 
         effective_timeout_ms = self._resolve_timeout_ms(timeout_ms)
         timeout_seconds = max(effective_timeout_ms, self.http_timeout_ms) / 1000.0
@@ -1706,9 +1710,10 @@ class PromptEnhancer:
                         )
                     except Exception as exc:
                         error_detail = str(exc)
-                        if (isinstance(response_content, str) and response_content.strip()):
-                            error_detail = (f"{error_detail} | assistant_response="
-                                            f"{_preview_text(response_content, limit=240)}")
+                        if isinstance(response_content, str) and response_content.strip():
+                            error_detail = (
+                                f"{error_detail} | assistant_response={_preview_text(response_content, limit=240)}"
+                            )
                         raise RuntimeError(error_detail) from exc
 
                 (

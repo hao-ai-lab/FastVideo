@@ -109,7 +109,6 @@ def _load_raw_mapping(handle: Any, config_path: Path) -> Any:
 
 
 class _SchemaParser:
-
     def parse_dataclass(
         self,
         config_type: type[T],
@@ -224,7 +223,8 @@ class _SchemaParser:
 
         return tuple(
             self.parse_value(item_type, item, f"{path}[{index}]")
-            for index, (item_type, item) in enumerate(zip(item_types, value, strict=True)))
+            for index, (item_type, item) in enumerate(zip(item_types, value, strict=True))
+        )
 
     def _parse_dict_key(self, annotation: Any, value: Any, path: str) -> Any:
         if annotation is Any:
@@ -278,7 +278,7 @@ _SCALAR_PARSERS: dict[Any, Any] = {
 
 
 def _field_is_required(field: dataclasses.Field[Any]) -> bool:
-    return (field.default is dataclasses.MISSING and field.default_factory is dataclasses.MISSING)
+    return field.default is dataclasses.MISSING and field.default_factory is dataclasses.MISSING
 
 
 def _get_dataclass_spec(config_type: type[Any]) -> _DataclassSpec:
@@ -289,8 +289,7 @@ def _get_dataclass_spec(config_type: type[Any]) -> _DataclassSpec:
     spec = _DataclassSpec(
         cls=config_type,
         type_hints=get_type_hints(config_type),
-        fields_by_name={field.name: field
-                        for field in dataclasses.fields(config_type)},
+        fields_by_name={field.name: field for field in dataclasses.fields(config_type)},
     )
     _DATACLASS_SPEC_CACHE[config_type] = spec
     return spec

@@ -6,6 +6,7 @@ Wan VAE and overwrites the first denoising latent frame with that clean latent
 at every step. This stage mirrors `MagiEvaluator.encode_image` and stashes the
 normalized latent on `batch.image_latent` for the latent-prep and denoise stages.
 """
+
 from __future__ import annotations
 
 from typing import Any

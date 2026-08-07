@@ -8,7 +8,7 @@ from fastvideo.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.configs.models.dits.gen3c import Gen3CVideoConfig
 from fastvideo.configs.models.encoders import BaseEncoderOutput
 from fastvideo.configs.models.encoders.base import TextEncoderArchConfig
-from fastvideo.configs.models.encoders.t5 import (T5LargeArchConfig, T5LargeConfig)
+from fastvideo.configs.models.encoders.t5 import T5LargeArchConfig, T5LargeConfig
 from fastvideo.configs.models.vaes import Gen3CVAEConfig
 from fastvideo.configs.pipelines.base import PipelineConfig
 
@@ -17,8 +17,8 @@ from fastvideo.configs.pipelines.base import PipelineConfig
 class _Gen3CT5LargeArchConfig(T5LargeArchConfig):
     """T5 Large arch config that pads inputs to max_length.
 
-    GEN3C requires padded text encoder inputs, while the base 
-    T5 config no longer pads by default after the SP mask 
+    GEN3C requires padded text encoder inputs, while the base
+    T5 config no longer pads by default after the SP mask
     refactor [PR#1142](https://github.com/hao-ai-lab/FastVideo/pull/1142).
     """
 
@@ -35,7 +35,7 @@ class _Gen3CT5LargeConfig(T5LargeConfig):
 
 def t5_large_postprocess_text(outputs: BaseEncoderOutput) -> torch.Tensor:
     """Postprocess T5 Large text encoder outputs for GEN3C pipeline.
-    
+
     Return raw last_hidden_state without truncation/padding.
     """
     hidden_state = outputs.last_hidden_state
@@ -61,7 +61,7 @@ def t5_large_postprocess_text(outputs: BaseEncoderOutput) -> torch.Tensor:
 @dataclass
 class Gen3CConfig(PipelineConfig):
     """Configuration for GEN3C Video Generation Pipeline.
-    
+
     GEN3C extends Cosmos with 3D cache for camera-controlled video generation.
     Key parameters:
     - frame_buffer_max: Number of 3D cache buffers (default: 2)
@@ -73,13 +73,14 @@ class Gen3CConfig(PipelineConfig):
 
     vae_config: VAEConfig = field(default_factory=Gen3CVAEConfig)
 
-    text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (_Gen3CT5LargeConfig(), ))
-    postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.Tensor],
-                                  ...] = field(default_factory=lambda: (t5_large_postprocess_text, ))
+    text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (_Gen3CT5LargeConfig(),))
+    postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.Tensor], ...] = field(
+        default_factory=lambda: (t5_large_postprocess_text,)
+    )
 
     dit_precision: str = "bf16"
     vae_precision: str = "bf16"
-    text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("bf16", ))
+    text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("bf16",))
 
     # GEN3C-specific conditioning parameters
     conditioning_strategy: str = "frame_replace"
@@ -129,7 +130,8 @@ class Gen3CConfig(PipelineConfig):
         "underexposed and overexposed scenes, poor color balance, washed out colors, choppy sequences, "
         "jerky movements, low frame rate, artifacting, color banding, unnatural transitions, outdated special "
         "effects, fake elements, unconvincing visuals, poorly edited content, jump cuts, visual noise, and "
-        "flickering. Overall, the video is of poor quality.")
+        "flickering. Overall, the video is of poor quality."
+    )
 
     # Autoregressive generation settings
     autoregressive_chunk_frames: int = 121  # Frames per chunk
@@ -142,11 +144,13 @@ class Gen3CConfig(PipelineConfig):
         self._vae_latent_dim = 16
 
         # Validate frame buffer configuration matches DiT
-        if hasattr(self.dit_config, 'arch_config'):
+        if hasattr(self.dit_config, "arch_config"):
             arch_config = self.dit_config.arch_config
-            if (hasattr(arch_config, 'frame_buffer_max') and arch_config.frame_buffer_max != self.frame_buffer_max):
-                raise ValueError(f"frame_buffer_max mismatch: pipeline config has {self.frame_buffer_max}, "
-                                 f"DiT config has {arch_config.frame_buffer_max}")
+            if hasattr(arch_config, "frame_buffer_max") and arch_config.frame_buffer_max != self.frame_buffer_max:
+                raise ValueError(
+                    f"frame_buffer_max mismatch: pipeline config has {self.frame_buffer_max}, "
+                    f"DiT config has {arch_config.frame_buffer_max}"
+                )
 
         allowed_cfg_behavior = {"legacy", "official_uncond_at_unity"}
         if self.cfg_behavior not in allowed_cfg_behavior:

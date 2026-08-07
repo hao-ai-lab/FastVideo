@@ -8,7 +8,7 @@ from typing import Any
 import torch
 import torch.nn.functional as F
 
-from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import (SelfForcingFlowMatchScheduler)
+from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import SelfForcingFlowMatchScheduler
 from fastvideo.train.methods.base import LogScalar, TrainingMethod
 from fastvideo.train.models.base import ModelBase
 from fastvideo.train.utils.checkpoint import _FullModelState
@@ -16,7 +16,6 @@ from fastvideo.train.utils.optimizer import build_optimizer_and_scheduler
 
 
 class CausalConsistencyDistillationMethod(TrainingMethod):
-
     def __init__(
         self,
         *,
@@ -27,10 +26,12 @@ class CausalConsistencyDistillationMethod(TrainingMethod):
 
         for role in ("student", "teacher", "ema"):
             if role not in role_models:
-                raise ValueError(f"Causal-CD requires role {role!r} "
-                                 "(student trainable; teacher + ema frozen, "
-                                 "both initialized from the student's "
-                                 "checkpoint)")
+                raise ValueError(
+                    f"Causal-CD requires role {role!r} "
+                    "(student trainable; teacher + ema frozen, "
+                    "both initialized from the student's "
+                    "checkpoint)"
+                )
         if not self.student._trainable:
             raise ValueError("Causal-CD requires student to be trainable")
         self.teacher = role_models["teacher"]
@@ -107,7 +108,7 @@ class CausalConsistencyDistillationMethod(TrainingMethod):
 
         sigmas = self._sf_scheduler.sigmas.to(device)
         timesteps = self._sf_scheduler.timesteps.to(device)
-        idx = torch.randint(0, self._discrete_cd_n - 1, (1, ), generator=self.cuda_generator, device=device).squeeze(0)
+        idx = torch.randint(0, self._discrete_cd_n - 1, (1,), generator=self.cuda_generator, device=device).squeeze(0)
         t, t_next = timesteps[idx], timesteps[idx + 1]
         sigma_t, sigma_t_next = sigmas[idx], sigmas[idx + 1]
         t_pf = t * torch.ones(batch_size, num_latents, device=device)
@@ -127,43 +128,31 @@ class CausalConsistencyDistillationMethod(TrainingMethod):
         training_batch.timesteps = t_pf
 
         with torch.no_grad():
-            v_cond = self._predict_flow(self.teacher,
-                                        latent_t,
-                                        t_pf,
-                                        training_batch,
-                                        conditional=True,
-                                        clean_x=clean_latents)
-            v_uncond = self._predict_flow(self.teacher,
-                                          latent_t,
-                                          t_pf,
-                                          training_batch,
-                                          conditional=False,
-                                          clean_x=clean_latents)
+            v_cond = self._predict_flow(
+                self.teacher, latent_t, t_pf, training_batch, conditional=True, clean_x=clean_latents
+            )
+            v_uncond = self._predict_flow(
+                self.teacher, latent_t, t_pf, training_batch, conditional=False, clean_x=clean_latents
+            )
             v_pred = v_uncond + self._guidance_scale * (v_cond - v_uncond)
-            dt = ((t - t_next) / float(self.student.num_train_timesteps))
+            dt = (t - t_next) / float(self.student.num_train_timesteps)
             latent_t_next = latent_t - dt * v_pred
 
-        flow_student = self._predict_flow(self.student,
-                                          latent_t,
-                                          t_pf,
-                                          training_batch,
-                                          conditional=True,
-                                          clean_x=clean_latents)
+        flow_student = self._predict_flow(
+            self.student, latent_t, t_pf, training_batch, conditional=True, clean_x=clean_latents
+        )
         x0_t = latent_t - sigma_t * flow_student
 
         with torch.no_grad():
-            flow_ema = self._predict_flow(self.ema_model,
-                                          latent_t_next,
-                                          t_next_pf,
-                                          training_batch,
-                                          conditional=True,
-                                          clean_x=clean_latents)
+            flow_ema = self._predict_flow(
+                self.ema_model, latent_t_next, t_next_pf, training_batch, conditional=True, clean_x=clean_latents
+            )
             x0_t_next = latent_t_next - sigma_t_next * flow_ema
 
         loss = F.mse_loss(x0_t.float(), x0_t_next.float())
 
         loss_map = {"total_loss": loss, "causal_cd_loss": loss}
-        attn_metadata = (training_batch.attn_metadata_vsa if self._attn_kind == "vsa" else training_batch.attn_metadata)
+        attn_metadata = training_batch.attn_metadata_vsa if self._attn_kind == "vsa" else training_batch.attn_metadata
         outputs: dict[str, Any] = {"_fv_backward": (t_pf, attn_metadata)}
         metrics: dict[str, LogScalar] = {}
         return loss_map, outputs, metrics
@@ -203,19 +192,22 @@ class CausalConsistencyDistillationMethod(TrainingMethod):
         conditional: bool,
         clean_x: torch.Tensor,
     ) -> torch.Tensor:
-        return model.predict_noise(latents,
-                                   timestep,
-                                   batch,
-                                   conditional=conditional,
-                                   cfg_uncond=None,
-                                   attn_kind=self._attn_kind,
-                                   clean_x=clean_x)
+        return model.predict_noise(
+            latents,
+            timestep,
+            batch,
+            conditional=conditional,
+            cfg_uncond=None,
+            attn_kind=self._attn_kind,
+            clean_x=clean_x,
+        )
 
     @torch.no_grad()
     def _update_ema(self) -> None:
         decay = self._ema_decay
-        for ema_p, p in zip(self.ema_model.transformer.parameters(), self.student.transformer.parameters(),
-                            strict=True):
+        for ema_p, p in zip(
+            self.ema_model.transformer.parameters(), self.student.transformer.parameters(), strict=True
+        ):
             ema_p.mul_(decay).add_(p.detach().to(ema_p.dtype), alpha=1.0 - decay)
 
     def _init_optimizers_and_schedulers(self) -> None:

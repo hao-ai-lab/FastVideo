@@ -31,9 +31,9 @@ class PSNRMetric(BaseMetric):
         chunk = self._chunk_size or n
         mse_parts = []
         for i in range(0, n, chunk):
-            g = gen[i:i + chunk]
-            r = ref[i:i + chunk]
-            mse_parts.append(((g - r)**2).mean(dim=(1, 2, 3)))
+            g = gen[i : i + chunk]
+            r = ref[i : i + chunk]
+            mse_parts.append(((g - r) ** 2).mean(dim=(1, 2, 3)))
         mse = torch.cat(mse_parts)  # (T,)
         psnr = 10.0 * torch.log10(self.max_val**2 / mse.clamp(min=1e-10))
 

@@ -5,6 +5,7 @@ session controller via attribute access (``runtime.gpu_pool``). Do NOT import
 these names directly (``from runtime import gpu_pool``) — ``from``-import
 copies the current binding, freezing it at ``None`` before lifespan runs.
 """
+
 # pyright: reportMissingImports=false
 from __future__ import annotations
 

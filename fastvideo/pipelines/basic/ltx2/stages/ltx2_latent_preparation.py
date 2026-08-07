@@ -15,10 +15,12 @@ from fastvideo.logger import init_logger
 from fastvideo.models.dits.ltx2 import VideoLatentShape
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
-from fastvideo.pipelines.basic.ltx2.stages.ltx2_image_conditioning import (LTX2_VIDEO_CLEAN_LATENT_KEY,
-                                                                           LTX2_VIDEO_DENOISE_MASK_KEY,
-                                                                           apply_ltx2_gaussian_noiser,
-                                                                           build_ltx2_image_conditioning)
+from fastvideo.pipelines.basic.ltx2.stages.ltx2_image_conditioning import (
+    LTX2_VIDEO_CLEAN_LATENT_KEY,
+    LTX2_VIDEO_DENOISE_MASK_KEY,
+    apply_ltx2_gaussian_noiser,
+    build_ltx2_image_conditioning,
+)
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 
@@ -141,8 +143,7 @@ class LTX2LatentPreparationStage(PipelineStage):
 
         spatial_ratio = fastvideo_args.pipeline_config.vae_config.arch_config.spatial_compression_ratio
         if height % spatial_ratio != 0 or width % spatial_ratio != 0:
-            raise ValueError(f"Height and width must be divisible by {spatial_ratio} "
-                             f"but are {height} and {width}.")
+            raise ValueError(f"Height and width must be divisible by {spatial_ratio} but are {height} and {width}.")
         shape = (
             batch_size,
             self.transformer.num_channels_latents,
@@ -152,8 +153,10 @@ class LTX2LatentPreparationStage(PipelineStage):
         )
 
         if isinstance(generator, list) and len(generator) != batch_size:
-            raise ValueError(f"You have passed a list of generators of length {len(generator)}, "
-                             f"but requested an effective batch size of {batch_size}.")
+            raise ValueError(
+                f"You have passed a list of generators of length {len(generator)}, "
+                f"but requested an effective batch size of {batch_size}."
+            )
 
         if latents is None:
             if latent_path:
@@ -213,8 +216,8 @@ class LTX2LatentPreparationStage(PipelineStage):
                 denoise_mask=image_conditioning.denoise_mask,
                 noise_scale=1.0,
             )
-            batch.extra[LTX2_VIDEO_CLEAN_LATENT_KEY] = (image_conditioning.clean_latent)
-            batch.extra[LTX2_VIDEO_DENOISE_MASK_KEY] = (image_conditioning.denoise_mask)
+            batch.extra[LTX2_VIDEO_CLEAN_LATENT_KEY] = image_conditioning.clean_latent
+            batch.extra[LTX2_VIDEO_DENOISE_MASK_KEY] = image_conditioning.denoise_mask
             logger.info(
                 "[LTX2] Applied conditioning for stage-1: images=%d latent=%s.",
                 len(image_conditioning.images),
@@ -228,7 +231,7 @@ class LTX2LatentPreparationStage(PipelineStage):
     def _adjust_video_length(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> int | None:
         if not fastvideo_args.pipeline_config.vae_config.use_temporal_scaling_frames:
             return None
-        temporal_scale_factor = (fastvideo_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio)
+        temporal_scale_factor = fastvideo_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
         video_length = batch.num_frames
         return int((video_length - 1) // temporal_scale_factor + 1)
 
@@ -269,8 +272,9 @@ class LTX2LatentPreparationStage(PipelineStage):
         result.add_check(
             "prompt_or_embeds",
             None,
-            lambda _: V.string_or_list_strings(batch.prompt) or not batch.prompt_embeds or V.list_not_empty(
-                batch.prompt_embeds),
+            lambda _: V.string_or_list_strings(batch.prompt)
+            or not batch.prompt_embeds
+            or V.list_not_empty(batch.prompt_embeds),
         )
         if batch.prompt_embeds:
             result.add_check("prompt_embeds", batch.prompt_embeds, V.list_of_tensors)

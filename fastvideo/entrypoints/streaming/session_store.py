@@ -20,6 +20,7 @@ JSON payload via an accompanying :class:`BlobStore`. Both stores share a
 process today; they are separate types so that a future implementation
 can put blobs on S3 while keeping session metadata in Redis.
 """
+
 from __future__ import annotations
 
 import threading
@@ -52,8 +53,7 @@ class BlobStore(ABC):
         """Remove a blob. Missing ids are a no-op."""
 
     @abstractmethod
-    def __contains__(self, blob_id: str) -> bool:
-        ...
+    def __contains__(self, blob_id: str) -> bool: ...
 
 
 @dataclass(frozen=True)
@@ -137,12 +137,10 @@ class SessionStore(ABC):
         """Forget a session. Missing ids are a no-op."""
 
     @abstractmethod
-    def __contains__(self, session_id: str) -> bool:
-        ...
+    def __contains__(self, session_id: str) -> bool: ...
 
     @abstractmethod
-    def __iter__(self) -> Iterator[str]:
-        ...
+    def __iter__(self) -> Iterator[str]: ...
 
 
 class InMemorySessionStore(SessionStore):

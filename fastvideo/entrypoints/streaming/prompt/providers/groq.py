@@ -1,12 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 """Groq LLM provider (OpenAI-compatible chat endpoint)."""
+
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass
 
 from fastvideo.entrypoints.streaming.prompt.providers._openai_compat import (
-    complete_openai_compatible, )
+    complete_openai_compatible,
+)
 from fastvideo.entrypoints.streaming.prompt.providers.base import (
     LLMRequest,
     LLMResponse,

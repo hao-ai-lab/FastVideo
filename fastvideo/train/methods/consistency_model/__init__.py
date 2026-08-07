@@ -6,7 +6,8 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from fastvideo.train.methods.consistency_model.causal_cd import (
-        CausalConsistencyDistillationMethod, )
+        CausalConsistencyDistillationMethod,
+    )
 
 __all__ = [
     "CausalConsistencyDistillationMethod",
@@ -16,7 +17,8 @@ __all__ = [
 def __getattr__(name: str) -> object:
     if name == "CausalConsistencyDistillationMethod":
         from fastvideo.train.methods.consistency_model.causal_cd import (
-            CausalConsistencyDistillationMethod, )
+            CausalConsistencyDistillationMethod,
+        )
 
         return CausalConsistencyDistillationMethod
     raise AttributeError(name)

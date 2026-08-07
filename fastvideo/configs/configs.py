@@ -13,6 +13,7 @@ class DatasetType(str, Enum):
     """
     Enumeration for different dataset types.
     """
+
     HF = "hf"
     MERGED = "merged"
 
@@ -23,7 +24,8 @@ class DatasetType(str, Enum):
             return cls(value.lower())
         except ValueError:
             raise ValueError(
-                f"Invalid dataset type: {value}. Must be one of: {', '.join([m.value for m in cls])}") from None
+                f"Invalid dataset type: {value}. Must be one of: {', '.join([m.value for m in cls])}"
+            ) from None
 
     @classmethod
     def choices(cls) -> list[str]:
@@ -35,6 +37,7 @@ class VideoLoaderType(str, Enum):
     """
     Enumeration for different video loaders.
     """
+
     TORCHCODEC = "torchcodec"
     TORCHVISION = "torchvision"
 
@@ -45,7 +48,8 @@ class VideoLoaderType(str, Enum):
             return cls(value.lower())
         except ValueError:
             raise ValueError(
-                f"Invalid video loader: {value}. Must be one of: {', '.join([m.value for m in cls])}") from None
+                f"Invalid video loader: {value}. Must be one of: {', '.join([m.value for m in cls])}"
+            ) from None
 
     @classmethod
     def choices(cls) -> list[str]:
@@ -96,108 +100,140 @@ class PreprocessConfig:
 
         preprocess_args = parser.add_argument_group("Preprocessing Arguments")
         # Model & Dataset
-        preprocess_args.add_argument(f"--{prefix_with_dot}model-path",
-                                     type=str,
-                                     default=PreprocessConfig.model_path,
-                                     help="Path to the model for preprocessing")
-        preprocess_args.add_argument(f"--{prefix_with_dot}dataset-path",
-                                     type=str,
-                                     default=PreprocessConfig.dataset_path,
-                                     help="Path to the dataset directory for preprocessing")
-        preprocess_args.add_argument(f"--{prefix_with_dot}dataset-type",
-                                     type=str,
-                                     choices=DatasetType.choices(),
-                                     default=PreprocessConfig.dataset_type.value,
-                                     help="Type of the dataset")
-        preprocess_args.add_argument(f"--{prefix_with_dot}dataset-output-dir",
-                                     type=str,
-                                     default=PreprocessConfig.dataset_output_dir,
-                                     help="The output directory where the dataset will be written.")
+        preprocess_args.add_argument(
+            f"--{prefix_with_dot}model-path",
+            type=str,
+            default=PreprocessConfig.model_path,
+            help="Path to the model for preprocessing",
+        )
+        preprocess_args.add_argument(
+            f"--{prefix_with_dot}dataset-path",
+            type=str,
+            default=PreprocessConfig.dataset_path,
+            help="Path to the dataset directory for preprocessing",
+        )
+        preprocess_args.add_argument(
+            f"--{prefix_with_dot}dataset-type",
+            type=str,
+            choices=DatasetType.choices(),
+            default=PreprocessConfig.dataset_type.value,
+            help="Type of the dataset",
+        )
+        preprocess_args.add_argument(
+            f"--{prefix_with_dot}dataset-output-dir",
+            type=str,
+            default=PreprocessConfig.dataset_output_dir,
+            help="The output directory where the dataset will be written.",
+        )
 
         # Dataloader
         preprocess_args.add_argument(
             f"--{prefix_with_dot}dataloader-num-workers",
             type=int,
             default=PreprocessConfig.dataloader_num_workers,
-            help=
-            "Number of subprocesses to use for data loading. 0 means that the data will be loaded in the main process.")
-        preprocess_args.add_argument(f"--{prefix_with_dot}preprocess-video-batch-size",
-                                     type=int,
-                                     default=PreprocessConfig.preprocess_video_batch_size,
-                                     help="Batch size (per device) for the training dataloader.")
+            help="Number of subprocesses to use for data loading. 0 means that the data will be loaded in the main process.",
+        )
+        preprocess_args.add_argument(
+            f"--{prefix_with_dot}preprocess-video-batch-size",
+            type=int,
+            default=PreprocessConfig.preprocess_video_batch_size,
+            help="Batch size (per device) for the training dataloader.",
+        )
 
         # Saver
-        preprocess_args.add_argument(f"--{prefix_with_dot}samples-per-file",
-                                     type=int,
-                                     default=PreprocessConfig.samples_per_file,
-                                     help="Number of samples per output file")
-        preprocess_args.add_argument(f"--{prefix_with_dot}flush-frequency",
-                                     type=int,
-                                     default=PreprocessConfig.flush_frequency,
-                                     help="How often to save to parquet files")
+        preprocess_args.add_argument(
+            f"--{prefix_with_dot}samples-per-file",
+            type=int,
+            default=PreprocessConfig.samples_per_file,
+            help="Number of samples per output file",
+        )
+        preprocess_args.add_argument(
+            f"--{prefix_with_dot}flush-frequency",
+            type=int,
+            default=PreprocessConfig.flush_frequency,
+            help="How often to save to parquet files",
+        )
 
         # Video processing parameters
-        preprocess_args.add_argument(f"--{prefix_with_dot}video-loader-type",
-                                     type=str,
-                                     choices=VideoLoaderType.choices(),
-                                     default=PreprocessConfig.video_loader_type.value,
-                                     help="Type of the video loader")
-        preprocess_args.add_argument(f"--{prefix_with_dot}max-height",
-                                     type=int,
-                                     default=PreprocessConfig.max_height,
-                                     help="Maximum height for video processing")
-        preprocess_args.add_argument(f"--{prefix_with_dot}max-width",
-                                     type=int,
-                                     default=PreprocessConfig.max_width,
-                                     help="Maximum width for video processing")
-        preprocess_args.add_argument(f"--{prefix_with_dot}num-frames",
-                                     type=int,
-                                     default=PreprocessConfig.num_frames,
-                                     help="Number of frames to process")
-        preprocess_args.add_argument(f"--{prefix_with_dot}video-length-tolerance-range",
-                                     type=float,
-                                     default=PreprocessConfig.video_length_tolerance_range,
-                                     help="Video length tolerance range")
-        preprocess_args.add_argument(f"--{prefix_with_dot}train-fps",
-                                     type=int,
-                                     default=PreprocessConfig.train_fps,
-                                     help="Training FPS")
-        preprocess_args.add_argument(f"--{prefix_with_dot}speed-factor",
-                                     type=float,
-                                     default=PreprocessConfig.speed_factor,
-                                     help="Speed factor for video processing")
-        preprocess_args.add_argument(f"--{prefix_with_dot}drop-short-ratio",
-                                     type=float,
-                                     default=PreprocessConfig.drop_short_ratio,
-                                     help="Ratio for dropping short videos")
-        preprocess_args.add_argument(f"--{prefix_with_dot}do-temporal-sample",
-                                     action=StoreBoolean,
-                                     default=PreprocessConfig.do_temporal_sample,
-                                     help="Whether to do temporal sampling")
+        preprocess_args.add_argument(
+            f"--{prefix_with_dot}video-loader-type",
+            type=str,
+            choices=VideoLoaderType.choices(),
+            default=PreprocessConfig.video_loader_type.value,
+            help="Type of the video loader",
+        )
+        preprocess_args.add_argument(
+            f"--{prefix_with_dot}max-height",
+            type=int,
+            default=PreprocessConfig.max_height,
+            help="Maximum height for video processing",
+        )
+        preprocess_args.add_argument(
+            f"--{prefix_with_dot}max-width",
+            type=int,
+            default=PreprocessConfig.max_width,
+            help="Maximum width for video processing",
+        )
+        preprocess_args.add_argument(
+            f"--{prefix_with_dot}num-frames",
+            type=int,
+            default=PreprocessConfig.num_frames,
+            help="Number of frames to process",
+        )
+        preprocess_args.add_argument(
+            f"--{prefix_with_dot}video-length-tolerance-range",
+            type=float,
+            default=PreprocessConfig.video_length_tolerance_range,
+            help="Video length tolerance range",
+        )
+        preprocess_args.add_argument(
+            f"--{prefix_with_dot}train-fps", type=int, default=PreprocessConfig.train_fps, help="Training FPS"
+        )
+        preprocess_args.add_argument(
+            f"--{prefix_with_dot}speed-factor",
+            type=float,
+            default=PreprocessConfig.speed_factor,
+            help="Speed factor for video processing",
+        )
+        preprocess_args.add_argument(
+            f"--{prefix_with_dot}drop-short-ratio",
+            type=float,
+            default=PreprocessConfig.drop_short_ratio,
+            help="Ratio for dropping short videos",
+        )
+        preprocess_args.add_argument(
+            f"--{prefix_with_dot}do-temporal-sample",
+            action=StoreBoolean,
+            default=PreprocessConfig.do_temporal_sample,
+            help="Whether to do temporal sampling",
+        )
 
         # Model Training configuration
-        preprocess_args.add_argument(f"--{prefix_with_dot}training-cfg-rate",
-                                     type=float,
-                                     default=PreprocessConfig.training_cfg_rate,
-                                     help="Training CFG rate")
-        preprocess_args.add_argument(f"--{prefix_with_dot}with-audio",
-                                     action=StoreBoolean,
-                                     default=PreprocessConfig.with_audio,
-                                     help="Whether to extract and encode audio")
-        preprocess_args.add_argument(f"--{prefix_with_dot}seed",
-                                     type=int,
-                                     default=PreprocessConfig.seed,
-                                     help="Seed for random number generator")
+        preprocess_args.add_argument(
+            f"--{prefix_with_dot}training-cfg-rate",
+            type=float,
+            default=PreprocessConfig.training_cfg_rate,
+            help="Training CFG rate",
+        )
+        preprocess_args.add_argument(
+            f"--{prefix_with_dot}with-audio",
+            action=StoreBoolean,
+            default=PreprocessConfig.with_audio,
+            help="Whether to extract and encode audio",
+        )
+        preprocess_args.add_argument(
+            f"--{prefix_with_dot}seed", type=int, default=PreprocessConfig.seed, help="Seed for random number generator"
+        )
 
         return parser
 
     @classmethod
     def from_kwargs(cls, kwargs: dict[str, Any]) -> Optional["PreprocessConfig"]:
         """Create PreprocessConfig from keyword arguments."""
-        if 'dataset_type' in kwargs and isinstance(kwargs['dataset_type'], str):
-            kwargs['dataset_type'] = DatasetType.from_string(kwargs['dataset_type'])
-        if 'video_loader_type' in kwargs and isinstance(kwargs['video_loader_type'], str):
-            kwargs['video_loader_type'] = VideoLoaderType.from_string(kwargs['video_loader_type'])
+        if "dataset_type" in kwargs and isinstance(kwargs["dataset_type"], str):
+            kwargs["dataset_type"] = DatasetType.from_string(kwargs["dataset_type"])
+        if "video_loader_type" in kwargs and isinstance(kwargs["video_loader_type"], str):
+            kwargs["video_loader_type"] = VideoLoaderType.from_string(kwargs["video_loader_type"])
 
         preprocess_config = cls()
         if not update_config_from_args(preprocess_config, kwargs, prefix="preprocess", pop_args=True):

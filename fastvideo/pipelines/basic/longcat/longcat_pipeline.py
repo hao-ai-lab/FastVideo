@@ -52,26 +52,26 @@ class LongCatPipeline(LoRAPipeline, ComposedPipelineBase):
 
             effective_bsa_params = dict(bsa_params_cfg) if isinstance(bsa_params_cfg, dict) else {}
             if sparsity is not None:
-                effective_bsa_params['sparsity'] = sparsity
+                effective_bsa_params["sparsity"] = sparsity
             if cdf_threshold is not None:
-                effective_bsa_params['cdf_threshold'] = cdf_threshold
+                effective_bsa_params["cdf_threshold"] = cdf_threshold
             if chunk_q is not None:
-                effective_bsa_params['chunk_3d_shape_q'] = chunk_q
+                effective_bsa_params["chunk_3d_shape_q"] = chunk_q
             if chunk_k is not None:
-                effective_bsa_params['chunk_3d_shape_k'] = chunk_k
+                effective_bsa_params["chunk_3d_shape_k"] = chunk_k
             # Provide defaults if still missing
-            effective_bsa_params.setdefault('sparsity', 0.9375)
-            effective_bsa_params.setdefault('chunk_3d_shape_q', [4, 4, 4])
-            effective_bsa_params.setdefault('chunk_3d_shape_k', [4, 4, 4])
+            effective_bsa_params.setdefault("sparsity", 0.9375)
+            effective_bsa_params.setdefault("chunk_3d_shape_q", [4, 4, 4])
+            effective_bsa_params.setdefault("chunk_3d_shape_k", [4, 4, 4])
 
-            if hasattr(transformer, 'enable_bsa'):
+            if hasattr(transformer, "enable_bsa"):
                 logger.info("Enabling Block Sparse Attention (BSA) for LongCat transformer")
                 transformer.enable_bsa()
                 # Propagate params to all attention modules
-                if hasattr(transformer, 'blocks'):
+                if hasattr(transformer, "blocks"):
                     try:
                         for blk in transformer.blocks:
-                            if hasattr(blk, 'self_attn'):
+                            if hasattr(blk, "self_attn"):
                                 blk.self_attn.bsa_params = effective_bsa_params
                     except Exception as e:
                         logger.warning("Failed to set BSA params on all blocks: %s", e)
@@ -80,7 +80,7 @@ class LongCatPipeline(LoRAPipeline, ComposedPipelineBase):
                 logger.warning("BSA is enabled in config but transformer does not support it")
         else:
             # Explicitly disable if present
-            if hasattr(transformer, 'disable_bsa'):
+            if hasattr(transformer, "disable_bsa"):
                 transformer.disable_bsa()
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
@@ -88,34 +88,47 @@ class LongCatPipeline(LoRAPipeline, ComposedPipelineBase):
 
         self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())
 
-        self.add_stage(stage_name="prompt_encoding_stage",
-                       stage=TextEncodingStage(
-                           text_encoders=[self.get_module("text_encoder")],
-                           tokenizers=[self.get_module("tokenizer")],
-                       ))
+        self.add_stage(
+            stage_name="prompt_encoding_stage",
+            stage=TextEncodingStage(
+                text_encoders=[self.get_module("text_encoder")],
+                tokenizers=[self.get_module("tokenizer")],
+            ),
+        )
 
         # Add refine initialization stage (will be skipped if not refining)
         self.add_stage(stage_name="longcat_refine_init_stage", stage=LongCatRefineInitStage(vae=self.get_module("vae")))
 
         # First prepare generic timesteps (for non-refine paths)
-        self.add_stage(stage_name="timestep_preparation_stage",
-                       stage=TimestepPreparationStage(scheduler=self.get_module("scheduler")))
+        self.add_stage(
+            stage_name="timestep_preparation_stage",
+            stage=TimestepPreparationStage(scheduler=self.get_module("scheduler")),
+        )
 
         # Then override timesteps for refinement (will be a no-op if not refining),
         # matching LongCat's generate_refine schedule.
-        self.add_stage(stage_name="longcat_refine_timestep_stage",
-                       stage=LongCatRefineTimestepStage(scheduler=self.get_module("scheduler")))
+        self.add_stage(
+            stage_name="longcat_refine_timestep_stage",
+            stage=LongCatRefineTimestepStage(scheduler=self.get_module("scheduler")),
+        )
 
-        self.add_stage(stage_name="latent_preparation_stage",
-                       stage=LatentPreparationStage(scheduler=self.get_module("scheduler"),
-                                                    transformer=self.get_module("transformer", None)))
+        self.add_stage(
+            stage_name="latent_preparation_stage",
+            stage=LatentPreparationStage(
+                scheduler=self.get_module("scheduler"), transformer=self.get_module("transformer", None)
+            ),
+        )
 
-        self.add_stage(stage_name="denoising_stage",
-                       stage=LongCatDenoisingStage(transformer=self.get_module("transformer"),
-                                                   transformer_2=self.get_module("transformer_2", None),
-                                                   scheduler=self.get_module("scheduler"),
-                                                   vae=self.get_module("vae"),
-                                                   pipeline=self))
+        self.add_stage(
+            stage_name="denoising_stage",
+            stage=LongCatDenoisingStage(
+                transformer=self.get_module("transformer"),
+                transformer_2=self.get_module("transformer_2", None),
+                scheduler=self.get_module("scheduler"),
+                vae=self.get_module("vae"),
+                pipeline=self,
+            ),
+        )
 
         self.add_stage(stage_name="decoding_stage", stage=DecodingStage(vae=self.get_module("vae"), pipeline=self))
 

@@ -184,7 +184,9 @@ def sync_from_hf(
                     "repo_id": HF_REPO_ID,
                     "synced_at": datetime.now(timezone.utc).isoformat(),
                     "revision": revision,
-                }, marker)
+                },
+                marker,
+            )
     except Exception as exc:
         if strict:
             raise
@@ -285,11 +287,13 @@ def load_records(
         if cutoff is not None and ts is not None and ts < cutoff:
             continue
 
-        records.append((
-            ts or datetime.min.replace(tzinfo=timezone.utc),
-            path,
-            data,
-        ))
+        records.append(
+            (
+                ts or datetime.min.replace(tzinfo=timezone.utc),
+                path,
+                data,
+            )
+        )
 
     return [data for _ts, _path, data in sorted(records)]
 

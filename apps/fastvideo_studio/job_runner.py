@@ -304,11 +304,14 @@ class JobRunner:
                     status = JobStatus.FAILED
                     row["error"] = "Server restarted (job was running)"
                     row["finished_at"] = time.time()
-                    self._db.update_job(row["id"], {
-                        "status": "failed",
-                        "error": row["error"],
-                        "finished_at": row["finished_at"],
-                    })
+                    self._db.update_job(
+                        row["id"],
+                        {
+                            "status": "failed",
+                            "error": row["error"],
+                            "finished_at": row["finished_at"],
+                        },
+                    )
                 elif status == "pending":
                     status = JobStatus.PENDING
                 job = Job(
@@ -371,14 +374,16 @@ class JobRunner:
         """Persist job to database."""
         try:
             self._db.update_job(
-                job.id, {
+                job.id,
+                {
                     "status": job.status.value,
                     "started_at": job.started_at,
                     "finished_at": job.finished_at,
                     "error": job.error,
                     "output_path": job.output_path,
                     "log_file_path": job.log_file_path,
-                })
+                },
+            )
         except Exception as exc:
             logger.warning("Failed to persist job %s: %s", job.id, exc)
 
@@ -523,7 +528,7 @@ class JobRunner:
 
     def start_job(self, job_id: str) -> Job:
         """Start (or restart) a pending / stopped / failed job.
-        
+
         Raises:
             ValueError: If job not found or cannot be started
         """
@@ -558,10 +563,10 @@ class JobRunner:
                 logger.critical("Unhandled exception escaped from _run_job for job %s: %s", job.id, exc, exc_info=True)
                 with contextlib.suppress(Exception):
                     job.status = JobStatus.FAILED
-                    job.error = (f"Unhandled exception: {type(exc).__name__}: {str(exc)}")
+                    job.error = f"Unhandled exception: {type(exc).__name__}: {str(exc)}"
                     job.finished_at = time.time()
 
-        thread = threading.Thread(target=safe_run_job, args=(job, ), daemon=True)
+        thread = threading.Thread(target=safe_run_job, args=(job,), daemon=True)
         job._thread = thread
         thread.start()
         logger.info("Started job %s", job.id)
@@ -569,10 +574,10 @@ class JobRunner:
 
     def stop_job(self, job_id: str) -> Job:
         """Request a running job to stop.
-        
+
         For inference: cooperative stop between phases.
         For training: terminates the subprocess.
-        
+
         Raises:
             ValueError: If job not found or not running
         """
@@ -592,14 +597,14 @@ class JobRunner:
 
     def get_job_logs(self, job_id: str, after: int = 0) -> dict[str, Any]:
         """Return log lines for a job.
-        
+
         Args:
             job_id: The job ID
             after: Return only lines after this index (for incremental polling)
-            
+
         Returns:
             Dictionary with 'lines', 'total', 'progress', 'progress_msg', 'phase'
-            
+
         Raises:
             ValueError: If job not found
         """
@@ -713,8 +718,10 @@ class JobRunner:
 
         if not job.data_path or not os.path.isdir(job.data_path):
             job.status = JobStatus.FAILED
-            job.error = (f"Data path '{job.data_path}' is required and must be an "
-                         "existing directory. Preprocess your dataset first.")
+            job.error = (
+                f"Data path '{job.data_path}' is required and must be an "
+                "existing directory. Preprocess your dataset first."
+            )
             job.finished_at = time.time()
             self._save_job(job)
             return
@@ -831,7 +838,7 @@ class JobRunner:
         job.log_file_path = os.path.join(self.log_dir, f"{job.id}.log")
 
         # Add file handler to persist logs
-        file_handler = logging.FileHandler(job.log_file_path, mode='w', encoding='utf-8')
+        file_handler = logging.FileHandler(job.log_file_path, mode="w", encoding="utf-8")
         file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
         job.log_file_handler = file_handler
 
@@ -845,10 +852,9 @@ class JobRunner:
         # Use Manager().Queue() so it can be shared with spawned workers (spawn
         # does not inherit memory; mp.Queue only works through inheritance).
         log_queue = self._mp_manager.Queue()
-        queue_listener = logging.handlers.QueueListener(log_queue,
-                                                        buffer_handler,
-                                                        file_handler,
-                                                        respect_handler_level=True)
+        queue_listener = logging.handlers.QueueListener(
+            log_queue, buffer_handler, file_handler, respect_handler_level=True
+        )
         queue_listener.start()
 
         # Set output directory, create if it doesn't exist

@@ -12,26 +12,26 @@ logger = init_logger(__name__)
 class WorkflowBase(ABC):
     """
     Abstract base class for defining video processing workflows.
-    
+
     A workflow serves as the top-level orchestrator that coordinates multiple pipelines
     and components to accomplish a specific video processing task. The workflow pattern
     provides several key benefits:
-    
+
     1. **Separation of Concerns**: Workflows separate high-level orchestration logic
        from low-level processing implementations in pipelines.
-    
+
     2. **Modularity**: Different workflows can be created for different execution modes
        (preprocess, inference, etc.) while sharing common pipeline components.
-    
+
     3. **Configuration Management**: Workflows manage the configuration and initialization
        of multiple related pipelines and components in a centralized manner.
-    
+
     4. **Environment Setup**: Workflows handle system-level setup and resource
        allocation before pipeline execution begins.
-    
+
     5. **Lifecycle Management**: Workflows control the complete lifecycle from
        initialization through execution to cleanup.
-    
+
     The workflow acts as a factory and coordinator, creating the appropriate pipelines
     based on configuration, setting up the execution environment, and orchestrating
     the overall processing flow.
@@ -40,7 +40,7 @@ class WorkflowBase(ABC):
     def __init__(self, fastvideo_args: FastVideoArgs):
         """
         Initialize the workflow with configuration arguments.
-        
+
         Args:
             fastvideo_args: Configuration object containing all parameters
                           needed for workflow and pipeline setup.
@@ -62,7 +62,7 @@ class WorkflowBase(ABC):
     def load_pipelines(self) -> None:
         """
         Create and initialize all registered pipelines.
-        
+
         This method instantiates pipeline objects from their configurations
         and makes them available as both dictionary entries and instance
         attributes for convenient access.
@@ -76,7 +76,7 @@ class WorkflowBase(ABC):
     def add_pipeline_config(self, pipeline_name: str, pipeline_config: tuple[PipelineType, FastVideoArgs]) -> None:
         """
         Register a pipeline configuration for later instantiation.
-        
+
         Args:
             pipeline_name: Unique identifier for the pipeline.
             pipeline_config: Tuple containing the pipeline type and
@@ -87,11 +87,11 @@ class WorkflowBase(ABC):
     def add_component(self, component_name: str, component: Any) -> None:
         """
         Register a component instance with the workflow.
-        
+
         Components are auxiliary objects that may be shared across pipelines
         or used for workflow-level functionality (e.g., databases, caches,
         external services).
-        
+
         Args:
             component_name: Unique identifier for the component.
             component: The component instance to register.
@@ -102,10 +102,10 @@ class WorkflowBase(ABC):
     def get_component(self, component_name: str) -> Any:
         """
         Retrieve a registered component by name.
-        
+
         Args:
             component_name: The name of the component to retrieve.
-            
+
         Returns:
             The component instance.
         """
@@ -115,7 +115,7 @@ class WorkflowBase(ABC):
     def register_components(self) -> None:
         """
         Register workflow-specific components.
-        
+
         Subclasses must implement this method to register any components
         needed for their specific workflow (e.g., databases, external APIs,
         shared resources).
@@ -126,7 +126,7 @@ class WorkflowBase(ABC):
     def register_pipelines(self) -> None:
         """
         Register workflow-specific pipelines.
-        
+
         Subclasses must implement this method to define which pipelines
         are needed for their specific workflow and how they should be
         configured.
@@ -137,7 +137,7 @@ class WorkflowBase(ABC):
     def prepare_system_environment(self) -> None:
         """
         Prepare the system environment for workflow execution.
-        
+
         Subclasses must implement this method to handle any system-level
         setup required before pipeline execution (e.g., GPU initialization,
         temporary directories, resource allocation).
@@ -148,7 +148,7 @@ class WorkflowBase(ABC):
     def run(self):
         """
         Execute the main workflow logic.
-        
+
         Subclasses must implement this method to define the specific
         execution flow for their workflow, coordinating the registered
         pipelines and components to accomplish the desired task.
@@ -159,21 +159,22 @@ class WorkflowBase(ABC):
     def get_workflow_cls(cls, fastvideo_args: FastVideoArgs) -> Optional["WorkflowBase"]:
         """
         Factory method to get the appropriate workflow class based on execution mode.
-        
+
         This method acts as a workflow factory, returning the appropriate
         workflow class implementation based on the specified execution mode
         in the configuration arguments.
-        
+
         Args:
             fastvideo_args: Configuration object containing the execution mode
                           and other parameters.
-            
+
         Returns:
             The appropriate workflow class for the specified execution mode,
             or None if no workflow is available for the given mode.
         """
         if fastvideo_args.mode == ExecutionMode.PREPROCESS:
-            from fastvideo.workflow.preprocess.preprocess_workflow import (PreprocessWorkflow)
+            from fastvideo.workflow.preprocess.preprocess_workflow import PreprocessWorkflow
+
             return PreprocessWorkflow.get_workflow_cls(fastvideo_args)
         else:
             raise ValueError(f"Execution mode: {fastvideo_args.mode} is not supported in workflow.")

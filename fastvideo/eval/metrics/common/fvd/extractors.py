@@ -66,6 +66,7 @@ class _I3DExtractor(_BaseExtractor):
     def __init__(self, device: torch.device) -> None:
         super().__init__(device)
         from fastvideo.eval.models import ensure_checkpoint
+
         path = ensure_checkpoint(_I3D_FILENAME, source=_I3D_REPO_ID, filename=_I3D_FILENAME)
         model = torch.jit.load(path, map_location=device)
         model.eval()
@@ -80,15 +81,16 @@ class _I3DExtractor(_BaseExtractor):
     def forward(self, video: torch.Tensor) -> np.ndarray:
         B, T, C, H, W = video.shape
         if T < _I3D_MIN_FRAMES:
-            raise ValueError(f"I3D requires at least {_I3D_MIN_FRAMES} frames, got {T}. "
-                             "Increase num_frames or use a longer video.")
+            raise ValueError(
+                f"I3D requires at least {_I3D_MIN_FRAMES} frames, got {T}. Increase num_frames or use a longer video."
+            )
         # Scale [0, 1] → [-1, 1] BEFORE resize so output is bit-identical to the
         # original benchmarks/fvd/feature_extractors.I3DFeatureExtractor.  Bilinear
         # interpolation is linear so the math is equivalent either order, but the
         # FP rounding of `interp(2x-1)` vs `2*interp(x)-1` is not — and that small
         # delta propagates through dozens of I3D Conv3D layers into ~1e-2 feature
         # differences.  Scaling first matches OLD verbatim.
-        video = (video.to(self.device) * 2.0 - 1.0)
+        video = video.to(self.device) * 2.0 - 1.0
         if H != 224 or W != 224:
             video = video.reshape(B * T, C, H, W)
             video = F.interpolate(video, size=(224, 224), mode="bilinear", align_corners=False)
@@ -109,8 +111,9 @@ class _CLIPExtractor(_BaseExtractor):
         try:
             from transformers import CLIPModel, CLIPProcessor
         except ImportError as e:
-            raise ImportError("common.fvd with extractor='clip' requires transformers. "
-                              "Install with: uv pip install -e '.[eval]'") from e
+            raise ImportError(
+                "common.fvd with extractor='clip' requires transformers. Install with: uv pip install -e '.[eval]'"
+            ) from e
         self._processor = CLIPProcessor.from_pretrained(_CLIP_MODEL_NAME)
         self._model = CLIPModel.from_pretrained(_CLIP_MODEL_NAME).to(device)
         self._model.eval()
@@ -143,8 +146,9 @@ class _VideoMAEExtractor(_BaseExtractor):
         try:
             from transformers import VideoMAEModel
         except ImportError as e:
-            raise ImportError("common.fvd with extractor='videomae' requires transformers. "
-                              "Install with: uv pip install -e '.[eval]'") from e
+            raise ImportError(
+                "common.fvd with extractor='videomae' requires transformers. Install with: uv pip install -e '.[eval]'"
+            ) from e
         self._model = VideoMAEModel.from_pretrained(_VIDEOMAE_MODEL_NAME).to(device)
         self._model.eval()
         self.feature_dim = self._model.config.hidden_size
@@ -166,7 +170,7 @@ class _VideoMAEExtractor(_BaseExtractor):
             video = video.view(B * T, C, H, W)
             video = F.interpolate(video, size=(224, 224), mode="bilinear", align_corners=False)
             video = video.view(B, T, C, 224, 224)
-        pixel_values = ((video.float().to(self.device) - self._mean) / self._std)
+        pixel_values = (video.float().to(self.device) - self._mean) / self._std
         outputs = self._model(pixel_values)
         # (B, n_patches, D) → mean over patches → (B, D)
         return outputs.last_hidden_state.mean(dim=1).cpu().numpy()

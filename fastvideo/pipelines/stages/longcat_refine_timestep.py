@@ -19,7 +19,7 @@ logger = init_logger(__name__)
 class LongCatRefineTimestepStage(PipelineStage):
     """
     Stage for preparing timesteps specific to LongCat refinement.
-    
+
     For refinement, we need to start from t_thresh instead of t=1.0, so we:
     1. Generate normal timesteps for num_inference_steps
     2. Filter to only keep timesteps < t_thresh * 1000
@@ -37,11 +37,11 @@ class LongCatRefineTimestepStage(PipelineStage):
     ) -> ForwardBatch:
         """
         Prepare refinement-specific timesteps.
-        
+
         Args:
             batch: The current batch information.
             fastvideo_args: The inference arguments.
-            
+
         Returns:
             The batch with refinement timesteps.
         """

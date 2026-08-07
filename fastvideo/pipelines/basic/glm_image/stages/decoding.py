@@ -10,14 +10,13 @@ from fastvideo.utils import PRECISION_TO_TYPE
 
 
 class GlmImageDecodingStage(DecodingStage):
-
     @torch.no_grad()
     def decode(self, latents: torch.Tensor, fastvideo_args: FastVideoArgs) -> torch.Tensor:
         self.vae.to(get_local_torch_device())
         latents = latents.to(get_local_torch_device())
 
         vae_dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.vae_precision]
-        vae_autocast = (vae_dtype != torch.float32 and not fastvideo_args.disable_autocast)
+        vae_autocast = vae_dtype != torch.float32 and not fastvideo_args.disable_autocast
 
         latents = self._denormalize_latents(latents, fastvideo_args)
         if latents.dim() == 5:

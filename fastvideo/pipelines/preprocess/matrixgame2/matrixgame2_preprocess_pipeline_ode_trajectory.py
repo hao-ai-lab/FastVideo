@@ -22,19 +22,24 @@ from tqdm import tqdm
 
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.dataset import getdataset
-from fastvideo.dataset.dataloader.parquet_io import (ParquetDatasetWriter, records_to_table)
-from fastvideo.dataset.dataloader.record_schema import (matrixgame2_ode_record_creator)
-from fastvideo.dataset.dataloader.schema import (pyarrow_schema_matrixgame2_ode_trajectory)
+from fastvideo.dataset.dataloader.parquet_io import ParquetDatasetWriter, records_to_table
+from fastvideo.dataset.dataloader.record_schema import matrixgame2_ode_record_creator
+from fastvideo.dataset.dataloader.schema import pyarrow_schema_matrixgame2_ode_trajectory
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
-from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import (SelfForcingFlowMatchScheduler)
+from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import SelfForcingFlowMatchScheduler
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
-from fastvideo.pipelines.preprocess.preprocess_pipeline_base import (BasePreprocessPipeline)
-from fastvideo.pipelines.stages import (DecodingStage, InputValidationStage, LatentPreparationStage,
-                                        MatrixGame2ImageEncodingStage, TimestepPreparationStage)
-from fastvideo.pipelines.stages.matrixgame2_denoising import (MatrixGame2CausalDenoisingStage)
+from fastvideo.pipelines.preprocess.preprocess_pipeline_base import BasePreprocessPipeline
+from fastvideo.pipelines.stages import (
+    DecodingStage,
+    InputValidationStage,
+    LatentPreparationStage,
+    MatrixGame2ImageEncodingStage,
+    TimestepPreparationStage,
+)
+from fastvideo.pipelines.stages.matrixgame2_denoising import MatrixGame2CausalDenoisingStage
 from fastvideo.utils import save_decoded_latents_as_video, shallow_asdict
 
 logger = init_logger(__name__)
@@ -57,33 +62,41 @@ class PreprocessPipeline_MatrixGame2_ODE_Trajectory(BasePreprocessPipeline):
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         """Set up pipeline stages with proper dependency injection."""
         assert fastvideo_args.pipeline_config.flow_shift == 5
-        self.modules["scheduler"] = SelfForcingFlowMatchScheduler(shift=fastvideo_args.pipeline_config.flow_shift,
-                                                                  sigma_min=0.0,
-                                                                  extra_one_step=True)
+        self.modules["scheduler"] = SelfForcingFlowMatchScheduler(
+            shift=fastvideo_args.pipeline_config.flow_shift, sigma_min=0.0, extra_one_step=True
+        )
         self.modules["scheduler"].set_timesteps(num_inference_steps=48, denoising_strength=1.0)
 
         self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())
-        self.add_stage(stage_name="image_encoding_stage",
-                       stage=MatrixGame2ImageEncodingStage(
-                           image_encoder=self.get_module("image_encoder"),
-                           image_processor=self.get_module("image_processor"),
-                       ))
-        self.add_stage(stage_name="timestep_preparation_stage",
-                       stage=TimestepPreparationStage(scheduler=self.get_module("scheduler")))
-        self.add_stage(stage_name="latent_preparation_stage",
-                       stage=LatentPreparationStage(scheduler=self.get_module("scheduler"),
-                                                    transformer=self.get_module("transformer", None)))
-        self.add_stage(stage_name="denoising_stage",
-                       stage=MatrixGame2CausalDenoisingStage(
-                           transformer=self.get_module("transformer"),
-                           scheduler=self.get_module("scheduler"),
-                           pipeline=self,
-                           vae=self.get_module("vae"),
-                       ))
+        self.add_stage(
+            stage_name="image_encoding_stage",
+            stage=MatrixGame2ImageEncodingStage(
+                image_encoder=self.get_module("image_encoder"),
+                image_processor=self.get_module("image_processor"),
+            ),
+        )
+        self.add_stage(
+            stage_name="timestep_preparation_stage",
+            stage=TimestepPreparationStage(scheduler=self.get_module("scheduler")),
+        )
+        self.add_stage(
+            stage_name="latent_preparation_stage",
+            stage=LatentPreparationStage(
+                scheduler=self.get_module("scheduler"), transformer=self.get_module("transformer", None)
+            ),
+        )
+        self.add_stage(
+            stage_name="denoising_stage",
+            stage=MatrixGame2CausalDenoisingStage(
+                transformer=self.get_module("transformer"),
+                scheduler=self.get_module("scheduler"),
+                pipeline=self,
+                vae=self.get_module("vae"),
+            ),
+        )
         self.add_stage(stage_name="decoding_stage", stage=DecodingStage(vae=self.get_module("vae")))
 
     def get_extra_features(self, valid_data: dict[str, Any], fastvideo_args: FastVideoArgs) -> dict[str, Any]:
-
         # TODO(will): move these to cpu at some point
         self.get_module("image_encoder").to(get_local_torch_device())
         self.get_module("vae").to(get_local_torch_device())
@@ -105,9 +118,9 @@ class PreprocessPipeline_MatrixGame2_ODE_Trajectory(BasePreprocessPipeline):
             processed_images.append(processed_img)
 
         # Get CLIP features
-        pixel_values = torch.cat([img['pixel_values'] for img in processed_images], dim=0).to(get_local_torch_device())
+        pixel_values = torch.cat([img["pixel_values"] for img in processed_images], dim=0).to(get_local_torch_device())
         with torch.no_grad():
-            image_inputs = {'pixel_values': pixel_values}
+            image_inputs = {"pixel_values": pixel_values}
             with set_forward_context(current_timestep=0, attn_metadata=None):
                 clip_features = self.get_module("image_encoder")(**image_inputs)
             clip_features = clip_features.last_hidden_state
@@ -120,11 +133,15 @@ class PreprocessPipeline_MatrixGame2_ODE_Trajectory(BasePreprocessPipeline):
             processed_img = frame.to(device="cpu", dtype=torch.float32)
             processed_img = processed_img.unsqueeze(0).permute(0, 3, 1, 2).unsqueeze(2)
             # (B, H, W, C) -> (B, C, 1, H, W)
-            video_condition = torch.cat([
-                processed_img,
-                processed_img.new_zeros(processed_img.shape[0], processed_img.shape[1], num_frames - 1, height, width)
-            ],
-                                        dim=2)
+            video_condition = torch.cat(
+                [
+                    processed_img,
+                    processed_img.new_zeros(
+                        processed_img.shape[0], processed_img.shape[1], num_frames - 1, height, width
+                    ),
+                ],
+                dim=2,
+            )
             video_condition = video_condition.to(device=get_local_torch_device(), dtype=torch.float32)
             video_conditions.append(video_condition)
 
@@ -138,23 +155,24 @@ class PreprocessPipeline_MatrixGame2_ODE_Trajectory(BasePreprocessPipeline):
 
         # Use latents_mean/latents_std normalization to match
         vae = self.get_module("vae")
-        if (hasattr(vae.config, 'latents_mean') and hasattr(vae.config, 'latents_std')):
-            latents_mean = torch.tensor(vae.config.latents_mean,
-                                        device=latent_condition.device,
-                                        dtype=latent_condition.dtype).view(1, -1, 1, 1, 1)
-            latents_std = torch.tensor(vae.config.latents_std,
-                                       device=latent_condition.device,
-                                       dtype=latent_condition.dtype).view(1, -1, 1, 1, 1)
+        if hasattr(vae.config, "latents_mean") and hasattr(vae.config, "latents_std"):
+            latents_mean = torch.tensor(
+                vae.config.latents_mean, device=latent_condition.device, dtype=latent_condition.dtype
+            ).view(1, -1, 1, 1, 1)
+            latents_std = torch.tensor(
+                vae.config.latents_std, device=latent_condition.device, dtype=latent_condition.dtype
+            ).view(1, -1, 1, 1, 1)
             latent_condition = (latent_condition - latents_mean) / latents_std
-        elif (hasattr(vae, "shift_factor") and vae.shift_factor is not None):
+        elif hasattr(vae, "shift_factor") and vae.shift_factor is not None:
             if isinstance(vae.shift_factor, torch.Tensor):
                 latent_condition -= vae.shift_factor.to(latent_condition.device, latent_condition.dtype)
             else:
                 latent_condition -= vae.shift_factor
 
             if isinstance(vae.scaling_factor, torch.Tensor):
-                latent_condition = latent_condition * vae.scaling_factor.to(latent_condition.device,
-                                                                            latent_condition.dtype)
+                latent_condition = latent_condition * vae.scaling_factor.to(
+                    latent_condition.device, latent_condition.dtype
+                )
             else:
                 latent_condition = latent_condition * vae.scaling_factor
 
@@ -174,7 +192,7 @@ class PreprocessPipeline_MatrixGame2_ODE_Trajectory(BasePreprocessPipeline):
             for action_path in valid_data["action_path"]:
                 if action_path:
                     action_data = np.load(action_path, allow_pickle=True)
-                    if isinstance(action_data, np.ndarray) and action_data.dtype == np.dtype('O'):
+                    if isinstance(action_data, np.ndarray) and action_data.dtype == np.dtype("O"):
                         action_dict = action_data.item()
                         if "keyboard" in action_dict:
                             keyboard_cond_list.append(action_dict["keyboard"][:, :keyboard_dim].astype(np.float32))
@@ -227,12 +245,12 @@ class PreprocessPipeline_MatrixGame2_ODE_Trajectory(BasePreprocessPipeline):
                 # Get extra features if needed
                 extra_features = self.get_extra_features(valid_data, fastvideo_args)
 
-                clip_features = extra_features['clip_feature']
-                image_latents = extra_features['first_frame_latent']
-                image_latents = image_latents[:, :, :args.num_latent_t]
-                pil_image = extra_features['pil_image']
-                keyboard_cond = extra_features.get('keyboard_cond')
-                mouse_cond = extra_features.get('mouse_cond')
+                clip_features = extra_features["clip_feature"]
+                image_latents = extra_features["first_frame_latent"]
+                image_latents = image_latents[:, :, : args.num_latent_t]
+                pil_image = extra_features["pil_image"]
+                keyboard_cond = extra_features.get("keyboard_cond")
+                mouse_cond = extra_features.get("mouse_cond")
 
                 sampling_params = SamplingParam.from_pretrained(args.model_path)
 
@@ -243,13 +261,19 @@ class PreprocessPipeline_MatrixGame2_ODE_Trajectory(BasePreprocessPipeline):
                 device = get_local_torch_device()
                 for i in range(len(valid_indices)):
                     # Collect the trajectory data
-                    batch = ForwardBatch(**shallow_asdict(sampling_params), )
+                    batch = ForwardBatch(
+                        **shallow_asdict(sampling_params),
+                    )
                     batch.image_embeds = [clip_features[i].unsqueeze(0)]
                     batch.image_latent = image_latents[i].unsqueeze(0)
-                    batch.keyboard_cond = (torch.from_numpy(keyboard_cond[i]).unsqueeze(0).to(device)
-                                           if keyboard_cond is not None else None)
-                    batch.mouse_cond = (torch.from_numpy(mouse_cond[i]).unsqueeze(0).to(device)
-                                        if mouse_cond is not None else None)
+                    batch.keyboard_cond = (
+                        torch.from_numpy(keyboard_cond[i]).unsqueeze(0).to(device)
+                        if keyboard_cond is not None
+                        else None
+                    )
+                    batch.mouse_cond = (
+                        torch.from_numpy(mouse_cond[i]).unsqueeze(0).to(device) if mouse_cond is not None else None
+                    )
                     batch.num_inference_steps = 48
                     batch.return_trajectory_latents = True
                     # Enabling this will save the decoded trajectory videos.
@@ -277,15 +301,15 @@ class PreprocessPipeline_MatrixGame2_ODE_Trajectory(BasePreprocessPipeline):
                 # Prepare extra features
                 extra_features = {
                     "trajectory_latents": trajectory_latents,
-                    "trajectory_timesteps": trajectory_timesteps
+                    "trajectory_timesteps": trajectory_timesteps,
                 }
 
                 if batch.return_trajectory_decoded:
                     for i, decoded_frames in enumerate(trajectory_decoded):
                         for j, decoded_frame in enumerate(decoded_frames):
-                            save_decoded_latents_as_video(decoded_frame,
-                                                          f"decoded_videos/trajectory_decoded_{i}_{j}.mp4",
-                                                          args.train_fps)
+                            save_decoded_latents_as_video(
+                                decoded_frame, f"decoded_videos/trajectory_decoded_{i}_{j}.mp4", args.train_fps
+                            )
 
                 # Prepare batch data for Parquet dataset
                 batch_data: list[dict[str, Any]] = []
@@ -311,15 +335,17 @@ class PreprocessPipeline_MatrixGame2_ODE_Trajectory(BasePreprocessPipeline):
                         traj_timesteps = traj_timesteps.cpu().float().numpy()
 
                     # Create record for Parquet dataset
-                    record: dict[str, Any] = matrixgame2_ode_record_creator(video_name=video_name,
-                                                                            clip_feature=clip_feature_np,
-                                                                            first_frame_latent=first_frame_latent_np,
-                                                                            trajectory_latents=traj_latents,
-                                                                            trajectory_timesteps=traj_timesteps,
-                                                                            pil_image=pil_image_np,
-                                                                            keyboard_cond=keyboard_cond_np,
-                                                                            mouse_cond=mouse_cond_np,
-                                                                            caption="")
+                    record: dict[str, Any] = matrixgame2_ode_record_creator(
+                        video_name=video_name,
+                        clip_feature=clip_feature_np,
+                        first_frame_latent=first_frame_latent_np,
+                        trajectory_latents=traj_latents,
+                        trajectory_timesteps=traj_timesteps,
+                        pil_image=pil_image_np,
+                        keyboard_cond=keyboard_cond_np,
+                        mouse_cond=mouse_cond_np,
+                        caption="",
+                    )
                     batch_data.append(record)
 
                 if batch_data:
@@ -328,7 +354,7 @@ class PreprocessPipeline_MatrixGame2_ODE_Trajectory(BasePreprocessPipeline):
                     write_pbar.update(1)
                     write_pbar.close()
 
-                    if not hasattr(self, 'dataset_writer'):
+                    if not hasattr(self, "dataset_writer"):
                         self.dataset_writer = ParquetDatasetWriter(
                             out_dir=self.combined_parquet_dir,
                             samples_per_file=args.samples_per_file,
@@ -343,7 +369,7 @@ class PreprocessPipeline_MatrixGame2_ODE_Trajectory(BasePreprocessPipeline):
                     self.num_processed_samples = 0
 
         # Final flush for any remaining samples
-        if hasattr(self, 'dataset_writer'):
+        if hasattr(self, "dataset_writer"):
             written = self.dataset_writer.flush(write_remainder=True)
             if written:
                 logger.info("Final flush wrote %s samples", written)
@@ -371,10 +397,9 @@ class PreprocessPipeline_MatrixGame2_ODE_Trajectory(BasePreprocessPipeline):
 
         self.num_processed_samples = 0
         # Add progress bar for video preprocessing
-        self.pbar = tqdm(self.preprocess_loader_iter,
-                         desc="Processing videos",
-                         unit="batch",
-                         disable=self.local_rank != 0)
+        self.pbar = tqdm(
+            self.preprocess_loader_iter, desc="Processing videos", unit="batch", disable=self.local_rank != 0
+        )
 
         # Initialize class variables for data sharing
         self.video_data: dict[str, Any] = {}  # Store video metadata and paths

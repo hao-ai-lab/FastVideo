@@ -94,29 +94,41 @@ class HCCLLibrary:
     exported_functions = [
         Function("HcclGetErrorString", ctypes.c_char_p, [hcclResult_t]),
         Function("HcclGetRootInfo", hcclResult_t, [ctypes.POINTER(hcclUniqueId)]),
-        Function("HcclCommInitRootInfo", hcclResult_t, [
-            ctypes.c_int,
-            ctypes.POINTER(hcclUniqueId),
-            ctypes.c_int,
-            ctypes.POINTER(hcclComm_t),
-        ]),
-        Function("HcclAllReduce", hcclResult_t, [
-            buffer_type,
-            buffer_type,
-            ctypes.c_size_t,
-            hcclDataType_t,
-            hcclRedOp_t,
-            hcclComm_t,
-            aclrtStream_t,
-        ]),
-        Function("HcclBroadcast", hcclResult_t, [
-            buffer_type,
-            ctypes.c_size_t,
-            hcclDataType_t,
-            ctypes.c_int,
-            hcclComm_t,
-            aclrtStream_t,
-        ]),
+        Function(
+            "HcclCommInitRootInfo",
+            hcclResult_t,
+            [
+                ctypes.c_int,
+                ctypes.POINTER(hcclUniqueId),
+                ctypes.c_int,
+                ctypes.POINTER(hcclComm_t),
+            ],
+        ),
+        Function(
+            "HcclAllReduce",
+            hcclResult_t,
+            [
+                buffer_type,
+                buffer_type,
+                ctypes.c_size_t,
+                hcclDataType_t,
+                hcclRedOp_t,
+                hcclComm_t,
+                aclrtStream_t,
+            ],
+        ),
+        Function(
+            "HcclBroadcast",
+            hcclResult_t,
+            [
+                buffer_type,
+                ctypes.c_size_t,
+                hcclDataType_t,
+                ctypes.c_int,
+                hcclComm_t,
+                aclrtStream_t,
+            ],
+        ),
         Function("HcclCommDestroy", hcclResult_t, [hcclComm_t]),
     ]
 
@@ -129,7 +141,6 @@ class HCCLLibrary:
     path_to_dict_mapping: dict[str, dict[str, Any]] = {}
 
     def __init__(self, so_file: str | None = None):
-
         so_file = so_file or find_hccl_library()
 
         try:
@@ -145,7 +156,10 @@ class HCCLLibrary:
                 "or it does not support the current platform %s. "
                 "If you already have the library, please set the "
                 "environment variable HCCL_SO_PATH"
-                " to point to the correct hccl library path.", so_file, platform.platform())
+                " to point to the correct hccl library path.",
+                so_file,
+                platform.platform(),
+            )
             raise e
 
         if so_file not in HCCLLibrary.path_to_dict_mapping:
@@ -173,16 +187,26 @@ class HCCLLibrary:
 
     def hcclCommInitRank(self, world_size: int, unique_id: hcclUniqueId, rank: int) -> hcclComm_t:
         comm = hcclComm_t()
-        self.HCCL_CHECK(self._funcs["HcclCommInitRootInfo"](world_size, ctypes.byref(unique_id), rank,
-                                                            ctypes.byref(comm)))
+        self.HCCL_CHECK(
+            self._funcs["HcclCommInitRootInfo"](world_size, ctypes.byref(unique_id), rank, ctypes.byref(comm))
+        )
         return comm
 
-    def hcclAllReduce(self, sendbuff: buffer_type, recvbuff: buffer_type, count: int, datatype: int, op: int,
-                      comm: hcclComm_t, stream: aclrtStream_t) -> None:
+    def hcclAllReduce(
+        self,
+        sendbuff: buffer_type,
+        recvbuff: buffer_type,
+        count: int,
+        datatype: int,
+        op: int,
+        comm: hcclComm_t,
+        stream: aclrtStream_t,
+    ) -> None:
         self.HCCL_CHECK(self._funcs["HcclAllReduce"](sendbuff, recvbuff, count, datatype, op, comm, stream))
 
-    def hcclBroadcast(self, buf: buffer_type, count: int, datatype: int, root: int, comm: hcclComm_t,
-                      stream: aclrtStream_t) -> None:
+    def hcclBroadcast(
+        self, buf: buffer_type, count: int, datatype: int, root: int, comm: hcclComm_t, stream: aclrtStream_t
+    ) -> None:
         self.HCCL_CHECK(self._funcs["HcclBroadcast"](buf, count, datatype, root, comm, stream))
 
     def hcclCommDestroy(self, comm: hcclComm_t) -> None:

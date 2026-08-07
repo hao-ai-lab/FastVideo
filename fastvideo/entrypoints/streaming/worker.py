@@ -7,6 +7,7 @@ process. The worker constructs its :class:`VideoGenerator` from a typed
 initial-segment and continuation-branch compile graphs are hot, and
 then loops on the job queue.
 """
+
 from __future__ import annotations
 
 import multiprocessing as mp
@@ -75,17 +76,21 @@ def worker_main(
         request = item["request"]
         try:
             result = generator.generate(request)
-            result_queue.put({
-                "kind": "result",
-                "job_id": job_id,
-                "result": result,
-            })
+            result_queue.put(
+                {
+                    "kind": "result",
+                    "job_id": job_id,
+                    "result": result,
+                }
+            )
         except Exception as exc:
-            result_queue.put({
-                "kind": "error",
-                "job_id": job_id,
-                "error": repr(exc),
-            })
+            result_queue.put(
+                {
+                    "kind": "error",
+                    "job_id": job_id,
+                    "error": repr(exc),
+                }
+            )
 
 
 def _warmup_worker(

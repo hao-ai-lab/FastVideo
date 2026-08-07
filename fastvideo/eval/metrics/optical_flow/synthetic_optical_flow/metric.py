@@ -51,7 +51,9 @@ from fastvideo.eval.registry import register
 from fastvideo.eval.types import MetricResult
 
 
-def _resolve_calibration(obj: str | Path | dict | ThirdPersonCalibration, ) -> ThirdPersonCalibration:
+def _resolve_calibration(
+    obj: str | Path | dict | ThirdPersonCalibration,
+) -> ThirdPersonCalibration:
     if isinstance(obj, ThirdPersonCalibration):
         return obj
     if isinstance(obj, dict):
@@ -91,8 +93,9 @@ class SyntheticOpticalFlowMetric(BaseMetric):
         self.min_mag = min_mag
         self.max_mag_pct = max_mag_pct
         self.grid_size = grid_size
-        self._calibration: ThirdPersonCalibration | None = (_resolve_calibration(calibration_path)
-                                                            if calibration_path else None)
+        self._calibration: ThirdPersonCalibration | None = (
+            _resolve_calibration(calibration_path) if calibration_path else None
+        )
         self._model = None
         # One frame-pair per DPFlow forward; see ``gt_optical_flow``.
         self._chunk_size = 1
@@ -121,8 +124,7 @@ class SyntheticOpticalFlowMetric(BaseMetric):
         if cal is None:
             return self._skip(
                 sample,
-                "missing 'calibration' (pass calibration_path= at construction "
-                "or sample['calibration'] per call)",
+                "missing 'calibration' (pass calibration_path= at construction or sample['calibration'] per call)",
             )
 
         video = sample["video"].float()  # (T, C, H, W)
@@ -155,7 +157,8 @@ class SyntheticOpticalFlowMetric(BaseMetric):
                 grid_size=self.grid_size,
                 min_mag=self.min_mag,
                 max_mag_pct=self.max_mag_pct,
-            ) for i in range(n)
+            )
+            for i in range(n)
         ]
         summary = aggregate_temporal(per_frame)
         score = summary.get("pixel_epe_mean_mean")

@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """SR video-only denoising stage for daVinci-MagiHuman SR-540p."""
+
 from __future__ import annotations
 
 import copy
@@ -15,7 +16,8 @@ from fastvideo.pipelines.basic.magi_human.stages.denoising import (
     _overwrite_first_frame,
 )
 from fastvideo.pipelines.basic.magi_human.stages.latent_preparation import (
-    build_static_packed_inputs, )
+    build_static_packed_inputs,
+)
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import VerificationResult
@@ -88,13 +90,17 @@ class MagiHumanSRDenoisingStage(PipelineStage):
             neg_txt_feat_len = int(batch.magi_original_neg_text_lens[0])
 
         latent_length = video_latent.shape[2]
-        guidance = torch.tensor(
-            self.sr_video_txt_guidance_scale,
-            device=device,
-            dtype=video_latent.dtype,
-        ).expand(1, 1, latent_length, 1, 1).clone()
+        guidance = (
+            torch.tensor(
+                self.sr_video_txt_guidance_scale,
+                device=device,
+                dtype=video_latent.dtype,
+            )
+            .expand(1, 1, latent_length, 1, 1)
+            .clone()
+        )
         if self.use_cfg_trick:
-            guidance[:, :, :self.cfg_trick_start_frame] = min(
+            guidance[:, :, : self.cfg_trick_start_frame] = min(
                 self.cfg_trick_value,
                 self.sr_video_txt_guidance_scale,
             )
@@ -110,9 +116,12 @@ class MagiHumanSRDenoisingStage(PipelineStage):
                 coords_style=self.coords_style,
                 layout=getattr(batch, "magi_static_packed_layout", None),
             )
-            with trace_step(idx), set_forward_context(
+            with (
+                trace_step(idx),
+                set_forward_context(
                     current_timestep=int(t.item()) if torch.is_tensor(t) else int(t),
                     attn_metadata=None,
+                ),
             ):
                 v_cond_video, _ = _dit_forward(
                     self.transformer,

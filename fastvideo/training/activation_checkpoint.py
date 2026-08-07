@@ -2,7 +2,7 @@ import collections
 from enum import Enum
 
 import torch
-from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (checkpoint_wrapper)
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import checkpoint_wrapper
 
 TRANSFORMER_BLOCK_NAMES = [
     "blocks",
@@ -31,9 +31,9 @@ _SELECTIVE_ACTIVATION_CHECKPOINTING_OPS = {
 }
 
 
-def apply_activation_checkpointing(module: torch.nn.Module,
-                                   checkpointing_type: str = CheckpointType.FULL,
-                                   n_layer: int = 1) -> torch.nn.Module:
+def apply_activation_checkpointing(
+    module: torch.nn.Module, checkpointing_type: str = CheckpointType.FULL, n_layer: int = 1
+) -> torch.nn.Module:
     if checkpointing_type == CheckpointType.FULL:
         module = _apply_activation_checkpointing_blocks(module)
     elif checkpointing_type == CheckpointType.OPS:
@@ -64,10 +64,9 @@ def _apply_activation_checkpointing_blocks(module: torch.nn.Module, n_layer: int
 
 
 def _apply_activation_checkpointing_ops(module: torch.nn.Module, ops) -> torch.nn.Module:
-    from torch.utils.checkpoint import (CheckpointPolicy, create_selective_checkpoint_contexts)
+    from torch.utils.checkpoint import CheckpointPolicy, create_selective_checkpoint_contexts
 
     def _get_custom_policy(meta: dict[str, int]) -> CheckpointPolicy:
-
         def _custom_policy(ctx, func, *args, **kwargs):
             mode = "recompute" if ctx.is_recompute else "forward"
             mm_count_key = f"{mode}_mm_count"

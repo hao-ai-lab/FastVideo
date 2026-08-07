@@ -12,6 +12,7 @@ Produces:
 Also stakes out the per-token coords / modality map that the DiT consumes
 (replicates the reference `MagiDataProxy.process_input`).
 """
+
 from __future__ import annotations
 
 from typing import Literal
@@ -87,7 +88,8 @@ def _img2tokens(x_t: torch.Tensor, t_patch: int, patch: int) -> torch.Tensor:
     """
     B, C, T, H, W = x_t.shape
     assert T % t_patch == 0 and H % patch == 0 and W % patch == 0, (
-        f"Latent dims {T,H,W} must divide ({t_patch}, {patch}, {patch})")
+        f"Latent dims {T, H, W} must divide ({t_patch}, {patch}, {patch})"
+    )
     return rearrange(
         x_t,
         "B C (T pT) (H pH) (W pW) -> B (T H W) (C pT pH pW)",
@@ -369,8 +371,8 @@ def precompute_static_packed_layout(
             dtype=dtype,
         )
 
-    video_mm = torch.full((video_token_num, ), MODALITY_VIDEO, dtype=torch.int64, device=device)
-    audio_mm = torch.full((audio_feat_len, ), MODALITY_AUDIO, dtype=torch.int64, device=device)
+    video_mm = torch.full((video_token_num,), MODALITY_VIDEO, dtype=torch.int64, device=device)
+    audio_mm = torch.full((audio_feat_len,), MODALITY_AUDIO, dtype=torch.int64, device=device)
 
     return StaticPackedLayout(
         video_coords=video_coords,
@@ -438,8 +440,8 @@ def build_static_packed_inputs(
     dtype = video_tokens.dtype
     video_token_num = video_tokens.size(0)
 
-    video_mm = torch.full((video_token_num, ), MODALITY_VIDEO, dtype=torch.int64, device=device)
-    audio_mm = torch.full((audio_feat_len, ), MODALITY_AUDIO, dtype=torch.int64, device=device)
+    video_mm = torch.full((video_token_num,), MODALITY_VIDEO, dtype=torch.int64, device=device)
+    audio_mm = torch.full((audio_feat_len,), MODALITY_AUDIO, dtype=torch.int64, device=device)
 
     video_ref_shape = (T // pT, H // pH, W // pW)
     video_coords = _build_coords(
@@ -497,7 +499,7 @@ def assemble_packed_inputs(
 
     device = token_seq.device
     dtype = token_seq.dtype
-    text_mm = torch.full((txt_feat_len, ), MODALITY_TEXT, dtype=torch.int64, device=device)
+    text_mm = torch.full((txt_feat_len,), MODALITY_TEXT, dtype=torch.int64, device=device)
     mm = torch.cat([static.video_mm, static.audio_mm, text_mm], dim=0)
 
     if coords_style == "v2":
@@ -572,18 +574,22 @@ def unpack_tokens(
     tH, tW = H // pH, W // pW
 
     video_flat = output[:video_token_num, :video_in_channels]
-    video_latent = rearrange(
-        video_flat,
-        "(T H W) (pT pH pW C) -> C (T pT) (H pH) (W pW)",
-        H=tH,
-        W=tW,
-        pT=pT,
-        pH=pH,
-        pW=pW,
-    ).contiguous().unsqueeze(0)
+    video_latent = (
+        rearrange(
+            video_flat,
+            "(T H W) (pT pH pW C) -> C (T pT) (H pH) (W pW)",
+            H=tH,
+            W=tW,
+            pT=pT,
+            pH=pH,
+            pW=pW,
+        )
+        .contiguous()
+        .unsqueeze(0)
+    )
 
     audio_latent = output[
-        video_token_num:video_token_num + audio_feat_len,
+        video_token_num : video_token_num + audio_feat_len,
         :audio_in_channels,
     ].unsqueeze(0)
 

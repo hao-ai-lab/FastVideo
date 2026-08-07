@@ -2,6 +2,7 @@
 """
 GameCraft VAE config - matches official config.json from Hunyuan-GameCraft-1.0.
 """
+
 from dataclasses import dataclass, field
 
 from fastvideo.configs.models.vaes.base import VAEArchConfig, VAEConfig
@@ -40,7 +41,7 @@ class GameCraftVAEArchConfig(VAEArchConfig):
     sample_tsize: int = 64  # from config.json
 
     def __post_init__(self):
-        self.spatial_compression_ratio = 2**(len(self.block_out_channels) - 1)
+        self.spatial_compression_ratio = 2 ** (len(self.block_out_channels) - 1)
 
 
 @dataclass

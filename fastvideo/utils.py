@@ -33,7 +33,7 @@ import numpy as np
 import torch
 from torchvision.utils import make_grid
 import yaml
-from diffusers.loaders.lora_base import (_best_guess_weight_name)  # watch out for potetential removal from diffusers
+from diffusers.loaders.lora_base import _best_guess_weight_name  # watch out for potetential removal from diffusers
 from einops import rearrange
 from huggingface_hub import snapshot_download
 from remote_pdb import RemotePdb
@@ -145,15 +145,16 @@ def current_stream() -> torch.cuda.Stream | None:
 
 
 class StoreBoolean(argparse.Action):
-
     def __init__(self, option_strings, dest, default=False, required=False, help=None):
-        super().__init__(option_strings=option_strings,
-                         dest=dest,
-                         nargs='?',
-                         const=True,
-                         default=default,
-                         required=required,
-                         help=help)
+        super().__init__(
+            option_strings=option_strings,
+            dest=dest,
+            nargs="?",
+            const=True,
+            default=default,
+            required=required,
+            help=help,
+        )
 
     def __call__(self, parser, namespace, values, option_string=None):
         if values is None:
@@ -164,8 +165,7 @@ class StoreBoolean(argparse.Action):
             elif values.lower() == "false":
                 setattr(namespace, self.dest, False)
             else:
-                raise ValueError(f"Invalid boolean value: {values}. "
-                                 "Expected 'true' or 'false'.")
+                raise ValueError(f"Invalid boolean value: {values}. Expected 'true' or 'false'.")
         else:
             setattr(namespace, self.dest, bool(values))
 
@@ -185,44 +185,46 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
 
     def __init__(self, *args, **kwargs) -> None:
         # Set the default 'formatter_class' to SortedHelpFormatter
-        if 'formatter_class' not in kwargs:
-            kwargs['formatter_class'] = SortedHelpFormatter
+        if "formatter_class" not in kwargs:
+            kwargs["formatter_class"] = SortedHelpFormatter
         super().__init__(*args, **kwargs)
 
     def parse_args(  # type: ignore[override]
-            self, args=None, namespace=None) -> argparse.Namespace:
+        self, args=None, namespace=None
+    ) -> argparse.Namespace:
         namespace, unknown = self.parse_known_args(args, namespace)
         if unknown:
             self.error(f"unrecognized arguments: {' '.join(unknown)}")
         return namespace
 
     def parse_known_args(  # type: ignore[override]
-            self, args=None, namespace=None) -> tuple[argparse.Namespace, list[str]]:
+        self, args=None, namespace=None
+    ) -> tuple[argparse.Namespace, list[str]]:
         if args is None:
             args = sys.argv[1:]
 
-        if '--config' in args and not self._should_defer_config_loading(args):
+        if "--config" in args and not self._should_defer_config_loading(args):
             args = self._pull_args_from_config(args)
 
         # Convert underscores to dashes and vice versa in argument names
         processed_args = []
         for arg in args:
-            if arg.startswith('--'):
-                if '=' in arg:
-                    key, value = arg.split('=', 1)
-                    normalized_key = key[len('--'):]
-                    if '.' not in normalized_key:
-                        normalized_key = normalized_key.replace('_', '-')
-                    key = '--' + normalized_key
-                    processed_args.append(f'{key}={value}')
+            if arg.startswith("--"):
+                if "=" in arg:
+                    key, value = arg.split("=", 1)
+                    normalized_key = key[len("--") :]
+                    if "." not in normalized_key:
+                        normalized_key = normalized_key.replace("_", "-")
+                    key = "--" + normalized_key
+                    processed_args.append(f"{key}={value}")
                 else:
-                    normalized_key = arg[len('--'):]
-                    if '.' not in normalized_key:
-                        normalized_key = normalized_key.replace('_', '-')
-                    processed_args.append('--' + normalized_key)
-            elif arg.startswith('-O') and arg != '-O' and len(arg) == 2:
+                    normalized_key = arg[len("--") :]
+                    if "." not in normalized_key:
+                        normalized_key = normalized_key.replace("_", "-")
+                    processed_args.append("--" + normalized_key)
+            elif arg.startswith("-O") and arg != "-O" and len(arg) == 2:
                 # allow -O flag to be used without space, e.g. -O3
-                processed_args.append('-O')
+                processed_args.append("-O")
                 processed_args.append(arg[2:])
             else:
                 processed_args.append(arg)
@@ -235,18 +237,18 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
         i = 0
         while i < len(args):
             arg = args[i]
-            if arg.startswith('--'):
+            if arg.startswith("--"):
                 # Handle --key=value format
-                if '=' in arg:
-                    key = arg.split('=')[0][2:].replace('-', '_')
+                if "=" in arg:
+                    key = arg.split("=")[0][2:].replace("-", "_")
                     namespace._provided.add(key)
                     i += 1
                 # Handle --key value format
                 else:
-                    key = arg[2:].replace('-', '_')
+                    key = arg[2:].replace("-", "_")
                     namespace._provided.add(key)
                     # Skip the value if there is one
-                    if i + 1 < len(args) and not args[i + 1].startswith('-'):
+                    if i + 1 < len(args) and not args[i + 1].startswith("-"):
                         i += 2
                     else:
                         i += 1
@@ -258,7 +260,7 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
     def _should_defer_config_loading(self, args: list[str]) -> bool:
         if getattr(self, "defer_config_loading", False):
             return True
-        subcommand = next((arg for arg in args if not arg.startswith('-')), None)
+        subcommand = next((arg for arg in args if not arg.startswith("-")), None)
         if subcommand in self._DEFER_CONFIG_SUBCOMMANDS:
             return True
         return self.prog.split()[-1] in self._DEFER_CONFIG_SUBCOMMANDS
@@ -297,12 +299,14 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
         this way the order of priorities is maintained when these are args
         parsed by super().
         """
-        assert args.count('--config') <= 1, "More than one config file specified!"
+        assert args.count("--config") <= 1, "More than one config file specified!"
 
-        index = args.index('--config')
+        index = args.index("--config")
         if index == len(args) - 1:
-            raise ValueError("No config file specified! \
-                             Please check your command-line arguments.")
+            raise ValueError(
+                "No config file specified! \
+                             Please check your command-line arguments."
+            )
 
         file_path = args[index + 1]
 
@@ -316,11 +320,10 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
         # of cli > config > defaults
         if args[0] == "serve":
             if index == 1:
-                raise ValueError("No model_tag specified! Please check your command-line"
-                                 " arguments.")
-            args = [args[0]] + [args[1]] + config_args + args[2:index] + args[index + 2:]
+                raise ValueError("No model_tag specified! Please check your command-line arguments.")
+            args = [args[0]] + [args[1]] + config_args + args[2:index] + args[index + 2 :]
         else:
-            args = [args[0]] + config_args + args[1:index] + args[index + 2:]
+            args = [args[0]] + config_args + args[1:index] + args[index + 2 :]
 
         return args
 
@@ -343,10 +346,13 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
             ]
         """
 
-        extension: str = file_path.split('.')[-1]
-        if extension not in ('yaml', 'yml', 'json'):
-            raise ValueError("Config file must be of a yaml/yml/json type.\
-                              %s supplied", extension)
+        extension: str = file_path.split(".")[-1]
+        if extension not in ("yaml", "yml", "json"):
+            raise ValueError(
+                "Config file must be of a yaml/yml/json type.\
+                              %s supplied",
+                extension,
+            )
 
         processed_args: list[str] = []
 
@@ -355,8 +361,11 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
             with open(file_path) as config_file:
                 config = yaml.safe_load(config_file)
         except Exception as ex:
-            logger.error("Unable to read the config file at %s. \
-                Make sure path is correct", file_path)
+            logger.error(
+                "Unable to read the config file at %s. \
+                Make sure path is correct",
+                file_path,
+            )
             raise ex
 
         store_boolean_arguments = [action.dest for action in self._actions if isinstance(action, StoreBoolean)]
@@ -367,18 +376,18 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
 
                 if isinstance(value, bool) and full_key not in store_boolean_arguments:
                     if value:
-                        processed_args.append('--' + full_key)
+                        processed_args.append("--" + full_key)
                     else:
-                        processed_args.append('--' + full_key)
-                        processed_args.append('false')
+                        processed_args.append("--" + full_key)
+                        processed_args.append("false")
                 elif isinstance(value, list):
-                    processed_args.append('--' + full_key)
+                    processed_args.append("--" + full_key)
                     for item in value:
                         processed_args.append(str(item))
                 elif isinstance(value, dict):
                     process_dict(full_key, value)
                 else:
-                    processed_args.append('--' + full_key)
+                    processed_args.append("--" + full_key)
                     processed_args.append(str(value))
 
         process_dict("", config)
@@ -414,7 +423,7 @@ def warn_for_unimplemented_methods(cls: type[T]) -> type[T]:
         unimplemented_methods = []
         for attr_name in dir(self):
             # bypass inner method
-            if attr_name.startswith('_'):
+            if attr_name.startswith("_"):
                 continue
 
             try:
@@ -428,8 +437,8 @@ def warn_for_unimplemented_methods(cls: type[T]) -> type[T]:
             if "NotImplementedError" in src:
                 unimplemented_methods.append(attr_name)
         if unimplemented_methods:
-            method_names = ','.join(unimplemented_methods)
-            msg = (f"Methods {method_names} not implemented in {self}")
+            method_names = ",".join(unimplemented_methods)
+            msg = f"Methods {method_names} not implemented in {self}"
             logger.warning(msg)
 
     @wraps(original_init)
@@ -437,7 +446,7 @@ def warn_for_unimplemented_methods(cls: type[T]) -> type[T]:
         original_init(self, *args, **kwargs)
         find_unimplemented_methods(self)
 
-    type.__setattr__(cls, '__init__', wrapped_init)
+    type.__setattr__(cls, "__init__", wrapped_init)
     return cls
 
 
@@ -490,20 +499,23 @@ def import_pynvml():
     module to our codebase, and use it directly.
     """
     import fastvideo.third_party.pynvml as pynvml
+
     return pynvml
 
 
 def _split_hf_repo_subfolder(model_name_or_path: str) -> tuple[str, str | None]:
     """Split an ``org/repo/subfolder`` reference into its Hub coordinates."""
     parts = model_name_or_path.split("/")
-    if (len(parts) < 3 or model_name_or_path.startswith("/") or model_name_or_path.startswith(".") or "" in parts):
+    if len(parts) < 3 or model_name_or_path.startswith("/") or model_name_or_path.startswith(".") or "" in parts:
         return model_name_or_path, None
 
     sub_parts = parts[2:]
     if any(part in (".", "..") for part in sub_parts) or any(char in part for part in sub_parts for char in "*?["):
-        raise ValueError(f"Invalid umbrella-repo subfolder in {model_name_or_path!r}: "
-                         "`.`/`..` segments and glob metacharacters (`*`, `?`, `[`) "
-                         "are not allowed.")
+        raise ValueError(
+            f"Invalid umbrella-repo subfolder in {model_name_or_path!r}: "
+            "`.`/`..` segments and glob metacharacters (`*`, `?`, `[`) "
+            "are not allowed."
+        )
     return "/".join(parts[:2]), "/".join(sub_parts)
 
 
@@ -554,8 +566,11 @@ def maybe_download_model(
     try:
         if subfolder is not None:
             logger.info("Downloading umbrella-repo subfolder %s/%s from HF Hub...", repo_id, subfolder)
-            subfolder_allow_patterns = ([f"{subfolder}/{pattern}" for pattern in allow_patterns]
-                                        if allow_patterns is not None else [f"{subfolder}/**"])
+            subfolder_allow_patterns = (
+                [f"{subfolder}/{pattern}" for pattern in allow_patterns]
+                if allow_patterns is not None
+                else [f"{subfolder}/**"]
+            )
             with get_lock(model_name_or_path):
                 snapshot_root = snapshot_download(
                     repo_id=repo_id,
@@ -569,21 +584,26 @@ def maybe_download_model(
             snapshot_real = os.path.realpath(snapshot_root)
             local_path = os.path.realpath(os.path.join(snapshot_root, subfolder))
             if local_path != snapshot_real and not local_path.startswith(snapshot_real + os.sep):
-                raise ValueError(f"Resolved umbrella-repo path {local_path!r} escapes the "
-                                 f"snapshot root {snapshot_real!r}.")
+                raise ValueError(
+                    f"Resolved umbrella-repo path {local_path!r} escapes the snapshot root {snapshot_real!r}."
+                )
             if not os.path.isdir(local_path):
-                raise ValueError(f"Subfolder {subfolder!r} was not found inside the snapshot of "
-                                 f"{repo_id!r}; verify it exists in the umbrella repo.")
+                raise ValueError(
+                    f"Subfolder {subfolder!r} was not found inside the snapshot of "
+                    f"{repo_id!r}; verify it exists in the umbrella repo."
+                )
             logger.info("Downloaded subfolder to %s", local_path)
             return str(local_path)
 
         logger.info("Downloading model snapshot from HF Hub for %s...", model_name_or_path)
         with get_lock(model_name_or_path):
-            local_path = snapshot_download(repo_id=model_name_or_path,
-                                           allow_patterns=allow_patterns,
-                                           ignore_patterns=["*.onnx", "*.msgpack"],
-                                           local_dir=local_dir,
-                                           revision=revision)
+            local_path = snapshot_download(
+                repo_id=model_name_or_path,
+                allow_patterns=allow_patterns,
+                ignore_patterns=["*.onnx", "*.msgpack"],
+                local_dir=local_dir,
+                revision=revision,
+            )
         logger.info("Downloaded model to %s", local_path)
         return str(local_path)
     except Exception as e:
@@ -597,7 +617,7 @@ def maybe_download_lora(model_name_or_path: str, local_dir: str | None = None, d
         model_name_or_path: Local path or Hugging Face Hub model ID
         local_dir: Local directory to save the model
         download: Whether to download the model from Hugging Face Hub
-        
+
     Returns:
         Local path to the model
     """
@@ -622,26 +642,31 @@ def verify_model_config_and_directory(
 ) -> dict[str, Any]:
     """
     Verify that the model directory contains a valid Diffusers configuration.
-    
+
     Args:
         model_path: Path to the model directory
         required_component_dirs: Component directories required by the selected
             pipeline. ``None`` preserves full-snapshot validation; an empty
             collection validates only the manifest.
-        
+
     Returns:
         The loaded model configuration as a dictionary
     """
 
     # Some Diffusers checkpoints publish a modular manifest instead of model_index.json.
     config_filename = next(
-        (name for name in ("model_index.json", "modular_model_index.json")
-         if os.path.isfile(os.path.join(model_path, name))),
+        (
+            name
+            for name in ("model_index.json", "modular_model_index.json")
+            if os.path.isfile(os.path.join(model_path, name))
+        ),
         None,
     )
     if config_filename is None:
-        raise ValueError(f"Model directory {model_path} does not contain model_index.json or "
-                         "modular_model_index.json. Only Hugging Face Diffusers format is supported.")
+        raise ValueError(
+            f"Model directory {model_path} does not contain model_index.json or "
+            "modular_model_index.json. Only Hugging Face Diffusers format is supported."
+        )
     config_path = os.path.join(model_path, config_filename)
 
     # Load the config first so directory checks below can be conditional on
@@ -652,8 +677,9 @@ def verify_model_config_and_directory(
     if required_component_dirs is not None:
         for component_dir in required_component_dirs:
             if not os.path.isdir(os.path.join(model_path, component_dir)):
-                raise ValueError(f"Model directory {model_path} is missing the selected "
-                                 f"{component_dir}/ component directory.")
+                raise ValueError(
+                    f"Model directory {model_path} is missing the selected {component_dir}/ component directory."
+                )
     else:
         # Full snapshots keep the historical invariant that transformer/ is
         # present and every active manifest component exists locally.
@@ -681,8 +707,10 @@ def verify_model_config_and_directory(
                 continue
             subdir = os.path.join(model_path, key)
             if not os.path.exists(subdir):
-                raise ValueError(f"Model directory {model_path} declares `{key}` in "
-                                 f"{config_filename} but is missing the {key}/ subfolder.")
+                raise ValueError(
+                    f"Model directory {model_path} declares `{key}` in "
+                    f"{config_filename} but is missing the {key}/ subfolder."
+                )
 
     # Verify diffusers version exists
     if "_diffusers_version" not in config:
@@ -695,11 +723,11 @@ def verify_model_config_and_directory(
 def maybe_download_model_index(model_name_or_path: str, revision: str | None = None) -> dict[str, Any]:
     """
     Download and extract a Diffusers model manifest for a Hugging Face model.
-    
+
     Args:
         model_name_or_path: Path or HF Hub model ID
         revision: Optional immutable Hub revision.
-        
+
     Returns:
         The parsed model_index.json or modular_model_index.json dictionary
     """
@@ -720,15 +748,11 @@ def maybe_download_model_index(model_name_or_path: str, revision: str | None = N
         config_filename = "model_index.json"
         try:
             filename = f"{subfolder}/{config_filename}" if subfolder else config_filename
-            model_index_path = hf_hub_download(repo_id=repo_id,
-                                               filename=filename,
-                                               revision=revision)
+            model_index_path = hf_hub_download(repo_id=repo_id, filename=filename, revision=revision)
         except EntryNotFoundError:
             config_filename = "modular_model_index.json"
             filename = f"{subfolder}/{config_filename}" if subfolder else config_filename
-            model_index_path = hf_hub_download(repo_id=repo_id,
-                                               filename=filename,
-                                               revision=revision)
+            model_index_path = hf_hub_download(repo_id=repo_id, filename=filename, revision=revision)
 
         # Load the selected manifest.
         with open(model_index_path) as f:
@@ -739,14 +763,12 @@ def maybe_download_model_index(model_name_or_path: str, revision: str | None = N
             raise ValueError(f"{config_filename} for {model_name_or_path} does not contain _class_name field")
 
         if "_diffusers_version" not in config:
-            raise ValueError(
-                f"{config_filename} for {model_name_or_path} does not contain _diffusers_version field")
+            raise ValueError(f"{config_filename} for {model_name_or_path} does not contain _diffusers_version field")
 
         # Add the pipeline name for downstream use
         config["pipeline_name"] = config["_class_name"]
 
-        logger.info("Downloaded %s for %s, pipeline: %s", config_filename, model_name_or_path,
-                    config["_class_name"])
+        logger.info("Downloaded %s for %s, pipeline: %s", config_filename, model_name_or_path, config["_class_name"])
         return config
 
     except Exception as e:
@@ -773,8 +795,7 @@ def resolve_hf_token() -> str | None:
 def update_environment_variables(envs: dict[str, str]):
     for k, v in envs.items():
         if k in os.environ and os.environ[k] != v:
-            logger.warning("Overwriting environment variable %s "
-                           "from '%s' to '%s'", k, os.environ[k], v)
+            logger.warning("Overwriting environment variable %s from '%s' to '%s'", k, os.environ[k], v)
         os.environ[k] = v
 
 
@@ -792,8 +813,7 @@ def run_method(obj: Any, method: str | bytes | Callable, args: tuple[Any], kwarg
         try:
             func = getattr(obj, method)
         except AttributeError:
-            raise NotImplementedError(f"Method {method!r} is not"
-                                      " implemented.") from None
+            raise NotImplementedError(f"Method {method!r} is not implemented.") from None
     else:
         func = partial(method, obj)  # type: ignore
     return func(*args, **kwargs)
@@ -811,6 +831,7 @@ def kill_itself_when_parent_died() -> None:
     # sigkill this process when parent worker manager dies
     PR_SET_PDEATHSIG = 1
     import platform
+
     if platform.system() == "Linux":
         libc = ctypes.CDLL("libc.so.6")
         libc.prctl(PR_SET_PDEATHSIG, signal.SIGKILL)
@@ -828,7 +849,6 @@ def get_exception_traceback() -> str:
 
 
 class TypeBasedDispatcher:
-
     def __init__(self, mapping: list[tuple[type, Callable]]):
         self._mapping = mapping
 
@@ -863,7 +883,7 @@ _mixed_precision_state = threading.local()
 
 def get_mixed_precision_state() -> MixedPrecisionState:
     """Get the current mixed precision state."""
-    if not hasattr(_mixed_precision_state, 'state'):
+    if not hasattr(_mixed_precision_state, "state"):
         raise ValueError("Mixed precision state not set")
     return cast(MixedPrecisionState, _mixed_precision_state.state)
 
@@ -875,7 +895,7 @@ def set_mixed_precision_policy(
     mp_policy: MixedPrecisionPolicy | None = None,
 ):
     """Set mixed precision policy globally.
-    
+
     Args:
         param_dtype: Parameter dtype used for training
         reduce_dtype: Reduction dtype used for gradients
@@ -892,11 +912,11 @@ def set_mixed_precision_policy(
 
 def get_compute_dtype() -> torch.dtype:
     """Get the current compute dtype from mixed precision policy.
-    
+
     Returns:
         torch.dtype: The compute dtype to use, defaults to get_default_dtype() if no policy set
     """
-    if not hasattr(_mixed_precision_state, 'state'):
+    if not hasattr(_mixed_precision_state, "state"):
         return torch.get_default_dtype()
     else:
         state = get_mixed_precision_state()
@@ -919,7 +939,8 @@ def dict_to_3d_list(
     # Case 1: no data, but fixed shape requested
     if mask_strategy is None:
         assert t_max is not None and l_max is not None and h_max is not None, (
-            "If mask_strategy is None, you must provide t_max, l_max, and h_max")
+            "If mask_strategy is None, you must provide t_max, l_max, and h_max"
+        )
         return [[[None for _ in range(h_max)] for _ in range(l_max)] for _ in range(t_max)]
 
     # Parse all keys into integer tuples
@@ -934,8 +955,8 @@ def dict_to_3d_list(
     else:
         # require all three to be provided
         assert t_max is not None and l_max is not None and h_max is not None, (
-            "Either supply none of (t_max, l_max, h_max) to infer dimensions, "
-            "or supply all three to fix the shape.")
+            "Either supply none of (t_max, l_max, h_max) to infer dimensions, or supply all three to fix the shape."
+        )
         max_timesteps_idx = t_max
         max_layer_idx = l_max
         max_head_idx = h_max
@@ -955,6 +976,7 @@ def dict_to_3d_list(
 
 def set_random_seed(seed: int) -> None:
     from fastvideo.platforms import current_platform
+
     current_platform.seed_everything(seed)
 
 
@@ -969,6 +991,7 @@ def is_vmoba_available() -> bool:
         return False
     try:
         import flash_attn
+
         return flash_attn.__version__ >= "2.7.4"
     except Exception:
         return False
@@ -986,8 +1009,11 @@ def masks_like(tensor, zero=False, generator=None, p=0.2) -> tuple[list[torch.Te
             for u, v in zip(out1, out2, strict=False):
                 random_num = torch.rand(1, generator=generator, device=generator.device).item()
                 if random_num < p:
-                    u[:, 0] = torch.normal(mean=-3.5, std=0.5, size=(1, ), device=u.device,
-                                           generator=generator).expand_as(u[:, 0]).exp()
+                    u[:, 0] = (
+                        torch.normal(mean=-3.5, std=0.5, size=(1,), device=u.device, generator=generator)
+                        .expand_as(u[:, 0])
+                        .exp()
+                    )
                     v[:, 0] = torch.zeros_like(v[:, 0])
                 else:
                     u[:, 0] = u[:, 0]
@@ -1005,7 +1031,7 @@ def masks_like(tensor, zero=False, generator=None, p=0.2) -> tuple[list[torch.Te
 def best_output_size(w, h, dw, dh, expected_area):
     # float output size
     ratio = w / h
-    ow = (expected_area * ratio)**0.5
+    ow = (expected_area * ratio) ** 0.5
     oh = expected_area / ow
 
     # process width first
@@ -1043,13 +1069,15 @@ def save_decoded_latents_as_video(decoded_latents: list[torch.Tensor], output_pa
 def _format_bytes(num_bytes: int | float | None) -> str:
     if num_bytes is None:
         return "N/A"
-    return f"{num_bytes / (1024 ** 3):.2f} GB"
+    return f"{num_bytes / (1024**3):.2f} GB"
 
 
-def log_torch_cuda_memory(tag: str | None = None,
-                          *,
-                          log_fn: Callable[[str], None] | None = None,
-                          log_file_path: str | os.PathLike[str] | None = "memory_trace.txt") -> None:
+def log_torch_cuda_memory(
+    tag: str | None = None,
+    *,
+    log_fn: Callable[[str], None] | None = None,
+    log_file_path: str | os.PathLike[str] | None = "memory_trace.txt",
+) -> None:
     """Log CUDA memory statistics via logger and append to a trace file."""
 
     log_fn = log_fn or logger.info
@@ -1136,7 +1164,8 @@ def get_ip() -> str:
     warnings.warn(
         "Failed to get the IP address, using 0.0.0.0 by default."
         "The value can be set by the environment variable FASTVIDEO_HOST_IP.",
-        stacklevel=2)
+        stacklevel=2,
+    )
     return "0.0.0.0"
 
 
@@ -1162,8 +1191,10 @@ def get_loopback_ip() -> str:
     elif test_loopback_bind("::1", socket.AF_INET6):
         return "::1"
     else:
-        raise RuntimeError("Neither 127.0.0.1 nor ::1 are bound to a local interface. "
-                           "Set the FASTVIDEO_LOOPBACK_IP environment variable explicitly.")
+        raise RuntimeError(
+            "Neither 127.0.0.1 nor ::1 are bound to a local interface. "
+            "Set the FASTVIDEO_LOOPBACK_IP environment variable explicitly."
+        )
 
 
 def is_valid_ipv6_address(address: str) -> bool:
@@ -1240,8 +1271,8 @@ def get_mp_context() -> BaseContext:
 
 
 # ANSI color codes
-CYAN = '\033[1;36m'
-RESET = '\033[0;0m'
+CYAN = "\033[1;36m"
+RESET = "\033[0;0m"
 
 
 def _add_prefix(file: TextIO, worker_name: str, pid: int) -> None:
@@ -1256,7 +1287,7 @@ def _add_prefix(file: TextIO, worker_name: str, pid: int) -> None:
         if file.start_new_line:  # type: ignore[attr-defined]
             file_write(prefix)
         idx = 0
-        while (next_idx := s.find('\n', idx)) != -1:
+        while (next_idx := s.find("\n", idx)) != -1:
             next_idx += 1
             file_write(s[idx:next_idx])
             if next_idx == len(s):
@@ -1290,6 +1321,7 @@ def decorate_logs(process_name: str | None = None) -> None:
 
 def _probe_pin_memory() -> bool:
     from fastvideo.platforms import current_platform
+
     if current_platform.is_cpu() or current_platform.is_mps() or current_platform.is_npu():
         return False
 

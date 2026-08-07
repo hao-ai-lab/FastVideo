@@ -3,17 +3,21 @@
 
 from fastvideo.api.presets import InferencePreset, PresetStageSpec
 
-_NEGATIVE_PROMPT = ("Static, 2D cartoon, cartoon, 2d animation, paintings, images, worst quality, low quality, ugly, "
-                    "deformed, walking backwards")
+_NEGATIVE_PROMPT = (
+    "Static, 2D cartoon, cartoon, 2d animation, paintings, images, worst quality, low quality, ugly, "
+    "deformed, walking backwards"
+)
 
 _DENOISE_STAGE = PresetStageSpec(
     name="denoise",
     kind="denoising",
     description="Main Kandinsky-5 denoising pass",
-    allowed_overrides=frozenset({
-        "num_inference_steps",
-        "guidance_scale",
-    }),
+    allowed_overrides=frozenset(
+        {
+            "num_inference_steps",
+            "guidance_scale",
+        }
+    ),
 )
 
 KANDINSKY5_T2V_LITE_5S = InferencePreset(
@@ -22,7 +26,7 @@ KANDINSKY5_T2V_LITE_5S = InferencePreset(
     model_family="kandinsky5",
     description="Kandinsky-5.0 Lite T2V 5s",
     workload_type="t2v",
-    stage_schemas=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE,),
     defaults={
         "height": 512,
         "width": 768,
@@ -40,7 +44,7 @@ KANDINSKY5_T2V_LITE_DISTILLED_5S = InferencePreset(
     model_family="kandinsky5",
     description="Kandinsky-5.0 Lite T2V Distilled 5s",
     workload_type="t2v",
-    stage_schemas=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE,),
     defaults={
         "height": 512,
         "width": 768,
@@ -58,7 +62,7 @@ KANDINSKY5_T2V_PRO_5S = InferencePreset(
     model_family="kandinsky5",
     description="Kandinsky-5.0 Pro T2V 5s",
     workload_type="t2v",
-    stage_schemas=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE,),
     defaults={
         "height": 512,
         "width": 768,
@@ -76,7 +80,7 @@ KANDINSKY5_T2V_PRO_DISTILLED_5S = InferencePreset(
     model_family="kandinsky5",
     description="Kandinsky-5.0 Pro T2V Distilled 5s",
     workload_type="t2v",
-    stage_schemas=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE,),
     defaults={
         "height": 512,
         "width": 768,
@@ -94,7 +98,7 @@ KANDINSKY5_I2V_LITE_5S = InferencePreset(
     model_family="kandinsky5",
     description="Kandinsky-5.0 Lite I2V 5s",
     workload_type="i2v",
-    stage_schemas=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE,),
     defaults={
         "height": 512,
         "width": 768,
@@ -112,7 +116,7 @@ KANDINSKY5_I2V_PRO_5S = InferencePreset(
     model_family="kandinsky5",
     description="Kandinsky-5.0 Pro I2V 5s",
     workload_type="i2v",
-    stage_schemas=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE,),
     defaults={
         "height": 512,
         "width": 768,
@@ -130,7 +134,7 @@ KANDINSKY5_I2V_LITE_DISTILLED_5S = InferencePreset(
     model_family="kandinsky5",
     description="Kandinsky-5.0 Lite I2V Distilled 5s",
     workload_type="i2v",
-    stage_schemas=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE,),
     defaults={
         "height": 512,
         "width": 768,
@@ -148,7 +152,7 @@ KANDINSKY5_I2V_PRO_DISTILLED_5S = InferencePreset(
     model_family="kandinsky5",
     description="Kandinsky-5.0 Pro I2V Distilled 5s",
     workload_type="i2v",
-    stage_schemas=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE,),
     defaults={
         "height": 512,
         "width": 768,
@@ -160,6 +164,13 @@ KANDINSKY5_I2V_PRO_DISTILLED_5S = InferencePreset(
     },
 )
 
-ALL_PRESETS = (KANDINSKY5_T2V_LITE_5S, KANDINSKY5_T2V_LITE_DISTILLED_5S, KANDINSKY5_T2V_PRO_5S,
-               KANDINSKY5_T2V_PRO_DISTILLED_5S, KANDINSKY5_I2V_LITE_5S, KANDINSKY5_I2V_LITE_DISTILLED_5S,
-               KANDINSKY5_I2V_PRO_5S, KANDINSKY5_I2V_PRO_DISTILLED_5S)
+ALL_PRESETS = (
+    KANDINSKY5_T2V_LITE_5S,
+    KANDINSKY5_T2V_LITE_DISTILLED_5S,
+    KANDINSKY5_T2V_PRO_5S,
+    KANDINSKY5_T2V_PRO_DISTILLED_5S,
+    KANDINSKY5_I2V_LITE_5S,
+    KANDINSKY5_I2V_LITE_DISTILLED_5S,
+    KANDINSKY5_I2V_PRO_5S,
+    KANDINSKY5_I2V_PRO_DISTILLED_5S,
+)

@@ -9,6 +9,7 @@
 Asset paths live on :class:`~fastvideo.api.schema.ComponentConfig`
 (``upsampler_weights`` and ``lora_path``).
 """
+
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, fields
@@ -35,7 +36,9 @@ class LTX2RefineStageOverride:
     video_position_offset_sec: float | None = None
 
 
-def refine_override_to_dict(override: LTX2RefinePresetOverride | LTX2RefineStageOverride, ) -> dict[str, Any]:
+def refine_override_to_dict(
+    override: LTX2RefinePresetOverride | LTX2RefineStageOverride,
+) -> dict[str, Any]:
     """Serialise a refine override, dropping ``None`` entries so only
     user-set fields reach ``preset_overrides.refine`` or
     ``stage_overrides.refine``."""

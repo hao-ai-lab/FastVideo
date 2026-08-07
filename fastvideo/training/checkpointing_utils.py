@@ -5,12 +5,16 @@ from typing import Any
 import numpy as np
 import torch
 import torch.distributed.checkpoint.stateful
-from torch.distributed.checkpoint.state_dict import (StateDictOptions, get_model_state_dict, get_optimizer_state_dict,
-                                                     set_model_state_dict, set_optimizer_state_dict)
+from torch.distributed.checkpoint.state_dict import (
+    StateDictOptions,
+    get_model_state_dict,
+    get_optimizer_state_dict,
+    set_model_state_dict,
+    set_optimizer_state_dict,
+)
 
 
 class ModelWrapper(torch.distributed.checkpoint.stateful.Stateful):
-
     def __init__(self, model: torch.nn.Module) -> None:
         self.model = model
 
@@ -18,8 +22,7 @@ class ModelWrapper(torch.distributed.checkpoint.stateful.Stateful):
         state_dict = get_model_state_dict(self.model)
 
         param_requires_grad = {
-            k.replace("._checkpoint_wrapped_module.", ".")
-            for k, v in self.model.named_parameters() if v.requires_grad
+            k.replace("._checkpoint_wrapped_module.", ".") for k, v in self.model.named_parameters() if v.requires_grad
         }
 
         filtered_state_dict = {k: v for k, v in state_dict.items() if k in param_requires_grad}
@@ -35,7 +38,6 @@ class ModelWrapper(torch.distributed.checkpoint.stateful.Stateful):
 
 
 class OptimizerWrapper(torch.distributed.checkpoint.stateful.Stateful):
-
     def __init__(self, model: torch.nn.Module, optimizer: torch.optim.Optimizer) -> None:
         self.model = model
         self.optimizer = optimizer
@@ -57,7 +59,6 @@ class OptimizerWrapper(torch.distributed.checkpoint.stateful.Stateful):
 
 
 class SchedulerWrapper(torch.distributed.checkpoint.stateful.Stateful):
-
     def __init__(self, scheduler) -> None:
         self.scheduler = scheduler
 
@@ -69,7 +70,6 @@ class SchedulerWrapper(torch.distributed.checkpoint.stateful.Stateful):
 
 
 class RandomStateWrapper(torch.distributed.checkpoint.stateful.Stateful):
-
     def __init__(self, noise_generator: torch.Generator | None = None) -> None:
         self.noise_generator = noise_generator
 

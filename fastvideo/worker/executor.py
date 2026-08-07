@@ -14,7 +14,6 @@ _R = TypeVar("_R")
 
 
 class Executor(ABC):
-
     def __init__(
         self,
         fastvideo_args: FastVideoArgs,
@@ -34,9 +33,11 @@ class Executor(ABC):
     def get_class(fastvideo_args: FastVideoArgs) -> type["Executor"]:
         if fastvideo_args.distributed_executor_backend == "mp":
             from fastvideo.worker.multiproc_executor import MultiprocExecutor
+
             return cast(type["Executor"], MultiprocExecutor)
         elif fastvideo_args.distributed_executor_backend == "ray":
             from fastvideo.worker.ray_distributed_executor import RayDistributedExecutor
+
             return cast(type["Executor"], RayDistributedExecutor)
         else:
             raise ValueError(f"Unsupported distributed executor backend: {fastvideo_args.distributed_executor_backend}")
@@ -46,19 +47,15 @@ class Executor(ABC):
         forward_batch: ForwardBatch,
         fastvideo_args: FastVideoArgs,
     ) -> ForwardBatch:
-        outputs: list[dict[str, Any]] = self.collective_rpc("execute_forward",
-                                                            kwargs={
-                                                                "forward_batch": forward_batch,
-                                                                "fastvideo_args": fastvideo_args
-                                                            })
+        outputs: list[dict[str, Any]] = self.collective_rpc(
+            "execute_forward", kwargs={"forward_batch": forward_batch, "fastvideo_args": fastvideo_args}
+        )
         return cast(ForwardBatch, outputs[0]["output_batch"])
 
     @abstractmethod
-    def set_lora_adapter(self,
-                         lora_nickname: str,
-                         lora_path: str | None = None,
-                         strength: float = 1.0,
-                         accumulate: bool = False) -> None:
+    def set_lora_adapter(
+        self, lora_nickname: str, lora_path: str | None = None, strength: float = 1.0, accumulate: bool = False
+    ) -> None:
         """
         Set the LoRA adapter for the workers.
         """
@@ -79,11 +76,13 @@ class Executor(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def collective_rpc(self,
-                       method: str | Callable[..., _R],
-                       timeout: float | None = None,
-                       args: tuple = (),
-                       kwargs: dict[str, Any] | None = None) -> list[_R]:
+    def collective_rpc(
+        self,
+        method: str | Callable[..., _R],
+        timeout: float | None = None,
+        args: tuple = (),
+        kwargs: dict[str, Any] | None = None,
+    ) -> list[_R]:
         """
         Execute an RPC call on all workers.
 
@@ -101,7 +100,7 @@ class Executor(ABC):
 
         Returns:
             A list containing the results from each worker.
-        
+
         Note:
             It is recommended to use this API to only pass control messages,
             and set up data-plane communication to pass data.

@@ -69,11 +69,13 @@ _FA4_FP4_CAPABILITIES = frozenset({(10, 0), (10, 3)})
 # CUTE_DSL_ENABLE_TVM_FFI=1, and FASTVIDEO_FA4=1 (the fork ships no compiled
 # FA2, so dense attention paths need the FA4 opt-in). dsl 4.6-era installs
 # fail at CuTe JIT trace (cute.make_fragment was removed at module level).
-_FA4_INSTALL_HINT = ("install flash-attention-fp4 (branch fp4) from "
-                     "https://github.com/hao-ai-lab/flash-attention-fp4 with "
-                     "nvidia-cutlass-dsl==4.4.2, quack-kernels==0.4.1, "
-                     "flashinfer-python==0.6.8 and FASTVIDEO_FA4=1; "
-                     "see docs/inference/optimizations.md")
+_FA4_INSTALL_HINT = (
+    "install flash-attention-fp4 (branch fp4) from "
+    "https://github.com/hao-ai-lab/flash-attention-fp4 with "
+    "nvidia-cutlass-dsl==4.4.2, quack-kernels==0.4.1, "
+    "flashinfer-python==0.6.8 and FASTVIDEO_FA4=1; "
+    "see docs/inference/optimizations.md"
+)
 
 _fa4_fp4_import_ok: bool | None = None
 
@@ -86,7 +88,9 @@ def _fa4_fp4_available() -> bool:
     if _fa4_fp4_import_ok is None:
         try:
             from fastvideo.attention.utils.flash_attn_cute import (  # noqa: F401
-                flash_attn_fp4_func, )
+                flash_attn_fp4_func,
+            )
+
             _fa4_fp4_import_ok = True
         except ImportError:
             _fa4_fp4_import_ok = False
@@ -132,8 +136,10 @@ def attn_qat_infer_receipt() -> str:
     if kernel == "cutlass_sm12x":
         return f"arch={arch} kernel=fastvideo-kernel-cutlass scheme=sage3-fp4-sm120"
     if kernel == "fa4_fp4":
-        return (f"arch={arch} kernel=flash-attention-fp4 qk_mode=nvfp4(per-16-e4m3-sf) "
-                f"pv_mode=bf16 train_sim_mismatch=measured")
+        return (
+            f"arch={arch} kernel=flash-attention-fp4 qk_mode=nvfp4(per-16-e4m3-sf) "
+            f"pv_mode=bf16 train_sim_mismatch=measured"
+        )
     supported = "sm_120a/sm_121a via fastvideo-kernel build.sh; sm_100a/sm_103a via flash-attention-fp4"
     if cap is not None and cap in _FA4_FP4_CAPABILITIES:
         return f"arch={arch} kernel=none (flash_attn.cute not importable -- {_FA4_INSTALL_HINT})"
@@ -147,9 +153,12 @@ def _import_fa4_route_ops() -> tuple:
     """Slow path (own function so tests pin it runs once per process):
     resolves the FA4 quantize helper and kernel entry point."""
     from fastvideo.attention.backends.flash_attn import (
-        _nvfp4_quantize_for_fa4, )
+        _nvfp4_quantize_for_fa4,
+    )
     from fastvideo.attention.utils.flash_attn_cute import (
-        flash_attn_fp4_func, )
+        flash_attn_fp4_func,
+    )
+
     return (_nvfp4_quantize_for_fa4, flash_attn_fp4_func)
 
 
@@ -190,7 +199,6 @@ def is_attn_qat_infer_available() -> bool:
 
 
 class AttnQatInferBackend(AttentionBackend):
-
     accept_output_buffer: bool = True
 
     @staticmethod
@@ -215,7 +223,6 @@ class AttnQatInferBackend(AttentionBackend):
 
 
 class AttnQatInferImpl(AttentionImpl[AttentionMetadata]):
-
     def __init__(
         self,
         num_heads: int,
@@ -230,8 +237,10 @@ class AttnQatInferImpl(AttentionImpl[AttentionMetadata]):
         self.softmax_scale = softmax_scale
         dropout_p = extra_impl_args.get("dropout_p", 0.0)
         if dropout_p > 0:
-            raise NotImplementedError(f"attn_qat_infer does not support dropout (got dropout_p={dropout_p}). "
-                                      "The QAT inference kernel applies no stochastic dropout.")
+            raise NotImplementedError(
+                f"attn_qat_infer does not support dropout (got dropout_p={dropout_p}). "
+                "The QAT inference kernel applies no stochastic dropout."
+            )
         # Kernel resolution is per-forward, not per-construction: callers
         # (the validation swap, backend selection) gate on
         # is_attn_qat_infer_available() first, and constructing an impl on a
@@ -253,8 +262,10 @@ class AttnQatInferImpl(AttentionImpl[AttentionMetadata]):
         if kernel == "fa4_fp4":
             return self._forward_fa4_fp4(query, key, value)
         if kernel is None:
-            raise ImportError(f"attn_qat_infer is not available ({attn_qat_infer_receipt()}). "
-                              "Please ensure an ATTN_QAT_INFER kernel is installed for this device.")
+            raise ImportError(
+                f"attn_qat_infer is not available ({attn_qat_infer_receipt()}). "
+                "Please ensure an ATTN_QAT_INFER kernel is installed for this device."
+            )
 
         attn_qat_infer = _get_attn_qat_infer()
         assert attn_qat_infer is not None  # kernel == "cutlass_sm12x" implies the import succeeded

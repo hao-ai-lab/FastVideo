@@ -12,24 +12,28 @@ from .base_device_communicator import DeviceCommunicatorBase
 
 
 class CpuCommunicator(DeviceCommunicatorBase):
-
-    def __init__(self,
-                 cpu_group: ProcessGroup,
-                 device: torch.device | None = None,
-                 device_group: ProcessGroup | None = None,
-                 unique_name: str = ""):
+    def __init__(
+        self,
+        cpu_group: ProcessGroup,
+        device: torch.device | None = None,
+        device_group: ProcessGroup | None = None,
+        unique_name: str = "",
+    ):
         super().__init__(cpu_group, device, device_group, unique_name)
         self.dist_module = torch.distributed
 
         from fastvideo.platforms import current_platform
 
-        if (current_platform.get_cpu_architecture() == CpuArchEnum.X86) and hasattr(
-                torch.ops._C, "init_shm_manager") and unique_name.startswith("tp"):
+        if (
+            (current_platform.get_cpu_architecture() == CpuArchEnum.X86)
+            and hasattr(torch.ops._C, "init_shm_manager")
+            and unique_name.startswith("tp")
+        ):
             self.dist_module = _CPUSHMDistributed(self)
 
-    def all_reduce(self,
-                   input_: torch.Tensor,
-                   op: torch.distributed.ReduceOp | None = torch.distributed.ReduceOp.SUM) -> torch.Tensor:
+    def all_reduce(
+        self, input_: torch.Tensor, op: torch.distributed.ReduceOp | None = torch.distributed.ReduceOp.SUM
+    ) -> torch.Tensor:
         self.dist_module.all_reduce(input_, group=self.device_group, op=op)
         return input_
 
@@ -40,7 +44,7 @@ class CpuCommunicator(DeviceCommunicatorBase):
         NOTE: `dst` is the local rank of the destination rank.
         """
         world_size = self.world_size
-        assert -input_.dim() <= dim < input_.dim(), (f"Invalid dim ({dim}) for input tensor with shape {input_.size()}")
+        assert -input_.dim() <= dim < input_.dim(), f"Invalid dim ({dim}) for input tensor with shape {input_.size()}"
         if dim < 0:
             # Convert negative dim to positive.
             dim += input_.dim()
@@ -62,22 +66,22 @@ class CpuCommunicator(DeviceCommunicatorBase):
         # NOTE: we have to use concat-style all-gather here,
         # stack-style all-gather has compatibility issues with
         # torch.compile . see https://github.com/pytorch/pytorch/issues/138795
-        output_size = (input_size[0] * self.world_size, ) + input_size[1:]
+        output_size = (input_size[0] * self.world_size,) + input_size[1:]
         # Allocate output tensor.
         output_tensor = torch.empty(output_size, dtype=input_.dtype, device=input_.device)
         # All-gather.
         self.dist_module.all_gather_into_tensor(output_tensor, input_, group=self.device_group)
 
         # Reshape
-        output_tensor = output_tensor.reshape((self.world_size, ) + input_size)
+        output_tensor = output_tensor.reshape((self.world_size,) + input_size)
         output_tensor = output_tensor.movedim(0, dim)
-        output_tensor = output_tensor.reshape(input_size[:dim] + (self.world_size * input_size[dim], ) +
-                                              input_size[dim + 1:])
+        output_tensor = output_tensor.reshape(
+            input_size[:dim] + (self.world_size * input_size[dim],) + input_size[dim + 1 :]
+        )
         return output_tensor
 
 
 class _CPUSHMDistributed:
-
     def __init__(self, communicator: CpuCommunicator):
         instance_identifier = os.environ["VLLM_DIST_IDENT"]
         unique_name = communicator.unique_name
@@ -108,16 +112,17 @@ class _CPUSHMDistributed:
     def all_reduce(self, input: torch.Tensor, group: ProcessGroup | None = None) -> None:
         torch.ops._C.shm_allreduce(self.handle, input)
 
-    def gather(self,
-               input: torch.Tensor,
-               gather_list: list[torch.Tensor] | None,
-               dst: int = -1,
-               group: ProcessGroup | None = None) -> None:
+    def gather(
+        self,
+        input: torch.Tensor,
+        gather_list: list[torch.Tensor] | None,
+        dst: int = -1,
+        group: ProcessGroup | None = None,
+    ) -> None:
         # Note: different from the torch gather, here we use local dst rank.
         torch.ops._C.shm_gather(self.handle, input, gather_list, torch.distributed.get_group_rank(group, dst))
 
-    def all_gather_into_tensor(self,
-                               output: torch.Tensor,
-                               input: torch.Tensor,
-                               group: ProcessGroup | None = None) -> None:
+    def all_gather_into_tensor(
+        self, output: torch.Tensor, input: torch.Tensor, group: ProcessGroup | None = None
+    ) -> None:
         torch.ops._C.shm_all_gather(self.handle, input, output)

@@ -44,8 +44,9 @@ _forward_context: Optional["ForwardContext"] = None
 
 def get_forward_context() -> "ForwardContext":
     """Get the current forward context."""
-    assert _forward_context is not None, ("Forward context is not set. "
-                                          "Please use `set_forward_context` to set the forward context.")
+    assert _forward_context is not None, (
+        "Forward context is not set. Please use `set_forward_context` to set the forward context."
+    )
     return _forward_context
 
 
@@ -62,9 +63,9 @@ def set_forward_context(current_timestep, attn_metadata, forward_batch: Optional
         forward_start_time = time.perf_counter()
     global _forward_context
     prev_context = _forward_context
-    _forward_context = ForwardContext(current_timestep=current_timestep,
-                                      attn_metadata=attn_metadata,
-                                      forward_batch=forward_batch)
+    _forward_context = ForwardContext(
+        current_timestep=current_timestep, attn_metadata=attn_metadata, forward_batch=forward_batch
+    )
 
     try:
         yield
@@ -73,8 +74,7 @@ def set_forward_context(current_timestep, attn_metadata, forward_batch: Optional
         if need_to_track_batchsize:
             if hasattr(attn_metadata, "num_prefill_tokens"):
                 # for v0 attention backends
-                batchsize = attn_metadata.num_prefill_tokens + \
-                    attn_metadata.num_decode_tokens
+                batchsize = attn_metadata.num_prefill_tokens + attn_metadata.num_decode_tokens
             else:
                 # for v1 attention backends
                 batchsize = attn_metadata.num_input_tokens
@@ -93,6 +93,5 @@ def set_forward_context(current_timestep, attn_metadata, forward_batch: Optional
                     forward_stats.append((bs, len(times), medium))
                 forward_stats.sort(key=lambda x: x[1], reverse=True)
                 if forward_stats:
-                    logger.info(("Batchsize forward time stats "
-                                 "(batchsize, count, median_time(ms)): %s"), forward_stats)
+                    logger.info(("Batchsize forward time stats (batchsize, count, median_time(ms)): %s"), forward_stats)
         _forward_context = prev_context

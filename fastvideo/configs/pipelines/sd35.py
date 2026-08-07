@@ -21,8 +21,9 @@ from fastvideo.configs.pipelines.base import PipelineConfig, preprocess_text
 def _sd35_clip_text_postprocess(outputs: BaseEncoderOutput) -> torch.Tensor:
     hs = outputs.hidden_states
     if hs is None:
-        raise RuntimeError("SD3.5 CLIP prompt embeddings require hidden_states. "
-                           "Set output_hidden_states=True for CLIP encoders.")
+        raise RuntimeError(
+            "SD3.5 CLIP prompt embeddings require hidden_states. Set output_hidden_states=True for CLIP encoders."
+        )
     return hs[-2]
 
 
@@ -33,7 +34,6 @@ def _sd35_t5_text_postprocess(outputs: BaseEncoderOutput) -> torch.Tensor:
 
 @dataclass
 class SD35Config(PipelineConfig):
-
     scheduler_arch: str = "FlowMatchEulerDiscreteScheduler"
     transformer_arch: str = "SD3Transformer2DModel"
     vae_arch: str = "AutoencoderKL"
@@ -54,12 +54,15 @@ class SD35Config(PipelineConfig):
     embedded_cfg_scale: float = 0.0
     flow_shift: float | None = None
 
-    text_encoder_configs: tuple[EncoderConfig,
-                                ...] = field(default_factory=lambda: (CLIPTextConfig(), CLIPTextConfig(), T5Config()))
+    text_encoder_configs: tuple[EncoderConfig, ...] = field(
+        default_factory=lambda: (CLIPTextConfig(), CLIPTextConfig(), T5Config())
+    )
     preprocess_text_funcs: tuple[Callable[[str], str], ...] = field(
-        default_factory=lambda: (preprocess_text, preprocess_text, preprocess_text))
+        default_factory=lambda: (preprocess_text, preprocess_text, preprocess_text)
+    )
     postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.Tensor], ...] = field(
-        default_factory=lambda: (_sd35_clip_text_postprocess, _sd35_clip_text_postprocess, _sd35_t5_text_postprocess))
+        default_factory=lambda: (_sd35_clip_text_postprocess, _sd35_clip_text_postprocess, _sd35_t5_text_postprocess)
+    )
 
     dit_precision: str = "bf16"
     vae_precision: str = "fp32"

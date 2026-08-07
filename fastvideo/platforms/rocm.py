@@ -9,7 +9,7 @@ import torch
 
 import fastvideo.envs as envs
 from fastvideo.logger import init_logger
-from fastvideo.platforms.interface import (AttentionBackendEnum, DeviceCapability, Platform, PlatformEnum)
+from fastvideo.platforms.interface import AttentionBackendEnum, DeviceCapability, Platform, PlatformEnum
 
 logger = init_logger(__name__)
 
@@ -39,8 +39,10 @@ class RocmPlatform(Platform):
     @classmethod
     def is_async_output_supported(cls, enforce_eager: bool | None) -> bool:
         if enforce_eager:
-            logger.warning("To see benefits of async output processing, enable CUDA graph. "
-                           "Since enforce-eager is enabled, async output processor cannot be used")
+            logger.warning(
+                "To see benefits of async output processing, enable CUDA graph. "
+                "Since enforce-eager is enabled, async output processor cannot be used"
+            )
             return False
         return True
 
@@ -61,8 +63,9 @@ class RocmPlatform(Platform):
         return torch.cuda
 
     @classmethod
-    def get_attn_backend_cls(cls, selected_backend: AttentionBackendEnum | None, head_size: int,
-                             dtype: torch.dtype) -> str:
+    def get_attn_backend_cls(
+        cls, selected_backend: AttentionBackendEnum | None, head_size: int, dtype: torch.dtype
+    ) -> str:
         logger.info("Trying FASTVIDEO_ATTENTION_BACKEND=%s", envs.FASTVIDEO_ATTENTION_BACKEND)
 
         if selected_backend == AttentionBackendEnum.TORCH_SDPA:
@@ -79,8 +82,7 @@ class RocmPlatform(Platform):
 
         target_backend = AttentionBackendEnum.FLASH_ATTN
         if dtype not in (torch.float16, torch.bfloat16):
-            logger.info("Cannot use FlashAttention backend for dtype other than "
-                        "torch.float16 or torch.bfloat16.")
+            logger.info("Cannot use FlashAttention backend for dtype other than torch.float16 or torch.bfloat16.")
             target_backend = AttentionBackendEnum.TORCH_SDPA
 
         if target_backend == AttentionBackendEnum.FLASH_ATTN:
@@ -88,18 +90,20 @@ class RocmPlatform(Platform):
                 import flash_attn  # noqa: F401
 
                 from fastvideo.attention.backends.flash_attn import (  # noqa: F401
-                    FlashAttentionBackend)
+                    FlashAttentionBackend,
+                )
 
-                supported_sizes = \
-                    FlashAttentionBackend.get_supported_head_sizes()
+                supported_sizes = FlashAttentionBackend.get_supported_head_sizes()
                 if head_size not in supported_sizes:
                     logger.info("Cannot use FlashAttention-2 backend for head size %d.", head_size)
                     target_backend = AttentionBackendEnum.TORCH_SDPA
             except ImportError:
-                logger.info("Cannot use FlashAttention backend because the "
-                            "flash_attn package is not found. "
-                            "Make sure that flash_attn was built and installed "
-                            "(on by default).")
+                logger.info(
+                    "Cannot use FlashAttention backend because the "
+                    "flash_attn package is not found. "
+                    "Make sure that flash_attn was built and installed "
+                    "(on by default)."
+                )
                 target_backend = AttentionBackendEnum.TORCH_SDPA
 
         if target_backend == AttentionBackendEnum.TORCH_SDPA:

@@ -24,15 +24,17 @@ class PatchEmbed(nn.Module):
     Remove the _assert function in forward function to be compatible with multi-resolution images.
     """
 
-    def __init__(self,
-                 patch_size=16,
-                 in_chans=3,
-                 embed_dim=768,
-                 norm_layer=None,
-                 flatten=True,
-                 bias=True,
-                 dtype=None,
-                 prefix: str = ""):
+    def __init__(
+        self,
+        patch_size=16,
+        in_chans=3,
+        embed_dim=768,
+        norm_layer=None,
+        flatten=True,
+        bias=True,
+        dtype=None,
+        prefix: str = "",
+    ):
         super().__init__()
         # Convert patch_size to 2-tuple
         if isinstance(patch_size, list | tuple):
@@ -59,13 +61,14 @@ class WanCamControlPatchEmbedding(nn.Module):
     """Lingbot World Patch embedding for Plucker features."""
 
     def __init__(
-            self,
-            patch_size=(1, 2, 2),
-            in_chans=384,  # 6 * 64
-            embed_dim=2048,
-            bias=True,
-            dtype=None,
-            prefix: str = ""):
+        self,
+        patch_size=(1, 2, 2),
+        in_chans=384,  # 6 * 64
+        embed_dim=2048,
+        bias=True,
+        dtype=None,
+        prefix: str = "",
+    ):
         super().__init__()
         # must be 3-tuple
         if isinstance(patch_size, list | tuple):
@@ -125,8 +128,9 @@ class TimestepEmbedder(nn.Module):
         self.freq_dtype = freq_dtype
 
     def forward(self, t: torch.Tensor, timestep_seq_len: int | None = None) -> torch.Tensor:
-        t_freq = timestep_embedding(t, self.frequency_embedding_size, self.max_period,
-                                    dtype=self.freq_dtype).to(self.mlp.fc_in.weight.dtype)
+        t_freq = timestep_embedding(t, self.frequency_embedding_size, self.max_period, dtype=self.freq_dtype).to(
+            self.mlp.fc_in.weight.dtype
+        )
         if timestep_seq_len is not None:
             t_freq = t_freq.unflatten(0, (1, timestep_seq_len))
         # t_freq = t_freq.to(self.mlp.fc_in.weight.dtype)
@@ -134,18 +138,17 @@ class TimestepEmbedder(nn.Module):
         return t_emb
 
 
-def timestep_embedding(t: torch.Tensor,
-                       dim: int,
-                       max_period: int = 10000,
-                       dtype: torch.dtype = torch.float32) -> torch.Tensor:
+def timestep_embedding(
+    t: torch.Tensor, dim: int, max_period: int = 10000, dtype: torch.dtype = torch.float32
+) -> torch.Tensor:
     """
     Create sinusoidal timestep embeddings.
-    
+
     Args:
         t: Tensor of shape [B] with timesteps
         dim: Embedding dimension
         max_period: Controls the minimum frequency of the embeddings
-        
+
     Returns:
         Tensor of shape [B, dim] with embeddings
     """
@@ -184,11 +187,11 @@ class ModulateProjection(nn.Module):
 def unpatchify(x, t, h, w, patch_size, channels) -> torch.Tensor:
     """
     Convert patched representation back to image space.
-    
+
     Args:
         x: Tensor of shape [B, T*H*W, C*P_t*P_h*P_w]
         t, h, w: Temporal and spatial dimensions
-        
+
     Returns:
         Unpatchified tensor of shape [B, C, T*P_t, H*P_h, W*P_w]
     """
@@ -257,7 +260,6 @@ def get_timestep_embedding(
 
 
 class Timesteps(nn.Module):
-
     def __init__(self, num_channels: int, flip_sin_to_cos: bool, downscale_freq_shift: float, scale: int = 1):
         super().__init__()
         self.num_channels = num_channels

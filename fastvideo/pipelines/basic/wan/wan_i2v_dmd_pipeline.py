@@ -12,20 +12,33 @@ from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.lora_pipeline import LoRAPipeline
 
 # isort: off
-from fastvideo.pipelines.stages import (ImageEncodingStage, ConditioningStage, DecodingStage, DmdDenoisingStage,
-                                        ImageVAEEncodingStage, InputValidationStage, LatentPreparationStage,
-                                        TextEncodingStage, TimestepPreparationStage)
+from fastvideo.pipelines.stages import (
+    ImageEncodingStage,
+    ConditioningStage,
+    DecodingStage,
+    DmdDenoisingStage,
+    ImageVAEEncodingStage,
+    InputValidationStage,
+    LatentPreparationStage,
+    TextEncodingStage,
+    TimestepPreparationStage,
+)
+
 # isort: on
-from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (FlowMatchEulerDiscreteScheduler)
+from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler
 
 logger = init_logger(__name__)
 
 
 class WanImageToVideoDmdPipeline(LoRAPipeline, ComposedPipelineBase):
-
     _required_config_modules = [
-        "text_encoder", "tokenizer", "vae", "transformer", "scheduler", \
-        "image_encoder", "image_processor"
+        "text_encoder",
+        "tokenizer",
+        "vae",
+        "transformer",
+        "scheduler",
+        "image_encoder",
+        "image_processor",
     ]
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
@@ -36,34 +49,46 @@ class WanImageToVideoDmdPipeline(LoRAPipeline, ComposedPipelineBase):
 
         self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())
 
-        self.add_stage(stage_name="prompt_encoding_stage",
-                       stage=TextEncodingStage(
-                           text_encoders=[self.get_module("text_encoder")],
-                           tokenizers=[self.get_module("tokenizer")],
-                       ))
+        self.add_stage(
+            stage_name="prompt_encoding_stage",
+            stage=TextEncodingStage(
+                text_encoders=[self.get_module("text_encoder")],
+                tokenizers=[self.get_module("tokenizer")],
+            ),
+        )
 
-        self.add_stage(stage_name="image_encoding_stage",
-                       stage=ImageEncodingStage(
-                           image_encoder=self.get_module("image_encoder"),
-                           image_processor=self.get_module("image_processor"),
-                       ))
+        self.add_stage(
+            stage_name="image_encoding_stage",
+            stage=ImageEncodingStage(
+                image_encoder=self.get_module("image_encoder"),
+                image_processor=self.get_module("image_processor"),
+            ),
+        )
 
         self.add_stage(stage_name="conditioning_stage", stage=ConditioningStage())
 
-        self.add_stage(stage_name="timestep_preparation_stage",
-                       stage=TimestepPreparationStage(scheduler=self.get_module("scheduler")))
+        self.add_stage(
+            stage_name="timestep_preparation_stage",
+            stage=TimestepPreparationStage(scheduler=self.get_module("scheduler")),
+        )
 
-        self.add_stage(stage_name="latent_preparation_stage",
-                       stage=LatentPreparationStage(scheduler=self.get_module("scheduler"),
-                                                    transformer=self.get_module("transformer"),
-                                                    use_btchw_layout=True))
+        self.add_stage(
+            stage_name="latent_preparation_stage",
+            stage=LatentPreparationStage(
+                scheduler=self.get_module("scheduler"),
+                transformer=self.get_module("transformer"),
+                use_btchw_layout=True,
+            ),
+        )
 
-        self.add_stage(stage_name="image_latent_preparation_stage",
-                       stage=ImageVAEEncodingStage(vae=self.get_module("vae")))
+        self.add_stage(
+            stage_name="image_latent_preparation_stage", stage=ImageVAEEncodingStage(vae=self.get_module("vae"))
+        )
 
-        self.add_stage(stage_name="denoising_stage",
-                       stage=DmdDenoisingStage(transformer=self.get_module("transformer"),
-                                               scheduler=self.get_module("scheduler")))
+        self.add_stage(
+            stage_name="denoising_stage",
+            stage=DmdDenoisingStage(transformer=self.get_module("transformer"), scheduler=self.get_module("scheduler")),
+        )
 
         self.add_stage(stage_name="decoding_stage", stage=DecodingStage(vae=self.get_module("vae")))
 

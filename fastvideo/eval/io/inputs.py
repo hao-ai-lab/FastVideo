@@ -23,6 +23,7 @@ Design rules:
   set samples for corpus-shaped metrics (FVD / FAD) without disturbing
   per-sample paired metrics (LPIPS / PSNR / SSIM / gt_optical_flow).
 """
+
 from __future__ import annotations
 
 import json

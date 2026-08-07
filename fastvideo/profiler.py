@@ -236,13 +236,15 @@ class TorchProfilerConfig:
 
         requested_regions = {
             token.strip()
-            for token in (getattr(envs, "FASTVIDEO_TORCH_PROFILE_REGIONS", "") or "").split(",") if token.strip()
+            for token in (getattr(envs, "FASTVIDEO_TORCH_PROFILE_REGIONS", "") or "").split(",")
+            if token.strip()
         }
 
         if not requested_regions:
             available = ", ".join(region.name for region in list_profiler_regions())
-            raise ValueError("FASTVIDEO_TORCH_PROFILE_REGIONS must list at least one region; "
-                             f"available regions: {available}")
+            raise ValueError(
+                f"FASTVIDEO_TORCH_PROFILE_REGIONS must list at least one region; available regions: {available}"
+            )
 
         regions: dict[str, bool] = {}
         available_regions = list_profiler_regions()
@@ -256,8 +258,10 @@ class TorchProfilerConfig:
             regions[resolved.name] = True
 
         if not regions:
-            raise ValueError("FASTVIDEO_TORCH_PROFILE_REGIONS did not match any known regions; "
-                             f"requested={sorted(requested_regions)}, available={available_names}")
+            raise ValueError(
+                "FASTVIDEO_TORCH_PROFILE_REGIONS did not match any known regions; "
+                f"requested={sorted(requested_regions)}, available={available_names}"
+            )
 
         return cls(regions=regions)
 
@@ -343,7 +347,7 @@ class TorchProfilerController:
             return
         if self._collection_enabled == enabled:
             return
-        event = ("fastvideo.profiler.enable_collection" if enabled else "fastvideo.profiler.disable_collection")
+        event = "fastvideo.profiler.enable_collection" if enabled else "fastvideo.profiler.disable_collection"
         with torch.profiler.record_function(event):
             self._profiler.toggle_collection_dynamic(enabled, self._activities)
         self._collection_enabled = enabled
@@ -363,8 +367,9 @@ class TorchProfilerController:
         with torch.profiler.record_function(f"fastvideo.region::{region}"):
             self._active_region_depth += 1
             if self._active_region_depth == 1:
-                logger.info("PROFILER: Setting collection to True (depth=%s) for region %s", self._active_region_depth,
-                            region)
+                logger.info(
+                    "PROFILER: Setting collection to True (depth=%s) for region %s", self._active_region_depth, region
+                )
                 self._set_collection(True)
             try:
                 yield
@@ -420,7 +425,6 @@ def profile_region(region: str) -> Callable[[Callable[..., Any]], Callable[..., 
     """Wrap a bound method so it runs inside a profiler region if available."""
 
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
-
         @functools.wraps(fn)
         def wrapped(self, *args, **kwargs):
             controller = getattr(self, "profiler_controller", None)

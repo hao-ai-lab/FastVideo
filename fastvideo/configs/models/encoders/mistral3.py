@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """Mistral3 text encoder configuration for full Flux2."""
+
 from dataclasses import dataclass, field
 
 from fastvideo.configs.models.encoders.base import (

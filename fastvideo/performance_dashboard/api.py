@@ -20,7 +20,8 @@ from .service import build_latest_summary, build_trends, filter_records
 DEFAULT_TRACKING_ROOT = "/tmp/fastvideo-perf-dashboard"
 DEFAULT_DAYS = 90
 FRONTEND_DIST = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "performance_dashboard", "frontend", "dist"))
+    os.path.join(os.path.dirname(__file__), "..", "..", "performance_dashboard", "frontend", "dist")
+)
 
 
 def _matches_display_filters(record: dict[str, Any], model_id: str | None, gpu_type: str | None) -> bool:
@@ -28,7 +29,6 @@ def _matches_display_filters(record: dict[str, Any], model_id: str | None, gpu_t
 
 
 class PerformanceDataStore:
-
     def __init__(self, tracking_root: str | None = None) -> None:
         self.tracking_root = tracking_root or os.environ.get("PERFORMANCE_TRACKING_ROOT", DEFAULT_TRACKING_ROOT)
         self._lock = threading.RLock()
@@ -152,7 +152,8 @@ def create_app(store: PerformanceDataStore | None = None) -> FastAPI:
         # endpoints without affecting the summary semantics.
         loaded = data_store.load_records(days=None)
         rows = [
-            row for row in build_latest_summary(loaded, run_source=run_source)
+            row
+            for row in build_latest_summary(loaded, run_source=run_source)
             if _matches_display_filters(row, model_id, gpu_type)
         ]
         return {

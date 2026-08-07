@@ -27,6 +27,7 @@ logger.info("Using FlashAttention-%s backend", fa_version)
 # torch.compile treats the CuTeDSL kernel as an opaque boundary.
 try:
     from fastvideo.attention.utils.flash_attn_cute import flash_attn_fp4_func
+
     _FA4_FP4_AVAILABLE = True
 except ImportError:
     flash_attn_fp4_func = None
@@ -41,6 +42,7 @@ def _import_fa4_quant_ops() -> tuple:
     subprocess on first use). Kept as its own function so tests can pin
     that it runs at most once per process."""
     from flashinfer.quantization import SfLayout, nvfp4_quantize
+
     return (nvfp4_quantize, SfLayout)
 
 
@@ -82,8 +84,9 @@ def _nvfp4_quantize_for_fa4_impl(tensor_4d: torch.Tensor) -> tuple[torch.Tensor,
     fp4_data, sf_data = nvfp4_quantize(t2d, one, sfLayout=SfLayout.layout_128x4, do_shuffle=False)
 
     # FP4 data: (batch*seqlen, nheads*headdim/2) → (batch, seqlen, nheads, headdim/2)
-    fp4_tensor = (fp4_data.reshape(batch, seqlen_padded, nheads,
-                                   headdim // 2).view(torch.int8).view(torch.float4_e2m1fn_x2))
+    fp4_tensor = (
+        fp4_data.reshape(batch, seqlen_padded, nheads, headdim // 2).view(torch.int8).view(torch.float4_e2m1fn_x2)
+    )
 
     # SF layout conversion: nvfp4_quantize layout_128x4 → FA4 MMA layout
     # layout_128x4 buffer: [mTile, kTile, 32, 4, 4]
@@ -178,8 +181,9 @@ def _key_padding_mask_from_attn_mask(attn_mask: torch.Tensor, key_len: int) -> t
     key_padding_mask = attn_mask if attn_mask.dtype == torch.bool else attn_mask >= 0
 
     if key_padding_mask.shape[-1] != key_len:
-        raise ValueError("Invalid key padding mask length for FLASH_ATTN: "
-                         f"expected {key_len}, got {key_padding_mask.shape[-1]}")
+        raise ValueError(
+            f"Invalid key padding mask length for FLASH_ATTN: expected {key_len}, got {key_padding_mask.shape[-1]}"
+        )
     return key_padding_mask
 
 
@@ -190,7 +194,6 @@ class FlashAttnMetadata(AttentionMetadata):
 
 
 class FlashAttnMetadataBuilder(AttentionMetadataBuilder):
-
     def __init__(self):
         pass
 
@@ -198,15 +201,14 @@ class FlashAttnMetadataBuilder(AttentionMetadataBuilder):
         pass
 
     def build(  # type: ignore
-            self,
-            current_timestep: int,
-            attn_mask: torch.Tensor,
+        self,
+        current_timestep: int,
+        attn_mask: torch.Tensor,
     ) -> FlashAttnMetadata:
         return FlashAttnMetadata(current_timestep=current_timestep, attn_mask=attn_mask)
 
 
 class FlashAttentionImpl(AttentionImpl):
-
     def __init__(
         self,
         num_heads: int,
@@ -222,9 +224,11 @@ class FlashAttentionImpl(AttentionImpl):
         self.nvfp4_fa4 = extra_impl_args.get("nvfp4_fa4", False) or os.environ.get("FASTVIDEO_NVFP4_FA4", "0") == "1"
         if self.nvfp4_fa4:
             cap = torch.cuda.get_device_capability()
-            assert cap in [(10, 0), (10, 3)], (f"NVFP4 FA4 requires Blackwell (sm100a/sm103a), got sm{cap[0]}{cap[1]}")
-            assert _FA4_FP4_AVAILABLE, ("NVFP4 FA4 requires flash-attention-fp4 (flash_attn.cute). "
-                                        "Install via instructions in docs/inference/optimizations.md")
+            assert cap in [(10, 0), (10, 3)], f"NVFP4 FA4 requires Blackwell (sm100a/sm103a), got sm{cap[0]}{cap[1]}"
+            assert _FA4_FP4_AVAILABLE, (
+                "NVFP4 FA4 requires flash-attention-fp4 (flash_attn.cute). "
+                "Install via instructions in docs/inference/optimizations.md"
+            )
             logger.info("NVFP4 FA4 enabled for FlashAttentionImpl (quant_qk only)")
 
     def forward(
@@ -242,8 +246,10 @@ class FlashAttentionImpl(AttentionImpl):
             # Keep logging (and its Python lru_cache) out of compiled traces
             # so that the AOTAutograd cache can serialize.
             if not torch.compiler.is_compiling():
-                logger.warning_once(f"FLASH_ATTN received {orig_dtype} inputs; casting to "
-                                    f"bfloat16 for the kernel and restoring on output.")
+                logger.warning_once(
+                    f"FLASH_ATTN received {orig_dtype} inputs; casting to "
+                    f"bfloat16 for the kernel and restoring on output."
+                )
             query = query.to(torch.bfloat16)
             key = key.to(torch.bfloat16)
             value = value.to(torch.bfloat16)
@@ -259,7 +265,7 @@ class FlashAttentionImpl(AttentionImpl):
         value: torch.Tensor,
         attn_metadata: FlashAttnMetadata,
     ):
-        if (attn_metadata is not None and hasattr(attn_metadata, "attn_mask") and attn_metadata.attn_mask is not None):
+        if attn_metadata is not None and hasattr(attn_metadata, "attn_mask") and attn_metadata.attn_mask is not None:
             # Route through the *_compilable wrappers so dynamo sees one
             # traceable node for each masked entry point (the unpad/pad
             # bookkeeping runs eager inside the custom op). On FA2 these
@@ -299,8 +305,10 @@ class FlashAttentionImpl(AttentionImpl):
             qkv = torch.stack([query, key, value], dim=2)
             key_padding_mask = _key_padding_mask_from_attn_mask(attn_mask, attn_mask.shape[-1]).to(device=query.device)
             if key_padding_mask.shape[-1] > qkv.shape[1]:
-                raise ValueError("Invalid key padding mask length for FLASH_ATTN: "
-                                 f"expected at most {qkv.shape[1]}, got {key_padding_mask.shape[-1]}")
+                raise ValueError(
+                    "Invalid key padding mask length for FLASH_ATTN: "
+                    f"expected at most {qkv.shape[1]}, got {key_padding_mask.shape[-1]}"
+                )
             attn_mask_padded = F.pad(key_padding_mask, (qkv.shape[1] - key_padding_mask.shape[-1], 0), value=True)
             output = flash_attn_no_pad(qkv, attn_mask_padded, causal=False, dropout_p=0, softmax_scale=None)
         elif self.nvfp4_fa4:

@@ -25,7 +25,7 @@ MINIMAX_H3_T2VA = InferencePreset(
     model_family="minimax_h3",
     description="MiniMax H3 text-to-video with synchronized stereo audio at 768p",
     workload_type="t2v",
-    stage_schemas=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE,),
     defaults={
         **_SHARED_DEFAULTS,
         "height": 768,
@@ -40,7 +40,7 @@ MINIMAX_H3_FL2VA = InferencePreset(
     model_family="minimax_h3",
     description="MiniMax H3 first/last-frame-to-video with synchronized stereo audio",
     workload_type="i2v",
-    stage_schemas=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE,),
     defaults={
         **_SHARED_DEFAULTS,
         "height": 768,
@@ -55,7 +55,7 @@ MINIMAX_H3_REF2VA = InferencePreset(
     model_family="minimax_h3",
     description="MiniMax H3 ordered image/video/audio references to joint video and stereo audio",
     workload_type="i2v",
-    stage_schemas=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE,),
     defaults={
         **_SHARED_DEFAULTS,
         "height": 768,

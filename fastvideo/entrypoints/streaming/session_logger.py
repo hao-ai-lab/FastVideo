@@ -6,6 +6,7 @@ post-hoc analytics (enhancer latency, GPU assignment, segment timings)
 can be recovered without a tracing backend. The internal UI uses this
 format; keeping the same shape makes log tooling portable.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -51,12 +52,14 @@ class SessionLogger:
         if opened is None:
             return
         handle, lock = opened
-        line = json.dumps({
-            "session_id": event.session_id,
-            "event": event.event,
-            "ts": event.ts,
-            "payload": event.payload,
-        })
+        line = json.dumps(
+            {
+                "session_id": event.session_id,
+                "event": event.event,
+                "ts": event.ts,
+                "payload": event.payload,
+            }
+        )
         with lock, contextlib.suppress(ValueError):
             handle.write(line + "\n")
             handle.flush()

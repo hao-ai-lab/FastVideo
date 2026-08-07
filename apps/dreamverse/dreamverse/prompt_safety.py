@@ -12,7 +12,8 @@ _SERVER_DIR = Path(__file__).resolve().parent
 _REPO_ROOT = _SERVER_DIR.parent
 _DEFAULT_CLASSIFIER_DIR = _REPO_ROOT / "classifiers"
 CLASSIFIER_DIR = Path(
-    os.path.expandvars(os.path.expanduser(os.getenv("LTX2_CLASSIFIER_DIR", str(_DEFAULT_CLASSIFIER_DIR)))))
+    os.path.expandvars(os.path.expanduser(os.getenv("LTX2_CLASSIFIER_DIR", str(_DEFAULT_CLASSIFIER_DIR))))
+)
 
 
 @dataclass(frozen=True)
@@ -40,21 +41,25 @@ def resolve_classifier_path(
     env_path = os.getenv(env_var)
     if env_path:
         candidates.append(Path(os.path.expandvars(os.path.expanduser(env_path))))
-    candidates.extend([
-        CLASSIFIER_DIR / filename,
-        Path(f"/home/shared/{shared_filename}"),
-        Path(legacy_path),
-    ])
+    candidates.extend(
+        [
+            CLASSIFIER_DIR / filename,
+            Path(f"/home/shared/{shared_filename}"),
+            Path(legacy_path),
+        ]
+    )
 
     for candidate in candidates:
         if candidate.is_file():
             return str(candidate)
 
     checked = "\n".join(f"  - {candidate}" for candidate in candidates)
-    raise FileNotFoundError(f"Could not find the {classifier_kind} classifier.\n"
-                            f"Checked:\n{checked}\n"
-                            "Set LTX2_CLASSIFIER_DIR or the appropriate classifier path environment "
-                            "variable.")
+    raise FileNotFoundError(
+        f"Could not find the {classifier_kind} classifier.\n"
+        f"Checked:\n{checked}\n"
+        "Set LTX2_CLASSIFIER_DIR or the appropriate classifier path environment "
+        "variable."
+    )
 
 
 @cache
@@ -82,9 +87,9 @@ def fasttext_predict(
     latency_ms = (time.perf_counter() - start_time) * 1000.0
     identifier = labels[0].replace("__label__", "")
     confidence = float(probs[0])
-    print("[safety] "
-          f"{classifier_name} fastText latency={latency_ms:.2f}ms "
-          f"label={identifier} confidence={confidence:.4f}")
+    print(
+        f"[safety] {classifier_name} fastText latency={latency_ms:.2f}ms label={identifier} confidence={confidence:.4f}"
+    )
     return identifier, confidence
 
 
@@ -102,7 +107,7 @@ def _label_matches(
 
     def has_marker(marker: str) -> bool:
         normalized_marker = _normalize_classifier_label(marker)
-        return (normalized == normalized_marker or normalized_marker in tokens)
+        return normalized == normalized_marker or normalized_marker in tokens
 
     if any(has_marker(marker) for marker in safe_markers):
         return False
@@ -110,7 +115,6 @@ def _label_matches(
 
 
 class PromptSafetyFilter:
-
     def __init__(
         self,
         *,
@@ -159,28 +163,26 @@ class PromptSafetyFilter:
 
         nsfw_label, _ = self._nsfw_classifier(normalized_prompt)
         if _label_matches(
-                nsfw_label,
-                blocked_markers=("nsfw", ),
-                safe_markers=("sfw", "safe"),
+            nsfw_label,
+            blocked_markers=("nsfw",),
+            safe_markers=("sfw", "safe"),
         ):
-            return ("This prompt was flagged as NSFW. "
-                    "You can't generate a video with this specified prompt.")
+            return "This prompt was flagged as NSFW. You can't generate a video with this specified prompt."
 
         hate_label, _ = self._hate_speech_classifier(normalized_prompt)
         if _label_matches(
-                hate_label,
-                blocked_markers=("hatespeech", "hate", "toxic", "offensive", "abusive"),
-                safe_markers=(
-                    "non_hatespeech",
-                    "not_hatespeech",
-                    "non_toxic",
-                    "not_toxic",
-                    "safe",
-                    "clean",
-                ),
+            hate_label,
+            blocked_markers=("hatespeech", "hate", "toxic", "offensive", "abusive"),
+            safe_markers=(
+                "non_hatespeech",
+                "not_hatespeech",
+                "non_toxic",
+                "not_toxic",
+                "safe",
+                "clean",
+            ),
         ):
-            return ("This prompt was flagged as hate speech. "
-                    "You can't generate a video with this specified prompt.")
+            return "This prompt was flagged as hate speech. You can't generate a video with this specified prompt."
 
         return None
 

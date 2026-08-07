@@ -1,15 +1,18 @@
 # SPDX-License-Identifier: Apache-2.0
 """GEN3C model family pipeline presets."""
+
 from fastvideo.api.presets import InferencePreset, PresetStageSpec
 
 _DENOISE_STAGE = PresetStageSpec(
     name="denoise",
     kind="denoising",
     description="Camera-controlled denoising pass",
-    allowed_overrides=frozenset({
-        "num_inference_steps",
-        "guidance_scale",
-    }),
+    allowed_overrides=frozenset(
+        {
+            "num_inference_steps",
+            "guidance_scale",
+        }
+    ),
 )
 
 GEN3C_COSMOS_7B = InferencePreset(
@@ -18,7 +21,7 @@ GEN3C_COSMOS_7B = InferencePreset(
     model_family="gen3c",
     description="GEN3C Cosmos 7B",
     workload_type="t2v",
-    stage_schemas=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE,),
     defaults={
         "height": 704,
         "width": 1280,
@@ -32,4 +35,4 @@ GEN3C_COSMOS_7B = InferencePreset(
     },
 )
 
-ALL_PRESETS = (GEN3C_COSMOS_7B, )
+ALL_PRESETS = (GEN3C_COSMOS_7B,)

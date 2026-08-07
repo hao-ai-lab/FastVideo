@@ -45,7 +45,8 @@ class LingBotWorldArchConfig(DiTArchConfig):
             r"^blocks\.(\d+)\.cam_shift_layer\.(.*)$": r"blocks.\1.cam_conditioner.cam_shift_layer.\2",
             r"^head\.modulation$": r"scale_shift_table",
             r"^head\.head\.(.*)$": r"proj_out.\1",
-        })
+        }
+    )
 
     # Reverse mapping for saving checkpoints: custom -> hf
     reverse_param_names_mapping: dict = field(default_factory=lambda: {})
@@ -78,7 +79,9 @@ class LingBotWorldArchConfig(DiTArchConfig):
 
     # Causal Wan
     local_attn_size: int = -1  # Window size for temporal local attention (-1 indicates global attention)
-    sink_size: int = 0  # Size of the attention sink, we keep the first `sink_size` frames unchanged when rolling the KV cache
+    sink_size: int = (
+        0  # Size of the attention sink, we keep the first `sink_size` frames unchanged when rolling the KV cache
+    )
     num_frames_per_block: int = 3
     sliding_window_num_frames: int = 21
 

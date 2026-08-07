@@ -25,7 +25,8 @@ from torch.utils.data import DataLoader
 
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.dataset.validation_dataset import (
-    ValidationDataset, )
+    ValidationDataset,
+)
 from fastvideo.distributed import (
     get_sp_group,
     get_world_group,
@@ -35,7 +36,8 @@ from fastvideo.pipelines import ForwardBatch
 from fastvideo.train.callbacks.callback import Callback
 from fastvideo.train.utils.instantiate import resolve_target
 from fastvideo.train.utils.moduleloader import (
-    make_inference_args, )
+    make_inference_args,
+)
 from fastvideo.training.trackers import DummyTracker
 from fastvideo.utils import shallow_asdict
 
@@ -139,11 +141,11 @@ class ValidationCallback(Callback):
         self.pipeline_target = str(pipeline_target)
         self.dataset_file = str(dataset_file)
         self.every_steps = int(every_steps)
-        self.sampling_steps = ([int(s) for s in sampling_steps] if sampling_steps else [40])
-        self.guidance_scale = (float(guidance_scale) if guidance_scale is not None else None)
-        self.num_frames = (int(num_frames) if num_frames is not None else None)
-        self.output_dir = (str(output_dir) if output_dir is not None else None)
-        self.sampling_timesteps = ([int(s) for s in sampling_timesteps] if sampling_timesteps is not None else None)
+        self.sampling_steps = [int(s) for s in sampling_steps] if sampling_steps else [40]
+        self.guidance_scale = float(guidance_scale) if guidance_scale is not None else None
+        self.num_frames = int(num_frames) if num_frames is not None else None
+        self.output_dir = str(output_dir) if output_dir is not None else None
+        self.sampling_timesteps = [int(s) for s in sampling_timesteps] if sampling_timesteps is not None else None
         self.overlay_actions = self._coerce_bool(overlay_actions)
         # Validation-only action amplification for world model; training keeps raw action values.
         self.keyboard_value_scale = float(keyboard_value_scale)
@@ -160,7 +162,7 @@ class ValidationCallback(Callback):
         self._sampling_param: SamplingParam | None = None
         self._metric_evaluator: Any | None = None
         self.tracker: Any = DummyTracker()
-        self.validation_random_generator: (torch.Generator | None) = None
+        self.validation_random_generator: torch.Generator | None = None
         self.seed: int = 0
 
     @staticmethod
@@ -229,15 +231,14 @@ class ValidationCallback(Callback):
         self.world_group = get_world_group()
         self.sp_group = get_sp_group()
         self.global_rank = self.world_group.rank
-        self.rank_in_sp_group = (self.sp_group.rank_in_group)
+        self.rank_in_sp_group = self.sp_group.rank_in_group
         self.sp_world_size = self.sp_group.world_size
 
         seed = tc.data.seed
         if seed is None:
-            raise ValueError("training.data.seed must be set "
-                             "for validation")
+            raise ValueError("training.data.seed must be set for validation")
         self.seed = int(seed)
-        self.validation_random_generator = (torch.Generator(device="cpu").manual_seed(self.seed))
+        self.validation_random_generator = torch.Generator(device="cpu").manual_seed(self.seed)
 
         tracker = getattr(method, "tracker", None)
         if tracker is not None:
@@ -264,12 +265,11 @@ class ValidationCallback(Callback):
         method: TrainingMethod,
         step: int,
     ) -> None:
-
         transformer = method.student.transformer
         try:
             with self._validation_memory_context(
-                    method,
-                    validation_transformer=transformer,
+                method,
+                validation_transformer=transformer,
             ):
                 # Look for an EMA callback to temporarily swap
                 # EMA weights during validation.
@@ -291,23 +291,29 @@ class ValidationCallback(Callback):
             yield
             return
 
-        from fastvideo.attention.backends.attn_qat_infer import (AttnQatInferImpl, is_attn_qat_infer_available)
+        from fastvideo.attention.backends.attn_qat_infer import AttnQatInferImpl, is_attn_qat_infer_available
         from fastvideo.attention.backends.attn_qat_train import (
-            AttnQatTrainImpl, )
+            AttnQatTrainImpl,
+        )
         from fastvideo.platforms import AttentionBackendEnum
 
         layers = [
-            module for module in transformer.modules()
+            module
+            for module in transformer.modules()
             if isinstance(getattr(module, "attn_impl", None), AttnQatTrainImpl)
         ]
         if not layers:
             raise RuntimeError("attn_qat_infer validation requested, but the transformer has no ATTN_QAT_TRAIN layers")
         if not is_attn_qat_infer_available():
             from fastvideo.attention.backends.attn_qat_infer import (
-                attn_qat_infer_receipt, )
-            raise RuntimeError("attn_qat_infer validation requested but no ATTN_QAT_INFER kernel serves "
-                               f"this device ({attn_qat_infer_receipt()}). Set "
-                               "callbacks.validation.attn_qat_infer=false to validate with ATTN_QAT_TRAIN.")
+                attn_qat_infer_receipt,
+            )
+
+            raise RuntimeError(
+                "attn_qat_infer validation requested but no ATTN_QAT_INFER kernel serves "
+                f"this device ({attn_qat_infer_receipt()}). Set "
+                "callbacks.validation.attn_qat_infer=false to validate with ATTN_QAT_TRAIN."
+            )
 
         previous = [(layer, layer.attn_impl, layer.backend) for layer in layers]
         try:
@@ -489,7 +495,8 @@ class ValidationCallback(Callback):
     def _find_ema_callback(self) -> Any | None:
         """Find the EMA callback in the callback dict."""
         from fastvideo.train.callbacks.ema import (
-            EMACallback, )
+            EMACallback,
+        )
 
         cb_dict = getattr(self, "_callback_dict", None)
         if cb_dict is not None:
@@ -507,11 +514,11 @@ class ValidationCallback(Callback):
         tc = self.training_config
         was_training = bool(getattr(transformer, "training", False))
 
-        output_dir = (self.output_dir or tc.checkpoint.output_dir)
+        output_dir = self.output_dir or tc.checkpoint.output_dir
 
         try:
             transformer.eval()
-            num_sp_groups = (self.world_group.world_size // self.sp_group.world_size)
+            num_sp_groups = self.world_group.world_size // self.sp_group.world_size
             sp = self._get_sampling_param()
 
             for num_inference_steps in self.sampling_steps:
@@ -583,12 +590,12 @@ class ValidationCallback(Callback):
                     all_overlay_captions = list(local_overlay_captions)
                     all_metric_stats = local_metric_stats
                     for sp_idx in range(1, num_sp_groups):
-                        src = (sp_idx * self.sp_world_size)
-                        recv_v = (self.world_group.recv_object(src=src))
-                        recv_c = (self.world_group.recv_object(src=src))
-                        recv_ov = (self.world_group.recv_object(src=src))
-                        recv_oc = (self.world_group.recv_object(src=src))
-                        recv_m = (self.world_group.recv_object(src=src))
+                        src = sp_idx * self.sp_world_size
+                        recv_v = self.world_group.recv_object(src=src)
+                        recv_c = self.world_group.recv_object(src=src)
+                        recv_ov = self.world_group.recv_object(src=src)
+                        recv_oc = self.world_group.recv_object(src=src)
+                        recv_m = self.world_group.recv_object(src=src)
                         all_video_filenames.extend(recv_v)
                         all_overlay_video_filenames.extend(recv_ov)
                         all_captions.extend(recv_c)
@@ -613,8 +620,7 @@ class ValidationCallback(Callback):
                         self._log_validation_video_artifacts(
                             all_overlay_video_filenames,
                             all_overlay_captions,
-                            key=(f"validation_videos_{num_inference_steps}"
-                                 f"_steps_overlay"),
+                            key=(f"validation_videos_{num_inference_steps}_steps_overlay"),
                             step=step,
                             fps=sp.fps,
                         )
@@ -703,9 +709,9 @@ class ValidationCallback(Callback):
     ) -> None:
         video_logs = []
         for fname, cap in zip(
-                video_filenames,
-                captions,
-                strict=True,
+            video_filenames,
+            captions,
+            strict=True,
         ):
             art = self.tracker.video(
                 fname,
@@ -796,9 +802,9 @@ class ValidationCallback(Callback):
             )
             results = evaluator.evaluate(samples=samples)
             for filename, metric_results in zip(
-                    video_filenames,
-                    results,
-                    strict=True,
+                video_filenames,
+                results,
+                strict=True,
             ):
                 row: dict[str, Any] = {"path": filename}
                 self._accumulate_metric_results(
@@ -816,8 +822,7 @@ class ValidationCallback(Callback):
                 )
                 stats.per_video.append(row)
         except Exception as exc:
-            message = ("Validation metric evaluation failed on rank "
-                       f"{self.global_rank}: {exc}")
+            message = f"Validation metric evaluation failed on rank {self.global_rank}: {exc}"
             logger.exception(message)
             stats.errors.append(message)
             if self.metrics_config.strict:
@@ -955,7 +960,8 @@ class ValidationCallback(Callback):
         )
         metrics = {
             key: float(stats.sums[key] / stats.counts[key])
-            for key in sorted(stats.sums) if stats.counts.get(key, 0.0) > 0
+            for key in sorted(stats.sums)
+            if stats.counts.get(key, 0.0) > 0
         }
         payload = {
             "step": int(step),
@@ -970,9 +976,9 @@ class ValidationCallback(Callback):
             f"inference_steps_{num_inference_steps}_rank_{self.global_rank}.json",
         )
         with open(
-                path,
-                "w",
-                encoding="utf-8",
+            path,
+            "w",
+            encoding="utf-8",
         ) as f:
             json.dump(
                 payload,
@@ -1060,7 +1066,7 @@ class ValidationCallback(Callback):
 
     def _get_sampling_param(self) -> SamplingParam:
         if self._sampling_param is None:
-            self._sampling_param = (SamplingParam.from_pretrained(self._pipeline_model_path()))
+            self._sampling_param = SamplingParam.from_pretrained(self._pipeline_model_path())
         return self._sampling_param
 
     def _pipeline_model_path(self) -> str:
@@ -1113,9 +1119,9 @@ class ValidationCallback(Callback):
             return
 
         for validation_encoder, loaded_encoder in zip(
-                validation_encoders,
-                loaded_encoders,
-                strict=False,
+            validation_encoders,
+            loaded_encoders,
+            strict=False,
         ):
             hidden_size = getattr(
                 getattr(loaded_encoder, "arch_config", None),
@@ -1158,8 +1164,8 @@ class ValidationCallback(Callback):
         *,
         transformer: torch.nn.Module,
     ) -> Any:
-        key = (id(transformer), )
-        if (self._pipeline is not None and self._pipeline_key == key):
+        key = (id(transformer),)
+        if self._pipeline is not None and self._pipeline_key == key:
             return self._pipeline
 
         tc = self.training_config
@@ -1236,14 +1242,14 @@ class ValidationCallback(Callback):
         sampling_param.seed = self.seed
 
         # image_path for I2V pipelines.
-        img_path = (validation_batch.get("image_path") or validation_batch.get("video_path"))
+        img_path = validation_batch.get("image_path") or validation_batch.get("video_path")
         if img_path is not None and (img_path.startswith("http") or os.path.isfile(img_path)):
             sampling_param.image_path = img_path
 
         temporal_compression_factor = int(
             tc.pipeline_config.vae_config.arch_config.temporal_compression_ratio  # type: ignore[union-attr]
         )
-        default_num_frames = ((tc.data.num_latent_t - 1) * temporal_compression_factor + 1)
+        default_num_frames = (tc.data.num_latent_t - 1) * temporal_compression_factor + 1
         if self.num_frames is not None:
             sampling_param.num_frames = int(self.num_frames)
         else:
@@ -1254,12 +1260,16 @@ class ValidationCallback(Callback):
             sampling_param.height // 8,
             sampling_param.width // 8,
         ]
-        n_tokens = (latents_size[0] * latents_size[1] * latents_size[2])
+        n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
 
-        sampling_timesteps_tensor = (torch.tensor(
-            [int(s) for s in self.sampling_timesteps],
-            dtype=torch.long,
-        ) if self.sampling_timesteps is not None else None)
+        sampling_timesteps_tensor = (
+            torch.tensor(
+                [int(s) for s in self.sampling_timesteps],
+                dtype=torch.long,
+            )
+            if self.sampling_timesteps is not None
+            else None
+        )
 
         inference_args = make_inference_args(
             tc,
@@ -1286,7 +1296,7 @@ class ValidationCallback(Callback):
         batch._inference_args = inference_args  # type: ignore[attr-defined]
 
         # Conditionally set I2V fields.
-        if ("image" in validation_batch and validation_batch["image"] is not None):
+        if "image" in validation_batch and validation_batch["image"] is not None:
             batch.pil_image = validation_batch["image"]
 
         self._attach_action_conditions(
@@ -1341,7 +1351,9 @@ class ValidationCallback(Callback):
         transformer: torch.nn.Module,
     ) -> _ValidationStepResult:
         tc = self.training_config
-        pipeline = self._get_pipeline(transformer=transformer, )
+        pipeline = self._get_pipeline(
+            transformer=transformer,
+        )
         sampling_param = self._get_sampling_param()
 
         dataset = ValidationDataset(self.dataset_file)
@@ -1366,8 +1378,8 @@ class ValidationCallback(Callback):
 
         # Propagate sampling_timesteps to pipeline_config so
         # causal/DMD denoising stages can read them.
-        if (self.sampling_timesteps is not None and inference_args.pipeline_config.dmd_denoising_steps is None):
-            inference_args.pipeline_config.dmd_denoising_steps = ([int(s) for s in self.sampling_timesteps])
+        if self.sampling_timesteps is not None and inference_args.pipeline_config.dmd_denoising_steps is None:
+            inference_args.pipeline_config.dmd_denoising_steps = [int(s) for s in self.sampling_timesteps]
 
         videos: list[list[np.ndarray]] = []
         overlay_videos: list[list[np.ndarray]] = []
@@ -1384,7 +1396,7 @@ class ValidationCallback(Callback):
                 num_inference_steps,
             )
 
-            assert (batch.prompt is not None and isinstance(batch.prompt, str))
+            assert batch.prompt is not None and isinstance(batch.prompt, str)
             captions.append(batch.prompt)
             ref_video = validation_batch.get("ref_video")
             ref_videos.append(ref_video if isinstance(ref_video, str) else None)
@@ -1412,7 +1424,7 @@ class ValidationCallback(Callback):
                     x,
                     nrow=6,
                 )
-                x = (x.transpose(0, 1).transpose(1, 2).squeeze(-1))
+                x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
                 frames.append((x * 255).numpy().astype(np.uint8))
             videos.append(frames)
             if self.overlay_actions:
@@ -1456,7 +1468,7 @@ class ValidationCallback(Callback):
     def state_dict(self) -> dict[str, Any]:
         state: dict[str, Any] = {}
         if self.validation_random_generator is not None:
-            state["validation_rng"] = (self.validation_random_generator.get_state())
+            state["validation_rng"] = self.validation_random_generator.get_state()
         return state
 
     def load_state_dict(
@@ -1464,5 +1476,5 @@ class ValidationCallback(Callback):
         state_dict: dict[str, Any],
     ) -> None:
         rng_state = state_dict.get("validation_rng")
-        if (rng_state is not None and self.validation_random_generator is not None):
+        if rng_state is not None and self.validation_random_generator is not None:
             self.validation_random_generator.set_state(rng_state)

@@ -118,8 +118,9 @@ class Platform:
         return self._enum == PlatformEnum.NPU
 
     @classmethod
-    def get_attn_backend_cls(cls, selected_backend: AttentionBackendEnum | None, head_size: int,
-                             dtype: torch.dtype) -> str:
+    def get_attn_backend_cls(
+        cls, selected_backend: AttentionBackendEnum | None, head_size: int, dtype: torch.dtype
+    ) -> str:
         """Get the attention backend class of a device."""
         return ""
 
@@ -224,10 +225,8 @@ class Platform:
         """
         Verify whether the quantization is supported by the current platform.
         """
-        if cls.supported_quantization and \
-            quant not in cls.supported_quantization:
-            raise ValueError(f"{quant} quantization is currently not supported in "
-                             f"{cls.device_name}.")
+        if cls.supported_quantization and quant not in cls.supported_quantization:
+            raise ValueError(f"{quant} quantization is currently not supported in {cls.device_name}.")
 
     @classmethod
     def get_current_memory_usage(cls, device: torch.types.Device | None = None) -> float:

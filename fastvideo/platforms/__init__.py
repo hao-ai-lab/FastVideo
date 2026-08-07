@@ -5,6 +5,7 @@ import traceback
 from typing import TYPE_CHECKING
 
 from fastvideo.logger import init_logger
+
 # imported by other files, do not remove
 from fastvideo.platforms.interface import AttentionBackendEnum  # noqa: F401
 from fastvideo.platforms.interface import Platform, PlatformEnum
@@ -18,6 +19,7 @@ def cuda_platform_plugin() -> str | None:
 
     try:
         from fastvideo.utils import import_pynvml
+
         pynvml = import_pynvml()  # type: ignore[no-untyped-call]
         pynvml.nvmlInit()
         try:
@@ -26,7 +28,7 @@ def cuda_platform_plugin() -> str | None:
             # we need to check if fastvideo is built with cpu too.
             # Otherwise, fastvideo will always activate cuda plugin
             # on a GPU machine, even if in a cpu build.
-            is_cuda = (pynvml.nvmlDeviceGetCount() > 0)
+            is_cuda = pynvml.nvmlDeviceGetCount() > 0
         finally:
             pynvml.nvmlShutdown()
     except Exception as e:
@@ -38,8 +40,7 @@ def cuda_platform_plugin() -> str | None:
         import os
 
         def cuda_is_jetson() -> bool:
-            return os.path.isfile("/etc/nv_tegra_release") \
-                or os.path.exists("/sys/class/tegra-firmware")
+            return os.path.isfile("/etc/nv_tegra_release") or os.path.exists("/sys/class/tegra-firmware")
 
         if cuda_is_jetson():
             is_cuda = True
@@ -55,6 +56,7 @@ def mps_platform_plugin() -> str | None:
 
     try:
         import torch
+
         if torch.backends.mps.is_available():
             is_mps = True
             logger.info("MPS (Metal Performance Shaders) is available")
@@ -69,8 +71,10 @@ def npu_platform_plugin() -> str | None:
 
     try:
         import torch
+
         # 导入 torch_npu 以初始化 NPU 后端
         import torch_npu  # noqa: F401
+
         if torch.npu.is_available():
             is_npu = True
             logger.info("NPU is available")
@@ -95,6 +99,7 @@ def rocm_platform_plugin() -> str | None:
 
     try:
         import amdsmi
+
         amdsmi.amdsmi_init()
         try:
             if len(amdsmi.amdsmi_get_processor_handles()) > 0:
@@ -109,11 +114,11 @@ def rocm_platform_plugin() -> str | None:
 
 
 builtin_platform_plugins = {
-    'cuda': cuda_platform_plugin,
-    'rocm': rocm_platform_plugin,
-    'mps': mps_platform_plugin,
-    'cpu': cpu_platform_plugin,
-    'npu': npu_platform_plugin,
+    "cuda": cuda_platform_plugin,
+    "rocm": rocm_platform_plugin,
+    "mps": mps_platform_plugin,
+    "cpu": cpu_platform_plugin,
+    "npu": npu_platform_plugin,
 }
 
 
@@ -146,19 +151,18 @@ def resolve_current_platform_cls_qualname() -> str:
     if platform_cls_qualname is not None:
         return platform_cls_qualname
 
-    raise RuntimeError("No platform plugin found. Please check your "
-                       "installation.")
+    raise RuntimeError("No platform plugin found. Please check your installation.")
 
 
 _current_platform = None
-_init_trace: str = ''
+_init_trace: str = ""
 
 if TYPE_CHECKING:
     current_platform: Platform
 
 
 def __getattr__(name: str):
-    if name == 'current_platform':
+    if name == "current_platform":
         # lazy init current_platform.
         # 1. out-of-tree platform plugins need `from fastvideo.platforms import
         #    Platform` so that they can inherit `Platform` class. Therefore,
@@ -183,4 +187,4 @@ def __getattr__(name: str):
         raise AttributeError(f"No attribute named '{name}' exists in {__name__}.")
 
 
-__all__ = ['Platform', 'PlatformEnum', 'current_platform', "_init_trace"]
+__all__ = ["Platform", "PlatformEnum", "current_platform", "_init_trace"]

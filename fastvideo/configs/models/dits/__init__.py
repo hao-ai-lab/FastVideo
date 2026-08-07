@@ -20,9 +20,25 @@ from fastvideo.configs.models.dits.lingbotworld2 import LingBotWorld2CausalFastV
 from fastvideo.configs.models.dits.lingbot_video import LingBotVideoConfig
 
 __all__ = [
-    "HunyuanVideoConfig", "HunyuanVideo15Config", "HunyuanGameCraftConfig", "WanVideoConfig", "DreamXWorldConfig",
-    "DreamXWorldARConfig", "CosmosVideoConfig", "Cosmos25VideoConfig", "FluxDiTConfig", "Flux2Config",
-    "LongCatVideoConfig", "LTX2VideoConfig", "HYWorldConfig", "Kandinsky5VideoConfig", "MagiHumanVideoConfig",
-    "StableAudioConfig", "GlmImageDiTConfig", "LingBotWorld2CausalFastVideoConfig", "LingBotVideoConfig",
-    "MiniMaxH3Config", "ZImageDiTConfig"
+    "HunyuanVideoConfig",
+    "HunyuanVideo15Config",
+    "HunyuanGameCraftConfig",
+    "WanVideoConfig",
+    "DreamXWorldConfig",
+    "DreamXWorldARConfig",
+    "CosmosVideoConfig",
+    "Cosmos25VideoConfig",
+    "FluxDiTConfig",
+    "Flux2Config",
+    "LongCatVideoConfig",
+    "LTX2VideoConfig",
+    "HYWorldConfig",
+    "Kandinsky5VideoConfig",
+    "MagiHumanVideoConfig",
+    "StableAudioConfig",
+    "GlmImageDiTConfig",
+    "LingBotWorld2CausalFastVideoConfig",
+    "LingBotVideoConfig",
+    "MiniMaxH3Config",
+    "ZImageDiTConfig",
 ]

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-DREAMVERSE_RUNTIME_DEPS_MESSAGE = (
-    "Dreamverse runtime deps missing — install with pip install 'fastvideo[dreamverse]'.")
+DREAMVERSE_RUNTIME_DEPS_MESSAGE = "Dreamverse runtime deps missing — install with pip install 'fastvideo[dreamverse]'."
 
 
 def require_dreamverse_runtime_deps() -> None:

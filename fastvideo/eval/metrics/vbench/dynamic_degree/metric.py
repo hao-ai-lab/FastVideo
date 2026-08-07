@@ -20,7 +20,6 @@ from fastvideo.eval.types import MetricResult
 
 @register("vbench.dynamic_degree")
 class DynamicDegreeMetric(BaseMetric):
-
     name = "vbench.dynamic_degree"
     requires_reference = False
     higher_is_better = True
@@ -47,6 +46,7 @@ class DynamicDegreeMetric(BaseMetric):
         model = torch.nn.DataParallel(RAFT(args))
 
         from fastvideo.eval.models import ensure_checkpoint
+
         ckpt_path = ensure_checkpoint(
             "raft-things.pth",
             source="sbalani/raft-things",
@@ -61,7 +61,7 @@ class DynamicDegreeMetric(BaseMetric):
     def _get_score(self, flow: torch.Tensor) -> float:
         """Top-5% mean flow magnitude (matching VBench dynamic_degree.get_score)."""
         flo = flow.permute(1, 2, 0).cpu().numpy()
-        rad = np.sqrt(flo[..., 0]**2 + flo[..., 1]**2)
+        rad = np.sqrt(flo[..., 0] ** 2 + flo[..., 1] ** 2)
         h, w = rad.shape
         cut = max(1, int(h * w * 0.05))
         rad_flat = rad.flatten()
@@ -79,8 +79,7 @@ class DynamicDegreeMetric(BaseMetric):
         # cannot auto-derive fps from a tensor, so a missing fps would silently
         # use a wrong stride and produce a wrong score. Skip explicitly.
         if "fps" not in sample:
-            return self._skip(sample, "missing 'fps' (required to set the "
-                              "8fps optical-flow sampling stride)")
+            return self._skip(sample, "missing 'fps' (required to set the 8fps optical-flow sampling stride)")
         fps = float(sample["fps"])
         interval = max(1, round(fps / 8.0))
 
@@ -129,6 +128,6 @@ class DynamicDegreeMetric(BaseMetric):
                 "count_needed": count_needed,
                 "fps": fps,
                 "interval": interval,
-                "n_frames_used": n
+                "n_frames_used": n,
             },
         )

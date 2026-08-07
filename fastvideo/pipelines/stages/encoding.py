@@ -21,7 +21,7 @@ logger = init_logger(__name__)
 class EncodingStage(PipelineStage):
     """
     Stage for encoding pixel space representations into latent space.
-    
+
     This stage handles the encoding of pixel-space video/images into latent
     representations for further processing in the diffusion pipeline.
     """
@@ -51,11 +51,11 @@ class EncodingStage(PipelineStage):
     ) -> ForwardBatch:
         """
         Encode pixel space representations into latent space.
-        
+
         Args:
             batch: The current batch information.
             fastvideo_args: The inference arguments.
-            
+
         Returns:
             The batch with encoded latents.
         """
@@ -87,7 +87,7 @@ class EncodingStage(PipelineStage):
         batch.latents = latents
 
         # Offload models if needed
-        if hasattr(self, 'maybe_free_model_hooks'):
+        if hasattr(self, "maybe_free_model_hooks"):
             self.maybe_free_model_hooks()
 
         if fastvideo_args.vae_cpu_offload:

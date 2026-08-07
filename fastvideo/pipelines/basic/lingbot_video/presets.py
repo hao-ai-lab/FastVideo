@@ -3,17 +3,19 @@
 
 from fastvideo.api.presets import InferencePreset, PresetStageSpec
 
-DEFAULT_NEGATIVE_PROMPT = ('{"universal_negative": {"visual_quality": ["low quality", "worst quality", "blurry", '
-                           '"pixelated", "jpeg artifacts", "low resolution", "unstable color", "color flicker", '
-                           '"underexposed", "overexposed", "invisible subject", "subject hidden in darkness"], '
-                           '"artistic_style": ["painting", "illustration", "drawing", "cartoon", "3d render", '
-                           '"cgi", "sketch", "digital art"], "composition_and_content": ["text", "watermark", '
-                           '"signature", "logo", "subtitles", "pillarboxed", "side bars", "portrait image in '
-                           'landscape frame"], "temporal_and_motion_stability": ["flickering", "jittery", '
-                           '"motion blur", "temporal inconsistency", "warping", "morphing", "incoherent motion", '
-                           '"unnatural movement", "static object with sudden jump", "frame-to-frame inconsistency"], '
-                           '"material_and_structure": ["plastic-like glass", "unrealistic texture", "deformed '
-                           'bottle", "liquid freezing improperly", "distorted reflections"]}}')
+DEFAULT_NEGATIVE_PROMPT = (
+    '{"universal_negative": {"visual_quality": ["low quality", "worst quality", "blurry", '
+    '"pixelated", "jpeg artifacts", "low resolution", "unstable color", "color flicker", '
+    '"underexposed", "overexposed", "invisible subject", "subject hidden in darkness"], '
+    '"artistic_style": ["painting", "illustration", "drawing", "cartoon", "3d render", '
+    '"cgi", "sketch", "digital art"], "composition_and_content": ["text", "watermark", '
+    '"signature", "logo", "subtitles", "pillarboxed", "side bars", "portrait image in '
+    'landscape frame"], "temporal_and_motion_stability": ["flickering", "jittery", '
+    '"motion blur", "temporal inconsistency", "warping", "morphing", "incoherent motion", '
+    '"unnatural movement", "static object with sudden jump", "frame-to-frame inconsistency"], '
+    '"material_and_structure": ["plastic-like glass", "unrealistic texture", "deformed '
+    'bottle", "liquid freezing improperly", "distorted reflections"]}}'
+)
 
 _DENOISE_STAGE = PresetStageSpec(
     name="denoise",
@@ -26,13 +28,15 @@ _REFINE_STAGE = PresetStageSpec(
     name="refine",
     kind="refinement",
     description="LingBot-Video pixel-space resize, VAE re-encode, and refiner denoising",
-    allowed_overrides=frozenset({
-        "height_sr",
-        "width_sr",
-        "num_inference_steps_sr",
-        "guidance_scale_2",
-        "t_thresh",
-    }),
+    allowed_overrides=frozenset(
+        {
+            "height_sr",
+            "width_sr",
+            "num_inference_steps_sr",
+            "guidance_scale_2",
+            "t_thresh",
+        }
+    ),
 )
 
 LINGBOT_VIDEO_DENSE_T2V = InferencePreset(
@@ -41,7 +45,7 @@ LINGBOT_VIDEO_DENSE_T2V = InferencePreset(
     model_family="lingbot_video",
     description="LingBot-Video Dense 1.3B text-to-video at 480p",
     workload_type="t2v",
-    stage_schemas=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE,),
     defaults={
         "height": 480,
         "width": 832,

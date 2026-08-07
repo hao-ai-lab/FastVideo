@@ -6,25 +6,30 @@ stage topology, default sampling values, and which per-stage overrides
 are allowed.  Presets are registered explicitly from
 :func:`fastvideo.registry._register_presets`.
 """
+
 from fastvideo.api.presets import InferencePreset, PresetStageSpec
 
 # -------------------------------------------------------------------
 # Shared negative prompts
 # -------------------------------------------------------------------
 
-_NEGATIVE_PROMPT_EN = ("Bright tones, overexposed, static, blurred details, subtitles,"
-                       " style, works, paintings, images, static, overall gray, worst"
-                       " quality, low quality, JPEG compression residue, ugly,"
-                       " incomplete, extra fingers, poorly drawn hands, poorly drawn"
-                       " faces, deformed, disfigured, misshapen limbs, fused fingers,"
-                       " still picture, messy background, three legs, many people in"
-                       " the background, walking backwards")
+_NEGATIVE_PROMPT_EN = (
+    "Bright tones, overexposed, static, blurred details, subtitles,"
+    " style, works, paintings, images, static, overall gray, worst"
+    " quality, low quality, JPEG compression residue, ugly,"
+    " incomplete, extra fingers, poorly drawn hands, poorly drawn"
+    " faces, deformed, disfigured, misshapen limbs, fused fingers,"
+    " still picture, messy background, three legs, many people in"
+    " the background, walking backwards"
+)
 
-_NEGATIVE_PROMPT_CN = ("色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，"
-                       "静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，"
-                       "多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，"
-                       "形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，"
-                       "背景人很多，倒着走")
+_NEGATIVE_PROMPT_CN = (
+    "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，"
+    "静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，"
+    "多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，"
+    "形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，"
+    "背景人很多，倒着走"
+)
 
 # -------------------------------------------------------------------
 # Shared stage specs
@@ -34,10 +39,12 @@ _DENOISE_STAGE = PresetStageSpec(
     name="denoise",
     kind="denoising",
     description="Main denoising pass",
-    allowed_overrides=frozenset({
-        "num_inference_steps",
-        "guidance_scale",
-    }),
+    allowed_overrides=frozenset(
+        {
+            "num_inference_steps",
+            "guidance_scale",
+        }
+    ),
 )
 
 # -------------------------------------------------------------------
@@ -50,7 +57,7 @@ WAN_T2V_1_3B = InferencePreset(
     model_family="wan",
     description="Wan 2.1 T2V 1.3B at 480p",
     workload_type="t2v",
-    stage_schemas=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE,),
     defaults={
         "height": 480,
         "width": 832,
@@ -68,7 +75,7 @@ WAN_T2V_14B = InferencePreset(
     model_family="wan",
     description="Wan 2.1 T2V 14B at 720p",
     workload_type="t2v",
-    stage_schemas=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE,),
     defaults={
         "height": 720,
         "width": 1280,
@@ -90,7 +97,7 @@ WAN_I2V_14B_480P = InferencePreset(
     model_family="wan",
     description="Wan 2.1 I2V 14B at 480p",
     workload_type="i2v",
-    stage_schemas=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE,),
     defaults={
         "height": 480,
         "width": 832,
@@ -108,7 +115,7 @@ WAN_I2V_14B_720P = InferencePreset(
     model_family="wan",
     description="Wan 2.1 I2V 14B at 720p",
     workload_type="i2v",
-    stage_schemas=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE,),
     defaults={
         "height": 720,
         "width": 1280,
@@ -128,12 +135,14 @@ _DENOISE_STAGE_WAN22 = PresetStageSpec(
     name="denoise",
     kind="denoising",
     description="Wan 2.2 two-guidance-scale denoising",
-    allowed_overrides=frozenset({
-        "num_inference_steps",
-        "guidance_scale",
-        "guidance_scale_2",
-        "boundary_ratio",
-    }),
+    allowed_overrides=frozenset(
+        {
+            "num_inference_steps",
+            "guidance_scale",
+            "guidance_scale_2",
+            "boundary_ratio",
+        }
+    ),
 )
 
 WAN_2_2_T2V_A14B = InferencePreset(
@@ -142,7 +151,7 @@ WAN_2_2_T2V_A14B = InferencePreset(
     model_family="wan",
     description="Wan 2.2 T2V A14B with dual guidance scales",
     workload_type="t2v",
-    stage_schemas=(_DENOISE_STAGE_WAN22, ),
+    stage_schemas=(_DENOISE_STAGE_WAN22,),
     defaults={
         "guidance_scale": 4.0,
         "guidance_scale_2": 3.0,
@@ -158,7 +167,7 @@ WAN_2_2_I2V_A14B = InferencePreset(
     model_family="wan",
     description="Wan 2.2 I2V A14B with dual guidance scales",
     workload_type="i2v",
-    stage_schemas=(_DENOISE_STAGE_WAN22, ),
+    stage_schemas=(_DENOISE_STAGE_WAN22,),
     defaults={
         "guidance_scale": 3.5,
         "guidance_scale_2": 3.5,
@@ -178,7 +187,7 @@ WAN_FUN_1_3B_INP = InferencePreset(
     model_family="wan",
     description="Wan 2.1 Fun 1.3B InP (image-to-video inpainting)",
     workload_type="i2v",
-    stage_schemas=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE,),
     defaults={
         "height": 480,
         "width": 832,
@@ -195,7 +204,7 @@ WAN_FUN_1_3B_CONTROL = InferencePreset(
     version=1,
     model_family="wan",
     description="Wan 2.1 Fun 1.3B Control (V2V)",
-    stage_schemas=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE,),
     defaults={
         "height": 832,
         "width": 480,
@@ -216,7 +225,7 @@ FAST_WAN_T2V_480P = InferencePreset(
     model_family="wan",
     description="FastWan 2.1 T2V DMD at 480p (3-step)",
     workload_type="t2v",
-    stage_schemas=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE,),
     defaults={
         "height": 448,
         "width": 832,
@@ -238,7 +247,7 @@ WAN_2_2_TI2V_5B = InferencePreset(
     model_family="wan",
     description="Wan 2.2 TI2V 5B",
     workload_type="t2v",
-    stage_schemas=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE,),
     defaults={
         "height": 704,
         "width": 1280,
@@ -256,7 +265,7 @@ FAST_WAN_2_2_TI2V_5B = InferencePreset(
     model_family="wan",
     description="FastWan 2.2 TI2V 5B DMD",
     workload_type="t2v",
-    stage_schemas=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE,),
     defaults={
         "height": 704,
         "width": 1280,
@@ -274,7 +283,7 @@ LUCY_EDIT_DEV = InferencePreset(
     model_family="wan",
     description="Lucy Edit Dev 5B video editing",
     workload_type="t2v",
-    stage_schemas=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE,),
     defaults={
         "height": 480,
         "width": 832,
@@ -296,7 +305,7 @@ SF_WAN_T2V_1_3B = InferencePreset(
     model_family="wan",
     description="Self-Forcing Wan 2.1 T2V 1.3B (causal)",
     workload_type="t2v",
-    stage_schemas=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE,),
     defaults={
         "height": 480,
         "width": 832,
@@ -314,7 +323,7 @@ SF_WAN_2_2_T2V_A14B = InferencePreset(
     model_family="wan",
     description="Self-Forcing Wan 2.2 T2V A14B (causal)",
     workload_type="t2v",
-    stage_schemas=(_DENOISE_STAGE_WAN22, ),
+    stage_schemas=(_DENOISE_STAGE_WAN22,),
     defaults={
         "height": 448,
         "width": 832,
@@ -333,7 +342,7 @@ SF_WAN_2_2_I2V_A14B = InferencePreset(
     model_family="wan",
     description="Self-Forcing Wan 2.2 I2V A14B (causal)",
     workload_type="i2v",
-    stage_schemas=(_DENOISE_STAGE_WAN22, ),
+    stage_schemas=(_DENOISE_STAGE_WAN22,),
     defaults={
         "height": 448,
         "width": 832,

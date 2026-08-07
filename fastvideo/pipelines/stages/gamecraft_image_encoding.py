@@ -76,8 +76,10 @@ class GameCraftImageVAEEncodingStage(PipelineStage):
         else:
             # PIL Image – resize, center-crop, normalize to [-1, 1]
             from PIL import Image as PILImage
+
             if not isinstance(image, PILImage.Image):
                 import numpy as np
+
                 if isinstance(image, np.ndarray):
                     image = PILImage.fromarray(image)
 
@@ -86,15 +88,17 @@ class GameCraftImageVAEEncodingStage(PipelineStage):
             resize_w = int(round(original_w * scale))
             resize_h = int(round(original_h * scale))
 
-            ref_transform = transforms.Compose([
-                transforms.Resize(
-                    (resize_h, resize_w),
-                    interpolation=transforms.InterpolationMode.LANCZOS,
-                ),
-                transforms.CenterCrop((target_height, target_width)),
-                transforms.ToTensor(),
-                transforms.Normalize([0.5], [0.5]),
-            ])
+            ref_transform = transforms.Compose(
+                [
+                    transforms.Resize(
+                        (resize_h, resize_w),
+                        interpolation=transforms.InterpolationMode.LANCZOS,
+                    ),
+                    transforms.CenterCrop((target_height, target_width)),
+                    transforms.ToTensor(),
+                    transforms.Normalize([0.5], [0.5]),
+                ]
+            )
             ref_pixel = ref_transform(image)  # [3, H, W]
             ref_pixel = ref_pixel.unsqueeze(0).unsqueeze(2)  # [1, 3, 1, H, W]
             ref_pixel = ref_pixel.to(device=device, dtype=torch.float32)

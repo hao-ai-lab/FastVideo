@@ -51,7 +51,7 @@ class _HeartbeatAccessLogFilter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         message = record.getMessage()
-        return ('"GET /healthz ' not in message and '"GET /readyz ' not in message)
+        return '"GET /healthz ' not in message and '"GET /readyz ' not in message
 
 
 def _install_heartbeat_log_filter() -> None:
@@ -121,14 +121,12 @@ def _build_mock_segment_bytes() -> bytes:
 
 
 class PromptSubmission:
-
     def __init__(self, prompt_id: str, raw_prompt: str):
         self.prompt_id = prompt_id
         self.raw_prompt = raw_prompt
 
 
 class ReadyPrompt:
-
     def __init__(
         self,
         *,
@@ -152,8 +150,7 @@ async def lifespan(app: FastAPI):
     print(f"Mock server starting with {LATENCY_MS}ms simulated latency...", flush=True)
     MOCK_SEGMENT_BYTES = _build_mock_segment_bytes()
     print(
-        "Mock server ready "
-        f"({len(MOCK_SEGMENT_BYTES) / (1024 * 1024):.2f} MiB fMP4 clip)",
+        f"Mock server ready ({len(MOCK_SEGMENT_BYTES) / (1024 * 1024):.2f} MiB fMP4 clip)",
         flush=True,
     )
     yield
@@ -256,13 +253,15 @@ async def _stream_mock_segment(
         raise RuntimeError("Mock segment bytes were not initialized.")
 
     stream_id = f"mock-stream-{segment_idx}-{uuid.uuid4().hex[:8]}"
-    await ws_send_json({
-        "type": "media_init",
-        "segment_idx": segment_idx,
-        "mime": MOCK_AV_MIME,
-        "stream_id": stream_id,
-        "mode": "av_fmp4",
-    })
+    await ws_send_json(
+        {
+            "type": "media_init",
+            "segment_idx": segment_idx,
+            "mime": MOCK_AV_MIME,
+            "stream_id": stream_id,
+            "mode": "av_fmp4",
+        }
+    )
 
     chunk_count = 0
     for start in range(0, len(MOCK_SEGMENT_BYTES), MOCK_STREAM_CHUNK_SIZE_BYTES):
@@ -272,12 +271,14 @@ async def _stream_mock_segment(
         if MOCK_STREAM_CHUNK_DELAY_MS > 0:
             await asyncio.sleep(MOCK_STREAM_CHUNK_DELAY_MS / 1000.0)
 
-    await ws_send_json({
-        "type": "media_segment_complete",
-        "segment_idx": segment_idx,
-        "stream_id": stream_id,
-        "chunks": chunk_count,
-    })
+    await ws_send_json(
+        {
+            "type": "media_segment_complete",
+            "segment_idx": segment_idx,
+            "stream_id": stream_id,
+            "chunks": chunk_count,
+        }
+    )
 
 
 @app.websocket("/ws")
@@ -305,21 +306,25 @@ async def websocket_endpoint(websocket: WebSocket):
             return
         stop_event.set()
         try:
-            await ws_send_json({
-                "type": "session_timeout",
-                "message": f"Session expired after {SESSION_TIMEOUT_SECONDS} seconds",
-            })
+            await ws_send_json(
+                {
+                    "type": "session_timeout",
+                    "message": f"Session expired after {SESSION_TIMEOUT_SECONDS} seconds",
+                }
+            )
             await websocket.close(code=1000, reason="Session timeout")
         except Exception:
             pass
 
     try:
-        await ws_send_json({
-            "type": "queue_status",
-            "position": 0,
-            "total_gpus": 1,
-            "available_gpus": 1,
-        })
+        await ws_send_json(
+            {
+                "type": "queue_status",
+                "position": 0,
+                "total_gpus": 1,
+                "available_gpus": 1,
+            }
+        )
 
         try:
             init_data = await asyncio.wait_for(websocket.receive_json(), timeout=10.0)
@@ -349,20 +354,24 @@ async def websocket_endpoint(websocket: WebSocket):
         try:
             session_init_image = persist_session_init_image(init_data.get("initial_image"))
         except ValueError as exc:
-            await ws_send_json({
-                "type": "error",
-                "message": str(exc),
-            })
+            await ws_send_json(
+                {
+                    "type": "error",
+                    "message": str(exc),
+                }
+            )
             await websocket.close(code=1003, reason="Invalid initial image")
             return
 
         timeout_task = asyncio.create_task(session_timeout())
 
-        await ws_send_json({
-            "type": "gpu_assigned",
-            "gpu_id": 0,
-            "session_timeout": SESSION_TIMEOUT_SECONDS,
-        })
+        await ws_send_json(
+            {
+                "type": "gpu_assigned",
+                "gpu_id": 0,
+                "session_timeout": SESSION_TIMEOUT_SECONDS,
+            }
+        )
 
         raw_prompt_queue: asyncio.Queue[PromptSubmission] = asyncio.Queue()
         ready_prompt_queue: asyncio.Queue[ReadyPrompt] = asyncio.Queue()
@@ -392,57 +401,73 @@ async def websocket_endpoint(websocket: WebSocket):
                 cleanup_session_init_image(previous_session_image)
 
         async def send_stream_start(seed_reason: str) -> None:
-            await ws_send_json({
-                "type": "ltx2_stream_start",
-                "total_segments": len(curated_prompts),
-                "preset_id": preset_id,
-                "stream_mode": "av_fmp4",
-                "live_mode": True,
-                "loop_generation_enabled": loop_generation_enabled,
-                "loop_iteration": loop_iteration,
-                "generation_segment_cap": 0,
-            })
-            if seed_reason == "init":
-                await ws_send_json({
-                    "type": "seed_prompts_updated",
-                    "prompts": seed_prompt_memory,
+            await ws_send_json(
+                {
+                    "type": "ltx2_stream_start",
+                    "total_segments": len(curated_prompts),
                     "preset_id": preset_id,
-                    "preset_label": preset_label,
-                    "reason": "init",
-                    "seed_prompt_count": len(seed_prompt_memory),
-                })
-                await ws_send_json({
-                    "type": "loop_generation_updated",
-                    "enabled": loop_generation_enabled,
-                })
-                await ws_send_json({
-                    "type": "generation_paused_updated",
-                    "paused": generation_paused,
-                })
-            else:
-                await ws_send_json({
-                    "type": "seed_prompts_reset_applied",
-                    "reason": seed_reason or "manual_reset",
+                    "stream_mode": "av_fmp4",
+                    "live_mode": True,
+                    "loop_generation_enabled": loop_generation_enabled,
                     "loop_iteration": loop_iteration,
-                    "seed_prompt_count": len(seed_prompt_memory),
-                    "dropped_user_raw_queue": 0,
-                    "dropped_user_ready_queue": 0,
-                })
+                    "generation_segment_cap": 0,
+                }
+            )
+            if seed_reason == "init":
+                await ws_send_json(
+                    {
+                        "type": "seed_prompts_updated",
+                        "prompts": seed_prompt_memory,
+                        "preset_id": preset_id,
+                        "preset_label": preset_label,
+                        "reason": "init",
+                        "seed_prompt_count": len(seed_prompt_memory),
+                    }
+                )
+                await ws_send_json(
+                    {
+                        "type": "loop_generation_updated",
+                        "enabled": loop_generation_enabled,
+                    }
+                )
+                await ws_send_json(
+                    {
+                        "type": "generation_paused_updated",
+                        "paused": generation_paused,
+                    }
+                )
+            else:
+                await ws_send_json(
+                    {
+                        "type": "seed_prompts_reset_applied",
+                        "reason": seed_reason or "manual_reset",
+                        "loop_iteration": loop_iteration,
+                        "seed_prompt_count": len(seed_prompt_memory),
+                        "dropped_user_raw_queue": 0,
+                        "dropped_user_ready_queue": 0,
+                    }
+                )
 
-        async def promote_submission_to_ready(submission: PromptSubmission, ) -> None:
+        async def promote_submission_to_ready(
+            submission: PromptSubmission,
+        ) -> None:
             nonlocal prompt_sources_blocked
 
-            await ws_send_json({
-                "type": "prompt_received",
-                "prompt_id": submission.prompt_id,
-                "queue_depth": raw_prompt_queue.qsize() + 1,
-            })
+            await ws_send_json(
+                {
+                    "type": "prompt_received",
+                    "prompt_id": submission.prompt_id,
+                    "queue_depth": raw_prompt_queue.qsize() + 1,
+                }
+            )
 
             if enhancement_enabled:
-                await ws_send_json({
-                    "type": "prompt_enhancing",
-                    "prompt_id": submission.prompt_id,
-                })
+                await ws_send_json(
+                    {
+                        "type": "prompt_enhancing",
+                        "prompt_id": submission.prompt_id,
+                    }
+                )
                 await asyncio.sleep(min(LATENCY_MS, 120) / 1000.0)
                 final_prompt = submission.raw_prompt
                 await ready_prompt_queue.put(
@@ -451,14 +476,17 @@ async def websocket_endpoint(websocket: WebSocket):
                         source="user_enhanced",
                         prompt_id=submission.prompt_id,
                         loop_iteration=loop_iteration,
-                    ))
-                await ws_send_json({
-                    "type": "prompt_ready",
-                    "prompt_id": submission.prompt_id,
-                    "prompt": final_prompt,
-                    "source": "user_enhanced",
-                    "latency_ms": float(min(LATENCY_MS, 120)),
-                })
+                    )
+                )
+                await ws_send_json(
+                    {
+                        "type": "prompt_ready",
+                        "prompt_id": submission.prompt_id,
+                        "prompt": final_prompt,
+                        "source": "user_enhanced",
+                        "latency_ms": float(min(LATENCY_MS, 120)),
+                    }
+                )
             else:
                 final_prompt = submission.raw_prompt
                 await ready_prompt_queue.put(
@@ -467,25 +495,32 @@ async def websocket_endpoint(websocket: WebSocket):
                         source="user_raw",
                         prompt_id=submission.prompt_id,
                         loop_iteration=loop_iteration,
-                    ))
-                await ws_send_json({
-                    "type": "prompt_ready",
-                    "prompt_id": submission.prompt_id,
-                    "prompt": final_prompt,
-                    "source": "user_raw",
-                    "latency_ms": 0.0,
-                })
+                    )
+                )
+                await ws_send_json(
+                    {
+                        "type": "prompt_ready",
+                        "prompt_id": submission.prompt_id,
+                        "prompt": final_prompt,
+                        "source": "user_raw",
+                        "latency_ms": 0.0,
+                    }
+                )
 
             if prompt_sources_blocked:
                 prompt_sources_blocked = False
-                await ws_send_json({
-                    "type": "prompt_sources_resumed",
-                    "segment_idx": segment_idx + 1,
-                    "source": "user_prompt",
-                    "prompt_id": submission.prompt_id,
-                })
+                await ws_send_json(
+                    {
+                        "type": "prompt_sources_resumed",
+                        "segment_idx": segment_idx + 1,
+                        "source": "user_prompt",
+                        "prompt_id": submission.prompt_id,
+                    }
+                )
 
-        async def apply_project_init_payload(payload: dict[str, object], ) -> bool:
+        async def apply_project_init_payload(
+            payload: dict[str, object],
+        ) -> bool:
             nonlocal preset_id
             nonlocal preset_label
             nonlocal initial_rollout_prompt
@@ -514,17 +549,20 @@ async def websocket_endpoint(websocket: WebSocket):
             next_preset_id = str(payload.get("preset_id") or "").strip()
             next_preset_label = str(payload.get("preset_label") or "").strip()
             next_curated_prompts = [
-                prompt.strip() for prompt in payload.get("curated_prompts", [])
+                prompt.strip()
+                for prompt in payload.get("curated_prompts", [])
                 if isinstance(prompt, str) and prompt.strip()
             ]
 
             try:
                 replace_session_image(payload.get("initial_image"))
             except ValueError as exc:
-                await ws_send_json({
-                    "type": "error",
-                    "message": str(exc),
-                })
+                await ws_send_json(
+                    {
+                        "type": "error",
+                        "message": str(exc),
+                    }
+                )
                 return False
 
             if next_preset_id:
@@ -607,11 +645,13 @@ async def websocket_endpoint(websocket: WebSocket):
                 project_stream_started = False
                 await ws_send_json({"type": "ltx2_stream_complete"})
 
-            await ws_send_json({
-                "type": "project_idle",
-                "dropped_user_raw_queue": dropped_raw,
-                "dropped_user_ready_queue": dropped_ready,
-            })
+            await ws_send_json(
+                {
+                    "type": "project_idle",
+                    "dropped_user_raw_queue": dropped_raw,
+                    "dropped_user_ready_queue": dropped_ready,
+                }
+            )
 
         async def reader_loop() -> None:
             nonlocal preset_id
@@ -658,66 +698,69 @@ async def websocket_endpoint(websocket: WebSocket):
 
                 if msg_type == "project_init_v1":
                     if project_active or pending_project_end:
-                        await ws_send_json({
-                            "type":
-                            "error",
-                            "message": ("Current project is still ending. "
-                                        "Wait for the reset to finish before starting another project."),
-                        })
+                        await ws_send_json(
+                            {
+                                "type": "error",
+                                "message": (
+                                    "Current project is still ending. "
+                                    "Wait for the reset to finish before starting another project."
+                                ),
+                            }
+                        )
                         continue
                     init_applied = await apply_project_init_payload(data)
                     if not init_applied:
                         continue
                     if initial_rollout_waiting_for_rewrite:
-                        await ws_send_json({
-                            "type": "rewrite_seed_prompts_started",
-                            "model": "mock-rewrite-model",
-                        })
+                        await ws_send_json(
+                            {
+                                "type": "rewrite_seed_prompts_started",
+                                "model": "mock-rewrite-model",
+                            }
+                        )
                         seed_prompt_memory = [f"{initial_rollout_prompt} [segment {index}]" for index in range(1, 7)]
                         curated_prompts = list(seed_prompt_memory)
-                        await ws_send_json({
-                            "type":
-                            "seed_prompts_updated",
-                            "prompts":
-                            seed_prompt_memory,
-                            "preset_id":
-                            preset_id,
-                            "preset_label":
-                            preset_label,
-                            "reason":
-                            "rewrite",
-                            "fallback_used":
-                            False,
-                            "error":
-                            None,
-                            "model":
-                            "mock-rewrite-model",
-                            "latency_ms":
-                            float(min(LATENCY_MS, 150)),
-                            "raw_llm_output":
-                            json.dumps({
-                                "id": preset_id or "current_rollout",
-                                "label": preset_label or "Current rollout",
-                                "segment_prompts": seed_prompt_memory,
-                            }),
-                        })
-                        await ws_send_json({
-                            "type": "rewrite_seed_prompts_complete",
-                            "fallback_used": False,
-                            "error": None,
-                            "preset_id": preset_id,
-                            "preset_label": preset_label,
-                            "model": "mock-rewrite-model",
-                            "latency_ms": float(min(LATENCY_MS, 150)),
-                        })
+                        await ws_send_json(
+                            {
+                                "type": "seed_prompts_updated",
+                                "prompts": seed_prompt_memory,
+                                "preset_id": preset_id,
+                                "preset_label": preset_label,
+                                "reason": "rewrite",
+                                "fallback_used": False,
+                                "error": None,
+                                "model": "mock-rewrite-model",
+                                "latency_ms": float(min(LATENCY_MS, 150)),
+                                "raw_llm_output": json.dumps(
+                                    {
+                                        "id": preset_id or "current_rollout",
+                                        "label": preset_label or "Current rollout",
+                                        "segment_prompts": seed_prompt_memory,
+                                    }
+                                ),
+                            }
+                        )
+                        await ws_send_json(
+                            {
+                                "type": "rewrite_seed_prompts_complete",
+                                "fallback_used": False,
+                                "error": None,
+                                "preset_id": preset_id,
+                                "preset_label": preset_label,
+                                "model": "mock-rewrite-model",
+                                "latency_ms": float(min(LATENCY_MS, 150)),
+                            }
+                        )
                         pending_seed_reset = True
                         pending_seed_reset_reason = "initial_rewrite"
                         generation_paused = False
                         initial_rollout_waiting_for_rewrite = False
-                        await ws_send_json({
-                            "type": "generation_paused_updated",
-                            "paused": generation_paused,
-                        })
+                        await ws_send_json(
+                            {
+                                "type": "generation_paused_updated",
+                                "paused": generation_paused,
+                            }
+                        )
                     else:
                         pending_seed_reset = True
                         pending_seed_reset_reason = "project_init"
@@ -725,54 +768,65 @@ async def websocket_endpoint(websocket: WebSocket):
 
                 if not project_active:
                     if msg_type in {
-                            "append_prompt",
-                            "rewrite_seed_prompts",
-                            "reset_to_seed_prompts",
-                            "restart_generation",
+                        "append_prompt",
+                        "rewrite_seed_prompts",
+                        "reset_to_seed_prompts",
+                        "restart_generation",
                     }:
-                        await ws_send_json({
-                            "type": "error",
-                            "message": "Start a new project before sending prompts.",
-                        })
+                        await ws_send_json(
+                            {
+                                "type": "error",
+                                "message": "Start a new project before sending prompts.",
+                            }
+                        )
                     continue
 
                 if msg_type == "append_prompt":
-                    if ((rollout_waiting_for_rewrite or initial_rollout_waiting_for_rewrite) and not single_clip_mode):
-                        await ws_send_json({
-                            "type": "error",
-                            "message": ("Use Rewrite to create or restart the rollout."),
-                        })
+                    if (rollout_waiting_for_rewrite or initial_rollout_waiting_for_rewrite) and not single_clip_mode:
+                        await ws_send_json(
+                            {
+                                "type": "error",
+                                "message": ("Use Rewrite to create or restart the rollout."),
+                            }
+                        )
                         continue
                     raw_prompt = str(data.get("prompt", "")).strip()
                     if not raw_prompt:
-                        await ws_send_json({
-                            "type": "error",
-                            "message": "append_prompt requires a non-empty prompt",
-                        })
+                        await ws_send_json(
+                            {
+                                "type": "error",
+                                "message": "append_prompt requires a non-empty prompt",
+                            }
+                        )
                         continue
                     await promote_submission_to_ready(
                         PromptSubmission(
                             prompt_id=str(data.get("prompt_id") or uuid.uuid4()),
                             raw_prompt=raw_prompt,
-                        ))
+                        )
+                    )
                     continue
 
                 if msg_type == "simple_generate":
                     raw_prompt = str(data.get("prompt", "")).strip()
                     if not raw_prompt:
-                        await ws_send_json({
-                            "type": "error",
-                            "message": "simple_generate requires a non-empty prompt",
-                        })
+                        await ws_send_json(
+                            {
+                                "type": "error",
+                                "message": "simple_generate requires a non-empty prompt",
+                            }
+                        )
                         continue
 
                     try:
                         replace_session_image(data.get("initial_image"))
                     except ValueError as exc:
-                        await ws_send_json({
-                            "type": "error",
-                            "message": str(exc),
-                        })
+                        await ws_send_json(
+                            {
+                                "type": "error",
+                                "message": str(exc),
+                            }
+                        )
                         continue
 
                     next_preset_id = str(data.get("preset_id") or "").strip()
@@ -789,30 +843,43 @@ async def websocket_endpoint(websocket: WebSocket):
                     generation_paused = False
                     pending_seed_reset = True
                     pending_seed_reset_reason = "simple_generate"
-                    seed_prompt_memory = ([] if enhancement_enabled else [raw_prompt])
+                    seed_prompt_memory = [] if enhancement_enabled else [raw_prompt]
                     curated_prompts = list(seed_prompt_memory)
-                    pending_simple_submission = (PromptSubmission(
-                        prompt_id=str(data.get("prompt_id") or uuid.uuid4()),
-                        raw_prompt=raw_prompt,
-                    ) if enhancement_enabled else None)
+                    pending_simple_submission = (
+                        PromptSubmission(
+                            prompt_id=str(data.get("prompt_id") or uuid.uuid4()),
+                            raw_prompt=raw_prompt,
+                        )
+                        if enhancement_enabled
+                        else None
+                    )
                     continue
 
                 if msg_type == "rewrite_seed_prompts":
                     rewrite_instruction = str(data.get("rewrite_instruction", "")).strip()
-                    if len(seed_prompt_memory) == 0 and not (initial_rollout_waiting_for_rewrite
-                                                             and rewrite_instruction):
-                        await ws_send_json({
-                            "type": "error",
-                            "message": "No seed prompts available to rewrite.",
-                        })
+                    if len(seed_prompt_memory) == 0 and not (
+                        initial_rollout_waiting_for_rewrite and rewrite_instruction
+                    ):
+                        await ws_send_json(
+                            {
+                                "type": "error",
+                                "message": "No seed prompts available to rewrite.",
+                            }
+                        )
                         continue
-                    if (segment_generation_active and not single_clip_mode and not rollout_waiting_for_rewrite
-                            and not initial_rollout_waiting_for_rewrite):
+                    if (
+                        segment_generation_active
+                        and not single_clip_mode
+                        and not rollout_waiting_for_rewrite
+                        and not initial_rollout_waiting_for_rewrite
+                    ):
                         rewrite_restart_pending = True
-                    await ws_send_json({
-                        "type": "rewrite_seed_prompts_started",
-                        "model": "mock-rewrite-model",
-                    })
+                    await ws_send_json(
+                        {
+                            "type": "rewrite_seed_prompts_started",
+                            "model": "mock-rewrite-model",
+                        }
+                    )
                     rollout_id = preset_id or "current_rollout"
                     rollout_label = preset_label or "Current rollout"
                     if seed_prompt_memory:
@@ -831,10 +898,12 @@ async def websocket_endpoint(websocket: WebSocket):
                         pending_seed_reset_reason = "initial_rewrite"
                         generation_paused = False
                         initial_rollout_waiting_for_rewrite = False
-                        await ws_send_json({
-                            "type": "generation_paused_updated",
-                            "paused": generation_paused,
-                        })
+                        await ws_send_json(
+                            {
+                                "type": "generation_paused_updated",
+                                "paused": generation_paused,
+                            }
+                        )
                     if rollout_waiting_for_rewrite:
                         pending_seed_reset = True
                         pending_seed_reset_reason = "rewrite_rollout"
@@ -844,41 +913,37 @@ async def websocket_endpoint(websocket: WebSocket):
                         pending_seed_reset_reason = "rewrite_during_generation"
                         generation_paused = False
                         rewrite_restart_pending = False
-                    await ws_send_json({
-                        "type":
-                        "seed_prompts_updated",
-                        "prompts":
-                        seed_prompt_memory,
-                        "preset_id":
-                        preset_id,
-                        "preset_label":
-                        preset_label,
-                        "reason":
-                        "rewrite",
-                        "fallback_used":
-                        False,
-                        "error":
-                        None,
-                        "model":
-                        "mock-rewrite-model",
-                        "latency_ms":
-                        float(min(LATENCY_MS, 150)),
-                        "raw_llm_output":
-                        json.dumps({
-                            "id": preset_id,
-                            "label": preset_label,
-                            "segment_prompts": seed_prompt_memory,
-                        }),
-                    })
-                    await ws_send_json({
-                        "type": "rewrite_seed_prompts_complete",
-                        "fallback_used": False,
-                        "error": None,
-                        "preset_id": preset_id,
-                        "preset_label": preset_label,
-                        "model": "mock-rewrite-model",
-                        "latency_ms": float(min(LATENCY_MS, 150)),
-                    })
+                    await ws_send_json(
+                        {
+                            "type": "seed_prompts_updated",
+                            "prompts": seed_prompt_memory,
+                            "preset_id": preset_id,
+                            "preset_label": preset_label,
+                            "reason": "rewrite",
+                            "fallback_used": False,
+                            "error": None,
+                            "model": "mock-rewrite-model",
+                            "latency_ms": float(min(LATENCY_MS, 150)),
+                            "raw_llm_output": json.dumps(
+                                {
+                                    "id": preset_id,
+                                    "label": preset_label,
+                                    "segment_prompts": seed_prompt_memory,
+                                }
+                            ),
+                        }
+                    )
+                    await ws_send_json(
+                        {
+                            "type": "rewrite_seed_prompts_complete",
+                            "fallback_used": False,
+                            "error": None,
+                            "preset_id": preset_id,
+                            "preset_label": preset_label,
+                            "model": "mock-rewrite-model",
+                            "latency_ms": float(min(LATENCY_MS, 150)),
+                        }
+                    )
                     continue
 
                 if msg_type == "reset_to_seed_prompts":
@@ -890,43 +955,53 @@ async def websocket_endpoint(websocket: WebSocket):
                     pending_seed_reset = True
                     pending_seed_reset_reason = "cap_restart"
                     rollout_waiting_for_rewrite = False
-                    await ws_send_json({
-                        "type": "generation_restarted",
-                        "reason": "cap_restart",
-                        "segment_cap": 0,
-                    })
+                    await ws_send_json(
+                        {
+                            "type": "generation_restarted",
+                            "reason": "cap_restart",
+                            "segment_cap": 0,
+                        }
+                    )
                     continue
 
                 if msg_type == "set_enhancement":
                     enhancement_enabled = bool(data.get("enabled", enhancement_enabled))
-                    await ws_send_json({
-                        "type": "enhancement_updated",
-                        "enabled": enhancement_enabled,
-                    })
+                    await ws_send_json(
+                        {
+                            "type": "enhancement_updated",
+                            "enabled": enhancement_enabled,
+                        }
+                    )
                     continue
 
                 if msg_type == "set_auto_extension":
                     auto_extension_enabled = bool(data.get("enabled", auto_extension_enabled))
-                    await ws_send_json({
-                        "type": "auto_extension_updated",
-                        "enabled": auto_extension_enabled,
-                    })
+                    await ws_send_json(
+                        {
+                            "type": "auto_extension_updated",
+                            "enabled": auto_extension_enabled,
+                        }
+                    )
                     continue
 
                 if msg_type == "set_loop_generation":
                     loop_generation_enabled = bool(data.get("enabled", loop_generation_enabled))
-                    await ws_send_json({
-                        "type": "loop_generation_updated",
-                        "enabled": loop_generation_enabled,
-                    })
+                    await ws_send_json(
+                        {
+                            "type": "loop_generation_updated",
+                            "enabled": loop_generation_enabled,
+                        }
+                    )
                     continue
 
                 if msg_type == "set_generation_paused":
                     generation_paused = bool(data.get("paused", generation_paused))
-                    await ws_send_json({
-                        "type": "generation_paused_updated",
-                        "paused": generation_paused,
-                    })
+                    await ws_send_json(
+                        {
+                            "type": "generation_paused_updated",
+                            "paused": generation_paused,
+                        }
+                    )
                     continue
 
         async def generation_loop() -> None:
@@ -981,14 +1056,20 @@ async def websocket_endpoint(websocket: WebSocket):
                     await asyncio.sleep(0.05)
                     continue
 
-                if (not single_clip_mode and not rollout_waiting_for_rewrite and GENERATION_SEGMENT_CAP > 0
-                        and segment_idx >= GENERATION_SEGMENT_CAP):
+                if (
+                    not single_clip_mode
+                    and not rollout_waiting_for_rewrite
+                    and GENERATION_SEGMENT_CAP > 0
+                    and segment_idx >= GENERATION_SEGMENT_CAP
+                ):
                     rollout_waiting_for_rewrite = True
                     loop_generation_enabled = False
                     project_stream_started = False
-                    await ws_send_json({
-                        "type": "ltx2_stream_complete",
-                    })
+                    await ws_send_json(
+                        {
+                            "type": "ltx2_stream_complete",
+                        }
+                    )
                     await asyncio.sleep(0.05)
                     continue
 
@@ -1020,43 +1101,51 @@ async def websocket_endpoint(websocket: WebSocket):
                         continue
                     if not prompt_sources_blocked:
                         prompt_sources_blocked = True
-                        await ws_send_json({
-                            "type": "prompt_sources_blocked",
-                            "segment_idx": segment_idx + 1,
-                        })
+                        await ws_send_json(
+                            {
+                                "type": "prompt_sources_blocked",
+                                "segment_idx": segment_idx + 1,
+                            }
+                        )
                     await asyncio.sleep(0.05)
                     continue
 
                 if prompt_sources_blocked:
                     prompt_sources_blocked = False
-                    await ws_send_json({
-                        "type": "prompt_sources_resumed",
-                        "segment_idx": segment_idx + 1,
-                        "source": selected.source,
-                        "prompt_id": selected.prompt_id,
-                    })
+                    await ws_send_json(
+                        {
+                            "type": "prompt_sources_resumed",
+                            "segment_idx": segment_idx + 1,
+                            "source": selected.source,
+                            "prompt_id": selected.prompt_id,
+                        }
+                    )
 
                 segment_idx += 1
                 single_clip_waiting_for_request = False
                 total_segments_hint = max(segment_idx, len(curated_prompts))
-                await ws_send_json({
-                    "type": "segment_prompt_source",
-                    "segment_idx": segment_idx,
-                    "source": selected.source,
-                    "prompt_id": selected.prompt_id,
-                    "fallback_used": False,
-                    "seed_prompt_index": selected.seed_prompt_index,
-                    "loop_iteration": selected.loop_iteration or loop_iteration,
-                })
-                await ws_send_json({
-                    "type": "ltx2_segment_start",
-                    "segment_idx": segment_idx,
-                    "total_segments": total_segments_hint,
-                    "prompt": selected.prompt,
-                    "source": selected.source,
-                    "seed_prompt_index": selected.seed_prompt_index,
-                    "loop_iteration": selected.loop_iteration or loop_iteration,
-                })
+                await ws_send_json(
+                    {
+                        "type": "segment_prompt_source",
+                        "segment_idx": segment_idx,
+                        "source": selected.source,
+                        "prompt_id": selected.prompt_id,
+                        "fallback_used": False,
+                        "seed_prompt_index": selected.seed_prompt_index,
+                        "loop_iteration": selected.loop_iteration or loop_iteration,
+                    }
+                )
+                await ws_send_json(
+                    {
+                        "type": "ltx2_segment_start",
+                        "segment_idx": segment_idx,
+                        "total_segments": total_segments_hint,
+                        "prompt": selected.prompt,
+                        "source": selected.source,
+                        "seed_prompt_index": selected.seed_prompt_index,
+                        "loop_iteration": selected.loop_iteration or loop_iteration,
+                    }
+                )
 
                 segment_generation_active = True
                 await asyncio.sleep(LATENCY_MS / 1000.0)
@@ -1065,92 +1154,102 @@ async def websocket_endpoint(websocket: WebSocket):
                     ws_send_bytes,
                     segment_idx=segment_idx,
                 )
-                await ws_send_json({
-                    "type": "step_complete",
-                    "latency_ms": {
-                        "total": round(LATENCY_MS + 120.0, 2),
-                        "worker_e2e": round(float(LATENCY_MS), 2),
-                        "main_user_step": round(LATENCY_MS + 120.0, 2),
-                        "overhead": 120.0,
-                    },
-                })
-                await ws_send_json({
-                    "type": "ltx2_segment_complete",
-                    "segment_idx": segment_idx,
-                    "total_segments": total_segments_hint,
-                })
+                await ws_send_json(
+                    {
+                        "type": "step_complete",
+                        "latency_ms": {
+                            "total": round(LATENCY_MS + 120.0, 2),
+                            "worker_e2e": round(float(LATENCY_MS), 2),
+                            "main_user_step": round(LATENCY_MS + 120.0, 2),
+                            "overhead": 120.0,
+                        },
+                    }
+                )
+                await ws_send_json(
+                    {
+                        "type": "ltx2_segment_complete",
+                        "segment_idx": segment_idx,
+                        "total_segments": total_segments_hint,
+                    }
+                )
                 segment_generation_active = False
                 if single_clip_mode and not single_clip_waiting_for_request:
                     single_clip_waiting_for_request = True
                     project_stream_started = False
-                    await ws_send_json({
-                        "type": "ltx2_stream_complete",
-                    })
+                    await ws_send_json(
+                        {
+                            "type": "ltx2_stream_complete",
+                        }
+                    )
 
         reader_task = asyncio.create_task(reader_loop())
         generation_task = asyncio.create_task(generation_loop())
         await asyncio.sleep(0)
 
-        await ws_send_json({
-            "type": "loop_generation_updated",
-            "enabled": loop_generation_enabled,
-        })
-        await ws_send_json({
-            "type": "generation_paused_updated",
-            "paused": generation_paused,
-        })
+        await ws_send_json(
+            {
+                "type": "loop_generation_updated",
+                "enabled": loop_generation_enabled,
+            }
+        )
+        await ws_send_json(
+            {
+                "type": "generation_paused_updated",
+                "paused": generation_paused,
+            }
+        )
         if pending_project_end:
             await enter_project_idle()
         elif initial_rollout_waiting_for_rewrite:
-            await ws_send_json({
-                "type": "rewrite_seed_prompts_started",
-                "model": "mock-rewrite-model",
-            })
+            await ws_send_json(
+                {
+                    "type": "rewrite_seed_prompts_started",
+                    "model": "mock-rewrite-model",
+                }
+            )
             seed_prompt_memory = [f"{initial_rollout_prompt} [segment {index}]" for index in range(1, 7)]
             curated_prompts = list(seed_prompt_memory)
-            await ws_send_json({
-                "type":
-                "seed_prompts_updated",
-                "prompts":
-                seed_prompt_memory,
-                "preset_id":
-                preset_id,
-                "preset_label":
-                preset_label,
-                "reason":
-                "rewrite",
-                "fallback_used":
-                False,
-                "error":
-                None,
-                "model":
-                "mock-rewrite-model",
-                "latency_ms":
-                float(min(LATENCY_MS, 150)),
-                "raw_llm_output":
-                json.dumps({
-                    "id": preset_id or "current_rollout",
-                    "label": preset_label or "Current rollout",
-                    "segment_prompts": seed_prompt_memory,
-                }),
-            })
-            await ws_send_json({
-                "type": "rewrite_seed_prompts_complete",
-                "fallback_used": False,
-                "error": None,
-                "preset_id": preset_id,
-                "preset_label": preset_label,
-                "model": "mock-rewrite-model",
-                "latency_ms": float(min(LATENCY_MS, 150)),
-            })
+            await ws_send_json(
+                {
+                    "type": "seed_prompts_updated",
+                    "prompts": seed_prompt_memory,
+                    "preset_id": preset_id,
+                    "preset_label": preset_label,
+                    "reason": "rewrite",
+                    "fallback_used": False,
+                    "error": None,
+                    "model": "mock-rewrite-model",
+                    "latency_ms": float(min(LATENCY_MS, 150)),
+                    "raw_llm_output": json.dumps(
+                        {
+                            "id": preset_id or "current_rollout",
+                            "label": preset_label or "Current rollout",
+                            "segment_prompts": seed_prompt_memory,
+                        }
+                    ),
+                }
+            )
+            await ws_send_json(
+                {
+                    "type": "rewrite_seed_prompts_complete",
+                    "fallback_used": False,
+                    "error": None,
+                    "preset_id": preset_id,
+                    "preset_label": preset_label,
+                    "model": "mock-rewrite-model",
+                    "latency_ms": float(min(LATENCY_MS, 150)),
+                }
+            )
             pending_seed_reset = True
             pending_seed_reset_reason = "initial_rewrite"
             generation_paused = False
             initial_rollout_waiting_for_rewrite = False
-            await ws_send_json({
-                "type": "generation_paused_updated",
-                "paused": generation_paused,
-            })
+            await ws_send_json(
+                {
+                    "type": "generation_paused_updated",
+                    "paused": generation_paused,
+                }
+            )
         else:
             project_stream_started = True
             await send_stream_start("init")
@@ -1171,13 +1270,16 @@ async def websocket_endpoint(websocket: WebSocket):
     except Exception as exc:
         print(f"Client {client_id[:8]} error: {exc}")
         try:
-            await websocket.send_json({
-                "type": "error",
-                "message": f"Mock streaming failed: {exc}",
-            })
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "message": f"Mock streaming failed: {exc}",
+                }
+            )
         except Exception:
             pass
         import traceback
+
         traceback.print_exc()
     finally:
         stop_event.set()

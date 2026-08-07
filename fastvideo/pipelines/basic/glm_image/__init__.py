@@ -2,6 +2,7 @@
 """GLM-Image pipeline package."""
 
 from fastvideo.pipelines.basic.glm_image.glm_image_pipeline import (
-    GlmImagePipeline, )
+    GlmImagePipeline,
+)
 
 __all__ = ["GlmImagePipeline"]

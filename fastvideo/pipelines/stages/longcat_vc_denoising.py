@@ -24,17 +24,17 @@ logger = init_logger(__name__)
 class LongCatVCDenoisingStage(LongCatDenoisingStage):
     """
     LongCat denoising with Video Continuation and KV cache support.
-    
+
     Key differences from I2V denoising:
     - Supports KV cache (reuses cached K/V from conditioning frames)
     - Handles larger num_cond_latents
     - Concatenates conditioning latents back after denoising
-    
+
     When use_kv_cache=True:
     - batch.latents contains ONLY noise frames (cond removed by KV cache init)
     - batch.kv_cache_dict contains cached K/V
     - batch.cond_latents contains conditioning latents for post-concat
-    
+
     When use_kv_cache=False:
     - batch.latents contains ALL frames (cond + noise)
     - Timestep masking: timestep[:, :num_cond_latents] = 0
@@ -61,28 +61,32 @@ class LongCatVCDenoisingStage(LongCatDenoisingStage):
         latents = batch.latents
         timesteps = batch.timesteps
         prompt_embeds = batch.prompt_embeds[0]
-        prompt_attention_mask = (batch.prompt_attention_mask[0] if batch.prompt_attention_mask else None)
+        prompt_attention_mask = batch.prompt_attention_mask[0] if batch.prompt_attention_mask else None
         guidance_scale = batch.guidance_scale
         do_classifier_free_guidance = batch.do_classifier_free_guidance
 
         # Get VC-specific parameters
-        num_cond_latents = getattr(batch, 'num_cond_latents', 0)
-        use_kv_cache = getattr(batch, 'use_kv_cache', False)
-        kv_cache_dict = getattr(batch, 'kv_cache_dict', {})
+        num_cond_latents = getattr(batch, "num_cond_latents", 0)
+        use_kv_cache = getattr(batch, "use_kv_cache", False)
+        kv_cache_dict = getattr(batch, "kv_cache_dict", {})
 
-        logger.info("VC Denoising: num_cond_latents=%d, use_kv_cache=%s, latent_shape=%s", num_cond_latents,
-                    use_kv_cache, latents.shape)
+        logger.info(
+            "VC Denoising: num_cond_latents=%d, use_kv_cache=%s, latent_shape=%s",
+            num_cond_latents,
+            use_kv_cache,
+            latents.shape,
+        )
 
         # Prepare negative prompts for CFG
         if do_classifier_free_guidance:
             negative_prompt_embeds = batch.negative_prompt_embeds[0]
-            negative_prompt_attention_mask = (batch.negative_attention_mask[0]
-                                              if batch.negative_attention_mask else None)
+            negative_prompt_attention_mask = batch.negative_attention_mask[0] if batch.negative_attention_mask else None
 
             prompt_embeds_combined = torch.cat([negative_prompt_embeds, prompt_embeds], dim=0)
             if prompt_attention_mask is not None:
-                prompt_attention_mask_combined = torch.cat([negative_prompt_attention_mask, prompt_attention_mask],
-                                                           dim=0)
+                prompt_attention_mask_combined = torch.cat(
+                    [negative_prompt_attention_mask, prompt_attention_mask], dim=0
+                )
             else:
                 prompt_attention_mask_combined = None
         else:
@@ -115,18 +119,21 @@ class LongCatVCDenoisingStage(LongCatDenoisingStage):
                 # 5. Prepare transformer kwargs
                 # IMPORTANT: num_cond_latents is ALWAYS passed - needed for RoPE position offset
                 transformer_kwargs = {
-                    'num_cond_latents': num_cond_latents,
+                    "num_cond_latents": num_cond_latents,
                 }
                 if use_kv_cache:
-                    transformer_kwargs['kv_cache_dict'] = kv_cache_dict
+                    transformer_kwargs["kv_cache_dict"] = kv_cache_dict
 
                 # 6. Run transformer
                 batch.is_cfg_negative = False
-                with set_forward_context(
+                with (
+                    set_forward_context(
                         current_timestep=i,
                         attn_metadata=None,
                         forward_batch=batch,
-                ), torch.autocast(device_type='cuda', dtype=target_dtype, enabled=autocast_enabled):
+                    ),
+                    torch.autocast(device_type="cuda", dtype=target_dtype, enabled=autocast_enabled),
+                ):
                     noise_pred = self.transformer(
                         hidden_states=latent_model_input,
                         encoder_hidden_states=prompt_embeds_combined,
@@ -146,8 +153,9 @@ class LongCatVCDenoisingStage(LongCatDenoisingStage):
                     st_star = self.optimized_scale(positive, negative)
                     st_star = st_star.view(B, 1, 1, 1, 1)
 
-                    noise_pred = (noise_pred_uncond * st_star + guidance_scale *
-                                  (noise_pred_cond - noise_pred_uncond * st_star))
+                    noise_pred = noise_pred_uncond * st_star + guidance_scale * (
+                        noise_pred_cond - noise_pred_uncond * st_star
+                    )
 
                 # 8. Negate for flow matching scheduler
                 noise_pred = -noise_pred
@@ -178,7 +186,7 @@ class LongCatVCDenoisingStage(LongCatDenoisingStage):
                 progress_bar.update()
 
         # 10. If using KV cache, concatenate conditioning latents back
-        if use_kv_cache and hasattr(batch, 'cond_latents') and batch.cond_latents is not None:
+        if use_kv_cache and hasattr(batch, "cond_latents") and batch.cond_latents is not None:
             latents = torch.cat([batch.cond_latents, latents], dim=2)
             logger.info("Concatenated conditioning latents back, final shape: %s", latents.shape)
 

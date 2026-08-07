@@ -18,7 +18,6 @@ from fastvideo.utils import PRECISION_TO_TYPE
 
 
 class SD35LatentPreparationStage(PipelineStage):
-
     def __init__(self, scheduler) -> None:
         super().__init__()
         self.scheduler = scheduler
@@ -52,8 +51,10 @@ class SD35LatentPreparationStage(PipelineStage):
             raise TypeError(f"SD3.5 expects integer patch_size, got {type(patch_size)}")
         required_divisor = spatial_ratio * patch_size
         if batch.height % required_divisor != 0 or batch.width % required_divisor != 0:
-            raise ValueError(f"height/width must be divisible by {required_divisor} for SD3.5 "
-                             f"(got height={batch.height}, width={batch.width})")
+            raise ValueError(
+                f"height/width must be divisible by {required_divisor} for SD3.5 "
+                f"(got height={batch.height}, width={batch.width})"
+            )
         h_lat = batch.height // spatial_ratio
         w_lat = batch.width // spatial_ratio
         shape = (batch_size, in_channels, 1, h_lat, w_lat)
@@ -79,7 +80,6 @@ class SD35LatentPreparationStage(PipelineStage):
 
 
 class SD35ConditioningStage(PipelineStage):
-
     def __init__(self, text_encoders, tokenizers) -> None:
         super().__init__()
         self.text_encoders = text_encoders
@@ -152,10 +152,12 @@ class SD35ConditioningStage(PipelineStage):
         clip_tok_kwargs_1.setdefault("return_tensors", "pt")
         clip_tok_kwargs_2.setdefault("return_tensors", "pt")
 
-        pooled_1 = self._clip_pooled(self.text_encoders[0], self.tokenizers[0], batch.prompt, clip_tok_kwargs_1, device,
-                                     target_dtype)
-        pooled_2 = self._clip_pooled(self.text_encoders[1], self.tokenizers[1], batch.prompt, clip_tok_kwargs_2, device,
-                                     target_dtype)
+        pooled_1 = self._clip_pooled(
+            self.text_encoders[0], self.tokenizers[0], batch.prompt, clip_tok_kwargs_1, device, target_dtype
+        )
+        pooled_2 = self._clip_pooled(
+            self.text_encoders[1], self.tokenizers[1], batch.prompt, clip_tok_kwargs_2, device, target_dtype
+        )
         pooled = torch.cat([pooled_1, pooled_2], dim=-1)
 
         batch.extra["sd35_encoder_hidden_states"] = prompt_embeds
@@ -176,8 +178,7 @@ class SD35ConditioningStage(PipelineStage):
             negative_pooled_1 = self._clip_pooled(
                 self.text_encoders[0],
                 self.tokenizers[0],
-                batch.negative_prompt if isinstance(batch.negative_prompt, str
-                                                    | list) else "",
+                batch.negative_prompt if isinstance(batch.negative_prompt, str | list) else "",
                 clip_tok_kwargs_1,
                 device,
                 target_dtype,
@@ -185,8 +186,7 @@ class SD35ConditioningStage(PipelineStage):
             negative_pooled_2 = self._clip_pooled(
                 self.text_encoders[1],
                 self.tokenizers[1],
-                batch.negative_prompt if isinstance(batch.negative_prompt, str
-                                                    | list) else "",
+                batch.negative_prompt if isinstance(batch.negative_prompt, str | list) else "",
                 clip_tok_kwargs_2,
                 device,
                 target_dtype,
@@ -238,7 +238,8 @@ class SD35DenoisingStage(PipelineStage):
 
         extra_step_kwargs = self._prepare_extra_func_kwargs(
             self.scheduler.step,
-            {"generator": batch.generator[0] if isinstance(batch.generator, list) else batch.generator})
+            {"generator": batch.generator[0] if isinstance(batch.generator, list) else batch.generator},
+        )
 
         for t in timesteps:
             latents_4d = latents.squeeze(2)
@@ -258,9 +259,9 @@ class SD35DenoisingStage(PipelineStage):
             timestep = t.expand(latent_model_input.shape[0])
 
             with torch.autocast(
-                    device_type="cuda",
-                    dtype=target_dtype,
-                    enabled=autocast_enabled and (get_local_torch_device().type == "cuda"),
+                device_type="cuda",
+                dtype=target_dtype,
+                enabled=autocast_enabled and (get_local_torch_device().type == "cuda"),
             ):
                 noise_pred = self.transformer(
                     hidden_states=latent_model_input,
@@ -282,7 +283,6 @@ class SD35DenoisingStage(PipelineStage):
 
 
 class SD35DecodingStage(PipelineStage):
-
     def __init__(self, vae) -> None:
         super().__init__()
         self.vae = vae
@@ -321,9 +321,9 @@ class SD35DecodingStage(PipelineStage):
         latents_4d = self._denormalize_latents(latents_4d, self.vae)
 
         with torch.autocast(
-                device_type="cuda",
-                dtype=vae_dtype,
-                enabled=autocast_enabled and (device.type == "cuda"),
+            device_type="cuda",
+            dtype=vae_dtype,
+            enabled=autocast_enabled and (device.type == "cuda"),
         ):
             if not autocast_enabled:
                 latents_4d = latents_4d.to(dtype=vae_dtype)

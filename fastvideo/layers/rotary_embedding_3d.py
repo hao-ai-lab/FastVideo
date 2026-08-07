@@ -27,7 +27,7 @@ def broadcast(tensors: list[torch.Tensor], dim: int = -1) -> torch.Tensor:
     assert all(len(set(t[1])) <= 2 for t in expandable_dims), "invalid dimensions for broadcastable concatenation"
 
     max_dims = [(t[0], max(t[1])) for t in expandable_dims]
-    expanded_dims = [(t[0], (t[1], ) * num_tensors) for t in max_dims]
+    expanded_dims = [(t[0], (t[1],) * num_tensors) for t in max_dims]
     expanded_dims.insert(dim, (dim, dims[dim]))
     expandable_shapes = list(zip(*[t[1] for t in expanded_dims], strict=False))
     tensors = [t[0].expand(*t[1]) for t in zip(tensors, expandable_shapes, strict=False)]
@@ -48,7 +48,7 @@ def rotate_half(x: torch.Tensor) -> torch.Tensor:
 class RotaryPositionalEmbedding3D(nn.Module):
     """
     3D Rotary Positional Embedding for video transformers.
-    
+
     Splits the head dimension across temporal, height, and width dimensions,
     computing separate rotary embeddings for each and concatenating them.
     """
@@ -74,7 +74,7 @@ class RotaryPositionalEmbedding3D(nn.Module):
     def register_grid_size(self, grid_size: tuple[int, int, int]) -> None:
         """
         Precompute and register frequencies for a given grid size.
-        
+
         Args:
             grid_size: (T, H, W) tuple of grid dimensions
         """
@@ -84,10 +84,10 @@ class RotaryPositionalEmbedding3D(nn.Module):
     def precompute_freqs_3d(self, grid_size: tuple[int, int, int]) -> torch.Tensor:
         """
         Precompute 3D rotary frequencies.
-        
+
         Args:
             grid_size: (num_frames, height, width)
-            
+
         Returns:
             freqs: [T*H*W, head_dim] tensor of frequencies
         """
@@ -100,9 +100,9 @@ class RotaryPositionalEmbedding3D(nn.Module):
         dim_w = 2 * (self.head_dim // 6)
 
         # Compute frequency bands for each dimension
-        freqs_t = 1.0 / (self.base**(torch.arange(0, dim_t, 2)[:(dim_t // 2)].float() / dim_t))
-        freqs_h = 1.0 / (self.base**(torch.arange(0, dim_h, 2)[:(dim_h // 2)].float() / dim_h))
-        freqs_w = 1.0 / (self.base**(torch.arange(0, dim_w, 2)[:(dim_w // 2)].float() / dim_w))
+        freqs_t = 1.0 / (self.base ** (torch.arange(0, dim_t, 2)[: (dim_t // 2)].float() / dim_t))
+        freqs_h = 1.0 / (self.base ** (torch.arange(0, dim_h, 2)[: (dim_h // 2)].float() / dim_h))
+        freqs_w = 1.0 / (self.base ** (torch.arange(0, dim_w, 2)[: (dim_w // 2)].float() / dim_w))
 
         # Create position grids
         grid_t = torch.arange(num_frames, dtype=torch.float32)
@@ -142,12 +142,12 @@ class RotaryPositionalEmbedding3D(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Apply 3D rotary positional embedding to queries and keys.
-        
+
         Args:
             q: Query tensor [B, num_heads, seq_len, head_dim]
             k: Key tensor [B, num_heads, seq_len, head_dim]
             grid_size: (T, H, W) tuple of grid dimensions
-            
+
         Returns:
             (q_rotated, k_rotated): Rotated query and key tensors
         """
@@ -186,13 +186,13 @@ def apply_rotary_emb_3d(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Convenience function to apply 3D RoPE.
-    
+
     Args:
         q: Query tensor [B, num_heads, seq_len, head_dim]
         k: Key tensor [B, num_heads, seq_len, head_dim]
         rope_module: RotaryPositionalEmbedding3D module
         grid_size: (T, H, W) grid dimensions
-        
+
     Returns:
         (q_rotated, k_rotated): Rotated tensors
     """

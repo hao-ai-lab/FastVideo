@@ -11,7 +11,8 @@ import torch.nn.functional as F
 from fastvideo.train.methods.base import TrainingMethod, LogScalar
 from fastvideo.train.models.base import ModelBase
 from fastvideo.train.utils.optimizer import (
-    build_optimizer_and_scheduler, )
+    build_optimizer_and_scheduler,
+)
 from fastvideo.train.utils.config import (
     get_optional_float,
     get_optional_int,
@@ -49,15 +50,14 @@ class DMD2Method(TrainingMethod):
         if not self.student._trainable:
             raise ValueError("DMD2Method requires student to be trainable")
         if self.teacher._trainable:
-            raise ValueError("DMD2Method requires teacher to be "
-                             "non-trainable")
+            raise ValueError("DMD2Method requires teacher to be non-trainable")
         if not self.critic._trainable:
             raise ValueError("DMD2Method requires critic to be trainable")
         self._cfg_uncond = self._parse_cfg_uncond()
         self._rollout_mode = self._parse_rollout_mode()
         self._validate_preprocessed_data_type()
         self._configure_student_negative_conditioning()
-        self._denoising_step_list: torch.Tensor | None = (None)
+        self._denoising_step_list: torch.Tensor | None = None
         (
             self._score_min_timestep,
             self._score_max_timestep,
@@ -69,7 +69,9 @@ class DMD2Method(TrainingMethod):
         self._init_optimizers_and_schedulers()
 
     @property
-    def _optimizer_dict(self, ) -> dict[str, torch.optim.Optimizer]:
+    def _optimizer_dict(
+        self,
+    ) -> dict[str, torch.optim.Optimizer]:
         return {
             "student": self._student_optimizer,
             "critic": self._critic_optimizer,
@@ -88,9 +90,9 @@ class DMD2Method(TrainingMethod):
         batch: dict[str, Any],
         iteration: int,
     ) -> tuple[
-            dict[str, torch.Tensor],
-            dict[str, Any],
-            dict[str, LogScalar],
+        dict[str, torch.Tensor],
+        dict[str, Any],
+        dict[str, LogScalar],
     ]:
         latents_source: Literal["data", "zeros"] = "data"
         if self._rollout_mode == "simulate":
@@ -207,11 +209,13 @@ class DMD2Method(TrainingMethod):
     ) -> dict[str, torch.nn.Module]:
         targets: dict[str, torch.nn.Module] = {}
         if self._should_update_student(iteration):
-            targets["student"] = (self.student.transformer)
+            targets["student"] = self.student.transformer
         targets["critic"] = self.critic.transformer
         return targets
 
-    def _parse_rollout_mode(self, ) -> Literal["simulate", "data_latent"]:
+    def _parse_rollout_mode(
+        self,
+    ) -> Literal["simulate", "data_latent"]:
         """Parse how DMD2 obtains the latent point used for rollout.
 
         ``simulate`` starts from fresh noise and lets the student create an
@@ -221,31 +225,34 @@ class DMD2Method(TrainingMethod):
         """
         raw = self.method_config.get("rollout_mode", None)
         if raw is None:
-            raise ValueError("method_config.rollout_mode must be set "
-                             "for DMD2")
+            raise ValueError("method_config.rollout_mode must be set for DMD2")
         if not isinstance(raw, str):
-            raise ValueError("method_config.rollout_mode must be a "
-                             "string, "
-                             f"got {type(raw).__name__}")
+            raise ValueError(f"method_config.rollout_mode must be a string, got {type(raw).__name__}")
         mode = raw.strip().lower()
         if mode in ("simulate", "sim"):
             return "simulate"
         if mode in ("data_latent", "data", "vae_latent"):
             return "data_latent"
-        raise ValueError("method_config.rollout_mode must be one of "
-                         "{simulate, data_latent}, got "
-                         f"{raw!r}")
+        raise ValueError(f"method_config.rollout_mode must be one of {{simulate, data_latent}}, got {raw!r}")
 
     def _validate_preprocessed_data_type(self) -> None:
-        data_type = str(getattr(
-            self.training_config.data,
-            "preprocessed_data_type",
-            "t2v",
-        )).strip().lower()
+        data_type = (
+            str(
+                getattr(
+                    self.training_config.data,
+                    "preprocessed_data_type",
+                    "t2v",
+                )
+            )
+            .strip()
+            .lower()
+        )
         if data_type == "text_only" and self._rollout_mode != "simulate":
-            raise ValueError("training.data.preprocessed_data_type='text_only' "
-                             "requires method.rollout_mode='simulate'; "
-                             "data_latent rollout requires vae_latent data.")
+            raise ValueError(
+                "training.data.preprocessed_data_type='text_only' "
+                "requires method.rollout_mode='simulate'; "
+                "data_latent rollout requires vae_latent data."
+            )
 
     def _uses_negative_prompt_conditioning(self) -> bool:
         if self._cfg_uncond is None:
@@ -264,13 +271,14 @@ class DMD2Method(TrainingMethod):
         if setter is not None:
             setter(self._uses_negative_prompt_conditioning())
 
-    def _parse_cfg_uncond(self, ) -> dict[str, Any] | None:
+    def _parse_cfg_uncond(
+        self,
+    ) -> dict[str, Any] | None:
         raw = self.method_config.get("cfg_uncond", None)
         if raw is None:
             return None
         if not isinstance(raw, dict):
-            raise ValueError("method_config.cfg_uncond must be a dict "
-                             f"when set, got {type(raw).__name__}")
+            raise ValueError(f"method_config.cfg_uncond must be a dict when set, got {type(raw).__name__}")
 
         cfg: dict[str, Any] = dict(raw)
 
@@ -278,14 +286,14 @@ class DMD2Method(TrainingMethod):
         if on_missing_raw is None:
             on_missing_raw = "error"
         if not isinstance(on_missing_raw, str):
-            raise ValueError("method_config.cfg_uncond.on_missing must "
-                             "be a string, got "
-                             f"{type(on_missing_raw).__name__}")
+            raise ValueError(
+                f"method_config.cfg_uncond.on_missing must be a string, got {type(on_missing_raw).__name__}"
+            )
         on_missing = on_missing_raw.strip().lower()
         if on_missing not in {"error", "ignore"}:
-            raise ValueError("method_config.cfg_uncond.on_missing must "
-                             "be one of {error, ignore}, got "
-                             f"{on_missing_raw!r}")
+            raise ValueError(
+                f"method_config.cfg_uncond.on_missing must be one of {{error, ignore}}, got {on_missing_raw!r}"
+            )
         cfg["on_missing"] = on_missing
 
         for channel, policy_raw in list(cfg.items()):
@@ -294,19 +302,17 @@ class DMD2Method(TrainingMethod):
             if policy_raw is None:
                 continue
             if not isinstance(policy_raw, str):
-                raise ValueError("method_config.cfg_uncond values must "
-                                 "be strings, got "
-                                 f"{channel}="
-                                 f"{type(policy_raw).__name__}")
+                raise ValueError(
+                    f"method_config.cfg_uncond values must be strings, got {channel}={type(policy_raw).__name__}"
+                )
             policy = policy_raw.strip().lower()
             allowed = {"keep", "zero", "drop"}
             if channel == "text":
                 allowed = {*allowed, "negative_prompt"}
             if policy not in allowed:
-                raise ValueError("method_config.cfg_uncond values must "
-                                 "be one of "
-                                 f"{sorted(allowed)}, got "
-                                 f"{channel}={policy_raw!r}")
+                raise ValueError(
+                    f"method_config.cfg_uncond values must be one of {sorted(allowed)}, got {channel}={policy_raw!r}"
+                )
             cfg[channel] = policy
 
         return cfg
@@ -339,14 +345,12 @@ class DMD2Method(TrainingMethod):
             where="method.fake_score_learning_rate",
         )
         if critic_lr_raw is None or critic_lr_raw == 0.0:
-            raise ValueError("method.fake_score_learning_rate must "
-                             "be set to a positive value")
+            raise ValueError("method.fake_score_learning_rate must be set to a positive value")
         critic_lr = float(critic_lr_raw)
 
         critic_betas_raw = self.method_config.get("fake_score_betas", None)
         if critic_betas_raw is None:
-            raise ValueError("method.fake_score_betas must be set "
-                             "(e.g. [0.0, 0.999])")
+            raise ValueError("method.fake_score_betas must be set (e.g. [0.0, 0.999])")
         critic_betas = parse_betas(
             critic_betas_raw,
             where="method.fake_score_betas",
@@ -354,8 +358,7 @@ class DMD2Method(TrainingMethod):
 
         critic_sched_raw = self.method_config.get("fake_score_lr_scheduler", None)
         if critic_sched_raw is None:
-            raise ValueError("method.fake_score_lr_scheduler must "
-                             "be set (e.g. 'constant')")
+            raise ValueError("method.fake_score_lr_scheduler must be set (e.g. 'constant')")
         critic_sched = str(critic_sched_raw)
         critic_params = [p for p in self.critic.transformer.parameters() if p.requires_grad]
         (
@@ -389,13 +392,12 @@ class DMD2Method(TrainingMethod):
         self,
         device: torch.device,
     ) -> torch.Tensor:
-        if (self._denoising_step_list is not None and self._denoising_step_list.device == device):
+        if self._denoising_step_list is not None and self._denoising_step_list.device == device:
             return self._denoising_step_list
 
         raw = self.method_config.get("dmd_denoising_steps", None)
         if not isinstance(raw, list) or not raw:
-            raise ValueError("method_config.dmd_denoising_steps must "
-                             "be set for DMD2 distillation")
+            raise ValueError("method_config.dmd_denoising_steps must be set for DMD2 distillation")
 
         steps = torch.tensor(
             [int(s) for s in raw],
@@ -407,10 +409,12 @@ class DMD2Method(TrainingMethod):
         if warp is None:
             warp = False
         if bool(warp):
-            timesteps = torch.cat((
-                self.student.noise_scheduler.timesteps.to("cpu"),
-                torch.tensor([0], dtype=torch.float32),
-            )).to(device)
+            timesteps = torch.cat(
+                (
+                    self.student.noise_scheduler.timesteps.to("cpu"),
+                    torch.tensor([0], dtype=torch.float32),
+                )
+            ).to(device)
             steps = timesteps[1000 - steps]
 
         self._denoising_step_list = steps
@@ -451,9 +455,9 @@ class DMD2Method(TrainingMethod):
         min_ratio = 0.0 if min_ratio is None else float(min_ratio)
         max_ratio = 1.0 if max_ratio is None else float(max_ratio)
         if not 0.0 <= min_ratio <= max_ratio <= 1.0:
-            raise ValueError("method min/max_timestep_ratio must satisfy "
-                             "0 <= min <= max <= 1, got "
-                             f"min={min_ratio}, max={max_ratio}")
+            raise ValueError(
+                f"method min/max_timestep_ratio must satisfy 0 <= min <= max <= 1, got min={min_ratio}, max={max_ratio}"
+            )
 
         num_timesteps = int(self.student.num_train_timesteps)
         return (
@@ -524,7 +528,7 @@ class DMD2Method(TrainingMethod):
             dtype=dtype,
             generator=self.cuda_generator,
         )
-        current_noise_latents_copy = (current_noise_latents.clone())
+        current_noise_latents_copy = current_noise_latents.clone()
 
         max_target_idx = len(step_list) - 1
         noise_latents: list[torch.Tensor] = []
@@ -534,11 +538,11 @@ class DMD2Method(TrainingMethod):
             with torch.no_grad():
                 for step_idx in range(max_target_idx):
                     current_timestep = step_list[step_idx]
-                    current_timestep_tensor = (current_timestep * torch.ones(
+                    current_timestep_tensor = current_timestep * torch.ones(
                         1,
                         device=device,
                         dtype=torch.long,
-                    ))
+                    )
 
                     pred_clean = self.student.predict_x0(
                         current_noise_latents,
@@ -550,22 +554,22 @@ class DMD2Method(TrainingMethod):
                     )
 
                     next_timestep = step_list[step_idx + 1]
-                    next_timestep_tensor = (next_timestep * torch.ones(
+                    next_timestep_tensor = next_timestep * torch.ones(
                         1,
                         device=device,
                         dtype=torch.long,
-                    ))
+                    )
                     noise = torch.randn(
                         latents.shape,
                         device=device,
                         dtype=pred_clean.dtype,
                         generator=self.cuda_generator,
                     )
-                    current_noise_latents = (self.student.add_noise(
+                    current_noise_latents = self.student.add_noise(
                         pred_clean,
                         noise,
                         next_timestep_tensor,
-                    ))
+                    )
                     noise_latents.append(current_noise_latents.clone())
 
         if noise_latent_index >= 0:
@@ -625,7 +629,7 @@ class DMD2Method(TrainingMethod):
             attn_kind="dense",
         )
         target = noise - generator_pred_x0
-        flow_matching_loss = torch.mean((pred_noise - target)**2)
+        flow_matching_loss = torch.mean((pred_noise - target) ** 2)
 
         batch.fake_score_latent_vis_dict = {
             "generator_pred_video": generator_pred_x0,

@@ -17,6 +17,7 @@ This keeps ``import fastvideo`` cheap on hosts where flashinfer is
 not installed; only the actual NVFP4 quantize / matmul ops fail at
 use time, with a clear error.
 """
+
 from __future__ import annotations
 
 import logging
@@ -44,11 +45,14 @@ def _require_flashinfer() -> tuple[Any, Any, Any]:
     """
     try:
         from flashinfer import (  # type: ignore[import-not-found]
-            SfLayout, mm_fp4, nvfp4_quantize,
+            SfLayout,
+            mm_fp4,
+            nvfp4_quantize,
         )
     except ImportError as exc:  # pragma: no cover - depends on host env
-        raise ImportError("NVFP4 quantization requires flashinfer. "
-                          "Install with `pip install flashinfer-python`.") from exc
+        raise ImportError(
+            "NVFP4 quantization requires flashinfer. Install with `pip install flashinfer-python`."
+        ) from exc
     return SfLayout, mm_fp4, nvfp4_quantize
 
 
@@ -72,9 +76,9 @@ _LTX2_NVFP4_BLOCK_LINEAR_SUFFIXES = (
     "ffn.fc_in",
     "ffn.fc_out",
 )
-_LTX2_NVFP4_LINEAR_PREFIXES = frozenset(f"ltx2.blocks.{block_idx}.{suffix}" for block_idx in range(48)
-                                        for suffix in _LTX2_NVFP4_BLOCK_LINEAR_SUFFIXES) | frozenset(
-                                            ("ltx2.adaln_single.linear", ))
+_LTX2_NVFP4_LINEAR_PREFIXES = frozenset(
+    f"ltx2.blocks.{block_idx}.{suffix}" for block_idx in range(48) for suffix in _LTX2_NVFP4_BLOCK_LINEAR_SUFFIXES
+) | frozenset(("ltx2.adaln_single.linear",))
 
 
 def is_ltx2_nvfp4_linear_prefix(prefix: str) -> bool:
@@ -301,7 +305,6 @@ def _coerce_fp4_input_dtype(x: torch.Tensor) -> torch.Tensor:
 
 
 class NVFP4QuantizeMethod(QuantizeMethodBase):
-
     def __init__(self, layer_prefix: str = ""):
         super().__init__()
         self.weight_fp4 = None
@@ -315,14 +318,24 @@ class NVFP4QuantizeMethod(QuantizeMethodBase):
         # the base stage profile runs them dense by deployment contract.
         self._retain_original_weights: bool | None = None
 
-    def create_weights(self, layer: torch.nn.Module, input_size_per_partition: int, output_partition_sizes: list[int],
-                       input_size: int, output_size: int, params_dtype: torch.dtype, **extra_weight_attrs):
-        weight = Parameter(torch.empty(
-            sum(output_partition_sizes),
-            input_size_per_partition,
-            dtype=params_dtype,
-        ),
-                           requires_grad=False)
+    def create_weights(
+        self,
+        layer: torch.nn.Module,
+        input_size_per_partition: int,
+        output_partition_sizes: list[int],
+        input_size: int,
+        output_size: int,
+        params_dtype: torch.dtype,
+        **extra_weight_attrs,
+    ):
+        weight = Parameter(
+            torch.empty(
+                sum(output_partition_sizes),
+                input_size_per_partition,
+                dtype=params_dtype,
+            ),
+            requires_grad=False,
+        )
         set_weight_attrs(weight, {"input_dim": 1, "output_dim": 0})
         layer.register_parameter("weight", weight)
         set_weight_attrs(weight, extra_weight_attrs)
@@ -350,8 +363,7 @@ class NVFP4QuantizeMethod(QuantizeMethodBase):
         layer: torch.nn.Module,
         x: torch.Tensor,
         bias: torch.Tensor | None = None,
-        pre_quantized: tuple[torch.Tensor, torch.Tensor, torch.Tensor]
-        | None = None,
+        pre_quantized: tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None = None,
     ) -> torch.Tensor:
         SfLayout, _, _ = _require_flashinfer()
         # The original bf16 weight may have been purged after FP4 conversion
@@ -367,12 +379,17 @@ class NVFP4QuantizeMethod(QuantizeMethodBase):
         stage_profile = _get_ltx2_fp4_stage_profile(default="refine")
         if self._is_refine_only_layer and stage_profile == "base":
             if weight is None:
-                raise RuntimeError(f"NVFP4 layer {self.layer_prefix!r} hit the stage-profile dense path, "
-                                   "but its original weights were purged "
-                                   "(NVFP4Config(retain_original_weights=False)). Streaming/two-stage "
-                                   "deploys must load with retain_original_weights left unset (auto) or True.")
-            out = (F.linear(x, weight, bias) if torch.cuda.is_available() or bias is None else F.linear(
-                x, weight, bias.to(x.dtype)))
+                raise RuntimeError(
+                    f"NVFP4 layer {self.layer_prefix!r} hit the stage-profile dense path, "
+                    "but its original weights were purged "
+                    "(NVFP4Config(retain_original_weights=False)). Streaming/two-stage "
+                    "deploys must load with retain_original_weights left unset (auto) or True."
+                )
+            out = (
+                F.linear(x, weight, bias)
+                if torch.cuda.is_available() or bias is None
+                else F.linear(x, weight, bias.to(x.dtype))
+            )
             return out.view(*original_shape[:-1], out_dim)
         if pre_quantized is not None:
             x_fp4, x_scale, x_global_sf = pre_quantized
@@ -411,7 +428,7 @@ class NVFP4QuantizeMethod(QuantizeMethodBase):
             alpha,
             torch.bfloat16,
             None,
-            backend='auto',
+            backend="auto",
         )
 
         if bias is not None:

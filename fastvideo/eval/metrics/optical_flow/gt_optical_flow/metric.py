@@ -99,7 +99,8 @@ class GtOpticalFlowMetric(BaseMetric):
                 grid_size=self.grid_size,
                 min_mag=self.min_mag,
                 max_mag_pct=self.max_mag_pct,
-            ) for rf, gf in zip(ref_flows, gen_flows, strict=False)
+            )
+            for rf, gf in zip(ref_flows, gen_flows, strict=False)
         ]
         summary = aggregate_temporal(per_frame)
         score = summary.get("pixel_epe_mean_mean")
