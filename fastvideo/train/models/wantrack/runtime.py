@@ -100,6 +100,8 @@ class WanTrackInferenceRuntime:
         model_dir: str,
         fps: float,
         chunk_size: int,
+        dmd_denoising_steps: list[int] | None = None,
+        warp_denoising_step: bool = True,
     ) -> None:
         self.model = model
         self.vae = vae
@@ -114,6 +116,8 @@ class WanTrackInferenceRuntime:
         self.model_dir = str(model_dir)
         self.fps = float(fps)
         self.chunk_size = int(chunk_size)
+        self.dmd_denoising_steps = list(dmd_denoising_steps or [1000, 750, 500, 250])
+        self.warp_denoising_step = bool(warp_denoising_step)
         self.temporal_compression = int(
             training_config.pipeline_config.vae_config.arch_config.temporal_compression_ratio)
         self.validation_pixel_frames = ((int(training_config.data.num_latent_t) - 1) * self.temporal_compression + 1)
@@ -124,6 +128,9 @@ class WanTrackInferenceRuntime:
             "local_attn_size": int(transformer.local_attn_size),
             "sink_size": int(transformer.sink_size),
             "rope_cache_policy": str(transformer.rope_cache_policy),
+            "dmd_denoising_steps": list(self.dmd_denoising_steps),
+            "warp_denoising_step": self.warp_denoising_step,
+            "flow_shift": float(getattr(model, "timestep_shift", 0.0) or 0.0),
         }
         if self.height <= 0 or self.width <= 0:
             raise ValueError("WanTrack YAML must define positive training.data.num_height "
@@ -206,6 +213,8 @@ class WanTrackInferenceRuntime:
 
         maybe_init_distributed_environment_and_model_parallel(1, 1)
 
+        from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
+            FlowMatchEulerDiscreteScheduler, )
         from fastvideo.train.models.wantrack.wantrack_causal import (
             WanTrackCausalModel, )
         from fastvideo.train.utils.moduleloader import (
@@ -215,13 +224,19 @@ class WanTrackInferenceRuntime:
         from fastvideo.models.loader.component_loader import (
             PipelineComponentLoader, )
 
+        # Standalone inference never calls init_preprocessors(), so apply the
+        # YAML flow_shift here instead of the WanModel constructor default (3.0).
+        flow_shift = float(getattr(training_config.pipeline_config, "flow_shift", None) or 5.0)
         model = WanTrackCausalModel(
             init_from=model_dir,
             training_config=training_config,
             trainable=False,
+            flow_shift=flow_shift,
             track_augmentation=models["student"].get("track_augmentation"),
             freeze_track_encoder=bool(models["student"].get("freeze_track_encoder", False)),
         )
+        model.timestep_shift = flow_shift
+        model.noise_scheduler = FlowMatchEulerDiscreteScheduler(shift=flow_shift)
         dit_config = training_config.pipeline_config.dit_config
         expected_recipe = (
             int(dit_config.local_attn_size),
@@ -295,7 +310,7 @@ class WanTrackInferenceRuntime:
                 dtype=torch.float16,
             ).eval()
 
-        method = raw.get("method", {})
+        method = raw.get("method", {}) if isinstance(raw.get("method"), dict) else {}
         chunk_size = int(
             method.get(
                 "chunk_size",
@@ -309,6 +324,15 @@ class WanTrackInferenceRuntime:
                     ),
                 ),
             ))
+        dmd_raw = method.get("dmd_denoising_steps")
+        if dmd_raw is None:
+            dmd_steps = [1000, 750, 500, 250]
+        else:
+            if not isinstance(dmd_raw, (list, tuple)) or not dmd_raw:
+                raise ValueError("method.dmd_denoising_steps must be a non-empty list")
+            dmd_steps = [int(s) for s in dmd_raw]
+        warp_raw = method.get("warp_denoising_step", True)
+        warp_denoising_step = True if warp_raw is None else bool(warp_raw)
         fps = cls._fps_from_yaml(raw)
         return cls(
             model=model,
@@ -323,6 +347,8 @@ class WanTrackInferenceRuntime:
             model_dir=model_dir,
             fps=fps,
             chunk_size=chunk_size,
+            dmd_denoising_steps=dmd_steps,
+            warp_denoising_step=warp_denoising_step,
         )
 
     @staticmethod
@@ -886,6 +912,8 @@ class CausalWanTrackSession:
                 motion_guidance_scale=settings.motion_guidance_scale,
                 motion_cfg=settings.motion_cfg,
                 commit=True,
+                dmd_denoising_steps=self.runtime.dmd_denoising_steps,
+                warp_denoising_step=self.runtime.warp_denoising_step,
             )
             decoded, vae_cache = self.runtime.decode_block(
                 latents,

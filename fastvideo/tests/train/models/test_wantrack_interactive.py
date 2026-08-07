@@ -169,6 +169,8 @@ class _FakeRuntime:
     fps = 16.0
     chunk_size = 3
     temporal_compression = 4
+    dmd_denoising_steps = [1000, 750, 500, 250]
+    warp_denoising_step = True
 
     def __init__(self) -> None:
         self.model = _FakeModel()

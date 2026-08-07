@@ -10,6 +10,7 @@ import torch
 
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
     FlowMatchEulerDiscreteScheduler, )
+from fastvideo.models.utils import pred_noise_to_pred_video
 from fastvideo.pipelines import TrainingBatch
 from fastvideo.train.models.base import CausalModelBase, ModelBase
 
@@ -206,7 +207,30 @@ def _store_causal_context(
         )
 
 
-def _sample_block(
+def resolve_dmd_timesteps(
+    scheduler: FlowMatchEulerDiscreteScheduler,
+    dmd_denoising_steps: list[int] | tuple[int, ...],
+    *,
+    warp_denoising_step: bool = True,
+    device: torch.device | str | None = None,
+) -> torch.Tensor:
+    """Map Self-Forcing DMD indices onto the flow-matching schedule."""
+    if not dmd_denoising_steps:
+        raise ValueError("dmd_denoising_steps must be a non-empty sequence")
+    steps = torch.tensor([int(s) for s in dmd_denoising_steps], dtype=torch.long)
+    if bool(warp_denoising_step):
+        # Match WanTrackCausalDenoisingStage / Self-Forcing training warp.
+        scheduler.set_timesteps(1000, device="cpu")
+        schedule = torch.cat(
+            (scheduler.timesteps.cpu(), torch.tensor([0], dtype=torch.float32)))
+        num_train = int(getattr(scheduler.config, "num_train_timesteps", 1000))
+        steps = schedule[num_train - steps]
+    if device is None:
+        return steps
+    return steps.to(device=device)
+
+
+def _sample_block_euler(
     model: ModelBase,
     latents: torch.Tensor,
     batch: TrainingBatch,
@@ -248,6 +272,113 @@ def _sample_block(
     return latents, branches
 
 
+def _sample_block_dmd(
+    model: ModelBase,
+    latents: torch.Tensor,
+    batch: TrainingBatch,
+    *,
+    scheduler: FlowMatchEulerDiscreteScheduler,
+    dmd_timesteps: torch.Tensor,
+    start_frame: int,
+    text_guidance_scale: float,
+    motion_guidance_scale: float,
+    motion_cfg: bool,
+) -> tuple[torch.Tensor, tuple[_Branch, ...]]:
+    """Self-Forcing / DMD multistep: predict x0, then re-noise to the next t."""
+    latent_dtype = latents.dtype
+    branches: tuple[_Branch, ...] = ("full", )
+    for step_idx, current_timestep in enumerate(dmd_timesteps):
+        timestep = torch.full(
+            latents.shape[:2],
+            float(current_timestep.item()),
+            device=latents.device,
+            dtype=torch.float32,
+        )
+        batch.timesteps = timestep
+        prediction, branches = _guided_prediction(
+            model,
+            latents,
+            timestep,
+            batch,
+            start_frame=start_frame,
+            text_guidance_scale=text_guidance_scale,
+            motion_guidance_scale=motion_guidance_scale,
+            motion_cfg=motion_cfg,
+        )
+        pred_x0 = pred_noise_to_pred_video(
+            pred_noise=prediction.flatten(0, 1).float(),
+            noise_input_latent=latents.flatten(0, 1).float(),
+            timestep=timestep,
+            scheduler=scheduler,
+        ).unflatten(0, prediction.shape[:2]).to(dtype=latent_dtype)
+
+        if step_idx + 1 >= len(dmd_timesteps):
+            latents = pred_x0
+            break
+
+        next_timestep = dmd_timesteps[step_idx + 1]
+        next_t = torch.full(
+            latents.shape[:2],
+            float(next_timestep.item()),
+            device=latents.device,
+            dtype=torch.float32,
+        )
+        noise = torch.randn_like(pred_x0, dtype=torch.float32)
+        latents = scheduler.add_noise(
+            pred_x0.flatten(0, 1).float(),
+            noise.flatten(0, 1),
+            next_t,
+        ).unflatten(0, pred_x0.shape[:2]).to(dtype=latent_dtype)
+    return latents, branches
+
+
+def _sample_block(
+    model: ModelBase,
+    latents: torch.Tensor,
+    batch: TrainingBatch,
+    *,
+    scheduler: FlowMatchEulerDiscreteScheduler,
+    num_inference_steps: int,
+    start_frame: int,
+    text_guidance_scale: float,
+    motion_guidance_scale: float,
+    motion_cfg: bool,
+    dmd_denoising_steps: list[int] | tuple[int, ...] | None = None,
+    warp_denoising_step: bool = True,
+) -> tuple[torch.Tensor, tuple[_Branch, ...]]:
+    if dmd_denoising_steps is not None:
+        # Ensure the scheduler owns a 1000-step grid before x0 / add_noise.
+        scheduler.set_timesteps(1000, device=latents.device)
+        dmd_timesteps = resolve_dmd_timesteps(
+            scheduler,
+            dmd_denoising_steps,
+            warp_denoising_step=warp_denoising_step,
+            device=latents.device,
+        )
+        return _sample_block_dmd(
+            model,
+            latents,
+            batch,
+            scheduler=scheduler,
+            dmd_timesteps=dmd_timesteps,
+            start_frame=start_frame,
+            text_guidance_scale=text_guidance_scale,
+            motion_guidance_scale=motion_guidance_scale,
+            motion_cfg=motion_cfg,
+        )
+    return _sample_block_euler(
+        model,
+        latents,
+        batch,
+        scheduler=scheduler,
+        num_inference_steps=num_inference_steps,
+        start_frame=start_frame,
+        text_guidance_scale=text_guidance_scale,
+        motion_guidance_scale=motion_guidance_scale,
+        motion_cfg=motion_cfg,
+    )
+
+
 def clear_wantrack_caches(model: ModelBase) -> None:
     """Clear every CFG-tagged causal cache owned by WanTrack sampling."""
     if not isinstance(model, CausalModelBase):
@@ -269,6 +400,8 @@ def sample_wantrack_block(
     motion_cfg: bool = True,
     scheduler: FlowMatchEulerDiscreteScheduler | None = None,
     commit: bool = True,
+    dmd_denoising_steps: list[int] | tuple[int, ...] | None = None,
+    warp_denoising_step: bool = True,
 ) -> torch.Tensor:
     """Denoise one causal block and optionally commit its context once."""
     if latents.ndim != 5:
@@ -289,6 +422,8 @@ def sample_wantrack_block(
         text_guidance_scale=text_guidance_scale,
         motion_guidance_scale=motion_guidance_scale,
         motion_cfg=motion_cfg,
+        dmd_denoising_steps=dmd_denoising_steps,
+        warp_denoising_step=warp_denoising_step,
     )
     if commit:
         _store_causal_context(
@@ -312,6 +447,8 @@ def sample_wantrack(
     motion_guidance_scale: float = 1.0,
     motion_cfg: bool = True,
     chunk_size: int | None = None,
+    dmd_denoising_steps: list[int] | tuple[int, ...] | None = None,
+    warp_denoising_step: bool = True,
 ) -> torch.Tensor:
     """Generate normalized latents in ``[B, T, C, H, W]`` layout.
 
@@ -342,6 +479,8 @@ def sample_wantrack(
             text_guidance_scale=text_guidance_scale,
             motion_guidance_scale=motion_guidance_scale,
             motion_cfg=motion_cfg,
+            dmd_denoising_steps=dmd_denoising_steps,
+            warp_denoising_step=warp_denoising_step,
         )
         return sampled
 
@@ -387,6 +526,8 @@ def sample_wantrack(
                 motion_cfg=motion_cfg,
                 scheduler=scheduler,
                 commit=True,
+                dmd_denoising_steps=dmd_denoising_steps,
+                warp_denoising_step=warp_denoising_step,
             )
             sampled_blocks.append(block)
             start_frame += block_size

@@ -170,7 +170,10 @@ def create_app(
                     await send_json({
                         "type": "block_started",
                         "block_index": block_index,
-                        "num_inference_steps": 4,
+                        "num_inference_steps": len(
+                            getattr(runtime_value, "dmd_denoising_steps", [1000, 750, 500, 250])),
+                        "dmd_denoising_steps": list(
+                            getattr(runtime_value, "dmd_denoising_steps", [1000, 750, 500, 250])),
                         "cfg_enabled": False,
                     })
                     block = await asyncio.to_thread(session.generate_next_block)
@@ -310,9 +313,11 @@ def create_app(
                 owns_generation_lock = True
                 runtime_value = await app.state.runtime_provider.get()
                 session = runtime_value.create_session()
+                dmd_steps = list(
+                    getattr(runtime_value, "dmd_denoising_steps", [1000, 750, 500, 250]))
                 sampling = {
                     "seed": int(message.get("seed", 0)),
-                    "num_inference_steps": 4,
+                    "num_inference_steps": len(dmd_steps),
                     "text_guidance_scale": 1.0,
                     "motion_guidance_scale": 1.0,
                     "motion_cfg": False,
@@ -334,7 +339,8 @@ def create_app(
                     "type": "session_started",
                     "fps": float(getattr(runtime_value, "fps", 16.0)),
                     "chunk_size": int(getattr(runtime_value, "chunk_size", 3)),
-                    "num_inference_steps": 4,
+                    "num_inference_steps": len(dmd_steps),
+                    "dmd_denoising_steps": dmd_steps,
                     "cfg_enabled": False,
                     "causal_recipe": getattr(runtime_value, "causal_recipe", {}),
                     "decoder": str(getattr(runtime_value, "decoder_name", "unknown")),

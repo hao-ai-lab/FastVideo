@@ -88,7 +88,7 @@
       } else if (message.type === "block_started") {
         setStatus(
           `Generating block ${message.block_index}`,
-          "4 denoising steps, single conditional branch. Controls update at the next block.",
+          "DMD 4-step, single conditional branch. Controls update at the next block.",
           true,
         );
       } else if (message.type === "block_encoding") {
@@ -291,7 +291,7 @@
     revision = 0;
     download.hidden = true;
     startButton.disabled = true;
-    setStatus("Sending controls", "Starting the fixed 4-step, CFG-free SF sampler.", true);
+    setStatus("Sending controls", "Starting the fixed DMD 4-step, CFG-free SF sampler.", true);
     socket.send(JSON.stringify({
       type: "start",
       handles,
