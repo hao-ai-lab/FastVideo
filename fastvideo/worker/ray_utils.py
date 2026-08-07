@@ -217,12 +217,21 @@ def initialize_ray_cluster(
         # the current node has at least one device.
         current_ip = get_ip()
         current_node_id = ray.get_runtime_context().get_node_id()
-        current_node_resource = available_resources_per_node()[current_node_id]
-        if current_node_resource.get(device_str, 0) < 1:
-            raise ValueError(f"Current node has no {device_str} available. "
-                             f"{current_node_resource=}. FastVideo engine cannot start without "
-                             f"{device_str}. Make sure you have at least 1 {device_str} "
-                             f"available in a node {current_node_id=} {current_ip=}.")
+        # A previous engine's actors may still be releasing their devices
+        # (actor death and placement-group teardown are asynchronous) — retry
+        # briefly instead of failing an otherwise-valid load.
+        deadline = time.monotonic() + 60
+        while True:
+            current_node_resource = available_resources_per_node()[current_node_id]
+            if current_node_resource.get(device_str, 0) >= 1:
+                break
+            if time.monotonic() >= deadline:
+                raise ValueError(f"Current node has no {device_str} available. "
+                                 f"{current_node_resource=}. FastVideo engine cannot start without "
+                                 f"{device_str}. Make sure you have at least 1 {device_str} "
+                                 f"available in a node {current_node_id=} {current_ip=}.")
+            logger.info("Waiting for a %s to free on the current node...", device_str)
+            time.sleep(2)
         # This way, at least bundle is required to be created in a current
         # node.
         placement_group_specs[0][f"node:{current_ip}"] = 0.001

@@ -404,6 +404,17 @@ class RayDistributedExecutor(Executor):
                     _time.sleep(0.5)
                 else:
                     logger.warning("Placement group still not removed after 30s")
+                # The killed actors release their GPUs asynchronously as the
+                # processes die; wait for the resources to reappear so the
+                # next load doesn't fail its GPU-availability probe.
+                want = float(self.fastvideo_args.num_gpus)
+                deadline = _time.monotonic() + 60
+                while _time.monotonic() < deadline:
+                    if ray.available_resources().get("GPU", 0.0) >= want:
+                        break
+                    _time.sleep(0.5)
+                else:
+                    logger.warning("GPUs not back in ray ledger 60s after shutdown")
             except Exception:  # noqa: BLE001 -- already-removed / cluster gone
                 logger.warning("Failed to remove ray placement group", exc_info=True)
             self.fastvideo_args.ray_placement_group = None
