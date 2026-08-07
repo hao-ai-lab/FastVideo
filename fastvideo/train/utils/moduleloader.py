@@ -93,10 +93,15 @@ def load_module_from_path(
     transformer_override_safetensor: str | None = None,
     attention_backend: AttentionBackendEnum | str | None = None,
 ) -> torch.nn.Module:
-    """Load a single pipeline component module.
+    """Load one pipeline component with its role-scoped attention policy.
 
     Accepts a ``TrainingConfig`` and internally builds the
     ``TrainingArgs`` needed by ``PipelineComponentLoader``.
+
+    Diffusers component entries retain provider and architecture as their
+    first two fields and can append modular loading metadata. Attention layers
+    bind their backend during construction, so the requested backend remains
+    scoped to this load call.
     """
     fastvideo_args: Any = _make_training_args(training_config, model_path=model_path)
 
@@ -112,7 +117,9 @@ def load_module_from_path(
         raise ValueError(f"Module {module_type!r} has null value in "
                          f"config at {local_model_path}")
 
-    transformers_or_diffusers, _architecture = module_info
+    # Trailing modular-manifest metadata does not change component dispatch;
+    # the provider and architecture remain the first two fields.
+    transformers_or_diffusers, _architecture = module_info[:2]
     component_path = os.path.join(local_model_path, module_type)
 
     old_override: str | None = None

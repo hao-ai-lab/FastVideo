@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
+"""Verify construction-scoped attention backends in the training loader."""
+
 from __future__ import annotations
 
 import torch
@@ -15,6 +17,7 @@ from fastvideo.train.utils.training_config import (
 
 
 def test_load_transformer_scopes_attention_backend(monkeypatch, tmp_path) -> None:
+    """Apply one backend while accepting trailing modular-manifest metadata."""
     training_config = TrainingConfig(
         distributed=DistributedConfig(hsdp_shard_dim=1),
         pipeline_config=PipelineConfig(),
@@ -25,7 +28,9 @@ def test_load_transformer_scopes_attention_backend(monkeypatch, tmp_path) -> Non
     monkeypatch.setattr(
         moduleloader,
         "verify_model_config_and_directory",
-        lambda path: {"transformer": ("diffusers", "FakeTransformer")},
+        lambda path: {"transformer": ("diffusers", "FakeTransformer", {
+            "subfolder": "transformer"
+        })},
     )
 
     def _fake_load_module(**kwargs):

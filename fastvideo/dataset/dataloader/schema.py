@@ -81,6 +81,36 @@ pyarrow_schema_t2v = pa.schema([
 ])
 
 
+# One text-to-video-and-audio (T2VA) row owns synchronized video, audio, and text tensors so
+# collate_rows_from_parquet_schema cannot pair targets from different samples.
+# Each tensor uses the bytes/shape/dtype triplet that the collator discovers.
+pyarrow_schema_t2va = pa.schema([
+    pa.field("id", pa.string()),
+    # --- Video VAE latent tensor ---
+    pa.field("vae_latent_bytes", pa.binary()),
+    pa.field("vae_latent_shape", pa.list_(pa.int64())),
+    pa.field("vae_latent_dtype", pa.string()),
+    # --- Stereo audio VAE latent tensor ---
+    pa.field("audio_latent_bytes", pa.binary()),
+    pa.field("audio_latent_shape", pa.list_(pa.int64())),
+    pa.field("audio_latent_dtype", pa.string()),
+    # --- Text encoder output tensor ---
+    pa.field("text_embedding_bytes", pa.binary()),
+    pa.field("text_embedding_shape", pa.list_(pa.int64())),
+    pa.field("text_embedding_dtype", pa.string()),
+    # --- Paired audio-video metadata ---
+    pa.field("file_name", pa.string()),
+    pa.field("caption", pa.string()),
+    pa.field("media_type", pa.string()),
+    pa.field("width", pa.int64()),
+    pa.field("height", pa.int64()),
+    pa.field("num_frames", pa.int64()),
+    pa.field("duration_sec", pa.float64()),
+    pa.field("fps", pa.float64()),
+    pa.field("audio_sample_rate", pa.int64()),
+])
+
+
 pyarrow_schema_ode_trajectory_text_only = pa.schema([
     pa.field("id", pa.string()),
     # --- Text encoder output tensor ---

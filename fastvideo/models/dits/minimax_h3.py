@@ -39,8 +39,12 @@ class MiniMaxH3RotaryPosEmbed(nn.Module):
         self.register_buffer("inv_freq", inv_freq, persistent=False)
 
     def forward(self, position_ids: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Build rotary tensors on the device that owns the packed positions."""
         position_ids = position_ids.to(torch.float32)
-        freqs = position_ids.unsqueeze(-1) * self.inv_freq.view(1, 1, -1)
+        # Analytic rotary positional embedding (RoPE) state is non-persistent,
+        # so runtime coordinates own the device after loading or state offload.
+        inv_freq = self.inv_freq.to(position_ids.device)
+        freqs = position_ids.unsqueeze(-1) * inv_freq.view(1, 1, -1)
         freqs_t, freqs_h, freqs_w = freqs.unbind(dim=1)
         freqs = torch.cat((freqs_t, freqs_h, freqs_w), dim=-1)
         freqs = torch.cat((freqs, freqs), dim=-1)
@@ -448,7 +452,14 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
     })
 
     def _get_parameter_dtype(self, name: str, default_dtype: torch.dtype) -> torch.dtype:
-        """Keep the released input, timestep, and output projections in FP32."""
+        """Select a uniform Fully Sharded Data Parallel dtype or H3's inference dtype.
+
+        FastVideo's Fully Sharded Data Parallel loading path requires one dtype
+        for every trainable parameter. H3 inference preserves FP32 input, timestep,
+        and output projections because those boundaries are part of its numerical policy.
+        """
+        if self.config.uniform_parameter_dtype:
+            return default_dtype
         return torch.float32 if name.split(".", 1)[0] in self._keep_in_fp32_modules else default_dtype
 
     def __init__(self, config: MiniMaxH3Config, hf_config: dict[str, Any]) -> None:
@@ -556,9 +567,14 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         device: torch.device,
         dtype: torch.dtype | None = None,
     ) -> None:
-        """Rebuild analytic RoPE state after meta-device checkpoint loading."""
+        """Rebuild analytic RoPE state on the checkpoint loader device.
+
+        RoPE frequencies are absent from the checkpoint, so meta-device model
+        construction and device moves must derive the buffer from architecture
+        fields before the first forward pass.
+        """
         del dtype
-        if self.rope.inv_freq.is_meta:
+        if self.rope.inv_freq.is_meta or self.rope.inv_freq.device != device:
             arch = self.config.arch_config
             inv_freq = 1.0 / (
                 arch.rope_theta

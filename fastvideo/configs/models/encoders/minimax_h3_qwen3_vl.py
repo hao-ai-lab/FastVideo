@@ -65,6 +65,9 @@ class MiniMaxH3Qwen3VLArchConfig(TextEncoderArchConfig):
     num_attention_heads: int = 64
     num_key_value_heads: int = 8
     head_dim: int = 128
+    # H3 text conditioning truncates at 1,024 tokens. The parquet loader reads
+    # the same field when padding stored embeddings and attention masks.
+    text_len: int = 1024
     hidden_act: str = "silu"
     max_position_embeddings: int = 262144
     initializer_range: float = 0.02
