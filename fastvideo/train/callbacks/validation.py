@@ -711,12 +711,11 @@ class ValidationCallback(Callback):
         audio_waveforms: list[torch.Tensor | np.ndarray | None] | None = None,
         audio_sample_rates: list[int | None] | None = None,
     ) -> _SavedValidationVideos:
-        """Save aligned validation media and include every supplied waveform.
+        """Save aligned validation media and skip artifacts that fail encoding.
 
-        Audio-bearing outputs require a complete audio-video MP4 because a
-        silent fallback would invalidate multimodal validation. Video-only
-        outputs use best-effort logging so one failed artifact does not stop
-        training.
+        Audio and sample-rate metadata must pass the alignment checks before
+        encoding. Media writer failures are logged and omitted so validation
+        artifact creation does not interrupt the training loop.
         """
         if (audio_waveforms is None) != (audio_sample_rates is None):
             raise ValueError("Validation audio waveforms and sample rates must be provided together.")
@@ -747,18 +746,10 @@ class ValidationCallback(Callback):
                     audio_sample_rate=audio_sample_rate,
                 )
             except Exception as exc:
-                if audio is not None:
-                    logger.exception(
-                        "Failed to preserve audio in validation MP4 %s on rank %s: %s",
-                        fname,
-                        self.global_rank,
-                        exc,
-                    )
-                    raise
-                # Video-only validation remains useful when one optional
-                # artifact fails to encode, so the remaining files are logged.
+                # Validation media is diagnostic output, so one failed write
+                # must not terminate training or prevent later artifact writes.
                 logger.exception(
-                    "Failed to save validation video %s on rank %s; skipping artifact: %s",
+                    "Failed to save validation media %s on rank %s; skipping artifact: %s",
                     fname,
                     self.global_rank,
                     exc,

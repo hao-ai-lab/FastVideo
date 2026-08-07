@@ -870,33 +870,44 @@ class TestActionOverlay:
         assert encoded_audio[1][0] is waveforms[1]
         assert [sample_rate for _, sample_rate in encoded_audio] == [32_000, 32_000]
 
-    def test_save_validation_videos_raises_on_audio_encode_failure(
+    def test_save_validation_videos_skips_audio_encode_failure(
         self,
         tmp_path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Verify a MiniMax H3 audio encoding failure stops the validation event."""
+        """Verify an audio encoding failure is omitted without stopping later writes."""
         cb = _make_callback()
         cb.global_rank = 0
+        calls: list[str] = []
 
-        def fail_audio_encode(*args, **kwargs) -> None:
-            raise RuntimeError("AAC unavailable")
+        def fail_first_audio_encode(fname: str, *args, **kwargs) -> None:
+            """Leave one incomplete file before allowing the second write."""
+            del args, kwargs
+            calls.append(fname)
+            if len(calls) == 1:
+                with open(fname, "wb") as incomplete_file:
+                    incomplete_file.write(b"incomplete")
+                raise RuntimeError("AAC unavailable")
 
         monkeypatch.setattr(
             "fastvideo.train.callbacks.validation.write_validation_mp4",
-            fail_audio_encode,
+            fail_first_audio_encode,
         )
 
-        with pytest.raises(RuntimeError, match="AAC unavailable"):
-            cb._save_validation_videos(
-                [[np.zeros((2, 2, 3), dtype=np.uint8)]],
-                output_dir=str(tmp_path),
-                step=0,
-                num_inference_steps=50,
-                fps=24,
-                audio_waveforms=[torch.zeros(32, 2)],
-                audio_sample_rates=[32_000],
-            )
+        saved = cb._save_validation_videos(
+            [[np.zeros((2, 2, 3), dtype=np.uint8)]] * 2,
+            output_dir=str(tmp_path),
+            step=0,
+            num_inference_steps=50,
+            fps=24,
+            audio_waveforms=[torch.zeros(32, 2)] * 2,
+            audio_sample_rates=[32_000, 32_000],
+        )
+
+        assert saved.indices == [1]
+        assert saved.audio_video_count == 1
+        assert len(calls) == 2
+        assert not (tmp_path / "validation_step_0_inference_steps_50_rank_0_video_0.mp4").exists()
 
     def test_post_process_validation_frames_uses_student_hook(self) -> None:
         cb = _make_callback(overlay_actions=True)
