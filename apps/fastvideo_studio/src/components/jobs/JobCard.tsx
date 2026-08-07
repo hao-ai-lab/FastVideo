@@ -152,17 +152,15 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
         type="button"
         aria-pressed={isSelected}
         onClick={handleSelectJob}
-        className="flex w-full min-w-0 items-center gap-2 rounded-md text-left"
+        className="flex w-full min-w-0 flex-col gap-1 rounded-md text-left"
       >
+        <span className="flex w-full min-w-0 items-center gap-2">
         <span className="shrink-0 text-sm font-semibold text-foreground">
           {job.model_id}
         </span>
         <Badge variant={BADGE_VARIANTS[job.status] ?? 'secondary'}>
           {job.status}
         </Badge>
-        <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-muted-foreground">
-          {job.prompt}
-        </span>
         <span className="ml-auto flex shrink-0 items-center gap-3 text-xs text-muted-foreground">
           {job.job_type === 'inference' ? (
             <>
@@ -180,6 +178,10 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
               {elapsedTime}
             </span>
           )}
+        </span>
+        </span>
+        <span className="w-full whitespace-pre-wrap break-words text-xs text-muted-foreground">
+          {job.prompt}
         </span>
       </button>
       <div className="flex flex-wrap items-center gap-1.5">
