@@ -354,10 +354,11 @@ export interface GeneratorInfo {
 	vsa_sparsity: number;
 	tp_size: number;
 	sp_size: number;
-	error?: string | null;
+	error: string | null;
 	started_at?: number;
 }
 
+/** The single resident slot: [] when nothing is loaded, else one entry. */
 export async function listGenerators(): Promise<GeneratorInfo[]> {
 	const baseApiUrl = getApiBaseUrl();
 	const response = await fetch(`${baseApiUrl}/generators`);
@@ -387,14 +388,11 @@ export async function preloadGenerator(
 	return response.json();
 }
 
-export async function unloadGenerator(req: GeneratorRequest): Promise<void> {
+/** Unload the single resident generator (no body — there is only one slot). */
+export async function unloadGenerator(): Promise<void> {
 	const baseApiUrl = getApiBaseUrl();
 	const response = await fetch(`${baseApiUrl}/generators/unload`, {
 		method: "POST",
-		headers: {
-			"Content-Type": "application/json",
-		},
-		body: JSON.stringify(req),
 	});
 	if (!response.ok) {
 		const error = await response
@@ -402,6 +400,26 @@ export async function unloadGenerator(req: GeneratorRequest): Promise<void> {
 			.catch(() => ({ detail: "Failed to unload model" }));
 		throw new Error(error.detail || "Failed to unload model");
 	}
+}
+
+// --- Engine logs ---
+
+export interface EngineLogs {
+	lines: string[];
+	total: number;
+}
+
+/**
+ * Incremental tail of the engine's stdout/stderr. Poll with
+ * `after=<total from the previous response>`.
+ */
+export async function getEngineLogs(after: number = 0): Promise<EngineLogs> {
+	const baseApiUrl = getApiBaseUrl();
+	const response = await fetch(`${baseApiUrl}/engine/logs?after=${after}`);
+	if (!response.ok) {
+		throw new Error("Failed to fetch engine logs");
+	}
+	return response.json();
 }
 
 // --- Datasets ---

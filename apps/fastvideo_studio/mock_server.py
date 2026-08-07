@@ -90,8 +90,10 @@ _DEFAULT_SETTINGS: dict[str, Any] = {
 _state_lock = threading.Lock()
 _settings: dict[str, Any] = dict(_DEFAULT_SETTINGS)
 _jobs: dict[str, dict[str, Any]] = {}
-# GeneratorRequest field values (as a tuple) -> preload/resident state dict.
-_generators: dict[tuple, dict[str, Any]] = {}
+# The engine's single model slot: None when empty, else the state dict.
+_generator_slot: dict[str, Any] | None = None
+# Fake engine stdout/stderr tail; grows a little on every poll.
+_engine_log_lines: list[str] = ["[engine] FastVideo studio mock engine started"]
 _datasets: dict[str, dict[str, Any]] = {}
 # dataset_id -> {"file_names": [...], "captions": {file_name: caption}}
 _dataset_files: dict[str, dict[str, Any]] = {}
@@ -577,10 +579,6 @@ def download_log(job_id: str) -> PlainTextResponse:
 # --- Generators (warm models) -------------------------------------------------
 
 
-def _generator_key(req: GeneratorRequest) -> tuple:
-    return tuple(req.model_dump().values())
-
-
 def _advance_generator(entry: dict[str, Any]) -> None:
     """Flip a loading generator to ready once enough wall-clock time has passed.
 
@@ -591,45 +589,77 @@ def _advance_generator(entry: dict[str, Any]) -> None:
         entry["state"] = "ready"
 
 
+def _running_inference_ids() -> list[str]:
+    return [
+        j["id"] for j in _jobs.values() if j.get("job_type") == "inference" and _public_job(j)["status"] == "running"
+    ]
+
+
 @app.get("/api/generators")
 def list_generators() -> list[dict[str, Any]]:
     with _state_lock:
-        for entry in _generators.values():
-            _advance_generator(entry)
-        return [dict(entry) for entry in _generators.values()]
+        if _generator_slot is None:
+            return []
+        _advance_generator(_generator_slot)
+        return [dict(_generator_slot)]
 
 
 @app.post("/api/generators/preload", status_code=202)
 def preload_generator(req: GeneratorRequest) -> dict[str, Any]:
+    global _generator_slot
     valid_ids = {m["id"] for m in _models_for(None)}
     if req.model_id not in valid_ids:
         raise HTTPException(
             status_code=400,
             detail=f"Unknown model_id '{req.model_id}'. Valid options: {sorted(valid_ids)}",
         )
-    key = _generator_key(req)
     with _state_lock:
-        entry = _generators.get(key)
-        if entry is None:
-            entry = {"state": "loading", "started_at": time.time(), "error": None, **req.model_dump()}
-            _generators[key] = entry
-        else:
-            _advance_generator(entry)
-        return dict(entry)
+        if _generator_slot is not None:
+            _advance_generator(_generator_slot)
+            if _generator_slot["state"] == "loading":
+                raise HTTPException(status_code=409, detail="a model load is already in progress")
+            if _generator_slot["state"] == "ready" and all(
+                    _generator_slot.get(k) == v for k, v in req.model_dump().items()):
+                return dict(_generator_slot)
+        running = _running_inference_ids()
+        if running:
+            raise HTTPException(status_code=409,
+                                detail=f"cannot swap models while inference jobs are running: {running}")
+        # Loading a new model always replaces (releases) the resident one.
+        _generator_slot = {"state": "loading", "started_at": time.time(), "error": None, **req.model_dump()}
+        return dict(_generator_slot)
 
 
 @app.post("/api/generators/unload")
-def unload_generator(req: GeneratorRequest) -> dict[str, Any]:
+def unload_generator() -> dict[str, Any]:
+    global _generator_slot
     with _state_lock:
-        running = [
-            j["id"] for j in _jobs.values()
-            if j.get("job_type") == "inference" and _public_job(j)["status"] == "running"
-        ]
+        if _generator_slot is not None:
+            _advance_generator(_generator_slot)
+            if _generator_slot["state"] == "loading":
+                raise HTTPException(status_code=409, detail="cannot unload while a model load is in progress")
+        if _generator_slot is None:
+            raise HTTPException(status_code=404, detail="No model is loaded")
+        running = _running_inference_ids()
         if running:
             raise HTTPException(status_code=409, detail=f"cannot unload while inference jobs are running: {running}")
-        if _generators.pop(_generator_key(req), None) is None:
-            raise HTTPException(status_code=404, detail="No such resident generator")
+        _generator_slot = None
     return {"unloaded": True}
+
+
+# --- Engine logs --------------------------------------------------------------
+
+
+@app.get("/api/engine/logs")
+def engine_logs(after: int = 0) -> dict[str, Any]:
+    """Growing fake tail of the engine's stdout/stderr: every poll appends a
+    couple of lines so the console visibly streams."""
+    with _state_lock:
+        n = len(_engine_log_lines)
+        _engine_log_lines.append(f"[engine] step {n}: worker heartbeat ok")
+        _engine_log_lines.append(f"[engine] step {n + 1}: gpu mem {random.randint(20, 80)}% used")
+        total = len(_engine_log_lines)
+        return {"lines": _engine_log_lines[max(0, after):], "total": total}
 
 
 # --- Datasets ---------------------------------------------------------------

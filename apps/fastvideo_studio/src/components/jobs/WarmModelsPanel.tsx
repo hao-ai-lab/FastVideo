@@ -13,7 +13,6 @@ import {
   preloadGenerator,
   unloadGenerator,
   type GeneratorInfo,
-  type GeneratorRequest,
   type Model,
 } from '@/lib/api';
 import { getDefaultModelForWorkload } from '@/lib/defaultOptions';
@@ -40,24 +39,6 @@ function configSummary(gen: GeneratorInfo): string {
   return parts.join(' · ');
 }
 
-// The identifying engine subset of a listed generator (the unload payload).
-function toRequest(gen: GeneratorInfo): GeneratorRequest {
-  return {
-    model_id: gen.model_id,
-    workload_type: gen.workload_type,
-    num_gpus: gen.num_gpus,
-    dit_cpu_offload: gen.dit_cpu_offload,
-    text_encoder_cpu_offload: gen.text_encoder_cpu_offload,
-    vae_cpu_offload: gen.vae_cpu_offload,
-    image_encoder_cpu_offload: gen.image_encoder_cpu_offload,
-    use_fsdp_inference: gen.use_fsdp_inference,
-    enable_torch_compile: gen.enable_torch_compile,
-    vsa_sparsity: gen.vsa_sparsity,
-    tp_size: gen.tp_size,
-    sp_size: gen.sp_size,
-  };
-}
-
 const STATE_VARIANTS: Record<GeneratorInfo['state'], BadgeProps['variant']> = {
   ready: 'success',
   loading: 'warning',
@@ -65,37 +46,38 @@ const STATE_VARIANTS: Record<GeneratorInfo['state'], BadgeProps['variant']> = {
 };
 
 /**
- * Utility strip for keeping inference models resident in GPU memory: lists
- * the warm (or loading/failed) generators, preloads the selected model using
- * the persisted default job options, and unloads warm models on demand.
+ * Utility strip for the engine's single model slot: shows the resident model
+ * (ready/loading/failed), loads the selected model using the persisted
+ * default job options (replacing whatever is resident), and unloads it.
  */
 export default function WarmModelsPanel() {
   const { options } = useStore(defaultOptionsStore);
 
-  const [generators, setGenerators] = React.useState<GeneratorInfo[]>([]);
+  const [slot, setSlot] = React.useState<GeneratorInfo | null>(null);
   const [models, setModels] = React.useState<Model[]>([]);
   const [modelId, setModelId] = React.useState('');
   const [isBusy, setIsBusy] = React.useState(false);
 
-  const fetchGenerators = React.useCallback(async () => {
+  const fetchSlot = React.useCallback(async () => {
     try {
-      setGenerators(await listGenerators());
+      const list = await listGenerators();
+      setSlot(list[0] ?? null);
     } catch (e) {
       console.error('Failed to fetch generators:', e);
     }
   }, []);
 
   React.useEffect(() => {
-    fetchGenerators();
-  }, [fetchGenerators]);
+    fetchSlot();
+  }, [fetchSlot]);
 
-  // Poll every 5s while any preload is in flight; stop otherwise.
-  const anyLoading = generators.some((g) => g.state === 'loading');
+  // Poll every 5s while a load is in flight; stop otherwise.
+  const isLoading = slot?.state === 'loading';
   React.useEffect(() => {
-    if (!anyLoading) return;
-    const interval = setInterval(fetchGenerators, 5000);
+    if (!isLoading) return;
+    const interval = setInterval(fetchSlot, 5000);
     return () => clearInterval(interval);
-  }, [anyLoading, fetchGenerators]);
+  }, [isLoading, fetchSlot]);
 
   // Same model catalogue (and default selection) as the create-job modal.
   React.useEffect(() => {
@@ -115,8 +97,8 @@ export default function WarmModelsPanel() {
       .catch((e) => console.error('Failed to load models:', e));
   }, []);
 
-  async function handlePreload() {
-    if (!modelId || isBusy) return;
+  async function handleLoad() {
+    if (!modelId || isBusy || isLoading) return;
     setIsBusy(true);
     try {
       await preloadGenerator({
@@ -133,10 +115,10 @@ export default function WarmModelsPanel() {
         tp_size: options.tpSize,
         sp_size: options.spSize,
       });
-      await fetchGenerators();
+      await fetchSlot();
     } catch (err) {
-      console.error('Failed to preload model:', err);
-      toast.error('Model was not preloaded', {
+      console.error('Failed to load model:', err);
+      toast.error('Model was not loaded', {
         description:
           err instanceof Error
             ? err.message
@@ -147,12 +129,12 @@ export default function WarmModelsPanel() {
     }
   }
 
-  async function handleUnload(gen: GeneratorInfo) {
+  async function handleUnload() {
     if (isBusy) return;
     setIsBusy(true);
     try {
-      await unloadGenerator(toRequest(gen));
-      await fetchGenerators();
+      await unloadGenerator();
+      await fetchSlot();
     } catch (err) {
       console.error('Failed to unload model:', err);
       toast.error('Model was not unloaded', {
@@ -166,6 +148,9 @@ export default function WarmModelsPanel() {
     }
   }
 
+  // Loading a model always replaces the resident one — say so on the button.
+  const replaces = slot !== null && !!modelId && slot.model_id !== modelId;
+
   return (
     <section
       aria-label="Warm models"
@@ -174,10 +159,10 @@ export default function WarmModelsPanel() {
       <div className="flex flex-col gap-3 rounded-lg border border-border bg-background p-4">
         <div className="flex flex-wrap items-center gap-2">
           <h2 className="mr-auto text-sm font-semibold text-foreground">
-            Warm Models
+            Warm Model
           </h2>
           <label htmlFor="warm-model-select" className="sr-only">
-            Model to preload
+            Model to load
           </label>
           <NativeSelect
             id="warm-model-select"
@@ -197,55 +182,55 @@ export default function WarmModelsPanel() {
           </NativeSelect>
           <Button
             size="sm"
-            onClick={handlePreload}
-            disabled={isBusy || !modelId}
+            onClick={handleLoad}
+            disabled={isBusy || !modelId || isLoading}
           >
-            Preload model
+            {replaces ? 'Load (replaces current)' : 'Load model'}
           </Button>
         </div>
         <p className="text-xs text-muted-foreground">
-          Keeps the model resident in GPU memory so jobs skip the load wait
-          (uses your default job options).
+          One model at a time stays resident in GPU memory so jobs skip the
+          load wait; loading a new one replaces it (uses your default job
+          options).
         </p>
-        {generators.length > 0 && (
-          <ul className="flex flex-col gap-2">
-            {generators.map((gen) => (
-              <li
-                key={JSON.stringify(toRequest(gen))}
-                className="flex min-h-8 flex-wrap items-center gap-2"
+        <div className="flex min-h-8 flex-wrap items-center gap-2">
+          {slot ? (
+            <>
+              <Badge
+                variant={STATE_VARIANTS[slot.state]}
+                className={
+                  slot.state === 'loading' ? 'animate-pulse' : undefined
+                }
+                title={
+                  slot.state === 'failed' ? (slot.error ?? undefined) : undefined
+                }
               >
-                <Badge
-                  variant={STATE_VARIANTS[gen.state]}
-                  className={
-                    gen.state === 'loading' ? 'animate-pulse' : undefined
-                  }
-                  title={
-                    gen.state === 'failed' ? (gen.error ?? undefined) : undefined
-                  }
+                {slot.state}
+              </Badge>
+              <span className="text-sm font-medium text-foreground">
+                {modelLabel(slot.model_id)}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {configSummary(slot)}
+              </span>
+              {slot.state === 'ready' && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="ml-auto"
+                  onClick={handleUnload}
+                  disabled={isBusy}
                 >
-                  {gen.state}
-                </Badge>
-                <span className="text-sm font-medium text-foreground">
-                  {modelLabel(gen.model_id)}
-                </span>
-                <span className="text-xs text-muted-foreground">
-                  {configSummary(gen)}
-                </span>
-                {gen.state === 'ready' && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="ml-auto"
-                    onClick={() => handleUnload(gen)}
-                    disabled={isBusy}
-                  >
-                    Unload
-                  </Button>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
+                  Unload
+                </Button>
+              )}
+            </>
+          ) : (
+            <span className="text-sm text-muted-foreground">
+              No model loaded
+            </span>
+          )}
+        </div>
       </div>
     </section>
   );
