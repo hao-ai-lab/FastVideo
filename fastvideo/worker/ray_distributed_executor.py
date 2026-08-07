@@ -385,6 +385,16 @@ class RayDistributedExecutor(Executor):
             ray.kill(worker)
 
         self.workers = []
+        # Killing the actors does not release the placement group — without
+        # this, the GPUs stay reserved and no new engine can ever schedule
+        # in the same ray cluster.
+        pg = getattr(self.fastvideo_args, "ray_placement_group", None)
+        if pg is not None:
+            try:
+                ray.util.remove_placement_group(pg)
+            except Exception:  # noqa: BLE001 -- already-removed / cluster gone
+                logger.warning("Failed to remove ray placement group", exc_info=True)
+            self.fastvideo_args.ray_placement_group = None
 
     def __del__(self):
         self.shutdown()

@@ -259,12 +259,14 @@ class JobRunner:
         self._jobs_lock = threading.Lock()
         self._load_jobs()
 
-        # Cache of loaded generators keyed by model config so that we only pay
-        # the model-loading cost once per model configuration.
-        self._generators: dict[tuple, Any] = {}
-        self._generators_lock = threading.Lock()
-        # Explicit preloads in flight/failed, keyed like _generators.
-        self._preloads: dict[tuple, dict[str, Any]] = {}
+        # Exactly one generator lives in memory at a time. Loading a new
+        # config always releases the old instance first (shutdown + placement
+        # group teardown); unload deletes it outright.
+        self._generator: Any | None = None
+        self._generator_config: dict[str, Any] | None = None
+        self._generator_state: str = "empty"  # empty | loading | ready | failed
+        self._generator_error: str | None = None
+        self._generator_lock = threading.Lock()
 
         # Shared Manager for log queues (avoids spawning a new process per job)
         self._mp_manager = get_mp_context().Manager()
@@ -620,7 +622,7 @@ class JobRunner:
         }
 
     @staticmethod
-    def _generator_cache_key(
+    def _generator_config_dict(
         model_id: str,
         workload_type: str,
         num_gpus: int,
@@ -633,88 +635,146 @@ class JobRunner:
         vsa_sparsity: float = 0.0,
         tp_size: int = -1,
         sp_size: int = -1,
-    ) -> tuple:
-        return (
-            model_id,
-            workload_type,
-            num_gpus,
-            dit_cpu_offload,
-            text_encoder_cpu_offload,
-            vae_cpu_offload,
-            image_encoder_cpu_offload,
-            use_fsdp_inference,
-            enable_torch_compile,
-            vsa_sparsity,
-            tp_size,
-            sp_size,
-        )
+    ) -> dict[str, Any]:
+        """Canonical engine-config dict; equality here == same generator."""
+        return {
+            "model_id": model_id,
+            "workload_type": workload_type,
+            "num_gpus": num_gpus,
+            "dit_cpu_offload": dit_cpu_offload,
+            "text_encoder_cpu_offload": text_encoder_cpu_offload,
+            "vae_cpu_offload": vae_cpu_offload,
+            "image_encoder_cpu_offload": image_encoder_cpu_offload,
+            "use_fsdp_inference": use_fsdp_inference,
+            "enable_torch_compile": enable_torch_compile,
+            "vsa_sparsity": vsa_sparsity,
+            "tp_size": tp_size,
+            "sp_size": sp_size,
+        }
 
-    @staticmethod
-    def _generator_key_dict(key: tuple) -> dict[str, Any]:
-        names = ("model_id", "workload_type", "num_gpus", "dit_cpu_offload",
-                 "text_encoder_cpu_offload", "vae_cpu_offload",
-                 "image_encoder_cpu_offload", "use_fsdp_inference",
-                 "enable_torch_compile", "vsa_sparsity", "tp_size", "sp_size")
-        return dict(zip(names, key, strict=True))
+    def _slot_entry(self) -> dict[str, Any]:
+        return {
+            "state": self._generator_state,
+            "error": self._generator_error,
+            **(self._generator_config or {}),
+        }
+
+    def _running_inference_jobs(self) -> list[str]:
+        with self._jobs_lock:
+            return [j.id for j in self._jobs.values()
+                    if j.status == JobStatus.RUNNING and j.job_type == "inference"]
+
+    def _release_generator(self) -> None:
+        """Shut down and delete the resident generator (caller holds no lock)."""
+        with self._generator_lock:
+            gen = self._generator
+            self._generator = None
+            self._generator_state = "empty"
+            self._generator_config = None
+            self._generator_error = None
+        if gen is not None:
+            logger.info("Releasing resident generator")
+            gen.shutdown()
+            del gen
 
     def preload_generator(self, **params: Any) -> dict[str, Any]:
-        """Load a generator into the cache without running a job, so the first
-        generation doesn't pay the model load. Returns the preload state dict
-        (state: loading | ready | failed)."""
-        key = self._generator_cache_key(**params)
-        with self._generators_lock:
-            if key in self._generators:
-                return {"state": "ready", **self._generator_key_dict(key)}
-            entry = self._preloads.get(key)
-            if entry is not None and entry["state"] == "loading":
-                return entry
-            entry = {
-                "state": "loading",
-                "started_at": time.time(),
-                "error": None,
-                **self._generator_key_dict(key),
-            }
-            self._preloads[key] = entry
+        """Load a model into memory ahead of time. One load at a time; loading
+        a different config always releases the current instance first."""
+        config = self._generator_config_dict(**params)
+        with self._generator_lock:
+            if self._generator_state == "loading":
+                raise RuntimeError("a model load is already in progress")
+            if self._generator_state == "ready" and self._generator_config == config:
+                return self._slot_entry()
+            if self._running_inference_jobs():
+                raise RuntimeError("cannot swap models while inference jobs are running")
+            self._generator_state = "loading"
+            self._generator_config = config
+            self._generator_error = None
+            entry = self._slot_entry()
 
         def _load() -> None:
             try:
-                self._get_or_create_generator(**params)
-                entry["state"] = "ready"
+                self._create_generator_into_slot(config)
             except Exception as exc:  # noqa: BLE001 -- surfaced via the API
-                logger.exception("Preload failed for %s", params.get("model_id"))
-                entry["state"] = "failed"
-                entry["error"] = str(exc)
+                logger.exception("Preload failed for %s", config["model_id"])
+                with self._generator_lock:
+                    self._generator_state = "failed"
+                    self._generator_error = str(exc)
 
         threading.Thread(target=_load, daemon=True, name="generator-preload").start()
         return entry
 
-    def list_generators(self) -> list[dict[str, Any]]:
-        """Resident generators plus preloads in flight or failed."""
-        out: list[dict[str, Any]] = []
-        with self._generators_lock:
-            resident = set(self._generators)
-            for key in resident:
-                out.append({"state": "ready", **self._generator_key_dict(key)})
-            for key, entry in self._preloads.items():
-                if key not in resident and entry["state"] != "ready":
-                    out.append(entry)
-        return out
+    def _create_generator_into_slot(self, config: dict[str, Any]) -> Any:
+        """Release whatever is resident, load ``config``, make it THE instance."""
+        with self._generator_lock:
+            gen = self._generator
+            self._generator = None
+        if gen is not None:
+            logger.info("Releasing resident generator before loading a new one")
+            gen.shutdown()
+            del gen
 
-    def unload_generator(self, **params: Any) -> bool:
-        """Shut down a cached generator and free its GPU memory. Refuses while
-        any inference job is running (the job may be using it)."""
-        with self._jobs_lock:
-            running = [j.id for j in self._jobs.values()
-                       if j.status == JobStatus.RUNNING and j.job_type == "inference"]
+        # Import lazily so starting the server is fast even without a GPU.
+        from fastvideo import VideoGenerator
+
+        # Deployment-level knobs (set where the API server is launched):
+        # FASTVIDEO_STUDIO_MODEL_PATHS="id=/local/dir,..." serves a registered
+        # model id from local weights instead of the HF hub;
+        # FASTVIDEO_STUDIO_EXECUTOR_BACKEND=ray runs workers on an existing
+        # Ray cluster (the multi-node path — "mp" spawns local processes only).
+        model_path = config["model_id"]
+        for pair in os.environ.get("FASTVIDEO_STUDIO_MODEL_PATHS", "").split(","):
+            mid, sep, path = pair.partition("=")
+            if sep and mid.strip() == config["model_id"]:
+                model_path = path.strip()
+        executor_kwargs: dict[str, Any] = {}
+        backend = os.environ.get("FASTVIDEO_STUDIO_EXECUTOR_BACKEND")
+        if backend:
+            executor_kwargs["distributed_executor_backend"] = backend
+
+        logger.info("Loading model %s (%s)", config["model_id"],
+                    ", ".join(f"{k}={v}" for k, v in config.items() if k != "model_id"))
+        new_gen = VideoGenerator.from_pretrained(
+            model_path,
+            workload_type=config["workload_type"],
+            num_gpus=config["num_gpus"],
+            dit_cpu_offload=config["dit_cpu_offload"],
+            text_encoder_cpu_offload=config["text_encoder_cpu_offload"],
+            vae_cpu_offload=config["vae_cpu_offload"],
+            image_encoder_cpu_offload=config["image_encoder_cpu_offload"],
+            use_fsdp_inference=config["use_fsdp_inference"],
+            enable_torch_compile=config["enable_torch_compile"],
+            VSA_sparsity=config["vsa_sparsity"],
+            tp_size=config["tp_size"],
+            sp_size=config["sp_size"],
+            **executor_kwargs,
+        )
+        with self._generator_lock:
+            self._generator = new_gen
+            self._generator_config = config
+            self._generator_state = "ready"
+            self._generator_error = None
+        return new_gen
+
+    def list_generators(self) -> list[dict[str, Any]]:
+        """The resident slot, or empty when nothing is loaded."""
+        with self._generator_lock:
+            if self._generator_state == "empty":
+                return []
+            return [self._slot_entry()]
+
+    def unload_generator(self, **_ignored: Any) -> bool:
+        """Shut down and delete the resident generator, freeing GPU memory."""
+        with self._generator_lock:
+            if self._generator_state == "loading":
+                raise RuntimeError("cannot unload while a model load is in progress")
+            if self._generator_state == "empty":
+                return False
+        running = self._running_inference_jobs()
         if running:
             raise RuntimeError(f"cannot unload while inference jobs are running: {running}")
-        key = self._generator_cache_key(**params)
-        with self._generators_lock:
-            gen = self._generators.pop(key, None)
-            self._preloads.pop(key, None)
-        if gen is None:
-            return False
-        gen.shutdown()
+        self._release_generator()
         return True
 
     def _get_or_create_generator(
@@ -733,7 +793,10 @@ class JobRunner:
         sp_size: int = -1,
         log_queue: mp.Queue | None = None,
     ) -> Any:
-        cache_key = self._generator_cache_key(
+        """Return the resident generator if the config matches; otherwise
+        replace the slot (waiting out an in-flight preload first)."""
+        del log_queue  # single-slot generators log via the engine tee
+        config = self._generator_config_dict(
             model_id=model_id,
             workload_type=workload_type,
             num_gpus=num_gpus,
@@ -747,72 +810,21 @@ class JobRunner:
             tp_size=tp_size,
             sp_size=sp_size,
         )
+        # A preload may be in flight (possibly for exactly this config): wait
+        # for it rather than racing it for the GPUs.
+        deadline = time.time() + 3600
+        while time.time() < deadline:
+            with self._generator_lock:
+                state = self._generator_state
+                if state != "loading":
+                    if state == "ready" and self._generator_config == config:
+                        return self._generator
+                    break
+            time.sleep(1.0)
+        else:
+            raise RuntimeError("timed out waiting for the in-flight model load")
 
-        # Generators are cached by model_id and configuration parameters
-        with self._generators_lock:
-            if cache_key in self._generators:
-                return self._generators[cache_key]
-
-        # Import lazily so starting the server is fast even without a GPU.
-        from fastvideo import VideoGenerator
-
-        # Deployment-level knobs (set where the API server is launched):
-        # FASTVIDEO_STUDIO_MODEL_PATHS="id=/local/dir,..." serves a registered
-        # model id from local weights instead of the HF hub;
-        # FASTVIDEO_STUDIO_EXECUTOR_BACKEND=ray runs workers on an existing
-        # Ray cluster (the multi-node path — "mp" spawns local processes only).
-        model_path = model_id
-        for pair in os.environ.get("FASTVIDEO_STUDIO_MODEL_PATHS", "").split(","):
-            mid, sep, path = pair.partition("=")
-            if sep and mid.strip() == model_id:
-                model_path = path.strip()
-        executor_kwargs: dict[str, Any] = {}
-        backend = os.environ.get("FASTVIDEO_STUDIO_EXECUTOR_BACKEND")
-        if backend:
-            executor_kwargs["distributed_executor_backend"] = backend
-
-        logger.info(
-            "Loading model %s (workload=%s, num_gpus=%d, offloads: "
-            "dit=%s text_encoder=%s vae=%s image_encoder=%s, fsdp=%s, "
-            "torch_compile=%s, vsa_sparsity=%.2f, tp=%d sp=%d) …",
-            model_id,
-            workload_type,
-            num_gpus,
-            dit_cpu_offload,
-            text_encoder_cpu_offload,
-            vae_cpu_offload,
-            image_encoder_cpu_offload,
-            use_fsdp_inference,
-            enable_torch_compile,
-            vsa_sparsity,
-            tp_size,
-            sp_size,
-        )
-
-        gen = VideoGenerator.from_pretrained(
-            model_path,
-            workload_type=workload_type,
-            num_gpus=num_gpus,
-            dit_cpu_offload=dit_cpu_offload,
-            text_encoder_cpu_offload=text_encoder_cpu_offload,
-            vae_cpu_offload=vae_cpu_offload,
-            image_encoder_cpu_offload=image_encoder_cpu_offload,
-            use_fsdp_inference=use_fsdp_inference,
-            enable_torch_compile=enable_torch_compile,
-            VSA_sparsity=vsa_sparsity,
-            tp_size=tp_size,
-            sp_size=sp_size,
-            log_queue=log_queue,
-            **executor_kwargs,
-        )
-
-        with self._generators_lock:
-            if cache_key not in self._generators:
-                self._generators[cache_key] = gen
-            else:  # Another thread may have created it while we were loading.
-                gen.shutdown()
-                gen = self._generators[cache_key]
-        return gen
+        return self._create_generator_into_slot(config)
 
     def _run_job(self, job: Job):
         if job.job_type == "inference":

@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for the resident-generator API: preload, list, unload.
+"""Tests for the single-slot resident generator: preload, list, unload.
 
-The generator itself is faked at the JobRunner boundary — these tests pin the
-cache/lifecycle contract (idempotent preload, state transitions, unload
-refusal while a job runs), not model loading.
+Exactly one VideoGenerator lives in memory. One load at a time; loading a new
+config always releases the old instance; unload deletes it. The generator is
+faked at the ``_create_generator_into_slot``/VideoGenerator boundary.
 """
 
 from __future__ import annotations
@@ -26,99 +26,187 @@ class _FakeGenerator:
 
 
 @pytest.fixture()
-def runner(tmp_path, monkeypatch):
+def runner():
     r = JobRunner.__new__(JobRunner)  # skip __init__: no DB/Manager needed
     r._jobs = {}
     r._jobs_lock = threading.Lock()
-    r._generators = {}
-    r._generators_lock = threading.Lock()
-    r._preloads = {}
+    r._generator = None
+    r._generator_config = None
+    r._generator_state = "empty"
+    r._generator_error = None
+    r._generator_lock = threading.Lock()
     return r
 
 
-def _wait_state(runner, model_id, state, timeout=5.0):
+def _install_fake_loader(runner, monkeypatch, made: list | None = None,
+                         gate: threading.Event | None = None,
+                         fail: str | None = None):
+    """Replace the VideoGenerator load inside _create_generator_into_slot."""
+    import fastvideo_studio.job_runner as jr
+
+    class _FakeVG:
+        @staticmethod
+        def from_pretrained(model_path, **kwargs):
+            if gate is not None:
+                assert gate.wait(5), "test gate never opened"
+            if fail is not None:
+                raise RuntimeError(fail)
+            gen = _FakeGenerator()
+            if made is not None:
+                made.append((model_path, gen))
+            return gen
+
+    monkeypatch.setitem(__import__("sys").modules, "fastvideo",
+                        SimpleNamespace(VideoGenerator=_FakeVG))
+    return jr
+
+
+def _wait_state(runner, state, timeout=5.0):
     deadline = time.time() + timeout
     while time.time() < deadline:
-        entries = [g for g in runner.list_generators() if g["model_id"] == model_id]
-        if entries and entries[0]["state"] == state:
-            return entries[0]
+        with runner._generator_lock:
+            if runner._generator_state == state:
+                return runner._slot_entry()
         time.sleep(0.02)
-    raise AssertionError(f"{model_id} never reached state {state}: {runner.list_generators()}")
+    raise AssertionError(f"never reached state {state}: {runner._generator_state}")
 
 
-def test_preload_loads_once_and_lists_ready(runner, monkeypatch):
-    created = []
+def test_preload_then_ready_then_idempotent(runner, monkeypatch):
+    made = []
+    _install_fake_loader(runner, monkeypatch, made=made)
 
-    def fake_create(self, **params):
-        gen = _FakeGenerator()
-        created.append(params["model_id"])
-        key = self._generator_cache_key(**params)
-        with self._generators_lock:
-            self._generators[key] = gen
-        return gen
+    entry = runner.preload_generator(model_id="org/a", workload_type="t2v", num_gpus=8)
+    assert entry["state"] in ("loading", "ready")
+    _wait_state(runner, "ready")
 
-    monkeypatch.setattr(JobRunner, "_get_or_create_generator", fake_create)
-
-    first = runner.preload_generator(model_id="org/model-a", workload_type="t2v", num_gpus=8)
-    # the loader thread may finish before we return; either state is legal here
-    assert first["state"] in ("loading", "ready")
-    ready = _wait_state(runner, "org/model-a", "ready")
-    assert ready["num_gpus"] == 8
-
-    # idempotent: preloading a resident config is an immediate ready, no reload
-    again = runner.preload_generator(model_id="org/model-a", workload_type="t2v", num_gpus=8)
+    again = runner.preload_generator(model_id="org/a", workload_type="t2v", num_gpus=8)
     assert again["state"] == "ready"
-    assert created == ["org/model-a"]
+    assert len(made) == 1  # same config never reloads
 
 
-def test_preload_failure_is_reported_not_raised(runner, monkeypatch):
-    def fake_create(self, **params):
-        raise RuntimeError("no CUDA on this box")
+def test_only_one_load_at_a_time(runner, monkeypatch):
+    gate = threading.Event()
+    _install_fake_loader(runner, monkeypatch, gate=gate)
 
-    monkeypatch.setattr(JobRunner, "_get_or_create_generator", fake_create)
-    entry = runner.preload_generator(model_id="org/broken", workload_type="t2v", num_gpus=1)
-    assert entry["state"] in ("loading", "failed")
-    failed = _wait_state(runner, "org/broken", "failed")
+    runner.preload_generator(model_id="org/a", workload_type="t2v", num_gpus=8)
+    with pytest.raises(RuntimeError, match="already in progress"):
+        runner.preload_generator(model_id="org/b", workload_type="t2v", num_gpus=8)
+    gate.set()
+    _wait_state(runner, "ready")
+
+
+def test_new_config_always_releases_old_instance(runner, monkeypatch):
+    made = []
+    _install_fake_loader(runner, monkeypatch, made=made)
+
+    runner.preload_generator(model_id="org/a", workload_type="t2v", num_gpus=8)
+    _wait_state(runner, "ready")
+    first = made[0][1]
+
+    runner.preload_generator(model_id="org/b", workload_type="t2v", num_gpus=8)
+    _wait_state(runner, "ready")
+    assert first.shutdown_calls == 1  # old instance released, not stacked
+    assert [m[0] for m in made] == ["org/a", "org/b"]
+    assert len(runner.list_generators()) == 1
+    assert runner.list_generators()[0]["model_id"] == "org/b"
+
+
+def test_failed_load_reports_error_and_allows_retry(runner, monkeypatch):
+    _install_fake_loader(runner, monkeypatch, fail="no CUDA on this box")
+    runner.preload_generator(model_id="org/broken", workload_type="t2v", num_gpus=1)
+    failed = _wait_state(runner, "failed")
     assert "no CUDA" in failed["error"]
-    # a failed preload must not leave a resident entry
-    assert all(g["state"] != "ready" for g in runner.list_generators())
+
+    # retry after failure must be accepted (this was the reported bug)
+    made = []
+    _install_fake_loader(runner, monkeypatch, made=made)
+    runner.preload_generator(model_id="org/broken", workload_type="t2v", num_gpus=1)
+    _wait_state(runner, "ready")
+    assert len(made) == 1
 
 
-def test_unload_shuts_down_and_removes(runner):
-    gen = _FakeGenerator()
-    key = runner._generator_cache_key(model_id="org/model-a", workload_type="t2v", num_gpus=8)
-    runner._generators[key] = gen
+def test_unload_deletes_instance(runner, monkeypatch):
+    made = []
+    _install_fake_loader(runner, monkeypatch, made=made)
+    runner.preload_generator(model_id="org/a", workload_type="t2v", num_gpus=8)
+    _wait_state(runner, "ready")
 
-    assert runner.unload_generator(model_id="org/model-a", workload_type="t2v", num_gpus=8) is True
-    assert gen.shutdown_calls == 1
+    assert runner.unload_generator() is True
+    assert made[0][1].shutdown_calls == 1
     assert runner.list_generators() == []
-    # second unload: nothing resident
-    assert runner.unload_generator(model_id="org/model-a", workload_type="t2v", num_gpus=8) is False
+    assert runner._generator is None
+    assert runner.unload_generator() is False  # nothing resident
 
 
-def test_unload_refuses_while_inference_job_runs(runner):
-    key = runner._generator_cache_key(model_id="org/model-a", workload_type="t2v", num_gpus=8)
-    gen = _FakeGenerator()
-    runner._generators[key] = gen
+def test_unload_refuses_while_inference_job_runs(runner, monkeypatch):
+    made = []
+    _install_fake_loader(runner, monkeypatch, made=made)
+    runner.preload_generator(model_id="org/a", workload_type="t2v", num_gpus=8)
+    _wait_state(runner, "ready")
     runner._jobs["j1"] = SimpleNamespace(id="j1", status=JobStatus.RUNNING, job_type="inference")
 
     with pytest.raises(RuntimeError, match="j1"):
-        runner.unload_generator(model_id="org/model-a", workload_type="t2v", num_gpus=8)
-    assert gen.shutdown_calls == 0  # still resident
+        runner.unload_generator()
+    assert made[0][1].shutdown_calls == 0
 
-    # training jobs don't block unload
-    runner._jobs["j1"].job_type = "finetune"
-    assert runner.unload_generator(model_id="org/model-a", workload_type="t2v", num_gpus=8) is True
+    runner._jobs["j1"].job_type = "finetune"  # training doesn't block
+    assert runner.unload_generator() is True
 
 
-def test_cache_key_matches_job_lookup_defaults(runner):
-    """A preload with GeneratorRequest defaults must hit the same cache slot a
-    job with CreateJobRequest defaults resolves to — else preloading is a lie."""
+def test_job_waits_for_matching_preload(runner, monkeypatch):
+    gate = threading.Event()
+    made = []
+    _install_fake_loader(runner, monkeypatch, made=made, gate=gate)
+
+    runner.preload_generator(model_id="org/a", workload_type="t2v", num_gpus=8)
+    got = []
+    t = threading.Thread(
+        target=lambda: got.append(
+            runner._get_or_create_generator("org/a", "t2v", 8)),
+        daemon=True)
+    t.start()
+    time.sleep(0.2)
+    assert not got  # job blocked on the in-flight load
+    gate.set()
+    t.join(5)
+    assert got and got[0] is made[0][1]
+    assert len(made) == 1  # the job reused the preloaded instance
+
+
+def test_job_with_different_config_replaces_slot(runner, monkeypatch):
+    made = []
+    _install_fake_loader(runner, monkeypatch, made=made)
+    runner.preload_generator(model_id="org/a", workload_type="t2v", num_gpus=8)
+    _wait_state(runner, "ready")
+
+    gen = runner._get_or_create_generator("org/b", "t2v", 4)
+    assert gen is made[1][1]
+    assert made[0][1].shutdown_calls == 1  # old released before new load
+    assert runner.list_generators()[0]["model_id"] == "org/b"
+
+
+def test_config_dict_matches_request_defaults(runner):
+    """GeneratorRequest defaults and CreateJobRequest defaults must resolve to
+    the same slot config — else preloading never matches the job."""
     from fastvideo_studio.models import CreateJobRequest, GeneratorRequest
 
     job = CreateJobRequest(model_id="m", prompt="p").model_dump()
     pre = GeneratorRequest(model_id="m").model_dump()
-    job_key = runner._generator_cache_key(
+    assert runner._generator_config_dict(**pre) == runner._generator_config_dict(
         **{k: job[k] for k in pre})
-    pre_key = runner._generator_cache_key(**pre)
-    assert job_key == pre_key
+
+
+def test_engine_log_buffer_incremental_tail():
+    from fastvideo_studio.server import _EngineLogBuffer
+
+    buf = _EngineLogBuffer(maxlen=3)
+    buf.write("a\nb\n")
+    buf.write("c")          # partial line: not visible yet
+    lines, total = buf.get_lines(0)
+    assert lines == ["a", "b"] and total == 2
+    buf.write("!\nd\ne\n")  # completes "c!", then overflows the ring
+    lines, total = buf.get_lines(total)
+    assert lines == ["c!", "d", "e"] and total == 5
+    # reader far behind: dropped lines are skipped, no crash
+    lines, _ = buf.get_lines(0)
+    assert lines == ["c!", "d", "e"]

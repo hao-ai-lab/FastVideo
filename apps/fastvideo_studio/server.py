@@ -34,8 +34,8 @@ from fastvideo.registry import (get_registered_model_paths, get_registered_model
 from fastvideo_studio.database import Database, _get_db_path
 from fastvideo_studio.gpu import get_gpu_snapshot
 from fastvideo_studio.job_runner import JobRunner, JobStatus
-from fastvideo_studio.models import (CreateDatasetRequest, CreateJobRequest, GeneratorRequest, SettingsUpdate, UpdateCaptionRequest,
-                                     model_label)
+from fastvideo_studio.models import (CreateDatasetRequest, CreateJobRequest, GeneratorRequest, SettingsUpdate,
+                                     UpdateCaptionRequest, model_label)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -44,6 +44,60 @@ logging.basicConfig(
 logger = logging.getLogger("fastvideo.studio.api")
 
 DEFAULT_OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "..", "outputs", "ui_jobs")
+
+class _EngineLogBuffer:
+    """Thread-safe ring buffer over the server process's stdout/stderr.
+
+    Because ray relays worker output to the driver (log_to_driver), teeing the
+    server's own streams captures engine output from every rank on every node;
+    under the mp executor, worker logs arrive via the logging handlers which
+    also write to stderr.
+    """
+
+    def __init__(self, maxlen: int = 5000) -> None:
+        import collections
+        import threading
+        self._lines: collections.deque[str] = collections.deque(maxlen=maxlen)
+        self._dropped = 0
+        self._lock = threading.Lock()
+        self._partial = ""
+
+    def write(self, text: str) -> None:
+        with self._lock:
+            buf = self._partial + text
+            *complete, self._partial = buf.split("\n")
+            for line in complete:
+                if len(self._lines) == self._lines.maxlen:
+                    self._dropped += 1
+                self._lines.append(line)
+
+    def get_lines(self, after: int = 0) -> tuple[list[str], int]:
+        with self._lock:
+            total = self._dropped + len(self._lines)
+            start = max(0, after - self._dropped)
+            return list(self._lines)[start:], total
+
+
+class _Tee:
+    """File-like that forwards to the original stream and the ring buffer."""
+
+    def __init__(self, orig: Any, buffer: _EngineLogBuffer) -> None:
+        self._orig = orig
+        self._buffer = buffer
+
+    def write(self, text: str) -> int:
+        self._buffer.write(text)
+        return self._orig.write(text)
+
+    def flush(self) -> None:
+        self._orig.flush()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._orig, name)
+
+
+engine_log = _EngineLogBuffer()
+
 
 _available_models: list[dict[str, str]] = [{
     "id": path,
@@ -261,8 +315,8 @@ def list_generators() -> list[dict[str, Any]]:
 
 @app.post("/api/generators/preload", status_code=202)
 def preload_generator(req: GeneratorRequest) -> dict[str, Any]:
-    """Load a model into memory ahead of time so the first generation with
-    this configuration skips the model-load wait. Idempotent."""
+    """Load a model into memory ahead of time (replacing whatever is
+    resident). One load at a time — 409 while another load is in flight."""
     valid_ids = {m["id"] for m in _available_models}
     if req.model_id not in valid_ids and not os.path.isdir(req.model_id):
         raise HTTPException(
@@ -270,19 +324,30 @@ def preload_generator(req: GeneratorRequest) -> dict[str, Any]:
             detail=(f"Unknown model_id '{req.model_id}'. "
                     f"Valid options: {sorted(valid_ids)}"),
         )
-    return job_runner.preload_generator(**req.model_dump())
+    try:
+        return job_runner.preload_generator(**req.model_dump())
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @app.post("/api/generators/unload")
-def unload_generator(req: GeneratorRequest) -> dict[str, Any]:
-    """Shut down a resident generator and free its GPU memory."""
+def unload_generator() -> dict[str, Any]:
+    """Shut down and delete the resident generator, freeing GPU memory."""
     try:
-        unloaded = job_runner.unload_generator(**req.model_dump())
+        unloaded = job_runner.unload_generator()
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not unloaded:
-        raise HTTPException(status_code=404, detail="No such resident generator")
+        raise HTTPException(status_code=404, detail="No model is loaded")
     return {"unloaded": True}
+
+
+@app.get("/api/engine/logs")
+def engine_logs(after: int = 0) -> dict[str, Any]:
+    """Incremental tail of the engine's stdout/stderr (driver + relayed
+    worker output). Poll with ?after=<total from the previous response>."""
+    lines, total = engine_log.get_lines(after=after)
+    return {"lines": lines, "total": total}
 
 
 @app.post("/api/jobs", status_code=201)
@@ -656,6 +721,14 @@ def create_local_env(host: str, port: int) -> None:
 
 
 def main() -> None:
+    import sys
+    sys.stdout = _Tee(sys.stdout, engine_log)
+    sys.stderr = _Tee(sys.stderr, engine_log)
+    # handlers created before the tee (module-level basicConfig) hold the
+    # original stream objects — re-point them or their output bypasses the buffer
+    for h in logging.getLogger().handlers:
+        if isinstance(h, logging.StreamHandler) and h.stream in (sys.__stderr__, sys.__stdout__):
+            h.setStream(sys.stderr)
     global job_runner, database, upload_dir, verbose, datasets_upload_dir  # noqa: PLW0603
 
     # Set up signal handlers to prevent worker crashes from killing the server
