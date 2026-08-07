@@ -2,6 +2,7 @@
 from collections import defaultdict
 from collections.abc import Hashable
 from contextlib import nullcontext
+import re
 from typing import Any
 from collections.abc import Generator
 
@@ -27,6 +28,14 @@ from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.utils import maybe_download_lora
 
 logger = init_logger(__name__)
+
+
+def _normalize_lora_key(name: str) -> str:
+    """Normalize known DiffSynth/PEFT wrappers without rewriting module names."""
+    name = name.removeprefix("diffusion_model.")
+    name = name.removeprefix("pipe.dit.")
+    name = re.sub(r"(\.lora_[AB])\.default(?=\.weight$)", r"\1", name)
+    return name.removesuffix(".weight")
 
 
 def _get_hook_ctx(module: nn.Module | None):
@@ -324,8 +333,7 @@ class LoRAPipeline(ComposedPipelineBase):
             to_merge_params: defaultdict[Hashable, dict[Any, Any]] = (defaultdict(dict))
             for name, weight in lora_state_dict.items():
                 # Extract weights (lora_A, lora_B, and lora_alpha)
-                name = name.replace("diffusion_model.", "")
-                name = name.replace(".weight", "")
+                name = _normalize_lora_key(name)
 
                 if "lora_alpha" in name:
                     # Store alpha with minimal mapping - same processing as lora_A/lora_B
