@@ -80,6 +80,10 @@ training:
     run_name: my_run
 ```
 
+## RL Examples
+
+- DiffusionNFT Wan video RL: see `examples/train/diffusion_nft_wan_video.md`.
+
 ## Directory Layout
 
 ```

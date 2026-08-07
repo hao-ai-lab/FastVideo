@@ -80,6 +80,7 @@ class PreprocessPipeline_Text(BasePreprocessPipeline):
                     batch_captions,
                     fastvideo_args,
                     encoder_index=[0],
+                    padding=True,
                     return_attention_mask=True,
                 )
                 prompt_embeds = prompt_embeds_list[0]

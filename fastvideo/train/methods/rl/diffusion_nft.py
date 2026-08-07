@@ -21,7 +21,11 @@ from fastvideo.logger import init_logger
 from fastvideo.pipelines import TrainingBatch
 from fastvideo.train.methods.base import LogScalar, TrainingMethod
 from fastvideo.train.models.base import ModelBase
-from fastvideo.train.methods.rl.rewards import build_multi_reward_scorer
+from fastvideo.train.methods.rl.rewards import (
+    GENRL_REWARD_NAMES,
+    build_multi_reward_scorer,
+    normalize_reward_weights,
+)
 from fastvideo.train.methods.rl.common import (
     DiffusionSampler,
     RLValidationConfig,
@@ -93,6 +97,9 @@ class DiffusionNFTMethod(TrainingMethod):
             raise ValueError("DiffusionNFTMethod requires role 'reference'")
         if not self.student._trainable:
             raise ValueError("DiffusionNFTMethod requires a trainable student")
+        if int(self.training_config.distributed.sp_size or 1) != 1:
+            raise ValueError("DiffusionNFTMethod does not yet support sequence parallelism; "
+                             "set training.distributed.sp_size to 1")
 
         self.old = role_models["old"]
         self.reference = role_models["reference"]
@@ -134,14 +141,17 @@ class DiffusionNFTMethod(TrainingMethod):
                              "{all, positive_only, negative_only, one_only, binary}")
 
         reward_fn = self.method_config.get("reward_fn", None)
-        if not isinstance(reward_fn, dict) or not reward_fn:
-            raise ValueError("method.reward_fn must be a non-empty mapping, "
-                             "for example {pickscore: 1.0, clipscore: 1.0}")
-        self._reward_fn_config = {str(k): float(v) for k, v in reward_fn.items()}
-        unsupported = sorted(set(self._reward_fn_config) - {"pickscore", "clipscore"})
-        if unsupported:
-            raise ValueError(f"Unsupported DiffusionNFT reward(s): {unsupported}. "
-                             "Only pickscore and clipscore are currently ported.")
+        self._reward_fn_config, reward_backend = normalize_reward_weights(reward_fn)
+        self._reward_backend = str(self.method_config.get(
+            "reward_backend",
+            reward_backend or "auto",
+        ) or "auto").strip().lower()
+        if self._reward_backend not in {"auto", "diffusion_nft", "genrl"}:
+            raise ValueError("method.reward_backend must be one of auto, diffusion_nft, "
+                             f"or genrl, got {self._reward_backend!r}")
+        if self._reward_backend == "genrl" and not any(name in GENRL_REWARD_NAMES for name in self._reward_fn_config):
+            raise ValueError("method.reward_backend='genrl' requires at least one GenRL reward "
+                             f"from {sorted(GENRL_REWARD_NAMES)}")
 
         self._reward_scorer: Any | None = None
         self._init_optimizer_and_scheduler()
@@ -225,6 +235,7 @@ class DiffusionNFTMethod(TrainingMethod):
         self._reward_scorer = build_multi_reward_scorer(
             self._reward_fn_config,
             device=self.student.device,
+            backend=self._reward_backend,
         )
 
     def _init_optimizer_and_scheduler(self) -> None:
@@ -364,11 +375,7 @@ class DiffusionNFTMethod(TrainingMethod):
             batch_items = items[start:start + config.batch_size]
             raw_batch = self._collate_validation_rows([item[2] for item in batch_items])
             prompts = self._extract_prompts(raw_batch)
-            batch = self.student.prepare_batch(
-                raw_batch,
-                generator=prepare_generator,
-                latents_source="zeros",
-            )
+            batch = self._prepare_validation_batch(raw_batch, prepare_generator)
             sampling_result = self._validation_sampler.sample(
                 self.student,
                 batch,
@@ -419,6 +426,18 @@ class DiffusionNFTMethod(TrainingMethod):
             self._log_validation_samples(local_logs, iteration)
         self._log_progress(f"[DiffusionNFT] validation step {iteration}: finished")
         return metrics
+
+    def _prepare_validation_batch(
+        self,
+        raw_batch: dict[str, Any],
+        generator: torch.Generator,
+    ) -> TrainingBatch:
+        return self.student.prepare_batch(
+            raw_batch,
+            generator=generator,
+            latents_source="zeros",
+            num_latent_t=self._validation_config.num_latent_t,
+        )
 
     def _get_validation_items(self) -> list[tuple[int, bool, dict[str, Any]]]:
         if self._validation_items is not None:
@@ -482,11 +501,15 @@ class DiffusionNFTMethod(TrainingMethod):
             return
 
         artifacts = []
-        for item in sorted(logs, key=lambda x: int(x["index"])):
+        fps = int(self._validation_config.fps)
+        sorted_logs = sorted(logs, key=lambda x: int(x["index"]))
+        if self._validation_config.max_samples is not None:
+            sorted_logs = sorted_logs[:self._validation_config.max_samples]
+        for item in sorted_logs:
             artifact = tracker.video(
                 media_to_video_array(item["media"]),
                 caption=validation_caption(str(item["prompt"]), item["rewards"]),
-                fps=1,
+                fps=fps,
             )
             if artifact is not None:
                 artifacts.append(artifact)
@@ -544,6 +567,7 @@ class DiffusionNFTMethod(TrainingMethod):
         effective_grad_accum *= max(1, num_train_timesteps)
         current_accum = 0
         optimizer_steps = 0
+        partial_step_micro_steps = 0
         loss_terms: dict[str, list[torch.Tensor]] = defaultdict(list)
         num_batches = max(1, total_samples // max(1, self._train_batch_size))
         training_batch_size = max(1, total_samples // num_batches)
@@ -607,6 +631,11 @@ class DiffusionNFTMethod(TrainingMethod):
                     progress.update(1)
 
         if current_accum % effective_grad_accum != 0:
+            partial_step_micro_steps = current_accum % effective_grad_accum
+            self._log_progress("[DiffusionNFT] final optimizer step uses a partial "
+                               f"gradient accumulation window "
+                               f"({partial_step_micro_steps}/{effective_grad_accum} "
+                               "timestep micro-steps)")
             self._clip_student_grads()
             self._student_optimizer.step()
             self._student_lr_scheduler.step()
@@ -627,6 +656,9 @@ class DiffusionNFTMethod(TrainingMethod):
             "nft/iteration": float(iteration),
             "nft/num_inner_epochs": float(self._num_inner_epochs),
             "nft/inner_micro_steps": float(current_accum),
+            "nft/effective_grad_accum_micro_steps": float(effective_grad_accum),
+            "nft/partial_optimizer_step_micro_steps": float(partial_step_micro_steps),
+            "nft/partial_optimizer_step_ratio": float(partial_step_micro_steps) / float(effective_grad_accum),
             "nft/optimizer_steps": float(optimizer_steps),
             "ema/update_count": float(self._ema_update_count),
         }

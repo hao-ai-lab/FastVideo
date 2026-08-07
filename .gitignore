@@ -32,6 +32,7 @@ env
 **/build/
 **.pyc
 **.txt
+!examples/train/requirements-diffusion-nft.txt
 *.log
 weights/
 logs/
