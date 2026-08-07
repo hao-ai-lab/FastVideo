@@ -99,11 +99,11 @@ class InputValidationStage(PipelineStage):
             ih, iw = img.height, img.width
 
             pipeline_class_name = type(fastvideo_args.pipeline_config).__name__
-            if 'MatrixGame' in pipeline_class_name or 'MatrixCausal' in pipeline_class_name:
+            is_matrix_game = ('MatrixGame' in pipeline_class_name or 'MatrixCausal' in pipeline_class_name)
+            if is_matrix_game or fastvideo_args.pipeline_config.is_causal:
                 oh, ow = batch.height, batch.width
                 img = img.resize((ow, oh), Image.LANCZOS)
             else:
-                # Standard Wan logic
                 patch_size = fastvideo_args.pipeline_config.dit_config.arch_config.patch_size
                 vae_stride = fastvideo_args.pipeline_config.vae_config.arch_config.scale_factor_spatial
                 dh, dw = patch_size[1] * vae_stride, patch_size[2] * vae_stride
@@ -121,12 +121,13 @@ class InputValidationStage(PipelineStage):
             assert img.width == ow and img.height == oh
             logger.info("final processed img height: %s, img width: %s", img.height, img.width)
 
-            # to tensor
-            img = TF.to_tensor(img).sub_(0.5).div_(0.5).to(self.device).unsqueeze(1)
-            img = img.unsqueeze(0)
             batch.height = oh
             batch.width = ow
-            batch.pil_image = img
+            if is_matrix_game or fastvideo_args.pipeline_config.ti2v_task:
+                img = TF.to_tensor(img).sub_(0.5).div_(0.5).to(self.device).unsqueeze(1)
+                batch.pil_image = img.unsqueeze(0)
+            else:
+                batch.pil_image = img
 
         # for v2v, get control video from video path
         if batch.video_path is not None:

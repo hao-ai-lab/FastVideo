@@ -460,7 +460,8 @@ class ImageVAEEncodingStage(PipelineStage):
             generator = batch.generator
             if generator is None:
                 raise ValueError("Generator must be provided")
-            latent_condition = self.retrieve_latents(encoder_output, generator)
+            sample_mode = "argmax" if fastvideo_args.pipeline_config.is_causal else "sample"
+            latent_condition = self.retrieve_latents(encoder_output, generator, sample_mode=sample_mode)
 
         # Apply shifting if needed
         if (hasattr(self.vae, "shift_factor") and self.vae.shift_factor is not None):

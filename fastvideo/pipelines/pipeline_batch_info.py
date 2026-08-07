@@ -134,6 +134,11 @@ class ForwardBatch:
     mouse_cond: torch.Tensor | None = None  # Shape: (B, T, 2)
     keyboard_cond: torch.Tensor | None = None  # Shape: (B, T, K)
     grid_sizes: torch.Tensor | None = None  # Shape: (3,) [F,H,W]
+
+    track_points: torch.Tensor | None = None  # Shape: (B, T, N, 2)
+    track_visibility: torch.Tensor | None = None  # Shape: (B, T, N)
+    track_ids: torch.Tensor | None = None  # Shape: (B, N)
+    track_map: torch.Tensor | None = None
     num_iterations: int | None = None
     use_base_model: bool = False
 

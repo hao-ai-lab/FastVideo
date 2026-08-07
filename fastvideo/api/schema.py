@@ -129,6 +129,9 @@ class InputConfig:
     mouse_cond: Any | None = None
     keyboard_cond: Any | None = None
     grid_sizes: Any | None = None
+    track_points: Any | None = None
+    track_visibility: Any | None = None
+    track_ids: Any | None = None
     c2ws_plucker_emb: Any | None = None
     action_path: str | None = None
     refine_from: str | None = None

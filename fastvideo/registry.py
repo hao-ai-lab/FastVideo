@@ -40,6 +40,7 @@ from fastvideo.configs.pipelines.flux_2 import (
 )
 from fastvideo.configs.pipelines.matrixgame2 import MatrixGame2I2V480PConfig
 from fastvideo.configs.pipelines.matrixgame3 import MatrixGame3I2V720PConfig
+from fastvideo.configs.pipelines.wantrack import CausalTrackWanSFI2VConfig
 from fastvideo.configs.pipelines.turbodiffusion import (
     TurboDiffusionI2V_A14B_Config,
     TurboDiffusionT2V_14B_Config,
@@ -68,6 +69,7 @@ from fastvideo.configs.pipelines.zimage import ZImagePipelineConfig
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.api.matrixgame2 import MatrixGame2SamplingParam
 from fastvideo.api.matrixgame3 import MatrixGame3SamplingParam
+from fastvideo.api.wantrack import WanTrackSamplingParam
 from fastvideo.api.flux import FluxSamplingParam
 
 from fastvideo.fastvideo_args import WorkloadType
@@ -782,6 +784,24 @@ def _register_configs() -> None:
         model_family="matrixgame",
         default_preset="matrixgame2_i2v",
     )
+
+    # Causal WanTrack Self-Forcing I2V (Track-v0)
+    register_configs(
+        sampling_param_cls=WanTrackSamplingParam,
+        pipeline_config_cls=CausalTrackWanSFI2VConfig,
+        workload_types=(WorkloadType.I2V, ),
+        hf_model_paths=[],
+        model_detectors=[
+            lambda path: any(token in path.lower() for token in (
+                "track-v0",
+                "wantrack",
+                "causaltrack",
+            )),
+        ],
+        model_family="wantrack",
+        default_preset="sf_wantrack_causal_i2v",
+        pipeline_cls_name="WanTrackCausalDMDPipeline",
+    )
     # MatrixGame 3.0 (I2V)
     register_configs(
         sampling_param_cls=MatrixGame3SamplingParam,
@@ -1279,6 +1299,8 @@ def _register_presets() -> None:
         ALL_PRESETS as MATRIXGAME2_PRESETS, )
     from fastvideo.pipelines.basic.matrixgame3.presets import (
         ALL_PRESETS as MATRIXGAME3_PRESETS, )
+    from fastvideo.pipelines.basic.wantrack.presets import (
+        ALL_PRESETS as WANTRACK_PRESETS, )
     from fastvideo.pipelines.basic.sd35.presets import (
         ALL_PRESETS as SD35_PRESETS, )
     from fastvideo.pipelines.basic.stable_audio.presets import (
@@ -1309,6 +1331,7 @@ def _register_presets() -> None:
         LTX2_PRESETS,
         MATRIXGAME2_PRESETS,
         MATRIXGAME3_PRESETS,
+        WANTRACK_PRESETS,
         SD35_PRESETS,
         STABLE_AUDIO_PRESETS,
         TURBODIFFUSION_PRESETS,

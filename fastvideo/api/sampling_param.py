@@ -38,6 +38,10 @@ class SamplingParam:
     keyboard_cond: Any | None = None  # Shape: (B, T, K)
     grid_sizes: Any | None = None  # Shape: (3,) [F,H,W]
 
+    track_points: Any | None = None  # Shape: (B, T, N, 2)
+    track_visibility: Any | None = None  # Shape: (B, T, N)
+    track_ids: Any | None = None  # Shape: (B, N)
+
     # Camera control inputs (HYWorld)
     pose: str | None = None  # Camera trajectory: pose string (e.g., 'w-31') or JSON file path
     prompt_attention_mask: list = field(default_factory=list)

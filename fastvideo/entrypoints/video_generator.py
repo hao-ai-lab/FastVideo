@@ -399,6 +399,9 @@ class VideoGenerator:
         keyboard_cond: torch.Tensor | None = None,
         grid_sizes: tuple[int, int, int] | list[int] | torch.Tensor
         | None = None,
+        track_points: torch.Tensor | None = None,
+        track_visibility: torch.Tensor | None = None,
+        track_ids: torch.Tensor | None = None,
         **kwargs,
     ) -> dict[str, Any] | list[dict[str, Any]]:
         """
@@ -447,6 +450,9 @@ class VideoGenerator:
                 mouse_cond=mouse_cond,
                 keyboard_cond=keyboard_cond,
                 grid_sizes=grid_sizes,
+                track_points=track_points,
+                track_visibility=track_visibility,
+                track_ids=track_ids,
                 legacy_kwargs=kwargs,
             )
 
@@ -528,6 +534,9 @@ class VideoGenerator:
         keyboard_cond: torch.Tensor | None = None,
         grid_sizes: tuple[int, int, int] | list[int] | torch.Tensor
         | None = None,
+        track_points: torch.Tensor | None = None,
+        track_visibility: torch.Tensor | None = None,
+        track_ids: torch.Tensor | None = None,
         fastvideo_args: FastVideoArgs | None = None,
         **kwargs,
     ) -> dict[str, Any] | list[np.ndarray] | list[dict[str, Any]]:
@@ -546,6 +555,12 @@ class VideoGenerator:
             kwargs['keyboard_cond'] = keyboard_cond
         if grid_sizes is not None:
             kwargs['grid_sizes'] = grid_sizes
+        if track_points is not None:
+            kwargs['track_points'] = track_points
+        if track_visibility is not None:
+            kwargs['track_visibility'] = track_visibility
+        if track_ids is not None:
+            kwargs['track_ids'] = track_ids
 
         extra_overrides: dict[str, Any] = {}
         for _ek in _BATCH_EXTRA_PASSTHROUGH_KEYS:

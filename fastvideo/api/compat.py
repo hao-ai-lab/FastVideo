@@ -328,6 +328,9 @@ def legacy_generate_call_to_request(
     mouse_cond: Any | None = None,
     keyboard_cond: Any | None = None,
     grid_sizes: Any | None = None,
+    track_points: Any | None = None,
+    track_visibility: Any | None = None,
+    track_ids: Any | None = None,
     legacy_kwargs: Mapping[str, Any] | None = None,
 ) -> GenerationRequest:
     raw = _sampling_param_to_request_raw(sampling_param)
@@ -343,6 +346,12 @@ def legacy_generate_call_to_request(
         raw.setdefault("inputs", {})["keyboard_cond"] = keyboard_cond
     if grid_sizes is not None:
         raw.setdefault("inputs", {})["grid_sizes"] = grid_sizes
+    if track_points is not None:
+        raw.setdefault("inputs", {})["track_points"] = track_points
+    if track_visibility is not None:
+        raw.setdefault("inputs", {})["track_visibility"] = track_visibility
+    if track_ids is not None:
+        raw.setdefault("inputs", {})["track_ids"] = track_ids
 
     normalized = parse_config(GenerationRequest, raw)
     bind_generation_request_raw(normalized, raw)

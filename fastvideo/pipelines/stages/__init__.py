@@ -32,6 +32,7 @@ from fastvideo.pipelines.basic.ltx2.stages import (  # noqa: F401
 )
 from fastvideo.pipelines.stages.matrixgame2_denoising import MatrixGame2CausalDenoisingStage
 from fastvideo.pipelines.stages.matrixgame3_denoising import MatrixGame3DenoisingStage
+from fastvideo.pipelines.stages.wantrack_causal_denoising import WanTrackCausalDenoisingStage
 from fastvideo.pipelines.stages.hyworld_denoising import HYWorldDenoisingStage
 from fastvideo.pipelines.stages.kandinsky5 import (Kandinsky5DecodingStage, Kandinsky5DenoisingStage,
                                                    Kandinsky5LatentPreparationStage)
@@ -66,6 +67,7 @@ __all__ = [
     "CausalDenoisingStage",
     "MatrixGame2CausalDenoisingStage",
     "MatrixGame3DenoisingStage",
+    "WanTrackCausalDenoisingStage",
     "HYWorldDenoisingStage",
     "Kandinsky5DecodingStage",
     "Kandinsky5DenoisingStage",
