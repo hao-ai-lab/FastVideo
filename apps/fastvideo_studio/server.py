@@ -62,6 +62,8 @@ class _EngineLogBuffer:
         self._lock = threading.Lock()
         self._partial = ""
 
+    on_line = None  # optional callable(str), set once at startup
+
     def write(self, text: str) -> None:
         with self._lock:
             buf = self._partial + text
@@ -70,6 +72,12 @@ class _EngineLogBuffer:
                 if len(self._lines) == self._lines.maxlen:
                     self._dropped += 1
                 self._lines.append(line)
+        if self.on_line is not None:
+            for line in complete:
+                try:
+                    self.on_line(line)
+                except Exception:  # noqa: BLE001 -- never break stdout
+                    pass
 
     def get_lines(self, after: int = 0) -> tuple[list[str], int]:
         with self._lock:
@@ -814,6 +822,9 @@ def main() -> None:
         verbose=args.verbose,
         database=database,
     )
+    # ray relays worker output (incl. denoising tqdm) to the driver's stdout;
+    # feed those lines to the running job so the UI progress bar moves.
+    engine_log.on_line = job_runner.feed_engine_line
 
     logger.info("Output directory: %s", output_dir)
     logger.info("Log directory: %s", log_dir)

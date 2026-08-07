@@ -246,3 +246,23 @@ def test_engine_log_buffer_incremental_tail():
     # reader far behind: dropped lines are skipped, no crash
     lines, _ = buf.get_lines(0)
     assert lines == ["c!", "d", "e"]
+
+
+def test_engine_feed_drives_job_progress(runner):
+    from fastvideo_studio.job_runner import Job
+
+    job = Job(id="j-prog", model_id="m", prompt="p")
+    runner._active_inference_job = job
+    runner.feed_engine_line("(RayWorkerWrapper pid=123, ip=10.0.0.2)  40%|████      | 20/50 [00:30<00:45,  1.5s/it]")
+    assert job._log_buf.progress == 40.0
+    assert job._log_buf.progress_msg == "20/50 steps"
+
+    # driver-side lines (no ray prefix) are NOT double-fed
+    before = job._log_buf.get_lines()[1]
+    runner.feed_engine_line("INFO 08-07 [video_generator.py] driver line")
+    assert job._log_buf.get_lines()[1] == before
+
+    # no active job: no-op
+    runner._active_inference_job = None
+    runner.feed_engine_line("(RayWorkerWrapper pid=123)  90%|████| 45/50")
+    assert job._log_buf.progress == 40.0

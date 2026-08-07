@@ -41,6 +41,9 @@ _TQDM_FRAC_RE = re.compile(r"\b(\d+)/(\d+)\b")
 
 _MAX_LOG_LINES = 2000  # ring-buffer cap per job
 
+# ray's log relay prefixes worker lines like "(RayWorkerWrapper pid=123, ip=…)"
+_RAY_RELAY_RE = re.compile(r"^\(\w+ pid=")
+
 
 class JobStatus(str, enum.Enum):
     PENDING = "pending"
@@ -270,6 +273,9 @@ class JobRunner:
         # Serializes every slot transition (preload, job-triggered replace,
         # unload). Held for the full duration of a load.
         self._load_lock = threading.Lock()
+        # The inference job currently generating, fed by the engine log tee
+        # (ray relays worker output to the driver; tqdm lines land there).
+        self._active_inference_job: Job | None = None
 
         # Shared Manager for log queues (avoids spawning a new process per job)
         self._mp_manager = get_mp_context().Manager()
@@ -837,6 +843,24 @@ class JobRunner:
                     return self._generator
             return self._load_into_slot_locked(config)
 
+    def feed_engine_line(self, line: str) -> None:
+        """Bridge ray-relayed worker output into the running job's log buffer.
+
+        On the ray backend worker logs cannot cross nodes via the mp queue,
+        but ray already relays them to the driver's stdout — which the engine
+        tee captures. Lines with ray's actor prefix are attributed to the one
+        running inference job, whose buffer parses tqdm into UI progress.
+        Driver-side logging is excluded (it reaches the buffer via the
+        logging handlers already).
+        """
+        job = self._active_inference_job
+        if job is None or not _RAY_RELAY_RE.match(line):
+            return
+        try:
+            job._log_buf.write(line)
+        except Exception:  # noqa: BLE001 -- never break the tee
+            pass
+
     def _run_job(self, job: Job):
         if job.job_type == "inference":
             self._run_inference_job(job)
@@ -1066,6 +1090,7 @@ class JobRunner:
 
             generator = _gen_result[0]
             buf.phase = "generating"
+            self._active_inference_job = job  # engine tee feeds tqdm from here
             logger.info("Starting generation for job %s (model=%s)", job.id, job.model_id)
 
             gen_kwargs: dict[str, Any] = {
@@ -1125,6 +1150,8 @@ class JobRunner:
             buf.phase = "failed"
 
         finally:
+            if self._active_inference_job is job:
+                self._active_inference_job = None
             queue_listener.stop()
             # Remove handlers and close file
             fastvideo_logger.removeHandler(buffer_handler)
