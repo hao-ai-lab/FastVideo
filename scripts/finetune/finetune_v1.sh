@@ -11,7 +11,9 @@ NUM_GPUS=4
 
 # Make sure that num_latent_t is a multiple of sp_size
 torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
-    fastvideo/training/wan_training_pipeline.py\
+    fastvideo/training/runner.py\
+    --pipeline_class WanTrainingPipeline \
+    --pipeline_module fastvideo.training.wan_training_pipeline \
     --model_path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
     --inference_mode False\
     --pretrained_model_name_or_path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
