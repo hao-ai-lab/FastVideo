@@ -28,10 +28,24 @@ void register_rms_norm(pybind11::module_ &);
 void register_layer_norm(pybind11::module_ &);
 void register_gemm(pybind11::module_ &);
 
+#ifdef TK_COMPILE_BLOCK_SPARSE_VSA_SM100A
+extern std::vector<torch::Tensor> block_sparse_vsa_sm100a_fwd(
+    torch::Tensor q, torch::Tensor k, torch::Tensor v, c10::optional<torch::Tensor> v_t,
+    torch::Tensor q2k_idx, torch::Tensor q2k_num, torch::Tensor variable_block_sizes,
+    double sm_scale, bool need_lse);
+#endif
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.doc() = "FastVideo CUDA Kernels";
 
+#ifdef TK_COMPILE_BLOCK_SPARSE_VSA_SM100A
+    m.def("block_sparse_vsa_sm100a_fwd",
+          torch::wrap_pybind_function(block_sparse_vsa_sm100a_fwd),
+          "VSA block-sparse attention forward (Blackwell sm100a)");
+#endif
+
 #ifdef TK_COMPILE_ST_ATTN
+
     m.def("sta_fwd", torch::wrap_pybind_function(sta_forward), "sliding tile attention (Hopper)");
 #endif
 
