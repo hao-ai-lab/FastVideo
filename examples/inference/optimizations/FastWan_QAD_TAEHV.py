@@ -18,12 +18,11 @@ Requirements:
     - TAEHV weights ``taew2_1.pth`` (https://github.com/madebyollin/taehv)
 
 Usage:
-    python fp4_linear_taehv_wan2_1_1_3b.py                    # FP4 + TAEHV + compile
-    python fp4_linear_taehv_wan2_1_1_3b.py --no-taehv         # FP4 + full Wan VAE
-    python fp4_linear_taehv_wan2_1_1_3b.py --no-compile       # eager
-    python fp4_linear_taehv_wan2_1_1_3b.py --baseline         # dense bf16 reference
-    python fp4_linear_taehv_wan2_1_1_3b.py --distilled_model ''  # base Wan2.1 weights
-    python fp4_linear_taehv_wan2_1_1_3b.py --warmups 5 --benchmark-runs 20  # timing stats (default)
+    python FastWan_QAD_TAEHV.py                    # FP4 + TAEHV + compile
+    python FastWan_QAD_TAEHV.py --no-taehv         # FP4 + full Wan VAE
+    python FastWan_QAD_TAEHV.py --no-compile       # eager
+    python FastWan_QAD_TAEHV.py --baseline         # dense bf16 reference
+    python FastWan_QAD_TAEHV.py --warmups 5 --benchmark-runs 20  # timing stats (default)
 """
 
 import argparse
@@ -42,13 +41,12 @@ from fastvideo.layers.quantization.nvfp4_qat_config import NVFP4QATConfig
 
 OUTPUT_PATH = "video_samples"
 
-# Distilled, quantization-aware (QAD) transformer for Wan2.1-1.3B (3 steps,
-# guidance 1.0). Loaded on top of the base Wan2.1 pipeline; pass
-# ``--distilled_model ''`` to run the base weights instead.
-DEFAULT_DISTILLED_MODEL = "FastVideo/FastWan-QAD-1.3B"
-DISTILLED_WEIGHTS_FILE = (
-    "generator_inference_transformer/diffusion_pytorch_model.safetensors"
-)
+# FastWan-QAD-1.3B is already a complete Diffusers pipeline. Keep the
+# distilled overlay disabled by default; users can still pass a local
+# safetensors file or compatible repo via ``--distilled_model``.
+DEFAULT_MODEL = "FastVideo/FastWan-QAD-1.3B"
+DEFAULT_DISTILLED_MODEL = ""
+DISTILLED_WEIGHTS_FILE = "transformer/diffusion_pytorch_model.safetensors"
 
 # TAEHV checkpoint for Wan2.1. Clone https://github.com/madebyollin/taehv to get
 # ``taew2_1.pth`` (Wan 2.1 / Wan 2.2-14B / Qwen-Image all use this VAE).
@@ -183,7 +181,7 @@ def build_generator(args: argparse.Namespace) -> VideoGenerator:
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="FP4 linear Wan2.1-1.3B with TAEHV decoding benchmark")
-    parser.add_argument("--model", default="Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+    parser.add_argument("--model", default=DEFAULT_MODEL,
                         help="Model path or HuggingFace ID")
     parser.add_argument("--baseline", action="store_true",
                         help="Run dense bf16 instead of FP4 linear")
@@ -198,7 +196,7 @@ def main() -> None:
     parser.add_argument("--distilled_model", default=DEFAULT_DISTILLED_MODEL,
                         help="HuggingFace ID (or local path) of a distilled "
                              "transformer checkpoint to load on top of --model. "
-                             "Pass '' to use the base --model weights instead.")
+                             "Pass '' to use --model weights directly.")
     parser.add_argument("--num_gpus", type=int, default=1)
     parser.add_argument("--infer_steps", type=int, default=3)
     parser.add_argument("--guidance_scale", type=float, default=1.0)
