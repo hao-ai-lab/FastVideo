@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import contextlib
 from typing import Any
 
 
@@ -12,7 +11,7 @@ import torch
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
-from fastvideo.profiler import get_global_controller
+from fastvideo.profiler import profiler_region
 from fastvideo.hooks.activation_trace import trace_step
 from fastvideo.pipelines.basic.minimax_h3.packing import (
     MINIMAX_H3_KEYFRAME_NOISE_AUG,
@@ -101,11 +100,8 @@ class MiniMaxH3DenoisingStage(PipelineStage):
         text_indices = layout.text_indices.to(device)
         prompt_embeds = batch.prompt_embeds[0].to(device)
 
-        controller = get_global_controller()
-        denoise_region = (controller.region("profiler_region_inference_denoising")
-                          if controller is not None else contextlib.nullcontext())
         try:
-            with denoise_region:
+            with profiler_region("inference_denoising"):
                 for index, (video_timestep, audio_timestep) in enumerate(zip(video_timesteps, audio_timesteps,
                                                                              strict=True)):
                     unique_timesteps, timestep_indices = row_timestep_plan[index]
