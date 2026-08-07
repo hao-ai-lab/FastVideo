@@ -216,10 +216,7 @@ def build_packed_sequence(
     position_ids = torch.zeros(sequence_length, 3, dtype=torch.float64)
     position_ids[:num_text_tokens, 0] = torch.arange(num_text_tokens, dtype=torch.float64)
 
-    sqrt_area = np.sqrt(latent_height * latent_width)
-    height_grid = spatial_position_grid(latent_height, patch_h, sqrt_area)
-    width_grid = spatial_position_grid(latent_width, patch_w, sqrt_area)
-    frame_grid = torch.stack([axis.reshape(-1) for axis in torch.meshgrid(height_grid, width_grid, indexing="ij")], -1)
+    frame_grid, width_grid = _frame_position_grid(latent_height, latent_width, patch_h, patch_w)
 
     for index, anchor in enumerate(keyframe_anchors):
         if anchor == "first":
@@ -233,12 +230,8 @@ def build_packed_sequence(
         position_ids[rows, 0] = anchor_time
         position_ids[rows, 1:] = frame_grid
 
-    audio_time = float(num_text_tokens) + torch.arange(num_audio_latents, dtype=torch.float64)
-    position_ids[audio_start:video_start, 0] = audio_time.repeat(MINIMAX_H3_AUDIO_CHANNELS)
-    position_ids[audio_start:video_start, 2] = torch.cat([
-        torch.full((num_audio_latents, ), float(width_grid[0]), dtype=torch.float64),
-        torch.full((num_audio_rows - num_audio_latents, ), float(width_grid[-1]), dtype=torch.float64),
-    ])
+    _fill_audio_positions(position_ids, slice(audio_start, video_start), num_audio_latents, float(num_text_tokens),
+                          width_grid)
 
     video_positions = torch.empty(num_latent_frames, rows_per_frame, 3, dtype=torch.float64)
     video_positions[:, :, 0] = temporal_position_grid(num_latent_frames, float(num_text_tokens))[:, None]
@@ -487,6 +480,4 @@ def keyframe_condition_noise(
             dtype=dtype,
         )
         rows.append(patchify_video_latents(noise, patch_size))
-    if not rows:
-        return torch.empty((0, latent_channels * int(np.prod(patch_size))), device=device, dtype=dtype)
     return torch.cat(rows)
