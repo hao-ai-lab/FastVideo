@@ -170,6 +170,27 @@ def list_models(workload_type: str | None = None) -> list[dict[str, Any]]:
     return _available_models
 
 
+_PRESET_FIELDS = ("height", "width", "num_frames", "fps", "num_inference_steps",
+                  "guidance_scale", "guidance_rescale", "negative_prompt", "seed")
+_preset_cache: dict[str, dict[str, Any]] = {}
+
+
+@app.get("/api/models/presets")
+def model_presets(model_id: str) -> dict[str, Any]:
+    """The model's recommended sampling settings (config-only — never loads
+    weights). The UI populates the job form from these on model selection."""
+    if model_id not in _preset_cache:
+        from fastvideo.api.sampling_param import SamplingParam
+        try:
+            sp = SamplingParam.from_pretrained(model_id)
+        except Exception as exc:  # noqa: BLE001 -- unknown/unresolvable model
+            raise HTTPException(status_code=404, detail=f"No presets for '{model_id}': {exc}") from exc
+        _preset_cache[model_id] = {
+            f: getattr(sp, f) for f in _PRESET_FIELDS if getattr(sp, f, None) is not None
+        }
+    return _preset_cache[model_id]
+
+
 ALLOWED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 
 
