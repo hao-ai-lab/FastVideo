@@ -6,7 +6,6 @@ from __future__ import annotations
 import contextlib
 from typing import Any
 
-
 import torch
 
 from fastvideo.distributed import get_local_torch_device
@@ -106,8 +105,8 @@ class MiniMaxH3DenoisingStage(PipelineStage):
                           if controller is not None else contextlib.nullcontext())
         try:
             with denoise_region:
-                for index, (video_timestep, audio_timestep) in enumerate(zip(video_timesteps, audio_timesteps,
-                                                                             strict=True)):
+                for index, (video_timestep,
+                            audio_timestep) in enumerate(zip(video_timesteps, audio_timesteps, strict=True)):
                     unique_timesteps, timestep_indices = row_timestep_plan[index]
                     # Under torch.compile(mode="reduce-overhead") each denoising
                     # step must be marked, or cudagraph trees flag cross-step
