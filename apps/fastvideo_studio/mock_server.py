@@ -36,13 +36,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse
 
 from fastvideo_studio.database import default_settings_dict
-from fastvideo_studio.models import (CreateDatasetRequest, CreateJobRequest, SettingsUpdate, UpdateCaptionRequest,
-                                     model_label)
+from fastvideo_studio.models import (CreateDatasetRequest, CreateJobRequest, GeneratorRequest, SettingsUpdate,
+                                     UpdateCaptionRequest, model_label)
 
 # --- Config -----------------------------------------------------------------
 
 # How long a started job stays "running" before it flips to "completed".
 COMPLETE_AFTER_SECONDS = 3.0
+# How long a preloading generator stays "loading" before it flips to "ready".
+GENERATOR_READY_AFTER_SECONDS = 2.0
 FFMPEG_BIN = shutil.which(os.getenv("FASTVIDEO_FFMPEG_BIN", "ffmpeg"))
 
 # A small catalogue of fake models keyed by workload type. Mirrors the real
@@ -88,6 +90,8 @@ _DEFAULT_SETTINGS: dict[str, Any] = {
 _state_lock = threading.Lock()
 _settings: dict[str, Any] = dict(_DEFAULT_SETTINGS)
 _jobs: dict[str, dict[str, Any]] = {}
+# GeneratorRequest field values (as a tuple) -> preload/resident state dict.
+_generators: dict[tuple, dict[str, Any]] = {}
 _datasets: dict[str, dict[str, Any]] = {}
 # dataset_id -> {"file_names": [...], "captions": {file_name: caption}}
 _dataset_files: dict[str, dict[str, Any]] = {}
@@ -568,6 +572,64 @@ def download_log(job_id: str) -> PlainTextResponse:
         _advance_job(job)
         lines = _compute_logs(job)["lines"]
     return PlainTextResponse("\n".join(lines) + "\n", media_type="text/plain")
+
+
+# --- Generators (warm models) -------------------------------------------------
+
+
+def _generator_key(req: GeneratorRequest) -> tuple:
+    return tuple(req.model_dump().values())
+
+
+def _advance_generator(entry: dict[str, Any]) -> None:
+    """Flip a loading generator to ready once enough wall-clock time has passed.
+
+    Like job status, generator state is *computed on read*, so polling the
+    generators list naturally shows loading -> ready.
+    """
+    if entry["state"] == "loading" and time.time() - entry["started_at"] >= GENERATOR_READY_AFTER_SECONDS:
+        entry["state"] = "ready"
+
+
+@app.get("/api/generators")
+def list_generators() -> list[dict[str, Any]]:
+    with _state_lock:
+        for entry in _generators.values():
+            _advance_generator(entry)
+        return [dict(entry) for entry in _generators.values()]
+
+
+@app.post("/api/generators/preload", status_code=202)
+def preload_generator(req: GeneratorRequest) -> dict[str, Any]:
+    valid_ids = {m["id"] for m in _models_for(None)}
+    if req.model_id not in valid_ids:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown model_id '{req.model_id}'. Valid options: {sorted(valid_ids)}",
+        )
+    key = _generator_key(req)
+    with _state_lock:
+        entry = _generators.get(key)
+        if entry is None:
+            entry = {"state": "loading", "started_at": time.time(), "error": None, **req.model_dump()}
+            _generators[key] = entry
+        else:
+            _advance_generator(entry)
+        return dict(entry)
+
+
+@app.post("/api/generators/unload")
+def unload_generator(req: GeneratorRequest) -> dict[str, Any]:
+    with _state_lock:
+        running = [
+            j["id"] for j in _jobs.values()
+            if j.get("job_type") == "inference" and _public_job(j)["status"] == "running"
+        ]
+        if running:
+            raise HTTPException(status_code=409, detail=f"cannot unload while inference jobs are running: {running}")
+        if _generators.pop(_generator_key(req), None) is None:
+            raise HTTPException(status_code=404, detail="No such resident generator")
+    return {"unloaded": True}
 
 
 # --- Datasets ---------------------------------------------------------------

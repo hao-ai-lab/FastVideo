@@ -319,6 +319,91 @@ export async function downloadJobVideo(id: string): Promise<Blob> {
 	return response.blob();
 }
 
+// --- Generators (warm models) ---
+
+/**
+ * Engine subset of CreateJobRequest that identifies one resident generator.
+ * Mirrors the backend's GeneratorRequest defaults.
+ */
+export interface GeneratorRequest {
+	model_id: string;
+	workload_type?: string;
+	num_gpus?: number;
+	dit_cpu_offload?: boolean;
+	text_encoder_cpu_offload?: boolean;
+	vae_cpu_offload?: boolean;
+	image_encoder_cpu_offload?: boolean;
+	use_fsdp_inference?: boolean;
+	enable_torch_compile?: boolean;
+	vsa_sparsity?: number;
+	tp_size?: number;
+	sp_size?: number;
+}
+
+export interface GeneratorInfo {
+	state: "ready" | "loading" | "failed";
+	model_id: string;
+	workload_type: string;
+	num_gpus: number;
+	dit_cpu_offload: boolean;
+	text_encoder_cpu_offload: boolean;
+	vae_cpu_offload: boolean;
+	image_encoder_cpu_offload: boolean;
+	use_fsdp_inference: boolean;
+	enable_torch_compile: boolean;
+	vsa_sparsity: number;
+	tp_size: number;
+	sp_size: number;
+	error?: string | null;
+	started_at?: number;
+}
+
+export async function listGenerators(): Promise<GeneratorInfo[]> {
+	const baseApiUrl = getApiBaseUrl();
+	const response = await fetch(`${baseApiUrl}/generators`);
+	if (!response.ok) {
+		throw new Error("Failed to fetch generators");
+	}
+	return response.json();
+}
+
+export async function preloadGenerator(
+	req: GeneratorRequest,
+): Promise<GeneratorInfo> {
+	const baseApiUrl = getApiBaseUrl();
+	const response = await fetch(`${baseApiUrl}/generators/preload`, {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+		},
+		body: JSON.stringify(req),
+	});
+	if (!response.ok) {
+		const error = await response
+			.json()
+			.catch(() => ({ detail: "Failed to preload model" }));
+		throw new Error(error.detail || "Failed to preload model");
+	}
+	return response.json();
+}
+
+export async function unloadGenerator(req: GeneratorRequest): Promise<void> {
+	const baseApiUrl = getApiBaseUrl();
+	const response = await fetch(`${baseApiUrl}/generators/unload`, {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+		},
+		body: JSON.stringify(req),
+	});
+	if (!response.ok) {
+		const error = await response
+			.json()
+			.catch(() => ({ detail: "Failed to unload model" }));
+		throw new Error(error.detail || "Failed to unload model");
+	}
+}
+
 // --- Datasets ---
 
 export interface Dataset {
