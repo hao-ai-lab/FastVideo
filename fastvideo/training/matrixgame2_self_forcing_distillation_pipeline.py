@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-import sys
 from collections.abc import Iterable
 from copy import deepcopy
 from typing import Any, cast
@@ -874,4 +873,3 @@ class MatrixGame2SelfForcingDistillationPipeline(SelfForcingDistillationPipeline
             batch.mouse_cond = mouse_cond
 
         return batch
-

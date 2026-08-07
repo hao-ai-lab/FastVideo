@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 
-import sys
 from copy import deepcopy
 from typing import Any, cast
 
@@ -426,4 +425,3 @@ class MatrixGame2ARDiffusionPipeline(TrainingPipeline):
             batch.mouse_cond = mouse_cond
 
         return batch
-

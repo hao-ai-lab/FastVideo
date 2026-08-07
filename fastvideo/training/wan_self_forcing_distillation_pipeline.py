@@ -1,8 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-import sys
 from copy import deepcopy
 
-from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
+from fastvideo.fastvideo_args import TrainingArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.basic.wan.wan_causal_dmd_pipeline import (WanCausalDMDPipeline)
 from fastvideo.training.self_forcing_distillation_pipeline import (SelfForcingDistillationPipeline)
@@ -53,4 +52,3 @@ class WanSelfForcingDistillationPipeline(SelfForcingDistillationPipeline):
             dit_cpu_offload=True)
 
         self.validation_pipeline = validation_pipeline
-

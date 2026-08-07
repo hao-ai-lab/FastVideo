@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-import sys
 from copy import deepcopy
 from typing import Any, cast
 
@@ -308,4 +307,3 @@ class ODEInitTrainingPipeline(TrainingPipeline):
 
         if self.global_rank == 0 and tracker_loss_dict:
             self.tracker.log_artifacts(tracker_loss_dict, step)
-

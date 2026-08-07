@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-import sys
 from copy import deepcopy
 from typing import Any
 
@@ -173,4 +172,3 @@ class WanI2VDistillationPipeline(DistillationPipeline):
         training_batch.noise_latents = noise_input
 
         return training_batch
-

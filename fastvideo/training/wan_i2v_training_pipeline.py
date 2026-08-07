@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-import sys
 from copy import deepcopy
 from typing import Any
 
@@ -164,4 +163,3 @@ class WanI2VTrainingPipeline(TrainingPipeline):
         )
 
         return batch
-

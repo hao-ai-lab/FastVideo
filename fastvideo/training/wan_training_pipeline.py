@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-import sys
 from copy import deepcopy
 
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
@@ -51,4 +50,3 @@ class WanTrainingPipeline(TrainingPipeline):
             dit_cpu_offload=True)
 
         self.validation_pipeline = validation_pipeline
-
