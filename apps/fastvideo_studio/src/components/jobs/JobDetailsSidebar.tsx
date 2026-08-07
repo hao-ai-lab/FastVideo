@@ -6,7 +6,7 @@ import { X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useDrawerFocus } from '@/hooks/useDrawerFocus';
 import { useResizable } from '@/hooks/useResizable';
-import { downloadJobLog, getJobLogs } from '@/lib/api';
+import { downloadJobLog, getJobLogs, getJobVideoUrl } from '@/lib/api';
 import type { Job } from '@/lib/types';
 import { cn, downloadBlob } from '@/lib/utils';
 
@@ -179,6 +179,41 @@ export default function JobDetailsSidebar({
           </Button>
         </div>
       </div>
+
+      {job.status === 'completed' &&
+        job.output_path &&
+        (job.job_type === 'inference' || !job.job_type) && (
+          <div className="border-b border-border px-5 py-4">
+            <span className="mb-2 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Output
+            </span>
+            {job.output_path.toLowerCase().endsWith('.png') ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={getJobVideoUrl(job.id)}
+                alt={
+                  job.prompt
+                    ? `Generated image: ${job.prompt}`
+                    : 'Generated image'
+                }
+                className="block w-full rounded-lg border border-border bg-background object-contain"
+              />
+            ) : (
+              <video
+                src={getJobVideoUrl(job.id)}
+                aria-label={
+                  job.prompt
+                    ? `Generated video: ${job.prompt}`
+                    : 'Generated video'
+                }
+                controls
+                playsInline
+                preload="metadata"
+                className="block max-h-80 w-full rounded-lg border border-border bg-background object-contain"
+              />
+            )}
+          </div>
+        )}
 
       <div className="flex min-h-0 flex-1 flex-col px-5 py-4">
         <div className="mb-2 flex items-center justify-between">

@@ -35,6 +35,15 @@ import { getDefaultModelForWorkload } from '@/lib/defaultOptions';
 import { WORKLOAD_OPTIONS } from '@/lib/jobConfig';
 import type { JobType } from '@/lib/types';
 
+// ponytail: dims pre-rounded to multiples of 32 so every model family accepts
+// them (H3 requires /32) — hence 720p→704 and 1080p→1088. Tooltips show the
+// exact dims; the labels stay 480p/720p/1080p.
+const RESOLUTION_PRESETS = [
+  { label: '480p', height: 480, width: 832 },
+  { label: '720p', height: 704, width: 1280 },
+  { label: '1080p', height: 1088, width: 1920 },
+] as const;
+
 export interface CreateJobModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -70,6 +79,12 @@ export default function CreateJobModal({
   const [numFrames, setNumFrames] = React.useState(81);
   const [height, setHeight] = React.useState(480);
   const [width, setWidth] = React.useState(832);
+  // The selected model's preset dims, kept so the "Native" chip can restore
+  // them after a resolution chip or manual slider edit.
+  const [nativeDims, setNativeDims] = React.useState<{
+    height: number;
+    width: number;
+  } | null>(null);
   const [guidanceScale, setGuidanceScale] = React.useState(5);
   const [guidanceRescale, setGuidanceRescale] = React.useState(0);
   const [fps, setFps] = React.useState(24);
@@ -244,11 +259,14 @@ export default function CreateJobModal({
   React.useEffect(() => {
     if (!isOpen || !isInference || !modelId) return;
     let stale = false;
+    setNativeDims(null);
     getModelPresets(modelId)
       .then((p) => {
         if (stale) return;
         if (p.height !== undefined) setHeight(p.height);
         if (p.width !== undefined) setWidth(p.width);
+        if (p.height !== undefined && p.width !== undefined)
+          setNativeDims({ height: p.height, width: p.width });
         if (p.num_frames !== undefined)
           setNumFrames(workloadType === 't2i' ? 1 : p.num_frames);
         if (p.fps !== undefined) setFps(p.fps);
@@ -835,6 +853,64 @@ export default function CreateJobModal({
                     disabled={isSubmitting}
                   />
                 )}
+                <div className="col-span-full flex flex-wrap items-center gap-1.5">
+                  <span className="pl-0.5 text-xs font-normal tracking-wide text-muted-foreground">
+                    Resolution
+                  </span>
+                  {RESOLUTION_PRESETS.map((preset) => (
+                    <Button
+                      key={preset.label}
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      title={`${preset.height}×${preset.width}`}
+                      onClick={() => {
+                        // Apply in the current orientation so a portrait
+                        // setup stays portrait when switching resolution.
+                        const portrait = height > width;
+                        setHeight(portrait ? preset.width : preset.height);
+                        setWidth(portrait ? preset.height : preset.width);
+                      }}
+                      disabled={isSubmitting}
+                      className="h-6 px-2 text-xs"
+                    >
+                      {preset.label}
+                    </Button>
+                  ))}
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    title={
+                      nativeDims
+                        ? `${nativeDims.height}×${nativeDims.width}`
+                        : 'Model preset resolution (unavailable)'
+                    }
+                    onClick={() => {
+                      if (!nativeDims) return;
+                      setHeight(nativeDims.height);
+                      setWidth(nativeDims.width);
+                    }}
+                    disabled={isSubmitting || !nativeDims}
+                    className="h-6 px-2 text-xs"
+                  >
+                    Native
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    title="Swap height and width"
+                    onClick={() => {
+                      setHeight(width);
+                      setWidth(height);
+                    }}
+                    disabled={isSubmitting}
+                    className="h-6 px-2 text-xs"
+                  >
+                    {height > width ? 'Portrait' : 'Landscape'}
+                  </Button>
+                </div>
                 <SliderRow
                   id="modal-height"
                   label="Height"

@@ -548,3 +548,35 @@ export function getDatasetMediaUrl(
 	const baseApiUrl = getApiBaseUrl();
 	return `${baseApiUrl}/datasets/${datasetId}/media/${encodeURIComponent(fileName)}`;
 }
+
+// --- Cluster ---
+
+/** Per-GPU telemetry within a cluster node (same shape as GpuInfo). */
+export type ClusterGpu = GpuInfo;
+
+export interface ClusterNode {
+	hostname: string;
+	ip: string | null;
+	is_this_host: boolean;
+	cpus: number | null;
+	ray_gpus: number | null;
+	available: boolean;
+	error: string | null;
+	gpus: ClusterGpu[];
+}
+
+export interface ClusterSnapshot {
+	mode: "ray" | "local";
+	nodes: ClusterNode[];
+	resources: { gpus_total: number; gpus_available: number } | null;
+	error: string | null;
+}
+
+export async function getClusterStatus(): Promise<ClusterSnapshot> {
+	const baseApiUrl = getApiBaseUrl();
+	const response = await fetch(`${baseApiUrl}/cluster`);
+	if (!response.ok) {
+		throw new Error("Failed to fetch cluster status");
+	}
+	return response.json();
+}

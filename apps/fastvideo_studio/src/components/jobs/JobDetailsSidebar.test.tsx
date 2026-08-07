@@ -9,6 +9,7 @@ import { makeJob as makeBaseJob } from '@/test/factories';
 vi.mock('@/lib/api', () => ({
   getJobLogs: vi.fn(),
   downloadJobLog: vi.fn(),
+  getJobVideoUrl: (id: string) => `http://test.local/api/jobs/${id}/video`,
 }));
 
 const makeJob = (overrides: Partial<Job> = {}): Job =>
@@ -43,6 +44,43 @@ describe('JobDetailsSidebar', () => {
     expect(drawer).toHaveAttribute('aria-modal', 'true');
     expect(drawer).toHaveFocus();
     expect(onWidthChange).toHaveBeenCalledWith(0);
+  });
+
+  it('plays completed inference output inline; running jobs get no player', async () => {
+    vi.mocked(getJobLogs).mockResolvedValue({
+      lines: [],
+      total: 0,
+      progress: 0,
+      progress_msg: '',
+      phase: '',
+    });
+
+    const { rerender } = render(
+      <JobDetailsSidebar
+        job={makeJob({
+          status: 'completed',
+          output_path: '/outputs/job-1.mp4',
+          prompt: 'a cat surfing a wave',
+        })}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const video = screen.getByLabelText('Generated video: a cat surfing a wave');
+    expect(video.tagName).toBe('VIDEO');
+    expect(video).toHaveAttribute('controls');
+    expect(video).toHaveAttribute(
+      'src',
+      'http://test.local/api/jobs/job-1/video',
+    );
+
+    rerender(
+      <JobDetailsSidebar
+        job={makeJob({ status: 'running', output_path: null })}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.queryByLabelText(/Generated video/)).not.toBeInTheDocument();
   });
 
   it('renders log lines streamed from the job log poll', async () => {

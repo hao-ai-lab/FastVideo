@@ -8,9 +8,9 @@ import { Button } from '@/components/ui/button';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
 
 const TAB_TITLES: Record<string, string> = {
-  '/inference': 'Jobs',
-  '/finetuning': 'Jobs',
-  '/distillation': 'Jobs',
+  '/inference': 'Studio',
+  '/finetuning': 'Studio',
+  '/distillation': 'Studio',
   '/datasets': 'Datasets',
   '/gallery': 'Gallery',
   '/gpus': 'GPUs',

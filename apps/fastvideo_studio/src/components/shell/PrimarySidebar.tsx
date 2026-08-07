@@ -108,7 +108,7 @@ export default function PrimarySidebar({
                 isJobsActive && TAB_ACTIVE,
               )}
             >
-              <span>Jobs</span>
+              <span>Studio</span>
               <svg
                 viewBox="0 0 24 24"
                 fill="none"

@@ -470,6 +470,49 @@ def list_gpus() -> dict[str, Any]:
     return {"available": True, "gpus": gpus, "error": None}
 
 
+@app.get("/api/cluster")
+def cluster_status() -> dict[str, Any]:
+    """Two fake ray nodes x 4 GPUs with per-request jitter, mirroring the
+    real server's /api/cluster shape."""
+    nodes = []
+    for host_idx, (hostname, ip, is_this_host) in enumerate([
+        ("mock-node-0", "10.0.0.10", True),
+        ("mock-node-1", "10.0.0.11", False),
+    ]):
+        gpus = []
+        for index in range(4):
+            base_util = (13 + 29 * index + 41 * host_idx) % 100
+            gpus.append({
+                "index": index,
+                "name": "NVIDIA Mock GPU 80GB",
+                "utilization": max(0, min(100, base_util + random.randint(-5, 5))),
+                "memory_used_mib": 6_144 + 17_408 * index + random.randint(-256, 256),
+                "memory_total_mib": 81_920,
+                "temperature_c": 42 + 6 * index + random.randint(-3, 3),
+                "power_watts": 110.0 + 140.0 * index + random.randint(-20, 20),
+                "power_limit_watts": 700.0,
+            })
+        nodes.append({
+            "hostname": hostname,
+            "ip": ip,
+            "is_this_host": is_this_host,
+            "cpus": 64.0,
+            "ray_gpus": 4.0,
+            "available": True,
+            "error": None,
+            "gpus": gpus,
+        })
+    return {
+        "mode": "ray",
+        "nodes": nodes,
+        "resources": {
+            "gpus_total": 8.0,
+            "gpus_available": 5.0
+        },
+        "error": None,
+    }
+
+
 # --- Uploads ----------------------------------------------------------------
 
 

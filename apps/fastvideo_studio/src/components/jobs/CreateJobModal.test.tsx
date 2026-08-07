@@ -302,6 +302,56 @@ describe('CreateJobModal', () => {
     });
   });
 
+  it('applies resolution preset chips and the orientation toggle to the payload', async () => {
+    const user = userEvent.setup();
+    renderModal();
+
+    await screen.findByRole('option', { name: 'Wan T2V (wan/t2v-1.3b)' });
+    await user.click(screen.getByText('Options'));
+
+    // 720p chip sets the /32-rounded dims; the orientation toggle swaps them.
+    await user.click(screen.getByRole('button', { name: '720p' }));
+    await user.click(screen.getByRole('button', { name: 'Landscape' }));
+    expect(
+      screen.getByRole('button', { name: 'Portrait' }),
+    ).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText('Prompt'), 'portrait 720p');
+    await user.click(screen.getByRole('button', { name: 'Create Job' }));
+
+    await waitFor(() => expect(createJob).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(createJob).mock.calls[0][0]).toMatchObject({
+      height: 1280,
+      width: 704,
+    });
+  });
+
+  it('restores the model preset resolution via the Native chip', async () => {
+    vi.mocked(getModelPresets).mockResolvedValue({ height: 720, width: 1280 });
+
+    const user = userEvent.setup();
+    renderModal();
+
+    await screen.findByRole('option', { name: 'Wan T2V (wan/t2v-1.3b)' });
+    // Native is disabled until the selected model's presets have loaded.
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Native' })).toBeEnabled(),
+    );
+    await user.click(screen.getByText('Options'));
+
+    await user.click(screen.getByRole('button', { name: '1080p' }));
+    await user.click(screen.getByRole('button', { name: 'Native' }));
+
+    await user.type(screen.getByLabelText('Prompt'), 'native dims');
+    await user.click(screen.getByRole('button', { name: 'Create Job' }));
+
+    await waitFor(() => expect(createJob).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(createJob).mock.calls[0][0]).toMatchObject({
+      height: 720,
+      width: 1280,
+    });
+  });
+
   it('populates sampling fields from the selected model presets; engine fields stay from defaults', async () => {
     defaultOptionsStore.set({
       options: { ...DEFAULT_OPTIONS, numGpus: 4, tpSize: 2, seed: 999 },
