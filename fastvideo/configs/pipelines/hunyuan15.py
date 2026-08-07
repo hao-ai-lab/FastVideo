@@ -8,7 +8,7 @@ import torch
 
 from fastvideo.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.configs.models.dits import HunyuanVideo15Config
-from fastvideo.configs.models.encoders import (BaseEncoderOutput, Qwen2_5_VLConfig, T5Config)
+from fastvideo.configs.models.encoders import (BaseEncoderOutput, Qwen2_5_VLConfig, SiglipVisionConfig, T5Config)
 from fastvideo.configs.models.vaes import Hunyuan15VAEConfig
 from fastvideo.configs.models.upsamplers import SRTo720pUpsamplerConfig, SRTo1080pUpsamplerConfig
 from fastvideo.configs.pipelines.base import PipelineConfig, UpsamplerConfig
@@ -124,6 +124,10 @@ class Hunyuan15T2V480PConfig(PipelineConfig):
 class Hunyuan15I2V480PStepDistilledConfig(Hunyuan15T2V480PConfig):
     flow_shift: int = 7
 
+    # The i2v checkpoints ship a SigLIP vision tower; declaring it here is what
+    # makes the loader build one.
+    image_encoder_config: EncoderConfig = field(default_factory=SiglipVisionConfig)
+
 
 @dataclass
 class Hunyuan15T2V720PConfig(Hunyuan15T2V480PConfig):
@@ -139,6 +143,8 @@ class Hunyuan15I2V720PConfig(Hunyuan15T2V720PConfig):
 
     # HunyuanConfig-specific parameters with defaults
     flow_shift: int = 7
+
+    image_encoder_config: EncoderConfig = field(default_factory=SiglipVisionConfig)
 
 
 @dataclass
