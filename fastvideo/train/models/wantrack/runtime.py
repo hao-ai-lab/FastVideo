@@ -21,6 +21,7 @@ from fastvideo.pipelines import TrainingBatch
 from fastvideo.train.models.wantrack.control import StableGridController
 from fastvideo.train.models.wantrack.inference import (
     clear_wantrack_caches,
+    prepare_wantrack_batch,
     sample_wantrack_block,
 )
 
@@ -28,10 +29,10 @@ from fastvideo.train.models.wantrack.inference import (
 @dataclass(frozen=True, slots=True)
 class WanTrackSamplingSettings:
     seed: int = 0
-    num_inference_steps: int = 30
-    text_guidance_scale: float = 3.0
-    motion_guidance_scale: float = 1.5
-    motion_cfg: bool = True
+    num_inference_steps: int = 4
+    text_guidance_scale: float = 1.0
+    motion_guidance_scale: float = 1.0
+    motion_cfg: bool = False
 
     @classmethod
     def from_value(
@@ -64,7 +65,7 @@ class WanTrackSamplingSettings:
 class PreparedWanTrackInput:
     image: Image.Image
     prompt: str
-    batch: TrainingBatch
+    raw_batch: dict[str, Any]
     latent_channels: int
     latent_height: int
     latent_width: int
@@ -89,6 +90,7 @@ class WanTrackInferenceRuntime:
         *,
         model: Any,
         vae: Any,
+        taehv: Any | None,
         text_encoder: Any,
         tokenizer: Any,
         image_encoder: Any,
@@ -101,6 +103,8 @@ class WanTrackInferenceRuntime:
     ) -> None:
         self.model = model
         self.vae = vae
+        self.taehv = taehv
+        self.decoder_name = "TAEHV (taew2_1)" if taehv is not None else "Wan VAE"
         self.text_encoder = text_encoder
         self.tokenizer = tokenizer
         self.image_encoder = image_encoder
@@ -112,8 +116,15 @@ class WanTrackInferenceRuntime:
         self.chunk_size = int(chunk_size)
         self.temporal_compression = int(
             training_config.pipeline_config.vae_config.arch_config.temporal_compression_ratio)
+        self.validation_pixel_frames = ((int(training_config.data.num_latent_t) - 1) * self.temporal_compression + 1)
         self.height = int(training_config.data.num_height)
         self.width = int(training_config.data.num_width)
+        transformer = model.transformer
+        self.causal_recipe = {
+            "local_attn_size": int(transformer.local_attn_size),
+            "sink_size": int(transformer.sink_size),
+            "rope_cache_policy": str(transformer.rope_cache_policy),
+        }
         if self.height <= 0 or self.width <= 0:
             raise ValueError("WanTrack YAML must define positive training.data.num_height "
                              "and num_width")
@@ -127,6 +138,7 @@ class WanTrackInferenceRuntime:
         cls,
         model_dir: str | os.PathLike[str],
         yaml_path: str | os.PathLike[str],
+        taehv_checkpoint: str | os.PathLike[str] | None = None,
     ) -> WanTrackInferenceRuntime:
         """Load a Diffusers-format causal export and its training YAML."""
         model_dir = str(Path(model_dir).expanduser().resolve())
@@ -207,7 +219,30 @@ class WanTrackInferenceRuntime:
             init_from=model_dir,
             training_config=training_config,
             trainable=False,
+            track_augmentation=models["student"].get("track_augmentation"),
+            freeze_track_encoder=bool(models["student"].get("freeze_track_encoder", False)),
         )
+        dit_config = training_config.pipeline_config.dit_config
+        expected_recipe = (
+            int(dit_config.local_attn_size),
+            int(dit_config.sink_size),
+            str(dit_config.arch_config.rope_cache_policy),
+        )
+        transformer_recipe = (
+            int(model.transformer.local_attn_size),
+            int(model.transformer.sink_size),
+            str(model.transformer.rope_cache_policy),
+        )
+        block_recipes = {(
+            int(block.attn1.local_attn_size),
+            int(block.attn1.sink_size),
+            str(block.attn1.rope_cache_policy),
+        )
+                         for block in model.transformer.blocks}
+        if transformer_recipe != expected_recipe or block_recipes != {expected_recipe}:
+            raise RuntimeError("WanTrack causal recipe mismatch after model construction: "
+                               f"expected={expected_recipe}, transformer={transformer_recipe}, "
+                               f"blocks={sorted(block_recipes)}")
         model.transformer.eval()
         vae = load_module_from_path(
             model_path=model_dir,
@@ -245,6 +280,20 @@ class WanTrackInferenceRuntime:
         image_processor_name = ("image_processor"
                                 if model_index.get("image_processor") is not None else "feature_extractor")
         image_processor = load_component(image_processor_name)
+        taehv_model = None
+        if taehv_checkpoint is not None:
+            taehv_path = Path(taehv_checkpoint).expanduser().resolve()
+            if not taehv_path.is_file():
+                raise FileNotFoundError(f"TAEHV checkpoint not found: {taehv_path}")
+            try:
+                from taehv import TAEHV
+            except ImportError as exc:
+                raise RuntimeError("Install the official madebyollin/taehv package to use "
+                                   "TAEHV decoding") from exc
+            taehv_model = TAEHV(checkpoint_path=str(taehv_path)).to(
+                device=model.device,
+                dtype=torch.float16,
+            ).eval()
 
         method = raw.get("method", {})
         chunk_size = int(
@@ -264,6 +313,7 @@ class WanTrackInferenceRuntime:
         return cls(
             model=model,
             vae=vae,
+            taehv=taehv_model,
             text_encoder=text_encoder,
             tokenizer=tokenizer,
             image_encoder=image_encoder,
@@ -360,11 +410,27 @@ class WanTrackInferenceRuntime:
         clip_feature = image_output.last_hidden_state.to(dtype=dtype)
 
         array = np.asarray(processed, dtype=np.float32) / 127.5 - 1.0
-        pixels = torch.from_numpy(array).permute(2, 0, 1)
-        pixels = pixels.unsqueeze(0).unsqueeze(2).to(
+        first_frame = torch.from_numpy(array).permute(2, 0, 1)
+        first_frame = first_frame.unsqueeze(0).unsqueeze(2).to(
             device=device,
             dtype=torch.float32,
         )
+        latent_t = int(self.training_config.data.num_latent_t)
+        pixel_t = (latent_t - 1) * self.temporal_compression + 1
+        # Match PreprocessPipeline_I2V exactly: the VAE sees the complete
+        # validation-length condition video, with only its first pixel frame
+        # populated. Encoding a one-frame tensor is not equivalent for a
+        # temporal VAE and produces a different I2V condition.
+        pixels = torch.zeros(
+            first_frame.shape[0],
+            first_frame.shape[1],
+            pixel_t,
+            first_frame.shape[3],
+            first_frame.shape[4],
+            device=device,
+            dtype=torch.float32,
+        )
+        pixels[:, :, :1] = first_frame
         vae = self.vae.to(device)
         encoded = vae.encode(pixels)
         first_latent = encoded.mean
@@ -383,47 +449,57 @@ class WanTrackInferenceRuntime:
                 dtype=first_latent.dtype,
             )
         first_latent = first_latent.to(dtype=dtype)
-        image_condition = self.model._build_i2v_condition(first_latent)
         latent_channels = int(self.training_config.pipeline_config.vae_config.arch_config.z_dim)
         latent_height = int(first_latent.shape[-2])
         latent_width = int(first_latent.shape[-1])
-        latents = torch.zeros(
-            1,
-            1,
-            latent_channels,
-            latent_height,
-            latent_width,
-            device=device,
-            dtype=dtype,
-        )
-        conditional = {
-            "encoder_hidden_states": text_embedding,
-            "encoder_attention_mask": text_mask,
-            "encoder_hidden_states_image": clip_feature,
-            "image_latents": image_condition,
-            "track_points": None,
-            "track_visibility": None,
-            "track_ids": None,
-            "track_map": None,
-        }
-        batch = TrainingBatch(
-            latents=latents,
-            encoder_hidden_states=text_embedding,
-            encoder_attention_mask=text_mask,
-            image_embeds=clip_feature,
-            image_latents=image_condition,
-            conditional_dict=conditional,
-            unconditional_dict=None,
-            attn_metadata=None,
-            attn_metadata_vsa=None,
-        )
         return PreparedWanTrackInput(
             image=processed,
             prompt=prompt,
-            batch=batch,
+            raw_batch={
+                "text_embedding": text_embedding,
+                "text_attention_mask": text_mask,
+                "clip_feature": clip_feature,
+                "first_frame_latent": first_latent,
+            },
             latent_channels=latent_channels,
             latent_height=latent_height,
             latent_width=latent_width,
+        )
+
+    def prepare_validation_batch(
+        self,
+        prepared: PreparedWanTrackInput,
+        controller: StableGridController,
+        *,
+        seed: int,
+    ) -> TrainingBatch:
+        """Build conditions through the exact SF validation preparation path."""
+        latent_t = int(self.training_config.data.num_latent_t)
+        pixel_t = (latent_t - 1) * self.temporal_compression + 1
+        initial_control = controller.render_constant(pixel_t)
+        raw_batch = dict(prepared.raw_batch)
+        raw_batch.update({
+            "track_points": torch.from_numpy(initial_control.tracks).unsqueeze(0),
+            "track_visibility": torch.from_numpy(initial_control.visibility).unsqueeze(0),
+            # Uploaded images have no segmentation IDs. Treat the control grid
+            # as background so SF validation's sparse sampler retains its
+            # configured ``extra_points`` subset.
+            "object_ids": torch.full(
+                (1, initial_control.tracks.shape[1]),
+                -1,
+                dtype=torch.long,
+            ),
+            "track_weights": torch.zeros(
+                1,
+                initial_control.tracks.shape[1],
+                dtype=torch.float32,
+            ),
+        })
+        return prepare_wantrack_batch(
+            self.model,
+            raw_batch,
+            seed=int(seed),
+            latents_source="zeros",
         )
 
     def _inference_args(self) -> Any:
@@ -469,7 +545,11 @@ class WanTrackInferenceRuntime:
             track_ids=track_ids.to(device),
         )
 
-    def new_vae_cache(self) -> list[torch.Tensor | None] | None:
+    def new_vae_cache(self) -> Any:
+        if self.taehv is not None:
+            from taehv import StreamingTAEHV
+
+            return StreamingTAEHV(self.taehv)
         getter = getattr(self.vae, "get_streaming_cache", None)
         return getter() if callable(getter) else None
 
@@ -478,9 +558,31 @@ class WanTrackInferenceRuntime:
         self,
         latents: torch.Tensor,
         *,
-        cache: list[torch.Tensor | None] | None,
+        cache: Any,
         first: bool,
-    ) -> tuple[np.ndarray, list[torch.Tensor | None] | None]:
+    ) -> tuple[np.ndarray, Any]:
+        if self.taehv is not None:
+            if cache is None or not hasattr(cache, "decode"):
+                raise RuntimeError("TAEHV streaming decoder state is unavailable")
+            decoder_dtype = next(self.taehv.parameters()).dtype
+            normalized = latents.to(
+                device=self.model.device,
+                dtype=decoder_dtype,
+            )
+            decoded_frames = []
+            frame = cache.decode(normalized)
+            while frame is not None:
+                decoded_frames.append(frame)
+                frame = cache.decode()
+            expected_frames = (1 if first else latents.shape[1] * self.temporal_compression)
+            if len(decoded_frames) != expected_frames:
+                raise RuntimeError("TAEHV produced an unexpected number of frames: "
+                                   f"expected={expected_frames}, actual={len(decoded_frames)}")
+            decoded = torch.cat(decoded_frames, dim=1)
+            frames = (decoded[0].clamp(0, 1) * 255).round().byte()
+            frames = frames.permute(0, 2, 3, 1).cpu().numpy()
+            return np.ascontiguousarray(frames), cache
+
         normalized = latents.permute(0, 2, 1, 3, 4).float()
         if bool(getattr(self.vae, "handles_latent_denorm", False)):
             denormalized = normalized
@@ -508,6 +610,23 @@ class WanTrackInferenceRuntime:
         frames = frames[0].permute(1, 2, 3, 0).byte().cpu().numpy()
         return np.ascontiguousarray(frames), cache
 
+    @torch.no_grad()
+    def decode_validation_prefix(
+        self,
+        latents: torch.Tensor,
+        *,
+        pixel_start: int,
+    ) -> np.ndarray:
+        """Decode a causal prefix through the same hook as SF validation."""
+        decoded = self.model.decode_latents(latents)
+        frames = ((decoded[0, :, pixel_start:].clamp(0, 1) * 255).round().permute(
+            1,
+            2,
+            3,
+            0,
+        ).byte().cpu().numpy())
+        return np.ascontiguousarray(frames)
+
     def clear_state(self) -> None:
         clear_wantrack_caches(self.model)
         clear_vae = getattr(self.vae, "clear_cache", None)
@@ -525,11 +644,15 @@ class CausalWanTrackSession:
         self._prepared: PreparedWanTrackInput | None = None
         self._sampling: WanTrackSamplingSettings | None = None
         self._controller: StableGridController | None = None
+        self._noise: torch.Tensor | None = None
         self._noise_generator: torch.Generator | None = None
+        self._noise_start = 0
         self._track_ids: torch.Tensor | None = None
+        self._track_visibility: np.ndarray | None = None
         self._batch: TrainingBatch | None = None
         self._vae_cache: list[torch.Tensor | None] | None = None
         self._history: list[np.ndarray] = []
+        self._visibility_history: list[np.ndarray] = []
         self._block_index = 0
         self._latent_start = 0
         self._session_started_ms = 0.0
@@ -566,27 +689,53 @@ class CausalWanTrackSession:
         prepared = (image if isinstance(image, PreparedWanTrackInput) else self.runtime.prepare(image, prompt))
         settings = WanTrackSamplingSettings.from_value(sampling)
         controller = StableGridController(handles, radius=radius)
-        generator = torch.Generator(device="cpu").manual_seed(settings.seed)
-        track_ids = torch.arange(
-            controller.grid.shape[0],
-            dtype=torch.long,
-            device="cpu",
-        ).unsqueeze(0)
-        batch = prepared.batch
-        batch.track_ids = track_ids.to(self.runtime.model.device)
+        batch = self.runtime.prepare_validation_batch(
+            prepared,
+            controller,
+            seed=settings.seed,
+        )
+        if batch.track_ids is None:
+            raise RuntimeError("validation-prepared WanTrack batch has no track IDs")
+        if batch.track_visibility is None:
+            raise RuntimeError("validation-prepared WanTrack batch has no track visibility")
         if batch.conditional_dict is None:
             raise RuntimeError("prepared WanTrack input is missing conditions")
-        batch.conditional_dict["track_ids"] = batch.track_ids
+        track_visibility = (batch.track_visibility[0].amax(dim=0).float().cpu().numpy())
+        for handle in handles:
+            point = np.asarray(
+                [float(handle["x"]), float(handle["y"])],
+                dtype=np.float32,
+            )
+            nearest = int(np.linalg.norm(controller.grid - point, axis=1).argmin())
+            track_visibility[nearest] = 1.0
+        if batch.latents is None:
+            raise RuntimeError("validation-prepared WanTrack batch has no latents")
+        # Match sample_wantrack exactly: one full-shape CPU draw followed by
+        # causal slicing. Repeated smaller randn calls do not preserve the same
+        # seeded sequence and diverge from SF validation at the first block.
+        noise_generator = torch.Generator(device="cpu").manual_seed(settings.seed)
+        noise = torch.randn(
+            tuple(batch.latents.shape),
+            generator=noise_generator,
+            dtype=torch.float32,
+        ).to(
+            device=self.runtime.model.device,
+            dtype=batch.latents.dtype,
+        )
         self.runtime.clear_state()
         now = time.monotonic() * 1000.0
         with self._lock:
             self._prepared = prepared
             self._sampling = settings
             self._controller = controller
-            self._noise_generator = generator
+            self._noise = noise
+            self._noise_generator = noise_generator
+            self._noise_start = 0
             self._track_ids = batch.track_ids
+            self._track_visibility = track_visibility
             self._batch = batch
             self._vae_cache = self.runtime.new_vae_cache()
+            self._visibility_history = []
             self._session_started_ms = now
             self._block_started_ms = now
             self._state = "running"
@@ -626,14 +775,17 @@ class CausalWanTrackSession:
             assert self._prepared is not None
             assert self._sampling is not None
             assert self._controller is not None
+            assert self._noise is not None
             assert self._noise_generator is not None
             assert self._track_ids is not None
+            assert self._track_visibility is not None
             assert self._batch is not None
-            prepared = self._prepared
             settings = self._sampling
             controller = self._controller
-            generator = self._noise_generator
-            track_ids = self._track_ids
+            noise = self._noise
+            noise_generator = self._noise_generator
+            noise_start = self._noise_start
+            track_visibility = self._track_visibility
             batch = self._batch
             block_index = self._block_index
             latent_start = self._latent_start
@@ -652,54 +804,82 @@ class CausalWanTrackSession:
                 interval_end_ms=block_started_ms,
             )
 
+        control_visibility = (np.linalg.norm(
+            control.tracks - controller.grid[None],
+            axis=-1,
+        ) > 1e-5).astype(np.float32)
         candidate_history = self._history + [control.tracks.copy()]
+        candidate_visibility = self._visibility_history + [control_visibility]
         all_points = np.concatenate(candidate_history, axis=0)
-        all_visibility = np.ones(all_points.shape[:2], dtype=np.float32)
+        all_visibility = np.concatenate(candidate_visibility, axis=0)
+        future_frames = max(
+            0,
+            self.runtime.validation_pixel_frames - all_points.shape[0],
+        )
+        if future_frames:
+            future = controller.render_constant(future_frames)
+            all_points = np.concatenate([all_points, future.tracks], axis=0)
+            future_visibility = (np.linalg.norm(
+                future.tracks - controller.grid[None],
+                axis=-1,
+            ) > 1e-5).astype(np.float32)
+            all_visibility = np.concatenate(
+                [all_visibility, future_visibility],
+                axis=0,
+            )
+        all_visibility *= track_visibility[None]
         ratio = self.runtime.temporal_compression
-        required_start = max(0, latent_start * ratio - (ratio - 1))
         required_end = (latent_start + latent_frames - 1) * ratio + 1
         if required_end > all_points.shape[0]:
             raise RuntimeError("control history does not cover the next causal block")
-        window_points = all_points[required_start:required_end]
-        window_visibility = all_visibility[required_start:required_end]
 
         try:
-            track_map = self.runtime.encode_track_window(
-                points=window_points,
-                visibility=window_visibility,
-                pixel_start=required_start,
-                latent_start=latent_start,
-                latent_t=latent_frames,
-                latent_h=prepared.latent_height,
-                latent_w=prepared.latent_width,
-                track_ids=track_ids,
-            )
-            batch.track_map = track_map
-            batch.track_points = None
-            batch.track_visibility = None
-            assert batch.conditional_dict is not None
-            batch.conditional_dict["track_map"] = track_map
-            batch.conditional_dict["track_points"] = None
-            batch.conditional_dict["track_visibility"] = None
-            noise = torch.randn(
-                (
-                    1,
-                    latent_frames,
-                    prepared.latent_channels,
-                    prepared.latent_height,
-                    prepared.latent_width,
-                ),
-                generator=generator,
+            device = self.runtime.model.device
+            batch.track_map = None
+            batch.track_points = torch.from_numpy(np.ascontiguousarray(all_points), ).unsqueeze(0).to(
+                device=device,
                 dtype=torch.float32,
-                device="cpu",
-            ).to(
-                device=self.runtime.model.device,
-                dtype=torch.bfloat16,
             )
+            batch.track_visibility = torch.from_numpy(np.ascontiguousarray(all_visibility), ).unsqueeze(0).to(
+                device=device,
+                dtype=torch.float32,
+            )
+            assert batch.conditional_dict is not None
+            batch.conditional_dict["track_map"] = None
+            batch.conditional_dict["track_points"] = batch.track_points
+            batch.conditional_dict["track_visibility"] = batch.track_visibility
+            block_end = latent_start + latent_frames
+            noise_end = noise_start + noise.shape[1]
+            if block_end > noise_end:
+                local_start = latent_start - noise_start
+                if local_start < 0 or local_start > noise.shape[1]:
+                    raise RuntimeError("causal noise window is not contiguous with the next block")
+                remaining_noise = noise[:, local_start:]
+                extension_frames = max(
+                    self.runtime.chunk_size,
+                    int(self.runtime.training_config.data.num_latent_t) - 1,
+                )
+                extended_noise = torch.randn(
+                    (
+                        noise.shape[0],
+                        extension_frames,
+                        noise.shape[2],
+                        noise.shape[3],
+                        noise.shape[4],
+                    ),
+                    generator=noise_generator,
+                    dtype=torch.float32,
+                ).to(device=device, dtype=noise.dtype)
+                noise = torch.cat([remaining_noise, extended_noise], dim=1)
+                noise_start = latent_start
+            local_start = latent_start - noise_start
+            noise_block = noise[:, local_start:local_start + latent_frames]
+            if noise_block.shape[1] != latent_frames:
+                raise RuntimeError("causal noise window does not cover the next block")
             latents = sample_wantrack_block(
                 self.runtime.model,
                 batch,
-                noise,
+                noise_block,
                 start_frame=latent_start,
                 num_inference_steps=settings.num_inference_steps,
                 text_guidance_scale=settings.text_guidance_scale,
@@ -721,6 +901,9 @@ class CausalWanTrackSession:
 
         with self._lock:
             self._history.append(control.tracks.copy())
+            self._visibility_history.append(control_visibility)
+            self._noise = noise
+            self._noise_start = noise_start
             self._vae_cache = vae_cache
             self._block_index += 1
             self._latent_start += latent_frames
@@ -740,5 +923,8 @@ class CausalWanTrackSession:
                 return
             self._state = "closed"
             self._close_reason = str(reason)
+            self._noise = None
+            self._noise_generator = None
             self._vae_cache = None
+            self._visibility_history = []
         self.runtime.clear_state()

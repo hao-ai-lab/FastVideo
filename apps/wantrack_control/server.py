@@ -9,6 +9,7 @@ import io
 import os
 from pathlib import Path
 import tempfile
+import time
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -60,9 +61,10 @@ class _RuntimeProvider:
             if self._runtime is None:
                 model_dir = os.getenv("WANTRACK_MODEL_DIR", "").strip()
                 yaml_path = os.getenv("WANTRACK_YAML_PATH", "").strip()
-                if not model_dir or not yaml_path:
-                    raise RuntimeError("Set WANTRACK_MODEL_DIR and WANTRACK_YAML_PATH before "
-                                       "preparing a session")
+                taehv_checkpoint = os.getenv("WANTRACK_TAEHV_CHECKPOINT", "").strip()
+                if not model_dir or not yaml_path or not taehv_checkpoint:
+                    raise RuntimeError("Set WANTRACK_MODEL_DIR, WANTRACK_YAML_PATH, and "
+                                       "WANTRACK_TAEHV_CHECKPOINT before preparing a session")
                 from fastvideo.train.models.wantrack.runtime import (
                     WanTrackInferenceRuntime, )
 
@@ -70,6 +72,7 @@ class _RuntimeProvider:
                     WanTrackInferenceRuntime.from_export,
                     model_dir,
                     yaml_path,
+                    taehv_checkpoint,
                 )
         return self._runtime
 
@@ -152,7 +155,7 @@ def create_app(
                     raise
 
         async def run_generation(runtime_value: Any) -> None:
-            nonlocal owns_generation_lock, connected
+            nonlocal owns_generation_lock, connected, generation_task
             writer = app.state.writer_factory(
                 app.state.output_dir,
                 fps=float(getattr(runtime_value, "fps", 16.0)),
@@ -163,11 +166,15 @@ def create_app(
             try:
                 while not stop_event.is_set():
                     block_index = int(getattr(session, "block_index", 0))
+                    block_started_at = time.perf_counter()
                     await send_json({
                         "type": "block_started",
                         "block_index": block_index,
+                        "num_inference_steps": 4,
+                        "cfg_enabled": False,
                     })
                     block = await asyncio.to_thread(session.generate_next_block)
+                    generated_at = time.perf_counter()
                     applied_revision = int(_block_value(block, "applied_revision", 0))
                     if applied_revision > last_applied_revision:
                         last_applied_revision = applied_revision
@@ -179,11 +186,16 @@ def create_app(
                             "active_handle_ids": list(_block_value(block, "active_handle_ids", ())),
                         })
                     frames = _block_value(block, "pixel_frames")
+                    await send_json({
+                        "type": "block_encoding",
+                        "block_index": block_index,
+                    })
                     encoded = await asyncio.to_thread(
                         writer.encode_block,
                         frames,
                         int(_block_value(block, "block_index", block_index)),
                     )
+                    encoded_at = time.perf_counter()
                     if not init_sent:
                         await send_json({
                             "type": "media_init",
@@ -196,6 +208,8 @@ def create_app(
                         "type": "media_segment_complete",
                         "block_index": encoded.block_index,
                         "bytes": len(encoded.media_bytes),
+                        "generation_ms": round((generated_at - block_started_at) * 1000),
+                        "encoding_ms": round((encoded_at - generated_at) * 1000),
                     })
             except Exception as exc:
                 terminal_error = str(exc) or type(exc).__name__
@@ -229,6 +243,7 @@ def create_app(
                             "blocks": len(writer.block_paths),
                             "download_url": download_url,
                         })
+                generation_task = None
 
         async def handle_message(message: dict[str, Any]) -> None:
             nonlocal prepared, session, generation_task
@@ -237,7 +252,20 @@ def create_app(
             if message_type == "prepare":
                 if generation_task is not None:
                     raise ValueError("prepare is unavailable during generation")
+                prepare_started_at = time.perf_counter()
+                await send_json({
+                    "type": "progress",
+                    "phase": "loading_model",
+                    "message": "Loading Track-v0",
+                    "detail": "The first request loads the SF checkpoint onto the GPU.",
+                })
                 runtime_value = await app.state.runtime_provider.get()
+                await send_json({
+                    "type": "progress",
+                    "phase": "preparing_input",
+                    "message": "Preparing image and prompt",
+                    "detail": "Encoding text, the reference image, and its first-frame latent.",
+                })
                 image_bytes = _decode_image(message.get("image", ""))
                 prompt = str(message.get("prompt", "") or "")
                 prepared = await asyncio.to_thread(
@@ -255,6 +283,9 @@ def create_app(
                     "height": processed_image.height,
                     "fps": float(getattr(runtime_value, "fps", 16.0)),
                     "chunk_size": int(getattr(runtime_value, "chunk_size", 3)),
+                    "causal_recipe": getattr(runtime_value, "causal_recipe", {}),
+                    "decoder": str(getattr(runtime_value, "decoder_name", "unknown")),
+                    "prepare_ms": round((time.perf_counter() - prepare_started_at) * 1000),
                 })
                 return
 
@@ -268,15 +299,23 @@ def create_app(
                     raise ValueError("start requires at least one handle")
                 if app.state.active_generation.locked():
                     raise RuntimeError("another WanTrack session is already generating")
+                start_started_at = time.perf_counter()
+                await send_json({
+                    "type": "progress",
+                    "phase": "starting_session",
+                    "message": "Starting causal session",
+                    "detail": "Initializing controls and the causal KV cache.",
+                })
                 await app.state.active_generation.acquire()
                 owns_generation_lock = True
                 runtime_value = await app.state.runtime_provider.get()
                 session = runtime_value.create_session()
                 sampling = {
                     "seed": int(message.get("seed", 0)),
-                    "steps": int(message.get("steps", 30)),
-                    "text_guidance": float(message.get("text_guidance", 3.0)),
-                    "motion_guidance": float(message.get("motion_guidance", 1.5)),
+                    "num_inference_steps": 4,
+                    "text_guidance_scale": 1.0,
+                    "motion_guidance_scale": 1.0,
+                    "motion_cfg": False,
                 }
                 try:
                     await asyncio.to_thread(
@@ -295,7 +334,13 @@ def create_app(
                     "type": "session_started",
                     "fps": float(getattr(runtime_value, "fps", 16.0)),
                     "chunk_size": int(getattr(runtime_value, "chunk_size", 3)),
+                    "num_inference_steps": 4,
+                    "cfg_enabled": False,
+                    "causal_recipe": getattr(runtime_value, "causal_recipe", {}),
+                    "decoder": str(getattr(runtime_value, "decoder_name", "unknown")),
+                    "start_ms": round((time.perf_counter() - start_started_at) * 1000),
                 })
+                stop_event.clear()
                 generation_task = asyncio.create_task(run_generation(runtime_value))
                 return
 

@@ -43,7 +43,13 @@ class _FakeSession:
     def start(self, image, prompt, handles, sampling, *, radius):
         assert image.prompt == prompt
         assert handles
-        assert sampling["steps"] > 0
+        assert sampling == {
+            "seed": 0,
+            "num_inference_steps": 4,
+            "text_guidance_scale": 1.0,
+            "motion_guidance_scale": 1.0,
+            "motion_cfg": False,
+        }
         assert radius > 0
 
     def apply_control_revision(self, revision, **kwargs):
@@ -74,6 +80,12 @@ class _FakeSession:
 class _FakeRuntime:
     fps = 16.0
     chunk_size = 3
+    decoder_name = "TAEHV (taew2_1)"
+    causal_recipe = {
+        "local_attn_size": 6,
+        "sink_size": 1,
+        "rope_cache_policy": "relativistic",
+    }
 
     def __init__(self, session):
         self.session = session
@@ -140,7 +152,13 @@ def _prepare_and_start(websocket):
         "image": base64.b64encode(image.getvalue()).decode(),
         "prompt": "",
     })
-    assert _json(websocket)["type"] == "prepared"
+    assert _json(websocket)["phase"] == "loading_model"
+    assert _json(websocket)["phase"] == "preparing_input"
+    prepared = _json(websocket)
+    assert prepared["type"] == "prepared"
+    assert prepared["prepare_ms"] >= 0
+    assert prepared["causal_recipe"]["rope_cache_policy"] == "relativistic"
+    assert prepared["decoder"] == "TAEHV (taew2_1)"
     websocket.send_json({
         "type": "start",
         "handles": [{
@@ -149,9 +167,18 @@ def _prepare_and_start(websocket):
             "y": 0.5,
         }],
         "radius": 0.15,
-        "steps": 2,
+        # Client overrides are ignored for the fixed SF recipe.
+        "steps": 99,
+        "text_guidance": 9.0,
+        "motion_guidance": 9.0,
     })
-    assert _json(websocket)["type"] == "session_started"
+    assert _json(websocket)["phase"] == "starting_session"
+    started = _json(websocket)
+    assert started["type"] == "session_started"
+    assert started["num_inference_steps"] == 4
+    assert started["cfg_enabled"] is False
+    assert started["causal_recipe"]["local_attn_size"] == 6
+    assert started["decoder"] == "TAEHV (taew2_1)"
 
 
 def test_two_block_binary_order_future_update_and_stop(tmp_path):
@@ -165,10 +192,11 @@ def test_two_block_binary_order_future_update_and_stop(tmp_path):
     with TestClient(app) as client:
         with client.websocket_connect("/ws") as websocket:
             _prepare_and_start(websocket)
-            assert _json(websocket) == {
-                "type": "block_started",
-                "block_index": 0,
-            }
+            started = _json(websocket)
+            assert started["type"] == "block_started"
+            assert started["block_index"] == 0
+            assert started["num_inference_steps"] == 4
+            assert started["cfg_enabled"] is False
             websocket.send_json({
                 "type": "control_update",
                 "revision": 1,
@@ -187,6 +215,7 @@ def test_two_block_binary_order_future_update_and_stop(tmp_path):
             stale = _json(websocket)
             assert stale["status"] == "ignored_stale"
             gates[0].set()
+            assert _json(websocket)["type"] == "block_encoding"
             assert _json(websocket)["type"] == "media_init"
             assert _bytes(websocket) == b"init"
             assert _bytes(websocket) == b"media-0"
@@ -198,6 +227,7 @@ def test_two_block_binary_order_future_update_and_stop(tmp_path):
             applied = _json(websocket)
             assert applied["type"] == "control_applied"
             assert applied["revision"] == 1
+            assert _json(websocket)["type"] == "block_encoding"
             assert _bytes(websocket) == b"media-1"
             assert _json(websocket)["type"] == "media_segment_complete"
             complete = _json(websocket)
@@ -224,6 +254,7 @@ def test_error_releases_lock_and_preserves_completed_prefix(tmp_path):
         with client.websocket_connect("/ws") as websocket:
             _prepare_and_start(websocket)
             assert _json(websocket)["type"] == "block_started"
+            assert _json(websocket)["type"] == "block_encoding"
             assert _json(websocket)["type"] == "media_init"
             assert _bytes(websocket) == b"init"
             assert _bytes(websocket) == b"media-0"

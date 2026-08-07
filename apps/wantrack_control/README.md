@@ -3,13 +3,16 @@
 This standalone prototype prepares one image and continuously generates causal
 WanTrack blocks. Handle updates received during block N are committed only at
 the next block boundary, so generated frames and control history are immutable.
-One GPU session may generate at a time.
+One GPU session may generate at a time. The SF checkpoint uses its fixed
+four-step sampler without classifier-free guidance; the server does not accept
+client overrides for steps or guidance.
 
 Set a Diffusers-format causal WanTrack export and its training YAML, then launch:
 
 ```bash
 export WANTRACK_MODEL_DIR=/path/to/wantrack-causal-export
 export WANTRACK_YAML_PATH=/path/to/causal_i2v.yaml
+export WANTRACK_TAEHV_CHECKPOINT=/path/to/taew2_1.pth
 python -m apps.wantrack_control
 ```
 
@@ -18,8 +21,13 @@ blocks are preserved under `WANTRACK_OUTPUT_DIR` (or the system temporary
 directory) and concatenated into a downloadable MP4 on Stop, disconnect, or a
 recoverable failure.
 
+The interactive preview uses the official TAEHV `StreamingTAEHV` decoder with
+the Wan 2.1 `taew2_1.pth` weights. The full Wan VAE remains loaded only because
+input preparation still needs its encoder.
+
 The `/ws` endpoint accepts `prepare`, `start`, `control_update`, and `stop`
-JSON messages. It emits `prepared`, `session_started`, `block_started`,
-`control_applied`, `media_init`, `media_segment_complete`, `stream_complete`,
-and terminal `error` events. Binary frames carry one fMP4 initialization
-section followed by ordered block fragments.
+JSON messages. It emits phase-specific `progress`, `prepared`,
+`session_started`, `block_started`, `block_encoding`, `control_applied`,
+`media_init`, `media_segment_complete`, `stream_complete`, and terminal
+`error` events. Binary frames carry one fMP4 initialization section followed
+by ordered block fragments.

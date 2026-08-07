@@ -13,7 +13,10 @@
         <h1>WanTrack Control</h1>
         <p>Drag points to steer the next causal block.</p>
       </div>
-      <span id="status">Disconnected</span>
+      <div id="status" role="status" aria-live="polite">
+        <span id="status-label">Disconnected</span>
+        <small id="status-detail">Waiting for the server connection.</small>
+      </div>
     </header>
 
     <section class="controls">
@@ -40,9 +43,10 @@
 
     <section class="sampling">
       <label>Seed <input id="seed" type="number" value="0" step="1"></label>
-      <label>Steps <input id="steps" type="number" value="30" min="1" max="100"></label>
-      <label>Text guidance <input id="text-guidance" type="number" value="3" min="0" step="0.1"></label>
-      <label>Motion guidance <input id="motion-guidance" type="number" value="1.5" min="0" step="0.1"></label>
+      <div class="recipe">
+        <strong>SF checkpoint</strong>
+        <span>4 denoising steps · CFG off · TAEHV · relativistic RoPE · local 6 · sink 1</span>
+      </div>
       <button id="start" disabled>Start</button>
       <button id="stop" disabled>Stop</button>
     </section>

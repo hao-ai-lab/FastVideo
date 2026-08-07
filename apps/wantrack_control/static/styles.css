@@ -10,7 +10,21 @@ main { width: min(1180px, calc(100% - 32px)); margin: 24px auto; }
 header { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
 h1 { margin: 0; font-size: 22px; }
 p { margin: 6px 0 20px; color: #929ba3; }
-#status { padding: 7px 10px; border-radius: 99px; background: #23282d; color: #b9c1c8; font-size: 12px; }
+#status {
+  display: grid; grid-template-columns: auto 1fr; gap: 2px 9px; min-width: 300px;
+  padding: 9px 12px; border-radius: 10px; background: #23282d; color: #dce2e7;
+}
+#status::before {
+  content: ""; grid-row: 1 / 3; align-self: center; width: 8px; height: 8px;
+  border-radius: 50%; background: #62d58b;
+}
+#status[data-busy="true"]::before {
+  width: 12px; height: 12px; border: 2px solid #65717a; border-top-color: #edf0f2;
+  background: transparent; animation: spin .8s linear infinite;
+}
+#status-label { font-size: 12px; font-weight: 700; }
+#status-detail { color: #9ea8b0; font-size: 11px; }
+@keyframes spin { to { transform: rotate(360deg); } }
 .controls, .sampling, .canvas-toolbar { display: flex; align-items: end; gap: 10px; flex-wrap: wrap; }
 label { color: #aeb6bd; font-size: 12px; }
 input[type="text"], input[type="number"], input[type="file"] {
@@ -34,4 +48,10 @@ canvas { touch-action: none; cursor: crosshair; }
 #download { display: inline-block; margin-top: 10px; text-decoration: none; }
 #download[hidden] { display: none; }
 .sampling input { width: 92px; }
+.recipe {
+  display: grid; gap: 2px; min-height: 36px; padding: 6px 10px;
+  border: 1px solid #353b41; border-radius: 7px; background: #1a1e22;
+}
+.recipe strong { color: #edf0f2; font-size: 12px; }
+.recipe span { color: #8f99a1; font-size: 11px; }
 @media (max-width: 800px) { .workspace { grid-template-columns: 1fr; } }
