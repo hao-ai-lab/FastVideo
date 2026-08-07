@@ -13,11 +13,11 @@ import os
 
 import cv2
 import numpy as np
-import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
 
 from fastvideo.dataset.dataloader.schema import pyarrow_schema_t2v
+from fastvideo.dataset.dataloader.parquet_io import records_to_table
 from fastvideo.utils import maybe_download_model
 
 # --- Config ---
@@ -166,11 +166,7 @@ def main() -> None:
     torch.cuda.empty_cache()
 
     # Write parquet
-    table = pa.table(
-        {k: [r[k] for r in records]
-         for k in records[0]},
-        schema=pyarrow_schema_t2v,
-    )
+    table = records_to_table(records, pyarrow_schema_t2v)
     output_path = os.path.join(OUTPUT_DIR, "data_00000.parquet")
     pq.write_table(table, output_path)
     print(f"\nWrote {len(records)} records to {output_path}")
