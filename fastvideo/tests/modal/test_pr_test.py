@@ -323,3 +323,15 @@ def test_run_unit_test_collects_modal_cache_runner_tests(monkeypatch):
         "./fastvideo/tests/modal/test_ssim_test.py",
     ):
         assert test_path in commands[0]
+
+
+def test_run_unit_test_collects_the_whole_attention_directory(monkeypatch):
+    """Naming individual files under fastvideo/tests/attention/ let new ones
+    land uncovered; collect the directory so that cannot happen silently."""
+    module = _load_pr_test_module(monkeypatch)
+    commands = []
+    monkeypatch.setattr(module, "run_test", commands.append)
+
+    module.run_unit_test()
+
+    assert "./fastvideo/tests/attention/ " in commands[0]
