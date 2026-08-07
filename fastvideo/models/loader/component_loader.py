@@ -104,6 +104,8 @@ class ComponentLoader(ABC):
             "image_processor": (ImageProcessorLoader, "transformers"),
             "feature_extractor": (ImageProcessorLoader, "transformers"),
             "image_encoder": (ImageEncoderLoader, "transformers"),
+            "image_encoder_2": (ImageEncoderLoader, "transformers"),
+            "image_encoder_3": (ImageEncoderLoader, "transformers"),
             "vision_language_encoder": (VisionLanguageEncoderLoader, "transformers"),
             "processor": (ProcessorLoader, "transformers"),
             "upsampler": (UpsamplerLoader, "diffusers"),
@@ -371,15 +373,18 @@ class TextEncoderLoader(ComponentLoader):
         fastvideo_args: FastVideoArgs,
         dtype: str = "fp16",
         use_text_encoder_override: bool = False,  # prevent subclasses from misusing
+        cpu_offload: bool | None = None,
     ):
+        if cpu_offload is None:
+            cpu_offload = fastvideo_args.text_encoder_cpu_offload
         use_cpu_offload = (
-            fastvideo_args.text_encoder_cpu_offload
+            cpu_offload
             and len(getattr(model_config, "_fsdp_shard_conditions", [])) > 0
         )
 
         from fastvideo.platforms import current_platform
 
-        if fastvideo_args.text_encoder_cpu_offload:
+        if cpu_offload:
             target_device = (
                 torch.device("mps")
                 if current_platform.is_mps()
@@ -435,7 +440,7 @@ class TextEncoderLoader(ComponentLoader):
                     self._get_all_weights(
                         model,
                         model_path,
-                        to_cpu=fastvideo_args.text_encoder_cpu_offload,
+                        to_cpu=cpu_offload,
                     )
                 )  # type: ignore
 
@@ -516,7 +521,36 @@ class ImageEncoderLoader(TextEncoderLoader):
         model_config.pop("model_type", None)
         logger.info("HF Model config: %s", model_config)
 
-        encoder_config = fastvideo_args.pipeline_config.image_encoder_config
+        base = os.path.basename(os.path.normpath(model_path))
+        index = 0
+        if base.startswith("image_encoder_"):
+            try:
+                index = int(base.split("_")[-1]) - 1
+            except ValueError:
+                index = 0
+
+        encoder_configs = getattr(
+            fastvideo_args.pipeline_config, "image_encoder_configs", None)
+        encoder_precisions = getattr(
+            fastvideo_args.pipeline_config, "image_encoder_precisions", None)
+        if encoder_configs is None:
+            if index != 0:
+                raise IndexError(
+                    f"image encoder index {index} requires pipeline_config."
+                    "image_encoder_configs")
+            encoder_config = fastvideo_args.pipeline_config.image_encoder_config
+            encoder_precision = fastvideo_args.pipeline_config.image_encoder_precision
+        else:
+            if index < 0 or index >= len(encoder_configs):
+                raise IndexError(
+                    f"image encoder index {index} out of range for "
+                    f"image_encoder_configs (len={len(encoder_configs)})")
+            encoder_config = encoder_configs[index]
+            if encoder_precisions is None or index >= len(
+                    encoder_precisions):
+                raise IndexError(
+                    f"image encoder index {index} has no matching precision")
+            encoder_precision = encoder_precisions[index]
         encoder_config.update_model_arch(model_config)
         record_resolved_attention_backend(encoder_config)
 
@@ -536,7 +570,8 @@ class ImageEncoderLoader(TextEncoderLoader):
             encoder_config,
             target_device,
             fastvideo_args,
-            fastvideo_args.pipeline_config.image_encoder_precision,
+            encoder_precision,
+            cpu_offload=fastvideo_args.image_encoder_cpu_offload,
         )
 
 
@@ -958,8 +993,14 @@ class AudioDecoderLoader(ComponentLoader):
         precision = getattr(
             fastvideo_args.pipeline_config, "audio_decoder_precision", "bf16"
         )
-        with set_default_torch_dtype(PRECISION_TO_TYPE[precision]):
-            audio_decoder = model_cls(config).to(target_device)
+        # MMAudio normalizes its magnitude-preserving convolution weights in
+        # fp32 and only then casts the whole feature utility module to bf16.
+        # Constructing/loading directly in bf16 quantizes the unnormalized
+        # checkpoint first and changes the decoded mel trajectory.
+        construction_precision = "fp32" if class_name == "MMAudioVAE" else precision
+        construction_device = torch.device("cpu") if class_name == "MMAudioVAE" else target_device
+        with set_default_torch_dtype(PRECISION_TO_TYPE[construction_precision]):
+            audio_decoder = model_cls(config).to(construction_device)
 
         safetensors_list = glob.glob(
             os.path.join(str(model_path), "*.safetensors")
@@ -967,6 +1008,11 @@ class AudioDecoderLoader(ComponentLoader):
         loaded: dict[str, torch.Tensor] = {}
         for sf_file in safetensors_list:
             loaded.update(safetensors_load_file(sf_file))
+
+        if class_name == "MMAudioVAE":
+            audio_decoder.load_state_dict(loaded, strict=True)
+            audio_decoder.remove_weight_norm()
+            return audio_decoder.to(device=target_device, dtype=PRECISION_TO_TYPE[precision]).eval()
 
         decoder_state = {}
         for name, tensor in loaded.items():
@@ -981,7 +1027,7 @@ class AudioDecoderLoader(ComponentLoader):
 
 
 class VocoderLoader(ComponentLoader):
-    """Loader for LTX-2 vocoder."""
+    """Loader for native vocoders."""
 
     def load(self, model_path: str, fastvideo_args: FastVideoArgs):
         config = get_diffusers_config(model=model_path)
@@ -993,8 +1039,12 @@ class VocoderLoader(ComponentLoader):
         precision = getattr(
             fastvideo_args.pipeline_config, "vocoder_precision", "bf16"
         )
-        with set_default_torch_dtype(PRECISION_TO_TYPE[precision]):
-            vocoder = model_cls(config).to(target_device)
+        # Canonical BigVGAN likewise removes parametrized weight norm in fp32
+        # before the official MMAudio feature module is cast to bf16.
+        construction_precision = "fp32" if class_name == "BigVGANV2" else precision
+        construction_device = torch.device("cpu") if class_name == "BigVGANV2" else target_device
+        with set_default_torch_dtype(PRECISION_TO_TYPE[construction_precision]):
+            vocoder = model_cls(config).to(construction_device)
 
         safetensors_list = glob.glob(
             os.path.join(str(model_path), "*.safetensors")
@@ -1002,6 +1052,11 @@ class VocoderLoader(ComponentLoader):
         loaded: dict[str, torch.Tensor] = {}
         for sf_file in safetensors_list:
             loaded.update(safetensors_load_file(sf_file))
+
+        if class_name == "BigVGANV2":
+            vocoder.load_state_dict(loaded, strict=True)
+            vocoder.remove_weight_norm()
+            return vocoder.to(device=target_device, dtype=PRECISION_TO_TYPE[precision]).eval()
 
         target_module = getattr(vocoder, "model", vocoder)
         target_module.load_state_dict(loaded, strict=False)

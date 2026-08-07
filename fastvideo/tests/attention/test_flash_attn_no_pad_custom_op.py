@@ -87,6 +87,50 @@ def test_no_pad_inference_matches_original(no_pad_impls, dtype):
     torch.testing.assert_close(out_test, out_ref, atol=0, rtol=0)
 
 
+def test_backend_translates_explicit_causal_mask(no_pad_impls):
+    """MMAudio's additive mask must route through native causal attention."""
+    from fastvideo.attention.backends.flash_attn import (
+        FlashAttentionImpl,
+        flash_attn_func_compilable,
+    )
+    from fastvideo.attention.backends.sdpa import SDPAMetadata
+
+    torch.manual_seed(0)
+    device = torch.device("cuda")
+    batch, seqlen, heads, head_dim = 1, 32, 2, 64
+    query = torch.randn(batch, seqlen, heads, head_dim, device=device, dtype=torch.bfloat16)
+    key = torch.randn_like(query)
+    value = torch.randn_like(query)
+    causal_mask = torch.full(
+        (1, 1, seqlen, seqlen),
+        float("-inf"),
+        device=device,
+        dtype=query.dtype,
+    ).triu_(1)
+    impl = FlashAttentionImpl(
+        num_heads=heads,
+        head_size=head_dim,
+        causal=False,
+        softmax_scale=head_dim**-0.5,
+    )
+
+    with torch.inference_mode():
+        expected = flash_attn_func_compilable(
+            query,
+            key,
+            value,
+            softmax_scale=head_dim**-0.5,
+            causal=True,
+        )
+        actual = impl.forward(
+            query,
+            key,
+            value,
+            SDPAMetadata(current_timestep=0, attn_mask=causal_mask, is_causal=True),
+        )
+    torch.testing.assert_close(actual, expected, atol=0, rtol=0)
+
+
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
 def test_no_pad_training_backward_through_registered_autograd(no_pad_impls, dtype):
     """FA2: grads flow through the registered op and match the original."""
