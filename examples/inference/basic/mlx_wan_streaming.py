@@ -31,12 +31,27 @@ import numpy as np
 
 
 def _mx_dtype(name: str):
+    """Map a precision name to its corresponding MLX data type.
+
+    Parameters:
+        name (str): Precision name: ``"fp16"``, ``"bf16"``, or ``"fp32"``.
+
+    Returns:
+        MLX data type corresponding to the requested precision.
+    """
     import mlx.core as mx
 
     return {"fp16": mx.float16, "bf16": mx.bfloat16, "fp32": mx.float32}[name]
 
 
 def main() -> None:
+    """
+    Run a command-line benchmark for streaming causal Wan generation on Apple Silicon.
+
+    The command loads the causal DiT model, prepares prompt embeddings and noise latents,
+    streams generated latent blocks, and reports loading, latency, throughput, and peak-memory
+    metrics. Metrics can optionally be written to a JSON file.
+    """
     parser = argparse.ArgumentParser(description="MLX causal Wan streaming demo + latency benchmark.")
     parser.add_argument("--model-root", type=Path, required=True,
                         help="Root with transformer/ (and optionally text_encoder/, tokenizer/, vae/).")

@@ -43,6 +43,11 @@ HF = dict(
 
 
 def _build_torch_model() -> CausalWanTransformer3DModel:
+    """Build a deterministic, evaluation-mode PyTorch reference model with initialized parameters.
+
+    Returns:
+        CausalWanTransformer3DModel: The initialized CPU reference model.
+    """
     cfg = WanVideoConfig(arch_config=WanVideoArchConfig(**ARCH))
     model = CausalWanTransformer3DModel(config=cfg, hf_config=HF).to("cpu", torch.float32).eval()
     torch.manual_seed(SEED + 3)
@@ -56,6 +61,15 @@ def _build_torch_model() -> CausalWanTransformer3DModel:
 
 
 def _mlx_from_torch(model: CausalWanTransformer3DModel) -> MLXCausalWanDiT:
+    """
+    Convert a PyTorch causal Wan transformer into an MLX causal DiT model.
+
+    Parameters:
+        model (CausalWanTransformer3DModel): PyTorch model whose weights and configuration are converted.
+
+    Returns:
+        MLXCausalWanDiT: MLX model with matching weights, transformer blocks, and text-length configuration.
+    """
     state = {name: value.detach().float() for name, value in model.state_dict().items()}
     inner_dim = NUM_HEADS * HEAD_DIM
     weights = {}
@@ -74,6 +88,11 @@ def _mlx_from_torch(model: CausalWanTransformer3DModel) -> MLXCausalWanDiT:
 
 
 def _full_rotary():
+    """Generate PyTorch and MLX rotary positional embeddings for all latent frames.
+
+    Returns:
+        tuple: PyTorch cosine and sine embeddings followed by their MLX equivalents.
+    """
     d = (NUM_HEADS * HEAD_DIM) // NUM_HEADS
     rope_dim_list = [d - 4 * (d // 6), 2 * (d // 6), 2 * (d // 6)]
     cos, sin = get_rotary_pos_embed(
@@ -84,6 +103,12 @@ def _full_rotary():
 
 @pytest.mark.usefixtures("distributed_setup")
 def test_mlx_causal_dit_matches_torch_streaming() -> None:
+    """
+    Verify that the MLX causal transformer matches the PyTorch reference during frame-by-frame streaming.
+
+    Returns:
+        None
+    """
     torch_model = _build_torch_model()
     mlx_model = _mlx_from_torch(torch_model)
     frame_seqlen = (HEIGHT // 2) * (WIDTH // 2)

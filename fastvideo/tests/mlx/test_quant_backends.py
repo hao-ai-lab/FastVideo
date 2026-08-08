@@ -57,6 +57,12 @@ def _frobenius_rel_error(y: mx.array, ref: mx.array) -> float:
 
 
 def _make_inputs() -> tuple[mx.array, mx.array, mx.array]:
+    """
+    Generate deterministic random weights and inputs with their matrix multiplication reference.
+
+    Returns:
+        tuple[mx.array, mx.array, mx.array]: The weights, inputs, and fp16 reference output.
+    """
     mx.random.seed(_SEED)
     w = mx.random.normal((_WEIGHT_ROWS, _WEIGHT_COLS)).astype(mx.float16)
     x = mx.random.normal((_BATCH, _WEIGHT_COLS)).astype(mx.float16)
@@ -84,7 +90,12 @@ def test_quant_backend_matmul_accuracy(backend: str) -> None:
 
 
 def test_quant_backends_summary_table(capsys: pytest.CaptureFixture[str]) -> None:
-    """Print a one-row-per-backend summary when run with pytest -s."""
+    """
+    Print a support, storage, and relative-error summary for each quantization backend.
+
+    The table reports unsupported backends as unavailable and asserts that the affine
+    int8 baseline is supported.
+    """
     w, x, ref = _make_inputs()
     rows: list[tuple[str, str, str, str]] = []
 

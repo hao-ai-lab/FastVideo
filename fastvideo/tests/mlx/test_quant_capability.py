@@ -56,6 +56,7 @@ def test_unsupported_mode_raises_with_actionable_message(monkeypatch) -> None:
 
 
 def test_loader_rejects_unsupported_mode_before_reading_weights(monkeypatch, tmp_path) -> None:
+    """Verify that unsupported quantization modes are rejected before checkpoint weights are read."""
     from fastvideo.mlx_runtime.fastwan import mlx_dit_from_diffusers_safetensors
 
     spec_key = ("mxfp4", None, None)

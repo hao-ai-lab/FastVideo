@@ -30,6 +30,16 @@ from fastvideo.layers.quantization.mlx_mxfp4_qat import (  # noqa: E402
 
 
 def _unpack_mxfp4_codes(packed: np.ndarray, *, out_cols: int) -> np.ndarray:
+    """
+    Unpack packed MXFP4 values into individual 4-bit codes.
+
+    Parameters:
+        packed (np.ndarray): Array containing eight packed MXFP4 codes per element.
+        out_cols (int): Number of output columns to retain.
+
+    Returns:
+        np.ndarray: Integer array containing the unpacked MXFP4 codes.
+    """
     words = packed.astype(np.uint64)
     codes = np.zeros((*packed.shape[:-1], packed.shape[-1] * 8), dtype=np.int32)
     for k in range(8):
@@ -38,6 +48,16 @@ def _unpack_mxfp4_codes(packed: np.ndarray, *, out_cols: int) -> np.ndarray:
 
 
 def _mlx_mxfp4_quantize(w_np: np.ndarray, *, device) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Quantize and dequantize an array using MLX MXFP4 on the specified device.
+
+    Parameters:
+        w_np (np.ndarray): Input values to quantize.
+        device: MLX device on which to perform the operation.
+
+    Returns:
+        tuple[np.ndarray, np.ndarray, np.ndarray]: Packed MXFP4 values, E8M0 scale values, and dequantized float32 values.
+    """
     with mx.stream(device):
         q, scales = mx.quantize(mx.array(w_np), mode="mxfp4")
         deq = mx.dequantize(q, scales, mode="mxfp4")

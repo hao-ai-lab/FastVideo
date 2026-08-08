@@ -28,12 +28,23 @@ per-block work ``O(chunk * (window + sink) * D)`` and total work
 
 from __future__ import annotations
 
-from typing import Optional
-
 import mlx.core as mx
 
 
-def _default_scale(head_dim: int, scale: Optional[float]) -> float:
+def _default_scale(head_dim: int, scale: float | None) -> float:
+    """
+    Determine the attention scaling factor from an explicit value or head dimension.
+
+    Parameters:
+        head_dim (int): The attention head dimension used to derive the default scale.
+        scale (Optional[float]): An explicit scaling factor.
+
+    Returns:
+        float: The explicit scale converted to a float, or the reciprocal square root of `head_dim`.
+
+    Raises:
+        ValueError: If `scale` is not provided and `head_dim` is not positive.
+    """
     if scale is not None:
         return float(scale)
     if head_dim <= 0:
@@ -42,16 +53,26 @@ def _default_scale(head_dim: int, scale: Optional[float]) -> float:
 
 
 def _validate_qkv(q: mx.array, k: mx.array, v: mx.array) -> tuple[int, int, int, int]:
+    """
+    Validate compatible rank-4 query, key, and value tensors.
+
+    Parameters:
+        q (mx.array): Query tensor shaped `(B, H, S, D)`.
+        k (mx.array): Key tensor with the same shape as `q`.
+        v (mx.array): Value tensor with the same shape as `q`.
+
+    Returns:
+        tuple[int, int, int, int]: Batch size, head count, sequence length, and head dimension.
+
+    Raises:
+        ValueError: If the tensors are not rank 4, do not have identical shapes, or have an empty sequence or head dimension.
+    """
     if q.ndim != 4 or k.ndim != 4 or v.ndim != 4:
-        raise ValueError(
-            f"q/k/v must be rank-4 (B, H, S, D); got shapes "
-            f"{q.shape}, {k.shape}, {v.shape}"
-        )
+        raise ValueError(f"q/k/v must be rank-4 (B, H, S, D); got shapes "
+                         f"{q.shape}, {k.shape}, {v.shape}")
     b, h, s, d = q.shape
     if k.shape != (b, h, s, d) or v.shape != (b, h, s, d):
-        raise ValueError(
-            f"q/k/v shapes must match exactly; got q={q.shape}, k={k.shape}, v={v.shape}"
-        )
+        raise ValueError(f"q/k/v shapes must match exactly; got q={q.shape}, k={k.shape}, v={v.shape}")
     if s == 0:
         raise ValueError("sequence length S must be > 0")
     if d == 0:
@@ -63,9 +84,18 @@ def full_attention(
     q: mx.array,
     k: mx.array,
     v: mx.array,
-    scale: Optional[float] = None,
+    scale: float | None = None,
 ) -> mx.array:
-    """Full (dense) self-attention via fused SDPA.  Shapes ``(B, H, S, D)``."""
+    """
+    Compute dense scaled dot-product attention over the full sequence.
+
+    Parameters:
+        scale (float, optional): Attention scaling factor. If omitted, uses the
+            inverse square root of the head dimension.
+
+    Returns:
+        mx.array: Attention output with shape ``(B, H, S, D)``.
+    """
     _, _, _, d = _validate_qkv(q, k, v)
     sc = _default_scale(d, scale)
     return mx.fast.scaled_dot_product_attention(q, k, v, scale=sc)
@@ -126,25 +156,30 @@ def windowed_attention(
     v: mx.array,
     window: int,
     sink: int = 0,
-    scale: Optional[float] = None,
+    scale: float | None = None,
     *,
-    chunk_size: Optional[int] = None,
+    chunk_size: int | None = None,
 ) -> mx.array:
-    """Block-local symmetric sliding-window attention (chunked SDPA).
+    """
+    Apply symmetric sliding-window self-attention with optional global sink positions.
 
-    Args:
-        q, k, v: ``(B, H, S, D)`` query/key/value tensors.
-        window: Symmetric window width in tokens (see module docstring).
-            Must be ``>= 1``.  When ``window >= S`` the result matches full
-            attention up to floating-point noise (sinks are redundant).
-        sink: Number of leading key positions that every query may attend to
-            globally.  Must be ``>= 0``.
-        scale: Softmax scale; defaults to ``1 / sqrt(D)``.
-        chunk_size: Query-block length for the FLOP-reducing tile loop.
-            Defaults to ``min(window, 512)`` (clamped to at least 1).
+    Parameters:
+        q (mx.array): Query tensor shaped `(B, H, S, D)`.
+        k (mx.array): Key tensor shaped `(B, H, S, D)`.
+        v (mx.array): Value tensor shaped `(B, H, S, D)`.
+        window (int): Symmetric attention window width in tokens; must be at least 1.
+        sink (int): Number of leading key positions available to every query; must
+            be between 0 and the sequence length.
+        scale (Optional[float]): Softmax scale. Defaults to `1 / sqrt(D)`.
+        chunk_size (Optional[int]): Query block length used for chunked processing.
+            Defaults to the smaller of `window` and 512.
 
     Returns:
-        Attention output with the same shape as ``q``.
+        mx.array: Attention output with the same shape as `q`.
+
+    Raises:
+        ValueError: If the inputs or attention parameters are invalid.
+        RuntimeError: If a query block has no available keys.
     """
     _, _, seq_len, d = _validate_qkv(q, k, v)
 
@@ -164,10 +199,7 @@ def windowed_attention(
     if window >= seq_len:
         return mx.fast.scaled_dot_product_attention(q, k, v, scale=sc)
 
-    if chunk_size is None:
-        chunk = min(window, 512)
-    else:
-        chunk = int(chunk_size)
+    chunk = min(window, 512) if chunk_size is None else int(chunk_size)
     if chunk < 1:
         raise ValueError(f"chunk_size must be >= 1, got {chunk}")
     chunk = min(chunk, seq_len)
@@ -179,12 +211,8 @@ def windowed_attention(
         ranges = _key_ranges_for_block(qs, qe, seq_len, half, sink)
         k_block, v_block = _concat_kv_slices(k, v, ranges)
         if k_block.shape[2] == 0:
-            raise RuntimeError(
-                f"empty key set for query block [{qs}, {qe}) with window={window}, sink={sink}"
-            )
-        out_block = mx.fast.scaled_dot_product_attention(
-            q_block, k_block, v_block, scale=sc
-        )
+            raise RuntimeError(f"empty key set for query block [{qs}, {qe}) with window={window}, sink={sink}")
+        out_block = mx.fast.scaled_dot_product_attention(q_block, k_block, v_block, scale=sc)
         outputs.append(out_block)
 
     return mx.concatenate(outputs, axis=2)

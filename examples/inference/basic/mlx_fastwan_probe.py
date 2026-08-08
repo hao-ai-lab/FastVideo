@@ -26,6 +26,13 @@ from fastvideo.mlx_runtime.fastwan import (
 
 
 def main() -> None:
+    """
+    Run the MLX performance probe for FastWan-like workloads.
+
+    Parses command-line options, reports the derived workload shape, and prints
+    median timings for MLX attention and hidden linear operations. Optionally
+    compares attention performance with Torch MPS.
+    """
     parser = argparse.ArgumentParser(description="MLX primitive probe for FastWan-like Apple Silicon runtime work")
     parser.add_argument("--height", type=int, default=256)
     parser.add_argument("--width", type=int, default=448)

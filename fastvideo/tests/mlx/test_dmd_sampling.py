@@ -19,6 +19,11 @@ from fastvideo.mlx_runtime.sampling import (
 def _reference_schedule() -> MLXDMDSchedule:
     # A small monotonic flow-match-like schedule: timesteps 0..999, sigmas in
     # (0, 1]. Exact values are irrelevant; the lookup must pick the nearest.
+    """Create the deterministic schedule used by the reference tests.
+
+    Returns:
+        MLXDMDSchedule: A schedule with timesteps from 0 through 999 and linearly decreasing sigma values from 1.0 to 0.001.
+    """
     timesteps = np.arange(1000, dtype=np.float64)
     sigmas = np.linspace(1.0, 1e-3, 1000, dtype=np.float64)
     return MLXDMDSchedule(sigmas=sigmas, timesteps=timesteps)
@@ -75,6 +80,9 @@ def test_dmd_step_final_returns_clean_prediction() -> None:
 
 
 def test_dmd_step_intermediate_renoises_to_next_level() -> None:
+    """
+    Verifies that an intermediate DMD step re-noises the denoised prediction at the next schedule level.
+    """
     schedule = _reference_schedule()
     rng = np.random.default_rng(3)
     pred_noise = rng.standard_normal((1, 16, 3, 8, 8)).astype(np.float32)
@@ -98,6 +106,7 @@ def test_dmd_step_intermediate_renoises_to_next_level() -> None:
 
 
 def test_dmd_step_requires_noise_for_intermediate_step() -> None:
+    """Verify that an intermediate DMD step requires a noise tensor for re-noising."""
     schedule = _reference_schedule()
     zeros = np.zeros((1, 16, 3, 8, 8), dtype=np.float32)
     try:

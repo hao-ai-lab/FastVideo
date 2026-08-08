@@ -33,6 +33,11 @@ class AppliedMemoryLimits:
     errors: dict[str, str] = field(default_factory=dict)
 
     def as_metrics(self) -> dict[str, int | float | str | bool | None]:
+        """Flatten the configured memory limits, applied values, previous values, and errors into a metrics dictionary.
+
+        Returns:
+            dict[str, int | float | str | bool | None]: Metrics keyed by limit names and their corresponding values.
+        """
         metrics: dict[str, int | float | str | bool | None] = {
             "mlx_memory_limit_gib": self.mlx_memory_limit_gib,
             "mlx_cache_limit_gib": self.mlx_cache_limit_gib,
@@ -51,6 +56,18 @@ class AppliedMemoryLimits:
 
 
 def gib_to_bytes(value: float | None) -> int | None:
+    """
+    Convert a positive memory limit from GiB to bytes.
+
+    Parameters:
+        value (float | None): Memory limit in GiB, or `None` when unset.
+
+    Returns:
+        int | None: The memory limit in bytes, or `None` when no limit is provided.
+
+    Raises:
+        ValueError: If `value` is zero or negative.
+    """
     if value is None:
         return None
     if value <= 0:
@@ -59,6 +76,18 @@ def gib_to_bytes(value: float | None) -> int | None:
 
 
 def _set_mps_env(name: str, value: float | None) -> float | None:
+    """Set a PyTorch MPS watermark environment variable.
+
+    Parameters:
+        name (str): Name of the environment variable to set.
+        value (float | None): Watermark ratio, or `None` to leave the variable unchanged.
+
+    Returns:
+        float | None: The configured watermark ratio, or `None` when no value is provided.
+
+    Raises:
+        ValueError: If `value` is negative.
+    """
     if value is None:
         return None
     if value < 0:
@@ -80,9 +109,23 @@ def apply_memory_limits(
     """Apply optional MLX allocator limits and PyTorch MPS watermarks.
 
     PyTorch reads MPS watermark variables when the MPS backend initializes, so
-    callers should invoke this before importing torch. If a high watermark is
-    requested without a low watermark, the low watermark is set to ``0.0`` to
-    avoid PyTorch's default low watermark exceeding the requested high cap.
+    call this before importing PyTorch. Specifying only a high watermark sets the
+    low watermark to ``0.0``. MLX limit-setting failures are recorded in the
+    result and do not prevent other limits from being applied.
+
+    Parameters:
+        mlx_memory_limit_gib (float | None): Maximum MLX memory in GiB.
+        mlx_cache_limit_gib (float | None): Maximum MLX cache size in GiB.
+        mlx_disable_cache (bool): Whether to disable the MLX cache.
+        mlx_wired_limit_gib (float | None): Maximum MLX wired memory in GiB.
+        torch_mps_high_watermark_ratio (float | None): PyTorch MPS high watermark
+            ratio.
+        torch_mps_low_watermark_ratio (float | None): PyTorch MPS low watermark
+            ratio.
+
+    Returns:
+        AppliedMemoryLimits: Configured values, applied and previous MLX byte
+            limits, MPS watermark values, and per-limit errors.
     """
     if torch_mps_high_watermark_ratio is not None and torch_mps_low_watermark_ratio is None:
         torch_mps_low_watermark_ratio = 0.0
@@ -138,16 +181,39 @@ def add_memory_limit_args(
     torch_mps_high_watermark_ratio: float | None = None,
     torch_mps_low_watermark_ratio: float | None = None,
 ) -> None:
-    """Add shared Apple Silicon memory-tier flags to an argparse parser."""
-    parser.add_argument("--mlx-memory-limit-gib", type=float, default=mlx_memory_limit_gib,
+    """
+    Add configurable Apple Silicon memory-limit options to an argument parser.
+
+    Parameters:
+        parser (argparse.ArgumentParser): Parser to which the options are added.
+        mlx_memory_limit_gib (float | None): Default MLX memory limit in GiB.
+        mlx_cache_limit_gib (float | None): Default MLX cache limit in GiB.
+        mlx_disable_cache (bool): Whether the cache limit defaults to zero.
+        mlx_wired_limit_gib (float | None): Default MLX wired-memory limit in GiB.
+        torch_mps_high_watermark_ratio (float | None): Default PyTorch MPS high-watermark ratio.
+        torch_mps_low_watermark_ratio (float | None): Default PyTorch MPS low-watermark ratio.
+    """
+    parser.add_argument("--mlx-memory-limit-gib",
+                        type=float,
+                        default=mlx_memory_limit_gib,
                         help="Set MLX memory limit in GiB for memory-tier testing (DiT path).")
-    parser.add_argument("--mlx-cache-limit-gib", type=float, default=mlx_cache_limit_gib,
+    parser.add_argument("--mlx-cache-limit-gib",
+                        type=float,
+                        default=mlx_cache_limit_gib,
                         help="Set MLX cache limit in GiB. Use --mlx-disable-cache to force 0.")
-    parser.add_argument("--mlx-disable-cache", action="store_true", default=mlx_disable_cache,
+    parser.add_argument("--mlx-disable-cache",
+                        action="store_true",
+                        default=mlx_disable_cache,
                         help="Set MLX cache limit to 0 for stricter memory-tier tests.")
-    parser.add_argument("--mlx-wired-limit-gib", type=float, default=mlx_wired_limit_gib,
+    parser.add_argument("--mlx-wired-limit-gib",
+                        type=float,
+                        default=mlx_wired_limit_gib,
                         help="Set MLX wired-memory limit in GiB where supported by macOS/MLX.")
-    parser.add_argument("--torch-mps-high-watermark-ratio", type=float, default=torch_mps_high_watermark_ratio,
+    parser.add_argument("--torch-mps-high-watermark-ratio",
+                        type=float,
+                        default=torch_mps_high_watermark_ratio,
                         help="Set PYTORCH_MPS_HIGH_WATERMARK_RATIO before importing torch.")
-    parser.add_argument("--torch-mps-low-watermark-ratio", type=float, default=torch_mps_low_watermark_ratio,
+    parser.add_argument("--torch-mps-low-watermark-ratio",
+                        type=float,
+                        default=torch_mps_low_watermark_ratio,
                         help="Set PYTORCH_MPS_LOW_WATERMARK_RATIO before importing torch.")

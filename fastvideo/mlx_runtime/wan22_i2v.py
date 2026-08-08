@@ -34,7 +34,18 @@ def tokens_per_frame(height: int, width: int, patch_size: Sequence[int]) -> int:
 
 
 def num_patch_tokens(frames: int, height: int, width: int, patch_size: Sequence[int]) -> int:
-    """Total sequence length ``L`` after patch embedding."""
+    """
+    Calculate the total number of patch tokens for a latent video.
+
+    Parameters:
+        patch_size (Sequence[int]): Temporal, height, and width patch dimensions.
+
+    Returns:
+        int: Total patch-token count in frame-major order.
+
+    Raises:
+        ValueError: If the number of frames is not divisible by the temporal patch size.
+    """
     pt, _, _ = int(patch_size[0]), int(patch_size[1]), int(patch_size[2])
     if frames % pt != 0:
         raise ValueError(f"latent frames {frames} not divisible by patch_t {pt}")
@@ -42,11 +53,20 @@ def num_patch_tokens(frames: int, height: int, width: int, patch_size: Sequence[
 
 
 def replace_first_latent_frame(noise_latents: Any, image_latent_frame: Any) -> Any:
-    """Return latents with frame 0 replaced by ``image_latent_frame``.
+    """Replace the first temporal latent frame with an image latent.
 
     Args:
-        noise_latents: ``[B, C, T, H, W]`` (torch or numpy or mx.array).
-        image_latent_frame: ``[B, C, H, W]`` or ``[B, C, 1, H, W]``.
+        noise_latents: Latents shaped ``[B, C, T, H, W]``.
+        image_latent_frame: Image latent shaped ``[B, C, H, W]`` or
+            ``[B, C, 1, H, W]``.
+
+    Returns:
+        A copy of ``noise_latents`` with its first frame replaced, preserving the
+        input backend and latent dtype.
+
+    Raises:
+        ValueError: If the image latent shape does not match the first latent
+            frame or contains more than one temporal frame.
     """
     # Dispatch without importing mlx/torch at module import time.
     if not isinstance(noise_latents, np.ndarray):
@@ -132,11 +152,19 @@ def build_i2v_inputs(
         image_timestep: float = 0.0,
         patch_size: Sequence[int] = (1, 2, 2),
 ) -> tuple[Any, np.ndarray]:
-    """Construct ``(latents, per_token_timestep)`` for one I2V DiT forward.
-
-    Works with NumPy / torch / mx latents; timestep is always returned as
-    NumPy float32 ``[B, L]`` (caller casts for the backend).
     """
+        Construct conditioned latents and per-token timesteps for an image-to-video DiT forward pass.
+
+        Parameters:
+            noise_latents (Any): Noise latents with shape [B, C, T, H, W].
+            image_latent_frame (Any): Latent image frame used to condition the first video frame.
+            video_timestep (float): Timestep assigned to tokens from subsequent video frames.
+            image_timestep (float): Timestep assigned to tokens from the first frame.
+            patch_size (Sequence[int]): Temporal and spatial patch dimensions used to count tokens.
+
+        Returns:
+            tuple[Any, np.ndarray]: Conditioned latents and a NumPy float32 timestep array with shape [B, L].
+        """
     shape = tuple(noise_latents.shape) if hasattr(noise_latents, "shape") else np.asarray(noise_latents).shape
     if len(shape) != 5:
         raise ValueError(f"noise_latents must be [B,C,T,H,W], got {shape}")

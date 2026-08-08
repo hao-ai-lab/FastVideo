@@ -30,11 +30,16 @@ def build_dmd_schedule(
     flow_shift: float = 8.0,
     warp_denoising_step: bool = True,
 ) -> tuple[MLXDMDSchedule, list[float]]:
-    """Return ``(schedule, timesteps)`` for causal DMD.
+    """
+    Build the DMD timestep schedule and corresponding sampling timesteps.
 
-    Mirrors the torch stage: the raw denoising steps (e.g. ``[1000, 750, 500,
-    250]``) index into a warped 1000-step flow-match schedule when
-    ``warp_denoising_step`` is set.
+    Parameters:
+        dmd_denoising_steps (list[int]): Raw denoising step indices.
+        flow_shift (float): Shift applied to the flow-matching schedule.
+        warp_denoising_step (bool): Whether to map raw steps through the 1,000-step flow-matching schedule.
+
+    Returns:
+        tuple[MLXDMDSchedule, list[float]]: The MLX DMD schedule and its floating-point sampling timesteps.
     """
     import torch
 
@@ -65,10 +70,22 @@ def stream_causal_latents(
     context_noise: float = 0.0,
     seed: int = 0,
 ) -> Iterator[tuple[int, mx.array]]:
-    """Yield ``(block_index, clean_block_latents)`` as each block finalizes.
+    """
+    Stream finalized clean latent blocks as they become available.
 
-    ``noise_latents`` is ``[B, C, T, H, W]`` pure noise; ``cos_full``/``sin_full``
-    are the rotary tables for the whole clip (frame-major), sliced per block.
+    Parameters:
+        noise_latents (mx.array): Pure-noise latents with shape ``[B, C, T, H, W]``.
+        frame_seqlen (int): Number of tokens represented by each video frame.
+        context_noise (float): Timestep used when updating the context cache with
+            finalized latents.
+
+    Returns:
+        Iterator[tuple[int, mx.array]]: Block index and corresponding clean latent
+            block.
+
+    Raises:
+        ValueError: If the total latent frame count is not divisible by the model's
+            frames-per-block value.
     """
     import mlx.core as mx
 

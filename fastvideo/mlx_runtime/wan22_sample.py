@@ -27,7 +27,17 @@ def build_wan22_dmd_schedule(
     flow_shift: float = 5.0,
     warp_denoising_step: bool = True,
 ) -> tuple[MLXDMDSchedule, list[float]]:
-    """Return ``(schedule, continuous_timesteps)`` for Wan2.2 FastWan DMD."""
+    """
+    Build the flow-matching schedule and continuous timesteps used for Wan2.2 DMD sampling.
+
+    Parameters:
+        dmd_denoising_steps (Sequence[int] | None): Denoising step values to use; defaults to 1000, 757, and 522.
+        flow_shift (float): Flow-matching shift applied when constructing the schedule.
+        warp_denoising_step (bool): Whether to convert denoising steps to scheduler-warped continuous timesteps.
+
+    Returns:
+        tuple[MLXDMDSchedule, list[float]]: The DMD schedule and corresponding continuous timesteps.
+    """
     import torch
 
     from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler
@@ -56,7 +66,20 @@ def sample_wan22_dmd(
     warp_denoising_step: bool = True,
     seed: int = 0,
 ) -> mx.array:
-    """Run warped 3-step (default) DMD on ``noise_latents`` → clean latents."""
+    """
+    Generate clean video latents from noisy latents using iterative DMD denoising.
+
+    Parameters:
+        noise_latents (mx.array): Initial noisy video latents.
+        freqs_cis (tuple): Rotary positional frequency tensors used by the model.
+        dmd_denoising_steps (Sequence[int] | None): DMD denoising steps, or the default schedule when omitted.
+        flow_shift (float): Flow-matching schedule shift.
+        warp_denoising_step (bool): Whether to warp the denoising timesteps.
+        seed (int): Seed for reproducible intermediate re-noising.
+
+    Returns:
+        mx.array: Denoised video latents.
+    """
     import mlx.core as mx
 
     schedule, timesteps = build_wan22_dmd_schedule(dmd_denoising_steps,

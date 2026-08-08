@@ -44,10 +44,19 @@ DecodeBackend = Literal["taehv", "taehv-torch", "wan-vae"]
 
 
 def _cache_dir() -> Path:
+    """Return the local directory used to cache TAEHV files."""
     return Path.home() / ".cache" / "fastvideo" / "taehv"
 
 
 def _sha256(path: Path) -> str:
+    """Compute the SHA-256 digest of a file.
+
+    Parameters:
+        path (Path): Path to the file to hash.
+
+    Returns:
+        str: Lowercase hexadecimal SHA-256 digest.
+    """
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1 << 20), b""):
@@ -56,19 +65,39 @@ def _sha256(path: Path) -> str:
 
 
 def _verify_checkpoint(path: Path, expected_digest: str) -> None:
-    """Verify checkpoint sha256 if expected_digest is nonempty."""
+    """
+    Verify a checkpoint's SHA-256 digest when an expected digest is provided.
+
+    Parameters:
+        path (Path): Path to the checkpoint file.
+        expected_digest (str): Expected SHA-256 digest; an empty value skips verification.
+
+    Raises:
+        RuntimeError: If verification is enabled and the checkpoint digest does not match.
+    """
     if expected_digest:
         actual = _sha256(path)
         if actual != expected_digest:
-            raise RuntimeError(
-                f"TAEHV checkpoint at {path} failed sha256 verification "
-                f"(expected {expected_digest}, got {actual}). "
-                "Delete the file to re-download it."
-            )
+            raise RuntimeError(f"TAEHV checkpoint at {path} failed sha256 verification "
+                               f"(expected {expected_digest}, got {actual}). "
+                               "Delete the file to re-download it.")
 
 
 def ensure_taehv_checkpoint(*, z_dim: int, checkpoint_path: Path | None = None) -> Path:
-    """Return a TAEHV weight file for the given latent channel count."""
+    """
+    Return a validated TAEHV checkpoint for the specified latent channel count.
+
+    Parameters:
+        z_dim (int): Number of latent channels, supported values are 16 and 48.
+        checkpoint_path (Path | None): Optional existing checkpoint path to validate and use.
+
+    Returns:
+        Path: Path to the validated TAEHV checkpoint.
+
+    Raises:
+        FileNotFoundError: If the supplied checkpoint path does not exist.
+        ValueError: If no checkpoint is mapped to the specified latent channel count.
+    """
     if checkpoint_path is not None:
         if not checkpoint_path.exists():
             raise FileNotFoundError(f"TAEHV checkpoint not found: {checkpoint_path}")
@@ -87,11 +116,11 @@ def ensure_taehv_checkpoint(*, z_dim: int, checkpoint_path: Path | None = None) 
         import tempfile
         # Download to a temporary file, verify, then atomically rename.
         with tempfile.NamedTemporaryFile(
-            mode="wb",
-            dir=path.parent,
-            prefix=f".tmp_{name}_",
-            suffix=".pth",
-            delete=False,
+                mode="wb",
+                dir=path.parent,
+                prefix=f".tmp_{name}_",
+                suffix=".pth",
+                delete=False,
         ) as tmp_file:
             tmp_path = Path(tmp_file.name)
             try:
@@ -125,6 +154,15 @@ class WanVAEConfigView:
 
     @classmethod
     def from_vae_dir(cls, vae_dir: Path) -> WanVAEConfigView:
+        """
+        Load Wan VAE configuration values from a directory.
+
+        Parameters:
+            vae_dir (Path): Directory containing the VAE ``config.json`` file.
+
+        Returns:
+            WanVAEConfigView: Configuration loaded from the VAE directory.
+        """
         cfg = json.loads((vae_dir / "config.json").read_text())
         return cls(
             z_dim=int(cfg["z_dim"]),
@@ -138,12 +176,15 @@ class WanVAEConfigView:
 
 
 def denormalize_latents_np(latents: np.ndarray, config: WanVAEConfigView) -> np.ndarray:
-    """Apply ``z / (1/std) + mean`` ⇔ ``z * std + mean`` (diffusers Wan path).
+    """
+    Denormalize Wan VAE latent values using the configured means and standard deviations.
 
-    Matches ``mlx_wan_prompt_to_video``::
+    Parameters:
+        latents (np.ndarray): Latent values in normalized form.
+        config (WanVAEConfigView): Wan VAE latent statistics.
 
-        latents = latents / latents_std + latents_mean
-        # where latents_std was stored as 1/std in the tensor view
+    Returns:
+        np.ndarray: Denormalized latent values as float32.
     """
     mean = np.asarray(config.latents_mean, dtype=np.float32).reshape(1, -1, 1, 1, 1)
     std = np.asarray(config.latents_std, dtype=np.float32).reshape(1, -1, 1, 1, 1)
@@ -167,6 +208,17 @@ def _mlx_conv2d(x: Any, weight: Any, bias: Any, *, stride: int = 1) -> Any:
 
 
 def _mlx_conv2d_1x1(x: Any, weight: Any, bias: Any = None) -> Any:
+    """
+    Applies a 1×1 convolution to an MLX tensor in channel-first layout.
+
+    Parameters:
+        x (Any): Input tensor with shape [batch, channels, height, width].
+        weight (Any): Convolution weights.
+        bias (Any, optional): Optional output-channel bias.
+
+    Returns:
+        Any: The convolved tensor with shape [batch, output_channels, height, width].
+    """
     import mlx.core as mx
 
     y = mx.conv2d(x.transpose(0, 2, 3, 1), weight.transpose(0, 2, 3, 1), stride=1, padding=0)
@@ -177,6 +229,14 @@ def _mlx_conv2d_1x1(x: Any, weight: Any, bias: Any = None) -> Any:
 
 
 def _load_torch_state(path: Path) -> dict[str, np.ndarray]:
+    """Load a PyTorch state dictionary as NumPy arrays.
+
+    Parameters:
+        path (Path): Path to the PyTorch checkpoint.
+
+    Returns:
+        dict[str, np.ndarray]: State dictionary with tensors converted to NumPy arrays.
+    """
     import torch
 
     sd = torch.load(path, map_location="cpu", weights_only=True)
@@ -187,6 +247,12 @@ class MLXTAEHVDecoder:
     """Minimal MLX port of TAEHV ``decoder`` (parallel-over-time MemBlocks)."""
 
     def __init__(self, checkpoint_path: Path, *, z_dim: int) -> None:
+        """Initialize the TAEHV decoder from a checkpoint for the specified latent dimensionality.
+
+        Parameters:
+            checkpoint_path (Path): Path to the TAEHV checkpoint.
+            z_dim (int): Number of latent channels, determining the decoder patch size.
+        """
         import mlx.core as mx
 
         self.checkpoint_path = Path(checkpoint_path)
@@ -202,7 +268,17 @@ class MLXTAEHVDecoder:
         self._n_f = [256, 128, 64, 64]
 
     def decode_ntchw(self, latents_ntchw: Any) -> Any:
-        """Decode ``[N, T, C, H, W]`` diffusion latents → ``[N, T_out, 3, H_p, W_p]`` in ~[0,1]."""
+        """
+        Decode latent video batches into clipped RGB frames.
+
+        Parameters:
+            latents_ntchw (Any): Latents with shape ``[N, T, C, H, W]`` and the
+                decoder's configured latent channel count.
+
+        Returns:
+            Any: Decoded frames with shape ``[N, T_out, 3, H_out, W_out]`` and values
+                clipped to the range ``[0, 1]``.
+        """
         import mlx.core as mx
 
         x = latents_ntchw
@@ -225,12 +301,25 @@ class MLXTAEHVDecoder:
         return mx.clip(x, 0.0, 1.0)
 
     def _run_decoder_parallel(self, x: Any, *, n: int) -> Any:
-        """Apply decoder Sequential with MemBlock temporal memory (parallel mode)."""
+        """
+        Apply the TAEHV decoder stack to flattened batch and temporal frames while preserving temporal memory.
+        """
         import mlx.core as mx
 
         w = self.weights
 
         def memblock(base: int, xx: Any, past: Any) -> Any:
+            """
+            Apply a temporal memory block to the current and past feature tensors.
+
+            Parameters:
+                base (int): Decoder block index used to select the block weights.
+                xx (Any): Current feature tensor.
+                past (Any): Past feature tensor concatenated with the current features.
+
+            Returns:
+                Any: Activated feature tensor produced by the memory block.
+            """
             cat = mx.concatenate([xx, past], axis=1)
             h = _mlx_conv2d(cat, w[f"decoder.{base}.conv.0.weight"], w.get(f"decoder.{base}.conv.0.bias"))
             h = mx.maximum(h, 0.0)
@@ -242,6 +331,15 @@ class MLXTAEHVDecoder:
             return mx.maximum(h + skip, 0.0)
 
         def upsample2(xx: Any) -> Any:
+            """
+            Upsample a four-dimensional tensor by a factor of two along its spatial dimensions.
+
+            Parameters:
+                xx (Any): Tensor with shape `(N, C, H, W)`.
+
+            Returns:
+                Any: Tensor with shape `(N, C, 2H, 2W)` containing replicated spatial values.
+            """
             nt, c, h, ww = xx.shape
             xx = xx.reshape(nt, c, h, 1, ww, 1)
             xx = mx.broadcast_to(xx, (nt, c, h, 2, ww, 2))
@@ -262,6 +360,15 @@ class MLXTAEHVDecoder:
             return y.reshape(nt * stride, c_in, h, ww)
 
         def mem_past(xx: Any) -> Any:
+            """
+            Build a temporal memory tensor containing a zero frame followed by the preceding frame at each time step.
+
+            Parameters:
+                xx (Any): Flattened batch and temporal tensor with shape ``(batch * time, channels, height, width)``.
+
+            Returns:
+                Any: Tensor with the same shape as ``xx`` containing the preceding frame for each temporal position.
+            """
             nt, c, h, ww = xx.shape
             t_cur = nt // n
             x_ = xx.reshape(n, t_cur, c, h, ww)
@@ -299,7 +406,20 @@ def decode_latents_taehv_mlx(
     z_dim: int | None = None,
     checkpoint_path: Path | None = None,
 ) -> np.ndarray:
-    """Decode DiT latents ``[B,C,T,H,W]`` with MLX TAEHV → pixels ``[B,T,H,W,3]`` in [0,1]."""
+    """
+    Decode latent representations with the MLX TAEHV decoder.
+
+    Parameters:
+        latents_np (np.ndarray): Latents arranged as [B, C, T, H, W].
+        z_dim (int | None): Latent channel dimension used to select the decoder checkpoint.
+        checkpoint_path (Path | None): Optional path to a TAEHV checkpoint.
+
+    Returns:
+        np.ndarray: Decoded pixels arranged as [B, T, H, W, 3] with values in [0, 1].
+
+    Raises:
+        ValueError: If `latents_np` does not have five dimensions.
+    """
     import mlx.core as mx
 
     if latents_np.ndim != 5:
@@ -359,7 +479,27 @@ def decode_latents_to_video(
     taehv_checkpoint: Path | None = None,
     torch_device: str = "auto",
 ) -> dict[str, Any]:
-    """Decode and write MP4. Returns metrics dict including ``decode_s``."""
+    """Decode latent video frames and export them as an MP4 file.
+
+    Parameters:
+        latents_np (np.ndarray): Latent video representation to decode.
+        output_path (Path): Destination path for the MP4 file.
+        fps (int): Output video frame rate.
+        backend (DecodeBackend): Decoder backend to use.
+        vae_dir (Path | None): Directory containing the full Wan VAE when using
+            the ``wan-vae`` backend.
+        z_dim (int | None): Latent channel count for TAEHV decoding.
+        taehv_checkpoint (Path | None): Optional TAEHV checkpoint path.
+        torch_device (str): PyTorch device selection for PyTorch-based decoding.
+
+    Returns:
+        dict[str, Any]: Decode time in seconds, backend name, output path, frame
+        count, and video resolution.
+
+    Raises:
+        ValueError: If the full VAE backend lacks ``vae_dir`` or the backend is
+        unknown.
+    """
     import time
 
     from diffusers.utils import export_to_video

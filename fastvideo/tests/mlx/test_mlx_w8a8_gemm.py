@@ -28,6 +28,13 @@ from fastvideo.mlx_runtime.w8a8_gemm import (  # noqa: E402
 @pytest.mark.parametrize("kind", ["naive", "tiled"])
 @pytest.mark.parametrize("shape", [(32, 48, 64), (17, 33, 65), (128, 128, 128)])
 def test_w8a8_matches_dequant_reference(kind: str, shape: tuple[int, int, int]) -> None:
+    """
+    Verify that the W8A8 matrix multiplication matches the dequantized reference.
+
+    Parameters:
+        kind (str): The matrix multiplication kernel variant to test.
+        shape (tuple[int, int, int]): The matrix dimensions as `(m, n, k)`.
+    """
     m, n, k = shape
     rng = np.random.default_rng(0)
     x = rng.standard_normal((m, k)).astype(np.float32)
@@ -41,6 +48,7 @@ def test_w8a8_matches_dequant_reference(kind: str, shape: tuple[int, int, int]) 
 
 
 def test_quantize_per_row_roundtrip_bound() -> None:
+    """Verify that per-row INT8 quantization reconstructs values within the expected error bound."""
     rng = np.random.default_rng(1)
     x = rng.standard_normal((16, 64)).astype(np.float32) * 3.0
     q, scale = quantize_per_row(x)
@@ -51,6 +59,7 @@ def test_quantize_per_row_roundtrip_bound() -> None:
 
 
 def test_w8a8_linear_with_bias() -> None:
+    """Verify that the W8A8 linear operation matches the dequantized reference when a bias is applied."""
     rng = np.random.default_rng(2)
     x = rng.standard_normal((8, 64)).astype(np.float32)
     w = rng.standard_normal((32, 64)).astype(np.float32)

@@ -30,12 +30,10 @@ from fastvideo.logger import init_logger
 logger = init_logger(__name__)
 
 # Keep in lockstep with streaming PromptEnhancer defaults (enhance op).
-DEFAULT_ENHANCE_SYSTEM_PROMPT = (
-    "You are a prompt enhancer for cinematic video generation. Given "
-    "a user prompt, produce an enhanced prompt that is more vivid, "
-    "specific, and concrete. Keep the subject intact; add lighting, "
-    "camera, and motion detail. Reply with just the enhanced prompt."
-)
+DEFAULT_ENHANCE_SYSTEM_PROMPT = ("You are a prompt enhancer for cinematic video generation. Given "
+                                 "a user prompt, produce an enhanced prompt that is more vivid, "
+                                 "specific, and concrete. Keep the subject intact; add lighting, "
+                                 "camera, and motion detail. Reply with just the enhanced prompt.")
 
 # Small default that fits 16 GB Macs alongside the 1.3B DiT when the user
 # opts into mlx-lm. Override with --enhance-prompt-model.
@@ -94,10 +92,27 @@ class EnhanceResult:
 
     @property
     def changed(self) -> bool:
+        """Indicates whether the enhanced prompt differs from the original after trimming surrounding whitespace.
+
+        Returns:
+            bool: `True` if the prompts differ, `False` otherwise.
+        """
         return self.enhanced.strip() != self.original.strip()
 
 
 def _normalize_user_prompt(prompt: str) -> str:
+    """
+    Normalize a user prompt for enhancement.
+
+    Parameters:
+        prompt (str): User-provided prompt text.
+
+    Returns:
+        str: The prompt with leading and trailing whitespace removed and internal whitespace collapsed.
+
+    Raises:
+        ValueError: If the prompt is empty after whitespace normalization.
+    """
     text = " ".join(prompt.strip().split())
     if not text:
         raise ValueError("prompt must be non-empty")
@@ -105,19 +120,27 @@ def _normalize_user_prompt(prompt: str) -> str:
 
 
 def _already_rich(prompt: str) -> bool:
-    """Heuristic: long prompts that already name camera/light/motion pass through."""
+    """
+    Determine whether a prompt already contains substantial camera and lighting detail.
+
+    Returns:
+        bool: `true` if the prompt is at least 160 characters long and includes camera and lighting cues, `false` otherwise.
+    """
     lower = prompt.lower()
     has_camera = any(c in lower for c in _CAMERA_CUES)
     has_light = any(c in lower for c in _LIGHT_CUES)
-    has_motion = any(c in lower for c in _MOTION_CUES)
     return len(prompt) >= 160 and has_camera and has_light
 
 
 def enhance_prompt_template(prompt: str) -> str:
-    """Deterministic cinematic expansion (no model weights).
+    """
+    Expand a prompt with cinematic camera, lighting, motion, and visual-quality details.
 
-    Keeps the subject verbatim and appends Wan-style shot grammar only when
-    the prompt looks thin. Idempotent on already-rich prompts.
+    Rich prompts are preserved, while thinner prompts receive deterministic enhancements
+    without changing their subject.
+
+    Returns:
+        str: The original or expanded prompt with normalized whitespace and punctuation.
     """
     text = _normalize_user_prompt(prompt)
     if _already_rich(text):
@@ -127,22 +150,16 @@ def enhance_prompt_template(prompt: str) -> str:
     parts = [text.rstrip(".")]
 
     if not any(c in lower for c in _CAMERA_CUES):
-        parts.append(
-            "shot on a 35mm anamorphic lens, gentle handheld micro-movement, "
-            "shallow depth of field"
-        )
+        parts.append("shot on a 35mm anamorphic lens, gentle handheld micro-movement, "
+                     "shallow depth of field")
     if not any(c in lower for c in _LIGHT_CUES):
-        parts.append(
-            "natural cinematic lighting with soft volumetric haze and subtle "
-            "rim light separating subject from background"
-        )
+        parts.append("natural cinematic lighting with soft volumetric haze and subtle "
+                     "rim light separating subject from background")
     if not any(c in lower for c in _MOTION_CUES):
         parts.append("smooth continuous motion with grounded physics")
 
-    parts.append(
-        "highly detailed, coherent temporal continuity, film grain, "
-        "color graded like a contemporary drama"
-    )
+    parts.append("highly detailed, coherent temporal continuity, film grain, "
+                 "color graded like a contemporary drama")
     enhanced = ", ".join(parts)
     # Single trailing period; collapse duplicate whitespace.
     enhanced = re.sub(r"\s+", " ", enhanced).strip()
@@ -159,22 +176,41 @@ def enhance_prompt_mlx_lm(
     max_tokens: int = 128,
     temp: float = 0.6,
 ) -> str:
-    """Run a local mlx-lm instruct model. Raises if mlx-lm is unavailable."""
+    """
+    Enhance a user prompt with a locally hosted mlx-lm instruction model.
+
+    Parameters:
+        prompt (str): The prompt to enhance.
+        model (str): The mlx-lm model identifier or path.
+        system_prompt (str): Instructions that guide prompt enhancement.
+        max_tokens (int): Maximum number of tokens to generate.
+        temp (float): Sampling temperature for generation.
+
+    Returns:
+        str: The enhanced prompt.
+
+    Raises:
+        RuntimeError: If mlx-lm is unavailable or produces an empty result.
+    """
     try:
         from mlx_lm import generate, load
     except ImportError as exc:  # pragma: no cover - optional dep
-        raise RuntimeError(
-            "mlx-lm is not installed. `uv pip install mlx-lm` or use "
-            "--enhance-prompt-backend template."
-        ) from exc
+        raise RuntimeError("mlx-lm is not installed. `uv pip install mlx-lm` or use "
+                           "--enhance-prompt-backend template.") from exc
 
     text = _normalize_user_prompt(prompt)
     logger.info("[MLX enhance] loading %s", model)
     mlx_model, tokenizer = load(model)
 
     messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": text},
+        {
+            "role": "system",
+            "content": system_prompt
+        },
+        {
+            "role": "user",
+            "content": text
+        },
     ]
     if hasattr(tokenizer, "apply_chat_template"):
         chat = tokenizer.apply_chat_template(
@@ -200,15 +236,24 @@ def enhance_prompt_mlx_lm(
 
 
 def _clean_llm_output(raw: str, *, original: str) -> str:
-    """Strip chat debris; fall back to original if the model refused."""
+    """
+    Clean generated prompt text and fall back to the original when the result is too short.
+
+    Parameters:
+        raw (str): Raw text produced by the language model.
+        original (str): Original prompt used as the fallback value.
+
+    Returns:
+        str: Cleaned first paragraph of the generated text, or the original prompt when the generated text is too short.
+    """
     text = raw.strip()
     # Drop common prefatory phrases.
     for prefix in (
-        "enhanced prompt:",
-        "here's the enhanced prompt:",
-        "here is the enhanced prompt:",
-        "sure:",
-        "sure,",
+            "enhanced prompt:",
+            "here's the enhanced prompt:",
+            "here is the enhanced prompt:",
+            "sure:",
+            "sure,",
     ):
         if text.lower().startswith(prefix):
             text = text[len(prefix):].strip()
@@ -228,12 +273,21 @@ def enhance_prompt(
     system_prompt: str = DEFAULT_ENHANCE_SYSTEM_PROMPT,
     max_tokens: int = 128,
 ) -> EnhanceResult:
-    """Enhance ``prompt`` with the requested backend.
+    """Enhance a prompt using the selected backend, falling back to a deterministic template when configured for automatic selection.
 
-    ``backend``:
-      * ``"auto"`` — try mlx-lm, fall back to template
-      * ``"mlx-lm"`` — require mlx-lm (error if missing)
-      * ``"template"`` — deterministic expansion only
+    Parameters:
+        prompt (str): The prompt to enhance.
+        backend (str): The enhancement backend: ``"auto"``, ``"mlx-lm"``, or ``"template"``.
+        model (str | None): The MLX language model to use.
+        system_prompt (str): Instructions provided to the MLX language model.
+        max_tokens (int): Maximum number of tokens generated by the MLX language model.
+
+    Returns:
+        EnhanceResult: The original and enhanced prompts, selected backend, timing information, and model metadata.
+
+    Raises:
+        ValueError: If the prompt is empty or the backend is unsupported.
+        Exception: If the explicitly selected ``"mlx-lm"`` backend fails.
     """
     text = _normalize_user_prompt(prompt)
     backend_norm = (backend or "auto").lower()
@@ -301,7 +355,21 @@ def load_or_enhance_prompt(
     cache: bool = True,
     cache_dir: Path | None = None,
 ) -> EnhanceResult:
-    """Enhance with an optional on-disk cache (skip model on repeat prompts)."""
+    """
+    Enhance a prompt, reusing a cached result when available.
+
+    Parameters:
+        prompt (str): The prompt to enhance.
+        backend (str): Enhancement backend to use.
+        model (str | None): Optional model identifier.
+        system_prompt (str): System prompt for model-based enhancement.
+        max_tokens (int): Maximum number of tokens generated by the model.
+        cache (bool): Whether to read and write the on-disk cache.
+        cache_dir (Path | None): Optional directory for cached results.
+
+    Returns:
+        EnhanceResult: The enhanced prompt and backend metadata. Cached results are marked with the ``"cache"`` backend.
+    """
     text = _normalize_user_prompt(prompt)
     path = enhance_cache_path(text, backend=backend, model=model, cache_dir=cache_dir)
     if cache and path.is_file():
@@ -338,14 +406,22 @@ def load_or_enhance_prompt(
                         "model": result.model,
                     },
                     indent=2,
-                )
-            )
+                ))
         except OSError as exc:  # pragma: no cover - cache is best-effort
             logger.info("[MLX enhance] cache write skipped: %s", exc)
     return result
 
 
 def enhance_result_as_metrics(result: EnhanceResult | None) -> dict[str, Any]:
+    """
+    Convert prompt enhancement results into metrics fields.
+
+    Parameters:
+        result (EnhanceResult | None): The enhancement result, or `None` when no enhancement was performed.
+
+    Returns:
+        dict[str, Any]: A metrics mapping containing enhancement status, backend metadata, timing, and original and enhanced prompts.
+    """
     if result is None:
         return {
             "enhance_prompt": False,

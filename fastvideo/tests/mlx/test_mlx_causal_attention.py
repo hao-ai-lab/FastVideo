@@ -25,10 +25,29 @@ RNG = np.random.default_rng(2026)
 
 
 def _rand(*shape: int) -> "mx.array":
+    """Generate a deterministic random float32 array with the specified shape.
+
+    Parameters:
+        shape (int): Dimensions of the generated array.
+
+    Returns:
+        "mx.array": A random float32 array with the requested shape.
+    """
     return mx.array(RNG.standard_normal(shape).astype(np.float32))
 
 
 def _qkv_cos_sin(num_tokens: int, num_heads: int, head_dim: int):
+    """
+    Create deterministic query, key, value, and rotary embedding tensors for a token sequence.
+
+    Parameters:
+        num_tokens (int): Number of token positions to generate.
+        num_heads (int): Number of attention heads.
+        head_dim (int): Size of each attention head.
+
+    Returns:
+        tuple: Query, key, value, cosine, and sine tensors for the generated sequence.
+    """
     q = _rand(1, num_tokens, num_heads, head_dim)
     k = _rand(1, num_tokens, num_heads, head_dim)
     v = _rand(1, num_tokens, num_heads, head_dim)
@@ -65,6 +84,24 @@ def _block_causal_masked_reference(q, k, v, cos, sin, *, chunk_tokens: int, wind
 
 
 def _run_cached(q, k, v, cos, sin, *, chunk_tokens, local_attn_size, frame_seqlen, kv_cache_size, sink_tokens=0):
+    """
+    Run causal self-attention over token chunks using a rolling key-value cache.
+
+    Parameters:
+        q: Query tensor containing the full token sequence.
+        k: Key tensor containing the full token sequence.
+        v: Value tensor containing the full token sequence.
+        cos: Cosine rotary-embedding values for the token positions.
+        sin: Sine rotary-embedding values for the token positions.
+        chunk_tokens (int): Number of tokens processed in each attention step.
+        local_attn_size (int): Maximum local attention span.
+        frame_seqlen (int): Length of the frame used for causal attention.
+        kv_cache_size (int): Maximum number of tokens stored in the key-value cache.
+        sink_tokens (int): Number of initial cache entries preserved during eviction.
+
+    Returns:
+        tuple: Concatenated attention outputs and the populated key-value cache.
+    """
     num_tokens = q.shape[1]
     num_heads, head_dim = q.shape[2], q.shape[3]
     cache = MLXCausalKVCache.allocate(
@@ -82,7 +119,7 @@ def _run_cached(q, k, v, cos, sin, *, chunk_tokens, local_attn_size, frame_seqle
 
 
 def test_cached_matches_block_causal_masked_no_eviction() -> None:
-    """local_attn_size=-1: chunked cached decode == block-causal masked full pass."""
+    """Verify that chunked cached decoding without eviction matches block-causal full-sequence attention."""
     frame_seqlen, nfb, num_frames, num_heads, head_dim = 4, 2, 3, 2, 8
     chunk = frame_seqlen * nfb
     n = num_frames * chunk
@@ -117,11 +154,10 @@ def test_cached_matches_sliding_window_with_eviction() -> None:
 
 
 def test_cached_matches_sliding_window_overlapping_eviction() -> None:
-    """window > 2*chunk: eviction shifts overlapping source/dest regions.
+    """
+    Verify sliding-window cached attention remains correct when eviction shifts overlapping cache regions.
 
-    The adjacent-window case (window == 2*chunk) only moves non-overlapping
-    slices; production windows are larger, so this exercises the overlapping
-    shift path that would corrupt K/V if the rolled copy were not materialised.
+    The test also confirms the cache reaches the expected global and local end indices.
     """
     frame_seqlen, local_attn_size, num_frames, num_heads, head_dim = 4, 3, 6, 2, 8
     chunk = frame_seqlen  # 4

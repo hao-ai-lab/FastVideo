@@ -11,7 +11,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Final, Mapping
+from typing import Final
+from collections.abc import Mapping
 
 import mlx.core as mx
 
@@ -78,6 +79,17 @@ class QuantizedWeight:
 
 
 def _normalize_backend(backend: str) -> str:
+    """Normalize a quantization backend name and validate that it is supported.
+
+    Parameters:
+        backend (str): Backend name to normalize.
+
+    Returns:
+        str: The lowercase backend name without surrounding whitespace.
+
+    Raises:
+        ValueError: If the backend name is unknown.
+    """
     name = backend.strip().lower()
     if name not in _BACKEND_KWARGS:
         known = ", ".join(BACKENDS)
@@ -86,14 +98,26 @@ def _normalize_backend(backend: str) -> str:
 
 
 def _kwargs_for(backend: str) -> dict[str, object]:
+    """Return the MLX quantization arguments configured for a backend.
+
+    Parameters:
+        backend (str): Backend name to resolve.
+
+    Returns:
+        dict[str, object]: Quantization arguments for the normalized backend.
+    """
     return dict(_BACKEND_KWARGS[_normalize_backend(backend)])
 
 
 def support_error(backend: str) -> str | None:
-    """Return the support-probe error message, or ``None`` if supported.
+    """
+    Check whether a quantization backend is supported by the current MLX runtime.
 
-    Wraps ``mx.quantize`` + ``mx.quantized_matmul`` in try/except so missing
-    modes on older MLX builds surface as a string rather than an exception.
+    Parameters:
+        backend (str): Quantization backend name.
+
+    Returns:
+        str | None: An error description when the backend is unsupported, or `None` when supported.
     """
     name = _normalize_backend(backend)
     if name in _SUPPORT_ERROR_CACHE:
@@ -141,21 +165,27 @@ def is_supported(backend: str) -> bool:
 
 
 def quantize_weight(w: mx.array, backend: str) -> QuantizedWeight:
-    """Quantize a 2D weight with the native MLX API for ``backend``.
+    """
+    Quantize a two-dimensional weight matrix using the specified native MLX backend.
+
+    Parameters:
+        w (mx.array): The two-dimensional weight matrix to quantize.
+        backend (str): The quantization backend to use.
+
+    Returns:
+        QuantizedWeight: The quantized weights and associated quantization metadata.
 
     Raises:
-        ValueError: unknown backend, non-2D input, or last dim not divisible
-            by the mode's group size.
-        RuntimeError: backend is not supported by the installed MLX build.
+        ValueError: If the backend is unknown, the weight is not two-dimensional,
+            or its last dimension is not divisible by the backend's group size.
+        RuntimeError: If the backend is unsupported by the installed MLX build.
     """
     name = _normalize_backend(backend)
     err = support_error(name)
     if err is not None:
         mlx_version = getattr(mx, "__version__", "unknown")
-        raise RuntimeError(
-            f"Quant backend {name!r} is not supported by installed mlx "
-            f"({mlx_version}): {err}"
-        )
+        raise RuntimeError(f"Quant backend {name!r} is not supported by installed mlx "
+                           f"({mlx_version}): {err}")
 
     if w.ndim != 2:
         raise ValueError(f"quantize_weight expects a 2D weight, got shape {tuple(w.shape)}")
@@ -165,10 +195,8 @@ def quantize_weight(w: mx.array, backend: str) -> QuantizedWeight:
     group_size = kwargs["group_size"]
     # When group_size is None, MLX applies the mode default; only check when set.
     if isinstance(group_size, int) and cols % group_size != 0:
-        raise ValueError(
-            f"Weight last dim {cols} must be divisible by group_size={group_size} "
-            f"for backend {name!r}"
-        )
+        raise ValueError(f"Weight last dim {cols} must be divisible by group_size={group_size} "
+                         f"for backend {name!r}")
 
     quantized = mx.quantize(
         w,
@@ -209,6 +237,15 @@ def quantized_matmul(x: mx.array, qw: QuantizedWeight) -> mx.array:
 
 
 def _artifact_nbytes(qw: QuantizedWeight) -> int:
+    """
+    Calculate the total storage size of a quantized weight artifact in bytes.
+
+    Parameters:
+        qw (QuantizedWeight): Quantized weight artifact whose packed weights, scales, and optional biases are measured.
+
+    Returns:
+        int: Total number of bytes used by the artifact's stored arrays.
+    """
     total = int(qw.weight.nbytes) + int(qw.scales.nbytes)
     if qw.biases is not None:
         total += int(qw.biases.nbytes)
@@ -216,10 +253,18 @@ def _artifact_nbytes(qw: QuantizedWeight) -> int:
 
 
 def bytes_per_weight(backend: str) -> float:
-    """Effective stored bytes per weight element (packed data + scales/biases).
+    """
+    Measure the effective storage cost of a quantized weight.
 
-    Quantizes a probe matrix and divides total artifact nbytes by the number of
-    original weight elements — not a hard-coded formula.
+    Parameters:
+        backend (str): Quantization backend to measure.
+
+    Returns:
+        float: Stored bytes per original weight element, including packed weights,
+            scales, and optional biases.
+
+    Raises:
+        RuntimeError: If the backend is unsupported.
     """
     name = _normalize_backend(backend)
     if name in _BYTES_CACHE:
@@ -228,10 +273,8 @@ def bytes_per_weight(backend: str) -> float:
     err = support_error(name)
     if err is not None:
         mlx_version = getattr(mx, "__version__", "unknown")
-        raise RuntimeError(
-            f"Cannot measure bytes_per_weight for unsupported backend {name!r} "
-            f"(mlx {mlx_version}): {err}"
-        )
+        raise RuntimeError(f"Cannot measure bytes_per_weight for unsupported backend {name!r} "
+                           f"(mlx {mlx_version}): {err}")
 
     probe = mx.zeros((_PROBE_DIM, _PROBE_DIM), dtype=mx.float16)
     qw = quantize_weight(probe, name)

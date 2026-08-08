@@ -28,6 +28,12 @@ DEFAULT_MODEL_ROOT = (
 
 
 def main() -> None:
+    """
+    Run a configurable MLX FastWan DiT forward-pass smoke test with randomly generated inputs.
+
+    Command-line options control the model snapshot, video dimensions, text length, numeric
+    dtype, quantization mode, number of transformer blocks, and random seed.
+    """
     parser = argparse.ArgumentParser(description="Full FastWan DiT forward smoke for the experimental MLX runtime")
     parser.add_argument("--model-root", type=Path, default=DEFAULT_MODEL_ROOT)
     parser.add_argument("--height", type=int, default=256)

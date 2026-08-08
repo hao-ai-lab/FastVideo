@@ -73,7 +73,7 @@ _W8A8_GEMM_NAIVE_SRC = r"""
 """
 
 # Tiled: each threadgroup cooperatively loads tiles of A/B into threadgroup
-# memory and accumulates a TM×TN output tile. Still scalar MACs (no AMX/ANE
+# memory and accumulates a TM×TN output tile. Still scalar MACs (no Apple Neural Engine
 # intrinsics exposed through mx.fast.metal_kernel) — mainly reduces global
 # loads. grid = (ceil(N/TN)*tg_x, ceil(M/TM)*tg_y, 1).
 _TILE_M = 8
@@ -157,6 +157,18 @@ _kernel_cache: dict[str, Any] = {}
 
 
 def _get_kernel(kind: str = "naive"):
+    """
+    Retrieve or create the cached Metal kernel for the specified W8A8 GEMM implementation.
+
+    Parameters:
+        kind (str): Kernel variant to use, either ``"naive"`` or ``"tiled"``.
+
+    Returns:
+        The corresponding MLX Metal kernel.
+
+    Raises:
+        ValueError: If ``kind`` is not a supported kernel variant.
+    """
     import mlx.core as mx
 
     if kind in _kernel_cache:
@@ -202,14 +214,27 @@ def quantize_per_row(
     max_abs: float | None = None,
     eps: float = 1e-8,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Symmetric per-row absmax → int8. Returns ``(q_int8, scale_f32)``."""
+    """
+    Quantize each row of a 2D array symmetrically to signed 8-bit integers.
+
+    Parameters:
+        x (np.ndarray | Any): Array whose rows are quantized independently.
+        max_abs (float | None): Optional absolute maximum applied to every row.
+        eps (float): Minimum absolute maximum used to prevent zero scales.
+
+    Returns:
+        tuple[np.ndarray, np.ndarray]: Quantized int8 rows and float32 scale values for each row.
+
+    Raises:
+        ValueError: If `x` is not two-dimensional.
+    """
     arr = np.asarray(x, dtype=np.float32)
     if arr.ndim != 2:
         raise ValueError(f"expected 2D array, got shape {arr.shape}")
     if max_abs is None:
         absmax = np.max(np.abs(arr), axis=1).astype(np.float32)
     else:
-        absmax = np.full((arr.shape[0],), float(max_abs), dtype=np.float32)
+        absmax = np.full((arr.shape[0], ), float(max_abs), dtype=np.float32)
     absmax = np.maximum(absmax, eps)
     scale = absmax / 127.0
     q = np.clip(np.rint(arr / scale[:, None]), -127, 127).astype(np.int8)
@@ -217,7 +242,15 @@ def quantize_per_row(
 
 
 def quantize_activations_per_token(x: Any) -> W8A8Matrix:
-    """Per-token (row) activation quant — Gate-1 recommended scheme."""
+    """
+    Quantize each activation token independently for W8A8 matrix multiplication.
+
+    Parameters:
+        x (Any): Activation array with the feature dimension in the final axis.
+
+    Returns:
+        W8A8Matrix: Quantized activations with leading dimensions flattened into token rows.
+    """
     import mlx.core as mx
 
     if hasattr(x, "shape") and type(x).__module__.startswith("mlx"):
@@ -238,7 +271,15 @@ def quantize_activations_per_token(x: Any) -> W8A8Matrix:
 
 
 def quantize_weights_per_out_channel(w: Any) -> W8A8Matrix:
-    """Per-out-channel weight quant for ``y = x @ w.T`` (w shape ``[N, K]``)."""
+    """
+    Quantize weights independently for each output channel in a matrix used by ``y = x @ w.T``.
+
+    Parameters:
+        w: A two-dimensional weight matrix with shape ``[N, K]``.
+
+    Returns:
+        A ``W8A8Matrix`` containing the quantized weights and per-output-channel scales.
+    """
     import mlx.core as mx
 
     if hasattr(w, "shape") and type(w).__module__.startswith("mlx"):
@@ -257,7 +298,15 @@ def quantize_weights_per_out_channel(w: Any) -> W8A8Matrix:
 
 
 def dequant_reference(a: W8A8Matrix, b: W8A8Matrix) -> np.ndarray:
-    """``(a.q * sa) @ (b.q * sb).T`` in float64 — kernel correctness oracle."""
+    """Compute a float64 reference product from quantized activations and weights.
+
+    Parameters:
+        a (W8A8Matrix): Quantized activation matrix with per-row scales.
+        b (W8A8Matrix): Quantized weight matrix with per-row output-channel scales.
+
+    Returns:
+        np.ndarray: The dequantized matrix product.
+    """
     import mlx.core as mx
 
     aq = np.array(a.q.astype(mx.float32) if hasattr(a.q, "astype") else a.q).astype(np.float64)
@@ -278,16 +327,20 @@ def w8a8_matmul(
     *,
     kind: str = "naive",
 ) -> Any:
-    """Compute ``y = (a.q⊙sa) @ (b.q⊙sb).T`` via the fused Metal kernel.
+    """
+    Compute the W8A8 matrix product using the selected kernel.
 
     Args:
-        a: activations ``[M, K]`` int8 + per-row scales.
-        b: weights ``[N, K]`` int8 + per-out-channel scales (NOT transposed
-           relative to ``nn.Linear.weight`` layout).
-        kind: ``"naive"`` or ``"tiled"``.
+        a: Quantized activations with shape ``[M, K]`` and per-row scales.
+        b: Quantized weights with shape ``[N, K]`` and per-output-channel
+            scales.
+        kind: Kernel variant, either ``"naive"`` or ``"tiled"``.
 
     Returns:
-        ``mx.array`` float32 of shape ``[M, N]``.
+        An ``mx.array`` of float32 results with shape ``[M, N]``.
+
+    Raises:
+        ValueError: If the input inner dimensions do not match.
     """
     import mlx.core as mx
 
@@ -326,9 +379,17 @@ def w8a8_linear(
     bias: Any | None = None,
     kind: str = "naive",
 ) -> Any:
-    """Drop-in-ish Linear: quantize ``x`` per-token, ``weight`` per-out, GEMM.
+    """Apply W8A8 quantization and matrix multiplication to a linear layer.
 
-    ``weight`` is ``[out_features, in_features]`` (torch/MLX Linear layout).
+    Parameters:
+        x: Input activations whose leading dimensions are treated as tokens.
+        weight: Linear-layer weights with shape ``[out_features, in_features]``.
+        bias: Optional bias added to the output.
+        kind: Matrix multiplication kernel variant to use.
+
+    Returns:
+        The float32 linear-layer output with the input's leading dimensions and
+        ``out_features`` as the final dimension.
     """
     import mlx.core as mx
 
@@ -357,6 +418,17 @@ class BenchRow:
 
 
 def _median_ms(fn, warmup: int, iters: int) -> float:
+    """
+    Measure the median execution time of a callable after warmup runs.
+
+    Parameters:
+        fn (Callable): The computation to execute.
+        warmup (int): Number of executions performed before measurement.
+        iters (int): Number of measured executions.
+
+    Returns:
+        float: Median execution time in milliseconds.
+    """
     import mlx.core as mx
 
     for _ in range(warmup):
@@ -383,7 +455,20 @@ def bench_w8a8(
     iters: int = 20,
     seed: int = 0,
 ) -> list[BenchRow]:
-    """Microbench W8A8 naive/tiled vs fp16 GEMM vs weight-only quant matmul."""
+    """
+    Benchmark FP16 GEMM, W8A8 GEMM variants, and optional weight-only quantized matmul.
+
+    Parameters:
+        m (int): Number of rows in the activation matrix.
+        n (int): Number of output channels.
+        k (int): Shared contraction dimension.
+        warmup (int): Number of warmup executions before timing.
+        iters (int): Number of timed executions.
+        seed (int): Seed for reproducible input generation.
+
+    Returns:
+        list[BenchRow]: Benchmark results for each successfully measured method.
+    """
     import mlx.core as mx
 
     mx.random.seed(seed)
@@ -401,10 +486,18 @@ def bench_w8a8(
     rows: list[BenchRow] = []
 
     def add(label: str, fn, notes: str = "") -> None:
+        """
+        Record a benchmark measurement for a labeled operation.
+
+        Parameters:
+            label (str): Name of the operation being measured.
+            fn: Callable used to perform the operation.
+            notes (str): Optional notes to include with the benchmark result.
+        """
         ms = _median_ms(fn, warmup=warmup, iters=iters)
         tflops = (flops / (ms * 1e-3)) / 1e12
         rows.append(BenchRow(label=label, m=m, n=n, k=k, median_ms=ms, tflops=tflops, notes=notes))
-        logger.info("[w8a8 bench] %s: %.3f ms  %.2f TFLOP/s  %s" % (label, ms, tflops, notes))
+        logger.info("[w8a8 bench] %s: %.3f ms  %.2f TFLOP/s  %s", label, ms, tflops, notes)
 
     add("fp16_gemm", lambda: x @ w.T, notes="baseline mx matmul")
     add("w8a8_naive", lambda: w8a8_matmul(a, b, kind="naive"))
@@ -416,6 +509,12 @@ def bench_w8a8(
         mx.eval(w_q, scales, biases)
 
         def _qmm():
+            """
+            Compute the quantized matrix product using 8-bit weights.
+
+            Returns:
+                The quantized matrix multiplication result.
+            """
             return mx.quantized_matmul(
                 x,
                 w_q,
@@ -434,19 +533,33 @@ def bench_w8a8(
 
 
 def _format_bench(rows: list[BenchRow]) -> str:
+    """Format benchmark results as a human-readable table.
+
+    Parameters:
+        rows (list[BenchRow]): Benchmark results to render.
+
+    Returns:
+        str: A table containing benchmark labels, dimensions, latency, throughput, and notes.
+    """
     lines = [
         f"{'label':28s} {'M':>5} {'N':>5} {'K':>5} {'ms':>10} {'TFLOP/s':>10}  notes",
         "-" * 90,
     ]
     for r in rows:
-        lines.append(
-            f"{r.label:28s} {r.m:5d} {r.n:5d} {r.k:5d} {r.median_ms:10.3f} {r.tflops:10.3f}  {r.notes}"
-        )
+        lines.append(f"{r.label:28s} {r.m:5d} {r.n:5d} {r.k:5d} {r.median_ms:10.3f} {r.tflops:10.3f}  {r.notes}")
     return "\n".join(lines)
 
 
 def main(argv: list[str] | None = None) -> None:
-    """CLI: correctness smoke + optional microbench."""
+    """
+    Run correctness checks for both W8A8 GEMM kernels and optionally benchmark configured matrix shapes.
+
+    Parameters:
+        argv (list[str] | None): Command-line arguments to parse; uses process arguments when omitted.
+
+    Raises:
+        SystemExit: If an invalid shape is provided or a correctness check exceeds the error threshold.
+    """
     import argparse
 
     import mlx.core as mx
@@ -522,7 +635,6 @@ def main(argv: list[str] | None = None) -> None:
 
 if __name__ == "__main__":
     main()
-
 
 __all__ = [
     "W8A8Matrix",

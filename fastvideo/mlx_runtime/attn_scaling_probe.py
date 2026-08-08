@@ -20,7 +20,6 @@ import subprocess
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Optional
 
 import mlx.core as mx
 
@@ -50,6 +49,15 @@ class Row:
 
 
 def _sysctl(name: str) -> str:
+    """
+    Retrieve a macOS system setting by name.
+
+    Parameters:
+        name (str): The system setting to query.
+
+    Returns:
+        str: The setting value, or an error description if the query fails.
+    """
     try:
         out = subprocess.run(
             ["sysctl", "-n", name],
@@ -76,7 +84,16 @@ def _time_call(fn, warmup: int, iters: int) -> float:
 
 
 def mean_cosine_similarity(a: mx.array, b: mx.array) -> float:
-    """Mean cosine similarity over all ``(B, H, S)`` head vectors (fp32)."""
+    """
+    Compute the mean cosine similarity between corresponding vectors in two tensors.
+
+    Parameters:
+        a (mx.array): The first tensor.
+        b (mx.array): The second tensor, with the same shape as `a`.
+
+    Returns:
+        float: The mean cosine similarity across corresponding vectors.
+    """
     if a.shape != b.shape:
         raise ValueError(f"shape mismatch for cosine: {a.shape} vs {b.shape}")
     a32 = a.astype(mx.float32).reshape(-1, a.shape[-1])
@@ -89,9 +106,19 @@ def mean_cosine_similarity(a: mx.array, b: mx.array) -> float:
     return float(mx.mean(cos).item())
 
 
-def _make_qkv(
-    b: int, h: int, s: int, d: int, *, seed: int
-) -> tuple[mx.array, mx.array, mx.array]:
+def _make_qkv(b: int, h: int, s: int, d: int, *, seed: int) -> tuple[mx.array, mx.array, mx.array]:
+    """Create fixed fp16 query, key, and value tensors for an attention benchmark.
+
+    Parameters:
+        b (int): Batch size.
+        h (int): Number of attention heads.
+        s (int): Sequence length.
+        d (int): Head dimension.
+        seed (int): Random seed used to generate the tensors.
+
+    Returns:
+        tuple[mx.array, mx.array, mx.array]: Query, key, and value tensors with shape `(b, h, s, d)`.
+    """
     mx.random.seed(seed)
     q = mx.random.normal((b, h, s, d)).astype(mx.float16)
     k = mx.random.normal((b, h, s, d)).astype(mx.float16)
@@ -112,14 +139,30 @@ def bench_pair(
     iters: int,
     seed: int,
 ) -> Row:
-    """Time full vs windowed attention and measure mean cosine on fixed q/k/v."""
+    """
+    Benchmark full and windowed attention on identical inputs and quantify their similarity.
+
+    Parameters:
+        window (int): Size of the symmetric attention window.
+        sink (int): Number of global sink tokens included in windowed attention.
+
+    Returns:
+        Row: Timing, speedup, similarity, and tensor-shape results for the comparison.
+    """
     q, k, v = _make_qkv(b, h, s, d, seed=seed)
     scale = d**-0.5
 
     def run_full() -> mx.array:
+        """Compute dense attention for the configured query, key, and value tensors."""
         return full_attention(q, k, v, scale=scale)
 
     def run_win() -> mx.array:
+        """
+        Compute windowed attention for the benchmark inputs.
+
+        Returns:
+            mx.array: The windowed attention output.
+        """
         return windowed_attention(q, k, v, window=window, sink=sink, scale=scale)
 
     full_s = _time_call(run_full, warmup, iters)
@@ -145,7 +188,15 @@ def bench_pair(
 
 
 def format_table(rows: list[Row]) -> str:
-    """Pretty fixed-width table for stdout."""
+    """
+    Format benchmark results as a fixed-width table for display.
+
+    Parameters:
+        rows (list[Row]): Benchmark results to include in the table.
+
+    Returns:
+        str: A right-aligned table containing benchmark metrics.
+    """
     headers = (
         "S",
         "window",
@@ -157,21 +208,20 @@ def format_table(rows: list[Row]) -> str:
     )
     body: list[tuple[str, ...]] = []
     for r in rows:
-        body.append(
-            (
-                str(r.seq_len),
-                str(r.window),
-                str(r.sink),
-                f"{r.full_seconds:.4f}",
-                f"{r.windowed_seconds:.4f}",
-                f"{r.speedup:.2f}x",
-                f"{r.mean_cosine:.6f}",
-            )
-        )
+        body.append((
+            str(r.seq_len),
+            str(r.window),
+            str(r.sink),
+            f"{r.full_seconds:.4f}",
+            f"{r.windowed_seconds:.4f}",
+            f"{r.speedup:.2f}x",
+            f"{r.mean_cosine:.6f}",
+        ))
     cols = list(zip(*([headers] + body), strict=True))
     widths = [max(len(cell) for cell in col) for col in cols]
 
     def fmt_row(cells: tuple[str, ...]) -> str:
+        """Format table cells as right-aligned, consistently spaced text."""
         return "  ".join(c.rjust(w) for c, w in zip(cells, widths, strict=True))
 
     lines = [fmt_row(headers), "  ".join("-" * w for w in widths)]
@@ -191,7 +241,20 @@ def run_probe(
     iters: int = 5,
     seed: int = _SEED,
 ) -> dict:
-    """Run the full grid and return a JSON-serializable report."""
+    """
+    Run attention benchmarks for every sequence-length and window-size combination.
+
+    Parameters:
+        seqs (tuple[int, ...]): Sequence lengths to benchmark.
+        windows (tuple[int, ...]): Window sizes to benchmark.
+        sink (int): Number of optional global sink tokens included in each benchmark.
+        warmup (int): Number of warmup calls per benchmark.
+        iters (int): Number of timed calls per benchmark.
+        seed (int): Base random seed used to generate benchmark inputs.
+
+    Returns:
+        dict: A JSON-serializable report containing platform details, benchmark configuration, and results.
+    """
     if not seqs or not windows:
         raise ValueError("seqs and windows must be non-empty")
 
@@ -245,10 +308,20 @@ def run_probe(
     return report
 
 
-def main(argv: Optional[list[str]] = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Benchmark full vs chunked windowed attention (MLX Wan shapes)."
-    )
+def main(argv: list[str] | None = None) -> int:
+    """
+    Parse command-line options, run the attention benchmark, and display its results.
+
+    Parameters:
+        argv (Optional[list[str]]): Command-line arguments to parse; defaults to the process arguments.
+
+    Returns:
+        int: Exit status of the command.
+
+    Raises:
+        SystemExit: If warmup, iteration, or sink values are invalid.
+    """
+    parser = argparse.ArgumentParser(description="Benchmark full vs chunked windowed attention (MLX Wan shapes).")
     parser.add_argument(
         "--json",
         type=Path,

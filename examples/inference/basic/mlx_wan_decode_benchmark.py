@@ -13,6 +13,13 @@ from examples.inference.basic.mlx_wan_prompt_to_video import DEFAULT_MODEL_ROOT,
 
 
 def _torch_mps_memory() -> dict[str, int | None]:
+    """
+    Report current and recommended memory usage for the MPS backend.
+
+    Returns:
+        dict[str, int | None]: Memory metrics in bytes, or `None` values when
+            PyTorch or MPS is unavailable.
+    """
     try:
         import torch
     except ImportError:
@@ -35,6 +42,18 @@ def _torch_mps_memory() -> dict[str, int | None]:
 
 
 def _parse_backends(raw: str) -> list[str]:
+    """
+    Parse and validate a comma-separated list of decoding backends.
+
+    Parameters:
+        raw (str): Comma-separated backend names.
+
+    Returns:
+        list[str]: Trimmed, supported backend names in input order.
+
+    Raises:
+        ValueError: If the input contains an unsupported backend.
+    """
     backends = [backend.strip() for backend in raw.split(",") if backend.strip()]
     allowed = {"wan-vae", "taehv"}
     unknown = sorted(set(backends) - allowed)
@@ -44,6 +63,13 @@ def _parse_backends(raw: str) -> list[str]:
 
 
 def main() -> None:
+    """
+    Benchmark selected Wan latent decoding backends and record their performance metrics.
+
+    Loads the specified latent array, decodes it with each selected backend, exports the
+    results as MP4 files, and writes per-backend timing and Torch MPS memory metrics to
+    `metrics.json`.
+    """
     parser = argparse.ArgumentParser(description="Benchmark decode backends on saved Wan/FastWan latents.")
     parser.add_argument("--model-root", type=Path, default=DEFAULT_MODEL_ROOT)
     parser.add_argument("--latents-path", type=Path, required=True)

@@ -15,6 +15,19 @@ from fastvideo.mlx_runtime.windowed_attention import (  # noqa: E402
 
 
 def _rand_qkv(b: int, h: int, s: int, d: int, seed: int = 0):
+    """
+    Generate deterministic random query, key, and value tensors.
+
+    Parameters:
+        b (int): Batch size.
+        h (int): Number of attention heads.
+        s (int): Sequence length.
+        d (int): Feature dimension.
+        seed (int): Random number generator seed.
+
+    Returns:
+        tuple: Query, key, and value tensors with shape `(b, h, s, d)`.
+    """
     rng = np.random.default_rng(seed)
     q = mx.array(rng.standard_normal((b, h, s, d)).astype(np.float32))
     k = mx.array(rng.standard_normal((b, h, s, d)).astype(np.float32))
@@ -23,6 +36,16 @@ def _rand_qkv(b: int, h: int, s: int, d: int, seed: int = 0):
 
 
 def _mean_cosine(a: "mx.array", b: "mx.array") -> float:
+    """
+    Compute the mean cosine similarity between corresponding feature vectors.
+
+    Parameters:
+        a: The first tensor.
+        b: The second tensor.
+
+    Returns:
+        The mean cosine similarity, with protection against zero-norm vectors.
+    """
     a32 = np.array(a.astype(mx.float32)).reshape(-1, a.shape[-1])
     b32 = np.array(b.astype(mx.float32)).reshape(-1, b.shape[-1])
     num = np.sum(a32 * b32, axis=-1)

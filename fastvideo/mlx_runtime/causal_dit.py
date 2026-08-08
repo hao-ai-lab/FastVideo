@@ -32,11 +32,18 @@ if TYPE_CHECKING:
 
 
 def _modulate_per_frame(x, scale, shift, *, temb_seq_len: int, tokens_per_temb: int):
-    """``(x reshaped to per-frame) * (1 + scale) + shift`` then flattened back.
+    """
+    Apply per-frame scale and shift modulation to a token sequence.
 
-    Mirrors the torch block's ``unflatten(1,(S,tpt)) * (1+scale) + shift`` so the
-    modulation is applied per timestep-frame (``scale``/``shift`` are
-    ``[B, S, 1, dim]``).
+    Parameters:
+        x: Token representations with shape ``[batch, sequence, dim]``.
+        scale: Per-frame scale values with shape ``[batch, temb_seq_len, 1, dim]``.
+        shift: Per-frame shift values with shape ``[batch, temb_seq_len, 1, dim]``.
+        temb_seq_len: Number of timestep frames represented in the sequence.
+        tokens_per_temb: Number of tokens associated with each timestep frame.
+
+    Returns:
+        Token representations with shape ``[batch, sequence, dim]`` after modulation.
     """
     batch, seq, dim = x.shape
     x = x.reshape(batch, temb_seq_len, tokens_per_temb, dim)
@@ -45,6 +52,17 @@ def _modulate_per_frame(x, scale, shift, *, temb_seq_len: int, tokens_per_temb: 
 
 
 def _gate_per_frame(x, gate, *, temb_seq_len: int, tokens_per_temb: int):
+    """Apply per-frame gating to a sequence of token representations.
+
+    Parameters:
+        x (array): Token representations with shape `(batch, sequence, dimension)`.
+        gate (array): Per-frame gating values.
+        temb_seq_len (int): Number of timestep or frame groups.
+        tokens_per_temb (int): Number of tokens in each group.
+
+    Returns:
+        array: The gated token representations with the original shape.
+    """
     batch, seq, dim = x.shape
     x = x.reshape(batch, temb_seq_len, tokens_per_temb, dim)
     x = x * gate
@@ -63,6 +81,17 @@ class MLXCausalWanTransformerBlock:
         self.eps = eps
 
     def _cross_attention(self, x, encoder_hidden_states, crossattn_cache) -> mx.array:
+        """
+        Apply cross-attention between hidden states and encoder states.
+
+        Parameters:
+            x: The query hidden states.
+            encoder_hidden_states: The states used to produce cross-attention keys and values.
+            crossattn_cache: Optional cache for reusing projected keys and values.
+
+        Returns:
+            The cross-attention output projected to the model dimension.
+        """
         import mlx.core as mx
 
         batch = x.shape[0]
@@ -107,6 +136,24 @@ class MLXCausalWanTransformerBlock:
         local_attn_size: int,
         frame_seqlen: int,
     ) -> mx.array:
+        """
+        Apply causal self-attention, cached cross-attention, and gated feed-forward processing to hidden states.
+
+        Parameters:
+            hidden_states: Token representations for the current frame block.
+            encoder_hidden_states: Conditioning representations used by cross-attention.
+            timestep_proj: Per-frame timestep modulation projections.
+            cos: Cosine rotary-position embeddings.
+            sin: Sine rotary-position embeddings.
+            kv_cache: Cache for causal self-attention keys and values.
+            crossattn_cache: Cache for cross-attention keys and values.
+            current_start (int): Starting position of the current frame block.
+            local_attn_size (int): Number of prior positions available to local attention.
+            frame_seqlen (int): Number of tokens representing one frame.
+
+        Returns:
+            Hidden states after the transformer block.
+        """
         import mlx.core as mx
 
         orig_dtype = hidden_states.dtype
@@ -194,6 +241,18 @@ class MLXCausalWanDiT:
         sink_size: int = 0,
         num_frames_per_block: int = 1,
     ) -> None:
+        """
+        Initialize the causal Wan DiT model and its runtime attention settings.
+
+        Parameters:
+            weights (dict[str, mx.array]): Model weights used during inference.
+            blocks (list[MLXCausalWanTransformerBlock]): Transformer blocks comprising the model.
+            config (dict): Model configuration containing architecture and conditioning settings.
+            local_attn_size (int): Number of tokens in the local attention window; -1 uses the finite
+                compatibility window from ``GLOBAL_ATTN_COMPAT_MAX_LATENT_FRAMES``.
+            sink_size (int): Number of initial tokens retained as attention sinks.
+            num_frames_per_block (int): Number of frames processed in each inference block.
+        """
         self.weights = weights
         self.blocks = blocks
         self.config = config
@@ -210,7 +269,17 @@ class MLXCausalWanDiT:
         self.num_frames_per_block = num_frames_per_block
 
     def allocate_caches(self, *, batch: int, frame_seqlen: int, dtype=None) -> tuple:
-        """One KV cache + cross-attn cache per block, sized to the window."""
+        """
+        Allocate self-attention and cross-attention caches for each transformer block.
+
+        Parameters:
+            batch (int): Number of samples in the batch.
+            frame_seqlen (int): Number of tokens represented by each frame.
+            dtype: Data type used for the self-attention caches.
+
+        Returns:
+            tuple: A pair containing the per-block self-attention KV caches and cross-attention cache dictionaries.
+        """
         from fastvideo.mlx_runtime.causal import max_attention_size
 
         window = max_attention_size(self.local_attn_size, frame_seqlen)
@@ -226,6 +295,14 @@ class MLXCausalWanDiT:
         return kv_caches, crossattn_caches
 
     def _patch_embed(self, hidden_states) -> mx.array:
+        """Convert spatiotemporal input into projected patch tokens.
+
+        Parameters:
+            hidden_states (mx.array): Input tensor shaped as
+                ``[batch, channels, frames, height, width]``.
+
+        Returns:
+            mx.array: Flattened patch embeddings."""
         batch, channels, frames, height, width = hidden_states.shape
         pt, ph, pw = self.patch_size
         patch_dim = channels * pt * ph * pw
@@ -234,7 +311,17 @@ class MLXCausalWanDiT:
         return linear(x, self.weights["patch_embedding.weight"], self.weights.get("patch_embedding.bias"))
 
     def _condition(self, timestep, encoder_hidden_states) -> tuple:
-        """Per-frame timestep conditioning. ``timestep`` is ``[B, frames]``."""
+        """
+        Prepare per-frame timestep and text conditioning for the transformer.
+
+        Parameters:
+            timestep: Per-frame timestep values with shape ``[batch, frames]``.
+            encoder_hidden_states: Text conditioning embeddings.
+
+        Returns:
+            A tuple containing the timestep embeddings, timestep modulation
+            projections, and projected text conditioning embeddings.
+        """
         import mlx.core as mx
 
         batch, frames = timestep.shape
@@ -269,6 +356,20 @@ class MLXCausalWanDiT:
         return temb_out, timestep_proj, ehs
 
     def _output(self, hidden_states, temb_out, *, batch, frames, height, width) -> mx.array:
+        """
+        Reconstruct a video tensor from denoised patch tokens.
+
+        Parameters:
+            hidden_states: Patch-token representations to project into output patches.
+            temb_out: Per-frame timestep modulation values.
+            batch (int): Batch size.
+            frames (int): Number of video frames.
+            height (int): Video height.
+            width (int): Video width.
+
+        Returns:
+            mx.array: Reconstructed video with shape ``[batch, channels, frames, height, width]``.
+        """
         import mlx.core as mx
 
         pt, ph, pw = self.patch_size
@@ -297,7 +398,22 @@ class MLXCausalWanDiT:
         *,
         current_start: int,
     ) -> mx.array:
-        """Denoise one frame-block; ``cos``/``sin`` are its global-position rotary."""
+        """
+        Process a frame block through the causal Wan DiT and reconstruct its denoised video chunk.
+
+        Parameters:
+            hidden_states: Input video frame block.
+            encoder_hidden_states: Text conditioning embeddings.
+            timestep: Diffusion timestep for each frame.
+            cos: Cosine rotary embeddings for the frame block's global positions.
+            sin: Sine rotary embeddings for the frame block's global positions.
+            kv_caches: Self-attention KV cache for each transformer block.
+            crossattn_caches: Cross-attention cache for each transformer block.
+            current_start (int): Global starting position of the frame block.
+
+        Returns:
+            mx.array: Denoised video chunk with shape [batch, channels, frames, height, width].
+        """
         batch, _, frames, height, width = hidden_states.shape
         frame_seqlen = (height // self.patch_size[1]) * (width // self.patch_size[2])
 
@@ -330,10 +446,18 @@ def mlx_causal_dit_from_diffusers_safetensors(
     sink_size: int = 0,
     num_frames_per_block: int = 1,
 ) -> MLXCausalWanDiT:
-    """Load a causal Wan DiT from a Diffusers checkpoint into ``MLXCausalWanDiT``.
+    """
+    Load a causal Wan DiT model from a Diffusers safetensors checkpoint.
 
-    Reuses the dense Diffusers loader (the causal checkpoint has the same weight
-    layout) and re-wraps its blocks as causal blocks — only the forward differs.
+    Parameters:
+        checkpoint_path (str | Path): Path to the Diffusers model checkpoint.
+        config_path (str | Path): Path to the model configuration.
+        local_attn_size (int): Number of tokens in the local attention window.
+        sink_size (int): Number of initial tokens preserved as attention sinks.
+        num_frames_per_block (int): Number of frames processed in each block.
+
+    Returns:
+        MLXCausalWanDiT: The configured causal Wan DiT model.
     """
     dense = mlx_dit_from_diffusers_safetensors(checkpoint_path,
                                                config_path,

@@ -30,6 +30,16 @@ _RNG = np.random.default_rng(0)
 
 
 def _rand(*shape: int, scale: float = 1.0) -> "mx.array":
+    """
+    Generate a float32 MLX array of normally distributed random values.
+
+    Parameters:
+        shape (int): Dimensions of the generated array.
+        scale (float): Factor applied to the sampled values.
+
+    Returns:
+        mx.array: The generated random array.
+    """
     return mx.array((_RNG.standard_normal(shape) * scale).astype(np.float32))
 
 
@@ -60,6 +70,16 @@ def test_timestep_embedding_compiles_and_matches_eager() -> None:
 
 
 def _tiny_block_weights(dim: int, ffn: int) -> dict:
+    """
+    Create randomized weights for a small transformer block test fixture.
+
+    Parameters:
+        dim (int): Hidden dimension of the transformer block.
+        ffn (int): Intermediate dimension of the feed-forward network.
+
+    Returns:
+        dict: Randomized attention, normalization, modulation, and feed-forward weights and biases.
+    """
     square = ["to_q", "to_k", "to_v", "to_out", "attn2.to_q", "attn2.to_k", "attn2.to_v", "attn2.to_out"]
     weights = {f"{k}.weight": _rand(dim, dim, scale=0.05) for k in square}
     weights.update({f"{k}.bias": _rand(dim, scale=0.05) for k in ["to_q", "to_k", "to_v", "to_out"]})

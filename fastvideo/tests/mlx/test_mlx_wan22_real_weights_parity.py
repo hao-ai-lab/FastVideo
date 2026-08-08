@@ -29,7 +29,12 @@ _HAS_WEIGHTS = _CHECKPOINT.exists() and _CONFIG.exists() and _CHECKPOINT.stat().
 # The real-weight test loads ~10 GB fp16 weights + activations. Gate on the
 # documented 36 GB requirement unless explicitly opted in.
 def _check_memory_requirement() -> bool:
-    """Return True if available memory meets the 36 GB requirement or opt-in is set."""
+    """Determine whether the system meets the memory requirement for the test.
+
+    Returns:
+        bool: `true` if the system has at least 36 GiB of memory or low-memory
+        execution is explicitly enabled, `false` otherwise.
+    """
     if os.environ.get("FASTVIDEO_WAN22_5B_ALLOW_LOW_MEMORY") == "1":
         return True
     try:
@@ -70,7 +75,17 @@ pytestmark = [
 
 
 def _load_torch_wan22_from_diffusers(checkpoint: Path, config_path: Path, *, dtype):
-    """Instantiate ``WanTransformer3DModel`` and load Diffusers-format weights."""
+    """
+    Instantiate a Wan2.2 transformer and load its Diffusers-format checkpoint weights.
+
+    Parameters:
+        checkpoint (Path): Path to the safetensors checkpoint.
+        config_path (Path): Path to the Diffusers configuration file.
+        dtype: Data type to use for the returned model.
+
+    Returns:
+        WanTransformer3DModel: An evaluation-mode model with the loaded weights.
+    """
     import torch
     from safetensors.torch import load_file
 
@@ -127,6 +142,9 @@ def _load_torch_wan22_from_diffusers(checkpoint: Path, config_path: Path, *, dty
 
 @pytest.mark.usefixtures("distributed_setup")
 def test_wan22_real_weights_mlx_matches_torch_per_token_timestep() -> None:
+    """
+    Verify that the MLX and PyTorch Wan2.2 implementations produce equivalent outputs for per-token timesteps using real checkpoint weights.
+    """
     import torch
 
     from fastvideo.forward_context import set_forward_context

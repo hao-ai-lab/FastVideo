@@ -21,6 +21,13 @@ DEFAULT_MODEL_ROOT = (
 
 
 def main() -> None:
+    """
+    Run a smoke test of FastWan transformer blocks with MLX checkpoint weights and synthetic inputs.
+
+    Command-line options control the model path, video dimensions, sequence and text lengths,
+    number of blocks, data type, and random seed. Reports block-loading time, execution time,
+    and the final output shape and data type.
+    """
     parser = argparse.ArgumentParser(description="Run real FastWan DiT blocks in the experimental MLX runtime")
     parser.add_argument("--model-root", type=Path, default=DEFAULT_MODEL_ROOT)
     parser.add_argument("--height", type=int, default=256)

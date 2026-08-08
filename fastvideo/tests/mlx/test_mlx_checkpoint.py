@@ -36,6 +36,7 @@ from fastvideo.tests.mlx.tiny_wan import (  # noqa: E402
 
 
 def _forward(dit) -> np.ndarray:
+    """Run the DiT model with standard inputs and return its output as a NumPy array."""
     hidden_states, encoder_hidden_states, timestep = build_inputs()
     return mlx_output(dit, hidden_states, encoder_hidden_states, timestep, mlx_rotary_embeddings(hidden_states))
 

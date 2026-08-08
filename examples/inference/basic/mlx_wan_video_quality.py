@@ -10,6 +10,18 @@ import numpy as np
 
 
 def _read_video(path: Path) -> np.ndarray:
+    """
+    Read all frames from a video file as an RGB NumPy array.
+
+    Parameters:
+        path (Path): Path to the video file.
+
+    Returns:
+        np.ndarray: Video frames stacked along the first axis.
+
+    Raises:
+        ValueError: If the video contains no readable frames.
+    """
     import cv2
 
     cap = cv2.VideoCapture(str(path))
@@ -29,6 +41,19 @@ def _read_video(path: Path) -> np.ndarray:
 
 
 def _metrics(candidate: np.ndarray, reference: np.ndarray) -> dict[str, float | int | list[int]]:
+    """
+    Compute pixel-level comparison metrics between candidate and reference video frames.
+
+    Parameters:
+        candidate (np.ndarray): Candidate video frames in frame, height, width, and channel order.
+        reference (np.ndarray): Reference video frames with the same shape as the candidate.
+
+    Returns:
+        dict[str, float | int | list[int]]: Frame dimensions and pixel comparison metrics, including MSE, MAE, maximum absolute difference, and PSNR in decibels.
+
+    Raises:
+        ValueError: If the candidate and reference arrays have different shapes.
+    """
     if candidate.shape != reference.shape:
         raise ValueError(f"Shape mismatch: candidate={candidate.shape}, reference={reference.shape}")
     candidate_f = candidate.astype(np.float32)
@@ -51,6 +76,7 @@ def _metrics(candidate: np.ndarray, reference: np.ndarray) -> dict[str, float | 
 
 
 def main() -> None:
+    """Compare candidate MP4 videos with a reference and write pixel-level metrics to a JSON file."""
     parser = argparse.ArgumentParser(description="Compare MP4s against a reference MP4.")
     parser.add_argument("--reference", type=Path, required=True)
     parser.add_argument("--candidates", type=Path, nargs="+", required=True)

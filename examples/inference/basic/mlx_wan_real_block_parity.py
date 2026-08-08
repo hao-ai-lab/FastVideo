@@ -26,6 +26,7 @@ DEFAULT_MODEL_ROOT = (
 
 
 def _patch_single_process_attention() -> None:
+    """Configure attention helpers for single-process execution."""
     import fastvideo.attention.layer as attention_layer
 
     attention_layer.get_sp_parallel_rank = lambda: 0
@@ -35,6 +36,11 @@ def _patch_single_process_attention() -> None:
 
 
 def main() -> None:
+    """
+    Run a selected FastWan transformer block with MLX and optionally compare it with PyTorch.
+
+    Command-line arguments control the model checkpoint, block index, input dimensions, sequence lengths, data type, random seed, comparison tolerances, and whether to skip the PyTorch reference run.
+    """
     parser = argparse.ArgumentParser(description="Real FastWan block parity for the experimental MLX runtime")
     parser.add_argument("--model-root", type=Path, default=DEFAULT_MODEL_ROOT)
     parser.add_argument("--block-index", type=int, default=0)

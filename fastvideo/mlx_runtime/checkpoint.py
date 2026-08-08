@@ -48,6 +48,17 @@ _DTYPE_TO_NAME = {"float16": "fp16", "bfloat16": "bf16", "float32": "fp32"}
 
 
 def _dtype_name(dtype) -> str:
+    """Return the manifest name for a supported MLX data type.
+
+    Parameters:
+        dtype: The MLX data type to convert.
+
+    Returns:
+        str: The manifest name corresponding to the data type.
+
+    Raises:
+        ValueError: If the data type is not supported for checkpointing.
+    """
     import mlx.core as mx
 
     for raw, name in _DTYPE_TO_NAME.items():
@@ -57,12 +68,28 @@ def _dtype_name(dtype) -> str:
 
 
 def _name_to_dtype(name: str):
+    """Convert a manifest dtype name to its corresponding MLX dtype.
+
+    Parameters:
+        name (str): Manifest name, such as ``"fp16"``, ``"bf16"``, or ``"fp32"``.
+
+    Returns:
+        The corresponding MLX dtype.
+    """
     import mlx.core as mx
 
     return {"fp16": mx.float16, "bf16": mx.bfloat16, "fp32": mx.float32}[name]
 
 
 def _flatten_weights(dit: MLXWanDiT) -> dict[str, Any]:
+    """Combine model and transformer-block weights into a single flattened mapping.
+
+    Parameters:
+        dit (MLXWanDiT): Model whose weights should be flattened.
+
+    Returns:
+        dict[str, Any]: Mapping containing top-level weights and indexed transformer-block weights.
+    """
     flat: dict[str, Any] = dict(dit.weights)
     for index, block in enumerate(dit.blocks):
         for name, value in block.weights.items():
@@ -71,7 +98,15 @@ def _flatten_weights(dit: MLXWanDiT) -> dict[str, Any]:
 
 
 def save_mlx_dit_checkpoint(dit: MLXWanDiT, checkpoint_dir: str | Path) -> Path:
-    """Persist ``dit`` (plain or quantized) into ``checkpoint_dir``."""
+    """Save a plain or quantized MLX Wan DiT checkpoint to a directory.
+
+    Parameters:
+        dit (MLXWanDiT): Model whose weights and configuration will be saved.
+        checkpoint_dir (str | Path): Destination directory for the checkpoint.
+
+    Returns:
+        Path: Path to the checkpoint directory.
+    """
     import mlx.core as mx
 
     checkpoint_dir = Path(checkpoint_dir)
@@ -83,9 +118,8 @@ def save_mlx_dit_checkpoint(dit: MLXWanDiT, checkpoint_dir: str | Path) -> Path:
     for key, value in _flatten_weights(dit).items():
         if isinstance(value, QuantizedMatrix):
             if spec is not None and value.spec != spec:
-                raise ValueError(
-                    f"Mixed quantization specs in one checkpoint ({spec} vs {value.spec} at '{key}') "
-                    "are not supported.")
+                raise ValueError(f"Mixed quantization specs in one checkpoint ({spec} vs {value.spec} at '{key}') "
+                                 "are not supported.")
             spec = value.spec
             arrays[key] = value.weight
             arrays[f"{key}.scales"] = value.scales
@@ -113,29 +147,40 @@ def save_mlx_dit_checkpoint(dit: MLXWanDiT, checkpoint_dir: str | Path) -> Path:
     weights_path = checkpoint_dir / WEIGHTS_FILENAME
     mx.save_safetensors(str(weights_path), arrays)
     (checkpoint_dir / MANIFEST_FILENAME).write_text(json.dumps(manifest, indent=2))
-    logger.info("Saved MLX DiT checkpoint (%d arrays, quantization=%s) to %s",
-                len(arrays), spec.label if spec else "none", checkpoint_dir)
+    logger.info("Saved MLX DiT checkpoint (%d arrays, quantization=%s) to %s", len(arrays),
+                spec.label if spec else "none", checkpoint_dir)
     return checkpoint_dir
 
 
 def load_mlx_dit_checkpoint(checkpoint_dir: str | Path, *, compile: bool = False) -> MLXWanDiT:
-    """Rebuild an ``MLXWanDiT`` saved by :func:`save_mlx_dit_checkpoint`."""
+    """
+    Reconstruct an MLXWanDiT model from a versioned checkpoint.
+
+    Parameters:
+        checkpoint_dir (str | Path): Directory containing the checkpoint manifest and weights.
+        compile (bool): Whether to configure the reconstructed model for compilation.
+
+    Returns:
+        MLXWanDiT: The reconstructed model.
+
+    Raises:
+        FileNotFoundError: If the checkpoint manifest or weights file is missing.
+        ValueError: If the checkpoint format is unsupported or block weights are incomplete.
+    """
     import mlx.core as mx
 
     checkpoint_dir = Path(checkpoint_dir)
     manifest_path = checkpoint_dir / MANIFEST_FILENAME
     weights_path = checkpoint_dir / WEIGHTS_FILENAME
     if not manifest_path.exists() or not weights_path.exists():
-        raise FileNotFoundError(
-            f"Not an MLX DiT checkpoint directory: {checkpoint_dir} "
-            f"(expected {MANIFEST_FILENAME} and {WEIGHTS_FILENAME}).")
+        raise FileNotFoundError(f"Not an MLX DiT checkpoint directory: {checkpoint_dir} "
+                                f"(expected {MANIFEST_FILENAME} and {WEIGHTS_FILENAME}).")
 
     manifest = json.loads(manifest_path.read_text())
     version = manifest.get("format_version")
     if version != FORMAT_VERSION:
-        raise ValueError(
-            f"MLX DiT checkpoint {checkpoint_dir} has format_version={version}; "
-            f"this FastVideo build reads version {FORMAT_VERSION}. Re-export the checkpoint.")
+        raise ValueError(f"MLX DiT checkpoint {checkpoint_dir} has format_version={version}; "
+                         f"this FastVideo build reads version {FORMAT_VERSION}. Re-export the checkpoint.")
 
     spec = None
     if manifest["quantization"] is not None:
@@ -148,6 +193,15 @@ def load_mlx_dit_checkpoint(checkpoint_dir: str | Path, *, compile: bool = False
     quantized_keys: dict[str, dict[str, Any]] = manifest["quantized_keys"]
 
     def rebuild(key: str):
+        """
+        Reconstructs a weight array or quantized matrix from checkpoint data.
+
+        Parameters:
+            key (str): The weight key to rebuild.
+
+        Returns:
+            The stored array for an unquantized weight or a reconstructed quantized matrix.
+        """
         if key not in quantized_keys:
             return arrays[key]
         info = quantized_keys[key]
@@ -176,9 +230,8 @@ def load_mlx_dit_checkpoint(checkpoint_dir: str | Path, *, compile: bool = False
 
     num_blocks = int(manifest["num_blocks"])
     if sorted(block_keys) != list(range(num_blocks)):
-        raise ValueError(
-            f"MLX DiT checkpoint {checkpoint_dir} is missing block weights: "
-            f"manifest says {num_blocks} blocks, found indices {sorted(block_keys)}.")
+        raise ValueError(f"MLX DiT checkpoint {checkpoint_dir} is missing block weights: "
+                         f"manifest says {num_blocks} blocks, found indices {sorted(block_keys)}.")
 
     inner_dim = int(config["num_attention_heads"]) * int(config["attention_head_dim"])
     blocks = []

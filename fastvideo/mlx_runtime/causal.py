@@ -57,6 +57,20 @@ class MLXCausalKVCache:
         sink_tokens: int = 0,
         dtype=None,
     ) -> MLXCausalKVCache:
+        """
+        Create a zero-initialized rolling key/value cache with the specified dimensions.
+
+        Parameters:
+            batch (int): Number of sequences in the cache.
+            max_tokens (int): Maximum number of cached tokens.
+            num_heads (int): Number of attention heads.
+            head_dim (int): Dimension of each attention head.
+            sink_tokens (int): Number of initial tokens preserved during cache eviction.
+            dtype: Data type for the key and value buffers.
+
+        Returns:
+            MLXCausalKVCache: An allocated cache with reset sequence indices.
+        """
         import mlx.core as mx
 
         dtype = dtype if dtype is not None else mx.float16
@@ -71,7 +85,16 @@ class MLXCausalKVCache:
 
 
 def max_attention_size(local_attn_size: int, frame_seqlen: int) -> int:
-    """Attention-window size in tokens, matching the torch reference."""
+    """
+    Convert the attention-window size from latent frames to tokens.
+
+    Parameters:
+        local_attn_size (int): Attention-window size in latent frames, or `-1` for the compatibility window.
+        frame_seqlen (int): Number of tokens in each latent frame.
+
+    Returns:
+        int: Attention-window size in tokens.
+    """
     if local_attn_size == -1:
         return GLOBAL_ATTN_COMPAT_MAX_LATENT_FRAMES * frame_seqlen
     return local_attn_size * frame_seqlen
@@ -90,14 +113,24 @@ def causal_self_attention_step(
     frame_seqlen: int,
     scale: float | None = None,
 ) -> mx.array:
-    """One cached, mask-free causal attention step for a frame-block.
+    """
+    Perform one causal self-attention step using the rolling key/value cache.
 
-    ``q``/``k``/``v`` are ``[batch, num_new_tokens, num_heads, head_dim]`` for
-    the current chunk; ``cos``/``sin`` are the rotary tables for this chunk's
-    *global* positions (i.e. the caller has already offset by ``current_start``).
-    Writes the new roped K/V into ``cache`` (rolling out the oldest tokens past
-    the first ``sink_tokens`` on overflow) and returns the chunk's attention
-    output ``[batch, num_new_tokens, num_heads, head_dim]``.
+    Parameters:
+        q (mx.array): Query states for the current token chunk.
+        k (mx.array): Key states for the current token chunk.
+        v (mx.array): Value states for the current token chunk.
+        cos (mx.array): Rotary cosine values for the chunk's global positions.
+        sin (mx.array): Rotary sine values for the chunk's global positions.
+        cache (MLXCausalKVCache): Rolling key/value cache to update.
+        current_start (int): Global position of the first token in the chunk.
+        local_attn_size (int): Attention window size in latent frames, or `-1` for the finite
+            compatibility window defined by ``GLOBAL_ATTN_COMPAT_MAX_LATENT_FRAMES``.
+        frame_seqlen (int): Number of tokens represented by one latent frame.
+        scale (float | None): Attention score scale; defaults to the inverse square root of the query head dimension.
+
+    Returns:
+        mx.array: Attention output for the current chunk.
     """
     import mlx.core as mx
 
@@ -123,10 +156,9 @@ def causal_self_attention_step(
         # Chunk larger than the non-sink capacity would make num_rolled negative and
         # the subsequent local_start:local_end write would clobber the sink region.
         if num_rolled < 0:
-            raise ValueError(
-                f"Chunk size ({num_new}) exceeds available cache capacity "
-                f"({kv_cache_size - sink_tokens} after sinks); cannot evict "
-                f"without overwriting sink tokens.")
+            raise ValueError(f"Chunk size ({num_new}) exceeds available cache capacity "
+                             f"({kv_cache_size - sink_tokens} after sinks); cannot evict "
+                             f"without overwriting sink tokens.")
         # Copy the source slice first (mx slices are new arrays, so no aliasing).
         rolled_k = cache.k[:, sink_tokens + num_evicted:sink_tokens + num_evicted + num_rolled]
         rolled_v = cache.v[:, sink_tokens + num_evicted:sink_tokens + num_evicted + num_rolled]
@@ -139,10 +171,8 @@ def causal_self_attention_step(
 
     # Validate write bounds before assignment for the local_attn_size == -1 path.
     if local_start < 0 or local_end > kv_cache_size:
-        raise ValueError(
-            f"Cache write range [{local_start}:{local_end}] exceeds allocated "
-            f"capacity [0:{kv_cache_size}]; increase cache size or reduce chunk."
-        )
+        raise ValueError(f"Cache write range [{local_start}:{local_end}] exceeds allocated "
+                         f"capacity [0:{kv_cache_size}]; increase cache size or reduce chunk.")
 
     cache.k[:, local_start:local_end] = roped_key
     cache.v[:, local_start:local_end] = v

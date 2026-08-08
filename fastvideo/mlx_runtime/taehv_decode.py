@@ -27,10 +27,24 @@ TAEW2_2_CHECKPOINT_URL = "https://raw.githubusercontent.com/madebyollin/taehv/ma
 
 
 def _default_cache_dir() -> Path:
+    """Return the default directory used to cache TAEHV checkpoints.
+
+    Returns:
+        Path: The TAEHV checkpoint cache directory under the user's home directory.
+    """
     return Path.home() / ".cache" / "fastvideo" / "taehv"
 
 
 def _sha256(path: Path) -> str:
+    """
+    Compute the SHA-256 digest of a file.
+
+    Parameters:
+        path (Path): The file whose contents are hashed.
+
+    Returns:
+        str: The file's SHA-256 digest in hexadecimal form.
+    """
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1 << 20), b""):
@@ -39,6 +53,14 @@ def _sha256(path: Path) -> str:
 
 
 def _verify_checkpoint(path: Path) -> None:
+    """Verify that a TAEW2.1 checkpoint matches the expected SHA-256 digest.
+
+    Parameters:
+        path (Path): Path to the checkpoint file.
+
+    Raises:
+        RuntimeError: If the checkpoint digest does not match the expected value.
+    """
     actual = _sha256(path)
     if actual != TAEW2_1_CHECKPOINT_SHA256:
         raise RuntimeError(f"TAEHV checkpoint at {path} failed sha256 verification "
@@ -48,11 +70,22 @@ def _verify_checkpoint(path: Path) -> None:
 
 
 def ensure_taew2_1_checkpoint(checkpoint_path: Path | None = None) -> Path:
-    """Return a verified ``taew2_1.pth``, downloading into the cache if needed.
+    """
+    Ensure the TAEW2.1 checkpoint is available locally.
 
-    A caller-supplied ``checkpoint_path`` is treated as trusted user input and
-    is not hash-checked (it may legitimately be a newer or retrained decoder);
-    only the checkpoint this module downloads itself is pinned.
+    A caller-provided path is treated as trusted and is only checked for existence.
+    The module-managed cached checkpoint is verified against the pinned SHA-256 digest
+    after downloading or before reuse.
+
+    Parameters:
+        checkpoint_path (Path | None): Optional path to a caller-provided checkpoint.
+
+    Returns:
+        Path: The available checkpoint path.
+
+    Raises:
+        FileNotFoundError: If a caller-provided checkpoint does not exist.
+        RuntimeError: If a module-managed checkpoint fails verification.
     """
     if checkpoint_path is not None:
         if not checkpoint_path.exists():
@@ -67,11 +100,11 @@ def ensure_taew2_1_checkpoint(checkpoint_path: Path | None = None) -> Path:
         import tempfile
         # Download to a temporary file, verify, then atomically rename.
         with tempfile.NamedTemporaryFile(
-            mode="wb",
-            dir=checkpoint_path.parent,
-            prefix=".tmp_taew2_1_",
-            suffix=".pth",
-            delete=False,
+                mode="wb",
+                dir=checkpoint_path.parent,
+                prefix=".tmp_taew2_1_",
+                suffix=".pth",
+                delete=False,
         ) as tmp_file:
             tmp_path = Path(tmp_file.name)
             try:
@@ -95,6 +128,17 @@ def ensure_taew2_1_checkpoint(checkpoint_path: Path | None = None) -> Path:
 
 
 def _load_taehv_class(source_path: Path | None):
+    """Load the TAEHV class from the vendored implementation or a local source override.
+
+    Parameters:
+        source_path (Path | None): Path to a local Python file defining `TAEHV`; `None` selects the vendored implementation.
+
+    Returns:
+        The loaded `TAEHV` class.
+
+    Raises:
+        RuntimeError: If the specified source cannot be loaded.
+    """
     if source_path is None:
         from fastvideo.third_party.taehv import TAEHV
 

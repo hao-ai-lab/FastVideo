@@ -18,6 +18,18 @@ from examples.inference.basic.mlx_wan_prompt_to_video import (
 
 
 def _parse_modes(raw: str) -> list[str]:
+    """
+    Parse and validate a comma-separated list of quantization modes.
+
+    Parameters:
+        raw (str): Comma-separated mode names.
+
+    Returns:
+        list[str]: Normalized, whitespace-trimmed mode names.
+
+    Raises:
+        ValueError: If any mode is unsupported.
+    """
     modes = [mode.strip() for mode in raw.split(",") if mode.strip()]
     allowed = {"none", "int8", "int4", "mxfp8", "mxfp4", "nvfp4"}
     unknown = sorted(set(modes) - allowed)
@@ -27,6 +39,17 @@ def _parse_modes(raw: str) -> list[str]:
 
 
 def _latent_delta_metrics(candidate: np.ndarray, baseline: np.ndarray) -> dict[str, float]:
+    """
+    Compare candidate and baseline latent arrays using error and signal-quality metrics.
+
+    Parameters:
+        candidate (np.ndarray): Latent array to evaluate.
+        baseline (np.ndarray): Reference latent array for comparison.
+
+    Returns:
+        dict[str, float]: Mean squared error, mean absolute error, maximum absolute
+        error, and signal-to-noise ratio in decibels between the arrays.
+    """
     diff = candidate.astype(np.float32) - baseline.astype(np.float32)
     mse = float(np.mean(np.square(diff)))
     mae = float(np.mean(np.abs(diff)))
@@ -41,6 +64,12 @@ def _latent_delta_metrics(candidate: np.ndarray, baseline: np.ndarray) -> dict[s
 
 
 def _torch_mps_memory() -> dict[str, int | None]:
+    """
+    Report PyTorch MPS memory statistics when PyTorch MPS is available.
+
+    Returns:
+        dict[str, int | None]: A mapping of MPS memory metric names to byte counts, or `None` values when PyTorch or MPS is unavailable.
+    """
     try:
         import torch
     except ImportError:
@@ -63,6 +92,17 @@ def _torch_mps_memory() -> dict[str, int | None]:
 
 
 def _decode_with_metrics(*, args, latents: np.ndarray, output_path: Path) -> dict[str, float | int | None | str]:
+    """
+    Decode latents to a video and collect export timing and PyTorch MPS memory metrics.
+
+    Parameters:
+        args: Configuration values for decoding and video export.
+        latents (np.ndarray): Latent representation to decode.
+        output_path (Path): Destination path for the exported video.
+
+    Returns:
+        dict[str, float | int | None | str]: Video export duration and PyTorch MPS memory measurements.
+    """
     before = _torch_mps_memory()
     decode_start = time.perf_counter()
     decode_latents_to_video(
@@ -99,6 +139,22 @@ def _run_one_mode(
     prompt_embeds,
     freqs_cis,
 ):
+    """
+    Run denoising for one quantization mode and collect performance and memory metrics.
+
+    Parameters:
+        mode (str): Quantization mode to benchmark.
+        args: Benchmark configuration, including dtype, dimensions, seed, scheduler, and denoising settings.
+        config (dict): Model configuration containing the input channel count.
+        checkpoint_path (Path): Path to the transformer checkpoint.
+        config_path (Path): Path to the transformer configuration.
+        prompt_embeds: Encoded prompt embeddings shared across benchmark modes.
+        freqs_cis: Rotary positional embeddings used during denoising.
+
+    Returns:
+        dict: The mode name, generated latent array, and metrics for model loading,
+        denoising, step timing, and MLX memory usage.
+    """
     import mlx.core as mx
     import torch
 
@@ -176,6 +232,9 @@ def _run_one_mode(
 
 
 def main() -> None:
+    """
+    Run the MLX FastWan quantization benchmark for the selected modes and write latency, memory, output, and latent-difference metrics to the output directory.
+    """
     parser = argparse.ArgumentParser(description="Benchmark MLX FastWan quantization modes.")
     parser.add_argument("--model-root", type=Path, default=DEFAULT_MODEL_ROOT)
     parser.add_argument("--prompt", default="A snow leopard walks across a windy mountain ridge.")

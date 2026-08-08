@@ -65,6 +65,15 @@ def test_full_dit_forward_matches_torch_reference(distributed_setup) -> None:
 
 
 def test_full_dit_forward_int8_stays_close_to_fp32(distributed_setup) -> None:
+    """
+    Ensure int8 quantization preserves the MLX DiT output within the required signal-to-noise ratio.
+
+    Parameters:
+        distributed_setup: Test fixture providing the distributed test environment.
+
+    Raises:
+        AssertionError: If the int8 output contains non-finite values or its signal-to-noise ratio is below the configured minimum.
+    """
     model = build_torch_model()
     hidden_states, encoder_hidden_states, timestep = build_inputs()
     hf_config = build_hf_config(build_tiny_wan_config())

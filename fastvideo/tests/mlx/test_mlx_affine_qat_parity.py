@@ -54,7 +54,17 @@ QMATMUL_DEPLOY_TOL = 2e-2
 
 
 def _unpack_uint32_codes(packed: np.ndarray, *, bits: int, out_cols: int) -> np.ndarray:
-    """Unpack MLX's little-endian uint32 words into per-element integer codes."""
+    """
+    Unpack little-endian MLX quantization words into per-element integer codes.
+
+    Parameters:
+        packed (np.ndarray): Packed `uint32` quantization words.
+        bits (int): Number of bits used by each code.
+        out_cols (int): Number of codes to retain along the final axis.
+
+    Returns:
+        np.ndarray: Integer codes truncated to `out_cols` columns.
+    """
     el_per_word = 32 // bits
     bitmask = (1 << bits) - 1
     words = packed.astype(np.uint64)
@@ -65,7 +75,18 @@ def _unpack_uint32_codes(packed: np.ndarray, *, bits: int, out_cols: int) -> np.
 
 
 def _mlx_quantize(w_np: np.ndarray, *, group_size: int, bits: int, device) -> tuple:
-    """Quantize/dequantize on an explicit MLX stream (CPU = spec, GPU = deploy)."""
+    """
+    Quantize and dequantize weights using an explicitly selected MLX execution stream.
+
+    Parameters:
+        w_np (np.ndarray): Weight values to quantize.
+        group_size (int): Number of values in each quantization group.
+        bits (int): Quantization bit width.
+        device: MLX stream device used for the operations.
+
+    Returns:
+        tuple: Quantized values, scales, biases, and dequantized values as NumPy arrays.
+    """
     with mx.stream(device):
         q, scales, biases = mx.quantize(mx.array(w_np), group_size=group_size, bits=bits, mode="affine")
         deq = mx.dequantize(q, scales, biases, group_size=group_size, bits=bits, mode="affine")
@@ -100,7 +121,12 @@ def test_quantizer_decisions_bitmatch_mlx_cpu(dtype: torch.dtype, bits: int, sha
 
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float16])
 def test_dequant_bitmatch_mlx_cpu(dtype: torch.dtype) -> None:
-    """The twin's dequantized reconstruction matches MLX's CPU kernel exactly."""
+    """
+    Verify that CPU dequantization matches the MLX reconstruction exactly.
+
+    Parameters:
+        dtype (torch.dtype): Input tensor precision used for the comparison.
+    """
     torch.manual_seed(7)
     w = torch.randn(8, 192, dtype=torch.float32).to(dtype) * 0.05
 

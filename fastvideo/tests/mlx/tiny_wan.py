@@ -52,10 +52,24 @@ TINY_ARCH = dict(
 
 
 def build_tiny_wan_config() -> WanVideoConfig:
+    """Build the deterministic miniature Wan video configuration.
+
+    Returns:
+        WanVideoConfig: Configuration created from the tiny test architecture.
+    """
     return WanVideoConfig(arch_config=WanVideoArchConfig(**TINY_ARCH))
 
 
 def build_hf_config(config: WanVideoConfig) -> dict[str, object]:
+    """
+    Builds the configuration dictionary required by the Hugging Face-style Wan model representation.
+
+    Parameters:
+        config (WanVideoConfig): Wan video configuration to convert.
+
+    Returns:
+        dict[str, object]: Configuration values for the Hugging Face-style model.
+    """
     return {
         "num_attention_heads": config.num_attention_heads,
         "attention_head_dim": config.attention_head_dim,
@@ -75,6 +89,11 @@ def build_hf_config(config: WanVideoConfig) -> dict[str, object]:
 def initialize_model_parameters(model: torch.nn.Module) -> None:
     # ReplicatedLinear parameters are allocated with torch.empty and need an
     # explicit initialization in tests to avoid undefined values.
+    """Initialize model parameters deterministically for reproducible tests.
+
+    Parameters:
+        model (torch.nn.Module): Model whose parameters will be initialized.
+    """
     torch.manual_seed(SEED + 3)
     with torch.no_grad():
         for name, param in model.named_parameters():
@@ -88,6 +107,12 @@ def initialize_model_parameters(model: torch.nn.Module) -> None:
 
 
 def build_torch_model() -> WanTransformer3DModel:
+    """
+    Build a deterministically initialized CPU float32 Wan transformer model.
+
+    Returns:
+        WanTransformer3DModel: The initialized model in evaluation mode.
+    """
     config = build_tiny_wan_config()
     model = WanTransformer3DModel(config=config, hf_config=build_hf_config(config))
     model = model.to(device="cpu", dtype=torch.float32)
@@ -97,6 +122,10 @@ def build_torch_model() -> WanTransformer3DModel:
 
 
 def build_inputs() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Create deterministic latent, text-encoder, and timestep inputs for the tiny Wan model.
+
+    Returns:
+        tuple[torch.Tensor, torch.Tensor, torch.Tensor]: The latent hidden states, text-encoder hidden states, and timestep."""
     generator = torch.Generator(device="cpu").manual_seed(SEED + 1)
     hidden_states = torch.randn(1, TINY_ARCH["in_channels"], 4, 8, 8, generator=generator, dtype=torch.float32)
     encoder_hidden_states = torch.randn(1, 8, TINY_ARCH["text_dim"], generator=generator, dtype=torch.float32)
@@ -131,6 +160,17 @@ def mlx_dit_from_torch_model(
     *,
     quantization: MLXQuantizationSpec | None = None,
 ) -> MLXWanDiT:
+    """
+    Convert a PyTorch Wan DiT model to an MLX Wan DiT model.
+
+    Parameters:
+        model (WanTransformer3DModel): PyTorch model whose parameters are converted.
+        hf_config (dict[str, object]): Model configuration used to construct the MLX representation.
+        quantization (MLXQuantizationSpec | None): Optional quantization specification for eligible weight matrices.
+
+    Returns:
+        MLXWanDiT: The converted MLX model.
+    """
     import mlx.core as mx
 
     state = {name: value.detach().float() for name, value in model.state_dict().items()}
@@ -168,7 +208,15 @@ def mlx_dit_from_torch_model(
 
 
 def mlx_rotary_embeddings(hidden_states: torch.Tensor):
-    """The rotary table the torch model builds internally, converted to MLX."""
+    """
+    Generate MLX rotary-position embedding tables matching the tiny Wan model.
+
+    Parameters:
+        hidden_states (torch.Tensor): Input latent tensor whose spatial and temporal dimensions determine the embedding grid.
+
+    Returns:
+        Tuple of MLX arrays containing the cosine and sine rotary-position embeddings.
+    """
     import mlx.core as mx
 
     _, _, frames, height, width = hidden_states.shape
@@ -191,6 +239,18 @@ def mlx_rotary_embeddings(hidden_states: torch.Tensor):
 
 
 def torch_reference_output(model, hidden_states, encoder_hidden_states, timestep) -> np.ndarray:
+    """
+    Run the PyTorch model on the provided inputs and return its output as a NumPy array.
+
+    Parameters:
+        model: The PyTorch Wan transformer model.
+        hidden_states: The latent hidden states provided to the model.
+        encoder_hidden_states: The encoder hidden states provided to the model.
+        timestep: The diffusion timestep provided to the model.
+
+    Returns:
+        The model output as a CPU float32 NumPy array.
+    """
     with torch.no_grad(), set_forward_context(
             current_timestep=0,
             attn_metadata=None,
@@ -205,6 +265,19 @@ def torch_reference_output(model, hidden_states, encoder_hidden_states, timestep
 
 
 def mlx_output(dit, hidden_states, encoder_hidden_states, timestep, freqs_cis) -> np.ndarray:
+    """
+    Run the MLX DiT model on the provided inputs.
+
+    Parameters:
+        dit: The MLX DiT model to evaluate.
+        hidden_states: Input latent states.
+        encoder_hidden_states: Text encoder states.
+        timestep: Diffusion timestep input.
+        freqs_cis: Rotary-position embedding frequencies.
+
+    Returns:
+        np.ndarray: The model output as a float32 NumPy array.
+    """
     import mlx.core as mx
 
     out = dit(

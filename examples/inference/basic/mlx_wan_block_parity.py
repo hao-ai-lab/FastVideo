@@ -19,6 +19,13 @@ import argparse
 
 
 def main() -> None:
+    """
+    Run a deterministic PyTorch-versus-MLX parity check for a Wan transformer block.
+
+    Command-line arguments control the block dimensions, input sizes, random seed,
+    and tolerances used to compare the implementations. Raises `SystemExit` with
+    status 1 when the outputs exceed the configured tolerances.
+    """
     parser = argparse.ArgumentParser(description="Tiny Wan block parity check for the experimental MLX runtime")
     parser.add_argument("--dim", type=int, default=64)
     parser.add_argument("--ffn-dim", type=int, default=128)

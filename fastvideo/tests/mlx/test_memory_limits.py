@@ -12,10 +12,27 @@ class _FakeMLX:
         self.calls: list[tuple[str, int]] = []
 
     def set_memory_limit(self, value: int) -> int:
+        """
+        Record a requested memory limit and provide the prior limit.
+
+        Parameters:
+            value (int): The memory limit to record.
+
+        Returns:
+            int: The previously configured memory limit.
+        """
         self.calls.append(("memory", value))
         return 111
 
     def set_cache_limit(self, value: int) -> int:
+        """Record and apply a cache memory limit.
+
+        Parameters:
+            value (int): Cache memory limit in bytes.
+
+        Returns:
+            int: The previously configured cache memory limit.
+        """
         self.calls.append(("cache", value))
         return 222
 
