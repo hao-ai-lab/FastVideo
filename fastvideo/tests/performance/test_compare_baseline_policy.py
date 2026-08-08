@@ -1936,3 +1936,50 @@ def test_upload_policy_pass_allows_calibration_record(monkeypatch):
         "success": True,
         "comparison_status": compare_baseline.STATUS_CALIBRATION_NEEDED,
     }) is True
+
+
+def _run_main_with_static_breach(monkeypatch, tmp_path, raw_overrides):
+    results_dir = tmp_path / "results"
+    reports_dir = tmp_path / "reports"
+    tracking_root = tmp_path / "tracking"
+    results_dir.mkdir()
+
+    raw_result = _v2_raw_result(
+        avg_generation_time_s=18.252,
+        thresholds={"max_generation_time_s": 10.0},
+        **raw_overrides,
+    )
+    (results_dir / "perf_breach.json").write_text(json.dumps(raw_result), encoding="utf-8")
+
+    monkeypatch.setenv("PERF_RUN_SOURCE", "scheduled_main")
+    monkeypatch.delenv("PERF_PYTEST_RC", raising=False)
+    monkeypatch.setattr(compare_baseline, "RESULTS_DIR", str(results_dir))
+    monkeypatch.setattr(compare_baseline, "PERF_REPORTS_DIR", str(reports_dir))
+    monkeypatch.setattr(compare_baseline, "TRACKING_ROOT", str(tracking_root))
+    monkeypatch.setattr(compare_baseline, "UPLOAD_POLICY", "never")
+    monkeypatch.setattr(compare_baseline, "sync_from_hf", lambda local_dir, strict=False: local_dir)
+
+    assert compare_baseline.main() == 1
+
+
+def test_static_threshold_failure_prints_worker_log_tail(monkeypatch, tmp_path, capsys):
+    worker_log = tmp_path / "worker_wan-t2v-1.3b-2gpu.log"
+    worker_log.write_text("attention backend fell back to slow path\n", encoding="utf-8")
+
+    _run_main_with_static_breach(
+        monkeypatch, tmp_path, {"worker_log_path": str(worker_log)})
+
+    output = capsys.readouterr().out
+    assert "exceeded fixed threshold" in output
+    assert "Worker log tail for wan-t2v-1.3b-2gpu" in output
+    assert "attention backend fell back to slow path" in output
+
+
+def test_static_threshold_failure_without_worker_log_degrades_gracefully(
+        monkeypatch, tmp_path, capsys):
+    _run_main_with_static_breach(monkeypatch, tmp_path, {})
+
+    output = capsys.readouterr().out
+    assert "exceeded fixed threshold" in output
+    assert "no log file recorded" in output
+    assert "worker log unavailable" in output
