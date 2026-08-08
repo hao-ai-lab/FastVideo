@@ -42,6 +42,46 @@ img {
     margin: 0 auto;
 }
 
+.cookbook-picker {
+    padding: 1rem;
+    border: 0.05rem solid var(--md-default-fg-color--lightest);
+    border-radius: 0.2rem;
+}
+
+.cookbook-picker select {
+    width: 100%;
+    padding: 0.6rem;
+    color: var(--md-default-fg-color);
+    background: var(--md-default-bg-color);
+    border: 0.05rem solid var(--md-default-fg-color--lighter);
+    border-radius: 0.2rem;
+}
+
+.cookbook-picker dl {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.25rem 1rem;
+}
+
+.cookbook-picker dt {
+    font-weight: 700;
+}
+
+.cookbook-picker dd {
+    margin: 0;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.cookbook-picker__status {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+}
+
 .md-typeset .copy-page-button.md-button {
     float: right;
     margin: 0 0 1rem 1rem;

@@ -65,6 +65,7 @@ uv pip install flash-attn --no-build-isolation -v
 
 ## Next Steps
 
-- [Quick Start Guide](quick_start.md) - Get started with your first video generation
+- [Quick Start](quick_start.md) - Generate your first video
+- [Inference Cookbook](../cookbook/index.md) - Choose a maintained recipe
 - [Configuration](../inference/configuration.md) - Learn about configuration options
-- [Examples](../inference/examples/examples_inference_index.md) - Explore example scripts and notebooks
+- [Examples](../inference/examples/examples_inference_index.md) - Explore scripts and notebooks
