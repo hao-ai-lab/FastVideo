@@ -589,14 +589,34 @@ def main() -> None:
     config_path = model_root / "transformer/config.json"
     checkpoint_path = model_root / "transformer/diffusion_pytorch_model.safetensors"
     config = json.loads(config_path.read_text())
+    # A pre-quantized MLX DiT can be paired with a lightweight asset root for
+    # UMT5/TAEHV.  In that case the model root is *not* the architecture
+    # authority: use the checkpoint's embedded transformer config for the
+    # sampler guard and latent geometry.
+    dit_config = config
+    if args.mlx_checkpoint is not None:
+        mlx_config_path = Path(args.mlx_checkpoint) / "mlx_dit.json"
+        if mlx_config_path.is_file():
+            mlx_checkpoint_config = json.loads(mlx_config_path.read_text())
+            dit_config = mlx_checkpoint_config.get("config", mlx_checkpoint_config)
+    if int(dit_config.get("in_channels", 0)) == 48 and int(dit_config.get("out_channels", 0)) == 48:
+        raise SystemExit(
+            "Wan2.2-TI2V-5B uses 48-channel, per-token timestep conditioning. "
+            "Use examples/inference/basic/mlx_wan22_generate.py instead; this "
+            "generic Wan2.1 sampler produces invalid outputs for that checkpoint."
+        )
     # Latent geometry follows the model's own VAE: Wan2.1 compresses 4x8x8,
     # the Wan2.2 TI2V VAE (48 channels) compresses 4x16x16. Read the factors
     # from the checkpoint's vae config rather than assuming Wan2.1.
     vae_config_path = model_root / "vae/config.json"
     vae_config = json.loads(vae_config_path.read_text()) if vae_config_path.is_file() else {}
-    vae_temporal_factor = int(vae_config.get("scale_factor_temporal", 4))
-    vae_spatial_factor = int(vae_config.get("scale_factor_spatial", 8))
-    patch_size = tuple(config.get("patch_size", (1, 2, 2)))
+    # Wan2.1 uses 16 latent channels with 4x8x8 compression.  Do not inherit
+    # the 4x16x16 VAE geometry merely because the asset root belongs to a
+    # Wan2.2 checkpoint.
+    is_wan21 = int(dit_config.get("in_channels", 0)) == 16
+    vae_temporal_factor = 4 if is_wan21 else int(vae_config.get("scale_factor_temporal", 4))
+    vae_spatial_factor = 8 if is_wan21 else int(vae_config.get("scale_factor_spatial", 8))
+    patch_size = tuple(dit_config.get("patch_size", (1, 2, 2)))
 
     # Spatial plan: refine (quality two-pass) or fast-spatial (upsample-only).
     # Both reuse the same resolution splitter; only the post-denoise path differs.
