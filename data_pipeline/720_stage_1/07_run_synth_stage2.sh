@@ -18,10 +18,17 @@ export NCCL_IB_HCA=mlx5_0,mlx5_1,mlx5_3,mlx5_4
 # export NCCL_DEBUG=INFO   # first launch only.
 
 # Stage 2: sparse + robustness masking/dropout, HEAD still FROZEN.
+# Every WANTRACK_/TRACKWAN_ knob is set EXPLICITLY (no code defaults) to match upstream stage-2 (E):
+# same as stage-1 but with masking (PMASK=0.2/CHUNK=8) and dropout (TRACK=0.5, MOTION=0.3) ON.
 FASTVIDEO_FA4=1 \
-  TRACKWAN_TRACK_BIAS=1 WANTRACK_FREEZE_HEAD=1 \
-  WANTRACK_AUG=1 WANTRACK_SPARSE=1 WANTRACK_EXTRA_RANDOM=20 \
-  WANTRACK_TRACK_DROP=0.5 WANTRACK_MOTION_DROP=0.3 WANTRACK_PMASK=0.2 WANTRACK_MASK_CHUNK=8 \
+  TRACKWAN_TRACK_BIAS=1 \
+  WANTRACK_FREEZE_HEAD=1 \
+  WANTRACK_IMAGE_COND=1 \
+  WANTRACK_AUG=1 \
+  WANTRACK_SPARSE=1 WANTRACK_EXTRA_RANDOM=20 WANTRACK_EXTRA_MODE=random \
+  WANTRACK_FIXED_SAMPLE=0 \
+  WANTRACK_PMASK=0.2 WANTRACK_MASK_CHUNK=8 \
+  WANTRACK_TRACK_DROP=0.5 WANTRACK_MOTION_DROP=0.3 WANTRACK_TEXT_DROP=0 \
   torchrun \
   --nnodes=${NNODES} --nproc_per_node=${GPUS_PER_NODE} --node_rank=${NODE_RANK} \
   --rdzv_id=synth_stage2_14b_720p --rdzv_backend=c10d --rdzv_endpoint=${MASTER_ADDR}:${MASTER_PORT} \

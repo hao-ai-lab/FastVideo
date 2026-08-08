@@ -18,9 +18,17 @@ export NCCL_IB_HCA=mlx5_0,mlx5_1,mlx5_3,mlx5_4
 # export NCCL_DEBUG=INFO   # uncomment on the FIRST launch to confirm NET/IB, then re-comment.
 
 # Stage 1: sparse conditioning, HEAD FROZEN (train the DiT to use the merged track pathway), no masking.
+# Every WANTRACK_/TRACKWAN_ knob is set EXPLICITLY (no reliance on code defaults) to match upstream
+# stage-1 (D) and to avoid inheriting the overfit launcher's opposite settings (IMAGE_COND=0, FIXED_SAMPLE=1).
 FASTVIDEO_FA4=1 \
-  TRACKWAN_TRACK_BIAS=1 WANTRACK_FREEZE_HEAD=1 \
-  WANTRACK_AUG=1 WANTRACK_SPARSE=1 WANTRACK_EXTRA_RANDOM=20 \
+  TRACKWAN_TRACK_BIAS=1 \
+  WANTRACK_FREEZE_HEAD=1 \
+  WANTRACK_IMAGE_COND=1 \
+  WANTRACK_AUG=1 \
+  WANTRACK_SPARSE=1 WANTRACK_EXTRA_RANDOM=20 WANTRACK_EXTRA_MODE=random \
+  WANTRACK_FIXED_SAMPLE=0 \
+  WANTRACK_PMASK=0 WANTRACK_MASK_CHUNK=0 \
+  WANTRACK_TRACK_DROP=0 WANTRACK_MOTION_DROP=0 WANTRACK_TEXT_DROP=0 \
   torchrun \
   --nnodes=${NNODES} --nproc_per_node=${GPUS_PER_NODE} --node_rank=${NODE_RANK} \
   --rdzv_id=openvid_stage1_14b_720p --rdzv_backend=c10d --rdzv_endpoint=${MASTER_ADDR}:${MASTER_PORT} \

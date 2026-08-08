@@ -117,8 +117,12 @@ class TrackValidationCallback(Callback):
         heldout_data_path: str | None = None,
         heldout_sample_indices: list[int] | None = None,
         include_heldout: bool = True,
+        min_step: int = 0,
     ) -> None:
         self.every_steps = int(every_steps)
+        # Skip periodic validation before this step (validate_at_start is unaffected). Lets you
+        # avoid the expensive early validations on a re-run you already trust, e.g. min_step=2600.
+        self.min_step = int(min_step)
         self.val_sample_indices: list[int] | None = [int(i) for i in val_sample_indices] if val_sample_indices is not None else None
         # Optional second parquet of HELD-OUT samples (never seen in training):
         # same Stage-5 schema, rendered alongside the train-set samples with a
@@ -184,7 +188,8 @@ class TrackValidationCallback(Callback):
         # iteration > 0 guards step 0 (divisible by every_steps); `not first_call` skips the
         # periodic validation on the trainer's pre-loop call at the (re)start step, so resuming
         # from a checkpoint at a multiple of every_steps doesn't re-run validation.
-        if self.every_steps > 0 and iteration > 0 and iteration % self.every_steps == 0 and not first_call:
+        if (self.every_steps > 0 and iteration > 0 and iteration % self.every_steps == 0
+                and iteration >= self.min_step and not first_call):
             run = True
         if not run:
             return
@@ -386,14 +391,25 @@ class TrackValidationCallback(Callback):
                 transformer.train()
 
     def _adversarial_tracks(self, tp: torch.Tensor, tv: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """Flip x coordinates: tp_adv[..., 0] = 1 - tp[..., 0].
+        """Reverse each track's horizontal motion AROUND ITS OWN FRAME-0 POSITION.
 
-        Reflects all track positions horizontally across the frame center.
-        Visibility is preserved so the model sees the same temporal pattern but mirrored motion.
+        tp is [1, T, N, 2] (normalized 0..1), axis 1 = time. Reflect x across each point's t=0 x:
+            x_adv[t] = 2*x[0] - x[t]
+        so every track STARTS exactly where it does in the real first frame (consistent with the
+        first-frame image conditioning) and only the horizontal *direction* flips. A plain mirror
+        (1 - x) moves the t=0 position to the opposite side, contradicting the unchanged frame-0
+        image and confounding the test. Visibility is preserved (same temporal pattern, mirrored motion).
         """
         tp_adv = tp.clone()
-        tp_adv[..., 0] = (1.0 - tp[..., 0]).clamp(0.0, 1.0)
-        return tp_adv, tv
+        x0 = tp[:, 0:1, :, 0]                       # [1,1,N] each point's frame-0 x
+        x_ref = 2.0 * x0 - tp[..., 0]               # [1,T,N] reflected x (may leave [0,1])
+        # Where the reversed motion leaves the frame, the track is "off-screen": drop visibility for
+        # those frames (like a real track exiting) instead of clamping it into an edge pile-up. The
+        # coordinate is still clamped as a safety, but it's invisible so its value is inert downstream.
+        in_bounds = (x_ref >= 0.0) & (x_ref <= 1.0)  # [1,T,N]
+        tp_adv[..., 0] = x_ref.clamp(0.0, 1.0)
+        tv_adv = tv * in_bounds.to(tv.dtype)
+        return tp_adv, tv_adv
 
     def _sampled_tracks(self, student: Any, s: dict[str, Any]) -> tuple[torch.Tensor, torch.Tensor]:
         """Run the training-time track sampler (_augment_tracks) on this val sample, deterministically
@@ -432,7 +448,10 @@ class TrackValidationCallback(Callback):
         # tp_in/tv_in None => no-track counterfactual (transformer builds a zero track map).
         tp = tp_in.to(device, dtype) if tp_in is not None else None  # [1,T,N,2] normalized sampled subset
         tv = tv_in.to(device, dtype) if tv_in is not None else None  # [1,T,N] sampled visibility
-        img = s["clip_feature"].to(device, dtype)  # [1,SeqLen,Dim] CLIP frame-0
+        # Mirror the training-side WANTRACK_IMAGE_COND gate so validation matches training: a
+        # CLIP-free overfit must also validate CLIP-free, else train/val mismatch => noise.
+        img = (None if os.getenv("WANTRACK_IMAGE_COND", "1") in ("0", "false", "False") else
+               s["clip_feature"].to(device, dtype))  # [1,SeqLen,Dim] CLIP frame-0
 
         _, _, T, H, W = ff.shape
         gen = torch.Generator(device="cpu").manual_seed(self.seed)

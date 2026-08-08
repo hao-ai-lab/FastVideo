@@ -349,11 +349,18 @@ class WanTrackModel(WanModel):
         first_frame_latent = raw_batch["first_frame_latent"][:, :, :tc.data.num_latent_t].to(device, dtype=dtype)
 
         # CLIP image embedding of frame 0 (Wan2.1 I2V semantic cross-attention pathway).
-        image_embeds = raw_batch.get("clip_feature")
-        if image_embeds is None or (torch.is_tensor(image_embeds) and image_embeds.numel() == 0):
-            raise ValueError("WanTrack (I2V) requires 'clip_feature'; re-run the i2v_track preprocess with an "
-                             "image_encoder (e.g. the Wan2.1-Fun-1.3B-InP base).")
-        image_embeds = image_embeds.to(device, dtype=dtype)
+        # WANTRACK_IMAGE_COND=0 keeps the run CLIP-free: the overfit is seeded from a CLIP-free base
+        # and the merge lifts only the (CLIP-independent) track pathway, so CLIP is enabled from
+        # stage-1 onward on the pristine merged base -- turning it on mid-overfit shocks a model that
+        # never trained with it. Default 1 (on) so stage-1/stage-2 are unaffected.
+        if os.getenv("WANTRACK_IMAGE_COND", "1") in ("0", "false", "False"):
+            image_embeds = None
+        else:
+            image_embeds = raw_batch.get("clip_feature")
+            if image_embeds is None or (torch.is_tensor(image_embeds) and image_embeds.numel() == 0):
+                raise ValueError("WanTrack (I2V) requires 'clip_feature'; re-run the i2v_track preprocess with an "
+                                 "image_encoder (e.g. the Wan2.1-Fun-1.3B-InP base).")
+            image_embeds = image_embeds.to(device, dtype=dtype)
 
         expected_frames = (tc.data.num_latent_t - 1) * self._temporal_compression_ratio() + 1
         track_points = raw_batch.get("track_points")
