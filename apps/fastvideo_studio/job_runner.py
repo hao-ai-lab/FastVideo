@@ -275,6 +275,15 @@ class JobRunner:
         # Serializes every slot transition (preload, job-triggered replace,
         # unload). Held for the full duration of a load.
         self._load_lock = threading.Lock()
+        # All generator creations run on this ONE persistent thread: the mp
+        # executor arms prctl(PR_SET_PDEATHSIG, SIGKILL) in its workers, and
+        # on Linux that fires when the CREATING THREAD exits — a generator
+        # spawned from a short-lived thread loses all its workers (silent
+        # SIGKILL, zombies) the moment that thread finishes.
+        import queue as _queue
+        self._loader_queue: _queue.Queue = _queue.Queue()
+        threading.Thread(target=self._loader_loop, daemon=True,
+                         name="generator-loader").start()
         # The inference job currently generating, fed by the engine log tee
         # (ray relays worker output to the driver; tqdm lines land there).
         self._active_inference_job: Job | None = None
@@ -679,6 +688,35 @@ class JobRunner:
             return [j.id for j in self._jobs.values()
                     if j.status == JobStatus.RUNNING and j.job_type == "inference"]
 
+    def _loader_loop(self) -> None:
+        while True:
+            fn = self._loader_queue.get()
+            try:
+                fn()
+            except BaseException:  # noqa: BLE001 -- surfaced via the caller's box
+                pass
+            finally:
+                self._loader_queue.task_done()
+
+    def _run_on_loader(self, fn: Any) -> Any:
+        """Run ``fn`` on the persistent loader thread and return its result."""
+        box: dict[str, Any] = {}
+        done = threading.Event()
+
+        def wrapped() -> None:
+            try:
+                box["r"] = fn()
+            except BaseException as exc:  # noqa: BLE001 -- re-raised below
+                box["e"] = exc
+            finally:
+                done.set()
+
+        self._loader_queue.put(wrapped)
+        done.wait()
+        if "e" in box:
+            raise box["e"]
+        return box["r"]
+
     def preload_generator(self, **params: Any) -> dict[str, Any]:
         """Load a model into memory ahead of time. One load at a time; loading
         a different config always releases the current instance first."""
@@ -702,7 +740,7 @@ class JobRunner:
 
         def _load() -> None:
             try:  # the preload owns _load_lock until the load resolves
-                self._load_into_slot_locked(config)
+                self._run_on_loader(lambda: self._load_into_slot_locked(config))
             except Exception:  # noqa: BLE001 -- state already set to failed
                 pass
             finally:
@@ -853,7 +891,7 @@ class JobRunner:
                         and self._generator_config == config
                         and self._generator is not None):
                     return self._generator
-            return self._load_into_slot_locked(config)
+            return self._run_on_loader(lambda: self._load_into_slot_locked(config))
 
     def feed_engine_line(self, line: str) -> None:
         """Bridge ray-relayed worker output into the running job's log buffer.

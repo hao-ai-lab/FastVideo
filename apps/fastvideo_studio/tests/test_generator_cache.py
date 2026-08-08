@@ -38,6 +38,9 @@ def runner():
     r._generator_lock = threading.Lock()
     r._load_lock = threading.Lock()
     r._worker_log_queue = None  # no Manager in unit tests
+    import queue as _queue
+    r._loader_queue = _queue.Queue()
+    threading.Thread(target=r._loader_loop, daemon=True).start()
     return r
 
 
