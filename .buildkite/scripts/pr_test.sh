@@ -151,6 +151,19 @@ upload_performance_artifacts() {
         fi
     }
 
+    _upload_worker_logs() {
+        local found=0
+        while IFS= read -r -d '' target; do
+            found=1
+            log "Found worker log: $target. Uploading to Buildkite..."
+            buildkite-agent artifact upload "$target"
+        done < <(find "$LOCAL_DIR" -path "*/worker_logs/worker_*.log*" -print0)
+
+        if [ "$found" -eq 0 ]; then
+            log "No worker log artifacts found."
+        fi
+    }
+
     _cleanup_modal_volume() {
         log "Cleaning up perf_reports/ from Modal Volume..."
         if modal volume rm hf-model-weights "perf_reports/" --recursive; then
@@ -170,6 +183,7 @@ upload_performance_artifacts() {
     _upload_dashboard
     _upload_perf_summary
     _upload_normalized_perf_results
+    _upload_worker_logs
     _cleanup_modal_volume
     _cleanup_local
 }
