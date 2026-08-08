@@ -202,3 +202,28 @@ def mlx_wan22_dit_from_diffusers_safetensors(
                                  eps=float(dense.config.get("eps", 1e-6))) for block in dense.blocks
     ]
     return MLXWan22DiT(dense.weights, blocks, dense.config)
+
+
+def mlx_wan22_dit_from_mlx_checkpoint(checkpoint_dir: str | Path) -> MLXWan22DiT:
+    """Rewrap a persisted MLX DiT checkpoint with Wan2.2 conditioning.
+
+    The generic checkpoint loader intentionally rebuilds ``MLXWanDiT`` because
+    it is also used by the Wan2.1 runtime.  Wan2.2 TI2V has the same weight
+    layout but needs per-token timestep modulation, so callers must rewrap the
+    loaded weights and blocks as :class:`MLXWan22DiT` before sampling.
+    """
+    from fastvideo.mlx_runtime.checkpoint import load_mlx_dit_checkpoint
+
+    dense = load_mlx_dit_checkpoint(checkpoint_dir)
+    inner_dim = int(dense.config["num_attention_heads"]) * int(dense.config["attention_head_dim"])
+    blocks = [
+        MLXWan22TransformerBlock(
+            block.weights,
+            dim=inner_dim,
+            ffn_dim=int(dense.config["ffn_dim"]),
+            num_heads=int(dense.config["num_attention_heads"]),
+            eps=float(dense.config.get("eps", 1e-6)),
+        )
+        for block in dense.blocks
+    ]
+    return MLXWan22DiT(dense.weights, blocks, dense.config)
