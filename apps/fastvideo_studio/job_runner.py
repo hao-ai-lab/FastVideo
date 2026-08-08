@@ -751,6 +751,11 @@ class JobRunner:
                 workload_type=config["workload_type"],
                 num_gpus=config["num_gpus"],
                 dit_cpu_offload=config["dit_cpu_offload"],
+                # FastVideoArgs defaults this True, which disables FSDP and
+                # parks a full DiT copy in host RAM per worker — the mp
+                # executor's 4 workers OOM-killed the node silently. The UI's
+                # offload toggles are the studio's contract; layerwise off.
+                dit_layerwise_offload=False,
                 text_encoder_cpu_offload=config["text_encoder_cpu_offload"],
                 vae_cpu_offload=config["vae_cpu_offload"],
                 image_encoder_cpu_offload=config["image_encoder_cpu_offload"],
