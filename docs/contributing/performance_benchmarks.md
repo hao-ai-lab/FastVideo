@@ -297,6 +297,7 @@ Written by `test_inference_performance.py`. One file per benchmark run.
     "max_dit_time_s": 10.0,
     "max_vae_decode_time_s": 10.0
   },
+  "worker_log_path": "<container-local path to the captured worker log, or null>",
   "regression_thresholds": {
     "latency": {
       "threshold_percent": 0.10,
@@ -480,6 +481,18 @@ record is checked against its own static thresholds: a measured breach reports
 nonzero pytest exit with no attributable static-threshold breach reports
 `INFRA_ERROR`. Failed records have `success=false` and are excluded from future
 rolling baselines. The dashboard still runs best-effort for observability.
+
+Each benchmark run also captures worker-process logs into
+`results/worker_logs/worker_<benchmark_id>_<ts>.log` (raw records point to it
+via `worker_log_path`; the field is null/absent in older and HF-synced
+records). On a hard regression, a 200-line tail of that log is printed in the
+failure output — by the pytest assertion on PR runs and by
+`compare_baseline.py` on scheduled runs — and the log file is copied to
+`$PERF_REPORTS_DIR/worker_logs/` so `upload_performance_artifacts` uploads it
+as a Buildkite artifact even when the comparison phase never runs. Coverage
+caveat: only the `fastvideo` logger is captured (no torch/NCCL or raw stderr
+output), and ranks > 0 suppress `logger.info` by default, so the file contains
+rank-0 INFO plus WARNING/ERROR from all ranks.
 When the rolling-baseline phase runs, it emits:
 
 * **Markdown summary** — appended to `$GITHUB_STEP_SUMMARY` when that variable
