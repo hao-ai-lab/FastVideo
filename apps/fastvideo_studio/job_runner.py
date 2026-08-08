@@ -281,6 +281,10 @@ class JobRunner:
 
         # Shared Manager for log queues (avoids spawning a new process per job)
         self._mp_manager = get_mp_context().Manager()
+        # One queue for the generator's whole life: mp workers get it at spawn
+        # (creation-time attach). Sending a Manager proxy over the executor's
+        # worker pipes post-hoc (set_log_queue RPC) breaks the pipe.
+        self._worker_log_queue = self._mp_manager.Queue()
         atexit.register(self._shutdown)
 
         # Ensure directories exist
@@ -755,6 +759,7 @@ class JobRunner:
                 VSA_sparsity=config["vsa_sparsity"],
                 tp_size=config["tp_size"],
                 sp_size=config["sp_size"],
+                log_queue=self._worker_log_queue,
                 **executor_kwargs,
             )
         except Exception as exc:
@@ -1010,10 +1015,12 @@ class JobRunner:
         fastvideo_logger.addHandler(buffer_handler)
         fastvideo_logger.addHandler(file_handler)
 
-        # Queue for worker process logs (fsdp_load, cuda, etc.)
-        # Use Manager().Queue() so it can be shared with spawned workers (spawn
-        # does not inherit memory; mp.Queue only works through inheritance).
-        log_queue = self._mp_manager.Queue()
+        # Worker logs flow through the runner-wide queue the generator was
+        # created with; drain anything stale, then listen for this job.
+        log_queue = self._worker_log_queue
+        with contextlib.suppress(Exception):
+            while True:
+                log_queue.get_nowait()
         queue_listener = logging.handlers.QueueListener(log_queue,
                                                         buffer_handler,
                                                         file_handler,
@@ -1111,7 +1118,6 @@ class JobRunner:
                 "fps": job.fps,
                 "seed": job.seed,
                 "negative_prompt": job.negative_prompt or "",
-                "log_queue": log_queue,
             }
             if job.image_path:
                 gen_kwargs["image_path"] = job.image_path

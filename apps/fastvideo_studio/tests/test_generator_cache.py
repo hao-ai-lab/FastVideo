@@ -37,6 +37,7 @@ def runner():
     r._generator_error = None
     r._generator_lock = threading.Lock()
     r._load_lock = threading.Lock()
+    r._worker_log_queue = None  # no Manager in unit tests
     return r
 
 
