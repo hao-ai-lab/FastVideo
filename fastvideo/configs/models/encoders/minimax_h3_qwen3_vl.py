@@ -128,10 +128,6 @@ class MiniMaxH3Qwen3VLArchConfig(TextEncoderArchConfig):
         self.mrope_section = (int(section[0]), int(section[1]), int(section[2]))
         if sum(self.mrope_section) * 2 != self.head_dim:
             raise ValueError("MiniMax H3 Qwen3-VL mRoPE sections must cover exactly half of each attention head.")
-        rope_scaling["mrope_interleaved"] = self.mrope_interleaved
-        rope_scaling["mrope_section"] = list(self.mrope_section)
-        rope_scaling.setdefault("rope_type", "default")
-        self.rope_scaling = rope_scaling
 
         if self.vision_out_hidden_size != self.hidden_size:
             raise ValueError("MiniMax H3 Qwen3-VL vision_out_hidden_size must match the language hidden_size "

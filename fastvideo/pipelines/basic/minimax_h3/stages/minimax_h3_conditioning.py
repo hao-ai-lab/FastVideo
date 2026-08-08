@@ -42,14 +42,6 @@ def _token_ids(tokenized: Any) -> list[int]:
     return [int(token_id) for token_id in input_ids]
 
 
-def _module_dtype(module: Any) -> torch.dtype:
-    dtype = getattr(module, "dtype", None)
-    if isinstance(dtype, torch.dtype):
-        return dtype
-    parameter = next(module.parameters(), None)
-    return torch.float32 if parameter is None else parameter.dtype
-
-
 def _create_mm_token_type_ids(processor: Any, token_ids: list[int]) -> list[list[int]]:
     """Build Qwen3-VL modality IDs across old and new Transformers releases."""
     create_ids = getattr(processor, "create_mm_token_type_ids", None)
@@ -164,22 +156,13 @@ class MiniMaxH3ConditioningStage(PipelineStage):
         **vision_inputs: torch.Tensor | None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         hidden_state_index = MINIMAX_H3_TEXT_ENCODER_LAYER
-        num_hidden_layers = getattr(self.conditioner, "num_hidden_layers", None)
-        if num_hidden_layers is None:
-            config = getattr(self.conditioner, "config", None)
-            arch = getattr(config, "arch_config", config)
-            num_hidden_layers = getattr(arch, "num_hidden_layers", None)
-        if num_hidden_layers is None or num_hidden_layers <= hidden_state_index:
-            raise ValueError(f"MiniMax H3 requires more than {hidden_state_index} Qwen3-VL decoder layers to read "
-                             f"`hidden_states[{hidden_state_index}]`, got {num_hidden_layers}.")
-
         input_ids = torch.tensor([token_ids], dtype=torch.long, device=device)
         mm_token_type_ids = torch.as_tensor(
             _create_mm_token_type_ids(self.processor, token_ids),
             dtype=torch.long,
             device=device,
         )
-        dtype = _module_dtype(self.conditioner)
+        dtype = self.conditioner.dtype
         outputs = self.conditioner(
             input_ids=input_ids,
             attention_mask=torch.ones_like(input_ids),

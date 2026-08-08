@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-from typing import Any
 
 from PIL import Image, ImageOps
 import torch
@@ -32,18 +31,6 @@ from fastvideo.pipelines.stages.validators import VerificationResult
 
 MINIMAX_H3_KEYFRAMES_KEY = "minimax_h3_keyframes"
 MINIMAX_H3_KEYFRAME_ANCHORS_KEY = "minimax_h3_keyframe_anchors"
-
-
-def _component_value(module: Any, name: str) -> Any:
-    value = getattr(module, name, None)
-    if value is not None:
-        return value
-    config = getattr(module, "config", None)
-    for owner in (getattr(config, "arch_config", None), config):
-        value = getattr(owner, name, None)
-        if value is not None:
-            return value
-    raise ValueError(f"MiniMax-H3 component {type(module).__name__} does not expose `{name}`.")
 
 
 def _has_negative_prompt(value: str | list[str] | None) -> bool:
@@ -95,7 +82,7 @@ def resolve_target_canvas(batch: ForwardBatch, vae: object, default_aspect: tupl
             raise ValueError(f"MiniMax-H3 `height` and `width` must be positive multiples of "
                              f"{MINIMAX_H3_CANVAS_MULTIPLE}, got {height}x{width}.")
 
-    ratio = int(_component_value(vae, "spatial_compression_ratio"))
+    ratio = int(vae.spatial_compression_ratio)
     if height % ratio or width % ratio:
         raise ValueError(f"MiniMax-H3 canvas {height}x{width} is not divisible by VAE ratio {ratio}.")
     return height, width, ratio
@@ -169,7 +156,7 @@ class MiniMaxH3InputPreparationStage(PipelineStage):
         latent_height = height // ratio
         latent_width = width // ratio
         num_latent_frames = video_latent_num_frames(num_frames)
-        latent_channels = int(_component_value(self.vae, "latent_channels"))
+        latent_channels = int(self.vae.latent_channels)
 
         batch.height = height
         batch.width = width
@@ -211,7 +198,7 @@ class MiniMaxH3InputPreparationStage(PipelineStage):
 
         height, width, ratio = resolve_target_canvas(batch, self.vae, (16, 9))
         num_frames = resolve_target_num_frames(batch.num_frames)
-        target_sample_rate = int(_component_value(self.audio_vae, "sampling_rate"))
+        target_sample_rate = int(self.audio_vae.sampling_rate)
         batch.references = [prepare_reference(reference, num_frames, target_sample_rate) for reference in references]
         self._write_target_geometry(batch, height, width, ratio, num_frames)
         batch.extra[MINIMAX_H3_KEYFRAMES_KEY] = []

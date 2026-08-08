@@ -20,6 +20,7 @@ from fastvideo.pipelines.basic.minimax_h3.packing import (
     MINIMAX_H3_FPS,
     MINIMAX_H3_FRAMES_PER_CHUNK,
     MINIMAX_H3_LATENTS_PER_CHUNK,
+    MINIMAX_H3_MAX_DURATION,
     resolve_canvas_size,
 )
 
@@ -136,16 +137,21 @@ def decode_reference_video(source: str | os.PathLike[str]) -> tuple[np.ndarray, 
         if not container.streams.video:
             raise ValueError(f"Reference media {source!s} contains no video stream.")
         stream = container.streams.video[0]
+        rate = stream.average_rate or getattr(stream, "guessed_rate", None)
+        if rate is None:
+            raise ValueError(f"Reference media {source!s} does not expose a frame rate.")
+        # everything past the trimmed maximum is discarded downstream; stop
+        # decoding (and buffering) once that many source frames are in hand
+        max_frames = math.ceil(MINIMAX_H3_MAX_DURATION * float(rate)) + 1
         frames = []
         rotation = 0.0
         for frame in container.decode(stream):
             rotation = float(getattr(frame, "rotation", 0.0) or 0.0)
             frames.append(frame.to_ndarray(format="rgb24"))
+            if len(frames) >= max_frames:
+                break
         if not frames:
             raise ValueError(f"Reference media {source!s} contains no video frames.")
-        rate = stream.average_rate or getattr(stream, "guessed_rate", None)
-        if rate is None:
-            raise ValueError(f"Reference media {source!s} does not expose a frame rate.")
 
         soundtrack = None
         if container.streams.audio:
