@@ -12,32 +12,40 @@ from fastapi.responses import HTMLResponse, FileResponse
 from fastvideo.entrypoints.streaming_generator import StreamingVideoGenerator
 from fastvideo.models.dits.matrixgame2.utils import expand_action_to_frames
 
-
 VARIANT_CONFIG = {
     "Matrix-Game-2.0-Base": {
-        "model_path": "FastVideo/Matrix-Game-2.0-Base-Distilled-Diffusers",
-        "keyboard_dim": 4,
-        "mode": "universal",
-        "image_url": "https://raw.githubusercontent.com/SkyworkAI/Matrix-Game/main/Matrix-Game-2/demo_images/universal/0000.png",
+        "model_path":
+        "FastVideo/Matrix-Game-2.0-Base-Distilled-Diffusers",
+        "keyboard_dim":
+        4,
+        "mode":
+        "universal",
+        "image_url":
+        "https://raw.githubusercontent.com/SkyworkAI/Matrix-Game/main/Matrix-Game-2/demo_images/universal/0000.png",
     },
     "Matrix-Game-2.0-GTA": {
-        "model_path": "FastVideo/Matrix-Game-2.0-GTA-Distilled-Diffusers",
-        "keyboard_dim": 2,
-        "mode": "gta_drive",
-        "image_url": "https://raw.githubusercontent.com/SkyworkAI/Matrix-Game/main/Matrix-Game-2/demo_images/gta_drive/0000.png",
+        "model_path":
+        "FastVideo/Matrix-Game-2.0-GTA-Distilled-Diffusers",
+        "keyboard_dim":
+        2,
+        "mode":
+        "gta_drive",
+        "image_url":
+        "https://raw.githubusercontent.com/SkyworkAI/Matrix-Game/main/Matrix-Game-2/demo_images/gta_drive/0000.png",
     },
     "Matrix-Game-2.0-TempleRun": {
-        "model_path": "FastVideo/Matrix-Game-2.0-TempleRun-Distilled-Diffusers",
-        "keyboard_dim": 7,
-        "mode": "templerun",
-        "image_url": "https://raw.githubusercontent.com/SkyworkAI/Matrix-Game/main/Matrix-Game-2/demo_images/temple_run/0000.png",
+        "model_path":
+        "FastVideo/Matrix-Game-2.0-TempleRun-Distilled-Diffusers",
+        "keyboard_dim":
+        7,
+        "mode":
+        "templerun",
+        "image_url":
+        "https://raw.githubusercontent.com/SkyworkAI/Matrix-Game/main/Matrix-Game-2/demo_images/temple_run/0000.png",
     },
 }
 
-MODEL_PATH_MAPPING = {
-    name: config["model_path"] for name, config in VARIANT_CONFIG.items()
-}
-
+MODEL_PATH_MAPPING = {name: config["model_path"] for name, config in VARIANT_CONFIG.items()}
 
 CAM_VALUE = 0.1
 KEYBOARD_MAP_UNIVERSAL = {
@@ -62,7 +70,6 @@ KEYBOARD_MAP_TEMPLERUN = {
     "D (Right)": [0, 0, 0, 0, 0, 0, 1],
 }
 
-
 CAMERA_MAP_UNIVERSAL = {
     "U (Center)": [0, 0],
     "I (Up)": [CAM_VALUE, 0],
@@ -76,6 +83,7 @@ CAMERA_MAP_GTA = {
     "D (Steer Right)": [0, CAM_VALUE],
 }
 
+
 def setup_model_environment(model_path: str) -> None:
     # if "fullattn" in model_path.lower():
     #     os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "FLASH_ATTN"
@@ -84,9 +92,10 @@ def setup_model_environment(model_path: str) -> None:
     os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "FLASH_ATTN"
     os.environ["FASTVIDEO_STAGE_LOGGING"] = "1"
 
+
 def create_timing_display(inference_time, total_time, stage_execution_times, num_frames):
     dit_denoising_time = f"{stage_execution_times[5]:.2f}s" if len(stage_execution_times) > 5 else "N/A"
-    
+
     timing_html = f"""
     <div style="margin: 10px 0;">
         <h3 style="text-align: center; margin-bottom: 10px;">⏱️ Timing Breakdown</h3>
@@ -117,7 +126,7 @@ def create_timing_display(inference_time, total_time, stage_execution_times, num
                 <div style="font-size: 18px; color: #0277bd;">{total_time:.2f}s</div>
             </div>
         </div>"""
-    
+
     if inference_time > 0:
         fps = num_frames / inference_time
         timing_html += f"""
@@ -125,8 +134,9 @@ def create_timing_display(inference_time, total_time, stage_execution_times, num
             <span style="font-weight: bold;">Generation Speed: </span>
             <span style="font-size: 18px; color: #6366f1; font-weight: bold;">{fps:.1f} frames/second</span>
         </div>"""
-    
+
     return timing_html + "</div>"
+
 
 def get_action_tensors(mode: str, keyboard_key: str, mouse_key: str | None):
     if mode == "universal":
@@ -140,13 +150,14 @@ def get_action_tensors(mode: str, keyboard_key: str, mouse_key: str | None):
         mouse = None
     else:
         raise ValueError(f"Unknown mode: {mode}")
-    
+
     return {"keyboard": keyboard, "mouse": mouse}
+
 
 def create_gradio_interface(generators: dict[str, StreamingVideoGenerator], loaded_model_name: str):
     initial_config = VARIANT_CONFIG.get(loaded_model_name, VARIANT_CONFIG["Matrix-Game-2.0-Base"])
     initial_mode = initial_config["mode"]
-    
+
     if initial_mode == "universal":
         initial_kb_choices = list(KEYBOARD_MAP_UNIVERSAL.keys())
         initial_mouse_choices = list(CAMERA_MAP_UNIVERSAL.keys())
@@ -159,7 +170,7 @@ def create_gradio_interface(generators: dict[str, StreamingVideoGenerator], load
         initial_kb_choices = list(KEYBOARD_MAP_TEMPLERUN.keys())
         initial_mouse_choices = []
         initial_mouse_visible = False
-    
+
     theme = gr.themes.Base().set(
         button_primary_background_fill="#2563eb",
         button_primary_background_fill_hover="#1d4ed8",
@@ -167,7 +178,7 @@ def create_gradio_interface(generators: dict[str, StreamingVideoGenerator], load
         slider_color="#2563eb",
         checkbox_background_color_selected="#2563eb",
     )
-    
+
     with gr.Blocks(title="FastVideo - Matrix Game 2.0", theme=theme) as demo:
         game_state = gr.State({
             "initialized": False,
@@ -175,17 +186,17 @@ def create_gradio_interface(generators: dict[str, StreamingVideoGenerator], load
             "block_idx": 0,
             "max_blocks": 50,
         })
-        
+
         # Header
         gr.Image("assets/full.svg", show_label=False, container=False, height=80)
-        
+
         gr.HTML("""
         <div style="text-align: center; margin-bottom: 10px;">
             <p style="font-size: 18px;"> Make Video Generation Go Blurrrrrrr </p>
             <p style="font-size: 18px;"> <a href="https://github.com/hao-ai-lab/FastVideo/tree/main" target="_blank">Code</a> | <a href="https://hao-ai-lab.github.io/blogs/fastvideo_post_training/" target="_blank">Blog</a> | <a href="https://hao-ai-lab.github.io/FastVideo/" target="_blank">Docs</a>  </p>
         </div>
         """)
-        
+
         with gr.Accordion("🎥 What Is FastVideo?", open=False):
             gr.HTML("""
             <div style="padding: 20px; line-height: 1.6;">
@@ -194,49 +205,46 @@ def create_gradio_interface(generators: dict[str, StreamingVideoGenerator], load
                 </p>
             </div>
             """)
-        
+
         # Model Selection
         with gr.Row():
-            model_selection = gr.Dropdown(
-                choices=[loaded_model_name],
-                value=loaded_model_name,
-                label="Select Model",
-                interactive=False
-            )
-        
+            model_selection = gr.Dropdown(choices=[loaded_model_name],
+                                          value=loaded_model_name,
+                                          label="Select Model",
+                                          interactive=False)
 
         # Main Layout
         with gr.Row(equal_height=True, elem_classes="main-content-row"):
             with gr.Column(scale=1, elem_classes="advanced-options-column"):
                 with gr.Group():
                     gr.HTML("<div style='margin: 0 0 15px 0; text-align: center; font-size: 16px;'>Game Controls</div>")
-                    
+
                     with gr.Group():
-                        gr.HTML("<div style='font-size: 14px; margin-bottom: 5px; font-weight: bold;'>🎮 Keyboard Control</div>")
-                        keyboard_action = gr.Radio(
-                            choices=initial_kb_choices,
-                            value=initial_kb_choices[0] if initial_kb_choices else None,
-                            label="Movement",
-                            show_label=False,
-                            interactive=True
+                        gr.HTML(
+                            "<div style='font-size: 14px; margin-bottom: 5px; font-weight: bold;'>🎮 Keyboard Control</div>"
                         )
-                    
+                        keyboard_action = gr.Radio(choices=initial_kb_choices,
+                                                   value=initial_kb_choices[0] if initial_kb_choices else None,
+                                                   label="Movement",
+                                                   show_label=False,
+                                                   interactive=True)
+
                     with gr.Group(visible=initial_mouse_visible) as mouse_group:
-                        gr.HTML("<div style='font-size: 14px; margin-bottom: 5px; font-weight: bold;'>🖱️ Mouse/Camera Control</div>")
-                        mouse_action = gr.Radio(
-                            choices=initial_mouse_choices if initial_mouse_visible else [],
-                            value=initial_mouse_choices[0] if initial_mouse_choices else None,
-                            label="Camera",
-                            show_label=False,
-                            interactive=True
+                        gr.HTML(
+                            "<div style='font-size: 14px; margin-bottom: 5px; font-weight: bold;'>🖱️ Mouse/Camera Control</div>"
                         )
-                    
+                        mouse_action = gr.Radio(choices=initial_mouse_choices if initial_mouse_visible else [],
+                                                value=initial_mouse_choices[0] if initial_mouse_choices else None,
+                                                label="Camera",
+                                                show_label=False,
+                                                interactive=True)
+
                     with gr.Row():
                         action_btn = gr.Button("Start", variant="primary")
                         stop_btn = gr.Button("Stop", variant="stop")
-                    
+
                     gr.HTML("<div style='margin-top: 15px;'></div>")
-                    
+
                     seed = gr.Slider(
                         label="Seed",
                         minimum=0,
@@ -246,21 +254,18 @@ def create_gradio_interface(generators: dict[str, StreamingVideoGenerator], load
                     )
                     randomize_seed = gr.Checkbox(label="Randomize seed", value=False)
                     seed_output = gr.Number(label="Used Seed")
-                    
-                    block_counter = gr.Textbox(label="Progress", value="Block: 0 / 50", interactive=False, lines=1)
 
+                    block_counter = gr.Textbox(label="Progress", value="Block: 0 / 50", interactive=False, lines=1)
 
             # Right Column: Video Output
             with gr.Column(scale=1, elem_classes="video-column"):
-                video_output = gr.Video(
-                    label="Generated Video",
-                    show_label=True,
-                    height=466,
-                    width=600,
-                    container=True,
-                    elem_classes="video-component",
-                    autoplay=True
-                )
+                video_output = gr.Video(label="Generated Video",
+                                        show_label=True,
+                                        height=466,
+                                        width=600,
+                                        container=True,
+                                        elem_classes="video-component",
+                                        autoplay=True)
 
         # Styles
         gr.HTML("""
@@ -393,12 +398,12 @@ def create_gradio_interface(generators: dict[str, StreamingVideoGenerator], load
         }
         </style>
         """)
-        
+
         # UI update based on model selection
         def on_model_change(model_name):
             config = VARIANT_CONFIG.get(model_name, VARIANT_CONFIG["Matrix-Game-2.0-Base"])
             mode = config["mode"]
-            
+
             if mode == "universal":
                 kb_choices = list(KEYBOARD_MAP_UNIVERSAL.keys())
                 mouse_choices = list(CAMERA_MAP_UNIVERSAL.keys())
@@ -411,31 +416,31 @@ def create_gradio_interface(generators: dict[str, StreamingVideoGenerator], load
                 kb_choices = list(KEYBOARD_MAP_TEMPLERUN.keys())
                 mouse_choices = []
                 mouse_visible = False
-            
+
             return (
                 gr.update(choices=kb_choices, value=kb_choices[0] if kb_choices else None),
-                gr.update(choices=mouse_choices, value=mouse_choices[0] if mouse_choices else None, visible=mouse_visible),
+                gr.update(choices=mouse_choices,
+                          value=mouse_choices[0] if mouse_choices else None,
+                          visible=mouse_visible),
                 gr.update(visible=mouse_visible),
             )
-        
-        model_selection.change(
-            fn=on_model_change,
-            inputs=model_selection,
-            outputs=[keyboard_action, mouse_action, mouse_group]
-        )
+
+        model_selection.change(fn=on_model_change,
+                               inputs=model_selection,
+                               outputs=[keyboard_action, mouse_action, mouse_group])
 
         def start_game(model_name, seed_val, randomize, state):
             if randomize:
-                seed_val = torch.randint(0, 1000000, (1,)).item()
-            
+                seed_val = torch.randint(0, 1000000, (1, )).item()
+
             config = VARIANT_CONFIG.get(model_name)
             if not config:
                 return state, seed_val, "Block: 0 / 50", None, "", gr.update(), gr.update()
-            
+
             generator = generators.get(config["model_path"])
             if not generator:
                 return state, seed_val, "Block: 0 / 50", None, "", gr.update(), gr.update()
-            
+
             # If already initialized, clean up first
             if state.get("initialized"):
                 try:
@@ -444,23 +449,23 @@ def create_gradio_interface(generators: dict[str, StreamingVideoGenerator], load
                     generator.executor.execute_streaming_clear()
                 except Exception as e:
                     print(f"Warning: cleanup error: {e}")
-            
+
             # Streaming parameters
             num_latent_frames_per_block = 3
             max_blocks = 50
             total_latent_frames = num_latent_frames_per_block * max_blocks
             num_frames = (total_latent_frames - 1) * 4 + 1
-            
+
             actions = {
                 "keyboard": torch.zeros((num_frames, config["keyboard_dim"])),
                 "mouse": torch.zeros((num_frames, 2))
             }
             grid_sizes = torch.tensor([150, 44, 80])
-            
+
             output_dir = os.path.abspath("outputs/matrixgame2")
             os.makedirs(output_dir, exist_ok=True)
             video_path = os.path.join(output_dir, f"video_{int(time.time())}.mp4")
-            
+
             generator.reset(
                 prompt="",
                 image_path=config["image_url"],
@@ -473,7 +478,7 @@ def create_gradio_interface(generators: dict[str, StreamingVideoGenerator], load
                 num_inference_steps=50,
                 output_path=video_path,
             )
-            
+
             new_state = {
                 "initialized": True,
                 "current_model": model_name,
@@ -484,13 +489,13 @@ def create_gradio_interface(generators: dict[str, StreamingVideoGenerator], load
                 "mode": config["mode"],
                 "seed": seed_val,
             }
-            
+
             return new_state, seed_val, "Block: 0 / 50", None, gr.update(value="Step"), gr.update(interactive=True)
-        
+
         async def step_game(keyboard_key, mouse_key, model_name, state):
             if not state.get("initialized"):
                 return state, state.get("seed", 0), "Block: 0 / 50", None, gr.update(), gr.update()
-            
+
             # total_start_time = time.time()
             config = VARIANT_CONFIG.get(model_name)
             generator = generators.get(config["model_path"])
@@ -500,19 +505,19 @@ def create_gradio_interface(generators: dict[str, StreamingVideoGenerator], load
             # Parse inputs to tensors
             action = get_action_tensors(mode, keyboard_key, mouse_key)
             keyboard_cond, mouse_cond = expand_action_to_frames(action, frames_per_block)
-            
+
             # run step async
             # inference_start_time = time.time()
             frames, block_future = await generator.step_async(keyboard_cond, mouse_cond)
             # inference_time = time.time() - inference_start_time
-            
+
             # wait for block file to be written
             block_path = await asyncio.to_thread(block_future.result) if block_future else None
             state["block_idx"] = generator.block_idx
             block_str = f"Block: {state['block_idx']} / {state['max_blocks']}"
-            
+
             # total_time = time.time() - total_start_time
-            
+
             # Timing breakdown
             # timing_html = create_timing_display(inference_time, total_time, [], frames_per_block)
 
@@ -520,56 +525,58 @@ def create_gradio_interface(generators: dict[str, StreamingVideoGenerator], load
 
         def stop_game(model_name, state):
             if not state.get("initialized"):
-                return {"initialized": False}, 0, "Block: 0 / 50", None, gr.update(value="Start"), gr.update(interactive=False)
-            
+                return {
+                    "initialized": False
+                }, 0, "Block: 0 / 50", None, gr.update(value="Start"), gr.update(interactive=False)
+
             config = VARIANT_CONFIG.get(model_name)
             generator = generators.get(config["model_path"])
-            
+
             final_path = state.get("video_path")
             generator.finalize(final_path)
-            
-            return {"initialized": False}, state.get("seed", 0), "Block: 0 / 50", final_path, gr.update(value="Start"), gr.update(interactive=False)
-        
+
+            return {
+                "initialized": False
+            }, state.get("seed", 0), "Block: 0 / 50", final_path, gr.update(value="Start"), gr.update(interactive=False)
+
         async def handle_action(keyboard_key, mouse_key, model_name, seed_val, randomize, state):
             if not state.get("initialized"):
                 return start_game(model_name, seed_val, randomize, state)
             else:
                 return await step_game(keyboard_key, mouse_key, model_name, state)
-        
-        action_btn.click(
-            fn=handle_action,
-            inputs=[keyboard_action, mouse_action, model_selection, seed, randomize_seed, game_state],
-            outputs=[game_state, seed_output, block_counter, video_output, action_btn, stop_btn]
-        )
-        
-        stop_btn.click(
-            fn=stop_game,
-            inputs=[model_selection, game_state],
-            outputs=[game_state, seed_output, block_counter, video_output, action_btn, stop_btn]
-        )
-        
+
+        action_btn.click(fn=handle_action,
+                         inputs=[keyboard_action, mouse_action, model_selection, seed, randomize_seed, game_state],
+                         outputs=[game_state, seed_output, block_counter, video_output, action_btn, stop_btn])
+
+        stop_btn.click(fn=stop_game,
+                       inputs=[model_selection, game_state],
+                       outputs=[game_state, seed_output, block_counter, video_output, action_btn, stop_btn])
+
         gr.HTML("""
         <div style="text-align: center; margin-top: 10px; margin-bottom: 15px;">
             <p style="font-size: 16px; margin: 0;">Note that this demo is meant to showcase Matrix Game's quality and that under a large number of requests, generation speed may be affected.</p>
         </div>
         """)
-    
+
     return demo
 
 
 def main():
     parser = argparse.ArgumentParser(description="Matrix Game Gradio Demo")
-    parser.add_argument("--model", type=str, default="Matrix-Game-2.0-Base",
+    parser.add_argument("--model",
+                        type=str,
+                        default="Matrix-Game-2.0-Base",
                         choices=list(VARIANT_CONFIG.keys()),
                         help="Model variant to load")
     parser.add_argument("--host", type=str, default="0.0.0.0")
     parser.add_argument("--port", type=int, default=7860)
     args = parser.parse_args()
-    
+
     # Load the selected model
     config = VARIANT_CONFIG[args.model]
     model_path = config["model_path"]
-    
+
     print(f"Loading model: {model_path}")
     setup_model_environment(model_path)
     generator = StreamingVideoGenerator.from_pretrained(
@@ -581,43 +588,39 @@ def main():
         text_encoder_cpu_offload=True,
         pin_cpu_memory=True,
     )
-    
+
     generators = {model_path: generator}
-    
+
     demo = create_gradio_interface(generators, args.model)
-    
+
     print(f"Starting Gradio at http://{args.host}:{args.port}")
-    
+
     # FastAPI Wrapper
     app = FastAPI()
-    
+
     @app.get("/logo.png")
     def get_logo():
-        return FileResponse(
-            "assets/full.svg",
-            media_type="image/svg+xml",
-            headers={
-                "Cache-Control": "public, max-age=3600",
-                "Access-Control-Allow-Origin": "*"
-            }
-        )
+        return FileResponse("assets/full.svg",
+                            media_type="image/svg+xml",
+                            headers={
+                                "Cache-Control": "public, max-age=3600",
+                                "Access-Control-Allow-Origin": "*"
+                            })
 
     @app.get("/favicon.ico")
     def get_favicon():
         favicon_path = "assets/icon-simple.svg"
-        
+
         if os.path.exists(favicon_path):
-            return FileResponse(
-                favicon_path, 
-                media_type="image/svg+xml",
-                headers={
-                    "Cache-Control": "public, max-age=3600",
-                    "Access-Control-Allow-Origin": "*"
-                }
-            )
+            return FileResponse(favicon_path,
+                                media_type="image/svg+xml",
+                                headers={
+                                    "Cache-Control": "public, max-age=3600",
+                                    "Access-Control-Allow-Origin": "*"
+                                })
         else:
             raise HTTPException(status_code=404, detail="Favicon not found")
-    
+
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request):
         base_url = str(request.base_url).rstrip('/')
@@ -670,13 +673,12 @@ def main():
         </html>
         """
 
-    app = gr.mount_gradio_app(
-        app, 
-        demo, 
-        path="/gradio",
-        allowed_paths=[os.path.abspath("outputs"), os.path.abspath("fastvideo-logos")]
-    )
-    
+    app = gr.mount_gradio_app(app,
+                              demo,
+                              path="/gradio",
+                              allowed_paths=[os.path.abspath("outputs"),
+                                             os.path.abspath("fastvideo-logos")])
+
     uvicorn.run(app, host=args.host, port=args.port)
 
 

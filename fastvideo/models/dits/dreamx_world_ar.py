@@ -18,8 +18,7 @@ import torch.nn.functional as F
 from fastvideo.configs.models.dits.dreamx_world import DreamXWorldARConfig
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.models.dits.base import BaseDiT
-from fastvideo.models.dits.dreamx_world import (_dreamx_apply_tiled_projmat,
-                                               _dreamx_prope_qkv)
+from fastvideo.models.dits.dreamx_world import (_dreamx_apply_tiled_projmat, _dreamx_prope_qkv)
 
 
 def attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
@@ -40,8 +39,7 @@ def attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor
     return out.transpose(1, 2)
 
 
-def prope_qkv(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor,
-              viewmats: torch.Tensor, Ks: torch.Tensor):
+def prope_qkv(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, viewmats: torch.Tensor, Ks: torch.Tensor):
     q, k, v, output_projection = _dreamx_prope_qkv(q, k, v, viewmats, Ks)
 
     def apply_fn_o(x: torch.Tensor) -> torch.Tensor:
@@ -54,17 +52,14 @@ def sinusoidal_embedding_1d(dim, position):
     assert dim % 2 == 0
     half = dim // 2
     position = position.type(torch.float64)
-    sinusoid = torch.outer(
-        position, torch.pow(10000, -torch.arange(half).to(position).div(half)))
+    sinusoid = torch.outer(position, torch.pow(10000, -torch.arange(half).to(position).div(half)))
     return torch.cat([torch.cos(sinusoid), torch.sin(sinusoid)], dim=1)
 
 
 def rope_params(max_seq_len, dim, theta=10000):
     assert dim % 2 == 0
-    freqs = torch.outer(
-        torch.arange(max_seq_len),
-        1.0 / torch.pow(theta,
-                        torch.arange(0, dim, 2).to(torch.float64).div(dim)))
+    freqs = torch.outer(torch.arange(max_seq_len), 1.0 / torch.pow(theta,
+                                                                   torch.arange(0, dim, 2).to(torch.float64).div(dim)))
     return torch.polar(torch.ones_like(freqs), freqs)
 
 
@@ -108,6 +103,7 @@ class WanLayerNorm(nn.LayerNorm):
 
 
 class WanCrossAttention(nn.Module):
+
     def __init__(self, dim, num_heads, window_size=(-1, -1), qk_norm=True, eps=1e-6):
         super().__init__()
         self.num_heads = num_heads
@@ -168,8 +164,7 @@ def block_relativistic_rope(x, grid_sizes, freqs, start_frame=0, relative_frame_
     output = []
     for i, (f, h, w) in enumerate(grid_sizes.tolist()):
         seq_len = f * h * w
-        x_i = torch.view_as_complex(x[i, :seq_len].to(torch.float64).reshape(
-            seq_len, n, -1, 2))
+        x_i = torch.view_as_complex(x[i, :seq_len].to(torch.float64).reshape(seq_len, n, -1, 2))
 
         if relative_frame_indices is not None:
             frame_indices = relative_frame_indices.long()
@@ -178,10 +173,10 @@ def block_relativistic_rope(x, grid_sizes, freqs, start_frame=0, relative_frame_
             freqs_temporal = freqs[0][start_frame:start_frame + f].view(f, 1, 1, -1).expand(f, h, w, -1)
 
         freqs_i = torch.cat([
-            freqs_temporal,
-            freqs[1][:h].view(1, h, 1, -1).expand(f, h, w, -1),
-            freqs[2][:w].view(1, 1, w, -1).expand(f, h, w, -1)
-        ], dim=-1).reshape(seq_len, 1, -1)
+            freqs_temporal, freqs[1][:h].view(1, h, 1, -1).expand(f, h, w, -1), freqs[2][:w].view(1, 1, w, -1).expand(
+                f, h, w, -1)
+        ],
+                            dim=-1).reshape(seq_len, 1, -1)
 
         x_i = torch.view_as_real(x_i * freqs_i).flatten(2)
         x_i = torch.cat([x_i, x[i, seq_len:]])
@@ -193,8 +188,7 @@ def block_relativistic_rope(x, grid_sizes, freqs, start_frame=0, relative_frame_
 class CausalWanSelfAttention(nn.Module):
     """Self-attention with KV cache and Block-Relativistic RoPE for causal inference."""
 
-    def __init__(self, dim, num_heads, local_attn_size=6, sink_size=1,
-                 qk_norm=True, eps=1e-6):
+    def __init__(self, dim, num_heads, local_attn_size=6, sink_size=1, qk_norm=True, eps=1e-6):
         assert dim % num_heads == 0
         super().__init__()
         self.dim = dim
@@ -213,8 +207,15 @@ class CausalWanSelfAttention(nn.Module):
         self.norm_q = WanRMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
         self.norm_k = WanRMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
 
-    def forward(self, x, seq_lens, grid_sizes, freqs, kv_cache,
-                current_start=0, cache_start=None, sink_recache_after_switch=False):
+    def forward(self,
+                x,
+                seq_lens,
+                grid_sizes,
+                freqs,
+                kv_cache,
+                current_start=0,
+                cache_start=None,
+                sink_recache_after_switch=False):
         """
         Args:
             x: Shape [B, L, C]
@@ -269,19 +270,22 @@ class CausalWanSelfAttention(nn.Module):
                 temp_v[:, write_start_index:local_end_index] = v[:, roped_offset:roped_offset + write_len]
 
             # Block-Relativistic RoPE: query uses window-relative indices
-            query_relative_indices = torch.arange(
-                self.local_attn_size - num_new_frames, self.local_attn_size, device=q.device)
-            roped_query = block_relativistic_rope(
-                q, grid_sizes, freqs, relative_frame_indices=query_relative_indices).type_as(v)
+            query_relative_indices = torch.arange(self.local_attn_size - num_new_frames,
+                                                  self.local_attn_size,
+                                                  device=q.device)
+            roped_query = block_relativistic_rope(q, grid_sizes, freqs,
+                                                  relative_frame_indices=query_relative_indices).type_as(v)
 
             # Block-Relativistic RoPE: cached K uses position-in-window indices
             num_cache_frames = local_end_index // frame_seqlen
             cache_relative_indices = torch.arange(0, num_cache_frames, device=k.device)
             cache_grid_sizes = grid_sizes.clone()
             cache_grid_sizes[0, 0] = num_cache_frames
-            roped_temp_k = block_relativistic_rope(
-                temp_k[:, :local_end_index].view(b, num_cache_frames, frame_seqlen, n, d).flatten(1, 2),
-                cache_grid_sizes, freqs, relative_frame_indices=cache_relative_indices).type_as(v)
+            roped_temp_k = block_relativistic_rope(temp_k[:, :local_end_index].view(b, num_cache_frames, frame_seqlen,
+                                                                                    n, d).flatten(1, 2),
+                                                   cache_grid_sizes,
+                                                   freqs,
+                                                   relative_frame_indices=cache_relative_indices).type_as(v)
 
             cache_update_info = {
                 "action": "roll_and_insert",
@@ -316,18 +320,21 @@ class CausalWanSelfAttention(nn.Module):
 
             # RoPE with relative indices (growing sequentially before cache fills)
             current_frame_in_window = local_start_index // frame_seqlen
-            query_relative_indices = torch.arange(
-                current_frame_in_window, current_frame_in_window + num_new_frames, device=q.device)
-            roped_query = block_relativistic_rope(
-                q, grid_sizes, freqs, relative_frame_indices=query_relative_indices).type_as(v)
+            query_relative_indices = torch.arange(current_frame_in_window,
+                                                  current_frame_in_window + num_new_frames,
+                                                  device=q.device)
+            roped_query = block_relativistic_rope(q, grid_sizes, freqs,
+                                                  relative_frame_indices=query_relative_indices).type_as(v)
 
             num_cache_frames = local_end_index // frame_seqlen
             cache_relative_indices = torch.arange(0, num_cache_frames, device=k.device)
             cache_grid_sizes = grid_sizes.clone()
             cache_grid_sizes[0, 0] = num_cache_frames
-            roped_temp_k = block_relativistic_rope(
-                temp_k[:, :local_end_index].view(b, num_cache_frames, frame_seqlen, n, d).flatten(1, 2),
-                cache_grid_sizes, freqs, relative_frame_indices=cache_relative_indices).type_as(v)
+            roped_temp_k = block_relativistic_rope(temp_k[:, :local_end_index].view(b, num_cache_frames, frame_seqlen,
+                                                                                    n, d).flatten(1, 2),
+                                                   cache_grid_sizes,
+                                                   freqs,
+                                                   relative_frame_indices=cache_relative_indices).type_as(v)
 
             cache_update_info = {
                 "action": "direct_insert",
@@ -358,10 +365,8 @@ class CausalWanSelfAttention(nn.Module):
             x = attention(roped_query, k_cat, v_cat)
         else:
             window_start = max(0, local_end_index - self.max_attention_size)
-            x = attention(
-                roped_query,
-                roped_temp_k[:, window_start:local_end_index],
-                temp_v[:, window_start:local_end_index])
+            x = attention(roped_query, roped_temp_k[:, window_start:local_end_index],
+                          temp_v[:, window_start:local_end_index])
 
         x = x.flatten(2)
         x, _ = self.o(x)
@@ -371,8 +376,15 @@ class CausalWanSelfAttention(nn.Module):
 class CausalPropeSelfAttention(nn.Module):
     """PRoPE self-attention with optional KV cache for camera-controlled inference."""
 
-    def __init__(self, dim, attn_dim, num_heads, window_size=(-1, -1),
-                 local_attn_size=-1, sink_size=0, qk_norm=True, eps=1e-6):
+    def __init__(self,
+                 dim,
+                 attn_dim,
+                 num_heads,
+                 window_size=(-1, -1),
+                 local_attn_size=-1,
+                 sink_size=0,
+                 qk_norm=True,
+                 eps=1e-6):
         assert dim % num_heads == 0
         assert attn_dim % num_heads == 0
         super().__init__()
@@ -398,9 +410,18 @@ class CausalPropeSelfAttention(nn.Module):
         nn.init.zeros_(self.out_proj.weight)
         nn.init.zeros_(self.out_proj.bias)
 
-    def forward(self, x, cam_viewmats, cam_K, seq_lens, grid_sizes, freqs,
-                kv_cache=None, current_start=0, cache_start=None,
-                sink_recache_after_switch=False, cache_update_policy="commit_detached"):
+    def forward(self,
+                x,
+                cam_viewmats,
+                cam_K,
+                seq_lens,
+                grid_sizes,
+                freqs,
+                kv_cache=None,
+                current_start=0,
+                cache_start=None,
+                sink_recache_after_switch=False,
+                cache_update_policy="commit_detached"):
         """
         Args:
             x: Shape [B, L, C]
@@ -420,9 +441,11 @@ class CausalPropeSelfAttention(nn.Module):
         v = v.view(b, s, n, d)
 
         # Apply PRoPE (Positional Rotary Position Embedding from camera parameters)
-        q_t, k_t, v_t, apply_fn_o = prope_qkv(
-            q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2),
-            viewmats=cam_viewmats, Ks=cam_K)
+        q_t, k_t, v_t, apply_fn_o = prope_qkv(q.transpose(1, 2),
+                                              k.transpose(1, 2),
+                                              v.transpose(1, 2),
+                                              viewmats=cam_viewmats,
+                                              Ks=cam_K)
         proped_q = q_t.transpose(1, 2)
         proped_k = k_t.transpose(1, 2)
         proped_v = v_t.transpose(1, 2)
@@ -460,8 +483,12 @@ class CausalPropeSelfAttention(nn.Module):
                     write_len = max(0, local_end_index - write_start_index)
                     if write_len > 0:
                         with torch.no_grad():
-                            kv_cache["k"][:, write_start_index:local_end_index] = proped_k[:, roped_offset:roped_offset + write_len].detach()
-                            kv_cache["v"][:, write_start_index:local_end_index] = proped_v[:, roped_offset:roped_offset + write_len].detach()
+                            kv_cache["k"][:,
+                                          write_start_index:local_end_index] = proped_k[:, roped_offset:roped_offset +
+                                                                                        write_len].detach()
+                            kv_cache["v"][:,
+                                          write_start_index:local_end_index] = proped_v[:, roped_offset:roped_offset +
+                                                                                        write_len].detach()
             else:
                 # === DIRECT INSERT MODE ===
                 local_end_index = kv_cache["local_end_index"].item() + current_end - kv_cache["global_end_index"].item()
@@ -475,8 +502,12 @@ class CausalPropeSelfAttention(nn.Module):
                     write_len = max(0, local_end_index - write_start_index)
                     if write_len > 0:
                         with torch.no_grad():
-                            kv_cache["k"][:, write_start_index:local_end_index] = proped_k[:, roped_offset:roped_offset + write_len].detach()
-                            kv_cache["v"][:, write_start_index:local_end_index] = proped_v[:, roped_offset:roped_offset + write_len].detach()
+                            kv_cache["k"][:,
+                                          write_start_index:local_end_index] = proped_k[:, roped_offset:roped_offset +
+                                                                                        write_len].detach()
+                            kv_cache["v"][:,
+                                          write_start_index:local_end_index] = proped_v[:, roped_offset:roped_offset +
+                                                                                        write_len].detach()
 
             # Attention: sink tokens + local window
             if sink_tokens > 0:
@@ -495,10 +526,8 @@ class CausalPropeSelfAttention(nn.Module):
                 x_out = attention(proped_q, k_cat, v_cat)
             else:
                 window_start = max(0, local_end_index - self.max_attention_size)
-                x_out = attention(
-                    proped_q,
-                    kv_cache["k"][:, window_start:local_end_index].detach(),
-                    kv_cache["v"][:, window_start:local_end_index].detach())
+                x_out = attention(proped_q, kv_cache["k"][:, window_start:local_end_index].detach(),
+                                  kv_cache["v"][:, window_start:local_end_index].detach())
 
             if not is_recompute and cache_update_policy != "none":
                 kv_cache["global_end_index"].fill_(current_end)
@@ -513,8 +542,16 @@ class CausalPropeSelfAttention(nn.Module):
 
 class CausalWanAttentionBlock(nn.Module):
 
-    def __init__(self, dim, ffn_dim, num_heads, local_attn_size=-1, sink_size=0,
-                 qk_norm=True, cross_attn_norm=False, eps=1e-6, **kwargs):
+    def __init__(self,
+                 dim,
+                 ffn_dim,
+                 num_heads,
+                 local_attn_size=-1,
+                 sink_size=0,
+                 qk_norm=True,
+                 cross_attn_norm=False,
+                 eps=1e-6,
+                 **kwargs):
         super().__init__()
         self.dim = dim
         self.ffn_dim = ffn_dim
@@ -532,10 +569,8 @@ class CausalWanAttentionBlock(nn.Module):
 
         # layers
         self.norm1 = WanLayerNorm(dim, eps)
-        self.self_attn = CausalWanSelfAttention(
-            dim, num_heads, local_attn_size, sink_size, qk_norm, eps)
-        self.norm3 = WanLayerNorm(
-            dim, eps, elementwise_affine=True) if cross_attn_norm else nn.Identity()
+        self.self_attn = CausalWanSelfAttention(dim, num_heads, local_attn_size, sink_size, qk_norm, eps)
+        self.norm3 = WanLayerNorm(dim, eps, elementwise_affine=True) if cross_attn_norm else nn.Identity()
         self.cross_attn = WanCrossAttention(dim, num_heads, (-1, -1), qk_norm, eps)
         self.norm2 = WanLayerNorm(dim, eps)
         # nn.Linear (not ReplicatedLinear) on purpose: the official checkpoint
@@ -543,36 +578,48 @@ class CausalWanAttentionBlock(nn.Module):
         # copy-only converter and the strict-load tests require verbatim, and
         # ReplicatedLinear's (out, bias) tuple return cannot compose inside
         # nn.Sequential without renaming the state-dict surface.
-        self.ffn = nn.Sequential(
-            nn.Linear(dim, ffn_dim), nn.GELU(approximate='tanh'),
-            nn.Linear(ffn_dim, dim))
+        self.ffn = nn.Sequential(nn.Linear(dim, ffn_dim), nn.GELU(approximate='tanh'), nn.Linear(ffn_dim, dim))
 
         # PRoPE self-attention branch for camera control
         add_cam_attn = self.add_control_adapter and self.cam_method == 'prope'
         if add_cam_attn and cam_self_attn_layers is not None:
             add_cam_attn = self.layer_idx in cam_self_attn_layers
         if add_cam_attn:
-            self.cam_self_attn = CausalPropeSelfAttention(
-                dim, dim // self.attn_compress, num_heads,
-                local_attn_size=local_attn_size, sink_size=sink_size,
-                qk_norm=qk_norm, eps=eps)
+            self.cam_self_attn = CausalPropeSelfAttention(dim,
+                                                          dim // self.attn_compress,
+                                                          num_heads,
+                                                          local_attn_size=local_attn_size,
+                                                          sink_size=sink_size,
+                                                          qk_norm=qk_norm,
+                                                          eps=eps)
 
         # modulation
         self.modulation = nn.Parameter(torch.randn(1, 6, dim) / dim**0.5)
 
-    def forward(self, x, e, seq_lens, grid_sizes, freqs, context, context_lens,
-                kv_cache, crossattn_cache=None, current_start=0, cache_start=None,
-                cam_viewmats=None, cam_K=None, sink_recache_after_switch=False,
+    def forward(self,
+                x,
+                e,
+                seq_lens,
+                grid_sizes,
+                freqs,
+                context,
+                context_lens,
+                kv_cache,
+                crossattn_cache=None,
+                current_start=0,
+                cache_start=None,
+                cam_viewmats=None,
+                cam_K=None,
+                sink_recache_after_switch=False,
                 cache_update_policy="commit_detached"):
         num_frames, frame_seqlen = e.shape[1], x.shape[1] // e.shape[1]
         e = (self.modulation.unsqueeze(1) + e).chunk(6, dim=2)
 
         # self-attention
-        attn_input = (self.norm1(x).unflatten(
-            dim=1, sizes=(num_frames, frame_seqlen)) * (1 + e[1]) + e[0]).flatten(1, 2)
-        y, cache_update_info = self.self_attn(
-            attn_input, seq_lens, grid_sizes, freqs, kv_cache,
-            current_start, cache_start, sink_recache_after_switch)
+        attn_input = (self.norm1(x).unflatten(dim=1, sizes=(num_frames, frame_seqlen)) * (1 + e[1]) + e[0]).flatten(
+            1, 2)
+        y, cache_update_info = self.self_attn(attn_input, seq_lens, grid_sizes, freqs, kv_cache, current_start,
+                                              cache_start, sink_recache_after_switch)
 
         # PRoPE camera attention (parallel branch)
         if hasattr(self, 'cam_self_attn') and cam_viewmats is not None and cam_K is not None:
@@ -584,19 +631,23 @@ class CausalWanAttentionBlock(nn.Module):
                     "global_end_index": kv_cache["prope_global_end_index"],
                     "local_end_index": kv_cache["prope_local_end_index"],
                 }
-            y = y + self.cam_self_attn(
-                attn_input, cam_viewmats, cam_K, seq_lens, grid_sizes, freqs,
-                kv_cache=prope_kv_cache, current_start=current_start,
-                cache_start=cache_start, cache_update_policy=cache_update_policy)
+            y = y + self.cam_self_attn(attn_input,
+                                       cam_viewmats,
+                                       cam_K,
+                                       seq_lens,
+                                       grid_sizes,
+                                       freqs,
+                                       kv_cache=prope_kv_cache,
+                                       current_start=current_start,
+                                       cache_start=cache_start,
+                                       cache_update_policy=cache_update_policy)
 
         x = x + (y.unflatten(dim=1, sizes=(num_frames, frame_seqlen)) * e[2]).flatten(1, 2)
 
         # cross-attention & FFN
-        x = x + self.cross_attn(self.norm3(x), context, context_lens,
-                                crossattn_cache=crossattn_cache)
+        x = x + self.cross_attn(self.norm3(x), context, context_lens, crossattn_cache=crossattn_cache)
         y = self.ffn(
-            (self.norm2(x).unflatten(dim=1, sizes=(num_frames, frame_seqlen))
-             * (1 + e[4]) + e[3]).flatten(1, 2))
+            (self.norm2(x).unflatten(dim=1, sizes=(num_frames, frame_seqlen)) * (1 + e[4]) + e[3]).flatten(1, 2))
         x = x + (y.unflatten(dim=1, sizes=(num_frames, frame_seqlen)) * e[5]).flatten(1, 2)
 
         return x, cache_update_info
@@ -619,9 +670,7 @@ class CausalHead(nn.Module):
     def forward(self, x, e):
         num_frames, frame_seqlen = e.shape[1], x.shape[1] // e.shape[1]
         e = (self.modulation.unsqueeze(1) + e).chunk(2, dim=2)
-        x, _ = self.head(
-            self.norm(x).unflatten(dim=1, sizes=(num_frames, frame_seqlen))
-            * (1 + e[1]) + e[0])
+        x, _ = self.head(self.norm(x).unflatten(dim=1, sizes=(num_frames, frame_seqlen)) * (1 + e[1]) + e[0])
         return x
 
 
@@ -680,27 +729,26 @@ class DreamXWorldARTransformer3DModel(BaseDiT):
         # embeddings — nn.Linear inside nn.Sequential on purpose: the official
         # checkpoint keys are positional (text_embedding.0/.2, time_embedding.0/.2,
         # time_projection.1) and must load verbatim (see ffn comment above).
-        self.patch_embedding = nn.Conv3d(
-            in_dim, dim, kernel_size=patch_size, stride=patch_size)
-        self.text_embedding = nn.Sequential(
-            nn.Linear(text_dim, dim), nn.GELU(approximate='tanh'),
-            nn.Linear(dim, dim))
-        self.time_embedding = nn.Sequential(
-            nn.Linear(freq_dim, dim), nn.SiLU(), nn.Linear(dim, dim))
-        self.time_projection = nn.Sequential(
-            nn.SiLU(), nn.Linear(dim, dim * 6))
+        self.patch_embedding = nn.Conv3d(in_dim, dim, kernel_size=patch_size, stride=patch_size)
+        self.text_embedding = nn.Sequential(nn.Linear(text_dim, dim), nn.GELU(approximate='tanh'), nn.Linear(dim, dim))
+        self.time_embedding = nn.Sequential(nn.Linear(freq_dim, dim), nn.SiLU(), nn.Linear(dim, dim))
+        self.time_projection = nn.Sequential(nn.SiLU(), nn.Linear(dim, dim * 6))
 
         # transformer blocks
         self.blocks = nn.ModuleList([
-            CausalWanAttentionBlock(
-                dim, ffn_dim, num_heads, local_attn_size, sink_size,
-                qk_norm, cross_attn_norm, eps,
-                add_control_adapter=add_control_adapter,
-                cam_method=cam_method,
-                attn_compress=attn_compress,
-                layer_idx=layer_idx,
-                cam_self_attn_layers=cam_self_attn_layers)
-            for layer_idx in range(num_layers)
+            CausalWanAttentionBlock(dim,
+                                    ffn_dim,
+                                    num_heads,
+                                    local_attn_size,
+                                    sink_size,
+                                    qk_norm,
+                                    cross_attn_norm,
+                                    eps,
+                                    add_control_adapter=add_control_adapter,
+                                    cam_method=cam_method,
+                                    attn_compress=attn_compress,
+                                    layer_idx=layer_idx,
+                                    cam_self_attn_layers=cam_self_attn_layers) for layer_idx in range(num_layers)
         ])
         for layer_idx, block in enumerate(self.blocks):
             block.self_attn.layer_idx = layer_idx
@@ -712,11 +760,11 @@ class DreamXWorldARTransformer3DModel(BaseDiT):
         # RoPE frequencies
         assert (dim % num_heads) == 0 and (dim // num_heads) % 2 == 0
         d = dim // num_heads
-        self.freqs = torch.cat([
-            rope_params(1024, d - 4 * (d // 6)),
-            rope_params(1024, 2 * (d // 6)),
-            rope_params(1024, 2 * (d // 6))
-        ], dim=1)
+        self.freqs = torch.cat(
+            [rope_params(1024, d - 4 * (d // 6)),
+             rope_params(1024, 2 * (d // 6)),
+             rope_params(1024, 2 * (d // 6))],
+            dim=1)
 
         self.num_attention_heads = num_heads
         self.attention_head_dim = dim // num_heads
@@ -728,10 +776,22 @@ class DreamXWorldARTransformer3DModel(BaseDiT):
         self.num_frame_per_block = config.arch_config.num_frames_per_block
         self.__post_init__()
 
-    def forward(self, x=None, t=None, context=None, seq_len=None, y=None, y_camera=None,
-                kv_cache=None, crossattn_cache=None, current_start=0,
-                cache_start=0, cache_update_policy="commit_detached",
-                hidden_states=None, encoder_hidden_states=None, timestep=None, **kwargs):
+    def forward(self,
+                x=None,
+                t=None,
+                context=None,
+                seq_len=None,
+                y=None,
+                y_camera=None,
+                kv_cache=None,
+                crossattn_cache=None,
+                current_start=0,
+                cache_start=0,
+                cache_update_policy="commit_detached",
+                hidden_states=None,
+                encoder_hidden_states=None,
+                timestep=None,
+                **kwargs):
         """
         Causal inference with KV caching.
         See Algorithm 2 of CausVid (https://arxiv.org/abs/2412.07772).
@@ -766,7 +826,8 @@ class DreamXWorldARTransformer3DModel(BaseDiT):
                 seq_len = int(t.shape[1]) if t.dim() > 1 else int(t.numel())
             elif x is not None:
                 sample = x[0]
-                seq_len = (sample.shape[1] // self.patch_size[0]) * (sample.shape[2] // self.patch_size[1]) * (sample.shape[3] // self.patch_size[2])
+                seq_len = (sample.shape[1] // self.patch_size[0]) * (sample.shape[2] // self.patch_size[1]) * (
+                    sample.shape[3] // self.patch_size[2])
         if x is None or t is None or context is None or seq_len is None:
             raise ValueError("DreamXWorldARTransformer3DModel requires x/t/context/seq_len or FastVideo aliases")
 
@@ -777,34 +838,28 @@ class DreamXWorldARTransformer3DModel(BaseDiT):
                 rope_params(1024, d - 4 * (d // 6)),
                 rope_params(1024, 2 * (d // 6)),
                 rope_params(1024, 2 * (d // 6)),
-            ], dim=1).to(device)
+            ],
+                                   dim=1).to(device)
 
         if y is not None:
             x = [torch.cat([u, v], dim=0) for u, v in zip(x, y, strict=True)]
 
         # patch embedding
         x = [self.patch_embedding(u.unsqueeze(0)) for u in x]
-        grid_sizes = torch.stack(
-            [torch.tensor(u.shape[2:], dtype=torch.long) for u in x])
+        grid_sizes = torch.stack([torch.tensor(u.shape[2:], dtype=torch.long) for u in x])
         x = [u.flatten(2).transpose(1, 2) for u in x]
         seq_lens = torch.tensor([u.size(1) for u in x], dtype=torch.long)
         assert seq_lens.max() <= seq_len
         x = torch.cat(x)
 
         # time embedding
-        e = self.time_embedding(
-            sinusoidal_embedding_1d(self.freq_dim, t.flatten()).type_as(x))
-        e0 = self.time_projection(e).unflatten(
-            1, (6, self.dim)).unflatten(dim=0, sizes=t.shape)
+        e = self.time_embedding(sinusoidal_embedding_1d(self.freq_dim, t.flatten()).type_as(x))
+        e0 = self.time_projection(e).unflatten(1, (6, self.dim)).unflatten(dim=0, sizes=t.shape)
 
         # text embedding
         context_lens = None
         context = self.text_embedding(
-            torch.stack([
-                torch.cat(
-                    [u, u.new_zeros(self.text_len - u.size(0), u.size(1))])
-                for u in context
-            ]))
+            torch.stack([torch.cat([u, u.new_zeros(self.text_len - u.size(0), u.size(1))]) for u in context]))
 
         # camera parameters
         if y_camera is not None and isinstance(y_camera, dict):
@@ -815,9 +870,14 @@ class DreamXWorldARTransformer3DModel(BaseDiT):
             cam_K = None
 
         block_kwargs = dict(
-            e=e0, seq_lens=seq_lens, grid_sizes=grid_sizes, freqs=self.freqs,
-            context=context, context_lens=context_lens,
-            cam_viewmats=cam_viewmats, cam_K=cam_K,
+            e=e0,
+            seq_lens=seq_lens,
+            grid_sizes=grid_sizes,
+            freqs=self.freqs,
+            context=context,
+            context_lens=context_lens,
+            cam_viewmats=cam_viewmats,
+            cam_K=cam_K,
             cache_update_policy=cache_update_policy,
         )
 
@@ -868,7 +928,8 @@ class DreamXWorldARTransformer3DModel(BaseDiT):
                         cache["v"][:, sink_tokens:sink_tokens + num_rolled_tokens] = \
                             cache["v"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
 
-                        if write_end_index > write_start_index and new_k.shape[1] == (write_end_index - write_start_index):
+                        if write_end_index > write_start_index and new_k.shape[1] == (write_end_index -
+                                                                                      write_start_index):
                             cache["k"][:, write_start_index:write_end_index] = new_k
                             cache["v"][:, write_start_index:write_end_index] = new_v
 
@@ -878,7 +939,8 @@ class DreamXWorldARTransformer3DModel(BaseDiT):
                         new_k = update_info["new_k"].detach()
                         new_v = update_info["new_v"].detach()
 
-                        if write_end_index > write_start_index and new_k.shape[1] == (write_end_index - write_start_index):
+                        if write_end_index > write_start_index and new_k.shape[1] == (write_end_index -
+                                                                                      write_start_index):
                             cache["k"][:, write_start_index:write_end_index] = new_k
                             cache["v"][:, write_start_index:write_end_index] = new_v
 

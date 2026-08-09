@@ -5,6 +5,7 @@ import torch
 
 
 class EventHook(ForwardHook):
+
     def __init__(self, content: str, event_list: list[str]):
         self.content = content
         self.event_list = event_list
@@ -13,16 +14,12 @@ class EventHook(ForwardHook):
         return f"EventHook_{self.content}"
 
     def pre_forward(self, module: nn.Module, *args, **kwargs):
-        print(
-            f"[{self.content}] Pre-forward called with args[0].shape: {args[0].shape}"
-        )
+        print(f"[{self.content}] Pre-forward called with args[0].shape: {args[0].shape}")
         self.event_list.append(f"[pre]{self.content}")
         return args, kwargs
 
     def post_forward(self, module: nn.Module, output: Any):
-        print(
-            f"[{self.content}] Post-forward called with outputs.shape: {output.shape}"
-        )
+        print(f"[{self.content}] Post-forward called with outputs.shape: {output.shape}")
         self.event_list.append(f"[post]{self.content}")
         return output
 
@@ -54,7 +51,5 @@ def test_hook_execution_order():
     # Post-hooks should be LIFO (Last In First Out): B then A
     expected_events = ["[pre]A", "[pre]B", "[post]B", "[post]A"]
 
-    assert events == expected_events, (
-        f"Expected {expected_events}, but got {events}"
-    )
+    assert events == expected_events, (f"Expected {expected_events}, but got {events}")
     print(f"✓ Hook execution order test passed: {events}")

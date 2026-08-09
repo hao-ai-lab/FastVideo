@@ -23,7 +23,7 @@ from fastvideo.tests.golden_gate._harness import GateSpec, distributed_runtime, 
 __all__ = ["distributed_runtime"]
 
 EMBED_DIM = 1536  # StableAudioArchConfig.embed_dim
-COND_DIM = 768    # StableAudioArchConfig.cond_token_dim (project_cond_tokens=False)
+COND_DIM = 768  # StableAudioArchConfig.cond_token_dim (project_cond_tokens=False)
 
 
 def _build_block(layer: int) -> torch.nn.Module:

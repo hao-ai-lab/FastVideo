@@ -250,7 +250,7 @@ def test_generate_single_video_metadata_only_skips_output_materialization(monkey
     assert result["frames"] is None
     assert result["video_path"] is None
     assert result["peak_memory_mb"] == 42.0
-    assert empty_calls == [((0,), {"device": "cpu"})]
+    assert empty_calls == [((0, ), {"device": "cpu"})]
 
 
 def test_generate_single_video_return_frames_still_materializes_output(tmp_path):
@@ -306,7 +306,7 @@ def test_generate_single_video_save_video_still_builds_frames(monkeypatch, tmp_p
 
 
 def test_generate_single_video_audio_only_metadata_returns_audio_without_frames(tmp_path):
-    audio = torch.zeros((16,), dtype=torch.float32)
+    audio = torch.zeros((16, ), dtype=torch.float32)
     output_batch = _single_video_output_batch(
         _NoCpuMaterializationOutput(),
         extra={
@@ -332,7 +332,7 @@ def test_generate_single_video_audio_only_metadata_returns_audio_without_frames(
 
 
 def test_generate_single_video_audio_only_save_skips_placeholder_materialization(tmp_path):
-    audio = torch.zeros((16,), dtype=torch.float32)
+    audio = torch.zeros((16, ), dtype=torch.float32)
     output_batch = _single_video_output_batch(
         _NoCpuMaterializationOutput(),
         extra={
@@ -360,7 +360,7 @@ def test_generate_single_video_audio_only_save_skips_placeholder_materialization
 
 
 def test_generate_single_video_ray_audio_only_save_preserves_worker_metadata(monkeypatch, tmp_path):
-    audio = torch.zeros((16,), dtype=torch.float32)
+    audio = torch.zeros((16, ), dtype=torch.float32)
     worker_output = ForwardBatch(
         data_type="audio",
         output=torch.ones((1, 3, 1, 8, 8)),

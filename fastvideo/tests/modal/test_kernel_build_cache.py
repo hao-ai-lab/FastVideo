@@ -88,14 +88,14 @@ def _write_prebuilt_artifact(prebuilt_root: Path, name: str, cache_key: str) -> 
 
 def _patch_stable_metadata(monkeypatch) -> None:
     for name in (
-        "GPU_BACKEND",
-        "CMAKE_ARGS",
-        "CFLAGS",
-        "CXXFLAGS",
-        "LDFLAGS",
-        "TORCH_CUDA_ARCH_LIST",
-        "FASTVIDEO_CONTAINER_IMAGE_REF",
-        "CUDACXX",
+            "GPU_BACKEND",
+            "CMAKE_ARGS",
+            "CFLAGS",
+            "CXXFLAGS",
+            "LDFLAGS",
+            "TORCH_CUDA_ARCH_LIST",
+            "FASTVIDEO_CONTAINER_IMAGE_REF",
+            "CUDACXX",
     ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(kernel_build_cache, "_kernel_source_hash", lambda repo_root: {"source_hash": "source"})
@@ -115,8 +115,15 @@ def _patch_stable_metadata(monkeypatch) -> None:
         kernel_build_cache,
         "_compiler_libc_metadata",
         lambda: {
-            "compiler": {"cc": {"path": "/usr/bin/gcc", "version": "gcc 11.4.0"}},
-            "libc": {"ldd_version": "ldd 2.35"},
+            "compiler": {
+                "cc": {
+                    "path": "/usr/bin/gcc",
+                    "version": "gcc 11.4.0"
+                }
+            },
+            "libc": {
+                "ldd_version": "ldd 2.35"
+            },
         },
     )
     monkeypatch.setattr(
@@ -188,8 +195,15 @@ def test_cache_key_changes_with_compiler_or_torch_abi(monkeypatch, tmp_path) -> 
         kernel_build_cache,
         "_compiler_libc_metadata",
         lambda: {
-            "compiler": {"cc": {"path": "/opt/gcc-12/bin/gcc", "version": "gcc 12.3.0"}},
-            "libc": {"ldd_version": "ldd 2.35"},
+            "compiler": {
+                "cc": {
+                    "path": "/opt/gcc-12/bin/gcc",
+                    "version": "gcc 12.3.0"
+                }
+            },
+            "libc": {
+                "ldd_version": "ldd 2.35"
+            },
         },
     )
     compiler_changed = kernel_build_cache._build_metadata(tmp_path)

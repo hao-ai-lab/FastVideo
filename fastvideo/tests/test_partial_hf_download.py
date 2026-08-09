@@ -147,11 +147,10 @@ def test_minimax_patterns_filter_unused_repo_partitions(
         "Ref2VA/model.safetensors",
     ]
 
-    selected = set(
-        filter_repo_objects(
-            repo_files,
-            allow_patterns=pipeline_cls.get_hf_download_allow_patterns(),
-        ))
+    selected = set(filter_repo_objects(
+        repo_files,
+        allow_patterns=pipeline_cls.get_hf_download_allow_patterns(),
+    ))
 
     assert "model_index.json" in selected
     assert "scheduler/scheduler_config.json" in selected
@@ -234,10 +233,11 @@ def test_model_index_supports_umbrella_repo_paths(tmp_path: Path, monkeypatch) -
         captured.update(kwargs)
         manifest_path = tmp_path / kwargs["filename"]
         manifest_path.parent.mkdir(parents=True, exist_ok=True)
-        manifest_path.write_text(json.dumps({
-            "_class_name": "MiniMaxH3ModularPipeline",
-            "_diffusers_version": "0.35.0",
-        }))
+        manifest_path.write_text(
+            json.dumps({
+                "_class_name": "MiniMaxH3ModularPipeline",
+                "_diffusers_version": "0.35.0",
+            }))
         return str(manifest_path)
 
     monkeypatch.setattr("huggingface_hub.hf_hub_download", fake_hf_hub_download)

@@ -33,10 +33,7 @@ assert_reference_source(reference, "src/diffusers/modular_pipelines/minimax_h3/p
 from fastvideo.pipelines.basic.minimax_h3 import packing as base_packing  # noqa: E402
 from fastvideo.pipelines.basic.minimax_h3 import reference as actual  # noqa: E402
 from fastvideo.pipelines.basic.minimax_h3.reference import (  # noqa: E402
-    MiniMaxH3Reference,
-    decode_reference_audio,
-    decode_reference_video,
-    prepare_reference,
+    MiniMaxH3Reference, decode_reference_audio, decode_reference_video, prepare_reference,
 )
 
 
@@ -76,9 +73,8 @@ def test_reference_video_24_and_30_fps_resampling_matches_pinned_diffusers() -> 
     result = actual.resample_reference_frames(frames, 30.0)
     expected = reference.resample_reference_frames(frames, 30.0)
     np.testing.assert_array_equal(result, expected)
-    assert [int(frame[0, 0, 0]) for frame in result] == [
-        index for index in range(30) if index not in (2, 7, 12, 17, 22, 27)
-    ]
+    assert [int(frame[0, 0, 0])
+            for frame in result] == [index for index in range(30) if index not in (2, 7, 12, 17, 22, 27)]
 
 
 def test_reference_video_resize_and_truncate_matches_pinned_diffusers(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -32,9 +32,7 @@ from .grad_norm_regression import (
     resolve_blocks,
 )
 
-_FIXTURE = str(
-    Path(__file__).resolve().parent.parent / "fixtures"
-    / "cosmos_t2w_finetune_min.yaml")
+_FIXTURE = str(Path(__file__).resolve().parent.parent / "fixtures" / "cosmos_t2w_finetune_min.yaml")
 
 # Cosmos 2.5 Reason1 (Qwen2.5-VL) text embedding width.
 _COSMOS_TEXT_DIM = 100352
@@ -51,19 +49,14 @@ def _build_synthetic_batch(
     """
     batch_size = 1
     return {
-        "text_embedding":
-        torch.randn(batch_size, 16, _COSMOS_TEXT_DIM, device=device,
-                    dtype=dtype),
-        "text_attention_mask":
-        torch.ones(batch_size, 16, device=device),
-        "vae_latent":
-        torch.randn(batch_size, 16, 4, 8, 8, device=device, dtype=dtype),
+        "text_embedding": torch.randn(batch_size, 16, _COSMOS_TEXT_DIM, device=device, dtype=dtype),
+        "text_attention_mask": torch.ones(batch_size, 16, device=device),
+        "vae_latent": torch.randn(batch_size, 16, 4, 8, 8, device=device, dtype=dtype),
     }
 
 
 @pytest.mark.usefixtures("distributed_setup")
-def test_cosmos_finetune_single_train_step(
-        monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cosmos_finetune_single_train_step(monkeypatch: pytest.MonkeyPatch) -> None:
     if not torch.cuda.is_available():
         pytest.skip("requires CUDA")
 
@@ -100,14 +93,12 @@ def test_cosmos_finetune_single_train_step(
 
     loss = loss_map["total_loss"]
     assert torch.is_tensor(loss), "total_loss must be a torch.Tensor"
-    assert torch.isfinite(loss).item(), (
-        f"total_loss is not finite: {loss.item()}")
+    assert torch.isfinite(loss).item(), (f"total_loss is not finite: {loss.item()}")
 
     method.backward(loss_map, outputs, grad_accum_rounds=1)
 
     blocks = resolve_blocks(model.transformer)
-    assert blocks is not None and len(blocks) > 0, (
-        "transformer is expected to expose a non-empty block list")
+    assert blocks is not None and len(blocks) > 0, ("transformer is expected to expose a non-empty block list")
     layer0 = blocks[0]
 
     trainable = [p for p in layer0.parameters() if p.requires_grad]
@@ -115,14 +106,11 @@ def test_cosmos_finetune_single_train_step(
 
     for i, p in enumerate(trainable):
         assert p.grad is not None, f"layer 0 param[{i}] has None grad"
-        assert torch.isfinite(p.grad).all().item(), (
-            f"layer 0 param[{i}] grad contains NaN/Inf")
+        assert torch.isfinite(p.grad).all().item(), (f"layer 0 param[{i}] grad contains NaN/Inf")
 
-    any_nonzero = any(
-        p.grad.detach().float().norm().item() > 0.0 for p in trainable)
-    assert any_nonzero, (
-        "all layer-0 grads are exactly zero; backward did not "
-        "reach the first transformer block")
+    any_nonzero = any(p.grad.detach().float().norm().item() > 0.0 for p in trainable)
+    assert any_nonzero, ("all layer-0 grads are exactly zero; backward did not "
+                         "reach the first transformer block")
 
     # 5a-ii: device-keyed grad-norm regression on top of the same harness.
     # Skips when the current GPU has no seeded reference.

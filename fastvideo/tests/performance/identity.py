@@ -37,14 +37,14 @@ _PROFILE_ENV_VARS = (
 _PACKAGE_DISTRIBUTIONS = {
     "fastvideo_kernel": ("fastvideo-kernel", "fastvideo_kernel"),
     "flash_attn": ("flash-attn", "flash_attn"),
-    "flash_attn_4": ("flash-attn-4",),
-    "flash_attention_fp4": ("flash-attention-fp4",),
+    "flash_attn_4": ("flash-attn-4", ),
+    "flash_attention_fp4": ("flash-attention-fp4", ),
     "flashinfer": ("flashinfer-python", "flashinfer"),
     "nvidia_cutlass_dsl": ("nvidia-cutlass-dsl", "cutlass-dsl"),
-    "sageattention": ("sageattention",),
-    "sageattn3": ("sageattn3",),
-    "triton": ("triton",),
-    "xformers": ("xformers",),
+    "sageattention": ("sageattention", ),
+    "sageattn3": ("sageattn3", ),
+    "triton": ("triton", ),
+    "xformers": ("xformers", ),
 }
 
 
@@ -72,10 +72,7 @@ def recipe_fingerprint(recipe: Mapping[str, Any]) -> str:
     # upstream repo commit, including model-card edits with unchanged
     # weights. The fingerprint is pinned to declared inputs only; the
     # resolved values stay in the stored recipe for auditability.
-    pruned = {
-        key: (dict(value) if isinstance(value, Mapping) else value)
-        for key, value in recipe.items()
-    }
+    pruned = {key: (dict(value) if isinstance(value, Mapping) else value) for key, value in recipe.items()}
     model = pruned.get("model")
     if isinstance(model, dict):
         model.pop("resolved_revision", None)
@@ -114,16 +111,10 @@ def environment_fingerprint(metadata: Mapping[str, Any]) -> str:
 
 
 def benchmark_identity_from_config(cfg: Mapping[str, Any]) -> dict[str, Any]:
-    missing = [
-        key for key in REQUIRED_BENCHMARK_IDENTITY_KEYS
-        if _none_if_empty(cfg.get(key)) is None
-    ]
+    missing = [key for key in REQUIRED_BENCHMARK_IDENTITY_KEYS if _none_if_empty(cfg.get(key)) is None]
     if missing:
         raise ValueError("Benchmark config missing required identity fields: " + ", ".join(missing))
-    return {
-        key: cfg[key]
-        for key in REQUIRED_BENCHMARK_IDENTITY_KEYS
-    }
+    return {key: cfg[key] for key in REQUIRED_BENCHMARK_IDENTITY_KEYS}
 
 
 def build_recipe_from_benchmark_config(
@@ -276,8 +267,7 @@ def software_profile(
         "cuda": _major_minor(cuda_version or torch.version.cuda),
         "packages": {
             name: str(version)
-            for name, version in sorted(versions.items())
-            if version
+            for name, version in sorted(versions.items()) if version
         },
     }
 
@@ -310,17 +300,16 @@ def environment_metadata(
         },
         "env": {
             key: source_env.get(key)
-            for key in _PROFILE_ENV_VARS
-            if source_env.get(key) is not None
+            for key in _PROFILE_ENV_VARS if source_env.get(key) is not None
         },
         "packages": {
             key: value
-            for key, value in sorted(full_package_versions.items())
-            if value
+            for key, value in sorted(full_package_versions.items()) if value
         },
-        "hardware_profile": dict(hardware) if hardware is not None else hardware_profile(),
-        "software_profile": dict(software) if software is not None else software_profile(
-            package_versions=full_package_versions),
+        "hardware_profile":
+        dict(hardware) if hardware is not None else hardware_profile(),
+        "software_profile":
+        dict(software) if software is not None else software_profile(package_versions=full_package_versions),
     }
 
 
@@ -328,10 +317,7 @@ def _canonicalize(value: Any) -> Any:
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
         return _canonicalize(dataclasses.asdict(value))
     if isinstance(value, Mapping):
-        return {
-            str(key): _canonicalize(value[key])
-            for key in sorted(value, key=lambda item: str(item))
-        }
+        return {str(key): _canonicalize(value[key]) for key in sorted(value, key=lambda item: str(item))}
     if isinstance(value, (set, frozenset)):
         return [_canonicalize(item) for item in sorted(value, key=lambda item: str(item))]
     if isinstance(value, tuple):

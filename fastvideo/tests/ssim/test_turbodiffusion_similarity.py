@@ -41,8 +41,7 @@ TURBODIFFUSION_PARAMS = {
     "tp_size": 1,
     "fps": 24,
 }
-_TURBODIFFUSION_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained(
-    TURBODIFFUSION_PARAMS["model_path"])
+_TURBODIFFUSION_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained(TURBODIFFUSION_PARAMS["model_path"])
 TURBODIFFUSION_FULL_QUALITY_PARAMS = {
     "num_gpus": TURBODIFFUSION_PARAMS["num_gpus"],
     "model_path": TURBODIFFUSION_PARAMS["model_path"],
@@ -110,8 +109,7 @@ TURBODIFFUSION_I2V_PARAMS = {
     "tp_size": 1,
     "fps": 24,
 }
-_TURBODIFFUSION_I2V_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained(
-    TURBODIFFUSION_I2V_PARAMS["model_path"])
+_TURBODIFFUSION_I2V_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained(TURBODIFFUSION_I2V_PARAMS["model_path"])
 TURBODIFFUSION_I2V_FULL_QUALITY_PARAMS = {
     "num_gpus": TURBODIFFUSION_I2V_PARAMS["num_gpus"],
     "model_path": TURBODIFFUSION_I2V_PARAMS["model_path"],

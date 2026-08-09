@@ -43,7 +43,7 @@ def test_channel_major_patch_order_and_round_trip_match_reference() -> None:
     assert_close(restored, latents, rtol=0, atol=0)
 
 
-@pytest.mark.parametrize("anchors", [(), ("first",), ("first", "last")])
+@pytest.mark.parametrize("anchors", [(), ("first", ), ("first", "last")])
 def test_layout_position_tags_indices_and_timesteps_match_reference(anchors: tuple[str, ...]) -> None:
     kwargs = {
         "text_token_tags": torch.tensor([1, 1, 0, 0, 1]),
@@ -77,7 +77,10 @@ def test_condition_noise_preserves_draw_order() -> None:
     expected = reference.keyframe_condition_noise(**kwargs, generator=reference_generator)
     result = actual.keyframe_condition_noise(**kwargs, generator=actual_generator)
     assert_close(result, expected, rtol=0, atol=0)
-    assert_close(torch.randn(5, generator=actual_generator), torch.randn(5, generator=reference_generator), rtol=0, atol=0)
+    assert_close(torch.randn(5, generator=actual_generator),
+                 torch.randn(5, generator=reference_generator),
+                 rtol=0,
+                 atol=0)
 
 
 def test_stereo_audio_rows_unpack_channel_major() -> None:

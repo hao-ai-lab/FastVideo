@@ -30,12 +30,12 @@ def _build_block(layer: int) -> torch.nn.Module:
     arch = Gen3CArchConfig()
     return Gen3CTransformerBlock(
         num_attention_heads=arch.num_attention_heads,  # 32
-        attention_head_dim=arch.attention_head_dim,    # 128 -> hidden 4096
-        cross_attention_dim=arch.text_embed_dim,       # 1024
-        mlp_ratio=arch.mlp_ratio,                      # 4.0 -> mlp inner 16384
-        adaln_lora_dim=arch.adaln_lora_dim,            # 256
-        use_adaln_lora=arch.use_adaln_lora,            # True
-        qk_norm=(arch.qk_norm == "rms_norm"),          # True
+        attention_head_dim=arch.attention_head_dim,  # 128 -> hidden 4096
+        cross_attention_dim=arch.text_embed_dim,  # 1024
+        mlp_ratio=arch.mlp_ratio,  # 4.0 -> mlp inner 16384
+        adaln_lora_dim=arch.adaln_lora_dim,  # 256
+        use_adaln_lora=arch.use_adaln_lora,  # True
+        qk_norm=(arch.qk_norm == "rms_norm"),  # True
         supported_attention_backends=arch._supported_attention_backends,
     )
 

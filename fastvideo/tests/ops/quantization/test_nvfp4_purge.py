@@ -46,8 +46,7 @@ class _FakeLinear(nn.Module):
 
 def _fake_quantize(weight, global_sf, sfLayout=None, do_shuffle=False):
     out_dim, in_dim = weight.shape[0], weight.shape[-1]
-    return (torch.zeros(out_dim, in_dim // 2, dtype=torch.int8), torch.zeros(out_dim, in_dim // 16,
-                                                                             dtype=torch.uint8))
+    return (torch.zeros(out_dim, in_dim // 2, dtype=torch.int8), torch.zeros(out_dim, in_dim // 16, dtype=torch.uint8))
 
 
 @pytest.fixture(autouse=True)

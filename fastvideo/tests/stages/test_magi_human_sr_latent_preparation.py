@@ -33,8 +33,7 @@ from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 
 def _make_stage() -> MagiHumanSRLatentPreparationStage:
     """Bypass __init__: only set the fields the T2V forward() path reads."""
-    stage = MagiHumanSRLatentPreparationStage.__new__(
-        MagiHumanSRLatentPreparationStage)
+    stage = MagiHumanSRLatentPreparationStage.__new__(MagiHumanSRLatentPreparationStage)
     # vae + video_processor are only used by `_encode_image` (TI2V path);
     # T2V skips that branch when `batch.image_latent is None`.
     stage.vae = None
@@ -47,8 +46,7 @@ def _make_stage() -> MagiHumanSRLatentPreparationStage:
     stage.sr_audio_noise_scale = 0.7
     stage.sr_height = 512
     stage.sr_width = 896
-    stage.sigmas = ZeroSNRDDPMDiscretization()(
-        1000, do_append_zero=False, flip=True)
+    stage.sigmas = ZeroSNRDDPMDiscretization()(1000, do_append_zero=False, flip=True)
     return stage
 
 

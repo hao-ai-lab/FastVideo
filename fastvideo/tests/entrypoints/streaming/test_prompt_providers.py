@@ -102,8 +102,7 @@ class TestCerebrasProvider:
         monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
         provider = CerebrasProvider()
         with pytest.raises(LLMProviderError, match="CEREBRAS_API_KEY"):
-            asyncio.run(provider.complete(
-                LLMRequest(messages=[], model="m")))
+            asyncio.run(provider.complete(LLMRequest(messages=[], model="m")))
 
     def test_api_key_from_env(self, monkeypatch):
         monkeypatch.setenv("CEREBRAS_API_KEY", "from-env")
@@ -121,18 +120,23 @@ class TestCerebrasProvider:
             response=_FakeResponse(
                 status_code=200,
                 payload={
-                    "choices": [{"message": {"content": "enhanced"}}],
+                    "choices": [{
+                        "message": {
+                            "content": "enhanced"
+                        }
+                    }],
                 },
             ),
         )
         provider = CerebrasProvider(api_key="secret")
-        result = asyncio.run(provider.complete(
-            LLMRequest(
-                messages=[LLMMessage(role="user", content="a fox")],
-                model="gpt-oss-120b",
-                max_tokens=64,
-                temperature=0.7,
-            )))
+        result = asyncio.run(
+            provider.complete(
+                LLMRequest(
+                    messages=[LLMMessage(role="user", content="a fox")],
+                    model="gpt-oss-120b",
+                    max_tokens=64,
+                    temperature=0.7,
+                )))
         assert result.content == "enhanced"
         assert result.provider == "cerebras"
         assert result.model == "gpt-oss-120b"
@@ -155,14 +159,12 @@ class TestCerebrasProvider:
 
         stub.HTTPError = _HTTPError
         stub.TimeoutException = _TimeoutException
-        stub.AsyncClient = lambda *a, **k: _FakeAsyncClient(
-            _HTTPError("boom"), captured=[])
+        stub.AsyncClient = lambda *a, **k: _FakeAsyncClient(_HTTPError("boom"), captured=[])
         monkeypatch.setitem(sys.modules, "httpx", stub)
 
         provider = CerebrasProvider(api_key="k")
         with pytest.raises(LLMProviderError, match="HTTP"):
-            asyncio.run(provider.complete(
-                LLMRequest(messages=[], model="m")))
+            asyncio.run(provider.complete(LLMRequest(messages=[], model="m")))
 
     def test_timeout_wrapped(self, monkeypatch):
         _install_fake_httpx(monkeypatch)
@@ -175,8 +177,7 @@ class TestCerebrasProvider:
         stub.AsyncClient = raising_factory  # type: ignore[attr-defined]
         provider = CerebrasProvider(api_key="k")
         with pytest.raises(LLMTimeoutError):
-            asyncio.run(provider.complete(
-                LLMRequest(messages=[], model="m")))
+            asyncio.run(provider.complete(LLMRequest(messages=[], model="m")))
 
     def test_4xx_raises_non_retryable_provider_error(self, monkeypatch):
         _install_fake_httpx(
@@ -189,8 +190,7 @@ class TestCerebrasProvider:
         )
         provider = CerebrasProvider(api_key="k")
         with pytest.raises(LLMProviderError, match="401") as excinfo:
-            asyncio.run(provider.complete(
-                LLMRequest(messages=[], model="m")))
+            asyncio.run(provider.complete(LLMRequest(messages=[], model="m")))
         assert excinfo.value.retryable is False
 
     def test_429_raises_retryable_provider_error(self, monkeypatch):
@@ -204,8 +204,7 @@ class TestCerebrasProvider:
         )
         provider = CerebrasProvider(api_key="k")
         with pytest.raises(LLMProviderError, match="429") as excinfo:
-            asyncio.run(provider.complete(
-                LLMRequest(messages=[], model="m")))
+            asyncio.run(provider.complete(LLMRequest(messages=[], model="m")))
         assert excinfo.value.retryable is True
 
     def test_5xx_raises_retryable_provider_error(self, monkeypatch):
@@ -219,8 +218,7 @@ class TestCerebrasProvider:
         )
         provider = CerebrasProvider(api_key="k")
         with pytest.raises(LLMProviderError, match="503") as excinfo:
-            asyncio.run(provider.complete(
-                LLMRequest(messages=[], model="m")))
+            asyncio.run(provider.complete(LLMRequest(messages=[], model="m")))
         assert excinfo.value.retryable is True
 
     def test_non_json_body_raises_provider_error(self, monkeypatch):
@@ -240,19 +238,16 @@ class TestCerebrasProvider:
         )
         provider = CerebrasProvider(api_key="k")
         with pytest.raises(LLMProviderError, match="non-JSON"):
-            asyncio.run(provider.complete(
-                LLMRequest(messages=[], model="m")))
+            asyncio.run(provider.complete(LLMRequest(messages=[], model="m")))
 
     def test_empty_choices_raises(self, monkeypatch):
         _install_fake_httpx(
             monkeypatch,
-            response=_FakeResponse(
-                status_code=200, payload={"choices": []}),
+            response=_FakeResponse(status_code=200, payload={"choices": []}),
         )
         provider = CerebrasProvider(api_key="k")
         with pytest.raises(LLMProviderError, match="no choices"):
-            asyncio.run(provider.complete(
-                LLMRequest(messages=[], model="m")))
+            asyncio.run(provider.complete(LLMRequest(messages=[], model="m")))
 
 
 # ----------------------------------------------------------------------
@@ -269,8 +264,7 @@ class TestGroqProvider:
         monkeypatch.delenv("GROQ_API_KEY", raising=False)
         provider = GroqProvider()
         with pytest.raises(LLMProviderError, match="GROQ_API_KEY"):
-            asyncio.run(provider.complete(
-                LLMRequest(messages=[], model="m")))
+            asyncio.run(provider.complete(LLMRequest(messages=[], model="m")))
 
     def test_api_key_from_env(self, monkeypatch):
         monkeypatch.setenv("GROQ_API_KEY", "from-env")
@@ -283,13 +277,17 @@ class TestGroqProvider:
             response=_FakeResponse(
                 status_code=200,
                 payload={
-                    "choices": [{"message": {"content": "groq out"}}],
+                    "choices": [{
+                        "message": {
+                            "content": "groq out"
+                        }
+                    }],
                 },
             ),
         )
         provider = GroqProvider(api_key="secret")
-        result = asyncio.run(provider.complete(
-            LLMRequest(
+        result = asyncio.run(
+            provider.complete(LLMRequest(
                 messages=[LLMMessage(role="user", content="a deer")],
                 model="llama-3.1-70b",
             )))

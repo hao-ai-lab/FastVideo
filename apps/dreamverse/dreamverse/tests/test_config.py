@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-
 SERVER_DIR = Path(__file__).resolve().parents[1]
 
 
@@ -53,9 +52,7 @@ def test_config_defaults_to_cerebras_with_parallel_groq_fallback_stage(monkeypat
     module = _load_config_module()
 
     assert module.PROMPT_PROVIDER == "cerebras"
-    assert module.PROMPT_PROVIDER_RUNTIME_STAGES == (
-        ("cerebras", "groq"),
-    )
+    assert module.PROMPT_PROVIDER_RUNTIME_STAGES == (("cerebras", "groq"), )
     assert module.PROMPT_PROVIDER_PRIORITY == (
         "cerebras",
         "groq",
@@ -86,9 +83,7 @@ def test_config_ignores_legacy_groq_primary_override(monkeypatch):
     module = _load_config_module()
 
     assert module.PROMPT_PROVIDER == "cerebras"
-    assert module.PROMPT_PROVIDER_RUNTIME_STAGES == (
-        ("cerebras", "groq"),
-    )
+    assert module.PROMPT_PROVIDER_RUNTIME_STAGES == (("cerebras", "groq"), )
     assert module.PROMPT_PROVIDER_PRIORITY == (
         "cerebras",
         "groq",
@@ -106,24 +101,17 @@ def test_config_uses_local_overlay_paths_when_devtools_enabled(monkeypatch, tmp_
 
     assert module.DEVTOOLS_ENABLED is True
     assert module.FRONTEND_ROOT.as_posix().endswith("apps/dreamverse/web")
-    assert module.PROMPT_ENHANCE_SYSTEM_PROMPT_PATH.endswith(
-        "dreamverse/prompts.local/next_segment_system_prompt.md"
-    )
+    assert module.PROMPT_ENHANCE_SYSTEM_PROMPT_PATH.endswith("dreamverse/prompts.local/next_segment_system_prompt.md")
     assert module.PROMPT_ENHANCE_SYSTEM_PROMPT_FALLBACK_PATH.endswith(
-        "dreamverse/prompts/next_segment_system_prompt.md"
-    )
+        "dreamverse/prompts/next_segment_system_prompt.md")
     assert module.PROMPT_REWRITE_USER_SYSTEM_PROMPT_PATH.endswith(
-        "dreamverse/prompts.local/rewrite_user_system_prompt.md"
-    )
+        "dreamverse/prompts.local/rewrite_user_system_prompt.md")
     assert module.PROMPT_REWRITE_USER_SYSTEM_PROMPT_FALLBACK_PATH.endswith(
-        "dreamverse/prompts/rewrite_user_system_prompt.md"
-    )
+        "dreamverse/prompts/rewrite_user_system_prompt.md")
     assert module.CURATED_PRESETS_FILE_PATH.endswith(
-        "apps/dreamverse/web/prompts.local/selected_ltx2_continuation_story_presets.json"
-    )
+        "apps/dreamverse/web/prompts.local/selected_ltx2_continuation_story_presets.json")
     assert module.CURATED_PRESETS_FALLBACK_FILE_PATH.endswith(
-        "apps/dreamverse/web/prompts/selected_ltx2_continuation_story_presets.json"
-    )
+        "apps/dreamverse/web/prompts/selected_ltx2_continuation_story_presets.json")
     assert module.FRONTEND_STATIC_DIR_CANDIDATES[:2] == (
         str(module.FRONTEND_ROOT / "out"),
         str(module.FRONTEND_ROOT / "dist"),

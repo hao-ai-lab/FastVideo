@@ -7,7 +7,6 @@ from typing import Tuple
 
 import torch
 
-
 # ---------------------------------------------------------------------------
 # Backend selection helpers
 # ---------------------------------------------------------------------------
@@ -37,10 +36,8 @@ def _force_triton() -> bool:
     Honors both the new ``FASTVIDEO_VSA_TRITON`` and the legacy
     ``FASTVIDEO_KERNEL_VSA_FORCE_TRITON`` for backward compatibility.
     """
-    return (
-        os.environ.get("FASTVIDEO_VSA_TRITON", "0") == "1"
-        or os.environ.get("FASTVIDEO_KERNEL_VSA_FORCE_TRITON", "0") == "1"
-    )
+    return (os.environ.get("FASTVIDEO_VSA_TRITON", "0") == "1"
+            or os.environ.get("FASTVIDEO_KERNEL_VSA_FORCE_TRITON", "0") == "1")
 
 
 def _force_tk() -> bool:
@@ -62,25 +59,19 @@ def _map_to_index(block_map: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
     if block_map.dim() == 3:
         block_map = block_map.unsqueeze(0)
     if block_map.dim() != 4:
-        raise ValueError(
-            f"block_map must be [B,H,Q,KV] (or [H,Q,KV]), "
-            f"got shape={tuple(block_map.shape)}"
-        )
+        raise ValueError(f"block_map must be [B,H,Q,KV] (or [H,Q,KV]), "
+                         f"got shape={tuple(block_map.shape)}")
     if block_map.dtype != torch.bool:
         block_map = block_map.to(torch.bool)
     if not block_map.is_cuda:
-        raise RuntimeError(
-            "block_map must be a CUDA tensor (Triton map_to_index required)."
-        )
+        raise RuntimeError("block_map must be a CUDA tensor (Triton map_to_index required).")
 
     try:
         from fastvideo_kernel.triton_kernels.index import map_to_index as triton_map_to_index
     except Exception as e:  # pragma: no cover - environment issue
-        raise ImportError(
-            "Triton map_to_index is required but not available. "
-            "Ensure Triton is installed and "
-            "fastvideo_kernel.triton_kernels.index is importable."
-        ) from e
+        raise ImportError("Triton map_to_index is required but not available. "
+                          "Ensure Triton is installed and "
+                          "fastvideo_kernel.triton_kernels.index is importable.") from e
     return triton_map_to_index(block_map)
 
 
@@ -123,8 +114,7 @@ def block_sparse_attn_triton(
     variable_block_sizes: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     from fastvideo_kernel.triton_kernels.block_sparse_attn_triton import (
-        triton_block_sparse_attn_forward,
-    )
+        triton_block_sparse_attn_forward, )
 
     o, M = triton_block_sparse_attn_forward(
         q.contiguous(),
@@ -172,13 +162,10 @@ def block_sparse_attn_backward_triton(
     variable_block_sizes: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     from fastvideo_kernel.triton_kernels.block_sparse_attn_triton import (
-        triton_block_sparse_attn_backward,
-    )
+        triton_block_sparse_attn_backward, )
 
     num_kv_blocks = int(variable_block_sizes.numel())
-    k2q_idx, k2q_num = _invert_indices_for_backward(
-        q2k_idx, q2k_num, num_kv_blocks
-    )
+    k2q_idx, k2q_num = _invert_indices_for_backward(q2k_idx, q2k_num, num_kv_blocks)
     # q/k/v are saved from the user-facing inputs and may be non-contiguous;
     # o/M are kernel outputs so are already contiguous.
     dq, dk, dv = triton_block_sparse_attn_backward(
@@ -223,16 +210,11 @@ def _setup_context_triton(ctx, inputs, output):
 
 def _backward_triton(ctx, grad_o, grad_M):
     q, k, v, o, M, q2k_idx, q2k_num, variable_block_sizes = ctx.saved_tensors
-    dq, dk, dv = block_sparse_attn_backward_triton(
-        grad_o, q, k, v, o, M, q2k_idx, q2k_num, variable_block_sizes
-    )
+    dq, dk, dv = block_sparse_attn_backward_triton(grad_o, q, k, v, o, M, q2k_idx, q2k_num, variable_block_sizes)
     return dq, dk, dv, None, None, None
 
 
-block_sparse_attn_triton.register_autograd(
-    _backward_triton, setup_context=_setup_context_triton
-)
-
+block_sparse_attn_triton.register_autograd(_backward_triton, setup_context=_setup_context_triton)
 
 # ---------------------------------------------------------------------------
 # SM90 backend custom ops (index-native)
@@ -306,9 +288,7 @@ def block_sparse_attn_backward_sm90(
         raise ImportError("fastvideo_kernel_ops.block_sparse_bwd is not available")
 
     num_kv_blocks = int(variable_block_sizes.numel())
-    k2q_idx, k2q_num = _invert_indices_for_backward(
-        q2k_idx, q2k_num, num_kv_blocks
-    )
+    k2q_idx, k2q_num = _invert_indices_for_backward(q2k_idx, q2k_num, num_kv_blocks)
 
     # q/k/v are saved from user-facing inputs; o/lse are kernel outputs.
     dq, dk, dv = block_sparse_bwd(
@@ -353,16 +333,11 @@ def _setup_context_sm90(ctx, inputs, output):
 
 def _backward_sm90(ctx, grad_o, grad_lse):
     q, k, v, o, lse, q2k_idx, q2k_num, variable_block_sizes = ctx.saved_tensors
-    dq, dk, dv = block_sparse_attn_backward_sm90(
-        grad_o, q, k, v, o, lse, q2k_idx, q2k_num, variable_block_sizes
-    )
+    dq, dk, dv = block_sparse_attn_backward_sm90(grad_o, q, k, v, o, lse, q2k_idx, q2k_num, variable_block_sizes)
     return dq, dk, dv, None, None, None
 
 
-block_sparse_attn_sm90.register_autograd(
-    _backward_sm90, setup_context=_setup_context_sm90
-)
-
+block_sparse_attn_sm90.register_autograd(_backward_sm90, setup_context=_setup_context_sm90)
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -385,11 +360,7 @@ def block_sparse_attn_from_indices(
     variable_block_sizes = _as_int32_contig(variable_block_sizes, "variable_block_sizes")
 
     block_sparse_fwd, block_sparse_bwd = _get_sm90_ops()
-    sm90_available = (
-        _is_sm90()
-        and block_sparse_fwd is not None
-        and block_sparse_bwd is not None
-    )
+    sm90_available = (_is_sm90() and block_sparse_fwd is not None and block_sparse_bwd is not None)
 
     # Backend resolution:
     # - FASTVIDEO_VSA_TRITON forces Triton everywhere.
@@ -419,6 +390,4 @@ def block_sparse_attn(
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Bool-mask compat wrapper; prefer block_sparse_attn_from_indices."""
     q2k_idx, q2k_num = _map_to_index(block_map)
-    return block_sparse_attn_from_indices(
-        q, k, v, q2k_idx, q2k_num, variable_block_sizes
-    )
+    return block_sparse_attn_from_indices(q, k, v, q2k_idx, q2k_num, variable_block_sizes)

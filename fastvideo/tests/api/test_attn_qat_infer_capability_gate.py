@@ -44,11 +44,7 @@ FALLBACK_CLASSES = {
 }
 
 
-def _fake_gpu(monkeypatch,
-              *,
-              capability: tuple[int, int],
-              extension_imports: bool,
-              fa4_imports: bool = False) -> None:
+def _fake_gpu(monkeypatch, *, capability: tuple[int, int], extension_imports: bool, fa4_imports: bool = False) -> None:
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
     monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device=None: capability)
     monkeypatch.setattr(

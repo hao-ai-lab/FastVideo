@@ -16,7 +16,6 @@ import torch
 
 from fastvideo_kernel.triton_kernels.attn_qat_train import attention
 
-
 RTX_5090_DENSE_BF16_TFLOPS = 209.5
 
 
@@ -68,11 +67,9 @@ def _format_result(
     median_ms, min_ms, max_ms = timing_ms
     algorithmic_tflops = algorithmic_flops / (median_ms * 1e9)
     executed_tflops = executed_matmul_flops / (median_ms * 1e9)
-    return (
-        f"{label}: {median_ms:.3f} ms (min={min_ms:.3f}, max={max_ms:.3f}), "
-        f"algorithmic={algorithmic_tflops:.2f} TFLOPS/{100 * algorithmic_tflops / peak_tflops:.2f}% MFU, "
-        f"executed_matmul={executed_tflops:.2f} TFLOPS/{100 * executed_tflops / peak_tflops:.2f}% MFU"
-    )
+    return (f"{label}: {median_ms:.3f} ms (min={min_ms:.3f}, max={max_ms:.3f}), "
+            f"algorithmic={algorithmic_tflops:.2f} TFLOPS/{100 * algorithmic_tflops / peak_tflops:.2f}% MFU, "
+            f"executed_matmul={executed_tflops:.2f} TFLOPS/{100 * executed_tflops / peak_tflops:.2f}% MFU")
 
 
 def main() -> None:

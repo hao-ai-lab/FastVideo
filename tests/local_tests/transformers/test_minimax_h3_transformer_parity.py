@@ -20,7 +20,6 @@ import pytest
 import torch
 from torch.testing import assert_close
 
-
 REPO_ROOT = Path(__file__).resolve().parents[3]
 OFFICIAL_REF_DIR = Path(os.environ.get("MINIMAX_H3_OFFICIAL_REF_DIR", REPO_ROOT / "DiffusersMiniMaxH3"))
 OFFICIAL_SRC = OFFICIAL_REF_DIR / "src"
@@ -119,8 +118,8 @@ def _assert_mixed_dtype_contract(model: torch.nn.Module) -> None:
     parameters = dict(model.named_parameters())
     assert parameters["proj_in.weight"].dtype == torch.float32
     assert parameters["audio_proj_in.weight"].dtype == torch.float32
-    assert parameters["time_embedder.fc_in.weight" if "time_embedder.fc_in.weight" in parameters
-                      else "time_embedder.linear_1.weight"].dtype == torch.float32
+    assert parameters["time_embedder.fc_in.weight" if "time_embedder.fc_in.weight" in
+                      parameters else "time_embedder.linear_1.weight"].dtype == torch.float32
     assert parameters["proj_out.weight"].dtype == torch.float32
     assert parameters["audio_proj_out.weight"].dtype == torch.float32
     assert parameters["context_embedder.weight"].dtype == torch.bfloat16
@@ -146,8 +145,7 @@ def _load_official(component_dir: Path, device: torch.device) -> torch.nn.Module
     )
     load_errors = {
         name: loading_info.get(name, [])
-        for name in ("missing_keys", "unexpected_keys", "mismatched_keys", "error_msgs")
-        if loading_info.get(name)
+        for name in ("missing_keys", "unexpected_keys", "mismatched_keys", "error_msgs") if loading_info.get(name)
     }
     assert not load_errors, f"official MiniMax H3 checkpoint did not load strictly: {load_errors}"
     model = model.eval()

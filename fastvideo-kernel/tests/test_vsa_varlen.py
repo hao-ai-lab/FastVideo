@@ -24,10 +24,15 @@ from fastvideo_kernel.block_sparse_attn_varlen import block_sparse_attn_varlen
 
 
 def _reference_per_sequence(
-    q_list, k_list, v_list,
-    block_masks, vbs_list,
-    non_pad_q_list, non_pad_kv_list,
-    q_nblocks_list, kv_nblocks_list,
+    q_list,
+    k_list,
+    v_list,
+    block_masks,
+    vbs_list,
+    non_pad_q_list,
+    non_pad_kv_list,
+    q_nblocks_list,
+    kv_nblocks_list,
 ):
     """Run per-sequence block_sparse_attn and concat outputs."""
     outs = []
@@ -38,7 +43,12 @@ def _reference_per_sequence(
 
         q2k_idx, q2k_num = _map_to_index(block_masks[i].unsqueeze(0))
         o_pad, _ = block_sparse_attn_from_indices(
-            q_pad, k_pad, v_pad, q2k_idx, q2k_num, vbs_list[i],
+            q_pad,
+            k_pad,
+            v_pad,
+            q2k_idx,
+            q2k_num,
+            vbs_list[i],
         )
         o = o_pad[:, :, non_pad_q_list[i], :]
         outs.append(o.squeeze(0).transpose(0, 1))
@@ -111,29 +121,41 @@ def _run_varlen_test(
         cu_kv.append(cu_kv[-1] + skv)
 
     ref_out = _reference_per_sequence(
-        q_list, k_list, v_list,
-        block_masks, vbs_list,
-        non_pad_q_list, non_pad_kv_list,
-        q_nblocks_list, kv_nblocks_list,
+        q_list,
+        k_list,
+        v_list,
+        block_masks,
+        vbs_list,
+        non_pad_q_list,
+        non_pad_kv_list,
+        q_nblocks_list,
+        kv_nblocks_list,
     )
 
     q_packed = torch.cat(
-        [qi.squeeze(0).transpose(0, 1) for qi in q_list], dim=0,
+        [qi.squeeze(0).transpose(0, 1) for qi in q_list],
+        dim=0,
     )
     k_packed = torch.cat(
-        [ki.squeeze(0).transpose(0, 1) for ki in k_list], dim=0,
+        [ki.squeeze(0).transpose(0, 1) for ki in k_list],
+        dim=0,
     )
     v_packed = torch.cat(
-        [vi.squeeze(0).transpose(0, 1) for vi in v_list], dim=0,
+        [vi.squeeze(0).transpose(0, 1) for vi in v_list],
+        dim=0,
     )
 
     cu_seqlens_q = torch.tensor(cu_q, dtype=torch.int32, device=device)
     cu_seqlens_kv = torch.tensor(cu_kv, dtype=torch.int32, device=device)
 
     varlen_out = block_sparse_attn_varlen(
-        q_packed, k_packed, v_packed,
-        cu_seqlens_q, cu_seqlens_kv,
-        q2k_idx_list, q2k_num_list,
+        q_packed,
+        k_packed,
+        v_packed,
+        cu_seqlens_q,
+        cu_seqlens_kv,
+        q2k_idx_list,
+        q2k_num_list,
         vbs_list,
         q_variable_block_sizes_list=q_vbs_for_varlen,
     )
@@ -215,9 +237,14 @@ class TestVSAVarlen:
         cu_kv = torch.tensor([0, skv], dtype=torch.int32, device=device)
 
         varlen_out = block_sparse_attn_varlen(
-            q_flat, k_flat, v_flat,
-            cu_q, cu_kv,
-            [q2k_idx], [q2k_num], [vbs_kv],
+            q_flat,
+            k_flat,
+            v_flat,
+            cu_q,
+            cu_kv,
+            [q2k_idx],
+            [q2k_num],
+            [vbs_kv],
         )
 
         max_abs = (ref_flat - varlen_out).abs().max().item()
@@ -307,7 +334,12 @@ def _run_varlen_backward_test(
 
         q2k_idx, q2k_num = _map_to_index(block_masks[i].unsqueeze(0))
         o_pad, _ = block_sparse_attn_from_indices(
-            q_pad, k_pad, v_pad, q2k_idx, q2k_num, vbs_list[i],
+            q_pad,
+            k_pad,
+            v_pad,
+            q2k_idx,
+            q2k_num,
+            vbs_list[i],
         )
         o = o_pad[:, :, non_pad_q_list[i], :]
         o_flat = o.squeeze(0).transpose(0, 1)
@@ -326,22 +358,29 @@ def _run_varlen_backward_test(
 
     # --- Varlen backward ---
     q_packed = torch.cat(
-        [qi.squeeze(0).transpose(0, 1) for qi in q_list], dim=0,
+        [qi.squeeze(0).transpose(0, 1) for qi in q_list],
+        dim=0,
     ).detach().requires_grad_(True)
     k_packed = torch.cat(
-        [ki.squeeze(0).transpose(0, 1) for ki in k_list], dim=0,
+        [ki.squeeze(0).transpose(0, 1) for ki in k_list],
+        dim=0,
     ).detach().requires_grad_(True)
     v_packed = torch.cat(
-        [vi.squeeze(0).transpose(0, 1) for vi in v_list], dim=0,
+        [vi.squeeze(0).transpose(0, 1) for vi in v_list],
+        dim=0,
     ).detach().requires_grad_(True)
 
     cu_seqlens_q = torch.tensor(cu_q, dtype=torch.int32, device=device)
     cu_seqlens_kv = torch.tensor(cu_kv, dtype=torch.int32, device=device)
 
     varlen_out = block_sparse_attn_varlen(
-        q_packed, k_packed, v_packed,
-        cu_seqlens_q, cu_seqlens_kv,
-        q2k_idx_list, q2k_num_list,
+        q_packed,
+        k_packed,
+        v_packed,
+        cu_seqlens_q,
+        cu_seqlens_kv,
+        q2k_idx_list,
+        q2k_num_list,
         vbs_list,
         q_variable_block_sizes_list=q_vbs_list,
     )
@@ -363,9 +402,7 @@ def _run_varlen_backward_test(
         mean_abs = ref.abs().mean().item()
         max_rel = max_abs / (mean_abs + 1e-8)
         print(f"  {name}: max_abs={max_abs:.4e}, max_rel={max_rel:.4e}")
-        assert max_rel < grad_rtol, (
-            f"{name}: max relative error {max_rel:.4e} exceeds threshold {grad_rtol}"
-        )
+        assert max_rel < grad_rtol, (f"{name}: max relative error {max_rel:.4e} exceeds threshold {grad_rtol}")
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
@@ -413,9 +450,14 @@ class TestVSAVarlenBackward:
         cu_kv = torch.tensor([0, skv], dtype=torch.int32, device=device)
 
         out = block_sparse_attn_varlen(
-            q, k, v,
-            cu_q, cu_kv,
-            [q2k_idx], [q2k_num], [vbs_kv],
+            q,
+            k,
+            v,
+            cu_q,
+            cu_kv,
+            [q2k_idx],
+            [q2k_num],
+            [vbs_kv],
             q_variable_block_sizes_list=[vbs_q],
         )
 

@@ -62,16 +62,12 @@ def _make_inputs(device: torch.device, seed: int) -> dict:
         # (shift, scale, gate) per set, [1, 1, DIM] each, in the DiT dtype.
         return tuple(
             tuple(
-                torch.randn(1, 1, DIM, generator=generator, dtype=torch.float32)
-                .to(device=device, dtype=torch.bfloat16)
-                for _ in range(3))
-            for _ in range(n_sets))
+                torch.randn(1, 1, DIM, generator=generator, dtype=torch.float32).to(device=device, dtype=torch.bfloat16)
+                for _ in range(3)) for _ in range(n_sets))
 
     # ids built as in Flux2Transformer2DModel.forward (flux_2.py:1044-1051)
-    txt_ids = torch.cartesian_prod(
-        torch.arange(1), torch.arange(1), torch.arange(1), torch.arange(TEXT_LEN))
-    img_ids = torch.cartesian_prod(
-        torch.arange(1), torch.arange(IMG_H), torch.arange(IMG_W), torch.arange(1))
+    txt_ids = torch.cartesian_prod(torch.arange(1), torch.arange(1), torch.arange(1), torch.arange(TEXT_LEN))
+    img_ids = torch.cartesian_prod(torch.arange(1), torch.arange(IMG_H), torch.arange(IMG_W), torch.arange(1))
     rope = Flux2PosEmbed(theta=2000, axes_dim=[32, 32, 32, 32])
     freqs_cis = compute_flux2_freqs_cis_from_ids(rope, txt_ids, img_ids, device=device)
 

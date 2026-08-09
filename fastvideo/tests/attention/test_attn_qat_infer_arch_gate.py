@@ -144,11 +144,9 @@ def _register_fa4_quantize_cpu_kernel():
     def _cpu_kernel(tensor_4d: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         batch, seqlen, nheads, headdim = tensor_4d.shape
         seqlen_padded = (seqlen + 127) // 128 * 128
-        fp4 = torch.zeros(batch, seqlen_padded, nheads, headdim // 2,
-                          dtype=torch.int8).view(torch.float4_e2m1fn_x2)
+        fp4 = torch.zeros(batch, seqlen_padded, nheads, headdim // 2, dtype=torch.int8).view(torch.float4_e2m1fn_x2)
         rest_m, rest_k = seqlen_padded // 128, (headdim // 16) // 4
-        sf = torch.zeros(batch, nheads, rest_m, rest_k, 32, 4, 4,
-                         dtype=torch.uint8).permute(4, 5, 2, 6, 3, 1, 0)
+        sf = torch.zeros(batch, nheads, rest_m, rest_k, 32, 4, 4, dtype=torch.uint8).permute(4, 5, 2, 6, 3, 1, 0)
         return fp4, sf
 
     try:
@@ -197,6 +195,6 @@ def test_fa4_quantize_op_fake_matches_real() -> None:
     x = torch.randn(2, 200, 2, 128, dtype=torch.bfloat16)
     torch.library.opcheck(
         torch.ops.fastvideo.nvfp4_quantize_fa4,
-        (x,),
+        (x, ),
         test_utils=("test_schema", "test_faketensor", "test_aot_dispatch_dynamic"),
     )

@@ -8,6 +8,7 @@ import torch
 
 
 class RecordingLogger:
+
     def __init__(self):
         self.infos = []
         self.warnings = []
@@ -20,6 +21,7 @@ class RecordingLogger:
 
 
 class NullProgressBar:
+
     def __enter__(self):
         return self
 
@@ -56,8 +58,9 @@ class TinyDenoiser(torch.nn.Module):
         self.calls.append("uncond" if is_uncond else "cond")
 
         prompt_term = prompt_value.reshape((1, ) * latent_model_input.ndim)
-        timestep_term = timestep.to(latent_model_input.device, torch.float32).reshape(
-            latent_model_input.shape[0], *([1] * (latent_model_input.ndim - 1)))
+        timestep_term = timestep.to(latent_model_input.device,
+                                    torch.float32).reshape(latent_model_input.shape[0],
+                                                           *([1] * (latent_model_input.ndim - 1)))
         return latent_model_input.float() * 0.2 + prompt_term * 0.5 + timestep_term * 0.001
 
 

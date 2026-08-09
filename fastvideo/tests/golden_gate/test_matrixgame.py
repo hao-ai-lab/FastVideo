@@ -42,7 +42,6 @@ MG3_INNER_DIM = 3072  # 24 heads x 128, matrixgame3.py:42-43
 F, H, W = 3, 22, 40  # post-patch grid; seq=2640 (% 128 != 0, see docstring)
 N_PIX = 4 * (F - 1) + 1  # pixel-frame action length (action_module.py:511-521)
 
-
 # ===== Matrix-Game-2.0 (causal) =====
 
 
@@ -63,14 +62,14 @@ def _build_block_mg2(layer: int) -> torch.nn.Module:
     assert inner_dim == MG2_INNER_DIM
     return CausalMatrixGame2TransformerBlock(
         inner_dim,
-        hf["ffn_dim"],                # 8960
-        hf["num_attention_heads"],    # 12
-        hf["local_attn_size"],        # 6
-        hf["sink_size"],              # 0
-        hf["qk_norm"],                # "rms_norm_across_heads"
-        arch.cross_attn_norm,         # True (block asserts it, causal_model.py:436)
-        hf["eps"],                    # 1e-6
-        arch.added_kv_proj_dim,       # None -> attn2 = WanT2VCrossAttention
+        hf["ffn_dim"],  # 8960
+        hf["num_attention_heads"],  # 12
+        hf["local_attn_size"],  # 6
+        hf["sink_size"],  # 0
+        hf["qk_norm"],  # "rms_norm_across_heads"
+        arch.cross_attn_norm,  # True (block asserts it, causal_model.py:436)
+        hf["eps"],  # 1e-6
+        arch.added_kv_proj_dim,  # None -> attn2 = WanT2VCrossAttention
         arch._supported_attention_backends,
         prefix=f"Wan.blocks.{layer}",
         action_config=hf["action_config"],  # ActionModule on blocks 0-14 only
@@ -89,16 +88,22 @@ def _make_inputs_mg2(device: torch.device, seed: int) -> dict:
     # CLIP image embeds post WanImageEmbedding
     context = torch.randn(1, 257, MG2_INNER_DIM, generator=generator, dtype=torch.float32)
     temb = torch.randn(1, F, 6, MG2_INNER_DIM, generator=generator, dtype=torch.float32)
-    mouse = torch.randn(1, N_PIX, 2, generator=generator, dtype=torch.float32)     # mouse_dim_in=2
+    mouse = torch.randn(1, N_PIX, 2, generator=generator, dtype=torch.float32)  # mouse_dim_in=2
     keyboard = torch.randn(1, N_PIX, 4, generator=generator, dtype=torch.float32)  # keyboard_dim_in=4
 
     # masks exactly as _forward_inference builds them (causal_model.py:1129-1162)
-    block_mask = CausalMatrixGame2WanModel._prepare_blockwise_causal_attn_mask(
-        device=device, num_frames=F, frame_seqlen=H * W,
-        num_frame_per_block=3, local_attn_size=6, sink_size=0)
-    block_mask_action = CausalMatrixGame2WanModel._prepare_blockwise_causal_attn_mask_action(
-        device=device, num_frames=F, frame_seqlen=1,
-        num_frame_per_block=3, local_attn_size=6, sink_size=0)
+    block_mask = CausalMatrixGame2WanModel._prepare_blockwise_causal_attn_mask(device=device,
+                                                                               num_frames=F,
+                                                                               frame_seqlen=H * W,
+                                                                               num_frame_per_block=3,
+                                                                               local_attn_size=6,
+                                                                               sink_size=0)
+    block_mask_action = CausalMatrixGame2WanModel._prepare_blockwise_causal_attn_mask_action(device=device,
+                                                                                             num_frames=F,
+                                                                                             frame_seqlen=1,
+                                                                                             num_frame_per_block=3,
+                                                                                             local_attn_size=6,
+                                                                                             sink_size=0)
 
     return {
         "hidden_states": hidden.to(device=device, dtype=torch.float32),
@@ -145,16 +150,16 @@ def _build_block_mg3(layer: int) -> torch.nn.Module:
     assert inner_dim == MG3_INNER_DIM
     return MatrixGame3TransformerBlock(
         inner_dim,
-        arch.ffn_dim,                 # 14336
-        arch.num_attention_heads,     # 24
-        arch.qk_norm,                 # "rms_norm_across_heads"
-        arch.cross_attn_norm,         # True (asserted at model.py:246)
-        arch.eps,                     # 1e-6
+        arch.ffn_dim,  # 14336
+        arch.num_attention_heads,  # 24
+        arch.qk_norm,  # "rms_norm_across_heads"
+        arch.cross_attn_norm,  # True (asserted at model.py:246)
+        arch.eps,  # 1e-6
         arch._supported_attention_backends,
         prefix=f"Wan.blocks.{layer}",
         action_config=arch.action_config,  # blocks 0-14 only
         block_id=layer,
-        use_memory=arch.use_memory,   # True -> cam_* Linears on EVERY block
+        use_memory=arch.use_memory,  # True -> cam_* Linears on EVERY block
     )
 
 
@@ -169,12 +174,12 @@ def _make_inputs_mg3(device: torch.device, seed: int) -> dict:
     context = torch.randn(1, 512, MG3_INNER_DIM, generator=generator, dtype=torch.float32)
     # per-token 4-D temb (bs, seq, 6, 3072), real path (model.py:687-713)
     temb = torch.randn(1, seq, 6, MG3_INNER_DIM, generator=generator, dtype=torch.float32)
-    mouse = torch.randn(1, N_PIX, 2, generator=generator, dtype=torch.float32)     # mouse_dim_in=2
+    mouse = torch.randn(1, N_PIX, 2, generator=generator, dtype=torch.float32)  # mouse_dim_in=2
     keyboard = torch.randn(1, N_PIX, 6, generator=generator, dtype=torch.float32)  # keyboard_dim_in=6
 
     # exactly as model.py:640-646: use_memory=True -> per-head 3-D complex table
-    freqs = _build_rope_freqs(max_seq_len=2048, head_dim=128, num_heads=24,
-                              sigma_theta=0.8, device=device)  # (24, 2048, 64) complex128
+    freqs = _build_rope_freqs(max_seq_len=2048, head_dim=128, num_heads=24, sigma_theta=0.8,
+                              device=device)  # (24, 2048, 64) complex128
 
     return {
         "hidden_states": hidden.to(device=device, dtype=torch.bfloat16),

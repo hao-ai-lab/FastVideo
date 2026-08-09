@@ -114,7 +114,8 @@ def test_sync_marker_reuse_requires_the_exact_revision(tmp_path):
         "endpoint": hf_store.ENDPOINT,
         "repo_id": hf_store.HF_REPO_ID,
         "revision": "pinned-old-revision",
-    }), encoding="utf-8")
+    }),
+                      encoding="utf-8")
 
     assert hf_store._sync_marker_matches_request(str(marker), "pinned-old-revision") is True
     assert hf_store._sync_marker_matches_request(str(marker), None) is False
@@ -123,7 +124,8 @@ def test_sync_marker_reuse_requires_the_exact_revision(tmp_path):
         "endpoint": "https://different.example",
         "repo_id": hf_store.HF_REPO_ID,
         "revision": "pinned-old-revision",
-    }), encoding="utf-8")
+    }),
+                      encoding="utf-8")
     assert hf_store._sync_marker_matches_request(str(marker), "pinned-old-revision") is False
 
 
@@ -217,18 +219,19 @@ def test_invalid_regression_threshold_container_uses_defaults():
 
 
 def test_boolean_regression_threshold_values_are_ignored():
-    policies = resolve_metric_policies({
-        "latency": {
+    policies = resolve_metric_policies(
+        {"latency": {
             "threshold_percent": True,
             "threshold_absolute": False,
             "gated": "false",
-        }
-    })
+        }})
 
     latency = next(policy for policy in policies if policy.key == "latency")
     assert latency.threshold_percent == 0.08
     assert latency.threshold_absolute == 0.5
     assert latency.gated is False
+
+
 def test_normalized_record_preserves_identity_metadata(monkeypatch):
     monkeypatch.setenv("PERF_RUN_SOURCE", "pr")
     raw = _raw_result()
@@ -443,10 +446,8 @@ def test_comparison_identity_filters_keep_zero_version():
 def test_baseline_eligibility_only_for_successful_scheduled_main():
     assert compare_baseline._is_baseline_eligible("scheduled_main", True) is True
     assert compare_baseline._is_baseline_eligible("scheduled_main", False) is False
-    assert compare_baseline._is_baseline_eligible(
-        "scheduled_main", True, compare_baseline.STATUS_PASS) is True
-    assert compare_baseline._is_baseline_eligible(
-        "scheduled_main", False, compare_baseline.STATUS_PASS) is False
+    assert compare_baseline._is_baseline_eligible("scheduled_main", True, compare_baseline.STATUS_PASS) is True
+    assert compare_baseline._is_baseline_eligible("scheduled_main", False, compare_baseline.STATUS_PASS) is False
     assert compare_baseline._is_baseline_eligible("pr", True) is False
     assert compare_baseline._is_baseline_eligible("local", True) is False
 
@@ -455,24 +456,18 @@ def test_latency_regression_requires_percent_and_absolute_floors():
     baseline = [{"latency": 10.0}]
     current = {"model_id": "wan", "latency": 10.6}
 
-    percent_only = resolve_metric_policies({
-        "latency": {
-            "threshold_percent": 0.05,
-            "threshold_absolute": 0.75,
-        }
-    })
-    absolute_only = resolve_metric_policies({
-        "latency": {
-            "threshold_percent": 0.10,
-            "threshold_absolute": 0.5,
-        }
-    })
-    both = resolve_metric_policies({
-        "latency": {
-            "threshold_percent": 0.05,
-            "threshold_absolute": 0.5,
-        }
-    })
+    percent_only = resolve_metric_policies({"latency": {
+        "threshold_percent": 0.05,
+        "threshold_absolute": 0.75,
+    }})
+    absolute_only = resolve_metric_policies({"latency": {
+        "threshold_percent": 0.10,
+        "threshold_absolute": 0.5,
+    }})
+    both = resolve_metric_policies({"latency": {
+        "threshold_percent": 0.05,
+        "threshold_absolute": 0.5,
+    }})
 
     assert compare_baseline._check_regressions(current, baseline, percent_only) == []
     assert compare_baseline._check_regressions(current, baseline, absolute_only) == []
@@ -485,12 +480,10 @@ def test_latency_regression_requires_percent_and_absolute_floors():
 def test_throughput_regression_uses_higher_is_better_direction():
     baseline = [{"throughput": 10.0}]
     current = {"model_id": "wan", "throughput": 9.0}
-    policies = resolve_metric_policies({
-        "throughput": {
-            "threshold_percent": 0.05,
-            "threshold_absolute": 0.5,
-        }
-    })
+    policies = resolve_metric_policies({"throughput": {
+        "threshold_percent": 0.05,
+        "threshold_absolute": 0.5,
+    }})
 
     failures = compare_baseline._check_regressions(current, baseline, policies)
 
@@ -501,12 +494,10 @@ def test_throughput_regression_uses_higher_is_better_direction():
 def test_memory_regression_uses_metric_specific_absolute_floor():
     baseline = [{"memory": 10000.0}]
     current = {"model_id": "wan", "memory": 10600.0}
-    policies = resolve_metric_policies({
-        "memory": {
-            "threshold_percent": 0.05,
-            "threshold_absolute": 256.0,
-        }
-    })
+    policies = resolve_metric_policies({"memory": {
+        "threshold_percent": 0.05,
+        "threshold_absolute": 256.0,
+    }})
 
     failures = compare_baseline._check_regressions(current, baseline, policies)
 
@@ -517,12 +508,10 @@ def test_memory_regression_uses_metric_specific_absolute_floor():
 def test_component_metric_can_gate_independently():
     baseline = [{"dit_time_s": 8.0}]
     current = {"model_id": "wan", "dit_time_s": 8.6}
-    policies = resolve_metric_policies({
-        "dit_time_s": {
-            "threshold_percent": 0.05,
-            "threshold_absolute": 0.25,
-        }
-    })
+    policies = resolve_metric_policies({"dit_time_s": {
+        "threshold_percent": 0.05,
+        "threshold_absolute": 0.25,
+    }})
 
     failures = compare_baseline._check_regressions(current, baseline, policies)
 
@@ -533,13 +522,12 @@ def test_component_metric_can_gate_independently():
 def test_informational_metric_remains_visible_without_failing():
     baseline = [{"throughput": 10.0}]
     current = {"model_id": "wan", "gpu_type": "NVIDIA L40S", "throughput": 8.0}
-    policies = resolve_metric_policies({
-        "throughput": {
+    policies = resolve_metric_policies(
+        {"throughput": {
             "threshold_percent": 0.01,
             "threshold_absolute": 0.01,
             "gated": False,
-        }
-    })
+        }})
 
     row = compare_baseline._build_summary_row(current, baseline, policies, False)
 
@@ -757,8 +745,12 @@ def test_baseline_seed_rejects_untrusted_calibration_sources(monkeypatch, overri
 @pytest.mark.parametrize(
     ("overrides", "match"),
     [
-        ({"result_schema_version": 1}, "normalized v2"),
-        ({"baseline_eligible": True}, "baseline_eligible=false"),
+        ({
+            "result_schema_version": 1
+        }, "normalized v2"),
+        ({
+            "baseline_eligible": True
+        }, "baseline_eligible=false"),
     ],
 )
 def test_baseline_seed_rejects_invalid_calibration_schema(overrides, match):
@@ -866,14 +858,10 @@ def test_baseline_seed_orders_sources_by_original_timestamp(monkeypatch, tmp_pat
 
     manifest_path = next(staging_root.glob(".seed-reservations/*/manifest"))
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    prepared = [
-        json.loads(Path(entry["path"]).read_text(encoding="utf-8"))
-        for entry in manifest["prepared_records"]
-    ]
+    prepared = [json.loads(Path(entry["path"]).read_text(encoding="utf-8")) for entry in manifest["prepared_records"]]
     last_five = prepared[-5:]
-    assert [record["baseline_seed_source_timestamp"] for record in last_five] == [
-        f"2026-06-{day:02d}T00:00:00+00:00" for day in range(2, 7)
-    ]
+    assert [record["baseline_seed_source_timestamp"]
+            for record in last_five] == [f"2026-06-{day:02d}T00:00:00+00:00" for day in range(2, 7)]
     assert not tracking_root.exists()
     assert len(list(staging_root.glob(".seed-reservations/*/manifest"))) == 1
 
@@ -898,6 +886,7 @@ def test_baseline_seed_rejects_existing_eligible_identity(monkeypatch, tmp_path)
     })
     tracking_root = tmp_path / "tracking"
     staging_root = tmp_path / "staging"
+
     def sync(local_dir, *, strict=False, revision=None):
         assert strict is True
         assert revision is None
@@ -944,6 +933,7 @@ def test_baseline_seed_rejects_trusted_different_recipe(monkeypatch, tmp_path):
     })
     tracking_root = tmp_path / "tracking"
     staging_root = tmp_path / "staging"
+
     def sync(local_dir, *, strict=False, revision=None):
         assert strict is True
         assert revision is None
@@ -1062,6 +1052,7 @@ def test_baseline_seed_upload_is_one_conditional_commit(monkeypatch, tmp_path):
     calls = {}
 
     class FakeApi:
+
         def __init__(self, token):
             assert token == "hf-test"
 
@@ -1130,6 +1121,7 @@ def test_baseline_seed_upload_rechecks_remote_state(monkeypatch, tmp_path):
         return local_dir
 
     class FakeApi:
+
         def __init__(self, token):
             assert token == "hf-test"
 
@@ -1151,6 +1143,7 @@ def test_baseline_seed_upload_preserves_manifest_on_cas_failure(monkeypatch, tmp
     manifest_path = _prepare_single_seed(tmp_path)
 
     class FakeApi:
+
         def __init__(self, token):
             assert token == "hf-test"
 
@@ -1184,10 +1177,16 @@ def test_baseline_seed_upload_rejects_staged_mutation(tmp_path):
 def test_baseline_seed_orders_invalid_timestamps_last_and_warns(capsys):
     source_paths = ["dated-later", "missing", "malformed", "dated-earlier"]
     records = [
-        {"timestamp": "2026-06-02T00:00:00+00:00"},
+        {
+            "timestamp": "2026-06-02T00:00:00+00:00"
+        },
         {},
-        {"timestamp": "not-a-timestamp"},
-        {"timestamp": "2026-06-01T00:00:00+00:00"},
+        {
+            "timestamp": "not-a-timestamp"
+        },
+        {
+            "timestamp": "2026-06-01T00:00:00+00:00"
+        },
     ]
 
     ordered = seed_baseline._order_sources_by_timestamp(source_paths, records)
@@ -1340,7 +1339,7 @@ def test_baseline_seed_rejects_invalid_measurements_before_persistence(
     else:
         invalid_source[metric] = invalid_value
 
-    sources = (valid_source, invalid_source) if valid_prefix else (invalid_source,)
+    sources = (valid_source, invalid_source) if valid_prefix else (invalid_source, )
     source_paths = []
     for index, source in enumerate(sources, start=1):
         source_path = tmp_path / f"source_{index}.json"
@@ -1740,9 +1739,8 @@ def test_scheduled_main_static_regression_does_not_contaminate_passing_record(
         normalized[record["model_id"]] = record
 
     assert normalized["regressed-benchmark"]["comparison_status"] == compare_baseline.STATUS_REGRESSION
-    assert "avg_generation_time_s exceeded fixed threshold" in normalized[
-        "regressed-benchmark"
-    ]["comparison_status_reason"]
+    assert "avg_generation_time_s exceeded fixed threshold" in normalized["regressed-benchmark"][
+        "comparison_status_reason"]
     assert normalized["regressed-benchmark"]["success"] is False
     assert normalized["regressed-benchmark"]["baseline_eligible"] is False
     assert normalized["passing-benchmark"]["comparison_status"] == compare_baseline.STATUS_PASS
@@ -1756,7 +1754,9 @@ def test_unattributed_performance_pytest_failure_reports_infra_error(monkeypatch
 
     failures, status, reason = compare_baseline._evaluate_record_comparison(
         record,
-        [{"latency": 10.0}],
+        [{
+            "latency": 10.0
+        }],
         [],
         resolve_metric_policies(None),
         [],
@@ -1923,8 +1923,8 @@ def test_legacy_record_lookup_still_uses_model_and_gpu(tmp_path):
 
 
 def test_non_pass_status_is_not_baseline_eligible():
-    assert compare_baseline._is_baseline_eligible(
-        "scheduled_main", True, compare_baseline.STATUS_CALIBRATION_NEEDED) is False
+    assert compare_baseline._is_baseline_eligible("scheduled_main", True,
+                                                  compare_baseline.STATUS_CALIBRATION_NEEDED) is False
     assert compare_baseline._is_baseline_eligible("pr", True, compare_baseline.STATUS_PASS) is False
     assert compare_baseline._is_baseline_eligible("local", True, compare_baseline.STATUS_PASS) is False
 

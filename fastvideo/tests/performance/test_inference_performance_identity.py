@@ -201,9 +201,7 @@ def test_producer_tracks_runtime_software_identity_and_container_audit(monkeypat
     }
     assert identity_fields["software_profile"] == expected_profile
     assert identity_fields["software_profile_id"] == perf.software_profile_id(expected_profile)
-    assert identity_fields["environment_metadata"]["env"]["FASTVIDEO_CONTAINER_IMAGE_REF"].endswith(
-        "sha256:abc"
-    )
+    assert identity_fields["environment_metadata"]["env"]["FASTVIDEO_CONTAINER_IMAGE_REF"].endswith("sha256:abc")
 
     first_profile_id = identity_fields["software_profile_id"]
     monkeypatch.setenv(
@@ -220,9 +218,7 @@ def test_producer_tracks_runtime_software_identity_and_container_audit(monkeypat
         },
     )
     assert changed_audit["software_profile_id"] == first_profile_id
-    assert changed_audit["environment_metadata"]["env"]["FASTVIDEO_CONTAINER_IMAGE_REF"].endswith(
-        "sha256:def"
-    )
+    assert changed_audit["environment_metadata"]["env"]["FASTVIDEO_CONTAINER_IMAGE_REF"].endswith("sha256:def")
 
     monkeypatch.setenv("FASTVIDEO_FA4", "0")
     changed_runtime = perf._build_identity_fields(

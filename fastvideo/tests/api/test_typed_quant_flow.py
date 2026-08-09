@@ -45,20 +45,17 @@ def captured_kwargs(monkeypatch):
     return captured
 
 
-def test_typed_transformer_quant_resolves_to_nvfp4_instance(
-        captured_kwargs) -> None:
+def test_typed_transformer_quant_resolves_to_nvfp4_instance(captured_kwargs) -> None:
     cfg = GeneratorConfig(
         model_path="FastVideo/LTX2-Distilled-Diffusers",
-        engine=EngineConfig(
-            quantization=QuantizationConfig(transformer_quant="NVFP4"), ),
+        engine=EngineConfig(quantization=QuantizationConfig(transformer_quant="NVFP4"), ),
     )
     generator_config_to_fastvideo_args(cfg)
-    assert "transformer_quant" in captured_kwargs, (
-        "compat layer must forward typed transformer_quant onto "
-        "FastVideoArgs.from_kwargs")
-    assert isinstance(captured_kwargs["transformer_quant"], NVFP4Config), (
-        f"Expected NVFP4Config instance, got "
-        f"{type(captured_kwargs['transformer_quant']).__name__}")
+    assert "transformer_quant" in captured_kwargs, ("compat layer must forward typed transformer_quant onto "
+                                                    "FastVideoArgs.from_kwargs")
+    assert isinstance(captured_kwargs["transformer_quant"],
+                      NVFP4Config), (f"Expected NVFP4Config instance, got "
+                                     f"{type(captured_kwargs['transformer_quant']).__name__}")
 
 
 def test_no_typed_quant_omits_transformer_quant_kwarg(captured_kwargs) -> None:
@@ -91,8 +88,7 @@ def test_apply_transformer_quant_pins_to_dit_config(monkeypatch) -> None:
     assert args.pipeline_config.dit_config.quant_config is nvfp4
 
 
-def test_apply_transformer_quant_does_not_overwrite_explicit_dit_config(
-) -> None:
+def test_apply_transformer_quant_does_not_overwrite_explicit_dit_config() -> None:
     """When the caller has explicitly set
     ``pipeline_config.dit_config.quant_config`` already, the typed
     carrier defers — the explicit setter wins.

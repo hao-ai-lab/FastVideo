@@ -18,11 +18,8 @@ from fastvideo.pipelines.preprocess.preprocess_minimax_h3_overfit import (
     write_parquet,
 )
 
-
-_TRAINING_CAPTION = (
-    "A watermelon wearing a helmet is crushed by a hydraulic press, "
-    "causing it to flatten and burst open."
-)
+_TRAINING_CAPTION = ("A watermelon wearing a helmet is crushed by a hydraulic press, "
+                     "causing it to flatten and burst open.")
 
 
 def test_load_crush_smol_training_sample_selects_fixed_record(tmp_path: Path) -> None:
@@ -32,16 +29,17 @@ def test_load_crush_smol_training_sample_selects_fixed_record(tmp_path: Path) ->
     video_path = video_dir / TRAINING_VIDEO_NAME
     video_path.touch()
     manifest_path = tmp_path / "videos2caption.json"
-    manifest_path.write_text(json.dumps([
-        {
-            "path": "another-video.mp4",
-            "cap": ["Another caption."],
-        },
-        {
-            "path": TRAINING_VIDEO_NAME,
-            "cap": [_TRAINING_CAPTION],
-        },
-    ]))
+    manifest_path.write_text(
+        json.dumps([
+            {
+                "path": "another-video.mp4",
+                "cap": ["Another caption."],
+            },
+            {
+                "path": TRAINING_VIDEO_NAME,
+                "cap": [_TRAINING_CAPTION],
+            },
+        ]))
 
     selected_video_path, caption = load_crush_smol_training_sample(manifest_path, video_dir)
 

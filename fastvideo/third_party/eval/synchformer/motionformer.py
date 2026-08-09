@@ -19,12 +19,9 @@ FILE2URL = {
     'divided_224_16x4.yaml':
     'https://raw.githubusercontent.com/facebookresearch/Motionformer/bf43d50/configs/SSV2/divided_224_16x4.yaml',
     # ckpt
-    'ssv2_motionformer_224_16x4.pyth':
-    'https://dl.fbaipublicfiles.com/motionformer/ssv2_motionformer_224_16x4.pyth',
-    'ssv2_joint_224_16x4.pyth':
-    'https://dl.fbaipublicfiles.com/motionformer/ssv2_joint_224_16x4.pyth',
-    'ssv2_divided_224_16x4.pyth':
-    'https://dl.fbaipublicfiles.com/motionformer/ssv2_divided_224_16x4.pyth',
+    'ssv2_motionformer_224_16x4.pyth': 'https://dl.fbaipublicfiles.com/motionformer/ssv2_motionformer_224_16x4.pyth',
+    'ssv2_joint_224_16x4.pyth': 'https://dl.fbaipublicfiles.com/motionformer/ssv2_joint_224_16x4.pyth',
+    'ssv2_divided_224_16x4.pyth': 'https://dl.fbaipublicfiles.com/motionformer/ssv2_divided_224_16x4.pyth',
 }
 
 
@@ -69,8 +66,7 @@ class MotionFormer(VisionTransformer):
             # init from motionformer ckpt or from our Stage I ckpt
             # depending on whether the feat extractor was pre-trained on AVCLIPMoCo or not, we need to
             # load the state dict differently
-            was_pt_on_avclip = self.ckpt_path.endswith(
-                '.pt')  # checks if it is a stage I ckpt (FIXME: a bit generic)
+            was_pt_on_avclip = self.ckpt_path.endswith('.pt')  # checks if it is a stage I ckpt (FIXME: a bit generic)
             if self.ckpt_path.endswith(tuple(mformer_ckpt2cfg.keys())):
                 cfg_fname = mformer_ckpt2cfg[Path(self.ckpt_path).name]
             elif was_pt_on_avclip:
@@ -116,8 +112,7 @@ class MotionFormer(VisionTransformer):
         # load the ckpt now if ckpt is provided and not from AVCLIPMoCo-pretrained ckpt
         if (self.ckpt_path is not None) and (not was_pt_on_avclip):
             _ckpt_load_status = self.load_state_dict(ckpt['model_state'], strict=False)
-            if len(_ckpt_load_status.missing_keys) > 0 or len(
-                    _ckpt_load_status.unexpected_keys) > 0:
+            if len(_ckpt_load_status.missing_keys) > 0 or len(_ckpt_load_status.unexpected_keys) > 0:
                 logging.warning(f'Loading exact vfeat_extractor ckpt from {self.ckpt_path} failed.' \
                                 f'Missing keys: {_ckpt_load_status.missing_keys}, ' \
                                 f'Unexpected keys: {_ckpt_load_status.unexpected_keys}')
@@ -125,8 +120,7 @@ class MotionFormer(VisionTransformer):
                 logging.info(f'Loading vfeat_extractor ckpt from {self.ckpt_path} succeeded.')
 
         if self.extract_features:
-            assert isinstance(self.norm,
-                              nn.LayerNorm), 'early x[:, 1:, :] may not be safe for per-tr weights'
+            assert isinstance(self.norm, nn.LayerNorm), 'early x[:, 1:, :] may not be safe for per-tr weights'
             # pre-logits are Sequential(nn.Linear(emb, emd), act) and `act` is tanh but see the logger
             self.pre_logits = nn.Identity()
             # we don't need the classification head (saving memory)
@@ -146,8 +140,7 @@ class MotionFormer(VisionTransformer):
             # define adapters if needed
             if self.factorize_space_time:
                 if agg_space_module == 'TransformerEncoderLayer':
-                    self.spatial_attn_agg = SpatialTransformerEncoderLayer(
-                        **transf_enc_layer_kwargs)
+                    self.spatial_attn_agg = SpatialTransformerEncoderLayer(**transf_enc_layer_kwargs)
                 elif agg_space_module == 'AveragePooling':
                     self.spatial_attn_agg = AveragePooling(avg_pattern='BS D t h w -> BS D t',
                                                            then_permute_pattern='BS D t -> BS t D')
@@ -164,11 +157,10 @@ class MotionFormer(VisionTransformer):
                     # we can reuse the same layer as for temporal factorization (B, dim_to_agg, D) -> (B, D)
                     # we need to add pos emb (PE) because previously we added the same PE for each segment
                     pos_max_len = max_segments if max_segments is not None else 16  # 16 = 10sec//0.64sec + 1
-                    self.global_attn_agg = TemporalTransformerEncoderLayer(
-                        add_pos_emb=True,
-                        pos_emb_drop=mformer_cfg.VIT.POS_DROPOUT,
-                        pos_max_len=pos_max_len,
-                        **transf_enc_layer_kwargs)
+                    self.global_attn_agg = TemporalTransformerEncoderLayer(add_pos_emb=True,
+                                                                           pos_emb_drop=mformer_cfg.VIT.POS_DROPOUT,
+                                                                           pos_max_len=pos_max_len,
+                                                                           **transf_enc_layer_kwargs)
                 elif agg_segments_module == 'AveragePooling':
                     self.global_attn_agg = AveragePooling(avg_pattern='B S D -> B D')
 
@@ -222,16 +214,14 @@ class MotionFormer(VisionTransformer):
         assert self.extract_features
 
         # (BS, T, D) where T = 1 + (224 // 16) * (224 // 16) * 8
-        x = x[:,
-              1:, :]  # without the CLS token for efficiency (should be safe for LayerNorm and FC)
+        x = x[:, 1:, :]  # without the CLS token for efficiency (should be safe for LayerNorm and FC)
         x = self.norm(x)
         x = self.pre_logits(x)
         if self.factorize_space_time:
             x = self.restore_spatio_temp_dims(x, orig_shape)  # (B*S, D, t, h, w) <- (B*S, t*h*w, D)
 
             x = self.spatial_attn_agg(x, x_mask)  # (B*S, t, D)
-            x = self.temp_attn_agg(
-                x)  # (B*S, D) or (BS, t, D) if `self.temp_attn_agg` is `Identity`
+            x = self.temp_attn_agg(x)  # (B*S, D) or (BS, t, D) if `self.temp_attn_agg` is `Identity`
 
         return x
 
@@ -294,8 +284,7 @@ class BaseEncoderLayer(nn.TransformerEncoderLayer):
         cls_tokens = self.cls_token.expand(batch_dim, -1, -1)  # expanding to match batch dimension
         x = torch.cat((cls_tokens, x), dim=-2)  # (batch_dim, 1+seq_len, D)
         if x_mask is not None:
-            cls_mask = torch.ones((batch_dim, 1), dtype=torch.bool,
-                                  device=x_mask.device)  # 1=keep; 0=mask
+            cls_mask = torch.ones((batch_dim, 1), dtype=torch.bool, device=x_mask.device)  # 1=keep; 0=mask
             x_mask_w_cls = torch.cat((cls_mask, x_mask), dim=-1)  # (batch_dim, 1+seq_len)
             B, N = x_mask_w_cls.shape
             # torch expects (N, N) or (B*num_heads, N, N) mask (sadness ahead); torch masks
@@ -309,8 +298,7 @@ class BaseEncoderLayer(nn.TransformerEncoderLayer):
 
         # add positional embedding
         if self.add_pos_emb:
-            seq_len = x.shape[
-                1]  # (don't even think about moving it before the CLS token concatenation)
+            seq_len = x.shape[1]  # (don't even think about moving it before the CLS token concatenation)
             assert seq_len <= self.pos_max_len, f'Seq len ({seq_len}) > pos_max_len ({self.pos_max_len})'
             x = x + self.pos_emb[:, :seq_len, :]
             x = self.pos_drop(x)

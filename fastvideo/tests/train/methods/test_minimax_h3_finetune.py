@@ -29,23 +29,15 @@ from fastvideo.train.utils.config import load_run_config
 _FIXTURE = Path(__file__).resolve().parent.parent / "fixtures" / "minimax_h3_t2va_min.yaml"
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _EXPERIMENT_CONFIG = _REPO_ROOT / "examples/train/configs/overfit_minimax_h3_t2va.yaml"
-_VALIDATION_PROMPTS = (
-    _REPO_ROOT / "examples/training/finetune/Wan2.1-Fun-1.3B-InP/crush_smol/validation.json"
-)
+_VALIDATION_PROMPTS = (_REPO_ROOT / "examples/training/finetune/Wan2.1-Fun-1.3B-InP/crush_smol/validation.json")
 _EXPECTED_VALIDATION_CAPTIONS = [
-    (
-        "A large metal cylinder is seen pressing down on a pile of Oreo cookies, "
-        "flattening them as if they were under a hydraulic press."
-    ),
-    (
-        "A large metal cylinder is seen compressing colorful clay into a compact shape, "
-        "demonstrating the power of a hydraulic press."
-    ),
-    (
-        "A large metal cylinder is seen pressing down on a pile of colorful candies, "
-        "flattening them as if they were under a hydraulic press. The candies are crushed "
-        "and broken into small pieces, creating a mess on the table."
-    ),
+    ("A large metal cylinder is seen pressing down on a pile of Oreo cookies, "
+     "flattening them as if they were under a hydraulic press."),
+    ("A large metal cylinder is seen compressing colorful clay into a compact shape, "
+     "demonstrating the power of a hydraulic press."),
+    ("A large metal cylinder is seen pressing down on a pile of colorful candies, "
+     "flattening them as if they were under a hydraulic press. The candies are crushed "
+     "and broken into small pieces, creating a mess on the table."),
 ]
 
 
@@ -246,11 +238,8 @@ def test_h3_experiment_config_uses_modular_validation_callback() -> None:
     assert config["method"]["_target_"] == "fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod"
     assert validation["_target_"] == "fastvideo.train.callbacks.validation.ValidationCallback"
     assert validation["pipeline_target"] == (
-        "fastvideo.pipelines.basic.minimax_h3.minimax_h3_pipeline.MiniMaxH3Pipeline"
-    )
-    assert validation["dataset_file"] == (
-        "examples/training/finetune/Wan2.1-Fun-1.3B-InP/crush_smol/validation.json"
-    )
+        "fastvideo.pipelines.basic.minimax_h3.minimax_h3_pipeline.MiniMaxH3Pipeline")
+    assert validation["dataset_file"] == ("examples/training/finetune/Wan2.1-Fun-1.3B-InP/crush_smol/validation.json")
     assert validation["every_steps"] == 20
     assert validation["run_at_start"] is True
     assert validation["sampling_steps"] == [50]
@@ -279,17 +268,12 @@ def test_h3_experiment_config_resolves_64_gpu_mesh_and_global_batch() -> None:
         "pin_cpu_memory": True,
     }
     data_parallel_degree = distributed["num_gpus"] // distributed["sp_size"]
-    effective_global_batch = (
-        training["data"]["train_batch_size"]
-        * data_parallel_degree
-        * training["loop"]["gradient_accumulation_steps"]
-    )
+    effective_global_batch = (training["data"]["train_batch_size"] * data_parallel_degree *
+                              training["loop"]["gradient_accumulation_steps"])
     assert distributed["hsdp_replicate_dim"] * distributed["hsdp_shard_dim"] == 64
     assert data_parallel_degree == 8
     assert effective_global_batch == 8
-    assert training["data"]["data_path"] == {
-        "data/crush-smol_h3_t2va_single_sample_preprocessed": 8
-    }
+    assert training["data"]["data_path"] == {"data/crush-smol_h3_t2va_single_sample_preprocessed": 8}
     assert training["loop"]["max_train_steps"] == 400
     assert training["checkpoint"]["training_state_checkpointing_steps"] == 20
     assert training["checkpoint"]["checkpoints_total_limit"] == 2
@@ -335,9 +319,7 @@ def test_h3_experiment_data_repeat_supplies_every_sp_group(
     assert sorted(assigned_indices) == list(range(8))
 
 
-def test_h3_slurm_scripts_preserve_inherited_wandb_key(
-    tmp_path: Path,
-) -> None:
+def test_h3_slurm_scripts_preserve_inherited_wandb_key(tmp_path: Path, ) -> None:
     """Verify shell syntax, H200 allocation, and secret-free job-script text."""
     run_slurm = _REPO_ROOT / "examples/train/run_slurm.sh"
     launcher = _REPO_ROOT / "examples/train/launch_minimax_h3_t2va_crush_smol_validation.sh"
@@ -350,12 +332,10 @@ def test_h3_slurm_scripts_preserve_inherited_wandb_key(
     generated_job_script = tmp_path / "generated-job.sh"
     sbatch_arguments = tmp_path / "sbatch-arguments.txt"
     fake_sbatch = fake_bin / "sbatch"
-    fake_sbatch.write_text(
-        "#!/bin/bash\n"
-        "printf '%s\\n' \"$@\" > \"$SBATCH_ARGUMENTS\"\n"
-        "dd status=none of=\"$SBATCH_JOB_SCRIPT\"\n"
-        "printf 'Submitted batch job 4242\\n'\n"
-    )
+    fake_sbatch.write_text("#!/bin/bash\n"
+                           "printf '%s\\n' \"$@\" > \"$SBATCH_ARGUMENTS\"\n"
+                           "dd status=none of=\"$SBATCH_JOB_SCRIPT\"\n"
+                           "printf 'Submitted batch job 4242\\n'\n")
     fake_sbatch.chmod(0o755)
     secret_value = "wandb-test-secret-must-not-appear"
     environment = os.environ.copy()
@@ -403,30 +383,24 @@ def test_h3_slurm_job_resolves_one_node_rank_per_srun_task(tmp_path: Path) -> No
     torchrun_arguments_dir.mkdir()
 
     fake_sbatch = fake_bin / "sbatch"
-    fake_sbatch.write_text(
-        "#!/bin/bash\n"
-        "dd status=none of=\"$SBATCH_JOB_SCRIPT\"\n"
-        "printf 'Submitted batch job 4242\\n'\n"
-    )
+    fake_sbatch.write_text("#!/bin/bash\n"
+                           "dd status=none of=\"$SBATCH_JOB_SCRIPT\"\n"
+                           "printf 'Submitted batch job 4242\\n'\n")
     fake_sbatch.chmod(0o755)
     fake_scontrol = fake_bin / "scontrol"
     fake_scontrol.write_text("#!/bin/bash\nprintf 'node%s\\n' {0..7}\n")
     fake_scontrol.chmod(0o755)
     fake_srun = fake_bin / "srun"
-    fake_srun.write_text(
-        "#!/bin/bash\n"
-        "set -euo pipefail\n"
-        "for rank in {0..7}; do\n"
-        "    SLURM_PROCID=\"$rank\" \"$@\"\n"
-        "done\n"
-    )
+    fake_srun.write_text("#!/bin/bash\n"
+                         "set -euo pipefail\n"
+                         "for rank in {0..7}; do\n"
+                         "    SLURM_PROCID=\"$rank\" \"$@\"\n"
+                         "done\n")
     fake_srun.chmod(0o755)
     fake_torchrun = fake_bin / "torchrun"
-    fake_torchrun.write_text(
-        "#!/bin/bash\n"
-        "printf '%s\\n' \"$@\" > "
-        "\"$TORCHRUN_ARGUMENTS_DIR/rank_${SLURM_PROCID}.txt\"\n"
-    )
+    fake_torchrun.write_text("#!/bin/bash\n"
+                             "printf '%s\\n' \"$@\" > "
+                             "\"$TORCHRUN_ARGUMENTS_DIR/rank_${SLURM_PROCID}.txt\"\n")
     fake_torchrun.chmod(0o755)
 
     environment = os.environ.copy()

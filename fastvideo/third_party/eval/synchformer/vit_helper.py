@@ -26,8 +26,7 @@ def qkv_attn(q, k, v, tok_mask: torch.Tensor = None):
     # apply masking if provided, tok_mask is (B*S*H, N): 1s - keep; sim is (B*S*H, H, N, N)
     if tok_mask is not None:
         BSH, N = tok_mask.shape
-        sim = sim.masked_fill(tok_mask.view(BSH, 1, N) == 0,
-                              float('-inf'))  # 1 - broadcasts across N
+        sim = sim.masked_fill(tok_mask.view(BSH, 1, N) == 0, float('-inf'))  # 1 - broadcasts across N
     attn = sim.softmax(dim=-1)
     out = einsum('b i j, b j d -> b i d', attn, v)
     return out
@@ -79,8 +78,7 @@ class DividedAttention(nn.Module):
         cls_out = qkv_attn(cls_q, k, v, tok_mask=tok_mask)
 
         # rearrange across time or space
-        q_, k_, v_ = map(lambda t: rearrange(t, f'{einops_from} -> {einops_to}', **einops_dims),
-                         (q_, k_, v_))
+        q_, k_, v_ = map(lambda t: rearrange(t, f'{einops_from} -> {einops_to}', **einops_dims), (q_, k_, v_))
 
         # expand CLS token keys and values across time or space and concat
         r = q_.shape[0] // cls_k.shape[0]
@@ -92,10 +90,8 @@ class DividedAttention(nn.Module):
         # the same for masking (if provided)
         if tok_mask is not None:
             # since mask does not have the latent dim (d), we need to remove it from einops dims
-            mask_ = rearrange(mask_, f'{einops_from} -> {einops_to}'.replace(' d', ''),
-                              **einops_dims)
-            cls_mask = repeat(cls_mask, 'b () -> (b r) ()',
-                              r=r)  # expand cls_mask across time or space
+            mask_ = rearrange(mask_, f'{einops_from} -> {einops_to}'.replace(' d', ''), **einops_dims)
+            cls_mask = repeat(cls_mask, 'b () -> (b r) ()', r=r)  # expand cls_mask across time or space
             mask_ = torch.cat((cls_mask, mask_), dim=1)
 
         # attention
@@ -138,11 +134,7 @@ class DividedSpaceTimeBlock(nn.Module):
 
         self.norm1 = norm_layer(dim)
 
-        self.attn = DividedAttention(dim,
-                                     num_heads=num_heads,
-                                     qkv_bias=qkv_bias,
-                                     attn_drop=attn_drop,
-                                     proj_drop=drop)
+        self.attn = DividedAttention(dim, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=drop)
 
         self.timeattn = DividedAttention(dim,
                                          num_heads=num_heads,
@@ -154,19 +146,10 @@ class DividedSpaceTimeBlock(nn.Module):
         self.drop_path = nn.Identity()
         self.norm2 = norm_layer(dim)
         mlp_hidden_dim = int(dim * mlp_ratio)
-        self.mlp = Mlp(in_features=dim,
-                       hidden_features=mlp_hidden_dim,
-                       act_layer=act_layer,
-                       drop=drop)
+        self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
         self.norm3 = norm_layer(dim)
 
-    def forward(self,
-                x,
-                seq_len=196,
-                num_frames=8,
-                approx='none',
-                num_landmarks=128,
-                tok_mask: torch.Tensor = None):
+    def forward(self, x, seq_len=196, num_frames=8, approx='none', num_landmarks=128, tok_mask: torch.Tensor = None):
         time_output = self.timeattn(self.norm3(x),
                                     self.einops_from_time,
                                     self.einops_to_time,
@@ -188,12 +171,7 @@ class DividedSpaceTimeBlock(nn.Module):
 
 class Mlp(nn.Module):
 
-    def __init__(self,
-                 in_features,
-                 hidden_features=None,
-                 out_features=None,
-                 act_layer=nn.GELU,
-                 drop=0.):
+    def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
         super().__init__()
         out_features = out_features or in_features
         hidden_features = hidden_features or in_features
@@ -274,14 +252,11 @@ class HeadMLP(nn.Module):
         self.n_hidden = n_hidden
         if n_hidden is None:
             # use linear classifier
-            self.block_forward = nn.Sequential(nn.Dropout(p=p),
-                                               nn.Linear(n_input, n_classes, bias=True))
+            self.block_forward = nn.Sequential(nn.Dropout(p=p), nn.Linear(n_input, n_classes, bias=True))
         else:
             # use simple MLP classifier
-            self.block_forward = nn.Sequential(nn.Dropout(p=p),
-                                               nn.Linear(n_input, n_hidden, bias=True),
-                                               nn.BatchNorm1d(n_hidden), nn.ReLU(inplace=True),
-                                               nn.Dropout(p=p),
+            self.block_forward = nn.Sequential(nn.Dropout(p=p), nn.Linear(n_input, n_hidden, bias=True),
+                                               nn.BatchNorm1d(n_hidden), nn.ReLU(inplace=True), nn.Dropout(p=p),
                                                nn.Linear(n_hidden, n_classes, bias=True))
         print(f"Dropout-NLP: {p}")
 
@@ -333,13 +308,7 @@ def adapt_input_conv(in_chans, conv_weight, agg='sum'):
     return conv_weight
 
 
-def load_pretrained(model,
-                    cfg=None,
-                    num_classes=1000,
-                    in_chans=3,
-                    filter_fn=None,
-                    strict=True,
-                    progress=False):
+def load_pretrained(model, cfg=None, num_classes=1000, in_chans=3, filter_fn=None, strict=True, progress=False):
     # Load state dict
     assert (f"{cfg.VIT.PRETRAINED_WEIGHTS} not in [vit_1k, vit_1k_large]")
     state_dict = torch.hub.load_state_dict_from_url(url=default_cfgs[cfg.VIT.PRETRAINED_WEIGHTS])
@@ -354,18 +323,12 @@ def load_pretrained(model,
         for input_conv_name in input_convs:
             weight_name = input_conv_name + '.weight'
             try:
-                state_dict[weight_name] = adapt_input_conv(in_chans,
-                                                           state_dict[weight_name],
-                                                           agg='avg')
-                print(
-                    f'Converted input conv {input_conv_name} pretrained weights from 3 to {in_chans} channel(s)'
-                )
+                state_dict[weight_name] = adapt_input_conv(in_chans, state_dict[weight_name], agg='avg')
+                print(f'Converted input conv {input_conv_name} pretrained weights from 3 to {in_chans} channel(s)')
             except NotImplementedError as e:
                 del state_dict[weight_name]
                 strict = False
-                print(
-                    f'Unable to convert pretrained {input_conv_name} weights, using random init for this layer.'
-                )
+                print(f'Unable to convert pretrained {input_conv_name} weights, using random init for this layer.')
 
     classifier_name = 'head'
     label_offset = cfg.get('label_offset', 0)

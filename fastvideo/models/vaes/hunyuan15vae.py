@@ -27,7 +27,9 @@ from fastvideo.layers.activation import get_act_fn
 from fastvideo.configs.models.vaes import Hunyuan15VAEConfig
 from fastvideo.models.vaes.common import ParallelTiledVAE
 
+
 class HunyuanVideo15CausalConv3d(nn.Module):
+
     def __init__(
         self,
         in_channels: int,
@@ -75,7 +77,7 @@ class HunyuanVideo15RMS_norm(nn.Module):
     def __init__(self, dim: int, channel_first: bool = True, images: bool = True, bias: bool = False) -> None:
         super().__init__()
         broadcastable_dims = (1, 1, 1) if not images else (1, 1)
-        shape = (dim, *broadcastable_dims) if channel_first else (dim,)
+        shape = (dim, *broadcastable_dims) if channel_first else (dim, )
 
         self.channel_first = channel_first
         self.scale = dim**0.5
@@ -87,6 +89,7 @@ class HunyuanVideo15RMS_norm(nn.Module):
 
 
 class HunyuanVideo15AttnBlock(nn.Module):
+
     def __init__(self, in_channels: int):
         super().__init__()
         self.in_channels = in_channels
@@ -116,7 +119,7 @@ class HunyuanVideo15AttnBlock(nn.Module):
         mask = torch.full((seq_len, seq_len), float("-inf"), dtype=dtype, device=device)
         for i in range(seq_len):
             i_frame = i // n_hw
-            mask[i, : (i_frame + 1) * n_hw] = 0
+            mask[i, :(i_frame + 1) * n_hw] = 0
         if batch_size is not None:
             mask = mask.unsqueeze(0).expand(batch_size, -1, -1)
         return mask
@@ -136,9 +139,11 @@ class HunyuanVideo15AttnBlock(nn.Module):
         key = key.reshape(batch_size, channels, frames * height * width).permute(0, 2, 1).unsqueeze(1).contiguous()
         value = value.reshape(batch_size, channels, frames * height * width).permute(0, 2, 1).unsqueeze(1).contiguous()
 
-        attention_mask = self.prepare_causal_attention_mask(
-            frames, height * width, query.dtype, query.device, batch_size=batch_size
-        )
+        attention_mask = self.prepare_causal_attention_mask(frames,
+                                                            height * width,
+                                                            query.dtype,
+                                                            query.device,
+                                                            batch_size=batch_size)
 
         x = nn.functional.scaled_dot_product_attention(query, key, value, attn_mask=attention_mask)
 
@@ -151,6 +156,7 @@ class HunyuanVideo15AttnBlock(nn.Module):
 
 
 class HunyuanVideo15Upsample(nn.Module):
+
     def __init__(self, in_channels: int, out_channels: int, add_temporal_upsample: bool = True):
         super().__init__()
         factor = 2 * 2 * 2 if add_temporal_upsample else 1 * 2 * 2
@@ -184,7 +190,7 @@ class HunyuanVideo15Upsample(nn.Module):
         if self.add_temporal_upsample:
             h_first = h[:, :, :1, :, :]
             h_first = self._dcae_upsample_rearrange(h_first, r1=1, r2=2, r3=2)
-            h_first = h_first[:, : h_first.shape[1] // 2]
+            h_first = h_first[:, :h_first.shape[1] // 2]
             h_next = h[:, :, 1:, :, :]
             h_next = self._dcae_upsample_rearrange(h_next, r1=r1, r2=2, r3=2)
             h = torch.cat([h_first, h_next], dim=2)
@@ -207,6 +213,7 @@ class HunyuanVideo15Upsample(nn.Module):
 
 
 class HunyuanVideo15Downsample(nn.Module):
+
     def __init__(self, in_channels: int, out_channels: int, add_temporal_downsample: bool = True):
         super().__init__()
         factor = 2 * 2 * 2 if add_temporal_downsample else 1 * 2 * 2
@@ -260,6 +267,7 @@ class HunyuanVideo15Downsample(nn.Module):
 
 
 class HunyuanVideo15ResnetBlock(nn.Module):
+
     def __init__(
         self,
         in_channels: int,
@@ -299,6 +307,7 @@ class HunyuanVideo15ResnetBlock(nn.Module):
 
 
 class HunyuanVideo15MidBlock(nn.Module):
+
     def __init__(
         self,
         in_channels: int,
@@ -309,12 +318,10 @@ class HunyuanVideo15MidBlock(nn.Module):
         self.add_attention = add_attention
 
         # There is always at least one resnet
-        resnets = [
-            HunyuanVideo15ResnetBlock(
-                in_channels=in_channels,
-                out_channels=in_channels,
-            )
-        ]
+        resnets = [HunyuanVideo15ResnetBlock(
+            in_channels=in_channels,
+            out_channels=in_channels,
+        )]
         attentions = []
 
         for _ in range(num_layers):
@@ -323,12 +330,10 @@ class HunyuanVideo15MidBlock(nn.Module):
             else:
                 attentions.append(None)
 
-            resnets.append(
-                HunyuanVideo15ResnetBlock(
-                    in_channels=in_channels,
-                    out_channels=in_channels,
-                )
-            )
+            resnets.append(HunyuanVideo15ResnetBlock(
+                in_channels=in_channels,
+                out_channels=in_channels,
+            ))
 
         self.attentions = nn.ModuleList(attentions)
         self.resnets = nn.ModuleList(resnets)
@@ -347,6 +352,7 @@ class HunyuanVideo15MidBlock(nn.Module):
 
 
 class HunyuanVideo15DownBlock3D(nn.Module):
+
     def __init__(
         self,
         in_channels: int,
@@ -360,25 +366,21 @@ class HunyuanVideo15DownBlock3D(nn.Module):
 
         for i in range(num_layers):
             in_channels = in_channels if i == 0 else out_channels
-            resnets.append(
-                HunyuanVideo15ResnetBlock(
-                    in_channels=in_channels,
-                    out_channels=out_channels,
-                )
-            )
+            resnets.append(HunyuanVideo15ResnetBlock(
+                in_channels=in_channels,
+                out_channels=out_channels,
+            ))
 
         self.resnets = nn.ModuleList(resnets)
 
         if downsample_out_channels is not None:
-            self.downsamplers = nn.ModuleList(
-                [
-                    HunyuanVideo15Downsample(
-                        out_channels,
-                        out_channels=downsample_out_channels,
-                        add_temporal_downsample=add_temporal_downsample,
-                    )
-                ]
-            )
+            self.downsamplers = nn.ModuleList([
+                HunyuanVideo15Downsample(
+                    out_channels,
+                    out_channels=downsample_out_channels,
+                    add_temporal_downsample=add_temporal_downsample,
+                )
+            ])
         else:
             self.downsamplers = None
 
@@ -396,6 +398,7 @@ class HunyuanVideo15DownBlock3D(nn.Module):
 
 
 class HunyuanVideo15UpBlock3D(nn.Module):
+
     def __init__(
         self,
         in_channels: int,
@@ -410,25 +413,21 @@ class HunyuanVideo15UpBlock3D(nn.Module):
         for i in range(num_layers):
             input_channels = in_channels if i == 0 else out_channels
 
-            resnets.append(
-                HunyuanVideo15ResnetBlock(
-                    in_channels=input_channels,
-                    out_channels=out_channels,
-                )
-            )
+            resnets.append(HunyuanVideo15ResnetBlock(
+                in_channels=input_channels,
+                out_channels=out_channels,
+            ))
 
         self.resnets = nn.ModuleList(resnets)
 
         if upsample_out_channels is not None:
-            self.upsamplers = nn.ModuleList(
-                [
-                    HunyuanVideo15Upsample(
-                        out_channels,
-                        out_channels=upsample_out_channels,
-                        add_temporal_upsample=add_temporal_upsample,
-                    )
-                ]
-            )
+            self.upsamplers = nn.ModuleList([
+                HunyuanVideo15Upsample(
+                    out_channels,
+                    out_channels=upsample_out_channels,
+                    add_temporal_upsample=add_temporal_upsample,
+                )
+            ])
         else:
             self.upsamplers = None
 
@@ -668,7 +667,7 @@ class AutoencoderKLHunyuanVideo15(nn.Module, ParallelTiledVAE):
         # The minimal tile height and width for spatial tiling to be used
         self.tile_sample_min_height = 256
         self.tile_sample_min_width = 256
-        self.tile_sample_min_num_frames = 2000 # Fill in a random large number, as hy1.5 vae does not use temporal tiling
+        self.tile_sample_min_num_frames = 2000  # Fill in a random large number, as hy1.5 vae does not use temporal tiling
 
     def _encode(self, x: torch.Tensor) -> torch.Tensor:
         x = self.encoder(x)
@@ -698,6 +697,7 @@ class AutoencoderKLHunyuanVideo15(nn.Module, ParallelTiledVAE):
         z = posterior.sample(generator=generator) if sample_posterior else posterior.mode()
         dec = self.decode(z)
         return dec
+
 
 # Entry point for model registry
 EntryClass = AutoencoderKLHunyuanVideo15

@@ -16,7 +16,6 @@ from fastvideo.utils import maybe_download_model
 from fastvideo.configs.models.dits import WanVideoConfig
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 
-
 logger = init_logger(__name__)
 
 os.environ["MASTER_ADDR"] = "localhost"
@@ -42,11 +41,9 @@ def test_wan_transformer():
     loader = TransformerLoader()
     model2 = loader.load(TRANSFORMER_PATH, args).to(dtype=precision)
 
-    model1 = (
-        WanTransformer3DModel.from_pretrained(TRANSFORMER_PATH, device=device, torch_dtype=precision)
-        .to(device, dtype=precision)
-        .requires_grad_(False)
-    )
+    model1 = (WanTransformer3DModel.from_pretrained(TRANSFORMER_PATH, device=device,
+                                                    torch_dtype=precision).to(device,
+                                                                              dtype=precision).requires_grad_(False))
 
     total_params = sum(p.numel() for p in model1.parameters())
     # Calculate weight sum for model1 (converting to float64 to avoid overflow)
@@ -86,9 +83,7 @@ def test_wan_transformer():
     # Timestep
     timestep = torch.tensor([500], device=device, dtype=precision)
 
-    forward_batch = ForwardBatch(
-        data_type="dummy",
-    )
+    forward_batch = ForwardBatch(data_type="dummy", )
 
     with torch.amp.autocast("cuda", dtype=precision):
         output1 = model1(
@@ -98,13 +93,13 @@ def test_wan_transformer():
             return_dict=False,
         )[0]
         with set_forward_context(
-            current_timestep=0,
-            attn_metadata=None,
-            forward_batch=forward_batch,
+                current_timestep=0,
+                attn_metadata=None,
+                forward_batch=forward_batch,
         ):
-            output2 = model2(
-                hidden_states=hidden_states, encoder_hidden_states=encoder_hidden_states, timestep=timestep
-            )
+            output2 = model2(hidden_states=hidden_states,
+                             encoder_hidden_states=encoder_hidden_states,
+                             timestep=timestep)
 
     # Check if outputs have the same shape
     assert output1.shape == output2.shape, f"Output shapes don't match: {output1.shape} vs {output2.shape}"

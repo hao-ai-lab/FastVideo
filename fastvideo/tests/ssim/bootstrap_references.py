@@ -36,8 +36,7 @@ def xfail_missing_reference_in_bootstrap_mode(
     generated_path = Path(generated_artifact_path)
     if not generated_path.exists():
         raise FileNotFoundError(
-            f"SSIM bootstrap mode is enabled, but generated {artifact_kind} artifact is missing: {generated_path}"
-        )
+            f"SSIM bootstrap mode is enabled, but generated {artifact_kind} artifact is missing: {generated_path}")
 
     repo_id = os.environ.get(HF_REPO_ENV_KEY, DEFAULT_REPO_ID)
     repo_type = os.environ.get(HF_REPO_TYPE_ENV_KEY, DEFAULT_REPO_TYPE)
@@ -47,10 +46,8 @@ def xfail_missing_reference_in_bootstrap_mode(
         generated_artifact_path=generated_path,
         reference_folder=Path(reference_folder),
     )
-    pytest.xfail(
-        "SSIM bootstrap mode generated a draft "
-        f"{artifact_kind} reference at {repo_id}/{draft_path}. "
-        "Review it, then promote with "
-        "`python fastvideo/tests/ssim/reference_videos_cli.py promote-draft "
-        f"--quality-tier {get_output_quality_tier()} --model-id <model_id>`."
-    )
+    pytest.xfail("SSIM bootstrap mode generated a draft "
+                 f"{artifact_kind} reference at {repo_id}/{draft_path}. "
+                 "Review it, then promote with "
+                 "`python fastvideo/tests/ssim/reference_videos_cli.py promote-draft "
+                 f"--quality-tier {get_output_quality_tier()} --model-id <model_id>`.")

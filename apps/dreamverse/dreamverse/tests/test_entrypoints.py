@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 import fastvideo.entrypoints.streaming as streaming_entrypoints
 import pytest
 
+
 def _install_stack03_import_stubs(monkeypatch):
     """Keep entrypoint tests focused while later-stack runtime modules are absent."""
     if not hasattr(streaming_entrypoints, "build_health_router"):
@@ -17,6 +18,7 @@ def _install_stack03_import_stubs(monkeypatch):
     gpu_pool_stub = types.ModuleType("dreamverse.gpu_pool")
 
     class GPUPool:
+
         def __init__(self, _gpu_ids):
             pass
 
@@ -49,6 +51,7 @@ def _install_stack03_import_stubs(monkeypatch):
     controller_stub = types.ModuleType("dreamverse.session.controller")
 
     class SessionController:
+
         def __init__(self, **_kwargs):
             pass
 
@@ -76,13 +79,11 @@ def _run_cli(module, monkeypatch, argv: list[str]) -> list[dict[str, object]]:
     uvicorn_stub = types.ModuleType("uvicorn")
 
     def run(app, host: str, port: int) -> None:
-        calls.append(
-            {
-                "app": app,
-                "host": host,
-                "port": port,
-            }
-        )
+        calls.append({
+            "app": app,
+            "host": host,
+            "port": port,
+        })
 
     uvicorn_stub.run = run
     monkeypatch.setitem(sys.modules, "uvicorn", uvicorn_stub)
@@ -99,13 +100,11 @@ def test_server_cli_defaults_to_local_web_port(monkeypatch):
     server_main = _import_server_main(monkeypatch)
     calls = _run_cli(server_main, monkeypatch, ["dreamverse-server"])
 
-    assert calls == [
-        {
-            "app": server_main.app,
-            "host": "0.0.0.0",
-            "port": 8009,
-        }
-    ]
+    assert calls == [{
+        "app": server_main.app,
+        "host": "0.0.0.0",
+        "port": 8009,
+    }]
 
 
 def test_server_cli_allows_explicit_host_and_port(monkeypatch):
@@ -116,13 +115,11 @@ def test_server_cli_allows_explicit_host_and_port(monkeypatch):
         ["dreamverse-server", "--host", "127.0.0.1", "--port", "8123"],
     )
 
-    assert calls == [
-        {
-            "app": server_main.app,
-            "host": "127.0.0.1",
-            "port": 8123,
-        }
-    ]
+    assert calls == [{
+        "app": server_main.app,
+        "host": "127.0.0.1",
+        "port": 8123,
+    }]
 
 
 def test_server_does_not_expose_backend_source_as_static_assets(monkeypatch):
@@ -142,13 +139,11 @@ def test_mock_server_cli_defaults_to_local_web_port(monkeypatch):
         ["dreamverse-mock-server"],
     )
 
-    assert calls == [
-        {
-            "app": mock_server.app,
-            "host": "0.0.0.0",
-            "port": 8009,
-        }
-    ]
+    assert calls == [{
+        "app": mock_server.app,
+        "host": "0.0.0.0",
+        "port": 8009,
+    }]
 
 
 def test_mock_server_cli_updates_latency(monkeypatch):
@@ -161,13 +156,11 @@ def test_mock_server_cli_updates_latency(monkeypatch):
             ["dreamverse-mock-server", "--latency", "321", "--port", "8111"],
         )
 
-        assert calls == [
-            {
-                "app": mock_server.app,
-                "host": "0.0.0.0",
-                "port": 8111,
-            }
-        ]
+        assert calls == [{
+            "app": mock_server.app,
+            "host": "0.0.0.0",
+            "port": 8111,
+        }]
         assert mock_server.LATENCY_MS == 321
     finally:
         mock_server.LATENCY_MS = old_latency_ms

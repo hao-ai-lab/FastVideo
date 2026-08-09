@@ -11,8 +11,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from fastvideo.configs.models.dits.lingbotworld2 import (
-    LingBotWorld2CausalFastVideoConfig,
-)
+    LingBotWorld2CausalFastVideoConfig, )
 from fastvideo.distributed.communication_op import (
     sequence_model_parallel_all_gather,
     sequence_model_parallel_all_to_all_4D,
@@ -58,7 +57,8 @@ def rope_params(max_seq_len: int, dim: int, theta: int = 10000) -> torch.Tensor:
     assert dim % 2 == 0
     freqs = torch.outer(
         torch.arange(max_seq_len),
-        1.0 / torch.pow(theta, torch.arange(0, dim, 2).to(torch.float64).div(dim)),
+        1.0 / torch.pow(theta,
+                        torch.arange(0, dim, 2).to(torch.float64).div(dim)),
     )
     return torch.polar(torch.ones_like(freqs), freqs)
 
@@ -110,12 +110,8 @@ def flash_attention(
     if version == 3 and not FLASH_ATTN_3_AVAILABLE:
         warnings.warn("FlashAttention 3 is not available; using FlashAttention 2.")
 
-    cu_q = torch.cat([q_lens.new_zeros([1]), q_lens]).cumsum(
-        0, dtype=torch.int32
-    ).to(q.device, non_blocking=True)
-    cu_k = torch.cat([k_lens.new_zeros([1]), k_lens]).cumsum(
-        0, dtype=torch.int32
-    ).to(k.device, non_blocking=True)
+    cu_q = torch.cat([q_lens.new_zeros([1]), q_lens]).cumsum(0, dtype=torch.int32).to(q.device, non_blocking=True)
+    cu_k = torch.cat([k_lens.new_zeros([1]), k_lens]).cumsum(0, dtype=torch.int32).to(k.device, non_blocking=True)
 
     if (version is None or version == 3) and FLASH_ATTN_3_AVAILABLE:
         x = flash_attn_interface.flash_attn_varlen_func(
@@ -189,9 +185,7 @@ def attention(
     q = q.transpose(1, 2).to(dtype)
     k = k.transpose(1, 2).to(dtype)
     v = v.transpose(1, 2).to(dtype)
-    out = F.scaled_dot_product_attention(
-        q, k, v, attn_mask=None, is_causal=causal, dropout_p=dropout_p
-    )
+    out = F.scaled_dot_product_attention(q, k, v, attn_mask=None, is_causal=causal, dropout_p=dropout_p)
     return out.transpose(1, 2).contiguous()
 
 
@@ -211,7 +205,7 @@ def causal_rope_apply(
         x_i = torch.view_as_complex(x[i, :seq_len].to(torch.float64).reshape(seq_len, n, -1, 2))
         freqs_i = torch.cat(
             [
-                freqs[0][start_frame : start_frame + f].view(f, 1, 1, -1).expand(f, h, w, -1),
+                freqs[0][start_frame:start_frame + f].view(f, 1, 1, -1).expand(f, h, w, -1),
                 freqs[1][:h].view(1, h, 1, -1).expand(f, h, w, -1),
                 freqs[2][:w].view(1, 1, w, -1).expand(f, h, w, -1),
             ],
@@ -330,18 +324,19 @@ class CausalWanSelfAttention(nn.Module):
             local_start_index = current_start
             kv_cache["k"][:, local_start_index:local_end_index] = roped_key
             kv_cache["v"][:, local_start_index:local_end_index] = v
-        elif (current_end > kv_cache["global_end_index"].item()) and (
-            num_new_tokens + kv_cache["local_end_index"].item() > kv_cache_size
-        ):
+        elif (current_end
+              > kv_cache["global_end_index"].item()) and (num_new_tokens + kv_cache["local_end_index"].item()
+                                                          > kv_cache_size):
             num_evicted_tokens = num_new_tokens + kv_cache["local_end_index"].item() - kv_cache_size
             num_rolled_tokens = kv_cache["local_end_index"].item() - num_evicted_tokens - sink_tokens
-            kv_cache["k"][:, sink_tokens : sink_tokens + num_rolled_tokens] = kv_cache["k"][
-                :, sink_tokens + num_evicted_tokens : sink_tokens + num_evicted_tokens + num_rolled_tokens
-            ].clone()
-            kv_cache["v"][:, sink_tokens : sink_tokens + num_rolled_tokens] = kv_cache["v"][
-                :, sink_tokens + num_evicted_tokens : sink_tokens + num_evicted_tokens + num_rolled_tokens
-            ].clone()
-            local_end_index = kv_cache["local_end_index"].item() + current_end - kv_cache["global_end_index"].item() - num_evicted_tokens
+            kv_cache["k"][:, sink_tokens:sink_tokens +
+                          num_rolled_tokens] = kv_cache["k"][:, sink_tokens + num_evicted_tokens:sink_tokens +
+                                                             num_evicted_tokens + num_rolled_tokens].clone()
+            kv_cache["v"][:, sink_tokens:sink_tokens +
+                          num_rolled_tokens] = kv_cache["v"][:, sink_tokens + num_evicted_tokens:sink_tokens +
+                                                             num_evicted_tokens + num_rolled_tokens].clone()
+            local_end_index = kv_cache["local_end_index"].item() + current_end - kv_cache["global_end_index"].item(
+            ) - num_evicted_tokens
             local_start_index = local_end_index - num_new_tokens
             kv_cache["k"][:, local_start_index:local_end_index] = roped_key
             kv_cache["v"][:, local_start_index:local_end_index] = v
@@ -351,8 +346,8 @@ class CausalWanSelfAttention(nn.Module):
             kv_cache["k"][:, local_start_index:local_end_index] = roped_key
             kv_cache["v"][:, local_start_index:local_end_index] = v
 
-        k_cache = kv_cache["k"][:, max(0, local_end_index - max_attention_size) : local_end_index]
-        v_cache = kv_cache["v"][:, max(0, local_end_index - max_attention_size) : local_end_index]
+        k_cache = kv_cache["k"][:, max(0, local_end_index - max_attention_size):local_end_index]
+        v_cache = kv_cache["v"][:, max(0, local_end_index - max_attention_size):local_end_index]
         x = attention(roped_query, k_cache, v_cache)
         kv_cache["global_end_index"].fill_(current_end)
         kv_cache["local_end_index"].fill_(local_end_index)
@@ -363,6 +358,7 @@ class CausalWanSelfAttention(nn.Module):
                 x = torch.cat([x, x.new_zeros(b, sp_pad, x.size(2), d)], dim=1)
             x = sequence_model_parallel_all_to_all_4D(x, scatter_dim=1, gather_dim=2)
         return self.o(x.flatten(2))
+
 
 class WanCrossAttention(CausalWanSelfAttention):
     """LingBot World 2 cross-attention with reusable text K/V cache."""
@@ -379,7 +375,8 @@ class WanCrossAttention(CausalWanSelfAttention):
         b, n, d = x.size(0), self.num_heads, self.head_dim
         q = self.norm_q(self.q(x)).view(b, -1, n, d)
         if crossattn_cache is not None:
-            is_first = crossattn_cache["is_init"].item() == 0 if cross_attn_first_call is None else cross_attn_first_call
+            is_first = crossattn_cache["is_init"].item(
+            ) == 0 if cross_attn_first_call is None else cross_attn_first_call
             if is_first:
                 crossattn_cache["is_init"].fill_(1)
                 k = self.norm_k(self.k(context)).view(b, -1, n, d)
@@ -470,9 +467,7 @@ class CausalWanAttentionBlock(nn.Module):
 
         if dit_cond_dict is not None and "c2ws_plucker_emb" in dit_cond_dict:
             c2ws_plucker_emb = dit_cond_dict["c2ws_plucker_emb"]
-            c2ws_hidden_states = self.cam_injector_layer2(
-                F.silu(self.cam_injector_layer1(c2ws_plucker_emb))
-            )
+            c2ws_hidden_states = self.cam_injector_layer2(F.silu(self.cam_injector_layer1(c2ws_plucker_emb)))
             c2ws_hidden_states = c2ws_hidden_states + c2ws_plucker_emb
             x = (1.0 + self.cam_scale_layer(c2ws_hidden_states)) * x + self.cam_shift_layer(c2ws_hidden_states)
 
@@ -567,21 +562,18 @@ class LingBotWorld2CausalFastTransformer3DModel(BaseDiT):
             nn.Linear(self.dim, self.dim),
         )
         self.time_projection = nn.Sequential(nn.SiLU(), nn.Linear(self.dim, self.dim * 6))
-        self.blocks = nn.ModuleList(
-            [
-                CausalWanAttentionBlock(
-                    self.dim,
-                    self.ffn_dim,
-                    self.num_heads,
-                    self.local_attn_size,
-                    self.sink_size,
-                    self.qk_norm,
-                    self.cross_attn_norm,
-                    self.eps,
-                )
-                for _ in range(self.num_layers)
-            ]
-        )
+        self.blocks = nn.ModuleList([
+            CausalWanAttentionBlock(
+                self.dim,
+                self.ffn_dim,
+                self.num_heads,
+                self.local_attn_size,
+                self.sink_size,
+                self.qk_norm,
+                self.cross_attn_norm,
+                self.eps,
+            ) for _ in range(self.num_layers)
+        ])
         self.head = CausalHead(self.dim, self.out_dim, self.patch_size, self.eps)
         self.freqs: torch.Tensor | None = None
         self.init_weights()
@@ -667,14 +659,12 @@ class LingBotWorld2CausalFastTransformer3DModel(BaseDiT):
             bt = t.size(0)
             t = t.flatten()
             e = self.time_embedding(
-                sinusoidal_embedding_1d(self.freq_dim, t).unflatten(0, (bt, padded_seq_len)).float()
-            )
+                sinusoidal_embedding_1d(self.freq_dim, t).unflatten(0, (bt, padded_seq_len)).float())
             e0 = self.time_projection(e).unflatten(2, (6, self.dim))
 
         context_lens = None
         context = self.text_embedding(
-            torch.stack([torch.cat([u, u.new_zeros(self.text_len - u.size(0), u.size(1))]) for u in context])
-        )
+            torch.stack([torch.cat([u, u.new_zeros(self.text_len - u.size(0), u.size(1))]) for u in context]))
 
         if dit_cond_dict is not None and "c2ws_plucker_emb" in dit_cond_dict:
             c2ws_plucker_emb = dit_cond_dict["c2ws_plucker_emb"]
@@ -685,14 +675,12 @@ class LingBotWorld2CausalFastTransformer3DModel(BaseDiT):
                     c1=self.patch_size[0],
                     c2=self.patch_size[1],
                     c3=self.patch_size[2],
-                )
-                for i in c2ws_plucker_emb
+                ) for i in c2ws_plucker_emb
             ]
             c2ws_plucker_emb = torch.cat(c2ws_plucker_emb, dim=1)
             c2ws_plucker_emb = self.patch_embedding_wancamctrl(c2ws_plucker_emb)
-            c2ws_hidden_states = self.c2ws_hidden_states_layer2(
-                F.silu(self.c2ws_hidden_states_layer1(c2ws_plucker_emb))
-            )
+            c2ws_hidden_states = self.c2ws_hidden_states_layer2(F.silu(
+                self.c2ws_hidden_states_layer1(c2ws_plucker_emb)))
             c2ws_plucker_emb = c2ws_plucker_emb + c2ws_hidden_states
             cam_len = c2ws_plucker_emb.size(1)
             if cam_len < padded_seq_len:
@@ -748,7 +736,7 @@ class LingBotWorld2CausalFastTransformer3DModel(BaseDiT):
         c = self.out_dim
         out = []
         for u, v in zip(x, grid_sizes.tolist(), strict=True):
-            u = u[: math.prod(v)].view(*v, *self.patch_size, c)
+            u = u[:math.prod(v)].view(*v, *self.patch_size, c)
             u = torch.einsum("fhwpqrc->cfphqwr", u)
             u = u.reshape(c, *[i * j for i, j in zip(v, self.patch_size, strict=True)])
             out.append(u)

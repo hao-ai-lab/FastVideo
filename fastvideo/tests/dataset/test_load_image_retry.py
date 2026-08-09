@@ -35,8 +35,7 @@ def test_load_image_retries_transient_error_then_succeeds(monkeypatch):
     monkeypatch.setattr(vision_utils.time, "sleep", lambda _s: None)
     get = mock.Mock(side_effect=[
         # The shape that broke build 4202: connection dropped mid-body.
-        requests.exceptions.ChunkedEncodingError(
-            "IncompleteRead(1024 bytes read, 2048 more expected)"),
+        requests.exceptions.ChunkedEncodingError("IncompleteRead(1024 bytes read, 2048 more expected)"),
         _good_response(),
     ])
     monkeypatch.setattr(vision_utils.requests, "get", get)
@@ -53,8 +52,7 @@ def test_load_image_retries_transient_error_then_succeeds(monkeypatch):
 def test_load_image_raises_after_exhausting_retries(monkeypatch):
     sleeps: list[float] = []
     monkeypatch.setattr(vision_utils.time, "sleep", sleeps.append)
-    get = mock.Mock(
-        side_effect=requests.exceptions.ConnectionError("connection reset"))
+    get = mock.Mock(side_effect=requests.exceptions.ConnectionError("connection reset"))
     monkeypatch.setattr(vision_utils.requests, "get", get)
 
     with pytest.raises(requests.exceptions.ConnectionError):

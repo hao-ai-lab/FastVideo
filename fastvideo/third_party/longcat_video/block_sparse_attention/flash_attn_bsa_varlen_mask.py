@@ -31,32 +31,58 @@ configs_fwd_bsa_varlen = [
     for w in [4, 8] \
 ]
 
-fwd_bsa_reevaluate_varlen_keys = ['N_CTX', 'BLOCK_M', 'BLOCK_N_LG', 'SPARSITY'] if os.environ.get('TRITON_REEVALUATE_KEY', '0') == '1' else []
+fwd_bsa_reevaluate_varlen_keys = ['N_CTX', 'BLOCK_M', 'BLOCK_N_LG', 'SPARSITY'] if os.environ.get(
+    'TRITON_REEVALUATE_KEY', '0') == '1' else []
+
+
 @autotune(list(configs_fwd_bsa_varlen), key=fwd_bsa_reevaluate_varlen_keys)
 @triton.jit
 def _attn_fwd_bsa_varlen(
-    Q, K, V, sm_scale, M, Out, 
-    block_indices, # [B, H, M_COMPRESS, S_MAX]
-    block_indices_lens, # [B, H, M_COMPRESS]
-    stride_qz, stride_qh, stride_qm, stride_qk,
-    stride_kz, stride_kh, stride_kn, stride_kk,
-    stride_vz, stride_vh, stride_vn, stride_vk,
-    stride_oz, stride_oh, stride_om, stride_ok,
-    stride_bz, stride_bh, stride_bm, stride_bs,
-    stride_lz, stride_lh, stride_lm,
-    H, N_CTX,
-    HEAD_DIM: tl.constexpr, 
-    BLOCK_M: tl.constexpr, 
-    BLOCK_N_LG: tl.constexpr, 
-    BLOCK_N: tl.constexpr, 
-    SPARSITY: tl.constexpr, # not used; just for trigger reevaluate for benchmarking
-    ):
-    
+        Q,
+        K,
+        V,
+        sm_scale,
+        M,
+        Out,
+        block_indices,  # [B, H, M_COMPRESS, S_MAX]
+        block_indices_lens,  # [B, H, M_COMPRESS]
+        stride_qz,
+        stride_qh,
+        stride_qm,
+        stride_qk,
+        stride_kz,
+        stride_kh,
+        stride_kn,
+        stride_kk,
+        stride_vz,
+        stride_vh,
+        stride_vn,
+        stride_vk,
+        stride_oz,
+        stride_oh,
+        stride_om,
+        stride_ok,
+        stride_bz,
+        stride_bh,
+        stride_bm,
+        stride_bs,
+        stride_lz,
+        stride_lh,
+        stride_lm,
+        H,
+        N_CTX,
+        HEAD_DIM: tl.constexpr,
+        BLOCK_M: tl.constexpr,
+        BLOCK_N_LG: tl.constexpr,
+        BLOCK_N: tl.constexpr,
+        SPARSITY: tl.constexpr,  # not used; just for trigger reevaluate for benchmarking
+):
+
     start_m = tl.program_id(0)
     off_hz = tl.program_id(1)
     off_z = off_hz // H
     off_h = off_hz % H
-    
+
     q_offset = off_z.to(tl.int64) * stride_qz + off_h.to(tl.int64) * stride_qh
     k_offset = off_z.to(tl.int64) * stride_kz + off_h.to(tl.int64) * stride_kh
     v_offset = off_z.to(tl.int64) * stride_vz + off_h.to(tl.int64) * stride_vh
@@ -129,7 +155,7 @@ def _attn_fwd_bsa_varlen(
             m_ij = tl.maximum(m_i, tl.max(qkT, 1) * qk_scale)
             qkT = qkT * qk_scale - m_ij[:, None]
             p = tl.math.exp2(qkT)
-            
+
             # -- update m_i and l_i
             alpha = tl.math.exp2(m_i - m_ij)
             l_ij = tl.sum(p, 1)
@@ -144,13 +170,14 @@ def _attn_fwd_bsa_varlen(
             m_i = m_ij
             V_block_ptr_i = tl.advance(V_block_ptr_i, (BLOCK_N, 0))
             KT_block_ptr_i = tl.advance(KT_block_ptr_i, (0, BLOCK_N))
-    
+
     # epilogue
     m_i += tl.math.log2(l_i)
     acc = acc / l_i[:, None]
     m_ptrs = M + off_hz * N_CTX + offs_m
     tl.store(m_ptrs, m_i)
     tl.store(O_block_ptr, acc.to(Out.type.element_ty))
+
 
 configs_fwd_bsa_varlen_align_preset = {
     'default': {
@@ -168,31 +195,57 @@ configs_fwd_bsa_varlen_align = [
     for w in [4, 8] \
 ]
 
-fwd_bsa_reevaluate_varlen_align_keys = ['N_CTX', 'BLOCK_M', 'BLOCK_N_LG', 'SPARSITY'] if os.environ.get('TRITON_REEVALUATE_KEY', '0') == '1' else []
+fwd_bsa_reevaluate_varlen_align_keys = ['N_CTX', 'BLOCK_M', 'BLOCK_N_LG', 'SPARSITY'] if os.environ.get(
+    'TRITON_REEVALUATE_KEY', '0') == '1' else []
+
+
 @autotune(list(configs_fwd_bsa_varlen_align), key=fwd_bsa_reevaluate_varlen_align_keys)
 @triton.jit
 def _attn_fwd_bsa_varlen_align(
-    Q, K, V, sm_scale, M, Out, 
-    block_indices, # [B, H, M_COMPRESS, S_MAX]
-    block_indices_lens, # [B, H, M_COMPRESS]
-    stride_qz, stride_qh, stride_qm, stride_qk,
-    stride_kz, stride_kh, stride_kn, stride_kk,
-    stride_vz, stride_vh, stride_vn, stride_vk,
-    stride_oz, stride_oh, stride_om, stride_on,
-    stride_bz, stride_bh, stride_bm, stride_bs,
-    stride_lz, stride_lh, stride_lm,
-    H, N_CTX,
-    HEAD_DIM: tl.constexpr, 
-    BLOCK_M: tl.constexpr, 
-    BLOCK_N_LG: tl.constexpr, 
-    SPARSITY: tl.constexpr, # not used; just for trigger reevaluate for benchmarking
-    ):
-    
+        Q,
+        K,
+        V,
+        sm_scale,
+        M,
+        Out,
+        block_indices,  # [B, H, M_COMPRESS, S_MAX]
+        block_indices_lens,  # [B, H, M_COMPRESS]
+        stride_qz,
+        stride_qh,
+        stride_qm,
+        stride_qk,
+        stride_kz,
+        stride_kh,
+        stride_kn,
+        stride_kk,
+        stride_vz,
+        stride_vh,
+        stride_vn,
+        stride_vk,
+        stride_oz,
+        stride_oh,
+        stride_om,
+        stride_on,
+        stride_bz,
+        stride_bh,
+        stride_bm,
+        stride_bs,
+        stride_lz,
+        stride_lh,
+        stride_lm,
+        H,
+        N_CTX,
+        HEAD_DIM: tl.constexpr,
+        BLOCK_M: tl.constexpr,
+        BLOCK_N_LG: tl.constexpr,
+        SPARSITY: tl.constexpr,  # not used; just for trigger reevaluate for benchmarking
+):
+
     start_m = tl.program_id(0)
     off_hz = tl.program_id(1)
     off_z = off_hz // H
     off_h = off_hz % H
-    
+
     q_offset = off_z.to(tl.int64) * stride_qz + off_h.to(tl.int64) * stride_qh
     k_offset = off_z.to(tl.int64) * stride_kz + off_h.to(tl.int64) * stride_kh
     v_offset = off_z.to(tl.int64) * stride_vz + off_h.to(tl.int64) * stride_vh
@@ -262,7 +315,7 @@ def _attn_fwd_bsa_varlen_align(
         m_ij = tl.maximum(m_i, tl.max(qkT, 1) * qk_scale)
         qkT = qkT * qk_scale - m_ij[:, None]
         p = tl.math.exp2(qkT)
-        
+
         # -- update m_i and l_i
         alpha = tl.math.exp2(m_i - m_ij)
         l_ij = tl.sum(p, 1)
@@ -270,13 +323,12 @@ def _attn_fwd_bsa_varlen_align(
         acc = acc * alpha[:, None]
         # update acc
         v = tl.load(V_block_ptr_i)
-        acc = tl.dot(p.to(v.dtype), v, acc) # 没除se，fa2引入的优化
+        acc = tl.dot(p.to(v.dtype), v, acc)  # 没除se，fa2引入的优化
         # update m_i and l_i
         # place this at the end of the loop to reduce register pressure: https://github.com/triton-lang/triton/commit/ee6abd9
-        l_i = l_i * alpha + l_ij # 当前总se
+        l_i = l_i * alpha + l_ij  # 当前总se
         m_i = m_ij
 
-    
     # epilogue
     m_i += tl.math.log2(l_i)
     acc = acc / l_i[:, None]
@@ -288,24 +340,30 @@ def _attn_fwd_bsa_varlen_align(
 # The main inner-loop logic for computing dK and dV.
 @triton.jit
 def _attn_bwd_dkdv_bsa_varlen(
-    dk, dv,
-    k, v,
-    Q, DO,
-    M, D,
+    dk,
+    dv,
+    k,
+    v,
+    Q,
+    DO,
+    M,
+    D,
     block_indices,
     block_indices_lens,
     # shared by Q/K/V/DO.
     # stride_tok, stride_d,
-    stride_qm, stride_qk,
-    stride_dom, stride_dok,
+    stride_qm,
+    stride_qk,
+    stride_dom,
+    stride_dok,
     stride_mm,
     stride_dm,
     stride_bm,
-    N_CTX, 
+    N_CTX,
     BLOCK_M1: tl.constexpr,
     HEAD_DIM: tl.constexpr,
-    ):
-    
+):
+
     QT_block_ptr = tl.make_block_ptr(
         base=Q,
         shape=(HEAD_DIM, N_CTX),
@@ -314,7 +372,7 @@ def _attn_bwd_dkdv_bsa_varlen(
         block_shape=(HEAD_DIM, BLOCK_M1),
         order=(0, 1),
     )
-    
+
     DO_block_ptr = tl.make_block_ptr(
         base=DO,
         shape=(N_CTX, HEAD_DIM),
@@ -329,10 +387,10 @@ def _attn_bwd_dkdv_bsa_varlen(
         block_id = tl.load(block_indices + i * stride_bm).to(tl.int32)
         start_m = block_id * BLOCK_M1
         start_m = tl.multiple_of(start_m, BLOCK_M1)
-        
+
         QT_block_ptr_i = tl.advance(QT_block_ptr, (0, start_m))
         DO_block_ptr_i = tl.advance(DO_block_ptr, (start_m, 0))
-        
+
         qT = tl.load(QT_block_ptr_i)
         # Load m before computing qk to reduce pipeline stall.
         offs_m = start_m + tl.arange(0, BLOCK_M1) * stride_mm
@@ -353,7 +411,6 @@ def _attn_bwd_dkdv_bsa_varlen(
         dsT = pT * (dpT - Di[None, :])
         dsT = dsT.to(v.dtype)
         dk += tl.dot(dsT, tl.trans(qT))
-        
 
     return dk, dv
 
@@ -362,9 +419,12 @@ def _attn_bwd_dkdv_bsa_varlen(
 @triton.jit
 def _attn_bwd_dq_bsa_varlen(
     dq,
-    q, do, 
-    m, d,
-    K, V, 
+    q,
+    do,
+    m,
+    d,
+    K,
+    V,
     N_CTX,
     BLOCK_N2: tl.constexpr,
     BLOCK_N_LG: tl.constexpr,
@@ -373,10 +433,12 @@ def _attn_bwd_dq_bsa_varlen(
     block_indices_lens,
     stride_bn,
     # stride_tok, stride_d,
-    stride_kn, stride_kk,        
-    stride_vn, stride_vk,  
-    ):
-    
+    stride_kn,
+    stride_kk,
+    stride_vn,
+    stride_vk,
+):
+
     VT_block_ptr = tl.make_block_ptr(
         base=V,
         shape=(HEAD_DIM, N_CTX),
@@ -393,19 +455,19 @@ def _attn_bwd_dq_bsa_varlen(
         block_shape=(HEAD_DIM, BLOCK_N2),
         order=(0, 1),
     )
-    
+
     S = tl.load(block_indices_lens)
     for i in range(S):
         block_id = tl.load(block_indices + i * stride_bn).to(tl.int32)
         lo, hi = block_id * BLOCK_N_LG, (block_id + 1) * BLOCK_N_LG
         lo = tl.multiple_of(lo, BLOCK_N2)
-        
+
         KT_block_ptr_i = tl.advance(KT_block_ptr, (0, lo))
         VT_block_ptr_i = tl.advance(VT_block_ptr, (0, lo))
-    
+
         for start_n in range(lo, hi, BLOCK_N2):
             start_n = tl.multiple_of(start_n, BLOCK_N2)
-            
+
             kT = tl.load(KT_block_ptr_i)
             vT = tl.load(VT_block_ptr_i)
             qkT = tl.dot(q, kT)
@@ -413,33 +475,41 @@ def _attn_bwd_dq_bsa_varlen(
             # Compute dP and dS.
             dp = tl.dot(do, vT).to(tl.float32)
             ds = p * (dp - d)
-            ds = ds.to(kT.dtype) # https://github.com/Dao-AILab/flash-attention/blob/main/flash_attn/flash_attn_triton.py: Converting ds to q.dtype here reduces register pressure and makes it much faster for BLOCK_HEADDIM=128
+            ds = ds.to(
+                kT.dtype
+            )  # https://github.com/Dao-AILab/flash-attention/blob/main/flash_attn/flash_attn_triton.py: Converting ds to q.dtype here reduces register pressure and makes it much faster for BLOCK_HEADDIM=128
             # Compute dQ.
             # NOTE: We need to de-scale dq in the end, because kT was pre-scaled.
             dq += tl.dot(ds, tl.trans(kT))
             # Increment pointers.
             KT_block_ptr_i = tl.advance(KT_block_ptr_i, (0, BLOCK_N2))
             VT_block_ptr_i = tl.advance(VT_block_ptr_i, (0, BLOCK_N2))
-        
+
     return dq
+
 
 # the main inner-loop logic for computing dQ
 @triton.jit
 def _attn_bwd_dq_bsa_varlen_align(
     dq,
-    q, do, 
-    m, d,
-    K, V, 
+    q,
+    do,
+    m,
+    d,
+    K,
+    V,
     N_CTX,
     BLOCK_N_LG: tl.constexpr,
     HEAD_DIM: tl.constexpr,
     block_indices,
     block_indices_lens,
     stride_bn,
-    stride_kn, stride_kk,        
-    stride_vn, stride_vk,  
-    ):
-    
+    stride_kn,
+    stride_kk,
+    stride_vn,
+    stride_vk,
+):
+
     VT_block_ptr = tl.make_block_ptr(
         base=V,
         shape=(HEAD_DIM, N_CTX),
@@ -456,16 +526,16 @@ def _attn_bwd_dq_bsa_varlen_align(
         block_shape=(HEAD_DIM, BLOCK_N_LG),
         order=(0, 1),
     )
-    
+
     S = tl.load(block_indices_lens)
     for i in range(S):
         block_id = tl.load(block_indices + i * stride_bn).to(tl.int32)
         lo = block_id * BLOCK_N_LG
         lo = tl.multiple_of(lo, BLOCK_N_LG)
-        
+
         KT_block_ptr_i = tl.advance(KT_block_ptr, (0, lo))
         VT_block_ptr_i = tl.advance(VT_block_ptr, (0, lo))
-          
+
         kT = tl.load(KT_block_ptr_i)
         vT = tl.load(VT_block_ptr_i)
         qkT = tl.dot(q, kT)
@@ -473,13 +543,15 @@ def _attn_bwd_dq_bsa_varlen_align(
         # Compute dP and dS.
         dp = tl.dot(do, vT).to(tl.float32)
         ds = p * (dp - d)
-        ds = ds.to(kT.dtype) # https://github.com/Dao-AILab/flash-attention/blob/main/flash_attn/flash_attn_triton.py: Converting ds to q.dtype here reduces register pressure and makes it much faster for BLOCK_HEADDIM=128
+        ds = ds.to(
+            kT.dtype
+        )  # https://github.com/Dao-AILab/flash-attention/blob/main/flash_attn/flash_attn_triton.py: Converting ds to q.dtype here reduces register pressure and makes it much faster for BLOCK_HEADDIM=128
         # Compute dQ.
         # NOTE: We need to de-scale dq in the end, because kT was pre-scaled.
         dq += tl.dot(ds, tl.trans(kT))
 
-        
     return dq
+
 
 configs_bwd_dkdv_bsa_varlen_preset = {
     'default': {
@@ -499,40 +571,75 @@ configs_bwd_dkdv_bsa_varlen = [
     for s in [2, 3, 4, 5] \
     for w in [4, 8] \
 ]
-bwd_dkdv_bsa_varlen_reevaluate_keys = ['N_CTX', 'BLOCK_M', 'BLOCK_N_DQ_LG', 'SPARSITY'] if os.environ.get('TRITON_REEVALUATE_KEY', '0') == '1' else []
+bwd_dkdv_bsa_varlen_reevaluate_keys = ['N_CTX', 'BLOCK_M', 'BLOCK_N_DQ_LG', 'SPARSITY'] if os.environ.get(
+    'TRITON_REEVALUATE_KEY', '0') == '1' else []
+
+
 @autotune(list(configs_bwd_dkdv_bsa_varlen), key=bwd_dkdv_bsa_varlen_reevaluate_keys)
 @triton.jit
 def _attn_bwd_dkdv_bsa_varlen_wrapper(
-    Q, K, V, sm_scale,  # softmax scale
-    DO,
-    DK, DV,
-    M, # lse (log2)
-    D,
-    block_indices,
-    block_indices_lens,
-    # stride_z, stride_h, stride_tok, stride_d, # shared by Q/K/V/DO.
-    # qkv
-    stride_qz, stride_qh, stride_qm, stride_qk,
-    stride_kz, stride_kh, stride_kn, stride_kk,
-    stride_vz, stride_vh, stride_vn, stride_vk,
-    # dk dv do
-    stride_dkz, stride_dkh, stride_dkn, stride_dkk,
-    stride_dvz, stride_dvh, stride_dvn, stride_dvk,
-    stride_doz, stride_doh, stride_dom, stride_dok,
-    # m, d
-    stride_mz, stride_mh, stride_mm,
-    stride_dz, stride_dh, stride_dm,
-    #
-    stride_bz, stride_bh, stride_bn, stride_bm, # block_indices
-    stride_lz, stride_lh, stride_ln, # block_indices_lens
-    #
-    H, N_CTX,
-    BLOCK_M: tl.constexpr, 
-    BLOCK_N: tl.constexpr, 
-    BLOCK_N_DQ_LG: tl.constexpr, # logical block size
-    HEAD_DIM: tl.constexpr,
-    SPARSITY: tl.constexpr, # not used; just for trigger reevaluate for benchmarking
-    ):
+        Q,
+        K,
+        V,
+        sm_scale,  # softmax scale
+        DO,
+        DK,
+        DV,
+        M,  # lse (log2)
+        D,
+        block_indices,
+        block_indices_lens,
+        # stride_z, stride_h, stride_tok, stride_d, # shared by Q/K/V/DO.
+        # qkv
+        stride_qz,
+        stride_qh,
+        stride_qm,
+        stride_qk,
+        stride_kz,
+        stride_kh,
+        stride_kn,
+        stride_kk,
+        stride_vz,
+        stride_vh,
+        stride_vn,
+        stride_vk,
+        # dk dv do
+        stride_dkz,
+        stride_dkh,
+        stride_dkn,
+        stride_dkk,
+        stride_dvz,
+        stride_dvh,
+        stride_dvn,
+        stride_dvk,
+        stride_doz,
+        stride_doh,
+        stride_dom,
+        stride_dok,
+        # m, d
+        stride_mz,
+        stride_mh,
+        stride_mm,
+        stride_dz,
+        stride_dh,
+        stride_dm,
+        #
+        stride_bz,
+        stride_bh,
+        stride_bn,
+        stride_bm,  # block_indices
+        stride_lz,
+        stride_lh,
+        stride_ln,  # block_indices_lens
+        #
+    H,
+        N_CTX,
+        BLOCK_M: tl.constexpr,
+        BLOCK_N: tl.constexpr,
+        BLOCK_N_DQ_LG: tl.constexpr,  # logical block size
+        HEAD_DIM: tl.constexpr,
+        SPARSITY: tl.constexpr,  # not used; just for trigger reevaluate for benchmarking
+):
 
     tl.static_assert(BLOCK_N_DQ_LG % BLOCK_N == 0)
     start_n = tl.program_id(0)
@@ -540,7 +647,7 @@ def _attn_bwd_dkdv_bsa_varlen_wrapper(
     off_hz = tl.program_id(2)
     off_z = off_hz // H
     off_h = off_hz % H
-    
+
     off_q = off_z.to(tl.int64) * stride_qz + off_h.to(tl.int64) * stride_qh
     off_k = off_z.to(tl.int64) * stride_kz + off_h.to(tl.int64) * stride_kh
     off_v = off_z.to(tl.int64) * stride_vz + off_h.to(tl.int64) * stride_vh
@@ -548,13 +655,13 @@ def _attn_bwd_dkdv_bsa_varlen_wrapper(
     off_dk = off_z.to(tl.int64) * stride_dkz + off_h.to(tl.int64) * stride_dkh
     off_dv = off_z.to(tl.int64) * stride_dvz + off_h.to(tl.int64) * stride_dvh
     off_do = off_z.to(tl.int64) * stride_doz + off_h.to(tl.int64) * stride_doh
-    
+
     off_m = off_z.to(tl.int64) * stride_mz + off_h.to(tl.int64) * stride_mh
     off_d = off_z.to(tl.int64) * stride_dz + off_h.to(tl.int64) * stride_dh
 
-    off_block_incides =      off_z.to(tl.int64) * stride_bz + off_h.to(tl.int64) * stride_bh
+    off_block_incides = off_z.to(tl.int64) * stride_bz + off_h.to(tl.int64) * stride_bh
     off_block_incides_lens = off_z.to(tl.int64) * stride_lz + off_h.to(tl.int64) * stride_lh
-    
+
     # offset pointers for batch/head
     Q += off_q
     K += off_k
@@ -562,7 +669,7 @@ def _attn_bwd_dkdv_bsa_varlen_wrapper(
     DO += off_do
     DK += off_dk
     DV += off_dv
-    
+
     M += off_m
     D += off_d
     block_indices += off_block_incides
@@ -574,7 +681,7 @@ def _attn_bwd_dkdv_bsa_varlen_wrapper(
     dk = tl.zeros([BLOCK_N, HEAD_DIM], dtype=tl.float32)
 
     # load K and V: they stay in SRAM throughout the inner loop.
-    
+
     K_block_ptr = tl.make_block_ptr(
         base=K,
         shape=(N_CTX, HEAD_DIM),
@@ -607,39 +714,46 @@ def _attn_bwd_dkdv_bsa_varlen_wrapper(
         block_shape=(BLOCK_N, HEAD_DIM),
         order=(1, 0),
     )
-    
+
     k = tl.load(K_block_ptr)
     v = tl.load(V_block_ptr)
-    
+
     k_compress_idx = start_n * BLOCK_N // BLOCK_N_DQ_LG
     block_indices_i = block_indices + k_compress_idx * stride_bn
     block_indices_lens_i = block_indices_lens + k_compress_idx * stride_ln
-    
+
     dk, dv = _attn_bwd_dkdv_bsa_varlen(
-        dk, dv, 
-        k, v, 
-        Q, DO, 
-        M, D, 
+        dk,
+        dv,
+        k,
+        v,
+        Q,
+        DO,
+        M,
+        D,
         block_indices_i,
         block_indices_lens_i,
         # shared by Q/K/V/DO.
-        stride_qm, stride_qk,
-        stride_dom, stride_dok,
+        stride_qm,
+        stride_qk,
+        stride_dom,
+        stride_dok,
         stride_mm,
         stride_dm,
         #
         stride_bm,
-        N_CTX, 
-        BLOCK_M, 
-        HEAD_DIM, 
+        N_CTX,
+        BLOCK_M,
+        HEAD_DIM,
     )
-    
+
     # Write back dk
-    dk *= sm_scale # S = scale * QKT; dK = scale * QdST
+    dk *= sm_scale  # S = scale * QKT; dK = scale * QdST
     tl.store(DK_block_ptr, dk.to(k.dtype))
-    
+
     # Write back dv
     tl.store(DV_block_ptr, dv.to(v.dtype))
+
 
 configs_bwd_dq_bsa_varlen_preset = {
     'default': {
@@ -659,62 +773,92 @@ configs_bwd_dq_bsa_varlen = [
     for s in [2, 3, 4, 5] \
     for w in [4, 8] \
 ]
-bwd_dq_bsa_varlen_reevaluate_keys = ['N_CTX', 'BLOCK_M', 'BLOCK_N_DQ_LG', 'SPARSITY'] if os.environ.get('TRITON_REEVALUATE_KEY', '0') == '1' else []
+bwd_dq_bsa_varlen_reevaluate_keys = ['N_CTX', 'BLOCK_M', 'BLOCK_N_DQ_LG', 'SPARSITY'] if os.environ.get(
+    'TRITON_REEVALUATE_KEY', '0') == '1' else []
+
+
 @autotune(list(configs_bwd_dq_bsa_varlen), key=bwd_dq_bsa_varlen_reevaluate_keys)
 @triton.jit
 def _attn_bwd_dq_bsa_varlen_wrapper(
-    Q, K, V,  # softmax scale
-    DO, 
-    DQ,
-    M, # lse (log2)
-    D,
-    block_indices,
-    block_indices_lens,
-    # stride_z, stride_h, stride_tok, stride_d, # shared by Q/K/V/DO.
-    # qkv
-    stride_qz, stride_qh, stride_qm, stride_qk,
-    stride_kz, stride_kh, stride_kn, stride_kk,
-    stride_vz, stride_vh, stride_vn, stride_vk,
-    # dq do
-    stride_dqz, stride_dqh, stride_dqm, stride_dqk,
-    stride_doz, stride_doh, stride_dom, stride_dok,
-    # m, d
-    stride_mz, stride_mh, stride_mm,
-    stride_dz, stride_dh, stride_dm,
-    #
-    stride_bz, stride_bh, stride_bm, stride_bn, # block_indices
-    stride_lz, stride_lh, stride_lm, # block_indices_lens
-    #
-    H, N_CTX,
-    BLOCK_M: tl.constexpr, 
-    BLOCK_N_DQ_LG: tl.constexpr, # logical block size
-    BLOCK_N_DQ: tl.constexpr, 
-    HEAD_DIM: tl.constexpr,
-    SPARSITY: tl.constexpr, # not used; just for trigger reevaluate for benchmarking
-    ):
+        Q,
+        K,
+        V,  # softmax scale
+        DO,
+        DQ,
+        M,  # lse (log2)
+        D,
+        block_indices,
+        block_indices_lens,
+        # stride_z, stride_h, stride_tok, stride_d, # shared by Q/K/V/DO.
+        # qkv
+        stride_qz,
+        stride_qh,
+        stride_qm,
+        stride_qk,
+        stride_kz,
+        stride_kh,
+        stride_kn,
+        stride_kk,
+        stride_vz,
+        stride_vh,
+        stride_vn,
+        stride_vk,
+        # dq do
+        stride_dqz,
+        stride_dqh,
+        stride_dqm,
+        stride_dqk,
+        stride_doz,
+        stride_doh,
+        stride_dom,
+        stride_dok,
+        # m, d
+        stride_mz,
+        stride_mh,
+        stride_mm,
+        stride_dz,
+        stride_dh,
+        stride_dm,
+        #
+        stride_bz,
+        stride_bh,
+        stride_bm,
+        stride_bn,  # block_indices
+        stride_lz,
+        stride_lh,
+        stride_lm,  # block_indices_lens
+        #
+    H,
+        N_CTX,
+        BLOCK_M: tl.constexpr,
+        BLOCK_N_DQ_LG: tl.constexpr,  # logical block size
+        BLOCK_N_DQ: tl.constexpr,
+        HEAD_DIM: tl.constexpr,
+        SPARSITY: tl.constexpr,  # not used; just for trigger reevaluate for benchmarking
+):
 
     tl.static_assert(BLOCK_N_DQ_LG % BLOCK_N_DQ == 0)
     tl.static_assert(BLOCK_N_DQ_LG % BLOCK_M == 0)
-    
+
     LN2: tl.constexpr = 0.6931471824645996  # = ln(2)
-    
+
     start_m = tl.program_id(0)
 
     off_hz = tl.program_id(2)
     off_z = off_hz // H
     off_h = off_hz % H
-    
+
     off_q = off_z.to(tl.int64) * stride_qz + off_h.to(tl.int64) * stride_qh
     off_k = off_z.to(tl.int64) * stride_kz + off_h.to(tl.int64) * stride_kh
     off_v = off_z.to(tl.int64) * stride_vz + off_h.to(tl.int64) * stride_vh
 
     off_dq = off_z.to(tl.int64) * stride_dqz + off_h.to(tl.int64) * stride_dqh
     off_do = off_z.to(tl.int64) * stride_doz + off_h.to(tl.int64) * stride_doh
-    
+
     off_m = off_z.to(tl.int64) * stride_mz + off_h.to(tl.int64) * stride_mh
     off_d = off_z.to(tl.int64) * stride_dz + off_h.to(tl.int64) * stride_dh
 
-    off_block_incides =      off_z.to(tl.int64) * stride_bz + off_h.to(tl.int64) * stride_bh
+    off_block_incides = off_z.to(tl.int64) * stride_bz + off_h.to(tl.int64) * stride_bh
     off_block_incides_lens = off_z.to(tl.int64) * stride_lz + off_h.to(tl.int64) * stride_lh
 
     # offset pointers for batch/head
@@ -723,14 +867,14 @@ def _attn_bwd_dq_bsa_varlen_wrapper(
     V += off_v
     DO += off_do
     DQ += off_dq
-    
+
     M += off_m
     D += off_d
     block_indices += off_block_incides
     block_indices_lens += off_block_incides_lens
 
     # ---------------------------------------- [DQ] ----------------------------------------
-    
+
     Q_block_ptr = tl.make_block_ptr(
         base=Q,
         shape=(N_CTX, HEAD_DIM),
@@ -755,12 +899,12 @@ def _attn_bwd_dq_bsa_varlen_wrapper(
         block_shape=(BLOCK_M, HEAD_DIM),
         order=(1, 0),
     )
-    
+
     q = tl.load(Q_block_ptr)
     do = tl.load(DO_block_ptr)
-    
+
     dq = tl.zeros([BLOCK_M, HEAD_DIM], dtype=tl.float32)
-    
+
     start_m = start_m * BLOCK_M
 
     offs_m = start_m + tl.arange(0, BLOCK_M) * stride_mm
@@ -771,29 +915,35 @@ def _attn_bwd_dq_bsa_varlen_wrapper(
 
     d = tl.load(D + offs_d)
     d = d[:, None]
-    
+
     block_indices_m = block_indices + (start_m // BLOCK_M) * stride_bm
     block_indices_lens_m = block_indices_lens + (start_m // BLOCK_M) * stride_lm
 
     dq = _attn_bwd_dq_bsa_varlen(
         dq,
-        q, do, 
-        m, d,
-        K, V, 
+        q,
+        do,
+        m,
+        d,
+        K,
+        V,
         N_CTX,
         BLOCK_N_DQ,
-        BLOCK_N_DQ_LG,   
+        BLOCK_N_DQ_LG,
         HEAD_DIM,
-        block_indices_m, 
-        block_indices_lens_m, 
-        stride_bn,   
-        stride_kn, stride_kk,        
-        stride_vn, stride_vk,   
+        block_indices_m,
+        block_indices_lens_m,
+        stride_bn,
+        stride_kn,
+        stride_kk,
+        stride_vn,
+        stride_vk,
     )
-    
+
     # Write back dQ.
     dq *= LN2
     tl.store(DQ_block_ptr, dq.to(q.dtype))
+
 
 configs_bwd_dq_bsa_varlen_align_preset = {
     'default': {
@@ -810,60 +960,90 @@ configs_bwd_dq_bsa_varlen_align = [
     for s in [2, 3, 4, 5] \
     for w in [4, 8] \
 ]
-bwd_dq_bsa_varlen_align_reevaluate_keys = ['N_CTX', 'BLOCK_M', 'BLOCK_N_DQ_LG', 'SPARSITY'] if os.environ.get('TRITON_REEVALUATE_KEY', '0') == '1' else []
+bwd_dq_bsa_varlen_align_reevaluate_keys = ['N_CTX', 'BLOCK_M', 'BLOCK_N_DQ_LG', 'SPARSITY'] if os.environ.get(
+    'TRITON_REEVALUATE_KEY', '0') == '1' else []
+
+
 @autotune(list(configs_bwd_dq_bsa_varlen_align), key=bwd_dq_bsa_varlen_align_reevaluate_keys)
 @triton.jit
 def _attn_bwd_dq_bsa_varlen_align_wrapper(
-    Q, K, V,  # softmax scale
-    DO, 
-    DQ,
-    M, # lse (log2)
-    D,
-    block_indices,
-    block_indices_lens,
-    # qkv
-    stride_qz, stride_qh, stride_qm, stride_qk,
-    stride_kz, stride_kh, stride_kn, stride_kk,
-    stride_vz, stride_vh, stride_vn, stride_vk,
-    # dq do
-    stride_dqz, stride_dqh, stride_dqm, stride_dqk,
-    stride_doz, stride_doh, stride_dom, stride_dok,
-    # m, d
-    stride_mz, stride_mh, stride_mm,
-    stride_dz, stride_dh, stride_dm,
-    #
-    stride_bz, stride_bh, stride_bm, stride_bn, # block_indices
-    stride_lz, stride_lh, stride_lm, # block_indices_lens
-    #
-    H, N_CTX,
-    BLOCK_M: tl.constexpr, 
-    BLOCK_N_DQ_LG: tl.constexpr, # logical block size
-    HEAD_DIM: tl.constexpr,
-    SPARSITY: tl.constexpr, # not used; just for trigger reevaluate for benchmarking
-    ):
+        Q,
+        K,
+        V,  # softmax scale
+        DO,
+        DQ,
+        M,  # lse (log2)
+        D,
+        block_indices,
+        block_indices_lens,
+        # qkv
+        stride_qz,
+        stride_qh,
+        stride_qm,
+        stride_qk,
+        stride_kz,
+        stride_kh,
+        stride_kn,
+        stride_kk,
+        stride_vz,
+        stride_vh,
+        stride_vn,
+        stride_vk,
+        # dq do
+        stride_dqz,
+        stride_dqh,
+        stride_dqm,
+        stride_dqk,
+        stride_doz,
+        stride_doh,
+        stride_dom,
+        stride_dok,
+        # m, d
+        stride_mz,
+        stride_mh,
+        stride_mm,
+        stride_dz,
+        stride_dh,
+        stride_dm,
+        #
+        stride_bz,
+        stride_bh,
+        stride_bm,
+        stride_bn,  # block_indices
+        stride_lz,
+        stride_lh,
+        stride_lm,  # block_indices_lens
+        #
+    H,
+        N_CTX,
+        BLOCK_M: tl.constexpr,
+        BLOCK_N_DQ_LG: tl.constexpr,  # logical block size
+        HEAD_DIM: tl.constexpr,
+        SPARSITY: tl.constexpr,  # not used; just for trigger reevaluate for benchmarking
+):
 
     tl.static_assert(BLOCK_N_DQ_LG % BLOCK_N_DQ_LG == 0)
     tl.static_assert(BLOCK_N_DQ_LG % BLOCK_M == 0)
-    
+
     LN2: tl.constexpr = 0.6931471824645996  # = ln(2)
-    
+
     start_m = tl.program_id(0)
-    
+
     off_hz = tl.program_id(2)
     off_z = off_hz // H
     off_h = off_hz % H
-    
+
     off_q = off_z.to(tl.int64) * stride_qz + off_h.to(tl.int64) * stride_qh
     off_k = off_z.to(tl.int64) * stride_kz + off_h.to(tl.int64) * stride_kh
     off_v = off_z.to(tl.int64) * stride_vz + off_h.to(tl.int64) * stride_vh
 
     off_dq = off_z.to(tl.int64) * stride_dqz + off_h.to(tl.int64) * stride_dqh
     off_do = off_z.to(tl.int64) * stride_doz + off_h.to(tl.int64) * stride_doh
-    
+
     off_m = off_z.to(tl.int64) * stride_mz + off_h.to(tl.int64) * stride_mh
     off_d = off_z.to(tl.int64) * stride_dz + off_h.to(tl.int64) * stride_dh
 
-    off_block_incides =      off_z.to(tl.int64) * stride_bz + off_h.to(tl.int64) * stride_bh
+    off_block_incides = off_z.to(tl.int64) * stride_bz + off_h.to(tl.int64) * stride_bh
     off_block_incides_lens = off_z.to(tl.int64) * stride_lz + off_h.to(tl.int64) * stride_lh
 
     # offset pointers for batch/head
@@ -872,14 +1052,14 @@ def _attn_bwd_dq_bsa_varlen_align_wrapper(
     V += off_v
     DO += off_do
     DQ += off_dq
-    
+
     M += off_m
     D += off_d
     block_indices += off_block_incides
     block_indices_lens += off_block_incides_lens
 
     # ---------------------------------------- [DQ] ----------------------------------------
-    
+
     Q_block_ptr = tl.make_block_ptr(
         base=Q,
         shape=(N_CTX, HEAD_DIM),
@@ -904,12 +1084,12 @@ def _attn_bwd_dq_bsa_varlen_align_wrapper(
         block_shape=(BLOCK_M, HEAD_DIM),
         order=(1, 0),
     )
-    
+
     q = tl.load(Q_block_ptr)
     do = tl.load(DO_block_ptr)
-    
+
     dq = tl.zeros([BLOCK_M, HEAD_DIM], dtype=tl.float32)
-    
+
     start_m = start_m * BLOCK_M
 
     offs_m = start_m + tl.arange(0, BLOCK_M) * stride_mm
@@ -917,30 +1097,34 @@ def _attn_bwd_dq_bsa_varlen_align_wrapper(
 
     m = tl.load(M + offs_m)
     m = m[:, None]
-    
+
     # D (= delta) is pre-divided by ds_scale.
     d = tl.load(D + offs_d)
     d = d[:, None]
-    
+
     block_indices_m = block_indices + (start_m // BLOCK_M) * stride_bm
     block_indices_lens_m = block_indices_lens + (start_m // BLOCK_M) * stride_lm
 
     dq = _attn_bwd_dq_bsa_varlen_align(
         dq,
-        q, do, 
-        m, d,
-        K, V, 
+        q,
+        do,
+        m,
+        d,
+        K,
+        V,
         N_CTX,
-        BLOCK_N_DQ_LG,   
+        BLOCK_N_DQ_LG,
         HEAD_DIM,
-        block_indices_m, 
-        block_indices_lens_m, 
-        stride_bn,    
-        stride_kn, stride_kk,        
-        stride_vn, stride_vk,        
+        block_indices_m,
+        block_indices_lens_m,
+        stride_bn,
+        stride_kn,
+        stride_kk,
+        stride_vn,
+        stride_vk,
     )
-    
-    # Write back dQ.    
+
+    # Write back dQ.
     dq *= LN2
     tl.store(DQ_block_ptr, dq.to(q.dtype))
-

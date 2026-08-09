@@ -17,18 +17,14 @@ import pytest
 import torch
 from torch.testing import assert_close
 
-
 os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
 
 MODEL_DIR = Path(os.getenv("DREAMX_WORLD_MODEL_DIR", "converted_weights/dreamx_world"))
-
 
 pytestmark = pytest.mark.skipif(
     not torch.cuda.is_available(),
     reason="DreamX-World pipeline parity requires CUDA",
 )
-
-
 
 
 def _run_worker_forward_batch(worker_wrapper: Any, request_kwargs: dict[str, Any]) -> torch.Tensor:
@@ -38,11 +34,7 @@ def _run_worker_forward_batch(worker_wrapper: Any, request_kwargs: dict[str, Any
 
     fastvideo_args = worker_wrapper.worker.fastvideo_args
     sampling_param = SamplingParam.from_pretrained(fastvideo_args.model_path)
-    sampling_param.update({
-        key: value
-        for key, value in request_kwargs.items()
-        if key not in {"prompt", "output_path"}
-    })
+    sampling_param.update({key: value for key, value in request_kwargs.items() if key not in {"prompt", "output_path"}})
     sampling_param.prompt = request_kwargs["prompt"]
 
     latents_size = [
@@ -60,6 +52,7 @@ def _run_worker_forward_batch(worker_wrapper: Any, request_kwargs: dict[str, Any
     output_batch = worker_wrapper.worker.pipeline.forward(batch, fastvideo_args)
     assert output_batch.output is not None
     return output_batch.output.detach().cpu()
+
 
 def _close_generator(generator: Any) -> None:
     generator.shutdown()

@@ -161,12 +161,9 @@ class ParquetDatasetWriter:
                     for file in files:
                         if file.endswith('.parquet'):
                             num_parquets += 1
-                remainder_path = os.path.join(worker_dir,
-                                              f"data_chunk_{num_parquets}.parquet")
+                remainder_path = os.path.join(worker_dir, f"data_chunk_{num_parquets}.parquet")
                 temp_path = remainder_path + '.tmp'
-                pq.write_table(remainder_table,
-                               temp_path,
-                               compression=self.compression)
+                pq.write_table(remainder_table, temp_path, compression=self.compression)
                 if os.path.exists(remainder_path):
                     os.remove(remainder_path)
                 os.rename(temp_path, remainder_path)
@@ -184,17 +181,15 @@ class ParquetDatasetWriter:
             start_chunk = worker_id * chunks_per_worker
             end_chunk = min((worker_id + 1) * chunks_per_worker, total_chunks)
             if start_chunk < end_chunk:
-                work_ranges.append(
-                    (
-                        start_chunk,
-                        end_chunk,
-                        table_to_write,
-                        worker_id,
-                        self.out_dir,
-                        self.samples_per_file,
-                        self.compression,
-                    )
-                )
+                work_ranges.append((
+                    start_chunk,
+                    end_chunk,
+                    table_to_write,
+                    worker_id,
+                    self.out_dir,
+                    self.samples_per_file,
+                    self.compression,
+                ))
 
         written_total = 0
         if len(work_ranges) == 1:
@@ -259,6 +254,3 @@ def _process_chunk_range(args: Any) -> int:
             raise
 
     return total_written
-
-
-

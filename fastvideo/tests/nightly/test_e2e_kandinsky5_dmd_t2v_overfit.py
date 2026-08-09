@@ -102,8 +102,7 @@ STAGE1_DIFFUSERS_DIR = E2E_ROOT / "stage1_diffusers"
 STAGE2_DIFFUSERS_DIR = E2E_ROOT / "stage2_diffusers"
 GENERATED_VIDEO_DIR = E2E_ROOT / "generated"
 
-STAGE1_CONFIG = (REPO_ROOT / "examples" / "train" / "configs" / "fine_tuning" / "kandinsky5" /
-                 "t2v_480p_qat.yaml")
+STAGE1_CONFIG = (REPO_ROOT / "examples" / "train" / "configs" / "fine_tuning" / "kandinsky5" / "t2v_480p_qat.yaml")
 STAGE2_CONFIG = (REPO_ROOT / "examples" / "train" / "configs" / "distribution_matching" / "kandinsky5" /
                  "dmd2_t2v_480p_qat.yaml")
 
@@ -194,9 +193,8 @@ def _synthesize_single_sample() -> None:
         (768, 512),
     )
     if not writer.isOpened():
-        raise RuntimeError(
-            f"cv2.VideoWriter failed to open {video_path} (mp4v codec unavailable?) -- "
-            "the fixture clip would be empty and preprocessing would fail on it.")
+        raise RuntimeError(f"cv2.VideoWriter failed to open {video_path} (mp4v codec unavailable?) -- "
+                           "the fixture clip would be empty and preprocessing would fail on it.")
     rng = np.random.default_rng(0)
     for _ in range(121):
         frame = rng.integers(0, 256, size=(512, 768, 3), dtype=np.uint8)
@@ -228,7 +226,8 @@ def _run_preprocessing() -> None:
     env["KANDINSKY5_OVERFIT_DATA_DIR"] = str(RAW_DATA_DIR)
     env["KANDINSKY5_OVERFIT_OUTPUT_DIR"] = str(PREPROCESSED_DIR)
     cmd = [
-        sys.executable, "-m",
+        sys.executable,
+        "-m",
         "fastvideo.pipelines.preprocess.preprocess_kandinsky5_overfit",
     ]
     subprocess.run(cmd, cwd=str(REPO_ROOT), env=env, check=True)
@@ -247,11 +246,15 @@ def _export_dcp_to_diffusers(checkpoint_dir: Path, output_dir: Path) -> None:
     inside the next launch that loads the directory.
     """
     cmd = [
-        sys.executable, "-m",
+        sys.executable,
+        "-m",
         "fastvideo.train.entrypoint.dcp_to_diffusers",
-        "--checkpoint", str(checkpoint_dir),
-        "--output-dir", str(output_dir),
-        "--role", "student",
+        "--checkpoint",
+        str(checkpoint_dir),
+        "--output-dir",
+        str(output_dir),
+        "--role",
+        "student",
         "--overwrite",
         "--verify",
     ]
@@ -265,27 +268,42 @@ def _latest_checkpoint(output_dir: Path) -> Path:
 
 
 def _run_stage(config: Path, output_dir: Path, *, max_train_steps: int, extra_overrides: list[str],
-              env_overrides: dict[str, str]) -> None:
+               env_overrides: dict[str, str]) -> None:
     cmd = [
-        sys.executable, "-m", "torch.distributed.run",
-        "--nnodes", "1",
-        "--nproc_per_node", NUM_GPUS,
-        "-m", "fastvideo.train.entrypoint.train",
-        "--config", str(config),
-        "--training.data.data_path", str(PREPROCESSED_DIR),
-        "--training.distributed.num_gpus", NUM_GPUS,
-        "--training.distributed.hsdp_shard_dim", NUM_GPUS,
-        "--training.loop.max_train_steps", str(max_train_steps),
-        "--training.checkpoint.output_dir", str(output_dir),
-        "--training.checkpoint.training_state_checkpointing_steps", str(max_train_steps),
+        sys.executable,
+        "-m",
+        "torch.distributed.run",
+        "--nnodes",
+        "1",
+        "--nproc_per_node",
+        NUM_GPUS,
+        "-m",
+        "fastvideo.train.entrypoint.train",
+        "--config",
+        str(config),
+        "--training.data.data_path",
+        str(PREPROCESSED_DIR),
+        "--training.distributed.num_gpus",
+        NUM_GPUS,
+        "--training.distributed.hsdp_shard_dim",
+        NUM_GPUS,
+        "--training.loop.max_train_steps",
+        str(max_train_steps),
+        "--training.checkpoint.output_dir",
+        str(output_dir),
+        "--training.checkpoint.training_state_checkpointing_steps",
+        str(max_train_steps),
         # Explicitly disable resume for BOTH stages, even though
         # _clean_previous_artifacts() already removed the output dirs: the
         # stage-1 YAML defaults to resume_from_checkpoint: latest, and this
         # test's correctness must not silently depend on that default (or a
         # partially-failed cleanup) ever changing.
-        "--training.checkpoint.resume_from_checkpoint", "none",
-        "--callbacks.validation.every_steps", str(max_train_steps),
-        "--callbacks.validation.dataset_file", str(PREPROCESSED_DIR / "validation_prompts.json"),
+        "--training.checkpoint.resume_from_checkpoint",
+        "none",
+        "--callbacks.validation.every_steps",
+        str(max_train_steps),
+        "--callbacks.validation.dataset_file",
+        str(PREPROCESSED_DIR / "validation_prompts.json"),
         *extra_overrides,
     ]
     env = dict(os.environ)
@@ -316,15 +334,15 @@ def _generate_from_export(export_dir: Path, output_dir: Path) -> Path:
     env.pop("FASTVIDEO_ATTENTION_BACKEND", None)
     cmd = [
         sys.executable,
-        str(THIS_FILE), "--generate",
+        str(THIS_FILE),
+        "--generate",
         str(export_dir),
         str(output_dir),
     ]
     subprocess.run(cmd, cwd=str(REPO_ROOT), env=env, check=True)
 
     videos = sorted(Path(output_dir).glob("**/*.mp4"))
-    assert len(videos) == 1, (
-        f"expected exactly one generated video under {output_dir}, found {videos}")
+    assert len(videos) == 1, (f"expected exactly one generated video under {output_dir}, found {videos}")
     return videos[0]
 
 
@@ -420,11 +438,10 @@ def _assert_matches_reference(video_path: Path) -> None:
                   "review it by eye and commit it. This bootstrap run "
                   "compares the video against itself (SSIM=1) below.")
         else:
-            pytest.fail(
-                f"reference video missing at {REFERENCE_VIDEO}. This test "
-                "must not pass on artifact existence alone -- run once on a "
-                f"sanctioned GPU box with {WRITE_REFERENCE_ENV}=1, review "
-                "the written video, and commit it (see module docstring).")
+            pytest.fail(f"reference video missing at {REFERENCE_VIDEO}. This test "
+                        "must not pass on artifact existence alone -- run once on a "
+                        f"sanctioned GPU box with {WRITE_REFERENCE_ENV}=1, review "
+                        "the written video, and commit it (see module docstring).")
 
     from fastvideo.tests.utils import compute_video_ssim_torchvision
 
@@ -446,7 +463,9 @@ def _assert_matches_reference(video_path: Path) -> None:
 @pytest.mark.nightly
 def test_e2e_kandinsky5_dmd_overfit_single_sample():
     if not STAGE1_CONFIG.exists() or not STAGE2_CONFIG.exists():
-        pytest.skip("Kandinsky5 QAT configs not found -- see examples/train/configs/{fine_tuning,distribution_matching}/kandinsky5/")
+        pytest.skip(
+            "Kandinsky5 QAT configs not found -- see examples/train/configs/{fine_tuning,distribution_matching}/kandinsky5/"
+        )
 
     os.environ.setdefault("WANDB_MODE", "offline")
 
@@ -469,7 +488,8 @@ def test_e2e_kandinsky5_dmd_overfit_single_sample():
             # eye at bootstrap, and stable across runs for the SSIM oracle
             # (noise output decorrelates under any training
             # nondeterminism; structured output does not).
-            "--training.optimizer.learning_rate", "1e-6",
+            "--training.optimizer.learning_rate",
+            "1e-6",
         ],
         env_overrides={"FASTVIDEO_ATTENTION_BACKEND": "ATTN_QAT_TRAIN"},
     )
@@ -485,9 +505,12 @@ def test_e2e_kandinsky5_dmd_overfit_single_sample():
         STAGE2_OUTPUT_DIR,
         max_train_steps=3,
         extra_overrides=[
-            "--models.student.init_from", str(stage1_diffusers_dir),
-            "--models.teacher.init_from", str(stage1_diffusers_dir),
-            "--models.critic.init_from", str(stage1_diffusers_dir),
+            "--models.student.init_from",
+            str(stage1_diffusers_dir),
+            "--models.teacher.init_from",
+            str(stage1_diffusers_dir),
+            "--models.critic.init_from",
+            str(stage1_diffusers_dir),
             # The recipe's generator_update_interval of 5 would mean ZERO
             # student updates in a 3-step run (the trainer iterates 1..3
             # and DMD2Method updates the generator only when
@@ -495,12 +518,12 @@ def test_e2e_kandinsky5_dmd_overfit_single_sample():
             # would just be the stage-1 weights, and this test could not
             # catch a broken student backward/optimizer path. Update the
             # generator every step instead.
-            "--method.generator_update_interval", "1",
+            "--method.generator_update_interval",
+            "1",
         ],
         env_overrides={"FASTVIDEO_ATTENTION_BACKEND": "ATTN_QAT_TRAIN"},
     )
-    assert any(STAGE2_OUTPUT_DIR.glob("*.mp4")), (
-        f"no stage-2 validation video produced under {STAGE2_OUTPUT_DIR}")
+    assert any(STAGE2_OUTPUT_DIR.glob("*.mp4")), (f"no stage-2 validation video produced under {STAGE2_OUTPUT_DIR}")
 
     # The actual deliverable of this recipe is the exported stage-2
     # student: export it, strict-reload it (--verify), then instantiate it

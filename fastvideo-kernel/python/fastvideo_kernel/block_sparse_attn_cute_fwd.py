@@ -22,13 +22,11 @@ from typing import Tuple
 
 import torch
 
-_FA4_IMPORT_HINT = (
-    "VSA-256 CuTe fastpath requires a FlashAttention-4 CuTe build that "
-    "provides `flash_attn.cute` with block-sparsity support (plus "
-    "`nvidia-cutlass-dsl` and `quack-kernels`). This is an optional "
-    "dependency; the default VSA-256 path is Triton. Install the FA4 CuTe "
-    "build and set FASTVIDEO_VSA_CUTEDSL=1 to enable the CuTe fastpath."
-)
+_FA4_IMPORT_HINT = ("VSA-256 CuTe fastpath requires a FlashAttention-4 CuTe build that "
+                    "provides `flash_attn.cute` with block-sparsity support (plus "
+                    "`nvidia-cutlass-dsl` and `quack-kernels`). This is an optional "
+                    "dependency; the default VSA-256 path is Triton. Install the FA4 CuTe "
+                    "build and set FASTVIDEO_VSA_CUTEDSL=1 to enable the CuTe fastpath.")
 
 
 def _load_fa4_cute():
@@ -54,17 +52,14 @@ def _map_to_index(block_map: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
     if block_map.dim() == 3:
         block_map = block_map.unsqueeze(0)
     if block_map.dim() != 4:
-        raise ValueError(
-            f"block_map must be [B,H,Q,KV] (or [H,Q,KV]), "
-            f"got shape={tuple(block_map.shape)}"
-        )
+        raise ValueError(f"block_map must be [B,H,Q,KV] (or [H,Q,KV]), "
+                         f"got shape={tuple(block_map.shape)}")
     if block_map.dtype != torch.bool:
         block_map = block_map.to(torch.bool)
     if not block_map.is_cuda:
         raise RuntimeError("block_map must be a CUDA tensor.")
     from fastvideo_kernel.triton_kernels.index import (
-        map_to_index as triton_map_to_index,
-    )
+        map_to_index as triton_map_to_index, )
 
     return triton_map_to_index(block_map)
 
@@ -84,10 +79,8 @@ def _aggregate_q_block_map(
 ) -> torch.Tensor:
     factor = q_sparse_block_size // q_block_size
     if factor <= 0 or q_sparse_block_size % q_block_size != 0:
-        raise ValueError(
-            f"q_sparse_block_size must be a positive multiple of "
-            f"q_block_size ({q_block_size}), got {q_sparse_block_size}"
-        )
+        raise ValueError(f"q_sparse_block_size must be a positive multiple of "
+                         f"q_block_size ({q_block_size}), got {q_sparse_block_size}")
     bsz, nhead, q_blocks, kv_blocks = block_map.shape
     q_blocks_sparse = (q_blocks + factor - 1) // factor
     pad_q = q_blocks_sparse * factor - q_blocks
@@ -164,9 +157,7 @@ def _cute_forward(
         q_block_size=q_block_size,
     )
     kv_full = (variable_block_sizes == kv_block_size).view(1, 1, 1, -1)
-    kv_partial = (
-        (variable_block_sizes > 0) & (variable_block_sizes < kv_block_size)
-    ).view(1, 1, 1, -1)
+    kv_partial = ((variable_block_sizes > 0) & (variable_block_sizes < kv_block_size)).view(1, 1, 1, -1)
     full_map = sparse_map & kv_full
     mask_map = sparse_map & kv_partial
 

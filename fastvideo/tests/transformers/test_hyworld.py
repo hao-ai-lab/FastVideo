@@ -55,9 +55,7 @@ def test_hyworld_transformer():
         model_path=transformer_path,
         dit_cpu_offload=False,
         use_fsdp_inference=False,
-        pipeline_config=PipelineConfig(
-            dit_config=HYWorldConfig(), dit_precision=precision_str
-        ),
+        pipeline_config=PipelineConfig(dit_config=HYWorldConfig(), dit_precision=precision_str),
     )
     args.device = device
 
@@ -86,57 +84,42 @@ def test_hyworld_transformer():
     latent_width = 30
 
     # Video latents [B, C, T, H, W]
-    hidden_states = torch.randn(
-        batch_size, 65, num_frames, latent_height, latent_width,
-        device=device, dtype=precision
-    )
+    hidden_states = torch.randn(batch_size, 65, num_frames, latent_height, latent_width, device=device, dtype=precision)
 
     if sp_world_size > 1:
         chunk_per_rank = hidden_states.shape[2] // sp_world_size
         hidden_states = hidden_states[:, :, sp_rank * chunk_per_rank:(sp_rank + 1) * chunk_per_rank]
 
     # Text embeddings [B, L, D] (including global token)
-    encoder_hidden_states = torch.randn(
-        batch_size, seq_len + 1, 3584, device=device, dtype=precision
-    )
+    encoder_hidden_states = torch.randn(batch_size, seq_len + 1, 3584, device=device, dtype=precision)
     # Create attention mask for encoder_hidden_states
-    encoder_attention_mask = torch.ones(
-        batch_size, seq_len + 1, device=device, dtype=torch.bool
-    )
+    encoder_attention_mask = torch.ones(batch_size, seq_len + 1, device=device, dtype=torch.bool)
     encoder_hidden_states[:, 15:] = 0
     encoder_attention_mask[:, 15:] = False
 
-    encoder_hidden_states_2 = torch.randn(
-        batch_size, seq_len_2 + 1, 1472, device=device, dtype=precision
-    )
-    encoder_attention_mask_2 = torch.ones(
-        batch_size, seq_len_2 + 1, device=device, dtype=torch.bool
-    )
+    encoder_hidden_states_2 = torch.randn(batch_size, seq_len_2 + 1, 1472, device=device, dtype=precision)
+    encoder_attention_mask_2 = torch.ones(batch_size, seq_len_2 + 1, device=device, dtype=torch.bool)
     encoder_hidden_states_2[:, 39:] = 0
     encoder_attention_mask_2[:, 39:] = False
 
     # Image embeddings
-    image_embeds = torch.zeros(
-        batch_size, 729, 1152, dtype=precision, device=device
-    )
+    image_embeds = torch.zeros(batch_size, 729, 1152, dtype=precision, device=device)
 
     # Action tensor [B*T] - discrete action per frame, first frame of each batch is 0
-    action = torch.randint(0, 10, (batch_size * num_frames,), device=device)
+    action = torch.randint(0, 10, (batch_size * num_frames, ), device=device)
     action[::num_frames] = 0  # First frame of each batch is 0
     action = action.to(dtype=precision)
 
     # Camera view matrices [B, T, 4, 4] - 4x4 extrinsic/view matrices
-    viewmats = torch.eye(4, dtype=precision, device=device).unsqueeze(0).unsqueeze(0).expand(
-        batch_size, num_frames, -1, -1
-    ).contiguous()
+    viewmats = torch.eye(4, dtype=precision,
+                         device=device).unsqueeze(0).unsqueeze(0).expand(batch_size, num_frames, -1, -1).contiguous()
 
     # Camera intrinsics [B, T, 3, 3] - 3x3 intrinsic matrices
-    Ks = torch.eye(3, dtype=precision, device=device).unsqueeze(0).unsqueeze(0).expand(
-        batch_size, num_frames, -1, -1
-    ).contiguous()
+    Ks = torch.eye(3, dtype=precision, device=device).unsqueeze(0).unsqueeze(0).expand(batch_size, num_frames, -1,
+                                                                                       -1).contiguous()
 
     # Timestep [B*T] - one timestep value per frame
-    timestep = torch.full((batch_size * num_frames,), 500, device=device, dtype=precision)
+    timestep = torch.full((batch_size * num_frames, ), 500, device=device, dtype=precision)
     # Timestep for text [B] - one timestep value per batch
     timestep_txt = torch.tensor([500], device=device, dtype=precision)
 
@@ -145,9 +128,9 @@ def test_hyworld_transformer():
     with torch.no_grad():
         with torch.amp.autocast("cuda", dtype=precision):
             with set_forward_context(
-                current_timestep=0,
-                attn_metadata=None,
-                forward_batch=forward_batch,
+                    current_timestep=0,
+                    attn_metadata=None,
+                    forward_batch=forward_batch,
             ):
                 output = model(
                     hidden_states=hidden_states,

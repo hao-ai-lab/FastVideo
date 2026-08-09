@@ -8,6 +8,7 @@ from triton.language.target_info import cuda_capability_geq
 
 MXFP_BLOCK_SIZE = tl.constexpr(16)
 
+
 @triton.jit
 def _compute_quant_and_scale(
     src_tensor,
@@ -22,9 +23,7 @@ def _compute_quant_and_scale(
     is_fp4: tl.constexpr = mx_tensor_dtype == tl.uint8
 
     tl.static_assert(
-        is_fp4
-        or mx_tensor_dtype == tl.float8e4nv
-        or mx_tensor_dtype == tl.float8e5,
+        is_fp4 or mx_tensor_dtype == tl.float8e4nv or mx_tensor_dtype == tl.float8e5,
         "mx_tensor_dtype must be uint8, float8e4nv, or float8e5",
     )
 
@@ -32,7 +31,7 @@ def _compute_quant_and_scale(
     f32_tensor = src_tensor.to(tl.float32)
     abs_tensor = tl.abs(f32_tensor)
     abs_tensor = tl.where(valid_src_mask, abs_tensor, -1.0)  # Don't consider padding tensors in scale computation
-    
+
     if two_level_quant_P:
         # row max from SageAttn3 paper
         global_max_val = tl.max(f32_tensor, axis=1, keep_dims=True)  # (BLOCK_SIZE_OUT_DIM, 1)
@@ -51,8 +50,9 @@ def _compute_quant_and_scale(
     elif not two_level_quant_P and not use_global_sf:
         s_dec = 1.0
         s_enc = 1.0
-    
-    max_val = tl.max(abs_tensor, axis=2, keep_dims=True)  # (BLOCK_SIZE_OUT_DIM, BLOCK_SIZE_QUANT_MX_SCALE, 1)  # per block maxima
+
+    max_val = tl.max(abs_tensor, axis=2,
+                     keep_dims=True)  # (BLOCK_SIZE_OUT_DIM, BLOCK_SIZE_QUANT_MX_SCALE, 1)  # per block maxima
     s_dec_b = max_val / 6  # (BLOCK_SIZE_OUT_DIM, BLOCK_SIZE_QUANT_MX_SCALE, 1)
     s_dec_b_e4m3 = (s_dec_b * s_enc).to(tl.float8e4nv)  # (BLOCK_SIZE_OUT_DIM, BLOCK_SIZE_QUANT_MX_SCALE, 1)
     s_enc_b = 1 / (s_dec_b_e4m3.to(tl.float32) * s_dec)  # (BLOCK_SIZE_OUT_DIM, BLOCK_SIZE_QUANT_MX_SCALE, 1)
@@ -132,6 +132,7 @@ def _compute_quant_and_scale(
 
     return out_tensor, dequant_scale, s_dec
 
+
 @triton.jit
 def _compute_dequant(
     mx_tensor,
@@ -141,7 +142,8 @@ def _compute_dequant(
     BLOCK_SIZE_QUANT_DIM: tl.constexpr,
     dst_dtype: tl.constexpr,
 ):
-    tl.static_assert(BLOCK_SIZE_QUANT_DIM % MXFP_BLOCK_SIZE == 0, f"Block size along quantization block must be a multiple of {MXFP_BLOCK_SIZE=}")
+    tl.static_assert(BLOCK_SIZE_QUANT_DIM % MXFP_BLOCK_SIZE == 0,
+                     f"Block size along quantization block must be a multiple of {MXFP_BLOCK_SIZE=}")
     # uint8 signifies two fp4 e2m1 values packed into a single byte
     mx_tensor_dtype: tl.constexpr = mx_tensor.dtype
     tl.static_assert(dst_dtype == tl.float16 or dst_dtype == tl.bfloat16 or dst_dtype == tl.float32)

@@ -31,11 +31,9 @@ from fastvideo.train.callbacks.validation import (
     _ValidationMetricStats,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
 
 _PIPE_TARGET = "fastvideo.pipelines.basic.wan.wan_pipeline.WanPipeline"
 
@@ -276,11 +274,8 @@ class TestH3ValidationContract:
                 num_width=96,
                 num_latent_t=2,
             ),
-            pipeline_config=SimpleNamespace(
-                vae_config=SimpleNamespace(
-                    arch_config=SimpleNamespace(temporal_compression_ratio=4),
-                ),
-            ),
+            pipeline_config=SimpleNamespace(vae_config=SimpleNamespace(
+                arch_config=SimpleNamespace(temporal_compression_ratio=4), ), ),
             model_path="unused",
             vsa_sparsity=0.0,
         )
@@ -312,11 +307,8 @@ class TestH3ValidationContract:
                 num_width=96,
                 num_latent_t=2,
             ),
-            pipeline_config=SimpleNamespace(
-                vae_config=SimpleNamespace(
-                    arch_config=SimpleNamespace(temporal_compression_ratio=4),
-                ),
-            ),
+            pipeline_config=SimpleNamespace(vae_config=SimpleNamespace(
+                arch_config=SimpleNamespace(temporal_compression_ratio=4), ), ),
             model_path="unused",
             vsa_sparsity=0.0,
         )
@@ -382,9 +374,8 @@ class TestH3ValidationContract:
         monkeypatch.setattr(
             cb,
             "_prepare_validation_batch",
-            lambda sampling_param, validation_batch, num_inference_steps: SimpleNamespace(
-                prompt=validation_batch["caption"],
-            ),
+            lambda sampling_param, validation_batch, num_inference_steps: SimpleNamespace(prompt=validation_batch[
+                "caption"], ),
         )
 
         result = cb._run_validation_for_steps(50, transformer=torch.nn.Identity())
@@ -399,6 +390,7 @@ class TestH3ValidationContract:
 
     def test_log_validation_video_artifacts_emits_eight_wandb_videos(self) -> None:
         """Verify a MiniMax H3 event contains eight media objects and scalar evidence."""
+
         class FakeWandbTracker:
             """Record tracker calls without contacting W&B."""
 
@@ -547,9 +539,7 @@ class TestStateDict:
 
         # Receiver: fresh generator with a different seed.
         fresh = _make_callback()
-        fresh.validation_random_generator = (
-            torch.Generator(device="cpu").manual_seed(999)
-        )
+        fresh.validation_random_generator = (torch.Generator(device="cpu").manual_seed(999))
         fresh.load_state_dict(state)
 
         # After load, both generators draw the same next sample.
@@ -561,9 +551,7 @@ class TestStateDict:
         cb = _make_callback()
         # Generator is None: load must not raise even when state has
         # an rng entry.
-        cb.load_state_dict(
-            {"validation_rng": torch.tensor([1, 2, 3], dtype=torch.uint8)}
-        )
+        cb.load_state_dict({"validation_rng": torch.tensor([1, 2, 3], dtype=torch.uint8)})
         assert cb.validation_random_generator is None
 
 
@@ -581,16 +569,21 @@ class TestMetricAggregation:
             stats,
             row,
             {
-                "vbench.aesthetic_quality": SimpleNamespace(
+                "vbench.aesthetic_quality":
+                SimpleNamespace(
                     name="vbench.aesthetic_quality",
                     score=0.5,
                     details={"ignored": [1, 2, 3]},
                 ),
-                SYNTHETIC_OPTICAL_FLOW_METRIC: SimpleNamespace(
+                SYNTHETIC_OPTICAL_FLOW_METRIC:
+                SimpleNamespace(
                     name=SYNTHETIC_OPTICAL_FLOW_METRIC,
                     score=1.5,
                     details={
-                        **{key: float(i) for i, key in enumerate(SYNTHETIC_OPTICAL_FLOW_LOG_KEYS)},
+                        **{
+                            key: float(i)
+                            for i, key in enumerate(SYNTHETIC_OPTICAL_FLOW_LOG_KEYS)
+                        },
                         "pixel_epe_mean_std": 99.0,
                         "pixel_epe_mean_max": 100.0,
                         "pixel_epe_mean_auc": 101.0,
@@ -616,13 +609,23 @@ class TestMetricAggregation:
         dst = _ValidationMetricStats(
             sums={"a": 1.0},
             counts={"a": 1.0},
-            per_video=[{"path": "a.mp4"}],
+            per_video=[{
+                "path": "a.mp4"
+            }],
             errors=["first"],
         )
         src = _ValidationMetricStats(
-            sums={"a": 2.0, "b": 3.0},
-            counts={"a": 2.0, "b": 1.0},
-            per_video=[{"path": "b.mp4"}],
+            sums={
+                "a": 2.0,
+                "b": 3.0
+            },
+            counts={
+                "a": 2.0,
+                "b": 1.0
+            },
+            per_video=[{
+                "path": "b.mp4"
+            }],
             errors=["second"],
         )
 
@@ -640,10 +643,7 @@ class TestMetricAggregation:
             metrics={"names": ["vbench.aesthetic_quality"]},
         )
 
-        assert (
-            cb._metric_log_name("vbench.aesthetic_quality")
-            == "metrics/validation/vbench/aesthetic_quality"
-        )
+        assert (cb._metric_log_name("vbench.aesthetic_quality") == "metrics/validation/vbench/aesthetic_quality")
 
     def test_metric_device_uses_local_rank(
         self,
@@ -694,12 +694,10 @@ class TestMetricAggregation:
         keyboard = np.zeros((4, 6))
         mouse = np.zeros((4, 2))
 
-        actions = ValidationCallback._validation_actions(
-            {
-                "keyboard_cond": keyboard,
-                "mouse_cond": mouse,
-            }
-        )
+        actions = ValidationCallback._validation_actions({
+            "keyboard_cond": keyboard,
+            "mouse_cond": mouse,
+        })
 
         assert actions is not None
         assert np.array_equal(actions["keyboard"], keyboard)
@@ -773,9 +771,7 @@ class TestActionOverlay:
             suffix="_overlay",
         )
 
-        assert saved.filenames == [
-            str(tmp_path / "validation_step_7_inference_steps_4_rank_3_video_0_overlay.mp4")
-        ]
+        assert saved.filenames == [str(tmp_path / "validation_step_7_inference_steps_4_rank_3_video_0_overlay.mp4")]
         assert saved.indices == [0]
         assert calls == [(saved.filenames[0], 25)]
 
@@ -820,9 +816,7 @@ class TestActionOverlay:
         )
 
         assert saved.indices == [1]
-        assert saved.filenames == [
-            str(tmp_path / "validation_step_8_inference_steps_5_rank_0_video_1.mp4")
-        ]
+        assert saved.filenames == [str(tmp_path / "validation_step_8_inference_steps_5_rank_0_video_1.mp4")]
         assert len(calls) == 2
 
     def test_save_validation_videos_counts_preserved_audio(

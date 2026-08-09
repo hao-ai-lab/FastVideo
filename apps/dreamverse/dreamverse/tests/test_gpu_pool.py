@@ -7,7 +7,6 @@ from types import SimpleNamespace
 
 import pytest
 
-
 import dreamverse.gpu_pool as gpu_pool
 
 
@@ -85,9 +84,7 @@ def test_send_command_raises_on_worker_death():
     cmd_q = ctx.Queue()
     resp_q = ctx.Queue()
 
-    proc = ctx.Process(
-        target=_child_consume_and_exit, args=(cmd_q, resp_q)
-    )
+    proc = ctx.Process(target=_child_consume_and_exit, args=(cmd_q, resp_q))
     proc.start()
 
     # Wait for the spawn child to fully boot.  Allow generous time —

@@ -111,13 +111,9 @@ def layer0_grad_norm(transformer) -> float:
     (``.item()``) at the end, rather than one per parameter.
     """
     blocks = resolve_blocks(transformer)
-    assert blocks is not None and len(blocks) > 0, (
-        "transformer is expected to expose a non-empty block list "
-        f"(one of {_BLOCK_LIST_ATTRS})")
-    grads = [
-        p.grad for p in blocks[0].parameters()
-        if p.requires_grad and p.grad is not None
-    ]
+    assert blocks is not None and len(blocks) > 0, ("transformer is expected to expose a non-empty block list "
+                                                    f"(one of {_BLOCK_LIST_ATTRS})")
+    grads = [p.grad for p in blocks[0].parameters() if p.requires_grad and p.grad is not None]
     if not grads:
         return 0.0
     # Some loaders (e.g. Cosmos via fsdp_load) keep parameters/grads as
@@ -137,9 +133,7 @@ def _load_refs() -> dict[str, dict[str, float]]:
 
 
 def _save_refs(refs: dict[str, dict[str, float]]) -> None:
-    _REFS_PATH.write_text(
-        json.dumps(refs, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8")
+    _REFS_PATH.write_text(json.dumps(refs, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def check_grad_norm_regression(
@@ -160,26 +154,22 @@ def check_grad_norm_regression(
 
     if os.environ.get(_UPDATE_ENV) == "1":
         if device_key is None:
-            pytest.skip(
-                f"{_UPDATE_ENV}=1 but GPU '{_device_name()}' has no reference "
-                "key; add it to _DEVICE_MAPPINGS first")
+            pytest.skip(f"{_UPDATE_ENV}=1 but GPU '{_device_name()}' has no reference "
+                        "key; add it to _DEVICE_MAPPINGS first")
         refs = _load_refs()
         refs.setdefault(test_name, {})[device_key] = round(norm, 4)
         _save_refs(refs)
-        pytest.skip(
-            f"recorded grad-norm reference {test_name}[{device_key}] = "
-            f"{norm:.4f} (assertion skipped under {_UPDATE_ENV}=1)")
+        pytest.skip(f"recorded grad-norm reference {test_name}[{device_key}] = "
+                    f"{norm:.4f} (assertion skipped under {_UPDATE_ENV}=1)")
 
     ref = _load_refs().get(test_name, {}).get(device_key) \
         if device_key is not None else None
     if ref is None:
-        pytest.skip(
-            f"no grad-norm reference for {test_name} on '{_device_name()}' "
-            f"(device_key={device_key}); run with {_UPDATE_ENV}=1 to seed it")
+        pytest.skip(f"no grad-norm reference for {test_name} on '{_device_name()}' "
+                    f"(device_key={device_key}); run with {_UPDATE_ENV}=1 to seed it")
 
     rel = abs(norm - ref) / (abs(ref) + 1e-12)
-    assert rel <= rtol, (
-        f"{test_name}[{device_key}] grad-norm regression: got {norm:.4f}, "
-        f"reference {ref:.4f}, relative error {rel:.3%} exceeds rtol "
-        f"{rtol:.0%}. If this is an intentional change, refresh the reference "
-        f"with {_UPDATE_ENV}=1 and explain why in the PR.")
+    assert rel <= rtol, (f"{test_name}[{device_key}] grad-norm regression: got {norm:.4f}, "
+                         f"reference {ref:.4f}, relative error {rel:.3%} exceeds rtol "
+                         f"{rtol:.0%}. If this is an intentional change, refresh the reference "
+                         f"with {_UPDATE_ENV}=1 and explain why in the PR.")

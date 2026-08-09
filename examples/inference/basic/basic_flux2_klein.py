@@ -21,7 +21,6 @@ from fastvideo.api import (
     SamplingConfig,
 )
 
-
 DEFAULT_PROMPT = "a brushed steel espresso machine on a marble counter, morning window light"
 
 

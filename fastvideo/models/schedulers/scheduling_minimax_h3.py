@@ -59,20 +59,15 @@ class MiniMaxH3Scheduler(SchedulerMixin, ConfigMixin):
     ) -> None:
         if sigmas is None:
             if num_inference_steps is None or num_inference_steps < 2:
-                raise ValueError(
-                    "`set_timesteps` requires explicit `sigmas` or "
-                    f"`num_inference_steps` >= 2, got {num_inference_steps}."
-                )
+                raise ValueError("`set_timesteps` requires explicit `sigmas` or "
+                                 f"`num_inference_steps` >= 2, got {num_inference_steps}.")
             base = torch.linspace(1.0, 0.0, int(num_inference_steps), dtype=torch.float32)
             sigma_tensor = self._shift * base / (1 + (self._shift - 1) * base)
             sigma_tensor = torch.unique_consecutive(sigma_tensor)
         else:
             sigma_tensor = torch.as_tensor(sigmas, dtype=torch.float32).flatten().cpu()
-            is_valid = (
-                sigma_tensor.numel() >= 2
-                and bool((sigma_tensor[1:] < sigma_tensor[:-1]).all())
-                and sigma_tensor[-1].item() == 0.0
-            )
+            is_valid = (sigma_tensor.numel() >= 2 and bool((sigma_tensor[1:] < sigma_tensor[:-1]).all())
+                        and sigma_tensor[-1].item() == 0.0)
             if not is_valid:
                 raise ValueError("`sigmas` must hold at least two strictly decreasing values ending at 0.0.")
 
@@ -140,7 +135,7 @@ class MiniMaxH3Scheduler(SchedulerMixin, ConfigMixin):
         self._step_index += 1
 
         if not return_dict:
-            return (prev_sample,)
+            return (prev_sample, )
         return MiniMaxH3SchedulerOutput(prev_sample=prev_sample)
 
 

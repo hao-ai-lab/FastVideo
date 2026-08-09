@@ -28,15 +28,14 @@ LATENT_H = LATENT_W = 64  # patch_size=2 -> 32x32 = 1024 image tokens
 
 def _build_block(layer: int) -> torch.nn.Module:
     from fastvideo.configs.models.dits.glm_image import GlmImageDiTArchConfig
-    from fastvideo.models.dits.glm_image import (GlmImageTransformer2DModel,
-                                                 GlmImageTransformerBlock)
+    from fastvideo.models.dits.glm_image import (GlmImageTransformer2DModel, GlmImageTransformerBlock)
 
     arch = GlmImageDiTArchConfig()
     return GlmImageTransformerBlock(
         arch.num_attention_heads * arch.attention_head_dim,  # dim = 4096
-        arch.num_attention_heads,                            # 32
-        arch.attention_head_dim,                             # 128
-        arch.time_embed_dim,                                 # 512
+        arch.num_attention_heads,  # 32
+        arch.attention_head_dim,  # 128
+        arch.time_embed_dim,  # 512
         supported_attention_backends=GlmImageTransformer2DModel._supported_attention_backends,
         prefix=f"transformer_blocks.{layer}",
     )

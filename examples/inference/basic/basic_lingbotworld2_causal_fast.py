@@ -6,7 +6,6 @@ from pathlib import Path
 
 from fastvideo import VideoGenerator
 
-
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DATASET_DIR = REPO_ROOT / "examples" / "dataset" / "lingbotworld2"
 OUTPUT_PATH = REPO_ROOT / "outputs" / "lingbotworld2_causal_fast.mp4"

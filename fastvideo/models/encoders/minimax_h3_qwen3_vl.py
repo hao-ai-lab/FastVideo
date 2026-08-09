@@ -52,6 +52,7 @@ class MiniMaxH3Qwen3VLTextRotaryEmbedding(nn.Module):
 
 
 class MiniMaxH3Qwen3VLTextAttention(nn.Module):
+
     def __init__(self, config: MiniMaxH3Qwen3VLConfig, prefix: str) -> None:
         super().__init__()
         tp_size = get_tp_world_size()
@@ -60,10 +61,8 @@ class MiniMaxH3Qwen3VLTextAttention(nn.Module):
         if self.total_num_heads % tp_size:
             raise ValueError(f"Qwen3-VL attention heads {self.total_num_heads} are not divisible by TP={tp_size}")
         if tp_size > self.total_num_kv_heads:
-            raise ValueError(
-                f"Qwen3-VL native K/V projections require TP={tp_size} to be no larger than "
-                f"the {self.total_num_kv_heads} KV heads"
-            )
+            raise ValueError(f"Qwen3-VL native K/V projections require TP={tp_size} to be no larger than "
+                             f"the {self.total_num_kv_heads} KV heads")
         if self.total_num_kv_heads % tp_size:
             raise ValueError(f"Qwen3-VL KV heads {self.total_num_kv_heads} are not divisible by TP={tp_size}")
 
@@ -136,10 +135,10 @@ class MiniMaxH3Qwen3VLTextAttention(nn.Module):
         else:
             if self.num_heads != self.num_kv_heads:
                 groups = self.num_heads // self.num_kv_heads
-                key = key[:, :, None].expand(-1, -1, groups, -1, -1).reshape(
-                    batch_size, self.num_heads, sequence_length, self.head_dim)
-                value = value[:, :, None].expand(-1, -1, groups, -1, -1).reshape(
-                    batch_size, self.num_heads, sequence_length, self.head_dim)
+                key = key[:, :, None].expand(-1, -1, groups, -1, -1).reshape(batch_size, self.num_heads,
+                                                                             sequence_length, self.head_dim)
+                value = value[:, :, None].expand(-1, -1, groups, -1, -1).reshape(batch_size, self.num_heads,
+                                                                                 sequence_length, self.head_dim)
             causal = torch.ones(sequence_length, sequence_length, device=query.device, dtype=torch.bool).tril()
             key_mask = attention_mask.to(device=query.device, dtype=torch.bool)
             mask = causal[None, None] & key_mask[:, None, None]
@@ -158,6 +157,7 @@ class MiniMaxH3Qwen3VLTextAttention(nn.Module):
 
 
 class MiniMaxH3Qwen3VLTextMLP(nn.Module):
+
     def __init__(self, config: MiniMaxH3Qwen3VLConfig, prefix: str) -> None:
         super().__init__()
         quant_config = getattr(config, "quant_config", None)
@@ -182,6 +182,7 @@ class MiniMaxH3Qwen3VLTextMLP(nn.Module):
             quant_config=quant_config,
             prefix=f"{prefix}.down_proj",
         )
+
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         gate, _ = self.gate_proj(hidden_states)
         up, _ = self.up_proj(hidden_states)
@@ -191,6 +192,7 @@ class MiniMaxH3Qwen3VLTextMLP(nn.Module):
 
 
 class MiniMaxH3Qwen3VLTextDecoderLayer(nn.Module):
+
     def __init__(self, config: MiniMaxH3Qwen3VLConfig, prefix: str) -> None:
         super().__init__()
         self.self_attn = MiniMaxH3Qwen3VLTextAttention(config, prefix=f"{prefix}.self_attn")
@@ -215,6 +217,7 @@ class MiniMaxH3Qwen3VLTextDecoderLayer(nn.Module):
 
 
 class MiniMaxH3Qwen3VLLanguageModel(nn.Module):
+
     def __init__(self, config: MiniMaxH3Qwen3VLConfig) -> None:
         super().__init__()
         quant_config = getattr(config, "quant_config", None)
@@ -226,8 +229,7 @@ class MiniMaxH3Qwen3VLLanguageModel(nn.Module):
         )
         self.layers = nn.ModuleList(
             MiniMaxH3Qwen3VLTextDecoderLayer(config, prefix=f"{config.prefix}.language_model.layers.{index}")
-            for index in range(config.num_hidden_layers)
-        )
+            for index in range(config.num_hidden_layers))
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.rotary_emb = MiniMaxH3Qwen3VLTextRotaryEmbedding(config)
 
@@ -247,7 +249,7 @@ class MiniMaxH3Qwen3VLLanguageModel(nn.Module):
         all_hidden_states: tuple[torch.Tensor, ...] | None = () if output_hidden_states else None
         for layer_index, layer in enumerate(self.layers):
             if all_hidden_states is not None:
-                all_hidden_states += (hidden_states,)
+                all_hidden_states += (hidden_states, )
             hidden_states = layer(hidden_states, position_embeddings, attention_mask)
             if deepstack_visual_embeds is not None and layer_index < len(deepstack_visual_embeds):
                 if visual_pos_masks is None:
@@ -258,11 +260,12 @@ class MiniMaxH3Qwen3VLLanguageModel(nn.Module):
                 hidden_states[mask] = updated
         hidden_states = self.norm(hidden_states)
         if all_hidden_states is not None:
-            all_hidden_states += (hidden_states,)
+            all_hidden_states += (hidden_states, )
         return BaseEncoderOutput(last_hidden_state=hidden_states, hidden_states=all_hidden_states)
 
 
 class MiniMaxH3Qwen3VLVisionPatchEmbed(nn.Module):
+
     def __init__(self, config: MiniMaxH3Qwen3VLConfig) -> None:
         super().__init__()
         self.in_channels = config.vision_in_channels
@@ -278,6 +281,7 @@ class MiniMaxH3Qwen3VLVisionPatchEmbed(nn.Module):
 
 
 class MiniMaxH3Qwen3VLVisionRotaryEmbedding(nn.Module):
+
     def __init__(self, dimension: int) -> None:
         super().__init__()
         # Transformers initializes this non-persistent constant on CPU before
@@ -295,6 +299,7 @@ class MiniMaxH3Qwen3VLVisionRotaryEmbedding(nn.Module):
 
 
 class MiniMaxH3Qwen3VLVisionPatchMerger(nn.Module):
+
     def __init__(self, config: MiniMaxH3Qwen3VLConfig, use_postshuffle_norm: bool) -> None:
         super().__init__()
         self.hidden_size = config.vision_hidden_size * config.vision_spatial_merge_size**2
@@ -315,6 +320,7 @@ class MiniMaxH3Qwen3VLVisionPatchMerger(nn.Module):
 
 
 class MiniMaxH3Qwen3VLVisionMLP(nn.Module):
+
     def __init__(self, config: MiniMaxH3Qwen3VLConfig) -> None:
         super().__init__()
         self.linear_fc1 = nn.Linear(config.vision_hidden_size, config.vision_intermediate_size, bias=True)
@@ -325,6 +331,7 @@ class MiniMaxH3Qwen3VLVisionMLP(nn.Module):
 
 
 class MiniMaxH3Qwen3VLVisionAttention(nn.Module):
+
     def __init__(self, config: MiniMaxH3Qwen3VLConfig) -> None:
         super().__init__()
         self.num_heads = config.vision_num_heads
@@ -367,6 +374,7 @@ class MiniMaxH3Qwen3VLVisionAttention(nn.Module):
 
 
 class MiniMaxH3Qwen3VLVisionBlock(nn.Module):
+
     def __init__(self, config: MiniMaxH3Qwen3VLConfig) -> None:
         super().__init__()
         self.norm1 = nn.LayerNorm(config.vision_hidden_size, eps=1e-6)
@@ -385,6 +393,7 @@ class MiniMaxH3Qwen3VLVisionBlock(nn.Module):
 
 
 class MiniMaxH3Qwen3VLVisionModel(nn.Module):
+
     def __init__(self, config: MiniMaxH3Qwen3VLConfig) -> None:
         super().__init__()
         self.config = config
@@ -398,9 +407,7 @@ class MiniMaxH3Qwen3VLVisionModel(nn.Module):
         self.merger = MiniMaxH3Qwen3VLVisionPatchMerger(config, use_postshuffle_norm=False)
         self.deepstack_visual_indexes = tuple(config.vision_deepstack_visual_indexes)
         self.deepstack_merger_list = nn.ModuleList(
-            MiniMaxH3Qwen3VLVisionPatchMerger(config, use_postshuffle_norm=True)
-            for _ in self.deepstack_visual_indexes
-        )
+            MiniMaxH3Qwen3VLVisionPatchMerger(config, use_postshuffle_norm=True) for _ in self.deepstack_visual_indexes)
 
     def _rotary_positions(self, grid_thw: torch.Tensor) -> torch.Tensor:
         max_height_width = int(grid_thw[:, 1:].max().item())
@@ -462,7 +469,9 @@ class MiniMaxH3Qwen3VLVisionModel(nn.Module):
                 weight_lists[index].extend(weights[index].tolist())
 
         index_tensor = torch.tensor(index_lists, dtype=torch.long, device=self.pos_embed.weight.device)
-        weight_tensor = torch.tensor(weight_lists, dtype=self.pos_embed.weight.dtype, device=self.pos_embed.weight.device)
+        weight_tensor = torch.tensor(weight_lists,
+                                     dtype=self.pos_embed.weight.dtype,
+                                     device=self.pos_embed.weight.device)
         embeddings = self.pos_embed(index_tensor) * weight_tensor[:, :, None]
         embeddings = (embeddings[0] + embeddings[1] + embeddings[2] + embeddings[3]).split(patch_counts)
         permuted = []
@@ -478,9 +487,9 @@ class MiniMaxH3Qwen3VLVisionModel(nn.Module):
         rotary = self._rotary_positions(grid_thw).reshape(hidden_states.shape[0], -1)
         embedding = torch.cat((rotary, rotary), dim=-1)
         position_embeddings = (embedding.cos(), embedding.sin())
-        sequence_lengths = [int(value) for value in torch.repeat_interleave(
-            grid_thw[:, 1] * grid_thw[:, 2], grid_thw[:, 0]
-        )]
+        sequence_lengths = [
+            int(value) for value in torch.repeat_interleave(grid_thw[:, 1] * grid_thw[:, 2], grid_thw[:, 0])
+        ]
         deepstack_features = []
         for layer_index, block in enumerate(self.blocks):
             hidden_states = block(hidden_states, sequence_lengths, position_embeddings)
@@ -518,8 +527,8 @@ class MiniMaxH3Qwen3VLConditioner(TextEncoder):
     ) -> torch.Tensor:
         if image_grid_thw is None and video_grid_thw is None:
             if attention_mask is None:
-                return torch.arange(input_ids.shape[1], device=input_ids.device).view(1, 1, -1).expand(
-                    3, input_ids.shape[0], -1)
+                return torch.arange(input_ids.shape[1],
+                                    device=input_ids.device).view(1, 1, -1).expand(3, input_ids.shape[0], -1)
             positions = attention_mask.long().cumsum(-1) - 1
             positions.masked_fill_(attention_mask == 0, 1)
             return positions.unsqueeze(0).expand(3, -1, -1)
@@ -528,7 +537,11 @@ class MiniMaxH3Qwen3VLConditioner(TextEncoder):
             video_grid_thw = torch.repeat_interleave(video_grid_thw, video_grid_thw[:, 0], dim=0).clone()
             video_grid_thw[:, 0] = 1
         mask = torch.ones_like(input_ids) if attention_mask is None else attention_mask
-        position_ids = torch.ones(3, input_ids.shape[0], input_ids.shape[1], dtype=input_ids.dtype, device=input_ids.device)
+        position_ids = torch.ones(3,
+                                  input_ids.shape[0],
+                                  input_ids.shape[1],
+                                  dtype=input_ids.dtype,
+                                  device=input_ids.device)
         image_index = 0
         video_index = 0
         merge = self.config.vision_spatial_merge_size
@@ -593,10 +606,8 @@ class MiniMaxH3Qwen3VLConditioner(TextEncoder):
         mask = input_ids == token_id
         expanded = mask.unsqueeze(-1).expand_as(inputs_embeds)
         if inputs_embeds[expanded].numel() != features.numel():
-            raise ValueError(
-                f"Qwen3-VL {label} features and placeholder tokens do not match: "
-                f"tokens={int(mask.sum())}, features={features.shape[0]}"
-            )
+            raise ValueError(f"Qwen3-VL {label} features and placeholder tokens do not match: "
+                             f"tokens={int(mask.sum())}, features={features.shape[0]}")
         return mask
 
     def forward(
@@ -631,16 +642,16 @@ class MiniMaxH3Qwen3VLConditioner(TextEncoder):
                 raise ValueError("pixel_values require input_ids and image_grid_thw")
             image_features, image_deepstack = self._visual_features(pixel_values, image_grid_thw)
             image_features = image_features.to(inputs_embeds.device, inputs_embeds.dtype)
-            image_mask = self._placeholder_mask(
-                input_ids, inputs_embeds, self.config.image_token_id, image_features, "image")
+            image_mask = self._placeholder_mask(input_ids, inputs_embeds, self.config.image_token_id, image_features,
+                                                "image")
             inputs_embeds = inputs_embeds.masked_scatter(image_mask.unsqueeze(-1), image_features)
         if pixel_values_videos is not None:
             if input_ids is None or video_grid_thw is None:
                 raise ValueError("pixel_values_videos require input_ids and video_grid_thw")
             video_features, video_deepstack = self._visual_features(pixel_values_videos, video_grid_thw)
             video_features = video_features.to(inputs_embeds.device, inputs_embeds.dtype)
-            video_mask = self._placeholder_mask(
-                input_ids, inputs_embeds, self.config.video_token_id, video_features, "video")
+            video_mask = self._placeholder_mask(input_ids, inputs_embeds, self.config.video_token_id, video_features,
+                                                "video")
             inputs_embeds = inputs_embeds.masked_scatter(video_mask.unsqueeze(-1), video_features)
 
         visual_mask = None
@@ -666,8 +677,9 @@ class MiniMaxH3Qwen3VLConditioner(TextEncoder):
         if position_ids is None:
             if input_ids is None:
                 sequence_length = inputs_embeds.shape[1]
-                position_ids = torch.arange(sequence_length, device=inputs_embeds.device).view(1, 1, -1).expand(
-                    3, inputs_embeds.shape[0], -1)
+                position_ids = torch.arange(sequence_length,
+                                            device=inputs_embeds.device).view(1, 1,
+                                                                              -1).expand(3, inputs_embeds.shape[0], -1)
             else:
                 position_ids = self._get_rope_index(input_ids, image_grid_thw, video_grid_thw, attention_mask)
         output_hidden_states = self.config.output_hidden_states if output_hidden_states is None else output_hidden_states

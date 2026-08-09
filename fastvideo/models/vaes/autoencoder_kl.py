@@ -10,7 +10,7 @@ from fastvideo.configs.models import VAEConfig
 
 
 class AutoencoderKL(_DiffusersAutoencoderKL):
-    
+
     def __init__(self, config: VAEConfig, **kwargs: Any) -> None:
         self.fastvideo_config = config
         arch = config.arch_config

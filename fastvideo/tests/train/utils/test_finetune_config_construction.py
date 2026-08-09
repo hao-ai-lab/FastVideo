@@ -29,14 +29,13 @@ def _recipe_id(path: Path) -> str:
 def test_fine_tuning_recipe_constructs(recipe: Path) -> None:
     cfg = load_run_config(str(recipe))
 
-    assert cfg.training.pipeline_config is not None, (
-        f"{_recipe_id(recipe)} did not resolve a pipeline config; "
-        "check its `pipeline:` key and init_from registry match")
+    assert cfg.training.pipeline_config is not None, (f"{_recipe_id(recipe)} did not resolve a pipeline config; "
+                                                      "check its `pipeline:` key and init_from registry match")
 
     target = cfg.models["student"]["_target_"]
-    assert isinstance(target, str) and target and "." in target, (
-        f"{_recipe_id(recipe)} student _target_ is not importable-shaped: "
-        f"{target!r}")
+    assert isinstance(
+        target, str) and target and "." in target, (f"{_recipe_id(recipe)} student _target_ is not importable-shaped: "
+                                                    f"{target!r}")
 
 
 def test_recipe_glob_found_recipes() -> None:

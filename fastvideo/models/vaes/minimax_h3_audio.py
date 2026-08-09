@@ -1,6 +1,5 @@
 # Copyright 2025 MiniMax authors and HuggingFace Team
 # SPDX-License-Identifier: Apache-2.0
-
 """Native MiniMax H3 waveform autoencoder."""
 
 from __future__ import annotations
@@ -74,7 +73,7 @@ def kaiser_sinc_filter1d(cutoff: float, half_width: float, kernel_size: int) -> 
     if attenuation > 50.0:
         beta = 0.1102 * (attenuation - 8.7)
     elif attenuation >= 21.0:
-        beta = 0.5842 * (attenuation - 21) ** 0.4 + 0.07886 * (attenuation - 21.0)
+        beta = 0.5842 * (attenuation - 21)**0.4 + 0.07886 * (attenuation - 21.0)
     else:
         beta = 0.0
 
@@ -284,9 +283,8 @@ class MiniMaxH3AudioCausalAttention(nn.Module):
             self.qkv.weight,
             torch.cat((self.q_bias, self.zero_k_bias, self.v_bias)),
         )
-        query, key, value = (
-            qkv.reshape(batch_size, seq_len, 3, self.num_heads, self.head_dim).permute(2, 0, 1, 3, 4).unbind(0)
-        )
+        query, key, value = (qkv.reshape(batch_size, seq_len, 3, self.num_heads, self.head_dim).permute(2, 0, 1, 3,
+                                                                                                        4).unbind(0))
 
         # H3's projection is an unusual causal flat stream, not a VAE spatial-attention block.
         hidden_states = F.scaled_dot_product_attention(
@@ -325,13 +323,10 @@ class MiniMaxH3AudioAMPBlock(nn.Module):
             _wn_conv1d(channels, channels, kernel_size, dilation=d, padding=(kernel_size * d - d) // 2)
             for d in dilation
         ])
-        self.convs2 = nn.ModuleList([
-            _wn_conv1d(channels, channels, kernel_size, dilation=1, padding=(kernel_size - 1) // 2)
-            for _ in dilation
-        ])
+        self.convs2 = nn.ModuleList(
+            [_wn_conv1d(channels, channels, kernel_size, dilation=1, padding=(kernel_size - 1) // 2) for _ in dilation])
         self.activations = nn.ModuleList([
-            MiniMaxH3AudioActivation1d(activation=MiniMaxH3AudioSnakeBeta(channels))
-            for _ in range(2 * len(dilation))
+            MiniMaxH3AudioActivation1d(activation=MiniMaxH3AudioSnakeBeta(channels)) for _ in range(2 * len(dilation))
         ])
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
@@ -361,19 +356,21 @@ class MiniMaxH3AudioBigVGANDecoder(nn.Module):
 
         self.ups = nn.ModuleList()
         for i, (rate, kernel) in enumerate(zip(upsample_rates, upsample_kernel_sizes)):
-            self.ups.append(nn.ModuleList([
-                weight_norm(nn.ConvTranspose1d(
-                    upsample_initial_channel // (2**i),
-                    upsample_initial_channel // (2 ** (i + 1)),
-                    kernel,
-                    rate,
-                    padding=(kernel - rate) // 2,
-                ))
-            ]))
+            self.ups.append(
+                nn.ModuleList([
+                    weight_norm(
+                        nn.ConvTranspose1d(
+                            upsample_initial_channel // (2**i),
+                            upsample_initial_channel // (2**(i + 1)),
+                            kernel,
+                            rate,
+                            padding=(kernel - rate) // 2,
+                        ))
+                ]))
 
         self.resblocks = nn.ModuleList()
         for i in range(self.num_upsamples):
-            channels = upsample_initial_channel // (2 ** (i + 1))
+            channels = upsample_initial_channel // (2**(i + 1))
             for kernel, dilation in zip(resblock_kernel_sizes, resblock_dilation_sizes):
                 self.resblocks.append(MiniMaxH3AudioAMPBlock(channels, kernel, tuple(dilation)))
 
@@ -424,15 +421,11 @@ class MiniMaxH3AudioVAE(nn.Module):
         )
 
         if math.prod(decoder_rates) != self.hop_length:
-            raise ValueError(
-                f"`decoder_rates` must upsample by the encoder hop length {self.hop_length}, got "
-                f"{math.prod(decoder_rates)}."
-            )
+            raise ValueError(f"`decoder_rates` must upsample by the encoder hop length {self.hop_length}, got "
+                             f"{math.prod(decoder_rates)}.")
         if arch.latent_dim % arch.latent_channels != 0:
-            raise ValueError(
-                f"`latent_dim` ({arch.latent_dim}) must be a multiple of `latent_channels` "
-                f"({arch.latent_channels})."
-            )
+            raise ValueError(f"`latent_dim` ({arch.latent_dim}) must be a multiple of `latent_channels` "
+                             f"({arch.latent_channels}).")
 
         self.encoder = MiniMaxH3AudioEncoder(
             d_model=arch.encoder_dim,
@@ -455,8 +448,7 @@ class MiniMaxH3AudioVAE(nn.Module):
             upsample_kernel_sizes=tuple(int(kernel) for kernel in arch.decoder_kernel_sizes),
             resblock_kernel_sizes=tuple(int(kernel) for kernel in arch.resblock_kernel_sizes),
             resblock_dilation_sizes=tuple(
-                tuple(int(dilation) for dilation in group) for group in arch.resblock_dilation_sizes
-            ),
+                tuple(int(dilation) for dilation in group) for group in arch.resblock_dilation_sizes),
         )
 
         # The H3 checkpoint and waveform numerics require this component to stay FP32.
@@ -485,7 +477,7 @@ class MiniMaxH3AudioVAE(nn.Module):
 
         posterior = MiniMaxH3AudioDiagonalGaussianDistribution(mean, logs)
         if not return_dict:
-            return (posterior,)
+            return (posterior, )
         return MiniMaxH3AudioEncoderOutput(latent_dist=posterior)
 
     def normalize_latents(self, latents: torch.Tensor) -> torch.Tensor:
@@ -501,8 +493,7 @@ class MiniMaxH3AudioVAE(nn.Module):
     ) -> MiniMaxH3AudioDecoderOutput | tuple[torch.Tensor]:
         if latents.ndim != 3:
             raise ValueError(
-                f"`latents` must have shape [batch_size, latent_channels, num_frames], got {tuple(latents.shape)}."
-            )
+                f"`latents` must have shape [batch_size, latent_channels, num_frames], got {tuple(latents.shape)}.")
 
         decoder_dtype = _module_dtype(self.decoder)
         decoded = self.decoder(self.dec_in_proj(latents.to(decoder_dtype)))
@@ -510,7 +501,7 @@ class MiniMaxH3AudioVAE(nn.Module):
             decoded = decoded.float()
 
         if not return_dict:
-            return (decoded,)
+            return (decoded, )
         return MiniMaxH3AudioDecoderOutput(sample=decoded)
 
     def forward(

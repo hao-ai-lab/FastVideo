@@ -24,9 +24,7 @@ os.environ.setdefault("DISABLE_SP", "1")
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 FAMILY = "glm_image"
-LOCAL_WEIGHTS_DIR = Path(
-    os.getenv("GLM_IMAGE_LOCAL_WEIGHTS_DIR",
-              REPO_ROOT / "official_weights" / FAMILY))
+LOCAL_WEIGHTS_DIR = Path(os.getenv("GLM_IMAGE_LOCAL_WEIGHTS_DIR", REPO_ROOT / "official_weights" / FAMILY))
 TEXT_ENCODER_DIR = LOCAL_WEIGHTS_DIR / "text_encoder"
 TOKENIZER_DIR = LOCAL_WEIGHTS_DIR / "tokenizer"
 
@@ -40,11 +38,8 @@ pytestmark = pytest.mark.skipif(
     reason=f"GLM-Image text_encoder/tokenizer not found under {LOCAL_WEIGHTS_DIR}.",
 )
 
-
-SAMPLE_PROMPT = (
-    'A photo of a coffee shop with a wooden sign reading "Daily Grind" '
-    "and a chalk menu next to it"
-)
+SAMPLE_PROMPT = ('A photo of a coffee shop with a wooden sign reading "Daily Grind" '
+                 "and a chalk menu next to it")
 
 
 @pytest.fixture(scope="module")
@@ -63,15 +58,14 @@ def official_tokenizer():
 @pytest.fixture(scope="module")
 def official_text_encoder(device):
     transformers = pytest.importorskip("transformers")
-    return transformers.T5EncoderModel.from_pretrained(
-        str(TEXT_ENCODER_DIR), torch_dtype=torch.float32).to(device).eval()
+    return transformers.T5EncoderModel.from_pretrained(str(TEXT_ENCODER_DIR),
+                                                       torch_dtype=torch.float32).to(device).eval()
 
 
 def test_tokenizer_is_byt5(official_tokenizer):
     """Glyph tokenizer must be ByT5 (byte-level), not generic T5."""
     assert type(official_tokenizer).__name__ == "ByT5Tokenizer"
-    assert official_tokenizer.vocab_size <= 400, (
-        "ByT5 vocab is byte-level (~256+special)")
+    assert official_tokenizer.vocab_size <= 400, ("ByT5 vocab is byte-level (~256+special)")
 
 
 def test_glyph_text_extraction():
@@ -86,9 +80,7 @@ def test_glyph_text_extraction():
     assert "Daily Grind" in out
 
 
-def _diffusers_reference_get_glyph_embeds(prompts, tokenizer, text_encoder,
-                                          device, dtype,
-                                          max_sequence_length=2048):
+def _diffusers_reference_get_glyph_embeds(prompts, tokenizer, text_encoder, device, dtype, max_sequence_length=2048):
     """Inlined copy of diffusers `_get_glyph_embeds` + `get_glyph_texts`.
 
     Source: `reference/diffusers/src/diffusers/pipelines/glm_image/`
@@ -106,10 +98,8 @@ def _diffusers_reference_get_glyph_embeds(prompts, tokenizer, text_encoder,
         out = []
         for p in prompt:
             out.append(
-                re.findall(r"'([^']*)'", p)
-                + re.findall(r"“([^“”]*)”", p)
-                + re.findall(r'"([^"]*)"', p)
-                + re.findall(r"「([^「」]*)」", p))
+                re.findall(r"'([^']*)'", p) + re.findall(r"“([^“”]*)”", p) + re.findall(r'"([^"]*)"', p) +
+                re.findall(r"「([^「」]*)」", p))
         return out
 
     all_glyph_texts = get_glyph_texts(prompts)
@@ -122,21 +112,14 @@ def _diffusers_reference_get_glyph_embeds(prompts, tokenizer, text_encoder,
             max_length=max_sequence_length,
             truncation=True,
         ).input_ids
-        input_ids = [
-            [tokenizer.pad_token_id] * ((len(input_ids) + 1) % 2) + ids
-            for ids in input_ids
-        ]
+        input_ids = [[tokenizer.pad_token_id] * ((len(input_ids) + 1) % 2) + ids for ids in input_ids]
         max_length = max(len(ids) for ids in input_ids)
         attention_mask = torch.tensor(
-            [[1] * len(ids) + [0] * (max_length - len(ids))
-             for ids in input_ids],
+            [[1] * len(ids) + [0] * (max_length - len(ids)) for ids in input_ids],
             device=device,
         )
         input_ids_t = torch.tensor(
-            [
-                ids + [tokenizer.pad_token_id] * (max_length - len(ids))
-                for ids in input_ids
-            ],
+            [ids + [tokenizer.pad_token_id] * (max_length - len(ids)) for ids in input_ids],
             device=device,
         )
         outputs = text_encoder(input_ids_t, attention_mask=attention_mask)
@@ -147,15 +130,13 @@ def _diffusers_reference_get_glyph_embeds(prompts, tokenizer, text_encoder,
     padded = []
     for emb in all_glyph_embeds:
         if emb.size(1) < max_seq_len:
-            pad = torch.zeros(emb.size(0), max_seq_len - emb.size(1),
-                              emb.size(2), device=device, dtype=emb.dtype)
+            pad = torch.zeros(emb.size(0), max_seq_len - emb.size(1), emb.size(2), device=device, dtype=emb.dtype)
             emb = torch.cat([pad, emb], dim=1)
         padded.append(emb)
     return torch.cat(padded, dim=0).to(device=device, dtype=dtype)
 
 
-def test_get_glyph_embeds_matches_diffusers(official_tokenizer,
-                                            official_text_encoder, device):
+def test_get_glyph_embeds_matches_diffusers(official_tokenizer, official_text_encoder, device):
     """FastVideo `compute_glyph_embeds` must equal the diffusers reference."""
     pytest.importorskip("fastvideo")
     try:
@@ -165,16 +146,13 @@ def test_get_glyph_embeds_matches_diffusers(official_tokenizer,
         pytest.skip(f"FastVideo glyph encoder not yet at target path: {e}")
 
     with torch.no_grad():
-        official_embeds = _diffusers_reference_get_glyph_embeds(
-            [SAMPLE_PROMPT], official_tokenizer, official_text_encoder, device,
-            torch.float32)
+        official_embeds = _diffusers_reference_get_glyph_embeds([SAMPLE_PROMPT], official_tokenizer,
+                                                                official_text_encoder, device, torch.float32)
         fv_embeds = compute_glyph_embeds([SAMPLE_PROMPT],
                                          tokenizer=official_tokenizer,
                                          text_encoder=official_text_encoder,
                                          device=device,
                                          dtype=torch.float32,
                                          max_sequence_length=2048)
-    assert fv_embeds.shape == official_embeds.shape, (
-        f"shape mismatch: {fv_embeds.shape} vs {official_embeds.shape}")
-    torch.testing.assert_close(fv_embeds, official_embeds, atol=1e-4,
-                               rtol=1e-4)
+    assert fv_embeds.shape == official_embeds.shape, (f"shape mismatch: {fv_embeds.shape} vs {official_embeds.shape}")
+    torch.testing.assert_close(fv_embeds, official_embeds, atol=1e-4, rtol=1e-4)

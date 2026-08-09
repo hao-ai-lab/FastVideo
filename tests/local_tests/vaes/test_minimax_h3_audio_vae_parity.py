@@ -14,7 +14,6 @@ import pytest
 import torch
 from torch.testing import assert_close
 
-
 REPO_ROOT = Path(__file__).resolve().parents[3]
 OFFICIAL_REF_DIR = Path(os.environ.get("MINIMAX_H3_OFFICIAL_REF_DIR", REPO_ROOT / "DiffusersMiniMaxH3"))
 OFFICIAL_SRC = OFFICIAL_REF_DIR / "src"
@@ -80,8 +79,7 @@ def _load_official(component_dir: Path, device: torch.device) -> torch.nn.Module
     )
     load_errors = {
         name: loading_info.get(name, [])
-        for name in ("missing_keys", "unexpected_keys", "mismatched_keys", "error_msgs")
-        if loading_info.get(name)
+        for name in ("missing_keys", "unexpected_keys", "mismatched_keys", "error_msgs") if loading_info.get(name)
     }
     assert not load_errors, f"official MiniMax H3 audio VAE did not load strictly: {load_errors}"
     model = model.eval()

@@ -73,8 +73,7 @@ def _make_inputs(device: torch.device, seed: int) -> dict:
     # matrices [B, T, H, W, 1, head_dim/2, 2, 2] fp32, then the dense
     # fractal_flatten(block_mask=False) is rope.flatten(1, 3) (line 109).
     rope3d = Kandinsky5RoPE3D(AXES_DIMS)
-    rope = rope3d((b, t, h, w),
-                  [torch.arange(t), torch.arange(h), torch.arange(w)])
+    rope = rope3d((b, t, h, w), [torch.arange(t), torch.arange(h), torch.arange(w)])
     rope = rope.flatten(1, 3)
 
     return {

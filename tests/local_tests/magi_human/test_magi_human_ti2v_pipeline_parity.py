@@ -26,7 +26,6 @@ from tests.local_tests.magi_human.test_magi_human_pipeline_parity import (
     _run_denoise_loop,
 )
 
-
 os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
 os.environ.setdefault("MASTER_ADDR", "localhost")
 os.environ.setdefault("MASTER_PORT", "29520")
@@ -77,9 +76,7 @@ def test_magi_human_ti2v_pipeline_latent_parity():
         dtype=torch.float32,
         device=device,
     )
-    txt_feat, txt_feat_len, neg_txt_feat, neg_txt_feat_len = (
-        _encode_magi_human_prompt_pair(device)
-    )
+    txt_feat, txt_feat_len, neg_txt_feat, neg_txt_feat_len = (_encode_magi_human_prompt_pair(device))
 
     num_inference_steps = 4
     shift = 5.0
@@ -160,14 +157,10 @@ def test_magi_human_ti2v_pipeline_latent_parity():
 
     v_diff = (ref_video - fv_video).abs()
     a_diff = (ref_audio - fv_audio).abs()
-    print(
-        f"ti2v video diff_max={v_diff.max().item():.4f} "
-        f"diff_mean={v_diff.mean().item():.4f}"
-    )
-    print(
-        f"ti2v audio diff_max={a_diff.max().item():.4f} "
-        f"diff_mean={a_diff.mean().item():.4f}"
-    )
+    print(f"ti2v video diff_max={v_diff.max().item():.4f} "
+          f"diff_mean={v_diff.mean().item():.4f}")
+    print(f"ti2v audio diff_max={a_diff.max().item():.4f} "
+          f"diff_mean={a_diff.mean().item():.4f}")
 
     assert ref_video.shape == fv_video.shape
     assert ref_audio.shape == fv_audio.shape

@@ -55,8 +55,7 @@ class VisionTransformer(nn.Module):
                                                       in_chans=self.in_chans,
                                                       embed_dim=self.embed_dim,
                                                       z_block_size=self.cfg.VIT.PATCH_SIZE_TEMP)
-        self.patch_embed_3d.proj.weight.data = torch.zeros_like(
-            self.patch_embed_3d.proj.weight.data)
+        self.patch_embed_3d.proj.weight.data = torch.zeros_like(self.patch_embed_3d.proj.weight.data)
 
         # Number of patches
         if self.video_input:
@@ -70,8 +69,7 @@ class VisionTransformer(nn.Module):
         trunc_normal_(self.cls_token, std=.02)
 
         # Positional embedding
-        self.pos_embed = nn.Parameter(
-            torch.zeros(1, self.patch_embed.num_patches + 1, self.embed_dim))
+        self.pos_embed = nn.Parameter(torch.zeros(1, self.patch_embed.num_patches + 1, self.embed_dim))
         self.pos_drop = nn.Dropout(p=cfg.VIT.POS_DROPOUT)
         trunc_normal_(self.pos_embed, std=.02)
 
@@ -108,8 +106,7 @@ class VisionTransformer(nn.Module):
                                  attn_drop=self.attn_drop_rate,
                                  drop_path=dpr[i],
                                  norm_layer=norm_layer,
-                                 use_original_code=self.cfg.VIT.USE_ORIGINAL_TRAJ_ATTN_CODE)
-                for i in range(self.depth)
+                                 use_original_code=self.cfg.VIT.USE_ORIGINAL_TRAJ_ATTN_CODE) for i in range(self.depth)
             ])
         self.norm = norm_layer(self.embed_dim)
 
@@ -125,11 +122,10 @@ class VisionTransformer(nn.Module):
             else:
                 # logging.info("Using ReLU activation in MLP")
                 act = nn.ReLU()
-            self.pre_logits = nn.Sequential(
-                OrderedDict([
-                    ('fc', nn.Linear(self.embed_dim, hidden_dim)),
-                    ('act', act),
-                ]))
+            self.pre_logits = nn.Sequential(OrderedDict([
+                ('fc', nn.Linear(self.embed_dim, hidden_dim)),
+                ('act', act),
+            ]))
         else:
             self.pre_logits = nn.Identity()
 
@@ -139,8 +135,7 @@ class VisionTransformer(nn.Module):
             for a, i in enumerate(range(len(self.num_classes))):
                 setattr(self, "head%d" % a, nn.Linear(self.embed_dim, self.num_classes[i]))
         else:
-            self.head = nn.Linear(self.embed_dim,
-                                  self.num_classes) if self.num_classes > 0 else nn.Identity()
+            self.head = nn.Linear(self.embed_dim, self.num_classes) if self.num_classes > 0 else nn.Identity()
 
         # Initialize weights
         self.apply(self._init_weights)

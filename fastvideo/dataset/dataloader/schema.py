@@ -50,7 +50,6 @@ pyarrow_schema_i2v = pa.schema([
     pa.field("fps", pa.float64()),
 ])
 
-
 pyarrow_schema_t2v = pa.schema([
     pa.field("id", pa.string()),
     # --- Image/Video VAE latents ---
@@ -79,7 +78,6 @@ pyarrow_schema_t2v = pa.schema([
     pa.field("duration_sec", pa.float64()),
     pa.field("fps", pa.float64()),
 ])
-
 
 # One text-to-video-and-audio (T2VA) row owns synchronized video, audio, and text tensors so
 # collate_rows_from_parquet_schema cannot pair targets from different samples.
@@ -110,7 +108,6 @@ pyarrow_schema_t2va = pa.schema([
     pa.field("audio_sample_rate", pa.int64()),
 ])
 
-
 pyarrow_schema_ode_trajectory_text_only = pa.schema([
     pa.field("id", pa.string()),
     # --- Text encoder output tensor ---
@@ -133,7 +130,6 @@ pyarrow_schema_ode_trajectory_text_only = pa.schema([
     pa.field("media_type", pa.string()),  # Always 'text' for text-only
 ])
 
-
 pyarrow_schema_text_only = pa.schema([
     pa.field("id", pa.string()),
     # --- Text encoder output tensor ---
@@ -146,7 +142,6 @@ pyarrow_schema_text_only = pa.schema([
     # --- Metadata ---
     pa.field("caption", pa.string()),
 ])
-
 
 pyarrow_schema_matrixgame2 = pa.schema([
     pa.field("id", pa.string()),

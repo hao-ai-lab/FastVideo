@@ -32,8 +32,7 @@ from fastvideo.forward_context import set_forward_context
 from fastvideo.train.models.longcat import LongCatModel
 from fastvideo.train.utils.config import load_run_config
 
-_FIXTURE = str(
-    Path(__file__).resolve().parent.parent / "fixtures" / "longcat_t2v_min.yaml")
+_FIXTURE = str(Path(__file__).resolve().parent.parent / "fixtures" / "longcat_t2v_min.yaml")
 
 # LongCat caption_channels (text embedding width).
 _LONGCAT_TEXT_DIM = 4096
@@ -62,11 +61,7 @@ def test_longcat_model_loads_and_forwards():
     # LongCat transformer takes [B, C, T, H, W] (in_channels=16,
     # patch_size=(1,2,2)) and a [B, N_text, 4096] text embedding.
     hidden_states = torch.randn(1, 16, 4, 32, 32, device=device, dtype=dtype)
-    encoder_hidden_states = torch.randn(1,
-                                        16,
-                                        _LONGCAT_TEXT_DIM,
-                                        device=device,
-                                        dtype=dtype)
+    encoder_hidden_states = torch.randn(1, 16, _LONGCAT_TEXT_DIM, device=device, dtype=dtype)
     encoder_attention_mask = torch.ones(1, 16, device=device, dtype=dtype)
     timestep = torch.tensor([500], device=device, dtype=dtype)
 
@@ -83,7 +78,6 @@ def test_longcat_model_loads_and_forwards():
 
     if isinstance(out, tuple):
         out = out[0]
-    assert out.shape == hidden_states.shape, (
-        f"output shape {tuple(out.shape)} != input shape "
-        f"{tuple(hidden_states.shape)}")
+    assert out.shape == hidden_states.shape, (f"output shape {tuple(out.shape)} != input shape "
+                                              f"{tuple(hidden_states.shape)}")
     assert torch.isfinite(out).all().item(), "output contains NaN/Inf"

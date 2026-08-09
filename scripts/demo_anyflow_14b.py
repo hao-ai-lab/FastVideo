@@ -42,7 +42,6 @@ from pathlib import Path
 import torch
 from safetensors.torch import load_file
 
-
 ANYFLOW_LOCAL = Path(os.environ.get("ANYFLOW_LOCAL", "./anyflow-14b")).expanduser()
 OUT_DIR = Path(os.environ.get("ANYFLOW_DEMO_OUT", "./demo_videos")).expanduser()
 OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -52,15 +51,13 @@ DEVICE = torch.device("cuda")
 DTYPE = torch.bfloat16
 NUM_FRAMES = 81
 HEIGHT, WIDTH = 480, 832
-PROMPT = (
-    "CG game concept digital art, a majestic elephant with a vibrant tusk and sleek fur "
-    "running swiftly towards a herd of its kind. The elephant has a calm yet determined "
-    "expression, with its ears flapping slightly as it moves at high speed. The herd consists "
-    "of several other elephants of various ages and sizes, all moving in unison. The landscape "
-    "is vast savanna with rolling hills, tall grasses, and scattered acacia trees. The sun "
-    "sets behind the horizon, casting a warm golden glow over the scene. Low-angle view, focus "
-    "on the elephant as it accelerates towards the herd."
-)
+PROMPT = ("CG game concept digital art, a majestic elephant with a vibrant tusk and sleek fur "
+          "running swiftly towards a herd of its kind. The elephant has a calm yet determined "
+          "expression, with its ears flapping slightly as it moves at high speed. The herd consists "
+          "of several other elephants of various ages and sizes, all moving in unison. The landscape "
+          "is vast savanna with rolling hills, tall grasses, and scattered acacia trees. The sun "
+          "sets behind the horizon, casting a warm golden glow over the scene. Low-angle view, focus "
+          "on the elephant as it accelerates towards the herd.")
 NEG_PROMPT = "blurry, low quality, distorted"
 # The published nvidia/AnyFlow-* checkpoints are on-policy distilled with
 # fuse_guidance_scale=3.0 baked into the weights — inference uses 1.0
@@ -116,14 +113,19 @@ def encode_prompts():
 
     tok = AutoTokenizer.from_pretrained(str(ANYFLOW_LOCAL), subfolder="tokenizer", use_fast=False)
     enc = UMT5EncoderModel.from_pretrained(
-        str(ANYFLOW_LOCAL), subfolder="text_encoder", torch_dtype=DTYPE,
+        str(ANYFLOW_LOCAL),
+        subfolder="text_encoder",
+        torch_dtype=DTYPE,
     ).to(DEVICE).eval()
 
     @torch.no_grad()
     def encode_one(prompts):
-        out = tok(
-            prompts, padding="max_length", max_length=512, truncation=True,
-            return_attention_mask=True, return_tensors="pt")
+        out = tok(prompts,
+                  padding="max_length",
+                  max_length=512,
+                  truncation=True,
+                  return_attention_mask=True,
+                  return_tensors="pt")
         ids = out.input_ids.to(DEVICE)
         mask = out.attention_mask.to(DEVICE)
         seq_lens = mask.gt(0).sum(dim=1).long()
@@ -201,19 +203,13 @@ def sample(model, text_e, neg_e, nfe: int) -> torch.Tensor:
         t_in = t_cur.expand(B).to(DTYPE)
         r_in = t_next.expand(B).to(DTYPE)
         with set_forward_context(current_timestep=t_in, attn_metadata=None):
-            flow_cond = model(
-                hidden_states=x, encoder_hidden_states=text_e,
-                timestep=t_in, r_timestep=r_in)
+            flow_cond = model(hidden_states=x, encoder_hidden_states=text_e, timestep=t_in, r_timestep=r_in)
             if GUIDANCE != 1.0:
-                flow_uncond = model(
-                    hidden_states=x, encoder_hidden_states=neg_e,
-                    timestep=t_in, r_timestep=r_in)
+                flow_uncond = model(hidden_states=x, encoder_hidden_states=neg_e, timestep=t_in, r_timestep=r_in)
                 flow = flow_uncond + GUIDANCE * (flow_cond - flow_uncond)
             else:
                 flow = flow_cond
-        x = scheduler.step(
-            flow, sample=x,
-            timestep=t_cur.repeat(B), r_timestep=t_next.repeat(B))
+        x = scheduler.step(flow, sample=x, timestep=t_cur.repeat(B), r_timestep=t_next.repeat(B))
     print(f"  NFE={nfe} sample time: {time.time() - t0:.1f}s "
           f"({(time.time() - t0) / nfe:.1f}s/step)")
     xf = x.float()
@@ -229,7 +225,9 @@ def decode_to_mp4(latents: torch.Tensor, out_path: Path) -> tuple[Path, tuple]:
     import imageio.v3 as iio
 
     vae = AutoencoderKLWan.from_pretrained(
-        str(ANYFLOW_LOCAL), subfolder="vae", torch_dtype=DTYPE,
+        str(ANYFLOW_LOCAL),
+        subfolder="vae",
+        torch_dtype=DTYPE,
     ).to(DEVICE).eval()
     try:
         vae.enable_tiling()

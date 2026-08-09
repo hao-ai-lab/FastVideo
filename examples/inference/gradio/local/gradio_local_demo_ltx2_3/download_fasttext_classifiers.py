@@ -21,14 +21,16 @@ class ClassifierSpec:
 
 
 CLASSIFIERS = {
-    "nsfw": ClassifierSpec(
+    "nsfw":
+    ClassifierSpec(
         name="nsfw",
         repo_id="allenai/dolma-jigsaw-fasttext-bigrams-nsfw",
         source_filename="model.bin",
         target_filename="jigsaw_fasttext_bigrams_nsfw_final.bin",
         env_var="LTX2_NSFW_CLASSIFIER_PATH",
     ),
-    "hatespeech": ClassifierSpec(
+    "hatespeech":
+    ClassifierSpec(
         name="hatespeech",
         repo_id="allenai/dolma-jigsaw-fasttext-bigrams-hatespeech",
         source_filename="model.bin",
@@ -48,20 +50,14 @@ def default_output_dir() -> Path:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description=(
-            "Download the fastText safety classifiers used by "
-            "gradio_local_demo_ltx2_3.py."
-        )
-    )
+    parser = argparse.ArgumentParser(description=("Download the fastText safety classifiers used by "
+                                                  "gradio_local_demo_ltx2_3.py."))
     parser.add_argument(
         "--output-dir",
         type=Path,
         default=default_output_dir(),
-        help=(
-            "Directory where the demo looks for classifiers. Defaults to "
-            "LTX2_CLASSIFIER_DIR or the local Gradio demo directory."
-        ),
+        help=("Directory where the demo looks for classifiers. Defaults to "
+              "LTX2_CLASSIFIER_DIR or the local Gradio demo directory."),
     )
     parser.add_argument(
         "--classifier",
@@ -108,10 +104,8 @@ def download_classifier(
         print(f"[skip] {spec.name}: {destination}")
         return destination
 
-    print(
-        f"[download] {spec.name}: "
-        f"{spec.repo_id}/{spec.source_filename}"
-    )
+    print(f"[download] {spec.name}: "
+          f"{spec.repo_id}/{spec.source_filename}")
     cached_path = Path(
         hf_hub_download(
             repo_id=spec.repo_id,
@@ -119,8 +113,7 @@ def download_classifier(
             cache_dir=cache_dir,
             force_download=force,
             token=token,
-        )
-    )
+        ))
     materialize_download(cached_path, destination)
     print(f"[ready] {spec.name}: {destination}")
     return destination
@@ -138,9 +131,7 @@ def print_summary(
     print("\nThese filenames are auto-discovered by gradio_local_demo_ltx2_3.py.")
 
     if output_dir != default_output_dir():
-        print(
-            "\nBecause you used a custom output directory, point the demo to it:"
-        )
+        print("\nBecause you used a custom output directory, point the demo to it:")
         print(f'  export LTX2_CLASSIFIER_DIR="{output_dir}"')
 
     for spec, path in zip(selected_specs, downloaded_paths, strict=True):
@@ -164,8 +155,7 @@ def main() -> None:
             cache_dir=cache_dir,
             force=args.force,
             token=args.token,
-        )
-        for spec in selected_specs
+        ) for spec in selected_specs
     ]
     print_summary(selected_specs, output_dir, downloaded_paths)
 

@@ -16,16 +16,13 @@ def test_stable_audio_typed_surface_preflight() -> None:
         StableAudioPipeline,
     )
     from fastvideo.pipelines.basic.stable_audio.stages import (  # noqa: F401
-        StableAudioConditioningStage,
-        StableAudioDecodingStage,
-        StableAudioDenoisingStage,
+        StableAudioConditioningStage, StableAudioDecodingStage, StableAudioDenoisingStage,
         StableAudioLatentPreparationStage,
     )
     # Native components — must import without diffusers in scope.
     from fastvideo.models.dits.stable_audio import StableAudioDiT  # noqa: F401
     from fastvideo.models.encoders.stable_audio_conditioner import (  # noqa: F401
-        StableAudioMultiConditioner,
-    )
+        StableAudioMultiConditioner, )
 
     assert EntryClass is StableAudioPipeline
 

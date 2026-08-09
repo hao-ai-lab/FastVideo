@@ -23,14 +23,12 @@ os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 FAMILY = "glm_image"
-LOCAL_WEIGHTS_DIR = Path(
-    os.getenv("GLM_IMAGE_LOCAL_WEIGHTS_DIR",
-              REPO_ROOT / "official_weights" / FAMILY))
+LOCAL_WEIGHTS_DIR = Path(os.getenv("GLM_IMAGE_LOCAL_WEIGHTS_DIR", REPO_ROOT / "official_weights" / FAMILY))
 TRANSFORMER_DIR = LOCAL_WEIGHTS_DIR / "transformer"
 
+
 def _has_weights() -> bool:
-    return TRANSFORMER_DIR.exists() and any(
-        TRANSFORMER_DIR.glob("*.safetensors"))
+    return TRANSFORMER_DIR.exists() and any(TRANSFORMER_DIR.glob("*.safetensors"))
 
 
 def _has_glm_image_diffusers() -> bool:
@@ -52,11 +50,10 @@ def _has_glm_image_diffusers() -> bool:
 pytestmark = [
     pytest.mark.skipif(
         not _has_weights(),
-        reason=(
-            f"GLM-Image transformer weights not found at {TRANSFORMER_DIR}. "
-            "Download via "
-            "`python .agents/skills/add-model-01-prep/scripts/download_hf_weights.py "
-            "zai-org/GLM-Image official_weights/glm_image`."),
+        reason=(f"GLM-Image transformer weights not found at {TRANSFORMER_DIR}. "
+                "Download via "
+                "`python .agents/skills/add-model-01-prep/scripts/download_hf_weights.py "
+                "zai-org/GLM-Image official_weights/glm_image`."),
     ),
     pytest.mark.skipif(
         not _has_glm_image_diffusers(),
@@ -79,8 +76,7 @@ def device() -> torch.device:
 def _load_official(device, dtype):
     diffusers = pytest.importorskip("diffusers")
     cls = diffusers.GlmImageTransformer2DModel
-    return cls.from_pretrained(str(TRANSFORMER_DIR),
-                               torch_dtype=dtype).to(device).eval()
+    return cls.from_pretrained(str(TRANSFORMER_DIR), torch_dtype=dtype).to(device).eval()
 
 
 def _load_fastvideo(device, dtype):
@@ -91,9 +87,7 @@ def _load_fastvideo(device, dtype):
     except ImportError as e:
         pytest.skip(f"FastVideo GLM-Image DiT not yet ported: {e}")
     cfg = GlmImageDiTConfig()
-    model = GlmImageTransformer2DModel(cfg,
-                                       {"_class_name":
-                                        "GlmImageTransformer2DModel"})
+    model = GlmImageTransformer2DModel(cfg, {"_class_name": "GlmImageTransformer2DModel"})
     sd = _load_state_dict(TRANSFORMER_DIR)
     sd = _apply_param_mapping(sd, cfg.arch_config.param_names_mapping)
     missing, unexpected = model.load_state_dict(sd, strict=False)
@@ -110,13 +104,11 @@ def _forward_pair(device, dtype):
     inputs = _make_inputs(device, dtype=dtype)
     with torch.no_grad():
         ref_out = ref(**inputs, return_dict=False)[0]
-        with set_forward_context(current_timestep=0, attn_metadata=None,
-                                 forward_batch=None):
+        with set_forward_context(current_timestep=0, attn_metadata=None, forward_batch=None):
             fv_out = fv(**inputs)
         if isinstance(fv_out, tuple):
             fv_out = fv_out[0]
-    assert ref_out.shape == fv_out.shape, (
-        f"shape mismatch: {ref_out.shape} vs {fv_out.shape}")
+    assert ref_out.shape == fv_out.shape, (f"shape mismatch: {ref_out.shape} vs {fv_out.shape}")
     # Free the two 7B models before the next dtype runs (single-GPU budget).
     del ref, fv
     torch.cuda.empty_cache()
@@ -144,8 +136,12 @@ def _apply_param_mapping(sd, mapping):
     return out
 
 
-def _make_inputs(device, batch_size=1, height=64, width=64,
-                 text_seq_len=32, dtype=torch.bfloat16) -> dict[str, torch.Tensor]:
+def _make_inputs(device,
+                 batch_size=1,
+                 height=64,
+                 width=64,
+                 text_seq_len=32,
+                 dtype=torch.bfloat16) -> dict[str, torch.Tensor]:
     """Synthetic inputs matching the diffusers `GlmImageTransformer2DModel.forward`
     contract. Latent shape is `(B, 16, H, W)`; post-patch grid is `(H/2, W/2)`
     so `prior_token_id` has `(H/2)*(W/2)` entries per batch element."""
@@ -153,20 +149,13 @@ def _make_inputs(device, batch_size=1, height=64, width=64,
     patch_size = 2
     num_patches = (height // patch_size) * (width // patch_size)
     return {
-        "hidden_states": torch.randn(batch_size, 16, height, width,
-                                     device=device, dtype=dtype),
-        "encoder_hidden_states": torch.randn(batch_size, text_seq_len, 1472,
-                                             device=device, dtype=dtype),
-        "prior_token_id": torch.randint(0, 16384, (batch_size, num_patches),
-                                        device=device, dtype=torch.long),
-        "prior_token_drop": torch.zeros(batch_size, device=device,
-                                        dtype=torch.bool),
-        "timestep": torch.tensor([500] * batch_size, device=device,
-                                 dtype=torch.long),
-        "target_size": torch.tensor([[height * 8, width * 8]] * batch_size,
-                                    device=device, dtype=torch.long),
-        "crop_coords": torch.zeros(batch_size, 2, device=device,
-                                   dtype=torch.long),
+        "hidden_states": torch.randn(batch_size, 16, height, width, device=device, dtype=dtype),
+        "encoder_hidden_states": torch.randn(batch_size, text_seq_len, 1472, device=device, dtype=dtype),
+        "prior_token_id": torch.randint(0, 16384, (batch_size, num_patches), device=device, dtype=torch.long),
+        "prior_token_drop": torch.zeros(batch_size, device=device, dtype=torch.bool),
+        "timestep": torch.tensor([500] * batch_size, device=device, dtype=torch.long),
+        "target_size": torch.tensor([[height * 8, width * 8]] * batch_size, device=device, dtype=torch.long),
+        "crop_coords": torch.zeros(batch_size, 2, device=device, dtype=torch.long),
     }
 
 
@@ -184,11 +173,9 @@ def test_transformer_forward_matches_diffusers_fp32(device):
     """Structural gate: in fp32 the FastVideo DiT is numerically faithful to
     the diffusers reference (cosine ~1.0, element-wise close to ~1e-3)."""
     fv_out, ref_out = _forward_pair(device, torch.float32)
-    cos = torch.nn.functional.cosine_similarity(
-        fv_out.flatten(), ref_out.flatten(), dim=0)
+    cos = torch.nn.functional.cosine_similarity(fv_out.flatten(), ref_out.flatten(), dim=0)
     assert cos > 0.9999, f"fp32 cosine similarity too low: {cos:.6f}"
-    torch.testing.assert_close(fv_out, ref_out,
-                               atol=ATOL_FP32, rtol=RTOL_FP32)
+    torch.testing.assert_close(fv_out, ref_out, atol=ATOL_FP32, rtol=RTOL_FP32)
 
 
 def test_transformer_forward_matches_diffusers_bf16(device):
@@ -198,8 +185,6 @@ def test_transformer_forward_matches_diffusers_bf16(device):
     kernel (~28% of elements exceed atol=5e-3 purely from rounding) — see
     PORT_STATUS I020."""
     fv_out, ref_out = _forward_pair(device, torch.bfloat16)
-    cos = torch.nn.functional.cosine_similarity(
-        fv_out.flatten(), ref_out.flatten(), dim=0)
-    assert cos > COS_MIN_BF16, (
-        f"bf16 cosine similarity {cos:.6f} below {COS_MIN_BF16}; "
-        "indicates a structural divergence, not just precision.")
+    cos = torch.nn.functional.cosine_similarity(fv_out.flatten(), ref_out.flatten(), dim=0)
+    assert cos > COS_MIN_BF16, (f"bf16 cosine similarity {cos:.6f} below {COS_MIN_BF16}; "
+                                "indicates a structural divergence, not just precision.")

@@ -84,9 +84,7 @@ class _DummyMethod:
         self.weight.grad = None
 
 
-def test_trainer_runs_validation_callback_during_training(
-    monkeypatch,
-) -> None:
+def test_trainer_runs_validation_callback_during_training(monkeypatch, ) -> None:
     tracker = _DummyTracker()
     group = SimpleNamespace(rank=0, local_rank=0, rank_in_group=0, world_size=1)
 
@@ -124,7 +122,9 @@ def test_trainer_runs_validation_callback_during_training(
 
     trainer.run(
         method,
-        dataloader=[{"sample": "x"}],
+        dataloader=[{
+            "sample": "x"
+        }],
         max_steps=3,
     )
 

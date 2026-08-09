@@ -45,10 +45,8 @@ def _make_reference(seed: int, sample_rate: int, seconds: float):
     return (base * env).unsqueeze(0).contiguous()
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(),
-                    reason="Stable Audio inpainting test requires CUDA.")
-@pytest.mark.skipif(not can_access_repo(_HF_REPO_ID),
-                    reason=f"{_HF_REPO_ID} not accessible — gated.")
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="Stable Audio inpainting test requires CUDA.")
+@pytest.mark.skipif(not can_access_repo(_HF_REPO_ID), reason=f"{_HF_REPO_ID} not accessible — gated.")
 def test_stable_audio_inpaint_kept_region_preserved():
     """Run inpainting with the first 1.5s kept and the next 4.5s
     regenerated. Verify the kept region matches the reference and the
@@ -117,9 +115,8 @@ def test_stable_audio_inpaint_kept_region_preserved():
     out_kept_rms = out_kept.float().pow(2).mean().sqrt().item()
     rms_ratio = out_kept_rms / max(ref_rms, 1e-6)
     print(f"kept rms ratio={rms_ratio:.3f}  ref_rms={ref_rms:.4f} out_rms={out_kept_rms:.4f}")
-    assert 0.5 < rms_ratio < 2.0, (
-        f"kept-region RMS ratio {rms_ratio:.3f} outside [0.5, 2.0] — "
-        "RePaint blending did not preserve the reference")
+    assert 0.5 < rms_ratio < 2.0, (f"kept-region RMS ratio {rms_ratio:.3f} outside [0.5, 2.0] — "
+                                   "RePaint blending did not preserve the reference")
 
     # 2. Unkept region: should be live audio (finite, in-range, non-silent).
     assert torch.isfinite(out_unkept).all(), "unkept region produced non-finite values"

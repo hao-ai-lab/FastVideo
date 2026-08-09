@@ -30,8 +30,8 @@ def _build_block(layer: int) -> torch.nn.Module:
     arch = FluxTransformer2DArchConfig()
     return FluxTransformerBlock(
         dim=arch.num_attention_heads * arch.attention_head_dim,  # 3072
-        num_attention_heads=arch.num_attention_heads,            # 24
-        attention_head_dim=arch.attention_head_dim,              # 128
+        num_attention_heads=arch.num_attention_heads,  # 24
+        attention_head_dim=arch.attention_head_dim,  # 128
         supported_attention_backends=FluxTransformer2DModel._supported_attention_backends,
     )
 

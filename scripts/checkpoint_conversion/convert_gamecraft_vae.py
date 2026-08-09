@@ -57,9 +57,7 @@ def convert_gamecraft_vae(
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Convert GameCraft VAE weights to FastVideo safetensors format."
-    )
+    parser = argparse.ArgumentParser(description="Convert GameCraft VAE weights to FastVideo safetensors format.")
     parser.add_argument(
         "--input",
         type=str,

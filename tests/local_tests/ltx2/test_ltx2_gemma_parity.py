@@ -13,7 +13,6 @@ from fastvideo.configs.models.encoders import LTX2GemmaConfig
 from fastvideo.models.encoders.gemma import LTX2GemmaTextEncoderModel
 from fastvideo.models.loader.component_loader import get_diffusers_config
 
-
 repo_root = Path(__file__).resolve().parents[3]
 ltx_core_path = repo_root / "LTX-2" / "packages" / "ltx-core" / "src"
 if ltx_core_path.exists() and str(ltx_core_path) not in sys.path:
@@ -41,37 +40,40 @@ def _attach_encoder_logging(
     log_path: Path,
     label: str,
 ) -> None:
+
     def _format_sum(tensor: torch.Tensor | None) -> str:
         if tensor is None:
             return "None"
         return f"{tensor.float().sum().item():.6f}"
 
     def _hook_factory(name: str):
+
         def _hook(_module, _inputs, outputs):  # noqa: ANN001
             out = outputs[0] if isinstance(outputs, tuple) else outputs
             out_sum = _format_sum(out if torch.is_tensor(out) else None)
             _log_line(log_path, f"{label}:{name}:sum={out_sum}")
+
         return _hook
 
     def _pre_hook_factory(name: str):
+
         def _hook(_module, inputs):  # noqa: ANN001
             tensor = inputs[0] if inputs else None
             in_sum = _format_sum(tensor if torch.is_tensor(tensor) else None)
             _log_line(log_path, f"{label}:{name}:in_sum={in_sum}")
+
         return _hook
 
     def _attach_block_detail(block: torch.nn.Module, prefix: str) -> None:
         block.register_forward_pre_hook(_pre_hook_factory(f"{prefix}:input"))
         block.register_forward_hook(_hook_factory(f"{prefix}:output"))
         if hasattr(block, "attn1"):
-            block.attn1.register_forward_hook(
-                _hook_factory(f"{prefix}:attn1"))
+            block.attn1.register_forward_hook(_hook_factory(f"{prefix}:attn1"))
         if hasattr(block, "ff"):
             block.ff.register_forward_hook(_hook_factory(f"{prefix}:ff"))
 
     if hasattr(encoder, "feature_extractor_linear"):
-        encoder.feature_extractor_linear.register_forward_pre_hook(
-            _pre_hook_factory("feature_extractor_linear"))
+        encoder.feature_extractor_linear.register_forward_pre_hook(_pre_hook_factory("feature_extractor_linear"))
         encoder.feature_extractor_linear.register_forward_hook(_hook_factory("feature_extractor_linear"))
     if hasattr(encoder, "embeddings_connector"):
         encoder.embeddings_connector.register_forward_hook(_hook_factory("embeddings_connector"))
@@ -84,6 +86,7 @@ def _attach_encoder_logging(
 
 
 def _log_register_sums(encoder: torch.nn.Module, log_path: Path, label: str) -> None:
+
     def _sum_param(module: torch.nn.Module, name: str) -> float | None:
         if not hasattr(module, "learnable_registers"):
             return None
@@ -103,6 +106,7 @@ def _log_register_sums(encoder: torch.nn.Module, log_path: Path, label: str) -> 
 
 
 def _log_param_sums(encoder: torch.nn.Module, log_path: Path, label: str) -> None:
+
     def _log_param(name: str, tensor: torch.Tensor | None) -> None:
         if tensor is None:
             _log_line(log_path, f"{label}:param:{name}:sum=None")
@@ -165,15 +169,11 @@ def test_ltx2_gemma_parity():
     torch.backends.cuda.enable_mem_efficient_sdp(False)
     torch.backends.cuda.enable_math_sdp(True)
     fastvideo_log, reference_log = _init_log_paths()
-    diffusers_root = Path(
-        os.getenv("LTX2_DIFFUSERS_PATH", "converted/ltx2_diffusers")
-    )
-    official_path = Path(
-        os.getenv(
-            "LTX2_OFFICIAL_PATH",
-            "official_ltx_weights/ltx-2-19b-distilled.safetensors",
-        )
-    )
+    diffusers_root = Path(os.getenv("LTX2_DIFFUSERS_PATH", "converted/ltx2_diffusers"))
+    official_path = Path(os.getenv(
+        "LTX2_OFFICIAL_PATH",
+        "official_ltx_weights/ltx-2-19b-distilled.safetensors",
+    ))
     text_encoder_path = diffusers_root / "text_encoder"
     gemma_path = text_encoder_path / "gemma"
 
@@ -204,9 +204,7 @@ def test_ltx2_gemma_parity():
         model_sd_ops=AV_GEMMA_TEXT_ENCODER_KEY_OPS,
         module_ops=module_ops_from_gemma_root(str(gemma_path)),
     )
-    reference_encoder = reference_builder.build(
-        device=device, dtype=precision
-    ).to(device=device, dtype=precision)
+    reference_encoder = reference_builder.build(device=device, dtype=precision).to(device=device, dtype=precision)
     if hasattr(reference_encoder.model, "config"):
         if hasattr(reference_encoder.model.config, "attn_implementation"):
             reference_encoder.model.config.attn_implementation = "sdpa"
@@ -231,9 +229,7 @@ def test_ltx2_gemma_parity():
     encoder_config = LTX2GemmaConfig()
     encoder_config.update_model_arch(diffusers_config)
     encoder_config.arch_config.gemma_model_path = str(gemma_path)
-    fastvideo_encoder = LTX2GemmaTextEncoderModel(encoder_config).to(
-        device=device, dtype=precision
-    )
+    fastvideo_encoder = LTX2GemmaTextEncoderModel(encoder_config).to(device=device, dtype=precision)
     if hasattr(fastvideo_encoder.gemma_model, "config"):
         if hasattr(fastvideo_encoder.gemma_model.config, "attn_implementation"):
             fastvideo_encoder.gemma_model.config.attn_implementation = "sdpa"
@@ -269,9 +265,9 @@ def test_ltx2_gemma_parity():
     attention_mask = torch.tensor([[w[1] for w in token_pairs]], device=device)
 
     with torch.no_grad(), torch.backends.cuda.sdp_kernel(
-        enable_flash=False,
-        enable_mem_efficient=False,
-        enable_math=True,
+            enable_flash=False,
+            enable_mem_efficient=False,
+            enable_math=True,
     ):
         ref_outputs = reference_encoder.model(
             input_ids=input_ids,
@@ -315,27 +311,19 @@ def test_ltx2_gemma_parity():
             rope_type=fastvideo_encoder.embeddings_connector.rope_type,
         )
         _log_line(
-            reference_log,
-            "reference:rope:cos_sum="
+            reference_log, "reference:rope:cos_sum="
             f"{ref_cos.float().sum().item():.6f} sin_sum={ref_sin.float().sum().item():.6f} "
             f"theta={reference_encoder.embeddings_connector.positional_embedding_theta} "
             f"max_pos={reference_encoder.embeddings_connector.positional_embedding_max_pos} "
-            f"rope_type={reference_encoder.embeddings_connector.rope_type}"
-        )
+            f"rope_type={reference_encoder.embeddings_connector.rope_type}")
         _log_line(
-            fastvideo_log,
-            "fastvideo:rope:cos_sum="
+            fastvideo_log, "fastvideo:rope:cos_sum="
             f"{fast_cos.float().sum().item():.6f} sin_sum={fast_sin.float().sum().item():.6f} "
             f"theta={fastvideo_encoder.embeddings_connector.positional_embedding_theta} "
             f"max_pos={fastvideo_encoder.embeddings_connector.positional_embedding_max_pos} "
-            f"rope_type={fastvideo_encoder.embeddings_connector.rope_type}"
-        )
-        ref_video, ref_audio, _ = reference_encoder._run_connectors(
-            ref_projected, attention_mask
-        )
-        fast_video_from_ref, fast_audio_from_ref, _ = fastvideo_encoder._run_connectors(
-            ref_projected, attention_mask
-        )
+            f"rope_type={fastvideo_encoder.embeddings_connector.rope_type}")
+        ref_video, ref_audio, _ = reference_encoder._run_connectors(ref_projected, attention_mask)
+        fast_video_from_ref, fast_audio_from_ref, _ = fastvideo_encoder._run_connectors(ref_projected, attention_mask)
         _log_line(
             fastvideo_log,
             "fastvideo:connector_on_ref:video_sum="
@@ -364,9 +352,7 @@ def test_ltx2_gemma_parity():
             attention_mask=attention_mask,
             padding_side=fastvideo_encoder.padding_side,
         )
-        fast_video, fast_audio, _ = fastvideo_encoder._run_connectors(
-            fast_projected, attention_mask
-        )
+        fast_video, fast_audio, _ = fastvideo_encoder._run_connectors(fast_projected, attention_mask)
 
     assert ref_video.shape == fast_video.shape
     assert ref_audio.shape == fast_audio.shape

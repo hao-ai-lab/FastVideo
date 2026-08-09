@@ -26,8 +26,9 @@ import sys
 import pytest
 
 if importlib.util.find_spec("flash_attn") is None:
-    pytest.skip("flash_attn not installed; resolver tests require it for the unconditional top-level imports in flash_attn_no_pad",
-                allow_module_level=True)
+    pytest.skip(
+        "flash_attn not installed; resolver tests require it for the unconditional top-level imports in flash_attn_no_pad",
+        allow_module_level=True)
 
 
 def _reload_resolver_module():

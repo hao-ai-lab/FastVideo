@@ -42,7 +42,7 @@ class EncoderCausal3D(nn.Module):
         self,
         in_channels: int = 3,
         out_channels: int = 16,
-        down_block_types: Tuple[str, ...] = ("DownEncoderBlockCausal3D",),
+        down_block_types: Tuple[str, ...] = ("DownEncoderBlockCausal3D", ),
         block_out_channels: Tuple[int, ...] = (128, 256, 512, 512),
         layers_per_block: int = 2,
         norm_num_groups: int = 32,
@@ -57,9 +57,11 @@ class EncoderCausal3D(nn.Module):
         super().__init__()
         self.layers_per_block = layers_per_block
 
-        self.conv_in = CausalConv3d(
-            in_channels, block_out_channels[0], kernel_size=3, stride=1, disable_causal=disable_causal
-        )
+        self.conv_in = CausalConv3d(in_channels,
+                                    block_out_channels[0],
+                                    kernel_size=3,
+                                    stride=1,
+                                    disable_causal=disable_causal)
         self.down_blocks = nn.ModuleList([])
 
         output_channel = block_out_channels[0]
@@ -72,9 +74,7 @@ class EncoderCausal3D(nn.Module):
 
             if time_compression_ratio == 4:
                 add_spatial = bool(i < num_spatial)
-                add_time = bool(
-                    i >= (len(block_out_channels) - 1 - num_time) and not is_final_block
-                )
+                add_time = bool(i >= (len(block_out_channels) - 1 - num_time) and not is_final_block)
             elif time_compression_ratio == 8:
                 add_spatial = bool(i < num_spatial)
                 add_time = bool(i < num_time)
@@ -82,7 +82,7 @@ class EncoderCausal3D(nn.Module):
                 raise ValueError(f"Unsupported time_compression_ratio: {time_compression_ratio}")
 
             downsample_stride_HW = (2, 2) if add_spatial else (1, 1)
-            downsample_stride_T = (2,) if add_time else (1,)
+            downsample_stride_T = (2, ) if add_time else (1, )
             downsample_stride = tuple(downsample_stride_T + downsample_stride_HW)
 
             down_block = DownEncoderBlockCausal3D(
@@ -112,9 +112,7 @@ class EncoderCausal3D(nn.Module):
             causal_attention=mid_block_causal_attn,
         )
 
-        self.conv_norm_out = nn.GroupNorm(
-            num_channels=block_out_channels[-1], num_groups=norm_num_groups, eps=1e-6
-        )
+        self.conv_norm_out = nn.GroupNorm(num_channels=block_out_channels[-1], num_groups=norm_num_groups, eps=1e-6)
         self.conv_act = nn.SiLU()
         conv_out_channels = 2 * out_channels if double_z else out_channels
         self.conv_out = CausalConv3d(
@@ -142,7 +140,7 @@ class DecoderCausal3D(nn.Module):
         self,
         in_channels: int = 16,
         out_channels: int = 3,
-        up_block_types: Tuple[str, ...] = ("UpDecoderBlockCausal3D",),
+        up_block_types: Tuple[str, ...] = ("UpDecoderBlockCausal3D", ),
         block_out_channels: Tuple[int, ...] = (128, 256, 512, 512),
         layers_per_block: int = 2,
         norm_num_groups: int = 32,
@@ -189,9 +187,7 @@ class DecoderCausal3D(nn.Module):
 
             if time_compression_ratio == 4:
                 add_spatial = bool(i < num_spatial)
-                add_time = bool(
-                    i >= len(block_out_channels) - 1 - num_time and not is_final_block
-                )
+                add_time = bool(i >= len(block_out_channels) - 1 - num_time and not is_final_block)
             elif time_compression_ratio == 8:
                 add_spatial = bool(i >= len(block_out_channels) - num_spatial)
                 add_time = bool(i >= len(block_out_channels) - num_time)
@@ -199,7 +195,7 @@ class DecoderCausal3D(nn.Module):
                 raise ValueError(f"Unsupported time_compression_ratio: {time_compression_ratio}")
 
             upsample_HW = (2, 2) if add_spatial else (1, 1)
-            upsample_T = (2,) if add_time else (1,)
+            upsample_T = (2, ) if add_time else (1, )
             upsample_scale_factor = tuple(upsample_T + upsample_HW)
 
             up_block = UpDecoderBlockCausal3D(
@@ -217,13 +213,9 @@ class DecoderCausal3D(nn.Module):
             self.up_blocks.append(up_block)
             output_channel = output_channel
 
-        self.conv_norm_out = nn.GroupNorm(
-            num_channels=block_out_channels[0], num_groups=norm_num_groups, eps=1e-6
-        )
+        self.conv_norm_out = nn.GroupNorm(num_channels=block_out_channels[0], num_groups=norm_num_groups, eps=1e-6)
         self.conv_act = nn.SiLU()
-        self.conv_out = CausalConv3d(
-            block_out_channels[0], out_channels, kernel_size=3, disable_causal=disable_causal
-        )
+        self.conv_out = CausalConv3d(block_out_channels[0], out_channels, kernel_size=3, disable_causal=disable_causal)
 
     def forward(
         self,
@@ -283,27 +275,23 @@ class GameCraftVAE(nn.Module):
             mid_block_causal_attn=getattr(arch, "mid_block_causal_attn", False),
         )
 
-        self.quant_conv = nn.Conv3d(
-            2 * arch.latent_channels, 2 * arch.latent_channels, kernel_size=1
-        )
-        self.post_quant_conv = nn.Conv3d(
-            arch.latent_channels, arch.latent_channels, kernel_size=1
-        )
-        
+        self.quant_conv = nn.Conv3d(2 * arch.latent_channels, 2 * arch.latent_channels, kernel_size=1)
+        self.post_quant_conv = nn.Conv3d(arch.latent_channels, arch.latent_channels, kernel_size=1)
+
         # Scaling factor for latent normalization (required for decoding stage)
         self.scaling_factor = arch.scaling_factor
-        
+
         # Tiling support - matches official GameCraft VAE settings
         self._tiling_enabled = False
         self.tile_overlap_factor = 0.25
-        
+
         # Temporal tiling params (for >64 output frames)
         self.tile_sample_min_tsize = 64  # Minimum sample temporal size (video frames)
         self.tile_latent_min_tsize = 16  # = 64 // 4 (time_compression_ratio)
-        
+
         # Spatial tiling params - use small tiles to reduce memory
         self.tile_sample_min_size = 256  # Minimum spatial tile size in pixel space
-        self.tile_latent_min_size = 32   # = 256 // 8 (spatial_compression_ratio)
+        self.tile_latent_min_size = 32  # = 256 // 8 (spatial_compression_ratio)
 
     def encode(self, x: torch.Tensor) -> AutoencoderKLOutput:
         """Encode to latent distribution."""
@@ -329,7 +317,7 @@ class GameCraftVAE(nn.Module):
             # Check if spatial tiling needed (large H or W)
             if z.shape[-1] > self.tile_latent_min_size or z.shape[-2] > self.tile_latent_min_size:
                 return self._spatial_tiled_decode(z)
-        
+
         z = self.post_quant_conv(z)
         dec = self.decoder(z, latent_embeds=None)
         return dec
@@ -341,21 +329,21 @@ class GameCraftVAE(nn.Module):
         Only used when T > tile_latent_min_tsize (16).
         """
         B, C, T, H, W = z.shape
-        
+
         # Use the pre-configured tiling parameters
         overlap_size = int(self.tile_latent_min_tsize * (1 - self.tile_overlap_factor))
         blend_extent = int(self.tile_sample_min_tsize * self.tile_overlap_factor)
         t_limit = self.tile_sample_min_tsize - blend_extent
-        
+
         row = []
         for i in range(0, T, overlap_size):
-            tile = z[:, :, i : i + self.tile_latent_min_tsize + 1, :, :]
+            tile = z[:, :, i:i + self.tile_latent_min_tsize + 1, :, :]
             tile = self.post_quant_conv(tile)
             decoded = self.decoder(tile, latent_embeds=None)
             if i > 0:
                 decoded = decoded[:, :, 1:, :, :]  # Skip first frame for non-first tiles
             row.append(decoded)
-        
+
         # Blend overlapping regions
         result_row = []
         for i, tile in enumerate(row):
@@ -363,10 +351,10 @@ class GameCraftVAE(nn.Module):
                 tile = self._blend_t(row[i - 1], tile, blend_extent)
                 result_row.append(tile[:, :, :t_limit, :, :])
             else:
-                result_row.append(tile[:, :, :t_limit+1, :, :])
-        
+                result_row.append(tile[:, :, :t_limit + 1, :, :])
+
         return torch.cat(result_row, dim=2)
-    
+
     def _spatial_tiled_decode(self, z: torch.Tensor) -> torch.Tensor:
         """Decode latents in spatial tiles with overlapping and blending.
         
@@ -375,18 +363,18 @@ class GameCraftVAE(nn.Module):
         overlap_size = int(self.tile_latent_min_size * (1 - self.tile_overlap_factor))
         blend_extent = int(self.tile_sample_min_size * self.tile_overlap_factor)
         row_limit = self.tile_sample_min_size - blend_extent
-        
+
         # Split z into overlapping tiles and decode them separately
         rows = []
         for i in range(0, z.shape[-2], overlap_size):
             row = []
             for j in range(0, z.shape[-1], overlap_size):
-                tile = z[:, :, :, i: i + self.tile_latent_min_size, j: j + self.tile_latent_min_size]
+                tile = z[:, :, :, i:i + self.tile_latent_min_size, j:j + self.tile_latent_min_size]
                 tile = self.post_quant_conv(tile)
                 decoded = self.decoder(tile, latent_embeds=None)
                 row.append(decoded)
             rows.append(row)
-        
+
         # Blend overlapping regions
         result_rows = []
         for i, row in enumerate(rows):
@@ -399,53 +387,53 @@ class GameCraftVAE(nn.Module):
                     tile = self._blend_h(row[j - 1], tile, blend_extent)
                 result_row.append(tile[:, :, :, :row_limit, :row_limit])
             result_rows.append(torch.cat(result_row, dim=-1))
-        
+
         return torch.cat(result_rows, dim=-2)
-    
+
     def _blend_t(self, a: torch.Tensor, b: torch.Tensor, blend_extent: int) -> torch.Tensor:
         """Blend two tensors along temporal dimension."""
         blend_extent = min(a.shape[-3], b.shape[-3], blend_extent)
         if blend_extent == 0:
             return b
-        
+
         a_region = a[..., -blend_extent:, :, :]
         b_region = b[..., :blend_extent, :, :]
-        
+
         weights = torch.arange(blend_extent, device=a.device, dtype=a.dtype) / blend_extent
         weights = weights.view(1, 1, blend_extent, 1, 1)
-        
+
         blended = a_region * (1 - weights) + b_region * weights
         b[..., :blend_extent, :, :] = blended
         return b
-    
+
     def _blend_v(self, a: torch.Tensor, b: torch.Tensor, blend_extent: int) -> torch.Tensor:
         """Blend two tensors along vertical (height) dimension."""
         blend_extent = min(a.shape[-2], b.shape[-2], blend_extent)
         if blend_extent == 0:
             return b
-        
+
         a_region = a[..., -blend_extent:, :]
         b_region = b[..., :blend_extent, :]
-        
+
         weights = torch.arange(blend_extent, device=a.device, dtype=a.dtype) / blend_extent
         weights = weights.view(1, 1, 1, blend_extent, 1)
-        
+
         blended = a_region * (1 - weights) + b_region * weights
         b[..., :blend_extent, :] = blended
         return b
-    
+
     def _blend_h(self, a: torch.Tensor, b: torch.Tensor, blend_extent: int) -> torch.Tensor:
         """Blend two tensors along horizontal (width) dimension."""
         blend_extent = min(a.shape[-1], b.shape[-1], blend_extent)
         if blend_extent == 0:
             return b
-        
+
         a_region = a[..., -blend_extent:]
         b_region = b[..., :blend_extent]
-        
+
         weights = torch.arange(blend_extent, device=a.device, dtype=a.dtype) / blend_extent
         weights = weights.view(1, 1, 1, 1, blend_extent)
-        
+
         blended = a_region * (1 - weights) + b_region * weights
         b[..., :blend_extent] = blended
         return b

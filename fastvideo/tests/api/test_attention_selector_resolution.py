@@ -338,8 +338,8 @@ def test_component_with_no_concrete_decision_reports_no_request(monkeypatch):
     # (c) and it does NOT suppress the env var, which is the whole point
     monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
     selector._cached_get_attn_backend.cache_clear()
-    passthrough = selector.get_attn_backend(
-        requested=selector.component_attention_backend(_Component(untouched)), **KWARGS)
+    passthrough = selector.get_attn_backend(requested=selector.component_attention_backend(_Component(untouched)),
+                                            **KWARGS)
     assert passthrough == selector.get_attn_backend(**KWARGS)
 
 
