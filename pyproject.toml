@@ -208,7 +208,8 @@ dreamverse-mock-server = "dreamverse.mock_server:cli"
 
 [tool.setuptools.packages.find]
 where = [".", "apps/dreamverse"]
-exclude = ["assets*", "docker*", "docs", "scripts*", "apps*", "dreamverse.tests*"]
+include = ["fastvideo", "fastvideo.*", "dreamverse", "dreamverse.*"]
+exclude = ["dreamverse.tests*"]
 
 [tool.setuptools.package-data]
 dreamverse = ["prompts/*.md"]
