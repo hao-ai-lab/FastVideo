@@ -18,6 +18,7 @@ from fastvideo.distributed.communication_op import (
 )
 from fastvideo.distributed.parallel_state import get_sp_world_size, model_parallel_is_initialized
 from fastvideo.layers.linear import ReplicatedLinear
+from fastvideo.layers.mlp import MLP
 from fastvideo.layers.quantization import QuantizationConfig
 from fastvideo.layers.visual_embedding import Timesteps
 from fastvideo.models.dits.base import BaseDiT
@@ -47,39 +48,6 @@ class MiniMaxH3RotaryPosEmbed(nn.Module):
         freqs = torch.cat((freqs_t, freqs_h, freqs_w), dim=-1)
         freqs = torch.cat((freqs, freqs), dim=-1)
         return freqs.cos(), freqs.sin()
-
-
-class MiniMaxH3TimestepEmbedding(nn.Module):
-    """Linear-SiLU-linear timestep MLP."""
-
-    def __init__(
-        self,
-        input_dim: int,
-        hidden_dim: int,
-        output_dim: int,
-        quant_config: QuantizationConfig | None = None,
-        prefix: str = "",
-    ) -> None:
-        super().__init__()
-        self.fc_in = ReplicatedLinear(
-            input_dim,
-            hidden_dim,
-            bias=True,
-            quant_config=quant_config,
-            prefix=f"{prefix}.fc_in",
-        )
-        self.fc_out = ReplicatedLinear(
-            hidden_dim,
-            output_dim,
-            bias=True,
-            quant_config=quant_config,
-            prefix=f"{prefix}.fc_out",
-        )
-
-    def forward(self, sample: torch.Tensor) -> torch.Tensor:
-        hidden_states, _ = self.fc_in(sample)
-        hidden_states, _ = self.fc_out(F.silu(hidden_states))
-        return hidden_states
 
 
 class MiniMaxH3FeedForward(nn.Module):
@@ -496,14 +464,19 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
             flip_sin_to_cos=True,
             downscale_freq_shift=0,
         )
-        self.time_embedder = MiniMaxH3TimestepEmbedding(
+        self.time_embedder = MLP(
             arch.freq_dim,
             arch.time_embed_hidden_dim,
             arch.time_embed_dim,
+            act_type="silu",
             quant_config=config.quant_config,
             prefix=f"{config.prefix}.time_embedder",
         )
         self.rope = MiniMaxH3RotaryPosEmbed(arch.rope_freq_dim, arch.rope_theta)
+        # per-generation caches for loop-invariant work (see _rotary_for /
+        # _refined_text); plain attrs, never in state_dict
+        self._rope_cache: tuple | None = None
+        self._text_cache: tuple | None = None
         self.token_refiner = MiniMaxH3TokenRefiner(
             arch.hidden_size,
             arch.num_attention_heads,
@@ -573,6 +546,49 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
                                  (2 * arch.rope_freq_dim)))
             self.rope._buffers["inv_freq"] = inv_freq
 
+    def _rotary_for(self, position_ids: torch.Tensor, dtype: torch.dtype) -> tuple[torch.Tensor, torch.Tensor]:
+        """cos/sin depend only on positions; the denoising stage holds one
+        position_ids tensor for the whole loop, so cache per layout and
+        pre-cast once instead of rebuilding every step and re-casting in
+        every block. Holding the source tensor keeps the identity check safe
+        against id reuse."""
+        if torch.compiler.is_compiling():
+            cos, sin = self.rope(position_ids)
+            return cos.to(dtype), sin.to(dtype)
+        cached = self._rope_cache
+        if (cached is not None and cached[0] is position_ids and cached[1] == dtype
+                and cached[2][0].device == position_ids.device):
+            return cached[2]
+        cos, sin = self.rope(position_ids)
+        value = (cos.to(dtype), sin.to(dtype))
+        self._rope_cache = (position_ids, dtype, value)
+        return value
+
+    def _refined_text(self, encoder_hidden_states: torch.Tensor) -> torch.Tensor:
+        """The prompt embedding is constant across the denoising loop and the
+        refiner blocks are timestep-free, so refine once per generation
+        (saves two transformer blocks and four collectives per step). Skipped
+        under grad (training needs the graph) and under compile."""
+        cacheable = not torch.is_grad_enabled() and not torch.compiler.is_compiling()
+        if (cacheable and self._text_cache is not None and self._text_cache[0] is encoder_hidden_states
+                and self._text_cache[1].device == encoder_hidden_states.device):
+            return self._text_cache[1]
+        text_embeds, _ = self.context_embedder(encoder_hidden_states.to(self.context_embedder.weight.dtype))
+        text_original_seq_len = text_embeds.shape[1]
+        sp_world_size = get_sp_world_size() if model_parallel_is_initialized() else 1
+        if sp_world_size > 1:
+            text_embeds, _ = sequence_model_parallel_shard(text_embeds, dim=1)
+        text_embeds = self.token_refiner(text_embeds, text_original_seq_len)
+        if sp_world_size > 1:
+            text_embeds = sequence_model_parallel_all_gather_with_unpad(
+                text_embeds,
+                text_original_seq_len,
+                dim=1,
+            )
+        if cacheable:
+            self._text_cache = (encoder_hidden_states, text_embeds)
+        return text_embeds
+
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -599,27 +615,19 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         if encoder_hidden_states.shape[1] != text_indices.numel():
             raise ValueError("encoder_hidden_states row count must match text_indices.")
 
-        rotary_emb = self.rope(position_ids)
         video_embeds, _ = self.proj_in(hidden_states.to(self.proj_in.weight.dtype))
         audio_embeds, _ = self.audio_proj_in(audio_hidden_states.to(self.audio_proj_in.weight.dtype))
-        text_embeds, _ = self.context_embedder(encoder_hidden_states.to(self.context_embedder.weight.dtype))
-
-        text_original_seq_len = text_embeds.shape[1]
+        text_embeds = self._refined_text(encoder_hidden_states)
+        rotary_emb = self._rotary_for(position_ids, text_embeds.dtype)
         sp_world_size = get_sp_world_size() if model_parallel_is_initialized() else 1
-        if sp_world_size > 1:
-            text_embeds, _ = sequence_model_parallel_shard(text_embeds, dim=1)
-        text_embeds = self.token_refiner(text_embeds, text_original_seq_len)
-        if sp_world_size > 1:
-            text_embeds = sequence_model_parallel_all_gather_with_unpad(
-                text_embeds,
-                text_original_seq_len,
-                dim=1,
-            )
 
-        packed_hidden_states = text_embeds.new_zeros((text_embeds.shape[0], sequence_length, text_embeds.shape[-1]))
-        packed_hidden_states = packed_hidden_states.index_copy(1, text_indices, text_embeds)
-        packed_hidden_states = packed_hidden_states.index_copy(1, video_indices, video_embeds.to(text_embeds.dtype))
-        packed_hidden_states = packed_hidden_states.index_copy(1, audio_indices, audio_embeds.to(text_embeds.dtype))
+        # text/video/audio indices partition [0, sequence_length), so the
+        # uninitialized buffer is fully overwritten; in-place index_copy_ avoids
+        # the three full-buffer clones out-of-place index_copy would make.
+        packed_hidden_states = text_embeds.new_empty((text_embeds.shape[0], sequence_length, text_embeds.shape[-1]))
+        packed_hidden_states.index_copy_(1, text_indices, text_embeds)
+        packed_hidden_states.index_copy_(1, video_indices, video_embeds.to(text_embeds.dtype))
+        packed_hidden_states.index_copy_(1, audio_indices, audio_embeds.to(text_embeds.dtype))
 
         temb = self.time_proj(timestep)
         temb = self.time_embedder(temb.to(self.time_embedder.fc_in.weight.dtype))
