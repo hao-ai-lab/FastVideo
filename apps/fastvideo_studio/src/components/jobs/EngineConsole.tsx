@@ -10,6 +10,11 @@ const POLL_INTERVAL_MS = 2000;
 // Cap the DOM at the last ~500 lines; the server keeps its own ring buffer.
 const MAX_LINES = 500;
 
+// The engine tail includes uvicorn's access log (until a server restart picks
+// up access_log=False); the frontend's own polling would otherwise flood the
+// console with "GET /api/... 200 OK" lines. Keep non-GET and non-2xx lines.
+const ACCESS_LOG_NOISE = /^INFO:\s+[\d.:]+\s+- "(?:GET|HEAD) \S+ HTTP\/[\d.]+" 2\d\d/;
+
 /**
  * Collapsible tail of the engine's stdout/stderr (driver + relayed worker
  * output). Polls only while open; sticks to the bottom unless the user has
@@ -35,8 +40,9 @@ export default function EngineConsole() {
       try {
         const data = await getEngineLogs(afterRef.current);
         afterRef.current = data.total;
-        if (mounted && data.lines.length > 0) {
-          setLines((prev) => [...prev, ...data.lines].slice(-MAX_LINES));
+        const fresh = data.lines.filter((l) => !ACCESS_LOG_NOISE.test(l));
+        if (mounted && fresh.length > 0) {
+          setLines((prev) => [...prev, ...fresh].slice(-MAX_LINES));
         }
       } catch (e) {
         console.error('Failed to fetch engine logs:', e);

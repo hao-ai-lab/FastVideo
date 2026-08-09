@@ -45,6 +45,7 @@ logger = logging.getLogger("fastvideo.studio.api")
 
 DEFAULT_OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "..", "outputs", "ui_jobs")
 
+
 class _EngineLogBuffer:
     """Thread-safe ring buffer over the server process's stdout/stderr.
 
@@ -74,10 +75,9 @@ class _EngineLogBuffer:
                 self._lines.append(line)
         if self.on_line is not None:
             for line in complete:
-                try:
+                # never break stdout on a bad feed
+                with contextlib.suppress(Exception):
                     self.on_line(line)
-                except Exception:  # noqa: BLE001 -- never break stdout
-                    pass
 
     def get_lines(self, after: int = 0) -> tuple[list[str], int]:
         with self._lock:
@@ -105,7 +105,6 @@ class _Tee:
 
 
 engine_log = _EngineLogBuffer()
-
 
 _available_models: list[dict[str, str]] = [{
     "id": path,
@@ -185,8 +184,8 @@ def list_models(workload_type: str | None = None) -> list[dict[str, Any]]:
     return _available_models
 
 
-_PRESET_FIELDS = ("height", "width", "num_frames", "fps", "num_inference_steps",
-                  "guidance_scale", "guidance_rescale", "negative_prompt", "seed")
+_PRESET_FIELDS = ("height", "width", "num_frames", "fps", "num_inference_steps", "guidance_scale", "guidance_rescale",
+                  "negative_prompt", "seed")
 _preset_cache: dict[str, dict[str, Any]] = {}
 
 
@@ -200,9 +199,7 @@ def model_presets(model_id: str) -> dict[str, Any]:
             sp = SamplingParam.from_pretrained(model_id)
         except Exception as exc:  # noqa: BLE001 -- unknown/unresolvable model
             raise HTTPException(status_code=404, detail=f"No presets for '{model_id}': {exc}") from exc
-        _preset_cache[model_id] = {
-            f: getattr(sp, f) for f in _PRESET_FIELDS if getattr(sp, f, None) is not None
-        }
+        _preset_cache[model_id] = {f: getattr(sp, f) for f in _PRESET_FIELDS if getattr(sp, f, None) is not None}
     return _preset_cache[model_id]
 
 
@@ -764,7 +761,7 @@ def main() -> None:
     # original stream objects — re-point them or their output bypasses the buffer
     for h in logging.getLogger().handlers:
         if isinstance(h, logging.StreamHandler) and h.stream in (sys.__stderr__, sys.__stdout__):
-            h.setStream(sys.stderr)
+            h.setStream(sys.stderr)  # type: ignore[arg-type]  # duck-typed file-like
     global job_runner, database, upload_dir, verbose, datasets_upload_dir  # noqa: PLW0603
 
     # Set up signal handlers to prevent worker crashes from killing the server
@@ -841,6 +838,10 @@ def main() -> None:
         host=args.host,
         port=args.port,
         log_level="info",
+        # The engine-output console tails this process's stdout/stderr; the
+        # frontend polls several endpoints every few seconds, so access-log
+        # lines are pure self-noise there. App/job logging is unaffected.
+        access_log=False,
     )
 
 
