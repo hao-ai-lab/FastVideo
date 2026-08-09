@@ -1,0 +1,61 @@
+# Minimal H3 DMD2 trio and method configuration for CPU contract tests.
+models:
+  student:
+    _target_: fastvideo.train.models.minimax_h3.MiniMaxH3DMDModel
+    init_from: MiniMaxAI/MiniMax-H3
+    trainable: true
+  teacher:
+    _target_: fastvideo.train.models.minimax_h3.MiniMaxH3DMDModel
+    init_from: MiniMaxAI/MiniMax-H3
+    trainable: false
+  critic:
+    _target_: fastvideo.train.models.minimax_h3.MiniMaxH3DMDModel
+    init_from: MiniMaxAI/MiniMax-H3
+    trainable: true
+
+method:
+  _target_: fastvideo.train.methods.distribution_matching.dmd2.DMD2Method
+  rollout_mode: data_latent
+  generator_update_interval: 1
+  real_score_guidance_scale: 3.5
+  dmd_denoising_steps: [1000, 757, 522]
+  min_timestep_ratio: 0.02
+  max_timestep_ratio: 0.98
+  cfg_uncond:
+    text: zero
+  fake_score_learning_rate: 1.0e-3
+  fake_score_betas: [0.0, 0.999]
+  fake_score_lr_scheduler: constant
+
+training:
+  distributed:
+    num_gpus: 1
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 1
+  data:
+    data_path: /tmp/minimax_h3_t2va
+    preprocessed_data_type: t2va
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    seed: 42
+    # Tiny geometry: [1, 24, 2, 4, 4] video latents, [1, 2, 32, 8] audio.
+    num_latent_t: 2
+    num_height: 64
+    num_width: 64
+    num_frames: 5
+  optimizer:
+    learning_rate: 1.0e-3
+    betas: [0.0, 0.999]
+    weight_decay: 0.0
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+  loop:
+    max_train_steps: 4
+  model:
+    precondition_outputs: false
+  dit_precision: bf16
+
+callbacks: {}
+pipeline: {}

@@ -1,0 +1,226 @@
+# SPDX-License-Identifier: Apache-2.0
+"""MiniMax H3 distribution-matching adapter (packed dual-modality latents)."""
+
+from __future__ import annotations
+
+import math
+from typing import Any, Literal
+
+import torch
+
+from fastvideo.pipelines import TrainingBatch
+from fastvideo.pipelines.basic.minimax_h3.packing import (
+    MINIMAX_H3_AUDIO_CHANNELS,
+    audio_latent_num_frames,
+)
+from fastvideo.train.models.minimax_h3.minimax_h3 import (
+    _AUDIO_LATENT_CHANNELS,
+    _AUDIO_SCHEDULER_SHIFT,
+    _VIDEO_LATENT_CHANNELS,
+    _VIDEO_SCHEDULER_SHIFT,
+    MiniMaxH3Model,
+    shift_noise_amount,
+)
+
+# DMD2 samples integer score timesteps on the legacy [0, 1000] scale. H3 maps
+# them to its shared base noise amount before applying the modality shifts.
+_DMD_TIMESTEP_SCALE = 1000
+
+
+class MiniMaxH3DMDModel(MiniMaxH3Model):
+    """Present H3's dual (video, audio) streams to DMD2 as one packed tensor.
+
+    ``DMD2Method``'s rollout and loss math assume one latent tensor per
+    sample. This adapter flattens both modality latents into one ``[1, N]``
+    tensor (video's ``[1, T, 24, H, W]`` elements first, stereo audio's
+    ``[1, 2, 32, Ta]`` elements after) so ``dmd2.py`` stays model-agnostic.
+    Integer method timesteps become one shared base noise amount that is
+    shifted per modality (video 12.0, audio 3.0), exactly as H3's paired
+    schedulers synchronize the two streams during fine-tuning and inference.
+
+    ponytail: packed means weight modalities by element count (video
+    dominates); switch to per-modality mean losses if audio quality lags.
+    """
+
+    @property
+    def num_train_timesteps(self) -> int:
+        return _DMD_TIMESTEP_SCALE
+
+    # ------------------------------------------------------------------
+    # Packed dual-modality helpers
+    # ------------------------------------------------------------------
+
+    def _modality_shapes(self) -> tuple[tuple[int, ...], tuple[int, ...]]:
+        """Return the ``[1, T, C, H, W]`` video and ``[1, 2, 32, Ta]`` audio shapes."""
+        data = self.training_config.data
+        video_shape = (
+            1,
+            int(data.num_latent_t),
+            _VIDEO_LATENT_CHANNELS,
+            int(data.num_height) // 16,
+            int(data.num_width) // 16,
+        )
+        audio_shape = (
+            1,
+            MINIMAX_H3_AUDIO_CHANNELS,
+            _AUDIO_LATENT_CHANNELS,
+            audio_latent_num_frames(int(data.num_frames)),
+        )
+        return video_shape, audio_shape
+
+    def pack_latents(
+        self,
+        video_latents: torch.Tensor,
+        audio_latents: torch.Tensor,
+    ) -> torch.Tensor:
+        """Flatten both modality latents into one ``[1, N]`` tensor."""
+        return torch.cat(
+            (video_latents.reshape(1, -1), audio_latents.reshape(1, -1)),
+            dim=1,
+        )
+
+    def unpack_latents(self, packed: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Split one packed ``[1, N]`` tensor back into (video, audio) latents."""
+        video_shape, audio_shape = self._modality_shapes()
+        split = math.prod(video_shape)
+        if packed.shape != (1, split + math.prod(audio_shape)):
+            raise ValueError("Packed latents must have shape "
+                             f"[1, {split + math.prod(audio_shape)}], got {tuple(packed.shape)}")
+        return (
+            packed[:, :split].reshape(video_shape),
+            packed[:, split:].reshape(audio_shape),
+        )
+
+    def _noise_amounts(self, timestep: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Map one integer method timestep to both modality noise amounts."""
+        base = (timestep.reshape(-1)[:1].to(torch.float32) / _DMD_TIMESTEP_SCALE)
+        base = base.clamp(0.0, 1.0)
+        return (
+            shift_noise_amount(base, _VIDEO_SCHEDULER_SHIFT),
+            shift_noise_amount(base, _AUDIO_SCHEDULER_SHIFT),
+        )
+
+    # ------------------------------------------------------------------
+    # ModelBase overrides (packed convention)
+    # ------------------------------------------------------------------
+
+    def set_requires_negative_conditioning(self, requires: bool) -> None:
+        """Fail fast: H3 cannot encode negative prompts at training time."""
+        if requires:
+            raise ValueError("MiniMaxH3DMDModel has no negative-prompt encoder; set "
+                             "method.cfg_uncond={'text': 'zero'} for unconditional forwards")
+
+    def prepare_batch(
+        self,
+        raw_batch: dict[str, Any],
+        *,
+        generator: torch.Generator,
+        latents_source: Literal["data", "zeros"] = "data",
+    ) -> TrainingBatch:
+        """Prepare the T2VA batch, then expose clean latents in packed form."""
+        batch = super().prepare_batch(
+            raw_batch,
+            generator=generator,
+            latents_source=latents_source,
+        )
+        # DMD2 draws its own noise and timesteps per forward; only the packed
+        # clean latents matter here. The fine-tuning noisy fields are
+        # refreshed by predict_noise on every call.
+        batch.latents = self.pack_latents(batch.latents, batch.audio_latents)
+        return batch
+
+    def add_noise(
+        self,
+        clean_latents: torch.Tensor,
+        noise: torch.Tensor,
+        timestep: torch.Tensor,
+    ) -> torch.Tensor:
+        """Noise packed latents at one shared timestep, shifted per modality."""
+        sigma_video, sigma_audio = self._noise_amounts(timestep)
+        clean_video, clean_audio = self.unpack_latents(clean_latents)
+        noise_video, noise_audio = self.unpack_latents(noise)
+        return self.pack_latents(
+            self._mix(clean_video, noise_video, sigma_video),
+            self._mix(clean_audio, noise_audio, sigma_audio),
+        )
+
+    @staticmethod
+    def _mix(
+        clean: torch.Tensor,
+        noise: torch.Tensor,
+        sigma: torch.Tensor,
+    ) -> torch.Tensor:
+        sigma = sigma.to(device=clean.device, dtype=clean.dtype)
+        return (1.0 - sigma) * clean + sigma * noise
+
+    def predict_noise(
+        self,
+        noisy_latents: torch.Tensor,
+        timestep: torch.Tensor,
+        batch: TrainingBatch,
+        *,
+        conditional: bool,
+        cfg_uncond: dict[str, Any] | None = None,
+        attn_kind: Literal["dense", "vsa"] = "dense",
+    ) -> torch.Tensor:
+        """Run one packed joint forward at an explicit method timestep.
+
+        Both modality clean-time fields on ``batch`` are rewritten from
+        ``timestep`` so the packed-row timestep plan and the backward
+        forward-context stay coherent with this call.
+        """
+        sigma_video, sigma_audio = self._noise_amounts(timestep)
+        noisy_video, noisy_audio = self.unpack_latents(noisy_latents)
+        batch.timesteps = (1.0 - sigma_video).to(noisy_latents.device)
+        batch.audio_timesteps = (1.0 - sigma_audio).to(noisy_latents.device)
+        batch.audio_noisy_model_input = noisy_audio
+        video_pred, audio_pred = super().predict_noise(
+            noisy_video,
+            timestep,
+            batch,
+            conditional=conditional,
+            cfg_uncond=cfg_uncond,
+            attn_kind=attn_kind,
+        )
+        return self.pack_latents(video_pred, audio_pred)
+
+    def predict_x0(
+        self,
+        noisy_latents: torch.Tensor,
+        timestep: torch.Tensor,
+        batch: TrainingBatch,
+        *,
+        conditional: bool,
+        cfg_uncond: dict[str, Any] | None = None,
+        attn_kind: Literal["dense", "vsa"] = "dense",
+    ) -> torch.Tensor:
+        """Convert packed noise-minus-clean predictions to packed clean latents."""
+        pred_noise = self.predict_noise(
+            noisy_latents,
+            timestep,
+            batch,
+            conditional=conditional,
+            cfg_uncond=cfg_uncond,
+            attn_kind=attn_kind,
+        )
+        sigma_video, sigma_audio = self._noise_amounts(timestep)
+        noisy_video, noisy_audio = self.unpack_latents(noisy_latents)
+        pred_video, pred_audio = self.unpack_latents(pred_noise)
+        return self.pack_latents(
+            self._to_x0(noisy_video, pred_video, sigma_video),
+            self._to_x0(noisy_audio, pred_audio, sigma_audio),
+        )
+
+    @staticmethod
+    def _to_x0(
+        noisy: torch.Tensor,
+        pred_noise: torch.Tensor,
+        sigma: torch.Tensor,
+    ) -> torch.Tensor:
+        # noisy = (1 - sigma) * clean + sigma * noise and pred approximates
+        # noise - clean, so clean = noisy - sigma * pred.
+        sigma = sigma.to(device=noisy.device, dtype=noisy.dtype)
+        return noisy - sigma * pred_noise
+
+
+__all__ = ["MiniMaxH3DMDModel"]

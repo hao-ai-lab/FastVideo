@@ -320,10 +320,12 @@ class MiniMaxH3Model(ModelBase):
     ) -> NoisePrediction:
         """Pack modality timesteps and convert H3 outputs to noise-minus-clean."""
         del timestep
-        if not conditional or cfg_uncond is not None:
-            raise ValueError("MiniMaxH3Model predicts one conditional T2VA sample")
-        if attn_kind != "dense":
-            raise ValueError("MiniMaxH3Model supports dense attention for training")
+        # Both attention-metadata views are None under TORCH_SDPA, so "vsa"
+        # silently means dense here (mirrors WanModel under dense backends).
+        # Real VSA-H3 metadata would slot in at this branch once the VSA-H3
+        # attention backend lands (PR #1695).
+        if attn_kind not in ("dense", "vsa"):
+            raise ValueError(f"Unknown attn_kind: {attn_kind!r}")
         layout = batch.minimax_h3_layout
         if not isinstance(layout, MiniMaxH3PackedLayout):
             raise RuntimeError("prepare_batch() must set TrainingBatch.minimax_h3_layout")
@@ -331,6 +333,16 @@ class MiniMaxH3Model(ModelBase):
             raise RuntimeError("prepare_batch() must set audio and text transformer inputs")
         if batch.timesteps is None or batch.audio_timesteps is None:
             raise RuntimeError("prepare_batch() must set video and audio timesteps")
+
+        encoder_hidden_states = batch.encoder_hidden_states
+        if not conditional:
+            # H3 has no negative-prompt encoder at training time, so the only
+            # supported unconditional branch (teacher CFG in distillation)
+            # zeroes the text embeddings.
+            if (cfg_uncond or {}).get("text") != "zero":
+                raise ValueError("MiniMaxH3Model unconditional forwards require "
+                                 "method.cfg_uncond={'text': 'zero'}")
+            encoder_hidden_states = torch.zeros_like(encoder_hidden_states)
 
         dtype = torch.bfloat16
         device = self.device
@@ -359,7 +371,7 @@ class MiniMaxH3Model(ModelBase):
             video_velocity, audio_velocity = self.transformer(
                 hidden_states=video_rows[None],
                 audio_hidden_states=audio_rows[None],
-                encoder_hidden_states=batch.encoder_hidden_states,
+                encoder_hidden_states=encoder_hidden_states,
                 timestep=unique_timesteps,
                 timestep_indices=timestep_indices,
                 token_tags=layout.token_tags.to(device),

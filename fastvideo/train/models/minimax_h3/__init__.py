@@ -3,3 +3,5 @@
 
 from fastvideo.train.models.minimax_h3.minimax_h3 import (
     MiniMaxH3Model as MiniMaxH3Model, )
+from fastvideo.train.models.minimax_h3.minimax_h3_dmd import (
+    MiniMaxH3DMDModel as MiniMaxH3DMDModel, )
