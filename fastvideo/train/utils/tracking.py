@@ -6,6 +6,7 @@ import os
 from typing import Any, TYPE_CHECKING
 
 from fastvideo.distributed import get_world_group
+from fastvideo.logger import init_logger
 from fastvideo.training.trackers import (
     initialize_trackers,
     Trackers,
@@ -16,6 +17,25 @@ if TYPE_CHECKING:
         CheckpointConfig,
         TrackerConfig,
     )
+
+logger = init_logger(__name__)
+
+
+def _wandb_usable() -> bool:
+    """True when wandb can actually start a run (importable + credentials)."""
+    try:
+        import wandb
+    except Exception:
+        return False
+    if os.environ.get("WANDB_API_KEY"):
+        return True
+    if os.environ.get("WANDB_MODE") in ("offline", "disabled"):
+        return True
+    try:
+        # Covers ~/.netrc logins from a prior `wandb login`.
+        return wandb.api.api_key is not None
+    except Exception:
+        return False
 
 
 def build_tracker(
@@ -33,6 +53,11 @@ def build_tracker(
         trackers.append(Trackers.WANDB.value)
     if world_group.rank != 0:
         trackers = []
+    if Trackers.WANDB.value in trackers and not _wandb_usable():
+        logger.warning("wandb tracking requested but wandb is not importable "
+                       "or no credentials are configured (WANDB_API_KEY); "
+                       "continuing without the wandb tracker.")
+        trackers = [t for t in trackers if t != Trackers.WANDB.value]
 
     tracker_log_dir = (checkpoint_config.output_dir or os.getcwd())
     if trackers:

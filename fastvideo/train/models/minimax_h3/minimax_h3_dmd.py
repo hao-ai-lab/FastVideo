@@ -8,11 +8,16 @@ from typing import Any, Literal
 
 import torch
 
+import fastvideo.envs as envs
+from fastvideo.attention.backends.video_sparse_attn_h3 import (
+    MiniMaxH3VSAMetadataBuilder, )
 from fastvideo.pipelines import TrainingBatch
 from fastvideo.pipelines.basic.minimax_h3.packing import (
     MINIMAX_H3_AUDIO_CHANNELS,
     audio_latent_num_frames,
 )
+from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_denoising import (
+    _h3_vsa_prefix_segments, )
 from fastvideo.train.models.minimax_h3.minimax_h3 import (
     _AUDIO_LATENT_CHANNELS,
     _AUDIO_SCHEDULER_SHIFT,
@@ -127,7 +132,39 @@ class MiniMaxH3DMDModel(MiniMaxH3Model):
         # clean latents matter here. The fine-tuning noisy fields are
         # refreshed by predict_noise on every call.
         batch.latents = self.pack_latents(batch.latents, batch.audio_latents)
+        self._maybe_build_vsa_metadata(batch)
         return batch
+
+    def _maybe_build_vsa_metadata(self, batch: TrainingBatch) -> None:
+        """Populate the VSA view when this role runs the VSA-H3 backend.
+
+        DMD2 hardcodes student forwards to ``attn_kind="vsa"``; the dense
+        teacher/critic views stay ``None`` so their forwards remain dense.
+        One builder per model keeps the padded tile buffer reused across
+        steps (see ``MiniMaxH3VSAMetadata.tile_buf_holder``).
+        """
+        backend = (self.attention_backend_name or envs.FASTVIDEO_ATTENTION_BACKEND)
+        if backend != "VIDEO_SPARSE_ATTN_H3":
+            return
+        layout = batch.minimax_h3_layout
+        patch_size = tuple(self.transformer.patch_size)
+        builder = getattr(self, "_vsa_metadata_builder", None)
+        if builder is None:
+            builder = self._vsa_metadata_builder = MiniMaxH3VSAMetadataBuilder()
+        batch.attn_metadata_vsa = builder.build(
+            # Training builds one metadata per batch and reuses it across the
+            # rollout's timesteps; the step index only feeds probe bookkeeping.
+            current_timestep=0,
+            raw_latent_shape=(
+                layout.num_video_latent_frames,
+                layout.latent_height,
+                layout.latent_width,
+            ),
+            patch_size=patch_size,
+            VSA_sparsity=float(self.training_config.vsa_sparsity),
+            prefix_segments=_h3_vsa_prefix_segments(layout, patch_size),
+            device=self.device,
+        )
 
     def add_noise(
         self,

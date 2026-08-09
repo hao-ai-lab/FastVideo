@@ -39,6 +39,15 @@ _AUDIO_SCHEDULER_SHIFT = 3.0
 _VIDEO_LATENT_CHANNELS = 24
 _AUDIO_LATENT_CHANNELS = 32
 
+# Dense TORCH_SDPA is the default; per-role overrides allow FLASH_ATTN
+# (teacher/critic, FA4 via FASTVIDEO_FA4=1) and the packed-sequence VSA-H3
+# backend (distillation student).
+_ALLOWED_ATTENTION_BACKENDS = (
+    AttentionBackendEnum.TORCH_SDPA,
+    AttentionBackendEnum.FLASH_ATTN,
+    AttentionBackendEnum.VIDEO_SPARSE_ATTN_H3,
+)
+
 
 def shift_noise_amount(base_noise_amount: torch.Tensor, shift: float) -> torch.Tensor:
     """Apply the MiniMax H3 rational shift to a unit noise amount."""
@@ -68,10 +77,12 @@ class MiniMaxH3Model(ModelBase):
             trainable=trainable,
             attention_backend=attention_backend,
         )
-        # PyTorch scaled dot product attention (SDPA) provides dense attention
-        # without adding another attention-kernel dependency to H3 training.
-        if self.attention_backend != AttentionBackendEnum.TORCH_SDPA:
-            raise ValueError("MiniMaxH3Model requires the TORCH_SDPA attention backend")
+        # Attention layers bind their backend during construction, so this is
+        # the per-role selection point (student/teacher/critic can differ).
+        if self.attention_backend not in _ALLOWED_ATTENTION_BACKENDS:
+            allowed = ", ".join(b.name for b in _ALLOWED_ATTENTION_BACKENDS)
+            raise ValueError("MiniMaxH3Model supports the attention backends "
+                             f"{{{allowed}}}, got {self.attention_backend}")
         if training_config.pipeline_config is None:
             raise ValueError("MiniMaxH3Model requires a resolved MiniMax H3 pipeline config")
         # Packed row indices describe one text-video-audio document without a
@@ -320,12 +331,12 @@ class MiniMaxH3Model(ModelBase):
     ) -> NoisePrediction:
         """Pack modality timesteps and convert H3 outputs to noise-minus-clean."""
         del timestep
-        # Both attention-metadata views are None under TORCH_SDPA, so "vsa"
-        # silently means dense here (mirrors WanModel under dense backends).
-        # Real VSA-H3 metadata would slot in at this branch once the VSA-H3
-        # attention backend lands (PR #1695).
+        # Under dense backends both metadata views are None, so "vsa" silently
+        # means dense (mirrors WanModel). MiniMaxH3DMDModel.prepare_batch
+        # populates attn_metadata_vsa when the role runs VIDEO_SPARSE_ATTN_H3.
         if attn_kind not in ("dense", "vsa"):
             raise ValueError(f"Unknown attn_kind: {attn_kind!r}")
+        attn_metadata = (batch.attn_metadata_vsa if attn_kind == "vsa" else batch.attn_metadata)
         layout = batch.minimax_h3_layout
         if not isinstance(layout, MiniMaxH3PackedLayout):
             raise RuntimeError("prepare_batch() must set TrainingBatch.minimax_h3_layout")
@@ -366,7 +377,7 @@ class MiniMaxH3Model(ModelBase):
 
         with torch.autocast(device.type, dtype=dtype), set_forward_context(
                 current_timestep=unique_timesteps,
-                attn_metadata=None,
+                attn_metadata=attn_metadata,
         ):
             video_velocity, audio_velocity = self.transformer(
                 hidden_states=video_rows[None],

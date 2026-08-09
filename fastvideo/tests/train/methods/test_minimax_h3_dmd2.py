@@ -14,6 +14,9 @@ import pytest
 import torch
 import yaml
 
+from fastvideo.attention.backends.video_sparse_attn_h3 import MiniMaxH3VSAMetadata
+from fastvideo.forward_context import get_forward_context
+from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.train.methods.distribution_matching.dmd2 import DMD2Method
 from fastvideo.train.models.minimax_h3 import MiniMaxH3DMDModel, MiniMaxH3Model
 from fastvideo.train.models.minimax_h3.minimax_h3 import shift_noise_amount
@@ -22,6 +25,7 @@ from fastvideo.train.utils.config import load_run_config
 _FIXTURE = Path(__file__).resolve().parent.parent / "fixtures" / "minimax_h3_dmd2_min.yaml"
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _EXPERIMENT_CONFIG = _REPO_ROOT / "examples/train/configs/distribution_matching/minimax_h3/dmd2_t2va.yaml"
+_VSA_OVERFIT_CONFIG = (_REPO_ROOT / "examples/train/configs/distribution_matching/minimax_h3/dmd2_vsa0_overfit.yaml")
 
 # Fixture geometry: video latents [1, 24, 2, 4, 4] and audio latents
 # [1, 2, 32, 8]; the packed adapter stores video-major [1, T, C, H, W].
@@ -39,9 +43,11 @@ class _TinyJointTransformer(torch.nn.Module):
         super().__init__()
         self.scale = torch.nn.Parameter(torch.tensor(scale))
         self.last_encoder_hidden_states: torch.Tensor | None = None
+        self.last_attn_metadata = None
 
     def forward(self, **kwargs):
         self.last_encoder_hidden_states = kwargs["encoder_hidden_states"]
+        self.last_attn_metadata = get_forward_context().attn_metadata
         return (
             kwargs["hidden_states"] * self.scale,
             kwargs["audio_hidden_states"] * self.scale,
@@ -61,6 +67,7 @@ def _make_model(
     model.transformer = _TinyJointTransformer(scale)
     model.training_config = training_config
     model.sp_group = None
+    model.attention_backend = None
     return model
 
 
@@ -73,6 +80,7 @@ def _tiny_training_config():
             num_width=64,
         ),
         distributed=SimpleNamespace(sp_size=1),
+        vsa_sparsity=0.0,
     )
 
 
@@ -298,8 +306,128 @@ def test_uncond_forward_zeroes_text_and_guards_policies(monkeypatch: pytest.Monk
 
 
 # ----------------------------------------------------------------------
+# VSA-H3 wiring
+# ----------------------------------------------------------------------
+
+
+def test_prepare_batch_builds_vsa_h3_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The VSA-H3 role gets real packed-sequence metadata; dense view stays None."""
+    tc = _tiny_training_config()
+    tc.vsa_sparsity = 0.35
+    model = _make_model(monkeypatch, tc)
+    model.attention_backend = AttentionBackendEnum.VIDEO_SPARSE_ATTN_H3
+
+    batch = model.prepare_batch(_raw_batch(), generator=torch.Generator().manual_seed(7))
+
+    meta = batch.attn_metadata_vsa
+    assert isinstance(meta, MiniMaxH3VSAMetadata)
+    assert batch.attn_metadata is None
+    assert meta.VSA_sparsity == pytest.approx(0.35)
+    # Packed layout: 2 text rows | 0 condition rows | 16 stereo audio rows |
+    # 8 video rows ([1, 24, 2, 4, 4] latents at patch (1, 2, 2)).
+    assert meta.total_seq_length == 26
+    assert meta.num_prefix_tiles == 2
+    assert meta.num_video_tiles == 1
+    assert meta.variable_block_sizes.tolist() == [2, 16, 8]
+    assert int(meta.variable_block_sizes.sum()) == meta.total_seq_length
+
+
+def test_predict_noise_routes_vsa_metadata_by_attn_kind(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Student "vsa" forwards see the VSA metadata; "dense" forwards see None."""
+    model = _make_model(monkeypatch, _tiny_training_config())
+    model.attention_backend = AttentionBackendEnum.VIDEO_SPARSE_ATTN_H3
+    batch = model.prepare_batch(_raw_batch(), generator=torch.Generator().manual_seed(7))
+    noisy = torch.randn(1, _PACKED_NUMEL).to(torch.bfloat16)
+    timestep = torch.tensor([757], dtype=torch.long)
+
+    model.predict_noise(noisy, timestep, batch, conditional=True, attn_kind="vsa")
+    assert model.transformer.last_attn_metadata is batch.attn_metadata_vsa
+    assert isinstance(model.transformer.last_attn_metadata, MiniMaxH3VSAMetadata)
+
+    model.predict_noise(noisy, timestep, batch, conditional=True, attn_kind="dense")
+    assert model.transformer.last_attn_metadata is None
+
+
+def _ctor_training_config() -> SimpleNamespace:
+    """The minimum surface MiniMaxH3Model.__init__ reads from TrainingConfig."""
+    return SimpleNamespace(
+        pipeline_config=SimpleNamespace(dit_config=SimpleNamespace(uniform_parameter_dtype=False)),
+        data=SimpleNamespace(
+            train_batch_size=1,
+            training_cfg_rate=0.0,
+            preprocessed_data_type="t2va",
+        ),
+        model=SimpleNamespace(enable_gradient_checkpointing_type=None),
+    )
+
+
+def test_per_role_attention_backend_override_resolves(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each role's backend reaches the loader; unsupported backends fail fast."""
+    captured: dict[str, AttentionBackendEnum | None] = {}
+
+    def _fake_load(**kwargs):
+        captured[kwargs["model_path"]] = kwargs["attention_backend"]
+        return _TinyJointTransformer()
+
+    monkeypatch.setattr(
+        "fastvideo.train.models.minimax_h3.minimax_h3.load_module_from_path",
+        _fake_load,
+    )
+
+    student = MiniMaxH3DMDModel(
+        init_from="role/student",
+        training_config=_ctor_training_config(),
+        trainable=True,
+        attention_backend="VIDEO_SPARSE_ATTN_H3",
+    )
+    teacher = MiniMaxH3DMDModel(
+        init_from="role/teacher",
+        training_config=_ctor_training_config(),
+        trainable=False,
+        attention_backend="FLASH_ATTN",
+    )
+
+    assert student.attention_backend is AttentionBackendEnum.VIDEO_SPARSE_ATTN_H3
+    assert teacher.attention_backend is AttentionBackendEnum.FLASH_ATTN
+    # load_module_from_path turns this request into the construction scope
+    # that binds the backend to the transformer's attention layers.
+    assert captured["role/student"] is AttentionBackendEnum.VIDEO_SPARSE_ATTN_H3
+    assert captured["role/teacher"] is AttentionBackendEnum.FLASH_ATTN
+    assert not any(p.requires_grad for p in teacher.transformer.parameters())
+
+    with pytest.raises(ValueError, match="supports the attention backends"):
+        MiniMaxH3DMDModel(
+            init_from="role/bad",
+            training_config=_ctor_training_config(),
+            attention_backend="VIDEO_SPARSE_ATTN",
+        )
+
+
+# ----------------------------------------------------------------------
 # Config contracts
 # ----------------------------------------------------------------------
+
+
+def test_vsa0_overfit_config_pins_roles_and_experiment() -> None:
+    """The overfit config runs student VSA-H3 at sparsity 0, dense FA roles."""
+    config = yaml.safe_load(_VSA_OVERFIT_CONFIG.read_text())
+    models, method, training = config["models"], config["method"], config["training"]
+
+    assert models["student"]["attention_backend"] == "VIDEO_SPARSE_ATTN_H3"
+    assert models["teacher"]["attention_backend"] == "FLASH_ATTN"
+    assert models["critic"]["attention_backend"] == "FLASH_ATTN"
+    assert models["teacher"]["trainable"] is False
+    assert training["vsa"]["sparsity"] == 0.0
+    assert method["rollout_mode"] == "data_latent"
+    assert method["generator_update_interval"] == 5
+    assert method["dmd_denoising_steps"] == [1000, 757, 522]
+    assert training["data"]["train_batch_size"] == 1
+    assert training["data"]["data_path"] == "/mnt/h3-dmd2-overfit/data"
+    assert training["data"]["num_height"] == 768
+    assert training["data"]["num_width"] == 1344
+    assert training["data"]["num_frames"] == 124
+    assert training["loop"]["max_train_steps"] == 2000
+    assert training["tracker"]["project_name"] == "h3-dmd2-vsa"
 
 
 def test_h3_dmd2_fixture_resolves_trio_contract() -> None:

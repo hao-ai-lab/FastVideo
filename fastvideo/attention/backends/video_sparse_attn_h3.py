@@ -261,6 +261,15 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         n_tiles = attn_metadata.variable_block_sizes.numel()
         target_shape = (x.shape[0], n_tiles * _TILE_ELEMS, x.shape[-2], x.shape[-1])
 
+        if torch.is_grad_enabled() and x.requires_grad:
+            # Grad-tracking forwards (VSA-H3 training students) get a fresh
+            # buffer per call: autograd saves views of the tiled buffer for
+            # backward (layer.py chunks q/k/v out of it), so a later layer's
+            # in-place overwrite of a shared buffer raises the saved-tensor
+            # version error at backward. Mirrors Wan training's
+            # vsa_cache_tile_buf=False default.
+            return scatter_into_tile_buf(x, target_shape, attn_metadata.untile_combined_index, None)
+
         # single scatter: untile_combined_index maps original row i to its
         # padded slot, so this is exactly the inverse of postprocess_output
         holder = attn_metadata.tile_buf_holder

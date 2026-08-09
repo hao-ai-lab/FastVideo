@@ -133,9 +133,33 @@ def test_prefix_queries_stay_dense_at_high_sparsity():
             "video rows should actually be sparse at 75%"
 
 
+def test_tile_under_grad_does_not_reuse_shared_buffer():
+    """Training forwards need fresh tile buffers; in-place reuse of the shared
+    holder would trip autograd's saved-tensor version check at backward."""
+    meta = _build(_TINY)
+    impl = _impl()
+    seq = meta.total_seq_length
+
+    x1 = torch.randn(1, seq, 2, 8, requires_grad=True)
+    x2 = torch.randn(1, seq, 2, 8, requires_grad=True)
+    buf1 = impl.tile(x1, meta)
+    saved = (buf1 * buf1).sum()  # saves buf1 for backward, like the kernel
+    buf2 = impl.tile(x2, meta)
+    assert buf1 is not buf2
+    saved.backward()  # raises "modified by an inplace operation" on reuse
+    assert x1.grad is not None and x2.grad is None
+
+    # no-grad paths (inference / rollout) keep the single-buffer reuse
+    with torch.no_grad():
+        y1 = impl.tile(x1.detach(), meta)
+        y2 = impl.tile(x2.detach(), meta)
+    assert y1 is y2
+
+
 if __name__ == "__main__":
     test_geometry_720p()
     test_mask_policy()
     test_sparsity_zero_matches_dense_sdpa()
     test_prefix_queries_stay_dense_at_high_sparsity()
+    test_tile_under_grad_does_not_reuse_shared_buffer()
     print("all VSA-H3 CPU checks passed")
