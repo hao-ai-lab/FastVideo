@@ -22,7 +22,12 @@ from fastvideo.api import (
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model-path", default="MiniMaxAI/MiniMax-H3")
-    # parser.add_argument("--model-path", default="noctuashap/MiniMax-H3-pruned-r16")  # rank-16 AdaLN: -39% params, -23 GiB VRAM
+    # Rank-reduced AdaLN checkpoint (-39% params, -23 GiB VRAM): pass
+    #   --model-path noctuashap/MiniMax-H3-pruned-r16
+    # (or a local dir converted with tools/minimax_h3/fit_adaln_basis.py).
+    # adaln_rank is read from the checkpoint config; no other flags needed.
+    # Rank-reduced checkpoints are inference-only: training needs the
+    # full-rank release.
     parser.add_argument("--prompt", required=True)
     parser.add_argument("--output", default="outputs/minimax_h3_t2v")
     parser.add_argument("--height", type=int, default=768)

@@ -25,7 +25,12 @@ from fastvideo.pipelines.basic.minimax_h3.packing import resolve_canvas_size
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model-path", default="MiniMaxAI/MiniMax-H3")
-    # parser.add_argument("--model-path", default="noctuashap/MiniMax-H3-pruned-r16")  # rank-16 AdaLN: -39% params, -23 GiB VRAM
+    # Rank-reduced AdaLN checkpoint (-39% params, -23 GiB VRAM): pass
+    #   --model-path noctuashap/MiniMax-H3-pruned-r16
+    # (or a local dir converted with tools/minimax_h3/fit_adaln_basis.py).
+    # adaln_rank is read from the checkpoint config; no other flags needed.
+    # Rank-reduced checkpoints are inference-only: training needs the
+    # full-rank release.
     parser.add_argument("--image", required=True, help="First-frame image path.")
     parser.add_argument("--last-image", help="Optional last-frame image path.")
     parser.add_argument("--output", default="outputs/minimax_h3_fl2va")

@@ -490,6 +490,14 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
             prefix=f"{config.prefix}.time_embedder",
         )
         self.adaln_rank: int | None = arch.adaln_rank
+        if self.adaln_rank is not None and config.uniform_parameter_dtype:
+            raise ValueError(
+                "Rank-reduced AdaLN checkpoints (adaln_rank set) cannot be trained: "
+                "uniform_parameter_dtype needs one dtype for every trainable "
+                "parameter, but factorized AdaLN weights are pinned to FP16 "
+                "(BF16 reconstructs them ~1.7x worse). Fine-tune the full-rank "
+                "checkpoint instead, then re-fit the basis with "
+                "tools/minimax_h3/fit_adaln_basis.py.")
         adaln_dim = self.adaln_rank or arch.time_embed_dim
         self.adaln_basis = ReplicatedLinear(
             arch.time_embed_dim,
