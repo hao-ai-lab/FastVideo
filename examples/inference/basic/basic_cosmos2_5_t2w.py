@@ -31,8 +31,7 @@ def main():
         "The welding torch consistently emits sparks and light, and the smoke continues to rise, diffusing slightly as it moves upward. "
         "The metal surface beneath the torch shows ongoing signs of heating and melting. "
         "The scene retains its industrial ambiance, with the welding sparks and smoke dominating the visual field, "
-        "underscoring the ongoing nature of the welding operation."
-    )
+        "underscoring the ongoing nature of the welding operation.")
 
     generator.generate_video(
         prompt,
@@ -46,6 +45,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-

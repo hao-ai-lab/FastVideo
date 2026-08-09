@@ -53,8 +53,12 @@ def _make_inputs(device: torch.device, seed: int) -> dict:
 
     d = INNER_DIM // 40
     rope_dim_list = [d - 4 * (d // 6), 2 * (d // 6), 2 * (d // 6)]
-    freqs_cos, freqs_sin = get_rotary_pos_embed(
-        (t, h, w), INNER_DIM, 40, rope_dim_list, rope_theta=10000, dtype=torch.float64)
+    freqs_cos, freqs_sin = get_rotary_pos_embed((t, h, w),
+                                                INNER_DIM,
+                                                40,
+                                                rope_dim_list,
+                                                rope_theta=10000,
+                                                dtype=torch.float64)
     freqs_cis = (freqs_cos.to(device).float(), freqs_sin.to(device).float())
 
     hidden = torch.randn(1, seq, INNER_DIM, generator=generator, dtype=torch.float32)

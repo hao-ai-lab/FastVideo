@@ -173,10 +173,9 @@ def test_raw_transformer_without_context_bypasses_backend(monkeypatch):
             ).sample
 
         assert out.shape == (1, 2, 8, 8, 4)
-        assert len(backend_calls) == 0, (
-            "expected the missing-forward-context fallback to bypass the backend impl; "
-            "if this now fails, Kandinsky5Attention's fallback behavior changed and the "
-            "stage guard docs/tests should be revisited")
+        assert len(backend_calls) == 0, ("expected the missing-forward-context fallback to bypass the backend impl; "
+                                         "if this now fails, Kandinsky5Attention's fallback behavior changed and the "
+                                         "stage guard docs/tests should be revisited")
     finally:
         _cached_get_attn_backend.cache_clear()
 

@@ -50,6 +50,7 @@ def _install_xfuser_stub() -> None:
     distributed.model_parallel_is_initialized = lambda: False
 
     class XFuserLongContextAttention:
+
         def __call__(self, *args, **kwargs):
             raise RuntimeError("xfuser stub cannot execute attention")
 

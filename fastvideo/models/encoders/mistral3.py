@@ -39,10 +39,8 @@ class Mistral3ForConditionalGeneration(TextEncoder):
         return model
 
     def forward(self, *args: Any, **kwargs: Any) -> Any:
-        raise NotImplementedError(
-            "Mistral3ForConditionalGeneration is loaded through Transformers "
-            "via from_pretrained_local()."
-        )
+        raise NotImplementedError("Mistral3ForConditionalGeneration is loaded through Transformers "
+                                  "via from_pretrained_local().")
 
 
 EntryClass = Mistral3ForConditionalGeneration

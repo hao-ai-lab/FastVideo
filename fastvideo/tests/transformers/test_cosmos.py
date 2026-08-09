@@ -16,7 +16,6 @@ from fastvideo.utils import maybe_download_model
 from fastvideo.configs.models.dits import CosmosVideoConfig
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 
-
 logger = init_logger(__name__)
 
 os.environ["MASTER_ADDR"] = "localhost"
@@ -51,13 +50,13 @@ def test_cosmos2_transformer():
     loader = TransformerLoader()
     model2 = loader.load(TRANSFORMER_PATH, args).to(device, dtype=precision)
 
-    model1 = CosmosTransformer3DModel.from_pretrained(
-        TRANSFORMER_PATH, torch_dtype=precision).to(device, dtype=precision).requires_grad_(False)
+    model1 = CosmosTransformer3DModel.from_pretrained(TRANSFORMER_PATH,
+                                                      torch_dtype=precision).to(device,
+                                                                                dtype=precision).requires_grad_(False)
 
     total_params = sum(p.numel() for p in model1.parameters())
     # Calculate weight sum for model1 (converting to float64 to avoid overflow)
-    weight_sum_model1 = sum(
-        p.to(torch.float64).sum().item() for p in model1.parameters())
+    weight_sum_model1 = sum(p.to(torch.float64).sum().item() for p in model1.parameters())
     # Also calculate mean for more stable comparison
     weight_mean_model1 = weight_sum_model1 / total_params
     logger.info("Model 1 weight sum: %s", weight_sum_model1)
@@ -65,8 +64,7 @@ def test_cosmos2_transformer():
 
     # Calculate weight sum for model2 (converting to float64 to avoid overflow)
     total_params_model2 = sum(p.numel() for p in model2.parameters())
-    weight_sum_model2 = sum(
-        p.to(torch.float64).sum().item() for p in model2.parameters())
+    weight_sum_model2 = sum(p.to(torch.float64).sum().item() for p in model2.parameters())
     # Also calculate mean for more stable comparison
     weight_mean_model2 = weight_sum_model2 / total_params_model2
     logger.info("Model 2 weight sum: %s", weight_sum_model2)
@@ -86,20 +84,22 @@ def test_cosmos2_transformer():
     seq_len = 30
 
     # Video latents [B, C, T, H, W] - Cosmos2 specific dimensions
-    hidden_states = torch.randn(batch_size,
-                                17,
-                                1,  # Single frame for image generation
-                                32,  # Height patches
-                                32,  # Width patches
-                                device=device,
-                                dtype=precision)
+    hidden_states = torch.randn(
+        batch_size,
+        17,
+        1,  # Single frame for image generation
+        32,  # Height patches
+        32,  # Width patches
+        device=device,
+        dtype=precision)
 
     # Text embeddings [B, L, D] - Cosmos2 uses T5 embeddings with 1024 dim
-    encoder_hidden_states = torch.randn(batch_size,
-                                        seq_len,
-                                        1024,  # T5 embedding dimension
-                                        device=device,
-                                        dtype=precision)
+    encoder_hidden_states = torch.randn(
+        batch_size,
+        seq_len,
+        1024,  # T5 embedding dimension
+        device=device,
+        dtype=precision)
 
     # Timestep
     timestep = torch.tensor([500], device=device, dtype=precision)
@@ -108,9 +108,7 @@ def test_cosmos2_transformer():
     padding_mask = hidden_states.new_zeros(1, 1, 32, 32, device=device, dtype=precision)
     # print(padding_mask.shape)
 
-    forward_batch = ForwardBatch(
-        data_type="dummy",
-    )
+    forward_batch = ForwardBatch(data_type="dummy", )
 
     with torch.autocast('cuda', dtype=precision):
         output1 = model1(

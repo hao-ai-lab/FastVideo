@@ -30,8 +30,7 @@ N_TXT = 154
 def _build_block(layer: int) -> torch.nn.Module:
     # Mirrors SD3Transformer2DModel.__init__ (sd3.py:923-933).
     from fastvideo.configs.models.dits.sd3 import SD3Transformer2DArchConfig
-    from fastvideo.models.dits.sd3 import (SD3JointTransformerBlock,
-                                           SD3Transformer2DModel)
+    from fastvideo.models.dits.sd3 import (SD3JointTransformerBlock, SD3Transformer2DModel)
 
     arch = SD3Transformer2DArchConfig()
     return SD3JointTransformerBlock(

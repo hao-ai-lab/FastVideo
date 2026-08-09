@@ -56,10 +56,7 @@ def _bootstrap_fastvideo_source() -> None:
     # Remove editable-install finders that would otherwise win over
     # PYTHONPATH. uv-installed editables register a custom finder
     # named like ``__editable___fastvideo_0_1_7_finder``.
-    sys.meta_path = [
-        finder for finder in sys.meta_path
-        if "__editable___fastvideo" not in type(finder).__module__
-    ]
+    sys.meta_path = [finder for finder in sys.meta_path if "__editable___fastvideo" not in type(finder).__module__]
     # Drop pre-resolved fastvideo modules from any earlier import.
     for name in [k for k in sys.modules if k == "fastvideo" or k.startswith("fastvideo.")]:
         sys.modules.pop(name, None)
@@ -71,23 +68,21 @@ def _bootstrap_fastvideo_source() -> None:
 
 _bootstrap_fastvideo_source()
 
-
 import numpy as np  # noqa: E402  (after bootstrap so torch picks up the right env)
 import torch  # noqa: E402
 
 # Pinned alignment fixture — matches basic_ltx2_upscale.py upstream.
-PROMPT = (
-    "A warm sunny backyard. The camera starts in a tight cinematic close-up "
-    "of a woman and a man in their 30s, facing each other with serious "
-    "expressions. The woman, emotional and dramatic, says softly, \"That's "
-    "it... Dad's lost it. And we've lost Dad.\" The man exhales, slightly "
-    "annoyed: \"Stop being so dramatic, Jess.\" A beat. He glances aside, "
-    "then mutters defensively, \"He's just having fun.\" The camera slowly "
-    "pans right, revealing the grandfather in the garden wearing enormous "
-    "butterfly wings, waving his arms in the air like he's trying to take "
-    "off. He shouts, \"Wheeeew!\" as he flaps his wings with full commitment. "
-    "The woman covers her face, on the verge of tears. The tone is deadpan, "
-    "absurd, and quietly tragic.")
+PROMPT = ("A warm sunny backyard. The camera starts in a tight cinematic close-up "
+          "of a woman and a man in their 30s, facing each other with serious "
+          "expressions. The woman, emotional and dramatic, says softly, \"That's "
+          "it... Dad's lost it. And we've lost Dad.\" The man exhales, slightly "
+          "annoyed: \"Stop being so dramatic, Jess.\" A beat. He glances aside, "
+          "then mutters defensively, \"He's just having fun.\" The camera slowly "
+          "pans right, revealing the grandfather in the garden wearing enormous "
+          "butterfly wings, waving his arms in the air like he's trying to take "
+          "off. He shouts, \"Wheeeew!\" as he flaps his wings with full commitment. "
+          "The woman covers her face, on the verge of tears. The tone is deadpan, "
+          "absurd, and quietly tragic.")
 
 DEFAULT_MODEL = "FastVideo/LTX2-Distilled-Diffusers"
 DEFAULT_SEED = 10
@@ -185,8 +180,8 @@ def _run_typed(args: argparse.Namespace) -> RunResult:
     pipeline.preset_overrides["refine"] driving the SR path."""
     from fastvideo import VideoGenerator  # noqa: PLC0415
     from fastvideo.api import (  # noqa: PLC0415
-        ComponentConfig, EngineConfig, GenerationRequest, GeneratorConfig,
-        InputConfig, OutputConfig, PipelineSelection, SamplingConfig)
+        ComponentConfig, EngineConfig, GenerationRequest, GeneratorConfig, InputConfig, OutputConfig, PipelineSelection,
+        SamplingConfig)
 
     config = GeneratorConfig(
         model_path=args.model,
@@ -270,8 +265,7 @@ def _result_frames(result: Any) -> torch.Tensor:
     if frames is None and isinstance(result, dict):
         frames = result.get("frames")
     if frames is None:
-        raise RuntimeError(
-            "Generation returned no frames; ensure return_frames=True.")
+        raise RuntimeError("Generation returned no frames; ensure return_frames=True.")
     if isinstance(frames, list):
         frames = np.stack(frames, axis=0)
     if isinstance(frames, np.ndarray):
@@ -309,9 +303,8 @@ def _diff(args: argparse.Namespace) -> None:
     ref_path = Path(args.reference)
     cand_path = Path(args.candidate)
     if not ref_path.is_file() or not cand_path.is_file():
-        raise FileNotFoundError(
-            f"Need both --reference and --candidate to exist: {ref_path}, "
-            f"{cand_path}")
+        raise FileNotFoundError(f"Need both --reference and --candidate to exist: {ref_path}, "
+                                f"{cand_path}")
     ref = torch.load(ref_path, map_location="cpu")
     cand = torch.load(cand_path, map_location="cpu")
 
@@ -357,21 +350,16 @@ def _diff(args: argparse.Namespace) -> None:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="mode", required=False)
 
     run = parser
-    run.add_argument("--label",
-                     default="run",
-                     help="Identifier saved alongside the output (e.g. internal/public).")
-    run.add_argument("--output",
-                     default="/tmp/ltx2_sr_alignment.pt",
-                     help="Destination .pt file.")
+    run.add_argument("--label", default="run", help="Identifier saved alongside the output (e.g. internal/public).")
+    run.add_argument("--output", default="/tmp/ltx2_sr_alignment.pt", help="Destination .pt file.")
     run.add_argument("--use-typed-api",
                      action="store_true",
                      help="Use the new typed GeneratorConfig API "
-                          "(public side); otherwise use legacy from_pretrained.")
+                     "(public side); otherwise use legacy from_pretrained.")
     run.add_argument("--model", default=DEFAULT_MODEL)
     run.add_argument("--seed", type=int, default=DEFAULT_SEED)
     run.add_argument("--height", type=int, default=DEFAULT_HEIGHT)
@@ -381,9 +369,7 @@ def _build_parser() -> argparse.ArgumentParser:
     run.add_argument("--base-steps", type=int, default=DEFAULT_BASE_STEPS)
     run.add_argument("--refine-steps", type=int, default=DEFAULT_REFINE_STEPS)
 
-    run.add_argument("--diff",
-                     action="store_true",
-                     help="Diff two .pt outputs instead of running.")
+    run.add_argument("--diff", action="store_true", help="Diff two .pt outputs instead of running.")
     run.add_argument("--reference")
     run.add_argument("--candidate")
     return parser

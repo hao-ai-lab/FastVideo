@@ -15,16 +15,12 @@ def pad(t: torch.Tensor, padding_length: int) -> tuple[torch.Tensor, torch.Tenso
     L, D = t.shape
     if padding_length > L:  # pad
         pad = torch.zeros(padding_length - L, D, dtype=t.dtype, device=t.device)
-        return torch.cat([t, pad], 0), torch.cat(
-            [torch.ones(L), torch.zeros(padding_length - L)], 0)
+        return torch.cat([t, pad], 0), torch.cat([torch.ones(L), torch.zeros(padding_length - L)], 0)
     else:  # crop
         return t[:padding_length], torch.ones(padding_length)
 
 
-def get_torch_tensors_from_row_dict(row_dict,
-                                    keys,
-                                    cfg_rate,
-                                    rng=None) -> dict[str, Any]:
+def get_torch_tensors_from_row_dict(row_dict, keys, cfg_rate, rng=None) -> dict[str, Any]:
     """
     Get the latents and prompts from a row dictionary.
     """
@@ -46,8 +42,7 @@ def get_torch_tensors_from_row_dict(row_dict,
             bytes = row_dict[f"{key}_bytes"]
 
         # TODO (peiyuan): read precision
-        if key == 'text_embedding' and (rng.random()
-                                        if rng else random.random()) < cfg_rate:
+        if key == 'text_embedding' and (rng.random() if rng else random.random()) < cfg_rate:
             data = np.zeros(shape, dtype=np.float32)
         else:
             data = np.frombuffer(bytes, dtype=np.float32).reshape(shape).copy()
@@ -60,12 +55,11 @@ def get_torch_tensors_from_row_dict(row_dict,
     return return_dict
 
 
-def collate_latents_embs_masks(
-        batch_to_process,
-        text_padding_length,
-        keys,
-        cfg_rate=0.0,
-        rng=None) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[str]]:
+def collate_latents_embs_masks(batch_to_process,
+                               text_padding_length,
+                               keys,
+                               cfg_rate=0.0,
+                               rng=None) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[str]]:
     # Initialize tensors to hold padded embeddings and masks
     all_latents = []
     all_embs = []
@@ -153,19 +147,12 @@ def collate_rows_from_parquet_schema(rows,
                     # Deterministic per-sample CFG dropout
                     # using sample index (resume-safe).
                     drop = False
-                    if (tensor_name == 'text_embedding'
-                            and cfg_rate > 0):
-                        sample_idx = row.get(
-                            "_sample_index")
+                    if (tensor_name == 'text_embedding' and cfg_rate > 0):
+                        sample_idx = row.get("_sample_index")
                         if sample_idx is not None:
-                            drop = (random.Random(
-                                seed ^ sample_idx
-                            ).random() < cfg_rate)
+                            drop = (random.Random(seed ^ sample_idx).random() < cfg_rate)
                         else:
-                            drop = ((rng.random()
-                                     if rng else
-                                     random.random())
-                                    < cfg_rate)
+                            drop = ((rng.random() if rng else random.random()) < cfg_rate)
                     if drop:
                         data = np.zeros(shape, dtype=np.float32)
                     else:
@@ -197,10 +184,7 @@ def collate_rows_from_parquet_schema(rows,
                     attention_masks.append(mask)
                 else:
                     # Handle empty embeddings - assume default embedding dimension
-                    padded_tensors.append(
-                        torch.zeros(text_padding_length,
-                                    768,
-                                    dtype=torch.bfloat16))
+                    padded_tensors.append(torch.zeros(text_padding_length, 768, dtype=torch.bfloat16))
                     attention_masks.append(torch.zeros(text_padding_length))
 
             batch_data[tensor_name] = torch.stack(padded_tensors)
@@ -211,16 +195,11 @@ def collate_rows_from_parquet_schema(rows,
             try:
                 batch_data[tensor_name] = torch.stack(tensor_list)
             except ValueError as e:
-                shapes = [
-                    t.shape
-                    if t is not None and hasattr(t, 'shape') else 'None/Invalid'
-                    for t in tensor_list
-                ]
-                raise ValueError(
-                    f"Failed to stack tensors for field '{tensor_name}'. "
-                    f"Tensor shapes: {shapes}. "
-                    f"All tensors in a batch must have compatible shapes. "
-                    f"Original error: {e}") from e
+                shapes = [t.shape if t is not None and hasattr(t, 'shape') else 'None/Invalid' for t in tensor_list]
+                raise ValueError(f"Failed to stack tensors for field '{tensor_name}'. "
+                                 f"Tensor shapes: {shapes}. "
+                                 f"All tensors in a batch must have compatible shapes. "
+                                 f"Original error: {e}") from e
 
     # Process metadata fields into info_list
     info_list = []

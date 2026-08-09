@@ -10,12 +10,9 @@ import pytest
 import torch
 from PIL import Image, ImageDraw
 
-
 os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
 
 MODEL_DIR = Path(os.getenv("DREAMX_WORLD_MODEL_DIR", "converted_weights/dreamx_world"))
-
-
 
 
 def _write_smoke_image(path: Path) -> None:
@@ -25,6 +22,7 @@ def _write_smoke_image(path: Path) -> None:
     draw.polygon([(0, 56), (48, 30), (96, 56)], fill=(120, 142, 158))
     draw.rectangle((34, 42, 62, 72), fill=(178, 198, 212))
     image.save(path)
+
 
 pytestmark = pytest.mark.skipif(
     not torch.cuda.is_available(),
@@ -52,9 +50,7 @@ def test_dreamx_world_typed_surface_preflight() -> None:
         "scheduler",
     ]
 
-    default_preset, model_family = registry.get_preset_selection(
-        "GD-ML/DreamX-World-5B-Cam"
-    )
+    default_preset, model_family = registry.get_preset_selection("GD-ML/DreamX-World-5B-Cam")
     assert model_family == "dreamx_world"
     assert default_preset == "dreamx_world_5b_cam"
 

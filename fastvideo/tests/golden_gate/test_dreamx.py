@@ -29,8 +29,7 @@ TEXT_LEN = 512
 
 
 def _build_block(layer: int) -> torch.nn.Module:
-    from fastvideo.configs.pipelines.dreamx_world import (
-        make_dreamx_world_5b_cam_dit_config)
+    from fastvideo.configs.pipelines.dreamx_world import (make_dreamx_world_5b_cam_dit_config)
     from fastvideo.models.dits.dreamx_world import DreamXWorldTransformerBlock
 
     arch = make_dreamx_world_5b_cam_dit_config().arch_config
@@ -38,18 +37,18 @@ def _build_block(layer: int) -> torch.nn.Module:
     # (dreamx_world.py:374-391)
     return DreamXWorldTransformerBlock(
         arch.num_attention_heads * arch.attention_head_dim,  # 3072
-        arch.ffn_dim,               # 14336
-        arch.num_attention_heads,   # 24
-        arch.qk_norm,               # "rms_norm_across_heads"
-        arch.cross_attn_norm,       # True
-        arch.eps,                   # 1e-6
-        arch.added_kv_proj_dim,     # None -> T2V cross-attn
+        arch.ffn_dim,  # 14336
+        arch.num_attention_heads,  # 24
+        arch.qk_norm,  # "rms_norm_across_heads"
+        arch.cross_attn_norm,  # True
+        arch.eps,  # 1e-6
+        arch.added_kv_proj_dim,  # None -> T2V cross-attn
         arch._supported_attention_backends,
         quant_config=None,
         prefix=f"Wan.blocks.{layer}",
-        add_control_adapter=arch.add_control_adapter,    # True
-        cam_method=arch.cam_method,                      # "prope"
-        attn_compress=arch.attn_compress,                # 1
+        add_control_adapter=arch.add_control_adapter,  # True
+        cam_method=arch.cam_method,  # "prope"
+        attn_compress=arch.attn_compress,  # 1
         cam_self_attn_layers=arch.cam_self_attn_layers,  # None -> cam attn everywhere
         layer_idx=layer,
     )
@@ -59,21 +58,23 @@ def _make_inputs(device: torch.device, seed: int) -> dict:
     """Fixed batch mirroring the SSIM defaults (9 frames @ 64x64):
     latent (3, 4, 4) -> patch (1,2,2) -> seq = 3*2*2 = 12, cameras = 3 latent frames."""
     from fastvideo.layers.rotary_embedding import get_rotary_pos_embed
-    from fastvideo.pipelines.basic.dreamx_world.camera_conditioning import (
-        build_dreamx_camera_condition)
+    from fastvideo.pipelines.basic.dreamx_world.camera_conditioning import (build_dreamx_camera_condition)
 
     generator = torch.Generator(device="cpu").manual_seed(seed)
     num_frames, height, width = 9, 64, 64
-    post_t = (num_frames - 1) // 4 + 1                    # VAE 4x temporal
+    post_t = (num_frames - 1) // 4 + 1  # VAE 4x temporal
     post_h, post_w = height // 16 // 2, width // 16 // 2  # VAE 16x spatial, patch (1,2,2)
-    seq = post_t * post_h * post_w                        # 12
+    seq = post_t * post_h * post_w  # 12
 
     # RoPE exactly as the model forward builds it (dreamx_world.py:429-439)
     d = INNER_DIM // 24  # head_dim 128
     rope_dim_list = [d - 4 * (d // 6), 2 * (d // 6), 2 * (d // 6)]  # [44, 42, 42]
-    freqs_cos, freqs_sin = get_rotary_pos_embed(
-        (post_t, post_h, post_w), INNER_DIM, 24, rope_dim_list,
-        rope_theta=10000, dtype=torch.float64)
+    freqs_cos, freqs_sin = get_rotary_pos_embed((post_t, post_h, post_w),
+                                                INNER_DIM,
+                                                24,
+                                                rope_dim_list,
+                                                rope_theta=10000,
+                                                dtype=torch.float64)
     freqs_cis = (freqs_cos.to(device).float(), freqs_sin.to(device).float())
 
     hidden = torch.randn(1, seq, INNER_DIM, generator=generator, dtype=torch.float32)
@@ -83,9 +84,12 @@ def _make_inputs(device: torch.device, seed: int) -> dict:
 
     # Deterministic camera condition, same builder + keys as the pipeline stage
     # (stages.py:55-64). dtype MUST match hidden_states.
-    camera = build_dreamx_camera_condition(
-        ["w"], [4.0], num_frames=num_frames, height=height, width=width,
-        dtype=torch.bfloat16, device=device)
+    camera = build_dreamx_camera_condition(["w"], [4.0],
+                                           num_frames=num_frames,
+                                           height=height,
+                                           width=width,
+                                           dtype=torch.bfloat16,
+                                           device=device)
     y_camera = {k: v.unsqueeze(0) for k, v in camera.items()}  # viewmats (1,3,4,4), K (1,3,3,3)
 
     return {

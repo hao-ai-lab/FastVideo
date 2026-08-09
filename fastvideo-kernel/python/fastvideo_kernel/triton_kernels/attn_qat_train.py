@@ -59,16 +59,8 @@ def _use_sm100_optimized_qat(
     use_global_sf_p: bool,
 ) -> bool:
     """Return whether this call matches the validated SM100 fast path."""
-    return (
-        _sm100_optimization_enabled()
-        and is_sm100(device)
-        and head_dim == 128
-        and not causal
-        and is_qat
-        and fake_quant_p
-        and not two_level_quant_p
-        and not use_global_sf_p
-    )
+    return (_sm100_optimization_enabled() and is_sm100(device) and head_dim == 128 and not causal and is_qat
+            and fake_quant_p and not two_level_quant_p and not use_global_sf_p)
 
 
 def _select_sm100_forward_config(n_ctx_q: int, n_ctx_kv: int, mode: str):
@@ -92,12 +84,27 @@ def _mul_alpha(acc, alpha, BM: tl.constexpr, BN: tl.constexpr):
 
 
 @triton.jit
-def _attn_fwd_inner(acc, high_prec_acc, l_i, m_i, q, q_valid,
-                    desc_k, desc_v,
-                    offset_y, dtype: tl.constexpr, start_m, qk_scale,
-                    BLOCK_M: tl.constexpr, HEAD_DIM: tl.constexpr, BLOCK_N: tl.constexpr,
-                    STAGE: tl.constexpr, offs_m: tl.constexpr, offs_n: tl.constexpr,
-                    N_CTX: tl.constexpr, warp_specialize: tl.constexpr, IS_HOPPER: tl.constexpr,
+def _attn_fwd_inner(acc,
+                    high_prec_acc,
+                    l_i,
+                    m_i,
+                    q,
+                    q_valid,
+                    desc_k,
+                    desc_v,
+                    offset_y,
+                    dtype: tl.constexpr,
+                    start_m,
+                    qk_scale,
+                    BLOCK_M: tl.constexpr,
+                    HEAD_DIM: tl.constexpr,
+                    BLOCK_N: tl.constexpr,
+                    STAGE: tl.constexpr,
+                    offs_m: tl.constexpr,
+                    offs_n: tl.constexpr,
+                    N_CTX: tl.constexpr,
+                    warp_specialize: tl.constexpr,
+                    IS_HOPPER: tl.constexpr,
                     IS_QAT: tl.constexpr,
                     fake_quant_P: tl.constexpr = True,
                     two_level_quant_P: tl.constexpr = False,
@@ -135,16 +142,14 @@ def _attn_fwd_inner(acc, high_prec_acc, l_i, m_i, q, q_valid,
             m_ij = tl.maximum(m_i, tl.max(qk, 1) * qk_scale)
             qk = qk * qk_scale - m_ij[:, None]
         p = tl.math.exp2(qk)
-        if IS_QAT:  
-            p, high_prec_p = fake_quantize(
-                src_tensor=p,
-                valid_src_mask=tl.full(shape=p.shape, value=1.0, dtype=p.dtype) == 1.0,
-                BLOCK_SIZE_OUT_DIM=BLOCK_M,
-                BLOCK_SIZE_QUANT_DIM=BLOCK_N,
-                dst_dtype=dtype,
-                two_level_quant_P=two_level_quant_P,
-                use_global_sf=use_global_sf_P
-            )
+        if IS_QAT:
+            p, high_prec_p = fake_quantize(src_tensor=p,
+                                           valid_src_mask=tl.full(shape=p.shape, value=1.0, dtype=p.dtype) == 1.0,
+                                           BLOCK_SIZE_OUT_DIM=BLOCK_M,
+                                           BLOCK_SIZE_QUANT_DIM=BLOCK_N,
+                                           dst_dtype=dtype,
+                                           two_level_quant_P=two_level_quant_P,
+                                           use_global_sf=use_global_sf_P)
             l_ij = tl.sum(high_prec_p, 1)
         else:
             l_ij = tl.sum(p, 1)
@@ -213,11 +218,11 @@ def _host_descriptor_pre_hook(nargs):
 NUM_STAGES_OPTIONS = [2, 3, 4]
 
 configs = [
-    triton.Config({'BLOCK_M': BM, 'BLOCK_N': BN}, num_stages=s, num_warps=w, pre_hook=_host_descriptor_pre_hook)
-    for BM in [64, 128]
-    for BN in [32, 64, 128]
-    for s in NUM_STAGES_OPTIONS
-    for w in [4, 8]
+    triton.Config({
+        'BLOCK_M': BM,
+        'BLOCK_N': BN
+    }, num_stages=s, num_warps=w, pre_hook=_host_descriptor_pre_hook) for BM in [64, 128] for BN in [32, 64, 128]
+    for s in NUM_STAGES_OPTIONS for w in [4, 8]
 ]
 if "PYTEST_VERSION" in os.environ:
     # Use a single config in testing for reproducibility
@@ -238,8 +243,7 @@ def prune_invalid_configs(configs, named_args, **kwargs):
     N_CTX_KV = kwargs["N_CTX_KV"]
     return [
         conf for conf in configs
-        if conf.kwargs.get("BLOCK_M", 0) <= N_CTX_Q
-        and conf.kwargs.get("BLOCK_N", 0) <= N_CTX_KV
+        if conf.kwargs.get("BLOCK_M", 0) <= N_CTX_Q and conf.kwargs.get("BLOCK_N", 0) <= N_CTX_KV
         and conf.kwargs.get("BLOCK_N", 0) % conf.kwargs.get("BLOCK_M", 0) == 0
     ]
 
@@ -255,21 +259,31 @@ def _maybe_make_tensor_desc(desc_or_ptr, shape, strides, block_shape):
 # @triton.autotune(configs=list(filter(keep, configs)), key=["N_CTX_Q", "N_CTX_KV", "HEAD_DIM", "FP8_OUTPUT", "warp_specialize"],
 #                  prune_configs_by={'early_config_prune': prune_invalid_configs}, cache_results=True)
 @triton.jit
-def _attn_fwd(sm_scale, M,
-              Z, H, desc_q, desc_k, desc_v, desc_o, desc_high_prec_o, N_CTX_Q, N_CTX_KV,
-              HEAD_DIM: tl.constexpr,
-              BLOCK_M: tl.constexpr,
-              BLOCK_N: tl.constexpr,
-              FP8_OUTPUT: tl.constexpr,
-              STAGE: tl.constexpr,
-              warp_specialize: tl.constexpr,
-              IS_HOPPER: tl.constexpr,
-              IS_QAT: tl.constexpr,
-              fake_quant_P: tl.constexpr = True,
-              two_level_quant_P: tl.constexpr = False,
-              use_global_sf_P: tl.constexpr = True,
-              JOIN_QAT_PV: tl.constexpr = False,
-              ):
+def _attn_fwd(
+    sm_scale,
+    M,
+    Z,
+    H,
+    desc_q,
+    desc_k,
+    desc_v,
+    desc_o,
+    desc_high_prec_o,
+    N_CTX_Q,
+    N_CTX_KV,
+    HEAD_DIM: tl.constexpr,
+    BLOCK_M: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+    FP8_OUTPUT: tl.constexpr,
+    STAGE: tl.constexpr,
+    warp_specialize: tl.constexpr,
+    IS_HOPPER: tl.constexpr,
+    IS_QAT: tl.constexpr,
+    fake_quant_P: tl.constexpr = True,
+    two_level_quant_P: tl.constexpr = False,
+    use_global_sf_P: tl.constexpr = True,
+    JOIN_QAT_PV: tl.constexpr = False,
+):
     dtype = tl.float8e5 if FP8_OUTPUT else tl.bfloat16
     tl.static_assert(BLOCK_N <= HEAD_DIM)
     start_m = tl.program_id(0)
@@ -279,27 +293,33 @@ def _attn_fwd(sm_scale, M,
 
     y_dim_q = Z * H * N_CTX_Q
     y_dim_kv = Z * H * N_CTX_KV
-    desc_q = _maybe_make_tensor_desc(desc_q, shape=[y_dim_q, HEAD_DIM], strides=[HEAD_DIM, 1],
+    desc_q = _maybe_make_tensor_desc(desc_q,
+                                     shape=[y_dim_q, HEAD_DIM],
+                                     strides=[HEAD_DIM, 1],
                                      block_shape=[BLOCK_M, HEAD_DIM])
     if FP8_OUTPUT:
-        desc_v = _maybe_make_tensor_desc(desc_v, shape=[HEAD_DIM, y_dim_kv], strides=[N_CTX_KV, 1],
+        desc_v = _maybe_make_tensor_desc(desc_v,
+                                         shape=[HEAD_DIM, y_dim_kv],
+                                         strides=[N_CTX_KV, 1],
                                          block_shape=[HEAD_DIM, BLOCK_N])
     else:
-        desc_v = _maybe_make_tensor_desc(desc_v, shape=[y_dim_kv, HEAD_DIM], strides=[HEAD_DIM, 1],
+        desc_v = _maybe_make_tensor_desc(desc_v,
+                                         shape=[y_dim_kv, HEAD_DIM],
+                                         strides=[HEAD_DIM, 1],
                                          block_shape=[BLOCK_N, HEAD_DIM])
-    desc_k = _maybe_make_tensor_desc(desc_k, shape=[y_dim_kv, HEAD_DIM], strides=[HEAD_DIM, 1],
+    desc_k = _maybe_make_tensor_desc(desc_k,
+                                     shape=[y_dim_kv, HEAD_DIM],
+                                     strides=[HEAD_DIM, 1],
                                      block_shape=[BLOCK_N, HEAD_DIM])
-    desc_o = _maybe_make_tensor_desc(
-        desc_o, shape=[Z * H, N_CTX_Q, HEAD_DIM],
-        strides=[N_CTX_Q * HEAD_DIM, HEAD_DIM, 1],
-        block_shape=[1, BLOCK_M, HEAD_DIM]
-    )
+    desc_o = _maybe_make_tensor_desc(desc_o,
+                                     shape=[Z * H, N_CTX_Q, HEAD_DIM],
+                                     strides=[N_CTX_Q * HEAD_DIM, HEAD_DIM, 1],
+                                     block_shape=[1, BLOCK_M, HEAD_DIM])
     if IS_QAT:
-        desc_high_prec_o = _maybe_make_tensor_desc(
-            desc_high_prec_o, shape=[Z * H, N_CTX_Q, HEAD_DIM],
-            strides=[N_CTX_Q * HEAD_DIM, HEAD_DIM, 1],
-            block_shape=[1, BLOCK_M, HEAD_DIM]
-        )
+        desc_high_prec_o = _maybe_make_tensor_desc(desc_high_prec_o,
+                                                   shape=[Z * H, N_CTX_Q, HEAD_DIM],
+                                                   strides=[N_CTX_Q * HEAD_DIM, HEAD_DIM, 1],
+                                                   block_shape=[1, BLOCK_M, HEAD_DIM])
 
     offset_y_q = off_z * (N_CTX_Q * H) + off_h * N_CTX_Q  # offset for query tensor
     offset_y_kv = off_z * (N_CTX_KV * H) + off_h * N_CTX_KV  # offset for key/value tensors
@@ -327,24 +347,18 @@ def _attn_fwd(sm_scale, M,
     # For causal = True, STAGE = 3 and _attn_fwd_inner gets 1 as its STAGE
     # For causal = False, STAGE = 1, and _attn_fwd_inner gets 3 as its STAGE
     if STAGE & 1:
-        acc, high_prec_acc, l_i, m_i = _attn_fwd_inner(
-            acc, high_prec_acc, l_i, m_i, q, q_valid,
-            desc_k, desc_v,
-            offset_y_kv, dtype, start_m, qk_scale,
-            BLOCK_M, HEAD_DIM, BLOCK_N,
-            4 - STAGE, offs_m, offs_n, N_CTX_KV,
-            warp_specialize, IS_HOPPER, IS_QAT, fake_quant_P, two_level_quant_P, use_global_sf_P, JOIN_QAT_PV
-        )
+        acc, high_prec_acc, l_i, m_i = _attn_fwd_inner(acc, high_prec_acc, l_i, m_i, q, q_valid, desc_k, desc_v,
+                                                       offset_y_kv, dtype, start_m, qk_scale, BLOCK_M, HEAD_DIM,
+                                                       BLOCK_N, 4 - STAGE, offs_m, offs_n, N_CTX_KV, warp_specialize,
+                                                       IS_HOPPER, IS_QAT, fake_quant_P, two_level_quant_P,
+                                                       use_global_sf_P, JOIN_QAT_PV)
     # stage 2: on-band
     if STAGE & 2:
-        acc, high_prec_acc, l_i, m_i = _attn_fwd_inner(
-            acc, high_prec_acc, l_i, m_i, q, q_valid,
-            desc_k, desc_v,
-            offset_y_kv, dtype, start_m, qk_scale,
-            BLOCK_M, HEAD_DIM, BLOCK_N,
-            2, offs_m, offs_n, N_CTX_KV,
-            warp_specialize, IS_HOPPER, IS_QAT, fake_quant_P, two_level_quant_P, use_global_sf_P, JOIN_QAT_PV
-        )
+        acc, high_prec_acc, l_i, m_i = _attn_fwd_inner(acc, high_prec_acc, l_i, m_i, q, q_valid, desc_k, desc_v,
+                                                       offset_y_kv, dtype, start_m, qk_scale, BLOCK_M, HEAD_DIM,
+                                                       BLOCK_N, 2, offs_m, offs_n, N_CTX_KV, warp_specialize, IS_HOPPER,
+                                                       IS_QAT, fake_quant_P, two_level_quant_P, use_global_sf_P,
+                                                       JOIN_QAT_PV)
     # epilogue
     m_i += tl.math.log2(l_i)
     acc = acc / l_i[:, None]
@@ -404,18 +418,15 @@ def _attn_fwd_exact_m(
 
 
 @triton.jit
-def _attn_bwd_preprocess(O, DO,
-                         Delta,
-                         Z, H, N_CTX,
-                         BLOCK_M: tl.constexpr, HEAD_DIM: tl.constexpr
-                         ):
+def _attn_bwd_preprocess(O, DO, Delta, Z, H, N_CTX, BLOCK_M: tl.constexpr, HEAD_DIM: tl.constexpr):
     off_m = tl.program_id(0) * BLOCK_M + tl.arange(0, BLOCK_M)
     off_hz = tl.program_id(1)
     off_n = tl.arange(0, HEAD_DIM)
     valid = off_m < N_CTX
     # load
     o = tl.load(O + off_hz * HEAD_DIM * N_CTX + off_m[:, None] * HEAD_DIM + off_n[None, :], mask=valid[:, None])
-    do = tl.load(DO + off_hz * HEAD_DIM * N_CTX + off_m[:, None] * HEAD_DIM + off_n[None, :], mask=valid[:, None]).to(tl.float32)
+    do = tl.load(DO + off_hz * HEAD_DIM * N_CTX + off_m[:, None] * HEAD_DIM + off_n[None, :],
+                 mask=valid[:, None]).to(tl.float32)
     delta = tl.sum(o * do, axis=1)
     # write-back
     tl.store(Delta + off_hz * N_CTX + off_m, delta, mask=valid)
@@ -423,24 +434,36 @@ def _attn_bwd_preprocess(O, DO,
 
 # The main inner-loop logic for computing dK and dV.
 @triton.jit
-def _attn_bwd_dkdv(dk, dv,
-                   Q, k, v, qk_scale,
-                   DO,
-                   M, D, Q_MEAN,
-                   # shared by Q/K/V/DO.
-                   stride_tok, stride_d,
-                   H, N_CTX, BLOCK_M1: tl.constexpr,
-                   BLOCK_N1: tl.constexpr,
-                   HEAD_DIM: tl.constexpr,
-                   # Filled in by the wrapper.
-                   start_n, start_m, num_steps,
-                   MASK: tl.constexpr,
-                   IS_QAT: tl.constexpr,
-                   two_level_quant_P: tl.constexpr = False,
-                   fake_quant_P: tl.constexpr = True,
-                   SMOOTH_Q: tl.constexpr = False,
-                   use_global_sf_P: tl.constexpr = True,
-                   warp_specialize: tl.constexpr = False):
+def _attn_bwd_dkdv(
+        dk,
+        dv,
+        Q,
+        k,
+        v,
+        qk_scale,
+        DO,
+        M,
+        D,
+        Q_MEAN,
+        # shared by Q/K/V/DO.
+        stride_tok,
+        stride_d,
+        H,
+        N_CTX,
+        BLOCK_M1: tl.constexpr,
+        BLOCK_N1: tl.constexpr,
+        HEAD_DIM: tl.constexpr,
+        # Filled in by the wrapper.
+        start_n,
+        start_m,
+        num_steps,
+        MASK: tl.constexpr,
+        IS_QAT: tl.constexpr,
+        two_level_quant_P: tl.constexpr = False,
+        fake_quant_P: tl.constexpr = True,
+        SMOOTH_Q: tl.constexpr = False,
+        use_global_sf_P: tl.constexpr = True,
+        warp_specialize: tl.constexpr = False):
     offs_m = start_m + tl.arange(0, BLOCK_M1)
     offs_n = start_n + tl.arange(0, BLOCK_N1)
     offs_k = tl.arange(0, HEAD_DIM)
@@ -471,15 +494,13 @@ def _attn_bwd_dkdv(dk, dv,
         # Compute dV.
         p_quant = p
         if IS_QAT and fake_quant_P:
-            p_quant, _ = fake_quantize(
-                src_tensor=p,
-                valid_src_mask=tl.full(shape=p.shape, value=1.0, dtype=p.dtype) == 1.0,
-                BLOCK_SIZE_OUT_DIM=BLOCK_M1,
-                BLOCK_SIZE_QUANT_DIM=BLOCK_N1,
-                dst_dtype=p.dtype,
-                two_level_quant_P=two_level_quant_P,
-                use_global_sf=use_global_sf_P
-            )
+            p_quant, _ = fake_quantize(src_tensor=p,
+                                       valid_src_mask=tl.full(shape=p.shape, value=1.0, dtype=p.dtype) == 1.0,
+                                       BLOCK_SIZE_OUT_DIM=BLOCK_M1,
+                                       BLOCK_SIZE_QUANT_DIM=BLOCK_N1,
+                                       dst_dtype=p.dtype,
+                                       two_level_quant_P=two_level_quant_P,
+                                       use_global_sf=use_global_sf_P)
         dv += tl.dot(tl.trans(p_quant.to(tl.bfloat16)), do)
         # D (= delta) is pre-divided by ds_scale.
         Di = tl.load(D + offs_m, mask=q_valid)
@@ -501,20 +522,31 @@ def _attn_bwd_dkdv(dk, dv,
 
 # The main inner-loop logic for computing dQ
 @triton.jit
-def _attn_bwd_dq(dq, q, K, V,
-                 do, m, D, qk_scale,
-                 # shared by Q/K/V/DO.
-                 stride_tok, stride_d,
-                 H, N_CTX,
-                 K_MEAN,
-                 BLOCK_M2: tl.constexpr,
-                 BLOCK_N2: tl.constexpr,
-                 HEAD_DIM: tl.constexpr,
-                 # Filled in by the wrapper.
-                 start_m, start_n, num_steps,
-                 MASK: tl.constexpr,
-                 SMOOTH_K: tl.constexpr,
-                 warp_specialize: tl.constexpr = False):
+def _attn_bwd_dq(
+        dq,
+        q,
+        K,
+        V,
+        do,
+        m,
+        D,
+        qk_scale,
+        # shared by Q/K/V/DO.
+        stride_tok,
+        stride_d,
+        H,
+        N_CTX,
+        K_MEAN,
+        BLOCK_M2: tl.constexpr,
+        BLOCK_N2: tl.constexpr,
+        HEAD_DIM: tl.constexpr,
+        # Filled in by the wrapper.
+        start_m,
+        start_n,
+        num_steps,
+        MASK: tl.constexpr,
+        SMOOTH_K: tl.constexpr,
+        warp_specialize: tl.constexpr = False):
     offs_m = start_m + tl.arange(0, BLOCK_M2)
     offs_n = start_n + tl.arange(0, BLOCK_N2)
     offs_k = tl.arange(0, HEAD_DIM)
@@ -571,12 +603,25 @@ def _compute_cross_attn_pointer_offsets(bhid, H, N_CTX_Q, stride_z_q, stride_z_k
 
 
 @triton.jit
-def _attn_bwd_dq_cross(Q, K, V, sm_scale,
-                       DO, DQ,
-                       M, D,
-                       stride_z_q, stride_z_kv, stride_h_q,
-                       stride_h_kv, stride_tok_q, stride_tok_kv, stride_d_q, stride_d_kv,
-                       H, N_CTX_Q, N_CTX_KV,
+def _attn_bwd_dq_cross(Q,
+                       K,
+                       V,
+                       sm_scale,
+                       DO,
+                       DQ,
+                       M,
+                       D,
+                       stride_z_q,
+                       stride_z_kv,
+                       stride_h_q,
+                       stride_h_kv,
+                       stride_tok_q,
+                       stride_tok_kv,
+                       stride_d_q,
+                       stride_d_kv,
+                       H,
+                       N_CTX_Q,
+                       N_CTX_KV,
                        K_MEAN,
                        BLOCK_M2: tl.constexpr,
                        BLOCK_N2: tl.constexpr,
@@ -588,7 +633,8 @@ def _attn_bwd_dq_cross(Q, K, V, sm_scale,
     qk_scale = sm_scale * RCP_LN2
 
     bhid = tl.program_id(2)
-    off_chz, adj_q, adj_kv = _compute_cross_attn_pointer_offsets(bhid, H, N_CTX_Q, stride_z_q, stride_z_kv, stride_h_q, stride_h_kv)
+    off_chz, adj_q, adj_kv = _compute_cross_attn_pointer_offsets(bhid, H, N_CTX_Q, stride_z_q, stride_z_kv, stride_h_q,
+                                                                 stride_h_kv)
 
     Q += adj_q
     K += adj_kv
@@ -640,12 +686,27 @@ def _attn_bwd_dq_cross(Q, K, V, sm_scale,
 
 
 @triton.jit
-def _attn_bwd_dkdv_cross(Q, K, V, sm_scale,
-                         DO, DK, DV,
-                         M, D, Q_MEAN,
-                         stride_z_q, stride_z_kv, stride_h_q, stride_h_kv, 
-                         stride_tok_q, stride_tok_kv, stride_d_q, stride_d_kv,
-                         H, N_CTX_Q, N_CTX_KV,
+def _attn_bwd_dkdv_cross(Q,
+                         K,
+                         V,
+                         sm_scale,
+                         DO,
+                         DK,
+                         DV,
+                         M,
+                         D,
+                         Q_MEAN,
+                         stride_z_q,
+                         stride_z_kv,
+                         stride_h_q,
+                         stride_h_kv,
+                         stride_tok_q,
+                         stride_tok_kv,
+                         stride_d_q,
+                         stride_d_kv,
+                         H,
+                         N_CTX_Q,
+                         N_CTX_KV,
                          BLOCK_M1: tl.constexpr,
                          BLOCK_N1: tl.constexpr,
                          HEAD_DIM: tl.constexpr,
@@ -654,14 +715,14 @@ def _attn_bwd_dkdv_cross(Q, K, V, sm_scale,
                          fake_quant_P: tl.constexpr = True,
                          SMOOTH_Q: tl.constexpr = False,
                          use_global_sf_P: tl.constexpr = True,
-                         warp_specialize: tl.constexpr = False
-                         ):
+                         warp_specialize: tl.constexpr = False):
     # Apply scale AFTER dot product for better precision
     RCP_LN2: tl.constexpr = 1.4426950408889634  # = 1.0 / ln(2)
     qk_scale = sm_scale * RCP_LN2
 
     bhid = tl.program_id(2)
-    off_chz, adj_q, adj_kv = _compute_cross_attn_pointer_offsets(bhid, H, N_CTX_Q, stride_z_q, stride_z_kv, stride_h_q, stride_h_kv)
+    off_chz, adj_q, adj_kv = _compute_cross_attn_pointer_offsets(bhid, H, N_CTX_Q, stride_z_q, stride_z_kv, stride_h_q,
+                                                                 stride_h_kv)
 
     Q += adj_q
     K += adj_kv
@@ -703,15 +764,13 @@ def _attn_bwd_dkdv_cross(Q, K, V, sm_scale,
         p = tl.math.exp2(qk - m[:, None])
         p_quant = p
         if IS_QAT and fake_quant_P:
-            p_quant, _ = fake_quantize(
-                src_tensor=p,
-                valid_src_mask=tl.full(shape=p.shape, value=1.0, dtype=p.dtype) == 1.0,
-                BLOCK_SIZE_OUT_DIM=BLOCK_M1,
-                BLOCK_SIZE_QUANT_DIM=BLOCK_N1,
-                dst_dtype=p.dtype,
-                two_level_quant_P=two_level_quant_P,
-                use_global_sf=use_global_sf_P
-            )
+            p_quant, _ = fake_quantize(src_tensor=p,
+                                       valid_src_mask=tl.full(shape=p.shape, value=1.0, dtype=p.dtype) == 1.0,
+                                       BLOCK_SIZE_OUT_DIM=BLOCK_M1,
+                                       BLOCK_SIZE_QUANT_DIM=BLOCK_N1,
+                                       dst_dtype=p.dtype,
+                                       two_level_quant_P=two_level_quant_P,
+                                       use_global_sf=use_global_sf_P)
         dv += tl.dot(tl.trans(p_quant.to(tl.bfloat16)), do)
 
         dp = tl.dot(do, tl.trans(v_block))
@@ -733,28 +792,40 @@ def _attn_bwd_dkdv_cross(Q, K, V, sm_scale,
 
 
 @triton.jit
-def _attn_bwd(Q, K, V, sm_scale,
-              DO,
-              DQ, DK, DV,
-              M, D, Q_MEAN,
-              # shared by Q/K/V/DO.
-              stride_z, stride_h, stride_tok, stride_d,
-              H, N_CTX,
-              K_MEAN,
-              BLOCK_M1: tl.constexpr,
-              BLOCK_N1: tl.constexpr,
-              BLOCK_M2: tl.constexpr,
-              BLOCK_N2: tl.constexpr,
-              BLK_SLICE_FACTOR: tl.constexpr,
-              HEAD_DIM: tl.constexpr,
-              CAUSAL: tl.constexpr,
-              IS_QAT: tl.constexpr,
-              SMOOTH_K: tl.constexpr,
-              two_level_quant_P: tl.constexpr = False,
-              fake_quant_P: tl.constexpr = True,
-              SMOOTH_Q: tl.constexpr = False,
-              use_global_sf_P: tl.constexpr = True,
-              warp_specialize: tl.constexpr = False):
+def _attn_bwd(
+        Q,
+        K,
+        V,
+        sm_scale,
+        DO,
+        DQ,
+        DK,
+        DV,
+        M,
+        D,
+        Q_MEAN,
+        # shared by Q/K/V/DO.
+        stride_z,
+        stride_h,
+        stride_tok,
+        stride_d,
+        H,
+        N_CTX,
+        K_MEAN,
+        BLOCK_M1: tl.constexpr,
+        BLOCK_N1: tl.constexpr,
+        BLOCK_M2: tl.constexpr,
+        BLOCK_N2: tl.constexpr,
+        BLK_SLICE_FACTOR: tl.constexpr,
+        HEAD_DIM: tl.constexpr,
+        CAUSAL: tl.constexpr,
+        IS_QAT: tl.constexpr,
+        SMOOTH_K: tl.constexpr,
+        two_level_quant_P: tl.constexpr = False,
+        fake_quant_P: tl.constexpr = True,
+        SMOOTH_Q: tl.constexpr = False,
+        use_global_sf_P: tl.constexpr = True,
+        warp_specialize: tl.constexpr = False):
 
     bhid = tl.program_id(2)
     off_chz = (bhid * N_CTX).to(tl.int64)
@@ -804,23 +875,33 @@ def _attn_bwd(Q, K, V, sm_scale,
     if CAUSAL:
         num_steps = BLOCK_N1 // MASK_BLOCK_M1
 
-        dk, dv = _attn_bwd_dkdv(
-            dk, dv,
-            Q, k, v, qk_scale,
-            DO,
-            M, D, Q_MEAN,
-            stride_tok, stride_d,
-            H, N_CTX,
-            MASK_BLOCK_M1, BLOCK_N1, HEAD_DIM,
-            start_n, start_m, num_steps,
-            MASK=True,
-            IS_QAT=IS_QAT,
-            two_level_quant_P=two_level_quant_P,
-            fake_quant_P=fake_quant_P,
-            SMOOTH_Q=SMOOTH_Q,
-            use_global_sf_P=use_global_sf_P,
-            warp_specialize=warp_specialize
-        )
+        dk, dv = _attn_bwd_dkdv(dk,
+                                dv,
+                                Q,
+                                k,
+                                v,
+                                qk_scale,
+                                DO,
+                                M,
+                                D,
+                                Q_MEAN,
+                                stride_tok,
+                                stride_d,
+                                H,
+                                N_CTX,
+                                MASK_BLOCK_M1,
+                                BLOCK_N1,
+                                HEAD_DIM,
+                                start_n,
+                                start_m,
+                                num_steps,
+                                MASK=True,
+                                IS_QAT=IS_QAT,
+                                two_level_quant_P=two_level_quant_P,
+                                fake_quant_P=fake_quant_P,
+                                SMOOTH_Q=SMOOTH_Q,
+                                use_global_sf_P=use_global_sf_P,
+                                warp_specialize=warp_specialize)
 
         start_m += num_steps * MASK_BLOCK_M1
         num_steps = (N_CTX - start_m + BLOCK_M1 - 1) // BLOCK_M1
@@ -830,23 +911,33 @@ def _attn_bwd(Q, K, V, sm_scale,
         num_steps = (N_CTX + BLOCK_M1 - 1) // BLOCK_M1
 
     # Compute dK and dV for non-masked blocks.
-    dk, dv = _attn_bwd_dkdv(
-        dk, dv,
-        Q, k, v, qk_scale,
-        DO,
-        M, D, Q_MEAN,
-        stride_tok, stride_d,
-        H, N_CTX,
-        BLOCK_M1, BLOCK_N1, HEAD_DIM,
-        start_n, start_m, num_steps,
-        MASK=False,
-        IS_QAT=IS_QAT,
-        two_level_quant_P=two_level_quant_P,
-        fake_quant_P=fake_quant_P,
-        SMOOTH_Q=SMOOTH_Q,
-        use_global_sf_P=use_global_sf_P,
-        warp_specialize=warp_specialize
-    )
+    dk, dv = _attn_bwd_dkdv(dk,
+                            dv,
+                            Q,
+                            k,
+                            v,
+                            qk_scale,
+                            DO,
+                            M,
+                            D,
+                            Q_MEAN,
+                            stride_tok,
+                            stride_d,
+                            H,
+                            N_CTX,
+                            BLOCK_M1,
+                            BLOCK_N1,
+                            HEAD_DIM,
+                            start_n,
+                            start_m,
+                            num_steps,
+                            MASK=False,
+                            IS_QAT=IS_QAT,
+                            two_level_quant_P=two_level_quant_P,
+                            fake_quant_P=fake_quant_P,
+                            SMOOTH_Q=SMOOTH_Q,
+                            use_global_sf_P=use_global_sf_P,
+                            warp_specialize=warp_specialize)
 
     dv_ptrs = DV + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d
     tl.store(dv_ptrs, dv, mask=kv_valid[:, None])
@@ -879,13 +970,25 @@ def _attn_bwd(Q, K, V, sm_scale,
     if CAUSAL:
         num_steps = BLOCK_M2 // MASK_BLOCK_N2
         dq = _attn_bwd_dq(
-            dq, q, K, V,
-            do, m, D, qk_scale,
-            stride_tok, stride_d,
-            H, N_CTX,
+            dq,
+            q,
+            K,
+            V,
+            do,
+            m,
+            D,
+            qk_scale,
+            stride_tok,
+            stride_d,
+            H,
+            N_CTX,
             K_MEAN,
-            BLOCK_M2, MASK_BLOCK_N2, HEAD_DIM,
-            start_m, end_n - num_steps * MASK_BLOCK_N2, num_steps,
+            BLOCK_M2,
+            MASK_BLOCK_N2,
+            HEAD_DIM,
+            start_m,
+            end_n - num_steps * MASK_BLOCK_N2,
+            num_steps,
             MASK=True,
             SMOOTH_K=SMOOTH_K,
             warp_specialize=warp_specialize,
@@ -900,13 +1003,25 @@ def _attn_bwd(Q, K, V, sm_scale,
         start_n = 0
     # stage 2
     dq = _attn_bwd_dq(
-        dq, q, K, V,
-        do, m, D, qk_scale,
-        stride_tok, stride_d,
-        H, N_CTX,
+        dq,
+        q,
+        K,
+        V,
+        do,
+        m,
+        D,
+        qk_scale,
+        stride_tok,
+        stride_d,
+        H,
+        N_CTX,
         K_MEAN,
-        BLOCK_M2, BLOCK_N2, HEAD_DIM,
-        start_m, start_n, num_steps,
+        BLOCK_M2,
+        BLOCK_N2,
+        HEAD_DIM,
+        start_m,
+        start_n,
+        num_steps,
         MASK=False,
         SMOOTH_K=SMOOTH_K,
         warp_specialize=warp_specialize,
@@ -957,22 +1072,16 @@ class _attention(torch.autograd.Function):
         N_CTX_Q = q.shape[2]  # Query sequence length
         N_CTX_KV = k.shape[2]  # Key/Value sequence length (may differ from query)
         assert k.shape[2] == v.shape[2], "k and v must have the same sequence length"
-        sm100_optimized = (
-            q.dtype == torch.bfloat16
-            and k.dtype == q.dtype
-            and v.dtype == q.dtype
-            and k.device == q.device
-            and v.device == q.device
-            and _use_sm100_optimized_qat(
-                q.device,
-                HEAD_DIM_K,
-                causal,
-                IS_QAT,
-                fake_quant_P,
-                two_level_quant_P,
-                use_global_sf_P,
-            )
-        )
+        sm100_optimized = (q.dtype == torch.bfloat16 and k.dtype == q.dtype and v.dtype == q.dtype
+                           and k.device == q.device and v.device == q.device and _use_sm100_optimized_qat(
+                               q.device,
+                               HEAD_DIM_K,
+                               causal,
+                               IS_QAT,
+                               fake_quant_P,
+                               two_level_quant_P,
+                               use_global_sf_P,
+                           ))
 
         # smoothing k from SageAttn
         ctx.k_mean = None
@@ -980,7 +1089,7 @@ class _attention(torch.autograd.Function):
             k_mean = k.mean(dim=(0, 1, 2), keepdim=True)
             k = k - k_mean
             ctx.k_mean = k_mean.view(-1)
-        
+
         q_orig, k_orig, v_orig = None, None, None
         if not use_qat_qkv_backward:
             q_orig, k_orig, v_orig = q, k, v
@@ -1006,30 +1115,28 @@ class _attention(torch.autograd.Function):
             # (Z, H, N_CTX_Q, HEAD_DIM_K) -> (Z*H*N_CTX_Q, HEAD_DIM_K)
             desc_q = TensorDescriptor(q, shape=[y_dim_q, HEAD_DIM_K], strides=[HEAD_DIM_K, 1], block_shape=dummy_block)
             if q.dtype == torch.float8_e5m2:
-                desc_v = TensorDescriptor(
-                    v, shape=[HEAD_DIM_K, y_dim_kv], strides=[k.shape[2], 1],
-                    block_shape=dummy_block
-                )
+                desc_v = TensorDescriptor(v,
+                                          shape=[HEAD_DIM_K, y_dim_kv],
+                                          strides=[k.shape[2], 1],
+                                          block_shape=dummy_block)
             else:
-                desc_v = TensorDescriptor(
-                    v, shape=[y_dim_kv, HEAD_DIM_K], strides=[HEAD_DIM_K, 1],
-                    block_shape=dummy_block
-                )
+                desc_v = TensorDescriptor(v,
+                                          shape=[y_dim_kv, HEAD_DIM_K],
+                                          strides=[HEAD_DIM_K, 1],
+                                          block_shape=dummy_block)
             desc_k = TensorDescriptor(k, shape=[y_dim_kv, HEAD_DIM_K], strides=[HEAD_DIM_K, 1], block_shape=dummy_block)
             # Use 3D descriptor for output to handle N_CTX_Q boundaries correctly
             dummy_block3d = [1, 1, 1]
             ZH = q.shape[0] * q.shape[1]
-            desc_o = TensorDescriptor(
-                o, shape=[ZH, N_CTX_Q, HEAD_DIM_K],
-                strides=[N_CTX_Q * HEAD_DIM_K, HEAD_DIM_K, 1],
-                block_shape=dummy_block3d
-            )
+            desc_o = TensorDescriptor(o,
+                                      shape=[ZH, N_CTX_Q, HEAD_DIM_K],
+                                      strides=[N_CTX_Q * HEAD_DIM_K, HEAD_DIM_K, 1],
+                                      block_shape=dummy_block3d)
             if IS_QAT:
-                desc_high_prec_o = TensorDescriptor(
-                    high_prec_o, shape=[ZH, N_CTX_Q, HEAD_DIM_K],
-                    strides=[N_CTX_Q * HEAD_DIM_K, HEAD_DIM_K, 1],
-                    block_shape=dummy_block3d
-                )
+                desc_high_prec_o = TensorDescriptor(high_prec_o,
+                                                    shape=[ZH, N_CTX_Q, HEAD_DIM_K],
+                                                    strides=[N_CTX_Q * HEAD_DIM_K, HEAD_DIM_K, 1],
+                                                    block_shape=dummy_block3d)
             else:
                 desc_high_prec_o = desc_o  # Use regular output descriptor when not in QAT mode
         else:
@@ -1065,13 +1172,10 @@ class _attention(torch.autograd.Function):
         if sm100_optimized:
             fwd_mode = os.environ.get("FASTVIDEO_ATTN_QAT_FWD_MODE", "fast").lower()
             if fwd_mode not in {"fast", "balanced", "reference"}:
-                raise ValueError(
-                    f"FASTVIDEO_ATTN_QAT_FWD_MODE={fwd_mode!r} "
-                    "(want fast|balanced|reference)"
-                )
+                raise ValueError(f"FASTVIDEO_ATTN_QAT_FWD_MODE={fwd_mode!r} "
+                                 "(want fast|balanced|reference)")
             fwd_block_m, fwd_block_n, fwd_num_warps, fwd_num_stages = _select_sm100_forward_config(
-                N_CTX_Q, N_CTX_KV, fwd_mode
-            )
+                N_CTX_Q, N_CTX_KV, fwd_mode)
         if IS_QAT:
             fake_q = torch.empty_like(q)
             fake_k = torch.empty_like(k)
@@ -1080,9 +1184,18 @@ class _attention(torch.autograd.Function):
             # override desc_q, desc_k, desc_v with fake_q, fake_k, fake_v
             if supports_host_descriptor() and not (is_hopper() and warp_specialize):
                 # (Z, H, N_CTX_Q, HEAD_DIM_K) -> (Z*H*N_CTX_Q, HEAD_DIM_K)
-                desc_q = TensorDescriptor(fake_q, shape=[y_dim_q, HEAD_DIM_K], strides=[HEAD_DIM_K, 1], block_shape=dummy_block)
-                desc_k = TensorDescriptor(fake_k, shape=[y_dim_kv, HEAD_DIM_K], strides=[HEAD_DIM_K, 1], block_shape=dummy_block)
-                desc_v = TensorDescriptor(fake_v, shape=[y_dim_kv, HEAD_DIM_K], strides=[HEAD_DIM_K, 1], block_shape=dummy_block)
+                desc_q = TensorDescriptor(fake_q,
+                                          shape=[y_dim_q, HEAD_DIM_K],
+                                          strides=[HEAD_DIM_K, 1],
+                                          block_shape=dummy_block)
+                desc_k = TensorDescriptor(fake_k,
+                                          shape=[y_dim_kv, HEAD_DIM_K],
+                                          strides=[HEAD_DIM_K, 1],
+                                          block_shape=dummy_block)
+                desc_v = TensorDescriptor(fake_v,
+                                          shape=[y_dim_kv, HEAD_DIM_K],
+                                          strides=[HEAD_DIM_K, 1],
+                                          block_shape=dummy_block)
             else:
                 desc_q = fake_q
                 desc_k = fake_k
@@ -1093,23 +1206,39 @@ class _attention(torch.autograd.Function):
             grid_2 = (triton.cdiv(k.shape[2], qkv_block_n), q.shape[0] * q.shape[1], 1)
 
             fake_quantize_q[grid_1](
-                q, fake_q,
-                q.stride(0), q.stride(1),
-                q.stride(2), q.stride(3),
-                fake_q.stride(0), fake_q.stride(1),
-                fake_q.stride(2), fake_q.stride(3),
-                H, N_CTX_Q,
-                BLOCK_M=qkv_block_m, HEAD_DIM=HEAD_DIM_K,
+                q,
+                fake_q,
+                q.stride(0),
+                q.stride(1),
+                q.stride(2),
+                q.stride(3),
+                fake_q.stride(0),
+                fake_q.stride(1),
+                fake_q.stride(2),
+                fake_q.stride(3),
+                H,
+                N_CTX_Q,
+                BLOCK_M=qkv_block_m,
+                HEAD_DIM=HEAD_DIM_K,
                 use_global_sf=use_global_sf_QKV,
             )
             fake_quantize_kv[grid_2](
-                k, v, fake_k, fake_v,
-                k.stride(0), k.stride(1),
-                k.stride(2), k.stride(3),
-                fake_k.stride(0), fake_k.stride(1),
-                fake_k.stride(2), fake_k.stride(3),
-                H, N_CTX_KV,
-                BLOCK_N=qkv_block_n, HEAD_DIM=HEAD_DIM_K,
+                k,
+                v,
+                fake_k,
+                fake_v,
+                k.stride(0),
+                k.stride(1),
+                k.stride(2),
+                k.stride(3),
+                fake_k.stride(0),
+                fake_k.stride(1),
+                fake_k.stride(2),
+                fake_k.stride(3),
+                H,
+                N_CTX_KV,
+                BLOCK_N=qkv_block_n,
+                HEAD_DIM=HEAD_DIM_K,
                 use_global_sf=use_global_sf_QKV,
             )
 
@@ -1126,35 +1255,35 @@ class _attention(torch.autograd.Function):
             "FP8_OUTPUT": q.dtype == torch.float8_e5m2,
         })
 
-        _attn_fwd[grid](
-            sm_scale, M,
-            q.shape[0], q.shape[1],
-            desc_q, desc_k, desc_v, desc_o, desc_high_prec_o,
-            N_CTX_Q=N_CTX_Q,
-            N_CTX_KV=N_CTX_KV,
-            HEAD_DIM=HEAD_DIM_K,
-            BLOCK_M=fwd_block_m, BLOCK_N=fwd_block_n,
-            FP8_OUTPUT=q.dtype == torch.float8_e5m2,
-            STAGE=stage,
-            warp_specialize=warp_specialize,
-            IS_HOPPER=is_hopper(),
-            IS_QAT=IS_QAT,
-            fake_quant_P=fake_quant_P,
-            two_level_quant_P=two_level_quant_P,
-            use_global_sf_P=use_global_sf_P,
-            JOIN_QAT_PV=(consumer_blackwell and _consumer_blackwell_join_qat_pv_enabled()),
-            num_warps=fwd_num_warps,
-            num_stages=fwd_num_stages,
-            **extra_kern_args
-        )
+        _attn_fwd[grid](sm_scale,
+                        M,
+                        q.shape[0],
+                        q.shape[1],
+                        desc_q,
+                        desc_k,
+                        desc_v,
+                        desc_o,
+                        desc_high_prec_o,
+                        N_CTX_Q=N_CTX_Q,
+                        N_CTX_KV=N_CTX_KV,
+                        HEAD_DIM=HEAD_DIM_K,
+                        BLOCK_M=fwd_block_m,
+                        BLOCK_N=fwd_block_n,
+                        FP8_OUTPUT=q.dtype == torch.float8_e5m2,
+                        STAGE=stage,
+                        warp_specialize=warp_specialize,
+                        IS_HOPPER=is_hopper(),
+                        IS_QAT=IS_QAT,
+                        fake_quant_P=fake_quant_P,
+                        two_level_quant_P=two_level_quant_P,
+                        use_global_sf_P=use_global_sf_P,
+                        JOIN_QAT_PV=(consumer_blackwell and _consumer_blackwell_join_qat_pv_enabled()),
+                        num_warps=fwd_num_warps,
+                        num_stages=fwd_num_stages,
+                        **extra_kern_args)
 
         exact_m = _sm100_exact_m_enabled()
-        if (
-            sm100_optimized
-            and fwd_mode != "reference"
-            and exact_m
-            and (fwd_block_m != 32 or fwd_block_n != 32)
-        ):
+        if (sm100_optimized and fwd_mode != "reference" and exact_m and (fwd_block_m != 32 or fwd_block_n != 32)):
             # The large forward tile changes a legal reduction order. Restore
             # the legacy statistic so dV remains bitwise-compatible while the
             # two output paths retain the faster large-tile PV computation.
@@ -1226,25 +1355,22 @@ class _attention(torch.autograd.Function):
         arg_k = k
         pre_grid = ((N_CTX_Q + PRE_BLOCK - 1) // PRE_BLOCK, BATCH * N_HEAD)
         delta = torch.empty_like(M)
-        _attn_bwd_preprocess[pre_grid](
-            o_for_bwd, do,
-            delta,
-            BATCH, N_HEAD, N_CTX_Q,
-            BLOCK_M=PRE_BLOCK, HEAD_DIM=ctx.HEAD_DIM
-        )
+        _attn_bwd_preprocess[pre_grid](o_for_bwd,
+                                       do,
+                                       delta,
+                                       BATCH,
+                                       N_HEAD,
+                                       N_CTX_Q,
+                                       BLOCK_M=PRE_BLOCK,
+                                       HEAD_DIM=ctx.HEAD_DIM)
 
         q_m = None
         if ctx.smooth_q:
             # _, q_m = triton_group_mean(q)
             q_m = q_m.repeat_interleave(q.shape[2] // q_m.shape[2], dim=2)  # B,H,L,D
 
-        sm100_optimized_backward = (
-            getattr(ctx, "sm100_optimized", False)
-            and ctx.use_qat_qkv_backward
-            and not ctx.smooth_k
-            and not ctx.smooth_q
-            and N_CTX_KV % 16 == 0
-        )
+        sm100_optimized_backward = (getattr(ctx, "sm100_optimized", False) and ctx.use_qat_qkv_backward
+                                    and not ctx.smooth_k and not ctx.smooth_q and N_CTX_KV % 16 == 0)
         if sm100_optimized_backward:
             # Keeping dQ and dK/dV in separate programs allows 64x64 tiles
             # without carrying all three fp32 accumulators at once. On SM100
@@ -1319,36 +1445,66 @@ class _attention(torch.autograd.Function):
         elif N_CTX_Q == N_CTX_KV:
             # Use existing kernel for self-attention (same sequence lengths)
             grid = ((N_CTX_KV + BLOCK_N1 - 1) // BLOCK_N1, 1, BATCH * N_HEAD)
-            _attn_bwd[grid](
-                q, arg_k, v, ctx.sm_scale, do, dq, dk, dv,
-                M, delta, q_m,
-                q.stride(0), q.stride(1), q.stride(2), q.stride(3),
-                N_HEAD, N_CTX_KV,
-                ctx.k_mean,
-                BLOCK_M1=BLOCK_M1, BLOCK_N1=BLOCK_N1,
-                BLOCK_M2=BLOCK_M2, BLOCK_N2=BLOCK_N2,
-                BLK_SLICE_FACTOR=BLK_SLICE_FACTOR,
-                HEAD_DIM=ctx.HEAD_DIM,
-                CAUSAL=ctx.causal,
-                IS_QAT=ctx.IS_QAT,
-                SMOOTH_K=ctx.smooth_k,
-                two_level_quant_P=ctx.two_level_quant_P,
-                fake_quant_P=ctx.fake_quant_P,
-                SMOOTH_Q=ctx.smooth_q,
-                use_global_sf_P=ctx.use_global_sf_P,
-                warp_specialize=ctx.warp_specialize,
-                num_warps=NUM_WARPS,
-                num_stages=NUM_STAGES
-            )
+            _attn_bwd[grid](q,
+                            arg_k,
+                            v,
+                            ctx.sm_scale,
+                            do,
+                            dq,
+                            dk,
+                            dv,
+                            M,
+                            delta,
+                            q_m,
+                            q.stride(0),
+                            q.stride(1),
+                            q.stride(2),
+                            q.stride(3),
+                            N_HEAD,
+                            N_CTX_KV,
+                            ctx.k_mean,
+                            BLOCK_M1=BLOCK_M1,
+                            BLOCK_N1=BLOCK_N1,
+                            BLOCK_M2=BLOCK_M2,
+                            BLOCK_N2=BLOCK_N2,
+                            BLK_SLICE_FACTOR=BLK_SLICE_FACTOR,
+                            HEAD_DIM=ctx.HEAD_DIM,
+                            CAUSAL=ctx.causal,
+                            IS_QAT=ctx.IS_QAT,
+                            SMOOTH_K=ctx.smooth_k,
+                            two_level_quant_P=ctx.two_level_quant_P,
+                            fake_quant_P=ctx.fake_quant_P,
+                            SMOOTH_Q=ctx.smooth_q,
+                            use_global_sf_P=ctx.use_global_sf_P,
+                            warp_specialize=ctx.warp_specialize,
+                            num_warps=NUM_WARPS,
+                            num_stages=NUM_STAGES)
         else:
             # Use separate kernels for cross-attention (different sequence lengths)
             grid_dq = ((N_CTX_Q + BLOCK_M2 - 1) // BLOCK_M2, 1, BATCH * N_HEAD)
             _attn_bwd_dq_cross[grid_dq](
-                q, arg_k, v, ctx.sm_scale, do, dq, M, delta,
-                q.stride(0), k.stride(0), q.stride(1), k.stride(1), q.stride(2), k.stride(2), q.stride(3), k.stride(3),
-                N_HEAD, N_CTX_Q, N_CTX_KV,
+                q,
+                arg_k,
+                v,
+                ctx.sm_scale,
+                do,
+                dq,
+                M,
+                delta,
+                q.stride(0),
+                k.stride(0),
+                q.stride(1),
+                k.stride(1),
+                q.stride(2),
+                k.stride(2),
+                q.stride(3),
+                k.stride(3),
+                N_HEAD,
+                N_CTX_Q,
+                N_CTX_KV,
                 ctx.k_mean,
-                BLOCK_M2=BLOCK_M2, BLOCK_N2=BLOCK_N2,
+                BLOCK_M2=BLOCK_M2,
+                BLOCK_N2=BLOCK_N2,
                 HEAD_DIM=ctx.HEAD_DIM,
                 SMOOTH_K=ctx.smooth_k,
                 warp_specialize=ctx.warp_specialize,
@@ -1357,10 +1513,29 @@ class _attention(torch.autograd.Function):
             )
             grid_dkdv = ((N_CTX_KV + BLOCK_N1 - 1) // BLOCK_N1, 1, BATCH * N_HEAD)
             _attn_bwd_dkdv_cross[grid_dkdv](
-                q, arg_k, v, ctx.sm_scale, do, dk, dv, M, delta, q_m,
-                q.stride(0), k.stride(0), q.stride(1), k.stride(1), q.stride(2), k.stride(2), q.stride(3), k.stride(3),
-                N_HEAD, N_CTX_Q, N_CTX_KV,
-                BLOCK_M1=BLOCK_M1, BLOCK_N1=BLOCK_N1,
+                q,
+                arg_k,
+                v,
+                ctx.sm_scale,
+                do,
+                dk,
+                dv,
+                M,
+                delta,
+                q_m,
+                q.stride(0),
+                k.stride(0),
+                q.stride(1),
+                k.stride(1),
+                q.stride(2),
+                k.stride(2),
+                q.stride(3),
+                k.stride(3),
+                N_HEAD,
+                N_CTX_Q,
+                N_CTX_KV,
+                BLOCK_M1=BLOCK_M1,
+                BLOCK_N1=BLOCK_N1,
                 HEAD_DIM=ctx.HEAD_DIM,
                 IS_QAT=ctx.IS_QAT,
                 two_level_quant_P=ctx.two_level_quant_P,

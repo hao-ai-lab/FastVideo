@@ -101,6 +101,7 @@ class MiniMaxH3VideoGroupNorm(nn.GroupNorm):
 
 
 class MiniMaxH3VideoResnetBlock3d(nn.Module):
+
     def __init__(
         self,
         in_channels: int,
@@ -144,6 +145,7 @@ class MiniMaxH3VideoResnetBlock3d(nn.Module):
 
 
 class MiniMaxH3VideoDownsample3d(nn.Module):
+
     def __init__(
         self,
         in_channels: int,
@@ -171,6 +173,7 @@ class MiniMaxH3VideoDownsample3d(nn.Module):
 
 
 class MiniMaxH3VideoDownBlock3d(nn.Module):
+
     def __init__(
         self,
         in_channels: int,
@@ -183,31 +186,26 @@ class MiniMaxH3VideoDownBlock3d(nn.Module):
         spatial_padding_mode: str = "reflect",
     ) -> None:
         super().__init__()
-        self.resnets = nn.ModuleList(
-            [
-                MiniMaxH3VideoResnetBlock3d(
-                    in_channels=in_channels if index == 0 else out_channels,
-                    out_channels=out_channels,
-                    norm_num_groups=norm_num_groups,
-                    norm_eps=norm_eps,
-                    spatial_padding_mode=spatial_padding_mode,
-                )
-                for index in range(num_layers)
-            ]
-        )
+        self.resnets = nn.ModuleList([
+            MiniMaxH3VideoResnetBlock3d(
+                in_channels=in_channels if index == 0 else out_channels,
+                out_channels=out_channels,
+                norm_num_groups=norm_num_groups,
+                norm_eps=norm_eps,
+                spatial_padding_mode=spatial_padding_mode,
+            ) for index in range(num_layers)
+        ])
         self.downsamplers = None
         if temporal_downsample_factor * spatial_downsample_factor > 1:
-            self.downsamplers = nn.ModuleList(
-                [
-                    MiniMaxH3VideoDownsample3d(
-                        out_channels,
-                        out_channels,
-                        temporal_stride=temporal_downsample_factor,
-                        spatial_stride=spatial_downsample_factor,
-                        spatial_padding_mode=spatial_padding_mode,
-                    )
-                ]
-            )
+            self.downsamplers = nn.ModuleList([
+                MiniMaxH3VideoDownsample3d(
+                    out_channels,
+                    out_channels,
+                    temporal_stride=temporal_downsample_factor,
+                    spatial_stride=spatial_downsample_factor,
+                    spatial_padding_mode=spatial_padding_mode,
+                )
+            ])
         self.gradient_checkpointing = False
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
@@ -223,6 +221,7 @@ class MiniMaxH3VideoDownBlock3d(nn.Module):
 
 
 class MiniMaxH3VideoEncoder3d(nn.Module):
+
     def __init__(
         self,
         in_channels: int,
@@ -244,22 +243,19 @@ class MiniMaxH3VideoEncoder3d(nn.Module):
             temporal_padding=2,
             spatial_padding_mode=spatial_padding_mode,
         )
-        block_in_channels = (block_out_channels[0],) + tuple(block_out_channels[:-1])
-        self.down_blocks = nn.ModuleList(
-            [
-                MiniMaxH3VideoDownBlock3d(
-                    in_channels=block_in_channels[index],
-                    out_channels=block_out_channels[index],
-                    num_layers=layers_per_block,
-                    temporal_downsample_factor=temporal_downsample_factors[index],
-                    spatial_downsample_factor=spatial_downsample_factors[index],
-                    norm_num_groups=norm_num_groups,
-                    norm_eps=norm_eps,
-                    spatial_padding_mode=spatial_padding_mode,
-                )
-                for index in range(len(block_out_channels))
-            ]
-        )
+        block_in_channels = (block_out_channels[0], ) + tuple(block_out_channels[:-1])
+        self.down_blocks = nn.ModuleList([
+            MiniMaxH3VideoDownBlock3d(
+                in_channels=block_in_channels[index],
+                out_channels=block_out_channels[index],
+                num_layers=layers_per_block,
+                temporal_downsample_factor=temporal_downsample_factors[index],
+                spatial_downsample_factor=spatial_downsample_factors[index],
+                norm_num_groups=norm_num_groups,
+                norm_eps=norm_eps,
+                spatial_padding_mode=spatial_padding_mode,
+            ) for index in range(len(block_out_channels))
+        ])
         self.norm_out = MiniMaxH3VideoGroupNorm(norm_num_groups, block_out_channels[-1], eps=norm_eps, affine=True)
         self.conv_out = MiniMaxH3VideoCausalConv3d(
             block_out_channels[-1],
@@ -278,11 +274,12 @@ class MiniMaxH3VideoEncoder3d(nn.Module):
 
 
 class MiniMaxH3VideoRotaryPosEmbed(nn.Module):
+
     def __init__(self, dim: int, theta: float = 100.0, num_axes: int = 3) -> None:
         super().__init__()
         if dim % (2 * num_axes) != 0:
             raise ValueError(f"`dim` {dim} must be divisible by `2 * num_axes` {2 * num_axes}.")
-        inv_freq = 1.0 / theta ** torch.arange(0, 1, 2 * num_axes / dim, dtype=torch.float32)
+        inv_freq = 1.0 / theta**torch.arange(0, 1, 2 * num_axes / dim, dtype=torch.float32)
         self.register_buffer("inv_freq", inv_freq, persistent=False)
 
     def forward(self, position_ids: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -292,6 +289,7 @@ class MiniMaxH3VideoRotaryPosEmbed(nn.Module):
 
 
 class MiniMaxH3VideoAttention(nn.Module):
+
     def __init__(self, dim: int, heads: int, dim_head: int, eps: float = 1e-5, bias: bool = True) -> None:
         super().__init__()
         self.heads = heads
@@ -337,6 +335,7 @@ class MiniMaxH3VideoAttention(nn.Module):
 
 
 class MiniMaxH3VideoSwiGLU(nn.Module):
+
     def __init__(self, dim_in: int, dim_out: int, bias: bool = True) -> None:
         super().__init__()
         self.proj = nn.Linear(dim_in, dim_out * 2, bias=bias)
@@ -348,16 +347,15 @@ class MiniMaxH3VideoSwiGLU(nn.Module):
 
 
 class MiniMaxH3VideoFeedForward(nn.Module):
+
     def __init__(self, dim: int, mult: int = 4, bias: bool = True) -> None:
         super().__init__()
         inner_dim = int(dim * mult)
-        self.net = nn.ModuleList(
-            [
-                MiniMaxH3VideoSwiGLU(dim, inner_dim, bias=bias),
-                nn.Dropout(0.0),
-                nn.Linear(inner_dim, dim, bias=bias),
-            ]
-        )
+        self.net = nn.ModuleList([
+            MiniMaxH3VideoSwiGLU(dim, inner_dim, bias=bias),
+            nn.Dropout(0.0),
+            nn.Linear(inner_dim, dim, bias=bias),
+        ])
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         for module in self.net:
@@ -366,6 +364,7 @@ class MiniMaxH3VideoFeedForward(nn.Module):
 
 
 class MiniMaxH3VideoTransformerBlock(nn.Module):
+
     def __init__(
         self,
         dim: int,
@@ -395,6 +394,7 @@ class MiniMaxH3VideoTransformerBlock(nn.Module):
 
 
 class MiniMaxH3VideoViTDecoder3d(nn.Module):
+
     def __init__(
         self,
         in_channels: int,
@@ -419,18 +419,15 @@ class MiniMaxH3VideoViTDecoder3d(nn.Module):
         self.rope = MiniMaxH3VideoRotaryPosEmbed(int(attention_head_dim * rope_dim_ratio), theta=rope_theta)
         self.proj_in = nn.Linear(in_channels, dim)
         self.register_tokens = nn.Parameter(torch.zeros(1, num_register_tokens, dim))
-        self.transformer_blocks = nn.ModuleList(
-            [
-                MiniMaxH3VideoTransformerBlock(
-                    dim=dim,
-                    heads=num_attention_heads,
-                    dim_head=attention_head_dim,
-                    ffn_mult=ffn_mult,
-                    eps=norm_eps,
-                )
-                for _ in range(num_layers)
-            ]
-        )
+        self.transformer_blocks = nn.ModuleList([
+            MiniMaxH3VideoTransformerBlock(
+                dim=dim,
+                heads=num_attention_heads,
+                dim_head=attention_head_dim,
+                ffn_mult=ffn_mult,
+                eps=norm_eps,
+            ) for _ in range(num_layers)
+        ])
         self.norm_out = nn.LayerNorm(dim, elementwise_affine=True, eps=norm_eps)
         self.proj_out = nn.Linear(dim, out_channels * patch_size_t * patch_size * patch_size)
         self.gradient_checkpointing = False
@@ -672,9 +669,9 @@ class AutoencoderKLMiniMaxH3(nn.Module):
                 if column_index > 0:
                     tile = self._blend(row[column_index - 1], tile, width_overlaps[column_index - 1], -1)
                 if row_index < len(tiles) - 1:
-                    tile = tile[..., : -height_overlaps[row_index], :]
+                    tile = tile[..., :-height_overlaps[row_index], :]
                 if column_index < len(row) - 1:
-                    tile = tile[..., :, : -width_overlaps[column_index]]
+                    tile = tile[..., :, :-width_overlaps[column_index]]
                 result_row.append(tile)
             result_rows.append(torch.cat(result_row, dim=-1))
         return torch.cat(result_rows, dim=-2)
@@ -783,12 +780,8 @@ class AutoencoderKLMiniMaxH3(nn.Module):
         if pad_tokens > 0:
             intra_tail = self.config.clip_length % temporal_ratio
             num_tokens_before_pad = z.shape[2] - pad_tokens
-            pad_frames = sum(
-                intra_tail
-                if intra_tail and (num_tokens_before_pad + offset) % tokens_chunk_size == 0
-                else temporal_ratio
-                for offset in range(pad_tokens)
-            )
+            pad_frames = sum(intra_tail if intra_tail and (num_tokens_before_pad + offset) %
+                             tokens_chunk_size == 0 else temporal_ratio for offset in range(pad_tokens))
             decoded = decoded[:, :, :-pad_frames]
         return decoded
 
@@ -803,7 +796,7 @@ class AutoencoderKLMiniMaxH3(nn.Module):
             moments = self._encode(x)
         posterior = DiagonalGaussianDistribution(moments)
         if not return_dict:
-            return (posterior,)
+            return (posterior, )
         return AutoencoderKLOutput(latent_dist=posterior)
 
     def encode_keyframe(
@@ -820,7 +813,7 @@ class AutoencoderKLMiniMaxH3(nn.Module):
             moments = self._encode_clip(x)
         posterior = DiagonalGaussianDistribution(moments)
         if not return_dict:
-            return (posterior,)
+            return (posterior, )
         return AutoencoderKLOutput(latent_dist=posterior)
 
     def decode(self, z: torch.Tensor, return_dict: bool = True) -> DecoderOutput | tuple[torch.Tensor]:
@@ -829,7 +822,7 @@ class AutoencoderKLMiniMaxH3(nn.Module):
         else:
             decoded = self._decode(z)
         if not return_dict:
-            return (decoded,)
+            return (decoded, )
         return DecoderOutput(sample=decoded)
 
     def forward(

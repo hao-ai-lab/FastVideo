@@ -33,8 +33,7 @@ from fastvideo.forward_context import set_forward_context
 from fastvideo.train.models.matrixgame2.matrixgame2 import MatrixGame2Model
 from fastvideo.train.utils.config import load_run_config
 
-_FIXTURE = str(
-    Path(__file__).resolve().parent.parent / "fixtures" / "matrixgame2_min.yaml")
+_FIXTURE = str(Path(__file__).resolve().parent.parent / "fixtures" / "matrixgame2_min.yaml")
 
 # Matrix-Game 2.0 CLIP image-embedding width.
 _MG2_IMAGE_DIM = 1280
@@ -65,11 +64,9 @@ def test_matrixgame2_model_loads_and_forwards():
     # transformer expects (16 noise + image/mask cond channels).
     in_channels = transformer.patch_embedding.proj.in_channels
 
-    hidden_states = torch.randn(1, in_channels, 4, 32, 32, device=device,
-                                dtype=dtype)
+    hidden_states = torch.randn(1, in_channels, 4, 32, 32, device=device, dtype=dtype)
     # CLIP image embeds drive the image-action cross-attention; no text.
-    encoder_hidden_states_image = torch.randn(1, 257, _MG2_IMAGE_DIM,
-                                              device=device, dtype=dtype)
+    encoder_hidden_states_image = torch.randn(1, 257, _MG2_IMAGE_DIM, device=device, dtype=dtype)
     timestep = torch.tensor([500], device=device, dtype=torch.long)
 
     with torch.no_grad(), set_forward_context(
@@ -90,7 +87,6 @@ def test_matrixgame2_model_loads_and_forwards():
         out = out[0]
     # out has out_channels (16); compare the non-channel dims.
     assert out.shape[0] == hidden_states.shape[0]
-    assert out.shape[2:] == hidden_states.shape[2:], (
-        f"output spatial/temporal shape {tuple(out.shape)} != input "
-        f"{tuple(hidden_states.shape)}")
+    assert out.shape[2:] == hidden_states.shape[2:], (f"output spatial/temporal shape {tuple(out.shape)} != input "
+                                                      f"{tuple(hidden_states.shape)}")
     assert torch.isfinite(out).all().item(), "output contains NaN/Inf"

@@ -28,16 +28,12 @@ os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 FAMILY = "glm_image"
-LOCAL_WEIGHTS_DIR = Path(
-    os.getenv("GLM_IMAGE_LOCAL_WEIGHTS_DIR",
-              REPO_ROOT / "official_weights" / FAMILY))
+LOCAL_WEIGHTS_DIR = Path(os.getenv("GLM_IMAGE_LOCAL_WEIGHTS_DIR", REPO_ROOT / "official_weights" / FAMILY))
 CONDITION_IMAGE = REPO_ROOT / "assets" / "images" / "couple.jpg"
 
 
 def _has_weights() -> bool:
-    required = ["transformer", "vae", "text_encoder",
-                "vision_language_encoder", "processor", "tokenizer",
-                "scheduler"]
+    required = ["transformer", "vae", "text_encoder", "vision_language_encoder", "processor", "tokenizer", "scheduler"]
     return all((LOCAL_WEIGHTS_DIR / r).exists() for r in required)
 
 
@@ -61,7 +57,6 @@ pytestmark = [
                 "Bump locally to run."),
     ),
 ]
-
 
 EDIT_PROMPT = "Make the scene a snowy winter landscape."
 SEED = 0
@@ -100,13 +95,13 @@ def _fastvideo_edit_image(device) -> np.ndarray:
     except ImportError as e:
         pytest.skip(f"FastVideo VideoGenerator unavailable: {e}")
     condition = Image.open(CONDITION_IMAGE).convert("RGB")
-    gen = VideoGenerator.from_pretrained(str(LOCAL_WEIGHTS_DIR), num_gpus=1,
-                                         trust_remote_code=True)
+    gen = VideoGenerator.from_pretrained(str(LOCAL_WEIGHTS_DIR), num_gpus=1, trust_remote_code=True)
     result = gen.generate_video(prompt=EDIT_PROMPT,
                                 pil_image=condition,
                                 save_video=False,
                                 return_frames=True,
-                                height=HEIGHT, width=WIDTH,
+                                height=HEIGHT,
+                                width=WIDTH,
                                 num_inference_steps=STEPS,
                                 guidance_scale=1.5,
                                 seed=SEED)

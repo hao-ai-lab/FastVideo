@@ -28,7 +28,8 @@ from fastvideo.models.loader.component_loader import TextEncoderLoader
 REPO_ROOT = Path(__file__).resolve().parents[3]
 OFFICIAL_REF_DIR = Path(os.getenv("DREAMX_WORLD_OFFICIAL_REF_DIR", REPO_ROOT / "DreamX-World"))
 WAN_BASE_DIR = Path(os.getenv("DREAMX_WORLD_WAN_BASE_DIR", REPO_ROOT / "official_weights" / "Wan2.2-TI2V-5B"))
-WAN_DIFFUSERS_DIR = Path(os.getenv("DREAMX_WORLD_WAN_DIFFUSERS_DIR", REPO_ROOT / "official_weights" / "Wan2.2-TI2V-5B-Diffusers"))
+WAN_DIFFUSERS_DIR = Path(
+    os.getenv("DREAMX_WORLD_WAN_DIFFUSERS_DIR", REPO_ROOT / "official_weights" / "Wan2.2-TI2V-5B-Diffusers"))
 PARITY_SCOPE = "implementation_subcomponent"
 
 
@@ -55,6 +56,7 @@ def _install_xfuser_stub() -> None:
     distributed.model_parallel_is_initialized = lambda: False
 
     class XFuserLongContextAttention:
+
         def __call__(self, *args, **kwargs):
             raise RuntimeError("xfuser stub cannot execute attention")
 
@@ -95,9 +97,10 @@ def _load_official_text_encoder(device, dtype):
         from models import WanT5EncoderModel
     except Exception as exc:  # noqa: BLE001
         pytest.skip(f"Cannot import official DreamX text encoder: {exc}")
-    model = WanT5EncoderModel.from_pretrained(
-        str(text_path), additional_kwargs=_text_kwargs(), low_cpu_mem_usage=True, torch_dtype=dtype
-    )
+    model = WanT5EncoderModel.from_pretrained(str(text_path),
+                                              additional_kwargs=_text_kwargs(),
+                                              low_cpu_mem_usage=True,
+                                              torch_dtype=dtype)
     return model.to(device=device, dtype=dtype).eval()
 
 

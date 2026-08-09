@@ -41,8 +41,7 @@ def test_role_override_invalidates_cached_backend(monkeypatch) -> None:
 
     try:
         assert selector.get_attn_backend(**kwargs) == "FLASH_ATTN"
-        with selector._component_attention_backend_scope(
-                AttentionBackendEnum.TORCH_SDPA, component="role"):
+        with selector._component_attention_backend_scope(AttentionBackendEnum.TORCH_SDPA, component="role"):
             # Same cache key as above; the role-local request must still win.
             assert selector.get_attn_backend(**kwargs) == "TORCH_SDPA"
 
@@ -59,8 +58,7 @@ def test_unsupported_role_override_honors_layer_default(monkeypatch) -> None:
     monkeypatch.setattr(selector, "resolve_obj_by_qualname", lambda name: name)
 
     try:
-        with selector._component_attention_backend_scope(
-                AttentionBackendEnum.ATTN_QAT_TRAIN, component="role"):
+        with selector._component_attention_backend_scope(AttentionBackendEnum.ATTN_QAT_TRAIN, component="role"):
             assert selector.get_attn_backend(
                 head_size=128,
                 dtype=torch.bfloat16,

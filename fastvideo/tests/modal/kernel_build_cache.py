@@ -22,7 +22,6 @@ import zipfile
 from email.parser import Parser
 from pathlib import Path
 
-
 CACHE_SCHEMA_VERSION = 3
 DEFAULT_PREBUILT_INFO_PATH = "/opt/fastvideo-kernel-prebuilt"
 KERNEL_RELATIVE_DIR = "fastvideo-kernel"
@@ -39,11 +38,7 @@ def _log(message: str) -> None:
     print(f"[fastvideo-kernel-cache] {message}", flush=True)
 
 
-def _run(args: list[str],
-         *,
-         cwd: Path | None = None,
-         env: dict[str, str] | None = None,
-         capture: bool = False) -> str:
+def _run(args: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None, capture: bool = False) -> str:
     _log("$ " + " ".join(str(arg) for arg in args))
     result = subprocess.run(
         args,
@@ -82,8 +77,8 @@ def _hash_directory(root: Path) -> str:
     hasher = hashlib.sha256()
     skip_dirs = {".git", ".mypy_cache", ".pytest_cache", "__pycache__", "build", "dist"}
     for current_root, dirnames, filenames in os.walk(root):
-        dirnames[:] = sorted(
-            dirname for dirname in dirnames if dirname not in skip_dirs and not dirname.endswith(".egg-info"))
+        dirnames[:] = sorted(dirname for dirname in dirnames
+                             if dirname not in skip_dirs and not dirname.endswith(".egg-info"))
         for filename in sorted(filenames):
             path = Path(current_root) / filename
             hasher.update(path.relative_to(root).as_posix().encode("utf-8"))
@@ -100,8 +95,7 @@ def _kernel_source_hash(repo_root: Path) -> dict[str, str]:
     try:
         tree_hash = _run(["git", "rev-parse", f"HEAD:{KERNEL_RELATIVE_DIR}"], cwd=repo_root, capture=True)
         diff = _run_optional(["git", "diff", "--binary", "--", KERNEL_RELATIVE_DIR], cwd=repo_root)
-        cached_diff = _run_optional(["git", "diff", "--cached", "--binary", "--", KERNEL_RELATIVE_DIR],
-                                    cwd=repo_root)
+        cached_diff = _run_optional(["git", "diff", "--cached", "--binary", "--", KERNEL_RELATIVE_DIR], cwd=repo_root)
         submodules = _run_optional(
             [
                 "git",
@@ -268,11 +262,8 @@ def _build_metadata(repo_root: Path) -> dict[str, object]:
 
 
 def _find_wheel(directory: Path) -> Path:
-    candidates = sorted(
-        path
-        for pattern in ("fastvideo_kernel-*.whl", "fastvideo-kernel-*.whl")
-        for path in directory.glob(pattern)
-    )
+    candidates = sorted(path for pattern in ("fastvideo_kernel-*.whl", "fastvideo-kernel-*.whl")
+                        for path in directory.glob(pattern))
     if not candidates:
         raise RuntimeError(f"No fastvideo-kernel wheel found in {directory}")
     return candidates[-1]
@@ -427,8 +418,7 @@ def _store_cache_entry(cache_root: Path, metadata: dict[str, object], wheel: Pat
             "created_at_utc": _utc_now_isoformat(),
             "artifact": _wheel_artifact(stored_wheel),
         }
-        (temp_entry / METADATA_FILE).write_text(json.dumps(stored_metadata, indent=2, sort_keys=True),
-                                                encoding="utf-8")
+        (temp_entry / METADATA_FILE).write_text(json.dumps(stored_metadata, indent=2, sort_keys=True), encoding="utf-8")
         temp_entry.rename(cache_entry)
     except OSError as error:
         shutil.rmtree(temp_entry, ignore_errors=True)

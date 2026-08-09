@@ -81,17 +81,14 @@ def bench_generation(args) -> None:
     sampling_param.num_inference_steps = args.steps
     sampling_param.seed = args.seed
 
-    prompt = (
-        "A curious raccoon peers through a vibrant field of yellow sunflowers, "
-        "its eyes wide with interest. Soft natural light, warm cheerful tones, "
-        "mid-shot, cinematic.")
+    prompt = ("A curious raccoon peers through a vibrant field of yellow sunflowers, "
+              "its eyes wide with interest. Soft natural light, warm cheerful tones, "
+              "mid-shot, cinematic.")
 
     def _gen():
         torch.cuda.synchronize()
         t0 = time.perf_counter()
-        video = generator.generate_video(prompt, output_path=args.out,
-                                          save_video=True,
-                                          sampling_param=sampling_param)
+        video = generator.generate_video(prompt, output_path=args.out, save_video=True, sampling_param=sampling_param)
         torch.cuda.synchronize()
         # generate_video returns a plain dict (legacy result), not an object —
         # attribute access would silently fall back to wall time / None.
@@ -132,28 +129,24 @@ def bench_decode_precision(args) -> None:
     """Part B: fp32-vs-bf16 VAE decode of one fixed latent (SSIM + speedup)."""
     try:
         from diffusers import AutoencoderKLWan
-        from torchmetrics.functional import (
-            multiscale_structural_similarity_index_measure as msssim)
+        from torchmetrics.functional import (multiscale_structural_similarity_index_measure as msssim)
     except ImportError as e:  # torchmetrics is not a hard FastVideo dep
         _p(f"skipping decode A/B (missing dependency: {e}); "
            "`uv pip install torchmetrics` to enable it.")
         return
 
     dev = "cuda"
-    vae = AutoencoderKLWan.from_pretrained(
-        args.model, subfolder="vae", torch_dtype=torch.float32).to(dev).eval()
+    vae = AutoencoderKLWan.from_pretrained(args.model, subfolder="vae", torch_dtype=torch.float32).to(dev).eval()
 
     # Wan latent geometry for height x width x frames, patch (4,8,8):
     #   T_lat = (frames - 1) // 4 + 1,  H_lat = height // 8,  W_lat = width // 8
     t_lat = (args.frames - 1) // 4 + 1
-    z = torch.randn(1, 16, t_lat, args.height // 8, args.width // 8,
-                    device=dev, dtype=torch.float32)
+    z = torch.randn(1, 16, t_lat, args.height // 8, args.width // 8, device=dev, dtype=torch.float32)
 
     def _decode(autocast: bool):
         torch.cuda.synchronize()
         t0 = time.perf_counter()
-        with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16,
-                                             enabled=autocast):
+        with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16, enabled=autocast):
             out = vae.decode(z, return_dict=False)[0]
         torch.cuda.synchronize()
         return out.float(), time.perf_counter() - t0
@@ -164,8 +157,8 @@ def bench_decode_precision(args) -> None:
     _decode(False)  # warm both paths (excluded from timing)
     _decode(True)
 
-    o32, t32 = _decode(autocast=False)          # fp32
-    o16, t16 = _decode(autocast=True)           # bf16 (== vae_decode_precision="bf16")
+    o32, t32 = _decode(autocast=False)  # fp32
+    o16, t16 = _decode(autocast=True)  # bf16 (== vae_decode_precision="bf16")
     ssim = msssim(_frames(o16), _frames(o32), data_range=1.0).item()
 
     _p(f"fp32 decode : {t32 * 1000:8.1f} ms")
@@ -185,10 +178,8 @@ def main() -> None:
     ap.add_argument("--width", type=int, default=832)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--out", default="spark_bench_samples")
-    ap.add_argument("--skip-gen", action="store_true",
-                    help="skip Part A (generation timing)")
-    ap.add_argument("--skip-decode", action="store_true",
-                    help="skip Part B (decode precision A/B)")
+    ap.add_argument("--skip-gen", action="store_true", help="skip Part A (generation timing)")
+    ap.add_argument("--skip-decode", action="store_true", help="skip Part B (decode precision A/B)")
     args = ap.parse_args()
 
     if not torch.cuda.is_available():

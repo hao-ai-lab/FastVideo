@@ -20,13 +20,13 @@ PREPROCESSING_ENTRY_FILE_PATH = "fastvideo/pipelines/preprocess/v1_preprocess.py
 
 LOCAL_PREPROCESSED_DATA_DIR = Path(os.path.join(DATA_DIR, "cats_preprocessed_data"))
 
-
 # training
 NUM_GPUS_PER_NODE_TRAINING = "4"
 TRAINING_ENTRY_FILE_PATH = "fastvideo/training/wan_training_pipeline.py"
 LOCAL_TRAINING_DATA_DIR = os.path.join(LOCAL_PREPROCESSED_DATA_DIR, "combined_parquet_dataset")
 LOCAL_VALIDATION_DATASET_FILE = os.path.join(LOCAL_RAW_DATA_DIR, "validation_prompt_1_sample.json")
 LOCAL_OUTPUT_DIR = Path(os.path.join(DATA_DIR, "outputs"))
+
 
 def download_data():
     # create the data dir if it doesn't exist
@@ -45,17 +45,17 @@ def download_data():
             token=os.environ.get("HF_TOKEN"),  # In case authentication is needed
         )
         print(f"Download completed successfully. Files downloaded to: {result}")
-        
+
         # Verify the download
         if not LOCAL_RAW_DATA_DIR.exists():
             raise RuntimeError(f"Download appeared to succeed but {LOCAL_RAW_DATA_DIR} does not exist")
-            
+
         # List downloaded files
         print("Downloaded files:")
         for file in LOCAL_RAW_DATA_DIR.rglob("*"):
             if file.is_file():
                 print(f"  - {file.relative_to(LOCAL_RAW_DATA_DIR)}")
-                
+
     except Exception as e:
         print(f"Error during download: {str(e)}")
         raise
@@ -70,22 +70,37 @@ def run_preprocessing():
     # Run torchrun command
     cmd = [
         "torchrun",
-        "--nnodes", NUM_NODES,
-        "--nproc_per_node", NUM_GPUS_PER_NODE_PREPROCESSING,
+        "--nnodes",
+        NUM_NODES,
+        "--nproc_per_node",
+        NUM_GPUS_PER_NODE_PREPROCESSING,
         PREPROCESSING_ENTRY_FILE_PATH,
-        "--model_path", MODEL_PATH,
-        "--data_merge_path", os.path.join(LOCAL_RAW_DATA_DIR, "merge_1_sample.txt"),
-        "--preprocess_video_batch_size", "1",
-        "--max_height", "480",
-        "--max_width", "832",
-        "--num_frames", "77",
-        "--dataloader_num_workers", "0",
-        "--output_dir", LOCAL_PREPROCESSED_DATA_DIR,
-        "--train_fps", "16",
-        "--samples_per_file", "1",
-        "--flush_frequency", "1",
-        "--video_length_tolerance_range", "5",
-        "--preprocess_task", "t2v",
+        "--model_path",
+        MODEL_PATH,
+        "--data_merge_path",
+        os.path.join(LOCAL_RAW_DATA_DIR, "merge_1_sample.txt"),
+        "--preprocess_video_batch_size",
+        "1",
+        "--max_height",
+        "480",
+        "--max_width",
+        "832",
+        "--num_frames",
+        "77",
+        "--dataloader_num_workers",
+        "0",
+        "--output_dir",
+        LOCAL_PREPROCESSED_DATA_DIR,
+        "--train_fps",
+        "16",
+        "--samples_per_file",
+        "1",
+        "--flush_frequency",
+        "1",
+        "--video_length_tolerance_range",
+        "5",
+        "--preprocess_task",
+        "t2v",
     ]
 
     process = subprocess.run(cmd, check=True)
@@ -94,48 +109,87 @@ def run_preprocessing():
 def run_training():
     cmd = [
         "torchrun",
-        "--nnodes", NUM_NODES,
-        "--nproc_per_node", NUM_GPUS_PER_NODE_TRAINING,
+        "--nnodes",
+        NUM_NODES,
+        "--nproc_per_node",
+        NUM_GPUS_PER_NODE_TRAINING,
         TRAINING_ENTRY_FILE_PATH,
-        "--model_path", MODEL_PATH,
-        "--inference_mode", "False",
-        "--pretrained_model_name_or_path", MODEL_PATH,
-        "--data_path", LOCAL_TRAINING_DATA_DIR,
-        "--validation_dataset_file", LOCAL_VALIDATION_DATASET_FILE,
-        "--train_batch_size", "1",
-        "--num_latent_t", "8",
-        "--num_gpus", NUM_GPUS_PER_NODE_TRAINING,
-        "--sp_size", NUM_GPUS_PER_NODE_TRAINING,
-        "--tp_size", "1",
-        "--hsdp_replicate_dim", "1",
-        "--hsdp_shard_dim", NUM_GPUS_PER_NODE_TRAINING,
-        "--num_gpus", NUM_GPUS_PER_NODE_TRAINING,
-        "--train_sp_batch_size", "1",
-        "--dataloader_num_workers", "10",
-        "--gradient_accumulation_steps", "1",
-        "--max_train_steps", "901",
-        "--learning_rate", "5e-6",
-        "--mixed_precision", "bf16",
-        "--weight_only_checkpointing_steps", "6000",
-        "--training_state_checkpointing_steps", "6000",
-        "--validation_steps", "100",
-        "--validation_sampling_steps", "50",
+        "--model_path",
+        MODEL_PATH,
+        "--inference_mode",
+        "False",
+        "--pretrained_model_name_or_path",
+        MODEL_PATH,
+        "--data_path",
+        LOCAL_TRAINING_DATA_DIR,
+        "--validation_dataset_file",
+        LOCAL_VALIDATION_DATASET_FILE,
+        "--train_batch_size",
+        "1",
+        "--num_latent_t",
+        "8",
+        "--num_gpus",
+        NUM_GPUS_PER_NODE_TRAINING,
+        "--sp_size",
+        NUM_GPUS_PER_NODE_TRAINING,
+        "--tp_size",
+        "1",
+        "--hsdp_replicate_dim",
+        "1",
+        "--hsdp_shard_dim",
+        NUM_GPUS_PER_NODE_TRAINING,
+        "--num_gpus",
+        NUM_GPUS_PER_NODE_TRAINING,
+        "--train_sp_batch_size",
+        "1",
+        "--dataloader_num_workers",
+        "10",
+        "--gradient_accumulation_steps",
+        "1",
+        "--max_train_steps",
+        "901",
+        "--learning_rate",
+        "5e-6",
+        "--mixed_precision",
+        "bf16",
+        "--weight_only_checkpointing_steps",
+        "6000",
+        "--training_state_checkpointing_steps",
+        "6000",
+        "--validation_steps",
+        "100",
+        "--validation_sampling_steps",
+        "50",
         "--log_validation",
-        "--checkpoints_total_limit", "3",
-        "--ema_start_step", "0",
-        "--training_cfg_rate", "0.0",
-        "--output_dir", LOCAL_OUTPUT_DIR,
-        "--tracker_project_name", "wan_finetune_overfit_ci",
-        "--num_height", "480",
-        "--num_width", "832",
-        "--num_frames", "81",
-        "--validation_guidance_scale", "3.0",
-        "--num_euler_timesteps", "50",
-        "--multi_phased_distill_schedule", "4000-1",
-        "--weight_decay", "0.01",
+        "--checkpoints_total_limit",
+        "3",
+        "--ema_start_step",
+        "0",
+        "--training_cfg_rate",
+        "0.0",
+        "--output_dir",
+        LOCAL_OUTPUT_DIR,
+        "--tracker_project_name",
+        "wan_finetune_overfit_ci",
+        "--num_height",
+        "480",
+        "--num_width",
+        "832",
+        "--num_frames",
+        "81",
+        "--validation_guidance_scale",
+        "3.0",
+        "--num_euler_timesteps",
+        "50",
+        "--multi_phased_distill_schedule",
+        "4000-1",
+        "--weight_decay",
+        "0.01",
         "--not_apply_cfg_solver",
-        "--dit_precision", "fp32",
-        "--max_grad_norm", "1.0",
+        "--dit_precision",
+        "fp32",
+        "--max_grad_norm",
+        "1.0",
     ]
 
     print(f"Running training with command: {cmd}")
@@ -153,7 +207,6 @@ def test_e2e_overfit_single_sample():
     print(f"reference_video_file: {reference_video_file}")
     final_validation_video_file = os.path.join(LOCAL_OUTPUT_DIR, "validation_step_900_inference_steps_50_video_0.mp4")
     print(f"final_validation_video_file: {final_validation_video_file}")
-
 
     # Ensure both files exist
     assert os.path.exists(reference_video_file), f"Reference video not found at {reference_video_file}"

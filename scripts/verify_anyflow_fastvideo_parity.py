@@ -39,7 +39,6 @@ from pathlib import Path
 import torch
 from safetensors.torch import load_file
 
-
 ANYFLOW_LOCAL = Path(os.environ.get("ANYFLOW_LOCAL", "./anyflow-1.3b")).expanduser()
 ANYFLOW_REF = Path(os.environ.get("ANYFLOW_REF", "./anyflow-ref")).expanduser()
 sys.path.insert(0, str(ANYFLOW_REF))
@@ -71,8 +70,7 @@ def init_single_rank() -> None:
         init_distributed_environment,
         initialize_model_parallel,
     )
-    init_distributed_environment(world_size=1, rank=0, local_rank=0,
-                                 backend="nccl")
+    init_distributed_environment(world_size=1, rank=0, local_rank=0, backend="nccl")
     initialize_model_parallel(
         tensor_model_parallel_size=1,
         sequence_model_parallel_size=1,
@@ -187,8 +185,8 @@ def forward_compare(fv_model, af_net):
     # are semantically equivalent.
     t_per_frame = torch.full((B, F), 500.0, device=DEVICE, dtype=DTYPE)
     r_per_frame = torch.full((B, F), 200.0, device=DEVICE, dtype=DTYPE)
-    t_per_sample = torch.full((B,), 500.0, device=DEVICE, dtype=DTYPE)
-    r_per_sample = torch.full((B,), 200.0, device=DEVICE, dtype=DTYPE)
+    t_per_sample = torch.full((B, ), 500.0, device=DEVICE, dtype=DTYPE)
+    r_per_sample = torch.full((B, ), 200.0, device=DEVICE, dtype=DTYPE)
 
     with torch.no_grad():
         # AnyFlow native: takes [B, F, C, H, W] + [B, F] (t, r).
@@ -209,8 +207,8 @@ def forward_compare(fv_model, af_net):
         # current timestep / attn_metadata.
         from fastvideo.forward_context import set_forward_context
         with set_forward_context(
-            current_timestep=t_per_sample,
-            attn_metadata=None,
+                current_timestep=t_per_sample,
+                attn_metadata=None,
         ):
             fv_out = fv_model(
                 hidden_states=x,
@@ -268,7 +266,8 @@ def sample_anystep(fv_model):
                     r_timestep=r_in,
                 )
             x = scheduler.step(
-                v, sample=x,
+                v,
+                sample=x,
                 timestep=t_cur.repeat(B),
                 r_timestep=t_next.repeat(B),
             )
@@ -305,8 +304,8 @@ def training_step_compare(fv_model, af_net) -> bool:
     noise = torch.randn_like(real)
     t_abs_pf = torch.full((B, F), 500.0, device=DEVICE, dtype=DTYPE)
     r_abs_pf = torch.full((B, F), 200.0, device=DEVICE, dtype=DTYPE)
-    t_abs_ps = torch.full((B,), 500.0, device=DEVICE, dtype=DTYPE)
-    r_abs_ps = torch.full((B,), 200.0, device=DEVICE, dtype=DTYPE)
+    t_abs_ps = torch.full((B, ), 500.0, device=DEVICE, dtype=DTYPE)
+    r_abs_ps = torch.full((B, ), 200.0, device=DEVICE, dtype=DTYPE)
 
     # AnyFlow inline replica: uses [B, F, C, H, W] layout.
     real_btchw = real.permute(0, 2, 1, 3, 4).contiguous()
@@ -315,19 +314,19 @@ def training_step_compare(fv_model, af_net) -> bool:
     noisy_btchw = t_norm_pf * noise_btchw + (1 - t_norm_pf) * real_btchw
 
     def u_func_af(x_in, t_in, r_in):
-        return af_net(
-            x_in, timestep=t_in, r_timestep=r_in,
-            encoder_hidden_states=enc, return_dict=False, is_causal=False)[0]
+        return af_net(x_in,
+                      timestep=t_in,
+                      r_timestep=r_in,
+                      encoder_hidden_states=enc,
+                      return_dict=False,
+                      is_causal=False)[0]
 
     v_pred = noise_btchw - real_btchw
     eps = EPSILON
-    F_plus = u_func_af(noisy_btchw + v_pred * (eps / NUM_TRAIN_TIMESTEPS),
-                       t_abs_pf + eps, r_abs_pf)
-    F_minus = u_func_af(noisy_btchw - v_pred * (eps / NUM_TRAIN_TIMESTEPS),
-                        t_abs_pf - eps, r_abs_pf)
+    F_plus = u_func_af(noisy_btchw + v_pred * (eps / NUM_TRAIN_TIMESTEPS), t_abs_pf + eps, r_abs_pf)
+    F_minus = u_func_af(noisy_btchw - v_pred * (eps / NUM_TRAIN_TIMESTEPS), t_abs_pf - eps, r_abs_pf)
     dF_dt_af = (F_plus - F_minus) / (2 * eps)
-    target_af = ((noise_btchw - real_btchw)
-                 - (t_abs_pf - r_abs_pf).view(B, F, 1, 1, 1) * dF_dt_af)
+    target_af = ((noise_btchw - real_btchw) - (t_abs_pf - r_abs_pf).view(B, F, 1, 1, 1) * dF_dt_af)
     flow_af = u_func_af(noisy_btchw, t_abs_pf, r_abs_pf)
     loss_af = (flow_af.float() - target_af.float()).pow(2).reshape(B, -1).mean(-1)
 
@@ -347,15 +346,10 @@ def training_step_compare(fv_model, af_net) -> bool:
             )
 
     v_pred_fv = noise_bcfhw - real_bcfhw
-    F_plus_fv = u_func_fv(
-        noisy_bcfhw + v_pred_fv * (eps / NUM_TRAIN_TIMESTEPS),
-        t_abs_ps + eps, r_abs_ps)
-    F_minus_fv = u_func_fv(
-        noisy_bcfhw - v_pred_fv * (eps / NUM_TRAIN_TIMESTEPS),
-        t_abs_ps - eps, r_abs_ps)
+    F_plus_fv = u_func_fv(noisy_bcfhw + v_pred_fv * (eps / NUM_TRAIN_TIMESTEPS), t_abs_ps + eps, r_abs_ps)
+    F_minus_fv = u_func_fv(noisy_bcfhw - v_pred_fv * (eps / NUM_TRAIN_TIMESTEPS), t_abs_ps - eps, r_abs_ps)
     dF_dt_fv = (F_plus_fv - F_minus_fv) / (2 * eps)
-    target_fv = ((noise_bcfhw - real_bcfhw)
-                 - (t_abs_ps - r_abs_ps).view(B, 1, 1, 1, 1) * dF_dt_fv)
+    target_fv = ((noise_bcfhw - real_bcfhw) - (t_abs_ps - r_abs_ps).view(B, 1, 1, 1, 1) * dF_dt_fv)
     flow_fv = u_func_fv(noisy_bcfhw, t_abs_ps, r_abs_ps)
     loss_fv = (flow_fv.float() - target_fv.float()).pow(2).reshape(B, -1).mean(-1)
 
@@ -392,11 +386,9 @@ def main() -> None:
     forward_ok = forward_compare(fv_model, af_net)
     sample_ok = sample_anystep(fv_model)
     train_ok = training_step_compare(fv_model, af_net)
-    banner(
-        f"SUMMARY: missing_keys={n_miss} unexpected_keys={n_unex} "
-        f"forward_parity={forward_ok} sample_smoke={sample_ok} "
-        f"training_parity={train_ok}"
-    )
+    banner(f"SUMMARY: missing_keys={n_miss} unexpected_keys={n_unex} "
+           f"forward_parity={forward_ok} sample_smoke={sample_ok} "
+           f"training_parity={train_ok}")
     sys.exit(0 if (forward_ok and sample_ok and train_ok) else 1)
 
 

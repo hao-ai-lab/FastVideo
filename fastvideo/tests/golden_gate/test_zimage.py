@@ -52,8 +52,7 @@ def _make_inputs(device: torch.device, seed: int) -> dict:
     # freqs_cis exactly as the model builds it (zimage.py:342, 527-531); image
     # position ids start at frame index cap_len+1 -> use start=(1, 0, 0).
     rope = RopeEmbedder(theta=256.0, axes_dims=(32, 48, 48), axes_lens=(1536, 512, 512))
-    pos_ids = ZImageTransformer2DModel.create_coordinate_grid(
-        (1, 8, 8), start=(1, 0, 0)).flatten(0, 2)  # [64, 3] int32
+    pos_ids = ZImageTransformer2DModel.create_coordinate_grid((1, 8, 8), start=(1, 0, 0)).flatten(0, 2)  # [64, 3] int32
     freqs_cis = rope(pos_ids).unsqueeze(0).expand(batch, seq, 64).contiguous()  # complex64 [2, 64, 64]
 
     attn_mask = torch.zeros(batch, seq, dtype=torch.bool)

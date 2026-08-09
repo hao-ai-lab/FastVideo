@@ -62,9 +62,7 @@ def _gpu_too_small() -> bool:
 def _flashinfer_fp4_available() -> bool:
     try:
         from flashinfer import (  # noqa: F401
-            SfLayout,
-            mm_fp4,
-            nvfp4_quantize,
+            SfLayout, mm_fp4, nvfp4_quantize,
         )
     except ImportError:
         return False
@@ -83,23 +81,15 @@ def _build_synthetic_batch(
     """
     batch_size = 1
     return {
-        "text_embedding":
-        torch.randn(batch_size,
-                    _LTX2_TEXT_LEN,
-                    text_dim,
-                    device=device,
-                    dtype=dtype),
-        "text_attention_mask":
-        torch.ones(batch_size, _LTX2_TEXT_LEN, device=device),
-        "vae_latent":
-        torch.randn(batch_size, 128, 3, 8, 8, device=device, dtype=dtype),
+        "text_embedding": torch.randn(batch_size, _LTX2_TEXT_LEN, text_dim, device=device, dtype=dtype),
+        "text_attention_mask": torch.ones(batch_size, _LTX2_TEXT_LEN, device=device),
+        "vae_latent": torch.randn(batch_size, 128, 3, 8, 8, device=device, dtype=dtype),
     }
 
 
 @pytest.mark.usefixtures("distributed_setup")
 @pytest.mark.parametrize("case", _CASES.keys())
-def test_ltx2_finetune_single_train_step(
-        case: str, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ltx2_finetune_single_train_step(case: str, monkeypatch: pytest.MonkeyPatch) -> None:
     if _gpu_too_small():
         pytest.skip(f"requires a CUDA GPU with >= {_MIN_GPU_MEMORY_GB}GB "
                     "memory (LTX-2 DiT is 18.9B params)")
@@ -145,21 +135,17 @@ def test_ltx2_finetune_single_train_step(
         from fastvideo.layers.quantization.nvfp4_qat_train_config import (
             NVFP4QATTrainQuantizeMethod, )
         quantized = sum(
-            isinstance(getattr(module, "quant_method", None),
-                       NVFP4QATTrainQuantizeMethod)
+            isinstance(getattr(module, "quant_method", None), NVFP4QATTrainQuantizeMethod)
             for module in model.transformer.modules())
-        assert quantized == expected_qat_linears, (
-            f"expected {expected_qat_linears} deployment-matched NVFP4-QAT "
-            f"linears on the LTX-2 DiT, found {quantized}")
+        assert quantized == expected_qat_linears, (f"expected {expected_qat_linears} deployment-matched NVFP4-QAT "
+                                                   f"linears on the LTX-2 DiT, found {quantized}")
 
         from fastvideo.attention.backends.attn_qat_train import (
             AttnQatTrainImpl, )
         qat_attention = sum(
-            isinstance(getattr(module, "attn_impl", None), AttnQatTrainImpl)
-            for module in model.transformer.modules())
-        assert qat_attention == 96, (
-            "expected ATTN_QAT_TRAIN on attn1 and attn2 in all 48 LTX-2 "
-            f"blocks, found {qat_attention} implementations")
+            isinstance(getattr(module, "attn_impl", None), AttnQatTrainImpl) for module in model.transformer.modules())
+        assert qat_attention == 96, ("expected ATTN_QAT_TRAIN on attn1 and attn2 in all 48 LTX-2 "
+                                     f"blocks, found {qat_attention} implementations")
 
     method = FineTuneMethod(
         cfg=cfg,
@@ -172,15 +158,13 @@ def test_ltx2_finetune_single_train_step(
 
     loss = loss_map["total_loss"]
     assert torch.is_tensor(loss), "total_loss must be a torch.Tensor"
-    assert torch.isfinite(loss).item(), (
-        f"total_loss is not finite: {loss.item()}")
+    assert torch.isfinite(loss).item(), (f"total_loss is not finite: {loss.item()}")
 
     method.backward(loss_map, outputs, grad_accum_rounds=1)
 
     # LTX-2 nests its transformer_blocks under the ``model`` submodule.
     blocks = resolve_blocks(model.transformer.model)
-    assert blocks is not None and len(blocks) > 0, (
-        "transformer is expected to expose a non-empty block list")
+    assert blocks is not None and len(blocks) > 0, ("transformer is expected to expose a non-empty block list")
     layer0 = blocks[0]
 
     trainable = [p for p in layer0.parameters() if p.requires_grad]
@@ -188,24 +172,19 @@ def test_ltx2_finetune_single_train_step(
 
     for i, p in enumerate(trainable):
         assert p.grad is not None, f"layer 0 param[{i}] has None grad"
-        assert torch.isfinite(p.grad).all().item(), (
-            f"layer 0 param[{i}] grad contains NaN/Inf")
+        assert torch.isfinite(p.grad).all().item(), (f"layer 0 param[{i}] grad contains NaN/Inf")
 
-    any_nonzero = any(
-        p.grad.detach().float().norm().item() > 0.0 for p in trainable)
-    assert any_nonzero, (
-        "all layer-0 grads are exactly zero; backward did not "
-        "reach the first transformer block")
+    any_nonzero = any(p.grad.detach().float().norm().item() > 0.0 for p in trainable)
+    assert any_nonzero, ("all layer-0 grads are exactly zero; backward did not "
+                         "reach the first transformer block")
 
     # Audio / cross-modal parameters must be frozen by default.
     audio_trainable = [
         name for name, param in model.transformer.named_parameters()
-        if param.requires_grad and any(
-            pattern in name for pattern in ("audio", "a2v", "v2a", "av_ca"))
+        if param.requires_grad and any(pattern in name for pattern in ("audio", "a2v", "v2a", "av_ca"))
     ]
-    assert not audio_trainable, (
-        f"audio/cross-modal params unexpectedly trainable: "
-        f"{audio_trainable[:5]}")
+    assert not audio_trainable, (f"audio/cross-modal params unexpectedly trainable: "
+                                 f"{audio_trainable[:5]}")
 
     # Device-keyed grad-norm regression on top of the same harness.
     # Skips when the current GPU has no seeded reference.

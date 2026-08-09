@@ -130,8 +130,7 @@ def test_dmd_builds_three_role_models_and_method_knobs() -> None:
 
 
 def test_dmd_vsa_maps_to_training_vsa_sparsity() -> None:
-    config = build_training_config(
-        _job("dmd_t2v", dmd_use_vsa=True, dmd_vsa_sparsity=0.9), "out")
+    config = build_training_config(_job("dmd_t2v", dmd_use_vsa=True, dmd_vsa_sparsity=0.9), "out")
     assert config["training"]["vsa"]["sparsity"] == 0.9
 
 
@@ -161,31 +160,27 @@ def test_validation_callback_only_when_file_given() -> None:
     without = build_training_config(_job("full_t2v"), "out")
     assert "validation" not in without["callbacks"]
 
-    with_file = build_training_config(
-        _job("full_t2v", validation_dataset_file="val.json"), "out")
+    with_file = build_training_config(_job("full_t2v", validation_dataset_file="val.json"), "out")
     validation = with_file["callbacks"]["validation"]
     assert validation["dataset_file"] == "val.json"
     assert validation["pipeline_target"].endswith(".WanPipeline")
     assert validation["sampling_steps"] == [50]
 
-    dmd = build_training_config(
-        _job("dmd_t2v", validation_dataset_file="val.json"), "out")
+    dmd = build_training_config(_job("dmd_t2v", validation_dataset_file="val.json"), "out")
     validation = dmd["callbacks"]["validation"]
     assert validation["pipeline_target"].endswith(".WanDMDPipeline")
     assert validation["sampling_steps"] == [3]
     assert validation["sampling_timesteps"] == [1000, 757, 522]
 
     # KD/ODE-init has no sampling-based validation pipeline.
-    ode = build_training_config(
-        _job("ode_init", validation_dataset_file="val.json"), "out")
+    ode = build_training_config(_job("ode_init", validation_dataset_file="val.json"), "out")
     assert "validation" not in ode["callbacks"]
 
 
 def test_ltx2_models_are_rejected() -> None:
     assert is_ltx2_model("Lightricks/LTX-2-19B")
     with pytest.raises(ValueError, match="LTX-2 training is not supported"):
-        build_training_config(
-            _job("full_t2v", model_id="Lightricks/LTX-2-19B"), "out")
+        build_training_config(_job("full_t2v", model_id="Lightricks/LTX-2-19B"), "out")
 
 
 def test_unknown_workload_is_rejected() -> None:
@@ -195,8 +190,7 @@ def test_unknown_workload_is_rejected() -> None:
 
 def test_invalid_denoising_steps_are_rejected() -> None:
     with pytest.raises(ValueError, match="Invalid DMD denoising steps"):
-        build_training_config(
-            _job("dmd_t2v", dmd_denoising_steps="1000,abc"), "out")
+        build_training_config(_job("dmd_t2v", dmd_denoising_steps="1000,abc"), "out")
 
 
 def test_training_env_has_no_backend_override() -> None:
@@ -211,8 +205,7 @@ def test_workloads_match_frontend_job_config() -> None:
     (src/lib/jobConfig.ts) — drift means creatable-but-unrunnable jobs."""
     import re
 
-    job_config = (Path(__file__).resolve().parents[1] / "src" / "lib" /
-                  "jobConfig.ts").read_text(encoding="utf-8")
+    job_config = (Path(__file__).resolve().parents[1] / "src" / "lib" / "jobConfig.ts").read_text(encoding="utf-8")
     all_types = set(re.findall(r'type:\s*"([^"]+)"', job_config))
     inference_types = {"t2v", "i2v", "t2i"}
     assert inference_types <= all_types, "jobConfig.ts parse failed"

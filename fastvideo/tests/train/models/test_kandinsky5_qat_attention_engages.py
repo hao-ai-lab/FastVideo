@@ -59,9 +59,7 @@ from fastvideo.attention.selector import _cached_get_attn_backend
 from fastvideo.forward_context import set_forward_context
 from fastvideo.platforms import AttentionBackendEnum
 
-_FIXTURE = str(
-    Path(__file__).resolve().parent.parent / "fixtures" /
-    "kandinsky5_t2v_min.yaml")
+_FIXTURE = str(Path(__file__).resolve().parent.parent / "fixtures" / "kandinsky5_t2v_min.yaml")
 
 
 @pytest.mark.usefixtures("distributed_setup")
@@ -108,9 +106,14 @@ def test_kandinsky5_attn_qat_train_engages_and_backprops(monkeypatch):
         latent_h = grid_h * patch_size[1]
         latent_w = grid_w * patch_size[2]
 
-        latents = torch.randn(
-            1, latent_t, latent_h, latent_w, in_visual_dim, device=device, dtype=dtype,
-            requires_grad=True)
+        latents = torch.randn(1,
+                              latent_t,
+                              latent_h,
+                              latent_w,
+                              in_visual_dim,
+                              device=device,
+                              dtype=dtype,
+                              requires_grad=True)
         if bool(getattr(transformer, "visual_cond", False)):
             # See Kandinsky5Model._build_distill_input_kwargs /
             # Kandinsky5LatentPreparationStage: visual_cond=True checkpoints
@@ -150,9 +153,8 @@ def test_kandinsky5_attn_qat_train_engages_and_backprops(monkeypatch):
         assert latents.grad is not None
         assert torch.isfinite(latents.grad).all().item(), "input grad contains NaN/Inf"
         assert attn.to_query.weight.grad is not None
-        assert torch.isfinite(attn.to_query.weight.grad.to_local()
-                              if hasattr(attn.to_query.weight.grad, "to_local") else
-                              attn.to_query.weight.grad).all().item(), "weight grad contains NaN/Inf"
+        assert torch.isfinite(attn.to_query.weight.grad.to_local() if hasattr(attn.to_query.weight.grad, "to_local")
+                              else attn.to_query.weight.grad).all().item(), "weight grad contains NaN/Inf"
     finally:
         # monkeypatch restores FASTVIDEO_ATTENTION_BACKEND itself, but the
         # selector cache is a separate process-wide functools.cache keyed on

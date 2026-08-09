@@ -27,11 +27,9 @@ import pytest
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.logger import init_logger
 from fastvideo.tests.ssim.inference_similarity_utils import (
-    resolve_inference_device_reference_folder,
-)
+    resolve_inference_device_reference_folder, )
 from fastvideo.tests.ssim.latent_similarity_utils import (
-    run_text_to_latent_similarity_test,
-)
+    run_text_to_latent_similarity_test, )
 
 logger = init_logger(__name__)
 
@@ -62,16 +60,14 @@ LTX2_DISTILLED_REFERENCE_GUIDANCE_OVERRIDES = {
     "ltx2_stg_scale_video": 1.0,
     "ltx2_stg_scale_audio": 1.0,
 }
-_LTX2_DISTILLED_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained(
-    LTX2_DISTILLED_PARAMS["model_path"])
+_LTX2_DISTILLED_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained(LTX2_DISTILLED_PARAMS["model_path"])
 LTX2_DISTILLED_FULL_QUALITY_PARAMS = {
     "num_gpus": LTX2_DISTILLED_PARAMS["num_gpus"],
     "model_path": LTX2_DISTILLED_PARAMS["model_path"],
     "height": _LTX2_DISTILLED_FULL_QUALITY_DEFAULTS.height,
     "width": _LTX2_DISTILLED_FULL_QUALITY_DEFAULTS.width,
     "num_frames": _LTX2_DISTILLED_FULL_QUALITY_DEFAULTS.num_frames,
-    "num_inference_steps":
-        _LTX2_DISTILLED_FULL_QUALITY_DEFAULTS.num_inference_steps,
+    "num_inference_steps": _LTX2_DISTILLED_FULL_QUALITY_DEFAULTS.num_inference_steps,
     "guidance_scale": _LTX2_DISTILLED_FULL_QUALITY_DEFAULTS.guidance_scale,
     "seed": _LTX2_DISTILLED_FULL_QUALITY_DEFAULTS.seed,
     "sp_size": LTX2_DISTILLED_PARAMS["sp_size"],

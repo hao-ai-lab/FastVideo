@@ -27,8 +27,7 @@ assert_reference_source(reference, "src/diffusers/modular_pipelines/minimax_h3/p
 from fastvideo.pipelines.basic.minimax_h3 import packing as actual  # noqa: E402
 from fastvideo.pipelines.basic.minimax_h3.reference import MiniMaxH3PreparedReference  # noqa: E402
 from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_conditioning import (  # noqa: E402
-    build_ref2va_presentation,
-)
+    build_ref2va_presentation, )
 
 
 def _actual_mixed_references() -> list[MiniMaxH3PreparedReference]:

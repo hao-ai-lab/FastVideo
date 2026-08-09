@@ -25,7 +25,6 @@ from transformers import AutoTokenizer
 
 from fastvideo.models.loader.component_loader import TokenizerLoader
 
-
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ZIMAGE_TOKENIZER_DIR = REPO_ROOT / "official_weights" / "Z-Image" / "tokenizer"
 PARITY_SCOPE = "production_loader"
@@ -93,12 +92,10 @@ def test_zimage_tokenizer_chat_template_parity():
     ref_tok = _load_reference_tokenizer()
     fv_tok = _load_fastvideo_tokenizer()
 
-    assert callable(getattr(ref_tok, "apply_chat_template", None)), (
-        "Pinned Z-Image tokenizer must expose apply_chat_template"
-    )
-    assert callable(getattr(fv_tok, "apply_chat_template", None)), (
-        "FastVideo TokenizerLoader dropped the required apply_chat_template API"
-    )
+    assert callable(getattr(ref_tok, "apply_chat_template",
+                            None)), ("Pinned Z-Image tokenizer must expose apply_chat_template")
+    assert callable(getattr(fv_tok, "apply_chat_template",
+                            None)), ("FastVideo TokenizerLoader dropped the required apply_chat_template API")
 
     messages = [{"role": "user", "content": "Describe a futuristic city skyline."}]
 

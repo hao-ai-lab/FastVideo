@@ -18,7 +18,6 @@ import torch
 
 from fastvideo.train.methods.distribution_matching.anyflow import AnyFlowMethod
 
-
 # ---------------------------------------------------------------------------
 # Helpers: build a "naked" AnyFlowMethod that skips __init__.
 # ---------------------------------------------------------------------------
@@ -61,19 +60,16 @@ def _naked_method(
 
 
 def test_get_rollout_schedule_uses_t_list_override_verbatim() -> None:
-    method = _naked_method(
-        t_list_override=[999.0, 937.0, 833.0, 624.0, 0.0])
+    method = _naked_method(t_list_override=[999.0, 937.0, 833.0, 624.0, 0.0])
     schedule = method._get_rollout_schedule(device=torch.device("cpu"))
     torch.testing.assert_close(
         schedule,
-        torch.tensor([999.0, 937.0, 833.0, 624.0, 0.0],
-                     dtype=torch.float32),
+        torch.tensor([999.0, 937.0, 833.0, 624.0, 0.0], dtype=torch.float32),
     )
 
 
 def test_get_rollout_schedule_falls_back_to_denoising_step_list() -> None:
-    method = _naked_method(
-        denoising_step_list=[999, 750, 500, 250])
+    method = _naked_method(denoising_step_list=[999, 750, 500, 250])
     schedule = method._get_rollout_schedule(device=torch.device("cpu"))
     # Tail must be a 0 boundary so the final Euler step lands at t=0.
     assert float(schedule[-1].item()) == 0.0
@@ -85,8 +81,7 @@ def test_get_rollout_schedule_falls_back_to_denoising_step_list() -> None:
 
 
 def test_get_rollout_schedule_does_not_double_append_zero() -> None:
-    method = _naked_method(
-        denoising_step_list=[999, 750, 500, 0])
+    method = _naked_method(denoising_step_list=[999, 750, 500, 0])
     schedule = method._get_rollout_schedule(device=torch.device("cpu"))
     assert schedule.numel() == 4  # no extra boundary inserted.
 
@@ -138,8 +133,7 @@ class _SpyStudent:
         attn_kind: str = "vsa",
     ) -> torch.Tensor:
         del batch, conditional, cfg_uncond, attn_kind
-        self.seen.append((float(t.flatten()[0].item()),
-                          float(r.flatten()[0].item())))
+        self.seen.append((float(t.flatten()[0].item()), float(r.flatten()[0].item())))
         # Constant velocity field of magnitude param so we can backprop.
         return self.param * torch.ones_like(noisy)
 
@@ -195,9 +189,8 @@ def test_rollout_with_grad_true_produces_differentiable_output() -> None:
     method.student = student  # type: ignore[assignment]
     batch = _make_batch((1, 2, 4, 4, 4))
     out = method._student_rollout(batch, with_grad=True)
-    assert out.requires_grad, (
-        "Rollout output must keep a gradient so the DMD loss can backprop "
-        "through the chosen step.")
+    assert out.requires_grad, ("Rollout output must keep a gradient so the DMD loss can backprop "
+                               "through the chosen step.")
     out.sum().backward()
     assert student.param.grad is not None
     assert student.param.grad.abs().sum() > 0
@@ -219,13 +212,11 @@ def test_rollout_with_grad_false_blocks_gradient_completely() -> None:
 def test_broadcast_grad_step_index_in_range() -> None:
     method = _naked_method(student_sample_steps=4)
     for _ in range(20):
-        idx = method._broadcast_grad_step_index(
-            num_steps=4, device=torch.device("cpu"))
+        idx = method._broadcast_grad_step_index(num_steps=4, device=torch.device("cpu"))
         assert 0 <= idx < 4
 
 
 def test_broadcast_grad_step_index_rejects_non_positive_num_steps() -> None:
     method = _naked_method()
     with pytest.raises(ValueError, match="num_steps must be positive"):
-        method._broadcast_grad_step_index(
-            num_steps=0, device=torch.device("cpu"))
+        method._broadcast_grad_step_index(num_steps=0, device=torch.device("cpu"))

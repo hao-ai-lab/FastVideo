@@ -50,7 +50,6 @@ import torch
 import torch.nn.functional as F
 from torch.testing import assert_close
 
-
 # Force SDPA on both sides so the attention kernel is shared.
 os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
 os.environ.setdefault("MASTER_ADDR", "localhost")
@@ -58,10 +57,8 @@ os.environ.setdefault("MASTER_PORT", "29519")
 
 _T5GEMMA_ID = os.getenv("MAGI_HUMAN_T5GEMMA_ID", "google/t5gemma-9b-9b-ul2")
 _T5_GEMMA_TARGET_LENGTH = 640
-_SAMPLE_PROMPT = (
-    "A warm afternoon scene: a person sits on a park bench reading a book, "
-    "surrounded by softly swaying trees."
-)
+_SAMPLE_PROMPT = ("A warm afternoon scene: a person sits on a park bench reading a book, "
+                  "surrounded by softly swaying trees.")
 
 
 def _hf_token() -> str | None:
@@ -100,10 +97,8 @@ def _pad_or_trim_dim1(t: torch.Tensor, target: int) -> tuple[torch.Tensor, int]:
 def _encode_magi_human_prompt_pair(device: torch.device):
     """Encode the production preset prompt pair once via T5-Gemma."""
     if not _can_access_t5gemma():
-        pytest.skip(
-            f"{_T5GEMMA_ID} not accessible — gated Google repo; set "
-            "HF_TOKEN / HF_API_KEY and accept the terms of use."
-        )
+        pytest.skip(f"{_T5GEMMA_ID} not accessible — gated Google repo; set "
+                    "HF_TOKEN / HF_API_KEY and accept the terms of use.")
 
     for src in ("HF_TOKEN", "HUGGINGFACE_HUB_TOKEN", "HF_API_KEY"):
         token = os.environ.get(src)
@@ -116,14 +111,11 @@ def _encode_magi_human_prompt_pair(device: torch.device):
         from transformers import AutoTokenizer
 
         from fastvideo.configs.models.encoders.t5gemma import (
-            T5GemmaEncoderConfig,
-        )
+            T5GemmaEncoderConfig, )
         from fastvideo.models.encoders.t5gemma import (
-            T5GemmaEncoderModel,
-        )
+            T5GemmaEncoderModel, )
         from fastvideo.pipelines.basic.magi_human.presets import (
-            _MAGI_HUMAN_NEGATIVE_PROMPT,
-        )
+            _MAGI_HUMAN_NEGATIVE_PROMPT, )
     except Exception as exc:
         pytest.skip(f"T5-Gemma prompt encoding dependencies unavailable: {exc}")
 
@@ -183,24 +175,36 @@ def _cleanup_gpu() -> None:
 
 
 def _dit_forward_fv(
-    dit, video_latent, audio_latent, audio_feat_len,
-    txt_feat, txt_feat_len, patch_size, coords_style,
-    video_in_channels, audio_in_channels,
+    dit,
+    video_latent,
+    audio_latent,
+    audio_feat_len,
+    txt_feat,
+    txt_feat_len,
+    patch_size,
+    coords_style,
+    video_in_channels,
+    audio_in_channels,
 ):
     """One FastVideo DiT call — same as MagiHumanDenoisingStage._dit_forward."""
     from fastvideo.pipelines.basic.magi_human.stages.latent_preparation import (
-        build_packed_inputs, unpack_tokens,
+        build_packed_inputs,
+        unpack_tokens,
     )
     x, coords, mm = build_packed_inputs(
-        video_latent=video_latent, audio_latent=audio_latent,
-        audio_feat_len=audio_feat_len, txt_feat=txt_feat,
-        txt_feat_len=txt_feat_len, patch_size=patch_size,
+        video_latent=video_latent,
+        audio_latent=audio_latent,
+        audio_feat_len=audio_feat_len,
+        txt_feat=txt_feat,
+        txt_feat_len=txt_feat_len,
+        patch_size=patch_size,
         coords_style=coords_style,
     )
     video_token_num = x.shape[0] - audio_feat_len - txt_feat_len
     out = dit(x, coords, mm)
     return unpack_tokens(
-        out, video_token_num=video_token_num,
+        out,
+        video_token_num=video_token_num,
         audio_feat_len=audio_feat_len,
         video_in_channels=video_in_channels,
         audio_in_channels=audio_in_channels,
@@ -210,9 +214,16 @@ def _dit_forward_fv(
 
 
 def _dit_forward_upstream(
-    dit, video_latent, audio_latent, audio_feat_len,
-    txt_feat, txt_feat_len, patch_size, coords_style,
-    video_in_channels, audio_in_channels,
+    dit,
+    video_latent,
+    audio_latent,
+    audio_feat_len,
+    txt_feat,
+    txt_feat_len,
+    patch_size,
+    coords_style,
+    video_in_channels,
+    audio_in_channels,
 ):
     """One upstream DiT call — identical input construction + output
     unpacking to the FastVideo path. The only thing that differs is
@@ -220,28 +231,38 @@ def _dit_forward_upstream(
     kwargs the upstream expects.
     """
     from fastvideo.pipelines.basic.magi_human.stages.latent_preparation import (
-        build_packed_inputs, unpack_tokens,
+        build_packed_inputs,
+        unpack_tokens,
     )
     from inference.common import VarlenHandler
     x, coords, mm = build_packed_inputs(
-        video_latent=video_latent, audio_latent=audio_latent,
-        audio_feat_len=audio_feat_len, txt_feat=txt_feat,
-        txt_feat_len=txt_feat_len, patch_size=patch_size,
+        video_latent=video_latent,
+        audio_latent=audio_latent,
+        audio_feat_len=audio_feat_len,
+        txt_feat=txt_feat,
+        txt_feat_len=txt_feat_len,
+        patch_size=patch_size,
         coords_style=coords_style,
     )
     video_token_num = x.shape[0] - audio_feat_len - txt_feat_len
     total = x.shape[0]
     cu = torch.tensor([0, total], dtype=torch.int32, device=x.device)
     varlen = VarlenHandler(
-        cu_seqlens_q=cu, cu_seqlens_k=cu,
-        max_seqlen_q=total, max_seqlen_k=total,
+        cu_seqlens_q=cu,
+        cu_seqlens_k=cu,
+        max_seqlen_q=total,
+        max_seqlen_k=total,
     )
     out = dit(
-        x=x, coords_mapping=coords, modality_mapping=mm,
-        varlen_handler=varlen, local_attn_handler=None,
+        x=x,
+        coords_mapping=coords,
+        modality_mapping=mm,
+        varlen_handler=varlen,
+        local_attn_handler=None,
     )
     return unpack_tokens(
-        out, video_token_num=video_token_num,
+        out,
+        video_token_num=video_token_num,
         audio_feat_len=audio_feat_len,
         video_in_channels=video_in_channels,
         audio_in_channels=audio_in_channels,
@@ -260,8 +281,7 @@ def _build_fastvideo_schedulers(shift: float, num_inference_steps: int, device):
     from upstream.
     """
     from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (
-        FlowUniPCMultistepScheduler,
-    )
+        FlowUniPCMultistepScheduler, )
     video_sched = FlowUniPCMultistepScheduler()
     audio_sched = FlowUniPCMultistepScheduler()
     video_sched.set_timesteps(num_inference_steps, device=device, shift=shift)
@@ -280,8 +300,7 @@ def _build_upstream_schedulers(shift: float, num_inference_steps: int, device):
     *call pattern*.
     """
     from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (
-        FlowUniPCMultistepScheduler,
-    )
+        FlowUniPCMultistepScheduler, )
     video_sched = FlowUniPCMultistepScheduler()
     audio_sched = FlowUniPCMultistepScheduler()
     video_sched.set_timesteps(num_inference_steps, device=device, shift=shift)
@@ -290,11 +309,24 @@ def _build_upstream_schedulers(shift: float, num_inference_steps: int, device):
 
 
 def _run_denoise_loop(
-    dit, dit_forward_fn, video_latent, audio_latent,
-    txt_feat, txt_feat_len, neg_txt_feat, neg_txt_feat_len,
-    *, video_sched, audio_sched, cfg_number,
-    video_txt_guidance_scale, audio_txt_guidance_scale,
-    patch_size, coords_style, video_in_channels, audio_in_channels,
+    dit,
+    dit_forward_fn,
+    video_latent,
+    audio_latent,
+    txt_feat,
+    txt_feat_len,
+    neg_txt_feat,
+    neg_txt_feat_len,
+    *,
+    video_sched,
+    audio_sched,
+    cfg_number,
+    video_txt_guidance_scale,
+    audio_txt_guidance_scale,
+    patch_size,
+    coords_style,
+    video_in_channels,
+    audio_in_channels,
     image_latent=None,
 ):
     """Joint video+audio FlowUniPC denoise. The schedulers are passed
@@ -314,35 +346,49 @@ def _run_denoise_loop(
             t_int = int(t.item()) if torch.is_tensor(t) else int(t)
             with set_forward_context(current_timestep=t_int, attn_metadata=None):
                 v_cond_video, v_cond_audio = dit_forward_fn(
-                    dit, video_latent, audio_latent, audio_feat_len,
-                    txt_feat, txt_feat_len, patch_size, coords_style,
-                    video_in_channels, audio_in_channels,
+                    dit,
+                    video_latent,
+                    audio_latent,
+                    audio_feat_len,
+                    txt_feat,
+                    txt_feat_len,
+                    patch_size,
+                    coords_style,
+                    video_in_channels,
+                    audio_in_channels,
                 )
                 if cfg_number == 2:
                     v_uncond_video, v_uncond_audio = dit_forward_fn(
-                        dit, video_latent, audio_latent, audio_feat_len,
-                        neg_txt_feat, neg_txt_feat_len, patch_size, coords_style,
-                        video_in_channels, audio_in_channels,
+                        dit,
+                        video_latent,
+                        audio_latent,
+                        audio_feat_len,
+                        neg_txt_feat,
+                        neg_txt_feat_len,
+                        patch_size,
+                        coords_style,
+                        video_in_channels,
+                        audio_in_channels,
                     )
                     # Upstream's video-guidance drop-at-t<=500 trick.
-                    video_guidance = (
-                        video_txt_guidance_scale if t > 500 else 2.0
-                    )
-                    v_video = v_uncond_video + video_guidance * (
-                        v_cond_video - v_uncond_video
-                    )
-                    v_audio = v_uncond_audio + audio_txt_guidance_scale * (
-                        v_cond_audio - v_uncond_audio
-                    )
+                    video_guidance = (video_txt_guidance_scale if t > 500 else 2.0)
+                    v_video = v_uncond_video + video_guidance * (v_cond_video - v_uncond_video)
+                    v_audio = v_uncond_audio + audio_txt_guidance_scale * (v_cond_audio - v_uncond_audio)
                 else:
                     v_video = v_cond_video
                     v_audio = v_cond_audio
 
             video_latent = video_sched.step(
-                v_video, t, video_latent, return_dict=False,
+                v_video,
+                t,
+                video_latent,
+                return_dict=False,
             )[0]
             audio_latent = audio_sched.step(
-                v_audio, t, audio_latent, return_dict=False,
+                v_audio,
+                t,
+                audio_latent,
+                return_dict=False,
             )[0]
         if image_latent is not None:
             video_latent[:, :, :1] = image_latent.to(
@@ -360,16 +406,12 @@ def test_magi_human_pipeline_latent_parity():
     repo_root = Path(__file__).resolve().parents[3]
     upstream_src = repo_root / "daVinci-MagiHuman"
     if not upstream_src.exists():
-        pytest.skip(
-            "Upstream daVinci-MagiHuman/ clone missing. Run "
-            "`git clone --depth 1 https://github.com/GAIR-NLP/daVinci-MagiHuman.git`"
-        )
+        pytest.skip("Upstream daVinci-MagiHuman/ clone missing. Run "
+                    "`git clone --depth 1 https://github.com/GAIR-NLP/daVinci-MagiHuman.git`")
 
     base_shard_dir = _find_base_shard_dir()
     if base_shard_dir is None or not base_shard_dir.is_dir():
-        pytest.skip(
-            "GAIR/daVinci-MagiHuman base/ shards not available locally."
-        )
+        pytest.skip("GAIR/daVinci-MagiHuman base/ shards not available locally.")
 
     converted_dir = Path(os.getenv(
         "MAGI_HUMAN_DIFFUSERS_PATH",
@@ -380,7 +422,8 @@ def test_magi_human_pipeline_latent_parity():
         pytest.skip(f"Converted transformer dir missing at {transformer_dir}")
 
     from tests.local_tests.helpers.magi_human_upstream import (
-        install_stubs, load_upstream_dit,
+        install_stubs,
+        load_upstream_dit,
     )
     install_stubs()
 
@@ -395,21 +438,22 @@ def test_magi_human_pipeline_latent_parity():
     lat_T, lat_H, lat_W = 2, 6, 6
     video_latent = torch.randn(
         (1, z_dim, lat_T, lat_H, lat_W),
-        dtype=torch.float32, device=device,
+        dtype=torch.float32,
+        device=device,
     )
     audio_latent = torch.randn(
-        (1, 4, 64), dtype=torch.float32, device=device,
+        (1, 4, 64),
+        dtype=torch.float32,
+        device=device,
     )
     # Production-facing text embeddings: encode the example prompt and the
     # preset negative prompt via T5-Gemma once, then feed the identical cached
     # tensors to upstream and FastVideo. This keeps the DiT comparison focused
     # while still validating prompt/preset content such as the full
     # three-block MagiHuman negative prompt.
-    txt_feat, txt_feat_len, neg_txt_feat, neg_txt_feat_len = (
-        _encode_magi_human_prompt_pair(device)
-    )
+    txt_feat, txt_feat_len, neg_txt_feat, neg_txt_feat_len = (_encode_magi_human_prompt_pair(device))
 
-    num_inference_steps = 4        # 4 steps × CFG=2 = 8 DiT calls / side; surfaces compounding drift that 1-step hides
+    num_inference_steps = 4  # 4 steps × CFG=2 = 8 DiT calls / side; surfaces compounding drift that 1-step hides
     shift = 5.0
     common_kwargs = dict(
         cfg_number=2,
@@ -424,17 +468,24 @@ def test_magi_human_pipeline_latent_parity():
     # --- Upstream side first (so we can free it before loading FastVideo). ---
     # Upstream uses single-shift scheduler init (matches MagiEvaluator).
     up_video_sched, up_audio_sched = _build_upstream_schedulers(
-        shift=shift, num_inference_steps=num_inference_steps, device=device,
+        shift=shift,
+        num_inference_steps=num_inference_steps,
+        device=device,
     )
     print("Loading upstream DiTModel from base shards...")
     upstream_dit = load_upstream_dit(base_shard_dir, device=device, dtype=None)
     print("Running upstream denoise loop...")
     ref_video, ref_audio = _run_denoise_loop(
-        upstream_dit, _dit_forward_upstream,
-        video_latent.clone(), audio_latent.clone(),
-        txt_feat.clone(), txt_feat_len,
-        neg_txt_feat.clone(), neg_txt_feat_len,
-        video_sched=up_video_sched, audio_sched=up_audio_sched,
+        upstream_dit,
+        _dit_forward_upstream,
+        video_latent.clone(),
+        audio_latent.clone(),
+        txt_feat.clone(),
+        txt_feat_len,
+        neg_txt_feat.clone(),
+        neg_txt_feat_len,
+        video_sched=up_video_sched,
+        audio_sched=up_audio_sched,
         **common_kwargs,
     )
     ref_video = ref_video.detach().float().cpu()
@@ -447,7 +498,9 @@ def test_magi_human_pipeline_latent_parity():
     # `MagiHumanDenoisingStage` in production: shift in __init__ via
     # `magi_human_pipeline.initialize_pipeline` AND in set_timesteps).
     fv_video_sched, fv_audio_sched = _build_fastvideo_schedulers(
-        shift=shift, num_inference_steps=num_inference_steps, device=device,
+        shift=shift,
+        num_inference_steps=num_inference_steps,
+        device=device,
     )
     from fastvideo.configs.models.dits.magi_human import MagiHumanVideoConfig
     from fastvideo.models.dits.magi_human import MagiHumanDiT
@@ -467,11 +520,16 @@ def test_magi_human_pipeline_latent_parity():
 
     print("Running FastVideo denoise loop...")
     fv_video, fv_audio = _run_denoise_loop(
-        fv_dit, _dit_forward_fv,
-        video_latent.clone(), audio_latent.clone(),
-        txt_feat.clone(), txt_feat_len,
-        neg_txt_feat.clone(), neg_txt_feat_len,
-        video_sched=fv_video_sched, audio_sched=fv_audio_sched,
+        fv_dit,
+        _dit_forward_fv,
+        video_latent.clone(),
+        audio_latent.clone(),
+        txt_feat.clone(),
+        txt_feat_len,
+        neg_txt_feat.clone(),
+        neg_txt_feat_len,
+        video_sched=fv_video_sched,
+        audio_sched=fv_audio_sched,
         **common_kwargs,
     )
     fv_video = fv_video.detach().float().cpu()
@@ -480,20 +538,16 @@ def test_magi_human_pipeline_latent_parity():
     # --- Report + assertions ---
     v_diff = (ref_video - fv_video).abs()
     a_diff = (ref_audio - fv_audio).abs()
-    print(
-        f"video  ref_abs={ref_video.abs().mean().item():.4f} "
-        f"fv_abs={fv_video.abs().mean().item():.4f} "
-        f"diff_max={v_diff.max().item():.4f} "
-        f"diff_mean={v_diff.mean().item():.4f} "
-        f"diff_median={v_diff.median().item():.4f}"
-    )
-    print(
-        f"audio  ref_abs={ref_audio.abs().mean().item():.4f} "
-        f"fv_abs={fv_audio.abs().mean().item():.4f} "
-        f"diff_max={a_diff.max().item():.4f} "
-        f"diff_mean={a_diff.mean().item():.4f} "
-        f"diff_median={a_diff.median().item():.4f}"
-    )
+    print(f"video  ref_abs={ref_video.abs().mean().item():.4f} "
+          f"fv_abs={fv_video.abs().mean().item():.4f} "
+          f"diff_max={v_diff.max().item():.4f} "
+          f"diff_mean={v_diff.mean().item():.4f} "
+          f"diff_median={v_diff.median().item():.4f}")
+    print(f"audio  ref_abs={ref_audio.abs().mean().item():.4f} "
+          f"fv_abs={fv_audio.abs().mean().item():.4f} "
+          f"diff_max={a_diff.max().item():.4f} "
+          f"diff_mean={a_diff.mean().item():.4f} "
+          f"diff_median={a_diff.median().item():.4f}")
 
     assert ref_video.shape == fv_video.shape
     assert ref_audio.shape == fv_audio.shape

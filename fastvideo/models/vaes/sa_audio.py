@@ -50,10 +50,8 @@ class SAAudioVAEModel(nn.Module):
 
         path = self.pretrained_path
         if not path:
-            raise ValueError(
-                "OobleckVAEConfig.pretrained_path must be set; expected "
-                "`stabilityai/stable-audio-open-1.0` or a local path."
-            )
+            raise ValueError("OobleckVAEConfig.pretrained_path must be set; expected "
+                             "`stabilityai/stable-audio-open-1.0` or a local path.")
         dtype = getattr(torch, self.pretrained_dtype, torch.float32)
         # If the caller already pointed us at the VAE dir directly, drop
         # the subfolder. Otherwise pass through (default "vae").

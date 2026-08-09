@@ -52,10 +52,8 @@ def _dtype_skip(dtype):
 
 def _fa2_only(mod):
     if mod._FA_VARLEN_VERSION != "2":
-        pytest.skip(
-            f"register_autograd is only wired for FA2; got "
-            f"_FA_VARLEN_VERSION={mod._FA_VARLEN_VERSION!r}"
-        )
+        pytest.skip(f"register_autograd is only wired for FA2; got "
+                    f"_FA_VARLEN_VERSION={mod._FA_VARLEN_VERSION!r}")
 
 
 def _padding_mask(batch, seqlen, valid_lens, device):
@@ -107,8 +105,8 @@ def test_no_pad_training_backward_through_registered_autograd(no_pad_impls, dtyp
     out_test = mod.flash_attn_no_pad_compilable(qkv_test, mask, causal=False, dropout_p=0.0)
 
     dout = torch.randn_like(out_ref)
-    (dqkv_ref,) = torch.autograd.grad((out_ref * dout).sum(), (qkv_ref,))
-    (dqkv_test,) = torch.autograd.grad((out_test * dout).sum(), (qkv_test,))
+    (dqkv_ref, ) = torch.autograd.grad((out_ref * dout).sum(), (qkv_ref, ))
+    (dqkv_test, ) = torch.autograd.grad((out_test * dout).sum(), (qkv_test, ))
 
     atol = rtol = 6e-3 if dtype == torch.float16 else 2e-2
     torch.testing.assert_close(dqkv_test, dqkv_ref, atol=atol, rtol=rtol)
@@ -191,8 +189,13 @@ def test_varlen_qk_training_backward_through_registered_autograd(no_pad_impls, d
     v_test = v_ref.detach().clone().requires_grad_(True)
 
     out_ref = mod.flash_attn_varlen_qk_no_pad(q_ref, k_ref, v_ref, qmask, kmask, causal=False, dropout_p=0.0)
-    out_test = mod.flash_attn_varlen_qk_no_pad_compilable(q_test, k_test, v_test, qmask, kmask,
-                                                          causal=False, dropout_p=0.0)
+    out_test = mod.flash_attn_varlen_qk_no_pad_compilable(q_test,
+                                                          k_test,
+                                                          v_test,
+                                                          qmask,
+                                                          kmask,
+                                                          causal=False,
+                                                          dropout_p=0.0)
 
     dout = torch.randn_like(out_ref)
     dq_ref, dk_ref, dv_ref = torch.autograd.grad((out_ref * dout).sum(), (q_ref, k_ref, v_ref))

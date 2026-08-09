@@ -7,14 +7,12 @@ import torch.nn as nn
 
 from fastvideo.attention import DistributedAttention, LocalAttention
 from fastvideo.configs.models.dits import HunyuanVideoConfig
-from fastvideo.layers.layernorm import (LayerNormScaleShift, ScaleResidual,
-                                        ScaleResidualLayerNormScaleShift)
+from fastvideo.layers.layernorm import (LayerNormScaleShift, ScaleResidual, ScaleResidualLayerNormScaleShift)
 from fastvideo.layers.linear import ReplicatedLinear
 # TODO(will-PY-refactor): RMSNorm ....
 from fastvideo.layers.mlp import MLP
 from fastvideo.layers.rotary_embedding import get_rotary_pos_embed
-from fastvideo.layers.visual_embedding import (ModulateProjection, PatchEmbed,
-                                               TimestepEmbedder, unpatchify)
+from fastvideo.layers.visual_embedding import (ModulateProjection, PatchEmbed, TimestepEmbedder, unpatchify)
 from fastvideo.models.dits.base import BaseDiT
 from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.distributed.communication_op import sequence_model_parallel_shard, sequence_model_parallel_all_gather_with_unpad
@@ -111,15 +109,11 @@ class MMDoubleStreamBlock(nn.Module):
         )
 
         # Fused operations for image stream
-        self.img_attn_norm = LayerNormScaleShift(hidden_size,
-                                                 norm_type="layer",
-                                                 elementwise_affine=False,
-                                                 dtype=dtype)
-        self.img_attn_residual_mlp_norm = ScaleResidualLayerNormScaleShift(
-            hidden_size,
-            norm_type="layer",
-            elementwise_affine=False,
-            dtype=dtype)
+        self.img_attn_norm = LayerNormScaleShift(hidden_size, norm_type="layer", elementwise_affine=False, dtype=dtype)
+        self.img_attn_residual_mlp_norm = ScaleResidualLayerNormScaleShift(hidden_size,
+                                                                           norm_type="layer",
+                                                                           elementwise_affine=False,
+                                                                           dtype=dtype)
         self.img_mlp_residual = ScaleResidual()
 
         # Image attention components
@@ -138,11 +132,7 @@ class MMDoubleStreamBlock(nn.Module):
                                               params_dtype=dtype,
                                               prefix=f"{prefix}.img_attn_proj")
 
-        self.img_mlp = MLP(hidden_size,
-                           mlp_hidden_dim,
-                           bias=True,
-                           dtype=dtype,
-                           prefix=f"{prefix}.img_mlp")
+        self.img_mlp = MLP(hidden_size, mlp_hidden_dim, bias=True, dtype=dtype, prefix=f"{prefix}.img_mlp")
 
         # Text modulation components
         self.txt_mod = ModulateProjection(
@@ -154,41 +144,30 @@ class MMDoubleStreamBlock(nn.Module):
         )
 
         # Fused operations for text stream
-        self.txt_attn_norm = LayerNormScaleShift(hidden_size,
-                                                 norm_type="layer",
-                                                 elementwise_affine=False,
-                                                 dtype=dtype)
-        self.txt_attn_residual_mlp_norm = ScaleResidualLayerNormScaleShift(
-            hidden_size,
-            norm_type="layer",
-            elementwise_affine=False,
-            dtype=dtype)
+        self.txt_attn_norm = LayerNormScaleShift(hidden_size, norm_type="layer", elementwise_affine=False, dtype=dtype)
+        self.txt_attn_residual_mlp_norm = ScaleResidualLayerNormScaleShift(hidden_size,
+                                                                           norm_type="layer",
+                                                                           elementwise_affine=False,
+                                                                           dtype=dtype)
         self.txt_mlp_residual = ScaleResidual()
 
         # Text attention components
-        self.txt_attn_qkv = ReplicatedLinear(hidden_size,
-                                             hidden_size * 3,
-                                             bias=True,
-                                             params_dtype=dtype)
+        self.txt_attn_qkv = ReplicatedLinear(hidden_size, hidden_size * 3, bias=True, params_dtype=dtype)
 
         # QK norm layers for text
         self.txt_attn_q_norm = HunyuanRMSNorm(head_dim, eps=1e-6, dtype=dtype)
         self.txt_attn_k_norm = HunyuanRMSNorm(head_dim, eps=1e-6, dtype=dtype)
 
-        self.txt_attn_proj = ReplicatedLinear(hidden_size,
-                                              hidden_size,
-                                              bias=True,
-                                              params_dtype=dtype)
+        self.txt_attn_proj = ReplicatedLinear(hidden_size, hidden_size, bias=True, params_dtype=dtype)
 
         self.txt_mlp = MLP(hidden_size, mlp_hidden_dim, bias=True, dtype=dtype)
 
         # Distributed attention
-        self.attn = DistributedAttention(
-            num_heads=num_attention_heads,
-            head_size=head_dim,
-            causal=False,
-            supported_attention_backends=supported_attention_backends,
-            prefix=f"{prefix}.attn")
+        self.attn = DistributedAttention(num_heads=num_attention_heads,
+                                         head_size=head_dim,
+                                         causal=False,
+                                         supported_attention_backends=supported_attention_backends,
+                                         prefix=f"{prefix}.attn")
 
     def forward(
         self,
@@ -226,10 +205,8 @@ class MMDoubleStreamBlock(nn.Module):
         batch_size, image_seq_len = img_qkv.shape[0], img_qkv.shape[1]
 
         # Split QKV
-        img_qkv = img_qkv.view(batch_size, image_seq_len, 3,
-                               self.num_attention_heads, -1)
-        img_q, img_k, img_v = img_qkv[:, :, 0], img_qkv[:, :, 1], img_qkv[:, :,
-                                                                          2]
+        img_qkv = img_qkv.view(batch_size, image_seq_len, 3, self.num_attention_heads, -1)
+        img_q, img_k, img_v = img_qkv[:, :, 0], img_qkv[:, :, 1], img_qkv[:, :, 2]
 
         # Apply QK-Norm if needed
 
@@ -244,10 +221,8 @@ class MMDoubleStreamBlock(nn.Module):
         batch_size, text_seq_len = txt_qkv.shape[0], txt_qkv.shape[1]
 
         # Split QKV
-        txt_qkv = txt_qkv.view(batch_size, text_seq_len, 3,
-                               self.num_attention_heads, -1)
-        txt_q, txt_k, txt_v = txt_qkv[:, :, 0], txt_qkv[:, :, 1], txt_qkv[:, :,
-                                                                          2]
+        txt_qkv = txt_qkv.view(batch_size, text_seq_len, 3, self.num_attention_heads, -1)
+        txt_q, txt_k, txt_v = txt_qkv[:, :, 0], txt_qkv[:, :, 1], txt_qkv[:, :, 2]
 
         # Apply QK-Norm if needed
         txt_q = self.txt_attn_q_norm(txt_q).to(txt_q.dtype)
@@ -255,23 +230,21 @@ class MMDoubleStreamBlock(nn.Module):
 
         # Run distributed attention
         img_attn, txt_attn = self.attn(img_q, img_k, img_v, original_seq_len, txt_q, txt_k, txt_v, freqs_cis=freqs_cis)
-        img_attn_out, _ = self.img_attn_proj(
-            img_attn.view(batch_size, image_seq_len, -1))
+        img_attn_out, _ = self.img_attn_proj(img_attn.view(batch_size, image_seq_len, -1))
         # Use fused operation for residual connection, normalization, and modulation
-        img_mlp_input, img_residual = self.img_attn_residual_mlp_norm(
-            img, img_attn_out, img_attn_gate, img_mlp_shift, img_mlp_scale)
+        img_mlp_input, img_residual = self.img_attn_residual_mlp_norm(img, img_attn_out, img_attn_gate, img_mlp_shift,
+                                                                      img_mlp_scale)
 
         # Process image MLP
         img_mlp_out = self.img_mlp(img_mlp_input)
         img = self.img_mlp_residual(img_residual, img_mlp_out, img_mlp_gate)
 
         # Process text attention output
-        txt_attn_out, _ = self.txt_attn_proj(
-            txt_attn.reshape(batch_size, text_seq_len, -1))
+        txt_attn_out, _ = self.txt_attn_proj(txt_attn.reshape(batch_size, text_seq_len, -1))
 
         # Use fused operation for residual connection, normalization, and modulation
-        txt_mlp_input, txt_residual = self.txt_attn_residual_mlp_norm(
-            txt, txt_attn_out, txt_attn_gate, txt_mlp_shift, txt_mlp_scale)
+        txt_mlp_input, txt_residual = self.txt_attn_residual_mlp_norm(txt, txt_attn_out, txt_attn_gate, txt_mlp_shift,
+                                                                      txt_mlp_scale)
 
         # Process text MLP
         txt_mlp_out = self.txt_mlp(txt_mlp_input)
@@ -324,12 +297,11 @@ class MMSingleStreamBlock(nn.Module):
         self.k_norm = HunyuanRMSNorm(head_dim, eps=1e-6, dtype=dtype)
 
         # Fused operations with better naming
-        self.input_norm_scale_shift = LayerNormScaleShift(
-            hidden_size,
-            norm_type="layer",
-            eps=1e-6,
-            elementwise_affine=False,
-            dtype=dtype)
+        self.input_norm_scale_shift = LayerNormScaleShift(hidden_size,
+                                                          norm_type="layer",
+                                                          eps=1e-6,
+                                                          elementwise_affine=False,
+                                                          dtype=dtype)
         self.output_residual = ScaleResidual()
 
         # Activation function
@@ -343,12 +315,11 @@ class MMSingleStreamBlock(nn.Module):
                                              prefix=f"{prefix}.modulation")
 
         # Distributed attention
-        self.attn = DistributedAttention(
-            num_heads=num_attention_heads,
-            head_size=head_dim,
-            causal=False,
-            supported_attention_backends=supported_attention_backends,
-            prefix=f"{prefix}.attn")
+        self.attn = DistributedAttention(num_heads=num_attention_heads,
+                                         head_size=head_dim,
+                                         causal=False,
+                                         supported_attention_backends=supported_attention_backends,
+                                         prefix=f"{prefix}.attn")
 
     def forward(
         self,
@@ -368,9 +339,7 @@ class MMSingleStreamBlock(nn.Module):
         linear1_out, _ = self.linear1(x_mod)
 
         # Split into QKV and MLP parts
-        qkv, mlp = torch.split(linear1_out,
-                               [3 * self.hidden_size, self.mlp_hidden_dim],
-                               dim=-1)
+        qkv, mlp = torch.split(linear1_out, [3 * self.hidden_size, self.mlp_hidden_dim], dim=-1)
 
         # Process QKV
         batch_size, seq_len = qkv.shape[0], qkv.shape[1]
@@ -386,12 +355,16 @@ class MMSingleStreamBlock(nn.Module):
         img_k, txt_k = k[:, :-txt_len], k[:, -txt_len:]
         img_v, txt_v = v[:, :-txt_len], v[:, -txt_len:]
 
-
         # Run distributed attention
-        img_attn_output, txt_attn_output = self.attn(img_q, img_k, img_v, original_seq_len, txt_q,
-                                                     txt_k, txt_v, freqs_cis = freqs_cis)
-        attn_output = torch.cat((img_attn_output, txt_attn_output),
-                                dim=1).view(batch_size, seq_len, -1)
+        img_attn_output, txt_attn_output = self.attn(img_q,
+                                                     img_k,
+                                                     img_v,
+                                                     original_seq_len,
+                                                     txt_q,
+                                                     txt_k,
+                                                     txt_v,
+                                                     freqs_cis=freqs_cis)
+        attn_output = torch.cat((img_attn_output, txt_attn_output), dim=1).view(batch_size, seq_len, -1)
         # Process MLP activation
         mlp_output = self.mlp_act(mlp)
 
@@ -421,19 +394,15 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
     # shard single stream, double stream blocks, and refiner_blocks
     _fsdp_shard_conditions = HunyuanVideoConfig()._fsdp_shard_conditions
     _compile_conditions = HunyuanVideoConfig()._compile_conditions
-    _supported_attention_backends = HunyuanVideoConfig(
-    )._supported_attention_backends
+    _supported_attention_backends = HunyuanVideoConfig()._supported_attention_backends
     param_names_mapping = HunyuanVideoConfig().param_names_mapping
-    reverse_param_names_mapping = HunyuanVideoConfig(
-    ).reverse_param_names_mapping
+    reverse_param_names_mapping = HunyuanVideoConfig().reverse_param_names_mapping
     lora_param_names_mapping = HunyuanVideoConfig().lora_param_names_mapping
 
     def __init__(self, config: HunyuanVideoConfig, hf_config: dict[str, Any]):
         super().__init__(config=config, hf_config=hf_config)
 
-        self.patch_size = [
-            config.patch_size_t, config.patch_size, config.patch_size
-        ]
+        self.patch_size = [config.patch_size_t, config.patch_size, config.patch_size]
         self.in_channels = config.in_channels
         self.num_channels_latents = config.num_channels_latents
         self.out_channels = config.in_channels if config.out_channels is None else config.out_channels
@@ -448,9 +417,7 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
 
         pe_dim = config.hidden_size // config.num_attention_heads
         if sum(config.rope_axes_dim) != pe_dim:
-            raise ValueError(
-                f"Got {config.rope_axes_dim} but expected positional dim {pe_dim}"
-            )
+            raise ValueError(f"Got {config.rope_axes_dim} but expected positional dim {pe_dim}")
 
         self.hidden_size = config.hidden_size
         self.num_attention_heads = config.num_attention_heads
@@ -486,33 +453,27 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
 
         # Guidance modulation
         self.guidance_in = (TimestepEmbedder(
-            self.hidden_size,
-            act_layer="silu",
-            dtype=config.dtype,
-            prefix=f"{config.prefix}.guidance_in")
+            self.hidden_size, act_layer="silu", dtype=config.dtype, prefix=f"{config.prefix}.guidance_in")
                             if self.guidance_embeds else None)
 
         # Double blocks
         self.double_blocks = nn.ModuleList([
-            MMDoubleStreamBlock(
-                config.hidden_size,
-                config.num_attention_heads,
-                mlp_ratio=config.mlp_ratio,
-                dtype=config.dtype,
-                supported_attention_backends=self._supported_attention_backends,
-                prefix=f"{config.prefix}.double_blocks.{i}")
-            for i in range(config.num_layers)
+            MMDoubleStreamBlock(config.hidden_size,
+                                config.num_attention_heads,
+                                mlp_ratio=config.mlp_ratio,
+                                dtype=config.dtype,
+                                supported_attention_backends=self._supported_attention_backends,
+                                prefix=f"{config.prefix}.double_blocks.{i}") for i in range(config.num_layers)
         ])
 
         # Single blocks
         self.single_blocks = nn.ModuleList([
-            MMSingleStreamBlock(
-                config.hidden_size,
-                config.num_attention_heads,
-                mlp_ratio=config.mlp_ratio,
-                dtype=config.dtype,
-                supported_attention_backends=self._supported_attention_backends,
-                prefix=f"{config.prefix}.single_blocks.{i+config.num_layers}")
+            MMSingleStreamBlock(config.hidden_size,
+                                config.num_attention_heads,
+                                mlp_ratio=config.mlp_ratio,
+                                dtype=config.dtype,
+                                supported_attention_backends=self._supported_attention_backends,
+                                prefix=f"{config.prefix}.single_blocks.{i+config.num_layers}")
             for i in range(config.num_single_layers)
         ])
 
@@ -547,9 +508,7 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
             Tuple of (output)
         """
         if guidance is None:
-            guidance = torch.tensor([6016.0],
-                                    device=hidden_states.device,
-                                    dtype=hidden_states.dtype)
+            guidance = torch.tensor([6016.0], device=hidden_states.device, dtype=hidden_states.dtype)
 
         img = x = hidden_states
         t = timestep
@@ -571,9 +530,8 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
         )
 
         # Get rotary embeddings
-        freqs_cos, freqs_sin = get_rotary_pos_embed(
-            (tt, th, tw), self.hidden_size,
-            self.num_attention_heads, self.rope_dim_list, self.rope_theta)
+        freqs_cos, freqs_sin = get_rotary_pos_embed((tt, th, tw), self.hidden_size, self.num_attention_heads,
+                                                    self.rope_dim_list, self.rope_theta)
         freqs_cos = freqs_cos.to(x.device)
         freqs_sin = freqs_sin.to(x.device)
         # Prepare modulation vectors
@@ -644,18 +602,14 @@ class SingleTokenRefiner(nn.Module):
         super().__init__()
 
         # Input projection
-        self.input_embedder = ReplicatedLinear(
-            in_channels,
-            hidden_size,
-            bias=True,
-            params_dtype=dtype,
-            prefix=f"{prefix}.input_embedder")
+        self.input_embedder = ReplicatedLinear(in_channels,
+                                               hidden_size,
+                                               bias=True,
+                                               params_dtype=dtype,
+                                               prefix=f"{prefix}.input_embedder")
 
         # Timestep embedding
-        self.t_embedder = TimestepEmbedder(hidden_size,
-                                           act_layer="silu",
-                                           dtype=dtype,
-                                           prefix=f"{prefix}.t_embedder")
+        self.t_embedder = TimestepEmbedder(hidden_size, act_layer="silu", dtype=dtype, prefix=f"{prefix}.t_embedder")
 
         # Context embedding
         self.c_embedder = MLP(in_channels,
@@ -684,8 +638,7 @@ class SingleTokenRefiner(nn.Module):
 
         context_aware_representations = torch.mean(x, dim=1)
 
-        context_aware_representations = self.c_embedder(
-            context_aware_representations)
+        context_aware_representations = self.c_embedder(context_aware_representations)
         c = timestep_aware_representations + context_aware_representations
         # Project input
         x, _ = self.input_embedder(x)
@@ -714,10 +667,7 @@ class IndividualTokenRefinerBlock(nn.Module):
         mlp_hidden_dim = int(hidden_size * mlp_ratio)
 
         # Normalization and attention
-        self.norm1 = nn.LayerNorm(hidden_size,
-                                  eps=1e-6,
-                                  elementwise_affine=True,
-                                  dtype=dtype)
+        self.norm1 = nn.LayerNorm(hidden_size, eps=1e-6, elementwise_affine=True, dtype=dtype)
 
         self.self_attn_qkv = ReplicatedLinear(hidden_size,
                                               hidden_size * 3,
@@ -725,40 +675,29 @@ class IndividualTokenRefinerBlock(nn.Module):
                                               params_dtype=dtype,
                                               prefix=f"{prefix}.self_attn_qkv")
 
-        self.self_attn_proj = ReplicatedLinear(
-            hidden_size,
-            hidden_size,
-            bias=qkv_bias,
-            params_dtype=dtype,
-            prefix=f"{prefix}.self_attn_proj")
+        self.self_attn_proj = ReplicatedLinear(hidden_size,
+                                               hidden_size,
+                                               bias=qkv_bias,
+                                               params_dtype=dtype,
+                                               prefix=f"{prefix}.self_attn_proj")
 
         # MLP
-        self.norm2 = nn.LayerNorm(hidden_size,
-                                  eps=1e-6,
-                                  elementwise_affine=True,
-                                  dtype=dtype)
-        self.mlp = MLP(hidden_size,
-                       mlp_hidden_dim,
-                       bias=True,
-                       act_type="silu",
-                       dtype=dtype,
-                       prefix=f"{prefix}.mlp")
+        self.norm2 = nn.LayerNorm(hidden_size, eps=1e-6, elementwise_affine=True, dtype=dtype)
+        self.mlp = MLP(hidden_size, mlp_hidden_dim, bias=True, act_type="silu", dtype=dtype, prefix=f"{prefix}.mlp")
 
         # Modulation
-        self.adaLN_modulation = ModulateProjection(
-            hidden_size,
-            factor=2,
-            act_layer="silu",
-            dtype=dtype,
-            prefix=f"{prefix}.adaLN_modulation")
+        self.adaLN_modulation = ModulateProjection(hidden_size,
+                                                   factor=2,
+                                                   act_layer="silu",
+                                                   dtype=dtype,
+                                                   prefix=f"{prefix}.adaLN_modulation")
 
         # Scaled dot product attention
         self.attn = LocalAttention(
             num_heads=num_attention_heads,
             head_size=hidden_size // num_attention_heads,
             # TODO: remove hardcode
-            supported_attention_backends=(AttentionBackendEnum.FLASH_ATTN,
-                                          AttentionBackendEnum.TORCH_SDPA),
+            supported_attention_backends=(AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA),
         )
 
     def forward(self, x, c):
@@ -774,8 +713,7 @@ class IndividualTokenRefinerBlock(nn.Module):
 
         # Run scaled dot product attention
         attn_output = self.attn(q, k, v)  # [B, L, H, D]
-        attn_output = attn_output.reshape(batch_size, seq_len,
-                                          -1)  # [B, L, H*D]
+        attn_output = attn_output.reshape(batch_size, seq_len, -1)  # [B, L, H*D]
 
         # Project and apply residual connection with gating
         attn_out, _ = self.self_attn_proj(attn_output)
@@ -793,19 +731,11 @@ class FinalLayer(nn.Module):
     The final layer of DiT that projects features to pixel space.
     """
 
-    def __init__(self,
-                 hidden_size,
-                 patch_size,
-                 out_channels,
-                 dtype=None,
-                 prefix: str = "") -> None:
+    def __init__(self, hidden_size, patch_size, out_channels, dtype=None, prefix: str = "") -> None:
         super().__init__()
 
         # Normalization
-        self.norm_final = nn.LayerNorm(hidden_size,
-                                       eps=1e-6,
-                                       elementwise_affine=False,
-                                       dtype=dtype)
+        self.norm_final = nn.LayerNorm(hidden_size, eps=1e-6, elementwise_affine=False, dtype=dtype)
 
         output_dim = patch_size[0] * patch_size[1] * patch_size[2] * out_channels
 
@@ -816,12 +746,11 @@ class FinalLayer(nn.Module):
                                        prefix=f"{prefix}.linear")
 
         # Modulation
-        self.adaLN_modulation = ModulateProjection(
-            hidden_size,
-            factor=2,
-            act_layer="silu",
-            dtype=dtype,
-            prefix=f"{prefix}.adaLN_modulation")
+        self.adaLN_modulation = ModulateProjection(hidden_size,
+                                                   factor=2,
+                                                   act_layer="silu",
+                                                   dtype=dtype,
+                                                   prefix=f"{prefix}.adaLN_modulation")
 
     def forward(self, x, c):
         # What the heck HF? Why you change the scale and shift order here???
@@ -829,6 +758,7 @@ class FinalLayer(nn.Module):
         x = self.norm_final(x) * (1.0 + scale.unsqueeze(1)) + shift.unsqueeze(1)
         x, _ = self.linear(x)
         return x
+
 
 # Entry point for model registry
 EntryClass = HunyuanVideoTransformer3DModel

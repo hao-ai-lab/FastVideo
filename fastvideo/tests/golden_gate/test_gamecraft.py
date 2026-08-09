@@ -30,10 +30,10 @@ def _build_block(layer: int) -> torch.nn.Module:
 
     arch = HunyuanGameCraftArchConfig()
     return MMDoubleStreamBlock(
-        hidden_size=arch.hidden_size,                    # 3072
-        num_attention_heads=arch.num_attention_heads,    # 24
-        mlp_ratio=arch.mlp_ratio,                        # 4.0
-        dtype=arch.dtype,                                # None
+        hidden_size=arch.hidden_size,  # 3072
+        num_attention_heads=arch.num_attention_heads,  # 24
+        mlp_ratio=arch.mlp_ratio,  # 4.0
+        dtype=arch.dtype,  # None
         supported_attention_backends=arch._supported_attention_backends,
         prefix=f"hunyuan_gamecraft.double_blocks.{layer}",
     )
@@ -52,8 +52,7 @@ def _make_inputs(device: torch.device, seed: int) -> dict:
     tt, th, tw = 3, 4, 5
     img_seq, txt_seq = tt * th * tw, 32
 
-    freqs_cos, freqs_sin = get_rotary_pos_embed(
-        (tt, th, tw), HIDDEN, 24, [16, 56, 56], 256)  # -> [60, 128] fp32 each
+    freqs_cos, freqs_sin = get_rotary_pos_embed((tt, th, tw), HIDDEN, 24, [16, 56, 56], 256)  # -> [60, 128] fp32 each
 
     img = torch.randn(1, img_seq, HIDDEN, generator=generator, dtype=torch.float32)
     txt = torch.randn(1, txt_seq, HIDDEN, generator=generator, dtype=torch.float32)
@@ -63,8 +62,8 @@ def _make_inputs(device: torch.device, seed: int) -> dict:
         "img": img.to(device=device, dtype=torch.bfloat16),
         "txt": txt.to(device=device, dtype=torch.bfloat16),
         "vec": vec.to(device=device, dtype=torch.bfloat16),
-        "freqs_cis": (freqs_cos.to(device=device, dtype=torch.bfloat16),
-                      freqs_sin.to(device=device, dtype=torch.bfloat16)),
+        "freqs_cis": (freqs_cos.to(device=device,
+                                   dtype=torch.bfloat16), freqs_sin.to(device=device, dtype=torch.bfloat16)),
     }
 
 

@@ -99,8 +99,7 @@ class TestStageOverridesMirrorPresetSchema:
     def test_allowed_overrides_mirror_dataclass(self) -> None:
         import fastvideo.registry  # noqa: F401
         preset = get_preset("ltx2_two_stage", "ltx2")
-        refine_schema = next(
-            s for s in preset.stage_schemas if s.name == "refine")
+        refine_schema = next(s for s in preset.stage_schemas if s.name == "refine")
         assert refine_schema.allowed_overrides == refine_stage_override_fields()
 
     def test_roundtrip_through_validate_stage_overrides(self) -> None:
@@ -110,12 +109,10 @@ class TestStageOverridesMirrorPresetSchema:
             num_inference_steps=3,
             guidance_scale=1.0,
         )
-        validate_stage_overrides(
-            preset, {"refine": refine_override_to_dict(override)})
+        validate_stage_overrides(preset, {"refine": refine_override_to_dict(override)})
 
     def test_unknown_field_rejected(self) -> None:
         import fastvideo.registry  # noqa: F401
         preset = get_preset("ltx2_two_stage", "ltx2")
         with pytest.raises(ConfigValidationError):
-            validate_stage_overrides(
-                preset, {"refine": {"unknown_key": 1}})
+            validate_stage_overrides(preset, {"refine": {"unknown_key": 1}})

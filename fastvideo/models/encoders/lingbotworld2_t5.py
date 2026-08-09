@@ -35,8 +35,7 @@ def canonicalize(text: str, keep_punctuation_exact_string: str | None = None) ->
     if keep_punctuation_exact_string:
         text = keep_punctuation_exact_string.join(
             part.translate(str.maketrans("", "", string.punctuation))
-            for part in text.split(keep_punctuation_exact_string)
-        )
+            for part in text.split(keep_punctuation_exact_string))
     else:
         text = text.translate(str.maketrans("", "", string.punctuation))
     return " ".join(text.lower().split())
@@ -164,9 +163,8 @@ class T5RelativeEmbedding(nn.Module):
             rel_buckets = 0
             rel_pos = -torch.min(rel_pos, torch.zeros_like(rel_pos))
         max_exact = num_buckets // 2
-        rel_pos_large = max_exact + (
-            torch.log(rel_pos.float() / max_exact) / math.log(self.max_dist / max_exact) * (num_buckets - max_exact)
-        ).long()
+        rel_pos_large = max_exact + (torch.log(rel_pos.float() / max_exact) / math.log(self.max_dist / max_exact) *
+                                     (num_buckets - max_exact)).long()
         rel_pos_large = torch.min(rel_pos_large, torch.full_like(rel_pos_large, num_buckets - 1))
         rel_buckets += torch.where(rel_pos < max_exact, rel_pos, rel_pos_large)
         return rel_buckets
@@ -192,7 +190,10 @@ class T5SelfAttention(nn.Module):
         self.ffn = T5FeedForward(dim, dim_ffn, dropout)
         self.pos_embedding = None if shared_pos else T5RelativeEmbedding(num_buckets, num_heads, bidirectional=True)
 
-    def forward(self, x: torch.Tensor, mask: torch.Tensor | None = None, pos_bias: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(self,
+                x: torch.Tensor,
+                mask: torch.Tensor | None = None,
+                pos_bias: torch.Tensor | None = None) -> torch.Tensor:
         """Run self-attention and feed-forward residual updates."""
         e = pos_bias if self.pos_embedding is None else self.pos_embedding(x.size(1), x.size(1))
         x = self._fp16_clamp(x + self.attn(self.norm1(x), mask=mask, pos_bias=e))
@@ -218,20 +219,17 @@ class LingBotWorld2T5EncoderModel(TextEncoder):
         arch = config.arch_config
         self.token_embedding = nn.Embedding(arch.vocab_size, arch.dim)
         self.dropout = nn.Dropout(arch.dropout)
-        self.blocks = nn.ModuleList(
-            [
-                T5SelfAttention(
-                    arch.dim,
-                    arch.dim_attn,
-                    arch.dim_ffn,
-                    arch.num_heads,
-                    arch.num_buckets,
-                    shared_pos=False,
-                    dropout=arch.dropout,
-                )
-                for _ in range(arch.num_layers)
-            ]
-        )
+        self.blocks = nn.ModuleList([
+            T5SelfAttention(
+                arch.dim,
+                arch.dim_attn,
+                arch.dim_ffn,
+                arch.num_heads,
+                arch.num_buckets,
+                shared_pos=False,
+                dropout=arch.dropout,
+            ) for _ in range(arch.num_layers)
+        ])
         self.norm = T5LayerNorm(arch.dim)
 
     def forward(

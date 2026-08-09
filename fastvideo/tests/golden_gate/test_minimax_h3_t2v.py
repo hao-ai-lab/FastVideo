@@ -110,8 +110,7 @@ def _component_dir() -> Path:
 
     from huggingface_hub import hf_hub_download
 
-    index_path = Path(hf_hub_download(
-        MODEL_REPO_ID, "transformer/diffusion_pytorch_model.safetensors.index.json"))
+    index_path = Path(hf_hub_download(MODEL_REPO_ID, "transformer/diffusion_pytorch_model.safetensors.index.json"))
     weight_map = json.loads(index_path.read_text())["weight_map"]
     prefix = f"transformer_blocks.{LAYER}."
     shards = sorted({shard for name, shard in weight_map.items() if name.startswith(prefix)})
@@ -173,9 +172,9 @@ def _make_inputs(device: torch.device) -> dict:
     seq = n_text + n_audio + n_video
 
     token_tags = torch.cat([
-        torch.full((n_text,), 1, dtype=torch.long),
-        torch.full((n_audio,), 2, dtype=torch.long),
-        torch.full((n_video,), 0, dtype=torch.long),
+        torch.full((n_text, ), 1, dtype=torch.long),
+        torch.full((n_audio, ), 2, dtype=torch.long),
+        torch.full((n_video, ), 0, dtype=torch.long),
     ])
     timestep_indices = torch.zeros(seq, dtype=torch.long)
     timestep_indices[n_text:n_text + n_audio] = 1
@@ -214,8 +213,7 @@ def _golden_filename() -> str:
 
 def _resolve_golden() -> tuple[Path, bool]:
     """Return (path, exists). Local dir wins; falls back to the HF dataset."""
-    local_root = Path(os.environ.get(
-        "MINIMAX_H3_GATE_GOLDEN_DIR", Path(__file__).resolve().parent / "goldens"))
+    local_root = Path(os.environ.get("MINIMAX_H3_GATE_GOLDEN_DIR", Path(__file__).resolve().parent / "goldens"))
     local = local_root / _device_slug() / _golden_filename()
     if local.exists():
         return local, True
@@ -279,12 +277,10 @@ def test_minimax_h3_t2v_golden_gate() -> None:
     golden = torch.load(golden_path, weights_only=True)
     mismatches = {
         key: (value, meta["env"].get(key))
-        for key, value in golden["metadata"]["env"].items()
-        if meta["env"].get(key) != value
+        for key, value in golden["metadata"]["env"].items() if meta["env"].get(key) != value
     }
-    assert not mismatches, (
-        f"environment changed since golden was minted — re-mint deliberately rather "
-        f"than chasing bit drift. golden -> current: {mismatches}")
+    assert not mismatches, (f"environment changed since golden was minted — re-mint deliberately rather "
+                            f"than chasing bit drift. golden -> current: {mismatches}")
 
     drift = (out - golden["output"]).abs()
     print(f"golden-gate drift: max_abs={drift.max().item():.10f} "

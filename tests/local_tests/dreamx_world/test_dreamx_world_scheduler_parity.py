@@ -17,8 +17,7 @@ from omegaconf import OmegaConf
 from torch.testing import assert_close
 
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
-    FlowMatchEulerDiscreteScheduler as FastVideoFlowMatchEulerDiscreteScheduler,
-)
+    FlowMatchEulerDiscreteScheduler as FastVideoFlowMatchEulerDiscreteScheduler, )
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PARITY_SCOPE = "implementation_subcomponent"

@@ -85,11 +85,13 @@ def test_sliding_tile_attention():
 
     # Run correctness check directly
     results = check_correctness(b, h, n, d, causal, mean, std, error_mode='output')
-    assert results['TK vs FLEX']['avg_diff'] < 3e-6, f"Average difference: {results['TK vs FLEX']['avg_diff']} is too large"
-    assert results['TK vs FLEX']['max_diff'] < 4e-2, f"Maximum difference: {results['TK vs FLEX']['max_diff']} is too large"
+    assert results['TK vs FLEX'][
+        'avg_diff'] < 3e-6, f"Average difference: {results['TK vs FLEX']['avg_diff']} is too large"
+    assert results['TK vs FLEX'][
+        'max_diff'] < 4e-2, f"Maximum difference: {results['TK vs FLEX']['max_diff']} is too large"
     print(f"Average difference: {results['TK vs FLEX']['avg_diff']}")
     print(f"Maximum difference: {results['TK vs FLEX']['max_diff']}")
 
+
 if __name__ == "__main__":
     test_sliding_tile_attention()
-

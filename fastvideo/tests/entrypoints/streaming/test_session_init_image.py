@@ -10,8 +10,7 @@ import pytest
 from PIL import Image
 
 from fastvideo.entrypoints.streaming.session_init_image import (
-    persist_session_init_image,
-)
+    persist_session_init_image, )
 
 
 def _png_bytes(size: tuple[int, int] = (64, 64)) -> bytes:
@@ -32,11 +31,13 @@ class TestPersistSessionInitImage:
 
     def test_png_payload_persists(self, tmp_path):
         data = _png_bytes()
-        image = persist_session_init_image({
-            "mime": "image/png",
-            "name": "ref.png",
-            "data": base64.b64encode(data).decode("ascii"),
-        }, output_dir=str(tmp_path))
+        image = persist_session_init_image(
+            {
+                "mime": "image/png",
+                "name": "ref.png",
+                "data": base64.b64encode(data).decode("ascii"),
+            },
+            output_dir=str(tmp_path))
         assert image is not None
         assert os.path.exists(image.path)
         assert image.mime == "image/png"
@@ -66,11 +67,13 @@ class TestPersistSessionInitImage:
             }, output_dir=str(tmp_path))
 
     def test_display_name_sanitized(self, tmp_path):
-        image = persist_session_init_image({
-            "mime": "image/png",
-            "name": "../evil/../name.png",
-            "data": base64.b64encode(_png_bytes()).decode("ascii"),
-        }, output_dir=str(tmp_path))
+        image = persist_session_init_image(
+            {
+                "mime": "image/png",
+                "name": "../evil/../name.png",
+                "data": base64.b64encode(_png_bytes()).decode("ascii"),
+            },
+            output_dir=str(tmp_path))
         assert image is not None
         assert image.display_name == "name.png"
 
@@ -81,10 +84,11 @@ class TestPersistSessionInitImage:
         mod._MAX_IMAGE_BYTES = 100
         try:
             with pytest.raises(ValueError, match="limit"):
-                persist_session_init_image({
-                    "mime": "image/png",
-                    "data": base64.b64encode(_png_bytes((512, 512))).decode(
-                        "ascii"),
-                }, output_dir=str(tmp_path))
+                persist_session_init_image(
+                    {
+                        "mime": "image/png",
+                        "data": base64.b64encode(_png_bytes((512, 512))).decode("ascii"),
+                    },
+                    output_dir=str(tmp_path))
         finally:
             mod._MAX_IMAGE_BYTES = original

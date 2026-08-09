@@ -35,9 +35,10 @@ from fastvideo.models.vaes.hunyuan15vae import (
 # Cache size for temporal feature caching (number of frames to cache)
 CACHE_T = 2
 
+
 class HYWorldCausalConv3d(nn.Module):
     """Causal Conv3d with optional cache support for temporal feature caching."""
-    
+
     def __init__(
         self,
         in_channels: int,
@@ -60,8 +61,8 @@ class HYWorldCausalConv3d(nn.Module):
             kernel_size[0] // 2,  # W_right (spatial)
             kernel_size[1] // 2,  # H_left (spatial)
             kernel_size[1] // 2,  # H_right (spatial)
-            kernel_size[2] - 1,   # T_left (temporal causal padding)
-            0,                    # T_right (no future padding for causal)
+            kernel_size[2] - 1,  # T_left (temporal causal padding)
+            0,  # T_right (no future padding for causal)
         )
 
         self.conv = nn.Conv3d(in_channels, out_channels, kernel_size, stride, padding, dilation, bias=bias)
@@ -76,21 +77,21 @@ class HYWorldCausalConv3d(nn.Module):
                     When provided, uses cached frames instead of padding for temporal dimension.
         """
         padding = list(self.time_causal_padding)
-        
+
         if cache_x is not None and self.time_causal_padding[4] > 0:  # Has temporal padding and cache
             cache_x = cache_x.to(hidden_states.device)
             # Concatenate cached frames with current input on temporal dimension
             hidden_states = torch.cat([cache_x, hidden_states], dim=2)
             # Reduce temporal padding since we have cached frames
             padding[4] -= cache_x.shape[2]
-        
+
         hidden_states = F.pad(hidden_states, padding, mode=self.pad_mode)
         return self.conv(hidden_states)
 
 
 class HYWorldUpsample(nn.Module):
     """Hierarchical upsampling with temporal/spatial support and optional caching."""
-    
+
     def __init__(self, in_channels: int, out_channels: int, add_temporal_upsample: bool = True):
         super().__init__()
         factor = 2 * 2 * 2 if add_temporal_upsample else 1 * 2 * 2
@@ -99,7 +100,7 @@ class HYWorldUpsample(nn.Module):
         self.repeats = factor * out_channels // in_channels
 
     def forward(
-        self, 
+        self,
         x: torch.Tensor,
         feat_cache: Optional[List[Optional[torch.Tensor]]] = None,
         feat_idx: Optional[List[int]] = None,
@@ -133,7 +134,7 @@ class HYWorldUpsample(nn.Module):
             if first_chunk:
                 # First chunk: only spatial upsample
                 h = rearrange(h, "b (r2 r3 c) f h w -> b c f (h r2) (w r3)", r2=2, r3=2)
-                h = h[:, : h.shape[1] // 2]
+                h = h[:, :h.shape[1] // 2]
                 # Compute the shortcut part
                 shortcut = rearrange(x, "b (r2 r3 c) f h w -> b c f (h r2) (w r3)", r2=2, r3=2)
                 shortcut = shortcut.repeat_interleave(repeats=self.repeats // 2, dim=1)
@@ -146,7 +147,7 @@ class HYWorldUpsample(nn.Module):
 
                 # First frame: only spatial upsample
                 h_first = rearrange(h_first, "b (r2 r3 c) f h w -> b c f (h r2) (w r3)", r2=2, r3=2)
-                h_first = h_first[:, : h_first.shape[1] // 2]
+                h_first = h_first[:, :h_first.shape[1] // 2]
                 shortcut_first = rearrange(x_first, "b (r2 r3 c) f h w -> b c f (h r2) (w r3)", r2=2, r3=2)
                 shortcut_first = shortcut_first.repeat_interleave(repeats=self.repeats // 2, dim=1)
                 out_first = h_first + shortcut_first
@@ -167,13 +168,13 @@ class HYWorldUpsample(nn.Module):
             h = rearrange(h, "b (r1 r2 r3 c) f h w -> b c (f r1) (h r2) (w r3)", r1=r1, r2=2, r3=2)
             shortcut = x.repeat_interleave(repeats=self.repeats, dim=1)
             shortcut = rearrange(shortcut, "b (r1 r2 r3 c) f h w -> b c (f r1) (h r2) (w r3)", r1=r1, r2=2, r3=2)
-        
+
         return h + shortcut
 
 
 class HYWorldDownsample(nn.Module):
     """Hierarchical downsampling with temporal/spatial support and optional caching."""
-    
+
     def __init__(self, in_channels: int, out_channels: int, add_temporal_downsample: bool = True):
         super().__init__()
         factor = 2 * 2 * 2 if add_temporal_downsample else 1 * 2 * 2
@@ -183,7 +184,7 @@ class HYWorldDownsample(nn.Module):
         self.group_size = factor * in_channels // out_channels
 
     def forward(
-        self, 
+        self,
         x: torch.Tensor,
         feat_cache: Optional[List[Optional[torch.Tensor]]] = None,
         feat_idx: Optional[List[int]] = None,
@@ -197,7 +198,7 @@ class HYWorldDownsample(nn.Module):
             feat_idx: List containing current cache index [idx]
         """
         r1 = 2 if self.add_temporal_downsample else 1
-        
+
         # Apply conv with caching
         if feat_cache is not None and feat_idx is not None:
             idx = feat_idx[0]
@@ -211,8 +212,8 @@ class HYWorldDownsample(nn.Module):
             feat_cache[idx] = cache_x
             feat_idx[0] += 1
         else:
-            h = self.conv(x) # Change the channel, ready for spatial or temporal downsample
-        
+            h = self.conv(x)  # Change the channel, ready for spatial or temporal downsample
+
         if self.add_temporal_downsample:
             if x.shape[2] == 1:
                 # Single frame: only spatial downsample
@@ -239,6 +240,7 @@ class HYWorldDownsample(nn.Module):
 
 
 class HYWorldResnetBlock(nn.Module):
+
     def __init__(
         self,
         in_channels: int,
@@ -259,9 +261,9 @@ class HYWorldResnetBlock(nn.Module):
         self.conv2 = HYWorldCausalConv3d(out_channels, out_channels, kernel_size=3)
         if in_channels != out_channels:
             self.nin_shortcut = nn.Conv3d(in_channels, out_channels, kernel_size=1, stride=1, padding=0)
-    
+
     def forward(
-        self, 
+        self,
         hidden_states: torch.Tensor,
         feat_cache: Optional[List[Optional[torch.Tensor]]] = None,
         feat_idx: Optional[List[int]] = None,
@@ -278,7 +280,7 @@ class HYWorldResnetBlock(nn.Module):
 
         hidden_states = self.norm1(hidden_states)
         hidden_states = self.nonlinearity(hidden_states)
-        
+
         # apply the feature cacheing mechanism
         if feat_cache is not None and feat_idx is not None:
             # Retrieve the current layer index.
@@ -286,7 +288,7 @@ class HYWorldResnetBlock(nn.Module):
 
             # Clone the last CACHE_T frames from the current input to store for the next step.
             cache_x = hidden_states[:, :, -CACHE_T:, :, :].clone()
-            
+
             # Handle boundary conditions: if the current temporal chunk is too short (< 2 frames)
             # and we have a previous cache, prepend the last frame of the previous cache.
             # This ensures sufficient temporal context for the convolution kernel.
@@ -296,10 +298,10 @@ class HYWorldResnetBlock(nn.Module):
                     [feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device), cache_x],
                     dim=2,
                 )
-            
+
             # Apply the convolution layer using `hidden_states`and the *previous* cached state.
             hidden_states = self.conv1(hidden_states, feat_cache[idx])
-            
+
             # Update the cache for this layer with the newly prepared context ('cache_x').
             feat_cache[idx] = cache_x
 
@@ -334,7 +336,7 @@ class HYWorldResnetBlock(nn.Module):
 
 class HYWorldMidBlock(nn.Module):
     """Mid block with attention and resnet blocks, with optional caching support."""
-    
+
     def __init__(
         self,
         in_channels: int,
@@ -345,12 +347,10 @@ class HYWorldMidBlock(nn.Module):
         self.add_attention = add_attention
 
         # There is always at least one resnet
-        resnets = [
-            HYWorldResnetBlock(
-                in_channels=in_channels,
-                out_channels=in_channels,
-            )
-        ]
+        resnets = [HYWorldResnetBlock(
+            in_channels=in_channels,
+            out_channels=in_channels,
+        )]
         attentions = []
 
         for _ in range(num_layers):
@@ -359,12 +359,10 @@ class HYWorldMidBlock(nn.Module):
             else:
                 attentions.append(None)
 
-            resnets.append(
-                HYWorldResnetBlock(
-                    in_channels=in_channels,
-                    out_channels=in_channels,
-                )
-            )
+            resnets.append(HYWorldResnetBlock(
+                in_channels=in_channels,
+                out_channels=in_channels,
+            ))
 
         self.attentions = nn.ModuleList(attentions)
         self.resnets = nn.ModuleList(resnets)
@@ -372,7 +370,7 @@ class HYWorldMidBlock(nn.Module):
         self.gradient_checkpointing = False
 
     def forward(
-        self, 
+        self,
         hidden_states: torch.Tensor,
         feat_cache: Optional[List[Optional[torch.Tensor]]] = None,
         feat_idx: Optional[List[int]] = None,
@@ -397,7 +395,7 @@ class HYWorldMidBlock(nn.Module):
 
 class HYWorldDownBlock3D(nn.Module):
     """Down block with resnet blocks and optional downsampling, with caching support."""
-    
+
     def __init__(
         self,
         in_channels: int,
@@ -411,32 +409,28 @@ class HYWorldDownBlock3D(nn.Module):
 
         for i in range(num_layers):
             in_channels = in_channels if i == 0 else out_channels
-            resnets.append(
-                HYWorldResnetBlock(
-                    in_channels=in_channels,
-                    out_channels=out_channels,
-                )
-            )
+            resnets.append(HYWorldResnetBlock(
+                in_channels=in_channels,
+                out_channels=out_channels,
+            ))
 
         self.resnets = nn.ModuleList(resnets)
 
         if downsample_out_channels is not None:
-            self.downsamplers = nn.ModuleList(
-                [
-                    HYWorldDownsample(
-                        out_channels,
-                        out_channels=downsample_out_channels,
-                        add_temporal_downsample=add_temporal_downsample,
-                    )
-                ]
-            )
+            self.downsamplers = nn.ModuleList([
+                HYWorldDownsample(
+                    out_channels,
+                    out_channels=downsample_out_channels,
+                    add_temporal_downsample=add_temporal_downsample,
+                )
+            ])
         else:
             self.downsamplers = None
 
         self.gradient_checkpointing = False
 
     def forward(
-        self, 
+        self,
         hidden_states: torch.Tensor,
         feat_cache: Optional[List[Optional[torch.Tensor]]] = None,
         feat_idx: Optional[List[int]] = None,
@@ -461,7 +455,7 @@ class HYWorldDownBlock3D(nn.Module):
 
 class HYWorldUpBlock3D(nn.Module):
     """Up block with resnet blocks and optional upsampling, with caching support."""
-    
+
     def __init__(
         self,
         in_channels: int,
@@ -476,32 +470,28 @@ class HYWorldUpBlock3D(nn.Module):
         for i in range(num_layers):
             input_channels = in_channels if i == 0 else out_channels
 
-            resnets.append(
-                HYWorldResnetBlock(
-                    in_channels=input_channels,
-                    out_channels=out_channels,
-                )
-            )
+            resnets.append(HYWorldResnetBlock(
+                in_channels=input_channels,
+                out_channels=out_channels,
+            ))
 
         self.resnets = nn.ModuleList(resnets)
 
         if upsample_out_channels is not None:
-            self.upsamplers = nn.ModuleList(
-                [
-                    HYWorldUpsample(
-                        out_channels,
-                        out_channels=upsample_out_channels,
-                        add_temporal_upsample=add_temporal_upsample,
-                    )
-                ]
-            )
+            self.upsamplers = nn.ModuleList([
+                HYWorldUpsample(
+                    out_channels,
+                    out_channels=upsample_out_channels,
+                    add_temporal_upsample=add_temporal_upsample,
+                )
+            ])
         else:
             self.upsamplers = None
 
         self.gradient_checkpointing = False
 
     def forward(
-        self, 
+        self,
         hidden_states: torch.Tensor,
         feat_cache: Optional[List[Optional[torch.Tensor]]] = None,
         feat_idx: Optional[List[int]] = None,
@@ -592,7 +582,7 @@ class HYWorldEncoder3D(nn.Module):
         self.gradient_checkpointing = False
 
     def forward(
-        self, 
+        self,
         hidden_states: torch.Tensor,
         feat_cache: Optional[List[Optional[torch.Tensor]]] = None,
         feat_idx: Optional[List[int]] = None,
@@ -720,7 +710,7 @@ class HYWorldDecoder3D(nn.Module):
         self.gradient_checkpointing = False
 
     def forward(
-        self, 
+        self,
         hidden_states: torch.Tensor,
         feat_cache: Optional[List[Optional[torch.Tensor]]] = None,
         feat_idx: Optional[List[int]] = None,
@@ -745,8 +735,7 @@ class HYWorldDecoder3D(nn.Module):
                     dim=2,
                 )
             hidden_states = self.conv_in(hidden_states, feat_cache[idx]) + hidden_states.repeat_interleave(
-                repeats=self.repeat, dim=1
-            )
+                repeats=self.repeat, dim=1)
             feat_cache[idx] = cache_x
             feat_idx[0] += 1
         else:
@@ -779,7 +768,7 @@ class HYWorldDecoder3D(nn.Module):
             feat_idx[0] += 1
         else:
             hidden_states = self.conv_out(hidden_states)
-        
+
         return hidden_states
 
 
@@ -792,8 +781,8 @@ class AutoencoderKLHYWorld(nn.Module, ParallelTiledVAE):
     _supports_gradient_checkpointing = True
 
     def __init__(
-        self,
-        config: Hunyuan15VAEConfig, # HYWorld use the same VAE architecture as HunyuanVideo-1.5
+            self,
+            config: Hunyuan15VAEConfig,  # HYWorld use the same VAE architecture as HunyuanVideo-1.5
     ) -> None:
         nn.Module.__init__(self)
         ParallelTiledVAE.__init__(self, config)
@@ -829,7 +818,7 @@ class AutoencoderKLHYWorld(nn.Module, ParallelTiledVAE):
         # The minimal tile height and width for spatial tiling to be used
         self.tile_sample_min_height = 256
         self.tile_sample_min_width = 256
-        self.tile_sample_min_num_frames = 2000 # Fill in a random large number, as hy1.5 vae does not use temporal tiling
+        self.tile_sample_min_num_frames = 2000  # Fill in a random large number, as hy1.5 vae does not use temporal tiling
 
         # Cache-related attributes (initialized in clear_cache)
         self._conv_num: int = 0
@@ -841,16 +830,10 @@ class AutoencoderKLHYWorld(nn.Module, ParallelTiledVAE):
 
         # Precompute and cache conv counts for encoder and decoder for clear_cache speedup
         self._cached_conv_counts = {
-            "decoder": (
-                sum(1 for m in self.decoder.modules() if isinstance(m, HYWorldCausalConv3d))
-                if self.decoder is not None
-                else 0
-            ),
-            "encoder": (
-                sum(1 for m in self.encoder.modules() if isinstance(m, HYWorldCausalConv3d))
-                if self.encoder is not None
-                else 0
-            ),
+            "decoder": (sum(1 for m in self.decoder.modules()
+                            if isinstance(m, HYWorldCausalConv3d)) if self.decoder is not None else 0),
+            "encoder": (sum(1 for m in self.encoder.modules()
+                            if isinstance(m, HYWorldCausalConv3d)) if self.encoder is not None else 0),
         }
 
     def clear_cache(self) -> None:
@@ -864,7 +847,7 @@ class AutoencoderKLHYWorld(nn.Module, ParallelTiledVAE):
         self._conv_num = self._cached_conv_counts["decoder"]
         self._conv_idx = [0]
         self._feat_map: List[Optional[torch.Tensor]] = [None] * self._conv_num
-        
+
         # Cache for encoder
         self._enc_conv_num = self._cached_conv_counts["encoder"]
         self._enc_conv_idx = [0]
@@ -888,7 +871,7 @@ class AutoencoderKLHYWorld(nn.Module, ParallelTiledVAE):
         _, _, num_frame, _, _ = x.shape
 
         self.clear_cache()
-        
+
         # Process in chunks: first frame alone, then groups of 4 frames
         iter_ = 1 + (num_frame - 1) // 4
         for i in range(iter_):
@@ -903,7 +886,7 @@ class AutoencoderKLHYWorld(nn.Module, ParallelTiledVAE):
             else:
                 # Subsequent frames in groups of 4
                 out_ = self.encoder(
-                    x[:, :, 1 + 4 * (i - 1) : 1 + 4 * i, :, :],
+                    x[:, :, 1 + 4 * (i - 1):1 + 4 * i, :, :],
                     feat_cache=self._enc_feat_map,
                     feat_idx=self._enc_conv_idx,
                 )
@@ -930,14 +913,14 @@ class AutoencoderKLHYWorld(nn.Module, ParallelTiledVAE):
         _, _, num_frame, _, _ = z.shape
 
         self.clear_cache()
-        
+
         # Process one frame at a time with caching
         for i in range(num_frame):
             self._conv_idx = [0]
             if i == 0:
                 # First frame with first_chunk=True
                 out = self.decoder(
-                    z[:, :, i : i + 1, :, :],
+                    z[:, :, i:i + 1, :, :],
                     feat_cache=self._feat_map,
                     feat_idx=self._conv_idx,
                     first_chunk=True,
@@ -945,7 +928,7 @@ class AutoencoderKLHYWorld(nn.Module, ParallelTiledVAE):
             else:
                 # Subsequent frames
                 out_ = self.decoder(
-                    z[:, :, i : i + 1, :, :],
+                    z[:, :, i:i + 1, :, :],
                     feat_cache=self._feat_map,
                     feat_idx=self._conv_idx,
                     first_chunk=False,
@@ -983,6 +966,7 @@ class AutoencoderKLHYWorld(nn.Module, ParallelTiledVAE):
         dec = self.decode(z)
 
         return dec
+
 
 # Entry point for model registry
 EntryClass = AutoencoderKLHYWorld

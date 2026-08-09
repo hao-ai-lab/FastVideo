@@ -25,7 +25,6 @@ from fastvideo.configs.models.encoders.minimax_h3_qwen3_vl import MiniMaxH3Qwen3
 from fastvideo.distributed import cleanup_dist_env_and_memory, maybe_init_distributed_environment_and_model_parallel
 from fastvideo.models.loader.component_loader import TextEncoderLoader
 
-
 PARITY_SCOPE = "production_loader"
 MINIMAX_H3_TEXT_ENCODER_LAYER = 50
 
@@ -114,13 +113,10 @@ def _make_cases(root: Path) -> dict[str, dict[str, torch.Tensor]]:
     image_grid_thw = image_inputs["image_grid_thw"]
     merge_area = int(processor.image_processor.merge_size)**2
     image_token_count = int(image_grid_thw[0].prod().item()) // merge_area
-    image_ids = (
-        tokenizer("<Picture 1>: ", add_special_tokens=False)["input_ids"]
-        + [_token_id(tokenizer, "<|vision_start|>")]
-        + [_token_id(tokenizer, "<|image_pad|>")] * image_token_count
-        + [_token_id(tokenizer, "<|vision_end|>")]
-        + prompt_ids
-    )
+    image_ids = (tokenizer("<Picture 1>: ", add_special_tokens=False)["input_ids"] +
+                 [_token_id(tokenizer, "<|vision_start|>")] +
+                 [_token_id(tokenizer, "<|image_pad|>")] * image_token_count +
+                 [_token_id(tokenizer, "<|vision_end|>")] + prompt_ids)
     cases["image"] = {
         "input_ids": torch.tensor([image_ids], dtype=torch.long),
         "attention_mask": torch.ones(1, len(image_ids), dtype=torch.long),
@@ -136,11 +132,9 @@ def _make_cases(root: Path) -> dict[str, dict[str, torch.Tensor]]:
     video_tokens_per_block = grid_height * grid_width // int(processor.video_processor.merge_size)**2
     video_ids = tokenizer("<Video 1>: ", add_special_tokens=False)["input_ids"]
     for _ in range(temporal_blocks):
-        video_ids += (
-            [_token_id(tokenizer, "<|vision_start|>")]
-            + [_token_id(tokenizer, "<|video_pad|>")] * video_tokens_per_block
-            + [_token_id(tokenizer, "<|vision_end|>")]
-        )
+        video_ids += ([_token_id(tokenizer, "<|vision_start|>")] +
+                      [_token_id(tokenizer, "<|video_pad|>")] * video_tokens_per_block +
+                      [_token_id(tokenizer, "<|vision_end|>")])
     video_ids += prompt_ids
     cases["video"] = {
         "input_ids": torch.tensor([video_ids], dtype=torch.long),
@@ -179,8 +173,8 @@ def _run_cases(
 def _production_loader_args() -> SimpleNamespace:
     return SimpleNamespace(
         pipeline_config=SimpleNamespace(
-            text_encoder_configs=(MiniMaxH3Qwen3VLConfig(),),
-            text_encoder_precisions=("bf16",),
+            text_encoder_configs=(MiniMaxH3Qwen3VLConfig(), ),
+            text_encoder_precisions=("bf16", ),
         ),
         text_encoder_cpu_offload=False,
         override_text_encoder_quant=None,
@@ -212,8 +206,7 @@ def test_minimax_h3_qwen3_vl_parity() -> None:
     )
     load_errors = {
         name: loading_info.get(name, [])
-        for name in ("missing_keys", "unexpected_keys", "mismatched_keys", "error_msgs")
-        if loading_info.get(name)
+        for name in ("missing_keys", "unexpected_keys", "mismatched_keys", "error_msgs") if loading_info.get(name)
     }
     assert not load_errors, f"Official Qwen3-VL checkpoint did not load strictly: {load_errors}"
     official = official_full.model.eval().to(device)

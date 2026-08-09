@@ -13,10 +13,7 @@ from fastvideo.train.utils.validation_media import write_validation_mp4
 
 def _rgb_frames(frame_count: int) -> list[np.ndarray]:
     """Create distinct even-sized RGB frames for codec tests."""
-    return [
-        np.full((16, 24, 3), fill_value=frame_index * 10, dtype=np.uint8)
-        for frame_index in range(frame_count)
-    ]
+    return [np.full((16, 24, 3), fill_value=frame_index * 10, dtype=np.uint8) for frame_index in range(frame_count)]
 
 
 def _stereo_waveform(sample_count: int, sample_rate: int) -> np.ndarray:

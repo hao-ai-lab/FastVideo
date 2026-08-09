@@ -23,19 +23,25 @@ def _by_stem(directory: Path, exts: set[str]) -> dict[str, Path]:
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description=__doc__,
-                                formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--candidate-dir", type=Path, default=None,
-                   help="Directory of candidate clips (directory mode).")
-    p.add_argument("--reference", action="append", default=[], metavar="NAME=DIR",
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--candidate-dir", type=Path, default=None, help="Directory of candidate clips (directory mode).")
+    p.add_argument("--reference",
+                   action="append",
+                   default=[],
+                   metavar="NAME=DIR",
                    help="Baseline directory, repeatable: 'name=dir' or bare 'dir'.")
-    p.add_argument("--image-dir", type=Path, default=None,
+    p.add_argument("--image-dir",
+                   type=Path,
+                   default=None,
                    help="Optional first-frame images, matched to clips by stem.")
-    p.add_argument("--prompts-json", type=Path, default=None,
-                   help="Optional {stem: control-signal text} JSON.")
-    p.add_argument("--actions-json", type=Path, default=None,
+    p.add_argument("--prompts-json", type=Path, default=None, help="Optional {stem: control-signal text} JSON.")
+    p.add_argument("--actions-json",
+                   type=Path,
+                   default=None,
                    help="Optional {stem: action-label} JSON for the per-action breakdown.")
-    p.add_argument("--manifest", type=Path, default=None,
+    p.add_argument("--manifest",
+                   type=Path,
+                   default=None,
                    help="JSON list of {baseline, video_path, reference_path, ...} rows.")
     p.add_argument("--output", type=Path, default=None)
     args = p.parse_args()
@@ -44,8 +50,7 @@ def main() -> None:
     by_baseline: dict[str, list[dict]] = defaultdict(list)
     if args.manifest is not None:
         for row in json.loads(args.manifest.read_text()):
-            by_baseline[row.get("baseline", "baseline")].append(
-                {k: v for k, v in row.items() if k != "baseline"})
+            by_baseline[row.get("baseline", "baseline")].append({k: v for k, v in row.items() if k != "baseline"})
     elif args.candidate_dir is not None and args.reference:
         cands = _by_stem(args.candidate_dir, VIDEO_EXTS)
         images = _by_stem(args.image_dir, IMAGE_EXTS) if args.image_dir else {}

@@ -9,11 +9,9 @@ import re
 
 DEFAULT_PROMPTS = [
     "a photo of a cat",
-    (
-        "a cinematic photo of a red panda wearing a tiny backpack, standing on a "
-        "rainy neon-lit street at night, shallow depth of field, sharp focus, "
-        "35mm, bokeh"
-    ),
+    ("a cinematic photo of a red panda wearing a tiny backpack, standing on a "
+     "rainy neon-lit street at night, shallow depth of field, sharp focus, "
+     "35mm, bokeh"),
 ]
 
 
@@ -42,9 +40,7 @@ def _remove_existing_outputs(out_dir: str, filename_base: str) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(
-        description="Run FLUX.1-dev text-to-image with FastVideo VideoGenerator.",
-    )
+    p = argparse.ArgumentParser(description="Run FLUX.1-dev text-to-image with FastVideo VideoGenerator.", )
     p.add_argument(
         "--model-path",
         default="official_weights/FLUX.1-dev",
@@ -108,9 +104,7 @@ def main() -> None:
     try:
         for i, prompt in enumerate(prompts):
             seed = args.seed + i
-            filename_base = (
-                f"flux_dev_{i:02d}_seed{seed}_{_safe_filename(prompt, max_len=80)}"
-            )
+            filename_base = (f"flux_dev_{i:02d}_seed{seed}_{_safe_filename(prompt, max_len=80)}")
             _remove_existing_outputs(args.out_dir, filename_base)
             output_path = os.path.join(args.out_dir, f"{filename_base}.png")
             print(f"[flux] prompt_idx={i} seed={seed} output_path={output_path}")

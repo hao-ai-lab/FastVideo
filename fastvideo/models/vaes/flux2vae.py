@@ -63,7 +63,7 @@ class AutoencoderKLFlux2(nn.Module, ParallelTiledVAE):
         batch_norm_eps: float = arch_config.batch_norm_eps
         batch_norm_momentum: float = arch_config.batch_norm_momentum
         patch_size: Tuple[int, int] = arch_config.patch_size
-        
+
         # pass init params to Encoder
         self.encoder = Encoder(
             in_channels=in_channels,
@@ -89,16 +89,8 @@ class AutoencoderKLFlux2(nn.Module, ParallelTiledVAE):
             mid_block_add_attention=mid_block_add_attention,
         )
 
-        self.quant_conv = (
-            nn.Conv2d(2 * latent_channels, 2 * latent_channels, 1)
-            if use_quant_conv
-            else None
-        )
-        self.post_quant_conv = (
-            nn.Conv2d(latent_channels, latent_channels, 1)
-            if use_post_quant_conv
-            else None
-        )
+        self.quant_conv = (nn.Conv2d(2 * latent_channels, 2 * latent_channels, 1) if use_quant_conv else None)
+        self.post_quant_conv = (nn.Conv2d(latent_channels, latent_channels, 1) if use_post_quant_conv else None)
 
         self.bn = nn.BatchNorm2d(
             math.prod(patch_size) * latent_channels,
@@ -113,14 +105,8 @@ class AutoencoderKLFlux2(nn.Module, ParallelTiledVAE):
 
         # only relevant if vae tiling is enabled
         self.tile_sample_min_size = sample_size
-        sample_size_val = (
-            sample_size[0]
-            if isinstance(sample_size, (list, tuple))
-            else sample_size
-        )
-        self.tile_latent_min_size = int(
-            sample_size_val / (2 ** (len(block_out_channels) - 1))
-        )
+        sample_size_val = (sample_size[0] if isinstance(sample_size, (list, tuple)) else sample_size)
+        self.tile_latent_min_size = int(sample_size_val / (2**(len(block_out_channels) - 1)))
         self.tile_overlap_factor = 0.25
 
     @property
@@ -153,9 +139,7 @@ class AutoencoderKLFlux2(nn.Module, ParallelTiledVAE):
         return processors
 
     # Copied from diffusers.models.unets.unet_2d_condition.UNet2DConditionModel.set_attn_processor
-    def set_attn_processor(
-        self, processor: Union[AttentionProcessor, Dict[str, AttentionProcessor]]
-    ):
+    def set_attn_processor(self, processor: Union[AttentionProcessor, Dict[str, AttentionProcessor]]):
         r"""
         Sets the attention processor to use to compute attention.
 
@@ -173,8 +157,7 @@ class AutoencoderKLFlux2(nn.Module, ParallelTiledVAE):
         if isinstance(processor, dict) and len(processor) != count:
             raise ValueError(
                 f"A dict of processors was passed, but the number of processors {len(processor)} does not match the"
-                f" number of attention layers: {count}. Please make sure to pass {count} processor classes."
-            )
+                f" number of attention layers: {count}. Please make sure to pass {count} processor classes.")
 
         def fn_recursive_attn_processor(name: str, module: torch.nn.Module, processor):
             if hasattr(module, "set_processor"):
@@ -194,15 +177,9 @@ class AutoencoderKLFlux2(nn.Module, ParallelTiledVAE):
         """
         Disables custom attention processors and sets the default attention implementation.
         """
-        if all(
-            proc.__class__ in ADDED_KV_ATTENTION_PROCESSORS
-            for proc in self.attn_processors.values()
-        ):
+        if all(proc.__class__ in ADDED_KV_ATTENTION_PROCESSORS for proc in self.attn_processors.values()):
             processor = AttnAddedKVProcessor()
-        elif all(
-            proc.__class__ in CROSS_ATTENTION_PROCESSORS
-            for proc in self.attn_processors.values()
-        ):
+        elif all(proc.__class__ in CROSS_ATTENTION_PROCESSORS for proc in self.attn_processors.values()):
             processor = AttnProcessor()
         else:
             raise ValueError(
@@ -214,9 +191,7 @@ class AutoencoderKLFlux2(nn.Module, ParallelTiledVAE):
     def _encode(self, x: torch.Tensor) -> torch.Tensor:
         batch_size, num_channels, height, width = x.shape
 
-        if self.use_tiling and (
-            width > self.tile_sample_min_size or height > self.tile_sample_min_size
-        ):
+        if self.use_tiling and (width > self.tile_sample_min_size or height > self.tile_sample_min_size):
             return self._tiled_encode(x)
 
         enc = self.encoder(x)
@@ -225,9 +200,9 @@ class AutoencoderKLFlux2(nn.Module, ParallelTiledVAE):
 
         return enc
 
-    def encode(
-        self, x: torch.Tensor, return_dict: bool = True
-    ) -> Union[AutoencoderKLOutput, Tuple[DiagonalGaussianDistribution]]:
+    def encode(self,
+               x: torch.Tensor,
+               return_dict: bool = True) -> Union[AutoencoderKLOutput, Tuple[DiagonalGaussianDistribution]]:
         """
         Encode a batch of images into latents.
 
@@ -253,17 +228,12 @@ class AutoencoderKLFlux2(nn.Module, ParallelTiledVAE):
 
         posterior = DiagonalGaussianDistribution(h)
         if not return_dict:
-            return (posterior,)
+            return (posterior, )
 
         return AutoencoderKLOutput(latent_dist=posterior)
 
-    def _decode(
-        self, z: torch.Tensor, return_dict: bool = True
-    ) -> Union[DecoderOutput, torch.Tensor]:
-        if self.use_tiling and (
-            z.shape[-1] > self.tile_latent_min_size
-            or z.shape[-2] > self.tile_latent_min_size
-        ):
+    def _decode(self, z: torch.Tensor, return_dict: bool = True) -> Union[DecoderOutput, torch.Tensor]:
+        if self.use_tiling and (z.shape[-1] > self.tile_latent_min_size or z.shape[-2] > self.tile_latent_min_size):
             return self.tiled_decode(z, return_dict=return_dict)
 
         if self.post_quant_conv is not None:
@@ -272,13 +242,14 @@ class AutoencoderKLFlux2(nn.Module, ParallelTiledVAE):
         dec = self.decoder(z)
 
         if not return_dict:
-            return (dec,)
+            return (dec, )
 
         return DecoderOutput(sample=dec)
 
-    def decode(
-        self, z: torch.FloatTensor, return_dict: bool = True, generator=None
-    ) -> Union[DecoderOutput, torch.FloatTensor]:
+    def decode(self,
+               z: torch.FloatTensor,
+               return_dict: bool = True,
+               generator=None) -> Union[DecoderOutput, torch.FloatTensor]:
         """
         Decode a batch of images.
 
@@ -300,28 +271,20 @@ class AutoencoderKLFlux2(nn.Module, ParallelTiledVAE):
             decoded = self._decode(z).sample
 
         if not return_dict:
-            return (decoded,)
+            return (decoded, )
 
         return DecoderOutput(sample=decoded)
 
-    def blend_v(
-        self, a: torch.Tensor, b: torch.Tensor, blend_extent: int
-    ) -> torch.Tensor:
+    def blend_v(self, a: torch.Tensor, b: torch.Tensor, blend_extent: int) -> torch.Tensor:
         blend_extent = min(a.shape[2], b.shape[2], blend_extent)
         for y in range(blend_extent):
-            b[:, :, y, :] = a[:, :, -blend_extent + y, :] * (1 - y / blend_extent) + b[
-                :, :, y, :
-            ] * (y / blend_extent)
+            b[:, :, y, :] = a[:, :, -blend_extent + y, :] * (1 - y / blend_extent) + b[:, :, y, :] * (y / blend_extent)
         return b
 
-    def blend_h(
-        self, a: torch.Tensor, b: torch.Tensor, blend_extent: int
-    ) -> torch.Tensor:
+    def blend_h(self, a: torch.Tensor, b: torch.Tensor, blend_extent: int) -> torch.Tensor:
         blend_extent = min(a.shape[3], b.shape[3], blend_extent)
         for x in range(blend_extent):
-            b[:, :, :, x] = a[:, :, :, -blend_extent + x] * (1 - x / blend_extent) + b[
-                :, :, :, x
-            ] * (x / blend_extent)
+            b[:, :, :, x] = a[:, :, :, -blend_extent + x] * (1 - x / blend_extent) + b[:, :, :, x] * (x / blend_extent)
         return b
 
     def _tiled_encode(self, x: torch.Tensor) -> torch.Tensor:
@@ -353,8 +316,8 @@ class AutoencoderKLFlux2(nn.Module, ParallelTiledVAE):
                 tile = x[
                     :,
                     :,
-                    i : i + self.tile_sample_min_size,
-                    j : j + self.tile_sample_min_size,
+                    i:i + self.tile_sample_min_size,
+                    j:j + self.tile_sample_min_size,
                 ]
                 tile = self.encoder(tile)
                 if self.quant_conv is not None:
@@ -377,9 +340,7 @@ class AutoencoderKLFlux2(nn.Module, ParallelTiledVAE):
         enc = torch.cat(result_rows, dim=2)
         return enc
 
-    def tiled_encode(
-        self, x: torch.Tensor, return_dict: bool = True
-    ) -> AutoencoderKLOutput:
+    def tiled_encode(self, x: torch.Tensor, return_dict: bool = True) -> AutoencoderKLOutput:
         r"""Encode a batch of images using a tiled encoder.
 
         When this option is enabled, the VAE will split the input tensor into tiles to compute encoding in several
@@ -416,8 +377,8 @@ class AutoencoderKLFlux2(nn.Module, ParallelTiledVAE):
                 tile = x[
                     :,
                     :,
-                    i : i + self.tile_sample_min_size,
-                    j : j + self.tile_sample_min_size,
+                    i:i + self.tile_sample_min_size,
+                    j:j + self.tile_sample_min_size,
                 ]
                 tile = self.encoder(tile)
                 if self.quant_conv is not None:
@@ -441,13 +402,11 @@ class AutoencoderKLFlux2(nn.Module, ParallelTiledVAE):
         posterior = DiagonalGaussianDistribution(moments)
 
         if not return_dict:
-            return (posterior,)
+            return (posterior, )
 
         return AutoencoderKLOutput(latent_dist=posterior)
 
-    def tiled_decode(
-        self, z: torch.Tensor, return_dict: bool = True
-    ) -> Union[DecoderOutput, torch.Tensor]:
+    def tiled_decode(self, z: torch.Tensor, return_dict: bool = True) -> Union[DecoderOutput, torch.Tensor]:
         r"""
         Decode a batch of images using a tiled decoder.
 
@@ -474,8 +433,8 @@ class AutoencoderKLFlux2(nn.Module, ParallelTiledVAE):
                 tile = z[
                     :,
                     :,
-                    i : i + self.tile_latent_min_size,
-                    j : j + self.tile_latent_min_size,
+                    i:i + self.tile_latent_min_size,
+                    j:j + self.tile_latent_min_size,
                 ]
                 if self.post_quant_conv is not None:
                     tile = self.post_quant_conv(tile)
@@ -497,7 +456,7 @@ class AutoencoderKLFlux2(nn.Module, ParallelTiledVAE):
 
         dec = torch.cat(result_rows, dim=2)
         if not return_dict:
-            return (dec,)
+            return (dec, )
 
         return DecoderOutput(sample=dec)
 
@@ -525,7 +484,7 @@ class AutoencoderKLFlux2(nn.Module, ParallelTiledVAE):
         dec = self.decode(z).sample
 
         if not return_dict:
-            return (dec,)
+            return (dec, )
 
         return DecoderOutput(sample=dec)
 

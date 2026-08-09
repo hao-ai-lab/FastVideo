@@ -69,11 +69,9 @@ DEFAULT_DISTILLED = "FastVideo/FastWan-QAD-1.3B"
 # base Wan pipeline (vae/text_encoder are Wan-identical).
 DISTILLED_WEIGHTS_FILE = "transformer/diffusion_pytorch_model.safetensors"
 
-PROMPT = (
-    "A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes "
-    "wide with interest. The playful yet serene atmosphere is complemented by soft "
-    "natural light filtering through the petals. Mid-shot, warm and cheerful tones."
-)
+PROMPT = ("A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes "
+          "wide with interest. The playful yet serene atmosphere is complemented by soft "
+          "natural light filtering through the petals. Mid-shot, warm and cheerful tones.")
 
 
 def resolve_distilled_weights(hf_id: str) -> str:
@@ -95,7 +93,7 @@ def build_generator(fp4_linear: bool):
     pipeline_config = PipelineConfig.from_pretrained(model_id)
     pipeline_config.dit_precision = "bf16"
     pipeline_config.vae_precision = "bf16"
-    pipeline_config.text_encoder_precisions = ("bf16",)
+    pipeline_config.text_encoder_precisions = ("bf16", )
 
     if fp4_linear:
         # Wan-style config: matches to_q/k/v/out + ffn (the plain NVFP4 config is
@@ -159,19 +157,23 @@ def main() -> None:
     def _generate():
         # seed + frame dims live under `sampling` (SamplingConfig); `output`
         # only takes output_path/save_video/return_frames (OutputConfig).
-        return generator.generate(request={
-            "prompt": prompt,
-            "sampling": {
-                "seed": seed,
-                "num_inference_steps": steps,
-                "guidance_scale": guidance,
-                "height": height,
-                "width": width,
-                "num_frames": frames,
-            },
-            "output": {"save_video": True, "output_path": arm_dir,
-                       "return_frames": True},
-        })
+        return generator.generate(
+            request={
+                "prompt": prompt,
+                "sampling": {
+                    "seed": seed,
+                    "num_inference_steps": steps,
+                    "guidance_scale": guidance,
+                    "height": height,
+                    "width": width,
+                    "num_frames": frames,
+                },
+                "output": {
+                    "save_video": True,
+                    "output_path": arm_dir,
+                    "return_frames": True
+                },
+            })
 
     for _ in range(warmup):
         _generate()

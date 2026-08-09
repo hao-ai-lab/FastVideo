@@ -71,17 +71,17 @@ class RCMScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         if mid_timesteps is None:
             mid_timesteps = [1.5, 1.4, 1.0]
         self._mid_timesteps = mid_timesteps
-        
+
         self.num_train_timesteps = num_train_timesteps
         self.sigma_max = sigma_max
-        
+
         # Initialize with default timesteps (will be set properly via set_timesteps)
         self.timesteps = torch.tensor([1.0, 0.0], dtype=torch.float64)
         self.sigmas = self.timesteps.clone()
-        
+
         self._step_index: int | None = None
         self._begin_index: int | None = None
-        
+
         BaseScheduler.__init__(self)
 
     @property
@@ -148,13 +148,11 @@ class RCMScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
                 Override the initial sigma value.
         """
         if num_inference_steps < 1 or num_inference_steps > 4:
-            logger.warning(
-                "rCM is optimized for 1-4 steps, got %d steps. "
-                "Performance may be suboptimal.", num_inference_steps
-            )
+            logger.warning("rCM is optimized for 1-4 steps, got %d steps. "
+                           "Performance may be suboptimal.", num_inference_steps)
 
         self.num_inference_steps = num_inference_steps
-        
+
         if sigma_max is not None:
             self.sigma_max = sigma_max
 
@@ -173,10 +171,10 @@ class RCMScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
 
         # Store raw sigmas for use in step() formula
         self.sigmas = t_steps.clone()
-        
+
         # Scale timesteps by 1000 for model input (as per TurboDiffusion)
         self.timesteps = t_steps * 1000
-        
+
         self._step_index = None
         self._begin_index = None
 
@@ -222,7 +220,7 @@ class RCMScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         """
         if noise is None:
             raise ValueError("noise must be provided for rCM scale_noise")
-        
+
         # Use raw sigma (not scaled timestep) for initial noise scaling
         t_initial = self.sigmas[0]
         return noise.to(torch.float64) * t_initial
@@ -262,7 +260,7 @@ class RCMScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
             self._init_step_index()
 
         assert self._step_index is not None
-        
+
         # Get current and next sigma values (raw, unscaled) for rCM formula
         # Note: self.timesteps is scaled by 1000 for model input,
         # but we need raw values for the step formula
@@ -279,7 +277,7 @@ class RCMScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
 
         # rCM update: x = (1 - t_next) * (x - t_cur * v_pred) + t_next * noise
         x_denoised = sample - t_cur * model_output
-        
+
         # Generate noise for SDE sampling
         if isinstance(generator, list):
             generator = generator[0]
@@ -299,7 +297,7 @@ class RCMScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         prev_sample = prev_sample.to(model_output.dtype)
 
         if not return_dict:
-            return (prev_sample,)
+            return (prev_sample, )
 
         return RCMSchedulerOutput(prev_sample=prev_sample)
 
@@ -314,13 +312,12 @@ class RCMScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         
         Not typically used for rCM inference, but provided for API compatibility.
         """
-        raise NotImplementedError(
-            "add_noise is not implemented for RCMScheduler. "
-            "Use scale_noise for initializing the sampling process."
-        )
+        raise NotImplementedError("add_noise is not implemented for RCMScheduler. "
+                                  "Use scale_noise for initializing the sampling process.")
 
     def __len__(self) -> int:
         return self.config.num_train_timesteps
+
 
 # Entry point for model registry
 EntryClass = RCMScheduler

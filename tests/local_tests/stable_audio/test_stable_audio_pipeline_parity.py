@@ -55,11 +55,9 @@ _MODEL_WEIGHTS = "model.safetensors"
 def _stable_audio_tools_inference_available() -> bool:
     try:
         from stable_audio_tools.inference.generation import (  # noqa: F401
-            generate_diffusion_cond,
-        )
+            generate_diffusion_cond, )
         from stable_audio_tools.models.factory import (  # noqa: F401
-            create_model_from_config,
-        )
+            create_model_from_config, )
         return True
     except Exception:
         return False
@@ -72,10 +70,8 @@ def _load_official_diffusion_cond(device: torch.device):
     from huggingface_hub import hf_hub_download
     from safetensors.torch import load_file
 
-    cfg_path = hf_hub_download(repo_id=_HF_REPO_ID, filename=_MODEL_CFG,
-                               token=resolve_hf_token())
-    weights_path = hf_hub_download(repo_id=_HF_REPO_ID, filename=_MODEL_WEIGHTS,
-                                   token=resolve_hf_token())
+    cfg_path = hf_hub_download(repo_id=_HF_REPO_ID, filename=_MODEL_CFG, token=resolve_hf_token())
+    weights_path = hf_hub_download(repo_id=_HF_REPO_ID, filename=_MODEL_WEIGHTS, token=resolve_hf_token())
     with open(cfg_path) as f:
         model_config = json.load(f)
 
@@ -84,8 +80,7 @@ def _load_official_diffusion_cond(device: torch.device):
     state = load_file(weights_path)
     missing, unexpected = model.load_state_dict(state, strict=True)
     assert not missing and not unexpected, (
-        f"official model state mismatch — missing={missing[:3]} unexpected={unexpected[:3]}"
-    )
+        f"official model state mismatch — missing={missing[:3]} unexpected={unexpected[:3]}")
     return model.to(device).eval(), model_config
 
 
@@ -152,11 +147,9 @@ def test_stable_audio_pipeline_official_parity():
     )
     end_idx = int(audio_end_in_s * sample_rate)
     off_audio = audio_full.detach().float().cpu()[:, :, :end_idx]
-    print(
-        f"off shape={tuple(off_audio.shape)} "
-        f"abs_mean={off_audio.abs().mean().item():.6f} "
-        f"range=[{off_audio.min().item():.4f}, {off_audio.max().item():.4f}]"
-    )
+    print(f"off shape={tuple(off_audio.shape)} "
+          f"abs_mean={off_audio.abs().mean().item():.6f} "
+          f"range=[{off_audio.min().item():.4f}, {off_audio.max().item():.4f}]")
 
     # Free the reference model so FV has GPU memory.
     del off_model
@@ -199,30 +192,22 @@ def test_stable_audio_pipeline_official_parity():
     fv_audio = fv_audio.detach().float().cpu()
     if fv_audio.ndim == 2 and fv_audio.shape[0] != 1:
         fv_audio = fv_audio.T.unsqueeze(0)
-    print(
-        f"fv  shape={tuple(fv_audio.shape)} "
-        f"abs_mean={fv_audio.abs().mean().item():.6f} "
-        f"range=[{fv_audio.min().item():.4f}, {fv_audio.max().item():.4f}]"
-    )
+    print(f"fv  shape={tuple(fv_audio.shape)} "
+          f"abs_mean={fv_audio.abs().mean().item():.6f} "
+          f"range=[{fv_audio.min().item():.4f}, {fv_audio.max().item():.4f}]")
 
-    assert fv_audio.shape == off_audio.shape, (
-        f"shape mismatch: off={off_audio.shape} fv={fv_audio.shape}"
-    )
+    assert fv_audio.shape == off_audio.shape, (f"shape mismatch: off={off_audio.shape} fv={fv_audio.shape}")
 
     diff = (fv_audio - off_audio).abs()
     diff_max = diff.max().item()
     diff_mean = diff.mean().item()
     diff_median = diff.median().item()
     rel = abs(off_audio.abs().mean() - fv_audio.abs().mean()) / max(off_audio.abs().mean().item(), 1e-6)
-    print(
-        f"diff max={diff_max:.6f} mean={diff_mean:.6f} median={diff_median:.6f}"
-    )
+    print(f"diff max={diff_max:.6f} mean={diff_mean:.6f} median={diff_median:.6f}")
     print(f"abs_mean rel drift: {rel:.4%}")
 
     # Tight bounds (1% drift, 0.05 element-wise) since FV is now a
     # first-class port of the upstream — drift is fp32 kernel noise,
     # not algorithmic divergence.
     assert rel < 0.01, f"abs_mean rel drift {rel:.2%} > 1% — port regression"
-    assert diff_max < 0.05, (
-        f"max element diff {diff_max:.4f} > 0.05 — port regression"
-    )
+    assert diff_max < 0.05, (f"max element diff {diff_max:.4f} > 0.05 — port regression")

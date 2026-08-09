@@ -40,8 +40,8 @@ os.environ.setdefault("LOCAL_RANK", "0")
 @dataclass
 class GateSpec:
     """Everything model-specific about one golden gate."""
-    name: str                                  # golden filename stem, e.g. "wan_t2v"
-    repo_id: str                               # HF checkpoint repo
+    name: str  # golden filename stem, e.g. "wan_t2v"
+    repo_id: str  # HF checkpoint repo
     build_block: Callable[[int], torch.nn.Module]
     make_inputs: Callable[[torch.device, int], dict[str, Any]]
     subfolder: str = "transformer"
@@ -55,7 +55,7 @@ class GateSpec:
     dtype: torch.dtype = torch.bfloat16
     # some blocks return tuples (e.g. double-stream img/txt) — reduce to one tensor
     postprocess: Callable[[Any], torch.Tensor] = field(default=lambda out: out)
-    model_root_env: str | None = None          # env var naming a local checkpoint root
+    model_root_env: str | None = None  # env var naming a local checkpoint root
     weight_file: str = "diffusion_pytorch_model.safetensors"  # single-file fallback
 
 
@@ -178,8 +178,13 @@ def run_gate(spec: GateSpec) -> None:
     out = out.detach().float().cpu()
 
     golden_path, golden_exists = _resolve_golden(spec)
-    meta = {"name": spec.name, "layer": spec.layer, "seed": spec.seed,
-            "shape": list(out.shape), "env": env_fingerprint(spec)}
+    meta = {
+        "name": spec.name,
+        "layer": spec.layer,
+        "seed": spec.seed,
+        "shape": list(out.shape),
+        "env": env_fingerprint(spec)
+    }
     if not golden_exists:
         golden_path.parent.mkdir(parents=True, exist_ok=True)
         torch.save({"output": out, "metadata": meta}, golden_path)
@@ -192,16 +197,15 @@ def run_gate(spec: GateSpec) -> None:
     golden = torch.load(golden_path, weights_only=True)
     mismatches = {
         key: (value, meta["env"].get(key))
-        for key, value in golden["metadata"]["env"].items()
-        if meta["env"].get(key) != value
+        for key, value in golden["metadata"]["env"].items() if meta["env"].get(key) != value
     }
-    assert not mismatches, (
-        f"environment changed since golden was minted — re-mint deliberately rather "
-        f"than chasing bit drift. golden -> current: {mismatches}")
+    assert not mismatches, (f"environment changed since golden was minted — re-mint deliberately rather "
+                            f"than chasing bit drift. golden -> current: {mismatches}")
 
     drift = (out - golden["output"]).abs()
     print(f"golden-gate[{spec.name}] drift: max_abs={drift.max().item():.10f} "
-          f"mean_abs={drift.mean().item():.10f}", flush=True)
+          f"mean_abs={drift.mean().item():.10f}",
+          flush=True)
     assert_close(out, golden["output"], atol=0.0, rtol=0.0)
 
 

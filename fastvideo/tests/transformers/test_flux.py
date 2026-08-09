@@ -60,10 +60,8 @@ requires_cuda = pytest.mark.skipif(
 
 requires_weights = pytest.mark.skipif(
     not glob.glob(os.path.join(_flux_transformer_path(), "*.safetensors")),
-    reason=(
-        f"No safetensors under {_flux_transformer_path()} — download FLUX.1-dev "
-        "transformer or set FLUX_TRANSFORMER_PATH"
-    ),
+    reason=(f"No safetensors under {_flux_transformer_path()} — download FLUX.1-dev "
+            "transformer or set FLUX_TRANSFORMER_PATH"),
 )
 
 
@@ -118,7 +116,7 @@ def test_flux_transformer_parity_vs_diffusers() -> None:
 
     # Diffusers pipeline passes scheduler timesteps / 1000 (float, same dtype as latents).
     timestep = torch.tensor([512.0], device=device, dtype=precision) / 1000.0
-    guidance = torch.full((batch_size,), 3.5, device=device, dtype=torch.float32)
+    guidance = torch.full((batch_size, ), 3.5, device=device, dtype=torch.float32)
 
     txt_ids = torch.zeros(text_len, 3, device=device, dtype=torch.long)
     img_ids = _prepare_latent_image_ids(latent_h, latent_w, device, dtype=torch.long)
@@ -130,13 +128,13 @@ def test_flux_transformer_parity_vs_diffusers() -> None:
     fv_model = loader.load(transformer_path, args).to(device=device, dtype=precision)
     fv_model.eval()
     with (
-        torch.no_grad(),
-        torch.amp.autocast("cuda", dtype=precision),
-        set_forward_context(
-            current_timestep=512,
-            attn_metadata=None,
-            forward_batch=forward_batch,
-        ),
+            torch.no_grad(),
+            torch.amp.autocast("cuda", dtype=precision),
+            set_forward_context(
+                current_timestep=512,
+                attn_metadata=None,
+                forward_batch=forward_batch,
+            ),
     ):
         fv_out = fv_model(
             hidden_states=hidden_states.clone(),
@@ -153,14 +151,10 @@ def test_flux_transformer_parity_vs_diffusers() -> None:
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-    hf_model = (
-        HFFluxTransformer2DModel.from_pretrained(
-            transformer_path,
-            torch_dtype=precision,
-        )
-        .to(device)
-        .eval()
-    )
+    hf_model = (HFFluxTransformer2DModel.from_pretrained(
+        transformer_path,
+        torch_dtype=precision,
+    ).to(device).eval())
     with torch.no_grad(), torch.amp.autocast("cuda", dtype=precision):
         hf_out = hf_model(
             hidden_states=hidden_states.clone(),

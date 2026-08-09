@@ -23,7 +23,6 @@ from fastvideo.layers.visual_embedding import Timesteps
 from fastvideo.models.dits.base import BaseDiT
 from fastvideo.platforms import AttentionBackendEnum
 
-
 MINIMAX_H3_MODALITY_NUM = 3
 _CFG = MiniMaxH3Config()
 
@@ -33,9 +32,8 @@ class MiniMaxH3RotaryPosEmbed(nn.Module):
 
     def __init__(self, rope_freq_dim: int, rope_theta: float) -> None:
         super().__init__()
-        inv_freq = 1.0 / (
-            rope_theta ** (torch.arange(0, 2 * rope_freq_dim, 2, dtype=torch.float32) / (2 * rope_freq_dim))
-        )
+        inv_freq = 1.0 / (rope_theta**(torch.arange(0, 2 * rope_freq_dim, 2, dtype=torch.float32) /
+                                       (2 * rope_freq_dim)))
         self.register_buffer("inv_freq", inv_freq, persistent=False)
 
     def forward(self, position_ids: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -355,9 +353,7 @@ class MiniMaxH3AdaLayerNormOut(nn.Module):
         shift_scale, _ = self.linear(F.silu(temb).to(self.linear.weight.dtype))
         shift, scale = shift_scale.chunk(2, dim=-1)
         hidden_states = self.norm(hidden_states)
-        return hidden_states * (1.0 + scale.index_select(0, timestep_indices)) + shift.index_select(
-            0, timestep_indices
-        )
+        return hidden_states * (1.0 + scale.index_select(0, timestep_indices)) + shift.index_select(0, timestep_indices)
 
 
 class MiniMaxH3TransformerBlock(nn.Module):
@@ -414,16 +410,14 @@ class MiniMaxH3TransformerBlock(nn.Module):
         residual = hidden_states
         norm_hidden_states = self.norm1(hidden_states)
         norm_hidden_states = norm_hidden_states * (
-            1.0 + scale_msa.index_select(0, adaln_indices)
-        ) + shift_msa.index_select(0, adaln_indices)
+            1.0 + scale_msa.index_select(0, adaln_indices)) + shift_msa.index_select(0, adaln_indices)
         attention_output = self.attn(norm_hidden_states, rotary_emb, original_seq_len)
         hidden_states = residual + gate_msa.index_select(0, adaln_indices) * attention_output
 
         residual = hidden_states
         norm_hidden_states = self.norm2(hidden_states)
         norm_hidden_states = norm_hidden_states * (
-            1.0 + scale_mlp.index_select(0, adaln_indices)
-        ) + shift_mlp.index_select(0, adaln_indices)
+            1.0 + scale_mlp.index_select(0, adaln_indices)) + shift_mlp.index_select(0, adaln_indices)
         feed_forward_output = self.ff(norm_hidden_states)
         return residual + gate_mlp.index_select(0, adaln_indices) * feed_forward_output
 
@@ -467,10 +461,8 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         arch = config.arch_config
         sp_world_size = get_sp_world_size() if model_parallel_is_initialized() else 1
         if arch.num_attention_heads % sp_world_size:
-            raise ValueError(
-                f"MiniMax H3 attention heads ({arch.num_attention_heads}) must be divisible by "
-                f"sequence parallel size ({sp_world_size})."
-            )
+            raise ValueError(f"MiniMax H3 attention heads ({arch.num_attention_heads}) must be divisible by "
+                             f"sequence parallel size ({sp_world_size}).")
 
         self.hidden_size = arch.hidden_size
         self.num_attention_heads = arch.num_attention_heads
@@ -576,13 +568,9 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         del dtype
         if self.rope.inv_freq.is_meta or self.rope.inv_freq.device != device:
             arch = self.config.arch_config
-            inv_freq = 1.0 / (
-                arch.rope_theta
-                ** (
-                    torch.arange(0, 2 * arch.rope_freq_dim, 2, device=device, dtype=torch.float32)
-                    / (2 * arch.rope_freq_dim)
-                )
-            )
+            inv_freq = 1.0 / (arch.rope_theta
+                              **(torch.arange(0, 2 * arch.rope_freq_dim, 2, device=device, dtype=torch.float32) /
+                                 (2 * arch.rope_freq_dim)))
             self.rope._buffers["inv_freq"] = inv_freq
 
     def forward(
@@ -602,7 +590,7 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         if position_ids.ndim != 2 or position_ids.shape[-1] != 3:
             raise ValueError(f"position_ids must have shape (seq_len, 3), got {tuple(position_ids.shape)}.")
         sequence_length = position_ids.shape[0]
-        if token_tags.shape != (sequence_length,) or timestep_indices.shape != (sequence_length,):
+        if token_tags.shape != (sequence_length, ) or timestep_indices.shape != (sequence_length, ):
             raise ValueError("token_tags and timestep_indices must both match the packed sequence length.")
         if hidden_states.shape[1] != video_indices.numel():
             raise ValueError("hidden_states row count must match video_indices.")
@@ -628,9 +616,7 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
                 dim=1,
             )
 
-        packed_hidden_states = text_embeds.new_zeros(
-            (text_embeds.shape[0], sequence_length, text_embeds.shape[-1])
-        )
+        packed_hidden_states = text_embeds.new_zeros((text_embeds.shape[0], sequence_length, text_embeds.shape[-1]))
         packed_hidden_states = packed_hidden_states.index_copy(1, text_indices, text_embeds)
         packed_hidden_states = packed_hidden_states.index_copy(1, video_indices, video_embeds.to(text_embeds.dtype))
         packed_hidden_states = packed_hidden_states.index_copy(1, audio_indices, audio_embeds.to(text_embeds.dtype))

@@ -30,27 +30,21 @@ BLOCK_N = 128  # Block size for N dimension (key/value sequence length)
 
 
 @triton.jit
-def group_mean_kernel(
-    q_ptr,          
-    q_out_ptr,      
-    qm_out_ptr,     
-    B, H, L, D: tl.constexpr,    
-    stride_qb, stride_qh, stride_ql, stride_qd,  
-    stride_qmb, stride_qmh, stride_qml, stride_qmd,  
-    GROUP_SIZE: tl.constexpr
-):
+def group_mean_kernel(q_ptr, q_out_ptr, qm_out_ptr, B, H, L, D: tl.constexpr, stride_qb, stride_qh, stride_ql,
+                      stride_qd, stride_qmb, stride_qmh, stride_qml, stride_qmd, GROUP_SIZE: tl.constexpr):
     pid_b = tl.program_id(0)
     pid_h = tl.program_id(1)
     pid_group = tl.program_id(2)
-    
+
     group_start = pid_group * GROUP_SIZE
     offsets = group_start + tl.arange(0, GROUP_SIZE)
-    
-    q_offsets = pid_b * stride_qb + pid_h * stride_qh + offsets[:, None] * stride_ql + tl.arange(0, D)[None, :] * stride_qd
+
+    q_offsets = pid_b * stride_qb + pid_h * stride_qh + offsets[:, None] * stride_ql + tl.arange(0,
+                                                                                                 D)[None, :] * stride_qd
     q_group = tl.load(q_ptr + q_offsets)
-    
+
     qm_group = tl.sum(q_group, axis=0) / GROUP_SIZE
-    
+
     q_group = q_group - qm_group
     tl.store(q_out_ptr + q_offsets, q_group)
 
@@ -62,23 +56,37 @@ def triton_group_mean(q: torch.Tensor):
     B, H, L, D = q.shape
     GROUP_SIZE = BLOCK_M
     num_groups = L // GROUP_SIZE
-    
+
     q_out = torch.empty_like(q)  # [B, H, L, D]
-    qm = torch.empty(B, H, num_groups, D, device=q.device, dtype=q.dtype) 
-    
+    qm = torch.empty(B, H, num_groups, D, device=q.device, dtype=q.dtype)
+
     grid = (B, H, num_groups)
-    
-    group_mean_kernel[grid](
-        q, q_out, qm,
-        B, H, L, D,
-        q.stride(0), q.stride(1), q.stride(2), q.stride(3),
-        qm.stride(0), qm.stride(1), qm.stride(2), qm.stride(3),
-        GROUP_SIZE=GROUP_SIZE
-    )
+
+    group_mean_kernel[grid](q,
+                            q_out,
+                            qm,
+                            B,
+                            H,
+                            L,
+                            D,
+                            q.stride(0),
+                            q.stride(1),
+                            q.stride(2),
+                            q.stride(3),
+                            qm.stride(0),
+                            qm.stride(1),
+                            qm.stride(2),
+                            qm.stride(3),
+                            GROUP_SIZE=GROUP_SIZE)
     return q_out, qm
 
 
-def preprocess_qkv(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, per_block_mean: bool = True, enable_smoothing_q: bool = False, enable_smoothing_k: bool = False):
+def preprocess_qkv(q: torch.Tensor,
+                   k: torch.Tensor,
+                   v: torch.Tensor,
+                   per_block_mean: bool = True,
+                   enable_smoothing_q: bool = False,
+                   enable_smoothing_k: bool = False):
 
     def pad_to_block_size(x):
         L = x.size(2)
@@ -86,9 +94,9 @@ def preprocess_qkv(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, per_block_
         if pad_len == 0:
             return x.contiguous()
         return F.pad(x, (0, 0, 0, pad_len), value=0).contiguous()
-    
+
     if enable_smoothing_k:
-        k -= k.mean(dim=-2, keepdim=True)  
+        k -= k.mean(dim=-2, keepdim=True)
     q, k, v = map(lambda x: pad_to_block_size(x), [q, k, v])
     if per_block_mean and enable_smoothing_q:
         q, qm = triton_group_mean(q)
@@ -100,8 +108,9 @@ def preprocess_qkv(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, per_block_
     else:  # used to disable q smoothing
         B, H, L, D = q.shape
         delta_s = torch.zeros((B, H, L // BLOCK_M, k.shape[2]), device=q.device, dtype=torch.float32)
-        
+
     return q, k, v, delta_s
+
 
 def scale_and_quant_fp4(x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
     assert x.ndim == 4
@@ -111,6 +120,7 @@ def scale_and_quant_fp4(x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
     fp4quant_cuda.scaled_fp4_quant(x, packed_fp4, fp8_scale, 1)
     return packed_fp4, fp8_scale
 
+
 def scale_and_quant_fp4_permute(x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
     assert x.ndim == 4
     B, H, N, D = x.shape
@@ -118,6 +128,7 @@ def scale_and_quant_fp4_permute(x: torch.Tensor) -> Tuple[torch.Tensor, torch.Te
     fp8_scale = torch.empty((B, H, N, D // 16), device=x.device, dtype=torch.float8_e4m3fn)
     fp4quant_cuda.scaled_fp4_quant_permute(x, packed_fp4, fp8_scale, 1)
     return packed_fp4, fp8_scale
+
 
 def scale_and_quant_fp4_transpose(x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
     assert x.ndim == 4
@@ -127,22 +138,31 @@ def scale_and_quant_fp4_transpose(x: torch.Tensor) -> Tuple[torch.Tensor, torch.
     fp4quant_cuda.scaled_fp4_quant_trans(x, packed_fp4, fp8_scale, 1)
     return packed_fp4, fp8_scale
 
-def blockscaled_fp4_attn(qlist: Tuple, 
+
+def blockscaled_fp4_attn(qlist: Tuple,
                          klist: Tuple,
                          vlist: Tuple,
                          delta_s: torch.Tensor,
                          KL: int,
-                         is_causal: bool = False, 
+                         is_causal: bool = False,
                          per_block_mean: bool = True,
                          is_bf16: bool = True,
                          single_level_p_quant: bool = False,
-                         sm_scale: float | None = None
-                        ):
-    softmax_scale = sm_scale if sm_scale is not None else (qlist[0].shape[-1] * 2) ** (-0.5)
-    return fp4attn_cuda.fwd(qlist[0], klist[0], vlist[0], qlist[1], klist[1], vlist[1], delta_s, KL, None, softmax_scale, is_causal, per_block_mean, is_bf16, single_level_p_quant)
+                         sm_scale: float | None = None):
+    softmax_scale = sm_scale if sm_scale is not None else (qlist[0].shape[-1] * 2)**(-0.5)
+    return fp4attn_cuda.fwd(qlist[0], klist[0], vlist[0], qlist[1], klist[1], vlist[1], delta_s, KL, None,
+                            softmax_scale, is_causal, per_block_mean, is_bf16, single_level_p_quant)
 
 
-def sageattn_blackwell(q, k, v, attn_mask = None, is_causal = False, per_block_mean = True, single_level_p_quant = True, sm_scale: float | None = None, **kwargs):
+def sageattn_blackwell(q,
+                       k,
+                       v,
+                       attn_mask=None,
+                       is_causal=False,
+                       per_block_mean=True,
+                       single_level_p_quant=True,
+                       sm_scale: float | None = None,
+                       **kwargs):
     """
     SageAttention3 Blackwell kernel for FP4 attention.
     
@@ -166,7 +186,7 @@ def sageattn_blackwell(q, k, v, attn_mask = None, is_causal = False, per_block_m
     """
     if q.size(-1) >= 256:
         print(f"Unsupported Headdim {q.size(-1)}")
-        return sdpa(q, k, v, is_causal = is_causal)
+        return sdpa(q, k, v, is_causal=is_causal)
     QL = q.size(2)
     KL = k.size(2)
     is_bf16 = q.dtype == torch.bfloat16
@@ -174,16 +194,6 @@ def sageattn_blackwell(q, k, v, attn_mask = None, is_causal = False, per_block_m
     qlist_from_cuda = scale_and_quant_fp4(q)
     klist_from_cuda = scale_and_quant_fp4_permute(k)
     vlist_from_cuda = scale_and_quant_fp4_transpose(v)
-    o_fp4 = blockscaled_fp4_attn(
-    qlist_from_cuda,
-    klist_from_cuda, 
-    vlist_from_cuda,
-    delta_s,
-    KL,
-    is_causal,
-    per_block_mean,
-    is_bf16,
-    single_level_p_quant,
-    sm_scale
-    )[0][:, :, :QL, :].contiguous()
+    o_fp4 = blockscaled_fp4_attn(qlist_from_cuda, klist_from_cuda, vlist_from_cuda, delta_s, KL, is_causal,
+                                 per_block_mean, is_bf16, single_level_p_quant, sm_scale)[0][:, :, :QL, :].contiguous()
     return o_fp4

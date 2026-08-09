@@ -41,8 +41,7 @@ def load_taehv(checkpoint_path, device="cuda", dtype=torch.float16):
 @torch.no_grad()  # type: ignore[misc]
 def decode_with_taehv(taehv_model, latents):
     latents = latents.permute(0, 2, 1, 3, 4)
-    latents = latents.to(device=next(taehv_model.parameters()).device,
-                         dtype=next(taehv_model.parameters()).dtype)
+    latents = latents.to(device=next(taehv_model.parameters()).device, dtype=next(taehv_model.parameters()).dtype)
     decoded = taehv_model.decode_video(latents, parallel=False, show_progress_bar=False)
     frames = []
     for frame in decoded[0]:
@@ -53,14 +52,16 @@ def decode_with_taehv(taehv_model, latents):
 
 def main():
     parser = argparse.ArgumentParser(description="FP8 video generation benchmark")
-    parser.add_argument("--bf16", action="store_true",
-                        help="BF16 baseline (no FP8 quantization)")
-    parser.add_argument("--granularity", choices=["tensor", "channel"], default="tensor",
+    parser.add_argument("--bf16", action="store_true", help="BF16 baseline (no FP8 quantization)")
+    parser.add_argument("--granularity",
+                        choices=["tensor", "channel"],
+                        default="tensor",
                         help="FP8 weight scale granularity: tensor (faster) or channel (more accurate)")
-    parser.add_argument("--taehv-checkpoint", default=None, metavar="PATH",
+    parser.add_argument("--taehv-checkpoint",
+                        default=None,
+                        metavar="PATH",
                         help="Path to taew2_1.pth; enables TAEHV tiny autoencoder decoding")
-    parser.add_argument("--model", default="FastVideo/FastWan-QAD-FP8-1.3B",
-                        help="Model path or HuggingFace ID")
+    parser.add_argument("--model", default="FastVideo/FastWan-QAD-FP8-1.3B", help="Model path or HuggingFace ID")
     parser.add_argument("--no-compile", action="store_true", help="Disable torch.compile for the DiT")
     parser.add_argument("--num_gpus", type=int, default=1)
     parser.add_argument("--infer_steps", type=int, default=3)
@@ -81,9 +82,7 @@ def main():
 
     # transformer_quant needs a QuantizationConfig *instance* — the bare string
     # is not resolved on the from_pretrained kwarg path.
-    extra = {} if args.bf16 else {
-        "transformer_quant": get_quantization_config("FP8")(granularity=args.granularity)
-    }
+    extra = {} if args.bf16 else {"transformer_quant": get_quantization_config("FP8")(granularity=args.granularity)}
     generator = VideoGenerator.from_pretrained(
         args.model,
         num_gpus=args.num_gpus,
@@ -99,36 +98,56 @@ def main():
         **extra,
     )
 
-    prompt = (
-        "A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes "
-        "wide with interest. The playful yet serene atmosphere is complemented by soft "
-        "natural light filtering through the petals. Mid-shot, warm and cheerful tones."
-    )
+    prompt = ("A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes "
+              "wide with interest. The playful yet serene atmosphere is complemented by soft "
+              "natural light filtering through the petals. Mid-shot, warm and cheerful tones.")
 
     n_warmup = 1 if not args.no_compile else 0
     for _ in range(n_warmup):
-        generator.generate(request={"prompt": prompt, "sampling": {"num_inference_steps": 3, "guidance_scale": 1.0},
-                                    "output": {"save_video": False}})
+        generator.generate(
+            request={
+                "prompt": prompt,
+                "sampling": {
+                    "num_inference_steps": 3,
+                    "guidance_scale": 1.0
+                },
+                "output": {
+                    "save_video": False
+                }
+            })
 
     os.makedirs(OUTPUT_PATH, exist_ok=True)
     start = time.time()
     if use_taehv:
-        result = generator.generate(request={
-            "prompt": prompt,
-            "sampling": {"num_inference_steps": args.infer_steps, "guidance_scale": 1.0},
-            "output": {"save_video": False},
-        })
+        result = generator.generate(
+            request={
+                "prompt": prompt,
+                "sampling": {
+                    "num_inference_steps": args.infer_steps,
+                    "guidance_scale": 1.0
+                },
+                "output": {
+                    "save_video": False
+                },
+            })
         import imageio
         frames = decode_with_taehv(taehv_model, result.samples)
         video_path = os.path.join(OUTPUT_PATH, f"raccoon_{mode}.mp4")
         imageio.mimsave(video_path, frames, fps=16, format="mp4")
         print(f"Saved TAEHV-decoded video to: {video_path}")
     else:
-        generator.generate(request={
-            "prompt": prompt,
-            "sampling": {"num_inference_steps": args.infer_steps, "guidance_scale": 1.0},
-            "output": {"save_video": True, "output_path": os.path.join(OUTPUT_PATH, f"raccoon_{mode}.mp4")},
-        })
+        generator.generate(
+            request={
+                "prompt": prompt,
+                "sampling": {
+                    "num_inference_steps": args.infer_steps,
+                    "guidance_scale": 1.0
+                },
+                "output": {
+                    "save_video": True,
+                    "output_path": os.path.join(OUTPUT_PATH, f"raccoon_{mode}.mp4")
+                },
+            })
     elapsed = time.time() - start
     print(f"[{mode.upper()}] {args.infer_steps} steps in {elapsed:.2f}s "
           f"({args.infer_steps / elapsed:.2f} it/s)")

@@ -8,12 +8,10 @@ import modal
 
 IMAGE = os.environ.get("DREAMVERSE_IMAGE")
 if not IMAGE:
-    raise RuntimeError(
-        "DREAMVERSE_IMAGE is required. Set it to a published SHA-specific Dreamverse image, "
-        "for example a dreamverse-backend-cuda13.0.0-sha-* tag or a "
-        "dreamverse-ui-cuda13.0.0-sha-* tag if serving the static UI. "
-        "CUDA 12 / cu126 images use the corresponding cuda12.6.3 tag."
-    )
+    raise RuntimeError("DREAMVERSE_IMAGE is required. Set it to a published SHA-specific Dreamverse image, "
+                       "for example a dreamverse-backend-cuda13.0.0-sha-* tag or a "
+                       "dreamverse-ui-cuda13.0.0-sha-* tag if serving the static UI. "
+                       "CUDA 12 / cu126 images use the corresponding cuda12.6.3 tag.")
 
 # ``@modal.web_server`` invokes ``serve()`` directly and bypasses the image
 # ENTRYPOINT (``docker/docker_entrypoint.sh``).  That entrypoint normally
@@ -65,14 +63,10 @@ def serve():
     # ``or ""`` collapses ``None`` (unset) into an empty string, ``.strip()``
     # collapses whitespace-only values (e.g. ``"   "``) — both should be
     # treated as missing.
-    missing = [
-        k for k in _REQUIRED_SECRET_KEYS
-        if not (os.environ.get(k) or "").strip()
-    ]
+    missing = [k for k in _REQUIRED_SECRET_KEYS if not (os.environ.get(k) or "").strip()]
     if missing:
-        raise RuntimeError(
-            "dreamverse-api-keys secret is missing required entries: "
-            f"{', '.join(missing)}. Add them with `modal secret create "
-            "dreamverse-api-keys ... --force` and redeploy "
-            "(see apps/dreamverse/scripts/modal/README.md).")
+        raise RuntimeError("dreamverse-api-keys secret is missing required entries: "
+                           f"{', '.join(missing)}. Add them with `modal secret create "
+                           "dreamverse-api-keys ... --force` and redeploy "
+                           "(see apps/dreamverse/scripts/modal/README.md).")
     subprocess.Popen(["dreamverse-server", "--host", "0.0.0.0", "--port", "8009"])

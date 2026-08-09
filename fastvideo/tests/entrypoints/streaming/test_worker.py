@@ -36,7 +36,10 @@ class _RecordingGenerator:
 
     state_to_return: ContinuationState | None = field(default_factory=lambda: ContinuationState(
         kind="ltx2.v1",
-        payload={"schema_version": 1, "segment_index": 1},
+        payload={
+            "schema_version": 1,
+            "segment_index": 1
+        },
     ))
     requests: list[GenerationRequest] = field(default_factory=list)
 

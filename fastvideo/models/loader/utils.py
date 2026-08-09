@@ -24,8 +24,7 @@ def set_default_torch_dtype(dtype: torch.dtype):
         torch.set_default_dtype(old_dtype)
 
 
-def get_param_names_mapping(
-        mapping_dict: dict[str, str]) -> Callable[[str], tuple[str, Any, Any]]:
+def get_param_names_mapping(mapping_dict: dict[str, str]) -> Callable[[str], tuple[str, Any, Any]]:
     """
     Creates a mapping function that transforms parameter names using regex patterns.
     
@@ -78,19 +77,13 @@ def hf_to_custom_state_dict(
     if isinstance(hf_param_sd, dict):
         hf_param_sd = hf_param_sd.items()  # type: ignore
     for source_param_name, full_tensor in hf_param_sd:  # type: ignore
-        target_param_name, merge_index, num_params_to_merge = param_names_mapping(
-            source_param_name)
-        reverse_param_names_mapping[target_param_name] = (source_param_name,
-                                                          merge_index,
-                                                          num_params_to_merge)
+        target_param_name, merge_index, num_params_to_merge = param_names_mapping(source_param_name)
+        reverse_param_names_mapping[target_param_name] = (source_param_name, merge_index, num_params_to_merge)
         if merge_index is not None:
             to_merge_params[target_param_name][merge_index] = full_tensor
             if len(to_merge_params[target_param_name]) == num_params_to_merge:
                 # cat at output dim according to the merge_index order
-                sorted_tensors = [
-                    to_merge_params[target_param_name][i]
-                    for i in range(num_params_to_merge)
-                ]
+                sorted_tensors = [to_merge_params[target_param_name][i] for i in range(num_params_to_merge)]
                 full_tensor = torch.cat(sorted_tensors, dim=0)
                 del to_merge_params[target_param_name]
             else:

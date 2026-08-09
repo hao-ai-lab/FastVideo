@@ -10,12 +10,10 @@ import torch.nn as nn
 
 # from transformers.modeling_attn_mask_utils import _create_4d_causal_attention_mask, _prepare_4d_attention_mask
 from fastvideo.attention import LocalAttention
-from fastvideo.configs.models.encoders import (BaseEncoderOutput,
-                                               CLIPTextConfig, CLIPVisionConfig)
+from fastvideo.configs.models.encoders import (BaseEncoderOutput, CLIPTextConfig, CLIPVisionConfig)
 from fastvideo.distributed import divide, get_tp_world_size
 from fastvideo.layers.activation import get_act_fn
-from fastvideo.layers.linear import (ColumnParallelLinear, QKVParallelLinear,
-                                     RowParallelLinear)
+from fastvideo.layers.linear import (ColumnParallelLinear, QKVParallelLinear, RowParallelLinear)
 from fastvideo.layers.quantization import QuantizationConfig
 from fastvideo.logger import init_logger
 from fastvideo.models.encoders.base import ImageEncoder, TextEncoder
@@ -50,17 +48,13 @@ class CLIPVisionEmbeddings(nn.Module):
 
         self.num_patches = (self.image_size // self.patch_size)**2
         self.num_positions = self.num_patches + 1
-        self.position_embedding = nn.Embedding(self.num_positions,
-                                               self.embed_dim)
-        self.register_buffer("position_ids",
-                             torch.arange(self.num_positions).expand((1, -1)),
-                             persistent=False)
+        self.position_embedding = nn.Embedding(self.num_positions, self.embed_dim)
+        self.register_buffer("position_ids", torch.arange(self.num_positions).expand((1, -1)), persistent=False)
 
     def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
         batch_size = pixel_values.shape[0]
         target_dtype = self.patch_embedding.weight.dtype
-        patch_embeds = self.patch_embedding(pixel_values.to(
-            dtype=target_dtype))  # shape = [*, width, grid, grid]
+        patch_embeds = self.patch_embedding(pixel_values.to(dtype=target_dtype))  # shape = [*, width, grid, grid]
         patch_embeds = patch_embeds.flatten(2).transpose(1, 2)
 
         class_embeds = self.class_embedding.expand(batch_size, 1, -1)
@@ -78,14 +72,12 @@ class CLIPTextEmbeddings(nn.Module):
         embed_dim = config.hidden_size
 
         self.token_embedding = nn.Embedding(config.vocab_size, embed_dim)
-        self.position_embedding = nn.Embedding(config.max_position_embeddings,
-                                               embed_dim)
+        self.position_embedding = nn.Embedding(config.max_position_embeddings, embed_dim)
 
         # position_ids (1, len position emb) is contiguous in memory and exported when serialized
-        self.register_buffer(
-            "position_ids",
-            torch.arange(config.max_position_embeddings).expand((1, -1)),
-            persistent=False)
+        self.register_buffer("position_ids",
+                             torch.arange(config.max_position_embeddings).expand((1, -1)),
+                             persistent=False)
 
     def forward(
         self,
@@ -98,16 +90,13 @@ class CLIPTextEmbeddings(nn.Module):
         elif inputs_embeds is not None:
             seq_length = inputs_embeds.shape[-2]
         else:
-            raise ValueError(
-                "Either input_ids or inputs_embeds must be provided.")
+            raise ValueError("Either input_ids or inputs_embeds must be provided.")
 
         max_position_embedding = self.position_embedding.weight.shape[0]
 
         if seq_length > max_position_embedding:
-            raise ValueError(
-                f"Sequence length must be less than max_position_embeddings (got `sequence length`: "
-                f"{seq_length} and max_position_embeddings: {max_position_embedding}"
-            )
+            raise ValueError(f"Sequence length must be less than max_position_embeddings (got `sequence length`: "
+                             f"{seq_length} and max_position_embeddings: {max_position_embedding}")
 
         if position_ids is None:
             position_ids = self.position_ids[:, :seq_length]
@@ -136,10 +125,9 @@ class CLIPAttention(nn.Module):
         self.num_heads = config.num_attention_heads
         self.head_dim = self.embed_dim // self.num_heads
         if self.head_dim * self.num_heads != self.embed_dim:
-            raise ValueError(
-                "embed_dim must be divisible by num_heads "
-                f"(got `embed_dim`: {self.embed_dim} and `num_heads`:"
-                f" {self.num_heads}).")
+            raise ValueError("embed_dim must be divisible by num_heads "
+                             f"(got `embed_dim`: {self.embed_dim} and `num_heads`:"
+                             f" {self.num_heads}).")
         self.scale = self.head_dim**-0.5 if config.enable_scale else None
         self.dropout = config.attention_dropout
 
@@ -161,17 +149,15 @@ class CLIPAttention(nn.Module):
         self.tp_size = get_tp_world_size()
         self.num_heads_per_partition = divide(self.num_heads, self.tp_size)
 
-        self.attn = LocalAttention(
-            self.num_heads_per_partition,
-            self.head_dim,
-            self.num_heads_per_partition,
-            softmax_scale=self.scale,
-            causal=config.is_causal,
-            supported_attention_backends=config._supported_attention_backends)
+        self.attn = LocalAttention(self.num_heads_per_partition,
+                                   self.head_dim,
+                                   self.num_heads_per_partition,
+                                   softmax_scale=self.scale,
+                                   causal=config.is_causal,
+                                   supported_attention_backends=config._supported_attention_backends)
 
     def _shape(self, tensor: torch.Tensor, seq_len: int, bsz: int):
-        return tensor.view(bsz, seq_len, self.num_heads,
-                           self.head_dim).transpose(1, 2).contiguous()
+        return tensor.view(bsz, seq_len, self.num_heads, self.head_dim).transpose(1, 2).contiguous()
 
     def forward(
         self,
@@ -182,22 +168,15 @@ class CLIPAttention(nn.Module):
         qkv_states, _ = self.qkv_proj(hidden_states)
         query_states, key_states, value_states = qkv_states.chunk(3, dim=-1)
         # use flash_attn_func
-        query_states = query_states.reshape(query_states.shape[0],
-                                            query_states.shape[1],
-                                            self.num_heads_per_partition,
+        query_states = query_states.reshape(query_states.shape[0], query_states.shape[1], self.num_heads_per_partition,
                                             self.head_dim)
-        key_states = key_states.reshape(key_states.shape[0],
-                                        key_states.shape[1],
-                                        self.num_heads_per_partition,
+        key_states = key_states.reshape(key_states.shape[0], key_states.shape[1], self.num_heads_per_partition,
                                         self.head_dim)
-        value_states = value_states.reshape(value_states.shape[0],
-                                            value_states.shape[1],
-                                            self.num_heads_per_partition,
+        value_states = value_states.reshape(value_states.shape[0], value_states.shape[1], self.num_heads_per_partition,
                                             self.head_dim)
         attn_output = self.attn(query_states, key_states, value_states)
-        attn_output = attn_output.reshape(
-            attn_output.shape[0], attn_output.shape[1],
-            self.num_heads_per_partition * self.head_dim)
+        attn_output = attn_output.reshape(attn_output.shape[0], attn_output.shape[1],
+                                          self.num_heads_per_partition * self.head_dim)
         attn_output, _ = self.out_proj(attn_output)
 
         return attn_output, None
@@ -247,13 +226,9 @@ class CLIPEncoderLayer(nn.Module):
             quant_config=quant_config,
             prefix=f"{prefix}.self_attn",
         )
-        self.layer_norm1 = nn.LayerNorm(config.hidden_size,
-                                        eps=config.layer_norm_eps)
-        self.mlp = CLIPMLP(config,
-                           quant_config=quant_config,
-                           prefix=f"{prefix}.mlp")
-        self.layer_norm2 = nn.LayerNorm(config.hidden_size,
-                                        eps=config.layer_norm_eps)
+        self.layer_norm1 = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.mlp = CLIPMLP(config, quant_config=quant_config, prefix=f"{prefix}.mlp")
+        self.layer_norm2 = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
 
@@ -296,15 +271,11 @@ class CLIPEncoder(nn.Module):
         else:
             num_hidden_layers = num_hidden_layers_override
         self.layers = nn.ModuleList([
-            CLIPEncoderLayer(config=config,
-                             quant_config=quant_config,
-                             prefix=f"{prefix}.layers.{layer_idx}")
+            CLIPEncoderLayer(config=config, quant_config=quant_config, prefix=f"{prefix}.layers.{layer_idx}")
             for layer_idx in range(num_hidden_layers)
         ])
 
-    def forward(
-            self, inputs_embeds: torch.Tensor, return_all_hidden_states: bool
-    ) -> torch.Tensor | list[torch.Tensor]:
+    def forward(self, inputs_embeds: torch.Tensor, return_all_hidden_states: bool) -> torch.Tensor | list[torch.Tensor]:
         hidden_states_pool = [inputs_embeds]
         hidden_states = inputs_embeds
 
@@ -332,14 +303,12 @@ class CLIPTextTransformer(nn.Module):
 
         self.embeddings = CLIPTextEmbeddings(config)
 
-        self.encoder = CLIPEncoder(
-            config,
-            quant_config=quant_config,
-            num_hidden_layers_override=num_hidden_layers_override,
-            prefix=prefix)
+        self.encoder = CLIPEncoder(config,
+                                   quant_config=quant_config,
+                                   num_hidden_layers_override=num_hidden_layers_override,
+                                   prefix=prefix)
 
-        self.final_layer_norm = nn.LayerNorm(embed_dim,
-                                             eps=config.layer_norm_eps)
+        self.final_layer_norm = nn.LayerNorm(embed_dim, eps=config.layer_norm_eps)
 
         # For `pooled_output` computation
         self.eos_token_id = config.eos_token_id
@@ -357,8 +326,7 @@ class CLIPTextTransformer(nn.Module):
 
         """
         output_hidden_states = (output_hidden_states
-                                if output_hidden_states is not None else
-                                self.config.output_hidden_states)
+                                if output_hidden_states is not None else self.config.output_hidden_states)
 
         if input_ids is None:
             raise ValueError("You have to specify input_ids")
@@ -366,8 +334,7 @@ class CLIPTextTransformer(nn.Module):
         input_shape = input_ids.size()
         input_ids = input_ids.view(-1, input_shape[-1])
 
-        hidden_states = self.embeddings(input_ids=input_ids,
-                                        position_ids=position_ids)
+        hidden_states = self.embeddings(input_ids=input_ids, position_ids=position_ids)
 
         # CLIP's text model uses causal mask, prepare it here.
         # https://github.com/openai/CLIP/blob/cfcffb90e69f37bf2ff1e988237a0fbe41f33c04/clip/model.py#L324
@@ -401,20 +368,17 @@ class CLIPTextTransformer(nn.Module):
             # take features from the eot embedding (eot_token is the highest number in each sequence)
             # casting to torch.int for onnx compatibility: argmax doesn't support int64 inputs with opset 14
             pooled_output = last_hidden_state[
-                torch.arange(last_hidden_state.shape[0],
-                             device=last_hidden_state.device),
-                input_ids.to(dtype=torch.int, device=last_hidden_state.device).
-                argmax(dim=-1),
+                torch.arange(last_hidden_state.shape[0], device=last_hidden_state.device),
+                input_ids.to(dtype=torch.int, device=last_hidden_state.device).argmax(dim=-1),
             ]
         else:
             # The config gets updated `eos_token_id` from PR #24773 (so the use of exta new tokens is possible)
             pooled_output = last_hidden_state[
-                torch.arange(last_hidden_state.shape[0],
-                             device=last_hidden_state.device),
+                torch.arange(last_hidden_state.shape[0], device=last_hidden_state.device),
                 # We need to get the first position of `eos_token_id` value (`pad_token_ids` might equal to `eos_token_id`)
                 # Note: we assume each sequence (along batch dim.) contains an  `eos_token_id` (e.g. prepared by the tokenizer)
-                (input_ids.to(dtype=torch.int, device=last_hidden_state.device
-                              ) == self.eos_token_id).int().argmax(dim=-1),
+                (input_ids.to(dtype=torch.int, device=last_hidden_state.device) == self.eos_token_id).int().argmax(
+                    dim=-1),
             ]
 
         return BaseEncoderOutput(
@@ -432,9 +396,7 @@ class CLIPTextModel(TextEncoder):
         config: CLIPTextConfig,
     ) -> None:
         super().__init__(config)
-        self.text_model = CLIPTextTransformer(config=config,
-                                              quant_config=config.quant_config,
-                                              prefix=config.prefix)
+        self.text_model = CLIPTextTransformer(config=config, quant_config=config.quant_config, prefix=config.prefix)
 
     def forward(
         self,
@@ -454,8 +416,7 @@ class CLIPTextModel(TextEncoder):
         )
         return outputs
 
-    def load_weights(self, weights: Iterable[tuple[str,
-                                                   torch.Tensor]]) -> set[str]:
+    def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
 
         # Define mapping for stacked parameters
         stacked_params_mapping = [
@@ -483,8 +444,7 @@ class CLIPTextModel(TextEncoder):
                 # Use default weight loader for all other parameters
                 if name in params_dict:
                     param = params_dict[name]
-                    weight_loader = getattr(param, "weight_loader",
-                                            default_weight_loader)
+                    weight_loader = getattr(param, "weight_loader", default_weight_loader)
                     weight_loader(param, loaded_weight)
                     loaded_params.add(name)
 
@@ -495,9 +455,7 @@ class CLIPTextModelWithProjection(CLIPTextModel):
 
     def __init__(self, config: CLIPTextConfig) -> None:
         super().__init__(config)
-        self.text_projection = nn.Linear(
-            config.hidden_size, config.projection_dim, bias=False
-        )
+        self.text_projection = nn.Linear(config.hidden_size, config.projection_dim, bias=False)
 
     def forward(
         self,
@@ -558,17 +516,15 @@ class CLIPVisionTransformer(nn.Module):
 
         num_hidden_layers = config.num_hidden_layers
         if len(self.encoder.layers) > config.num_hidden_layers:
-            raise ValueError(
-                f"The original encoder only has {num_hidden_layers} "
-                f"layers, but you requested {len(self.encoder.layers)} layers.")
+            raise ValueError(f"The original encoder only has {num_hidden_layers} "
+                             f"layers, but you requested {len(self.encoder.layers)} layers.")
 
         # If possible, skip post_layernorm to conserve memory
         if require_post_norm is None:
             require_post_norm = len(self.encoder.layers) == num_hidden_layers
 
         if require_post_norm:
-            self.post_layernorm = nn.LayerNorm(embed_dim,
-                                               eps=config.layer_norm_eps)
+            self.post_layernorm = nn.LayerNorm(embed_dim, eps=config.layer_norm_eps)
         else:
             self.post_layernorm = None
 
@@ -585,17 +541,14 @@ class CLIPVisionTransformer(nn.Module):
 
         # Produces either the last layer output or all of the hidden states,
         # depending on if we have feature_sample_layers or not
-        encoder_outputs = self.encoder(
-            inputs_embeds=hidden_states,
-            return_all_hidden_states=return_all_hidden_states)
+        encoder_outputs = self.encoder(inputs_embeds=hidden_states, return_all_hidden_states=return_all_hidden_states)
 
         if not return_all_hidden_states:
             encoder_outputs = encoder_outputs[0]
 
         # Handle post-norm (if applicable) and stacks feature layers if needed
-        encoder_outputs = resolve_visual_encoder_outputs(
-            encoder_outputs, feature_sample_layers, self.post_layernorm,
-            self.config.num_hidden_layers)
+        encoder_outputs = resolve_visual_encoder_outputs(encoder_outputs, feature_sample_layers, self.post_layernorm,
+                                                         self.config.num_hidden_layers)
 
         return encoder_outputs
 
@@ -607,12 +560,11 @@ class CLIPVisionModel(ImageEncoder):
 
     def __init__(self, config: CLIPVisionConfig) -> None:
         super().__init__(config)
-        self.vision_model = CLIPVisionTransformer(
-            config=config,
-            quant_config=config.quant_config,
-            num_hidden_layers_override=config.num_hidden_layers_override,
-            require_post_norm=config.require_post_norm,
-            prefix=f"{config.prefix}.vision_model")
+        self.vision_model = CLIPVisionTransformer(config=config,
+                                                  quant_config=config.quant_config,
+                                                  num_hidden_layers_override=config.num_hidden_layers_override,
+                                                  require_post_norm=config.require_post_norm,
+                                                  prefix=f"{config.prefix}.vision_model")
 
     def forward(
         self,
@@ -620,8 +572,7 @@ class CLIPVisionModel(ImageEncoder):
         feature_sample_layers: list[int] | None = None,
         **kwargs,
     ) -> BaseEncoderOutput:
-        last_hidden_state = self.vision_model(pixel_values,
-                                              feature_sample_layers)
+        last_hidden_state = self.vision_model(pixel_values, feature_sample_layers)
         return BaseEncoderOutput(last_hidden_state=last_hidden_state)
 
     @property
@@ -630,8 +581,7 @@ class CLIPVisionModel(ImageEncoder):
 
     # (TODO) Add prefix argument for filtering out weights to be loaded
     #        ref: https://github.com/vllm-project/vllm/pull/7186#discussion_r1734163986
-    def load_weights(self, weights: Iterable[tuple[str,
-                                                   torch.Tensor]]) -> set[str]:
+    def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
 
         params_dict = dict(self.named_parameters())
         loaded_params: set[str] = set()
@@ -641,8 +591,7 @@ class CLIPVisionModel(ImageEncoder):
             if name.startswith("visual_projection"):
                 continue
             # post_layernorm is not needed in CLIPVisionModel
-            if (name.startswith("vision_model.post_layernorm")
-                    and self.vision_model.post_layernorm is None):
+            if (name.startswith("vision_model.post_layernorm") and self.vision_model.post_layernorm is None):
                 continue
 
             # omit layers when num_hidden_layers_override is set
@@ -651,8 +600,7 @@ class CLIPVisionModel(ImageEncoder):
                 if layer_idx >= layer_count:
                     continue
 
-            for (param_name, weight_name,
-                 shard_id) in self.config.arch_config.stacked_params_mapping:
+            for (param_name, weight_name, shard_id) in self.config.arch_config.stacked_params_mapping:
                 if weight_name not in name:
                     continue
                 name = name.replace(weight_name, param_name)
@@ -663,11 +611,11 @@ class CLIPVisionModel(ImageEncoder):
                 break
             else:
                 param = params_dict[name]
-                weight_loader = getattr(param, "weight_loader",
-                                        default_weight_loader)
+                weight_loader = getattr(param, "weight_loader", default_weight_loader)
                 weight_loader(param, loaded_weight)
             loaded_params.add(name)
         return loaded_params
+
 
 # Entry point for model registry
 EntryClass = [CLIPTextModel, CLIPVisionModel]

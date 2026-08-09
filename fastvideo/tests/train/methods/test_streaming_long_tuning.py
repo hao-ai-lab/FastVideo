@@ -38,9 +38,7 @@ from fastvideo.train.utils.config import load_run_config
 
 from .grad_norm_regression import check_grad_norm_regression
 
-_FIXTURE = str(
-    Path(__file__).resolve().parent.parent / "fixtures"
-    / "wan_causal_t2v_streaming_long_min.yaml")
+_FIXTURE = str(Path(__file__).resolve().parent.parent / "fixtures" / "wan_causal_t2v_streaming_long_min.yaml")
 
 
 def _build_synthetic_batch(
@@ -49,12 +47,9 @@ def _build_synthetic_batch(
 ) -> dict[str, torch.Tensor]:
     batch_size = 1
     return {
-        "text_embedding":
-        torch.randn(batch_size, 16, 4096, device=device, dtype=dtype),
-        "text_attention_mask":
-        torch.ones(batch_size, 16, device=device),
-        "vae_latent":
-        torch.randn(batch_size, 16, 6, 8, 8, device=device, dtype=dtype),
+        "text_embedding": torch.randn(batch_size, 16, 4096, device=device, dtype=dtype),
+        "text_attention_mask": torch.ones(batch_size, 16, device=device),
+        "vae_latent": torch.randn(batch_size, 16, 6, 8, 8, device=device, dtype=dtype),
     }
 
 
@@ -65,25 +60,21 @@ def _assert_layer0_grads(model, *, role: str) -> None:
     assert len(trainable) > 0, f"{role} layer 0 has no trainable parameters"
     for i, p in enumerate(trainable):
         assert p.grad is not None, f"{role} layer 0 param[{i}] has None grad"
-        assert torch.isfinite(p.grad).all().item(), (
-            f"{role} layer 0 param[{i}] grad contains NaN/Inf")
-    assert any(
-        p.grad.detach().float().norm().item() > 0.0 for p in trainable), (
-            f"all {role} layer-0 grads are exactly zero; the loss did not "
-            "reach the first transformer block")
+        assert torch.isfinite(p.grad).all().item(), (f"{role} layer 0 param[{i}] grad contains NaN/Inf")
+    assert any(p.grad.detach().float().norm().item() > 0.0
+               for p in trainable), (f"all {role} layer-0 grads are exactly zero; the loss did not "
+                                     "reach the first transformer block")
 
 
 def _assert_finite_losses(loss_map: dict[str, torch.Tensor]) -> None:
     for name in ("total_loss", "generator_loss", "fake_score_loss"):
         loss = loss_map[name]
         assert torch.is_tensor(loss), f"{name} must be a torch.Tensor"
-        assert torch.isfinite(loss).item(), (
-            f"{name} is not finite: {loss.item()}")
+        assert torch.isfinite(loss).item(), (f"{name} is not finite: {loss.item()}")
 
 
 @pytest.mark.usefixtures("distributed_setup")
-def test_streaming_long_tuning_multi_stage_train_steps(
-        monkeypatch: pytest.MonkeyPatch) -> None:
+def test_streaming_long_tuning_multi_stage_train_steps(monkeypatch: pytest.MonkeyPatch) -> None:
     if not torch.cuda.is_available():
         pytest.skip("requires CUDA")
 
@@ -140,9 +131,7 @@ def test_streaming_long_tuning_multi_stage_train_steps(
     method.backward(loss_map, outputs, grad_accum_rounds=1)
     _assert_layer0_grads(student, role="student")
     _assert_layer0_grads(critic, role="critic")
-    assert all(not p.requires_grad
-               for p in teacher.transformer.parameters()), (
-                   "teacher must stay frozen")
+    assert all(not p.requires_grad for p in teacher.transformer.parameters()), ("teacher must stay frozen")
 
     # Iteration 1 — first streaming chunk: 3 fresh latents, no overlap.
     method.optimizers_zero_grad(1)
@@ -165,8 +154,7 @@ def test_streaming_long_tuning_multi_stage_train_steps(
     method.backward(loss_map, outputs, grad_accum_rounds=1)
     mask = outputs["dmd_latent_vis_dict"]["streaming_chunk_mask"]
     assert mask.dtype == torch.bool
-    assert int(mask.sum().item()) == 2, (
-        "overlap latents must be masked out of the training chunk")
+    assert int(mask.sum().item()) == 2, ("overlap latents must be masked out of the training chunk")
 
     # Iteration 3 — final chunk fills the sequence (1 new latent).
     method.optimizers_zero_grad(3)
@@ -255,8 +243,15 @@ class TestScheduleParsing:
         with pytest.raises(ValueError, match="ordered and non-overlapping"):
             parse_multi_phased_distill_schedule(
                 [
-                    {"stage": "self_forcing", "start_step": 0, "end_step": 10},
-                    {"stage": "streaming_long", "start_step": 5},
+                    {
+                        "stage": "self_forcing",
+                        "start_step": 0,
+                        "end_step": 10
+                    },
+                    {
+                        "stage": "streaming_long",
+                        "start_step": 5
+                    },
                 ],
                 default_num_latent_t=6,
                 default_streaming_chunk_size=3,
@@ -293,12 +288,10 @@ class TestPadFirstFrameLatent:
     def test_passthrough_without_condition_or_when_long_enough(self) -> None:
         method = _method_without_init()
         raw: dict = {"other": 1}
-        assert method._with_padded_first_frame_latent(
-            raw, target_latent_frames=3) is raw
+        assert method._with_padded_first_frame_latent(raw, target_latent_frames=3) is raw
 
         full = {"first_frame_latent": torch.zeros(1, 4, 3, 2, 2)}
-        assert method._with_padded_first_frame_latent(
-            full, target_latent_frames=3) is full
+        assert method._with_padded_first_frame_latent(full, target_latent_frames=3) is full
 
     def test_rejects_non_5d_condition(self) -> None:
         method = _method_without_init()
@@ -347,12 +340,10 @@ class TestStageChunkSize:
         method._chunk_size = 7
 
         assert method._stage_chunk_size(_make_stage()) == 3
-        assert method._stage_chunk_size(
-            _make_stage(streaming_chunk_size=None)) == 5
+        assert method._stage_chunk_size(_make_stage(streaming_chunk_size=None)) == 5
 
         method.method_config = {}
-        assert method._stage_chunk_size(
-            _make_stage(streaming_chunk_size=None)) == 7
+        assert method._stage_chunk_size(_make_stage(streaming_chunk_size=None)) == 7
 
     def test_rejects_non_positive_chunk_size(self) -> None:
         method = _method_without_init()

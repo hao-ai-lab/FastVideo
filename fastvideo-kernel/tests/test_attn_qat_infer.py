@@ -16,6 +16,7 @@ or via pytest:
 
 import os
 import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
@@ -42,19 +43,17 @@ def cosine_similarity(a: torch.Tensor, b: torch.Tensor) -> float:
     return (torch.dot(a_flat, b_flat) / (norm_a * norm_b)).item()
 
 
-def reference_sdpa(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor,
-                   is_causal: bool) -> torch.Tensor:
+def reference_sdpa(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, is_causal: bool) -> torch.Tensor:
     """PyTorch math-backend SDPA reference in float32."""
     with sdpa_kernel([SDPBackend.MATH]):
-        out = F.scaled_dot_product_attention(
-            q.float(), k.float(), v.float(), is_causal=is_causal
-        )
+        out = F.scaled_dot_product_attention(q.float(), k.float(), v.float(), is_causal=is_causal)
     return out.to(q.dtype)
 
 
 # ---------------------------------------------------------------------------
 # Benchmark
 # ---------------------------------------------------------------------------
+
 
 def bench(B, H, L, D, is_causal, warmup=20, iters=100):
     q = torch.randn(B, H, L, D, device="cuda", dtype=torch.bfloat16)
@@ -87,10 +86,8 @@ def run_benchmark():
         for L in [512, 1024, 2048, 4096]:
             for D in [64, 128]:
                 ms, tflops = bench(B, H, L, D, is_causal)
-                print(
-                    f"{B:>2} {H:>2} {L:>5} {D:>4} {str(is_causal):>6}"
-                    f"  {ms:>8.3f}  {tflops:>7.2f}"
-                )
+                print(f"{B:>2} {H:>2} {L:>5} {D:>4} {str(is_causal):>6}"
+                      f"  {ms:>8.3f}  {tflops:>7.2f}")
 
 
 # ---------------------------------------------------------------------------
@@ -101,15 +98,21 @@ import pytest
 
 
 @pytest.mark.parametrize("B,H,L,D", [
-    (2, 4,  128,  64), (2, 4,  128, 128),
-    (2, 4,  256,  64), (2, 4,  256, 128),
-    (2, 4,  512,  64), (2, 4,  512, 128),
-    (2, 4, 1024,  64), (2, 4, 1024, 128),
-    (2, 4, 2048,  64), (2, 4, 2048, 128),
-    (2, 4, 4096,  64), (2, 4, 4096, 128),
-    (1, 4,  128, 128),
-    (2, 8,  256, 128),
-    (1, 4,  384, 128),
+    (2, 4, 128, 64),
+    (2, 4, 128, 128),
+    (2, 4, 256, 64),
+    (2, 4, 256, 128),
+    (2, 4, 512, 64),
+    (2, 4, 512, 128),
+    (2, 4, 1024, 64),
+    (2, 4, 1024, 128),
+    (2, 4, 2048, 64),
+    (2, 4, 2048, 128),
+    (2, 4, 4096, 64),
+    (2, 4, 4096, 128),
+    (1, 4, 128, 128),
+    (2, 8, 256, 128),
+    (1, 4, 384, 128),
 ])
 @pytest.mark.parametrize("causal", [False, True], ids=["non_causal", "causal"])
 def test_accuracy_sdpa(causal: bool, B: int, H: int, L: int, D: int):
@@ -135,15 +138,21 @@ if __name__ == "__main__":
     print("Accuracy sweep — SDPA reference:")
     for causal in [False, True]:
         for B, H, L, D in [
-            (2, 4,  128,  64), (2, 4,  128, 128),
-            (2, 4,  256,  64), (2, 4,  256, 128),
-            (2, 4,  512,  64), (2, 4,  512, 128),
-            (2, 4, 1024,  64), (2, 4, 1024, 128),
-            (2, 4, 2048,  64), (2, 4, 2048, 128),
-            (2, 4, 4096,  64), (2, 4, 4096, 128),
-            (1, 4,  128, 128),
-            (2, 8,  256, 128),
-            (1, 4,  384, 128),
+            (2, 4, 128, 64),
+            (2, 4, 128, 128),
+            (2, 4, 256, 64),
+            (2, 4, 256, 128),
+            (2, 4, 512, 64),
+            (2, 4, 512, 128),
+            (2, 4, 1024, 64),
+            (2, 4, 1024, 128),
+            (2, 4, 2048, 64),
+            (2, 4, 2048, 128),
+            (2, 4, 4096, 64),
+            (2, 4, 4096, 128),
+            (1, 4, 128, 128),
+            (2, 8, 256, 128),
+            (1, 4, 384, 128),
         ]:
             test_accuracy_sdpa(causal, B, H, L, D)
     print()

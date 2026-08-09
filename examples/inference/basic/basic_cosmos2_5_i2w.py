@@ -30,8 +30,7 @@ def main():
         "and casting reflections onto adjacent vehicles. "
         "The motion creates space in the lineup, signaling activity within the otherwise quiet station. "
         "It then comes to a smooth stop, resuming its position in line. "
-        "Overhead signage in Chinese characters remains illuminated, enhancing the vibrant, urban night scene."
-    )
+        "Overhead signage in Chinese characters remains illuminated, enhancing the vibrant, urban night scene.")
 
     generator.generate_video(
         prompt,
@@ -47,4 +46,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

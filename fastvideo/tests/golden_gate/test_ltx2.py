@@ -34,8 +34,7 @@ AUDIO_DIM = 2048  # 32 heads x 64
 
 def _build_block(layer: int) -> torch.nn.Module:
     from fastvideo.configs.models.dits.ltx2 import LTX2VideoArchConfig
-    from fastvideo.models.dits.ltx2 import (
-        BasicAVTransformerBlock, LTXRopeType, TransformerConfig)
+    from fastvideo.models.dits.ltx2 import (BasicAVTransformerBlock, LTXRopeType, TransformerConfig)
 
     arch = LTX2VideoArchConfig()
     video_cfg = TransformerConfig(
@@ -69,13 +68,11 @@ def _build_block(layer: int) -> torch.nn.Module:
 
 
 def _make_inputs(device: torch.device, seed: int) -> dict:
-    from fastvideo.models.dits.ltx2 import (
-        AudioLatentPatchifier, AudioLatentShape, DEFAULT_LTX2_AUDIO_DOWNSAMPLE,
-        DEFAULT_LTX2_AUDIO_HOP_LENGTH, DEFAULT_LTX2_AUDIO_MEL_BINS,
-        DEFAULT_LTX2_AUDIO_SAMPLE_RATE, DEFAULT_LTX2_SCALE_FACTORS, LTXRopeType,
-        TransformerArgs, VideoLatentPatchifier, VideoLatentShape,
-        _get_pixel_coords, generate_ltx_freq_grid_float64,
-        precompute_ltx_freqs_cis)
+    from fastvideo.models.dits.ltx2 import (AudioLatentPatchifier, AudioLatentShape, DEFAULT_LTX2_AUDIO_DOWNSAMPLE,
+                                            DEFAULT_LTX2_AUDIO_HOP_LENGTH, DEFAULT_LTX2_AUDIO_MEL_BINS,
+                                            DEFAULT_LTX2_AUDIO_SAMPLE_RATE, DEFAULT_LTX2_SCALE_FACTORS, LTXRopeType,
+                                            TransformerArgs, VideoLatentPatchifier, VideoLatentShape, _get_pixel_coords,
+                                            generate_ltx_freq_grid_float64, precompute_ltx_freqs_cis)
 
     generator = torch.Generator(device="cpu").manual_seed(seed)
     B, frames, h, w = 1, 2, 4, 6
@@ -84,67 +81,60 @@ def _make_inputs(device: torch.device, seed: int) -> dict:
 
     # Video positions: patch grid bounds -> pixel coords (scale 8,32,32;
     # fps 24; causal fix), cast to hidden dtype like ltx2.py:3044.
-    v_pos = VideoLatentPatchifier(patch_size=1).get_patch_grid_bounds(
-        VideoLatentShape((B, 128, frames, h, w)), device=torch.device("cpu"))
-    v_pos = _get_pixel_coords(v_pos, DEFAULT_LTX2_SCALE_FACTORS, fps=24.0,
-                              causal_fix=True).to(torch.bfloat16)
+    v_pos = VideoLatentPatchifier(patch_size=1).get_patch_grid_bounds(VideoLatentShape((B, 128, frames, h, w)),
+                                                                      device=torch.device("cpu"))
+    v_pos = _get_pixel_coords(v_pos, DEFAULT_LTX2_SCALE_FACTORS, fps=24.0, causal_fix=True).to(torch.bfloat16)
     # Audio positions stay float32 [B, 1, T, 2] (ltx2.py:3099-3101).
     a_pos = AudioLatentPatchifier(
         patch_size=DEFAULT_LTX2_AUDIO_MEL_BINS,
         sample_rate=DEFAULT_LTX2_AUDIO_SAMPLE_RATE,
         hop_length=DEFAULT_LTX2_AUDIO_HOP_LENGTH,
         audio_latent_downsample_factor=DEFAULT_LTX2_AUDIO_DOWNSAMPLE,
-        is_causal=True, shift=0,
-    ).get_patch_grid_bounds(
-        AudioLatentShape((B, 8, seq_a, DEFAULT_LTX2_AUDIO_MEL_BINS)),
-        device=torch.device("cpu"))
+        is_causal=True,
+        shift=0,
+    ).get_patch_grid_bounds(AudioLatentShape((B, 8, seq_a, DEFAULT_LTX2_AUDIO_MEL_BINS)), device=torch.device("cpu"))
 
-    rope_kw = dict(out_dtype=torch.bfloat16, theta=10000.0,
-                   use_middle_indices_grid=True, num_attention_heads=32,
+    rope_kw = dict(out_dtype=torch.bfloat16,
+                   theta=10000.0,
+                   use_middle_indices_grid=True,
+                   num_attention_heads=32,
                    rope_type=LTXRopeType.SPLIT,
                    freq_grid_generator=generate_ltx_freq_grid_float64)
-    v_pe = precompute_ltx_freqs_cis(v_pos, dim=VIDEO_DIM,
-                                    max_pos=[20, 2048, 2048], **rope_kw)
-    v_cross_pe = precompute_ltx_freqs_cis(v_pos[:, 0:1, :], dim=AUDIO_DIM,
-                                          max_pos=[20], **rope_kw)
-    a_pe = precompute_ltx_freqs_cis(a_pos, dim=AUDIO_DIM, max_pos=[20],
-                                    **rope_kw)
-    a_cross_pe = precompute_ltx_freqs_cis(a_pos[:, 0:1, :], dim=AUDIO_DIM,
-                                          max_pos=[20], **rope_kw)
+    v_pe = precompute_ltx_freqs_cis(v_pos, dim=VIDEO_DIM, max_pos=[20, 2048, 2048], **rope_kw)
+    v_cross_pe = precompute_ltx_freqs_cis(v_pos[:, 0:1, :], dim=AUDIO_DIM, max_pos=[20], **rope_kw)
+    a_pe = precompute_ltx_freqs_cis(a_pos, dim=AUDIO_DIM, max_pos=[20], **rope_kw)
+    a_cross_pe = precompute_ltx_freqs_cis(a_pos[:, 0:1, :], dim=AUDIO_DIM, max_pos=[20], **rope_kw)
 
     def rnd(*shape):
-        return torch.randn(*shape, generator=generator,
-                           dtype=torch.float32).to(device=device,
-                                                   dtype=torch.bfloat16)
+        return torch.randn(*shape, generator=generator, dtype=torch.float32).to(device=device, dtype=torch.bfloat16)
 
     def to_dev(pe):
         return tuple(t.to(device) for t in pe)
 
-    video = TransformerArgs(
-        x=rnd(B, seq_v, VIDEO_DIM),
-        context=rnd(B, n_text, VIDEO_DIM),
-        context_mask=None,
-        timesteps=rnd(B, seq_v, 6 * VIDEO_DIM),
-        embedded_timestep=rnd(B, seq_v, VIDEO_DIM),
-        positional_embeddings=to_dev(v_pe),
-        cross_positional_embeddings=to_dev(v_cross_pe),
-        cross_scale_shift_timestep=rnd(B, seq_v, 4 * VIDEO_DIM),
-        cross_gate_timestep=rnd(B, seq_v, VIDEO_DIM),
-        enabled=True, prompt_timestep=None)
-    audio = TransformerArgs(
-        x=rnd(B, seq_a, AUDIO_DIM),
-        context=rnd(B, n_text, AUDIO_DIM),
-        context_mask=None,
-        timesteps=rnd(B, seq_a, 6 * AUDIO_DIM),
-        embedded_timestep=rnd(B, seq_a, AUDIO_DIM),
-        positional_embeddings=to_dev(a_pe),
-        cross_positional_embeddings=to_dev(a_cross_pe),
-        cross_scale_shift_timestep=rnd(B, seq_a, 4 * AUDIO_DIM),
-        cross_gate_timestep=rnd(B, seq_a, AUDIO_DIM),
-        enabled=True, prompt_timestep=None)
+    video = TransformerArgs(x=rnd(B, seq_v, VIDEO_DIM),
+                            context=rnd(B, n_text, VIDEO_DIM),
+                            context_mask=None,
+                            timesteps=rnd(B, seq_v, 6 * VIDEO_DIM),
+                            embedded_timestep=rnd(B, seq_v, VIDEO_DIM),
+                            positional_embeddings=to_dev(v_pe),
+                            cross_positional_embeddings=to_dev(v_cross_pe),
+                            cross_scale_shift_timestep=rnd(B, seq_v, 4 * VIDEO_DIM),
+                            cross_gate_timestep=rnd(B, seq_v, VIDEO_DIM),
+                            enabled=True,
+                            prompt_timestep=None)
+    audio = TransformerArgs(x=rnd(B, seq_a, AUDIO_DIM),
+                            context=rnd(B, n_text, AUDIO_DIM),
+                            context_mask=None,
+                            timesteps=rnd(B, seq_a, 6 * AUDIO_DIM),
+                            embedded_timestep=rnd(B, seq_a, AUDIO_DIM),
+                            positional_embeddings=to_dev(a_pe),
+                            cross_positional_embeddings=to_dev(a_cross_pe),
+                            cross_scale_shift_timestep=rnd(B, seq_a, 4 * AUDIO_DIM),
+                            cross_gate_timestep=rnd(B, seq_a, AUDIO_DIM),
+                            enabled=True,
+                            prompt_timestep=None)
 
-    return {"video": video, "audio": audio,
-            "video_original_seq_len": seq_v, "audio_original_seq_len": seq_a}
+    return {"video": video, "audio": audio, "video_original_seq_len": seq_v, "audio_original_seq_len": seq_a}
 
 
 SPEC = GateSpec(

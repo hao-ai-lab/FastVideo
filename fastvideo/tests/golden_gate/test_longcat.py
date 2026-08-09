@@ -23,7 +23,7 @@ from fastvideo.tests.golden_gate._harness import GateSpec, distributed_runtime, 
 __all__ = ["distributed_runtime"]
 
 HIDDEN_SIZE = 4096  # configs/models/dits/longcat.py:77
-ADALN_DIM = 512     # configs/models/dits/longcat.py:93
+ADALN_DIM = 512  # configs/models/dits/longcat.py:93
 
 
 def _build_block(layer: int) -> torch.nn.Module:

@@ -44,7 +44,9 @@ def test_v2_benchmark_config_identity_validates_and_is_preserved():
         "workload_id": "wan-t2v",
         "variant_id": "1.3b-sp2",
         "benchmark_version": 2,
-        "quality_metadata": {"some": "data"},
+        "quality_metadata": {
+            "some": "data"
+        },
     }
 
 
@@ -113,7 +115,11 @@ def test_optional_v2_metadata_fields_must_be_objects():
 def test_regression_thresholds_validate_without_forcing_v2_schema():
     cfg = {
         "benchmark_id": "legacy-benchmark",
-        "regression_thresholds": {"latency": {"threshold_percent": 0.1}},
+        "regression_thresholds": {
+            "latency": {
+                "threshold_percent": 0.1
+            }
+        },
     }
 
     _validate_benchmark_config(cfg, "legacy.json")

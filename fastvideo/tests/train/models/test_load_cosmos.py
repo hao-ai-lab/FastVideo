@@ -31,8 +31,7 @@ from fastvideo.forward_context import set_forward_context
 from fastvideo.train.models.cosmos import CosmosModel
 from fastvideo.train.utils.config import load_run_config
 
-_FIXTURE = str(
-    Path(__file__).resolve().parent.parent / "fixtures" / "cosmos_t2w_min.yaml")
+_FIXTURE = str(Path(__file__).resolve().parent.parent / "fixtures" / "cosmos_t2w_min.yaml")
 
 # Cosmos 2.5 Reason1 (Qwen2.5-VL) text embedding width.
 _COSMOS_TEXT_DIM = 100352
@@ -63,11 +62,7 @@ def test_cosmos_model_loads_and_forwards():
     # Small spatial + few frames so this fits next to the 2B model.
     b, c, t, h, w = 1, 16, 4, 32, 32
     hidden_states = torch.randn(b, c, t, h, w, device=device, dtype=dtype)
-    encoder_hidden_states = torch.randn(b,
-                                        16,
-                                        _COSMOS_TEXT_DIM,
-                                        device=device,
-                                        dtype=dtype)
+    encoder_hidden_states = torch.randn(b, 16, _COSMOS_TEXT_DIM, device=device, dtype=dtype)
     timestep = torch.tensor([[500]], device=device, dtype=dtype)
     condition_mask = torch.zeros(b, 1, t, h, w, device=device, dtype=dtype)
     padding_mask = torch.zeros(1, 1, h, w, device=device, dtype=dtype)
@@ -87,7 +82,6 @@ def test_cosmos_model_loads_and_forwards():
 
     if isinstance(out, tuple):
         out = out[0]
-    assert out.shape == hidden_states.shape, (
-        f"output shape {tuple(out.shape)} != input shape "
-        f"{tuple(hidden_states.shape)}")
+    assert out.shape == hidden_states.shape, (f"output shape {tuple(out.shape)} != input shape "
+                                              f"{tuple(hidden_states.shape)}")
     assert torch.isfinite(out).all().item(), "output contains NaN/Inf"
