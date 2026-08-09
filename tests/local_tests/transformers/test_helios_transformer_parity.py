@@ -156,13 +156,13 @@ def _load_tiny_fastvideo(
     device: torch.device,
     dtype: torch.dtype,
 ):
-    from fastvideo.attention.selector import global_force_attn_backend_context_manager
+    from fastvideo.attention.selector import _component_attention_backend_scope
 
     HeliosArchConfig, HeliosConfig, FastVideoHeliosTransformer = _native_types()
     kwargs = _tiny_kwargs()
     torch.manual_seed(3535)
     official = OfficialHeliosTransformer3DModel(**kwargs).to(dtype=dtype).eval()
-    with set_default_torch_dtype(dtype), global_force_attn_backend_context_manager(backend):
+    with set_default_torch_dtype(dtype), _component_attention_backend_scope(backend, component="transformer"):
         native = FastVideoHeliosTransformer(
             config=HeliosConfig(arch_config=HeliosArchConfig(**kwargs)),
             hf_config={},
