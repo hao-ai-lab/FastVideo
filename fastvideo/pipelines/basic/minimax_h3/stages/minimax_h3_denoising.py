@@ -140,9 +140,11 @@ class MiniMaxH3DenoisingStage(PipelineStage):
             vsa_prefix_segments = _h3_vsa_prefix_segments(layout, vsa_patch_size)
             # Per-request knobs (sweeps flip these between generate_video calls
             # without respawning workers); mode None defers to the env default.
-            vsa_mode = batch.extra.get("vsa_mode")
-            vsa_exempt = None if vsa_mode is None else vsa_mode == "exempt"
-            vsa_dense_layers = tuple(int(layer) for layer in batch.extra.get("vsa_dense_layers", ()))
+            vsa_mode = batch.extra.get("vsa_mode", "exempt")
+            if vsa_mode not in ("exempt", "compete"):
+                raise ValueError(f"vsa_mode must be 'exempt' or 'compete', got {vsa_mode!r}.")
+            vsa_exempt = vsa_mode == "exempt"
+            vsa_dense_layers = tuple(batch.extra.get("vsa_dense_layers", ()))
             vsa_dense_first_n = int(batch.extra.get("vsa_dense_first_n_steps", 0))
 
         controller = get_global_controller()

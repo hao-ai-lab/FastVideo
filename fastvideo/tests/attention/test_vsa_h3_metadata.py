@@ -10,7 +10,7 @@ import torch.nn.functional as F
 
 from fastvideo.attention.backends.video_sparse_attn_h3 import (_TILE_ELEMS, MiniMaxH3VSAImpl,
                                                                MiniMaxH3VSAMetadataBuilder, _build_block_mask,
-                                                               _pool_tiles)
+                                                               _pool_tiles, token_tile_and_valid)
 
 _720P = dict(raw_latent_shape=(30, 44, 80), patch_size=(1, 2, 2), prefix_segments=(512, 1760, 400))
 _TINY = dict(raw_latent_shape=(8, 8, 12), patch_size=(1, 2, 2), prefix_segments=(7, 5, 3))
@@ -36,10 +36,7 @@ def _impl():
 def reference_sparse_attention(query, key, value, mask, meta):
     """Token-level oracle: SDPA over the padded tile buffer with the block
     mask expanded to tokens. query/key/value: tiled [B, S_pad, H, D]."""
-    n_tiles = meta.variable_block_sizes.numel()
-    token_tile = torch.arange(n_tiles, device=query.device).repeat_interleave(_TILE_ELEMS)
-    token_valid = (torch.arange(_TILE_ELEMS, device=query.device)[None, :] < meta.variable_block_sizes[:,
-                                                                                                       None]).flatten()
+    token_tile, token_valid = token_tile_and_valid(meta.variable_block_sizes)
     out = torch.empty_like(query)
     for b in range(query.shape[0]):
         for h in range(query.shape[2]):
@@ -62,8 +59,8 @@ def test_geometry_720p():
     assert meta.num_prefix_tiles == 2 + 7 + 2
     assert meta.num_video_tiles == 8 * 3 * 5
     assert int(meta.variable_block_sizes.sum()) == seq
-    perm = meta.tile_partition_indices
-    assert torch.equal(torch.sort(perm).values, torch.arange(seq))
+    # (permutation coverage of [0, seq) is implied by the roundtrip below:
+    # untile_combined_index scatters seq distinct rows and recovers all of x)
     # segment purity: no prefix tile straddles a segment boundary
     boundaries = [512, 512 + 1760, 512 + 1760 + 400]
     start = 0

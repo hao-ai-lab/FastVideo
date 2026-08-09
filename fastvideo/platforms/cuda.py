@@ -189,8 +189,6 @@ class CudaPlatformBase(Platform):
                 from fastvideo_kernel.block_sparse_attn_256 import (  # noqa: F401
                     block_sparse_attn_256_bshd)
 
-                from fastvideo.attention.backends.video_sparse_attn_h3 import (  # noqa: F401
-                    MiniMaxH3VSABackend)
                 logger.info("Using MiniMax-H3 Video Sparse Attention backend.")
 
                 return "fastvideo.attention.backends.video_sparse_attn_h3.MiniMaxH3VSABackend"

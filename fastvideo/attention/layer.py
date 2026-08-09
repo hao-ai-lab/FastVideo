@@ -213,7 +213,7 @@ class DistributedAttention_VSA(DistributedAttention):
         qkvg = torch.cat(stack, dim=0)  # [3or4*batch, seq_len, num_heads, head_dim]
 
         # Redistribute heads across sequence dimension
-        # Before: [4*batch, shard_seq_len, num_heads, head_dim]
+        # Before: [3or4*batch, shard_seq_len, num_heads, head_dim]
         # After:  [4*batch, full_seq_len, shard_num_heads, head_dim]
         qkvg = sequence_model_parallel_all_to_all_4D(qkvg, scatter_dim=2, gather_dim=1)
 

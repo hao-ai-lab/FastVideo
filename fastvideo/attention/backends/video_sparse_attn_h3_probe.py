@@ -59,9 +59,8 @@ def record_probe(
     # token-true check on sampled rows (exact row softmax, tile-aggregated)
     gen = torch.Generator(device="cpu").manual_seed(step * 1000 + layer)
     # sample among video rows in the PADDED/tiled domain that are non-pad
-    vbs = attn_metadata.variable_block_sizes
-    token_tile = torch.arange(vbs.numel(), device=query.device).repeat_interleave(query.shape[1] // vbs.numel())
-    token_valid = (torch.arange(query.shape[1] // vbs.numel(), device=query.device)[None, :] < vbs[:, None]).flatten()
+    from fastvideo.attention.backends.video_sparse_attn_h3 import token_tile_and_valid
+    token_tile, token_valid = token_tile_and_valid(attn_metadata.variable_block_sizes)
     video_rows = torch.nonzero((token_tile >= P) & token_valid, as_tuple=False).flatten()
     idx = video_rows[torch.randint(0, video_rows.numel(), (_TRUE_ROWS, ), generator=gen).to(query.device)]
 
@@ -69,7 +68,7 @@ def record_probe(
     logits = torch.einsum("brhd,bshd->bhrs", q_s, key.float()) / (query.shape[-1]**0.5)
     logits = logits.masked_fill(~token_valid.view(1, 1, 1, -1), float("-inf"))
     true_probs = torch.softmax(logits, dim=-1)
-    n_tiles = vbs.numel()
+    n_tiles = attn_metadata.variable_block_sizes.numel()
     tile_mass = torch.zeros(*true_probs.shape[:3], n_tiles, device=query.device, dtype=true_probs.dtype)
     tile_mass.index_add_(3, token_tile, true_probs)  # [B,H,R,n]
     tm_vid = tile_mass[..., P:]

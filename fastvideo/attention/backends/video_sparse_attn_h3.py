@@ -15,8 +15,8 @@ backend differs from the Wan-tuned ``video_sparse_attn``:
 - Non-video *queries* are always dense. Non-video *keys* are either
   always-selected for every query ("exempt", default) or compete in
   top-k under a FLOP-matched budget ("compete") — the ablation axis,
-  switched via ``FASTVIDEO_H3_VSA_MODE`` or per request via
-  ``generate_video(..., vsa_mode=...)``. Per-request scheduling knobs
+  switched per request via ``generate_video(..., vsa_mode=...)``
+  (default: exempt). Per-request scheduling knobs
   (``vsa_dense_first_n_steps``, ``vsa_dense_layers``) let mixed schedules
   run the diffuse steps/layers dense while pushing the rest harder.
 
@@ -27,8 +27,6 @@ fallback and keeps identical mask semantics.
 
 import functools
 import math
-import os
-import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -40,20 +38,26 @@ except ImportError:
     block_sparse_attn_256_bshd = None
 
 from fastvideo.attention.backends.abstract import (AttentionBackend, AttentionImpl, AttentionMetadata,
-                                                   AttentionMetadataBuilder)
-from fastvideo.attention.backends.video_sparse_attn import (construct_variable_block_sizes, get_non_pad_index,
-                                                            get_tile_partition_indices)
+                                                   AttentionMetadataBuilder, layer_idx_from_prefix)
+from fastvideo.attention.backends.video_sparse_attn import (compute_topk, construct_variable_block_sizes,
+                                                            get_non_pad_index, get_tile_partition_indices,
+                                                            scatter_into_tile_buf)
 from fastvideo.attention.backends.video_sparse_attn_h3_probe import probe_enabled, record_probe
 
 VSA_H3_TILE_SIZE = (4, 8, 8)  # 256 elements -> FA4 CuTe fastpath on sm10.x
 _TILE_ELEMS = math.prod(VSA_H3_TILE_SIZE)
 
 
-def _h3_vsa_mode() -> str:
-    mode = os.environ.get("FASTVIDEO_H3_VSA_MODE", "exempt")
-    if mode not in ("exempt", "compete"):
-        raise ValueError(f"FASTVIDEO_H3_VSA_MODE must be 'exempt' or 'compete', got {mode!r}.")
-    return mode
+def token_tile_and_valid(variable_block_sizes: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """Per padded-token tile id and pad-validity mask.
+
+    The single encoding of the padding contract, shared by the probe and the
+    test oracle so they cannot drift from the backend's tile geometry.
+    """
+    device = variable_block_sizes.device
+    token_tile = torch.arange(variable_block_sizes.numel(), device=device).repeat_interleave(_TILE_ELEMS)
+    token_valid = (torch.arange(_TILE_ELEMS, device=device)[None, :] < variable_block_sizes[:, None]).reshape(-1)
+    return token_tile, token_valid
 
 
 @functools.lru_cache(maxsize=10)
@@ -61,10 +65,10 @@ def _h3_tile_geometry(
     prefix_segments: tuple[int, ...],
     dit_seq_shape: tuple[int, int, int],
     device: torch.device,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int, int]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, int, int]:
     """Tile the packed sequence: segment-pure prefix chunks, then video tiles.
 
-    Returns (tile_partition_indices, variable_block_sizes, non_pad_index,
+    Returns (tile_partition_indices, variable_block_sizes,
     untile_combined_index, num_prefix_tiles, num_video_tiles).
     """
     prefix_len = sum(prefix_segments)
@@ -99,8 +103,7 @@ def _h3_tile_geometry(
     non_pad_index = get_non_pad_index(variable_block_sizes, _TILE_ELEMS)
 
     untile_combined_index = non_pad_index[torch.argsort(tile_partition_indices)]
-    return (tile_partition_indices, variable_block_sizes, non_pad_index, untile_combined_index, num_prefix_tiles,
-            num_video_tiles)
+    return (tile_partition_indices, variable_block_sizes, untile_combined_index, num_prefix_tiles, num_video_tiles)
 
 
 class MiniMaxH3VSABackend(AttentionBackend):
@@ -134,20 +137,22 @@ class MiniMaxH3VSAMetadata(AttentionMetadata):
     num_prefix_tiles: int
     num_video_tiles: int
     exempt: bool
-    tile_partition_indices: torch.Tensor
     variable_block_sizes: torch.Tensor
-    non_pad_index: torch.Tensor
     untile_combined_index: torch.Tensor
     # layers forced dense regardless of sparsity (probe-guided opt-outs)
     dense_layers: tuple[int, ...] = ()
-    # Per-step shared padded buffer reused across the 50 VSA layers.
-    tile_buf: torch.Tensor | None = None
+    # Single-slot holder for the padded tile buffer, owned by the BUILDER so
+    # one buffer serves the whole denoising loop (pad slots stay zero and
+    # every non-pad slot is fully overwritten per tile(), so cross-step reuse
+    # is valid; saves a ~1.4 GB alloc+memset per step at 720p). VSA-H3 runs
+    # eager today — revisit the reuse if it ever goes under cudagraphs.
+    tile_buf_holder: list = None  # type: ignore[assignment]
 
 
 class MiniMaxH3VSAMetadataBuilder(AttentionMetadataBuilder):
 
     def __init__(self) -> None:
-        pass
+        self._tile_buf_holder: list = [None]
 
     def prepare(self) -> None:
         pass
@@ -160,7 +165,7 @@ class MiniMaxH3VSAMetadataBuilder(AttentionMetadataBuilder):
             VSA_sparsity: float,
             prefix_segments: tuple[int, ...],
             device: torch.device,
-            exempt: bool | None = None,
+            exempt: bool = True,
             dense_layers: tuple[int, ...] = (),
             **kwargs: dict[str, Any],
     ) -> MiniMaxH3VSAMetadata:
@@ -169,7 +174,7 @@ class MiniMaxH3VSAMetadataBuilder(AttentionMetadataBuilder):
         prefix_segments = tuple(int(s) for s in prefix_segments if s > 0)
         total_seq_length = sum(prefix_segments) + math.prod(dit_seq_shape)
 
-        (tile_partition_indices, variable_block_sizes, non_pad_index, untile_combined_index, num_prefix_tiles,
+        (_tile_partition_indices, variable_block_sizes, untile_combined_index, num_prefix_tiles,
          num_video_tiles) = _h3_tile_geometry(prefix_segments, dit_seq_shape, device)
 
         return MiniMaxH3VSAMetadata(
@@ -178,12 +183,11 @@ class MiniMaxH3VSAMetadataBuilder(AttentionMetadataBuilder):
             total_seq_length=total_seq_length,
             num_prefix_tiles=num_prefix_tiles,
             num_video_tiles=num_video_tiles,
-            exempt=exempt if exempt is not None else _h3_vsa_mode() == "exempt",
-            tile_partition_indices=tile_partition_indices,
+            exempt=exempt,
             variable_block_sizes=variable_block_sizes,
-            non_pad_index=non_pad_index,
             untile_combined_index=untile_combined_index,
-            dense_layers=tuple(dense_layers),
+            dense_layers=tuple(int(layer) for layer in dense_layers),
+            tile_buf_holder=self._tile_buf_holder,
         )
 
 
@@ -211,7 +215,7 @@ def _build_block_mask(
 ) -> torch.Tensor:
     """scores: [B, H, n_tiles, n_tiles] -> bool mask, same shape."""
     n_tiles = scores.shape[-1]
-    k_vid = max(1, min(math.ceil((1 - VSA_sparsity) * num_video_tiles), num_video_tiles))
+    k_vid = compute_topk(VSA_sparsity, num_video_tiles)
     if k_vid == num_video_tiles:
         return torch.ones_like(scores, dtype=torch.bool)
     mask = torch.zeros_like(scores, dtype=torch.bool)
@@ -241,15 +245,14 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         **extra_impl_args,
     ) -> None:
         self.prefix = prefix
-        match = re.search(r"transformer_blocks\.(\d+)\.", prefix)
-        self.layer_idx = int(match.group(1)) if match else -1
+        self.layer_idx = layer_idx_from_prefix(prefix, default=-1)
 
     def tile(self, x: torch.Tensor, attn_metadata: MiniMaxH3VSAMetadata) -> torch.Tensor:
         """Scatter rows into the padded tile buffer (pad positions stay zero).
 
-        The returned tensor aliases the per-metadata buffer; callers must
-        consume it before the next ``tile()`` on the same metadata (both
-        call sites in ``forward()`` read it immediately).
+        The returned tensor aliases the builder-owned buffer; callers must
+        consume it before the next ``tile()`` (both call sites in
+        ``forward()`` read it immediately).
         """
         if x.shape[1] != attn_metadata.total_seq_length:
             raise ValueError(f"VSA-H3 metadata was built for sequence length {attn_metadata.total_seq_length}, "
@@ -258,16 +261,11 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         n_tiles = attn_metadata.variable_block_sizes.numel()
         target_shape = (x.shape[0], n_tiles * _TILE_ELEMS, x.shape[-2], x.shape[-1])
 
-        buf = attn_metadata.tile_buf
-        if (buf is None or buf.shape != target_shape or buf.dtype != x.dtype or buf.device != x.device):
-            buf = torch.zeros(target_shape, device=x.device, dtype=x.dtype)
-            attn_metadata.tile_buf = buf
-
         # single scatter: untile_combined_index maps original row i to its
         # padded slot, so this is exactly the inverse of postprocess_output
-        # (no gathered temp of x, unlike buf[:, non_pad] = x[:, partition])
-        buf[:, attn_metadata.untile_combined_index] = x
-        return buf
+        holder = attn_metadata.tile_buf_holder
+        holder[0] = scatter_into_tile_buf(x, target_shape, attn_metadata.untile_combined_index, holder[0])
+        return holder[0]
 
     def preprocess_qkv(self, qkv: torch.Tensor, attn_metadata: MiniMaxH3VSAMetadata) -> torch.Tensor:
         return self.tile(qkv, attn_metadata)
