@@ -36,6 +36,10 @@ def test_passthrough_keys_cover_ltx2_audio_conditioning() -> None:
         "ltx2_audio_denoise_mask",
         "audio_num_frames",
         "video_position_offset_sec",
+        # MiniMax-H3 VSA per-request knobs (consumed by MiniMaxH3DenoisingStage)
+        "vsa_mode",
+        "vsa_dense_first_n_steps",
+        "vsa_dense_layers",
     }
     assert set(_BATCH_EXTRA_PASSTHROUGH_KEYS) == expected
 

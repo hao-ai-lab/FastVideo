@@ -29,6 +29,7 @@ class MiniMaxH3ArchConfig(DiTArchConfig):
         # sm_12x). Enabled for speed experiments; output quality against the
         # SSIM references is not yet validated.
         AttentionBackendEnum.ATTN_QAT_INFER,
+        AttentionBackendEnum.VIDEO_SPARSE_ATTN_H3,
     )
 
     param_names_mapping: dict = field(
