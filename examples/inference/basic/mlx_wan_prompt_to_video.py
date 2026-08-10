@@ -67,7 +67,22 @@ def resolve_model_root(model_root: Path | None, *, model_id: str = DEFAULT_MODEL
         return model_root
     from huggingface_hub import snapshot_download
 
-    return Path(snapshot_download(model_id))
+    # Download only the non-DiT components (text encoder, VAE, tokenizer,
+    # scheduler, model_index + the DiT config for reference). The DiT weights
+    # come from the quantized QAD FastMetal checkpoint via --mlx-checkpoint;
+    # fetching the base fp16/bf16 transformer here would waste tens of GB
+    # (49 GB for the 14B).
+    return Path(snapshot_download(
+        model_id,
+        allow_patterns=[
+            "model_index.json",
+            "scheduler/*",
+            "tokenizer/*",
+            "text_encoder/*",
+            "vae/*",
+            "transformer/config.json",
+        ],
+    ))
 
 
 def _torch_device(device_arg: str):
