@@ -7,10 +7,6 @@ _DENOISE_STAGE = PresetStageSpec(
     name="denoise",
     kind="denoising",
     description="Causal-fast denoising pass",
-    allowed_overrides=frozenset({
-        "num_inference_steps",
-        "guidance_scale",
-    }),
 )
 
 LINGBOTWORLD_FAST_I2V = InferencePreset(
