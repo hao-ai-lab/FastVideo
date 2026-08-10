@@ -362,9 +362,8 @@ class TorchProfilerController:
             # a typo here would otherwise silently profile nothing, forever
             if region not in self._warned_unregistered:
                 self._warned_unregistered.add(region)
-                logger.warning(
-                    "PROFILER: region %r is not registered (typo?); available: %s", region,
-                    ", ".join(r.name for r in list_profiler_regions()))
+                logger.warning("PROFILER: region %r is not registered (typo?); available: %s", region,
+                               ", ".join(r.name for r in list_profiler_regions()))
             yield
             return
 
