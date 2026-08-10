@@ -12,7 +12,9 @@ import numpy as np
 def _load_prompt_to_video_module():
     root = Path(__file__).resolve().parents[3]
     script = root / "examples/inference/basic/mlx_wan_prompt_to_video.py"
-    spec = importlib.util.spec_from_file_location("mlx_wan_prompt_to_video_for_test", script)
+    spec = importlib.util.spec_from_file_location(
+        "mlx_wan_prompt_to_video_for_test", script
+    )
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -30,7 +32,9 @@ def test_default_taehv_decode_uses_mlx_backend(monkeypatch, tmp_path):
         output_path.write_bytes(b"fake mp4")
         return {"backend": kwargs["backend"]}
 
-    monkeypatch.setattr(wan_vae, "decode_latents_to_video", fake_decode_latents_to_video)
+    monkeypatch.setattr(
+        wan_vae, "decode_latents_to_video", fake_decode_latents_to_video
+    )
     latents = np.zeros((1, 16, 1, 2, 2), dtype=np.float32)
     output_path = tmp_path / "out.mp4"
 

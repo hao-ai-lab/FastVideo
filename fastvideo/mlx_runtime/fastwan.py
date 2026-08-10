@@ -10,8 +10,13 @@ import statistics
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from fastvideo.logger import init_logger
+
+if TYPE_CHECKING:
+    import mlx.core as mx
+    import torch
 
 logger = init_logger(__name__)
 
@@ -52,7 +57,7 @@ class MLXQuantizationSpec:
     group_size: int | None = None
 
     @classmethod
-    def from_name(cls, name: str | None) -> "MLXQuantizationSpec | None":
+    def from_name(cls, name: str | None) -> MLXQuantizationSpec | None:
         if name is None or name in {"", "none", "fp16", "fp32"}:
             return None
         if name == "int8":
@@ -76,23 +81,23 @@ class MLXQuantizationSpec:
 
 @dataclass(frozen=True)
 class QuantizedMatrix:
-    weight: "mx.array"
-    scales: "mx.array"
-    biases: "mx.array | None"
+    weight: mx.array
+    scales: mx.array
+    biases: mx.array | None
     spec: MLXQuantizationSpec
-    dequantized_dtype: "mx.Dtype"
+    dequantized_dtype: mx.Dtype
 
 
 def fastwan_shape(
-    *,
-    height: int,
-    width: int,
-    num_frames: int,
-    vae_temporal_compression: int = 4,
-    vae_spatial_compression: int = 8,
-    patch_size: tuple[int, int, int] = (1, 2, 2),
-    num_heads: int = 12,
-    head_dim: int = 128,
+        *,
+        height: int,
+        width: int,
+        num_frames: int,
+        vae_temporal_compression: int = 4,
+        vae_spatial_compression: int = 8,
+        patch_size: tuple[int, int, int] = (1, 2, 2),
+        num_heads: int = 12,
+        head_dim: int = 128,
 ) -> FastWanShape:
     """Return the approximate DiT token shape for Wan/FastWan T2V inference."""
     latent_frames = (num_frames - 1) // vae_temporal_compression + 1
@@ -171,7 +176,7 @@ def benchmark_mlx_linear(shape: FastWanShape, warmup: int, iters: int) -> float:
 
     x = mx.random.normal((shape.tokens, shape.hidden_size), dtype=mx.float16)
     w = mx.random.normal((shape.hidden_size, shape.hidden_size), dtype=mx.float16)
-    b = mx.zeros((shape.hidden_size,), dtype=mx.float16)
+    b = mx.zeros((shape.hidden_size, ), dtype=mx.float16)
 
     for _ in range(warmup):
         y = x @ w + b
@@ -216,7 +221,7 @@ def benchmark_torch_mps_attention(shape: FastWanShape, warmup: int, iters: int) 
     return median_ms(samples)
 
 
-def torch_to_mx(tensor) -> "mx.array":
+def torch_to_mx(tensor) -> mx.array:
     import mlx.core as mx
 
     return mx.array(tensor.detach().cpu().float().numpy())
@@ -267,10 +272,9 @@ def ensure_quantization_supported(spec: MLXQuantizationSpec | None) -> None:
     import mlx.core as mx
 
     mlx_version = getattr(mx, "__version__", "unknown")
-    raise UnsupportedMLXQuantizationError(
-        f"MLX quantization mode '{spec.label}' is not supported by the installed mlx "
-        f"({mlx_version}): {error}. Upgrade mlx or pick a supported mode "
-        f"(int8 is currently the most reliable quality/memory target).")
+    raise UnsupportedMLXQuantizationError(f"MLX quantization mode '{spec.label}' is not supported by the installed mlx "
+                                          f"({mlx_version}): {error}. Upgrade mlx or pick a supported mode "
+                                          f"(int8 is currently the most reliable quality/memory target).")
 
 
 def quantize_matrix(weight, spec: MLXQuantizationSpec | None):
@@ -446,7 +450,8 @@ def scale_residual_layer_norm_scale_shift(residual, x, gate, shift, scale, weigh
 
 
 class MLXWanT2VCrossAttention:
-    def __init__(self, weights: dict[str, "mx.array"], *, dim: int, num_heads: int, eps: float = 1e-6) -> None:
+
+    def __init__(self, weights: dict[str, mx.array], *, dim: int, num_heads: int, eps: float = 1e-6) -> None:
         self.weights = weights
         self.dim = dim
         self.num_heads = num_heads
@@ -458,17 +463,17 @@ class MLXWanT2VCrossAttention:
 
         batch = x.shape[0]
         q = linear(x, self.weights["attn2.to_q.weight"], self.weights.get("attn2.to_q.bias"))
-        q = rms_norm(q, self.weights["attn2.norm_q.weight"], eps=self.eps).reshape(
-            batch, -1, self.num_heads, self.head_dim)
+        q = rms_norm(q, self.weights["attn2.norm_q.weight"], eps=self.eps).reshape(batch, -1, self.num_heads,
+                                                                                   self.head_dim)
 
         if context.shape[1] == 0:
             attended = mx.zeros_like(q)
         else:
             k = linear(context, self.weights["attn2.to_k.weight"], self.weights.get("attn2.to_k.bias"))
-            k = rms_norm(k, self.weights["attn2.norm_k.weight"], eps=self.eps).reshape(
-                batch, -1, self.num_heads, self.head_dim)
-            v = linear(context, self.weights["attn2.to_v.weight"], self.weights.get("attn2.to_v.bias")).reshape(
-                batch, -1, self.num_heads, self.head_dim)
+            k = rms_norm(k, self.weights["attn2.norm_k.weight"],
+                         eps=self.eps).reshape(batch, -1, self.num_heads, self.head_dim)
+            v = linear(context, self.weights["attn2.to_v.weight"],
+                       self.weights.get("attn2.to_v.bias")).reshape(batch, -1, self.num_heads, self.head_dim)
             attended = mx.fast.scaled_dot_product_attention(
                 q.transpose(0, 2, 1, 3),
                 k.transpose(0, 2, 1, 3),
@@ -488,7 +493,7 @@ class MLXWanTransformerBlock:
     this first parity target.
     """
 
-    def __init__(self, weights: dict[str, "mx.array"], *, dim: int, ffn_dim: int, num_heads: int, eps: float = 1e-6):
+    def __init__(self, weights: dict[str, mx.array], *, dim: int, ffn_dim: int, num_heads: int, eps: float = 1e-6):
         self.weights = weights
         self.dim = dim
         self.ffn_dim = ffn_dim
@@ -511,10 +516,10 @@ class MLXWanTransformerBlock:
         key = linear(norm_hidden_states, self.weights["to_k.weight"], self.weights.get("to_k.bias"))
         value = linear(norm_hidden_states, self.weights["to_v.weight"], self.weights.get("to_v.bias"))
 
-        query = rms_norm(query, self.weights["norm_q.weight"], eps=self.eps).reshape(
-            hidden_states.shape[0], -1, self.num_heads, self.head_dim)
-        key = rms_norm(key, self.weights["norm_k.weight"], eps=self.eps).reshape(
-            hidden_states.shape[0], -1, self.num_heads, self.head_dim)
+        query = rms_norm(query, self.weights["norm_q.weight"],
+                         eps=self.eps).reshape(hidden_states.shape[0], -1, self.num_heads, self.head_dim)
+        key = rms_norm(key, self.weights["norm_k.weight"], eps=self.eps).reshape(hidden_states.shape[0], -1,
+                                                                                 self.num_heads, self.head_dim)
         value = value.reshape(hidden_states.shape[0], -1, self.num_heads, self.head_dim)
 
         if freqs_cis is not None:
@@ -574,7 +579,7 @@ class MLXWanTransformerBlock:
         return hidden_states.astype(orig_dtype)
 
 
-def mlx_block_weights_from_torch(torch_block) -> dict[str, "mx.array"]:
+def mlx_block_weights_from_torch(torch_block) -> dict[str, mx.array]:
     return {name: torch_to_mx(value) for name, value in torch_block.state_dict().items()}
 
 
@@ -583,7 +588,7 @@ class MLXWanDiT:
 
     def __init__(
         self,
-        weights: dict[str, "mx.array"],
+        weights: dict[str, mx.array],
         blocks: list[MLXWanTransformerBlock],
         config: dict,
         *,
@@ -793,15 +798,15 @@ def mlx_block_weights_from_diffusers_safetensors(
     block_index: int = 0,
     quantization: str | MLXQuantizationSpec | None = None,
     dtype=None,
-) -> dict[str, "mx.array"]:
+) -> dict[str, mx.array]:
     """Load one Diffusers-format Wan block into the MLX dense-block key layout."""
-    import mlx.core as mx
     from safetensors import safe_open
 
     prefix = f"blocks.{block_index}."
     key_map = _WAN_BLOCK_KEY_MAP
 
-    spec = MLXQuantizationSpec.from_name(quantization) if (quantization is None or isinstance(quantization, str)) else quantization
+    spec = MLXQuantizationSpec.from_name(quantization) if (quantization is None
+                                                           or isinstance(quantization, str)) else quantization
     ensure_quantization_supported(spec)
     matrix_targets = {target for target in key_map.values() if target.endswith(".weight") and "norm" not in target}
     weights = {}
@@ -830,6 +835,7 @@ def mlx_dit_from_diffusers_safetensors(
     dtype: str = "fp16",
     num_blocks: int | None = None,
     quantization: str | MLXQuantizationSpec | None = None,
+    compile: bool = False,
 ) -> MLXWanDiT:
     import mlx.core as mx
     from safetensors import safe_open
@@ -839,7 +845,8 @@ def mlx_dit_from_diffusers_safetensors(
     if num_blocks is None:
         num_blocks = total_blocks
     cast_dtype = {"fp16": mx.float16, "bf16": mx.bfloat16, "fp32": mx.float32}[dtype]
-    spec = MLXQuantizationSpec.from_name(quantization) if (quantization is None or isinstance(quantization, str)) else quantization
+    spec = MLXQuantizationSpec.from_name(quantization) if (quantization is None
+                                                           or isinstance(quantization, str)) else quantization
     ensure_quantization_supported(spec)
 
     top_level_names = [
@@ -899,16 +906,15 @@ def mlx_dit_from_diffusers_safetensors(
                 ffn_dim=int(config["ffn_dim"]),
                 num_heads=int(config["num_attention_heads"]),
                 eps=float(config["eps"]),
-            )
-        )
-    return MLXWanDiT(weights, blocks, config)
+            ))
+    return MLXWanDiT(weights, blocks, config, compile=compile)
 
 
 def torch_block_state_from_diffusers_safetensors(
     checkpoint_path: str | Path,
     *,
     block_index: int = 0,
-) -> dict[str, "torch.Tensor"]:
+) -> dict[str, torch.Tensor]:
     """Load one Diffusers-format Wan block into FastVideo's dense block keys."""
     from safetensors import safe_open
 

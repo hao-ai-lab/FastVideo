@@ -22,6 +22,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from fastvideo.logger import init_logger
 from fastvideo.mlx_runtime.fastwan import (
     MLXWanT2VCrossAttention,
     gelu_tanh,
@@ -37,11 +38,21 @@ from fastvideo.mlx_runtime.fastwan import (
 if TYPE_CHECKING:
     import mlx.core as mx
 
+logger = init_logger(__name__)
+
 
 class MLXWan22TransformerBlock:
     """Dense Wan block with per-token (``[B, L, dim]``) timestep modulation."""
 
-    def __init__(self, weights: dict[str, mx.array], *, dim: int, ffn_dim: int, num_heads: int, eps: float = 1e-6):
+    def __init__(
+        self,
+        weights: dict[str, mx.array],
+        *,
+        dim: int,
+        ffn_dim: int,
+        num_heads: int,
+        eps: float = 1e-6,
+    ):
         self.weights = weights
         self.dim = dim
         self.ffn_dim = ffn_dim
@@ -112,7 +123,16 @@ class MLXWan22TransformerBlock:
 class MLXWan22DiT:
     """Wan2.2-TI2V-5B dense DiT with per-token timestep conditioning."""
 
-    def __init__(self, weights: dict[str, mx.array], blocks: list[MLXWan22TransformerBlock], config: dict) -> None:
+    def __init__(
+        self,
+        weights: dict[str, mx.array],
+        blocks: list[MLXWan22TransformerBlock],
+        config: dict,
+        *,
+        compile: bool = False,
+    ) -> None:
+        import os
+
         self.weights = weights
         self.blocks = blocks
         self.config = config
@@ -123,6 +143,8 @@ class MLXWan22DiT:
         self.patch_size = tuple(config["patch_size"])
         self.out_channels = int(config["out_channels"])
         self.eps = float(config.get("eps", 1e-6))
+        self._enable_compile = compile or os.environ.get("FASTVIDEO_MLX_COMPILE", "0") == "1"
+        self._compiled_forward = None
 
     def _patch_embed(self, hidden_states) -> mx.array:
         batch, channels, frames, height, width = hidden_states.shape
@@ -169,14 +191,31 @@ class MLXWan22DiT:
         out = out.transpose(0, 7, 1, 4, 2, 5, 3, 6)
         return out.reshape(batch, self.out_channels, frames, height, width)
 
-    def __call__(self, hidden_states, encoder_hidden_states, timestep, freqs_cis) -> mx.array:
-        cos, sin = freqs_cis
+    def _forward(self, hidden_states, encoder_hidden_states, timestep, cos, sin) -> mx.array:
         batch, _, frames, height, width = hidden_states.shape
         hidden = self._patch_embed(hidden_states)
         temb_out, timestep_proj, ehs = self._condition(timestep, encoder_hidden_states)
         for block in self.blocks:
             hidden = block(hidden, ehs, timestep_proj, cos, sin)
         return self._output(hidden, temb_out, batch=batch, frames=frames, height=height, width=width)
+
+    def __call__(self, hidden_states, encoder_hidden_states, timestep, freqs_cis) -> mx.array:
+        cos, sin = freqs_cis
+        if self._enable_compile and cos is not None:
+            import mlx.core as mx
+
+            if self._compiled_forward is None:
+                self._compiled_forward = mx.compile(self._forward)
+            try:
+                return self._compiled_forward(hidden_states, encoder_hidden_states, timestep, cos, sin)
+            except Exception as exc:  # noqa: BLE001 - some graphs may not trace; fall back to eager.
+                logger.warning(
+                    "Wan2.2 mx.compile forward failed (%s); falling back to eager execution.",
+                    exc,
+                )
+                self._enable_compile = False
+                self._compiled_forward = None
+        return self._forward(hidden_states, encoder_hidden_states, timestep, cos, sin)
 
 
 def mlx_wan22_dit_from_diffusers_safetensors(
@@ -186,6 +225,7 @@ def mlx_wan22_dit_from_diffusers_safetensors(
     dtype: str = "fp16",
     num_blocks: int | None = None,
     quantization=None,
+    compile: bool = False,
 ) -> MLXWan22DiT:
     """Load Wan2.2-TI2V-5B (FullAttn) into ``MLXWan22DiT`` via the dense loader."""
     dense = mlx_dit_from_diffusers_safetensors(checkpoint_path,
@@ -201,10 +241,14 @@ def mlx_wan22_dit_from_diffusers_safetensors(
                                  num_heads=int(dense.config["num_attention_heads"]),
                                  eps=float(dense.config.get("eps", 1e-6))) for block in dense.blocks
     ]
-    return MLXWan22DiT(dense.weights, blocks, dense.config)
+    return MLXWan22DiT(dense.weights, blocks, dense.config, compile=compile)
 
 
-def mlx_wan22_dit_from_mlx_checkpoint(checkpoint_dir: str | Path) -> MLXWan22DiT:
+def mlx_wan22_dit_from_mlx_checkpoint(
+    checkpoint_dir: str | Path,
+    *,
+    compile: bool = False,
+) -> MLXWan22DiT:
     """Rewrap a persisted MLX DiT checkpoint with Wan2.2 conditioning.
 
     The generic checkpoint loader intentionally rebuilds ``MLXWanDiT`` because
@@ -223,7 +267,6 @@ def mlx_wan22_dit_from_mlx_checkpoint(checkpoint_dir: str | Path) -> MLXWan22DiT
             ffn_dim=int(dense.config["ffn_dim"]),
             num_heads=int(dense.config["num_attention_heads"]),
             eps=float(dense.config.get("eps", 1e-6)),
-        )
-        for block in dense.blocks
+        ) for block in dense.blocks
     ]
-    return MLXWan22DiT(dense.weights, blocks, dense.config)
+    return MLXWan22DiT(dense.weights, blocks, dense.config, compile=compile)

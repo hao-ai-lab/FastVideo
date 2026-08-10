@@ -35,7 +35,7 @@ from fastvideo.tests.mlx.tiny_wan import (  # noqa: E402
 )
 
 
-def _mlx_wan22_from_torch(model, hf_config) -> MLXWan22DiT:
+def _mlx_wan22_from_torch(model, hf_config, *, compile: bool = False) -> MLXWan22DiT:
     state = {name: value.detach().float() for name, value in model.state_dict().items()}
     inner_dim = int(hf_config["num_attention_heads"]) * int(hf_config["attention_head_dim"])
     weights = {}
@@ -49,7 +49,7 @@ def _mlx_wan22_from_torch(model, hf_config) -> MLXWan22DiT:
             mlx_block_weights_from_torch(tb), dim=inner_dim, ffn_dim=int(hf_config["ffn_dim"]),
             num_heads=int(hf_config["num_attention_heads"]), eps=float(hf_config["eps"])) for tb in model.blocks
     ]
-    return MLXWan22DiT(weights, blocks, dict(hf_config))
+    return MLXWan22DiT(weights, blocks, dict(hf_config), compile=compile)
 
 
 @pytest.mark.usefixtures("distributed_setup")
@@ -82,3 +82,61 @@ def test_wan22_per_token_timestep_matches_torch() -> None:
     mlx_out = np.array(out.astype(mx.float32))
 
     np.testing.assert_allclose(mlx_out, ref, atol=2e-3, rtol=2e-3)
+
+
+@pytest.mark.usefixtures("distributed_setup")
+def test_wan22_compile_path_matches_eager() -> None:
+    torch_model = build_torch_model()
+    hf_config = build_hf_config(build_tiny_wan_config())
+    eager_model = _mlx_wan22_from_torch(torch_model, hf_config)
+    compiled_model = _mlx_wan22_from_torch(torch_model, hf_config, compile=True)
+
+    frames, height, width = 4, 8, 8
+    p_t, p_h, p_w = TINY_ARCH["patch_size"]
+    num_tokens = (frames // p_t) * (height // p_h) * (width // p_w)
+    tokens_per_frame = num_tokens // (frames // p_t)
+
+    gen = torch.Generator().manual_seed(12)
+    hidden = torch.randn(
+        1,
+        TINY_ARCH["in_channels"],
+        frames,
+        height,
+        width,
+        generator=gen,
+        dtype=torch.float32,
+    )
+    text = torch.randn(
+        1,
+        8,
+        TINY_ARCH["text_dim"],
+        generator=gen,
+        dtype=torch.float32,
+    )
+    per_frame = [0] + [500] * (frames // p_t - 1)
+    timestep = torch.tensor(
+        [[per_frame[i // tokens_per_frame] for i in range(num_tokens)]],
+        dtype=torch.long,
+    )
+    freqs_cis = mlx_rotary_embeddings(hidden)
+
+    eager = eager_model(
+        mx.array(hidden.numpy()),
+        mx.array(text.numpy()),
+        mx.array(timestep.float().numpy()),
+        freqs_cis,
+    )
+    compiled = compiled_model(
+        mx.array(hidden.numpy()),
+        mx.array(text.numpy()),
+        mx.array(timestep.float().numpy()),
+        freqs_cis,
+    )
+    mx.eval(eager, compiled)
+
+    np.testing.assert_allclose(
+        np.array(compiled.astype(mx.float32)),
+        np.array(eager.astype(mx.float32)),
+        atol=1e-4,
+        rtol=1e-4,
+    )

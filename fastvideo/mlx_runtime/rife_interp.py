@@ -7,10 +7,8 @@ The backend is the Apple-Silicon-native ``rife-mlx`` package, using the
 
 from __future__ import annotations
 
-import argparse
-import time
-from functools import lru_cache
 from collections.abc import Iterable
+from functools import lru_cache
 
 import numpy as np
 
@@ -39,8 +37,8 @@ def load_model(version: str = "4.25", weights_dir: str | None = None):
     try:
         from rife_mlx.utils.weights import build_model
     except ImportError as exc:
-        raise RIFEBackendError("MLX RIFE backend is unavailable. Install it into the active venv with "
-                               "`uv pip install --python /Users/aryank/claude-fastvideo/FastVideo/.venv/bin/python "
+        raise RIFEBackendError("MLX RIFE backend is unavailable. Install the `rife-mlx` package "
+                               "into the active environment, e.g. `uv pip install "
                                "git+https://github.com/xocialize/rife-mlx.git`.") from exc
 
     try:
@@ -109,32 +107,3 @@ def interpolate(
             out.append(interpolate_pair(left, right, step / factor, model=model, scale=scale))
     out.append(frame_list[-1])
     return out
-
-
-def _self_test() -> None:
-    frame0 = np.zeros((64, 96, 3), dtype=np.uint8)
-    frame1 = np.zeros((64, 96, 3), dtype=np.uint8)
-    frame1[:, :, 0] = 255
-    start = time.perf_counter()
-    model = load_model()
-    load_s = time.perf_counter() - start
-    start = time.perf_counter()
-    frames = interpolate([frame0, frame1], factor=2, model=model)
-    interp_s = time.perf_counter() - start
-    assert len(frames) == 3
-    assert frames[1].shape == frame0.shape
-    assert frames[1].dtype == np.uint8
-    print(f"MLX RIFE self-test passed: load_s={load_s:.3f} interp_s={interp_s:.3f} shape={frames[1].shape}")
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description="MLX RIFE 4.25 frame interpolation smoke test.")
-    parser.add_argument("--self-test", action="store_true", help="Run a tiny two-frame interpolation test.")
-    args = parser.parse_args()
-    if not args.self_test:
-        raise SystemExit("Nothing to do; pass --self-test")
-    _self_test()
-
-
-if __name__ == "__main__":
-    main()

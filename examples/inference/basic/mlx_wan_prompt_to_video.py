@@ -736,6 +736,7 @@ def main() -> None:
             config_path,
             dtype=args.mlx_dtype,
             quantization=quantization,
+            compile=args.mlx_compile,
         )
     load_time = time.perf_counter() - load_start
     load_peak_memory = mx.get_peak_memory()
