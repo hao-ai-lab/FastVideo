@@ -30,11 +30,8 @@ if TYPE_CHECKING:
     FASTVIDEO_TORCH_PROFILER_DIR: str | None = None
     FASTVIDEO_TORCH_PROFILER_RECORD_SHAPES: bool = False
     FASTVIDEO_TORCH_PROFILER_WITH_PROFILE_MEMORY: bool = False
-    FASTVIDEO_TORCH_PROFILER_WITH_STACK: bool = True
+    FASTVIDEO_TORCH_PROFILER_WITH_STACK: bool = False
     FASTVIDEO_TORCH_PROFILER_WITH_FLOPS: bool = False
-    FASTVIDEO_TORCH_PROFILER_WAIT_STEPS: int = 2
-    FASTVIDEO_TORCH_PROFILER_WARMUP_STEPS: int = 1
-    FASTVIDEO_TORCH_PROFILER_ACTIVE_STEPS: int = 2
     FASTVIDEO_TORCH_PROFILE_REGIONS: str = ""
     FASTVIDEO_TRACE_ACTIVATIONS: bool = False
     FASTVIDEO_TRACE_LAYERS: str = ""
@@ -242,11 +239,11 @@ environment_variables: dict[str, Callable[[], Any]] = {
     "FASTVIDEO_TORCH_PROFILER_WITH_PROFILE_MEMORY":
     lambda: bool(os.getenv("FASTVIDEO_TORCH_PROFILER_WITH_PROFILE_MEMORY", "0") != "0"),
 
-    # Enable torch profiler to profile stack if set
-    # FASTVIDEO_TORCH_PROFILER_WITH_STACK=1. If not set, torch profiler WILL
-    # profile stack by default.
+    # Enable torch profiler stack capture with
+    # FASTVIDEO_TORCH_PROFILER_WITH_STACK=1. Off by default: stack capture
+    # costs ~1.5x runtime overhead and ~1.4x trace size.
     "FASTVIDEO_TORCH_PROFILER_WITH_STACK":
-    lambda: bool(os.getenv("FASTVIDEO_TORCH_PROFILER_WITH_STACK", "1") != "0"),
+    lambda: bool(os.getenv("FASTVIDEO_TORCH_PROFILER_WITH_STACK", "0") != "0"),
 
     # Enable torch profiler to profile flops if set
     # FASTVIDEO_TORCH_PROFILER_WITH_FLOPS=1. If not set, torch profiler will
@@ -255,16 +252,10 @@ environment_variables: dict[str, Callable[[], Any]] = {
     lambda: bool(os.getenv("FASTVIDEO_TORCH_PROFILER_WITH_FLOPS", "0") != "0"),
     # Wait steps per profiling cycle (torch.profiler.schedule wait parameter)
     # Defaults to 2 if not set.
-    "FASTVIDEO_TORCH_PROFILER_WAIT_STEPS":
-    lambda: int(os.getenv("FASTVIDEO_TORCH_PROFILER_WAIT_STEPS", "2")),
     # Warmup steps per profiling cycle (torch.profiler.schedule warmup parameter)
     # Defaults to 1 if not set.
-    "FASTVIDEO_TORCH_PROFILER_WARMUP_STEPS":
-    lambda: int(os.getenv("FASTVIDEO_TORCH_PROFILER_WARMUP_STEPS", "1")),
     # Active steps per profiling cycle (torch.profiler.schedule active parameter)
     # Defaults to 2 if not set.
-    "FASTVIDEO_TORCH_PROFILER_ACTIVE_STEPS":
-    lambda: int(os.getenv("FASTVIDEO_TORCH_PROFILER_ACTIVE_STEPS", "2")),
     "FASTVIDEO_TORCH_PROFILE_REGIONS":
     lambda: os.getenv("FASTVIDEO_TORCH_PROFILE_REGIONS", ""),
 
