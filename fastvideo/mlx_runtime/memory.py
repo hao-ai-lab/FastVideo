@@ -50,8 +50,8 @@ class AppliedMemoryLimits:
             metrics[f"{name}_bytes"] = value
         for name, value in self.previous_bytes.items():
             metrics[f"previous_{name}_bytes"] = value
-        for name, value in self.errors.items():
-            metrics[f"{name}_error"] = value
+        for name, error in self.errors.items():
+            metrics[f"{name}_error"] = error
         return metrics
 
 
@@ -142,7 +142,9 @@ def apply_memory_limits(
     errors: dict[str, str] = {}
     if memory_bytes is not None or cache_bytes is not None or wired_bytes is not None:
         if mx_module is None:
-            import mlx.core as mx_module
+            import mlx.core as mx
+
+            mx_module = mx
 
         # Apply each limit independently; record failures without stopping.
         limits = [

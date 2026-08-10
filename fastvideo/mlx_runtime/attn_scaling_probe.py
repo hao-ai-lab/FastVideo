@@ -366,7 +366,18 @@ def main(argv: list[str] | None = None) -> int:
         warmup=args.warmup,
         iters=args.iters,
     )
-    rows = [Row(**{k: (tuple(v) if k == "shape" else v) for k, v in r.items()}) for r in report["rows"]]
+    rows = [
+        Row(
+            seq_len=int(r["seq_len"]),
+            window=int(r["window"]),
+            sink=int(r["sink"]),
+            full_seconds=float(r["full_seconds"]),
+            windowed_seconds=float(r["windowed_seconds"]),
+            speedup=float(r["speedup"]),
+            mean_cosine=float(r["mean_cosine"]),
+            shape=tuple(r["shape"]),
+        ) for r in report["rows"]
+    ]
 
     print()
     print("=== Full vs windowed attention (B=1, H=12, D=128, fp16) ===")
