@@ -20,7 +20,8 @@ and set that frame's timestep to 0 (handled by the caller / sampler). See
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+from collections.abc import Callable
 
 from fastvideo.logger import init_logger
 from fastvideo.mlx_runtime.fastwan import (
@@ -144,7 +145,7 @@ class MLXWan22DiT:
         self.out_channels = int(config["out_channels"])
         self.eps = float(config.get("eps", 1e-6))
         self._enable_compile = compile or os.environ.get("FASTVIDEO_MLX_COMPILE", "0") == "1"
-        self._compiled_forward = None
+        self._compiled_forward: Callable[..., Any] | None = None
 
     def _patch_embed(self, hidden_states) -> mx.array:
         batch, channels, frames, height, width = hidden_states.shape
@@ -206,8 +207,9 @@ class MLXWan22DiT:
 
             if self._compiled_forward is None:
                 self._compiled_forward = mx.compile(self._forward)
+            compiled_forward = self._compiled_forward
             try:
-                return self._compiled_forward(hidden_states, encoder_hidden_states, timestep, cos, sin)
+                return compiled_forward(hidden_states, encoder_hidden_states, timestep, cos, sin)
             except Exception as exc:  # noqa: BLE001 - some graphs may not trace; fall back to eager.
                 logger.warning(
                     "Wan2.2 mx.compile forward failed (%s); falling back to eager execution.",

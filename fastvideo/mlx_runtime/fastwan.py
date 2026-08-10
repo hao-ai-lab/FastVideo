@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# mypy: disable-error-code=no-untyped-call
 """FastWan-oriented helpers for the experimental MLX runtime path."""
 
 from __future__ import annotations
@@ -10,7 +11,8 @@ import statistics
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+from collections.abc import Callable
 
 from fastvideo.logger import init_logger
 
@@ -613,7 +615,7 @@ class MLXWanDiT:
         # baseline; enable via constructor or FASTVIDEO_MLX_COMPILE=1 and verify
         # with the benchmark's SSIM ~= 1.0 check.
         self._enable_compile = compile or os.environ.get("FASTVIDEO_MLX_COMPILE", "0") == "1"
-        self._compiled_forward = None
+        self._compiled_forward: Callable[..., Any] | None = None
 
     def patch_embed(self, hidden_states):
         batch, channels, frames, height, width = hidden_states.shape
@@ -700,8 +702,9 @@ class MLXWanDiT:
 
             if self._compiled_forward is None:
                 self._compiled_forward = mx.compile(self._forward)
+            compiled_forward = self._compiled_forward
             try:
-                return self._compiled_forward(hidden_states, encoder_hidden_states, timestep, cos, sin)
+                return compiled_forward(hidden_states, encoder_hidden_states, timestep, cos, sin)
             except Exception as exc:  # noqa: BLE001 - some quant graphs may not trace; fall back to eager.
                 logger.warning("mx.compile forward failed (%s); falling back to eager execution.", exc)
                 self._enable_compile = False
