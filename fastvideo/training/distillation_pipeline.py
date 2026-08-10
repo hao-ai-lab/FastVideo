@@ -280,7 +280,8 @@ class DistillationPipeline(TrainingPipeline):
             # Download the model if it's a Hugging Face model ID
             local_model_path = maybe_download_model(model_path)
             logger.info("Model downloaded/found at: %s", local_model_path)
-            config = verify_model_config_and_directory(local_model_path)
+            from fastvideo.models.loader.ltx_single_file import (model_index_and_component_path)
+            config, component_path = model_index_and_component_path(local_model_path, module_type)
 
             if module_type not in config:
                 if hasattr(self, '_extra_config_module_map') and module_type in self._extra_config_module_map:
@@ -298,7 +299,6 @@ class DistillationPipeline(TrainingPipeline):
                 raise ValueError(f"Module {module_type} has null value in config at {local_model_path}")
 
             transformers_or_diffusers, architecture = module_info
-            component_path = os.path.join(local_model_path, module_type)
             module = PipelineComponentLoader.load_module(
                 module_name=module_type,
                 component_model_path=component_path,

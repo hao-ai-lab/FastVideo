@@ -82,6 +82,79 @@ def is_ltx2_nvfp4_linear_prefix(prefix: str) -> bool:
     return prefix in _LTX2_NVFP4_LINEAR_PREFIXES
 
 
+def audit_nvfp4_coverage(
+    model,
+    predicate=None,
+    target_classes=None,
+    skip_classes=(),
+) -> dict[str, object]:
+    """Report which declared target classes actually attached, and raise if any did not.
+
+    The target set is written as module-prefix suffixes, but a tensor carries
+    three different names on its way here -- the checkpoint key, the
+    ``named_modules()`` path, and the ``prefix=`` string a layer is constructed
+    with -- and only the last one reaches the predicate. A rename on any of the
+    others leaves this set syntactically valid and silently matching nothing,
+    and the attached COUNT alone cannot show it: a set that quietly stops
+    covering a whole class still reports a large, healthy-looking number.
+
+    So: a declared class matching zero modules is an error, not a warning. This
+    guard did NOT fire when it was written -- the shipped set is correct today.
+    It exists for the next rename, which is the only kind of failure that can
+    reach production looking like success.
+
+    Returns the receipt: attached count and params, per-class attached counts,
+    and the classes deliberately NOT targeted, so a reader can see the
+    exclusions were chosen rather than lost.
+    """
+    from fastvideo.layers.linear import LinearBase
+
+    if predicate is None:
+        predicate = is_ltx2_nvfp4_linear_prefix
+    if target_classes is None:
+        target_classes = _LTX2_NVFP4_BLOCK_LINEAR_SUFFIXES
+
+    linears = [(getattr(m, "prefix", None) or n, n, m)
+               for n, m in model.named_modules() if isinstance(m, LinearBase)]
+
+    def _params(mod):
+        w = getattr(mod, "weight", None)
+        return int(w.shape[0] * w.shape[1]) if w is not None and w.dim() == 2 else 0
+
+    per_class: dict[str, int] = {}
+    for suffix in target_classes:
+        per_class[suffix] = sum(1 for pfx, _, _ in linears
+                                if pfx.endswith("." + suffix) and predicate(pfx))
+    empty = sorted(k for k, v in per_class.items() if v == 0)
+    if empty:
+        raise ValueError(
+            "NVFP4 target classes matched ZERO modules: " + ", ".join(empty) +
+            ". The model's actual Linear prefixes look like: " +
+            ", ".join(sorted({p for p, _, _ in linears})[:5]) +
+            ". Either the module naming changed or the target set is stale -- "
+            "refusing to train a model that silently quantizes less than declared.")
+
+    attached = [(p, n, m) for p, n, m in linears if predicate(p)]
+    skipped: dict[str, int] = {}
+    for pfx, name, _ in linears:
+        if predicate(pfx):
+            continue
+        tail = name.rsplit(".", 1)[-1]
+        for known in skip_classes:
+            if known in name:
+                skipped[known] = skipped.get(known, 0) + 1
+                break
+        else:
+            skipped["other:" + tail] = skipped.get("other:" + tail, 0) + 1
+    return {
+        "linears_total": len(linears),
+        "attached": len(attached),
+        "attached_params_M": round(sum(_params(m) for _, _, m in attached) / 1e6, 1),
+        "attached_per_class": per_class,
+        "skipped_by_rule": dict(sorted(skipped.items())),
+    }
+
+
 def _is_ltx2_refine_only_prefix(prefix: str) -> bool:
     return any(prefix.endswith(suffix) for suffix in _LTX2_REFINE_ONLY_SUFFIXES)
 
@@ -552,4 +625,5 @@ __all__ = [
     "NVFP4QuantizeMethod",
     "convert_model_to_nvfp4",
     "is_ltx2_nvfp4_linear_prefix",
+    "audit_nvfp4_coverage",
 ]

@@ -20,6 +20,9 @@ from fastvideo.utils import (
     maybe_download_model,
     verify_model_config_and_directory,
 )
+from fastvideo.models.loader.ltx_single_file import (
+    model_index_and_component_path,
+)
 from fastvideo.platforms import AttentionBackendEnum
 
 if TYPE_CHECKING:
@@ -106,7 +109,7 @@ def load_module_from_path(
     fastvideo_args: Any = _make_training_args(training_config, model_path=model_path)
 
     local_model_path = maybe_download_model(model_path)
-    config = verify_model_config_and_directory(local_model_path)
+    config, component_path = model_index_and_component_path(local_model_path, module_type)
 
     if module_type not in config:
         raise ValueError(f"Module {module_type!r} not found in "
@@ -120,7 +123,6 @@ def load_module_from_path(
     # Trailing modular-manifest metadata does not change component dispatch;
     # the provider and architecture remain the first two fields.
     transformers_or_diffusers, _architecture = module_info[:2]
-    component_path = os.path.join(local_model_path, module_type)
 
     # fastvideo_args is freshly built above and never escapes this function,
     # so overrides are plain assignments — nothing to save or restore.

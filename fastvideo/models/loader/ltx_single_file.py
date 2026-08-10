@@ -257,3 +257,24 @@ def _read_encoder_version(root: str) -> str | None:
             return json.load(f).get("gemma_version")
     except (OSError, json.JSONDecodeError):
         return None
+
+
+def model_index_and_component_path(model_path: str, module_type: str) -> tuple[dict[str, Any], str]:
+    """``(model_index, component_path)`` for a directory repo OR a bundle.
+
+    The two differ in both halves: a repo answers "what components exist" from
+    ``model_index.json`` and puts each in its own subdirectory, while a bundle
+    declares its components in its own metadata and holds them all in one file.
+    Callers that resolve those two things together should route through here so
+    the bundle case is handled once instead of at every site.
+
+    ponytail: a bundle's text encoder and tokenizer live OUTSIDE the file, so
+    this returns the bundle path for them too, which is wrong for those two
+    module types. Training does not load them (text embeddings are
+    preprocessed), so it does not arise. Give this the resolved encoder root the
+    day a caller needs them.
+    """
+    if is_single_file_bundle(model_path):
+        return bundle_model_index(model_path), model_path
+    from fastvideo.utils import verify_model_config_and_directory
+    return verify_model_config_and_directory(model_path), os.path.join(model_path, module_type)

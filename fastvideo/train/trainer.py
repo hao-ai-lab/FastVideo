@@ -11,9 +11,12 @@ import torch
 from tqdm.auto import tqdm
 
 from fastvideo.distributed import get_sp_group, get_world_group
+from fastvideo.logger import init_logger
 from fastvideo.train.callbacks.callback import CallbackDict
 from fastvideo.train.methods.base import LogScalar, TrainingMethod
 from fastvideo.train.utils.tracking import build_tracker
+
+logger = init_logger(__name__)
 
 if TYPE_CHECKING:
     from fastvideo.train.utils.training_config import (
@@ -222,6 +225,10 @@ class Trainer:
             metrics["step_time_sec"] = (time.perf_counter() - t0)
             metrics["vsa_sparsity"] = float(tc.vsa_sparsity)
             if self.global_rank == 0 and metrics:
+                # Console as well as tracker: with trackers disabled the
+                # tracker is a DummyTracker, and this is then the only place a
+                # step's loss is reported at all.
+                logger.info("step %d %s", step, {k: round(v, 6) for k, v in metrics.items()})
                 self.tracker.log(metrics, step)
 
             self.callbacks.on_training_step_end(

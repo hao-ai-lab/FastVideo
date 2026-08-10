@@ -329,7 +329,10 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=None,
         pipeline_config_cls=LTX2T2VConfig,
-        workload_types=(WorkloadType.T2V, ),
+        # The LTX-2 family conditions i2v in LATENT SPACE (clean-latent +
+        # denoise mask, ltx2_image_conditioning.py); one checkpoint serves
+        # both workloads, so declaring T2V only under-reported the family.
+        workload_types=(WorkloadType.T2V, WorkloadType.I2V),
         hf_model_paths=[
             "FastVideo/LTX2-Distilled-Diffusers",
             # LTX-2.3 distilled aliases share the distilled pipeline/preset.
@@ -348,7 +351,10 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=None,
         pipeline_config_cls=LTX2T2VConfig,
-        workload_types=(WorkloadType.T2V, ),
+        # The LTX-2 family conditions i2v in LATENT SPACE (clean-latent +
+        # denoise mask, ltx2_image_conditioning.py); one checkpoint serves
+        # both workloads, so declaring T2V only under-reported the family.
+        workload_types=(WorkloadType.T2V, WorkloadType.I2V),
         hf_model_paths=[
             "Lightricks/LTX-2.3",
             "FastVideo/LTX2.3-base",
@@ -369,7 +375,10 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=None,
         pipeline_config_cls=LTX2T2VConfig,
-        workload_types=(WorkloadType.T2V, ),
+        # The LTX-2 family conditions i2v in LATENT SPACE (clean-latent +
+        # denoise mask, ltx2_image_conditioning.py); one checkpoint serves
+        # both workloads, so declaring T2V only under-reported the family.
+        workload_types=(WorkloadType.T2V, WorkloadType.I2V),
         hf_model_paths=[
             "Lightricks/LTX-2",
             "FastVideo/LTX2-base",
