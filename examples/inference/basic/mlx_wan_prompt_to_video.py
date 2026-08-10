@@ -300,14 +300,23 @@ def decode_latents_to_video(
     taehv_checkpoint_path: Path | None,
     taehv_parallel: bool,
 ) -> None:
-    import torch
-    from diffusers import AutoencoderKLWan
-    from diffusers.video_processor import VideoProcessor
-    from diffusers.utils import export_to_video
-
-    device = _torch_device(device_arg)
-    dtype = _torch_dtype(dtype_arg)
     if backend == "taehv":
+        if taehv_source_path is None:
+            from fastvideo.mlx_runtime.wan_vae import decode_latents_to_video as decode_latents_to_video_mlx
+
+            decode_latents_to_video_mlx(
+                latents_np,
+                output_path,
+                fps=fps,
+                backend="taehv",
+                z_dim=latents_np.shape[1],
+                taehv_checkpoint=taehv_checkpoint_path,
+                torch_device=device_arg,
+            )
+            return
+
+        device = _torch_device(device_arg)
+        dtype = _torch_dtype(dtype_arg)
         from fastvideo.mlx_runtime.taehv_decode import decode_latents_to_video_taehv
 
         decode_latents_to_video_taehv(
@@ -326,6 +335,13 @@ def decode_latents_to_video(
     if backend != "wan-vae":
         raise ValueError(f"Unsupported decode backend: {backend}")
 
+    import torch
+    from diffusers import AutoencoderKLWan
+    from diffusers.video_processor import VideoProcessor
+    from diffusers.utils import export_to_video
+
+    device = _torch_device(device_arg)
+    dtype = _torch_dtype(dtype_arg)
     vae = AutoencoderKLWan.from_pretrained(
         model_root / "vae",
         torch_dtype=dtype,
