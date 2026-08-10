@@ -75,6 +75,7 @@ docs/distillation/examples/
 *.pkl
 
 # Reference videos (negations must come after the catch-all on line below)
+!fastvideo/tests/nightly/reference_video_*.mp4
 
 # Static images
 !docs/assets/images/**/*.png

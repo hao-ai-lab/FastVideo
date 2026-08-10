@@ -38,8 +38,14 @@ def _maybe_quantize_model(model: nn.Module) -> None:
     The walk returns on the first quantized layer found so unquantized callers
     pay only an ``isinstance`` check per module. Both imports are deferred so
     this is a no-op on hosts without the relevant backends.
+
+    QAT-*train* linears (``nvfp4_qat_train``) need no weight conversion — the
+    master weight stays full precision — but their attachment is otherwise
+    silent, so the same walk emits a one-line receipt with the count of
+    linears that actually carry the QAT method.
     """
     # Defer imports: these modules pull in heavy symbols at module-load time.
+    from fastvideo.layers.linear import LinearBase
     from fastvideo.layers.quantization.nvfp4_config import (
         NVFP4QuantizeMethod,
         convert_model_to_nvfp4,
@@ -48,11 +54,15 @@ def _maybe_quantize_model(model: nn.Module) -> None:
         NVFP4QATQuantizeMethod,
         convert_model_to_fp4,
     )
+    from fastvideo.layers.quantization.nvfp4_qat_train_config import (
+        NVFP4QATTrainQuantizeMethod, )
     from fastvideo.layers.quantization.fp8_config import (
         FP8QuantizeMethod,
         convert_model_to_fp8,
     )
 
+    qat_train_attached = 0
+    qat_train_skipped = 0
     for mod in model.modules():
         qm = getattr(mod, "quant_method", None)
         if isinstance(qm, NVFP4QuantizeMethod):
@@ -67,6 +77,16 @@ def _maybe_quantize_model(model: nn.Module) -> None:
             logger.info("Converting loaded model weights for FP8 linear layers")
             convert_model_to_fp8(model)
             return
+        # QAT-train configs are mutually exclusive with the inference schemes
+        # above (one quant_config per model), so when they're active the loop
+        # always runs to completion and the counts below are model-wide.
+        if isinstance(qm, NVFP4QATTrainQuantizeMethod):
+            qat_train_attached += 1
+        elif isinstance(mod, LinearBase):
+            qat_train_skipped += 1
+    if qat_train_attached:
+        logger.info("NVFP4 QAT: attached %d linears (%d skipped by prefix filter)", qat_train_attached,
+                    qat_train_skipped)
 
 
 # TODO(PY): move this to utils elsewhere

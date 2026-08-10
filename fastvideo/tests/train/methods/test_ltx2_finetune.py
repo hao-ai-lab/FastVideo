@@ -2,12 +2,12 @@
 """Per-method GPU smoke test: ``LTX2Model`` + ``FineTuneMethod``.
 
 Mirrors ``test_wan_finetune.py`` for the LTX-2 plugin, parametrized
-over LTX-2.0 and LTX-2.3 checkpoints. LTX2-specific differences: the
-synthetic ``raw_batch`` carries a single post-connector Gemma
-embedding (3840-d for 2.0, 4096-d for 2.3 which has no in-DiT caption
-projection) and 128-channel VAE latents; the DiT is 18.9B params, so
-the test skips on GPUs with less than 60GB memory (e.g. the L40S CI
-runner).
+over dense LTX-2.0/LTX-2.3 and LTX-2.0 NVFP4-QAT checkpoints.
+LTX2-specific differences: the synthetic ``raw_batch`` carries a
+single post-connector Gemma embedding (3840-d for 2.0, 4096-d for 2.3
+which has no in-DiT caption projection) and 128-channel VAE latents;
+the DiT is 18.9B params, so the test skips on GPUs with less than 60GB
+memory (e.g. the L40S CI runner).
 """
 
 from __future__ import annotations
@@ -34,10 +34,17 @@ from .grad_norm_regression import (
 
 _FIXTURE_DIR = Path(__file__).resolve().parent.parent / "fixtures"
 
-# id -> (fixture, post-connector text embedding width, grad-norm ref name)
+# id -> (fixture, post-connector text embedding width, grad-norm ref name,
+#        expected NVFP4-QAT attachment count or None for dense training)
 _CASES = {
-    "ltx2": ("ltx2_t2v_finetune_min.yaml", 3840, "test_ltx2_finetune"),
-    "ltx2_3": ("ltx2_3_t2v_finetune_min.yaml", 4096, "test_ltx2_3_finetune"),
+    "ltx2": ("ltx2_t2v_finetune_min.yaml", 3840, "test_ltx2_finetune", None),
+    "ltx2_3": ("ltx2_3_t2v_finetune_min.yaml", 4096, "test_ltx2_3_finetune", None),
+    "ltx2_nvfp4_qat": (
+        "ltx2_t2v_qat_finetune_min.yaml",
+        3840,
+        "test_ltx2_nvfp4_qat_finetune",
+        576,
+    ),
 }
 
 _LTX2_TEXT_LEN = 1024
@@ -50,6 +57,18 @@ def _gpu_too_small() -> bool:
         return True
     total = torch.cuda.get_device_properties(0).total_memory
     return total < _MIN_GPU_MEMORY_GB * 1024**3
+
+
+def _flashinfer_fp4_available() -> bool:
+    try:
+        from flashinfer import (  # noqa: F401
+            SfLayout,
+            mm_fp4,
+            nvfp4_quantize,
+        )
+    except ImportError:
+        return False
+    return True
 
 
 def _build_synthetic_batch(
@@ -85,8 +104,21 @@ def test_ltx2_finetune_single_train_step(
         pytest.skip(f"requires a CUDA GPU with >= {_MIN_GPU_MEMORY_GB}GB "
                     "memory (LTX-2 DiT is 18.9B params)")
 
-    fixture_name, text_dim, ref_name = _CASES[case]
+    fixture_name, text_dim, ref_name, expected_qat_linears = _CASES[case]
+    if expected_qat_linears is not None:
+        if torch.cuda.get_device_capability(0) < (10, 0):
+            pytest.skip("NVFP4 QAT requires an SM100+ GPU")
+        if not _flashinfer_fp4_available():
+            pytest.skip("requires flashinfer with FP4 kernels")
+
     cfg = load_run_config(str(_FIXTURE_DIR / fixture_name))
+    if expected_qat_linears is not None:
+        from fastvideo.layers.quantization.nvfp4_qat_train_config import (
+            NVFP4QATTrainConfig, )
+        assert isinstance(
+            cfg.training.pipeline_config.dit_config.quant_config,
+            NVFP4QATTrainConfig,
+        )
 
     device = torch.device("cuda:0")
     dtype = torch.bfloat16
@@ -105,8 +137,29 @@ def test_ltx2_finetune_single_train_step(
         init_from=cfg.models["student"]["init_from"],
         training_config=cfg.training,
         trainable=True,
+        attention_backend=cfg.models["student"].get("attention_backend"),
     )
     model.transformer = model.transformer.to(device=device, dtype=dtype)
+
+    if expected_qat_linears is not None:
+        from fastvideo.layers.quantization.nvfp4_qat_train_config import (
+            NVFP4QATTrainQuantizeMethod, )
+        quantized = sum(
+            isinstance(getattr(module, "quant_method", None),
+                       NVFP4QATTrainQuantizeMethod)
+            for module in model.transformer.modules())
+        assert quantized == expected_qat_linears, (
+            f"expected {expected_qat_linears} deployment-matched NVFP4-QAT "
+            f"linears on the LTX-2 DiT, found {quantized}")
+
+        from fastvideo.attention.backends.attn_qat_train import (
+            AttnQatTrainImpl, )
+        qat_attention = sum(
+            isinstance(getattr(module, "attn_impl", None), AttnQatTrainImpl)
+            for module in model.transformer.modules())
+        assert qat_attention == 96, (
+            "expected ATTN_QAT_TRAIN on attn1 and attn2 in all 48 LTX-2 "
+            f"blocks, found {qat_attention} implementations")
 
     method = FineTuneMethod(
         cfg=cfg,

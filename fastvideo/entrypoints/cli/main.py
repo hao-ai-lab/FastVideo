@@ -8,6 +8,7 @@ from fastvideo.entrypoints.cli.router_serve import (
 from fastvideo.entrypoints.cli.serve import cmd_init as serve_cmd_init
 from fastvideo.entrypoints.cli.bench import cmd_init as bench_cmd_init
 from fastvideo.entrypoints.cli.eval import cmd_init as eval_cmd_init
+from fastvideo.version import __version__
 
 
 def cmd_init() -> list[CLISubcommand]:
@@ -23,7 +24,7 @@ def cmd_init() -> list[CLISubcommand]:
 
 def main() -> None:
     parser = FlexibleArgumentParser(description="FastVideo CLI")
-    parser.add_argument('-v', '--version', action='version', version='0.1.0')
+    parser.add_argument('-v', '--version', action='version', version=__version__)
 
     subparsers = parser.add_subparsers(required=False, dest="subparser")
 

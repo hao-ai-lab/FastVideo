@@ -38,6 +38,7 @@ from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.ltx2 import VideoLatentShape
 from fastvideo.pipelines import ForwardBatch, TrainingBatch
+from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.training.activation_checkpoint import (
     apply_activation_checkpointing, )
 
@@ -94,6 +95,7 @@ class LTX2Model(WanModel):
         transformer_override_safetensor: str
         | None = None,
         lora: LoraConfig | dict[str, Any] | None = None,
+        attention_backend: AttentionBackendEnum | str | None = None,
         train_audio: bool = False,
         timestep_uniform_prob: float = 0.1,
     ) -> None:
@@ -126,6 +128,7 @@ class LTX2Model(WanModel):
             enable_gradient_checkpointing_type=(enable_gradient_checkpointing_type),
             transformer_override_safetensor=(transformer_override_safetensor),
             lora=lora,
+            attention_backend=attention_backend,
         )
 
         if trainable:
@@ -149,6 +152,7 @@ class LTX2Model(WanModel):
         enable_gradient_checkpointing_type: str | None,
         training_config: TrainingConfig,
         transformer_override_safetensor: str | None = None,
+        attention_backend: AttentionBackendEnum | str | None = None,
     ) -> torch.nn.Module:
         transformer = load_module_from_path(
             model_path=init_from,
@@ -157,6 +161,7 @@ class LTX2Model(WanModel):
             disable_custom_init_weights=(disable_custom_init_weights),
             override_transformer_cls_name=(self._transformer_cls_name),
             transformer_override_safetensor=(transformer_override_safetensor),
+            attention_backend=attention_backend,
         )
         ckpt_type = (enable_gradient_checkpointing_type or getattr(
             getattr(training_config, "model", None),

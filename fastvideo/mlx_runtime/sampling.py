@@ -44,7 +44,7 @@ class MLXDMDSchedule:
     timesteps: np.ndarray
 
     @classmethod
-    def from_torch_scheduler(cls, scheduler: Any) -> MLXDMDSchedule:
+    def from_torch_scheduler(cls, scheduler: Any) -> "MLXDMDSchedule":
         """Snapshot ``scheduler.sigmas`` / ``scheduler.timesteps`` to NumPy.
 
         Matches ``pred_noise_to_pred_video`` / ``add_noise``, which index the
@@ -61,10 +61,10 @@ class MLXDMDSchedule:
 
 
 def pred_noise_to_pred_video(
-    pred_noise: mx.array,
-    noise_input_latent: mx.array,
+    pred_noise: "mx.array",
+    noise_input_latent: "mx.array",
     sigma: float,
-) -> mx.array:
+) -> "mx.array":
     """``x0`` prediction from a flow-match noise prediction (scalar ``sigma``).
 
     Equivalent to ``fastvideo/models/utils.py::pred_noise_to_pred_video`` for a
@@ -74,10 +74,10 @@ def pred_noise_to_pred_video(
 
 
 def add_noise(
-    clean_latent: mx.array,
-    noise: mx.array,
+    clean_latent: "mx.array",
+    noise: "mx.array",
     sigma: float,
-) -> mx.array:
+) -> "mx.array":
     """Flow-match forward noising, mirroring the scheduler's ``add_noise``.
 
     ``sample = (1 - sigma) * clean_latent + sigma * noise``.
@@ -87,14 +87,14 @@ def add_noise(
 
 def dmd_step(
     *,
-    latents: mx.array,
-    noise_input_latent: mx.array,
-    pred_noise: mx.array,
+    latents: "mx.array",
+    noise_input_latent: "mx.array",
+    pred_noise: "mx.array",
     schedule: MLXDMDSchedule,
     timestep: float,
     next_timestep: float | None,
-    noise: mx.array | None = None,
-) -> mx.array:
+    noise: "mx.array | None" = None,
+) -> "mx.array":
     """One on-device DMD update.
 
     Predicts the clean video from ``pred_noise`` at ``timestep`` and, when a

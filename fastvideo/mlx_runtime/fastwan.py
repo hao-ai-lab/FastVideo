@@ -5,12 +5,12 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import statistics
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
-from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from fastvideo.logger import init_logger
 
@@ -227,7 +227,7 @@ def torch_to_mx(tensor) -> mx.array:
     return mx.array(tensor.detach().cpu().float().numpy())
 
 
-def weight_dtype(weight: Any) -> Any:
+def weight_dtype(weight):
     if isinstance(weight, QuantizedMatrix):
         return weight.dequantized_dtype
     return weight.dtype
@@ -299,7 +299,7 @@ def quantize_matrix(weight, spec: MLXQuantizationSpec | None):
     )
 
 
-def linear(x: Any, weight: Any, bias: Any = None) -> Any:
+def linear(x, weight, bias=None):
     import mlx.core as mx
 
     if isinstance(weight, QuantizedMatrix):
@@ -403,18 +403,20 @@ def apply_rotary_emb(x, cos, sin, *, is_neox_style: bool = False):
     return mx.stack([o1, o2], axis=-1).reshape(*x.shape).astype(x.dtype)
 
 
-# This must be a Python float. A NumPy scalar multiplying a traced mx.array
-# dispatches through NumPy, which evaluates the array and breaks mx.compile.
+# tanh-GELU constant as a Python float. A NumPy scalar (``np.sqrt(...)``) here
+# makes ``np.float64 * mx.array`` dispatch through NumPy, which evals the traced
+# array and breaks mx.compile ("Attempting to eval an array during function
+# transformations"). A plain float dispatches through mx and traces cleanly.
 _GELU_TANH_COEF = math.sqrt(2.0 / math.pi)
 
 
-def gelu_tanh(x: Any) -> Any:
+def gelu_tanh(x):
     import mlx.core as mx
 
     return 0.5 * x * (1.0 + mx.tanh(_GELU_TANH_COEF * (x + 0.044715 * mx.power(x, 3.0))))
 
 
-def silu(x: Any) -> Any:
+def silu(x):
     import mlx.core as mx
 
     return x * mx.sigmoid(x)
@@ -432,7 +434,7 @@ def timestep_embedding(t, dim: int, max_period: int = 10000):
     return embedding
 
 
-def scale_residual(residual: Any, x: Any, gate: Any) -> Any:
+def scale_residual(residual, x, gate):
     return residual + x * gate
 
 
@@ -525,12 +527,23 @@ class MLXWanTransformerBlock:
             query = apply_rotary_emb(query, cos, sin, is_neox_style=False)
             key = apply_rotary_emb(key, cos, sin, is_neox_style=False)
 
-        attn_output = mx.fast.scaled_dot_product_attention(
-            query.transpose(0, 2, 1, 3),
-            key.transpose(0, 2, 1, 3),
-            value.transpose(0, 2, 1, 3),
-            scale=self.head_dim**-0.5,
-        ).transpose(0, 2, 1, 3)
+        # Self-attention only. FASTVIDEO_MLX_WINDOW=0/unset → full SDPA (byte-identical
+        # to the historical path). When >0, use chunked symmetric sliding-window
+        # attention (see windowed_attention.py). Cross-attn (attn2) stays full.
+        # Optional FASTVIDEO_MLX_WINDOW_SINK (default 0) adds global sink tokens.
+        q_bh = query.transpose(0, 2, 1, 3)  # (B, H, S, D)
+        k_bh = key.transpose(0, 2, 1, 3)
+        v_bh = value.transpose(0, 2, 1, 3)
+        scale = self.head_dim**-0.5
+        window = int(os.environ.get("FASTVIDEO_MLX_WINDOW", "0") or "0")
+        if window > 0:
+            from fastvideo.mlx_runtime.windowed_attention import windowed_attention
+
+            sink = int(os.environ.get("FASTVIDEO_MLX_WINDOW_SINK", "0") or "0")
+            attn_output = windowed_attention(q_bh, k_bh, v_bh, window=window, sink=sink, scale=scale)
+        else:
+            attn_output = mx.fast.scaled_dot_product_attention(q_bh, k_bh, v_bh, scale=scale)
+        attn_output = attn_output.transpose(0, 2, 1, 3)
         attn_output = attn_output.reshape(hidden_states.shape[0], -1, self.dim)
         attn_output = linear(attn_output, self.weights["to_out.weight"], self.weights.get("to_out.bias"))
 
@@ -600,9 +613,9 @@ class MLXWanDiT:
         # baseline; enable via constructor or FASTVIDEO_MLX_COMPILE=1 and verify
         # with the benchmark's SSIM ~= 1.0 check.
         self._enable_compile = compile or os.environ.get("FASTVIDEO_MLX_COMPILE", "0") == "1"
-        self._compiled_forward: Callable[..., Any] | None = None
+        self._compiled_forward = None
 
-    def patch_embed(self, hidden_states: Any) -> Any:
+    def patch_embed(self, hidden_states):
         batch, channels, frames, height, width = hidden_states.shape
         pt, ph, pw = self.patch_size
         patch_dim = channels * pt * ph * pw
@@ -610,7 +623,7 @@ class MLXWanDiT:
         x = x.transpose(0, 2, 4, 6, 1, 3, 5, 7).reshape(batch, -1, patch_dim)
         return linear(x, self.weights["patch_embedding.weight"], self.weights.get("patch_embedding.bias"))
 
-    def condition(self, timestep: Any, encoder_hidden_states: Any) -> tuple[Any, Any, Any]:
+    def condition(self, timestep, encoder_hidden_states):
         t_freq = timestep_embedding(timestep, self.freq_dim).astype(
             weight_dtype(self.weights["condition_embedder.time_embedder.linear_1.weight"]))
         temb = linear(
@@ -666,14 +679,7 @@ class MLXWanDiT:
         hidden_states = hidden_states.transpose(0, 7, 1, 4, 2, 5, 3, 6)
         return hidden_states.reshape(batch, self.out_channels, frames, height, width)
 
-    def _forward(
-        self,
-        hidden_states: Any,
-        encoder_hidden_states: Any,
-        timestep: Any,
-        cos: Any,
-        sin: Any,
-    ) -> Any:
+    def _forward(self, hidden_states, encoder_hidden_states, timestep, cos, sin):
         """Pure forward used both eagerly and as the mx.compile target.
 
         ``cos``/``sin`` are passed as separate array args (rather than a tuple)
@@ -753,6 +759,39 @@ def _eval_loaded_weight(value) -> None:
         mx.eval(value)
 
 
+# Diffusers-to-FastVideo key mapping for WanTransformerBlock weights.
+# Shared by both MLX and torch block loaders to keep mappings synchronized.
+_WAN_BLOCK_KEY_MAP = {
+    "scale_shift_table": "scale_shift_table",
+    "attn1.to_q.weight": "to_q.weight",
+    "attn1.to_q.bias": "to_q.bias",
+    "attn1.to_k.weight": "to_k.weight",
+    "attn1.to_k.bias": "to_k.bias",
+    "attn1.to_v.weight": "to_v.weight",
+    "attn1.to_v.bias": "to_v.bias",
+    "attn1.to_out.0.weight": "to_out.weight",
+    "attn1.to_out.0.bias": "to_out.bias",
+    "attn1.norm_q.weight": "norm_q.weight",
+    "attn1.norm_k.weight": "norm_k.weight",
+    "attn2.to_q.weight": "attn2.to_q.weight",
+    "attn2.to_q.bias": "attn2.to_q.bias",
+    "attn2.to_k.weight": "attn2.to_k.weight",
+    "attn2.to_k.bias": "attn2.to_k.bias",
+    "attn2.to_v.weight": "attn2.to_v.weight",
+    "attn2.to_v.bias": "attn2.to_v.bias",
+    "attn2.to_out.0.weight": "attn2.to_out.weight",
+    "attn2.to_out.0.bias": "attn2.to_out.bias",
+    "attn2.norm_q.weight": "attn2.norm_q.weight",
+    "attn2.norm_k.weight": "attn2.norm_k.weight",
+    "ffn.net.0.proj.weight": "ffn.fc_in.weight",
+    "ffn.net.0.proj.bias": "ffn.fc_in.bias",
+    "ffn.net.2.weight": "ffn.fc_out.weight",
+    "ffn.net.2.bias": "ffn.fc_out.bias",
+    "norm2.weight": "self_attn_residual_norm.norm.weight",
+    "norm2.bias": "self_attn_residual_norm.norm.bias",
+}
+
+
 def mlx_block_weights_from_diffusers_safetensors(
     checkpoint_path: str | Path,
     *,
@@ -764,35 +803,7 @@ def mlx_block_weights_from_diffusers_safetensors(
     from safetensors import safe_open
 
     prefix = f"blocks.{block_index}."
-    key_map = {
-        "scale_shift_table": "scale_shift_table",
-        "attn1.to_q.weight": "to_q.weight",
-        "attn1.to_q.bias": "to_q.bias",
-        "attn1.to_k.weight": "to_k.weight",
-        "attn1.to_k.bias": "to_k.bias",
-        "attn1.to_v.weight": "to_v.weight",
-        "attn1.to_v.bias": "to_v.bias",
-        "attn1.to_out.0.weight": "to_out.weight",
-        "attn1.to_out.0.bias": "to_out.bias",
-        "attn1.norm_q.weight": "norm_q.weight",
-        "attn1.norm_k.weight": "norm_k.weight",
-        "attn2.to_q.weight": "attn2.to_q.weight",
-        "attn2.to_q.bias": "attn2.to_q.bias",
-        "attn2.to_k.weight": "attn2.to_k.weight",
-        "attn2.to_k.bias": "attn2.to_k.bias",
-        "attn2.to_v.weight": "attn2.to_v.weight",
-        "attn2.to_v.bias": "attn2.to_v.bias",
-        "attn2.to_out.0.weight": "attn2.to_out.weight",
-        "attn2.to_out.0.bias": "attn2.to_out.bias",
-        "attn2.norm_q.weight": "attn2.norm_q.weight",
-        "attn2.norm_k.weight": "attn2.norm_k.weight",
-        "ffn.net.0.proj.weight": "ffn.fc_in.weight",
-        "ffn.net.0.proj.bias": "ffn.fc_in.bias",
-        "ffn.net.2.weight": "ffn.fc_out.weight",
-        "ffn.net.2.bias": "ffn.fc_out.bias",
-        "norm2.weight": "self_attn_residual_norm.norm.weight",
-        "norm2.bias": "self_attn_residual_norm.norm.bias",
-    }
+    key_map = _WAN_BLOCK_KEY_MAP
 
     spec = MLXQuantizationSpec.from_name(quantization) if (quantization is None
                                                            or isinstance(quantization, str)) else quantization
@@ -800,8 +811,16 @@ def mlx_block_weights_from_diffusers_safetensors(
     matrix_targets = {target for target in key_map.values() if target.endswith(".weight") and "norm" not in target}
     weights = {}
     with safe_open(str(checkpoint_path), framework="pt", device="cpu") as handle:
+        available = set(handle.keys())
         for source_name, target_name in key_map.items():
-            array = _load_mx_array_from_safetensor(handle, prefix + source_name, dtype)
+            full = prefix + source_name
+            if full not in available:
+                # Biases are optional: e.g. Wan2.1-14B has bias-free attention/FFN.
+                # The block forward already fetches biases via ``.get(...)``.
+                if source_name.endswith(".bias"):
+                    continue
+                raise KeyError(f"missing required block weight: {full}")
+            array = _load_mx_array_from_safetensor(handle, full, dtype)
             loaded = quantize_matrix(array, spec) if target_name in matrix_targets else array
             _eval_loaded_weight(loaded)
             weights[target_name] = loaded
@@ -849,7 +868,12 @@ def mlx_dit_from_diffusers_safetensors(
     ]
     weights = {}
     with safe_open(str(checkpoint_path), framework="pt", device="cpu") as handle:
+        available = set(handle.keys())
         for name in top_level_names:
+            if name not in available:
+                if name.endswith(".bias"):
+                    continue
+                raise KeyError(f"missing required weight: {name}")
             array = _load_mx_array_from_safetensor(handle, name, cast_dtype)
             if name == "patch_embedding.weight":
                 array = array.reshape(int(config["num_attention_heads"]) * int(config["attention_head_dim"]), -1)
@@ -895,38 +919,17 @@ def torch_block_state_from_diffusers_safetensors(
     from safetensors import safe_open
 
     prefix = f"blocks.{block_index}."
-    key_map = {
-        "scale_shift_table": "scale_shift_table",
-        "attn1.to_q.weight": "to_q.weight",
-        "attn1.to_q.bias": "to_q.bias",
-        "attn1.to_k.weight": "to_k.weight",
-        "attn1.to_k.bias": "to_k.bias",
-        "attn1.to_v.weight": "to_v.weight",
-        "attn1.to_v.bias": "to_v.bias",
-        "attn1.to_out.0.weight": "to_out.weight",
-        "attn1.to_out.0.bias": "to_out.bias",
-        "attn1.norm_q.weight": "norm_q.weight",
-        "attn1.norm_k.weight": "norm_k.weight",
-        "attn2.to_q.weight": "attn2.to_q.weight",
-        "attn2.to_q.bias": "attn2.to_q.bias",
-        "attn2.to_k.weight": "attn2.to_k.weight",
-        "attn2.to_k.bias": "attn2.to_k.bias",
-        "attn2.to_v.weight": "attn2.to_v.weight",
-        "attn2.to_v.bias": "attn2.to_v.bias",
-        "attn2.to_out.0.weight": "attn2.to_out.weight",
-        "attn2.to_out.0.bias": "attn2.to_out.bias",
-        "attn2.norm_q.weight": "attn2.norm_q.weight",
-        "attn2.norm_k.weight": "attn2.norm_k.weight",
-        "ffn.net.0.proj.weight": "ffn.fc_in.weight",
-        "ffn.net.0.proj.bias": "ffn.fc_in.bias",
-        "ffn.net.2.weight": "ffn.fc_out.weight",
-        "ffn.net.2.bias": "ffn.fc_out.bias",
-        "norm2.weight": "self_attn_residual_norm.norm.weight",
-        "norm2.bias": "self_attn_residual_norm.norm.bias",
-    }
+    key_map = _WAN_BLOCK_KEY_MAP
 
     state = {}
     with safe_open(str(checkpoint_path), framework="pt", device="cpu") as handle:
+        available = set(handle.keys())
         for source_name, target_name in key_map.items():
-            state[target_name] = handle.get_tensor(prefix + source_name).float()
+            full = prefix + source_name
+            if full not in available:
+                # Biases are optional: e.g. Wan2.1-14B has bias-free attention/FFN.
+                if source_name.endswith(".bias"):
+                    continue
+                raise KeyError(f"missing required block weight: {full}")
+            state[target_name] = handle.get_tensor(full).float()
     return state

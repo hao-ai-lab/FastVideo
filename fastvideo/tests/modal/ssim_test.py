@@ -507,9 +507,7 @@ def _prepare_ssim_workspace(
     rm -rf fastvideo/tests/ssim/reference_videos
     git_retry git submodule update --init --recursive
     uv pip install -e ".[test]"
-    cd fastvideo-kernel
-    ./build.sh
-    cd ..
+    python fastvideo/tests/modal/kernel_build_cache.py install
     uv pip install git+https://github.com/microsoft/MoGe.git
     # Stable Audio Open 1.0 inference deps (optional in basic install,
     # required by `StableAudioDenoisingStage`; consumed by
@@ -527,9 +525,11 @@ def _prepare_ssim_workspace(
             "HF_API_KEY": hf_api_key,
         },
     )
+    if result.stdout:
+        print(result.stdout, end="" if result.stdout.endswith("\n") else "\n")
+    if result.stderr:
+        print(result.stderr, end="" if result.stderr.endswith("\n") else "\n", file=sys.stderr)
     if result.returncode != 0:
-        print(result.stdout)
-        print(result.stderr)
         raise RuntimeError(f"Workspace setup failed with exit code {result.returncode}")
 
     ssim_dir = os.path.join(repo_root, "fastvideo", "tests", "ssim")

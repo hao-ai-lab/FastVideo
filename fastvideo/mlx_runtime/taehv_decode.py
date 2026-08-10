@@ -21,6 +21,9 @@ TAEW2_1_CHECKPOINT_URL = "https://raw.githubusercontent.com/madebyollin/taehv/ma
 # (fetched 2026-07-02). If upstream publishes a new checkpoint, revalidate the
 # decode path and update this pin.
 TAEW2_1_CHECKPOINT_SHA256 = "d26151e76cdc2c9424bef988de874b33d9a53f30ef3060cd556c429c469c797e"
+# Wan2.2 5B (z_dim=48) — see madebyollin/taehv taew2_2.pth; prefer
+# ``fastvideo.mlx_runtime.wan_vae.ensure_taehv_checkpoint(z_dim=48)`` for new code.
+TAEW2_2_CHECKPOINT_URL = "https://raw.githubusercontent.com/madebyollin/taehv/main/taew2_2.pth"
 
 
 def _default_cache_dir() -> Path:
@@ -60,9 +63,34 @@ def ensure_taew2_1_checkpoint(checkpoint_path: Path | None = None) -> Path:
     if not checkpoint_path.exists():
         checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
         print(f"Downloading {TAEW2_1_CHECKPOINT_URL} -> {checkpoint_path}")
-        urllib.request.urlretrieve(TAEW2_1_CHECKPOINT_URL,
-                                   checkpoint_path)  # noqa: S310 - pinned public artifact, hash-verified below.
-    _verify_checkpoint(checkpoint_path)
+        import socket
+        import tempfile
+        # Download to a temporary file, verify, then atomically rename.
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            dir=checkpoint_path.parent,
+            prefix=".tmp_taew2_1_",
+            suffix=".pth",
+            delete=False,
+        ) as tmp_file:
+            tmp_path = Path(tmp_file.name)
+            try:
+                old_timeout = socket.getdefaulttimeout()
+                socket.setdefaulttimeout(300)
+                try:
+                    urllib.request.urlretrieve(
+                        TAEW2_1_CHECKPOINT_URL,
+                        tmp_path,  # noqa: S310 - pinned public artifact, hash-verified below.
+                    )
+                finally:
+                    socket.setdefaulttimeout(old_timeout)
+                _verify_checkpoint(tmp_path)
+                tmp_path.replace(checkpoint_path)
+            except Exception:
+                tmp_path.unlink(missing_ok=True)
+                raise
+    else:
+        _verify_checkpoint(checkpoint_path)
     return checkpoint_path
 
 
