@@ -68,12 +68,15 @@ class LTXCheckpointMetadata:
     (``transformer``, ``vae``, ``scheduler``, ``audio_vae``, ``vocoder``).
     ``model_version`` and ``gemma_source_checkpoint`` are carried through so
     callers can validate the text encoder against the checkpoint that trained
-    it; ``gemma_source_checkpoint`` is absent on some variants.
+    it; ``gemma_source_checkpoint`` is absent on some variants. ``variant`` is
+    the training variant the header declares, when it declares one (see
+    :func:`bundle_variant`).
     """
 
     config: dict[str, Any]
     model_version: str | None
     gemma_source_checkpoint: dict[str, Any] | None
+    variant: str | None = None
 
 
 def read_ltx_metadata(path: str) -> LTXCheckpointMetadata:
@@ -101,9 +104,28 @@ def read_ltx_metadata(path: str) -> LTXCheckpointMetadata:
     return LTXCheckpointMetadata(
         config=config,
         model_version=metadata.get("model_version"),
-        gemma_source_checkpoint=(json.loads(gemma_source)
-                                 if gemma_source is not None else None),
+        gemma_source_checkpoint=(json.loads(gemma_source) if gemma_source is not None else None),
+        variant=metadata.get("variant"),
     )
+
+
+def bundle_variant(metadata: LTXCheckpointMetadata, path: str) -> str:
+    """The bundle's training variant: ``"distilled"`` or ``"base"``.
+
+    Decides which sampling preset a bundle gets (a distilled model wants its
+    short no-CFG schedule; everything else wants the standard one), so it must
+    be answerable from the header alone, without loading weights. An explicit
+    ``variant`` entry in the file metadata wins when the checkpoint declares
+    one.
+
+    ponytail: filename fallback -- the known bundles declare no variant marker
+    in their headers (a distilled file and its sft sibling differ only in
+    fields incidental to the variant), so the "distilled" token in the file
+    name is the only signal available today. Drop the fallback when
+    checkpoints start declaring ``variant``.
+    """
+    declared = metadata.variant or os.path.basename(path)
+    return "distilled" if "distilled" in declared.lower() else "base"
 
 
 def bundle_model_index(path: str) -> dict[str, Any]:
@@ -126,19 +148,18 @@ def bundle_model_index(path: str) -> dict[str, Any]:
     the bundle, but the pipeline needs both.
     """
     model_index: dict[str, Any] = {
-        # ponytail: the pipeline class is selected by the caller through
-        # `override_pipeline_cls_name` (see `registry._bundle_config_info`),
-        # and `load_modules` pops both of these without reading them. Nothing
-        # here is entitled to name a pipeline, so these are placeholders --
-        # they exist only because those pops have no default.
+        # ponytail: the pipeline class is pinned by the registry's bundle
+        # table (`registry._bundle_config_info`) or an explicit
+        # `override_pipeline_cls_name`, and `load_modules` pops both of these
+        # without reading them. Nothing here is entitled to name a pipeline,
+        # so these are placeholders -- they exist only because those pops have
+        # no default.
         "_class_name": None,
         "_diffusers_version": None,
     }
     for component, section in read_ltx_metadata(path).config.items():
-        cls_name = (section.get("_class_name")
-                    if isinstance(section, dict) else None)
-        model_index[component] = (["diffusers", cls_name]
-                                  if cls_name else [None, None])
+        cls_name = (section.get("_class_name") if isinstance(section, dict) else None)
+        model_index[component] = (["diffusers", cls_name] if cls_name else [None, None])
     model_index["text_encoder"] = ["transformers", "LTX2GemmaTextEncoderModel"]
     model_index["tokenizer"] = ["transformers", "AutoTokenizer"]
     return model_index
@@ -184,9 +205,7 @@ def component_weights(
             if key.startswith(transformer_prefix):
                 name = key[len(transformer_prefix):]
                 # str.startswith takes a tuple.
-                owner = ("text_encoder"
-                         if name.startswith(TEXT_STACK_SUBPREFIXES) else
-                         "transformer")
+                owner = ("text_encoder" if name.startswith(TEXT_STACK_SUBPREFIXES) else "transformer")
                 if owner != component:
                     continue
             elif key.startswith(prefix):
@@ -223,16 +242,14 @@ def resolve_text_encoder_root(
     """
     root = override_path or configured_path
     if not root:
-        raise ValueError(
-            "A single-file checkpoint does not carry its text encoder, so the "
-            "encoder root must be declared. Set `gemma_model_path` in the "
-            "pipeline config, or pass the text-encoder path explicitly for "
-            "this run. It is not inferred from the checkpoint's directory: "
-            "loading whichever encoder happens to sit beside the file would "
-            "silently pick the wrong one when several are present.")
+        raise ValueError("A single-file checkpoint does not carry its text encoder, so the "
+                         "encoder root must be declared. Set `gemma_model_path` in the "
+                         "pipeline config, or pass the text-encoder path explicitly for "
+                         "this run. It is not inferred from the checkpoint's directory: "
+                         "loading whichever encoder happens to sit beside the file would "
+                         "silently pick the wrong one when several are present.")
 
-    expected = (metadata.gemma_source_checkpoint or {}).get(
-        "gemma_version") if metadata is not None else None
+    expected = (metadata.gemma_source_checkpoint or {}).get("gemma_version") if metadata is not None else None
     if expected:
         # ponytail: warn, don't raise -- the declared root is the user's
         # explicit instruction and the pairing is advisory. Promote to a hard
@@ -242,8 +259,7 @@ def resolve_text_encoder_root(
         if actual is not None and actual != expected:
             logger.warning(
                 "Checkpoint expects text-encoder version %r but the encoder at "
-                "%s reports %r; continuing with the declared root.", expected,
-                root, actual)
+                "%s reports %r; continuing with the declared root.", expected, root, actual)
     return root
 
 

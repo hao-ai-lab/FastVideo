@@ -33,6 +33,35 @@ For the typed config/request path added during the inference API refactor:
 python examples/inference/basic/basic_dmd_new_api.py
 ```
 
+## LTX-2.5 single-file bundles
+
+These examples load LTX-2.5 from a single-file bundle: one `.safetensors`
+file carrying every component (transformer, video VAE, audio VAE, vocoder,
+text projection). (The Hugging Face release ships as a split pack — one
+file per component — which loads through the standard repo path instead.)
+Pass the bundle FILE path directly:
+
+```bash
+python examples/inference/basic/basic_ltx2_5_distilled.py \
+    --model-path /path/to/bundle.safetensors \
+    --gemma-root /path/to/gemma_root
+```
+
+| bundle variant | preset | sampling defaults |
+|---|---|---|
+| distilled | `ltx2_distilled` | one stage, 8 steps, CFG 1.0 (no CFG/STG, no spatial upscaler) |
+| sft / base | `ltx2_base` | 40 steps, CFG 3.0 with STG |
+
+- The variant is read from the bundle header when declared; otherwise the
+  `distilled` token in the file name decides.
+- The Gemma text encoder is NOT in the bundle. Declare its root with
+  `--gemma-root` (or `FASTVIDEO_LTX_ENCODER_ROOT`), and use the root shipped
+  with the same transformer variant — the roots differ in prompt templating.
+- Decoder caveat: bundles that declare a diffusion VAE decoder
+  (`CausalDiffusionVAE`) are not supported yet; loading them currently
+  fails at VAE build time. Bundles with the classic `CausalVideoAutoencoder`
+  run end to end.
+
 ## Basic Walkthrough
 
 All you need to generate videos using multi-gpus from state-of-the-art diffusion pipelines is the following few lines!

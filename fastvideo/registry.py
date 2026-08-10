@@ -147,11 +147,18 @@ _MODEL_NAME_DETECTORS: list[tuple[str, Callable[[str], bool]]] = []
 # Keyed on that `_class_name` -- a stable, checkpoint-declared identifier --
 # and NOT on `model_id`, which is a positional index (`str(len(_CONFIG_REGISTRY))`)
 # and would silently rebind whenever registration order changes. The value pins
-# the ConfigInfo by its stable `(model_family, default_preset)` pair. A bundle's
-# file NAME is never consulted.
-_BUNDLE_TRANSFORMER_TO_CONFIG: dict[str, tuple[str, str]] = {
-    # transformer _class_name -> (model_family, default_preset)
-    "AVTransformer3DModel": ("ltx2", "ltx2_distilled"),
+# the model family, the pipeline class to build (a bundle names no pipeline
+# itself), and the default preset per training variant; the variant comes from
+# `ltx_single_file.bundle_variant` (declared in the header when present, with a
+# filename-token fallback). The transformer CLASS is never inferred from the
+# file name.
+_BUNDLE_TRANSFORMER_TO_CONFIG: dict[str, tuple[str, str, dict[str, str]]] = {
+    # transformer _class_name -> (model_family, pipeline class,
+    #                             variant -> default_preset)
+    "AVTransformer3DModel": ("ltx2", "LTX2Pipeline", {
+        "distilled": "ltx2_distilled",
+        "base": "ltx2_base",
+    }),
 }
 
 
@@ -204,11 +211,14 @@ def _bundle_config_info(model_path: str) -> ConfigInfo:
 
     The bundle declares its own component classes in ``__metadata__``; reading
     that is the only inference done here. The transformer's ``_class_name`` is
-    mapped through :data:`_BUNDLE_TRANSFORMER_TO_CONFIG`, an explicit table, to
-    the ``(model_family, default_preset)`` of a registered config. Nothing is
-    matched by wildcard, and nothing is read off the file name -- a file name is
-    incidental, and making resolution depend on it makes correct loading depend
-    on what a checkpoint happens to be called.
+    mapped through :data:`_BUNDLE_TRANSFORMER_TO_CONFIG`, an explicit table,
+    and the bundle's training variant (``bundle_variant``: header-declared,
+    filename token as fallback) selects the ``default_preset`` within that
+    entry, so a distilled bundle gets distilled sampling defaults and a
+    base/sft bundle gets the standard ones. Nothing is matched by wildcard,
+    and the transformer class is never read off the file name -- a file name
+    is incidental, and making class resolution depend on it makes correct
+    loading depend on what a checkpoint happens to be called.
 
     An unrecognized transformer class raises, naming both the table to extend
     and the per-run override, rather than falling through to a guess.
@@ -217,30 +227,41 @@ def _bundle_config_info(model_path: str) -> ConfigInfo:
     metadata directly. Dispatch on a per-format reader if a second bundle
     format ever appears.
     """
-    from fastvideo.models.loader.ltx_single_file import read_ltx_metadata
+    from fastvideo.models.loader.ltx_single_file import (bundle_variant, read_ltx_metadata)
 
     try:
-        cls_name = read_ltx_metadata(model_path).config.get("transformer", {}).get("_class_name")
+        metadata = read_ltx_metadata(model_path)
+        cls_name = metadata.config.get("transformer", {}).get("_class_name")
     except KeyError:  # no `config` section: not a bundle we know how to read
+        metadata = None
         cls_name = None
 
     entry = _BUNDLE_TRANSFORMER_TO_CONFIG.get(cls_name) if cls_name else None
-    if entry is None:
+    if entry is None or metadata is None:
         raise ValueError(
             f"Single-file checkpoint {model_path} declares transformer class {cls_name!r}, which is not in "
             f"_BUNDLE_TRANSFORMER_TO_CONFIG (known: {sorted(_BUNDLE_TRANSFORMER_TO_CONFIG)}). Add the class to that "
             "table, or select the pipeline explicitly for this run with `override_pipeline_cls_name`. The pipeline is "
             "never inferred from the checkpoint's file name.")
 
-    model_family, default_preset = entry
+    model_family, pipeline_cls_name, variant_presets = entry
+    variant = bundle_variant(metadata, model_path)
+    default_preset = variant_presets.get(variant)
+    if default_preset is None:
+        raise ValueError(f"Single-file checkpoint {model_path} resolves to variant {variant!r}, but "
+                         f"_BUNDLE_TRANSFORMER_TO_CONFIG[{cls_name!r}] only maps {sorted(variant_presets)}. "
+                         "Add the variant to that table.")
+
     for config_info in _CONFIG_REGISTRY.values():
         if config_info.model_family == model_family and config_info.default_preset == default_preset:
-            return config_info
+            # A bundle names no pipeline itself (there is no model_index.json
+            # to carry a `_class_name`), so the table's pipeline class is
+            # pinned onto the resolved config.
+            return dataclasses.replace(config_info, pipeline_cls_name=pipeline_cls_name)
 
-    raise ValueError(
-        f"_BUNDLE_TRANSFORMER_TO_CONFIG maps {cls_name!r} to model_family={model_family!r} "
-        f"default_preset={default_preset!r}, but no registered config declares that pair. "
-        "Fix the table or the registration.")
+    raise ValueError(f"_BUNDLE_TRANSFORMER_TO_CONFIG maps {cls_name!r} ({variant!r}) to model_family={model_family!r} "
+                     f"default_preset={default_preset!r}, but no registered config declares that pair. "
+                     "Fix the table or the registration.")
 
 
 def _get_config_info(
@@ -1308,7 +1329,12 @@ def get_model_info(
         pipeline_name: str | None = override_pipeline_cls_name
         logger.info("Using override pipeline class name %s", pipeline_name)
     else:
-        if os.path.exists(model_path):
+        if model_path.endswith(".safetensors"):
+            # A single-file bundle has no model_index.json and names no
+            # pipeline itself; `_bundle_config_info` above pinned the class
+            # through `pipeline_cls_name`.
+            config = {}
+        elif os.path.exists(model_path):
             config = verify_model_config_and_directory(model_path, required_component_dirs=[])
         else:
             config = maybe_download_model_index(model_path, revision=revision)
