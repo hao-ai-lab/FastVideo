@@ -19,12 +19,17 @@ def test_rife_interpolation_preserves_keyframes_shape_and_count() -> None:
     if importlib.util.find_spec("fastvideo.third_party.rife_mlx") is None:
         pytest.skip("vendored MLX RIFE backend is unavailable")
 
-    from fastvideo.mlx_runtime.rife_interp import interpolate, load_model
+    from fastvideo.mlx_runtime.rife_interp import RIFEBackendError, interpolate, load_model
 
     frame0 = np.zeros((64, 96, 3), dtype=np.uint8)
     frame1 = np.zeros((64, 96, 3), dtype=np.uint8)
     frame1[:, :, 0] = 255
-    model = load_model()
+    try:
+        # The backend is vendored, but its weights are fetched from Hugging Face
+        # on first use, so an offline machine should skip rather than fail.
+        model = load_model()
+    except RIFEBackendError as exc:
+        pytest.skip(f"RIFE weights unavailable: {exc}")
 
     frames = interpolate([frame0, frame1], factor=2, model=model)
 
