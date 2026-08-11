@@ -209,7 +209,7 @@ rocm = [
 # Apple Silicon FastWan release runtime. The range is intentionally pinned to
 # the MLX version used for the checked-in parity and checkpoint tests.
 mlx = [
-    "mlx>=0.31.2,<0.32; platform_system == 'Darwin' and platform_machine == 'arm64'",
+    "mlx>=0.31.2,<0.33; platform_system == 'Darwin' and platform_machine == 'arm64'",
     # RIFE fast-mode (--fast): Apple-Silicon-native frame interpolation.
     "rife-mlx; platform_system == 'Darwin' and platform_machine == 'arm64'",
 ]

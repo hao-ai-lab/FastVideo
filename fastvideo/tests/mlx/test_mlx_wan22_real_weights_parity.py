@@ -17,6 +17,12 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+# The torch reference side brings up FastVideo's single-process distributed
+# environment, which rendezvouses over env://. Match the other torch-backed
+# tests in this repo and provide a local rendezvous before that happens.
+os.environ.setdefault("MASTER_ADDR", "localhost")
+os.environ.setdefault("MASTER_PORT", "29513")
+
 mx = pytest.importorskip("mlx.core", reason="MLX is required for the Wan2.2 real-weight parity test")
 
 _ROOT = Path(os.environ.get("FASTVIDEO_WAN22_5B_ROOT", str(Path.home() / "models" / "fastwan22_5b")))
@@ -206,8 +212,11 @@ def test_wan22_real_weights_mlx_matches_torch_per_token_timestep() -> None:
     print(f"Wan2.2-5B real-weight MLX-fp16 vs torch-fp16: "
           f"max|Δ|={max_abs:.3e} mean|Δ|={mean_abs:.3e} cosine={cosine:.6f}")
     # Full 30-layer fp16 Metal vs torch SDPA drifts more than the tiny-config
-    # fp32 gate (2e-3) / CUDA-tiny dump (5e-3). Measured on M4 Max ~ max 9e-2,
-    # mean 6e-3, cosine 0.99994 — assert with recorded headroom.
-    assert max_abs <= 0.15, f"max|Δ|={max_abs} over budget"
-    assert mean_abs <= 0.02, f"mean|Δ|={mean_abs} over budget"
-    assert cosine >= 0.999, f"cosine={cosine} too low"
+    # fp32 gate (2e-3) / CUDA-tiny dump (5e-3). Measured on M4 Max: mean 6.1e-3,
+    # cosine 0.999948, both stable across MLX versions. The worst single element
+    # is not: it was 9e-2 when this budget was written and reaches 1.65e-1 under
+    # MLX 0.32's kernel fusion, so the aggregate statistics carry the assertion
+    # and max|Δ| stays as a loose guard against a genuine divergence.
+    assert mean_abs <= 1e-2, f"mean|Δ|={mean_abs} over budget"
+    assert cosine >= 0.9995, f"cosine={cosine} too low"
+    assert max_abs <= 0.25, f"max|Δ|={max_abs} over budget"

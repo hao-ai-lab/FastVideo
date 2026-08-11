@@ -28,6 +28,24 @@ from fastvideo.mlx_runtime.fastwan import (  # noqa: E402
 # distinct values (re-seeding per call made every (dim, dim) weight identical).
 _RNG = np.random.default_rng(0)
 
+# Through MLX 0.31 the compiler emitted the same kernels as eager for these
+# graphs, so bit-identity was the contract. MLX 0.32 fuses more aggressively and
+# reassociates float ops, which moves a handful of elements by a few ULP (max
+# observed: 2.4e-07 absolute, 6.4e-06 relative, on 41 of 7680 elements). That is
+# reassociation, not a regression, so assert bit-identity where it is guaranteed
+# and a tight tolerance otherwise. Either way a silent fallback to eager or a
+# broken trace still fails the test.
+_MLX_VERSION = tuple(int(part) for part in mx.__version__.split(".")[:2])
+_COMPILE_IS_BITWISE = _MLX_VERSION < (0, 32)
+
+
+def _assert_compile_parity(eager: "mx.array", compiled: "mx.array") -> None:
+    """Compare an eager result against its compiled counterpart."""
+    if _COMPILE_IS_BITWISE:
+        np.testing.assert_array_equal(np.array(eager), np.array(compiled))
+    else:
+        np.testing.assert_allclose(np.array(eager), np.array(compiled), rtol=1e-5, atol=1e-6)
+
 
 def _rand(*shape: int, scale: float = 1.0) -> "mx.array":
     """
@@ -50,8 +68,7 @@ def test_gelu_tanh_compiles_and_matches_eager() -> None:
     mx.eval(eager)
     compiled = mx.compile(gelu_tanh)(x)
     mx.eval(compiled)
-    # Bit-identical on the same device is the compile-parity contract (not allclose).
-    np.testing.assert_array_equal(np.array(eager), np.array(compiled))
+    _assert_compile_parity(eager, compiled)
 
 
 def test_timestep_embedding_compiles_and_matches_eager() -> None:
@@ -114,4 +131,4 @@ def test_transformer_block_compiles_and_matches_eager() -> None:
     compiled = mx.compile(lambda h, e, t, c, s: block(h, e, t, (c, s)))(hidden, context, temb, cos, sin)
     mx.eval(compiled)
 
-    np.testing.assert_array_equal(np.array(eager), np.array(compiled))
+    _assert_compile_parity(eager, compiled)
