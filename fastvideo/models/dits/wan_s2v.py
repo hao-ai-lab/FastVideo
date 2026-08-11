@@ -422,8 +422,14 @@ class WanS2VTransformer3DModel(BaseDiT):
         """
         if self.zero_timestep:
             t = torch.cat([t, torch.zeros([1], dtype=t.dtype, device=t.device)])
-        e = self.time_embedding(sinusoidal_embedding_1d(self.freq_dim, t).to(t.device)).float()
-        e0 = self.time_projection(e)[0].unflatten(1, (6, self.hidden_size)).float()
+        # sinusoidal_embedding_1d emits fp32; the GEMMs need the params' dtype
+        # (bf16 when loaded from the checkpoint, fp32 in the CPU/parity tests --
+        # where this cast is a no-op). Without it, a raw CUDA call fails with a
+        # Float/BFloat16 mismatch; autocast contexts merely masked this.
+        param_dtype = self.time_projection.linear.weight.dtype
+        sinusoid = sinusoidal_embedding_1d(self.freq_dim, t).to(device=t.device, dtype=param_dtype)
+        e = self.time_embedding(sinusoid).float()
+        e0 = self.time_projection(e.to(param_dtype))[0].unflatten(1, (6, self.hidden_size)).float()
         if not self.zero_timestep:
             return e, (e0.unsqueeze(2).repeat(1, 1, 2, 1), 0)
         e, zero_e0, e0 = e[:-1], e0[-1:], e0[:-1]
