@@ -56,14 +56,6 @@ from fastvideo.mlx_runtime.prompt_enhance import (
     enhance_result_as_metrics,
     load_or_enhance_prompt,
 )
-from fastvideo.mlx_runtime.w8a8_gemm import (
-    W8A8Matrix,
-    bench_w8a8,
-    quantize_activations_per_token,
-    quantize_weights_per_out_channel,
-    w8a8_linear,
-    w8a8_matmul,
-)
 
 __all__ = [
     "AppliedMemoryLimits",
@@ -79,11 +71,9 @@ __all__ = [
     "RefinePlan",
     "TwoPassResult",
     "UnsupportedMLXQuantizationError",
-    "W8A8Matrix",
     "add_memory_limit_args",
     "apply_fast_spatial_upsample",
     "apply_memory_limits",
-    "bench_w8a8",
     "enhance_prompt",
     "enhance_prompt_template",
     "enhance_result_as_metrics",
@@ -99,8 +89,6 @@ __all__ = [
     "plan_fast_spatial",
     "plan_refine_resolutions",
     "prepare_refine_latents",
-    "quantize_activations_per_token",
-    "quantize_weights_per_out_channel",
     "quantization_support_error",
     "refine_sigma_from_schedule",
     "resolve_spatial_mode",
@@ -108,6 +96,4 @@ __all__ = [
     "run_two_pass_dmd",
     "save_mlx_dit_checkpoint",
     "upsample_latents_spatial",
-    "w8a8_linear",
-    "w8a8_matmul",
 ]
