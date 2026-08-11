@@ -19,8 +19,7 @@ import torch
 import torch.distributed as dist
 
 
-def bench(fn, num_warmups: int = 5, num_tests: int = 10,
-          high_precision: bool = False):
+def bench(fn, num_warmups: int = 5, num_tests: int = 10, high_precision: bool = False):
     # Flush L2 cache with 256 MB data
     torch.cuda.synchronize()
     cache = torch.empty(int(256e6 // 4), dtype=torch.int, device='cuda')
@@ -49,6 +48,7 @@ def bench(fn, num_warmups: int = 5, num_tests: int = 10,
 
 
 class empty_suppress:
+
     def __enter__(self):
         return self
 
@@ -57,6 +57,7 @@ class empty_suppress:
 
 
 class suppress_stdout_stderr:
+
     def __enter__(self):
         self.outnull_file = open(os.devnull, 'w')
         self.errnull_file = open(os.devnull, 'w')
@@ -91,8 +92,13 @@ class suppress_stdout_stderr:
         self.errnull_file.close()
 
 
-def bench_kineto(fn, kernel_names, num_tests: int = 30, suppress_kineto_output: bool = False,
-                 trace_path: str = None, barrier_comm_profiling: bool = False, flush_l2: bool = False):
+def bench_kineto(fn,
+                 kernel_names,
+                 num_tests: int = 30,
+                 suppress_kineto_output: bool = False,
+                 trace_path: str = None,
+                 barrier_comm_profiling: bool = False,
+                 flush_l2: bool = False):
     # Conflict with Nsight Systems
     using_nsys = os.environ.get('DG_NSYS_PROFILING', False)
 
@@ -103,7 +109,8 @@ def bench_kineto(fn, kernel_names, num_tests: int = 30, suppress_kineto_output: 
     suppress = suppress_stdout_stderr if suppress_kineto_output and not using_nsys else empty_suppress
     with suppress():
         schedule = torch.profiler.schedule(wait=0, warmup=1, active=1, repeat=1) if not using_nsys else None
-        profiler = torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CUDA], schedule=schedule) if not using_nsys else empty_suppress()
+        profiler = torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CUDA],
+                                          schedule=schedule) if not using_nsys else empty_suppress()
         with profiler:
             for i in range(2):
                 # NOTES: use a large kernel and a barrier to eliminate the unbalanced CPU launch overhead

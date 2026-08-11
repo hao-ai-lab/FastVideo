@@ -23,7 +23,6 @@ try:
 except Exception as e:  # pragma: no cover
     raise ImportError("This benchmark requires triton (for triton.testing.do_bench).") from e
 
-
 BLOCK_M = 64
 BLOCK_N = 64
 
@@ -43,16 +42,23 @@ def parse_arguments() -> argparse.Namespace:
     p.add_argument("--head_dim", type=int, default=128, choices=[64, 128])
     p.add_argument("--topk", type=int, default=None, help="KV blocks per Q block (default: ~90%% sparsity)")
     p.add_argument("--q_seq_lens", type=int, nargs="+", default=[49152], help="Q sequence lengths (must be /64)")
-    p.add_argument("--kv_seq_lens", type=int, nargs="+", default=None, help="KV sequence lengths (defaults to q_seq_len)")
+    p.add_argument("--kv_seq_lens",
+                   type=int,
+                   nargs="+",
+                   default=None,
+                   help="KV sequence lengths (defaults to q_seq_len)")
     p.add_argument("--warmup", type=int, default=5)
     p.add_argument("--rep", type=int, default=20)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--dtype", type=str, default="bf16", choices=["bf16", "fp16"])
-    p.add_argument("--force_triton", action="store_true", help="Force wrapper to use Triton path (if supported by shapes).")
+    p.add_argument("--force_triton",
+                   action="store_true",
+                   help="Force wrapper to use Triton path (if supported by shapes).")
     return p.parse_args()
 
 
-def create_qkv(batch: int, heads: int, q_len: int, kv_len: int, d: int, dtype: torch.dtype) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+def create_qkv(batch: int, heads: int, q_len: int, kv_len: int, d: int,
+               dtype: torch.dtype) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     q = torch.randn(batch, heads, q_len, d, dtype=dtype, device="cuda")
     k = torch.randn(batch, heads, kv_len, d, dtype=dtype, device="cuda")
     v = torch.randn(batch, heads, kv_len, d, dtype=dtype, device="cuda")
@@ -117,13 +123,14 @@ def main() -> None:
         topk = min(topk, num_kv_blocks)
 
         print("\n" + "=" * 80)
-        print(f"q_len={q_len}, kv_len={kv_len}, num_q_blocks={num_q_blocks}, num_kv_blocks={num_kv_blocks}, topk={topk}")
+        print(
+            f"q_len={q_len}, kv_len={kv_len}, num_q_blocks={num_q_blocks}, num_kv_blocks={num_kv_blocks}, topk={topk}")
 
         q, k, v = create_qkv(bs, h, q_len, kv_len, d, dtype)
         block_map = make_block_map(bs, h, num_q_blocks, num_kv_blocks, topk)
 
         # Variable block sizes: default full blocks (64 tokens per KV block)
-        variable_block_sizes = torch.full((num_kv_blocks,), BLOCK_N, dtype=torch.int32, device="cuda")
+        variable_block_sizes = torch.full((num_kv_blocks, ), BLOCK_N, dtype=torch.int32, device="cuda")
 
         def _fwd():
             return block_sparse_attn(q, k, v, block_map, variable_block_sizes)
@@ -162,5 +169,3 @@ if __name__ == "__main__":
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA is required for this benchmark.")
     main()
-
-

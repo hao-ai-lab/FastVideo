@@ -39,25 +39,15 @@ def _torch_vsa256_reference(
     scores = torch.matmul(q_c, k_c.transpose(-2, -1)) / math.sqrt(dim)
     attn = torch.softmax(scores, dim=-1)
     out_c = torch.matmul(attn, v_c)
-    out_c = (
-        out_c.view(bsz, heads, q_blocks, 1, dim)
-        .repeat(1, 1, 1, q_block, 1)
-        .view_as(q)
-    )
+    out_c = (out_c.view(bsz, heads, q_blocks, 1, dim).repeat(1, 1, 1, q_block, 1).view_as(q))
 
     with torch.no_grad():
         topk_idx = torch.topk(scores.detach(), topk_logical, dim=-1).indices
         block_mask = torch.zeros_like(scores, dtype=torch.bool).scatter_(-1, topk_idx, True)
         block_token_idx = torch.arange(kv_block, device=kv_var.device, dtype=torch.int32)
-        kv_token_valid_by_block = (
-            block_token_idx.view(1, -1) < kv_var.to(torch.int32).view(-1, 1)
-        ).to(torch.bool)
+        kv_token_valid_by_block = (block_token_idx.view(1, -1) < kv_var.to(torch.int32).view(-1, 1)).to(torch.bool)
         kv_token_valid = kv_token_valid_by_block.reshape(1, 1, 1, kv_blocks * kv_block)
-        token_mask = (
-            block_mask
-            .repeat_interleave(q_block, dim=2)
-            .repeat_interleave(kv_block, dim=3)
-        )
+        token_mask = (block_mask.repeat_interleave(q_block, dim=2).repeat_interleave(kv_block, dim=3))
         token_mask = token_mask & kv_token_valid
 
     qf, kf, vf = q.float(), k.float(), v.float()
@@ -98,8 +88,8 @@ def test_vsa256_triton_forward_backward_vs_torch_ref(monkeypatch) -> None:
     v_base = torch.randn(bsz, heads, skv, dim, device=device, dtype=dtype)
     grad_out = torch.randn_like(q_base)
 
-    q_var = torch.full((q_blocks_256,), q_block, dtype=torch.int32, device=device)
-    kv_var = torch.randint(16, kv_block + 1, (kv_blocks_256,), dtype=torch.int32, device=device)
+    q_var = torch.full((q_blocks_256, ), q_block, dtype=torch.int32, device=device)
+    kv_var = torch.randint(16, kv_block + 1, (kv_blocks_256, ), dtype=torch.int32, device=device)
     token_idx = torch.arange(kv_block, device=device, dtype=torch.int32)
     kv_valid = token_idx.view(1, -1) < kv_var.view(-1, 1)
     kv_valid = kv_valid.view(1, 1, kv_blocks_256, kv_block, 1)
@@ -111,7 +101,9 @@ def test_vsa256_triton_forward_backward_vs_torch_ref(monkeypatch) -> None:
     k = k_base.detach().clone().requires_grad_(True)
     v = v_base.detach().clone().requires_grad_(True)
     out = video_sparse_attn(
-        q, k, v,
+        q,
+        k,
+        v,
         kv_var,
         q_var,
         topk_logical,
@@ -135,14 +127,12 @@ def test_vsa256_triton_forward_backward_vs_torch_ref(monkeypatch) -> None:
     m_dq = _metrics(dq_ref, dq)
     m_dk = _metrics(dk_ref, dk)
     m_dv = _metrics(dv_ref, dv)
-    print(
-        "[vsa256-triton] "
-        f"kv_var[min={int(kv_var.min().item())}, max={int(kv_var.max().item())}], "
-        f"out(avg_abs={m_out[0]:.6e}, max_rel={m_out[1]:.6e}), "
-        f"dq(avg_abs={m_dq[0]:.6e}, max_rel={m_dq[1]:.6e}), "
-        f"dk(avg_abs={m_dk[0]:.6e}, max_rel={m_dk[1]:.6e}), "
-        f"dv(avg_abs={m_dv[0]:.6e}, max_rel={m_dv[1]:.6e})"
-    )
+    print("[vsa256-triton] "
+          f"kv_var[min={int(kv_var.min().item())}, max={int(kv_var.max().item())}], "
+          f"out(avg_abs={m_out[0]:.6e}, max_rel={m_out[1]:.6e}), "
+          f"dq(avg_abs={m_dq[0]:.6e}, max_rel={m_dq[1]:.6e}), "
+          f"dk(avg_abs={m_dk[0]:.6e}, max_rel={m_dk[1]:.6e}), "
+          f"dv(avg_abs={m_dv[0]:.6e}, max_rel={m_dv[1]:.6e})")
 
     assert m_out[0] < 1e-3 and m_out[1] < 0.2
     assert m_dq[0] < 2e-2 and m_dq[1] < 0.5

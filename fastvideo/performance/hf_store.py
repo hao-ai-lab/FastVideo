@@ -18,6 +18,7 @@ from typing import Any
 
 import pandas as pd
 from huggingface_hub import HfApi, snapshot_download
+from huggingface_hub.constants import ENDPOINT
 
 # ---------------------------------------------------------------------------
 # Configuration — read once at import time, shared across both consumers
@@ -35,7 +36,8 @@ SYNC_REUSE_TTL_SECONDS = int(os.environ.get("PERFORMANCE_TRACKING_SYNC_REUSE_TTL
 
 def sanitize(value: str) -> str:
     """Return a filesystem- and HF-path-safe version of *value*."""
-    return re.sub(r"[^A-Za-z0-9._-]", "_", value)
+    sanitized = re.sub(r"[^A-Za-z0-9._-]", "_", value)
+    return f"_{sanitized}" if not sanitized or sanitized.startswith(".") else sanitized
 
 
 def safe_float(value: Any) -> float | None:
@@ -58,6 +60,19 @@ def is_baseline_eligible_record(record: dict[str, Any]) -> bool:
     if record.get("baseline_eligible") is True:
         return True
     return "baseline_eligible" not in record and "run_source" not in record
+
+
+def _parse_record_timestamp(record: dict[str, Any]) -> datetime | None:
+    raw_ts = record.get("timestamp")
+    if not raw_ts:
+        return None
+    try:
+        ts = datetime.fromisoformat(str(raw_ts))
+    except ValueError:
+        return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return ts
 
 
 def resolve_hf_token() -> str | None:
@@ -95,11 +110,23 @@ def _sync_marker_is_fresh(marker_path: str) -> bool:
     return age.total_seconds() <= SYNC_REUSE_TTL_SECONDS
 
 
+def _sync_marker_matches_request(marker_path: str, revision: str | None) -> bool:
+    try:
+        with open(marker_path, encoding="utf-8") as marker:
+            marker_data = json.load(marker)
+    except (OSError, json.JSONDecodeError):
+        return False
+    if marker_data.get("endpoint") != ENDPOINT or marker_data.get("repo_id") != HF_REPO_ID:
+        return False
+    return marker_data.get("revision") == revision
+
+
 def sync_from_hf(
     local_dir: str,
     *,
     strict: bool = False,
     reuse_existing: bool = False,
+    revision: str | None = None,
 ) -> str:
     """Download the HF dataset repo snapshot to *local_dir*.
 
@@ -116,14 +143,18 @@ def sync_from_hf(
     snapshot checks when compare and dashboard scripts run sequentially in the
     same CI job, without silently reusing stale data in persistent local or
     long-lived runner environments.
+
+    Pass ``revision`` to pin the snapshot to a previously read Hub commit. This
+    is used by conditional writers that must validate one exact remote state
+    before committing with that revision as their parent.
     """
     marker_path = _sync_marker_path(local_dir)
     if reuse_existing and os.path.exists(marker_path):
-        if _sync_marker_is_fresh(marker_path):
+        if _sync_marker_is_fresh(marker_path) and _sync_marker_matches_request(marker_path, revision):
             print(f"hf_store: reusing existing sync at {local_dir}")
             return local_dir
         os.remove(marker_path)
-        print(f"hf_store: existing sync at {local_dir} is stale; refreshing")
+        print(f"hf_store: existing sync at {local_dir} is stale or mismatched; refreshing")
 
     if not reuse_existing and os.path.exists(marker_path):
         os.remove(marker_path)
@@ -143,13 +174,17 @@ def sync_from_hf(
             local_dir=local_dir,
             token=resolve_hf_token(),
             allow_patterns="*.json",
+            revision=revision,
         )
         os.makedirs(local_dir, exist_ok=True)
         with open(marker_path, "w", encoding="utf-8") as marker:
-            json.dump({
-                "repo_id": HF_REPO_ID,
-                "synced_at": datetime.now(timezone.utc).isoformat(),
-            }, marker)
+            json.dump(
+                {
+                    "endpoint": ENDPOINT,
+                    "repo_id": HF_REPO_ID,
+                    "synced_at": datetime.now(timezone.utc).isoformat(),
+                    "revision": revision,
+                }, marker)
     except Exception as exc:
         if strict:
             raise
@@ -231,7 +266,7 @@ def load_records(
     if days is not None:
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
-    records: list[dict[str, Any]] = []
+    records: list[tuple[datetime, str, dict[str, Any]]] = []
 
     for path in sorted(glob.glob(os.path.join(local_dir, "**", "*.json"), recursive=True)):
         try:
@@ -246,21 +281,17 @@ def load_records(
         if baseline_eligible_only and not is_baseline_eligible_record(data):
             continue
 
-        if cutoff is not None:
-            raw_ts = data.get("timestamp")
-            if raw_ts:
-                try:
-                    ts = datetime.fromisoformat(raw_ts)
-                    if ts.tzinfo is None:
-                        ts = ts.replace(tzinfo=timezone.utc)
-                    if ts < cutoff:
-                        continue
-                except ValueError:
-                    pass  # keep records with unparsable timestamps
+        ts = _parse_record_timestamp(data)
+        if cutoff is not None and ts is not None and ts < cutoff:
+            continue
 
-        records.append(data)
+        records.append((
+            ts or datetime.min.replace(tzinfo=timezone.utc),
+            path,
+            data,
+        ))
 
-    return records
+    return [data for _ts, _path, data in sorted(records)]
 
 
 def load_records_for_model(
@@ -325,6 +356,36 @@ def load_records_for_model(
     for key, expected in identity_filters.items():
         if expected is not None:
             records = [r for r in records if str(r.get(key)) == str(expected)]
+
+    if last_n is not None:
+        records = records[-last_n:]
+
+    return records
+
+
+def load_records_for_identity(
+    local_dir: str,
+    identity_filters: dict[str, str],
+    *,
+    last_n: int | None = None,
+    successful_only: bool = True,
+    baseline_eligible_only: bool = False,
+) -> list[dict[str, Any]]:
+    """Return records matching comparable identity fields.
+
+    V2 performance comparison is intentionally independent from the legacy
+    ``model_id`` directory and ``gpu_type`` display string. The comparable
+    identity filters usually contain the full v2 comparison key, and may also
+    contain a subset when looking for same-cohort recipe mismatches.
+    """
+    records = load_records(
+        local_dir,
+        successful_only=successful_only,
+        baseline_eligible_only=baseline_eligible_only,
+    )
+
+    for key, expected in identity_filters.items():
+        records = [r for r in records if str(r.get(key)) == str(expected)]
 
     if last_n is not None:
         records = records[-last_n:]

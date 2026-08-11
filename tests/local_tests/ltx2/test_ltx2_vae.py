@@ -10,7 +10,6 @@ from safetensors import safe_open
 from safetensors.torch import load_file
 from torch.testing import assert_close
 
-
 repo_root = Path(__file__).resolve().parents[3]
 ltx_core_path = repo_root / "LTX-2" / "packages" / "ltx-core" / "src"
 if ltx_core_path.exists() and str(ltx_core_path) not in sys.path:
@@ -50,16 +49,10 @@ def _select_vae_weights(weights: dict[str, torch.Tensor], prefix: str) -> dict[s
 
 def _load_into_model(model: torch.nn.Module, weights: dict[str, torch.Tensor]) -> tuple[int, list[str]]:
     model_state = model.state_dict()
-    filtered = {
-        k: v
-        for k, v in weights.items()
-        if k in model_state and model_state[k].shape == v.shape
-    }
+    filtered = {k: v for k, v in weights.items() if k in model_state and model_state[k].shape == v.shape}
     missing = [k for k in model_state.keys() if k not in filtered]
-    print(
-        f"[LTX2 VAE TEST] Loading {len(filtered)} / {len(model_state)} tensors "
-        f"from {len(weights)} available"
-    )
+    print(f"[LTX2 VAE TEST] Loading {len(filtered)} / {len(model_state)} tensors "
+          f"from {len(weights)} available")
     if not filtered:
         return 0, missing
     model.load_state_dict(filtered, strict=False)
@@ -67,18 +60,12 @@ def _load_into_model(model: torch.nn.Module, weights: dict[str, torch.Tensor]) -
 
 
 def test_ltx2_vae_parity():
-    diffusers_root = Path(
-        os.getenv("LTX2_DIFFUSERS_PATH", "converted/ltx2_diffusers")
-    )
-    official_path = Path(
-        os.getenv(
-            "LTX2_OFFICIAL_PATH",
-            "official_ltx_weights/ltx-2-19b-distilled.safetensors",
-        )
-    )
-    fastvideo_path = Path(
-        os.getenv("LTX2_VAE_PATH", str(diffusers_root / "vae"))
-    )
+    diffusers_root = Path(os.getenv("LTX2_DIFFUSERS_PATH", "converted/ltx2_diffusers"))
+    official_path = Path(os.getenv(
+        "LTX2_OFFICIAL_PATH",
+        "official_ltx_weights/ltx-2-19b-distilled.safetensors",
+    ))
+    fastvideo_path = Path(os.getenv("LTX2_VAE_PATH", str(diffusers_root / "vae")))
     if not official_path.exists():
         pytest.skip(f"LTX-2 weights not found at {official_path}")
     if not fastvideo_path.exists():
@@ -103,12 +90,8 @@ def test_ltx2_vae_parity():
     if not fastvideo_weights_path.exists():
         pytest.skip(f"FastVideo VAE weights not found at {fastvideo_weights_path}")
     fastvideo_weights = _load_weights(fastvideo_weights_path)
-    fastvideo_encoder_weights = _select_vae_weights(
-        fastvideo_weights, "encoder."
-    )
-    fastvideo_decoder_weights = _select_vae_weights(
-        fastvideo_weights, "decoder."
-    )
+    fastvideo_encoder_weights = _select_vae_weights(fastvideo_weights, "encoder.")
+    fastvideo_decoder_weights = _select_vae_weights(fastvideo_weights, "decoder.")
     if not fastvideo_encoder_weights or not fastvideo_decoder_weights:
         pytest.skip("FastVideo VAE weights not found in diffusers file.")
 
@@ -120,28 +103,21 @@ def test_ltx2_vae_parity():
     ref_encoder = VideoEncoderConfigurator.from_config(config).to(device=device, dtype=precision)
     ref_decoder = VideoDecoderConfigurator.from_config(config).to(device=device, dtype=precision)
 
-    loaded_fastvideo_encoder, missing_fastvideo_encoder = _load_into_model(
-        fastvideo_encoder.model, fastvideo_encoder_weights
-    )
+    loaded_fastvideo_encoder, missing_fastvideo_encoder = _load_into_model(fastvideo_encoder.model,
+                                                                           fastvideo_encoder_weights)
     loaded_ref_encoder, missing_ref_encoder = _load_into_model(ref_encoder, encoder_weights)
-    loaded_fastvideo_decoder, missing_fastvideo_decoder = _load_into_model(
-        fastvideo_decoder.model, fastvideo_decoder_weights
-    )
+    loaded_fastvideo_decoder, missing_fastvideo_decoder = _load_into_model(fastvideo_decoder.model,
+                                                                           fastvideo_decoder_weights)
     loaded_ref_decoder, missing_ref_decoder = _load_into_model(ref_decoder, decoder_weights)
 
     if min(
-        loaded_fastvideo_encoder,
-        loaded_ref_encoder,
-        loaded_fastvideo_decoder,
-        loaded_ref_decoder,
+            loaded_fastvideo_encoder,
+            loaded_ref_encoder,
+            loaded_fastvideo_decoder,
+            loaded_ref_decoder,
     ) == 0:
         pytest.skip("Failed to load VAE weights into one or more models.")
-    if (
-        missing_fastvideo_encoder
-        or missing_ref_encoder
-        or missing_fastvideo_decoder
-        or missing_ref_decoder
-    ):
+    if (missing_fastvideo_encoder or missing_ref_encoder or missing_fastvideo_decoder or missing_ref_decoder):
         print(f"[LTX2 VAE TEST] Missing encoder keys: {len(missing_fastvideo_encoder)}")
         print(f"[LTX2 VAE TEST] Missing decoder keys: {len(missing_fastvideo_decoder)}")
         pytest.skip("Missing VAE keys; cannot ensure parity.")

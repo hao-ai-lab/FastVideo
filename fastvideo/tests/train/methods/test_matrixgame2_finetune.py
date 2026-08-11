@@ -39,9 +39,7 @@ from .grad_norm_regression import (
     resolve_blocks,
 )
 
-_FIXTURE = str(
-    Path(__file__).resolve().parent.parent / "fixtures"
-    / "matrixgame2_finetune_min.yaml")
+_FIXTURE = str(Path(__file__).resolve().parent.parent / "fixtures" / "matrixgame2_finetune_min.yaml")
 
 # Matrix-Game 2.0 CLIP image-embedding width.
 _MG2_IMAGE_DIM = 1280
@@ -69,32 +67,24 @@ def _build_synthetic_batch(
     # action-module params receive gradients.
     action_frames = 13
     return {
-        "vae_latent":
-        torch.randn(batch_size, 16, 4, 8, 8, device=device, dtype=dtype),
-        "clip_feature":
-        torch.randn(batch_size, 257, _MG2_IMAGE_DIM, device=device,
-                    dtype=dtype),
-        "first_frame_latent":
-        torch.randn(batch_size, 16, 4, 8, 8, device=device, dtype=dtype),
-        "keyboard_cond":
-        torch.ones(batch_size, action_frames, 6, device=device, dtype=dtype),
-        "mouse_cond":
-        torch.ones(batch_size, action_frames, 2, device=device, dtype=dtype),
+        "vae_latent": torch.randn(batch_size, 16, 4, 8, 8, device=device, dtype=dtype),
+        "clip_feature": torch.randn(batch_size, 257, _MG2_IMAGE_DIM, device=device, dtype=dtype),
+        "first_frame_latent": torch.randn(batch_size, 16, 4, 8, 8, device=device, dtype=dtype),
+        "keyboard_cond": torch.ones(batch_size, action_frames, 6, device=device, dtype=dtype),
+        "mouse_cond": torch.ones(batch_size, action_frames, 2, device=device, dtype=dtype),
     }
 
 
 @pytest.mark.usefixtures("distributed_setup")
-def test_matrixgame2_finetune_single_train_step(
-        monkeypatch: pytest.MonkeyPatch) -> None:
+def test_matrixgame2_finetune_single_train_step(monkeypatch: pytest.MonkeyPatch) -> None:
     if not torch.cuda.is_available():
         pytest.skip("requires CUDA")
 
     total_mem = torch.cuda.get_device_properties(0).total_memory
     if total_mem < _MIN_GPU_MEM_BYTES:
-        pytest.skip(
-            f"Matrix-Game 2.0 (~14B) backward needs ~56 GB; this GPU has "
-            f"{total_mem / 1024**3:.0f} GB. Loading is covered by "
-            "test_load_matrixgame2.py; the grad path runs on larger dev GPUs.")
+        pytest.skip(f"Matrix-Game 2.0 (~14B) backward needs ~56 GB; this GPU has "
+                    f"{total_mem / 1024**3:.0f} GB. Loading is covered by "
+                    "test_load_matrixgame2.py; the grad path runs on larger dev GPUs.")
 
     cfg = load_run_config(_FIXTURE)
 
@@ -127,14 +117,12 @@ def test_matrixgame2_finetune_single_train_step(
 
     loss = loss_map["total_loss"]
     assert torch.is_tensor(loss), "total_loss must be a torch.Tensor"
-    assert torch.isfinite(loss).item(), (
-        f"total_loss is not finite: {loss.item()}")
+    assert torch.isfinite(loss).item(), (f"total_loss is not finite: {loss.item()}")
 
     method.backward(loss_map, outputs, grad_accum_rounds=1)
 
     blocks = resolve_blocks(model.transformer)
-    assert blocks is not None and len(blocks) > 0, (
-        "transformer is expected to expose a non-empty block list")
+    assert blocks is not None and len(blocks) > 0, ("transformer is expected to expose a non-empty block list")
     layer0 = blocks[0]
 
     named = [(n, p) for n, p in layer0.named_parameters() if p.requires_grad]
@@ -146,19 +134,15 @@ def test_matrixgame2_finetune_single_train_step(
     # *active* path (self-attn, ffn, image cross-attn, action modules) is
     # intact rather than requiring every block-0 param to receive a grad.
     with_grad = [(n, p) for n, p in named if p.grad is not None]
-    assert len(with_grad) > 0, (
-        "no layer-0 params received a gradient; backward did not reach "
-        "the first transformer block")
+    assert len(with_grad) > 0, ("no layer-0 params received a gradient; backward did not reach "
+                                "the first transformer block")
 
     for n, p in with_grad:
-        assert torch.isfinite(p.grad).all().item(), (
-            f"layer 0 param '{n}' grad contains NaN/Inf")
+        assert torch.isfinite(p.grad).all().item(), (f"layer 0 param '{n}' grad contains NaN/Inf")
 
-    any_nonzero = any(
-        p.grad.detach().float().norm().item() > 0.0 for _, p in with_grad)
-    assert any_nonzero, (
-        "all layer-0 grads are exactly zero; backward did not "
-        "reach the first transformer block")
+    any_nonzero = any(p.grad.detach().float().norm().item() > 0.0 for _, p in with_grad)
+    assert any_nonzero, ("all layer-0 grads are exactly zero; backward did not "
+                         "reach the first transformer block")
 
     # 5a-ii: device-keyed grad-norm regression on top of the same harness.
     # Skips when the current GPU has no seeded reference.

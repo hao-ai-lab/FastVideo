@@ -17,7 +17,7 @@ from fastvideo.performance.hf_store import is_baseline_eligible_record, safe_flo
 from fastvideo.performance.metric_policy import regression_delta, resolve_metric_policies
 
 Record = dict[str, Any]
-CohortKey = tuple[str, str, str, str, str, str, str, str]
+CohortKey = tuple[str, ...]
 COMPARISON_COHORT_KEYS = (
     "workload_id",
     "variant_id",
@@ -102,16 +102,18 @@ def record_comparison_metadata(record: Record) -> Record:
     return {key: _cohort_metadata_value(record.get(key)) for key in COMPARISON_COHORT_KEYS}
 
 
+def _record_has_complete_v2_identity(record: Record) -> bool:
+    return all(_cohort_metadata_value(record.get(key)) != "" for key in COMPARISON_COHORT_KEYS)
+
+
 def comparison_cohort_key(record: Record) -> CohortKey:
+    if _record_has_complete_v2_identity(record):
+        return ("v2", *(_cohort_key_value(record.get(key)) for key in COMPARISON_COHORT_KEYS))
     return (
+        "legacy",
         str(record.get("model_id") or "unknown"),
         str(record.get("gpu_type") or "unknown"),
-        _cohort_key_value(record.get("workload_id")),
-        _cohort_key_value(record.get("variant_id")),
-        _cohort_key_value(record.get("benchmark_version")),
-        _cohort_key_value(record.get("recipe_fingerprint")),
-        _cohort_key_value(record.get("hardware_profile_id")),
-        _cohort_key_value(record.get("software_profile_id")),
+        *(_cohort_key_value(record.get(key)) for key in COMPARISON_COHORT_KEYS),
     )
 
 
@@ -122,18 +124,16 @@ def group_by_comparison_cohort(records: list[Record]) -> dict[CohortKey, list[Re
     return {key: sorted(value, key=record_sort_key) for key, value in groups.items()}
 
 
-def comparison_sort_key(record: Record) -> CohortKey:
-    return comparison_cohort_key(record)
+def comparison_sort_key(record: Record) -> tuple[str, ...]:
+    return (
+        str(record.get("model_id") or "unknown"),
+        str(record.get("gpu_type") or "unknown"),
+        *(_cohort_key_value(record.get(key)) for key in COMPARISON_COHORT_KEYS),
+    )
 
 
 def latest_row_sort_key(row: Record) -> tuple[Any, ...]:
     return (row["status"] != "fail", *comparison_sort_key(row))
-
-
-def group_identity(key: CohortKey) -> tuple[str, str]:
-    model_id = key[0]
-    gpu_type = key[1]
-    return model_id, gpu_type
 
 
 def baseline_value(records: list[Record], metric_key: str) -> float | None:
@@ -149,8 +149,7 @@ def build_latest_summary(records: list[Record],
                          baseline_window: int = 5,
                          run_source: str | None = None) -> list[Record]:
     rows: list[Record] = []
-    for key, group in group_by_comparison_cohort(records).items():
-        model_id, gpu_type = group_identity(key)
+    for group in group_by_comparison_cohort(records).values():
         latest_candidates = group
         if run_source:
             latest_candidates = [record for record in group if record_run_source(record) == run_source]
@@ -158,6 +157,8 @@ def build_latest_summary(records: list[Record],
             continue
 
         latest = latest_candidates[-1]
+        model_id = str(latest.get("model_id") or "unknown")
+        gpu_type = str(latest.get("gpu_type") or "unknown")
         latest_index = next(index for index, record in enumerate(group) if record is latest)
         baseline_pool = [
             record for record in group[:latest_index]
@@ -224,8 +225,10 @@ def build_latest_summary(records: list[Record],
 
 def build_trends(records: list[Record]) -> list[Record]:
     trends: list[Record] = []
-    for key, group in group_by_comparison_cohort(records).items():
-        model_id, gpu_type = group_identity(key)
+    for group in group_by_comparison_cohort(records).values():
+        latest = group[-1]
+        model_id = str(latest.get("model_id") or "unknown")
+        gpu_type = str(latest.get("gpu_type") or "unknown")
         points = []
         for record in group:
             metric_policies = resolve_metric_policies(record.get("regression_thresholds"))
@@ -244,7 +247,7 @@ def build_trends(records: list[Record]) -> list[Record]:
         trends.append({
             "model_id": model_id,
             "gpu_type": gpu_type,
-            **record_comparison_metadata(group[-1]),
+            **record_comparison_metadata(latest),
             "points": points,
         })
     return sorted(trends, key=comparison_sort_key)

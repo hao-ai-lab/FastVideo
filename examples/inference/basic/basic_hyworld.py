@@ -6,6 +6,8 @@ DEFAULT_PROMPT = 'A paved pathway leads towards a stone arch bridge spanning a c
 DEFAULT_IMAGE = 'https://raw.githubusercontent.com/Tencent-Hunyuan/HY-WorldPlay/main/assets/img/test.png'
 
 OUTPUT_PATH = "video_samples_hyworld"
+
+
 def main():
     import argparse
 

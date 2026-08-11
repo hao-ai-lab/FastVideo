@@ -52,12 +52,10 @@ def _stable_audio_tools_available() -> bool:
 )
 @pytest.mark.skipif(
     not _stable_audio_tools_available(),
-    reason=(
-        "Official `stable-audio-tools` not importable. Install with:\n"
-        "  git clone --depth 1 https://github.com/Stability-AI/stable-audio-tools.git\n"
-        "  uv pip install --no-deps -e ./stable-audio-tools\n"
-        "  uv pip install alias_free_torch"
-    ),
+    reason=("Official `stable-audio-tools` not importable. Install with:\n"
+            "  git clone --depth 1 https://github.com/Stability-AI/stable-audio-tools.git\n"
+            "  uv pip install --no-deps -e ./stable-audio-tools\n"
+            "  uv pip install alias_free_torch"),
 )
 def test_oobleck_official_parity():
     from stable_audio_tools.models.autoencoders import OobleckDecoder, OobleckEncoder
@@ -75,14 +73,23 @@ def test_oobleck_official_parity():
     #   audio_channels=2 (stereo)
     #   snake activations on, no tanh on decoder
     up_enc = OobleckEncoder(
-        in_channels=2, channels=128, latent_dim=128,
-        c_mults=[1, 2, 4, 8, 16], strides=[2, 4, 4, 8, 8],
-        use_snake=True, antialias_activation=False,
+        in_channels=2,
+        channels=128,
+        latent_dim=128,
+        c_mults=[1, 2, 4, 8, 16],
+        strides=[2, 4, 4, 8, 8],
+        use_snake=True,
+        antialias_activation=False,
     ).to(device).eval()
     up_dec = OobleckDecoder(
-        out_channels=2, channels=128, latent_dim=64,
-        c_mults=[1, 2, 4, 8, 16], strides=[2, 4, 4, 8, 8],
-        use_snake=True, antialias_activation=False, final_tanh=False,
+        out_channels=2,
+        channels=128,
+        latent_dim=64,
+        c_mults=[1, 2, 4, 8, 16],
+        strides=[2, 4, 4, 8, 8],
+        use_snake=True,
+        antialias_activation=False,
+        final_tanh=False,
     ).to(device).eval()
 
     # FastVideo OobleckVAE — extract its encoder/decoder.
@@ -90,8 +97,10 @@ def test_oobleck_official_parity():
         encoder_hidden_size=128,
         downsampling_ratios=[2, 4, 4, 8, 8],
         channel_multiples=[1, 2, 4, 8, 16],
-        decoder_channels=128, decoder_input_channels=64,
-        audio_channels=2, sampling_rate=44100,
+        decoder_channels=128,
+        decoder_input_channels=64,
+        audio_channels=2,
+        sampling_rate=44100,
     ).to(device).eval()
 
     # Transfer upstream weights into FastVideo via positional pairing.
@@ -101,8 +110,7 @@ def test_oobleck_official_parity():
     # Forward identical input.
     sr = fv_vae.sampling_rate
     n = (sr // fv_vae.hop_length) * fv_vae.hop_length  # full chunks only
-    waveform = torch.randn((1, fv_vae.audio_channels, n),
-                           dtype=torch.float32, device=device)
+    waveform = torch.randn((1, fv_vae.audio_channels, n), dtype=torch.float32, device=device)
 
     with torch.inference_mode():
         # Encoder parity: upstream returns raw conv output (mean+scale
@@ -112,12 +120,8 @@ def test_oobleck_official_parity():
         up_enc_out = up_enc(waveform).detach().float().cpu()
         fv_enc_out = fv_vae.encoder(waveform).detach().float().cpu()
 
-    print(
-        f"encoder: up shape={tuple(up_enc_out.shape)} abs_mean={up_enc_out.abs().mean().item():.6f}"
-    )
-    print(
-        f"encoder: fv shape={tuple(fv_enc_out.shape)} abs_mean={fv_enc_out.abs().mean().item():.6f}"
-    )
+    print(f"encoder: up shape={tuple(up_enc_out.shape)} abs_mean={up_enc_out.abs().mean().item():.6f}")
+    print(f"encoder: fv shape={tuple(fv_enc_out.shape)} abs_mean={fv_enc_out.abs().mean().item():.6f}")
     enc_diff = (up_enc_out - fv_enc_out).abs()
     print(f"encoder diff max={enc_diff.max().item():.6e} mean={enc_diff.mean().item():.6e}")
 
@@ -126,18 +130,13 @@ def test_oobleck_official_parity():
 
     # Decoder parity on a random latent of the right shape.
     torch.manual_seed(1)
-    latent = torch.randn((1, fv_vae.decoder_input_channels, 4),
-                         dtype=torch.float32, device=device)
+    latent = torch.randn((1, fv_vae.decoder_input_channels, 4), dtype=torch.float32, device=device)
     with torch.inference_mode():
         up_dec_out = up_dec(latent).detach().float().cpu()
         fv_dec_out = fv_vae.decoder(latent).detach().float().cpu()
 
-    print(
-        f"decoder: up shape={tuple(up_dec_out.shape)} abs_mean={up_dec_out.abs().mean().item():.6f}"
-    )
-    print(
-        f"decoder: fv shape={tuple(fv_dec_out.shape)} abs_mean={fv_dec_out.abs().mean().item():.6f}"
-    )
+    print(f"decoder: up shape={tuple(up_dec_out.shape)} abs_mean={up_dec_out.abs().mean().item():.6f}")
+    print(f"decoder: fv shape={tuple(fv_dec_out.shape)} abs_mean={fv_dec_out.abs().mean().item():.6f}")
     dec_diff = (up_dec_out - fv_dec_out).abs()
     print(f"decoder diff max={dec_diff.max().item():.6e} mean={dec_diff.mean().item():.6e}")
 
@@ -159,8 +158,7 @@ def _transfer_state_positional(src: torch.nn.Module, dst: torch.nn.Module, label
     src_items = list(src_state.items())
     dst_items = list(dst_state.items())
     assert len(src_items) == len(dst_items), (
-        f"{label}: param count mismatch — src={len(src_items)} dst={len(dst_items)}"
-    )
+        f"{label}: param count mismatch — src={len(src_items)} dst={len(dst_items)}")
     new_state: dict[str, torch.Tensor] = {}
     for (sk, sv), (dk, dv) in zip(src_items, dst_items):
         if sv.shape == dv.shape:
@@ -168,12 +166,8 @@ def _transfer_state_positional(src: torch.nn.Module, dst: torch.nn.Module, label
         elif sv.numel() == dv.numel():
             new_state[dk] = sv.reshape(dv.shape).clone()
         else:
-            raise RuntimeError(
-                f"{label}: numel mismatch at src={sk}{tuple(sv.shape)} "
-                f"vs dst={dk}{tuple(dv.shape)}"
-            )
+            raise RuntimeError(f"{label}: numel mismatch at src={sk}{tuple(sv.shape)} "
+                               f"vs dst={dk}{tuple(dv.shape)}")
     missing, unexpected = dst.load_state_dict(new_state, strict=True)
     if missing or unexpected:
-        raise RuntimeError(
-            f"{label}: load_state_dict reported missing={missing[:3]} unexpected={unexpected[:3]}"
-        )
+        raise RuntimeError(f"{label}: load_state_dict reported missing={missing[:3]} unexpected={unexpected[:3]}")

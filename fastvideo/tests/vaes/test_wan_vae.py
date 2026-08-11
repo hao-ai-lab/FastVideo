@@ -29,9 +29,8 @@ def test_wan_vae():
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     precision = torch.float32
     precision_str = "fp32"
-    args = FastVideoArgs(
-        model_path=VAE_PATH, pipeline_config=PipelineConfig(vae_config=WanVAEConfig(), vae_precision=precision_str)
-    )
+    args = FastVideoArgs(model_path=VAE_PATH,
+                         pipeline_config=PipelineConfig(vae_config=WanVAEConfig(), vae_precision=precision_str))
     args.device = device
     args.vae_cpu_offload = False
 
@@ -63,21 +62,16 @@ def test_wan_vae():
         latent2 = model2.encode(input_tensor)
         # Check if latents have the same shape
         assert latent1.mean.shape == latent2.mean.shape, (
-            f"Latent shapes don't match: {latent1.mean.shape} vs {latent2.mean.shape}"
-        )
+            f"Latent shapes don't match: {latent1.mean.shape} vs {latent2.mean.shape}")
         # Check if latents are similar
         assert_close(latent1.mean, latent2.mean, atol=1e-4, rtol=1e-4)
         # Test decoding
         logger.info("Testing decoding...")
         latent1_tensor = latent1.mode()
-        mean1 = (
-            torch.tensor(model1.config.latents_mean)
-            .view(1, model1.config.z_dim, 1, 1, 1)
-            .to(input_tensor.device, input_tensor.dtype)
-        )
+        mean1 = (torch.tensor(model1.config.latents_mean).view(1, model1.config.z_dim, 1, 1,
+                                                               1).to(input_tensor.device, input_tensor.dtype))
         std1 = (1.0 / torch.tensor(model1.config.latents_std).view(1, model1.config.z_dim, 1, 1, 1)).to(
-            input_tensor.device, input_tensor.dtype
-        )
+            input_tensor.device, input_tensor.dtype)
         latent1_tensor = latent1_tensor / std1 + mean1
         output1 = model1.decode(latent1_tensor).sample
 

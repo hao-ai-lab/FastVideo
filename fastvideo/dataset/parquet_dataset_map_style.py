@@ -16,8 +16,7 @@ from torchdata.stateful_dataloader import StatefulDataLoader
 from fastvideo.platforms import current_platform
 
 from fastvideo.dataset.utils import collate_rows_from_parquet_schema
-from fastvideo.distributed import (get_sp_world_size, get_world_group,
-                                   get_world_rank, get_world_size)
+from fastvideo.distributed import (get_sp_world_size, get_world_group, get_world_rank, get_world_size)
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
@@ -64,26 +63,20 @@ class DP_SP_BatchSampler(Sampler[list[int]]):
             # 3. Prevents uneven batch sizes across SP groups at end of epoch
             num_batches = self.dataset_size // self.batch_size
             num_global_batches = num_batches // self.num_sp_groups
-            global_indices = global_indices[:num_global_batches *
-                                            self.num_sp_groups *
-                                            self.batch_size]
+            global_indices = global_indices[:num_global_batches * self.num_sp_groups * self.batch_size]
         else:
             if self.dataset_size % (self.num_sp_groups * self.batch_size) != 0:
                 # add more indices to make it divisible by (batch_size * num_sp_groups)
-                padding_size = self.num_sp_groups * self.batch_size - (
-                    self.dataset_size % (self.num_sp_groups * self.batch_size))
-                logger.info("Padding the dataset from %d to %d",
-                            self.dataset_size, self.dataset_size + padding_size)
-                global_indices = torch.cat(
-                    [global_indices, global_indices[:padding_size]])
+                padding_size = self.num_sp_groups * self.batch_size - (self.dataset_size %
+                                                                       (self.num_sp_groups * self.batch_size))
+                logger.info("Padding the dataset from %d to %d", self.dataset_size, self.dataset_size + padding_size)
+                global_indices = torch.cat([global_indices, global_indices[:padding_size]])
 
         # shard the indices to each sp group
         ith_sp_group = self.global_rank // self.sp_world_size
-        sp_group_local_indices = global_indices[ith_sp_group::self.
-                                                num_sp_groups]
+        sp_group_local_indices = global_indices[ith_sp_group::self.num_sp_groups]
         self.sp_group_local_indices = sp_group_local_indices
-        logger.info("Dataset size for each sp group: %d",
-                    len(sp_group_local_indices))
+        logger.info("Dataset size for each sp group: %d", len(sp_group_local_indices))
 
     def __iter__(self):
         indices = self.sp_group_local_indices
@@ -98,11 +91,7 @@ class DP_SP_BatchSampler(Sampler[list[int]]):
 def _parse_data_path_specs(path: str | Sequence[str] | dict[str, int]) -> list[tuple[str, int]]:
     """Parse one or more dataset roots with old-framework repeat counts."""
     if isinstance(path, dict):
-        return [
-            (str(root), int(repeat))
-            for root, repeat in path.items()
-            if int(repeat) > 0
-        ]
+        return [(str(root), int(repeat)) for root, repeat in path.items() if int(repeat) > 0]
     if isinstance(path, Sequence) and not isinstance(path, str):
         return [(str(root), 1) for root in path]
 
@@ -132,11 +121,9 @@ def get_parquet_files_and_length(path: str | Sequence[str] | dict[str, int]):
                 all_file_names.extend(file_names)
                 all_lengths.extend(lengths)
         if not all_file_names:
-            raise FileNotFoundError(
-                "No parquet files found under dataset paths: "
-                f"{path}. "
-                "Please verify these paths point to preprocessed parquet data."
-            )
+            raise FileNotFoundError("No parquet files found under dataset paths: "
+                                    f"{path}. "
+                                    "Please verify these paths point to preprocessed parquet data.")
         file_lengths = sorted(
             zip(all_file_names, all_lengths, strict=True),
             key=lambda x: x[0],
@@ -162,19 +149,13 @@ def get_parquet_files_and_length(path: str | Sequence[str] | dict[str, int]):
                 with open(cache_file, "rb") as f:
                     file_names_sorted, lengths_sorted = pickle.load(f)
                 file_names_sorted = tuple(
-                    os.path.realpath(
-                        os.path.join(os.getcwd(), p)
-                        if not os.path.isabs(p) else p)
+                    os.path.realpath(os.path.join(os.getcwd(), p) if not os.path.isabs(p) else p)
                     for p in file_names_sorted)
                 files_outside_dataset_root = [
                     file_path for file_path in file_names_sorted
-                    if os.path.commonpath([dataset_root, file_path
-                                           ]) != dataset_root
+                    if os.path.commonpath([dataset_root, file_path]) != dataset_root
                 ]
-                missing_files = [
-                    file_path for file_path in file_names_sorted
-                    if not os.path.exists(file_path)
-                ]
+                missing_files = [file_path for file_path in file_names_sorted if not os.path.exists(file_path)]
                 if files_outside_dataset_root:
                     logger.warning(
                         "Cached parquet file list points outside dataset root "
@@ -210,20 +191,15 @@ def get_parquet_files_and_length(path: str | Sequence[str] | dict[str, int]):
                         file_path = os.path.realpath(os.path.join(root, file))
                         file_names.append(file_path)
             if len(file_names) == 0:
-                raise FileNotFoundError(
-                    "No parquet files found under dataset path: "
-                    f"{path}. "
-                    "Please verify this path points to preprocessed parquet "
-                    "data.")
-            for file_path in tqdm.tqdm(
-                    file_names, desc="Reading parquet files to get lengths"):
+                raise FileNotFoundError("No parquet files found under dataset path: "
+                                        f"{path}. "
+                                        "Please verify this path points to preprocessed parquet "
+                                        "data.")
+            for file_path in tqdm.tqdm(file_names, desc="Reading parquet files to get lengths"):
                 num_rows = pq.ParquetFile(file_path).metadata.num_rows
                 lengths.append(num_rows)
             # sort according to file name to ensure all rank has the same order
-            file_names_sorted, lengths_sorted = zip(*sorted(zip(file_names,
-                                                                lengths,
-                                                                strict=True),
-                                                            key=lambda x: x[0]),
+            file_names_sorted, lengths_sorted = zip(*sorted(zip(file_names, lengths, strict=True), key=lambda x: x[0]),
                                                     strict=True)
             # Save the cache
             os.makedirs(cache_dir, exist_ok=True)
@@ -240,20 +216,17 @@ def get_parquet_files_and_length(path: str | Sequence[str] | dict[str, int]):
     with open(cache_file, "rb") as f:
         file_names_sorted, lengths_sorted = pickle.load(f)
     if len(file_names_sorted) == 0:
-        raise RuntimeError(
-            "Cached parquet metadata is empty after synchronization at "
-            f"{cache_file}. "
-            "Please verify the dataset path and regenerate cache.")
+        raise RuntimeError("Cached parquet metadata is empty after synchronization at "
+                           f"{cache_file}. "
+                           "Please verify the dataset path and regenerate cache.")
     if len(file_names_sorted) != len(lengths_sorted):
-        raise RuntimeError(
-            "Cached parquet metadata is corrupted at "
-            f"{cache_file}: file count and length count do not match.")
+        raise RuntimeError("Cached parquet metadata is corrupted at "
+                           f"{cache_file}: file count and length count do not match.")
 
     return file_names_sorted, lengths_sorted
 
 
-def read_row_from_parquet_file(parquet_files: list[str], global_row_idx: int,
-                               lengths: list[int]) -> dict[str, Any]:
+def read_row_from_parquet_file(parquet_files: list[str], global_row_idx: int, lengths: list[int]) -> dict[str, Any]:
     '''
     Read a row from a parquet file.
     Args:
@@ -274,8 +247,7 @@ def read_row_from_parquet_file(parquet_files: list[str], global_row_idx: int,
         cumulative += lengths[file_index]
     else:
         # If we reach here, global_row_idx is out of bounds
-        raise IndexError(
-            f"global_row_idx {global_row_idx} is out of bounds for dataset")
+        raise IndexError(f"global_row_idx {global_row_idx} is out of bounds for dataset")
 
     parquet_file = pq.ParquetFile(parquet_files[file_index])
 
@@ -294,9 +266,7 @@ def read_row_from_parquet_file(parquet_files: list[str], global_row_idx: int,
         cumulative += num_rows
     else:
         # If we reach here, local_row_idx is out of bounds for this parquet file
-        raise IndexError(
-            f"local_row_idx {local_row_idx} is out of bounds for parquet file {parquet_files[file_index]}"
-        )
+        raise IndexError(f"local_row_idx {local_row_idx} is out of bounds for parquet file {parquet_files[file_index]}")
 
     row_group = parquet_file.read_row_group(row_group_index).to_pydict()
     row_dict = {k: v[local_index] for k, v in row_group.items()}
@@ -333,8 +303,7 @@ class LatentsParquetMapStyleDataset(Dataset):
         self.seed = seed
         # Create a seeded random generator for deterministic CFG
         self.rng = random.Random(seed)
-        logger.info("Initializing LatentsParquetMapStyleDataset with path: %s",
-                    path)
+        logger.info("Initializing LatentsParquetMapStyleDataset with path: %s", path)
         self.parquet_files, self.lengths = get_parquet_files_and_length(path)
         self.batch = batch_size
         self.text_padding_length = text_padding_length
@@ -348,11 +317,9 @@ class LatentsParquetMapStyleDataset(Dataset):
             drop_first_row=drop_first_row,
             seed=seed,
         )
-        logger.info("Dataset initialized with %d parquet files and %d rows",
-                    len(self.parquet_files), sum(self.lengths))
+        logger.info("Dataset initialized with %d parquet files and %d rows", len(self.parquet_files), sum(self.lengths))
 
-    def get_validation_negative_prompt(
-            self) -> tuple[torch.Tensor, torch.Tensor, str]:
+    def get_validation_negative_prompt(self) -> tuple[torch.Tensor, torch.Tensor, str]:
         """
         Get the negative prompt for validation. 
         This method ensures the negative prompt is loaded and cached properly.
@@ -363,8 +330,7 @@ class LatentsParquetMapStyleDataset(Dataset):
         file_path = self.parquet_files[0]
         row_idx = 0
         # Read the negative prompt data
-        row_dict = read_row_from_parquet_file([file_path], row_idx,
-                                              [self.lengths[0]])
+        row_dict = read_row_from_parquet_file([file_path], row_idx, [self.lengths[0]])
 
         batch = collate_rows_from_parquet_schema([row_dict],
                                                  self.parquet_schema,
@@ -377,8 +343,7 @@ class LatentsParquetMapStyleDataset(Dataset):
         if len(negative_prompt_embedding.shape) == 2:
             negative_prompt_embedding = negative_prompt_embedding.unsqueeze(0)
         if len(negative_prompt_attention_mask.shape) == 1:
-            negative_prompt_attention_mask = negative_prompt_attention_mask.unsqueeze(
-                0).unsqueeze(0)
+            negative_prompt_attention_mask = negative_prompt_attention_mask.unsqueeze(0).unsqueeze(0)
 
         return negative_prompt_embedding, negative_prompt_attention_mask, negative_prompt
 
@@ -387,10 +352,7 @@ class LatentsParquetMapStyleDataset(Dataset):
         """
         Batch fetch using read_row_from_parquet_file for each index.
         """
-        rows = [
-            read_row_from_parquet_file(self.parquet_files, idx, self.lengths)
-            for idx in indices
-        ]
+        rows = [read_row_from_parquet_file(self.parquet_files, idx, self.lengths) for idx in indices]
 
         # Inject sample indices for deterministic CFG dropout
         # that is reproducible across checkpoint resume.
@@ -407,6 +369,7 @@ class LatentsParquetMapStyleDataset(Dataset):
     def __len__(self):
         return sum(self.lengths)
 
+
 # ────────────────────────────────────────────────────────────────────────────
 # 3.  Loader helper – everything else stays just like your original trainer
 # ────────────────────────────────────────────────────────────────────────────
@@ -414,25 +377,23 @@ def passthrough(batch):
     return batch
 
 
-def build_parquet_map_style_dataloader(
-        path,
-        batch_size,
-        num_data_workers,
-        parquet_schema,
-        cfg_rate=0.0,
-        drop_last=True,
-        drop_first_row=False,
-        text_padding_length=512,
-        seed=42) -> tuple[LatentsParquetMapStyleDataset, StatefulDataLoader]:
-    dataset = LatentsParquetMapStyleDataset(
-        path,
-        batch_size,
-        cfg_rate=cfg_rate,
-        drop_last=drop_last,
-        drop_first_row=drop_first_row,
-        text_padding_length=text_padding_length,
-        parquet_schema=parquet_schema,
-        seed=seed)
+def build_parquet_map_style_dataloader(path,
+                                       batch_size,
+                                       num_data_workers,
+                                       parquet_schema,
+                                       cfg_rate=0.0,
+                                       drop_last=True,
+                                       drop_first_row=False,
+                                       text_padding_length=512,
+                                       seed=42) -> tuple[LatentsParquetMapStyleDataset, StatefulDataLoader]:
+    dataset = LatentsParquetMapStyleDataset(path,
+                                            batch_size,
+                                            cfg_rate=cfg_rate,
+                                            drop_last=drop_last,
+                                            drop_first_row=drop_first_row,
+                                            text_padding_length=text_padding_length,
+                                            parquet_schema=parquet_schema,
+                                            seed=seed)
 
     loader = StatefulDataLoader(
         dataset,

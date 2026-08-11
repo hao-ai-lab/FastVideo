@@ -19,7 +19,7 @@ class GlmImageDecodingStage(DecodingStage):
         vae_dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.vae_precision]
         vae_autocast = (vae_dtype != torch.float32 and not fastvideo_args.disable_autocast)
 
-        latents = self._denormalize_latents(latents)
+        latents = self._denormalize_latents(latents, fastvideo_args)
         if latents.dim() == 5:
             latents = latents.squeeze(2)
 

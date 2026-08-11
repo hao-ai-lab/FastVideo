@@ -53,19 +53,12 @@ def _flux_t5_post(outputs: BaseEncoderOutput) -> torch.Tensor:
 class _FluxDevLoaderPipelineConfig(PipelineConfig):
     """Two text encoders (CLIP + T5) matching FLUX.1-dev model_index.json."""
 
-    vae_config: AutoencoderKLVAEConfig = field(
-        default_factory=AutoencoderKLVAEConfig
-    )
-    text_encoder_configs: tuple[CLIPTextConfig, T5LargeConfig] = field(
-        default_factory=lambda: (CLIPTextConfig(), T5LargeConfig())
-    )
+    vae_config: AutoencoderKLVAEConfig = field(default_factory=AutoencoderKLVAEConfig)
+    text_encoder_configs: tuple[CLIPTextConfig,
+                                T5LargeConfig] = field(default_factory=lambda: (CLIPTextConfig(), T5LargeConfig()))
     text_encoder_precisions: tuple[str, ...] = ("fp32", "bf16")
-    preprocess_text_funcs: tuple = field(
-        default_factory=lambda: (preprocess_text, preprocess_text)
-    )
-    postprocess_text_funcs: tuple = field(
-        default_factory=lambda: (_flux_clip_post, _flux_t5_post)
-    )
+    preprocess_text_funcs: tuple = field(default_factory=lambda: (preprocess_text, preprocess_text))
+    postprocess_text_funcs: tuple = field(default_factory=lambda: (_flux_clip_post, _flux_t5_post))
 
 
 def test_flux_dev_model_index_components_load() -> None:
@@ -73,10 +66,8 @@ def test_flux_dev_model_index_components_load() -> None:
     if not torch.cuda.is_available():
         pytest.skip("FLUX component loader test requires CUDA")
     if not Path(_FLUX_DEV_ROOT, "model_index.json").is_file():
-        pytest.skip(
-            "official_weights/FLUX.1-dev missing "
-            "(set FLUX_DEV_ROOT or download black-forest-labs/FLUX.1-dev)"
-        )
+        pytest.skip("official_weights/FLUX.1-dev missing "
+                    "(set FLUX_DEV_ROOT or download black-forest-labs/FLUX.1-dev)")
 
     from fastvideo.distributed import (
         cleanup_dist_env_and_memory,
@@ -99,21 +90,13 @@ def test_flux_dev_model_index_components_load() -> None:
             pin_cpu_memory=False,
         )
 
-        tok_clip = TokenizerLoader().load(
-            os.path.join(_FLUX_DEV_ROOT, "tokenizer"), args
-        )
-        tok_t5 = TokenizerLoader().load(
-            os.path.join(_FLUX_DEV_ROOT, "tokenizer_2"), args
-        )
+        tok_clip = TokenizerLoader().load(os.path.join(_FLUX_DEV_ROOT, "tokenizer"), args)
+        tok_t5 = TokenizerLoader().load(os.path.join(_FLUX_DEV_ROOT, "tokenizer_2"), args)
         assert "CLIP" in tok_clip.__class__.__name__
         assert "T5" in tok_t5.__class__.__name__
 
-        te_clip = TextEncoderLoader().load(
-            os.path.join(_FLUX_DEV_ROOT, "text_encoder"), args
-        )
-        te_t5 = TextEncoderLoader().load(
-            os.path.join(_FLUX_DEV_ROOT, "text_encoder_2"), args
-        )
+        te_clip = TextEncoderLoader().load(os.path.join(_FLUX_DEV_ROOT, "text_encoder"), args)
+        te_t5 = TextEncoderLoader().load(os.path.join(_FLUX_DEV_ROOT, "text_encoder_2"), args)
         # Distributed init may wrap encoders in an FSDP shell.
         assert te_clip.__class__.__name__.endswith("CLIPTextModel")
         assert te_t5.__class__.__name__.endswith("T5EncoderModel")
@@ -121,9 +104,7 @@ def test_flux_dev_model_index_components_load() -> None:
         vae = VAELoader().load(os.path.join(_FLUX_DEV_ROOT, "vae"), args)
         assert vae.__class__.__name__ == "AutoencoderKL"
 
-        scheduler = SchedulerLoader().load(
-            os.path.join(_FLUX_DEV_ROOT, "scheduler"), args
-        )
+        scheduler = SchedulerLoader().load(os.path.join(_FLUX_DEV_ROOT, "scheduler"), args)
         assert scheduler.__class__.__name__ == "FlowMatchEulerDiscreteScheduler"
         scheduler.set_timesteps(4, mu=0.7)
         assert len(scheduler.timesteps) == 4

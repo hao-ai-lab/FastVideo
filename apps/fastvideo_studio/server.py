@@ -32,8 +32,10 @@ from fastapi.responses import FileResponse
 
 from fastvideo.registry import (get_registered_model_paths, get_registered_models_with_workloads)
 from fastvideo_studio.database import Database, _get_db_path
+from fastvideo_studio.gpu import get_gpu_snapshot
 from fastvideo_studio.job_runner import JobRunner, JobStatus
-from fastvideo_studio.models import (CreateDatasetRequest, CreateJobRequest, SettingsUpdate, UpdateCaptionRequest)
+from fastvideo_studio.models import (CreateDatasetRequest, CreateJobRequest, SettingsUpdate, UpdateCaptionRequest,
+                                     model_label)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -43,15 +45,9 @@ logger = logging.getLogger("fastvideo.studio.api")
 
 DEFAULT_OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "..", "outputs", "ui_jobs")
 
-
-def _get_model_label(model_path: str) -> str:
-    """Derive a readable label from a HF model path."""
-    return model_path.split("/")[-1].replace("-", " ").replace("_", " ")
-
-
 _available_models: list[dict[str, str]] = [{
     "id": path,
-    "label": _get_model_label(path)
+    "label": model_label(path)
 } for path in get_registered_model_paths()]
 
 job_runner: JobRunner
@@ -98,6 +94,12 @@ def update_settings(settings: SettingsUpdate) -> dict[str, Any]:
         return database.get_settings()
     database.save_settings(updates)
     return database.get_settings()
+
+
+@app.get("/api/gpus")
+def list_gpus() -> dict[str, Any]:
+    """Return an NVML snapshot of every GPU on the API server host."""
+    return get_gpu_snapshot()
 
 
 @app.get("/api/models")
@@ -148,12 +150,29 @@ async def upload_image(file: Annotated[UploadFile, File()], ) -> dict[str, str]:
     return {"path": os.path.abspath(dest_path)}
 
 
-ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".webm", ".avi", ".mov"}
+ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".webm", ".avi", ".mov", ".mkv"}
 
 
 def _filter_video_files(files: list[UploadFile]) -> list[UploadFile]:
     """Filter uploaded files to only include videos."""
     return [f for f in files if Path(f.filename or "").suffix.lower() in ALLOWED_VIDEO_EXTENSIONS]
+
+
+def _path_is_within(child: str, parent: str) -> bool:
+    """True if ``child`` resolves to a location inside ``parent``."""
+    try:
+        parent_real = os.path.realpath(parent)
+        return os.path.commonpath([os.path.realpath(child), parent_real]) == parent_real
+    except (ValueError, OSError):
+        return False
+
+
+def _staging_base_path() -> str:
+    """Root under which raw uploads are staged (settings override or default)."""
+    settings = database.get_settings() if database is not None else {}
+    raw_path = (settings.get("datasetUploadPath") or settings.get("dataset_upload_path") or "")
+    base_path = (raw_path.strip() if raw_path and isinstance(raw_path, str) else "")
+    return datasets_upload_dir if not base_path else os.path.abspath(base_path)
 
 
 @app.post("/api/upload-raw-dataset")
@@ -167,10 +186,7 @@ async def upload_raw_dataset(files: Annotated[list[UploadFile], File()], ) -> di
             status_code=503,
             detail="Database not initialized",
         )
-    settings = database.get_settings()
-    raw_path = (settings.get("datasetUploadPath") or settings.get("dataset_upload_path") or "")
-    base_path = (raw_path.strip() if raw_path and isinstance(raw_path, str) else "")
-    base_path = (datasets_upload_dir if not base_path else os.path.abspath(base_path))
+    base_path = _staging_base_path()
     if not base_path:
         raise HTTPException(
             status_code=503,
@@ -250,6 +266,19 @@ def create_job(req: CreateJobRequest) -> dict[str, Any]:
                         f"Valid options: {sorted(valid_ids)}"),
             )
 
+    # Training jobs reference a dataset by id; resolve it to the on-disk media
+    # directory the trainer reads (the UI has no free-text path field). Falls
+    # through unchanged for inference and for anything already a real path.
+    def _resolve_dataset_path(value: str) -> str:
+        media_dir = _dataset_media_dir(value) if value else ""
+        return media_dir if media_dir and os.path.isdir(media_dir) else value
+
+    data_path = req.data_path or ""
+    validation_dataset_file = req.validation_dataset_file or ""
+    if job_type != "inference":
+        data_path = _resolve_dataset_path(data_path)
+        validation_dataset_file = _resolve_dataset_path(validation_dataset_file)
+
     job = job_runner.create_job(
         job_id=str(uuid.uuid4()),
         model_id=req.model_id,
@@ -257,14 +286,13 @@ def create_job(req: CreateJobRequest) -> dict[str, Any]:
         workload_type=req.workload_type or "t2v",
         job_type=job_type,
         image_path=req.image_path or "",
-        data_path=req.data_path or "",
+        data_path=data_path,
         max_train_steps=req.max_train_steps,
         train_batch_size=req.train_batch_size,
         learning_rate=req.learning_rate,
         num_latent_t=req.num_latent_t,
-        validation_dataset_file=req.validation_dataset_file or "",
+        validation_dataset_file=validation_dataset_file,
         lora_rank=req.lora_rank,
-        ltx2_first_frame_conditioning_p=req.ltx2_first_frame_conditioning_p,
         negative_prompt=req.negative_prompt,
         num_inference_steps=req.num_inference_steps,
         num_frames=req.num_frames,
@@ -287,8 +315,6 @@ def create_job(req: CreateJobRequest) -> dict[str, Any]:
         dmd_use_vsa=req.dmd_use_vsa,
         dmd_vsa_sparsity=req.dmd_vsa_sparsity,
         dmd_denoising_steps=req.dmd_denoising_steps or "1000,757,522",
-        min_timestep_ratio=req.min_timestep_ratio,
-        max_timestep_ratio=req.max_timestep_ratio,
         real_score_guidance_scale=req.real_score_guidance_scale,
         generator_update_interval=req.generator_update_interval,
         real_score_model_path=req.real_score_model_path or "",
@@ -418,6 +444,13 @@ def create_dataset(req: CreateDatasetRequest) -> dict[str, Any]:
             status_code=400,
             detail="No media files found. Ensure at least one image or video.",
         )
+    # upload_path must be a staging dir produced by /api/upload-raw-dataset,
+    # not an arbitrary client path — the code below copies then rmtrees it.
+    if not _path_is_within(req.upload_path, _staging_base_path()):
+        raise HTTPException(
+            status_code=400,
+            detail="upload_path must be a staged upload directory.",
+        )
     dataset_id = str(uuid.uuid4())
     created_at = time.time()
     dest_dir = os.path.join(datasets_upload_dir, dataset_id)
@@ -491,8 +524,9 @@ def serve_dataset_media(dataset_id: str, file_name: str) -> FileResponse:
     ds = database.get_dataset(dataset_id)
     if ds is None:
         raise HTTPException(status_code=404, detail="Dataset not found")
-    media_path = os.path.join(_dataset_media_dir(dataset_id), file_name)
-    if not os.path.isfile(media_path):
+    media_dir = _dataset_media_dir(dataset_id)
+    media_path = os.path.realpath(os.path.join(media_dir, file_name))
+    if not (_path_is_within(media_path, media_dir) and os.path.isfile(media_path)):
         raise HTTPException(status_code=404, detail="File not found")
     import mimetypes
     mime, _ = mimetypes.guess_type(media_path)

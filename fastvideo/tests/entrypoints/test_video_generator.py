@@ -3,8 +3,11 @@ from types import SimpleNamespace
 import warnings
 
 import pytest
+import torch
 
+import fastvideo.entrypoints.video_generator as video_generator_module
 from fastvideo.api import (
+    ConfigValidationError,
     GenerationRequest,
     GenerationResult,
     GeneratorConfig,
@@ -13,8 +16,11 @@ from fastvideo.api import (
     load_run_config,
 )
 from fastvideo.api.sampling_param import SamplingParam
-from fastvideo.entrypoints.video_generator import VideoGenerator
+from fastvideo.entrypoints.video_generator import VideoGenerator, _resolve_output_size
 from fastvideo.fastvideo_args import WorkloadType
+from fastvideo.pipelines import ForwardBatch
+from fastvideo.worker.gpu_worker import Worker
+from fastvideo.worker.ray_distributed_executor import RayDistributedExecutor
 
 
 def _new_video_generator() -> VideoGenerator:
@@ -76,10 +82,72 @@ def _patch_fastvideo_args_from_kwargs(monkeypatch):
 
 
 def _patch_sampling_param_from_pretrained(monkeypatch):
+
     def fake_from_pretrained(cls, model_path):
         return cls()
 
     monkeypatch.setattr(SamplingParam, "from_pretrained", classmethod(fake_from_pretrained))
+
+
+class _NoCpuMaterializationOutput:
+
+    @property
+    def shape(self):
+        raise AssertionError("metadata-only output path should not inspect output shape")
+
+    def cpu(self):
+        raise AssertionError("metadata-only output path should not move output to CPU")
+
+    def __mul__(self, other):
+        raise AssertionError("metadata-only output path should not build frames")
+
+
+def _single_video_args(output_type="pil"):
+    return SimpleNamespace(
+        output_type=output_type,
+        pin_cpu_memory=False,
+        VSA_sparsity=0.0,
+        pipeline_config=SimpleNamespace(flow_shift=1.0, embedded_cfg_scale=1.0),
+        workload_type=SimpleNamespace(value="t2v"),
+    )
+
+
+def _small_sampling_param(*, save_video=False, return_frames=False):
+    return SamplingParam(
+        num_frames=2,
+        height=16,
+        width=16,
+        fps=8,
+        num_inference_steps=1,
+        save_video=save_video,
+        return_frames=return_frames,
+    )
+
+
+def _single_video_output_batch(output, *, extra=None):
+    return SimpleNamespace(
+        output=output,
+        extra=extra or {},
+        logging_info=None,
+        trajectory_latents=None,
+        trajectory_timesteps=None,
+        trajectory_decoded=None,
+    )
+
+
+def _single_video_generator(output_batch, fastvideo_args):
+    generator = _new_video_generator()
+    generator.fastvideo_args = fastvideo_args
+    generator.executor = SimpleNamespace(execute_forward=lambda batch, args: output_batch)
+    generator.config = None
+    return generator
+
+
+def test_resolve_output_size_uses_produced_pixel_geometry() -> None:
+    """Report refined dimensions instead of the base request geometry."""
+    samples = torch.empty(1, 3, 5, 64, 96)
+    assert _resolve_output_size(samples, (32, 48, 1), pixel_output=True) == (64, 96, 5)
+    assert _resolve_output_size(samples, (32, 48, 1), pixel_output=False) == (32, 48, 1)
 
 
 def test_prepare_output_path_file_sanitization(tmp_path):
@@ -149,6 +217,220 @@ def test_prepare_output_path_empty_prompt_fallback(tmp_path):
 
     assert os.path.dirname(result) == str(out_dir)
     assert os.path.basename(result) == "output.mp4"
+
+
+def test_generate_single_video_metadata_only_skips_output_materialization(monkeypatch, tmp_path):
+    output_batch = _single_video_output_batch(
+        _NoCpuMaterializationOutput(),
+        extra={"peak_memory_mb": 42.0},
+    )
+    fastvideo_args = _single_video_args()
+    generator = _single_video_generator(output_batch, fastvideo_args)
+    empty_calls = []
+    real_empty = video_generator_module.torch.empty
+
+    def record_empty(*args, **kwargs):
+        empty_calls.append((args, kwargs))
+        return real_empty(*args, **kwargs)
+
+    def fail_make_grid(*args, **kwargs):
+        raise AssertionError("metadata-only output path should not build frame grids")
+
+    monkeypatch.setattr(video_generator_module.torch, "empty", record_empty)
+    monkeypatch.setattr(video_generator_module.torchvision.utils, "make_grid", fail_make_grid)
+
+    result = generator._generate_single_video(
+        prompt="metadata only",
+        sampling_param=_small_sampling_param(save_video=False, return_frames=False),
+        fastvideo_args=fastvideo_args,
+        output_path=str(tmp_path / "unused.mp4"),
+    )
+
+    assert result["samples"] is None
+    assert result["frames"] is None
+    assert result["video_path"] is None
+    assert result["peak_memory_mb"] == 42.0
+    assert empty_calls == [((0, ), {"device": "cpu"})]
+
+
+def test_generate_single_video_return_frames_still_materializes_output(tmp_path):
+    output = torch.ones((1, 3, 2, 16, 16), dtype=torch.float32) * 0.5
+    output_batch = _single_video_output_batch(output)
+    fastvideo_args = _single_video_args()
+    generator = _single_video_generator(output_batch, fastvideo_args)
+
+    result = generator._generate_single_video(
+        prompt="return frames",
+        sampling_param=_small_sampling_param(save_video=False, return_frames=True),
+        fastvideo_args=fastvideo_args,
+        output_path=str(tmp_path / "unused.mp4"),
+    )
+
+    torch.testing.assert_close(result["samples"], output)
+    assert len(result["frames"]) == 2
+    assert result["video_path"] is None
+
+
+def test_generate_single_video_save_video_still_builds_frames(monkeypatch, tmp_path):
+    output = torch.ones((1, 3, 2, 16, 16), dtype=torch.float32) * 0.5
+    output_batch = _single_video_output_batch(output)
+    fastvideo_args = _single_video_args()
+    generator = _single_video_generator(output_batch, fastvideo_args)
+    saved = {}
+
+    def fake_mimsave(path, frames, *, fps, format):
+        saved["path"] = path
+        saved["frame_count"] = len(frames)
+        saved["fps"] = fps
+        saved["format"] = format
+
+    monkeypatch.setattr(video_generator_module.imageio, "mimsave", fake_mimsave)
+
+    output_path = str(tmp_path / "saved.mp4")
+    result = generator._generate_single_video(
+        prompt="save only",
+        sampling_param=_small_sampling_param(save_video=True, return_frames=False),
+        fastvideo_args=fastvideo_args,
+        output_path=output_path,
+    )
+
+    assert result["samples"] is None
+    assert result["frames"] is None
+    assert result["video_path"] == output_path
+    assert saved == {
+        "path": output_path,
+        "frame_count": 2,
+        "fps": 8,
+        "format": "mp4",
+    }
+
+
+def test_generate_single_video_audio_only_metadata_returns_audio_without_frames(tmp_path):
+    audio = torch.zeros((16, ), dtype=torch.float32)
+    output_batch = _single_video_output_batch(
+        _NoCpuMaterializationOutput(),
+        extra={
+            "audio_only": True,
+            "audio": audio,
+            "audio_sample_rate": 44100,
+        },
+    )
+    fastvideo_args = _single_video_args()
+    generator = _single_video_generator(output_batch, fastvideo_args)
+
+    result = generator._generate_single_video(
+        prompt="audio only",
+        sampling_param=_small_sampling_param(save_video=False, return_frames=False),
+        fastvideo_args=fastvideo_args,
+        output_path=str(tmp_path / "unused.mp4"),
+    )
+
+    assert result["samples"] is None
+    assert result["frames"] is None
+    assert result["audio"] is audio
+    assert result["audio_sample_rate"] == 44100
+
+
+def test_generate_single_video_audio_only_save_skips_placeholder_materialization(tmp_path):
+    audio = torch.zeros((16, ), dtype=torch.float32)
+    output_batch = _single_video_output_batch(
+        _NoCpuMaterializationOutput(),
+        extra={
+            "audio_only": True,
+            "audio": audio,
+            "audio_sample_rate": 44100,
+        },
+    )
+    fastvideo_args = _single_video_args()
+    generator = _single_video_generator(output_batch, fastvideo_args)
+    output_path = str(tmp_path / "audio.mp4")
+
+    result = generator._generate_single_video(
+        prompt="audio only",
+        sampling_param=_small_sampling_param(save_video=True, return_frames=False),
+        fastvideo_args=fastvideo_args,
+        output_path=output_path,
+    )
+
+    assert result["samples"] is None
+    assert result["frames"] is None
+    assert result["audio"] is audio
+    assert result["audio_sample_rate"] == 44100
+    assert result["video_path"] == str(tmp_path / "audio.wav")
+
+
+def test_generate_single_video_ray_audio_only_save_preserves_worker_metadata(monkeypatch, tmp_path):
+    audio = torch.zeros((16, ), dtype=torch.float32)
+    worker_output = ForwardBatch(
+        data_type="audio",
+        output=torch.ones((1, 3, 1, 8, 8)),
+        extra={
+            "audio_only": True,
+            "audio": audio,
+            "audio_sample_rate": 44100,
+        },
+    )
+    worker = Worker.__new__(Worker)
+    worker.fastvideo_args = SimpleNamespace()
+    worker.pipeline = SimpleNamespace(forward=lambda batch, args: worker_output)
+
+    monkeypatch.setattr(RayDistributedExecutor, "__abstractmethods__", frozenset())
+    executor = RayDistributedExecutor.__new__(RayDistributedExecutor)
+    executor.shutdown = lambda: None
+
+    def collective_rpc(method, *, kwargs, **_):
+        assert method == "execute_forward"
+        return [worker.execute_forward(**kwargs)]
+
+    executor.collective_rpc = collective_rpc
+    fastvideo_args = _single_video_args()
+    generator = _new_video_generator()
+    generator.fastvideo_args = fastvideo_args
+    generator.executor = executor
+    generator.config = None
+    written = {}
+
+    def fake_write_pcm_wav(path, samples, sample_rate):
+        written.update(path=path, samples=samples, sample_rate=sample_rate)
+
+    monkeypatch.setattr(generator, "_write_pcm_wav", fake_write_pcm_wav)
+    sampling_param = _small_sampling_param(save_video=True, return_frames=False)
+    sampling_param.data_type = "audio"
+
+    result = generator._generate_single_video(
+        prompt="audio only",
+        sampling_param=sampling_param,
+        fastvideo_args=fastvideo_args,
+        output_path=str(tmp_path / "audio.mp4"),
+    )
+
+    assert worker_output.output is not None
+    assert worker_output.output.numel() == 0
+    assert result["samples"] is None
+    assert result["frames"] is None
+    assert result["audio"] is audio
+    assert result["audio_sample_rate"] == 44100
+    assert result["video_path"] == str(tmp_path / "audio.wav")
+    assert written["path"] == str(tmp_path / "audio.wav")
+    assert written["samples"] is audio
+    assert written["sample_rate"] == 44100
+
+
+def test_generate_single_video_latent_metadata_skips_cpu_materialization(tmp_path):
+    output_batch = _single_video_output_batch(_NoCpuMaterializationOutput())
+    fastvideo_args = _single_video_args(output_type="latent")
+    generator = _single_video_generator(output_batch, fastvideo_args)
+
+    result = generator._generate_single_video(
+        prompt="latent metadata",
+        sampling_param=_small_sampling_param(save_video=False, return_frames=False),
+        fastvideo_args=fastvideo_args,
+        output_path=str(tmp_path / "unused.mp4"),
+    )
+
+    assert result["samples"] is None
+    assert result["frames"] is None
+    assert result["video_path"] is None
 
 
 def test_from_config_normalizes_and_translates(monkeypatch):
@@ -250,8 +532,7 @@ def test_generate_uses_typed_request_path(monkeypatch):
         GenerationRequest(
             prompt="hello world",
             sampling=SamplingConfig(num_frames=81, height=480, width=832),
-        )
-    )
+        ))
 
     assert isinstance(result, GenerationResult)
     assert captured["prompt"] == "hello world"
@@ -259,6 +540,24 @@ def test_generate_uses_typed_request_path(monkeypatch):
     assert captured["sampling_param"].height == 480
     assert captured["sampling_param"].width == 832
     assert result.video_path == "outputs/test.mp4"
+
+
+def test_generate_rejects_stage_override_outside_registered_stage(monkeypatch) -> None:
+    """Validate typed stage overrides at the public generation entrypoint."""
+    generator = _new_runtime_video_generator()
+    monkeypatch.setattr(
+        "fastvideo.registry.get_preset_selection",
+        lambda _model_path: ("lingbot_video_moe_refiner_t2v", "lingbot_video"),
+    )
+    with pytest.raises(ConfigValidationError, match="stage_overrides.denoise.t_thresh"):
+        generator.generate({
+            "prompt": "hello world",
+            "stage_overrides": {
+                "denoise": {
+                    "t_thresh": 0.7
+                }
+            },
+        })
 
 
 def test_generate_preserves_schema_defaults_for_dataclass_request(monkeypatch):
@@ -285,8 +584,7 @@ def test_generate_preserves_schema_defaults_for_dataclass_request(monkeypatch):
             prompt="hello world",
             negative_prompt=None,
             sampling=SamplingConfig(num_frames=125, height=720, width=1280),
-        )
-    )
+        ))
 
     assert captured["sampling_param"].negative_prompt is None
     assert captured["sampling_param"].num_frames == 125
@@ -294,9 +592,7 @@ def test_generate_preserves_schema_defaults_for_dataclass_request(monkeypatch):
     assert captured["sampling_param"].width == 1280
 
 
-def test_generate_mapping_request_preserves_model_defaults_for_omitted_fields(
-    monkeypatch,
-):
+def test_generate_mapping_request_preserves_model_defaults_for_omitted_fields(monkeypatch, ):
     generator = _new_runtime_video_generator()
     captured = {}
 
@@ -317,11 +613,9 @@ def test_generate_mapping_request_preserves_model_defaults_for_omitted_fields(
     monkeypatch.setattr(SamplingParam, "from_pretrained", classmethod(fake_from_pretrained))
     monkeypatch.setattr(generator, "_generate_video_impl", fake_generate_video_impl)
 
-    generator.generate(
-        {
-            "prompt": "hello world",
-        }
-    )
+    generator.generate({
+        "prompt": "hello world",
+    })
 
     assert captured["sampling_param"].negative_prompt == "model default"
     assert captured["sampling_param"].num_frames == 61
@@ -513,16 +807,16 @@ def test_generate_batch_prompt_file_returns_typed_results(tmp_path, monkeypatch)
 
     monkeypatch.setattr(generator, "_generate_single_video", fake_generate_single_video)
 
-    results = generator.generate(
-        {
-            "inputs": {"prompt_path": str(prompt_file)},
-            "output": {
-                "output_path": str(output_dir),
-                "save_video": False,
-                "return_frames": False,
-            },
-        }
-    )
+    results = generator.generate({
+        "inputs": {
+            "prompt_path": str(prompt_file)
+        },
+        "output": {
+            "output_path": str(output_dir),
+            "save_video": False,
+            "return_frames": False,
+        },
+    })
 
     assert isinstance(results, list)
     assert [result.prompt for result in results] == ["first prompt", "second prompt"]
@@ -548,8 +842,7 @@ def test_generate_batched_request_fans_out_media_inputs(monkeypatch):
                 image_path=["first.png", "second.png"],
                 video_path=["first.mp4", "second.mp4"],
             ),
-        )
-    )
+        ))
 
     assert [result.prompt for result in results] == ["first prompt", "second prompt"]
     assert captured == [
@@ -567,5 +860,4 @@ def test_generate_batched_request_rejects_mismatched_media_inputs(monkeypatch):
             GenerationRequest(
                 prompt=["first prompt", "second prompt"],
                 inputs=InputConfig(image_path=["first.png"]),
-            )
-        )
+            ))

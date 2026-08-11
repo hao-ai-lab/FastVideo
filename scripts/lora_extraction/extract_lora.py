@@ -55,18 +55,18 @@ def load_transformer_state_dict_from_safetensors(model_path: str) -> Dict[str, t
     """
     from huggingface_hub import snapshot_download
     import os
-    
+
     # Download or locate the model
     if os.path.isdir(model_path):
         local_path = model_path
     else:
         local_path = snapshot_download(model_path)
-    
+
     # Find transformer directory
     transformer_dir = os.path.join(local_path, "transformer")
     if not os.path.isdir(transformer_dir):
         raise FileNotFoundError(f"Transformer directory not found at {transformer_dir}")
-    
+
     # Load all safetensors files
     state_dict: Dict[str, torch.Tensor] = {}
     for fname in sorted(os.listdir(transformer_dir)):
@@ -75,12 +75,13 @@ def load_transformer_state_dict_from_safetensors(model_path: str) -> Dict[str, t
             with safe_open(fpath, framework='pt', device='cpu') as f:
                 for key in f.keys():
                     state_dict[key] = f.get_tensor(key)
-    
+
     if not state_dict:
         raise ValueError(f"No safetensors files found in {transformer_dir}")
-    
+
     LOG.info("Loaded %d keys directly from safetensors", len(state_dict))
     return state_dict
+
 
 # Configure minimal logging
 LOG = logging.getLogger("extract_lora")
@@ -140,7 +141,8 @@ def load_transformer_state_dict_from_model(
         pipeline_attr = getattr(pipeline, "pipeline", None)
         transformer = getattr(pipeline_attr, "transformer", None) if pipeline_attr else None
     if transformer is None:
-        raise RuntimeError("Transformer not found in pipeline. Expected pipeline.transformer or pipeline.modules['transformer'].")
+        raise RuntimeError(
+            "Transformer not found in pipeline. Expected pipeline.transformer or pipeline.modules['transformer'].")
 
     state_dict = transformer.state_dict()
 
@@ -257,12 +259,12 @@ def build_adapter_from_states(
             continue
 
         S_sqrt = torch.sqrt(S[:chosen_rank].to(torch.float32))
-        U_r = U[:, :chosen_rank].to(torch.float32)    # (out, r)
+        U_r = U[:, :chosen_rank].to(torch.float32)  # (out, r)
         Vh_r = Vh[:chosen_rank, :].to(torch.float32)  # (r, in)
 
-        lora_B = (U_r * S_sqrt.unsqueeze(0)).contiguous()        # (out, r)
-        tmp = (Vh_r.T * S_sqrt.unsqueeze(0)).contiguous()       # (in, r)
-        lora_A = tmp.T.contiguous()                              # (r, in)
+        lora_B = (U_r * S_sqrt.unsqueeze(0)).contiguous()  # (out, r)
+        tmp = (Vh_r.T * S_sqrt.unsqueeze(0)).contiguous()  # (in, r)
+        lora_A = tmp.T.contiguous()  # (r, in)
 
         base_name = key[:-len(".weight")]
         a_key = f"{base_name}.lora_A.weight"
@@ -296,8 +298,8 @@ def build_adapter_from_states(
             pass
 
     avg_delta = (sum(mean_deltas) / len(mean_deltas)) if mean_deltas else 0.0
-    LOG.info("Extraction complete: processed_keys=%d, extracted_layers=%d, avg_abs_delta=%.6e",
-             len(keys), processed, avg_delta)
+    LOG.info("Extraction complete: processed_keys=%d, extracted_layers=%d, avg_abs_delta=%.6e", len(keys), processed,
+             avg_delta)
     return adapter_state
 
 
@@ -359,7 +361,6 @@ def extract_lora_adapter(
         base_sd = load_transformer_state_dict_from_safetensors(base)
         LOG.info("Loading fine-tuned model directly from safetensors: %s", ft)
         ft_sd = load_transformer_state_dict_from_safetensors(ft)
-
 
     resume_idx = 0
     adapter_existing: Dict[str, torch.Tensor] = {}

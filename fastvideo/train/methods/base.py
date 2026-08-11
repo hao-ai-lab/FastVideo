@@ -272,10 +272,9 @@ class TrainingMethod(torch.nn.Module, ABC):
 
         self.student.on_train_start()
 
-    @staticmethod
-    def _infer_attn_kind() -> Literal["dense", "vsa"]:
-        """Derive attn_kind from ``FASTVIDEO_ATTENTION_BACKEND``."""
-        backend = envs.FASTVIDEO_ATTENTION_BACKEND
+    def _infer_attn_kind(self) -> Literal["dense", "vsa"]:
+        """Derive metadata mode from the student's resolved backend."""
+        backend = (self.student.attention_backend_name or envs.FASTVIDEO_ATTENTION_BACKEND)
         if backend == "VIDEO_SPARSE_ATTN":
             return "vsa"
         return "dense"

@@ -27,13 +27,13 @@ device_reference_folder = resolve_device_reference_folder(
     (
         ("A40", "A40"),
         ("L40S", "L40S"),
+        ("GB200", "GB200"),
         ("H200", "H200"),
     ),
     device_name=get_cuda_device_name(),
     fallback_device_prefix="L40S",
     logger=logger,
 )
-
 
 MATRIXGAME3_PARAMS = {
     "num_gpus": 1,
@@ -45,8 +45,7 @@ MATRIXGAME3_PARAMS = {
     "guidance_scale": 5.0,
     "seed": 42,
 }
-_MATRIXGAME3_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained(
-    MATRIXGAME3_PARAMS["model_path"])
+_MATRIXGAME3_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained(MATRIXGAME3_PARAMS["model_path"])
 MATRIXGAME3_FULL_QUALITY_PARAMS = {
     "num_gpus": MATRIXGAME3_PARAMS["num_gpus"],
     "model_path": MATRIXGAME3_PARAMS["model_path"],
@@ -57,7 +56,6 @@ MATRIXGAME3_FULL_QUALITY_PARAMS = {
     "guidance_scale": _MATRIXGAME3_FULL_QUALITY_DEFAULTS.guidance_scale,
     "seed": _MATRIXGAME3_FULL_QUALITY_DEFAULTS.seed,
 }
-
 
 MODEL_TO_PARAMS = {
     "Matrix-Game-3.0-Diffusers-Base": MATRIXGAME3_PARAMS,

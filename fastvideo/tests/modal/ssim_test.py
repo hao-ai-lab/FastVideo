@@ -25,6 +25,7 @@ except ModuleNotFoundError:
     def resolve_uv_torch_backend(image_tag: str) -> str | None:
         return os.environ.get("UV_TORCH_BACKEND")
 
+
 app = modal.App()
 
 model_vol = modal.Volume.from_name("hf-model-weights")
@@ -39,8 +40,7 @@ print(f"Using image: {image_ref}")
 uv_torch_backend_override = resolve_uv_torch_backend(image_tag)
 
 image = (
-    modal.Image.from_registry(image_ref, add_python="3.12")
-    .apt_install(
+    modal.Image.from_registry(image_ref, add_python="3.12").apt_install(
         "cmake",
         "pkg-config",
         "build-essential",
@@ -52,25 +52,25 @@ image = (
         "libsm6",
         "libxext6",
         "libxrender1",
-    )
-    .run_commands("curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable")
-    .run_commands("echo 'source ~/.cargo/env' >> ~/.bashrc")
-    .env(
-        {
-            # INVARIANT: keep this image identical for every CI job at a given
-            # base digest -- per-job/per-commit values (BUILDKITE_*) must never
-            # be baked here as image layers or every job rebuilds its own image
-            # variant. repo/commit/PR already reach the container as
-            # run_ssim_partition() arguments.
-            "PATH": "/root/.cargo/bin:$PATH",
-            "IMAGE_VERSION": image_version,
-            **({"UV_TORCH_BACKEND": uv_torch_backend_override} if uv_torch_backend_override else {}),
-            # FA4 is opt-in (FASTVIDEO_FA4); the SSIM references were seeded
-            # with FA4 inference, so keep it enabled in CI. Caller override wins.
-            "FASTVIDEO_FA4": os.environ.get("FASTVIDEO_FA4", "1"),
-        }
-    )
-)
+    ).run_commands("curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable")
+    .run_commands("echo 'source ~/.cargo/env' >> ~/.bashrc").env({
+        # INVARIANT: keep this image identical for every CI job at a given
+        # base digest -- per-job/per-commit values (BUILDKITE_*) must never
+        # be baked here as image layers or every job rebuilds its own image
+        # variant. repo/commit/PR already reach the container as
+        # run_ssim_partition() arguments.
+        "PATH":
+        "/root/.cargo/bin:$PATH",
+        "IMAGE_VERSION":
+        image_version,
+        **({
+            "UV_TORCH_BACKEND": uv_torch_backend_override
+        } if uv_torch_backend_override else {}),
+        # FA4 is opt-in (FASTVIDEO_FA4); the SSIM references were seeded
+        # with FA4 inference, so keep it enabled in CI. Caller override wins.
+        "FASTVIDEO_FA4":
+        os.environ.get("FASTVIDEO_FA4", "1"),
+    }))
 
 SSIM_NUM_GPUS = 4
 SSIM_TERMINATE_TIMEOUT_S = 30
@@ -159,9 +159,9 @@ def _run_git_command(args: list[str]) -> str:
 
 def _normalize_git_repo_url(git_repo: str) -> str:
     if git_repo.startswith("git@github.com:"):
-        return "https://github.com/" + git_repo[len("git@github.com:") :]
+        return "https://github.com/" + git_repo[len("git@github.com:"):]
     if git_repo.startswith("ssh://git@github.com/"):
-        return "https://github.com/" + git_repo[len("ssh://git@github.com/") :]
+        return "https://github.com/" + git_repo[len("ssh://git@github.com/"):]
     return git_repo
 
 
@@ -204,9 +204,7 @@ def _resolve_pull_request(pr_number: str) -> str:
     return "false"
 
 
-def _resolve_hf_api_key(
-    hf_api_key: str,
-) -> str:
+def _resolve_hf_api_key(hf_api_key: str, ) -> str:
     if hf_api_key.strip():
         return hf_api_key.strip()
 
@@ -216,8 +214,7 @@ def _resolve_hf_api_key(
             return value
 
     raise RuntimeError(
-        "Hugging Face token is required. Set HF_API_KEY, HUGGINGFACE_HUB_TOKEN, or HF_TOKEN; or pass --hf-api-key."
-    )
+        "Hugging Face token is required. Set HF_API_KEY, HUGGINGFACE_HUB_TOKEN, or HF_TOKEN; or pass --hf-api-key.")
 
 
 def _sanitize_path_fragment(value: str) -> str:
@@ -268,13 +265,11 @@ def _print_local_reference_copy_command(quality_tier: str) -> None:
         _build_local_generated_download_dir(quality_tier),
         MODAL_DEVICE_REFERENCE_FOLDER,
     )
-    print(
-        "To update local references from the downloaded Modal outputs, run:\n"
-        "  python fastvideo/tests/ssim/reference_videos_cli.py copy-local "
-        f"--quality-tier {quality_tier} "
-        f"--generated-dir {generated_dir} "
-        f"--device-folder {MODAL_DEVICE_REFERENCE_FOLDER}"
-    )
+    print("To update local references from the downloaded Modal outputs, run:\n"
+          "  python fastvideo/tests/ssim/reference_videos_cli.py copy-local "
+          f"--quality-tier {quality_tier} "
+          f"--generated-dir {generated_dir} "
+          f"--device-folder {MODAL_DEVICE_REFERENCE_FOLDER}")
 
 
 def _count_video_files(root: str) -> int:
@@ -318,11 +313,9 @@ def _sync_generated_videos_to_volume(
 
     num_videos = _count_video_files(absolute_dst)
     print(f"Raw generated videos exported to Modal volume path: {relative_dst} ({num_videos} video files).")
-    print(
-        "Download command:\n"
-        f"  modal volume get hf-model-weights {relative_dst} "
-        f"{_build_local_generated_download_dir(quality_tier)}"
-    )
+    print("Download command:\n"
+          f"  modal volume get hf-model-weights {relative_dst} "
+          f"{_build_local_generated_download_dir(quality_tier)}")
     _print_local_reference_copy_command(quality_tier)
     return relative_dst
 
@@ -395,11 +388,8 @@ def _discover_ssim_tasks(
     for filepath in test_files:
         file_name = os.path.basename(filepath)
         rel_path = f"./fastvideo/tests/ssim/{file_name}"
-        if selected_test_files and (
-            filepath not in selected_test_files
-            and rel_path not in selected_test_files
-            and file_name not in selected_test_file_names
-        ):
+        if selected_test_files and (filepath not in selected_test_files and rel_path not in selected_test_files
+                                    and file_name not in selected_test_file_names):
             continue
 
         matched_test_files.add(file_name)
@@ -418,19 +408,16 @@ def _discover_ssim_tasks(
                         test_file=rel_path,
                         required_gpus=required_gpus,
                         model_id=model_id,
-                    )
-                )
+                    ))
                 task_id += 1
         else:
             if selected_model_ids:
                 continue
-            tasks.append(
-                SSIMTask(
-                    task_id=task_id,
-                    test_file=rel_path,
-                    required_gpus=required_gpus,
-                )
-            )
+            tasks.append(SSIMTask(
+                task_id=task_id,
+                test_file=rel_path,
+                required_gpus=required_gpus,
+            ))
             task_id += 1
 
     if selected_test_files:
@@ -507,9 +494,7 @@ def _prepare_ssim_workspace(
     rm -rf fastvideo/tests/ssim/reference_videos
     git_retry git submodule update --init --recursive
     uv pip install -e ".[test]"
-    cd fastvideo-kernel
-    ./build.sh
-    cd ..
+    python fastvideo/tests/modal/kernel_build_cache.py install
     uv pip install git+https://github.com/microsoft/MoGe.git
     # Stable Audio Open 1.0 inference deps (optional in basic install,
     # required by `StableAudioDenoisingStage`; consumed by
@@ -527,9 +512,11 @@ def _prepare_ssim_workspace(
             "HF_API_KEY": hf_api_key,
         },
     )
+    if result.stdout:
+        print(result.stdout, end="" if result.stdout.endswith("\n") else "\n")
+    if result.stderr:
+        print(result.stderr, end="" if result.stderr.endswith("\n") else "\n", file=sys.stderr)
     if result.returncode != 0:
-        print(result.stdout)
-        print(result.stderr)
         raise RuntimeError(f"Workspace setup failed with exit code {result.returncode}")
 
     ssim_dir = os.path.join(repo_root, "fastvideo", "tests", "ssim")
@@ -711,12 +698,10 @@ def _schedule_ssim_tasks(
     max_required_gpus = max((task.required_gpus for task in pending_tasks), default=0)
     if max_required_gpus > len(available_gpu_ids):
         cuda_visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES", "<unset>")
-        raise RuntimeError(
-            "SSIM task requires "
-            f"{max_required_gpus} GPUs but only "
-            f"{len(available_gpu_ids)} are visible via "
-            f"CUDA_VISIBLE_DEVICES={cuda_visible_devices!r}."
-        )
+        raise RuntimeError("SSIM task requires "
+                           f"{max_required_gpus} GPUs but only "
+                           f"{len(available_gpu_ids)} are visible via "
+                           f"CUDA_VISIBLE_DEVICES={cuda_visible_devices!r}.")
     results = {}
     fail_fast_triggered = False
     log_dir = tempfile.mkdtemp(prefix="fastvideo-ssim-logs-")
@@ -732,8 +717,8 @@ def _schedule_ssim_tasks(
                 break
 
             task = pending_tasks.pop(next_task_index)
-            assigned_gpu_ids = available_gpu_ids[: task.required_gpus]
-            del available_gpu_ids[: task.required_gpus]
+            assigned_gpu_ids = available_gpu_ids[:task.required_gpus]
+            del available_gpu_ids[:task.required_gpus]
             running_task = _spawn_ssim_task(
                 task=task,
                 repo_root=repo_root,
@@ -812,14 +797,11 @@ def _collect_task_summaries(
                 status=result.status,
                 returncode=result.returncode,
                 log_content=log_content,
-            )
-        )
+            ))
     return summaries
 
 
-def _print_combined_results(
-    partition_results: list[_PartitionResult | None],
-) -> int:
+def _print_combined_results(partition_results: list[_PartitionResult | None], ) -> int:
     """Print a unified report across all partitions."""
     passed = []
     failed = []
@@ -987,10 +969,8 @@ def run_ssim_tests(
     if pytest_k.strip():
         print(f"Using pytest -k filter: {pytest_k}")
     if bootstrap_mode:
-        print(
-            "SSIM bootstrap mode enabled: missing references will upload "
-            "draft artifacts and xfail."
-        )
+        print("SSIM bootstrap mode enabled: missing references will upload "
+              "draft artifacts and xfail.")
     quality_tier = _resolve_output_quality_tier(full_quality)
     if sync_generated_to_volume:
         resolved_subdir = _resolve_generated_volume_subdir(
@@ -1001,10 +981,8 @@ def run_ssim_tests(
             generated_volume_subdir=resolved_subdir,
             quality_tier=quality_tier,
         )
-        print(
-            "Raw generated videos will be saved to Modal volume path: "
-            f"{generated_volume_path}"
-        )
+        print("Raw generated videos will be saved to Modal volume path: "
+              f"{generated_volume_path}")
     else:
         resolved_subdir = ""
 
@@ -1029,8 +1007,7 @@ def run_ssim_tests(
             partition_index=i,
             num_partitions=NUM_PARTITIONS,
             **common_kwargs,
-        )
-        for i in range(NUM_PARTITIONS)
+        ) for i in range(NUM_PARTITIONS)
     ]
     results: list[_PartitionResult | None] = [f.get() for f in futures]
 
@@ -1041,11 +1018,9 @@ def run_ssim_tests(
             quality_tier=quality_tier,
         )
         local_download_dir = _build_local_generated_download_dir(quality_tier)
-        print(
-            "To download raw generated videos locally, run:\n"
-            f"  modal volume get hf-model-weights {download_src} "
-            f"{local_download_dir}"
-        )
+        print("To download raw generated videos locally, run:\n"
+              f"  modal volume get hf-model-weights {download_src} "
+              f"{local_download_dir}")
         _print_local_reference_copy_command(quality_tier)
     if exit_code != 0:
         sys.exit(exit_code)

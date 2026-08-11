@@ -27,15 +27,12 @@ os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 FAMILY = "glm_image"
-LOCAL_WEIGHTS_DIR = Path(
-    os.getenv("GLM_IMAGE_LOCAL_WEIGHTS_DIR",
-              REPO_ROOT / "official_weights" / FAMILY))
+LOCAL_WEIGHTS_DIR = Path(os.getenv("GLM_IMAGE_LOCAL_WEIGHTS_DIR", REPO_ROOT / "official_weights" / FAMILY))
 TRANSFORMER_DIR = LOCAL_WEIGHTS_DIR / "transformer"
 
 
 def _has_shards() -> bool:
-    return TRANSFORMER_DIR.exists() and any(
-        TRANSFORMER_DIR.glob("*.safetensors"))
+    return TRANSFORMER_DIR.exists() and any(TRANSFORMER_DIR.glob("*.safetensors"))
 
 
 pytestmark = pytest.mark.skipif(
@@ -85,8 +82,7 @@ def test_dit_strict_load_against_hf_checkpoint():
     for k, v in renamed_sd.items():
         if v.shape != fv_sd[k].shape:
             shape_mismatches.append((k, tuple(fv_sd[k].shape), tuple(v.shape)))
-    assert not shape_mismatches, (
-        f"shape mismatches: {shape_mismatches[:5]}")
+    assert not shape_mismatches, (f"shape mismatches: {shape_mismatches[:5]}")
 
     # 5. Strict load.
     incompatible = model.load_state_dict(renamed_sd, strict=True)

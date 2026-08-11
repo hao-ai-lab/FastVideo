@@ -24,11 +24,9 @@ import torch
 
 from fastvideo.logger import init_logger
 from fastvideo.tests.ssim.inference_similarity_utils import (
-    resolve_inference_device_reference_folder,
-)
+    resolve_inference_device_reference_folder, )
 from fastvideo.tests.ssim.latent_similarity_utils import (
-    run_text_to_latent_similarity_test,
-)
+    run_text_to_latent_similarity_test, )
 
 logger = init_logger(__name__)
 
@@ -107,8 +105,6 @@ def test_flux2_similarity(
             "vae_cpu_offload": True,
             "text_encoder_cpu_offload": True,
             "pin_cpu_memory": False,
-            "override_pipeline_cls_name": (
-                "Flux2KleinPipeline" if "klein" in model_id.lower() else "Flux2Pipeline"
-            ),
+            "override_pipeline_cls_name": ("Flux2KleinPipeline" if "klein" in model_id.lower() else "Flux2Pipeline"),
         },
     )

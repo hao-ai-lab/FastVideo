@@ -38,7 +38,6 @@ except ImportError:
     hf_hub_download = None
     snapshot_download = None
 
-
 # Parameter name mapping from official GEN3C checkpoint to FastVideo format
 # Based on fastvideo/configs/models/dits/gen3c.py
 # The actual GEN3C checkpoint uses AdaLN-LoRA with decomposed projections (index 0 = base, 1 = LoRA)
@@ -50,7 +49,7 @@ PARAM_NAMES_MAPPING: dict[str, str] = {
     r"^net\.t_embedder\.0\.(.*)$": r"time_embed.time_proj.\1",
     r"^net\.t_embedder\.1\.linear_1\.(.*)$": r"time_embed.t_embedder.linear_1.\1",
     r"^net\.t_embedder\.1\.linear_2\.(.*)$": r"time_embed.t_embedder.linear_2.\1",
-    
+
     # Augment sigma embedding (GEN3C-specific)
     r"^net\.augment_sigma_embedder\.0\.(.*)$": r"augment_sigma_embed.time_proj.\1",
     r"^net\.augment_sigma_embedder\.1\.linear_1\.(.*)$": r"augment_sigma_embed.t_embedder.linear_1.\1",
@@ -66,7 +65,7 @@ PARAM_NAMES_MAPPING: dict[str, str] = {
 
     # Transformer blocks: net.blocks.blockN -> transformer_blocks.N
     # GEN3C uses attn.to_q.0/1 pattern (0=base weight, 1=LoRA weight)
-    
+
     # Self-attention (block index 0)
     # Q projection: to_q.0 is linear, to_q.1 is QK norm (RMSNorm applied per-head)
     r"^net\.blocks\.block(\d+)\.blocks\.0\.block\.attn\.to_q\.0\.(.*)$": r"transformer_blocks.\1.attn1.to_q.\2",
@@ -79,7 +78,8 @@ PARAM_NAMES_MAPPING: dict[str, str] = {
     # Output projection
     r"^net\.blocks\.block(\d+)\.blocks\.0\.block\.attn\.to_out\.0\.(.*)$": r"transformer_blocks.\1.attn1.to_out.\2",
     # AdaLN modulation for self-attention
-    r"^net\.blocks\.block(\d+)\.blocks\.0\.adaLN_modulation\.(.*)$": r"transformer_blocks.\1.adaln_modulation_self_attn.\2",
+    r"^net\.blocks\.block(\d+)\.blocks\.0\.adaLN_modulation\.(.*)$":
+    r"transformer_blocks.\1.adaln_modulation_self_attn.\2",
 
     # Cross-attention (block index 1)
     # Q projection: to_q.0 is linear, to_q.1 is QK norm
@@ -93,7 +93,8 @@ PARAM_NAMES_MAPPING: dict[str, str] = {
     # Output projection
     r"^net\.blocks\.block(\d+)\.blocks\.1\.block\.attn\.to_out\.0\.(.*)$": r"transformer_blocks.\1.attn2.to_out.\2",
     # AdaLN modulation for cross-attention
-    r"^net\.blocks\.block(\d+)\.blocks\.1\.adaLN_modulation\.(.*)$": r"transformer_blocks.\1.adaln_modulation_cross_attn.\2",
+    r"^net\.blocks\.block(\d+)\.blocks\.1\.adaLN_modulation\.(.*)$":
+    r"transformer_blocks.\1.adaln_modulation_cross_attn.\2",
 
     # MLP (block index 2) - simpler naming: layer1, layer2 directly
     r"^net\.blocks\.block(\d+)\.blocks\.2\.block\.layer1\.(.*)$": r"transformer_blocks.\1.mlp.fc_in.\2",
@@ -119,12 +120,12 @@ def apply_mapping(key: str) -> str | None:
     for pattern in SKIP_PATTERNS:
         if key.startswith(pattern):
             return None
-    
+
     # Apply mapping patterns
     for pattern, replacement in PARAM_NAMES_MAPPING.items():
         if re.match(pattern, key):
             return re.sub(pattern, replacement, key)
-    
+
     # If no mapping found, return original key (will be reported)
     return key
 
@@ -138,7 +139,7 @@ def load_checkpoint(path: Path, mmap: bool = True) -> dict[str, torch.Tensor]:
     """
     # Try memory-mapped loading first (PyTorch 2.1+)
     load_kwargs: dict = {"map_location": "cpu", "weights_only": False}
-    
+
     if mmap:
         # Check if PyTorch version supports mmap (2.1+)
         try:
@@ -152,16 +153,16 @@ def load_checkpoint(path: Path, mmap: bool = True) -> dict[str, torch.Tensor]:
                 print(f"  Note: PyTorch {torch.__version__} doesn't support mmap, using standard loading")
         except (ValueError, IndexError):
             print(f"  Warning: Could not parse PyTorch version {torch.__version__}, skipping mmap")
-    
+
     checkpoint = torch.load(path, **load_kwargs)
-    
+
     # Handle different checkpoint formats
     if isinstance(checkpoint, dict):
         for key in ("state_dict", "model_state_dict", "model", "ema"):
             if key in checkpoint:
                 return checkpoint[key]
         return checkpoint
-    
+
     return checkpoint
 
 
@@ -174,13 +175,13 @@ def iterate_checkpoint_keys(path: Path) -> Iterator[str]:
     # Unfortunately PyTorch doesn't have a great way to do this
     # So we load the full checkpoint but only keep keys
     checkpoint = torch.load(path, map_location="meta", weights_only=False)
-    
+
     if isinstance(checkpoint, dict):
         for key in ("state_dict", "model_state_dict", "model", "ema"):
             if key in checkpoint:
                 checkpoint = checkpoint[key]
                 break
-    
+
     return checkpoint.keys()
 
 
@@ -189,23 +190,23 @@ def analyze_checkpoint(state_dict: dict[str, torch.Tensor]) -> None:
     print("\n" + "=" * 80)
     print("CHECKPOINT ANALYSIS")
     print("=" * 80)
-    
+
     # Count parameters
     total_params = sum(p.numel() for p in state_dict.values())
     print(f"\nTotal parameters: {total_params:,} ({total_params / 1e9:.2f}B)")
     print(f"Total keys: {len(state_dict)}")
-    
+
     # Analyze key prefixes
     prefixes: dict[str, int] = {}
     for key in state_dict:
         parts = key.split(".")
         prefix = ".".join(parts[:2]) if len(parts) > 1 else parts[0]
         prefixes[prefix] = prefixes.get(prefix, 0) + 1
-    
+
     print("\nKey prefixes:")
     for prefix, count in sorted(prefixes.items()):
         print(f"  {prefix}: {count}")
-    
+
     # Print first 100 keys with shapes
     print("\nFirst 100 keys with shapes:")
     for i, (key, value) in enumerate(state_dict.items()):
@@ -213,7 +214,7 @@ def analyze_checkpoint(state_dict: dict[str, torch.Tensor]) -> None:
             print(f"  ... and {len(state_dict) - 100} more keys")
             break
         print(f"  {key}: {list(value.shape)}")
-    
+
     # Identify GEN3C-specific layers
     print("\nGEN3C-specific layers:")
     gen3c_patterns = [
@@ -226,7 +227,7 @@ def analyze_checkpoint(state_dict: dict[str, torch.Tensor]) -> None:
             if pattern in key:
                 print(f"  {key}: {list(state_dict[key].shape)}")
                 break
-    
+
     print("=" * 80 + "\n")
 
 
@@ -252,15 +253,15 @@ def convert_weights(
     converted = OrderedDict()
     unmapped = []
     skipped = []
-    
+
     # Get all keys first (so we can delete as we go)
     keys = list(state_dict.keys())
     total = len(keys)
-    
+
     for i, key in enumerate(keys):
         value = state_dict[key]
         new_key = apply_mapping(key)
-        
+
         if new_key is None:
             skipped.append(key)
             if verbose:
@@ -281,21 +282,21 @@ def convert_weights(
                 converted[new_key] = value.contiguous() if memory_efficient else value
             if verbose:
                 print(f"  {key} -> {new_key}")
-        
+
         # Free memory by deleting processed tensor from source
         if memory_efficient:
             del state_dict[key]
             if i % 100 == 0:
                 gc.collect()
-        
+
         # Progress indicator
         if (i + 1) % 200 == 0 or i == total - 1:
             print(f"  Processed {i + 1}/{total} tensors...")
-    
+
     # Final garbage collection
     if memory_efficient:
         gc.collect()
-    
+
     return converted, unmapped, skipped
 
 
@@ -308,13 +309,13 @@ def write_component(
     """Write component weights and config to output directory."""
     component_dir = output_dir / name
     component_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # Save weights
     output_file = component_dir / "model.safetensors"
     save_file(weights, str(output_file))
     print(f"Saved {name} weights to {output_file}")
     print(f"  {len(weights)} tensors, {sum(t.numel() for t in weights.values()):,} parameters")
-    
+
     # Save config
     if config is not None:
         config_path = component_dir / "config.json"
@@ -379,7 +380,7 @@ def download_checkpoint(
     """Download checkpoint from HuggingFace Hub."""
     if hf_hub_download is None:
         raise RuntimeError("huggingface_hub is required for --download. Install with: uv pip install huggingface_hub")
-    
+
     print(f"Downloading {filename} from {repo_id}...")
     path = hf_hub_download(
         repo_id=repo_id,
@@ -401,9 +402,8 @@ def resolve_model_dir(
         return model_path
 
     if snapshot_download is None:
-        raise RuntimeError(
-            "huggingface_hub is required to download component source. "
-            "Install with: uv pip install huggingface_hub")
+        raise RuntimeError("huggingface_hub is required to download component source. "
+                           "Install with: uv pip install huggingface_hub")
 
     print(f"Downloading component source repo: {model_name_or_path}")
     downloaded = snapshot_download(
@@ -451,9 +451,7 @@ def add_inference_components(
             print(f"  Copied {component}: {src} -> {dst}")
 
     if missing:
-        raise FileNotFoundError(
-            f"Missing required components in source repo {source_dir}: {missing}"
-        )
+        raise FileNotFoundError(f"Missing required components in source repo {source_dir}: {missing}")
 
 
 def patch_gen3c_vae_config(output_dir: Path) -> None:
@@ -489,7 +487,7 @@ Examples:
     python convert_gen3c_to_fastvideo.py --source ./model.pt --output ./gen3c_fastvideo --dtype fp16
         """,
     )
-    
+
     parser.add_argument(
         "--source",
         type=str,
@@ -548,11 +546,9 @@ Examples:
         "--components-source",
         type=str,
         default=None,
-        help=(
-            "Optional local path or HF repo id containing diffusers components "
-            "(vae/text_encoder/tokenizer/scheduler) to copy into output. "
-            "Example: nvidia/Cosmos-Predict2-2B-Video2World"
-        ),
+        help=("Optional local path or HF repo id containing diffusers components "
+              "(vae/text_encoder/tokenizer/scheduler) to copy into output. "
+              "Example: nvidia/Cosmos-Predict2-2B-Video2World"),
     )
     parser.add_argument(
         "--components-cache-dir",
@@ -568,21 +564,18 @@ Examples:
     parser.add_argument(
         "--components-only",
         action="store_true",
-        help=(
-            "Skip transformer conversion and only add "
-            "vae/text_encoder/tokenizer/scheduler into --output."
-        ),
+        help=("Skip transformer conversion and only add "
+              "vae/text_encoder/tokenizer/scheduler into --output."),
     )
-    
+
     args = parser.parse_args()
-    
+
     # Validate arguments
     if args.components_only:
         if args.output is None:
             raise ValueError("--output is required with --components-only")
         if args.components_source is None:
-            raise ValueError(
-                "--components-source is required with --components-only")
+            raise ValueError("--components-source is required with --components-only")
     else:
         if args.download and args.source:
             raise ValueError("Use either --download or --source, not both")
@@ -594,13 +587,10 @@ Examples:
     if args.components_only:
         output_dir = Path(args.output)
         if not output_dir.exists():
-            raise FileNotFoundError(
-                f"--components-only expected existing output directory: {output_dir}"
-            )
+            raise FileNotFoundError(f"--components-only expected existing output directory: {output_dir}")
         component_source_dir = resolve_model_dir(
             args.components_source,
-            cache_dir=Path(args.components_cache_dir)
-            if args.components_cache_dir else None,
+            cache_dir=Path(args.components_cache_dir) if args.components_cache_dir else None,
         )
         print("Adding inference components only...")
         add_inference_components(
@@ -611,7 +601,7 @@ Examples:
         patch_gen3c_vae_config(output_dir)
         print(f"Done. Components added to {output_dir}")
         return
-    
+
     # Parse dtype
     dtype_map = {
         "fp32": torch.float32,
@@ -619,7 +609,7 @@ Examples:
         "bf16": torch.bfloat16,
     }
     target_dtype = dtype_map[args.dtype]
-    
+
     # Get checkpoint path
     if args.download:
         checkpoint_path = download_checkpoint(
@@ -631,63 +621,63 @@ Examples:
         checkpoint_path = Path(args.source)
         if not checkpoint_path.exists():
             raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
-    
+
     # Load checkpoint with memory-mapped loading
     print(f"Loading checkpoint from {checkpoint_path}...")
     use_mmap = not args.no_mmap
     state_dict = load_checkpoint(checkpoint_path, mmap=use_mmap)
-    
+
     # Analyze if requested
     if args.analyze:
         analyze_checkpoint(state_dict)
         return
-    
+
     # Analyze before conversion (quick summary only to save memory)
     print(f"\nCheckpoint has {len(state_dict)} tensors")
     total_params = sum(p.numel() for p in state_dict.values())
     print(f"Total parameters: {total_params:,} ({total_params / 1e9:.2f}B)")
-    
+
     # Convert weights (memory-efficient mode)
     print(f"\nConverting weights to {args.dtype}...")
     converted, unmapped, skipped = convert_weights(
-        state_dict, 
+        state_dict,
         verbose=args.verbose,
         dtype=target_dtype,
         memory_efficient=True,
     )
-    
+
     # Force garbage collection after conversion
     del state_dict
     gc.collect()
-    
+
     print(f"\nConversion summary:")
     print(f"  Converted: {len(converted)} tensors")
     print(f"  Skipped: {len(skipped)} tensors (dynamic/metadata)")
     print(f"  Unmapped: {len(unmapped)} tensors (kept original names)")
-    
+
     if unmapped:
         print("\nWarning: The following keys were not mapped:")
         for key in unmapped[:20]:
             print(f"  {key}")
         if len(unmapped) > 20:
             print(f"  ... and {len(unmapped) - 20} more")
-    
+
     # Write output
     output_dir = Path(args.output)
     if output_dir.exists() and not args.force:
         raise FileExistsError(f"Output directory exists: {output_dir}. Use --force to overwrite.")
-    
+
     output_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # Write transformer weights
     print(f"\nSaving converted weights...")
     transformer_config = build_transformer_config()
     write_component(output_dir, "transformer", converted, transformer_config)
-    
+
     # Free memory after saving
     del converted
     gc.collect()
-    
+
     # Write model_index.json
     model_index = build_model_index()
     model_index_path = output_dir / "model_index.json"
@@ -700,8 +690,7 @@ Examples:
         print("\nAdding inference components...")
         component_source_dir = resolve_model_dir(
             args.components_source,
-            cache_dir=Path(args.components_cache_dir)
-            if args.components_cache_dir else None,
+            cache_dir=Path(args.components_cache_dir) if args.components_cache_dir else None,
         )
         add_inference_components(
             source_dir=component_source_dir,
@@ -713,7 +702,7 @@ Examples:
         print("\nNote: Only transformer/model_index were written.")
         print("FastVideo local loading also requires: vae/, text_encoder/, tokenizer/, scheduler/.")
         print("Re-run with --components-source to add them automatically.")
-    
+
     print(f"\nConversion complete! Output saved to {output_dir}")
     print("\nTo use with FastVideo:")
     print(f"  from fastvideo.models.dits.gen3c import Gen3CTransformer3DModel")

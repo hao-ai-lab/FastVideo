@@ -17,10 +17,8 @@ class HunyuanClip(nn.Module):
         super().__init__()
 
         self.max_length = max_length
-        self.tokenizer = BertTokenizer.from_pretrained(
-            os.path.join(model_dir, 'tokenizer'))
-        self.text_encoder = BertModel.from_pretrained(
-            os.path.join(model_dir, 'clip_text_encoder'))
+        self.tokenizer = BertTokenizer.from_pretrained(os.path.join(model_dir, 'tokenizer'))
+        self.text_encoder = BertModel.from_pretrained(os.path.join(model_dir, 'clip_text_encoder'))
 
     @torch.no_grad
     def forward(self, prompts, with_mask=True):
@@ -35,7 +33,6 @@ class HunyuanClip(nn.Module):
         )
         prompt_embeds = self.text_encoder(
             text_inputs.input_ids.to(self.device),
-            attention_mask=text_inputs.attention_mask.to(self.device)
-            if with_mask else None,
+            attention_mask=text_inputs.attention_mask.to(self.device) if with_mask else None,
         )
         return prompt_embeds.last_hidden_state, prompt_embeds.pooler_output

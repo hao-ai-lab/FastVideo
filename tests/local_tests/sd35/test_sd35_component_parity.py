@@ -26,20 +26,16 @@ pytestmark = [
         not torch.cuda.is_available(),
         reason="SD3.5 component parity tests require CUDA",
     ),
-    pytest.mark.filterwarnings(
-        "ignore:.*torch.jit.script_method.*:DeprecationWarning",
-    ),
+    pytest.mark.filterwarnings("ignore:.*torch.jit.script_method.*:DeprecationWarning", ),
 ]
 
 os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
 hf_logging.set_verbosity_error()
 
-MODEL_DIR = Path(
-    os.getenv(
-        "SD35_MODEL_DIR",
-        "/FastVideo/official_weights/stabilityai__stable-diffusion-3.5-medium",
-    )
-)
+MODEL_DIR = Path(os.getenv(
+    "SD35_MODEL_DIR",
+    "/FastVideo/official_weights/stabilityai__stable-diffusion-3.5-medium",
+))
 
 
 def _load_json(path: Path) -> dict:
@@ -375,11 +371,11 @@ def test_sd35_clip_text_with_projection_parity(encoder_subdir: str):
 
     cfg_raw = _load_json(text_encoder_dir / "config.json")
     for k in (
-        "_name_or_path",
-        "transformers_version",
-        "model_type",
-        "tokenizer_class",
-        "torch_dtype",
+            "_name_or_path",
+            "transformers_version",
+            "model_type",
+            "tokenizer_class",
+            "torch_dtype",
     ):
         cfg_raw.pop(k, None)
 
@@ -436,8 +432,7 @@ def _iter_pretrained_safetensors(model_dir: Path):
         return
 
     raise FileNotFoundError(
-        f"Missing safetensors checkpoint in {model_dir} (expected model.safetensors or model.safetensors.index.json)"
-    )
+        f"Missing safetensors checkpoint in {model_dir} (expected model.safetensors or model.safetensors.index.json)")
 
 
 def _scheduler_cfg() -> dict:
@@ -445,6 +440,7 @@ def _scheduler_cfg() -> dict:
     cfg.pop("_class_name", None)
     cfg.pop("_diffusers_version", None)
     return cfg
+
 
 def test_sd35_t5_encoder_model_parity():
     if not MODEL_DIR.exists():
@@ -473,10 +469,8 @@ def test_sd35_t5_encoder_model_parity():
             max_abs = float(t[finite].abs().max().item())
         else:
             max_abs = float("nan")
-        print(
-            f"[NONFINITE] {name}: shape={tuple(t.shape)} dtype={t.dtype} device={t.device} "
-            f"finite={pct_finite:.2f}% nan={nan_count} inf={inf_count} max_abs_finite={max_abs}"
-        )
+        print(f"[NONFINITE] {name}: shape={tuple(t.shape)} dtype={t.dtype} device={t.device} "
+              f"finite={pct_finite:.2f}% nan={nan_count} inf={inf_count} max_abs_finite={max_abs}")
         pytest.fail(f"Non-finite values detected in {name}")
 
     text_encoder_dir = MODEL_DIR / "text_encoder_3"

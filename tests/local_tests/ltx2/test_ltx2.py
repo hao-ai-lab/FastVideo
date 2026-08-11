@@ -41,10 +41,8 @@ def _infer_patch_params(in_channels: int) -> tuple[int, int]:
             patch_size = root
             num_channels_latents = candidate
             break
-    print(
-        f"[LTX2 TEST] Inferred patch_size={patch_size}, "
-        f"num_channels_latents={num_channels_latents}"
-    )
+    print(f"[LTX2 TEST] Inferred patch_size={patch_size}, "
+          f"num_channels_latents={num_channels_latents}")
     return patch_size, num_channels_latents
 
 
@@ -100,6 +98,7 @@ def _attach_block_detail_logging(
         return f"{tensor.float().sum().item():.6f}"
 
     def _hook_factory(block_idx: int, name: str):
+
         def _hook(_module, _inputs, outputs):  # noqa: ANN001
             if isinstance(outputs, tuple):
                 out = outputs[0]
@@ -108,29 +107,32 @@ def _attach_block_detail_logging(
             out_sum = _format_sum(out if torch.is_tensor(out) else None)
             with log_path.open("a", encoding="utf-8") as f:
                 f.write(f"{label}:{block_idx}:{name}:out_sum={out_sum}\n")
+
         return _hook
 
     for block in model.transformer_blocks:
         idx = block.idx
         for name in (
-            "attn1",
-            "attn2",
-            "ff",
-            "audio_attn1",
-            "audio_attn2",
-            "audio_ff",
-            "audio_to_video_attn",
-            "video_to_audio_attn",
+                "attn1",
+                "attn2",
+                "ff",
+                "audio_attn1",
+                "audio_attn2",
+                "audio_ff",
+                "audio_to_video_attn",
+                "video_to_audio_attn",
         ):
             if hasattr(block, name):
                 getattr(block, name).register_forward_hook(_hook_factory(idx, name))
 
     def _output_hook(name: str):
+
         def _hook(_module, _inputs, outputs):  # noqa: ANN001
             out = outputs[0] if isinstance(outputs, tuple) else outputs
             out_sum = _format_sum(out if torch.is_tensor(out) else None)
             with log_path.open("a", encoding="utf-8") as f:
                 f.write(f"{label}:output:{name}:out_sum={out_sum}\n")
+
         return _hook
 
     for name in ("proj_out", "audio_proj_out"):
@@ -140,21 +142,15 @@ def _attach_block_detail_logging(
 
 def test_ltx2_transformer_parity():
     torch.manual_seed(42)
-    diffusers_root = Path(
-        os.getenv("LTX2_DIFFUSERS_PATH", "converted/ltx2_diffusers")
-    )
-    official_path = Path(
-        os.getenv(
-            "LTX2_OFFICIAL_PATH",
-            "official_ltx_weights/ltx-2-19b-distilled.safetensors",
-        )
-    )
-    fastvideo_path = Path(
-        os.getenv(
-            "LTX2_FASTVIDEO_PATH",
-            str(diffusers_root / "transformer"),
-        )
-    )
+    diffusers_root = Path(os.getenv("LTX2_DIFFUSERS_PATH", "converted/ltx2_diffusers"))
+    official_path = Path(os.getenv(
+        "LTX2_OFFICIAL_PATH",
+        "official_ltx_weights/ltx-2-19b-distilled.safetensors",
+    ))
+    fastvideo_path = Path(os.getenv(
+        "LTX2_FASTVIDEO_PATH",
+        str(diffusers_root / "transformer"),
+    ))
     if not official_path.exists():
         pytest.skip(f"LTX-2 official weights not found at {official_path}")
     if not fastvideo_path.exists():
@@ -165,8 +161,7 @@ def test_ltx2_transformer_parity():
         from ltx_core.guidance.perturbations import BatchedPerturbationConfig
         from ltx_core.loader.sft_loader import SafetensorsModelStateDictLoader
         from ltx_core.loader.single_gpu_model_builder import SingleGPUModelBuilder
-        from ltx_core.model.transformer import (LTXModelConfigurator,
-                                                LTXV_MODEL_COMFY_RENAMING_MAP)
+        from ltx_core.model.transformer import (LTXModelConfigurator, LTXV_MODEL_COMFY_RENAMING_MAP)
         from ltx_core.model.transformer.modality import Modality
         from ltx_core.types import VideoLatentShape
     except ImportError as exc:
@@ -178,48 +173,35 @@ def test_ltx2_transformer_parity():
 
     config = LTX2VideoConfig()
     cfg = config.arch_config
-    cfg.num_attention_heads = transformer_config.get("num_attention_heads",
-                                                     cfg.num_attention_heads)
-    cfg.attention_head_dim = transformer_config.get("attention_head_dim",
-                                                    cfg.attention_head_dim)
+    cfg.num_attention_heads = transformer_config.get("num_attention_heads", cfg.num_attention_heads)
+    cfg.attention_head_dim = transformer_config.get("attention_head_dim", cfg.attention_head_dim)
     cfg.num_layers = transformer_config.get("num_layers", cfg.num_layers)
-    cfg.cross_attention_dim = transformer_config.get(
-        "cross_attention_dim", cfg.cross_attention_dim)
-    cfg.caption_channels = transformer_config.get("caption_channels",
-                                                  cfg.caption_channels)
+    cfg.cross_attention_dim = transformer_config.get("cross_attention_dim", cfg.cross_attention_dim)
+    cfg.caption_channels = transformer_config.get("caption_channels", cfg.caption_channels)
     cfg.norm_eps = transformer_config.get("norm_eps", cfg.norm_eps)
-    cfg.attention_type = transformer_config.get("attention_type",
-                                                cfg.attention_type)
-    cfg.positional_embedding_theta = transformer_config.get(
-        "positional_embedding_theta", cfg.positional_embedding_theta)
-    cfg.positional_embedding_max_pos = transformer_config.get(
-        "positional_embedding_max_pos", cfg.positional_embedding_max_pos)
-    cfg.timestep_scale_multiplier = transformer_config.get(
-        "timestep_scale_multiplier", cfg.timestep_scale_multiplier)
-    cfg.use_middle_indices_grid = transformer_config.get(
-        "use_middle_indices_grid", cfg.use_middle_indices_grid)
+    cfg.attention_type = transformer_config.get("attention_type", cfg.attention_type)
+    cfg.positional_embedding_theta = transformer_config.get("positional_embedding_theta",
+                                                            cfg.positional_embedding_theta)
+    cfg.positional_embedding_max_pos = transformer_config.get("positional_embedding_max_pos",
+                                                              cfg.positional_embedding_max_pos)
+    cfg.timestep_scale_multiplier = transformer_config.get("timestep_scale_multiplier", cfg.timestep_scale_multiplier)
+    cfg.use_middle_indices_grid = transformer_config.get("use_middle_indices_grid", cfg.use_middle_indices_grid)
     cfg.rope_type = transformer_config.get("rope_type", cfg.rope_type)
     cfg.double_precision_rope = transformer_config.get(
         "double_precision_rope",
-        transformer_config.get("frequencies_precision", "")
-        == "float64",
+        transformer_config.get("frequencies_precision", "") == "float64",
     )
-    cfg.audio_num_attention_heads = transformer_config.get(
-        "audio_num_attention_heads", cfg.audio_num_attention_heads)
-    cfg.audio_attention_head_dim = transformer_config.get(
-        "audio_attention_head_dim", cfg.audio_attention_head_dim)
-    cfg.audio_in_channels = transformer_config.get("audio_in_channels",
-                                                   cfg.audio_in_channels)
-    cfg.audio_out_channels = transformer_config.get("audio_out_channels",
-                                                    cfg.audio_out_channels)
-    cfg.audio_cross_attention_dim = transformer_config.get(
-        "audio_cross_attention_dim", cfg.audio_cross_attention_dim)
+    cfg.audio_num_attention_heads = transformer_config.get("audio_num_attention_heads", cfg.audio_num_attention_heads)
+    cfg.audio_attention_head_dim = transformer_config.get("audio_attention_head_dim", cfg.audio_attention_head_dim)
+    cfg.audio_in_channels = transformer_config.get("audio_in_channels", cfg.audio_in_channels)
+    cfg.audio_out_channels = transformer_config.get("audio_out_channels", cfg.audio_out_channels)
+    cfg.audio_cross_attention_dim = transformer_config.get("audio_cross_attention_dim", cfg.audio_cross_attention_dim)
     cfg.audio_positional_embedding_max_pos = transformer_config.get(
         "audio_positional_embedding_max_pos",
         cfg.audio_positional_embedding_max_pos,
     )
-    cfg.av_ca_timestep_scale_multiplier = transformer_config.get(
-        "av_ca_timestep_scale_multiplier", cfg.av_ca_timestep_scale_multiplier)
+    cfg.av_ca_timestep_scale_multiplier = transformer_config.get("av_ca_timestep_scale_multiplier",
+                                                                 cfg.av_ca_timestep_scale_multiplier)
     cfg.in_channels = transformer_config.get("in_channels", cfg.in_channels)
     cfg.out_channels = transformer_config.get("out_channels", cfg.out_channels)
 
@@ -250,8 +232,7 @@ def test_ltx2_transformer_parity():
         model_path=str(official_path),
         model_sd_ops=LTXV_MODEL_COMFY_RENAMING_MAP,
     )
-    reference_model = reference_builder.build(
-        device=device, dtype=precision).to(device=device, dtype=precision)
+    reference_model = reference_builder.build(device=device, dtype=precision).to(device=device, dtype=precision)
     reference_model.set_gradient_checkpointing(False)
 
     fastvideo_model.eval()
@@ -328,9 +309,9 @@ def test_ltx2_transformer_parity():
         ref_out = patchifier.unpatchify(ref_out, output_shape=video_shape)
         print(f"[LTX2 TEST] Reference model output shape: {ref_out.shape}")
         with set_forward_context(
-            current_timestep=0,
-            attn_metadata=None,
-            forward_batch=None,
+                current_timestep=0,
+                attn_metadata=None,
+                forward_batch=None,
         ):
             fastvideo_out = fastvideo_model(
                 hidden_states=hidden_states,

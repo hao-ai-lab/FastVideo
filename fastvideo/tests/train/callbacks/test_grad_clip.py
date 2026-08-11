@@ -12,7 +12,6 @@ import torch
 
 from fastvideo.train.callbacks.grad_clip import GradNormClipCallback
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -40,9 +39,7 @@ class _Method:
         self.tracker = tracker
         self.iter_seen: int | None = None
 
-    def get_grad_clip_targets(
-        self, iteration: int
-    ) -> dict[str, torch.nn.Module]:
+    def get_grad_clip_targets(self, iteration: int) -> dict[str, torch.nn.Module]:
         self.iter_seen = iteration
         return self._targets
 
@@ -83,9 +80,7 @@ class TestGradNormClipCallback:
         assert _grad_norm(m) > 1.0
 
         cb = GradNormClipCallback(max_grad_norm=1.0)
-        cb.on_before_optimizer_step(
-            method=_Method(targets={"m": m}), iteration=0
-        )
+        cb.on_before_optimizer_step(method=_Method(targets={"m": m}), iteration=0)
 
         # After clipping the L2 norm should not exceed max_grad_norm
         # (allow a tiny epsilon for the +1e-6 in the clip helper).
@@ -97,9 +92,7 @@ class TestGradNormClipCallback:
         assert before < 1.0
 
         cb = GradNormClipCallback(max_grad_norm=1.0)
-        cb.on_before_optimizer_step(
-            method=_Method(targets={"m": m}), iteration=0
-        )
+        cb.on_before_optimizer_step(method=_Method(targets={"m": m}), iteration=0)
 
         # Clip coef >1 is clamped to 1, so values are preserved
         # (modulo the *1.0 multiply, which is exact for floats).
@@ -115,9 +108,7 @@ class TestGradNormClipCallback:
     def test_tracker_logged_when_enabled(self) -> None:
         m = _make_module(grad_value=5.0)
         tracker = _RecordingTracker()
-        cb = GradNormClipCallback(
-            max_grad_norm=1.0, log_grad_norms=True
-        )
+        cb = GradNormClipCallback(max_grad_norm=1.0, log_grad_norms=True)
         cb.on_before_optimizer_step(
             method=_Method(targets={"layer": m}, tracker=tracker),
             iteration=7,
@@ -131,9 +122,7 @@ class TestGradNormClipCallback:
     def test_tracker_not_logged_when_disabled(self) -> None:
         m = _make_module(grad_value=5.0)
         tracker = _RecordingTracker()
-        cb = GradNormClipCallback(
-            max_grad_norm=1.0, log_grad_norms=False
-        )
+        cb = GradNormClipCallback(max_grad_norm=1.0, log_grad_norms=False)
         cb.on_before_optimizer_step(
             method=_Method(targets={"m": m}, tracker=tracker),
             iteration=0,
@@ -143,13 +132,12 @@ class TestGradNormClipCallback:
     def test_no_tracker_does_not_raise(self) -> None:
         m = _make_module(grad_value=5.0)
         cb = GradNormClipCallback(max_grad_norm=1.0, log_grad_norms=True)
+
         # Method without a tracker attribute at all.
 
         class _BareMethod:
 
-            def get_grad_clip_targets(
-                self, iteration: int
-            ) -> dict[str, torch.nn.Module]:
+            def get_grad_clip_targets(self, iteration: int) -> dict[str, torch.nn.Module]:
                 return {"m": m}
 
         cb.on_before_optimizer_step(method=_BareMethod(), iteration=0)

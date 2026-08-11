@@ -35,7 +35,10 @@ dependencies = [
     "torch==2.12.0",
     "torchvision",
     "torchaudio",
-    "flashinfer-python",
+    # CUDA-only: no wheels for non-Linux platforms, and the sdist build shells
+    # out to nvcc unconditionally. Gate on sys_platform so installs on macOS
+    # (MPS) and other non-Linux platforms don't try to build it from source.
+    "flashinfer-python; sys_platform == 'linux'",
 
     # Acceleration & Optimization
     "accelerate==1.0.1",
@@ -73,7 +76,12 @@ dependencies = [
     "remote-pdb",
 
     # Kernel & Packaging
-    "fastvideo-kernel==0.3.2",
+    # CUDA-only: PyPI only publishes manylinux wheels, and the sdist build
+    # requires nvcc via CMake. Gate on sys_platform so installs on macOS
+    # (MPS) and other non-Linux platforms don't try to build it from source;
+    # every fastvideo_kernel import elsewhere is already guarded to degrade
+    # gracefully when the package is absent.
+    "fastvideo-kernel==0.3.2; sys_platform == 'linux'",
     "wheel",
 
     # Training Dependencies

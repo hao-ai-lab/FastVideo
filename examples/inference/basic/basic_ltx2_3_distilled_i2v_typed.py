@@ -100,23 +100,14 @@ _inductor.coordinate_descent_tuning = True
 _inductor.coordinate_descent_check_all_directions = True
 _inductor.epilogue_fusion = False
 
-MODEL_ID = os.path.expandvars(
-    os.path.expanduser(
-        os.getenv("LTX23_MODEL_PATH", "FastVideo/LTX-2.3-Distilled-Diffusers")
-    )
-)
-OUTPUT_DIR = Path(
-    os.getenv(
-        "LTX23_OUTPUT_DIR", "outputs_video/ltx2_3_distilled_i2v_typed"
-    )
-)
+MODEL_ID = os.path.expandvars(os.path.expanduser(os.getenv("LTX23_MODEL_PATH",
+                                                           "FastVideo/LTX-2.3-Distilled-Diffusers")))
+OUTPUT_DIR = Path(os.getenv("LTX23_OUTPUT_DIR", "outputs_video/ltx2_3_distilled_i2v_typed"))
 I2V_IMAGE = os.getenv("LTX23_I2V_IMAGE", "")
-DEFAULT_PROMPT = (
-    "A fashion model takes a slow step forward and shifts her weight, "
-    "the soft fabric of her clothing swaying and rippling with the "
-    "motion, her hair shifting gently, soft even studio lighting on a "
-    "clean light background, elegant slow-motion runway feel."
-)
+DEFAULT_PROMPT = ("A fashion model takes a slow step forward and shifts her weight, "
+                  "the soft fabric of her clothing swaying and rippling with the "
+                  "motion, her hair shifting gently, soft even studio lighting on a "
+                  "clean light background, elegant slow-motion runway feel.")
 PROMPT = os.getenv("LTX23_I2V_PROMPT", DEFAULT_PROMPT)
 
 
@@ -147,9 +138,7 @@ def _collect_stage_times(
         return
     for name, metrics in stages.items():
         stage_order.setdefault(name, None)
-        stage_times.setdefault(name, []).append(
-            float(metrics.get("execution_time", 0.0))
-        )
+        stage_times.setdefault(name, []).append(float(metrics.get("execution_time", 0.0)))
 
 
 def _resolve_refine_upsampler(model_root: str) -> Path:
@@ -157,20 +146,16 @@ def _resolve_refine_upsampler(model_root: str) -> Path:
         cand = Path(model_root) / name
         if (cand / "config.json").is_file():
             return cand
-    raise FileNotFoundError(
-        f"No refine upsampler directory under {model_root}. "
-        f"Expected `{model_root}/spatial_upscaler/config.json`."
-    )
+    raise FileNotFoundError(f"No refine upsampler directory under {model_root}. "
+                            f"Expected `{model_root}/spatial_upscaler/config.json`.")
 
 
 def main() -> None:
     if not I2V_IMAGE:
-        raise SystemExit(
-            "LTX23_I2V_IMAGE is required for i2v. Example:\n"
-            "  export LTX23_I2V_IMAGE=/path/to/portrait_or_product.jpg\n"
-            "  python examples/inference/basic/"
-            "basic_ltx2_3_distilled_i2v_typed.py"
-        )
+        raise SystemExit("LTX23_I2V_IMAGE is required for i2v. Example:\n"
+                         "  export LTX23_I2V_IMAGE=/path/to/portrait_or_product.jpg\n"
+                         "  python examples/inference/basic/"
+                         "basic_ltx2_3_distilled_i2v_typed.py")
     if not Path(I2V_IMAGE).is_file():
         raise SystemExit(f"LTX23_I2V_IMAGE not found: {I2V_IMAGE}")
 
@@ -220,10 +205,9 @@ def main() -> None:
             # model-specific VAE precision / decoder defaults are picked up
             # the same way the legacy example's
             # ``PipelineConfig.from_pretrained(model_root)`` did them.
-            components=ComponentConfig(
-                upsampler_weights=str(refine_upsampler_path),
-                # Distilled has no refine LoRA — omit ``lora_path``.
-            ),
+            components=ComponentConfig(upsampler_weights=str(refine_upsampler_path),
+                                       # Distilled has no refine LoRA — omit ``lora_path``.
+                                       ),
             vae_tiling=False,
             preset_overrides={
                 "refine": {
@@ -278,11 +262,7 @@ def main() -> None:
         for w in range(warmup_runs):
             print(f"\n[warmup {w + 1}/{warmup_runs}] compiling + generating…")
             t0 = time.perf_counter()
-            generator.generate(
-                build_request(
-                    OUTPUT_DIR / f"_warmup_{w + 1}.mp4", seed=7
-                )
-            )
+            generator.generate(build_request(OUTPUT_DIR / f"_warmup_{w + 1}.mp4", seed=7))
             dt = time.perf_counter() - t0
             warmup_secs.append(dt)
             print(f"[warmup {w + 1}/{warmup_runs}] wall={dt:.1f}s")
@@ -291,46 +271,30 @@ def main() -> None:
             (OUTPUT_DIR / f"_warmup_{w + 1}.mp4").unlink(missing_ok=True)
 
         for m in range(measured_runs):
-            out_path = (
-                OUTPUT_DIR
-                / f"output_ltx2_3_distilled_i2v_typed_run_{m + 1}.mp4"
-            )
-            print(
-                f"\n[measured {m + 1}/{measured_runs}] generating: {out_path}"
-            )
+            out_path = (OUTPUT_DIR / f"output_ltx2_3_distilled_i2v_typed_run_{m + 1}.mp4")
+            print(f"\n[measured {m + 1}/{measured_runs}] generating: {out_path}")
             t0 = time.perf_counter()
-            result = generator.generate(
-                build_request(out_path, seed=2002 + m)
-            )
+            result = generator.generate(build_request(out_path, seed=2002 + m))
             wall = time.perf_counter() - t0
             # ``e2e_latency`` is currently surfaced via ``result.extra``;
             # ``GenerationResult`` exposes ``generation_time`` as a
             # first-class field but the LTX-2 pipeline only fills the
             # legacy ``e2e_latency`` key. Prefer the explicit one, fall
             # back to wall-clock.
-            e2e = (
-                result.extra.get("e2e_latency")
-                if hasattr(result, "extra") else None
-            ) or wall
+            e2e = (result.extra.get("e2e_latency") if hasattr(result, "extra") else None) or wall
             measured_secs.append(e2e)
-            print(
-                f"[measured {m + 1}/{measured_runs}] "
-                f"e2e={e2e:.2f}s wall={wall:.2f}s"
-            )
+            print(f"[measured {m + 1}/{measured_runs}] "
+                  f"e2e={e2e:.2f}s wall={wall:.2f}s")
             _print_stage_breakdown(result, f"measured {m + 1}")
             _collect_stage_times(result, stage_times, stage_order)
 
         print("\n=== summary ===")
-        print(
-            f"warmup wall-times:      "
-            f"{[round(x, 1) for x in warmup_secs]}"
-        )
+        print(f"warmup wall-times:      "
+              f"{[round(x, 1) for x in warmup_secs]}")
         if measured_secs:
             avg = sum(measured_secs) / len(measured_secs)
-            print(
-                f"measured e2e (n={len(measured_secs)}): "
-                f"{[round(x, 2) for x in measured_secs]} -> avg {avg:.2f}s"
-            )
+            print(f"measured e2e (n={len(measured_secs)}): "
+                  f"{[round(x, 2) for x in measured_secs]} -> avg {avg:.2f}s")
         if stage_times:
             print(f"average stage times over {measured_runs} measured runs:")
             avg_total = 0.0

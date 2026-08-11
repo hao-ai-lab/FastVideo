@@ -26,16 +26,14 @@ def _load_official_functions():
         import importlib.util
 
         pose_path = OFFICIAL_REF_DIR / "utils" / "pose_utils.py"
-        pose_spec = importlib.util.spec_from_file_location(
-            "dreamx_world_pose_utils", pose_path)
+        pose_spec = importlib.util.spec_from_file_location("dreamx_world_pose_utils", pose_path)
         if pose_spec is None or pose_spec.loader is None:
             raise RuntimeError(f"Cannot load DreamX pose_utils: {pose_path}")
         pose_module = importlib.util.module_from_spec(pose_spec)
         pose_spec.loader.exec_module(pose_module)
 
         source = (OFFICIAL_REF_DIR / "utils" / "inference_utils.py").read_text()
-        source = source.replace(
-            "from .pose_utils import interpolate_camera_poses\n", "")
+        source = source.replace("from .pose_utils import interpolate_camera_poses\n", "")
         namespace = {"interpolate_camera_poses": pose_module.interpolate_camera_poses}
         exec(compile(source, str(OFFICIAL_REF_DIR / "utils" / "inference_utils.py"), "exec"), namespace)
     except Exception as exc:  # noqa: BLE001 - local parity should skip missing reference deps.
@@ -91,5 +89,7 @@ def test_dreamx_world_camera_conditioning_matches_official(action_seq, action_sp
     for key in ("viewmats", "K"):
         assert official[key].shape == fastvideo[key].shape
         diff = (official[key] - fastvideo[key]).abs()
-        print(f"{key}: shape={tuple(fastvideo[key].shape)} diff_max={diff.max().item():.8f} diff_mean={diff.mean().item():.8f}")
+        print(
+            f"{key}: shape={tuple(fastvideo[key].shape)} diff_max={diff.max().item():.8f} diff_mean={diff.mean().item():.8f}"
+        )
         assert_close(fastvideo[key], official[key], atol=1e-5, rtol=1e-5)

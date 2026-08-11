@@ -23,14 +23,12 @@ import torch
 from fastvideo import VideoGenerator
 from fastvideo.eval import create_evaluator
 
-PROMPT = (
-    "A warm sunny backyard. The camera starts in a tight cinematic close-up "
-    "of a woman and a man in their 30s, facing each other with serious "
-    "expressions. The woman, emotional and dramatic, says softly, \"That's "
-    "it... Dad's lost it. And we've lost Dad.\" The man exhales, slightly "
-    "annoyed: \"Stop being so dramatic, Jess.\" A beat. He glances aside, "
-    "then mutters defensively, \"He's just having fun.\""
-)
+PROMPT = ("A warm sunny backyard. The camera starts in a tight cinematic close-up "
+          "of a woman and a man in their 30s, facing each other with serious "
+          "expressions. The woman, emotional and dramatic, says softly, \"That's "
+          "it... Dad's lost it. And we've lost Dad.\" The man exhales, slightly "
+          "annoyed: \"Stop being so dramatic, Jess.\" A beat. He glances aside, "
+          "then mutters defensively, \"He's just having fun.\"")
 
 METRICS = [
     "audio.clap_score",

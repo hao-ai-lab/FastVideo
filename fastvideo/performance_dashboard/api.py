@@ -23,6 +23,10 @@ FRONTEND_DIST = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "performance_dashboard", "frontend", "dist"))
 
 
+def _matches_display_filters(record: dict[str, Any], model_id: str | None, gpu_type: str | None) -> bool:
+    return (not model_id or record.get("model_id") == model_id) and (not gpu_type or record.get("gpu_type") == gpu_type)
+
+
 class PerformanceDataStore:
 
     def __init__(self, tracking_root: str | None = None) -> None:
@@ -147,11 +151,10 @@ def create_app(store: PerformanceDataStore | None = None) -> FastAPI:
         # query is kept only so the frontend can share filter state across
         # endpoints without affecting the summary semantics.
         loaded = data_store.load_records(days=None)
-        filtered = filter_records(loaded, model_id=model_id, gpu_type=gpu_type)
-        rows = build_latest_summary(
-            filtered,
-            run_source=run_source,
-        )
+        rows = [
+            row for row in build_latest_summary(loaded, run_source=run_source)
+            if _matches_display_filters(row, model_id, gpu_type)
+        ]
         return {
             "rows": rows,
             "count": len(rows),
@@ -177,8 +180,10 @@ def create_app(store: PerformanceDataStore | None = None) -> FastAPI:
         run_source: str | None = None,
     ) -> dict[str, Any]:
         loaded = data_store.load_records(days=days)
-        filtered = filter_records(loaded, model_id=model_id, gpu_type=gpu_type, run_source=run_source)
-        groups = build_trends(filtered)
+        source_filtered = filter_records(loaded, run_source=run_source)
+        groups = [
+            group for group in build_trends(source_filtered) if _matches_display_filters(group, model_id, gpu_type)
+        ]
         return {
             "groups": groups,
             "count": len(groups),

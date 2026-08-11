@@ -27,9 +27,7 @@ def sliding_tile_attention(
 ) -> torch.Tensor:
     # Check if the specific op is available
     if sta_fwd is None:
-        return sliding_tile_attention_triton(
-            q, k, v, window_size, text_length, has_text, seq_shape
-        )
+        return sliding_tile_attention_triton(q, k, v, window_size, text_length, has_text, seq_shape)
 
     seq_length = q.shape[2]
     shape_map = {"30x48x80": 1, "36x48x48": 2, "18x48x80": 3}
@@ -53,11 +51,7 @@ def sliding_tile_attention(
         k_h = k[:, head_idx:head_idx + 1].contiguous()
         v_h = v[:, head_idx:head_idx + 1].contiguous()
         o_h = torch.empty_like(q_h)
-        sta_fwd(
-            q_h, k_h,
-            v_h, o_h,
-            t, h, w, text_length, False, has_text, flag
-        )
+        sta_fwd(q_h, k_h, v_h, o_h, t, h, w, text_length, False, has_text, flag)
         output[:, head_idx:head_idx + 1] = o_h
 
     if has_text:
@@ -96,35 +90,27 @@ def video_sparse_attn(
     if k.shape[0] != batch or v.shape[0] != batch or k.shape[1] != heads or v.shape[1] != heads:
         raise ValueError("Expected q/k/v to have the same batch and head dimensions.")
     if v.shape[2] != kv_seq_len:
-        raise ValueError(
-            f"Expected k and v to have the same sequence length, got "
-            f"k.shape[2]={kv_seq_len}, v.shape[2]={v.shape[2]}"
-        )
+        raise ValueError(f"Expected k and v to have the same sequence length, got "
+                         f"k.shape[2]={kv_seq_len}, v.shape[2]={v.shape[2]}")
 
     if q_seq_len % block_elements != 0 or kv_seq_len % block_elements != 0:
-        raise ValueError(
-            f"q_seq_len and kv_seq_len must be divisible by block_elements={block_elements}, "
-            f"got q_seq_len={q_seq_len}, kv_seq_len={kv_seq_len}"
-        )
+        raise ValueError(f"q_seq_len and kv_seq_len must be divisible by block_elements={block_elements}, "
+                         f"got q_seq_len={q_seq_len}, kv_seq_len={kv_seq_len}")
     q_num_blocks = q_seq_len // block_elements
     kv_num_blocks = kv_seq_len // block_elements
     if variable_block_sizes.numel() != kv_num_blocks:
-        raise ValueError(
-            f"variable_block_sizes must have length kv_num_blocks={kv_num_blocks}, "
-            f"got {variable_block_sizes.numel()}"
-        )
+        raise ValueError(f"variable_block_sizes must have length kv_num_blocks={kv_num_blocks}, "
+                         f"got {variable_block_sizes.numel()}")
     if q_variable_block_sizes.numel() != q_num_blocks:
-        raise ValueError(
-            f"q_variable_block_sizes must have length q_num_blocks={q_num_blocks}, "
-            f"got {q_variable_block_sizes.numel()}"
-        )
+        raise ValueError(f"q_variable_block_sizes must have length q_num_blocks={q_num_blocks}, "
+                         f"got {q_variable_block_sizes.numel()}")
 
     # Compression branch (fused Triton: bf16 read → fp32 accumulate → div → bf16 write)
     q_c = fused_block_mean(q, q_variable_block_sizes, block_elements)
     k_c = fused_block_mean(k, variable_block_sizes, block_elements)
     v_c = fused_block_mean(v, variable_block_sizes, block_elements)
 
-    scores = torch.matmul(q_c, k_c.transpose(-2, -1)) / (dim ** 0.5)
+    scores = torch.matmul(q_c, k_c.transpose(-2, -1)) / (dim**0.5)
     attn = torch.softmax(scores, dim=-1)
     out_c = torch.matmul(attn, v_c)
     out_c = out_c.view(batch, heads, q_num_blocks, 1, dim)
@@ -163,61 +149,46 @@ def video_sparse_attn_bshd(
         block_size = (block_size, block_size, block_size)
     block_elements = block_size[0] * block_size[1] * block_size[2]
     if block_elements != 256:
-        raise ValueError(
-            "video_sparse_attn_bshd is only defined for block_elements=256 "
-            f"(got {block_elements}); use video_sparse_attn for the 64-block path."
-        )
+        raise ValueError("video_sparse_attn_bshd is only defined for block_elements=256 "
+                         f"(got {block_elements}); use video_sparse_attn for the 64-block path.")
 
     batch, q_seq_len, heads, dim = q.shape
     kv_seq_len = k.shape[1]
     if k.shape[0] != batch or v.shape[0] != batch or k.shape[2] != heads or v.shape[2] != heads:
         raise ValueError("Expected q/k/v to have the same batch and head dimensions.")
     if v.shape[1] != kv_seq_len:
-        raise ValueError(
-            f"Expected k and v to have the same sequence length, got "
-            f"k.shape[1]={kv_seq_len}, v.shape[1]={v.shape[1]}"
-        )
+        raise ValueError(f"Expected k and v to have the same sequence length, got "
+                         f"k.shape[1]={kv_seq_len}, v.shape[1]={v.shape[1]}")
     if q_seq_len % block_elements != 0 or kv_seq_len % block_elements != 0:
-        raise ValueError(
-            f"q_seq_len and kv_seq_len must be divisible by block_elements={block_elements}, "
-            f"got q_seq_len={q_seq_len}, kv_seq_len={kv_seq_len}"
-        )
+        raise ValueError(f"q_seq_len and kv_seq_len must be divisible by block_elements={block_elements}, "
+                         f"got q_seq_len={q_seq_len}, kv_seq_len={kv_seq_len}")
     q_num_blocks = q_seq_len // block_elements
     kv_num_blocks = kv_seq_len // block_elements
     if variable_block_sizes.numel() != kv_num_blocks:
-        raise ValueError(
-            f"variable_block_sizes must have length kv_num_blocks={kv_num_blocks}, "
-            f"got {variable_block_sizes.numel()}"
-        )
+        raise ValueError(f"variable_block_sizes must have length kv_num_blocks={kv_num_blocks}, "
+                         f"got {variable_block_sizes.numel()}")
     if q_variable_block_sizes.numel() != q_num_blocks:
-        raise ValueError(
-            f"q_variable_block_sizes must have length q_num_blocks={q_num_blocks}, "
-            f"got {q_variable_block_sizes.numel()}"
-        )
+        raise ValueError(f"q_variable_block_sizes must have length q_num_blocks={q_num_blocks}, "
+                         f"got {q_variable_block_sizes.numel()}")
 
     # Compression branch (BSHD-native: mean over the 256-token axis).
     token_idx = torch.arange(block_elements, device=q.device, dtype=torch.int32)
-    q_token_valid = (token_idx.view(1, -1) < q_variable_block_sizes.view(-1, 1)).view(
-        1, q_num_blocks, block_elements, 1, 1
-    )
-    kv_token_valid = (token_idx.view(1, -1) < variable_block_sizes.view(-1, 1)).view(
-        1, kv_num_blocks, block_elements, 1, 1
-    )
+    q_token_valid = (token_idx.view(1, -1) < q_variable_block_sizes.view(-1,
+                                                                         1)).view(1, q_num_blocks, block_elements, 1, 1)
+    kv_token_valid = (token_idx.view(1, -1) < variable_block_sizes.view(-1,
+                                                                        1)).view(1, kv_num_blocks, block_elements, 1, 1)
 
     q_c = q.view(batch, q_num_blocks, block_elements, heads, dim)
     k_c = k.view(batch, kv_num_blocks, block_elements, heads, dim)
     v_c = v.view(batch, kv_num_blocks, block_elements, heads, dim)
-    q_c = ((q_c.float() * q_token_valid).sum(dim=2)
-           / q_variable_block_sizes.view(1, -1, 1, 1)).to(q.dtype)
-    k_c = ((k_c.float() * kv_token_valid).sum(dim=2)
-           / variable_block_sizes.view(1, -1, 1, 1)).to(k.dtype)
-    v_c = ((v_c.float() * kv_token_valid).sum(dim=2)
-           / variable_block_sizes.view(1, -1, 1, 1)).to(v.dtype)
+    q_c = ((q_c.float() * q_token_valid).sum(dim=2) / q_variable_block_sizes.view(1, -1, 1, 1)).to(q.dtype)
+    k_c = ((k_c.float() * kv_token_valid).sum(dim=2) / variable_block_sizes.view(1, -1, 1, 1)).to(k.dtype)
+    v_c = ((v_c.float() * kv_token_valid).sum(dim=2) / variable_block_sizes.view(1, -1, 1, 1)).to(v.dtype)
     q_ch = q_c.permute(0, 2, 1, 3).contiguous()
     k_ch = k_c.permute(0, 2, 1, 3).contiguous()
     v_ch = v_c.permute(0, 2, 1, 3).contiguous()
 
-    scores = torch.matmul(q_ch, k_ch.transpose(-2, -1)) / (dim ** 0.5)
+    scores = torch.matmul(q_ch, k_ch.transpose(-2, -1)) / (dim**0.5)
     attn = torch.softmax(scores, dim=-1)
     out_c_ch = torch.matmul(attn, v_ch)
     out_c_blk = out_c_ch.permute(0, 2, 1, 3).contiguous()
@@ -229,9 +200,7 @@ def video_sparse_attn_bshd(
     out = out_s
     out_view = out.view(batch, q_num_blocks, block_elements, heads, dim)
     if compress_attn_weight is not None:
-        gate_view = compress_attn_weight.view(
-            batch, q_num_blocks, block_elements, heads, dim
-        )
+        gate_view = compress_attn_weight.view(batch, q_num_blocks, block_elements, heads, dim)
         out_view.add_(out_c_blk.unsqueeze(2) * gate_view)
     else:
         out_view.add_(out_c_blk.unsqueeze(2))

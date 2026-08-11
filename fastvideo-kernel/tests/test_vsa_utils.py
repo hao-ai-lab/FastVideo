@@ -58,7 +58,7 @@ class TestGetTilePartitionIndices:
         device = torch.device("cpu")
         idx = get_tile_partition_indices(dit_seq_shape, tile_size, device)
         n = math.prod(dit_seq_shape)
-        assert idx.shape == (n,)
+        assert idx.shape == (n, )
         assert idx.dtype == torch.long
         assert set(idx.tolist()) == set(range(n))
 
@@ -73,7 +73,7 @@ class TestGetTilePartitionIndices:
         device = torch.device("cpu")
         shape = (5, 7, 3)
         idx = get_tile_partition_indices(shape, (4, 4, 4), device)
-        assert idx.shape == (5 * 7 * 3,)
+        assert idx.shape == (5 * 7 * 3, )
         assert set(idx.tolist()) == set(range(5 * 7 * 3))
 
 
@@ -188,9 +188,12 @@ class TestBuildVsaMetadata:
         """build_vsa_metadata returns all expected keys."""
         meta = build_vsa_metadata((8, 16, 16), device="cpu")
         expected_keys = {
-            "tile_partition_indices", "reverse_tile_partition_indices",
-            "variable_block_sizes", "non_pad_index",
-            "num_tiles", "max_block_size",
+            "tile_partition_indices",
+            "reverse_tile_partition_indices",
+            "variable_block_sizes",
+            "non_pad_index",
+            "num_tiles",
+            "max_block_size",
         }
         assert set(meta.keys()) == expected_keys
 
@@ -227,8 +230,8 @@ class TestBuildVsaMetadata:
         shape = (8, 16, 16)
         meta = build_vsa_metadata(shape, device="cpu")
         n = math.prod(shape)
-        assert meta["tile_partition_indices"].shape == (n,)
-        assert meta["reverse_tile_partition_indices"].shape == (n,)
+        assert meta["tile_partition_indices"].shape == (n, )
+        assert meta["reverse_tile_partition_indices"].shape == (n, )
         assert meta["variable_block_sizes"].sum().item() == n
         assert meta["non_pad_index"].shape[0] == n
 
@@ -243,16 +246,14 @@ class TestConsistencyWithFramework:
     def _skip_if_no_framework(self):
         try:
             from fastvideo.attention.backends.video_sparse_attn import (
-                get_tile_partition_indices as fw_get_tile,
-            )
+                get_tile_partition_indices as fw_get_tile, )
         except ImportError:
             pytest.skip("fastvideo framework not installed")
 
     @pytest.mark.parametrize("shape", [(8, 16, 16), (9, 10, 7)])
     def test_tile_indices_match(self, shape):
         from fastvideo.attention.backends.video_sparse_attn import (
-            get_tile_partition_indices as fw_get_tile,
-        )
+            get_tile_partition_indices as fw_get_tile, )
         device = torch.device("cpu")
         tile_size = (4, 4, 4)
         ours = get_tile_partition_indices(shape, tile_size, device)
@@ -262,8 +263,7 @@ class TestConsistencyWithFramework:
     @pytest.mark.parametrize("shape", [(8, 16, 16), (9, 10, 7)])
     def test_variable_block_sizes_match(self, shape):
         from fastvideo.attention.backends.video_sparse_attn import (
-            construct_variable_block_sizes as fw_construct_vbs,
-        )
+            construct_variable_block_sizes as fw_construct_vbs, )
         device = torch.device("cpu")
         tile_size = (4, 4, 4)
         num_tiles = tuple(math.ceil(s / t) for s, t in zip(shape, tile_size))

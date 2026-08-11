@@ -137,7 +137,7 @@ class TestInMemorySessionStore:
                 ContinuationState(kind="ltx2.v1", payload={"i": i}),
             )
 
-        threads = [threading.Thread(target=write, args=(i,)) for i in range(200)]
+        threads = [threading.Thread(target=write, args=(i, )) for i in range(200)]
         for t in threads:
             t.start()
         for t in threads:
@@ -154,9 +154,7 @@ class TestSnapshotHydrateRoundTrip:
 
         typed = LTX2ContinuationState(
             segment_index=4,
-            video_frames=[
-                np.full((32, 32, 3), i * 5, dtype=np.uint8) for i in range(3)
-            ],
+            video_frames=[np.full((32, 32, 3), i * 5, dtype=np.uint8) for i in range(3)],
             audio_latents=torch.randn(1, 4, 8, 32, dtype=torch.float32),
             audio_sample_rate=24000,
             audio_conditioning_num_frames=5,
@@ -177,10 +175,8 @@ class TestSnapshotHydrateRoundTrip:
         rebuilt = sessions.snapshot(new_sid)
         assert rebuilt is snapshot
 
-        restored = LTX2ContinuationState.from_continuation_state(
-            rebuilt, blob_store=blob_store)
+        restored = LTX2ContinuationState.from_continuation_state(rebuilt, blob_store=blob_store)
         assert restored.segment_index == typed.segment_index
         assert restored.audio_sample_rate == typed.audio_sample_rate
-        torch.testing.assert_close(
-            restored.audio_latents, typed.audio_latents)
+        torch.testing.assert_close(restored.audio_latents, typed.audio_latents)
         assert len(restored.video_frames) == len(typed.video_frames)

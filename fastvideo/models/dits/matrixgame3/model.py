@@ -138,6 +138,7 @@ def _apply_rope_with_frame_indices(
 
 
 class MatrixGame3TimeImageEmbedding(nn.Module):
+
     def __init__(
         self,
         dim: int,
@@ -145,12 +146,8 @@ class MatrixGame3TimeImageEmbedding(nn.Module):
     ):
         super().__init__()
 
-        self.time_embedder = TimestepEmbedder(
-            dim, frequency_embedding_size=time_freq_dim, act_layer="silu"
-        )
-        self.time_modulation = ModulateProjection(
-            dim, factor=6, act_layer="silu"
-        )
+        self.time_embedder = TimestepEmbedder(dim, frequency_embedding_size=time_freq_dim, act_layer="silu")
+        self.time_modulation = ModulateProjection(dim, factor=6, act_layer="silu")
 
     def forward(
         self,
@@ -173,6 +170,7 @@ class MatrixGame3TimeImageEmbedding(nn.Module):
 
 
 class MatrixGame3CrossAttention(WanSelfAttention):
+
     def forward(self, x, context, context_lens=None):
         r"""
         Args:
@@ -197,6 +195,7 @@ class MatrixGame3CrossAttention(WanSelfAttention):
 
 
 class MatrixGame3TransformerBlock(nn.Module):
+
     def __init__(
         self,
         dim: int,
@@ -254,9 +253,7 @@ class MatrixGame3TransformerBlock(nn.Module):
         )
 
         # 2. Cross-attention
-        self.attn2 = MatrixGame3CrossAttention(
-            dim, num_heads, qk_norm=qk_norm, eps=eps
-        )
+        self.attn2 = MatrixGame3CrossAttention(dim, num_heads, qk_norm=qk_norm, eps=eps)
         self.cross_attn_residual_norm = ScaleResidualLayerNormScaleShift(
             dim,
             norm_type="layer",
@@ -315,9 +312,7 @@ class MatrixGame3TransformerBlock(nn.Module):
                 c_shift_msa,
                 c_scale_msa,
                 c_gate_msa,
-            ) = (self.scale_shift_table.unsqueeze(0) + temb.float()).chunk(
-                6, dim=2
-            )
+            ) = (self.scale_shift_table.unsqueeze(0) + temb.float()).chunk(6, dim=2)
             # batch_size, seq_len, 1, inner_dim
             shift_msa = shift_msa.squeeze(2)
             scale_msa = scale_msa.squeeze(2)
@@ -339,9 +334,7 @@ class MatrixGame3TransformerBlock(nn.Module):
         assert shift_msa.dtype == torch.float32
 
         # 1. Self-attention
-        norm_hidden_states = (
-            self.norm1(hidden_states).float() * (1 + scale_msa) + shift_msa
-        ).to(orig_dtype)
+        norm_hidden_states = (self.norm1(hidden_states).float() * (1 + scale_msa) + shift_msa).to(orig_dtype)
         query, _ = self.to_q(norm_hidden_states)
         key, _ = self.to_k(norm_hidden_states)
         value, _ = self.to_v(norm_hidden_states)
@@ -373,30 +366,42 @@ class MatrixGame3TransformerBlock(nn.Module):
             if pred_indices is None:
                 pred_indices = torch.arange(grid_frames - memory_length, device=query.device, dtype=torch.long)
 
-            query_memory = _apply_rope_with_frame_indices(
-                query_memory, freqs, height=grid_height, width=grid_width, frame_indices=mem_indices
-            )
-            key_memory = _apply_rope_with_frame_indices(
-                key_memory, freqs, height=grid_height, width=grid_width, frame_indices=mem_indices
-            )
-            query_pred = _apply_rope_with_frame_indices(
-                query_pred, freqs, height=grid_height, width=grid_width, frame_indices=pred_indices
-            )
-            key_pred = _apply_rope_with_frame_indices(
-                key_pred, freqs, height=grid_height, width=grid_width, frame_indices=pred_indices
-            )
+            query_memory = _apply_rope_with_frame_indices(query_memory,
+                                                          freqs,
+                                                          height=grid_height,
+                                                          width=grid_width,
+                                                          frame_indices=mem_indices)
+            key_memory = _apply_rope_with_frame_indices(key_memory,
+                                                        freqs,
+                                                        height=grid_height,
+                                                        width=grid_width,
+                                                        frame_indices=mem_indices)
+            query_pred = _apply_rope_with_frame_indices(query_pred,
+                                                        freqs,
+                                                        height=grid_height,
+                                                        width=grid_width,
+                                                        frame_indices=pred_indices)
+            key_pred = _apply_rope_with_frame_indices(key_pred,
+                                                      freqs,
+                                                      height=grid_height,
+                                                      width=grid_width,
+                                                      frame_indices=pred_indices)
             query = torch.cat([query_memory, query_pred], dim=1)
             key = torch.cat([key_memory, key_pred], dim=1)
         else:
             pred_indices = predict_latent_idx
             if pred_indices is None:
                 pred_indices = torch.arange(grid_frames, device=query.device, dtype=torch.long)
-            query = _apply_rope_with_frame_indices(
-                query, freqs, height=grid_height, width=grid_width, frame_indices=pred_indices
-            )
-            key = _apply_rope_with_frame_indices(
-                key, freqs, height=grid_height, width=grid_width, frame_indices=pred_indices
-            )
+            query = _apply_rope_with_frame_indices(query,
+                                                   freqs,
+                                                   height=grid_height,
+                                                   width=grid_width,
+                                                   frame_indices=pred_indices)
+            key = _apply_rope_with_frame_indices(key,
+                                                 freqs,
+                                                 height=grid_height,
+                                                 width=grid_width,
+                                                 frame_indices=pred_indices)
 
         attn_output, _ = self.attn1(query, key, value)
         attn_output = attn_output.flatten(2)
@@ -407,8 +412,7 @@ class MatrixGame3TransformerBlock(nn.Module):
         hidden_states = hidden_states.float() + attn_output.float() * gate_msa.float()
         if self.use_memory and plucker_emb is not None:
             c2ws_hidden_states = self.cam_injector_layer2(
-                torch.nn.functional.silu(self.cam_injector_layer1(plucker_emb))
-            )
+                torch.nn.functional.silu(self.cam_injector_layer1(plucker_emb)))
             c2ws_hidden_states = c2ws_hidden_states + plucker_emb
             cam_scale = self.cam_scale_layer(c2ws_hidden_states)
             cam_shift = self.cam_shift_layer(c2ws_hidden_states)
@@ -416,19 +420,14 @@ class MatrixGame3TransformerBlock(nn.Module):
         norm_hidden_states = self.self_attn_residual_norm.norm(hidden_states)
 
         # 2. Cross-attention
-        attn_output = self.attn2(
-            norm_hidden_states, context=encoder_hidden_states, context_lens=None
-        )
+        attn_output = self.attn2(norm_hidden_states, context=encoder_hidden_states, context_lens=None)
 
         # - use_memory / action path: x = norm3(x); x = x + cross_attn(x)
         # - plain path:              x = x + cross_attn(norm3(x))
-        cross_attn_residual_base = (
-            norm_hidden_states if (mouse_cond is not None or self.use_memory) else hidden_states
-        )
+        cross_attn_residual_base = (norm_hidden_states if
+                                    (mouse_cond is not None or self.use_memory) else hidden_states)
         hidden_states = cross_attn_residual_base + attn_output
-        norm_hidden_states = self.cross_attn_residual_norm.norm(
-            hidden_states.float()
-        )
+        norm_hidden_states = self.cross_attn_residual_norm.norm(hidden_states.float())
         norm_hidden_states = norm_hidden_states * (1 + c_scale_msa) + c_shift_msa
 
         # ================= Action Module =================
@@ -446,9 +445,7 @@ class MatrixGame3TransformerBlock(nn.Module):
                 keyboard_cond_memory=keyboard_cond_memory,
             )
 
-            norm_hidden_states = self.cross_attn_residual_norm.norm(
-                hidden_states.float()
-            )
+            norm_hidden_states = self.cross_attn_residual_norm.norm(hidden_states.float())
             norm_hidden_states = norm_hidden_states * (1 + c_scale_msa) + c_shift_msa
         # =================================================
 
@@ -469,16 +466,10 @@ class MatrixGame3WanModel(BaseDiT):
 
     _fsdp_shard_conditions = _DEFAULT_MATRIXGAME3_CONFIG._fsdp_shard_conditions
     _compile_conditions = _DEFAULT_MATRIXGAME3_CONFIG._compile_conditions
-    _supported_attention_backends = (
-        _DEFAULT_MATRIXGAME3_CONFIG._supported_attention_backends
-    )
+    _supported_attention_backends = (_DEFAULT_MATRIXGAME3_CONFIG._supported_attention_backends)
     param_names_mapping = _DEFAULT_MATRIXGAME3_CONFIG.param_names_mapping
-    reverse_param_names_mapping = (
-        _DEFAULT_MATRIXGAME3_CONFIG.reverse_param_names_mapping
-    )
-    lora_param_names_mapping = (
-        _DEFAULT_MATRIXGAME3_CONFIG.lora_param_names_mapping
-    )
+    reverse_param_names_mapping = (_DEFAULT_MATRIXGAME3_CONFIG.reverse_param_names_mapping)
+    lora_param_names_mapping = (_DEFAULT_MATRIXGAME3_CONFIG.lora_param_names_mapping)
 
     def __init__(
         self,
@@ -531,24 +522,21 @@ class MatrixGame3WanModel(BaseDiT):
         self.action_config = getattr(config, "action_config", {})
 
         # 3. Transformer blocks
-        self.blocks = nn.ModuleList(
-            [
-                MatrixGame3TransformerBlock(
-                    inner_dim,
-                    config.ffn_dim,
-                    config.num_attention_heads,
-                    config.qk_norm,
-                    config.cross_attn_norm,
-                    config.eps,
-                    self._supported_attention_backends,
-                    prefix=f"{getattr(config, 'prefix', 'Wan')}.blocks.{i}",
-                    action_config=self.action_config,
-                    block_id=i,
-                    use_memory=self.use_memory,
-                )
-                for i in range(config.num_layers)
-            ]
-        )
+        self.blocks = nn.ModuleList([
+            MatrixGame3TransformerBlock(
+                inner_dim,
+                config.ffn_dim,
+                config.num_attention_heads,
+                config.qk_norm,
+                config.cross_attn_norm,
+                config.eps,
+                self._supported_attention_backends,
+                prefix=f"{getattr(config, 'prefix', 'Wan')}.blocks.{i}",
+                action_config=self.action_config,
+                block_id=i,
+                use_memory=self.use_memory,
+            ) for i in range(config.num_layers)
+        ])
 
         # 4. Output norm & projection
         self.norm_out = LayerNormScaleShift(
@@ -559,12 +547,8 @@ class MatrixGame3WanModel(BaseDiT):
             dtype=torch.float32,
             compute_dtype=torch.float32,
         )
-        self.proj_out = nn.Linear(
-            inner_dim, config.out_channels * math.prod(config.patch_size)
-        )
-        self.scale_shift_table = nn.Parameter(
-            torch.randn(1, 2, inner_dim) / inner_dim**0.5
-        )
+        self.proj_out = nn.Linear(inner_dim, config.out_channels * math.prod(config.patch_size))
+        self.scale_shift_table = nn.Parameter(torch.randn(1, 2, inner_dim) / inner_dim**0.5)
 
         self.gradient_checkpointing = False
 
@@ -585,9 +569,7 @@ class MatrixGame3WanModel(BaseDiT):
         predict_latent_idx: tuple[int, int] | list[int] | tuple[int, ...] | torch.Tensor | None = None,
         **kwargs,
     ) -> torch.Tensor:
-        if encoder_hidden_states is not None and not isinstance(
-            encoder_hidden_states, torch.Tensor
-        ):
+        if encoder_hidden_states is not None and not isinstance(encoder_hidden_states, torch.Tensor):
             encoder_hidden_states = encoder_hidden_states[0]
 
         memory_length = 0
@@ -617,23 +599,27 @@ class MatrixGame3WanModel(BaseDiT):
             predict_latent_idx = predict_latent_idx.to(device=device_idx, dtype=torch.long)
         elif isinstance(predict_latent_idx, tuple) and len(predict_latent_idx) == 2:
             predict_latent_idx = torch.arange(
-                predict_latent_idx[0], predict_latent_idx[1],
-                device=device_idx, dtype=torch.long,
+                predict_latent_idx[0],
+                predict_latent_idx[1],
+                device=device_idx,
+                dtype=torch.long,
             )
         else:
             predict_latent_idx = torch.tensor(
-                list(predict_latent_idx), device=device_idx, dtype=torch.long,
+                list(predict_latent_idx),
+                device=device_idx,
+                dtype=torch.long,
             )
 
-        if memory_latent_idx is None or (
-            not torch.is_tensor(memory_latent_idx) and len(memory_latent_idx) == 0
-        ):
+        if memory_latent_idx is None or (not torch.is_tensor(memory_latent_idx) and len(memory_latent_idx) == 0):
             memory_latent_idx = None
         elif torch.is_tensor(memory_latent_idx):
             memory_latent_idx = memory_latent_idx.to(device=device_idx, dtype=torch.long)
         else:
             memory_latent_idx = torch.tensor(
-                list(memory_latent_idx), device=device_idx, dtype=torch.long,
+                list(memory_latent_idx),
+                device=device_idx,
+                dtype=torch.long,
             )
 
         head_dim = self.hidden_size // self.num_attention_heads
@@ -646,10 +632,8 @@ class MatrixGame3WanModel(BaseDiT):
         )
         max_seq_len = freqs.shape[1] if freqs.dim() == 3 else freqs.shape[0]
         if max_frame_index > max_seq_len or post_patch_height > max_seq_len or post_patch_width > max_seq_len:
-            raise ValueError(
-                f"got frames={max_frame_index}, height={post_patch_height}, width={post_patch_width}, "
-                f"max_seq_len={max_seq_len}"
-            )
+            raise ValueError(f"got frames={max_frame_index}, height={post_patch_height}, width={post_patch_width}, "
+                             f"max_seq_len={max_seq_len}")
 
         hidden_states = self.patch_embedding(hidden_states)
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
@@ -668,20 +652,16 @@ class MatrixGame3WanModel(BaseDiT):
             target_frames = post_patch_num_frames * p_t
             target_height = post_patch_height * p_h
             target_width = post_patch_width * p_w
-            if c2ws_plucker_emb.shape[2] > target_frames or c2ws_plucker_emb.shape[3] > target_height or c2ws_plucker_emb.shape[4] > target_width:
+            if c2ws_plucker_emb.shape[2] > target_frames or c2ws_plucker_emb.shape[
+                    3] > target_height or c2ws_plucker_emb.shape[4] > target_width:
                 c2ws_plucker_emb = c2ws_plucker_emb[:, :, :target_frames, :target_height, :target_width]
             if c2ws_plucker_emb.shape[2:] != (target_frames, target_height, target_width):
-                raise ValueError(
-                    "Camera conditioning must align with the patchified latent grid, "
-                    f"got camera shape {tuple(c2ws_plucker_emb.shape[2:])} vs target "
-                    f"{(target_frames, target_height, target_width)}"
-                )
-            plucker_emb = self.camera_patch_embedding(
-                c2ws_plucker_emb.to(hidden_states.dtype)
-            )
+                raise ValueError("Camera conditioning must align with the patchified latent grid, "
+                                 f"got camera shape {tuple(c2ws_plucker_emb.shape[2:])} vs target "
+                                 f"{(target_frames, target_height, target_width)}")
+            plucker_emb = self.camera_patch_embedding(c2ws_plucker_emb.to(hidden_states.dtype))
             plucker_hidden = self.c2ws_hidden_states_layer2(
-                torch.nn.functional.silu(self.c2ws_hidden_states_layer1(plucker_emb))
-            )
+                torch.nn.functional.silu(self.c2ws_hidden_states_layer1(plucker_emb)))
             plucker_emb = plucker_emb + plucker_hidden
 
         timestep_tokens = timestep
@@ -689,20 +669,15 @@ class MatrixGame3WanModel(BaseDiT):
             timestep_tokens = timestep_tokens.unsqueeze(0)
         if timestep_tokens.dim() == 1:
             timestep_tokens = timestep_tokens.unsqueeze(1).repeat(
-                1, post_patch_num_frames * post_patch_height * post_patch_width
-            )
+                1, post_patch_num_frames * post_patch_height * post_patch_width)
         elif timestep_tokens.dim() == 2 and timestep_tokens.shape[1] == num_frames:
-            timestep_tokens = (
-                timestep_tokens[:, :, None, None]
-                .repeat(1, 1, post_patch_height, post_patch_width)
-                .reshape(timestep_tokens.shape[0], -1)
-            )
+            timestep_tokens = (timestep_tokens[:, :, None,
+                                               None].repeat(1, 1, post_patch_height,
+                                                            post_patch_width).reshape(timestep_tokens.shape[0], -1))
         if memory_length > 0:
             if timestep_memory is None:
                 raise ValueError("MatrixGame3 requires timestep_memory when x_memory is provided")
-            timestep_tokens = torch.cat(
-                [timestep_memory.to(timestep_tokens.dtype), timestep_tokens], dim=1
-            )
+            timestep_tokens = torch.cat([timestep_memory.to(timestep_tokens.dtype), timestep_tokens], dim=1)
 
         temb, timestep_proj, encoder_hidden_states = self.condition_embedder(
             timestep_tokens.flatten(),
@@ -717,13 +692,9 @@ class MatrixGame3WanModel(BaseDiT):
                 encoder_hidden_states = encoder_hidden_states[0]
             elif encoder_hidden_states.ndim == 2:
                 encoder_hidden_states = encoder_hidden_states.unsqueeze(0)
-            if (
-                encoder_hidden_states.ndim == 3
-                and encoder_hidden_states.shape[-1] == self.text_embedding[0].in_features
-            ):
-                encoder_hidden_states = self.text_embedding(
-                    encoder_hidden_states.to(hidden_states.dtype)
-                )
+            if (encoder_hidden_states.ndim == 3
+                    and encoder_hidden_states.shape[-1] == self.text_embedding[0].in_features):
+                encoder_hidden_states = self.text_embedding(encoder_hidden_states.to(hidden_states.dtype))
 
         # [F, H, W] for the ActionModule
         grid_sizes = (post_patch_num_frames, post_patch_height, post_patch_width)
@@ -766,15 +737,11 @@ class MatrixGame3WanModel(BaseDiT):
 
         # Output
         if temb.dim() == 3:
-            shift, scale = (
-                self.scale_shift_table.unsqueeze(0) + temb.unsqueeze(2)
-            ).chunk(2, dim=2)
+            shift, scale = (self.scale_shift_table.unsqueeze(0) + temb.unsqueeze(2)).chunk(2, dim=2)
             shift = shift.squeeze(2)
             scale = scale.squeeze(2)
         else:
-            shift, scale = (self.scale_shift_table + temb.unsqueeze(1)).chunk(
-                2, dim=1
-            )
+            shift, scale = (self.scale_shift_table + temb.unsqueeze(1)).chunk(2, dim=1)
         hidden_states = self.norm_out(hidden_states, shift, scale)
         hidden_states = self.proj_out(hidden_states)
 

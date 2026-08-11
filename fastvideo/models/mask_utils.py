@@ -1,6 +1,7 @@
 import torch
 from typing import Callable, Optional
 
+
 def and_masks(*mask_functions: Callable) -> Callable:
     """Returns a mask function that is the intersection of provided mask functions"""
     if not all(callable(arg) for arg in mask_functions):
@@ -14,11 +15,13 @@ def and_masks(*mask_functions: Callable) -> Callable:
 
     return and_mask
 
+
 def causal_mask_function(batch_idx: int, head_idx: int, q_idx: int, kv_idx: int) -> bool:
     """
     This creates a basic lower-diagonal causal mask.
     """
     return kv_idx <= q_idx
+
 
 def padding_mask_function(padding_mask: torch.Tensor) -> Callable:
     """
@@ -33,9 +36,9 @@ def padding_mask_function(padding_mask: torch.Tensor) -> Callable:
 
     return inner_mask
 
-def prepare_padding_mask(
-    attention_mask: Optional[torch.Tensor], kv_length: int, kv_offset: int
-) -> Optional[torch.Tensor]:
+
+def prepare_padding_mask(attention_mask: Optional[torch.Tensor], kv_length: int,
+                         kv_offset: int) -> Optional[torch.Tensor]:
     """
     From the 2D attention mask, prepare the correct padding mask to use by potentially padding it.
     """
@@ -46,9 +49,9 @@ def prepare_padding_mask(
             local_padding_mask = torch.nn.functional.pad(attention_mask, (0, padding_length))
     return local_padding_mask
 
-def _non_vmap_expansion_sdpa(
-    batch_indices: torch.Tensor, head_indices: torch.Tensor, q_indices: torch.Tensor, kv_indices: torch.Tensor
-):
+
+def _non_vmap_expansion_sdpa(batch_indices: torch.Tensor, head_indices: torch.Tensor, q_indices: torch.Tensor,
+                             kv_indices: torch.Tensor):
     """
     Used to broadcast our mask_functions over the all 4 dimensions (b_idx, h_idx, q_idx, kv_idx) of the inputs.
     Allows the usage of any index-based mask function without relying on vmap.
@@ -63,6 +66,7 @@ def _non_vmap_expansion_sdpa(
     q_indices = q_indices[None, None, :, None]
     kv_indices = kv_indices[None, None, None, :]
     return batch_indices, head_indices, q_indices, kv_indices
+
 
 def sdpa_mask(
     batch_size: int,

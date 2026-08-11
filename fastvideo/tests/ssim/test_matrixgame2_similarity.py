@@ -29,6 +29,7 @@ device_reference_folder = resolve_device_reference_folder(
     (
         ("A40", "A40"),
         ("L40S", "L40S"),
+        ("GB200", "GB200"),
         ("H200", "H200"),
     ),
     device_name=get_cuda_device_name(),
@@ -47,8 +48,7 @@ MATRIXGAME_PARAMS = {
     "seed": 1024,
     "keyboard_dim": 4,
 }
-_MATRIXGAME_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained(
-    MATRIXGAME_PARAMS["model_path"])
+_MATRIXGAME_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained(MATRIXGAME_PARAMS["model_path"])
 MATRIXGAME_FULL_QUALITY_PARAMS = {
     "num_gpus": MATRIXGAME_PARAMS["num_gpus"],
     "model_path": MATRIXGAME_PARAMS["model_path"],
@@ -60,7 +60,6 @@ MATRIXGAME_FULL_QUALITY_PARAMS = {
     "seed": _MATRIXGAME_FULL_QUALITY_DEFAULTS.seed,
     "keyboard_dim": MATRIXGAME_PARAMS["keyboard_dim"],
 }
-
 
 MODEL_TO_PARAMS = {
     "Matrix-Game-2.0-Diffusers-Base": MATRIXGAME_PARAMS,
@@ -110,9 +109,9 @@ def test_matrixgame2_similarity(prompt, ATTENTION_BACKEND, model_id):
     num_inference_steps = BASE_PARAMS["num_inference_steps"]
 
     # Create action conditions for Matrix-Game 2.0
-    actions = create_action_presets(
-        BASE_PARAMS["num_frames"], keyboard_dim=BASE_PARAMS["keyboard_dim"], seed=BASE_PARAMS["seed"]
-    )
+    actions = create_action_presets(BASE_PARAMS["num_frames"],
+                                    keyboard_dim=BASE_PARAMS["keyboard_dim"],
+                                    seed=BASE_PARAMS["seed"])
     latent_frames = (BASE_PARAMS["num_frames"] - 1) // 4 + 1
     grid_sizes = torch.tensor([latent_frames, 44, 80])
 

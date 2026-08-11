@@ -28,7 +28,6 @@ from huggingface_hub import save_torch_state_dict
 from safetensors import safe_open
 from safetensors.torch import load_file
 
-
 OFFICIAL_TO_DIFFUSERS_MAPPING: dict[str, str] = {
     r"^text_embedding\.0\.(.*)$": r"condition_embedder.text_embedder.linear_1.\1",
     r"^text_embedding\.2\.(.*)$": r"condition_embedder.text_embedder.linear_2.\1",
@@ -194,8 +193,14 @@ def analyze(source: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source", type=Path, required=True, help="DreamX raw transformer directory or safetensors file")
-    parser.add_argument("--output", type=Path, required=True, help="Output model root; transformer/ is created inside it")
+    parser.add_argument("--source",
+                        type=Path,
+                        required=True,
+                        help="DreamX raw transformer directory or safetensors file")
+    parser.add_argument("--output",
+                        type=Path,
+                        required=True,
+                        help="Output model root; transformer/ is created inside it")
     parser.add_argument("--max-shard-size", default="10GB")
     parser.add_argument(
         "--component-source",

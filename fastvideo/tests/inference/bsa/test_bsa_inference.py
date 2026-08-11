@@ -69,16 +69,12 @@ def test_inference_bsa():
         },
     }
 
-    with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".json", delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
         json.dump(config, f)
         config_path = f.name
 
     try:
-        cmd = [
-            sys.executable, "-m", "fastvideo.entrypoints.cli.main",
-            "generate", "--config", config_path
-        ]
+        cmd = [sys.executable, "-m", "fastvideo.entrypoints.cli.main", "generate", "--config", config_path]
         subprocess.run(cmd, check=True)
     finally:
         os.unlink(config_path)

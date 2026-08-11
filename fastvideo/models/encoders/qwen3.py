@@ -56,9 +56,7 @@ class Qwen3MLP(nn.Module):
             prefix=f"{prefix}.down_proj",
         )
         if hidden_act != "silu":
-            raise ValueError(
-                f"Unsupported activation: {hidden_act}. Only silu is supported."
-            )
+            raise ValueError(f"Unsupported activation: {hidden_act}. Only silu is supported.")
         self.act_fn = SiluAndMul()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -100,9 +98,7 @@ class Qwen3Attention(nn.Module):
             assert tp_size % self.total_num_kv_heads == 0
         self.num_kv_heads = max(1, self.total_num_kv_heads // tp_size)
 
-        self.head_dim = getattr(
-            config, "head_dim", self.hidden_size // self.total_num_heads
-        )
+        self.head_dim = getattr(config, "head_dim", self.hidden_size // self.total_num_heads)
         self.rotary_dim = self.head_dim
         self.q_size = self.num_heads * self.head_dim
         self.kv_size = self.num_kv_heads * self.head_dim
@@ -225,9 +221,7 @@ class Qwen3DecoderLayer(nn.Module):
             config=config,
             hidden_size=self.hidden_size,
             num_heads=config.num_attention_heads,
-            num_kv_heads=getattr(
-                config, "num_key_value_heads", config.num_attention_heads
-            ),
+            num_kv_heads=getattr(config, "num_key_value_heads", config.num_attention_heads),
             rope_theta=rope_theta,
             rope_scaling=rope_scaling,
             max_position_embeddings=max_position_embeddings,
@@ -244,9 +238,7 @@ class Qwen3DecoderLayer(nn.Module):
             prefix=f"{prefix}.mlp",
         )
         self.input_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-        self.post_attention_layernorm = RMSNorm(
-            config.hidden_size, eps=config.rms_norm_eps
-        )
+        self.post_attention_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
     def forward(
         self,
@@ -306,16 +298,13 @@ class Qwen3ForCausalLM(TextEncoder):
             quant_config=self.quant_config,
         )
 
-        self.layers = nn.ModuleList(
-            [
-                Qwen3DecoderLayer(
-                    config=config,
-                    quant_config=self.quant_config,
-                    prefix=f"{config.prefix}.layers.{i}",
-                )
-                for i in range(config.num_hidden_layers)
-            ]
-        )
+        self.layers = nn.ModuleList([
+            Qwen3DecoderLayer(
+                config=config,
+                quant_config=self.quant_config,
+                prefix=f"{config.prefix}.layers.{i}",
+            ) for i in range(config.num_hidden_layers)
+        ])
 
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
@@ -327,17 +316,15 @@ class Qwen3ForCausalLM(TextEncoder):
         dtype: torch.dtype,
         device: torch.device,
     ) -> nn.Module:
-        from transformers import AutoModelForCausalLM
+        from transformers import AutoModel
 
-        if device.type == "cpu" and torch.cuda.is_available():
-            from fastvideo.distributed import get_local_torch_device
-
-            device = get_local_torch_device()
-
-        return AutoModelForCausalLM.from_pretrained(
+        # FastVideo uses Qwen3 only as a text encoder. Loading the body avoids
+        # materializing an unused LM head and full-vocabulary logits, including
+        # for checkpoints whose metadata names Qwen3ForCausalLM.
+        return AutoModel.from_pretrained(
             model_path,
             local_files_only=True,
-            torch_dtype=dtype,
+            dtype=dtype,
             low_cpu_mem_usage=True,
         ).eval().to(device)
 
@@ -353,11 +340,8 @@ class Qwen3ForCausalLM(TextEncoder):
         output_hidden_states: bool | None = None,
         **kwargs: Any,
     ) -> BaseEncoderOutput:
-        output_hidden_states = (
-            output_hidden_states
-            if output_hidden_states is not None
-            else self.config.output_hidden_states
-        )
+        output_hidden_states = (output_hidden_states
+                                if output_hidden_states is not None else self.config.output_hidden_states)
 
         if inputs_embeds is not None:
             hidden_states = inputs_embeds
@@ -368,21 +352,24 @@ class Qwen3ForCausalLM(TextEncoder):
         residual = None
 
         if position_ids is None:
+            # Expand to [batch_size, seq_len]: the rotary layer flattens
+            # positions to ``num_tokens`` and reshapes q/k to
+            # ``(num_tokens, -1, head_dim)``. A bare [1, seq_len] only matches
+            # ``num_tokens`` when batch_size == 1; for batched inputs it folds
+            # the batch dim into the head dim and misaligns RoPE. Expanding to
+            # ``batch_size * seq_len`` tokens keeps the layout correct.
             position_ids = torch.arange(
-                0, hidden_states.shape[1], device=hidden_states.device
-            ).unsqueeze(0)
+                0,
+                hidden_states.shape[1],
+                device=hidden_states.device,
+                dtype=torch.long,
+            ).unsqueeze(0).expand(hidden_states.shape[0], -1)
 
-        all_hidden_states: tuple[Any, ...] | None = (
-            () if output_hidden_states else None
-        )
+        all_hidden_states: tuple[Any, ...] | None = (() if output_hidden_states else None)
 
         for layer in self.layers:
             if all_hidden_states is not None:
-                all_hidden_states += (
-                    (hidden_states,)
-                    if residual is None
-                    else (hidden_states + residual,)
-                )
+                all_hidden_states += ((hidden_states, ) if residual is None else (hidden_states + residual, ))
             hidden_states, residual = layer(
                 position_ids,
                 hidden_states,
@@ -393,18 +380,27 @@ class Qwen3ForCausalLM(TextEncoder):
         hidden_states, _ = self.norm(hidden_states, residual)
 
         if all_hidden_states is not None:
-            all_hidden_states += (hidden_states,)
+            all_hidden_states += (hidden_states, )
 
         return BaseEncoderOutput(
             last_hidden_state=hidden_states,
             hidden_states=all_hidden_states,
         )
 
-    def load_weights(
-        self, weights: Iterable[tuple[str, torch.Tensor]]
-    ) -> set[str]:
+    def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         params_dict = dict(self.named_parameters())
         loaded_params: set[str] = set()
+        stacked_params_mapping = self.config.arch_config.stacked_params_mapping
+        # A fused destination is initialized either by one already-fused tensor
+        # or after every split source projection has been loaded. Include
+        # auxiliary quantization parameters (for example scale_weight) rather
+        # than limiting completeness checks to weight/bias tensors.
+        expected_stacked_shards = {(name, shard_id)
+                                   for name in params_dict
+                                   for param_name, _, shard_id in stacked_params_mapping if param_name in name}
+        fused_param_names = {name for name, _ in expected_stacked_shards}
+        loaded_stacked_shards: set[tuple[str, str | int]] = set()
+        loaded_fused_params: set[str] = set()
 
         for name, loaded_weight in weights:
             if name.startswith("model."):
@@ -416,44 +412,63 @@ class Qwen3ForCausalLM(TextEncoder):
                 continue
 
             if "scale" in name:
-                kv_scale_name: str | None = maybe_remap_kv_scale_name(
-                    name, params_dict
-                )
+                kv_scale_name: str | None = maybe_remap_kv_scale_name(name, params_dict)
                 if kv_scale_name is None:
                     continue
                 name = kv_scale_name
 
-            for (
-                param_name,
-                weight_name,
-                shard_id,
-            ) in self.config.arch_config.stacked_params_mapping:
+            matched_stacked_param = False
+            for param_name, weight_name, shard_id in stacked_params_mapping:
                 if weight_name not in name:
                     continue
-                name = name.replace(weight_name, param_name)
+                matched_stacked_param = True
+                target_name = name.replace(weight_name, param_name)
 
-                if name.endswith(".bias") and name not in params_dict:
-                    continue
+                if target_name.endswith(".bias") and target_name not in params_dict:
+                    break
 
-                if name not in params_dict:
-                    continue
+                if target_name not in params_dict:
+                    break
 
-                param = params_dict[name]
+                param = params_dict[target_name]
                 weight_loader = param.weight_loader
                 weight_loader(param, loaded_weight, shard_id)
+                loaded_params.add(target_name)
+                loaded_stacked_shards.add((target_name, shard_id))
                 break
+
+            if matched_stacked_param:
+                continue
+
+            if name.endswith(".bias") and name not in params_dict:
+                continue
+
+            if name not in params_dict:
+                continue
+
+            param = params_dict[name]
+            if name in fused_param_names and name.endswith(".scale_weight"):
+                # Merged scale loaders interpret a missing shard id as shard 0.
+                # An exact fused key is already a complete vector, so copy it
+                # atomically and retain the default loader's shape validation.
+                default_weight_loader(param, loaded_weight)
             else:
-                if name.endswith(".bias") and name not in params_dict:
-                    continue
-
-                if name not in params_dict:
-                    continue
-
-                param = params_dict[name]
                 weight_loader = getattr(param, "weight_loader", default_weight_loader)
                 weight_loader(param, loaded_weight)
-
             loaded_params.add(name)
+            if name in fused_param_names:
+                loaded_fused_params.add(name)
+
+        required_split_shards = {(name, shard_id)
+                                 for name, shard_id in expected_stacked_shards if name not in loaded_fused_params}
+        missing_stacked_shards = required_split_shards - loaded_stacked_shards
+        if missing_stacked_shards:
+            formatted_missing = ", ".join(f"{name}[{shard_id}]" for name, shard_id in sorted(
+                missing_stacked_shards,
+                key=lambda item: (item[0], str(item[1])),
+            ))
+            raise ValueError("Missing required stacked checkpoint shards: "
+                             f"{formatted_missing}")
 
         return loaded_params
 

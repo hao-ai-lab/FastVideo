@@ -26,9 +26,7 @@ def crop(clip, i, j, h, w) -> torch.Tensor:
 
 def resize(clip, target_size, interpolation_mode) -> torch.Tensor:
     if len(target_size) != 2:
-        raise ValueError(
-            f"target size should be tuple (height, width), instead got {target_size}"
-        )
+        raise ValueError(f"target size should be tuple (height, width), instead got {target_size}")
     return torch.nn.functional.interpolate(
         clip,
         size=target_size,
@@ -68,8 +66,7 @@ def normalize_video(clip) -> torch.Tensor:
     """
     _is_tensor_video_clip(clip)
     if not clip.dtype == torch.uint8:
-        raise TypeError(
-            f"clip tensor should have data type uint8. Got {clip.dtype}")
+        raise TypeError(f"clip tensor should have data type uint8. Got {clip.dtype}")
     # return clip.float().permute(3, 0, 1, 2) / 255.0
     return clip.float() / 255.0
 
@@ -87,8 +84,7 @@ class CenterCropResizeVideo:
         interpolation_mode="bilinear",
     ) -> None:
         if len(size) != 2:
-            raise ValueError(
-                f"size should be tuple (height, width), instead got {size}")
+            raise ValueError(f"size should be tuple (height, width), instead got {size}")
         self.size = size
         self.top_crop = top_crop
         self.interpolation_mode = interpolation_mode
@@ -101,10 +97,7 @@ class CenterCropResizeVideo:
             torch.tensor: scale resized / center cropped video clip.
                 size is (T, C, crop_size, crop_size)
         """
-        clip_center_crop = center_crop_th_tw(clip,
-                                             self.size[0],
-                                             self.size[1],
-                                             top_crop=self.top_crop)
+        clip_center_crop = center_crop_th_tw(clip, self.size[0], self.size[1], top_crop=self.top_crop)
         clip_center_crop_resize = resize(
             clip_center_crop,
             target_size=self.size,

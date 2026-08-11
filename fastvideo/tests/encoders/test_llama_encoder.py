@@ -71,8 +71,7 @@ def test_llama_encoder():
     assert torch.allclose(
         model1.embed_tokens.weight,
         model2.embed_tokens.weight.to_local().to(device)
-        if isinstance(model2.embed_tokens.weight, DTensor)
-        else model2.embed_tokens.weight.to(device),
+        if isinstance(model2.embed_tokens.weight, DTensor) else model2.embed_tokens.weight.to(device),
     )
     weights = ["layers.{}.input_layernorm.weight", "layers.{}.post_attention_layernorm.weight"]
     for layer_idx in range(hf_config.num_hidden_layers):
@@ -119,9 +118,8 @@ def test_llama_encoder():
             logger.info("Testing prompt: '%s'", prompt)
 
             # Tokenize the prompt
-            tokens = tokenizer(prompt, padding="max_length", max_length=512, truncation=True, return_tensors="pt").to(
-                device
-            )
+            tokens = tokenizer(prompt, padding="max_length", max_length=512, truncation=True,
+                               return_tensors="pt").to(device)
 
             # Get outputs from our implementation
             # filter out padding input_ids
@@ -133,15 +131,14 @@ def test_llama_encoder():
 
             # Get outputs from HuggingFace implementation
             with set_forward_context(current_timestep=0, attn_metadata=None):
-                outputs2 = model2(
-                    input_ids=tokens.input_ids, attention_mask=tokens.attention_mask, output_hidden_states=True
-                )
+                outputs2 = model2(input_ids=tokens.input_ids,
+                                  attention_mask=tokens.attention_mask,
+                                  output_hidden_states=True)
 
             # Compare last hidden states
             last_hidden_state1 = outputs1.last_hidden_state[tokens.attention_mask == 1]
             last_hidden_state2 = outputs2.last_hidden_state[tokens.attention_mask == 1]
 
             assert last_hidden_state1.shape == last_hidden_state2.shape, (
-                f"Hidden state shapes don't match: {last_hidden_state1.shape} vs {last_hidden_state2.shape}"
-            )
+                f"Hidden state shapes don't match: {last_hidden_state1.shape} vs {last_hidden_state2.shape}")
             assert_close(last_hidden_state1, last_hidden_state2, atol=1e-1, rtol=1e-4)

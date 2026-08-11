@@ -35,20 +35,29 @@ from fastvideo.eval import create_evaluator, samples_from
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description=__doc__,
-                                formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--gen-dir", type=Path, required=True,
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--gen-dir",
+                   type=Path,
+                   required=True,
                    help="Directory of generated videos (.mp4, .avi, .mov, .mkv, .gif).")
-    p.add_argument("--reference-dir", type=Path, default=None,
+    p.add_argument("--reference-dir",
+                   type=Path,
+                   default=None,
                    help="Directory of reference videos. Omit to score against the cached "
-                        "reference features (built on a previous run).")
+                   "reference features (built on a previous run).")
     p.add_argument("--device", default="cuda:0" if torch.cuda.is_available() else "cpu")
-    p.add_argument("--num-gpus", type=int, default=1,
+    p.add_argument("--num-gpus",
+                   type=int,
+                   default=1,
                    help="Number of GPU replicas. >1 fans extraction out across devices.")
-    p.add_argument("--cache-path", type=Path, default=None,
+    p.add_argument("--cache-path",
+                   type=Path,
+                   default=None,
                    help="Override the reference-feature cache path. "
-                        "Defaults to ${FASTVIDEO_EVAL_CACHE}/fvd/real_features_i3d.pt.")
-    p.add_argument("--output", type=Path, default=None,
+                   "Defaults to ${FASTVIDEO_EVAL_CACHE}/fvd/real_features_i3d.pt.")
+    p.add_argument("--output",
+                   type=Path,
+                   default=None,
                    help="Write the result as JSON to this path (default: stdout only).")
     args = p.parse_args()
 

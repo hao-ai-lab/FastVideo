@@ -30,22 +30,21 @@ PARITY_SCOPE = "both"
 
 
 def _tiny_config() -> DreamXWorldARConfig:
-    return DreamXWorldARConfig(
-        arch_config=DreamXWorldARArchConfig(
-            num_attention_heads=1,
-            attention_head_dim=8,
-            in_channels=4,
-            out_channels=4,
-            ffn_dim=16,
-            num_layers=1,
-            text_dim=8,
-            freq_dim=8,
-            text_len=4,
-            local_attn_size=2,
-            sink_size=1,
-            attn_compress=1,
-            cam_self_attn_layers=(0,),
-        ))
+    return DreamXWorldARConfig(arch_config=DreamXWorldARArchConfig(
+        num_attention_heads=1,
+        attention_head_dim=8,
+        in_channels=4,
+        out_channels=4,
+        ffn_dim=16,
+        num_layers=1,
+        text_dim=8,
+        freq_dim=8,
+        text_len=4,
+        local_attn_size=2,
+        sink_size=1,
+        attn_compress=1,
+        cam_self_attn_layers=(0, ),
+    ))
 
 
 def _load_official_tiny():
@@ -64,8 +63,10 @@ def _load_official_tiny():
 
     def _sdpa_same_dtype(q, k, v, **kwargs):
         del kwargs
-        out = torch.nn.functional.scaled_dot_product_attention(
-            q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), dropout_p=0.0)
+        out = torch.nn.functional.scaled_dot_product_attention(q.transpose(1, 2),
+                                                               k.transpose(1, 2),
+                                                               v.transpose(1, 2),
+                                                               dropout_p=0.0)
         return out.transpose(1, 2).contiguous()
 
     official_attention.attention = _sdpa_same_dtype
@@ -91,7 +92,7 @@ def _load_official_tiny():
         add_control_adapter=True,
         cam_method="prope",
         attn_compress=1,
-        cam_self_attn_layers=(0,),
+        cam_self_attn_layers=(0, ),
     ).eval()
 
 
@@ -136,11 +137,21 @@ def test_dreamx_world_ar_tiny_forward_matches_official():
     fastvideo.load_state_dict(official.state_dict(), strict=True)
 
     x, t, context, camera, kv_cache, cross_cache = _make_inputs()
-    official_out = official(x=x, t=t, context=context, seq_len=4, y_camera=camera,
-                            kv_cache=kv_cache, crossattn_cache=cross_cache).detach()
+    official_out = official(x=x,
+                            t=t,
+                            context=context,
+                            seq_len=4,
+                            y_camera=camera,
+                            kv_cache=kv_cache,
+                            crossattn_cache=cross_cache).detach()
     x, t, context, camera, kv_cache, cross_cache = _make_inputs()
-    fastvideo_out = fastvideo(x=x, t=t, context=context, seq_len=4, y_camera=camera,
-                              kv_cache=kv_cache, crossattn_cache=cross_cache).detach()
+    fastvideo_out = fastvideo(x=x,
+                              t=t,
+                              context=context,
+                              seq_len=4,
+                              y_camera=camera,
+                              kv_cache=kv_cache,
+                              crossattn_cache=cross_cache).detach()
     assert official_out.abs().max() > 0, "official output is all-zero; parity comparison is vacuous"
     assert_close(fastvideo_out, official_out, atol=1e-5, rtol=1e-5)
 

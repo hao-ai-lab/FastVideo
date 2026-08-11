@@ -134,8 +134,7 @@ class TestImageBuildGenerationKwargs:
 
     def test_output_path_under_images_subdir(self, tmp_path):
         kw = self._build()
-        assert kw["output_path"].startswith(
-            os.path.join(str(tmp_path), "images"))
+        assert kw["output_path"].startswith(os.path.join(str(tmp_path), "images"))
 
     def test_num_frames_always_one(self):
         kw = self._build()
@@ -189,8 +188,7 @@ class TestVideoBuildGenerationKwargs:
 
     def test_output_path_under_videos_subdir(self, tmp_path):
         kw = self._build()
-        assert kw["output_path"].startswith(
-            os.path.join(str(tmp_path), "videos"))
+        assert kw["output_path"].startswith(os.path.join(str(tmp_path), "videos"))
         assert kw["output_path"].endswith(".mp4")
 
     def test_fps_defaults_24(self):
@@ -242,10 +240,8 @@ class TestVideoDefaultRequestMerge:
         body_defaults = dict(prompt="a running dog", seconds=4)
         body_defaults.update(body_overrides)
         req = VideoGenerationsRequest(**body_defaults)
-        default_request = _make_default_request(
-            default_raw) if default_raw else None
-        return _build_generation_kwargs(
-            "req-v1", req, default_request=default_request)
+        default_request = _make_default_request(default_raw) if default_raw else None
+        return _build_generation_kwargs("req-v1", req, default_request=default_request)
 
     def test_default_seed_flows_through_when_body_omits(self):
         kw = self._build(default_raw={"sampling": {"seed": 42}})
@@ -281,24 +277,17 @@ class TestVideoDefaultRequestMerge:
 
     def test_body_size_overrides_default_sampling_dims(self):
         kw = self._build(
-            default_raw={
-                "sampling": {
-                    "width": 640,
-                    "height": 360
-                }
-            },
+            default_raw={"sampling": {
+                "width": 640,
+                "height": 360
+            }},
             size="1024x576",
         )
         assert kw["width"] == 1024
         assert kw["height"] == 576
 
     def test_default_width_height_preserved_when_body_omits_size(self):
-        kw = self._build(default_raw={
-            "sampling": {
-                "width": 640,
-                "height": 360
-            }
-        })
+        kw = self._build(default_raw={"sampling": {"width": 640, "height": 360}})
         assert kw["width"] == 640
         assert kw["height"] == 360
 
@@ -320,8 +309,7 @@ class TestVideoDefaultRequestMerge:
         assert default_dir not in kw["output_path"]
 
     def test_default_negative_prompt_flows_through(self):
-        kw = self._build(
-            default_raw={"negative_prompt": "low quality, blur"})
+        kw = self._build(default_raw={"negative_prompt": "low quality, blur"})
         assert kw["negative_prompt"] == "low quality, blur"
 
     def test_body_negative_prompt_overrides_default(self):
@@ -339,16 +327,11 @@ class TestVideoDefaultRequestMerge:
     def test_default_request_not_mutated_by_build(self):
         # Merge should operate on a fresh copy (caller supplies a clone);
         # the helper itself must not mutate the passed-in default.
-        default_request = _make_default_request(
-            {"sampling": {
-                "seed": 42,
-                "fps": 30
-            }})
+        default_request = _make_default_request({"sampling": {"seed": 42, "fps": 30}})
         from fastvideo.entrypoints.openai.video_api import (
             _build_generation_kwargs, )
         req = VideoGenerationsRequest(prompt="p", seconds=1)
-        _ = _build_generation_kwargs(
-            "req-1", req, default_request=default_request)
+        _ = _build_generation_kwargs("req-1", req, default_request=default_request)
         assert default_request.sampling.seed == 42
         assert default_request.sampling.fps == 30
 
@@ -369,48 +352,30 @@ class TestValidateDefaultRequestAgainstPreset:
     def test_empty_stage_overrides_is_noop(self):
         from fastvideo.entrypoints.openai.api_server import (
             _validate_default_request_against_preset, )
-        default_request = _make_default_request({
-            "sampling": {
-                "seed": 42
-            }
-        })
+        default_request = _make_default_request({"sampling": {"seed": 42}})
         _validate_default_request_against_preset(default_request, "any/model")
 
     def test_unknown_model_path_is_noop(self):
         from fastvideo.entrypoints.openai.api_server import (
             _validate_default_request_against_preset, )
-        default_request = _make_default_request({
-            "stage_overrides": {
-                "denoise": {
-                    "num_inference_steps": 10
-                }
-            }
-        })
+        default_request = _make_default_request({"stage_overrides": {"denoise": {"num_inference_steps": 10}}})
         with patch(
                 "fastvideo.entrypoints.openai.api_server.get_preset_selection",
                 return_value=(None, None),
         ):
-            _validate_default_request_against_preset(
-                default_request, "unknown/model")
+            _validate_default_request_against_preset(default_request, "unknown/model")
 
     def test_unknown_stage_name_raises(self):
         from fastvideo.api.errors import ConfigValidationError
         from fastvideo.entrypoints.openai.api_server import (
             _validate_default_request_against_preset, )
-        default_request = _make_default_request({
-            "stage_overrides": {
-                "not_a_real_stage": {
-                    "num_inference_steps": 10
-                }
-            }
-        })
+        default_request = _make_default_request({"stage_overrides": {"not_a_real_stage": {"num_inference_steps": 10}}})
         with patch(
                 "fastvideo.entrypoints.openai.api_server.get_preset_selection",
                 return_value=("wan_t2v_1_3b", "wan"),
         ):
             with pytest.raises(ConfigValidationError):
-                _validate_default_request_against_preset(
-                    default_request, "Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
+                _validate_default_request_against_preset(default_request, "Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
 
 
 # ---------------------------------------------------------------------------
@@ -435,10 +400,7 @@ class TestDefaultRequestState:
         from fastvideo.entrypoints.openai import state as state_mod
         saved = state_mod._default_request
         try:
-            state_mod._default_request = _make_default_request(
-                {"sampling": {
-                    "seed": 7
-                }})
+            state_mod._default_request = _make_default_request({"sampling": {"seed": 7}})
             state_mod.clear_state()
             assert state_mod.get_default_request() is None
         finally:
@@ -482,8 +444,6 @@ class TestProtocolModels:
         assert len(ids) == 100
 
     def test_video_list_response(self):
-        resp = VideoListResponse(
-            data=[VideoResponse(
-                id="a"), VideoResponse(id="b")])
+        resp = VideoListResponse(data=[VideoResponse(id="a"), VideoResponse(id="b")])
         assert len(resp.data) == 2
         assert resp.object == "list"

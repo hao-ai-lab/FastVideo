@@ -10,14 +10,20 @@ from fastvideo.configs.models.dits.hunyuanvideo15 import HunyuanVideo15Config
 from fastvideo.configs.models.dits.longcat import LongCatVideoConfig
 from fastvideo.configs.models.dits.ltx2 import LTX2VideoConfig
 from fastvideo.configs.models.dits.magi_human import MagiHumanVideoConfig
+from fastvideo.configs.models.dits.minimax_h3 import MiniMaxH3Config
+from fastvideo.configs.models.dits.mmaudio import MMAudioArchConfig, MMAudioTransformerConfig
 from fastvideo.configs.models.dits.stable_audio import StableAudioConfig
 from fastvideo.configs.models.dits.wanvideo import WanVideoConfig
+from fastvideo.configs.models.dits.zimage import ZImageDiTConfig
 from fastvideo.configs.models.dits.hyworld import HYWorldConfig
 from fastvideo.configs.models.dits.kandinsky5 import Kandinsky5VideoConfig
+from fastvideo.configs.models.dits.lingbotworld2 import LingBotWorld2CausalFastVideoConfig
+from fastvideo.configs.models.dits.lingbot_video import LingBotVideoConfig
 
 __all__ = [
     "HunyuanVideoConfig", "HunyuanVideo15Config", "HunyuanGameCraftConfig", "WanVideoConfig", "DreamXWorldConfig",
     "DreamXWorldARConfig", "CosmosVideoConfig", "Cosmos25VideoConfig", "FluxDiTConfig", "Flux2Config",
     "LongCatVideoConfig", "LTX2VideoConfig", "HYWorldConfig", "Kandinsky5VideoConfig", "MagiHumanVideoConfig",
-    "StableAudioConfig", "GlmImageDiTConfig"
+    "StableAudioConfig", "GlmImageDiTConfig", "LingBotWorld2CausalFastVideoConfig", "LingBotVideoConfig",
+    "MiniMaxH3Config", "ZImageDiTConfig", "MMAudioArchConfig", "MMAudioTransformerConfig"
 ]

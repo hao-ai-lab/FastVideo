@@ -5,7 +5,7 @@ from copy import deepcopy
 
 import gradio as gr
 
-from fastvideo.configs.sample.base import SamplingParam
+from fastvideo import SamplingParam
 from fastvideo.entrypoints.video_generator import VideoGenerator
 
 from .config import (
@@ -33,16 +33,16 @@ from .rendering import (
 )
 from .safety import get_prompt_safety_check
 
+
 def create_gradio_interface(default_params: dict[str, SamplingParam], generators: dict[str, VideoGenerator]):
+
     def _sanitize_filename_component(name: str) -> str:
         sanitized = re.sub(r'[\\/:*?"<>|]', "", name)
         sanitized = sanitized.strip().strip(".")
         sanitized = re.sub(r"\s+", "_", sanitized)
         return sanitized or "video"
 
-    def generate_video(
-        prompt, model_selection, input_image=None
-    ):
+    def generate_video(prompt, model_selection, input_image=None):
         model_path = MODEL_PATH_MAPPING.get(model_selection, MODEL_ID)
         setup_model_environment(model_path)
         try:
@@ -69,45 +69,33 @@ def create_gradio_interface(default_params: dict[str, SamplingParam], generators
             output_path = str(OUTPUT_DIR / video_filename)
             params.output_path = output_path
             start_time = time.perf_counter()
-            result = generator.generate_video(
-                prompt=prompt,
-                output_path=output_path,
-                fps=DEFAULT_FPS,
-                seed=int(params.seed),
-                save_video=True,
-                return_frames=False,
-                guidance_scale=float(params.guidance_scale),
-                height=int(params.height),
-                width=int(params.width),
-                num_frames=int(params.num_frames),
-                num_inference_steps=DEFAULT_NUM_INFERENCE_STEPS,
-                negative_prompt=params.negative_prompt,
-                image_path=params.image_path,
-                ltx2_image_crf=0.0
-            )
+            result = generator.generate_video(prompt=prompt,
+                                              output_path=output_path,
+                                              fps=DEFAULT_FPS,
+                                              seed=int(params.seed),
+                                              save_video=True,
+                                              return_frames=False,
+                                              guidance_scale=float(params.guidance_scale),
+                                              height=int(params.height),
+                                              width=int(params.width),
+                                              num_frames=int(params.num_frames),
+                                              num_inference_steps=DEFAULT_NUM_INFERENCE_STEPS,
+                                              negative_prompt=params.negative_prompt,
+                                              image_path=params.image_path,
+                                              ltx2_image_crf=0.0)
             wall_time = time.perf_counter() - start_time
-            generation_time = (
-                result.get("generation_time")
-                if isinstance(result, dict) else None
-            )
-            e2e_latency = (
-                result.get("e2e_latency")
-                if isinstance(result, dict) else None
-            )
+            generation_time = (result.get("generation_time") if isinstance(result, dict) else None)
+            e2e_latency = (result.get("e2e_latency") if isinstance(result, dict) else None)
             if generation_time is None:
                 generation_time = wall_time
             if e2e_latency is None:
                 e2e_latency = wall_time
-            resolved_output_path = (
-                result.get("output_path", output_path)
-                if isinstance(result, dict) else output_path
-            )
+            resolved_output_path = (result.get("output_path", output_path) if isinstance(result, dict) else output_path)
             logging_info = result.get("logging_info", None) if isinstance(result, dict) else None
             if logging_info:
                 stage_names = logging_info.get_execution_order()
                 stage_execution_times = [
-                    logging_info.get_stage_info(stage_name).get("execution_time", 0.0) 
-                    for stage_name in stage_names
+                    logging_info.get_stage_info(stage_name).get("execution_time", 0.0) for stage_name in stage_names
                 ]
             else:
                 stage_names = []
@@ -126,11 +114,9 @@ def create_gradio_interface(default_params: dict[str, SamplingParam], generators
             return None, f"Generation failed: {str(e)}", 0, 0.0, 0.0
 
     examples, example_labels = load_example_prompts()
-    curated_prompts = {
-        prompt.strip() for prompt in examples if prompt.strip()
-    }
+    curated_prompts = {prompt.strip() for prompt in examples if prompt.strip()}
     initial_example_label = None
-    
+
     theme = gr.themes.Base().set(
         button_primary_background_fill="#2563eb",
         button_primary_background_fill_hover="#1d4ed8",
@@ -169,7 +155,8 @@ def create_gradio_interface(default_params: dict[str, SamplingParam], generators
             </div>
             <div id="hero-title" class="hero-title">Real-Time 1080p Video Generation with FastLTX-2.3 on a single B200</div>
         </div>
-        """, elem_id="hero-wrapper")
+        """,
+                elem_id="hero-wrapper")
 
         with gr.Column(elem_id="app-shell", elem_classes="app-shell"):
             timing_title = gr.HTML(
@@ -186,9 +173,7 @@ def create_gradio_interface(default_params: dict[str, SamplingParam], generators
 
             with gr.Group(elem_id="stage-card", elem_classes="stage-card"):
                 with gr.Row(elem_id="stage-card-header", elem_classes="stage-card-header"):
-                    gr.HTML(
-                        "<div class='stage-title'>🏎️ Make Video Generation Go Blurrrrrrr 💨</div>"
-                    )
+                    gr.HTML("<div class='stage-title'>🏎️ Make Video Generation Go Blurrrrrrr 💨</div>")
                     stage_badges = gr.HTML(
                         render_generation_badges("FastLTX-2.3"),
                         elem_id="stage-badges",
@@ -246,8 +231,8 @@ def create_gradio_interface(default_params: dict[str, SamplingParam], generators
                     elem_id="input-image",
                 )
                 with gr.Row(
-                    elem_id="image-upload-status-row",
-                    elem_classes="image-upload-status-row",
+                        elem_id="image-upload-status-row",
+                        elem_classes="image-upload-status-row",
                 ):
                     image_upload_status = gr.HTML(
                         value=render_input_image_status(None),
@@ -334,7 +319,10 @@ def create_gradio_interface(default_params: dict[str, SamplingParam], generators
         with gr.Row(elem_id="completed-clips-header-row", elem_classes="completed-clips-header-row"):
             with gr.Column(scale=4):
                 gr.Markdown("## Gallery")
-            with gr.Column(scale=1, min_width=170, elem_id="completed-clips-button-column", elem_classes="completed-clips-button-column"):
+            with gr.Column(scale=1,
+                           min_width=170,
+                           elem_id="completed-clips-button-column",
+                           elem_classes="completed-clips-button-column"):
                 clear_clips_button = gr.Button(
                     "Clear My Gallery",
                     variant="secondary",
@@ -1528,13 +1516,13 @@ def create_gradio_interface(default_params: dict[str, SamplingParam], generators
         })();
         </script>
         """)
-        
+
         def on_example_select(example_label):
             if example_label and example_label in example_labels:
                 index = example_labels.index(example_label)
                 return examples[index]
             return gr.update()
-        
+
         example_dropdown.change(
             fn=on_example_select,
             inputs=example_dropdown,
@@ -1586,7 +1574,7 @@ def create_gradio_interface(default_params: dict[str, SamplingParam], generators
                 stage_badges,
             ],
         )
-        
+
         def summarize_clip_status(session_clips):
             session_clips = session_clips or []
             count = len(session_clips)
@@ -1678,15 +1666,11 @@ def create_gradio_interface(default_params: dict[str, SamplingParam], generators
                 )
 
             if prompt_for_generation != normalized_prompt:
-                enhanced_safety_check = get_prompt_safety_check(
-                    prompt_for_generation
-                )
+                enhanced_safety_check = get_prompt_safety_check(prompt_for_generation)
                 if enhanced_safety_check.blocked:
-                    message = (
-                        "Prompt enhancement produced text that was blocked by "
-                        "the safety filter. Please revise the prompt and try "
-                        "again."
-                    )
+                    message = ("Prompt enhancement produced text that was blocked by "
+                               "the safety filter. Please revise the prompt and try "
+                               "again.")
                     gr.Warning(message)
                     return (
                         gr.update(value=None, visible=True),
@@ -1708,8 +1692,7 @@ def create_gradio_interface(default_params: dict[str, SamplingParam], generators
                     )
 
             result_path, seed_or_error, num_frames, generation_time, e2e_latency = generate_video(
-                prompt_for_generation, model_selection, input_image
-            )
+                prompt_for_generation, model_selection, input_image)
             timing_details = create_timing_display(
                 inference_time=generation_time,
                 total_time=e2e_latency,
@@ -1762,7 +1745,7 @@ def create_gradio_interface(default_params: dict[str, SamplingParam], generators
             ],
             queue=False,
         )
-        
+
         run_button.click(
             fn=handle_generation,
             inputs=[
@@ -1784,5 +1767,5 @@ def create_gradio_interface(default_params: dict[str, SamplingParam], generators
             show_progress_on=result,
             queue=False,
         )
-    
+
     return demo

@@ -67,24 +67,18 @@ _inductor.coordinate_descent_tuning = True
 _inductor.coordinate_descent_check_all_directions = True
 _inductor.epilogue_fusion = False
 
-MODEL_ID = os.path.expandvars(
-    os.path.expanduser(
-        os.getenv("LTX23_MODEL_PATH", "FastVideo/LTX-2.3-Distilled-Diffusers")
-    )
-)
-OUTPUT_DIR = Path(
-    os.getenv("LTX23_OUTPUT_DIR", "outputs_video/ltx2_3_distilled_i2v")
-)
+MODEL_ID = os.path.expandvars(os.path.expanduser(os.getenv("LTX23_MODEL_PATH",
+                                                           "FastVideo/LTX-2.3-Distilled-Diffusers")))
+OUTPUT_DIR = Path(os.getenv("LTX23_OUTPUT_DIR", "outputs_video/ltx2_3_distilled_i2v"))
 I2V_IMAGE = os.getenv("LTX23_I2V_IMAGE", "")
-DEFAULT_PROMPT = (
-    "A fashion model takes a slow step forward and shifts her weight, "
-    "the soft fabric of her clothing swaying and rippling with the "
-    "motion, her hair shifting gently, soft even studio lighting on a "
-    "clean light background, elegant slow-motion runway feel."
-)
+DEFAULT_PROMPT = ("A fashion model takes a slow step forward and shifts her weight, "
+                  "the soft fabric of her clothing swaying and rippling with the "
+                  "motion, her hair shifting gently, soft even studio lighting on a "
+                  "clean light background, elegant slow-motion runway feel.")
 PROMPT = os.getenv("LTX23_I2V_PROMPT", DEFAULT_PROMPT)
 
 # Per-stage timing helpers --------------------------------------------------
+
 
 def _print_stage_breakdown(result: dict, label: str) -> float | None:
     """Print stage execution times and return the sum, or None if missing."""
@@ -114,9 +108,7 @@ def _collect_stage_times(
         return
     for name, metrics in stages.items():
         stage_order.setdefault(name, None)
-        stage_times.setdefault(name, []).append(
-            float(metrics.get("execution_time", 0.0))
-        )
+        stage_times.setdefault(name, []).append(float(metrics.get("execution_time", 0.0)))
 
 
 def _resolve_refine_upsampler(model_root: str) -> Path:
@@ -125,21 +117,18 @@ def _resolve_refine_upsampler(model_root: str) -> Path:
         cand = Path(model_root) / name
         if (cand / "config.json").is_file():
             return cand
-    raise FileNotFoundError(
-        f"No refine upsampler directory under {model_root}. "
-        f"Expected `{model_root}/spatial_upscaler/config.json`."
-    )
+    raise FileNotFoundError(f"No refine upsampler directory under {model_root}. "
+                            f"Expected `{model_root}/spatial_upscaler/config.json`.")
 
 
 # Main ---------------------------------------------------------------------
 
+
 def main() -> None:
     if not I2V_IMAGE:
-        raise SystemExit(
-            "LTX23_I2V_IMAGE is required for i2v. Example:\n"
-            "  export LTX23_I2V_IMAGE=/path/to/portrait_or_product.jpg\n"
-            "  python examples/inference/basic/basic_ltx2_3_distilled_i2v.py"
-        )
+        raise SystemExit("LTX23_I2V_IMAGE is required for i2v. Example:\n"
+                         "  export LTX23_I2V_IMAGE=/path/to/portrait_or_product.jpg\n"
+                         "  python examples/inference/basic/basic_ltx2_3_distilled_i2v.py")
     if not Path(I2V_IMAGE).is_file():
         raise SystemExit(f"LTX23_I2V_IMAGE not found: {I2V_IMAGE}")
 
@@ -201,11 +190,13 @@ def main() -> None:
 
     common_kwargs = dict(
         prompt=PROMPT,
-        negative_prompt="",         # distilled is CFG-free; no negative needed
-        guidance_scale=1.0,         # CFG=1 for distilled
-        height=1280, width=832,     # portrait runway aspect
-        num_frames=121, fps=24,     # ~5s clip
-        num_inference_steps=8,      # distilled denoise steps
+        negative_prompt="",  # distilled is CFG-free; no negative needed
+        guidance_scale=1.0,  # CFG=1 for distilled
+        height=1280,
+        width=832,  # portrait runway aspect
+        num_frames=121,
+        fps=24,  # ~5s clip
+        num_inference_steps=8,  # distilled denoise steps
         # i2v: anchor the input image at frame 0 with full strength.
         # `ltx2_image_crf=0.0` skips an extra JPEG re-encode of an already
         # JPEG conditioning image.
@@ -251,10 +242,7 @@ def main() -> None:
                 **common_kwargs,
             )
             wall = time.perf_counter() - t0
-            e2e = (
-                result.get("e2e_latency")
-                if isinstance(result, dict) else None
-            ) or wall
+            e2e = (result.get("e2e_latency") if isinstance(result, dict) else None) or wall
             measured_secs.append(e2e)
             print(f"[measured {m + 1}/{measured_runs}] e2e={e2e:.2f}s wall={wall:.2f}s")
             if isinstance(result, dict):
@@ -266,10 +254,8 @@ def main() -> None:
         print(f"warmup wall-times:      {[round(x, 1) for x in warmup_secs]}")
         if measured_secs:
             avg = sum(measured_secs) / len(measured_secs)
-            print(
-                f"measured e2e (n={len(measured_secs)}): "
-                f"{[round(x, 2) for x in measured_secs]} -> avg {avg:.2f}s"
-            )
+            print(f"measured e2e (n={len(measured_secs)}): "
+                  f"{[round(x, 2) for x in measured_secs]} -> avg {avg:.2f}s")
         if stage_times:
             print(f"average stage times over {measured_runs} measured runs:")
             avg_total = 0.0

@@ -41,6 +41,8 @@ class SDPABackend(AttentionBackend):
 class SDPAMetadata(AttentionMetadata):
     current_timestep: int
     attn_mask: torch.Tensor | None = None
+    # The mask is exactly native causal attention, with no additional padding.
+    is_causal: bool = False
 
 
 class SDPAMetadataBuilder(AttentionMetadataBuilder):

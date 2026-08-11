@@ -30,7 +30,6 @@ from .block_sparse_attn import block_sparse_attn_triton, _force_triton
 # FA4 CuTe build (``flash_attn.cute``) and make it a hard dependency of the
 # default Triton path.
 
-
 _KV_BLOCK_PHYS = 128  # FA4 CuTe BSA forward uses 128-token KV blocks.
 _KV_BLOCK_TRITON = 64  # Existing Triton path uses 64-token KV blocks.
 
@@ -66,7 +65,7 @@ def _expand_mask_and_sizes_256_to_128(
     child0 = torch.clamp(sizes_i32, min=0, max=_KV_BLOCK_PHYS)
     child1 = torch.clamp(sizes_i32 - _KV_BLOCK_PHYS, min=0, max=_KV_BLOCK_PHYS)
     expanded_sizes = torch.empty(
-        (sizes_i32.numel() * 2,),
+        (sizes_i32.numel() * 2, ),
         dtype=torch.int32,
         device=sizes_i32.device,
     )
@@ -108,9 +107,7 @@ def _triton_via_route_a(
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     from .triton_kernels.index import map_to_index as triton_map_to_index
 
-    mask_64, sizes_64 = _expand_mask_and_sizes_256_to_64(
-        logical_mask_256, logical_kv_sizes_256
-    )
+    mask_64, sizes_64 = _expand_mask_and_sizes_256_to_64(logical_mask_256, logical_kv_sizes_256)
     q2k_idx, q2k_num = triton_map_to_index(mask_64.to(torch.bool))
     return block_sparse_attn_triton(q, k, v, q2k_idx, q2k_num, sizes_64)
 
@@ -127,13 +124,9 @@ def block_sparse_attn_256(
         logical_block_map_256 = logical_block_map_256.unsqueeze(0)
 
     if _resolve_backend() == "triton":
-        return _triton_via_route_a(
-            q, k, v, logical_block_map_256, logical_variable_block_sizes_256
-        )
+        return _triton_via_route_a(q, k, v, logical_block_map_256, logical_variable_block_sizes_256)
 
-    mask_128, sizes_128 = _expand_mask_and_sizes_256_to_128(
-        logical_block_map_256, logical_variable_block_sizes_256
-    )
+    mask_128, sizes_128 = _expand_mask_and_sizes_256_to_128(logical_block_map_256, logical_variable_block_sizes_256)
     from .block_sparse_attn_cute_fwd import block_sparse_attn_cute_fwd
     return block_sparse_attn_cute_fwd(q, k, v, mask_128, sizes_128)
 
@@ -163,8 +156,6 @@ def block_sparse_attn_256_bshd(
         )
         return out_bhsd.transpose(1, 2).contiguous(), aux
 
-    mask_128, sizes_128 = _expand_mask_and_sizes_256_to_128(
-        logical_block_map_256, logical_variable_block_sizes_256
-    )
+    mask_128, sizes_128 = _expand_mask_and_sizes_256_to_128(logical_block_map_256, logical_variable_block_sizes_256)
     from .block_sparse_attn_cute_fwd import block_sparse_attn_cute_fwd_bshd
     return block_sparse_attn_cute_fwd_bshd(q, k, v, mask_128, sizes_128)

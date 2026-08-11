@@ -26,10 +26,7 @@ from fastvideo.train.methods.consistency_model.causal_cd import (
 from fastvideo.train.models.wan import WanCausalModel
 from fastvideo.train.utils.config import load_run_config
 
-
-_FIXTURE = str(
-    Path(__file__).resolve().parent.parent / "fixtures"
-    / "wan_causal_t2v_causal_cd_min.yaml")
+_FIXTURE = str(Path(__file__).resolve().parent.parent / "fixtures" / "wan_causal_t2v_causal_cd_min.yaml")
 
 
 def _build_synthetic_batch(
@@ -38,18 +35,14 @@ def _build_synthetic_batch(
 ) -> dict[str, torch.Tensor]:
     batch_size = 1
     return {
-        "text_embedding":
-        torch.randn(batch_size, 16, 4096, device=device, dtype=dtype),
-        "text_attention_mask":
-        torch.ones(batch_size, 16, device=device),
-        "vae_latent":
-        torch.randn(batch_size, 16, 6, 8, 8, device=device, dtype=dtype),
+        "text_embedding": torch.randn(batch_size, 16, 4096, device=device, dtype=dtype),
+        "text_attention_mask": torch.ones(batch_size, 16, device=device),
+        "vae_latent": torch.randn(batch_size, 16, 6, 8, 8, device=device, dtype=dtype),
     }
 
 
 @pytest.mark.usefixtures("distributed_setup")
-def test_wan_causal_cd_single_train_step(
-        monkeypatch: pytest.MonkeyPatch) -> None:
+def test_wan_causal_cd_single_train_step(monkeypatch: pytest.MonkeyPatch) -> None:
     if not torch.cuda.is_available():
         pytest.skip("requires CUDA")
 
@@ -87,7 +80,11 @@ def test_wan_causal_cd_single_train_step(
 
     method = CausalConsistencyDistillationMethod(
         cfg=cfg,
-        role_models={"student": student, "teacher": teacher, "ema": ema},
+        role_models={
+            "student": student,
+            "teacher": teacher,
+            "ema": ema
+        },
     )
     method.on_train_start()
 
@@ -96,8 +93,7 @@ def test_wan_causal_cd_single_train_step(
 
     loss = loss_map["total_loss"]
     assert torch.is_tensor(loss), "total_loss must be a torch.Tensor"
-    assert torch.isfinite(loss).item(), (
-        f"total_loss is not finite: {loss.item()}")
+    assert torch.isfinite(loss).item(), (f"total_loss is not finite: {loss.item()}")
 
     method.backward(loss_map, outputs, grad_accum_rounds=1)
 
@@ -108,15 +104,13 @@ def test_wan_causal_cd_single_train_step(
     assert len(trainable) > 0, "student layer 0 has no trainable parameters"
     for i, p in enumerate(trainable):
         assert p.grad is not None, f"student layer 0 param[{i}] has None grad"
-        assert torch.isfinite(p.grad).all().item(), (
-            f"student layer 0 param[{i}] grad contains NaN/Inf")
-    assert any(p.grad.detach().float().norm().item() > 0.0 for p in trainable), (
-        "all student layer-0 grads are exactly zero; consistency loss "
-        "did not reach the first transformer block")
+        assert torch.isfinite(p.grad).all().item(), (f"student layer 0 param[{i}] grad contains NaN/Inf")
+    assert any(p.grad.detach().float().norm().item() > 0.0
+               for p in trainable), ("all student layer-0 grads are exactly zero; consistency loss "
+                                     "did not reach the first transformer block")
 
     # Teacher must stay frozen.
-    assert all(not p.requires_grad for p in teacher.transformer.parameters()), (
-        "teacher must be frozen for Causal-CD")
+    assert all(not p.requires_grad for p in teacher.transformer.parameters()), ("teacher must be frozen for Causal-CD")
 
     # The EMA model and student start from the same checkpoint, so the first
     # parameter must match before any update. FSDP fully_shard params are
@@ -127,8 +121,8 @@ def test_wan_causal_cd_single_train_step(
 
     ema_param = next(ema.transformer.parameters())
     student_param = next(student.transformer.parameters())
-    assert torch.equal(_local(ema_param), _local(student_param)), (
-        "EMA model should start identical to the student (same checkpoint)")
+    assert torch.equal(_local(ema_param),
+                       _local(student_param)), ("EMA model should start identical to the student (same checkpoint)")
 
     # The EMA update must move EMA toward the student. Apply a visibly large
     # perturbation so the bf16 lerp is well above rounding noise (the real
@@ -138,10 +132,7 @@ def test_wan_causal_cd_single_train_step(
     before = _local(ema_param).detach().float().clone()
     method._update_ema()
     after = _local(ema_param).detach().float()
-    assert not torch.equal(before, after), (
-        "EMA weights did not move after _update_ema")
+    assert not torch.equal(before, after), ("EMA weights did not move after _update_ema")
     # EMA = decay*ema + (1-decay)*student moves ~ (1-decay) of the gap.
-    expected = before + (1.0 - method._ema_decay) * (
-        _local(student_param).detach().float() - before)
-    assert torch.allclose(after, expected, atol=1e-2), (
-        "EMA update did not follow the expected lerp")
+    expected = before + (1.0 - method._ema_decay) * (_local(student_param).detach().float() - before)
+    assert torch.allclose(after, expected, atol=1e-2), ("EMA update did not follow the expected lerp")

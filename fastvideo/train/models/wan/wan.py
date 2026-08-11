@@ -18,6 +18,7 @@ from fastvideo.forward_context import set_forward_context
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
     FlowMatchEulerDiscreteScheduler, )
 from fastvideo.pipelines import TrainingBatch
+from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.training.activation_checkpoint import (
     apply_activation_checkpointing, )
 from fastvideo.training.training_utils import (
@@ -71,10 +72,12 @@ class WanModel(ModelBase):
         transformer_override_safetensor: str
         | None = None,
         lora: LoraConfig | dict[str, Any] | None = None,
+        attention_backend: AttentionBackendEnum | str | None = None,
     ) -> None:
         super().__init__(
             trainable=trainable,
             lora=lora,
+            attention_backend=attention_backend,
         )
         self._init_from = str(init_from)
 
@@ -85,6 +88,7 @@ class WanModel(ModelBase):
             enable_gradient_checkpointing_type=(enable_gradient_checkpointing_type),
             training_config=training_config,
             transformer_override_safetensor=(transformer_override_safetensor),
+            attention_backend=self.attention_backend,
         )
 
         self.noise_scheduler = (FlowMatchEulerDiscreteScheduler(shift=float(flow_shift)))
@@ -118,6 +122,7 @@ class WanModel(ModelBase):
         enable_gradient_checkpointing_type: str | None,
         training_config: TrainingConfig,
         transformer_override_safetensor: str | None = None,
+        attention_backend: AttentionBackendEnum | str | None = None,
     ) -> torch.nn.Module:
         transformer = load_module_from_path(
             model_path=init_from,
@@ -126,6 +131,7 @@ class WanModel(ModelBase):
             disable_custom_init_weights=(disable_custom_init_weights),
             override_transformer_cls_name=(self._transformer_cls_name),
             transformer_override_safetensor=(transformer_override_safetensor),
+            attention_backend=attention_backend,
         )
         # Fall back to training_config.model if not set on the
         # model YAML section directly.
@@ -484,7 +490,8 @@ class WanModel(ModelBase):
         assert latents_shape is not None
         assert training_batch.timesteps is not None
 
-        if (envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN"):
+        attention_backend = (self.attention_backend_name or envs.FASTVIDEO_ATTENTION_BACKEND)
+        if attention_backend == "VIDEO_SPARSE_ATTN":
             if (not is_vsa_available() or VideoSparseAttentionMetadataBuilder is None):
                 raise ImportError("FASTVIDEO_ATTENTION_BACKEND is "
                                   "VIDEO_SPARSE_ATTN, but "
@@ -498,7 +505,7 @@ class WanModel(ModelBase):
                 device=self.device,
                 cache_tile_buf=tc.vsa_cache_tile_buf,
             )
-        elif (envs.FASTVIDEO_ATTENTION_BACKEND == "VMOBA_ATTN"):
+        elif attention_backend == "VMOBA_ATTN":
             if (not is_vmoba_available() or VideoMobaAttentionMetadataBuilder is None):
                 raise ImportError("FASTVIDEO_ATTENTION_BACKEND is "
                                   "VMOBA_ATTN, but fastvideo_kernel "
