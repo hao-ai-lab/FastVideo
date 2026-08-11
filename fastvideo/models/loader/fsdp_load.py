@@ -19,6 +19,11 @@ from torch.distributed.fsdp import (CPUOffloadPolicy, FSDPModule, MixedPrecision
 from torch.nn.modules.module import _IncompatibleKeys
 
 from fastvideo.logger import init_logger
+from fastvideo.models.loader.shard_cache import (
+    shard_cache_context,
+    try_load_from_shard_cache,
+    write_shard_cache,
+)
 from fastvideo.models.loader.utils import (get_param_names_mapping, hf_to_custom_state_dict)
 from fastvideo.models.loader.weight_utils import safetensors_weights_iterator
 from fastvideo.utils import set_mixed_precision_policy, is_pin_memory_available
@@ -201,17 +206,37 @@ def maybe_load_fsdp_model(
                     fsdp_shard_conditions=model._fsdp_shard_conditions,
                     pin_cpu_memory=pin_cpu_memory)
 
-    weight_iterator = safetensors_weights_iterator(weight_dir_list, to_cpu=True)
-    param_names_mapping_fn = get_param_names_mapping(model.param_names_mapping)
-    load_model_from_full_model_state_dict(
-        model,
-        weight_iterator,
-        device,
-        default_dtype,
-        strict=strict,
-        cpu_offload=cpu_offload,
-        param_names_mapping=param_names_mapping_fn,
-    )
+    # Sharded base-weight cache (opt-in via FASTVIDEO_WEIGHT_SHARD_CACHE):
+    # rebuild local DTensor chunks from tmpfs instead of re-reading and
+    # re-scattering the full checkpoint on every relaunch. Any miss or
+    # validation failure falls through to the full load below.
+    shard_cache_ctx = None
+    if use_fsdp and not cpu_offload:
+        shard_cache_ctx = shard_cache_context(
+            weight_dir_list=weight_dir_list,
+            device_mesh=device_mesh,
+            hsdp_replicate_dim=hsdp_replicate_dim,
+            hsdp_shard_dim=hsdp_shard_dim,
+            default_dtype=default_dtype,
+            param_dtype=param_dtype,
+            param_names_mapping=model.param_names_mapping,
+        )
+    cache_hit = (shard_cache_ctx is not None
+                 and try_load_from_shard_cache(model, shard_cache_ctx, device, strict=strict))
+    if not cache_hit:
+        weight_iterator = safetensors_weights_iterator(weight_dir_list, to_cpu=True)
+        param_names_mapping_fn = get_param_names_mapping(model.param_names_mapping)
+        load_model_from_full_model_state_dict(
+            model,
+            weight_iterator,
+            device,
+            default_dtype,
+            strict=strict,
+            cpu_offload=cpu_offload,
+            param_names_mapping=param_names_mapping_fn,
+        )
+        if shard_cache_ctx is not None:
+            write_shard_cache(model, shard_cache_ctx)
     if hasattr(model, "materialize_non_persistent_buffers"):
         model.materialize_non_persistent_buffers(device=device, dtype=default_dtype)
     for n, p in chain(model.named_parameters(), model.named_buffers()):
@@ -440,10 +465,14 @@ def load_model_from_full_model_state_dict(
                 sharded_tensor = full_tensor
         else:
             full_tensor = full_tensor.to(device=device, dtype=target_dtype)
+            # Every rank read the identical full tensor from the checkpoint, so
+            # each can slice its own shard locally; the default src_data_rank=0
+            # scatters from rank 0 and throws away the other ranks' copies.
             sharded_tensor = distribute_tensor(
                 full_tensor,
                 meta_sharded_param.device_mesh,
                 meta_sharded_param.placements,
+                src_data_rank=None,
             )
             if cpu_offload:
                 sharded_tensor = sharded_tensor.cpu()
