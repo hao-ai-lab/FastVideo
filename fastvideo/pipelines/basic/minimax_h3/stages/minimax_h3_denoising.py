@@ -12,6 +12,7 @@ from fastvideo.attention.selector import component_attention_backend, get_attn_b
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
+from fastvideo.logger import init_logger
 from fastvideo.profiler import get_global_controller
 from fastvideo.hooks.activation_trace import trace_step
 from fastvideo.pipelines.basic.minimax_h3.packing import (
@@ -25,6 +26,8 @@ from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 from fastvideo.utils import get_compute_dtype
+
+logger = init_logger(__name__)
 
 
 def _h3_vsa_metadata_builder(transformer: Any, fastvideo_args: FastVideoArgs) -> Any:
@@ -104,8 +107,19 @@ class MiniMaxH3DenoisingStage(PipelineStage):
             batch.latents = batch.latents.to(device)
             batch.audio_latents = batch.audio_latents.to(device)
 
-        self.scheduler.set_timesteps(batch.num_inference_steps, device=device)
-        self.audio_scheduler.set_timesteps(batch.num_inference_steps, device=device)
+        dmd_steps = fastvideo_args.pipeline_config.dmd_denoising_steps
+        if dmd_steps:
+            # DMD method timesteps are integers on the shared 1000-step grid;
+            # normalize to base time and let each scheduler apply its own shift
+            # (mirroring MiniMaxH3DMDModel._noise_amounts), so few-step sampling
+            # visits exactly the trained jump points — one forward per step.
+            base = torch.tensor([float(step) / 1000.0 for step in dmd_steps] + [0.0], dtype=torch.float32)
+            self.scheduler.set_timesteps(sigmas=self.scheduler.shift_sigmas(base), device=device)
+            self.audio_scheduler.set_timesteps(sigmas=self.audio_scheduler.shift_sigmas(base), device=device)
+            logger.info("MiniMax-H3 denoising with explicit DMD steps %s.", list(dmd_steps))
+        else:
+            self.scheduler.set_timesteps(batch.num_inference_steps, device=device)
+            self.audio_scheduler.set_timesteps(batch.num_inference_steps, device=device)
         video_timesteps = self.scheduler.timesteps
         audio_timesteps = self.audio_scheduler.timesteps
         if video_timesteps is None or audio_timesteps is None:
@@ -146,6 +160,13 @@ class MiniMaxH3DenoisingStage(PipelineStage):
             vsa_exempt = vsa_mode == "exempt"
             vsa_dense_layers = tuple(batch.extra.get("vsa_dense_layers", ()))
             vsa_dense_first_n = int(batch.extra.get("vsa_dense_first_n_steps", 0))
+            # A per-request batch sparsity wins when set; otherwise fall back
+            # to the run-level args value (training validation and the CLI set
+            # fastvideo_args.VSA_sparsity — nothing populates the batch field
+            # on those paths, and the batch's 0.0 default silently sampled
+            # dense while training ran sparse).
+            vsa_sparsity_base = (float(batch.VSA_sparsity)
+                                 if float(batch.VSA_sparsity) > 0.0 else float(fastvideo_args.VSA_sparsity))
 
         controller = get_global_controller()
         denoise_region = (controller.region("profiler_region_inference_denoising")
@@ -160,7 +181,7 @@ class MiniMaxH3DenoisingStage(PipelineStage):
                         # Optional schedule: run the first N steps dense (sparsity 0
                         # selects every tile — parity-proven ≡ dense ≤2e-4); early
                         # steps set global structure and are the most damage-prone.
-                        vsa_sparsity = 0.0 if index < vsa_dense_first_n else float(batch.VSA_sparsity)
+                        vsa_sparsity = 0.0 if index < vsa_dense_first_n else vsa_sparsity_base
                         attn_metadata = vsa_metadata_builder.build(
                             current_timestep=index,
                             raw_latent_shape=(layout.num_video_latent_frames, layout.latent_height,

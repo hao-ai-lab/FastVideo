@@ -382,6 +382,17 @@ class ValidationCallback(Callback):
             self._restore_inactive_role_modules(module_records)
             self._restore_optimizer_states(optimizer_tensor_records)
             self._empty_cuda_cache()
+            off_cuda = [
+                f"{name} on {getattr(p, '_local_tensor', p).device}"
+                for name, p in validation_transformer.named_parameters()
+                if getattr(p, "_local_tensor", p).device.type != "cuda"
+            ]
+            if off_cuda:
+                logger.warning(
+                    "Post-validation: %d validation-transformer params off-CUDA; first: %s",
+                    len(off_cuda),
+                    off_cuda[:5],
+                )
 
     def _offload_optimizer_states_to_cpu(
         self,
@@ -466,6 +477,20 @@ class ValidationCallback(Callback):
             device = self._first_cuda_tensor_device(module)
             if device is None:
                 continue
+            if self._is_fsdp_managed(module):
+                # `.to()` round-trips on fully_shard modules replace DTensor
+                # local storage behind FSDP2's bookkeeping; the corruption
+                # surfaces as device-mismatch errors on the first backward
+                # through the module a few steps after restore. Keep sharded
+                # roles resident — the optimizer-state offload above already
+                # returns the bulk of the memory.
+                logger.info(
+                    "Keeping role %r transformer on %s during validation "
+                    "(FSDP-managed modules do not survive .to() round-trips).",
+                    role,
+                    device,
+                )
+                continue
             try:
                 module.to("cpu")
             except Exception as exc:
@@ -493,6 +518,17 @@ class ValidationCallback(Callback):
                 role,
                 device,
             )
+
+    @staticmethod
+    def _is_fsdp_managed(module: torch.nn.Module) -> bool:
+        try:
+            from torch.distributed.fsdp import FSDPModule
+            from torch.distributed.tensor import DTensor
+        except ImportError:
+            return False
+        if isinstance(module, FSDPModule):
+            return True
+        return any(isinstance(p, DTensor) for p in module.parameters(recurse=True))
 
     @staticmethod
     def _first_cuda_tensor_device(module: torch.nn.Module) -> torch.device | None:
@@ -1237,6 +1273,25 @@ class ValidationCallback(Callback):
                 getattr(transformer, name),
             )
 
+    def _inject_method_denoising_steps(self, validation_config: Any) -> None:
+        """Sample validation at the method's trained DMD jump points.
+
+        Distillation students only ever denoise from ``dmd_denoising_steps``;
+        stages that honor ``pipeline_config.dmd_denoising_steps`` should visit
+        the same points instead of the scheduler's native grid. An explicit
+        value already on the pipeline config wins, and warped lists stay out
+        (their raw entries are grid indices, not timesteps).
+        """
+        method_config = getattr(self.method, "method_config", None)
+        if not isinstance(method_config, dict):
+            return
+        steps = method_config.get("dmd_denoising_steps")
+        if not steps or bool(method_config.get("warp_denoising_step", False)):
+            return
+        if getattr(validation_config, "dmd_denoising_steps", "unset") is not None:
+            return
+        validation_config.dmd_denoising_steps = [int(step) for step in steps]
+
     def _get_pipeline(
         self,
         *,
@@ -1288,6 +1343,7 @@ class ValidationCallback(Callback):
                 validation_config,
                 loaded_config,
             )
+            self._inject_method_denoising_steps(validation_config)
             self._pipeline.fastvideo_args.pipeline_config = validation_config
             arch_config = self._pipeline.fastvideo_args.pipeline_config.dit_config.arch_config
             logger.info(

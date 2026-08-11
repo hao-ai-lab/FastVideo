@@ -51,6 +51,11 @@ class MiniMaxH3Scheduler(SchedulerMixin, ConfigMixin):
             raise ValueError(f"`shift` must be positive, got {shift}.")
         self._shift = float(shift)
 
+    def shift_sigmas(self, base_sigmas: torch.Tensor) -> torch.Tensor:
+        """Warp unshifted base noise amounts onto this scheduler's shifted grid."""
+        base = torch.as_tensor(base_sigmas, dtype=torch.float32)
+        return self._shift * base / (1 + (self._shift - 1) * base)
+
     def set_timesteps(
         self,
         num_inference_steps: int | None = None,
@@ -62,7 +67,7 @@ class MiniMaxH3Scheduler(SchedulerMixin, ConfigMixin):
                 raise ValueError("`set_timesteps` requires explicit `sigmas` or "
                                  f"`num_inference_steps` >= 2, got {num_inference_steps}.")
             base = torch.linspace(1.0, 0.0, int(num_inference_steps), dtype=torch.float32)
-            sigma_tensor = self._shift * base / (1 + (self._shift - 1) * base)
+            sigma_tensor = self.shift_sigmas(base)
             sigma_tensor = torch.unique_consecutive(sigma_tensor)
         else:
             sigma_tensor = torch.as_tensor(sigmas, dtype=torch.float32).flatten().cpu()

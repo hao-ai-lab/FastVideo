@@ -461,3 +461,49 @@ def test_h3_dmd2_experiment_config_mirrors_wan_recipe() -> None:
     assert config["training"]["data"]["preprocessed_data_type"] == "t2va"
     assert config["training"]["data"]["train_batch_size"] == 1
     assert config["training"]["data"]["training_cfg_rate"] == 0.0
+
+
+def test_validation_dmd_sigmas_match_training_noise_amounts() -> None:
+    """``pipeline_config.dmd_denoising_steps`` replays the trained jump points.
+
+    The H3 denoising stage normalizes the method's integer steps to base time
+    and lets each scheduler apply its own shift; the resulting clean-times must
+    match ``1 - shift_noise_amount(base)`` — the exact noising the packed DMD
+    adapter applies during training rollouts — with one forward per step.
+    """
+    from fastvideo.models.schedulers.scheduling_minimax_h3 import MiniMaxH3Scheduler
+
+    steps = [1000, 757, 522]
+    base = torch.tensor([step / 1000.0 for step in steps] + [0.0], dtype=torch.float32)
+    video = MiniMaxH3Scheduler(shift=12.0)
+    audio = MiniMaxH3Scheduler(shift=3.0)
+    video.set_timesteps(sigmas=video.shift_sigmas(base))
+    audio.set_timesteps(sigmas=audio.shift_sigmas(base))
+
+    assert video.num_inference_steps == len(steps)
+    assert audio.num_inference_steps == len(steps)
+    for index, step in enumerate(steps):
+        base_step = torch.tensor([step / 1000.0])
+        assert video.timesteps[index].item() == pytest.approx(1.0 - shift_noise_amount(base_step, 12.0).item())
+        assert audio.timesteps[index].item() == pytest.approx(1.0 - shift_noise_amount(base_step, 3.0).item())
+
+
+def test_validation_callback_injects_method_denoising_steps() -> None:
+    """The callback copies the trained step list onto the validation config."""
+    from fastvideo.train.callbacks.validation import ValidationCallback
+
+    callback = ValidationCallback.__new__(ValidationCallback)
+    callback.method = SimpleNamespace(method_config={"dmd_denoising_steps": [1000, 757, 522]})
+
+    config = SimpleNamespace(dmd_denoising_steps=None)
+    callback._inject_method_denoising_steps(config)
+    assert config.dmd_denoising_steps == [1000, 757, 522]
+
+    explicit = SimpleNamespace(dmd_denoising_steps=[1000, 500])
+    callback._inject_method_denoising_steps(explicit)
+    assert explicit.dmd_denoising_steps == [1000, 500]
+
+    callback.method = SimpleNamespace(method_config={"dmd_denoising_steps": [1000, 757], "warp_denoising_step": True})
+    warped = SimpleNamespace(dmd_denoising_steps=None)
+    callback._inject_method_denoising_steps(warped)
+    assert warped.dmd_denoising_steps is None

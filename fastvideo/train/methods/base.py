@@ -275,6 +275,6 @@ class TrainingMethod(torch.nn.Module, ABC):
     def _infer_attn_kind(self) -> Literal["dense", "vsa"]:
         """Derive metadata mode from the student's resolved backend."""
         backend = (self.student.attention_backend_name or envs.FASTVIDEO_ATTENTION_BACKEND)
-        if backend == "VIDEO_SPARSE_ATTN":
+        if backend in ("VIDEO_SPARSE_ATTN", "VIDEO_SPARSE_ATTN_H3"):
             return "vsa"
         return "dense"

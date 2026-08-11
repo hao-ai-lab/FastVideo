@@ -207,6 +207,14 @@ class DistributedAttention_VSA(DistributedAttention):
         ctx_attn_metadata = forward_context.attn_metadata
 
         batch_size, seq_len, num_heads, head_dim = q.shape
+        # VSA kernels are bf16-only; cast before the cat/all-to-all so the
+        # packed qkvg comm buffers and tile scatter move half-width tensors
+        # instead of carrying autocast's fp32 norm outputs through the
+        # sequence-parallel exchange (the dominant grad-path transient).
+        if q.dtype is not torch.bfloat16:
+            q, k, v = q.to(torch.bfloat16), k.to(torch.bfloat16), v.to(torch.bfloat16)
+            if gate_compress is not None:
+                gate_compress = gate_compress.to(torch.bfloat16)
         # Stack QKV (a caller with a structurally-zero gate passes None and
         # skips the gate's share of the all-to-all/tile traffic)
         stack = [q, k, v] if gate_compress is None else [q, k, v, gate_compress]

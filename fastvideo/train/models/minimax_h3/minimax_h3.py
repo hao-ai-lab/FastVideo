@@ -7,6 +7,9 @@ from typing import Any, Literal, TYPE_CHECKING
 
 import torch
 
+import fastvideo.envs as envs
+from fastvideo.attention.backends.video_sparse_attn_h3 import (
+    MiniMaxH3VSAMetadataBuilder, )
 from fastvideo.distributed import get_sp_group
 from fastvideo.forward_context import set_forward_context
 from fastvideo.models.schedulers.scheduling_minimax_h3 import MiniMaxH3Scheduler
@@ -22,6 +25,8 @@ from fastvideo.pipelines.basic.minimax_h3.packing import (
     unpack_audio_tokens,
     unpatchify_video_tokens,
 )
+from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_denoising import (
+    _h3_vsa_prefix_segments, )
 from fastvideo.platforms import AttentionBackendEnum
 
 from fastvideo.train.models.base import ModelBase, NoisePrediction
@@ -305,7 +310,39 @@ class MiniMaxH3Model(ModelBase):
         training_batch.minimax_h3_layout = layout
         training_batch.attn_metadata = None
         training_batch.attn_metadata_vsa = None
+        self._maybe_build_vsa_metadata(training_batch)
         return training_batch
+
+    def _maybe_build_vsa_metadata(self, batch: TrainingBatch) -> None:
+        """Populate the VSA view when this model runs the VSA-H3 backend.
+
+        Methods route it through ``predict_noise(attn_kind="vsa")``; dense
+        models keep ``attn_metadata_vsa`` as ``None`` so their forwards stay
+        dense. One builder per model keeps the padded tile buffer reused
+        across steps (see ``MiniMaxH3VSAMetadata.tile_buf_holder``).
+        """
+        backend = (getattr(self, "attention_backend_name", None) or envs.FASTVIDEO_ATTENTION_BACKEND)
+        if backend != "VIDEO_SPARSE_ATTN_H3":
+            return
+        layout = batch.minimax_h3_layout
+        patch_size = tuple(self.transformer.patch_size)
+        builder = getattr(self, "_vsa_metadata_builder", None)
+        if builder is None:
+            builder = self._vsa_metadata_builder = MiniMaxH3VSAMetadataBuilder()
+        batch.attn_metadata_vsa = builder.build(
+            # Training builds one metadata per batch and reuses it across the
+            # step's forwards; the step index only feeds probe bookkeeping.
+            current_timestep=0,
+            raw_latent_shape=(
+                layout.num_video_latent_frames,
+                layout.latent_height,
+                layout.latent_width,
+            ),
+            patch_size=patch_size,
+            VSA_sparsity=float(self.training_config.vsa_sparsity),
+            prefix_segments=_h3_vsa_prefix_segments(layout, patch_size),
+            device=self.device,
+        )
 
     def add_noise(
         self,
@@ -413,6 +450,19 @@ class MiniMaxH3Model(ModelBase):
     ) -> None:
         """Restore the forward context and average accumulated microbatch gradients."""
         timesteps, attn_metadata = ctx
+        expected_device_type = self.device.type
+        offenders = []
+        for name, param in self.transformer.named_parameters():
+            local = getattr(param, "_local_tensor", param)
+            if local.device.type != expected_device_type:
+                offenders.append(f"param {name} on {local.device}")
+            if param.grad is not None:
+                grad_local = getattr(param.grad, "_local_tensor", param.grad)
+                if grad_local.device.type != expected_device_type:
+                    offenders.append(f"grad {name} on {grad_local.device}")
+        if offenders:
+            raise RuntimeError(f"{len(offenders)} training tensors off-CUDA before backward; "
+                               f"first offenders: {offenders[:8]}")
         with set_forward_context(
                 current_timestep=timesteps,
                 attn_metadata=attn_metadata,

@@ -43,9 +43,12 @@ from fastvideo.attention.backends.video_sparse_attn import (compute_topk, constr
                                                             get_non_pad_index, get_tile_partition_indices,
                                                             scatter_into_tile_buf)
 from fastvideo.attention.backends.video_sparse_attn_h3_probe import probe_enabled, record_probe
+from fastvideo.logger import init_logger
 
 VSA_H3_TILE_SIZE = (4, 8, 8)  # 256 elements -> FA4 CuTe fastpath on sm10.x
 _TILE_ELEMS = math.prod(VSA_H3_TILE_SIZE)
+
+logger = init_logger(__name__)
 
 
 def token_tile_and_valid(variable_block_sizes: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -277,6 +280,12 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         return holder[0]
 
     def preprocess_qkv(self, qkv: torch.Tensor, attn_metadata: MiniMaxH3VSAMetadata) -> torch.Tensor:
+        # Cast before tiling: autocast leaves the packed qkv fp32 (norm
+        # outputs), but the kernel computes in bf16 regardless — tiling in
+        # fp32 just doubles the dominant grad-path transient (the fresh
+        # per-forward tile buffer) and everything chunked out of it.
+        if qkv.dtype is not torch.bfloat16:
+            qkv = qkv.to(torch.bfloat16)
         return self.tile(qkv, attn_metadata)
 
     def postprocess_output(self, output: torch.Tensor, attn_metadata: MiniMaxH3VSAMetadata) -> torch.Tensor:
@@ -292,6 +301,21 @@ class MiniMaxH3VSAImpl(AttentionImpl):
     ) -> torch.Tensor:
         if block_sparse_attn_256_bshd is None:
             raise NotImplementedError("fastvideo_kernel.block_sparse_attn_256 is not installed")
+
+        # The VSA-256 kernel computes its PV dot in bf16 and accepts bf16
+        # only; training paths can leak fp32 activations into attention
+        # (fp32 master weights — the same phenomenon FLASH_ATTN guards
+        # against). Cast through bf16 and restore on output.
+        orig_dtype = query.dtype
+        if orig_dtype is not torch.bfloat16:
+            if not torch.compiler.is_compiling():
+                logger.warning_once(f"VIDEO_SPARSE_ATTN_H3 received {orig_dtype} inputs; casting to "
+                                    "bfloat16 for the kernel and restoring on output.")
+            query = query.to(torch.bfloat16)
+            key = key.to(torch.bfloat16)
+            value = value.to(torch.bfloat16)
+            if gate_compress is not None:
+                gate_compress = gate_compress.to(torch.bfloat16)
 
         # probe-guided per-layer opt-out: diffuse layers run dense (all-True
         # mask) while the rest keep the configured sparsity
@@ -332,4 +356,6 @@ class MiniMaxH3VSAImpl(AttentionImpl):
             n_tiles = attn_metadata.variable_block_sizes.numel()
             out.view(batch, n_tiles, _TILE_ELEMS, heads,
                      dim).addcmul_(out_c.unsqueeze(2), gate_compress.view(batch, n_tiles, _TILE_ELEMS, heads, dim))
+        if out.dtype != orig_dtype:
+            out = out.to(orig_dtype)
         return out

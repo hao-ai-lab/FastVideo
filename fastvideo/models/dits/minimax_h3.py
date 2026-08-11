@@ -174,6 +174,11 @@ class MiniMaxH3Attention(nn.Module):
         reach a zero gate for it to ever train).
         """
         if torch.is_grad_enabled():
+            # Training can turn the zero-init gate nonzero; drop the cached
+            # answer so the next no-grad forward (validation sampling)
+            # re-tests the weight instead of skipping a branch that has
+            # started contributing.
+            self._gate_compress_active = None
             return True
         if self._gate_compress_active is None:
             weight = self.to_gate_compress.weight
