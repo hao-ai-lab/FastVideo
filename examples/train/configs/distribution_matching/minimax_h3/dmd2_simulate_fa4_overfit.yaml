@@ -1,14 +1,16 @@
-# Single-sample DMD2 overfit: MiniMax H3 with the VSA-H3 student backend at
-# sparsity 0.0 (parity-vs-dense experiment; the backend's sparsity-0 path is
-# parity-proven <=2e-4 vs dense).
+# Single-sample DMD2 DATA-FREE overfit: rollout_mode=simulate on MiniMax H3
+# with FLASH_ATTN (FA4) for every role — no VSA in the loop.
 #
-# - Student:  VIDEO_SPARSE_ATTN_H3 backend; DMD2 forwards it attn_kind="vsa"
-#   with real packed-sequence metadata built in MiniMaxH3DMDModel.prepare_batch.
-# - Teacher/critic: FLASH_ATTN (run with FASTVIDEO_FA4=1 for the FA4 path);
-#   their forwards stay dense (attn_metadata=None).
-# - Data: ONE preprocessed t2va parquet row (768x1344, 124 frames @ 24 fps)
-#   produced by fastvideo/pipelines/preprocess/preprocess_minimax_h3_overfit.py
-#   — see examples/distill/MiniMax-H3/overfit_vsa0.sh.
+# - simulate rollout: the student builds its own trajectory from pure noise
+#   through dmd_denoising_steps (no-grad prefix steps, one with-grad step at a
+#   sampled target index). VAE latents in the parquet are ignored (zeros
+#   latents sized from training.data dims); only the text conditioning is
+#   consumed.
+# - Student/teacher/critic: FLASH_ATTN (run with FASTVIDEO_FA4=1). DMD2 still
+#   passes attn_kind="vsa" for the student rollout, which degrades to dense
+#   because attn_metadata_vsa stays None for non-VSA backends.
+# - Data: same ONE preprocessed t2va parquet row (768x1344, 124 frames @ 24
+#   fps) as dmd2_vsa0_overfit.yaml; see examples/distill/MiniMax-H3/.
 
 models:
   student:
@@ -16,7 +18,7 @@ models:
     init_from: /mnt/models/MiniMax-H3
     trainable: true
     enable_gradient_checkpointing_type: full
-    attention_backend: VIDEO_SPARSE_ATTN_H3
+    attention_backend: FLASH_ATTN
   teacher:
     _target_: fastvideo.train.models.minimax_h3.MiniMaxH3DMDModel
     init_from: /mnt/models/MiniMax-H3
@@ -33,7 +35,7 @@ models:
 
 method:
   _target_: fastvideo.train.methods.distribution_matching.dmd2.DMD2Method
-  rollout_mode: data_latent
+  rollout_mode: simulate
   generator_update_interval: 5
   real_score_guidance_scale: 3.5
   dmd_denoising_steps: [1000, 757, 522]
@@ -58,7 +60,8 @@ training:
     hsdp_shard_dim: 4
 
   data:
-    # Preprocessed-latents parquet dir; the cluster run produces it.
+    # Preprocessed-latents parquet dir; simulate mode only reads the text
+    # conditioning from it (latents are zeros sized from the dims below).
     data_path: /mnt/h3-dmd2-overfit/data
     preprocessed_data_type: t2va
     dataloader_num_workers: 0
@@ -69,10 +72,6 @@ training:
     num_height: 768
     num_width: 1344
     num_frames: 124
-
-  # Student VSA sparsity (0.0 = every tile selected, dense parity).
-  vsa:
-    sparsity: 0.0
 
   optimizer:
     learning_rate: 2.0e-6
@@ -86,7 +85,7 @@ training:
     gradient_accumulation_steps: 1
 
   checkpoint:
-    output_dir: outputs/minimax_h3_dmd2_vsa0_overfit
+    output_dir: outputs/minimax_h3_dmd2_simulate_fa4_overfit
     # 0 disables training-state checkpointing (no resume; avoids ~400+ GiB
     # DCP saves on the 87%-full volume).
     training_state_checkpointing_steps: 0
@@ -94,7 +93,7 @@ training:
 
   tracker:
     project_name: h3-dmd2-vsa
-    run_name: dmd2_vsa0_overfit
+    run_name: dmd2_simulate_fa4_overfit
 
   model:
     precondition_outputs: false
@@ -122,9 +121,7 @@ callbacks:
     offload_training_state: true
     text_encoder_cpu_offload: true
     vae_cpu_offload: true
-  # EMA disabled: its GPU shadow costs ~15.4 GiB/rank, which put the student
-  # update step ~1 GiB over the 184 GiB cards (OOM at step 5/10). Re-enable
-  # once the shadow can live on CPU.
+  # EMA disabled: its GPU shadow costs ~15.4 GiB/rank (OOM on 184 GiB cards).
   # ema:
   #   _target_: fastvideo.train.callbacks.ema.EMACallback
   #   decay: 0.98

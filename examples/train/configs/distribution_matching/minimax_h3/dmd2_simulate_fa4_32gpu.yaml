@@ -1,14 +1,20 @@
-# Single-sample DMD2 overfit: MiniMax H3 with the VSA-H3 student backend at
-# sparsity 0.0 (parity-vs-dense experiment; the backend's sparsity-0 path is
-# parity-proven <=2e-4 vs dense).
+# 32x GB200 (8 trays x 4 GPUs) data-free DMD2 on MiniMax H3, all-dense FA4.
 #
-# - Student:  VIDEO_SPARSE_ATTN_H3 backend; DMD2 forwards it attn_kind="vsa"
-#   with real packed-sequence metadata built in MiniMaxH3DMDModel.prepare_batch.
-# - Teacher/critic: FLASH_ATTN (run with FASTVIDEO_FA4=1 for the FA4 path);
-#   their forwards stay dense (attn_metadata=None).
-# - Data: ONE preprocessed t2va parquet row (768x1344, 124 frames @ 24 fps)
-#   produced by fastvideo/pipelines/preprocess/preprocess_minimax_h3_overfit.py
-#   — see examples/distill/MiniMax-H3/overfit_vsa0.sh.
+# Topology: sp_size=4 within a tray (one packed document per SP group), HSDP
+# mesh (replicate=8, shard=4) — params sharded only inside a tray (keeps the
+# proven ~145 GiB/rank profile from the 4-GPU runs), gradients replicated
+# across trays. 32/4 = 8 data-parallel groups.
+#
+# Global batch 64 = 8 DP groups x gradient_accumulation_steps 8 x micro-batch
+# 1. H3's packed-sequence pipeline is batch-1 per forward by design (one
+# interleaved [text|cond|audio|video] document); batching composes through
+# accumulation, which the trainer loops natively.
+#
+# Launch: sbatch examples/train/slurm/dmd2_32xgb200.sbatch
+#
+# NOTE: data_path below still points at the 2-row overfit set — good for a
+# 32-GPU smoke test only. Swap in the real preprocessed t2va dataset before a
+# production run.
 
 models:
   student:
@@ -16,7 +22,7 @@ models:
     init_from: /mnt/models/MiniMax-H3
     trainable: true
     enable_gradient_checkpointing_type: full
-    attention_backend: VIDEO_SPARSE_ATTN_H3
+    attention_backend: FLASH_ATTN
   teacher:
     _target_: fastvideo.train.models.minimax_h3.MiniMaxH3DMDModel
     init_from: /mnt/models/MiniMax-H3
@@ -33,33 +39,29 @@ models:
 
 method:
   _target_: fastvideo.train.methods.distribution_matching.dmd2.DMD2Method
-  rollout_mode: data_latent
+  rollout_mode: simulate
   generator_update_interval: 5
   real_score_guidance_scale: 3.5
   dmd_denoising_steps: [1000, 757, 522]
   min_timestep_ratio: 0.02
   max_timestep_ratio: 0.98
-  # H3 has no negative-prompt encoder at training time; unconditional teacher
-  # forwards zero the text embeddings instead.
   cfg_uncond:
     text: zero
 
-  # Critic optimizer (required — no fallback to training.optimizer)
   fake_score_learning_rate: 8.0e-6
   fake_score_betas: [0.0, 0.999]
   fake_score_lr_scheduler: constant
 
 training:
   distributed:
-    num_gpus: 4
+    num_gpus: 32
     sp_size: 4
     tp_size: 1
-    hsdp_replicate_dim: 1
+    hsdp_replicate_dim: 8
     hsdp_shard_dim: 4
 
   data:
-    # Preprocessed-latents parquet dir; the cluster run produces it.
-    data_path: /mnt/h3-dmd2-overfit/data
+    data_path: /mnt/h3-dmd2-overfit/data_bs2  # smoke-test set; swap for real data
     preprocessed_data_type: t2va
     dataloader_num_workers: 0
     train_batch_size: 1
@@ -70,10 +72,6 @@ training:
     num_width: 1344
     num_frames: 124
 
-  # Student VSA sparsity (0.0 = every tile selected, dense parity).
-  vsa:
-    sparsity: 0.0
-
   optimizer:
     learning_rate: 2.0e-6
     betas: [0.0, 0.999]
@@ -82,19 +80,20 @@ training:
     lr_warmup_steps: 0
 
   loop:
-    max_train_steps: 2000
-    gradient_accumulation_steps: 1
+    max_train_steps: 4000
+    # 8 accumulation rounds x 8 DP groups = global batch 64 per optimizer step.
+    gradient_accumulation_steps: 8
 
   checkpoint:
-    output_dir: outputs/minimax_h3_dmd2_vsa0_overfit
-    # 0 disables training-state checkpointing (no resume; avoids ~400+ GiB
-    # DCP saves on the 87%-full volume).
-    training_state_checkpointing_steps: 0
+    output_dir: outputs/minimax_h3_dmd2_simulate_fa4_32gpu
+    # Multi-node runs should checkpoint; DCP saves are large — point
+    # output_dir at a volume with headroom or set back to 0 to disable.
+    training_state_checkpointing_steps: 500
     checkpoints_total_limit: 3
 
   tracker:
     project_name: h3-dmd2-vsa
-    run_name: dmd2_vsa0_overfit
+    run_name: dmd2_simulate_fa4_32gpu
 
   model:
     precondition_outputs: false
@@ -109,10 +108,8 @@ callbacks:
   validation:
     _target_: fastvideo.train.callbacks.validation.ValidationCallback
     pipeline_target: fastvideo.pipelines.basic.minimax_h3.minimax_h3_pipeline.MiniMaxH3Pipeline
-    dataset_file: /mnt/h3-dmd2-overfit/c17_validation.json
-    every_steps: 50
-    # Sample the untrained baseline at step 0 (costs the validation pipeline
-    # build upfront: text-encoder + VAE loads before the first train step).
+    dataset_file: /mnt/h3-dmd2-overfit/c17_bs2_validation.json
+    every_steps: 250
     run_at_start: true
     sampling_steps: [3]
     guidance_scale: 1.0
@@ -122,12 +119,5 @@ callbacks:
     offload_training_state: true
     text_encoder_cpu_offload: true
     vae_cpu_offload: true
-  # EMA disabled: its GPU shadow costs ~15.4 GiB/rank, which put the student
-  # update step ~1 GiB over the 184 GiB cards (OOM at step 5/10). Re-enable
-  # once the shadow can live on CPU.
-  # ema:
-  #   _target_: fastvideo.train.callbacks.ema.EMACallback
-  #   decay: 0.98
-  #   start_iter: 0
 
 pipeline: {}

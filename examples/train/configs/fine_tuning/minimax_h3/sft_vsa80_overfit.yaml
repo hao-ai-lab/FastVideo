@@ -1,0 +1,93 @@
+# Single-sample SFT overfit: MiniMax H3 with the VSA-H3 backend at sparsity
+# 0.8 (80% of video tiles pruned) — sparse variant of sft_vsa0_overfit.yaml;
+# distribution_matching/minimax_h3/dmd2_vsa0_overfit.yaml (same c17_v2
+# preprocessed record, same validation prompt). Optimizer recipe follows the
+# crush-smol H3 T2VA overfit (overfit_minimax_h3_t2va.yaml), scaled to one
+# 4-GPU node with pure-FSDP sharding.
+
+models:
+  student:
+    _target_: fastvideo.train.models.minimax_h3.MiniMaxH3Model
+    init_from: /mnt/models/MiniMax-H3
+    trainable: true
+    enable_gradient_checkpointing_type: full
+    attention_backend: VIDEO_SPARSE_ATTN_H3
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
+
+training:
+  distributed:
+    num_gpus: 4
+    sp_size: 4
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 4
+
+  data:
+    data_path: /mnt/h3-dmd2-overfit/data
+    preprocessed_data_type: t2va
+    dataloader_num_workers: 0
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    seed: 42
+    num_latent_t: 37
+    num_height: 768
+    num_width: 1344
+    num_frames: 124
+
+  # Student VSA sparsity (0.8 = top-20% of tiles attended).
+  vsa:
+    sparsity: 0.8
+
+  optimizer:
+    learning_rate: 5.0e-5
+    betas: [0.9, 0.999]
+    weight_decay: 0.0
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 2000
+    gradient_accumulation_steps: 1
+
+  checkpoint:
+    output_dir: outputs/minimax_h3_sft_vsa80_overfit
+    # 0 disables training-state checkpointing (no resume; avoids large DCP
+    # saves on the shared volume).
+    training_state_checkpointing_steps: 0
+    checkpoints_total_limit: 3
+
+  tracker:
+    project_name: h3-dmd2-vsa
+    run_name: sft_vsa80_overfit
+
+  model:
+    precondition_outputs: false
+    enable_gradient_checkpointing_type: full
+
+  dit_precision: bf16
+
+callbacks:
+  grad_clip:
+    _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
+    max_grad_norm: 1.0
+  validation:
+    _target_: fastvideo.train.callbacks.validation.ValidationCallback
+    pipeline_target: fastvideo.pipelines.basic.minimax_h3.minimax_h3_pipeline.MiniMaxH3Pipeline
+    dataset_file: /mnt/h3-dmd2-overfit/c17_validation.json
+    every_steps: 50
+    # Sample the untrained baseline at step 0.
+    run_at_start: true
+    # SFT is not a few-step generator; sample on the full 50-step schedule
+    # (mirrors the crush-smol overfit validation).
+    sampling_steps: [50]
+    guidance_scale: 1.0
+    num_frames: 124
+    num_videos_per_prompt: 1
+    use_validation_media_conditioning: false
+    offload_training_state: true
+    text_encoder_cpu_offload: true
+    vae_cpu_offload: true
+
+pipeline: {}
