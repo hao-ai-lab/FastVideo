@@ -19,6 +19,12 @@ import re
 import pytest
 import torch
 
+# The distributed_setup fixture rendezvouses via env:// even for a single
+# GPU; without these the CUDA forward-pass test errors before it starts.
+# Same convention as test_flux.py (port distinct per file to avoid clashes).
+os.environ.setdefault("MASTER_ADDR", "localhost")
+os.environ.setdefault("MASTER_PORT", "29519")
+
 from fastvideo.configs.models.dits.wan_s2v import WanS2VArchConfig, WanS2VConfig
 from fastvideo.models.dits.wan_s2v import WanS2VTransformer3DModel
 from fastvideo.models.dits.wan_s2v_audio import AudioInjector, CausalAudioEncoder
@@ -403,10 +409,10 @@ def test_missing_audio_or_reference_fails_loudly() -> None:
     from fastvideo.forward_context import set_forward_context
     arch = _tiny_arch()
     model = _tiny_model(arch)
-    with torch.no_grad(), set_forward_context(current_timestep=0, attn_metadata=None):
-        with pytest.raises(ValueError, match="reference image and audio"):
-            model(torch.randn(1, arch.in_channels, 4, 16, 16), torch.randn(1, 12, arch.text_dim),
-                  torch.tensor([500.0]))
+    with torch.no_grad(), set_forward_context(current_timestep=0, attn_metadata=None), \
+            pytest.raises(ValueError, match="reference image and audio"):
+        model(torch.randn(1, arch.in_channels, 4, 16, 16), torch.randn(1, 12, arch.text_dim),
+              torch.tensor([500.0]))
 
 
 # --------------------------------------------------------------------------
