@@ -616,6 +616,7 @@ class MLXWanDiT:
         # with the benchmark's SSIM ~= 1.0 check.
         self._enable_compile = compile or os.environ.get("FASTVIDEO_MLX_COMPILE", "0") == "1"
         self._compiled_forward: Callable[..., Any] | None = None
+        self._compiled_signature: tuple | None = None
 
     def patch_embed(self, hidden_states):
         batch, channels, frames, height, width = hidden_states.shape
@@ -700,8 +701,21 @@ class MLXWanDiT:
         if self._enable_compile and cos is not None:
             import mlx.core as mx
 
+            # mx.compile keeps one traced graph per input signature, and each
+            # graph pins its own materialization of the quantized weights. The
+            # two-pass modes (--refine) call the DiT at a second resolution, so
+            # keeping both graphs alive doubles resident DiT memory: 14B refine
+            # peaked at 34.7 GiB instead of 20.8 GiB. Retire the previous graph
+            # when the signature changes; the retrace costs far less than a
+            # second copy of the weights.
+            signature = (hidden_states.shape, encoder_hidden_states.shape, timestep.shape)
+            if self._compiled_forward is not None and signature != self._compiled_signature:
+                self._compiled_forward = None
+                self._compiled_signature = None
+                mx.clear_cache()
             if self._compiled_forward is None:
                 self._compiled_forward = mx.compile(self._forward)
+                self._compiled_signature = signature
             compiled_forward = self._compiled_forward
             try:
                 return compiled_forward(hidden_states, encoder_hidden_states, timestep, cos, sin)
@@ -709,6 +723,7 @@ class MLXWanDiT:
                 logger.warning("mx.compile forward failed (%s); falling back to eager execution.", exc)
                 self._enable_compile = False
                 self._compiled_forward = None
+                self._compiled_signature = None
         return self._forward(hidden_states, encoder_hidden_states, timestep, cos, sin)
 
 

@@ -146,6 +146,7 @@ class MLXWan22DiT:
         self.eps = float(config.get("eps", 1e-6))
         self._enable_compile = compile or os.environ.get("FASTVIDEO_MLX_COMPILE", "0") == "1"
         self._compiled_forward: Callable[..., Any] | None = None
+        self._compiled_signature: tuple | None = None
 
     def _patch_embed(self, hidden_states) -> mx.array:
         batch, channels, frames, height, width = hidden_states.shape
@@ -205,8 +206,18 @@ class MLXWan22DiT:
         if self._enable_compile and cos is not None:
             import mlx.core as mx
 
+            # One traced graph per input signature, and each pins its own copy of
+            # the quantized weights. --refine denoises at two resolutions, so
+            # keeping both alive doubles resident DiT memory. Retire the previous
+            # graph when the signature changes.
+            signature = (hidden_states.shape, encoder_hidden_states.shape, timestep.shape)
+            if self._compiled_forward is not None and signature != self._compiled_signature:
+                self._compiled_forward = None
+                self._compiled_signature = None
+                mx.clear_cache()
             if self._compiled_forward is None:
                 self._compiled_forward = mx.compile(self._forward)
+                self._compiled_signature = signature
             compiled_forward = self._compiled_forward
             try:
                 return compiled_forward(hidden_states, encoder_hidden_states, timestep, cos, sin)
@@ -217,6 +228,7 @@ class MLXWan22DiT:
                 )
                 self._enable_compile = False
                 self._compiled_forward = None
+                self._compiled_signature = None
         return self._forward(hidden_states, encoder_hidden_states, timestep, cos, sin)
 
 
