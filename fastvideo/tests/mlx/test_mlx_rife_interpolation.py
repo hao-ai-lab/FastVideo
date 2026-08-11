@@ -16,8 +16,8 @@ mx = pytest.importorskip("mlx.core", reason="MLX required for RIFE tests")
     reason="RIFE MLX regression requires Apple Silicon Metal",
 )
 def test_rife_interpolation_preserves_keyframes_shape_and_count() -> None:
-    if importlib.util.find_spec("rife_mlx") is None:
-        pytest.skip("rife-mlx package is not installed")
+    if importlib.util.find_spec("fastvideo.third_party.rife_mlx") is None:
+        pytest.skip("vendored MLX RIFE backend is unavailable")
 
     from fastvideo.mlx_runtime.rife_interp import interpolate, load_model
 

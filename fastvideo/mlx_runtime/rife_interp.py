@@ -30,16 +30,21 @@ def _require_hwc_rgb(frame: np.ndarray, index: int) -> np.ndarray:
 def load_model(version: str = "4.25", weights_dir: str | None = None):
     """Load the MLX-native RIFE model.
 
-    ``weights_dir`` is passed through to ``rife_mlx.utils.weights.build_model``.
+    ``weights_dir`` is passed through to ``build_model`` in the vendored ``rife_mlx``.
     When it is ``None``, the package downloads/uses the Hugging Face
     ``mlx-community/RIFE-4.25`` snapshot.
     """
     try:
-        from rife_mlx.utils.weights import build_model
-    except ImportError as exc:
-        raise RIFEBackendError("MLX RIFE backend is unavailable. Install the `rife-mlx` package "
-                               "into the active environment, e.g. `uv pip install "
-                               "git+https://github.com/xocialize/rife-mlx.git`.") from exc
+        from fastvideo.third_party.rife_mlx.utils.weights import build_model
+    except ImportError:
+        # Fall back to a separately installed upstream package, for anyone who
+        # already has one in the environment.
+        try:
+            from rife_mlx.utils.weights import build_model
+        except ImportError as exc:
+            raise RIFEBackendError("MLX RIFE backend is unavailable. It ships vendored under "
+                                   "fastvideo/third_party/rife_mlx, so this usually means MLX "
+                                   "itself is missing: install with `uv pip install -e '.[mlx]'`.") from exc
 
     try:
         return build_model(version, weights_dir=weights_dir)
@@ -66,7 +71,10 @@ def interpolate_pair(
     if model is None:
         model = load_model()
     try:
-        from rife_mlx.pipeline_mlx import interpolate_pair as _interpolate_pair
+        try:
+            from fastvideo.third_party.rife_mlx.pipeline_mlx import interpolate_pair as _interpolate_pair
+        except ImportError:
+            from rife_mlx.pipeline_mlx import interpolate_pair as _interpolate_pair
 
         return _interpolate_pair(model, img0, img1, timestep=timestep, scale=scale)
     except Exception as exc:  # noqa: BLE001 - preserve exact backend failure.

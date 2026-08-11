@@ -495,7 +495,7 @@ def main() -> None:
                         help="Fast mode: generate 1/factor of the frames, then RIFE-interpolate up "
                         "to --num-frames on Apple Silicon (~2.7x faster denoise, reconstruction "
                         "MS-SSIM ~0.97). Composes with --refine (B: fewer frames at base res, "
-                        "full-res refine) and --fast-spatial. Requires the rife-mlx package. "
+                        "full-res refine) and --fast-spatial. Uses the vendored MLX RIFE backend. "
                         "See docs/experiments/rife-speedup-summary.md.")
     parser.add_argument("--fast-factor", type=int, default=2,
                         help="Fast-mode interpolation factor (2 = generate half the frames).")

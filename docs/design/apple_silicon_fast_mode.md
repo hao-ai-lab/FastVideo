@@ -19,7 +19,7 @@ Reproduce with `python -m fastvideo.benchmarks.eval_metalfx_rife --mode int8`.
 ## Install
 
 ```bash
-uv pip install -e ".[mlx]"   # pulls in rife-mlx (git dependency)
+uv pip install -e ".[mlx]"   # RIFE ships vendored; this only needs MLX
 ```
 
 ## Use

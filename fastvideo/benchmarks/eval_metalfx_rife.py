@@ -306,7 +306,7 @@ def main() -> None:
         "model_root":
         str(args.model_root),
         "rife_impl":
-        "rife-mlx git+https://github.com/xocialize/rife-mlx.git, weights mlx-community/RIFE-4.25",
+        "rife-mlx vendored at fastvideo/third_party/rife_mlx, weights mlx-community/RIFE-4.25",
         "runtime_limits":
         runtime_limits,
         "reference_frames":
