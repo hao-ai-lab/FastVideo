@@ -38,8 +38,9 @@ class MiniMaxH3DMDModel(MiniMaxH3Model):
     shifted per modality (video 12.0, audio 3.0), exactly as H3's paired
     schedulers synchronize the two streams during fine-tuning and inference.
 
-    ponytail: packed means weight modalities by element count (video
-    dominates); switch to per-modality mean losses if audio quality lags.
+    ``modality_slices()`` exposes the packed video/audio column ranges so
+    DMD2 computes losses and normalizers per modality instead of one packed
+    mean that video's element count would dominate.
     """
 
     @property
@@ -77,6 +78,20 @@ class MiniMaxH3DMDModel(MiniMaxH3Model):
         return torch.cat(
             (video_latents.reshape(1, -1), audio_latents.reshape(1, -1)),
             dim=1,
+        )
+
+    def modality_slices(self) -> tuple[tuple[str, slice], ...]:
+        """Named packed-latent column slices for per-modality DMD2 losses.
+
+        Video is ~3.6M packed elements against audio's ~15-30k, so a single
+        global mean would give audio <1% of the distillation signal; DMD2
+        consumes these slices to normalize and weight each stream separately.
+        """
+        video_shape, audio_shape = self._modality_shapes()
+        split = math.prod(video_shape)
+        return (
+            ("video", slice(0, split)),
+            ("audio", slice(split, split + math.prod(audio_shape))),
         )
 
     def unpack_latents(self, packed: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:

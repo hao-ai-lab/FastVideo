@@ -110,18 +110,20 @@ class DMD2Method(TrainingMethod):
             dtype=training_batch.latents.dtype,
         )
         student_ctx = None
+        generator_metrics: dict[str, LogScalar] = {}
         if update_student:
             generator_pred_x0 = self._student_rollout(training_batch, with_grad=True)
             student_ctx = (
                 training_batch.timesteps,
                 training_batch.attn_metadata_vsa,
             )
-            generator_loss = self._dmd_loss(generator_pred_x0, training_batch)
+            generator_loss, generator_metrics = self._dmd_loss(generator_pred_x0, training_batch)
 
         (
             fake_score_loss,
             critic_ctx,
             critic_outputs,
+            critic_metrics,
         ) = self._critic_flow_matching_loss(training_batch)
 
         total_loss = generator_loss + fake_score_loss
@@ -137,7 +139,11 @@ class DMD2Method(TrainingMethod):
             "student_ctx": student_ctx,
             "critic_ctx": critic_ctx,
         }
-        metrics: dict[str, LogScalar] = {"update_student": float(update_student)}
+        metrics: dict[str, LogScalar] = {
+            "update_student": float(update_student),
+            **generator_metrics,
+            **critic_metrics,
+        }
         return loss_map, outputs, metrics
 
     # TrainingMethod override: backward
@@ -370,6 +376,28 @@ class DMD2Method(TrainingMethod):
             scheduler_name=critic_sched,
         )
 
+    def _modality_slices(self) -> tuple[tuple[str, slice], ...] | None:
+        """Named packed-latent slices exposed by multi-modality models.
+
+        Packed adapters (e.g. MiniMax-H3's video+audio flattening) weight
+        modalities by element count under a single global mean, which mutes
+        the smaller stream — H3 audio is <1% of packed elements. When the
+        student exposes ``modality_slices()``, every DMD2 loss and normalizer
+        is computed per modality and combined via ``_modality_weight``.
+        """
+        getter = getattr(self.student, "modality_slices", None)
+        if getter is None:
+            return None
+        slices = tuple(getter())
+        return slices or None
+
+    def _modality_weight(self, name: str) -> float:
+        raw = self.method_config.get("modality_loss_weights", None)
+        if not isinstance(raw, dict):
+            return 1.0
+        value = raw.get(name, 1.0)
+        return 1.0 if value is None else float(value)
+
     def _should_update_student(
         self,
         iteration: int,
@@ -601,7 +629,7 @@ class DMD2Method(TrainingMethod):
     def _critic_flow_matching_loss(
         self,
         batch: Any,
-    ) -> tuple[torch.Tensor, Any, dict[str, Any]]:
+    ) -> tuple[torch.Tensor, Any, dict[str, Any], dict[str, LogScalar]]:
         with torch.no_grad():
             generator_pred_x0 = self._student_rollout(batch, with_grad=False)
 
@@ -625,7 +653,17 @@ class DMD2Method(TrainingMethod):
             attn_kind="dense",
         )
         target = noise - generator_pred_x0
-        flow_matching_loss = torch.mean((pred_noise - target)**2)
+        slices = self._modality_slices()
+        emit_modality_metrics = slices is not None
+        if slices is None:
+            slices = (("packed", slice(None)), )
+        flow_matching_loss = torch.zeros((), device=device, dtype=torch.float32)
+        metrics: dict[str, LogScalar] = {}
+        for name, modality in slices:
+            loss_m = torch.mean((pred_noise[:, modality].float() - target[:, modality].float())**2)
+            flow_matching_loss = flow_matching_loss + self._modality_weight(name) * loss_m
+            if emit_modality_metrics:
+                metrics[f"fake_score_loss_{name}"] = loss_m.detach()
 
         batch.fake_score_latent_vis_dict = {
             "generator_pred_video": generator_pred_x0,
@@ -636,13 +674,14 @@ class DMD2Method(TrainingMethod):
             flow_matching_loss,
             (batch.timesteps, batch.attn_metadata),
             outputs,
+            metrics,
         )
 
     def _dmd_loss(
         self,
         generator_pred_x0: torch.Tensor,
         batch: Any,
-    ) -> torch.Tensor:
+    ) -> tuple[torch.Tensor, dict[str, LogScalar]]:
         guidance_scale = get_optional_float(
             self.method_config,
             "real_score_guidance_scale",
@@ -689,12 +728,20 @@ class DMD2Method(TrainingMethod):
             )
             real_cfg_x0 = real_uncond_x0 + (real_cond_x0 - real_uncond_x0) * guidance_scale
 
-            denom = torch.abs(generator_pred_x0 - real_cfg_x0).mean()
-            grad = (faker_x0 - real_cfg_x0) / denom
-            grad = torch.nan_to_num(grad)
-
-        loss = 0.5 * F.mse_loss(
-            generator_pred_x0.float(),
-            (generator_pred_x0.float() - grad.float()).detach(),
-        )
-        return loss
+        slices = self._modality_slices()
+        emit_modality_metrics = slices is not None
+        if slices is None:
+            slices = (("packed", slice(None)), )
+        loss = torch.zeros((), device=device, dtype=torch.float32)
+        metrics: dict[str, LogScalar] = {}
+        for name, modality in slices:
+            with torch.no_grad():
+                real_m = real_cfg_x0[:, modality]
+                denom = torch.abs(generator_pred_x0[:, modality] - real_m).mean()
+                grad = torch.nan_to_num((faker_x0[:, modality] - real_m) / denom)
+            gen_m = generator_pred_x0[:, modality].float()
+            loss_m = 0.5 * F.mse_loss(gen_m, (gen_m - grad.float()).detach())
+            loss = loss + self._modality_weight(name) * loss_m
+            if emit_modality_metrics:
+                metrics[f"generator_loss_{name}"] = loss_m.detach()
+        return loss, metrics
