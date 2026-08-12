@@ -216,10 +216,11 @@ def _get_config_info(
         config = maybe_download_model_index(model_path, revision=revision)
 
     pipeline_name = config.get("_class_name", "").lower()
+    variant = config.get("fastvideo_ltx2_variant", "").lower()
 
     matched_model_names: list[str] = []
     for model_id, detector in _MODEL_NAME_DETECTORS:
-        if detector(model_path.lower()) or detector(pipeline_name):
+        if detector(model_path.lower()) or detector(pipeline_name) or detector(variant):
             logger.debug("Matched model name '%s' using a registered detector.", model_id)
             matched_model_names.append(model_id)
 

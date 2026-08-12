@@ -274,6 +274,77 @@ def test_split_model_index_enables_distilled_refine_without_lora() -> None:
     assert "fastvideo_refine_lora_path" not in model_index
 
 
+def test_split_ltx2_5_conversion_preserves_enabled_transformer_gates(tmp_path: Path) -> None:
+    """Transformer config filtering retains True-valued 2.5 architecture gates."""
+    # Create a fresh fixture with all 2.5 gates enabled
+    transformer_config = {
+        "transformer": {
+            "num_attention_heads": 2,
+            "attention_head_dim": 4,
+            "num_layers": 1,
+            "cross_attention_dim": 8,
+            "caption_channels": 6,
+            "audio_num_attention_heads": 1,
+            "audio_attention_head_dim": 3,
+            "audio_in_channels": 4,
+            "audio_out_channels": 4,
+            "audio_cross_attention_dim": 3,
+            "cross_attention_adaln": True,
+            "caption_proj_before_connector": True,
+            "apply_gated_attention": True,
+            "use_prompt_adaln_single": True,
+            "ff_bias": True,
+            "audio_ff_bias": True,
+            "use_keyframes_abs_pos_embedding": True,
+            "caption_projection_first_linear": False,
+            "caption_proj_input_norm": True,
+            "caption_projection_second_linear": False,
+            "connector_num_attention_heads": 2,
+            "connector_attention_head_dim": 4,
+            "connector_num_layers": 1,
+            "audio_connector_num_attention_heads": 1,
+            "audio_connector_attention_head_dim": 3,
+            "audio_connector_num_layers": 1,
+            "connector_positional_embedding_max_pos": [2048],
+            "connector_apply_gated_attention": True,
+            "connector_ff_bias": False,
+            "frequencies_precision": "float64",
+        }
+    }
+    transformer = tmp_path / "transformer_gates_enabled.safetensors"
+    _save(
+        transformer,
+        {
+            "model.diffusion_model.transformer_blocks.0.ff.net.0.proj.weight": torch.ones(2, 2),
+            "model.diffusion_model.video_embeddings_connector.transformer_1d_blocks.0.weight": torch.ones(1),
+            "model.diffusion_model.audio_embeddings_connector.transformer_1d_blocks.0.weight": torch.ones(1),
+        },
+        config=transformer_config,
+    )
+
+    # Reuse other fixture sources
+    sources = _split_sources(tmp_path)
+    output = tmp_path / "converted_gates_enabled"
+
+    converter.convert_split_components(
+        transformer_source=transformer,
+        text_encoder_source=sources["text_encoder"],
+        vae_source=sources["vae"],
+        audio_vae_source=sources["audio_vae"],
+        spatial_upscaler_source=sources["spatial_upscaler"],
+        distilled_lora_source=sources["distilled_lora"],
+        output_dir=output,
+        transformer_class_name="LTX2Transformer3DModel",
+        variant="dev",
+    )
+
+    transformer_config_out = json.loads((output / "transformer" / "config.json").read_text())
+    assert transformer_config_out["use_prompt_adaln_single"] is True
+    assert transformer_config_out["ff_bias"] is True
+    assert transformer_config_out["audio_ff_bias"] is True
+    assert transformer_config_out["use_keyframes_abs_pos_embedding"] is True
+
+
 def test_legacy_monolithic_conversion_behavior_is_preserved(tmp_path: Path) -> None:
     source = tmp_path / "legacy.safetensors"
     metadata_config = {

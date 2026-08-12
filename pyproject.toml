@@ -21,11 +21,9 @@ dependencies = [
     "requests>=2.32.2",
 
     # Machine Learning & Transformers
-    # LTX-2.5's packed Gemma 4 unified encoder requires transformers 5.8+.
-    # Keep the official <5.15 guard: 5.15 routes global Gemma 4 config access
-    # through the heterogeneous-layer API while its own RoPE setup still reads
-    # global head_dim, preventing model construction.
-    "transformers>=5.8.0,<5.15",
+    # LTX-2.5's packed Gemma 4 unified encoder requires transformers 5.15.0+
+    # for correct mapping and loading of the Gemma 4 architecture.
+    "transformers>=5.15.0",
     # <0.23: tokenizers 0.23 renamed RobertaProcessing's binding args, so
     # transformers' CLIP-style tokenizer loading dies with
     # "RobertaProcessing.__new__() got an unexpected keyword argument 'cls'".

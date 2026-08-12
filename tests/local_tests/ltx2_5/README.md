@@ -129,7 +129,7 @@ one-stage smoke ran on 2xH100 and produced a joint H.264/AAC MP4 with 9 video
 frames and 17 audio frames in 11.77s after load. The full two-stage smoke ran
 on 2xB200: base ancestral denoising, spatial upsampling, the published
 1,632-layer refinement LoRA, all three refinement steps, and joint decode/save
-completed in 76.28s. The verified output contains 9 H.264 frames and 17 AAC
+completed in 76.17s. The verified output contains 9 H.264 frames and 17 AAC
 frames. W&B records the launch run at
 `https://wandb.ai/aryan5v-san-jose-state-university/fastvideo-ltx2-5/runs/o9ixwewk`.
 

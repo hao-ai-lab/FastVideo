@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import torch
 
+from fastvideo.models.dits.ltx2 import LTXRopeType
 from fastvideo.models.encoders.gemma import (
     Embeddings1DConnector,
     GemmaConnectorConfig,
@@ -16,7 +17,6 @@ from fastvideo.models.encoders.gemma import (
 def test_gemma4_bos_token_id_comes_from_nested_text_config() -> None:
     config = SimpleNamespace(text_config=SimpleNamespace(bos_token_id=2))
     assert _get_bos_token_id(config) == 2
-from fastvideo.models.dits.ltx2 import LTXRopeType
 
 
 def test_ensure_leading_bos_preserves_gemma3_and_fixes_gemma4() -> None:

@@ -18,11 +18,6 @@ import pytest
 import torch
 from torch.testing import assert_close
 
-os.environ.setdefault("MASTER_ADDR", "localhost")
-os.environ.setdefault("MASTER_PORT", "29525")
-os.environ.setdefault("DISABLE_SP", "1")
-os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
-
 REPO_ROOT = Path(__file__).resolve().parents[3]
 OFFICIAL_REF_DIR = Path(os.environ.get("LTX2_5_OFFICIAL_REF_DIR", REPO_ROOT / "LTX-2-Reference"))
 OFFICIAL_SRC = OFFICIAL_REF_DIR / "packages" / "ltx-core" / "src"
@@ -39,6 +34,15 @@ CONVERTED_WEIGHTS_DIR = Path(
     )
 )
 PARITY_SCOPE = "both"
+
+
+@pytest.fixture(autouse=True)
+def _setup_test_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Set default environment variables for all tests in this module."""
+    monkeypatch.setenv("MASTER_ADDR", "localhost")
+    monkeypatch.setenv("MASTER_PORT", "29525")
+    monkeypatch.setenv("DISABLE_SP", "1")
+    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
 
 
 def _import_official(module_name: str):
