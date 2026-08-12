@@ -747,43 +747,113 @@ class AutoencoderKLMiniMaxH3(nn.Module):
             moments = moments[:, :, :-self.config.token_drop]
         return moments
 
-    def _decode(self, z: torch.Tensor) -> torch.Tensor:
-        tokens_chunk_size = self.tokens_chunk_size
+    def _encode_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
+        """Encode unnormalized pixels while keeping full videos off the accelerator."""
+        clip_length = self.config.clip_length
+        moments = []
+        for frame_start in range(0, pixels.shape[2], clip_length):
+            clip = pixels[:, :, frame_start:frame_start + clip_length].to(
+                device=self.pixel_mean.device,
+                dtype=torch.float32,
+            )
+            if pixels.dtype == torch.uint8:
+                clip = clip / 255.0
+            if clip.shape[2] < clip_length:
+                pad_frames = clip[:, :, -1:].repeat(1, 1, clip_length - clip.shape[2], 1, 1)
+                clip = torch.cat([clip, pad_frames], dim=2)
+            clip = self.normalize_pixels(clip)
+            moments.append(self._encode_clip(clip))
+            del clip
+        encoded = torch.cat(moments, dim=2)
+        if self.config.token_drop > 0:
+            encoded = encoded[:, :, :-self.config.token_drop]
+        return encoded
+
+    def _temporal_decode_plan(self, latent_num_frames: int) -> tuple[int, int, int]:
+        """Return pad tokens, chunk count, and exact decoded frame count."""
+        if latent_num_frames <= 0:
+            raise ValueError(f"MiniMax-H3 latent frame count must be positive, got {latent_num_frames}.")
+
         token_drop = self.config.token_drop
+        tokens_chunk_size = self.tokens_chunk_size
         temporal_ratio = self.temporal_compression_ratio
-        chunk_num_frames = tokens_chunk_size * temporal_ratio
-        num_tokens = z.shape[2] + token_drop
+        num_tokens = latent_num_frames + token_drop
         pad_tokens = (-num_tokens) % tokens_chunk_size
         num_chunks = (num_tokens + pad_tokens) // tokens_chunk_size - int(token_drop > 0)
+        if num_chunks < 1:
+            pad_tokens += tokens_chunk_size
+            num_chunks = 1
+
+        decoded_num_frames = num_chunks * (tokens_chunk_size * temporal_ratio - self.frame_pre_padding)
+        if token_drop > 0:
+            decoded_num_frames += self.frame_overlap
+        if pad_tokens > 0:
+            intra_tail = self.config.clip_length % temporal_ratio
+            pad_frames = sum(intra_tail if intra_tail and (latent_num_frames + offset) %
+                             tokens_chunk_size == 0 else temporal_ratio for offset in range(pad_tokens))
+            decoded_num_frames -= pad_frames
+        return pad_tokens, num_chunks, decoded_num_frames
+
+    def _decode_chunks(self, z: torch.Tensor):
+        """Yield finalized temporal chunks in decode order."""
+        tokens_chunk_size = self.tokens_chunk_size
+        chunk_num_frames = tokens_chunk_size * self.temporal_compression_ratio
+        pad_tokens, num_chunks, output_num_frames = self._temporal_decode_plan(z.shape[2])
         if pad_tokens > 0:
             z = torch.cat([z, z[:, :, -1:].repeat(1, 1, pad_tokens, 1, 1)], dim=2)
 
-        decoded_chunks = []
+        output_frame_start = 0
         overlap = None
         for index in range(num_chunks):
             start = index * tokens_chunk_size
             clip = self._decode_clip(z[:, :, start:start + tokens_chunk_size + self.token_overlap])
-            for overlap_index in range(int(token_drop > 0) + 1):
-                frame_start = overlap_index * chunk_num_frames
-                chunk = clip[:, :, frame_start:frame_start + chunk_num_frames]
-                chunk = chunk[:, :, self.frame_pre_padding:]
-                if overlap_index == 0:
-                    if overlap is not None:
-                        chunk = self._blend(overlap, chunk, self.frame_overlap, dim=-3)
-                    decoded_chunks.append(chunk)
-                else:
-                    overlap = chunk
-        if overlap is not None:
-            decoded_chunks.append(overlap)
-        decoded = torch.cat(decoded_chunks, dim=2)
+            chunk = clip[:, :, self.frame_pre_padding:chunk_num_frames]
+            next_overlap = None
+            if self.config.token_drop > 0:
+                next_overlap = clip[:, :, chunk_num_frames + self.frame_pre_padding:].clone()
+            if overlap is not None:
+                chunk = self._blend(overlap, chunk, self.frame_overlap, dim=-3)
 
-        if pad_tokens > 0:
-            intra_tail = self.config.clip_length % temporal_ratio
-            num_tokens_before_pad = z.shape[2] - pad_tokens
-            pad_frames = sum(intra_tail if intra_tail and (num_tokens_before_pad + offset) %
-                             tokens_chunk_size == 0 else temporal_ratio for offset in range(pad_tokens))
-            decoded = decoded[:, :, :-pad_frames]
-        return decoded
+            num_frames = min(chunk.shape[2], output_num_frames - output_frame_start)
+            if num_frames > 0:
+                yield chunk[:, :, :num_frames]
+                output_frame_start += num_frames
+            overlap = next_overlap
+
+        if overlap is not None and output_frame_start < output_num_frames:
+            yield overlap[:, :, :output_num_frames - output_frame_start]
+
+    def decoded_pixel_shape(self, latent_shape: torch.Size | tuple[int, ...]) -> tuple[int, int, int, int, int]:
+        """Return the exact CPU pixel-buffer shape for a latent tensor shape."""
+        if len(latent_shape) != 5:
+            raise ValueError(f"MiniMax-H3 latents must be five-dimensional, got shape {tuple(latent_shape)}.")
+        batch_size, channels, latent_num_frames, latent_height, latent_width = map(int, latent_shape)
+        if channels != self.latent_channels:
+            raise ValueError(f"MiniMax-H3 latents must have {self.latent_channels} channels, got {channels}.")
+        _, _, decoded_num_frames = self._temporal_decode_plan(latent_num_frames)
+        return (
+            batch_size,
+            int(self.config.out_channels),
+            decoded_num_frames,
+            latent_height * self.spatial_compression_ratio,
+            latent_width * self.spatial_compression_ratio,
+        )
+
+    def _decode_to_pixels(self, z: torch.Tensor, output: torch.Tensor) -> None:
+        """Decode temporal chunks and immediately copy finalized pixels to CPU."""
+        output_frame_start = 0
+        for chunk in self._decode_chunks(z):
+            num_frames = chunk.shape[2]
+            pixels = self.denormalize_pixels(chunk.float()).clamp_(0, 1)
+            output[:, :, output_frame_start:output_frame_start + num_frames].copy_(pixels)
+            output_frame_start += num_frames
+        if output_frame_start != output.shape[2]:
+            raise RuntimeError(
+                f"MiniMax-H3 decode wrote {output_frame_start} frames into an output buffer expecting "
+                f"{output.shape[2]}.")
+
+    def _decode(self, z: torch.Tensor) -> torch.Tensor:
+        return torch.cat(list(self._decode_chunks(z)), dim=2)
 
     def encode(
         self,
@@ -794,6 +864,28 @@ class AutoencoderKLMiniMaxH3(nn.Module):
             moments = torch.cat([self._encode(x_slice) for x_slice in x.split(1)])
         else:
             moments = self._encode(x)
+        posterior = DiagonalGaussianDistribution(moments)
+        if not return_dict:
+            return (posterior, )
+        return AutoencoderKLOutput(latent_dist=posterior)
+
+    def encode_pixels(
+        self,
+        pixels: torch.Tensor,
+        return_dict: bool = True,
+    ) -> AutoencoderKLOutput | tuple[DiagonalGaussianDistribution]:
+        if pixels.ndim != 5 or pixels.shape[1] != self.config.in_channels or pixels.shape[2] <= 0:
+            raise ValueError(
+                f"`pixels` must have shape [B, {self.config.in_channels}, T, H, W] with T > 0, "
+                f"got {tuple(pixels.shape)}.")
+        if pixels.device.type != "cpu":
+            raise ValueError(f"`pixels` must remain on CPU, got device={pixels.device}.")
+        if pixels.dtype != torch.uint8 and not pixels.is_floating_point():
+            raise TypeError(f"`pixels` must use uint8 or a floating-point dtype, got {pixels.dtype}.")
+        if self.use_slicing and pixels.shape[0] > 1:
+            moments = torch.cat([self._encode_pixels(pixel_slice) for pixel_slice in pixels.split(1)])
+        else:
+            moments = self._encode_pixels(pixels)
         posterior = DiagonalGaussianDistribution(moments)
         if not return_dict:
             return (posterior, )
@@ -824,6 +916,20 @@ class AutoencoderKLMiniMaxH3(nn.Module):
         if not return_dict:
             return (decoded, )
         return DecoderOutput(sample=decoded)
+
+    def decode_to_pixels(self, z: torch.Tensor, output: torch.Tensor) -> torch.Tensor:
+        """Stream decoded ``[0, 1]`` FP32 pixels into a caller-owned CPU buffer."""
+        expected_shape = self.decoded_pixel_shape(z.shape)
+        if output.device.type != "cpu" or output.dtype != torch.float32 or tuple(output.shape) != expected_shape:
+            raise ValueError(
+                "`output` must be a CPU float32 tensor with shape "
+                f"{expected_shape}, got device={output.device}, dtype={output.dtype}, shape={tuple(output.shape)}.")
+        if self.use_slicing and z.shape[0] > 1:
+            for batch_index, z_slice in enumerate(z.split(1)):
+                self._decode_to_pixels(z_slice, output[batch_index:batch_index + 1])
+        else:
+            self._decode_to_pixels(z, output)
+        return output
 
     def forward(
         self,

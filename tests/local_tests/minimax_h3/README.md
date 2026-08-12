@@ -12,6 +12,14 @@ FastVideo-owned unit contracts belong under `fastvideo/tests/`.
 The reference helper verifies the pinned source and import origin. A missing checkout may skip a source-parity module;
 that skip is not parity evidence.
 
+## FastVideo unit contracts
+
+```bash
+pytest \
+  fastvideo/tests/vaes/test_minimax_h3_video_vae_streaming.py \
+  fastvideo/tests/stages/test_minimax_h3_vae_streaming.py -q
+```
+
 ## Registry smoke
 
 ```bash

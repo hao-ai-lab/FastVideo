@@ -119,9 +119,8 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
                 if reference.frames is None:
                     raise ValueError("MiniMax-H3 reference video frames are missing.")
                 frames = reference.frames[:trim_reference_num_frames(reference.frames.shape[0])]
-                pixels = torch.from_numpy(frames.copy()).permute(3, 0, 1, 2)[None]
-                pixels = pixels.to(device=device, dtype=torch.float32).div_(255.0)
-                posterior = self.vae.encode(self.vae.normalize_pixels(pixels)).latent_dist
+                pixels = torch.from_numpy(np.ascontiguousarray(frames)).permute(3, 0, 1, 2)[None]
+                posterior = self.vae.encode_pixels(pixels).latent_dist
                 latents = self.vae.normalize_latents(_sample_visual_posterior(posterior).to(
                     torch.float16).float()).cpu()
             reference.num_latent_frames = int(latents.shape[2])

@@ -7,7 +7,7 @@ from typing import Any
 
 import torch
 
-from fastvideo.distributed import get_local_torch_device
+from fastvideo.distributed import get_local_torch_device, get_world_group, model_parallel_is_initialized
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.models.vaes.minimax_h3_audio import MiniMaxH3AudioVAE
 from fastvideo.models.vaes.minimax_h3_video import AutoencoderKLMiniMaxH3
@@ -21,6 +21,7 @@ from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
+from fastvideo.utils import is_pin_memory_available
 
 
 def _layout(batch: ForwardBatch) -> MiniMaxH3PackedLayout:
@@ -54,6 +55,13 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
 
     @torch.no_grad()
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+        if model_parallel_is_initialized() and not get_world_group().is_first_rank:
+            # Distributed executors consume rank 0's ForwardBatch. Keep a
+            # verifier-compatible placeholder on other ranks and avoid
+            # duplicating the full VAE decode and CPU output buffer.
+            batch.output = torch.empty((0, 3, 0, 0, 0), device="cpu", dtype=torch.float32)
+            return batch
+
         layout = _layout(batch)
         if batch.latents is None or batch.raw_latent_shape is None or len(batch.raw_latent_shape) != 5:
             raise ValueError("MiniMax-H3 video latents or raw geometry are missing at decode.")
@@ -74,10 +82,16 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
                 batch.output = latents.detach().float().cpu()
                 return batch
 
+            output = torch.empty(
+                self.vae.decoded_pixel_shape(latents.shape),
+                device="cpu",
+                dtype=torch.float32,
+                pin_memory=fastvideo_args.pin_cpu_memory and is_pin_memory_available(),
+            )
             # The published decode recipe uses FP16 autocast over FP32 weights.
             with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=device.type == "cuda"):
-                video = self.vae.decode(latents).sample
-            batch.output = self.vae.denormalize_pixels(video.float()).clamp_(0, 1).cpu()
+                self.vae.decode_to_pixels(latents, output)
+            batch.output = output
             return batch
         finally:
             if fastvideo_args.vae_cpu_offload:
@@ -107,6 +121,12 @@ class MiniMaxH3AudioDecodingStage(PipelineStage):
 
     @torch.no_grad()
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+        if model_parallel_is_initialized() and not get_world_group().is_first_rank:
+            batch.extra["audio"] = torch.empty((0, 2), device="cpu", dtype=torch.float32)
+            batch.extra["audio_sample_rate"] = self.audio_vae.sampling_rate
+            self._clear_runtime(batch)
+            return batch
+
         layout = _layout(batch)
         if batch.audio_latents is None:
             raise ValueError("MiniMax-H3 audio latents are missing at decode.")
