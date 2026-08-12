@@ -160,6 +160,7 @@ nav:
     - Optimizations: inference/optimizations.md
     - ComfyUI: inference/comfyui.md
     - Support Matrix: inference/support_matrix.md
+    - LTX-2.5: inference/ltx2_5.md
     - CLI: inference/cli.md
     - Add Pipeline: inference/add_pipeline.md
     - Examples:

@@ -277,6 +277,32 @@ class TextEncoderLoader(ComponentLoader):
         if gemma_path and not gemma_path_from_candidate:
             if not os.path.isabs(gemma_path):
                 model_config["gemma_model_path"] = os.path.normpath(os.path.join(repo_root, gemma_path))
+        resolved_gemma_path = model_config.get("gemma_model_path", gemma_path)
+        gemma_config_path = os.path.join(resolved_gemma_path, "config.json") if resolved_gemma_path else ""
+        if os.path.isfile(gemma_config_path):
+            try:
+                with open(gemma_config_path, encoding="utf-8") as f:
+                    gemma_config = json.load(f)
+                gemma_text_config = gemma_config.get("text_config", gemma_config)
+                gemma_hidden_size = gemma_text_config.get("hidden_size")
+                gemma_num_hidden_layers = gemma_text_config.get("num_hidden_layers")
+                if gemma_hidden_size is not None and gemma_num_hidden_layers is not None:
+                    # LTX feature extraction stacks the embedding output plus
+                    # every Gemma transformer layer. Derive this from the
+                    # packed Gemma config so Gemma 4 never inherits Gemma 3's
+                    # hard-coded 3840x49 geometry.
+                    model_config["hidden_size"] = int(gemma_hidden_size)
+                    model_config["num_hidden_layers"] = int(gemma_num_hidden_layers)
+                    model_config["feature_extractor_in_features"] = (int(gemma_hidden_size) *
+                                                                       (int(gemma_num_hidden_layers) + 1))
+                for field_name in ("num_attention_heads", "pad_token_id", "eos_token_id"):
+                    value = gemma_text_config.get(field_name, gemma_config.get(field_name))
+                    if value is not None:
+                        if field_name == "eos_token_id" and isinstance(value, list):
+                            value = value[0] if value else 2
+                        model_config[field_name] = value
+            except (json.JSONDecodeError, OSError, TypeError, ValueError) as exc:
+                logger.warning("Unable to derive LTX Gemma geometry from %s: %s", gemma_config_path, exc)
         transformer_config_path = os.path.join(repo_root, "transformer", "config.json")
         if os.path.isfile(transformer_config_path):
             try:

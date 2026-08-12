@@ -137,3 +137,4 @@ fastvideo/tests/ssim/reference_videos/**
 *.nvimlog
 .nvimlog
 .python-version
+/LTX-2-Reference/

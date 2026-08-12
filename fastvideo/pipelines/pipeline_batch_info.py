@@ -203,6 +203,9 @@ class ForwardBatch:
     ltx2_stg_scale_audio: float = 0.0
     ltx2_stg_blocks_video: list[int] = field(default_factory=list)
     ltx2_stg_blocks_audio: list[int] = field(default_factory=list)
+    # Enabled only by LTX-2.5 distilled presets. The refine stage supplies an
+    # explicit sigma override and therefore remains deterministic.
+    ltx2_use_ancestral_sampler: bool = False
 
     # LTX-2 image / video / continuation conditioning
     ltx2_images: list[tuple[str, int, float]] | None = None
