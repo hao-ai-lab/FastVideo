@@ -718,15 +718,24 @@ class DMD2Method(TrainingMethod):
                 cfg_uncond=self._cfg_uncond,
                 attn_kind="dense",
             )
-            real_uncond_x0 = self.teacher.predict_x0(
-                noisy_latents,
-                timestep,
-                batch,
-                conditional=False,
-                cfg_uncond=self._cfg_uncond,
-                attn_kind="dense",
-            )
-            real_cfg_x0 = real_uncond_x0 + (real_cond_x0 - real_uncond_x0) * guidance_scale
+            if float(guidance_scale) == 1.0:
+                # At scale 1.0 the CFG combination is the identity, so the
+                # unconditional forward is pure waste. This is also the
+                # correct setting for guidance-distilled teachers (e.g.
+                # MiniMax-H3, whose own inference stack rejects CFG): their
+                # conditional prediction already bakes in guidance, and they
+                # define no trained unconditional branch to extrapolate from.
+                real_cfg_x0 = real_cond_x0
+            else:
+                real_uncond_x0 = self.teacher.predict_x0(
+                    noisy_latents,
+                    timestep,
+                    batch,
+                    conditional=False,
+                    cfg_uncond=self._cfg_uncond,
+                    attn_kind="dense",
+                )
+                real_cfg_x0 = real_uncond_x0 + (real_cond_x0 - real_uncond_x0) * guidance_scale
 
         slices = self._modality_slices()
         emit_modality_metrics = slices is not None
