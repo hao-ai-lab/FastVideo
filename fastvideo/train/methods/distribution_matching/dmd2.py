@@ -111,6 +111,7 @@ class DMD2Method(TrainingMethod):
         )
         student_ctx = None
         generator_metrics: dict[str, LogScalar] = {}
+        rollout_for_critic: torch.Tensor | None = None
         if update_student:
             generator_pred_x0 = self._student_rollout(training_batch, with_grad=True)
             student_ctx = (
@@ -118,13 +119,20 @@ class DMD2Method(TrainingMethod):
                 training_batch.attn_metadata_vsa,
             )
             generator_loss, generator_metrics = self._dmd_loss(generator_pred_x0, training_batch)
+            # Reference DMD2 trains the critic on the same generated sample
+            # the generator step used; a second independent rollout here
+            # would only add ~len(dmd_denoising_steps) no-grad forwards.
+            rollout_for_critic = generator_pred_x0.detach()
 
         (
             fake_score_loss,
             critic_ctx,
             critic_outputs,
             critic_metrics,
-        ) = self._critic_flow_matching_loss(training_batch)
+        ) = self._critic_flow_matching_loss(
+            training_batch,
+            generator_pred_x0=rollout_for_critic,
+        )
 
         total_loss = generator_loss + fake_score_loss
         loss_map = {
@@ -629,9 +637,12 @@ class DMD2Method(TrainingMethod):
     def _critic_flow_matching_loss(
         self,
         batch: Any,
+        *,
+        generator_pred_x0: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, Any, dict[str, Any], dict[str, LogScalar]]:
-        with torch.no_grad():
-            generator_pred_x0 = self._student_rollout(batch, with_grad=False)
+        if generator_pred_x0 is None:
+            with torch.no_grad():
+                generator_pred_x0 = self._student_rollout(batch, with_grad=False)
 
         device = generator_pred_x0.device
         fake_score_timestep = self._sample_score_timestep(device)
