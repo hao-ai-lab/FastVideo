@@ -152,6 +152,13 @@ class DMD2Method(TrainingMethod):
             **generator_metrics,
             **critic_metrics,
         }
+        # Rank-local latent snapshots for LatentVisCallback. The critic dict
+        # always carries generator_pred_video; the DMD dict adds the real- and
+        # fake-score predictions on generator-update iterations.
+        self.latent_vis = {
+            **(training_batch.fake_score_latent_vis_dict or {}),
+            **(training_batch.dmd_latent_vis_dict or {}),
+        }
         return loss_map, outputs, metrics
 
     # TrainingMethod override: backward
@@ -747,6 +754,15 @@ class DMD2Method(TrainingMethod):
                     attn_kind="dense",
                 )
                 real_cfg_x0 = real_uncond_x0 + (real_cond_x0 - real_uncond_x0) * guidance_scale
+
+            # Intermediate-latent visualization state (legacy training/
+            # distillation_pipeline.py key names); LatentVisCallback decodes
+            # these on rank 0 every N steps.
+            batch.dmd_latent_vis_dict.update({
+                "real_score_pred_video": real_cfg_x0.detach(),
+                "faker_score_pred_video": faker_x0.detach(),
+                "dmd_timestep": timestep.detach(),
+            })
 
         slices = self._modality_slices()
         emit_modality_metrics = slices is not None

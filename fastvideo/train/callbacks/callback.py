@@ -24,6 +24,7 @@ _BUILTIN_CALLBACKS: dict[str, str] = {
     "grad_clip": "fastvideo.train.callbacks.grad_clip.GradNormClipCallback",
     "validation": "fastvideo.train.callbacks.validation.ValidationCallback",
     "ema": "fastvideo.train.callbacks.ema.EMACallback",
+    "latent_vis": "fastvideo.train.callbacks.latent_vis.LatentVisCallback",
 }
 
 

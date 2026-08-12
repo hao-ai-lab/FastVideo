@@ -238,5 +238,72 @@ class MiniMaxH3DMDModel(MiniMaxH3Model):
         sigma = sigma.to(device=noisy.device, dtype=noisy.dtype)
         return noisy - sigma * pred_noise
 
+    # ------------------------------------------------------------------
+    # Intermediate-latent visualization (LatentVisCallback)
+    # ------------------------------------------------------------------
+
+    def _load_vis_vae(self) -> Any:
+        """Lazily load the H3 video VAE for visualization decodes.
+
+        The module stays CPU-resident between decodes; ``decode_vis_latents``
+        moves it to the GPU per call. Loading mirrors the H3 preprocess
+        scripts: the inference component registry keeps precision policy and
+        normalization identical to the published decode recipe.
+        """
+        vae = getattr(self, "_vis_vae_module", None)
+        if vae is not None:
+            return vae
+        import os
+
+        from fastvideo.fastvideo_args import FastVideoArgs
+        from fastvideo.models.loader.component_loader import PipelineComponentLoader
+        from fastvideo.utils import verify_model_config_and_directory
+
+        model_index = verify_model_config_and_directory(self._init_from)
+        transformers_or_diffusers, _ = model_index["vae"][:2]
+        args = FastVideoArgs(
+            model_path=self._init_from,
+            pipeline_config=self.training_config.pipeline_config,
+            num_gpus=1,
+            tp_size=1,
+            sp_size=1,
+            hsdp_shard_dim=1,
+            use_fsdp_inference=False,
+            vae_cpu_offload=True,
+            text_encoder_cpu_offload=True,
+        )
+        vae = PipelineComponentLoader.load_module(
+            module_name="vae",
+            component_model_path=os.path.join(self._init_from, "vae"),
+            transformers_or_diffusers=transformers_or_diffusers,
+            fastvideo_args=args,
+        )
+        vae.to("cpu")
+        self._vis_vae_module = vae
+        return vae
+
+    @torch.no_grad()
+    def decode_vis_latents(self, packed: torch.Tensor) -> Any:
+        """Decode the packed video stream into a uint8 ``[B, T, C, H, W]`` clip.
+
+        Follows ``MiniMaxH3VideoDecodingStage``: denormalize latents, decode
+        under the published FP16-autocast-over-FP32 recipe, denormalize
+        pixels. The audio stream is dropped — the tracker artifact is a
+        silent video.
+        """
+        video_latents, _ = self.unpack_latents(packed.detach())
+        latents = video_latents.permute(0, 2, 1, 3, 4).to(device=self.device, dtype=torch.float32)
+        vae = self._load_vis_vae()
+        vae.to(self.device)
+        try:
+            latents = vae.denormalize_latents(latents)
+            with torch.autocast(self.device.type, dtype=torch.float16, enabled=self.device.type == "cuda"):
+                video = vae.decode(latents).sample
+            video = vae.denormalize_pixels(video.float()).clamp_(0.0, 1.0).cpu()
+        finally:
+            vae.to("cpu")
+        video = video.permute(0, 2, 1, 3, 4)
+        return (video * 255.0).to(torch.uint8).numpy()
+
 
 __all__ = ["MiniMaxH3DMDModel"]
