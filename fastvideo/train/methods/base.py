@@ -208,6 +208,23 @@ class TrainingMethod(torch.nn.Module, ABC):
         """
         return False
 
+    def did_update_role(
+        self,
+        role: str,
+        iteration: int,
+    ) -> bool:
+        """Whether ``role`` completed an optimizer update this iteration.
+
+        Callbacks run after optimization and use this hook to follow the
+        method's actual update cadence. The default implementation matches
+        the role's optimizer against the optimizers selected for this
+        iteration; methods that step optimizers internally can override it.
+        """
+        role_optimizer = self._optimizer_dict.get(role)
+        if role_optimizer is None:
+            return False
+        return any(optimizer is role_optimizer for optimizer in self.get_optimizers(iteration))
+
     def managed_train_step(
         self,
         data_stream: Any,

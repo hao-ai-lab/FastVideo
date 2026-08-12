@@ -42,9 +42,15 @@ class _Method:
         self,
         transformer: torch.nn.Module | None,
         tracker: Any | None = None,
+        updated_iterations: set[int] | None = None,
     ) -> None:
         self.student = _Student(transformer)
         self.tracker = tracker
+        self.updated_iterations = updated_iterations
+
+    def did_update_role(self, role: str, iteration: int) -> bool:
+        assert role == "student"
+        return (self.updated_iterations is None or iteration in self.updated_iterations)
 
 
 def _tiny_transformer(*, fill: float = 0.0) -> torch.nn.Module:
@@ -154,6 +160,44 @@ class TestOnTrainingStepEnd:
         cb.on_training_step_end(method, loss_dict={}, iteration=0)
 
         assert any(payload.get("ema/decay") == 0.99 and step == 0 for payload, step in tracker.entries)
+
+    def test_only_updates_after_student_optimizer_step(self) -> None:
+        transformer = _tiny_transformer(fill=1.0)
+        tracker = _RecordingTracker()
+        method = _Method(
+            transformer,
+            tracker=tracker,
+            updated_iterations={5},
+        )
+        cb = EMACallback(decay=0.9, start_iter=0)
+        cb.on_train_start(method, iteration=0)
+
+        with torch.no_grad():
+            transformer.weight.fill_(7.0)
+        cb.on_training_step_end(method, loss_dict={}, iteration=4)
+        assert not cb._ema_started
+        assert torch.allclose(
+            cb.student_ema.shadow["weight"],
+            torch.full((2, 4), 1.0),
+        )
+        assert tracker.entries == []
+
+        cb.on_training_step_end(method, loss_dict={}, iteration=5)
+        assert cb._ema_started
+        assert torch.allclose(
+            cb.student_ema.shadow["weight"],
+            torch.full((2, 4), 7.0),
+        )
+        assert tracker.entries == [({"ema/decay": 0.9}, 5)]
+
+        with torch.no_grad():
+            transformer.weight.fill_(11.0)
+        cb.on_training_step_end(method, loss_dict={}, iteration=6)
+        assert torch.allclose(
+            cb.student_ema.shadow["weight"],
+            torch.full((2, 4), 7.0),
+        )
+        assert tracker.entries == [({"ema/decay": 0.9}, 5)]
 
 
 # ---------------------------------------------------------------------------

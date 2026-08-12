@@ -94,6 +94,8 @@ class EMACallback(Callback):
 
         if iteration < self._start_iter:
             return
+        if not method.did_update_role("student", iteration):
+            return
         if not self._ema_started:
             logger.info(
                 "Starting EMA updates at iteration %d "

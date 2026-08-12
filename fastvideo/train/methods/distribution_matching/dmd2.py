@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 import torch
+import torch.distributed as dist
 import torch.nn.functional as F
 
 from fastvideo.profiler import profile_region
@@ -432,6 +433,23 @@ class DMD2Method(TrainingMethod):
         )
         return step_list[index]
 
+    @staticmethod
+    def _max_rollout_target_idx_across_ranks(target_timestep_idx: torch.Tensor, ) -> int:
+        """Return the largest sampled rollout index across all data ranks.
+
+        Each rank intentionally samples its own DMD2 timestep, but FSDP ranks
+        must execute the same number of transformer forwards so their
+        collectives stay ordered. The largest local target is therefore the
+        minimum prefix length every rank must execute this iteration.
+        """
+        max_target_timestep_idx = target_timestep_idx.detach().clone()
+        if dist.is_available() and dist.is_initialized():
+            dist.all_reduce(
+                max_target_timestep_idx,
+                op=dist.ReduceOp.MAX,
+            )
+        return int(max_target_timestep_idx.item())
+
     def _parse_score_timestep_bounds(self) -> tuple[int, int]:
         """Resolve the score-model timestep window used by legacy DMD.
 
@@ -518,6 +536,7 @@ class DMD2Method(TrainingMethod):
             generator=self.cuda_generator,
         )
         target_timestep_idx_int = int(target_timestep_idx.item())
+        synchronized_target_idx = self._max_rollout_target_idx_across_ranks(target_timestep_idx, )
         target_timestep = step_list[target_timestep_idx]
 
         current_noise_latents = torch.randn(
@@ -526,56 +545,62 @@ class DMD2Method(TrainingMethod):
             dtype=dtype,
             generator=self.cuda_generator,
         )
-        current_noise_latents_copy = (current_noise_latents.clone())
 
         max_target_idx = len(step_list) - 1
-        noise_latents: list[torch.Tensor] = []
-        noise_latent_index = target_timestep_idx_int - 1
+        noisy_input = current_noise_latents
 
         if max_target_idx > 0:
             with torch.no_grad():
                 for step_idx in range(max_target_idx):
-                    current_timestep = step_list[step_idx]
-                    current_timestep_tensor = (current_timestep * torch.ones(
-                        1,
-                        device=device,
-                        dtype=torch.long,
-                    ))
+                    # FSDP ranks must run the same number of forwards. Ranks
+                    # whose local target is earlier keep advancing a throwaway
+                    # trajectory until the largest target sampled globally.
+                    needs_prefix_step = step_idx < synchronized_target_idx
+                    pred_clean: torch.Tensor | None = None
+                    noise_dtype = dtype
+                    if needs_prefix_step:
+                        current_timestep = step_list[step_idx]
+                        current_timestep_tensor = (current_timestep * torch.ones(
+                            1,
+                            device=device,
+                            dtype=torch.long,
+                        ))
 
-                    pred_clean = self.student.predict_x0(
-                        current_noise_latents,
-                        current_timestep_tensor,
-                        batch,
-                        conditional=True,
-                        cfg_uncond=self._cfg_uncond,
-                        attn_kind="vsa",
-                    )
+                        pred_clean = self.student.predict_x0(
+                            current_noise_latents,
+                            current_timestep_tensor,
+                            batch,
+                            conditional=True,
+                            cfg_uncond=self._cfg_uncond,
+                            attn_kind="vsa",
+                        )
+                        noise_dtype = pred_clean.dtype
 
-                    next_timestep = step_list[step_idx + 1]
-                    next_timestep_tensor = (next_timestep * torch.ones(
-                        1,
-                        device=device,
-                        dtype=torch.long,
-                    ))
+                    # Preserve the method-owned generator sequence even when
+                    # the corresponding prefix forward is unnecessary. This
+                    # keeps all later DMD2 random draws aligned with the old
+                    # full-rollout implementation.
                     noise = torch.randn(
                         latents.shape,
                         device=device,
-                        dtype=pred_clean.dtype,
+                        dtype=noise_dtype,
                         generator=self.cuda_generator,
                     )
-                    current_noise_latents = (self.student.add_noise(
-                        pred_clean,
-                        noise,
-                        next_timestep_tensor,
-                    ))
-                    noise_latents.append(current_noise_latents.clone())
-
-        if noise_latent_index >= 0:
-            if noise_latent_index >= len(noise_latents):
-                raise RuntimeError("noise_latent_index is out of bounds")
-            noisy_input = noise_latents[noise_latent_index]
-        else:
-            noisy_input = current_noise_latents_copy
+                    if needs_prefix_step:
+                        assert pred_clean is not None
+                        next_timestep = step_list[step_idx + 1]
+                        next_timestep_tensor = (next_timestep * torch.ones(
+                            1,
+                            device=device,
+                            dtype=torch.long,
+                        ))
+                        current_noise_latents = (self.student.add_noise(
+                            pred_clean,
+                            noise,
+                            next_timestep_tensor,
+                        ))
+                        if step_idx + 1 == target_timestep_idx_int:
+                            noisy_input = current_noise_latents
 
         if with_grad:
             pred_x0 = self.student.predict_x0(

@@ -431,7 +431,9 @@ callbacks:
 ```
 
 The EMA callback owns its own state and checkpoints independently — EMA weights
-are saved and restored automatically on resume.
+are saved and restored automatically on resume. It advances only after the
+training method reports that the student optimizer updated; alternating methods
+such as DMD2 therefore skip EMA work on critic-only steps.
 
 ### ValidationCallback
 
