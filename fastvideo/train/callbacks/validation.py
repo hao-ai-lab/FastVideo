@@ -31,6 +31,7 @@ from fastvideo.distributed import (
     get_world_group,
 )
 from fastvideo.logger import init_logger
+from fastvideo.profiler import profile_region
 from fastvideo.pipelines import ForwardBatch
 from fastvideo.train.callbacks.callback import Callback
 from fastvideo.train.utils.instantiate import resolve_target
@@ -285,6 +286,7 @@ class ValidationCallback(Callback):
     # Core validation logic
     # ----------------------------------------------------------
 
+    @profile_region("profiler_region_training_validation")
     def _run_validation(
         self,
         method: TrainingMethod,

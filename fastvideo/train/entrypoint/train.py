@@ -24,7 +24,9 @@ from typing import Any
 
 import torch
 
+import fastvideo.envs as envs
 from fastvideo.logger import init_logger
+from fastvideo.profiler import get_or_create_profiler
 
 logger = init_logger(__name__)
 
@@ -74,47 +76,55 @@ def run_training_from_config(
         tc.distributed.sp_size,
     )
 
-    _, method, dataloader, start_step = build_from_config(cfg)
+    profiler_controller = get_or_create_profiler(envs.FASTVIDEO_TORCH_PROFILER_DIR, )
+    try:
+        with profiler_controller.region("profiler_region_model_loading"):
+            _, method, dataloader, start_step = build_from_config(cfg)
 
-    if dry_run:
-        logger.info("Dry-run: config parsed and "
-                    "build_from_config succeeded.")
-        return
+        if dry_run:
+            logger.info("Dry-run: config parsed and "
+                        "build_from_config succeeded.")
+            return
 
-    trainer = Trainer(
-        tc,
-        config=cfg.resolved_config(),
-        callback_configs=cfg.callbacks,
-    )
+        trainer = Trainer(
+            tc,
+            config=cfg.resolved_config(),
+            callback_configs=cfg.callbacks,
+        )
 
-    # Attach the exact YAML used for this run to the
-    # tracker (e.g., W&B Files).
-    trainer.tracker.log_file(
-        os.path.abspath(os.path.expanduser(config_path)),
-        name="run.yaml",
-    )
+        # Attach the exact YAML used for this run to the
+        # tracker (e.g., W&B Files).
+        trainer.tracker.log_file(
+            os.path.abspath(os.path.expanduser(config_path)),
+            name="run.yaml",
+        )
 
-    ckpt_config = CheckpointConfig(
-        save_steps=int(tc.checkpoint.training_state_checkpointing_steps or 0),
-        keep_last=int(tc.checkpoint.checkpoints_total_limit or 0),
-    )
+        ckpt_config = CheckpointConfig(
+            save_steps=int(tc.checkpoint.training_state_checkpointing_steps or 0),
+            keep_last=int(tc.checkpoint.checkpoints_total_limit or 0),
+        )
 
-    checkpoint_manager = CheckpointManager(
-        method=method,
-        dataloader=dataloader,
-        output_dir=tc.checkpoint.output_dir,
-        config=ckpt_config,
-        callbacks=trainer.callbacks,
-        raw_config=cfg.raw,
-    )
+        checkpoint_manager = CheckpointManager(
+            method=method,
+            dataloader=dataloader,
+            output_dir=tc.checkpoint.output_dir,
+            config=ckpt_config,
+            callbacks=trainer.callbacks,
+            raw_config=cfg.raw,
+        )
 
-    trainer.run(
-        method,
-        dataloader=dataloader,
-        max_steps=tc.loop.max_train_steps,
-        start_step=start_step,
-        checkpoint_manager=checkpoint_manager,
-    )
+        trainer.run(
+            method,
+            dataloader=dataloader,
+            max_steps=tc.loop.max_train_steps,
+            start_step=start_step,
+            checkpoint_manager=checkpoint_manager,
+        )
+    finally:
+        # torch.profiler exports its trace at stop(). Keep atexit as a fallback
+        # for abrupt exits, but flush here so normal training returns only after
+        # all per-rank traces and summaries are complete.
+        profiler_controller.stop()
 
 
 def main(

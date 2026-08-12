@@ -23,6 +23,7 @@ from torch.distributed.checkpoint.state_dict import (
 from torch.distributed.checkpoint.stateful import Stateful
 
 from fastvideo.logger import init_logger
+from fastvideo.profiler import profile_region
 
 logger = init_logger(__name__)
 
@@ -246,6 +247,7 @@ class CheckpointManager:
             return
         self.save(step)
 
+    @profile_region("profiler_region_training_save_checkpoint")
     def save(self, step: int) -> None:
         checkpoint_dir = self._checkpoint_dir(step)
         dcp_dir = self._dcp_dir(step)

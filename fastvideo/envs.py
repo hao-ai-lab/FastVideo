@@ -250,12 +250,7 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # not profile flops.
     "FASTVIDEO_TORCH_PROFILER_WITH_FLOPS":
     lambda: bool(os.getenv("FASTVIDEO_TORCH_PROFILER_WITH_FLOPS", "0") != "0"),
-    # Wait steps per profiling cycle (torch.profiler.schedule wait parameter)
-    # Defaults to 2 if not set.
-    # Warmup steps per profiling cycle (torch.profiler.schedule warmup parameter)
-    # Defaults to 1 if not set.
-    # Active steps per profiling cycle (torch.profiler.schedule active parameter)
-    # Defaults to 2 if not set.
+    # Comma-separated names of registered profiler regions to capture.
     "FASTVIDEO_TORCH_PROFILE_REGIONS":
     lambda: os.getenv("FASTVIDEO_TORCH_PROFILE_REGIONS", ""),
 

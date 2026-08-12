@@ -16,6 +16,9 @@ import os
 import subprocess
 import sys
 
+import pytest
+import torch
+
 # Five-window child: ops before any region, inside a region, between regions,
 # inside a second (short-named) region, after the last region. Exits without
 # calling stop() — export must happen via the atexit hook. Each window is
@@ -61,19 +64,21 @@ def _run_child(tmp_path):
     return trace_dir, proc.stdout + proc.stderr
 
 
-def _trace_event_names(trace_dir):
+def _trace_events(trace_dir):
     traces = glob.glob(os.path.join(trace_dir, "**", "*.json*"), recursive=True)
     traces = [t for t in traces if "summary" not in os.path.basename(t)]
     assert traces, f"no trace exported to {trace_dir} (atexit hook missing?)"
-    opener = gzip.open if traces[0].endswith(".gz") else open
-    with opener(traces[0], "rt") as fh:
-        events = json.load(fh).get("traceEvents", [])
-    return {e.get("name", "") for e in events}
+    events = []
+    for trace in traces:
+        opener = gzip.open if trace.endswith(".gz") else open
+        with opener(trace, "rt") as fh:
+            events.extend(json.load(fh).get("traceEvents", []))
+    return events
 
 
 def test_regions_gate_collection_and_atexit_exports(tmp_path):
     trace_dir, output = _run_child(tmp_path)
-    names = _trace_event_names(trace_dir)
+    names = {event.get("name", "") for event in _trace_events(trace_dir)}
 
     assert "win_region1" in names, "op inside an enabled region was not captured"
     assert "win_region2" in names, "short region name did not resolve/capture"
@@ -87,8 +92,61 @@ def test_regions_gate_collection_and_atexit_exports(tmp_path):
     assert output.count("is not registered") == 1
 
     # per-rank op summary written next to the trace
-    summaries = glob.glob(os.path.join(trace_dir, "summary_rank0.*"))
-    assert sorted(os.path.splitext(s)[1] for s in summaries) == [".json", ".txt"]
+    summaries = glob.glob(os.path.join(trace_dir, "summary_rank0_segment*.*"))
+    assert sorted(os.path.splitext(s)[1] for s in summaries) == [
+        ".json",
+        ".json",
+        ".txt",
+        ".txt",
+    ]
+    with open(next(s for s in summaries if s.endswith(".json")), encoding="utf-8") as fh:
+        summary_rows = json.load(fh)
+    assert summary_rows
+    assert {
+        "name",
+        "shapes",
+        "self_cpu_us",
+        "cpu_us",
+        "self_device_us",
+        "device_us",
+        "count",
+    } <= summary_rows[0].keys()
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
+def test_cuda_region_exports_kernel_events(tmp_path):
+    trace_dir = str(tmp_path / "cuda_traces")
+    child = r"""
+import torch
+from fastvideo.profiler import get_or_create_profiler, profiler_region
+
+controller = get_or_create_profiler({trace_dir!r})
+x = torch.randn(1024, 1024, device="cuda")
+y = torch.randn(1024, 1024, device="cuda")
+torch.cuda.synchronize()
+with profiler_region("training_forward"):
+    torch.mm(x, y)
+    torch.cuda.synchronize()
+controller.stop()
+""".format(trace_dir=trace_dir)
+    env = os.environ.copy()
+    env["FASTVIDEO_TORCH_PROFILER_DIR"] = trace_dir
+    env["FASTVIDEO_TORCH_PROFILE_REGIONS"] = "training_forward"
+    proc = subprocess.run(
+        [sys.executable, "-c", child],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert proc.returncode == 0, proc.stderr
+
+    events = _trace_events(trace_dir)
+    categories = {event.get("cat", "") for event in events}
+    names = {event.get("name", "") for event in events}
+    assert "kernel" in categories
+    assert "cuda_runtime" in categories
+    assert "fastvideo.region::training_forward" in names
 
 
 def test_noop_without_profiler_dir(tmp_path):

@@ -136,4 +136,5 @@ def test_trainer_runs_validation_callback_during_training(monkeypatch, ) -> None
     assert method.zero_grad_steps == [0, 1, 2, 3]
     assert method.optimizer_steps == [1, 2, 3]
     assert [step for _, step in tracker.logs] == [1, 2, 3]
+    assert all("dataloader_time_sec" in metrics for metrics, _ in tracker.logs)
     assert tracker.finished is True

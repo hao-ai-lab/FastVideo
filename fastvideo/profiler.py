@@ -2,18 +2,17 @@
 """Utilities for managing the PyTorch profiler within FastVideo.
 
 The profiler is shared across the process; this module adds a light-weight
-controller that gates collection based on named *regions*. Regions may be
-enabled through dedicated environment variables (e.g.
-``FASTVIDEO_TORCH_PROFILE_MODEL_LOADING=1``) or via the consolidated
-``FASTVIDEO_TORCH_PROFILE_REGIONS`` comma-separated list. Short names work
+controller that gates collection based on named *regions*. Regions are enabled
+through the ``FASTVIDEO_TORCH_PROFILE_REGIONS`` comma-separated list. Short names work
 (``FASTVIDEO_TORCH_PROFILE_REGIONS=model_loading,training_train`` resolves the
 ``profiler_region_`` prefix automatically).
 
 Typical usage from client code::
 
-    controller = TorchProfilerController(profiler, activities)
-    with controller.region("training_dit"):
+    controller = get_or_create_profiler("/tmp/fastvideo-traces")
+    with controller.region("training_train"):
         run_training_step()
+    controller.stop()
 
 To introduce a new region, register it via :func:`register_profiler_region`
 and wrap the corresponding code in :meth:`TorchProfilerController.region`.
@@ -22,11 +21,11 @@ and wrap the corresponding code in :meth:`TorchProfilerController.region`.
 from __future__ import annotations
 
 import contextlib
+import functools
+import os
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Any
-from collections.abc import Callable
-import functools
-from collections.abc import Iterable
 
 import torch
 
@@ -143,6 +142,26 @@ register_profiler_region(
     description="Single optimizer step including forward/backward passes.",
 )
 register_profiler_region(
+    name="profiler_region_training_forward",
+    description="Training method forward pass and loss computation.",
+)
+register_profiler_region(
+    name="profiler_region_training_dataloader",
+    description="Fetch the next training batch in the trainer process.",
+)
+register_profiler_region(
+    name="profiler_region_training_backward",
+    description="Training backward pass.",
+)
+register_profiler_region(
+    name="profiler_region_training_optimizer",
+    description="Gradient clipping, optimizer/scheduler steps, and zero_grad.",
+)
+register_profiler_region(
+    name="profiler_region_training_callbacks",
+    description="End-of-step training callbacks such as EMA updates.",
+)
+register_profiler_region(
     name="profiler_region_training_train",
     description="High-level step orchestration in the training loop.",
 )
@@ -163,6 +182,21 @@ register_profiler_region(
 register_profiler_region(
     name="profiler_region_distillation_update",
     description="Parameter updates specific to distillation workflows.",
+)
+
+# DMD2 method regions. These sit inside ``training_forward`` and make the
+# method's multi-model forward path distinguishable in a single trace.
+register_profiler_region(
+    name="profiler_region_dmd2_student_rollout",
+    description="DMD2 student rollout, including its simulated prefix steps.",
+)
+register_profiler_region(
+    name="profiler_region_dmd2_generator_loss",
+    description="DMD2 generator loss, including teacher and critic scoring.",
+)
+register_profiler_region(
+    name="profiler_region_dmd2_critic_loss",
+    description="DMD2 critic flow-matching loss, including its student rollout.",
 )
 
 
@@ -189,25 +223,28 @@ def get_or_create_profiler(trace_dir: str | None) -> TorchProfilerController:
     )
     logger.info("FASTVIDEO_TORCH_PROFILE_REGIONS=%s", envs.FASTVIDEO_TORCH_PROFILE_REGIONS)
 
-    profiler = torch.profiler.profile(
-        activities=_DEFAULT_ACTIVITIES,
-        record_shapes=envs.FASTVIDEO_TORCH_PROFILER_RECORD_SHAPES,
-        profile_memory=envs.FASTVIDEO_TORCH_PROFILER_WITH_PROFILE_MEMORY,
-        with_stack=envs.FASTVIDEO_TORCH_PROFILER_WITH_STACK,
-        with_flops=envs.FASTVIDEO_TORCH_PROFILER_WITH_FLOPS,
-        # No schedule: nothing in the codebase calls profiler.step(), so a
-        # wait/warmup schedule never advances and the profiler records nothing.
-        # Region toggling gates collection; the single trace exports at stop().
-        on_trace_ready=torch.profiler.tensorboard_trace_handler(trace_dir, use_gzip=True),
+    def profiler_factory() -> Any:
+        return torch.profiler.profile(
+            activities=_DEFAULT_ACTIVITIES,
+            record_shapes=envs.FASTVIDEO_TORCH_PROFILER_RECORD_SHAPES,
+            profile_memory=envs.FASTVIDEO_TORCH_PROFILER_WITH_PROFILE_MEMORY,
+            with_stack=envs.FASTVIDEO_TORCH_PROFILER_WITH_STACK,
+            with_flops=envs.FASTVIDEO_TORCH_PROFILER_WITH_FLOPS,
+            on_trace_ready=torch.profiler.tensorboard_trace_handler(trace_dir, use_gzip=True),
+        )
+
+    controller = TorchProfilerController(
+        None,
+        _DEFAULT_ACTIVITIES,
+        profiler_factory=profiler_factory,
+        trace_dir=trace_dir,
     )
-    controller = TorchProfilerController(profiler, _DEFAULT_ACTIVITIES)
-    controller._trace_dir = trace_dir
     controller.start()
-    # The trace only exports at stop(); inference paths have no shutdown hook
-    # that calls it, so register one. stop() is idempotent.
+    # Region exit normally exports each trace segment. Keep an atexit hook for
+    # exceptions or process shutdown while a region is still active.
     import atexit
     atexit.register(controller.stop)
-    logger.info("Torch profiler started")
+    logger.info("Torch profiler armed; collection starts at the first enabled region")
     return controller
 
 
@@ -260,7 +297,14 @@ class TorchProfilerConfig:
 
 
 class TorchProfilerController:
-    """Helper that toggles torch profiler collection for named regions.
+    """Create complete torch-profiler trace segments for named regions.
+
+    PyTorch's dynamic CUDA collection toggle can fail to re-enable CUPTI on
+    some supported stacks. In that failure mode it emits CPU operators while
+    silently dropping every CUDA kernel. This controller therefore starts a
+    fresh profiler at each outermost enabled region and stops it when that
+    region exits. Nested enabled regions become annotations in the same
+    CPU/CUDA trace segment.
 
     Parameters
     ----------
@@ -273,12 +317,17 @@ class TorchProfilerController:
     config:
         Optional :class:`TorchProfilerConfig`. If omitted, :meth:`from_env`
         constructs one during initialization.
+    profiler_factory:
+        Factory for fresh profiler instances. Required to profile more than
+        one outermost region invocation.
+    trace_dir:
+        Directory for per-segment summaries.
 
     Examples
     --------
     Enabling an existing region from the command line::
 
-        FASTVIDEO_TORCH_PROFILE_REGIONS=model_loading,training_dit \
+        FASTVIDEO_TORCH_PROFILE_REGIONS=model_loading,training_train \
         python fastvideo/training/wan_training_pipeline.py ...
 
     Wrapping a code block in a registered region::
@@ -299,24 +348,29 @@ class TorchProfilerController:
         activities: Iterable[torch.profiler.ProfilerActivity],
         config: TorchProfilerConfig | None = None,
         disabled: bool = False,
+        profiler_factory: Callable[[], Any] | None = None,
+        trace_dir: str | None = None,
     ) -> None:
         activities_tuple = tuple(activities)
         existing = get_global_controller()
         if existing is not None and not disabled:
             raise RuntimeError("TorchProfilerController already initialized globally. Use get_global_controller().")
+        self._profiler = profiler
+        self._profiler_factory = profiler_factory
+        self._activities = activities_tuple
+        self._trace_dir = trace_dir
+        self._segment_index = 0
+        self._segment_region: str | None = None
+        self._active_region_depth = 0
+        self._collection_enabled = False
         if disabled:
-            self._profiler = None
+            self._configured = False
+            self._armed = False
             return
 
-        self._profiler = profiler
-        self._activities = activities_tuple
         self._config = config or TorchProfilerConfig.from_env()
-        # torch.profiler collects from start(); reflect that so the initial
-        # _set_collection(False) in start() actually toggles it off instead of
-        # short-circuiting (which captured everything before the first region).
-        self._collection_enabled = True
-        self._active_region_depth = 0
-        self._trace_dir: str | None = None
+        self._configured = True
+        self._armed = False
         logger.info("PROFILER: TorchProfilerController initialized with config: %s", self._config)
         set_global_controller(self)
 
@@ -324,29 +378,61 @@ class TorchProfilerController:
     def is_enabled(self) -> bool:
         """Return ``True`` when the underlying profiler is collecting."""
 
-        if self._profiler is None:
-            return False
         return self._collection_enabled
 
     def is_region_enabled(self, region: str) -> bool:
         """Return ``True`` if ``region`` should be collected."""
 
-        if self._profiler is None:
+        if not self.has_profiler:
             return False
         resolved = resolve_profiler_region(region)
         if resolved is None:
             return False
         return self._config.regions.get(resolved.name, False)
 
-    def _set_collection(self, enabled: bool) -> None:
-        if self._profiler is None:
+    def _new_profiler(self) -> Any:
+        if self._profiler is not None:
+            profiler = self._profiler
+            self._profiler = None
+            return profiler
+        if self._profiler_factory is None:
+            raise RuntimeError("Torch profiler cannot start another trace segment without a profiler_factory")
+        return self._profiler_factory()
+
+    def _start_segment(self, region: str) -> None:
+        if self._collection_enabled:
             return
-        if self._collection_enabled == enabled:
+        self._profiler = self._new_profiler()
+        logger.info(
+            "PROFILER: Starting segment %d for region %s",
+            self._segment_index,
+            region,
+        )
+        self._profiler.start()
+        self._segment_region = region
+        self._collection_enabled = True
+
+    def _finish_segment(self) -> None:
+        if self._profiler is None or not self._collection_enabled:
             return
-        event = ("fastvideo.profiler.enable_collection" if enabled else "fastvideo.profiler.disable_collection")
-        with torch.profiler.record_function(event):
-            self._profiler.toggle_collection_dynamic(enabled, self._activities)
-        self._collection_enabled = enabled
+        profiler = self._profiler
+        segment_index = self._segment_index
+        segment_region = self._segment_region or "unknown"
+        logger.info(
+            "PROFILER: Stopping segment %d for region %s",
+            segment_index,
+            segment_region,
+        )
+        profiler.stop()
+        self._write_summary(
+            profiler,
+            segment_index=segment_index,
+            segment_region=segment_region,
+        )
+        self._profiler = None
+        self._collection_enabled = False
+        self._segment_region = None
+        self._segment_index += 1
 
     _warned_unregistered: set[str] = set()
 
@@ -354,7 +440,7 @@ class TorchProfilerController:
     def region(self, region: str):
         """Context manager that enables profiling for ``region`` if configured."""
 
-        if self._profiler is None:
+        if not self.has_profiler:
             yield
             return
 
@@ -371,64 +457,70 @@ class TorchProfilerController:
             yield
             return
 
-        # NVTX range so the same region names are visible in nsys timelines
+        if self._active_region_depth == 0:
+            self._start_segment(region)
+
+        # NVTX range so the same region names are visible in nsys timelines.
+        # Push after profiler startup so Kineto also records the annotation.
         nvtx = torch.cuda.is_available()
         if nvtx:
             torch.cuda.nvtx.range_push(f"fastvideo.region::{region}")
         self._active_region_depth += 1
-        if self._active_region_depth == 1:
-            logger.info("PROFILER: Setting collection to True (depth=%s) for region %s", self._active_region_depth,
-                        region)
-            self._set_collection(True)
         try:
-            # record_function opens after collection is enabled so the region
-            # marker itself lands in the trace.
             with torch.profiler.record_function(f"fastvideo.region::{region}"):
                 yield
         finally:
             self._active_region_depth -= 1
-            logger.info("PROFILER: Decreasing active region depth to %s", self._active_region_depth)
-            if self._active_region_depth == 0:
-                logger.info("PROFILER: Setting collection to False upon exiting region %s", region)
-                self._set_collection(False)
-            if nvtx:
-                torch.cuda.nvtx.range_pop()
+            try:
+                if nvtx:
+                    torch.cuda.nvtx.range_pop()
+            finally:
+                # Close NVTX before stopping Kineto so both profilers see a
+                # balanced outermost range in the exported segment.
+                if self._active_region_depth == 0:
+                    self._finish_segment()
 
     def start(self) -> None:
-        """Start the profiler and pause collection until a region is entered."""
+        """Arm the controller; collection begins at an enabled region."""
 
-        logger.info("PROFILER: Starting profiler...")
-        if self._profiler is None:
+        if not self._configured:
             return
-        self._profiler.start()
-        logger.info("PROFILER: Profiler started")
-        # Profiler starts with collection disabled by default.
-        logger.info("PROFILER: Setting collection to False")
-        self._set_collection(False)
-        logger.info("PROFILER: Profiler started with collection disabled")
+        self._armed = True
+        logger.info("PROFILER: Controller armed")
 
-    def _write_summary(self) -> None:
+    def _write_summary(
+        self,
+        profiler: Any,
+        *,
+        segment_index: int,
+        segment_region: str,
+    ) -> None:
         """Compact per-rank op summary next to the trace: a key_averages table
         and a JSON with input shapes, so operator-split analysis does not
         require parsing multi-GB chrome traces."""
-        if self._profiler is None or not self._trace_dir:
+        if not self._trace_dir:
             return
         try:
             import json as _json
-            import os as _os
-            rank = _os.environ.get("RANK", "0")
-            averages = self._profiler.key_averages(group_by_input_shape=True)
-            stem = _os.path.join(self._trace_dir, f"summary_rank{rank}")
-            with open(f"{stem}.txt", "w") as fh:
+            rank = os.environ.get("RANK", "0")
+            short_region = segment_region.removeprefix("profiler_region_")
+            stem = os.path.join(
+                self._trace_dir,
+                f"summary_rank{rank}_segment{segment_index:04d}_{short_region}",
+            )
+            averages = profiler.key_averages(group_by_input_shape=envs.FASTVIDEO_TORCH_PROFILER_RECORD_SHAPES, )
+            with open(f"{stem}.txt", "w", encoding="utf-8") as fh:
                 fh.write(averages.table(sort_by="self_device_time_total", row_limit=60))
             rows = [{
                 "name": e.key,
                 "shapes": str(e.input_shapes),
+                "self_cpu_us": e.self_cpu_time_total,
+                "cpu_us": e.cpu_time_total,
                 "self_device_us": e.self_device_time_total,
                 "device_us": e.device_time_total,
                 "count": e.count,
             } for e in averages]
-            with open(f"{stem}.json", "w") as fh:
+            with open(f"{stem}.json", "w", encoding="utf-8") as fh:
                 _json.dump(rows, fh)
             if rank == "0":
                 logger.info("PROFILER: summary written to %s.txt", stem)
@@ -436,24 +528,25 @@ class TorchProfilerController:
             logger.exception("PROFILER: summary generation failed")
 
     def stop(self) -> None:
-        """Stop the profiler after disabling collection and clearing state."""
+        """Flush any active segment and disable this controller."""
 
-        if self._profiler is None:
+        if not self._configured:
             return
 
         logger.info("PROFILER: Stopping profiler...")
-        self._profiler.stop()
-        self._write_summary()
-        self._profiler = None  # makes stop() idempotent (atexit may re-enter)
+        self._finish_segment()
+        self._profiler = None
+        self._configured = False
+        self._armed = False
         logger.info("PROFILER: Profiler stopped")
         self._active_region_depth = 0
         set_global_controller(None)
 
     @property
     def has_profiler(self) -> bool:
-        """Return ``True`` when a profiler instance is available."""
+        """Return ``True`` when this controller is configured and armed."""
 
-        return self._profiler is not None
+        return self._configured and self._armed
 
     @property
     def activities(self) -> tuple[torch.profiler.ProfilerActivity, ...]:
@@ -476,13 +569,21 @@ def profiler_region(region: str):
 
 
 def profile_region(region: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-    """Wrap a bound method so it runs inside a profiler region if available."""
+    """Wrap a bound method so it runs inside a profiler region if available.
+
+    Prefer a controller attached to the instance, then fall back to the
+    process-wide controller. The fallback lets lightweight owners such as the
+    modular trainer and its callbacks add regions without threading profiler
+    plumbing through their public constructors.
+    """
 
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
 
         @functools.wraps(fn)
         def wrapped(self, *args, **kwargs):
             controller = getattr(self, "profiler_controller", None)
+            if controller is None:
+                controller = get_global_controller()
             if controller is None or not controller.has_profiler:
                 return fn(self, *args, **kwargs)
             with controller.region(region):

@@ -8,6 +8,7 @@ from typing import Any, Literal
 import torch
 import torch.nn.functional as F
 
+from fastvideo.profiler import profile_region
 from fastvideo.train.methods.base import TrainingMethod, LogScalar
 from fastvideo.train.models.base import ModelBase
 from fastvideo.train.utils.optimizer import (
@@ -476,6 +477,7 @@ class DMD2Method(TrainingMethod):
             self._score_max_timestep,
         )
 
+    @profile_region("profiler_region_dmd2_student_rollout")
     def _student_rollout(
         self,
         batch: Any,
@@ -598,6 +600,7 @@ class DMD2Method(TrainingMethod):
         batch.dmd_latent_vis_dict["generator_timestep"] = target_timestep.float().detach()
         return pred_x0
 
+    @profile_region("profiler_region_dmd2_critic_loss")
     def _critic_flow_matching_loss(
         self,
         batch: Any,
@@ -638,6 +641,7 @@ class DMD2Method(TrainingMethod):
             outputs,
         )
 
+    @profile_region("profiler_region_dmd2_generator_loss")
     def _dmd_loss(
         self,
         generator_pred_x0: torch.Tensor,
