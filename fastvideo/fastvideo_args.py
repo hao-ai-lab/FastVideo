@@ -120,10 +120,12 @@ class FastVideoArgs:
     num_gpus: int = 1
     tp_size: int = -1
     sp_size: int = -1
-    # Number of ranks within the sequence-parallel group used by pure Ring
-    # Attention. ``1`` disables Ring Attention (default Ulysses-only SP).
-    # The initial implementation supports pure Ring only, so when > 1 it
-    # must equal ``sp_size`` (see ``_check_ring_attention_args``).
+    # Number of ranks within the sequence-parallel group used by Ring
+    # Attention. ``1`` disables Ring Attention (pure Ulysses SP). When
+    # ``1 < ring_size < sp_size``, Ring Attention runs combined with Ulysses
+    # as a 2D hybrid (USP): ``sp_size`` must be divisible by ``ring_size``,
+    # and the remaining ``sp_size // ring_size`` factor is the Ulysses
+    # subgroup size (see ``_check_ring_attention_args``).
     ring_size: int = 1
     hsdp_replicate_dim: int = 1
     hsdp_shard_dim: int = -1
@@ -543,8 +545,10 @@ class FastVideoArgs:
             type=int,
             default=FastVideoArgs.ring_size,
             help=("Number of ranks used by Ring Attention within the sequence-parallel "
-                  "group. Set to 1 to disable Ring Attention. In the initial pure-Ring "
-                  "implementation, ring_size must equal sp_size."),
+                  "group. Set to 1 to disable Ring Attention. Must evenly divide sp_size; "
+                  "when ring_size == sp_size this is pure Ring Attention, when "
+                  "1 < ring_size < sp_size it runs combined with Ulysses as a hybrid "
+                  "(USP) using the remaining sp_size // ring_size ranks for Ulysses."),
         )
         parser.add_argument(
             "--hsdp-replicate-dim",
@@ -1090,9 +1094,11 @@ class FastVideoArgs:
     def _check_ring_attention_args(self) -> None:
         """Validate Ring Attention configuration.
 
-        The initial FastVideo integration only supports pure Ring Attention:
-        the entire sequence-parallel group is used as the Ring group, and
-        Ring Attention training/backward is not supported.
+        FastVideo supports pure Ring Attention (``ring_size == sp_size``) and
+        the Ring+Ulysses hybrid, a.k.a. USP (``1 < ring_size < sp_size``,
+        with the remaining ``sp_size // ring_size`` factor used as the
+        Ulysses subgroup size). Ring Attention training/backward is not
+        supported in either case.
         """
         if self.ring_size < 1:
             raise ValueError(f"ring_size must be >= 1, got {self.ring_size}.")
@@ -1104,10 +1110,9 @@ class FastVideoArgs:
             raise ValueError(f"Ring Attention requires sequence parallelism. Got ring_size={self.ring_size}, "
                              f"sp_size={self.sp_size}.")
 
-        if self.ring_size != self.sp_size:
-            raise NotImplementedError(
-                "The initial Ring Attention implementation supports pure Ring only: ring_size must equal "
-                f"sp_size. Got ring_size={self.ring_size}, sp_size={self.sp_size}.")
+        if self.sp_size % self.ring_size != 0:
+            raise ValueError("Ring Attention (including the Ring+Ulysses/USP hybrid) requires sp_size to be divisible "
+                             f"by ring_size. Got ring_size={self.ring_size}, sp_size={self.sp_size}.")
 
         if not self.inference_mode:
             raise NotImplementedError("Ring Attention training/backward is not supported in the initial "
