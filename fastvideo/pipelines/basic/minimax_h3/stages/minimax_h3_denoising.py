@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import contextlib
+import os
 from typing import Any
 
 import torch
@@ -108,6 +109,19 @@ class MiniMaxH3DenoisingStage(PipelineStage):
             batch.audio_latents = batch.audio_latents.to(device)
 
         dmd_steps = fastvideo_args.pipeline_config.dmd_denoising_steps
+        if not dmd_steps:
+            env_steps = os.environ.get("FASTVIDEO_DMD_DENOISING_STEPS", "").strip()
+            if env_steps:
+                dmd_steps = [int(s) for s in env_steps.split(",") if s.strip()]
+        # Stochastic backward simulation (reference-DMD2 sampling): re-noise
+        # each hop's x0 estimate with FRESH noise instead of the deterministic
+        # Euler carry — matching the training rollout's input manifold. Only
+        # meaningful with explicit DMD steps.
+        stochastic_renoise = bool(dmd_steps) and (
+            bool(getattr(fastvideo_args.pipeline_config, "dmd_stochastic_renoise", False))
+            or os.environ.get("FASTVIDEO_DMD_STOCHASTIC_RENOISE", "0").strip().lower() in ("1", "true", "yes"))
+        if stochastic_renoise:
+            logger.info("MiniMax-H3 DMD denoising with stochastic fresh-noise re-noising.")
         if dmd_steps:
             # DMD method timesteps are integers on the shared 1000-step grid;
             # normalize to base time and let each scheduler apply its own shift
@@ -219,18 +233,52 @@ class MiniMaxH3DenoisingStage(PipelineStage):
 
                     video_start = layout.num_condition_video_rows
                     audio_start = layout.num_condition_audio_rows
-                    batch.latents[video_start:] = self.scheduler.step(
-                        video_velocity[0, video_start:].float(),
-                        video_timestep,
-                        batch.latents[video_start:],
-                        return_dict=False,
-                    )[0]
-                    batch.audio_latents[audio_start:] = self.audio_scheduler.step(
-                        audio_velocity[0, audio_start:].float(),
-                        audio_timestep,
-                        batch.audio_latents[audio_start:],
-                        return_dict=False,
-                    )[0]
+                    if os.environ.get("FASTVIDEO_DMD_DEBUG_STATS", "0") == "1":
+                        with torch.no_grad():
+                            for tag, lat, vel, st, sig in (
+                                ("video", batch.latents, video_velocity, video_start, self.scheduler.sigmas),
+                                ("audio", batch.audio_latents, audio_velocity, audio_start,
+                                 self.audio_scheduler.sigmas),
+                            ):
+                                s = float(sig[index])
+                                xin = lat[st:].float()
+                                x0dbg = xin + s * vel[0, st:].float()
+                                logger.info(
+                                    "DMD_DEBUG step=%d %s sigma=%.4f in(std=%.4f,mean=%.4f) "
+                                    "x0(std=%.4f,mean=%.4f) v(std=%.4f)", index, tag, s, xin.std(), xin.mean(),
+                                    x0dbg.std(), x0dbg.mean(), vel[0, st:].float().std())
+                    if stochastic_renoise:
+                        # x0 = sample + sigma * v (velocity = noise - clean),
+                        # then fresh-noise re-mix at the next sigma — the same
+                        # hop rule as the DMD2 training rollout.
+                        assert self.scheduler.sigmas is not None and self.audio_scheduler.sigmas is not None
+                        for latents, velocity, start, sigmas in (
+                            (batch.latents, video_velocity, video_start, self.scheduler.sigmas),
+                            (batch.audio_latents, audio_velocity, audio_start, self.audio_scheduler.sigmas),
+                        ):
+                            sigma = float(sigmas[index])
+                            sigma_next = float(sigmas[index + 1])
+                            sample = latents[start:].float()
+                            pred_x0 = sample + sigma * velocity[0, start:].float()
+                            if sigma_next > 0.0:
+                                noise = torch.randn_like(pred_x0)
+                                nxt = (1.0 - sigma_next) * pred_x0 + sigma_next * noise
+                            else:
+                                nxt = pred_x0
+                            latents[start:] = nxt.to(latents.dtype)
+                    else:
+                        batch.latents[video_start:] = self.scheduler.step(
+                            video_velocity[0, video_start:].float(),
+                            video_timestep,
+                            batch.latents[video_start:],
+                            return_dict=False,
+                        )[0]
+                        batch.audio_latents[audio_start:] = self.audio_scheduler.step(
+                            audio_velocity[0, audio_start:].float(),
+                            audio_timestep,
+                            batch.audio_latents[audio_start:],
+                            return_dict=False,
+                        )[0]
                     batch.step_index = index
                     batch.timestep = video_timestep
         finally:

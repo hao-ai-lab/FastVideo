@@ -62,6 +62,7 @@ class DMD2Method(TrainingMethod):
             self._score_min_timestep,
             self._score_max_timestep,
         ) = self._parse_score_timestep_bounds()
+        self._score_timestep_shift = self._parse_score_timestep_shift()
 
         # Initialize preprocessors on student.
         self.student.init_preprocessors(self.training_config)
@@ -413,6 +414,21 @@ class DMD2Method(TrainingMethod):
         value = raw.get(name, 1.0)
         return 1.0 if value is None else float(value)
 
+    def apply_configured_lrs(self) -> None:
+        """Force student/critic LRs back to the configured values (post-resume)."""
+        student_lr = float(self.training_config.optimizer.learning_rate)
+        critic_lr = float(self.method_config.get("fake_score_learning_rate"))
+        for optimizer, scheduler, lr in (
+            (self._student_optimizer, self._student_lr_scheduler, student_lr),
+            (self._critic_optimizer, self._critic_lr_scheduler, critic_lr),
+        ):
+            for group in optimizer.param_groups:
+                group["lr"] = lr
+                if "initial_lr" in group:
+                    group["initial_lr"] = lr
+            if hasattr(scheduler, "base_lrs"):
+                scheduler.base_lrs = [lr] * len(scheduler.base_lrs)
+
     def _should_update_student(
         self,
         iteration: int,
@@ -504,15 +520,54 @@ class DMD2Method(TrainingMethod):
             int(max_ratio * num_timesteps),
         )
 
-    def _sample_score_timestep(self, device: torch.device) -> torch.Tensor:
-        timestep = torch.randint(
-            0,
-            int(self.student.num_train_timesteps),
-            [1],
-            device=device,
-            dtype=torch.long,
-            generator=self.cuda_generator,
+    def _parse_score_timestep_shift(self) -> float:
+        """Resolve the sampling-density shift for the score timestep.
+
+        ``1.0`` (default) keeps the legacy uniform draw over base timesteps.
+        For rectified-flow models with a large timestep shift ``s``, uniform
+        base-t concentrates ~s× more supervision near sigma=1 than near the
+        floor; setting this to ``s`` samples uniformly in that modality's
+        *shifted sigma* instead (draw u ~ U over sigma-space bounds, invert
+        t = u / (s - (s-1)u)), equalizing score supervision across its noise
+        axis. Only the sampling density changes — every timestep still maps
+        to per-modality sigmas exactly as before.
+        """
+        shift = get_optional_float(
+            self.method_config,
+            "score_timestep_shift",
+            where="method.score_timestep_shift",
         )
+        shift = 1.0 if shift is None else float(shift)
+        if shift <= 0.0:
+            raise ValueError("method.score_timestep_shift must be > 0, "
+                             f"got {shift}")
+        return shift
+
+    def _sample_score_timestep(self, device: torch.device) -> torch.Tensor:
+        shift = self._score_timestep_shift
+        if shift == 1.0:
+            timestep = torch.randint(
+                0,
+                int(self.student.num_train_timesteps),
+                [1],
+                device=device,
+                dtype=torch.long,
+                generator=self.cuda_generator,
+            )
+        else:
+            num_timesteps = float(self.student.num_train_timesteps)
+            t_lo = self._score_min_timestep / num_timesteps
+            t_hi = self._score_max_timestep / num_timesteps
+            sigma_lo = shift * t_lo / (1.0 + (shift - 1.0) * t_lo)
+            sigma_hi = shift * t_hi / (1.0 + (shift - 1.0) * t_hi)
+            u = torch.rand(
+                [1],
+                device=device,
+                dtype=torch.float32,
+                generator=self.cuda_generator,
+            ) * (sigma_hi - sigma_lo) + sigma_lo
+            t = u / (shift - (shift - 1.0) * u)
+            timestep = (t * num_timesteps).round().to(torch.long)
         timestep = self.student.shift_and_clamp_timestep(timestep)
         return timestep.clamp(
             self._score_min_timestep,
