@@ -34,16 +34,26 @@ NNODES="${SLURM_JOB_NUM_NODES}"
 GPUS_PER_NODE="${SLURM_GPUS_PER_NODE:-4}"
 GPUS_PER_NODE="${GPUS_PER_NODE##*:}"   # "4" or "gb200:4" -> 4
 WORLD_SIZE=$((NNODES * GPUS_PER_NODE))
+# Topology overrides (default: sp across a tray, HSDP replicate=nodes/shard=4).
+# e.g. SP_SIZE=1 HSDP_REPLICATE=1 HSDP_SHARD=$WORLD_SIZE for pure full-shard FSDP.
+SP_SIZE="${SP_SIZE:-${GPUS_PER_NODE}}"
+HSDP_REPLICATE="${HSDP_REPLICATE:-${NNODES}}"
+HSDP_SHARD="${HSDP_SHARD:-${GPUS_PER_NODE}}"
 MASTER_ADDR="$(scontrol show hostnames "${SLURM_JOB_NODELIST}" | head -n 1)"
 MASTER_PORT="${MASTER_PORT:-29501}"
 
 echo "=== H3 DMD2 multi-node launch ==="
 echo "Nodes:        ${NNODES} (${SLURM_JOB_NODELIST})"
 echo "World size:   ${WORLD_SIZE}"
+echo "Topology:     sp=${SP_SIZE} hsdp=(replicate=${HSDP_REPLICATE}, shard=${HSDP_SHARD})"
 echo "Rendezvous:   ${MASTER_ADDR}:${MASTER_PORT}"
 echo "Config:       ${CONFIG}"
 
 # ── per-rank environment (srun propagates exported vars) ─────────────────
+# CLUSTER: if compute nodes lack the login /home (k8s worker pods), submit
+# with LUSTRE_HOME=<shared writable dir> — triton's JIT cache (touched at
+# fastvideo import), HF caches, and ~/.netrc all resolve through $HOME.
+export HOME="${LUSTRE_HOME:-${HOME}}"
 export FASTVIDEO_FA4=1
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export TOKENIZERS_PARALLELISM=false
@@ -55,11 +65,34 @@ export FASTVIDEO_WEIGHT_SHARD_CACHE_PER_NODE=1
 # W&B: credentials come from ~/.netrc on the shared home; flip to offline if
 # compute nodes have no egress.
 export WANDB_MODE="${WANDB_MODE:-online}"
-# CLUSTER: NCCL fabric tuning if needed (NVLink partitioning, IB HCA choice):
-# export NCCL_IB_HCA=...  NCCL_SOCKET_IFNAME=...
+# CLUSTER: NCCL fabric tuning. These three come from the cluster onboarding
+# guide's multi-node NCCL-test recipe (GB200 NVL72 + CX7 IB cross-rack):
+# MNNVL is multi-node NVLink within a rack's NVL72 domain.
+export NCCL_CUMEM_ENABLE="${NCCL_CUMEM_ENABLE:-1}"
+export NCCL_MNNVL_ENABLE="${NCCL_MNNVL_ENABLE:-2}"
+export UCX_NET_DEVICES="${UCX_NET_DEVICES:-eth0}"
+# WARN costs nothing and turns silent transport hangs at communicator init
+# into named errors in the log.
+export NCCL_DEBUG="${NCCL_DEBUG:-WARN}"
 
 export NNODES MASTER_ADDR MASTER_PORT
 export NUM_GPUS="${GPUS_PER_NODE}"
+
+# Boot watchdog: NCCL communicator init can wedge silently (all ranks parked
+# in ib_uverbs_event_read/poll, no WARN output, GPUs at 0%). If no weight
+# loading has been logged within BOOT_TIMEOUT_MIN minutes, abort the job so
+# the allocation isn't squatted on. 0 disables.
+BOOT_TIMEOUT_MIN="${BOOT_TIMEOUT_MIN:-20}"
+if [ "${BOOT_TIMEOUT_MIN}" -gt 0 ]; then
+  (
+    sleep $((BOOT_TIMEOUT_MIN * 60))
+    if ! grep -qs "Loading weights took" "${REPO}/examples/train/logs/${SLURM_JOB_ID}-node0"/*.log; then
+      echo "BOOT WATCHDOG: no weight loading after ${BOOT_TIMEOUT_MIN} min — aborting job ${SLURM_JOB_ID}"
+      scancel "${SLURM_JOB_ID}"
+    fi
+  ) &
+  WATCHDOG_PID=$!
+fi
 
 # CLUSTER: if trays require a container, wrap the srun payload accordingly,
 # e.g. add `--container-image=... --container-mounts=/mnt:/mnt` (pyxis) so
@@ -73,7 +106,10 @@ srun --kill-on-bad-exit=1 --ntasks-per-node=1 bash -c "
   cd '${REPO}'
   bash examples/train/run.sh '${CONFIG}' \
     --training.distributed.num_gpus ${WORLD_SIZE} \
-    --training.distributed.hsdp_replicate_dim ${NNODES} \
-    --training.distributed.hsdp_shard_dim ${GPUS_PER_NODE} \
-    --training.distributed.sp_size ${GPUS_PER_NODE}
+    --training.distributed.hsdp_replicate_dim ${HSDP_REPLICATE} \
+    --training.distributed.hsdp_shard_dim ${HSDP_SHARD} \
+    --training.distributed.sp_size ${SP_SIZE}
 "
+SRUN_EXIT=$?
+[ -n "${WATCHDOG_PID:-}" ] && kill "${WATCHDOG_PID}" 2>/dev/null
+exit "${SRUN_EXIT}"

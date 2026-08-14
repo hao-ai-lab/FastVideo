@@ -1,0 +1,105 @@
+# MEMORY/TOPOLOGY TEST: data-free DMD2 on 13 trays (52x GB200, single rack),
+# sp_size=1 (no sequence parallelism — one full packed document per GPU) with
+# FULL FSDP sharding across all 52 ranks (mesh replicate=1 x shard=52).
+#
+# Hypothesis under test: with params/grads/optimizer sharded 52-way (~7 GiB/rank
+# for all three 33B roles) and NVL72 intra-rack NVLink carrying the all-gathers,
+# does the sp=1 activation working set fit in 184 GiB? Prior measurement says
+# ~116 GiB at sp=2 with full checkpointing → ~230 GiB extrapolated at sp=1.
+#
+# Test shape: accum=1 (global batch = 52 = one sample per GPU per step),
+# validation and checkpointing disabled, 200 steps.
+#
+# Launch (13 trays, rack-2):
+#   SP_SIZE=1 HSDP_REPLICATE=1 HSDP_SHARD=52 \
+#   CONFIG=<this file> sbatch --nodes=13 -p hpc-rack-2 \
+#     examples/train/slurm/dmd2_32xgb200.sbatch
+
+models:
+  student:
+    _target_: fastvideo.train.models.minimax_h3.MiniMaxH3DMDModel
+    init_from: /mnt/lustre/vlm-k1kong/models/MiniMax-H3
+    trainable: true
+    enable_gradient_checkpointing_type: full
+    attention_backend: FLASH_ATTN
+  teacher:
+    _target_: fastvideo.train.models.minimax_h3.MiniMaxH3DMDModel
+    init_from: /mnt/lustre/vlm-k1kong/models/MiniMax-H3
+    trainable: false
+    disable_custom_init_weights: true
+    attention_backend: FLASH_ATTN
+  critic:
+    _target_: fastvideo.train.models.minimax_h3.MiniMaxH3DMDModel
+    init_from: /mnt/lustre/vlm-k1kong/models/MiniMax-H3
+    trainable: true
+    disable_custom_init_weights: true
+    enable_gradient_checkpointing_type: full
+    attention_backend: FLASH_ATTN
+
+method:
+  _target_: fastvideo.train.methods.distribution_matching.dmd2.DMD2Method
+  rollout_mode: simulate
+  generator_update_interval: 5
+  real_score_guidance_scale: 3.5
+  dmd_denoising_steps: [1000, 757, 522]
+  min_timestep_ratio: 0.02
+  max_timestep_ratio: 0.98
+  cfg_uncond:
+    text: zero
+
+  fake_score_learning_rate: 8.0e-6
+  fake_score_betas: [0.0, 0.999]
+  fake_score_lr_scheduler: constant
+
+training:
+  distributed:
+    num_gpus: 52
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 52
+
+  data:
+    data_path: /mnt/lustre/vlm-wlsaidhi/fastvideo/data/vidprom_h3_text_only
+    preprocessed_data_type: text_only
+    dataloader_num_workers: 0
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    seed: 42
+    num_latent_t: 37
+    num_height: 768
+    num_width: 1344
+    num_frames: 124
+
+  optimizer:
+    learning_rate: 2.0e-6
+    betas: [0.0, 0.999]
+    weight_decay: 0.01
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 200
+    gradient_accumulation_steps: 1
+
+  checkpoint:
+    output_dir: /mnt/lustre/vlm-wlsaidhi/fastvideo/outputs/minimax_h3_dmd2_sp1_fsdp52_test
+    training_state_checkpointing_steps: 0
+    checkpoints_total_limit: 1
+
+  tracker:
+    project_name: h3-dmd2-vsa
+    run_name: dmd2_sp1_fsdp52_test
+
+  model:
+    precondition_outputs: false
+    enable_gradient_checkpointing_type: full
+
+  dit_precision: bf16
+
+callbacks:
+  grad_clip:
+    _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
+    max_grad_norm: 1.0
+
+pipeline: {}

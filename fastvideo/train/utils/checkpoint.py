@@ -184,6 +184,9 @@ class _CallbackStateWrapper:
 class CheckpointConfig:
     save_steps: int
     keep_last: int
+    # Suppress periodic saves before this step (early checkpoints of a long
+    # run are rarely useful and cost ~100 GiB each). 0 disables the gate.
+    start_step: int = 0
 
 
 class CheckpointManager:
@@ -233,6 +236,8 @@ class CheckpointManager:
     def maybe_save(self, step: int) -> None:
         save_steps = int(self.config.save_steps or 0)
         if save_steps <= 0:
+            return
+        if step < int(self.config.start_step or 0):
             return
         if step % save_steps != 0:
             return

@@ -121,12 +121,24 @@ def _save_role_pretrained(
             dst,
             local_base,
         )
-        shutil.copytree(
-            local_base,
-            dst,
-            symlinks=False,
-            copy_function=_copy_or_link,
-        )
+        try:
+            shutil.copytree(
+                local_base,
+                dst,
+                symlinks=False,
+                copy_function=_copy_or_link,
+                # HF hub bookkeeping under the base checkpoint (.cache/) may
+                # be unreadable when the base belongs to another user; it is
+                # not part of the model.
+                ignore=shutil.ignore_patterns(".cache", ".git*"),
+            )
+        except shutil.Error as exc:
+            # copytree collects per-file failures and raises at the end;
+            # tolerate stragglers as long as the component manifest made it.
+            logger.warning("copytree finished with %d skipped entries (first: %s)", len(exc.args[0]),
+                           exc.args[0][0] if exc.args[0] else "?")
+        if not ((dst / "modular_model_index.json").is_file() or (dst / "model_index.json").is_file()):
+            raise FileNotFoundError(f"Export dir {dst} is missing its model index after copy.")
 
     _barrier()
 
@@ -233,6 +245,7 @@ def convert(
     role: str = "student",
     overwrite: bool = False,
     verify: bool = False,
+    weights_only: bool = False,
 ) -> str:
     """Load a DCP checkpoint and export as a diffusers model.
 
@@ -296,6 +309,11 @@ def convert(
 
     # -- Load DCP weights into the model --
     states = method.checkpoint_state()
+    if weights_only:
+        # Export needs only module weights; optimizer states (a full fp32
+        # second-moment tensor per trainable role) can double GPU memory and
+        # force structure-matching between the shim and checkpoint optimizers.
+        states = {k: v for k, v in states.items() if k.startswith("roles.")}
     logger.info(
         "Loading DCP checkpoint from %s",
         resolved,
@@ -443,6 +461,14 @@ def main() -> None:
               "the exported directory to catch key-mapping bugs "
               "immediately."),
     )
+    parser.add_argument(
+        "--weights-only",
+        action="store_true",
+        help=("Load only roles.* module weights from the checkpoint, "
+              "skipping optimizer/scheduler states (halves GPU memory "
+              "and allows exporting via a shim config whose optimizer "
+              "differs from the checkpoint's)."),
+    )
     args = parser.parse_args(sys.argv[1:])
 
     convert(
@@ -452,6 +478,7 @@ def main() -> None:
         role=args.role,
         overwrite=args.overwrite,
         verify=args.verify,
+        weights_only=args.weights_only,
     )
 
 

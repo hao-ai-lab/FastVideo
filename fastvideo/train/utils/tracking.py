@@ -68,11 +68,40 @@ def build_tracker(
     tracker_run_name = tracker_config.run_name or None
     project = (tracker_config.project_name or "fastvideo")
 
-    return initialize_trackers(
-        trackers,
-        experiment_name=project,
-        config=tracker_config_dict,
-        log_dir=tracker_log_dir,
-        entity=tracker_entity,
-        run_name=tracker_run_name,
-    )
+    try:
+        return initialize_trackers(
+            trackers,
+            experiment_name=project,
+            config=tracker_config_dict,
+            log_dir=tracker_log_dir,
+            entity=tracker_entity,
+            run_name=tracker_run_name,
+        )
+    except Exception as exc:
+        if Trackers.WANDB.value not in trackers:
+            raise
+        # A revoked API key or unreachable api.wandb.ai passes _wandb_usable()
+        # (it only proves a key exists) and then throws inside wandb.init —
+        # which must not kill a multi-node run at boot. Offline init never
+        # contacts the API; the run stays syncable later via `wandb sync`.
+        logger.warning("Tracker init failed (%s); retrying wandb in offline mode.", exc)
+        os.environ["WANDB_MODE"] = "offline"
+        try:
+            return initialize_trackers(
+                trackers,
+                experiment_name=project,
+                config=tracker_config_dict,
+                log_dir=tracker_log_dir,
+                entity=tracker_entity,
+                run_name=tracker_run_name,
+            )
+        except Exception as offline_exc:
+            logger.warning("Offline tracker init also failed (%s); continuing without trackers.", offline_exc)
+            return initialize_trackers(
+                [],
+                experiment_name=project,
+                config=None,
+                log_dir=tracker_log_dir,
+                entity=None,
+                run_name=None,
+            )

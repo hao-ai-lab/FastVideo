@@ -109,6 +109,17 @@ class TrainingMethod(torch.nn.Module, ABC):
     def _lr_scheduler_dict(self) -> dict[str, Any]:
         ...
 
+    def apply_configured_lrs(self) -> None:
+        """Re-apply the config's learning rates to live optimizers/schedulers.
+
+        Called after a checkpoint resume when
+        ``training.checkpoint.reset_lr_on_resume`` is set: DCP restores
+        param-group ``lr``/``initial_lr`` and scheduler ``base_lrs`` from the
+        checkpoint, which would otherwise silently override an LR change in
+        the YAML. Methods with per-role LRs override this.
+        """
+        return None
+
     def checkpoint_state(self) -> dict[str, Any]:
         """Return DCP-ready checkpoint state for all trainable roles.
 
