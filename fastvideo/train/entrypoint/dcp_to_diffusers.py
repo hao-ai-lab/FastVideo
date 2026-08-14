@@ -62,6 +62,7 @@ def _save_role_pretrained(
     output_dir: str,
     module_names: list[str] | None = None,
     overwrite: bool = False,
+    link_base: bool = False,
     model: Any,
 ) -> str:
     """Export a role's modules into a diffusers-style model dir.
@@ -117,26 +118,49 @@ def _save_role_pretrained(
 
         logger.info(
             "Creating pretrained export dir at %s "
-            "(base=%s)",
+            "(base=%s, link_base=%s)",
             dst,
             local_base,
+            link_base,
         )
-        try:
-            shutil.copytree(
-                local_base,
-                dst,
-                symlinks=False,
-                copy_function=_copy_or_link,
-                # HF hub bookkeeping under the base checkpoint (.cache/) may
-                # be unreadable when the base belongs to another user; it is
-                # not part of the model.
-                ignore=shutil.ignore_patterns(".cache", ".git*"),
-            )
-        except shutil.Error as exc:
-            # copytree collects per-file failures and raises at the end;
-            # tolerate stragglers as long as the component manifest made it.
-            logger.warning("copytree finished with %d skipped entries (first: %s)", len(exc.args[0]),
-                           exc.args[0][0] if exc.args[0] else "?")
+        if link_base:
+            # Space-lean export: symlink every base component except the
+            # module dirs we are about to rewrite (those get a real dir with
+            # the base's non-weight files, e.g. config.json — weights and
+            # index are produced fresh below). Cross-user hardlinks are
+            # blocked by fs.protected_hardlinks, symlinks are not.
+            rewritten = set(module_names or ["transformer"])
+            dst.mkdir(parents=True, exist_ok=True)
+            for entry in sorted(local_base.iterdir()):
+                if entry.name == ".cache" or entry.name.startswith(".git"):
+                    continue
+                target = dst / entry.name
+                if entry.is_dir() and entry.name in rewritten:
+                    target.mkdir()
+                    for f in sorted(entry.iterdir()):
+                        if f.name.endswith(".safetensors") or f.name.endswith(".safetensors.index.json"):
+                            continue
+                        shutil.copy2(os.path.realpath(f), target / f.name)
+                else:
+                    os.symlink(os.path.realpath(entry), target)
+        else:
+            try:
+                shutil.copytree(
+                    local_base,
+                    dst,
+                    symlinks=False,
+                    copy_function=_copy_or_link,
+                    # HF hub bookkeeping under the base checkpoint (.cache/)
+                    # may be unreadable when the base belongs to another
+                    # user; it is not part of the model.
+                    ignore=shutil.ignore_patterns(".cache", ".git*"),
+                )
+            except shutil.Error as exc:
+                # copytree collects per-file failures and raises at the end;
+                # tolerate stragglers as long as the component manifest made
+                # it.
+                logger.warning("copytree finished with %d skipped entries (first: %s)", len(exc.args[0]),
+                               exc.args[0][0] if exc.args[0] else "?")
         if not ((dst / "modular_model_index.json").is_file() or (dst / "model_index.json").is_file()):
             raise FileNotFoundError(f"Export dir {dst} is missing its model index after copy.")
 
@@ -171,6 +195,10 @@ def _save_role_pretrained(
 
         if _rank() == 0:
             for path in module_dir.glob("*.safetensors"):
+                path.unlink(missing_ok=True)
+            # A leftover shard index from the base would point at the shards
+            # deleted above and shadow the fresh single-file export.
+            for path in module_dir.glob("*.safetensors.index.json"):
                 path.unlink(missing_ok=True)
 
             # Convert internal parameter names back to HF format.
@@ -246,6 +274,7 @@ def convert(
     overwrite: bool = False,
     verify: bool = False,
     weights_only: bool = False,
+    link_base: bool = False,
 ) -> str:
     """Load a DCP checkpoint and export as a diffusers model.
 
@@ -339,6 +368,7 @@ def convert(
         base_model_path=base_model_path,
         output_dir=output_dir,
         overwrite=overwrite,
+        link_base=link_base,
         model=model,
     )
     logger.info("Export complete: %s", result)
@@ -469,6 +499,14 @@ def main() -> None:
               "and allows exporting via a shim config whose optimizer "
               "differs from the checkpoint's)."),
     )
+    parser.add_argument(
+        "--link-base",
+        action="store_true",
+        help=("Symlink base-model components into the export dir instead "
+              "of copying them (only the exported module dirs are real). "
+              "Saves hundreds of GB per export; the export then depends on "
+              "the base model dir staying in place."),
+    )
     args = parser.parse_args(sys.argv[1:])
 
     convert(
@@ -479,6 +517,7 @@ def main() -> None:
         overwrite=args.overwrite,
         verify=args.verify,
         weights_only=args.weights_only,
+        link_base=args.link_base,
     )
 
 
