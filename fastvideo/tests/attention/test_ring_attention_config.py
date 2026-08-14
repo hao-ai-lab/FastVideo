@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Configuration tests for pure Ring Attention integration."""
+"""Configuration tests for the Ring Attention / USP (Ring+Ulysses) integration."""
 
 from __future__ import annotations
 
@@ -25,6 +25,9 @@ def test_sequence_parallel_defaults() -> None:
         (4, 4, 1),  # Ulysses
         (2, 2, 2),  # pure Ring
         (4, 4, 4),  # pure Ring
+        (4, 4, 2),  # USP hybrid: ring_size=2, ulysses_size=2
+        (8, 8, 2),  # USP hybrid: ring_size=2, ulysses_size=4
+        (8, 8, 4),  # USP hybrid: ring_size=4, ulysses_size=2
     ],
 )
 def test_supported_sequence_parallel_configurations(
@@ -105,14 +108,14 @@ def test_ring_requires_sequence_parallelism() -> None:
         )
 
 
-def test_partial_ring_group_is_not_supported_yet() -> None:
+def test_ring_size_must_divide_sp_size() -> None:
     with pytest.raises(
-        NotImplementedError,
-        match="pure Ring only",
+        ValueError,
+        match="divisible",
     ):
         FastVideoArgs(
             model_path=MODEL_PATH,
-            num_gpus=4,
-            sp_size=4,
-            ring_size=2,
+            num_gpus=6,
+            sp_size=6,
+            ring_size=4,
         )
