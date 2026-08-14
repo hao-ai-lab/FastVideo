@@ -326,7 +326,8 @@ class WanTransformerBlock(nn.Module):
                                                                         eps=eps,
                                                                         elementwise_affine=True,
                                                                         dtype=torch.float32,
-                                                                        compute_dtype=torch.float32)
+                                                                        compute_dtype=torch.float32,
+                                                                        fuse_inference=True)
 
         # 2. Cross-attention
         if added_kv_proj_dim is not None:
@@ -350,7 +351,8 @@ class WanTransformerBlock(nn.Module):
                                                                          eps=eps,
                                                                          elementwise_affine=False,
                                                                          dtype=torch.float32,
-                                                                         compute_dtype=torch.float32)
+                                                                         compute_dtype=torch.float32,
+                                                                         fuse_inference=True)
 
         # 3. Feed-forward
         self.ffn = MLP(dim, ffn_dim, act_type="gelu_pytorch_tanh", quant_config=quant_config, prefix=f"{prefix}.ffn")
@@ -486,7 +488,8 @@ class WanTransformerBlock_VSA(nn.Module):
                                                                         eps=eps,
                                                                         elementwise_affine=True,
                                                                         dtype=torch.float32,
-                                                                        compute_dtype=torch.float32)
+                                                                        compute_dtype=torch.float32,
+                                                                        fuse_inference=True)
 
         # 2. Cross-attention
         if added_kv_proj_dim is not None:
@@ -510,7 +513,8 @@ class WanTransformerBlock_VSA(nn.Module):
                                                                          eps=eps,
                                                                          elementwise_affine=False,
                                                                          dtype=torch.float32,
-                                                                         compute_dtype=torch.float32)
+                                                                         compute_dtype=torch.float32,
+                                                                         fuse_inference=True)
 
         # 3. Feed-forward
         self.ffn = MLP(dim, ffn_dim, act_type="gelu_pytorch_tanh", quant_config=quant_config, prefix=f"{prefix}.ffn")

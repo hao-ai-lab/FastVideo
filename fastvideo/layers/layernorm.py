@@ -144,8 +144,15 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
         dtype: torch.dtype = torch.float32,
         compute_dtype: torch.dtype | None = None,
         prefix: str = "",
+        fuse_inference: bool = False,
     ):
         super().__init__()
+        # Opt-in Triton fusion for the no-grad path. Off by default: the fused
+        # kernel returns both outputs in the *stream* dtype (so caller-side
+        # .to(orig_dtype) casts become no-ops), which changes the return dtype
+        # contract relative to eager type promotion. Only callers that follow
+        # every call with a cast to the stream dtype (e.g. Wan) should enable.
+        self.fuse_inference = fuse_inference
         if norm_type == "rms":
             self.norm = RMSNorm(hidden_size, has_weight=elementwise_affine, eps=eps, dtype=dtype)
         elif norm_type == "layer":
@@ -179,6 +186,13 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
             - residual value (value after residual connection
               but before normalization)
         """
+        if (shift is None) != (scale is None):
+            raise ValueError("shift and scale must be None together or both be tensors")
+
+        if self.fuse_inference:
+            from fastvideo.layers.triton_fused_norm import (fused_path_supported, fused_residual_norm_mod)
+            if fused_path_supported(residual, x, gate, shift, scale, self.norm):
+                return fused_residual_norm_mod(residual, x, gate, shift, scale, self.norm)
         # x.shape: [batch_size, seq_len, inner_dim]
         # Apply residual connection with gating
         if isinstance(gate, int):
@@ -204,8 +218,6 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
 
         # Identity modulation: skip the scale/shift passes entirely.
         if shift is None or scale is None:
-            if shift is not None or scale is not None:
-                raise ValueError("shift and scale must be None together or both be tensors")
             return normalized, residual_output
 
         if convert_modulation_dtype:
