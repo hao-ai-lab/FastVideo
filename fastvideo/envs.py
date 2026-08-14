@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     FASTVIDEO_TORCH_PROFILER_WITH_STACK: bool = False
     FASTVIDEO_TORCH_PROFILER_WITH_FLOPS: bool = False
     FASTVIDEO_TORCH_PROFILE_REGIONS: str = ""
+    FASTVIDEO_DISABLE_FUSED_NORM: bool = False
     FASTVIDEO_TRACE_ACTIVATIONS: bool = False
     FASTVIDEO_TRACE_LAYERS: str = ""
     FASTVIDEO_TRACE_STATS: str = "abs_mean,sum"
@@ -259,6 +260,12 @@ environment_variables: dict[str, Callable[[], Any]] = {
     "FASTVIDEO_TORCH_PROFILE_REGIONS":
     lambda: os.getenv("FASTVIDEO_TORCH_PROFILE_REGIONS", ""),
 
+    # Disable the Triton-fused residual+norm+modulate inference path
+    # (fastvideo/layers/triton_fused_norm.py) if set. The fused path is
+    # opt-in per module instance and inference-only; this is the global
+    # kill switch for debugging numerics or Triton issues.
+    "FASTVIDEO_DISABLE_FUSED_NORM":
+    lambda: bool(os.getenv("FASTVIDEO_DISABLE_FUSED_NORM", "0") != "0"),
     # Enable activation trace hooks if set.
     "FASTVIDEO_TRACE_ACTIVATIONS":
     lambda: bool(os.getenv("FASTVIDEO_TRACE_ACTIVATIONS", "0") != "0"),
