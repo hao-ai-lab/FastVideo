@@ -34,6 +34,7 @@ from fastvideo.mlx_runtime.refine import (
     DEFAULT_REFINE_SIGMA,
     RefinePlan,
     TwoPassResult,
+    default_refine_timesteps,
     plan_refine_resolutions,
     prepare_refine_latents,
     refine_sigma_from_schedule,
@@ -41,7 +42,15 @@ from fastvideo.mlx_runtime.refine import (
     run_two_pass_dmd,
     upsample_latents_spatial,
 )
+from fastvideo.mlx_runtime.frame_upsample import (
+    DEFAULT_PIXEL_UPSAMPLE_MODE,
+    PIXEL_UPSAMPLE_MODES,
+    unsharp,
+    upsample_frame,
+    upsample_frames,
+)
 from fastvideo.mlx_runtime.fast_spatial import (
+    DEFAULT_FAST_SPATIAL_SHARPEN,
     FastSpatialPlan,
     apply_fast_spatial_upsample,
     plan_fast_spatial,
@@ -61,6 +70,8 @@ __all__ = [
     "AppliedMemoryLimits",
     "DEFAULT_ENHANCE_SYSTEM_PROMPT",
     "DEFAULT_MLX_LM_MODEL",
+    "DEFAULT_FAST_SPATIAL_SHARPEN",
+    "DEFAULT_PIXEL_UPSAMPLE_MODE",
     "DEFAULT_REFINE_SIGMA",
     "EnhanceResult",
     "FastSpatialPlan",
@@ -86,6 +97,8 @@ __all__ = [
     "mlx_dit_from_diffusers_safetensors",
     "mlx_block_weights_from_diffusers_safetensors",
     "mlx_block_weights_from_torch",
+    "PIXEL_UPSAMPLE_MODES",
+    "default_refine_timesteps",
     "plan_fast_spatial",
     "plan_refine_resolutions",
     "prepare_refine_latents",
@@ -95,5 +108,8 @@ __all__ = [
     "run_dmd_loop",
     "run_two_pass_dmd",
     "save_mlx_dit_checkpoint",
+    "unsharp",
+    "upsample_frame",
+    "upsample_frames",
     "upsample_latents_spatial",
 ]

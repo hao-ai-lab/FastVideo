@@ -109,6 +109,7 @@ def plan_refine_resolutions(
         vae_temporal_compression: int = 4,
         patch_size: tuple[int, int, int] = (1, 2, 2),
         enabled: bool = True,
+        mode_label: str = "Refine",
 ) -> RefinePlan:
     """
     Validate the requested dimensions and create the stage-1 and target-resolution refinement plan.
@@ -122,6 +123,8 @@ def plan_refine_resolutions(
         vae_temporal_compression (int): Temporal compression factor of the VAE.
         patch_size (tuple[int, int, int]): Temporal and spatial patch dimensions used to validate latent-grid alignment.
         enabled (bool): Whether to use two-pass refinement.
+        mode_label (str): Name of the calling mode, used to prefix validation
+            errors so ``--fast-spatial`` failures do not read as refine failures.
 
     Returns:
         RefinePlan: The validated stage-1 and target-resolution plan.
@@ -144,11 +147,11 @@ def plan_refine_resolutions(
             vae_temporal_compression=vae_temporal_compression,
             num_frames=num_frames,
         )
-        _validate_plan(plan, patch_size=patch_size)
+        _validate_plan(plan, patch_size=patch_size, mode_label=mode_label)
         return plan
 
     if height % spatial_scale != 0 or width % spatial_scale != 0:
-        raise ValueError(f"Refine requires height/width divisible by spatial_scale={spatial_scale} "
+        raise ValueError(f"{mode_label} requires height/width divisible by spatial_scale={spatial_scale} "
                          f"(got {height}x{width}).")
 
     stage1_height = height // spatial_scale
@@ -156,7 +159,7 @@ def plan_refine_resolutions(
     # Stage-1 must land on a VAE-aligned grid so the first denoise produces
     # valid latents; the LTX-2 init stage enforces the same constraint.
     if (stage1_height % vae_spatial_compression != 0 or stage1_width % vae_spatial_compression != 0):
-        raise ValueError(f"Refine requires height/width divisible by "
+        raise ValueError(f"{mode_label} requires height/width divisible by "
                          f"{spatial_scale * vae_spatial_compression} "
                          f"(got {height}x{width}, vae_spatial={vae_spatial_compression}).")
 
@@ -170,7 +173,7 @@ def plan_refine_resolutions(
         vae_temporal_compression=vae_temporal_compression,
         num_frames=num_frames,
     )
-    _validate_plan(plan, patch_size=patch_size)
+    _validate_plan(plan, patch_size=patch_size, mode_label=mode_label)
     logger.info(
         "[MLX refine] enabled: stage1=%dx%d stage2=%dx%d scale=%dx",
         stage1_width,
@@ -182,7 +185,7 @@ def plan_refine_resolutions(
     return plan
 
 
-def _validate_plan(plan: RefinePlan, *, patch_size: tuple[int, int, int]) -> None:
+def _validate_plan(plan: RefinePlan, *, patch_size: tuple[int, int, int], mode_label: str = "Refine") -> None:
     """
     Validate that both refinement stages have latent dimensions aligned to the patch grid.
 
@@ -199,10 +202,10 @@ def _validate_plan(plan: RefinePlan, *, patch_size: tuple[int, int, int]) -> Non
         ("stage2", plan.stage2_latent_height, plan.stage2_latent_width),
     ):
         if lh % ph != 0 or lw % pw != 0:
-            raise ValueError(f"Refine {label} latent grid {lh}x{lw} is not divisible by "
+            raise ValueError(f"{mode_label} {label} latent grid {lh}x{lw} is not divisible by "
                              f"patch spatial size {ph}x{pw}.")
         if plan.latent_frames % pt != 0:
-            raise ValueError(f"Refine latent_frames={plan.latent_frames} is not divisible by "
+            raise ValueError(f"{mode_label} latent_frames={plan.latent_frames} is not divisible by "
                              f"patch temporal size {pt}.")
 
 
@@ -377,6 +380,45 @@ def refine_sigma_from_schedule(
     return float(schedule.sigma_for(float(timesteps[0])))
 
 
+def default_refine_timesteps(
+    schedule: MLXDMDSchedule,
+    timesteps: Sequence[float | int],
+) -> list[float]:
+    """Derive stage-2 timesteps from the stage-1 DMD grid.
+
+    The stage-2 pass must start *below* full noise, otherwise the hand-off
+    ``(1 - sigma) * upsampled + sigma * noise`` weights stage 1 at zero and
+    the refine pass silently becomes a plain full-resolution generation at
+    twice the cost. FastWan's stage-1 grid opens at ``t=1000`` (``sigma``
+    exactly 1.0), so reusing it verbatim — which is what happens when
+    ``--refine-dmd-denoising-steps`` is left unset — discards stage 1.
+
+    Dropping the leading full-noise entries keeps the pass on timesteps the
+    distilled student was actually trained on (no off-grid ``t`` the DiT has
+    never seen) while letting the stage-1 structure through.
+
+    Parameters:
+        schedule (MLXDMDSchedule): Schedule used to map timesteps to noise levels.
+        timesteps (Sequence[float | int]): The stage-1 DMD timestep grid.
+
+    Returns:
+        list[float]: The stage-1 grid with leading full-noise timesteps removed.
+
+    Raises:
+        ValueError: If every timestep in the grid is at full noise, leaving no
+            usable refine step.
+    """
+    steps = [float(step) for step in timesteps]
+    first = 0
+    while first < len(steps) and schedule.sigma_for(steps[first]) >= 1.0:
+        first += 1
+    if first == len(steps):
+        raise ValueError(f"No usable refine timesteps in {steps}: every entry is at sigma >= 1 "
+                         "(full noise), which would discard the stage-1 result. Pass "
+                         "explicit stage-2 timesteps below the full-noise step.")
+    return steps[first:]
+
+
 def run_dmd_loop(
     *,
     dit: Any,
@@ -529,11 +571,38 @@ def run_two_pass_dmd(
     if freqs_cis_stage2 is None:
         raise ValueError("freqs_cis_stage2 is required when refine spatial_scale > 1")
 
-    stage2_timesteps = list(refine_timesteps) if refine_timesteps is not None else list(timesteps)
-    if not stage2_timesteps:
-        raise ValueError("refine_timesteps must be non-empty when refine is enabled")
-    sigma = (float(refine_sigma) if refine_sigma is not None else refine_sigma_from_schedule(
-        schedule, stage2_timesteps))
+    if refine_timesteps is not None:
+        stage2_timesteps = [float(step) for step in refine_timesteps]
+        if not stage2_timesteps:
+            raise ValueError("refine_timesteps must be non-empty when refine is enabled")
+    else:
+        # Not `list(timesteps)`: the stage-1 grid opens at full noise, which
+        # would weight the stage-1 result at zero. See default_refine_timesteps.
+        stage2_timesteps = default_refine_timesteps(schedule, timesteps)
+    grid_sigma = refine_sigma_from_schedule(schedule, stage2_timesteps)
+    sigma = float(refine_sigma) if refine_sigma is not None else grid_sigma
+    if refine_sigma is not None and abs(sigma - grid_sigma) > 1e-6:
+        # The loop tells the DiT `stage2_timesteps[0]`, which implies grid_sigma.
+        # Overriding the hand-off noise level breaks that correspondence, so the
+        # model is denoising from a level it was not told about. Useful for
+        # exploring schedules that bottom out too high, but say so out loud.
+        logger.warning(
+            "[MLX refine] refine_sigma=%.4f overrides the schedule's %.4f for timestep %g; "
+            "the DiT is told a timestep that no longer matches the noise it receives.",
+            sigma,
+            grid_sigma,
+            stage2_timesteps[0],
+        )
+
+    # A hand-off at sigma >= 1 is `0 * upsampled + 1 * noise`: stage 1 is
+    # thrown away and refine degrades to a plain full-res run at 2x the cost.
+    # Fail loudly rather than silently burning the first pass.
+    if add_noise_flag and sigma >= 1.0:
+        raise ValueError(f"Refine hand-off sigma={sigma:.4f} (from stage-2 timestep "
+                         f"{stage2_timesteps[0]:g}) discards the stage-1 result entirely: "
+                         "the upsampled latents are weighted (1 - sigma) = 0. Start the "
+                         "stage-2 grid below the full-noise timestep, or pass "
+                         "add_noise_flag=False to hand off the clean upsample.")
 
     stage2_input = prepare_refine_latents(
         stage1_latents,
@@ -585,6 +654,7 @@ __all__ = [
     "DEFAULT_REFINE_SIGMA",
     "RefinePlan",
     "TwoPassResult",
+    "default_refine_timesteps",
     "plan_refine_resolutions",
     "prepare_refine_latents",
     "refine_sigma_from_schedule",

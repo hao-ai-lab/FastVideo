@@ -17,8 +17,10 @@ Optional quality / speed levers (compose freely):
 * ``--refine`` — H3 / LTX-2 two-pass: denoise at base res, upsample +
   re-noise, re-denoise at target res with the same DiT.
 * ``--fast`` — RIFE temporal fast mode (fewer frames → interpolate).
-* ``--fast-spatial`` — spatial twin of RIFE: denoise at half res, latent
-  upsample to target (no second denoise). Orthogonal to ``--fast``.
+* ``--fast-spatial`` — spatial twin of RIFE: denoise *and decode* at half
+  res, then resample the decoded frames to the target size (no second
+  denoise). Orthogonal to ``--fast``. Attention is O(tokens²), so this is
+  the largest single denoise lever available: 86.1s → 10.3s at 1.3B.
 * ``--enhance-prompt`` — local Context-IR-style prompt enrichment
   (template or mlx-lm) before UMT5 encode.
 
@@ -36,11 +38,18 @@ import subprocess
 import sys
 import tempfile
 import time
+from dataclasses import replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 
+from fastvideo.mlx_runtime.fast_spatial import DEFAULT_FAST_SPATIAL_SHARPEN
+from fastvideo.mlx_runtime.frame_upsample import DEFAULT_PIXEL_UPSAMPLE_MODE, PIXEL_UPSAMPLE_MODES
 from fastvideo.mlx_runtime.memory import add_memory_limit_args, apply_memory_limits
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from fastvideo.mlx_runtime.fast_spatial import FastSpatialPlan
 
 
 DEFAULT_MODEL_ID = "FastVideo/FastWan2.1-T2V-1.3B-Diffusers"
@@ -365,29 +374,74 @@ def decode_latents_to_video(
 
 def _unsharp(frame: np.ndarray, amount: float) -> np.ndarray:
     """Light unsharp mask to counter RIFE's optical-flow softening."""
-    import cv2
+    from fastvideo.mlx_runtime.frame_upsample import unsharp
 
-    blur = cv2.GaussianBlur(frame, (0, 0), 1.0)
-    return cv2.addWeighted(frame, 1.0 + amount, blur, -amount, 0)
+    return unsharp(frame, amount)
+
+
+def _postprocess_video(*, video_path: Path, fps: int, rife: dict | None = None,
+                       spatial: "FastSpatialPlan | None" = None) -> None:
+    """Apply the post-decode passes to the written mp4 in a single re-encode.
+
+    ``--fast`` (RIFE frame interpolation) and ``--fast-spatial`` (pixel-space
+    upsample of a reduced-resolution decode) both operate on decoded frames.
+    Running them as separate in-place rewrites would put the video through two
+    lossy h264 round-trips, so they share one read/write here.
+
+    RIFE runs first, at the smaller frame size: optical flow is estimated on
+    fewer pixels (cheaper) and the interpolated frames then ride through the
+    same upsample as the keyframes, which keeps the clip spatially uniform.
+
+    Sharpening is applied once, at the end and at full resolution. Both passes
+    soften for the same reason (they synthesise pixels they do not have), so
+    stacking two unsharp masks over-crisps; the stronger of the two requested
+    amounts is used instead.
+    """
+    import imageio.v3 as iio
+
+    if rife is None and spatial is None:
+        return
+
+    frames = [frame for frame in iio.imread(video_path)]
+    labels = []
+    sharpen = 0.0
+
+    if rife is not None:
+        from fastvideo.mlx_runtime.rife_interp import interpolate as rife_interpolate, load_model
+
+        factor, target_frames = rife["factor"], rife["target_frames"]
+        frames = rife_interpolate(frames, factor=factor, model=load_model())
+        if len(frames) > target_frames:
+            frames = frames[:target_frames]
+        sharpen = max(sharpen, float(rife["sharpen"] or 0.0))
+        labels.append(f"RIFE {factor}x -> {len(frames)} frames")
+
+    if spatial is not None and spatial.enabled:
+        from fastvideo.mlx_runtime.fast_spatial import apply_fast_spatial_upsample
+
+        # The plan's own sharpen is folded into the single pass below.
+        frames = apply_fast_spatial_upsample(frames, replace(spatial, sharpen=0.0))
+        sharpen = max(sharpen, float(spatial.sharpen))
+        labels.append(f"upsample {spatial.scale}x -> {spatial.target_width}x{spatial.target_height} "
+                      f"({spatial.upsample_mode})")
+
+    if sharpen > 0.0:
+        frames = [_unsharp(frame, sharpen) for frame in frames]
+        labels.append(f"unsharp {sharpen:.2f}")
+
+    iio.imwrite(video_path, np.stack(frames), fps=fps, codec="libx264")
+    print(f"[post] {', '.join(labels)} written to {video_path}")
 
 
 def _rife_interpolate_video(*, video_path: Path, target_frames: int, factor: int,
                             sharpen: float, fps: int) -> None:
     """Read the reduced-frame mp4, RIFE-interpolate up to ``target_frames`` on
     Apple Silicon, optionally light-sharpen, and rewrite the file in place."""
-    import imageio.v3 as iio
-
-    from fastvideo.mlx_runtime.rife_interp import interpolate as rife_interpolate, load_model
-
-    frames = [frame for frame in iio.imread(video_path)]
-    model = load_model()
-    interp = rife_interpolate(frames, factor=factor, model=model)
-    if len(interp) > target_frames:
-        interp = interp[:target_frames]
-    if sharpen and sharpen > 0:
-        interp = [_unsharp(frame, sharpen) for frame in interp]
-    iio.imwrite(video_path, np.stack(interp), fps=fps, codec="libx264")
-    print(f"[fast] RIFE {factor}x -> {len(interp)} frames written to {video_path}")
+    _postprocess_video(
+        video_path=video_path,
+        fps=fps,
+        rife={"factor": factor, "target_frames": target_frames, "sharpen": sharpen},
+    )
 
 
 def main() -> None:
@@ -425,6 +479,17 @@ def main() -> None:
         "--dmd-denoising-steps when unset.",
     )
     parser.add_argument(
+        "--refine-sigma",
+        type=float,
+        default=None,
+        help="Override the stage-2 hand-off noise level (0-1). Lower keeps more "
+        "of the stage-1 draft. Normally derived from the first stage-2 timestep, "
+        "which keeps the noise level and the timestep the DiT is told consistent; "
+        "setting this decouples them, so the DiT sees a latent noised differently "
+        "than its timestep implies. Experimental — for exploring schedules whose "
+        "grid bottoms out too high (see the Wan2.2-5B note in the design doc).",
+    )
+    parser.add_argument(
         "--refine-add-noise",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -446,10 +511,11 @@ def main() -> None:
         "--fast-spatial",
         action=argparse.BooleanOptionalAction,
         default=False,
-        help="Spatial fast mode: denoise at height/width // fast-spatial-scale, then "
-        "bilinear-upsample clean latents to the target grid before decode (no second "
-        "denoise — that is --refine). Composes with --fast (RIFE). If both "
-        "--fast-spatial and --refine are set, refine wins (quality path).",
+        help="Spatial fast mode: denoise and decode at height/width // "
+        "fast-spatial-scale, then resample the decoded frames up to the target "
+        "size (no second denoise — that is --refine). Composes with --fast "
+        "(RIFE). If both --fast-spatial and --refine are set, refine wins "
+        "(quality path).",
     )
     parser.add_argument(
         "--fast-spatial-scale",
@@ -459,9 +525,17 @@ def main() -> None:
     )
     parser.add_argument(
         "--fast-spatial-upsample-mode",
-        choices=("bilinear", "nearest"),
-        default="bilinear",
-        help="Latent upsample mode for --fast-spatial.",
+        choices=PIXEL_UPSAMPLE_MODES,
+        default=DEFAULT_PIXEL_UPSAMPLE_MODE,
+        help="Pixel-space interpolation kernel used to resample the decoded "
+        f"stage-1 frames (default: {DEFAULT_PIXEL_UPSAMPLE_MODE}).",
+    )
+    parser.add_argument(
+        "--fast-spatial-sharpen",
+        type=float,
+        default=DEFAULT_FAST_SPATIAL_SHARPEN,
+        help="Light unsharp strength to counter resampling softness "
+        f"(default: {DEFAULT_FAST_SPATIAL_SHARPEN}; 0 disables).",
     )
     parser.add_argument(
         "--enhance-prompt",
@@ -595,7 +669,6 @@ def main() -> None:
 
     from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler
     from fastvideo.mlx_runtime.fast_spatial import (
-        apply_fast_spatial_upsample,
         plan_fast_spatial,
         resolve_spatial_mode,
     )
@@ -670,6 +743,7 @@ def main() -> None:
         vae_temporal_compression=vae_temporal_factor,
         patch_size=patch_size,
         upsample_mode=args.fast_spatial_upsample_mode,
+        sharpen=args.fast_spatial_sharpen,
         enabled=(spatial_mode == "fast_spatial"),
     )
     active_plan = refine_plan if spatial_mode == "refine" else fast_spatial_plan.plan
@@ -781,8 +855,14 @@ def main() -> None:
     refine_sigma = None
     if args.refine:
         assert dmd_schedule is not None  # guarded above
-        refine_steps_str = args.refine_dmd_denoising_steps or args.dmd_denoising_steps
-        refine_steps = [int(step.strip()) for step in refine_steps_str.split(",") if step.strip()]
+        # Left unset, the stage-2 grid is derived from the stage-1 one with the
+        # leading full-noise step dropped. Reusing --dmd-denoising-steps
+        # verbatim would start stage 2 at sigma=1 and discard stage 1.
+        refine_steps = None
+        if args.refine_dmd_denoising_steps:
+            refine_steps = [
+                float(step.strip()) for step in args.refine_dmd_denoising_steps.split(",") if step.strip()
+            ]
         freqs_cis_stage2 = make_rotary_embeddings(
             config,
             latent_frames=latent_frames,
@@ -803,15 +883,18 @@ def main() -> None:
             plan=refine_plan,
             schedule=dmd_schedule,
             timesteps=[float(t.item()) for t in timesteps],
-            refine_timesteps=[float(t) for t in refine_steps],
+            refine_timesteps=refine_steps,
             mx_dtype=mx_dtype,
             seed=args.seed,
             add_noise_flag=args.refine_add_noise,
             upsample_mode=args.refine_upsample_mode,
+            refine_sigma=args.refine_sigma,
         )
         latents = two_pass.latents
         stage1_latents_np = np.array(two_pass.stage1_latents.astype(mx.float32))
         refine_sigma = two_pass.refine_sigma
+        print(f"[refine] stage-2 hand-off sigma={refine_sigma:.4f} "
+              f"(stage-1 weight {1.0 - refine_sigma:.4f})")
     else:
         for step_index, timestep in enumerate(timesteps):
             noise_input_latent = latents
@@ -850,17 +933,10 @@ def main() -> None:
             mx.eval(latents)
             print(f"denoise step {step_index + 1}/{len(timesteps)} complete")
 
-        # A: spatial fast mode — upsample clean latents to target grid (no re-denoise).
-        if spatial_mode == "fast_spatial":
-            print(
-                f"[fast-spatial] upsample {fast_spatial_plan.stage1_width}x"
-                f"{fast_spatial_plan.stage1_height} -> "
-                f"{fast_spatial_plan.target_width}x{fast_spatial_plan.target_height} "
-                f"({fast_spatial_plan.upsample_mode})"
-            )
-            latents = apply_fast_spatial_upsample(latents, fast_spatial_plan)
-            mx.eval(latents)
-
+    # A: spatial fast mode leaves the latents alone. They stay on the stage-1
+    # grid through decode, and the resample to the target size happens on the
+    # decoded frames in _postprocess_video — interpolating a Wan latent puts it
+    # off the decoder's manifold and returns a blurred veil.
     denoise_time = time.perf_counter() - denoise_start
     denoise_peak_memory = mx.get_peak_memory()
     active_memory = mx.get_active_memory()
@@ -892,18 +968,28 @@ def main() -> None:
     )
     decode_time = time.perf_counter() - decode_start
 
-    rife_time = 0.0
+    # Post-decode passes share one read/write so the clip takes a single h264
+    # round-trip even when --fast and --fast-spatial are combined.
+    postprocess_time = 0.0
+    rife_request = None
     if fast_target_frames is not None:
-        rife_start = time.perf_counter()
-        _rife_interpolate_video(
+        rife_request = {
+            "factor": args.fast_factor,
+            "target_frames": fast_target_frames,
+            "sharpen": args.fast_sharpen,
+        }
+    spatial_request = fast_spatial_plan if spatial_mode == "fast_spatial" else None
+    if rife_request is not None or spatial_request is not None:
+        postprocess_start = time.perf_counter()
+        _postprocess_video(
             video_path=args.output_path,
-            target_frames=fast_target_frames,
-            factor=args.fast_factor,
-            sharpen=args.fast_sharpen,
             fps=args.fps,
+            rife=rife_request,
+            spatial=spatial_request,
         )
-        rife_time = time.perf_counter() - rife_start
-        print(f"RIFE fast-mode interpolate time: {rife_time:.2f}s")
+        postprocess_time = time.perf_counter() - postprocess_start
+        print(f"Post-decode (RIFE/upsample) time: {postprocess_time:.2f}s")
+    rife_time = postprocess_time
 
     total_time = time.perf_counter() - total_start
 
@@ -913,8 +999,8 @@ def main() -> None:
     print(f"MLX DiT load time: {load_time:.2f}s")
     print(f"MLX denoise time: {denoise_time:.2f}s")
     print(f"Decode/export time: {decode_time:.2f}s")
-    if rife_time:
-        print(f"RIFE interpolate time: {rife_time:.2f}s")
+    if postprocess_time:
+        print(f"Post-decode time: {postprocess_time:.2f}s")
     print(f"Total prompt-to-video time: {total_time:.2f}s")
     print(f"MLX load peak memory: {load_peak_memory / (1024 ** 3):.2f} GiB")
     print(f"MLX denoise peak memory: {denoise_peak_memory / (1024 ** 3):.2f} GiB")
@@ -939,6 +1025,8 @@ def main() -> None:
             "fast_spatial_scale": fast_spatial_plan.scale if spatial_mode == "fast_spatial" else 1,
             "fast_spatial_stage1_height": fast_spatial_plan.stage1_height if spatial_mode == "fast_spatial" else None,
             "fast_spatial_stage1_width": fast_spatial_plan.stage1_width if spatial_mode == "fast_spatial" else None,
+            "fast_spatial_upsample_mode": fast_spatial_plan.upsample_mode if spatial_mode == "fast_spatial" else None,
+            "fast_spatial_sharpen": fast_spatial_plan.sharpen if spatial_mode == "fast_spatial" else None,
             "refine": spatial_mode == "refine",
             "refine_scale": refine_plan.spatial_scale if spatial_mode == "refine" else 1,
             "refine_stage1_height": refine_plan.stage1_height if spatial_mode == "refine" else None,
@@ -963,6 +1051,7 @@ def main() -> None:
             "vae_decode_export_s": decode_time,
             "decode_export_s": decode_time,
             "rife_interpolate_s": rife_time,
+            "postprocess_s": postprocess_time,
             "total_s": total_time,
             **enhance_result_as_metrics(enhance_result),
             "mlx_load_peak_bytes": int(load_peak_memory),

@@ -405,17 +405,43 @@ def apply_rotary_emb(x, cos, sin, *, is_neox_style: bool = False):
     return mx.stack([o1, o2], axis=-1).reshape(*x.shape).astype(x.dtype)
 
 
-# tanh-GELU constant as a Python float. A NumPy scalar (``np.sqrt(...)``) here
-# makes ``np.float64 * mx.array`` dispatch through NumPy, which evals the traced
-# array and breaks mx.compile ("Attempting to eval an array during function
-# transformations"). A plain float dispatches through mx and traces cleanly.
-_GELU_TANH_COEF = math.sqrt(2.0 / math.pi)
+_WINDOWED_ATTENTION_WARNED = False
+
+
+def _warn_windowed_attention_once(window: int) -> None:
+    """Warn that FASTVIDEO_MLX_WINDOW degrades output on a dense-trained DiT.
+
+    Sliding-window self-attention is fast (6.6x at a +-3-frame window on 1.3B)
+    but these checkpoints were trained with dense attention, and restricting it
+    at inference produces heavy colour-block noise: structural agreement with
+    the dense baseline drops to 0.25 at +-3 frames and 0.03 at +-5. Sparsity of
+    this kind is a training-time method. Kept as a research knob, but it should
+    never be on by accident.
+    """
+    global _WINDOWED_ATTENTION_WARNED
+    if _WINDOWED_ATTENTION_WARNED:
+        return
+    _WINDOWED_ATTENTION_WARNED = True
+    logger.warning(
+        "FASTVIDEO_MLX_WINDOW=%d enables sliding-window self-attention. These "
+        "checkpoints are trained dense; expect severely degraded output. This is "
+        "a research knob, not a speed setting — use --fast-spatial for real "
+        "denoise savings.",
+        window,
+    )
 
 
 def gelu_tanh(x):
-    import mlx.core as mx
+    """tanh-approximate GELU, as used by Wan's FFN.
 
-    return 0.5 * x * (1.0 + mx.tanh(_GELU_TANH_COEF * (x + 0.044715 * mx.power(x, 3.0))))
+    ``mlx.nn.gelu_approx`` is the same tanh approximation behind a fused
+    kernel. On the 1.3B FFN shape (32760x8960) it is bit-identical to the
+    expanded expression below and 3.3x faster — 28.9ms -> 8.7ms per layer,
+    which is 0.6s per denoise step across 30 layers.
+    """
+    import mlx.nn as nn
+
+    return nn.gelu_approx(x)
 
 
 def silu(x):
@@ -541,6 +567,7 @@ class MLXWanTransformerBlock:
         if window > 0:
             from fastvideo.mlx_runtime.windowed_attention import windowed_attention
 
+            _warn_windowed_attention_once(window)
             sink = int(os.environ.get("FASTVIDEO_MLX_WINDOW_SINK", "0") or "0")
             attn_output = windowed_attention(q_bh, k_bh, v_bh, window=window, sink=sink, scale=scale)
         else:

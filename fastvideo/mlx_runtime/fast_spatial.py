@@ -2,29 +2,50 @@
 """Spatial fast mode for the MLX Wan runtime (RIFE's spatial twin).
 
 RIFE ``--fast`` cuts *frames* (temporal). This module cuts *pixels*
-(spatial): denoise at ``target // scale``, then upsample clean latents
-back to the target grid before decode. No second denoise pass — that is
-``--refine`` (quality). The two compose:
+(spatial): denoise at ``target // scale``, decode at that size, then
+resample the decoded frames up to the target. No second denoise pass —
+that is ``--refine`` (quality). The two compose:
 
 * ``--fast-spatial`` alone → speed (≈ scale² fewer tokens)
 * ``--refine`` alone → quality two-pass (H3 / LTX-2)
 * ``--fast`` + ``--refine`` → fewer frames at base res, full-res refine
 * ``--fast`` + ``--fast-spatial`` → fewer frames *and* fewer pixels
 
+The upsample runs in **pixel** space, after the VAE decode. It used to run
+in latent space (bilinear over the latent H/W plane, sharing the refine
+hand-off primitive) and that is what made spatial fast mode incoherent: an
+interpolated Wan latent is off the decoder's manifold, so decode returned
+the right silhouette under a smeared veil. ``--refine`` can get away with
+the latent-space upsample because a second DMD pass re-denoises the result;
+spatial fast mode hands the latent straight to the decoder, so it cannot.
+See :mod:`fastvideo.mlx_runtime.frame_upsample` for the full rationale.
+
 MetalFX is intentionally not used: it needs game-engine motion vectors
-and depth that diffusion output lacks. Latent bilinear upsample is the
-same primitive as the refine hand-off, without the re-noise / re-denoise.
+and depth that diffusion output lacks.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any
+
+import numpy as np
 
 from fastvideo.logger import init_logger
-from fastvideo.mlx_runtime.refine import RefinePlan, plan_refine_resolutions, upsample_latents_spatial
+from fastvideo.mlx_runtime.frame_upsample import (
+    DEFAULT_PIXEL_UPSAMPLE_MODE,
+    PIXEL_UPSAMPLE_MODES,
+    upsample_frames,
+)
+from fastvideo.mlx_runtime.refine import RefinePlan, plan_refine_resolutions
 
 logger = init_logger(__name__)
+
+# Resampling from a smaller decode loses high-frequency detail the same way
+# RIFE's flow warp does, so spatial fast mode borrows ``--fast``'s remedy: a
+# light unsharp pass. 0.4 recovers perceived crispness on Wan2.1 output at 2x
+# without the halos that show up by ~0.8.
+DEFAULT_FAST_SPATIAL_SHARPEN = 0.4
 
 
 @dataclass(frozen=True)
@@ -33,6 +54,7 @@ class FastSpatialPlan:
 
     plan: RefinePlan
     upsample_mode: str
+    sharpen: float = DEFAULT_FAST_SPATIAL_SHARPEN
 
     @property
     def enabled(self) -> bool:
@@ -101,20 +123,29 @@ def plan_fast_spatial(
     vae_spatial_compression: int = 8,
     vae_temporal_compression: int = 4,
     patch_size: tuple[int, int, int] = (1, 2, 2),
-    upsample_mode: str = "bilinear",
+    upsample_mode: str = DEFAULT_PIXEL_UPSAMPLE_MODE,
+    sharpen: float = DEFAULT_FAST_SPATIAL_SHARPEN,
     enabled: bool = True,
 ) -> FastSpatialPlan:
     """
-    Build a plan for reduced-resolution denoising followed by spatial upsampling.
+    Build a plan for reduced-resolution denoising followed by pixel-space upsampling.
 
     Parameters:
-        upsample_mode (str): Latent upsampling mode, either ``"bilinear"`` or ``"nearest"``.
+        upsample_mode (str): Pixel interpolation kernel, one of
+            :data:`~fastvideo.mlx_runtime.frame_upsample.PIXEL_UPSAMPLE_MODES`.
+        sharpen (float): Unsharp strength applied after the resize.
 
     Returns:
         FastSpatialPlan: The validated spatial-fast processing plan.
+
+    Raises:
+        ValueError: If the upsample mode is unsupported or ``sharpen`` is negative.
     """
-    if upsample_mode not in {"bilinear", "nearest"}:
-        raise ValueError(f"Unsupported upsample mode: {upsample_mode}")
+    if upsample_mode not in PIXEL_UPSAMPLE_MODES:
+        raise ValueError(f"Unsupported upsample mode: {upsample_mode!r} "
+                         f"(expected one of {', '.join(PIXEL_UPSAMPLE_MODES)})")
+    if sharpen < 0.0:
+        raise ValueError(f"sharpen must be >= 0, got {sharpen}")
     plan = plan_refine_resolutions(
         height=height,
         width=width,
@@ -124,51 +155,50 @@ def plan_fast_spatial(
         vae_temporal_compression=vae_temporal_compression,
         patch_size=patch_size,
         enabled=enabled,
+        mode_label="fast-spatial",
     )
     if plan.spatial_scale > 1:
         logger.info(
-            "[MLX fast-spatial] denoise %dx%d → upsample %dx to %dx%d (%s)",
+            "[MLX fast-spatial] denoise+decode %dx%d → upsample %dx to %dx%d (%s, sharpen=%.2f)",
             plan.stage1_width,
             plan.stage1_height,
             plan.spatial_scale,
             plan.target_width,
             plan.target_height,
             upsample_mode,
+            sharpen,
         )
-    return FastSpatialPlan(plan=plan, upsample_mode=upsample_mode)
+    return FastSpatialPlan(plan=plan, upsample_mode=upsample_mode, sharpen=sharpen)
 
 
 def apply_fast_spatial_upsample(
-    clean_latents: Any,
+    frames: Iterable[np.ndarray],
     spatial: FastSpatialPlan,
-) -> Any:
-    """Upsample clean latents to the target spatial resolution without re-noising.
+) -> list[np.ndarray]:
+    """Resample decoded stage-1 frames up to the target resolution.
+
+    This runs on decoded RGB frames, *not* on latents: see the module
+    docstring for why the latent-space version produced a blurred veil.
 
     Parameters:
-        clean_latents (Any): Clean latents produced at the stage-one resolution.
-        spatial (FastSpatialPlan): Spatial processing plan defining the target grid and upsampling settings.
+        frames (Iterable[np.ndarray]): Decoded HxWx3 uint8 RGB frames, produced
+            by decoding at the stage-one resolution.
+        spatial (FastSpatialPlan): Plan defining the target size, interpolation
+            kernel, and unsharp strength.
 
     Returns:
-        Any: The original latents when spatial scaling is disabled; otherwise, the upsampled latents.
-
-    Raises:
-        ValueError: If the upsampled latent dimensions do not match the target latent grid.
+        list[np.ndarray]: Frames at the target resolution. When spatial scaling
+            is disabled the frames are returned unchanged, as a list.
     """
     if not spatial.enabled:
-        return clean_latents
-    up = upsample_latents_spatial(
-        clean_latents,
-        scale=spatial.scale,
+        return list(frames)
+    return upsample_frames(
+        frames,
+        width=spatial.target_width,
+        height=spatial.target_height,
         mode=spatial.upsample_mode,
+        sharpen=spatial.sharpen,
     )
-    expected_h = spatial.plan.stage2_latent_height
-    expected_w = spatial.plan.stage2_latent_width
-    got_h, got_w = int(up.shape[-2]), int(up.shape[-1])
-    if got_h != expected_h or got_w != expected_w:
-        raise ValueError(f"fast-spatial upsample produced {got_h}x{got_w} latents, expected "
-                         f"{expected_h}x{expected_w} for target "
-                         f"{spatial.target_height}x{spatial.target_width}.")
-    return up
 
 
 def resolve_spatial_mode(
@@ -190,6 +220,7 @@ def resolve_spatial_mode(
 
 
 __all__ = [
+    "DEFAULT_FAST_SPATIAL_SHARPEN",
     "FastSpatialPlan",
     "apply_fast_spatial_upsample",
     "plan_fast_spatial",

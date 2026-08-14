@@ -16,12 +16,19 @@ import pytest
 
 from fastvideo.mlx_runtime.refine import (
     DEFAULT_REFINE_SIGMA,
+    default_refine_timesteps,
     plan_refine_resolutions,
     prepare_refine_latents,
     refine_sigma_from_schedule,
     upsample_latents_spatial,
 )
 from fastvideo.mlx_runtime.sampling import MLXDMDSchedule, add_noise
+
+
+def _fastwan_schedule() -> MLXDMDSchedule:
+    """FastWan's flow-match schedule: ``sigma == timestep / 1000``."""
+    timesteps = np.arange(1000, 0, -1, dtype=np.float64)
+    return MLXDMDSchedule(sigmas=timesteps / 1000.0, timesteps=timesteps)
 
 
 def test_plan_refine_resolutions_splits_even_target() -> None:
@@ -171,3 +178,41 @@ def test_default_refine_sigma_matches_ltx2_stage2_head() -> None:
     # Documented contract: DEFAULT_REFINE_SIGMA tracks LTX-2's first
     # STAGE_2_DISTILLED_SIGMA_VALUES entry so the fallback is intentional.
     assert math.isclose(DEFAULT_REFINE_SIGMA, 0.909375, rel_tol=0, abs_tol=0)
+
+
+def test_full_noise_handoff_would_discard_stage1() -> None:
+    """Why the stage-2 grid may not open at the stage-1 timestep.
+
+    FastWan's DMD grid starts at ``t=1000``, i.e. ``sigma == 1``. The hand-off
+    is ``(1 - sigma) * upsampled + sigma * noise``, so starting stage 2 there
+    weights the stage-1 result at exactly zero: refine silently degrades to a
+    plain full-resolution run costing two passes.
+    """
+    schedule = _fastwan_schedule()
+    assert refine_sigma_from_schedule(schedule, [1000, 757, 522]) == pytest.approx(1.0)
+
+    clean = np.random.default_rng(0).standard_normal((1, 2, 1, 4, 4)).astype(np.float32)
+    handoff = prepare_refine_latents(clean, scale=2, sigma=1.0, seed=7, upsample_mode="nearest")
+    upsampled = upsample_latents_spatial(clean, scale=2, mode="nearest")
+    # Nothing of stage 1 survives.
+    assert not np.allclose(handoff, upsampled)
+
+
+def test_default_refine_timesteps_drops_the_full_noise_step() -> None:
+    schedule = _fastwan_schedule()
+    steps = default_refine_timesteps(schedule, [1000, 757, 522])
+    assert steps == [757.0, 522.0]
+    # The resulting hand-off keeps a real share of stage 1.
+    sigma = refine_sigma_from_schedule(schedule, steps)
+    assert 0.0 < sigma < 1.0
+
+
+def test_default_refine_timesteps_keeps_an_already_valid_grid() -> None:
+    schedule = _fastwan_schedule()
+    assert default_refine_timesteps(schedule, [757, 522]) == [757.0, 522.0]
+
+
+def test_default_refine_timesteps_rejects_an_all_full_noise_grid() -> None:
+    schedule = _fastwan_schedule()
+    with pytest.raises(ValueError, match="No usable refine timesteps"):
+        default_refine_timesteps(schedule, [1000])

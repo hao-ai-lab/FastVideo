@@ -24,6 +24,9 @@ from pathlib import Path
 
 import numpy as np
 
+from fastvideo.mlx_runtime.fast_spatial import DEFAULT_FAST_SPATIAL_SHARPEN
+from fastvideo.mlx_runtime.frame_upsample import DEFAULT_PIXEL_UPSAMPLE_MODE, PIXEL_UPSAMPLE_MODES
+
 
 def _default_paths() -> tuple[Path, Path, Path]:
     def first_or_empty(pattern: str) -> Path:
@@ -199,14 +202,16 @@ def main() -> None:
     parser.add_argument(
         "--fast-spatial",
         action="store_true",
-        help="Denoise at reduced spatial resolution then upsample latents.",
+        help="Denoise and decode at reduced spatial resolution, then resample "
+        "the decoded frames up to the target size.",
     )
     parser.add_argument("--fast-spatial-scale", type=int, default=2)
     parser.add_argument(
         "--fast-spatial-upsample-mode",
-        choices=("bilinear", "nearest"),
-        default="bilinear",
+        choices=PIXEL_UPSAMPLE_MODES,
+        default=DEFAULT_PIXEL_UPSAMPLE_MODE,
     )
+    parser.add_argument("--fast-spatial-sharpen", type=float, default=DEFAULT_FAST_SPATIAL_SHARPEN)
     parser.add_argument(
         "--refine",
         action="store_true",
@@ -236,13 +241,10 @@ def main() -> None:
 
     if args.fast_factor < 2:
         parser.error("--fast-factor must be at least 2")
-    if args.fast_spatial:
-        raise SystemExit(
-            "--fast-spatial is disabled for Wan2.2-TI2V-5B: bilinearly upsampling "
-            "a completed 48-channel Wan latent is out of distribution and produces "
-            "black or noisy video. Use --refine (optionally with --fast) so the "
-            "upsampled latent receives a valid high-resolution DMD denoise pass."
-        )
+    # --fast-spatial used to be rejected here because it upsampled the completed
+    # 48-channel latent, which is out of distribution for the decoder and gave
+    # black or noisy video. The upsample now runs on decoded frames, so the
+    # latent never leaves the grid it was denoised on and the mode is usable.
     if args.refine and args.fast_spatial:
         print("[wan22] --refine takes precedence over --fast-spatial")
     target_frames = args.num_frames
@@ -257,12 +259,16 @@ def main() -> None:
     import torch
 
     from examples.inference.basic.mlx_wan_prompt_to_video import (
-        _rife_interpolate_video,
+        _postprocess_video,
         encode_prompt,
         make_rotary_embeddings,
     )
-    from fastvideo.mlx_runtime.fast_spatial import apply_fast_spatial_upsample, plan_fast_spatial
-    from fastvideo.mlx_runtime.refine import plan_refine_resolutions, prepare_refine_latents
+    from fastvideo.mlx_runtime.fast_spatial import plan_fast_spatial
+    from fastvideo.mlx_runtime.refine import (
+        default_refine_timesteps,
+        plan_refine_resolutions,
+        prepare_refine_latents,
+    )
     from fastvideo.mlx_runtime.wan22 import (
         mlx_wan22_dit_from_diffusers_safetensors,
         mlx_wan22_dit_from_mlx_checkpoint,
@@ -287,7 +293,8 @@ def main() -> None:
             height=args.height, width=args.width, num_frames=args.num_frames,
             spatial_scale=args.fast_spatial_scale, vae_spatial_compression=16,
             vae_temporal_compression=4, patch_size=patch_size,
-            upsample_mode=args.fast_spatial_upsample_mode, enabled=True,
+            upsample_mode=args.fast_spatial_upsample_mode,
+            sharpen=args.fast_spatial_sharpen, enabled=True,
         )
         active_plan = fast_spatial_plan.plan
         spatial_mode = "fast_spatial"
@@ -388,7 +395,15 @@ def main() -> None:
         schedule, warped_steps = build_wan22_dmd_schedule(
             steps, flow_shift=args.flow_shift, warp_denoising_step=not args.no_warp,
         )
-        sigma = schedule.sigma_for(warped_steps[0])
+        # The grid opens at sigma == 1, where the hand-off
+        # `(1 - sigma) * upsampled + sigma * noise` weights stage 1 at zero and
+        # refine silently becomes a plain full-res run. Drop the leading
+        # full-noise steps so stage 1 actually reaches stage 2.
+        stage2_warped = default_refine_timesteps(schedule, warped_steps)
+        stage2_steps = steps[len(warped_steps) - len(stage2_warped):]
+        sigma = schedule.sigma_for(stage2_warped[0])
+        print(f"[5B refine] stage-2 steps={stage2_steps} sigma={sigma:.4f} "
+              f"(stage-1 weight {1.0 - sigma:.4f})", flush=True)
         latents = prepare_refine_latents(
             latents, scale=args.refine_scale, sigma=sigma,
             add_noise_flag=not args.no_refine_add_noise,
@@ -400,12 +415,12 @@ def main() -> None:
             latent_width=active_plan.stage2_latent_width,
         )
         latents = sample_wan22_dmd(
-            dit, ehs, latents, freqs_stage2, dmd_denoising_steps=steps,
+            dit, ehs, latents, freqs_stage2, dmd_denoising_steps=stage2_steps,
             flow_shift=args.flow_shift, warp_denoising_step=not args.no_warp,
             seed=args.renoise_seed + 2,
         )
-    elif spatial_mode == "fast_spatial":
-        latents = apply_fast_spatial_upsample(latents, fast_spatial_plan)
+    # spatial_mode == "fast_spatial" leaves the latents on the stage-1 grid;
+    # the resample happens after decode, in _postprocess_video.
     denoise_s = time.perf_counter() - t2
     peak = mx.get_peak_memory() / (1024**3)
     print(f"[5B] denoise {len(steps)} steps in {denoise_s:.1f}s, peak {peak:.2f} GiB", flush=True)
@@ -424,12 +439,19 @@ def main() -> None:
         vae_dir=args.vae_root if args.decode_backend == "wan-vae" else None,
         z_dim=in_ch,
     )
+    # One h264 round-trip for both post-decode passes (see _postprocess_video).
     rife_s = 0.0
-    if args.fast:
+    rife_request = ({
+        "factor": args.fast_factor,
+        "target_frames": target_frames,
+        "sharpen": args.fast_sharpen,
+    } if args.fast else None)
+    spatial_request = fast_spatial_plan if spatial_mode == "fast_spatial" else None
+    if rife_request is not None or spatial_request is not None:
         rife_start = time.perf_counter()
-        _rife_interpolate_video(
-            video_path=args.output_path, target_frames=target_frames,
-            factor=args.fast_factor, sharpen=args.fast_sharpen, fps=args.fps,
+        _postprocess_video(
+            video_path=args.output_path, fps=args.fps,
+            rife=rife_request, spatial=spatial_request,
         )
         rife_s = time.perf_counter() - rife_start
     print(f"[5B] decoded via {metrics['backend']} in {metrics['decode_s']:.1f}s → {args.output_path}", flush=True)
