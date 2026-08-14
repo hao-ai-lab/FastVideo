@@ -9,8 +9,8 @@ import torch.nn as nn
 from fastvideo.attention.ring import ring_flash_attn_func
 from fastvideo.attention.selector import backend_name_to_enum, get_attn_backend
 from fastvideo.distributed.communication_op import (sequence_model_parallel_all_gather,
-                                                    sequence_model_parallel_all_to_all_4D)
-from fastvideo.distributed.parallel_state import (get_ring_group, get_ring_size, get_sp_parallel_rank,
+                                                    sequence_model_parallel_all_to_all_4D, ulysses_all_to_all_4D)
+from fastvideo.distributed.parallel_state import (get_ring_group, get_ring_rank, get_ring_size, get_sp_parallel_rank,
                                                   get_sp_world_size)
 from fastvideo.forward_context import ForwardContext, get_forward_context
 from fastvideo.platforms import AttentionBackendEnum
@@ -103,21 +103,29 @@ class DistributedAttention(nn.Module):
         self.dtype = dtype
         self.causal = causal
 
-        # Ring Attention is a process-wide parallelism setting (like SP itself),
-        # so it is read from the distributed runtime rather than threaded
-        # through every model's constructor.
+        # Ring Attention (and its USP hybrid with Ulysses) is a process-wide
+        # parallelism setting (like SP itself), so it is read from the
+        # distributed runtime rather than threaded through every model's
+        # constructor.
         self.ring_size = get_ring_size()
         self.use_ring_attention = self.ring_size > 1
         if self.use_ring_attention:
-            if self.ring_size != get_sp_world_size():
-                raise RuntimeError("Pure Ring Attention requires ring_size == SP world size. "
-                                   f"Got ring_size={self.ring_size}, sp_world_size={get_sp_world_size()}.")
+            sp_world_size = get_sp_world_size()
+            if sp_world_size % self.ring_size != 0:
+                raise RuntimeError("Ring Attention requires ring_size to evenly divide the SP world size. "
+                                   f"Got ring_size={self.ring_size}, sp_world_size={sp_world_size}.")
             if self.backend != AttentionBackendEnum.FLASH_ATTN:
                 raise NotImplementedError("The initial Ring Attention implementation only supports the "
                                           f"FlashAttention backend, got backend={self.backend}.")
             if num_heads != num_kv_heads:
                 raise NotImplementedError("The initial Ring Attention implementation does not support GQA. "
                                           f"num_heads={num_heads}, num_kv_heads={num_kv_heads}.")
+            ulysses_size = sp_world_size // self.ring_size
+            if ulysses_size > 1 and num_heads % ulysses_size != 0:
+                raise NotImplementedError(
+                    "The Ring+Ulysses (USP) hybrid requires num_heads to be divisible by the Ulysses "
+                    f"subgroup size. Got num_heads={num_heads}, ulysses_size={ulysses_size} "
+                    f"(sp_world_size={sp_world_size} // ring_size={self.ring_size}).")
         # Preserve the historical compiler-disabled default. The regional
         # inference loader may enable this one instance after validating the
         # transformer's resolved backend; no process-global default changes.
@@ -286,10 +294,20 @@ class DistributedAttention(nn.Module):
         ``freqs_cis`` (as produced by ``get_rotary_pos_embed``) covers the full,
         unsharded global sequence with shape ``[global_seq_len, head_size]``.
         Ulysses can apply it unsliced because the all-to-all gathers the full
-        sequence before RoPE is applied; Ring Attention never gathers the
-        sequence, so each rank must rotate only its own token range.
+        sequence before RoPE is applied. Ring Attention (pure, or the Ring
+        side of the Ring+Ulysses/USP hybrid) never gathers the sequence, so
+        each rank must rotate only its own contiguous chunk.
+
+        ``local_seq_len`` here is the length of that Ring chunk (equal to the
+        SP shard length in pure Ring, since ring rank == SP rank there; equal
+        to ``sp_shard_len * ulysses_size`` in the hybrid, since each Ring
+        chunk is first assembled from ``ulysses_size`` contiguous SP shards
+        by the pre-Ring Ulysses all-to-all). ``get_ring_rank()`` indexes that
+        chunk directly, so it is used regardless of which case is active
+        (it degenerates to the SP rank in pure Ring, and to 0 when Ring is
+        disabled entirely).
         """
-        rank = get_sp_parallel_rank()
+        rank = get_ring_rank()
         start = rank * local_seq_len
         end = start + local_seq_len
 
@@ -312,6 +330,20 @@ class DistributedAttention(nn.Module):
         replicated_v: torch.Tensor | None,
         freqs_cis: tuple[torch.Tensor, torch.Tensor] | None,
     ) -> tuple[torch.Tensor, None]:
+        """Ring Attention, optionally combined with Ulysses (USP hybrid).
+
+        When ``ulysses_size == 1`` (``ring_size == sp_world_size``) this is
+        pure Ring Attention: every SP rank is a Ring rank, and the Ulysses
+        all-to-all below is a no-op. When ``ulysses_size > 1``, each SP
+        replica is arranged as a ``ring_size x ulysses_size`` mesh: the
+        Ulysses all-to-all first redistributes heads -> sequence *within*
+        this rank's Ulysses subgroup, assembling one full contiguous "Ring
+        chunk" (``ulysses_size`` SP shards' worth of tokens) held on a
+        reduced number of heads. Ring Attention then runs across the
+        ``ring_size`` Ring ranks that each hold a different chunk but the
+        same head subset, and a final Ulysses all-to-all redistributes
+        sequence -> heads back to the original per-rank shard shape.
+        """
         self._validate_ring_inputs(
             q=q,
             original_seq_len=original_seq_len,
@@ -322,8 +354,17 @@ class DistributedAttention(nn.Module):
 
         batch_size, local_seq_len, _, _ = q.shape
 
+        # Ulysses step (no-op when ulysses_size == 1, i.e. pure Ring):
+        # redistribute heads -> sequence within this rank's Ulysses subgroup
+        # so that each Ring rank holds one full, contiguous Ring chunk.
+        qkv = torch.cat([q, k, v], dim=0)
+        qkv = ulysses_all_to_all_4D(qkv, scatter_dim=2, gather_dim=1)
+        q, k, v = qkv.chunk(3, dim=0)
+
+        ring_local_seq_len = q.shape[1]
+
         if freqs_cis is not None:
-            local_cos, local_sin = self._slice_local_rope(freqs_cis, local_seq_len)
+            local_cos, local_sin = self._slice_local_rope(freqs_cis, ring_local_seq_len)
             q = _apply_rotary_emb(q, local_cos, local_sin, is_neox_style=False)
             k = _apply_rotary_emb(k, local_cos, local_sin, is_neox_style=False)
 
@@ -356,6 +397,10 @@ class DistributedAttention(nn.Module):
 
         if output.dtype != orig_dtype:
             output = output.to(orig_dtype)
+
+        # Ulysses step back (no-op when ulysses_size == 1): redistribute
+        # sequence -> heads to restore the original per-rank shard shape.
+        output = ulysses_all_to_all_4D(output, scatter_dim=1, gather_dim=2)
 
         if output.shape[:2] != (batch_size, local_seq_len):
             raise RuntimeError("Ring Attention must preserve the local sequence shard. Expected output "
