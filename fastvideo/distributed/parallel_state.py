@@ -788,11 +788,21 @@ def get_dp_group() -> GroupCoordinator:
     return _DP
 
 
-# Ring Attention subgroup size within the sequence-parallel group. The
-# initial pure-Ring implementation requires this to equal the SP world size
-# (see FastVideoArgs._check_ring_attention_args), so no separate process
-# group is created: the Ring group is simply the SP device group.
+# USP (Unified Sequence Parallelism) splits each sequence-parallel group into
+# a 2D mesh of ``ring_size x ulysses_size == sp_size`` ranks:
+#   - Ring group: ``ring_size`` ranks that run pure Ring Attention with each
+#     other, exchanging K/V shards peer-to-peer around the ring.
+#   - Ulysses group: ``ulysses_size`` ranks that run a head<->sequence
+#     all-to-all with each other before/after the Ring step.
+# ``ring_size == 1`` degenerates to pure Ulysses (the Ulysses group is the
+# full SP group, no Ring group exists). ``ring_size == sp_size`` degenerates
+# to pure Ring (the Ring group is the full SP group, no Ulysses group
+# exists). In both degenerate cases the corresponding group is simply the SP
+# group itself, so no extra process group is created.
 _RING_SIZE: int = 1
+_ULYSSES_SIZE: int = 1
+_RING_GROUP: GroupCoordinator | None = None
+_ULYSSES_GROUP: GroupCoordinator | None = None
 
 
 def get_ring_size() -> int:
@@ -800,33 +810,88 @@ def get_ring_size() -> int:
     return _RING_SIZE
 
 
+def get_ulysses_size() -> int:
+    """Return the configured Ulysses subgroup size (1 == pure Ring / no SP)."""
+    return _ULYSSES_SIZE
+
+
+def _build_usp_subgroup_ranks(
+    sp_group_ranks: list[list[int]],
+    ring_size: int,
+    ulysses_size: int,
+) -> tuple[list[list[int]], list[list[int]]]:
+    """Split each SP replica's ranks into a 2D (ring x ulysses) mesh.
+
+    Ranks within one SP replica are laid out row-major with ``ring_size`` as
+    the outer (slow) dimension and ``ulysses_size`` as the inner (fast)
+    dimension, i.e. ``rank_in_group = ring_idx * ulysses_size + ulysses_idx``.
+    Ulysses groups are therefore contiguous blocks of ranks (favoring the
+    high-bandwidth, low-latency intra-node all-to-all), while Ring groups are
+    strided across those blocks (favoring Ring's point-to-point, latency-
+    tolerant communication pattern, which tolerates spanning nodes).
+
+    This also matches how the sequence itself is sharded across the SP group
+    (contiguous chunks in rank order): each Ulysses group's ranks hold
+    contiguous sequence shards that concatenate into one contiguous
+    "ring chunk", and ranks that share a Ring group hold the same head
+    subset after the Ulysses all-to-all.
+
+    Returns ``(ulysses_group_ranks, ring_group_ranks)``: the flattened list of
+    rank-lists for every Ulysses group and every Ring group, across all SP
+    replicas.
+    """
+    ulysses_group_ranks: list[list[int]] = []
+    ring_group_ranks: list[list[int]] = []
+    for sp_ranks in sp_group_ranks:
+        assert len(sp_ranks) == ring_size * ulysses_size
+        for ring_idx in range(ring_size):
+            ulysses_group_ranks.append(sp_ranks[ring_idx * ulysses_size:(ring_idx + 1) * ulysses_size])
+        for ulysses_idx in range(ulysses_size):
+            ring_group_ranks.append([sp_ranks[ring_idx * ulysses_size + ulysses_idx] for ring_idx in range(ring_size)])
+    return ulysses_group_ranks, ring_group_ranks
+
+
 def get_ring_group() -> ProcessGroup | None:
     """Return the raw ``torch.distributed.ProcessGroup`` used by Ring Attention.
 
     Returns ``None`` when Ring Attention is disabled (``ring_size == 1``).
-    The initial pure-Ring implementation reuses the full sequence-parallel
-    device group; hybrid Ulysses/Ring subgroup construction is not
-    supported yet.
     """
-    if _RING_SIZE <= 1:
+    if _RING_GROUP is None:
         return None
-    return get_sp_group().device_group
+    return _RING_GROUP.device_group
 
 
 def get_ring_world_size() -> int:
     """Return the world size of the Ring Attention process group (1 if disabled)."""
-    group = get_ring_group()
-    if group is None:
+    if _RING_GROUP is None:
         return 1
-    return torch.distributed.get_world_size(group)
+    return _RING_GROUP.world_size
 
 
 def get_ring_rank() -> int:
     """Return this rank's position within the Ring Attention process group."""
-    group = get_ring_group()
-    if group is None:
+    if _RING_GROUP is None:
         return 0
-    return torch.distributed.get_rank(group)
+    return _RING_GROUP.rank_in_group
+
+
+def get_ulysses_group() -> GroupCoordinator | None:
+    """Return the Ulysses subgroup coordinator, or ``None`` if pure Ring (ulysses_size == 1)."""
+    return _ULYSSES_GROUP
+
+
+def get_ulysses_world_size() -> int:
+    """Return the world size of the Ulysses process group (1 if disabled)."""
+    if _ULYSSES_GROUP is None:
+        return 1
+    return _ULYSSES_GROUP.world_size
+
+
+def get_ulysses_rank() -> int:
+    """Return this rank's position within the Ulysses process group."""
+    if _ULYSSES_GROUP is None:
+        return 0
+    return _ULYSSES_GROUP.rank_in_group
 
 
 def initialize_model_parallel(
@@ -879,14 +944,39 @@ def initialize_model_parallel(
         # Create groups of consecutive ranks
         ranks = list(range(i * sequence_model_parallel_size, (i + 1) * sequence_model_parallel_size))
         group_ranks.append(ranks)
+    sp_group_ranks = group_ranks
 
-    _SP = init_model_parallel_group(group_ranks, get_world_group().local_rank, backend, group_name="sp")
+    _SP = init_model_parallel_group(sp_group_ranks, get_world_group().local_rank, backend, group_name="sp")
 
     assert sequence_model_parallel_size % ring_size == 0, (
         f"sequence_model_parallel_size ({sequence_model_parallel_size}) must be divisible by "
         f"ring_size ({ring_size})")
-    global _RING_SIZE
+    ulysses_size = sequence_model_parallel_size // ring_size
+    global _RING_SIZE, _ULYSSES_SIZE
     _RING_SIZE = ring_size
+    _ULYSSES_SIZE = ulysses_size
+
+    # Build the USP (Ring x Ulysses) subgroups within each SP replica. The
+    # pure-Ring and pure-Ulysses cases reuse the SP group itself rather than
+    # creating a redundant, identical process group.
+    global _RING_GROUP, _ULYSSES_GROUP
+    assert _RING_GROUP is None and _ULYSSES_GROUP is None, ("USP subgroups are already initialized")
+    if ring_size == 1:
+        _ULYSSES_GROUP = _SP
+        _RING_GROUP = None
+    elif ulysses_size == 1:
+        _RING_GROUP = _SP
+        _ULYSSES_GROUP = None
+    else:
+        ulysses_group_ranks, ring_group_ranks = _build_usp_subgroup_ranks(sp_group_ranks, ring_size, ulysses_size)
+        _ULYSSES_GROUP = init_model_parallel_group(ulysses_group_ranks,
+                                                   get_world_group().local_rank,
+                                                   backend,
+                                                   group_name="ulysses")
+        _RING_GROUP = init_model_parallel_group(ring_group_ranks,
+                                                get_world_group().local_rank,
+                                                backend,
+                                                group_name="ring")
 
     # Build the data parallel groups.
     num_data_parallel_groups: int = sequence_model_parallel_size
@@ -1032,7 +1122,21 @@ def destroy_model_parallel() -> None:
         _TP.destroy()
     _TP = None
 
-    global _SP
+    # Destroy the USP subgroups before the SP group, since the pure-Ring /
+    # pure-Ulysses degenerate cases alias one of these to the SP group
+    # itself (`GroupCoordinator.destroy()` is idempotent, so aliasing is
+    # safe either way, but distinct groups must be destroyed explicitly or
+    # they leak).
+    global _RING_GROUP, _ULYSSES_GROUP, _RING_SIZE, _ULYSSES_SIZE, _SP
+    if _RING_GROUP is not None and _RING_GROUP is not _SP:
+        _RING_GROUP.destroy()
+    _RING_GROUP = None
+    if _ULYSSES_GROUP is not None and _ULYSSES_GROUP is not _SP:
+        _ULYSSES_GROUP.destroy()
+    _ULYSSES_GROUP = None
+    _RING_SIZE = 1
+    _ULYSSES_SIZE = 1
+
     if _SP:
         _SP.destroy()
     _SP = None

@@ -3,7 +3,7 @@
 
 import torch
 
-from fastvideo.distributed.parallel_state import (get_sp_group, get_sp_world_size, get_tp_group,
+from fastvideo.distributed.parallel_state import (get_sp_group, get_sp_world_size, get_tp_group, get_ulysses_group,
                                                   model_parallel_is_initialized)
 from fastvideo.distributed.utils import (unpad_sequence_tensor, compute_padding_for_sp, pad_sequence_tensor)
 from fastvideo.logger import init_logger
@@ -30,6 +30,21 @@ def sequence_model_parallel_all_to_all_4D(input_: torch.Tensor,
                                           gather_dim: int = 1) -> torch.Tensor:
     """All-to-all communication of 4D tensors (e.g. QKV matrices) across sequence parallel group."""
     return get_sp_group().all_to_all_4D(input_, scatter_dim, gather_dim)
+
+
+def ulysses_all_to_all_4D(input_: torch.Tensor, scatter_dim: int = 2, gather_dim: int = 1) -> torch.Tensor:
+    """All-to-all communication of 4D tensors across the Ulysses subgroup.
+
+    Used by the Ring/Ulysses hybrid (USP) attention path, where the
+    head<->sequence all-to-all must stay within the Ulysses subgroup rather
+    than spanning the whole sequence-parallel group. A no-op (returns
+    ``input_`` unchanged) when Ulysses is disabled, i.e. pure Ring Attention
+    (``ulysses_size == 1``, so there is no Ulysses group).
+    """
+    group = get_ulysses_group()
+    if group is None:
+        return input_
+    return group.all_to_all_4D(input_, scatter_dim, gather_dim)
 
 
 def sequence_model_parallel_all_gather(input_: torch.Tensor, dim: int = -1) -> torch.Tensor:
