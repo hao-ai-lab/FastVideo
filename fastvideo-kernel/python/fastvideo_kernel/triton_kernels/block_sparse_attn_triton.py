@@ -16,14 +16,21 @@ import triton.language as tl
 import math  # small utility needed by the sparse wrapper
 # ──────────────────────────── SPARSE ADDITION END ─────────────────────────────
 
-# We don't run auto-tuning every time to keep the tutorial fast. Keeping
-# the code below and commenting out the equivalent parameters is convenient for
-# re-tuning.
+# BLOCK_M / BLOCK_N are fixed at 64 because they are structural, not tunable:
+# the kernel indexes the top-k list per BLOCK_M q-tile and addresses keys as
+# kv_idx * BLOCK_N, so both must match the granularity q2k_index and
+# variable_block_sizes were built at.
+#
+# num_stages / num_warps ARE free, and the previous {3, 4, 7} was inherited from
+# the upstream tutorial rather than tuned here. It skips 5 and 6; on Blackwell
+# (sm_121) the optimum is num_stages=5, so the search could not reach it. Both
+# block paths independently select 5 once it is available. Autotune still picks
+# per architecture, so other GPUs re-tune rather than inheriting this choice.
 configs = [
     triton.Config({'BLOCK_M': BM, 'BLOCK_N': BN}, num_stages=s, num_warps=w) \
     for BM in [64]\
     for BN in [64]\
-    for s in [3, 4, 7]\
+    for s in [2, 3, 4, 5, 6, 7]\
     for w in [4, 8]\
 ]
 
