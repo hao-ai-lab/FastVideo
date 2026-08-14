@@ -99,9 +99,12 @@ class MiniMaxH3Model(ModelBase):
         if float(training_config.data.training_cfg_rate) != 0.0:
             raise ValueError("MiniMaxH3Model requires training.data.training_cfg_rate=0.0")
         # Joint supervision requires paired video and stereo-audio latents from
-        # every parquet row.
-        if str(training_config.data.preprocessed_data_type) != "t2va":
-            raise ValueError("MiniMaxH3Model requires training.data.preprocessed_data_type='t2va'")
+        # every parquet row ('t2va'). 'text_only' rows carry prompt conditioning
+        # alone and are valid only for data-free methods that synthesize latent
+        # shapes from config (DMD2 enforces rollout_mode='simulate' for them).
+        if str(training_config.data.preprocessed_data_type) not in ("t2va", "text_only"):
+            raise ValueError("MiniMaxH3Model requires training.data.preprocessed_data_type "
+                             "'t2va' or 'text_only'")
 
         # FastVideo's Fully Sharded Data Parallel loading path requires one BF16
         # parameter dtype, including modules that H3 inference keeps in FP32.
@@ -151,15 +154,17 @@ class MiniMaxH3Model(ModelBase):
 
     def init_preprocessors(self, training_config: TrainingConfig) -> None:
         """Load precomputed text embeddings and paired video-audio latents."""
-        from fastvideo.dataset.dataloader.schema import pyarrow_schema_t2va
+        from fastvideo.dataset.dataloader.schema import (pyarrow_schema_t2va, pyarrow_schema_text_only)
         from fastvideo.train.utils.dataloader import build_parquet_t2v_train_dataloader
 
         self.sp_group = get_sp_group()
         text_config = training_config.pipeline_config.text_encoder_configs[0]  # type: ignore[union-attr]
+        parquet_schema = (pyarrow_schema_text_only
+                          if str(training_config.data.preprocessed_data_type) == "text_only" else pyarrow_schema_t2va)
         self.dataloader = build_parquet_t2v_train_dataloader(
             training_config.data,
             text_len=int(text_config.arch_config.text_len),
-            parquet_schema=pyarrow_schema_t2va,
+            parquet_schema=parquet_schema,
         )
         self.start_step = 0
 
