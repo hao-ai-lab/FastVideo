@@ -21,7 +21,8 @@
 # depending on shard width — fits with wide margin.
 #
 # Validation: all 64 held-out Wan-derived H3 prompts every 100 steps (+ at
-# start). Checkpoints: every 100 steps starting at step 500, keep last 8.
+# start). Checkpoints: every 100 steps starting at step 500, keep last 4
+# (~528 GiB each at fp32 masters — lustre is tight).
 #
 # Launch (after warmup ladder or onto trays held by a previous job):
 #   SP_SIZE=1 HSDP_REPLICATE=1 HSDP_SHARD=<4*nodes> \
@@ -109,7 +110,7 @@ training:
     resume_from_checkpoint: latest
     training_state_checkpointing_steps: 100
     checkpointing_start_step: 500
-    checkpoints_total_limit: 8
+    checkpoints_total_limit: 4
 
   tracker:
     project_name: h3-dmd2-vsa
