@@ -42,7 +42,8 @@ from fastvideo.training.activation_checkpoint import (apply_activation_checkpoin
 from fastvideo.training.trackers import (DummyTracker, TrackerType, initialize_trackers, Trackers)
 from fastvideo.training.training_utils import (clip_grad_norm_while_handling_failing_dtensor_cases,
                                                compute_density_for_timestep_sampling, count_trainable, get_scheduler,
-                                               get_sigmas, load_checkpoint, normalize_dit_input, save_checkpoint)
+                                               get_sigmas, load_checkpoint, normalize_dit_input, save_checkpoint,
+                                               verify_master_weight_precision)
 from fastvideo.utils import (is_vmoba_available, is_vsa_available, set_random_seed, shallow_asdict)
 
 try:
@@ -519,6 +520,10 @@ class TrainingPipeline(LoRAPipeline, ABC):
         logger.info('rank: %s: start training', self.global_rank, local_main_process_only=False)
         if not self.post_init_called:
             self.post_init()
+        verify_master_weight_precision({
+            "transformer": self.transformer,
+            "transformer_2": getattr(self, "transformer_2", None),
+        })
         num_trainable_params = count_trainable(self.transformer)
         logger.info("Starting training with %s B trainable parameters", round(num_trainable_params / 1e9, 3))
 

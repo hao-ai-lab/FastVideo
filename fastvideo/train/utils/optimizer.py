@@ -60,14 +60,30 @@ class AdamWBeta1Zero(torch.optim.Optimizer):
                 state = self.state[p]
                 if not state:
                     state["step"] = 0
-                    state["exp_avg_sq"] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                    # Low-precision params must not starve the second moment:
+                    # bf16 v loses g^2 increments below ~0.4% of its running
+                    # magnitude. Keep v in fp32 whenever p is not fp32 (the
+                    # fp32-master path is unchanged and stays bitwise-equal
+                    # to torch.optim.AdamW).
+                    if p.dtype == torch.float32:
+                        state["exp_avg_sq"] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                    else:
+                        state["exp_avg_sq"] = torch.zeros_like(p, dtype=torch.float32)
                 state["step"] += 1
                 exp_avg_sq = state["exp_avg_sq"]
                 p.mul_(1 - lr * weight_decay)
-                exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
-                bias_correction2_sqrt = (1 - beta2**state["step"])**0.5
-                denom = (exp_avg_sq.sqrt() / bias_correction2_sqrt).add_(eps)
-                p.addcdiv_(grad, denom, value=-lr)
+                if p.dtype == torch.float32:
+                    exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
+                    bias_correction2_sqrt = (1 - beta2**state["step"])**0.5
+                    denom = (exp_avg_sq.sqrt() / bias_correction2_sqrt).add_(eps)
+                    p.addcdiv_(grad, denom, value=-lr)
+                else:
+                    grad_f = grad.float()
+                    exp_avg_sq.mul_(beta2).addcmul_(grad_f, grad_f, value=1 - beta2)
+                    bias_correction2_sqrt = (1 - beta2**state["step"])**0.5
+                    denom = (exp_avg_sq.sqrt() / bias_correction2_sqrt).add_(eps)
+                    update = grad_f.div_(denom).mul_(-lr)
+                    p.add_(update.to(p.dtype))
         return loss
 
 

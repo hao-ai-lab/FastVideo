@@ -33,7 +33,8 @@ from fastvideo.training.activation_checkpoint import (apply_activation_checkpoin
 from fastvideo.training.training_pipeline import TrainingPipeline
 from fastvideo.training.training_utils import (EMA_FSDP, clip_grad_norm_while_handling_failing_dtensor_cases,
                                                get_scheduler, load_distillation_checkpoint,
-                                               save_distillation_checkpoint, shift_timestep)
+                                               save_distillation_checkpoint, shift_timestep,
+                                               verify_master_weight_precision)
 from fastvideo.utils import (is_vsa_available, maybe_download_model, set_random_seed, verify_model_config_and_directory)
 
 try:
@@ -1282,6 +1283,12 @@ class DistillationPipeline(TrainingPipeline):
         """Main training loop with distillation-specific logging."""
         assert self.training_args.seed is not None, "seed must be set"
         seed = self.training_args.seed
+        verify_master_weight_precision({
+            "transformer": self.transformer,
+            "transformer_2": getattr(self, "transformer_2", None),
+            "fake_score_transformer": getattr(self, "fake_score_transformer", None),
+            "fake_score_transformer_2": getattr(self, "fake_score_transformer_2", None),
+        })
 
         # Set the same seed within each SP group to ensure reproducibility
         if self.sp_world_size > 1:

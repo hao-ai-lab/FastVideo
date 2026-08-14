@@ -58,6 +58,11 @@ class CheckpointConfig:
     resume_from_checkpoint: str = ""
     training_state_checkpointing_steps: int = 0
     checkpoints_total_limit: int = 0
+    checkpointing_start_step: int = 0
+    # DCP checkpoints restore optimizer param-group LRs and scheduler
+    # base_lrs, silently overriding the YAML on resume. Set true to re-apply
+    # the configured learning rates after loading (LR-change experiments).
+    reset_lr_on_resume: bool = False
 
 
 @dataclass(slots=True)
@@ -77,6 +82,13 @@ class ModelTrainingConfig:
     precondition_outputs: bool = False
     moba_config: dict = field(default_factory=dict)
     enable_gradient_checkpointing_type: str | None = None
+    # Optimizer steps applied to bf16/fp16 parameter storage round away
+    # updates smaller than ~half an ulp of each weight's magnitude —
+    # O(1)-magnitude parameters (norm gains) freeze entirely at typical
+    # distillation LRs. The trainer refuses to start unless master weights
+    # are fp32 (training.dit_precision: fp32) or this explicit opt-in
+    # acknowledges the effect (memory-constrained topologies).
+    allow_low_precision_master_weights: bool = False
 
 
 @dataclass(slots=True)

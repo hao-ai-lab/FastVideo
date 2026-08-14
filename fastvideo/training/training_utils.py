@@ -23,6 +23,36 @@ logger = init_logger(__name__)
 _HAS_ERRORED_CLIP_GRAD_NORM_WHILE_HANDLING_FAILING_DTENSOR_CASES = False
 
 
+def verify_master_weight_precision(modules: dict[str, torch.nn.Module | None]) -> None:
+    """Refuse to train on low-precision master weights unless opted in.
+
+    Optimizer steps applied in-place to bf16/fp16 parameters round away
+    updates below ~half an ulp of each weight's magnitude; O(1)-magnitude
+    parameters (norm gains) freeze entirely at typical fine-tune/distillation
+    learning rates, and ``zeros_like``-allocated optimizer state inherits the
+    same starved dtype. ``--dit_precision fp32`` gives fp32 sharded masters
+    while compute stays bf16 via FSDP's ``param_dtype``.
+    """
+    if os.environ.get("FASTVIDEO_ALLOW_LOW_PRECISION_MASTER_WEIGHTS", "0") == "1":
+        return
+    offenders: list[str] = []
+    for module_name, module in modules.items():
+        if module is None:
+            continue
+        for name, param in module.named_parameters():
+            if param.requires_grad and param.dtype != torch.float32:
+                offenders.append(f"{module_name}:{name} ({param.dtype})")
+                break
+    if offenders:
+        raise RuntimeError("Trainable master weights are not fp32: "
+                           f"{offenders}. bf16/fp16 parameter storage silently rounds away "
+                           "optimizer updates below ~half an ulp per weight (norm-scale "
+                           "parameters freeze completely). Pass --dit_precision fp32 "
+                           "(fp32 sharded masters; compute stays bf16 via FSDP param_dtype), "
+                           "or acknowledge the effect explicitly with "
+                           "FASTVIDEO_ALLOW_LOW_PRECISION_MASTER_WEIGHTS=1.")
+
+
 def gather_state_dict_on_cpu_rank0(
     model,
     device: torch.device | None = None,

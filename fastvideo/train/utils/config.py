@@ -422,6 +422,8 @@ def _build_training_config(
             resume_from_checkpoint=str(ck.get("resume_from_checkpoint", "") or ""),
             training_state_checkpointing_steps=int(ck.get("training_state_checkpointing_steps", 0) or 0),
             checkpoints_total_limit=int(ck.get("checkpoints_total_limit", 0) or 0),
+            checkpointing_start_step=int(ck.get("checkpointing_start_step", 0) or 0),
+            reset_lr_on_resume=bool(ck.get("reset_lr_on_resume", False)),
         ),
         tracker=TrackerConfig(
             trackers=list(tr.get("trackers", []) or []),
@@ -439,6 +441,7 @@ def _build_training_config(
             precondition_outputs=bool(m.get("precondition_outputs", False)),
             moba_config=dict(m.get("moba_config", {}) or {}),
             enable_gradient_checkpointing_type=(m.get("enable_gradient_checkpointing_type")),
+            allow_low_precision_master_weights=bool(m.get("allow_low_precision_master_weights", False)),
         ),
         pipeline_config=pipeline_config,
         model_path=model_path,

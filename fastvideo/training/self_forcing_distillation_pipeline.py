@@ -21,7 +21,7 @@ from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import SelfF
 from fastvideo.models.utils import pred_noise_to_pred_video
 from fastvideo.pipelines import TrainingBatch
 from fastvideo.training.distillation_pipeline import DistillationPipeline
-from fastvideo.training.training_utils import (EMA_FSDP, save_distillation_checkpoint)
+from fastvideo.training.training_utils import (EMA_FSDP, save_distillation_checkpoint, verify_master_weight_precision)
 from fastvideo.utils import is_vsa_available, set_random_seed
 from fastvideo.profiler import profile_region
 
@@ -797,6 +797,12 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         """Main training loop with self-forcing specific logging."""
         assert self.training_args.seed is not None, "seed must be set"
         seed = self.training_args.seed
+        verify_master_weight_precision({
+            "transformer": self.transformer,
+            "transformer_2": getattr(self, "transformer_2", None),
+            "fake_score_transformer": getattr(self, "fake_score_transformer", None),
+            "fake_score_transformer_2": getattr(self, "fake_score_transformer_2", None),
+        })
 
         # Set the same seed within each SP group to ensure reproducibility
         if self.sp_world_size > 1:
