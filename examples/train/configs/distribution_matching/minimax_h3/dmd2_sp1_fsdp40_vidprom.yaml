@@ -104,6 +104,9 @@ training:
 
   checkpoint:
     output_dir: /mnt/lustre/vlm-wlsaidhi/fastvideo/outputs/minimax_h3_dmd2_sp1_vidprom_v5_fp32_sched
+    # Requeue-safe: fresh output_dir -> first boot starts from scratch; after
+    # a pod flap the requeued job resumes from the newest checkpoint here.
+    resume_from_checkpoint: latest
     training_state_checkpointing_steps: 100
     checkpointing_start_step: 500
     checkpoints_total_limit: 8
