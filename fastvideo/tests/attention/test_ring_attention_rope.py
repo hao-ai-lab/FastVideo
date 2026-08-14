@@ -1,11 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
-"""RoPE-slicing correctness for the pure Ring Attention path.
+"""RoPE-slicing correctness for the Ring Attention / USP (Ring+Ulysses) path.
 
 Ulysses can apply RoPE using the full, unsharded ``freqs_cis`` table because
 the SP all-to-all gathers the complete sequence before RoPE runs. Ring
-Attention never gathers the sequence — each rank only ever holds its own
-contiguous shard — so ``DistributedAttention._slice_local_rope`` slices the
-global RoPE table down to the rank's token range *before* rotating.
+Attention never gathers the sequence — each Ring rank only ever holds its own
+contiguous chunk (in the USP hybrid, that chunk is first assembled from
+several SP shards by the pre-Ring Ulysses all-to-all) — so
+``DistributedAttention._slice_local_rope`` slices the global RoPE table down
+to the Ring rank's token range *before* rotating.
 """
 
 from __future__ import annotations
@@ -59,10 +61,11 @@ def test_local_rope_slice_matches_full_rope_math() -> None:
         torch.testing.assert_close(rotated_k_local, full_k[:, start:end], rtol=1e-5, atol=1e-6)
 
 
-def test_slice_local_rope_delegates_to_sp_rank(distributed_setup) -> None:
-    """With SP world size 1 (the ``distributed_setup`` fixture), rank is
-    always 0, so ``_slice_local_rope`` must return exactly the first
-    ``local_seq_len`` rows of the table."""
+def test_slice_local_rope_delegates_to_ring_rank(distributed_setup) -> None:
+    """With SP world size 1 (the ``distributed_setup`` fixture), Ring
+    Attention is disabled and the Ring rank is always 0, so
+    ``_slice_local_rope`` must return exactly the first ``local_seq_len``
+    rows of the table."""
     global_seq_len, head_size, local_seq_len = 16, 8, 16
     cos, sin = _random_rope_tables(global_seq_len, head_size)
 
