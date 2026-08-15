@@ -410,6 +410,16 @@ class TextEncoderLoader(ComponentLoader):
                 # Disable FSDP for MPS as it's not compatible
                 if current_platform.is_mps():
                     logger.info("Disabling FSDP sharding for MPS platform as it's not compatible")
+                elif current_platform.has_unified_memory():
+                    # Host and device are the same RAM here, so offloading
+                    # cannot free anything. Sharding would still walk the model
+                    # module by module, allocating each CPU copy before the
+                    # device copy goes away, which costs peak memory rather than
+                    # saving it. Leave the weights where they already are.
+                    logger.info(
+                        "Skipping CPU offload for the text encoder: %s has unified memory, so host and "
+                        "device allocations share one pool and offloading would hold two copies instead "
+                        "of moving one.", current_platform.get_device_name())
                 elif current_platform.is_npu():
                     mesh = init_device_mesh(
                         "npu",

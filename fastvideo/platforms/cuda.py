@@ -80,6 +80,18 @@ class CudaPlatformBase(Platform):
         raise NotImplementedError
 
     @classmethod
+    def has_unified_memory(cls, device_id: int = 0) -> bool:
+        # cudaDeviceProp::integrated, surfaced by torch as is_integrated. True
+        # on the Grace-Blackwell desktop parts (GB10 / DGX Spark) and on Jetson,
+        # where the GPU has no memory of its own and reads the host's. Guarded
+        # because the attribute is not present on every torch build.
+        try:
+            props = torch.cuda.get_device_properties(device_id)
+        except Exception:
+            return False
+        return bool(getattr(props, "is_integrated", False))
+
+    @classmethod
     def is_async_output_supported(cls, enforce_eager: bool | None) -> bool:
         if enforce_eager:
             logger.warning("To see benefits of async output processing, enable CUDA "

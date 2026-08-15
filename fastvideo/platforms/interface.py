@@ -119,6 +119,17 @@ class Platform:
         return self._enum == PlatformEnum.NPU
 
     @classmethod
+    def has_unified_memory(cls, device_id: int = 0) -> bool:
+        """Whether host and device allocations come out of one physical pool.
+
+        Where this is true, moving a tensor between host and device frees
+        nothing: both ends are the same RAM. Anything that offloads to save
+        memory needs to know, because on such a device the copy is at best a
+        no-op and at worst holds two copies at once.
+        """
+        return False
+
+    @classmethod
     def get_attn_backend_cls(cls, selected_backend: AttentionBackendEnum | None, head_size: int,
                              dtype: torch.dtype) -> str:
         """Get the attention backend class of a device."""
