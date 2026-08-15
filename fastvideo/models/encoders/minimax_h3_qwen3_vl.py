@@ -227,10 +227,21 @@ class MiniMaxH3Qwen3VLLanguageModel(nn.Module):
             org_num_embeddings=config.vocab_size,
             quant_config=quant_config,
         )
+        # Build only as far as the consumer reads. The hidden-state tuple records
+        # each layer's input, so stopping after N layers still yields entry N,
+        # the output of layer N-1, unchanged. Everything above it exists only to
+        # feed `last_hidden_state`, which nothing consumes.
+        override = config.num_hidden_layers_override
+        self.num_layers = (config.num_hidden_layers
+                           if override is None else min(config.num_hidden_layers, override))
         self.layers = nn.ModuleList(
             MiniMaxH3Qwen3VLTextDecoderLayer(config, prefix=f"{config.prefix}.language_model.layers.{index}")
-            for index in range(config.num_hidden_layers))
-        self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+            for index in range(self.num_layers))
+        # The final norm sits above the tapped layer, so a truncated stack drops
+        # it. Keeping it would overwrite the tapped entry with a normalised
+        # tensor and change conditioning without raising anything.
+        self.norm = (RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+                     if self.num_layers == config.num_hidden_layers else None)
         self.rotary_emb = MiniMaxH3Qwen3VLTextRotaryEmbedding(config)
 
     def forward(
@@ -258,7 +269,10 @@ class MiniMaxH3Qwen3VLLanguageModel(nn.Module):
                 visual = deepstack_visual_embeds[layer_index].to(hidden_states.device, hidden_states.dtype)
                 updated = hidden_states[mask].clone() + visual
                 hidden_states[mask] = updated
-        hidden_states = self.norm(hidden_states)
+        if self.norm is not None:
+            hidden_states = self.norm(hidden_states)
+        # Truncated or not, the last entry is appended here, so the tapped index
+        # lands in the same place either way.
         if all_hidden_states is not None:
             all_hidden_states += (hidden_states, )
         return BaseEncoderOutput(last_hidden_state=hidden_states, hidden_states=all_hidden_states)
@@ -694,6 +708,26 @@ class MiniMaxH3Qwen3VLConditioner(TextEncoder):
         outputs.attention_mask = attention_mask
         return outputs
 
+    def _is_above_the_tap(self, name: str) -> bool:
+        """Whether this checkpoint key belongs to a layer we did not build.
+
+        A truncated language stack still ships every layer in the checkpoint, and
+        the unexpected-key check below is strict on purpose, so the surplus keys
+        have to be dropped here rather than by relaxing it.
+        """
+        language_model = self.language_model
+        # The final norm is dropped exactly when the stack is truncated, so its
+        # absence is the signal.
+        if language_model.norm is not None:
+            return False
+        if name == "language_model.norm.weight":
+            return True
+        prefix = "language_model.layers."
+        if not name.startswith(prefix):
+            return False
+        index = name[len(prefix):].split(".", 1)[0]
+        return index.isdigit() and int(index) >= language_model.num_layers
+
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         parameters = dict(self.named_parameters())
         loaded: set[str] = set()
@@ -702,6 +736,8 @@ class MiniMaxH3Qwen3VLConditioner(TextEncoder):
             if source_name == "lm_head.weight":
                 continue
             name = source_name[6:] if source_name.startswith("model.") else source_name
+            if self._is_above_the_tap(name):
+                continue
             if name not in parameters:
                 raise ValueError(f"Unexpected MiniMax-H3 Qwen3-VL checkpoint key: {source_name}")
             parameter = parameters[name]

@@ -62,6 +62,15 @@ class MiniMaxH3Qwen3VLArchConfig(TextEncoderArchConfig):
     hidden_size: int = 5120
     intermediate_size: int = 25600
     num_hidden_layers: int = 64
+    # H3 conditions on one intermediate hidden state and reads nothing above it,
+    # so the remaining layers are built, weight-loaded and then discarded: 14
+    # layers, 13.7 GB in bf16. Building exactly this many leaves that hidden
+    # state bit-identical, because the tuple records each layer's *input*, so
+    # entry N is the output of layer N-1. Set to None to keep the full stack.
+    # Must equal MINIMAX_H3_TEXT_ENCODER_LAYER in
+    # fastvideo/pipelines/basic/minimax_h3/packing.py; a test pins them together
+    # rather than importing across the models -> pipelines boundary.
+    num_hidden_layers_override: int | None = 50
     num_attention_heads: int = 64
     num_key_value_heads: int = 8
     head_dim: int = 128
