@@ -37,6 +37,35 @@ def test_cuda_device_uuid_receipt_identifies_profiled_worker(monkeypatch) -> Non
     )
 
 
+def test_init_device_applies_offload_policy_after_binding_worker_device(monkeypatch) -> None:
+    """The runtime probe must see this worker's device, never driver device 0."""
+    events = []
+    args = FastVideoArgs(model_path="test", num_gpus=1)
+    args.disable_offload_on_unified_memory = Mock(side_effect=lambda device_id: events.append(("policy", device_id)))
+    worker = Worker(args, local_rank=3, rank=3, distributed_init_method="env://")
+
+    monkeypatch.setattr("fastvideo.worker.gpu_worker.get_local_torch_device", lambda: torch.device("cuda:3"))
+    monkeypatch.setattr("fastvideo.platforms.current_platform.is_cuda_alike", lambda: True)
+    monkeypatch.setattr("fastvideo.platforms.current_platform.is_cuda", lambda: False)
+    monkeypatch.setattr(torch.cuda, "set_device", lambda device: events.append(("set_device", device.index)))
+    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device: (123, 456))
+    monkeypatch.setattr(
+        "fastvideo.worker.gpu_worker.maybe_init_distributed_environment_and_model_parallel",
+        lambda *args: events.append(("distributed", None)),
+    )
+    monkeypatch.setattr("fastvideo.worker.gpu_worker.build_pipeline", lambda args: events.append(("pipeline", None)))
+
+    worker.init_device()
+
+    assert events == [
+        ("set_device", 3),
+        ("policy", 3),
+        ("distributed", None),
+        ("pipeline", None),
+    ]
+    assert worker.init_gpu_memory == 123
+
+
 def _worker_returning(output_batch: ForwardBatch) -> Worker:
     worker = Worker.__new__(Worker)
     worker.fastvideo_args = SimpleNamespace()

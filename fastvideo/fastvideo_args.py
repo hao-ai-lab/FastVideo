@@ -25,6 +25,10 @@ else:
 
 logger = init_logger(__name__)
 
+# Offload flags that trade device memory for host memory. Keeping the policy
+# centralized lets components share the same worker-local device decision.
+UNIFIED_MEMORY_OFFLOAD_FLAGS = ("text_encoder_cpu_offload", )
+
 
 class ExecutionMode(str, Enum):
     """
@@ -913,6 +917,39 @@ class FastVideoArgs:
             if not self.pipeline_config.vae_config.load_encoder:
                 self.pipeline_config.vae_config.load_encoder = True
             self.preprocess_config.check_preprocess_config()
+
+    def disable_offload_on_unified_memory(self, device_id: int = 0, *, offload_flag: str | None = None) -> bool:
+        """Disable host offload after a worker has selected its device.
+
+        CUDA's unified-memory probe reads runtime device properties and may
+        initialize a CUDA context. Callers must therefore use this only inside
+        a device-owning process, after selecting and binding ``device_id``.
+        Returning the classification lets direct component-loader callers
+        apply the same policy to explicit per-call overrides. When
+        ``offload_flag`` is given, the return value says whether this policy
+        covers that component role.
+        """
+        from fastvideo.platforms import current_platform
+
+        if not current_platform.has_unified_memory(device_id):
+            return False
+
+        try:
+            device_name = current_platform.get_device_name(device_id)
+        except Exception:
+            # Device naming is diagnostic only. NVML can be unavailable on an
+            # integrated GPU (for example Jetson), and its physical-ordinal
+            # lookup cannot interpret CUDA_VISIBLE_DEVICES UUID/MIG selectors.
+            # Neither case should undo an authoritative driver classification.
+            device_name = current_platform.device_name
+
+        for flag in UNIFIED_MEMORY_OFFLOAD_FLAGS:
+            if getattr(self, flag):
+                logger.info(
+                    "Disabling %s: %s has unified memory, so moving weights to the host duplicates "
+                    "them rather than freeing device memory.", flag, device_name)
+                setattr(self, flag, False)
+        return offload_flag is None or offload_flag in UNIFIED_MEMORY_OFFLOAD_FLAGS
 
 
 _current_fastvideo_args = None

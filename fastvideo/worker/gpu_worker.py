@@ -76,6 +76,13 @@ class Worker:
             # For MPS, we can't get memory info the same way
             self.init_gpu_memory = 0
 
+        # CUDA's unified-memory classification reads runtime device
+        # properties, so make this decision only after this worker has bound
+        # its own device. The worker-local args object is what every loader and
+        # pipeline stage below will consume.
+        device_id = self.device.index if self.device.index is not None else 0
+        self.fastvideo_args.disable_offload_on_unified_memory(device_id)
+
         # Initialize the distributed environment.
         maybe_init_distributed_environment_and_model_parallel(self.fastvideo_args.tp_size, self.fastvideo_args.sp_size,
                                                               self.distributed_init_method)
