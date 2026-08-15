@@ -25,6 +25,17 @@ else:
 
 logger = init_logger(__name__)
 
+# Offload flags that trade device memory for host memory. All of them are a loss
+# on a device where the two are the same physical pool, so they are decided
+# together in `check_fastvideo_args` rather than one at a time at each call site.
+UNIFIED_MEMORY_OFFLOAD_FLAGS = (
+    "dit_layerwise_offload",
+    "dit_cpu_offload",
+    "text_encoder_cpu_offload",
+    "image_encoder_cpu_offload",
+    "vae_cpu_offload",
+)
+
 
 class ExecutionMode(str, Enum):
     """
@@ -775,6 +786,25 @@ class FastVideoArgs:
         if current_platform.is_mps():
             self.use_fsdp_inference = False
             self.dit_layerwise_offload = False
+
+        # Every offload path here moves weights to host memory so the device can
+        # drop them. That trade only pays when the two are separate pools. On a
+        # unified-memory device they are one, so the move frees nothing and the
+        # copy is a pure loss, and the peak is the sum rather than the max.
+        #
+        # Deciding it once here rather than at each call site matters because a
+        # single flag acts in more than one place. text_encoder_cpu_offload
+        # picks the load-time target device, gates the FSDP offload path, and
+        # gates the shuttle around the conditioning forward; gating only the
+        # loader leaves the model on the host and defers the copy to inference.
+        elif current_platform.has_unified_memory():
+            device_name = current_platform.get_device_name()
+            for flag in UNIFIED_MEMORY_OFFLOAD_FLAGS:
+                if getattr(self, flag):
+                    logger.info(
+                        "Disabling %s: %s has unified memory, so moving weights to the host duplicates "
+                        "them rather than freeing device memory.", flag, device_name)
+                    setattr(self, flag, False)
 
         if self.dit_layerwise_offload:
             if self.use_fsdp_inference:
