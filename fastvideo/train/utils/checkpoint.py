@@ -62,7 +62,10 @@ def _find_latest_checkpoint(output_dir: Path) -> Path | None:
             continue
         if not _CHECKPOINT_DIR_RE.match(child.name):
             continue
-        if not (child / "dcp").is_dir():
+        # dcp.save writes .metadata last — its presence is the completion
+        # marker. A checkpoint dir from a crashed save (e.g. ENOSPC mid-write)
+        # has dcp/ but no .metadata; resuming from it would fail at boot.
+        if not (child / "dcp" / ".metadata").is_file():
             continue
         try:
             step = _parse_step_from_dir(child)
