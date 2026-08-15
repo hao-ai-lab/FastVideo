@@ -96,7 +96,7 @@ failure it prevents, and where it is now enforced in code (if it is).
     `sbatch --requeue`. DCP restores optimizer LRs over the YAML — use
     `reset_lr_on_resume: true` for LR-change experiments.
 15. **Budget checkpoint disk before launch:** save size × retention vs
-    filesystem free. fp32 masters doubled saves to ~528 GB; lustre at 98%
+    filesystem free. fp32 masters tripled saves to 741 GB (measured; student+critic params + fp32 second moments); lustre at 98%
     would have killed the run at its 4th save. `checkpoints_total_limit`
     is part of the launch math, not a detail.
 16. **Verify W&B auth (`wandb.Api().viewer` with the job's $HOME) before
