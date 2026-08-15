@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Regression tests for text-encoder placement on unified memory."""
+"""Regression tests for encoder placement on unified memory."""
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -84,7 +84,7 @@ def test_discrete_memory_preserves_explicit_cpu_target(monkeypatch, tmp_path) ->
     assert _PassthroughEncoder.loaded_device == torch.device("cpu")
 
 
-def test_text_policy_does_not_change_inherited_image_encoder_path(monkeypatch, tmp_path) -> None:
+def test_image_encoder_explicit_offload_resets_cpu_target(monkeypatch, tmp_path) -> None:
     probe = Mock(return_value=True)
     monkeypatch.setattr("fastvideo.models.loader.component_loader.get_local_torch_device",
                         lambda: torch.device("cuda:4"))
@@ -109,7 +109,7 @@ def test_text_policy_does_not_change_inherited_image_encoder_path(monkeypatch, t
         offload_flag="image_encoder_cpu_offload",
     )
 
-    assert _PassthroughEncoder.loaded_device == torch.device("cpu")
+    assert _PassthroughEncoder.loaded_device == torch.device("cuda:4")
     assert args.text_encoder_cpu_offload is False
-    assert args.image_encoder_cpu_offload is True
+    assert args.image_encoder_cpu_offload is False
     probe.assert_called_once_with(4)

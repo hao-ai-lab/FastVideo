@@ -25,9 +25,16 @@ else:
 
 logger = init_logger(__name__)
 
-# Offload flags that trade device memory for host memory. Keeping the policy
-# centralized lets components share the same worker-local device decision.
-UNIFIED_MEMORY_OFFLOAD_FLAGS = ("text_encoder_cpu_offload", )
+# Offload flags that trade device memory for host memory. All of them are a loss
+# on a device where the two are the same physical pool. Keeping the policy
+# centralized lets every loader and stage share one worker-local decision.
+UNIFIED_MEMORY_OFFLOAD_FLAGS = (
+    "dit_layerwise_offload",
+    "dit_cpu_offload",
+    "text_encoder_cpu_offload",
+    "image_encoder_cpu_offload",
+    "vae_cpu_offload",
+)
 
 
 class ExecutionMode(str, Enum):
