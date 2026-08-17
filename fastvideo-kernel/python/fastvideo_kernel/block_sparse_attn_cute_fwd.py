@@ -142,8 +142,16 @@ def _build_sparse_tensors(
     q_len: int,
     q_block_size: int,
     kv_block_size: int,
-) -> Tuple[object, object]:
-    """Build the Q-owned forward and KV-owned backward sparse metadata."""
+    need_backward: bool,
+) -> Tuple[object, object | None]:
+    """Build the Q-owned forward and KV-owned backward sparse metadata.
+
+    ``need_backward`` is False on inference-only calls: the backward metadata
+    is a pair of dense ``[B, H, kv_blocks, q_blocks]`` int32 index tensors that
+    FA4 keeps alive on its autograd ctx until backward runs, so building it
+    when nothing requires grad is pure overhead (~80 MiB per call at Wan-14B
+    720p shape).
+    """
     BlockSparseTensorsTorch, _ = _load_fa4_cute()
     q_sparse_candidate = _choose_q_sparse_block_size(q_len)
     q_sparse_block_size = max(
@@ -174,6 +182,9 @@ def _build_sparse_tensors(
         sparse_map & kv_partial,
     )
 
+    if not need_backward:
+        return forward_sparse_tensors, None
+
     # FA4 backward is KV-owned: for each physical KV tile, list the sparse
     # query tiles that selected it. Full and partial KV tiles stay separate
     # so the token-level validity mask only runs for padded tiles.
@@ -195,12 +206,14 @@ def _cute_attention(
     _, flash_attn_func = _load_fa4_cute()
     q_block_size = q_bshd.shape[1] // block_map.shape[2]
     kv_block_size = k_bshd.shape[1] // block_map.shape[3]
+    need_backward = torch.is_grad_enabled() and any(t.requires_grad for t in (q_bshd, k_bshd, v_bshd))
     forward_sparse_tensors, backward_sparse_tensors = _build_sparse_tensors(
         block_map,
         variable_block_sizes,
         q_len=q_bshd.shape[1],
         q_block_size=q_block_size,
         kv_block_size=kv_block_size,
+        need_backward=need_backward,
     )
     return flash_attn_func(
         q_bshd,
@@ -236,8 +249,10 @@ def block_sparse_attn_cute_fwd(
         variable_block_sizes,
     )
     out = out_bshd.transpose(1, 2).contiguous()
-    lse_bsh = lse.transpose(1, 2).contiguous().detach()
-    return out, lse_bsh
+    # FA4 already returns lse as [B, H, S], matching the Triton path's aux
+    # contract, so it needs no transpose. Detach before any further op: the
+    # value is informational and callers never backprop through it.
+    return out, lse.detach()
 
 
 def block_sparse_attn_cute_fwd_bshd(
@@ -258,5 +273,5 @@ def block_sparse_attn_cute_fwd_bshd(
         block_map,
         variable_block_sizes,
     )
-    lse_bsh = lse.transpose(1, 2).contiguous().detach()
-    return out, lse_bsh
+    # lse is [B, H, S] regardless of the q/k/v layout; see above.
+    return out, lse.detach()
