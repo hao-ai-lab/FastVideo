@@ -24,7 +24,7 @@ directly: ``adaln_rank`` in ``config.json`` flows onto the arch config through
 
 Usage::
 
-    python tools/minimax_h3/fit_adaln_basis.py \
+    python scripts/checkpoint_conversion/convert_minimax_h3_adaln_rank.py \
         --src  /path/to/MiniMax-H3/transformer \
         --dst  /path/to/MiniMax-H3-r16/transformer --rank 16
 
