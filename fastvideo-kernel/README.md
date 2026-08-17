@@ -75,17 +75,38 @@ fully usable without it).
 The symbols the fastpath needs (`flash_attn.cute.block_sparsity.BlockSparseTensorsTorch`
 and `flash_attn.cute.interface.flash_attn_func`) are provided upstream by
 [Dao-AILab/flash-attention](https://github.com/Dao-AILab/flash-attention). Pin to
-commit `940cd9680f3315f2f06b43ab5bea2c2cf2d96806`, the revision FastVideo pins as
+commit `82d6441eec5d4dfec120153db2c0145ae855a083`, the revision FastVideo pins as
 the `flash-attn-4` source in the repo-root `pyproject.toml`; other revisions may
 have incompatible block-sparse forward/backward interfaces.
 
+Install it under its distribution name so its own runtime stack resolves with it.
+Do **not** pre-install `nvidia-cutlass-dsl` by hand: this revision pins
+`nvidia-cutlass-dsl==4.6.0.dev0` exactly, and a hand-installed 4.5.x floor either
+gets silently upgraded or, if something else holds it back, leaves the CuTe
+kernels broken.
+
 ```bash
-pip install "nvidia-cutlass-dsl>=4.5.0" torchvision
-pip install "git+https://github.com/Dao-AILab/flash-attention.git@940cd9680f3315f2f06b43ab5bea2c2cf2d96806#subdirectory=flash_attn/cute"
+pip install torchvision
+pip install "flash-attn-4 @ git+https://github.com/Dao-AILab/flash-attention.git@82d6441eec5d4dfec120153db2c0145ae855a083#subdirectory=flash_attn/cute"
 ```
 
+That resolves `nvidia-cutlass-dsl` to 4.6.0.dev0 and `quack-kernels` to 0.5.3, a
+combination this revision works with. A mismatched CuTe DSL only surfaces when the
+kernel JIT-compiles, so the error points at CuTe internals rather than at the
+install:
+
+| Error on first VSA-256 CuTe call | Cause |
+|---|---|
+| `TypeError: fmax() missing 1 required positional argument: 'b'` | `nvidia-cutlass-dsl` 4.5.x |
+| `AttributeError: module 'cutlass.cute.core' has no attribute 'ThrMma'` | `quack-kernels` older than 0.5.1 |
+| `ImportError: cannot import name 'alloc_reserved_mbarrier'` | `quack-kernels` 0.6.2 or newer |
+
+An environment whose `flash_attn.cute` came from a prebuilt flash-attn wheel rather
+than from this pin hits the first row; that is what the overlay step in
+`docker/Dockerfile` works around.
+
 The CuTe kernels JIT-compile on first use. Forward and backward are verified on
-Blackwell (sm_100) against `tests/test_vsa256_*.py`.
+Blackwell (sm_100, GB200) against `tests/test_vsa256_*.py`.
 
 ## Usage
 
