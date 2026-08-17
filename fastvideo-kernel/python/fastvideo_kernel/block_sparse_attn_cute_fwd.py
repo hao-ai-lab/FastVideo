@@ -9,10 +9,11 @@ The BSHD variant is preferred from VSA-256 callers to avoid layout
 round-trips on the hot path.
 
 The FA4 CuTe block-sparse kernel (``flash_attn.cute`` with
-``block_sparsity``) is an *optional* dependency: it is imported lazily and
-only exercised when the VSA-256 CuTe fastpath is explicitly selected
-(``FASTVIDEO_VSA_CUTEDSL=1``). The default VSA-256 path is Triton and does
-not require it. Also needs ``nvidia-cutlass-dsl`` and ``quack-kernels``.
+``block_sparsity``) is an *optional* dependency: it is imported lazily. The
+legacy VSA-256 route selects it with ``FASTVIDEO_VSA_CUTEDSL=1``; direct
+fine-grained callers can use Q128/KV64 and, on SM100, Q64/KV64. The default
+VSA-256 path is Triton and does not require FA4. The CuTe path also needs
+``nvidia-cutlass-dsl`` and ``quack-kernels``.
 """
 
 from __future__ import annotations
@@ -22,11 +23,11 @@ from typing import Tuple
 
 import torch
 
-_FA4_IMPORT_HINT = ("VSA-256 CuTe fastpath requires a FlashAttention-4 CuTe build that "
+_FA4_IMPORT_HINT = ("The CuTe block-sparse fastpath requires a FlashAttention-4 CuTe build that "
                     "provides `flash_attn.cute` with block-sparsity support (plus "
                     "`nvidia-cutlass-dsl` and `quack-kernels`). This is an optional "
                     "dependency; the default VSA-256 path is Triton. Install the FA4 CuTe "
-                    "build and set FASTVIDEO_VSA_CUTEDSL=1 to enable the CuTe fastpath.")
+                    "build; set FASTVIDEO_VSA_CUTEDSL=1 when selecting the VSA-256 route.")
 
 
 def _load_fa4_cute():
@@ -44,7 +45,7 @@ def _load_fa4_cute():
     return BlockSparseTensorsTorch, _flash_attn_fwd
 
 
-# Q-side tile size; kv_block_size comes from the caller's VSA logical KV block.
+# Default Q-side tile size; the Q64/KV64 specialization uses a 64-row tile.
 _M_BLOCK_SIZE_DEFAULT = 128
 
 
@@ -70,6 +71,18 @@ def _choose_q_sparse_block_size(q_len: int, m_block_size: int = _M_BLOCK_SIZE_DE
     if major >= 10 and q_len > m_block_size:
         return 2 * m_block_size
     return m_block_size
+
+
+def _choose_m_block_size(q_block_size: int, kv_block_size: int) -> int:
+    """Choose the physical FA4 Q tile without changing sparse-map semantics."""
+    if q_block_size == 64:
+        if kv_block_size != 64:
+            raise ValueError("the FA4 Q64 specialization requires KV64 blocks")
+        major, _minor = torch.cuda.get_device_capability()
+        if major != 10:
+            raise RuntimeError("the FA4 Q64/KV64 specialization currently requires SM100")
+        return 64
+    return _M_BLOCK_SIZE_DEFAULT
 
 
 def _aggregate_q_block_map(
@@ -146,11 +159,18 @@ def _cute_forward(
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Internal: FA4 CuTe BSA fwd with BSHD inputs."""
     BlockSparseTensorsTorch, _flash_attn_fwd = _load_fa4_cute()
-    q_sparse_candidate = _choose_q_sparse_block_size(q_bshd.shape[1])
-    q_sparse_block_size = max(
-        q_block_size,
-        ((q_sparse_candidate + q_block_size - 1) // q_block_size) * q_block_size,
-    )
+    m_block_size = _choose_m_block_size(q_block_size, kv_block_size)
+    if q_block_size == m_block_size:
+        # Q128 and Q64 maps may select different KV blocks in adjacent rows.
+        # Preserve their declared granularity instead of unioning them into the
+        # historical two-stage Q256 schedule.
+        q_sparse_block_size = q_block_size
+    else:
+        q_sparse_candidate = _choose_q_sparse_block_size(q_bshd.shape[1], m_block_size)
+        q_sparse_block_size = max(
+            q_block_size,
+            ((q_sparse_candidate + q_block_size - 1) // q_block_size) * q_block_size,
+        )
     sparse_map = _aggregate_q_block_map(
         block_map,
         q_sparse_block_size=q_sparse_block_size,
@@ -177,7 +197,7 @@ def _cute_forward(
         q_bshd,
         k_bshd,
         v_bshd,
-        tile_mn=(_M_BLOCK_SIZE_DEFAULT, kv_block_size),
+        tile_mn=(m_block_size, kv_block_size),
         mask_mod=_build_vbs_mask_mod(kv_block_size),
         block_sparse_tensors=sparse_tensors,
         aux_tensors=[variable_block_sizes],

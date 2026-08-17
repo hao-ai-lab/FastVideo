@@ -64,28 +64,42 @@ cd fastvideo-kernel
 ./build.sh --rocm
 ```
 
-### Optional: FA4 CuTe block-sparse backend (VSA-256 fastpath)
+### Optional: FA4 CuTe block-sparse backend
 
-The VSA-256 fastpath (tile volume 256, on NVIDIA Blackwell / sm_100) routes to the
-FlashAttention-4 CuTe-DSL block-sparse kernel exposed as `flash_attn.cute`. This is
-an **optional** dependency: it is imported lazily, and `video_sparse_attn`
-transparently falls back to the Triton backend when it is absent (so the package is
-fully usable without it).
+The NVIDIA Blackwell / sm_100 VSA fastpath routes to FastVideo's in-tree
+FlashAttention-4 CuTe-DSL source fork, exposed as `flash_attn.cute`. This is an
+**optional** dependency: it is imported lazily, and `video_sparse_attn`
+transparently falls back to the Triton backend when it is absent (so the package
+is fully usable without it).
 
-The symbols the fastpath needs (`flash_attn.cute.block_sparsity.BlockSparseTensorsTorch`,
-`flash_attn.cute.interface._flash_attn_fwd`) are provided upstream by
-[Dao-AILab/flash-attention](https://github.com/Dao-AILab/flash-attention). Pin to
-commit `940cd9680f3315f2f06b43ab5bea2c2cf2d96806`, the revision FastVideo pins as
-the `flash-attn-4` source in the repo-root `pyproject.toml`; other revisions may
-have an incompatible `_flash_attn_fwd` signature.
+The fork lives in `fastvideo-kernel/fa4`, retains the `flash-attn-4` distribution
+name, and records its exact upstream revision and refresh procedure in
+`fa4/UPSTREAM.md`. Install it editable while developing the kernels:
 
 ```bash
-pip install "nvidia-cutlass-dsl>=4.5.0" torchvision
-pip install "git+https://github.com/Dao-AILab/flash-attention.git@940cd9680f3315f2f06b43ab5bea2c2cf2d96806#subdirectory=flash_attn/cute"
+uv pip install --no-deps --editable fastvideo-kernel/fa4
 ```
 
+The production VSA-256 entrypoint keeps its existing logical Q256/KV256 mask.
+When the CuTe backend is enabled, an optional shape override expands that mask
+to the finer physical schedules without changing selected token pairs:
+
+```bash
+FASTVIDEO_VSA_CUTEDSL=1 FASTVIDEO_VSA_FA4_BLOCK_SHAPE=128x64 ...
+# At the original Q256 API boundary, logical Q64 children are safely paired
+# onto the optimized physical Q128/KV64 schedule:
+FASTVIDEO_VSA_CUTEDSL=1 FASTVIDEO_VSA_FA4_BLOCK_SHAPE=64x64 ...
+```
+
+The default `FASTVIDEO_VSA_FA4_BLOCK_SHAPE=256x256` preserves the historical
+route (its logical KV256 edges are implemented with physical KV128 tiles).
+Direct callers with arbitrary, distinct Q64 masks still use the native
+Q64/KV64 kernel. The Q128/KV64 path enables score/probability double buffering
+by default; set `FASTVIDEO_FA4_VSA_SP_DOUBLE_BUFFER=0` only to run its retained
+legacy schedule for comparison or rollback.
+
 The CuTe kernel JIT-compiles on first use. Verified on Blackwell (sm_100) against
-`tests/test_vsa256_forward*.py`.
+`tests/test_fa4_vsa_block_shapes.py` and `tests/test_vsa256_forward*.py`.
 
 ## Usage
 
@@ -137,7 +151,33 @@ statistics and bitwise-compatible `dV`.
 
 ### VSA (block-sparse) TFLOPs
 
-After building/installing `fastvideo-kernel`, run:
+For the GB200 FA4 comparison, install the in-tree source fork and run the
+issue-#4554-derived harness. Its default `exact256` mask mode preserves the
+same selected token pairs across Q×KV block shapes, reports sparse-aware
+TFLOP/s, MFU against the 2.5-PFLOP/s dense-BF16 GB200 peak, and efficiency
+relative to the raw FA4 256×256 path:
+
+```bash
+uv pip install --no-deps --editable fastvideo-kernel/fa4
+CUDA_VISIBLE_DEVICES=0 CUTE_DSL_ENABLE_TVM_FFI=1 \
+  uv run --no-sync python fastvideo-kernel/benchmarks/bench_vsa_blackwell.py \
+  --seq_lens 32768 --sparsities dense 90 \
+  --block_shapes 256x256 128x64 64x64
+```
+
+To exercise every GPU in a four-GB200 tray, launch one independent replica per
+device. Each rank writes its own suffixed JSON (for example,
+`/tmp/fa4_tray.rank0.json`):
+
+```bash
+CUTE_DSL_ENABLE_TVM_FFI=1 uv run --no-sync torchrun --standalone --nproc-per-node=4 \
+  fastvideo-kernel/benchmarks/bench_vsa_blackwell.py \
+  --seq_lens 32768 --sparsities dense 90 \
+  --block_shapes 256x256 128x64 64x64 --out /tmp/fa4_tray.json
+```
+
+The older generic benchmark below measures FastVideo's 64-token block-sparse
+wrapper; it does not exercise the FA4 fine-grained source fork:
 
 ```bash
 cd fastvideo-kernel

@@ -6,9 +6,13 @@ edge ("route A"), and requires no optional dependencies.
 
 The FA4 CuTe block-sparse fastpath (intended for Blackwell sm_100+) is
 *opt-in* via ``FASTVIDEO_VSA_CUTEDSL=1``. It routes to
-:mod:`fastvideo_kernel.block_sparse_attn_cute_fwd`, which natively operates
-on 128-token KV blocks (this wrapper expands the logical 256-block map /
-sizes into that physical 128-block representation). The CuTe kernel
+:mod:`fastvideo_kernel.block_sparse_attn_cute_fwd`. By default this wrapper
+expands logical KV256 blocks to the historical physical KV128 tiles. Set
+``FASTVIDEO_VSA_FA4_BLOCK_SHAPE=128x64`` for the fine-grained FA4 schedule.
+The production ``64x64`` selection pairs adjacent Q64 children into physical
+Q128 tiles: their KV lists are identical because this wrapper derives them
+from one original Q256 metadata row. Direct Q64 callers with arbitrary masks
+continue to use the native Q64/KV64 path. The CuTe kernel
 (``flash_attn.cute`` with block-sparsity) is an optional dependency,
 imported lazily only when this fastpath is selected.
 
@@ -30,7 +34,18 @@ from .block_sparse_attn import block_sparse_attn_triton, _force_triton
 # FA4 CuTe build (``flash_attn.cute``) and make it a hard dependency of the
 # default Triton path.
 
-_KV_BLOCK_PHYS = 128  # FA4 CuTe BSA forward uses 128-token KV blocks.
+_LOGICAL_BLOCK_SIZE = 256
+_FA4_BLOCK_SHAPES = {
+    # The public name describes the original VSA mask. FA4 internally splits
+    # its logical KV256 edge into two physical KV128 tiles.
+    "256x256": (256, 128),
+    "128x64": (128, 64),
+    # This pairing is safe only at this original-Q256 wrapper boundary: all
+    # four Q64 children inherit exactly the same KV list from their parent.
+    # Keep arbitrary/distinct Q64 maps on block_sparse_attn_cute_fwd's native
+    # Q64/KV64 path, where they are not coalesced.
+    "64x64": (128, 64),
+}
 _KV_BLOCK_TRITON = 64  # Existing Triton path uses 64-token KV blocks.
 
 
@@ -49,28 +64,49 @@ def _resolve_backend() -> str:
     return "triton"
 
 
-def _expand_mask_and_sizes_256_to_128(
+def _resolve_fa4_block_shape() -> Tuple[int, int]:
+    requested = os.environ.get("FASTVIDEO_VSA_FA4_BLOCK_SHAPE", "256x256").lower()
+    try:
+        return _FA4_BLOCK_SHAPES[requested]
+    except KeyError as exc:
+        choices = ", ".join(_FA4_BLOCK_SHAPES)
+        raise ValueError(
+            f"unsupported FASTVIDEO_VSA_FA4_BLOCK_SHAPE={requested!r}; choose one of {choices}"
+        ) from exc
+
+
+def _expand_mask_and_sizes_256_for_fa4(
     logical_mask_256: torch.Tensor,
     logical_kv_sizes_256: torch.Tensor,
+    q_block_size: int,
+    kv_block_size: int,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Expand a [B, H, Qb256, KVb256] map to [B, H, Qb256, KVb128].
+    """Expand a logical Q256/KV256 map to one supported physical FA4 shape.
 
-    Each logical 256-token KV block splits into two physical 128-token
-    children. Each child inherits the logical mask edge; its valid-token
-    count is the logical count clamped into the child's window.
+    Every child inherits its parent edge. KV valid-token counts are clamped
+    into each child's window, preserving partial and empty tail blocks.
     """
-    expanded_mask = logical_mask_256.repeat_interleave(2, dim=3)
+    if _LOGICAL_BLOCK_SIZE % q_block_size or _LOGICAL_BLOCK_SIZE % kv_block_size:
+        raise ValueError(
+            f"FA4 QxKV blocks must divide {_LOGICAL_BLOCK_SIZE}, got "
+            f"{q_block_size}x{kv_block_size}"
+        )
+    q_factor = _LOGICAL_BLOCK_SIZE // q_block_size
+    kv_factor = _LOGICAL_BLOCK_SIZE // kv_block_size
+    expanded_mask = logical_mask_256.repeat_interleave(q_factor, dim=2)
+    expanded_mask = expanded_mask.repeat_interleave(kv_factor, dim=3)
 
     sizes_i32 = logical_kv_sizes_256.to(torch.int32)
-    child0 = torch.clamp(sizes_i32, min=0, max=_KV_BLOCK_PHYS)
-    child1 = torch.clamp(sizes_i32 - _KV_BLOCK_PHYS, min=0, max=_KV_BLOCK_PHYS)
-    expanded_sizes = torch.empty(
-        (sizes_i32.numel() * 2, ),
+    offsets = torch.arange(
+        kv_factor,
         dtype=torch.int32,
         device=sizes_i32.device,
-    )
-    expanded_sizes[0::2] = child0
-    expanded_sizes[1::2] = child1
+    ) * kv_block_size
+    expanded_sizes = torch.clamp(
+        sizes_i32[:, None] - offsets[None, :],
+        min=0,
+        max=kv_block_size,
+    ).reshape(-1)
     return expanded_mask, expanded_sizes
 
 
@@ -126,9 +162,15 @@ def block_sparse_attn_256(
     if _resolve_backend() == "triton":
         return _triton_via_route_a(q, k, v, logical_block_map_256, logical_variable_block_sizes_256)
 
-    mask_128, sizes_128 = _expand_mask_and_sizes_256_to_128(logical_block_map_256, logical_variable_block_sizes_256)
+    q_block_size, kv_block_size = _resolve_fa4_block_shape()
+    physical_mask, physical_sizes = _expand_mask_and_sizes_256_for_fa4(
+        logical_block_map_256,
+        logical_variable_block_sizes_256,
+        q_block_size,
+        kv_block_size,
+    )
     from .block_sparse_attn_cute_fwd import block_sparse_attn_cute_fwd
-    return block_sparse_attn_cute_fwd(q, k, v, mask_128, sizes_128)
+    return block_sparse_attn_cute_fwd(q, k, v, physical_mask, physical_sizes)
 
 
 def block_sparse_attn_256_bshd(
@@ -156,6 +198,12 @@ def block_sparse_attn_256_bshd(
         )
         return out_bhsd.transpose(1, 2).contiguous(), aux
 
-    mask_128, sizes_128 = _expand_mask_and_sizes_256_to_128(logical_block_map_256, logical_variable_block_sizes_256)
+    q_block_size, kv_block_size = _resolve_fa4_block_shape()
+    physical_mask, physical_sizes = _expand_mask_and_sizes_256_for_fa4(
+        logical_block_map_256,
+        logical_variable_block_sizes_256,
+        q_block_size,
+        kv_block_size,
+    )
     from .block_sparse_attn_cute_fwd import block_sparse_attn_cute_fwd_bshd
-    return block_sparse_attn_cute_fwd_bshd(q, k, v, mask_128, sizes_128)
+    return block_sparse_attn_cute_fwd_bshd(q, k, v, physical_mask, physical_sizes)

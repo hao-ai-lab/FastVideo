@@ -122,9 +122,9 @@ fastvideo-kernel = [
 # uv reads UV_TORCH_BACKEND / --torch-backend (not a pyproject setting). The
 # supported backends (cu126, cu130) both provide torch 2.12.0.
 imagebind = { git = "https://github.com/facebookresearch/ImageBind.git", rev = "53680b02d7e37b19b124fa37bae4b6c98c38f5be" }
-# FA4 cute, pinned to a cutlass-4.5-compatible revision. torch.compile support
-# comes from FastVideo's own custom_op wrappers.
-flash-attn-4 = { git = "https://github.com/Dao-AILab/flash-attention.git", rev = "82d6441eec5d4dfec120153db2c0145ae855a083", subdirectory = "flash_attn/cute" }
+# FastVideo's FA4 CuTe source fork. Its upstream commit and refresh procedure
+# are recorded in fastvideo-kernel/fa4/UPSTREAM.md.
+flash-attn-4 = { path = "fastvideo-kernel/fa4", editable = true }
 
 [project.optional-dependencies]
 
@@ -189,9 +189,8 @@ streaming = [
 dreamverse = [
     "uvicorn[standard]>=0.41.0",
     "cerebras-cloud-sdk",
-    # PyPI forbids direct URL deps in published metadata; pin upstream cute via
-    # [tool.uv.sources] above (same pattern as imagebind) so the wheel stays
-    # publishable while uv workspace installs still get it.
+    # Keep the published dependency name portable; [tool.uv.sources] above
+    # selects FastVideo's in-tree CuTe fork for workspace installs.
     "flash-attn-4",
     "flashinfer-python",
     "openai>=1.40",
