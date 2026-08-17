@@ -565,6 +565,24 @@ class WorkerMultiprocProc:
 
             worker.worker_busy_loop()
 
+        except SystemExit:
+            # Raised by the SIGTERM/SIGINT handler installed above, so it is a
+            # BaseException and not an Exception: without this clause it walks
+            # straight past the handler below and the worker dies having reported
+            # nothing at all. The parent then sees only a closed pipe and raises
+            # "See stack trace for root cause" with no stack trace attached.
+            #
+            # Log with the traceback rather than a bare message. A signal handler
+            # runs on top of whatever the process was executing, so the frames
+            # here are the frames that were interrupted, which is the only clue
+            # to what the worker was doing when it was told to stop.
+            logger.exception(
+                "Worker %d was terminated by a signal while running. This is usually an external "
+                "process, such as an out-of-memory daemon, or the parent forcing shutdown after a "
+                "worker failed to exit. The stack below is where execution was interrupted, not the "
+                "cause.", rank)
+            raise
+
         except Exception as exc:
             if ready_pipe is not None:
                 logger.exception("WorkerMultiprocProc failed to start.")
