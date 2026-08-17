@@ -89,9 +89,7 @@ def build_reference_folder_path(
         model_id,
         attention_backend,
     )
-    if quality_tier == DEFAULT_OUTPUT_QUALITY_TIER and os.path.exists(
-        legacy_reference_folder
-    ):
+    if quality_tier == DEFAULT_OUTPUT_QUALITY_TIER and os.path.exists(legacy_reference_folder):
         return legacy_reference_folder
 
     return tiered_reference_folder

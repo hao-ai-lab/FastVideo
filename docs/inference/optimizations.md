@@ -3,6 +3,12 @@
 
 This page describes the various options for speeding up generation times in FastVideo.
 
+!!! note "On a DGX Spark (GB10)?"
+    Several options on this page behave differently on the GB10's unified-memory
+    hardware — some give little or nothing there. See
+    [DGX Spark: Performance & Tuning](../getting_started/installation/spark_performance.md)
+    for what actually helps on that platform and why.
+
 ## Table of Contents
 
 - Optimized Attention Backends
@@ -118,6 +124,22 @@ pip install "nvidia-cutlass-dsl>=4.5.2" apache-tvm-ffi flashinfer-python
 
 The `--no-deps` flag prevents upgrading torch/torchvision. Use the supported
 PyTorch 2.12.0 and CUDA 13 environment for this kernel.
+
+Branch-to-`nvidia-cutlass-dsl` compatibility (the fork tracks the CuTe DSL API
+surface closely):
+
+| fork branch | cutlass-dsl | notes |
+|---|---|---|
+| `fp4` | `==4.4.2` (+ `nvidia-cutlass-dsl-libs-base==4.4.2`) | validated set on GB200: `quack-kernels==0.4.1`, `flashinfer-python==0.6.8`, `CUTE_DSL_ENABLE_TVM_FFI=1`, `FASTVIDEO_FA4=1` |
+| `fix/cutlass-dsl-4.5` | `>=4.5.2` | carries the `cute.core.ThrMma` -> `cute.ThrMma` fix |
+| any | 4.6-era | unsupported: `cute.make_fragment` was removed at module level; fails at CuTe JIT trace |
+
+`FASTVIDEO_FA4=1` is required alongside the fork: it ships no compiled
+FlashAttention-2, so dense attention paths raise ImportError without the FA4
+opt-in. The same kernel also serves `ATTN_QAT_INFER` on sm_100a/sm_103a
+(datacenter Blackwell) — the selection log's receipt line
+(`ATTN_QAT_INFER resolved: ...`) records the arch, kernel, and quantization
+mode that actually bound.
 
 #### Usage
 

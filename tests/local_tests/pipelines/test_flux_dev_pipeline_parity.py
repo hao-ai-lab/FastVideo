@@ -54,10 +54,8 @@ _RTOL = 5e-2
 
 def _log_stats(label: str, t: torch.Tensor) -> None:
     tf = t.float()
-    print(
-        f"[FLUX PARITY] {label}: shape={tuple(t.shape)} dtype={t.dtype} "
-        f"min={tf.min():.4f} max={tf.max():.4f} mean={tf.mean():.4f} std={tf.std():.4f}"
-    )
+    print(f"[FLUX PARITY] {label}: shape={tuple(t.shape)} dtype={t.dtype} "
+          f"min={tf.min():.4f} max={tf.max():.4f} mean={tf.mean():.4f} std={tf.std():.4f}")
 
 
 def _requires_weights() -> bool:
@@ -152,8 +150,7 @@ def test_flux_dev_pipeline_image_parity() -> None:
     # ------------------------------------------------------------------
     print("[FLUX PARITY] Checking FastVideo output...")
     assert hf_image.shape == fv_image.shape, (
-        f"Shape mismatch: Diffusers {hf_image.shape} vs FastVideo {fv_image.shape}"
-    )
+        f"Shape mismatch: Diffusers {hf_image.shape} vs FastVideo {fv_image.shape}")
     assert torch.isfinite(fv_image).all(), "FastVideo output contains NaN or Inf"
     assert fv_image.min() >= -0.1, f"FastVideo output below expected range: min={fv_image.min():.4f}"
     assert fv_image.max() <= 1.1, f"FastVideo output above expected range: max={fv_image.max():.4f}"

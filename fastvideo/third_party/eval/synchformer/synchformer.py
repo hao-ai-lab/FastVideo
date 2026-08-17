@@ -5,7 +5,7 @@ import torch
 from torch import nn
 
 from fastvideo.third_party.eval.synchformer.ast import AST
-from fastvideo.third_party.eval.synchformer.motionformer import MotionFormer
+from fastvideo.third_party.synchformer.motionformer import MotionFormer
 from fastvideo.third_party.eval.synchformer.transformer import GlobalTransformer
 
 
@@ -20,13 +20,11 @@ def make_class_grid(leftmost_val,
     assert grid_size >= 3, f'grid_size: {grid_size} doesnot make sense. If =2 -> (-1,1); =1 -> (-1); =0 -> ()'
     grid = torch.from_numpy(np.linspace(leftmost_val, rightmost_val, grid_size)).float()
     if add_extreme_offset:
-        assert all([seg_size_vframes, nseg,
-                    step_size_seg]), f'{seg_size_vframes} {nseg} {step_size_seg}'
+        assert all([seg_size_vframes, nseg, step_size_seg]), f'{seg_size_vframes} {nseg} {step_size_seg}'
         seg_size_sec = seg_size_vframes / vfps
         trim_size_in_seg = nseg - (1 - step_size_seg) * (nseg - 1)
         extreme_value = trim_size_in_seg * seg_size_sec
-        grid = torch.cat([grid,
-                          torch.tensor([extreme_value])])  # adding extreme offset to the class grid
+        grid = torch.cat([grid, torch.tensor([extreme_value])])  # adding extreme offset to the class grid
     return grid
 
 
@@ -68,8 +66,7 @@ class Synchformer(nn.Module):
 
         # self.transformer will concatenate the vis and aud in one sequence with aux tokens,
         # ie `CvvvvMaaaaaa`, and will return the logits for the CLS tokens
-        logits = self.transformer(vis,
-                                  aud)  # (B, cls); or (B, cls) and (B, 2) if DoubtingTransformer
+        logits = self.transformer(vis, aud)  # (B, cls); or (B, cls) and (B, 2) if DoubtingTransformer
 
         return logits
 

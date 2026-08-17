@@ -44,9 +44,7 @@ def test_magi_human_vae_decode_parity():
     repo_root = Path(__file__).resolve().parents[3]
     upstream_src = repo_root / "daVinci-MagiHuman"
     if not upstream_src.exists():
-        pytest.skip(
-            "Upstream daVinci-MagiHuman/ clone missing — no Wan2_2_VAE source."
-        )
+        pytest.skip("Upstream daVinci-MagiHuman/ clone missing — no Wan2_2_VAE source.")
 
     fv_vae_dir = Path(os.getenv(
         "MAGI_HUMAN_VAE_DIR",
@@ -60,7 +58,8 @@ def test_magi_human_vae_decode_parity():
     try:
         from huggingface_hub import hf_hub_download
         pth_path = hf_hub_download(
-            repo_id="Wan-AI/Wan2.2-TI2V-5B", filename="Wan2.2_VAE.pth",
+            repo_id="Wan-AI/Wan2.2-TI2V-5B",
+            filename="Wan2.2_VAE.pth",
         )
     except Exception as exc:
         pytest.skip(f"Wan2.2_VAE.pth not available: {exc}")
@@ -90,7 +89,9 @@ def test_magi_human_vae_decode_parity():
         up_out = up_vae.decode(z[0]).detach().float().cpu()
 
     del up_vae
-    import gc; gc.collect(); torch.cuda.empty_cache()
+    import gc
+    gc.collect()
+    torch.cuda.empty_cache()
 
     # --- FastVideo decode ---
     # Upstream `Wan2_2_VAE.decode(z)` internally normalizes via
@@ -136,10 +137,14 @@ def test_magi_human_vae_decode_parity():
     # latent — apply the same transform externally to feed both paths
     # equivalently.
     latents_mean = torch.tensor(
-        fv_config.arch_config.latents_mean, dtype=torch.float32, device=device,
+        fv_config.arch_config.latents_mean,
+        dtype=torch.float32,
+        device=device,
     )
     latents_std = torch.tensor(
-        fv_config.arch_config.latents_std, dtype=torch.float32, device=device,
+        fv_config.arch_config.latents_std,
+        dtype=torch.float32,
+        device=device,
     )
     z_denormalized = z * latents_std.view(1, -1, 1, 1, 1) + latents_mean.view(1, -1, 1, 1, 1)
     with torch.inference_mode():
@@ -156,25 +161,17 @@ def test_magi_human_vae_decode_parity():
 
     up_s = _squeeze(up_out)
     fv_s = _squeeze(fv_out)
-    print(
-        f"up shape={tuple(up_s.shape)} abs_mean={up_s.abs().mean().item():.4f} "
-        f"range=[{up_s.min().item():.4f}, {up_s.max().item():.4f}]"
-    )
-    print(
-        f"fv shape={tuple(fv_s.shape)} abs_mean={fv_s.abs().mean().item():.4f} "
-        f"range=[{fv_s.min().item():.4f}, {fv_s.max().item():.4f}]"
-    )
+    print(f"up shape={tuple(up_s.shape)} abs_mean={up_s.abs().mean().item():.4f} "
+          f"range=[{up_s.min().item():.4f}, {up_s.max().item():.4f}]")
+    print(f"fv shape={tuple(fv_s.shape)} abs_mean={fv_s.abs().mean().item():.4f} "
+          f"range=[{fv_s.min().item():.4f}, {fv_s.max().item():.4f}]")
 
     # Wan VAE has a known fp32 op-ordering drift of ~8e-4 caused by
     # `z * std + mean` (FV) vs `z / (1/std) + mean` (upstream) at decode
     # normalization. This is a SHARED Wan-family bug, not magi-specific.
     # Tracked as OQ-7 in tests/local_tests/magi-human.md; tighten to
     # atol=1e-4 once the Wan VAE op-order fix lands.
-    assert up_s.shape == fv_s.shape, (
-        f"shape mismatch: up={up_s.shape} fv={fv_s.shape}"
-    )
+    assert up_s.shape == fv_s.shape, (f"shape mismatch: up={up_s.shape} fv={fv_s.shape}")
     diff = (up_s - fv_s).abs()
-    print(
-        f"diff max={diff.max().item():.6f} mean={diff.mean().item():.6f}"
-    )
+    print(f"diff max={diff.max().item():.6f} mean={diff.mean().item():.6f}")
     assert_close(fv_s, up_s, atol=1e-3, rtol=1e-3)

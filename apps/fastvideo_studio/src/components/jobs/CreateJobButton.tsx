@@ -2,6 +2,7 @@
 
 import * as React from 'react';
 import { ChevronDown } from 'lucide-react';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 
 import CreateJobModal from '@/components/jobs/CreateJobModal';
 import { Button } from '@/components/ui/button';
@@ -33,31 +34,35 @@ export default function CreateJobButton({ jobType }: CreateJobButtonProps) {
 
   return (
     <>
-      <div className="group relative inline-block">
-        <Button type="button" className="gap-1.5">
-          Create Job
-          <ChevronDown className="size-3.5 opacity-85" aria-hidden />
-        </Button>
-        <div
-          role="menu"
-          className="invisible absolute right-0 top-full z-[200] mt-1 min-w-full -translate-y-1 rounded-lg border border-border bg-popover py-1 opacity-0 shadow-lg transition-all duration-150 group-hover:visible group-hover:translate-y-0 group-hover:opacity-100"
-        >
-          {options.map((opt) => (
-            <button
-              key={opt.type}
-              type="button"
-              role="menuitem"
-              onClick={() => openModal(opt.type)}
-              className="block w-full whitespace-nowrap px-4 py-2 text-left text-sm font-medium text-popover-foreground transition-colors hover:bg-secondary"
-            >
-              {opt.label}
-              <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
-                {opt.desc}
-              </span>
-            </button>
-          ))}
-        </div>
-      </div>
+      <DropdownMenu.Root>
+        <DropdownMenu.Trigger asChild>
+          <Button type="button" className="gap-1.5">
+            Create Job
+            <ChevronDown className="size-3.5 opacity-85" aria-hidden />
+          </Button>
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Portal>
+          <DropdownMenu.Content
+            align="end"
+            sideOffset={4}
+            collisionPadding={8}
+            className="z-[200] min-w-48 overflow-hidden rounded-lg border border-border bg-popover py-1 text-popover-foreground shadow-lg"
+          >
+            {options.map((opt) => (
+              <DropdownMenu.Item
+                key={opt.type}
+                onSelect={() => openModal(opt.type)}
+                className="flex min-h-11 cursor-pointer select-none flex-col justify-center px-4 py-2 text-left text-sm font-medium outline-none data-[highlighted]:bg-secondary"
+              >
+                {opt.label}
+                <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
+                  {opt.desc}
+                </span>
+              </DropdownMenu.Item>
+            ))}
+          </DropdownMenu.Content>
+        </DropdownMenu.Portal>
+      </DropdownMenu.Root>
       <CreateJobModal
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}

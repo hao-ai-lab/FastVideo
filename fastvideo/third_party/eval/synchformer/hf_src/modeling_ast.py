@@ -14,7 +14,6 @@
 # limitations under the License.
 
 # Modified by v-iashin to support token masking
-
 """ PyTorch Audio Spectrogram Transformer (AST) model."""
 
 import math
@@ -65,7 +64,6 @@ _EXPECTED_OUTPUT_SHAPE = [1, 1214, 768]
 _SEQ_CLASS_CHECKPOINT = "MIT/ast-finetuned-audioset-10-10-0.4593"
 _SEQ_CLASS_EXPECTED_OUTPUT = "'Speech'"
 _SEQ_CLASS_EXPECTED_LOSS = 0.17
-
 
 AUDIO_SPECTROGRAM_TRANSFORMER_PRETRAINED_MODEL_ARCHIVE_LIST = [
     "MIT/ast-finetuned-audioset-10-10-0.4593",
@@ -125,9 +123,10 @@ class ASTPatchEmbeddings(nn.Module):
         frequency_stride = config.frequency_stride
         time_stride = config.time_stride
 
-        self.projection = nn.Conv2d(
-            1, config.hidden_size, kernel_size=(patch_size, patch_size), stride=(frequency_stride, time_stride)
-        )
+        self.projection = nn.Conv2d(1,
+                                    config.hidden_size,
+                                    kernel_size=(patch_size, patch_size),
+                                    stride=(frequency_stride, time_stride))
 
     def forward(self, input_values: torch.Tensor) -> torch.Tensor:
         input_values = input_values.unsqueeze(1)
@@ -138,13 +137,12 @@ class ASTPatchEmbeddings(nn.Module):
 
 # Copied from transformers.models.vit.modeling_vit.ViTSelfAttention with ViT->AST
 class ASTSelfAttention(nn.Module):
+
     def __init__(self, config: ASTConfig) -> None:
         super().__init__()
         if config.hidden_size % config.num_attention_heads != 0 and not hasattr(config, "embedding_size"):
-            raise ValueError(
-                f"The hidden size {config.hidden_size,} is not a multiple of the number of attention "
-                f"heads {config.num_attention_heads}."
-            )
+            raise ValueError(f"The hidden size {config.hidden_size,} is not a multiple of the number of attention "
+                             f"heads {config.num_attention_heads}.")
 
         self.num_attention_heads = config.num_attention_heads
         self.attention_head_size = int(config.hidden_size / config.num_attention_heads)
@@ -161,10 +159,11 @@ class ASTSelfAttention(nn.Module):
         x = x.view(new_x_shape)
         return x.permute(0, 2, 1, 3)
 
-    def forward(
-        self, hidden_states, tok_mask: Optional[torch.Tensor] = None,
-        head_mask: Optional[torch.Tensor] = None, output_attentions: bool = False
-    ) -> Union[Tuple[torch.Tensor, torch.Tensor], Tuple[torch.Tensor]]:
+    def forward(self,
+                hidden_states,
+                tok_mask: Optional[torch.Tensor] = None,
+                head_mask: Optional[torch.Tensor] = None,
+                output_attentions: bool = False) -> Union[Tuple[torch.Tensor, torch.Tensor], Tuple[torch.Tensor]]:
         mixed_query_layer = self.query(hidden_states)
 
         key_layer = self.transpose_for_scores(self.key(hidden_states))
@@ -195,10 +194,10 @@ class ASTSelfAttention(nn.Module):
         context_layer = torch.matmul(attention_probs, value_layer)
 
         context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
-        new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
+        new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size, )
         context_layer = context_layer.view(new_context_layer_shape)
 
-        outputs = (context_layer, attention_probs) if output_attentions else (context_layer,)
+        outputs = (context_layer, attention_probs) if output_attentions else (context_layer, )
 
         return outputs
 
@@ -224,6 +223,7 @@ class ASTSelfOutput(nn.Module):
 
 # Copied from transformers.models.vit.modeling_vit.ViTAttention with ViT->AST
 class ASTAttention(nn.Module):
+
     def __init__(self, config: ASTConfig) -> None:
         super().__init__()
         self.attention = ASTSelfAttention(config)
@@ -233,9 +233,8 @@ class ASTAttention(nn.Module):
     def prune_heads(self, heads: Set[int]) -> None:
         if len(heads) == 0:
             return
-        heads, index = find_pruneable_heads_and_indices(
-            heads, self.attention.num_attention_heads, self.attention.attention_head_size, self.pruned_heads
-        )
+        heads, index = find_pruneable_heads_and_indices(heads, self.attention.num_attention_heads,
+                                                        self.attention.attention_head_size, self.pruned_heads)
 
         # Prune linear layers
         self.attention.query = prune_linear_layer(self.attention.query, index)
@@ -259,12 +258,13 @@ class ASTAttention(nn.Module):
 
         attention_output = self.output(self_outputs[0], hidden_states)
 
-        outputs = (attention_output,) + self_outputs[1:]  # add attentions if we output them
+        outputs = (attention_output, ) + self_outputs[1:]  # add attentions if we output them
         return outputs
 
 
 # Copied from transformers.models.vit.modeling_vit.ViTIntermediate with ViT->AST
 class ASTIntermediate(nn.Module):
+
     def __init__(self, config: ASTConfig) -> None:
         super().__init__()
         self.dense = nn.Linear(config.hidden_size, config.intermediate_size)
@@ -282,6 +282,7 @@ class ASTIntermediate(nn.Module):
 
 # Copied from transformers.models.vit.modeling_vit.ViTOutput with ViT->AST
 class ASTOutput(nn.Module):
+
     def __init__(self, config: ASTConfig) -> None:
         super().__init__()
         self.dense = nn.Linear(config.intermediate_size, config.hidden_size)
@@ -336,13 +337,14 @@ class ASTLayer(nn.Module):
         # second residual connection is done here
         layer_output = self.output(layer_output, hidden_states)
 
-        outputs = (layer_output,) + outputs
+        outputs = (layer_output, ) + outputs
 
         return outputs
 
 
 # Copied from transformers.models.vit.modeling_vit.ViTEncoder with ViT->AST
 class ASTEncoder(nn.Module):
+
     def __init__(self, config: ASTConfig) -> None:
         super().__init__()
         self.config = config
@@ -363,13 +365,14 @@ class ASTEncoder(nn.Module):
 
         for i, layer_module in enumerate(self.layer):
             if output_hidden_states:
-                all_hidden_states = all_hidden_states + (hidden_states,)
+                all_hidden_states = all_hidden_states + (hidden_states, )
 
             layer_head_mask = head_mask[i] if head_mask is not None else None
 
             if self.gradient_checkpointing and self.training:
 
                 def create_custom_forward(module):
+
                     def custom_forward(*inputs):
                         return module(*inputs, output_attentions)
 
@@ -387,10 +390,10 @@ class ASTEncoder(nn.Module):
             hidden_states = layer_outputs[0]
 
             if output_attentions:
-                all_self_attentions = all_self_attentions + (layer_outputs[1],)
+                all_self_attentions = all_self_attentions + (layer_outputs[1], )
 
         if output_hidden_states:
-            all_hidden_states = all_hidden_states + (hidden_states,)
+            all_hidden_states = all_hidden_states + (hidden_states, )
 
         if not return_dict:
             return tuple(v for v in [hidden_states, all_hidden_states, all_self_attentions] if v is not None)
@@ -418,9 +421,9 @@ class ASTPreTrainedModel(PreTrainedModel):
         if isinstance(module, (nn.Linear, nn.Conv2d)):
             # Upcast the input in `fp32` and cast it back to desired `dtype` to avoid
             # `trunc_normal_cpu` not implemented in `half` issues
-            module.weight.data = nn.init.trunc_normal_(
-                module.weight.data.to(torch.float32), mean=0.0, std=self.config.initializer_range
-            ).to(module.weight.dtype)
+            module.weight.data = nn.init.trunc_normal_(module.weight.data.to(torch.float32),
+                                                       mean=0.0,
+                                                       std=self.config.initializer_range).to(module.weight.dtype)
             if module.bias is not None:
                 module.bias.data.zero_()
         elif isinstance(module, nn.LayerNorm):
@@ -473,6 +476,7 @@ AUDIO_SPECTROGRAM_TRANSFORMER_INPUTS_DOCSTRING = r"""
     AUDIO_SPECTROGRAM_TRANSFORMER_START_DOCSTRING,
 )
 class ASTModel(ASTPreTrainedModel):
+
     def __init__(self, config: ASTConfig):
         super().__init__(config)
         self.config = config
@@ -514,9 +518,8 @@ class ASTModel(ASTPreTrainedModel):
         return_dict: Optional[bool] = None,
     ):
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
-        output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
-        )
+        output_hidden_states = (output_hidden_states
+                                if output_hidden_states is not None else self.config.output_hidden_states)
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
         if input_values is None:
@@ -551,7 +554,7 @@ class ASTModel(ASTPreTrainedModel):
             # replace nans with 0s; these are the tokens that correspond to the masked content
             tok_mask = ~torch.isnan(indicator)
             # since all values in the D-dimension (latent) will also be nans, we can just use the first el
-            tok_mask = tok_mask[:, :, 0]   # (BS, 2+num_patches) -- 2 is from CLS and DISTIL tokens
+            tok_mask = tok_mask[:, :, 0]  # (BS, 2+num_patches) -- 2 is from CLS and DISTIL tokens
         else:
             tok_mask = None
 
@@ -580,11 +583,11 @@ class ASTModel(ASTPreTrainedModel):
 
 
 class ASTMLPHead(nn.Module):
+
     def __init__(self, config: ASTConfig):
         super().__init__()
         self.layernorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
-        self.dense = nn.Linear(
-            config.hidden_size, config.num_labels) if config.num_labels > 0 else nn.Identity()
+        self.dense = nn.Linear(config.hidden_size, config.num_labels) if config.num_labels > 0 else nn.Identity()
 
     def forward(self, hidden_state):
         hidden_state = self.layernorm(hidden_state)
@@ -600,6 +603,7 @@ class ASTMLPHead(nn.Module):
     AUDIO_SPECTROGRAM_TRANSFORMER_START_DOCSTRING,
 )
 class ASTForAudioClassification(ASTPreTrainedModel):
+
     def __init__(self, config: ASTConfig) -> None:
         super().__init__(config)
 
@@ -675,8 +679,8 @@ class ASTForAudioClassification(ASTPreTrainedModel):
                 loss = loss_fct(logits, labels)
 
         if not return_dict:
-            output = (logits,) + outputs[2:]
-            return ((loss,) + output) if loss is not None else output
+            output = (logits, ) + outputs[2:]
+            return ((loss, ) + output) if loss is not None else output
 
         return SequenceClassifierOutput(
             loss=loss,

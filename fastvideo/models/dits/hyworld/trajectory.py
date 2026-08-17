@@ -66,13 +66,11 @@ def generate_camera_trajectory_local(motions):
             C = np.array([[1, 0.0, 0, 0], [0, 1, 0, 0], [0, 0, 1, -1.0], [0, 0, 0, 1]])
             c_origin = C.copy()
             # Rotation around the Y-axis
-            R_y = np.array(
-                [
-                    [np.cos(theta), 0, np.sin(theta)],
-                    [0, 1, 0],
-                    [-np.sin(theta), 0, np.cos(theta)],
-                ]
-            )
+            R_y = np.array([
+                [np.cos(theta), 0, np.sin(theta)],
+                [0, 1, 0],
+                [-np.sin(theta), 0, np.cos(theta)],
+            ])
             # Translation
             C[:3, :3] = C[:3, :3] @ R_y
             C[:3, 3] = R_y @ C[:3, 3]

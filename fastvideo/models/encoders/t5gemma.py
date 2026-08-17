@@ -61,11 +61,9 @@ class T5GemmaEncoderModel(TextEncoder):
 
         path = self.t5gemma_model_path
         if not path:
-            raise ValueError(
-                "t5gemma_model_path must be set. Expected "
-                "`google/t5gemma-9b-9b-ul2` or a local path to an "
-                "equivalent T5-Gemma encoder."
-            )
+            raise ValueError("t5gemma_model_path must be set. Expected "
+                             "`google/t5gemma-9b-9b-ul2` or a local path to an "
+                             "equivalent T5-Gemma encoder.")
         dtype = getattr(torch, self.t5gemma_dtype, torch.bfloat16)
         model = HFEncoder.from_pretrained(
             path,
@@ -124,9 +122,7 @@ class T5GemmaEncoderModel(TextEncoder):
             attention_mask=attention_mask,
         )
 
-    def load_weights(
-        self, weights: Iterable[tuple[str, torch.Tensor]]
-    ) -> set[str]:
+    def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         # The HF T5-Gemma encoder is lazy-loaded from `t5gemma_model_path`
         # (see `_build_t5gemma_model`), so this wrapper owns zero
         # FastVideo-native parameters and `named_parameters()` is filtered

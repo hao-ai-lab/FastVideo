@@ -243,10 +243,8 @@ def select_aligned_memory_frames(
 
     num_total_frames = len(w2c_list)
     if current_frame_idx >= num_total_frames or current_frame_idx < 3:
-        raise ValueError(
-            f"The current frame index must be within the valid range of w2c_list and must be at least 3."
-            f"{current_frame_idx}, {len(w2c_list)}"
-        )
+        raise ValueError(f"The current frame index must be within the valid range of w2c_list and must be at least 3."
+                         f"{current_frame_idx}, {len(w2c_list)}")
 
     start_context_idx = max(0, current_frame_idx - temporal_context_size)
     context_frames_indices = list(range(start_context_idx, current_frame_idx))
@@ -255,17 +253,11 @@ def select_aligned_memory_frames(
     query_clip_indices = list(
         range(
             current_frame_idx,
-            (
-                current_frame_idx + pred_latent_size
-                if current_frame_idx + pred_latent_size <= num_total_frames
-                else num_total_frames
-            ),
-        )
-    )
+            (current_frame_idx + pred_latent_size if current_frame_idx +
+             pred_latent_size <= num_total_frames else num_total_frames),
+        ))
 
-    historical_clip_indices = list(
-        range(4, current_frame_idx - temporal_context_size, 4)
-    )
+    historical_clip_indices = list(range(4, current_frame_idx - temporal_context_size, 4))
 
     memory_frames_indices = [0, 1, 2, 3]  # add the first chunk as context
     memory_frames = memory_frames - temporal_context_size

@@ -1,10 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
+"""Verify construction-scoped attention backends in the training loader."""
+
 from __future__ import annotations
 
 import torch
 import pytest
 
-from fastvideo.attention.selector import get_global_forced_attn_backend
+from fastvideo.attention.selector import _active_component_attention_backend_scope
 from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.train.utils import moduleloader
@@ -15,22 +17,26 @@ from fastvideo.train.utils.training_config import (
 
 
 def test_load_transformer_scopes_attention_backend(monkeypatch, tmp_path) -> None:
+    """Apply one backend while accepting trailing modular-manifest metadata."""
     training_config = TrainingConfig(
         distributed=DistributedConfig(hsdp_shard_dim=1),
         pipeline_config=PipelineConfig(),
     )
-    captured: list[AttentionBackendEnum | None] = []
+    captured: list[tuple[AttentionBackendEnum | None, str | None]] = []
 
     monkeypatch.setattr(moduleloader, "maybe_download_model", lambda path: str(tmp_path))
     monkeypatch.setattr(
         moduleloader,
         "verify_model_config_and_directory",
-        lambda path: {"transformer": ("diffusers", "FakeTransformer")},
+        lambda path: {"transformer": ("diffusers", "FakeTransformer", {
+            "subfolder": "transformer"
+        })},
     )
 
     def _fake_load_module(**kwargs):
         del kwargs
-        captured.append(get_global_forced_attn_backend())
+        scope = _active_component_attention_backend_scope()
+        captured.append((scope.backend, scope.component) if scope else (None, None))
         return torch.nn.Linear(1, 1)
 
     monkeypatch.setattr(
@@ -47,8 +53,8 @@ def test_load_transformer_scopes_attention_backend(monkeypatch, tmp_path) -> Non
     )
 
     assert isinstance(result, torch.nn.Module)
-    assert captured == [AttentionBackendEnum.ATTN_QAT_TRAIN]
-    assert get_global_forced_attn_backend() is None
+    assert captured == [(AttentionBackendEnum.ATTN_QAT_TRAIN, "transformer")]
+    assert _active_component_attention_backend_scope() is None
 
 
 def test_load_transformer_restores_backend_when_loading_fails(
@@ -68,7 +74,8 @@ def test_load_transformer_restores_backend_when_loading_fails(
 
     def _raise_during_load(**kwargs):
         del kwargs
-        assert get_global_forced_attn_backend() is AttentionBackendEnum.ATTN_QAT_TRAIN
+        scope = _active_component_attention_backend_scope()
+        assert scope is not None and scope.backend is AttentionBackendEnum.ATTN_QAT_TRAIN
         raise RuntimeError("load failed")
 
     monkeypatch.setattr(
@@ -84,4 +91,4 @@ def test_load_transformer_restores_backend_when_loading_fails(
             training_config=training_config,
             attention_backend="ATTN_QAT_TRAIN",
         )
-    assert get_global_forced_attn_backend() is None
+    assert _active_component_attention_backend_scope() is None

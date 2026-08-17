@@ -14,6 +14,7 @@ from tqdm.auto import tqdm
 
 import fastvideo.envs as envs
 from fastvideo.attention import get_attn_backend
+from fastvideo.attention.selector import component_attention_backend
 from fastvideo.distributed import (get_local_torch_device, get_world_group)
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
@@ -66,7 +67,13 @@ class DenoisingStage(PipelineStage):
             dtype=torch.float16,  # TODO(will): hack
             supported_attention_backends=(AttentionBackendEnum.VIDEO_SPARSE_ATTN, AttentionBackendEnum.BSA_ATTN,
                                           AttentionBackendEnum.VMOBA_ATTN, AttentionBackendEnum.FLASH_ATTN,
-                                          AttentionBackendEnum.TORCH_SDPA, AttentionBackendEnum.SAGE_ATTN_THREE)  # hack
+                                          AttentionBackendEnum.TORCH_SDPA,
+                                          AttentionBackendEnum.SAGE_ATTN_THREE),  # hack
+            # Build metadata for the backend this transformer actually resolved
+            # instead of re-deriving it from the environment. The two agreed
+            # only when the request arrived via the env var: a request passed as
+            # `attention_backend` reached the layers but never this stage.
+            requested=component_attention_backend(self.transformer),
         )
 
     def forward(

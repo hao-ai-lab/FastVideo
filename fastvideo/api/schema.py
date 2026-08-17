@@ -100,7 +100,7 @@ class ComponentConfig:
 
 @dataclass
 class PipelineSelection:
-    workload_type: Literal["t2v", "i2v", "t2i", "i2i"] | None = None
+    workload_type: Literal["t2v", "i2v", "t2i", "i2i", "v2a", "t2a"] | None = None
     preset: str | None = None
     preset_version: int | None = None
     components: ComponentConfig = field(default_factory=ComponentConfig)
@@ -125,6 +125,10 @@ class InputConfig:
     image_path: str | list[str] | None = None
     video_path: str | list[str] | None = None
     pil_image: Any | None = None
+    last_image: Any | None = None
+    references: list[Any] | None = None
+    latents: Any | None = None
+    audio_latents: Any | None = None
     pose: str | None = None
     mouse_cond: Any | None = None
     keyboard_cond: Any | None = None

@@ -9,7 +9,7 @@
 # flag (see fastvideo/models/loader/component_loader.py). No monkey-patching.
 #
 # Init the generator from the stage-1 finetune checkpoint (finetune_qat.sh).
-# Data: run download_mixkit_data.sh first.
+# Data: run examples/datasets/mixkit/download_dataset.sh first.
 #
 # Verified end-to-end on Blackwell (GB200/sm_100): generator loads with
 # ATTN_QAT_TRAIN while teacher/critic load full-precision; the DMD double loop

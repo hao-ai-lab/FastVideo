@@ -12,23 +12,19 @@ from torch.nn.attention.flex_attention import BlockMask
 # wan 1.3B model has a weird channel / head configurations and require max-autotune to work with flexattention
 # see https://github.com/pytorch/pytorch/issues/133254
 # change to default for other models
-flex_attention = torch.compile(
-    flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs")
+flex_attention = torch.compile(flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs")
 import torch.distributed as dist
 
 import fastvideo.envs as envs
-from fastvideo.attention import (DistributedAttention,
-                                 LocalAttention)
+from fastvideo.attention import (DistributedAttention, LocalAttention)
 from fastvideo.configs.models.dits import WanVideoConfig
 from fastvideo.distributed.parallel_state import get_sp_world_size
 from fastvideo.forward_context import get_forward_context
-from fastvideo.layers.layernorm import (FP32LayerNorm, LayerNormScaleShift,
-                                        RMSNorm, ScaleResidual,
+from fastvideo.layers.layernorm import (FP32LayerNorm, LayerNormScaleShift, RMSNorm, ScaleResidual,
                                         ScaleResidualLayerNormScaleShift)
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.mlp import MLP
-from fastvideo.layers.rotary_embedding import (_apply_rotary_emb,
-                                               get_rotary_pos_embed)
+from fastvideo.layers.rotary_embedding import (_apply_rotary_emb, get_rotary_pos_embed)
 from fastvideo.layers.visual_embedding import (PatchEmbed)
 from fastvideo.logger import init_logger
 from fastvideo.models.dits._relative_rope import relativistic_window_offsets
@@ -65,16 +61,15 @@ class CausalWanSelfAttention(nn.Module):
         self.rope_cache_policy = rope_cache_policy
 
         # Scaled dot product attention
-        self.attn = LocalAttention(
-            num_heads=num_heads,
-            head_size=self.head_dim,
-            dropout_rate=0,
-            softmax_scale=None,
-            causal=False,
-            supported_attention_backends=(AttentionBackendEnum.FLASH_ATTN,
-                                          AttentionBackendEnum.TORCH_SDPA))
+        self.attn = LocalAttention(num_heads=num_heads,
+                                   head_size=self.head_dim,
+                                   dropout_rate=0,
+                                   softmax_scale=None,
+                                   causal=False,
+                                   supported_attention_backends=(AttentionBackendEnum.FLASH_ATTN,
+                                                                 AttentionBackendEnum.TORCH_SDPA))
 
-    def forward(self, 
+    def forward(self,
                 q: torch.Tensor,
                 k: torch.Tensor,
                 v: torch.Tensor,
@@ -106,31 +101,26 @@ class CausalWanSelfAttention(nn.Module):
         if kv_cache is None:
             # Padding for flex attention
             padded_length = math.ceil(q.shape[1] / 128) * 128 - q.shape[1]
-            padded_roped_query = torch.cat(
-                [roped_query,
-                    torch.zeros([q.shape[0], padded_length, q.shape[2], q.shape[3]],
-                                device=q.device, dtype=v.dtype)],
-                dim=1
-            )
+            padded_roped_query = torch.cat([
+                roped_query,
+                torch.zeros([q.shape[0], padded_length, q.shape[2], q.shape[3]], device=q.device, dtype=v.dtype)
+            ],
+                                           dim=1)
 
-            padded_roped_key = torch.cat(
-                [roped_key, torch.zeros([k.shape[0], padded_length, k.shape[2], k.shape[3]],
-                                        device=k.device, dtype=v.dtype)],
-                dim=1
-            )
+            padded_roped_key = torch.cat([
+                roped_key,
+                torch.zeros([k.shape[0], padded_length, k.shape[2], k.shape[3]], device=k.device, dtype=v.dtype)
+            ],
+                                         dim=1)
 
             padded_v = torch.cat(
-                [v, torch.zeros([v.shape[0], padded_length, v.shape[2], v.shape[3]],
-                                device=v.device, dtype=v.dtype)],
-                dim=1
-            )
+                [v, torch.zeros([v.shape[0], padded_length, v.shape[2], v.shape[3]], device=v.device, dtype=v.dtype)],
+                dim=1)
 
-            x = flex_attention(
-                query=padded_roped_query.transpose(2, 1),
-                key=padded_roped_key.transpose(2, 1),
-                value=padded_v.transpose(2, 1),
-                block_mask=block_mask
-            )[:, :, :-padded_length].transpose(2, 1)
+            x = flex_attention(query=padded_roped_query.transpose(2, 1),
+                               key=padded_roped_key.transpose(2, 1),
+                               value=padded_v.transpose(2, 1),
+                               block_mask=block_mask)[:, :, :-padded_length].transpose(2, 1)
         else:
             current_end = current_start + q.shape[1]
             sink_tokens = self.sink_size * frame_seqlen
@@ -139,28 +129,22 @@ class CausalWanSelfAttention(nn.Module):
             else:
                 max_attention_size = self.local_attn_size * frame_seqlen
             if self.local_attn_size == -1 and current_end > max_attention_size:
-                raise ValueError(
-                    "Causal Wan local_attn_size=-1 keeps the previous "
-                    f"{GLOBAL_ATTN_COMPAT_MAX_LATENT_FRAMES}-latent-frame KV "
-                    "window for compatibility. Set local_attn_size for "
-                    f"longer rollouts; got current_end={current_end} tokens "
-                    f"with frame_seqlen={frame_seqlen}.")
+                raise ValueError("Causal Wan local_attn_size=-1 keeps the previous "
+                                 f"{GLOBAL_ATTN_COMPAT_MAX_LATENT_FRAMES}-latent-frame KV "
+                                 "window for compatibility. Set local_attn_size for "
+                                 f"longer rollouts; got current_end={current_end} tokens "
+                                 f"with frame_seqlen={frame_seqlen}.")
             # If we are using local attention and the current KV cache size is larger than the local attention size, we need to truncate the KV cache
             kv_cache_size = kv_cache["k"].shape[1]
             num_new_tokens = q.shape[1]
             stored_key = k if relativistic else roped_key  # raw vs roped in cache
-            global_end_index = (
-                int(kv_cache["global_end_index"].item())
-                if isinstance(kv_cache["global_end_index"], torch.Tensor)
-                else int(kv_cache["global_end_index"])
-            )
-            local_end_index_prev = (
-                int(kv_cache["local_end_index"].item())
-                if isinstance(kv_cache["local_end_index"], torch.Tensor)
-                else int(kv_cache["local_end_index"])
-            )
-            if self.local_attn_size != -1 and (current_end > global_end_index) and (
-                    num_new_tokens + local_end_index_prev > kv_cache_size):
+            global_end_index = (int(kv_cache["global_end_index"].item()) if isinstance(
+                kv_cache["global_end_index"], torch.Tensor) else int(kv_cache["global_end_index"]))
+            local_end_index_prev = (int(kv_cache["local_end_index"].item()) if isinstance(
+                kv_cache["local_end_index"], torch.Tensor) else int(kv_cache["local_end_index"]))
+            if self.local_attn_size != -1 and (current_end
+                                               > global_end_index) and (num_new_tokens + local_end_index_prev
+                                                                        > kv_cache_size):
                 # Calculate the number of new tokens added in this step
                 # Shift existing cache content left to discard oldest tokens
                 # Clone the source slice to avoid overlapping memory error
@@ -188,14 +172,12 @@ class CausalWanSelfAttention(nn.Module):
             key_window = kv_cache["k"][:, max(0, local_end_index - max_attention_size):local_end_index]
             value_window = kv_cache["v"][:, max(0, local_end_index - max_attention_size):local_end_index]
             if relativistic:
-                window_len, query_lo, query_hi = relativistic_window_offsets(
-                    local_end_index, num_new_tokens, max_attention_size)
-                roped_query = _apply_rotary_emb(
-                    q, cos[query_lo:query_hi], sin[query_lo:query_hi],
-                    is_neox_style=False).type_as(v)
-                key_window = _apply_rotary_emb(
-                    key_window, cos[:window_len], sin[:window_len],
-                    is_neox_style=False).type_as(v)
+                window_len, query_lo, query_hi = relativistic_window_offsets(local_end_index, num_new_tokens,
+                                                                             max_attention_size)
+                roped_query = _apply_rotary_emb(q, cos[query_lo:query_hi], sin[query_lo:query_hi],
+                                                is_neox_style=False).type_as(v)
+                key_window = _apply_rotary_emb(key_window, cos[:window_len], sin[:window_len],
+                                               is_neox_style=False).type_as(v)
             x = self.attn(roped_query, key_window, value_window)
             if isinstance(kv_cache["global_end_index"], torch.Tensor):
                 kv_cache["global_end_index"].fill_(current_end)
@@ -207,6 +189,7 @@ class CausalWanSelfAttention(nn.Module):
                 kv_cache["local_end_index"] = local_end_index
 
         return x
+
 
 class CausalWanTransformerBlock(nn.Module):
 
@@ -232,14 +215,13 @@ class CausalWanTransformerBlock(nn.Module):
         self.to_v = ReplicatedLinear(dim, dim, bias=True)
 
         self.to_out = ReplicatedLinear(dim, dim, bias=True)
-        self.attn1 = CausalWanSelfAttention(
-            dim,
-            num_heads,
-            local_attn_size=local_attn_size,
-            sink_size=sink_size,
-            qk_norm=qk_norm,
-            eps=eps,
-            rope_cache_policy=rope_cache_policy)
+        self.attn1 = CausalWanSelfAttention(dim,
+                                            num_heads,
+                                            local_attn_size=local_attn_size,
+                                            sink_size=sink_size,
+                                            qk_norm=qk_norm,
+                                            eps=eps,
+                                            rope_cache_policy=rope_cache_policy)
         self.hidden_dim = dim
         self.num_attention_heads = num_heads
         self.local_attn_size = local_attn_size
@@ -255,25 +237,20 @@ class CausalWanTransformerBlock(nn.Module):
             print("QK Norm type not supported")
             raise Exception
         assert cross_attn_norm is True
-        self.self_attn_residual_norm = ScaleResidualLayerNormScaleShift(
-            dim,
-            norm_type="layer",
-            eps=eps,
-            elementwise_affine=True,
-            dtype=torch.float32)
+        self.self_attn_residual_norm = ScaleResidualLayerNormScaleShift(dim,
+                                                                        norm_type="layer",
+                                                                        eps=eps,
+                                                                        elementwise_affine=True,
+                                                                        dtype=torch.float32)
 
         # 2. Cross-attention
         # Only T2V for now
-        self.attn2 = WanT2VCrossAttention(dim,
-                                            num_heads,
-                                            qk_norm=qk_norm,
-                                            eps=eps)
-        self.cross_attn_residual_norm = ScaleResidualLayerNormScaleShift(
-            dim,
-            norm_type="layer",
-            eps=eps,
-            elementwise_affine=False,
-            dtype=torch.float32)
+        self.attn2 = WanT2VCrossAttention(dim, num_heads, qk_norm=qk_norm, eps=eps)
+        self.cross_attn_residual_norm = ScaleResidualLayerNormScaleShift(dim,
+                                                                         norm_type="layer",
+                                                                         eps=eps,
+                                                                         elementwise_affine=False,
+                                                                         dtype=torch.float32)
 
         # 3. Feed-forward
         self.ffn = MLP(dim, ffn_dim, act_type="gelu_pytorch_tanh")
@@ -310,14 +287,13 @@ class CausalWanTransformerBlock(nn.Module):
         e = self.scale_shift_table + temb
         # e.shape: [batch_size, temb_seq_len, 6, inner_dim]
         assert e.shape == (bs, temb_seq_len, 6, self.hidden_dim)
-        shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = e.chunk(
-            6, dim=2)
+        shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = e.chunk(6, dim=2)
         # *_msa.shape: [batch_size, temb_seq_len, 1, inner_dim]
         # assert shift_msa.dtype == torch.float32
 
         # 1. Self-attention
         norm_hidden_states = (self.norm1(hidden_states).unflatten(dim=1, sizes=(temb_seq_len, tokens_per_temb)) *
-                        (1 + scale_msa) + shift_msa).flatten(1, 2)
+                              (1 + scale_msa) + shift_msa).flatten(1, 2)
         query, _ = self.to_q(norm_hidden_states)
         key, _ = self.to_k(norm_hidden_states)
         value, _ = self.to_v(norm_hidden_states)
@@ -347,18 +323,17 @@ class CausalWanTransformerBlock(nn.Module):
         attn_output = attn_output.squeeze(1)
 
         null_shift = null_scale = torch.tensor([0], device=hidden_states.device)
-        norm_hidden_states, hidden_states = self.self_attn_residual_norm(
-            hidden_states, attn_output, gate_msa, null_shift, null_scale)
-        norm_hidden_states, hidden_states = norm_hidden_states.to(
-            orig_dtype), hidden_states.to(orig_dtype)
+        norm_hidden_states, hidden_states = self.self_attn_residual_norm(hidden_states, attn_output, gate_msa,
+                                                                         null_shift, null_scale)
+        norm_hidden_states, hidden_states = norm_hidden_states.to(orig_dtype), hidden_states.to(orig_dtype)
 
         # 2. Cross-attention
         attn_output = self.attn2(norm_hidden_states,
                                  context=encoder_hidden_states,
                                  context_lens=None,
                                  crossattn_cache=crossattn_cache)
-        norm_hidden_states, hidden_states = self.cross_attn_residual_norm(
-            hidden_states, attn_output, 1, c_shift_msa, c_scale_msa)
+        norm_hidden_states, hidden_states = self.cross_attn_residual_norm(hidden_states, attn_output, 1, c_shift_msa,
+                                                                          c_scale_msa)
 
         # 3. Feed-forward
         ff_output = self.ffn(norm_hidden_states)
@@ -366,17 +341,16 @@ class CausalWanTransformerBlock(nn.Module):
 
         return hidden_states
 
+
 class CausalWanTransformer3DModel(BaseDiT):
     _fsdp_shard_conditions = WanVideoConfig()._fsdp_shard_conditions
     _compile_conditions = WanVideoConfig()._compile_conditions
-    _supported_attention_backends = WanVideoConfig(
-    )._supported_attention_backends
+    _supported_attention_backends = WanVideoConfig()._supported_attention_backends
     param_names_mapping = WanVideoConfig().param_names_mapping
     reverse_param_names_mapping = WanVideoConfig().reverse_param_names_mapping
     lora_param_names_mapping = WanVideoConfig().lora_param_names_mapping
 
-    def __init__(self, config: WanVideoConfig, hf_config: dict[str,
-                                                               Any]) -> None:
+    def __init__(self, config: WanVideoConfig, hf_config: dict[str, Any]) -> None:
         super().__init__(config=config, hf_config=hf_config)
 
         inner_dim = config.num_attention_heads * config.attention_head_dim
@@ -408,17 +382,17 @@ class CausalWanTransformer3DModel(BaseDiT):
         # 3. Transformer blocks
         self.blocks = nn.ModuleList([
             CausalWanTransformerBlock(inner_dim,
-                              config.ffn_dim,
-                              config.num_attention_heads,
-                              config.local_attn_size,
-                              config.sink_size,
-                              config.qk_norm,
-                              config.cross_attn_norm,
-                              config.eps,
-                              config.added_kv_proj_dim,
-                              self._supported_attention_backends,
-                              prefix=f"{config.prefix}.blocks.{i}",
-                              rope_cache_policy=config.arch_config.rope_cache_policy)
+                                      config.ffn_dim,
+                                      config.num_attention_heads,
+                                      config.local_attn_size,
+                                      config.sink_size,
+                                      config.qk_norm,
+                                      config.cross_attn_norm,
+                                      config.eps,
+                                      config.added_kv_proj_dim,
+                                      self._supported_attention_backends,
+                                      prefix=f"{config.prefix}.blocks.{i}",
+                                      rope_cache_policy=config.arch_config.rope_cache_policy)
             for i in range(config.num_layers)
         ])
 
@@ -428,10 +402,8 @@ class CausalWanTransformer3DModel(BaseDiT):
                                             eps=config.eps,
                                             elementwise_affine=False,
                                             dtype=torch.float32)
-        self.proj_out = nn.Linear(
-            inner_dim, config.out_channels * math.prod(config.patch_size))
-        self.scale_shift_table = nn.Parameter(
-            torch.randn(1, 2, inner_dim) / inner_dim**0.5)
+        self.proj_out = nn.Linear(inner_dim, config.out_channels * math.prod(config.patch_size))
+        self.scale_shift_table = nn.Parameter(torch.randn(1, 2, inner_dim) / inner_dim**0.5)
 
         self.gradient_checkpointing = False
 
@@ -445,10 +417,11 @@ class CausalWanTransformer3DModel(BaseDiT):
         self.__post_init__()
 
     @staticmethod
-    def _prepare_blockwise_causal_attn_mask(
-        device: torch.device | str, num_frames: int = 21,
-        frame_seqlen: int = 1560, num_frame_per_block=1, local_attn_size=-1
-    ) -> BlockMask:
+    def _prepare_blockwise_causal_attn_mask(device: torch.device | str,
+                                            num_frames: int = 21,
+                                            frame_seqlen: int = 1560,
+                                            num_frame_per_block=1,
+                                            local_attn_size=-1) -> BlockMask:
         """
         we will divide the token sequence into the following format
         [1 latent frame] [1 latent frame] ... [1 latent frame]
@@ -459,16 +432,10 @@ class CausalWanTransformer3DModel(BaseDiT):
         # we do right padding to get to a multiple of 128
         padded_length = math.ceil(total_length / 128) * 128 - total_length
 
-        ends = torch.zeros(total_length + padded_length,
-                           device=device, dtype=torch.long)
+        ends = torch.zeros(total_length + padded_length, device=device, dtype=torch.long)
 
         # Block-wise causal mask will attend to all elements that are before the end of the current chunk
-        frame_indices = torch.arange(
-            start=0,
-            end=total_length,
-            step=frame_seqlen * num_frame_per_block,
-            device=device
-        )
+        frame_indices = torch.arange(start=0, end=total_length, step=frame_seqlen * num_frame_per_block, device=device)
 
         for tmp in frame_indices:
             ends[tmp:tmp + frame_seqlen * num_frame_per_block] = tmp + \
@@ -478,15 +445,20 @@ class CausalWanTransformer3DModel(BaseDiT):
             if local_attn_size == -1:
                 return (kv_idx < ends[q_idx]) | (q_idx == kv_idx)
             else:
-                return ((kv_idx < ends[q_idx]) & (kv_idx >= (ends[q_idx] - local_attn_size * frame_seqlen))) | (q_idx == kv_idx)
+                return ((kv_idx < ends[q_idx]) &
+                        (kv_idx >= (ends[q_idx] - local_attn_size * frame_seqlen))) | (q_idx == kv_idx)
             # return ((kv_idx < total_length) & (q_idx < total_length))  | (q_idx == kv_idx) # bidirectional mask
 
-        block_mask = create_block_mask(attention_mask, B=None, H=None, Q_LEN=total_length + padded_length,
-                                       KV_LEN=total_length + padded_length, _compile=False, device=device)
+        block_mask = create_block_mask(attention_mask,
+                                       B=None,
+                                       H=None,
+                                       Q_LEN=total_length + padded_length,
+                                       KV_LEN=total_length + padded_length,
+                                       _compile=False,
+                                       device=device)
 
         if not dist.is_initialized() or dist.get_rank() == 0:
-            print(
-                f" cache a block wise causal mask with block size of {num_frame_per_block} frames")
+            print(f" cache a block wise causal mask with block size of {num_frame_per_block} frames")
             print(block_mask)
 
         # import imageio
@@ -502,22 +474,22 @@ class CausalWanTransformer3DModel(BaseDiT):
         return block_mask
 
     @staticmethod
-    def _prepare_teacher_forcing_mask(
-        device: torch.device | str, num_frames: int = 21,
-        frame_seqlen: int = 1560, num_frame_per_block=1, local_attn_size=-1
-    ) -> BlockMask:
+    def _prepare_teacher_forcing_mask(device: torch.device | str,
+                                      num_frames: int = 21,
+                                      frame_seqlen: int = 1560,
+                                      num_frame_per_block=1,
+                                      local_attn_size=-1) -> BlockMask:
         """Attention mask for the teacher-forcing ``[clean | noisy]`` sequence.
 
         A noisy token attends to its own block plus the clean context of all
         strictly previous blocks; clean tokens are block-wise causal.
         """
         if local_attn_size != -1:
-            raise NotImplementedError(
-                f"Teacher forcing ignores local_attn_size={local_attn_size}: "
-                "unlike the block-wise causal mask, this mask always attends "
-                "to the full clean context. Windowed teacher forcing is not "
-                "implemented; use local_attn_size=-1 for teacher-forcing "
-                "training.")
+            raise NotImplementedError(f"Teacher forcing ignores local_attn_size={local_attn_size}: "
+                                      "unlike the block-wise causal mask, this mask always attends "
+                                      "to the full clean context. Windowed teacher forcing is not "
+                                      "implemented; use local_attn_size=-1 for teacher-forcing "
+                                      "training.")
         total_length = num_frames * frame_seqlen * 2
         padded_length = math.ceil(total_length / 128) * 128 - total_length
 
@@ -529,17 +501,19 @@ class CausalWanTransformer3DModel(BaseDiT):
         noise_noise_ends = torch.zeros(total_length + padded_length, device=device, dtype=torch.long)
 
         attention_block_size = frame_seqlen * num_frame_per_block
-        frame_indices = torch.arange(
-            start=0, end=num_frames * frame_seqlen,
-            step=attention_block_size, device=device, dtype=torch.long
-        )
+        frame_indices = torch.arange(start=0,
+                                     end=num_frames * frame_seqlen,
+                                     step=attention_block_size,
+                                     device=device,
+                                     dtype=torch.long)
         for start in frame_indices:
             context_ends[start:start + attention_block_size] = start + attention_block_size
 
-        noisy_image_start_list = torch.arange(
-            num_frames * frame_seqlen, total_length,
-            step=attention_block_size, device=device, dtype=torch.long
-        )
+        noisy_image_start_list = torch.arange(num_frames * frame_seqlen,
+                                              total_length,
+                                              step=attention_block_size,
+                                              device=device,
+                                              dtype=torch.long)
         noisy_image_end_list = noisy_image_start_list + attention_block_size
         for block_index, (start, end) in enumerate(zip(noisy_image_start_list, noisy_image_end_list)):
             noise_noise_starts[start:end] = start
@@ -554,10 +528,13 @@ class CausalWanTransformer3DModel(BaseDiT):
             eye_mask = q_idx == kv_idx
             return eye_mask | clean_mask | noise_mask
 
-        block_mask = create_block_mask(
-            attention_mask, B=None, H=None,
-            Q_LEN=total_length + padded_length, KV_LEN=total_length + padded_length,
-            _compile=False, device=device)
+        block_mask = create_block_mask(attention_mask,
+                                       B=None,
+                                       H=None,
+                                       Q_LEN=total_length + padded_length,
+                                       KV_LEN=total_length + padded_length,
+                                       _compile=False,
+                                       device=device)
 
         if not dist.is_initialized() or dist.get_rank() == 0:
             print(f" cache a teacher-forcing mask with block size of {num_frame_per_block} frames")
@@ -565,19 +542,18 @@ class CausalWanTransformer3DModel(BaseDiT):
 
         return block_mask
 
-    def _forward_inference(
-                self,
-                hidden_states: torch.Tensor,
-                encoder_hidden_states: torch.Tensor | list[torch.Tensor],
-                timestep: torch.LongTensor,
-                encoder_hidden_states_image: torch.Tensor | list[torch.Tensor]
-                | None = None,
-                kv_cache: dict = None,
-                crossattn_cache: dict = None,
-                current_start: int = 0,
-                cache_start: int = 0,
-                start_frame: int = 0,
-                **kwargs) -> torch.Tensor:
+    def _forward_inference(self,
+                           hidden_states: torch.Tensor,
+                           encoder_hidden_states: torch.Tensor | list[torch.Tensor],
+                           timestep: torch.LongTensor,
+                           encoder_hidden_states_image: torch.Tensor | list[torch.Tensor]
+                           | None = None,
+                           kv_cache: dict = None,
+                           crossattn_cache: dict = None,
+                           current_start: int = 0,
+                           cache_start: int = 0,
+                           start_frame: int = 0,
+                           **kwargs) -> torch.Tensor:
         r"""
         Run the diffusion model with kv caching.
         See Algorithm 2 of CausVid paper https://arxiv.org/abs/2412.07772 for details.
@@ -588,11 +564,9 @@ class CausalWanTransformer3DModel(BaseDiT):
         orig_dtype = hidden_states.dtype
         if not isinstance(encoder_hidden_states, torch.Tensor):
             encoder_hidden_states = encoder_hidden_states[0]
-        if isinstance(encoder_hidden_states_image,
-                      list) and len(encoder_hidden_states_image) > 0:
-            encoder_hidden_states_image = encoder_hidden_states_image[0]
-        else:
-            encoder_hidden_states_image = None
+        if isinstance(encoder_hidden_states_image, list):
+            encoder_hidden_states_image = (encoder_hidden_states_image[0]
+                                           if len(encoder_hidden_states_image) > 0 else None)
 
         batch_size, num_channels, num_frames, height, width = hidden_states.shape
         p_t, p_h, p_w = self.patch_size
@@ -605,46 +579,44 @@ class CausalWanTransformer3DModel(BaseDiT):
         rope_dim_list = [d - 4 * (d // 6), 2 * (d // 6), 2 * (d // 6)]
         if self.rope_cache_policy == "relativistic":
             # fixed table over [0, max_attention_frames); attention slices it per step
-            max_attention_frames = (
-                GLOBAL_ATTN_COMPAT_MAX_LATENT_FRAMES
-                if self.local_attn_size == -1 else self.local_attn_size)
+            max_attention_frames = (GLOBAL_ATTN_COMPAT_MAX_LATENT_FRAMES
+                                    if self.local_attn_size == -1 else self.local_attn_size)
             rope_num_frames = max_attention_frames * get_sp_world_size()
             rope_start_frame = 0
         else:
             rope_num_frames = post_patch_num_frames * get_sp_world_size()
             rope_start_frame = start_frame  # 0 when kv_cache is None
-        freqs_cos, freqs_sin = get_rotary_pos_embed(
-            (rope_num_frames, post_patch_height, post_patch_width),
-            self.hidden_size,
-            self.num_attention_heads,
-            rope_dim_list,
-            dtype=torch.float32 if current_platform.is_mps() else torch.float64,
-            rope_theta=10000,
-            start_frame=rope_start_frame
-        )
+        freqs_cos, freqs_sin = get_rotary_pos_embed((rope_num_frames, post_patch_height, post_patch_width),
+                                                    self.hidden_size,
+                                                    self.num_attention_heads,
+                                                    rope_dim_list,
+                                                    dtype=torch.float32 if current_platform.is_mps() else torch.float64,
+                                                    rope_theta=10000,
+                                                    start_frame=rope_start_frame)
         freqs_cos = freqs_cos.to(hidden_states.device)
         freqs_sin = freqs_sin.to(hidden_states.device)
-        freqs_cis = (freqs_cos,
-                     freqs_sin) if freqs_cos is not None else None
+        freqs_cis = (freqs_cos, freqs_sin) if freqs_cos is not None else None
 
         hidden_states = self.patch_embedding(hidden_states)
-        grid_sizes = torch.stack(
-            [torch.tensor(hidden_states[0].shape[1:], dtype=torch.long)])
+        grid_sizes = torch.stack([torch.tensor(hidden_states[0].shape[1:], dtype=torch.long)])
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
 
-        encoder_hidden_states = torch.cat([encoder_hidden_states, encoder_hidden_states.new_zeros(1, self.text_len - encoder_hidden_states.size(1), encoder_hidden_states.size(2))], dim=1)
+        encoder_hidden_states = torch.cat([
+            encoder_hidden_states,
+            encoder_hidden_states.new_zeros(1, self.text_len - encoder_hidden_states.size(1),
+                                            encoder_hidden_states.size(2))
+        ],
+                                          dim=1)
 
         temb, timestep_proj, encoder_hidden_states, encoder_hidden_states_image = self.condition_embedder(
-                        timestep.flatten(), encoder_hidden_states, encoder_hidden_states_image)
+            timestep.flatten(), encoder_hidden_states, encoder_hidden_states_image)
         timestep_proj = timestep_proj.unflatten(1, (6, self.hidden_size)).unflatten(dim=0, sizes=timestep.shape)
 
         if encoder_hidden_states_image is not None:
-            encoder_hidden_states = torch.concat(
-                [encoder_hidden_states_image, encoder_hidden_states], dim=1)
+            encoder_hidden_states = torch.concat([encoder_hidden_states_image, encoder_hidden_states], dim=1)
 
         encoder_hidden_states = encoder_hidden_states.to(
-            orig_dtype) if current_platform.is_mps(
-            ) else encoder_hidden_states  # cast to orig_dtype for MPS
+            orig_dtype) if current_platform.is_mps() else encoder_hidden_states  # cast to orig_dtype for MPS
 
         assert encoder_hidden_states.dtype == orig_dtype
 
@@ -658,28 +630,22 @@ class CausalWanTransformer3DModel(BaseDiT):
                     "block_mask": self.block_mask,
                     "frame_seqlen": post_patch_height * post_patch_width,
                 }
-                hidden_states = self._gradient_checkpointing_func(
-                    block, hidden_states, encoder_hidden_states,
-                    timestep_proj, freqs_cis,
-                    **causal_kwargs)
+                hidden_states = self._gradient_checkpointing_func(block, hidden_states, encoder_hidden_states,
+                                                                  timestep_proj, freqs_cis, **causal_kwargs)
             else:
                 causal_kwargs = {
                     "kv_cache": kv_cache[block_index],
-                    "crossattn_cache": (crossattn_cache[block_index]
-                                        if crossattn_cache is not None else None),
+                    "crossattn_cache": (crossattn_cache[block_index] if crossattn_cache is not None else None),
                     "current_start": current_start,
                     "cache_start": cache_start,
                     "block_mask": self.block_mask,
                     "frame_seqlen": post_patch_height * post_patch_width,
                 }
-                hidden_states = block(hidden_states, encoder_hidden_states,
-                                        timestep_proj, freqs_cis,
-                                        **causal_kwargs)
+                hidden_states = block(hidden_states, encoder_hidden_states, timestep_proj, freqs_cis, **causal_kwargs)
 
         # 5. Output norm, projection & unpatchify
         temb = temb.unflatten(dim=0, sizes=timestep.shape).unsqueeze(2)
-        shift, scale = (self.scale_shift_table.unsqueeze(1) + temb).chunk(2,
-                                                                    dim=2)
+        shift, scale = (self.scale_shift_table.unsqueeze(1) + temb).chunk(2, dim=2)
         hidden_states = self.norm_out(hidden_states, shift, scale)
         hidden_states = self.proj_out(hidden_states)
 
@@ -688,25 +654,23 @@ class CausalWanTransformer3DModel(BaseDiT):
         return torch.stack(output)
 
     def _forward_train(self,
-                hidden_states: torch.Tensor,
-                encoder_hidden_states: torch.Tensor | list[torch.Tensor],
-                timestep: torch.LongTensor,
-                encoder_hidden_states_image: torch.Tensor | list[torch.Tensor]
-                | None = None,
-                start_frame: int = 0,
-                clean_x: torch.Tensor | None = None,
-                aug_t: torch.Tensor | None = None,
-                **kwargs) -> torch.Tensor:
+                       hidden_states: torch.Tensor,
+                       encoder_hidden_states: torch.Tensor | list[torch.Tensor],
+                       timestep: torch.LongTensor,
+                       encoder_hidden_states_image: torch.Tensor | list[torch.Tensor]
+                       | None = None,
+                       start_frame: int = 0,
+                       clean_x: torch.Tensor | None = None,
+                       aug_t: torch.Tensor | None = None,
+                       **kwargs) -> torch.Tensor:
 
         orig_dtype = hidden_states.dtype
         teacher_forcing = clean_x is not None
         if not isinstance(encoder_hidden_states, torch.Tensor):
             encoder_hidden_states = encoder_hidden_states[0]
-        if isinstance(encoder_hidden_states_image,
-                      list) and len(encoder_hidden_states_image) > 0:
-            encoder_hidden_states_image = encoder_hidden_states_image[0]
-        else:
-            encoder_hidden_states_image = None
+        if isinstance(encoder_hidden_states_image, list):
+            encoder_hidden_states_image = (encoder_hidden_states_image[0]
+                                           if len(encoder_hidden_states_image) > 0 else None)
 
         batch_size, num_channels, num_frames, height, width = hidden_states.shape
         p_t, p_h, p_w = self.patch_size
@@ -718,19 +682,16 @@ class CausalWanTransformer3DModel(BaseDiT):
         d = self.hidden_size // self.num_attention_heads
         rope_dim_list = [d - 4 * (d // 6), 2 * (d // 6), 2 * (d // 6)]
         freqs_cos, freqs_sin = get_rotary_pos_embed(
-            (post_patch_num_frames * get_sp_world_size(), post_patch_height,
-             post_patch_width),
+            (post_patch_num_frames * get_sp_world_size(), post_patch_height, post_patch_width),
             self.hidden_size,
             self.num_attention_heads,
             rope_dim_list,
             dtype=torch.float32 if current_platform.is_mps() else torch.float64,
             rope_theta=10000,
-            start_frame=start_frame
-        )
+            start_frame=start_frame)
         freqs_cos = freqs_cos.to(hidden_states.device)
         freqs_sin = freqs_sin.to(hidden_states.device)
-        freqs_cis = (freqs_cos,
-                     freqs_sin) if freqs_cos is not None else None
+        freqs_cis = (freqs_cos, freqs_sin) if freqs_cos is not None else None
 
         if teacher_forcing:
             if self.teacher_forcing_block_mask is None:
@@ -744,34 +705,35 @@ class CausalWanTransformer3DModel(BaseDiT):
             block_mask = self.teacher_forcing_block_mask
         else:
             if self.block_mask is None:
-                self.block_mask = self._prepare_blockwise_causal_attn_mask(
-                    device=hidden_states.device,
-                    num_frames=num_frames,
-                    frame_seqlen=post_patch_height * post_patch_width,
-                    num_frame_per_block=self.num_frame_per_block,
-                    local_attn_size=self.local_attn_size
-                )
+                self.block_mask = self._prepare_blockwise_causal_attn_mask(device=hidden_states.device,
+                                                                           num_frames=num_frames,
+                                                                           frame_seqlen=post_patch_height *
+                                                                           post_patch_width,
+                                                                           num_frame_per_block=self.num_frame_per_block,
+                                                                           local_attn_size=self.local_attn_size)
             block_mask = self.block_mask
 
         hidden_states = self.patch_embedding(hidden_states)
-        grid_sizes = torch.stack(
-            [torch.tensor(hidden_states[0].shape[1:], dtype=torch.long)])
+        grid_sizes = torch.stack([torch.tensor(hidden_states[0].shape[1:], dtype=torch.long)])
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
 
-        encoder_hidden_states = torch.cat([encoder_hidden_states, encoder_hidden_states.new_zeros(1, self.text_len - encoder_hidden_states.size(1), encoder_hidden_states.size(2))], dim=1)
+        encoder_hidden_states = torch.cat([
+            encoder_hidden_states,
+            encoder_hidden_states.new_zeros(1, self.text_len - encoder_hidden_states.size(1),
+                                            encoder_hidden_states.size(2))
+        ],
+                                          dim=1)
         encoder_hidden_states_text = encoder_hidden_states
 
         temb, timestep_proj, encoder_hidden_states, encoder_hidden_states_image = self.condition_embedder(
-                        timestep.flatten(), encoder_hidden_states, encoder_hidden_states_image)
+            timestep.flatten(), encoder_hidden_states, encoder_hidden_states_image)
         timestep_proj = timestep_proj.unflatten(1, (6, self.hidden_size)).unflatten(dim=0, sizes=timestep.shape)
 
         if encoder_hidden_states_image is not None:
-            encoder_hidden_states = torch.concat(
-                [encoder_hidden_states_image, encoder_hidden_states], dim=1)
+            encoder_hidden_states = torch.concat([encoder_hidden_states_image, encoder_hidden_states], dim=1)
 
         encoder_hidden_states = encoder_hidden_states.to(
-            orig_dtype) if current_platform.is_mps(
-            ) else encoder_hidden_states  # cast to orig_dtype for MPS
+            orig_dtype) if current_platform.is_mps() else encoder_hidden_states  # cast to orig_dtype for MPS
 
         assert encoder_hidden_states.dtype == orig_dtype
 
@@ -781,34 +743,36 @@ class CausalWanTransformer3DModel(BaseDiT):
             hidden_states = torch.cat([clean_tokens, hidden_states], dim=1)
             if aug_t is None:
                 aug_t = torch.zeros_like(timestep)
-            _, timestep_proj_clean, _, _ = self.condition_embedder(
-                aug_t.flatten(), encoder_hidden_states_text, None)
-            timestep_proj_clean = timestep_proj_clean.unflatten(
-                1, (6, self.hidden_size)).unflatten(dim=0, sizes=timestep.shape)
+            _, timestep_proj_clean, _, _ = self.condition_embedder(aug_t.flatten(), encoder_hidden_states_text, None)
+            timestep_proj_clean = timestep_proj_clean.unflatten(1,
+                                                                (6, self.hidden_size)).unflatten(dim=0,
+                                                                                                 sizes=timestep.shape)
             timestep_proj = torch.cat([timestep_proj_clean, timestep_proj], dim=1)
-            freqs_cis = (torch.cat([freqs_cos, freqs_cos], dim=0),
-                         torch.cat([freqs_sin, freqs_sin], dim=0))
+            freqs_cis = (torch.cat([freqs_cos, freqs_cos], dim=0), torch.cat([freqs_sin, freqs_sin], dim=0))
 
         # 4. Transformer blocks
         if torch.is_grad_enabled() and self.gradient_checkpointing:
             for block in self.blocks:
-                hidden_states = self._gradient_checkpointing_func(
-                    block, hidden_states, encoder_hidden_states,
-                    timestep_proj, freqs_cis,
-                    block_mask=block_mask)
+                hidden_states = self._gradient_checkpointing_func(block,
+                                                                  hidden_states,
+                                                                  encoder_hidden_states,
+                                                                  timestep_proj,
+                                                                  freqs_cis,
+                                                                  block_mask=block_mask)
         else:
             for block in self.blocks:
-                hidden_states = block(hidden_states, encoder_hidden_states,
-                                        timestep_proj, freqs_cis,
-                                        block_mask=block_mask)
+                hidden_states = block(hidden_states,
+                                      encoder_hidden_states,
+                                      timestep_proj,
+                                      freqs_cis,
+                                      block_mask=block_mask)
 
         if teacher_forcing:
             hidden_states = hidden_states[:, hidden_states.shape[1] // 2:]
 
         # 5. Output norm, projection & unpatchify
         temb = temb.unflatten(dim=0, sizes=timestep.shape).unsqueeze(2)
-        shift, scale = (self.scale_shift_table.unsqueeze(1) + temb).chunk(2,
-                                                                    dim=2)
+        shift, scale = (self.scale_shift_table.unsqueeze(1) + temb).chunk(2, dim=2)
         hidden_states = self.norm_out(hidden_states, shift, scale)
         hidden_states = self.proj_out(hidden_states)
 
@@ -816,16 +780,11 @@ class CausalWanTransformer3DModel(BaseDiT):
 
         return torch.stack(output)
 
-    def forward(
-        self,
-        *args,
-        **kwargs
-    ):
+    def forward(self, *args, **kwargs):
         if kwargs.get('kv_cache', None) is not None:
             return self._forward_inference(*args, **kwargs)
         else:
             return self._forward_train(*args, **kwargs)
-
 
     def unpatchify(self, x, grid_sizes):
         r"""
@@ -852,6 +811,7 @@ class CausalWanTransformer3DModel(BaseDiT):
             u = u.reshape(c, *[i * j for i, j in zip(v, self.patch_size)])
             out.append(u)
         return out
+
 
 # Entry point for model registry
 EntryClass = CausalWanTransformer3DModel

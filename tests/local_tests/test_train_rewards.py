@@ -22,6 +22,7 @@ def test_select_first_frame_keeps_frame_tensor():
 
 
 def test_multi_reward_weighted_sum_with_injected_scorers():
+
     def pickscore(media, prompts):
         assert media.shape == (2, 3, 4, 5, 6)
         assert prompts == ["a", "b"]
@@ -33,7 +34,10 @@ def test_multi_reward_weighted_sum_with_injected_scorers():
         return torch.tensor([0.5, 1.5])
 
     scorer = MultiRewardScorer(
-        {"pickscore": 2.0, "clipscore": 3.0},
+        {
+            "pickscore": 2.0,
+            "clipscore": 3.0
+        },
         scorers={
             "pickscore": pickscore,
             "clipscore": clipscore,
@@ -50,7 +54,9 @@ def test_multi_reward_weighted_sum_with_injected_scorers():
 def test_multi_reward_validates_score_shape():
     scorer = MultiRewardScorer(
         {"pickscore": 1.0},
-        scorers={"pickscore": lambda media, prompts: torch.tensor([[1.0], [2.0]])},
+        scorers={
+            "pickscore": lambda media, prompts: torch.tensor([[1.0], [2.0]])
+        },
     )
 
     with pytest.raises(ValueError, match="must return shape"):

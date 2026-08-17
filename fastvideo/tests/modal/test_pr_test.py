@@ -44,6 +44,7 @@ class _FakeSecret:
 class _FakeApp:
 
     def function(self, *_args, **_kwargs):
+
         def decorator(func):
             return func
 
@@ -64,8 +65,7 @@ def _load_pr_test_module(monkeypatch):
     monkeypatch.setitem(sys.modules, "modal", fake_modal)
     monkeypatch.setitem(sys.modules, "modal_image_utils", fake_image_utils)
     module_path = Path(__file__).with_name("pr_test.py")
-    spec = importlib.util.spec_from_file_location(
-        "modal_pr_test_under_test", module_path)
+    spec = importlib.util.spec_from_file_location("modal_pr_test_under_test", module_path)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)
@@ -87,8 +87,7 @@ def test_checkout_repository_retries_clone_and_fetches_pr_ref(monkeypatch):
     monkeypatch.setattr(
         module.shutil,
         "rmtree",
-        lambda path, ignore_errors: cleanup_paths.append(
-            (path, ignore_errors)),
+        lambda path, ignore_errors: cleanup_paths.append((path, ignore_errors)),
     )
     monkeypatch.setattr(module.time, "sleep", sleep_seconds.append)
 
@@ -121,11 +120,26 @@ def test_checkout_repository_retries_clone_and_fetches_pr_ref(monkeypatch):
     ]
     assert sleep_seconds == [5]
     assert [kwargs for _, kwargs in commands] == [
-        {"cwd": "/", "check": False},
-        {"cwd": "/", "check": False},
-        {"cwd": "/tmp/FastVideo", "check": False},
-        {"cwd": "/tmp/FastVideo", "check": False},
-        {"cwd": "/tmp/FastVideo", "check": False},
+        {
+            "cwd": "/",
+            "check": False
+        },
+        {
+            "cwd": "/",
+            "check": False
+        },
+        {
+            "cwd": "/tmp/FastVideo",
+            "check": False
+        },
+        {
+            "cwd": "/tmp/FastVideo",
+            "check": False
+        },
+        {
+            "cwd": "/tmp/FastVideo",
+            "check": False
+        },
     ]
 
     fetch_command = commands[2][0]
@@ -187,8 +201,7 @@ def test_git_retry_exhaustion_is_bounded_and_cleans_each_attempt(monkeypatch):
     monkeypatch.setattr(
         module.shutil,
         "rmtree",
-        lambda path, ignore_errors: cleanup_paths.append(
-            (path, ignore_errors)),
+        lambda path, ignore_errors: cleanup_paths.append((path, ignore_errors)),
     )
     monkeypatch.setattr(module.time, "sleep", sleep_seconds.append)
 
@@ -215,14 +228,12 @@ def test_git_retry_exhaustion_is_bounded_and_cleans_each_attempt(monkeypatch):
         ("https://example.com/repo.git", "0123456789abcdef", "0"),
     ],
 )
-def test_checkout_repository_rejects_invalid_buildkite_values(
-        monkeypatch, git_repo, git_commit, pr_number):
+def test_checkout_repository_rejects_invalid_buildkite_values(monkeypatch, git_repo, git_commit, pr_number):
     module = _load_pr_test_module(monkeypatch)
     monkeypatch.setattr(
         module.subprocess,
         "run",
-        lambda *_args, **_kwargs: pytest.fail(
-            "git must not run for invalid input"),
+        lambda *_args, **_kwargs: pytest.fail("git must not run for invalid input"),
     )
 
     with pytest.raises(RuntimeError):
@@ -236,16 +247,13 @@ def test_checkout_repository_rejects_invalid_buildkite_values(
         (False, ""),
     ],
 )
-def test_run_test_command_composes_valid_post_checkout_shell(
-        monkeypatch, build_kernel, install_command):
+def test_run_test_command_composes_valid_post_checkout_shell(monkeypatch, build_kernel, install_command):
     module = _load_pr_test_module(monkeypatch)
     real_run = subprocess.run
     events = []
 
-    monkeypatch.setenv(
-        "BUILDKITE_REPO", "https://github.com/hao-ai-lab/FastVideo.git")
-    monkeypatch.setenv(
-        "BUILDKITE_COMMIT", "0123456789abcdef0123456789abcdef01234567")
+    monkeypatch.setenv("BUILDKITE_REPO", "https://github.com/hao-ai-lab/FastVideo.git")
+    monkeypatch.setenv("BUILDKITE_COMMIT", "0123456789abcdef0123456789abcdef01234567")
     monkeypatch.setenv("BUILDKITE_PULL_REQUEST", "false")
     monkeypatch.setattr(
         module,
@@ -265,13 +273,60 @@ def test_run_test_command_composes_valid_post_checkout_shell(
         install_command=install_command,
     )
 
-    assert [event for event, _ in events] == ["checkout", "run"]
-    shell_command = events[1][1][-1]
-    assert "cd /FastVideo" in shell_command
-    assert "git clone" not in shell_command
-    assert ("./build.sh" in shell_command) is build_kernel
+    assert [event for event, _ in events] == ["checkout", "run", "run"]
+    setup_command = events[1][1][-1]
+    test_command = events[2][1][-1]
+    assert "cd /FastVideo" in setup_command
+    assert "git clone" not in setup_command
+    assert ("kernel_build_cache.py install" in setup_command) is build_kernel
+    assert "pytest fastvideo/tests/api -q" not in setup_command
+    assert "kernel_build_cache.py install" not in test_command
+    assert "pytest fastvideo/tests/api -q" in test_command
     if install_command:
-        assert install_command in shell_command
+        assert install_command in setup_command
     else:
-        assert "uv pip install -e" not in shell_command
-    real_run(["/bin/bash", "-n"], input=shell_command, text=True, check=True)
+        assert "uv pip install -e" not in setup_command
+    for shell_command in (setup_command, test_command):
+        real_run(["/bin/bash", "-n"], input=shell_command, text=True, check=True)
+
+
+def test_run_test_command_uses_nonshared_kernel_install_before_tests(monkeypatch):
+    module = _load_pr_test_module(monkeypatch)
+    commands = []
+
+    def fake_run(args, **_kwargs):
+        commands.append(args[-1])
+        return types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setenv("BUILDKITE_REPO", "https://example.com/FastVideo.git")
+    monkeypatch.setenv("BUILDKITE_COMMIT", "0123456789abcdef")
+    monkeypatch.setenv("BUILDKITE_PULL_REQUEST", "false")
+    monkeypatch.setattr(module, "_checkout_repository", lambda *_args: None)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    module.run_test_command("pytest fastvideo/tests/api -q", build_kernel=True)
+
+    assert len(commands) == 2
+    setup_command, test_command = commands
+    assert "kernel_build_cache.py install" in setup_command
+    assert "--cache-root" not in setup_command
+    assert "pytest fastvideo/tests/api -q" not in setup_command
+    assert "kernel_build_cache.py install" not in test_command
+    assert "pytest fastvideo/tests/api -q" in test_command
+    assert not hasattr(module, "kernel_cache_vol")
+
+
+def test_run_unit_test_collects_modal_cache_runner_tests(monkeypatch):
+    module = _load_pr_test_module(monkeypatch)
+    commands = []
+    monkeypatch.setattr(module, "run_test", commands.append)
+
+    module.run_unit_test()
+
+    assert len(commands) == 1
+    for test_path in (
+            "./fastvideo/tests/modal/test_kernel_build_cache.py",
+            "./fastvideo/tests/modal/test_pr_test.py",
+            "./fastvideo/tests/modal/test_ssim_test.py",
+    ):
+        assert test_path in commands[0]

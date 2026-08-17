@@ -7,8 +7,7 @@ import datasets
 import numpy as np
 from torch.utils.data import IterableDataset
 
-from fastvideo.distributed import (get_sp_world_size, get_world_rank,
-                                   get_world_size)
+from fastvideo.distributed import (get_sp_world_size, get_world_rank, get_world_size)
 from fastvideo.logger import init_logger
 from fastvideo.models.vision_utils import load_image, load_video
 
@@ -25,26 +24,16 @@ class ValidationDataset(IterableDataset):
         self.dir = os.path.abspath(self.filename.parent)
 
         if not self.filename.exists():
-            raise FileNotFoundError(
-                f"File {self.filename.as_posix()} does not exist")
+            raise FileNotFoundError(f"File {self.filename.as_posix()} does not exist")
 
         if self.filename.suffix == ".csv":
-            data = datasets.load_dataset("csv",
-                                         data_files=self.filename.as_posix(),
-                                         split="train")
+            data = datasets.load_dataset("csv", data_files=self.filename.as_posix(), split="train")
         elif self.filename.suffix == ".json":
-            data = datasets.load_dataset("json",
-                                         data_files=self.filename.as_posix(),
-                                         split="train",
-                                         field="data")
+            data = datasets.load_dataset("json", data_files=self.filename.as_posix(), split="train", field="data")
         elif self.filename.suffix == ".parquet":
-            data = datasets.load_dataset("parquet",
-                                         data_files=self.filename.as_posix(),
-                                         split="train")
+            data = datasets.load_dataset("parquet", data_files=self.filename.as_posix(), split="train")
         elif self.filename.suffix == ".arrow":
-            data = datasets.load_dataset("arrow",
-                                         data_files=self.filename.as_posix(),
-                                         split="train")
+            data = datasets.load_dataset("arrow", data_files=self.filename.as_posix(), split="train")
         else:
             _SUPPORTED_FILE_FORMATS = [".csv", ".json", ".parquet", ".arrow"]
             raise ValueError(
@@ -69,8 +58,7 @@ class ValidationDataset(IterableDataset):
             # Duplicate samples cyclically to reach the target
             additional_samples = []
             for i in range(samples_to_add):
-                additional_samples.append(
-                    self.all_samples[i % self.original_total_samples])
+                additional_samples.append(self.all_samples[i % self.original_total_samples])
 
             self.all_samples.extend(additional_samples)
 
@@ -123,8 +111,7 @@ class ValidationDataset(IterableDataset):
                 image_path = sample["image_path"]
                 image_path = os.path.join(self.dir, image_path)
                 sample["image_path"] = image_path
-                if not pathlib.Path(image_path).is_file(
-                ) and not image_path.startswith("http"):
+                if not pathlib.Path(image_path).is_file() and not image_path.startswith("http"):
                     logger.warning("Image file %s does not exist.", image_path)
                 else:
                     sample["image"] = load_image(image_path)
@@ -133,8 +120,7 @@ class ValidationDataset(IterableDataset):
                 video_path = sample["video_path"]
                 video_path = os.path.join(self.dir, video_path)
                 sample["video_path"] = video_path
-                if not pathlib.Path(video_path).is_file(
-                ) and not video_path.startswith("http"):
+                if not pathlib.Path(video_path).is_file() and not video_path.startswith("http"):
                     logger.warning("Video file %s does not exist.", video_path)
                 else:
                     sample["video"] = load_video(video_path)
@@ -143,8 +129,7 @@ class ValidationDataset(IterableDataset):
                 ref_video_path = sample["ref_video"]
                 ref_video_path = os.path.join(self.dir, ref_video_path)
                 if not pathlib.Path(ref_video_path).is_file():
-                    logger.warning("Reference video file %s does not exist.",
-                                   ref_video_path)
+                    logger.warning("Reference video file %s does not exist.", ref_video_path)
                     sample.pop("ref_video", None)
                 else:
                     sample["ref_video"] = ref_video_path
@@ -153,10 +138,8 @@ class ValidationDataset(IterableDataset):
                 control_image_path = sample["control_image_path"]
                 control_image_path = os.path.join(self.dir, control_image_path)
                 sample["control_image_path"] = control_image_path
-                if not pathlib.Path(control_image_path).is_file(
-                ) and not control_image_path.startswith("http"):
-                    logger.warning("Control Image file %s does not exist.",
-                                   control_image_path)
+                if not pathlib.Path(control_image_path).is_file() and not control_image_path.startswith("http"):
+                    logger.warning("Control Image file %s does not exist.", control_image_path)
                 else:
                     sample["control_image"] = load_image(control_image_path)
 
@@ -164,10 +147,8 @@ class ValidationDataset(IterableDataset):
                 control_video_path = sample["control_video_path"]
                 control_video_path = os.path.join(self.dir, control_video_path)
                 sample["control_video_path"] = control_video_path
-                if not pathlib.Path(control_video_path).is_file(
-                ) and not control_video_path.startswith("http"):
-                    logger.warning("Control Video file %s does not exist.",
-                                   control_video_path)
+                if not pathlib.Path(control_video_path).is_file() and not control_video_path.startswith("http"):
+                    logger.warning("Control Video file %s does not exist.", control_video_path)
                 else:
                     sample["control_video"] = load_video(control_video_path)
 
@@ -176,30 +157,25 @@ class ValidationDataset(IterableDataset):
                 action_path = os.path.join(self.dir, action_path)
                 sample["action_path"] = action_path
                 if not pathlib.Path(action_path).is_file():
-                    logger.warning("Action file %s does not exist.",
-                                   action_path)
+                    logger.warning("Action file %s does not exist.", action_path)
                 else:
                     action_data = np.load(action_path, allow_pickle=True)
                     num_frames = sample["num_frames"]
-                    if isinstance(action_data,
-                                  np.ndarray) and action_data.dtype == object:
+                    if isinstance(action_data, np.ndarray) and action_data.dtype == object:
                         action_data = action_data.item()
                     if isinstance(action_data, dict):
                         kb_length = len(action_data["keyboard"])
                         ms_length = len(action_data["mouse"])
-                        assert kb_length >= num_frames, (
-                            f"keyboard length {kb_length} is smaller than "
-                            f"num_frames {num_frames} for {action_path}.")
-                        assert ms_length >= num_frames, (
-                            f"mouse length {ms_length} is smaller than "
-                            f"num_frames {num_frames} for {action_path}.")
+                        assert kb_length >= num_frames, (f"keyboard length {kb_length} is smaller than "
+                                                         f"num_frames {num_frames} for {action_path}.")
+                        assert ms_length >= num_frames, (f"mouse length {ms_length} is smaller than "
+                                                         f"num_frames {num_frames} for {action_path}.")
                         sample["keyboard_cond"] = action_data["keyboard"][:num_frames]
                         sample["mouse_cond"] = action_data["mouse"][:num_frames]
                     else:
                         kb_length = len(action_data)
-                        assert kb_length >= num_frames, (
-                            f"keyboard length {kb_length} is smaller than "
-                            f"num_frames {num_frames} for {action_path}.")
+                        assert kb_length >= num_frames, (f"keyboard length {kb_length} is smaller than "
+                                                         f"num_frames {num_frames} for {action_path}.")
                         sample["keyboard_cond"] = action_data[:num_frames]
 
             sample = {k: v for k, v in sample.items() if v is not None}

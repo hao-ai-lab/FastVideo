@@ -25,12 +25,11 @@ from fastvideo.layers.activation import get_act_fn
 from fastvideo.models.vaes.common import ParallelTiledVAE
 
 
-def prepare_causal_attention_mask(
-        num_frames: int,
-        height_width: int,
-        dtype: torch.dtype,
-        device: torch.device,
-        batch_size: int | None = None) -> torch.Tensor:
+def prepare_causal_attention_mask(num_frames: int,
+                                  height_width: int,
+                                  dtype: torch.dtype,
+                                  device: torch.device,
+                                  batch_size: int | None = None) -> torch.Tensor:
     indices = torch.arange(1, num_frames + 1, dtype=torch.int32, device=device)
     indices_blocks = indices.repeat_interleave(height_width)
     x, y = torch.meshgrid(indices_blocks, indices_blocks, indexing="xy")
@@ -43,8 +42,7 @@ def prepare_causal_attention_mask(
 
 class HunyuanVAEAttention(nn.Module):
 
-    def __init__(self, in_channels, heads, dim_head, eps, norm_num_groups,
-                 bias) -> None:
+    def __init__(self, in_channels, heads, dim_head, eps, norm_num_groups, bias) -> None:
         super().__init__()
         self.in_channels = in_channels
         self.heads = heads
@@ -59,25 +57,17 @@ class HunyuanVAEAttention(nn.Module):
         self.to_q = nn.Linear(in_channels, inner_dim, bias=bias)
         self.to_k = nn.Linear(in_channels, inner_dim, bias=bias)
         self.to_v = nn.Linear(in_channels, inner_dim, bias=bias)
-        self.to_out = nn.Sequential(nn.Linear(inner_dim, in_channels,
-                                              bias=bias))
+        self.to_out = nn.Sequential(nn.Linear(inner_dim, in_channels, bias=bias))
 
         # Optional normalization layers
-        self.group_norm = nn.GroupNorm(norm_num_groups,
-                                       in_channels,
-                                       eps=eps,
-                                       affine=True)
+        self.group_norm = nn.GroupNorm(norm_num_groups, in_channels, eps=eps, affine=True)
 
-    def forward(self,
-                hidden_states: torch.Tensor,
-                attention_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(self, hidden_states: torch.Tensor, attention_mask: torch.Tensor | None = None) -> torch.Tensor:
         residual = hidden_states
 
         batch_size, sequence_length, _ = hidden_states.shape
 
-        hidden_states = self.group_norm(hidden_states.transpose(1,
-                                                                2)).transpose(
-                                                                    1, 2)
+        hidden_states = self.group_norm(hidden_states.transpose(1, 2)).transpose(1, 2)
 
         # Project to query, key, value
         query = self.to_q(hidden_states)
@@ -100,8 +90,7 @@ class HunyuanVAEAttention(nn.Module):
                                                        is_causal=False)
 
         # Reshape back
-        hidden_states = hidden_states.transpose(1, 2).reshape(
-            batch_size, -1, self.heads * head_dim)
+        hidden_states = hidden_states.transpose(1, 2).reshape(batch_size, -1, self.heads * head_dim)
         hidden_states = hidden_states.to(query.dtype)
 
         # Linear projection
@@ -128,8 +117,7 @@ class HunyuanVideoCausalConv3d(nn.Module):
     ) -> None:
         super().__init__()
 
-        kernel_size = (kernel_size, kernel_size, kernel_size) if isinstance(
-            kernel_size, int) else kernel_size
+        kernel_size = (kernel_size, kernel_size, kernel_size) if isinstance(kernel_size, int) else kernel_size
 
         self.pad_mode = pad_mode
         self.time_causal_padding = (
@@ -141,18 +129,10 @@ class HunyuanVideoCausalConv3d(nn.Module):
             0,
         )
 
-        self.conv = nn.Conv3d(in_channels,
-                              out_channels,
-                              kernel_size,
-                              stride,
-                              padding,
-                              dilation,
-                              bias=bias)
+        self.conv = nn.Conv3d(in_channels, out_channels, kernel_size, stride, padding, dilation, bias=bias)
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        hidden_states = F.pad(hidden_states,
-                              self.time_causal_padding,
-                              mode=self.pad_mode)
+        hidden_states = F.pad(hidden_states, self.time_causal_padding, mode=self.pad_mode)
         return self.conv(hidden_states)
 
 
@@ -172,19 +152,13 @@ class HunyuanVideoUpsampleCausal3D(nn.Module):
         out_channels = out_channels or in_channels
         self.upsample_factor = upsample_factor
 
-        self.conv = HunyuanVideoCausalConv3d(in_channels,
-                                             out_channels,
-                                             kernel_size,
-                                             stride,
-                                             bias=bias)
+        self.conv = HunyuanVideoCausalConv3d(in_channels, out_channels, kernel_size, stride, bias=bias)
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         num_frames = hidden_states.size(2)
 
-        first_frame, other_frames = hidden_states.split((1, num_frames - 1),
-                                                        dim=2)
-        first_frame = F.interpolate(first_frame.squeeze(2),
-                                    scale_factor=self.upsample_factor[1:],
+        first_frame, other_frames = hidden_states.split((1, num_frames - 1), dim=2)
+        first_frame = F.interpolate(first_frame.squeeze(2), scale_factor=self.upsample_factor[1:],
                                     mode="nearest").unsqueeze(2)
 
         if num_frames > 1:
@@ -195,9 +169,7 @@ class HunyuanVideoUpsampleCausal3D(nn.Module):
             # `vae.enable_tiling()` first. If that doesn't work, open an issue at:
             # https://github.com/huggingface/diffusers/issues
             other_frames = other_frames.contiguous()
-            other_frames = F.interpolate(other_frames,
-                                         scale_factor=self.upsample_factor,
-                                         mode="nearest")
+            other_frames = F.interpolate(other_frames, scale_factor=self.upsample_factor, mode="nearest")
             hidden_states = torch.cat((first_frame, other_frames), dim=2)
         else:
             hidden_states = first_frame
@@ -220,12 +192,7 @@ class HunyuanVideoDownsampleCausal3D(nn.Module):
         super().__init__()
         out_channels = out_channels or channels
 
-        self.conv = HunyuanVideoCausalConv3d(channels,
-                                             out_channels,
-                                             kernel_size,
-                                             stride,
-                                             padding,
-                                             bias=bias)
+        self.conv = HunyuanVideoCausalConv3d(channels, out_channels, kernel_size, stride, padding, bias=bias)
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         hidden_states = self.conv(hidden_states)
@@ -249,18 +216,15 @@ class HunyuanVideoResnetBlockCausal3D(nn.Module):
         self.nonlinearity = get_act_fn(non_linearity)
 
         self.norm1 = nn.GroupNorm(groups, in_channels, eps=eps, affine=True)
-        self.conv1 = HunyuanVideoCausalConv3d(in_channels, out_channels, 3, 1,
-                                              0)
+        self.conv1 = HunyuanVideoCausalConv3d(in_channels, out_channels, 3, 1, 0)
 
         self.norm2 = nn.GroupNorm(groups, out_channels, eps=eps, affine=True)
         self.dropout = nn.Dropout(dropout)
-        self.conv2 = HunyuanVideoCausalConv3d(out_channels, out_channels, 3, 1,
-                                              0)
+        self.conv2 = HunyuanVideoCausalConv3d(out_channels, out_channels, 3, 1, 0)
 
         self.conv_shortcut = None
         if in_channels != out_channels:
-            self.conv_shortcut = HunyuanVideoCausalConv3d(
-                in_channels, out_channels, 1, 1, 0)
+            self.conv_shortcut = HunyuanVideoCausalConv3d(in_channels, out_channels, 1, 1, 0)
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         hidden_states = hidden_states.contiguous()
@@ -296,8 +260,7 @@ class HunyuanVideoMidBlock3D(nn.Module):
         attention_head_dim: int = 1,
     ) -> None:
         super().__init__()
-        resnet_groups = resnet_groups if resnet_groups is not None else min(
-            in_channels // 4, 32)
+        resnet_groups = resnet_groups if resnet_groups is not None else min(in_channels // 4, 32)
         self.add_attention = add_attention
 
         # There is always at least one resnet
@@ -344,50 +307,36 @@ class HunyuanVideoMidBlock3D(nn.Module):
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         if torch.is_grad_enabled() and self.gradient_checkpointing:
-            hidden_states = self._gradient_checkpointing_func(
-                self.resnets[0], hidden_states)
+            hidden_states = self._gradient_checkpointing_func(self.resnets[0], hidden_states)
 
-            for attn, resnet in zip(self.attentions,
-                                    self.resnets[1:],
-                                    strict=True):
+            for attn, resnet in zip(self.attentions, self.resnets[1:], strict=True):
                 if attn is not None:
                     batch_size, num_channels, num_frames, height, width = hidden_states.shape
-                    hidden_states = hidden_states.permute(0, 2, 3, 4,
-                                                          1).flatten(1, 3)
-                    attention_mask = prepare_causal_attention_mask(
-                        num_frames,
-                        height * width,
-                        hidden_states.dtype,
-                        hidden_states.device,
-                        batch_size=batch_size)
-                    hidden_states = attn(hidden_states,
-                                         attention_mask=attention_mask)
-                    hidden_states = hidden_states.unflatten(
-                        1, (num_frames, height, width)).permute(0, 4, 1, 2, 3)
+                    hidden_states = hidden_states.permute(0, 2, 3, 4, 1).flatten(1, 3)
+                    attention_mask = prepare_causal_attention_mask(num_frames,
+                                                                   height * width,
+                                                                   hidden_states.dtype,
+                                                                   hidden_states.device,
+                                                                   batch_size=batch_size)
+                    hidden_states = attn(hidden_states, attention_mask=attention_mask)
+                    hidden_states = hidden_states.unflatten(1, (num_frames, height, width)).permute(0, 4, 1, 2, 3)
 
-                hidden_states = self._gradient_checkpointing_func(
-                    resnet, hidden_states)
+                hidden_states = self._gradient_checkpointing_func(resnet, hidden_states)
 
         else:
             hidden_states = self.resnets[0](hidden_states)
 
-            for attn, resnet in zip(self.attentions,
-                                    self.resnets[1:],
-                                    strict=True):
+            for attn, resnet in zip(self.attentions, self.resnets[1:], strict=True):
                 if attn is not None:
                     batch_size, num_channels, num_frames, height, width = hidden_states.shape
-                    hidden_states = hidden_states.permute(0, 2, 3, 4,
-                                                          1).flatten(1, 3)
-                    attention_mask = prepare_causal_attention_mask(
-                        num_frames,
-                        height * width,
-                        hidden_states.dtype,
-                        hidden_states.device,
-                        batch_size=batch_size)
-                    hidden_states = attn(hidden_states,
-                                         attention_mask=attention_mask)
-                    hidden_states = hidden_states.unflatten(
-                        1, (num_frames, height, width)).permute(0, 4, 1, 2, 3)
+                    hidden_states = hidden_states.permute(0, 2, 3, 4, 1).flatten(1, 3)
+                    attention_mask = prepare_causal_attention_mask(num_frames,
+                                                                   height * width,
+                                                                   hidden_states.dtype,
+                                                                   hidden_states.device,
+                                                                   batch_size=batch_size)
+                    hidden_states = attn(hidden_states, attention_mask=attention_mask)
+                    hidden_states = hidden_states.unflatten(1, (num_frames, height, width)).permute(0, 4, 1, 2, 3)
 
                 hidden_states = resnet(hidden_states)
 
@@ -443,8 +392,7 @@ class HunyuanVideoDownBlock3D(nn.Module):
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         if torch.is_grad_enabled() and self.gradient_checkpointing:
             for resnet in self.resnets:
-                hidden_states = self._gradient_checkpointing_func(
-                    resnet, hidden_states)
+                hidden_states = self._gradient_checkpointing_func(resnet, hidden_states)
         else:
             for resnet in self.resnets:
                 hidden_states = resnet(hidden_states)
@@ -504,8 +452,7 @@ class HunyuanVideoUpBlock3D(nn.Module):
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         if torch.is_grad_enabled() and self.gradient_checkpointing:
             for resnet in self.resnets:
-                hidden_states = self._gradient_checkpointing_func(
-                    resnet, hidden_states)
+                hidden_states = self._gradient_checkpointing_func(resnet, hidden_states)
 
         else:
             for resnet in self.resnets:
@@ -544,51 +491,40 @@ class HunyuanVideoEncoder3D(nn.Module):
     ) -> None:
         super().__init__()
 
-        self.conv_in = HunyuanVideoCausalConv3d(in_channels,
-                                                block_out_channels[0],
-                                                kernel_size=3,
-                                                stride=1)
+        self.conv_in = HunyuanVideoCausalConv3d(in_channels, block_out_channels[0], kernel_size=3, stride=1)
         self.mid_block: HunyuanVideoMidBlock3D | None = None
         self.down_blocks = nn.ModuleList([])
 
         output_channel = block_out_channels[0]
         for i, down_block_type in enumerate(down_block_types):
             if down_block_type != "HunyuanVideoDownBlock3D":
-                raise ValueError(
-                    f"Unsupported down_block_type: {down_block_type}")
+                raise ValueError(f"Unsupported down_block_type: {down_block_type}")
 
             input_channel = output_channel
             output_channel = block_out_channels[i]
             is_final_block = i == len(block_out_channels) - 1
-            num_spatial_downsample_layers = int(
-                np.log2(spatial_compression_ratio))
-            num_time_downsample_layers = int(
-                np.log2(temporal_compression_ratio))
+            num_spatial_downsample_layers = int(np.log2(spatial_compression_ratio))
+            num_time_downsample_layers = int(np.log2(temporal_compression_ratio))
 
             if temporal_compression_ratio == 4:
                 add_spatial_downsample = bool(i < num_spatial_downsample_layers)
-                add_time_downsample = bool(i >= (len(block_out_channels) - 1 -
-                                                 num_time_downsample_layers)
+                add_time_downsample = bool(i >= (len(block_out_channels) - 1 - num_time_downsample_layers)
                                            and not is_final_block)
             elif temporal_compression_ratio == 8:
                 add_spatial_downsample = bool(i < num_spatial_downsample_layers)
                 add_time_downsample = bool(i < num_time_downsample_layers)
             else:
-                raise ValueError(
-                    f"Unsupported time_compression_ratio: {temporal_compression_ratio}"
-                )
+                raise ValueError(f"Unsupported time_compression_ratio: {temporal_compression_ratio}")
 
             downsample_stride_HW = (2, 2) if add_spatial_downsample else (1, 1)
             downsample_stride_T = (2, ) if add_time_downsample else (1, )
-            downsample_stride = tuple(downsample_stride_T +
-                                      downsample_stride_HW)
+            downsample_stride = tuple(downsample_stride_T + downsample_stride_HW)
 
             down_block = HunyuanVideoDownBlock3D(
                 num_layers=layers_per_block,
                 in_channels=input_channel,
                 out_channels=output_channel,
-                add_downsample=bool(add_spatial_downsample
-                                    or add_time_downsample),
+                add_downsample=bool(add_spatial_downsample or add_time_downsample),
                 resnet_eps=1e-6,
                 resnet_act_fn=act_fn,
                 resnet_groups=norm_num_groups,
@@ -607,15 +543,11 @@ class HunyuanVideoEncoder3D(nn.Module):
             add_attention=mid_block_add_attention,
         )
 
-        self.conv_norm_out = nn.GroupNorm(num_channels=block_out_channels[-1],
-                                          num_groups=norm_num_groups,
-                                          eps=1e-6)
+        self.conv_norm_out = nn.GroupNorm(num_channels=block_out_channels[-1], num_groups=norm_num_groups, eps=1e-6)
         self.conv_act = nn.SiLU()
 
         conv_out_channels = 2 * out_channels if double_z else out_channels
-        self.conv_out = HunyuanVideoCausalConv3d(block_out_channels[-1],
-                                                 conv_out_channels,
-                                                 kernel_size=3)
+        self.conv_out = HunyuanVideoCausalConv3d(block_out_channels[-1], conv_out_channels, kernel_size=3)
 
         self.gradient_checkpointing = False
 
@@ -624,11 +556,9 @@ class HunyuanVideoEncoder3D(nn.Module):
 
         if torch.is_grad_enabled() and self.gradient_checkpointing:
             for down_block in self.down_blocks:
-                hidden_states = self._gradient_checkpointing_func(
-                    down_block, hidden_states)
+                hidden_states = self._gradient_checkpointing_func(down_block, hidden_states)
 
-            hidden_states = self._gradient_checkpointing_func(
-                self.mid_block, hidden_states)
+            hidden_states = self._gradient_checkpointing_func(self.mid_block, hidden_states)
         else:
             for down_block in self.down_blocks:
                 hidden_states = down_block(hidden_states)
@@ -668,10 +598,7 @@ class HunyuanVideoDecoder3D(nn.Module):
         super().__init__()
         self.layers_per_block = layers_per_block
 
-        self.conv_in = HunyuanVideoCausalConv3d(in_channels,
-                                                block_out_channels[-1],
-                                                kernel_size=3,
-                                                stride=1)
+        self.conv_in = HunyuanVideoCausalConv3d(in_channels, block_out_channels[-1], kernel_size=3, stride=1)
         self.up_blocks = nn.ModuleList([])
 
         # mid
@@ -694,25 +621,19 @@ class HunyuanVideoDecoder3D(nn.Module):
             prev_output_channel = output_channel
             output_channel = reversed_block_out_channels[i]
             is_final_block = i == len(block_out_channels) - 1
-            num_spatial_upsample_layers = int(
-                np.log2(spatial_compression_ratio))
+            num_spatial_upsample_layers = int(np.log2(spatial_compression_ratio))
             num_time_upsample_layers = int(np.log2(time_compression_ratio))
 
             if time_compression_ratio == 4:
                 add_spatial_upsample = bool(i < num_spatial_upsample_layers)
-                add_time_upsample = bool(
-                    i >= len(block_out_channels) - 1 - num_time_upsample_layers
-                    and not is_final_block)
+                add_time_upsample = bool(i >= len(block_out_channels) - 1 - num_time_upsample_layers
+                                         and not is_final_block)
             else:
-                raise ValueError(
-                    f"Unsupported time_compression_ratio: {time_compression_ratio}"
-                )
+                raise ValueError(f"Unsupported time_compression_ratio: {time_compression_ratio}")
 
-            upsample_scale_factor_HW = (2, 2) if add_spatial_upsample else (1,
-                                                                            1)
+            upsample_scale_factor_HW = (2, 2) if add_spatial_upsample else (1, 1)
             upsample_scale_factor_T = (2, ) if add_time_upsample else (1, )
-            upsample_scale_factor = tuple(upsample_scale_factor_T +
-                                          upsample_scale_factor_HW)
+            upsample_scale_factor = tuple(upsample_scale_factor_T + upsample_scale_factor_HW)
 
             up_block = HunyuanVideoUpBlock3D(
                 num_layers=self.layers_per_block + 1,
@@ -729,13 +650,9 @@ class HunyuanVideoDecoder3D(nn.Module):
             prev_output_channel = output_channel
 
         # out
-        self.conv_norm_out = nn.GroupNorm(num_channels=block_out_channels[0],
-                                          num_groups=norm_num_groups,
-                                          eps=1e-6)
+        self.conv_norm_out = nn.GroupNorm(num_channels=block_out_channels[0], num_groups=norm_num_groups, eps=1e-6)
         self.conv_act = nn.SiLU()
-        self.conv_out = HunyuanVideoCausalConv3d(block_out_channels[0],
-                                                 out_channels,
-                                                 kernel_size=3)
+        self.conv_out = HunyuanVideoCausalConv3d(block_out_channels[0], out_channels, kernel_size=3)
 
         self.gradient_checkpointing = False
 
@@ -743,12 +660,10 @@ class HunyuanVideoDecoder3D(nn.Module):
         hidden_states = self.conv_in(hidden_states)
 
         if torch.is_grad_enabled() and self.gradient_checkpointing:
-            hidden_states = self._gradient_checkpointing_func(
-                self.mid_block, hidden_states)
+            hidden_states = self._gradient_checkpointing_func(self.mid_block, hidden_states)
 
             for up_block in self.up_blocks:
-                hidden_states = self._gradient_checkpointing_func(
-                    up_block, hidden_states)
+                hidden_states = self._gradient_checkpointing_func(up_block, hidden_states)
         else:
             hidden_states = self.mid_block(hidden_states)
 
@@ -799,9 +714,7 @@ class AutoencoderKLHunyuanVideo(nn.Module, ParallelTiledVAE):
                 temporal_compression_ratio=config.temporal_compression_ratio,
                 spatial_compression_ratio=config.spatial_compression_ratio,
             )
-            self.quant_conv = nn.Conv3d(2 * config.latent_channels,
-                                        2 * config.latent_channels,
-                                        kernel_size=1)
+            self.quant_conv = nn.Conv3d(2 * config.latent_channels, 2 * config.latent_channels, kernel_size=1)
 
         if config.load_decoder:
             self.decoder = HunyuanVideoDecoder3D(
@@ -816,9 +729,7 @@ class AutoencoderKLHunyuanVideo(nn.Module, ParallelTiledVAE):
                 spatial_compression_ratio=config.spatial_compression_ratio,
                 mid_block_add_attention=config.mid_block_add_attention,
             )
-            self.post_quant_conv = nn.Conv3d(config.latent_channels,
-                                             config.latent_channels,
-                                             kernel_size=1)
+            self.post_quant_conv = nn.Conv3d(config.latent_channels, config.latent_channels, kernel_size=1)
 
     def _encode(self, x: torch.Tensor) -> torch.Tensor:
         x = self.encoder(x)
@@ -847,6 +758,7 @@ class AutoencoderKLHunyuanVideo(nn.Module, ParallelTiledVAE):
         z = posterior.sample(generator=generator) if sample_posterior else posterior.mode()
         dec = self.decode(z)
         return dec
+
 
 # Entry point for model registry
 EntryClass = AutoencoderKLHunyuanVideo

@@ -7,7 +7,7 @@ ALLOWED_PREFIXES = (
     "fastvideo.entrypoints.video_generator",
     "fastvideo.configs",
 )
-ALLOWED_EXACT = ("fastvideo",)
+ALLOWED_EXACT = ("fastvideo", )
 FORBIDDEN_PREFIXES = (
     "fastvideo.pipelines",
     "fastvideo.models",
@@ -38,19 +38,13 @@ def test_dreamverse_server_imports_only_public_fastvideo_surfaces() -> None:
         except SyntaxError as task_exc:
             raise AssertionError(f"Failed to parse {path}") from task_exc
         for node in ast.walk(tree):
-            names = (
-                [a.name for a in node.names] if isinstance(node, ast.Import)
-                else [node.module] if isinstance(node, ast.ImportFrom) and node.module
-                else []
-            )
+            names = ([a.name for a in node.names] if isinstance(node, ast.Import) else
+                     [node.module] if isinstance(node, ast.ImportFrom) and node.module else [])
             for name in names:
                 if not name:
                     continue
                 rel_path = str(path.relative_to(root))
-                if (
-                    name.startswith(FORBIDDEN_PREFIXES)
-                    and (rel_path, name) not in ALLOWED_INTERNAL_IMPORTS
-                ):
+                if (name.startswith(FORBIDDEN_PREFIXES) and (rel_path, name) not in ALLOWED_INTERNAL_IMPORTS):
                     bad.append((str(path.relative_to(root)), getattr(node, "lineno", 0), name))
 
     assert bad == [], f"Forbidden internal imports: {bad}"

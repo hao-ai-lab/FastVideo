@@ -27,7 +27,6 @@ try:
 except ImportError:  # pragma: no cover - optional local conversion dependency
     snapshot_download = None
 
-
 # TODO: fill with authoritative component prefixes for monolithic checkpoints.
 # Example: {"model.model.": "transformer", "pretransform.model.": "vae"}
 COMPONENT_PREFIXES: dict[str, str] = {}
@@ -47,10 +46,7 @@ SKIP_PATTERNS: tuple[str, ...] = ()
 
 
 def _hf_token() -> str | None:
-    return (
-        os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_HUB_TOKEN")
-        or os.environ.get("HF_API_KEY")
-    )
+    return (os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_HUB_TOKEN") or os.environ.get("HF_API_KEY"))
 
 
 def resolve_src(src: str, revision: str | None) -> Path:
@@ -95,11 +91,10 @@ def apply_mapping(key: str) -> str | None:
     return key
 
 
-def split_monolithic(
-    state: dict[str, torch.Tensor],
-) -> dict[str, OrderedDict[str, torch.Tensor]]:
+def split_monolithic(state: dict[str, torch.Tensor], ) -> dict[str, OrderedDict[str, torch.Tensor]]:
     components: dict[str, OrderedDict[str, torch.Tensor]] = {
-        name: OrderedDict() for name in set(COMPONENT_PREFIXES.values())
+        name: OrderedDict()
+        for name in set(COMPONENT_PREFIXES.values())
     }
     intentionally_skipped: list[str] = []
     unowned: list[str] = []
@@ -117,10 +112,8 @@ def split_monolithic(
             unowned.append(key)
     if unowned:
         sample = ", ".join(unowned[:10])
-        raise ValueError(
-            f"Unowned monolithic keys: {len(unowned)}. "
-            f"Add COMPONENT_PREFIXES or SKIP_PATTERNS entries. Sample: {sample}"
-        )
+        raise ValueError(f"Unowned monolithic keys: {len(unowned)}. "
+                         f"Add COMPONENT_PREFIXES or SKIP_PATTERNS entries. Sample: {sample}")
     if intentionally_skipped:
         print(f"Intentionally skipped {len(intentionally_skipped)} keys")
     return {name: weights for name, weights in components.items() if weights}
@@ -143,8 +136,12 @@ def build_component_configs(_src_dir: Path) -> dict[str, dict[str, Any]]:
     # TODO: emit config content accepted by FastVideo loaders. Most components use
     # config.json; schedulers use scheduler_config.json.
     return {
-        "transformer": {"_class_name": "<FastVideoTransformerClass>"},
-        "vae": {"_class_name": "<FastVideoVAEClass>"},
+        "transformer": {
+            "_class_name": "<FastVideoTransformerClass>"
+        },
+        "vae": {
+            "_class_name": "<FastVideoVAEClass>"
+        },
     }
 
 
@@ -177,19 +174,13 @@ def build_model_index(
     }
     if revision:
         index["_fastvideo_converted_revision"] = revision
-    return {
-        key: value
-        for key, value in index.items()
-        if key.startswith("_") or key in available_components
-    }
+    return {key: value for key, value in index.items() if key.startswith("_") or key in available_components}
 
 
 def validate_component_configs(configs: dict[str, dict[str, Any]]) -> None:
     # TODO: instantiate each FastVideo config and call update_model_arch(...) or
     # update_model_config(...) with this JSON so unknown emitted keys fail here.
-    placeholder_configs = [
-        name for name, config in configs.items() if "<" in json.dumps(config)
-    ]
+    placeholder_configs = [name for name, config in configs.items() if "<" in json.dumps(config)]
     if placeholder_configs:
         raise ValueError(f"Replace config placeholders for: {placeholder_configs}")
 
@@ -201,9 +192,7 @@ def verify_conversion(
     del dst_dir, components
     # TODO: load each emitted stateful component through its production loader and
     # assert strict load, or document exact allowed missing/unexpected keys.
-    raise NotImplementedError(
-        "Implement production config validation and strict-load checks"
-    )
+    raise NotImplementedError("Implement production config validation and strict-load checks")
 
 
 def write_component(
@@ -216,9 +205,7 @@ def write_component(
     if component_dir.exists() and any(component_dir.iterdir()):
         shutil.rmtree(component_dir)
     component_dir.mkdir(parents=True, exist_ok=True)
-    save_file(
-        dict(state), str(component_dir / "diffusion_pytorch_model.safetensors")
-    )
+    save_file(dict(state), str(component_dir / "diffusion_pytorch_model.safetensors"))
     if config is not None:
         config_path = component_dir / config_filename(name)
         with config_path.open("w", encoding="utf-8") as f:
@@ -261,9 +248,7 @@ def convert(
 
     if layout in {"monolithic", "raw_official"}:
         # TODO: replace model.safetensors with the official monolithic file name.
-        components = split_monolithic(
-            load_checkpoint(default_monolithic_checkpoint(src_path))
-        )
+        components = split_monolithic(load_checkpoint(default_monolithic_checkpoint(src_path)))
     elif layout in {"separate_components", "mixed"}:
         if not src_path.is_dir():
             raise ValueError(f"{layout} layout requires a source directory: {src_path}")
@@ -271,9 +256,7 @@ def convert(
     else:
         raise ValueError(f"Unsupported template layout: {layout}")
 
-    copied = (
-        copy_passthrough(src_path, dst_dir) if src_path.is_dir() else []
-    )
+    copied = (copy_passthrough(src_path, dst_dir) if src_path.is_dir() else [])
     configs = build_component_configs(src_path if src_path.is_dir() else src_path.parent)
     validate_component_configs(configs)
     for name, state in components.items():
@@ -289,9 +272,7 @@ def convert(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--src", required=True, help="HF repo id, local dir, or checkpoint path"
-    )
+    parser.add_argument("--src", required=True, help="HF repo id, local dir, or checkpoint path")
     parser.add_argument("--revision", help="HF branch, tag, or commit for repo sources")
     parser.add_argument(
         "--dst",

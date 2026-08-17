@@ -68,6 +68,17 @@ steps:
             limit: 2
       agents:
         queue: "default"
+    - label: ":vertical_traffic_light: Golden-Gate Tests"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "golden_gate"
+      command: "timeout 90m .buildkite/scripts/pr_test.sh"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+      agents:
+        queue: "default"
     - label: ":microscope: Unit Tests"
       if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "unit_test"
       command: "timeout 90m .buildkite/scripts/pr_test.sh"

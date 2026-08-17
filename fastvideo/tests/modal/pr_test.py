@@ -21,6 +21,7 @@ except ModuleNotFoundError:
     def resolve_uv_torch_backend(image_tag: str) -> str | None:
         return os.environ.get("UV_TORCH_BACKEND")
 
+
 app = modal.App()
 
 model_vol = modal.Volume.from_name("hf-model-weights")
@@ -43,20 +44,16 @@ uv_torch_backend_override = resolve_uv_torch_backend(image_tag)
 # budget. `image_ref` is the only env-derived input allowed here, because it
 # *selects* the base digest. Per-job values arrive at runtime via
 # `ci_env_secret` below.
-image = (modal.Image.from_registry(
-    image_ref, add_python="3.12"
-).run_commands("rm -rf /FastVideo").apt_install(
-    "cmake", "pkg-config", "build-essential", "curl", "libssl-dev", "ffmpeg"
-).run_commands(
-    "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable"
-).run_commands("echo 'source ~/.cargo/env' >> ~/.bashrc").env({
-    "PATH": "/root/.cargo/bin:$PATH",
-    "HF_REPO_ID": "FastVideo/performance-tracking",
-}))
+image = (modal.Image.from_registry(image_ref, add_python="3.12").run_commands("rm -rf /FastVideo").apt_install(
+    "cmake", "pkg-config", "build-essential", "curl", "libssl-dev", "ffmpeg").run_commands(
+        "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable").
+         run_commands("echo 'source ~/.cargo/env' >> ~/.bashrc").env({
+             "PATH": "/root/.cargo/bin:$PATH",
+             "HF_REPO_ID": "FastVideo/performance-tracking",
+         }))
 
-dreamverse_image = (image.run_commands(
-    "curl -fsSL https://deb.nodesource.com/setup_22.x | bash -"
-).apt_install("nodejs").run_commands("node --version && npm --version"))
+dreamverse_image = (image.run_commands("curl -fsSL https://deb.nodesource.com/setup_22.x | bash -").apt_install(
+    "nodejs").run_commands("node --version && npm --version"))
 
 # Per-job/per-invocation values are injected into the container environment at
 # RUNTIME via this secret (attached to every function below), so the image
@@ -65,24 +62,34 @@ dreamverse_image = (image.run_commands(
 # resolver, `uv pip install`) all read os.environ at runtime, so nothing else
 # changes.
 ci_env_secret = modal.Secret.from_dict({
-    "BUILDKITE_REPO": os.environ.get("BUILDKITE_REPO", ""),
-    "BUILDKITE_COMMIT": os.environ.get("BUILDKITE_COMMIT", ""),
-    "BUILDKITE_PULL_REQUEST": os.environ.get("BUILDKITE_PULL_REQUEST", ""),
-    "BUILDKITE_BRANCH": os.environ.get("BUILDKITE_BRANCH", ""),
-    "BUILDKITE_SOURCE": os.environ.get("BUILDKITE_SOURCE", ""),
-    "BUILDKITE_BUILD_URL": os.environ.get("BUILDKITE_BUILD_URL", ""),
-    "BUILDKITE_BUILD_ID": os.environ.get("BUILDKITE_BUILD_ID", ""),
-    "BUILDKITE_JOB_ID": os.environ.get("BUILDKITE_JOB_ID", ""),
-    "TEST_SCOPE": os.environ.get("TEST_SCOPE", ""),
-    "IMAGE_VERSION": image_version,
-    "FASTVIDEO_CONTAINER_IMAGE_REF": image_ref,
+    "BUILDKITE_REPO":
+    os.environ.get("BUILDKITE_REPO", ""),
+    "BUILDKITE_COMMIT":
+    os.environ.get("BUILDKITE_COMMIT", ""),
+    "BUILDKITE_PULL_REQUEST":
+    os.environ.get("BUILDKITE_PULL_REQUEST", ""),
+    "BUILDKITE_BRANCH":
+    os.environ.get("BUILDKITE_BRANCH", ""),
+    "BUILDKITE_SOURCE":
+    os.environ.get("BUILDKITE_SOURCE", ""),
+    "BUILDKITE_BUILD_URL":
+    os.environ.get("BUILDKITE_BUILD_URL", ""),
+    "BUILDKITE_BUILD_ID":
+    os.environ.get("BUILDKITE_BUILD_ID", ""),
+    "BUILDKITE_JOB_ID":
+    os.environ.get("BUILDKITE_JOB_ID", ""),
+    "TEST_SCOPE":
+    os.environ.get("TEST_SCOPE", ""),
+    "IMAGE_VERSION":
+    image_version,
+    "FASTVIDEO_CONTAINER_IMAGE_REF":
+    image_ref,
     **{
         key: os.environ[key]
         for key in (
             "FASTVIDEO_ATTENTION_BACKEND",
             "FASTVIDEO_PERFORMANCE_PROFILE_VERSION",
-        )
-        if os.environ.get(key)
+        ) if os.environ.get(key)
     },
     **({
         "UV_TORCH_BACKEND": uv_torch_backend_override
@@ -91,19 +98,15 @@ ci_env_secret = modal.Secret.from_dict({
     # inference/perf parity; model-load and training lanes that do not exercise
     # FA4 explicitly set FASTVIDEO_FA4=0 in their command strings below.
     # Caller override wins.
-    "FASTVIDEO_FA4": os.environ.get("FASTVIDEO_FA4", "1"),
+    "FASTVIDEO_FA4":
+    os.environ.get("FASTVIDEO_FA4", "1"),
 })
 
-hf_secret = modal.Secret.from_dict(
-    {"HF_API_KEY": os.environ.get("HF_API_KEY", "")})
-wandb_secret = modal.Secret.from_dict(
-    {"WANDB_API_KEY": os.environ.get("WANDB_API_KEY", "")})
+hf_secret = modal.Secret.from_dict({"HF_API_KEY": os.environ.get("HF_API_KEY", "")})
+wandb_secret = modal.Secret.from_dict({"WANDB_API_KEY": os.environ.get("WANDB_API_KEY", "")})
 
 
-def _run_git_with_retries(command: list[str],
-                          *,
-                          cwd: str,
-                          cleanup_path: str | None = None) -> None:
+def _run_git_with_retries(command: list[str], *, cwd: str, cleanup_path: str | None = None) -> None:
     last_returncode = 1
     for attempt in range(1, 4):
         if cleanup_path is not None:
@@ -116,21 +119,15 @@ def _run_git_with_retries(command: list[str],
         last_returncode = result.returncode
         if attempt < 3:
             sleep_seconds = 5 * attempt
-            print(
-                f"Git command failed (attempt {attempt}/3, exit {last_returncode}); "
-                f"retrying in {sleep_seconds}s",
-                flush=True)
+            print(f"Git command failed (attempt {attempt}/3, exit {last_returncode}); "
+                  f"retrying in {sleep_seconds}s",
+                  flush=True)
             time.sleep(sleep_seconds)
 
-    raise RuntimeError(
-        f"Git command failed after 3 attempts with exit code {last_returncode}: "
-        + " ".join(command))
+    raise RuntimeError(f"Git command failed after 3 attempts with exit code {last_returncode}: " + " ".join(command))
 
 
-def _checkout_repository(git_repo: str,
-                         git_commit: str,
-                         pr_number: str | None,
-                         repo_root: str = "/FastVideo") -> None:
+def _checkout_repository(git_repo: str, git_commit: str, pr_number: str | None, repo_root: str = "/FastVideo") -> None:
     if not git_repo or git_repo.startswith("-"):
         raise RuntimeError("BUILDKITE_REPO must be a non-empty repository URL.")
 
@@ -138,18 +135,14 @@ def _checkout_repository(git_repo: str,
         try:
             pr_id = int(pr_number)
         except ValueError as error:
-            raise RuntimeError(
-                f"Invalid BUILDKITE_PULL_REQUEST value: {pr_number}") from error
+            raise RuntimeError(f"Invalid BUILDKITE_PULL_REQUEST value: {pr_number}") from error
         if pr_id <= 0:
-            raise RuntimeError(
-                f"Invalid BUILDKITE_PULL_REQUEST value: {pr_number}")
+            raise RuntimeError(f"Invalid BUILDKITE_PULL_REQUEST value: {pr_number}")
         target = f"refs/pull/{pr_id}/head"
         print(f"Using PR ref for checkout: {target}")
     else:
-        if not git_commit or re.fullmatch(r"[0-9a-fA-F]{7,64}",
-                                          git_commit) is None:
-            raise RuntimeError(
-                f"Invalid BUILDKITE_COMMIT value: {git_commit}")
+        if not git_commit or re.fullmatch(r"[0-9a-fA-F]{7,64}", git_commit) is None:
+            raise RuntimeError(f"Invalid BUILDKITE_COMMIT value: {git_commit}")
         target = git_commit
         print(f"Using direct commit checkout: {target}")
 
@@ -166,27 +159,21 @@ def _checkout_repository(git_repo: str,
         git_repo,
         repo_root,
     ]
-    _run_git_with_retries(clone_command,
-                          cwd="/",
-                          cleanup_path=repo_root)
+    _run_git_with_retries(clone_command, cwd="/", cleanup_path=repo_root)
 
     git_prefix = ["git", "-c", "http.version=HTTP/1.1"]
-    _run_git_with_retries(
-        git_prefix + [
-            "fetch",
-            "--prune",
-            "--no-tags",
-            "--depth=1",
-            "--filter=blob:none",
-            "origin",
-            target,
-        ],
-        cwd=repo_root)
-    _run_git_with_retries(
-        git_prefix + ["checkout", "--detach", "FETCH_HEAD"], cwd=repo_root)
-    _run_git_with_retries(
-        git_prefix + ["submodule", "update", "--init", "--recursive"],
-        cwd=repo_root)
+    _run_git_with_retries(git_prefix + [
+        "fetch",
+        "--prune",
+        "--no-tags",
+        "--depth=1",
+        "--filter=blob:none",
+        "origin",
+        target,
+    ],
+                          cwd=repo_root)
+    _run_git_with_retries(git_prefix + ["checkout", "--detach", "FETCH_HEAD"], cwd=repo_root)
+    _run_git_with_retries(git_prefix + ["submodule", "update", "--init", "--recursive"], cwd=repo_root)
 
 
 def run_test(pytest_command: str):
@@ -194,9 +181,7 @@ def run_test(pytest_command: str):
     run_test_command(pytest_command, build_kernel=True)
 
 
-def run_test_command(test_command: str,
-                     build_kernel: bool,
-                     install_command: str = 'uv pip install -e ".[test]"'):
+def run_test_command(test_command: str, build_kernel: bool, install_command: str = 'uv pip install -e ".[test]"'):
     """Helper function to run a test suite with custom test command.
 
     Most FastVideo CI suites need the custom kernel build. App-level tests like
@@ -209,6 +194,10 @@ def run_test_command(test_command: str,
     lane would then test stale kernels. Pass install_command="" for commands
     that manage their own installs.
     """
+    import os
+    import subprocess
+    import sys
+
     git_repo = os.environ.get("BUILDKITE_REPO", "")
     git_commit = os.environ.get("BUILDKITE_COMMIT", "")
     pr_number = os.environ.get("BUILDKITE_PULL_REQUEST")
@@ -219,32 +208,33 @@ def run_test_command(test_command: str,
         print(f"PR number: {pr_number}")
     _checkout_repository(git_repo, git_commit, pr_number)
 
-    build_kernel_command = """
-    cd fastvideo-kernel &&
-    ./build.sh &&
-    cd .. &&
-    """ if build_kernel else ""
+    setup_steps = [
+        "source $HOME/.local/bin/env",
+        "source /opt/venv/bin/activate",
+        "cd /FastVideo",
+    ]
+    if install_command:
+        setup_steps.append(install_command)
+    if build_kernel:
+        setup_steps.append("python fastvideo/tests/modal/kernel_build_cache.py install")
+    setup_command = " &&\n    ".join(setup_steps)
 
-    install_clause = f"{install_command} &&" if install_command else ""
+    setup_result = subprocess.run(["/bin/bash", "-c", setup_command], stdout=sys.stdout, stderr=sys.stderr, check=False)
+    if setup_result.returncode != 0:
+        raise RuntimeError(f"Setup command failed with exit code {setup_result.returncode}")
 
-    command = f"""
-    source $HOME/.local/bin/env &&
-    source /opt/venv/bin/activate &&
-    cd /FastVideo &&
-    {install_clause}
-    {build_kernel_command}
-    {test_command}
-    """
-
-    result = subprocess.run(["/bin/bash", "-c", command],
-                            stdout=sys.stdout,
-                            stderr=sys.stderr,
-                            check=False)
+    command = " &&\n    ".join([
+        "source $HOME/.local/bin/env",
+        "source /opt/venv/bin/activate",
+        "cd /FastVideo",
+        test_command,
+    ])
+    result = subprocess.run(["/bin/bash", "-c", command], stdout=sys.stdout, stderr=sys.stderr, check=False)
 
     # Modal containers crash on sys.exit(0); raise on failure, return on success.
     if result.returncode != 0:
-        raise RuntimeError(
-            f"Test command failed with exit code {result.returncode}")
+        raise RuntimeError(f"Test command failed with exit code {result.returncode}")
+
 
 @app.function(gpu="H100:1",
               image=image,
@@ -264,7 +254,21 @@ def run_encoder_tests():
               volumes={"/root/data": model_vol})
 def run_vae_tests():
     run_test(
-        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/vaes -vs"
+        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/vaes -vs")
+
+
+@app.function(gpu="L40S:1",
+              image=image,
+              timeout=900,
+              secrets=[hf_secret, ci_env_secret],
+              volumes={"/root/data": model_vol})
+def run_golden_gate_tests():
+    # Single-layer bitwise DiT fingerprints (~40s/model on GPU): a green gate
+    # means the compute path is bit-identical to the golden, so the expensive
+    # SSIM generation for that model cannot have regressed. Downloads only the
+    # shards holding the gated layer, never full checkpoints.
+    run_test(
+        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/golden_gate -vs"
     )
 
 
@@ -274,10 +278,8 @@ def run_vae_tests():
               secrets=[hf_secret, ci_env_secret],
               volumes={"/root/data": model_vol})
 def run_transformer_tests():
-    run_test(
-        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && "
-        "FASTVIDEO_FA4=0 pytest ./fastvideo/tests/transformers -vs"
-    )
+    run_test("export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && "
+             "FASTVIDEO_FA4=0 pytest ./fastvideo/tests/transformers -vs")
 
 
 @app.function(gpu="L40S:4",
@@ -288,10 +290,8 @@ def run_transformer_tests():
               secrets=[wandb_secret, ci_env_secret],
               volumes={"/root/data": model_vol})
 def run_training_tests():
-    run_test(
-        "export HF_HOME='/root/data/.cache' && wandb login $WANDB_API_KEY && "
-        "FASTVIDEO_FA4=0 pytest ./fastvideo/tests/training/Vanilla -srP"
-    )
+    run_test("export HF_HOME='/root/data/.cache' && wandb login $WANDB_API_KEY && "
+             "FASTVIDEO_FA4=0 pytest ./fastvideo/tests/training/Vanilla -srP")
 
 
 @app.function(gpu="L40S:2",
@@ -302,20 +302,13 @@ def run_training_tests():
               secrets=[wandb_secret, ci_env_secret],
               volumes={"/root/data": model_vol})
 def run_training_lora_tests():
-    run_test(
-        "export HF_HOME='/root/data/.cache' && wandb login $WANDB_API_KEY && "
-        "FASTVIDEO_FA4=0 pytest ./fastvideo/tests/training/lora/test_lora_training.py -srP"
-    )
+    run_test("export HF_HOME='/root/data/.cache' && wandb login $WANDB_API_KEY && "
+             "FASTVIDEO_FA4=0 pytest ./fastvideo/tests/training/lora/test_lora_training.py -srP")
 
 
-@app.function(gpu="H100!:2",
-              image=image,
-              timeout=900,
-              secrets=[wandb_secret, ci_env_secret])
+@app.function(gpu="H100!:2", image=image, timeout=900, secrets=[wandb_secret, ci_env_secret])
 def run_training_tests_VSA():
-    run_test(
-        "wandb login $WANDB_API_KEY && FASTVIDEO_FA4=0 pytest ./fastvideo/tests/training/VSA -srP"
-    )
+    run_test("wandb login $WANDB_API_KEY && FASTVIDEO_FA4=0 pytest ./fastvideo/tests/training/VSA -srP")
 
 
 @app.function(gpu="H100:1", image=image, timeout=900, secrets=[ci_env_secret])
@@ -340,51 +333,39 @@ def run_inference_tests_vmoba():
 
 @app.function(gpu="L40S:1", image=image, timeout=1200, secrets=[ci_env_secret])
 def run_inference_lora_tests():
-    run_test(
-        "pytest ./fastvideo/tests/inference/lora/test_lora_inference_similarity.py -vs"
-    )
+    run_test("pytest ./fastvideo/tests/inference/lora/test_lora_inference_similarity.py -vs")
 
 
 @app.function(gpu="L40S:2", image=image, timeout=900, secrets=[ci_env_secret])
 def run_distill_dmd_tests():
-    run_test(
-        "FASTVIDEO_FA4=0 pytest ./fastvideo/tests/training/distill/test_distill_dmd.py -vs")
+    run_test("FASTVIDEO_FA4=0 pytest ./fastvideo/tests/training/distill/test_distill_dmd.py -vs")
 
 
-@app.function(gpu="L40S:2",
-              image=image,
-              timeout=900,
-              secrets=[wandb_secret, ci_env_secret])
+@app.function(gpu="L40S:2", image=image, timeout=900, secrets=[wandb_secret, ci_env_secret])
 def run_self_forcing_tests():
-    run_test(
-        "wandb login $WANDB_API_KEY && "
-        "FASTVIDEO_FA4=0 pytest ./fastvideo/tests/training/self-forcing/test_self_forcing.py -vs"
-    )
+    run_test("wandb login $WANDB_API_KEY && "
+             "FASTVIDEO_FA4=0 pytest ./fastvideo/tests/training/self-forcing/test_self_forcing.py -vs")
 
 
 @app.function(gpu="L40S:1", image=image, timeout=900, secrets=[ci_env_secret])
 def run_unit_test():
-    run_test(
-        "pytest ./fastvideo/tests/api/ ./fastvideo/tests/contract/ ./fastvideo/tests/dataset/ "
-        "./fastvideo/tests/workflow/ ./fastvideo/tests/entrypoints/ ./fastvideo/tests/train/ "
-        "./fastvideo/tests/stages/ ./fastvideo/tests/ops/ ./fastvideo/tests/worker/ "
-        "./fastvideo/tests/training/test_trackers.py "
-        "./fastvideo/tests/attention/test_sdpa_metadata_mask_contract.py ./fastvideo/tests/modal/test_pr_test.py "
-        "--ignore=./fastvideo/tests/entrypoints/test_openai_api_integration.py "
-        "--ignore=./fastvideo/tests/train/models --ignore=./fastvideo/tests/train/methods -vs"
-    )
+    run_test("pytest ./fastvideo/tests/api/ ./fastvideo/tests/contract/ ./fastvideo/tests/dataset/ "
+             "./fastvideo/tests/workflow/ ./fastvideo/tests/entrypoints/ ./fastvideo/tests/train/ "
+             "./fastvideo/tests/stages/ ./fastvideo/tests/ops/ ./fastvideo/tests/worker/ "
+             "./fastvideo/tests/training/test_trackers.py "
+             "./fastvideo/tests/attention/test_sdpa_metadata_mask_contract.py "
+             "./fastvideo/tests/modal/test_kernel_build_cache.py ./fastvideo/tests/modal/test_pr_test.py "
+             "./fastvideo/tests/modal/test_ssim_test.py "
+             "--ignore=./fastvideo/tests/entrypoints/test_openai_api_integration.py "
+             "--ignore=./fastvideo/tests/train/models --ignore=./fastvideo/tests/train/methods -vs")
 
 
 # TODO: David: GPU only used to resolve import time requirement (not needed for this test). Maybe make those imports lazy?
-@app.function(gpu="L40S:1",
-              image=dreamverse_image,
-              timeout=1800,
-              secrets=[ci_env_secret])
+@app.function(gpu="L40S:1", image=dreamverse_image, timeout=1800, secrets=[ci_env_secret])
 def run_dreamverse_app_tests():
-    run_test_command(
-        install_command="",
-        build_kernel=False,
-        test_command="""
+    run_test_command(install_command="",
+                     build_kernel=False,
+                     test_command="""
         uv pip install -e ".[test,dreamverse]" &&
         export PYTHONPATH=/FastVideo/apps/dreamverse:$PYTHONPATH &&
         pytest apps/dreamverse/dreamverse/tests -q &&
@@ -423,10 +404,8 @@ def run_dreamverse_app_tests():
               secrets=[hf_secret, ci_env_secret],
               volumes={"/root/data": model_vol})
 def run_train_framework_tests():
-    run_test(
-        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && "
-        "FASTVIDEO_FA4=0 pytest ./fastvideo/tests/train/models ./fastvideo/tests/train/methods -vs"
-    )
+    run_test("export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && "
+             "FASTVIDEO_FA4=0 pytest ./fastvideo/tests/train/models ./fastvideo/tests/train/methods -vs")
 
 
 @app.function(gpu="L40S:1",
@@ -450,10 +429,8 @@ def seed_grad_norm_references():
     workstation — see the module docstring of ``grad_norm_regression.py`` for
     the local command and the ``_DEVICE_MAPPINGS`` table.
     """
-    run_test(
-        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && "
-        "FASTVIDEO_FA4=0 FASTVIDEO_GRADNORM_UPDATE=1 pytest ./fastvideo/tests/train/methods -vs -rs"
-    )
+    run_test("export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && "
+             "FASTVIDEO_FA4=0 FASTVIDEO_GRADNORM_UPDATE=1 pytest ./fastvideo/tests/train/methods -vs -rs")
 
 
 @app.function(gpu="L40S:1",
@@ -479,14 +456,9 @@ def run_eval_tests():
         install_command='uv pip install -e ".[test,eval-full]"')
 
 
-@app.function(gpu="L40S:1",
-              image=image,
-              timeout=3600,
-              secrets=[hf_secret, ci_env_secret])
+@app.function(gpu="L40S:1", image=image, timeout=3600, secrets=[hf_secret, ci_env_secret])
 def run_lora_extraction_tests():
-    run_test(
-        "hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/lora_extraction/test_lora_extraction.py"
-    )
+    run_test("hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/lora_extraction/test_lora_extraction.py")
 
 
 @app.function(gpu="L40S:2",

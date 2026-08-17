@@ -4,10 +4,11 @@ This page contains step-by-step instructions to get you quickly started with vid
 
 ## Requirements
 
-- **OS**: Linux (Tested on Ubuntu 22.04+)
+- **OS**: Linux (tested on Ubuntu 22.04+), or macOS on Apple silicon via the
+  [MPS installation guide](../getting_started/installation/mps.md)
 - **Python**: 3.10-3.12
-- **CUDA**: 12.6 or 13.0
-- **GPU**: At least one NVIDIA GPU
+- **CUDA**: 12.6 or 13.0 (NVIDIA GPUs)
+- **GPU**: At least one NVIDIA GPU, or an Apple silicon chip with MPS
 
 ## Installation
 
@@ -134,5 +135,4 @@ If the generated video doesn't match your prompt:
 - Learn about [Advanced Inference Configurations](configuration.md)
 - Learn about using [Optimizations](optimizations.md)
 - See [Examples](examples/examples_inference_index.md) for more usage scenarios
-- Join our [Community Discord](https://discord.gg/JA7cksDz86).
-- Join our [Community Slack](https://join.slack.com/t/fastvideo/shared_invite/zt-38u6p1jqe-yDI1QJOCEnbtkLoaI5bjZQ).
+- Join our [Community Slack](https://join.slack.com/t/fastvideo/shared_invite/zt-3f4lao1uq-u~Ipx6Lt4J27AlD2y~IdLQ).

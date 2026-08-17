@@ -34,6 +34,7 @@ from fastvideo.forward_context import (
     set_forward_context,
 )
 from fastvideo.pipelines import ForwardBatch
+from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.train.models.ltx2 import LTX2Model
 from fastvideo.train.utils.config import load_run_config
 
@@ -60,13 +61,15 @@ class _TinyLTX2Transformer(torch.nn.Module):
         self.a2v_weight = torch.nn.Parameter(torch.tensor(1.0))
         self.v2a_weight = torch.nn.Parameter(torch.tensor(1.0))
         self.av_ca_weight = torch.nn.Parameter(torch.tensor(1.0))
-        self.config = type("Config", (), {
-            "arch_config": type("Arch", (), {
-                "caption_proj_before_connector": is_ltx2_3,
-                "cross_attention_dim": 4096,
-                "caption_channels": 3840,
-            })(),
-        })()
+        self.config = type(
+            "Config", (), {
+                "arch_config":
+                type("Arch", (), {
+                    "caption_proj_before_connector": is_ltx2_3,
+                    "cross_attention_dim": 4096,
+                    "caption_channels": 3840,
+                })(),
+            })()
         self.forward_fps: float | None = None
         self.forward_timestep: torch.Tensor | None = None
         self.forward_text_dim: int | None = None
@@ -93,8 +96,7 @@ def _gpu_too_small() -> bool:
     return total < _MIN_GPU_MEMORY_GB * 1024**3
 
 
-def test_ltx2_rejects_audio_training_before_loading(
-        monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ltx2_rejects_audio_training_before_loading(monkeypatch: pytest.MonkeyPatch) -> None:
     cfg = load_run_config(str(_FIXTURE_DIR / _CASES["ltx2"][0]))
 
     def fail_if_loaded(*_args, **_kwargs):
@@ -109,9 +111,32 @@ def test_ltx2_rejects_audio_training_before_loading(
         )
 
 
+def test_ltx2_forwards_role_attention_backend_to_loader(monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = load_run_config(str(_FIXTURE_DIR / _CASES["ltx2"][0]))
+    transformer = _TinyLTX2Transformer(is_ltx2_3=False)
+    captured: list[AttentionBackendEnum | None] = []
+
+    def fake_load_module_from_path(**kwargs):
+        captured.append(kwargs.get("attention_backend"))
+        return transformer
+
+    monkeypatch.setattr(
+        "fastvideo.train.models.ltx2.ltx2.load_module_from_path",
+        fake_load_module_from_path,
+    )
+    model = LTX2Model(
+        init_from=cfg.models["student"]["init_from"],
+        training_config=cfg.training,
+        trainable=False,
+        attention_backend="TORCH_SDPA",
+    )
+
+    assert model.attention_backend is AttentionBackendEnum.TORCH_SDPA
+    assert captured == [AttentionBackendEnum.TORCH_SDPA]
+
+
 @pytest.mark.parametrize("case", _CASES.keys())
-def test_ltx2_wrapper_contract_runs_on_cpu(
-        case: str, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ltx2_wrapper_contract_runs_on_cpu(case: str, monkeypatch: pytest.MonkeyPatch) -> None:
     fixture_name, text_dim = _CASES[case]
     cfg = load_run_config(str(_FIXTURE_DIR / fixture_name))
     transformer = _TinyLTX2Transformer(is_ltx2_3=case == "ltx2_3")
@@ -147,7 +172,9 @@ def test_ltx2_wrapper_contract_runs_on_cpu(
             "text_embedding": torch.randn(1, 4, text_dim),
             "text_attention_mask": torch.ones(1, 4),
             "vae_latent": raw_latents,
-            "info_list": [{"fps": 12.0}],
+            "info_list": [{
+                "fps": 12.0
+            }],
         },
         generator=torch.Generator(device="cpu").manual_seed(0),
     )
@@ -190,8 +217,7 @@ def test_ltx2_wrapper_contract_runs_on_cpu(
 
     backward_fps: list[float] = []
     transformer.video_weight.register_hook(
-        lambda grad: backward_fps.append(
-            get_forward_context().forward_batch.fps) or grad)
+        lambda grad: backward_fps.append(get_forward_context().forward_batch.fps) or grad)
     with set_forward_context(
             current_timestep=torch.tensor([-1.0]),
             attn_metadata=None,
@@ -237,11 +263,7 @@ def test_ltx2_model_loads_and_forwards(case: str):
     b, c, t, h, w = 1, 128, 3, 8, 8
     tokens = t * h * w
     hidden_states = torch.randn(b, c, t, h, w, device=device, dtype=dtype)
-    encoder_hidden_states = torch.randn(b,
-                                        _LTX2_TEXT_LEN,
-                                        text_dim,
-                                        device=device,
-                                        dtype=dtype)
+    encoder_hidden_states = torch.randn(b, _LTX2_TEXT_LEN, text_dim, device=device, dtype=dtype)
     timestep = torch.full((b, tokens), 0.5, device=device, dtype=torch.float32)
 
     with torch.no_grad(), torch.autocast(device.type, dtype=dtype), \
@@ -259,7 +281,6 @@ def test_ltx2_model_loads_and_forwards(case: str):
         )
 
     assert torch.is_tensor(out), f"expected a tensor output, got {type(out)}"
-    assert out.shape == hidden_states.shape, (
-        f"denoised output shape {tuple(out.shape)} != input latent shape "
-        f"{tuple(hidden_states.shape)}")
+    assert out.shape == hidden_states.shape, (f"denoised output shape {tuple(out.shape)} != input latent shape "
+                                              f"{tuple(hidden_states.shape)}")
     assert torch.isfinite(out).all().item(), "forward output contains NaN/Inf"

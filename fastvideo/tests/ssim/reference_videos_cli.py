@@ -11,14 +11,13 @@ import tempfile
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 
-
 VIDEO_EXTENSIONS = (".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv")
 # Additional artefact types stored under the same reference folders. Latent
 # tensors (`.pt`) back the latent-slice regression tests used by flaky
 # pixel-space models (e.g. LTX-2 distilled). Keeping them in the same upload
 # flow means seeding a new test only requires one HF round-trip.
-LATENT_EXTENSIONS = (".pt",)
-REFERENCE_EXTENSIONS = VIDEO_EXTENSIONS + LATENT_EXTENSIONS + (".png",)
+LATENT_EXTENSIONS = (".pt", )
+REFERENCE_EXTENSIONS = VIDEO_EXTENSIONS + LATENT_EXTENSIONS + (".png", )
 HF_TOKEN_ENV_KEYS = ("HF_API_KEY", "HUGGINGFACE_HUB_TOKEN", "HF_TOKEN")
 HF_REPO_ENV_KEY = "FASTVIDEO_SSIM_REFERENCE_HF_REPO"
 HF_REPO_TYPE_ENV_KEY = "FASTVIDEO_SSIM_REFERENCE_HF_REPO_TYPE"
@@ -171,8 +170,7 @@ def _load_hf_sdk():
         from huggingface_hub import HfApi, snapshot_download
     except ImportError as exc:
         raise RuntimeError(
-            "huggingface_hub is required for download/upload.\nInstall with: uv pip install huggingface_hub"
-        ) from exc
+            "huggingface_hub is required for download/upload.\nInstall with: uv pip install huggingface_hub") from exc
     return HfApi, snapshot_download
 
 
@@ -249,8 +247,7 @@ def download_reference_videos(
         )
         if copied_roots == 0:
             raise RuntimeError(
-                "HF download completed but no reference_videos content was found in downloaded artifacts."
-            )
+                "HF download completed but no reference_videos content was found in downloaded artifacts.")
         for quality_tier in tiers:
             marker_path = local_dir / REFERENCE_VIDEOS_DIRNAME / quality_tier / f".download_complete_{quality_tier}"
             marker_path.parent.mkdir(parents=True, exist_ok=True)
@@ -277,8 +274,7 @@ def upload_reference_videos(
     )
 
     try:
-        existing_repo_files = set(
-            api.list_repo_files(repo_id=repo_id, repo_type=repo_type))
+        existing_repo_files = set(api.list_repo_files(repo_id=repo_id, repo_type=repo_type))
     except Exception:
         # Fresh repo or list failure — treat as empty so upload can proceed.
         existing_repo_files = set()
@@ -290,23 +286,19 @@ def upload_reference_videos(
         if model_id:
             folder_path = reference_dir / model_id
             if not folder_path.exists():
-                raise FileNotFoundError(
-                    f"Model subfolder not found for upload: {folder_path}")
+                raise FileNotFoundError(f"Model subfolder not found for upload: {folder_path}")
             path_in_repo = f"{base_in_repo}/{model_id}"
         else:
             folder_path = reference_dir
             path_in_repo = base_in_repo
 
-        conflicts = sorted(
-            f for f in existing_repo_files
-            if f.startswith(f"{path_in_repo}/") or f == path_in_repo)
+        conflicts = sorted(f for f in existing_repo_files if f.startswith(f"{path_in_repo}/") or f == path_in_repo)
         if conflicts and not force:
             preview = "\n".join(f"  - {c}" for c in conflicts[:10])
             more = f"\n  ... and {len(conflicts) - 10} more" if len(conflicts) > 10 else ""
-            raise RuntimeError(
-                f"Refusing to overwrite existing HF files under {path_in_repo} "
-                f"({len(conflicts)} file(s) already present):\n{preview}{more}\n"
-                f"Re-run with --force to overwrite.")
+            raise RuntimeError(f"Refusing to overwrite existing HF files under {path_in_repo} "
+                               f"({len(conflicts)} file(s) already present):\n{preview}{more}\n"
+                               f"Re-run with --force to overwrite.")
 
         target_desc = f"{reference_dir.name}/{model_id}" if model_id else reference_dir.name
         print(f"Uploading {target_desc} ({quality_tier}) to {repo_id}/{path_in_repo} ...")
@@ -330,8 +322,7 @@ def _reference_folder_repo_relative(reference_folder: Path, base_dir: Path | Non
             legacy_relative = resolved_reference_folder.relative_to(resolved_base_dir)
         except ValueError as exc:
             raise RuntimeError(
-                f"Reference folder {reference_folder} is not under SSIM directory {resolved_base_dir}"
-            ) from exc
+                f"Reference folder {reference_folder} is not under SSIM directory {resolved_base_dir}") from exc
         if not legacy_relative.parts or not legacy_relative.parts[0].endswith("_reference_videos"):
             raise RuntimeError(
                 f"Reference folder {reference_folder} does not match reference_videos/<tier>/<device>/<model>/<backend>"
@@ -339,9 +330,7 @@ def _reference_folder_repo_relative(reference_folder: Path, base_dir: Path | Non
         relative = Path(DEFAULT_OUTPUT_QUALITY_TIER, *legacy_relative.parts)
 
     if len(relative.parts) < 4:
-        raise RuntimeError(
-            f"Reference folder {reference_folder} does not include <quality>/<device>/<model>/<backend>"
-        )
+        raise RuntimeError(f"Reference folder {reference_folder} does not include <quality>/<device>/<model>/<backend>")
     return relative
 
 
@@ -357,10 +346,8 @@ def upload_draft_reference_artifact(
 ) -> str:
     resolved_token = token or _get_hf_token()
     if resolved_token is None:
-        raise RuntimeError(
-            "Hugging Face API key is required for SSIM bootstrap draft upload. "
-            "Set HF_API_KEY, HUGGINGFACE_HUB_TOKEN, or HF_TOKEN."
-        )
+        raise RuntimeError("Hugging Face API key is required for SSIM bootstrap draft upload. "
+                           "Set HF_API_KEY, HUGGINGFACE_HUB_TOKEN, or HF_TOKEN.")
     if not generated_artifact_path.exists():
         raise FileNotFoundError(f"Generated artifact not found: {generated_artifact_path}")
 
@@ -438,16 +425,13 @@ def promote_draft_references(
     if not draft_files:
         raise RuntimeError(f"No draft references found under {repo_id}/{draft_prefix}")
 
-    conflicts = sorted(
-        f for f in existing_repo_files
-        if f.startswith(f"{reference_prefix}/") or f == reference_prefix)
+    conflicts = sorted(f for f in existing_repo_files if f.startswith(f"{reference_prefix}/") or f == reference_prefix)
     if conflicts and not force:
         preview = "\n".join(f"  - {c}" for c in conflicts[:10])
         more = f"\n  ... and {len(conflicts) - 10} more" if len(conflicts) > 10 else ""
-        raise RuntimeError(
-            f"Refusing to overwrite existing HF files under {reference_prefix} "
-            f"({len(conflicts)} file(s) already present):\n{preview}{more}\n"
-            f"Re-run with --force to overwrite.")
+        raise RuntimeError(f"Refusing to overwrite existing HF files under {reference_prefix} "
+                           f"({len(conflicts)} file(s) already present):\n{preview}{more}\n"
+                           f"Re-run with --force to overwrite.")
 
     with tempfile.TemporaryDirectory(prefix="fv2-ssim-draft-") as tmp_cache_dir:
         snapshot_path = Path(
@@ -457,8 +441,7 @@ def promote_draft_references(
                 cache_dir=tmp_cache_dir,
                 token=token,
                 allow_patterns=[f"{draft_prefix}/**"],
-            )
-        )
+            ))
         draft_root = snapshot_path / draft_prefix
         if not draft_root.exists():
             raise RuntimeError(f"Downloaded draft path is missing: {draft_root}")
@@ -518,8 +501,7 @@ def ensure_reference_videos_available(
         resolved_repo_type = repo_type or _default_repo_type()
         if not resolved_repo_id:
             raise RuntimeError(
-                f"No local reference videos found and no HF repo configured.\nSet {HF_REPO_ENV_KEY} or pass --repo-id."
-            )
+                f"No local reference videos found and no HF repo configured.\nSet {HF_REPO_ENV_KEY} or pass --repo-id.")
 
         print(f"Repo ID: {resolved_repo_id}")
         print(f"Quality tier: {quality_tier}")
@@ -534,11 +516,9 @@ def ensure_reference_videos_available(
             print(f"Download completed for {quality_tier} reference videos.")
         except Exception as exc:
             print(f"ERROR: Failed to download {quality_tier} reference videos from {resolved_repo_id}.")
-            print(
-                f"Suggested command to retry: "
-                f"python fastvideo/tests/ssim/reference_videos_cli.py download "
-                f"--quality-tier {quality_tier}"
-            )
+            print(f"Suggested command to retry: "
+                  f"python fastvideo/tests/ssim/reference_videos_cli.py download "
+                  f"--quality-tier {quality_tier}")
             raise
 
         if not _has_local_reference_videos(target_dir, quality_tier):
@@ -549,25 +529,21 @@ def ensure_reference_videos_available(
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="reference_videos_cli",
-        description=(
-            "Manage SSIM reference videos locally and on Hugging Face.\n"
-            "This tool can copy generated videos into reference folders,\n"
-            "download references from a public HF repo, and upload updates."
-        ),
-        epilog=(
-            "Examples:\n"
-            "  # Copy default generated videos into local L40S refs\n"
-            "  python fastvideo/tests/ssim/reference_videos_cli.py copy-local \\\n"
-            "    --quality-tier default \\\n"
-            "    --device-folder L40S_reference_videos \\\n"
-            "    --reference-dir fastvideo/tests/ssim/reference_videos/default/L40S_reference_videos\n\n"
-            "  # Download both default and full-quality references from HF\n"
-            "  python fastvideo/tests/ssim/reference_videos_cli.py download \\\n"
-            "    --repo-id FastVideo/ssim-reference-videos\n\n"
-            "  # Upload both tiers and all GPU folders (fails if token is unset)\n"
-            "  python fastvideo/tests/ssim/reference_videos_cli.py upload \\\n"
-            "    --repo-id FastVideo/ssim-reference-videos"
-        ),
+        description=("Manage SSIM reference videos locally and on Hugging Face.\n"
+                     "This tool can copy generated videos into reference folders,\n"
+                     "download references from a public HF repo, and upload updates."),
+        epilog=("Examples:\n"
+                "  # Copy default generated videos into local L40S refs\n"
+                "  python fastvideo/tests/ssim/reference_videos_cli.py copy-local \\\n"
+                "    --quality-tier default \\\n"
+                "    --device-folder L40S_reference_videos \\\n"
+                "    --reference-dir fastvideo/tests/ssim/reference_videos/default/L40S_reference_videos\n\n"
+                "  # Download both default and full-quality references from HF\n"
+                "  python fastvideo/tests/ssim/reference_videos_cli.py download \\\n"
+                "    --repo-id FastVideo/ssim-reference-videos\n\n"
+                "  # Upload both tiers and all GPU folders (fails if token is unset)\n"
+                "  python fastvideo/tests/ssim/reference_videos_cli.py upload \\\n"
+                "    --repo-id FastVideo/ssim-reference-videos"),
         formatter_class=argparse.RawTextHelpFormatter,
     )
 
@@ -624,10 +600,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "--local-dir",
         type=Path,
         default=_ssim_dir(),
-        help=(
-            "Local SSIM directory where references are stored under "
-            "reference_videos/<quality-tier>/<GPU>_reference_videos."
-        ),
+        help=("Local SSIM directory where references are stored under "
+              "reference_videos/<quality-tier>/<GPU>_reference_videos."),
     )
     download_parser.add_argument(
         "--quality-tier",
@@ -664,11 +638,9 @@ def _build_parser() -> argparse.ArgumentParser:
         "--reference-dir",
         action="append",
         default=[],
-        help=(
-            "Reference directory to upload (repeatable). "
-            "Requires single --quality-tier. "
-            "Default: discover folders under --base-dir for chosen tier(s)."
-        ),
+        help=("Reference directory to upload (repeatable). "
+              "Requires single --quality-tier. "
+              "Default: discover folders under --base-dir for chosen tier(s)."),
     )
     upload_parser.add_argument(
         "--quality-tier",
@@ -700,18 +672,16 @@ def _build_parser() -> argparse.ArgumentParser:
     upload_parser.add_argument(
         "--model-id",
         default=None,
-        help=(
-            "Restrict upload to a single model subfolder "
-            "(reference_videos/<tier>/<device>/<model_id>). "
-            "Use when seeding references for a single new test."),
+        help=("Restrict upload to a single model subfolder "
+              "(reference_videos/<tier>/<device>/<model_id>). "
+              "Use when seeding references for a single new test."),
     )
     upload_parser.add_argument(
         "--force",
         action="store_true",
-        help=(
-            "Allow overwriting files that already exist at the target path on "
-            "Hugging Face. Off by default so seeding a new test cannot "
-            "clobber existing references."),
+        help=("Allow overwriting files that already exist at the target path on "
+              "Hugging Face. Off by default so seeding a new test cannot "
+              "clobber existing references."),
     )
 
     promote_parser = subparsers.add_parser(
@@ -814,11 +784,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             else:
                 # Backward compatibility for pre-device-folder layout.
                 generated_dir = tier_root
-        reference_dir = (
-            args.reference_dir
-            if args.reference_dir is not None
-            else (_ssim_dir() / REFERENCE_VIDEOS_DIRNAME / args.quality_tier / device_folder)
-        )
+        reference_dir = (args.reference_dir if args.reference_dir is not None else
+                         (_ssim_dir() / REFERENCE_VIDEOS_DIRNAME / args.quality_tier / device_folder))
         copied = copy_generated_to_reference(
             generated_dir=generated_dir,
             reference_dir=reference_dir,
@@ -826,9 +793,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         print(f"Done. {'Would copy' if args.dry_run else 'Copied'} {copied} video files.")
         if not args.dry_run and copied > 0:
-            marker = (
-                _ssim_dir() / REFERENCE_VIDEOS_DIRNAME / args.quality_tier / f".download_complete_{args.quality_tier}"
-            )
+            marker = (_ssim_dir() / REFERENCE_VIDEOS_DIRNAME / args.quality_tier /
+                      f".download_complete_{args.quality_tier}")
             marker.parent.mkdir(parents=True, exist_ok=True)
             marker.touch()
         return 0
@@ -849,8 +815,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         token = _get_hf_token()
         if token is None:
             raise RuntimeError(
-                "Hugging Face API key is required for upload. Set HF_API_KEY, HUGGINGFACE_HUB_TOKEN, or HF_TOKEN."
-            )
+                "Hugging Face API key is required for upload. Set HF_API_KEY, HUGGINGFACE_HUB_TOKEN, or HF_TOKEN.")
 
         reference_dirs_by_tier = _resolve_upload_reference_dirs(
             base_dir=args.base_dir.resolve(),
@@ -860,8 +825,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         if not reference_dirs_by_tier:
             raise RuntimeError(
-                f"No *_reference_videos directories found for the selected quality tier(s) under {args.base_dir}"
-            )
+                f"No *_reference_videos directories found for the selected quality tier(s) under {args.base_dir}")
 
         upload_reference_videos(
             repo_id=args.repo_id,
@@ -878,10 +842,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "promote-draft":
         token = _get_hf_token()
         if token is None:
-            raise RuntimeError(
-                "Hugging Face API key is required for promote-draft. "
-                "Set HF_API_KEY, HUGGINGFACE_HUB_TOKEN, or HF_TOKEN."
-            )
+            raise RuntimeError("Hugging Face API key is required for promote-draft. "
+                               "Set HF_API_KEY, HUGGINGFACE_HUB_TOKEN, or HF_TOKEN.")
         promote_draft_references(
             repo_id=args.repo_id,
             repo_type=args.repo_type,

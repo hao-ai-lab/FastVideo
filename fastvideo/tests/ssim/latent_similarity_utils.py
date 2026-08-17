@@ -64,8 +64,7 @@ from torch.nn.functional import cosine_similarity
 
 from fastvideo import VideoGenerator
 from fastvideo.tests.ssim.bootstrap_references import (
-    xfail_missing_reference_in_bootstrap_mode,
-)
+    xfail_missing_reference_in_bootstrap_mode, )
 from fastvideo.tests.ssim.inference_similarity_utils import (
     attention_backend,
     build_generation_kwargs,
@@ -108,34 +107,22 @@ def _extract_expected_slice(
     kind = spec.get("kind", "corner_3x3_first_frame")
     if kind == "corner_3x3_first_frame":
         if latent.dim() != 5:
-            raise ValueError(
-                f"corner_3x3_first_frame requires 5-D latent [B,C,T,H,W]; "
-                f"got shape {tuple(latent.shape)}")
+            raise ValueError(f"corner_3x3_first_frame requires 5-D latent [B,C,T,H,W]; "
+                             f"got shape {tuple(latent.shape)}")
         _, _, t, h, w = latent.shape
         if t < 1 or h < 3 or w < 3:
-            raise ValueError(
-                "corner_3x3_first_frame requires T>=1, H>=3, W>=3; got "
-                f"shape {tuple(latent.shape)}")
-        return (latent[0, :, 0, :3, :3]
-                .detach()
-                .to(torch.float32)
-                .reshape(-1)
-                .contiguous())
+            raise ValueError("corner_3x3_first_frame requires T>=1, H>=3, W>=3; got "
+                             f"shape {tuple(latent.shape)}")
+        return (latent[0, :, 0, :3, :3].detach().to(torch.float32).reshape(-1).contiguous())
     if kind == "audio_first_8_timesteps":
         if latent.dim() != 3:
-            raise ValueError(
-                f"audio_first_8_timesteps requires 3-D latent [B,C,T]; "
-                f"got shape {tuple(latent.shape)}")
+            raise ValueError(f"audio_first_8_timesteps requires 3-D latent [B,C,T]; "
+                             f"got shape {tuple(latent.shape)}")
         _, _, t = latent.shape
         if t < 8:
-            raise ValueError(
-                "audio_first_8_timesteps requires T>=8; got "
-                f"shape {tuple(latent.shape)}")
-        return (latent[0, :, :8]
-                .detach()
-                .to(torch.float32)
-                .reshape(-1)
-                .contiguous())
+            raise ValueError("audio_first_8_timesteps requires T>=8; got "
+                             f"shape {tuple(latent.shape)}")
+        return (latent[0, :, :8].detach().to(torch.float32).reshape(-1).contiguous())
     raise ValueError(f"Unknown slice kind: {kind!r}")
 
 
@@ -144,9 +131,7 @@ def _cosine_distance(a: torch.Tensor, b: torch.Tensor) -> float:
     a32 = a.detach().to(torch.float32).reshape(-1)
     b32 = b.detach().to(torch.float32).reshape(-1)
     if a32.shape != b32.shape:
-        raise ValueError(
-            f"Cosine shape mismatch: {tuple(a32.shape)} vs {tuple(b32.shape)}"
-        )
+        raise ValueError(f"Cosine shape mismatch: {tuple(a32.shape)} vs {tuple(b32.shape)}")
     sim = cosine_similarity(a32.unsqueeze(0), b32.unsqueeze(0), dim=1).item()
     return 1.0 - float(sim)
 
@@ -208,11 +193,10 @@ def load_latent_reference(path: str) -> dict[str, Any]:
     payload = torch.load(path, map_location="cpu", weights_only=False)
     fmt = payload.get("format_version") if isinstance(payload, dict) else None
     if fmt != LATENT_REFERENCE_FORMAT_VERSION:
-        raise ValueError(
-            f"Latent reference at {path!r} has format_version={fmt!r}; "
-            f"expected {LATENT_REFERENCE_FORMAT_VERSION}. Re-seed via the "
-            "test that produces this artefact, then re-upload through "
-            "fastvideo/tests/ssim/reference_videos_cli.py upload.")
+        raise ValueError(f"Latent reference at {path!r} has format_version={fmt!r}; "
+                         f"expected {LATENT_REFERENCE_FORMAT_VERSION}. Re-seed via the "
+                         "test that produces this artefact, then re-upload through "
+                         "fastvideo/tests/ssim/reference_videos_cli.py upload.")
     return payload
 
 
@@ -287,10 +271,9 @@ def _assert_latent_similarity(
     slice_spec = ref.get("slice_spec", DEFAULT_SLICE_SPEC)
 
     if tuple(gen_latent.shape) != ref_shape:
-        raise AssertionError(
-            f"Generated latent shape {tuple(gen_latent.shape)} does not "
-            f"match reference shape {ref_shape} for {model_id} with "
-            f"backend {attention_backend_name}")
+        raise AssertionError(f"Generated latent shape {tuple(gen_latent.shape)} does not "
+                             f"match reference shape {ref_shape} for {model_id} with "
+                             f"backend {attention_backend_name}")
 
     gen_slice = _extract_expected_slice(gen_latent, slice_spec)
     slice_cos = _cosine_distance(gen_slice, expected_slice)
@@ -301,8 +284,7 @@ def _assert_latent_similarity(
     # fp32 (see :func:`save_latent_reference`).
     gen_full_matched = gen_latent.to(torch.float16).to(torch.float32)
     full_cos = _cosine_distance(gen_full_matched, ref_full)
-    max_abs_diff = float(
-        (gen_full_matched - ref_full).abs().max().item())
+    max_abs_diff = float((gen_full_matched - ref_full).abs().max().item())
 
     metrics: dict[str, float] = {
         "slice_cosine_distance": slice_cos,
@@ -318,13 +300,11 @@ def _assert_latent_similarity(
 
     failures: list[str] = []
     if slice_cos > slice_cosine_threshold:
-        failures.append(
-            f"slice cosine {slice_cos:.6e} > threshold "
-            f"{slice_cosine_threshold:.6e}")
+        failures.append(f"slice cosine {slice_cos:.6e} > threshold "
+                        f"{slice_cosine_threshold:.6e}")
     if full_cos > full_cosine_threshold:
-        failures.append(
-            f"full cosine {full_cos:.6e} > threshold "
-            f"{full_cosine_threshold:.6e}")
+        failures.append(f"full cosine {full_cos:.6e} > threshold "
+                        f"{full_cosine_threshold:.6e}")
 
     passed = not failures
     write_latent_similarity_results(
@@ -343,10 +323,9 @@ def _assert_latent_similarity(
     )
 
     if failures:
-        raise AssertionError(
-            f"Latent regression exceeded tolerance for {model_id} with "
-            f"backend {attention_backend_name}: {'; '.join(failures)}. "
-            f"Full metrics: {metrics}")
+        raise AssertionError(f"Latent regression exceeded tolerance for {model_id} with "
+                             f"backend {attention_backend_name}: {'; '.join(failures)}. "
+                             f"Full metrics: {metrics}")
 
     return metrics
 
@@ -356,22 +335,18 @@ def _extract_latent_from_result(result: Any) -> torch.Tensor:
     ``generate_video`` output.
     """
     if not isinstance(result, dict):
-        raise RuntimeError(
-            "VideoGenerator.generate_video returned unexpected payload "
-            f"(type={type(result)!r}); expected dict with 'samples'.")
+        raise RuntimeError("VideoGenerator.generate_video returned unexpected payload "
+                           f"(type={type(result)!r}); expected dict with 'samples'.")
     samples = result.get("samples")
     if samples is None:
-        raise RuntimeError(
-            "VideoGenerator did not return latent samples. Ensure "
-            "output_type='latent' and return_frames=True for this call.")
+        raise RuntimeError("VideoGenerator did not return latent samples. Ensure "
+                           "output_type='latent' and return_frames=True for this call.")
     if not isinstance(samples, torch.Tensor):
-        raise RuntimeError(
-            f"Expected torch.Tensor samples; got type={type(samples)!r}.")
+        raise RuntimeError(f"Expected torch.Tensor samples; got type={type(samples)!r}.")
     gen_latent = samples.detach().to(torch.float32).cpu()
     if gen_latent.dim() not in (3, 5):
-        raise RuntimeError(
-            "Expected 5-D video latent (B,C,T,H,W) or 3-D audio latent "
-            f"(B,C,T); got shape {tuple(gen_latent.shape)}")
+        raise RuntimeError("Expected 5-D video latent (B,C,T,H,W) or 3-D audio latent "
+                           f"(B,C,T); got shape {tuple(gen_latent.shape)}")
     return gen_latent
 
 
@@ -473,10 +448,9 @@ def run_text_to_latent_similarity_test(
             reference_folder=reference_folder,
             artifact_kind="latent",
         )
-        raise FileNotFoundError(
-            f"Reference folder does not exist: {reference_folder}\n"
-            f"To download references, run:\n"
-            f"  python fastvideo/tests/ssim/reference_videos_cli.py download")
+        raise FileNotFoundError(f"Reference folder does not exist: {reference_folder}\n"
+                                f"To download references, run:\n"
+                                f"  python fastvideo/tests/ssim/reference_videos_cli.py download")
 
     reference_latent_path = os.path.join(
         reference_folder,
@@ -488,9 +462,8 @@ def run_text_to_latent_similarity_test(
             reference_folder=reference_folder,
             artifact_kind="latent",
         )
-        raise FileNotFoundError(
-            "Reference latent missing for prompt/backend: "
-            f"{reference_latent_path}")
+        raise FileNotFoundError("Reference latent missing for prompt/backend: "
+                                f"{reference_latent_path}")
 
     return _assert_latent_similarity(
         logger=logger,

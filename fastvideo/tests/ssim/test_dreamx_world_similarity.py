@@ -50,7 +50,6 @@ DREAMX_WORLD_FULL_QUALITY_PARAMS = {
     "guidance_scale": 5.0,
 }
 
-
 DREAMX_WORLD_AR_PARAMS = {
     "num_gpus": 1,
     "model_path": _AR_MODEL_PATH,
@@ -94,7 +93,6 @@ DREAMX_WORLD_TEST_CASES = [
         (4.0, 2.0, 4.0),
     ),
 ]
-
 
 DREAMX_WORLD_AR_TEST_CASES = [
     (
@@ -155,6 +153,7 @@ def test_dreamx_world_inference_similarity(
             "action_speed_list": list(action_speed_list),
         },
     )
+
 
 @pytest.mark.parametrize(("prompt", "action_list", "action_speed_list"), DREAMX_WORLD_AR_TEST_CASES)
 @pytest.mark.parametrize("attention_backend_name", ["TORCH_SDPA"])

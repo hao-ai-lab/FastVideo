@@ -42,8 +42,10 @@ def _reclaim_vram() -> None:
 
 def _gpu_mem_mb() -> float:
     if torch.cuda.is_available():
-        return torch.cuda.memory_allocated() / (1024 ** 2)
+        return torch.cuda.memory_allocated() / (1024**2)
     return 0.0
+
+
 from torch.testing import assert_close
 from transformers import AutoModel, AutoModelForCausalLM, AutoTokenizer
 from safetensors.torch import safe_open
@@ -64,7 +66,6 @@ PARITY_SCOPE = "both"
 # real silent drop. Enforced here in the test since the shared encoder's loader
 # is intentionally lenient (it's used by multiple models).
 _ALLOWED_UNEXPECTED_KEYS = {"lm_head.weight"}
-
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ZIMAGE_TEXT_ENCODER_DIR = REPO_ROOT / "official_weights" / "Z-Image" / "text_encoder"
@@ -110,8 +111,7 @@ def _iter_pretrained_safetensors(model_dir: Path):
         return
 
     raise FileNotFoundError(
-        f"Missing safetensors checkpoint in {model_dir} (expected model.safetensors or model.safetensors.index.json)"
-    )
+        f"Missing safetensors checkpoint in {model_dir} (expected model.safetensors or model.safetensors.index.json)")
 
 
 def _pretrained_safetensor_keys(model_dir: Path) -> set[str]:
@@ -152,12 +152,14 @@ def _precision_name(dtype: torch.dtype) -> str:
 def _tokenize_official_prompts(tokenizer, prompts: list[str]):
     formatted = [
         tokenizer.apply_chat_template(
-            [{"role": "user", "content": prompt}],
+            [{
+                "role": "user",
+                "content": prompt
+            }],
             tokenize=False,
             add_generation_prompt=True,
             enable_thinking=True,
-        )
-        for prompt in prompts
+        ) for prompt in prompts
     ]
     return tokenizer(
         formatted,
@@ -177,10 +179,7 @@ def _assert_native_load_surface(
     missing = param_names - loaded_params
     assert not missing, f"FastVideo parameters not loaded: {sorted(missing)}"
 
-    normalized_keys = {
-        name[len("model."):] if name.startswith("model.") else name
-        for name in checkpoint_keys
-    }
+    normalized_keys = {name[len("model."):] if name.startswith("model.") else name for name in checkpoint_keys}
     mapped_keys: set[str] = set()
     for checkpoint_name in normalized_keys:
         for param_name, weight_name, _ in model.config.arch_config.stacked_params_mapping:
@@ -195,10 +194,8 @@ def _assert_native_load_surface(
         "rotary_emb.cos_cached",
         "rotary_emb.sin_cached",
     }
-    assert unexpected <= _ALLOWED_UNEXPECTED_KEYS, (
-        "Unexpected checkpoint keys not in allowlist: "
-        f"{sorted(unexpected - _ALLOWED_UNEXPECTED_KEYS)}"
-    )
+    assert unexpected <= _ALLOWED_UNEXPECTED_KEYS, ("Unexpected checkpoint keys not in allowlist: "
+                                                    f"{sorted(unexpected - _ALLOWED_UNEXPECTED_KEYS)}")
 
 
 def _fake_qwen3_weight_target(include_quant_scales: bool = False):
@@ -218,14 +215,10 @@ def _fake_qwen3_weight_target(include_quant_scales: bool = False):
         })
     for param in params.values():
         if not hasattr(param, "weight_loader"):
-            param.weight_loader = (
-                lambda target, loaded, *args: target.data.copy_(loaded)
-            )
+            param.weight_loader = (lambda target, loaded, *args: target.data.copy_(loaded))
 
     model = SimpleNamespace(
-        config=SimpleNamespace(
-            arch_config=SimpleNamespace(stacked_params_mapping=stacked)
-        ),
+        config=SimpleNamespace(arch_config=SimpleNamespace(stacked_params_mapping=stacked)),
         named_parameters=lambda: params.items(),
     )
     return model, params, stacked
@@ -282,6 +275,7 @@ def test_qwen3_production_loader_avoids_device_context_and_honors_placement(
     auto_model_calls: list[dict] = []
 
     class FakeHFModel:
+
         def eval(self):
             return self
 
@@ -361,19 +355,11 @@ def test_set_default_torch_dtype_restores_after_exception():
 
 
 @pytest.mark.parametrize("checkpoint_prefix", ["", "model."])
-def test_qwen3_native_load_accepts_already_fused_weights_and_scales(
-    checkpoint_prefix: str,
-):
+def test_qwen3_native_load_accepts_already_fused_weights_and_scales(checkpoint_prefix: str, ):
     """Direct FastVideo/state-dict keys satisfy each fused target atomically."""
     fake_model, params, _ = _fake_qwen3_weight_target(include_quant_scales=True)
-    expected = {
-        name: torch.arange(1, param.numel() + 1, dtype=param.dtype)
-        for name, param in params.items()
-    }
-    weights = [
-        (f"{checkpoint_prefix}{name}", expected[name])
-        for name in params
-    ]
+    expected = {name: torch.arange(1, param.numel() + 1, dtype=param.dtype) for name, param in params.items()}
+    weights = [(f"{checkpoint_prefix}{name}", expected[name]) for name in params]
 
     loaded = Qwen3ForCausalLM.load_weights(fake_model, weights)
 
@@ -382,18 +368,16 @@ def test_qwen3_native_load_accepts_already_fused_weights_and_scales(
         assert torch.equal(param.data, expected[name])
     _assert_native_load_surface(
         fake_model,
-        {name for name, _ in weights},
+        {name
+         for name, _ in weights},
         loaded,
     )
 
 
 def test_qwen3_native_load_rejects_incompatible_fused_quant_scale_shape():
     fake_model, params, _ = _fake_qwen3_weight_target(include_quant_scales=True)
-    weights = [
-        (name, torch.ones_like(param))
-        for name, param in params.items()
-        if name != "layers.0.self_attn.qkv_proj.scale_weight"
-    ]
+    weights = [(name, torch.ones_like(param)) for name, param in params.items()
+               if name != "layers.0.self_attn.qkv_proj.scale_weight"]
     weights.append(("layers.0.self_attn.qkv_proj.scale_weight", torch.ones(1)))
 
     with pytest.raises(AssertionError, match="Attempted to load weight"):
@@ -402,19 +386,11 @@ def test_qwen3_native_load_rejects_incompatible_fused_quant_scale_shape():
 
 def test_qwen3_native_load_uses_real_shard_loader_for_split_quant_scales():
     fake_model, params, stacked = _fake_qwen3_weight_target(include_quant_scales=True)
-    weights = [
-        (name, torch.ones_like(param))
-        for name, param in params.items()
-        if name.endswith(".weight")
-    ]
-    weights.extend(
-        (f"model.layers.0.self_attn{weight_name}.scale_weight", torch.tensor(float(index + 1)))
-        for index, (_, weight_name, _) in enumerate(stacked[:3])
-    )
-    weights.extend(
-        (f"model.layers.0.mlp{weight_name}.scale_weight", torch.tensor(float(index + 4)))
-        for index, (_, weight_name, _) in enumerate(stacked[3:])
-    )
+    weights = [(name, torch.ones_like(param)) for name, param in params.items() if name.endswith(".weight")]
+    weights.extend((f"model.layers.0.self_attn{weight_name}.scale_weight", torch.tensor(float(index + 1)))
+                   for index, (_, weight_name, _) in enumerate(stacked[:3]))
+    weights.extend((f"model.layers.0.mlp{weight_name}.scale_weight", torch.tensor(float(index + 4)))
+                   for index, (_, weight_name, _) in enumerate(stacked[3:]))
 
     loaded = Qwen3ForCausalLM.load_weights(fake_model, weights)
 
@@ -444,25 +420,16 @@ def test_qwen3_native_load_rejects_missing_fused_weight_shard(
     missing_shard_id: str | int,
 ):
     fake_model, _, stacked = _fake_qwen3_weight_target()
-    weights = [
-        (f"model.layers.0.self_attn{weight_name}.weight", torch.empty(1))
-        for _, weight_name, _ in stacked[:3]
-        if weight_name != missing_weight_name
-    ]
-    weights.extend(
-        (f"model.layers.0.mlp{weight_name}.weight", torch.empty(1))
-        for _, weight_name, _ in stacked[3:]
-        if weight_name != missing_weight_name
-    )
+    weights = [(f"model.layers.0.self_attn{weight_name}.weight", torch.empty(1)) for _, weight_name, _ in stacked[:3]
+               if weight_name != missing_weight_name]
+    weights.extend((f"model.layers.0.mlp{weight_name}.weight", torch.empty(1)) for _, weight_name, _ in stacked[3:]
+                   if weight_name != missing_weight_name)
 
     with pytest.raises(ValueError, match="Missing required stacked checkpoint shards") as exc_info:
         Qwen3ForCausalLM.load_weights(fake_model, weights)
 
-    destination = (
-        "layers.0.self_attn.qkv_proj.weight"
-        if isinstance(missing_shard_id, str)
-        else "layers.0.mlp.gate_up_proj.weight"
-    )
+    destination = ("layers.0.self_attn.qkv_proj.weight"
+                   if isinstance(missing_shard_id, str) else "layers.0.mlp.gate_up_proj.weight")
     assert f"{destination}[{missing_shard_id}]" in str(exc_info.value)
 
 
@@ -481,30 +448,17 @@ def test_qwen3_native_load_rejects_missing_fused_quant_scale_shard(
     missing_shard_id: str | int,
 ):
     fake_model, params, stacked = _fake_qwen3_weight_target(include_quant_scales=True)
-    weights = [
-        (name, torch.empty(1))
-        for name in params
-        if name.endswith(".weight")
-    ]
-    weights.extend(
-        (f"model.layers.0.self_attn{weight_name}.scale_weight", torch.empty(1))
-        for _, weight_name, _ in stacked[:3]
-        if weight_name != missing_weight_name
-    )
-    weights.extend(
-        (f"model.layers.0.mlp{weight_name}.scale_weight", torch.empty(1))
-        for _, weight_name, _ in stacked[3:]
-        if weight_name != missing_weight_name
-    )
+    weights = [(name, torch.empty(1)) for name in params if name.endswith(".weight")]
+    weights.extend((f"model.layers.0.self_attn{weight_name}.scale_weight", torch.empty(1))
+                   for _, weight_name, _ in stacked[:3] if weight_name != missing_weight_name)
+    weights.extend((f"model.layers.0.mlp{weight_name}.scale_weight", torch.empty(1))
+                   for _, weight_name, _ in stacked[3:] if weight_name != missing_weight_name)
 
     with pytest.raises(ValueError, match="Missing required stacked checkpoint shards") as exc_info:
         Qwen3ForCausalLM.load_weights(fake_model, weights)
 
-    destination = (
-        "layers.0.self_attn.qkv_proj.scale_weight"
-        if isinstance(missing_shard_id, str)
-        else "layers.0.mlp.gate_up_proj.scale_weight"
-    )
+    destination = ("layers.0.self_attn.qkv_proj.scale_weight"
+                   if isinstance(missing_shard_id, str) else "layers.0.mlp.gate_up_proj.scale_weight")
     assert f"{destination}[{missing_shard_id}]" in str(exc_info.value)
 
 
@@ -643,20 +597,16 @@ def test_zimage_qwen3_encoder_parity_forward(dtype: torch.dtype):
             # looser bound because the final RMSNorm compresses drift ~5x.
             assert last_diff.mean().item() < _BF16_MEAN_DRIFT_POST_NORM, (
                 f"batch{i} last_hidden_state bf16 mean drift "
-                f"{last_diff.mean():.4f} >= {_BF16_MEAN_DRIFT_POST_NORM}"
-            )
+                f"{last_diff.mean():.4f} >= {_BF16_MEAN_DRIFT_POST_NORM}")
             assert last_diff.median().item() < _BF16_MEDIAN_DRIFT_POST_NORM, (
                 f"batch{i} last_hidden_state bf16 median drift "
-                f"{last_diff.median():.4f} >= {_BF16_MEDIAN_DRIFT_POST_NORM}"
-            )
+                f"{last_diff.median():.4f} >= {_BF16_MEDIAN_DRIFT_POST_NORM}")
             assert hs_m2_diff.mean().item() < _BF16_MEAN_DRIFT_PRE_NORM, (
                 f"batch{i} hidden_states[-2] bf16 mean drift "
-                f"{hs_m2_diff.mean():.4f} >= {_BF16_MEAN_DRIFT_PRE_NORM}"
-            )
+                f"{hs_m2_diff.mean():.4f} >= {_BF16_MEAN_DRIFT_PRE_NORM}")
             assert hs_m2_diff.median().item() < _BF16_MEDIAN_DRIFT_PRE_NORM, (
                 f"batch{i} hidden_states[-2] bf16 median drift "
-                f"{hs_m2_diff.median():.4f} >= {_BF16_MEDIAN_DRIFT_PRE_NORM}"
-            )
+                f"{hs_m2_diff.median():.4f} >= {_BF16_MEDIAN_DRIFT_PRE_NORM}")
         else:
             assert_close(ref_last_v, fv_last_v, atol=_FP32_ATOL, rtol=_FP32_RTOL)
             assert_close(ref_hs_m2_v, fv_hs_m2_v, atol=_FP32_ATOL, rtol=_FP32_RTOL)
@@ -732,12 +682,9 @@ def test_zimage_qwen3_encoder_per_layer_bf16_diagnostic():
         fv_hidden_cpu = [h.detach().float().cpu() for h in fv_out.hidden_states]
 
     assert fv_out.hidden_states is not None
-    assert len(ref_hidden_cpu) == 37, (
-        f"expected embeddings plus 36 block outputs, got {len(ref_hidden_cpu)} entries"
-    )
+    assert len(ref_hidden_cpu) == 37, (f"expected embeddings plus 36 block outputs, got {len(ref_hidden_cpu)} entries")
     assert len(ref_hidden_cpu) == len(fv_hidden_cpu), (
-        f"len mismatch: HF={len(ref_hidden_cpu)} FV={len(fv_hidden_cpu)}"
-    )
+        f"len mismatch: HF={len(ref_hidden_cpu)} FV={len(fv_hidden_cpu)}")
 
     mask_cpu = attention_mask.detach().bool().cpu()[0]
     print(

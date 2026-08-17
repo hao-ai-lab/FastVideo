@@ -44,6 +44,7 @@ logger = init_logger(__name__)
 
 
 class MatrixGame2TimeImageEmbedding(nn.Module):
+
     def __init__(
         self,
         dim: int,
@@ -52,12 +53,8 @@ class MatrixGame2TimeImageEmbedding(nn.Module):
     ):
         super().__init__()
 
-        self.time_embedder = TimestepEmbedder(
-            dim, frequency_embedding_size=time_freq_dim, act_layer="silu"
-        )
-        self.time_modulation = ModulateProjection(
-            dim, factor=6, act_layer="silu"
-        )
+        self.time_embedder = TimestepEmbedder(dim, frequency_embedding_size=time_freq_dim, act_layer="silu")
+        self.time_modulation = ModulateProjection(dim, factor=6, act_layer="silu")
 
         self.image_embedder = None
         if image_embed_dim is not None:
@@ -77,9 +74,7 @@ class MatrixGame2TimeImageEmbedding(nn.Module):
 
         if encoder_hidden_states_image is not None:
             assert self.image_embedder is not None
-            encoder_hidden_states_image = self.image_embedder(
-                encoder_hidden_states_image
-            )
+            encoder_hidden_states_image = self.image_embedder(encoder_hidden_states_image)
 
         encoder_hidden_states = torch.zeros(
             (timestep.shape[0], 0, temb.shape[-1]),
@@ -96,6 +91,7 @@ class MatrixGame2TimeImageEmbedding(nn.Module):
 
 
 class MatrixGame2CrossAttention(WanSelfAttention):
+
     def forward(self, x, context, context_lens=None, crossattn_cache=None):
         r"""
         Args:
@@ -133,6 +129,7 @@ class MatrixGame2CrossAttention(WanSelfAttention):
 
 
 class MatrixGame2TransformerBlock(nn.Module):
+
     def __init__(
         self,
         dim: int,
@@ -190,14 +187,10 @@ class MatrixGame2TransformerBlock(nn.Module):
         # 2. Cross-attention
         if added_kv_proj_dim is not None:
             # I2V
-            self.attn2 = WanI2VCrossAttention(
-                dim, num_heads, qk_norm=qk_norm, eps=eps
-            )
+            self.attn2 = WanI2VCrossAttention(dim, num_heads, qk_norm=qk_norm, eps=eps)
         else:
             # T2V
-            self.attn2 = WanT2VCrossAttention(
-                dim, num_heads, qk_norm=qk_norm, eps=eps
-            )
+            self.attn2 = WanT2VCrossAttention(dim, num_heads, qk_norm=qk_norm, eps=eps)
         self.cross_attn_residual_norm = ScaleResidualLayerNormScaleShift(
             dim,
             norm_type="layer",
@@ -244,9 +237,7 @@ class MatrixGame2TransformerBlock(nn.Module):
                 c_shift_msa,
                 c_scale_msa,
                 c_gate_msa,
-            ) = (self.scale_shift_table.unsqueeze(0) + temb.float()).chunk(
-                6, dim=2
-            )
+            ) = (self.scale_shift_table.unsqueeze(0) + temb.float()).chunk(6, dim=2)
             # batch_size, seq_len, 1, inner_dim
             shift_msa = shift_msa.squeeze(2)
             scale_msa = scale_msa.squeeze(2)
@@ -268,9 +259,7 @@ class MatrixGame2TransformerBlock(nn.Module):
         assert shift_msa.dtype == torch.float32
 
         # 1. Self-attention
-        norm_hidden_states = (
-            self.norm1(hidden_states.float()) * (1 + scale_msa) + shift_msa
-        ).to(orig_dtype)
+        norm_hidden_states = (self.norm1(hidden_states.float()) * (1 + scale_msa) + shift_msa).to(orig_dtype)
         query, _ = self.to_q(norm_hidden_states)
         key, _ = self.to_k(norm_hidden_states)
         value, _ = self.to_v(norm_hidden_states)
@@ -297,21 +286,17 @@ class MatrixGame2TransformerBlock(nn.Module):
         attn_output = attn_output.squeeze(1)
 
         null_shift = null_scale = torch.tensor([0], device=hidden_states.device)
-        norm_hidden_states, hidden_states = self.self_attn_residual_norm(
-            hidden_states, attn_output, gate_msa, null_shift, null_scale
-        )
+        norm_hidden_states, hidden_states = self.self_attn_residual_norm(hidden_states, attn_output, gate_msa,
+                                                                         null_shift, null_scale)
         norm_hidden_states, hidden_states = (
             norm_hidden_states.to(orig_dtype),
             hidden_states.to(orig_dtype),
         )
 
         # 2. Cross-attention
-        attn_output = self.attn2(
-            norm_hidden_states, context=encoder_hidden_states, context_lens=None
-        )
-        norm_hidden_states, hidden_states = self.cross_attn_residual_norm(
-            hidden_states, attn_output, 1, c_shift_msa, c_scale_msa
-        )
+        attn_output = self.attn2(norm_hidden_states, context=encoder_hidden_states, context_lens=None)
+        norm_hidden_states, hidden_states = self.cross_attn_residual_norm(hidden_states, attn_output, 1, c_shift_msa,
+                                                                          c_scale_msa)
         norm_hidden_states, hidden_states = (
             norm_hidden_states.to(orig_dtype),
             hidden_states.to(orig_dtype),
@@ -350,16 +335,10 @@ class MatrixGame2WanModel(BaseDiT):
 
     _fsdp_shard_conditions = _DEFAULT_MATRIXGAME2_CONFIG._fsdp_shard_conditions
     _compile_conditions = _DEFAULT_MATRIXGAME2_CONFIG._compile_conditions
-    _supported_attention_backends = (
-        _DEFAULT_MATRIXGAME2_CONFIG._supported_attention_backends
-    )
+    _supported_attention_backends = (_DEFAULT_MATRIXGAME2_CONFIG._supported_attention_backends)
     param_names_mapping = _DEFAULT_MATRIXGAME2_CONFIG.param_names_mapping
-    reverse_param_names_mapping = (
-        _DEFAULT_MATRIXGAME2_CONFIG.reverse_param_names_mapping
-    )
-    lora_param_names_mapping = (
-        _DEFAULT_MATRIXGAME2_CONFIG.lora_param_names_mapping
-    )
+    reverse_param_names_mapping = (_DEFAULT_MATRIXGAME2_CONFIG.reverse_param_names_mapping)
+    lora_param_names_mapping = (_DEFAULT_MATRIXGAME2_CONFIG.lora_param_names_mapping)
 
     def __init__(
         self,
@@ -394,23 +373,20 @@ class MatrixGame2WanModel(BaseDiT):
         self.action_config = getattr(config, "action_config", {})
 
         # 3. Transformer blocks
-        self.blocks = nn.ModuleList(
-            [
-                MatrixGame2TransformerBlock(
-                    inner_dim,
-                    config.ffn_dim,
-                    config.num_attention_heads,
-                    config.qk_norm,
-                    config.cross_attn_norm,
-                    config.eps,
-                    config.added_kv_proj_dim,
-                    self._supported_attention_backends,
-                    prefix=f"{getattr(config, 'prefix', 'Wan')}.blocks.{i}",
-                    action_config=self.action_config,
-                )
-                for i in range(config.num_layers)
-            ]
-        )
+        self.blocks = nn.ModuleList([
+            MatrixGame2TransformerBlock(
+                inner_dim,
+                config.ffn_dim,
+                config.num_attention_heads,
+                config.qk_norm,
+                config.cross_attn_norm,
+                config.eps,
+                config.added_kv_proj_dim,
+                self._supported_attention_backends,
+                prefix=f"{getattr(config, 'prefix', 'Wan')}.blocks.{i}",
+                action_config=self.action_config,
+            ) for i in range(config.num_layers)
+        ])
 
         # 4. Output norm & projection
         self.norm_out = LayerNormScaleShift(
@@ -421,12 +397,8 @@ class MatrixGame2WanModel(BaseDiT):
             dtype=torch.float32,
             compute_dtype=torch.float32,
         )
-        self.proj_out = nn.Linear(
-            inner_dim, config.out_channels * math.prod(config.patch_size)
-        )
-        self.scale_shift_table = nn.Parameter(
-            torch.randn(1, 2, inner_dim) / inner_dim**0.5
-        )
+        self.proj_out = nn.Linear(inner_dim, config.out_channels * math.prod(config.patch_size))
+        self.scale_shift_table = nn.Parameter(torch.randn(1, 2, inner_dim) / inner_dim**0.5)
 
         self.gradient_checkpointing = False
 
@@ -443,21 +415,14 @@ class MatrixGame2WanModel(BaseDiT):
         keyboard_cond: torch.Tensor | None = None,
         **kwargs,
     ) -> torch.Tensor:
-        if encoder_hidden_states is not None and not isinstance(
-            encoder_hidden_states, torch.Tensor
-        ):
+        if encoder_hidden_states is not None and not isinstance(encoder_hidden_states, torch.Tensor):
             encoder_hidden_states = encoder_hidden_states[0]
-        if (
-            isinstance(encoder_hidden_states_image, list)
-            and len(encoder_hidden_states_image) > 0
-        ):
+        if (isinstance(encoder_hidden_states_image, list) and len(encoder_hidden_states_image) > 0):
             encoder_hidden_states_image = encoder_hidden_states_image[0]
         elif not isinstance(encoder_hidden_states_image, torch.Tensor):
             encoder_hidden_states_image = None
 
-        batch_size, num_channels, num_frames, height, width = (
-            hidden_states.shape
-        )
+        batch_size, num_channels, num_frames, height, width = (hidden_states.shape)
         p_t, p_h, p_w = self.patch_size
         post_patch_num_frames = num_frames // p_t
         post_patch_height = height // p_h
@@ -481,11 +446,7 @@ class MatrixGame2WanModel(BaseDiT):
         )
         freqs_cos = freqs_cos.to(hidden_states.device)
         freqs_sin = freqs_sin.to(hidden_states.device)
-        freqs_cis = (
-            (freqs_cos.float(), freqs_sin.float())
-            if freqs_cos is not None
-            else None
-        )
+        freqs_cis = ((freqs_cos.float(), freqs_sin.float()) if freqs_cos is not None else None)
 
         hidden_states = self.patch_embedding(hidden_states)
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
@@ -498,9 +459,7 @@ class MatrixGame2WanModel(BaseDiT):
             timestep_proj,
             encoder_hidden_states,
             encoder_hidden_states_image,
-        ) = self.condition_embedder(
-            timestep, encoder_hidden_states, encoder_hidden_states_image
-        )
+        ) = self.condition_embedder(timestep, encoder_hidden_states, encoder_hidden_states_image)
         timestep_proj = timestep_proj.unflatten(1, (6, -1))
 
         if encoder_hidden_states is not None:
@@ -515,9 +474,7 @@ class MatrixGame2WanModel(BaseDiT):
 
         if encoder_hidden_states_image is not None:
             if encoder_hidden_states is not None:
-                encoder_hidden_states = torch.concat(
-                    [encoder_hidden_states_image, encoder_hidden_states], dim=1
-                )
+                encoder_hidden_states = torch.concat([encoder_hidden_states_image, encoder_hidden_states], dim=1)
             else:
                 encoder_hidden_states = encoder_hidden_states_image
 
@@ -552,9 +509,7 @@ class MatrixGame2WanModel(BaseDiT):
                 )
 
         # Output
-        shift, scale = (self.scale_shift_table + temb.unsqueeze(1)).chunk(
-            2, dim=1
-        )
+        shift, scale = (self.scale_shift_table + temb.unsqueeze(1)).chunk(2, dim=1)
         hidden_states = self.norm_out(hidden_states, shift, scale)
         hidden_states = self.proj_out(hidden_states)
 

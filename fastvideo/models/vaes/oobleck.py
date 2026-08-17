@@ -47,12 +47,17 @@ class Snake1d(nn.Module):
 
 
 class OobleckResidualUnit(nn.Module):
+
     def __init__(self, dimension: int = 16, dilation: int = 1):
         super().__init__()
         pad = ((7 - 1) * dilation) // 2
         self.snake1 = Snake1d(dimension)
         self.conv1 = weight_norm(nn.Conv1d(
-            dimension, dimension, kernel_size=7, dilation=dilation, padding=pad,
+            dimension,
+            dimension,
+            kernel_size=7,
+            dilation=dilation,
+            padding=pad,
         ))
         self.snake2 = Snake1d(dimension)
         self.conv2 = weight_norm(nn.Conv1d(dimension, dimension, kernel_size=1))
@@ -67,17 +72,21 @@ class OobleckResidualUnit(nn.Module):
 
 
 class OobleckEncoderBlock(nn.Module):
+
     def __init__(self, input_dim: int, output_dim: int, stride: int = 1):
         super().__init__()
         self.res_unit1 = OobleckResidualUnit(input_dim, dilation=1)
         self.res_unit2 = OobleckResidualUnit(input_dim, dilation=3)
         self.res_unit3 = OobleckResidualUnit(input_dim, dilation=9)
         self.snake1 = Snake1d(input_dim)
-        self.conv1 = weight_norm(nn.Conv1d(
-            input_dim, output_dim,
-            kernel_size=2 * stride, stride=stride,
-            padding=math.ceil(stride / 2),
-        ))
+        self.conv1 = weight_norm(
+            nn.Conv1d(
+                input_dim,
+                output_dim,
+                kernel_size=2 * stride,
+                stride=stride,
+                padding=math.ceil(stride / 2),
+            ))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.res_unit1(x)
@@ -87,14 +96,18 @@ class OobleckEncoderBlock(nn.Module):
 
 
 class OobleckDecoderBlock(nn.Module):
+
     def __init__(self, input_dim: int, output_dim: int, stride: int = 1):
         super().__init__()
         self.snake1 = Snake1d(input_dim)
-        self.conv_t1 = weight_norm(nn.ConvTranspose1d(
-            input_dim, output_dim,
-            kernel_size=2 * stride, stride=stride,
-            padding=math.ceil(stride / 2),
-        ))
+        self.conv_t1 = weight_norm(
+            nn.ConvTranspose1d(
+                input_dim,
+                output_dim,
+                kernel_size=2 * stride,
+                stride=stride,
+                padding=math.ceil(stride / 2),
+            ))
         self.res_unit1 = OobleckResidualUnit(output_dim, dilation=1)
         self.res_unit2 = OobleckResidualUnit(output_dim, dilation=3)
         self.res_unit3 = OobleckResidualUnit(output_dim, dilation=9)
@@ -120,8 +133,10 @@ class OobleckDiagonalGaussianDistribution:
 
     def sample(self, generator: torch.Generator | None = None) -> torch.Tensor:
         noise = torch.randn(
-            self.mean.shape, generator=generator,
-            device=self.parameters.device, dtype=self.parameters.dtype,
+            self.mean.shape,
+            generator=generator,
+            device=self.parameters.device,
+            dtype=self.parameters.dtype,
         )
         return self.mean + self.std * noise
 
@@ -135,6 +150,7 @@ class OobleckDecoderOutput:
 
 
 class OobleckEncoder(nn.Module):
+
     def __init__(
         self,
         encoder_hidden_size: int,
@@ -146,20 +162,25 @@ class OobleckEncoder(nn.Module):
         strides = downsampling_ratios
         channel_multiples = [1] + list(channel_multiples)
         self.conv1 = weight_norm(nn.Conv1d(
-            audio_channels, encoder_hidden_size, kernel_size=7, padding=3,
+            audio_channels,
+            encoder_hidden_size,
+            kernel_size=7,
+            padding=3,
         ))
         self.block = nn.ModuleList([
             OobleckEncoderBlock(
                 input_dim=encoder_hidden_size * channel_multiples[i],
                 output_dim=encoder_hidden_size * channel_multiples[i + 1],
                 stride=s,
-            )
-            for i, s in enumerate(strides)
+            ) for i, s in enumerate(strides)
         ])
         d_model = encoder_hidden_size * channel_multiples[-1]
         self.snake1 = Snake1d(d_model)
         self.conv2 = weight_norm(nn.Conv1d(
-            d_model, encoder_hidden_size, kernel_size=3, padding=1,
+            d_model,
+            encoder_hidden_size,
+            kernel_size=3,
+            padding=1,
         ))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -171,6 +192,7 @@ class OobleckEncoder(nn.Module):
 
 
 class OobleckDecoder(nn.Module):
+
     def __init__(
         self,
         channels: int,
@@ -183,20 +205,25 @@ class OobleckDecoder(nn.Module):
         strides = upsampling_ratios
         channel_multiples = [1] + list(channel_multiples)
         self.conv1 = weight_norm(nn.Conv1d(
-            input_channels, channels * channel_multiples[-1],
-            kernel_size=7, padding=3,
+            input_channels,
+            channels * channel_multiples[-1],
+            kernel_size=7,
+            padding=3,
         ))
         self.block = nn.ModuleList([
             OobleckDecoderBlock(
                 input_dim=channels * channel_multiples[len(strides) - i],
                 output_dim=channels * channel_multiples[len(strides) - i - 1],
                 stride=s,
-            )
-            for i, s in enumerate(strides)
+            ) for i, s in enumerate(strides)
         ])
         self.snake1 = Snake1d(channels)
         self.conv2 = weight_norm(nn.Conv1d(
-            channels, audio_channels, kernel_size=7, padding=3, bias=False,
+            channels,
+            audio_channels,
+            kernel_size=7,
+            padding=3,
+            bias=False,
         ))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -270,7 +297,8 @@ class OobleckVAE(nn.Module):
         )
 
     def encode(
-        self, x: torch.Tensor,
+        self,
+        x: torch.Tensor,
     ) -> OobleckDiagonalGaussianDistribution:
         return OobleckDiagonalGaussianDistribution(self.encoder(x))
 
@@ -278,7 +306,9 @@ class OobleckVAE(nn.Module):
         return OobleckDecoderOutput(sample=self.decoder(z))
 
     def forward(
-        self, sample: torch.Tensor, sample_posterior: bool = False,
+        self,
+        sample: torch.Tensor,
+        sample_posterior: bool = False,
     ) -> OobleckDecoderOutput:
         posterior = self.encode(sample)
         z = posterior.sample() if sample_posterior else posterior.mode()
@@ -317,7 +347,9 @@ class OobleckVAE(nn.Module):
             from huggingface_hub import snapshot_download
             allow = ["vae/*"] if subfolder else ["*"]
             root = snapshot_download(
-                repo_id=model_path, token=resolve_hf_token(), allow_patterns=allow,
+                repo_id=model_path,
+                token=resolve_hf_token(),
+                allow_patterns=allow,
             )
         if subfolder:
             root = os.path.join(root, subfolder)
@@ -326,10 +358,8 @@ class OobleckVAE(nn.Module):
 
         cfg_path = os.path.join(root, "config.json")
         if not os.path.isfile(cfg_path):
-            raise FileNotFoundError(
-                f"Expected config.json at {cfg_path}. If using a HF repo, "
-                f"pass subfolder='vae'."
-            )
+            raise FileNotFoundError(f"Expected config.json at {cfg_path}. If using a HF repo, "
+                                    f"pass subfolder='vae'.")
         with open(cfg_path) as f:
             cfg = json.load(f)
         cfg_fields = {k: v for k, v in cfg.items() if not k.startswith("_")}
@@ -347,24 +377,23 @@ class OobleckVAE(nn.Module):
             if os.path.isfile(alt):
                 weights_path = alt
             else:
-                raise FileNotFoundError(
-                    f"No safetensors weights under {root}. Expected "
-                    f"diffusion_pytorch_model.safetensors."
-                )
+                raise FileNotFoundError(f"No safetensors weights under {root}. Expected "
+                                        f"diffusion_pytorch_model.safetensors.")
         state = load_file(weights_path)
         missing, unexpected = model.load_state_dict(state, strict=False)
         if missing:
-            raise RuntimeError(
-                f"OobleckVAE missing {len(missing)} keys from {weights_path}: "
-                f"{missing[:5]}"
-            )
+            raise RuntimeError(f"OobleckVAE missing {len(missing)} keys from {weights_path}: "
+                               f"{missing[:5]}")
         if unexpected:
             # Non-critical: some checkpoints embed the VAE inside a larger
             # container (e.g. `pretransform.model.*`). Log the count so
             # genuine loader regressions don't go unnoticed.
             logger.debug(
                 "OobleckVAE: ignored %d unexpected keys from %s "
-                "(first 3: %s)", len(unexpected), weights_path, unexpected[:3],
+                "(first 3: %s)",
+                len(unexpected),
+                weights_path,
+                unexpected[:3],
             )
 
         if torch_dtype is not None:

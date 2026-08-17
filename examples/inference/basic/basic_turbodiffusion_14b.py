@@ -17,11 +17,9 @@ def main() -> None:
         num_gpus=2,
     )
 
-    prompt = (
-        "A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes "
-        "wide with interest. The playful yet serene atmosphere is complemented by soft "
-        "natural light filtering through the petals. Mid-shot, warm and cheerful tones."
-    )
+    prompt = ("A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes "
+              "wide with interest. The playful yet serene atmosphere is complemented by soft "
+              "natural light filtering through the petals. Mid-shot, warm and cheerful tones.")
     video = generator.generate_video(
         prompt,
         output_path=OUTPUT_PATH,
@@ -30,13 +28,11 @@ def main() -> None:
     )
 
     # Generate another video with a different prompt, without reloading the model!
-    prompt2 = (
-        "A majestic lion strides across the golden savanna, its powerful frame "
-        "glistening under the warm afternoon sun. The tall grass ripples gently in "
-        "the breeze, enhancing the lion's commanding presence. The tone is vibrant, "
-        "embodying the raw energy of the wild. Low angle, steady tracking shot, "
-        "cinematic."
-    )
+    prompt2 = ("A majestic lion strides across the golden savanna, its powerful frame "
+               "glistening under the warm afternoon sun. The tall grass ripples gently in "
+               "the breeze, enhancing the lion's commanding presence. The tone is vibrant, "
+               "embodying the raw energy of the wild. Low angle, steady tracking shot, "
+               "cinematic.")
     video2 = generator.generate_video(
         prompt2,
         output_path=OUTPUT_PATH,

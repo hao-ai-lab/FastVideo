@@ -12,8 +12,7 @@ import torch.nn.functional as F
 from torch.testing import assert_close
 
 from fastvideo.pipelines.basic.magi_human.stages.sr_latent_preparation import (
-    ZeroSNRDDPMDiscretization,
-)
+    ZeroSNRDDPMDiscretization, )
 from tests.local_tests.magi_human.test_magi_human_pipeline_parity import (
     _build_fastvideo_schedulers,
     _build_upstream_schedulers,
@@ -23,7 +22,6 @@ from tests.local_tests.magi_human.test_magi_human_pipeline_parity import (
     _find_base_shard_dir,
     _run_denoise_loop,
 )
-
 
 os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
 os.environ.setdefault("MASTER_ADDR", "localhost")
@@ -118,8 +116,8 @@ def _run_sr_denoise_loop(
                     dtype=video_latent.dtype,
                 )[:, :, :1]
             with set_forward_context(
-                current_timestep=int(t.item()) if torch.is_tensor(t) else int(t),
-                attn_metadata=None,
+                    current_timestep=int(t.item()) if torch.is_tensor(t) else int(t),
+                    attn_metadata=None,
             ):
                 v_cond_video, _ = dit_forward_fn(
                     dit,
@@ -192,10 +190,11 @@ def test_magi_human_sr540p_pipeline_latent_parity(use_image: bool):
     if sr_shard_dir is None or not sr_shard_dir.is_dir():
         pytest.skip("GAIR/daVinci-MagiHuman 540p_sr/ shards not available locally.")
 
-    converted_dir = Path(os.getenv(
-        "MAGI_HUMAN_SR540P_DIFFUSERS_PATH",
-        repo_root / "converted_weights" / "magi_human_sr_540p",
-    ))
+    converted_dir = Path(
+        os.getenv(
+            "MAGI_HUMAN_SR540P_DIFFUSERS_PATH",
+            repo_root / "converted_weights" / "magi_human_sr_540p",
+        ))
     transformer_dir = converted_dir / "transformer"
     sr_transformer_dir = converted_dir / "sr_transformer"
     if not transformer_dir.is_dir():
@@ -375,14 +374,10 @@ def test_magi_human_sr540p_pipeline_latent_parity(use_image: bool):
 
     v_diff = (ref_video - fv_video).abs()
     a_diff = (ref_audio - fv_audio).abs()
-    print(
-        f"sr540p {('ti2v' if use_image else 't2v')} "
-        f"video diff_max={v_diff.max().item():.4f} diff_mean={v_diff.mean().item():.4f}"
-    )
-    print(
-        f"sr540p {('ti2v' if use_image else 't2v')} "
-        f"audio diff_max={a_diff.max().item():.4f} diff_mean={a_diff.mean().item():.4f}"
-    )
+    print(f"sr540p {('ti2v' if use_image else 't2v')} "
+          f"video diff_max={v_diff.max().item():.4f} diff_mean={v_diff.mean().item():.4f}")
+    print(f"sr540p {('ti2v' if use_image else 't2v')} "
+          f"audio diff_max={a_diff.max().item():.4f} diff_mean={a_diff.mean().item():.4f}")
 
     assert ref_video.shape == fv_video.shape
     assert ref_audio.shape == fv_audio.shape

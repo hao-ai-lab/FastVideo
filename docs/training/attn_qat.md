@@ -49,7 +49,7 @@ configuration reference.
 Download the published preprocessed dataset:
 
 ```bash
-bash examples/training/finetune/wan_t2v_1.3B/mixkit/download_mixkit_data.sh
+bash examples/datasets/mixkit/download_dataset.sh
 ```
 
 ## Stage 1: supervised Attn-QAT fine-tuning

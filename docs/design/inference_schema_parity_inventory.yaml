@@ -76,6 +76,7 @@ surfaces:
       lora_target_modules: "Legacy LoRA configuration surface pending dedicated component API."
       output_type: "Legacy output formatting surface pending GenerationResult cleanup."
       VSA_sparsity: "Model-specific inference optimization not yet represented in the typed public schema."
+      attention_backend: "Process-wide default attention-backend request applied per component at load time; kernel-selection knob not yet represented in the typed public schema."
       moba_config_path: "Model-specific MoBA optimization surface not yet represented in the typed public schema."
       master_port: "Executor/bootstrap compatibility field; not part of the canonical inference schema."
       refine_transformer_path: "Generic stage-2 refine transformer override; no typed equivalent yet."
@@ -444,7 +445,11 @@ surfaces:
     moved:
       image_path: request.inputs.image_path
       pil_image: request.inputs.pil_image
+      last_image: request.inputs.last_image
+      references: request.inputs.references
       video_path: request.inputs.video_path
+      latents: request.inputs.latents
+      audio_latents: request.inputs.audio_latents
       mouse_cond: request.inputs.mouse_cond
       keyboard_cond: request.inputs.keyboard_cond
       grid_sizes: request.inputs.grid_sizes
@@ -524,7 +529,6 @@ surfaces:
       inpaint_mask: request.extensions.stable_audio.inpaint_mask
     internal_only:
       data_type: "Derived from the request shape and not a public input."
-      latents: "Pre-generated diffusion latents supplied by parity/debug harnesses; not a public input."
 
   sampling_param_extensions: {}
 

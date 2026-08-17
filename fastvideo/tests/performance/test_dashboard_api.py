@@ -6,6 +6,7 @@ from fastvideo.performance_dashboard.api import PerformanceDataStore, create_app
 
 
 class FakeStore(PerformanceDataStore):
+
     def __init__(self, records):
         super().__init__(tracking_root="/tmp/fake-fastvideo-perf-dashboard")
         self._records = records
@@ -55,36 +56,37 @@ def _record(model_id, gpu_type, ts, commit, latency, throughput, success=True, *
 
 
 def test_summary_endpoint_returns_latest_group_status():
-    app = create_app(FakeStore([
-        _record(
-            "wan",
-            "NVIDIA L40S",
-            "2026-01-01T00:00:00+00:00",
-            "a" * 40,
-            10.0,
-            10.0,
-            workload_id="wan-t2v",
-            variant_id="1.3b-sp2",
-            benchmark_version=2,
-            recipe_fingerprint="recipe-a",
-            hardware_profile_id="hw-l40s",
-            software_profile_id="sw-cu130",
-        ),
-        _record(
-            "wan",
-            "NVIDIA L40S",
-            "2026-01-02T00:00:00+00:00",
-            "b" * 40,
-            11.0,
-            9.0,
-            workload_id="wan-t2v",
-            variant_id="1.3b-sp2",
-            benchmark_version=2,
-            recipe_fingerprint="recipe-a",
-            hardware_profile_id="hw-l40s",
-            software_profile_id="sw-cu130",
-        ),
-    ]))
+    app = create_app(
+        FakeStore([
+            _record(
+                "wan",
+                "NVIDIA L40S",
+                "2026-01-01T00:00:00+00:00",
+                "a" * 40,
+                10.0,
+                10.0,
+                workload_id="wan-t2v",
+                variant_id="1.3b-sp2",
+                benchmark_version=2,
+                recipe_fingerprint="recipe-a",
+                hardware_profile_id="hw-l40s",
+                software_profile_id="sw-cu130",
+            ),
+            _record(
+                "wan",
+                "NVIDIA L40S",
+                "2026-01-02T00:00:00+00:00",
+                "b" * 40,
+                11.0,
+                9.0,
+                workload_id="wan-t2v",
+                variant_id="1.3b-sp2",
+                benchmark_version=2,
+                recipe_fingerprint="recipe-a",
+                hardware_profile_id="hw-l40s",
+                software_profile_id="sw-cu130",
+            ),
+        ]))
     client = TestClient(app)
 
     response = client.get("/api/performance/summary")
@@ -104,10 +106,11 @@ def test_summary_endpoint_returns_latest_group_status():
 
 
 def test_summary_status_is_independent_of_days_window():
-    app = create_app(FakeStore([
-        _record("wan", "NVIDIA L40S", "2026-01-01T00:00:00+00:00", "a" * 40, 10.0, 10.0),
-        _record("wan", "NVIDIA L40S", "2026-02-15T00:00:00+00:00", "b" * 40, 11.0, 9.0),
-    ]))
+    app = create_app(
+        FakeStore([
+            _record("wan", "NVIDIA L40S", "2026-01-01T00:00:00+00:00", "a" * 40, 10.0, 10.0),
+            _record("wan", "NVIDIA L40S", "2026-02-15T00:00:00+00:00", "b" * 40, 11.0, 9.0),
+        ]))
     client = TestClient(app)
 
     narrow = client.get("/api/performance/summary", params={"days": 1}).json()
@@ -122,30 +125,31 @@ def test_summary_status_is_independent_of_days_window():
 
 
 def test_dashboard_endpoints_filter_and_return_run_source_metadata():
-    app = create_app(FakeStore([
-        _record(
-            "wan",
-            "NVIDIA L40S",
-            "2026-01-01T00:00:00+00:00",
-            "a" * 40,
-            10.0,
-            10.0,
-            run_source="pr",
-            pr_number="123",
-            branch="feature/perf",
-            baseline_eligible=False,
-        ),
-        _record(
-            "wan",
-            "NVIDIA L40S",
-            "2026-01-02T00:00:00+00:00",
-            "b" * 40,
-            11.0,
-            9.0,
-            run_source="scheduled_main",
-            baseline_eligible=True,
-        ),
-    ]))
+    app = create_app(
+        FakeStore([
+            _record(
+                "wan",
+                "NVIDIA L40S",
+                "2026-01-01T00:00:00+00:00",
+                "a" * 40,
+                10.0,
+                10.0,
+                run_source="pr",
+                pr_number="123",
+                branch="feature/perf",
+                baseline_eligible=False,
+            ),
+            _record(
+                "wan",
+                "NVIDIA L40S",
+                "2026-01-02T00:00:00+00:00",
+                "b" * 40,
+                11.0,
+                9.0,
+                run_source="scheduled_main",
+                baseline_eligible=True,
+            ),
+        ]))
     client = TestClient(app)
 
     summary = client.get("/api/performance/summary", params={"run_source": "pr"}).json()
@@ -162,10 +166,11 @@ def test_dashboard_endpoints_filter_and_return_run_source_metadata():
 
 
 def test_records_and_trends_endpoints_filter_by_model_and_gpu():
-    app = create_app(FakeStore([
-        _record("wan", "NVIDIA L40S", "2026-01-01T00:00:00+00:00", "a" * 40, 10.0, 10.0),
-        _record("ltx", "NVIDIA A100", "2026-01-01T00:00:00+00:00", "b" * 40, 20.0, 5.0),
-    ]))
+    app = create_app(
+        FakeStore([
+            _record("wan", "NVIDIA L40S", "2026-01-01T00:00:00+00:00", "a" * 40, 10.0, 10.0),
+            _record("ltx", "NVIDIA A100", "2026-01-01T00:00:00+00:00", "b" * 40, 20.0, 5.0),
+        ]))
     client = TestClient(app)
 
     records = client.get("/api/performance/records", params={"model_id": "wan"}).json()
@@ -187,28 +192,29 @@ def test_v2_display_filters_keep_renamed_cohort_history():
         "hardware_profile_id": "hw-l40s",
         "software_profile_id": "sw-cu130",
     }
-    app = create_app(FakeStore([
-        _record(
-            "old-display",
-            "NVIDIA L40S old label",
-            "2026-01-01T00:00:00+00:00",
-            "a" * 40,
-            10.0,
-            10.0,
-            run_source="scheduled_main",
-            baseline_eligible=True,
-            **identity,
-        ),
-        _record(
-            "new-display",
-            "NVIDIA L40S",
-            "2026-01-02T00:00:00+00:00",
-            "b" * 40,
-            11.0,
-            9.0,
-            **identity,
-        ),
-    ]))
+    app = create_app(
+        FakeStore([
+            _record(
+                "old-display",
+                "NVIDIA L40S old label",
+                "2026-01-01T00:00:00+00:00",
+                "a" * 40,
+                10.0,
+                10.0,
+                run_source="scheduled_main",
+                baseline_eligible=True,
+                **identity,
+            ),
+            _record(
+                "new-display",
+                "NVIDIA L40S",
+                "2026-01-02T00:00:00+00:00",
+                "b" * 40,
+                11.0,
+                9.0,
+                **identity,
+            ),
+        ]))
     client = TestClient(app)
 
     filters = {"model_id": "new-display", "gpu_type": "NVIDIA L40S"}

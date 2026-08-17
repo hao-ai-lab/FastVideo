@@ -23,6 +23,7 @@ from fastvideo.training.trackers import (
 
 
 class _FakeSwanlab(ModuleType):
+
     def __init__(self) -> None:
         super().__init__("swanlab")
         self.init_kwargs: dict[str, Any] | None = None
@@ -194,6 +195,7 @@ def test_swanlab_missing_dependency_error_is_actionable(
 
 
 class _RecordingTracker(BaseTracker):
+
     def __init__(self, name: str) -> None:
         super().__init__()
         self.name = name

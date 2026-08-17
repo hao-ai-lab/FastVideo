@@ -50,17 +50,13 @@ def _run_torchrun(script_path: Path, mode: str, output_path: Path) -> None:
             timeout=120,
         )
     except subprocess.TimeoutExpired as error:
-        raise RuntimeError(
-            f"{mode} worker timed out after 120 seconds\n"
-            f"STDOUT:\n{error.stdout}\n"
-            f"STDERR:\n{error.stderr}"
-        ) from error
+        raise RuntimeError(f"{mode} worker timed out after 120 seconds\n"
+                           f"STDOUT:\n{error.stdout}\n"
+                           f"STDERR:\n{error.stderr}") from error
     if process.returncode != 0:
-        raise RuntimeError(
-            f"{mode} worker failed with code {process.returncode}\n"
-            f"STDOUT:\n{process.stdout}\n"
-            f"STDERR:\n{process.stderr}"
-        )
+        raise RuntimeError(f"{mode} worker failed with code {process.returncode}\n"
+                           f"STDOUT:\n{process.stdout}\n"
+                           f"STDERR:\n{process.stderr}")
 
 
 def _summarize_tensor(tensor: torch.Tensor | Any) -> dict[str, Any]:
@@ -75,10 +71,10 @@ def _summarize_tensor(tensor: torch.Tensor | Any) -> dict[str, Any]:
 
 def _run_worker(mode: str, output_path: Path) -> None:
     if mode not in {
-        "module_no_offload",
-        "direct_no_offload",
-        "module_cpu_offload",
-        "direct_cpu_offload",
+            "module_no_offload",
+            "direct_no_offload",
+            "module_cpu_offload",
+            "direct_cpu_offload",
     }:
         raise ValueError(f"Unsupported mode: {mode}")
 
@@ -91,7 +87,7 @@ def _run_worker(mode: str, output_path: Path) -> None:
     torch.manual_seed(SEED + rank)
 
     try:
-        mesh = init_device_mesh("cuda", (world_size,))
+        mesh = init_device_mesh("cuda", (world_size, ))
         norm = RMSNorm(HIDDEN_SIZE, eps=1e-6, has_weight=True).to(device)
         with torch.no_grad():
             norm.weight.fill_(1.0)
@@ -179,8 +175,7 @@ def test_no_direct_forward_native_calls_in_models() -> None:
     hooks (issue #1379); model code must use module dispatch instead."""
     models_dir = REPO_ROOT / "fastvideo" / "models"
     offenders = [
-        str(path.relative_to(REPO_ROOT))
-        for path in sorted(models_dir.rglob("*.py"))
+        str(path.relative_to(REPO_ROOT)) for path in sorted(models_dir.rglob("*.py"))
         if ".forward_native(" in path.read_text(encoding="utf-8")
     ]
     assert not offenders, f"Replace .forward_native(...) with module dispatch in: {offenders}"

@@ -59,9 +59,7 @@ def test_generate_parser_preserves_unknown_dotted_overrides(tmp_path):
     assert unknown == ["--request.sampling.seed", "42"]
 
 
-def test_build_generate_run_config_loads_nested_config_and_dotted_overrides(
-    tmp_path,
-):
+def test_build_generate_run_config_loads_nested_config_and_dotted_overrides(tmp_path, ):
     config_path = tmp_path / "run.yaml"
     config_path.write_text(
         "generator:\n"
@@ -188,8 +186,8 @@ def test_build_generate_run_config_rejects_flat_config(tmp_path):
 
     args, unknown = _parse_generate_args(["--config", str(config_path)])
     with pytest.raises(
-        ValueError,
-        match="top-level 'generator' mapping",
+            ValueError,
+            match="top-level 'generator' mapping",
     ):
         build_generate_run_config(args, unknown)
 
@@ -211,8 +209,8 @@ def test_build_generate_run_config_rejects_non_dotted_overrides(tmp_path):
         "2",
     ])
     with pytest.raises(
-        ValueError,
-        match="CLI overrides must use dotted config paths",
+            ValueError,
+            match="CLI overrides must use dotted config paths",
     ):
         build_generate_run_config(args, unknown)
 
@@ -226,8 +224,8 @@ def test_build_generate_run_config_requires_single_prompt_source(tmp_path):
     )
     args, unknown = _parse_generate_args(["--config", str(missing_prompt_path)])
     with pytest.raises(
-        ValueError,
-        match="Either request.prompt or request.inputs.prompt_path must be provided",
+            ValueError,
+            match="Either request.prompt or request.inputs.prompt_path must be provided",
     ):
         build_generate_run_config(args, unknown)
 
@@ -243,8 +241,8 @@ def test_build_generate_run_config_requires_single_prompt_source(tmp_path):
     )
     args, unknown = _parse_generate_args(["--config", str(conflicting_prompt_path)])
     with pytest.raises(
-        ValueError,
-        match="Cannot provide both request.prompt and request.inputs.prompt_path",
+            ValueError,
+            match="Cannot provide both request.prompt and request.inputs.prompt_path",
     ):
         build_generate_run_config(args, unknown)
 
@@ -287,8 +285,8 @@ def test_build_serve_config_rejects_flat_config(tmp_path):
 
     args, unknown = _parse_serve_args(["--config", str(config_path)])
     with pytest.raises(
-        ValueError,
-        match="top-level 'generator' mapping",
+            ValueError,
+            match="top-level 'generator' mapping",
     ):
         build_serve_config(args, unknown)
 
@@ -308,8 +306,8 @@ def test_build_serve_config_rejects_non_dotted_overrides(tmp_path):
         "9000",
     ])
     with pytest.raises(
-        ValueError,
-        match="CLI overrides must use dotted config paths",
+            ValueError,
+            match="CLI overrides must use dotted config paths",
     ):
         build_serve_config(args, unknown)
 
@@ -318,8 +316,8 @@ def test_generate_subcommand_requires_config():
     args, _ = _parse_generate_args([])
 
     with pytest.raises(
-        ValueError,
-        match="fastvideo generate requires --config PATH",
+            ValueError,
+            match="fastvideo generate requires --config PATH",
     ):
         GenerateSubcommand().validate(args)
 
@@ -328,8 +326,8 @@ def test_serve_subcommand_requires_config():
     args, _ = _parse_serve_args([])
 
     with pytest.raises(
-        ValueError,
-        match="fastvideo serve requires --config PATH",
+            ValueError,
+            match="fastvideo serve requires --config PATH",
     ):
         ServeSubcommand().validate(args)
 
@@ -351,8 +349,8 @@ def test_generate_subcommand_rejects_non_positive_num_gpus(tmp_path):
     ])
 
     with pytest.raises(
-        ValueError,
-        match=r"generator\.engine\.num_gpus must be > 0; got 0",
+            ValueError,
+            match=r"generator\.engine\.num_gpus must be > 0; got 0",
     ):
         GenerateSubcommand().validate(args)
 
@@ -372,8 +370,8 @@ def test_serve_subcommand_rejects_non_positive_num_gpus(tmp_path):
     ])
 
     with pytest.raises(
-        ValueError,
-        match=r"generator\.engine\.num_gpus must be > 0; got 0",
+            ValueError,
+            match=r"generator\.engine\.num_gpus must be > 0; got 0",
     ):
         ServeSubcommand().validate(args)
 
@@ -555,7 +553,7 @@ def test_streaming_run_server_rejects_missing_streaming_block():
         streaming=None,
     )
     with pytest.raises(
-        ValueError,
-        match="ServeConfig.streaming must be set",
+            ValueError,
+            match="ServeConfig.streaming must be set",
     ):
         streaming_server.run_server(config)

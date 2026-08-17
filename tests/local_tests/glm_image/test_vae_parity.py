@@ -24,9 +24,7 @@ os.environ.setdefault("DISABLE_SP", "1")
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 FAMILY = "glm_image"
-LOCAL_WEIGHTS_DIR = Path(
-    os.getenv("GLM_IMAGE_LOCAL_WEIGHTS_DIR",
-              REPO_ROOT / "official_weights" / FAMILY))
+LOCAL_WEIGHTS_DIR = Path(os.getenv("GLM_IMAGE_LOCAL_WEIGHTS_DIR", REPO_ROOT / "official_weights" / FAMILY))
 VAE_DIR = LOCAL_WEIGHTS_DIR / "vae"
 
 
@@ -56,8 +54,7 @@ def vae_config():
 @pytest.fixture(scope="module")
 def official_vae(device):
     diffusers = pytest.importorskip("diffusers")
-    vae = diffusers.AutoencoderKL.from_pretrained(
-        str(VAE_DIR), torch_dtype=torch.float32).to(device).eval()
+    vae = diffusers.AutoencoderKL.from_pretrained(str(VAE_DIR), torch_dtype=torch.float32).to(device).eval()
     return vae
 
 
@@ -72,8 +69,7 @@ def fastvideo_vae(device):
     cfg = GlmImageVAEConfig()
     vae = AutoencoderKL(cfg)
     safetensors = pytest.importorskip("safetensors.torch")
-    sd = safetensors.load_file(
-        str(VAE_DIR / "diffusion_pytorch_model.safetensors"))
+    sd = safetensors.load_file(str(VAE_DIR / "diffusion_pytorch_model.safetensors"))
     missing, unexpected = vae.load_state_dict(sd, strict=False)
     assert not missing, f"FastVideo VAE missing keys: {missing[:10]}"
     assert not unexpected, f"FastVideo VAE unexpected keys: {unexpected[:10]}"
@@ -83,8 +79,7 @@ def fastvideo_vae(device):
 def test_vae_config_matches_real_checkpoint(vae_config):
     assert vae_config["block_out_channels"] == [128, 512, 1024, 1024]
     assert vae_config["latent_channels"] == 16
-    assert "latents_mean" in vae_config and len(
-        vae_config["latents_mean"]) == 16
+    assert "latents_mean" in vae_config and len(vae_config["latents_mean"]) == 16
     assert "latents_std" in vae_config and len(vae_config["latents_std"]) == 16
 
 

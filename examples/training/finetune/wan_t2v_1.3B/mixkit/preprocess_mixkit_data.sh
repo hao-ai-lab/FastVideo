@@ -1,7 +1,7 @@
 #!/bin/bash
 # Build the HD-Mixkit-Finetune-Wan parquet shards from raw MixKit videos.
 #
-# Mirrors download_mixkit_data.sh's *output* layout so finetune_qat.sh and
+# Mirrors examples/datasets/mixkit/download_dataset.sh's *output* layout so finetune_qat.sh and
 # distill_dmd_qat.sh can consume the result without any change. Use this when
 # you want to reproduce the encoding from raw videos end-to-end, verify the
 # published preprocessed dataset, or substitute your own captions.

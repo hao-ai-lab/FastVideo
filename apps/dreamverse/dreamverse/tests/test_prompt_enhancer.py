@@ -6,7 +6,6 @@ import os
 import re
 import time
 
-
 os.environ.setdefault("CEREBRAS_API_KEY", "dummy")
 os.environ.setdefault("GROQ_API_KEY", "dummy")
 
@@ -22,6 +21,7 @@ from dreamverse.prompt_enhancer import (
 
 
 class _FakeResponse:
+
     def __init__(self, payload: dict):
         self._payload = payload
 
@@ -30,6 +30,7 @@ class _FakeResponse:
 
 
 class _FakeSyncCompletions:
+
     def __init__(self, payload: dict):
         self._payload = payload
 
@@ -38,6 +39,7 @@ class _FakeSyncCompletions:
 
 
 class _FakeSyncClient:
+
     def __init__(self, payload: dict):
         self.chat = type(
             "_FakeChat",
@@ -47,6 +49,7 @@ class _FakeSyncClient:
 
 
 class _DelayedSyncCompletions:
+
     def __init__(self, payload: dict, delay_s: float = 0.0, exc: Exception | None = None):
         self._payload = payload
         self._delay_s = delay_s
@@ -61,29 +64,26 @@ class _DelayedSyncCompletions:
 
 
 class _DelayedSyncClient:
+
     def __init__(self, payload: dict, delay_s: float = 0.0, exc: Exception | None = None):
         self.chat = type(
             "_FakeChat",
             (),
-            {
-                "completions": _DelayedSyncCompletions(
-                    payload,
-                    delay_s=delay_s,
-                    exc=exc,
-                )
-            },
+            {"completions": _DelayedSyncCompletions(
+                payload,
+                delay_s=delay_s,
+                exc=exc,
+            )},
         )()
 
 
 def _chat_payload_with_content(content: str) -> dict:
     return {
-        "choices": [
-            {
-                "message": {
-                    "content": content,
-                }
+        "choices": [{
+            "message": {
+                "content": content,
             }
-        ]
+        }]
     }
 
 
@@ -172,6 +172,7 @@ def _build_staged_enhancer(
 
 
 class _FakeOpenAIClient:
+
     def __init__(self, **kwargs):
         self.kwargs = kwargs
         self.chat = type(
@@ -182,6 +183,7 @@ class _FakeOpenAIClient:
 
 
 class _FakeCerebrasClient:
+
     def __init__(self, **kwargs):
         self.kwargs = kwargs
         self.chat = type(
@@ -192,16 +194,12 @@ class _FakeCerebrasClient:
 
 
 def test_parse_json_response_accepts_fenced_json_with_prose():
-    parsed = _parse_json_response(
-        "Here is the rewrite:\n```json\n{\"segment_prompts\":[\"A\",\"B\"]}\n```\nThanks."
-    )
+    parsed = _parse_json_response("Here is the rewrite:\n```json\n{\"segment_prompts\":[\"A\",\"B\"]}\n```\nThanks.")
     assert parsed == {"segment_prompts": ["A", "B"]}
 
 
 def test_parse_json_response_extracts_first_embedded_object():
-    parsed = _parse_json_response(
-        "Model output:\n{\"segment_prompts\":[\"A\",\"B\"]}\n(complete)"
-    )
+    parsed = _parse_json_response("Model output:\n{\"segment_prompts\":[\"A\",\"B\"]}\n(complete)")
     assert parsed == {"segment_prompts": ["A", "B"]}
 
 
@@ -268,16 +266,12 @@ def test_build_client_supports_groq_provider(monkeypatch):
 
 def test_rewrite_prompt_sequence_accepts_segment_prompts_output():
     enhancer = _build_test_enhancer(
-        _chat_payload_with_content(
-            '{"id":"preset_a","label":"Preset A","segment_prompts":["A","B"]}'
-        )
-    )
+        _chat_payload_with_content('{"id":"preset_a","label":"Preset A","segment_prompts":["A","B"]}'))
     result = asyncio.run(
         enhancer.rewrite_prompt_sequence(
             ["prompt one", "prompt two"],
             rewrite_instruction="make it cinematic",
-        )
-    )
+        ))
     assert result.fallback_used is False
     assert result.error is None
     assert result.rollout_id == "preset_a"
@@ -286,15 +280,12 @@ def test_rewrite_prompt_sequence_accepts_segment_prompts_output():
 
 
 def test_rewrite_prompt_sequence_accepts_legacy_rewritten_prompts_output():
-    enhancer = _build_test_enhancer(
-        _chat_payload_with_content('{"rewritten_prompts":["A","B"]}')
-    )
+    enhancer = _build_test_enhancer(_chat_payload_with_content('{"rewritten_prompts":["A","B"]}'))
     result = asyncio.run(
         enhancer.rewrite_prompt_sequence(
             ["prompt one", "prompt two"],
             rewrite_instruction="make it cinematic",
-        )
-    )
+        ))
     assert result.fallback_used is False
     assert result.error is None
     assert result.rollout_id == "current_rollout"
@@ -303,19 +294,14 @@ def test_rewrite_prompt_sequence_accepts_legacy_rewritten_prompts_output():
 
 
 def test_rewrite_prompt_sequence_accepts_segment_dicts_without_top_level_rollout_metadata():
-    enhancer = _build_test_enhancer(
-        _chat_payload_with_content(
-            '{"segments":[{"prompt":"A"},{"text":"B"}]}'
-        )
-    )
+    enhancer = _build_test_enhancer(_chat_payload_with_content('{"segments":[{"prompt":"A"},{"text":"B"}]}'))
     result = asyncio.run(
         enhancer.rewrite_prompt_sequence(
             ["prompt one", "prompt two"],
             preset_id="preset_a",
             preset_label="Preset A",
             rewrite_instruction="make it cinematic",
-        )
-    )
+        ))
     assert result.fallback_used is False
     assert result.error is None
     assert result.rollout_id == "preset_a"
@@ -329,14 +315,12 @@ def test_rewrite_prompt_sequence_accepts_numbered_prose_output():
             "The user is asking for a cinematic rewrite.\n\n"
             "1. A dog bounds across the moon's dusty surface, kicking up silver regolith as it chases a rabbit beneath the black sky.\n"
             "2. The rabbit darts around a crater rim while the dog lunges after it, Earth glowing blue in the distance.\n"
-        )
-    )
+        ))
     result = asyncio.run(
         enhancer.rewrite_prompt_sequence(
             ["prompt one", "prompt two"],
             rewrite_instruction="make it cinematic",
-        )
-    )
+        ))
     assert result.fallback_used is False
     assert result.error is None
     assert result.rollout_id == "current_rollout"
@@ -355,12 +339,10 @@ def test_enhance_prompt_prefers_cerebras_before_groq_fallback():
         groq_delay_s=0.01,
     )
 
-    result = asyncio.run(
-        enhancer.enhance_prompt(
-            "A rainy alley at night",
-            mode="single_clip",
-        )
-    )
+    result = asyncio.run(enhancer.enhance_prompt(
+        "A rainy alley at night",
+        mode="single_clip",
+    ))
 
     assert result.fallback_used is False
     assert result.error is None
@@ -381,12 +363,10 @@ def test_enhance_prompt_uses_groq_when_cerebras_fails():
         groq_delay_s=0.01,
     )
 
-    result = asyncio.run(
-        enhancer.enhance_prompt(
-            "A rainy alley at night",
-            mode="single_clip",
-        )
-    )
+    result = asyncio.run(enhancer.enhance_prompt(
+        "A rainy alley at night",
+        mode="single_clip",
+    ))
 
     assert result.fallback_used is False
     assert result.error is None
@@ -408,13 +388,11 @@ def test_enhance_prompt_can_use_groq_when_cerebras_times_out():
     enhancer.http_timeout_ms = 50
     enhancer.default_timeout_ms = 50
 
-    result = asyncio.run(
-        enhancer.enhance_prompt(
-            "A rainy alley at night",
-            mode="single_clip",
-            timeout_ms=50,
-        )
-    )
+    result = asyncio.run(enhancer.enhance_prompt(
+        "A rainy alley at night",
+        mode="single_clip",
+        timeout_ms=50,
+    ))
 
     assert result.fallback_used is False
     assert result.error is None
@@ -434,12 +412,10 @@ def test_enhance_prompt_can_use_cerebras_when_it_returns_first():
         groq_delay_s=0.08,
     )
 
-    result = asyncio.run(
-        enhancer.enhance_prompt(
-            "A rainy alley at night",
-            mode="single_clip",
-        )
-    )
+    result = asyncio.run(enhancer.enhance_prompt(
+        "A rainy alley at night",
+        mode="single_clip",
+    ))
 
     assert result.fallback_used is False
     assert result.error is None
@@ -453,15 +429,12 @@ def test_enhance_prompt_can_use_cerebras_when_it_returns_first():
 
 
 def test_rewrite_prompt_sequence_keeps_raw_output_on_parse_error():
-    enhancer = _build_test_enhancer(
-        _chat_payload_with_content("I cannot comply with JSON right now.")
-    )
+    enhancer = _build_test_enhancer(_chat_payload_with_content("I cannot comply with JSON right now."))
     result = asyncio.run(
         enhancer.rewrite_prompt_sequence(
             ["prompt one", "prompt two"],
             rewrite_instruction="make it cinematic",
-        )
-    )
+        ))
     assert result.fallback_used is True
     assert "No JSON object found in assistant response." in (result.error or "")
     assert result.raw_response_text == "I cannot comply with JSON right now."
@@ -473,9 +446,7 @@ def test_rewrite_prompt_sequence_keeps_raw_output_on_parse_error():
 def test_rewrite_prompt_sequence_uses_current_rollout_payload_shape():
     enhancer = _build_test_enhancer(
         _chat_payload_with_content(
-            '{"id":"rewritten_rollout","label":"Rewritten Rollout","segment_prompts":["A","B"]}'
-        )
-    )
+            '{"id":"rewritten_rollout","label":"Rewritten Rollout","segment_prompts":["A","B"]}'))
     captured = {
         "body": None,
         "timeout_seconds": None,
@@ -486,8 +457,7 @@ def test_rewrite_prompt_sequence_uses_current_rollout_payload_shape():
         captured["timeout_seconds"] = timeout_seconds
         return (
             _chat_payload_with_content(
-                '{"id":"rewritten_rollout","label":"Rewritten Rollout","segment_prompts":["A","B"]}'
-            ),
+                '{"id":"rewritten_rollout","label":"Rewritten Rollout","segment_prompts":["A","B"]}'),
             '{"id":"rewritten_rollout","label":"Rewritten Rollout","segment_prompts":["A","B"]}',
         )
 
@@ -502,8 +472,7 @@ def test_rewrite_prompt_sequence_uses_current_rollout_payload_shape():
             rewrite_model="gpt-test",
             rewrite_temperature=0.2,
             timeout_ms=800,
-        )
-    )
+        ))
 
     assert result.fallback_used is False
     assert captured["body"]["messages"][0] == {
@@ -512,12 +481,12 @@ def test_rewrite_prompt_sequence_uses_current_rollout_payload_shape():
     }
     assert captured["body"]["messages"][1]["role"] == "user"
     assert prompt_enhancer_module.json.loads(captured["body"]["messages"][1]["content"]) == {
-        "mode": "edit_existing_rollout",
-        "request": (
-            "Rewrite all segment prompts with improved continuity and cinematic detail. "
-            "Keep count and ordering identical."
-        ),
-        "user_instruction": "make it cinematic",
+        "mode":
+        "edit_existing_rollout",
+        "request": ("Rewrite all segment prompts with improved continuity and cinematic detail. "
+                    "Keep count and ordering identical."),
+        "user_instruction":
+        "make it cinematic",
         "current_rollout": {
             "id": "preset_a",
             "label": "Preset A",
@@ -528,11 +497,8 @@ def test_rewrite_prompt_sequence_uses_current_rollout_payload_shape():
 
 def test_rewrite_prompt_sequence_supports_new_rollout_mode():
     enhancer = _build_test_enhancer(
-        _chat_payload_with_content(
-            '{"id":"custom_editable","label":"Custom rollout","segment_prompts":['
-            '"A","B","C","D","E","F"]}'
-        )
-    )
+        _chat_payload_with_content('{"id":"custom_editable","label":"Custom rollout","segment_prompts":['
+                                   '"A","B","C","D","E","F"]}'))
     captured = {
         "body": None,
     }
@@ -541,10 +507,8 @@ def test_rewrite_prompt_sequence_supports_new_rollout_mode():
         del timeout_seconds
         captured["body"] = body
         return (
-            _chat_payload_with_content(
-                '{"id":"custom_editable","label":"Custom rollout","segment_prompts":['
-                '"A","B","C","D","E","F"]}'
-            ),
+            _chat_payload_with_content('{"id":"custom_editable","label":"Custom rollout","segment_prompts":['
+                                       '"A","B","C","D","E","F"]}'),
             '{"id":"custom_editable","label":"Custom rollout","segment_prompts":['
             '"A","B","C","D","E","F"]}',
         )
@@ -560,30 +524,29 @@ def test_rewrite_prompt_sequence_supports_new_rollout_mode():
             rewrite_model="gpt-test",
             rewrite_temperature=0.2,
             timeout_ms=800,
-        )
-    )
+        ))
 
     assert result.fallback_used is False
     assert result.prompts == ["A", "B", "C", "D", "E", "F"]
     assert prompt_enhancer_module.json.loads(captured["body"]["messages"][1]["content"]) == {
-        "mode": "new_rollout",
-        "request": (
-            "Rewrite all segment prompts with improved continuity and cinematic detail. "
-            "Keep count and ordering identical."
-        ),
-        "user_instruction": "A moonbase corridor thriller with flooding and red alarms",
-        "desired_segment_count": 6,
-        "rollout_id_hint": "custom_editable",
-        "rollout_label_hint": "Custom rollout",
+        "mode":
+        "new_rollout",
+        "request": ("Rewrite all segment prompts with improved continuity and cinematic detail. "
+                    "Keep count and ordering identical."),
+        "user_instruction":
+        "A moonbase corridor thriller with flooding and red alarms",
+        "desired_segment_count":
+        6,
+        "rollout_id_hint":
+        "custom_editable",
+        "rollout_label_hint":
+        "Custom rollout",
     }
 
 
 def test_rewrite_prompt_sequence_uses_session_override_system_prompt():
     enhancer = _build_test_enhancer(
-        _chat_payload_with_content(
-            '{"id":"preset_a","label":"Preset A","segment_prompts":["A","B"]}'
-        )
-    )
+        _chat_payload_with_content('{"id":"preset_a","label":"Preset A","segment_prompts":["A","B"]}'))
     enhancer.rewrite_all_system_prompt = "shared system prompt"
     captured = {
         "body": None,
@@ -593,9 +556,7 @@ def test_rewrite_prompt_sequence_uses_session_override_system_prompt():
         del timeout_seconds
         captured["body"] = body
         return (
-            _chat_payload_with_content(
-                '{"id":"preset_a","label":"Preset A","segment_prompts":["A","B"]}'
-            ),
+            _chat_payload_with_content('{"id":"preset_a","label":"Preset A","segment_prompts":["A","B"]}'),
             '{"id":"preset_a","label":"Preset A","segment_prompts":["A","B"]}',
         )
 
@@ -609,8 +570,7 @@ def test_rewrite_prompt_sequence_uses_session_override_system_prompt():
             rewrite_instruction="make it cinematic",
             rewrite_model="gpt-test",
             system_prompt_override="session specific system prompt",
-        )
-    )
+        ))
 
     assert result.fallback_used is False
     assert captured["body"]["messages"][0] == {
@@ -621,10 +581,7 @@ def test_rewrite_prompt_sequence_uses_session_override_system_prompt():
 
 def test_resolve_rewrite_new_rollout_system_prompt_uses_dedicated_prompt():
     enhancer = _build_test_enhancer(
-        _chat_payload_with_content(
-            '{"id":"preset_a","label":"Preset A","segment_prompts":["A","B"]}'
-        )
-    )
+        _chat_payload_with_content('{"id":"preset_a","label":"Preset A","segment_prompts":["A","B"]}'))
     enhancer.rewrite_all_system_prompt = "shared rewrite system prompt"
     enhancer.rewrite_user_system_prompt = "new rollout rewrite system prompt"
 
@@ -635,24 +592,17 @@ def test_resolve_rewrite_new_rollout_system_prompt_uses_dedicated_prompt():
 
 def test_resolve_rewrite_new_rollout_system_prompt_prefers_override():
     enhancer = _build_test_enhancer(
-        _chat_payload_with_content(
-            '{"id":"preset_a","label":"Preset A","segment_prompts":["A","B"]}'
-        )
-    )
+        _chat_payload_with_content('{"id":"preset_a","label":"Preset A","segment_prompts":["A","B"]}'))
     enhancer.rewrite_all_system_prompt = "shared rewrite system prompt"
     enhancer.rewrite_user_system_prompt = "new rollout rewrite system prompt"
 
-    resolved = enhancer.resolve_rewrite_new_rollout_system_prompt(
-        "session specific system prompt"
-    )
+    resolved = enhancer.resolve_rewrite_new_rollout_system_prompt("session specific system prompt")
 
     assert resolved == "session specific system prompt"
 
 
 def test_generate_auto_prompt_uses_selected_model():
-    enhancer = _build_test_enhancer(
-        _chat_payload_with_content('{"next_prompt":"Auto next"}')
-    )
+    enhancer = _build_test_enhancer(_chat_payload_with_content('{"next_prompt":"Auto next"}'))
     enhancer.auto_system_prompt = "auto system prompt"
     enhancer.rewrite_model_options = ["gpt-test", "gpt-alt"]
     enhancer.rewrite_default_model = "gpt-test"
@@ -680,8 +630,7 @@ def test_generate_auto_prompt_uses_selected_model():
             next_segment_idx=2,
             model="gpt-alt",
             timeout_ms=800,
-        )
-    )
+        ))
     assert result.fallback_used is False
     assert result.error is None
     assert result.prompt == "Auto next"
@@ -690,9 +639,7 @@ def test_generate_auto_prompt_uses_selected_model():
 
 
 def test_enhance_prompt_uses_selected_model():
-    enhancer = _build_test_enhancer(
-        _chat_payload_with_content('{"next_prompt":"Enhanced next"}')
-    )
+    enhancer = _build_test_enhancer(_chat_payload_with_content('{"next_prompt":"Enhanced next"}'))
     enhancer.enhance_system_prompt = "enhance system prompt"
     enhancer.auto_system_prompt = "auto system prompt"
     enhancer.rewrite_model_options = ["gpt-test", "gpt-alt"]
@@ -722,8 +669,7 @@ def test_enhance_prompt_uses_selected_model():
             next_segment_idx=2,
             model="gpt-alt",
             timeout_ms=800,
-        )
-    )
+        ))
     assert result.fallback_used is False
     assert result.error is None
     assert result.prompt == "Enhanced next"
@@ -732,9 +678,7 @@ def test_enhance_prompt_uses_selected_model():
 
 
 def test_enhance_prompt_single_clip_uses_auto_extension_prompt_and_prompt_field():
-    enhancer = _build_test_enhancer(
-        _chat_payload_with_content('{"prompt":"Extended single clip"}')
-    )
+    enhancer = _build_test_enhancer(_chat_payload_with_content('{"prompt":"Extended single clip"}'))
     enhancer.enhance_system_prompt = "enhance system prompt"
     enhancer.auto_system_prompt = "auto system prompt"
     enhancer.rewrite_model_options = ["gpt-test", "gpt-alt"]
@@ -764,14 +708,12 @@ def test_enhance_prompt_single_clip_uses_auto_extension_prompt_and_prompt_field(
 
     enhancer._request_content = _fake_request_content  # type: ignore[attr-defined]
 
-    result = asyncio.run(
-        enhancer.enhance_prompt(
-            "short 5s idea",
-            mode="single_clip",
-            model="gpt-alt",
-            timeout_ms=800,
-        )
-    )
+    result = asyncio.run(enhancer.enhance_prompt(
+        "short 5s idea",
+        mode="single_clip",
+        model="gpt-alt",
+        timeout_ms=800,
+    ))
     assert result.fallback_used is False
     assert result.error is None
     assert result.prompt == "Extended single clip"
@@ -784,17 +726,15 @@ def test_enhance_prompt_single_clip_uses_auto_extension_prompt_and_prompt_field(
             "single 5-second LTX-2.3 video clip. Respond with "
             'valid JSON only as {"prompt": "..."}.'  # noqa: E501
         ),
-        "user_prompt": "short 5s idea",
+        "user_prompt":
+        "short 5s idea",
     }
 
 
 def test_enhance_prompt_single_clip_rejects_plain_text_response():
     enhancer = _build_test_enhancer(
-        _chat_payload_with_content(
-            "Medium shot of a woman by a rainy cafe window as she lifts her "
-            "phone, exhales softly, and the camera makes a slow push in."
-        )
-    )
+        _chat_payload_with_content("Medium shot of a woman by a rainy cafe window as she lifts her "
+                                   "phone, exhales softly, and the camera makes a slow push in."))
     enhancer.auto_system_prompt = "auto system prompt"
 
     result = asyncio.run(
@@ -803,17 +743,14 @@ def test_enhance_prompt_single_clip_rejects_plain_text_response():
             mode="single_clip",
             model="gpt-test",
             timeout_ms=800,
-        )
-    )
+        ))
     assert result.fallback_used is True
     assert "No JSON object found in assistant response." in result.error
     assert result.prompt == ""
 
 
 def test_enhance_prompt_single_clip_rejects_segment_prompts_json():
-    enhancer = _build_test_enhancer(
-        _chat_payload_with_content('{"segment_prompts":["A","B"]}')
-    )
+    enhancer = _build_test_enhancer(_chat_payload_with_content('{"segment_prompts":["A","B"]}'))
     enhancer.auto_system_prompt = "auto system prompt"
     enhancer.rewrite_model_options = ["gpt-test"]
     enhancer.rewrite_default_model = "gpt-test"
@@ -824,17 +761,14 @@ def test_enhance_prompt_single_clip_rejects_segment_prompts_json():
             mode="single_clip",
             model="gpt-test",
             timeout_ms=800,
-        )
-    )
+        ))
     assert result.fallback_used is True
     assert result.prompt == ""
     assert "Missing prompt string." in (result.error or "")
 
 
 def test_enhance_prompt_requires_json_and_does_not_fallback_to_raw_text():
-    enhancer = _build_test_enhancer(
-        _chat_payload_with_content("A cinematic continuation with slow dolly movement.")
-    )
+    enhancer = _build_test_enhancer(_chat_payload_with_content("A cinematic continuation with slow dolly movement."))
     enhancer.enhance_system_prompt = "enhance system prompt"
     enhancer.rewrite_model_options = ["gpt-test"]
     enhancer.rewrite_default_model = "gpt-test"
@@ -846,17 +780,14 @@ def test_enhance_prompt_requires_json_and_does_not_fallback_to_raw_text():
             next_segment_idx=2,
             model="gpt-test",
             timeout_ms=800,
-        )
-    )
+        ))
     assert result.fallback_used is True
     assert result.prompt == ""
     assert "No JSON object found in assistant response." in (result.error or "")
 
 
 def test_generate_auto_prompt_requires_json_and_does_not_fallback_to_raw_text():
-    enhancer = _build_test_enhancer(
-        _chat_payload_with_content("A calm, grounded continuation with subtle motion.")
-    )
+    enhancer = _build_test_enhancer(_chat_payload_with_content("A calm, grounded continuation with subtle motion."))
     enhancer.auto_system_prompt = "auto system prompt"
     enhancer.rewrite_model_options = ["gpt-test"]
     enhancer.rewrite_default_model = "gpt-test"
@@ -867,34 +798,30 @@ def test_generate_auto_prompt_requires_json_and_does_not_fallback_to_raw_text():
             next_segment_idx=2,
             model="gpt-test",
             timeout_ms=800,
-        )
-    )
+        ))
     assert result.fallback_used is True
     assert result.prompt == ""
     assert "No JSON object found in assistant response." in (result.error or "")
 
 
 def test_rewrite_prompt_sequence_includes_raw_json_when_content_empty():
-    enhancer = _build_test_enhancer(
-        {
-            "choices": [
-                {
-                    "finish_reason": "length",
-                    "message": {
-                        "content": [],
-                        "refusal": None,
-                    },
-                }
-            ],
-            "usage": {"completion_tokens": 0},
-        }
-    )
+    enhancer = _build_test_enhancer({
+        "choices": [{
+            "finish_reason": "length",
+            "message": {
+                "content": [],
+                "refusal": None,
+            },
+        }],
+        "usage": {
+            "completion_tokens": 0
+        },
+    })
     result = asyncio.run(
         enhancer.rewrite_prompt_sequence(
             ["prompt one", "prompt two"],
             rewrite_instruction="make it cinematic",
-        )
-    )
+        ))
     assert result.fallback_used is True
     assert "No rewrite segment prompts found in assistant response." in (result.error or "")
     assert isinstance(result.raw_response_text, str)
@@ -903,10 +830,7 @@ def test_rewrite_prompt_sequence_includes_raw_json_when_content_empty():
 
 def test_get_rewrite_model_config_returns_fixed_defaults():
     enhancer = _build_test_enhancer(
-        _chat_payload_with_content(
-            '{"id":"preset_a","label":"Preset A","segment_prompts":["A","B"]}'
-        )
-    )
+        _chat_payload_with_content('{"id":"preset_a","label":"Preset A","segment_prompts":["A","B"]}'))
     enhancer.rewrite_default_model = "gpt-oss-120b"
     enhancer.rewrite_model_options = ["gpt-oss-120b"]
 
@@ -918,10 +842,7 @@ def test_get_rewrite_model_config_returns_fixed_defaults():
 
 def test_get_prompt_config_includes_auto_extension_prompt():
     enhancer = _build_test_enhancer(
-        _chat_payload_with_content(
-            '{"id":"preset_a","label":"Preset A","segment_prompts":["A","B"]}'
-        )
-    )
+        _chat_payload_with_content('{"id":"preset_a","label":"Preset A","segment_prompts":["A","B"]}'))
     enhancer.enhance_system_prompt_path = "/tmp/next.md"
     enhancer.auto_system_prompt_path = "/tmp/auto.md"
     enhancer.rewrite_all_system_prompt_path = "/tmp/rewrite.md"
@@ -948,19 +869,14 @@ def test_get_prompt_config_includes_auto_extension_prompt():
 
 def test_get_prompt_config_reports_loaded_fallback_prompt_path(tmp_path):
     enhancer = _build_test_enhancer(
-        _chat_payload_with_content(
-            '{"id":"preset_a","label":"Preset A","segment_prompts":["A","B"]}'
-        )
-    )
+        _chat_payload_with_content('{"id":"preset_a","label":"Preset A","segment_prompts":["A","B"]}'))
     rewrite_fallback_path = tmp_path / "rewrite_window_system_prompt.md"
     rewrite_fallback_path.write_text("rewrite prompt\n", encoding="utf-8")
     next_path = tmp_path / "next.md"
     next_path.write_text("next prompt\n", encoding="utf-8")
     auto_path = tmp_path / "auto.md"
     auto_path.write_text("auto prompt\n", encoding="utf-8")
-    enhancer.rewrite_all_system_prompt_path = str(
-        tmp_path / "prompts.local" / "rewrite_window_system_prompt.md"
-    )
+    enhancer.rewrite_all_system_prompt_path = str(tmp_path / "prompts.local" / "rewrite_window_system_prompt.md")
     enhancer.rewrite_all_system_prompt_fallback_path = str(rewrite_fallback_path)
     enhancer.enhance_system_prompt_path = str(next_path)
     enhancer.auto_system_prompt_path = str(auto_path)
@@ -973,14 +889,9 @@ def test_get_prompt_config_reports_loaded_fallback_prompt_path(tmp_path):
     assert config["rewrite_window_system_prompt_path"] == str(rewrite_fallback_path)
 
 
-def test_reload_system_prompts_falls_back_to_rewrite_window_when_user_prompt_empty(
-    tmp_path,
-):
+def test_reload_system_prompts_falls_back_to_rewrite_window_when_user_prompt_empty(tmp_path, ):
     enhancer = _build_test_enhancer(
-        _chat_payload_with_content(
-            '{"id":"preset_a","label":"Preset A","segment_prompts":["A","B"]}'
-        )
-    )
+        _chat_payload_with_content('{"id":"preset_a","label":"Preset A","segment_prompts":["A","B"]}'))
     next_path = tmp_path / "next.md"
     auto_path = tmp_path / "auto.md"
     rewrite_path = tmp_path / "rewrite_window_system_prompt.md"
@@ -1007,10 +918,7 @@ def test_reload_system_prompts_falls_back_to_rewrite_window_when_user_prompt_emp
 
 def test_save_prompt_config_updates_auto_extension_prompt(tmp_path):
     enhancer = _build_test_enhancer(
-        _chat_payload_with_content(
-            '{"id":"preset_a","label":"Preset A","segment_prompts":["A","B"]}'
-        )
-    )
+        _chat_payload_with_content('{"id":"preset_a","label":"Preset A","segment_prompts":["A","B"]}'))
     next_path = tmp_path / "next.md"
     auto_path = tmp_path / "auto.md"
     rewrite_path = tmp_path / "rewrite.md"
@@ -1021,9 +929,7 @@ def test_save_prompt_config_updates_auto_extension_prompt(tmp_path):
     enhancer.auto_system_prompt_path = str(auto_path)
     enhancer.rewrite_all_system_prompt_path = str(rewrite_path)
 
-    config = enhancer.save_prompt_config(
-        auto_extension_system_prompt="auto updated",
-    )
+    config = enhancer.save_prompt_config(auto_extension_system_prompt="auto updated", )
 
     assert auto_path.read_text(encoding="utf-8").strip() == "auto updated"
     assert config["auto_extension_system_prompt"] == "auto updated"
@@ -1031,10 +937,7 @@ def test_save_prompt_config_updates_auto_extension_prompt(tmp_path):
 
 def test_save_prompt_config_updates_rewrite_user_prompt(tmp_path):
     enhancer = _build_test_enhancer(
-        _chat_payload_with_content(
-            '{"id":"preset_a","label":"Preset A","segment_prompts":["A","B"]}'
-        )
-    )
+        _chat_payload_with_content('{"id":"preset_a","label":"Preset A","segment_prompts":["A","B"]}'))
     next_path = tmp_path / "next.md"
     auto_path = tmp_path / "auto.md"
     rewrite_path = tmp_path / "rewrite.md"
@@ -1052,9 +955,7 @@ def test_save_prompt_config_updates_rewrite_user_prompt(tmp_path):
     enhancer.rewrite_all_system_prompt_fallback_path = None
     enhancer.rewrite_user_system_prompt_fallback_path = None
 
-    config = enhancer.save_prompt_config(
-        rewrite_user_system_prompt="rewrite user updated",
-    )
+    config = enhancer.save_prompt_config(rewrite_user_system_prompt="rewrite user updated", )
 
     assert rewrite_user_path.read_text(encoding="utf-8").strip() == "rewrite user updated"
     assert config["rewrite_user_system_prompt"] == "rewrite user updated"
@@ -1062,10 +963,7 @@ def test_save_prompt_config_updates_rewrite_user_prompt(tmp_path):
 
 def test_save_prompt_config_updates_rewrite_model(tmp_path):
     enhancer = _build_test_enhancer(
-        _chat_payload_with_content(
-            '{"id":"preset_a","label":"Preset A","segment_prompts":["A","B"]}'
-        )
-    )
+        _chat_payload_with_content('{"id":"preset_a","label":"Preset A","segment_prompts":["A","B"]}'))
     next_path = tmp_path / "next.md"
     auto_path = tmp_path / "auto.md"
     rewrite_path = tmp_path / "rewrite.md"
@@ -1081,9 +979,7 @@ def test_save_prompt_config_updates_rewrite_model(tmp_path):
     enhancer.rewrite_default_model = "gpt-test"
     enhancer.rewrite_model_options = ["gpt-test", "gpt-alt"]
 
-    config = enhancer.save_prompt_config(
-        rewrite_model="gpt-alt",
-    )
+    config = enhancer.save_prompt_config(rewrite_model="gpt-alt", )
 
     assert enhancer.rewrite_default_model == "gpt-alt"
     assert config["rewrite_model"] == "gpt-alt"
@@ -1092,10 +988,7 @@ def test_save_prompt_config_updates_rewrite_model(tmp_path):
 
 def test_save_prompt_config_updates_rewrite_temperature(tmp_path):
     enhancer = _build_test_enhancer(
-        _chat_payload_with_content(
-            '{"id":"preset_a","label":"Preset A","segment_prompts":["A","B"]}'
-        )
-    )
+        _chat_payload_with_content('{"id":"preset_a","label":"Preset A","segment_prompts":["A","B"]}'))
     next_path = tmp_path / "next.md"
     auto_path = tmp_path / "auto.md"
     rewrite_path = tmp_path / "rewrite.md"
@@ -1109,9 +1002,7 @@ def test_save_prompt_config_updates_rewrite_temperature(tmp_path):
     enhancer.auto_system_prompt_fallback_path = None
     enhancer.rewrite_all_system_prompt_fallback_path = None
 
-    config = enhancer.save_prompt_config(
-        rewrite_temperature=1.3,
-    )
+    config = enhancer.save_prompt_config(rewrite_temperature=1.3, )
 
     assert enhancer.rewrite_default_temperature == 1.3
     assert config["rewrite_temperature"] == 1.3
@@ -1119,10 +1010,7 @@ def test_save_prompt_config_updates_rewrite_temperature(tmp_path):
 
 def test_save_prompt_config_creates_versioned_backup_for_existing_prompt(tmp_path):
     enhancer = _build_test_enhancer(
-        _chat_payload_with_content(
-            '{"id":"preset_a","label":"Preset A","segment_prompts":["A","B"]}'
-        )
-    )
+        _chat_payload_with_content('{"id":"preset_a","label":"Preset A","segment_prompts":["A","B"]}'))
     next_path = tmp_path / "next.md"
     auto_path = tmp_path / "auto.md"
     rewrite_path = tmp_path / "rewrite_window_system_prompt.md"
@@ -1136,13 +1024,9 @@ def test_save_prompt_config_creates_versioned_backup_for_existing_prompt(tmp_pat
     enhancer.auto_system_prompt_fallback_path = None
     enhancer.rewrite_all_system_prompt_fallback_path = None
 
-    enhancer.save_prompt_config(
-        rewrite_window_system_prompt="rewrite updated",
-    )
+    enhancer.save_prompt_config(rewrite_window_system_prompt="rewrite updated", )
 
-    backup_paths = sorted(
-        tmp_path.glob("rewrite_window_system_prompt.*.bak.md")
-    )
+    backup_paths = sorted(tmp_path.glob("rewrite_window_system_prompt.*.bak.md"))
 
     assert rewrite_path.read_text(encoding="utf-8").strip() == "rewrite updated"
     assert len(backup_paths) == 1

@@ -44,8 +44,7 @@ def test_nvfp4_kernel_call_raises_clear_error_without_flashinfer(monkeypatch):
     ImportError when flashinfer is missing, not a confusing
     AttributeError or NameError."""
     # Stage a fake flashinfer that fails on import.
-    monkeypatch.setitem(sys.modules, "flashinfer",
-                        _raise_module_on_import("flashinfer"))
+    monkeypatch.setitem(sys.modules, "flashinfer", _raise_module_on_import("flashinfer"))
     sys.modules.pop("fastvideo.layers.quantization.nvfp4_config", None)
     from fastvideo.layers.quantization.nvfp4_config import _require_flashinfer
     with pytest.raises(ImportError, match="flashinfer"):
@@ -71,8 +70,7 @@ def test_coerce_fp4_input_dtype_casts_and_rejects():
     cast to bf16, and non-floating inputs are rejected fast."""
     import torch
 
-    from fastvideo.layers.quantization.nvfp4_config import (
-        _coerce_fp4_input_dtype)
+    from fastvideo.layers.quantization.nvfp4_config import (_coerce_fp4_input_dtype)
 
     # bf16 / fp16 pass through untouched.
     bf16 = torch.zeros(4, 8, dtype=torch.bfloat16)
@@ -81,10 +79,8 @@ def test_coerce_fp4_input_dtype_casts_and_rejects():
     assert _coerce_fp4_input_dtype(fp16) is fp16
 
     # Other floating dtypes (fp32 from an unfused norm, fp64) -> bf16.
-    assert _coerce_fp4_input_dtype(
-        torch.zeros(4, 8, dtype=torch.float32)).dtype is torch.bfloat16
-    assert _coerce_fp4_input_dtype(
-        torch.zeros(4, 8, dtype=torch.float64)).dtype is torch.bfloat16
+    assert _coerce_fp4_input_dtype(torch.zeros(4, 8, dtype=torch.float32)).dtype is torch.bfloat16
+    assert _coerce_fp4_input_dtype(torch.zeros(4, 8, dtype=torch.float64)).dtype is torch.bfloat16
 
     # Non-floating inputs are a real error, not silently cast.
     for bad in (torch.int32, torch.int64, torch.bool):

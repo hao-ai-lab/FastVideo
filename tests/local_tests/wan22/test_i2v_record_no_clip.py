@@ -41,8 +41,7 @@ def _stub_pkg(name, path):
 
 _stub_pkg("fastvideo", _fv)
 _stub_pkg("fastvideo.dataset", os.path.join(_fv, "dataset"))
-_stub_pkg("fastvideo.dataset.dataloader",
-          os.path.join(_fv, "dataset", "dataloader"))
+_stub_pkg("fastvideo.dataset.dataloader", os.path.join(_fv, "dataset", "dataloader"))
 _stub_pkg("fastvideo.pipelines", os.path.join(_fv, "pipelines"))
 
 
@@ -79,17 +78,11 @@ def _make_batch(image_embeds: list) -> PreprocessBatch:
         fps=[16],
         num_frames=[77],
         video_file_name=["test.mp4"],
-        latents=[
-            np.random.randn(16, 20, 64, 64).astype(np.float32)
-        ],
-        prompt_embeds=[
-            np.random.randn(512, 4096).astype(np.float32)
-        ],
+        latents=[np.random.randn(16, 20, 64, 64).astype(np.float32)],
+        prompt_embeds=[np.random.randn(512, 4096).astype(np.float32)],
         image_embeds=image_embeds,
-        image_latent=np.random.randn(1, 16, 1, 64, 64).astype(
-            np.float32),
-        pil_image=np.random.randn(1, 3, 512, 512).astype(
-            np.float32),
+        image_latent=np.random.randn(1, 16, 1, 64, 64).astype(np.float32),
+        pil_image=np.random.randn(1, 3, 512, 512).astype(np.float32),
     )
 
 

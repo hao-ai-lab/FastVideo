@@ -52,9 +52,7 @@ class GlmImageKVCache:
 
     def set_mode(self, mode: Optional[str]):
         if mode is not None and mode not in ["write", "read", "skip"]:
-            raise ValueError(
-                f"Invalid mode: {mode}, must be one of 'write', 'read', 'skip'"
-            )
+            raise ValueError(f"Invalid mode: {mode}, must be one of 'write', 'read', 'skip'")
         for cache in self.caches:
             cache.mode = mode
 
@@ -133,18 +131,10 @@ class GlmImageCombinedTimestepSizeEmbeddings(nn.Module):
     ):
         super().__init__()
 
-        self.time_proj = Timesteps(
-            num_channels=timesteps_dim, flip_sin_to_cos=True, downscale_freq_shift=0
-        )
-        self.condition_proj = Timesteps(
-            num_channels=condition_dim, flip_sin_to_cos=True, downscale_freq_shift=0
-        )
-        self.timestep_embedder = GlmImageTimestepEmbedding(
-            in_channels=timesteps_dim, time_embed_dim=embedding_dim
-        )
-        self.condition_embedder = GlmImageTextProjection(
-            pooled_projection_dim, embedding_dim, act_fn="silu"
-        )
+        self.time_proj = Timesteps(num_channels=timesteps_dim, flip_sin_to_cos=True, downscale_freq_shift=0)
+        self.condition_proj = Timesteps(num_channels=condition_dim, flip_sin_to_cos=True, downscale_freq_shift=0)
+        self.timestep_embedder = GlmImageTimestepEmbedding(in_channels=timesteps_dim, time_embed_dim=embedding_dim)
+        self.condition_embedder = GlmImageTextProjection(pooled_projection_dim, embedding_dim, act_fn="silu")
 
     def forward(
         self,
@@ -155,21 +145,13 @@ class GlmImageCombinedTimestepSizeEmbeddings(nn.Module):
     ) -> torch.Tensor:
         timesteps_proj = self.time_proj(timestep)
 
-        crop_coords_proj = self.condition_proj(crop_coords.flatten()).view(
-            crop_coords.size(0), -1
-        )
-        target_size_proj = self.condition_proj(target_size.flatten()).view(
-            target_size.size(0), -1
-        )
+        crop_coords_proj = self.condition_proj(crop_coords.flatten()).view(crop_coords.size(0), -1)
+        target_size_proj = self.condition_proj(target_size.flatten()).view(target_size.size(0), -1)
 
         condition_proj = torch.cat([crop_coords_proj, target_size_proj], dim=1)
 
-        timesteps_emb = self.timestep_embedder(
-            timesteps_proj.to(dtype=hidden_dtype)
-        )
-        condition_emb = self.condition_embedder(
-            condition_proj.to(dtype=hidden_dtype)
-        )
+        timesteps_emb = self.timestep_embedder(timesteps_proj.to(dtype=hidden_dtype))
+        condition_emb = self.condition_embedder(condition_proj.to(dtype=hidden_dtype))
 
         conditioning = timesteps_emb + condition_emb
         return conditioning
@@ -203,9 +185,7 @@ class GlmImageImageProjector(nn.Module):
             post_patch_width,
             self.patch_size,
         )
-        hidden_states = (
-            hidden_states.permute(0, 2, 4, 1, 3, 5).flatten(3, 5).flatten(1, 2)
-        )
+        hidden_states = (hidden_states.permute(0, 2, 4, 1, 3, 5).flatten(3, 5).flatten(1, 2))
         hidden_states = self.proj(hidden_states)
 
         return hidden_states
@@ -231,9 +211,7 @@ class GlmImageAdaLayerNormZero(nn.Module):
     ) -> Tuple[torch.Tensor, ...]:
         dtype = hidden_states.dtype
         norm_hidden_states = self.norm(hidden_states).to(dtype=dtype)
-        norm_encoder_hidden_states = self.norm_context(encoder_hidden_states).to(
-            dtype=dtype
-        )
+        norm_encoder_hidden_states = self.norm_context(encoder_hidden_states).to(dtype=dtype)
 
         emb, _ = self.linear(temb)
         (
@@ -251,12 +229,8 @@ class GlmImageAdaLayerNormZero(nn.Module):
             c_gate_mlp,
         ) = emb.chunk(12, dim=1)
 
-        hidden_states = norm_hidden_states * (
-            1 + scale_msa.unsqueeze(1)
-        ) + shift_msa.unsqueeze(1)
-        encoder_hidden_states = norm_encoder_hidden_states * (
-            1 + c_scale_msa.unsqueeze(1)
-        ) + c_shift_msa.unsqueeze(1)
+        hidden_states = norm_hidden_states * (1 + scale_msa.unsqueeze(1)) + shift_msa.unsqueeze(1)
+        encoder_hidden_states = norm_encoder_hidden_states * (1 + c_scale_msa.unsqueeze(1)) + c_shift_msa.unsqueeze(1)
 
         return (
             hidden_states,
@@ -303,20 +277,14 @@ class GlmImageAttention(nn.Module):
         self.to_k = ReplicatedLinear(query_dim, self.inner_kv_dim, bias=bias)
         self.to_v = ReplicatedLinear(query_dim, self.inner_kv_dim, bias=bias)
 
-        self.to_out = nn.ModuleList(
-            [ReplicatedLinear(self.inner_dim, self.out_dim, bias=True)]
-        )
+        self.to_out = nn.ModuleList([ReplicatedLinear(self.inner_dim, self.out_dim, bias=True)])
 
         if qk_norm is None:
             self.norm_q = None
             self.norm_k = None
         elif qk_norm == "layer_norm":
-            self.norm_q = nn.LayerNorm(
-                dim_head, eps=eps, elementwise_affine=elementwise_affine
-            )
-            self.norm_k = nn.LayerNorm(
-                dim_head, eps=eps, elementwise_affine=elementwise_affine
-            )
+            self.norm_q = nn.LayerNorm(dim_head, eps=eps, elementwise_affine=elementwise_affine)
+            self.norm_k = nn.LayerNorm(dim_head, eps=eps, elementwise_affine=elementwise_affine)
         else:
             raise ValueError(f"unknown qk_norm: {qk_norm}")
 
@@ -361,12 +329,14 @@ class GlmImageAttention(nn.Module):
         if image_rotary_emb is not None:
             cos, sin = image_rotary_emb
 
-            query[:, text_seq_length:, :, :] = _apply_rotary_emb(
-                query[:, text_seq_length:, :, :], cos, sin, is_neox_style=True
-            )
-            key[:, text_seq_length:, :, :] = _apply_rotary_emb(
-                key[:, text_seq_length:, :, :], cos, sin, is_neox_style=True
-            )
+            query[:, text_seq_length:, :, :] = _apply_rotary_emb(query[:, text_seq_length:, :, :],
+                                                                 cos,
+                                                                 sin,
+                                                                 is_neox_style=True)
+            key[:, text_seq_length:, :, :] = _apply_rotary_emb(key[:, text_seq_length:, :, :],
+                                                               cos,
+                                                               sin,
+                                                               is_neox_style=True)
 
         # 4. KV Cache handling
         if kv_cache is not None:
@@ -376,9 +346,7 @@ class GlmImageAttention(nn.Module):
                 # Prepend cached condition k/v along seq (dim=1).
                 k_cache, v_cache = kv_cache.get()
                 key = torch.cat([k_cache, key], dim=1) if k_cache is not None else key
-                value = (
-                    torch.cat([v_cache, value], dim=1) if v_cache is not None else value
-                )
+                value = (torch.cat([v_cache, value], dim=1) if v_cache is not None else value)
             elif kv_cache.mode == "skip":
                 pass
 
@@ -390,8 +358,7 @@ class GlmImageAttention(nn.Module):
         hidden_states, _ = self.to_out[0](hidden_states)
 
         encoder_hidden_states, hidden_states = hidden_states.split(
-            [text_seq_length, hidden_states.size(1) - text_seq_length], dim=1
-        )
+            [text_seq_length, hidden_states.size(1) - text_seq_length], dim=1)
         return hidden_states, encoder_hidden_states
 
 
@@ -428,12 +395,11 @@ class GlmImageTransformerBlock(nn.Module):
         )
 
         # 2. Feedforward with fused ScaleResidualLayerNorm
-        self.norm2 = ScaleResidualLayerNormScaleShift(
-            dim, norm_type="layer", eps=1e-5, elementwise_affine=False
-        )
-        self.norm2_context = ScaleResidualLayerNormScaleShift(
-            dim, norm_type="layer", eps=1e-5, elementwise_affine=False
-        )
+        self.norm2 = ScaleResidualLayerNormScaleShift(dim, norm_type="layer", eps=1e-5, elementwise_affine=False)
+        self.norm2_context = ScaleResidualLayerNormScaleShift(dim,
+                                                              norm_type="layer",
+                                                              eps=1e-5,
+                                                              elementwise_affine=False)
         self.ff = MLP(input_dim=dim, mlp_hidden_dim=dim * 4, output_dim=dim, act_type="gelu_pytorch_tanh")
 
     def forward(
@@ -441,12 +407,10 @@ class GlmImageTransformerBlock(nn.Module):
         hidden_states: torch.Tensor,
         encoder_hidden_states: torch.Tensor,
         temb: Optional[torch.Tensor] = None,
-        image_rotary_emb: Optional[
-            Union[
-                Tuple[torch.Tensor, torch.Tensor],
-                List[Tuple[torch.Tensor, torch.Tensor]],
-            ]
-        ] = None,
+        image_rotary_emb: Optional[Union[
+            Tuple[torch.Tensor, torch.Tensor],
+            List[Tuple[torch.Tensor, torch.Tensor]],
+        ]] = None,
         attention_kwargs: Optional[Dict[str, Any]] = None,
         kv_cache: Optional[GlmImageLayerKVCache] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -495,9 +459,7 @@ class GlmImageTransformerBlock(nn.Module):
         ff_output = self.ff(norm_hidden_states)
         ff_output_context = self.ff(norm_encoder_hidden_states)
         hidden_states = hidden_states + ff_output * gate_mlp.unsqueeze(1)
-        encoder_hidden_states = (
-            encoder_hidden_states + ff_output_context * c_gate_mlp.unsqueeze(1)
-        )
+        encoder_hidden_states = (encoder_hidden_states + ff_output_context * c_gate_mlp.unsqueeze(1))
 
         return hidden_states, encoder_hidden_states
 
@@ -521,30 +483,15 @@ class GlmImageRotaryPosEmbed(nn.Module):
         width = raw_w // self.patch_size
         device = hidden_states.device
 
-        cache_key = (height, width, device.type,
-                     device.index if device.index is not None else -1)
+        cache_key = (height, width, device.type, device.index if device.index is not None else -1)
         if self._cache_key == cache_key and self._cache_value is not None:
             return self._cache_value
 
         dim_h, dim_w = self.dim // 2, self.dim // 2
-        h_inv_freq = 1.0 / (
-            self.theta
-            ** (
-                torch.arange(0, dim_h, 2, dtype=torch.float32, device=device)[
-                    : (dim_h // 2)
-                ]
-                / dim_h
-            )
-        )
-        w_inv_freq = 1.0 / (
-            self.theta
-            ** (
-                torch.arange(0, dim_w, 2, dtype=torch.float32, device=device)[
-                    : (dim_w // 2)
-                ]
-                / dim_w
-            )
-        )
+        h_inv_freq = 1.0 / (self.theta
+                            **(torch.arange(0, dim_h, 2, dtype=torch.float32, device=device)[:(dim_h // 2)] / dim_h))
+        w_inv_freq = 1.0 / (self.theta
+                            **(torch.arange(0, dim_w, 2, dtype=torch.float32, device=device)[:(dim_w // 2)] / dim_w))
         h_seq = torch.arange(height, device=device)
         w_seq = torch.arange(width, device=device)
         freqs_h = torch.outer(h_seq, h_inv_freq).unsqueeze(1).expand(height, width, -1)
@@ -572,9 +519,7 @@ class GlmImageAdaLayerNormContinuous(nn.Module):
         norm_type: str = "layer_norm",
     ):
         super().__init__()
-        self.linear = nn.Linear(
-            conditioning_embedding_dim, embedding_dim * 2, bias=bias
-        )
+        self.linear = nn.Linear(conditioning_embedding_dim, embedding_dim * 2, bias=bias)
         if norm_type == "layer_norm":
             self.norm = nn.LayerNorm(embedding_dim, eps, elementwise_affine, bias)
         elif norm_type == "rms_norm":
@@ -582,9 +527,7 @@ class GlmImageAdaLayerNormContinuous(nn.Module):
         else:
             raise ValueError(f"unknown norm_type {norm_type}")
 
-    def forward(
-        self, x: torch.Tensor, conditioning_embedding: torch.Tensor
-    ) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, conditioning_embedding: torch.Tensor) -> torch.Tensor:
         emb = self.linear(conditioning_embedding.to(x.dtype))
         scale, shift = torch.chunk(emb, 2, dim=1)
         x = self.norm(x) * (1 + scale)[:, None, :] + shift[:, None, :]
@@ -634,23 +577,17 @@ class GlmImageTransformer2DModel(BaseDiT):
         self.num_channels_latents = arch_config.out_channels
 
         # 1. RoPE
-        self.rotary_emb = GlmImageRotaryPosEmbed(
-            arch_config.attention_head_dim, arch_config.patch_size, theta=10000.0
-        )
+        self.rotary_emb = GlmImageRotaryPosEmbed(arch_config.attention_head_dim, arch_config.patch_size, theta=10000.0)
 
         # 2. Patch & Text-timestep embedding
-        self.image_projector = GlmImageImageProjector(
-            arch_config.in_channels, inner_dim, arch_config.patch_size
-        )
+        self.image_projector = GlmImageImageProjector(arch_config.in_channels, inner_dim, arch_config.patch_size)
         self.glyph_projector = MLP(
             input_dim=arch_config.text_embed_dim,
             mlp_hidden_dim=inner_dim,
             output_dim=inner_dim,
             act_type="gelu",
         )
-        self.prior_token_embedding = nn.Embedding(
-            arch_config.prior_vq_quantizer_codebook_size, inner_dim
-        )
+        self.prior_token_embedding = nn.Embedding(arch_config.prior_vq_quantizer_codebook_size, inner_dim)
         self.prior_projector = MLP(
             input_dim=inner_dim,
             mlp_hidden_dim=inner_dim,
@@ -666,24 +603,19 @@ class GlmImageTransformer2DModel(BaseDiT):
         )
 
         # 3. Transformer blocks
-        self.transformer_blocks = nn.ModuleList(
-            [
-                GlmImageTransformerBlock(
-                    inner_dim,
-                    arch_config.num_attention_heads,
-                    arch_config.attention_head_dim,
-                    arch_config.time_embed_dim,
-                    supported_attention_backends=self._supported_attention_backends,
-                    prefix=f"transformer_blocks.{i}",
-                )
-                for i in range(arch_config.num_layers)
-            ]
-        )
+        self.transformer_blocks = nn.ModuleList([
+            GlmImageTransformerBlock(
+                inner_dim,
+                arch_config.num_attention_heads,
+                arch_config.attention_head_dim,
+                arch_config.time_embed_dim,
+                supported_attention_backends=self._supported_attention_backends,
+                prefix=f"transformer_blocks.{i}",
+            ) for i in range(arch_config.num_layers)
+        ])
 
         # 4. Output projection
-        self.norm_out = GlmImageAdaLayerNormContinuous(
-            inner_dim, arch_config.time_embed_dim, elementwise_affine=False
-        )
+        self.norm_out = GlmImageAdaLayerNormContinuous(inner_dim, arch_config.time_embed_dim, elementwise_affine=False)
         self.proj_out = nn.Linear(
             inner_dim,
             arch_config.patch_size * arch_config.patch_size * arch_config.out_channels,
@@ -706,12 +638,10 @@ class GlmImageTransformer2DModel(BaseDiT):
         attention_kwargs: Optional[Dict[str, Any]] = None,
         kv_caches: Optional[GlmImageKVCache] = None,
         kv_caches_mode: Optional[str] = None,
-        freqs_cis: Optional[
-            Union[
-                Tuple[torch.Tensor, torch.Tensor],
-                List[Tuple[torch.Tensor, torch.Tensor]],
-            ]
-        ] = None,
+        freqs_cis: Optional[Union[
+            Tuple[torch.Tensor, torch.Tensor],
+            List[Tuple[torch.Tensor, torch.Tensor]],
+        ]] = None,
         guidance: torch.Tensor = None,
         **kwargs,
     ) -> torch.Tensor:
@@ -744,9 +674,7 @@ class GlmImageTransformer2DModel(BaseDiT):
         prior_hidden_states = self.prior_projector(prior_embedding)
         hidden_states = hidden_states + prior_hidden_states
 
-        temb = self.time_condition_embed(
-            timestep, target_size, crop_coords, hidden_states.dtype
-        )
+        temb = self.time_condition_embed(timestep, target_size, crop_coords, hidden_states.dtype)
         temb = F.silu(temb)
 
         # 3. Transformer blocks
@@ -765,9 +693,7 @@ class GlmImageTransformer2DModel(BaseDiT):
         hidden_states = self.proj_out(hidden_states)
 
         # 5. Unpatchify
-        hidden_states = hidden_states.reshape(
-            batch_size, post_patch_height, post_patch_width, -1, p, p
-        )
+        hidden_states = hidden_states.reshape(batch_size, post_patch_height, post_patch_width, -1, p, p)
         output = hidden_states.permute(0, 3, 1, 4, 2, 5).flatten(4, 5).flatten(2, 3)
 
         return output.float()

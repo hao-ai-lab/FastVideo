@@ -4,6 +4,8 @@
 import os
 from collections.abc import Generator
 from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
 from functools import cache
 from typing import cast
 
@@ -67,42 +69,109 @@ def get_env_variable_attn_backend() -> AttentionBackendEnum | None:
     return (None if backend_name is None else backend_name_to_enum(backend_name))
 
 
-# Global state allows a particular choice of backend
-# to be forced, overriding the logic which auto-selects
-# a backend based on system & workload configuration
-# (default behavior if this variable is None)
-#
-# THIS SELECTION TAKES PRECEDENCE OVER THE
-# FASTVIDEO ATTENTION BACKEND ENVIRONMENT VARIABLE
-forced_attn_backend: AttentionBackendEnum | None = None
+class _NoRequest:
+    """Type of the "caller expressed no opinion" sentinel.
+
+    ``None`` cannot carry that meaning: it is a real answer — "this component
+    resolved to automatic selection" — and a caller passing it wants automatic
+    selection, not a fallback to whatever the environment says.
+    """
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "<no request>"
 
 
-def global_force_attn_backend(attn_backend: AttentionBackendEnum | None) -> None:
-    '''
-    Force all attention operations to use a specified backend.
-
-    Passing `None` for the argument re-enables automatic
-    backend selection.,
-
-    Arguments:
-
-    * attn_backend: backend selection (None to revert to auto)
-    '''
-    global forced_attn_backend
-    forced_attn_backend = attn_backend
-    # Backend selection is cached by tensor shape/dtype, while the global
-    # override is intentionally not part of that cache key. Invalidate cached
-    # resolutions whenever the override changes so independently constructed
-    # role models can bind different attention implementations.
-    _cached_get_attn_backend.cache_clear()
+NO_REQUEST = _NoRequest()
 
 
-def get_global_forced_attn_backend() -> AttentionBackendEnum | None:
-    '''
-    Get the currently-forced choice of attention backend,
-    or None if auto-selection is currently enabled.
-    '''
-    return forced_attn_backend
+@dataclass(frozen=True)
+class _BackendScope:
+    backend: AttentionBackendEnum | None
+    component: str | None
+    consult_env: bool
+
+
+_SCOPE: ContextVar[_BackendScope | None] = ContextVar("fastvideo_attention_backend_scope", default=None)
+
+
+@contextmanager
+def _component_attention_backend_scope(
+    attn_backend: AttentionBackendEnum | str | None,
+    component: str | None = None,
+    *,
+    consult_env: bool = False,
+) -> Generator[None, None, None]:
+    """Carry a component's resolved request from its loader down to its layers.
+
+    **Transitional plumbing, not a feature.** The decision is resolved once at
+    load time and written onto the component's own config
+    (``ModelConfig._resolved_attention_backend``); this scope exists only
+    because the layer constructors nested inside a model do not yet receive
+    that config. They are handed a bare ``supported_attention_backends`` tuple,
+    threaded through block constructors up to four levels deep.
+
+    Deletion path: thread the request alongside that tuple, one model family at
+    a time, starting with the families that carry per-role requests (Wan,
+    LTX-2, Kandinsky5). When the last family reads its request from its own
+    config, this scope, ``_SCOPE`` and ``_BackendScope`` all go away and
+    ``get_attn_backend`` takes the request as a plain argument.
+
+    Nothing switches backends at runtime and nothing should: every caller wraps
+    *construction*. Process-local, exception-safe, nestable, and part of the
+    resolution cache key, so it never needs a cache flush.
+
+    ``_component_attention_backend_scope(None)`` means "automatic selection,
+    ignore any process-wide request" (dense teacher/critic roles built
+    alongside a quantized student); ``consult_env=True`` re-enables the env
+    fallback inside a scope.
+    """
+    token = _SCOPE.set(_BackendScope(coerce_attn_backend(attn_backend), component, consult_env))
+    try:
+        yield
+    finally:
+        _SCOPE.reset(token)
+
+
+def _active_component_attention_backend_scope() -> "_BackendScope | None":
+    """The request governing the component being constructed right now, or None."""
+    return _SCOPE.get()
+
+
+def record_resolved_attention_backend(config: object) -> AttentionBackendEnum | None:
+    """Write the request governing construction *right now* onto a component config.
+
+    Called by each loader while its component is being built, so the decision
+    ends up on the object the component keeps and is readable from the component
+    after load. The loader is the right place rather than the caller above it:
+    a loader may narrow the request for one component (the DMD teacher/critic
+    transformers build dense inside a nested scope), and only it knows that.
+    """
+    scope = _SCOPE.get()
+    resolved = scope.backend if scope is not None else None
+    config._resolved_attention_backend = resolved  # type: ignore[attr-defined]
+    return resolved
+
+
+def component_attention_backend(component: object) -> AttentionBackendEnum | _NoRequest:
+    """Read back the decision :func:`record_resolved_attention_backend` wrote.
+
+    Returns ``NO_REQUEST`` unless the component recorded a *concrete* backend,
+    so a caller that passes this through only overrides the ambient fallback
+    when there is a real decision to override it with.
+
+    ``NO_REQUEST`` rather than ``None`` for the no-decision case is deliberate,
+    and cannot be derived from the attribute's presence: ``ModelConfig`` declares
+    ``_resolved_attention_backend`` as a field defaulting to ``None``, so the
+    attribute always exists and a ``getattr`` default can never fire. Worse,
+    ``record_resolved_attention_backend`` writes ``None`` whenever no scope is
+    active, so "resolved to automatic selection" and "never recorded" are the
+    same stored value. Neither state should suppress the environment variable at
+    a call site that previously honoured it, and collapsing both to
+    ``NO_REQUEST`` keeps that behavior identical.
+    """
+    resolved = getattr(getattr(component, "config", None), "_resolved_attention_backend", None)
+    return NO_REQUEST if resolved is None else resolved
 
 
 def get_attn_backend(
@@ -111,8 +180,59 @@ def get_attn_backend(
     supported_attention_backends: tuple[AttentionBackendEnum, ...]
     | None = None,
     default_backend: AttentionBackendEnum | None = None,
+    *,
+    requested: AttentionBackendEnum | None | _NoRequest = NO_REQUEST,
 ) -> type[AttentionBackend]:
-    return _cached_get_attn_backend(head_size, dtype, supported_attention_backends, default_backend)
+    """Resolve the attention backend class for one call site.
+
+    ``requested`` is the decision made for the component this call site belongs
+    to — read from ``ModelConfig._resolved_attention_backend``. Passing it means
+    the caller knows the answer, so nothing ambient is consulted:
+
+    * ``requested=SOME_BACKEND`` — use it (subject to the layer's declared
+      support), ignoring the construction scope and the environment;
+    * ``requested=None`` — that component resolved to *automatic selection*.
+      That is an answer, not an absence, so the environment is not consulted
+      behind it;
+    * ``requested`` omitted (``NO_REQUEST``) — the caller has no opinion; fall
+      back to the construction scope, then the environment. This is the path
+      every layer built inside a loader still takes.
+    """
+    # Resolve every selection-affecting input BEFORE the cache so all of them
+    # live in the cache key: no mutation (env, scope) ever needs a cache_clear
+    # again, and components with different requests get distinct cache entries
+    # (per-component resolution).
+    if not isinstance(requested, _NoRequest):
+        # Explicit: the component's own decision outranks anything ambient.
+        component = None
+        env_backend = None
+    else:
+        scope = _SCOPE.get()
+        if scope is not None:
+            requested = scope.backend
+            component = scope.component
+            env_backend = envs.FASTVIDEO_ATTENTION_BACKEND if scope.consult_env else None
+        else:
+            requested = None
+            component = None
+            env_backend = envs.FASTVIDEO_ATTENTION_BACKEND
+    # The active device is a real selection input, not bookkeeping: the
+    # platform's backend resolution runs capability probes against the
+    # *current* device (e.g. AttnQatInferBackend's per-arch capability sets
+    # decide sm_12x CUTLASS vs sm_100/sm_103 FP4 FA4 vs FlashAttention
+    # fallback). Keying on it means a resolution taken for one device is
+    # never handed to another.
+    device_index = torch.cuda.current_device() if torch.cuda.is_available() else None
+    return _cached_get_attn_backend(
+        head_size,
+        dtype,
+        supported_attention_backends,
+        default_backend,
+        requested=requested,
+        env_backend=env_backend,
+        component=component,
+        device_index=device_index,
+    )
 
 
 @cache
@@ -122,26 +242,33 @@ def _cached_get_attn_backend(
     supported_attention_backends: tuple[AttentionBackendEnum, ...]
     | None = None,
     default_backend: AttentionBackendEnum | None = None,
+    *,
+    requested: AttentionBackendEnum | None = None,
+    env_backend: str | None = None,
+    component: str | None = None,
+    device_index: int | None = None,
 ) -> type[AttentionBackend]:
-    # Check whether a particular choice of backend was
-    # previously forced.
-    #
-    # THIS SELECTION OVERRIDES THE FASTVIDEO_ATTENTION_BACKEND
-    # ENVIRONMENT VARIABLE.
+    # Pure resolution: every selection input arrives as an argument (and is
+    # therefore part of the functools cache key). Only get_attn_backend calls
+    # this; it performs the scope/env/force reads.
     if not supported_attention_backends:
         raise ValueError("supported_attention_backends is empty")
-    selected_backend = None
-    backend_by_global_setting: AttentionBackendEnum | None = (get_global_forced_attn_backend())
-    if backend_by_global_setting is not None:
-        selected_backend = backend_by_global_setting
-    else:
-        # Check the environment variable and override if specified
-        backend_by_env_var: str | None = envs.FASTVIDEO_ATTENTION_BACKEND
-        if backend_by_env_var is not None:
-            selected_backend = backend_name_to_enum(backend_by_env_var)
+    # Cache-key-only inputs: component identity separates two components that
+    # agree on shape/dtype but not on request; device_index separates
+    # resolutions taken under different device capabilities (the platform
+    # probes the current device below).
+    del component, device_index
+    # Precedence: the per-component request (explicit argument, else the
+    # construction scope), then the env var (already resolved to None by the
+    # wrapper whenever the caller supplied a request), then the layer-declared
+    # default. Every one of these arrived as an argument, so all of them are in
+    # the cache key.
+    selected_backend = requested
+    if selected_backend is None and env_backend is not None:
+        selected_backend = backend_name_to_enum(env_backend)
 
     # Layer-level default (e.g. a checkpoint that requires a specific sparse
-    # backend). Lower precedence than the global force and the env var, so
+    # backend). Lower precedence than the force/scope/env requests, so
     # users can still override it.
     if selected_backend is None and default_backend is not None:
         selected_backend = default_backend
@@ -150,46 +277,16 @@ def _cached_get_attn_backend(
     from fastvideo.platforms import current_platform
 
     if (selected_backend is not None and selected_backend not in supported_attention_backends):
+        fallback_backend = (default_backend if default_backend in supported_attention_backends else None)
         logger.warning(
             "Requested attention backend %s is not supported by this "
-            "layer; supported backends are %s. Falling back to automatic "
-            "selection.",
+            "layer; supported backends are %s. Falling back to %s.",
             selected_backend.name,
             [b.name for b in supported_attention_backends],
+            fallback_backend.name if fallback_backend is not None else "automatic selection",
         )
-        selected_backend = None
+        selected_backend = fallback_backend
     attention_cls = current_platform.get_attn_backend_cls(selected_backend, head_size, dtype)
     if not attention_cls:
         raise ValueError(f"Invalid attention backend for {current_platform.device_name}")
     return cast(type[AttentionBackend], resolve_obj_by_qualname(attention_cls))
-
-
-@contextmanager
-def global_force_attn_backend_context_manager(attn_backend: AttentionBackendEnum) -> Generator[None, None, None]:
-    '''
-    Globally force a FastVideo attention backend override within a
-    context manager, reverting the global attention backend
-    override to its prior state upon exiting the context
-    manager.
-
-    Arguments:
-
-    * attn_backend: attention backend to force
-
-    Returns:
-
-    * Generator
-    '''
-
-    # Save the current state of the global backend override (if any)
-    original_value = get_global_forced_attn_backend()
-
-    # Globally force the new backend override
-    global_force_attn_backend(attn_backend)
-
-    # Yield control back to the enclosed code block
-    try:
-        yield
-    finally:
-        # Revert the original global backend override, if any
-        global_force_attn_backend(original_value)

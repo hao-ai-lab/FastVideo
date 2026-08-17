@@ -20,13 +20,11 @@ from fastvideo.api import (
     SamplingConfig,
 )
 
-
 DEFAULT_PROMPT = (
     "Young Chinese woman in red Hanfu, intricate embroidery. Impeccable makeup, red floral forehead pattern. "
     "Elaborate high bun, golden phoenix headdress, red flowers, beads. Holds round folding fan with lady, trees, bird. "
     "Neon lightning-bolt lamp (⚡️), bright yellow glow, above extended left palm. Soft-lit outdoor night background, "
-    "silhouetted tiered pagoda (西安大雁塔), blurred colorful distant lights."
-)
+    "silhouetted tiered pagoda (西安大雁塔), blurred colorful distant lights.")
 DEFAULT_REVISION = "f332072aa78be7aecdf3ee76d5c247082da564a6"
 
 

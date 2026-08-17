@@ -48,6 +48,23 @@ class ComposedPipelineBase(ABC):
     trainable_transformer_modules: dict[str, torch.nn.Module] = {}
     post_init_called: bool = False
 
+    @classmethod
+    def get_hf_download_component_dirs(cls) -> tuple[str, ...] | None:
+        """Return component directories for an opt-in partial Hub download."""
+        return None
+
+    @classmethod
+    def get_hf_download_allow_patterns(cls) -> list[str] | None:
+        """Return Hub patterns for the manifest and selected components."""
+        component_dirs = cls.get_hf_download_component_dirs()
+        if component_dirs is None:
+            return None
+        return [
+            "model_index.json",
+            "modular_model_index.json",
+            *(f"{component_dir}/**" for component_dir in component_dirs),
+        ]
+
     # TODO(will): args should support both inference args and training args
     def __init__(self,
                  model_path: str,
@@ -77,7 +94,6 @@ class ComposedPipelineBase(ABC):
         # FASTVIDEO_TORCH_PROFILER_DIR=/path/to/save/trace
         trace_dir = envs.FASTVIDEO_TORCH_PROFILER_DIR
         self.profiler_controller = get_or_create_profiler(trace_dir)
-        self.profiler = self.profiler_controller.profiler
 
         self.local_rank = get_world_group().local_rank
 
@@ -304,11 +320,18 @@ class ComposedPipelineBase(ABC):
 
     def _load_config(self, model_path: str) -> dict[str, Any]:
         revision = getattr(self.fastvideo_args, "revision", None)
-        model_path = maybe_download_model(self.model_path, revision=revision)
+        model_path = maybe_download_model(
+            self.model_path,
+            revision=revision,
+            allow_patterns=self.get_hf_download_allow_patterns(),
+        )
         self.model_path = model_path
         # fastvideo_args.downloaded_model_path = model_path
         logger.info("Model path: %s", model_path)
-        config = verify_model_config_and_directory(model_path)
+        config = verify_model_config_and_directory(
+            model_path,
+            required_component_dirs=self.get_hf_download_component_dirs(),
+        )
         return cast(dict[str, Any], config)
 
     @property
@@ -473,17 +496,6 @@ class ComposedPipelineBase(ABC):
         self._stages.append(stage)
         self._stage_name_mapping[stage_name] = stage
         setattr(self, stage_name, stage)
-
-    def profile(self, is_start: bool = True):
-        if self.profiler is None:
-            raise RuntimeError("Profiler is not enabled.")
-        if is_start:
-            self.profiler.start()
-        else:
-            self.profiler.stop()
-            # only print profiler results on rank 0
-            if self.local_rank == 0:
-                print(self.profiler.key_averages().table(sort_by="self_cuda_time_total"))
 
     # TODO(will): don't hardcode no_grad
     @torch.no_grad()

@@ -11,7 +11,6 @@ from typing import Any, cast
 import pytest
 import torch
 
-
 MODEL_DIR_ENV = os.getenv("ZIMAGE_MODEL_DIR")
 
 
