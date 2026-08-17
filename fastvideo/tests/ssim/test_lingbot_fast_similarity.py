@@ -1,9 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """SSIM-based similarity test for LingBot-World-Fast causal I2V.
 
-The camera trajectory is read straight from the LingBot example npy files
-(poses.npy/intrinsics.npy) by the pipeline itself, matching the official
-`generate_fast.py` workflow.
+The camera trajectory and source image are the tracked copies of official
+LingBot example 03, matching the released `run_fast.sh` workflow.
 
 Note: this checkpoint is 4-step distilled, so the step count is fixed by the
 model rather than reduced for CI.
@@ -33,14 +32,13 @@ REQUIRED_GPUS = 2
 NUM_DISTILLED_STEPS = 4
 
 
-def _find_lingbotworld_examples_root() -> str | None:
+def _find_lingbotworld_action_path() -> str | None:
     script_dir = os.path.dirname(os.path.abspath(__file__))
     repo_root = os.path.abspath(os.path.join(script_dir, "..", "..", ".."))
-    candidate = os.path.join(repo_root, "examples", "inference", "basic",
-                             "lingbotworld_examples")
-    if (os.path.exists(os.path.join(candidate, "00", "poses.npy"))
-            and os.path.exists(os.path.join(candidate, "00",
-                                            "intrinsics.npy"))):
+    candidate = os.path.join(repo_root, "examples", "datasets", "lingbotworld2")
+    if (os.path.exists(os.path.join(candidate, "image.jpg"))
+            and os.path.exists(os.path.join(candidate, "poses.npy"))
+            and os.path.exists(os.path.join(candidate, "intrinsics.npy"))):
         return os.path.abspath(candidate)
     return None
 
@@ -65,9 +63,6 @@ LINGBOT_FAST_PARAMS = {
     "num_frames": 25,  # must be 4k+1; trimmed to a whole number of chunks
     "seed": 42,
     "fps": 16,
-    "example_case": "00",
-    "image_path": ("https://raw.githubusercontent.com/Robbyant/lingbot-world/"
-                   "main/examples/00/image.jpg"),
 }
 LINGBOT_FAST_FULL_QUALITY_PARAMS = {
     **LINGBOT_FAST_PARAMS,
@@ -75,11 +70,10 @@ LINGBOT_FAST_FULL_QUALITY_PARAMS = {
 }
 
 TEST_PROMPTS = [
-    "The video presents a soaring journey through a fantasy jungle. The wind "
-    "whips past the rider's blue hands gripping the reins, causing the leather "
-    "straps to vibrate. The ancient gothic castle approaches steadily, its stone "
-    "details becoming clearer against the backdrop of floating islands and "
-    "distant waterfalls.",
+    "A serene lakeside scene with a lone tree standing in calm water, surrounded "
+    "by distant snow-capped mountains under a bright blue sky with drifting white "
+    "clouds — gentle ripples reflect the tree and sky, creating a tranquil, "
+    "meditative atmosphere.",
 ]
 
 
@@ -95,17 +89,17 @@ def test_lingbot_fast_i2v_similarity(prompt: str, ATTENTION_BACKEND: str):
         pytest.skip(
             f"Unsupported device for LingBot-World-Fast SSIM test: {device_name}"
         )
-    if torch.cuda.device_count() < params["num_gpus"]:
+    if torch.cuda.device_count() < REQUIRED_GPUS:
         pytest.skip(
-            f"LingBot-World-Fast SSIM test requires {params['num_gpus']} GPUs, "
+            f"LingBot-World-Fast SSIM test requires {REQUIRED_GPUS} GPUs, "
             f"but only {torch.cuda.device_count()} detected.")
 
-    examples_root = _find_lingbotworld_examples_root()
-    if examples_root is None:
+    action_path = _find_lingbotworld_action_path()
+    if action_path is None:
         pytest.skip(
-            "lingbotworld_examples not found under examples/inference/basic.")
-
-    action_path = os.path.join(examples_root, params["example_case"])
+            "LingBot camera assets not found under examples/datasets/lingbotworld2."
+        )
+    image_path = os.path.join(action_path, "image.jpg")
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
     model_id = "LingBot-World-Fast-Diffusers"
@@ -129,7 +123,7 @@ def test_lingbot_fast_i2v_similarity(prompt: str, ATTENTION_BACKEND: str):
     }
     generation_kwargs = {
         "output_path": output_dir,
-        "image_path": params["image_path"],
+        "image_path": image_path,
         "action_path": action_path,
         "height": params["height"],
         "width": params["width"],

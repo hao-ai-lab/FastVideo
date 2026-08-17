@@ -15,14 +15,12 @@ def main():
     )
 
     prompt = (
-        "The video presents a soaring journey through a fantasy jungle. The "
-        "wind whips past the rider's blue hands gripping the reins, causing "
-        "the leather straps to vibrate. The ancient gothic castle approaches "
-        "steadily, its stone details becoming clearer against the backdrop of "
-        "floating islands and distant waterfalls.")
-    image_path = ("https://raw.githubusercontent.com/Robbyant/lingbot-world/"
-                  "main/examples/00/image.jpg")
-    action_path = "examples/inference/basic/lingbotworld_examples/00"
+        "A serene lakeside scene with a lone tree standing in calm water, "
+        "surrounded by distant snow-capped mountains under a bright blue sky "
+        "with drifting white clouds — gentle ripples reflect the tree and sky, "
+        "creating a tranquil, meditative atmosphere.")
+    action_path = "examples/datasets/lingbotworld2"
+    image_path = f"{action_path}/image.jpg"
 
     generator.generate_video(
         prompt,
