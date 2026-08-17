@@ -6,6 +6,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from examples.inference.basic.mlx_wan22_generate import DEFAULT_HEIGHT, DEFAULT_NUM_FRAMES, DEFAULT_WIDTH
 from fastvideo.mlx_runtime.fast_spatial import (
     DEFAULT_FAST_SPATIAL_SHARPEN,
     apply_fast_spatial_upsample,
@@ -50,6 +51,21 @@ def test_plan_fast_spatial_disabled() -> None:
     spatial = plan_fast_spatial(height=480, width=832, num_frames=81, enabled=False)
     assert not spatial.enabled
     assert spatial.scale == 1
+
+
+def test_plan_fast_spatial_accepts_wan22_defaults() -> None:
+    assert (DEFAULT_HEIGHT, DEFAULT_WIDTH, DEFAULT_NUM_FRAMES) == (448, 832, 121)
+    spatial = plan_fast_spatial(
+        height=DEFAULT_HEIGHT,
+        width=DEFAULT_WIDTH,
+        num_frames=DEFAULT_NUM_FRAMES,
+        spatial_scale=2,
+        vae_spatial_compression=16,
+        vae_temporal_compression=4,
+        patch_size=(1, 2, 2),
+    )
+    assert (spatial.plan.stage1_latent_height, spatial.plan.stage1_latent_width) == (14, 26)
+    assert (spatial.plan.stage2_latent_height, spatial.plan.stage2_latent_width) == (28, 52)
 
 
 def test_apply_fast_spatial_upsample_resizes_decoded_frames() -> None:

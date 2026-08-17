@@ -7,6 +7,7 @@ on:
       - ".github/workflows/ci-macos-mlx.yml"
       - "fastvideo/mlx_runtime/**"
       - "fastvideo/tests/mlx/**"
+      - "fastvideo/tests/platforms/test_mps_vsa_error.py"
       - "fastvideo/platforms/mps.py"
       - "fastvideo/platforms/__init__.py"
       - "fastvideo/__init__.py"
@@ -49,7 +50,8 @@ jobs:
             torch==2.11.0 torchvision torchaudio
           uv pip install --system \
             pytest numpy scipy pillow imageio einops cloudpickle filelock \
-            PyYAML diffusers huggingface_hub remote-pdb safetensors loguru mlx
+            PyYAML diffusers huggingface_hub remote-pdb safetensors loguru mlx \
+            "ftfy>=6.3.1" "opencv-python>=4.10.0.84" psutil "transformers>=5.0.0"
 
       - name: Show Apple runtime
         run: |
@@ -78,6 +80,16 @@ jobs:
             fastvideo/tests/mlx/test_mlx_checkpoint.py \
             fastvideo/tests/mlx/test_mlx_fastwan_benchmark.py \
             fastvideo/tests/mlx/test_taehv_decode.py \
+            fastvideo/tests/mlx/test_frame_upsample.py \
+            fastvideo/tests/mlx/test_mlx_fast_spatial.py \
+            fastvideo/tests/mlx/test_mlx_refine.py \
+            fastvideo/tests/mlx/test_mlx_prompt_to_video_decode.py \
+            fastvideo/tests/mlx/test_mlx_wan22_prompt_cache_fingerprint.py \
+            fastvideo/tests/mlx/test_wan22_sample.py \
+            fastvideo/tests/mlx/test_windowed_attention.py \
+            fastvideo/tests/mlx/test_mlx_rife_interpolation.py::test_rife_download_unavailable_has_specific_error \
+            fastvideo/tests/mlx/test_mlx_rife_interpolation.py::test_rife_backend_regression_is_not_skip_eligible \
+            fastvideo/tests/platforms/test_mps_vsa_error.py \
             -q
 
   # Same tests on MLX's CPU backend. Hosted macOS runners are scarce and
@@ -110,7 +122,8 @@ jobs:
             torch==2.11.0 torchvision torchaudio
           uv pip install --system \
             pytest numpy scipy pillow imageio einops cloudpickle filelock \
-            PyYAML diffusers huggingface_hub remote-pdb safetensors loguru "mlx[cpu]"
+            PyYAML diffusers huggingface_hub remote-pdb safetensors loguru "mlx[cpu]" \
+            "ftfy>=6.3.1" "opencv-python>=4.10.0.84" psutil "transformers>=5.0.0"
 
       - name: Run MLX smoke tests (CPU backend)
         run: |
@@ -123,4 +136,14 @@ jobs:
             fastvideo/tests/mlx/test_mlx_checkpoint.py \
             fastvideo/tests/mlx/test_mlx_fastwan_benchmark.py \
             fastvideo/tests/mlx/test_taehv_decode.py \
+            fastvideo/tests/mlx/test_frame_upsample.py \
+            fastvideo/tests/mlx/test_mlx_fast_spatial.py \
+            fastvideo/tests/mlx/test_mlx_refine.py \
+            fastvideo/tests/mlx/test_mlx_prompt_to_video_decode.py \
+            fastvideo/tests/mlx/test_mlx_wan22_prompt_cache_fingerprint.py \
+            fastvideo/tests/mlx/test_wan22_sample.py \
+            fastvideo/tests/mlx/test_windowed_attention.py \
+            fastvideo/tests/mlx/test_mlx_rife_interpolation.py::test_rife_download_unavailable_has_specific_error \
+            fastvideo/tests/mlx/test_mlx_rife_interpolation.py::test_rife_backend_regression_is_not_skip_eligible \
+            fastvideo/tests/platforms/test_mps_vsa_error.py \
             -q

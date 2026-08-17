@@ -44,7 +44,6 @@ def build_wan22_dmd_schedule(
 
     steps = list(dmd_denoising_steps or [1000, 757, 522])
     scheduler = FlowMatchEulerDiscreteScheduler(shift=flow_shift)
-    scheduler.set_timesteps(1000, device="cpu")
     schedule = MLXDMDSchedule.from_torch_scheduler(scheduler)
     step_idx = torch.tensor(steps, dtype=torch.long)
     if warp_denoising_step:

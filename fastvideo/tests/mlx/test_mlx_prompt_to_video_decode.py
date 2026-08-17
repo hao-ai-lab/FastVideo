@@ -63,3 +63,23 @@ def test_vendored_taehv_import_available():
     from fastvideo.third_party.taehv import TAEHV
 
     assert TAEHV.__name__ == "TAEHV"
+
+
+def test_default_model_resolution_downloads_only_needed_transformer(monkeypatch, tmp_path):
+    module = _load_prompt_to_video_module()
+    import huggingface_hub
+
+    calls = []
+
+    def fake_snapshot_download(model_id, allow_patterns):
+        calls.append((model_id, allow_patterns))
+        return str(tmp_path)
+
+    monkeypatch.setattr(huggingface_hub, "snapshot_download", fake_snapshot_download)
+
+    assert module.resolve_model_root(None, include_transformer=True) == tmp_path
+    assert "transformer/*" in calls[-1][1]
+    assert module.resolve_model_root(None, include_transformer=False) == tmp_path
+    assert "transformer/*" not in calls[-1][1]
+    assert module.resolve_model_root(tmp_path) == tmp_path
+    assert len(calls) == 2

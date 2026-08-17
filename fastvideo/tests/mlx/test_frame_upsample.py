@@ -12,6 +12,7 @@ from fastvideo.mlx_runtime.frame_upsample import (
     upsample_frame,
     upsample_frames,
 )
+from fastvideo.mlx_runtime.rife_interp import aligned_keyframe_count
 
 
 def _frame(height: int = 24, width: int = 40, seed: int = 0) -> np.ndarray:
@@ -83,3 +84,16 @@ def test_upsample_frames_preserves_order_and_leaves_input_alone() -> None:
     assert not np.array_equal(out[0], out[1])
     for frame, original in zip(frames, originals, strict=True):
         np.testing.assert_array_equal(frame, original)
+
+
+@pytest.mark.parametrize(
+    ("target_frames", "factor", "keyframes"),
+    [(1, 999, 1), (81, 2, 41), (81, 3, 29), (82, 2, 45), (121, 4, 33)],
+)
+def test_aligned_keyframes_expand_to_exact_target(target_frames: int, factor: int, keyframes: int) -> None:
+    assert aligned_keyframe_count(target_frames, factor) == keyframes
+    interpolated_frames = (keyframes - 1) * factor + 1
+    assert interpolated_frames >= target_frames
+    assert keyframes % 4 == 1
+    if keyframes > 1:
+        assert (keyframes - 5) * factor + 1 < target_frames

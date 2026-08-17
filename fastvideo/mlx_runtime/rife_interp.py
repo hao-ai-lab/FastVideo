@@ -11,10 +11,28 @@ from collections.abc import Iterable
 from functools import lru_cache
 
 import numpy as np
+from huggingface_hub.utils import LocalEntryNotFoundError
 
 
 class RIFEBackendError(RuntimeError):
     """Raised when the MLX RIFE backend cannot be loaded or run."""
+
+
+class RIFEWeightsUnavailableError(RIFEBackendError):
+    """Raised when uncached RIFE weights cannot be downloaded."""
+
+
+def aligned_keyframe_count(target_frames: int, factor: int, temporal_compression: int = 4) -> int:
+    """Return the smallest VAE-aligned keyframe count that RIFE can expand to the target."""
+    if target_frames < 1:
+        raise ValueError(f"target_frames must be >= 1, got {target_frames}")
+    if factor < 1:
+        raise ValueError(f"factor must be >= 1, got {factor}")
+    if temporal_compression < 1:
+        raise ValueError(f"temporal_compression must be >= 1, got {temporal_compression}")
+    required_intervals = (target_frames - 1 + factor - 1) // factor
+    aligned_intervals = ((required_intervals + temporal_compression - 1) // temporal_compression * temporal_compression)
+    return aligned_intervals + 1
 
 
 def _require_hwc_rgb(frame: np.ndarray, index: int) -> np.ndarray:
@@ -48,6 +66,8 @@ def load_model(version: str = "4.25", weights_dir: str | None = None):
 
     try:
         return build_model(version, weights_dir=weights_dir)
+    except LocalEntryNotFoundError as exc:
+        raise RIFEWeightsUnavailableError(f"MLX RIFE {version} weights are unavailable: {exc}") from exc
     except Exception as exc:  # noqa: BLE001 - preserve exact backend failure.
         raise RIFEBackendError(f"Failed to load MLX RIFE {version}: {exc}") from exc
 

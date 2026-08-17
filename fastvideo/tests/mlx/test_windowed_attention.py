@@ -9,6 +9,7 @@ import pytest
 mx = pytest.importorskip("mlx.core", reason="MLX is required for windowed-attention tests")
 
 from fastvideo.mlx_runtime.windowed_attention import (  # noqa: E402
+    _key_ranges_for_block,
     full_attention,
     windowed_attention,
 )
@@ -85,6 +86,30 @@ def test_windowed_with_sinks_shape_and_finite() -> None:
     assert out.shape == (b, h, s, d)
     arr = np.array(out)
     assert np.isfinite(arr).all()
+
+
+def test_windowed_result_does_not_depend_on_chunk_size() -> None:
+    q, k, v = _rand_qkv(1, 2, 40, 8, seed=23)
+    per_query = windowed_attention(q, k, v, window=8, sink=4, chunk_size=1)
+    chunked = windowed_attention(q, k, v, window=8, sink=4, chunk_size=5)
+    mx.eval(per_query, chunked)
+
+    np.testing.assert_allclose(np.array(chunked), np.array(per_query), rtol=1e-5, atol=1e-5)
+
+
+def test_sink_range_extends_beyond_local_window() -> None:
+    assert _key_ranges_for_block(qs=0, qe=1, seq_len=12, half=1, sink=5) == [(0, 5)]
+
+
+def test_windowed_attention_enforces_per_query_local_and_sink_mask() -> None:
+    q = mx.zeros((1, 1, 6, 1))
+    k = mx.zeros_like(q)
+    v = mx.arange(6).reshape(1, 1, 6, 1)
+
+    out = windowed_attention(q, k, v, window=2, sink=3, chunk_size=4)
+    mx.eval(out)
+
+    np.testing.assert_allclose(np.array(out).reshape(-1), [1.0, 1.0, 1.5, 2.0, 2.5, 2.4], atol=1e-6)
 
 
 def test_invalid_window_raises() -> None:

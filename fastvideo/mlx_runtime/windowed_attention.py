@@ -145,7 +145,7 @@ def _key_ranges_for_block(
     sink_end = min(sink, seq_len)
     if local_start <= sink_end:
         # Sinks abut or overlap the local window — one contiguous slice from 0.
-        return [(0, local_end)]
+        return [(0, max(local_end, sink_end))]
     # Gap between sinks and local window: two slices, concat at SDPA time.
     return [(0, sink_end), (local_start, local_end)]
 
@@ -212,7 +212,12 @@ def windowed_attention(
         k_block, v_block = _concat_kv_slices(k, v, ranges)
         if k_block.shape[2] == 0:
             raise RuntimeError(f"empty key set for query block [{qs}, {qe}) with window={window}, sink={sink}")
-        out_block = mx.fast.scaled_dot_product_attention(q_block, k_block, v_block, scale=sc)
+        query_positions = mx.arange(qs, qe)[:, None]
+        key_positions = mx.array([position for start, end in ranges for position in range(start, end)])[None, :]
+        mask = mx.abs(query_positions - key_positions) <= half
+        if sink > 0:
+            mask = mask | (key_positions < sink)
+        out_block = mx.fast.scaled_dot_product_attention(q_block, k_block, v_block, scale=sc, mask=mask)
         outputs.append(out_block)
 
     return mx.concatenate(outputs, axis=2)

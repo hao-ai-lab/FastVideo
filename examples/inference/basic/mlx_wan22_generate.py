@@ -16,7 +16,6 @@ Decoder backends: ``taehv`` (default, MLX, ~seconds), ``taehv-torch`` (parity),
 from __future__ import annotations
 
 import argparse
-import glob
 import hashlib
 import json
 import time
@@ -26,27 +25,44 @@ import numpy as np
 
 from fastvideo.mlx_runtime.fast_spatial import DEFAULT_FAST_SPATIAL_SHARPEN
 from fastvideo.mlx_runtime.frame_upsample import DEFAULT_PIXEL_UPSAMPLE_MODE, PIXEL_UPSAMPLE_MODES
+from fastvideo.mlx_runtime.rife_interp import aligned_keyframe_count
 
+FASTWAN21_MODEL_ID = "FastVideo/FastWan2.1-T2V-1.3B-Diffusers"
+FASTWAN22_MODEL_ID = "FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers"
+DEFAULT_HEIGHT = 448
+DEFAULT_WIDTH = 832
+DEFAULT_NUM_FRAMES = 121
 
-def _default_paths() -> tuple[Path, Path, Path]:
-    def first_or_empty(pattern: str) -> Path:
-        matches = glob.glob(pattern)
-        return Path(matches[0]) if matches else Path()
+def _resolve_model_paths(
+    *,
+    text_encoder_root: Path | None,
+    dit_checkpoint: Path | None,
+    dit_config: Path | None,
+    vae_root: Path | None,
+    mlx_checkpoint: Path | None,
+    decode_backend: str,
+) -> tuple[Path, Path | None, Path | None, Path | None]:
+    """Download only the missing assets required by the selected Wan2.2 path."""
+    from huggingface_hub import snapshot_download
 
-    fw21 = first_or_empty(
-        str(
-            Path.home()
-            / ".cache/huggingface/hub/models--FastVideo--FastWan2.1-T2V-1.3B-Diffusers/snapshots/*"
-        )
-    )
-    wan22 = first_or_empty(
-        str(
-            Path.home()
-            / ".cache/huggingface/hub/models--FastVideo--FastWan2.2-TI2V-5B-FullAttn-Diffusers/snapshots/*"
-        )
-    )
-    dit_root = Path.home() / "models" / "fastwan22_5b" / "transformer"
-    return fw21, wan22, dit_root
+    if text_encoder_root is None:
+        text_encoder_root = Path(snapshot_download(
+            FASTWAN21_MODEL_ID,
+            allow_patterns=["tokenizer/*", "text_encoder/*"],
+        ))
+    if mlx_checkpoint is None and (dit_checkpoint is None or dit_config is None):
+        patterns = []
+        if dit_checkpoint is None:
+            patterns.append("transformer/diffusion_pytorch_model.safetensors")
+        if dit_config is None:
+            patterns.append("transformer/config.json")
+        model_root = Path(snapshot_download(FASTWAN22_MODEL_ID, allow_patterns=patterns))
+        dit_checkpoint = dit_checkpoint or model_root / "transformer/diffusion_pytorch_model.safetensors"
+        dit_config = dit_config or model_root / "transformer/config.json"
+    if decode_backend == "wan-vae" and vae_root is None:
+        model_root = Path(snapshot_download(FASTWAN22_MODEL_ID, allow_patterns=["vae/*"]))
+        vae_root = model_root / "vae"
+    return text_encoder_root, dit_checkpoint, dit_config, vae_root
 
 
 def _prompt_cache_fingerprint(
@@ -119,7 +135,6 @@ def _save_prompt_cache(
 
 
 def main() -> None:
-    fw21_default, wan22_default, dit_default = _default_paths()
     parser = argparse.ArgumentParser(
         description="MLX Wan2.2-5B T2V (encode → DiT DMD → TAEHV/VAE decode)"
     )
@@ -135,7 +150,7 @@ def main() -> None:
     parser.add_argument(
         "--text-encoder-root",
         type=Path,
-        default=fw21_default,
+        default=None,
         help="Root with text_encoder/ + tokenizer/",
     )
     parser.add_argument(
@@ -164,22 +179,22 @@ def main() -> None:
     parser.add_argument(
         "--dit-checkpoint",
         type=Path,
-        default=dit_default / "diffusion_pytorch_model.safetensors",
+        default=None,
     )
-    parser.add_argument("--dit-config", type=Path, default=dit_default / "config.json")
+    parser.add_argument("--dit-config", type=Path, default=None)
     parser.add_argument(
         "--mlx-checkpoint",
         type=Path,
         default=None,
         help="Pre-quantized MLX DiT checkpoint directory. Rewrapped with Wan2.2 per-token conditioning.",
     )
-    parser.add_argument("--vae-root", type=Path, default=wan22_default / "vae")
-    parser.add_argument("--height", type=int, default=480)
-    parser.add_argument("--width", type=int, default=832)
+    parser.add_argument("--vae-root", type=Path, default=None)
+    parser.add_argument("--height", type=int, default=DEFAULT_HEIGHT)
+    parser.add_argument("--width", type=int, default=DEFAULT_WIDTH)
     parser.add_argument(
         "--num-frames",
         type=int,
-        default=121,
+        default=DEFAULT_NUM_FRAMES,
         help="Pixel frames (121 at 24fps = 5.04 seconds)",
     )
     parser.add_argument("--seed", type=int, default=1234)
@@ -247,9 +262,17 @@ def main() -> None:
     # latent never leaves the grid it was denoised on and the mode is usable.
     if args.refine and args.fast_spatial:
         print("[wan22] --refine takes precedence over --fast-spatial")
+    args.text_encoder_root, args.dit_checkpoint, args.dit_config, args.vae_root = _resolve_model_paths(
+        text_encoder_root=args.text_encoder_root,
+        dit_checkpoint=args.dit_checkpoint,
+        dit_config=args.dit_config,
+        vae_root=args.vae_root,
+        mlx_checkpoint=args.mlx_checkpoint,
+        decode_backend=args.decode_backend,
+    )
     target_frames = args.num_frames
     if args.fast:
-        args.num_frames = (target_frames + args.fast_factor - 1) // args.fast_factor
+        args.num_frames = aligned_keyframe_count(target_frames, args.fast_factor)
         print(
             f"[wan22 fast] generating {args.num_frames} frames, "
             f"RIFE {args.fast_factor}x -> {target_frames}"

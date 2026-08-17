@@ -14,6 +14,7 @@ import math
 import numpy as np
 import pytest
 
+from examples.inference.basic.mlx_wan22_generate import DEFAULT_HEIGHT, DEFAULT_NUM_FRAMES, DEFAULT_WIDTH
 from fastvideo.mlx_runtime.refine import (
     DEFAULT_REFINE_SIGMA,
     default_refine_timesteps,
@@ -66,8 +67,22 @@ def test_plan_refine_disabled_collapses_to_single_pass() -> None:
     assert plan.stage1_width == plan.target_width == 832
 
 
+@pytest.mark.parametrize(
+    ("height", "width", "num_frames", "message"),
+    [(481, 832, 81, "height/width"), (480, 833, 81, "height/width"), (480, 832, 82, "num_frames")],
+)
+def test_plan_refine_rejects_requests_the_vae_would_truncate(
+    height: int,
+    width: int,
+    num_frames: int,
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        plan_refine_resolutions(height=height, width=width, num_frames=num_frames, enabled=False)
+
+
 def test_plan_refine_rejects_odd_target() -> None:
-    with pytest.raises(ValueError, match="divisible by spatial_scale"):
+    with pytest.raises(ValueError, match="divisible by"):
         plan_refine_resolutions(height=481, width=832, num_frames=81, spatial_scale=2)
 
 
@@ -100,6 +115,21 @@ def test_plan_refine_wan22_5b_720p_geometry() -> None:
     assert plan.stage1_latent_width == 40
     assert plan.stage2_latent_height == 44
     assert plan.stage2_latent_width == 80
+    assert plan.latent_frames == 31
+
+
+def test_plan_refine_wan22_default_geometry() -> None:
+    plan = plan_refine_resolutions(
+        height=DEFAULT_HEIGHT,
+        width=DEFAULT_WIDTH,
+        num_frames=DEFAULT_NUM_FRAMES,
+        spatial_scale=2,
+        vae_spatial_compression=16,
+        vae_temporal_compression=4,
+        patch_size=(1, 2, 2),
+    )
+    assert (plan.stage1_latent_height, plan.stage1_latent_width) == (14, 26)
+    assert (plan.stage2_latent_height, plan.stage2_latent_width) == (28, 52)
     assert plan.latent_frames == 31
 
 

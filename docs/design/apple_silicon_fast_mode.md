@@ -26,14 +26,14 @@ uv pip install -e ".[mlx]"   # RIFE ships vendored; this only needs MLX
 
 ```bash
 python examples/inference/basic/mlx_wan_prompt_to_video.py \
-  --model-root <FastWan2.1-T2V-1.3B-INT8-QAD> \
+  --mlx-checkpoint <FastWan2.1-T2V-1.3B-INT8-QAD> \
   --prompt "A red fox trotting through a snowy pine forest at golden hour, cinematic" \
   --num-frames 81 --fast \
   --output-path video_samples/fox_fast.mp4
 ```
 
-`--num-frames` stays the *target* length; fast mode generates `num_frames /
-fast_factor` frames and interpolates up.
+`--num-frames` stays the *target* length; fast mode generates the smallest
+VAE-aligned keyframe count that RIFE can interpolate to that target.
 
 | Flag | Default | Meaning |
 |---|---|---|
@@ -121,7 +121,7 @@ logs a warning, because the DiT is then told a timestep that does not match the
 noise it receives.
 
 **Wan2.2-5B has a lower ceiling.** Its warped schedule maps `1000,757,522` to
-sigmas `1.000, 0.940, 0.846`, so the best available stage-1 weight is **0.060**
+sigmas `1.000, 0.940, 0.845`, so the best available stage-1 weight is **0.060**
 (vs 0.243 at 1.3B). Un-warped (`--no-warp`) the same grid gives `1.000, 0.757,
 0.522` and a weight of 0.243 — but warping is what matches the FastVideo
 sampling schedule, so turning it off changes the timesteps the distilled student

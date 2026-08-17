@@ -24,6 +24,8 @@ Format (one directory):
 from __future__ import annotations
 
 import json
+import shutil
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -110,8 +112,6 @@ def save_mlx_dit_checkpoint(dit: MLXWanDiT, checkpoint_dir: str | Path) -> Path:
     import mlx.core as mx
 
     checkpoint_dir = Path(checkpoint_dir)
-    checkpoint_dir.mkdir(parents=True, exist_ok=True)
-
     arrays: dict[str, Any] = {}
     quantized: dict[str, dict[str, Any]] = {}
     spec: MLXQuantizationSpec | None = None
@@ -144,9 +144,33 @@ def save_mlx_dit_checkpoint(dit: MLXWanDiT, checkpoint_dir: str | Path) -> Path:
         "quantized_keys": quantized,
     }
 
-    weights_path = checkpoint_dir / WEIGHTS_FILENAME
-    mx.save_safetensors(str(weights_path), arrays)
-    (checkpoint_dir / MANIFEST_FILENAME).write_text(json.dumps(manifest, indent=2))
+    manifest_json = json.dumps(manifest, indent=2)
+    checkpoint_dir.parent.mkdir(parents=True, exist_ok=True)
+    staging_dir = Path(tempfile.mkdtemp(dir=checkpoint_dir.parent, prefix=f".{checkpoint_dir.name}.staging-"))
+    backup_root: Path | None = None
+    try:
+        staged_weights = staging_dir / WEIGHTS_FILENAME
+        staged_manifest = staging_dir / MANIFEST_FILENAME
+        mx.save_safetensors(str(staged_weights), arrays)
+        staged_manifest.write_text(manifest_json)
+        if checkpoint_dir.exists():
+            backup_root = Path(tempfile.mkdtemp(dir=checkpoint_dir.parent, prefix=f".{checkpoint_dir.name}.backup-"))
+            try:
+                checkpoint_dir.replace(backup_root / checkpoint_dir.name)
+            except Exception:
+                shutil.rmtree(backup_root, ignore_errors=True)
+                raise
+        try:
+            staging_dir.replace(checkpoint_dir)
+        except Exception:
+            if backup_root is not None:
+                (backup_root / checkpoint_dir.name).replace(checkpoint_dir)
+                shutil.rmtree(backup_root, ignore_errors=True)
+            raise
+        if backup_root is not None:
+            shutil.rmtree(backup_root, ignore_errors=True)
+    finally:
+        shutil.rmtree(staging_dir, ignore_errors=True)
     logger.info("Saved MLX DiT checkpoint (%d arrays, quantization=%s) to %s", len(arrays),
                 spec.label if spec else "none", checkpoint_dir)
     return checkpoint_dir

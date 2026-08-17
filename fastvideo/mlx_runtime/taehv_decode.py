@@ -23,7 +23,8 @@ TAEW2_1_CHECKPOINT_URL = "https://raw.githubusercontent.com/madebyollin/taehv/ma
 TAEW2_1_CHECKPOINT_SHA256 = "d26151e76cdc2c9424bef988de874b33d9a53f30ef3060cd556c429c469c797e"
 # Wan2.2 5B (z_dim=48) — see madebyollin/taehv taew2_2.pth; prefer
 # ``fastvideo.mlx_runtime.wan_vae.ensure_taehv_checkpoint(z_dim=48)`` for new code.
-TAEW2_2_CHECKPOINT_URL = "https://raw.githubusercontent.com/madebyollin/taehv/main/taew2_2.pth"
+TAEW2_2_CHECKPOINT_URL = ("https://raw.githubusercontent.com/madebyollin/taehv/"
+                          "563f40bdc820ed86bcad72ea515ee48f06bd22ec/taew2_2.pth")
 
 
 def _default_cache_dir() -> Path:

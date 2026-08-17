@@ -86,6 +86,30 @@ def test_missing_checkpoint_raises_clear_error(tmp_path) -> None:
         load_mlx_dit_checkpoint(tmp_path / "does-not-exist")
 
 
+def test_existing_checkpoint_is_replaced(distributed_setup, tmp_path) -> None:
+    dit = mlx_dit_from_torch_model(build_torch_model(), build_hf_config(build_tiny_wan_config()))
+    checkpoint_dir = save_mlx_dit_checkpoint(dit, tmp_path / "ckpt")
+    dit.config["checkpoint_revision"] = "second"
+
+    save_mlx_dit_checkpoint(dit, checkpoint_dir)
+
+    assert load_mlx_dit_checkpoint(checkpoint_dir).config["checkpoint_revision"] == "second"
+
+
+def test_failed_checkpoint_overwrite_preserves_existing(distributed_setup, tmp_path) -> None:
+    dit = mlx_dit_from_torch_model(build_torch_model(), build_hf_config(build_tiny_wan_config()))
+    checkpoint_dir = save_mlx_dit_checkpoint(dit, tmp_path / "ckpt")
+    weights_before = (checkpoint_dir / "mlx_dit.safetensors").read_bytes()
+    manifest_before = (checkpoint_dir / MANIFEST_FILENAME).read_bytes()
+    dit.config["not_json_serializable"] = object()
+
+    with pytest.raises(TypeError, match="not JSON serializable"):
+        save_mlx_dit_checkpoint(dit, checkpoint_dir)
+
+    assert (checkpoint_dir / "mlx_dit.safetensors").read_bytes() == weights_before
+    assert (checkpoint_dir / MANIFEST_FILENAME).read_bytes() == manifest_before
+
+
 def test_future_format_version_is_rejected(distributed_setup, tmp_path) -> None:
     dit = mlx_dit_from_torch_model(build_torch_model(), build_hf_config(build_tiny_wan_config()))
     ckpt = save_mlx_dit_checkpoint(dit, tmp_path / "ckpt")

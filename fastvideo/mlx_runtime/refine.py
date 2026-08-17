@@ -135,6 +135,14 @@ def plan_refine_resolutions(
         raise ValueError(f"spatial_scale must be >= 1, got {spatial_scale}")
     if num_frames <= 0:
         raise ValueError(f"num_frames must be positive, got {num_frames}")
+    if vae_spatial_compression < 1 or vae_temporal_compression < 1:
+        raise ValueError("VAE compression factors must be positive")
+    if height % vae_spatial_compression != 0 or width % vae_spatial_compression != 0:
+        raise ValueError(f"height/width must be divisible by vae_spatial_compression={vae_spatial_compression} "
+                         f"(got {height}x{width}).")
+    if (num_frames - 1) % vae_temporal_compression != 0:
+        raise ValueError(f"num_frames must be 1 modulo vae_temporal_compression={vae_temporal_compression} "
+                         f"(got {num_frames}).")
 
     if not enabled or spatial_scale == 1:
         plan = RefinePlan(

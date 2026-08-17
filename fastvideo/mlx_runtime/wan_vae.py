@@ -33,12 +33,11 @@ import numpy as np
 GIB = 1024**3
 
 TAEW2_1_URL = "https://raw.githubusercontent.com/madebyollin/taehv/main/taew2_1.pth"
-TAEW2_2_URL = "https://raw.githubusercontent.com/madebyollin/taehv/main/taew2_2.pth"
+TAEW2_2_URL = ("https://raw.githubusercontent.com/madebyollin/taehv/"
+               "563f40bdc820ed86bcad72ea515ee48f06bd22ec/taew2_2.pth")
 # Validated 2026-07-02 / 2026-07-09 against upstream madebyollin/taehv.
 TAEW2_1_SHA256 = "d26151e76cdc2c9424bef988de874b33d9a53f30ef3060cd556c429c469c797e"
-# Leave empty to skip pin for taew2_2 until a long-lived pin is recorded (still
-# downloads; user-supplied paths are never hash-checked).
-TAEW2_2_SHA256 = ""
+TAEW2_2_SHA256 = "d053e216ca50e2bb837bbcd79b85f0366bea00e5938025572382a773b74c559a"
 
 DecodeBackend = Literal["taehv", "taehv-torch", "wan-vae"]
 
@@ -66,21 +65,22 @@ def _sha256(path: Path) -> str:
 
 def _verify_checkpoint(path: Path, expected_digest: str) -> None:
     """
-    Verify a checkpoint's SHA-256 digest when an expected digest is provided.
+    Verify a checkpoint's SHA-256 digest against a required expected digest.
 
     Parameters:
         path (Path): Path to the checkpoint file.
-        expected_digest (str): Expected SHA-256 digest; an empty value skips verification.
+        expected_digest (str): Expected lowercase SHA-256 digest.
 
     Raises:
         RuntimeError: If verification is enabled and the checkpoint digest does not match.
     """
-    if expected_digest:
-        actual = _sha256(path)
-        if actual != expected_digest:
-            raise RuntimeError(f"TAEHV checkpoint at {path} failed sha256 verification "
-                               f"(expected {expected_digest}, got {actual}). "
-                               "Delete the file to re-download it.")
+    if len(expected_digest) != 64 or any(char not in "0123456789abcdef" for char in expected_digest):
+        raise ValueError("A valid lowercase SHA-256 digest is required for bundled TAEHV checkpoints")
+    actual = _sha256(path)
+    if actual != expected_digest:
+        raise RuntimeError(f"TAEHV checkpoint at {path} failed sha256 verification "
+                           f"(expected {expected_digest}, got {actual}). "
+                           "Delete the file to re-download it.")
 
 
 def ensure_taehv_checkpoint(*, z_dim: int, checkpoint_path: Path | None = None) -> Path:

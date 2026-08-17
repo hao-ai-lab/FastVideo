@@ -49,10 +49,12 @@ brew install ffmpeg
 
 ### Installation
 
+FastWan's native Apple Silicon runtime requires the `mlx` extra.
+
 #### With uv (recommended)
 
 ```bash
-uv pip install fastvideo
+uv pip install "fastvideo[mlx]"
 ```
 
 #### With Conda environment (alternative)
@@ -60,7 +62,7 @@ uv pip install fastvideo
 `uv` works inside an active conda env too, so prefer `uv pip` for the actual install:
 
 ```bash
-uv pip install fastvideo
+uv pip install "fastvideo[mlx]"
 ```
 
 ### Installation from Source
@@ -76,13 +78,13 @@ git clone https://github.com/hao-ai-lab/FastVideo.git && cd FastVideo
 Basic installation:
 
 ```bash
-uv pip install -e .
+uv pip install -e ".[mlx]"
 ```
 
 Alternative with Conda environment:
 
 ```bash
-uv pip install -e .
+uv pip install -e ".[mlx]"
 ```
 
 ## Development Environment Setup

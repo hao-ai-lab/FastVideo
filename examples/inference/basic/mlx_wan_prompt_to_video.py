@@ -47,6 +47,7 @@ import numpy as np
 from fastvideo.mlx_runtime.fast_spatial import DEFAULT_FAST_SPATIAL_SHARPEN
 from fastvideo.mlx_runtime.frame_upsample import DEFAULT_PIXEL_UPSAMPLE_MODE, PIXEL_UPSAMPLE_MODES
 from fastvideo.mlx_runtime.memory import add_memory_limit_args, apply_memory_limits
+from fastvideo.mlx_runtime.rife_interp import aligned_keyframe_count
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from fastvideo.mlx_runtime.fast_spatial import FastSpatialPlan
@@ -64,7 +65,12 @@ DEFAULT_MODEL_ROOT = (
 )
 
 
-def resolve_model_root(model_root: Path | None, *, model_id: str = DEFAULT_MODEL_ID) -> Path:
+def resolve_model_root(
+    model_root: Path | None,
+    *,
+    model_id: str = DEFAULT_MODEL_ID,
+    include_transformer: bool = True,
+) -> Path:
     """Return a usable model directory, resolving via the HF cache if unset.
 
     A user-supplied ``model_root`` is returned as-is. Otherwise the model is
@@ -76,21 +82,19 @@ def resolve_model_root(model_root: Path | None, *, model_id: str = DEFAULT_MODEL
         return model_root
     from huggingface_hub import snapshot_download
 
-    # Download only the non-DiT components (text encoder, VAE, tokenizer,
-    # scheduler, model_index + the DiT config for reference). The DiT weights
-    # come from the quantized QAD FastMetal checkpoint via --mlx-checkpoint;
-    # fetching the base fp16/bf16 transformer here would waste tens of GB
-    # (49 GB for the 14B).
+    # Always fetch the auxiliary assets. A pre-quantized MLX checkpoint does
+    # not need the raw transformer weights; the default Diffusers path does.
+    allow_patterns = [
+        "model_index.json",
+        "scheduler/*",
+        "tokenizer/*",
+        "text_encoder/*",
+        "vae/*",
+        "transformer/*" if include_transformer else "transformer/config.json",
+    ]
     return Path(snapshot_download(
         model_id,
-        allow_patterns=[
-            "model_index.json",
-            "scheduler/*",
-            "tokenizer/*",
-            "text_encoder/*",
-            "vae/*",
-            "transformer/config.json",
-        ],
+        allow_patterns=allow_patterns,
     ))
 
 
@@ -411,8 +415,9 @@ def _postprocess_video(*, video_path: Path, fps: int, rife: dict | None = None,
 
         factor, target_frames = rife["factor"], rife["target_frames"]
         frames = rife_interpolate(frames, factor=factor, model=load_model())
-        if len(frames) > target_frames:
-            frames = frames[:target_frames]
+        if len(frames) < target_frames:
+            raise RuntimeError(f"RIFE produced {len(frames)} frames, fewer than requested {target_frames}")
+        frames = frames[:target_frames]
         sharpen = max(sharpen, float(rife["sharpen"] or 0.0))
         labels.append(f"RIFE {factor}x -> {len(frames)} frames")
 
@@ -631,8 +636,6 @@ def main() -> None:
         if args.fast_factor < 2:
             parser.error("--fast-factor must be >= 2")
         fast_target_frames = args.num_frames
-        args.num_frames = (fast_target_frames + args.fast_factor - 1) // args.fast_factor
-        print(f"[fast] generating {args.num_frames} frames, RIFE {args.fast_factor}x -> {fast_target_frames}")
 
     if args.fast_spatial and args.fast_spatial_scale < 2:
         parser.error("--fast-spatial-scale must be >= 2 when --fast-spatial is set")
@@ -649,7 +652,10 @@ def main() -> None:
         torch_mps_low_watermark_ratio=args.torch_mps_low_watermark_ratio,
     ).as_metrics()
 
-    model_root = resolve_model_root(args.model_root)
+    model_root = resolve_model_root(
+        args.model_root,
+        include_transformer=args.mlx_checkpoint is None and args.encode_prompt_only is None,
+    )
 
     if args.encode_prompt_only is not None:
         prompt_embeds = encode_prompt(
@@ -721,6 +727,13 @@ def main() -> None:
     vae_temporal_factor = 4 if is_wan21 else int(vae_config.get("scale_factor_temporal", 4))
     vae_spatial_factor = 8 if is_wan21 else int(vae_config.get("scale_factor_spatial", 8))
     patch_size = tuple(dit_config.get("patch_size", (1, 2, 2)))
+    if fast_target_frames is not None:
+        args.num_frames = aligned_keyframe_count(
+            fast_target_frames,
+            args.fast_factor,
+            temporal_compression=vae_temporal_factor,
+        )
+        print(f"[fast] generating {args.num_frames} frames, RIFE {args.fast_factor}x -> {fast_target_frames}")
 
     # Spatial plan: refine (quality two-pass) or fast-spatial (upsample-only).
     # Both reuse the same resolution splitter; only the post-denoise path differs.
