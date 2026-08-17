@@ -6,6 +6,7 @@ import argparse
 import json
 import time
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 
@@ -15,6 +16,7 @@ from examples.inference.basic.mlx_wan_prompt_to_video import (
     encode_prompt,
     make_rotary_embeddings,
 )
+from fastvideo.mlx_runtime.memory import cleanup_mlx
 
 
 def _parse_modes(raw: str) -> list[str]:
@@ -308,6 +310,7 @@ def main() -> None:
             print(f"skipping mode (unsupported by this MLX build): {exc}")
             rows.append({"mode": mode, "status": "unsupported_by_mlx", "error": str(exc)})
             continue
+        cleanup_mlx(mx)
         latents = result["latents"]
         if baseline_latents is None:
             baseline_latents = latents
@@ -320,7 +323,7 @@ def main() -> None:
         if args.decode_backend != "none":
             output_path = args.output_dir / f"video_{mode}_{args.decode_backend}_{args.height}x{args.width}x{args.num_frames}.mp4"
             decode_metrics = _decode_with_metrics(args=args, latents=latents, output_path=output_path)
-            decode_time = float(decode_metrics["decode_export_s"])
+            decode_time = cast(float, decode_metrics["decode_export_s"])
 
         mode_total = time.perf_counter() - mode_start
         mlx_denoise_peak_bytes = int(result["metrics"]["mlx_denoise_peak_bytes"])

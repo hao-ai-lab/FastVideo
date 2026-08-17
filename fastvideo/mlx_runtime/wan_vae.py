@@ -30,6 +30,8 @@ from typing import Any, Literal
 
 import numpy as np
 
+from fastvideo.mlx_runtime.memory import cleanup_mlx, cleanup_torch_mps
+
 GIB = 1024**3
 
 TAEW2_1_URL = "https://raw.githubusercontent.com/madebyollin/taehv/main/taew2_1.pth"
@@ -540,6 +542,12 @@ def decode_latents_to_video(
     frames = video[0]
     frames = np.clip(frames, 0.0, 1.0)
     export_to_video(frames, str(output_path), fps=fps)
+    if backend == "taehv":
+        cleanup_mlx()
+    else:
+        if backend == "taehv-torch":
+            del model, lat, out
+        cleanup_torch_mps()
     return {
         "decode_s": decode_s,
         "backend": backend,

@@ -46,7 +46,7 @@ from examples.inference.basic.mlx_wan_prompt_to_video import (
     encode_prompt,
     make_rotary_embeddings,
 )
-from fastvideo.mlx_runtime.memory import add_memory_limit_args, apply_memory_limits
+from fastvideo.mlx_runtime.memory import add_memory_limit_args, apply_memory_limits, cleanup_mlx
 
 # The highest-fidelity cell; used as the default SSIM reference when no external
 # reference video is supplied.
@@ -483,6 +483,8 @@ def _generate_cell(
     )
     denoise_s = time.perf_counter() - denoise_start
     denoise_peak = _peak_memory_bytes(mx)
+    del dit, latents
+    cleanup_mlx(mx)
 
     video_path = (args.output_dir / f"{args.current_prompt_id}" /
                   f"video_{mode}_{decoder}_{args.height}x{args.width}x{args.num_frames}.mp4")

@@ -25,6 +25,7 @@ import numpy as np
 
 from fastvideo.mlx_runtime.fast_spatial import DEFAULT_FAST_SPATIAL_SHARPEN
 from fastvideo.mlx_runtime.frame_upsample import DEFAULT_PIXEL_UPSAMPLE_MODE, PIXEL_UPSAMPLE_MODES
+from fastvideo.mlx_runtime.memory import cleanup_mlx
 from fastvideo.mlx_runtime.rife_interp import aligned_keyframe_count
 
 FASTWAN21_MODEL_ID = "FastVideo/FastWan2.1-T2V-1.3B-Diffusers"
@@ -453,6 +454,11 @@ def main() -> None:
         args.save_latents.parent.mkdir(parents=True, exist_ok=True)
         np.savez(args.save_latents, latents=latents_np, prompt=args.prompt, seed=args.seed)
         print(f"[5B] wrote latents {args.save_latents}", flush=True)
+
+    if spatial_mode == "refine":
+        del freqs_stage2
+    del dit, latents, ehs, noise, freqs
+    cleanup_mlx()
 
     metrics = decode_latents_to_video(
         latents_np,

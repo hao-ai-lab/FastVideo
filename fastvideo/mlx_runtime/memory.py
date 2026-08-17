@@ -11,6 +11,7 @@ entrypoints a practical, explicit way to exercise memory-tier presets.
 from __future__ import annotations
 
 import argparse
+import gc
 import os
 from dataclasses import dataclass, field
 from typing import Any
@@ -73,6 +74,27 @@ def gib_to_bytes(value: float | None) -> int | None:
     if value <= 0:
         raise ValueError(f"Memory limit must be positive GiB, got {value}")
     return int(value * GIB)
+
+
+def cleanup_mlx(mx_module: Any | None = None) -> None:
+    """Collect unreachable MLX objects, then release their allocator cache."""
+    if mx_module is None:
+        import mlx.core as mx
+
+        mx_module = mx
+    gc.collect()
+    mx_module.clear_cache()
+
+
+def cleanup_torch_mps(torch_module: Any | None = None) -> None:
+    """Collect unreachable Torch objects, then release the MPS allocator cache."""
+    if torch_module is None:
+        import torch
+
+        torch_module = torch
+    gc.collect()
+    if torch_module.backends.mps.is_available():
+        torch_module.mps.empty_cache()
 
 
 def _set_mps_env(name: str, value: float | None) -> float | None:

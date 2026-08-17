@@ -31,7 +31,6 @@ then a full-res refine pass. Works for Wan2.1-1.3B/14B and Wan2.2-5B.
 from __future__ import annotations
 
 import argparse
-import gc
 import hashlib
 import json
 import subprocess
@@ -46,7 +45,12 @@ import numpy as np
 
 from fastvideo.mlx_runtime.fast_spatial import DEFAULT_FAST_SPATIAL_SHARPEN
 from fastvideo.mlx_runtime.frame_upsample import DEFAULT_PIXEL_UPSAMPLE_MODE, PIXEL_UPSAMPLE_MODES
-from fastvideo.mlx_runtime.memory import add_memory_limit_args, apply_memory_limits
+from fastvideo.mlx_runtime.memory import (
+    add_memory_limit_args,
+    apply_memory_limits,
+    cleanup_mlx,
+    cleanup_torch_mps,
+)
 from fastvideo.mlx_runtime.rife_interp import aligned_keyframe_count
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -112,14 +116,6 @@ def _torch_dtype(dtype_arg: str):
     return {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}[dtype_arg]
 
 
-def _cleanup_torch() -> None:
-    import torch
-
-    gc.collect()
-    if torch.backends.mps.is_available():
-        torch.mps.empty_cache()
-
-
 def encode_prompt(
     *,
     model_root: Path,
@@ -170,8 +166,8 @@ def encode_prompt(
         # fp32 is exact for every bf16 value.
         prompt_embeds = prompt_embeds.float()
     prompt_embeds = prompt_embeds.cpu().contiguous()
-    del text_encoder, tokenizer, text_inputs, text_input_ids, mask
-    _cleanup_torch()
+    del text_encoder, tokenizer, text_inputs, text_input_ids, mask, seq_lens
+    cleanup_torch_mps()
     return prompt_embeds
 
 
@@ -342,7 +338,7 @@ def decode_latents_to_video(
             source_path=taehv_source_path,
             checkpoint_path=taehv_checkpoint_path,
         )
-        _cleanup_torch()
+        cleanup_torch_mps()
         return
 
     if backend != "wan-vae":
@@ -372,8 +368,8 @@ def decode_latents_to_video(
     video = VideoProcessor(vae_scale_factor=vae.config.scale_factor_spatial).postprocess_video(video, output_type="np")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     export_to_video(video[0], str(output_path), fps=fps)
-    del vae, latents, video
-    _cleanup_torch()
+    del vae, latents, latents_mean, latents_std, video
+    cleanup_torch_mps()
 
 
 def _unsharp(frame: np.ndarray, amount: float) -> np.ndarray:
@@ -790,6 +786,8 @@ def main() -> None:
         )
         print(f"[enhance] original: {enhance_result.original}")
         print(f"[enhance] enhanced: {enhance_result.enhanced}")
+        if args.enhance_prompt_backend != "template":
+            cleanup_mlx()
 
     prompt_start = time.perf_counter()
     prompt_embeds = get_prompt_embeds(
@@ -908,6 +906,7 @@ def main() -> None:
         refine_sigma = two_pass.refine_sigma
         print(f"[refine] stage-2 hand-off sigma={refine_sigma:.4f} "
               f"(stage-1 weight {1.0 - refine_sigma:.4f})")
+        del two_pass, freqs_cis_stage2
     else:
         for step_index, timestep in enumerate(timesteps):
             noise_input_latent = latents
@@ -945,6 +944,11 @@ def main() -> None:
 
             mx.eval(latents)
             print(f"denoise step {step_index + 1}/{len(timesteps)} complete")
+            if args.denoising_mode == "dmd":
+                del noise_input_f32, pred_noise_f32, renoise
+            else:
+                del noise_pred_torch, latents_torch
+            del noise_input_latent, noise_pred, timestep_mx
 
     # A: spatial fast mode leaves the latents alone. They stay on the stage-1
     # grid through decode, and the resample to the target size happens on the
@@ -965,6 +969,9 @@ def main() -> None:
         stage1_path.parent.mkdir(parents=True, exist_ok=True)
         np.save(stage1_path, stage1_latents_np)
         print(f"Saved stage-1 latents to: {stage1_path}")
+
+    del dit, latents, encoder_hidden_states, freqs_cis
+    cleanup_mlx()
 
     decode_start = time.perf_counter()
     decode_latents_to_video(
