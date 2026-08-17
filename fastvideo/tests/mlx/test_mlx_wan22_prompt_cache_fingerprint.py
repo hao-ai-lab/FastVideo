@@ -127,3 +127,45 @@ def test_wan22_explicit_mlx_paths_do_not_download(monkeypatch, tmp_path: Path) -
     assert dit_checkpoint is None
     assert dit_config is None
     assert vae_root is None
+
+
+def test_wan22_prompt_cache_has_a_default_path(tmp_path: Path) -> None:
+    """The cache must work without an explicit --prompt-embeds-cache.
+
+    It previously only engaged when handed a path, so every 5B run paid a full
+    UMT5 encode (~45s on an M4 Max) even for a repeat prompt, while the Wan2.1
+    entrypoint cached by default.
+    """
+    module = _load_wan22_module()
+    fingerprint = module._prompt_cache_fingerprint(
+        prompt="a fox",
+        prompt_used="a fox",
+        enhance_prompt=False,
+        enhance_prompt_backend="none",
+        text_encoder_root=tmp_path,
+        max_sequence_length=512,
+        dtype="fp16",
+    )
+    path = module._default_prompt_cache_path(fingerprint)
+    assert path.suffix == ".npy"
+    assert path.parent.name == "prompt_embeds"
+    assert path.name.startswith("wan22_")
+
+
+def test_wan22_default_cache_path_tracks_the_fingerprint(tmp_path: Path) -> None:
+    """Two prompts must not collide, and the same prompt must be stable."""
+    module = _load_wan22_module()
+
+    def fp(prompt: str):
+        return module._prompt_cache_fingerprint(
+            prompt=prompt,
+            prompt_used=prompt,
+            enhance_prompt=False,
+            enhance_prompt_backend="none",
+            text_encoder_root=tmp_path,
+            max_sequence_length=512,
+            dtype="fp16",
+        )
+
+    assert module._default_prompt_cache_path(fp("a fox")) == module._default_prompt_cache_path(fp("a fox"))
+    assert module._default_prompt_cache_path(fp("a fox")) != module._default_prompt_cache_path(fp("a cat"))

@@ -87,6 +87,19 @@ def _prompt_cache_fingerprint(
     }
 
 
+def _default_prompt_cache_path(fingerprint: dict[str, object]) -> Path:
+    """Content-addressed default cache file for a prompt fingerprint.
+
+    The Wan2.1 entrypoint caches prompt embeddings by default; this one only
+    did so when handed an explicit ``--prompt-embeds-cache`` path, so every 5B
+    run paid a full UMT5 encode (~45s on an M4 Max) even for a repeat prompt.
+    The fingerprint already covers everything that changes the embedding, so
+    hash it for the filename.
+    """
+    digest = _fingerprint_digest(fingerprint)[:32]
+    return Path.home() / ".cache" / "fastvideo" / "prompt_embeds" / f"wan22_{digest}.npy"
+
+
 def _prompt_cache_meta_path(cache_path: Path) -> Path:
     return cache_path.with_suffix(cache_path.suffix + ".json")
 
@@ -158,7 +171,15 @@ def main() -> None:
         "--prompt-embeds-cache",
         type=Path,
         default=None,
-        help="Optional .npy UMT5 embedding cache for repeat generation.",
+        help="Explicit .npy UMT5 embedding cache file. Overrides the automatic "
+        "content-addressed cache (--prompt-cache).",
+    )
+    parser.add_argument(
+        "--prompt-cache",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Cache prompt embeddings under ~/.cache/fastvideo/prompt_embeds so "
+        "repeat runs skip the text encoder entirely. Default: on.",
     )
     parser.add_argument(
         "--text-encoder-device",
@@ -358,8 +379,11 @@ def main() -> None:
         max_sequence_length=512,
         dtype="fp16",
     )
+    prompt_cache_path = args.prompt_embeds_cache
+    if prompt_cache_path is None and args.prompt_cache:
+        prompt_cache_path = _default_prompt_cache_path(prompt_cache_fingerprint)
     cached_embeds = _load_prompt_cache_if_valid(
-        args.prompt_embeds_cache,
+        prompt_cache_path,
         prompt_cache_fingerprint,
     )
     if cached_embeds is not None:
@@ -373,7 +397,7 @@ def main() -> None:
             dtype_arg="fp16",
         )
         _save_prompt_cache(
-            args.prompt_embeds_cache,
+            prompt_cache_path,
             embeds,
             prompt_cache_fingerprint,
         )
