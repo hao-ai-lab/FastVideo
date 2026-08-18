@@ -7,3 +7,6 @@
 [submodule "fastvideo/third_party/eval/vbench"]
 	path = fastvideo/third_party/eval/vbench
 	url = https://github.com/Vchitect/VBench.git
+[submodule "fastvideo/third_party/eval/vqeval"]
+	path = fastvideo/third_party/eval/vqeval
+	url = https://github.com/JiusiServe/LongVideoSparseAttention.git
