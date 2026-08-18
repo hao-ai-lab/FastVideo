@@ -201,6 +201,12 @@ rocm = [
     "amdsmi",
 ]
 
+# Apple Silicon FastWan release runtime. The range is intentionally pinned to
+# the MLX version used for the checked-in parity and checkpoint tests.
+mlx = [
+    "mlx>=0.31.2,<0.33; platform_system == 'Darwin' and platform_machine == 'arm64'",
+]
+
 [project.scripts]
 fastvideo = "fastvideo.entrypoints.cli.main:main"
 dreamverse-server = "dreamverse.server_entry:cli"
@@ -212,6 +218,8 @@ exclude = ["assets*", "docker*", "docs", "scripts*", "apps*", "dreamverse.tests*
 
 [tool.setuptools.package-data]
 dreamverse = ["prompts/*.md"]
+"fastvideo.third_party.rife_mlx" = ["LICENSE"]
+"fastvideo.third_party.taehv" = ["LICENSE"]
 
 [tool.wheel]
 exclude = ["assets*", "docker*", "docs", "scripts*", "apps*"]
