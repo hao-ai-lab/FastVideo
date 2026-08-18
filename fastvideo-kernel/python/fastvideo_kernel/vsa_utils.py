@@ -14,7 +14,7 @@ import math
 import torch
 
 VSA_TILE_SIZE = (4, 4, 4)
-# 128 is served by the sm_100a CUDA backend (block_sparse_attn_vsa_sm100a); 64 and 256 by
+# 128 is served by the sm_100a CUDA backend (block_sparse_attn_sm100a); 64 and 256 by
 # Triton and the CuTe-DSL path. A volume here only needs a backend that accepts it.
 _SUPPORTED_VSA_BLOCK_VOLUMES = (64, 128, 256)
 

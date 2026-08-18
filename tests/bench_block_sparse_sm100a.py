@@ -6,14 +6,14 @@ deployed latent shapes, and drives the same block_sparse_attn_from_indices entry
 model calls -- so it measures the path that will run, including the dispatch and the index
 tensors as constructed rather than synthesised.
 
-    PYTHONPATH=fastvideo-kernel/python python tests/bench_vsa_sm100a.py
+    PYTHONPATH=fastvideo-kernel/python python tests/bench_block_sparse_sm100a.py
 """
 
 import time
 
 import torch
 
-from fastvideo_kernel import block_sparse_attn_vsa_sm100a as vsa
+from fastvideo_kernel import block_sparse_attn_sm100a as vsa
 from fastvideo_kernel.block_sparse_attn import block_sparse_attn_triton
 from fastvideo_kernel.triton_kernels.index import map_to_index
 from fastvideo_kernel.vsa_utils import build_vsa_metadata
@@ -62,7 +62,7 @@ def main():
         idx, num = idx.to(torch.int32).contiguous(), num.to(torch.int32).contiguous()
 
         ok = vsa.is_supported(q, vbs)
-        ours = timed(lambda: vsa.block_sparse_attn_vsa_sm100a(q, k, v, idx, num, vbs)) if ok else float("nan")
+        ours = timed(lambda: vsa.block_sparse_attn_sm100a(q, k, v, idx, num, vbs)) if ok else float("nan")
 
         # Triton needs 64-token blocks: expand each 128-block into its two halves.
         if block == 128:   # Triton is 64-granular; expand only when we run 128

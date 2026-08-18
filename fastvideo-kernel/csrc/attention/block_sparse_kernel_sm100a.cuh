@@ -1,4 +1,4 @@
-// block_sparse_vsa_kernel_sm100a.cuh -- block-causal + sink + sliding-window FMHA forward, sm_100a.
+// block_sparse_kernel_sm100a.cuh -- VSA block-sparse FMHA forward (per-q-block top-k), sm_100a.
 // Warp-specialized: load / MMA (tcgen05) / softmax / correction / epilogue / scheduler.
 // Writes O and, when asked, the log-sum-exp the backward consumes.
 //
@@ -18,7 +18,7 @@
 #include <vector>
 #include <algorithm>
 #include <string>
-#include "block_sparse_vsa_primitives.cuh"
+#include "primitives.cuh"
 
 #ifndef VSA_BLK128
 #define VSA_BLK128 false
@@ -26,6 +26,18 @@
 #ifndef VSA_BHSD
 #define VSA_BHSD false
 #endif
+
+// BLK128 is a file-scope constexpr, not a template parameter, so the blk64 and blk128 builds
+// would instantiate the SAME kernel symbol with DIFFERENT bodies -- an ODR violation the linker
+// resolves by silently keeping one. A config-named namespace keeps the two builds' symbols
+// distinct so both can live in one extension.
+#if VSA_BLK128
+#define VSA_NAMESPACE vsa_blk128
+#else
+#define VSA_NAMESPACE vsa_blk64
+#endif
+namespace VSA_NAMESPACE {
+
 constexpr bool BLK128 = VSA_BLK128;
 
 #ifndef VSA_DEFER_ROWSUM
@@ -856,21 +868,31 @@ fmha_context_bf16_gen_kernel(const __grid_constant__ CUtensorMap tmap_q,
       mbarrier_wait_parity_suspend(smem_ptr_u32(&empty_bar_alpha_and_l[m_tile]), scale_empty_ph.get_phase());
       scale_empty_ph.advance();
 
+      int thr_window = -(1 << 30);
+      int thr_cache0 = BLOCK, thr_cache1 = BLOCK;
+      auto get_vbs_thresholds = [&](int k, int gqb_mt, int half, int& t0, int& t1) {
+        if (k >= thr_window + 32) {
+          thr_window = k & ~31;
+          const int kk = thr_window + lane;
+          if constexpr (BLK128) {
+            thr_cache0 = (kk < it.num_kv_blocks)
+                       ? variable_block_sizes[q2k_idx[gqb_mt * max_kv + kk]] : 0;
+          } else {
+            const int b0 = kk * BLOCKS_PER_KTILE + 2 * half;
+            thr_cache0 = (b0     < it.num_kv_blocks)
+                       ? variable_block_sizes[q2k_idx[gqb_mt * max_kv + b0]]     : 0;
+            thr_cache1 = (b0 + 1 < it.num_kv_blocks)
+                       ? variable_block_sizes[q2k_idx[gqb_mt * max_kv + b0 + 1]] : 0;
+          }
+        }
+        t0 = __shfl_sync(0xffffffffu, thr_cache0, k & 31);
+        t1 = BLK128 ? 0 : __shfl_sync(0xffffffffu, thr_cache1, k & 31);
+      };
       auto softmax_step = [&](auto is_first_c, int k) {
         constexpr bool IS_FIRST = decltype(is_first_c)::value;
-
         const int gqb_mt_ = (m_tile == 0) ? it.global_mtile0 : it.global_mtile1;
         int vbs_thr0_, vbs_thr1_;
-        if constexpr (BLK128) {
-          vbs_thr0_ = (k < it.num_kv_blocks) ? variable_block_sizes[q2k_idx[gqb_mt_ * max_kv + k]] : 0;
-          vbs_thr1_ = 0;
-        } else {
-          const int b0_ = k * BLOCKS_PER_KTILE + 2 * (warp_in_group >> 1);
-          const int jbase_ = gqb_mt_ * max_kv + b0_;
-
-          vbs_thr0_ = (b0_     < it.num_kv_blocks) ? variable_block_sizes[q2k_idx[jbase_]]     : 0;
-          vbs_thr1_ = (b0_ + 1 < it.num_kv_blocks) ? variable_block_sizes[q2k_idx[jbase_ + 1]] : 0;
-        }
+        get_vbs_thresholds(k, gqb_mt_, warp_in_group >> 1, vbs_thr0_, vbs_thr1_);
         mbarrier_wait_parity_suspend(smem_ptr_u32(&full_bar_spo[m_tile]), spo_ph.get_phase());
 
         uint32_t s_regs[S_COLS];
@@ -1009,5 +1031,7 @@ fmha_context_bf16_gen_kernel(const __grid_constant__ CUtensorMap tmap_q,
   __syncthreads();
   if (warp_id == 0) tcgen05_dealloc<1>(tmem_base, TMEM_TOTAL);
 }
+
+}  // namespace VSA_NAMESPACE
 
 #endif

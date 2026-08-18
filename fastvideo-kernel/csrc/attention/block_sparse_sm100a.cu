@@ -1,4 +1,4 @@
-// block_sparse_vsa_sm100a.cu -- torch binding for the sm_100a VSA block-sparse FMHA forward.
+// block_sparse_sm100a.cu -- torch binding for the sm_100a VSA block-sparse FMHA forward.
 //
 // Forward only: returns (out, lse) so FastVideo's existing Triton backward keeps working
 // unchanged. lse is exactly the M tensor triton_block_sparse_attn_forward writes --
@@ -13,7 +13,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 
-#include "block_sparse_vsa_launch_sm100a.cuh"
+#include "block_sparse_launch_sm100a.cuh"
 
 namespace {
 
@@ -40,8 +40,17 @@ void check_index(const torch::Tensor& t, const char* name) {
 
 }  // namespace
 
+// The exported symbol carries the block size: block_sparse_sm100a_fwd is the 64-token build,
+// block_sparse_sm100a_blk128_fwd the 128-token one (block_sparse_blk128_sm100a.cu re-includes
+// this file with VSA_BLK128 set). The python backend picks by the metadata's block size.
+#if VSA_BLK128
+#define BLOCK_SPARSE_SM100A_FWD block_sparse_sm100a_blk128_fwd
+#else
+#define BLOCK_SPARSE_SM100A_FWD block_sparse_sm100a_fwd
+#endif
+
 // Returns {out} or {out, lse}. Layout of out matches the inputs.
-std::vector<torch::Tensor> block_sparse_vsa_sm100a_fwd(torch::Tensor q, torch::Tensor k,
+std::vector<torch::Tensor> BLOCK_SPARSE_SM100A_FWD(torch::Tensor q, torch::Tensor k,
                                                        torch::Tensor v,
                                                        c10::optional<torch::Tensor> v_t,
                                                        torch::Tensor q2k_idx,
@@ -90,15 +99,15 @@ std::vector<torch::Tensor> block_sparse_vsa_sm100a_fwd(torch::Tensor q, torch::T
   a.sm_scale = (float)sm_scale;
 
   // Report an unsupported regime loudly rather than returning plausible-looking wrong values.
-  TORCH_CHECK(block_sparse_vsa_supported(a) == cudaSuccess,
-              "block_sparse_vsa_sm100a: unsupported configuration -- requires head_dim==",
+  TORCH_CHECK(block_sparse_supported(a) == cudaSuccess,
+              "block_sparse_sm100a: unsupported configuration -- requires head_dim==",
               HEAD_DIM, ", an even num_blocks, seqlen == num_blocks*", BLOCK,
               ", and a variable_block_sizes tensor. Got head_dim=", D, " num_blocks=",
               num_blocks, " seqlen=", S);
 
-  const cudaError_t err = launch_block_sparse_vsa_sm100a(a, at::cuda::getCurrentCUDAStream());
+  const cudaError_t err = launch_block_sparse_sm100a(a, at::cuda::getCurrentCUDAStream());
   TORCH_CHECK(err == cudaSuccess,
-              "block_sparse_vsa_sm100a launch failed: ", cudaGetErrorString(err));
+              "block_sparse_sm100a launch failed: ", cudaGetErrorString(err));
 
   if (need_lse) return {out, lse};
   return {out};

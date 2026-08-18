@@ -5,14 +5,16 @@
 //
 // Everything a caller needs: a POD argument struct, a predicate saying whether this build can
 // run those arguments, and one launch entry point. The benchmark in
-// fmha_context_bf16_uniform_vsa_fv.cu and the torch binding both go through here, so there is
+// block_sparse_bench_sm100a.cu and the torch binding both go through here, so there is
 // one tensormap construction and one launch configuration rather than two that can drift.
 //
 // Two compile-time knobs select the four builds:
 //   VSA_BLK128  false -> 64-token sparse blocks, true -> 128-token
 //   VSA_BHSD    false -> [token][head][dim] (BSHD), true -> [batch][head][token][dim] (BHSD)
 
-#include "block_sparse_vsa_kernel_sm100a.cuh"
+#include "block_sparse_kernel_sm100a.cuh"
+
+namespace VSA_NAMESPACE {
 
 struct BlockSparseVsaArgs {
   const __nv_bfloat16* q;
@@ -37,7 +39,7 @@ struct BlockSparseVsaArgs {
 
 // cudaSuccess iff this build can run `a`. Deliberately conservative: the caller is expected
 // to fall back to its own implementation rather than get a wrong answer.
-__host__ inline cudaError_t block_sparse_vsa_supported(const BlockSparseVsaArgs& a) {
+__host__ inline cudaError_t block_sparse_supported(const BlockSparseVsaArgs& a) {
   if (a.head_dim != HEAD_DIM) return cudaErrorInvalidValue;      // compile-time in the kernel
   if (a.num_blocks % 2 != 0) return cudaErrorInvalidValue;       // a CTA owns an adjacent pair
   if (a.seqlen != a.num_blocks * BLOCK) return cudaErrorInvalidValue;
@@ -51,9 +53,9 @@ __host__ inline cudaError_t block_sparse_vsa_supported(const BlockSparseVsaArgs&
   return cudaSuccess;
 }
 
-__host__ inline cudaError_t launch_block_sparse_vsa_sm100a(const BlockSparseVsaArgs& a,
+__host__ inline cudaError_t launch_block_sparse_sm100a(const BlockSparseVsaArgs& a,
                                                            cudaStream_t stream) {
-  const cudaError_t sup = block_sparse_vsa_supported(a);
+  const cudaError_t sup = block_sparse_supported(a);
   if (sup != cudaSuccess) return sup;
 
   const int B = a.batch, H = a.num_heads, S = a.seqlen, hd = a.head_dim;
@@ -189,5 +191,11 @@ __host__ inline cudaError_t launch_block_sparse_vsa_sm100a(const BlockSparseVsaA
                                      a.q2k_idx, a.q2k_num, a.variable_block_sizes, a.lse);
   return cudaGetLastError();
 }
+
+}  // namespace VSA_NAMESPACE
+
+// Callers (the bench, the torch binding) keep using unqualified names; each translation unit
+// only ever sees the one configuration its VSA_BLK128 selected.
+using namespace VSA_NAMESPACE;
 
 #endif  // BLOCK_SPARSE_VSA_LAUNCH_SM100A_CUH

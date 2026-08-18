@@ -342,9 +342,11 @@ if(BUILD_CXX_KERNELS)
         set(ENABLE_VSA_SM100A ON)
     endif()
     if(ENABLE_VSA_SM100A)
-        message(STATUS "fastvideo-kernel: building block_sparse_vsa_sm100a (Blackwell)")
-        list(APPEND EXTENSION_SOURCES csrc/attention/block_sparse_vsa_sm100a.cu)
-        set_source_files_properties(csrc/attention/block_sparse_vsa_sm100a.cu PROPERTIES
+        message(STATUS "fastvideo-kernel: building block_sparse_sm100a (Blackwell, 64- and 128-token blocks)")
+        list(APPEND EXTENSION_SOURCES csrc/attention/block_sparse_sm100a.cu
+                                      csrc/attention/block_sparse_blk128_sm100a.cu)
+        set_source_files_properties(csrc/attention/block_sparse_sm100a.cu
+                                    csrc/attention/block_sparse_blk128_sm100a.cu PROPERTIES
             COMPILE_OPTIONS "-gencode;arch=compute_100a,code=sm_100a;-DVSA_BHSD=true")
     endif()
 
