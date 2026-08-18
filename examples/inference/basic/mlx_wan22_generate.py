@@ -16,7 +16,6 @@ Decoder backends: ``taehv`` (default, MLX, ~seconds), ``taehv-torch`` (parity),
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import time
 from pathlib import Path
@@ -26,6 +25,12 @@ import numpy as np
 from fastvideo.mlx_runtime.fast_spatial import DEFAULT_FAST_SPATIAL_SHARPEN
 from fastvideo.mlx_runtime.frame_upsample import DEFAULT_PIXEL_UPSAMPLE_MODE, PIXEL_UPSAMPLE_MODES
 from fastvideo.mlx_runtime.memory import cleanup_mlx
+from fastvideo.mlx_runtime.prompt_cache import (
+    fingerprint_digest,
+    load_prompt_cache,
+    save_prompt_cache,
+    text_encoder_fingerprint,
+)
 from fastvideo.mlx_runtime.rife_interp import aligned_keyframe_count
 
 FASTWAN21_MODEL_ID = "FastVideo/FastWan2.1-T2V-1.3B-Diffusers"
@@ -81,7 +86,7 @@ def _prompt_cache_fingerprint(
         "prompt_used": prompt_used,
         "enhance_prompt": enhance_prompt,
         "enhance_prompt_backend": enhance_prompt_backend,
-        "text_encoder_root": str(text_encoder_root.resolve()),
+        "text_encoder": text_encoder_fingerprint(text_encoder_root),
         "max_sequence_length": max_sequence_length,
         "dtype": dtype,
     }
@@ -96,56 +101,8 @@ def _default_prompt_cache_path(fingerprint: dict[str, object]) -> Path:
     The fingerprint already covers everything that changes the embedding, so
     hash it for the filename.
     """
-    digest = _fingerprint_digest(fingerprint)[:32]
+    digest = fingerprint_digest(fingerprint)[:32]
     return Path.home() / ".cache" / "fastvideo" / "prompt_embeds" / f"wan22_{digest}.npy"
-
-
-def _prompt_cache_meta_path(cache_path: Path) -> Path:
-    return cache_path.with_suffix(cache_path.suffix + ".json")
-
-
-def _fingerprint_digest(fingerprint: dict[str, object]) -> str:
-    payload = json.dumps(fingerprint, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
-def _load_prompt_cache_if_valid(
-    cache_path: Path | None,
-    fingerprint: dict[str, object],
-):
-    if cache_path is None or not cache_path.exists():
-        return None
-    meta_path = _prompt_cache_meta_path(cache_path)
-    if not meta_path.exists():
-        return None
-    try:
-        metadata = json.loads(meta_path.read_text())
-    except json.JSONDecodeError:
-        return None
-    if metadata.get("fingerprint_sha256") != _fingerprint_digest(fingerprint):
-        return None
-    return np.load(cache_path)
-
-
-def _save_prompt_cache(
-    cache_path: Path | None,
-    embeds,
-    fingerprint: dict[str, object],
-) -> None:
-    if cache_path is None:
-        return
-    cache_path.parent.mkdir(parents=True, exist_ok=True)
-    np.save(cache_path, embeds.cpu().numpy())
-    _prompt_cache_meta_path(cache_path).write_text(
-        json.dumps(
-            {
-                "fingerprint_sha256": _fingerprint_digest(fingerprint),
-                "fingerprint": fingerprint,
-            },
-            indent=2,
-        )
-        + "\n"
-    )
 
 
 def main() -> None:
@@ -382,7 +339,7 @@ def main() -> None:
     prompt_cache_path = args.prompt_embeds_cache
     if prompt_cache_path is None and args.prompt_cache:
         prompt_cache_path = _default_prompt_cache_path(prompt_cache_fingerprint)
-    cached_embeds = _load_prompt_cache_if_valid(
+    cached_embeds = load_prompt_cache(
         prompt_cache_path,
         prompt_cache_fingerprint,
     )
@@ -396,9 +353,9 @@ def main() -> None:
             device_arg=args.text_encoder_device,
             dtype_arg="fp16",
         )
-        _save_prompt_cache(
+        save_prompt_cache(
             prompt_cache_path,
-            embeds,
+            embeds.cpu().numpy(),
             prompt_cache_fingerprint,
         )
     ehs = mx.array(embeds.numpy()).astype(mx.float16)

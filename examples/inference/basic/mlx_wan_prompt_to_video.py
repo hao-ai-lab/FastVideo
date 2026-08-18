@@ -31,7 +31,6 @@ then a full-res refine pass. Works for Wan2.1-1.3B/14B and Wan2.2-5B.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import subprocess
 import sys
@@ -50,6 +49,12 @@ from fastvideo.mlx_runtime.memory import (
     apply_memory_limits,
     cleanup_mlx,
     cleanup_torch_mps,
+)
+from fastvideo.mlx_runtime.prompt_cache import (
+    fingerprint_digest,
+    load_prompt_cache,
+    save_prompt_cache,
+    text_encoder_fingerprint,
 )
 from fastvideo.mlx_runtime.rife_interp import aligned_keyframe_count
 
@@ -206,6 +211,21 @@ def encode_prompt_subprocess(
     return torch.from_numpy(prompt_embeds).contiguous()
 
 
+def _prompt_cache_fingerprint(
+    *,
+    model_root: Path,
+    prompt: str,
+    max_sequence_length: int,
+    dtype_arg: str,
+) -> dict[str, object]:
+    return {
+        "prompt": prompt,
+        "text_encoder": text_encoder_fingerprint(model_root),
+        "max_sequence_length": max_sequence_length,
+        "dtype": dtype_arg,
+    }
+
+
 def _default_prompt_cache_path(
     *,
     model_root: Path,
@@ -213,16 +233,13 @@ def _default_prompt_cache_path(
     max_sequence_length: int,
     dtype_arg: str,
 ) -> Path:
-    """Content-addressed prompt-embedding cache location.
-
-    The key covers everything that changes the embedding: the prompt text, the
-    truncation length, the encoder dtype, and the model directory (which pins
-    the tokenizer/encoder weights for a resolved snapshot). A collision would
-    require identical encoders and prompts, so a plain SHA-256 of the tuple is
-    a safe filename.
-    """
-    key = "\0".join([str(model_root), prompt, str(max_sequence_length), dtype_arg])
-    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:32]
+    fingerprint = _prompt_cache_fingerprint(
+        model_root=model_root,
+        prompt=prompt,
+        max_sequence_length=max_sequence_length,
+        dtype_arg=dtype_arg,
+    )
+    digest = fingerprint_digest(fingerprint)[:32]
     return Path.home() / ".cache" / "fastvideo" / "prompt_embeds" / f"{digest}.npy"
 
 
@@ -238,8 +255,17 @@ def get_prompt_embeds(
 ):
     import torch
 
-    if cache_path is not None and cache_path.exists():
-        return torch.from_numpy(np.load(cache_path)).contiguous()
+    fingerprint = None
+    if cache_path is not None:
+        fingerprint = _prompt_cache_fingerprint(
+            model_root=model_root,
+            prompt=prompt,
+            max_sequence_length=max_sequence_length,
+            dtype_arg=dtype_arg,
+        )
+        cached = load_prompt_cache(cache_path, fingerprint)
+        if cached is not None:
+            return torch.from_numpy(cached).contiguous()
 
     if encode_mode == "subprocess":
         prompt_embeds = encode_prompt_subprocess(
@@ -260,9 +286,8 @@ def get_prompt_embeds(
     else:
         raise ValueError(f"Unsupported prompt encode mode: {encode_mode}")
 
-    if cache_path is not None:
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        np.save(cache_path, prompt_embeds.cpu().numpy())
+    if cache_path is not None and fingerprint is not None:
+        save_prompt_cache(cache_path, prompt_embeds.cpu().numpy(), fingerprint)
     return prompt_embeds
 
 

@@ -89,6 +89,7 @@ def test_wan22_releases_compiled_dit_before_torch_decode_and_mlx_rife(monkeypatc
             "mlx_wan22_generate.py",
             "--text-encoder-root",
             str(tmp_path / "text"),
+            "--no-prompt-cache",
             "--mlx-checkpoint",
             str(checkpoint),
             "--height",
