@@ -70,25 +70,25 @@ def _apply_activation_checkpointing_blocks(module: torch.nn.Module, n_layer: int
     return module
 
 
-def _selective_checkpointing_context_fn():
+def _apply_activation_checkpointing_ops(module: torch.nn.Module) -> torch.nn.Module:
     from torch.utils.checkpoint import (CheckpointPolicy, create_selective_checkpoint_contexts)
 
-    def _custom_policy(ctx, func, *args, **kwargs):
-        # OpOverload.name() is e.g. "aten::_scaled_dot_product_flash_attention".
-        to_save = any(pattern in func.name() for pattern in _SAVE_OP_PATTERNS)
-        return CheckpointPolicy.MUST_SAVE if to_save else CheckpointPolicy.PREFER_RECOMPUTE
+    def selective_checkpointing_context_fn():
 
-    return create_selective_checkpoint_contexts(_custom_policy)
+        def _custom_policy(ctx, func, *args, **kwargs):
+            # OpOverload.name() is e.g. "aten::_scaled_dot_product_flash_attention".
+            to_save = any(pattern in func.name() for pattern in _SAVE_OP_PATTERNS)
+            return CheckpointPolicy.MUST_SAVE if to_save else CheckpointPolicy.PREFER_RECOMPUTE
 
+        return create_selective_checkpoint_contexts(_custom_policy)
 
-def _apply_activation_checkpointing_ops(module: torch.nn.Module) -> torch.nn.Module:
     applied = False
     for transformer_block_name in TRANSFORMER_BLOCK_NAMES:
         blocks: torch.nn.Module = getattr(module, transformer_block_name, None)
         if blocks is None:
             continue
         for layer_id, block in blocks.named_children():
-            block = checkpoint_wrapper(block, context_fn=_selective_checkpointing_context_fn, preserve_rng_state=False)
+            block = checkpoint_wrapper(block, context_fn=selective_checkpointing_context_fn, preserve_rng_state=False)
             blocks.register_module(layer_id, block)
         applied = True
     if not applied:

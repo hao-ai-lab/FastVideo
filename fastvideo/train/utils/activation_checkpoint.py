@@ -89,31 +89,30 @@ def _apply_activation_checkpointing_blocks(
     return module
 
 
-def _selective_checkpointing_context_fn():
-    """Build a policy that retains attention and collective outputs."""
+def _apply_activation_checkpointing_ops(module: torch.nn.Module) -> torch.nn.Module:
+    """Checkpoint every block while retaining selected operation outputs."""
     from torch.utils.checkpoint import CheckpointPolicy, create_selective_checkpoint_contexts
 
-    def _custom_policy(ctx, func, *args, **kwargs):
+    def selective_checkpointing_context_fn():
         """Retain selected expensive operations during recomputation."""
-        # OpOverload.name() is e.g. "aten::_scaled_dot_product_flash_attention".
-        to_save = any(pattern in func.name() for pattern in _SAVE_OP_PATTERNS)
-        return CheckpointPolicy.MUST_SAVE if to_save else CheckpointPolicy.PREFER_RECOMPUTE
 
-    return create_selective_checkpoint_contexts(_custom_policy)
+        def _custom_policy(ctx, func, *args, **kwargs):
+            # OpOverload.name() is e.g. "aten::_scaled_dot_product_flash_attention".
+            to_save = any(pattern in func.name() for pattern in _SAVE_OP_PATTERNS)
+            return CheckpointPolicy.MUST_SAVE if to_save else CheckpointPolicy.PREFER_RECOMPUTE
 
+        return create_selective_checkpoint_contexts(_custom_policy)
 
-def _apply_activation_checkpointing_ops(module: torch.nn.Module) -> torch.nn.Module:
-    """Checkpoint every block while retaining attention and collective outputs."""
     applied = False
     for transformer_block_name in _TRANSFORMER_BLOCK_NAMES:
         blocks: torch.nn.Module | None = getattr(module, transformer_block_name, None)
         if blocks is None:
             continue
         for layer_id, block in blocks.named_children():
-            # These blocks carry no stochastic masks that must replay during
-            # recomputation.
+            # Selective checkpointing wraps modules without stochastic masks that
+            # must replay during recomputation.
             checkpointed_block = checkpoint_wrapper(block,
-                                                    context_fn=_selective_checkpointing_context_fn,
+                                                    context_fn=selective_checkpointing_context_fn,
                                                     preserve_rng_state=False)
             blocks.register_module(layer_id, checkpointed_block)
         applied = True
