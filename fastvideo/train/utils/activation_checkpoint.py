@@ -51,9 +51,13 @@ _SELECTIVE_ACTIVATION_CHECKPOINTING_OP_NAMES = {
     # point, not an op, and naming that here would match nothing.
     "fastvideo_kernel::block_sparse_attn_sm90",
     "fastvideo_kernel::block_sparse_attn_triton",
-    "_c10d_functional::reduce_scatter_tensor",
-    "_c10d_functional::all_gather_into_tensor",
 }
+
+# The replaced set also named _c10d_functional::reduce_scatter_tensor, which
+# never fires: under FSDP2 the reduce-scatter runs in the post-backward hook,
+# outside the region. What does appear inside it is the parameter all-gather
+# (c10d::_allgather_base_), and retaining that would hold every checkpointed
+# block's unsharded weights at once, so it is deliberately not listed.
 
 # VMoBA and the FA3 training path go through torch.autograd.Function rather than
 # the dispatcher, so no policy can reach them; they get full recomputation.
