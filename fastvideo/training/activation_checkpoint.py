@@ -1,3 +1,4 @@
+import collections
 from enum import Enum
 
 import torch
@@ -22,30 +23,12 @@ class CheckpointType(str, Enum):
     BLOCK_SKIP = "block_skip"
 
 
-# Names rather than the op objects: the fastvideo ops register only when their
-# backend module is imported, so torch.ops.fastvideo... would raise here on any
-# build that has not loaded that backend.
-_SELECTIVE_ACTIVATION_CHECKPOINTING_OP_NAMES = {
-    "aten::_scaled_dot_product_flash_attention",
-    "aten::_scaled_dot_product_efficient_attention",
-    "aten::_scaled_dot_product_cudnn_attention",
-    "aten::_scaled_dot_product_attention_math",
-    "fastvideo::_flash_attn_default_forward",
-    "fastvideo::_flash_attn_cute_forward",
-    "fastvideo::_flash_attn_cute_varlen_forward",
-    "fastvideo::_flash_attn_cute_fp4_forward",
-    "fastvideo::_flash_attn_no_pad_forward",
-    "fastvideo::_flash_attn_varlen_qk_no_pad_forward",
-    # VSA dispatches block_sparse_attn; video_sparse_attn is its Python entry
-    # point, not an op, and naming that here would match nothing.
-    "fastvideo_kernel::block_sparse_attn_sm90",
-    "fastvideo_kernel::block_sparse_attn_triton",
-    "_c10d_functional::reduce_scatter_tensor",
-    "_c10d_functional::all_gather_into_tensor",
+_SELECTIVE_ACTIVATION_CHECKPOINTING_OPS = {
+    torch.ops.aten.mm.default,
+    torch.ops.aten._scaled_dot_product_efficient_attention.default,
+    torch.ops.aten._scaled_dot_product_flash_attention.default,
+    torch.ops._c10d_functional.reduce_scatter_tensor.default,
 }
-
-# VMoBA and the FA3 training path go through torch.autograd.Function rather than
-# the dispatcher, so no policy can reach them; they get full recomputation.
 
 
 def apply_activation_checkpointing(module: torch.nn.Module,
@@ -54,7 +37,7 @@ def apply_activation_checkpointing(module: torch.nn.Module,
     if checkpointing_type == CheckpointType.FULL:
         module = _apply_activation_checkpointing_blocks(module)
     elif checkpointing_type == CheckpointType.OPS:
-        module = _apply_activation_checkpointing_ops(module)
+        module = _apply_activation_checkpointing_ops(module, _SELECTIVE_ACTIVATION_CHECKPOINTING_OPS)
     elif checkpointing_type == CheckpointType.BLOCK_SKIP:
         module = _apply_activation_checkpointing_blocks(module, n_layer)
     else:
@@ -80,27 +63,24 @@ def _apply_activation_checkpointing_blocks(module: torch.nn.Module, n_layer: int
     return module
 
 
-def _apply_activation_checkpointing_ops(module: torch.nn.Module) -> torch.nn.Module:
+def _apply_activation_checkpointing_ops(module: torch.nn.Module, ops) -> torch.nn.Module:
     from torch.utils.checkpoint import (CheckpointPolicy, create_selective_checkpoint_contexts)
 
-    def selective_checkpointing_context_fn():
+    def _get_custom_policy(meta: dict[str, int]) -> CheckpointPolicy:
 
         def _custom_policy(ctx, func, *args, **kwargs):
-            # OpOverload.name() is e.g. "aten::_scaled_dot_product_flash_attention".
-            to_save = func.name() in _SELECTIVE_ACTIVATION_CHECKPOINTING_OP_NAMES
+            mode = "recompute" if ctx.is_recompute else "forward"
+            mm_count_key = f"{mode}_mm_count"
+            if func == torch.ops.aten.mm.default:
+                meta[mm_count_key] += 1
+            # Saves output of all compute ops, except every second mm
+            to_save = func in ops and not (func == torch.ops.aten.mm.default and meta[mm_count_key] % 2 == 0)
             return CheckpointPolicy.MUST_SAVE if to_save else CheckpointPolicy.PREFER_RECOMPUTE
 
-        return create_selective_checkpoint_contexts(_custom_policy)
+        return _custom_policy
 
-    applied = False
-    for transformer_block_name in TRANSFORMER_BLOCK_NAMES:
-        blocks: torch.nn.Module = getattr(module, transformer_block_name, None)
-        if blocks is None:
-            continue
-        for layer_id, block in blocks.named_children():
-            block = checkpoint_wrapper(block, context_fn=selective_checkpointing_context_fn, preserve_rng_state=False)
-            blocks.register_module(layer_id, block)
-        applied = True
-    if not applied:
-        raise ValueError("Activation checkpointing is not applied successfully")
-    return module
+    def selective_checkpointing_context_fn():
+        meta: dict[str, int] = collections.defaultdict(int)
+        return create_selective_checkpoint_contexts(_get_custom_policy(meta))
+
+    return checkpoint_wrapper(module, context_fn=selective_checkpointing_context_fn, preserve_rng_state=False)
