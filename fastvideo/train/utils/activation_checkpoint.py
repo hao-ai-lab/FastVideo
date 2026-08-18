@@ -5,9 +5,7 @@ The modular trainer owns these policies under ``fastvideo.train``, which keeps
 model plugins within one training package.
 """
 
-import collections
 from enum import Enum
-from typing import Any
 
 import torch
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import checkpoint_wrapper
@@ -35,12 +33,20 @@ class CheckpointType(str, Enum):
     BLOCK_SKIP = "block_skip"
 
 
-_SELECTIVE_ACTIVATION_CHECKPOINTING_OPS = {
-    torch.ops.aten.mm.default,
-    torch.ops.aten._scaled_dot_product_efficient_attention.default,
-    torch.ops.aten._scaled_dot_product_flash_attention.default,
-    torch.ops._c10d_functional.reduce_scatter_tensor.default,
-}
+# Attention and collectives are the outputs worth keeping: recomputing attention
+# is quadratic in sequence length, and recomputing a collective re-issues
+# communication. Matched by name because the fastvideo ops below do not exist
+# until their backend module is imported, so naming them by identity here would
+# force every backend to load and still miss the env-gated FA4 ones.
+_SAVE_OP_PATTERNS = (
+    "_scaled_dot_product",  # aten SDPA: flash / efficient / cudnn / math
+    "flash_attn",  # fastvideo::_flash_attn_{default,cute,varlen,...}
+    "video_sparse_attn",  # VSA
+    "moba_attn",  # VMoBA
+    "sage_attn",  # SageAttention 2 / 3
+    "reduce_scatter",
+    "all_gather",
+)
 
 
 def apply_activation_checkpointing(
@@ -52,10 +58,7 @@ def apply_activation_checkpointing(
     if checkpointing_type == CheckpointType.FULL:
         module = _apply_activation_checkpointing_blocks(module)
     elif checkpointing_type == CheckpointType.OPS:
-        module = _apply_activation_checkpointing_ops(
-            module,
-            _SELECTIVE_ACTIVATION_CHECKPOINTING_OPS,
-        )
+        module = _apply_activation_checkpointing_ops(module)
     elif checkpointing_type == CheckpointType.BLOCK_SKIP:
         module = _apply_activation_checkpointing_blocks(module, n_layer)
     else:
@@ -86,37 +89,34 @@ def _apply_activation_checkpointing_blocks(
     return module
 
 
-def _apply_activation_checkpointing_ops(
-    module: torch.nn.Module,
-    ops: set[Any],
-) -> torch.nn.Module:
-    """Checkpoint a module while retaining selected operation outputs."""
+def _selective_checkpointing_context_fn():
+    """Build a policy that retains attention and collective outputs."""
     from torch.utils.checkpoint import CheckpointPolicy, create_selective_checkpoint_contexts
 
-    def _get_custom_policy(meta: dict[str, int]):
-        """Build a policy that alternates matrix-multiply output retention."""
+    def _custom_policy(ctx, func, *args, **kwargs):
+        """Retain selected expensive operations during recomputation."""
+        # OpOverload.name() is e.g. "aten::_scaled_dot_product_flash_attention".
+        to_save = any(pattern in func.name() for pattern in _SAVE_OP_PATTERNS)
+        return CheckpointPolicy.MUST_SAVE if to_save else CheckpointPolicy.PREFER_RECOMPUTE
 
-        def _custom_policy(ctx, func, *args, **kwargs):
-            """Retain selected expensive operations during recomputation."""
-            mode = "recompute" if ctx.is_recompute else "forward"
-            mm_count_key = f"{mode}_mm_count"
-            if func == torch.ops.aten.mm.default:
-                meta[mm_count_key] += 1
-            # Retain compute outputs except every second matrix multiplication.
-            to_save = func in ops and not (func == torch.ops.aten.mm.default and meta[mm_count_key] % 2 == 0)
-            return CheckpointPolicy.MUST_SAVE if to_save else CheckpointPolicy.PREFER_RECOMPUTE
+    return create_selective_checkpoint_contexts(_custom_policy)
 
-        return _custom_policy
 
-    def selective_checkpointing_context_fn():
-        """Create independent operation counters for one checkpointed call."""
-        meta: dict[str, int] = collections.defaultdict(int)
-        return create_selective_checkpoint_contexts(_get_custom_policy(meta))
-
-    # Selective checkpointing wraps modules without stochastic masks that must
-    # replay during recomputation.
-    return checkpoint_wrapper(
-        module,
-        context_fn=selective_checkpointing_context_fn,
-        preserve_rng_state=False,
-    )
+def _apply_activation_checkpointing_ops(module: torch.nn.Module) -> torch.nn.Module:
+    """Checkpoint every block while retaining attention and collective outputs."""
+    applied = False
+    for transformer_block_name in _TRANSFORMER_BLOCK_NAMES:
+        blocks: torch.nn.Module | None = getattr(module, transformer_block_name, None)
+        if blocks is None:
+            continue
+        for layer_id, block in blocks.named_children():
+            # These blocks carry no stochastic masks that must replay during
+            # recomputation.
+            checkpointed_block = checkpoint_wrapper(block,
+                                                    context_fn=_selective_checkpointing_context_fn,
+                                                    preserve_rng_state=False)
+            blocks.register_module(layer_id, checkpointed_block)
+        applied = True
+    if not applied:
+        raise ValueError("Activation checkpointing is not applied successfully")
+    return module

@@ -1,4 +1,3 @@
-import collections
 from enum import Enum
 
 import torch
@@ -23,12 +22,20 @@ class CheckpointType(str, Enum):
     BLOCK_SKIP = "block_skip"
 
 
-_SELECTIVE_ACTIVATION_CHECKPOINTING_OPS = {
-    torch.ops.aten.mm.default,
-    torch.ops.aten._scaled_dot_product_efficient_attention.default,
-    torch.ops.aten._scaled_dot_product_flash_attention.default,
-    torch.ops._c10d_functional.reduce_scatter_tensor.default,
-}
+# Attention and collectives are the outputs worth keeping: recomputing attention
+# is quadratic in sequence length, and recomputing a collective re-issues
+# communication. Matched by name because the fastvideo ops below do not exist
+# until their backend module is imported, so naming them by identity here would
+# force every backend to load and still miss the env-gated FA4 ones.
+_SAVE_OP_PATTERNS = (
+    "_scaled_dot_product",  # aten SDPA: flash / efficient / cudnn / math
+    "flash_attn",  # fastvideo::_flash_attn_{default,cute,varlen,...}
+    "video_sparse_attn",  # VSA
+    "moba_attn",  # VMoBA
+    "sage_attn",  # SageAttention 2 / 3
+    "reduce_scatter",
+    "all_gather",
+)
 
 
 def apply_activation_checkpointing(module: torch.nn.Module,
@@ -37,7 +44,7 @@ def apply_activation_checkpointing(module: torch.nn.Module,
     if checkpointing_type == CheckpointType.FULL:
         module = _apply_activation_checkpointing_blocks(module)
     elif checkpointing_type == CheckpointType.OPS:
-        module = _apply_activation_checkpointing_ops(module, _SELECTIVE_ACTIVATION_CHECKPOINTING_OPS)
+        module = _apply_activation_checkpointing_ops(module)
     elif checkpointing_type == CheckpointType.BLOCK_SKIP:
         module = _apply_activation_checkpointing_blocks(module, n_layer)
     else:
@@ -63,24 +70,27 @@ def _apply_activation_checkpointing_blocks(module: torch.nn.Module, n_layer: int
     return module
 
 
-def _apply_activation_checkpointing_ops(module: torch.nn.Module, ops) -> torch.nn.Module:
+def _selective_checkpointing_context_fn():
     from torch.utils.checkpoint import (CheckpointPolicy, create_selective_checkpoint_contexts)
 
-    def _get_custom_policy(meta: dict[str, int]) -> CheckpointPolicy:
+    def _custom_policy(ctx, func, *args, **kwargs):
+        # OpOverload.name() is e.g. "aten::_scaled_dot_product_flash_attention".
+        to_save = any(pattern in func.name() for pattern in _SAVE_OP_PATTERNS)
+        return CheckpointPolicy.MUST_SAVE if to_save else CheckpointPolicy.PREFER_RECOMPUTE
 
-        def _custom_policy(ctx, func, *args, **kwargs):
-            mode = "recompute" if ctx.is_recompute else "forward"
-            mm_count_key = f"{mode}_mm_count"
-            if func == torch.ops.aten.mm.default:
-                meta[mm_count_key] += 1
-            # Saves output of all compute ops, except every second mm
-            to_save = func in ops and not (func == torch.ops.aten.mm.default and meta[mm_count_key] % 2 == 0)
-            return CheckpointPolicy.MUST_SAVE if to_save else CheckpointPolicy.PREFER_RECOMPUTE
+    return create_selective_checkpoint_contexts(_custom_policy)
 
-        return _custom_policy
 
-    def selective_checkpointing_context_fn():
-        meta: dict[str, int] = collections.defaultdict(int)
-        return create_selective_checkpoint_contexts(_get_custom_policy(meta))
-
-    return checkpoint_wrapper(module, context_fn=selective_checkpointing_context_fn, preserve_rng_state=False)
+def _apply_activation_checkpointing_ops(module: torch.nn.Module) -> torch.nn.Module:
+    applied = False
+    for transformer_block_name in TRANSFORMER_BLOCK_NAMES:
+        blocks: torch.nn.Module = getattr(module, transformer_block_name, None)
+        if blocks is None:
+            continue
+        for layer_id, block in blocks.named_children():
+            block = checkpoint_wrapper(block, context_fn=_selective_checkpointing_context_fn, preserve_rng_state=False)
+            blocks.register_module(layer_id, block)
+        applied = True
+    if not applied:
+        raise ValueError("Activation checkpointing is not applied successfully")
+    return module
