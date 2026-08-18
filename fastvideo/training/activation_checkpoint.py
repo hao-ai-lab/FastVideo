@@ -29,13 +29,16 @@ class CheckpointType(str, Enum):
 # force every backend to load and still miss the env-gated FA4 ones.
 _SAVE_OP_PATTERNS = (
     "_scaled_dot_product",  # aten SDPA: flash / efficient / cudnn / math
-    "flash_attn",  # fastvideo::_flash_attn_{default,cute,varlen,...}
-    "video_sparse_attn",  # VSA
-    "moba_attn",  # VMoBA
-    "sage_attn",  # SageAttention 2 / 3
-    "reduce_scatter",
-    "all_gather",
+    "flash_attn",  # fastvideo::_flash_attn_{default,cute,cute_varlen,no_pad}_forward
+    "block_sparse_attn",  # fastvideo_kernel::block_sparse_attn_{sm90,triton}, used by VSA
+    "reduce_scatter",  # _c10d_functional::reduce_scatter_tensor
+    "all_gather",  # _c10d_functional::all_gather_into_tensor
 )
+
+# Not covered, and not coverable: VMoBA routes through MixedAttention.apply, a
+# torch.autograd.Function rather than a dispatcher op, so a selective policy
+# never sees it. The same holds for the FA3 training path, which falls back to
+# flash_attn_func. Those backends get full recomputation under `ops`.
 
 
 def apply_activation_checkpointing(module: torch.nn.Module,

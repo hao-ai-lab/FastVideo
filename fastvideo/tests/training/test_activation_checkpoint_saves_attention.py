@@ -29,9 +29,10 @@ _MODULES = {
 N_BLOCKS, DIM = 4, 32
 CALLS: dict[str, int] = {}
 
-# Every attention op these models can dispatch, by the name OpOverload.name()
-# reports. A backend added without a matching pattern fails here rather than
-# silently costing full recomputation, which is the bug this file guards.
+# Every attention and collective op these models dispatch, as OpOverload.name()
+# reports it. These are transcribed from a live registry, not from module names:
+# VSA's op is fastvideo_kernel::block_sparse_attn_*, NOT video_sparse_attn, and
+# guessing the latter is exactly how a pattern ends up matching nothing.
 KNOWN_SAVE_OPS = [
     "aten::_scaled_dot_product_flash_attention",
     "aten::_scaled_dot_product_efficient_attention",
@@ -40,9 +41,8 @@ KNOWN_SAVE_OPS = [
     "fastvideo::_flash_attn_cute_forward",
     "fastvideo::_flash_attn_cute_varlen_forward",
     "fastvideo::_flash_attn_no_pad_forward",
-    "fastvideo::video_sparse_attn",
-    "fastvideo::moba_attn_varlen",
-    "fastvideo::sage_attn",
+    "fastvideo_kernel::block_sparse_attn_sm90",
+    "fastvideo_kernel::block_sparse_attn_triton",
     "_c10d_functional::reduce_scatter_tensor",
     "_c10d_functional::all_gather_into_tensor",
 ]
@@ -172,6 +172,18 @@ def _replaced_identity_wrap(module):
 @pytest.mark.parametrize("op_name", KNOWN_SAVE_OPS)
 def test_every_known_attention_and_collective_op_is_saved(ac, op_name: str) -> None:
     assert any(pattern in op_name for pattern in ac._SAVE_OP_PATTERNS)
+
+
+def test_no_pattern_matches_nothing(ac) -> None:
+    """A pattern covering no real op is a typo that silently disables retention.
+
+    Asserting the reverse direction is what catches it: "video_sparse_attn"
+    reads plausibly and matches no op that exists, so retention for VSA was
+    silently off until this check existed.
+    """
+    for pattern in ac._SAVE_OP_PATTERNS:
+        assert any(pattern in op_name for op_name in KNOWN_SAVE_OPS), \
+            f"pattern {pattern!r} matches no known op name"
 
 
 @pytest.mark.parametrize("op_name", KNOWN_RECOMPUTE_OPS)
