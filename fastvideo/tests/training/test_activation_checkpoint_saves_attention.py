@@ -138,7 +138,7 @@ def ac(request, monkeypatch):
     # The stub op stands in for a real attention kernel, so it has to be in the
     # save set for the behavioural tests. The membership tests above check the
     # shipped set directly and are unaffected.
-    monkeypatch.setattr(module, "_SAVE_OP_NAMES", module._SAVE_OP_NAMES | {MATCHING_NAME})
+    monkeypatch.setattr(module, "_SELECTIVE_ACTIVATION_CHECKPOINTING_OP_NAMES", module._SELECTIVE_ACTIVATION_CHECKPOINTING_OP_NAMES | {MATCHING_NAME})
     return module
 
 
@@ -178,12 +178,12 @@ def _replaced_identity_wrap(module):
 
 @pytest.mark.parametrize("op_name", KNOWN_SAVE_OPS)
 def test_every_known_attention_and_collective_op_is_saved(ac, op_name: str) -> None:
-    assert op_name in ac._SAVE_OP_NAMES
+    assert op_name in ac._SELECTIVE_ACTIVATION_CHECKPOINTING_OP_NAMES
 
 
 @pytest.mark.parametrize("op_name", KNOWN_RECOMPUTE_OPS)
 def test_ordinary_compute_is_recomputed(ac, op_name: str) -> None:
-    assert op_name not in ac._SAVE_OP_NAMES
+    assert op_name not in ac._SELECTIVE_ACTIVATION_CHECKPOINTING_OP_NAMES
 
 
 def test_full_recomputes_attention(ac) -> None:
