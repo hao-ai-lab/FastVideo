@@ -65,8 +65,8 @@ ARG FLASH_ATTN_WHEEL_RELEASE=https://github.com/mjun0812/flash-attention-prebuil
 ARG FLASH_ATTN_WHEEL_RELEASE_ARM64=https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.22
 
 # The prebuilt flash-attn wheel ships an FA4 `flash_attn.cute` built against the
-# cutlass-4.4 `cute.core.ThrMma` API, which crashes on the cutlass-dsl 4.5 that
-# flashinfer/quack pull in. After the wheel install we overlay this cutlass-4.5-safe
+# cutlass-4.4 `cute.core.ThrMma` API, which crashes on the CuTe DSL 4.6 that
+# flashinfer/quack pull in. After the wheel install we overlay this 4.6.0.dev0-compatible
 # upstream cute (flash-attn-4) so the image runs FA4 instead of the FA2 fallback.
 ARG FA4_CUTE_REF=82d6441eec5d4dfec120153db2c0145ae855a083
 
@@ -169,18 +169,24 @@ RUN --mount=type=cache,target=/opt/uv/cache \
 # flash_attn/__init__.py), so FA2/varlen/bert_padding stay from the install above;
 # rmtree clears the wheel's stale cute files first to avoid an install conflict.
 # Then verify both survive so a broken overlay fails the build instead of shipping
-# an FA2-less image. x86 only: the FA4 stack (quack-kernels etc.) is unvalidated on
-# arm64 / GB10 (sm_121), so there we skip the overlay; FA4 is opt-in
-# (FASTVIDEO_FA4=1) and errors if set without the overlay, so leave it unset on
-# arm64 and the image runs FA3/FA2 as usual.
+# an FA2-less image. CUDA 13 selects the matching runtime extra on both amd64 and
+# arm64 (validated on GB200). CUDA 12.6 amd64 keeps the bare/default runtime;
+# CUDA 12.6 arm64 remains unvalidated and skips the overlay. FA4 stays opt-in, so
+# installing it does not auto-enable the backend on GB10 (sm_121).
 RUN --mount=type=cache,target=/opt/uv/cache \
     source $HOME/.local/bin/env && \
     source /opt/venv/bin/activate && \
-    if [ "${TARGETARCH}" = "arm64" ]; then \
-        echo "Skipping FA4 cute overlay on arm64 (FA4 stack unvalidated there; do not set FASTVIDEO_FA4)"; \
+    if [ "${UV_TORCH_BACKEND}" = "cu130" ]; then \
+        FA4_PACKAGE="flash-attn-4[cu13]"; \
+    elif [ "${TARGETARCH}" = "arm64" ]; then \
+        echo "Skipping FA4 cute overlay on CUDA 12.6 arm64 (do not set FASTVIDEO_FA4)"; \
+        FA4_PACKAGE=""; \
     else \
+        FA4_PACKAGE="flash-attn-4"; \
+    fi && \
+    if [ -n "${FA4_PACKAGE}" ]; then \
         python -c "import glob, shutil; [shutil.rmtree(d, ignore_errors=True) for d in glob.glob('/opt/venv/lib/python*/site-packages/flash_attn/cute')]" && \
-        uv pip install "flash-attn-4 @ git+https://github.com/Dao-AILab/flash-attention.git@${FA4_CUTE_REF}#subdirectory=flash_attn/cute" && \
+        uv pip install "${FA4_PACKAGE} @ git+https://github.com/Dao-AILab/flash-attention.git@${FA4_CUTE_REF}#subdirectory=flash_attn/cute" && \
         python -c "import flash_attn; assert hasattr(flash_attn, 'flash_attn_func'), 'FA2 was clobbered by the cute overlay'; import flash_attn.cute; print('FA2 + FA4 cute OK')"; \
     fi
 
