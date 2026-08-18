@@ -48,9 +48,9 @@ KNOWN_SAVE_OPS = [
 ]
 
 # aten::mm is the one op the replaced identity set named that is deliberately
-# dropped: every Linear here carries a bias so F.linear emits addmm and the
-# entry never fired, and retaining matmuls costs far more than it saves at
-# video sequence lengths.
+# dropped. Retaining every second matmul is the stock torchtitan recipe, sized
+# for LLM sequence lengths; measured on MiniMax-H3 at 37,296 tokens it costs
+# 2.77 GiB per block -- ~138 GiB across 50 blocks -- to buy about 1%.
 KNOWN_RECOMPUTE_OPS = ["aten::mm", "aten::addmm", "aten::native_layer_norm", "aten::silu"]
 
 
@@ -103,8 +103,9 @@ class Block(nn.Module):
 
     def __init__(self, dim: int, op) -> None:
         super().__init__()
-        # bias=True, like every Linear in a Wan block -- this is what made the
-        # replaced policy's aten.mm.default entry never fire.
+        # bias=True, like every Linear in a Wan block, so F.linear emits addmm
+        # and the replaced policy's aten.mm entry never fired there. H3's
+        # attention projections are bias-free and did emit mm.
         self.qkv, self.o, self.op = nn.Linear(dim, 3 * dim), nn.Linear(dim, dim), op
 
     def forward(self, x):
