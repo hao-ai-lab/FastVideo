@@ -126,7 +126,7 @@ imagebind = { git = "https://github.com/facebookresearch/ImageBind.git", rev = "
 # back at 4.5.x breaks the CuTe kernels at JIT time, not at import
 # (see fastvideo-kernel/README.md).
 # torch.compile support comes from FastVideo's own custom_op wrappers.
-flash-attn-4 = { git = "https://github.com/Dao-AILab/flash-attention.git", rev = "82d6441eec5d4dfec120153db2c0145ae855a083", subdirectory = "flash_attn/cute" }
+flash-attn-4 = { git = "https://github.com/Dao-AILab/flash-attention.git", rev = "14c377950125c70b7a9dabf9c561fca53715ac7d", subdirectory = "flash_attn/cute" }
 
 [project.optional-dependencies]
 

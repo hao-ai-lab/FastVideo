@@ -5,14 +5,14 @@ FA4's forward and backward ``BlockSparseTensorsTorch`` representations.
 FA4's public ``flash_attn_func`` owns the forward/backward autograd bridge.
 
 Both [B, H, S, D] (BHSD) and [B, S, H, D] (BSHD) entrypoints are provided.
-The BSHD variant is preferred from VSA-256 callers to avoid layout
+The BSHD variant is preferred from VSA-128/256 callers to avoid layout
 round-trips on the hot path.
 
 The FA4 CuTe block-sparse kernel (``flash_attn.cute`` with
 ``block_sparsity``) is an *optional* dependency: it is imported lazily and
-only exercised when the VSA-256 CuTe fastpath is explicitly selected
-(``FASTVIDEO_VSA_CUTEDSL=1``). The default VSA-256 path is Triton and does
-not require it. Also needs ``nvidia-cutlass-dsl`` and ``quack-kernels``.
+only exercised when the VSA-128/256 CuTe fastpath is explicitly selected
+(``FASTVIDEO_VSA_CUTEDSL=1``). The default path is Triton and does not require
+it. Also needs ``nvidia-cutlass-dsl`` and ``quack-kernels``.
 """
 
 from __future__ import annotations
@@ -22,10 +22,10 @@ from typing import Tuple
 
 import torch
 
-_FA4_IMPORT_HINT = ("VSA-256 CuTe fastpath requires a FlashAttention-4 CuTe build that "
+_FA4_IMPORT_HINT = ("VSA-128/256 CuTe fastpath requires a FlashAttention-4 CuTe build that "
                     "provides `flash_attn.cute` with block-sparsity support (plus "
                     "`nvidia-cutlass-dsl` and `quack-kernels`). This is an optional "
-                    "dependency; the default VSA-256 path is Triton. Install the FA4 CuTe "
+                    "dependency; the default path is Triton. Install the FA4 CuTe "
                     "build and set FASTVIDEO_VSA_CUTEDSL=1 to enable the CuTe fastpath.")
 
 
@@ -39,14 +39,39 @@ def _load_fa4_cute():
     """
     try:
         from flash_attn.cute.block_sparsity import BlockSparseTensorsTorch
-        from flash_attn.cute.interface import flash_attn_func
+        from flash_attn.cute.interface import (
+            _flash_attn_bwd,
+            _flash_attn_fwd,
+            flash_attn_func,
+        )
     except ImportError as exc:  # pragma: no cover - optional dependency
         raise ImportError(_FA4_IMPORT_HINT) from exc
-    return BlockSparseTensorsTorch, flash_attn_func
+    return BlockSparseTensorsTorch, flash_attn_func, _flash_attn_fwd, _flash_attn_bwd
 
 
 # FA4's physical Q tile size; KV block size comes from the VSA caller.
 _FA4_Q_BLOCK_SIZE = 128
+
+
+class _SingleQStageLength(int):
+    """Keep the real length while selecting FA4's one-stage Q128 path.
+
+    On sm_100 FA4 derives ``q_stage`` from ``max_seqlen_q > tile_m``. Its
+    kernel supports one 128-token Q stage, but the fixed-length public wrapper
+    does not expose that choice. VSA-128 must select it explicitly; otherwise
+    adjacent logical Q blocks are merged into a 256-token sparse block.
+    """
+
+    def __mul__(self, other):
+        return type(self)(int(self) * int(other))
+
+    def __rmul__(self, other):
+        return type(self)(int(other) * int(self))
+
+    def __gt__(self, other):
+        if int(other) == _FA4_Q_BLOCK_SIZE:
+            return False
+        return int(self) > int(other)
 
 
 def _map_to_index(block_map: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -143,6 +168,7 @@ def _build_sparse_tensors(
     q_block_size: int,
     kv_block_size: int,
     need_backward: bool,
+    force_q_sparse_block_size: int | None = None,
 ) -> Tuple[object, object | None]:
     """Build the Q-owned forward and KV-owned backward sparse metadata.
 
@@ -152,12 +178,17 @@ def _build_sparse_tensors(
     when nothing requires grad is pure overhead (~80 MiB per call at Wan-14B
     720p shape).
     """
-    BlockSparseTensorsTorch, _ = _load_fa4_cute()
-    q_sparse_candidate = _choose_q_sparse_block_size(q_len)
-    q_sparse_block_size = max(
-        q_block_size,
-        ((q_sparse_candidate + q_block_size - 1) // q_block_size) * q_block_size,
-    )
+    BlockSparseTensorsTorch, _, _, _ = _load_fa4_cute()
+    if force_q_sparse_block_size is None:
+        q_sparse_candidate = _choose_q_sparse_block_size(q_len)
+        q_sparse_block_size = max(
+            q_block_size,
+            ((q_sparse_candidate + q_block_size - 1) // q_block_size) * q_block_size,
+        )
+    else:
+        q_sparse_block_size = force_q_sparse_block_size
+        if q_sparse_block_size < q_block_size or q_sparse_block_size % q_block_size != 0:
+            raise ValueError("force_q_sparse_block_size must be a positive multiple of q_block_size")
     sparse_map = _aggregate_q_block_map(
         block_map,
         q_sparse_block_size=q_sparse_block_size,
@@ -195,6 +226,102 @@ def _build_sparse_tensors(
     return forward_sparse_tensors, backward_sparse_tensors
 
 
+def _cute_attention_q128_forward(
+    q_bshd: torch.Tensor,
+    k_bshd: torch.Tensor,
+    v_bshd: torch.Tensor,
+    block_map: torch.Tensor,
+    variable_block_sizes: torch.Tensor,
+    *,
+    need_backward: bool,
+) -> Tuple[torch.Tensor, torch.Tensor, object | None]:
+    """Run FA4 with one physical Q stage per logical VSA-128 block."""
+    _, _, flash_attn_fwd, _ = _load_fa4_cute()
+    forward_sparse_tensors, backward_sparse_tensors = _build_sparse_tensors(
+        block_map,
+        variable_block_sizes,
+        q_len=q_bshd.shape[1],
+        q_block_size=_FA4_Q_BLOCK_SIZE,
+        kv_block_size=_FA4_Q_BLOCK_SIZE,
+        need_backward=need_backward,
+        force_q_sparse_block_size=_FA4_Q_BLOCK_SIZE,
+    )
+    out, lse = flash_attn_fwd(
+        q_bshd,
+        k_bshd,
+        v_bshd,
+        tile_mn=(_FA4_Q_BLOCK_SIZE, _FA4_Q_BLOCK_SIZE),
+        max_seqlen_q=_SingleQStageLength(q_bshd.shape[1]),
+        mask_mod=_build_vbs_mask_mod(_FA4_Q_BLOCK_SIZE),
+        block_sparse_tensors=forward_sparse_tensors,
+        aux_tensors=[variable_block_sizes],
+        causal=False,
+        return_lse=True,
+    )[:2]
+    return out, lse, backward_sparse_tensors
+
+
+class _CuteAttentionQ128(torch.autograd.Function):
+
+    @staticmethod
+    def forward(ctx, q_bshd, k_bshd, v_bshd, block_map, variable_block_sizes):
+        out, lse, backward_sparse_tensors = _cute_attention_q128_forward(
+            q_bshd,
+            k_bshd,
+            v_bshd,
+            block_map,
+            variable_block_sizes,
+            need_backward=True,
+        )
+        ctx.save_for_backward(q_bshd, k_bshd, v_bshd, out, lse, variable_block_sizes)
+        ctx.backward_sparse_tensors = backward_sparse_tensors
+        ctx.mark_non_differentiable(lse)
+        ctx.set_materialize_grads(False)
+        return out, lse
+
+    @staticmethod
+    def backward(ctx, grad_out, grad_lse):
+        del grad_lse
+        q_bshd, k_bshd, v_bshd, out, lse, variable_block_sizes = ctx.saved_tensors
+        if grad_out is None:
+            grad_out = torch.zeros_like(out)
+        _, _, _, flash_attn_bwd = _load_fa4_cute()
+        dq, dk, dv = flash_attn_bwd(
+            q_bshd,
+            k_bshd,
+            v_bshd,
+            out,
+            grad_out.contiguous(),
+            lse,
+            softmax_scale=q_bshd.shape[-1]**-0.5,
+            mask_mod=_build_vbs_mask_mod(_FA4_Q_BLOCK_SIZE),
+            aux_tensors=[variable_block_sizes],
+            block_sparse_tensors=ctx.backward_sparse_tensors,
+        )
+        return dq, dk, dv, None, None
+
+
+def _cute_attention_q128(
+    q_bshd: torch.Tensor,
+    k_bshd: torch.Tensor,
+    v_bshd: torch.Tensor,
+    block_map: torch.Tensor,
+    variable_block_sizes: torch.Tensor,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    need_backward = torch.is_grad_enabled() and any(t.requires_grad for t in (q_bshd, k_bshd, v_bshd))
+    if need_backward:
+        return _CuteAttentionQ128.apply(q_bshd, k_bshd, v_bshd, block_map, variable_block_sizes)
+    out, lse, _ = _cute_attention_q128_forward(
+        q_bshd,
+        k_bshd,
+        v_bshd,
+        block_map,
+        variable_block_sizes,
+        need_backward=False,
+    )
+    return out, lse
+
+
 def _cute_attention(
     q_bshd: torch.Tensor,
     k_bshd: torch.Tensor,
@@ -203,9 +330,11 @@ def _cute_attention(
     variable_block_sizes: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Run FA4's autograd-enabled block-sparse attention with BSHD inputs."""
-    _, flash_attn_func = _load_fa4_cute()
+    _, flash_attn_func, _, _ = _load_fa4_cute()
     q_block_size = q_bshd.shape[1] // block_map.shape[2]
     kv_block_size = k_bshd.shape[1] // block_map.shape[3]
+    if q_block_size == kv_block_size == _FA4_Q_BLOCK_SIZE:
+        return _cute_attention_q128(q_bshd, k_bshd, v_bshd, block_map, variable_block_sizes)
     need_backward = torch.is_grad_enabled() and any(t.requires_grad for t in (q_bshd, k_bshd, v_bshd))
     forward_sparse_tensors, backward_sparse_tensors = _build_sparse_tensors(
         block_map,

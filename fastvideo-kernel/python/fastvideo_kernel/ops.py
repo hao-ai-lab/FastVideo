@@ -2,6 +2,8 @@ import math
 import torch
 from .block_sparse_attn import block_sparse_attn
 from .block_sparse_attn_256 import (
+    block_sparse_attn_128,
+    block_sparse_attn_128_bshd,
     block_sparse_attn_256,
     block_sparse_attn_256_bshd,
 )
@@ -74,12 +76,13 @@ def video_sparse_attn(
 
     Dispatches the sparse branch by ``block_elements = prod(block_size)``:
     - 64  -> existing TK/Triton path (see ``block_sparse_attn_from_indices``).
+    - 128 -> Triton fallback or CuTe FA4 block-sparse attention.
     - 256 -> CuTe FA4 block-sparse attention (see ``block_sparse_attn_256``).
 
     Backend overrides:
     - ``FASTVIDEO_VSA_TRITON=1`` forces Triton in either path.
     - ``FASTVIDEO_VSA_TK=1`` prefers the sm_90 TK kernel in the 64-block path.
-    - ``FASTVIDEO_VSA_CUTEDSL=1`` prefers CuTe in the 256-block path.
+    - ``FASTVIDEO_VSA_CUTEDSL=1`` prefers CuTe in the 128/256-block paths.
     """
     if isinstance(block_size, int):
         block_size = (block_size, block_size, block_size)
@@ -119,8 +122,9 @@ def video_sparse_attn(
     # Sparse branch (fused Triton topk mask)
     mask = fused_topk_mask(scores, topk)
 
-    if block_elements == 256:
-        out_s = block_sparse_attn_256(q, k, v, mask, variable_block_sizes)[0]
+    if block_elements in (128, 256):
+        attention = block_sparse_attn_128 if block_elements == 128 else block_sparse_attn_256
+        out_s = attention(q, k, v, mask, variable_block_sizes)[0]
     else:
         out_s = block_sparse_attn(q, k, v, mask, variable_block_sizes)[0]
 
@@ -142,14 +146,14 @@ def video_sparse_attn_bshd(
     """VSA entrypoint for [B, S, H, D] tensors.
 
     Avoids the BHSD<->BSHD round-trip that ``video_sparse_attn`` performs on
-    the CuTe 256-block path; the 64-block path still expects BHSD and is not
+    the CuTe 128/256-block paths; the 64-block path still expects BHSD and is not
     supported here.
     """
     if isinstance(block_size, int):
         block_size = (block_size, block_size, block_size)
     block_elements = block_size[0] * block_size[1] * block_size[2]
-    if block_elements != 256:
-        raise ValueError("video_sparse_attn_bshd is only defined for block_elements=256 "
+    if block_elements not in (128, 256):
+        raise ValueError("video_sparse_attn_bshd is only defined for block_elements=128 or 256 "
                          f"(got {block_elements}); use video_sparse_attn for the 64-block path.")
 
     batch, q_seq_len, heads, dim = q.shape
@@ -191,7 +195,8 @@ def video_sparse_attn_bshd(
 
     # Sparse branch (fused Triton topk mask + CuTe BSHD).
     mask = fused_topk_mask(scores, topk)
-    out_s, _ = block_sparse_attn_256_bshd(q, k, v, mask, variable_block_sizes)
+    attention = block_sparse_attn_128_bshd if block_elements == 128 else block_sparse_attn_256_bshd
+    out_s, _ = attention(q, k, v, mask, variable_block_sizes)
 
     # Out-of-place: ``out_s`` is the tensor FA4's autograd node saved for its
     # backward, so mutating it in place invalidates the graph.

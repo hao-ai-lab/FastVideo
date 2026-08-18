@@ -4,7 +4,7 @@ Benchmark VSA *wrapper* performance (forward + backward) and report TFLOPs.
 
 This script benchmarks the autograd-enabled wrappers:
   - 64-token TK/Triton: fastvideo_kernel.block_sparse_attn.block_sparse_attn
-  - 256-token Triton/CuTe: fastvideo_kernel.block_sparse_attn_256.block_sparse_attn_256
+  - 128/256-token Triton/CuTe: fastvideo_kernel.block_sparse_attn_256
 
 So measured time includes wrapper overhead (map->index conversion, dispatch) plus kernel time.
 """
@@ -53,13 +53,13 @@ def parse_arguments() -> argparse.Namespace:
     p.add_argument("--rep", type=int, default=20)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--dtype", type=str, default="bf16", choices=["bf16", "fp16"])
-    p.add_argument("--block_size", type=int, default=64, choices=[64, 256])
+    p.add_argument("--block_size", type=int, default=64, choices=[64, 128, 256])
     p.add_argument("--force_triton",
                    action="store_true",
                    help="Force wrapper to use Triton path (if supported by shapes).")
     p.add_argument("--use_cute",
                    action="store_true",
-                   help="Use the optional FA4 CuTe forward/backward path (requires --block_size 256).")
+                   help="Use the optional FA4 CuTe forward/backward path (requires --block_size 128 or 256).")
     return p.parse_args()
 
 
@@ -91,8 +91,8 @@ def bench_ms(fn: Callable[[], object], warmup: int, rep: int) -> float:
 
 
 def _configure_backend(args: argparse.Namespace) -> None:
-    if args.use_cute and args.block_size != 256:
-        raise ValueError("--use_cute requires --block_size 256")
+    if args.use_cute and args.block_size not in (128, 256):
+        raise ValueError("--use_cute requires --block_size 128 or 256")
     if args.use_cute and args.force_triton:
         raise ValueError("--use_cute and --force_triton are mutually exclusive")
 
@@ -113,11 +113,15 @@ def main() -> None:
     dtype = torch.bfloat16 if args.dtype == "bf16" else torch.float16
 
     from fastvideo_kernel.block_sparse_attn import block_sparse_attn
-    from fastvideo_kernel.block_sparse_attn_256 import block_sparse_attn_256
+    from fastvideo_kernel.block_sparse_attn_256 import block_sparse_attn_128, block_sparse_attn_256
 
     bs, h, d = args.batch_size, args.num_heads, args.head_dim
     block_size = args.block_size
-    attention = block_sparse_attn_256 if block_size == 256 else block_sparse_attn
+    attention = {
+        64: block_sparse_attn,
+        128: block_sparse_attn_128,
+        256: block_sparse_attn_256,
+    }[block_size]
     kv_seq_lens = args.kv_seq_lens
     if kv_seq_lens is None:
         kv_seq_lens = args.q_seq_lens

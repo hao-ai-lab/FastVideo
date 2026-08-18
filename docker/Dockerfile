@@ -68,7 +68,7 @@ ARG FLASH_ATTN_WHEEL_RELEASE_ARM64=https://github.com/mjun0812/flash-attention-p
 # cutlass-4.4 `cute.core.ThrMma` API, which crashes on the cutlass-dsl 4.5 that
 # flashinfer/quack pull in. After the wheel install we overlay this cutlass-4.5-safe
 # upstream cute (flash-attn-4) so the image runs FA4 instead of the FA2 fallback.
-ARG FA4_CUTE_REF=82d6441eec5d4dfec120153db2c0145ae855a083
+ARG FA4_CUTE_REF=14c377950125c70b7a9dabf9c561fca53715ac7d
 
 # Provided automatically by BuildKit/buildx (e.g. "amd64" / "arm64") and used to
 # select the prebuilt flash-attn wheel. Empty under a plain `docker build` without
