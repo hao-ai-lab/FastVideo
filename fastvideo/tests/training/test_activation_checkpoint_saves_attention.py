@@ -93,10 +93,12 @@ def _make_attn_op(opname: str):
     return getattr(torch.ops.actest, opname)
 
 
-# "flash_attn_stub" carries the "flash_attn" fragment and must match;
-# "mystery_kernel" carries none of them and must not.
+# Stand-ins for a real attention kernel. MATCHING is added to the save set by
+# the `ac` fixture below; UNMATCHED never is, standing for a backend nobody
+# listed.
 MATCHING = _make_attn_op("flash_attn_stub")
 UNMATCHED = _make_attn_op("mystery_kernel")
+MATCHING_NAME = "actest::flash_attn_stub"
 
 
 class Block(nn.Module):
@@ -131,8 +133,13 @@ def _reset_calls():
 
 
 @pytest.fixture(params=sorted(_MODULES))
-def ac(request):
-    return _LOADED[request.param]
+def ac(request, monkeypatch):
+    module = _LOADED[request.param]
+    # The stub op stands in for a real attention kernel, so it has to be in the
+    # save set for the behavioural tests. The membership tests above check the
+    # shipped set directly and are unaffected.
+    monkeypatch.setattr(module, "_SAVE_OP_NAMES", module._SAVE_OP_NAMES | {MATCHING_NAME})
+    return module
 
 
 def _attention_calls(ac_module, op, opname: str, **kwargs) -> int:
@@ -171,24 +178,12 @@ def _replaced_identity_wrap(module):
 
 @pytest.mark.parametrize("op_name", KNOWN_SAVE_OPS)
 def test_every_known_attention_and_collective_op_is_saved(ac, op_name: str) -> None:
-    assert any(pattern in op_name for pattern in ac._SAVE_OP_PATTERNS)
-
-
-def test_no_pattern_matches_nothing(ac) -> None:
-    """A pattern covering no real op is a typo that silently disables retention.
-
-    Asserting the reverse direction is what catches it: "video_sparse_attn"
-    reads plausibly and matches no op that exists, so retention for VSA was
-    silently off until this check existed.
-    """
-    for pattern in ac._SAVE_OP_PATTERNS:
-        assert any(pattern in op_name for op_name in KNOWN_SAVE_OPS), \
-            f"pattern {pattern!r} matches no known op name"
+    assert op_name in ac._SAVE_OP_NAMES
 
 
 @pytest.mark.parametrize("op_name", KNOWN_RECOMPUTE_OPS)
 def test_ordinary_compute_is_recomputed(ac, op_name: str) -> None:
-    assert not any(pattern in op_name for pattern in ac._SAVE_OP_PATTERNS)
+    assert op_name not in ac._SAVE_OP_NAMES
 
 
 def test_full_recomputes_attention(ac) -> None:

@@ -24,21 +24,39 @@ class CheckpointType(str, Enum):
 
 # Attention and collectives are the outputs worth keeping: recomputing attention
 # is quadratic in sequence length, and recomputing a collective re-issues
-# communication. Matched by name because the fastvideo ops below do not exist
-# until their backend module is imported, so naming them by identity here would
-# force every backend to load and still miss the env-gated FA4 ones.
-_SAVE_OP_PATTERNS = (
-    "_scaled_dot_product",  # aten SDPA: flash / efficient / cudnn / math
-    "flash_attn",  # fastvideo::_flash_attn_{default,cute,cute_varlen,no_pad}_forward
-    "block_sparse_attn",  # fastvideo_kernel::block_sparse_attn_{sm90,triton}, used by VSA
-    "reduce_scatter",  # _c10d_functional::reduce_scatter_tensor
-    "all_gather",  # _c10d_functional::all_gather_into_tensor
-)
+# communication.
+#
+# Compared by name rather than against the op objects themselves: the fastvideo
+# ops register only when their backend module is imported, so referencing them
+# as `torch.ops.fastvideo...` here would raise AttributeError on any build that
+# has not loaded that backend. Names are plain strings and always comparable.
+_SAVE_OP_NAMES = frozenset({
+    # aten SDPA, dispatched by the TORCH_SDPA backend.
+    "aten::_scaled_dot_product_flash_attention",
+    "aten::_scaled_dot_product_efficient_attention",
+    "aten::_scaled_dot_product_cudnn_attention",
+    "aten::_scaled_dot_product_attention_math",
+    # FlashAttention backends. FA4 (cute) registers only under FASTVIDEO_FA4=1.
+    "fastvideo::_flash_attn_default_forward",
+    "fastvideo::_flash_attn_cute_forward",
+    "fastvideo::_flash_attn_cute_varlen_forward",
+    "fastvideo::_flash_attn_cute_fp4_forward",
+    "fastvideo::_flash_attn_no_pad_forward",
+    "fastvideo::_flash_attn_varlen_qk_no_pad_forward",
+    # Video Sparse Attention. Note the op is block_sparse_attn, not
+    # video_sparse_attn -- the latter is the Python entry point, not a
+    # dispatcher op, and naming it here would match nothing.
+    "fastvideo_kernel::block_sparse_attn_sm90",
+    "fastvideo_kernel::block_sparse_attn_triton",
+    # FSDP collectives.
+    "_c10d_functional::reduce_scatter_tensor",
+    "_c10d_functional::all_gather_into_tensor",
+})
 
-# Not covered, and not coverable: VMoBA routes through MixedAttention.apply, a
-# torch.autograd.Function rather than a dispatcher op, so a selective policy
-# never sees it. The same holds for the FA3 training path, which falls back to
-# flash_attn_func. Those backends get full recomputation under `ops`.
+# Not listed because no policy can reach them: VMoBA routes through
+# MixedAttention.apply and the FA3 training path through flash_attn_func, both
+# torch.autograd.Function rather than dispatcher ops, so selective checkpointing
+# never sees them. Those backends get full recomputation under `ops`.
 
 
 def apply_activation_checkpointing(module: torch.nn.Module,
@@ -80,7 +98,7 @@ def _apply_activation_checkpointing_ops(module: torch.nn.Module) -> torch.nn.Mod
 
         def _custom_policy(ctx, func, *args, **kwargs):
             # OpOverload.name() is e.g. "aten::_scaled_dot_product_flash_attention".
-            to_save = any(pattern in func.name() for pattern in _SAVE_OP_PATTERNS)
+            to_save = func.name() in _SAVE_OP_NAMES
             return CheckpointPolicy.MUST_SAVE if to_save else CheckpointPolicy.PREFER_RECOMPUTE
 
         return create_selective_checkpoint_contexts(_custom_policy)
