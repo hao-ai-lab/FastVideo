@@ -635,14 +635,17 @@ class GroupCoordinator:
         return self.device_communicator.recv(size, dtype, src)
 
     def destroy(self) -> None:
+        # The device communicator is torn down first: its teardown may itself be
+        # collective (the fused Ulysses all-to-all closes IPC peer mappings
+        # group-wide), so the process groups must still be alive for it.
+        if self.device_communicator is not None:
+            self.device_communicator.destroy()
         if self.device_group is not None:
             torch.distributed.destroy_process_group(self.device_group)
             self.device_group = None
         if self.cpu_group is not None:
             torch.distributed.destroy_process_group(self.cpu_group)
             self.cpu_group = None
-        if self.device_communicator is not None:
-            self.device_communicator.destroy()
         if self.mq_broadcaster is not None:
             self.mq_broadcaster = None
 

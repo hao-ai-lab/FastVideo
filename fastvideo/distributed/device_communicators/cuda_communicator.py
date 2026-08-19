@@ -5,6 +5,7 @@ import torch
 from torch.distributed import ProcessGroup
 
 from fastvideo.distributed.device_communicators.base_device_communicator import (DeviceCommunicatorBase)
+from fastvideo.distributed.device_communicators.ulysses_a2a import maybe_create_helper
 
 
 class CudaCommunicator(DeviceCommunicatorBase):
@@ -25,6 +26,10 @@ class CudaCommunicator(DeviceCommunicatorBase):
                 device=self.device,
             )
 
+        # Optional fused Ulysses all-to-all. Cheap and non-collective to create;
+        # it arms itself lazily on first use, once an operand shape is known.
+        self.ulysses_a2a = maybe_create_helper(self.device_group, self.world_size, self.device)
+
     def all_reduce(self, input_, op: torch.distributed.ReduceOp | None = None):
         pynccl_comm = self.pynccl_comm
         assert pynccl_comm is not None
@@ -37,6 +42,20 @@ class CudaCommunicator(DeviceCommunicatorBase):
             out = input_.clone()
             torch.distributed.all_reduce(out, group=self.device_group, op=op)
         return out
+
+    def all_to_all_4D(self, input_: torch.Tensor, scatter_dim: int = 2, gather_dim: int = 1) -> torch.Tensor:
+        """Sequence-parallel all-to-all, preferring the fused NVLink kernel.
+
+        The helper returns None whenever the fused path does not apply (wrong
+        topology, world size, dtype, shape, or graph capture), in which case
+        this is exactly the inherited NCCL implementation. Both produce
+        byte-identical results.
+        """
+        if self.ulysses_a2a is not None:
+            output = self.ulysses_a2a.try_all_to_all_4D(input_, scatter_dim, gather_dim)
+            if output is not None:
+                return output
+        return super().all_to_all_4D(input_, scatter_dim, gather_dim)
 
     def send(self, tensor: torch.Tensor, dst: int | None = None) -> None:
         """Sends a tensor to the destination rank in a non-blocking way"""
@@ -65,5 +84,11 @@ class CudaCommunicator(DeviceCommunicatorBase):
         return tensor
 
     def destroy(self) -> None:
+        if self.ulysses_a2a is not None:
+            # Collective while armed; reached by every rank via
+            # GroupCoordinator.destroy(). Must run before the process group is
+            # torn down, which is why it is first.
+            self.ulysses_a2a.close()
+            self.ulysses_a2a = None
         if self.pynccl_comm is not None:
             self.pynccl_comm = None
