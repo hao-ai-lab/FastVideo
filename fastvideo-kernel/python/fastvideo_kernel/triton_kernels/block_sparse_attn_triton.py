@@ -237,7 +237,12 @@ def _attn_bwd_dkdv(
         # Load m before computing qk to reduce pipeline stall.
         offs_m = start_m + block_sparse_offset + tl.arange(0, BLOCK_M1)
         m = tl.load(M + offs_m)
-        qkT = tl.dot(k, qT)
+        # Recompute logits exactly as the forward does: raw bf16 operands into
+        # the dot, fp32 scale after accumulation. A bf16 pre-scaled K perturbs
+        # the recomputed logits relative to the saved M by an error
+        # proportional to |logit|, which exp2 amplifies into arbitrarily wrong
+        # probabilities at large activations.
+        qkT = tl.dot(k, qT) * (sm_scale * 1.4426950408889634)
         pT = tl.math.exp2(qkT - m[None, :])
         mask = tl.arange(0, BLOCK_N1) < block_size
         pT = tl.where(mask[:, None], pT, 0.0)
@@ -268,6 +273,7 @@ def _attn_bwd_dq(
         do,
         m,
         D,
+        sm_scale,
         # shared by Q/K/V/DO.
         q2k_index,
         q2k_num,
@@ -315,7 +321,7 @@ def _attn_bwd_dq(
         block_sparse_offset = (kv_idx * 2 + half) * step_n * stride_tok
         kT = tl.load(kT_ptrs + block_sparse_offset)
         vT = tl.load(vT_ptrs + block_sparse_offset)
-        qk = tl.dot(q, kT)
+        qk = tl.dot(q, kT) * (sm_scale * 1.4426950408889634)
         p = tl.math.exp2(qk - m)
         offs_in_block = half * step_n + tl.arange(0, BLOCK_N2)
         mask = offs_in_block < block_size
@@ -324,8 +330,7 @@ def _attn_bwd_dq(
         dp = tl.dot(do, vT).to(tl.float32)
         ds = p * (dp - Di[:, None])
         ds = ds.to(tl.bfloat16)
-        # Compute dQ.
-        # NOTE: We need to de-scale dq in the end, because kT was pre-scaled.
+        # Compute dQ (kT is raw; the caller applies sm_scale once at the end).
         dq += tl.dot(ds, tl.trans(kT))
         # Increment pointers.
     return dq
@@ -453,6 +458,7 @@ def _attn_bwd(
         do,
         m,
         D,  #
+        sm_scale,
         q2k_index,
         q2k_num,
         max_kv_blks,
@@ -470,7 +476,7 @@ def _attn_bwd(
     )
     # Write back dQ.
     dq_ptrs = DQ + offs_m[:, None] * stride_tok + offs_k[None, :] * stride_d
-    dq *= LN2
+    dq *= sm_scale
     tl.store(dq_ptrs, dq)
 
 
@@ -591,6 +597,7 @@ def _attn_bwd_dq_kernel(
         Q,
         K,
         V,
+        sm_scale,
         DO,  #
         DQ,
         M,
@@ -663,6 +670,7 @@ def _attn_bwd_dq_kernel(
         do,
         m,
         D,
+        sm_scale,
         q2k_index,
         q2k_num,
         max_kv_blks,
@@ -680,7 +688,7 @@ def _attn_bwd_dq_kernel(
     )
 
     dq_ptrs = DQ + offs_m[:, None] * stride_tok + offs_k[None, :] * stride_d
-    dq_acc *= LN2
+    dq_acc *= sm_scale
     tl.store(dq_ptrs, dq_acc)
 
 
@@ -748,9 +756,11 @@ def triton_block_sparse_attn_backward(do, q, k, v, o, M, q2k_index, q2k_num, k2q
     dv = torch.empty_like(v)
     BATCH, N_HEAD = q.shape[:2]
     BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 32, 64, 64, 32
-    RCP_LN2 = 1.4426950408889634  # = 1.0 / ln(2)
+    # K stays raw: the backward kernels apply sm_scale in fp32 after the dot,
+    # matching the forward's rounding exactly. (A bf16 pre-scaled K perturbs
+    # the recomputed logits vs the saved M; exp2 turns that into unboundedly
+    # wrong probabilities at large activations.)
     arg_k = k
-    arg_k = arg_k * (sm_scale * RCP_LN2)
     PRE_BLOCK = 64
     assert Tq % PRE_BLOCK == 0
     pre_grid = (Tq // PRE_BLOCK, BATCH * N_HEAD)
@@ -813,6 +823,7 @@ def triton_block_sparse_attn_backward(do, q, k, v, o, M, q2k_index, q2k_num, k2q
         q,
         arg_k,
         v,
+        sm_scale,
         do,
         dq,
         M,
