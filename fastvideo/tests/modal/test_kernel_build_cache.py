@@ -155,6 +155,27 @@ def test_kernel_only_main_change_republishes_trusted_l40s_artifact() -> None:
     assert '--output "${l40s_wheel_dir}/metadata.json"' in dockerfile
 
 
+def test_vllm_nvl_image_targets_arm64_sm100_with_opencv_runtime() -> None:
+    workflow = yaml.load(
+        (REPO_ROOT / ".github/workflows/infra-build-image.yml").read_text(encoding="utf-8"),
+        Loader=yaml.BaseLoader,
+    )
+    job = workflow["jobs"]["build-vllm-nvl-image"]
+
+    assert job["with"]["architecture"] == "arm64"
+    assert job["with"]["runner"] == "ubuntu-24.04-arm"
+    assert job["with"]["tag_suffix"] == "py3.12-cuda13.0.0-sm100"
+    assert "CUDA_VERSION=13.0.0" in job["with"]["build_args"]
+    assert "UV_TORCH_BACKEND=cu130" in job["with"]["build_args"]
+    assert "TORCH_CUDA_ARCH_LIST=10.0" in job["with"]["build_args"]
+
+    dockerfile = (REPO_ROOT / "docker/Dockerfile").read_text(encoding="utf-8")
+    assert "    ffmpeg \\\n" in dockerfile
+    assert "    libgl1 \\\n" in dockerfile
+    assert "    libglib2.0-0 \\\n" in dockerfile
+    assert 'python -c "import cv2; print(\'OpenCV\', cv2.__version__)"' in dockerfile
+
+
 def test_cache_key_uses_resolved_arch_not_raw_env(monkeypatch, tmp_path) -> None:
     _patch_stable_metadata(monkeypatch)
     monkeypatch.setattr(kernel_build_cache, "_detect_arch_from_torch", lambda: "9.0a")

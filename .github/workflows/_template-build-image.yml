@@ -190,6 +190,7 @@ jobs:
         if: ${{ !inputs.push_by_digest }}
         run: |
           echo "✅ Python ${{ inputs.python_version }} image successfully built and pushed to ${{ steps.image.outputs.name }}:${{ inputs.tag_suffix }}-sha-${GITHUB_SHA::7}"
+          echo "Digest: ${{ steps.build-push.outputs.digest }}"
           echo "To run tests with this image, manually trigger the 'Run Tests' workflow."
 
       - name: Digest success message
