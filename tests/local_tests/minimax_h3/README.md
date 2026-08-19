@@ -59,5 +59,30 @@ pytest \
 With a gate enabled, missing CUDA, source, or weights is a failure. Recorded component evidence is exact for both DiT
 partitions, the video VAE, and all Qwen3-VL hidden states; audio decode has maximum absolute drift `2.4e-7`.
 
+The video VAE test verifies the reference checkout at commit
+`abc5e9bf71fd38f53cd471bc3acaa84bc5ecbfdc` and compares the production CPU `uint8` `encode_pixels()` path against
+the official posterior element by element.
+
+## Video VAE memory benchmark
+
+The benchmark uses one warmup and three measured runs with `vae_cpu_offload=True`. It reports absolute and
+stage-incremental allocated/reserved CUDA peaks for every rank. For SP runs, the reported aggregate is explicitly the
+sum of rank-local maxima, not a simultaneous node peak.
+
+```bash
+python tests/local_tests/vaes/benchmark_minimax_h3_video_vae_memory.py \
+  --source-root "$PWD" --model-root "$MINIMAX_H3_MODEL_ROOT" \
+  --revision-label candidate --operation encode
+
+python -m torch.distributed.run --nproc_per_node=4 \
+  tests/local_tests/vaes/benchmark_minimax_h3_video_vae_memory.py \
+  --source-root "$PWD" --model-root "$MINIMAX_H3_MODEL_ROOT" \
+  --revision-label candidate-sp4 --operation decode
+```
+
+Run the same script with `--source-root` pointed at the base checkout for a comparable baseline. The default workload
+is deterministic `124 x 768 x 1344` video geometry with seed `20260803`; the JSON record includes source/model
+revisions, software/allocator metadata, exact measurement boundaries, per-repetition values, and output shapes.
+
 FastVideo joint audio/video generation and SP=1/SP=4 latent consistency have been validated. T2VA, FL2VA, and
 Ref2VA video/audio latents match the pinned Diffusers pipeline exactly.
