@@ -152,6 +152,10 @@ class FastVideoArgs:
     # Per-component flags below let callers compile additional submodules
     # independently; ``False`` leaves the component eager.
     enable_torch_compile: bool = False
+    # Regional fullgraph compile of repeated blocks (modular fastvideo/train
+    # stack). False preserves the legacy whole-model torch.compile semantics
+    # for fastvideo/training recipes; the modular moduleloader sets it True.
+    regional_compile: bool = False
     enable_torch_compile_text_encoder: bool = False
     enable_torch_compile_vae: bool = False
     enable_torch_compile_audio_vae: bool = False
@@ -589,7 +593,9 @@ class FastVideoArgs:
             type=str,
             default=None,
             help=
-            "JSON string of kwargs to pass to torch.compile. Example: '{\"backend\":\"inductor\",\"mode\":\"reduce-overhead\"}'",
+            "JSON string of kwargs to pass to torch.compile. Example: '{\"backend\":\"inductor\",\"mode\":\"reduce-overhead\"}'. "
+            "Note: the modular fastvideo/train stack uses regional fullgraph compile, which rejects 'mode' "
+            "(it injects inductor options); express mode effects via 'options' there.",
         )
 
         parser.add_argument(

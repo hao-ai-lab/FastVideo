@@ -62,6 +62,9 @@ def _make_training_args(
         image_encoder_cpu_offload=False,
         use_fsdp_inference=False,
         enable_torch_compile=tc.model.enable_torch_compile,
+        # Modular stack opts into regional fullgraph compile; the legacy
+        # stack keeps whole-model torch.compile semantics (default False).
+        regional_compile=True,
         torch_compile_kwargs=tc.model.torch_compile_kwargs,
     )
 

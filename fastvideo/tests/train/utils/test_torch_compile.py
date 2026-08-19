@@ -117,3 +117,77 @@ def test_regional_compile_forwards_supported_kwargs(monkeypatch) -> None:
 def test_regional_compile_rejects_partial_graph_mode() -> None:
     with pytest.raises(ValueError, match="fullgraph=True"):
         _compile_model_regions(_RepeatedModel(), {"fullgraph": False})
+
+
+def test_regional_compile_rejects_mode_kwarg() -> None:
+    """`mode` conflicts with the always-injected inductor options.
+
+    torch.compile forbids mode+options together; the loader must fail with an
+    actionable message rather than letting torch blame an `options` key the
+    user never wrote (the CLI help's own example uses `mode`).
+    """
+    model = _RepeatedModel()
+    with pytest.raises(ValueError, match="mode"):
+        _compile_model_regions(model, {"mode": "reduce-overhead"})
+
+
+def test_checkpoint_wrapper_prefix_normalization() -> None:
+    """AC-wrapped blocks must not break name-keyed weight-loader lookups.
+
+    checkpoint_wrapper strips its prefix from state_dict() keys via hooks but
+    NOT from named_parameters()/named_buffers(); checkpoint keys are clean.
+    Pre-fix, a loaded buffer inside a wrapped block missed the named_buffers
+    membership test and was silently converted into a trainable nn.Parameter
+    by load_state_dict(assign=True).
+    """
+    from fastvideo.models.loader.fsdp_load import _strip_checkpoint_wrapper_prefix
+
+    class _BufferBlock(torch.nn.Module):
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.lin = torch.nn.Linear(4, 4)
+            self.register_buffer("freq", torch.arange(4.0))
+
+        def forward(self, value: torch.Tensor) -> torch.Tensor:
+            return self.lin(value) + self.freq
+
+    class _BufferModel(torch.nn.Module):
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.blocks = torch.nn.ModuleList([_BufferBlock()])
+
+    from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+        checkpoint_wrapper, )
+
+    model = _BufferModel()
+    model.blocks[0] = checkpoint_wrapper(model.blocks[0])
+
+    # state_dict is clean; raw named_buffers is prefixed.
+    assert "blocks.0.freq" in model.state_dict()
+    raw_buffer_names = {name for name, _ in model.named_buffers()}
+    assert "blocks.0.freq" not in raw_buffer_names
+    assert "blocks.0._checkpoint_wrapped_module.freq" in raw_buffer_names
+
+    # The canonicalized views match checkpoint keys exactly.
+    clean_buffers = {_strip_checkpoint_wrapper_prefix(name) for name, _ in model.named_buffers()}
+    clean_params = {_strip_checkpoint_wrapper_prefix(name) for name, _ in model.named_parameters()}
+    assert clean_buffers == {"blocks.0.freq"}
+    assert clean_params == {"blocks.0.lin.weight", "blocks.0.lin.bias"}
+
+    # End-to-end: membership keyed on canonical names keeps a loaded buffer a
+    # buffer under load_state_dict(assign=True) instead of promoting it to a
+    # trainable parameter.
+    loaded = {
+        "blocks.0.freq": torch.ones(4),
+        "blocks.0.lin.weight": torch.ones(4, 4),
+        "blocks.0.lin.bias": torch.ones(4),
+    }
+    sharded_sd = {
+        key: (value if key in clean_buffers else torch.nn.Parameter(value))
+        for key, value in loaded.items()
+    }
+    model.load_state_dict(sharded_sd, assign=True)
+    assert any("freq" in name for name, _ in model.named_buffers())
+    assert not any("freq" in name for name, _ in model.named_parameters())
