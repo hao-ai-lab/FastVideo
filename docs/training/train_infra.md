@@ -155,6 +155,8 @@ training:
     weighting_scheme: uniform   # uniform, logit_normal, mode
     precondition_outputs: false
     enable_gradient_checkpointing_type: full
+    enable_torch_compile: false
+    torch_compile_kwargs: {}
 
   vsa:
     sparsity: 0.0         # 0.0 = disabled
@@ -176,6 +178,47 @@ The repeat count duplicates that dataset's parquet file list before shuffling/sa
 
 See [Training Trackers](trackers.md) to configure Weights & Biases or SwanLab,
 including SwanLab installation and authentication.
+
+### `torch.compile` for modular training
+
+Set `training.model.enable_torch_compile: true` to compile the repeated DiT
+blocks selected by the model's `_compile_conditions`. Training compilation is
+regional and always uses `fullgraph=True`: activation checkpointing is applied
+first, FSDP establishes the runtime parameter representation, and each selected
+block is then compiled inside its eager checkpoint wrapper. The checkpoint
+control logic, FSDP hooks, and the model-level block loop all remain outside
+the compiled region; checkpoint state-dict names are preserved.
+
+Only no-grad block calls use the compiled path. Gradient-bearing student and
+critic calls remain eager because the current Inductor backward is not
+numerically reliable for the FA4 + FSDP + activation-checkpointed Wan stack.
+This still accelerates DMD2 simulated rollouts and teacher evaluation without
+invoking the affected compiled backward path.
+
+Additional supported `torch.compile` options can be provided under
+`training.model.torch_compile_kwargs`; `fullgraph: false` is rejected because
+it would silently reintroduce partial graphs. For example:
+
+```yaml
+training:
+  model:
+    enable_gradient_checkpointing_type: full
+    enable_torch_compile: true
+    torch_compile_kwargs:
+      dynamic: false
+```
+
+The first step includes Dynamo, AOTAutograd, Inductor, and attention-kernel
+compilation, so compare steady-state steps after warmup as well as total job
+time. Use `TORCH_LOGS=recompiles,graph_breaks` when diagnosing specialization.
+A single initial type specialization can occur when DMD2 first reaches a role
+whose block has a different FSDP/checkpoint wrapper type; repeated recompilation
+in steady state is not expected.
+
+`FLASH_ATTN` does not select FlashAttention-4 merely because FA4 is installed.
+Set `FASTVIDEO_FA4=1` together with a `FLASH_ATTN` role backend to opt in. Set
+`FASTVIDEO_DISABLE_ATTENTION_COMPILE=1` only as a debugging escape hatch when
+an attention implementation cannot participate in a compiled block.
 
 ### `callbacks` — Pluggable hooks
 
