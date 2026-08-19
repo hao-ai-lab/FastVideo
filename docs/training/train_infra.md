@@ -189,11 +189,14 @@ block is then compiled inside its eager checkpoint wrapper. The checkpoint
 control logic, FSDP hooks, and the model-level block loop all remain outside
 the compiled region; checkpoint state-dict names are preserved.
 
-Only no-grad block calls use the compiled path. Gradient-bearing student and
-critic calls remain eager because the current Inductor backward is not
-numerically reliable for the FA4 + FSDP + activation-checkpointed Wan stack.
-This still accelerates DMD2 simulated rollouts and teacher evaluation without
-invoking the affected compiled backward path.
+Both forward and backward block calls use the compiled path. Wan modulation is
+kept behind a small opaque operator boundary: this ensures all six modulation
+gradient slices are materialized before they are returned to FSDP instead of
+being fused into an incomplete Inductor output buffer. Eager execution keeps
+the original native PyTorch path. Regional training compile also enables
+Inductor's `emulate_precision_casts` option by default so fused BF16 operators
+retain eager's intermediate rounding points. It can be overridden explicitly
+under `torch_compile_kwargs.options`.
 
 Additional supported `torch.compile` options can be provided under
 `training.model.torch_compile_kwargs`; `fullgraph: false` is rejected because
