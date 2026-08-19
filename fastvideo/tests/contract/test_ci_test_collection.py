@@ -77,8 +77,10 @@ def test_unit_nvl_routes_to_trusted_static_driver():
     assert "unit-nvl" in valid_line
     assert "[unit-nvl]=unit_test_nvl" in slash_commands
     assert '''    - label: ":microscope: Unit Tests"
+      key: "unit-nvl"
       if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "unit_test_nvl"
-      command: "timeout 90m /opt/fastvideo-ci-vllm-nvl/run-unit"
+      command: "/opt/fastvideo-ci-vllm-nvl/run-unit"
+      timeout_in_minutes: 90
       agents:
         queue: "vllm-nvl-ci"''' in pipeline
 
