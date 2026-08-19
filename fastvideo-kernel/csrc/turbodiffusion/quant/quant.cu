@@ -63,7 +63,7 @@ auto quant(
 
     default: {
       std::cerr << "Observing: " << Input.scalar_type() << " for the input datatype which is invalid";
-      throw std::runtime_error("Unsupported input data type for quantize_to_fp4.");
+      throw std::runtime_error("Unsupported input data type for quant_cuda (int8 quantization).");
     }
   }
   
