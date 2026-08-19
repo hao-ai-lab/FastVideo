@@ -1,7 +1,6 @@
-// primitives.cuh -- device primitives for the sm_100a block-causal + sink +
-// sliding-window attention forward: tcgen05 (alloc / mma / ld / st / commit / wait / fence),
-// TMA load / store / tensormap, mbarrier, cluster launch control, setmaxnreg, fast math,
-// and the FMHA helpers.
+// primitives.cuh -- device primitives for the sm_100a VSA block-sparse attention
+// forward: tcgen05 (alloc / mma / ld / st / commit / wait / fence), TMA load / store /
+// tensormap, mbarrier, cluster launch control, setmaxnreg, fast math, and the FMHA helpers.
 //
 // Generated and pruned to what the kernel reaches -- do not edit by hand.
 #pragma once
@@ -28,9 +27,6 @@
   } while (0)
 #endif
 
-
-
-
 __device__ __forceinline__
 uint64_t mbarrier_arrive(uint32_t mbar_smem) {
   uint64_t state;
@@ -51,13 +47,11 @@ void mbarrier_arrive_cluster_default(uint32_t cluster_smem_addr) {
                :: "r"(cluster_smem_addr) : "memory");
 }
 
-
 __device__ __forceinline__
 void mbarrier_arrive_expect_tx(uint32_t mbar_smem, uint32_t expected_bytes) {
   asm volatile("mbarrier.arrive.expect_tx.release.cta.shared::cta.b64 _, [%0], %1;\n"
                :: "r"(mbar_smem), "r"(expected_bytes) : "memory");
 }
-
 
 __device__ __forceinline__
 void mbarrier_wait_parity_suspend(uint32_t mbar_smem, uint32_t phase_parity) {
@@ -93,7 +87,6 @@ void fence_proxy_async_shared() {
   asm volatile("fence.proxy.async.shared::cta;\n" ::: "memory");
 }
 
-
 __device__ __forceinline__ void clc_try_cancel_async(
     uint32_t smem_dst, uint32_t mbar_smem) {
   asm volatile(
@@ -102,7 +95,6 @@ __device__ __forceinline__ void clc_try_cancel_async(
     :: "r"(smem_dst), "r"(mbar_smem) : "memory");
 }
 
-
 __device__ __forceinline__ void clc_load_response(
     uint32_t smem_slot, uint32_t& r0, uint32_t& r1,
     uint32_t& r2, uint32_t& r3) {
@@ -110,8 +102,6 @@ __device__ __forceinline__ void clc_load_response(
                : "=r"(r0), "=r"(r1), "=r"(r2), "=r"(r3)
                : "r"(smem_slot));
 }
-
-
 
 template <int NUM_STAGES>
 struct MbarrierPhaseTracker {
@@ -280,7 +270,6 @@ void clc_fetch_next_tile_advance(int& clc_cons_stage,
   advance_stage_phase<STAGES>(clc_cons_stage, clc_cons_phase);
 }
 
-
 __device__ __forceinline__ unsigned fdiv(unsigned n, unsigned long long pk) {
   unsigned M = (unsigned)pk;
   if (M == 0u) return n;
@@ -293,8 +282,6 @@ __host__ inline unsigned long long make_magic(unsigned d) {
   unsigned long long m = ((1ull << p) + (unsigned long long)d - 1ull) / d;
   return (m & 0xffffffffULL) | ((unsigned long long)(p - 32u) << 32);
 }
-
-
 
 template <int BARRIER_ID>
 __device__ __forceinline__
@@ -357,7 +344,6 @@ __device__ __forceinline__ void mask_s_row_r2p(float* scores, int k_offset, int 
   }
 }
 
-
 template <int CTA_GROUP>
 __device__ __forceinline__ void tcgen05_alloc(uint32_t smem_dst_ptr,
                                               uint32_t n_cols) {
@@ -373,7 +359,6 @@ __device__ __forceinline__ void tcgen05_alloc(uint32_t smem_dst_ptr,
       :: "r"(smem_dst_ptr), "r"(n_cols));
   }
 }
-
 
 __device__ __forceinline__ void tcgen05_st_32x32b_x16(
     uint32_t tmem_addr, const uint32_t (&r)[16]) {
@@ -405,7 +390,6 @@ __device__ __forceinline__ void tcgen05_st_32x32b_x32(
                   "r"(r[28]),"r"(r[29]),"r"(r[30]),"r"(r[31]));
 }
 
-
 __device__ __forceinline__ void tcgen05_commit1_lead(uint32_t lead, uint32_t mbar_smem_addr) {
   asm volatile(
     "{\n\t"
@@ -423,7 +407,6 @@ __device__ __forceinline__ void tcgen05_wait_st() {
 __device__ __forceinline__ void tcgen05_fence_before_thread_sync() {
   asm volatile("tcgen05.fence::before_thread_sync;\n" ::: "memory");
 }
-
 
 __device__ __forceinline__
 void tma_load_2d(uint32_t smem_dst, const void* tensormap_ptr,
@@ -461,7 +444,6 @@ void tma_load_4d(uint32_t smem_dst, const void* tensormap_ptr,
     : "memory");
 }
 
-
 template <int CTA_GROUP>
 __device__ __forceinline__ void tcgen05_dealloc(uint32_t tmem_addr,
                                                 uint32_t n_cols) {
@@ -477,7 +459,6 @@ __device__ __forceinline__ void tcgen05_dealloc(uint32_t tmem_addr,
       :: "r"(tmem_addr), "r"(n_cols));
   }
 }
-
 
 __device__ __forceinline__
 void tma_store_2d(const void* tensormap_ptr, int coord_x, int coord_y,
@@ -510,7 +491,6 @@ void tma_store_4d(const void* tensormap_ptr, int c0, int c1, int c2, int c3,
     : "memory");
 }
 
-
 inline cudaError_t make_tma_2d_tiled(
     CUtensorMap* out,
     const void* ptr, int rows, int cols, int box_rows, int box_cols,
@@ -532,7 +512,6 @@ inline cudaError_t make_tma_2d_tiled(
   return (r == CUDA_SUCCESS) ? cudaSuccess : cudaErrorInvalidValue;
 }
 
-
 __device__ __forceinline__
 void cp_async_bulk_commit_group() {
   asm volatile("cp.async.bulk.commit_group;\n" ::: "memory");
@@ -543,7 +522,6 @@ __device__ __forceinline__
 void cp_async_bulk_wait_group_read() {
   asm volatile("cp.async.bulk.wait_group.read %0;\n" :: "n"(N) : "memory");
 }
-
 
 __device__ __forceinline__
 void mbarrier_init(uint32_t mbar_smem, uint32_t arrive_count) {
@@ -566,7 +544,6 @@ __device__ __forceinline__
 void fence_mbarrier_init_release_cluster() {
   asm volatile("fence.mbarrier_init.release.cluster;\n" ::: "memory");
 }
-
 
 __device__ __forceinline__ void tcgen05_mma_f16_ss_lead(uint32_t lead,
     uint32_t tmem_c, uint64_t desc_a, uint64_t desc_b, uint32_t idesc,
@@ -596,7 +573,6 @@ __device__ __forceinline__ void tcgen05_mma_f16_ts_1sm_lead(uint32_t lead,
        "r"(enable_input_d ? 1u : 0u), "r"(0u), "r"(0u), "r"(0u), "r"(0u));
 }
 
-
 enum class SmemSwizzleBlackwell : uint32_t {
   None = 0,
   B128_32atom = 1,
@@ -620,7 +596,6 @@ __device__ __host__ __forceinline__ uint64_t build_smem_desc_blackwell(
   d |= static_cast<uint64_t>(static_cast<uint32_t>(swizzle) & 0x7) << 61;
   return d;
 }
-
 
 __device__ __forceinline__
 uint32_t elect_one_sync() {
@@ -648,7 +623,6 @@ uint32_t elect_one_sync(uint32_t membermask) {
   return elected;
 }
 
-
 template <int N>
 __device__ __forceinline__
 void setmaxnreg_dec() {
@@ -667,7 +641,6 @@ void setmaxnreg_inc() {
                :: "n"(N) : "memory");
 }
 
-
 __device__ __forceinline__
 uint32_t cvt_f32x2_to_bf16x2(float a, float b) {
   uint32_t r;
@@ -675,7 +648,6 @@ uint32_t cvt_f32x2_to_bf16x2(float a, float b) {
                : "=r"(r) : "f"(a), "f"(b));
   return r;
 }
-
 
 namespace {
 __device__ __forceinline__ uint64_t f32x2_bits(float2 v) {
@@ -706,7 +678,6 @@ __device__ __forceinline__ float2 ffma2(float2 a, float2 b, float2 c) {
 }
 
 __device__ __forceinline__ float2 f32x2_splat(float s) { return make_float2(s, s); }
-
 
 __device__ __forceinline__ float ex2_approx_f32(float z) {
   float d;
@@ -754,14 +725,11 @@ __device__ __forceinline__ float2 ex2_emu_f32x2(float x, float y) {
   return r;
 }
 
-
 __device__ __forceinline__ float rcp_approx_ftz_f32(float x) {
   float d;
   asm("rcp.approx.ftz.f32 %0, %1;\n" : "=f"(d) : "f"(x));
   return d;
 }
-
-
 
 __device__ __forceinline__ uint32_t make_idesc_table44(
     int M, int N,
@@ -786,7 +754,6 @@ __device__ __forceinline__ uint32_t make_idesc_bf16_f32(
   return make_idesc_table44(M, N,  1,
                               1,  1, ta, tb);
 }
-
 
 __device__ __forceinline__ void tcgen05_ld_32x32b_x16(
     uint32_t tmem_addr, uint32_t (&r)[16]) {
@@ -897,7 +864,6 @@ __device__ __forceinline__ void tcgen05_ld_32x32b_x128(
                  "=r"(r[124]),"=r"(r[125]),"=r"(r[126]),"=r"(r[127])
                : "r"(tmem_addr));
 }
-
 
 __device__ __forceinline__
 uint32_t smem_ptr_u32(const void* ptr) {
