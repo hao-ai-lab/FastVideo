@@ -44,13 +44,13 @@ def test_regional_compile_preserves_checkpoint_state_dict(monkeypatch) -> None:
         block._checkpoint_wrapped_module for block in model.blocks
     ]
     assert [kwargs for _, kwargs in calls] == [
-        {"fullgraph": True},
-        {"fullgraph": True},
+        {"fullgraph": True, "options": {"emulate_precision_casts": True}},
+        {"fullgraph": True, "options": {"emulate_precision_casts": True}},
     ]
     assert list(model.state_dict()) == state_dict_keys
 
 
-def test_regional_compile_dispatches_only_no_grad_calls(monkeypatch) -> None:
+def test_regional_compile_dispatches_grad_and_no_grad_calls(monkeypatch) -> None:
     model = _RepeatedModel()
     compiled_calls = 0
 
@@ -69,11 +69,11 @@ def test_regional_compile_dispatches_only_no_grad_calls(monkeypatch) -> None:
 
     value = torch.randn(2, 4)
     model(value)
-    assert compiled_calls == 0
+    assert compiled_calls == 2
 
     with torch.no_grad():
         model(value)
-    assert compiled_calls == 2
+    assert compiled_calls == 4
 
 
 def test_regional_compile_forwards_supported_kwargs(monkeypatch) -> None:
@@ -86,11 +86,31 @@ def test_regional_compile_forwards_supported_kwargs(monkeypatch) -> None:
 
     monkeypatch.setattr(torch, "compile", _fake_compile)
 
-    _compile_model_regions(model, {"dynamic": False})
+    _compile_model_regions(model, {
+        "dynamic": False,
+        "options": {
+            "emulate_precision_casts": False,
+            "max_autotune": True,
+        },
+    })
 
     assert calls == [
-        {"fullgraph": True, "dynamic": False},
-        {"fullgraph": True, "dynamic": False},
+        {
+            "fullgraph": True,
+            "dynamic": False,
+            "options": {
+                "emulate_precision_casts": False,
+                "max_autotune": True,
+            },
+        },
+        {
+            "fullgraph": True,
+            "dynamic": False,
+            "options": {
+                "emulate_precision_casts": False,
+                "max_autotune": True,
+            },
+        },
     ]
 
 
