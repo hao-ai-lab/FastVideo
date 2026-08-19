@@ -106,6 +106,7 @@ def _patch_stable_metadata(monkeypatch) -> None:
         lambda: {
             "torch_version": "2.9.0",
             "torch_cuda_version": "12.8",
+            "torch_git_version": "stable-build-commit",
             "torch_file": "/opt/venv/lib/python3.12/site-packages/torch/__init__.py",
             "torch_config": "USE_CUDA=ON",
             "cxx11_abi": True,
@@ -155,6 +156,27 @@ def test_kernel_only_main_change_republishes_trusted_l40s_artifact() -> None:
     assert '--output "${l40s_wheel_dir}/metadata.json"' in dockerfile
 
 
+def test_ci_runner_image_targets_arm64_sm100_with_opencv_runtime() -> None:
+    workflow = yaml.load(
+        (REPO_ROOT / ".github/workflows/infra-build-image.yml").read_text(encoding="utf-8"),
+        Loader=yaml.BaseLoader,
+    )
+    job = workflow["jobs"]["build-ci-runner-image"]
+
+    assert job["with"]["architecture"] == "arm64"
+    assert job["with"]["runner"] == "ubuntu-24.04-arm"
+    assert job["with"]["tag_suffix"] == "py3.12-cuda13.0.0-sm100"
+    assert "CUDA_VERSION=13.0.0" in job["with"]["build_args"]
+    assert "UV_TORCH_BACKEND=cu130" in job["with"]["build_args"]
+    assert "TORCH_CUDA_ARCH_LIST=10.0" in job["with"]["build_args"]
+
+    dockerfile = (REPO_ROOT / "docker/Dockerfile").read_text(encoding="utf-8")
+    assert "    ffmpeg \\\n" in dockerfile
+    assert "    libgl1 \\\n" in dockerfile
+    assert "    libglib2.0-0 \\\n" in dockerfile
+    assert 'python -c "import cv2; print(\'OpenCV\', cv2.__version__)"' in dockerfile
+
+
 def test_cache_key_uses_resolved_arch_not_raw_env(monkeypatch, tmp_path) -> None:
     _patch_stable_metadata(monkeypatch)
     monkeypatch.setattr(kernel_build_cache, "_detect_arch_from_torch", lambda: "9.0a")
@@ -172,6 +194,25 @@ def test_cache_key_uses_resolved_arch_not_raw_env(monkeypatch, tmp_path) -> None
     assert explicit_hopper["build"]["torch_cuda_arch_list"] == "9.0a"
     assert detected_hopper["build"]["torch_cuda_arch_list"] == ""
     assert detected_l40s["cache_key"] != detected_hopper["cache_key"]
+
+
+def test_cache_key_ignores_runtime_only_torch_config(monkeypatch, tmp_path) -> None:
+    _patch_stable_metadata(monkeypatch)
+    build_host = kernel_build_cache._build_metadata(tmp_path)
+    torch_metadata = kernel_build_cache._torch_metadata()
+    monkeypatch.setattr(
+        kernel_build_cache,
+        "_torch_metadata",
+        lambda: {
+            **torch_metadata,
+            "torch_config": torch_metadata["torch_config"] + "\nCUDA Runtime 13.0\nCuDNN 92.0",
+        },
+    )
+
+    gpu_host = kernel_build_cache._build_metadata(tmp_path)
+
+    assert gpu_host["torch"]["torch_config"] != build_host["torch"]["torch_config"]
+    assert gpu_host["cache_key"] == build_host["cache_key"]
 
 
 @pytest.mark.parametrize("environment_name", ["CFLAGS", "CXXFLAGS", "LDFLAGS"])
@@ -213,7 +254,7 @@ def test_cache_key_changes_with_compiler_or_torch_abi(monkeypatch, tmp_path) -> 
     monkeypatch.setattr(kernel_build_cache, "_torch_metadata", lambda: {**torch_metadata, "cxx11_abi": False})
     torch_abi_changed = kernel_build_cache._build_metadata(tmp_path)
 
-    assert baseline["schema_version"] == 3
+    assert baseline["schema_version"] == 4
     assert baseline["cache_key"] != compiler_changed["cache_key"]
     assert baseline["cache_key"] != torch_abi_changed["cache_key"]
 

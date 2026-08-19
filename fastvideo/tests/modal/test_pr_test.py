@@ -316,17 +316,18 @@ def test_run_test_command_uses_nonshared_kernel_install_before_tests(monkeypatch
     assert not hasattr(module, "kernel_cache_vol")
 
 
-def test_run_unit_test_collects_modal_cache_runner_tests(monkeypatch):
+def test_run_unit_test_uses_shared_command(monkeypatch):
     module = _load_pr_test_module(monkeypatch)
     commands = []
     monkeypatch.setattr(module, "run_test", commands.append)
 
     module.run_unit_test()
 
-    assert len(commands) == 1
+    assert commands == ["bash .buildkite/scripts/unit_test.sh"]
+    unit_command = (Path(__file__).resolve().parents[3] / ".buildkite/scripts/unit_test.sh").read_text()
     for test_path in (
             "./fastvideo/tests/modal/test_kernel_build_cache.py",
             "./fastvideo/tests/modal/test_pr_test.py",
             "./fastvideo/tests/modal/test_ssim_test.py",
     ):
-        assert test_path in commands[0]
+        assert test_path in unit_command

@@ -89,6 +89,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     zsh \
     vim \
     curl \
+    ffmpeg \
+    libgl1 \
+    libglib2.0-0 \
     gcc-11 \
     g++-11 \
     clang-11 \
@@ -138,6 +141,7 @@ RUN --mount=type=cache,target=/opt/uv/cache \
     source /opt/venv/bin/activate && \
     uv pip install --upgrade pip && \
     uv pip install --excludes docker/uv-excludes ".[dev]" && \
+    python -c "import cv2; print('OpenCV', cv2.__version__)" && \
     PYTAG=cp$(echo "${PYTHON_VERSION}" | tr -d .) && \
     case "${TARGETARCH:-amd64}" in \
         amd64) \

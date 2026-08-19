@@ -27,13 +27,13 @@ def _function_strings(path: Path, function_name: str) -> str:
 
 
 def test_generic_l40s_launcher_defaults_fa4_off():
-    source = LAUNCH_L40S_JOB.read_text(encoding="utf-8")
-    assert '"FASTVIDEO_FA4": os.environ.get("FASTVIDEO_FA4", "0")' in source
+    source = ast.unparse(ast.parse(LAUNCH_L40S_JOB.read_text(encoding="utf-8")))
+    assert "'FASTVIDEO_FA4': os.environ.get('FASTVIDEO_FA4', '0')" in source
 
 
 def test_ssim_launcher_keeps_fa4_enabled_by_default():
-    source = SSIM_TEST.read_text(encoding="utf-8")
-    assert '"FASTVIDEO_FA4": os.environ.get("FASTVIDEO_FA4", "1")' in source
+    source = ast.unparse(ast.parse(SSIM_TEST.read_text(encoding="utf-8")))
+    assert "'FASTVIDEO_FA4': os.environ.get('FASTVIDEO_FA4', '1')" in source
 
 
 def test_performance_identity_env_reaches_modal_runtime():

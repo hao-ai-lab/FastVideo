@@ -90,6 +90,13 @@ steps:
             limit: 2
       agents:
         queue: "default"
+    - label: ":microscope: Unit Tests"
+      key: "unit-ci"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "unit_test_ci"
+      command: "/opt/fastvideo-ci-runner/run-unit"
+      timeout_in_minutes: 90
+      agents:
+        queue: "ci-runner"
     - label: ":microscope: DreamVerse App Tests"
       if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "dreamverse_app"
       command: "timeout 90m .buildkite/scripts/pr_test.sh"
