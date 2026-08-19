@@ -306,6 +306,12 @@ if(BUILD_CXX_KERNELS)
         csrc/turbodiffusion/norm/rmsnorm.cu
         csrc/turbodiffusion/norm/layernorm.cu
         csrc/turbodiffusion/quant/quant.cu
+        # Ulysses sequence-parallel all-to-all. Unlike the TK and FP4 kernels
+        # this needs no arch gate: it is plain CUDA (int4 vector loads, standard
+        # atomics) and builds for every arch in TORCH_CUDA_ARCH_LIST. Whether it
+        # can actually run is a runtime property (all-pairs NVLink P2P), checked
+        # by the topology probe on the Python side.
+        csrc/comm/ulysses_all_to_all.cu
     )
     
     # Conditionally add TK kernels

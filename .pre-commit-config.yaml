@@ -4,6 +4,9 @@ default_stages:
 exclude: |
   (?x)(
     fastvideo/third_party/.*|
+    # Vendored verbatim from flashinfer-ai/flashinfer (see the provenance
+    # header in each). Reformatting them would break re-syncing upstream.
+    fastvideo/distributed/device_communicators/(cuda_ipc|ulysses_comm|ulysses_topology)\.py|
     fastvideo-kernel/.*|
     assets/.*|
     tests/.*|

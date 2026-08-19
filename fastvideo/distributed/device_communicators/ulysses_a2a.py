@@ -118,18 +118,49 @@ class UlyssesA2AHelper:
             self._disabled_reason = reason
             logger.info("Ulysses fused all-to-all disabled: %s", reason)
 
+    def _can_attempt(self) -> tuple[bool, str]:
+        """Whether this rank could use the fused path at all.
+
+        Deliberately cheap and side-effect free: it allocates nothing and starts
+        no collective, so it is safe to evaluate before the ranks have agreed on
+        anything.
+        """
+        try:
+            from fastvideo_kernel import comm_ops
+            if not comm_ops.is_available():
+                return False, "fastvideo-kernel was built without the Ulysses a2a kernel"
+        except Exception as e:  # noqa: BLE001
+            return False, f"backend unavailable ({type(e).__name__}: {e})"
+        return True, ""
+
+    def _agree(self, ok: bool) -> bool:
+        """Reduce a local yes/no to a group-wide verdict: True only if all agree."""
+        vote = torch.tensor([1 if ok else 0], device=self.device, dtype=torch.int32)
+        dist.all_reduce(vote, op=dist.ReduceOp.MIN, group=self.device_group)
+        return bool(vote.item())
+
     def _build(self, dtype: torch.dtype, max_elems: int) -> bool:
         """Collectively build a communicator. Returns True if it is armed.
 
-        Backend selection happens inside the FlashInfer constructor and runs
-        before any IPC allocation or JIT compilation, so a negative topology
-        verdict costs nothing but the probe itself.
+        The fused kernel opens with a barrier across every rank, so a rank that
+        quietly falls back to NCCL while its peers proceed does not merely lose
+        the optimization -- it strands them, and the job hangs until the NCCL
+        watchdog fires. Deciding locally is therefore never correct here, even
+        for a condition as mundane as an import failing on one node.
+
+        So the ranks vote before anything is imported or allocated. Past that
+        point every remaining failure is arbitrated by the backend's own
+        group-wide protocol, which either arms all ranks or none. There is
+        deliberately no second vote afterwards: teardown is itself collective
+        while armed, so a recovery attempt from a split state would be the very
+        deadlock it was trying to avoid.
         """
-        try:
-            from flashinfer.comm import UlyssesCommunicator
-        except ImportError as e:
-            self._disable(f"flashinfer unavailable ({e})")
+        ok, reason = self._can_attempt()
+        if not self._agree(ok):
+            self._disable(reason or "a peer rank cannot use the fused path")
             return False
+
+        from .ulysses_comm import UlyssesCommunicator
 
         try:
             comm = UlyssesCommunicator(
@@ -162,22 +193,20 @@ class UlyssesA2AHelper:
         return True
 
     def precompile(self) -> None:
-        """Build the CUDA module without committing to a dtype or capacity.
+        """Report at warmup whether the fused path is usable.
 
-        Called from the sequence-parallel warmup so the JIT (tens of seconds on
-        a cold cache) happens before the first forward pass rather than inside
-        it. Deliberately does not construct a communicator: the warmup's dummy
-        tensors say nothing about the shapes and dtype the model will actually
-        use, and arming on them would only force a rebuild later.
+        The kernel ships prebuilt in the fastvideo-kernel wheel, so unlike the
+        JIT-based predecessor there is nothing to compile here. What remains is
+        worth keeping: surfacing at startup, once, whether the kernel is present
+        at all -- otherwise a wheel built without it looks identical to a slow
+        run. Deliberately does not construct a communicator, since the warmup's
+        dummy shapes and dtype are not the ones the model will use.
         """
         if self._disabled_reason is not None or not is_enabled():
             return
-        try:
-            from flashinfer.comm import get_ulysses_a2a_module
-            with torch.cuda.device(self.device):
-                get_ulysses_a2a_module()
-        except Exception as e:  # noqa: BLE001 - warmup must never be fatal
-            logger.info("Ulysses kernel precompile skipped (%s: %s)", type(e).__name__, e)
+        ok, reason = self._can_attempt()
+        if not ok:
+            logger.info("Ulysses fused all-to-all unavailable at warmup: %s", reason)
 
     def close(self) -> None:
         """Release the IPC staging buffer and peer mappings.
