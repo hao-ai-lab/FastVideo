@@ -23,6 +23,7 @@ CI_SOURCES = [
     TESTS_ROOT / "modal" / "ssim_test.py",
     *sorted((REPO_ROOT / ".buildkite").rglob("*.yml")),
     *sorted((REPO_ROOT / ".buildkite").rglob("*.sh")),
+    *sorted((REPO_ROOT / ".github/workflows").glob("ci-*.yml")),
 ]
 
 # Directories that intentionally have no CI lane today. Every entry needs a
@@ -66,6 +67,20 @@ def test_local_tests_stays_out_of_ci():
     # that must never gate CI. Fail if any CI source starts collecting it.
     assert "tests/local_tests" not in _ci_text(), ("tests/local_tests/ is local-only by design; remove the CI "
                                                    "reference or move the tests into a fastvideo/tests/ lane.")
+
+
+def test_unit_nvl_routes_to_trusted_static_driver():
+    slash_commands = (REPO_ROOT / ".github/workflows/ci-slash-commands.yml").read_text()
+    pipeline = (REPO_ROOT / ".buildkite/pipeline.yml").read_text()
+
+    valid_line = next(line for line in slash_commands.splitlines() if line.strip().startswith("VALID="))
+    assert "unit-nvl" in valid_line
+    assert "[unit-nvl]=unit_test_nvl" in slash_commands
+    assert '''    - label: ":microscope: Unit Tests"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "unit_test_nvl"
+      command: "timeout 90m /opt/fastvideo-ci-vllm-nvl/run-unit"
+      agents:
+        queue: "vllm-nvl-ci"''' in pipeline
 
 
 def test_allowlist_entries_are_still_real_directories():
