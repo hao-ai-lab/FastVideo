@@ -9,6 +9,7 @@ import os
 import contextlib
 import re
 from collections.abc import Callable, Generator
+from functools import wraps
 from itertools import chain
 from typing import Any
 
@@ -167,6 +168,7 @@ def maybe_load_fsdp_model(
     inference_vsa_tile_size: int | None = None,
     lora_path: str | None = None,
     lora_strength: float = 1.0,
+    pre_fsdp_transform: Callable[[nn.Module], nn.Module] | None = None,
 ) -> torch.nn.Module:
     """
     Load the model with FSDP if is training, else load the model without FSDP.
@@ -192,6 +194,9 @@ def maybe_load_fsdp_model(
     logger.info("Loading model with default_dtype: %s", default_dtype)
     with set_default_dtype(default_dtype), torch.device("meta"):
         model = model_cls(**init_params)
+
+    if pre_fsdp_transform is not None:
+        model = pre_fsdp_transform(model)
 
     dtype_selector = getattr(model, "_get_parameter_dtype", None)
     has_mixed_parameter_dtypes = callable(dtype_selector) and any(
@@ -289,16 +294,8 @@ def maybe_load_fsdp_model(
     # are present (lazy imports inside the helper).
     _maybe_quantize_model(model)
 
-    compile_in_loader = enable_torch_compile and training_mode
-    if compile_in_loader:
-        unsupported = _prepare_model_for_compile(model, regional=False)
-        if unsupported is not None:
-            logger.warning("Training torch.compile requested but disabled: %s. Model stays eager.", unsupported)
-        else:
-            compile_kwargs = torch_compile_kwargs or {}
-            logger.info("Enabling torch.compile for FSDP training module with kwargs=%s", compile_kwargs)
-            model = torch.compile(model, **compile_kwargs)
-            logger.info("torch.compile enabled for %s", type(model).__name__)
+    if enable_torch_compile and training_mode:
+        _compile_model_regions(model, torch_compile_kwargs or {})
     elif inference_regional_compile and not training_mode:
         # Inference-side counterpart of the #1718 training regional compile:
         # per-block fullgraph compile right after the transformer loads, no
@@ -385,48 +382,50 @@ def _enable_regional_attention_compile(model: nn.Module) -> int:
 
 
 def _compile_model_regions(model: nn.Module, compile_kwargs: dict[str, Any]) -> int:
-    """Compile repeated mathematical regions of a loaded model.
+    """Compile no-grad calls to repeated regions after FSDP setup.
 
     Only the selected module ``forward`` is replaced. This keeps activation
-    checkpoint wrappers structurally transparent while any module-level hooks
-    (FSDP pre/post, layerwise offload) execute outside the compiled region.
+    checkpoint wrappers structurally transparent while FSDP pre/post hooks
+    execute outside the compiled region. Gradient-bearing calls deliberately
+    stay eager: Inductor's compiled backward is not numerically reliable for
+    the current FA4 + FSDP + checkpointed Wan block stack, while DMD2's
+    simulated rollouts and teacher calls still provide substantial no-grad
+    regions to optimize.
     """
     compile_conditions = getattr(model, "_compile_conditions", None)
     if not compile_conditions:
         raise ValueError(f"{type(model).__name__} does not declare _compile_conditions")
 
     if compile_kwargs.get("fullgraph", True) is not True:
-        raise ValueError("Regional compile requires fullgraph=True")
-    if "mode" in compile_kwargs:
-        # torch.compile forbids passing both `mode` and `options`, and
-        # regional compile always injects options (emulate_precision_casts)
-        # to match the training-side regional-compile configuration. Fail here
-        # with an actionable message instead of letting torch raise a
-        # mode/options conflict about an `options` key the user never wrote.
-        raise ValueError("Regional compile sets inductor options "
-                         "(emulate_precision_casts) and cannot be combined "
-                         "with torch_compile_kwargs['mode']. Remove 'mode' or "
-                         "express its effect via torch_compile_kwargs['options'].")
+        raise ValueError("Regional training compile requires fullgraph=True")
     kwargs = {**compile_kwargs, "fullgraph": True}
-    options = {"emulate_precision_casts": True}
-    options.update(kwargs.get("options") or {})
-    kwargs["options"] = options
     compiled_count = 0
     for name, submodule in list(model.named_modules()):
         if not name:
             continue
         if any(condition(name, submodule) for condition in compile_conditions):
             # Activation checkpoint wrappers are control-flow boundaries, not
-            # mathematical regions. Keep their saved-tensor/recompute logic
-            # eager and compile only the repeated block they own.
+            # mathematical regions. Compiling the wrapper asks AOTAutograd to
+            # trace checkpoint's saved-tensor/recompute machinery and has
+            # produced invalid training gradients. Keep that machinery eager
+            # and compile only no-grad calls to the repeated block it owns.
             compile_target = getattr(submodule, "_checkpoint_wrapped_module", submodule)
-            compile_target.forward = torch.compile(compile_target.forward, **kwargs)
+            eager_forward = compile_target.forward
+            compiled_forward = torch.compile(eager_forward, **kwargs)
+
+            @wraps(eager_forward)
+            def forward(*args, _eager=eager_forward, _compiled=compiled_forward, **forward_kwargs):
+                if torch.is_grad_enabled():
+                    return _eager(*args, **forward_kwargs)
+                return _compiled(*args, **forward_kwargs)
+
+            compile_target.forward = forward
             compiled_count += 1
 
     if compiled_count == 0:
         raise ValueError(f"No submodules in {type(model).__name__} matched _compile_conditions")
     logger.info(
-        "Enabled regional torch.compile for %d submodules in %s with kwargs=%s",
+        "Enabled regional no-grad torch.compile for %d submodules in %s after FSDP setup with kwargs=%s",
         compiled_count,
         type(model).__name__,
         kwargs,

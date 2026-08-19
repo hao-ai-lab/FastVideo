@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import copy
+from functools import partial
 from typing import Any, Literal, TYPE_CHECKING
 
 import torch
@@ -19,7 +20,7 @@ from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
     FlowMatchEulerDiscreteScheduler, )
 from fastvideo.pipelines import TrainingBatch
 from fastvideo.platforms import AttentionBackendEnum
-from fastvideo.training.activation_checkpoint import (
+from fastvideo.train.utils.activation_checkpoint import (
     apply_activation_checkpointing, )
 from fastvideo.training.training_utils import (
     compute_density_for_timestep_sampling,
@@ -124,6 +125,17 @@ class WanModel(ModelBase):
         transformer_override_safetensor: str | None = None,
         attention_backend: AttentionBackendEnum | str | None = None,
     ) -> torch.nn.Module:
+        ckpt_type = (enable_gradient_checkpointing_type or getattr(
+            getattr(training_config, "model", None),
+            "enable_gradient_checkpointing_type",
+            None,
+        ))
+        pre_fsdp_transform = None
+        if trainable and ckpt_type:
+            pre_fsdp_transform = partial(
+                apply_activation_checkpointing,
+                checkpointing_type=ckpt_type,
+            )
         transformer = load_module_from_path(
             model_path=init_from,
             module_type="transformer",
@@ -132,19 +144,8 @@ class WanModel(ModelBase):
             override_transformer_cls_name=(self._transformer_cls_name),
             transformer_override_safetensor=(transformer_override_safetensor),
             attention_backend=attention_backend,
+            pre_fsdp_transform=pre_fsdp_transform,
         )
-        # Fall back to training_config.model if not set on the
-        # model YAML section directly.
-        ckpt_type = (enable_gradient_checkpointing_type or getattr(
-            getattr(training_config, "model", None),
-            "enable_gradient_checkpointing_type",
-            None,
-        ))
-        if trainable and ckpt_type:
-            transformer = apply_activation_checkpointing(
-                transformer,
-                checkpointing_type=ckpt_type,
-            )
         if self._enable_lora_if_configured(transformer):
             return transformer
         transformer = apply_trainable(transformer, trainable=trainable)
