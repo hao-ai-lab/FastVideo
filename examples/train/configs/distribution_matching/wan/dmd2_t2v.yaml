@@ -74,6 +74,7 @@ training:
 
   model:
     enable_gradient_checkpointing_type: full
+    enable_torch_compile: true
 
 callbacks:
   grad_clip:
