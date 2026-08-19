@@ -319,8 +319,13 @@ class MiniMaxH3VSAImpl(AttentionImpl):
             v_pooled = _pool_tiles(value, attn_metadata.variable_block_sizes)
             out_c = torch.matmul(torch.softmax(scores, dim=-1), v_pooled)  # [B, H, n_tiles, D]
             out_c = out_c.permute(0, 2, 1, 3).to(out.dtype)  # [B, n_tiles, H, D]
-            batch, _, heads, dim = out.shape
+            batch, seq_len, heads, dim = out.shape
             n_tiles = attn_metadata.variable_block_sizes.numel()
-            out.view(batch, n_tiles, _TILE_ELEMS, heads,
-                     dim).addcmul_(out_c.unsqueeze(2), gate_compress.view(batch, n_tiles, _TILE_ELEMS, heads, dim))
+            # Out-of-place: on the CuTe backend ``out`` is the tensor FA4's
+            # autograd node saved for its backward, so an in-place add here
+            # bumps its version counter and backward dies with "one of the
+            # variables needed for gradient computation has been modified".
+            out_tiled = out.view(batch, n_tiles, _TILE_ELEMS, heads, dim)
+            gate_tiled = gate_compress.view(batch, n_tiles, _TILE_ELEMS, heads, dim)
+            out = (out_tiled + out_c.unsqueeze(2) * gate_tiled).view(batch, seq_len, heads, dim)
         return out
