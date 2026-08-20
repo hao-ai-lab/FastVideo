@@ -8,7 +8,7 @@
 
 import torch
 
-from yunchang.globals import HAS_FLASH_ATTN
+from .capabilities import HAS_FLASH_ATTN
 
 if HAS_FLASH_ATTN:
     from flash_attn.flash_attn_interface import (

@@ -8,7 +8,7 @@
 
 import torch
 from .utils import RingComm, update_out_and_lse
-from yunchang.kernels import AttnType, select_flash_attn_impl
+from .kernels import AttnType, select_flash_attn_impl
 
 
 def zigzag_ring_flash_attn_forward(
