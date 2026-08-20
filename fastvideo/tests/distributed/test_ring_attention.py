@@ -200,7 +200,9 @@ def test_blockwise_lse_merge_matches_full_attention() -> None:
 
     from flash_attn import flash_attn_func
 
-    from fastvideo.attention.ring._fa_kernels import _fa_forward
+    from fastvideo.attention.ring.kernels.attention import (
+        flash_attn_forward,
+    )
     from fastvideo.attention.ring.utils import update_out_and_lse
 
     device = torch.device("cuda:0")
@@ -255,22 +257,24 @@ def test_blockwise_lse_merge_matches_full_attention() -> None:
 
     softmax_scale = HEAD_SIZE**-0.5
 
-    block_out_0, block_lse_0 = _fa_forward(
+    block_out_0, block_lse_0 = flash_attn_forward(
         q,
         k0,
         v0,
         dropout_p=0.0,
         softmax_scale=softmax_scale,
         causal=False,
+        softcap=0.0,
     )
 
-    block_out_1, block_lse_1 = _fa_forward(
+    block_out_1, block_lse_1 = flash_attn_forward(
         q,
         k1,
         v1,
         dropout_p=0.0,
         softmax_scale=softmax_scale,
         causal=False,
+        softcap=0.0,
     )
 
     merged_out, merged_lse = update_out_and_lse(
@@ -298,7 +302,10 @@ def test_blockwise_lse_merge_matches_full_attention() -> None:
         causal=False,
     )
 
-    _assert_attention_close(merged_out, full_output)
+    _assert_attention_close(
+        merged_out,
+        full_output,
+    )
 
 
 def _run_multi_gpu_worker(output_path: Path) -> None:
