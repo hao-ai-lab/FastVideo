@@ -35,6 +35,7 @@ from .attention import (
     pytorch_attn_forward,
 )
 
+
 class AttnType(Enum):
     AITER = "aiter"
     FA = "fa"
@@ -59,9 +60,8 @@ class AttnType(Enum):
                 return member
         raise ValueError(f"'{s}' is not a valid {cls.__name__}")
 
-def select_flash_attn_impl(
-    impl_type: AttnType, stage: str = "fwd-bwd", attn_processor: torch.nn.Module = None
-):
+
+def select_flash_attn_impl(impl_type: AttnType, stage: str = "fwd-bwd", attn_processor: torch.nn.Module = None):
     if impl_type == AttnType.AITER:
         if stage == "fwd-only":
             return flash_attn_forward_aiter
@@ -107,13 +107,9 @@ def select_flash_attn_impl(
                 # deterministic=False, descale_q=None, descale_k=None, descale_v=None, gqa_parallel=False)
                 from .attention import flash3_attn_func
 
-                assert softmax_scale is not None, f"softmax_scale is required for FA3"
-                assert (
-                    dropout_p == 0.0
-                ), f"dropout_p: {dropout_p} is not supported for FA3"
-                return flash3_attn_func(
-                    q, k, v, softmax_scale=softmax_scale, causal=causal
-                )
+                assert softmax_scale is not None, "softmax_scale is required for FA3"
+                assert (dropout_p == 0.0), f"dropout_p: {dropout_p} is not supported for FA3"
+                return flash3_attn_func(q, k, v, softmax_scale=softmax_scale, causal=causal)
 
             return fn
         else:
@@ -256,9 +252,7 @@ def select_flash_attn_impl(
         if not HAS_SPARSE_SAGE_ATTENTION:
             raise ImportError("SparseSageAttention is not available!")
         if not isinstance(attn_processor, SparseAttentionMeansim):
-            raise ImportError(
-                "SparseSageAttention is only available with a SparseAttentionProcessor class passed in"
-            )
+            raise ImportError("SparseSageAttention is only available with a SparseAttentionProcessor class passed in")
         if stage == "fwd-only":
 
             def fn(q, k, v, causal=False, softmax_scale=None, *args, **kwargs):
@@ -287,11 +281,12 @@ def select_flash_attn_impl(
             return npu_fused_attn_forward
         else:
             raise ValueError(f"Unknown stage: {stage}")
-            
+
     elif attn_processor is not None:
         return attn_processor
     else:
         raise ValueError(f"Unknown flash attention implementation: {impl_type}")
+
 
 __all__ = [
     "AttnType",
