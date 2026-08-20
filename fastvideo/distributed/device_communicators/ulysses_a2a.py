@@ -4,6 +4,10 @@
 Drop-in replacement for DistributedAutograd.AllToAll4D on a single-node
 all-pairs NVLink mesh: same layout, byte-identical results, ~1.5x faster per
 attention layer. Anything else falls back to the NCCL path.
+
+The kernel stores straight into peers' memory through NCCL's device API
+(ncclGetLsaPointer), so NCCL owns the window, the topology and the barrier --
+there is no IPC handle exchange or topology probe here.
 """
 
 import torch
@@ -17,9 +21,6 @@ logger = init_logger(__name__)
 
 # The kernel is template-specialized on the world size, so only these dispatch.
 SUPPORTED_WORLD_SIZES = (2, 4, 6, 8)
-
-# The kernel indexes operands with int32.
-_INT32_MAX = 2**31 - 1
 
 _SUPPORTED_DTYPES = (torch.float16, torch.bfloat16, torch.float32)
 
@@ -49,27 +50,27 @@ class _FusedUlyssesA2A(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output: torch.Tensor):  # type: ignore[override]
-        # Same numel and dtype as the forward output, so the communicator is
-        # already sized for it; only contiguity needs restoring.
+        # Same numel and dtype as the forward output, so the window is already
+        # sized for it; only contiguity needs restoring.
         grad_input = ctx.helper.run_armed(grad_output.contiguous(), 1 - ctx.mode)
         return None, grad_input, None
 
 
 class UlyssesA2AHelper:
-    """Owns the fused communicator for one sequence-parallel group.
+    """Owns the fused all-to-all context for one sequence-parallel group.
 
-    Construction is cheap and non-collective; the communicator is built on first
-    use, once an operand shape is known.
+    Construction is cheap and non-collective; the NCCL window is registered on
+    first use, once an operand size is known.
     """
 
-    def __init__(self, device_group: ProcessGroup, world_size: int, device: torch.device):
+    def __init__(self, device_group: ProcessGroup, world_size: int, device: torch.device, pynccl_comm):
         self.device_group = device_group
         self.world_size = world_size
         self.device = device
+        self.pynccl_comm = pynccl_comm
 
-        self._comm = None
-        self._dtype: torch.dtype | None = None
-        self._max_elems = 0
+        self._handle: int | None = None
+        self._nbytes = 0
         self._disabled_reason: str | None = None
 
         if world_size not in SUPPORTED_WORLD_SIZES:
@@ -83,12 +84,18 @@ class UlyssesA2AHelper:
             self._disabled_reason = reason
             logger.info("Ulysses fused all-to-all disabled: %s", reason)
 
+    def _comm_ptr(self) -> int:
+        comm = self.pynccl_comm.comm
+        return int(getattr(comm, "value", comm))
+
     def _can_attempt(self) -> tuple[bool, str]:
         """Whether this rank could use the fused path, without allocating anything."""
         try:
             from fastvideo_kernel import comm_ops
             if not comm_ops.is_available():
                 return False, "fastvideo-kernel was built without the Ulysses a2a kernel"
+            if not comm_ops.lsa_covers_group(self._comm_ptr(), self.world_size):
+                return False, "the group is not a load-store-accessible (NVLink) mesh"
         except Exception as e:  # noqa: BLE001
             return False, f"backend unavailable ({type(e).__name__}: {e})"
         return True, ""
@@ -99,69 +106,62 @@ class UlyssesA2AHelper:
         dist.all_reduce(vote, op=dist.ReduceOp.MIN, group=self.device_group)
         return bool(vote.item())
 
-    def _build(self, dtype: torch.dtype, max_elems: int) -> bool:
-        """Collectively build a communicator. Returns True if it is armed."""
+    def _build(self, nbytes: int) -> bool:
+        """Collectively register the window. Returns True if it is armed."""
         # The kernel opens with a barrier across every rank, so a rank that falls
         # back alone strands its peers until the NCCL watchdog fires. Hence the
-        # vote, before anything is imported or allocated. There is deliberately
-        # no second vote afterwards: teardown is itself collective while armed,
-        # so recovering from a split state would be that same deadlock.
+        # vote, before anything is registered. There is deliberately no second
+        # vote afterwards: window teardown is itself collective, so recovering
+        # from a split state would be that same deadlock.
         ok, reason = self._can_attempt()
         if not self._agree(ok):
             self._disable(reason or "a peer rank cannot use the fused path")
             return False
 
-        from .ulysses_comm import UlyssesCommunicator
+        from fastvideo_kernel import comm_ops
 
         try:
-            comm = UlyssesCommunicator(
-                self.device_group,
-                max_elems=max_elems,
-                dtype=dtype,
-                backend="auto",
-                device=self.device,
-            )
+            self._handle = comm_ops.init(self._comm_ptr(), nbytes, self.pynccl_comm.rank, self.world_size)
         except Exception as e:  # noqa: BLE001 - never break the caller
-            self._disable(f"communicator construction failed ({type(e).__name__}: {e})")
+            self._disable(f"window registration failed ({type(e).__name__}: {e})")
             return False
 
-        if comm.backend != "nvlink":
-            # Its NCCL fallback is correct but not autograd-aware and no faster
-            # than the path we already have, so hand the work back.
-            self._disable(f"topology not eligible ({comm.fallback_reason})")
-            try:
-                comm.close()
-            except Exception:  # noqa: BLE001
-                logger.warning("Ulysses communicator close() failed after fallback", exc_info=True)
-            return False
-
-        self._comm = comm
-        self._dtype = dtype
-        self._max_elems = max_elems
-        logger.info("Ulysses fused all-to-all armed: world_size=%d dtype=%s capacity=%d elems (%.0f MiB)",
-                    self.world_size, dtype, max_elems, max_elems * dtype.itemsize / 2**20)
+        self._nbytes = nbytes
+        logger.info("Ulysses fused all-to-all armed: world_size=%d window=%.0f MiB", self.world_size, nbytes / 2**20)
         return True
 
     def close(self) -> None:
-        """Release the IPC staging buffer and peer mappings.
+        """Deregister the window.
 
         Collective while armed, so every rank must reach it via
         GroupCoordinator.destroy().
         """
-        if self._comm is None:
+        if self._handle is None:
             return
-        comm, self._comm = self._comm, None
+        handle, self._handle = self._handle, None
         try:
-            comm.close()
+            from fastvideo_kernel import comm_ops
+            comm_ops.dispose(handle)
         except Exception:  # noqa: BLE001 - teardown must not mask a real error
-            logger.warning("Ulysses communicator close() failed", exc_info=True)
+            logger.warning("Ulysses window deregistration failed", exc_info=True)
 
     # -- collective ----------------------------------------------------------
 
     def run_armed(self, x: torch.Tensor, mode: int) -> torch.Tensor:
-        """Run one collective on an already-armed communicator."""
-        assert self._comm is not None, "run_armed called on an unarmed helper"
-        return self._comm.scatter_heads(x) if mode == 0 else self._comm.gather_heads(x)
+        """Run one collective on an already-armed context."""
+        assert self._handle is not None, "run_armed called on an unarmed helper"
+        from fastvideo_kernel import comm_ops
+
+        w = self.world_size
+        if mode == 0:
+            B, S_local, H, D = x.shape
+            out = torch.empty(B, S_local * w, H // w, D, dtype=x.dtype, device=x.device)
+        else:
+            B, S_global, H_local, D = x.shape
+            S_local, H = S_global // w, H_local * w
+            out = torch.empty(B, S_local, H, D, dtype=x.dtype, device=x.device)
+        comm_ops.all_to_all(self._handle, x, out, B, S_local, H, D, mode)
+        return out
 
     def try_all_to_all_4D(self, x: torch.Tensor, scatter_dim: int, gather_dim: int) -> torch.Tensor | None:
         """Fused collective, or None to let the caller use the NCCL path."""
@@ -183,33 +183,27 @@ class UlyssesA2AHelper:
         if mode == 1 and x.shape[1] % self.world_size != 0:
             return None
 
-        numel = x.numel()
-        if numel > _INT32_MAX:
-            self._disable(f"operand of {numel} elements exceeds the kernel's int32 index range")
-            return None
-
-        # Spin-wait barriers and a host-side sync during init make the fused
-        # kernel unsafe to capture.
+        # Spin-wait barriers make the fused kernel unsafe to capture.
         if torch.cuda.is_current_stream_capturing():
             return None
 
-        # dtype and capacity are pinned at construction and the first operand is
-        # not necessarily the largest, so grow rather than fall back.
-        if self._comm is None:
-            if not self._build(x.dtype, numel):
+        # The window is fixed at registration and the first operand is not
+        # necessarily the largest, so grow rather than fall back.
+        nbytes = x.numel() * x.element_size()
+        if self._handle is None:
+            if not self._build(nbytes):
                 return None
-        elif x.dtype != self._dtype or numel > self._max_elems:
-            logger.info("Ulysses communicator rebuild: dtype %s -> %s, capacity %d -> %d elems", self._dtype, x.dtype,
-                        self._max_elems, max(self._max_elems, numel))
+        elif nbytes > self._nbytes:
+            logger.info("Ulysses window grow: %d -> %d bytes", self._nbytes, nbytes)
             self.close()
-            if not self._build(x.dtype, max(self._max_elems, numel)):
+            if not self._build(nbytes):
                 return None
 
         return _FusedUlyssesA2A.apply(self, x, mode)
 
 
-def maybe_create_helper(device_group: ProcessGroup | None, world_size: int,
-                        device: torch.device | None) -> UlyssesA2AHelper | None:
+def maybe_create_helper(device_group: ProcessGroup | None, world_size: int, device: torch.device | None,
+                        pynccl_comm) -> UlyssesA2AHelper | None:
     """Create a helper if the fused path could apply to this group."""
     if not is_enabled():
         return None
@@ -217,4 +211,7 @@ def maybe_create_helper(device_group: ProcessGroup | None, world_size: int,
         return None
     if not dist.is_initialized():
         return None
-    return UlyssesA2AHelper(device_group, world_size, device)
+    # The kernel needs an ncclComm_t for the group; PyNcclCommunicator has one.
+    if pynccl_comm is None or pynccl_comm.disabled:
+        return None
+    return UlyssesA2AHelper(device_group, world_size, device, pynccl_comm)

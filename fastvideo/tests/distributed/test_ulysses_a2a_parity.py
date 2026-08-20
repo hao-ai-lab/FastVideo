@@ -173,24 +173,27 @@ def _worker() -> None:
             want_grad = DeviceCommunicatorBase.all_to_all_4D(comm, g.contiguous(), 1, 2)
             assert torch.equal(xg.grad, want_grad), f"backward parity failed at {(B, S_local, H, D)}"
 
-        # A dtype or capacity change must rebuild the communicator, not
-        # permanently disable the fused path: the first operand a helper sees is
-        # not necessarily representative (the SP warmup used to arm it on tiny
-        # bf16 dummies, which then locked out an fp32 model entirely).
+        # A dtype or size change must not permanently disable the fused path:
+        # the first operand a helper sees is not necessarily representative.
+        # The NCCL window is sized in bytes and is dtype-agnostic, so a dtype
+        # switch alone needs no re-registration -- only growing past the window
+        # does.
+        from fastvideo.distributed.device_communicators.base_device_communicator import (
+            DeviceCommunicatorBase)
+        comm = get_sp_group().device_communicator
         for dtype in (torch.float32, torch.bfloat16):
-            big = torch.randn(3, 128, 8, 64, device=device, dtype=dtype)
-            got = sequence_model_parallel_all_to_all_4D(big, scatter_dim=2, gather_dim=1)
-            from fastvideo.distributed.device_communicators.base_device_communicator import (
-                DeviceCommunicatorBase)
-            comm = get_sp_group().device_communicator
-            want = DeviceCommunicatorBase.all_to_all_4D(comm, big, 2, 1)
-            assert torch.equal(got, want), f"parity failed after switching to {dtype}"
-            if helper is not None and helper._disabled_reason is None:
-                assert helper._dtype == dtype, (
-                    f"helper did not rebuild for {dtype} (still {helper._dtype})")
+            for s_local in (128, 512):  # 512 grows past the window registered above
+                big = torch.randn(3, s_local, 8, 64, device=device, dtype=dtype)
+                got = sequence_model_parallel_all_to_all_4D(big, scatter_dim=2, gather_dim=1)
+                want = DeviceCommunicatorBase.all_to_all_4D(comm, big, 2, 1)
+                assert torch.equal(got, want), (
+                    f"parity failed at dtype={dtype} S_local={s_local}")
+                if helper is not None and helper._disabled_reason is None:
+                    assert helper._handle is not None, (
+                        f"helper lost its window at dtype={dtype} S_local={s_local}")
 
         if rank == 0:
-            armed = helper is not None and helper._comm is not None
+            armed = helper is not None and helper._handle is not None
             reason = helper._disabled_reason if helper is not None else "helper not created"
             print(f"PARITY_OK fused_engaged={armed} reason={reason}", flush=True)
     finally:

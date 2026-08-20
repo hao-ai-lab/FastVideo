@@ -1,11 +1,8 @@
-// Vendored from flashinfer-ai/flashinfer @ 8a94642d83cba0939035868fb6c309b4474a13d6
-// (PR #3820, "Feat/ulysses p2p a2a"), file: include/flashinfer/comm/ulysses_all_to_all.cuh
-// Unmodified except where noted. Do not edit locally -- re-sync from upstream.
-
 /*
  * Copyright (c) 2025 by FlashInfer team.
  *
- * Adapted from ThunderKittens' NVLink all-to-all kernel:
+ * Adapted from flashinfer-ai/flashinfer @ 8a94642d83cba0939035868fb6c309b4474a13d6
+ * (PR #3820), which in turn adapted ThunderKittens' NVLink all-to-all:
  * https://github.com/HazyResearch/ThunderKittens/blob/main/kernels/parallel/all_to_all/all_to_all.cu
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -21,17 +18,20 @@
  * limitations under the License.
  */
 
-// Fused-transpose Ulysses all-to-all over NVLink P2P (CUDA IPC).
+// Fused-transpose Ulysses all-to-all over NVLink, on NCCL's device API.
 //
-// Implements the head-scatter / sequence-gather collective used by Ulysses
-// context parallelism, with the layout permutation folded directly into the
-// cross-GPU write addresses. It reuses the Signal / multi_gpu_barrier machinery
-// from the (vLLM-derived) custom all-reduce kernel for inter-GPU sync.
+// The index math and slab decomposition below are upstream's. What differs is
+// where the peer pointers and the barrier come from. Upstream hand-rolls CUDA
+// IPC: a table of peer pointers built with cudaIpcOpenMemHandle, plus vLLM's
+// Signal/multi_gpu_barrier. Since NCCL 2.28 both are available directly:
 //
-// Push model: each rank reads from its *local* input tensor (no registration
-// required) and writes the head block destined for each peer directly into that
-// peer's IPC-registered output staging buffer. Only the output staging buffers
-// and the signal buffers need to be IPC-shared.
+//   out_ptrs.ptrs[peer]                -> ncclGetLsaPointer(win, off, peer)
+//   multi_gpu_barrier<N, true>         -> bar.sync(coop, memory_order_relaxed)
+//   multi_gpu_barrier<N, false, true>  -> bar.sync(coop, memory_order_acq_rel)
+//
+// which removes the IPC choreography, the vendored barrier, and the NVML
+// topology probe -- NCCL already knows which ranks are load-store accessible,
+// and reports it as ncclTeamLsa.
 //
 // head_dim == 2 layout, uniform sequence splits. With
 //   W        = ulysses world size
@@ -46,52 +46,24 @@
 // In both modes the unit of transfer is a contiguous (H_local * D) block, so
 // every cross-GPU store is fully coalesced.
 
-#ifndef FLASHINFER_COMM_ULYSSES_ALL_TO_ALL_CUH_
-#define FLASHINFER_COMM_ULYSSES_ALL_TO_ALL_CUH_
+#ifndef FASTVIDEO_COMM_ULYSSES_ALL_TO_ALL_CUH_
+#define FASTVIDEO_COMM_ULYSSES_ALL_TO_ALL_CUH_
 
 #include <cstdint>
 
-#include "comm/vllm_custom_all_reduce.cuh"  // MODIFIED: was flashinfer/comm/...
+#include <nccl.h>
+#include <nccl_device.h>
 
-namespace flashinfer {
+namespace fastvideo {
 namespace comm {
 namespace ulysses {
 
-// Reuse the (vLLM-derived) IPC signal / barrier machinery from custom all-reduce.
-using vllm::kMaxBlocks;
-using vllm::multi_gpu_barrier;
-using vllm::RankData;
-using vllm::RankSignals;
-using vllm::Signal;
-
 constexpr int kUlyssesThreads = 512;
-
-// Handle holding the IPC-shared output staging buffers and signals for one
-// Ulysses group. It does not own any device memory; buffers are passed in from
-// Python. Passed by pointer (as an int64 handle) across the FFI boundary.
-class UlyssesA2A {
- public:
-  int rank_;
-  int world_size_;
-  bool full_nvlink_;
-
-  RankSignals sg_;
-  Signal* self_sg_;
-  // ptrs[r] points to rank r's output staging buffer (device pointer, opened
-  // via IPC for remote ranks). Passed to the kernel by value.
-  RankData out_ptrs_;
-  // Convenience copy of this rank's own output staging buffer base pointer.
-  void* local_out_buf_;
-
-  UlyssesA2A(Signal** signals, void** out_bufs, int rank, int world_size, bool full_nvlink)
-      : rank_(rank), world_size_(world_size), full_nvlink_(full_nvlink), self_sg_(signals[rank]) {
-    for (int i = 0; i < world_size_; i++) {
-      sg_.signals[i] = signals[i];
-      out_ptrs_.ptrs[i] = out_bufs[i];
-    }
-    local_out_buf_ = out_bufs[rank];
-  }
-};
+// Upstream's cap came from the vendored Signal struct's fixed-size counter
+// arrays. NCCL's barrier has no such limit, but the grid stays modest on
+// purpose: this is link-bandwidth bound, so a small grid leaves the rest of the
+// GPU free without costing throughput.
+constexpr int kMaxBlocks = 36;
 
 // Shared movement body for the fused-transpose all-to-all (no barriers).
 //
@@ -105,8 +77,9 @@ class UlyssesA2A {
 // mapping produced (which collapsed badly at large world sizes where H_local is
 // small).
 template <typename T, int NGPUS, int MODE>
-__device__ __forceinline__ void ulysses_a2a_move(const T* __restrict__ local_in, RankData out_ptrs,
-                                                 int rank, int B, int S_local, int H_local, int D) {
+__device__ __forceinline__ void ulysses_a2a_move(const T* __restrict__ local_in,
+                                                 void* const* peer_ptrs, int rank, int B,
+                                                 int S_local, int H_local, int D) {
   static_assert(MODE == 0 || MODE == 1, "MODE must be 0 or 1");
   const int W = NGPUS;
   const int64_t H = static_cast<int64_t>(H_local) * W;
@@ -158,7 +131,7 @@ __device__ __forceinline__ void ulysses_a2a_move(const T* __restrict__ local_in,
       int64_t src_off, dst_off;
       const int64_t peer = offsets(row, src_off, dst_off);
       const Vec* s4 = reinterpret_cast<const Vec*>(local_in + src_off);
-      Vec* d4 = reinterpret_cast<Vec*>((T*)out_ptrs.ptrs[peer] + dst_off);
+      Vec* d4 = reinterpret_cast<Vec*>((T*)peer_ptrs[peer] + dst_off);
       d4[unit] = s4[unit];
     }
   } else {
@@ -167,7 +140,7 @@ __device__ __forceinline__ void ulysses_a2a_move(const T* __restrict__ local_in,
       int64_t src_off, dst_off;
       const int64_t peer = offsets(row, src_off, dst_off);
       const T* s_ptr = local_in + src_off;
-      T* d_ptr = (T*)out_ptrs.ptrs[peer] + dst_off;
+      T* d_ptr = (T*)peer_ptrs[peer] + dst_off;
       for (int64_t i = tid; i < block_len; i += nthr) {
         d_ptr[i] = s_ptr[i];
       }
@@ -179,18 +152,28 @@ __device__ __forceinline__ void ulysses_a2a_move(const T* __restrict__ local_in,
 // specializes and the coalesced slab decomposition is fully unrolled per mode.
 template <typename T, int NGPUS, int MODE>
 __global__ void __launch_bounds__(kUlyssesThreads, 1)
-    ulysses_a2a_kernel(const T* __restrict__ local_in, RankData out_ptrs, RankSignals sg,
-                       Signal* self_sg, int rank, int B, int S_local, int H_local, int D) {
+    ulysses_a2a_kernel(const T* __restrict__ local_in, ncclDevComm devComm, ncclWindow_t win,
+                       size_t win_offset, int rank, int B, int S_local, int H_local, int D) {
+  // Resolve the peer window pointers once: the movement loop would otherwise
+  // call ncclGetLsaPointer per 16B store.
+  void* peer_ptrs[NGPUS];
+#pragma unroll
+  for (int p = 0; p < NGPUS; ++p) {
+    peer_ptrs[p] = ncclGetLsaPointer(win, win_offset, p);
+  }
+
+  ncclLsaBarrierSession<ncclCoopCta> bar(ncclCoopCta(), devComm, ncclTeamTagLsa(), /*index=*/0);
+
   // Ensure every rank has entered before we start writing into peer buffers.
-  multi_gpu_barrier<NGPUS, true>(sg, self_sg, rank);
-  ulysses_a2a_move<T, NGPUS, MODE>(local_in, out_ptrs, rank, B, S_local, H_local, D);
-  // Release-acquire barrier so all peer writes are visible before any rank
-  // reads its own (now complete) output staging buffer.
-  multi_gpu_barrier<NGPUS, false, true>(sg, self_sg, rank);
+  bar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
+  ulysses_a2a_move<T, NGPUS, MODE>(local_in, peer_ptrs, rank, B, S_local, H_local, D);
+  // Release-acquire so all peer writes are visible before any rank reads its
+  // own (now complete) window.
+  bar.sync(ncclCoopCta(), cuda::memory_order_acq_rel);
 }
 
 }  // namespace ulysses
 }  // namespace comm
-}  // namespace flashinfer
+}  // namespace fastvideo
 
-#endif  // FLASHINFER_COMM_ULYSSES_ALL_TO_ALL_CUH_
+#endif  // FASTVIDEO_COMM_ULYSSES_ALL_TO_ALL_CUH_
