@@ -44,13 +44,7 @@ class CudaCommunicator(DeviceCommunicatorBase):
         return out
 
     def all_to_all_4D(self, input_: torch.Tensor, scatter_dim: int = 2, gather_dim: int = 1) -> torch.Tensor:
-        """Sequence-parallel all-to-all, preferring the fused NVLink kernel.
-
-        The helper returns None whenever the fused path does not apply (wrong
-        topology, world size, dtype, shape, or graph capture), in which case
-        this is exactly the inherited NCCL implementation. Both produce
-        byte-identical results.
-        """
+        """All-to-all over the sequence parallel group, fused when available."""
         if self.ulysses_a2a is not None:
             output = self.ulysses_a2a.try_all_to_all_4D(input_, scatter_dim, gather_dim)
             if output is not None:
@@ -85,9 +79,8 @@ class CudaCommunicator(DeviceCommunicatorBase):
 
     def destroy(self) -> None:
         if self.ulysses_a2a is not None:
-            # Collective while armed; reached by every rank via
-            # GroupCoordinator.destroy(). Must run before the process group is
-            # torn down, which is why it is first.
+            # Collective while armed, so it must run before the process group is
+            # torn down -- hence first.
             self.ulysses_a2a.close()
             self.ulysses_a2a = None
         if self.pynccl_comm is not None:

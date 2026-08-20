@@ -1,17 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Ulysses sequence-parallel all-to-all ops.
 
-Thin wrappers over the compiled kernel in ``csrc/comm/ulysses_all_to_all.cu``.
-These are deliberately unopinionated: they validate nothing beyond what the C++
-side already enforces, and they know nothing about process groups or IPC. The
-orchestration -- allocating the IPC-shared staging buffers, exchanging handles,
-probing the topology, and agreeing on a backend across ranks -- lives in
-``fastvideo/distributed/device_communicators/``, because it needs
-``torch.distributed`` and this package deliberately does not depend on it.
-
-``is_available()`` is the supported way to ask whether the kernel was built into
-this wheel; every entry point raises a clear error rather than an AttributeError
-when it was not.
+Thin wrappers over csrc/comm/ulysses_all_to_all.cu. The IPC and topology
+orchestration lives in fastvideo/distributed/device_communicators/, since it
+needs torch.distributed and this package does not depend on it.
 """
 
 from typing import List
@@ -48,20 +40,13 @@ def init(out_ipc_ptrs: List[int], signal_ipc_ptrs: List[int], rank: int, world_s
          full_nvlink: bool) -> int:
     """Create an all-to-all context over already-opened IPC pointers.
 
-    ``out_ipc_ptrs[j]`` and ``signal_ipc_ptrs[j]`` must be pointers valid in
-    *this* process that address rank ``j``'s buffers -- i.e. the result of
-    ``cudaIpcOpenMemHandle`` on the handle rank ``j`` exported. Building that
-    table is the caller's job.
+    ``out_ipc_ptrs[j]`` and ``signal_ipc_ptrs[j]`` must be pointers valid in this
+    process that address rank ``j``'s buffers; building that table is the
+    caller's job, as is verifying all-pairs NVLink P2P.
 
-    ``full_nvlink`` must be True: the kernel pushes over all-pairs NVLink P2P and
-    has no non-P2P path, so the caller has to have verified the topology.
-
-    Returns an opaque handle (a host-side ``UlyssesA2A*`` as an int, not a device
-    pointer). Free it with :func:`dispose`.
-
-    The C++ side zeroes this rank's signal buffer with an async memset, so the
-    caller must synchronize the device and then issue a process-group barrier
-    before the first :func:`all_to_all`.
+    Returns an opaque handle, freed with :func:`dispose`. The C++ side zeroes
+    this rank's signal buffer asynchronously, so the caller must synchronize the
+    device and issue a process-group barrier before the first :func:`all_to_all`.
     """
     _require()
     if world_size not in _SUPPORTED_WORLD_SIZES:
@@ -82,15 +67,13 @@ def dispose(handle: int) -> None:
 
 def all_to_all(handle: int, inp: torch.Tensor, out: torch.Tensor, B: int, S_local: int, H: int,
                D: int, mode: int) -> None:
-    """Run one fused all-to-all, writing the result into ``out``.
+    """Run one fused all-to-all on the current stream, writing into ``out``.
 
-    ``mode == 0`` (scatter heads): ``[B, S_local, H, D] -> [B, S_global, H_local, D]``
-    ``mode == 1`` (gather heads):  ``[B, S_global, H_local, D] -> [B, S_local, H, D]``
+    ``mode == 0``: ``[B, S_local, H, D] -> [B, S_global, H_local, D]``
+    ``mode == 1``: ``[B, S_global, H_local, D] -> [B, S_local, H, D]``
 
-    ``H`` is the *global* head count; ``H_local = H // world_size`` and
-    ``S_global = S_local * world_size``. Runs on the current CUDA stream. Every
-    rank must call with consistent geometry in the same order -- a mismatch is a
-    collective failure, as with any collective library.
+    ``H`` is the global head count. Every rank must call with consistent
+    geometry in the same order.
     """
     _require()
     _ops.ulysses_a2a(int(handle), inp, out, int(B), int(S_local), int(H), int(D), int(mode))

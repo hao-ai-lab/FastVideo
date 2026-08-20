@@ -38,9 +38,7 @@ dependencies = [
     # CUDA-only: no wheels for non-Linux platforms, and the sdist build shells
     # out to nvcc unconditionally. Gate on sys_platform so installs on macOS
     # (MPS) and other non-Linux platforms don't try to build it from source.
-    # >=0.6.16 for flashinfer.comm.UlyssesCommunicator (the fused
-    # sequence-parallel all-to-all; see distributed/device_communicators/ulysses_a2a.py).
-    "flashinfer-python>=0.6.16; sys_platform == 'linux'",
+    "flashinfer-python; sys_platform == 'linux'",
 
     # Acceleration & Optimization
     "accelerate==1.0.1",

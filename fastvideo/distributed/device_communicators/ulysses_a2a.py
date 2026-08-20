@@ -1,33 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-"""FlashInfer fused-transpose Ulysses all-to-all for sequence parallelism.
+"""Fused NVLink all-to-all for Ulysses sequence parallelism.
 
-The sequence-parallel attention path performs two all-to-alls per attention
-call: one that trades the sequence shard for a head shard before attention,
-and its inverse afterwards (see ``fastvideo/attention/layer.py``). The default
-implementation in :class:`DistributedAutograd.AllToAll4D` expresses that as
-``permute -> dist.all_to_all_single -> permute``, because NCCL can only move
-contiguous byte ranges and therefore needs the data pre-arranged into
-per-destination blocks. Those permutes cost three full-tensor round trips
-through HBM per collective and do no useful work.
-
-FlashInfer's kernel folds the layout permutation into the cross-GPU write
-addresses: each rank reads its local operand and pushes each destination block
-straight into the peer's IPC-shared staging buffer over NVLink, so the same
-bytes cross the wire with one pass over memory instead of four. Measured on
-GB200 (sp_size=4, bf16): 1.50x on the head-scatter, 1.77x on the head-gather,
-1.57x on the 3-scatter + 1-gather pattern an attention layer issues.
-
-Layout equivalence with :class:`DistributedAutograd.AllToAll4D` is exact --
-both compute ``y_r[b, j*S_local + s, hl, d] = x_j[b, s, r*H_local + hl, d]``
--- so this is a drop-in replacement rather than a numerically different path,
-and it is verified byte-for-byte in
-``fastvideo/tests/distributed/test_ulysses_a2a_parity.py``.
-
-The fused kernel only applies to a verified single-node all-pairs NVLink mesh
-with a world size in ``(2, 4, 6, 8)``; everything else (multi-node, PCIe-only,
-odd world sizes, oversized or oddly-typed operands, CUDA graph capture) falls
-back to the existing NCCL path. Fallback is always silent and always correct:
-a communication optimization must never be able to break a run.
+Drop-in replacement for DistributedAutograd.AllToAll4D on a single-node
+all-pairs NVLink mesh: same layout, byte-identical results, ~1.5x faster per
+attention layer. Anything else falls back to the NCCL path.
 """
 
 import torch
@@ -39,8 +15,7 @@ from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 
-# The kernel is template-specialized on the world size (RankData holds 8 peer
-# pointers and NGPUS is a compile-time constant), so only these are dispatchable.
+# The kernel is template-specialized on the world size, so only these dispatch.
 SUPPORTED_WORLD_SIZES = (2, 4, 6, 8)
 
 # The kernel indexes operands with int32.
@@ -48,25 +23,22 @@ _INT32_MAX = 2**31 - 1
 
 _SUPPORTED_DTYPES = (torch.float16, torch.bfloat16, torch.float32)
 
-# (scatter_dim, gather_dim) -> flashinfer mode.
-#   mode 0 == scatter_heads: [B, S_local, H, D]        -> [B, S_global, H_local, D]
-#   mode 1 == gather_heads:  [B, S_global, H_local, D] -> [B, S_local, H, D]
+# (scatter_dim, gather_dim) -> kernel mode.
+#   0: [B, S_local, H, D]        -> [B, S_global, H_local, D]
+#   1: [B, S_global, H_local, D] -> [B, S_local, H, D]
 _MODE_FROM_DIMS = {(2, 1): 0, (1, 2): 1}
 
 
 def is_enabled() -> bool:
-    """Whether the fused path is opted in via ``FASTVIDEO_ULYSSES_A2A``."""
+    """Whether the fused path is opted in via FASTVIDEO_ULYSSES_A2A."""
     return envs.FASTVIDEO_ULYSSES_A2A == "auto"
 
 
 class _FusedUlyssesA2A(torch.autograd.Function):
-    """Autograd wrapper around the fused collective.
+    """Differentiable fused all-to-all.
 
-    The two directions are exact inverses of each other, so the backward of a
-    head-scatter is a head-gather and vice versa. No gradient scaling is
-    involved: Ulysses redistributes activations, it does not reduce them, so
-    every gradient element has exactly one source (unlike an all-reduce, whose
-    backward must accumulate).
+    The two directions are exact inverses, and Ulysses redistributes activations
+    rather than reducing them, so backward is the opposite mode with no scaling.
     """
 
     @staticmethod
@@ -77,22 +49,17 @@ class _FusedUlyssesA2A(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output: torch.Tensor):  # type: ignore[override]
-        # The incoming gradient has the same element count and dtype as this
-        # call's output, so the communicator is already sized for it; only
-        # contiguity needs restoring (autograd may hand back a view).
+        # Same numel and dtype as the forward output, so the communicator is
+        # already sized for it; only contiguity needs restoring.
         grad_input = ctx.helper.run_armed(grad_output.contiguous(), 1 - ctx.mode)
         return None, grad_input, None
 
 
 class UlyssesA2AHelper:
-    """Owns the FlashInfer communicator for one sequence-parallel group.
+    """Owns the fused communicator for one sequence-parallel group.
 
-    Construction here is deliberately cheap and non-collective: the FlashInfer
-    communicator is built on first use instead, because its constructor sizes a
-    fixed staging buffer from ``max_elems`` and the process-group setup runs
-    long before any activation shape is known. Building it lazily is safe
-    because every rank runs the same module code and therefore reaches the same
-    attention call with the same shapes.
+    Construction is cheap and non-collective; the communicator is built on first
+    use, once an operand shape is known.
     """
 
     def __init__(self, device_group: ProcessGroup, world_size: int, device: torch.device):
@@ -103,8 +70,6 @@ class UlyssesA2AHelper:
         self._comm = None
         self._dtype: torch.dtype | None = None
         self._max_elems = 0
-        # Set once the fused path is known to be unusable for this group, so
-        # the topology probe and its collectives run at most once.
         self._disabled_reason: str | None = None
 
         if world_size not in SUPPORTED_WORLD_SIZES:
@@ -119,12 +84,7 @@ class UlyssesA2AHelper:
             logger.info("Ulysses fused all-to-all disabled: %s", reason)
 
     def _can_attempt(self) -> tuple[bool, str]:
-        """Whether this rank could use the fused path at all.
-
-        Deliberately cheap and side-effect free: it allocates nothing and starts
-        no collective, so it is safe to evaluate before the ranks have agreed on
-        anything.
-        """
+        """Whether this rank could use the fused path, without allocating anything."""
         try:
             from fastvideo_kernel import comm_ops
             if not comm_ops.is_available():
@@ -140,21 +100,12 @@ class UlyssesA2AHelper:
         return bool(vote.item())
 
     def _build(self, dtype: torch.dtype, max_elems: int) -> bool:
-        """Collectively build a communicator. Returns True if it is armed.
-
-        The fused kernel opens with a barrier across every rank, so a rank that
-        quietly falls back to NCCL while its peers proceed does not merely lose
-        the optimization -- it strands them, and the job hangs until the NCCL
-        watchdog fires. Deciding locally is therefore never correct here, even
-        for a condition as mundane as an import failing on one node.
-
-        So the ranks vote before anything is imported or allocated. Past that
-        point every remaining failure is arbitrated by the backend's own
-        group-wide protocol, which either arms all ranks or none. There is
-        deliberately no second vote afterwards: teardown is itself collective
-        while armed, so a recovery attempt from a split state would be the very
-        deadlock it was trying to avoid.
-        """
+        """Collectively build a communicator. Returns True if it is armed."""
+        # The kernel opens with a barrier across every rank, so a rank that falls
+        # back alone strands its peers until the NCCL watchdog fires. Hence the
+        # vote, before anything is imported or allocated. There is deliberately
+        # no second vote afterwards: teardown is itself collective while armed,
+        # so recovering from a split state would be that same deadlock.
         ok, reason = self._can_attempt()
         if not self._agree(ok):
             self._disable(reason or "a peer rank cannot use the fused path")
@@ -175,9 +126,8 @@ class UlyssesA2AHelper:
             return False
 
         if comm.backend != "nvlink":
-            # Not an error: FlashInfer's own NCCL fallback is correct, but it is
-            # not autograd-aware and is no faster than the path we already have,
-            # so hand the work back to DistributedAutograd.AllToAll4D.
+            # Its NCCL fallback is correct but not autograd-aware and no faster
+            # than the path we already have, so hand the work back.
             self._disable(f"topology not eligible ({comm.fallback_reason})")
             try:
                 comm.close()
@@ -192,27 +142,11 @@ class UlyssesA2AHelper:
                     self.world_size, dtype, max_elems, max_elems * dtype.itemsize / 2**20)
         return True
 
-    def precompile(self) -> None:
-        """Report at warmup whether the fused path is usable.
-
-        The kernel ships prebuilt in the fastvideo-kernel wheel, so unlike the
-        JIT-based predecessor there is nothing to compile here. What remains is
-        worth keeping: surfacing at startup, once, whether the kernel is present
-        at all -- otherwise a wheel built without it looks identical to a slow
-        run. Deliberately does not construct a communicator, since the warmup's
-        dummy shapes and dtype are not the ones the model will use.
-        """
-        if self._disabled_reason is not None or not is_enabled():
-            return
-        ok, reason = self._can_attempt()
-        if not ok:
-            logger.info("Ulysses fused all-to-all unavailable at warmup: %s", reason)
-
     def close(self) -> None:
         """Release the IPC staging buffer and peer mappings.
 
-        Collective while armed, so it must be reached by every rank -- which it
-        is, via ``GroupCoordinator.destroy()``.
+        Collective while armed, so every rank must reach it via
+        GroupCoordinator.destroy().
         """
         if self._comm is None:
             return
@@ -230,14 +164,7 @@ class UlyssesA2AHelper:
         return self._comm.scatter_heads(x) if mode == 0 else self._comm.gather_heads(x)
 
     def try_all_to_all_4D(self, x: torch.Tensor, scatter_dim: int, gather_dim: int) -> torch.Tensor | None:
-        """Fused collective, or ``None`` to let the caller use the NCCL path.
-
-        Guards are ordered cheapest-first so the common reject costs a couple of
-        comparisons. Every rejection is silent and local except the topology
-        probe and the (re)build, which are collective -- and those are reached
-        by all ranks together because the deciding inputs (world size, dtype,
-        shape) are identical across ranks under SPMD execution.
-        """
+        """Fused collective, or None to let the caller use the NCCL path."""
         if self._disabled_reason is not None or not is_enabled():
             return None
 
@@ -250,10 +177,7 @@ class UlyssesA2AHelper:
         if x.device != self.device:
             return None
 
-        # The head count must split across ranks for a scatter, and the global
-        # sequence must split for a gather. FastVideo pads the sequence to a
-        # multiple of sp_size before sharding, so the gather case holds by
-        # construction; the scatter case depends on the model's head count.
+        # Scatter splits the heads, gather splits the global sequence.
         if mode == 0 and x.shape[2] % self.world_size != 0:
             return None
         if mode == 1 and x.shape[1] % self.world_size != 0:
@@ -269,10 +193,8 @@ class UlyssesA2AHelper:
         if torch.cuda.is_current_stream_capturing():
             return None
 
-        # The communicator pins both dtype and capacity at construction, and the
-        # first operand seen is not necessarily representative. Rebuild rather
-        # than fall back: a DiT uses one or two distinct shapes and a single
-        # dtype, so this settles within the first step and is not a hot path.
+        # dtype and capacity are pinned at construction and the first operand is
+        # not necessarily the largest, so grow rather than fall back.
         if self._comm is None:
             if not self._build(x.dtype, numel):
                 return None
@@ -288,7 +210,7 @@ class UlyssesA2AHelper:
 
 def maybe_create_helper(device_group: ProcessGroup | None, world_size: int,
                         device: torch.device | None) -> UlyssesA2AHelper | None:
-    """Create a helper if the fused path could conceivably apply to this group."""
+    """Create a helper if the fused path could apply to this group."""
     if not is_enabled():
         return None
     if world_size <= 1 or device_group is None or device is None or device.type != "cuda":
