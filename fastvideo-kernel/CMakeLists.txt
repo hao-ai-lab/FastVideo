@@ -115,8 +115,22 @@ list(APPEND TORCH_INCLUDE_DIRS ${TORCH_INCLUDE_PATHS})
 find_package(Torch REQUIRED)
 
 # Include directories
+# NCCL for the sequence-parallel comm kernel (device API, needs >= 2.28).
+# Resolve via torch, which already depends on the same nccl the runtime loads.
+execute_process(
+    COMMAND "${Python_EXECUTABLE}" -c
+        "import os,glob,torch;d=os.path.join(os.path.dirname(os.path.dirname(torch.__file__)),'nvidia','nccl');print(os.path.join(d,'include') if os.path.isdir(d) else '')"
+    OUTPUT_VARIABLE NCCL_INCLUDE_DIR OUTPUT_STRIP_TRAILING_WHITESPACE)
+execute_process(
+    COMMAND "${Python_EXECUTABLE}" -c
+        "import os,glob,torch;d=os.path.join(os.path.dirname(os.path.dirname(torch.__file__)),'nvidia','nccl','lib');c=glob.glob(os.path.join(d,'libnccl.so*'));print(c[0] if c else '')"
+    OUTPUT_VARIABLE NCCL_LIBRARY OUTPUT_STRIP_TRAILING_WHITESPACE)
+message(STATUS "NCCL include: ${NCCL_INCLUDE_DIR}")
+message(STATUS "NCCL library: ${NCCL_LIBRARY}")
+
 include_directories(
     ${CMAKE_SOURCE_DIR}/include
+    ${NCCL_INCLUDE_DIR}
     ${CMAKE_SOURCE_DIR}/include/cutlass/include
     ${CMAKE_SOURCE_DIR}/include/tk/include
     ${CMAKE_SOURCE_DIR}/include/tk/prototype
@@ -306,11 +320,11 @@ if(BUILD_CXX_KERNELS)
         csrc/turbodiffusion/norm/rmsnorm.cu
         csrc/turbodiffusion/norm/layernorm.cu
         csrc/turbodiffusion/quant/quant.cu
-        # Ulysses sequence-parallel all-to-all. Unlike the TK and FP4 kernels
-        # this needs no arch gate: it is plain CUDA (int4 vector loads, standard
-        # atomics) and builds for every arch in TORCH_CUDA_ARCH_LIST. Whether it
-        # can actually run is a runtime property (all-pairs NVLink P2P), checked
-        # by the topology probe on the Python side.
+        # Ulysses sequence-parallel all-to-all. Needs no arch gate: it is plain
+        # CUDA (int4 vector loads) and builds for every arch in
+        # TORCH_CUDA_ARCH_LIST. Whether it can run is a runtime property --
+        # whether the group is load-store accessible -- which NCCL reports.
+        # Requires NCCL >= 2.28 for the device API (ncclGetLsaPointer).
         csrc/comm/ulysses_all_to_all.cu
     )
     
@@ -388,6 +402,9 @@ if(BUILD_CXX_KERNELS)
     # Link against Torch libraries to avoid undefined symbols at import time
     # (e.g., torch::autograd vtables) when loading the extension module.
     target_link_libraries(fastvideo_kernel_ops PRIVATE ${TORCH_LIBRARIES})
+    if(NCCL_LIBRARY)
+        target_link_libraries(fastvideo_kernel_ops PRIVATE ${NCCL_LIBRARY})
+    endif()
 
     # Also link against libtorch_python to satisfy Python-binding symbols
     # (e.g., torch::PyWarningHandler) required by torch/extension.h.

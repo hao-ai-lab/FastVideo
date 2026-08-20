@@ -28,7 +28,7 @@ class CudaCommunicator(DeviceCommunicatorBase):
 
         # Optional fused Ulysses all-to-all. Cheap and non-collective to create;
         # it arms itself lazily on first use, once an operand shape is known.
-        self.ulysses_a2a = maybe_create_helper(self.device_group, self.world_size, self.device)
+        self.ulysses_a2a = maybe_create_helper(self.device_group, self.world_size, self.device, self.pynccl_comm)
 
     def all_reduce(self, input_, op: torch.distributed.ReduceOp | None = None):
         pynccl_comm = self.pynccl_comm
