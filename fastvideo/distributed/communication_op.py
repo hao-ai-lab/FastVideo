@@ -148,15 +148,6 @@ def warmup_sequence_parallel_communication(device: torch.device | None = None) -
     dummy3 = torch.zeros(batch_size, 8, num_heads // sp_world_size, head_dim, device=device, dtype=torch.bfloat16)
     _ = sequence_model_parallel_all_gather(dummy3, dim=2)
 
-    # Compile the fused Ulysses kernel now, if it is enabled. On a cold cache
-    # the JIT takes tens of seconds; doing it here keeps it out of the first
-    # forward pass. Only the compile is hoisted -- the communicator itself is
-    # left to arm on the first real operand, because these dummy shapes and
-    # dtype are not the ones the model will use.
-    helper = getattr(get_sp_group().device_communicator, "ulysses_a2a", None)
-    if helper is not None:
-        helper.precompile()
-
     # Synchronize to ensure warmup completes
     torch.cuda.synchronize(device)
 

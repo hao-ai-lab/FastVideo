@@ -635,9 +635,8 @@ class GroupCoordinator:
         return self.device_communicator.recv(size, dtype, src)
 
     def destroy(self) -> None:
-        # The device communicator is torn down first: its teardown may itself be
-        # collective (the fused Ulysses all-to-all closes IPC peer mappings
-        # group-wide), so the process groups must still be alive for it.
+        # Torn down first: communicator teardown can itself be collective, so
+        # the process groups must still be alive for it.
         if self.device_communicator is not None:
             self.device_communicator.destroy()
         if self.device_group is not None:
