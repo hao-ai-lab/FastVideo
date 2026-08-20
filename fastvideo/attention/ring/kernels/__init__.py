@@ -35,6 +35,15 @@ from .attention import (
     pytorch_attn_forward,
 )
 
+if HAS_FLASH_ATTN:
+    from flash_attn import flash_attn_func
+
+if HAS_SAGE_ATTENTION:
+    import sageattention
+
+if HAS_SPARSE_SAGE_ATTENTION:
+    from spas_sage_attn.autotune import SparseAttentionMeansim
+
 
 class AttnType(Enum):
     AITER = "aiter"
