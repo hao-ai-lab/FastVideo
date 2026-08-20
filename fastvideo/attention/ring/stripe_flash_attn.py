@@ -7,7 +7,7 @@
 #   https://github.com/zhuzilin/ring-flash-attention
 
 import torch
-from yunchang.kernels import select_flash_attn_impl, AttnType
+from .kernels import AttnType, select_flash_attn_impl
 from .utils import RingComm, update_out_and_lse
 
 
