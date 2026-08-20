@@ -7,9 +7,12 @@
 #   https://github.com/feifeibear/long-context-attention
 
 import torch
-from yunchang.kernels import AttnType
+from .kernels import AttnType
 from .utils import RingComm, update_out_and_lse
-from yunchang.kernels.attention import pytorch_attn_forward, pytorch_attn_backward
+from .kernels.attention import (
+    pytorch_attn_backward,
+    pytorch_attn_forward,
+)
 
 
 def ring_pytorch_attn_func(

@@ -8,9 +8,10 @@
 
 import torch
 from .utils import RingComm, update_npu_out
-from yunchang.kernels.attention import (
-    npu_fused_attn_forward, )
-from yunchang.kernels import select_flash_attn_impl, AttnType
+from .kernels import AttnType, select_flash_attn_impl
+from .kernels.attention import (
+    npu_fused_attn_forward,
+)
 
 
 def ring_npu_flash_attn_forward(process_group,
