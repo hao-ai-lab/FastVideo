@@ -415,22 +415,14 @@ class MiniMaxH3LoraModel(MiniMaxH3Model):
     ) -> None:
         lora_config = LoraConfig.coerce(lora)
         if lora_config is None or not lora_config.enable:
-            raise ValueError(
-                "MiniMaxH3LoraModel requires models.student.lora.enable=true"
-            )
+            raise ValueError("MiniMaxH3LoraModel requires models.student.lora.enable=true")
         if not lora_config.target_modules:
-            raise ValueError(
-                "MiniMaxH3LoraModel requires a non-empty "
-                "models.student.lora.target_modules list"
-            )
+            raise ValueError("MiniMaxH3LoraModel requires a non-empty "
+                             "models.student.lora.target_modules list")
         if not trainable:
             raise ValueError("MiniMaxH3LoraModel requires trainable=true")
 
-        expected_layers = (
-            int(expected_lora_layers)
-            if expected_lora_layers is not None
-            else None
-        )
+        expected_layers = (int(expected_lora_layers) if expected_lora_layers is not None else None)
         if expected_layers is not None and expected_layers <= 0:
             raise ValueError("expected_lora_layers must be positive")
 
@@ -451,26 +443,17 @@ class MiniMaxH3LoraModel(MiniMaxH3Model):
         if not self._enable_lora_if_configured(self.transformer):
             raise RuntimeError("Failed to enable MiniMax H3 LoRA training")
 
-        if (
-            expected_layers is not None
-            and self._num_lora_layers != expected_layers
-        ):
-            raise ValueError(
-                "Unexpected MiniMax H3 LoRA layer count: "
-                f"expected {expected_layers}, got {self._num_lora_layers}"
-            )
+        if (expected_layers is not None and self._num_lora_layers != expected_layers):
+            raise ValueError("Unexpected MiniMax H3 LoRA layer count: "
+                             f"expected {expected_layers}, got {self._num_lora_layers}")
 
         unexpected_trainable = [
-            name
-            for name, parameter in self.transformer.named_parameters()
-            if parameter.requires_grad
-            and name.rsplit(".", maxsplit=1)[-1] not in {"lora_A", "lora_B"}
+            name for name, parameter in self.transformer.named_parameters()
+            if parameter.requires_grad and name.rsplit(".", maxsplit=1)[-1] not in {"lora_A", "lora_B"}
         ]
         if unexpected_trainable:
-            raise ValueError(
-                "MiniMax H3 LoRA enabled non-LoRA trainable parameters: "
-                f"{unexpected_trainable[:10]}"
-            )
+            raise ValueError("MiniMax H3 LoRA enabled non-LoRA trainable parameters: "
+                             f"{unexpected_trainable[:10]}")
 
 
 __all__ = ["MiniMaxH3LoraModel", "MiniMaxH3Model", "shift_noise_amount"]
