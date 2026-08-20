@@ -25,7 +25,6 @@ from ..capabilities import (
     HAS_NPU,
 )
 
-
 _scaled_dot_product_flash_attention = torch.ops.aten._scaled_dot_product_flash_attention
 _scaled_dot_product_efficient_attention = torch.ops.aten._scaled_dot_product_efficient_attention
 
@@ -40,11 +39,12 @@ try:
 except ModuleNotFoundError:
     pass
 
-
 if HAS_FLASH_ATTN:
     import flash_attn
-    from flash_attn import flash_attn_func
-    from flash_attn.flash_attn_interface import _flash_attn_backward
+    from flash_attn.flash_attn_interface import (
+        _flash_attn_backward,
+        _flash_attn_forward,
+    )
 
 if HAS_FLASH_ATTN_HOPPER:
     from flash_attn_interface import _flash_attn_backward as flash_attn_func_hopper_backward
@@ -112,11 +112,8 @@ def pytorch_attn_forward(
             scale=softmax_scale,
         )[:2]
     else:
-        backend = (
-            torch.nn.attention.SDPBackend.MATH
-            if op_type == "math"
-            else torch.nn.attention.SDPBackend.CUDNN_ATTENTION
-        )
+        backend = (torch.nn.attention.SDPBackend.MATH
+                   if op_type == "math" else torch.nn.attention.SDPBackend.CUDNN_ATTENTION)
         with torch.nn.attention.sdpa_kernel(backends=[backend]):
             out = F.scaled_dot_product_attention(
                 q,

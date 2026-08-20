@@ -11,7 +11,6 @@ import os
 
 import torch
 
-
 # test if flash_attn is available
 try:
     import flash_attn
