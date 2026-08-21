@@ -115,18 +115,32 @@ list(APPEND TORCH_INCLUDE_DIRS ${TORCH_INCLUDE_PATHS})
 find_package(Torch REQUIRED)
 
 # Include directories
-# NCCL for the sequence-parallel comm kernel (device API, needs >= 2.28).
-# Resolve via torch, which already depends on the same nccl the runtime loads.
-execute_process(
-    COMMAND "${Python_EXECUTABLE}" -c
-        "import os,glob,torch;d=os.path.join(os.path.dirname(os.path.dirname(torch.__file__)),'nvidia','nccl');print(os.path.join(d,'include') if os.path.isdir(d) else '')"
-    OUTPUT_VARIABLE NCCL_INCLUDE_DIR OUTPUT_STRIP_TRAILING_WHITESPACE)
-execute_process(
-    COMMAND "${Python_EXECUTABLE}" -c
-        "import os,glob,torch;d=os.path.join(os.path.dirname(os.path.dirname(torch.__file__)),'nvidia','nccl','lib');c=glob.glob(os.path.join(d,'libnccl.so*'));print(c[0] if c else '')"
-    OUTPUT_VARIABLE NCCL_LIBRARY OUTPUT_STRIP_TRAILING_WHITESPACE)
-message(STATUS "NCCL include: ${NCCL_INCLUDE_DIR}")
-message(STATUS "NCCL library: ${NCCL_LIBRARY}")
+# NCCL headers for the sequence-parallel comm kernel (device API, needs 2.28+).
+# Only the headers: torch already links libnccl into libtorch_cuda, so the
+# symbols resolve at load time. Torch ships its own torch/csrc/cuda/nccl.h,
+# which is a different header, so NVIDIA's has to be found separately.
+find_path(NCCL_INCLUDE_DIR nccl_device/coop.h
+    HINTS
+        ${NCCL_HOME}/include
+        $ENV{NCCL_HOME}/include
+        ${CUDAToolkit_INCLUDE_DIRS}
+    PATHS /usr/include /usr/local/include)
+if(NOT NCCL_INCLUDE_DIR)
+    # pip ships it as the nvidia.nccl namespace package, which has no
+    # __init__.py, so find_spec rather than __file__.
+    execute_process(
+        COMMAND "${Python_EXECUTABLE}" -c
+            "import importlib.util as u, os; s = u.find_spec('nvidia.nccl'); print(os.path.join(list(s.submodule_search_locations)[0], 'include') if s else '')"
+        OUTPUT_VARIABLE NCCL_INCLUDE_DIR OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET)
+endif()
+if(NCCL_INCLUDE_DIR AND EXISTS "${NCCL_INCLUDE_DIR}/nccl_device/coop.h")
+    message(STATUS "NCCL device API headers: ${NCCL_INCLUDE_DIR}")
+else()
+    message(FATAL_ERROR
+        "nccl_device.h not found. The Ulysses all-to-all kernel needs NCCL >= 2.28 "
+        "headers; set NCCL_HOME or install nvidia-nccl-cu12.")
+endif()
 
 include_directories(
     ${CMAKE_SOURCE_DIR}/include
@@ -402,9 +416,6 @@ if(BUILD_CXX_KERNELS)
     # Link against Torch libraries to avoid undefined symbols at import time
     # (e.g., torch::autograd vtables) when loading the extension module.
     target_link_libraries(fastvideo_kernel_ops PRIVATE ${TORCH_LIBRARIES})
-    if(NCCL_LIBRARY)
-        target_link_libraries(fastvideo_kernel_ops PRIVATE ${NCCL_LIBRARY})
-    endif()
 
     # Also link against libtorch_python to satisfy Python-binding symbols
     # (e.g., torch::PyWarningHandler) required by torch/extension.h.
