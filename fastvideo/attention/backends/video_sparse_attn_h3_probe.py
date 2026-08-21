@@ -60,7 +60,7 @@ def record_probe(
     gen = torch.Generator(device="cpu").manual_seed(step * 1000 + layer)
     # sample among video rows in the PADDED/tiled domain that are non-pad
     from fastvideo.attention.backends.video_sparse_attn_h3 import token_tile_and_valid
-    token_tile, token_valid = token_tile_and_valid(attn_metadata.variable_block_sizes)
+    token_tile, token_valid = token_tile_and_valid(attn_metadata.variable_block_sizes, attn_metadata.tile_elems)
     video_rows = torch.nonzero((token_tile >= P) & token_valid, as_tuple=False).flatten()
     idx = video_rows[torch.randint(0, video_rows.numel(), (_TRUE_ROWS, ), generator=gen).to(query.device)]
 
