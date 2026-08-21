@@ -57,18 +57,28 @@ def test_vsa_training_lane_uses_strict_h100_pair():
 
 
 def test_pr_model_load_and_training_lanes_disable_fa4():
+    # (pytest selection, shared lane script or None). Lanes shared with the
+    # self-hosted CI runner keep FASTVIDEO_FA4=0 in the Modal wrapper while
+    # the selection lives in the shared .buildkite/scripts/lanes/ script.
     lanes = {
-        "run_transformer_tests": "pytest ./fastvideo/tests/transformers -vs",
-        "run_training_tests": "pytest ./fastvideo/tests/training/Vanilla -srP",
-        "run_training_lora_tests": "pytest ./fastvideo/tests/training/lora/test_lora_training.py -srP",
-        "run_training_tests_VSA": "pytest ./fastvideo/tests/training/VSA -srP",
-        "run_distill_dmd_tests": "pytest ./fastvideo/tests/training/distill/test_distill_dmd.py -vs",
-        "run_self_forcing_tests": "pytest ./fastvideo/tests/training/self-forcing/test_self_forcing.py -vs",
-        "run_train_framework_tests": "pytest ./fastvideo/tests/train/models ./fastvideo/tests/train/methods -vs",
-        "seed_grad_norm_references": "pytest ./fastvideo/tests/train/methods -vs -rs",
+        "run_transformer_tests":
+        ("pytest ./fastvideo/tests/transformers -vs", ".buildkite/scripts/lanes/transformer.sh"),
+        "run_training_tests": ("pytest ./fastvideo/tests/training/Vanilla -srP", None),
+        "run_training_lora_tests": ("pytest ./fastvideo/tests/training/lora/test_lora_training.py -srP", None),
+        "run_training_tests_VSA": ("pytest ./fastvideo/tests/training/VSA -srP", None),
+        "run_distill_dmd_tests":
+        ("pytest ./fastvideo/tests/training/distill/test_distill_dmd.py -vs", ".buildkite/scripts/lanes/distillation_dmd.sh"),
+        "run_self_forcing_tests": ("pytest ./fastvideo/tests/training/self-forcing/test_self_forcing.py -vs", None),
+        "run_train_framework_tests":
+        ("pytest ./fastvideo/tests/train/models ./fastvideo/tests/train/methods -vs", ".buildkite/scripts/lanes/train_framework.sh"),
+        "seed_grad_norm_references": ("pytest ./fastvideo/tests/train/methods -vs -rs", None),
     }
 
-    for function_name, pytest_command in lanes.items():
+    for function_name, (pytest_command, lane_script) in lanes.items():
         function_strings = _function_strings(PR_TEST, function_name)
         assert "FASTVIDEO_FA4=0" in function_strings
-        assert pytest_command in function_strings
+        if lane_script is None:
+            assert pytest_command in function_strings
+        else:
+            assert f"bash {lane_script}" in function_strings
+            assert pytest_command in (REPO_ROOT / lane_script).read_text(encoding="utf-8")
