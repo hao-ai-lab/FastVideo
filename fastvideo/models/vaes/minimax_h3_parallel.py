@@ -27,6 +27,15 @@ identically shaped inputs. Work proceeds in rounds of one collective each;
 ranks without a chunk in the final round contribute a placeholder tensor, so
 participation is uniform by construction and no rank-dependent branch guards
 a collective.
+
+Caveat — compiled decoders (``enable_torch_compile_vae``): inductor autotunes
+kernel configs per process at first call, so a compiled decoder is only
+deterministic WITHIN a process, not across processes. Chunks decoded on other
+ranks then differ from the serial rank's decode of the same chunk exactly as
+two serial runs in different processes would (measured on GB200 at 124f:
+max 63/255 on <0.5% of pixels, mean ~1e-2/255, first chunk bit-identical).
+With the eager decoder — the pipeline default — parallel output is bitwise
+equal to serial ``decode_to_pixels``.
 """
 
 from __future__ import annotations
