@@ -4,8 +4,14 @@ from dataclasses import dataclass, field
 
 import torch
 
-from fastvideo.configs.models import (DiTConfig, EncoderConfig, ModelConfig, LTX2AudioDecoderConfig, LTX2VocoderConfig,
-                                      VAEConfig)
+from fastvideo.configs.models import (
+    DiTConfig,
+    EncoderConfig,
+    ModelConfig,
+    LTX2AudioDecoderConfig,
+    LTX2VocoderConfig,
+    VAEConfig,
+)
 from fastvideo.configs.models.dits import LTX2VideoConfig
 from fastvideo.configs.models.encoders import BaseEncoderOutput, LTX2GemmaConfig
 from fastvideo.configs.models.vaes import LTX2VAEConfig
@@ -25,14 +31,15 @@ class LTX2T2VConfig(PipelineConfig):
     vae_tiling: bool = True
     vae_sp: bool = False
 
-    text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (LTX2GemmaConfig(), ))
-    preprocess_text_funcs: tuple[Callable[[str], str], ...] = field(default_factory=lambda: (preprocess_text, ))
-    postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.Tensor],
-                                  ...] = field(default_factory=lambda: (ltx2_postprocess_text, ))
+    text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (LTX2GemmaConfig(),))
+    preprocess_text_funcs: tuple[Callable[[str], str], ...] = field(default_factory=lambda: (preprocess_text,))
+    postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.Tensor], ...] = field(
+        default_factory=lambda: (ltx2_postprocess_text,)
+    )
 
     dit_precision: str = "bf16"
     vae_precision: str = "bf16"
-    text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("bf16", ))
+    text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("bf16",))
 
     audio_decoder_config: ModelConfig = field(default_factory=LTX2AudioDecoderConfig)
     vocoder_config: ModelConfig = field(default_factory=LTX2VocoderConfig)

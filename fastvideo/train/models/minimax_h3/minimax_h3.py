@@ -124,8 +124,9 @@ class MiniMaxH3Model(ModelBase):
             transformer_override_safetensor=transformer_override_safetensor,
             attention_backend=self.attention_backend,
         )
-        checkpointing_type = (enable_gradient_checkpointing_type
-                              or self.training_config.model.enable_gradient_checkpointing_type)
+        checkpointing_type = (
+            enable_gradient_checkpointing_type or self.training_config.model.enable_gradient_checkpointing_type
+        )
         if trainable and checkpointing_type:
             transformer = apply_activation_checkpointing(
                 transformer,
@@ -179,17 +180,18 @@ class MiniMaxH3Model(ModelBase):
             raise ValueError(f"Unknown latents_source: {latents_source!r}")
 
         if video_latents.ndim != 5 or tuple(video_latents.shape[:2]) != (1, _VIDEO_LATENT_CHANNELS):
-            raise ValueError("vae_latent must have shape [1, 24, latent_frames, latent_height, latent_width], "
-                             f"got {tuple(video_latents.shape)}")
+            raise ValueError(
+                "vae_latent must have shape [1, 24, latent_frames, latent_height, latent_width], "
+                f"got {tuple(video_latents.shape)}"
+            )
         if audio_latents.ndim != 4 or tuple(audio_latents.shape[:3]) != (
-                1,
-                MINIMAX_H3_AUDIO_CHANNELS,
-                _AUDIO_LATENT_CHANNELS,
+            1,
+            MINIMAX_H3_AUDIO_CHANNELS,
+            _AUDIO_LATENT_CHANNELS,
         ):
-            raise ValueError("audio_latent must have shape [1, 2, 32, audio_frames], "
-                             f"got {tuple(audio_latents.shape)}")
+            raise ValueError(f"audio_latent must have shape [1, 2, 32, audio_frames], got {tuple(audio_latents.shape)}")
         if data_config.num_latent_t > 0:
-            video_latents = video_latents[:, :, :data_config.num_latent_t]
+            video_latents = video_latents[:, :, : data_config.num_latent_t]
         expected_audio_frames = audio_latent_num_frames(data_config.num_frames)
         audio_latents = audio_latents[:, :, :, :expected_audio_frames]
         if video_latents.shape[2] != data_config.num_latent_t:
@@ -208,7 +210,7 @@ class MiniMaxH3Model(ModelBase):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Sample one shared denoising stage and apply both modality shifts."""
         base_noise_amount = torch.rand(
-            (1, ),
+            (1,),
             generator=generator,
             device=device,
             dtype=torch.float32,
@@ -258,7 +260,7 @@ class MiniMaxH3Model(ModelBase):
 
         _, _, video_frames, latent_height, latent_width = video_latents.shape
         num_audio_latents = audio_latents.shape[-1]
-        text_token_tags = torch.full((int(valid_text.sum()), ), MINIMAX_H3_TEXT_TAG, dtype=torch.long)
+        text_token_tags = torch.full((int(valid_text.sum()),), MINIMAX_H3_TEXT_TAG, dtype=torch.long)
         # H3 self-attention consumes one interleaved document, so the layout
         # owns the row tags, positions, and modality output indices together.
         layout = build_packed_sequence(
@@ -352,9 +354,12 @@ class MiniMaxH3Model(ModelBase):
         unique_timesteps = unique_timesteps.to(device)
         timestep_indices = timestep_indices.to(device)
 
-        with torch.autocast(device.type, dtype=dtype), set_forward_context(
+        with (
+            torch.autocast(device.type, dtype=dtype),
+            set_forward_context(
                 current_timestep=unique_timesteps,
                 attn_metadata=None,
+            ),
         ):
             video_velocity, audio_velocity = self.transformer(
                 hidden_states=video_rows[None],
@@ -391,8 +396,8 @@ class MiniMaxH3Model(ModelBase):
         """Restore the forward context and average accumulated microbatch gradients."""
         timesteps, attn_metadata = ctx
         with set_forward_context(
-                current_timestep=timesteps,
-                attn_metadata=attn_metadata,
+            current_timestep=timesteps,
+            attn_metadata=attn_metadata,
         ):
             (loss / max(1, int(grad_accum_rounds))).backward()
 

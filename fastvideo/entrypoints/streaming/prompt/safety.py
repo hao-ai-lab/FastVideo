@@ -9,6 +9,7 @@ runtime cost.
 Install: ``pip install fastvideo[prompt-safety]`` (ships fasttext as an
 optional extra) or install fasttext directly.
 """
+
 from __future__ import annotations
 
 import enum
@@ -90,8 +91,9 @@ class PromptSafetyFilter:
             )
         label = labels[0].removeprefix("__label__") if labels else None
         score = float(probs[0]) if len(probs) else 0.0
-        decision = (SafetyDecision.BLOCK if
-                    (label == "unsafe" and score >= self._block_threshold) else SafetyDecision.ALLOW)
+        decision = (
+            SafetyDecision.BLOCK if (label == "unsafe" and score >= self._block_threshold) else SafetyDecision.ALLOW
+        )
         return SafetyResult(
             prompt=prompt,
             decision=decision,
@@ -115,8 +117,10 @@ class PromptSafetyFilter:
             try:
                 import fasttext  # type: ignore[import-not-found]
             except ImportError:
-                logger.warning("safety: fasttext not installed; safety filter disabled. "
-                               "Install fastvideo[prompt-safety] to enable.")
+                logger.warning(
+                    "safety: fasttext not installed; safety filter disabled. "
+                    "Install fastvideo[prompt-safety] to enable."
+                )
                 return None
             try:
                 self._model = fasttext.load_model(self._classifier_path)

@@ -8,7 +8,7 @@ import torch
 
 from fastvideo.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.configs.models.dits import HunyuanVideo15Config
-from fastvideo.configs.models.encoders import (BaseEncoderOutput, Qwen2_5_VLConfig, T5Config)
+from fastvideo.configs.models.encoders import BaseEncoderOutput, Qwen2_5_VLConfig, T5Config
 from fastvideo.configs.models.vaes import Hunyuan15VAEConfig
 from fastvideo.configs.models.upsamplers import SRTo720pUpsamplerConfig, SRTo1080pUpsamplerConfig
 from fastvideo.configs.pipelines.base import PipelineConfig, UpsamplerConfig
@@ -97,18 +97,21 @@ class Hunyuan15T2V480PConfig(PipelineConfig):
 
     # Text encoding stage
     text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (Qwen2_5_VLConfig(), T5Config()))
-    preprocess_text_funcs: tuple[Callable[[Any], Any],
-                                 ...] = field(default_factory=lambda: (qwen_preprocess_text, byt5_preprocess_text))
-    postprocess_text_funcs: tuple[Callable[..., Any],
-                                  ...] = field(default_factory=lambda: (qwen_postprocess_text, byt5_postprocess_text))
+    preprocess_text_funcs: tuple[Callable[[Any], Any], ...] = field(
+        default_factory=lambda: (qwen_preprocess_text, byt5_preprocess_text)
+    )
+    postprocess_text_funcs: tuple[Callable[..., Any], ...] = field(
+        default_factory=lambda: (qwen_postprocess_text, byt5_postprocess_text)
+    )
 
     # Precision for each component
     dit_precision: str = "bf16"
     vae_precision: str = "fp16"
     text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("bf16", "fp32"))
     text_encoder_crop_start: int = PROMPT_TEMPLATE_TOKEN_LENGTH
-    text_encoder_max_lengths: tuple[int,
-                                    ...] = field(default_factory=lambda: (1000 + PROMPT_TEMPLATE_TOKEN_LENGTH, 256))
+    text_encoder_max_lengths: tuple[int, ...] = field(
+        default_factory=lambda: (1000 + PROMPT_TEMPLATE_TOKEN_LENGTH, 256)
+    )
 
     vae_tiling: bool = True
 
@@ -149,5 +152,6 @@ class Hunyuan15SR1080PConfig(Hunyuan15T2V720PConfig):
     flow_shift: int = 7
     flow_shift_sr: int = 2
     upsampler_config: tuple[UpsamplerConfig, ...] = field(
-        default_factory=lambda: (SRTo720pUpsamplerConfig(), SRTo1080pUpsamplerConfig()))
+        default_factory=lambda: (SRTo720pUpsamplerConfig(), SRTo1080pUpsamplerConfig())
+    )
     upsampler_precision: str = "fp32"

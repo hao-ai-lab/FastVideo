@@ -64,4 +64,4 @@ These dirs are listed in `.pre-commit-config.yaml` `exclude`:
 
 - `fastvideo/third_party/`, `fastvideo/dataset/`, `fastvideo/models/`
 
-Editing files there will NOT trigger yapf/ruff/mypy/codespell. Format manually if a sibling file shows clear style; do not introduce new violations.
+Editing files there will NOT trigger ruff/mypy/codespell. Format manually if a sibling file shows clear style; do not introduce new violations.

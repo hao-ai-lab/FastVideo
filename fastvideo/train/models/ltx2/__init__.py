@@ -2,4 +2,5 @@
 """LTX-2 model plugin package."""
 
 from fastvideo.train.models.ltx2.ltx2 import (
-    LTX2Model as LTX2Model, )
+    LTX2Model as LTX2Model,
+)

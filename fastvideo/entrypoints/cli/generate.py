@@ -37,8 +37,9 @@ class GenerateSubcommand(CLISubcommand):
     def validate(self, args: argparse.Namespace) -> None:
         """Validate the arguments for this command"""
         if not args.config:
-            raise ValueError("fastvideo generate requires --config PATH; use a nested "
-                             "run config plus optional dotted overrides")
+            raise ValueError(
+                "fastvideo generate requires --config PATH; use a nested run config plus optional dotted overrides"
+            )
         if not os.path.exists(args.config):
             raise ValueError(f"Config file not found: {args.config}")
         setattr(
@@ -54,12 +55,13 @@ class GenerateSubcommand(CLISubcommand):
         generate_parser = subparsers.add_parser(
             "generate",
             help="Run inference on a model",
-            usage="fastvideo generate --config RUN_CONFIG [--dotted.override VALUE]")
+            usage="fastvideo generate --config RUN_CONFIG [--dotted.override VALUE]",
+        )
 
         generate_parser.add_argument(
             "--config",
             type=str,
-            default='',
+            default="",
             required=False,
             help="Path to a nested run config JSON or YAML file. Required.",
         )

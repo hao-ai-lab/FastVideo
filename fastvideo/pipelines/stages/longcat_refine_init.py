@@ -30,7 +30,7 @@ logger = init_logger(__name__)
 class LongCatRefineInitStage(PipelineStage):
     """
     Stage for initializing LongCat refinement from a stage1 (480p) video.
-    
+
     This replicates the logic from LongCatVideoPipeline.generate_refine():
     - Load stage1_video frames
     - Upsample spatially and temporally
@@ -49,11 +49,11 @@ class LongCatRefineInitStage(PipelineStage):
     ) -> ForwardBatch:
         """
         Initialize latents for refinement.
-        
+
         Args:
             batch: The current batch information.
             fastvideo_args: The inference arguments.
-            
+
         Returns:
             The batch with initialized latents for refinement.
         """
@@ -98,11 +98,11 @@ class LongCatRefineInitStage(PipelineStage):
         num_frames = len(pil_images)
         spatial_refine_only = batch.spatial_refine_only
         t_thresh = batch.t_thresh
-        num_cond_frames = batch.num_cond_frames if hasattr(batch, 'num_cond_frames') else 0
+        num_cond_frames = batch.num_cond_frames if hasattr(batch, "num_cond_frames") else 0
 
         # Calculate new frame count (temporal upsampling if not spatial_refine_only)
         new_num_frames = num_frames if spatial_refine_only else 2 * num_frames
-        logger.info("Refine mode: %s", 'spatial only' if spatial_refine_only else 'spatial + temporal')
+        logger.info("Refine mode: %s", "spatial only" if spatial_refine_only else "spatial + temporal")
 
         # Update batch.num_frames to reflect the upsampled count
         batch.num_frames = new_num_frames
@@ -133,7 +133,7 @@ class LongCatRefineInitStage(PipelineStage):
             cp_split_hw = [1, 1]
 
         # Get bucket config and find closest bucket for the input aspect ratio
-        bucket_config = get_bucket_config('720p', scale_factor_spatial)
+        bucket_config = get_bucket_config("720p", scale_factor_spatial)
 
         # Get input aspect ratio from stage1 video
         input_height, input_width = pil_images[0].height, pil_images[0].width
@@ -145,18 +145,26 @@ class LongCatRefineInitStage(PipelineStage):
 
         logger.info("Input aspect ratio: %.2f (%sx%s)", input_ratio, input_width, input_height)
         logger.info("Matched bucket ratio: %s -> resolution: %sx%s", closest_ratio, width, height)
-        logger.info("Target: %sx%s @ %s frames (sp_size=%s, scale_factor=%s)", width, height, new_num_frames, sp_size,
-                    scale_factor_spatial)
+        logger.info(
+            "Target: %sx%s @ %s frames (sp_size=%s, scale_factor=%s)",
+            width,
+            height,
+            new_num_frames,
+            sp_size,
+            scale_factor_spatial,
+        )
 
         # Override batch height/width with bucket-selected resolution
         batch.height = height
         batch.width = width
 
         # Convert PIL images to tensor [T, C, H, W]
-        stage1_video_tensor = torch.stack([
-            torch.from_numpy(np.array(img)).permute(2, 0, 1)  # HWC -> CHW
-            for img in pil_images
-        ]).float()  # [T, C, H, W]
+        stage1_video_tensor = torch.stack(
+            [
+                torch.from_numpy(np.array(img)).permute(2, 0, 1)  # HWC -> CHW
+                for img in pil_images
+            ]
+        ).float()  # [T, C, H, W]
 
         device = batch.prompt_embeds[0].device
         dtype = batch.prompt_embeds[0].dtype
@@ -164,14 +172,14 @@ class LongCatRefineInitStage(PipelineStage):
 
         # Replicate LongCat's exact preprocessing (lines 1227-1235 in pipeline_longcat_video.py)
         # First: spatial interpolation to target (height, width) on [T, C, H, W]
-        video_down = F.interpolate(stage1_video_tensor, size=(height, width), mode='bilinear', align_corners=True)
+        video_down = F.interpolate(stage1_video_tensor, size=(height, width), mode="bilinear", align_corners=True)
 
         # Rearrange to [C, T, H, W] and add batch dimension -> [1, C, T, H, W]
         video_down = video_down.permute(1, 0, 2, 3).unsqueeze(0)  # [1, C, T, H, W]
         video_down = video_down / 255.0  # Normalize to [0, 1]
 
         # Then: temporal+spatial interpolation to (new_num_frames, height, width)
-        video_up = F.interpolate(video_down, size=(new_num_frames, height, width), mode='trilinear', align_corners=True)
+        video_up = F.interpolate(video_down, size=(new_num_frames, height, width), mode="trilinear", align_corners=True)
 
         # Rescale to [-1, 1] for VAE
         video_up = video_up * 2.0 - 1.0
@@ -196,8 +204,11 @@ class LongCatRefineInitStage(PipelineStage):
         num_noise_frames_added = num_noise_latents * vae_scale_factor_temporal - num_noise_frames
 
         if num_cond_frames_added > 0 or num_noise_frames_added > 0:
-            logger.info("Padding temporal dimension for BSA: cond_frames+=%s, noise_frames+=%s", num_cond_frames_added,
-                        num_noise_frames_added)
+            logger.info(
+                "Padding temporal dimension for BSA: cond_frames+=%s, noise_frames+=%s",
+                num_cond_frames_added,
+                num_noise_frames_added,
+            )
             pad_front = video_up[:, :, 0:1].repeat(1, 1, num_cond_frames_added, 1, 1)
             pad_back = video_up[:, :, -1:].repeat(1, 1, num_noise_frames_added, 1, 1)
             video_up = torch.cat([pad_front, video_up, pad_back], dim=2)
@@ -216,8 +227,12 @@ class LongCatRefineInitStage(PipelineStage):
             batch.num_cond_latents = num_cond_latents
             logger.info("Will use num_cond_latents=%s during denoising", num_cond_latents)
 
-        logger.info("Padding info: cond+=%s, noise+=%s, original=%s", num_cond_frames_added, num_noise_frames_added,
-                    new_num_frames)
+        logger.info(
+            "Padding info: cond+=%s, noise+=%s, original=%s",
+            num_cond_frames_added,
+            num_noise_frames_added,
+            new_num_frames,
+        )
 
         # VAE encode with tiling for memory efficiency
         logger.info("Encoding stage1 video with VAE (tiling enabled)...")
@@ -226,19 +241,19 @@ class LongCatRefineInitStage(PipelineStage):
         video_up = video_up.to(dtype=vae_dtype, device=vae_device)
 
         # Enable tiling for large video encoding
-        if hasattr(self.vae, 'enable_tiling'):
+        if hasattr(self.vae, "enable_tiling"):
             self.vae.enable_tiling()
 
         with torch.no_grad():
             latent_dist = self.vae.encode(video_up)
             # Extract tensor from latent distribution
-            if hasattr(latent_dist, 'latent_dist'):
+            if hasattr(latent_dist, "latent_dist"):
                 # Nested distribution wrapper
                 latent_up = latent_dist.latent_dist.sample()
-            elif hasattr(latent_dist, 'sample'):
+            elif hasattr(latent_dist, "sample"):
                 # DiagonalGaussianDistribution or similar
                 latent_up = latent_dist.sample()
-            elif hasattr(latent_dist, 'latents'):
+            elif hasattr(latent_dist, "latents"):
                 # Direct latents tensor
                 latent_up = latent_dist.latents
             else:
@@ -246,12 +261,16 @@ class LongCatRefineInitStage(PipelineStage):
                 latent_up = latent_dist
 
         # Normalize latents using VAE config (exactly like LongCat)
-        if hasattr(self.vae.config, 'latents_mean') and hasattr(self.vae.config, 'latents_std'):
-            latents_mean = torch.tensor(self.vae.config.latents_mean).view(1, self.vae.config.z_dim, 1, 1,
-                                                                           1).to(latent_up.device, latent_up.dtype)
+        if hasattr(self.vae.config, "latents_mean") and hasattr(self.vae.config, "latents_std"):
+            latents_mean = (
+                torch.tensor(self.vae.config.latents_mean)
+                .view(1, self.vae.config.z_dim, 1, 1, 1)
+                .to(latent_up.device, latent_up.dtype)
+            )
             # LongCat uses: 1.0 / latents_std (equivalent to dividing by latents_std)
             latents_std = 1.0 / torch.tensor(self.vae.config.latents_std).view(1, self.vae.config.z_dim, 1, 1, 1).to(
-                latent_up.device, latent_up.dtype)
+                latent_up.device, latent_up.dtype
+            )
             # LongCat: (latents - mean) * (1/std)
             latent_up = (latent_up - latents_mean) * latents_std
 

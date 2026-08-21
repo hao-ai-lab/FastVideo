@@ -12,7 +12,8 @@ from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import VerificationResult
 
 from fastvideo.pipelines.basic.dreamx_world.camera_conditioning import (
-    build_dreamx_camera_condition, )
+    build_dreamx_camera_condition,
+)
 
 DREAMX_Y_CAMERA_KEY = "dreamx_y_camera"
 
@@ -104,9 +105,11 @@ class DreamXWorldImageVAEEncodingStage(PipelineStage):
             # running from pure noise (frame 0 uninitialized). Warn loudly —
             # this pipeline is registered I2V and the official flow always
             # forces from a frame.
-            logger.warning("DreamXWorldARPipeline called without an input image; "
-                           "first-frame context will be noise (T2V-style). Pass an "
-                           "image for the official AR-forcing behavior.")
+            logger.warning(
+                "DreamXWorldARPipeline called without an input image; "
+                "first-frame context will be noise (T2V-style). Pass an "
+                "image for the official AR-forcing behavior."
+            )
             return batch
 
         from fastvideo.platforms import get_local_torch_device
@@ -117,6 +120,7 @@ class DreamXWorldImageVAEEncodingStage(PipelineStage):
         if not isinstance(image, torch.Tensor):
             import numpy as np
             import PIL.Image
+
             assert isinstance(image, PIL.Image.Image)
             width = batch.width if isinstance(batch.width, int) else batch.width[0]
             height = batch.height if isinstance(batch.height, int) else batch.height[0]

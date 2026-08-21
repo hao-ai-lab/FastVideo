@@ -11,6 +11,7 @@ enables ``ServeConfig.streaming.prompt.enabled``, the server routes
 each ``session_init_v2`` curated prompt through ``enhance`` before the
 first segment.
 """
+
 from fastvideo.entrypoints.streaming.prompt.enhancer import (
     PromptEnhancer,
     PromptOperation,

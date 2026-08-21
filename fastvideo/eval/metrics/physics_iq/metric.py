@@ -153,10 +153,14 @@ class PhysicsIQMetric(BaseMetric):
 
     def _per_video_score(self, details: Mapping[str, Any]) -> float:
         score = 100.0 * (
-            ((mean(details["spatiotemporal_iou_per_frame"]) / mean(details["pv_spatiotemporal_iou_per_frame"])) +
-             (float(details["spatial_iou"]) / float(details["pv_spatial_iou"])) +
-             (float(details["weighted_spatial_iou"]) / float(details["pv_weighted_spatial_iou"]))) / 3.0 -
-            (mean(details["mse_per_frame"]) - mean(details["pv_mse_per_frame"])))
+            (
+                (mean(details["spatiotemporal_iou_per_frame"]) / mean(details["pv_spatiotemporal_iou_per_frame"]))
+                + (float(details["spatial_iou"]) / float(details["pv_spatial_iou"]))
+                + (float(details["weighted_spatial_iou"]) / float(details["pv_weighted_spatial_iou"]))
+            )
+            / 3.0
+            - (mean(details["mse_per_frame"]) - mean(details["pv_mse_per_frame"]))
+        )
         return round(float(np.clip(score, 0.0, 100.0)), 2)
 
     def compute(self, sample: dict) -> MetricResult:

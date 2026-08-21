@@ -15,6 +15,7 @@ Audio Open 1.0". This config is named after the architecture
 checkpoints; downstream pipelines reference it by its arch name, not
 by a host-pipeline name.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

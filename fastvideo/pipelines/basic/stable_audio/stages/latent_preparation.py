@@ -5,6 +5,7 @@ Seeds + samples the initial Gaussian noise; encodes `init_audio` (A2A
 variation) or `inpaint_audio` + `inpaint_mask` (RePaint inpainting) into
 latent-space tensors on `batch.extra` for the denoising stage.
 """
+
 from __future__ import annotations
 
 import os
@@ -19,13 +20,14 @@ from fastvideo.pipelines.stages.validators import VerificationResult
 
 
 class StableAudioLatentPreparationStage(PipelineStage):
-
-    def __init__(self,
-                 io_channels: int = 64,
-                 sample_size: int = 2097152,
-                 vae=None,
-                 sample_rate: int = 44100,
-                 audio_channels: int = 2) -> None:
+    def __init__(
+        self,
+        io_channels: int = 64,
+        sample_size: int = 2097152,
+        vae=None,
+        sample_rate: int = 44100,
+        audio_channels: int = 2,
+    ) -> None:
         super().__init__()
         self.io_channels = io_channels
         # Audio-domain length the model was trained for; latent length
@@ -61,17 +63,23 @@ class StableAudioLatentPreparationStage(PipelineStage):
 
         # Loud-fail rather than silently falling through to T2A.
         if inpaint_audio is not None and inpaint_mask is None:
-            raise ValueError("Stable Audio inpainting requires both `inpaint_audio` and "
-                             "`inpaint_mask` (1-D tensor in {0, 1} at the model sample rate, "
-                             "1 = keep, 0 = regenerate). Got `inpaint_audio` without `inpaint_mask`.")
+            raise ValueError(
+                "Stable Audio inpainting requires both `inpaint_audio` and "
+                "`inpaint_mask` (1-D tensor in {0, 1} at the model sample rate, "
+                "1 = keep, 0 = regenerate). Got `inpaint_audio` without `inpaint_mask`."
+            )
         if inpaint_mask is not None and inpaint_audio is None:
-            raise ValueError("Stable Audio inpainting requires both `inpaint_audio` and "
-                             "`inpaint_mask`. Got `inpaint_mask` without `inpaint_audio` — "
-                             "did you mean to pass `init_audio` (audio-to-audio variation)?")
+            raise ValueError(
+                "Stable Audio inpainting requires both `inpaint_audio` and "
+                "`inpaint_mask`. Got `inpaint_mask` without `inpaint_audio` — "
+                "did you mean to pass `init_audio` (audio-to-audio variation)?"
+            )
         if init_audio is not None and inpaint_audio is not None:
-            raise ValueError("Stable Audio cannot do A2A variation and inpainting in the "
-                             "same call. Pass either `init_audio` (variation) or "
-                             "`inpaint_audio` + `inpaint_mask` (inpainting), not both.")
+            raise ValueError(
+                "Stable Audio cannot do A2A variation and inpainting in the "
+                "same call. Pass either `init_audio` (variation) or "
+                "`inpaint_audio` + `inpaint_mask` (inpainting), not both."
+            )
 
         if init_audio is not None:
             batch.extra["init_latent"] = self._encode_audio_reference(init_audio, device)
@@ -113,7 +121,7 @@ class StableAudioLatentPreparationStage(PipelineStage):
         if cur_len < self.sample_size:
             audio = F.pad(audio, (0, self.sample_size - cur_len))
         elif cur_len > self.sample_size:
-            audio = audio[..., :self.sample_size]
+            audio = audio[..., : self.sample_size]
         # Stochastic sample (the next random draw after the latent
         # `randn` above), so encode-noise stays on the seeded sequence.
         return self.vae.encode(audio.to(next(self.vae.parameters()).dtype)).sample()
@@ -140,7 +148,7 @@ class StableAudioLatentPreparationStage(PipelineStage):
         if cur_len < self.sample_size:
             m = F.pad(m, (0, self.sample_size - cur_len))
         elif cur_len > self.sample_size:
-            m = m[..., :self.sample_size]
+            m = m[..., : self.sample_size]
         return F.interpolate(m.unsqueeze(1), size=latent_len, mode="nearest")
 
 
@@ -156,6 +164,7 @@ def _decode_audio_file(path, target_sr: int) -> torch.Tensor:
     """
     import av
     import numpy as np
+
     container = av.open(str(path))
     audio_stream = next(s for s in container.streams if s.type == "audio")
     resampler = av.AudioResampler(format="fltp", layout="stereo", rate=target_sr)

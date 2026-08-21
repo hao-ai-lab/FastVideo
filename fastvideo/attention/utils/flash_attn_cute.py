@@ -27,7 +27,9 @@ if torch.cuda.is_available():
         logger.warning(
             "flash_attn.cute (FA4) is installed but failed to import (%r). "
             "This is usually an nvidia-cutlass-dsl version mismatch -- pin a "
-            "compatible nvidia-cutlass-dsl to restore FA4.", e)
+            "compatible nvidia-cutlass-dsl to restore FA4.",
+            e,
+        )
         raise ImportError(f"flash_attn.cute (FA4) import failed: {e!r}") from e
 else:
     # This error will be caught in flash_attn.py or flash_attn_no_pad.py
@@ -54,7 +56,7 @@ def _check_dropout(dropout_p: float) -> None:
 @torch.compiler.assume_constant_result
 def _sm90_or_newer(device_id: int) -> bool:
     if device_id not in _SM90_OR_NEWER_BY_DEVICE:
-        _SM90_OR_NEWER_BY_DEVICE[device_id] = (current_platform.has_device_capability(90, device_id))
+        _SM90_OR_NEWER_BY_DEVICE[device_id] = current_platform.has_device_capability(90, device_id)
     return _SM90_OR_NEWER_BY_DEVICE[device_id]
 
 
@@ -75,9 +77,11 @@ def _use_fa2(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> bool:
 
 def _fa2_or_raise(fa2_func: Callable | None) -> Callable:
     if fa2_func is None:
-        raise RuntimeError("this attention call cannot run on FA4 cute below sm90 (its backward and "
-                           "GQA support require sm90+) and flash-attn 2, which serves it there, is "
-                           "not installed.")
+        raise RuntimeError(
+            "this attention call cannot run on FA4 cute below sm90 (its backward and "
+            "GQA support require sm90+) and flash-attn 2, which serves it there, is "
+            "not installed."
+        )
     return fa2_func
 
 

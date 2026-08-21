@@ -83,14 +83,14 @@ def get_block_map(
     BLKK: int = 64,
 ) -> tuple[torch.Tensor, torch.Tensor, int]:
     """Compute sparse block map for attention based on QK similarity.
-    
+
     Args:
         q: Query tensor of shape (B, H, L, D)
         k: Key tensor of shape (B, H, L, D)
         topk_ratio: Ratio of key blocks to attend to (0-1)
         BLKQ: Query block size
         BLKK: Key block size
-        
+
     Returns:
         sparse_map: Binary mask of shape (B, H, num_q_blocks, num_k_blocks)
         lut: Top-k indices of shape (B, H, num_q_blocks, topk)
@@ -144,6 +144,7 @@ class SLAAttentionBackend(AttentionBackend):
 @dataclass
 class SLAAttentionMetadata(AttentionMetadata):
     """Metadata for SLA attention."""
+
     current_timestep: int
     topk_ratio: float = 0.5  # Ratio of key blocks to attend to
 
@@ -171,11 +172,11 @@ class SLAAttentionMetadataBuilder(AttentionMetadataBuilder):
 
 class SLAAttentionImpl(AttentionImpl, nn.Module):
     """SLA attention implementation with learnable linear projection.
-    
+
     This implementation combines sparse attention with linear attention,
     using a learnable projection to blend the outputs. The sparse attention
     uses a block-sparse pattern determined by QK similarity.
-    
+
     Args:
         num_heads: Number of attention heads
         head_size: Dimension of each head
@@ -250,12 +251,12 @@ class SLAAttentionImpl(AttentionImpl, nn.Module):
         v: torch.Tensor,
     ) -> torch.Tensor:
         """Compute linear attention: (Q @ K^T @ V) / normalizer.
-        
+
         Args:
             q: Query tensor (B, H, L, D) after feature map
             k: Key tensor (B, H, L, D) after feature map
             v: Value tensor (B, H, L, D)
-            
+
         Returns:
             Linear attention output (B, H, L, D)
         """
@@ -271,16 +272,16 @@ class SLAAttentionImpl(AttentionImpl, nn.Module):
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         """Forward pass for SLA attention.
-        
+
         Input tensors are in FastVideo format: (B, L, H, D)
         Internally converted to SLA format: (B, H, L, D)
-        
+
         Args:
             query: Query tensor (B, L, H, D)
             key: Key tensor (B, L, H, D)
             value: Value tensor (B, L, H, D)
             attn_metadata: Attention metadata
-            
+
         Returns:
             Output tensor (B, L, H, D)
         """
@@ -293,7 +294,7 @@ class SLAAttentionImpl(AttentionImpl, nn.Module):
 
         # Get topk ratio from metadata if available
         topk_ratio = self.topk_ratio
-        if hasattr(attn_metadata, 'topk_ratio'):
+        if hasattr(attn_metadata, "topk_ratio"):
             topk_ratio = attn_metadata.topk_ratio  # type: ignore[union-attr]
 
         # Compute block-sparse attention pattern
@@ -316,7 +317,7 @@ class SLAAttentionImpl(AttentionImpl, nn.Module):
         o_l = self._calc_linear_attention(q_linear, k_linear, v)
 
         # Project linear attention output and combine
-        with torch.amp.autocast('cuda', dtype=self.dtype):
+        with torch.amp.autocast("cuda", dtype=self.dtype):
             o_l = self.proj_l(o_l)
 
         # Combine sparse and linear outputs
@@ -378,10 +379,10 @@ def _get_cuda_arch(device_index: int) -> str:
 
 class SageSLAAttentionImpl(AttentionImpl, nn.Module):
     """SageSLA attention implementation using quantized SageAttention kernels.
-    
+
     This uses INT8 quantization for Q/K and FP8 for V to achieve better performance
     while maintaining accuracy. Requires spas_sage_attn package.
-    
+
     Args:
         num_heads: Number of attention heads
         head_size: Dimension of each head (must be 64 or 128)
@@ -407,8 +408,10 @@ class SageSLAAttentionImpl(AttentionImpl, nn.Module):
         nn.Module.__init__(self)
 
         if not SAGESLA_ENABLED:
-            raise ImportError("SageSLA requires spas_sage_attn. "
-                              "Install with: uv pip install git+https://github.com/thu-ml/SpargeAttn.git")
+            raise ImportError(
+                "SageSLA requires spas_sage_attn. "
+                "Install with: uv pip install git+https://github.com/thu-ml/SpargeAttn.git"
+            )
 
         assert head_size in [64, 128], f"SageSLA requires head_size in [64, 128], got {head_size}"
 
@@ -468,15 +471,15 @@ class SageSLAAttentionImpl(AttentionImpl, nn.Module):
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         """Forward pass for SageSLA attention with quantized kernels.
-        
+
         Input tensors are in FastVideo format: (B, L, H, D)
-        
+
         Args:
             query: Query tensor (B, L, H, D)
             key: Key tensor (B, L, H, D)
             value: Value tensor (B, L, H, D)
             attn_metadata: Attention metadata
-            
+
         Returns:
             Output tensor (B, L, H, D)
         """
@@ -489,7 +492,7 @@ class SageSLAAttentionImpl(AttentionImpl, nn.Module):
 
         # Get topk ratio from metadata if available
         topk_ratio = self.topk_ratio
-        if hasattr(attn_metadata, 'topk_ratio'):
+        if hasattr(attn_metadata, "topk_ratio"):
             topk_ratio = attn_metadata.topk_ratio  # type: ignore[union-attr]
 
         # Determine block sizes based on GPU architecture
@@ -529,17 +532,46 @@ class SageSLAAttentionImpl(AttentionImpl, nn.Module):
         o_s = torch.empty_like(q)
         if arch == "sm90":
             qattn.qk_int8_sv_f8_accum_f32_block_sparse_attn_inst_buf_fuse_v_scale_sm90(
-                q_int8, k_int8, v_fp8, o_s, lut_triton, valid_block_num, q_scale, k_scale, v_scale, 1, False, 1, scale)
+                q_int8, k_int8, v_fp8, o_s, lut_triton, valid_block_num, q_scale, k_scale, v_scale, 1, False, 1, scale
+            )
         else:
-            pvthreshold = torch.full((q.shape[-3], ), 1e6, dtype=torch.float32, device=q.device)
+            pvthreshold = torch.full((q.shape[-3],), 1e6, dtype=torch.float32, device=q.device)
             if SAGE2PP_ENABLED:
                 qk_int8_sv_f8_accum_f16_block_sparse_attn_inst_buf_fuse_v_scale_with_pv_threshold(
-                    q_int8, k_int8, v_fp8, o_s, lut_triton, valid_block_num, pvthreshold, q_scale, k_scale, v_scale, 1,
-                    False, 1, scale, 0)
+                    q_int8,
+                    k_int8,
+                    v_fp8,
+                    o_s,
+                    lut_triton,
+                    valid_block_num,
+                    pvthreshold,
+                    q_scale,
+                    k_scale,
+                    v_scale,
+                    1,
+                    False,
+                    1,
+                    scale,
+                    0,
+                )
             else:
                 qattn.qk_int8_sv_f8_accum_f32_block_sparse_attn_inst_buf_fuse_v_scale_with_pv_threshold(
-                    q_int8, k_int8, v_fp8, o_s, lut_triton, valid_block_num, pvthreshold, q_scale, k_scale, v_scale, 1,
-                    False, 1, scale, 0)
+                    q_int8,
+                    k_int8,
+                    v_fp8,
+                    o_s,
+                    lut_triton,
+                    valid_block_num,
+                    pvthreshold,
+                    q_scale,
+                    k_scale,
+                    v_scale,
+                    1,
+                    False,
+                    1,
+                    scale,
+                    0,
+                )
         # ========== END SPARGE ==========
 
         # Linear attention with feature maps (see SLAAttentionImpl.forward
@@ -549,7 +581,7 @@ class SageSLAAttentionImpl(AttentionImpl, nn.Module):
         o_l = self._calc_linear_attention(q_linear, k_linear, v)
 
         # Project linear attention output and combine
-        with torch.amp.autocast('cuda', dtype=self.dtype):
+        with torch.amp.autocast("cuda", dtype=self.dtype):
             o_l = self.proj_l(o_l)
 
         # Combine sparse and linear outputs

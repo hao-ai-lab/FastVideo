@@ -17,7 +17,8 @@ from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 
 try:
-    from fastvideo.attention.backends.video_sparse_attn import (VideoSparseAttentionBackend)
+    from fastvideo.attention.backends.video_sparse_attn import VideoSparseAttentionBackend
+
     vsa_available = True
 except ImportError:
     vsa_available = False
@@ -66,7 +67,6 @@ class BlockProcessingContext:
 
 
 class MatrixGame2CausalDenoisingStage(DenoisingStage):
-
     def __init__(self, transformer, scheduler, pipeline=None, transformer_2=None, vae=None) -> None:
         super().__init__(transformer, scheduler, pipeline, transformer_2, vae)
         self.transformer = transformer
@@ -74,13 +74,17 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
         self.vae = vae
         self.num_transformer_blocks = len(self.transformer.blocks)
 
-        if hasattr(self.transformer, 'config') and hasattr(self.transformer.config, 'arch_config'):
-            self.num_frame_per_block = getattr(self.transformer.config.arch_config, 'num_frames_per_block',
-                                               getattr(self.transformer, 'num_frame_per_block', 1))
-            self.sliding_window_num_frames = getattr(self.transformer.config.arch_config, 'sliding_window_num_frames',
-                                                     15)
+        if hasattr(self.transformer, "config") and hasattr(self.transformer.config, "arch_config"):
+            self.num_frame_per_block = getattr(
+                self.transformer.config.arch_config,
+                "num_frames_per_block",
+                getattr(self.transformer, "num_frame_per_block", 1),
+            )
+            self.sliding_window_num_frames = getattr(
+                self.transformer.config.arch_config, "sliding_window_num_frames", 15
+            )
         else:
-            self.num_frame_per_block = getattr(self.transformer, 'num_frame_per_block', 1)
+            self.num_frame_per_block = getattr(self.transformer, "num_frame_per_block", 1)
             self.sliding_window_num_frames = 15
 
         try:
@@ -88,14 +92,19 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
         except Exception:
             self.local_attn_size = -1
 
-        assert self.local_attn_size != -1, (f"local_attn_size must be set for Matrix-Game causal inference, "
-                                            f"got {self.local_attn_size}. Check MatrixGame2WanVideoArchConfig.")
-        assert self.num_frame_per_block > 0, (f"num_frame_per_block must be positive, got {self.num_frame_per_block}")
+        assert self.local_attn_size != -1, (
+            f"local_attn_size must be set for Matrix-Game causal inference, "
+            f"got {self.local_attn_size}. Check MatrixGame2WanVideoArchConfig."
+        )
+        assert self.num_frame_per_block > 0, f"num_frame_per_block must be positive, got {self.num_frame_per_block}"
 
-        logger.info("Matrix-Game 2.0 causal inference initialized: "
-                    "local_attn_size=%s, num_frame_per_block=%s", self.local_attn_size, self.num_frame_per_block)
+        logger.info(
+            "Matrix-Game 2.0 causal inference initialized: local_attn_size=%s, num_frame_per_block=%s",
+            self.local_attn_size,
+            self.num_frame_per_block,
+        )
 
-        self.action_config = getattr(self.transformer, 'action_config', {})
+        self.action_config = getattr(self.transformer, "action_config", {})
         self.use_action_module = len(self.action_config) > 0
 
         self._streaming_initialized: bool = False
@@ -120,7 +129,7 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
             timesteps = scheduler_timesteps[1000 - timesteps]
         timesteps = timesteps.to(get_local_torch_device())
 
-        boundary_ratio = getattr(fastvideo_args.pipeline_config.dit_config, 'boundary_ratio', None)
+        boundary_ratio = getattr(fastvideo_args.pipeline_config.dit_config, "boundary_ratio", None)
         if boundary_ratio is not None:
             boundary_timestep = boundary_ratio * self.scheduler.num_train_timesteps
             high_noise_timesteps = timesteps[timesteps >= boundary_timestep]
@@ -146,22 +155,23 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
         kv_cache1 = self._initialize_kv_cache(batch_size=latents.shape[0], dtype=target_dtype, device=latents.device)
         kv_cache2 = None
         if boundary_timestep is not None:
-            kv_cache2 = self._initialize_kv_cache(batch_size=latents.shape[0],
-                                                  dtype=target_dtype,
-                                                  device=latents.device)
+            kv_cache2 = self._initialize_kv_cache(
+                batch_size=latents.shape[0], dtype=target_dtype, device=latents.device
+            )
 
         kv_cache_mouse = None
         kv_cache_keyboard = None
         if self.use_action_module:
-            kv_cache_mouse, kv_cache_keyboard = self._initialize_action_kv_cache(batch_size=latents.shape[0],
-                                                                                 dtype=target_dtype,
-                                                                                 device=latents.device)
+            kv_cache_mouse, kv_cache_keyboard = self._initialize_action_kv_cache(
+                batch_size=latents.shape[0], dtype=target_dtype, device=latents.device
+            )
 
         crossattn_cache = self._initialize_crossattn_cache(
             batch_size=latents.shape[0],
             max_text_len=257,  # 1 CLS + 256 patch tokens
             dtype=target_dtype,
-            device=latents.device)
+            device=latents.device,
+        )
 
         if t % self.num_frame_per_block != 0:
             raise ValueError("num_frames must be divisible by num_frame_per_block for causal denoising")
@@ -204,7 +214,7 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
             for block_idx, current_num_frames in enumerate(block_sizes):
                 ctx.block_idx = block_idx
                 ctx.start_index = start_index
-                current_latents = latents[:, :, start_index:start_index + current_num_frames, :, :]
+                current_latents = latents[:, :, start_index : start_index + current_num_frames, :, :]
 
                 action_kwargs = self._prepare_action_kwargs(batch, start_index, current_num_frames)
 
@@ -219,7 +229,7 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
                     progress_bar=progress_bar,
                 )
 
-                latents[:, :, start_index:start_index + current_num_frames, :, :] = current_latents
+                latents[:, :, start_index : start_index + current_num_frames, :, :] = current_latents
 
                 # Update KV caches with clean context
                 self._update_context_cache(
@@ -249,40 +259,39 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
 
         vae_time_compression_ratio = 4
         end_frame_idx = 1 + vae_time_compression_ratio * (start_index + num_frames - 1)
-        if hasattr(batch, 'mouse_cond') and batch.mouse_cond is not None:
-            action_kwargs['mouse_cond'] = batch.mouse_cond[:, :end_frame_idx]
-        if hasattr(batch, 'keyboard_cond') and batch.keyboard_cond is not None:
-            action_kwargs['keyboard_cond'] = batch.keyboard_cond[:, :end_frame_idx]
+        if hasattr(batch, "mouse_cond") and batch.mouse_cond is not None:
+            action_kwargs["mouse_cond"] = batch.mouse_cond[:, :end_frame_idx]
+        if hasattr(batch, "keyboard_cond") and batch.keyboard_cond is not None:
+            action_kwargs["keyboard_cond"] = batch.keyboard_cond[:, :end_frame_idx]
 
         # CRITICAL: Pass num_frame_per_block to model - this should be num_frames (current block size)
-        action_kwargs['num_frame_per_block'] = num_frames
+        action_kwargs["num_frame_per_block"] = num_frames
         return action_kwargs
 
     def _initialize_kv_cache(self, batch_size: int, dtype: torch.dtype, device: torch.device) -> list[dict]:
         kv_cache = []
         num_attention_heads = self.transformer.num_attention_heads
-        attention_head_dim = getattr(self.transformer, 'attention_head_dim',
-                                     self.transformer.hidden_size // num_attention_heads)
+        attention_head_dim = getattr(
+            self.transformer, "attention_head_dim", self.transformer.hidden_size // num_attention_heads
+        )
         if self.local_attn_size != -1:
             kv_cache_size = self.local_attn_size * self.frame_seq_length
         else:
             kv_cache_size = self.frame_seq_length * self.sliding_window_num_frames
 
         for _ in range(self.num_transformer_blocks):
-            kv_cache.append({
-                "k":
-                torch.zeros([batch_size, kv_cache_size, num_attention_heads, attention_head_dim],
-                            dtype=dtype,
-                            device=device),
-                "v":
-                torch.zeros([batch_size, kv_cache_size, num_attention_heads, attention_head_dim],
-                            dtype=dtype,
-                            device=device),
-                "global_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
-                "local_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
-            })
+            kv_cache.append(
+                {
+                    "k": torch.zeros(
+                        [batch_size, kv_cache_size, num_attention_heads, attention_head_dim], dtype=dtype, device=device
+                    ),
+                    "v": torch.zeros(
+                        [batch_size, kv_cache_size, num_attention_heads, attention_head_dim], dtype=dtype, device=device
+                    ),
+                    "global_end_index": torch.tensor([0], dtype=torch.long, device=device),
+                    "local_end_index": torch.tensor([0], dtype=torch.long, device=device),
+                }
+            )
 
         return kv_cache
 
@@ -290,59 +299,64 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
         kv_cache_mouse = []
         kv_cache_keyboard = []
 
-        action_heads = self.action_config.get('heads_num', 16)
-        mouse_head_dim = self.action_config.get('mouse_hidden_dim', 1024) // action_heads
-        keyboard_head_dim = self.action_config.get('keyboard_hidden_dim', 1024) // action_heads
+        action_heads = self.action_config.get("heads_num", 16)
+        mouse_head_dim = self.action_config.get("mouse_hidden_dim", 1024) // action_heads
+        keyboard_head_dim = self.action_config.get("keyboard_hidden_dim", 1024) // action_heads
 
         kv_cache_size = self.local_attn_size if self.local_attn_size != -1 else 15
 
         for _ in range(self.num_transformer_blocks):
-            kv_cache_keyboard.append({
-                "k":
-                torch.zeros([batch_size, kv_cache_size, action_heads, keyboard_head_dim], dtype=dtype, device=device),
-                "v":
-                torch.zeros([batch_size, kv_cache_size, action_heads, keyboard_head_dim], dtype=dtype, device=device),
-                "global_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
-                "local_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
-            })
-            kv_cache_mouse.append({
-                "k":
-                torch.zeros([batch_size * self.frame_seq_length, kv_cache_size, action_heads, mouse_head_dim],
-                            dtype=dtype,
-                            device=device),
-                "v":
-                torch.zeros([batch_size * self.frame_seq_length, kv_cache_size, action_heads, mouse_head_dim],
-                            dtype=dtype,
-                            device=device),
-                "global_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
-                "local_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
-            })
+            kv_cache_keyboard.append(
+                {
+                    "k": torch.zeros(
+                        [batch_size, kv_cache_size, action_heads, keyboard_head_dim], dtype=dtype, device=device
+                    ),
+                    "v": torch.zeros(
+                        [batch_size, kv_cache_size, action_heads, keyboard_head_dim], dtype=dtype, device=device
+                    ),
+                    "global_end_index": torch.tensor([0], dtype=torch.long, device=device),
+                    "local_end_index": torch.tensor([0], dtype=torch.long, device=device),
+                }
+            )
+            kv_cache_mouse.append(
+                {
+                    "k": torch.zeros(
+                        [batch_size * self.frame_seq_length, kv_cache_size, action_heads, mouse_head_dim],
+                        dtype=dtype,
+                        device=device,
+                    ),
+                    "v": torch.zeros(
+                        [batch_size * self.frame_seq_length, kv_cache_size, action_heads, mouse_head_dim],
+                        dtype=dtype,
+                        device=device,
+                    ),
+                    "global_end_index": torch.tensor([0], dtype=torch.long, device=device),
+                    "local_end_index": torch.tensor([0], dtype=torch.long, device=device),
+                }
+            )
 
         return kv_cache_mouse, kv_cache_keyboard
 
-    def _initialize_crossattn_cache(self, batch_size: int, max_text_len: int, dtype: torch.dtype,
-                                    device: torch.device) -> list[dict]:
+    def _initialize_crossattn_cache(
+        self, batch_size: int, max_text_len: int, dtype: torch.dtype, device: torch.device
+    ) -> list[dict]:
         crossattn_cache = []
         num_attention_heads = self.transformer.num_attention_heads
-        attention_head_dim = getattr(self.transformer, 'attention_head_dim',
-                                     self.transformer.hidden_size // num_attention_heads)
+        attention_head_dim = getattr(
+            self.transformer, "attention_head_dim", self.transformer.hidden_size // num_attention_heads
+        )
         for _ in range(self.num_transformer_blocks):
-            crossattn_cache.append({
-                "k":
-                torch.zeros([batch_size, max_text_len, num_attention_heads, attention_head_dim],
-                            dtype=dtype,
-                            device=device),
-                "v":
-                torch.zeros([batch_size, max_text_len, num_attention_heads, attention_head_dim],
-                            dtype=dtype,
-                            device=device),
-                "is_init":
-                False,
-            })
+            crossattn_cache.append(
+                {
+                    "k": torch.zeros(
+                        [batch_size, max_text_len, num_attention_heads, attention_head_dim], dtype=dtype, device=device
+                    ),
+                    "v": torch.zeros(
+                        [batch_size, max_text_len, num_attention_heads, attention_head_dim], dtype=dtype, device=device
+                    ),
+                    "is_init": False,
+                }
+            )
         return crossattn_cache
 
     def _process_single_block(
@@ -354,8 +368,7 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
         timesteps: torch.Tensor,
         ctx: BlockProcessingContext,
         action_kwargs: dict[str, Any],
-        noise_generator: Callable[[tuple, torch.dtype, int], torch.Tensor]
-        | None = None,
+        noise_generator: Callable[[tuple, torch.dtype, int], torch.Tensor] | None = None,
         progress_bar: Any | None = None,
     ) -> torch.Tensor:
         prompt_embeds = batch.prompt_embeds
@@ -370,7 +383,7 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
             noise_latents = noise_latents_btchw.clone()
             latent_model_input = current_latents.to(ctx.target_dtype)
 
-            independent_first_frame = getattr(self.transformer, 'independent_first_frame', False)
+            independent_first_frame = getattr(self.transformer, "independent_first_frame", False)
             if batch.image_latent is not None and independent_first_frame and start_index == 0:
                 latent_model_input = torch.cat([latent_model_input, batch.image_latent.to(ctx.target_dtype)], dim=2)
 
@@ -396,16 +409,16 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
             else:
                 attn_metadata = None
 
-            with torch.autocast(device_type="cuda",
-                                dtype=ctx.target_dtype,
-                                enabled=ctx.autocast_enabled), \
-                set_forward_context(current_timestep=i,
-                                    attn_metadata=attn_metadata,
-                                    forward_batch=batch):
+            with (
+                torch.autocast(device_type="cuda", dtype=ctx.target_dtype, enabled=ctx.autocast_enabled),
+                set_forward_context(current_timestep=i, attn_metadata=attn_metadata, forward_batch=batch),
+            ):
                 # Expand timestep to per-frame format [batch, num_frames] for causal model
-                t_expanded_noise = t_cur * torch.ones((latent_model_input.shape[0], current_num_frames),
-                                                      device=latent_model_input.device,
-                                                      dtype=torch.long)
+                t_expanded_noise = t_cur * torch.ones(
+                    (latent_model_input.shape[0], current_num_frames),
+                    device=latent_model_input.device,
+                    dtype=torch.long,
+                )
 
                 model_kwargs = {
                     "kv_cache": ctx.get_kv_cache(t_cur),
@@ -415,10 +428,12 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
                 }
 
                 if self.use_action_module and current_model == self.transformer:
-                    model_kwargs.update({
-                        "kv_cache_mouse": ctx.kv_cache_mouse,
-                        "kv_cache_keyboard": ctx.kv_cache_keyboard,
-                    })
+                    model_kwargs.update(
+                        {
+                            "kv_cache_mouse": ctx.kv_cache_mouse,
+                            "kv_cache_keyboard": ctx.kv_cache_keyboard,
+                        }
+                    )
                     model_kwargs.update(action_kwargs)
 
                 pred_noise_btchw = current_model(
@@ -436,13 +451,15 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
                     noise_input_latent=noise_latents.flatten(0, 1),
                     timestep=t_expand,
                     boundary_timestep=torch.ones_like(t_expand) * ctx.boundary_timestep,
-                    scheduler=self.scheduler).unflatten(0, pred_noise_btchw.shape[:2])
+                    scheduler=self.scheduler,
+                ).unflatten(0, pred_noise_btchw.shape[:2])
             else:
-                pred_video_btchw = pred_noise_to_pred_video(pred_noise=pred_noise_btchw.flatten(0, 1),
-                                                            noise_input_latent=noise_latents.flatten(0, 1),
-                                                            timestep=t_expand,
-                                                            scheduler=self.scheduler).unflatten(
-                                                                0, pred_noise_btchw.shape[:2])
+                pred_video_btchw = pred_noise_to_pred_video(
+                    pred_noise=pred_noise_btchw.flatten(0, 1),
+                    noise_input_latent=noise_latents.flatten(0, 1),
+                    timestep=t_expand,
+                    scheduler=self.scheduler,
+                ).unflatten(0, pred_noise_btchw.shape[:2])
 
             if i < len(timesteps) - 1:
                 next_timestep = timesteps[i + 1] * torch.ones([1], dtype=torch.long, device=pred_video_btchw.device)
@@ -454,23 +471,31 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
                     noise = torch.randn(
                         pred_video_btchw.shape,
                         dtype=pred_video_btchw.dtype,
-                        generator=(batch.generator[0] if isinstance(batch.generator, list) else batch.generator)).to(
-                            pred_video_btchw.device)
+                        generator=(batch.generator[0] if isinstance(batch.generator, list) else batch.generator),
+                    ).to(pred_video_btchw.device)
 
                 noise_btchw = noise
-                if ctx.boundary_timestep is not None and ctx.high_noise_timesteps is not None and i < len(
-                        ctx.high_noise_timesteps) - 1:
+                if (
+                    ctx.boundary_timestep is not None
+                    and ctx.high_noise_timesteps is not None
+                    and i < len(ctx.high_noise_timesteps) - 1
+                ):
                     noise_latents_btchw = self.scheduler.add_noise_high(
-                        pred_video_btchw.flatten(0, 1), noise_btchw.flatten(0, 1), next_timestep,
-                        torch.ones_like(next_timestep) * ctx.boundary_timestep).unflatten(
-                            0, pred_video_btchw.shape[:2])
-                elif ctx.boundary_timestep is not None and ctx.high_noise_timesteps is not None and i == len(
-                        ctx.high_noise_timesteps) - 1:
+                        pred_video_btchw.flatten(0, 1),
+                        noise_btchw.flatten(0, 1),
+                        next_timestep,
+                        torch.ones_like(next_timestep) * ctx.boundary_timestep,
+                    ).unflatten(0, pred_video_btchw.shape[:2])
+                elif (
+                    ctx.boundary_timestep is not None
+                    and ctx.high_noise_timesteps is not None
+                    and i == len(ctx.high_noise_timesteps) - 1
+                ):
                     noise_latents_btchw = pred_video_btchw
                 else:
-                    noise_latents_btchw = self.scheduler.add_noise(pred_video_btchw.flatten(0, 1),
-                                                                   noise_btchw.flatten(0, 1), next_timestep).unflatten(
-                                                                       0, pred_video_btchw.shape[:2])
+                    noise_latents_btchw = self.scheduler.add_noise(
+                        pred_video_btchw.flatten(0, 1), noise_btchw.flatten(0, 1), next_timestep
+                    ).unflatten(0, pred_video_btchw.shape[:2])
                 current_latents = noise_latents_btchw.permute(0, 2, 1, 3, 4)
             else:
                 current_latents = pred_video_btchw.permute(0, 2, 1, 3, 4)
@@ -494,17 +519,15 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
         latents_device = current_latents.device
 
         # Expand context timestep to per-frame format [batch, num_frames] for causal model
-        t_context = torch.ones([current_latents.shape[0], current_num_frames], device=latents_device,
-                               dtype=torch.long) * int(context_noise)
+        t_context = torch.ones(
+            [current_latents.shape[0], current_num_frames], device=latents_device, dtype=torch.long
+        ) * int(context_noise)
         context_bcthw = current_latents.to(ctx.target_dtype)
 
-        with torch.autocast(device_type="cuda",
-                            dtype=ctx.target_dtype,
-                            enabled=ctx.autocast_enabled), \
-            set_forward_context(current_timestep=0,
-                                attn_metadata=None,
-                                forward_batch=batch):
-
+        with (
+            torch.autocast(device_type="cuda", dtype=ctx.target_dtype, enabled=ctx.autocast_enabled),
+            set_forward_context(current_timestep=0, attn_metadata=None, forward_batch=batch),
+        ):
             context_model_kwargs = {
                 "kv_cache": ctx.kv_cache1,
                 "crossattn_cache": ctx.crossattn_cache,
@@ -513,10 +536,12 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
             }
 
             if self.use_action_module:
-                context_model_kwargs.update({
-                    "kv_cache_mouse": ctx.kv_cache_mouse,
-                    "kv_cache_keyboard": ctx.kv_cache_keyboard,
-                })
+                context_model_kwargs.update(
+                    {
+                        "kv_cache_mouse": ctx.kv_cache_mouse,
+                        "kv_cache_keyboard": ctx.kv_cache_keyboard,
+                    }
+                )
                 context_model_kwargs.update(action_kwargs)
 
             if ctx.boundary_timestep is not None and self.transformer_2 is not None:
@@ -556,7 +581,7 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
             timesteps = scheduler_timesteps[1000 - timesteps]
         timesteps = timesteps.to(get_local_torch_device())
 
-        boundary_ratio = getattr(fastvideo_args.pipeline_config.dit_config, 'boundary_ratio', None)
+        boundary_ratio = getattr(fastvideo_args.pipeline_config.dit_config, "boundary_ratio", None)
         if boundary_ratio is not None:
             boundary_timestep = boundary_ratio * self.scheduler.num_train_timesteps
             high_noise_timesteps = timesteps[timesteps >= boundary_timestep]
@@ -583,22 +608,23 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
         kv_cache1 = self._initialize_kv_cache(batch_size=latents.shape[0], dtype=target_dtype, device=latents.device)
         kv_cache2 = None
         if boundary_timestep is not None:
-            kv_cache2 = self._initialize_kv_cache(batch_size=latents.shape[0],
-                                                  dtype=target_dtype,
-                                                  device=latents.device)
+            kv_cache2 = self._initialize_kv_cache(
+                batch_size=latents.shape[0], dtype=target_dtype, device=latents.device
+            )
 
         kv_cache_mouse = None
         kv_cache_keyboard = None
         if self.use_action_module:
-            kv_cache_mouse, kv_cache_keyboard = self._initialize_action_kv_cache(batch_size=latents.shape[0],
-                                                                                 dtype=target_dtype,
-                                                                                 device=latents.device)
+            kv_cache_mouse, kv_cache_keyboard = self._initialize_action_kv_cache(
+                batch_size=latents.shape[0], dtype=target_dtype, device=latents.device
+            )
 
         crossattn_cache = self._initialize_crossattn_cache(
             batch_size=latents.shape[0],
             max_text_len=257,  # 1 CLS + 256 patch tokens
             dtype=target_dtype,
-            device=latents.device)
+            device=latents.device,
+        )
 
         # Calculate block sizes
         if t % self.num_frame_per_block != 0:
@@ -616,7 +642,8 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
                 noise_shape,
                 dtype=target_dtype,
                 device=latents.device,
-            ) for _ in range(num_denoising_steps - 1)
+            )
+            for _ in range(num_denoising_steps - 1)
         ]
 
         # Create and store context
@@ -645,9 +672,9 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
         self._streaming_initialized = True
         return batch
 
-    def streaming_step(self,
-                       keyboard_action: torch.Tensor | None = None,
-                       mouse_action: torch.Tensor | None = None) -> ForwardBatch:
+    def streaming_step(
+        self, keyboard_action: torch.Tensor | None = None, mouse_action: torch.Tensor | None = None
+    ) -> ForwardBatch:
         if not self._streaming_initialized or self._streaming_ctx is None:
             raise RuntimeError("Streaming not initialized! Call streaming_reset first.")
 
@@ -662,7 +689,7 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
         current_num_frames = ctx.block_sizes[ctx.block_idx]
         start_index = ctx.start_index
 
-        current_latents = latents[:, :, start_index:start_index + current_num_frames, :, :]
+        current_latents = latents[:, :, start_index : start_index + current_num_frames, :, :]
 
         # Update batch with new actions for this block
         if keyboard_action is not None or mouse_action is not None:
@@ -671,24 +698,24 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
 
             if keyboard_action is not None:
                 n = keyboard_action.shape[1]
-                batch.keyboard_cond[:, start_frame:start_frame + n] = keyboard_action.to(batch.keyboard_cond.device)
+                batch.keyboard_cond[:, start_frame : start_frame + n] = keyboard_action.to(batch.keyboard_cond.device)
             if mouse_action is not None:
                 n = mouse_action.shape[1]
-                batch.mouse_cond[:, start_frame:start_frame + n] = mouse_action.to(batch.mouse_cond.device)
+                batch.mouse_cond[:, start_frame : start_frame + n] = mouse_action.to(batch.mouse_cond.device)
 
         action_kwargs = self._prepare_action_kwargs(batch, start_index, current_num_frames)
 
         # Create noise generator that uses pre-allocated noise pool
         def streaming_noise_generator(shape: tuple, dtype: torch.dtype, step_idx: int) -> torch.Tensor:
             if ctx.noise_pool is not None and step_idx < len(ctx.noise_pool):
-                return ctx.noise_pool[step_idx][:, :shape[1], :, :, :].to(latents.device)
+                return ctx.noise_pool[step_idx][:, : shape[1], :, :, :].to(latents.device)
             else:
                 # Fallback to dynamic allocation if pool not available
                 return torch.randn(
                     shape,
                     dtype=dtype,
-                    generator=(batch.generator[0] if isinstance(batch.generator, list) else batch.generator)).to(
-                        latents.device)
+                    generator=(batch.generator[0] if isinstance(batch.generator, list) else batch.generator),
+                ).to(latents.device)
 
         current_latents = self._process_single_block(
             current_latents=current_latents,
@@ -701,7 +728,7 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
             noise_generator=streaming_noise_generator,
         )
 
-        latents[:, :, start_index:start_index + current_num_frames, :, :] = current_latents
+        latents[:, :, start_index : start_index + current_num_frames, :, :] = current_latents
 
         # Update KV caches with clean context
         self._update_context_cache(
@@ -735,6 +762,9 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
         result.add_check("eta", batch.eta, V.non_negative_float)
         result.add_check("generator", batch.generator, V.generator_or_list_generators)
         result.add_check("do_classifier_free_guidance", batch.do_classifier_free_guidance, V.bool_value)
-        result.add_check("negative_prompt_embeds", batch.negative_prompt_embeds,
-                         lambda x: not batch.do_classifier_free_guidance or V.list_not_empty(x))
+        result.add_check(
+            "negative_prompt_embeds",
+            batch.negative_prompt_embeds,
+            lambda x: not batch.do_classifier_free_guidance or V.list_not_empty(x),
+        )
         return result

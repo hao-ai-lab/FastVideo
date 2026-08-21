@@ -25,14 +25,14 @@ def _normalize_validation_frames(frames: list[np.ndarray]) -> np.ndarray:
         raise ValueError("Validation media requires at least one video frame.")
     frame_array = np.stack(frames)
     if frame_array.ndim != 4 or frame_array.shape[-1] != 3:
-        raise ValueError("Validation frames must have shape [frames, height, width, 3]; "
-                         f"got {frame_array.shape}.")
+        raise ValueError(f"Validation frames must have shape [frames, height, width, 3]; got {frame_array.shape}.")
     if frame_array.dtype != np.uint8:
-        raise TypeError("Validation frames must use uint8 RGB values; "
-                        f"got {frame_array.dtype}.")
+        raise TypeError(f"Validation frames must use uint8 RGB values; got {frame_array.dtype}.")
     if frame_array.shape[1] % 2 or frame_array.shape[2] % 2:
-        raise ValueError("H.264 yuv420p encoding requires even frame dimensions; "
-                         f"got {frame_array.shape[1]} x {frame_array.shape[2]}.")
+        raise ValueError(
+            "H.264 yuv420p encoding requires even frame dimensions; "
+            f"got {frame_array.shape[1]} x {frame_array.shape[2]}."
+        )
     return np.ascontiguousarray(frame_array)
 
 
@@ -43,7 +43,7 @@ def _normalize_audio_waveform(audio: torch.Tensor | np.ndarray) -> np.ndarray:
     sample-major arrays. Ambiguous two-dimensional shapes raise an error so
     validation never exchanges the sample and channel axes silently.
     """
-    waveform = (audio.detach().cpu().float().numpy() if torch.is_tensor(audio) else np.asarray(audio, dtype=np.float32))
+    waveform = audio.detach().cpu().float().numpy() if torch.is_tensor(audio) else np.asarray(audio, dtype=np.float32)
 
     if waveform.ndim == 1:
         waveform = waveform[:, None]
@@ -53,11 +53,14 @@ def _normalize_audio_waveform(audio: torch.Tensor | np.ndarray) -> np.ndarray:
         if first_axis_is_channels and not second_axis_is_channels:
             waveform = waveform.T
         elif first_axis_is_channels == second_axis_is_channels:
-            raise ValueError("A two-dimensional audio waveform must have one channel axis "
-                             f"with at most eight entries; got {waveform.shape}.")
+            raise ValueError(
+                "A two-dimensional audio waveform must have one channel axis "
+                f"with at most eight entries; got {waveform.shape}."
+            )
     else:
-        raise ValueError("Audio must have shape [samples], [samples, channels], or "
-                         f"[channels, samples]; got {waveform.shape}.")
+        raise ValueError(
+            f"Audio must have shape [samples], [samples, channels], or [channels, samples]; got {waveform.shape}."
+        )
 
     if waveform.shape[0] == 0:
         raise ValueError("Validation audio requires at least one sample.")
@@ -104,8 +107,7 @@ def _encode_mp4(
         if waveform is not None and sample_rate is not None:
             channel_count = int(waveform.shape[1])
             if channel_count not in (1, 2):
-                raise ValueError("Validation MP4 audio must be mono or stereo; "
-                                 f"got {channel_count} channels.")
+                raise ValueError(f"Validation MP4 audio must be mono or stereo; got {channel_count} channels.")
             layout = "mono" if channel_count == 1 else "stereo"
             audio_stream = container.add_stream("aac", rate=sample_rate, layout=layout)
 
@@ -126,7 +128,7 @@ def _encode_mp4(
         # AAC uses 1024-sample frames; flushing after the trailing short chunk lets
         # the codec emit every buffered sample into the container.
         for sample_index in range(0, audio_int16.shape[0], 1024):
-            chunk = np.ascontiguousarray(audio_int16[sample_index:sample_index + 1024].T)
+            chunk = np.ascontiguousarray(audio_int16[sample_index : sample_index + 1024].T)
             audio_frame = av.AudioFrame.from_ndarray(chunk, format="s16p", layout=layout)
             audio_frame.sample_rate = sample_rate
             audio_frame.pts = sample_index
@@ -157,11 +159,15 @@ def _verify_encoded_streams(
         encoded_channels = len(audio_stream.codec_context.layout.channels)
         encoded_sample_rate = int(audio_stream.codec_context.sample_rate)
         if encoded_channels != expected_audio_channels:
-            raise RuntimeError("Validation MP4 audio channel count changed during encoding: "
-                               f"expected {expected_audio_channels}, got {encoded_channels}.")
+            raise RuntimeError(
+                "Validation MP4 audio channel count changed during encoding: "
+                f"expected {expected_audio_channels}, got {encoded_channels}."
+            )
         if encoded_sample_rate != expected_audio_sample_rate:
-            raise RuntimeError("Validation MP4 audio sample rate changed during encoding: "
-                               f"expected {expected_audio_sample_rate}, got {encoded_sample_rate}.")
+            raise RuntimeError(
+                "Validation MP4 audio sample rate changed during encoding: "
+                f"expected {expected_audio_sample_rate}, got {encoded_sample_rate}."
+            )
 
 
 def write_validation_mp4(
@@ -185,8 +191,7 @@ def write_validation_mp4(
     if (audio is None) != (audio_sample_rate is None):
         raise ValueError("Validation audio and its sample rate must be provided together.")
     if audio_sample_rate is not None and audio_sample_rate <= 0:
-        raise ValueError("Validation audio sample rate must be positive; "
-                         f"got {audio_sample_rate}.")
+        raise ValueError(f"Validation audio sample rate must be positive; got {audio_sample_rate}.")
 
     frame_array = _normalize_validation_frames(frames)
     waveform = _normalize_audio_waveform(audio) if audio is not None else None

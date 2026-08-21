@@ -37,16 +37,16 @@ def split_tensor_along_last_dim(
     num_partitions: int,
     contiguous_split_chunks: bool = False,
 ) -> Sequence[torch.Tensor]:
-    """ Split a tensor along its last dimension.
+    """Split a tensor along its last dimension.
 
-        Arguments:
-            tensor: input tensor.
-            num_partitions: number of partitions to split the tensor
-            contiguous_split_chunks: If True, make each chunk contiguous
-                                     in memory.
+    Arguments:
+        tensor: input tensor.
+        num_partitions: number of partitions to split the tensor
+        contiguous_split_chunks: If True, make each chunk contiguous
+                                 in memory.
 
-        Returns:
-            A list of Tensors
+    Returns:
+        A list of Tensors
     """
     # Get the size and dimension.
     last_dim = tensor.dim() - 1
@@ -63,11 +63,11 @@ def split_tensor_along_last_dim(
 def compute_padding_for_sp(seq_len: int, sp_world_size: int) -> tuple[int, int]:
     """
     Compute padding needed for sequence parallel.
-    
+
     Args:
         seq_len: Original sequence length
         sp_world_size: Sequence parallel world size
-        
+
     Returns:
         tuple: (padded_seq_len, padding_amount)
     """
@@ -88,13 +88,13 @@ def pad_sequence_tensor(
 ) -> torch.Tensor:
     """
     Pad a tensor along the sequence dimension.
-    
+
     Args:
         tensor: Input tensor to pad
         target_seq_len: Target sequence length after padding
         seq_dim: Dimension to pad along (default: 1)
         pad_value: Value to use for padding (default: 0.0)
-        
+
     Returns:
         Tensor: Padded tensor
     """
@@ -130,12 +130,12 @@ def unpad_sequence_tensor(
 ) -> torch.Tensor:
     """
     Remove padding from a tensor along the sequence dimension.
-    
+
     Args:
         tensor: Padded tensor
         original_seq_len: Original sequence length (before padding)
         seq_dim: Dimension to unpad along (default: 1)
-        
+
     Returns:
         Tensor: Unpadded tensor
     """
@@ -152,6 +152,7 @@ class StatelessProcessGroup:
     group. Only use it to communicate metadata between processes.
     For data-plane communication, create NCCL-related objects.
     """
+
     rank: int
     world_size: int
     store: torch._C._distributed_c10d.Store
@@ -205,15 +206,13 @@ class StatelessProcessGroup:
         """
         if self.rank == src:
             self.expire_data()
-            key = (f"broadcast_from/{src}/"
-                   f"{self.broadcast_send_counter}")
+            key = f"broadcast_from/{src}/{self.broadcast_send_counter}"
             self.store.set(key, pickle.dumps(obj))
             self.broadcast_send_counter += 1
             self.entries.append((key, time.perf_counter()))
             return obj
         else:
-            key = (f"broadcast_from/{src}/"
-                   f"{self.broadcast_recv_src_counter[src]}")
+            key = f"broadcast_from/{src}/{self.broadcast_recv_src_counter[src]}"
             recv_obj = pickle.loads(self.store.get(key))
             self.broadcast_recv_src_counter[src] += 1
             return recv_obj
@@ -260,7 +259,7 @@ class StatelessProcessGroup:
         used for exchanging metadata. With this function, process A and process B
         can call `StatelessProcessGroup.create` to form a group, and then process A, B,
         C, and D can call `StatelessProcessGroup.create` to form another group.
-        """ # noqa
+        """  # noqa
         store = TCPStore(
             host_name=host,
             port=port,
@@ -268,7 +267,6 @@ class StatelessProcessGroup:
             is_master=(rank == 0),
         )
 
-        return StatelessProcessGroup(rank=rank,
-                                     world_size=world_size,
-                                     store=store,
-                                     data_expiration_seconds=data_expiration_seconds)
+        return StatelessProcessGroup(
+            rank=rank, world_size=world_size, store=store, data_expiration_seconds=data_expiration_seconds
+        )

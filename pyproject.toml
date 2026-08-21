@@ -293,8 +293,6 @@ ignore = [
 "fastvideo/models/hunyuan/diffusion/pipelines/pipeline_hunyuan_video.py" = ["E741"]
 
 
-[tool.yapf]
-column_limit = 120
 
 [tool.isort]
 line_length = 120

@@ -13,10 +13,10 @@ def is_zimage_block(name: str, module) -> bool:
 @dataclass
 class ZImageDiTArchConfig(DiTArchConfig):
     _fsdp_shard_conditions: list = field(default_factory=lambda: [is_zimage_block])
-    _supported_attention_backends: tuple[AttentionBackendEnum, ...] = (AttentionBackendEnum.TORCH_SDPA, )
+    _supported_attention_backends: tuple[AttentionBackendEnum, ...] = (AttentionBackendEnum.TORCH_SDPA,)
 
-    all_patch_size: tuple[int, ...] = (2, )
-    all_f_patch_size: tuple[int, ...] = (1, )
+    all_patch_size: tuple[int, ...] = (2,)
+    all_f_patch_size: tuple[int, ...] = (1,)
     in_channels: int = 16
     dim: int = 3840
     n_layers: int = 30

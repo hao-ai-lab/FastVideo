@@ -28,7 +28,8 @@ from dreamverse.prompt_safety import PromptSafetyFilter
 
 import dreamverse.runtime as runtime
 from dreamverse.routes.health import (
-    router as internal_monitor_router, )
+    router as internal_monitor_router,
+)
 from dreamverse.routes.presets import (
     prompt_config_router,
     curated_presets_router,
@@ -41,7 +42,7 @@ class _HeartbeatAccessLogFilter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         message = record.getMessage()
-        return ('"GET /healthz ' not in message and '"GET /readyz ' not in message)
+        return '"GET /healthz ' not in message and '"GET /readyz ' not in message
 
 
 def _install_heartbeat_log_filter() -> None:
@@ -67,7 +68,7 @@ async def lifespan(app: FastAPI):
 
     runtime.prompt_enhancer = PromptEnhancer()
     runtime.session_event_logger = SessionEventLogger(Path(SESSION_LOG_ROOT))
-    runtime.prompt_safety_filter = (PromptSafetyFilter() if PROMPT_SAFETY_ENABLED else None)
+    runtime.prompt_safety_filter = PromptSafetyFilter() if PROMPT_SAFETY_ENABLED else None
     if runtime.prompt_safety_filter is not None:
         print("Prompt safety filter enabled")
 
@@ -162,8 +163,9 @@ async def apply_lora(request: LoraRequest) -> dict:
         stack.append((key, intensity))
 
     if not stack:
-        raise HTTPException(status_code=400,
-                            detail="Active model has no OmniNFT LoRA and no style selected; nothing to apply.")
+        raise HTTPException(
+            status_code=400, detail="Active model has no OmniNFT LoRA and no style selected; nothing to apply."
+        )
 
     try:
         triggers = await runtime.gpu_pool.apply_lora_stack(stack)
@@ -174,14 +176,8 @@ async def apply_lora(request: LoraRequest) -> dict:
         "applied": True,
         "strength": strength,
         "styles": styles_map,
-        "triggers": {
-            key: AVAILABLE_LORAS[key]["trigger"]
-            for key in styles_map
-        },
-        "gpus": {
-            str(gpu_id): trigger
-            for gpu_id, trigger in triggers.items()
-        },
+        "triggers": {key: AVAILABLE_LORAS[key]["trigger"] for key in styles_map},
+        "gpus": {str(gpu_id): trigger for gpu_id, trigger in triggers.items()},
     }
 
 

@@ -16,6 +16,7 @@ Serialization contract:
   raw-numpy round-trip cannot.
 * The returned payload is always a plain JSON-serializable dict.
 """
+
 from __future__ import annotations
 
 import base64
@@ -167,13 +168,14 @@ class LTX2ContinuationState:
         schema version is unsupported.
         """
         if state.kind != LTX2_CONTINUATION_KIND:
-            raise ValueError(f"Expected ContinuationState.kind={LTX2_CONTINUATION_KIND!r}, "
-                             f"got {state.kind!r}")
+            raise ValueError(f"Expected ContinuationState.kind={LTX2_CONTINUATION_KIND!r}, got {state.kind!r}")
         payload = state.payload or {}
         version = int(payload.get("schema_version", LTX2_CONTINUATION_SCHEMA_VERSION))
         if version != LTX2_CONTINUATION_SCHEMA_VERSION:
-            raise ValueError(f"Unsupported LTX-2 continuation schema_version={version}; "
-                             f"this build expects {LTX2_CONTINUATION_SCHEMA_VERSION}")
+            raise ValueError(
+                f"Unsupported LTX-2 continuation schema_version={version}; "
+                f"this build expects {LTX2_CONTINUATION_SCHEMA_VERSION}"
+            )
 
         out = cls(
             segment_index=int(payload.get("segment_index", 0)),
@@ -296,8 +298,9 @@ def _encode_png(frame: np.ndarray) -> bytes:
     if not isinstance(frame, np.ndarray):
         raise TypeError(f"LTX2 continuation frame must be a numpy ndarray, got {type(frame).__name__}")
     if frame.dtype != np.uint8 or frame.ndim != 3 or frame.shape[-1] != 3:
-        raise ValueError("LTX2 continuation frame must be uint8 HxWx3 RGB; got "
-                         f"dtype={frame.dtype}, shape={frame.shape}")
+        raise ValueError(
+            f"LTX2 continuation frame must be uint8 HxWx3 RGB; got dtype={frame.dtype}, shape={frame.shape}"
+        )
     import io
 
     buffer = io.BytesIO()
@@ -336,18 +339,17 @@ def _unpack_frame_blobs(raw: bytes) -> list[bytes]:
     # would otherwise cause an O(count) allocation loop on malformed
     # input.
     if count > (len(raw) - 4) // 4:
-        raise ValueError(f"frame blob declares {count} frames but buffer holds at most "
-                         f"{(len(raw) - 4) // 4}")
+        raise ValueError(f"frame blob declares {count} frames but buffer holds at most {(len(raw) - 4) // 4}")
     out: list[bytes] = []
     cursor = 4
     for index in range(count):
         if cursor + 4 > len(raw):
             raise ValueError(f"frame blob truncated at frame {index} length header")
-        length = int.from_bytes(raw[cursor:cursor + 4], "big")
+        length = int.from_bytes(raw[cursor : cursor + 4], "big")
         cursor += 4
         if cursor + length > len(raw):
             raise ValueError(f"frame blob truncated at frame {index} payload")
-        out.append(raw[cursor:cursor + length])
+        out.append(raw[cursor : cursor + length])
         cursor += length
     return out
 
@@ -365,14 +367,15 @@ def _tensor_to_safetensors_bytes(tensor: Any) -> bytes:
     if isinstance(tensor, torch.Tensor):
         return st_save({"t": tensor.detach().cpu()})
     import numpy as np
+
     if isinstance(tensor, np.ndarray):
         return st_save({"t": torch.from_numpy(np.ascontiguousarray(tensor))})
-    raise TypeError("LTX2 audio_latents must be a torch.Tensor or numpy.ndarray, got "
-                    f"{type(tensor).__name__}")
+    raise TypeError(f"LTX2 audio_latents must be a torch.Tensor or numpy.ndarray, got {type(tensor).__name__}")
 
 
 def _safetensors_bytes_to_tensor(raw: bytes) -> Any:
     from safetensors.torch import load as st_load
+
     return st_load(raw)["t"]
 
 

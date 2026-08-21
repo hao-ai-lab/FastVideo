@@ -3,9 +3,13 @@
 
 import torch
 
-from fastvideo.distributed.parallel_state import (get_sp_group, get_sp_world_size, get_tp_group,
-                                                  model_parallel_is_initialized)
-from fastvideo.distributed.utils import (unpad_sequence_tensor, compute_padding_for_sp, pad_sequence_tensor)
+from fastvideo.distributed.parallel_state import (
+    get_sp_group,
+    get_sp_world_size,
+    get_tp_group,
+    model_parallel_is_initialized,
+)
+from fastvideo.distributed.utils import unpad_sequence_tensor, compute_padding_for_sp, pad_sequence_tensor
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
@@ -25,9 +29,9 @@ def tensor_model_parallel_all_gather(input_: torch.Tensor, dim: int = -1) -> tor
 
 
 # TODO: remove model, make it sequence_parallel
-def sequence_model_parallel_all_to_all_4D(input_: torch.Tensor,
-                                          scatter_dim: int = 2,
-                                          gather_dim: int = 1) -> torch.Tensor:
+def sequence_model_parallel_all_to_all_4D(
+    input_: torch.Tensor, scatter_dim: int = 2, gather_dim: int = 1
+) -> torch.Tensor:
     """All-to-all communication of 4D tensors (e.g. QKV matrices) across sequence parallel group."""
     return get_sp_group().all_to_all_4D(input_, scatter_dim, gather_dim)
 
@@ -37,16 +41,16 @@ def sequence_model_parallel_all_gather(input_: torch.Tensor, dim: int = -1) -> t
     return get_sp_group().all_gather(input_, dim)
 
 
-def sequence_model_parallel_all_gather_with_unpad(input_: torch.Tensor,
-                                                  original_seq_len: int,
-                                                  dim: int = -1) -> torch.Tensor:
+def sequence_model_parallel_all_gather_with_unpad(
+    input_: torch.Tensor, original_seq_len: int, dim: int = -1
+) -> torch.Tensor:
     """All-gather the input tensor and remove padding.
-    
+
     Args:
         input_: Sharded (and possibly padded) tensor to gather
         original_seq_len: Original sequence length before padding
         dim: Dimension to gather along (default: -1)
-        
+
     Returns:
         Tensor: Gathered and unpadded tensor
     """
@@ -63,11 +67,11 @@ def sequence_model_parallel_all_gather_with_unpad(input_: torch.Tensor,
 
 def sequence_model_parallel_shard(input_: torch.Tensor, dim: int = 1) -> tuple[torch.Tensor, int]:
     """Shard the input tensor across model parallel group with optional padding.
-    
+
     Args:
         input_: Input tensor to shard
         dim: Dimension to shard along (default: 1)
-        
+
     Returns:
         tuple: (sharded_tensor, original_seq_len)
             - sharded_tensor: The sharded (and possibly padded) tensor
@@ -93,11 +97,11 @@ def sequence_model_parallel_shard(input_: torch.Tensor, dim: int = 1) -> tuple[t
 
 def warmup_sequence_parallel_communication(device: torch.device | None = None) -> None:
     """Warmup NCCL communicators for sequence parallel all-to-all operations.
-    
+
     The first NCCL collective operation is slow due to lazy communicator
     initialization. This function runs dummy all-to-all operations to
     trigger the initialization upfront, before the first real forward pass.
-    
+
     Args:
         device: Device to use for warmup tensors. If None, uses CUDA device 0.
     """
@@ -136,12 +140,14 @@ def warmup_sequence_parallel_communication(device: torch.device | None = None) -
     _ = sequence_model_parallel_all_to_all_4D(dummy, scatter_dim=2, gather_dim=1)
 
     # Warmup pattern 2: scatter sequence, gather heads (after attention)
-    dummy2 = torch.zeros(batch_size,
-                         seq_len_per_rank * sp_world_size,
-                         num_heads // sp_world_size,
-                         head_dim,
-                         device=device,
-                         dtype=torch.bfloat16)
+    dummy2 = torch.zeros(
+        batch_size,
+        seq_len_per_rank * sp_world_size,
+        num_heads // sp_world_size,
+        head_dim,
+        device=device,
+        dtype=torch.bfloat16,
+    )
     _ = sequence_model_parallel_all_to_all_4D(dummy2, scatter_dim=1, gather_dim=2)
 
     # Warmup all-gather (used for replicated tokens)

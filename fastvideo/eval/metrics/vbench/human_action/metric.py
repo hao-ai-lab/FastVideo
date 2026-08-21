@@ -28,7 +28,8 @@ def _load_cat_dict() -> dict[str, str]:
     if _CAT_DICT is not None:
         return _CAT_DICT
     import vbench.third_party.umt as _umt_pkg
-    cat_path = (Path(_umt_pkg.__file__).resolve().parent / "kinetics_400_categories.txt")
+
+    cat_path = Path(_umt_pkg.__file__).resolve().parent / "kinetics_400_categories.txt"
     out: dict[str, str] = {}
     with cat_path.open() as f:
         for line in f:
@@ -42,7 +43,6 @@ def _load_cat_dict() -> dict[str, str]:
 
 @register("vbench.human_action")
 class HumanActionMetric(BaseMetric):
-
     name = "vbench.human_action"
     requires_reference = False
     higher_is_better = True
@@ -124,8 +124,5 @@ class HumanActionMetric(BaseMetric):
         return MetricResult(
             name=self.name,
             score=1.0 if match else 0.0,
-            details={
-                "predictions": predictions,
-                "ground_truth": gt_label
-            },
+            details={"predictions": predictions, "ground_truth": gt_label},
         )

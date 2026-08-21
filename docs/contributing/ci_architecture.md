@@ -53,8 +53,7 @@ The workflow runs `.pre-commit-config.yaml` with `--hook-stage manual`.
 
 | Hook | Checks |
 |---|---|
-| `yapf` | Python formatting |
-| `ruff` | Python linting and auto-fixes |
+| `ruff` | Python formatting, linting, and auto-fixes |
 | `codespell` | Spelling in code and docs |
 | `pymarkdown` | Markdown formatting |
 | `actionlint` | GitHub Actions workflow syntax |

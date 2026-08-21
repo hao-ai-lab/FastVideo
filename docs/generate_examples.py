@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).parent.parent.resolve()
-ROOT_DIR_RELATIVE = '../..'
+ROOT_DIR_RELATIVE = "../.."
 EXAMPLE_DIR = ROOT_DIR / "examples"
 EXAMPLE_DOC_DIR = ROOT_DIR / "docs/getting_started/examples"
 GITHUB_REPO = "hao-ai-lab/FastVideo"  # Update this to your repo
@@ -84,7 +84,7 @@ def fix_case(text: str) -> str:
         r"int\d+": lambda x: x.group(0).upper(),  # e.g. int8, int16
     }
     for pattern, repl in subs.items():
-        text = re.sub(rf'\b{pattern}\b', repl, text, flags=re.IGNORECASE)  # type: ignore[call-overload]
+        text = re.sub(rf"\b{pattern}\b", repl, text, flags=re.IGNORECASE)  # type: ignore[call-overload]
     return text
 
 
@@ -104,7 +104,8 @@ class Index:
     Methods:
         generate() -> str:
             Generates the index content as a string in the specified format.
-    """ # noqa: E501
+    """  # noqa: E501
+
     path: Path
     title: str
     description: str
@@ -145,7 +146,8 @@ class Example:
         determine_other_files() -> list[Path]: Determines other files in the directory excluding the main file.
         determine_title() -> str: Determines the title of the document.
         generate() -> str: Generates the documentation content.
-    """ # noqa: E501
+    """  # noqa: E501
+
     path: Path
     category: str | None = None
     main_file: Path = field(init=False)
@@ -167,7 +169,7 @@ class Example:
             Markdown file found in the directory.
         Raises:
             IndexError: If no Markdown files are found in the directory.
-        """ # noqa: E501
+        """  # noqa: E501
         if self.path.is_file():
             return self.path
 
@@ -191,7 +193,7 @@ class Example:
 
         Returns:
             list[Path]: A list of Path objects representing the other files in the directory.
-        """ # noqa: E501
+        """  # noqa: E501
         if self.path.is_file():
             return []
         is_other_file = lambda file: file.is_file() and file != self.main_file
@@ -213,12 +215,12 @@ class Example:
         # Include main file content
         if self.main_file.suffix == ".md":
             # For markdown files, include the content directly
-            with open(self.main_file, encoding='utf-8') as f:
+            with open(self.main_file, encoding="utf-8") as f:
                 content += f.read() + "\n\n"
         else:
             # For code files, use code blocks
             language = self.main_file.suffix[1:] if self.main_file.suffix else ""
-            with open(self.main_file, encoding='utf-8') as f:
+            with open(self.main_file, encoding="utf-8") as f:
                 file_content = f.read()
             content += f"```{language}\n{file_content}\n```\n\n"
 
@@ -228,8 +230,22 @@ class Example:
         content += "## Additional Files\n\n"
         # Define binary/non-text file extensions to skip
         binary_extensions = {
-            '.mp4', '.avi', '.mov', '.mkv', '.gif', '.jpg', '.jpeg', '.png', '.webp', '.bmp', '.pdf', '.zip', '.tar',
-            '.gz', '.mp3', '.wav'
+            ".mp4",
+            ".avi",
+            ".mov",
+            ".mkv",
+            ".gif",
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".webp",
+            ".bmp",
+            ".pdf",
+            ".zip",
+            ".tar",
+            ".gz",
+            ".mp3",
+            ".wav",
         }
 
         for file in sorted(self.other_files):
@@ -239,22 +255,22 @@ class Example:
 
             file_rel_path = file.relative_to(self.path)
             # Use collapsible admonition syntax for MkDocs
-            content += f"??? note \"{file_rel_path}\"\n\n"
+            content += f'??? note "{file_rel_path}"\n\n'
 
             try:
                 if file.suffix == ".md":
                     # Include markdown content with indentation
-                    with open(file, encoding='utf-8') as f:
+                    with open(file, encoding="utf-8") as f:
                         for line in f:
                             content += f"    {line}"
                 else:
                     # Include code with proper formatting
                     language = file.suffix[1:] if file.suffix else ""
-                    with open(file, encoding='utf-8') as f:
+                    with open(file, encoding="utf-8") as f:
                         file_content = f.read()
                     # Indent the code block for the admonition
                     content += f"    ```{language}\n"
-                    for line in file_content.split('\n'):
+                    for line in file_content.split("\n"):
                         content += f"    {line}\n"
                     content += "    ```\n"
                 content += "\n"
@@ -268,6 +284,7 @@ class Example:
 @dataclass
 class NestedStructure:
     """Helper class to manage nested documentation structures for training/distillation."""
+
     category: str
     method: str
     model: str
@@ -280,7 +297,7 @@ class NestedStructure:
 
     @property
     def title(self) -> str:
-        return fix_case(self.dataset.replace('_', ' '))
+        return fix_case(self.dataset.replace("_", " "))
 
     @property
     def description(self) -> str:
@@ -295,25 +312,21 @@ def create_category_indices() -> dict[str, Index]:
         main_index_dir.mkdir(parents=True)
 
     category_indices = {
-        "inference":
-        Index(
+        "inference": Index(
             path=ROOT_DIR / "docs/inference/examples/examples_inference_index.md",
             title="🚀 Examples",
-            description=
-            "Inference examples demonstrate how to use FastVideo inference. We recommend starting with [basic.md](basic.md).",
+            description="Inference examples demonstrate how to use FastVideo inference. We recommend starting with [basic.md](basic.md).",
             caption="Examples",
             maxdepth=1,
         ),
-        "training":
-        Index(
+        "training": Index(
             path=ROOT_DIR / "docs/training/examples/examples_training_index.md",
             title="🚀 Examples",
             description="Training examples demonstrate how to use FastVideo training.",
             caption="Examples",
             maxdepth=3,
         ),
-        "distillation":
-        Index(
+        "distillation": Index(
             path=ROOT_DIR / "docs/distillation/examples/examples_distillation_index.md",
             title="🚀 Examples",
             description="Distillation examples demonstrate how to use FastVideo distillation.",
@@ -407,11 +420,9 @@ def create_nested_structures(examples: list[Example]) -> dict[str, dict[str, dic
                     nested_structures[example.category][method][model] = {}
 
                 # Store the nested structure
-                nested_structures[example.category][method][model][dataset] = NestedStructure(category=example.category,
-                                                                                              method=method,
-                                                                                              model=model,
-                                                                                              dataset=dataset,
-                                                                                              example=example)
+                nested_structures[example.category][method][model][dataset] = NestedStructure(
+                    category=example.category, method=method, model=model, dataset=dataset, example=example
+                )
 
         elif example.category == "distillation" and len(path_parts) >= 2:
             # For distillation examples like Wan2.1-T2V/Wan-Syn-Data-480P
@@ -428,17 +439,16 @@ def create_nested_structures(examples: list[Example]) -> dict[str, dict[str, dic
                 nested_structures[example.category][method][model] = {}
 
             # Store the nested structure
-            nested_structures[example.category][method][model][dataset] = NestedStructure(category=example.category,
-                                                                                          method=method,
-                                                                                          model=model,
-                                                                                          dataset=dataset,
-                                                                                          example=example)
+            nested_structures[example.category][method][model][dataset] = NestedStructure(
+                category=example.category, method=method, model=model, dataset=dataset, example=example
+            )
 
     return nested_structures
 
 
-def generate_flat_examples(examples: list[Example], category_indices: dict[str, Index], examples_index: Index | None,
-                           generate_main_index: bool) -> None:
+def generate_flat_examples(
+    examples: list[Example], category_indices: dict[str, Index], examples_index: Index | None, generate_main_index: bool
+) -> None:
     """Generate documentation for flat structure examples (inference, etc.)."""
     for example in examples:
         if example.category in ["training", "distillation"]:
@@ -460,8 +470,9 @@ def generate_flat_examples(examples: list[Example], category_indices: dict[str, 
         index.documents.append(example.path.stem)
 
 
-def generate_nested_examples(nested_structures: dict[str, dict[str, dict[str, dict[str, NestedStructure]]]],
-                             category_indices: dict[str, Index]) -> None:
+def generate_nested_examples(
+    nested_structures: dict[str, dict[str, dict[str, dict[str, NestedStructure]]]], category_indices: dict[str, Index]
+) -> None:
     """Generate documentation for nested structure examples (training, distillation)."""
     for category_name in ["training", "distillation"]:
         if category_name not in category_indices or category_name not in nested_structures:
@@ -472,11 +483,13 @@ def generate_nested_examples(nested_structures: dict[str, dict[str, dict[str, di
 
         for method, models in nested_structures[category_name].items():
             # Create method-level index
-            method_index = Index(path=category_base_dir / f"{method}.md",
-                                 title=fix_case(method),
-                                 description=f"Examples using {method}.",
-                                 caption=f"{fix_case(method)} Examples",
-                                 maxdepth=2)
+            method_index = Index(
+                path=category_base_dir / f"{method}.md",
+                title=fix_case(method),
+                description=f"Examples using {method}.",
+                caption=f"{fix_case(method)} Examples",
+                maxdepth=2,
+            )
 
             for model, datasets in models.items():
                 # Generate dataset examples using the Example class
@@ -486,11 +499,13 @@ def generate_nested_examples(nested_structures: dict[str, dict[str, dict[str, di
                         f.write(nested_struct.example.generate())
 
                 # Create model-level index
-                model_index = Index(path=category_base_dir / f"{model}.md",
-                                    title=fix_case(model.replace('_', ' ')),
-                                    description=f"Examples for the {model} model.",
-                                    caption=f"{fix_case(model.replace('_', ' '))} Datasets",
-                                    maxdepth=1)
+                model_index = Index(
+                    path=category_base_dir / f"{model}.md",
+                    title=fix_case(model.replace("_", " ")),
+                    description=f"Examples for the {model} model.",
+                    caption=f"{fix_case(model.replace('_', ' '))} Datasets",
+                    maxdepth=1,
+                )
 
                 # Add dataset indices to model index
                 for dataset, nested_struct in datasets.items():
@@ -514,7 +529,7 @@ def generate_nested_examples(nested_structures: dict[str, dict[str, dict[str, di
 def generate_examples(generate_main_index: bool = False) -> None:
     """
     Generate example documentation.
-    
+
     Args:
         generate_main_index (bool): Whether to generate the main examples index.
             If False, only category-specific indices will be generated.
@@ -533,7 +548,8 @@ def generate_examples(generate_main_index: bool = False) -> None:
             f"All documented examples are autogenerated using [generate_examples.py](https://github.com/{GITHUB_REPO}/blob/main/docs/generate_examples.py) "
             f"from examples found in the [examples](https://github.com/{GITHUB_REPO}/tree/main/examples) directory.",
             caption="Examples",
-            maxdepth=2)
+            maxdepth=2,
+        )
 
     # Find all examples
     examples = find_examples(category_indices, generate_main_index)

@@ -32,7 +32,8 @@ from fastvideo.logger import init_logger
 
 try:
     from fastvideo.attention.utils.flash_attn_no_pad import (
-        flash_attn_varlen_func_impl, )
+        flash_attn_varlen_func_impl,
+    )
 
     FLASH_ATTN_AVAILABLE = True
 except ImportError:
@@ -62,11 +63,13 @@ def get_tile_partition_indices(
     for t in range(math.ceil(T / ts)):
         for h in range(math.ceil(H / hs)):
             for w in range(math.ceil(W / ws)):
-                ls.append(indices[
-                    t * ts:min(t * ts + ts, T),
-                    h * hs:min(h * hs + hs, H),
-                    w * ws:min(w * ws + ws, W),
-                ].flatten())
+                ls.append(
+                    indices[
+                        t * ts : min(t * ts + ts, T),
+                        h * hs : min(h * hs + hs, H),
+                        w * ws : min(w * ws + ws, W),
+                    ].flatten()
+                )
     return torch.cat(ls, dim=0)
 
 
@@ -113,7 +116,7 @@ def _prune_queries(
         return q_blocks, idx, S
 
     center_idx = S // 2
-    center = q_blocks[:, :, :, center_idx:center_idx + 1, :]
+    center = q_blocks[:, :, :, center_idx : center_idx + 1, :]
 
     q_norm = F.normalize(q_blocks, dim=-1)
     c_norm = F.normalize(center, dim=-1)
@@ -166,7 +169,7 @@ def _select_kv_blocks(
     keep_sorted[..., 1:] = cumsum[..., :-1] < cumulative_threshold
 
     min_mask = torch.zeros_like(keep_sorted)
-    min_mask[..., :min(min_kv_blocks, N)] = True
+    min_mask[..., : min(min_kv_blocks, N)] = True
     keep_sorted = keep_sorted | min_mask
 
     kv_mask = torch.zeros_like(block_attn, dtype=torch.bool)
@@ -388,7 +391,7 @@ def _flash_attn_single_mask(
 
     idx = 0
     for qb in active_blocks:
-        block_out = flat_out[idx:idx + Sq]  # [Sq, H, D]
+        block_out = flat_out[idx : idx + Sq]  # [Sq, H, D]
         output_b[:, qb] = block_out.permute(1, 0, 2)  # [H, Sq, D]
         idx += Sq
 
@@ -477,7 +480,7 @@ def _flash_attn_single_head(
 
     idx = 0
     for qb in active_blocks:
-        block_out = flat_out[idx:idx + Sq]  # [Sq, 1, D]
+        block_out = flat_out[idx : idx + Sq]  # [Sq, 1, D]
         output[b, h, qb] = block_out.squeeze(1)  # [Sq, D]
         idx += Sq
 
@@ -543,7 +546,6 @@ def _reconstruct_pruned(
 
 
 class BSAAttentionBackend(AttentionBackend):
-
     accept_output_buffer: bool = False
 
     @staticmethod
@@ -583,7 +585,6 @@ class BSAAttentionMetadata(AttentionMetadata):
 
 
 class BSAAttentionMetadataBuilder(AttentionMetadataBuilder):
-
     def __init__(self):
         pass
 
@@ -603,7 +604,8 @@ class BSAAttentionMetadataBuilder(AttentionMetadataBuilder):
     ) -> "BSAAttentionMetadata":
         # Ensure patching does not drop tokens silently.
         assert all(r % p == 0 for r, p in zip(raw_latent_shape, patch_size, strict=False)), (
-            "raw_latent_shape must be divisible by patch_size for BSA", )
+            "raw_latent_shape must be divisible by patch_size for BSA",
+        )
 
         dit_seq_shape = (
             raw_latent_shape[0] // patch_size[0],
@@ -615,7 +617,8 @@ class BSAAttentionMetadataBuilder(AttentionMetadataBuilder):
         block_size = math.prod(BSA_TILE_SIZE)
         # Require exact tiling to avoid reshape failures later.
         assert all(d % t == 0 for d, t in zip(dit_seq_shape, BSA_TILE_SIZE, strict=False)), (
-            "dit_seq_shape must be divisible by BSA_TILE_SIZE", )
+            "dit_seq_shape must be divisible by BSA_TILE_SIZE",
+        )
         num_blocks = total_seq_length // block_size
 
         tile_partition_indices = get_tile_partition_indices(dit_seq_shape, BSA_TILE_SIZE, device)
@@ -636,7 +639,6 @@ class BSAAttentionMetadataBuilder(AttentionMetadataBuilder):
 
 
 class BSAAttentionImpl(AttentionImpl):
-
     def __init__(
         self,
         num_heads: int,

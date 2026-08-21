@@ -13,6 +13,7 @@ Use cases:
 
 Launch: ``python -m fastvideo.entrypoints.streaming.mock_server``.
 """
+
 from __future__ import annotations
 
 import argparse

@@ -27,17 +27,19 @@ WAN_DMD_PIPELINE = "fastvideo.pipelines.basic.wan.wan_dmd_pipeline.WanDMDPipelin
 WAN_CAUSAL_DMD_PIPELINE = "fastvideo.pipelines.basic.wan.wan_causal_dmd_pipeline.WanCausalDMDPipeline"
 
 # Only T2V workflows are supported for finetuning and distillation.
-SUPPORTED_WORKLOADS: frozenset[str] = frozenset({
-    # Finetuning
-    "full_t2v",
-    "vsa_t2v",
-    "ode_init",
-    # Distillation
-    "dmd_t2v",
-    "self_forcing_t2v",
-    # LoRA
-    "lora_t2v",
-})
+SUPPORTED_WORKLOADS: frozenset[str] = frozenset(
+    {
+        # Finetuning
+        "full_t2v",
+        "vsa_t2v",
+        "ode_init",
+        # Distillation
+        "dmd_t2v",
+        "self_forcing_t2v",
+        # LoRA
+        "lora_t2v",
+    }
+)
 
 DISTILL_WORKLOADS = ("dmd_t2v", "self_forcing_t2v")
 
@@ -74,7 +76,7 @@ def _parse_denoising_steps(raw: str | None) -> list[int]:
 
 def _models_section(job: dict[str, Any], workload_type: str) -> dict[str, Any]:
     model_id = job.get("model_id", "")
-    student_target = (WAN_CAUSAL_MODEL if workload_type in ("self_forcing_t2v", "ode_init") else WAN_MODEL)
+    student_target = WAN_CAUSAL_MODEL if workload_type in ("self_forcing_t2v", "ode_init") else WAN_MODEL
     models: dict[str, Any] = {
         "student": {
             "_target_": student_target,
@@ -150,10 +152,12 @@ def _method_section(job: dict[str, Any], workload_type: str, output_dir: str) ->
     if workload_type == "self_forcing_t2v":
         # Non-default rollout knobs from
         # examples/train/configs/distribution_matching/wan/self_forcing_causal_t2v.yaml.
-        method.update({
-            "warp_denoising_step": True,
-            "same_step_across_blocks": True,
-        })
+        method.update(
+            {
+                "warp_denoising_step": True,
+                "same_step_across_blocks": True,
+            }
+        )
     return method
 
 
@@ -186,9 +190,7 @@ def _training_section(job: dict[str, Any], workload_type: str, output_dir: str) 
         "optimizer": {
             "learning_rate": job.get("learning_rate", 5e-5),
             # Finetunes keep the schema's (0.9, 0.999) default.
-            **({
-                "betas": [0.0, 0.999]
-            } if distill else {}),
+            **({"betas": [0.0, 0.999]} if distill else {}),
             "weight_decay": 1e-4,
         },
         "loop": {
@@ -261,10 +263,7 @@ def _pipeline_section(workload_type: str) -> dict[str, Any]:
     if workload_type == "self_forcing_t2v":
         return {
             "flow_shift": 5,
-            "dit_config": {
-                "local_attn_size": -1,
-                "sink_size": 0
-            },
+            "dit_config": {"local_attn_size": -1, "sink_size": 0},
         }
     if workload_type == "ode_init":
         return {"flow_shift": 5}
@@ -275,14 +274,15 @@ def build_training_config(job: dict[str, Any], output_dir: str) -> dict[str, Any
     """Build the fastvideo/train YAML run config (as a dict) for a studio job."""
     workload_type = job.get("workload_type", "full_t2v")
     if workload_type not in SUPPORTED_WORKLOADS:
-        raise ValueError(f"Unknown workload type: {workload_type}. "
-                         f"Supported: {sorted(SUPPORTED_WORKLOADS)}")
+        raise ValueError(f"Unknown workload type: {workload_type}. Supported: {sorted(SUPPORTED_WORKLOADS)}")
 
     model_id = job.get("model_id", "")
     if is_ltx2_model(model_id):
-        raise ValueError("LTX-2 training is not supported by the modular trainer "
-                         "(fastvideo/train has no LTX-2 model plugin). "
-                         "Choose a Wan-family model.")
+        raise ValueError(
+            "LTX-2 training is not supported by the modular trainer "
+            "(fastvideo/train has no LTX-2 model plugin). "
+            "Choose a Wan-family model."
+        )
 
     return {
         "models": _models_section(job, workload_type),

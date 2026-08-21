@@ -13,8 +13,8 @@ from typing import Any, cast
 import torch
 
 from fastvideo.configs.pipelines import PipelineConfig
-from fastvideo.distributed import (maybe_init_distributed_environment_and_model_parallel, get_world_group)
-from fastvideo.distributed.communication_op import (warmup_sequence_parallel_communication)
+from fastvideo.distributed import maybe_init_distributed_environment_and_model_parallel, get_world_group
+from fastvideo.distributed.communication_op import warmup_sequence_parallel_communication
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.hooks.activation_trace import attach_activation_trace, detach_activation_trace
 from fastvideo.logger import init_logger
@@ -23,7 +23,7 @@ from fastvideo.models.loader.component_loader import PipelineComponentLoader
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages import PipelineStage
 import fastvideo.envs as envs
-from fastvideo.utils import (maybe_download_model, verify_model_config_and_directory)
+from fastvideo.utils import maybe_download_model, verify_model_config_and_directory
 
 logger = init_logger(__name__)
 
@@ -31,7 +31,7 @@ logger = init_logger(__name__)
 class ComposedPipelineBase(ABC):
     """
     Base class for pipelines composed of multiple stages.
-    
+
     This class provides the framework for creating pipelines by composing multiple
     stages together. Each stage is responsible for a specific part of the diffusion
     process, and the pipeline orchestrates the execution of these stages.
@@ -66,11 +66,13 @@ class ComposedPipelineBase(ABC):
         ]
 
     # TODO(will): args should support both inference args and training args
-    def __init__(self,
-                 model_path: str,
-                 fastvideo_args: FastVideoArgs | TrainingArgs,
-                 required_config_modules: list[str] | None = None,
-                 loaded_modules: dict[str, torch.nn.Module] | None = None):
+    def __init__(
+        self,
+        model_path: str,
+        fastvideo_args: FastVideoArgs | TrainingArgs,
+        required_config_modules: list[str] | None = None,
+        loaded_modules: dict[str, torch.nn.Module] | None = None,
+    ):
         """
         Initialize the pipeline. After __init__, the pipeline should be ready to
         use. The pipeline should be stateless and not hold any batch state.
@@ -183,25 +185,26 @@ class ComposedPipelineBase(ABC):
 
         self.initialize_pipeline(self.fastvideo_args)
         compile_transformer = self.fastvideo_args.enable_torch_compile
-        compile_text_encoder = (self.fastvideo_args.enable_torch_compile_text_encoder)
+        compile_text_encoder = self.fastvideo_args.enable_torch_compile_text_encoder
         compile_vae = self.fastvideo_args.enable_torch_compile_vae
         compile_audio_vae = self.fastvideo_args.enable_torch_compile_audio_vae
-        if (compile_transformer or compile_text_encoder or compile_vae or compile_audio_vae):
+        if compile_transformer or compile_text_encoder or compile_vae or compile_audio_vae:
             if self.fastvideo_args.training_mode:
                 logger.info("Torch Compile enabled via FSDP loader for training; skipping additional pipeline compile")
             else:
                 fsdp_module_cls = None
                 try:
                     from torch.distributed.fsdp import FSDPModule  # type: ignore
+
                     fsdp_module_cls = FSDPModule
                 except Exception:  # pragma: no cover - FSDP not always available
                     fsdp_module_cls = None
 
-                global_compile_kwargs = (self.fastvideo_args.torch_compile_kwargs or {})
-                dit_compile_kwargs = (self.fastvideo_args.torch_compile_kwargs_dit or global_compile_kwargs)
-                text_compile_kwargs = (self.fastvideo_args.torch_compile_kwargs_text_encoder or global_compile_kwargs)
-                vae_compile_kwargs = (self.fastvideo_args.torch_compile_kwargs_vae or global_compile_kwargs)
-                audio_vae_compile_kwargs = (self.fastvideo_args.torch_compile_kwargs_audio_vae or global_compile_kwargs)
+                global_compile_kwargs = self.fastvideo_args.torch_compile_kwargs or {}
+                dit_compile_kwargs = self.fastvideo_args.torch_compile_kwargs_dit or global_compile_kwargs
+                text_compile_kwargs = self.fastvideo_args.torch_compile_kwargs_text_encoder or global_compile_kwargs
+                vae_compile_kwargs = self.fastvideo_args.torch_compile_kwargs_vae or global_compile_kwargs
+                audio_vae_compile_kwargs = self.fastvideo_args.torch_compile_kwargs_audio_vae or global_compile_kwargs
 
                 if compile_transformer:
                     self._maybe_compile_pipeline_module(
@@ -267,24 +270,24 @@ class ComposedPipelineBase(ABC):
         raise NotImplementedError("if log_validation is True, the pipeline must implement this method")
 
     @classmethod
-    def from_pretrained(cls,
-                        model_path: str,
-                        device: str | None = None,
-                        torch_dtype: torch.dtype | None = None,
-                        pipeline_config: str | PipelineConfig | None = None,
-                        args: argparse.Namespace | None = None,
-                        required_config_modules: list[str] | None = None,
-                        loaded_modules: dict[str, torch.nn.Module]
-                        | None = None,
-                        **kwargs) -> "ComposedPipelineBase":
+    def from_pretrained(
+        cls,
+        model_path: str,
+        device: str | None = None,
+        torch_dtype: torch.dtype | None = None,
+        pipeline_config: str | PipelineConfig | None = None,
+        args: argparse.Namespace | None = None,
+        required_config_modules: list[str] | None = None,
+        loaded_modules: dict[str, torch.nn.Module] | None = None,
+        **kwargs,
+    ) -> "ComposedPipelineBase":
         """
         Load a pipeline from a pretrained model.
         loaded_modules: Optional[Dict[str, torch.nn.Module]] = None,
         If provided, loaded_modules will be used instead of loading from config/pretrained weights.
         """
         if args is None or args.inference_mode:
-
-            kwargs['model_path'] = model_path
+            kwargs["model_path"] = model_path
             fastvideo_args = FastVideoArgs.from_kwargs(**kwargs)
         else:
             assert args is not None, "args must be provided for training mode"
@@ -299,14 +302,13 @@ class ComposedPipelineBase(ABC):
             # model is loaded with the correct precision. Subsequently we will
             # use FSDP2's MixedPrecisionPolicy to set the precision for the
             # fwd, bwd, and other operations' precision.
-            assert fastvideo_args.pipeline_config.dit_precision == 'fp32', 'only fp32 is supported for training'
+            assert fastvideo_args.pipeline_config.dit_precision == "fp32", "only fp32 is supported for training"
 
         logger.info("fastvideo_args in from_pretrained: %s", fastvideo_args)
 
-        pipe = cls(model_path,
-                   fastvideo_args,
-                   required_config_modules=required_config_modules,
-                   loaded_modules=loaded_modules)
+        pipe = cls(
+            model_path, fastvideo_args, required_config_modules=required_config_modules, loaded_modules=loaded_modules
+        )
         pipe.post_init()
         return pipe
 
@@ -344,7 +346,7 @@ class ComposedPipelineBase(ABC):
 
         class ConcretePipeline(ComposedPipelineBase):
             _required_config_modules = ["vae", "text_encoder", "transformer", "scheduler", "tokenizer"]
-            
+
 
             @property
             def required_config_modules(self):
@@ -378,12 +380,12 @@ class ComposedPipelineBase(ABC):
         """
         return
 
-    def load_modules(self,
-                     fastvideo_args: FastVideoArgs,
-                     loaded_modules: dict[str, torch.nn.Module] | None = None) -> dict[str, Any]:
+    def load_modules(
+        self, fastvideo_args: FastVideoArgs, loaded_modules: dict[str, torch.nn.Module] | None = None
+    ) -> dict[str, Any]:
         """
         Load the modules from the config.
-        loaded_modules: Optional[Dict[str, torch.nn.Module]] = None, 
+        loaded_modules: Optional[Dict[str, torch.nn.Module]] = None,
         If provided, loaded_modules will be used instead of loading from config/pretrained weights.
         """
 
@@ -415,7 +417,10 @@ class ComposedPipelineBase(ABC):
                 extra_module_value = self._extra_config_module_map[module_name]
                 logger.warning(
                     "model_index.json does not contain a %s module, but found {%s: %s} in _extra_config_module_map, adding to model_index.",
-                    module_name, module_name, extra_module_value)
+                    module_name,
+                    module_name,
+                    extra_module_value,
+                )
                 if extra_module_value in model_index:
                     logger.info("Using module %s for %s", extra_module_value, module_name)
                     model_index[module_name] = model_index[extra_module_value]
@@ -446,8 +451,9 @@ class ComposedPipelineBase(ABC):
                 continue
             transformers_or_diffusers = module_spec[0]
             if transformers_or_diffusers is None:
-                logger.warning("Module %s in model_index.json has null value, removing from required_config_modules",
-                               module_name)
+                logger.warning(
+                    "Module %s in model_index.json has null value, removing from required_config_modules", module_name
+                )
                 if module_name in self.required_config_modules:
                     self.required_config_modules.remove(module_name)
                 continue
@@ -506,7 +512,7 @@ class ComposedPipelineBase(ABC):
     ) -> ForwardBatch:
         """
         Generate a video or image using the pipeline.
-        
+
         Args:
             batch: The batch to generate from.
             fastvideo_args: The inference arguments.

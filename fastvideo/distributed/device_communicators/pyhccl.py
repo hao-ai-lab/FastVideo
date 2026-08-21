@@ -2,9 +2,15 @@ import torch
 import torch.distributed as dist
 from torch.distributed import ProcessGroup, ReduceOp
 
-from fastvideo.distributed.device_communicators.pyhccl_wrapper import (HCCLLibrary, aclrtStream_t, buffer_type,
-                                                                       hcclComm_t, hcclDataTypeEnum, hcclRedOpTypeEnum,
-                                                                       hcclUniqueId)
+from fastvideo.distributed.device_communicators.pyhccl_wrapper import (
+    HCCLLibrary,
+    aclrtStream_t,
+    buffer_type,
+    hcclComm_t,
+    hcclDataTypeEnum,
+    hcclRedOpTypeEnum,
+    hcclUniqueId,
+)
 from fastvideo.distributed.utils import StatelessProcessGroup
 from fastvideo.logger import init_logger
 from fastvideo.utils import current_stream
@@ -13,7 +19,6 @@ logger = init_logger(__name__)
 
 
 class PyHcclCommunicator:
-
     def __init__(
         self,
         group: ProcessGroup | StatelessProcessGroup,
@@ -35,7 +40,8 @@ class PyHcclCommunicator:
         if not isinstance(group, StatelessProcessGroup):
             assert dist.is_initialized()
             assert dist.get_backend(group) != dist.Backend.HCCL, (
-                "PyHcclCommunicator should be attached to a non-HCCL group.")
+                "PyHcclCommunicator should be attached to a non-HCCL group."
+            )
             # note: this rank is the rank in the group
             self.rank = dist.get_rank(group)
             self.world_size = dist.get_world_size(group)
@@ -112,25 +118,39 @@ class PyHcclCommunicator:
         # hccl communicator created on a specific device
         # will only work on tensors on the same device
         # otherwise it will cause "illegal memory access"
-        assert in_tensor.device == self.device, (f"this hccl communicator is created to work on {self.device}, "
-                                                 f"but the input tensor is on {in_tensor.device}")
+        assert in_tensor.device == self.device, (
+            f"this hccl communicator is created to work on {self.device}, but the input tensor is on {in_tensor.device}"
+        )
 
         out_tensor = torch.empty_like(in_tensor)
 
         if stream is None:
             stream = current_stream()
-        self.hccl.hcclAllReduce(buffer_type(in_tensor.data_ptr()), buffer_type(out_tensor.data_ptr()),
-                                in_tensor.numel(), hcclDataTypeEnum.from_torch(in_tensor.dtype),
-                                hcclRedOpTypeEnum.from_torch(op), self.comm, aclrtStream_t(stream.npu_stream))
+        self.hccl.hcclAllReduce(
+            buffer_type(in_tensor.data_ptr()),
+            buffer_type(out_tensor.data_ptr()),
+            in_tensor.numel(),
+            hcclDataTypeEnum.from_torch(in_tensor.dtype),
+            hcclRedOpTypeEnum.from_torch(op),
+            self.comm,
+            aclrtStream_t(stream.npu_stream),
+        )
         return out_tensor
 
     def broadcast(self, tensor: torch.Tensor, src: int, stream=None):
         if self.disabled:
             return
-        assert tensor.device == self.device, (f"this hccl communicator is created to work on {self.device}, "
-                                              f"but the input tensor is on {tensor.device}")
+        assert tensor.device == self.device, (
+            f"this hccl communicator is created to work on {self.device}, but the input tensor is on {tensor.device}"
+        )
         if stream is None:
             stream = current_stream()
         buffer = buffer_type(tensor.data_ptr())
-        self.hccl.hcclBroadcast(buffer, tensor.numel(), hcclDataTypeEnum.from_torch(tensor.dtype), src, self.comm,
-                                aclrtStream_t(stream.npu_stream))
+        self.hccl.hcclBroadcast(
+            buffer,
+            tensor.numel(),
+            hcclDataTypeEnum.from_torch(tensor.dtype),
+            src,
+            self.comm,
+            aclrtStream_t(stream.npu_stream),
+        )

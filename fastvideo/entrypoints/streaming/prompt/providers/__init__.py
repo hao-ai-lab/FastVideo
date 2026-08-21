@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """LLM provider implementations used by the prompt enhancer."""
+
 from fastvideo.entrypoints.streaming.prompt.providers.base import (
     LLMMessage,
     LLMProvider,
@@ -9,7 +10,8 @@ from fastvideo.entrypoints.streaming.prompt.providers.base import (
     LLMTimeoutError,
 )
 from fastvideo.entrypoints.streaming.prompt.providers.cerebras import (
-    CerebrasProvider, )
+    CerebrasProvider,
+)
 from fastvideo.entrypoints.streaming.prompt.providers.groq import GroqProvider
 
 __all__ = [

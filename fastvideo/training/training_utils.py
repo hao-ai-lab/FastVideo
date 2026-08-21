@@ -15,8 +15,7 @@ from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LambdaLR
 
 from fastvideo.logger import init_logger
-from fastvideo.training.checkpointing_utils import (ModelWrapper, OptimizerWrapper, RandomStateWrapper,
-                                                    SchedulerWrapper)
+from fastvideo.training.checkpointing_utils import ModelWrapper, OptimizerWrapper, RandomStateWrapper, SchedulerWrapper
 
 logger = init_logger(__name__)
 
@@ -30,10 +29,13 @@ def gather_state_dict_on_cpu_rank0(
     rank = dist.get_rank()
     cpu_state_dict = {}
     sharded_sd = model.state_dict()
-    param_requires_grad = set([
-        k.replace("._checkpoint_wrapped_module.", ".") for k, v in dict(model.named_parameters()).items()
-        if v.requires_grad
-    ])
+    param_requires_grad = set(
+        [
+            k.replace("._checkpoint_wrapped_module.", ".")
+            for k, v in dict(model.named_parameters()).items()
+            if v.requires_grad
+        ]
+    )
     for param_name, param in sharded_sd.items():
         if param_name not in param_requires_grad:
             continue
@@ -81,16 +83,16 @@ def compute_density_for_timestep_sampling(
         u = torch.normal(
             mean=logit_mean,
             std=logit_std,
-            size=(batch_size, ),
+            size=(batch_size,),
             device=device,
             generator=generator,
         )
         u = torch.nn.functional.sigmoid(u)
     elif weighting_scheme == "mode":
-        u = torch.rand(size=(batch_size, ), device=device, generator=generator)
-        u = 1 - u - mode_scale * (torch.cos(math.pi * u / 2)**2 - 1 + u)
+        u = torch.rand(size=(batch_size,), device=device, generator=generator)
+        u = 1 - u - mode_scale * (torch.cos(math.pi * u / 2) ** 2 - 1 + u)
     else:
-        u = torch.rand(size=(batch_size, ), device=device, generator=generator)
+        u = torch.rand(size=(batch_size,), device=device, generator=generator)
     return u
 
 
@@ -106,14 +108,9 @@ def get_sigmas(noise_scheduler, device, timesteps, n_dim=4, dtype=torch.float32)
     return sigma
 
 
-def save_checkpoint(transformer,
-                    rank,
-                    output_dir,
-                    step,
-                    optimizer=None,
-                    dataloader=None,
-                    scheduler=None,
-                    noise_generator=None) -> None:
+def save_checkpoint(
+    transformer, rank, output_dir, step, optimizer=None, dataloader=None, scheduler=None, noise_generator=None
+) -> None:
     """
     Save checkpoint following finetrainer's distributed checkpoint approach.
     Saves both distributed checkpoint and consolidated model weights.
@@ -141,10 +138,12 @@ def save_checkpoint(transformer,
     dcp.save(states, checkpoint_id=dcp_dir)
     end_time = time.perf_counter()
 
-    logger.info("rank: %s, distributed checkpoint saved in %.2f seconds",
-                rank,
-                end_time - begin_time,
-                local_main_process_only=False)
+    logger.info(
+        "rank: %s, distributed checkpoint saved in %.2f seconds",
+        rank,
+        end_time - begin_time,
+        local_main_process_only=False,
+    )
 
     cpu_state = gather_state_dict_on_cpu_rank0(transformer, device=None)
     if rank == 0:
@@ -172,41 +171,42 @@ def save_checkpoint(transformer,
 
 
 def save_distillation_checkpoint(
-        generator_transformer,
-        fake_score_transformer,
-        rank,
-        output_dir,
-        step,
-        generator_optimizer=None,
-        fake_score_optimizer=None,
-        dataloader=None,
-        generator_scheduler=None,
-        fake_score_scheduler=None,
-        noise_generator=None,
-        generator_ema=None,
-        only_save_generator_weight=False,
-        # MoE support
-        generator_transformer_2=None,
-        real_score_transformer_2=None,
-        fake_score_transformer_2=None,
-        generator_optimizer_2=None,
-        fake_score_optimizer_2=None,
-        generator_scheduler_2=None,
-        fake_score_scheduler_2=None,
-        generator_ema_2=None) -> None:
+    generator_transformer,
+    fake_score_transformer,
+    rank,
+    output_dir,
+    step,
+    generator_optimizer=None,
+    fake_score_optimizer=None,
+    dataloader=None,
+    generator_scheduler=None,
+    fake_score_scheduler=None,
+    noise_generator=None,
+    generator_ema=None,
+    only_save_generator_weight=False,
+    # MoE support
+    generator_transformer_2=None,
+    real_score_transformer_2=None,
+    fake_score_transformer_2=None,
+    generator_optimizer_2=None,
+    fake_score_optimizer_2=None,
+    generator_scheduler_2=None,
+    fake_score_scheduler_2=None,
+    generator_ema_2=None,
+) -> None:
     """
     Save distillation checkpoint with both generator and fake_score models.
     Supports MoE (Mixture of Experts) models with transformer_2 variants.
     Saves both distributed checkpoint and consolidated model weights.
     Only saves the generator model for inference (consolidated weights).
-    
+
     Args:
         generator_transformer: Main generator transformer model
         fake_score_transformer: Main fake score transformer model
         only_save_generator_weight: If True, only save the generator model weights for inference
                                    without saving distributed checkpoint for training resume.
         generator_transformer_2: Secondary generator transformer for MoE (optional)
-        real_score_transformer_2: Secondary real score transformer for MoE (optional) 
+        real_score_transformer_2: Secondary real score transformer for MoE (optional)
         fake_score_transformer_2: Secondary fake score transformer for MoE (optional)
         generator_optimizer_2: Optimizer for generator_transformer_2 (optional)
         fake_score_optimizer_2: Optimizer for fake_score_transformer_2 (optional)
@@ -234,19 +234,23 @@ def save_distillation_checkpoint(
             generator_states["scheduler"] = SchedulerWrapper(generator_scheduler)
 
         generator_dcp_dir = os.path.join(save_dir, "distributed_checkpoint", "generator")
-        logger.info("rank: %s, saving generator distributed checkpoint to %s",
-                    rank,
-                    generator_dcp_dir,
-                    local_main_process_only=False)
+        logger.info(
+            "rank: %s, saving generator distributed checkpoint to %s",
+            rank,
+            generator_dcp_dir,
+            local_main_process_only=False,
+        )
 
         begin_time = time.perf_counter()
         dcp.save(generator_states, checkpoint_id=generator_dcp_dir)
         end_time = time.perf_counter()
 
-        logger.info("rank: %s, generator distributed checkpoint saved in %.2f seconds",
-                    rank,
-                    end_time - begin_time,
-                    local_main_process_only=False)
+        logger.info(
+            "rank: %s, generator distributed checkpoint saved in %.2f seconds",
+            rank,
+            end_time - begin_time,
+            local_main_process_only=False,
+        )
 
         # Save generator_2 distributed checkpoint (MoE support)
         if generator_transformer_2 is not None:
@@ -261,19 +265,23 @@ def save_distillation_checkpoint(
                 generator_2_states["scheduler"] = SchedulerWrapper(generator_scheduler_2)
 
             generator_2_dcp_dir = os.path.join(save_dir, "distributed_checkpoint", "generator_2")
-            logger.info("rank: %s, saving generator_2 distributed checkpoint to %s",
-                        rank,
-                        generator_2_dcp_dir,
-                        local_main_process_only=False)
+            logger.info(
+                "rank: %s, saving generator_2 distributed checkpoint to %s",
+                rank,
+                generator_2_dcp_dir,
+                local_main_process_only=False,
+            )
 
             begin_time = time.perf_counter()
             dcp.save(generator_2_states, checkpoint_id=generator_2_dcp_dir)
             end_time = time.perf_counter()
 
-            logger.info("rank: %s, generator_2 distributed checkpoint saved in %.2f seconds",
-                        rank,
-                        end_time - begin_time,
-                        local_main_process_only=False)
+            logger.info(
+                "rank: %s, generator_2 distributed checkpoint saved in %.2f seconds",
+                rank,
+                end_time - begin_time,
+                local_main_process_only=False,
+            )
 
         # Save critic distributed checkpoint
         critic_states = {
@@ -287,19 +295,20 @@ def save_distillation_checkpoint(
             critic_states["scheduler"] = SchedulerWrapper(fake_score_scheduler)
 
         critic_dcp_dir = os.path.join(save_dir, "distributed_checkpoint", "critic")
-        logger.info("rank: %s, saving critic distributed checkpoint to %s",
-                    rank,
-                    critic_dcp_dir,
-                    local_main_process_only=False)
+        logger.info(
+            "rank: %s, saving critic distributed checkpoint to %s", rank, critic_dcp_dir, local_main_process_only=False
+        )
 
         begin_time = time.perf_counter()
         dcp.save(critic_states, checkpoint_id=critic_dcp_dir)
         end_time = time.perf_counter()
 
-        logger.info("rank: %s, critic distributed checkpoint saved in %.2f seconds",
-                    rank,
-                    end_time - begin_time,
-                    local_main_process_only=False)
+        logger.info(
+            "rank: %s, critic distributed checkpoint saved in %.2f seconds",
+            rank,
+            end_time - begin_time,
+            local_main_process_only=False,
+        )
 
         # Save critic_2 distributed checkpoint (MoE support)
         if fake_score_transformer_2 is not None:
@@ -314,19 +323,23 @@ def save_distillation_checkpoint(
                 critic_2_states["scheduler"] = SchedulerWrapper(fake_score_scheduler_2)
 
             critic_2_dcp_dir = os.path.join(save_dir, "distributed_checkpoint", "critic_2")
-            logger.info("rank: %s, saving critic_2 distributed checkpoint to %s",
-                        rank,
-                        critic_2_dcp_dir,
-                        local_main_process_only=False)
+            logger.info(
+                "rank: %s, saving critic_2 distributed checkpoint to %s",
+                rank,
+                critic_2_dcp_dir,
+                local_main_process_only=False,
+            )
 
             begin_time = time.perf_counter()
             dcp.save(critic_2_states, checkpoint_id=critic_2_dcp_dir)
             end_time = time.perf_counter()
 
-            logger.info("rank: %s, critic_2 distributed checkpoint saved in %.2f seconds",
-                        rank,
-                        end_time - begin_time,
-                        local_main_process_only=False)
+            logger.info(
+                "rank: %s, critic_2 distributed checkpoint saved in %.2f seconds",
+                rank,
+                end_time - begin_time,
+                local_main_process_only=False,
+            )
 
         # Save real_score_transformer_2 distributed checkpoint (MoE support)
         if real_score_transformer_2 is not None:
@@ -339,19 +352,23 @@ def save_distillation_checkpoint(
                 real_score_2_states["dataloader"] = dataloader
 
             real_score_2_dcp_dir = os.path.join(save_dir, "distributed_checkpoint", "real_score_2")
-            logger.info("rank: %s, saving real_score_2 distributed checkpoint to %s",
-                        rank,
-                        real_score_2_dcp_dir,
-                        local_main_process_only=False)
+            logger.info(
+                "rank: %s, saving real_score_2 distributed checkpoint to %s",
+                rank,
+                real_score_2_dcp_dir,
+                local_main_process_only=False,
+            )
 
             begin_time = time.perf_counter()
             dcp.save(real_score_2_states, checkpoint_id=real_score_2_dcp_dir)
             end_time = time.perf_counter()
 
-            logger.info("rank: %s, real_score_2 distributed checkpoint saved in %.2f seconds",
-                        rank,
-                        end_time - begin_time,
-                        local_main_process_only=False)
+            logger.info(
+                "rank: %s, real_score_2 distributed checkpoint saved in %.2f seconds",
+                rank,
+                end_time - begin_time,
+                local_main_process_only=False,
+            )
 
         # Save shared random state separately
         shared_states = {
@@ -362,9 +379,11 @@ def save_distillation_checkpoint(
         dcp.save(shared_states, checkpoint_id=shared_dcp_dir)
 
     else:
-        logger.info("rank: %s, skipping distributed checkpoint save (only_save_generator_weight=True)",
-                    rank,
-                    local_main_process_only=False)
+        logger.info(
+            "rank: %s, skipping distributed checkpoint save (only_save_generator_weight=True)",
+            rank,
+            local_main_process_only=False,
+        )
 
     # Persist EMA separately to avoid shape mismatches across ranks.
     # Supports:
@@ -379,36 +398,43 @@ def save_distillation_checkpoint(
             os.makedirs(ema_dir_shard, exist_ok=True)
             ema_shard_path = os.path.join(ema_dir_shard, f"generator_ema_rank{rank}.pt")
             torch.save(generator_ema.state_dict(), ema_shard_path)
-            logger.info("rank: %s, saved generator EMA shard (local_shard) to %s",
-                        rank,
-                        ema_shard_path,
-                        local_main_process_only=False)
+            logger.info(
+                "rank: %s, saved generator EMA shard (local_shard) to %s",
+                rank,
+                ema_shard_path,
+                local_main_process_only=False,
+            )
 
             # Also consolidate EMA to a single full-state file on rank 0 by applying EMA to the model and gathering
-            _consolidate_local_shard_ema_and_save_safetensors(generator_ema, generator_transformer, rank, save_dir,
-                                                              "generator_ema")
+            _consolidate_local_shard_ema_and_save_safetensors(
+                generator_ema, generator_transformer, rank, save_dir, "generator_ema"
+            )
 
     except Exception as e:
         logger.warning("rank: %s, failed saving EMA separately: %s", rank, str(e))
 
     try:
         if generator_ema_2 is not None and getattr(generator_ema_2, "mode", None) == "rank0_full":
-            _save_rank0_full_ema_safetensors(generator_ema_2, generator_transformer_2, rank, save_dir,
-                                             "generator_ema_2")
+            _save_rank0_full_ema_safetensors(
+                generator_ema_2, generator_transformer_2, rank, save_dir, "generator_ema_2"
+            )
         elif generator_ema_2 is not None and getattr(generator_ema_2, "mode", None) == "local_shard":
             # Save per-rank shard for EMA_2
             ema_dir_shard_2 = os.path.join(save_dir, "ema_local_shard")
             os.makedirs(ema_dir_shard_2, exist_ok=True)
             ema2_shard_path = os.path.join(ema_dir_shard_2, f"generator_ema_2_rank{rank}.pt")
             torch.save(generator_ema_2.state_dict(), ema2_shard_path)
-            logger.info("rank: %s, saved generator_2 EMA shard (local_shard) to %s",
-                        rank,
-                        ema2_shard_path,
-                        local_main_process_only=False)
+            logger.info(
+                "rank: %s, saved generator_2 EMA shard (local_shard) to %s",
+                rank,
+                ema2_shard_path,
+                local_main_process_only=False,
+            )
 
             # Also consolidate EMA_2 to a single full-state file on rank 0
-            _consolidate_local_shard_ema_and_save_safetensors(generator_ema_2, generator_transformer_2, rank, save_dir,
-                                                              "generator_ema_2")
+            _consolidate_local_shard_ema_and_save_safetensors(
+                generator_ema_2, generator_transformer_2, rank, save_dir, "generator_ema_2"
+            )
     except Exception as e:
         logger.warning("rank: %s, failed saving EMA_2 separately: %s", rank, str(e))
 
@@ -419,19 +445,23 @@ def save_distillation_checkpoint(
         # Save generator model weights (consolidated) for inference
         os.makedirs(inference_save_dir, exist_ok=True)
         weight_path = os.path.join(inference_save_dir, "diffusion_pytorch_model.safetensors")
-        logger.info("rank: %s, saving consolidated generator inference checkpoint to %s",
-                    rank,
-                    weight_path,
-                    local_main_process_only=False)
+        logger.info(
+            "rank: %s, saving consolidated generator inference checkpoint to %s",
+            rank,
+            weight_path,
+            local_main_process_only=False,
+        )
 
         # Convert training format to diffusers format and save
         diffusers_state_dict = custom_to_hf_state_dict(cpu_state, generator_transformer.reverse_param_names_mapping)
         save_file(diffusers_state_dict, weight_path)
 
-        logger.info("rank: %s, consolidated generator inference checkpoint saved to %s",
-                    rank,
-                    weight_path,
-                    local_main_process_only=False)
+        logger.info(
+            "rank: %s, consolidated generator inference checkpoint saved to %s",
+            rank,
+            weight_path,
+            local_main_process_only=False,
+        )
 
         # Save model config
         config_dict = generator_transformer.hf_config
@@ -451,20 +481,25 @@ def save_distillation_checkpoint(
         if rank == 0:
             os.makedirs(inference_save_dir_2, exist_ok=True)
             weight_path_2 = os.path.join(inference_save_dir_2, "diffusion_pytorch_model.safetensors")
-            logger.info("rank: %s, saving consolidated generator_2 inference checkpoint to %s",
-                        rank,
-                        weight_path_2,
-                        local_main_process_only=False)
+            logger.info(
+                "rank: %s, saving consolidated generator_2 inference checkpoint to %s",
+                rank,
+                weight_path_2,
+                local_main_process_only=False,
+            )
 
             # Convert training format to diffusers format and save
-            diffusers_state_dict_2 = custom_to_hf_state_dict(cpu_state_2,
-                                                             generator_transformer_2.reverse_param_names_mapping)
+            diffusers_state_dict_2 = custom_to_hf_state_dict(
+                cpu_state_2, generator_transformer_2.reverse_param_names_mapping
+            )
             save_file(diffusers_state_dict_2, weight_path_2)
 
-            logger.info("rank: %s, consolidated generator_2 inference checkpoint saved to %s",
-                        rank,
-                        weight_path_2,
-                        local_main_process_only=False)
+            logger.info(
+                "rank: %s, consolidated generator_2 inference checkpoint saved to %s",
+                rank,
+                weight_path_2,
+                local_main_process_only=False,
+            )
 
             # Save model config
             config_dict_2 = generator_transformer_2.hf_config
@@ -476,13 +511,9 @@ def save_distillation_checkpoint(
             logger.info("--> generator_2 distillation checkpoint saved at step %s to %s", step, weight_path_2)
 
 
-def load_checkpoint(transformer,
-                    rank,
-                    checkpoint_path,
-                    optimizer=None,
-                    dataloader=None,
-                    scheduler=None,
-                    noise_generator=None) -> int:
+def load_checkpoint(
+    transformer, rank, checkpoint_path, optimizer=None, dataloader=None, scheduler=None, noise_generator=None
+) -> int:
     """
     Load checkpoint following finetrainer's distributed checkpoint approach.
     Returns the step number from which training should resume.
@@ -492,7 +523,7 @@ def load_checkpoint(transformer,
         return 0
 
     # Extract step number from checkpoint path
-    step = int(os.path.basename(os.path.normpath(checkpoint_path)).split('-')[-1])
+    step = int(os.path.basename(os.path.normpath(checkpoint_path)).split("-")[-1])
 
     if rank == 0:
         logger.info("Loading checkpoint from step %s", step)
@@ -523,41 +554,44 @@ def load_checkpoint(transformer,
     dcp.load(states, checkpoint_id=dcp_dir)
     end_time = time.perf_counter()
 
-    logger.info("rank: %s, distributed checkpoint loaded in %.2f seconds",
-                rank,
-                end_time - begin_time,
-                local_main_process_only=False)
+    logger.info(
+        "rank: %s, distributed checkpoint loaded in %.2f seconds",
+        rank,
+        end_time - begin_time,
+        local_main_process_only=False,
+    )
     logger.info("--> checkpoint loaded from step %s", step)
 
     return step
 
 
 def load_distillation_checkpoint(
-        generator_transformer,
-        fake_score_transformer,
-        rank,
-        checkpoint_path,
-        generator_optimizer=None,
-        fake_score_optimizer=None,
-        dataloader=None,
-        generator_scheduler=None,
-        fake_score_scheduler=None,
-        noise_generator=None,
-        generator_ema=None,
-        # MoE support
-        generator_transformer_2=None,
-        real_score_transformer_2=None,
-        fake_score_transformer_2=None,
-        generator_optimizer_2=None,
-        fake_score_optimizer_2=None,
-        generator_scheduler_2=None,
-        fake_score_scheduler_2=None,
-        generator_ema_2=None) -> int:
+    generator_transformer,
+    fake_score_transformer,
+    rank,
+    checkpoint_path,
+    generator_optimizer=None,
+    fake_score_optimizer=None,
+    dataloader=None,
+    generator_scheduler=None,
+    fake_score_scheduler=None,
+    noise_generator=None,
+    generator_ema=None,
+    # MoE support
+    generator_transformer_2=None,
+    real_score_transformer_2=None,
+    fake_score_transformer_2=None,
+    generator_optimizer_2=None,
+    fake_score_optimizer_2=None,
+    generator_scheduler_2=None,
+    fake_score_scheduler_2=None,
+    generator_ema_2=None,
+) -> int:
     """
     Load distillation checkpoint with both generator and fake_score models.
     Supports MoE (Mixture of Experts) models with transformer_2 variants.
     Returns the step number from which training should resume.
-    
+
     Args:
         generator_transformer: Main generator transformer model
         fake_score_transformer: Main fake score transformer model
@@ -575,7 +609,7 @@ def load_distillation_checkpoint(
         return 0
 
     # Extract step number from checkpoint path
-    step = int(os.path.basename(checkpoint_path).split('-')[-1])
+    step = int(os.path.basename(checkpoint_path).split("-")[-1])
 
     if rank == 0:
         logger.info("Loading distillation checkpoint from step %s", step)
@@ -599,19 +633,23 @@ def load_distillation_checkpoint(
     if generator_scheduler is not None:
         generator_states["scheduler"] = SchedulerWrapper(generator_scheduler)
 
-    logger.info("rank: %s, loading generator distributed checkpoint from %s",
-                rank,
-                generator_dcp_dir,
-                local_main_process_only=False)
+    logger.info(
+        "rank: %s, loading generator distributed checkpoint from %s",
+        rank,
+        generator_dcp_dir,
+        local_main_process_only=False,
+    )
 
     begin_time = time.perf_counter()
     dcp.load(generator_states, checkpoint_id=generator_dcp_dir)
     end_time = time.perf_counter()
 
-    logger.info("rank: %s, generator distributed checkpoint loaded in %.2f seconds",
-                rank,
-                end_time - begin_time,
-                local_main_process_only=False)
+    logger.info(
+        "rank: %s, generator distributed checkpoint loaded in %.2f seconds",
+        rank,
+        end_time - begin_time,
+        local_main_process_only=False,
+    )
 
     # Load EMA separately
     if generator_ema is not None:
@@ -625,8 +663,11 @@ def load_distillation_checkpoint(
                 else:
                     logger.info("rank: %s, generator EMA shard file not found at %s; skipping", rank, ema_path)
             else:
-                logger.info("rank: %s, generator EMA mode %s not supported for resume; skipping", rank,
-                            getattr(generator_ema, "mode", None))
+                logger.info(
+                    "rank: %s, generator EMA mode %s not supported for resume; skipping",
+                    rank,
+                    getattr(generator_ema, "mode", None),
+                )
         except Exception as e:
             logger.warning("rank: %s, failed to load generator EMA: %s", rank, str(e))
 
@@ -641,8 +682,11 @@ def load_distillation_checkpoint(
                 else:
                     logger.info("rank: %s, generator EMA_2 shard file not found at %s; skipping", rank, ema_2_path)
             else:
-                logger.info("rank: %s, generator EMA_2 mode %s not supported for resume; skipping", rank,
-                            getattr(generator_ema_2, "mode", None))
+                logger.info(
+                    "rank: %s, generator EMA_2 mode %s not supported for resume; skipping",
+                    rank,
+                    getattr(generator_ema_2, "mode", None),
+                )
         except Exception as e:
             logger.warning("rank: %s, failed to load generator EMA_2: %s", rank, str(e))
 
@@ -663,19 +707,23 @@ def load_distillation_checkpoint(
             if generator_scheduler_2 is not None:
                 generator_2_states["scheduler"] = SchedulerWrapper(generator_scheduler_2)
 
-            logger.info("rank: %s, loading generator_2 distributed checkpoint from %s",
-                        rank,
-                        generator_2_dcp_dir,
-                        local_main_process_only=False)
+            logger.info(
+                "rank: %s, loading generator_2 distributed checkpoint from %s",
+                rank,
+                generator_2_dcp_dir,
+                local_main_process_only=False,
+            )
 
             begin_time = time.perf_counter()
             dcp.load(generator_2_states, checkpoint_id=generator_2_dcp_dir)
             end_time = time.perf_counter()
 
-            logger.info("rank: %s, generator_2 distributed checkpoint loaded in %.2f seconds",
-                        rank,
-                        end_time - begin_time,
-                        local_main_process_only=False)
+            logger.info(
+                "rank: %s, generator_2 distributed checkpoint loaded in %.2f seconds",
+                rank,
+                end_time - begin_time,
+                local_main_process_only=False,
+            )
         else:
             logger.info("rank: %s, generator_2 checkpoint not found, skipping", rank)
 
@@ -698,19 +746,20 @@ def load_distillation_checkpoint(
     if fake_score_scheduler is not None:
         critic_states["scheduler"] = SchedulerWrapper(fake_score_scheduler)
 
-    logger.info("rank: %s, loading critic distributed checkpoint from %s",
-                rank,
-                critic_dcp_dir,
-                local_main_process_only=False)
+    logger.info(
+        "rank: %s, loading critic distributed checkpoint from %s", rank, critic_dcp_dir, local_main_process_only=False
+    )
 
     begin_time = time.perf_counter()
     dcp.load(critic_states, checkpoint_id=critic_dcp_dir)
     end_time = time.perf_counter()
 
-    logger.info("rank: %s, critic distributed checkpoint loaded in %.2f seconds",
-                rank,
-                end_time - begin_time,
-                local_main_process_only=False)
+    logger.info(
+        "rank: %s, critic distributed checkpoint loaded in %.2f seconds",
+        rank,
+        end_time - begin_time,
+        local_main_process_only=False,
+    )
 
     # Load critic_2 distributed checkpoint (MoE support)
     if fake_score_transformer_2 is not None:
@@ -729,19 +778,23 @@ def load_distillation_checkpoint(
             if fake_score_scheduler_2 is not None:
                 critic_2_states["scheduler"] = SchedulerWrapper(fake_score_scheduler_2)
 
-            logger.info("rank: %s, loading critic_2 distributed checkpoint from %s",
-                        rank,
-                        critic_2_dcp_dir,
-                        local_main_process_only=False)
+            logger.info(
+                "rank: %s, loading critic_2 distributed checkpoint from %s",
+                rank,
+                critic_2_dcp_dir,
+                local_main_process_only=False,
+            )
 
             begin_time = time.perf_counter()
             dcp.load(critic_2_states, checkpoint_id=critic_2_dcp_dir)
             end_time = time.perf_counter()
 
-            logger.info("rank: %s, critic_2 distributed checkpoint loaded in %.2f seconds",
-                        rank,
-                        end_time - begin_time,
-                        local_main_process_only=False)
+            logger.info(
+                "rank: %s, critic_2 distributed checkpoint loaded in %.2f seconds",
+                rank,
+                end_time - begin_time,
+                local_main_process_only=False,
+            )
         else:
             logger.info("rank: %s, critic_2 checkpoint not found, skipping", rank)
 
@@ -756,19 +809,23 @@ def load_distillation_checkpoint(
             if dataloader is not None:
                 real_score_2_states["dataloader"] = dataloader
 
-            logger.info("rank: %s, loading real_score_2 distributed checkpoint from %s",
-                        rank,
-                        real_score_2_dcp_dir,
-                        local_main_process_only=False)
+            logger.info(
+                "rank: %s, loading real_score_2 distributed checkpoint from %s",
+                rank,
+                real_score_2_dcp_dir,
+                local_main_process_only=False,
+            )
 
             begin_time = time.perf_counter()
             dcp.load(real_score_2_states, checkpoint_id=real_score_2_dcp_dir)
             end_time = time.perf_counter()
 
-            logger.info("rank: %s, real_score_2 distributed checkpoint loaded in %.2f seconds",
-                        rank,
-                        end_time - begin_time,
-                        local_main_process_only=False)
+            logger.info(
+                "rank: %s, real_score_2 distributed checkpoint loaded in %.2f seconds",
+                rank,
+                end_time - begin_time,
+                local_main_process_only=False,
+            )
         else:
             logger.info("rank: %s, real_score_2 checkpoint not found, skipping", rank)
 
@@ -786,10 +843,12 @@ def load_distillation_checkpoint(
     dcp.load(shared_states, checkpoint_id=shared_dcp_dir)
     end_time = time.perf_counter()
 
-    logger.info("rank: %s, shared random state loaded in %.2f seconds",
-                rank,
-                end_time - begin_time,
-                local_main_process_only=False)
+    logger.info(
+        "rank: %s, shared random state loaded in %.2f seconds",
+        rank,
+        end_time - begin_time,
+        local_main_process_only=False,
+    )
     logger.info("--> distillation checkpoint loaded from step %s", step)
     return step
 
@@ -847,11 +906,14 @@ def clip_grad_norm_while_handling_failing_dtensor_cases(
                 logger.warning(
                     "DTensor does not support cross-mesh operation. If you haven't fully tensor-parallelized your "
                     "model, while combining other parallelisms such as FSDP, it could be the reason for this error. "
-                    "Gradient clipping will be skipped and gradient norm will not be logged.")
+                    "Gradient clipping will be skipped and gradient norm will not be logged."
+                )
         except Exception as e:
             logger.warning(
                 "An error occurred while clipping gradients: %s. Gradient clipping will be skipped and gradient "
-                "norm will not be logged.", e)
+                "norm will not be logged.",
+                e,
+            )
             _HAS_ERRORED_CLIP_GRAD_NORM_WHILE_HANDLING_FAILING_DTENSOR_CASES = True
     return None
 
@@ -936,9 +998,9 @@ def _clip_grads_with_norm_(
     max_norm = float(max_norm)
     if len(grads) == 0:
         return
-    grouped_grads: dict[tuple[torch.device, torch.dtype],
-                        tuple[list[list[torch.Tensor]],
-                              list[int]]] = (_group_tensors_by_device_and_dtype([grads]))  # type: ignore[assignment]
+    grouped_grads: dict[tuple[torch.device, torch.dtype], tuple[list[list[torch.Tensor]], list[int]]] = (
+        _group_tensors_by_device_and_dtype([grads])
+    )  # type: ignore[assignment]
 
     clip_coef = max_norm / (total_norm + 1e-6)
 
@@ -947,8 +1009,9 @@ def _clip_grads_with_norm_(
     # when the gradients do not reside in CPU memory.
     clip_coef_clamped = torch.clamp(clip_coef, max=1.0)
     for (device, _), ([device_grads], _) in grouped_grads.items():
-        if (foreach is None
-                and _has_foreach_support(device_grads, device)) or (foreach and _device_has_foreach_support(device)):
+        if (foreach is None and _has_foreach_support(device_grads, device)) or (
+            foreach and _device_has_foreach_support(device)
+        ):
             torch._foreach_mul_(device_grads, clip_coef_clamped.to(device))
         elif foreach:
             raise RuntimeError(f"foreach=True was passed, but can't use the foreach API on {device.type} tensors")
@@ -970,14 +1033,17 @@ def _get_total_norm(
         return torch.tensor(0.0)
     first_device = tensors[0].device
     grouped_tensors: dict[tuple[torch.device, torch.dtype], tuple[list[list[torch.Tensor]], list[int]]] = (
-        _group_tensors_by_device_and_dtype([tensors]  # type: ignore[list-item]
-                                           ))  # type: ignore[assignment]
+        _group_tensors_by_device_and_dtype(
+            [tensors]  # type: ignore[list-item]
+        )
+    )  # type: ignore[assignment]
 
     norms: list[torch.Tensor] = []
     for (device, _), ([device_tensors], _) in grouped_tensors.items():
         local_tensors = [t.to_local() if isinstance(t, torch.distributed.tensor.DTensor) else t for t in device_tensors]
-        if (foreach is None
-                and _has_foreach_support(local_tensors, device)) or (foreach and _device_has_foreach_support(device)):
+        if (foreach is None and _has_foreach_support(local_tensors, device)) or (
+            foreach and _device_has_foreach_support(device)
+        ):
             norms.extend(torch._foreach_norm(local_tensors, norm_type))
         elif foreach:
             raise RuntimeError(f"foreach=True was passed, but can't use the foreach API on {device.type} tensors")
@@ -987,10 +1053,12 @@ def _get_total_norm(
     total_norm = torch.linalg.vector_norm(torch.stack([norm.to(first_device) for norm in norms]), norm_type)
 
     if error_if_nonfinite and torch.logical_or(total_norm.isnan(), total_norm.isinf()):
-        raise RuntimeError(f"The total norm of order {norm_type} for gradients from "
-                           "`parameters` is non-finite, so it cannot be clipped. To disable "
-                           "this error and scale the gradients by the non-finite norm anyway, "
-                           "set `error_if_nonfinite=False`")
+        raise RuntimeError(
+            f"The total norm of order {norm_type} for gradients from "
+            "`parameters` is non-finite, so it cannot be clipped. To disable "
+            "this error and scale the gradients by the non-finite norm anyway, "
+            "set `error_if_nonfinite=False`"
+        )
     return total_norm
 
 
@@ -1005,7 +1073,8 @@ def _group_tensors_by_device_and_dtype(
     with_indices: bool = False,
 ) -> dict[tuple[torch.device, torch.dtype], tuple[list[list[torch.Tensor | None]], list[int]]]:
     return torch._C._group_tensors_by_device_and_dtype(  # type: ignore[no-any-return]
-        tensorlistlist, with_indices)
+        tensorlistlist, with_indices
+    )
 
 
 def _device_has_foreach_support(device: torch.device) -> bool:
@@ -1016,15 +1085,17 @@ def _has_foreach_support(tensors: list[torch.Tensor], device: torch.device) -> b
     return _device_has_foreach_support(device) and all(t is None or type(t) in [torch.Tensor] for t in tensors)
 
 
-def custom_to_hf_state_dict(state_dict: dict[str, Any] | Iterator[tuple[str, torch.Tensor]],
-                            reverse_param_names_mapping: dict[str, tuple[str, int, int]]) -> dict[str, Any]:
+def custom_to_hf_state_dict(
+    state_dict: dict[str, Any] | Iterator[tuple[str, torch.Tensor]],
+    reverse_param_names_mapping: dict[str, tuple[str, int, int]],
+) -> dict[str, Any]:
     """
     Convert fastvideo's custom model format to diffusers format using reverse_param_names_mapping.
-    
+
     Args:
         state_dict: State dict in fastvideo's custom format
         reverse_param_names_mapping: Reverse mapping from fastvideo's custom format to diffusers format
-        
+
     Returns:
         State dict in diffusers format
     """
@@ -1101,11 +1172,13 @@ def _save_rank0_full_ema_safetensors(
     output_path = os.path.join(ema_dir, f"{base_name}.safetensors")
     ema_state = ema.state_dict()
     _save_full_ema_safetensors_from_state(ema_state, module.reverse_param_names_mapping, output_path)
-    logger.info("rank: %s, saved %s as consolidated EMA safetensors to %s",
-                rank,
-                base_name,
-                output_path,
-                local_main_process_only=False)
+    logger.info(
+        "rank: %s, saved %s as consolidated EMA safetensors to %s",
+        rank,
+        base_name,
+        output_path,
+        local_main_process_only=False,
+    )
 
 
 def _consolidate_local_shard_ema_and_save_safetensors(
@@ -1124,11 +1197,13 @@ def _consolidate_local_shard_ema_and_save_safetensors(
             os.makedirs(ema_dir, exist_ok=True)
             output_path = os.path.join(ema_dir, f"{base_name}.safetensors")
             _save_full_ema_safetensors_from_state(cpu_state_full, module.reverse_param_names_mapping, output_path)
-            logger.info("rank: %s, saved consolidated %s EMA (from local_shard) as safetensors to %s",
-                        rank,
-                        base_name,
-                        output_path,
-                        local_main_process_only=False)
+            logger.info(
+                "rank: %s, saved consolidated %s EMA (from local_shard) as safetensors to %s",
+                rank,
+                base_name,
+                output_path,
+                local_main_process_only=False,
+            )
     except Exception as ce:
         logger.warning("rank: %s, failed consolidating %s EMA (local_shard): %s", rank, base_name, str(ce))
 
@@ -1240,7 +1315,6 @@ def get_piecewise_constant_schedule(optimizer: Optimizer, step_rules: str, last_
     last_lr_multiple = float(rule_list[-1])
 
     def create_rules_function(rules_dict: dict, last_lr_multiple: float) -> Callable[[int], float]:
-
         def rule_func(steps: int) -> float:
             for step_threshold, lr_multiple in sorted(rules_dict.items()):
                 if steps < step_threshold:
@@ -1254,10 +1328,9 @@ def get_piecewise_constant_schedule(optimizer: Optimizer, step_rules: str, last_
     return LambdaLR(optimizer, rules_func, last_epoch=last_epoch)
 
 
-def get_linear_schedule_with_warmup(optimizer: Optimizer,
-                                    num_warmup_steps: int,
-                                    num_training_steps: int,
-                                    last_epoch: int = -1) -> LambdaLR:
+def get_linear_schedule_with_warmup(
+    optimizer: Optimizer, num_warmup_steps: int, num_training_steps: int, last_epoch: int = -1
+) -> LambdaLR:
     """
     Create a schedule with a learning rate that decreases linearly from the initial lr set in the optimizer to 0, after
     a warmup period during which it increases linearly from 0 to the initial lr set in the optimizer.
@@ -1284,11 +1357,9 @@ def get_linear_schedule_with_warmup(optimizer: Optimizer,
     return LambdaLR(optimizer, lr_lambda, last_epoch)
 
 
-def get_cosine_schedule_with_warmup(optimizer: Optimizer,
-                                    num_warmup_steps: int,
-                                    num_training_steps: int,
-                                    num_cycles: float = 0.5,
-                                    last_epoch: int = -1) -> LambdaLR:
+def get_cosine_schedule_with_warmup(
+    optimizer: Optimizer, num_warmup_steps: int, num_training_steps: int, num_cycles: float = 0.5, last_epoch: int = -1
+) -> LambdaLR:
     """
     Create a schedule with a learning rate that decreases following the values of the cosine function between the
     initial lr set in the optimizer to 0, after a warmup period during which it increases linearly between 0 and the
@@ -1320,15 +1391,17 @@ def get_cosine_schedule_with_warmup(optimizer: Optimizer,
     return LambdaLR(optimizer, lr_lambda, last_epoch)
 
 
-def get_cosine_schedule_with_min_lr(optimizer: Optimizer,
-                                    num_warmup_steps: int,
-                                    num_training_steps: int,
-                                    min_lr_ratio: float = 0.1,
-                                    num_cycles: float = 0.5,
-                                    last_epoch: int = -1) -> LambdaLR:
+def get_cosine_schedule_with_min_lr(
+    optimizer: Optimizer,
+    num_warmup_steps: int,
+    num_training_steps: int,
+    min_lr_ratio: float = 0.1,
+    num_cycles: float = 0.5,
+    last_epoch: int = -1,
+) -> LambdaLR:
     """
     Create a schedule with a learning rate that decreases following the values of the cosine function between the
-    initial lr set in the optimizer to a minimum lr (min_lr_ratio * initial_lr), after a warmup period during which 
+    initial lr set in the optimizer to a minimum lr (min_lr_ratio * initial_lr), after a warmup period during which
     it increases linearly between 0 and the initial lr set in the optimizer.
 
     Args:
@@ -1362,11 +1435,9 @@ def get_cosine_schedule_with_min_lr(optimizer: Optimizer,
     return LambdaLR(optimizer, lr_lambda, last_epoch)
 
 
-def get_cosine_with_hard_restarts_schedule_with_warmup(optimizer: Optimizer,
-                                                       num_warmup_steps: int,
-                                                       num_training_steps: int,
-                                                       num_cycles: int = 1,
-                                                       last_epoch: int = -1) -> LambdaLR:
+def get_cosine_with_hard_restarts_schedule_with_warmup(
+    optimizer: Optimizer, num_warmup_steps: int, num_training_steps: int, num_cycles: int = 1, last_epoch: int = -1
+) -> LambdaLR:
     """
     Create a schedule with a learning rate that decreases following the values of the cosine function between the
     initial lr set in the optimizer to 0, with several hard restarts, after a warmup period during which it increases
@@ -1551,10 +1622,9 @@ def get_scheduler(
             last_epoch=last_epoch,
         )
 
-    return schedule_func(optimizer,
-                         num_warmup_steps=num_warmup_steps,
-                         num_training_steps=num_training_steps,
-                         last_epoch=last_epoch)
+    return schedule_func(
+        optimizer, num_warmup_steps=num_warmup_steps, num_training_steps=num_training_steps, last_epoch=last_epoch
+    )
 
 
 def _local_numel(p: torch.Tensor) -> int:
@@ -1603,6 +1673,7 @@ class EMA_FSDP:
         # DTensor-aware to_local fetch; fall back to raw tensor
         try:
             from torch.distributed.tensor import DTensor  # type: ignore
+
             if isinstance(t, DTensor):
                 return t.to_local()
         except Exception:
@@ -1676,7 +1747,6 @@ class EMA_FSDP:
                 p.data.copy_(w.to(dtype=p.dtype, device=p.device))
 
     class _ApplyEMACtx:
-
         def __init__(self, ema: "EMA_FSDP", module):
             self.ema = ema
             self.module = module

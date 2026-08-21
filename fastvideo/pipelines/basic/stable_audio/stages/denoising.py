@@ -4,6 +4,7 @@
 CFG-batched conditioning is built once outside the sampler loop so the
 adapter only does `cat([x, x])` + DiT call per step.
 """
+
 from __future__ import annotations
 
 import math
@@ -69,8 +70,7 @@ class StableAudioDenoisingStage(PipelineStage):
         raw = getattr(batch, "init_noise_level", None)
         strength = getattr(batch, "init_audio_strength", None)
         if raw is not None and strength is not None:
-            raise ValueError("Pass `init_audio_strength` (0..1) OR `init_noise_level` "
-                             "(raw sigma_max), not both.")
+            raise ValueError("Pass `init_audio_strength` (0..1) OR `init_noise_level` (raw sigma_max), not both.")
         if raw is not None:
             return float(raw)
         s = max(0.0, min(1.0, float(strength) if strength is not None else 0.6))
@@ -115,10 +115,9 @@ class StableAudioDenoisingStage(PipelineStage):
             negative_global_embed=_cast(ext.get("negative_global_embed")),
             do_cfg=guidance_scale != 1.0,
         )
-        adapter = _DiTAdapter(self.transformer,
-                              batch_cond=batch_cond,
-                              batch_global=batch_global,
-                              cfg_scale=guidance_scale)
+        adapter = _DiTAdapter(
+            self.transformer, batch_cond=batch_cond, batch_global=batch_global, cfg_scale=guidance_scale
+        )
         denoiser = K.external.VDenoiser(adapter)
 
         # RePaint blending hook — works on any v-prediction model, no
@@ -135,12 +134,9 @@ class StableAudioDenoisingStage(PipelineStage):
         # `LocalAttention` (in `StableAudioDiT`) reads `get_forward_context()`
         # for `attn_metadata`; wrap the whole loop.
         with set_forward_context(current_timestep=0, attn_metadata=None):
-            sampled = K.sampling.sample_dpmpp_3m_sde(denoiser,
-                                                     x,
-                                                     sigmas,
-                                                     disable=False,
-                                                     extra_args={},
-                                                     callback=callback)
+            sampled = K.sampling.sample_dpmpp_3m_sde(
+                denoiser, x, sigmas, disable=False, extra_args={}, callback=callback
+            )
 
         # Final blend so the kept region of the inpaint reference is exact.
         if inpaint_mask is not None and inpaint_ref is not None:

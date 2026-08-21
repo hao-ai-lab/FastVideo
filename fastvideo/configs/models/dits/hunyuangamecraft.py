@@ -7,6 +7,7 @@ HunyuanGameCraft extends HunyuanVideo with:
 2. 33 input channels (16 latent + 16 gt_latent + 1 mask)
 3. Mask-based conditioning for autoregressive generation
 """
+
 from dataclasses import dataclass, field
 
 import torch
@@ -45,7 +46,8 @@ class HunyuanGameCraftArchConfig(DiTArchConfig):
     camera_net: bool = True
 
     _fsdp_shard_conditions: list = field(
-        default_factory=lambda: [is_double_block, is_single_block, is_refiner_block, is_camera_net])
+        default_factory=lambda: [is_double_block, is_single_block, is_refiner_block, is_camera_net]
+    )
 
     _compile_conditions: list = field(default_factory=lambda: [is_double_block, is_single_block, is_txt_in])
 
@@ -58,35 +60,28 @@ class HunyuanGameCraftArchConfig(DiTArchConfig):
             r"^(.*)\.img_mlp\.fc2\.(.*)$": r"\1.img_mlp.fc_out.\2",
             r"^(.*)\.txt_mlp\.fc1\.(.*)$": r"\1.txt_mlp.fc_in.\2",
             r"^(.*)\.txt_mlp\.fc2\.(.*)$": r"\1.txt_mlp.fc_out.\2",
-
             # Single block MLP naming
             r"^single_blocks\.(\d+)\.mlp\.fc1\.(.*)$": r"single_blocks.\1.mlp.fc_in.\2",
             r"^single_blocks\.(\d+)\.mlp\.fc2\.(.*)$": r"single_blocks.\1.mlp.fc_out.\2",
-
             # Token refiner naming
             r"^txt_in\.individual_token_refiner\.blocks\.(\d+)\.(.*)$": r"txt_in.refiner_blocks.\1.\2",
-
             # Vector in naming
             r"^vector_in\.in_layer\.(.*)$": r"vector_in.fc_in.\1",
             r"^vector_in\.out_layer\.(.*)$": r"vector_in.fc_out.\1",
-
             # Time embedder naming
             r"^time_in\.mlp\.0\.(.*)$": r"time_in.mlp.fc_in.\1",
             r"^time_in\.mlp\.2\.(.*)$": r"time_in.mlp.fc_out.\1",
-
             # Guidance embedder naming (if present)
             r"^guidance_in\.mlp\.0\.(.*)$": r"guidance_in.mlp.fc_in.\1",
             r"^guidance_in\.mlp\.2\.(.*)$": r"guidance_in.mlp.fc_out.\1",
-
             # Final layer adaLN modulation
             r"^final_layer\.adaLN_modulation\.1\.(.*)$": r"final_layer.adaLN_modulation.linear.\1",
-
             # Refiner block MLP naming
             r"^txt_in\.refiner_blocks\.(\d+)\.mlp\.fc1\.(.*)$": r"txt_in.refiner_blocks.\1.mlp.fc_in.\2",
             r"^txt_in\.refiner_blocks\.(\d+)\.mlp\.fc2\.(.*)$": r"txt_in.refiner_blocks.\1.mlp.fc_out.\2",
-
             # Camera net weights are already correctly named
-        })
+        }
+    )
 
     # Reverse mapping for saving checkpoints
     reverse_param_names_mapping: dict = field(default_factory=lambda: {})
@@ -118,7 +113,8 @@ class HunyuanGameCraftArchConfig(DiTArchConfig):
 
     # Layers to exclude from LoRA
     exclude_lora_layers: list[str] = field(
-        default_factory=lambda: ["img_in", "txt_in", "time_in", "vector_in", "camera_net"])
+        default_factory=lambda: ["img_in", "txt_in", "time_in", "vector_in", "camera_net"]
+    )
 
     def __post_init__(self):
         super().__post_init__()

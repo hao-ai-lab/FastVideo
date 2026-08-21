@@ -14,7 +14,8 @@ from fastvideo.platforms import AttentionBackendEnum
 
 if TYPE_CHECKING:
     from fastvideo.train.utils.training_config import (
-        TrainingConfig, )
+        TrainingConfig,
+    )
     from fastvideo.train.utils.lora import LoraConfig
     from fastvideo.pipelines import TrainingBatch
 
@@ -94,8 +95,8 @@ class ModelBase(ABC):
     # ------------------------------------------------------------------
 
     def init_preprocessors(  # noqa: B027
-            self,
-            training_config: TrainingConfig,
+        self,
+        training_config: TrainingConfig,
     ) -> None:
         """Load VAE, build dataloader, seed RNGs.
 

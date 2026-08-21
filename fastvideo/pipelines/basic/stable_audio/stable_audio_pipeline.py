@@ -18,6 +18,7 @@ Stages:
       → StableAudioDenoisingStage         (k-diffusion `dpmpp-3m-sde` over the DiT)
       → StableAudioDecodingStage          (OobleckVAE -> waveform)
 """
+
 from __future__ import annotations
 
 import functools
@@ -40,11 +41,13 @@ logger = init_logger(__name__)
 
 @functools.lru_cache(maxsize=1)
 def _warn_tf32_disabled_for_stable_audio() -> None:
-    logger.warning("Stable Audio pipeline is disabling process-global "
-                   "torch.backends.{cuda.matmul.allow_tf32, cudnn.allow_tf32, "
-                   "cuda.matmul.allow_fp16_reduced_precision_reduction, "
-                   "cudnn.benchmark} for A2A renoise determinism. Other models "
-                   "loaded into this process will inherit these settings.")
+    logger.warning(
+        "Stable Audio pipeline is disabling process-global "
+        "torch.backends.{cuda.matmul.allow_tf32, cudnn.allow_tf32, "
+        "cuda.matmul.allow_fp16_reduced_precision_reduction, "
+        "cudnn.benchmark} for A2A renoise determinism. Other models "
+        "loaded into this process will inherit these settings."
+    )
 
 
 def _disable_tf32_for_stable_audio() -> None:

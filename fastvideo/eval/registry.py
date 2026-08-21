@@ -39,8 +39,7 @@ def get_metric(name: str, **kwargs: Any) -> BaseMetric:
 
     for dep in getattr(cls, "dependencies", []):
         if not importlib.util.find_spec(dep):
-            raise ImportError(f"{cls.__name__} requires '{dep}'. "
-                              f"Install with: {_install_hint(name, dep)}")
+            raise ImportError(f"{cls.__name__} requires '{dep}'. Install with: {_install_hint(name, dep)}")
 
     return cls(**kwargs)
 
@@ -71,9 +70,11 @@ def _install_hint(metric_name: str, dep: str) -> str:
     ``--no-build-isolation`` git+ install.
     """
     if dep == "detectron2":
-        return ("uv pip install 'fastvideo[eval-vbench]' && "
-                "uv pip install --no-build-isolation "
-                "'git+https://github.com/facebookresearch/detectron2.git'")
+        return (
+            "uv pip install 'fastvideo[eval-vbench]' && "
+            "uv pip install --no-build-isolation "
+            "'git+https://github.com/facebookresearch/detectron2.git'"
+        )
     return f"uv pip install -e '.[{_extra_for(metric_name)}]'"
 
 

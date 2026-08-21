@@ -5,11 +5,14 @@ from fastvideo.train.callbacks.callback import (
     CallbackDict,
 )
 from fastvideo.train.callbacks.ema import (
-    EMACallback, )
+    EMACallback,
+)
 from fastvideo.train.callbacks.grad_clip import (
-    GradNormClipCallback, )
+    GradNormClipCallback,
+)
 from fastvideo.train.callbacks.validation import (
-    ValidationCallback, )
+    ValidationCallback,
+)
 
 __all__ = [
     "Callback",

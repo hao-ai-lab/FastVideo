@@ -15,6 +15,7 @@ prefixes use the exact curated target set from its ``NVFP4`` deployment config.
 No ``convert_model_to_fp4`` is needed: the weight is kept in full precision and
 quantized on the fly each step.
 """
+
 import logging
 from typing import Any
 
@@ -30,16 +31,25 @@ logger = logging.getLogger(__name__)
 
 
 class NVFP4QATTrainQuantizeMethod(QuantizeMethodBase):
-
-    def create_weights(self, layer: torch.nn.Module, input_size_per_partition: int, output_partition_sizes: list[int],
-                       input_size: int, output_size: int, params_dtype: torch.dtype, **extra_weight_attrs):
+    def create_weights(
+        self,
+        layer: torch.nn.Module,
+        input_size_per_partition: int,
+        output_partition_sizes: list[int],
+        input_size: int,
+        output_size: int,
+        params_dtype: torch.dtype,
+        **extra_weight_attrs,
+    ):
         # Trainable master weight, fake-quantized to FP4 on each forward.
-        weight = Parameter(torch.empty(
-            sum(output_partition_sizes),
-            input_size_per_partition,
-            dtype=params_dtype,
-        ),
-                           requires_grad=True)
+        weight = Parameter(
+            torch.empty(
+                sum(output_partition_sizes),
+                input_size_per_partition,
+                dtype=params_dtype,
+            ),
+            requires_grad=True,
+        )
         set_weight_attrs(weight, {"input_dim": 1, "output_dim": 0})
         layer.register_parameter("weight", weight)
         set_weight_attrs(weight, extra_weight_attrs)
@@ -47,11 +57,11 @@ class NVFP4QATTrainQuantizeMethod(QuantizeMethodBase):
     def apply(self, layer: torch.nn.Module, x: torch.Tensor, bias: torch.Tensor | None = None) -> torch.Tensor:
         # FP4 forward + full-precision backward (STE).
         from fastvideo.layers.fp4linear import _LinearFWD4BWD16Fn
+
         return _LinearFWD4BWD16Fn.apply(x, layer.weight, bias, "cutlass", 16, True)
 
 
 class NVFP4QATTrainConfig(QuantizationConfig):
-
     def __init__(self) -> None:
         super().__init__()
 
@@ -75,10 +85,14 @@ class NVFP4QATTrainConfig(QuantizationConfig):
 
     def get_quant_method(self, layer: torch.nn.Module, prefix: str):
         from fastvideo.layers.linear import LinearBase
+
         if not isinstance(layer, LinearBase):
             return None
-        matches = (is_ltx2_nvfp4_linear_prefix(prefix) if prefix.startswith("ltx2.") else any(
-            layer_name in prefix for layer_name in DEFAULT_FP4_LAYERS))
+        matches = (
+            is_ltx2_nvfp4_linear_prefix(prefix)
+            if prefix.startswith("ltx2.")
+            else any(layer_name in prefix for layer_name in DEFAULT_FP4_LAYERS)
+        )
         if matches:
             return NVFP4QATTrainQuantizeMethod()
         return None

@@ -60,12 +60,13 @@ def record_probe(
     gen = torch.Generator(device="cpu").manual_seed(step * 1000 + layer)
     # sample among video rows in the PADDED/tiled domain that are non-pad
     from fastvideo.attention.backends.video_sparse_attn_h3 import token_tile_and_valid
+
     token_tile, token_valid = token_tile_and_valid(attn_metadata.variable_block_sizes)
     video_rows = torch.nonzero((token_tile >= P) & token_valid, as_tuple=False).flatten()
-    idx = video_rows[torch.randint(0, video_rows.numel(), (_TRUE_ROWS, ), generator=gen).to(query.device)]
+    idx = video_rows[torch.randint(0, video_rows.numel(), (_TRUE_ROWS,), generator=gen).to(query.device)]
 
     q_s = query[:, idx].float()  # [B, R, H, D]
-    logits = torch.einsum("brhd,bshd->bhrs", q_s, key.float()) / (query.shape[-1]**0.5)
+    logits = torch.einsum("brhd,bshd->bhrs", q_s, key.float()) / (query.shape[-1] ** 0.5)
     logits = logits.masked_fill(~token_valid.view(1, 1, 1, -1), float("-inf"))
     true_probs = torch.softmax(logits, dim=-1)
     n_tiles = attn_metadata.variable_block_sizes.numel()
@@ -86,15 +87,17 @@ def record_probe(
         perfect_recall[f] = perfect_sorted[..., k - 1].mean().item()
 
     os.makedirs(out_dir, exist_ok=True)
-    payload = dict(step=step,
-                   layer=layer,
-                   P=P,
-                   V=V,
-                   fracs=_FRACS,
-                   prefix_mass=prefix_mass.cpu(),
-                   recall_mean=recall_mean.cpu(),
-                   true_recall=true_recall,
-                   perfect_recall=perfect_recall)
+    payload = dict(
+        step=step,
+        layer=layer,
+        P=P,
+        V=V,
+        fracs=_FRACS,
+        prefix_mass=prefix_mass.cpu(),
+        recall_mean=recall_mean.cpu(),
+        true_recall=true_recall,
+        perfect_recall=perfect_recall,
+    )
     # under SP each rank holds a distinct head subset; keep every rank's stats
     rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
     torch.save(payload, os.path.join(out_dir, f"probe_step{step:03d}_layer{layer:03d}_r{rank}.pt"))

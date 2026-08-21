@@ -13,11 +13,14 @@ from fastvideo.train.utils.config import RunConfig
 
 if TYPE_CHECKING:
     from fastvideo.train.utils.training_config import (
-        TrainingConfig, )
+        TrainingConfig,
+    )
     from fastvideo.train.methods.base import TrainingMethod
 
 
-def build_from_config(cfg: RunConfig, ) -> tuple[TrainingConfig, TrainingMethod, Any, int]:
+def build_from_config(
+    cfg: RunConfig,
+) -> tuple[TrainingConfig, TrainingMethod, Any, int]:
     """Build method + dataloader from a v3 run config.
 
     1. Instantiate each model in ``cfg.models`` via ``_target_``.
@@ -32,8 +35,7 @@ def build_from_config(cfg: RunConfig, ) -> tuple[TrainingConfig, TrainingMethod,
     for role, model_cfg in cfg.models.items():
         model = instantiate(model_cfg, training_config=cfg.training)
         if not isinstance(model, ModelBase):
-            raise TypeError(f"models.{role}._target_ must resolve to a "
-                            f"ModelBase subclass, got {type(model).__name__}")
+            raise TypeError(f"models.{role}._target_ must resolve to a ModelBase subclass, got {type(model).__name__}")
         role_models[role] = model
 
     # --- 2. Build method ---
@@ -50,7 +52,7 @@ def build_from_config(cfg: RunConfig, ) -> tuple[TrainingConfig, TrainingMethod,
     )
 
     # --- 3. Gather dataloader and start_step ---
-    dataloader = (getattr(student, "dataloader", None) if student is not None else None)
+    dataloader = getattr(student, "dataloader", None) if student is not None else None
     start_step = int(getattr(student, "start_step", 0) if student is not None else 0)
 
     return cfg.training, method, dataloader, start_step

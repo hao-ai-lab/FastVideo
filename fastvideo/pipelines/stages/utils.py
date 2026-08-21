@@ -47,7 +47,8 @@ def retrieve_timesteps(
         if not accepts_timesteps:
             raise ValueError(
                 f"The current scheduler class {scheduler.__class__}'s `set_timesteps` does not support custom"
-                f" timestep schedules. Please check whether you are using the correct scheduler.")
+                f" timestep schedules. Please check whether you are using the correct scheduler."
+            )
         scheduler.set_timesteps(timesteps=timesteps, device=device, **kwargs)
         timesteps = scheduler.timesteps
         if timesteps is None:
@@ -58,7 +59,8 @@ def retrieve_timesteps(
         if not accept_sigmas:
             raise ValueError(
                 f"The current scheduler class {scheduler.__class__}'s `set_timesteps` does not support custom"
-                f" sigmas schedules. Please check whether you are using the correct scheduler.")
+                f" sigmas schedules. Please check whether you are using the correct scheduler."
+            )
         scheduler.set_timesteps(sigmas=sigmas, device=device, **kwargs)
         timesteps = scheduler.timesteps
         if timesteps is None:

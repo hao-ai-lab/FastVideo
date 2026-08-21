@@ -50,12 +50,17 @@ def _h3_vsa_prefix_segments(layout: MiniMaxH3PackedLayout, patch_size: tuple[int
     n_text = int(layout.text_indices.numel())
     n_cond = int(layout.num_condition_video_rows)
     n_audio = int(layout.audio_indices.numel())
-    n_video = ((layout.num_video_latent_frames // patch_size[0]) * (layout.latent_height // patch_size[1]) *
-               (layout.latent_width // patch_size[2]))
+    n_video = (
+        (layout.num_video_latent_frames // patch_size[0])
+        * (layout.latent_height // patch_size[1])
+        * (layout.latent_width // patch_size[2])
+    )
     if n_text + n_cond + n_audio + n_video != layout.sequence_length:
-        raise ValueError("VSA-H3 supports the standard [text|cond|audio|video] packing only; "
-                         f"segments ({n_text}, {n_cond}, {n_audio}) + video {n_video} do not sum to "
-                         f"sequence length {layout.sequence_length}.")
+        raise ValueError(
+            "VSA-H3 supports the standard [text|cond|audio|video] packing only; "
+            f"segments ({n_text}, {n_cond}, {n_audio}) + video {n_video} do not sum to "
+            f"sequence length {layout.sequence_length}."
+        )
     return n_text, n_cond, n_audio
 
 
@@ -95,8 +100,11 @@ class MiniMaxH3DenoisingStage(PipelineStage):
         if not batch.prompt_embeds or batch.latents is None or batch.audio_latents is None:
             raise ValueError("MiniMax-H3 conditioning and packed latents must precede denoising.")
 
-        full_cpu_offload = (fastvideo_args.dit_cpu_offload and not fastvideo_args.dit_layerwise_offload
-                            and not fastvideo_args.use_fsdp_inference)
+        full_cpu_offload = (
+            fastvideo_args.dit_cpu_offload
+            and not fastvideo_args.dit_layerwise_offload
+            and not fastvideo_args.use_fsdp_inference
+        )
         device = get_local_torch_device()
         if full_cpu_offload:
             self.transformer.to(device)
@@ -148,8 +156,9 @@ class MiniMaxH3DenoisingStage(PipelineStage):
 
         try:
             with profiler_region("inference_denoising"):
-                for index, (video_timestep,
-                            audio_timestep) in enumerate(zip(video_timesteps, audio_timesteps, strict=True)):
+                for index, (video_timestep, audio_timestep) in enumerate(
+                    zip(video_timesteps, audio_timesteps, strict=True)
+                ):
                     unique_timesteps, timestep_indices = row_timestep_plan[index]
                     attn_metadata = None
                     if vsa_metadata_builder is not None:
@@ -159,8 +168,11 @@ class MiniMaxH3DenoisingStage(PipelineStage):
                         vsa_sparsity = 0.0 if index < vsa_dense_first_n else float(batch.VSA_sparsity)
                         attn_metadata = vsa_metadata_builder.build(
                             current_timestep=index,
-                            raw_latent_shape=(layout.num_video_latent_frames, layout.latent_height,
-                                              layout.latent_width),
+                            raw_latent_shape=(
+                                layout.num_video_latent_frames,
+                                layout.latent_height,
+                                layout.latent_width,
+                            ),
                             patch_size=vsa_patch_size,
                             VSA_sparsity=vsa_sparsity,
                             prefix_segments=vsa_prefix_segments,
@@ -174,10 +186,13 @@ class MiniMaxH3DenoisingStage(PipelineStage):
                     # CUDAGraphs that has been overwritten" (surfaces at sp=1;
                     # sp>1 is masked by collective-induced graph breaks).
                     torch.compiler.cudagraph_mark_step_begin()
-                    with trace_step(index), set_forward_context(
+                    with (
+                        trace_step(index),
+                        set_forward_context(
                             current_timestep=index,
                             attn_metadata=attn_metadata,
                             forward_batch=batch,
+                        ),
                     ):
                         video_velocity, audio_velocity = self.transformer(
                             hidden_states=batch.latents[None],

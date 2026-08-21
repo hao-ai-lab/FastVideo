@@ -5,6 +5,7 @@ Slices the output to `[audio_start_in_s, audio_end_in_s]` and stashes
 the result on `batch.extra["audio"]` + `["audio_sample_rate"]` for
 `VideoGenerator._mux_audio` to pick up.
 """
+
 from __future__ import annotations
 
 import torch
@@ -44,6 +45,7 @@ class StableAudioDecodingStage(PipelineStage):
 
         # VAE may be CPU-parked under `vae_cpu_offload=True`.
         from fastvideo.distributed.parallel_state import get_local_torch_device
+
         self.vae = self.vae.to(get_local_torch_device())
         decoded = self.vae.decode(latents)
         if hasattr(decoded, "sample"):  # tolerate tensor or dataclass
@@ -52,7 +54,7 @@ class StableAudioDecodingStage(PipelineStage):
         sr = int(getattr(self.vae, "sampling_rate", pc.sampling_rate))
         start_in_s = float(batch.extra.get("audio_start_in_s", pc.audio_start_in_s))
         end_in_s = float(batch.extra.get("audio_end_in_s", pc.audio_end_in_s))
-        decoded = decoded[:, :, int(start_in_s * sr):int(end_in_s * sr)]
+        decoded = decoded[:, :, int(start_in_s * sr) : int(end_in_s * sr)]
 
         if batch.extra is None:
             batch.extra = {}

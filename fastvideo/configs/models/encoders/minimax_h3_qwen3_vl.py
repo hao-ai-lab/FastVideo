@@ -23,8 +23,9 @@ def _is_embeddings(name: str, module: Any) -> bool:
 
 def _is_vision_merger(name: str, module: Any) -> bool:
     parts = name.split(".")
-    return name.endswith("visual.merger") or (len(parts) >= 2 and parts[-2] == "deepstack_merger_list"
-                                              and parts[-1].isdigit())
+    return name.endswith("visual.merger") or (
+        len(parts) >= 2 and parts[-2] == "deepstack_merger_list" and parts[-1].isdigit()
+    )
 
 
 def _is_final_norm(name: str, module: Any) -> bool:
@@ -85,11 +86,13 @@ class MiniMaxH3Qwen3VLArchConfig(TextEncoderArchConfig):
     attention_bias: bool = False
     attention_dropout: float = 0.0
     rope_theta: float = 5000000.0
-    rope_scaling: dict[str, Any] | None = field(default_factory=lambda: {
-        "mrope_interleaved": True,
-        "mrope_section": [24, 20, 20],
-        "rope_type": "default",
-    })
+    rope_scaling: dict[str, Any] | None = field(
+        default_factory=lambda: {
+            "mrope_interleaved": True,
+            "mrope_section": [24, 20, 20],
+            "rope_type": "default",
+        }
+    )
     mrope_interleaved: bool = True
     mrope_section: tuple[int, int, int] = (24, 20, 20)
 
@@ -118,13 +121,15 @@ class MiniMaxH3Qwen3VLArchConfig(TextEncoderArchConfig):
 
     output_hidden_states: bool = True
     stacked_params_mapping: list[tuple[str, str, str | int]] = field(default_factory=list)
-    _fsdp_shard_conditions: list = field(default_factory=lambda: [
-        _is_language_transformer_layer,
-        _is_vision_transformer_layer,
-        _is_embeddings,
-        _is_vision_merger,
-        _is_final_norm,
-    ])
+    _fsdp_shard_conditions: list = field(
+        default_factory=lambda: [
+            _is_language_transformer_layer,
+            _is_vision_transformer_layer,
+            _is_embeddings,
+            _is_vision_merger,
+            _is_final_norm,
+        ]
+    )
 
     def __post_init__(self) -> None:
         # Runs both at construction and after ``update_model_arch`` merges the
@@ -134,8 +139,10 @@ class MiniMaxH3Qwen3VLArchConfig(TextEncoderArchConfig):
         # every ``language_model.layers.*`` checkpoint key, so the conditioner
         # would "load" with no transformer stack and only fail at generation.
         if self.num_hidden_layers_override is not None and self.num_hidden_layers_override < 1:
-            raise ValueError("MiniMax H3 Qwen3-VL num_hidden_layers_override must be a positive layer count "
-                             f"or None for the full stack; got {self.num_hidden_layers_override}.")
+            raise ValueError(
+                "MiniMax H3 Qwen3-VL num_hidden_layers_override must be a positive layer count "
+                f"or None for the full stack; got {self.num_hidden_layers_override}."
+            )
 
         rope_scaling = dict(self.rope_scaling or {})
         self.mrope_interleaved = bool(rope_scaling.get("mrope_interleaved", self.mrope_interleaved))
@@ -149,8 +156,10 @@ class MiniMaxH3Qwen3VLArchConfig(TextEncoderArchConfig):
             raise ValueError("MiniMax H3 Qwen3-VL mRoPE sections must cover exactly half of each attention head.")
 
         if self.vision_out_hidden_size != self.hidden_size:
-            raise ValueError("MiniMax H3 Qwen3-VL vision_out_hidden_size must match the language hidden_size "
-                             "for visual-token and DeepStack injection.")
+            raise ValueError(
+                "MiniMax H3 Qwen3-VL vision_out_hidden_size must match the language hidden_size "
+                "for visual-token and DeepStack injection."
+            )
 
         # H3 builds its presentation in the pipeline stage and tokenizes each
         # segment verbatim without adding tokenizer-owned presentation tokens.
@@ -179,8 +188,9 @@ class MiniMaxH3Qwen3VLConfig(TextEncoderConfig):
         architectures = flattened.get("architectures")
         if isinstance(architectures, str):
             architectures = [architectures]
-        if isinstance(architectures, list | tuple) and any(architecture in _OFFICIAL_ARCHITECTURES
-                                                           for architecture in architectures):
+        if isinstance(architectures, list | tuple) and any(
+            architecture in _OFFICIAL_ARCHITECTURES for architecture in architectures
+        ):
             flattened["architectures"] = ["MiniMaxH3Qwen3VLConditioner"]
 
         section = flattened.get("mrope_section")

@@ -37,7 +37,8 @@ class LTX2VideoArchConfig(DiTArchConfig):
             r"^diffusion_model\.(.*)$": r"model.\1",
             r"^model\.(.*)$": r"model.\1",
             r"^(.*)$": r"model.\1",
-        })
+        }
+    )
 
     reverse_param_names_mapping: dict = field(default_factory=lambda: {})
     lora_param_names_mapping: dict = field(default_factory=lambda: {})

@@ -17,6 +17,7 @@ The streaming server's session controller populates the continuation
 latents between segments; the legacy from_pretrained path passes
 ``ltx2_images`` / ``ltx2_image_crf`` through compat translation.
 """
+
 from __future__ import annotations
 
 import math
@@ -43,8 +44,8 @@ logger = init_logger(__name__)
 
 LTX2_VIDEO_CLEAN_LATENT_KEY = "ltx2_video_clean_latent"
 LTX2_VIDEO_DENOISE_MASK_KEY = "ltx2_video_denoise_mask"
-LTX2_CONTINUATION_STAGE1_LAST_LATENT_KEY = ("ltx2_continuation_stage1_last_latent")
-LTX2_CONTINUATION_STAGE2_LAST_LATENT_KEY = ("ltx2_continuation_stage2_last_latent")
+LTX2_CONTINUATION_STAGE1_LAST_LATENT_KEY = "ltx2_continuation_stage1_last_latent"
+LTX2_CONTINUATION_STAGE2_LAST_LATENT_KEY = "ltx2_continuation_stage2_last_latent"
 # NOTE: hard-coded for continuation quality experiments. The first
 # latent frame of the next clip is anchored to the previous clip's
 # last latent at full strength.
@@ -56,6 +57,7 @@ DEFAULT_LTX2_IMAGE_CRF = 33.0
 @dataclass
 class LTX2ImageConditioningState:
     """Result of building image / continuation conditioning."""
+
     clean_latent: torch.Tensor
     denoise_mask: torch.Tensor
     images: list[tuple[str, int, float]]
@@ -77,16 +79,14 @@ def resolve_ltx2_images(batch: ForwardBatch) -> list[tuple[str, int, float]]:
     resolved: list[tuple[str, int, float]] = []
     for item in images:
         if not isinstance(item, tuple | list) or len(item) != 3:
-            raise ValueError("Each ltx2_images item must be a tuple/list of "
-                             "(path, frame_idx, strength).")
+            raise ValueError("Each ltx2_images item must be a tuple/list of (path, frame_idx, strength).")
         image_path, frame_idx, strength = item
         frame_idx_int = int(frame_idx)
         strength_float = float(strength)
         if frame_idx_int < 0:
             raise ValueError(f"LTX-2 frame_idx must be >= 0, got {frame_idx_int}")
         if strength_float < 0.0 or strength_float > 1.0:
-            raise ValueError(f"LTX-2 image conditioning strength must be in [0, 1], "
-                             f"got {strength_float}")
+            raise ValueError(f"LTX-2 image conditioning strength must be in [0, 1], got {strength_float}")
         resolved.append((str(image_path), frame_idx_int, strength_float))
     return resolved
 
@@ -113,7 +113,7 @@ def _resize_and_center_crop(
 
     crop_top = (new_h - height) // 2
     crop_left = (new_w - width) // 2
-    tensor = tensor[:, :, crop_top:crop_top + height, crop_left:crop_left + width]
+    tensor = tensor[:, :, crop_top : crop_top + height, crop_left : crop_left + width]
     return tensor.unsqueeze(2)
 
 
@@ -161,8 +161,7 @@ def _preprocess_conditioning_image(
     if image_crf <= 0.0:
         return image
     if av is None:
-        logger.warning("[LTX2] PyAV is unavailable; skipping CRF "
-                       "conditioning preprocessing.")
+        logger.warning("[LTX2] PyAV is unavailable; skipping CRF conditioning preprocessing.")
         return image
 
     with BytesIO() as output_file:
@@ -231,7 +230,7 @@ def _extract_video_latent(vae: torch.nn.Module, image: torch.Tensor) -> torch.Te
         latent = encoded.mode()
     elif hasattr(encoded, "sample"):
         latent = encoded.sample()
-    elif (isinstance(encoded, tuple | list) and encoded and torch.is_tensor(encoded[0])):
+    elif isinstance(encoded, tuple | list) and encoded and torch.is_tensor(encoded[0]):
         latent = encoded[0]
     else:
         raise TypeError(f"Unsupported VAE encode output type: {type(encoded)}")
@@ -239,8 +238,7 @@ def _extract_video_latent(vae: torch.nn.Module, image: torch.Tensor) -> torch.Te
     if latent.ndim == 4:
         latent = latent.unsqueeze(2)
     if latent.ndim != 5:
-        raise ValueError(f"Expected video latent with 5 dims [B,C,T,H,W], got "
-                         f"{tuple(latent.shape)}")
+        raise ValueError(f"Expected video latent with 5 dims [B,C,T,H,W], got {tuple(latent.shape)}")
     return latent
 
 
@@ -256,8 +254,9 @@ def _insert_conditioning_latent(
     if conditioning_latent.ndim == 4:
         conditioning_latent = conditioning_latent.unsqueeze(2)
     if conditioning_latent.ndim != 5:
-        raise ValueError(f"LTX-2 {source_name} latent must have 5 dims [B,C,T,H,W], "
-                         f"got {tuple(conditioning_latent.shape)}")
+        raise ValueError(
+            f"LTX-2 {source_name} latent must have 5 dims [B,C,T,H,W], got {tuple(conditioning_latent.shape)}"
+        )
 
     if conditioning_latent.shape[0] == 1 and clean_latent.shape[0] > 1:
         conditioned_latent = conditioning_latent.expand(
@@ -270,23 +269,29 @@ def _insert_conditioning_latent(
     elif conditioning_latent.shape[0] == clean_latent.shape[0]:
         conditioned_latent = conditioning_latent
     else:
-        raise ValueError(f"LTX-2 {source_name} latent batch mismatch: "
-                         f"{conditioning_latent.shape[0]} vs {clean_latent.shape[0]}")
+        raise ValueError(
+            f"LTX-2 {source_name} latent batch mismatch: {conditioning_latent.shape[0]} vs {clean_latent.shape[0]}"
+        )
 
     if conditioned_latent.shape[1] != clean_latent.shape[1]:
-        raise ValueError(f"LTX-2 {source_name} latent channels mismatch: "
-                         f"{conditioned_latent.shape[1]} vs {clean_latent.shape[1]}")
+        raise ValueError(
+            f"LTX-2 {source_name} latent channels mismatch: {conditioned_latent.shape[1]} vs {clean_latent.shape[1]}"
+        )
     if conditioned_latent.shape[-2:] != clean_latent.shape[-2:]:
-        raise ValueError(f"LTX-2 {source_name} latent spatial shape "
-                         f"mismatch: {tuple(conditioned_latent.shape[-2:])} "
-                         f"vs {tuple(clean_latent.shape[-2:])}")
+        raise ValueError(
+            f"LTX-2 {source_name} latent spatial shape "
+            f"mismatch: {tuple(conditioned_latent.shape[-2:])} "
+            f"vs {tuple(clean_latent.shape[-2:])}"
+        )
 
     frame_count = conditioned_latent.shape[2]
     end_idx = frame_idx + frame_count
     if frame_idx < 0 or end_idx > clean_latent.shape[2]:
-        raise ValueError(f"LTX-2 {source_name} latent frame range out of bounds: "
-                         f"frame_idx={frame_idx}, frame_count={frame_count}, "
-                         f"latent_frames={clean_latent.shape[2]}")
+        raise ValueError(
+            f"LTX-2 {source_name} latent frame range out of bounds: "
+            f"frame_idx={frame_idx}, frame_count={frame_count}, "
+            f"latent_frames={clean_latent.shape[2]}"
+        )
 
     clean_latent[:, :, frame_idx:end_idx] = conditioned_latent.to(
         device=clean_latent.device,
@@ -321,16 +326,15 @@ def build_ltx2_image_conditioning(
     is_stage2_conditioning = not is_stage1_conditioning
     has_latent_conditioning = False
     continuation_latent_to_insert: torch.Tensor | None = None
-    if (conditioning_latent_stage1 is not None and not torch.is_tensor(conditioning_latent_stage1)):
-        raise TypeError("LTX-2 stage1 continuation latent conditioning "
-                        "expects a torch.Tensor.")
-    if (conditioning_latent_stage2 is not None and not torch.is_tensor(conditioning_latent_stage2)):
-        raise TypeError("LTX-2 stage2 continuation latent conditioning "
-                        "expects a torch.Tensor.")
+    if conditioning_latent_stage1 is not None and not torch.is_tensor(conditioning_latent_stage1):
+        raise TypeError("LTX-2 stage1 continuation latent conditioning expects a torch.Tensor.")
+    if conditioning_latent_stage2 is not None and not torch.is_tensor(conditioning_latent_stage2):
+        raise TypeError("LTX-2 stage2 continuation latent conditioning expects a torch.Tensor.")
 
     if (conditioning_latent_stage1 is None) != (conditioning_latent_stage2 is None):
-        raise ValueError("LTX-2 continuation expects both stage1 and stage2 "
-                         "conditioning latents (or neither for first round).")
+        raise ValueError(
+            "LTX-2 continuation expects both stage1 and stage2 conditioning latents (or neither for first round)."
+        )
     if is_stage1_conditioning and conditioning_latent_stage1 is not None:
         has_latent_conditioning = True
         continuation_latent_to_insert = conditioning_latent_stage1.to(
@@ -349,7 +353,7 @@ def build_ltx2_image_conditioning(
     if not images and not has_latent_conditioning and not video_conditions:
         return None
 
-    clean_latent = (torch.zeros_like(latents) if base_clean_latent is None else base_clean_latent.clone())
+    clean_latent = torch.zeros_like(latents) if base_clean_latent is None else base_clean_latent.clone()
 
     denoise_mask = torch.ones(
         (
@@ -367,8 +371,8 @@ def build_ltx2_image_conditioning(
         image_crf = getattr(batch, "ltx2_image_crf", DEFAULT_LTX2_IMAGE_CRF)
 
     vae_param = next(vae.parameters(), None)
-    encoder_dtype = (vae_param.dtype if vae_param is not None else latents.dtype)
-    encoder_device = (vae_param.device if vae_param is not None else latents.device)
+    encoder_dtype = vae_param.dtype if vae_param is not None else latents.dtype
+    encoder_device = vae_param.device if vae_param is not None else latents.device
     cache: dict[tuple[str, int, int, float], torch.Tensor] = {}
     latent_conditioned = False
 
@@ -429,8 +433,7 @@ def build_ltx2_image_conditioning(
             dtype=latents.dtype,
         )
         logger.info(
-            "[LTX2] Video-clip condition: %d frames -> "
-            "latent T=%d at frame_idx=%d strength=%.2f",
+            "[LTX2] Video-clip condition: %d frames -> latent T=%d at frame_idx=%d strength=%.2f",
             len(frame_paths),
             video_latent.shape[2],
             frame_idx,

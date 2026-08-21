@@ -20,13 +20,13 @@ class MiniMaxH3PipelineConfig(PipelineConfig):
     dit_config: MiniMaxH3Config = field(default_factory=MiniMaxH3Config)
     vae_config: VAEConfig = field(default_factory=MiniMaxH3VideoVAEConfig)
     audio_vae_config: VAEConfig = field(default_factory=MiniMaxH3AudioVAEConfig)
-    text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (MiniMaxH3Qwen3VLConfig(), ))
+    text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (MiniMaxH3Qwen3VLConfig(),))
 
     flow_shift: float | None = None
     embedded_cfg_scale: float | None = None
     dit_precision: str = "bf16"
     vae_precision: str = "fp32"
-    text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("bf16", ))
+    text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("bf16",))
     vae_sp: bool = False
 
     def check_pipeline_config(self) -> None:

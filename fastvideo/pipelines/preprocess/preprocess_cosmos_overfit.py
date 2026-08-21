@@ -75,12 +75,17 @@ def main() -> None:
     # `_class_name: AutoencoderKLWan`, so diffusers can load it directly.
     print("Loading Cosmos VAE (AutoencoderKLWan)...")
     from diffusers import AutoencoderKLWan
-    vae = AutoencoderKLWan.from_pretrained(
-        model_path,
-        subfolder="vae",
-        torch_dtype=torch.float16,
-    ).to(device).eval()
-    print(f"VAE loaded ({sum(p.numel() for p in vae.parameters())/1e6:.0f}M)")
+
+    vae = (
+        AutoencoderKLWan.from_pretrained(
+            model_path,
+            subfolder="vae",
+            torch_dtype=torch.float16,
+        )
+        .to(device)
+        .eval()
+    )
+    print(f"VAE loaded ({sum(p.numel() for p in vae.parameters()) / 1e6:.0f}M)")
 
     # --- Load T5 Large text encoder ---
     print("Loading T5 Large text encoder...")
@@ -89,10 +94,14 @@ def main() -> None:
     t5_cfg = T5LargeConfig()
     tok_kwargs = dict(t5_cfg.tokenizer_kwargs)
     tokenizer = AutoTokenizer.from_pretrained(os.path.join(model_path, "tokenizer"))
-    text_encoder = T5EncoderModel.from_pretrained(
-        os.path.join(model_path, "text_encoder"),
-        torch_dtype=torch.bfloat16,
-    ).to(device).eval()
+    text_encoder = (
+        T5EncoderModel.from_pretrained(
+            os.path.join(model_path, "text_encoder"),
+            torch_dtype=torch.bfloat16,
+        )
+        .to(device)
+        .eval()
+    )
 
     # --- Process each video ---
     records = []
@@ -155,8 +164,7 @@ def main() -> None:
 
     # Write parquet
     table = pa.table(
-        {k: [r[k] for r in records]
-         for k in records[0]},
+        {k: [r[k] for r in records] for k in records[0]},
         schema=pyarrow_schema_t2v,
     )
     output_path = os.path.join(OUTPUT_DIR, "data_00000.parquet")
@@ -165,6 +173,7 @@ def main() -> None:
 
     # Extract first frame from first video as V2W conditioning image
     import cv2
+
     first_video = os.path.join(DATA_DIR, "videos", caption_data[0]["path"])
     cap = cv2.VideoCapture(first_video)
     ret, frame = cap.read()
@@ -179,10 +188,13 @@ def main() -> None:
     # Use "caption" field — ValidationDataset aliases it to "prompt"
     # Include image_path for V2W conditioning during validation
     val_prompts = {
-        "data": [{
-            "caption": item["cap"][0],
-            "image_path": "cond_frame.png",
-        } for item in caption_data]
+        "data": [
+            {
+                "caption": item["cap"][0],
+                "image_path": "cond_frame.png",
+            }
+            for item in caption_data
+        ]
     }
     val_path = os.path.join(OUTPUT_DIR, "validation_prompts.json")
     with open(val_path, "w") as f:

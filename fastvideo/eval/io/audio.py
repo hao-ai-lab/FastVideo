@@ -13,6 +13,7 @@ can't usefully pre-load audio into a single canonical tensor the way it
 pre-loads video frames.  Paths-in / paths-out is the lingua franca for
 audio in this codebase.
 """
+
 from __future__ import annotations
 
 from pathlib import Path

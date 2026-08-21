@@ -91,7 +91,7 @@ def _build_generation_kwargs(
 
     if "seed" in body_set and req.seed is not None:
         kwargs["seed"] = req.seed
-    if ("num_inference_steps" in body_set and req.num_inference_steps is not None):
+    if "num_inference_steps" in body_set and req.num_inference_steps is not None:
         kwargs["num_inference_steps"] = req.num_inference_steps
     if "guidance_scale" in body_set and req.guidance_scale is not None:
         kwargs["guidance_scale"] = req.guidance_scale
@@ -184,12 +184,7 @@ async def _run_generation(request_id: str, kwargs: dict[str, Any]) -> None:
         logger.error("Video generation failed for %s: %s", request_id, e)
         await VIDEO_STORE.update_fields(
             request_id,
-            {
-                "status": "failed",
-                "error": {
-                    "message": str(e)
-                }
-            },
+            {"status": "failed", "error": {"message": str(e)}},
         )
 
 
@@ -198,22 +193,22 @@ async def _run_generation(request_id: str, kwargs: dict[str, Any]) -> None:
 
 @router.post("", response_model=VideoResponse)
 async def create_video(
-        request: Request,
-        # multipart/form-data fields
-        prompt: str | None = Form(None),
-        input_reference: UploadFile | None = File(None),  # noqa: B008
-        reference_url: str | None = Form(None),
-        model: str | None = Form(None),
-        seconds: int | None = Form(None),
-        size: str | None = Form(None),
-        fps: int | None = Form(None),
-        num_frames: int | None = Form(None),
-        seed: int | None = Form(1024),
-        negative_prompt: str | None = Form(None),
-        guidance_scale: float | None = Form(None),
-        num_inference_steps: int | None = Form(None),
-        enable_teacache: bool | None = Form(False),
-        extra_body: str | None = Form(None),
+    request: Request,
+    # multipart/form-data fields
+    prompt: str | None = Form(None),
+    input_reference: UploadFile | None = File(None),  # noqa: B008
+    reference_url: str | None = Form(None),
+    model: str | None = Form(None),
+    seconds: int | None = Form(None),
+    size: str | None = Form(None),
+    fps: int | None = Form(None),
+    num_frames: int | None = Form(None),
+    seed: int | None = Form(1024),
+    negative_prompt: str | None = Form(None),
+    guidance_scale: float | None = Form(None),
+    num_inference_steps: int | None = Form(None),
+    enable_teacache: bool | None = Form(False),
+    extra_body: str | None = Form(None),
 ):
     content_type = request.headers.get("content-type", "").lower()
     request_id = generate_request_id()
@@ -257,9 +252,7 @@ async def create_video(
             negative_prompt=negative_prompt,
             num_inference_steps=num_inference_steps,
             enable_teacache=enable_teacache,
-            **({
-                "guidance_scale": guidance_scale
-            } if guidance_scale is not None else {}),
+            **({"guidance_scale": guidance_scale} if guidance_scale is not None else {}),
         )
     else:
         try:
@@ -315,9 +308,9 @@ async def create_video(
 
 @router.get("", response_model=VideoListResponse)
 async def list_videos(
-        after: str | None = Query(None),
-        limit: int | None = Query(None, ge=1, le=100),
-        order: str | None = Query("desc"),
+    after: str | None = Query(None),
+    limit: int | None = Query(None, ge=1, le=100),
+    order: str | None = Query("desc"),
 ):
     order = (order or "desc").lower()
     if order not in ("asc", "desc"):
@@ -328,7 +321,7 @@ async def list_videos(
     if after is not None:
         try:
             idx = next(i for i, j in enumerate(jobs) if j["id"] == after)
-            jobs = jobs[idx + 1:]
+            jobs = jobs[idx + 1 :]
         except StopIteration:
             jobs = []
 

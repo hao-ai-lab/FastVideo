@@ -10,6 +10,7 @@ Separating this from :mod:`enhancer` keeps the enhancer provider-
 agnostic; anything UI-specific (how many alternatives to request, how
 to split the response, temperature) lives here.
 """
+
 from __future__ import annotations
 
 import re
@@ -72,7 +73,7 @@ def _split_response(content: str, *, limit: int) -> list[str]:
         stripped = _LEADING_MARKER_RE.sub("", line).strip()
         if stripped:
             cleaned.append(stripped)
-    return cleaned[:max(1, limit)]
+    return cleaned[: max(1, limit)]
 
 
 __all__ = [

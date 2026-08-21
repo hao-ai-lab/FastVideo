@@ -26,6 +26,7 @@ class BenchSubcommand(CLISubcommand):
     def cmd(self, args: argparse.Namespace) -> None:
         import asyncio
         from fastvideo.entrypoints.cli.bench_serving import benchmark
+
         asyncio.run(benchmark(args))
 
     def validate(self, args: argparse.Namespace) -> None:

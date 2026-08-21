@@ -25,7 +25,7 @@ logger = init_logger(__name__)
 class LatentPreparationStage(PipelineStage):
     """
     Stage for preparing initial latent variables for the diffusion process.
-    
+
     This stage handles the preparation of the initial latent variables that will be
     denoised during the diffusion process.
     """
@@ -43,17 +43,18 @@ class LatentPreparationStage(PipelineStage):
     ) -> ForwardBatch:
         """
         Prepare initial latent variables for the diffusion process.
-        
+
         Args:
             batch: The current batch information.
             fastvideo_args: The inference arguments.
-            
+
         Returns:
             The batch with prepared latent variables.
         """
 
-        latent_num_frames = (batch.num_frames -
-                             1) // fastvideo_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio + 1
+        latent_num_frames = (
+            batch.num_frames - 1
+        ) // fastvideo_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio + 1
         # Determine batch size; fall back to action/image inputs when no text encoder is present
         if not batch.prompt_embeds:
             if batch.keyboard_cond is not None:
@@ -80,11 +81,9 @@ class LatentPreparationStage(PipelineStage):
             # Matrix-Game models have text_dim=0 and ignore encoder_hidden_states.
             transformer_dtype = next(self.transformer.parameters()).dtype
             device = get_local_torch_device()
-            dummy_prompt = torch.zeros(batch_size,
-                                       0,
-                                       self.transformer.hidden_size,
-                                       device=device,
-                                       dtype=transformer_dtype)
+            dummy_prompt = torch.zeros(
+                batch_size, 0, self.transformer.hidden_size, device=device, dtype=transformer_dtype
+            )
             batch.prompt_embeds = [dummy_prompt]
             batch.negative_prompt_embeds = []
             batch.do_classifier_free_guidance = False
@@ -125,7 +124,8 @@ class LatentPreparationStage(PipelineStage):
         if isinstance(generator, list) and len(generator) != batch_size:
             raise ValueError(
                 f"You have passed a list of generators of length {len(generator)}, but requested an effective batch"
-                f" size of {batch_size}. Make sure the batch size matches the length of the generators.")
+                f" size of {batch_size}. Make sure the batch size matches the length of the generators."
+            )
         # Generate or use provided latents
         if latents is None:
             latents = randn_tensor(
@@ -155,8 +155,12 @@ class LatentPreparationStage(PipelineStage):
         """Verify latent preparation stage inputs."""
         result = VerificationResult()
         result.add_check(
-            "prompt_or_embeds", None, lambda _: V.string_or_list_strings(batch.prompt) or not batch.prompt_embeds or V.
-            list_not_empty(batch.prompt_embeds))
+            "prompt_or_embeds",
+            None,
+            lambda _: V.string_or_list_strings(batch.prompt)
+            or not batch.prompt_embeds
+            or V.list_not_empty(batch.prompt_embeds),
+        )
         if batch.prompt_embeds:
             result.add_check("prompt_embeds", batch.prompt_embeds, V.list_of_tensors)
         result.add_check("num_videos_per_prompt", batch.num_videos_per_prompt, V.positive_int)
@@ -179,7 +183,7 @@ class CosmosLatentPreparationStage(PipelineStage):
     """
     Cosmos-specific latent preparation stage that properly handles the tensor shapes
     and conditioning masks required by the Cosmos transformer.
-    
+
     This stage replicates the logic from diffusers' Cosmos2VideoToWorldPipeline.prepare_latents()
     """
 
@@ -236,9 +240,9 @@ class CosmosLatentPreparationStage(PipelineStage):
 
         video = None
 
-        if hasattr(batch, 'video') and batch.video is not None:
+        if hasattr(batch, "video") and batch.video is not None:
             video = batch.video
-        elif hasattr(batch, 'pil_image') and batch.pil_image is not None:
+        elif hasattr(batch, "pil_image") and batch.pil_image is not None:
             vae_scale_factor_spatial = 8
             image_processor = ImageProcessor(vae_scale_factor=vae_scale_factor_spatial)
 
@@ -248,7 +252,7 @@ class CosmosLatentPreparationStage(PipelineStage):
             video = processed_image.unsqueeze(2)
 
             video = video.to(device=device, dtype=torch.bfloat16)
-        elif hasattr(batch, 'preprocessed_image') and batch.preprocessed_image is not None:
+        elif hasattr(batch, "preprocessed_image") and batch.preprocessed_image is not None:
             # Convert preprocessed image to video format
             if isinstance(batch.preprocessed_image, torch.Tensor):
                 if batch.preprocessed_image.dim() == 4:  # [B, C, H, W] -> [B, C, T, H, W]
@@ -287,30 +291,41 @@ class CosmosLatentPreparationStage(PipelineStage):
                     elif isinstance(encoder_output, torch.Tensor):
                         return encoder_output
                     else:
-                        attrs = [attr for attr in dir(encoder_output) if not attr.startswith('_')]
+                        attrs = [attr for attr in dir(encoder_output) if not attr.startswith("_")]
                         raise AttributeError(
-                            f"Could not access latents of provided encoder_output. Available attributes: {attrs}")
+                            f"Could not access latents of provided encoder_output. Available attributes: {attrs}"
+                        )
 
                 if isinstance(generator, list):
                     init_latents = [
-                        retrieve_latents(self.vae.encode(video[i].unsqueeze(0)),
-                                         generator=torch.Generator(device="cpu").manual_seed(100))
+                        retrieve_latents(
+                            self.vae.encode(video[i].unsqueeze(0)),
+                            generator=torch.Generator(device="cpu").manual_seed(100),
+                        )
                         for i in range(batch_size)
                     ]
                 else:
                     init_latents = [
-                        retrieve_latents(self.vae.encode(vid.unsqueeze(0)),
-                                         torch.Generator(device="cpu").manual_seed(100)) for vid in video
+                        retrieve_latents(
+                            self.vae.encode(vid.unsqueeze(0)), torch.Generator(device="cpu").manual_seed(100)
+                        )
+                        for vid in video
                     ]
 
                 init_latents = torch.cat(init_latents, dim=0).to(dtype)
 
                 # Apply latent normalization
-                if hasattr(self.vae.config, 'latents_mean') and hasattr(self.vae.config, 'latents_std'):
-                    latents_mean = torch.tensor(self.vae.config.latents_mean).view(1, self.vae.config.z_dim, 1, 1,
-                                                                                   1).to(device, dtype)
-                    latents_std = torch.tensor(self.vae.config.latents_std).view(1, self.vae.config.z_dim, 1, 1,
-                                                                                 1).to(device, dtype)
+                if hasattr(self.vae.config, "latents_mean") and hasattr(self.vae.config, "latents_std"):
+                    latents_mean = (
+                        torch.tensor(self.vae.config.latents_mean)
+                        .view(1, self.vae.config.z_dim, 1, 1, 1)
+                        .to(device, dtype)
+                    )
+                    latents_std = (
+                        torch.tensor(self.vae.config.latents_std)
+                        .view(1, self.vae.config.z_dim, 1, 1, 1)
+                        .to(device, dtype)
+                    )
                     init_latents = (init_latents - latents_mean) / latents_std * self.scheduler.sigma_data
 
                 conditioning_latents = init_latents
@@ -323,10 +338,9 @@ class CosmosLatentPreparationStage(PipelineStage):
         # Generate or use provided latents
         if latents is None:
             # Use float32 for randn_tensor
-            latents = randn_tensor(shape,
-                                   generator=torch.Generator(device="cpu").manual_seed(200),
-                                   device=device,
-                                   dtype=dtype)
+            latents = randn_tensor(
+                shape, generator=torch.Generator(device="cpu").manual_seed(200), device=device, dtype=dtype
+            )
         else:
             latents = latents.to(device=device, dtype=dtype)
 
@@ -416,14 +430,14 @@ class Cosmos25LatentPreparationStage(CosmosLatentPreparationStage):
         video = None
         image_conditioning = False
 
-        if hasattr(batch, 'pil_image') and batch.pil_image is not None:
+        if hasattr(batch, "pil_image") and batch.pil_image is not None:
             vae_scale_factor_spatial = 8
             image_processor = ImageProcessor(vae_scale_factor=vae_scale_factor_spatial)
             processed_image = image_processor._preprocess_cosmos25(batch.pil_image, height, width)
             video = processed_image.unsqueeze(2)
             image_conditioning = True
             video = video.to(device=device, dtype=torch.bfloat16)
-        elif hasattr(batch, 'preprocessed_image') and batch.preprocessed_image is not None:
+        elif hasattr(batch, "preprocessed_image") and batch.preprocessed_image is not None:
             if isinstance(batch.preprocessed_image, torch.Tensor):
                 if batch.preprocessed_image.dim() == 4:
                     video = batch.preprocessed_image.unsqueeze(2)
@@ -469,8 +483,13 @@ class Cosmos25LatentPreparationStage(CosmosLatentPreparationStage):
                 padding = last_frame.repeat(1, 1, num_padding_frames, 1, 1)
                 if image_conditioning:
                     padding = cond_video.new_full(
-                        (cond_video.size(0), cond_video.size(1), num_padding_frames, cond_video.size(3),
-                         cond_video.size(4)),
+                        (
+                            cond_video.size(0),
+                            cond_video.size(1),
+                            num_padding_frames,
+                            cond_video.size(3),
+                            cond_video.size(4),
+                        ),
                         -1.0,
                     )
                 video = torch.cat([cond_video, padding], dim=2)
@@ -501,27 +520,36 @@ class Cosmos25LatentPreparationStage(CosmosLatentPreparationStage):
                     elif isinstance(encoder_output, torch.Tensor):
                         return encoder_output
                     else:
-                        attrs = [attr for attr in dir(encoder_output) if not attr.startswith('_')]
+                        attrs = [attr for attr in dir(encoder_output) if not attr.startswith("_")]
                         raise AttributeError(
-                            f"Could not access latents of provided encoder_output. Available attributes: {attrs}")
+                            f"Could not access latents of provided encoder_output. Available attributes: {attrs}"
+                        )
 
                 if isinstance(generator, list):
                     init_latents = [
-                        retrieve_latents(self.vae.encode(video[i].unsqueeze(0)),
-                                         generator=torch.Generator(device="cpu").manual_seed(100))
+                        retrieve_latents(
+                            self.vae.encode(video[i].unsqueeze(0)),
+                            generator=torch.Generator(device="cpu").manual_seed(100),
+                        )
                         for i in range(batch_size)
                     ]
                 else:
                     init_latents = [
-                        retrieve_latents(self.vae.encode(vid.unsqueeze(0)),
-                                         torch.Generator(device="cpu").manual_seed(100)) for vid in video
+                        retrieve_latents(
+                            self.vae.encode(vid.unsqueeze(0)), torch.Generator(device="cpu").manual_seed(100)
+                        )
+                        for vid in video
                     ]
 
                 init_latents = torch.cat(init_latents, dim=0).to(dtype)
 
                 cfg = getattr(self.vae, "config", None)
-                if (not bool(getattr(self.vae, "handles_latent_norm", False)) and cfg is not None
-                        and hasattr(cfg, 'latents_mean') and hasattr(cfg, 'latents_std')):
+                if (
+                    not bool(getattr(self.vae, "handles_latent_norm", False))
+                    and cfg is not None
+                    and hasattr(cfg, "latents_mean")
+                    and hasattr(cfg, "latents_std")
+                ):
                     latents_mean = torch.tensor(cfg.latents_mean).view(1, cfg.z_dim, 1, 1, 1).to(device, dtype)
                     latents_std = torch.tensor(cfg.latents_std).view(1, cfg.z_dim, 1, 1, 1).to(device, dtype)
                     init_latents = (init_latents - latents_mean) / latents_std * self.scheduler.sigma_data
@@ -568,8 +596,11 @@ class Cosmos25LatentPreparationStage(CosmosLatentPreparationStage):
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify Cosmos latent preparation stage inputs."""
         result = VerificationResult()
-        result.add_check("prompt_or_embeds", None,
-                         lambda _: V.string_or_list_strings(batch.prompt) or V.list_not_empty(batch.prompt_embeds))
+        result.add_check(
+            "prompt_or_embeds",
+            None,
+            lambda _: V.string_or_list_strings(batch.prompt) or V.list_not_empty(batch.prompt_embeds),
+        )
         result.add_check("prompt_embeds", batch.prompt_embeds, V.list_of_tensors)
         result.add_check("num_videos_per_prompt", batch.num_videos_per_prompt, V.positive_int)
         result.add_check("generator", batch.generator, V.generator_or_list_generators)
@@ -679,9 +710,12 @@ class Cosmos25AutoLatentPreparationStage(PipelineStage):
 
     @staticmethod
     def _has_conditioning_input(batch: ForwardBatch) -> bool:
-        return (getattr(batch, "pil_image", None) is not None or getattr(batch, "preprocessed_image", None) is not None
-                or bool(getattr(batch, "video_path", None))
-                or isinstance(getattr(batch, "video_latent", None), torch.Tensor))
+        return (
+            getattr(batch, "pil_image", None) is not None
+            or getattr(batch, "preprocessed_image", None) is not None
+            or bool(getattr(batch, "video_path", None))
+            or isinstance(getattr(batch, "video_latent", None), torch.Tensor)
+        )
 
     def forward(
         self,

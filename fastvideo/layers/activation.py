@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/model_executor/layers/activation.py
 """Custom activation functions."""
+
 import math
 
 import torch
@@ -54,12 +55,11 @@ class GeluAndMul(CustomOp):
         return F.gelu(x[..., :d], approximate=self.approximate) * x[..., d:]
 
     def extra_repr(self) -> str:
-        return f'approximate={repr(self.approximate)}'
+        return f"approximate={repr(self.approximate)}"
 
 
 @CustomOp.register("gelu_new")
 class NewGELU(CustomOp):
-
     def __init__(self):
         super().__init__()
 

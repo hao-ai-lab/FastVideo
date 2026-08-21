@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """Single-generator FastAPI + WebSocket streaming server."""
+
 from __future__ import annotations
 
 import asyncio
@@ -50,7 +51,8 @@ from fastvideo.entrypoints.streaming.session import (
     SessionState,
 )
 from fastvideo.entrypoints.streaming.session_init_image import (
-    persist_session_init_image, )
+    persist_session_init_image,
+)
 from fastvideo.entrypoints.streaming.gpu_pool import (
     GpuPool,
     InProcessGpuPool,
@@ -83,8 +85,7 @@ _ErrorCode = Literal[
 class _GeneratorProto(Protocol):
     """Subset of :class:`fastvideo.VideoGenerator` the server calls."""
 
-    def generate(self, request: GenerationRequest) -> Any:
-        ...
+    def generate(self, request: GenerationRequest) -> Any: ...
 
 
 @dataclass
@@ -112,8 +113,10 @@ def build_app(
     given.
     """
     if serve_config.streaming is None:
-        raise ValueError("ServeConfig.streaming must be set to launch the streaming "
-                         "server; got None. Add a `streaming:` block to your serve config.")
+        raise ValueError(
+            "ServeConfig.streaming must be set to launch the streaming "
+            "server; got None. Add a `streaming:` block to your serve config."
+        )
     streaming = serve_config.streaming
     if (generator is None) == (pool is None):
         raise ValueError("build_app requires exactly one of `generator` or `pool`")
@@ -138,11 +141,13 @@ def build_app(
 
     @app.get("/health")
     async def _health() -> JSONResponse:
-        return JSONResponse({
-            "status": "ok",
-            "sessions": len(state.sessions),
-            "stream_mode": streaming.stream_mode,
-        })
+        return JSONResponse(
+            {
+                "status": "ok",
+                "sessions": len(state.sessions),
+                "stream_mode": streaming.stream_mode,
+            }
+        )
 
     app.include_router(build_health_router(pool))
 
@@ -181,8 +186,10 @@ def run_server(serve_config: ServeConfig, *, generator: _GeneratorProto | None =
     serves ``build_app(...)`` via uvicorn.
     """
     if serve_config.streaming is None:
-        raise ValueError("ServeConfig.streaming must be set to launch the streaming server; "
-                         "got None. Add a `streaming:` block to your serve config.")
+        raise ValueError(
+            "ServeConfig.streaming must be set to launch the streaming server; "
+            "got None. Add a `streaming:` block to your serve config."
+        )
 
     import uvicorn
 
@@ -221,11 +228,13 @@ async def _handle_session(
             session.transition(SessionState.TIMEOUT)
         return
     session.gpu_id = assignment.gpu_id
-    await _send_json(websocket,
-                     GpuAssigned(
-                         gpu_id=assignment.gpu_id,
-                         session_timeout=state.sessions.session_timeout_seconds,
-                     ))
+    await _send_json(
+        websocket,
+        GpuAssigned(
+            gpu_id=assignment.gpu_id,
+            session_timeout=state.sessions.session_timeout_seconds,
+        ),
+    )
     session.transition(SessionState.ACTIVE)
     await _send_json(websocket, _build_stream_start(session, state))
 
@@ -337,12 +346,16 @@ async def _run_segment_loop(
         if isinstance(parsed, SnapshotState):
             snap = state.session_store.snapshot(session.id)
             if snap is None:
-                await _send_error(websocket,
-                                  "internal_error",
-                                  "no continuation state available for session",
-                                  retryable=False)
+                await _send_error(
+                    websocket, "internal_error", "no continuation state available for session", retryable=False
+                )
                 continue
-            await _send_json(websocket, ContinuationStateSnapshot(state={"kind": snap.kind, "payload": snap.payload}, ))
+            await _send_json(
+                websocket,
+                ContinuationStateSnapshot(
+                    state={"kind": snap.kind, "payload": snap.payload},
+                ),
+            )
             continue
 
         if isinstance(parsed, SegmentPromptSource):
@@ -368,7 +381,8 @@ async def _run_segment(
             segment_idx=segment_idx,
             prompt=message.prompt,
             total_steps=request.sampling.num_inference_steps,
-        ))
+        ),
+    )
 
     start = time.perf_counter()
     # TODO: pool.run() runs to completion even if the client disconnects
@@ -394,12 +408,15 @@ async def _run_segment(
     # terminal StepComplete so observability wiring still sees the
     # segment finish.
     total = request.sampling.num_inference_steps
-    await _send_json(websocket, StepComplete(
-        segment_idx=segment_idx,
-        step=total,
-        total_steps=total,
-        stage="denoise",
-    ))
+    await _send_json(
+        websocket,
+        StepComplete(
+            segment_idx=segment_idx,
+            step=total,
+            total_steps=total,
+            stage="denoise",
+        ),
+    )
 
     encoder = FragmentedMP4Encoder(
         width=request.sampling.width,
@@ -412,10 +429,13 @@ async def _run_segment(
         init_sent = False
         async for chunk in encoder.encode(frames):
             if chunk.kind == "init":
-                await _send_json(websocket, MediaInit(
-                    segment_idx=segment_idx,
-                    stream_id=chunk.stream_id,
-                ))
+                await _send_json(
+                    websocket,
+                    MediaInit(
+                        segment_idx=segment_idx,
+                        stream_id=chunk.stream_id,
+                    ),
+                )
                 init_sent = True
             await websocket.send_bytes(chunk.data)
             if init_sent and chunk.kind == "media":
@@ -428,7 +448,8 @@ async def _run_segment(
             stream_id=encoder.stream_id,
             chunks=chunks_relayed,
             duration_ms=float(request.sampling.num_frames) / request.sampling.fps * 1000.0,
-        ))
+        ),
+    )
 
     new_state = _extract_state(result)
     if new_state is not None:
@@ -445,7 +466,8 @@ async def _run_segment(
             segment_idx=segment_idx,
             generation_time_ms=elapsed_ms,
             e2e_latency_ms=elapsed_ms,
-        ))
+        ),
+    )
 
 
 def _build_stream_start(
@@ -471,27 +493,27 @@ def _build_generation_request(
     # preset-selected sampling knobs; override with per-message values.
     base = state.serve_config.default_request
     sampling_kwargs: dict[str, Any] = {
-        "num_videos_per_prompt":
-        base.sampling.num_videos_per_prompt,
-        "seed":
-        message.seed if message.seed is not None else base.sampling.seed,
-        "num_frames":
-        base.sampling.num_frames,
-        "height":
-        base.sampling.height,
-        "width":
-        base.sampling.width,
-        "fps":
-        base.sampling.fps,
-        "num_inference_steps":
-        (message.num_inference_steps if message.num_inference_steps is not None else base.sampling.num_inference_steps),
-        "guidance_scale":
-        (message.guidance_scale if message.guidance_scale is not None else base.sampling.guidance_scale),
+        "num_videos_per_prompt": base.sampling.num_videos_per_prompt,
+        "seed": message.seed if message.seed is not None else base.sampling.seed,
+        "num_frames": base.sampling.num_frames,
+        "height": base.sampling.height,
+        "width": base.sampling.width,
+        "fps": base.sampling.fps,
+        "num_inference_steps": (
+            message.num_inference_steps
+            if message.num_inference_steps is not None
+            else base.sampling.num_inference_steps
+        ),
+        "guidance_scale": (
+            message.guidance_scale if message.guidance_scale is not None else base.sampling.guidance_scale
+        ),
     }
     request = GenerationRequest(
         prompt=message.prompt,
         negative_prompt=message.negative_prompt or base.negative_prompt,
-        inputs=InputConfig(image_path=session.metadata.get("session_init_image"), ),
+        inputs=InputConfig(
+            image_path=session.metadata.get("session_init_image"),
+        ),
         sampling=SamplingConfig(**sampling_kwargs),
         output=OutputConfig(save_video=False, return_frames=True, return_state=True),
         state=session.continuation_state,
@@ -540,7 +562,7 @@ def _extract_state(result: Any) -> ContinuationState | None:
 
 
 async def _send_json(websocket: WebSocket, message: Any) -> None:
-    payload = (message.model_dump(mode="json", exclude_none=True) if hasattr(message, "model_dump") else message)
+    payload = message.model_dump(mode="json", exclude_none=True) if hasattr(message, "model_dump") else message
     await websocket.send_json(payload)
 
 

@@ -2,7 +2,8 @@
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
-    FlowMatchEulerDiscreteScheduler, )
+    FlowMatchEulerDiscreteScheduler,
+)
 from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
 from fastvideo.pipelines.basic.glm_image.stages import (
     GlmImageBeforeDenoisingStage,

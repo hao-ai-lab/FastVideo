@@ -118,11 +118,12 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
             else:
                 if reference.frames is None:
                     raise ValueError("MiniMax-H3 reference video frames are missing.")
-                frames = reference.frames[:trim_reference_num_frames(reference.frames.shape[0])]
+                frames = reference.frames[: trim_reference_num_frames(reference.frames.shape[0])]
                 pixels = torch.from_numpy(np.ascontiguousarray(frames)).permute(3, 0, 1, 2)[None]
                 posterior = self.vae.encode_pixels(pixels).latent_dist
-                latents = self.vae.normalize_latents(_sample_visual_posterior(posterior).to(
-                    torch.float16).float()).cpu()
+                latents = self.vae.normalize_latents(
+                    _sample_visual_posterior(posterior).to(torch.float16).float()
+                ).cpu()
             reference.num_latent_frames = int(latents.shape[2])
             reference.latent_height = int(latents.shape[3])
             reference.latent_width = int(latents.shape[4])
@@ -164,14 +165,16 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
             clean_rows: list[torch.Tensor] = []
             for image in keyframes:
                 clean_rows.append(
-                    patchify_video_latents(self._encode_keyframe_latents(image, vae_device),
-                                           self.transformer.patch_size))
+                    patchify_video_latents(
+                        self._encode_keyframe_latents(image, vae_device), self.transformer.patch_size
+                    )
+                )
         finally:
             if fastvideo_args.vae_cpu_offload:
                 self.vae.to("cpu")
 
         _, _, latent_height, latent_width = _video_geometry(batch)
-        shapes = ((1, latent_height, latent_width), ) * len(keyframes)
+        shapes = ((1, latent_height, latent_width),) * len(keyframes)
         noise = keyframe_condition_noise(
             shapes,
             self.transformer.patch_size,
@@ -218,8 +221,11 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
 
         if not video_rows:
             raise ValueError("MiniMax-H3 Ref2VA requires at least one visual reference.")
-        shapes = tuple((reference.num_latent_frames, reference.latent_height, reference.latent_width)
-                       for reference in references if reference.media_type != "audio")
+        shapes = tuple(
+            (reference.num_latent_frames, reference.latent_height, reference.latent_width)
+            for reference in references
+            if reference.media_type != "audio"
+        )
         noise = keyframe_condition_noise(
             shapes,
             self.transformer.patch_size,
@@ -293,10 +299,13 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
                 dtype=torch.float32,
             )
         elif tuple(video_noise.shape) != expected_video_shape:
-            raise ValueError(f"MiniMax-H3 injected video latents must have shape {expected_video_shape}, "
-                             f"got {tuple(video_noise.shape)}.")
-        video_rows = patchify_video_latents(video_noise.to(device=device, dtype=torch.float32),
-                                            self.transformer.patch_size)
+            raise ValueError(
+                f"MiniMax-H3 injected video latents must have shape {expected_video_shape}, "
+                f"got {tuple(video_noise.shape)}."
+            )
+        video_rows = patchify_video_latents(
+            video_noise.to(device=device, dtype=torch.float32), self.transformer.patch_size
+        )
 
         num_audio_latents = layout.num_audio_latents
         expected_audio_shape = (MINIMAX_H3_AUDIO_CHANNELS, self.audio_vae.latent_channels, num_audio_latents)
@@ -309,11 +318,15 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
             )
         else:
             if tuple(audio_noise.shape) != expected_audio_shape:
-                raise ValueError(f"MiniMax-H3 injected audio latents must have shape {expected_audio_shape}, "
-                                 f"got {tuple(audio_noise.shape)}.")
-            audio_rows = audio_noise.to(device=device,
-                                        dtype=torch.float32).permute(0, 2,
-                                                                     1).reshape(-1, self.audio_vae.latent_channels)
+                raise ValueError(
+                    f"MiniMax-H3 injected audio latents must have shape {expected_audio_shape}, "
+                    f"got {tuple(audio_noise.shape)}."
+                )
+            audio_rows = (
+                audio_noise.to(device=device, dtype=torch.float32)
+                .permute(0, 2, 1)
+                .reshape(-1, self.audio_vae.latent_channels)
+            )
 
         if condition_video is not None:
             video_rows = torch.cat((condition_video.to(device), video_rows))

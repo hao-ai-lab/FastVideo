@@ -75,7 +75,6 @@ def media_to_video_array(media: torch.Tensor) -> Any:
     if media.ndim == 3:
         media = media.unsqueeze(1)
     if media.ndim != 4:
-        raise ValueError("media must have shape [C, T, H, W] or [C, H, W], "
-                         f"got {tuple(media.shape)}")
+        raise ValueError(f"media must have shape [C, T, H, W] or [C, H, W], got {tuple(media.shape)}")
     video = (media.detach().float().clamp(0, 1) * 255).round().to(torch.uint8)
     return video.permute(1, 0, 2, 3).contiguous().cpu().numpy()

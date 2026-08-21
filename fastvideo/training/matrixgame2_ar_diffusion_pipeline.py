@@ -14,20 +14,22 @@ from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import (
-    SelfForcingFlowMatchScheduler, )
+    SelfForcingFlowMatchScheduler,
+)
 from fastvideo.pipelines.basic.matrixgame2.matrixgame2_causal_dmd_pipeline import (
-    MatrixGame2CausalDMDPipeline, )
+    MatrixGame2CausalDMDPipeline,
+)
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, TrainingBatch
 from fastvideo.training.training_pipeline import TrainingPipeline
 from fastvideo.training.training_utils import (
-    clip_grad_norm_while_handling_failing_dtensor_cases, )
+    clip_grad_norm_while_handling_failing_dtensor_cases,
+)
 from fastvideo.utils import shallow_asdict
 
 logger = init_logger(__name__)
 
 
 class MatrixGame2ARDiffusionPipeline(TrainingPipeline):
-
     _required_config_modules = ["scheduler", "transformer", "vae"]
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
@@ -54,12 +56,17 @@ class MatrixGame2ARDiffusionPipeline(TrainingPipeline):
         transformer_num_frame_per_block = getattr(self.transformer, "num_frame_per_block", None)
         requested_num_frame_per_block = getattr(training_args, "num_frame_per_block", None)
 
-        if (transformer_num_frame_per_block is not None and requested_num_frame_per_block is not None
-                and transformer_num_frame_per_block != requested_num_frame_per_block):
-            raise ValueError("num_frame_per_block mismatch between loaded transformer and "
-                             "training args: "
-                             f"transformer={transformer_num_frame_per_block}, "
-                             f"training_args={requested_num_frame_per_block}")
+        if (
+            transformer_num_frame_per_block is not None
+            and requested_num_frame_per_block is not None
+            and transformer_num_frame_per_block != requested_num_frame_per_block
+        ):
+            raise ValueError(
+                "num_frame_per_block mismatch between loaded transformer and "
+                "training args: "
+                f"transformer={transformer_num_frame_per_block}, "
+                f"training_args={requested_num_frame_per_block}"
+            )
 
         if transformer_num_frame_per_block is not None:
             return int(transformer_num_frame_per_block)
@@ -98,12 +105,11 @@ class MatrixGame2ARDiffusionPipeline(TrainingPipeline):
         step_size = 1000 // num_val_steps
         args_copy.pipeline_config.dmd_denoising_steps = list(range(1000, 0, -step_size))
         args_copy.pipeline_config.warp_denoising_step = True
-        training_args.pipeline_config.dmd_denoising_steps = (args_copy.pipeline_config.dmd_denoising_steps)
+        training_args.pipeline_config.dmd_denoising_steps = args_copy.pipeline_config.dmd_denoising_steps
         training_args.pipeline_config.warp_denoising_step = True
 
         logger.info(
-            "Validation: %d-step Matrix-Game 2.0 causal denoising, "
-            "dmd_denoising_steps has %d entries",
+            "Validation: %d-step Matrix-Game 2.0 causal denoising, dmd_denoising_steps has %d entries",
             num_val_steps,
             len(args_copy.pipeline_config.dmd_denoising_steps),
         )
@@ -168,10 +174,10 @@ class MatrixGame2ARDiffusionPipeline(TrainingPipeline):
             batch = next(self.train_loader_iter)
 
         latents = batch["vae_latent"]
-        latents = latents[:, :, :self.training_args.num_latent_t]
+        latents = latents[:, :, : self.training_args.num_latent_t]
         clip_features = batch["clip_feature"]
         image_latents = batch["first_frame_latent"]
-        image_latents = image_latents[:, :, :self.training_args.num_latent_t]
+        image_latents = image_latents[:, :, : self.training_args.num_latent_t]
         pil_image = batch["pil_image"]
         infos = batch["info_list"]
 
@@ -198,12 +204,13 @@ class MatrixGame2ARDiffusionPipeline(TrainingPipeline):
         if training_batch.keyboard_cond is not None:
             assert training_batch.keyboard_cond.shape[1] >= expected_num_frames, (
                 f"keyboard_cond has {training_batch.keyboard_cond.shape[1]} "
-                f"frames but need at least {expected_num_frames}")
+                f"frames but need at least {expected_num_frames}"
+            )
             training_batch.keyboard_cond = training_batch.keyboard_cond[:, :expected_num_frames]
         if training_batch.mouse_cond is not None:
             assert training_batch.mouse_cond.shape[1] >= expected_num_frames, (
-                f"mouse_cond has {training_batch.mouse_cond.shape[1]} frames "
-                f"but need at least {expected_num_frames}")
+                f"mouse_cond has {training_batch.mouse_cond.shape[1]} frames but need at least {expected_num_frames}"
+            )
             training_batch.mouse_cond = training_batch.mouse_cond[:, :expected_num_frames]
 
         return training_batch
@@ -231,7 +238,7 @@ class MatrixGame2ARDiffusionPipeline(TrainingPipeline):
             device=latents_btchw.device,
             dtype=latents_btchw.dtype,
         )
-        if (self.training_args.sp_size > 1 and self.sp_group is not None and hasattr(self.sp_group, "broadcast")):
+        if self.training_args.sp_size > 1 and self.sp_group is not None and hasattr(self.sp_group, "broadcast"):
             self.sp_group.broadcast(timesteps, src=0)
             self.sp_group.broadcast(noise, src=0)
 
@@ -293,7 +300,7 @@ class MatrixGame2ARDiffusionPipeline(TrainingPipeline):
 
         timesteps = training_batch.timesteps
         assert isinstance(timesteps, torch.Tensor)
-        assert timesteps.ndim == 2, (f"Expected per-frame timesteps [B, T], got shape {timesteps.shape}")
+        assert timesteps.ndim == 2, f"Expected per-frame timesteps [B, T], got shape {timesteps.shape}"
 
         training_batch.input_kwargs = {
             "hidden_states": training_batch.noisy_model_input,
@@ -314,16 +321,17 @@ class MatrixGame2ARDiffusionPipeline(TrainingPipeline):
         input_kwargs = training_batch.input_kwargs
 
         with set_forward_context(
-                current_timestep=training_batch.timesteps,
-                attn_metadata=None,
-                forward_batch=None,
+            current_timestep=training_batch.timesteps,
+            attn_metadata=None,
+            forward_batch=None,
         ):
             with torch.autocast("cuda", dtype=torch.bfloat16):
                 model_pred = self.transformer(**input_kwargs)
             model_pred_btchw = model_pred.permute(0, 2, 1, 3, 4)
 
-            training_target = training_batch._ar_training_target.to(model_pred_btchw.device,
-                                                                    dtype=model_pred_btchw.dtype)
+            training_target = training_batch._ar_training_target.to(
+                model_pred_btchw.device, dtype=model_pred_btchw.dtype
+            )
 
             per_frame_loss = F.mse_loss(
                 model_pred_btchw.float(),
@@ -331,8 +339,11 @@ class MatrixGame2ARDiffusionPipeline(TrainingPipeline):
                 reduction="none",
             ).mean(dim=(2, 3, 4))
             timesteps = training_batch.timesteps
-            weight = self.noise_scheduler.training_weight(timesteps.flatten(0, 1)).to(per_frame_loss.dtype).reshape(
-                per_frame_loss.shape)
+            weight = (
+                self.noise_scheduler.training_weight(timesteps.flatten(0, 1))
+                .to(per_frame_loss.dtype)
+                .reshape(per_frame_loss.shape)
+            )
             loss = (per_frame_loss * weight).mean()
             loss = loss / self.training_args.gradient_accumulation_steps
             loss.backward()
@@ -400,7 +411,7 @@ class MatrixGame2ARDiffusionPipeline(TrainingPipeline):
             sampling_param.width // 8,
         ]
         n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
-        temporal_compression_factor = (training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio)
+        temporal_compression_factor = training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
         num_frames = (training_args.num_latent_t - 1) * temporal_compression_factor + 1
         sampling_param.num_frames = num_frames
         batch = ForwardBatch(
@@ -413,13 +424,13 @@ class MatrixGame2ARDiffusionPipeline(TrainingPipeline):
         if "image" in validation_batch and validation_batch["image"] is not None:
             batch.pil_image = validation_batch["image"]
 
-        if ("keyboard_cond" in validation_batch and validation_batch["keyboard_cond"] is not None):
+        if "keyboard_cond" in validation_batch and validation_batch["keyboard_cond"] is not None:
             keyboard_cond = validation_batch["keyboard_cond"]
             keyboard_cond = torch.tensor(keyboard_cond, dtype=torch.bfloat16)
             keyboard_cond = keyboard_cond.unsqueeze(0)
             batch.keyboard_cond = keyboard_cond
 
-        if ("mouse_cond" in validation_batch and validation_batch["mouse_cond"] is not None):
+        if "mouse_cond" in validation_batch and validation_batch["mouse_cond"] is not None:
             mouse_cond = validation_batch["mouse_cond"]
             mouse_cond = torch.tensor(mouse_cond, dtype=torch.bfloat16)
             mouse_cond = mouse_cond.unsqueeze(0)

@@ -25,14 +25,15 @@ from fastvideo.eval.metrics.base import BaseMetric
 from fastvideo.eval.registry import register
 from fastvideo.eval.types import MetricResult
 
-_SCENE_PROMPT = ("Describe the visual scene in this video, including the location, "
-                 "environment, objects, and overall setting. Be specific and use "
-                 "concrete descriptive words.")
+_SCENE_PROMPT = (
+    "Describe the visual scene in this video, including the location, "
+    "environment, objects, and overall setting. Be specific and use "
+    "concrete descriptive words."
+)
 
 
 @register("vbench.scene")
 class SceneMetric(BaseMetric):
-
     name = "vbench.scene"
     requires_reference = False
     higher_is_better = True
@@ -85,28 +86,22 @@ class SceneMetric(BaseMetric):
 
         conversation = [
             {
-                "role":
-                "system",
-                "content": [{
-                    "type":
-                    "text",
-                    "text": ("You are Qwen, a virtual human developed by the Qwen Team, "
-                             "Alibaba Group, capable of perceiving auditory and visual inputs.")
-                }],
-            },
-            {
-                "role":
-                "user",
+                "role": "system",
                 "content": [
                     {
-                        "type": "video",
-                        "video": video_path,
-                        "max_pixels": 401408
-                    },
-                    {
                         "type": "text",
-                        "text": _SCENE_PROMPT
-                    },
+                        "text": (
+                            "You are Qwen, a virtual human developed by the Qwen Team, "
+                            "Alibaba Group, capable of perceiving auditory and visual inputs."
+                        ),
+                    }
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "video", "video": video_path, "max_pixels": 401408},
+                    {"type": "text", "text": _SCENE_PROMPT},
                 ],
             },
         ]
@@ -135,8 +130,9 @@ class SceneMetric(BaseMetric):
                 thinker_max_new_tokens=512,
             )
 
-        decoded = self._processor.batch_decode(text_ids, skip_special_tokens=True,
-                                               clean_up_tokenization_spaces=False)[0]
+        decoded = self._processor.batch_decode(text_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[
+            0
+        ]
         return decoded.split("\nassistant\n")[-1].lower()
 
     @torch.no_grad()

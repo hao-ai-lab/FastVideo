@@ -57,16 +57,20 @@ def is_attn_qat_train_available() -> bool:
     return _get_attn_qat_train_attention() is not None
 
 
-def attn_qat_train(q_BLHD: torch.Tensor,
-                   k_BLHD: torch.Tensor,
-                   v_BLHD: torch.Tensor,
-                   is_causal: bool = False,
-                   sm_scale: float | None = None) -> torch.Tensor:
+def attn_qat_train(
+    q_BLHD: torch.Tensor,
+    k_BLHD: torch.Tensor,
+    v_BLHD: torch.Tensor,
+    is_causal: bool = False,
+    sm_scale: float | None = None,
+) -> torch.Tensor:
     attention = _get_attn_qat_train_attention()
     if attention is None:
         detail = f" Original import error: {_attn_qat_train_import_error}" if _attn_qat_train_import_error else ""
-        raise ImportError("ATTN_QAT_TRAIN requires FastVideo's fastvideo-kernel package. Install it or make "
-                          f"fastvideo-kernel/python importable.{detail}")
+        raise ImportError(
+            "ATTN_QAT_TRAIN requires FastVideo's fastvideo-kernel package. Install it or make "
+            f"fastvideo-kernel/python importable.{detail}"
+        )
 
     q_BHLD = q_BLHD.permute(0, 2, 1, 3).contiguous()
     k_BHLD = k_BLHD.permute(0, 2, 1, 3).contiguous()
@@ -85,7 +89,7 @@ def attn_qat_train(q_BLHD: torch.Tensor,
     use_high_prec_o = True
     smooth_q = False
     if sm_scale is None:
-        sm_scale = 1.0 / (q_BHLD.shape[-1]**0.5)
+        sm_scale = 1.0 / (q_BHLD.shape[-1] ** 0.5)
     use_global_sf_qkv = False
     use_global_sf_p = False
 
@@ -110,7 +114,6 @@ def attn_qat_train(q_BLHD: torch.Tensor,
 
 
 class AttnQatTrainBackend(AttentionBackend):
-
     accept_output_buffer: bool = True
 
     @staticmethod
@@ -135,7 +138,6 @@ class AttnQatTrainBackend(AttentionBackend):
 
 
 class AttnQatTrainImpl(AttentionImpl[AttentionMetadata]):
-
     def __init__(
         self,
         num_heads: int,
@@ -150,8 +152,10 @@ class AttnQatTrainImpl(AttentionImpl[AttentionMetadata]):
         self.softmax_scale = softmax_scale
         dropout_p = extra_impl_args.get("dropout_p", 0.0)
         if dropout_p > 0:
-            raise NotImplementedError(f"attn_qat_train does not support dropout (got dropout_p={dropout_p}). "
-                                      "The QAT training kernel applies no stochastic dropout.")
+            raise NotImplementedError(
+                f"attn_qat_train does not support dropout (got dropout_p={dropout_p}). "
+                "The QAT training kernel applies no stochastic dropout."
+            )
 
     def forward(
         self,

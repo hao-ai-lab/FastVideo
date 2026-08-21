@@ -68,8 +68,7 @@ def _validate_qkv(q: mx.array, k: mx.array, v: mx.array) -> tuple[int, int, int,
         ValueError: If the tensors are not rank 4, do not have identical shapes, or have an empty sequence or head dimension.
     """
     if q.ndim != 4 or k.ndim != 4 or v.ndim != 4:
-        raise ValueError(f"q/k/v must be rank-4 (B, H, S, D); got shapes "
-                         f"{q.shape}, {k.shape}, {v.shape}")
+        raise ValueError(f"q/k/v must be rank-4 (B, H, S, D); got shapes {q.shape}, {k.shape}, {v.shape}")
     b, h, s, d = q.shape
     if k.shape != (b, h, s, d) or v.shape != (b, h, s, d):
         raise ValueError(f"q/k/v shapes must match exactly; got q={q.shape}, k={k.shape}, v={v.shape}")

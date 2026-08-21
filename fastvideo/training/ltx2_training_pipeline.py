@@ -6,7 +6,7 @@ from pathlib import Path
 import torch
 import torch.distributed as dist
 
-from fastvideo.dataset import (build_ltx2_precomputed_dataloader, build_parquet_map_style_dataloader)
+from fastvideo.dataset import build_ltx2_precomputed_dataloader, build_parquet_map_style_dataloader
 from fastvideo.dataset.dataloader.schema import pyarrow_schema_text_only
 from fastvideo.distributed import get_local_torch_device, get_sp_group, get_world_group
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
@@ -16,8 +16,8 @@ from fastvideo.models.dits.ltx2 import VideoLatentShape
 from fastvideo.pipelines.basic.ltx2.ltx2_pipeline import LTX2Pipeline
 from fastvideo.pipelines.pipeline_batch_info import TrainingBatch
 from fastvideo.training.training_pipeline import TrainingPipeline
-from fastvideo.training.trackers import (DummyTracker, TrackerType, Trackers, initialize_trackers)
-from fastvideo.training.training_utils import (clip_grad_norm_while_handling_failing_dtensor_cases, get_scheduler)
+from fastvideo.training.trackers import DummyTracker, TrackerType, Trackers, initialize_trackers
+from fastvideo.training.training_utils import clip_grad_norm_while_handling_failing_dtensor_cases, get_scheduler
 from fastvideo.utils import set_random_seed
 
 logger = init_logger(__name__)
@@ -67,9 +67,11 @@ class LTX2TrainingPipeline(TrainingPipeline):
         self.transformer.train()
 
         if training_args.enable_gradient_checkpointing_type is not None:
-            from fastvideo.training.activation_checkpoint import (apply_activation_checkpointing)
+            from fastvideo.training.activation_checkpoint import apply_activation_checkpointing
+
             self.transformer.model = apply_activation_checkpointing(
-                self.transformer.model, checkpointing_type=training_args.enable_gradient_checkpointing_type)
+                self.transformer.model, checkpointing_type=training_args.enable_gradient_checkpointing_type
+            )
 
         self.set_trainable()
         params_to_optimize = list(filter(lambda p: p.requires_grad, self.transformer.parameters()))
@@ -101,20 +103,20 @@ class LTX2TrainingPipeline(TrainingPipeline):
         if self._has_precomputed_pt_data(training_args.data_path):
             data_sources = self._get_ltx2_data_sources(training_args.data_path)
             self.with_audio = "audio_latents" in data_sources
-            self.train_dataset, self.train_dataloader = (build_ltx2_precomputed_dataloader(
+            self.train_dataset, self.train_dataloader = build_ltx2_precomputed_dataloader(
                 training_args.data_path,
                 training_args.train_batch_size,
                 num_data_workers=training_args.dataloader_num_workers,
                 data_sources=data_sources,
                 drop_last=True,
                 seed=self.seed,
-            ))
+            )
             self._use_parquet_data = False
             logger.info("Using precomputed .pt data")
         else:
-            text_padding_length = (training_args.pipeline_config.text_encoder_configs[0].arch_config.text_len)
+            text_padding_length = training_args.pipeline_config.text_encoder_configs[0].arch_config.text_len
             self.with_audio = False
-            self.train_dataset, self.train_dataloader = (build_parquet_map_style_dataloader(
+            self.train_dataset, self.train_dataloader = build_parquet_map_style_dataloader(
                 training_args.data_path,
                 training_args.train_batch_size,
                 num_data_workers=training_args.dataloader_num_workers,
@@ -123,12 +125,13 @@ class LTX2TrainingPipeline(TrainingPipeline):
                 drop_last=True,
                 text_padding_length=text_padding_length,
                 seed=self.seed,
-            ))
+            )
             self._use_parquet_data = True
             logger.info("No precomputed .pt data found, using parquet data")
 
-        self.num_update_steps_per_epoch = max(1,
-                                              len(self.train_dataloader) // training_args.gradient_accumulation_steps)
+        self.num_update_steps_per_epoch = max(
+            1, len(self.train_dataloader) // training_args.gradient_accumulation_steps
+        )
         self.num_train_epochs = max(1, training_args.max_train_steps // self.num_update_steps_per_epoch)
         self.current_epoch = 0
 
@@ -145,13 +148,17 @@ class LTX2TrainingPipeline(TrainingPipeline):
         tracker_config = training_args.__dict__ if trackers else None
         tracker_run_name = training_args.wandb_run_name or None
         project = training_args.tracker_project_name or "fastvideo"
-        self.tracker = initialize_trackers(
-            trackers,
-            experiment_name=project,
-            config=tracker_config,
-            log_dir=tracker_log_dir,
-            run_name=tracker_run_name,
-        ) if trackers else DummyTracker()
+        self.tracker = (
+            initialize_trackers(
+                trackers,
+                experiment_name=project,
+                config=tracker_config,
+                log_dir=tracker_log_dir,
+                run_name=tracker_run_name,
+            )
+            if trackers
+            else DummyTracker()
+        )
 
     def initialize_validation_pipeline(self, training_args: TrainingArgs):
         logger.info("Initializing LTX-2 validation pipeline...")
@@ -184,8 +191,12 @@ class LTX2TrainingPipeline(TrainingPipeline):
             data_root = data_root / ".precomputed"
         latents_dir = data_root / "latents"
         conditions_dir = data_root / "conditions"
-        return (latents_dir.exists() and conditions_dir.exists() and any(latents_dir.rglob("*.pt"))
-                and any(conditions_dir.rglob("*.pt")))
+        return (
+            latents_dir.exists()
+            and conditions_dir.exists()
+            and any(latents_dir.rglob("*.pt"))
+            and any(conditions_dir.rglob("*.pt"))
+        )
 
     def _get_ltx2_data_sources(self, data_path: str) -> dict[str, str]:
         data_root = Path(data_path).expanduser().resolve()
@@ -223,23 +234,26 @@ class LTX2TrainingPipeline(TrainingPipeline):
         prompt_embeds = batch["text_embedding"].to(device)
         prompt_attention_mask = batch["text_attention_mask"].to(device, dtype=torch.int64)
 
-        video_embeds, audio_embeds, attention_mask = (self.text_encoder.run_connectors(
-            prompt_embeds, prompt_attention_mask))
+        video_embeds, audio_embeds, attention_mask = self.text_encoder.run_connectors(
+            prompt_embeds, prompt_attention_mask
+        )
 
         # Parquet text-only data has no latents; create zeros.
         batch_size = video_embeds.shape[0]
-        vae_cfg = (self.training_args.pipeline_config.vae_config.arch_config)
+        vae_cfg = self.training_args.pipeline_config.vae_config.arch_config
         num_channels = vae_cfg.z_dim
         scr = vae_cfg.spatial_compression_ratio
         latent_h = self.training_args.num_height // scr
         latent_w = self.training_args.num_width // scr
-        latents = torch.zeros(batch_size,
-                              num_channels,
-                              self.training_args.num_latent_t,
-                              latent_h,
-                              latent_w,
-                              device=device,
-                              dtype=torch.bfloat16)
+        latents = torch.zeros(
+            batch_size,
+            num_channels,
+            self.training_args.num_latent_t,
+            latent_h,
+            latent_w,
+            device=device,
+            dtype=torch.bfloat16,
+        )
 
         training_batch.latents = latents
         training_batch.encoder_hidden_states = video_embeds.to(device, dtype=torch.bfloat16)
@@ -255,10 +269,13 @@ class LTX2TrainingPipeline(TrainingPipeline):
     ) -> TrainingBatch:
         """Extract training data from a precomputed .pt batch."""
         latents = batch["latents"]["latents"].to(get_local_torch_device(), dtype=torch.bfloat16)
-        latents = latents[:, :, :self.training_args.num_latent_t]
+        latents = latents[:, :, : self.training_args.num_latent_t]
         conditions = batch["conditions"]
-        if ("video_prompt_embeds" in conditions and "audio_prompt_embeds" in conditions
-                and "prompt_attention_mask" in conditions):
+        if (
+            "video_prompt_embeds" in conditions
+            and "audio_prompt_embeds" in conditions
+            and "prompt_attention_mask" in conditions
+        ):
             video_embeds = conditions["video_prompt_embeds"].to(get_local_torch_device())
             audio_embeds = conditions["audio_prompt_embeds"].to(get_local_torch_device())
             attention_mask = conditions["prompt_attention_mask"].to(get_local_torch_device(), dtype=torch.int64)
@@ -266,8 +283,9 @@ class LTX2TrainingPipeline(TrainingPipeline):
             prompt_embeds = conditions["prompt_embeds"].to(get_local_torch_device())
             prompt_attention_mask = conditions["prompt_attention_mask"].to(get_local_torch_device(), dtype=torch.int64)
 
-            video_embeds, audio_embeds, attention_mask = (self.text_encoder.run_connectors(
-                prompt_embeds, prompt_attention_mask))
+            video_embeds, audio_embeds, attention_mask = self.text_encoder.run_connectors(
+                prompt_embeds, prompt_attention_mask
+            )
 
         training_batch.latents = latents.to(get_local_torch_device(), dtype=torch.bfloat16)
         training_batch.encoder_hidden_states = video_embeds.to(get_local_torch_device(), dtype=torch.bfloat16)
@@ -276,9 +294,8 @@ class LTX2TrainingPipeline(TrainingPipeline):
         if self.with_audio and "audio_latents" in batch:
             audio_latents = batch["audio_latents"]["latents"].to(get_local_torch_device(), dtype=torch.bfloat16)
             training_batch.audio_latents = audio_latents
-            training_batch.audio_encoder_hidden_states = (audio_embeds.to(get_local_torch_device(),
-                                                                          dtype=torch.bfloat16))
-            training_batch.audio_encoder_attention_mask = (attention_mask.to(get_local_torch_device()))
+            training_batch.audio_encoder_hidden_states = audio_embeds.to(get_local_torch_device(), dtype=torch.bfloat16)
+            training_batch.audio_encoder_attention_mask = attention_mask.to(get_local_torch_device())
 
         idxs = batch.get("idx")
         if idxs is not None and torch.is_tensor(idxs):
@@ -291,19 +308,23 @@ class LTX2TrainingPipeline(TrainingPipeline):
     def _normalize_dit_input(self, training_batch: TrainingBatch) -> TrainingBatch:
         return training_batch
 
-    def _sample_sigmas(self, batch_size: int, seq_length: int, device: torch.device,
-                       dtype: torch.dtype) -> torch.Tensor:
+    def _sample_sigmas(
+        self, batch_size: int, seq_length: int, device: torch.device, dtype: torch.dtype
+    ) -> torch.Tensor:
         min_tokens = 1024
         max_tokens = 4096
         min_shift = 0.95
         max_shift = 2.05
         slope = (max_shift - min_shift) / (max_tokens - min_tokens)
         shift = slope * seq_length + (min_shift - slope * min_tokens)
-        normal_samples = torch.randn(
-            (batch_size, ),
-            generator=self.noise_random_generator,
-            device="cpu",
-        ) + shift
+        normal_samples = (
+            torch.randn(
+                (batch_size,),
+                generator=self.noise_random_generator,
+                device="cpu",
+            )
+            + shift
+        )
         return torch.sigmoid(normal_samples).to(device=device, dtype=dtype)
 
     def _prepare_dit_inputs(self, training_batch: TrainingBatch) -> TrainingBatch:
@@ -324,10 +345,14 @@ class LTX2TrainingPipeline(TrainingPipeline):
 
         conditioning_mask = None
         first_frame_p = self.training_args.ltx2_first_frame_conditioning_p
-        if (first_frame_p > 0 and torch.rand(
+        if (
+            first_frame_p > 0
+            and torch.rand(
                 1,
                 generator=self.noise_random_generator,
-        ).item() < first_frame_p):
+            ).item()
+            < first_frame_p
+        ):
             conditioning_mask = torch.zeros(
                 (batch_size, 1, latents.shape[2], latents.shape[3], latents.shape[4]),
                 dtype=torch.bool,
@@ -360,10 +385,12 @@ class LTX2TrainingPipeline(TrainingPipeline):
         training_batch.conditioning_mask = conditioning_mask
         if hasattr(training_batch, "audio_latents") and training_batch.audio_latents is not None:
             audio_latents = training_batch.audio_latents
-            audio_noise = torch.randn(audio_latents.shape,
-                                      generator=self.noise_gen_cuda,
-                                      device=audio_latents.device,
-                                      dtype=audio_latents.dtype)
+            audio_noise = torch.randn(
+                audio_latents.shape,
+                generator=self.noise_gen_cuda,
+                device=audio_latents.device,
+                dtype=audio_latents.dtype,
+            )
             audio_sigmas_expanded = sigmas.view(-1, 1, 1, 1)
             audio_noisy = (1.0 - audio_sigmas_expanded) * audio_latents + (audio_sigmas_expanded * audio_noise)
             audio_timesteps = sigmas.view(-1, 1).expand(batch_size, audio_latents.shape[2])
@@ -388,21 +415,20 @@ class LTX2TrainingPipeline(TrainingPipeline):
             "return_dict": False,
         }
         if training_batch.audio_noisy_model_input is not None:
-            training_batch.input_kwargs.update({
-                "audio_hidden_states":
-                training_batch.audio_noisy_model_input,
-                "audio_encoder_hidden_states":
-                training_batch.audio_encoder_hidden_states,
-                "audio_timestep":
-                training_batch.audio_timesteps.to(get_local_torch_device(), dtype=torch.bfloat16),
-                "audio_encoder_attention_mask":
-                training_batch.audio_encoder_attention_mask,
-            })
+            training_batch.input_kwargs.update(
+                {
+                    "audio_hidden_states": training_batch.audio_noisy_model_input,
+                    "audio_encoder_hidden_states": training_batch.audio_encoder_hidden_states,
+                    "audio_timestep": training_batch.audio_timesteps.to(get_local_torch_device(), dtype=torch.bfloat16),
+                    "audio_encoder_attention_mask": training_batch.audio_encoder_attention_mask,
+                }
+            )
         return training_batch
 
-    def _masked_mse(self, pred: torch.Tensor, target: torch.Tensor,
-                    conditioning_mask: torch.Tensor | None) -> torch.Tensor:
-        loss = (pred.float() - target.float())**2
+    def _masked_mse(
+        self, pred: torch.Tensor, target: torch.Tensor, conditioning_mask: torch.Tensor | None
+    ) -> torch.Tensor:
+        loss = (pred.float() - target.float()) ** 2
         if conditioning_mask is None:
             return loss.mean()
         loss_mask = (~conditioning_mask).float()
@@ -421,8 +447,12 @@ class LTX2TrainingPipeline(TrainingPipeline):
         assert training_batch.noisy_model_input is not None
         assert training_batch.noise is not None
 
-        with self.tracker.timed("timing/forward_backward"), set_forward_context(
-                current_timestep=training_batch.current_timestep, attn_metadata=training_batch.attn_metadata):
+        with (
+            self.tracker.timed("timing/forward_backward"),
+            set_forward_context(
+                current_timestep=training_batch.current_timestep, attn_metadata=training_batch.attn_metadata
+            ),
+        ):
             with torch.autocast("cuda", dtype=training_batch.latents.dtype), torch.autograd.set_detect_anomaly(True):
                 outputs = self.transformer(**input_kwargs)
 
@@ -441,7 +471,7 @@ class LTX2TrainingPipeline(TrainingPipeline):
                 audio_sigmas = training_batch.sigmas.view(-1, 1, 1, 1)
                 audio_pred_velocity = (training_batch.audio_noisy_model_input - audio_denoised) / audio_sigmas
                 audio_target = training_batch.audio_noise - training_batch.audio_latents
-                audio_loss = (audio_pred_velocity.float() - audio_target.float())**2
+                audio_loss = (audio_pred_velocity.float() - audio_target.float()) ** 2
                 loss = loss + audio_loss.mean()
                 logger.info("Audio loss: %s", audio_loss.mean())
             else:

@@ -1,19 +1,20 @@
 import torch
 from torch.distributed import ProcessGroup
 
-from fastvideo.distributed.device_communicators.base_device_communicator import (DeviceCommunicatorBase)
+from fastvideo.distributed.device_communicators.base_device_communicator import DeviceCommunicatorBase
 
 
 class NpuCommunicator(DeviceCommunicatorBase):
-
-    def __init__(self,
-                 cpu_group: ProcessGroup,
-                 device: torch.device | None = None,
-                 device_group: ProcessGroup | None = None,
-                 unique_name: str = ""):
+    def __init__(
+        self,
+        cpu_group: ProcessGroup,
+        device: torch.device | None = None,
+        device_group: ProcessGroup | None = None,
+        unique_name: str = "",
+    ):
         super().__init__(cpu_group, device, device_group, unique_name)
 
-        from fastvideo.distributed.device_communicators.pyhccl import (PyHcclCommunicator)
+        from fastvideo.distributed.device_communicators.pyhccl import PyHcclCommunicator
 
         self.pyhccl_comm: PyHcclCommunicator | None = None
         if self.world_size > 1:

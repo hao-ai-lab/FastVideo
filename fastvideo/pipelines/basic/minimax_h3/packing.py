@@ -74,7 +74,7 @@ def resolve_canvas_size(aspect_width: float, aspect_height: float) -> tuple[int,
         width, height = float(MINIMAX_H3_SHORT_EDGE), MINIMAX_H3_SHORT_EDGE / ratio
     area = width * height
     if area > MINIMAX_H3_MAX_PIXELS:
-        scale = (MINIMAX_H3_MAX_PIXELS / area)**0.5
+        scale = (MINIMAX_H3_MAX_PIXELS / area) ** 0.5
         width, height = width * scale, height * scale
     multiple = MINIMAX_H3_CANVAS_MULTIPLE
     return max(multiple, round(height / multiple) * multiple), max(multiple, round(width / multiple) * multiple)
@@ -170,8 +170,8 @@ def spatial_position_grid(dim: int, patch: int, sqrt_area: float) -> torch.Tenso
 def temporal_position_grid(num_latent_frames: int, origin: float) -> torch.Tensor:
     spans = torch.tensor(
         [
-            MINIMAX_H3_ROPE_FRAME_RESCALE *
-            MINIMAX_H3_ROPE_FRAMES_PER_LATENT[index % len(MINIMAX_H3_ROPE_FRAMES_PER_LATENT)]
+            MINIMAX_H3_ROPE_FRAME_RESCALE
+            * MINIMAX_H3_ROPE_FRAMES_PER_LATENT[index % len(MINIMAX_H3_ROPE_FRAMES_PER_LATENT)]
             for index in range(num_latent_frames)
         ],
         dtype=torch.float64,
@@ -183,18 +183,18 @@ def _temporal_position_span(num_latent_frames: int) -> float:
     # Preserve NumPy's pairwise summation: sequential torch summation diverges in the final ulp for longer clips.
     spans = np.ones(num_latent_frames, dtype=np.float64) * MINIMAX_H3_ROPE_FRAME_RESCALE
     for index, frames in enumerate(MINIMAX_H3_ROPE_FRAMES_PER_LATENT):
-        spans[index::len(MINIMAX_H3_ROPE_FRAMES_PER_LATENT)] *= frames
+        spans[index :: len(MINIMAX_H3_ROPE_FRAMES_PER_LATENT)] *= frames
     return float(spans.sum())
 
 
 def build_packed_sequence(
-        text_token_tags: torch.Tensor,
-        num_latent_frames: int,
-        latent_height: int,
-        latent_width: int,
-        num_audio_latents: int,
-        patch_size: tuple[int, int, int],
-        keyframe_anchors: tuple[str, ...] = (),
+    text_token_tags: torch.Tensor,
+    num_latent_frames: int,
+    latent_height: int,
+    latent_width: int,
+    num_audio_latents: int,
+    patch_size: tuple[int, int, int],
+    keyframe_anchors: tuple[str, ...] = (),
 ) -> MiniMaxH3PackedLayout:
     if text_token_tags.ndim != 1:
         raise ValueError(f"text_token_tags must be one-dimensional, got {tuple(text_token_tags.shape)}.")
@@ -222,16 +222,18 @@ def build_packed_sequence(
         if anchor == "first":
             anchor_time = float(num_text_tokens)
         elif anchor == "last":
-            anchor_time = (float(num_text_tokens) + _temporal_position_span(num_latent_frames) -
-                           MINIMAX_H3_ROPE_FRAME_RESCALE)
+            anchor_time = (
+                float(num_text_tokens) + _temporal_position_span(num_latent_frames) - MINIMAX_H3_ROPE_FRAME_RESCALE
+            )
         else:
             raise ValueError(f"A keyframe anchor must be 'first' or 'last', got {anchor!r}.")
         rows = slice(condition_start + index * rows_per_frame, condition_start + (index + 1) * rows_per_frame)
         position_ids[rows, 0] = anchor_time
         position_ids[rows, 1:] = frame_grid
 
-    _fill_audio_positions(position_ids, slice(audio_start, video_start), num_audio_latents, float(num_text_tokens),
-                          width_grid)
+    _fill_audio_positions(
+        position_ids, slice(audio_start, video_start), num_audio_latents, float(num_text_tokens), width_grid
+    )
 
     video_positions = torch.empty(num_latent_frames, rows_per_frame, 3, dtype=torch.float64)
     video_positions[:, :, 0] = temporal_position_grid(num_latent_frames, float(num_text_tokens))[:, None]
@@ -263,9 +265,11 @@ def build_packed_sequence(
 
 def _reference_temporal_span(num_latent_frames: int) -> float:
     """Advance the Ref2VA clock using its required sequential summation order."""
-    return sum(MINIMAX_H3_ROPE_FRAME_RESCALE *
-               MINIMAX_H3_ROPE_FRAMES_PER_LATENT[index % len(MINIMAX_H3_ROPE_FRAMES_PER_LATENT)]
-               for index in range(num_latent_frames))
+    return sum(
+        MINIMAX_H3_ROPE_FRAME_RESCALE
+        * MINIMAX_H3_ROPE_FRAMES_PER_LATENT[index % len(MINIMAX_H3_ROPE_FRAMES_PER_LATENT)]
+        for index in range(num_latent_frames)
+    )
 
 
 def _frame_position_grid(
@@ -290,10 +294,12 @@ def _fill_audio_positions(
 ) -> None:
     time = rotary_time + torch.arange(num_audio_latents, dtype=torch.float64)
     position_ids[rows, 0] = time.repeat(MINIMAX_H3_AUDIO_CHANNELS)
-    position_ids[rows, 2] = torch.cat([
-        torch.full((num_audio_latents, ), float(width_grid[0]), dtype=torch.float64),
-        torch.full((num_audio_latents, ), float(width_grid[-1]), dtype=torch.float64),
-    ])
+    position_ids[rows, 2] = torch.cat(
+        [
+            torch.full((num_audio_latents,), float(width_grid[0]), dtype=torch.float64),
+            torch.full((num_audio_latents,), float(width_grid[-1]), dtype=torch.float64),
+        ]
+    )
 
 
 def _num_video_rows(reference: MiniMaxH3PreparedReference, patch_size: tuple[int, int, int]) -> int:
@@ -303,8 +309,11 @@ def _num_video_rows(reference: MiniMaxH3PreparedReference, patch_size: tuple[int
         raise ValueError(f"Incomplete visual reference geometry: {geometry}.")
     if any(value % patch for value, patch in zip(geometry, patch_size, strict=True)):
         raise ValueError(f"Visual reference geometry {geometry} is not divisible by patch {patch_size}.")
-    return (reference.num_latent_frames // patch_t) * (reference.latent_height // patch_h) * (reference.latent_width //
-                                                                                              patch_w)
+    return (
+        (reference.num_latent_frames // patch_t)
+        * (reference.latent_height // patch_h)
+        * (reference.latent_width // patch_w)
+    )
 
 
 def build_ref2va_packed_sequence(
@@ -347,10 +356,16 @@ def build_ref2va_packed_sequence(
     num_target_video_rows = (num_latent_frames // patch_t) * (latent_height // patch_h) * (latent_width // patch_w)
     num_target_audio_rows = num_audio_latents * MINIMAX_H3_AUDIO_CHANNELS
     num_reference_video_rows = sum(visual_row_counts)
-    num_reference_audio_rows = sum(reference.num_audio_latents * MINIMAX_H3_AUDIO_CHANNELS for reference in references
-                                   if reference.has_audio)
-    sequence_length = (num_text_tokens + num_reference_video_rows + num_reference_audio_rows + num_target_audio_rows +
-                       num_target_video_rows)
+    num_reference_audio_rows = sum(
+        reference.num_audio_latents * MINIMAX_H3_AUDIO_CHANNELS for reference in references if reference.has_audio
+    )
+    sequence_length = (
+        num_text_tokens
+        + num_reference_video_rows
+        + num_reference_audio_rows
+        + num_target_audio_rows
+        + num_target_video_rows
+    )
 
     position_ids = torch.zeros(sequence_length, 3, dtype=torch.float64)
     position_ids[:num_text_tokens, 0] = torch.arange(num_text_tokens, dtype=torch.float64)
@@ -417,8 +432,9 @@ def build_ref2va_packed_sequence(
 
     audio_start = cursor
     video_start = audio_start + num_target_audio_rows
-    _fill_audio_positions(position_ids, slice(audio_start, video_start), num_audio_latents, rotary_time,
-                          target_width_grid)
+    _fill_audio_positions(
+        position_ids, slice(audio_start, video_start), num_audio_latents, rotary_time, target_width_grid
+    )
     frame_time = temporal_position_grid(num_latent_frames, rotary_time)
     position_ids[video_start:, 0] = frame_time.repeat_interleave(target_frame_grid.shape[0])
     position_ids[video_start:, 1:] = target_frame_grid.repeat(num_latent_frames // patch_t, 1)
@@ -456,10 +472,10 @@ def build_row_timesteps(
     condition_video_timestep: float,
     condition_audio_timestep: float,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    row_timesteps = torch.full((layout.sequence_length, ), video_timestep, dtype=torch.float32)
-    row_timesteps[layout.video_indices[:layout.num_condition_video_rows]] = condition_video_timestep
-    row_timesteps[layout.audio_indices[layout.num_condition_audio_rows:]] = audio_timestep
-    row_timesteps[layout.audio_indices[:layout.num_condition_audio_rows]] = condition_audio_timestep
+    row_timesteps = torch.full((layout.sequence_length,), video_timestep, dtype=torch.float32)
+    row_timesteps[layout.video_indices[: layout.num_condition_video_rows]] = condition_video_timestep
+    row_timesteps[layout.audio_indices[layout.num_condition_audio_rows :]] = audio_timestep
+    row_timesteps[layout.audio_indices[: layout.num_condition_audio_rows]] = condition_audio_timestep
     return torch.unique(row_timesteps, sorted=True, return_inverse=True)
 
 

@@ -36,10 +36,12 @@ def load_moge_model(
     try:
         from moge.model.v1 import MoGeModel
     except ImportError as exc:
-        raise ImportError("MoGe is required for GEN3C 3D cache conditioning. "
-                          "Install it with: uv pip install git+https://github.com/microsoft/MoGe.git. "
-                          "If import fails with libGL.so.1, install system deps: "
-                          "sudo apt-get install -y libgl1 libglib2.0-0 libsm6 libxext6 libxrender1") from exc
+        raise ImportError(
+            "MoGe is required for GEN3C 3D cache conditioning. "
+            "Install it with: uv pip install git+https://github.com/microsoft/MoGe.git. "
+            "If import fails with libGL.so.1, install system deps: "
+            "sudo apt-get install -y libgl1 libglib2.0-0 libsm6 libxext6 libxrender1"
+        ) from exc
 
     logger.info("Loading MoGe depth model: %s", model_name)
     model = MoGeModel.from_pretrained(model_name).to(device)
@@ -147,17 +149,24 @@ def _predict_depth_core(
     h_scale = target_h / depth_pred_h
     w_scale = target_w / depth_pred_w
 
-    depth_target = F.interpolate(depth_hw.unsqueeze(0).unsqueeze(0),
-                                 size=(target_h, target_w),
-                                 mode='bilinear',
-                                 align_corners=False).squeeze(0).squeeze(0)
+    depth_target = (
+        F.interpolate(
+            depth_hw.unsqueeze(0).unsqueeze(0), size=(target_h, target_w), mode="bilinear", align_corners=False
+        )
+        .squeeze(0)
+        .squeeze(0)
+    )
 
-    mask_target = F.interpolate(mask_hw.unsqueeze(0).unsqueeze(0).to(torch.float32),
-                                size=(target_h, target_w),
-                                mode='nearest').squeeze(0).squeeze(0).to(torch.bool)
+    mask_target = (
+        F.interpolate(mask_hw.unsqueeze(0).unsqueeze(0).to(torch.float32), size=(target_h, target_w), mode="nearest")
+        .squeeze(0)
+        .squeeze(0)
+        .to(torch.bool)
+    )
 
-    img_target = F.interpolate(img_tensor.unsqueeze(0), size=(target_h, target_w), mode='bilinear',
-                               align_corners=False).squeeze(0)
+    img_target = F.interpolate(
+        img_tensor.unsqueeze(0), size=(target_h, target_w), mode="bilinear", align_corners=False
+    ).squeeze(0)
 
     # Scale intrinsics for target resolution
     intrinsics_target = intrinsics_pixel.clone()

@@ -21,6 +21,7 @@ Preset *instances* are defined in pipeline-local ``presets.py`` files
 (e.g. ``fastvideo/pipelines/basic/wan/presets.py``) and registered
 explicitly from :func:`_register_presets` in ``fastvideo/registry.py``.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -103,9 +104,7 @@ def register_preset(preset: InferencePreset) -> None:
     """
     key = (preset.model_family, preset.name, preset.version)
     if key in _PRESET_REGISTRY:
-        raise ValueError(f"Duplicate preset registration: "
-                         f"model_family={key[0]!r}, name={key[1]!r}, "
-                         f"version={key[2]!r}")
+        raise ValueError(f"Duplicate preset registration: model_family={key[0]!r}, name={key[1]!r}, version={key[2]!r}")
     _PRESET_REGISTRY[key] = preset
 
 
@@ -146,7 +145,9 @@ def get_preset(
     return max(candidates, key=lambda p: p.version)
 
 
-def get_presets_for_family(model_family: str, ) -> list[InferencePreset]:
+def get_presets_for_family(
+    model_family: str,
+) -> list[InferencePreset]:
     """Return all presets registered for *model_family*."""
     return [prof for (fam, _n, _v), prof in _PRESET_REGISTRY.items() if fam == model_family]
 
@@ -175,8 +176,7 @@ def validate_stage_names(
         if stage_name not in valid_names:
             raise ConfigValidationError(
                 f"stage_overrides.{stage_name}",
-                f"unknown stage for preset {preset.name!r}; "
-                f"valid stages: {sorted(valid_names)}",
+                f"unknown stage for preset {preset.name!r}; valid stages: {sorted(valid_names)}",
             )
 
 
@@ -202,8 +202,7 @@ def validate_stage_overrides(
             if overrides:
                 raise ConfigValidationError(
                     f"stage_overrides.{stage_name}",
-                    f"stage {stage_name!r} does not accept "
-                    f"overrides",
+                    f"stage {stage_name!r} does not accept overrides",
                 )
             continue
         for key in overrides:

@@ -30,10 +30,12 @@ from fastvideo.logger import init_logger
 logger = init_logger(__name__)
 
 # Keep in lockstep with streaming PromptEnhancer defaults (enhance op).
-DEFAULT_ENHANCE_SYSTEM_PROMPT = ("You are a prompt enhancer for cinematic video generation. Given "
-                                 "a user prompt, produce an enhanced prompt that is more vivid, "
-                                 "specific, and concrete. Keep the subject intact; add lighting, "
-                                 "camera, and motion detail. Reply with just the enhanced prompt.")
+DEFAULT_ENHANCE_SYSTEM_PROMPT = (
+    "You are a prompt enhancer for cinematic video generation. Given "
+    "a user prompt, produce an enhanced prompt that is more vivid, "
+    "specific, and concrete. Keep the subject intact; add lighting, "
+    "camera, and motion detail. Reply with just the enhanced prompt."
+)
 
 # Small default that fits 16 GB Macs alongside the 1.3B DiT when the user
 # opts into mlx-lm. Override with --enhance-prompt-model.
@@ -150,16 +152,16 @@ def enhance_prompt_template(prompt: str) -> str:
     parts = [text.rstrip(".")]
 
     if not any(c in lower for c in _CAMERA_CUES):
-        parts.append("shot on a 35mm anamorphic lens, gentle handheld micro-movement, "
-                     "shallow depth of field")
+        parts.append("shot on a 35mm anamorphic lens, gentle handheld micro-movement, shallow depth of field")
     if not any(c in lower for c in _LIGHT_CUES):
-        parts.append("natural cinematic lighting with soft volumetric haze and subtle "
-                     "rim light separating subject from background")
+        parts.append(
+            "natural cinematic lighting with soft volumetric haze and subtle "
+            "rim light separating subject from background"
+        )
     if not any(c in lower for c in _MOTION_CUES):
         parts.append("smooth continuous motion with grounded physics")
 
-    parts.append("highly detailed, coherent temporal continuity, film grain, "
-                 "color graded like a contemporary drama")
+    parts.append("highly detailed, coherent temporal continuity, film grain, color graded like a contemporary drama")
     enhanced = ", ".join(parts)
     # Single trailing period; collapse duplicate whitespace.
     enhanced = re.sub(r"\s+", " ", enhanced).strip()
@@ -195,22 +197,17 @@ def enhance_prompt_mlx_lm(
     try:
         from mlx_lm import generate, load
     except ImportError as exc:  # pragma: no cover - optional dep
-        raise RuntimeError("mlx-lm is not installed. `uv pip install mlx-lm` or use "
-                           "--enhance-prompt-backend template.") from exc
+        raise RuntimeError(
+            "mlx-lm is not installed. `uv pip install mlx-lm` or use --enhance-prompt-backend template."
+        ) from exc
 
     text = _normalize_user_prompt(prompt)
     logger.info("[MLX enhance] loading %s", model)
     mlx_model, tokenizer = load(model)
 
     messages = [
-        {
-            "role": "system",
-            "content": system_prompt
-        },
-        {
-            "role": "user",
-            "content": text
-        },
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": text},
     ]
     if hasattr(tokenizer, "apply_chat_template"):
         chat = tokenizer.apply_chat_template(
@@ -249,14 +246,14 @@ def _clean_llm_output(raw: str, *, original: str) -> str:
     text = raw.strip()
     # Drop common prefatory phrases.
     for prefix in (
-            "enhanced prompt:",
-            "here's the enhanced prompt:",
-            "here is the enhanced prompt:",
-            "sure:",
-            "sure,",
+        "enhanced prompt:",
+        "here's the enhanced prompt:",
+        "here is the enhanced prompt:",
+        "sure:",
+        "sure,",
     ):
         if text.lower().startswith(prefix):
-            text = text[len(prefix):].strip()
+            text = text[len(prefix) :].strip()
     # Keep first non-empty paragraph only.
     para = text.split("\n\n")[0].strip()
     para = " ".join(para.split())
@@ -406,7 +403,8 @@ def load_or_enhance_prompt(
                         "model": result.model,
                     },
                     indent=2,
-                ))
+                )
+            )
         except OSError as exc:  # pragma: no cover - cache is best-effort
             logger.info("[MLX enhance] cache write skipped: %s", exc)
     return result

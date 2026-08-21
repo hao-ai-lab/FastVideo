@@ -20,7 +20,8 @@ from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import TransformerLoader, VAELoader
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
-    FlowMatchEulerDiscreteScheduler, )
+    FlowMatchEulerDiscreteScheduler,
+)
 from fastvideo.models.utils import pred_noise_to_pred_video
 from fastvideo.models.vaes.common import ParallelTiledVAE
 from fastvideo.models.vision_utils import normalize, numpy_to_pt, pil_to_numpy, resize
@@ -37,7 +38,6 @@ logger = init_logger(__name__)
 
 
 class Kandinsky5LatentPreparationStage(PipelineStage):
-
     def __init__(self, scheduler, transformer) -> None:
         super().__init__()
         self.scheduler = scheduler
@@ -61,9 +61,11 @@ class Kandinsky5LatentPreparationStage(PipelineStage):
         required_divisor_h = spatial_ratio * patch_size[1]
         required_divisor_w = spatial_ratio * patch_size[2]
         if height % required_divisor_h != 0 or width % required_divisor_w != 0:
-            raise ValueError(f"Kandinsky5 height must be divisible by {required_divisor_h} and width by "
-                             f"{required_divisor_w}; "
-                             f"got height={height}, width={width}.")
+            raise ValueError(
+                f"Kandinsky5 height must be divisible by {required_divisor_h} and width by "
+                f"{required_divisor_w}; "
+                f"got height={height}, width={width}."
+            )
 
         # NABLA sparse attention (Pro checkpoints) reshapes the post-patch grid
         # into 8x8 blocks; validate here instead of crashing mid-denoise after
@@ -73,9 +75,11 @@ class Kandinsky5LatentPreparationStage(PipelineStage):
             nabla_divisor_h = required_divisor_h * 8
             nabla_divisor_w = required_divisor_w * 8
             if height % nabla_divisor_h != 0 or width % nabla_divisor_w != 0:
-                raise ValueError(f"Kandinsky5 NABLA checkpoints require height divisible by {nabla_divisor_h} and "
-                                 f"width divisible by {nabla_divisor_w}; "
-                                 f"got height={height}, width={width}.")
+                raise ValueError(
+                    f"Kandinsky5 NABLA checkpoints require height divisible by {nabla_divisor_h} and "
+                    f"width divisible by {nabla_divisor_w}; "
+                    f"got height={height}, width={width}."
+                )
 
         if isinstance(batch.prompt, list):
             batch_size = len(batch.prompt)
@@ -115,8 +119,10 @@ class Kandinsky5LatentPreparationStage(PipelineStage):
             if visual_cond:
                 valid_shapes.append((*shape[:-1], num_channels * 2 + 1))
             if tuple(batch.latents.shape) not in valid_shapes:
-                raise ValueError(f"Provided latents shape {list(batch.latents.shape)} does not match expected "
-                                 f"Kandinsky5 latent shape(s): {[list(s) for s in valid_shapes]}.")
+                raise ValueError(
+                    f"Provided latents shape {list(batch.latents.shape)} does not match expected "
+                    f"Kandinsky5 latent shape(s): {[list(s) for s in valid_shapes]}."
+                )
             latents = batch.latents.to(device=device, dtype=dtype)
 
         if visual_cond and latents.shape[-1] == num_channels:
@@ -156,7 +162,6 @@ class Kandinsky5LatentPreparationStage(PipelineStage):
 
 
 class Kandinsky5DenoisingStage(PipelineStage):
-
     def __init__(self, transformer, scheduler) -> None:
         super().__init__()
         self.transformer = transformer
@@ -193,9 +198,11 @@ class Kandinsky5DenoisingStage(PipelineStage):
     # a different model family sharing the same process/env var) can
     # likewise legitimately resolve to something other than what was
     # requested.
-    _STRICT_BACKENDS = frozenset({
-        AttentionBackendEnum.ATTN_QAT_TRAIN,
-    })
+    _STRICT_BACKENDS = frozenset(
+        {
+            AttentionBackendEnum.ATTN_QAT_TRAIN,
+        }
+    )
 
     def _assert_local_attention_backend_engaged(self) -> None:
         """Guard against ``LocalAttention`` silently falling back to SDPA.
@@ -231,7 +238,8 @@ class Kandinsky5DenoisingStage(PipelineStage):
                 assert module.backend == expected, (
                     f"Kandinsky5 local attention resolved to backend {module.backend}, expected "
                     f"{expected} from FASTVIDEO_ATTENTION_BACKEND={backend_env}. This likely means "
-                    "LocalAttention's missing-forward-context guard silently fell back to SDPA.")
+                    "LocalAttention's missing-forward-context guard silently fell back to SDPA."
+                )
                 return
 
     def _resolve_target_dtype(self, fastvideo_args: FastVideoArgs) -> torch.dtype:
@@ -448,10 +456,15 @@ class Kandinsky5DenoisingStage(PipelineStage):
                         P=sparse_params["P"],
                         visual_shape=sparse_params["visual_shape"],
                     )
-                autocast_ctx = (torch.autocast(device_type="cuda", dtype=target_dtype, enabled=autocast_enabled)
-                                if device.type == "cuda" else contextlib.nullcontext())
-                with set_forward_context(current_timestep=i, attn_metadata=attn_metadata,
-                                         forward_batch=batch), autocast_ctx:
+                autocast_ctx = (
+                    torch.autocast(device_type="cuda", dtype=target_dtype, enabled=autocast_enabled)
+                    if device.type == "cuda"
+                    else contextlib.nullcontext()
+                )
+                with (
+                    set_forward_context(current_timestep=i, attn_metadata=attn_metadata, forward_batch=batch),
+                    autocast_ctx,
+                ):
                     pred_velocity = self.transformer(
                         hidden_states=latents.to(dtype=target_dtype),
                         encoder_hidden_states=prompt_embeds,
@@ -476,8 +489,9 @@ class Kandinsky5DenoisingStage(PipelineStage):
                             sparse_params=sparse_params,
                             return_dict=True,
                         ).sample
-                        pred_velocity = uncond_pred_velocity + batch.guidance_scale * (pred_velocity -
-                                                                                       uncond_pred_velocity)
+                        pred_velocity = uncond_pred_velocity + batch.guidance_scale * (
+                            pred_velocity - uncond_pred_velocity
+                        )
 
                 latents[:, cond_frames:, :, :, :num_channels] = self.scheduler.step(
                     pred_velocity[:, cond_frames:],
@@ -580,8 +594,7 @@ class Kandinsky5DmdDenoisingStage(Kandinsky5DenoisingStage):
 
         dmd_steps = fastvideo_args.pipeline_config.dmd_denoising_steps
         if not dmd_steps:
-            raise ValueError("Kandinsky5 DMD denoising requires "
-                             "pipeline_config.dmd_denoising_steps to be set.")
+            raise ValueError("Kandinsky5 DMD denoising requires pipeline_config.dmd_denoising_steps to be set.")
         timesteps = torch.tensor(dmd_steps, dtype=torch.long, device=device)
 
         # I2V keeps the first (conditioning) frame fixed during denoising.
@@ -605,10 +618,15 @@ class Kandinsky5DmdDenoisingStage(Kandinsky5DenoisingStage):
                         P=sparse_params["P"],
                         visual_shape=sparse_params["visual_shape"],
                     )
-                autocast_ctx = (torch.autocast(device_type="cuda", dtype=target_dtype, enabled=autocast_enabled)
-                                if device.type == "cuda" else contextlib.nullcontext())
-                with set_forward_context(current_timestep=i, attn_metadata=attn_metadata,
-                                         forward_batch=batch), autocast_ctx:
+                autocast_ctx = (
+                    torch.autocast(device_type="cuda", dtype=target_dtype, enabled=autocast_enabled)
+                    if device.type == "cuda"
+                    else contextlib.nullcontext()
+                )
+                with (
+                    set_forward_context(current_timestep=i, attn_metadata=attn_metadata, forward_batch=batch),
+                    autocast_ctx,
+                ):
                     pred_velocity = self.transformer(
                         hidden_states=latents.to(dtype=target_dtype),
                         encoder_hidden_states=prompt_embeds,
@@ -659,7 +677,6 @@ class Kandinsky5DmdDenoisingStage(Kandinsky5DenoisingStage):
 
 
 class Kandinsky5DecodingStage(DecodingStage):
-
     def __init__(self, vae: ParallelTiledVAE, pipeline=None) -> None:
         super().__init__(vae=vae, pipeline=pipeline)
 
@@ -689,17 +706,18 @@ class Kandinsky5ImageEncodingStage(EncodingStage):
         # normalized [-1, 1] tensor whose values happen to be non-negative,
         # so mirror diffusers' heuristic and say what we assumed.
         if image.min() >= 0:
-            logger.warning("Kandinsky5 conditioning image tensor has no negative values; "
-                           "assuming range [0, 1] and normalizing to [-1, 1]. "
-                           "Pass a [-1, 1] tensor with negative values to skip normalization.")
+            logger.warning(
+                "Kandinsky5 conditioning image tensor has no negative values; "
+                "assuming range [0, 1] and normalizing to [-1, 1]. "
+                "Pass a [-1, 1] tensor with negative values to skip normalization."
+            )
             image = normalize(image)  # [0, 1] -> [-1, 1]
         if image.ndim == 3:
             image = image.unsqueeze(0)
         if image.shape[-2:] != (height, width):
-            image = torch.nn.functional.interpolate(image.float(),
-                                                    size=(height, width),
-                                                    mode="bilinear",
-                                                    antialias=True)
+            image = torch.nn.functional.interpolate(
+                image.float(), size=(height, width), mode="bilinear", antialias=True
+            )
         return image
 
     @torch.no_grad()
@@ -761,8 +779,8 @@ class Kandinsky5ImageEncodingStage(EncodingStage):
         num_channels = image_latent.shape[-1]
         latents[:, 0:1, :, :, :num_channels] = image_latent
         if latents.shape[-1] > num_channels:
-            latents[:, 0:1, :, :, num_channels:2 * num_channels] = image_latent
-            latents[:, 0:1, :, :, 2 * num_channels:] = 1.0
+            latents[:, 0:1, :, :, num_channels : 2 * num_channels] = image_latent
+            latents[:, 0:1, :, :, 2 * num_channels :] = 1.0
         batch.latents = latents
 
         if fastvideo_args.vae_cpu_offload:
@@ -806,7 +824,7 @@ class Kandinsky5NormalizationStage(PipelineStage):
         if latents is None or latents.shape[1] <= n:
             return batch
 
-        reference = latents[:, n:n + min(self.REFERENCE_FRAMES, latents.shape[1] - 1)]
+        reference = latents[:, n : n + min(self.REFERENCE_FRAMES, latents.shape[1] - 1)]
         latents[:, :n] = self._adaptive_mean_std(latents[:, :n].clone(), reference)
         batch.latents = latents
         return batch

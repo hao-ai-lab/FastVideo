@@ -23,24 +23,20 @@ def resolve_target(target: str) -> type:
     ``"fastvideo.train.models.wan.wan.WanModel"``.
     """
     if not isinstance(target, str) or not target.strip():
-        raise ValueError(f"_target_ must be a non-empty dotted path string, "
-                         f"got {target!r}")
+        raise ValueError(f"_target_ must be a non-empty dotted path string, got {target!r}")
     target = target.strip()
     parts = target.rsplit(".", 1)
     if len(parts) != 2:
-        raise ValueError(f"_target_ must contain at least one dot "
-                         f"(module.ClassName), got {target!r}")
+        raise ValueError(f"_target_ must contain at least one dot (module.ClassName), got {target!r}")
     module_path, attr_name = parts
     try:
         module = importlib.import_module(module_path)
     except ModuleNotFoundError as exc:
-        raise ImportError(f"Cannot import module {module_path!r} "
-                          f"(from _target_={target!r})") from exc
+        raise ImportError(f"Cannot import module {module_path!r} (from _target_={target!r})") from exc
     try:
         cls = getattr(module, attr_name)
     except AttributeError as exc:
-        raise ImportError(f"Module {module_path!r} has no attribute "
-                          f"{attr_name!r} (from _target_={target!r})") from exc
+        raise ImportError(f"Module {module_path!r} has no attribute {attr_name!r} (from _target_={target!r})") from exc
     return cls
 
 
@@ -53,8 +49,7 @@ def instantiate(cfg: dict[str, Any], **extra: Any) -> Any:
     dropped, so callers can safely pass a superset.
     """
     if not isinstance(cfg, dict):
-        raise TypeError(f"instantiate() expects a dict with '_target_', "
-                        f"got {type(cfg).__name__}")
+        raise TypeError(f"instantiate() expects a dict with '_target_', got {type(cfg).__name__}")
     target_str = cfg.get("_target_")
     if target_str is None:
         raise KeyError("Config dict is missing '_target_' key")
@@ -70,7 +65,9 @@ def instantiate(cfg: dict[str, Any], **extra: Any) -> Any:
     if not has_var_keyword:
         valid_names = {
             name
-            for name, p in params.items() if p.kind in (
+            for name, p in params.items()
+            if p.kind
+            in (
                 inspect.Parameter.POSITIONAL_OR_KEYWORD,
                 inspect.Parameter.KEYWORD_ONLY,
             )
@@ -79,8 +76,7 @@ def instantiate(cfg: dict[str, Any], **extra: Any) -> Any:
         unrecognized = set(kwargs) - valid_names
         if unrecognized:
             warnings.warn(
-                f"instantiate({target_str}): dropping unrecognized "
-                f"kwargs {sorted(unrecognized)}",
+                f"instantiate({target_str}): dropping unrecognized kwargs {sorted(unrecognized)}",
                 stacklevel=2,
             )
             for key in unrecognized:

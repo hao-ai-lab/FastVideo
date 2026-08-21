@@ -100,8 +100,9 @@ def load_video(path: str, num_frames: int, height: int, width: int) -> torch.Ten
         # Without this, the repeat-last-frame fill below raises an opaque
         # IndexError on frames[-1]; cv2.VideoCapture doesn't raise on a
         # missing/corrupt file, it just decodes nothing.
-        raise ValueError(f"Could not decode any frames from video {path!r} -- "
-                         "the file is missing, empty, or not readable by OpenCV.")
+        raise ValueError(
+            f"Could not decode any frames from video {path!r} -- the file is missing, empty, or not readable by OpenCV."
+        )
 
     if len(frames) < num_frames:
         # Repeat last frame to fill
@@ -157,9 +158,11 @@ def main() -> None:
     with open(manifest_path) as f:
         caption_data = json.load(f)
     if not isinstance(caption_data, list) or not caption_data:
-        raise ValueError(f"Manifest {manifest_path} must be a non-empty JSON list of "
-                         f"{{'path', 'cap'}} entries, got: {type(caption_data).__name__} "
-                         f"with {len(caption_data) if isinstance(caption_data, list) else 'n/a'} entries")
+        raise ValueError(
+            f"Manifest {manifest_path} must be a non-empty JSON list of "
+            f"{{'path', 'cap'}} entries, got: {type(caption_data).__name__} "
+            f"with {len(caption_data) if isinstance(caption_data, list) else 'n/a'} entries"
+        )
 
     pipeline_config = Kandinsky5T2VConfig()
     # Kandinsky5T2VConfig.__post_init__ sets load_encoder=False by default --
@@ -185,10 +188,15 @@ def main() -> None:
 
     # --- Load text encoders ---
     print("Loading Qwen/Reason1 text encoder...")
-    qwen_enc = TextEncoderLoader().load(
-        os.path.join(model_path, "text_encoder"),
-        fastvideo_args,
-    ).to(device).eval()
+    qwen_enc = (
+        TextEncoderLoader()
+        .load(
+            os.path.join(model_path, "text_encoder"),
+            fastvideo_args,
+        )
+        .to(device)
+        .eval()
+    )
     qwen_tok = AutoTokenizer.from_pretrained(os.path.join(model_path, "tokenizer"))
     qwen_tok_kwargs = dict(pipeline_config.text_encoder_configs[0].tokenizer_kwargs)
     # TextEncodingStage overrides max_length from pipeline_config.text_encoder_max_lengths
@@ -199,10 +207,15 @@ def main() -> None:
     qwen_tok_kwargs["max_length"] = pipeline_config.text_encoder_max_lengths[0]
 
     print("Loading CLIP text encoder...")
-    clip_enc = TextEncoderLoader().load(
-        os.path.join(model_path, "text_encoder_2"),
-        fastvideo_args,
-    ).to(device).eval()
+    clip_enc = (
+        TextEncoderLoader()
+        .load(
+            os.path.join(model_path, "text_encoder_2"),
+            fastvideo_args,
+        )
+        .to(device)
+        .eval()
+    )
     clip_tok = AutoTokenizer.from_pretrained(os.path.join(model_path, "tokenizer_2"))
     clip_tok_kwargs = dict(pipeline_config.text_encoder_configs[1].tokenizer_kwargs)
     clip_tok_kwargs["max_length"] = pipeline_config.text_encoder_max_lengths[1]
@@ -254,11 +267,15 @@ def main() -> None:
         # Combine: [pooled_clip_row, qwen_embeds]
         qwen_dim = qwen_embeds.shape[-1]
         pooled_row = torch.zeros(qwen_dim, device=device, dtype=torch.float16)
-        pooled_row[:clip_pooled.shape[-1]] = clip_pooled
-        text_embedding = torch.cat(
-            [pooled_row.unsqueeze(0), qwen_embeds],
-            dim=0,
-        ).float().cpu()  # [seq+1, dim]
+        pooled_row[: clip_pooled.shape[-1]] = clip_pooled
+        text_embedding = (
+            torch.cat(
+                [pooled_row.unsqueeze(0), qwen_embeds],
+                dim=0,
+            )
+            .float()
+            .cpu()
+        )  # [seq+1, dim]
         print(f"  Text embedding shape: {text_embedding.shape}")
 
         record = {
@@ -285,8 +302,7 @@ def main() -> None:
 
     # Write parquet
     table = pa.table(
-        {k: [r[k] for r in records]
-         for k in records[0]},
+        {k: [r[k] for r in records] for k in records[0]},
         schema=pyarrow_schema_t2v,
     )
     output_path = os.path.join(OUTPUT_DIR, "data_00000.parquet")

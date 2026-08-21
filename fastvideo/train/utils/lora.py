@@ -72,15 +72,19 @@ class LoraConfig:
 
         if self.enable:
             if self.rank is None:
-                raise ValueError("models.<role>.lora.enable is true but lora.rank is unset "
-                                 "— an explicit positive rank is required to enable LoRA")
+                raise ValueError(
+                    "models.<role>.lora.enable is true but lora.rank is unset "
+                    "— an explicit positive rank is required to enable LoRA"
+                )
             if self.rank <= 0:
                 raise ValueError(f"models.<role>.lora.rank must be > 0, got {self.rank!r}")
         elif self.rank is not None:
             logger.info(
                 "models.<role>.lora.rank=%s is set but lora.enable is false — "
                 "LoRA will NOT be applied (model trains on its normal "
-                "trainable path).", self.rank)
+                "trainable path).",
+                self.rank,
+            )
 
     @classmethod
     def coerce(
@@ -97,12 +101,14 @@ class LoraConfig:
         if isinstance(obj, LoraConfig):
             return obj
         if not isinstance(obj, dict):
-            raise TypeError("models.<role>.lora must be a mapping or LoraConfig, got "
-                            f"{type(obj).__name__}")
+            raise TypeError(f"models.<role>.lora must be a mapping or LoraConfig, got {type(obj).__name__}")
         unknown = set(obj) - set(_LORA_CONFIG_KEYS)
         if unknown:
-            logger.warning("LoraConfig: ignoring unrecognized lora keys %s "
-                           "(valid keys: %s)", sorted(unknown), list(_LORA_CONFIG_KEYS))
+            logger.warning(
+                "LoraConfig: ignoring unrecognized lora keys %s (valid keys: %s)",
+                sorted(unknown),
+                list(_LORA_CONFIG_KEYS),
+            )
         return cls(
             enable=bool(obj.get("enable", False)),
             rank=obj.get("rank"),
@@ -125,7 +131,9 @@ def _is_excluded_layer(
     return any(excluded in module_name for excluded in excluded_modules)
 
 
-def _replicate_lora_parameters(transformer: torch.nn.Module, ) -> None:
+def _replicate_lora_parameters(
+    transformer: torch.nn.Module,
+) -> None:
     """Wrap LoRA params in replicated DTensors when distributed is active.
 
     The training loaders shard the base transformer with FSDP/HSDP before the
@@ -212,7 +220,9 @@ def enable_lora_training(
         "arch_config",
         None,
     )
-    excluded_modules = list(getattr(arch_config, "exclude_lora_layers", []), )
+    excluded_modules = list(
+        getattr(arch_config, "exclude_lora_layers", []),
+    )
 
     transformer.requires_grad_(False)
 
@@ -236,8 +246,7 @@ def enable_lora_training(
         replacements.append((module_name, lora_layer))
 
     if not replacements:
-        raise ValueError("No LoRA-compatible layers were found for the requested "
-                         f"target modules: {target_modules}")
+        raise ValueError(f"No LoRA-compatible layers were found for the requested target modules: {target_modules}")
 
     for module_name, lora_layer in replacements:
         replace_submodule(transformer, module_name, lora_layer)

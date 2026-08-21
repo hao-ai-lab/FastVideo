@@ -10,12 +10,11 @@ logger = init_logger(__name__)
 
 def _tensor_placeholder(tensor: torch.Tensor, device: torch.device) -> torch.Tensor:
     """Create a rank-preserving empty placeholder on the specified device."""
-    shape = (0, ) if tensor.ndim <= 0 else (0, ) * tensor.ndim
+    shape = (0,) if tensor.ndim <= 0 else (0,) * tensor.ndim
     return torch.empty(shape, device=device, dtype=tensor.dtype)
 
 
 class LayerwiseOffloadState:
-
     def __init__(
         self,
         async_copy_stream: torch.cuda.Stream,
@@ -37,7 +36,7 @@ class LayerwiseOffloadState:
         self.module_ref = module
         for name, param in self.module_ref.named_parameters():
             if self._will_offload(name):
-                self.cpu_named_parameters[name] = (param.data.detach().to("cpu").pin_memory())
+                self.cpu_named_parameters[name] = param.data.detach().to("cpu").pin_memory()
                 param.data = _tensor_placeholder(param.data, self.device)
 
     @torch.compiler.disable

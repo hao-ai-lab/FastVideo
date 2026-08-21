@@ -100,16 +100,16 @@ class RefinePlan:
 
 
 def plan_refine_resolutions(
-        *,
-        height: int,
-        width: int,
-        num_frames: int,
-        spatial_scale: int = 2,
-        vae_spatial_compression: int = 8,
-        vae_temporal_compression: int = 4,
-        patch_size: tuple[int, int, int] = (1, 2, 2),
-        enabled: bool = True,
-        mode_label: str = "Refine",
+    *,
+    height: int,
+    width: int,
+    num_frames: int,
+    spatial_scale: int = 2,
+    vae_spatial_compression: int = 8,
+    vae_temporal_compression: int = 4,
+    patch_size: tuple[int, int, int] = (1, 2, 2),
+    enabled: bool = True,
+    mode_label: str = "Refine",
 ) -> RefinePlan:
     """
     Validate the requested dimensions and create the stage-1 and target-resolution refinement plan.
@@ -138,11 +138,14 @@ def plan_refine_resolutions(
     if vae_spatial_compression < 1 or vae_temporal_compression < 1:
         raise ValueError("VAE compression factors must be positive")
     if height % vae_spatial_compression != 0 or width % vae_spatial_compression != 0:
-        raise ValueError(f"height/width must be divisible by vae_spatial_compression={vae_spatial_compression} "
-                         f"(got {height}x{width}).")
+        raise ValueError(
+            f"height/width must be divisible by vae_spatial_compression={vae_spatial_compression} "
+            f"(got {height}x{width})."
+        )
     if (num_frames - 1) % vae_temporal_compression != 0:
-        raise ValueError(f"num_frames must be 1 modulo vae_temporal_compression={vae_temporal_compression} "
-                         f"(got {num_frames}).")
+        raise ValueError(
+            f"num_frames must be 1 modulo vae_temporal_compression={vae_temporal_compression} (got {num_frames})."
+        )
 
     if not enabled or spatial_scale == 1:
         plan = RefinePlan(
@@ -159,17 +162,20 @@ def plan_refine_resolutions(
         return plan
 
     if height % spatial_scale != 0 or width % spatial_scale != 0:
-        raise ValueError(f"{mode_label} requires height/width divisible by spatial_scale={spatial_scale} "
-                         f"(got {height}x{width}).")
+        raise ValueError(
+            f"{mode_label} requires height/width divisible by spatial_scale={spatial_scale} (got {height}x{width})."
+        )
 
     stage1_height = height // spatial_scale
     stage1_width = width // spatial_scale
     # Stage-1 must land on a VAE-aligned grid so the first denoise produces
     # valid latents; the LTX-2 init stage enforces the same constraint.
-    if (stage1_height % vae_spatial_compression != 0 or stage1_width % vae_spatial_compression != 0):
-        raise ValueError(f"{mode_label} requires height/width divisible by "
-                         f"{spatial_scale * vae_spatial_compression} "
-                         f"(got {height}x{width}, vae_spatial={vae_spatial_compression}).")
+    if stage1_height % vae_spatial_compression != 0 or stage1_width % vae_spatial_compression != 0:
+        raise ValueError(
+            f"{mode_label} requires height/width divisible by "
+            f"{spatial_scale * vae_spatial_compression} "
+            f"(got {height}x{width}, vae_spatial={vae_spatial_compression})."
+        )
 
     plan = RefinePlan(
         target_height=height,
@@ -210,11 +216,13 @@ def _validate_plan(plan: RefinePlan, *, patch_size: tuple[int, int, int], mode_l
         ("stage2", plan.stage2_latent_height, plan.stage2_latent_width),
     ):
         if lh % ph != 0 or lw % pw != 0:
-            raise ValueError(f"{mode_label} {label} latent grid {lh}x{lw} is not divisible by "
-                             f"patch spatial size {ph}x{pw}.")
+            raise ValueError(
+                f"{mode_label} {label} latent grid {lh}x{lw} is not divisible by patch spatial size {ph}x{pw}."
+            )
         if plan.latent_frames % pt != 0:
-            raise ValueError(f"{mode_label} latent_frames={plan.latent_frames} is not divisible by "
-                             f"patch temporal size {pt}.")
+            raise ValueError(
+                f"{mode_label} latent_frames={plan.latent_frames} is not divisible by patch temporal size {pt}."
+            )
 
 
 def upsample_latents_spatial(
@@ -421,9 +429,11 @@ def default_refine_timesteps(
     while first < len(steps) and schedule.sigma_for(steps[first]) >= 1.0:
         first += 1
     if first == len(steps):
-        raise ValueError(f"No usable refine timesteps in {steps}: every entry is at sigma >= 1 "
-                         "(full noise), which would discard the stage-1 result. Pass "
-                         "explicit stage-2 timesteps below the full-noise step.")
+        raise ValueError(
+            f"No usable refine timesteps in {steps}: every entry is at sigma >= 1 "
+            "(full noise), which would discard the stage-1 result. Pass "
+            "explicit stage-2 timesteps below the full-noise step."
+        )
     return steps[first:]
 
 
@@ -606,11 +616,13 @@ def run_two_pass_dmd(
     # thrown away and refine degrades to a plain full-res run at 2x the cost.
     # Fail loudly rather than silently burning the first pass.
     if add_noise_flag and sigma >= 1.0:
-        raise ValueError(f"Refine hand-off sigma={sigma:.4f} (from stage-2 timestep "
-                         f"{stage2_timesteps[0]:g}) discards the stage-1 result entirely: "
-                         "the upsampled latents are weighted (1 - sigma) = 0. Start the "
-                         "stage-2 grid below the full-noise timestep, or pass "
-                         "add_noise_flag=False to hand off the clean upsample.")
+        raise ValueError(
+            f"Refine hand-off sigma={sigma:.4f} (from stage-2 timestep "
+            f"{stage2_timesteps[0]:g}) discards the stage-1 result entirely: "
+            "the upsampled latents are weighted (1 - sigma) = 0. Start the "
+            "stage-2 grid below the full-noise timestep, or pass "
+            "add_noise_flag=False to hand off the clean upsample."
+        )
 
     stage2_input = prepare_refine_latents(
         stage1_latents,
@@ -626,9 +638,11 @@ def run_two_pass_dmd(
     expected_w = plan.stage2_latent_width
     got_h, got_w = int(stage2_input.shape[-2]), int(stage2_input.shape[-1])
     if got_h != expected_h or got_w != expected_w:
-        raise ValueError(f"Refine upsample produced {got_h}x{got_w} latents, expected "
-                         f"{expected_h}x{expected_w} for target "
-                         f"{plan.target_height}x{plan.target_width}.")
+        raise ValueError(
+            f"Refine upsample produced {got_h}x{got_w} latents, expected "
+            f"{expected_h}x{expected_w} for target "
+            f"{plan.target_height}x{plan.target_width}."
+        )
 
     logger.info(
         "[MLX refine] stage2 start: latent=%dx%d sigma=%.4f steps=%d",

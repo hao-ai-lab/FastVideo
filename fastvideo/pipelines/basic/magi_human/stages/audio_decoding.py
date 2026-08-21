@@ -18,6 +18,7 @@ The stage stores the resampled waveform on `batch.extra["audio"]`
 then reads those, writes a temp wav, and muxes it into the output mp4
 via PyAV — same plumbing LTX-2 and Stable Audio use.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -85,9 +86,11 @@ class MagiHumanAudioDecodingStage(PipelineStage):
         latent_audio = getattr(batch, "audio_latents", None)
         if latent_audio is None:
             # Joint AV: missing audio latents means the denoising stage broke.
-            raise ValueError("MagiHumanAudioDecodingStage requires batch.audio_latents to be set. "
-                             "Did the denoising stage produce them? Joint AV pipeline expects "
-                             "both video and audio latents from MagiHumanDenoisingStage.")
+            raise ValueError(
+                "MagiHumanAudioDecodingStage requires batch.audio_latents to be set. "
+                "Did the denoising stage produce them? Joint AV pipeline expects "
+                "both video and audio latents from MagiHumanDenoisingStage."
+            )
 
         # Upstream shape: `[B, L, C_latent]` from the DiT; AutoencoderOobleck
         # expects `[B, C_latent, L]`. MagiEvaluator.post_process does

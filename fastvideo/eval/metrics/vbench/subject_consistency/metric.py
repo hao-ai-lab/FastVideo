@@ -25,7 +25,6 @@ _STD = [0.229, 0.224, 0.225]
 
 @register("vbench.subject_consistency")
 class SubjectConsistencyMetric(BaseMetric):
-
     name = "vbench.subject_consistency"
     requires_reference = False
     higher_is_better = True
@@ -61,7 +60,7 @@ class SubjectConsistencyMetric(BaseMetric):
         chunk = self._chunk_size or 64
         feats = []
         for i in range(0, frames.shape[0], chunk):
-            f = self._model(frames[i:i + chunk])
+            f = self._model(frames[i : i + chunk])
             f = F.normalize(f, dim=-1, p=2)
             feats.append(f)
         all_feats = torch.cat(feats, dim=0)  # (T, D)

@@ -44,19 +44,19 @@ def encode_negative_prompt(
     tc = training_config
     pipeline_config = tc.pipeline_config
     if pipeline_config is None:
-        raise ValueError("training_config.pipeline_config is required for negative "
-                         "prompt encoding")
+        raise ValueError("training_config.pipeline_config is required for negative prompt encoding")
 
     encoder_configs = pipeline_config.text_encoder_configs
     postprocess_funcs = pipeline_config.postprocess_text_funcs
     preprocess_funcs = getattr(pipeline_config, "preprocess_text_funcs", None)
 
     if encoder_index < 0 or encoder_index >= len(encoder_configs):
-        raise IndexError(f"encoder_index {encoder_index} out of range for "
-                         f"text_encoder_configs (len={len(encoder_configs)})")
+        raise IndexError(
+            f"encoder_index {encoder_index} out of range for text_encoder_configs (len={len(encoder_configs)})"
+        )
     encoder_config = encoder_configs[encoder_index]
     postprocess_text = postprocess_funcs[encoder_index]
-    preprocess_text = (preprocess_funcs[encoder_index] if preprocess_funcs is not None else None)
+    preprocess_text = preprocess_funcs[encoder_index] if preprocess_funcs is not None else None
 
     # HF convention: text_encoder / tokenizer for index 0,
     # text_encoder_2 / tokenizer_2 for index 1, etc.
@@ -71,18 +71,25 @@ def encode_negative_prompt(
     inference_args.text_encoder_cpu_offload = False
 
     loader = TextEncoderLoader()
-    text_encoder = loader.load(
-        os.path.join(model_path, encoder_subdir),
-        inference_args,
-    ).to(device).eval()
+    text_encoder = (
+        loader.load(
+            os.path.join(model_path, encoder_subdir),
+            inference_args,
+        )
+        .to(device)
+        .eval()
+    )
     tokenizer = AutoTokenizer.from_pretrained(os.path.join(model_path, tokenizer_subdir))
 
     tok_kwargs = dict(encoder_config.tokenizer_kwargs)
     text = preprocess_text(prompt) if preprocess_text is not None else prompt
 
-    with torch.no_grad(), set_forward_context(
+    with (
+        torch.no_grad(),
+        set_forward_context(
             current_timestep=0,
             attn_metadata=None,
+        ),
     ):
         text_inputs = tokenizer(text, **tok_kwargs).to(device)
         outputs = text_encoder(

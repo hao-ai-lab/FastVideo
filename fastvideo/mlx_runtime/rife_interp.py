@@ -31,7 +31,7 @@ def aligned_keyframe_count(target_frames: int, factor: int, temporal_compression
     if temporal_compression < 1:
         raise ValueError(f"temporal_compression must be >= 1, got {temporal_compression}")
     required_intervals = (target_frames - 1 + factor - 1) // factor
-    aligned_intervals = ((required_intervals + temporal_compression - 1) // temporal_compression * temporal_compression)
+    aligned_intervals = (required_intervals + temporal_compression - 1) // temporal_compression * temporal_compression
     return aligned_intervals + 1
 
 
@@ -60,9 +60,11 @@ def load_model(version: str = "4.25", weights_dir: str | None = None):
         try:
             from rife_mlx.utils.weights import build_model
         except ImportError as exc:
-            raise RIFEBackendError("MLX RIFE backend is unavailable. It ships vendored under "
-                                   "fastvideo/third_party/rife_mlx, so this usually means MLX "
-                                   "itself is missing: install with `uv pip install -e '.[mlx]'`.") from exc
+            raise RIFEBackendError(
+                "MLX RIFE backend is unavailable. It ships vendored under "
+                "fastvideo/third_party/rife_mlx, so this usually means MLX "
+                "itself is missing: install with `uv pip install -e '.[mlx]'`."
+            ) from exc
 
     try:
         return build_model(version, weights_dir=weights_dir)

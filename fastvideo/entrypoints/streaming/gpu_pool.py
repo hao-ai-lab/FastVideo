@@ -22,6 +22,7 @@ Typed config: workers start from a :class:`GeneratorConfig` (no flat
 LTX-2 kwargs), satisfying the PR 6 + PR 7 contracts that the public
 surface doesn't reintroduce the legacy kwarg bag.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -58,8 +59,7 @@ logger = init_logger(__name__)
 class _GeneratorLike(Protocol):
     """Subset the pool calls on a worker-side generator."""
 
-    def generate(self, request: GenerationRequest) -> Any:
-        ...
+    def generate(self, request: GenerationRequest) -> Any: ...
 
 
 @dataclass
@@ -88,28 +88,23 @@ class GpuPool(ABC):
         session_id: str,
         *,
         timeout: float | None = None,
-    ) -> PoolAssignment:
-        ...
+    ) -> PoolAssignment: ...
 
     @abstractmethod
     async def run(
         self,
         session_id: str,
         request: GenerationRequest,
-    ) -> Any:
-        ...
+    ) -> Any: ...
 
     @abstractmethod
-    async def release(self, session_id: str) -> None:
-        ...
+    async def release(self, session_id: str) -> None: ...
 
     @abstractmethod
-    async def shutdown(self) -> None:
-        ...
+    async def shutdown(self) -> None: ...
 
     @abstractmethod
-    def health(self) -> PoolHealth:
-        ...
+    def health(self) -> PoolHealth: ...
 
 
 @dataclass
@@ -274,10 +269,12 @@ class SubprocessGpuPool(GpuPool):
         # Wait for each worker's ready event in a thread to avoid
         # blocking the event loop.
         loop = asyncio.get_running_loop()
-        await asyncio.gather(*[
-            loop.run_in_executor(None, handle.ready.wait, self._warmup_config.timeout_seconds)
-            for handle in self._workers
-        ])
+        await asyncio.gather(
+            *[
+                loop.run_in_executor(None, handle.ready.wait, self._warmup_config.timeout_seconds)
+                for handle in self._workers
+            ]
+        )
 
         # Start background result readers — one task per worker
         # drains its result queue and resolves futures in _pending.
@@ -343,10 +340,7 @@ class SubprocessGpuPool(GpuPool):
             await loop.run_in_executor(
                 None,
                 handle.job_queue.put,
-                {
-                    "job_id": job_id,
-                    "request": request
-                },
+                {"job_id": job_id, "request": request},
             )
         except Exception:
             self._pending.pop(job_id, None)
@@ -432,8 +426,8 @@ class SubprocessGpuPool(GpuPool):
                 pending = self._pending.pop(jid, None)
                 if pending is not None and not pending.future.done():
                     pending.future.set_exception(
-                        RuntimeError(f"worker {handle.worker_id} result reader exited "
-                                     "with pending jobs"))
+                        RuntimeError(f"worker {handle.worker_id} result reader exited with pending jobs")
+                    )
 
 
 def _safe_queue_get(q: mp.Queue, timeout: float) -> Any | None:
@@ -449,15 +443,13 @@ def _safe_queue_get(q: mp.Queue, timeout: float) -> Any | None:
 
 
 class WorkerFactory(Protocol):
-
     def __call__(
         self,
         *,
         gpu_id: int,
         generator_config: GeneratorConfig,
         warmup_config: WarmupConfig,
-    ) -> _WorkerHandle:
-        ...
+    ) -> _WorkerHandle: ...
 
 
 def _default_worker_factory(

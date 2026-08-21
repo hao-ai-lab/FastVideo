@@ -118,8 +118,9 @@ def save_mlx_dit_checkpoint(dit: MLXWanDiT, checkpoint_dir: str | Path) -> Path:
     for key, value in _flatten_weights(dit).items():
         if isinstance(value, QuantizedMatrix):
             if spec is not None and value.spec != spec:
-                raise ValueError(f"Mixed quantization specs in one checkpoint ({spec} vs {value.spec} at '{key}') "
-                                 "are not supported.")
+                raise ValueError(
+                    f"Mixed quantization specs in one checkpoint ({spec} vs {value.spec} at '{key}') are not supported."
+                )
             spec = value.spec
             arrays[key] = value.weight
             arrays[f"{key}.scales"] = value.scales
@@ -136,7 +137,9 @@ def save_mlx_dit_checkpoint(dit: MLXWanDiT, checkpoint_dir: str | Path) -> Path:
         "format_version": FORMAT_VERSION,
         "config": dit.config,
         "num_blocks": len(dit.blocks),
-        "quantization": None if spec is None else {
+        "quantization": None
+        if spec is None
+        else {
             "mode": spec.mode,
             "bits": spec.bits,
             "group_size": spec.group_size,
@@ -171,8 +174,12 @@ def save_mlx_dit_checkpoint(dit: MLXWanDiT, checkpoint_dir: str | Path) -> Path:
             shutil.rmtree(backup_root, ignore_errors=True)
     finally:
         shutil.rmtree(staging_dir, ignore_errors=True)
-    logger.info("Saved MLX DiT checkpoint (%d arrays, quantization=%s) to %s", len(arrays),
-                spec.label if spec else "none", checkpoint_dir)
+    logger.info(
+        "Saved MLX DiT checkpoint (%d arrays, quantization=%s) to %s",
+        len(arrays),
+        spec.label if spec else "none",
+        checkpoint_dir,
+    )
     return checkpoint_dir
 
 
@@ -197,14 +204,18 @@ def load_mlx_dit_checkpoint(checkpoint_dir: str | Path, *, compile: bool = False
     manifest_path = checkpoint_dir / MANIFEST_FILENAME
     weights_path = checkpoint_dir / WEIGHTS_FILENAME
     if not manifest_path.exists() or not weights_path.exists():
-        raise FileNotFoundError(f"Not an MLX DiT checkpoint directory: {checkpoint_dir} "
-                                f"(expected {MANIFEST_FILENAME} and {WEIGHTS_FILENAME}).")
+        raise FileNotFoundError(
+            f"Not an MLX DiT checkpoint directory: {checkpoint_dir} "
+            f"(expected {MANIFEST_FILENAME} and {WEIGHTS_FILENAME})."
+        )
 
     manifest = json.loads(manifest_path.read_text())
     version = manifest.get("format_version")
     if version != FORMAT_VERSION:
-        raise ValueError(f"MLX DiT checkpoint {checkpoint_dir} has format_version={version}; "
-                         f"this FastVideo build reads version {FORMAT_VERSION}. Re-export the checkpoint.")
+        raise ValueError(
+            f"MLX DiT checkpoint {checkpoint_dir} has format_version={version}; "
+            f"this FastVideo build reads version {FORMAT_VERSION}. Re-export the checkpoint."
+        )
 
     spec = None
     if manifest["quantization"] is not None:
@@ -245,7 +256,7 @@ def load_mlx_dit_checkpoint(checkpoint_dir: str | Path, *, compile: bool = False
         if key.endswith(".scales") or key.endswith(".biases"):
             continue
         if key.startswith(f"{_BLOCK_PREFIX}."):
-            index_str, _, _ = key[len(_BLOCK_PREFIX) + 1:].partition(".")
+            index_str, _, _ = key[len(_BLOCK_PREFIX) + 1 :].partition(".")
             block_keys.setdefault(int(index_str), []).append(key)
         else:
             top_level_keys.append(key)
@@ -254,14 +265,16 @@ def load_mlx_dit_checkpoint(checkpoint_dir: str | Path, *, compile: bool = False
 
     num_blocks = int(manifest["num_blocks"])
     if sorted(block_keys) != list(range(num_blocks)):
-        raise ValueError(f"MLX DiT checkpoint {checkpoint_dir} is missing block weights: "
-                         f"manifest says {num_blocks} blocks, found indices {sorted(block_keys)}.")
+        raise ValueError(
+            f"MLX DiT checkpoint {checkpoint_dir} is missing block weights: "
+            f"manifest says {num_blocks} blocks, found indices {sorted(block_keys)}."
+        )
 
     inner_dim = int(config["num_attention_heads"]) * int(config["attention_head_dim"])
     blocks = []
     for index in range(num_blocks):
         prefix = f"{_BLOCK_PREFIX}.{index}."
-        block_weights = {key[len(prefix):]: rebuild(key) for key in block_keys[index]}
+        block_weights = {key[len(prefix) :]: rebuild(key) for key in block_keys[index]}
         blocks.append(
             MLXWanTransformerBlock(
                 block_weights,
@@ -269,5 +282,6 @@ def load_mlx_dit_checkpoint(checkpoint_dir: str | Path, *, compile: bool = False
                 ffn_dim=int(config["ffn_dim"]),
                 num_heads=int(config["num_attention_heads"]),
                 eps=float(config["eps"]),
-            ))
+            )
+        )
     return MLXWanDiT(weights, blocks, config, compile=compile)

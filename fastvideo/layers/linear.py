@@ -53,8 +53,9 @@ WEIGHT_LOADER_V2_SUPPORTED = [
 ]
 
 
-def adjust_scalar_to_fused_array(param: torch.Tensor, loaded_weight: torch.Tensor,
-                                 shard_id: str | int) -> tuple[torch.Tensor, torch.Tensor]:
+def adjust_scalar_to_fused_array(
+    param: torch.Tensor, loaded_weight: torch.Tensor, shard_id: str | int
+) -> tuple[torch.Tensor, torch.Tensor]:
     """For fused modules (QKV and MLP) we have an array of length
     N that holds 1 scale for each "logical" matrix. So the param
     is an array of length N. The loaded_weight corresponds to
@@ -150,8 +151,9 @@ class UnquantizedLinearMethod(LinearMethodBase):
         bias: torch.Tensor | None = None,
     ) -> torch.Tensor:
         output = (
-            F.linear(x, layer.weight, bias) if torch.cuda.is_available() or bias is None else F.linear(
-                x, layer.weight, bias.to(x.dtype))
+            F.linear(x, layer.weight, bias)
+            if torch.cuda.is_available() or bias is None
+            else F.linear(x, layer.weight, bias.to(x.dtype))
         )  # NOTE: this line assumes that we are using amp when using cuda and is needed to account for the fact that amp isn't supported in mps
         return output
 
@@ -189,7 +191,7 @@ class LinearBase(torch.nn.Module):
         self.quant_config = quant_config
         self.prefix = prefix
         if quant_config is None:
-            self.quant_method: QuantizeMethodBase | None = (UnquantizedLinearMethod())
+            self.quant_method: QuantizeMethodBase | None = UnquantizedLinearMethod()
         else:
             # ``get_quant_method`` returns ``None`` for layers the config
             # has decided not to quantize (e.g. ``NVFP4Config`` only tags
@@ -266,10 +268,12 @@ class ReplicatedLinear(LinearBase):
         )
 
         if bias:
-            self.bias = Parameter(torch.empty(
-                self.output_size,
-                dtype=self.params_dtype,
-            ))
+            self.bias = Parameter(
+                torch.empty(
+                    self.output_size,
+                    dtype=self.params_dtype,
+                )
+            )
             set_weight_attrs(
                 self.bias,
                 {
@@ -286,8 +290,9 @@ class ReplicatedLinear(LinearBase):
         if len(loaded_weight.shape) == 0:
             loaded_weight = loaded_weight.reshape(1)
 
-        assert param.size() == loaded_weight.size(), (f"Tried to load weights of size {loaded_weight.size()}"
-                                                      f"to a parameter of size {param.size()}")
+        assert param.size() == loaded_weight.size(), (
+            f"Tried to load weights of size {loaded_weight.size()}to a parameter of size {param.size()}"
+        )
         param.data.copy_(loaded_weight)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, Parameter | None]:
@@ -319,8 +324,13 @@ class ReplicatedLinear(LinearBase):
         shape_key = (input_shape, output_shape)
         if shape_key not in self._shape_to_layer_types:
             self._shape_to_layer_types[shape_key] = set()
-            logger.debug("Layer: %s | input shape: %s --> output shape: %s, Quant Method: %s", self.prefix, input_shape,
-                         output_shape, self.quant_method.__class__.__name__)
+            logger.debug(
+                "Layer: %s | input shape: %s --> output shape: %s, Quant Method: %s",
+                self.prefix,
+                input_shape,
+                output_shape,
+                self.quant_method.__class__.__name__,
+            )
         self._shape_to_layer_types[shape_key].add(self.__class__.__name__)
 
     @classmethod
@@ -408,14 +418,19 @@ class ColumnParallelLinear(LinearBase):
             input_size=self.input_size,
             output_size=self.output_size,
             params_dtype=self.params_dtype,
-            weight_loader=(self.weight_loader_v2 if self.quant_method.__class__.__name__ in WEIGHT_LOADER_V2_SUPPORTED
-                           else self.weight_loader),
+            weight_loader=(
+                self.weight_loader_v2
+                if self.quant_method.__class__.__name__ in WEIGHT_LOADER_V2_SUPPORTED
+                else self.weight_loader
+            ),
         )
         if bias:
-            self.bias = Parameter(torch.empty(
-                self.output_size_per_partition,
-                dtype=params_dtype,
-            ))
+            self.bias = Parameter(
+                torch.empty(
+                    self.output_size_per_partition,
+                    dtype=params_dtype,
+                )
+            )
             set_weight_attrs(
                 self.bias,
                 {
@@ -586,9 +601,11 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
         else:
             ignore_warning = getattr(param, "ignore_warning", False)
             if not ignore_warning:
-                logger.warning("Loading a weight without `output_dim` attribute in "
-                               "MergedColumnParallelLinear, assume the weight is "
-                               "the same for all partitions.")
+                logger.warning(
+                    "Loading a weight without `output_dim` attribute in "
+                    "MergedColumnParallelLinear, assume the weight is "
+                    "the same for all partitions."
+                )
 
         assert param_data.shape == loaded_weight.shape
         param_data.copy_(loaded_weight)
@@ -614,10 +631,10 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
             # Special case for Quantization.
             # If quantized, we need to adjust the offset and size to account
             # for the packing.
-            if (isinstance(param, PackedColumnParameter | PackedvLLMParameter)
-                    and param.packed_dim == param.output_dim):
-                shard_size, shard_offset = (param.adjust_shard_indexes_for_packing(shard_size=shard_size,
-                                                                                   shard_offset=shard_offset))
+            if isinstance(param, PackedColumnParameter | PackedvLLMParameter) and param.packed_dim == param.output_dim:
+                shard_size, shard_offset = param.adjust_shard_indexes_for_packing(
+                    shard_size=shard_size, shard_offset=shard_offset
+                )
 
             loaded_weight_shard = loaded_weight.narrow(param.output_dim, shard_offset, shard_size)
             self.weight_loader_v2(param, loaded_weight_shard, shard_id)
@@ -725,7 +742,7 @@ class QKVParallelLinear(ColumnParallelLinear):
             self.num_kv_heads = divide(self.total_num_kv_heads, tp_size)
             self.num_kv_head_replicas = 1
         input_size = self.hidden_size
-        output_size = ((self.num_heads + 2 * self.num_kv_heads) * tp_size * self.head_size)
+        output_size = (self.num_heads + 2 * self.num_kv_heads) * tp_size * self.head_size
         self.output_sizes = [
             self.num_heads * self.head_size * tp_size,  # q_proj
             self.num_kv_heads * self.head_size * tp_size,  # k_proj
@@ -789,10 +806,10 @@ class QKVParallelLinear(ColumnParallelLinear):
             # Special case for Quantization.
             # If quantized, we need to adjust the offset and size to account
             # for the packing.
-            if (isinstance(param, PackedColumnParameter | PackedvLLMParameter)
-                    and param.packed_dim == param.output_dim):
-                shard_size, shard_offset = (param.adjust_shard_indexes_for_packing(shard_size=shard_size,
-                                                                                   shard_offset=shard_offset))
+            if isinstance(param, PackedColumnParameter | PackedvLLMParameter) and param.packed_dim == param.output_dim:
+                shard_size, shard_offset = param.adjust_shard_indexes_for_packing(
+                    shard_size=shard_size, shard_offset=shard_offset
+                )
 
             loaded_weight_shard = loaded_weight.narrow(param.output_dim, shard_offset, shard_size)
             self.weight_loader_v2(param, loaded_weight_shard, shard_id)
@@ -911,9 +928,11 @@ class QKVParallelLinear(ColumnParallelLinear):
         else:
             ignore_warning = getattr(param, "ignore_warning", False)
             if not ignore_warning:
-                logger.warning("Loading a weight without `output_dim` attribute in "
-                               "QKVParallelLinear, assume the weight is the same "
-                               "for all partitions.")
+                logger.warning(
+                    "Loading a weight without `output_dim` attribute in "
+                    "QKVParallelLinear, assume the weight is the same "
+                    "for all partitions."
+                )
 
         assert param_data.shape == loaded_weight.shape
         param_data.copy_(loaded_weight)
@@ -984,12 +1003,14 @@ class RowParallelLinear(LinearBase):
             input_size=self.input_size,
             output_size=self.output_size,
             params_dtype=self.params_dtype,
-            weight_loader=(self.weight_loader_v2 if self.quant_method.__class__.__name__ in WEIGHT_LOADER_V2_SUPPORTED
-                           else self.weight_loader),
+            weight_loader=(
+                self.weight_loader_v2
+                if self.quant_method.__class__.__name__ in WEIGHT_LOADER_V2_SUPPORTED
+                else self.weight_loader
+            ),
         )
         if not reduce_results and (bias and not skip_bias_add):
-            raise ValueError("When not reduce the results, adding bias to the "
-                             "results can lead to incorrect results")
+            raise ValueError("When not reduce the results, adding bias to the results can lead to incorrect results")
 
         if bias:
             self.bias = Parameter(torch.empty(self.output_size, dtype=params_dtype))

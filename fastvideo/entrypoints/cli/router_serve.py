@@ -6,6 +6,7 @@ Launches the streaming router from a YAML config. Separate from
 fronts one or more running servers rather than hosting a generator
 itself.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -91,7 +92,8 @@ def _load_router_config(path: str) -> RouterConfig:
                 name=r.get("name"),
                 primary=bool(r.get("primary", False)),
                 weight=float(r.get("weight", 1.0)),
-            ))
+            )
+        )
     if not replicas:
         raise ValueError("Router config must list at least one replica under `router.replicas`")
 

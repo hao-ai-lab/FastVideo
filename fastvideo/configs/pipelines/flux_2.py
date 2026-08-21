@@ -36,8 +36,8 @@ class Flux2PipelineConfig(PipelineConfig):
     vae_sp: bool = False
 
     # Text encoder configuration (full Flux2 uses Mistral3)
-    text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (Mistral3TextConfig(), ))
-    text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("bf16", ))
+    text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (Mistral3TextConfig(),))
+    text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("bf16",))
 
     # Default postprocess function (can be overridden)
     @staticmethod
@@ -45,8 +45,9 @@ class Flux2PipelineConfig(PipelineConfig):
         """Default text postprocessing for Flux2."""
         return outputs.last_hidden_state
 
-    postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.Tensor],
-                                  ...] = field(default_factory=lambda: (Flux2PipelineConfig.default_postprocess_text, ))
+    postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.Tensor], ...] = field(
+        default_factory=lambda: (Flux2PipelineConfig.default_postprocess_text,)
+    )
 
 
 def flux2_klein_postprocess_text(outputs: BaseEncoderOutput) -> torch.Tensor:
@@ -63,24 +64,28 @@ def flux2_klein_postprocess_text(outputs: BaseEncoderOutput) -> torch.Tensor:
 @dataclass
 class Flux2KleinEncoderArchConfig(EncoderArchConfig):
     """Encoder arch config for Flux2 Klein (Qwen3); needs hidden states for layers 9, 18, 27."""
+
     output_hidden_states: bool = True
 
 
 @dataclass
 class Flux2KleinTextEncoderConfig(EncoderConfig):
     """Text encoder config for Flux2 Klein (Qwen3)."""
+
     arch_config: EncoderArchConfig = field(default_factory=Flux2KleinEncoderArchConfig)
 
 
 @dataclass
 class Flux2KleinPipelineConfig(Flux2PipelineConfig):
     """Configuration for Flux2 Klein (distilled, 4-step, no guidance)."""
+
     embedded_cfg_scale: float | None = None  # Klein distilled: no guidance embedding (matches Diffusers)
     scheduler_step_in_fp32: bool = True
     flux2_text_encoder_type: str = "qwen3"
     text_encoder_out_layers: tuple[int, ...] = (9, 18, 27)
-    text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (Qwen3TextConfig(), ))
-    text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("bf16", ))
-    preprocess_text_funcs: tuple[Callable[[str], str], ...] = field(default_factory=lambda: (preprocess_text, ))
-    postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.Tensor],
-                                  ...] = field(default_factory=lambda: (flux2_klein_postprocess_text, ))
+    text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (Qwen3TextConfig(),))
+    text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("bf16",))
+    preprocess_text_funcs: tuple[Callable[[str], str], ...] = field(default_factory=lambda: (preprocess_text,))
+    postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.Tensor], ...] = field(
+        default_factory=lambda: (flux2_klein_postprocess_text,)
+    )

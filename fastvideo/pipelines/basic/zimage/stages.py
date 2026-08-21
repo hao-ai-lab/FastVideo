@@ -36,8 +36,7 @@ class ZImageInputValidationStage(InputValidationStage):
         if batch.height is None or batch.width is None:
             raise ValueError("Z-Image requires height and width")
         if batch.height % 16 or batch.width % 16:
-            raise ValueError("Z-Image height and width must be divisible by 16; "
-                             f"got {batch.height}x{batch.width}")
+            raise ValueError(f"Z-Image height and width must be divisible by 16; got {batch.height}x{batch.width}")
         return batch
 
 
@@ -100,10 +99,12 @@ class ZImageLatentPreparationStage(PipelineStage):
             if len(generators) != shape[0]:
                 raise ValueError(f"generator list length {len(generators)} does not match batch size {shape[0]}")
             sample_shape = (1, *shape[1:])
-            return torch.cat([
-                torch.randn(sample_shape, generator=generator, device=device, dtype=torch.float32)
-                for generator in generators
-            ])
+            return torch.cat(
+                [
+                    torch.randn(sample_shape, generator=generator, device=device, dtype=torch.float32)
+                    for generator in generators
+                ]
+            )
         return torch.randn(shape, generator=generators, device=device, dtype=torch.float32)
 
     @torch.no_grad()
@@ -229,8 +230,12 @@ class ZImageDenoisingStage(PipelineStage):
             timestep = timestep_value.expand(batch_size).to(device=device, dtype=torch.float32)
             timestep = (1000.0 - timestep) / 1000.0
             current_guidance_scale = float(batch.guidance_scale)
-            if (batch.do_classifier_free_guidance and batch.cfg_truncation is not None and batch.cfg_truncation <= 1.0
-                    and timestep[0].item() > batch.cfg_truncation):
+            if (
+                batch.do_classifier_free_guidance
+                and batch.cfg_truncation is not None
+                and batch.cfg_truncation <= 1.0
+                and timestep[0].item() > batch.cfg_truncation
+            ):
                 current_guidance_scale = 0.0
             apply_cfg = batch.do_classifier_free_guidance and current_guidance_scale > 0.0
 
@@ -246,16 +251,16 @@ class ZImageDenoisingStage(PipelineStage):
                 model_timestep = timestep
 
             with (
-                    torch.autocast(
-                        device_type=device.type,
-                        enabled=False,
-                    ),
-                    trace_step(index),
-                    set_forward_context(
-                        current_timestep=index,
-                        attn_metadata=None,
-                        forward_batch=batch,
-                    ),
+                torch.autocast(
+                    device_type=device.type,
+                    enabled=False,
+                ),
+                trace_step(index),
+                set_forward_context(
+                    current_timestep=index,
+                    attn_metadata=None,
+                    forward_batch=batch,
+                ),
             ):
                 model_outputs = self.transformer(
                     hidden_states=model_latents,
@@ -268,9 +273,9 @@ class ZImageDenoisingStage(PipelineStage):
                 negative_outputs = model_outputs[batch_size:]
                 guided_outputs = []
                 for positive_output, negative_output in zip(
-                        positive_outputs,
-                        negative_outputs,
-                        strict=True,
+                    positive_outputs,
+                    negative_outputs,
+                    strict=True,
                 ):
                     positive_fp32 = positive_output.float()
                     prediction = positive_fp32 + current_guidance_scale * (positive_fp32 - negative_output.float())

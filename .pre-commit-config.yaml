@@ -17,18 +17,12 @@ exclude: |
     .github/workflows/_template-build-image.yml
   )
 repos:
-- repo: https://github.com/google/yapf
-  rev: v0.43.0
-  hooks:
-  - id: yapf
-    args: [--in-place, --verbose]
-    language_version: python3.12
-    additional_dependencies: [toml] # TODO: Remove when yapf is upgraded
 - repo: https://github.com/astral-sh/ruff-pre-commit
   rev: v0.11.12
   hooks:
   - id: ruff
     args: [--output-format, github, --fix]
+  - id: ruff-format
 - repo: https://github.com/codespell-project/codespell
   rev: v2.4.1
   hooks:

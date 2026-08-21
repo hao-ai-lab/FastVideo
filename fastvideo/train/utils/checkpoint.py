@@ -47,8 +47,7 @@ def _barrier() -> None:
 def _parse_step_from_dir(checkpoint_dir: Path) -> int:
     match = _CHECKPOINT_DIR_RE.match(checkpoint_dir.name)
     if not match:
-        raise ValueError(f"Invalid checkpoint directory name {checkpoint_dir.name!r}; "
-                         "expected 'checkpoint-<step>'")
+        raise ValueError(f"Invalid checkpoint directory name {checkpoint_dir.name!r}; expected 'checkpoint-<step>'")
     return int(match.group(1))
 
 
@@ -92,9 +91,7 @@ def _resolve_resume_checkpoint(resume_from_checkpoint: str, *, output_dir: str) 
         latest = _find_latest_checkpoint(out)
         if latest is None:
             logger.info(
-                "resume_from_checkpoint='latest' but no "
-                "checkpoints found under %s; starting from "
-                "scratch.",
+                "resume_from_checkpoint='latest' but no checkpoints found under %s; starting from scratch.",
                 out,
             )
         return latest
@@ -119,9 +116,11 @@ def _resolve_resume_checkpoint(resume_from_checkpoint: str, *, output_dir: str) 
 
     # Give a clearer error message.
     out = Path(os.path.expanduser(str(output_dir))).resolve()
-    raise ValueError("Could not resolve resume checkpoint. Expected a checkpoint directory "
-                     f"named 'checkpoint-<step>' (with 'dcp/' inside), or an output_dir "
-                     f"containing such checkpoints. Got: {path} (output_dir={out}).")
+    raise ValueError(
+        "Could not resolve resume checkpoint. Expected a checkpoint directory "
+        f"named 'checkpoint-<step>' (with 'dcp/' inside), or an output_dir "
+        f"containing such checkpoints. Got: {path} (output_dir={out})."
+    )
 
 
 class _RoleModuleContainer(torch.nn.Module):
@@ -220,7 +219,9 @@ class CheckpointManager:
 
         # Callback state (e.g. EMA shadow weights, validation RNG).
         if self._callbacks is not None and _is_stateful(self._callbacks):
-            states["callbacks"] = _CallbackStateWrapper(self._callbacks, )
+            states["callbacks"] = _CallbackStateWrapper(
+                self._callbacks,
+            )
 
         return states
 
@@ -286,7 +287,9 @@ class CheckpointManager:
             json.dump(metadata, f, indent=2)
 
     @staticmethod
-    def load_metadata(checkpoint_dir: str | Path, ) -> dict[str, Any]:
+    def load_metadata(
+        checkpoint_dir: str | Path,
+    ) -> dict[str, Any]:
         """Read ``metadata.json`` from a checkpoint dir."""
         meta_path = Path(checkpoint_dir) / "metadata.json"
         if not meta_path.is_file():
@@ -338,8 +341,7 @@ class CheckpointManager:
             rng_path = resolved / "rng_state.pt"
         if not rng_path.is_file():
             logger.warning(
-                "No rng_state in %s; skipping "
-                "RNG snapshot restore.",
+                "No rng_state in %s; skipping RNG snapshot restore.",
                 resolved,
             )
             return

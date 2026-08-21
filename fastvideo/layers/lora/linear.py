@@ -5,13 +5,24 @@ import math
 
 import torch
 from torch import nn
-from torch.distributed._composable.fsdp import (CPUOffloadPolicy, OffloadPolicy, fully_shard)
+from torch.distributed._composable.fsdp import CPUOffloadPolicy, OffloadPolicy, fully_shard
 from torch.distributed.tensor import DTensor
 
-from fastvideo.distributed import (get_local_torch_device, get_tp_rank, split_tensor_along_last_dim,
-                                   tensor_model_parallel_all_gather, tensor_model_parallel_all_reduce)
-from fastvideo.layers.linear import (ColumnParallelLinear, LinearBase, MergedColumnParallelLinear, QKVParallelLinear,
-                                     ReplicatedLinear, RowParallelLinear)
+from fastvideo.distributed import (
+    get_local_torch_device,
+    get_tp_rank,
+    split_tensor_along_last_dim,
+    tensor_model_parallel_all_gather,
+    tensor_model_parallel_all_reduce,
+)
+from fastvideo.layers.linear import (
+    ColumnParallelLinear,
+    LinearBase,
+    MergedColumnParallelLinear,
+    QKVParallelLinear,
+    ReplicatedLinear,
+    RowParallelLinear,
+)
 from fastvideo.layers.vocab_parallel_embedding import VocabParallelEmbedding
 from fastvideo.utils import get_mixed_precision_state
 
@@ -19,7 +30,6 @@ torch._dynamo.config.recompile_limit = 16
 
 
 class BaseLayerWithLoRA(nn.Module):
-
     def __init__(
         self,
         base_layer: nn.Module,
@@ -49,15 +59,15 @@ class BaseLayerWithLoRA(nn.Module):
             in_dim = self.base_layer.weight.shape[1]
             out_dim = self.base_layer.weight.shape[0]
             self.lora_A = nn.Parameter(
-                torch.zeros(self.lora_rank,
-                            in_dim,
-                            device=self.base_layer.weight.device,
-                            dtype=self.base_layer.weight.dtype))
+                torch.zeros(
+                    self.lora_rank, in_dim, device=self.base_layer.weight.device, dtype=self.base_layer.weight.dtype
+                )
+            )
             self.lora_B = nn.Parameter(
-                torch.zeros(out_dim,
-                            self.lora_rank,
-                            device=self.base_layer.weight.device,
-                            dtype=self.base_layer.weight.dtype))
+                torch.zeros(
+                    out_dim, self.lora_rank, device=self.base_layer.weight.device, dtype=self.base_layer.weight.dtype
+                )
+            )
             torch.nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
             torch.nn.init.zeros_(self.lora_B)
         else:
@@ -92,14 +102,16 @@ class BaseLayerWithLoRA(nn.Module):
     def slice_lora_b_weights(self, B: torch.Tensor) -> torch.Tensor:
         return B
 
-    def set_lora_weights(self,
-                         A: torch.Tensor,
-                         B: torch.Tensor,
-                         lora_alpha: float | None = None,
-                         training_mode: bool = False,
-                         lora_path: str | None = None,
-                         strength: float = 1.0,
-                         accumulate: bool = False) -> None:
+    def set_lora_weights(
+        self,
+        A: torch.Tensor,
+        B: torch.Tensor,
+        lora_alpha: float | None = None,
+        training_mode: bool = False,
+        lora_path: str | None = None,
+        strength: float = 1.0,
+        accumulate: bool = False,
+    ) -> None:
         self.lora_A = torch.nn.Parameter(A)  # share storage with weights in the pipeline
         self.lora_B = torch.nn.Parameter(B)
         self.disable_lora = False
@@ -138,32 +150,35 @@ class BaseLayerWithLoRA(nn.Module):
             data = self.base_layer.weight.data.to(get_local_torch_device()).full_tensor()
 
             # Apply LoRA with alpha scaling
-            lora_delta = (
-                self.slice_lora_b_weights(self.lora_B).to(data) @ self.slice_lora_a_weights(self.lora_A).to(data))
-            scale = ((self.lora_alpha / self.lora_rank) if (self.lora_alpha and self.lora_rank) else 1.0)
+            lora_delta = self.slice_lora_b_weights(self.lora_B).to(data) @ self.slice_lora_a_weights(self.lora_A).to(
+                data
+            )
+            scale = (self.lora_alpha / self.lora_rank) if (self.lora_alpha and self.lora_rank) else 1.0
             lora_delta *= scale * self.lora_strength
             data += lora_delta
             unsharded_base_layer.weight = nn.Parameter(data.to(current_device))
             if isinstance(getattr(self.base_layer, "bias", None), DTensor):
                 unsharded_base_layer.bias = nn.Parameter(
-                    self.base_layer.bias.to(get_local_torch_device(),
-                                            non_blocking=True).full_tensor().to(current_device))
+                    self.base_layer.bias.to(get_local_torch_device(), non_blocking=True)
+                    .full_tensor()
+                    .to(current_device)
+                )
 
             offload_policy = CPUOffloadPolicy() if "cpu" in str(current_device) else OffloadPolicy()
             mp_policy = get_mixed_precision_state().mp_policy
 
-            self.base_layer = fully_shard(unsharded_base_layer,
-                                          mesh=mesh,
-                                          mp_policy=mp_policy,
-                                          offload_policy=offload_policy)
+            self.base_layer = fully_shard(
+                unsharded_base_layer, mesh=mesh, mp_policy=mp_policy, offload_policy=offload_policy
+            )
         else:
             current_device = self.base_layer.weight.data.device
             data = self.base_layer.weight.data.to(get_local_torch_device())
 
             # Apply LoRA with alpha scaling
-            lora_delta = (
-                self.slice_lora_b_weights(self.lora_B.to(data)) @ self.slice_lora_a_weights(self.lora_A.to(data)))
-            scale = ((self.lora_alpha / self.lora_rank) if (self.lora_alpha and self.lora_rank) else 1.0)
+            lora_delta = self.slice_lora_b_weights(self.lora_B.to(data)) @ self.slice_lora_a_weights(
+                self.lora_A.to(data)
+            )
+            scale = (self.lora_alpha / self.lora_rank) if (self.lora_alpha and self.lora_rank) else 1.0
             lora_delta *= scale * self.lora_strength
             data += lora_delta
             self.base_layer.weight.data = data.to(current_device, non_blocking=True)
@@ -211,7 +226,6 @@ class VocabParallelEmbeddingWithLoRA(BaseLayerWithLoRA):
 
 
 class ColumnParallelLinearWithLoRA(BaseLayerWithLoRA):
-
     def __init__(
         self,
         base_layer: ColumnParallelLinear,
@@ -242,7 +256,6 @@ class ColumnParallelLinearWithLoRA(BaseLayerWithLoRA):
 
 
 class MergedColumnParallelLinearWithLoRA(ColumnParallelLinearWithLoRA):
-
     def __init__(
         self,
         base_layer: MergedColumnParallelLinear,
@@ -265,7 +278,6 @@ class MergedColumnParallelLinearWithLoRA(ColumnParallelLinearWithLoRA):
 
 
 class QKVParallelLinearWithLoRA(ColumnParallelLinearWithLoRA):
-
     def __init__(
         self,
         base_layer: QKVParallelLinear,
@@ -297,7 +309,6 @@ class QKVParallelLinearWithLoRA(ColumnParallelLinearWithLoRA):
 
 
 class RowParallelLinearWithLoRA(BaseLayerWithLoRA):
-
     def __init__(
         self,
         base_layer: RowParallelLinear,
@@ -326,7 +337,7 @@ class RowParallelLinearWithLoRA(BaseLayerWithLoRA):
             output_ = output_parallel
 
         if not self.base_layer.skip_bias_add:
-            output = (output_ + self.base_layer.bias if self.base_layer.bias is not None else output_)
+            output = output_ + self.base_layer.bias if self.base_layer.bias is not None else output_
             output_bias = None
         else:
             output = output_
@@ -345,10 +356,9 @@ class RowParallelLinearWithLoRA(BaseLayerWithLoRA):
         return B
 
 
-def get_lora_layer(layer: nn.Module,
-                   lora_rank: int | None = None,
-                   lora_alpha: int | None = None,
-                   training_mode: bool = False) -> BaseLayerWithLoRA | None:
+def get_lora_layer(
+    layer: nn.Module, lora_rank: int | None = None, lora_alpha: int | None = None, training_mode: bool = False
+) -> BaseLayerWithLoRA | None:
     supported_layer_types: dict[type[LinearBase], type[BaseLayerWithLoRA]] = {
         # the order matters
         # VocabParallelEmbedding: VocabParallelEmbeddingWithLoRA,

@@ -48,9 +48,11 @@ if envs.FASTVIDEO_FA4:
     try:
         from fastvideo.attention.utils.flash_attn_cute import flash_attn_func
     except ImportError as e:
-        raise RuntimeError(f"FASTVIDEO_FA4=1 but flash_attn.cute (FA4) is not usable ({e}); "
-                           "fix the FA4 install (see the flash-attn-4 pin in pyproject.toml) "
-                           "or unset FASTVIDEO_FA4.") from e
+        raise RuntimeError(
+            f"FASTVIDEO_FA4=1 but flash_attn.cute (FA4) is not usable ({e}); "
+            "fix the FA4 install (see the flash-attn-4 pin in pyproject.toml) "
+            "or unset FASTVIDEO_FA4."
+        ) from e
     fa_version = "4"
 else:
     try:
@@ -62,12 +64,14 @@ else:
         fa_version = "3"
     except ImportError:
         from flash_attn import flash_attn_func as flash_attn_2_func
+
         flash_attn_func = flash_attn_2_func
         fa_version = "2"
     try:
         if importlib.util.find_spec("flash_attn.cute") is not None:
-            logger.info("flash_attn.cute (FA4) is installed but not enabled; "
-                        "set FASTVIDEO_FA4=1 to use it for inference.")
+            logger.info(
+                "flash_attn.cute (FA4) is installed but not enabled; set FASTVIDEO_FA4=1 to use it for inference."
+            )
     except ImportError:
         pass
 
@@ -83,6 +87,7 @@ if fa_version == "2":
     # deterministic, return_attn_probs, ...) raises TypeError at the call
     # site, so silent loss of kwargs is not a failure mode.
     from flash_attn.flash_attn_interface import _flash_attn_backward as _fa2_backward
+
     _fa_default = flash_attn_func
 
     @torch.library.custom_op(
@@ -135,7 +140,7 @@ if fa_version == "2":
         # the default here so the value saved on ctx (and passed to backward) is
         # always a real float — matches what FA2's own autograd.Function does.
         if softmax_scale is None:
-            softmax_scale = q.shape[-1]**-0.5
+            softmax_scale = q.shape[-1] ** -0.5
         ctx.softmax_scale = softmax_scale
         ctx.causal = causal
 
@@ -247,5 +252,6 @@ else:
     # Defensive: the probe above only ever sets fa_version to "2", "3",
     # or "4"; an unexpected value means an import/probe regression and
     # we want a loud error at import, not a silent NameError later.
-    raise RuntimeError(f"Unsupported FlashAttention version: {fa_version!r} — expected "
-                       f"'2', '3', or '4' from the import probe above.")
+    raise RuntimeError(
+        f"Unsupported FlashAttention version: {fa_version!r} — expected '2', '3', or '4' from the import probe above."
+    )

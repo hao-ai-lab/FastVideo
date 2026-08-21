@@ -7,6 +7,7 @@ before constructing ``VideoGenerationWorker`` — all ``fastvideo.*``
 imports are deferred to method bodies so nothing touches CUDA at
 module import time.
 """
+
 # pyright: reportArgumentType=false, reportMissingImports=false, reportMissingTypeArgument=false, reportOptionalMemberAccess=false
 # ruff: noqa: SIM105
 # mypy: ignore-errors
@@ -45,16 +46,18 @@ LTX2_VIDEO_CONDITIONING_FRAME_IDX = int(os.getenv("LTX2_VIDEO_CONDITIONING_FRAME
 LTX2_VIDEO_CONDITIONING_STRENGTH = float(os.getenv("LTX2_VIDEO_CONDITIONING_STRENGTH", "1.0"))
 
 if (LTX2_VIDEO_CONDITIONING_NUM_FRAMES - 1) % 8 != 0:
-    raise ValueError("LTX2_VIDEO_CONDITIONING_NUM_FRAMES must satisfy "
-                     "(frames - 1) % 8 == 0; got "
-                     f"{LTX2_VIDEO_CONDITIONING_NUM_FRAMES}")
+    raise ValueError(
+        "LTX2_VIDEO_CONDITIONING_NUM_FRAMES must satisfy "
+        "(frames - 1) % 8 == 0; got "
+        f"{LTX2_VIDEO_CONDITIONING_NUM_FRAMES}"
+    )
 
 # Audio conditioning: reuse denoised audio latents from the previous
 # segment as initial latents for the next segment.
 ENABLE_AUDIO_COND = os.getenv("ENABLE_AUDIO_COND", "1").lower() in ("1", "true", "yes")
 # Number of decoded video frames worth of audio to condition on.
 # Not subject to the (n-1)%8==0 constraint since this is audio-only.
-AUDIO_CONDITIONING_NUM_FRAMES = int(os.getenv("AUDIO_CONDITIONING_NUM_FRAMES", '49'))
+AUDIO_CONDITIONING_NUM_FRAMES = int(os.getenv("AUDIO_CONDITIONING_NUM_FRAMES", "49"))
 AUDIO_CONDITIONING_STRENGTH = float(os.getenv("AUDIO_CONDITIONING_STRENGTH", "1.0"))
 
 # Noise injected into conditioning context to prevent error
@@ -88,6 +91,7 @@ class StepResult:
     so downstream AV streaming never needs to import conditioning
     constants.
     """
+
     frames: list
     audio: Any
     audio_sample_rate: int | None
@@ -128,11 +132,13 @@ class ContinuationState:
                 arr = np.clip(arr, 0, 255).astype(np.uint8)
                 noisy.append(Image.fromarray(arr))
             cond_images = noisy
-        request_kwargs["ltx2_video_conditions"] = [(
-            cond_images,
-            LTX2_VIDEO_CONDITIONING_FRAME_IDX,
-            LTX2_VIDEO_CONDITIONING_STRENGTH,
-        )]
+        request_kwargs["ltx2_video_conditions"] = [
+            (
+                cond_images,
+                LTX2_VIDEO_CONDITIONING_FRAME_IDX,
+                LTX2_VIDEO_CONDITIONING_STRENGTH,
+            )
+        ]
         request_kwargs["ltx2_images"] = None
         request_kwargs["image_path"] = None
 
@@ -159,7 +165,7 @@ class ContinuationState:
         audio_extra = max(0, AUDIO_CONDITIONING_NUM_FRAMES - LTX2_VIDEO_CONDITIONING_NUM_FRAMES)
         if audio_extra > 0:
             audio_num_frames = NUM_FRAMES + audio_extra
-            request_kwargs["audio_num_frames"] = (audio_num_frames)
+            request_kwargs["audio_num_frames"] = audio_num_frames
             prefix_sec = float(audio_extra) / 24.0
             request_kwargs["video_position_offset_sec"] = prefix_sec
 
@@ -171,13 +177,13 @@ class ContinuationState:
 
         B, C, _, mel = cached.shape
         clean = torch.zeros((B, C, total_T, mel), dtype=cached.dtype)
-        clean[:, :, :audio_cond_T, :] = (cached[:, :, -audio_cond_T:, :])
+        clean[:, :, :audio_cond_T, :] = cached[:, :, -audio_cond_T:, :]
         if AUDIO_CONTEXT_NOISE > 0:
             noise = torch.randn_like(clean[:, :, :audio_cond_T, :])
-            clean[:, :, :audio_cond_T, :] += (AUDIO_CONTEXT_NOISE * noise)
+            clean[:, :, :audio_cond_T, :] += AUDIO_CONTEXT_NOISE * noise
 
         mask = torch.ones((B, 1, total_T, 1), dtype=torch.float32)
-        mask[:, :, :audio_cond_T, :] = (1.0 - AUDIO_CONDITIONING_STRENGTH)
+        mask[:, :, :audio_cond_T, :] = 1.0 - AUDIO_CONDITIONING_STRENGTH
 
         request_kwargs["ltx2_audio_clean_latent"] = clean
         request_kwargs["ltx2_audio_denoise_mask"] = mask
@@ -185,11 +191,14 @@ class ContinuationState:
     def save_video(self, frames: list) -> None:
         """Snapshot trailing N frames as PIL images for next-segment conditioning."""
         from PIL import Image
+
         num_cond_frames = LTX2_VIDEO_CONDITIONING_NUM_FRAMES
         end_offset = LTX2_VIDEO_CONDITIONING_END_OFFSET
         if end_offset + num_cond_frames > len(frames):
-            raise RuntimeError(f"Cannot extract {num_cond_frames} conditioning frames with "
-                               f"end_offset={end_offset} from {len(frames)} generated frames.")
+            raise RuntimeError(
+                f"Cannot extract {num_cond_frames} conditioning frames with "
+                f"end_offset={end_offset} from {len(frames)} generated frames."
+            )
         start_idx = len(frames) - end_offset - num_cond_frames
         self.video_images = [
             Image.fromarray(np.ascontiguousarray(frames[start_idx + i])) for i in range(num_cond_frames)
@@ -235,8 +244,9 @@ class VideoGenerationWorker:
             config_path = os.path.join(candidate, "config.json")
             if os.path.isfile(config_path):
                 return candidate
-        raise FileNotFoundError("Could not find an LTX2 refine upsampler directory under "
-                                f"{model_root}. Checked: {', '.join(candidates)}")
+        raise FileNotFoundError(
+            f"Could not find an LTX2 refine upsampler directory under {model_root}. Checked: {', '.join(candidates)}"
+        )
 
     def initialize(self, model_config: dict | None = None) -> None:
         """Load (or reload) the LTX2 generator on the visible GPU."""
@@ -255,8 +265,7 @@ class VideoGenerationWorker:
             torch.cuda.empty_cache()
             print(f"[GPU {self.gpu_id}] After cleanup: {self._gpu_mem()}")
 
-        print(f"[GPU {self.gpu_id}] Loading model: "
-              f"{self.current_model_config['model_path']}")
+        print(f"[GPU {self.gpu_id}] Loading model: {self.current_model_config['model_path']}")
         print(f"[GPU {self.gpu_id}] Before model load: {self._gpu_mem()}")
 
         from fastvideo.api.schema import (
@@ -273,8 +282,9 @@ class VideoGenerationWorker:
 
         model_root = maybe_download_model(self.current_model_config["model_path"])
         refine_upsampler_path = self._resolve_refine_upsampler_path(model_root)
-        config_model_path = (self.current_model_config.get("config_model_path")
-                             or self.current_model_config["model_path"])
+        config_model_path = (
+            self.current_model_config.get("config_model_path") or self.current_model_config["model_path"]
+        )
 
         enable_compile = os.getenv("ENABLE_TORCH_COMPILE", "1") == "1"
         compile_mode = "max-autotune-no-cudagraphs" if DREAMVERSE_MAX_AUTOTUNE else None
@@ -327,12 +337,14 @@ class VideoGenerationWorker:
         self.generator = VideoGenerator.from_pretrained(config=generator_config)
         print(f"[GPU {self.gpu_id}] After model load: {self._gpu_mem()}")
 
-        lora_stack = DREAMVERSE_LORA_STACK or ([(DREAMVERSE_LORA_PATH,
-                                                 DREAMVERSE_LORA_STRENGTH)] if DREAMVERSE_LORA_PATH else [])
+        lora_stack = DREAMVERSE_LORA_STACK or (
+            [(DREAMVERSE_LORA_PATH, DREAMVERSE_LORA_STRENGTH)] if DREAMVERSE_LORA_PATH else []
+        )
         for i, (lora_path, lora_strength) in enumerate(lora_stack):
             nickname = DREAMVERSE_LORA_NICKNAME if i == 0 else f"{DREAMVERSE_LORA_NICKNAME}_{i}"
-            print(f"[GPU {self.gpu_id}] Applying LoRA '{nickname}' from {lora_path} "
-                  f"@{lora_strength} accumulate={i > 0}")
+            print(
+                f"[GPU {self.gpu_id}] Applying LoRA '{nickname}' from {lora_path} @{lora_strength} accumulate={i > 0}"
+            )
             self.generator.set_lora_adapter(
                 lora_nickname=nickname,
                 lora_path=lora_path,
@@ -371,8 +383,10 @@ class VideoGenerationWorker:
 
         for i, (lora_path, lora_strength) in enumerate(resolved_stack):
             nickname = DREAMVERSE_LORA_NICKNAME if i == 0 else f"{DREAMVERSE_LORA_NICKNAME}_{i}"
-            print(f"[GPU {self.gpu_id}] Re-applying LoRA '{nickname}' from {lora_path} "
-                  f"@{lora_strength} accumulate={i > 0}")
+            print(
+                f"[GPU {self.gpu_id}] Re-applying LoRA '{nickname}' from {lora_path} "
+                f"@{lora_strength} accumulate={i > 0}"
+            )
             self.generator.set_lora_adapter(
                 lora_nickname=nickname,
                 lora_path=lora_path,
@@ -416,8 +430,7 @@ class VideoGenerationWorker:
 
         audio_vae_path = os.path.join(model_root, "audio_vae")
         if not os.path.isdir(audio_vae_path):
-            print(f"[GPU {self.gpu_id}] audio_vae dir not found at "
-                  f"{audio_vae_path}; disabling re-encode")
+            print(f"[GPU {self.gpu_id}] audio_vae dir not found at {audio_vae_path}; disabling re-encode")
             return
 
         loader = ComponentLoader.for_module_type("audio_encoder", "diffusers")
@@ -433,8 +446,7 @@ class VideoGenerationWorker:
 
         self.audio_encoder_module = target
         self.audio_processor_module = proc
-        print(f"[GPU {self.gpu_id}] Audio encoder loaded for "
-              f"re-encode conditioning ({self._gpu_mem()})")
+        print(f"[GPU {self.gpu_id}] Audio encoder loaded for re-encode conditioning ({self._gpu_mem()})")
 
     def _re_encode_audio(
         self,
@@ -442,7 +454,7 @@ class VideoGenerationWorker:
         sample_rate: int,
     ) -> torch.Tensor | None:
         """Waveform → mel → encoder → latents."""
-        if (self.audio_encoder_module is None or self.audio_processor_module is None):
+        if self.audio_encoder_module is None or self.audio_processor_module is None:
             return None
         device = torch.device("cuda")
         if waveform.ndim == 1:
@@ -497,7 +509,7 @@ class VideoGenerationWorker:
         if reset_conditioning:
             self.continuation.clear()
 
-        audio_lps = (DEFAULT_LTX2_AUDIO_SAMPLE_RATE / DEFAULT_LTX2_AUDIO_HOP_LENGTH / DEFAULT_LTX2_AUDIO_DOWNSAMPLE)
+        audio_lps = DEFAULT_LTX2_AUDIO_SAMPLE_RATE / DEFAULT_LTX2_AUDIO_HOP_LENGTH / DEFAULT_LTX2_AUDIO_DOWNSAMPLE
 
         # Phase 1: seed kwargs with prior-segment conditioning.
         self.continuation.apply_video(request_kwargs, segment_idx)
@@ -519,8 +531,7 @@ class VideoGenerationWorker:
         if audio is not None and audio_sample_rate is None:
             # LTX2 audio decoding stage uses 24kHz output by default.
             audio_sample_rate = 24000
-            print(f"[GPU {self.gpu_id}] audio_sample_rate missing from result; "
-                  f"defaulting to {audio_sample_rate}Hz")
+            print(f"[GPU {self.gpu_id}] audio_sample_rate missing from result; defaulting to {audio_sample_rate}Hz")
 
         timings["generation_time_ms"] = result.get("generation_time", 0.0) * 1000
 
@@ -534,18 +545,21 @@ class VideoGenerationWorker:
         timings["save_conditioning_ms"] = (time.perf_counter() - t_save_start) * 1000
         timings["e2e_latency_ms"] = (time.perf_counter() - t0) * 1000
 
-        print(f"[GPU {self.gpu_id}] LTX2 segment {segment_idx}: "
-              f"{len(frames)} frames, gen={timings['generation_ms']:.0f}ms, "
-              f"save_conditioning={timings['save_conditioning_ms']:.0f}ms, "
-              f"e2e={timings['e2e_latency_ms']:.0f}ms")
+        print(
+            f"[GPU {self.gpu_id}] LTX2 segment {segment_idx}: "
+            f"{len(frames)} frames, gen={timings['generation_ms']:.0f}ms, "
+            f"save_conditioning={timings['save_conditioning_ms']:.0f}ms, "
+            f"e2e={timings['e2e_latency_ms']:.0f}ms"
+        )
 
         # Head-trim values for downstream AV streaming — computed here so
         # the streaming layer never needs to know conditioning constants.
         is_continuation = segment_idx > 1 and not reset_conditioning
-        head_trim_frames = (LTX2_VIDEO_CONDITIONING_NUM_FRAMES if is_continuation else 0)
-        audio_extra = (max(0, AUDIO_CONDITIONING_NUM_FRAMES -
-                           LTX2_VIDEO_CONDITIONING_NUM_FRAMES) if ENABLE_AUDIO_COND else 0)
-        head_trim_audio_frames = (head_trim_frames + audio_extra if is_continuation else 0)
+        head_trim_frames = LTX2_VIDEO_CONDITIONING_NUM_FRAMES if is_continuation else 0
+        audio_extra = (
+            max(0, AUDIO_CONDITIONING_NUM_FRAMES - LTX2_VIDEO_CONDITIONING_NUM_FRAMES) if ENABLE_AUDIO_COND else 0
+        )
+        head_trim_audio_frames = head_trim_frames + audio_extra if is_continuation else 0
 
         return StepResult(
             frames=frames,
@@ -566,20 +580,24 @@ class VideoGenerationWorker:
         """Pick which tensor to cache for next-segment audio conditioning."""
         if not ENABLE_AUDIO_COND:
             return None
-        if (ENABLE_AUDIO_RE_ENCODE and audio is not None and audio_sample_rate is not None):
+        if ENABLE_AUDIO_RE_ENCODE and audio is not None and audio_sample_rate is not None:
             re_encoded = self._re_encode_audio(audio, audio_sample_rate)
             if re_encoded is not None:
-                print(f"[GPU {self.gpu_id}] Re-encoded audio "
-                      f"latents shape="
-                      f"{tuple(re_encoded.shape)} "
-                      f"for segment {segment_idx + 1}")
+                print(
+                    f"[GPU {self.gpu_id}] Re-encoded audio "
+                    f"latents shape="
+                    f"{tuple(re_encoded.shape)} "
+                    f"for segment {segment_idx + 1}"
+                )
                 return re_encoded
             return None
         audio_latents = result.get("ltx2_audio_latents")
         if audio_latents is not None:
-            print(f"[GPU {self.gpu_id}] Cached audio latents "
-                  f"shape={tuple(audio_latents.shape)} "
-                  f"for segment {segment_idx + 1}")
+            print(
+                f"[GPU {self.gpu_id}] Cached audio latents "
+                f"shape={tuple(audio_latents.shape)} "
+                f"for segment {segment_idx + 1}"
+            )
             return audio_latents
         return None
 
@@ -588,8 +606,7 @@ class VideoGenerationWorker:
         if not warmup_prompt:
             raise RuntimeError("Startup warmup prompt must be non-empty.")
 
-        print(f"[GPU {self.gpu_id}] Startup warmup starting "
-              "(synthetic segments: seg1, seg2, seg1-post-LoRA)")
+        print(f"[GPU {self.gpu_id}] Startup warmup starting (synthetic segments: seg1, seg2, seg1-post-LoRA)")
         warmup_t0 = time.perf_counter()
 
         r1 = self.generate_step(
@@ -626,10 +643,12 @@ class VideoGenerationWorker:
         segment1_ms = float(r1.timings.get("e2e_latency_ms", 0.0))
         segment2_ms = float(r2.timings.get("e2e_latency_ms", 0.0))
         segment3_ms = float(r3.timings.get("e2e_latency_ms", 0.0))
-        print(f"[GPU {self.gpu_id}] Startup warmup complete: "
-              f"segment1={segment1_ms:.0f}ms, "
-              f"segment2={segment2_ms:.0f}ms, "
-              f"segment3={segment3_ms:.0f}ms, total={warmup_total_ms:.0f}ms")
+        print(
+            f"[GPU {self.gpu_id}] Startup warmup complete: "
+            f"segment1={segment1_ms:.0f}ms, "
+            f"segment2={segment2_ms:.0f}ms, "
+            f"segment3={segment3_ms:.0f}ms, total={warmup_total_ms:.0f}ms"
+        )
         return {
             "warmup_segment1_ms": segment1_ms,
             "warmup_segment2_ms": segment2_ms,

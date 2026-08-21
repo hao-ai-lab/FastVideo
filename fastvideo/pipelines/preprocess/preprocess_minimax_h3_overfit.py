@@ -69,12 +69,15 @@ def load_training_media(path: Path) -> tuple[np.ndarray, torch.Tensor]:
     decoded_frames, source_fps, soundtrack = decode_reference_video(path)
     resampled_frames = resample_reference_frames(decoded_frames, source_fps)
     if resampled_frames.shape[0] < NUM_FRAMES:
-        raise ValueError(f"Training video {path} has {resampled_frames.shape[0]} frames at {MINIMAX_H3_FPS} FPS; "
-                         f"{NUM_FRAMES} are required")
+        raise ValueError(
+            f"Training video {path} has {resampled_frames.shape[0]} frames at {MINIMAX_H3_FPS} FPS; "
+            f"{NUM_FRAMES} are required"
+        )
     frames = prepare_reference_frames(resampled_frames, NUM_FRAMES)
     if frames.shape != (NUM_FRAMES, VIDEO_HEIGHT, VIDEO_WIDTH, 3):
-        raise ValueError(f"Training video must resolve to {(NUM_FRAMES, VIDEO_HEIGHT, VIDEO_WIDTH, 3)}, "
-                         f"got {tuple(frames.shape)}")
+        raise ValueError(
+            f"Training video must resolve to {(NUM_FRAMES, VIDEO_HEIGHT, VIDEO_WIDTH, 3)}, got {tuple(frames.shape)}"
+        )
     if soundtrack is None:
         raise ValueError(f"Training video {path} requires a soundtrack")
     waveform, source_sample_rate = soundtrack
@@ -251,17 +254,19 @@ def build_parquet_record(
         record[f"{name}_bytes"] = tensor.numpy().tobytes()
         record[f"{name}_shape"] = list(tensor.shape)
         record[f"{name}_dtype"] = "float32"
-    record.update({
-        "file_name": file_name,
-        "caption": caption,
-        "media_type": "video_with_audio",
-        "width": VIDEO_WIDTH,
-        "height": VIDEO_HEIGHT,
-        "num_frames": NUM_FRAMES,
-        "duration_sec": NUM_FRAMES / MINIMAX_H3_FPS,
-        "fps": float(MINIMAX_H3_FPS),
-        "audio_sample_rate": AUDIO_SAMPLE_RATE,
-    })
+    record.update(
+        {
+            "file_name": file_name,
+            "caption": caption,
+            "media_type": "video_with_audio",
+            "width": VIDEO_WIDTH,
+            "height": VIDEO_HEIGHT,
+            "num_frames": NUM_FRAMES,
+            "duration_sec": NUM_FRAMES / MINIMAX_H3_FPS,
+            "fps": float(MINIMAX_H3_FPS),
+            "audio_sample_rate": AUDIO_SAMPLE_RATE,
+        }
+    )
     return record
 
 
@@ -278,8 +283,7 @@ def write_parquet(record: dict[str, Any], output_dir: Path) -> Path:
     # replacement shard set requires cache reconstruction.
     shutil.rmtree(output_dir / "map_style_cache", ignore_errors=True)
     table = pa.table(
-        {name: [record[name]]
-         for name in pyarrow_schema_t2va.names},
+        {name: [record[name]] for name in pyarrow_schema_t2va.names},
         schema=pyarrow_schema_t2va,
     )
     output_path = output_dir / "data_00000.parquet"

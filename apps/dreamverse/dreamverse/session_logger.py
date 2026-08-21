@@ -14,7 +14,6 @@ def _utc_now_iso() -> str:
 
 
 class SessionEventLogger:
-
     def __init__(self, root_dir: Path):
         self.hostname = socket.gethostname()
         timestamp = datetime.now(timezone.utc).strftime("%y%m%d_%H%M%S_%f")

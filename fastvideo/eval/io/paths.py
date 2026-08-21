@@ -5,6 +5,7 @@ Provides the prompt-sanitization, default filename convention, and
 class — :class:`fastvideo.eval.Evaluator` is the only stateful object
 in the eval surface; loops live in user scripts.
 """
+
 from __future__ import annotations
 
 import re

@@ -4,6 +4,7 @@ Single source of truth: upstream's ``VBench_full_info.json`` (946 entries,
 each with ``prompt_en``, a ``dimension`` list, optional ``auxiliary_info``
 keyed by dimension).
 """
+
 from __future__ import annotations
 
 import json
@@ -36,9 +37,11 @@ def _locate_full_info() -> Path:
             return candidate
         if (ancestor / ".git").exists():
             break
-    raise FileNotFoundError("Could not locate VBench_full_info.json. Initialize the upstream "
-                            "submodule (`git submodule update --init "
-                            "fastvideo/third_party/eval/vbench`) or set VBENCH_FULL_INFO_JSON.")
+    raise FileNotFoundError(
+        "Could not locate VBench_full_info.json. Initialize the upstream "
+        "submodule (`git submodule update --init "
+        "fastvideo/third_party/eval/vbench`) or set VBENCH_FULL_INFO_JSON."
+    )
 
 
 @register_dataset("vbench")
@@ -55,8 +58,7 @@ class VBenchPromptDataset(PromptDataset):
     its ``dimensions`` list carries all matches so the scorer can route.
     """
 
-    description = ("VBench (Vchitect) prompt corpus, 946 prompts across 16 "
-                   "evaluation dimensions.")
+    description = "VBench (Vchitect) prompt corpus, 946 prompts across 16 evaluation dimensions."
     supports_dimensions = True
 
     def __init__(
@@ -75,8 +77,7 @@ class VBenchPromptDataset(PromptDataset):
         else:
             unknown = set(dimensions) - set(all_dims)
             if unknown:
-                raise ValueError(f"Unknown VBench dimensions: {sorted(unknown)}. "
-                                 f"Available: {all_dims}")
+                raise ValueError(f"Unknown VBench dimensions: {sorted(unknown)}. Available: {all_dims}")
             self.dimensions = list(dimensions)
 
         wanted = set(self.dimensions)
@@ -84,7 +85,7 @@ class VBenchPromptDataset(PromptDataset):
             relevant = [d for d in entry["dimension"] if d in wanted]
             if not relevant:
                 continue
-            n = (TEMPORAL_FLICKERING_SAMPLES if "temporal_flickering" in relevant else DEFAULT_SAMPLES)
+            n = TEMPORAL_FLICKERING_SAMPLES if "temporal_flickering" in relevant else DEFAULT_SAMPLES
 
             # Strip the outer {dim_name: ...} wrapper from upstream's aux
             # schema so every metric reads its inputs from a flat dict.
@@ -117,10 +118,12 @@ class VBenchPromptDataset(PromptDataset):
                 if isinstance(v, dict):
                     flat_aux.update(v)
 
-            self._rows.append({
-                "prompt": entry["prompt_en"],
-                "n_samples": n,
-                "dimensions": relevant,
-                "auxiliary_info": flat_aux,
-            })
+            self._rows.append(
+                {
+                    "prompt": entry["prompt_en"],
+                    "n_samples": n,
+                    "dimensions": relevant,
+                    "auxiliary_info": flat_aux,
+                }
+            )
         self.full_info_path = path

@@ -7,6 +7,7 @@ Kept in-repo under ``fastvideo/entrypoints/streaming/router/`` per the
 PR plan's default; the alternative (separate package) is an open
 question deferred to review.
 """
+
 from fastvideo.entrypoints.streaming.router.registry import (
     Replica,
     ReplicaHealth,

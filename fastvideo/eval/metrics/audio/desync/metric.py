@@ -62,7 +62,7 @@ def _video_transform(frames: torch.Tensor) -> torch.Tensor:
     frames = F.interpolate(frames, size=(new_h, new_w), mode="bicubic", align_corners=False, antialias=True)
     top = (new_h - _SYNC_SIZE) // 2
     left = (new_w - _SYNC_SIZE) // 2
-    frames = frames[:, :, top:top + _SYNC_SIZE, left:left + _SYNC_SIZE]
+    frames = frames[:, :, top : top + _SYNC_SIZE, left : left + _SYNC_SIZE]
     return (frames - 0.5) / 0.5  # mean/std=0.5 per channel
 
 
@@ -72,7 +72,7 @@ def _segment_video(frames: torch.Tensor) -> torch.Tensor:
     num_segments = (t - _VIDEO_SEG_FRAMES) // _VIDEO_SEG_STEP + 1
     if num_segments <= 0:
         raise ValueError(f"video too short for Synchformer segmenting (got {t} frames)")
-    segs = [frames[i * _VIDEO_SEG_STEP:i * _VIDEO_SEG_STEP + _VIDEO_SEG_FRAMES] for i in range(num_segments)]
+    segs = [frames[i * _VIDEO_SEG_STEP : i * _VIDEO_SEG_STEP + _VIDEO_SEG_FRAMES] for i in range(num_segments)]
     return torch.stack(segs, dim=0)
 
 
@@ -88,10 +88,12 @@ def _load_audio_waveform(audio_path: str, resample_cache: dict[int, Any]) -> tor
     resampler below is identical to before.
     """
     import librosa
+
     waveform_np, sr = librosa.load(audio_path, sr=None, mono=True)
     waveform = torch.from_numpy(waveform_np)
     if sr != _AUDIO_SR:
         import torchaudio
+
         if sr not in resample_cache:
             resample_cache[sr] = torchaudio.transforms.Resample(sr, _AUDIO_SR)
         waveform = resample_cache[sr](waveform)
@@ -121,7 +123,7 @@ def _encode_audio_segments(synchformer: Any, waveform: torch.Tensor, mel_transfo
     num_segments = max(1, (t - _AUDIO_SEG_SAMPLES) // _AUDIO_SEG_STEP + 1)
     segments = []
     for i in range(num_segments):
-        seg = waveform[:, i * _AUDIO_SEG_STEP:i * _AUDIO_SEG_STEP + _AUDIO_SEG_SAMPLES]
+        seg = waveform[:, i * _AUDIO_SEG_STEP : i * _AUDIO_SEG_STEP + _AUDIO_SEG_SAMPLES]
         if seg.shape[1] < _AUDIO_SEG_SAMPLES:
             seg = F.pad(seg, (0, _AUDIO_SEG_SAMPLES - seg.shape[1]))
         segments.append(seg)
@@ -210,6 +212,7 @@ class DeSyncMetric(BaseMetric):
         # Synchformer's extract_vfeats wants (B, S, T_seg, C, H, W); fold (B, S) → (B*S, 1, ...).
         b, s = vsegs.shape[:2]
         from einops import rearrange
+
         vsegs_for_model = rearrange(vsegs, "b s t c h w -> (b s) 1 t c h w")
         vfeats = self._model.extract_vfeats(vsegs_for_model)
         vfeats = rearrange(vfeats, "(b s) 1 t d -> b s t d", b=b)  # (1, S, t_v, D)

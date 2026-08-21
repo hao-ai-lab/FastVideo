@@ -9,6 +9,7 @@ write back into a result list in input order.
 
 Pool sizing: ``max_size = prefetch_factor * num_workers``.
 """
+
 from __future__ import annotations
 
 import queue
@@ -28,7 +29,7 @@ class _DecodeError:
     ``_ready_q.get()`` forever.
     """
 
-    __slots__ = ("exc", )
+    __slots__ = ("exc",)
 
     def __init__(self, exc: BaseException) -> None:
         self.exc = exc

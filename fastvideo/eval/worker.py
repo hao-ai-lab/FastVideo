@@ -11,6 +11,7 @@ but in-process (threads, not processes) — eval metrics are independent
 and need no NCCL / TP / SP / distributed init, so process isolation is
 unnecessary overhead.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -34,13 +35,15 @@ class EvalWorker:
     Evaluator finalizes them after the pool drains.
     """
 
-    def __init__(self,
-                 metric_names: list[str],
-                 device: str,
-                 *,
-                 compile: bool = False,
-                 pre_upload: bool = True,
-                 skip_missing_deps: bool = False) -> None:
+    def __init__(
+        self,
+        metric_names: list[str],
+        device: str,
+        *,
+        compile: bool = False,
+        pre_upload: bool = True,
+        skip_missing_deps: bool = False,
+    ) -> None:
         self._names = list(metric_names)
         self._device = device
         self._compile = compile
@@ -71,6 +74,7 @@ class EvalWorker:
                 # vbench upstream pulling decord from its utils.py).
                 if self._skip_missing_deps:
                     import logging
+
                     logging.getLogger(__name__).warning("eval: skipping %s; setup-time import failed: %s", name, e)
                     continue
                 raise
@@ -142,6 +146,7 @@ class EvalWorker:
                 if not self._skip_missing_deps:
                     raise
                 import logging
+
                 logging.getLogger(__name__).exception("eval: dropping %s after %s: %s", name, type(e).__name__, e)
                 broken.append(name)
         for n in broken:

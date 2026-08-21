@@ -57,6 +57,7 @@ class ThirdPersonCalibration:
     means tilted down — typical over-the-shoulder framing). User mouse-pitch
     input is integrated on top of this baseline.
     """
+
     alpha_yaw: float
     alpha_pitch: float
     alpha_turn: float
@@ -134,19 +135,23 @@ class ThirdPersonFlowGenerator:
             omega_y += cal.alpha_turn * (kb[5] - kb[4])
         omega = np.array([omega_x, omega_y, 0.0])
 
-        T_avatar = np.array([
-            cal.beta_strafe * (kb[3] - kb[2]),
-            0.0,
-            cal.beta_fwd * (kb[0] - kb[1]),
-        ])
+        T_avatar = np.array(
+            [
+                cal.beta_strafe * (kb[3] - kb[2]),
+                0.0,
+                cal.beta_fwd * (kb[0] - kb[1]),
+            ]
+        )
 
         # T_orbit = -(omega x r) with r = (0, r_y, r_z).
         # cross([wx,wy,0], [0,ry,rz]) = (wy*rz, -wx*rz, wx*ry)
-        T_orbit = -np.array([
-            omega[1] * cal.r_z,
-            -omega[0] * cal.r_z,
-            omega[0] * cal.r_y,
-        ])
+        T_orbit = -np.array(
+            [
+                omega[1] * cal.r_z,
+                -omega[0] * cal.r_z,
+                omega[0] * cal.r_y,
+            ]
+        )
         return omega, T_avatar + T_orbit
 
     def _flow_from_kinematics(self, omega: np.ndarray, T: np.ndarray) -> np.ndarray:

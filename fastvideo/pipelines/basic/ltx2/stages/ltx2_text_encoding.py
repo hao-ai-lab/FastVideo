@@ -21,7 +21,7 @@ logger = init_logger(__name__)
 class LTX2TextEncodingStage(TextEncodingStage):
     """
     LTX2 text encoding stage with sequence parallelism support.
-    
+
     When SP is enabled (sp_world_size > 1), only rank 0 runs the text encoder
     and broadcasts embeddings to other ranks. This avoids I/O contention from
     all ranks loading the Gemma model simultaneously, which can cause text
@@ -64,8 +64,9 @@ class LTX2TextEncodingStage(TextEncodingStage):
             # Unpack into batch
             self._unpack_broadcast_to_batch(batch, broadcast_dict)
 
-            logger.info("[LTX2TextEncodingStage] SP rank %d: received %d prompt embeds", sp_rank,
-                        len(batch.prompt_embeds))
+            logger.info(
+                "[LTX2TextEncodingStage] SP rank %d: received %d prompt embeds", sp_rank, len(batch.prompt_embeds)
+            )
 
             return batch
 
@@ -83,14 +84,14 @@ class LTX2TextEncodingStage(TextEncodingStage):
             d[f"prompt_embed_{i}"] = pe
 
         # Prompt attention masks
-        has_prompt_masks = (batch.prompt_attention_mask is not None and len(batch.prompt_attention_mask) > 0)
+        has_prompt_masks = batch.prompt_attention_mask is not None and len(batch.prompt_attention_mask) > 0
         d["_has_prompt_masks"] = torch.tensor([1 if has_prompt_masks else 0], device=device)
         if has_prompt_masks:
             for i, pm in enumerate(batch.prompt_attention_mask):
                 d[f"prompt_mask_{i}"] = pm
 
         # Negative embeddings (CFG)
-        has_neg_embeds = (batch.negative_prompt_embeds is not None and len(batch.negative_prompt_embeds) > 0)
+        has_neg_embeds = batch.negative_prompt_embeds is not None and len(batch.negative_prompt_embeds) > 0
         d["_has_neg_embeds"] = torch.tensor([1 if has_neg_embeds else 0], device=device)
         if has_neg_embeds:
             d["_num_neg_embeds"] = torch.tensor([len(batch.negative_prompt_embeds)], device=device)
@@ -98,7 +99,7 @@ class LTX2TextEncodingStage(TextEncodingStage):
                 d[f"neg_embed_{i}"] = ne
 
             # Negative attention masks
-            has_neg_masks = (batch.negative_attention_mask is not None and len(batch.negative_attention_mask) > 0)
+            has_neg_masks = batch.negative_attention_mask is not None and len(batch.negative_attention_mask) > 0
             d["_has_neg_masks"] = torch.tensor([1 if has_neg_masks else 0], device=device)
             if has_neg_masks:
                 for i, nm in enumerate(batch.negative_attention_mask):

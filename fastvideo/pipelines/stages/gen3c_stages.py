@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-GEN3C-specific pipeline stages, allowing us to keep conditioning/latent/denoising logic 
+GEN3C-specific pipeline stages, allowing us to keep conditioning/latent/denoising logic
 separate from pipeline orchestration.
 """
 
@@ -45,8 +45,8 @@ class Gen3CCFGPolicyStage(PipelineStage):
 
         if policy == "official_uncond_at_unity":
             batch.do_classifier_free_guidance = batch.guidance_scale >= 1.0
-            has_negative_embeds = (batch.negative_prompt_embeds is not None and len(batch.negative_prompt_embeds) > 0)
-            if (batch.do_classifier_free_guidance and batch.negative_prompt is None and not has_negative_embeds):
+            has_negative_embeds = batch.negative_prompt_embeds is not None and len(batch.negative_prompt_embeds) > 0
+            if batch.do_classifier_free_guidance and batch.negative_prompt is None and not has_negative_embeds:
                 batch.negative_prompt = getattr(pipeline_config, "default_negative_prompt", "")
             return batch
 
@@ -74,7 +74,8 @@ class Gen3CConditioningStage(PipelineStage):
     def _get_moge_model(self, device: torch.device, model_name: str) -> Any:
         """Lazy-load MoGe model on first use and ensure it is on target device."""
         if self._moge_model is None:
-            from fastvideo.pipelines.basic.gen3c.depth_estimation import (load_moge_model)
+            from fastvideo.pipelines.basic.gen3c.depth_estimation import load_moge_model
+
             self._moge_model = load_moge_model(model_name, device)
         else:
             first_param = next(self._moge_model.parameters(), None)
@@ -99,32 +100,40 @@ class Gen3CConditioningStage(PipelineStage):
         device = get_local_torch_device()
         batch_extra = getattr(batch, "extra", {}) or {}
 
-        image_path = getattr(batch, 'image_path', None) or batch_extra.get("image_path")
+        image_path = getattr(batch, "image_path", None) or batch_extra.get("image_path")
         if image_path is None:
-            logger.info("No image_path provided - skipping 3D cache conditioning "
-                        "(will use zero conditioning)")
+            logger.info("No image_path provided - skipping 3D cache conditioning (will use zero conditioning)")
             return batch
 
         logger.info("Running 3D cache conditioning with image: %s", image_path)
 
-        height = getattr(batch, 'height', None) or getattr(pipeline_config, 'video_resolution', (720, 1280))[0]
-        width = getattr(batch, 'width', None) or getattr(pipeline_config, 'video_resolution', (720, 1280))[1]
-        num_frames = getattr(batch, 'num_frames', None) or getattr(pipeline_config, 'num_frames', 121)
+        height = getattr(batch, "height", None) or getattr(pipeline_config, "video_resolution", (720, 1280))[0]
+        width = getattr(batch, "width", None) or getattr(pipeline_config, "video_resolution", (720, 1280))[1]
+        num_frames = getattr(batch, "num_frames", None) or getattr(pipeline_config, "num_frames", 121)
 
-        trajectory_type = (getattr(batch, 'trajectory_type', None) or batch_extra.get("trajectory_type")
-                           or getattr(pipeline_config, 'default_trajectory_type', 'left'))
-        movement_distance = (getattr(batch, 'movement_distance', None) or batch_extra.get("movement_distance")
-                             or getattr(pipeline_config, 'default_movement_distance', 0.3))
-        camera_rotation = (getattr(batch, 'camera_rotation', None) or batch_extra.get("camera_rotation")
-                           or getattr(pipeline_config, 'default_camera_rotation', 'center_facing'))
+        trajectory_type = (
+            getattr(batch, "trajectory_type", None)
+            or batch_extra.get("trajectory_type")
+            or getattr(pipeline_config, "default_trajectory_type", "left")
+        )
+        movement_distance = (
+            getattr(batch, "movement_distance", None)
+            or batch_extra.get("movement_distance")
+            or getattr(pipeline_config, "default_movement_distance", 0.3)
+        )
+        camera_rotation = (
+            getattr(batch, "camera_rotation", None)
+            or batch_extra.get("camera_rotation")
+            or getattr(pipeline_config, "default_camera_rotation", "center_facing")
+        )
 
-        frame_buffer_max = getattr(pipeline_config, 'frame_buffer_max', 2)
-        noise_aug_strength = getattr(pipeline_config, 'noise_aug_strength', 0.0)
-        filter_points_threshold = getattr(pipeline_config, 'filter_points_threshold', 0.05)
+        frame_buffer_max = getattr(pipeline_config, "frame_buffer_max", 2)
+        noise_aug_strength = getattr(pipeline_config, "noise_aug_strength", 0.0)
+        filter_points_threshold = getattr(pipeline_config, "filter_points_threshold", 0.05)
 
-        moge_model_name = getattr(pipeline_config, 'moge_model_name', 'Ruicheng/moge-vitl')
+        moge_model_name = getattr(pipeline_config, "moge_model_name", "Ruicheng/moge-vitl")
 
-        from fastvideo.pipelines.basic.gen3c.depth_estimation import (predict_depth_from_path)
+        from fastvideo.pipelines.basic.gen3c.depth_estimation import predict_depth_from_path
 
         moge_model = self._get_moge_model(device, moge_model_name)
 
@@ -144,7 +153,7 @@ class Gen3CConditioningStage(PipelineStage):
 
         from fastvideo.pipelines.basic.gen3c.cache_3d import Cache3DBuffer
 
-        seed = getattr(batch, 'seed', None)
+        seed = getattr(batch, "seed", None)
         if seed is None:
             seed = 42
         generator = torch.Generator(device=device).manual_seed(seed)
@@ -162,7 +171,7 @@ class Gen3CConditioningStage(PipelineStage):
 
         logger.info("3D cache initialized with %d frame buffer(s)", frame_buffer_max)
 
-        from fastvideo.pipelines.basic.gen3c.camera_utils import (generate_camera_trajectory)
+        from fastvideo.pipelines.basic.gen3c.camera_utils import generate_camera_trajectory
 
         initial_w2c = w2c_b144[0, 0]
         initial_intrinsics = intrinsics_b133[0, 0]
@@ -237,13 +246,13 @@ class Gen3CLatentPreparationStage(LatentPreparationStage):
             batch_size = batch.prompt_embeds[0].shape[0]
         batch_size *= batch.num_videos_per_prompt
 
-        num_channels_latents = getattr(self.transformer, 'num_channels_latents', 16)
+        num_channels_latents = getattr(self.transformer, "num_channels_latents", 16)
 
-        fallback_num_frames = getattr(pipeline_config, 'num_frames', 121)
+        fallback_num_frames = getattr(pipeline_config, "num_frames", 121)
         if not isinstance(fallback_num_frames, int):
             fallback_num_frames = 121
 
-        num_frames_raw = getattr(batch, 'num_frames', None)
+        num_frames_raw = getattr(batch, "num_frames", None)
         if num_frames_raw is None:
             num_frames_raw = fallback_num_frames
         if isinstance(num_frames_raw, list):
@@ -261,8 +270,8 @@ class Gen3CLatentPreparationStage(LatentPreparationStage):
                 4,
             )
             latent_frames = int((num_frames - 1) // temporal_ratio + 1)
-        height = getattr(batch, 'height', 720)
-        width = getattr(batch, 'width', 1280)
+        height = getattr(batch, "height", 720)
+        width = getattr(batch, "width", 1280)
 
         spatial_ratio = getattr(
             pipeline_config.vae_config.arch_config,
@@ -289,7 +298,7 @@ class Gen3CLatentPreparationStage(LatentPreparationStage):
             dtype=torch.float32,
         )
 
-        if hasattr(self.scheduler, 'init_noise_sigma'):
+        if hasattr(self.scheduler, "init_noise_sigma"):
             latents = latents * self.scheduler.init_noise_sigma
 
         batch.latents = latents
@@ -301,12 +310,12 @@ class Gen3CLatentPreparationStage(LatentPreparationStage):
         batch.latent_frames = latent_frames
         batch.raw_latent_shape = latents.shape
 
-        frame_buffer_max = getattr(pipeline_config, 'frame_buffer_max', 2)
+        frame_buffer_max = getattr(pipeline_config, "frame_buffer_max", 2)
         channels_per_buffer = 32
         buffer_channels = frame_buffer_max * channels_per_buffer
 
-        rendered_warp_images = getattr(batch, 'rendered_warp_images', None)
-        rendered_warp_masks = getattr(batch, 'rendered_warp_masks', None)
+        rendered_warp_images = getattr(batch, "rendered_warp_images", None)
+        rendered_warp_masks = getattr(batch, "rendered_warp_masks", None)
 
         if rendered_warp_images is not None and rendered_warp_masks is not None:
             logger.info(
@@ -316,7 +325,7 @@ class Gen3CLatentPreparationStage(LatentPreparationStage):
 
             self.vae = self.vae.to(device)
 
-            if hasattr(self.vae, 'module'):
+            if hasattr(self.vae, "module"):
                 vae_dtype = next(self.vae.module.parameters()).dtype
             else:
                 vae_dtype = next(self.vae.parameters()).dtype
@@ -350,7 +359,7 @@ class Gen3CLatentPreparationStage(LatentPreparationStage):
                 device=device,
                 dtype=first_latent.dtype,
             )
-            conditioning_latents[:, :, :first_latent.shape[2], :, :] = first_latent
+            conditioning_latents[:, :, : first_latent.shape[2], :, :] = first_latent
             batch.conditioning_latents = conditioning_latents
 
             if fastvideo_args.vae_cpu_offload:
@@ -544,9 +553,9 @@ class Gen3CDenoisingStage(DenoisingStage):
         augment_latent = latent + noise * augment_sigma
         augment_latent = self._precondition_inputs(augment_latent, condition_augment_sigma)
         if self._has_edm_preconditioning():
-            augment_latent_unscaled = self._reverse_precondition_input(augment_latent,
-                                                                       sigma=sigma,
-                                                                       sigma_data=sigma_data)
+            augment_latent_unscaled = self._reverse_precondition_input(
+                augment_latent, sigma=sigma, sigma_data=sigma_data
+            )
         else:
             augment_latent_unscaled = augment_latent
 
@@ -568,13 +577,10 @@ class Gen3CDenoisingStage(DenoisingStage):
 
         extra_step_kwargs = self.prepare_extra_func_kwargs(
             self.scheduler.step,
-            {
-                "generator": batch.generator,
-                "eta": batch.eta
-            },
+            {"generator": batch.generator, "eta": batch.eta},
         )
 
-        if hasattr(self.transformer, 'module'):
+        if hasattr(self.transformer, "module"):
             transformer_dtype = next(self.transformer.module.parameters()).dtype
         else:
             transformer_dtype = next(self.transformer.parameters()).dtype
@@ -584,24 +590,24 @@ class Gen3CDenoisingStage(DenoisingStage):
         latents = batch.latents
         num_inference_steps = batch.num_inference_steps
         guidance_scale = batch.guidance_scale
-        fps = getattr(fastvideo_args.pipeline_config, 'fps', 24)
+        fps = getattr(fastvideo_args.pipeline_config, "fps", 24)
         sigma_data = float(getattr(fastvideo_args.pipeline_config, "sigma_data", 0.5))
         condition_augment_sigma = float(getattr(fastvideo_args.pipeline_config, "sigma_conditional", 0.001))
 
         self.scheduler.set_timesteps(num_inference_steps, device=latents.device)
         timesteps = self.scheduler.timesteps
 
-        condition_video_input_mask = getattr(batch, 'condition_video_input_mask', None)
-        condition_video_pose = getattr(batch, 'condition_video_pose', None)
-        condition_video_augment_sigma = getattr(batch, 'condition_video_augment_sigma', None)
-        conditioning_latents = getattr(batch, 'conditioning_latents', None)
+        condition_video_input_mask = getattr(batch, "condition_video_input_mask", None)
+        condition_video_pose = getattr(batch, "condition_video_pose", None)
+        condition_video_augment_sigma = getattr(batch, "condition_video_augment_sigma", None)
+        conditioning_latents = getattr(batch, "conditioning_latents", None)
         cond_indicator = getattr(batch, "cond_indicator", None)
         unconditioning_latents = conditioning_latents
         uncond_indicator = getattr(batch, "uncond_indicator", None)
 
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
-                if hasattr(self, 'interrupt') and self.interrupt:
+                if hasattr(self, "interrupt") and self.interrupt:
                     continue
 
                 self.scheduler._init_step_index(t)
@@ -610,8 +616,8 @@ class Gen3CDenoisingStage(DenoisingStage):
                 model_input = latents
                 latent_for_replace = conditioning_latents
                 indicator_for_replace = cond_indicator
-                if (conditioning_latents is not None and cond_indicator is not None):
-                    model_input, latent_for_replace, indicator_for_replace = (self._augment_noise_with_latent(
+                if conditioning_latents is not None and cond_indicator is not None:
+                    model_input, latent_for_replace, indicator_for_replace = self._augment_noise_with_latent(
                         latents,
                         sigma=sigma,
                         latent=conditioning_latents,
@@ -619,7 +625,7 @@ class Gen3CDenoisingStage(DenoisingStage):
                         condition_augment_sigma=condition_augment_sigma,
                         sigma_data=sigma_data,
                         generator=batch.generator,
-                    ))
+                    )
 
                 timestep = t.flatten().expand(latents.size(0))
                 padding_mask = torch.zeros(
@@ -635,9 +641,9 @@ class Gen3CDenoisingStage(DenoisingStage):
                     model_input_scaled = self.scheduler.scale_model_input(model_input, timestep=t).to(target_dtype)
 
                     with set_forward_context(
-                            current_timestep=i,
-                            attn_metadata=None,
-                            forward_batch=batch,
+                        current_timestep=i,
+                        attn_metadata=None,
+                        forward_batch=batch,
                     ):
                         noise_pred = self.transformer(
                             hidden_states=model_input_scaled,
@@ -645,11 +651,14 @@ class Gen3CDenoisingStage(DenoisingStage):
                             encoder_hidden_states=batch.prompt_embeds[0].to(target_dtype),
                             fps=fps,
                             condition_video_input_mask=condition_video_input_mask.to(target_dtype)
-                            if condition_video_input_mask is not None else None,
+                            if condition_video_input_mask is not None
+                            else None,
                             condition_video_pose=condition_video_pose.to(target_dtype)
-                            if condition_video_pose is not None else None,
+                            if condition_video_pose is not None
+                            else None,
                             condition_video_augment_sigma=condition_video_augment_sigma
-                            if condition_video_augment_sigma is not None else None,
+                            if condition_video_augment_sigma is not None
+                            else None,
                             padding_mask=padding_mask,
                         )
 
@@ -659,12 +668,13 @@ class Gen3CDenoisingStage(DenoisingStage):
 
                     if batch.do_classifier_free_guidance and batch.negative_prompt_embeds is not None:
                         with set_forward_context(
-                                current_timestep=i,
-                                attn_metadata=None,
-                                forward_batch=batch,
+                            current_timestep=i,
+                            attn_metadata=None,
+                            forward_batch=batch,
                         ):
-                            uncond_pose = torch.zeros_like(
-                                condition_video_pose) if condition_video_pose is not None else None
+                            uncond_pose = (
+                                torch.zeros_like(condition_video_pose) if condition_video_pose is not None else None
+                            )
 
                             uncond_noise_pred = self.transformer(
                                 hidden_states=model_input_scaled,
@@ -672,10 +682,12 @@ class Gen3CDenoisingStage(DenoisingStage):
                                 encoder_hidden_states=batch.negative_prompt_embeds[0].to(target_dtype),
                                 fps=fps,
                                 condition_video_input_mask=condition_video_input_mask.to(target_dtype)
-                                if condition_video_input_mask is not None else None,
+                                if condition_video_input_mask is not None
+                                else None,
                                 condition_video_pose=uncond_pose.to(target_dtype) if uncond_pose is not None else None,
                                 condition_video_augment_sigma=condition_video_augment_sigma
-                                if condition_video_augment_sigma is not None else None,
+                                if condition_video_augment_sigma is not None
+                                else None,
                                 padding_mask=padding_mask,
                             )
 
@@ -688,7 +700,7 @@ class Gen3CDenoisingStage(DenoisingStage):
                         pred = cond_pred
 
                 model_output = pred
-                if (latent_for_replace is not None and indicator_for_replace is not None):
+                if latent_for_replace is not None and indicator_for_replace is not None:
                     if self._has_edm_preconditioning():
                         latent_unscaled = self._reverse_precondition_output(
                             latent_for_replace,

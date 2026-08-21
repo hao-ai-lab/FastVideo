@@ -4,7 +4,7 @@ from typing import Any
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.worker.gpu_worker import Worker
-from fastvideo.utils import (run_method, update_environment_variables)
+from fastvideo.utils import run_method, update_environment_variables
 
 logger = init_logger(__name__)
 
@@ -50,7 +50,7 @@ class WorkerWrapperBase:
 
     def update_environment_variables(self, envs_list: list[dict[str, str]]) -> None:
         envs = envs_list[self.rpc_rank]
-        key = 'CUDA_VISIBLE_DEVICES'
+        key = "CUDA_VISIBLE_DEVICES"
         if key in envs and key in os.environ:
             # overwriting CUDA_VISIBLE_DEVICES is desired behavior
             # suppress the warning in `update_environment_variables`
@@ -64,7 +64,7 @@ class WorkerWrapperBase:
         """
         kwargs = all_kwargs[self.rpc_rank]
         self.fastvideo_args = kwargs.get("fastvideo_args")
-        assert self.fastvideo_args is not None, ("fastvideo_args is required to initialize the worker")
+        assert self.fastvideo_args is not None, "fastvideo_args is required to initialize the worker"
 
         self.worker = Worker(**kwargs)
         assert self.worker is not None
@@ -81,8 +81,7 @@ class WorkerWrapperBase:
             # exceptions in the rest worker may cause deadlock in rpc like ray
             # see https://github.com/vllm-project/vllm/issues/3455
             # print the error and inform the user to solve the error
-            msg = (f"Error executing method {method!r}. "
-                   "This might cause deadlock in distributed execution.")
+            msg = f"Error executing method {method!r}. This might cause deadlock in distributed execution."
             logger.exception(msg)
             raise e
 

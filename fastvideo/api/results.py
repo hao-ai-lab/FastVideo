@@ -38,7 +38,9 @@ class GenerationResult:
 
         extra = {
             key: value
-            for key, value in result.items() if key not in {
+            for key, value in result.items()
+            if key
+            not in {
                 "prompt",
                 "prompt_index",
                 "prompts",

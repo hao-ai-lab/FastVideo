@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """Hunyuan 1.5 model family pipeline presets."""
+
 import numpy as np
 
 from fastvideo.api.presets import InferencePreset, PresetStageSpec
@@ -14,19 +15,23 @@ _DENOISE_STAGE = PresetStageSpec(
     name="denoise",
     kind="denoising",
     description="Main denoising pass",
-    allowed_overrides=frozenset({
-        "num_inference_steps",
-        "guidance_scale",
-    }),
+    allowed_overrides=frozenset(
+        {
+            "num_inference_steps",
+            "guidance_scale",
+        }
+    ),
 )
 
 _SR_STAGE = PresetStageSpec(
     name="sr",
     kind="super_resolution",
     description="Super-resolution upscaling pass",
-    allowed_overrides=frozenset({
-        "num_inference_steps",
-    }),
+    allowed_overrides=frozenset(
+        {
+            "num_inference_steps",
+        }
+    ),
 )
 
 # -------------------------------------------------------------------
@@ -39,7 +44,7 @@ HUNYUAN15_T2V_480P = InferencePreset(
     model_family="hunyuan15",
     description="HunyuanVideo 1.5 T2V at 480p",
     workload_type="t2v",
-    stage_schemas=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE,),
     defaults={
         "height": 480,
         "width": 848,
@@ -58,7 +63,7 @@ HUNYUAN15_T2V_720P = InferencePreset(
     model_family="hunyuan15",
     description="HunyuanVideo 1.5 T2V at 720p",
     workload_type="t2v",
-    stage_schemas=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE,),
     defaults={
         "height": 720,
         "width": 1280,
@@ -81,7 +86,7 @@ HUNYUAN15_I2V_480P_DISTILLED = InferencePreset(
     model_family="hunyuan15",
     description="HunyuanVideo 1.5 I2V 480p step-distilled",
     workload_type="i2v",
-    stage_schemas=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE,),
     defaults={
         "height": 720,
         "width": 1280,
@@ -100,7 +105,7 @@ HUNYUAN15_I2V_720P_DISTILLED = InferencePreset(
     model_family="hunyuan15",
     description="HunyuanVideo 1.5 I2V 720p distilled",
     workload_type="i2v",
-    stage_schemas=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE,),
     defaults={
         "height": 720,
         "width": 1280,

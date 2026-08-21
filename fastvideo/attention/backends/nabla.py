@@ -16,6 +16,7 @@ import torch
 
 try:
     from torch.nn.attention.flex_attention import BlockMask, flex_attention
+
     flex_attention = torch.compile(flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs")
     CAN_USE_FLEX_ATTN = True
 except ImportError:
@@ -61,7 +62,6 @@ def nablaT_v2(
 
 
 class NablaAttentionBackend(AttentionBackend):
-
     @staticmethod
     def get_name() -> str:
         return "NABLA_ATTN"
@@ -89,7 +89,6 @@ class NablaAttentionMetadata(AttentionMetadata):
 
 
 class NablaAttentionMetadataBuilder(AttentionMetadataBuilder):
-
     def __init__(self) -> None:
         pass
 
@@ -113,7 +112,6 @@ class NablaAttentionMetadataBuilder(AttentionMetadataBuilder):
 
 
 class NablaAttentionImpl(AttentionImpl):
-
     def __init__(
         self,
         num_heads: int,
@@ -125,8 +123,10 @@ class NablaAttentionImpl(AttentionImpl):
         **extra_impl_args,
     ) -> None:
         if not CAN_USE_FLEX_ATTN:
-            raise RuntimeError("NABLA attention requires torch.nn.attention.flex_attention, "
-                               "which is unavailable in this PyTorch build.")
+            raise RuntimeError(
+                "NABLA attention requires torch.nn.attention.flex_attention, "
+                "which is unavailable in this PyTorch build."
+            )
         if causal:
             raise ValueError("NABLA attention does not support causal masking.")
 

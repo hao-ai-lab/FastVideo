@@ -184,8 +184,7 @@ def quantize_weight(w: mx.array, backend: str) -> QuantizedWeight:
     err = support_error(name)
     if err is not None:
         mlx_version = getattr(mx, "__version__", "unknown")
-        raise RuntimeError(f"Quant backend {name!r} is not supported by installed mlx "
-                           f"({mlx_version}): {err}")
+        raise RuntimeError(f"Quant backend {name!r} is not supported by installed mlx ({mlx_version}): {err}")
 
     if w.ndim != 2:
         raise ValueError(f"quantize_weight expects a 2D weight, got shape {tuple(w.shape)}")
@@ -195,8 +194,7 @@ def quantize_weight(w: mx.array, backend: str) -> QuantizedWeight:
     group_size = kwargs["group_size"]
     # When group_size is None, MLX applies the mode default; only check when set.
     if isinstance(group_size, int) and cols % group_size != 0:
-        raise ValueError(f"Weight last dim {cols} must be divisible by group_size={group_size} "
-                         f"for backend {name!r}")
+        raise ValueError(f"Weight last dim {cols} must be divisible by group_size={group_size} for backend {name!r}")
 
     quantized = mx.quantize(
         w,
@@ -273,8 +271,9 @@ def bytes_per_weight(backend: str) -> float:
     err = support_error(name)
     if err is not None:
         mlx_version = getattr(mx, "__version__", "unknown")
-        raise RuntimeError(f"Cannot measure bytes_per_weight for unsupported backend {name!r} "
-                           f"(mlx {mlx_version}): {err}")
+        raise RuntimeError(
+            f"Cannot measure bytes_per_weight for unsupported backend {name!r} (mlx {mlx_version}): {err}"
+        )
 
     probe = mx.zeros((_PROBE_DIM, _PROBE_DIM), dtype=mx.float16)
     qw = quantize_weight(probe, name)

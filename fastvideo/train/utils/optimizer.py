@@ -33,8 +33,7 @@ def build_optimizer_and_scheduler(
     as method-level attributes.
     """
     if not params:
-        raise ValueError("No trainable parameters passed to "
-                         "build_optimizer_and_scheduler")
+        raise ValueError("No trainable parameters passed to build_optimizer_and_scheduler")
 
     optimizer = torch.optim.AdamW(
         params,
@@ -64,9 +63,9 @@ def clip_grad_norm_if_needed(
 ) -> float:
     if max_grad_norm <= 0.0:
         return 0.0
-    grad_norm = (clip_grad_norm_while_handling_failing_dtensor_cases(
+    grad_norm = clip_grad_norm_while_handling_failing_dtensor_cases(
         [p for p in module.parameters()],
         max_grad_norm,
         foreach=None,
-    ))
-    return (float(grad_norm.item()) if grad_norm is not None else 0.0)
+    )
+    return float(grad_norm.item()) if grad_norm is not None else 0.0

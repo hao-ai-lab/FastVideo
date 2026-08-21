@@ -20,6 +20,7 @@ Example:
     FASTVIDEO_TRACE_OUTPUT="/tmp/fv_trace.jsonl" \
     python examples/inference/basic/basic_magi_human.py
 """
+
 from __future__ import annotations
 
 import json
@@ -171,7 +172,6 @@ def _flatten_tensors(obj: Any, prefix: str = "out") -> list[tuple[str, torch.Ten
 
 
 class ActivationTraceManager:
-
     def __init__(self, managers: list[ModuleHookManager], sink: JsonlSink) -> None:
         self.managers = managers
         self.sink = sink

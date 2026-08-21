@@ -49,7 +49,8 @@ class RunConfig:
             if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
                 return {
                     f.name: _safe_asdict(getattr(obj, f.name))
-                    for f in dataclasses.fields(obj) if not callable(getattr(obj, f.name))
+                    for f in dataclasses.fields(obj)
+                    if not callable(getattr(obj, f.name))
                 }
             if isinstance(obj, dict):
                 return {k: _safe_asdict(v) for k, v in obj.items()}
@@ -82,8 +83,7 @@ def _resolve_existing_file(path: str) -> str:
 
 def _require_mapping(raw: Any, *, where: str) -> dict[str, Any]:
     if not isinstance(raw, dict):
-        raise ValueError(f"Expected mapping at {where}, "
-                         f"got {type(raw).__name__}")
+        raise ValueError(f"Expected mapping at {where}, got {type(raw).__name__}")
     return raw
 
 
@@ -105,8 +105,7 @@ def get_optional_int(mapping: dict[str, Any], key: str, *, where: str) -> int | 
         return int(raw)
     if isinstance(raw, str) and raw.strip():
         return int(raw)
-    raise ValueError(f"Expected int at {where}, "
-                     f"got {type(raw).__name__}")
+    raise ValueError(f"Expected int at {where}, got {type(raw).__name__}")
 
 
 def get_optional_float(mapping: dict[str, Any], key: str, *, where: str) -> float | None:
@@ -119,8 +118,7 @@ def get_optional_float(mapping: dict[str, Any], key: str, *, where: str) -> floa
         return float(raw)
     if isinstance(raw, str) and raw.strip():
         return float(raw)
-    raise ValueError(f"Expected float at {where}, "
-                     f"got {type(raw).__name__}")
+    raise ValueError(f"Expected float at {where}, got {type(raw).__name__}")
 
 
 def parse_betas(raw: Any, *, where: str) -> tuple[float, float]:
@@ -131,11 +129,9 @@ def parse_betas(raw: Any, *, where: str) -> tuple[float, float]:
     if isinstance(raw, str):
         parts = [p.strip() for p in raw.split(",") if p.strip()]
         if len(parts) != 2:
-            raise ValueError(f"Expected betas as 'b1,b2' at {where}, "
-                             f"got {raw!r}")
+            raise ValueError(f"Expected betas as 'b1,b2' at {where}, got {raw!r}")
         return float(parts[0]), float(parts[1])
-    raise ValueError(f"Expected betas as 'b1,b2' at {where}, "
-                     f"got {type(raw).__name__}")
+    raise ValueError(f"Expected betas as 'b1,b2' at {where}, got {type(raw).__name__}")
 
 
 # ---- config convenience helpers ----
@@ -177,8 +173,7 @@ def require_non_negative_int(
         raise ValueError(f"Missing required key {loc!r}")
     val = get_optional_int(mapping, key, where=loc)
     if val is None or val < 0:
-        raise ValueError(f"{loc} must be a non-negative integer, "
-                         f"got {raw!r}")
+        raise ValueError(f"{loc} must be a non-negative integer, got {raw!r}")
     return val
 
 
@@ -198,8 +193,7 @@ def require_non_negative_float(
         raise ValueError(f"Missing required key {loc!r}")
     val = get_optional_float(mapping, key, where=loc)
     if val is None or val < 0.0:
-        raise ValueError(f"{loc} must be a non-negative float, "
-                         f"got {raw!r}")
+        raise ValueError(f"{loc} must be a non-negative float, got {raw!r}")
     return val
 
 
@@ -221,12 +215,10 @@ def require_choice(
             return default
         raise ValueError(f"Missing required key {loc!r}")
     if not isinstance(raw, str) or not raw.strip():
-        raise ValueError(f"{loc} must be a non-empty string, "
-                         f"got {type(raw).__name__}")
+        raise ValueError(f"{loc} must be a non-empty string, got {type(raw).__name__}")
     val = raw.strip().lower()
     if val not in choices:
-        raise ValueError(f"{loc} must be one of {sorted(choices)}, "
-                         f"got {raw!r}")
+        raise ValueError(f"{loc} must be one of {sorted(choices)}, got {raw!r}")
     return val
 
 
@@ -245,8 +237,7 @@ def require_bool(
             return default
         raise ValueError(f"Missing required key {loc!r}")
     if not isinstance(raw, bool):
-        raise ValueError(f"{loc} must be a bool, "
-                         f"got {type(raw).__name__}")
+        raise ValueError(f"{loc} must be a bool, got {type(raw).__name__}")
     return raw
 
 
@@ -300,7 +291,9 @@ def _resolve_dit_quant_config(pipeline_config: Any) -> None:
     quant = getattr(dit_config, "quant_config", None)
     if isinstance(quant, str):
         from fastvideo.layers.quantization import (
-            get_quantization_config, )
+            get_quantization_config,
+        )
+
         dit_config.quant_config = get_quantization_config(quant)()
 
 
@@ -378,9 +371,11 @@ def _build_training_config(
 
     preprocessed_data_type = str(da.get("preprocessed_data_type", "t2v") or "t2v").strip().lower()
     if preprocessed_data_type not in {"t2v", "t2va", "text_only"}:
-        raise ValueError("training.data.preprocessed_data_type must be one of "
-                         "{'t2v', 't2va', 'text_only'}, got "
-                         f"{preprocessed_data_type!r}")
+        raise ValueError(
+            "training.data.preprocessed_data_type must be one of "
+            "{'t2v', 't2va', 'text_only'}, got "
+            f"{preprocessed_data_type!r}"
+        )
 
     return TrainingConfig(
         distributed=DistributedConfig(
@@ -446,7 +441,9 @@ def _build_training_config(
     )
 
 
-def _parse_cli_overrides(overrides: list[str], ) -> dict[str, Any]:
+def _parse_cli_overrides(
+    overrides: list[str],
+) -> dict[str, Any]:
     """Parse ``--dotted.key value`` CLI overrides.
 
     Returns a flat dict mapping dotted keys to parsed
@@ -549,8 +546,7 @@ def load_run_config(
         role_str = _require_str(role, where="models.<role>")
         model_cfg = _require_mapping(model_cfg_raw, where=f"models.{role_str}")
         if "_target_" not in model_cfg:
-            raise ValueError(f"models.{role_str} must have a "
-                             "'_target_' key")
+            raise ValueError(f"models.{role_str} must have a '_target_' key")
         models[role_str] = dict(model_cfg)
 
     # --- method ---

@@ -28,8 +28,16 @@ import fastvideo.envs as envs
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
-from fastvideo.utils import (decorate_logs, get_distributed_init_method, get_exception_traceback, get_loopback_ip,
-                             get_mp_context, get_open_port, kill_itself_when_parent_died, force_spawn)
+from fastvideo.utils import (
+    decorate_logs,
+    get_distributed_init_method,
+    get_exception_traceback,
+    get_loopback_ip,
+    get_mp_context,
+    get_open_port,
+    kill_itself_when_parent_died,
+    force_spawn,
+)
 from fastvideo.worker.executor import Executor
 from fastvideo.worker.worker_base import WorkerWrapperBase
 
@@ -44,9 +52,10 @@ def _make_queue_log_handler(log_queue: Queue) -> logging.Handler:
 class StreamingTaskType(str, Enum):
     """
     Enumeration for different streaming task types.
-    
+
     Inherits from str to allow string comparison for backward compatibility.
     """
+
     RESET = "reset"
     STEP = "step"
     CLEAR = "clear"
@@ -56,6 +65,7 @@ class StreamingTaskType(str, Enum):
 @dataclass
 class StreamingTask:
     """Task submitted to worker via input queue."""
+
     task_type: StreamingTaskType
     # For STEP tasks:
     keyboard_action: torch.Tensor | None = None
@@ -68,13 +78,13 @@ class StreamingTask:
 @dataclass
 class StreamingResult:
     """Result returned from worker via output queue."""
+
     task_type: StreamingTaskType
     output_batch: ForwardBatch | None = None
     error: Exception | None = None
 
 
 class MultiprocExecutor(Executor):
-
     def _init_executor(self) -> None:
         self.world_size = self.fastvideo_args.num_gpus
         self.shutting_down = False
@@ -105,7 +115,8 @@ class MultiprocExecutor(Executor):
                         streaming_input_queue=self._streaming_input_queue,
                         streaming_output_queue=self._streaming_output_queue,
                         log_queue=self._log_queue,
-                    ))
+                    )
+                )
 
             # Workers must be created before wait_for_ready to avoid
             # deadlock, since worker.init_device() does a device sync.
@@ -122,11 +133,9 @@ class MultiprocExecutor(Executor):
         atexit.register(self.shutdown)
 
     def execute_forward(self, forward_batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
-        responses = self.collective_rpc("execute_forward",
-                                        kwargs={
-                                            "forward_batch": forward_batch,
-                                            "fastvideo_args": fastvideo_args
-                                        })
+        responses = self.collective_rpc(
+            "execute_forward", kwargs={"forward_batch": forward_batch, "fastvideo_args": fastvideo_args}
+        )
         output = responses[0]["output_batch"]
 
         logging_info = None
@@ -135,37 +144,45 @@ class MultiprocExecutor(Executor):
         # Get extra dict (contains audio, peak_memory_mb, etc.)
         extra = responses[0].get("extra", {})
 
-        result_batch = ForwardBatch(data_type=forward_batch.data_type,
-                                    output=output,
-                                    logging_info=logging_info,
-                                    extra=extra,
-                                    trajectory_latents=responses[0].get("trajectory_latents"),
-                                    trajectory_timesteps=responses[0].get("trajectory_timesteps"))
+        result_batch = ForwardBatch(
+            data_type=forward_batch.data_type,
+            output=output,
+            logging_info=logging_info,
+            extra=extra,
+            trajectory_latents=responses[0].get("trajectory_latents"),
+            trajectory_timesteps=responses[0].get("trajectory_timesteps"),
+        )
 
         return result_batch
 
     def execute_streaming_reset(self, forward_batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> dict[str, Any]:
-        responses = self.collective_rpc("execute_streaming_reset",
-                                        kwargs={
-                                            "forward_batch": forward_batch,
-                                            "fastvideo_args": fastvideo_args,
-                                        })
+        responses = self.collective_rpc(
+            "execute_streaming_reset",
+            kwargs={
+                "forward_batch": forward_batch,
+                "fastvideo_args": fastvideo_args,
+            },
+        )
         return responses[0]
 
     def execute_streaming_step(self, keyboard_action: Any, mouse_action: Any) -> ForwardBatch:
-        responses = self.collective_rpc("execute_streaming_step",
-                                        kwargs={
-                                            "keyboard_action": keyboard_action,
-                                            "mouse_action": mouse_action,
-                                        })
+        responses = self.collective_rpc(
+            "execute_streaming_step",
+            kwargs={
+                "keyboard_action": keyboard_action,
+                "mouse_action": mouse_action,
+            },
+        )
         return responses[0]
 
     async def execute_streaming_step_async(self, keyboard_action: Any, mouse_action: Any) -> ForwardBatch:
-        responses = await self.collective_rpc_async("execute_streaming_step",
-                                                    kwargs={
-                                                        "keyboard_action": keyboard_action,
-                                                        "mouse_action": mouse_action,
-                                                    })
+        responses = await self.collective_rpc_async(
+            "execute_streaming_step",
+            kwargs={
+                "keyboard_action": keyboard_action,
+                "mouse_action": mouse_action,
+            },
+        )
         return responses[0]
 
     def execute_streaming_clear(self) -> dict[str, Any]:
@@ -199,7 +216,8 @@ class MultiprocExecutor(Executor):
                 task_type=StreamingTaskType.RESET,
                 batch=forward_batch,
                 fastvideo_args=fastvideo_args,
-            ))
+            )
+        )
 
     def submit_step(self, keyboard_action: torch.Tensor | None, mouse_action: torch.Tensor | None) -> None:
         if not self._streaming_enabled:
@@ -210,7 +228,8 @@ class MultiprocExecutor(Executor):
                 task_type=StreamingTaskType.STEP,
                 keyboard_action=keyboard_action,
                 mouse_action=mouse_action,
-            ))
+            )
+        )
 
     def submit_clear(self) -> None:
         if self._streaming_enabled and self._streaming_input_queue is not None:
@@ -234,18 +253,18 @@ class MultiprocExecutor(Executor):
 
         return self._streaming_output_queue.get()
 
-    def set_lora_adapter(self,
-                         lora_nickname: str,
-                         lora_path: str | None = None,
-                         strength: float = 1.0,
-                         accumulate: bool = False) -> None:
-        responses = self.collective_rpc("set_lora_adapter",
-                                        kwargs={
-                                            "lora_nickname": lora_nickname,
-                                            "lora_path": lora_path,
-                                            "strength": strength,
-                                            "accumulate": accumulate
-                                        })
+    def set_lora_adapter(
+        self, lora_nickname: str, lora_path: str | None = None, strength: float = 1.0, accumulate: bool = False
+    ) -> None:
+        responses = self.collective_rpc(
+            "set_lora_adapter",
+            kwargs={
+                "lora_nickname": lora_nickname,
+                "lora_path": lora_path,
+                "strength": strength,
+                "accumulate": accumulate,
+            },
+        )
         for i, response in enumerate(responses):
             if response["status"] != "lora_adapter_set":
                 raise RuntimeError(f"Worker {i} failed to set LoRA adapter to {lora_path}")
@@ -270,11 +289,9 @@ class MultiprocExecutor(Executor):
         """Stop forwarding worker logs to the queue. Call after generate_video."""
         self.collective_rpc("clear_log_queue")
 
-    def collective_rpc(self,
-                       method: str | Callable,
-                       timeout: float | None = None,
-                       args: tuple = (),
-                       kwargs: dict | None = None) -> list[Any]:
+    def collective_rpc(
+        self, method: str | Callable, timeout: float | None = None, args: tuple = (), kwargs: dict | None = None
+    ) -> list[Any]:
         kwargs = kwargs or {}
 
         try:
@@ -299,11 +316,9 @@ class MultiprocExecutor(Executor):
         except Exception as e:
             raise e
 
-    async def collective_rpc_async(self,
-                                   method: str | Callable,
-                                   timeout: float | None = None,
-                                   args: tuple = (),
-                                   kwargs: dict | None = None) -> list[Any]:
+    async def collective_rpc_async(
+        self, method: str | Callable, timeout: float | None = None, args: tuple = (), kwargs: dict | None = None
+    ) -> list[Any]:
         kwargs = kwargs or {}
         loop = asyncio.get_running_loop()
 
@@ -318,13 +333,13 @@ class MultiprocExecutor(Executor):
 
     def shutdown(self) -> None:
         """Properly shut down the executor and its workers"""
-        if hasattr(self, 'shutting_down') and self.shutting_down:
+        if hasattr(self, "shutting_down") and self.shutting_down:
             return  # Prevent multiple shutdown calls
 
         logger.info("Shutting down MultiprocExecutor...")
 
         # Check if workers were initialized (they might not be if initialization failed)
-        if not hasattr(self, 'workers') or not self.workers:
+        if not hasattr(self, "workers") or not self.workers:
             logger.info("No workers to shut down.")
             return
 
@@ -422,6 +437,7 @@ class MultiprocExecutor(Executor):
 @dataclass
 class UnreadyWorkerProcHandle:
     """WorkerProcess handle before READY."""
+
     proc: BaseProcess
     rank: int
     pipe: Connection
@@ -509,10 +525,9 @@ class WorkerMultiprocProc:
             "log_queue": log_queue,
         }
         # Run EngineCore busy loop in background process.
-        proc = context.Process(target=WorkerMultiprocProc.worker_main,
-                               kwargs=process_kwargs,
-                               name=f"FVWorkerProc-{rank}",
-                               daemon=True)
+        proc = context.Process(
+            target=WorkerMultiprocProc.worker_main, kwargs=process_kwargs, name=f"FVWorkerProc-{rank}", daemon=True
+        )
 
         proc.start()
         worker_pipe.close()
@@ -520,8 +535,8 @@ class WorkerMultiprocProc:
 
     @staticmethod
     def worker_main(*args, **kwargs):
-        """ Worker initialization and execution loops.
-        This runs a background process """
+        """Worker initialization and execution loops.
+        This runs a background process"""
 
         log_queue = kwargs.pop("log_queue", None)
         # Add log handler before model loading so we capture fsdp_load, cuda, etc.
@@ -556,9 +571,11 @@ class WorkerMultiprocProc:
             worker = WorkerMultiprocProc(*args, **kwargs)
 
             # Send READY once we know everything is loaded
-            ready_pipe.send({
-                "status": WorkerMultiprocProc.READY_STR,
-            })
+            ready_pipe.send(
+                {
+                    "status": WorkerMultiprocProc.READY_STR,
+                }
+            )
 
             ready_pipe.close()
             ready_pipe = None
@@ -571,12 +588,14 @@ class WorkerMultiprocProc:
                 # Send error status to parent before closing pipe
                 try:
                     traceback_str = get_exception_traceback()
-                    ready_pipe.send({
-                        "status": "ERROR",
-                        "error": str(exc),
-                        "traceback": traceback_str,
-                        "rank": rank,
-                    })
+                    ready_pipe.send(
+                        {
+                            "status": "ERROR",
+                            "error": str(exc),
+                            "traceback": traceback_str,
+                            "rank": rank,
+                        }
+                    )
                 except Exception:
                     # If sending fails, at least log it
                     pass
@@ -601,10 +620,11 @@ class WorkerMultiprocProc:
 
     @staticmethod
     def wait_for_ready(unready_proc_handles: list[UnreadyWorkerProcHandle]) -> list[WorkerProcHandle]:
-
-        e = Exception("WorkerMultiprocProc initialization failed due to "
-                      "an exception in a background process. "
-                      "See stack trace for root cause.")
+        e = Exception(
+            "WorkerMultiprocProc initialization failed due to "
+            "an exception in a background process. "
+            "See stack trace for root cause."
+        )
 
         pipes = {handle.ready_pipe: handle for handle in unready_proc_handles}
         ready_proc_handles: list[WorkerProcHandle | None] = [None] * len(unready_proc_handles)
@@ -633,8 +653,9 @@ class WorkerMultiprocProc:
                         worker_errors.append(f"Worker returned unexpected status: {response.get('status', 'unknown')}")
 
                     if response["status"] == "READY":
-                        ready_proc_handles[unready_proc_handle.rank] = (
-                            WorkerProcHandle.from_unready_handle(unready_proc_handle))
+                        ready_proc_handles[unready_proc_handle.rank] = WorkerProcHandle.from_unready_handle(
+                            unready_proc_handle
+                        )
 
                 except EOFError:
                     # Pipe closed without sending status - worker crashed
@@ -686,9 +707,9 @@ class WorkerMultiprocProc:
                         self.pipe.send({"status": "streaming_queue_loop_started"})
                         self.streaming_queue_loop()
                         continue
-                    if method == 'execute_forward':
-                        forward_batch = kwargs['forward_batch']
-                        fastvideo_args = kwargs['fastvideo_args']
+                    if method == "execute_forward":
+                        forward_batch = kwargs["forward_batch"]
+                        fastvideo_args = kwargs["fastvideo_args"]
                         output_batch = self.worker.execute_forward(forward_batch, fastvideo_args)
                         logging_info = None
                         if envs.FASTVIDEO_STAGE_LOGGING:
@@ -696,14 +717,16 @@ class WorkerMultiprocProc:
                         # result tensor shared by CUDA IPC to avoid serialization overhead
                         result = output_batch.output
                         extra = output_batch.extra or {}
-                        extra["peak_memory_mb"] = (torch.cuda.max_memory_allocated() / (1024 * 1024))
-                        self.pipe.send({
-                            "output_batch": result,
-                            "logging_info": logging_info,
-                            "extra": extra,
-                            "trajectory_latents": output_batch.trajectory_latents,
-                            "trajectory_timesteps": output_batch.trajectory_timesteps,
-                        })
+                        extra["peak_memory_mb"] = torch.cuda.max_memory_allocated() / (1024 * 1024)
+                        self.pipe.send(
+                            {
+                                "output_batch": result,
+                                "logging_info": logging_info,
+                                "extra": extra,
+                                "trajectory_latents": output_batch.trajectory_latents,
+                                "trajectory_timesteps": output_batch.trajectory_timesteps,
+                            }
+                        )
                     else:
                         result = self.worker.execute_method(method, *args, **kwargs)
                         self.pipe.send(result)
@@ -741,7 +764,8 @@ class WorkerMultiprocProc:
                     try:
                         batch = self.worker.execute_streaming_step(task.keyboard_action, task.mouse_action)
                         self.streaming_output_queue.put(
-                            StreamingResult(task_type=StreamingTaskType.STEP, output_batch=batch))
+                            StreamingResult(task_type=StreamingTaskType.STEP, output_batch=batch)
+                        )
                     except Exception as e:
                         logger.error("Worker %d step error: %s", self.rank, e)
                         self.streaming_output_queue.put(StreamingResult(task_type=StreamingTaskType.STEP, error=e))
@@ -787,8 +811,8 @@ class WorkerMultiprocProc:
 
 
 def set_multiproc_executor_envs() -> None:
-    """ Set up environment variables that should be used when there are workers
-    in a multiprocessing environment. This should be called by the parent 
+    """Set up environment variables that should be used when there are workers
+    in a multiprocessing environment. This should be called by the parent
     process before worker processes are created"""
 
     force_spawn()

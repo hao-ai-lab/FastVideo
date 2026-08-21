@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """HYWorld model family pipeline presets."""
+
 import numpy as np
 
 from fastvideo.api.presets import InferencePreset, PresetStageSpec
@@ -10,10 +11,12 @@ _DENOISE_STAGE = PresetStageSpec(
     name="denoise",
     kind="denoising",
     description="Camera-controlled denoising pass",
-    allowed_overrides=frozenset({
-        "num_inference_steps",
-        "guidance_scale",
-    }),
+    allowed_overrides=frozenset(
+        {
+            "num_inference_steps",
+            "guidance_scale",
+        }
+    ),
 )
 
 HYWORLD_T2V = InferencePreset(
@@ -22,7 +25,7 @@ HYWORLD_T2V = InferencePreset(
     model_family="hyworld",
     description="HY-WorldPlay bidirectional at 480p",
     workload_type="t2v",
-    stage_schemas=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE,),
     defaults={
         "height": 480,
         "width": 832,
@@ -36,4 +39,4 @@ HYWORLD_T2V = InferencePreset(
     },
 )
 
-ALL_PRESETS = (HYWORLD_T2V, )
+ALL_PRESETS = (HYWORLD_T2V,)

@@ -63,16 +63,17 @@ class MagiHumanBaseConfig(PipelineConfig):
     flow_shift: float | None = 5.0
 
     # Text encoding
-    text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (T5GemmaEncoderConfig(), ))
-    postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.Tensor],
-                                  ...] = field(default_factory=lambda: (t5gemma_postprocess_text, ))
+    text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (T5GemmaEncoderConfig(),))
+    postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.Tensor], ...] = field(
+        default_factory=lambda: (t5gemma_postprocess_text,)
+    )
 
     # Precisions — the DiT runs bf16 internally, the text encoder is
     # bf16-native, and the VAE decode path benefits from fp32 for long
     # sequences.
     precision: str = "bf16"
     vae_precision: str = "fp32"
-    text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("bf16", ))
+    text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("bf16",))
 
     # MagiHuman-specific defaults surfaced for the pipeline stages. These
     # are pipeline-level knobs sourced from the upstream
