@@ -435,6 +435,7 @@ class MiniMaxH3VideoViTDecoder3d(nn.Module):
         self.gradient_checkpointing = False
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        """Decode one latent spatial input through the H3 video transformer."""
         batch_size, num_channels, num_frames, height, width = hidden_states.shape
         hidden_states = hidden_states.permute(0, 2, 3, 4, 1).reshape(
             batch_size,
@@ -484,6 +485,11 @@ class MiniMaxH3VideoViTDecoder3d(nn.Module):
         )
 
 
+def _is_minimax_h3_video_vae_decoder(name: str, submodule: nn.Module) -> bool:
+    """Select the video decoder that serves the H3 VAE ``decode`` path."""
+    return name == "decoder" and isinstance(submodule, MiniMaxH3VideoViTDecoder3d)
+
+
 class AutoencoderKLMiniMaxH3(nn.Module):
     """MiniMax-H3 causal encoder and ViT decoder with exact release geometry."""
 
@@ -491,6 +497,7 @@ class AutoencoderKLMiniMaxH3(nn.Module):
     _no_split_modules = ["MiniMaxH3VideoResnetBlock3d", "MiniMaxH3VideoTransformerBlock"]
     _repeated_blocks = ["MiniMaxH3VideoTransformerBlock"]
     _keep_in_fp32_modules = ["encoder", "decoder", "quant_conv", "post_quant_conv"]
+    _compile_conditions = [_is_minimax_h3_video_vae_decoder]
 
     def __init__(self, config: MiniMaxH3VideoVAEConfig) -> None:
         super().__init__()
@@ -656,12 +663,15 @@ class AutoencoderKLMiniMaxH3(nn.Module):
         slice_rest[dim] = slice(blend_extent, None)
         return torch.cat([blended, b[tuple(slice_rest)]], dim=dim)
 
+    # The fixed spatial tile grid reuses one compiled blend-and-concatenate graph.
+    @torch.compile(backend="inductor", mode="reduce-overhead", dynamic=False)
     def _stitch_tiles(
         self,
         tiles: list[list[torch.Tensor]],
         height_overlaps: list[int],
         width_overlaps: list[int],
     ) -> torch.Tensor:
+        """Blend decoded tile overlaps and concatenate the spatial canvas."""
         result_rows = []
         for row_index, row in enumerate(tiles):
             result_row = []
@@ -677,6 +687,12 @@ class AutoencoderKLMiniMaxH3(nn.Module):
                 result_row.append(tile)
             result_rows.append(torch.cat(result_row, dim=-1))
         return torch.cat(result_rows, dim=-2)
+
+    # Each fixed-shape latent tile reuses one compiled decoder-input projection.
+    @torch.compile(backend="inductor", mode="reduce-overhead", dynamic=False)
+    def _project_decoder_tile(self, tile: torch.Tensor) -> torch.Tensor:
+        """Project one spatial latent tile into the decoder input channels."""
+        return self.post_quant_conv(tile)
 
     def _encode_clip(self, x: torch.Tensor) -> torch.Tensor:
         if not self.use_tiling:
@@ -740,7 +756,7 @@ class AutoencoderKLMiniMaxH3(nn.Module):
                                 y_position // ratio:y_position // ratio + y_length // ratio,
                                 x_position // ratio:x_position // ratio + x_length // ratio,
                             ]
-                            projected_tile = self.post_quant_conv(tile)
+                            projected_tile = self._project_decoder_tile(tile)
                             with nvtx_range("minimax_h3.vae.decode_clip.tile.decoder_forward"):
                                 decoded_tile = self.decoder(projected_tile)
                             row.append(decoded_tile)
