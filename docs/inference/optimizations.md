@@ -337,6 +337,31 @@ Only DiT submodules that declare `_compile_conditions` are compiled
 (most shipped models). The text encoder and VAE are not compiled by this
 flag.
 
+### Regional fullgraph compile (experimental)
+
+`inference_torch_compile` is a stricter, kwargs-free variant that ports the
+training-side regional compile of
+[#1718](https://github.com/hao-ai-lab/FastVideo/pull/1718) to inference: the
+loader wraps each `_compile_conditions` block in
+`torch.compile(fullgraph=True)` with inductor
+`options={"emulate_precision_casts": True}` right after the transformer
+loads. Attention backends that cannot be traced end-to-end (VSA,
+FLASH_ATTN on flash-attn 3, or the `FASTVIDEO_DISABLE_ATTENTION_COMPILE=1`
+escape hatch) degrade the transformer to eager with one warning instead of
+failing mid-denoise.
+
+```python
+generator = VideoGenerator.from_pretrained(
+    "MiniMaxAI/MiniMax-H3",
+    inference_torch_compile=True,  # or FASTVIDEO_INFERENCE_TORCH_COMPILE=1
+)
+```
+
+Do not combine it with `torch_compile_kwargs['mode']` (the loader injects
+inductor options, and torch.compile forbids mode+options); it is
+independent of `enable_torch_compile`, and when both are set the regional
+compile wins for the DiT.
+
 ### What to expect
 
 | Config | Effect |
