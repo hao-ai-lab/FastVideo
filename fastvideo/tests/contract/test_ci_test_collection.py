@@ -34,6 +34,7 @@ ALLOWLIST = {
     "distributed": "no lane yet — multi-GPU torchrun tests, run manually",
     "hooks": "no lane yet — run manually",
     "layers": "no lane yet — torchrun FSDP dispatch tests, run manually",
+    "mlx": "Apple Silicon/Metal-specific suite; the Modal PR lanes run on Linux CUDA",
     "nightly": "by design: nightly cadence, not per-PR",
     "modal": "CI infrastructure itself, not a test suite",
 }
