@@ -1054,6 +1054,13 @@ class _attention(torch.autograd.Function):
         use_global_sf_P=True,
         use_global_sf_QKV=True,
     ):
+        if smooth_q:
+            # The backward path needs triton_group_mean (attn_qat_infer),
+            # whose import is currently disabled; fail fast instead of
+            # crashing mid-backward on a None q_m.
+            raise NotImplementedError("smooth_q=True is not supported: it requires "
+                                      "triton_group_mean from attn_qat_infer, which is currently disabled")
+
         # shape constraints
         HEAD_DIM_Q, HEAD_DIM_K = q.shape[-1], k.shape[-1]
         # when v is in float8_e5m2 it is transposed.
@@ -1364,10 +1371,8 @@ class _attention(torch.autograd.Function):
                                        BLOCK_M=PRE_BLOCK,
                                        HEAD_DIM=ctx.HEAD_DIM)
 
+        # smooth_q is rejected in forward(); ctx.smooth_q is always False here.
         q_m = None
-        if ctx.smooth_q:
-            # _, q_m = triton_group_mean(q)
-            q_m = q_m.repeat_interleave(q.shape[2] // q_m.shape[2], dim=2)  # B,H,L,D
 
         sm100_optimized_backward = (getattr(ctx, "sm100_optimized", False) and ctx.use_qat_qkv_backward
                                     and not ctx.smooth_k and not ctx.smooth_q and N_CTX_KV % 16 == 0)
