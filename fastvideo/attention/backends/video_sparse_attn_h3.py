@@ -29,11 +29,19 @@ At tile 256 this targets sm10.x through the FA4 CuTe 256-tile path
 fallback and keeps identical mask semantics. At tile 64 the block map is
 already at the kernels' native 64-token granularity, so both forward and
 backward run the Triton block-sparse kernels directly (no expansion,
-``FASTVIDEO_VSA_CUTEDSL`` does not apply).
+``FASTVIDEO_VSA_CUTEDSL`` does not apply). A third, opt-in route exists
+for the tile-64 FORWARD only: ``FASTVIDEO_VSA_SM100A=1`` sends no-grad
+forwards through the sm_100a CUDA block-sparse kernel
+(``fastvideo_kernel.block_sparse_attn_sm100a``, upstream PR #1719 plus
+our per-q-tile ``q2k_num`` fix) when the extension is built, the device
+is sm_100, and the geometry qualifies; grad-tracking forwards and every
+backward stay on Triton unchanged. If the env is set but a precondition
+fails, the route logs one warning and falls back.
 """
 
 import functools
 import math
+import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -42,9 +50,20 @@ import torch
 try:
     from fastvideo_kernel.block_sparse_attn import block_sparse_attn as block_sparse_attn_64_bhsd
     from fastvideo_kernel.block_sparse_attn_256 import block_sparse_attn_256_bshd
+    from fastvideo_kernel.triton_kernels.index import map_to_index
 except ImportError:
     block_sparse_attn_64_bhsd = None
     block_sparse_attn_256_bshd = None
+    map_to_index = None
+
+try:
+    # Optional: only present in fastvideo_kernel builds that carry the sm_100a
+    # CUDA block-sparse forward (upstream PR #1719). The module itself imports
+    # fine without the compiled symbols (`_HAS_VSA_SM100A` is then False and
+    # `is_supported` says no), so this only guards *module* availability.
+    from fastvideo_kernel import block_sparse_attn_sm100a as _sm100a
+except ImportError:
+    _sm100a = None
 
 from fastvideo.attention.backends.abstract import (AttentionBackend, AttentionImpl, AttentionMetadata,
                                                    AttentionMetadataBuilder, layer_idx_from_prefix)
@@ -52,6 +71,12 @@ from fastvideo.attention.backends.video_sparse_attn import (compute_topk, constr
                                                             get_non_pad_index, get_tile_partition_indices,
                                                             scatter_into_tile_buf)
 from fastvideo.attention.backends.video_sparse_attn_h3_probe import probe_enabled, record_probe
+from fastvideo.logger import init_logger
+
+logger = init_logger(__name__)
+
+# Opt-in switch for the sm_100a CUDA forward on the tile-64 no-grad path.
+VSA_SM100A_ENV = "FASTVIDEO_VSA_SM100A"
 
 VSA_H3_TILE_SIZE = (4, 8, 8)  # 256 elements -> FA4 CuTe fastpath on sm10.x (default)
 _TILE_ELEMS = math.prod(VSA_H3_TILE_SIZE)
@@ -309,6 +334,24 @@ def _build_block_mask(
     return mask
 
 
+def _sm100a_unavailable_reason(sm100a_mod: Any, query_bhsd: torch.Tensor, variable_block_sizes: torch.Tensor,
+                               grad_mode: bool) -> str | None:
+    """Why the opt-in sm_100a forward route cannot run here, or None if it can.
+
+    Pure decision logic, split out so the routing is unit-testable without a
+    GPU or the compiled extension (tests substitute ``sm100a_mod``). Order
+    matters only for the message: the cheapest, most actionable reason first.
+    """
+    if sm100a_mod is None:
+        return "fastvideo_kernel.block_sparse_attn_sm100a is not installed"
+    if grad_mode:
+        return "inputs require grad and the sm_100a kernel is forward-only; grad paths keep Triton"
+    if not sm100a_mod.is_supported(query_bhsd, variable_block_sizes):
+        return ("block_sparse_attn_sm100a.is_supported returned False (needs an sm_100 device, a built "
+                "extension, bf16, head_dim 128, an even tile count, and integer tile sizes)")
+    return None
+
+
 class MiniMaxH3VSAImpl(AttentionImpl):
 
     def __init__(
@@ -391,18 +434,55 @@ class MiniMaxH3VSAImpl(AttentionImpl):
             )
 
         if tile_elems == 64:
-            # Native 64-token path: the block map is already at the Triton
-            # kernels' granularity, so forward AND backward run
-            # fastvideo_kernel.block_sparse_attn directly. That entry takes
-            # BHSD ([B, H, S_pad, D]); mirror block_sparse_attn_256_bshd's
-            # Triton branch and transpose around the call.
-            out_bhsd, _ = block_sparse_attn_64_bhsd(
-                query.transpose(1, 2).contiguous(),
-                key.transpose(1, 2).contiguous(),
-                value.transpose(1, 2).contiguous(),
-                mask,
-                attn_metadata.variable_block_sizes,
-            )
+            # Native 64-token path: the block map is already at the kernels'
+            # granularity. Both 64-token entries take BHSD ([B, H, S_pad, D]);
+            # mirror block_sparse_attn_256_bshd's Triton branch and transpose
+            # around the call.
+            q_bhsd = query.transpose(1, 2).contiguous()
+            k_bhsd = key.transpose(1, 2).contiguous()
+            v_bhsd = value.transpose(1, 2).contiguous()
+
+            # Opt-in sm_100a CUDA forward (upstream PR #1719 + per-q-tile
+            # q2k_num fix). Forward-only: grad-tracking calls stay on Triton
+            # so autograd keeps the Triton fwd+bwd pairing untouched. The
+            # kernel does return an LSE in Triton's M format, so a future
+            # fwd/bwd pairing is possible, but it is not built here.
+            use_sm100a = False
+            if os.environ.get(VSA_SM100A_ENV, "0") == "1":
+                grad_mode = torch.is_grad_enabled() and (query.requires_grad or key.requires_grad
+                                                         or value.requires_grad)
+                reason = _sm100a_unavailable_reason(_sm100a, q_bhsd, attn_metadata.variable_block_sizes, grad_mode)
+                if reason is None and map_to_index is None:
+                    reason = "fastvideo_kernel.triton_kernels.index (map_to_index) is not importable"
+                if reason is None:
+                    use_sm100a = True
+                elif not torch.compiler.is_compiling():
+                    logger.warning_once(f"{VSA_SM100A_ENV}=1 but falling back to the Triton-64 kernels: {reason}")
+
+            if use_sm100a:
+                # The sm_100a entry is index-native; compact the bool map the
+                # same way the Triton bool entry does internally. Per-row
+                # counts are NON-uniform here (prefix query tiles are dense,
+                # video tiles run prefix+top-k) -- legal for the fixed kernel,
+                # silently wrong on the pre-fix upstream one.
+                q2k_idx, q2k_num = map_to_index(mask)
+                out_bhsd, _ = _sm100a.block_sparse_attn_sm100a(
+                    q_bhsd,
+                    k_bhsd,
+                    v_bhsd,
+                    q2k_idx,
+                    q2k_num,
+                    attn_metadata.variable_block_sizes.to(torch.int32),
+                    need_lse=False,
+                )
+            else:
+                out_bhsd, _ = block_sparse_attn_64_bhsd(
+                    q_bhsd,
+                    k_bhsd,
+                    v_bhsd,
+                    mask,
+                    attn_metadata.variable_block_sizes,
+                )
             out = out_bhsd.transpose(1, 2).contiguous()
         else:
             out, _ = block_sparse_attn_256_bshd(query, key, value, mask, attn_metadata.variable_block_sizes)

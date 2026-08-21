@@ -39,6 +39,8 @@ python examples/inference/basic/basic_fasth3.py --prompt "your prompt" [--vsa-sp
 ```
 The default checkpoint `FastVideo/FastH3-Preview-v0.1` is private on the Hub while its license review completes; until it flips public, pass `--model-path` with a local snapshot of the release.
 
+On Blackwell (sm_100) GPUs with a `fastvideo-kernel` build that carries the sm_100a block-sparse extension, `--vsa-kernel sm100a` routes the tile-64 attention forwards through the CUDA kernel instead of Triton (it sets `FASTVIDEO_VSA_SM100A=1` before the pipeline boots); if the extension or the arch is missing, the run warns once and falls back to Triton.
+
 ## Basic Walkthrough
 
 All you need to generate videos using multi-gpus from state-of-the-art diffusion pipelines is the following few lines!

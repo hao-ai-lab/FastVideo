@@ -16,6 +16,7 @@ dense (every tile is selected); raise the sparsity for additional speedup.
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
 from fastvideo import VideoGenerator
@@ -64,6 +65,15 @@ def parse_args() -> argparse.Namespace:
                         help="VSA-H3 tile size in tokens; 64 (default) is what the student was trained "
                         "with and runs the native Triton block-sparse path, 256 is the FA4-CuTe-capable "
                         "geometry for ablations")
+    parser.add_argument("--vsa-kernel",
+                        choices=("triton", "sm100a"),
+                        default="triton",
+                        help="Block-sparse kernel for the tile-64 attention forward: triton (default, "
+                        "portable fwd+bwd) or sm100a — the opt-in Blackwell CUDA forward "
+                        "(fastvideo_kernel.block_sparse_attn_sm100a). sm100a needs an sm_100 GPU and a "
+                        "fastvideo-kernel build that carries the extension; if a precondition fails at "
+                        "run time the attention layer logs one warning and falls back to Triton. Only "
+                        "meaningful with --vsa-tile-size 64")
     parser.add_argument("--torch-compile", action="store_true", help="torch.compile the DiT transformer path")
     parser.add_argument("--compile-mode",
                         default=None,
@@ -80,6 +90,13 @@ def main() -> None:
     args = parse_args()
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.vsa_kernel == "sm100a":
+        # The attention backend reads FASTVIDEO_VSA_SM100A per forward; set it
+        # before the pipeline boots so spawned GPU workers inherit it. The
+        # kernel is forward-only and inference runs under no-grad, so every
+        # denoising forward qualifies for the CUDA route.
+        os.environ["FASTVIDEO_VSA_SM100A"] = "1"
 
     # Boot-time run configuration, folded into FastVideoArgs (the same route
     # examples/inference/basic/basic_minimax_h3_t2v.py uses for sparsity):
