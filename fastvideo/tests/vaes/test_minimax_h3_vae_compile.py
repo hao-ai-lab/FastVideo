@@ -6,7 +6,7 @@ The final test is a CUDA regression gate for the reduce-overhead tile path
 """
 
 from contextlib import contextmanager
-from types import MethodType, SimpleNamespace
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import Mock, patch
 
@@ -178,14 +178,91 @@ def test_compile_with_conditions_selects_minimax_h3_video_decoder() -> None:
     _assert_dynamic_compile_selects_decoder(AutoencoderKLMiniMaxH3, MiniMaxH3VideoViTDecoder3d)
 
 
-def test_project_decoder_tile_uses_reduce_overhead_compile() -> None:
-    """Compile the per-tile decoder-input projection with CUDA Graph replay."""
-    _assert_reduce_overhead_compile(AutoencoderKLMiniMaxH3._project_decoder_tile)
+def test_tile_helpers_stay_eager_by_default() -> None:
+    """Leave the tile helpers uncompiled unless the VAE compile opt-in runs.
+
+    Default users must keep pre-PR eager behavior: no inductor/triton
+    requirement, no first-decode compile latency, and no permanent cudagraph
+    memory pools unless ``enable_torch_compile_vae`` was requested.
+    """
+    assert AutoencoderKLMiniMaxH3._tile_helpers_compiled is False
+    for helper in (AutoencoderKLMiniMaxH3._stitch_tiles, AutoencoderKLMiniMaxH3._project_decoder_tile):
+        assert not hasattr(helper, "get_compiler_config")
+        assert not hasattr(helper, "_torchdynamo_orig_callable")
 
 
-def test_stitch_tiles_uses_reduce_overhead_compile() -> None:
-    """Compile spatial tile blending and concatenation with CUDA Graph replay."""
-    _assert_reduce_overhead_compile(AutoencoderKLMiniMaxH3._stitch_tiles)
+def test_prepare_for_compile_installs_reduce_overhead_tile_helpers() -> None:
+    """Compile both tile helpers with CUDA Graph replay under the opt-in hook.
+
+    ``ComposedPipelineBase._maybe_compile_pipeline_module`` invokes
+    ``prepare_for_compile`` only when ``enable_torch_compile_vae`` is set,
+    right before the decoder is compiled through ``_compile_conditions``.
+    """
+    vae = _empty_typed_module(AutoencoderKLMiniMaxH3)
+    assert vae._tile_helpers_compiled is False
+
+    vae.prepare_for_compile()
+
+    assert vae._tile_helpers_compiled is True
+    _assert_reduce_overhead_compile(vae._stitch_tiles)
+    _assert_reduce_overhead_compile(vae._project_decoder_tile)
+
+    # Idempotent: the pipeline hook may run more than once per instance.
+    compiled_stitch = vae._stitch_tiles
+    compiled_project = vae._project_decoder_tile
+    vae.prepare_for_compile()
+    assert vae._stitch_tiles is compiled_stitch
+    assert vae._project_decoder_tile is compiled_project
+
+    # The opt-in mutates only this instance; the class (and therefore every
+    # default instance) stays eager.
+    assert AutoencoderKLMiniMaxH3._tile_helpers_compiled is False
+    assert not hasattr(AutoencoderKLMiniMaxH3._stitch_tiles, "get_compiler_config")
+    assert not hasattr(AutoencoderKLMiniMaxH3._project_decoder_tile, "get_compiler_config")
+
+
+def test_tile_drivers_return_caller_owned_tensors_when_compiled() -> None:
+    """Clone the stitched canvas out of cudagraph-pooled storage under the opt-in.
+
+    With ``mode="reduce-overhead"`` the ``_stitch_tiles`` output is a
+    CUDA-graph static buffer that the next replay overwrites, while the
+    collect-then-``torch.cat`` consumers (``_decode``/``_encode``/
+    ``_encode_pixels``/``encode_keyframe``) hold each chunk or clip result
+    across replays. The tile drivers therefore hand back a caller-owned copy
+    when the helpers are compiled — and return the stitched tensor by identity
+    when eager, keeping default behavior and peak memory unchanged.
+    """
+
+    def _mock_tiled_vae(stitched: torch.Tensor) -> nn.Module:
+        vae = _empty_typed_module(AutoencoderKLMiniMaxH3)
+        vae.use_tiling = True
+        vae.spatial_compression_ratio = 1
+        vae.tile_sample_min_height = 1
+        vae.tile_sample_min_width = 1
+        vae.tile_sample_min_overlap_height = 0
+        vae.tile_sample_min_overlap_width = 0
+        vae._split_tiles = Mock(return_value=([0, 1], [1, 1], [0]))
+        vae.post_quant_conv = nn.Identity()
+        vae._project_decoder_tile = vae.post_quant_conv
+        vae.quant_conv = nn.Identity()
+        vae.encoder = nn.Identity()
+        vae.decoder = nn.Identity()
+        vae._stitch_tiles = Mock(return_value=stitched)
+        return vae
+
+    latent_clip = torch.zeros((1, 1, 1, 2, 2))
+    for driver in ("_decode_clip", "_encode_clip"):
+        stitched = torch.zeros((1, 1, 1, 2, 2))
+
+        # Default instances return the stitched tensor without copying.
+        eager_vae = _mock_tiled_vae(stitched)
+        assert getattr(eager_vae, driver)(latent_clip) is stitched
+
+        compiled_vae = _mock_tiled_vae(stitched)
+        compiled_vae._tile_helpers_compiled = True
+        owned = getattr(compiled_vae, driver)(latent_clip)
+        assert owned is not stitched
+        assert torch.equal(owned, stitched)
 
 
 def test_compile_with_conditions_selects_minimax_h3_audio_decoder() -> None:
@@ -302,11 +379,10 @@ def test_decode_clip_emits_tiled_stage_ranges() -> None:
     with patch("fastvideo.models.vaes.minimax_h3_video.nvtx_range", record_range):
         decoded_clip = vae._decode_clip(torch.zeros((1, 1, 1, 2, 2)))
 
-    # The tile driver must hand back a caller-owned copy: under
-    # mode="reduce-overhead" the stitched canvas is CUDA-graph pooled storage
-    # that the next replay overwrites, so returning it by identity is a bug.
-    assert decoded_clip is not stitched_clip
-    assert torch.equal(decoded_clip, stitched_clip)
+    # Default (eager) instances return the stitched canvas by identity; the
+    # caller-owned copy under the compile opt-in is pinned by
+    # test_tile_drivers_return_caller_owned_tensors_when_compiled.
+    assert decoded_clip is stitched_clip
     assert vae._split_tiles.call_count == 2
     assert vae._project_decoder_tile.call_count == 4
     assert vae._stitch_tiles.call_count == 1
@@ -368,32 +444,29 @@ def _tiny_real_vae() -> AutoencoderKLMiniMaxH3:
         )).eval()
 
 
-def _dynamo_original(compiled_function: Any) -> Any:
-    """Return the eager callable behind a ``torch.compile``-decorated function."""
-    original = getattr(compiled_function, "_torchdynamo_orig_callable", None)
-    if original is None:
-        original = getattr(compiled_function, "__wrapped__", None)
-    assert original is not None, "cannot recover the eager tile helpers"
-    return original
-
-
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="reduce-overhead tile compile requires CUDA graphs")
 @torch.inference_mode()
 def test_tiled_decode_and_encode_survive_cudagraph_buffer_reuse_on_cuda() -> None:
     """Real tiled decode()/encode() with an unmocked reduce-overhead ``_stitch_tiles``.
 
-    Regression gate for the CUDA-graph output-clobbering bug: the stitched
-    canvas is a cudagraph static buffer, and the collect-then-``torch.cat``
-    consumers (``_decode``/``_encode``/``_encode_pixels``) hold chunk/clip
-    results across subsequent ``_stitch_tiles`` replays. Without the eager
-    ``.clone()`` at the tile-driver returns, the first tiled ``decode()`` with
-    >=2 temporal chunks raises ``accessing tensor output of CUDAGraphs that
-    has been overwritten by a subsequent run``. This test needs >=2 chunks
-    (decode), >=2 clips (encode), and a >=2x2 spatial tile grid.
+    Regression gate for the CUDA-graph output-clobbering bug under the
+    ``enable_torch_compile_vae`` opt-in (``prepare_for_compile``): the
+    stitched canvas is a cudagraph static buffer, and the
+    collect-then-``torch.cat`` consumers (``_decode``/``_encode``/
+    ``_encode_pixels``) hold chunk/clip results across subsequent
+    ``_stitch_tiles`` replays. Without the eager ``.clone()`` at the
+    tile-driver returns, the first tiled ``decode()`` with >=2 temporal
+    chunks raises ``accessing tensor output of CUDAGraphs that has been
+    overwritten by a subsequent run``. This test needs >=2 chunks (decode),
+    >=2 clips (encode), and a >=2x2 spatial tile grid.
     """
     torch.manual_seed(20260821)
     vae = _tiny_real_vae().to("cuda")
     vae.enable_tiling(16, 16, 4, 4)
+    # The hook ComposedPipelineBase._maybe_compile_pipeline_module runs for
+    # the opt-in; it installs the reduce-overhead compiled tile helpers.
+    vae.prepare_for_compile()
+    assert vae._tile_helpers_compiled
 
     # 8 latent tokens = 2 temporal chunks (tokens_chunk_size 5); 8x8 latents =
     # 32x32 pixels = a 2x2 grid of 16px tiles.
@@ -416,13 +489,12 @@ def test_tiled_decode_and_encode_survive_cudagraph_buffer_reuse_on_cuda() -> Non
     streamed_second = vae.encode_pixels(uint8_pixels).latent_dist.parameters
     assert torch.equal(streamed_first, streamed_second)
 
-    # Output parity vs the fully eager tile helpers (same weights, same math;
-    # the tolerance absorbs inductor fusion reassociation only).
+    # Output parity vs a default (fully eager, never-prepared) instance with
+    # the same weights and tiling — the tolerance absorbs inductor fusion
+    # reassociation only.
     eager_vae = _tiny_real_vae().to("cuda")
     eager_vae.load_state_dict(vae.state_dict())
     eager_vae.enable_tiling(16, 16, 4, 4)
-    eager_vae._stitch_tiles = MethodType(_dynamo_original(AutoencoderKLMiniMaxH3._stitch_tiles), eager_vae)
-    eager_vae._project_decoder_tile = MethodType(_dynamo_original(AutoencoderKLMiniMaxH3._project_decoder_tile),
-                                                 eager_vae)
+    assert not eager_vae._tile_helpers_compiled
     torch.testing.assert_close(decoded_first, eager_vae.decode(z).sample, atol=2e-4, rtol=2e-4)
     torch.testing.assert_close(encoded_first, eager_vae.encode(pixels).latent_dist.parameters, atol=2e-4, rtol=2e-4)

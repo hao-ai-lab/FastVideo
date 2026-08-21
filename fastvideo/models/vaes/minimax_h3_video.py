@@ -531,6 +531,9 @@ class AutoencoderKLMiniMaxH3(nn.Module):
     _repeated_blocks = ["MiniMaxH3VideoTransformerBlock"]
     _keep_in_fp32_modules = ["encoder", "decoder", "quant_conv", "post_quant_conv"]
     _compile_conditions = [_is_minimax_h3_video_vae_decoder]
+    # ``prepare_for_compile`` flips this per instance when the pipeline opts
+    # into ``enable_torch_compile_vae``; default instances stay fully eager.
+    _tile_helpers_compiled = False
 
     def __init__(self, config: MiniMaxH3VideoVAEConfig) -> None:
         super().__init__()
@@ -696,8 +699,33 @@ class AutoencoderKLMiniMaxH3(nn.Module):
         slice_rest[dim] = slice(blend_extent, None)
         return torch.cat([blended, b[tuple(slice_rest)]], dim=dim)
 
-    # The fixed spatial tile grid reuses one compiled blend-and-concatenate graph.
-    @torch.compile(backend="inductor", mode="reduce-overhead", dynamic=False)
+    def prepare_for_compile(self) -> None:
+        """Compile the fixed-shape tile helpers for the opt-in VAE compile path.
+
+        ``ComposedPipelineBase._maybe_compile_pipeline_module`` calls this hook
+        only when ``enable_torch_compile_vae`` is set, right before the decoder
+        is compiled through ``_compile_conditions``. The spatial tile grid and
+        the per-tile decoder-input projection have fixed shapes, so
+        ``mode="reduce-overhead"`` records one CUDA graph per geometry and
+        replays it for every tile and temporal chunk. Keeping this behind the
+        opt-in means default (eager) users pay neither the inductor/triton
+        toolchain requirement and first-decode compile latency nor the
+        permanent cudagraph memory pools, and multi-resolution callers never
+        churn ``dynamic=False`` recompiles they did not ask for.
+        """
+        if self._tile_helpers_compiled:
+            return
+        # The fixed spatial tile grid reuses one compiled blend-and-concatenate graph.
+        self._stitch_tiles = torch.compile(self._stitch_tiles, backend="inductor", mode="reduce-overhead", dynamic=False)
+        # Each fixed-shape latent tile reuses one compiled decoder-input projection.
+        self._project_decoder_tile = torch.compile(
+            self._project_decoder_tile,
+            backend="inductor",
+            mode="reduce-overhead",
+            dynamic=False,
+        )
+        self._tile_helpers_compiled = True
+
     def _stitch_tiles(
         self,
         tiles: list[list[torch.Tensor]],
@@ -721,8 +749,6 @@ class AutoencoderKLMiniMaxH3(nn.Module):
             result_rows.append(torch.cat(result_row, dim=-1))
         return torch.cat(result_rows, dim=-2)
 
-    # Each fixed-shape latent tile reuses one compiled decoder-input projection.
-    @torch.compile(backend="inductor", mode="reduce-overhead", dynamic=False)
     def _project_decoder_tile(self, tile: torch.Tensor) -> torch.Tensor:
         """Project one spatial latent tile into the decoder input channels."""
         return self.post_quant_conv(tile)
@@ -750,12 +776,17 @@ class AutoencoderKLMiniMaxH3(nn.Module):
             rows.append(row)
         latent_y_overlaps = [overlap // self.spatial_compression_ratio for overlap in y_overlaps]
         latent_x_overlaps = [overlap // self.spatial_compression_ratio for overlap in x_overlaps]
-        # Under mode="reduce-overhead" the stitched canvas is a CUDA-graph
-        # static buffer that the next _stitch_tiles replay overwrites. Callers
-        # (_encode/_encode_pixels/encode_keyframe) collect per-clip results
-        # across replays before concatenating, so hand them a caller-owned
-        # tensor instead of cudagraph-pooled storage.
-        return self._stitch_tiles(rows, latent_y_overlaps, latent_x_overlaps).clone()
+        stitched = self._stitch_tiles(rows, latent_y_overlaps, latent_x_overlaps)
+        if self._tile_helpers_compiled:
+            # Under the opt-in mode="reduce-overhead" compile the stitched
+            # canvas is a CUDA-graph static buffer that the next _stitch_tiles
+            # replay overwrites. Callers (_encode/_encode_pixels/
+            # encode_keyframe) collect per-clip results across replays before
+            # concatenating, so hand them a caller-owned tensor instead of
+            # cudagraph-pooled storage. Eager instances return the fresh
+            # torch.cat result directly.
+            stitched = stitched.clone()
+        return stitched
 
     def _decode_clip(self, z: torch.Tensor) -> torch.Tensor:
         """Decode one temporal clip, with optional overlapping spatial tiles."""
@@ -801,13 +832,17 @@ class AutoencoderKLMiniMaxH3(nn.Module):
                     rows.append(row)
 
             with nvtx_range("minimax_h3.vae.decode_clip.stitch_tiles"):
-                # Same CUDA-graph output-ownership contract as _encode_clip:
-                # _decode collects chunks across _stitch_tiles replays before
-                # torch.cat, so the pooled canvas must not escape this driver.
-                # (The streaming _decode_to_pixels path copies each chunk out
-                # before the next decode and never held stale storage; the
-                # clone keeps that path correct too at one D2D copy per chunk.)
-                return self._stitch_tiles(rows, y_overlaps, x_overlaps).clone()
+                stitched = self._stitch_tiles(rows, y_overlaps, x_overlaps)
+                if self._tile_helpers_compiled:
+                    # Same CUDA-graph output-ownership contract as
+                    # _encode_clip: _decode collects chunks across
+                    # _stitch_tiles replays before torch.cat, so the pooled
+                    # canvas must not escape this driver. (The streaming
+                    # _decode_to_pixels path copies each chunk out before the
+                    # next decode; the clone keeps it correct too at one D2D
+                    # copy per chunk.)
+                    stitched = stitched.clone()
+                return stitched
 
     def _encode(self, x: torch.Tensor) -> torch.Tensor:
         clip_length = self.config.clip_length
