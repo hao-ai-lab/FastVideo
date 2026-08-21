@@ -877,8 +877,13 @@ class VideoGenerator:
         # `GenerationResult.size` describes the produced media, not only the
         # base-stage request. Refiner pipelines can change the final pixel
         # dimensions, so derive this result metadata from the decoded output.
+        # Read the geometry from `output_batch.output` (a shape-only access,
+        # no D->H copy): when `return_frames=False` the `samples` mirror
+        # stays an empty placeholder and no longer carries the decoded
+        # shape. Metadata-only calls keep the request fallback and never
+        # inspect the (possibly dropped) worker output.
         output_size = _resolve_output_size(
-            samples,
+            output_batch.output if needs_frame_output else samples,
             (target_height, target_width, batch.num_frames),
             pixel_output=not is_latent_output and not audio_only,
         )

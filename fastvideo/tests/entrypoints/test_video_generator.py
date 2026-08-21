@@ -305,6 +305,37 @@ def test_generate_single_video_save_video_still_builds_frames(monkeypatch, tmp_p
     }
 
 
+def test_generate_single_video_save_only_reports_refined_output_size(monkeypatch, tmp_path):
+    """`GenerationResult.size` must describe the decoded media even when the
+    fp32 `samples` mirror is skipped (`return_frames=False`, the CLI save
+    flow). Refiner pipelines can change the final pixel geometry, so the size
+    has to come from `output_batch.output`, not the base request. CPU-only."""
+    # Refiner-style output: request asks for 2 frames of 16x16, pipeline
+    # produces 5 frames of 32x48.
+    output = torch.full((1, 3, 5, 32, 48), 0.5, dtype=torch.float32)
+    output_batch = _single_video_output_batch(output)
+    fastvideo_args = _single_video_args()
+    generator = _single_video_generator(output_batch, fastvideo_args)
+    saved = {}
+
+    def fake_mimsave(path, frames, *, fps, format):
+        saved["frame_count"] = len(frames)
+
+    monkeypatch.setattr(video_generator_module.imageio, "mimsave", fake_mimsave)
+
+    result = generator._generate_single_video(
+        prompt="refined save",
+        sampling_param=_small_sampling_param(save_video=True, return_frames=False),
+        fastvideo_args=fastvideo_args,
+        output_path=str(tmp_path / "refined.mp4"),
+    )
+
+    assert result["samples"] is None
+    assert result["frames"] is None
+    assert result["size"] == (32, 48, 5)
+    assert saved["frame_count"] == 5
+
+
 def test_generate_single_video_audio_only_metadata_returns_audio_without_frames(tmp_path):
     audio = torch.zeros((16, ), dtype=torch.float32)
     output_batch = _single_video_output_batch(
