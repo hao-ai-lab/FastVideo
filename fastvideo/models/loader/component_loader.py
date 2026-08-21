@@ -1080,6 +1080,8 @@ class TransformerLoader(ComponentLoader):
                 training_mode=fastvideo_args.training_mode,
                 enable_torch_compile=fastvideo_args.enable_torch_compile,
                 torch_compile_kwargs=fastvideo_args.torch_compile_kwargs,
+                regional_compile=getattr(fastvideo_args, "regional_compile", False),
+                pre_fsdp_transform=getattr(fastvideo_args, "_pre_fsdp_transform", None),
             )
 
         total_params = sum(p.numel() for p in model.parameters())

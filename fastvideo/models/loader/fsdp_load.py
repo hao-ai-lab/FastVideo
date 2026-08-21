@@ -136,6 +136,8 @@ def maybe_load_fsdp_model(
     pin_cpu_memory: bool = True,
     enable_torch_compile: bool = False,
     torch_compile_kwargs: dict[str, Any] | None = None,
+    pre_fsdp_transform: Callable[[nn.Module], nn.Module] | None = None,
+    regional_compile: bool = False,
 ) -> torch.nn.Module:
     """
     Load the model with FSDP if is training, else load the model without FSDP.
@@ -155,9 +157,13 @@ def maybe_load_fsdp_model(
     with set_default_dtype(default_dtype), torch.device("meta"):
         model = model_cls(**init_params)
 
+    if pre_fsdp_transform is not None:
+        model = pre_fsdp_transform(model)
+
     dtype_selector = getattr(model, "_get_parameter_dtype", None)
     has_mixed_parameter_dtypes = callable(dtype_selector) and any(
-        dtype_selector(name, param_dtype) != param_dtype for name, _ in model.named_parameters())
+        dtype_selector(_strip_checkpoint_wrapper_prefix(name), param_dtype) != param_dtype
+        for name, _ in model.named_parameters())
     if training_mode and has_mixed_parameter_dtypes:
         raise NotImplementedError("FSDP training with model-selected mixed parameter dtypes requires "
                                   "separate gradient synchronization for replicated parameters.")
@@ -229,13 +235,111 @@ def maybe_load_fsdp_model(
     # are present (lazy imports inside the helper).
     _maybe_quantize_model(model)
 
-    compile_in_loader = enable_torch_compile and training_mode
-    if compile_in_loader:
-        compile_kwargs = torch_compile_kwargs or {}
-        logger.info("Enabling torch.compile for FSDP training module with kwargs=%s", compile_kwargs)
-        model = torch.compile(model, **compile_kwargs)
-        logger.info("torch.compile enabled for %s", type(model).__name__)
+    if enable_torch_compile and training_mode:
+        if not regional_compile:
+            # Legacy training stack (--enable-torch-compile): preserve the
+            # pre-regional semantics — whole-model compile, partial graphs
+            # allowed, kwargs passed through unmodified.
+            compile_kwargs = torch_compile_kwargs or {}
+            logger.info("Enabling whole-model torch.compile with kwargs=%s", compile_kwargs)
+            model = torch.compile(model, **compile_kwargs)
+        else:
+            unsupported = _regional_compile_unsupported_reason(init_params)
+            if unsupported is not None:
+                logger.warning(
+                    "enable_torch_compile requested but disabled: %s. "
+                    "Training continues in eager mode.", unsupported)
+            else:
+                _compile_model_regions(model, torch_compile_kwargs or {})
+
     return model
+
+
+def _strip_checkpoint_wrapper_prefix(name: str) -> str:
+    """Canonicalize an FQN produced after activation-checkpoint wrapping.
+
+    ``checkpoint_wrapper`` strips its ``_checkpoint_wrapped_module.`` prefix
+    from ``state_dict()`` keys via hooks, but plain ``named_parameters()`` /
+    ``named_buffers()`` recursion still yields prefixed names. Checkpoint
+    keys are always clean, so every name-keyed lookup against loaded weights
+    must compare clean names.
+    """
+    return name.replace("._checkpoint_wrapped_module.", ".").removeprefix("_checkpoint_wrapped_module.")
+
+
+def _regional_compile_unsupported_reason(init_params: dict[str, Any]) -> str | None:
+    """Return why regional fullgraph compile cannot run, or None if it can.
+
+    FA3's grad-enabled attention path deliberately routes to the raw
+    autograd.Function at the cost of a dynamo graph break (see
+    flash_attn_default.py) — under regional ``fullgraph=True`` that break is
+    a hard RuntimeError at the first training step. FA2 and FA4 route through
+    traceable custom ops and are compile-safe.
+    """
+    config = init_params.get("config")
+    resolved = getattr(config, "_resolved_attention_backend", None)
+    if resolved is None or getattr(resolved, "name", "") != "FLASH_ATTN":
+        return None
+    try:
+        from fastvideo.attention.utils.flash_attn_default import fa_version
+    except Exception:  # pragma: no cover - flash-attn stack not importable
+        return None
+    if fa_version == "3":
+        return ("attention backend resolved to FLASH_ATTN with flash-attn 3, "
+                "whose grad-enabled path graph-breaks (incompatible with "
+                "fullgraph regional compile); use FA2, FA4 (FASTVIDEO_FA4=1), "
+                "or TORCH_SDPA for compiled training")
+    return None
+
+
+def _compile_model_regions(model: nn.Module, compile_kwargs: dict[str, Any]) -> int:
+    """Compile repeated mathematical regions after FSDP setup.
+
+    Only the selected module ``forward`` is replaced. This keeps activation
+    checkpoint wrappers structurally transparent while FSDP pre/post hooks
+    execute outside the compiled region.
+    """
+    compile_conditions = getattr(model, "_compile_conditions", None)
+    if not compile_conditions:
+        raise ValueError(f"{type(model).__name__} does not declare _compile_conditions")
+
+    if compile_kwargs.get("fullgraph", True) is not True:
+        raise ValueError("Regional training compile requires fullgraph=True")
+    if "mode" in compile_kwargs:
+        # torch.compile forbids passing both `mode` and `options`, and
+        # regional compile always injects options (emulate_precision_casts)
+        # for bf16 numerics parity. Fail here with an actionable message
+        # instead of letting torch raise a mode/options conflict about an
+        # `options` key the user never wrote.
+        raise ValueError("Regional training compile sets inductor options "
+                         "(emulate_precision_casts) and cannot be combined "
+                         "with torch_compile_kwargs['mode']. Remove 'mode' or "
+                         "express its effect via torch_compile_kwargs['options'].")
+    kwargs = {**compile_kwargs, "fullgraph": True}
+    options = {"emulate_precision_casts": True}
+    options.update(kwargs.get("options") or {})
+    kwargs["options"] = options
+    compiled_count = 0
+    for name, submodule in list(model.named_modules()):
+        if not name:
+            continue
+        if any(condition(name, submodule) for condition in compile_conditions):
+            # Activation checkpoint wrappers are control-flow boundaries, not
+            # mathematical regions. Keep their saved-tensor/recompute logic
+            # eager and compile only the repeated block they own.
+            compile_target = getattr(submodule, "_checkpoint_wrapped_module", submodule)
+            compile_target.forward = torch.compile(compile_target.forward, **kwargs)
+            compiled_count += 1
+
+    if compiled_count == 0:
+        raise ValueError(f"No submodules in {type(model).__name__} matched _compile_conditions")
+    logger.info(
+        "Enabled regional torch.compile for %d submodules in %s after FSDP setup with kwargs=%s",
+        compiled_count,
+        type(model).__name__,
+        kwargs,
+    )
+    return compiled_count
 
 
 def shard_model(
@@ -288,7 +392,7 @@ def shard_model(
         ignored_params = {
             parameter
             for name, parameter in model.named_parameters()
-            if dtype_selector(name, default_param_dtype) != default_param_dtype
+            if dtype_selector(_strip_checkpoint_wrapper_prefix(name), default_param_dtype) != default_param_dtype
         }
     named_modules = list(model.named_modules())
     ignored_params_by_module = {
@@ -385,8 +489,14 @@ def load_model_from_full_model_state_dict(
         NotImplementedError: If got FSDP with more than 1D.
     """
     meta_sd = model.state_dict()
-    named_parameters = dict(model.named_parameters())
-    named_buffers = dict(model.named_buffers())
+    # state_dict() keys are clean (checkpoint-wrapper hooks strip the AC
+    # prefix) but named_parameters()/named_buffers() are not; checkpoint keys
+    # are clean, so canonicalize before any name-keyed lookup. Without this,
+    # a loaded buffer inside an AC-wrapped block misses the named_buffers
+    # membership test below and is silently converted into a trainable
+    # nn.Parameter by load_state_dict(assign=True).
+    named_parameters = {_strip_checkpoint_wrapper_prefix(k): v for k, v in model.named_parameters()}
+    named_buffers = {_strip_checkpoint_wrapper_prefix(k): v for k, v in model.named_buffers()}
     sharded_sd = {}
     custom_param_sd, reverse_param_names_mapping = hf_to_custom_state_dict(full_sd_iterator,
                                                                            param_names_mapping)  # type: ignore
