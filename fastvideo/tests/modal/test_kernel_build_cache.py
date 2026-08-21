@@ -177,6 +177,21 @@ def test_ci_runner_image_targets_arm64_sm100_with_opencv_runtime() -> None:
     assert 'python -c "import cv2; print(\'OpenCV\', cv2.__version__)"' in dockerfile
 
 
+def test_docker_image_bakes_modal_apt_and_rust_layer() -> None:
+    """The Modal CI image layers apt packages + rustup on top of the release
+    image (pr_test.py); the Slurm unit tray runs the release image directly, so
+    the same packages must be baked into docker/Dockerfile or the two lanes
+    drift."""
+    modal_source = (REPO_ROOT / "fastvideo/tests/modal/pr_test.py").read_text(encoding="utf-8")
+    assert '.apt_install(\n    "cmake", "pkg-config", "build-essential", "curl", "libssl-dev", "ffmpeg")' in modal_source
+
+    dockerfile = (REPO_ROOT / "docker/Dockerfile").read_text(encoding="utf-8")
+    for package in ("cmake", "pkg-config", "build-essential", "libssl-dev", "curl", "ffmpeg"):
+        assert f"    {package} \\\n" in dockerfile, f"{package} missing from the docker/Dockerfile apt layer"
+    assert "sh.rustup.rs | sh -s -- -y --default-toolchain stable" in dockerfile
+    assert "ENV PATH=/root/.cargo/bin:${PATH}" in dockerfile
+
+
 def test_cache_key_uses_resolved_arch_not_raw_env(monkeypatch, tmp_path) -> None:
     _patch_stable_metadata(monkeypatch)
     monkeypatch.setattr(kernel_build_cache, "_detect_arch_from_torch", lambda: "9.0a")

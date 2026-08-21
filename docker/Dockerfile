@@ -95,7 +95,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc-11 \
     g++-11 \
     clang-11 \
+    cmake \
+    pkg-config \
+    build-essential \
+    libssl-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# Rust toolchain: some dependencies only ship sdists on aarch64 and need cargo
+# to build. The Modal CI image layers the identical apt set + rustup on top of
+# this image (fastvideo/tests/modal/pr_test.py); baking both here keeps the
+# Slurm unit tray and the Modal lanes on one package surface.
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+ENV PATH=/root/.cargo/bin:${PATH}
 
 # Set up C++20 compilers for ThunderKittens
 RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100 --slave /usr/bin/g++ g++ /usr/bin/g++-11
