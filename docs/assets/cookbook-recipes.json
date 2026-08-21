@@ -1,0 +1,52 @@
+{
+  "recipes": [
+    {
+      "id": "fastwan21-t2v",
+      "task": "Text to video",
+      "label": "FastWan2.1 1.3B (distilled + VSA)",
+      "model": "FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
+      "source": "scripts/inference/inference_wan_VSA_DMD_1_3B.yaml",
+      "command": "FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN fastvideo generate --config scripts/inference/inference_wan_VSA_DMD_1_3B.yaml"
+    },
+    {
+      "id": "wan22-t2v",
+      "task": "Text to video",
+      "label": "Wan2.2 A14B",
+      "model": "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
+      "source": "examples/inference/basic/basic_wan2_2.py",
+      "command": "python examples/inference/basic/basic_wan2_2.py"
+    },
+    {
+      "id": "wan21-i2v",
+      "task": "Image to video",
+      "label": "Wan2.1 14B 480P",
+      "model": "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers",
+      "source": "scripts/inference/inference_wan_i2v.yaml",
+      "command": "fastvideo generate --config scripts/inference/inference_wan_i2v.yaml"
+    },
+    {
+      "id": "turbowan22-i2v",
+      "task": "Image to video",
+      "label": "TurboWan2.2 A14B",
+      "model": "loayrashid/TurboWan2.2-I2V-A14B-Diffusers",
+      "source": "examples/inference/basic/basic_turbodiffusion_i2v.py",
+      "command": "python examples/inference/basic/basic_turbodiffusion_i2v.py"
+    },
+    {
+      "id": "wan22-ti2v",
+      "task": "Text or image to video",
+      "label": "Wan2.2 TI2V 5B",
+      "model": "Wan-AI/Wan2.2-TI2V-5B-Diffusers",
+      "source": "examples/inference/basic/basic_wan2_2_ti2v.py",
+      "command": "python examples/inference/basic/basic_wan2_2_ti2v.py"
+    },
+    {
+      "id": "matrix-game-2",
+      "task": "Interactive world",
+      "label": "Matrix Game 2.0",
+      "model": "FastVideo/Matrix-Game-2.0-Base-Distilled-Diffusers",
+      "source": "examples/inference/basic/basic_matrixgame2.py",
+      "command": "python examples/inference/basic/basic_matrixgame2.py"
+    }
+  ]
+}

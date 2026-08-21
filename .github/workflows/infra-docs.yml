@@ -6,6 +6,7 @@ on:
     paths:
       - 'docs/**'
       - 'examples/**'
+      - 'scripts/inference/**'
       - 'mkdocs.yml'
       - 'requirements-mkdocs.in'
       - 'requirements-mkdocs.txt'
@@ -16,6 +17,7 @@ on:
     paths:
       - 'docs/**'
       - 'examples/**'
+      - 'scripts/inference/**'
       - 'mkdocs.yml'
       - 'requirements-mkdocs.in'
       - 'requirements-mkdocs.txt'
