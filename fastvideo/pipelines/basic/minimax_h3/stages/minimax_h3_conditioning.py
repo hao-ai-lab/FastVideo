@@ -12,6 +12,7 @@ from torch.distributed.tensor import DTensor
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.models.encoders.minimax_h3_qwen3_vl import MiniMaxH3Qwen3VLConditioner
+from fastvideo.profiler import nvtx_range
 from fastvideo.pipelines.basic.minimax_h3.packing import (
     MINIMAX_H3_IMAGE_PAD_TOKEN,
     MINIMAX_H3_TEXT_ENCODER_LAYER,
@@ -286,6 +287,7 @@ class MiniMaxH3ConditioningStage(PipelineStage):
 
     @torch.no_grad()
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+        """Encode one H3 prompt presentation and attach its packed text features."""
         device = get_local_torch_device()
         first_param = next(self.conditioner.parameters(), None)
         moved_for_forward = (fastvideo_args.text_encoder_cpu_offload and first_param is not None
@@ -293,10 +295,13 @@ class MiniMaxH3ConditioningStage(PipelineStage):
         if moved_for_forward:
             self.conditioner.to(device)
         try:
-            if self.ref2va:
-                prompt_embeds, text_token_tags = self._encode_ref2va(batch, device)
-            else:
-                prompt_embeds, text_token_tags = self._encode_fl2va(batch, device)
+            # Keep both H3 prompt-presentation modes under one text-encoding
+            # range so Nsight Systems exposes their complete conditioning cost.
+            with nvtx_range("minimax_h3.text_encoding"):
+                if self.ref2va:
+                    prompt_embeds, text_token_tags = self._encode_ref2va(batch, device)
+                else:
+                    prompt_embeds, text_token_tags = self._encode_fl2va(batch, device)
         finally:
             if moved_for_forward:
                 self.conditioner.to("cpu")

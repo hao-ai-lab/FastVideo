@@ -25,6 +25,7 @@ from fastvideo.layers.quantization import QuantizationConfig
 from fastvideo.layers.visual_embedding import Timesteps
 from fastvideo.models.dits.base import BaseDiT
 from fastvideo.platforms import AttentionBackendEnum
+from fastvideo.profiler import nvtx_range
 from fastvideo.utils import get_compute_dtype
 
 MINIMAX_H3_MODALITY_NUM = 3
@@ -734,14 +735,17 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
             local_timestep_indices, _ = sequence_model_parallel_shard(local_timestep_indices, dim=0)
             rotary_emb = (rotary_cos, rotary_sin)
 
-        for block in self.transformer_blocks:
-            packed_hidden_states = block(
-                packed_hidden_states,
-                temb,
-                adaln_indices,
-                rotary_emb,
-                original_seq_len,
-            )
+        # The eager driver owns profiling markers while each block's compiled
+        # forward owns the graph that the marker surrounds.
+        for block_index, block in enumerate(self.transformer_blocks):
+            with nvtx_range(f"minimax_h3.transformer_block.{block_index}"):
+                packed_hidden_states = block(
+                    packed_hidden_states,
+                    temb,
+                    adaln_indices,
+                    rotary_emb,
+                    original_seq_len,
+                )
 
         packed_hidden_states = self.norm_out(
             packed_hidden_states,

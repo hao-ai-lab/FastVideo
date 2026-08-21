@@ -16,6 +16,7 @@ import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 
 from fastvideo.configs.models.vaes.minimax_h3_video import MiniMaxH3VideoVAEConfig
+from fastvideo.profiler import nvtx_range
 
 
 class DiagonalGaussianDistribution:
@@ -703,33 +704,50 @@ class AutoencoderKLMiniMaxH3(nn.Module):
         return self._stitch_tiles(rows, latent_y_overlaps, latent_x_overlaps)
 
     def _decode_clip(self, z: torch.Tensor) -> torch.Tensor:
-        if not self.use_tiling:
-            return self.decoder(self.post_quant_conv(z))
-        height = z.shape[-2] * self.spatial_compression_ratio
-        width = z.shape[-1] * self.spatial_compression_ratio
-        y_indices, y_lengths, y_overlaps = self._split_tiles(
-            height,
-            self.tile_sample_min_height,
-            self.tile_sample_min_overlap_height,
-        )
-        x_indices, x_lengths, x_overlaps = self._split_tiles(
-            width,
-            self.tile_sample_min_width,
-            self.tile_sample_min_overlap_width,
-        )
-        ratio = self.spatial_compression_ratio
-        rows = []
-        for y_position, y_length in zip(y_indices, y_lengths):
-            row = []
-            for x_position, x_length in zip(x_indices, x_lengths):
-                tile = z[
-                    ...,
-                    y_position // ratio:y_position // ratio + y_length // ratio,
-                    x_position // ratio:x_position // ratio + x_length // ratio,
-                ]
-                row.append(self.decoder(self.post_quant_conv(tile)))
-            rows.append(row)
-        return self._stitch_tiles(rows, y_overlaps, x_overlaps)
+        """Decode one temporal clip, with optional overlapping spatial tiles."""
+        with nvtx_range("minimax_h3.vae.decode_clip"):
+            if not self.use_tiling:
+                with nvtx_range("minimax_h3.vae.decode_clip.no_s_tile.post_quant_conv"):
+                    projected_clip = self.post_quant_conv(z)
+                with nvtx_range("minimax_h3.vae.decode_clip.no_s_tile.decoder_forward"):
+                    return self.decoder(projected_clip)
+
+            height = z.shape[-2] * self.spatial_compression_ratio
+            width = z.shape[-1] * self.spatial_compression_ratio
+            with nvtx_range("minimax_h3.vae.decode_clip.split_tiles"):
+                y_indices, y_lengths, y_overlaps = self._split_tiles(
+                    height,
+                    self.tile_sample_min_height,
+                    self.tile_sample_min_overlap_height,
+                )
+                x_indices, x_lengths, x_overlaps = self._split_tiles(
+                    width,
+                    self.tile_sample_min_width,
+                    self.tile_sample_min_overlap_width,
+                )
+
+            ratio = self.spatial_compression_ratio
+            rows = []
+            # The eager tile driver owns NVTX so each marker remains outside
+            # the compiled decoder graph.
+            with nvtx_range("minimax_h3.vae.decode_clip.decode_tiles"):
+                for row_index, (y_position, y_length) in enumerate(zip(y_indices, y_lengths)):
+                    row = []
+                    for column_index, (x_position, x_length) in enumerate(zip(x_indices, x_lengths)):
+                        with nvtx_range(f"minimax_h3.vae.decode_clip.tile.{row_index}.{column_index}"):
+                            tile = z[
+                                ...,
+                                y_position // ratio:y_position // ratio + y_length // ratio,
+                                x_position // ratio:x_position // ratio + x_length // ratio,
+                            ]
+                            projected_tile = self.post_quant_conv(tile)
+                            with nvtx_range("minimax_h3.vae.decode_clip.tile.decoder_forward"):
+                                decoded_tile = self.decoder(projected_tile)
+                            row.append(decoded_tile)
+                    rows.append(row)
+
+            with nvtx_range("minimax_h3.vae.decode_clip.stitch_tiles"):
+                return self._stitch_tiles(rows, y_overlaps, x_overlaps)
 
     def _encode(self, x: torch.Tensor) -> torch.Tensor:
         clip_length = self.config.clip_length
@@ -809,21 +827,27 @@ class AutoencoderKLMiniMaxH3(nn.Module):
 
         output_frame_start = 0
         overlap = None
-        for index in range(num_chunks):
-            start = index * tokens_chunk_size
-            clip = self._decode_clip(z[:, :, start:start + tokens_chunk_size + self.token_overlap])
-            chunk = clip[:, :, self.frame_pre_padding:chunk_num_frames]
-            next_overlap = None
-            if self.config.token_drop > 0:
-                next_overlap = clip[:, :, chunk_num_frames + self.frame_pre_padding:].clone()
-            if overlap is not None:
-                chunk = self._blend(overlap, chunk, self.frame_overlap, dim=-3)
+        for chunk_index in range(num_chunks):
+            with nvtx_range(f"minimax_h3.vae.temporal_chunk.{chunk_index}"):
+                start = chunk_index * tokens_chunk_size
+                clip = self._decode_clip(z[:, :, start:start + tokens_chunk_size + self.token_overlap])
+                with nvtx_range(f"minimax_h3.vae.temporal_chunk.{chunk_index}.frame_segment.0"):
+                    chunk = clip[:, :, self.frame_pre_padding:chunk_num_frames]
+                    if overlap is not None:
+                        chunk = self._blend(overlap, chunk, self.frame_overlap, dim=-3)
+                    num_frames = min(chunk.shape[2], output_num_frames - output_frame_start)
+                    chunk = chunk[:, :, :num_frames]
 
-            num_frames = min(chunk.shape[2], output_num_frames - output_frame_start)
-            if num_frames > 0:
-                yield chunk[:, :, :num_frames]
-                output_frame_start += num_frames
+                next_overlap = None
+                if self.config.token_drop > 0:
+                    with nvtx_range(f"minimax_h3.vae.temporal_chunk.{chunk_index}.frame_segment.1"):
+                        next_overlap = clip[:, :, chunk_num_frames + self.frame_pre_padding:].clone()
+
+            # Yield after the ranges close so consumer-side CPU copies do not inflate decoder timing.
             overlap = next_overlap
+            if num_frames > 0:
+                output_frame_start += num_frames
+                yield chunk
 
         if overlap is not None and output_frame_start < output_num_frames:
             yield overlap[:, :, :output_num_frames - output_frame_start]
