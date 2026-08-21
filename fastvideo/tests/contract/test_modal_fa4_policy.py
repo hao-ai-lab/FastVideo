@@ -26,14 +26,28 @@ def _function_strings(path: Path, function_name: str) -> str:
     raise AssertionError(f"{function_name} not found in {path}")
 
 
+def _image_env_default(path: Path, env_name: str) -> str:
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Dict):
+            continue
+        for key, value in zip(node.keys, node.values, strict=True):
+            if not (isinstance(key, ast.Constant) and key.value == env_name):
+                continue
+            if (isinstance(value, ast.Call) and isinstance(value.func, ast.Attribute)
+                    and value.func.attr == "get" and len(value.args) == 2
+                    and isinstance(value.args[0], ast.Constant) and value.args[0].value == env_name
+                    and isinstance(value.args[1], ast.Constant) and isinstance(value.args[1].value, str)):
+                return value.args[1].value
+    raise AssertionError(f"{env_name} default not found in an image environment dictionary in {path}")
+
+
 def test_generic_l40s_launcher_defaults_fa4_off():
-    source = LAUNCH_L40S_JOB.read_text(encoding="utf-8")
-    assert '"FASTVIDEO_FA4": os.environ.get("FASTVIDEO_FA4", "0")' in source
+    assert _image_env_default(LAUNCH_L40S_JOB, "FASTVIDEO_FA4") == "0"
 
 
 def test_ssim_launcher_keeps_fa4_enabled_by_default():
-    source = SSIM_TEST.read_text(encoding="utf-8")
-    assert '"FASTVIDEO_FA4": os.environ.get("FASTVIDEO_FA4", "1")' in source
+    assert _image_env_default(SSIM_TEST, "FASTVIDEO_FA4") == "1"
 
 
 def test_performance_identity_env_reaches_modal_runtime():
