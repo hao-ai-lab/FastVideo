@@ -25,7 +25,7 @@ try:
         flatten_varlen_lse,
         unflatten_varlen_lse,
     )
-except:
+except ImportError:
     from .utils import (  # type: ignore[no-redef]
         flatten_varlen_lse, unflatten_varlen_lse,
     )
