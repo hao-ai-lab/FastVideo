@@ -35,9 +35,9 @@ python examples/inference/basic/basic_dmd_new_api.py
 
 For the few-step (4-step, DMD2-distilled) MiniMax-H3 preview, generating synchronized video and audio, optionally with block-sparse VSA attention:
 ```
-python examples/inference/basic/basic_fast_minimax_h3.py --prompt "your prompt" [--vsa-sparsity 0.9]
+python examples/inference/basic/basic_fasth3.py --prompt "your prompt" [--vsa-sparsity 0.9]
 ```
-The default checkpoint `FastVideo/FastVideo-Minimax-H3-Preview-v0.1` is private on the Hub while its license review completes; until it flips public, pass `--model-path` with a local snapshot of the release.
+The default checkpoint `FastVideo/FastH3-Preview-v0.1` is private on the Hub while its license review completes; until it flips public, pass `--model-path` with a local snapshot of the release.
 
 ## Basic Walkthrough
 
