@@ -340,18 +340,46 @@ def test_wave1_lane_functions_use_shared_scripts(monkeypatch):
     commands = []
     monkeypatch.setattr(module, "run_test", commands.append)
 
+    hf_prefix = "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && "
     module.run_kernel_tests()
     module.run_inference_tests_vmoba()
     module.run_golden_gate_tests()
+    module.run_encoder_tests()
+    module.run_vae_tests()
+    module.run_transformer_tests()
+    module.run_inference_lora_tests()
+    module.run_distill_dmd_tests()
+    module.run_train_framework_tests()
 
     assert commands == [
         "bash .buildkite/scripts/lanes/kernel_tests.sh",
         "bash .buildkite/scripts/lanes/inference_vmoba.sh",
-        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY"
-        " && bash .buildkite/scripts/lanes/golden_gate.sh",
+        hf_prefix + "bash .buildkite/scripts/lanes/golden_gate.sh",
+        hf_prefix + "bash .buildkite/scripts/lanes/encoder.sh",
+        hf_prefix + "bash .buildkite/scripts/lanes/vae.sh",
+        hf_prefix + "FASTVIDEO_FA4=0 bash .buildkite/scripts/lanes/transformer.sh",
+        "bash .buildkite/scripts/lanes/inference_lora.sh",
+        "FASTVIDEO_FA4=0 bash .buildkite/scripts/lanes/distillation_dmd.sh",
+        hf_prefix + "FASTVIDEO_FA4=0 bash .buildkite/scripts/lanes/train_framework.sh",
     ]
+
     lanes_dir = Path(__file__).resolve().parents[3] / ".buildkite/scripts/lanes"
-    assert "pytest fastvideo-kernel/tests/ -vs" in (lanes_dir / "kernel_tests.sh").read_text()
-    assert ("python fastvideo/tests/inference/vmoba/test_vmoba_inference.py"
-            in (lanes_dir / "inference_vmoba.sh").read_text())
-    assert "pytest ./fastvideo/tests/golden_gate -vs" in (lanes_dir / "golden_gate.sh").read_text()
+    for script, payload in {
+            "kernel_tests.sh": "pytest fastvideo-kernel/tests/ -vs",
+            "inference_vmoba.sh": "python fastvideo/tests/inference/vmoba/test_vmoba_inference.py",
+            "golden_gate.sh": "pytest ./fastvideo/tests/golden_gate -vs",
+            "encoder.sh": "pytest ./fastvideo/tests/encoders -vs",
+            "vae.sh": "pytest ./fastvideo/tests/vaes -vs",
+            "transformer.sh": "pytest ./fastvideo/tests/transformers -vs",
+            "inference_lora.sh": "pytest ./fastvideo/tests/inference/lora/test_lora_inference_similarity.py -vs",
+            "distillation_dmd.sh": "pytest ./fastvideo/tests/training/distill/test_distill_dmd.py -vs",
+            "train_framework.sh": "pytest ./fastvideo/tests/train/models ./fastvideo/tests/train/methods -vs",
+            "eval.sh": "pytest ./fastvideo/tests/eval -vs",
+    }.items():
+        assert payload in (lanes_dir / script).read_text(), script
+
+    # run_eval_tests goes through run_test_command (custom install extras);
+    # pin its shared script + install command textually.
+    eval_source = (Path(__file__).resolve().parent / "pr_test.py").read_text()
+    assert "bash .buildkite/scripts/lanes/eval.sh" in eval_source
+    assert 'install_command=\'uv pip install -e ".[test,eval-full]"\'' in eval_source

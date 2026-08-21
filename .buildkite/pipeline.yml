@@ -128,6 +128,69 @@ steps:
         TEST_TYPE: "golden_gate_ci"
       agents:
         queue: "ci-runner"
+    - label: ":microscope: Encoder Tests (Slurm)"
+      key: "encoder-ci"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "encoder_ci"
+      command: "/opt/fastvideo-ci-runner/run-ci"
+      timeout_in_minutes: 90
+      env:
+        TEST_TYPE: "encoder_ci"
+      agents:
+        queue: "ci-runner"
+    - label: ":microscope: VAE Tests (Slurm)"
+      key: "vae-ci"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "vae_ci"
+      command: "/opt/fastvideo-ci-runner/run-ci"
+      timeout_in_minutes: 90
+      env:
+        TEST_TYPE: "vae_ci"
+      agents:
+        queue: "ci-runner"
+    - label: ":microscope: Transformer Tests (Slurm)"
+      key: "transformer-ci"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "transformer_ci"
+      command: "/opt/fastvideo-ci-runner/run-ci"
+      timeout_in_minutes: 90
+      env:
+        TEST_TYPE: "transformer_ci"
+      agents:
+        queue: "ci-runner"
+    - label: ":test_tube: LoRA Inference Tests (Slurm)"
+      key: "lora-inference-ci"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "inference_lora_ci"
+      command: "/opt/fastvideo-ci-runner/run-ci"
+      timeout_in_minutes: 90
+      env:
+        TEST_TYPE: "inference_lora_ci"
+      agents:
+        queue: "ci-runner"
+    - label: ":test_tube: Distillation DMD Tests (Slurm)"
+      key: "distillation-ci"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "distillation_dmd_ci"
+      command: "/opt/fastvideo-ci-runner/run-ci"
+      timeout_in_minutes: 90
+      env:
+        TEST_TYPE: "distillation_dmd_ci"
+      agents:
+        queue: "ci-runner"
+    - label: ":test_tube: Train Framework Tests (Slurm)"
+      key: "train-framework-ci"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "train_framework_ci"
+      command: "/opt/fastvideo-ci-runner/run-ci"
+      timeout_in_minutes: 90
+      env:
+        TEST_TYPE: "train_framework_ci"
+      agents:
+        queue: "ci-runner"
+    - label: ":test_tube: Eval Metrics Tests (Slurm)"
+      key: "eval-ci"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "eval_ci"
+      command: "/opt/fastvideo-ci-runner/run-ci"
+      timeout_in_minutes: 90
+      env:
+        TEST_TYPE: "eval_ci"
+      agents:
+        queue: "ci-runner"
     - label: ":microscope: DreamVerse App Tests"
       if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "dreamverse_app"
       command: "timeout 90m .buildkite/scripts/pr_test.sh"

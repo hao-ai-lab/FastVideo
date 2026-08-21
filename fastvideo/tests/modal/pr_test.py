@@ -243,7 +243,7 @@ def run_test_command(test_command: str, build_kernel: bool, install_command: str
               volumes={"/root/data": model_vol})
 def run_encoder_tests():
     run_test(
-        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/encoders -vs"
+        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && bash .buildkite/scripts/lanes/encoder.sh"
     )
 
 
@@ -254,7 +254,7 @@ def run_encoder_tests():
               volumes={"/root/data": model_vol})
 def run_vae_tests():
     run_test(
-        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/vaes -vs")
+        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && bash .buildkite/scripts/lanes/vae.sh")
 
 
 @app.function(gpu="L40S:1",
@@ -279,7 +279,7 @@ def run_golden_gate_tests():
               volumes={"/root/data": model_vol})
 def run_transformer_tests():
     run_test("export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && "
-             "FASTVIDEO_FA4=0 pytest ./fastvideo/tests/transformers -vs")
+             "FASTVIDEO_FA4=0 bash .buildkite/scripts/lanes/transformer.sh")
 
 
 @app.function(gpu="L40S:4",
@@ -333,12 +333,12 @@ def run_inference_tests_vmoba():
 
 @app.function(gpu="L40S:1", image=image, timeout=1200, secrets=[ci_env_secret])
 def run_inference_lora_tests():
-    run_test("pytest ./fastvideo/tests/inference/lora/test_lora_inference_similarity.py -vs")
+    run_test("bash .buildkite/scripts/lanes/inference_lora.sh")
 
 
 @app.function(gpu="L40S:2", image=image, timeout=900, secrets=[ci_env_secret])
 def run_distill_dmd_tests():
-    run_test("FASTVIDEO_FA4=0 pytest ./fastvideo/tests/training/distill/test_distill_dmd.py -vs")
+    run_test("FASTVIDEO_FA4=0 bash .buildkite/scripts/lanes/distillation_dmd.sh")
 
 
 @app.function(gpu="L40S:2", image=image, timeout=900, secrets=[wandb_secret, ci_env_secret])
@@ -397,7 +397,7 @@ def run_dreamverse_app_tests():
               volumes={"/root/data": model_vol})
 def run_train_framework_tests():
     run_test("export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && "
-             "FASTVIDEO_FA4=0 pytest ./fastvideo/tests/train/models ./fastvideo/tests/train/methods -vs")
+             "FASTVIDEO_FA4=0 bash .buildkite/scripts/lanes/train_framework.sh")
 
 
 @app.function(gpu="L40S:1",
@@ -443,7 +443,7 @@ def run_eval_tests():
     # pass vacuously. detectron2-backed vbench metrics remain skipped by
     # design (not pip-installable; see fastvideo/eval/README.md).
     run_test_command(
-        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/eval -vs",
+        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && bash .buildkite/scripts/lanes/eval.sh",
         build_kernel=True,
         install_command='uv pip install -e ".[test,eval-full]"')
 

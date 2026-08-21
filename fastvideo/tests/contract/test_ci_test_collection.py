@@ -98,9 +98,18 @@ def test_slurm_wave1_lanes_route_direct_to_trusted_static_driver():
 
     valid_line = next(line for line in slash_commands.splitlines() if line.strip().startswith("VALID="))
     lanes = [
+        # wave 1
         ("kernel-ci", "kernel_tests_ci", "kernel-tests-ci", ":microscope: Kernel Tests (Slurm)"),
         ("vmoba-ci", "inference_vmoba_ci", "inference-vmoba-ci", ":test_tube: Inference Tests VMoBA (Slurm)"),
         ("golden-gate-ci", "golden_gate_ci", "golden-gate-ci", ":vertical_traffic_light: Golden-Gate Tests (Slurm)"),
+        # wave 2 (HF-cache lanes)
+        ("encoder-ci", "encoder_ci", "encoder-ci", ":microscope: Encoder Tests (Slurm)"),
+        ("vae-ci", "vae_ci", "vae-ci", ":microscope: VAE Tests (Slurm)"),
+        ("transformer-ci", "transformer_ci", "transformer-ci", ":microscope: Transformer Tests (Slurm)"),
+        ("lora-inference-ci", "inference_lora_ci", "lora-inference-ci", ":test_tube: LoRA Inference Tests (Slurm)"),
+        ("distillation-ci", "distillation_dmd_ci", "distillation-ci", ":test_tube: Distillation DMD Tests (Slurm)"),
+        ("train-framework-ci", "train_framework_ci", "train-framework-ci", ":test_tube: Train Framework Tests (Slurm)"),
+        ("eval-ci", "eval_ci", "eval-ci", ":test_tube: Eval Metrics Tests (Slurm)"),
     ]
     for name, test_type, step_key, label in lanes:
         assert f" {name} " in valid_line or valid_line.rstrip('"').endswith(name), name
