@@ -44,7 +44,27 @@ def _block_size(q: torch.Tensor, variable_block_sizes: torch.Tensor) -> int:
 
 
 def is_supported(q: torch.Tensor, variable_block_sizes: torch.Tensor) -> bool:
-    """True iff this build can run these tensors; otherwise the caller uses Triton."""
+    """True iff this build can run these tensors; otherwise the caller uses Triton.
+
+    Static facts only -- shapes, dtypes, arch, layout. Deliberately NO reads of tensor
+    contents: the previous ``int(variable_block_sizes.min())`` was a GPU->CPU sync on every
+    call, and the kernel no longer needs it (see below). This predicate must stay cheap
+    enough to sit on a per-layer dispatch path.
+
+    What the kernel accepts (and is tested to handle):
+      * q/k/v: contiguous 4-D bf16 CUDA tensors on an sm_100 device, head_dim 128, laid out
+        as compiled (BHSD here); seqlen == num_blocks * block with an EVEN num_blocks (a CTA
+        owns an adjacent pair of query blocks) and a 64- or 128-token build present.
+      * q2k_num: any per-row counts in [0, max_kv], NON-uniform across rows included. Rows
+        with count 0 produce exactly-zero output rows (and a finite LSE sentinel) rather
+        than attending anywhere -- so no ``.min()`` floor is required of the caller.
+      * q2k_idx: rows only need valid entries (in [0, num_blocks)) BELOW that row's count;
+        padding past the count (e.g. map_to_index's -1 fill) is never dereferenced. max_kv
+        (= q2k_idx.shape[-1]) must be >= 1, which the host launcher re-checks.
+      * variable_block_sizes: per-KV-block valid-token counts in [0, block]; keys at or past
+        a block's count are masked. Integer metadata is converted to int32/contiguous by
+        ``block_sparse_attn_sm100a`` itself, so int64 inputs merely cost a cast.
+    """
     if not _HAS_VSA_SM100A or not q.is_cuda:
         return False
     if torch.cuda.get_device_capability(q.device) != _SM100:
@@ -58,9 +78,8 @@ def is_supported(q: torch.Tensor, variable_block_sizes: torch.Tensor) -> bool:
     # A CTA owns an adjacent pair of query blocks.
     if variable_block_sizes.numel() % 2 != 0:
         return False
-    # A fully empty block would give an all -inf row; FastVideo's tiling does not produce one,
-    # but the kernel assumes it and the check is a single reduction.
-    if int(variable_block_sizes.min()) < 1:
+    # Metadata must be integer-typed so the wrapper's int32 conversion is value-preserving.
+    if not variable_block_sizes.is_cuda or variable_block_sizes.dtype not in (torch.int32, torch.int64):
         return False
     return True
 

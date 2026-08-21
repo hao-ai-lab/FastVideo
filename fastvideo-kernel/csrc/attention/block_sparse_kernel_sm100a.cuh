@@ -142,7 +142,18 @@ struct WorkItem {
   int mtile1;
   int global_mtile0;
   int global_mtile1;
+  // Shared trip count for the CTA's q-tile pair: max of the two tiles' own
+  // counts, floored at 1. Every warp role derives its loop bounds from this
+  // one value, so the producer/consumer mbarrier pairing stays symmetric for
+  // ANY per-tile counts (including 0): a tile shorter than the pair max runs
+  // its extra iterations against clamped (valid, in-bounds) KV blocks and
+  // masks them to -inf via the per-tile count below, contributing nothing.
   int num_kv_blocks;
+  // Each q-tile's OWN q2k_num. Used for (a) the q2k_idx window clamp in the
+  // load warp and (b) the vbs-threshold masking in the softmax warps. The
+  // pre-fix kernel used q2k_num[global_mtile0] for BOTH tiles, silently
+  // corrupting one tile of any pair whose rows have different counts.
+  int num_kv_blocks_mt[2];
 };
 template <bool Q_RASTER>
 __device__ __forceinline__ WorkItem decode_workitem(
@@ -164,7 +175,13 @@ __device__ __forceinline__ WorkItem decode_workitem(
   it.mtile1 = 2 * p + 1;
   it.global_mtile0  = (it.sample * num_heads + it.head) * num_blocks + it.mtile0;
   it.global_mtile1  = it.global_mtile0 + 1;
-  it.num_kv_blocks   = q2k_num[it.global_mtile0];
+  it.num_kv_blocks_mt[0] = q2k_num[it.global_mtile0];
+  it.num_kv_blocks_mt[1] = q2k_num[it.global_mtile1];
+  // Floor of 1: a pair whose rows are BOTH empty still walks one K-tile so no
+  // mbarrier wait is left without its arrive (the load/MMA/softmax/correction
+  // pipeline has a fixed per-iteration handshake); the per-tile counts mask
+  // that K-tile completely, so such rows produce exactly-zero output.
+  it.num_kv_blocks = max(max(it.num_kv_blocks_mt[0], it.num_kv_blocks_mt[1]), 1);
   return it;
 }
 
@@ -277,8 +294,16 @@ fmha_context_bf16_gen_kernel(const __grid_constant__ CUtensorMap tmap_q,
       auto get_kv_block_id = [&](int mtile_idx, int j) -> int {
         if (j >= window_start[mtile_idx] + 32) {
           window_start[mtile_idx] = j & ~31;
-          const int idx = min(window_start[mtile_idx] + lane, it.num_kv_blocks - 1);
-          kv_block_id_cache[mtile_idx] = q2k_idx[global_mtile[mtile_idx] * max_kv + idx];
+          // Clamp into THIS tile's own row of q2k_idx (the pair may run more
+          // iterations than this tile has blocks -- see WorkItem). Positions
+          // past the tile's count re-read its last valid entry; an empty tile
+          // never dereferences its row at all and loads block 0 instead. Both
+          // are fully masked by the per-tile vbs thresholds, so only the
+          // load address safety matters here.
+          const int cnt = it.num_kv_blocks_mt[mtile_idx];
+          const int idx = max(0, min(window_start[mtile_idx] + lane, cnt - 1));
+          kv_block_id_cache[mtile_idx] =
+              (cnt > 0) ? q2k_idx[global_mtile[mtile_idx] * max_kv + idx] : 0;
         }
         return __shfl_sync(0xffffffffu, kv_block_id_cache[mtile_idx], j & 31);
       };
@@ -874,14 +899,19 @@ fmha_context_bf16_gen_kernel(const __grid_constant__ CUtensorMap tmap_q,
         if (k >= thr_window + 32) {
           thr_window = k & ~31;
           const int kk = thr_window + lane;
+          // THIS tile's own count (this warp group serves exactly one m_tile).
+          // Positions at or past it -- the pair-max padding, and everything in
+          // an empty row -- get threshold 0, i.e. the whole 64/128-token block
+          // masks to -inf, regardless of which KV block the load warp fetched.
+          const int cnt = it.num_kv_blocks_mt[m_tile];
           if constexpr (BLK128) {
-            thr_cache0 = (kk < it.num_kv_blocks)
+            thr_cache0 = (kk < cnt)
                        ? variable_block_sizes[q2k_idx[gqb_mt * max_kv + kk]] : 0;
           } else {
             const int b0 = kk * BLOCKS_PER_KTILE + 2 * half;
-            thr_cache0 = (b0     < it.num_kv_blocks)
+            thr_cache0 = (b0     < cnt)
                        ? variable_block_sizes[q2k_idx[gqb_mt * max_kv + b0]]     : 0;
-            thr_cache1 = (b0 + 1 < it.num_kv_blocks)
+            thr_cache1 = (b0 + 1 < cnt)
                        ? variable_block_sizes[q2k_idx[gqb_mt * max_kv + b0 + 1]] : 0;
           }
         }
