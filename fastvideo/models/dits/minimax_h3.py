@@ -546,7 +546,7 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
                 "parameter, but factorized AdaLN weights are pinned to FP16 "
                 "(BF16 reconstructs them ~1.7x worse). Fine-tune the full-rank "
                 "checkpoint instead, then re-fit the basis with "
-                "tools/minimax_h3/fit_adaln_basis.py.")
+                "scripts/checkpoint_conversion/convert_minimax_h3_adaln_rank.py.")
         adaln_dim = self.adaln_rank or arch.time_embed_dim
         self.adaln_basis = ReplicatedLinear(
             arch.time_embed_dim,
