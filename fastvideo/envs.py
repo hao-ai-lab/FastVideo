@@ -229,10 +229,8 @@ environment_variables: dict[str, Callable[[], Any]] = {
 
     # Sequence-parallel all-to-all backend.
     # - "off" (default): the NCCL path in DistributedAutograd.AllToAll4D
-    # - "auto": use the fused NVLink kernel when the group is a load-store
-    #   accessible mesh with world size 2/4/6/8, else fall back to the NCCL
-    #   path. Results are byte-identical either way. Opt-in because it holds a
-    #   persistent registered window sized to the largest operand.
+    # - "auto": fused NVLink kernel when the group is a load-store accessible
+    #   mesh of 2/4/6/8 ranks, else the NCCL path. Byte-identical either way.
     "FASTVIDEO_ULYSSES_A2A":
     lambda: os.getenv("FASTVIDEO_ULYSSES_A2A", "off").strip().lower(),
 
