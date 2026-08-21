@@ -11,6 +11,7 @@ from fastvideo.attention.selector import component_attention_backend, get_attn_b
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
+from fastvideo.profiler import profiler_region
 from fastvideo.hooks.activation_trace import trace_step
 from fastvideo.pipelines.basic.minimax_h3.packing import (
     MINIMAX_H3_KEYFRAME_NOISE_AUG,
@@ -132,11 +133,21 @@ class MiniMaxH3DenoisingStage(PipelineStage):
         text_indices = layout.text_indices.to(device)
         prompt_embeds = batch.prompt_embeds[0].to(device)
 
-        controller = get_global_controller()
-        denoise_region = (controller.region("profiler_region_inference_denoising")
-                          if controller is not None else contextlib.nullcontext())
+        vsa_metadata_builder = _h3_vsa_metadata_builder(self.transformer, fastvideo_args)
+        if vsa_metadata_builder is not None:
+            vsa_patch_size = fastvideo_args.pipeline_config.dit_config.patch_size
+            vsa_prefix_segments = _h3_vsa_prefix_segments(layout, vsa_patch_size)
+            # Per-request knobs (sweeps flip these between generate_video calls
+            # without respawning workers); mode None defers to the env default.
+            vsa_mode = batch.extra.get("vsa_mode", "exempt")
+            if vsa_mode not in ("exempt", "compete"):
+                raise ValueError(f"vsa_mode must be 'exempt' or 'compete', got {vsa_mode!r}.")
+            vsa_exempt = vsa_mode == "exempt"
+            vsa_dense_layers = tuple(batch.extra.get("vsa_dense_layers", ()))
+            vsa_dense_first_n = int(batch.extra.get("vsa_dense_first_n_steps", 0))
+
         try:
-            with denoise_region:
+            with profiler_region("inference_denoising"):
                 for index, (video_timestep,
                             audio_timestep) in enumerate(zip(video_timesteps, audio_timesteps, strict=True)):
                     unique_timesteps, timestep_indices = row_timestep_plan[index]
