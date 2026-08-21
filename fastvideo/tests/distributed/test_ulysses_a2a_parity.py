@@ -145,52 +145,12 @@ def _worker() -> None:
     torch.manual_seed(SEED + rank)
 
     try:
-        for B, S_local, H, D in [(3, 32, 8, 64), (3, 64, 40, 128)]:
-            if H % w:
+        for B, S_local, H, D in [(3, 32, 8, 64), (3, 64, 40, 128), (1, 48, 56, 128)]:
+            if H % w or S_local % 2:
                 continue
-            x = torch.randn(B, S_local, H, D, device=device, dtype=torch.bfloat16)
-
-            # Fused (or fallback, if the topology is not eligible).
-            got = sequence_model_parallel_all_to_all_4D(x, scatter_dim=2, gather_dim=1)
-
-            # Reference: the inherited NCCL implementation, reached directly.
-            from fastvideo.distributed.device_communicators.base_device_communicator import (
-                DeviceCommunicatorBase)
-            comm = get_sp_group().device_communicator
-            want = DeviceCommunicatorBase.all_to_all_4D(comm, x, 2, 1)
-            assert torch.equal(got, want), f"scatter parity failed at {(B, S_local, H, D)}"
-
-            y = got.contiguous()
-            got_g = sequence_model_parallel_all_to_all_4D(y, scatter_dim=1, gather_dim=2)
-            want_g = DeviceCommunicatorBase.all_to_all_4D(comm, y, 1, 2)
-            assert torch.equal(got_g, want_g), f"gather parity failed at {(B, S_local, H, D)}"
-            assert torch.equal(got_g, x), f"round-trip failed at {(B, S_local, H, D)}"
-
-            # Backward: scatter's vjp is a gather, with no scaling.
-            xg = x.clone().requires_grad_(True)
-            g = torch.randn(B, S_local * w, H // w, D, device=device, dtype=torch.bfloat16)
-            sequence_model_parallel_all_to_all_4D(xg, 2, 1).backward(g)
-            want_grad = DeviceCommunicatorBase.all_to_all_4D(comm, g.contiguous(), 1, 2)
-            assert torch.equal(xg.grad, want_grad), f"backward parity failed at {(B, S_local, H, D)}"
-
-        # A dtype or size change must not permanently disable the fused path:
-        # the first operand a helper sees is not necessarily representative.
-        # The NCCL window is sized in bytes and is dtype-agnostic, so a dtype
-        # switch alone needs no re-registration -- only growing past the window
-        # does.
-        from fastvideo.distributed.device_communicators.base_device_communicator import (
-            DeviceCommunicatorBase)
-        comm = get_sp_group().device_communicator
-        for dtype in (torch.float32, torch.bfloat16):
-            for s_local in (128, 512):  # 512 grows past the window registered above
-                big = torch.randn(3, s_local, 8, 64, device=device, dtype=dtype)
-                got = sequence_model_parallel_all_to_all_4D(big, scatter_dim=2, gather_dim=1)
-                want = DeviceCommunicatorBase.all_to_all_4D(comm, big, 2, 1)
-                assert torch.equal(got, want), (
-                    f"parity failed at dtype={dtype} S_local={s_local}")
-                if helper is not None and helper._disabled_reason is None:
-                    assert helper._handle is not None, (
-                        f"helper lost its window at dtype={dtype} S_local={s_local}")
+            for dt in (torch.bfloat16, torch.float16, torch.float32):
+                _check_shape(B, S_local, H, D, dt, w, device)
+        _check_window_growth(device, helper)
 
         if rank == 0:
             armed = helper is not None and helper._handle is not None
@@ -200,19 +160,82 @@ def _worker() -> None:
         cleanup_dist_env_and_memory()
 
 
+def _check_shape(B: int, S_local: int, H: int, D: int, dtype: torch.dtype, w: int,
+                 device: torch.device) -> None:
+    """Forward, gather, round-trip and backward must all match the NCCL path."""
+    from fastvideo.distributed.communication_op import sequence_model_parallel_all_to_all_4D
+    from fastvideo.distributed.device_communicators.base_device_communicator import (
+        DeviceCommunicatorBase)
+    from fastvideo.distributed.parallel_state import get_sp_group
+
+    comm = get_sp_group().device_communicator
+    tag = f"{(B, S_local, H, D)} {dtype}"
+    x = torch.randn(B, S_local, H, D, device=device, dtype=dtype)
+
+    got = sequence_model_parallel_all_to_all_4D(x, scatter_dim=2, gather_dim=1)
+    want = DeviceCommunicatorBase.all_to_all_4D(comm, x, 2, 1)
+    assert torch.equal(got, want), f"scatter parity failed at {tag}"
+
+    y = got.contiguous()
+    got_g = sequence_model_parallel_all_to_all_4D(y, scatter_dim=1, gather_dim=2)
+    want_g = DeviceCommunicatorBase.all_to_all_4D(comm, y, 1, 2)
+    assert torch.equal(got_g, want_g), f"gather parity failed at {tag}"
+    assert torch.equal(got_g, x), f"round-trip failed at {tag}"
+
+    # Backward: scatter's vjp is a gather, with no scaling.
+    xg = x.clone().requires_grad_(True)
+    g = torch.randn(B, S_local * w, H // w, D, device=device, dtype=dtype)
+    sequence_model_parallel_all_to_all_4D(xg, 2, 1).backward(g)
+    want_grad = DeviceCommunicatorBase.all_to_all_4D(comm, g.contiguous(), 1, 2)
+    assert torch.equal(xg.grad, want_grad), f"backward parity failed at {tag}"
+
+    # And the reverse direction's backward, which is the scatter.
+    yg = y.clone().requires_grad_(True)
+    g2 = torch.randn(B, S_local, H, D, device=device, dtype=dtype)
+    sequence_model_parallel_all_to_all_4D(yg, 1, 2).backward(g2)
+    want_grad2 = DeviceCommunicatorBase.all_to_all_4D(comm, g2.contiguous(), 2, 1)
+    assert torch.equal(yg.grad, want_grad2), f"reverse backward parity failed at {tag}"
+
+
+def _check_window_growth(device: torch.device, helper) -> None:
+    """A dtype or size change must not permanently disable the fused path.
+
+    The first operand a helper sees is not necessarily representative. The NCCL
+    window is sized in bytes and is dtype-agnostic, so a dtype switch alone
+    needs no re-registration -- only growing past the window does.
+    """
+    from fastvideo.distributed.communication_op import sequence_model_parallel_all_to_all_4D
+    from fastvideo.distributed.device_communicators.base_device_communicator import (
+        DeviceCommunicatorBase)
+    from fastvideo.distributed.parallel_state import get_sp_group
+
+    comm = get_sp_group().device_communicator
+    for dtype in (torch.float32, torch.bfloat16):
+        for s_local in (128, 512):  # 512 grows past the window registered above
+            big = torch.randn(3, s_local, 8, 64, device=device, dtype=dtype)
+            got = sequence_model_parallel_all_to_all_4D(big, scatter_dim=2, gather_dim=1)
+            want = DeviceCommunicatorBase.all_to_all_4D(comm, big, 2, 1)
+            assert torch.equal(got, want), f"parity failed at dtype={dtype} S_local={s_local}"
+            if helper is not None and helper._disabled_reason is None:
+                assert helper._handle is not None, (
+                    f"helper lost its window at dtype={dtype} S_local={s_local}")
+
+
 def _free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
         return int(sock.getsockname()[1])
 
 
-@pytest.mark.skipif(torch.cuda.device_count() < 2, reason="needs >= 2 GPUs")
-def test_fused_matches_nccl_gpu() -> None:
+@pytest.mark.parametrize("world", [2, 4])
+def test_fused_matches_nccl_gpu(world: int) -> None:
     """The seam produces byte-identical results to the NCCL path it replaces."""
+    if torch.cuda.device_count() < world:
+        pytest.skip(f"needs >= {world} GPUs")
     env = dict(os.environ, FASTVIDEO_ULYSSES_A2A="auto")
     proc = subprocess.run(
         [
-            sys.executable, "-m", "torch.distributed.run", "--nproc_per_node=2",
+            sys.executable, "-m", "torch.distributed.run", f"--nproc_per_node={world}",
             f"--master_port={_free_port()}",
             str(Path(__file__).resolve()), "--worker",
         ],
