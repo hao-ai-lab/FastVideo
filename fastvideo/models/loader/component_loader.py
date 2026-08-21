@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Generator, Iterable
 from contextlib import nullcontext
 from copy import deepcopy
-from typing import cast
+from typing import Any, cast
 
 import torch
 import torch.distributed as dist
@@ -30,9 +30,13 @@ from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.layers.quantization import get_quantization_config
 from fastvideo.logger import init_logger
-from fastvideo.models.encoders.base import TextEncoder
 from fastvideo.models.hf_transformer_utils import get_diffusers_config
 from fastvideo.models.loader.fsdp_load import maybe_load_fsdp_model, shard_model
+from fastvideo.models.loader.text_encoder_quantization import (
+    _configure_text_encoder_quantization,
+    _process_quantized_text_encoder_weights,
+    _resolve_text_encoder_checkpoint_path,
+)
 from fastvideo.models.loader.utils import set_default_torch_dtype
 from fastvideo.models.loader.weight_utils import (
     filter_duplicate_safetensors_files,
@@ -347,22 +351,46 @@ class TextEncoderLoader(ComponentLoader):
         if cpu_offload is None:
             cpu_offload = fastvideo_args.text_encoder_cpu_offload
         use_cpu_offload = (cpu_offload and len(getattr(model_config, "_fsdp_shard_conditions", [])) > 0)
+        runtime_device = get_local_torch_device()
 
         from fastvideo.platforms import current_platform
 
         if cpu_offload:
             target_device = (torch.device("mps") if current_platform.is_mps() else torch.device("cpu"))
 
-        # Set quantization config if specified
-        if (use_text_encoder_override and fastvideo_args.override_text_encoder_quant is not None):
-            if fastvideo_args.override_text_encoder_safetensors is None:
-                raise ValueError("override_text_encoder_quant is set but override_text_encoder_safetensors is None")
-            quant_cls = get_quantization_config(fastvideo_args.override_text_encoder_quant)
-            model_config.quant_config = quant_cls()
-
         with set_default_torch_dtype(PRECISION_TO_TYPE[dtype]):
             architectures = getattr(model_config, "architectures", [])
             model_cls, _ = ModelRegistry.resolve_model_cls(architectures)
+            checkpoint_path = _resolve_text_encoder_checkpoint_path(
+                model_path,
+                fastvideo_args,
+                use_text_encoder_override,
+            )
+            checkpoint_quant_config = _configure_text_encoder_quantization(
+                model_config,
+                model_cls,
+                checkpoint_path,
+            )
+            if checkpoint_quant_config is not None:
+                if fastvideo_args.override_text_encoder_quant is not None:
+                    raise ValueError("Serialized checkpoint quantization is selected from checkpoint metadata; "
+                                     "override_text_encoder_quant is an online conversion option and must be unset")
+                requested_dtype = PRECISION_TO_TYPE[dtype]
+                if requested_dtype not in checkpoint_quant_config.get_supported_act_dtypes():
+                    raise ValueError(f"Serialized {checkpoint_quant_config.get_name()} text encoder does not support "
+                                     f"activation dtype {requested_dtype}")
+                checkpoint_quant_config.validate_runtime(runtime_device)
+                logger.info(
+                    "Selected serialized %s text-encoder checkpoint execution from %s",
+                    checkpoint_quant_config.get_name(),
+                    checkpoint_path,
+                )
+            elif use_text_encoder_override and fastvideo_args.override_text_encoder_quant is not None:
+                if fastvideo_args.override_text_encoder_safetensors is None:
+                    raise ValueError("override_text_encoder_quant is set but override_text_encoder_safetensors is None")
+                quant_cls = get_quantization_config(fastvideo_args.override_text_encoder_quant)
+                model_config.quant_config = quant_cls()
+
             if getattr(model_cls, "supports_hf_from_pretrained", False):
                 model = model_cls.from_pretrained_local(  # type: ignore[attr-defined]
                     model_path,
@@ -381,11 +409,20 @@ class TextEncoderLoader(ComponentLoader):
 
             weights_to_load = {name for name, _ in model.named_parameters()}
             if (use_text_encoder_override and fastvideo_args.override_text_encoder_safetensors is not None):
-                loaded_weights: set[str] = model.load_weights(
-                    safetensors_weights_iterator(
-                        [fastvideo_args.override_text_encoder_safetensors],
+                if os.path.isdir(checkpoint_path):
+                    override_weights = self._get_all_weights(
+                        model,
+                        checkpoint_path,
+                        to_cpu=bool(cpu_offload),
+                    )
+                else:
+                    if self.counter_before_loading_weights == 0.0:
+                        self.counter_before_loading_weights = time.perf_counter()
+                    override_weights = safetensors_weights_iterator(
+                        [checkpoint_path],
                         to_cpu=use_cpu_offload,
-                    ))  # type: ignore
+                    )
+                loaded_weights: set[str] = model.load_weights(override_weights)  # type: ignore
             else:
                 loaded_weights: set[str] = model.load_weights(
                     self._get_all_weights(
@@ -399,6 +436,10 @@ class TextEncoderLoader(ComponentLoader):
                 "Loading weights took %.2f seconds",
                 self.counter_after_loading_weights - self.counter_before_loading_weights,
             )
+
+            if checkpoint_quant_config is not None:
+                processed_linears = _process_quantized_text_encoder_weights(model, runtime_device)
+                logger.info("Validated %d serialized blockwise FP8 text-encoder linears", processed_linears)
 
             # Explicitly move model to target device after loading weights
             model = model.to(target_device)
@@ -442,7 +483,7 @@ class TextEncoderLoader(ComponentLoader):
             # that have loaded weights tracking currently.
             # if loaded_weights is not None:
             weights_not_loaded = weights_to_load - loaded_weights
-            if weights_not_loaded and model_config.quant_config is None:
+            if weights_not_loaded and (model_config.quant_config is None or checkpoint_quant_config is not None):
                 raise ValueError("Following weights were not initialized from "
                                  f"checkpoint: {weights_not_loaded}")
 
