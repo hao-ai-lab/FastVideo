@@ -148,3 +148,45 @@ def test_fused_qknorm_rope_matches_eager_bf16_cuda(
     assert actual.shape == x.shape
     assert actual.dtype == x.dtype
     assert actual.is_contiguous()
+
+
+def test_fused_qknorm_rope_matches_eager_beyond_int32_element_count() -> None:
+    """Regression: kernel row offsets must be int64.
+
+    With int32 offsets, ``row * head_dim`` wraps once the flattened input
+    crosses 2**31 elements and the kernel reads/writes out of bounds (CUDA
+    illegal memory access). ``(1, 8_500_000, 2, 128)`` is 2.176e9 elements,
+    just past the boundary; for H3's 56 heads x 128 head_dim the equivalent
+    is ``batch*seq >= 299_593`` tokens per rank, reachable at SP=1.
+
+    GPU assumption: needs ~16 GiB free CUDA memory (input + output at
+    bf16 plus the fp32 rotary-table construction); skips below 20 GiB.
+    """
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA is required for the Triton fusion")
+    if not HAVE_TRITON:
+        pytest.skip("Triton is required for the fusion")
+    free_bytes, _ = torch.cuda.mem_get_info()
+    if free_bytes < 20 * 1024**3:
+        pytest.skip("needs ~20 GiB free GPU memory for a >2**31-element input")
+
+    heads, head_dim, rotary_dim = 2, 128, 96
+    seq_len = 8_500_000
+    assert seq_len * heads * head_dim > 2**31
+
+    torch.manual_seed(9)
+    device = torch.device("cuda")
+    x = torch.randn(1, seq_len, heads, head_dim, dtype=torch.bfloat16, device=device)
+    weight = (1.0 + 0.05 * torch.randn(head_dim, dtype=torch.bfloat16, device=device)).contiguous()
+    cos, sin = _rotary_tables(seq_len, rotary_dim, dtype=x.dtype, device=device)
+
+    with torch.inference_mode():
+        fused = fused_qknorm_rope(x, weight, cos, sin, 1e-6)
+        torch.cuda.synchronize()
+        # Compare only head/tail slices against eager: a full-tensor eager
+        # reference would double peak memory for no extra coverage, and the
+        # tail rows are exactly the ones an int32 wrap corrupts first.
+        expected_head = _eager_qknorm_rope(x[:, :8], weight, cos[:8], sin[:8], 1e-6)
+        expected_tail = _eager_qknorm_rope(x[:, -8:], weight, cos[-8:], sin[-8:], 1e-6)
+        torch.testing.assert_close(fused[:, :8], expected_head, atol=2e-2, rtol=2e-2)
+        torch.testing.assert_close(fused[:, -8:], expected_tail, atol=2e-2, rtol=2e-2)

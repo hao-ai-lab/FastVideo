@@ -35,7 +35,12 @@ if HAVE_TRITON:
         eps,
         BLOCK_SIZE: tl.constexpr,
     ):
-        row = tl.program_id(0)
+        # int64, like the sibling kernels: with int32 program ids,
+        # ``row * head_dim`` wraps once the flattened input reaches 2**31
+        # elements (H3's 56 heads x 128 head_dim crosses that at
+        # batch*seq >= 299_593 tokens per rank) and the loads/stores below
+        # become out-of-bounds. ``seq_index`` inherits int64 from ``row``.
+        row = tl.program_id(0).to(tl.int64)
         seq_index = (row // num_heads) % seq_len
         cols = tl.arange(0, BLOCK_SIZE)
         head_mask = cols < head_dim
@@ -128,6 +133,10 @@ def fused_qknorm_rope(
     RMSNorm reduction and RoPE arithmetic stay in FP32 registers until the
     final store. Triton's reduction order and the absence of eager's BF16
     intermediate materializations can produce small, expected rounding drift.
+
+    Row offsets are computed in int64, so inputs beyond 2**31 total elements
+    (about 300k tokens per rank at H3's 56 heads x 128 head_dim) address
+    correctly.
     """
     batch, seq_len, num_heads, head_dim, rotary_dim = _validate_inputs(x, weight, cos, sin, eps)
     if not weight.is_contiguous():
