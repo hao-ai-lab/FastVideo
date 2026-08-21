@@ -5,6 +5,12 @@ The test compares the exact Transformers base model used by the official
 pipeline with FastVideo's production ``TextEncoderLoader`` path.  It covers
 the three numerical branches the H3 pipelines exercise: text-only tokens,
 image features, and video features.
+
+The production encoder is built only as far as the layer-50 conditioning tap
+by default (``num_hidden_layers_override``), so it returns fewer hidden states
+than the official full stack.  Every state it does build is compared
+bit-exactly against the official value at the same index, which pins the tap
+and would catch a truncated stack that still applied the final norm.
 """
 
 from __future__ import annotations
@@ -220,9 +226,20 @@ def test_minimax_h3_qwen3_vl_parity() -> None:
     actual = _run_cases(production, cases, device)
 
     assert actual.keys() == expected.keys()
+    # The production stack is built only as far as the conditioning tap by
+    # default (``num_hidden_layers_override``), so it yields one hidden state
+    # per built layer plus the embeddings, while the official model always
+    # yields the full tuple. Every state the production model produces must be
+    # bit-identical to the official value at the same index; the shared-prefix
+    # comparison would in particular catch a truncated stack that still
+    # applied the final norm, which is the failure mode that silently changes
+    # conditioning. With the override set to None the lengths are equal and
+    # this remains the original full comparison, final normed state included.
+    built_layers = int(production.language_model.num_layers)
     for name in expected:
-        assert len(actual[name]) == len(expected[name])
-        for layer, (result, reference) in enumerate(zip(actual[name], expected[name], strict=True)):
+        assert len(actual[name]) == built_layers + 1
+        assert len(actual[name]) <= len(expected[name])
+        for layer, (result, reference) in enumerate(zip(actual[name], expected[name], strict=False)):
             assert_close(result, reference, atol=0.0, rtol=0.0, msg=lambda message: f"{name} layer {layer}: {message}")
         result = actual[name][MINIMAX_H3_TEXT_ENCODER_LAYER]
         reference = expected[name][MINIMAX_H3_TEXT_ENCODER_LAYER]
