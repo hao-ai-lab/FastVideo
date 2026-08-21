@@ -210,7 +210,13 @@ def fused_rmsnorm_modulate(
     index: torch.Tensor,
     eps: float,
 ) -> torch.Tensor:
-    """Run RMSNorm and row-indexed modulation in one strict Triton kernel."""
+    """Run RMSNorm and row-indexed modulation in one strict Triton kernel.
+
+    ``index`` values must lie in ``[0, table_rows)``. Unlike eager
+    ``index_select``, the kernel does not raise on out-of-range values (a
+    device-side bounds check would synchronize); callers are safe by
+    construction (``timestep_indices * 3 + token_tags``, SP pads with 0).
+    """
     _validate_contract(x, weight, (scale, shift), index, eps)
     _require_forward_only(x, weight, scale, shift)
     _require_triton_cuda(x)
@@ -252,7 +258,11 @@ def fused_residual_gate_rmsnorm_modulate(
     index: torch.Tensor,
     eps: float,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Fuse residual update, row-indexed gate, RMSNorm, and modulation."""
+    """Fuse residual update, row-indexed gate, RMSNorm, and modulation.
+
+    ``index`` values must lie in ``[0, table_rows)``; see
+    :func:`fused_rmsnorm_modulate` for why the wrapper does not check them.
+    """
     _validate_residual_branch(residual, branch)
     _validate_contract(residual, weight, (gate, scale, shift), index, eps)
     _require_forward_only(residual, branch, gate, weight, scale, shift)

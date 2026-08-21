@@ -8,10 +8,11 @@ from .modulation import (
     fused_residual_gate_rmsnorm_modulate,
     fused_rmsnorm_modulate,
 )
-from .qknorm_rope import fused_qknorm_rope
+from .qknorm_rope import HAVE_TRITON, fused_qknorm_rope
 from .swiglu import minimax_h3_swiglu
 
 __all__ = [
+    "HAVE_TRITON",
     "fused_qknorm_rope",
     "fused_residual_gate_rmsnorm_modulate",
     "fused_rmsnorm_modulate",

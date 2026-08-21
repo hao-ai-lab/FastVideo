@@ -24,8 +24,10 @@ from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.mlp import MLP
 from fastvideo.layers.quantization import QuantizationConfig
 from fastvideo.layers.visual_embedding import Timesteps
+from fastvideo.logger import init_logger
 from fastvideo.models.dits.base import BaseDiT
 from fastvideo.models.dits.minimax_h3_fusions import (
+    HAVE_TRITON,
     fused_qknorm_rope,
     fused_residual_gate_rmsnorm_modulate,
     fused_rmsnorm_modulate,
@@ -33,6 +35,8 @@ from fastvideo.models.dits.minimax_h3_fusions import (
 )
 from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.utils import get_compute_dtype
+
+logger = init_logger(__name__)
 
 MINIMAX_H3_MODALITY_NUM = 3
 _CFG = MiniMaxH3Config()
@@ -56,8 +60,13 @@ def _enabled_minimax_h3_fusions(value: str | None = None) -> frozenset[str]:
 
 
 def _can_run_minimax_h3_fusion(tensor: torch.Tensor) -> bool:
-    """Triton kernels are inference-only and stay outside Dynamo capture."""
-    return tensor.is_cuda and not torch.is_grad_enabled() and not torch.compiler.is_compiling()
+    """Triton kernels are inference-only and stay outside Dynamo capture.
+
+    The ``HAVE_TRITON`` check makes the eager fallback exact: on a CUDA build
+    whose Triton failed to import, an enabled fusion falls back instead of
+    hitting the strict wrappers' hard RuntimeError mid-forward.
+    """
+    return (HAVE_TRITON and tensor.is_cuda and not torch.is_grad_enabled() and not torch.compiler.is_compiling())
 
 
 class MiniMaxH3RotaryPosEmbed(nn.Module):
@@ -563,6 +572,16 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         super().__init__(config, hf_config)
         arch = config.arch_config
         self.enabled_fusions = _enabled_minimax_h3_fusions()
+        if self.enabled_fusions:
+            if HAVE_TRITON:
+                logger.info(
+                    "MiniMax H3 inference fusions enabled: %s (CUDA inference-only; grad-enabled and "
+                    "torch.compile-captured forwards fall back to eager).",
+                    ",".join(sorted(self.enabled_fusions)))
+            else:
+                logger.warning(
+                    "FASTVIDEO_MINIMAX_H3_FUSIONS requested %s but Triton is unavailable; "
+                    "every forward stays on the eager path.", ",".join(sorted(self.enabled_fusions)))
         sp_world_size = get_sp_world_size() if model_parallel_is_initialized() else 1
         if arch.num_attention_heads % sp_world_size:
             raise ValueError(f"MiniMax H3 attention heads ({arch.num_attention_heads}) must be divisible by "
@@ -688,6 +707,20 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
             prefix=f"{config.prefix}.audio_proj_out",
         )
         self.__post_init__()
+
+    def prepare_for_compile(self) -> None:
+        """Pipeline hook, called once right before torch.compile wraps the blocks.
+
+        Dynamo capture traces the eager branch of every fusion guard, so an
+        enabled ``FASTVIDEO_MINIMAX_H3_FUSIONS`` set is silently inert inside
+        compiled block forwards (H3 compiles per-block by default). Say so
+        once instead of leaving the flag looking active.
+        """
+        if self.enabled_fusions:
+            logger.warning(
+                "torch.compile is enabled for MiniMax H3, so the requested inference fusions (%s) are "
+                "inert inside compiled block forwards; the compiled eager path runs instead.",
+                ",".join(sorted(self.enabled_fusions)))
 
     def materialize_non_persistent_buffers(
         self,
