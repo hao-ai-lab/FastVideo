@@ -22,6 +22,7 @@ from .kernels import AttnType, select_flash_attn_impl
 
 _FIRST_RING_LOG = True
 
+
 def ring_flash_attn_forward(
     process_group,
     q: torch.Tensor,
@@ -36,7 +37,7 @@ def ring_flash_attn_forward(
     deterministic=False,
     attn_type: AttnType = AttnType.FA,
     attn_processor=None,
-):  
+):
 
     global _FIRST_RING_LOG
 
