@@ -334,7 +334,7 @@ def test_run_unit_test_uses_shared_command(monkeypatch):
 
 
 def test_wave1_lane_functions_use_shared_scripts(monkeypatch):
-    """Modal and the Slurm CI runner must execute the same per-lane scripts so
+    """Modal and the self-hosted CI runner must execute the same per-lane scripts so
     their test selections cannot drift (same contract as the unit lane)."""
     module = _load_pr_test_module(monkeypatch)
     commands = []

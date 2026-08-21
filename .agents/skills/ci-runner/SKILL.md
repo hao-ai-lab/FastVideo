@@ -1,12 +1,12 @@
 ---
 name: ci-runner
-description: Work on the Slurm CI runner lanes - add or migrate a CI lane to the ci-runner Buildkite queue, keep Modal/Slurm test selections drift-free via shared lane scripts, and flip a lane's authoritative routing per migration wave.
+description: Work on the self-hosted CI runner lanes - add or migrate a CI lane to the ci-runner Buildkite queue, keep Modal/self-hosted test selections drift-free via shared lane scripts, and flip a lane's authoritative routing per migration wave.
 ---
 
-# Slurm CI runner lanes
+# Self-hosted CI runner lanes
 
 FastVideo's `ci-runner` Buildkite queue dispatches lanes to one exclusive
-Slurm tray via a host-owned driver (`/opt/fastvideo-ci-runner/run-ci`;
+self-hosted GPU worker via a host-owned driver (`/opt/fastvideo-ci-runner/run-ci`;
 `run-unit` for the legacy unit step). The host side is a private operator
 bundle, deliberately not in this repository (site-specific paths/endpoints;
 see `docs/contributing/ci_architecture.md` and, historically,
@@ -14,12 +14,12 @@ see `docs/contributing/ci_architecture.md` and, historically,
 
 ## Invariants (contract-tested — keep them true)
 
-- Every Slurm lane's test selection lives in a shared script under
+- Every self-hosted CI lane's test selection lives in a shared script under
   `.buildkite/scripts/` (`unit_test.sh`, `lanes/<lane>.sh`) executed by BOTH
-  the Modal launcher (`fastvideo/tests/modal/pr_test.py`) and the tray, so
+  the Modal launcher (`fastvideo/tests/modal/pr_test.py`) and the worker, so
   selections cannot drift. Pinned by
   `fastvideo/tests/modal/test_pr_test.py` (shared-script tests).
-- Each Slurm step in `.buildkite/pipeline.yml` pins: a unique `key`, an `if`
+- Each self-hosted CI step in `.buildkite/pipeline.yml` pins: a unique `key`, an `if`
   on `TEST_SCOPE`/`TEST_TYPE`, the driver command string, 90-minute timeout,
   step-level `TEST_TYPE` env, and `queue: "ci-runner"`. Pinned byte-for-byte
   by `fastvideo/tests/contract/test_ci_test_collection.py`.
@@ -45,4 +45,4 @@ authoritative. Flipping a lane = repointing its original pipeline step to the
 ci-runner queue/driver (+ widening its host-side scope tuple, e.g. adding the
 Full Suite pair) in one commit; rollback is the revert. Hardware-sensitive
 lanes (ssim, performance, golden-gate's bitwise fingerprints) must be
-re-baselined on the tray's GPU architecture before they may gate merges.
+re-baselined on the worker's GPU architecture before they may gate merges.

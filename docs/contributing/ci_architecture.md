@@ -22,7 +22,7 @@ PR opened or updated
   |-- /merge, /test full, or ready label
         |
         `-- Tier 3: Full Suite
-              Buildkite orchestrates Modal GPU jobs and one Slurm unit job
+              Buildkite orchestrates Modal GPU jobs and one self-hosted unit job
               path-filtered integration, SSIM, training, eval, and performance checks
               |
               pass -> Mergify squash-merges when all merge conditions pass
@@ -36,7 +36,7 @@ CI is not one monolithic job:
   automations.
 - Buildkite owns the GPU test pipeline and path filtering.
 - Modal runs the existing GPU lanes; a dedicated CI runner dispatches the unit
-  lane to one isolated Slurm tray.
+  lane to an isolated self-hosted GPU worker.
 - Mergify owns merge protection, labeling, and the final squash merge.
 
 ## CI Tiers
@@ -93,7 +93,7 @@ status.
 | Attribute | Value |
 |---|---|
 | Triggered by | `/merge`, adding `ready`, `/test full`, or a new push to a PR that already has `ready` |
-| Runner | Buildkite agents that launch Modal GPU jobs and one Slurm unit job |
+| Runner | Buildkite agents that launch Modal GPU jobs and one self-hosted unit job |
 | Definition | `.buildkite/pipeline.yml` |
 | Entrypoint | `.buildkite/scripts/pr_test.sh` -> `fastvideo/tests/modal/pr_test.py` |
 
@@ -247,8 +247,8 @@ which:
 
 The `unit_test_ci` lane is the exception. Buildkite sends it to the dedicated
 `ci-runner` queue, whose host-owned `/opt/fastvideo-ci-runner/run-unit`
-dispatcher submits the immutable PR SHA to one exclusive Slurm tray. `/merge`
-and `/test full` include this lane; `/test unit-ci` runs it directly. The tray
+dispatcher submits the immutable PR SHA to an isolated self-hosted GPU worker. `/merge`
+and `/test full` include this lane; `/test unit-ci` runs it directly. The worker
 uses the same command as Modal: `.buildkite/scripts/unit_test.sh`.
 
 If you add a new CI test category:

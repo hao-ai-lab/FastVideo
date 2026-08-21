@@ -102,6 +102,6 @@ def test_kandinsky5_golden_gate(distributed_runtime, monkeypatch) -> None:
     # module-level os.environ.setdefault here leaked into every other
     # golden-gate test's env fingerprint at pytest collection time, breaking
     # full-directory runs in environments where FASTVIDEO_FA4 is unset
-    # (observed on the GB200 Slurm CI lane, builds 4943/4946).
+    # (observed on the self-hosted CI runner lane).
     monkeypatch.setenv("FASTVIDEO_FA4", os.environ.get("FASTVIDEO_FA4", "0"))
     run_gate(SPEC)

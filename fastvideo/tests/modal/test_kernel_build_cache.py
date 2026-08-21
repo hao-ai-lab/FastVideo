@@ -179,7 +179,7 @@ def test_ci_runner_image_targets_arm64_sm100_with_opencv_runtime() -> None:
 
 def test_docker_image_bakes_modal_apt_and_rust_layer() -> None:
     """The Modal CI image layers apt packages + rustup on top of the release
-    image (pr_test.py); the Slurm unit tray runs the release image directly, so
+    image (pr_test.py); the self-hosted unit runner runs the release image directly, so
     the same packages must be baked into docker/Dockerfile or the two lanes
     drift."""
     modal_source = (REPO_ROOT / "fastvideo/tests/modal/pr_test.py").read_text(encoding="utf-8")

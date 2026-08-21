@@ -203,8 +203,8 @@ jobs:
           docker buildx imagetools create "${TAG_ARGS[@]}" "${IMAGE_REFS[@]}"
           docker buildx imagetools inspect "${TAGS[0]}"
 
-  # The CI runner is ARM64 like DGX Spark, but its GB200 GPUs are sm_100 rather
-  # than sm_121. Publish a single-architecture variant so Slurm CI can reuse
+  # The CI runner is ARM64 like DGX Spark, but its the runner GPU architecture GPUs are sm_100 rather
+  # than sm_121. Publish a single-architecture variant so the self-hosted CI runner can reuse
   # the exact prebuilt kernel instead of compiling it in every job.
   build-ci-runner-image:
     if: ${{ (github.event_name == 'push' && github.repository == 'hao-ai-lab/FastVideo') || github.event.inputs.build_ci_runner_image == 'true' }}

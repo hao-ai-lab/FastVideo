@@ -104,8 +104,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Rust toolchain: some dependencies only ship sdists on aarch64 and need cargo
 # to build. The Modal CI image layers the identical apt set + rustup on top of
 # this image (fastvideo/tests/modal/pr_test.py); baking both here keeps the
-# Slurm unit tray and the Modal lanes on one package surface.
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+# self-hosted CI unit runner and the Modal lanes on one package surface.
+RUN set -o pipefail && \
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal && \
+    /root/.cargo/bin/cargo --version && /root/.cargo/bin/rustc --version
 ENV PATH=/root/.cargo/bin:${PATH}
 
 # Set up C++20 compilers for ThunderKittens

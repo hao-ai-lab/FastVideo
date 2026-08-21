@@ -4,7 +4,7 @@ the real platform resolver.
 
 ``is_attn_qat_infer_available()`` used to test only whether the kernel
 extension imports. CUDA 13 wheel builds can carry the sm_120/sm_121
-extension on any host (e.g. H100 sm_90, GB200 sm_100). Without the
+extension on any host (e.g. H100 sm_90, the runner GPU architecture sm_100). Without the
 capability gate, that successful import selects the consumer-Blackwell
 backend and defers failure until the first unsupported kernel call.
 Explicit ATTN_QAT_INFER requests must instead fail closed during
