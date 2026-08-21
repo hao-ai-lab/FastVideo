@@ -45,11 +45,38 @@ def test_arch_resolution(monkeypatch, cap, cutlass, fa4, expected_kernel) -> Non
 
 def test_receipt_records_fa4_quant_knobs(monkeypatch) -> None:
     _patch(monkeypatch, cap=(10, 0), cutlass=False, fa4=True)
+    monkeypatch.setattr(aqi, "_configured_fa4_pv_mode", "bf16")
     receipt = aqi.attn_qat_infer_receipt()
     assert "arch=sm_100" in receipt
     assert "qk_mode=nvfp4(per-16-e4m3-sf)" in receipt
     assert "pv_mode=bf16" in receipt
     assert "train_sim_mismatch=measured" in receipt
+
+
+def test_receipt_pv_mode_is_derived_from_configured_knob(monkeypatch) -> None:
+    """The receipt's pv_mode field derives from the fa4_pv_mode knob recorded
+    at impl construction, not a literal."""
+    _patch(monkeypatch, cap=(10, 0), cutlass=False, fa4=True)
+    monkeypatch.setattr(aqi, "_configured_fa4_pv_mode", "bf16")
+    monkeypatch.setattr(aqi, "_receipt_logged", False)
+
+    aqi.AttnQatInferImpl(num_heads=1, head_size=128, causal=False, softmax_scale=128**-0.5, fa4_pv_mode="fp8")
+    assert "pv_mode=fp8" in aqi.attn_qat_infer_receipt()
+
+
+@pytest.mark.parametrize("impl_module", ["attn_qat_infer", "flash_attn"])
+def test_fa4_pv_mode_typo_fails_at_construction(monkeypatch, impl_module) -> None:
+    """Both knob consumers validate fa4_pv_mode eagerly: a bad value raises at
+    impl construction (CPU-only), never surviving to a GPU forward."""
+    monkeypatch.setattr(aqi, "_configured_fa4_pv_mode", aqi._configured_fa4_pv_mode)
+    if impl_module == "attn_qat_infer":
+        impl_cls = aqi.AttnQatInferImpl
+    else:
+        from fastvideo.attention.backends.flash_attn import FlashAttentionImpl
+        impl_cls = FlashAttentionImpl
+
+    with pytest.raises(ValueError, match="fa4_pv_mode"):
+        impl_cls(num_heads=1, head_size=128, causal=False, softmax_scale=128**-0.5, fa4_pv_mode="fp16")
 
 
 def test_receipt_records_cutlass_scheme(monkeypatch) -> None:
@@ -120,10 +147,14 @@ def test_fa4_route_resolution_runs_once_across_forwards(monkeypatch) -> None:
     def fake_quant(t):
         return t, torch.zeros(1)
 
+    def fake_cast(t):
+        return t
+
     def fake_kernel(q, k, v, sfq, sfk, softmax_scale=None, causal=False):
         return v
 
-    monkeypatch.setattr(aqi, "_import_fa4_route_ops", lambda: (resolves.append(1) or (fake_quant, fake_kernel)))
+    monkeypatch.setattr(aqi, "_import_fa4_route_ops",
+                        lambda: (resolves.append(1) or (fake_quant, fake_cast, fake_kernel)))
     monkeypatch.setattr(aqi, "_FA4_ROUTE_OPS", None)
 
     impl = aqi.AttnQatInferImpl(num_heads=1, head_size=128, causal=False, softmax_scale=128**-0.5)
@@ -198,3 +229,88 @@ def test_fa4_quantize_op_fake_matches_real() -> None:
         (x, ),
         test_utils=("test_schema", "test_faketensor", "test_aot_dispatch_dynamic"),
     )
+
+
+def _register_fa4_v_to_fp8_cpu_kernel():
+    """Register a CPU kernel for fastvideo::fa4_v_to_fp8. Unlike the quantize
+    op this needs no mock: the production impl is a plain dtype cast, which
+    CPU torch executes natively, so the CPU kernel IS the production body."""
+    import torch
+
+    def _cpu_kernel(value: torch.Tensor) -> torch.Tensor:
+        return value.to(torch.float8_e4m3fn)
+
+    try:
+        torch.library.register_kernel("fastvideo::fa4_v_to_fp8", "cpu")(_cpu_kernel)
+    except RuntimeError:
+        pass  # already registered by a previous test/run
+
+
+def test_fa4_v_to_fp8_op_fake_matches_real() -> None:
+    """torch.library.opcheck for the fp8 V-cast op: the fake must reproduce
+    the impl's shape, dtype, AND strides (`.to` preserves the input layout for
+    dense tensors; empty_like's preserve_format mirrors that). Forward-only op
+    (no autograd registration), so restrict to the non-autograd suites."""
+    import torch
+
+    import fastvideo.attention.backends.flash_attn  # noqa: F401  registers the op + fake
+
+    _register_fa4_v_to_fp8_cpu_kernel()
+
+    for v in (
+            torch.randn(2, 200, 2, 128, dtype=torch.bfloat16),
+            # Non-contiguous dense input: strides must carry through the cast.
+            torch.randn(2, 2, 200, 128, dtype=torch.bfloat16).transpose(1, 2),
+    ):
+        torch.library.opcheck(
+            torch.ops.fastvideo.fa4_v_to_fp8,
+            (v,),
+            test_utils=("test_schema", "test_faketensor", "test_aot_dispatch_dynamic"),
+        )
+
+
+def test_fa4_fp8_pv_path_is_fullgraph_traceable(monkeypatch) -> None:
+    """With fa4_pv_mode="fp8" the production _forward_fa4_fp4 body (quantize
+    op + V-cast op + kernel call) must compile fullgraph with no graph break:
+    the naive in-forward `.to(torch.float8_e4m3fn)` cast breaks the graph,
+    which is exactly why the cast lives behind a custom op."""
+    import torch
+
+    from fastvideo.attention.backends import flash_attn as fa
+
+    _patch(monkeypatch, cap=(10, 0), cutlass=False, fa4=True)
+    monkeypatch.setattr(aqi, "_configured_fa4_pv_mode", aqi._configured_fa4_pv_mode)
+    _register_fa4_quantize_cpu_kernel()
+    _register_fa4_v_to_fp8_cpu_kernel()
+
+    def fake_kernel(q, k, v, sfq, sfk, softmax_scale=None, causal=False):
+        # The real kernel emits BF16 with full headdim regardless of V dtype.
+        return v.to(torch.bfloat16)
+
+    # Pre-resolve the route with the real op-backed helpers and a mocked
+    # kernel entry point (importing the real one needs a CUDA install).
+    monkeypatch.setattr(aqi, "_FA4_ROUTE_OPS", (fa._nvfp4_quantize_for_fa4, fa._fa4_v_to_fp8, fake_kernel))
+
+    impl = aqi.AttnQatInferImpl(num_heads=2, head_size=128, causal=False, softmax_scale=128**-0.5, fa4_pv_mode="fp8")
+    compiled = torch.compile(impl._forward_fa4_fp4, fullgraph=True, backend="eager")
+    x = torch.randn(1, 64, 2, 128, dtype=torch.bfloat16)
+    out = compiled(x, x, x)
+    assert out.shape == x.shape
+    assert out.dtype == torch.bfloat16
+
+
+def test_fa4_pv_mode_env_bridge(monkeypatch) -> None:
+    """The FASTVIDEO_FA4_PV_MODE env bridge is the user-reachable path to the
+    knob (model code constructs attention with fixed literals); explicit
+    kwargs still win over the environment."""
+    import torch  # noqa: F401
+
+    _patch(monkeypatch, cap=(10, 0), cutlass=False, fa4=True)
+    monkeypatch.setenv("FASTVIDEO_FA4_PV_MODE", "fp8")
+
+    impl = aqi.AttnQatInferImpl(num_heads=1, head_size=128, causal=False, softmax_scale=128**-0.5)
+    assert impl.fa4_pv_mode == "fp8"
+
+    explicit = aqi.AttnQatInferImpl(num_heads=1, head_size=128, causal=False, softmax_scale=128**-0.5,
+                                    fa4_pv_mode="bf16")
+    assert explicit.fa4_pv_mode == "bf16"

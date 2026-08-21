@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import importlib
+import os
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -75,6 +76,36 @@ _FA4_INSTALL_HINT = ("install flash-attention-fp4 (branch fp4) from "
                      "flashinfer-python==0.6.8 and FASTVIDEO_FA4=1; "
                      "see docs/inference/optimizations.md")
 
+# PV-mode knob for the FA4-FP4 path (the "fa4_pv_mode" extra_impl_args key,
+# consumed here and by FlashAttentionImpl). "bf16" keeps V in BF16 (default,
+# byte-identical to the pre-knob behavior); "fp8" casts V to e4m3 before the
+# kernel -- the fork's plain-fp8 PV contract: unscaled cast, no mSFV scale
+# factors and no v_descale, BF16 output.
+_FA4_PV_MODES = ("bf16", "fp8")
+
+
+# The last configured pv mode; the receipt derives its pv_mode field from
+# this instead of declaring a literal. Impl construction records it.
+def _default_fa4_pv_mode() -> str:
+    """Env bridge, mirroring the sibling nvfp4_fa4 pattern: kwargs win, the
+    FASTVIDEO_FA4_PV_MODE env var is the user-reachable fallback (model code
+    constructs attention with fixed literals, so without this bridge the knob
+    has no user path). Reading it here also makes the resolution-time receipt
+    correct for env-driven runs before any impl is constructed."""
+    return os.environ.get("FASTVIDEO_FA4_PV_MODE", "bf16")
+
+
+_configured_fa4_pv_mode = _default_fa4_pv_mode()
+
+
+def validate_fa4_pv_mode(mode: str) -> str:
+    # Fail fast at impl construction so a typo never survives to the first
+    # forward on a Blackwell box.
+    if mode not in _FA4_PV_MODES:
+        raise ValueError(f"fa4_pv_mode must be one of {_FA4_PV_MODES}, got {mode!r}")
+    return mode
+
+
 _fa4_fp4_import_ok: bool | None = None
 
 
@@ -122,10 +153,11 @@ def _resolved_kernel() -> str | None:
 
 def attn_qat_infer_receipt() -> str:
     """One-line receipt of the resolution decision (arch + kernel + quant
-    knobs), for the selection log and for tooling. The FA4 knobs are the
-    repo's tuned defaults passed through verbatim: qk_mode=nvfp4
-    (per-16 E4M3 SFs), pv_mode=bf16 -- see flash_attn/cute/README.md in
-    the kernel repo."""
+    knobs), for the selection log and for tooling. qk_mode=nvfp4 (per-16 E4M3
+    SFs) is the repo's tuned default passed through verbatim; pv_mode is
+    derived from the configured fa4_pv_mode knob, and the dtype actually fed
+    to the kernel is logged once on the first FA4 forward -- see
+    flash_attn/cute/README.md in the kernel repo."""
     cap = _active_capability()
     arch = f"sm_{cap[0]}{cap[1]}" if cap is not None else "no-cuda"
     kernel = _resolved_kernel()
@@ -133,7 +165,7 @@ def attn_qat_infer_receipt() -> str:
         return f"arch={arch} kernel=fastvideo-kernel-cutlass scheme=sage3-fp4-sm120"
     if kernel == "fa4_fp4":
         return (f"arch={arch} kernel=flash-attention-fp4 qk_mode=nvfp4(per-16-e4m3-sf) "
-                f"pv_mode=bf16 train_sim_mismatch=measured")
+                f"pv_mode={_configured_fa4_pv_mode} train_sim_mismatch=measured")
     supported = "sm_120a/sm_121a via fastvideo-kernel build.sh; sm_100a/sm_103a via flash-attention-fp4"
     if cap is not None and cap in _FA4_FP4_CAPABILITIES:
         return f"arch={arch} kernel=none (flash_attn.cute not importable -- {_FA4_INSTALL_HINT})"
@@ -145,12 +177,14 @@ _FA4_ROUTE_OPS: tuple | None = None
 
 def _import_fa4_route_ops() -> tuple:
     """Slow path (own function so tests pin it runs once per process):
-    resolves the FA4 quantize helper and kernel entry point."""
+    resolves the FA4 quantize/V-cast helpers and kernel entry point."""
     from fastvideo.attention.backends.flash_attn import (
-        _nvfp4_quantize_for_fa4, )
+        _fa4_v_to_fp8,
+        _nvfp4_quantize_for_fa4,
+    )
     from fastvideo.attention.utils.flash_attn_cute import (
         flash_attn_fp4_func, )
-    return (_nvfp4_quantize_for_fa4, flash_attn_fp4_func)
+    return (_nvfp4_quantize_for_fa4, _fa4_v_to_fp8, flash_attn_fp4_func)
 
 
 def _resolve_fa4_route_ops() -> tuple:
@@ -172,6 +206,19 @@ def _log_receipt_once() -> None:
     if not _receipt_logged:
         _receipt_logged = True
         logger.info("ATTN_QAT_INFER resolved: %s", attn_qat_infer_receipt())
+
+
+_pv_dtype_logged = False
+
+
+def _log_pv_dtype_once(dtype: torch.dtype) -> None:
+    # Derived-from-runtime companion to the receipt: the dtype actually fed
+    # to the FA4 kernel as V on the first forward, once per process.
+    global _pv_dtype_logged
+    if not _pv_dtype_logged:
+        _pv_dtype_logged = True
+        logger.info("ATTN_QAT_INFER FA4 first forward: observed V dtype=%s (configured pv_mode=%s)", dtype,
+                    _configured_fa4_pv_mode)
 
 
 def is_attn_qat_infer_available() -> bool:
@@ -232,6 +279,11 @@ class AttnQatInferImpl(AttentionImpl[AttentionMetadata]):
         if dropout_p > 0:
             raise NotImplementedError(f"attn_qat_infer does not support dropout (got dropout_p={dropout_p}). "
                                       "The QAT inference kernel applies no stochastic dropout.")
+        self.fa4_pv_mode = validate_fa4_pv_mode(extra_impl_args.get("fa4_pv_mode") or _default_fa4_pv_mode())
+        # Record the configured mode before the once-log so the receipt line
+        # (whose pv_mode field is derived from this) carries it.
+        global _configured_fa4_pv_mode
+        _configured_fa4_pv_mode = self.fa4_pv_mode
         # Kernel resolution is per-forward, not per-construction: callers
         # (the validation swap, backend selection) gate on
         # is_attn_qat_infer_available() first, and constructing an impl on a
@@ -279,17 +331,25 @@ class AttnQatInferImpl(AttentionImpl[AttentionMetadata]):
         key: torch.Tensor,
         value: torch.Tensor,
     ) -> torch.Tensor:
-        """sm_100a/sm_103a path: FP4 FA4 with the repo's tuned defaults
-        (NVFP4 per-16 block-scaled Q/K, BF16 V) -- mirrors
+        """sm_100a/sm_103a path: FP4 FA4 (NVFP4 per-16 block-scaled Q/K; V in
+        BF16 by default or fp8 e4m3 per the fa4_pv_mode knob) -- mirrors
         FlashAttentionImpl._forward_nvfp4 (#1221). Inputs/outputs are
         (batch, seqlen, nheads, headdim); no transpose."""
-        _nvfp4_quantize_for_fa4, flash_attn_fp4_func = _resolve_fa4_route_ops()
+        _nvfp4_quantize_for_fa4, _fa4_v_to_fp8, flash_attn_fp4_func = _resolve_fa4_route_ops()
 
         orig_seqlen_q = query.shape[1]
         orig_seqlen_k = key.shape[1]
 
         q_fp4, q_sf = _nvfp4_quantize_for_fa4(query)
         k_fp4, k_sf = _nvfp4_quantize_for_fa4(key)
+
+        # fp8 PV: unscaled e4m3 cast (no mSFV/v_descale); output stays BF16.
+        if self.fa4_pv_mode == "fp8":
+            value = _fa4_v_to_fp8(value)
+        # Keep the once-log (and its global flag) out of compiled traces,
+        # matching the FLASH_ATTN backend's logging convention.
+        if not torch.compiler.is_compiling():
+            _log_pv_dtype_once(value.dtype)
 
         # FP4/SF buffers are padded to a 128 multiple; FA4 masks to the
         # original lengths so padding never biases the softmax.

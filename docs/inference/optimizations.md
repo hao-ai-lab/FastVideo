@@ -162,6 +162,18 @@ gen = VideoGenerator.from_pretrained(
 gen.generate_video(prompt="A raccoon in sunflowers", save_video=True)
 ```
 
+#### fp8 PV mode **[target]**
+
+The FA4-FP4 path keeps V in BF16 by default. An `fa4_pv_mode="fp8"` knob (an
+attention-impl config field accepted by both `FLASH_ATTN` and `ATTN_QAT_INFER`
+on this path; allowed values `"bf16"`/`"fp8"`) casts V to fp8 e4m3 before the
+kernel — an unscaled cast, per the kernel's plain-fp8 PV contract. Kernel-level
+benchmarks on datacenter Blackwell show it is faster at large shapes, but it
+stays opt-in **[target]** pending an end-to-end compiled benchmark and a
+quality gate before any default consideration. The `ATTN_QAT_INFER` receipt
+line reports the configured `pv_mode`, and the V dtype actually fed to the
+kernel is logged once on the first FA4 forward.
+
 #### Known Limitations
 
 - `use_fsdp_inference=True` is incompatible with the FP4 path (FSDP shards invalidate tensor pointers)
