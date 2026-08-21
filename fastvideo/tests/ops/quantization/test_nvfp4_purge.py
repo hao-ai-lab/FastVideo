@@ -18,6 +18,7 @@ import torch
 import torch.nn as nn
 
 import fastvideo.layers.quantization.nvfp4_config as nv
+from fastvideo.layers.lora.linear import BaseLayerWithLoRA
 
 _ALWAYS_FP4_PREFIX = "ltx2.blocks.0.attn1.to_q"
 _REFINE_ONLY_PREFIX = "ltx2.blocks.0.audio_to_video_attn.to_q"
@@ -84,6 +85,14 @@ def test_retain_true_keeps_everything() -> None:
     nv.convert_model_to_nvfp4(model)
     assert model.always_fp4.weight is not None
     assert model.refine_only.weight is not None
+
+
+def test_retained_weight_can_be_wrapped_by_lora() -> None:
+    model = _model(retain=True)
+    nv.convert_model_to_nvfp4(model)
+    wrapped = BaseLayerWithLoRA(model.always_fp4)
+    assert wrapped.cpu_weight is not None
+    assert wrapped.cpu_weight.shape == model.always_fp4.weight.shape
 
 
 def test_retain_false_still_retains_dense_capable_layers() -> None:
