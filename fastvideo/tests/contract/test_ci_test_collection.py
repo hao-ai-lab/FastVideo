@@ -89,40 +89,44 @@ def test_unit_ci_routes_direct_and_full_suite_to_trusted_static_driver():
         queue: "ci-runner"''' in pipeline
 
 
-def test_slurm_wave1_lanes_route_direct_to_trusted_static_driver():
-    """Wave-1 Slurm lanes (kernel, VMoBA inference, golden-gate) are additive
-    /test <name>-ci routes on queue ci-runner via the pinned run-ci driver;
-    the Modal lanes stay authoritative until each wave is flipped."""
+def test_ci_runner_lanes_route_direct_and_full_suite_to_trusted_static_driver():
+    """Every CI-runner lane runs on the Full Suite (/merge, /test full) AND as
+    a /test <name>-ci direct route, always on queue ci-runner via the pinned
+    run-ci driver. Lanes with known hardware-content gaps (tolerance
+    re-baselining, license-gated models) are soft_fail: they run and report on
+    every Full Suite but do not block merges until re-baselined."""
     slash_commands = (REPO_ROOT / ".github/workflows/ci-slash-commands.yml").read_text()
     pipeline = (REPO_ROOT / ".buildkite/pipeline.yml").read_text()
 
     valid_line = next(line for line in slash_commands.splitlines() if line.strip().startswith("VALID="))
     lanes = [
-        # wave 1
-        ("kernel-ci", "kernel_tests_ci", "kernel-tests-ci", ":microscope: Kernel Tests (Slurm)"),
-        ("vmoba-ci", "inference_vmoba_ci", "inference-vmoba-ci", ":test_tube: Inference Tests VMoBA (Slurm)"),
-        ("golden-gate-ci", "golden_gate_ci", "golden-gate-ci", ":vertical_traffic_light: Golden-Gate Tests (Slurm)"),
-        # wave 2 (HF-cache lanes)
-        ("encoder-ci", "encoder_ci", "encoder-ci", ":microscope: Encoder Tests (Slurm)"),
-        ("vae-ci", "vae_ci", "vae-ci", ":microscope: VAE Tests (Slurm)"),
-        ("transformer-ci", "transformer_ci", "transformer-ci", ":microscope: Transformer Tests (Slurm)"),
-        ("lora-inference-ci", "inference_lora_ci", "lora-inference-ci", ":test_tube: LoRA Inference Tests (Slurm)"),
-        ("distillation-ci", "distillation_dmd_ci", "distillation-ci", ":test_tube: Distillation DMD Tests (Slurm)"),
-        ("train-framework-ci", "train_framework_ci", "train-framework-ci", ":test_tube: Train Framework Tests (Slurm)"),
-        ("eval-ci", "eval_ci", "eval-ci", ":test_tube: Eval Metrics Tests (Slurm)"),
+        # (slash name, TEST_TYPE, step key, label, soft_fail)
+        ("kernel-ci", "kernel_tests_ci", "kernel-tests-ci", ":microscope: Kernel Tests (CI Runner)", False),
+        ("vmoba-ci", "inference_vmoba_ci", "inference-vmoba-ci", ":test_tube: Inference Tests VMoBA (CI Runner)", False),
+        ("golden-gate-ci", "golden_gate_ci", "golden-gate-ci", ":vertical_traffic_light: Golden-Gate Tests (CI Runner)", True),
+        ("encoder-ci", "encoder_ci", "encoder-ci", ":microscope: Encoder Tests (CI Runner)", True),
+        ("vae-ci", "vae_ci", "vae-ci", ":microscope: VAE Tests (CI Runner)", False),
+        ("transformer-ci", "transformer_ci", "transformer-ci", ":microscope: Transformer Tests (CI Runner)", True),
+        ("lora-inference-ci", "inference_lora_ci", "lora-inference-ci", ":test_tube: LoRA Inference Tests (CI Runner)", False),
+        ("distillation-ci", "distillation_dmd_ci", "distillation-ci", ":test_tube: Distillation DMD Tests (CI Runner)", False),
+        ("train-framework-ci", "train_framework_ci", "train-framework-ci", ":test_tube: Train Framework Tests (CI Runner)", True),
+        ("eval-ci", "eval_ci", "eval-ci", ":test_tube: Eval Metrics Tests (CI Runner)", False),
     ]
-    for name, test_type, step_key, label in lanes:
+    for name, test_type, step_key, label, soft_fail in lanes:
         assert f" {name} " in valid_line or valid_line.rstrip('"').endswith(name), name
         assert f"[{name}]={test_type}" in slash_commands
+        soft_line = "      soft_fail: true\n" if soft_fail else ""
         assert f'''    - label: "{label}"
       key: "{step_key}"
-      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "{test_type}"
+      if: |
+        build.env("TEST_SCOPE") == "full" ||
+        (build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "{test_type}")
       command: "/opt/fastvideo-ci-runner/run-ci"
       timeout_in_minutes: 90
-      env:
+{soft_line}      env:
         TEST_TYPE: "{test_type}"
       agents:
-        queue: "ci-runner"''' in pipeline
+        queue: "ci-runner"''' in pipeline, step_key
 
 
 def test_allowlist_entries_are_still_real_directories():

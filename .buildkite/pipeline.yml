@@ -101,90 +101,114 @@ steps:
         TEST_TYPE: "unit_test_ci"
       agents:
         queue: "ci-runner"
-    - label: ":microscope: Kernel Tests (Slurm)"
+    - label: ":microscope: Kernel Tests (CI Runner)"
       key: "kernel-tests-ci"
-      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "kernel_tests_ci"
+      if: |
+        build.env("TEST_SCOPE") == "full" ||
+        (build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "kernel_tests_ci")
       command: "/opt/fastvideo-ci-runner/run-ci"
       timeout_in_minutes: 90
       env:
         TEST_TYPE: "kernel_tests_ci"
       agents:
         queue: "ci-runner"
-    - label: ":test_tube: Inference Tests VMoBA (Slurm)"
+    - label: ":test_tube: Inference Tests VMoBA (CI Runner)"
       key: "inference-vmoba-ci"
-      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "inference_vmoba_ci"
+      if: |
+        build.env("TEST_SCOPE") == "full" ||
+        (build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "inference_vmoba_ci")
       command: "/opt/fastvideo-ci-runner/run-ci"
       timeout_in_minutes: 90
       env:
         TEST_TYPE: "inference_vmoba_ci"
       agents:
         queue: "ci-runner"
-    - label: ":vertical_traffic_light: Golden-Gate Tests (Slurm)"
+    - label: ":vertical_traffic_light: Golden-Gate Tests (CI Runner)"
       key: "golden-gate-ci"
-      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "golden_gate_ci"
+      if: |
+        build.env("TEST_SCOPE") == "full" ||
+        (build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "golden_gate_ci")
       command: "/opt/fastvideo-ci-runner/run-ci"
       timeout_in_minutes: 90
+      soft_fail: true
       env:
         TEST_TYPE: "golden_gate_ci"
       agents:
         queue: "ci-runner"
-    - label: ":microscope: Encoder Tests (Slurm)"
+    - label: ":microscope: Encoder Tests (CI Runner)"
       key: "encoder-ci"
-      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "encoder_ci"
+      if: |
+        build.env("TEST_SCOPE") == "full" ||
+        (build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "encoder_ci")
       command: "/opt/fastvideo-ci-runner/run-ci"
       timeout_in_minutes: 90
+      soft_fail: true
       env:
         TEST_TYPE: "encoder_ci"
       agents:
         queue: "ci-runner"
-    - label: ":microscope: VAE Tests (Slurm)"
+    - label: ":microscope: VAE Tests (CI Runner)"
       key: "vae-ci"
-      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "vae_ci"
+      if: |
+        build.env("TEST_SCOPE") == "full" ||
+        (build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "vae_ci")
       command: "/opt/fastvideo-ci-runner/run-ci"
       timeout_in_minutes: 90
       env:
         TEST_TYPE: "vae_ci"
       agents:
         queue: "ci-runner"
-    - label: ":microscope: Transformer Tests (Slurm)"
+    - label: ":microscope: Transformer Tests (CI Runner)"
       key: "transformer-ci"
-      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "transformer_ci"
+      if: |
+        build.env("TEST_SCOPE") == "full" ||
+        (build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "transformer_ci")
       command: "/opt/fastvideo-ci-runner/run-ci"
       timeout_in_minutes: 90
+      soft_fail: true
       env:
         TEST_TYPE: "transformer_ci"
       agents:
         queue: "ci-runner"
-    - label: ":test_tube: LoRA Inference Tests (Slurm)"
+    - label: ":test_tube: LoRA Inference Tests (CI Runner)"
       key: "lora-inference-ci"
-      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "inference_lora_ci"
+      if: |
+        build.env("TEST_SCOPE") == "full" ||
+        (build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "inference_lora_ci")
       command: "/opt/fastvideo-ci-runner/run-ci"
       timeout_in_minutes: 90
       env:
         TEST_TYPE: "inference_lora_ci"
       agents:
         queue: "ci-runner"
-    - label: ":test_tube: Distillation DMD Tests (Slurm)"
+    - label: ":test_tube: Distillation DMD Tests (CI Runner)"
       key: "distillation-ci"
-      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "distillation_dmd_ci"
+      if: |
+        build.env("TEST_SCOPE") == "full" ||
+        (build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "distillation_dmd_ci")
       command: "/opt/fastvideo-ci-runner/run-ci"
       timeout_in_minutes: 90
       env:
         TEST_TYPE: "distillation_dmd_ci"
       agents:
         queue: "ci-runner"
-    - label: ":test_tube: Train Framework Tests (Slurm)"
+    - label: ":test_tube: Train Framework Tests (CI Runner)"
       key: "train-framework-ci"
-      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "train_framework_ci"
+      if: |
+        build.env("TEST_SCOPE") == "full" ||
+        (build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "train_framework_ci")
       command: "/opt/fastvideo-ci-runner/run-ci"
       timeout_in_minutes: 90
+      soft_fail: true
       env:
         TEST_TYPE: "train_framework_ci"
       agents:
         queue: "ci-runner"
-    - label: ":test_tube: Eval Metrics Tests (Slurm)"
+    - label: ":test_tube: Eval Metrics Tests (CI Runner)"
       key: "eval-ci"
-      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "eval_ci"
+      if: |
+        build.env("TEST_SCOPE") == "full" ||
+        (build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "eval_ci")
       command: "/opt/fastvideo-ci-runner/run-ci"
       timeout_in_minutes: 90
       env:
