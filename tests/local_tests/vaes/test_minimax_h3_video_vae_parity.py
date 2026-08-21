@@ -62,8 +62,9 @@ def _require_assets() -> tuple[torch.device, Path]:
 
 def _load_official(component_dir: Path, device: torch.device) -> torch.nn.Module:
     from diffusers.models.autoencoders.autoencoder_kl_minimax_h3 import AutoencoderKLMiniMaxH3
-    from tests.local_tests.minimax_h3._reference import assert_reference_source
+    from tests.local_tests.minimax_h3._reference import assert_reference_revision, assert_reference_source
 
+    assert_reference_revision()
     assert_reference_source(
         AutoencoderKLMiniMaxH3,
         "src/diffusers/models/autoencoders/autoencoder_kl_minimax_h3.py",
@@ -101,14 +102,35 @@ def _load_fastvideo(component_dir: Path) -> torch.nn.Module:
     return model
 
 
-def _make_video() -> torch.Tensor:
+def _make_pixels() -> torch.Tensor:
     generator = torch.Generator(device="cpu").manual_seed(20260803)
     # Two logical 17-frame clips after padding are required for H3's three-token
     # temporal overlap contract; 32 px remains safely above reflect-pad minima.
-    return torch.randn(1, 3, 22, 32, 32, generator=generator, dtype=torch.float32)
+    return torch.randint(0, 256, (1, 3, 22, 32, 32), generator=generator, dtype=torch.uint8)
 
 
-def _run(model: torch.nn.Module, video: torch.Tensor) -> dict[str, torch.Tensor]:
+def _normalize_pixels(pixels: torch.Tensor, device: torch.device) -> torch.Tensor:
+    video = pixels.to(device=device, dtype=torch.float32).div_(255.0)
+    pixel_mean = torch.tensor((0.485, 0.456, 0.406), device=device).view(1, -1, 1, 1, 1)
+    pixel_std = torch.tensor((0.229, 0.224, 0.225), device=device).view(1, -1, 1, 1, 1)
+    return (video - pixel_mean) / pixel_std
+
+
+def _run_encode_pixels(model: torch.nn.Module, pixels: torch.Tensor) -> dict[str, torch.Tensor]:
+    with torch.inference_mode():
+        posterior = model.encode_pixels(pixels, return_dict=False)[0]
+    return {
+        "mean": posterior.mean.detach().cpu(),
+        "logvar": posterior.logvar.detach().cpu(),
+    }
+
+
+def _run(
+    model: torch.nn.Module,
+    video: torch.Tensor,
+    *,
+    stream_output: bool = False,
+) -> dict[str, torch.Tensor]:
     with torch.inference_mode():
         posterior = model.encode(video, return_dict=False)[0]
         latents = posterior.mode()
@@ -121,12 +143,25 @@ def _run(model: torch.nn.Module, video: torch.Tensor) -> dict[str, torch.Tensor]
                                dtype=latents.dtype).view(1, -1, 1, 1, 1)
             normalized = (latents - mean) / std
         decoded = model.decode(latents, return_dict=False)[0]
-    return {
+        pixel_mean = torch.tensor((0.485, 0.456, 0.406), device=decoded.device,
+                                  dtype=torch.float32).view(1, -1, 1, 1, 1)
+        pixel_std = torch.tensor((0.229, 0.224, 0.225), device=decoded.device,
+                                 dtype=torch.float32).view(1, -1, 1, 1, 1)
+        pixels = (decoded.float() * pixel_std + pixel_mean).clamp_(0, 1)
+        streamed = None
+        if stream_output:
+            streamed = torch.empty(model.decoded_pixel_shape(latents.shape), dtype=torch.float32, device="cpu")
+            model.decode_to_pixels(latents, streamed)
+    result = {
         "mean": posterior.mean.detach().cpu(),
         "logvar": posterior.logvar.detach().cpu(),
         "normalized": normalized.detach().cpu(),
         "decoded": decoded.detach().cpu(),
+        "pixels": pixels.detach().cpu(),
     }
+    if streamed is not None:
+        result["streamed"] = streamed
+    return result
 
 
 def _reclaim_vram() -> None:
@@ -151,15 +186,16 @@ def _assert_tensor_parity(name: str, actual: torch.Tensor, expected: torch.Tenso
 def test_minimax_h3_video_vae_parity() -> None:
     """Match posterior, normalization, geometry, and deterministic decode."""
     device, component_dir = _require_assets()
-    video = _make_video()
+    pixels = _make_pixels()
 
     official = _load_official(component_dir, device)
-    expected = _run(official, video.to(device))
+    expected = _run(official, _normalize_pixels(pixels, device))
     del official
     _reclaim_vram()
 
     fastvideo = _load_fastvideo(component_dir)
-    actual = _run(fastvideo, video.to(device))
+    actual = _run(fastvideo, _normalize_pixels(pixels, device), stream_output=True)
+    streaming_encode = _run_encode_pixels(fastvideo, pixels)
     assert fastvideo.temporal_compression_ratio == 4
     assert fastvideo.spatial_compression_ratio == 16
     del fastvideo
@@ -167,5 +203,8 @@ def test_minimax_h3_video_vae_parity() -> None:
 
     _assert_tensor_parity("video_vae.mean", actual["mean"], expected["mean"], 0.0)
     _assert_tensor_parity("video_vae.logvar", actual["logvar"], expected["logvar"], 0.0)
+    _assert_tensor_parity("video_vae.streaming_encode.mean", streaming_encode["mean"], expected["mean"], 0.0)
+    _assert_tensor_parity("video_vae.streaming_encode.logvar", streaming_encode["logvar"], expected["logvar"], 0.0)
     _assert_tensor_parity("video_vae.normalized", actual["normalized"], expected["normalized"], 0.0)
     _assert_tensor_parity("video_vae.decode", actual["decoded"], expected["decoded"], 0.0)
+    _assert_tensor_parity("video_vae.streaming_decode", actual["streamed"], expected["pixels"], 0.0)
