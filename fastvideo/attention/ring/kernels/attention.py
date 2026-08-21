@@ -3,20 +3,20 @@ from typing import Any
 
 import torch
 
+from ..capabilities import HAS_AITER, HAS_FLASH_ATTN, HAS_FLASH_ATTN_HOPPER, HAS_FLASHINFER, HAS_NPU
+
 _scaled_dot_product_flash_attention = torch.ops.aten._scaled_dot_product_flash_attention
 _scaled_dot_product_efficient_attention = torch.ops.aten._scaled_dot_product_efficient_attention
 
 # Apply Moore Threads PyTorch Patches. It will not interfere CUDA setup if you are
 # not running in Moore Threads's environment.
 try:
-    import torch_musa
+    import torch_musa  # noqa: F401
     _scaled_dot_product_flash_attention = torch.ops.aten._scaled_dot_product_attention_flash_musa
     # The efficient operator hasn't been implemented yet
     _scaled_dot_product_efficient_attention = None
 except ModuleNotFoundError:
     pass
-
-from ..capabilities import HAS_AITER, HAS_FLASH_ATTN, HAS_FLASH_ATTN_HOPPER, HAS_FLASHINFER, HAS_NPU
 
 if HAS_AITER:
     from aiter import flash_attn_func as flash_attn_func_aiter
