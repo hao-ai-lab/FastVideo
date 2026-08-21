@@ -1057,7 +1057,12 @@ class TransformerLoader(ComponentLoader):
             # so recording here makes the decision readable from the loaded
             # transformer — and records the narrowed one for teacher/critic.
             resolved = record_resolved_attention_backend(dit_config)
-            logger.info("transformer attention backend: %s", resolved.name if resolved else "automatic selection")
+            # Every worker records its resolved backend so distributed profile
+            # snapshots can prove that all ranks use the requested kernels.
+            logger.info("Worker %s transformer attention backend: %s",
+                        os.environ.get("RANK", "0"),
+                        resolved.name if resolved else "automatic selection",
+                        local_main_process_only=False)
             model = maybe_load_fsdp_model(
                 model_cls=model_cls,
                 init_params={
