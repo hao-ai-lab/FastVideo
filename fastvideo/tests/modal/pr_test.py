@@ -268,7 +268,7 @@ def run_golden_gate_tests():
     # SSIM generation for that model cannot have regressed. Downloads only the
     # shards holding the gated layer, never full checkpoints.
     run_test(
-        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/golden_gate -vs"
+        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && bash .buildkite/scripts/lanes/golden_gate.sh"
     )
 
 
@@ -313,7 +313,7 @@ def run_training_tests_VSA():
 
 @app.function(gpu="H100:1", image=image, timeout=900, secrets=[ci_env_secret])
 def run_kernel_tests():
-    run_test("pytest fastvideo-kernel/tests/ -vs")
+    run_test("bash .buildkite/scripts/lanes/kernel_tests.sh")
 
 
 # @app.function(gpu="H100:1", image=image, timeout=900, secrets=[ci_env_secret])
@@ -328,7 +328,7 @@ def run_kernel_tests():
 
 @app.function(gpu="L40S:1", image=image, timeout=900, secrets=[ci_env_secret])
 def run_inference_tests_vmoba():
-    run_test('python fastvideo/tests/inference/vmoba/test_vmoba_inference.py')
+    run_test("bash .buildkite/scripts/lanes/inference_vmoba.sh")
 
 
 @app.function(gpu="L40S:1", image=image, timeout=1200, secrets=[ci_env_secret])

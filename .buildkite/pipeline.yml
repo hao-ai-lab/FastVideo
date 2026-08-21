@@ -101,6 +101,33 @@ steps:
         TEST_TYPE: "unit_test_ci"
       agents:
         queue: "ci-runner"
+    - label: ":microscope: Kernel Tests (Slurm)"
+      key: "kernel-tests-ci"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "kernel_tests_ci"
+      command: "/opt/fastvideo-ci-runner/run-ci"
+      timeout_in_minutes: 90
+      env:
+        TEST_TYPE: "kernel_tests_ci"
+      agents:
+        queue: "ci-runner"
+    - label: ":test_tube: Inference Tests VMoBA (Slurm)"
+      key: "inference-vmoba-ci"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "inference_vmoba_ci"
+      command: "/opt/fastvideo-ci-runner/run-ci"
+      timeout_in_minutes: 90
+      env:
+        TEST_TYPE: "inference_vmoba_ci"
+      agents:
+        queue: "ci-runner"
+    - label: ":vertical_traffic_light: Golden-Gate Tests (Slurm)"
+      key: "golden-gate-ci"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "golden_gate_ci"
+      command: "/opt/fastvideo-ci-runner/run-ci"
+      timeout_in_minutes: 90
+      env:
+        TEST_TYPE: "golden_gate_ci"
+      agents:
+        queue: "ci-runner"
     - label: ":microscope: DreamVerse App Tests"
       if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "dreamverse_app"
       command: "timeout 90m .buildkite/scripts/pr_test.sh"

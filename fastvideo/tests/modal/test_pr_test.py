@@ -331,3 +331,27 @@ def test_run_unit_test_uses_shared_command(monkeypatch):
             "./fastvideo/tests/modal/test_ssim_test.py",
     ):
         assert test_path in unit_command
+
+
+def test_wave1_lane_functions_use_shared_scripts(monkeypatch):
+    """Modal and the Slurm CI runner must execute the same per-lane scripts so
+    their test selections cannot drift (same contract as the unit lane)."""
+    module = _load_pr_test_module(monkeypatch)
+    commands = []
+    monkeypatch.setattr(module, "run_test", commands.append)
+
+    module.run_kernel_tests()
+    module.run_inference_tests_vmoba()
+    module.run_golden_gate_tests()
+
+    assert commands == [
+        "bash .buildkite/scripts/lanes/kernel_tests.sh",
+        "bash .buildkite/scripts/lanes/inference_vmoba.sh",
+        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY"
+        " && bash .buildkite/scripts/lanes/golden_gate.sh",
+    ]
+    lanes_dir = Path(__file__).resolve().parents[3] / ".buildkite/scripts/lanes"
+    assert "pytest fastvideo-kernel/tests/ -vs" in (lanes_dir / "kernel_tests.sh").read_text()
+    assert ("python fastvideo/tests/inference/vmoba/test_vmoba_inference.py"
+            in (lanes_dir / "inference_vmoba.sh").read_text())
+    assert "pytest ./fastvideo/tests/golden_gate -vs" in (lanes_dir / "golden_gate.sh").read_text()

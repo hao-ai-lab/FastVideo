@@ -89,6 +89,33 @@ def test_unit_ci_routes_direct_and_full_suite_to_trusted_static_driver():
         queue: "ci-runner"''' in pipeline
 
 
+def test_slurm_wave1_lanes_route_direct_to_trusted_static_driver():
+    """Wave-1 Slurm lanes (kernel, VMoBA inference, golden-gate) are additive
+    /test <name>-ci routes on queue ci-runner via the pinned run-ci driver;
+    the Modal lanes stay authoritative until each wave is flipped."""
+    slash_commands = (REPO_ROOT / ".github/workflows/ci-slash-commands.yml").read_text()
+    pipeline = (REPO_ROOT / ".buildkite/pipeline.yml").read_text()
+
+    valid_line = next(line for line in slash_commands.splitlines() if line.strip().startswith("VALID="))
+    lanes = [
+        ("kernel-ci", "kernel_tests_ci", "kernel-tests-ci", ":microscope: Kernel Tests (Slurm)"),
+        ("vmoba-ci", "inference_vmoba_ci", "inference-vmoba-ci", ":test_tube: Inference Tests VMoBA (Slurm)"),
+        ("golden-gate-ci", "golden_gate_ci", "golden-gate-ci", ":vertical_traffic_light: Golden-Gate Tests (Slurm)"),
+    ]
+    for name, test_type, step_key, label in lanes:
+        assert f" {name} " in valid_line or valid_line.rstrip('"').endswith(name), name
+        assert f"[{name}]={test_type}" in slash_commands
+        assert f'''    - label: "{label}"
+      key: "{step_key}"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "{test_type}"
+      command: "/opt/fastvideo-ci-runner/run-ci"
+      timeout_in_minutes: 90
+      env:
+        TEST_TYPE: "{test_type}"
+      agents:
+        queue: "ci-runner"''' in pipeline
+
+
 def test_allowlist_entries_are_still_real_directories():
     # A stale allowlist hides regressions; entries must track reality.
     missing = [name for name in ALLOWLIST if name != "modal" and not (TESTS_ROOT / name).is_dir()]
