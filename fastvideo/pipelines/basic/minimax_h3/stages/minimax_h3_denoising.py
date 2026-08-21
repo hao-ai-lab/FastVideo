@@ -145,6 +145,10 @@ class MiniMaxH3DenoisingStage(PipelineStage):
             vsa_exempt = vsa_mode == "exempt"
             vsa_dense_layers = tuple(batch.extra.get("vsa_dense_layers", ()))
             vsa_dense_first_n = int(batch.extra.get("vsa_dense_first_n_steps", 0))
+            # Run-level tile geometry (256 default, 64 = native Triton path),
+            # plumbed like the run-level sparsity; the builder validates the
+            # value against VSA_H3_TILE_SHAPES.
+            vsa_tile_size = int(fastvideo_args.VSA_tile_size)
 
         try:
             with profiler_region("inference_denoising"):
@@ -167,6 +171,7 @@ class MiniMaxH3DenoisingStage(PipelineStage):
                             device=device,
                             exempt=vsa_exempt,
                             dense_layers=vsa_dense_layers,
+                            tile_size=vsa_tile_size,
                         )
                     # Under torch.compile(mode="reduce-overhead") each denoising
                     # step must be marked, or cudagraph trees flag cross-step
