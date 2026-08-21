@@ -70,6 +70,8 @@ auto quant(
   return std::make_tuple(Output, Output_S);
 }
 
+#ifndef FASTVIDEO_KERNEL_DISABLE_PYBIND_REGISTRATION
 void register_quant(pybind11::module_ &m) {
     m.def("quant_cuda", &quant);
 }
+#endif
