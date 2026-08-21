@@ -278,10 +278,8 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
                 torch.zeros([batch_size, kv_cache_size, num_attention_heads, attention_head_dim],
                             dtype=dtype,
                             device=device),
-                "global_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
-                "local_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
+                "global_end_index": 0,
+                "local_end_index": 0,
             })
 
         return kv_cache
@@ -302,10 +300,8 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
                 torch.zeros([batch_size, kv_cache_size, action_heads, keyboard_head_dim], dtype=dtype, device=device),
                 "v":
                 torch.zeros([batch_size, kv_cache_size, action_heads, keyboard_head_dim], dtype=dtype, device=device),
-                "global_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
-                "local_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
+                "global_end_index": 0,
+                "local_end_index": 0,
             })
             kv_cache_mouse.append({
                 "k":
@@ -316,10 +312,8 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
                 torch.zeros([batch_size * self.frame_seq_length, kv_cache_size, action_heads, mouse_head_dim],
                             dtype=dtype,
                             device=device),
-                "global_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
-                "local_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
+                "global_end_index": 0,
+                "local_end_index": 0,
             })
 
         return kv_cache_mouse, kv_cache_keyboard
