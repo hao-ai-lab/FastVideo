@@ -114,7 +114,10 @@ def _info(logger: Logger,
     is_local_main_process = local_rank == 0
 
     if (main_process_only and is_main_process) or (local_main_process_only and is_local_main_process):
-        logger.log(logging.INFO, msg, *args, stacklevel=2, **kwargs)
+        # Honor an explicit stacklevel (info_once routes through here with
+        # stacklevel already set) instead of passing the keyword twice.
+        stacklevel = kwargs.pop("stacklevel", 2)
+        logger.log(logging.INFO, msg, *args, stacklevel=stacklevel, **kwargs)
 
     global _warned_local_main_process, _warned_main_process
 
