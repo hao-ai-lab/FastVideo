@@ -12,8 +12,7 @@ encoder/decoder submodules by name and type.
 """
 import torch.nn as nn
 
-from fastvideo.models.vaes.wanvae import (AutoencoderKLWan, WanDecoder3d,
-                                          WanEncoder3d, _is_wan_vae_codec)
+from fastvideo.models.vaes.wanvae import (AutoencoderKLWan, WanDecoder3d, WanEncoder3d, _is_wan_vae_codec)
 
 
 def test_wan_vae_registers_compile_conditions():

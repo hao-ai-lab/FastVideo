@@ -26,9 +26,7 @@ os.environ["MASTER_PORT"] = "29503"
 @pytest.fixture
 def t5_model_paths_and_config():
     base_model_path = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
-    model_path = maybe_download_model(base_model_path,
-                                      local_dir=os.path.join(
-                                          'data', base_model_path))
+    model_path = maybe_download_model(base_model_path, local_dir=os.path.join('data', base_model_path))
     text_encoder_path = os.path.join(model_path, "text_encoder")
     tokenizer_path = os.path.join(model_path, "tokenizer")
     return text_encoder_path, tokenizer_path, WanT2V480PConfig()
@@ -38,9 +36,7 @@ def t5_model_paths_and_config():
 def t5_large_model_paths_and_config():
     base_model_path = "nvidia/Cosmos-Predict2-2B-Video2World"
     local_dir = os.path.join('data', base_model_path)
-    skip_if_gated_repo_inaccessible(base_model_path,
-                                    local_path=local_dir,
-                                    test_name="Cosmos T5-large encoder test")
+    skip_if_gated_repo_inaccessible(base_model_path, local_path=local_dir, test_name="Cosmos T5-large encoder test")
     model_path = maybe_download_model(base_model_path, local_dir=local_dir)
     text_encoder_path = os.path.join(model_path, "text_encoder")
     tokenizer_path = os.path.join(model_path, "tokenizer")
@@ -57,14 +53,10 @@ def test_t5_encoder(t5_model_paths_and_config):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     precision_str = "fp32"
     precision = PRECISION_TO_TYPE[precision_str]
-    model1 = UMT5EncoderModel.from_pretrained(text_encoder_path).to(
-        precision).to(device).eval()
+    model1 = UMT5EncoderModel.from_pretrained(text_encoder_path).to(precision).to(device).eval()
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
 
-
-    args = FastVideoArgs(model_path=text_encoder_path,
-                        pipeline_config=pipeline_config,
-                        pin_cpu_memory=False)
+    args = FastVideoArgs(model_path=text_encoder_path, pipeline_config=pipeline_config, pin_cpu_memory=False)
     loader = TextEncoderLoader()
     model2 = loader.load(text_encoder_path, args)
     model2 = model2.to(precision)
@@ -84,7 +76,7 @@ def test_t5_encoder(t5_model_paths_and_config):
                "encoder.block.{}.layer.0.SelfAttention.o.weight", "encoder.block.{}.layer.1.DenseReluDense.wi_0.weight", "encoder.block.{}.layer.1.DenseReluDense.wi_1.weight",\
                 "encoder.block.{}.layer.1.DenseReluDense.wo.weight", \
                 "encoder.block.{}.layer.1.layer_norm.weight", "encoder.final_layer_norm.weight"]
-    
+
     for idx in range(hf_config.num_hidden_layers):
         for w in weights:
             name1 = w.format(idx)
@@ -93,13 +85,9 @@ def test_t5_encoder(t5_model_paths_and_config):
             p2 = params2[name2]
             p2 = (p2.to_local() if isinstance(p2, DTensor) else p2).to(p1)
             assert_close(p1, p2, atol=1e-4, rtol=1e-4)
-    
 
     # Test with some sample prompts
-    prompts = [
-        "Once upon a time", "The quick brown fox jumps over",
-        "In a galaxy far, far away"
-    ]
+    prompts = ["Once upon a time", "The quick brown fox jumps over", "In a galaxy far, far away"]
 
     logger.info("Testing T5 encoder with sample prompts")
 
@@ -108,10 +96,7 @@ def test_t5_encoder(t5_model_paths_and_config):
             logger.info("Testing prompt: %s", prompt)
 
             # Tokenize the prompt
-            tokens = tokenizer(prompt,
-                               padding="max_length",
-                               max_length=512,
-                               truncation=True,
+            tokens = tokenizer(prompt, padding="max_length", max_length=512, truncation=True,
                                return_tensors="pt").to(device)
 
             # Get outputs from HuggingFace implementation
@@ -148,13 +133,10 @@ def test_t5_large_encoder(t5_large_model_paths_and_config):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     precision_str = "fp32"
     precision = PRECISION_TO_TYPE[precision_str]
-    model1 = T5EncoderModel.from_pretrained(text_encoder_path).to(
-        precision).to(device).eval()
+    model1 = T5EncoderModel.from_pretrained(text_encoder_path).to(precision).to(device).eval()
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
 
-    args = FastVideoArgs(model_path=text_encoder_path,
-                        pipeline_config=pipeline_config,
-                        pin_cpu_memory=False)
+    args = FastVideoArgs(model_path=text_encoder_path, pipeline_config=pipeline_config, pin_cpu_memory=False)
     loader = TextEncoderLoader()
     model2 = loader.load(text_encoder_path, args)
     model2 = model2.to(precision)
@@ -168,12 +150,12 @@ def test_t5_large_encoder(t5_large_model_paths_and_config):
     # Check number of parameters
     logger.info("Model1 has %s parameters", len(params1))
     logger.info("Model2 has %s parameters", len(params2))
-    
+
     # Print parameter names for comparison
     logger.info("Model1 parameters:")
     for name in sorted(params1.keys()):
         logger.info("  %s: %s", name, params1[name].shape)
-    
+
     logger.info("Model2 parameters:")
     for name in sorted(params2.keys()):
         logger.info("  %s: %s", name, params2[name].shape)
@@ -182,7 +164,7 @@ def test_t5_large_encoder(t5_large_model_paths_and_config):
     weights = ["encoder.block.{}.layer.0.layer_norm.weight", "encoder.block.0.layer.0.SelfAttention.relative_attention_bias.weight", \
                "encoder.block.{}.layer.0.SelfAttention.o.weight", "encoder.block.{}.layer.1.DenseReluDense.wi.weight", \
                 "encoder.block.{}.layer.1.DenseReluDense.wo.weight", "encoder.final_layer_norm.weight"]
-    
+
     for idx in range(hf_config.num_hidden_layers):
         for w in weights:
             name1 = w.format(idx)
@@ -191,13 +173,9 @@ def test_t5_large_encoder(t5_large_model_paths_and_config):
             p2 = params2[name2]
             p2 = (p2.to_local() if isinstance(p2, DTensor) else p2).to(p1)
             assert_close(p1, p2, atol=1e-4, rtol=1e-4)
-    
 
     # Test with some sample prompts
-    prompts = [
-        "Once upon a time", "The quick brown fox jumps over",
-        "In a galaxy far, far away"
-    ]
+    prompts = ["Once upon a time", "The quick brown fox jumps over", "In a galaxy far, far away"]
 
     logger.info("Testing T5 Large encoder with sample prompts")
 
@@ -206,10 +184,7 @@ def test_t5_large_encoder(t5_large_model_paths_and_config):
             logger.info("Testing prompt: %s", prompt)
 
             # Tokenize the prompt
-            tokens = tokenizer(prompt,
-                               padding="max_length",
-                               max_length=512,
-                               truncation=True,
+            tokens = tokenizer(prompt, padding="max_length", max_length=512, truncation=True,
                                return_tensors="pt").to(device)
 
             # Get outputs from HuggingFace implementation

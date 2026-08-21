@@ -61,6 +61,8 @@ class WorkloadType(str, Enum):
     T2V = "t2v"  # Text to Video
     T2I = "t2i"  # Text to Image
     I2I = "i2i"  # Image to Image
+    V2A = "v2a"  # Video to Audio
+    T2A = "t2a"  # Text to Audio
 
     @classmethod
     def from_string(cls, value: str) -> "WorkloadType":
@@ -122,6 +124,18 @@ class FastVideoArgs:
     lora_target_modules: list[str] | None = None
 
     output_type: str = "pil"
+
+    # The attention backend requested for this run. Applied per component at
+    # load time (each component resolves its own decision, recorded on its
+    # config); a role-level request (the train stack's per-role
+    # attention_backend) overrides it.
+    #
+    # This field is the parse-once adapter for FASTVIDEO_ATTENTION_BACKEND:
+    # when left unset it takes the env var's value in __post_init__, so the
+    # environment is an *input* read once here rather than something the loader
+    # consults later. None means no request: per-layer defaults, then platform
+    # auto-selection.
+    attention_backend: str | None = None
 
     # CPU offload parameters
     dit_cpu_offload: bool = True
@@ -257,6 +271,21 @@ class FastVideoArgs:
         self._apply_ltx2_vae_overrides()
         self._resolve_refine_args()
         self._apply_transformer_quant()
+        if self.attention_backend is not None:
+            # Fail fast on typos instead of silently auto-selecting later.
+            from fastvideo.attention.selector import coerce_attn_backend
+            coerce_attn_backend(self.attention_backend)
+        else:
+            # Parse-once adapter: fold the environment variable into the typed
+            # request so resolution has a single input and library code never
+            # consults the environment on the load path. The env var keeps its
+            # historically permissive parse — an unknown name is ignored here
+            # and falls through to automatic selection rather than raising.
+            import fastvideo.envs as envs
+            from fastvideo.attention.selector import backend_name_to_enum
+            env_backend = envs.FASTVIDEO_ATTENTION_BACKEND
+            if env_backend is not None and backend_name_to_enum(env_backend) is not None:
+                self.attention_backend = env_backend
         self.check_fastvideo_args()
 
     def _apply_transformer_quant(self) -> None:
@@ -437,6 +466,17 @@ class FastVideoArgs:
             default=FastVideoArgs.output_type,
             choices=["pil"],
             help="Output type for the generated video",
+        )
+
+        # Attention backend (process-wide default request)
+        parser.add_argument(
+            "--attention-backend",
+            type=str,
+            default=FastVideoArgs.attention_backend,
+            help="Default attention backend request (e.g. FLASH_ATTN, TORCH_SDPA, "
+            "SAGE_ATTN). Applied per component at load time; component/role-level "
+            "requests override it. Unset: FASTVIDEO_ATTENTION_BACKEND env var, "
+            "then per-layer defaults, then automatic selection.",
         )
 
         # Prompt text file for batch processing

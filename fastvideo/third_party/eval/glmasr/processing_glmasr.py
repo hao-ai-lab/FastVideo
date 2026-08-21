@@ -18,7 +18,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
 import re
 
 import numpy as np
@@ -29,10 +28,8 @@ from transformers.processing_utils import ProcessingKwargs, ProcessorMixin, Unpa
 from transformers.tokenization_utils_base import TextInput
 from transformers.utils import is_torch_available, logging
 
-
 if is_torch_available():
     import torch
-
 
 logger = logging.get_logger(__name__)
 
@@ -63,7 +60,6 @@ class GlmAsrProcessor(ProcessorMixin):
     attributes = ["feature_extractor", "tokenizer"]
     feature_extractor_class = "WhisperFeatureExtractor"
     tokenizer_class = "PreTrainedTokenizerFast"
-
     r"""
     Constructs an GlmAsr processor which wraps an GlmAsr feature extractor and an GlmAsr
     tokenizer into a single processor.
@@ -319,8 +315,7 @@ class GlmAsrProcessor(ProcessorMixin):
         elif isinstance(prompt, (list, tuple)):
             if len(prompt) != batch_size:
                 raise ValueError(
-                    f"Received {len(prompt)} prompt(s) for {batch_size} audio sample(s); counts must match."
-                )
+                    f"Received {len(prompt)} prompt(s) for {batch_size} audio sample(s); counts must match.")
             prompts = []
             for item in prompt:
                 if item is None:
@@ -332,20 +327,23 @@ class GlmAsrProcessor(ProcessorMixin):
         else:
             raise TypeError("`prompt` must be a string, a sequence of strings, or `None`.")
 
-        conversations = [
-            [
+        conversations = [[{
+            "role":
+            "user",
+            "content": [
                 {
-                    "role": "user",
-                    "content": [
-                        {"type": "audio", "path": audio_item}
-                        if isinstance(audio_item, str)
-                        else {"type": "audio", "audio": audio_item},
-                        {"type": "text", "text": prompt_text},
-                    ],
-                }
-            ]
-            for prompt_text, audio_item in zip(prompts, audio_items)
-        ]
+                    "type": "audio",
+                    "path": audio_item
+                } if isinstance(audio_item, str) else {
+                    "type": "audio",
+                    "audio": audio_item
+                },
+                {
+                    "type": "text",
+                    "text": prompt_text
+                },
+            ],
+        }] for prompt_text, audio_item in zip(prompts, audio_items)]
 
         return self.apply_chat_template(
             conversations,
@@ -382,12 +380,12 @@ class GlmAsrProcessor(ProcessorMixin):
         stripped = text.strip()
 
         for prefix in (
-            "The spoken content of the audio is",
-            "The transcription of the audio is",
-            "The content of the input audio is",
+                "The spoken content of the audio is",
+                "The transcription of the audio is",
+                "The content of the input audio is",
         ):
             if stripped.startswith(prefix):
-                stripped = stripped[len(prefix) :].strip()
+                stripped = stripped[len(prefix):].strip()
                 break
 
         if stripped.endswith("."):

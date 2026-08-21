@@ -51,7 +51,7 @@ def test_dreamx_world_5b_cam_pipeline_config_wires_first_scope_components():
     assert text_config.prefix == "umt5"
     assert text_config.vocab_size == 256384
     assert text_config.d_model == 4096
-    assert config.text_encoder_precisions == ("bf16",)
+    assert config.text_encoder_precisions == ("bf16", )
 
 
 def test_dreamx_world_pipeline_registry_discovers_entrypoint():
@@ -60,31 +60,30 @@ def test_dreamx_world_pipeline_registry_discovers_entrypoint():
     assert pipelines["basic"]["DreamXWorldPipeline"] is DreamXWorldPipeline
 
 
-
-
 def test_dreamx_world_local_model_index_resolves_model_info(tmp_path):
     model_dir = tmp_path / "DreamX-World-5B-Cam-converted"
     model_dir.mkdir()
     for component in ("scheduler", "text_encoder", "tokenizer", "transformer", "vae"):
         (model_dir / component).mkdir()
-    (model_dir / "model_index.json").write_text(json.dumps({
-        "_class_name": "DreamXWorldPipeline",
-        "_diffusers_version": "0.31.0",
-        "scheduler": ["diffusers", "FlowMatchEulerDiscreteScheduler"],
-        "text_encoder": ["transformers", "UMT5EncoderModel"],
-        "tokenizer": ["transformers", "AutoTokenizer"],
-        "transformer": ["diffusers", "DreamXWorldTransformer3DModel"],
-        "vae": ["diffusers", "AutoencoderKLWan"],
-    }) + "\n")
+    (model_dir / "model_index.json").write_text(
+        json.dumps({
+            "_class_name": "DreamXWorldPipeline",
+            "_diffusers_version": "0.31.0",
+            "scheduler": ["diffusers", "FlowMatchEulerDiscreteScheduler"],
+            "text_encoder": ["transformers", "UMT5EncoderModel"],
+            "tokenizer": ["transformers", "AutoTokenizer"],
+            "transformer": ["diffusers", "DreamXWorldTransformer3DModel"],
+            "vae": ["diffusers", "AutoencoderKLWan"],
+        }) + "\n")
 
     info = get_model_info(str(model_dir), pipeline_type=PipelineType.BASIC, workload_type=WorkloadType.I2V)
 
     assert info.pipeline_cls is DreamXWorldPipeline
     assert info.pipeline_config_cls is DreamXWorld5BCamPipelineConfig
 
+
 def test_dreamx_world_model_path_resolves_pipeline_config():
     assert get_pipeline_config_cls_from_name("GD-ML/DreamX-World-5B-Cam") is DreamXWorld5BCamPipelineConfig
-
 
 
 def test_dreamx_world_default_preset_is_registered():
@@ -100,8 +99,6 @@ def test_dreamx_world_default_preset_is_registered():
     assert preset.defaults["guidance_scale"] == 5.0
 
 
-
-
 def test_dreamx_world_pipeline_initializes_official_flow_scheduler():
     pipeline = DreamXWorldPipeline.__new__(DreamXWorldPipeline)
     pipeline.modules = {}
@@ -112,6 +109,7 @@ def test_dreamx_world_pipeline_initializes_official_flow_scheduler():
     scheduler = pipeline.modules["scheduler"]
     assert isinstance(scheduler, FlowMatchEulerDiscreteScheduler)
     assert scheduler.config.shift == 3.0
+
 
 def test_dreamx_world_camera_conditioning_stage_sets_y_camera_extra():
     batch = ForwardBatch(
@@ -156,7 +154,6 @@ def test_dreamx_world_denoising_kwargs_filter_for_y_camera():
 
     assert stage.prepare_extra_func_kwargs(accepts_y_camera, {"y_camera": y_camera}) == {"y_camera": y_camera}
     assert stage.prepare_extra_func_kwargs(no_y_camera, {"y_camera": y_camera}) == {}
-
 
 
 def test_dreamx_world_ar_pipeline_config_wires_components():
@@ -221,7 +218,8 @@ def test_dreamx_world_camera_interpolation_handles_single_camera():
 def test_dreamx_world_ar_cache_initializes_camera_self_attention_entries():
     cam_self_attn = SimpleNamespace(num_heads=3, head_dim=5)
     transformer = SimpleNamespace(
-        blocks=[SimpleNamespace(cam_self_attn=cam_self_attn), SimpleNamespace(cam_self_attn=cam_self_attn)],
+        blocks=[SimpleNamespace(cam_self_attn=cam_self_attn),
+                SimpleNamespace(cam_self_attn=cam_self_attn)],
         num_attention_heads=2,
         attention_head_dim=4,
     )
@@ -250,9 +248,10 @@ def test_dreamx_world_ar_context_noise_fraction_maps_to_scheduler_timestep():
     assert DreamXWorldARCausalDenoisingStage._context_noise_timestep(100) == 100
 
 
-
 def test_dreamx_world_ar_context_update_advances_camera_cache_indices():
+
     class DummyTransformer:
+
         def __call__(self, *, hidden_states, encoder_hidden_states, timestep, y_camera, kv_cache, crossattn_cache,
                      current_start):
             del encoder_hidden_states, y_camera, crossattn_cache
@@ -290,7 +289,10 @@ def test_dreamx_world_ar_context_update_advances_camera_cache_indices():
     stage._update_context_cache(
         block_latents=torch.zeros(1, 4, 3, 2, 2),
         context=[torch.zeros(2, 4)],
-        camera_block={"viewmats": torch.eye(4).reshape(1, 1, 4, 4), "K": torch.eye(3).reshape(1, 1, 3, 3)},
+        camera_block={
+            "viewmats": torch.eye(4).reshape(1, 1, 4, 4),
+            "K": torch.eye(3).reshape(1, 1, 3, 3)
+        },
         kv_cache=caches,
         crossattn_cache=[{}],
         start=0,

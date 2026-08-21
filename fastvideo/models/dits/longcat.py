@@ -21,10 +21,10 @@ from fastvideo.models.dits.base import BaseDiT
 from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.third_party.longcat_video.block_sparse_attention.bsa_interface import flash_attn_bsa_3d
 
-
 # ============================================================================
 # Embeddings
 # ============================================================================
+
 
 class PatchEmbed3D(nn.Module):
     """
@@ -32,10 +32,10 @@ class PatchEmbed3D(nn.Module):
     """
 
     def __init__(
-        self,
-        patch_size: tuple[int, int, int] = (1, 2, 2),
-        in_channels: int = 16,
-        embed_dim: int = 4096,
+            self,
+            patch_size: tuple[int, int, int] = (1, 2, 2),
+            in_channels: int = 16,
+            embed_dim: int = 4096,
     ):
         super().__init__()
         self.patch_size = patch_size
@@ -106,9 +106,8 @@ class TimestepEmbedder(nn.Module):
         Create sinusoidal timestep embeddings.
         """
         half = dim // 2
-        freqs = torch.exp(
-            -math.log(max_period) * torch.arange(start=0, end=half, dtype=torch.float32, device=t.device) / half
-        )
+        freqs = torch.exp(-math.log(max_period) *
+                          torch.arange(start=0, end=half, dtype=torch.float32, device=t.device) / half)
         args = t[:, None].float() * freqs[None]
         embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
         if dim % 2:
@@ -125,25 +124,25 @@ class TimestepEmbedder(nn.Module):
         """
         # Sinusoidal embedding in FP32
         t_freq = self.timestep_embedding(t.flatten(), self.frequency_embedding_size)
-        
+
         # Cast to model dtype before MLP (matching original LongCat)
         # Handle LoRA wrapper if present
         linear_layer = self.linear_1.base_layer if hasattr(self.linear_1, 'base_layer') else self.linear_1
         target_dtype = linear_layer.weight.dtype
         if t_freq.dtype != target_dtype:
             t_freq = t_freq.to(target_dtype)
-        
+
         # MLP projection
         t_emb, _ = self.linear_1(t_freq)
         t_emb = self.act(t_emb)
         t_emb, _ = self.linear_2(t_emb)
-        
+
         # Reshape if needed
         if latent_shape is not None and len(t.shape) > 1:
             B = t.shape[0]
             T = latent_shape[0]
             t_emb = t_emb.reshape(B, T, -1)
-        
+
         return t_emb
 
 
@@ -198,7 +197,7 @@ class CaptionEmbedder(nn.Module):
         y, _ = self.linear_1(encoder_hidden_states)
         y = self.act(y)
         y, _ = self.linear_2(y)  # [B, N_text, C]
-        
+
         # Handle attention masking - just zero out padded tokens if requested
         if encoder_attention_mask is not None:
             # Remove extra dimensions
@@ -217,11 +216,11 @@ class CaptionEmbedder(nn.Module):
                 )
             elif mask_len > seq_len:
                 encoder_attention_mask = encoder_attention_mask[:, :seq_len]
-            
+
             # Zero out padded tokens if requested
             if self.text_tokens_zero_pad:
                 y = y * encoder_attention_mask.unsqueeze(-1)
-        
+
         # Return standard format [B, N_text, C] - no compaction!
         return y
 
@@ -229,6 +228,7 @@ class CaptionEmbedder(nn.Module):
 # ============================================================================
 # Attention Modules (Placeholders for now)
 # ============================================================================
+
 
 class LongCatSelfAttention(nn.Module):
     """
@@ -274,13 +274,12 @@ class LongCatSelfAttention(nn.Module):
         )
 
     def forward(
-        self,
-        x: torch.Tensor,              # [B, N, C]
-        latent_shape: tuple,          # (T, H, W)
-        num_cond_latents: int = 0,    # Number of conditioning latent frames (for I2V)
-        return_kv: bool = False,      # Return K/V for caching
-        **kwargs
-    ) -> torch.Tensor | tuple:
+            self,
+            x: torch.Tensor,  # [B, N, C]
+            latent_shape: tuple,  # (T, H, W)
+            num_cond_latents: int = 0,  # Number of conditioning latent frames (for I2V)
+            return_kv: bool = False,  # Return K/V for caching
+            **kwargs) -> torch.Tensor | tuple:
         """
         Forward pass with 3D RoPE and optional BSA.
         
@@ -330,41 +329,38 @@ class LongCatSelfAttention(nn.Module):
         if num_cond_latents > 0:
             # Calculate number of conditioned tokens (cond_latents * spatial_tokens_per_frame)
             num_cond_tokens = num_cond_latents * (N // T)
-            
+
             # Conditioned tokens: only attend to themselves (same seq length, use self.attn)
             q_cond = q[:, :num_cond_tokens].contiguous()
             k_cond = k[:, :num_cond_tokens].contiguous()
             v_cond = v[:, :num_cond_tokens].contiguous()
             out_cond, _ = self.attn(q_cond, k_cond, v_cond)
-            
+
             # Noise tokens: attend to ALL tokens (different seq lengths!)
             # Need to use flash attention directly since q has different length than k/v
             q_noise = q[:, num_cond_tokens:].contiguous()  # [B, N_noise, num_heads, head_dim]
             # k, v are full: [B, N, num_heads, head_dim]
-            
+
             # Transpose for flash attention: [B, num_heads, seq, head_dim]
             q_noise_t = q_noise.transpose(1, 2)
             k_t = k.transpose(1, 2)
             v_t = v.transpose(1, 2)
-            
+
             # Use scaled dot product attention (handles different q/kv lengths)
             out_noise_t = torch.nn.functional.scaled_dot_product_attention(
-                q_noise_t, k_t, v_t, 
-                attn_mask=None,
-                dropout_p=0.0,
-                is_causal=False
-            )  # [B, num_heads, N_noise, head_dim]
-            
+                q_noise_t, k_t, v_t, attn_mask=None, dropout_p=0.0,
+                is_causal=False)  # [B, num_heads, N_noise, head_dim]
+
             # Transpose back: [B, N_noise, num_heads, head_dim]
             out_noise = out_noise_t.transpose(1, 2)
-            
+
             # Merge conditioned and noise outputs
             out = torch.cat([out_cond, out_noise], dim=1)
-            
+
             # Reshape and project out
             out = out.reshape(B, N, C)
             out, _ = self.to_out(out)
-            
+
             if return_kv:
                 return out, (k_cache, v_cache)
             return out
@@ -375,7 +371,7 @@ class LongCatSelfAttention(nn.Module):
             q_bsa = q.transpose(1, 2).contiguous()  # [B, num_heads, N, head_dim]
             k_bsa = k.transpose(1, 2).contiguous()
             v_bsa = v.transpose(1, 2).contiguous()
-            
+
             # Handle SP split: BSA operates on per-rank spatial dimensions
             # Replicate LongCat's cp_split_hw logic exactly
             from fastvideo.distributed.parallel_state import get_sp_world_size
@@ -387,7 +383,7 @@ class LongCatSelfAttention(nn.Module):
                     if sp_size % i == 0:
                         factors.append([i, sp_size // i])
                 cp_split_hw = min(factors, key=lambda x: abs(x[0] - x[1]))
-                
+
                 # Split H and W dimensions by their respective factors
                 T_bsa, H_bsa, W_bsa = latent_shape
                 assert H_bsa % cp_split_hw[0] == 0 and W_bsa % cp_split_hw[1] == 0, \
@@ -397,15 +393,15 @@ class LongCatSelfAttention(nn.Module):
                 latent_shape_bsa = (T_bsa, H_bsa, W_bsa)
             else:
                 latent_shape_bsa = latent_shape
-            
+
             # Call BSA with per-rank latent shape
-            out = flash_attn_bsa_3d(
-                q_bsa, k_bsa, v_bsa,
-                latent_shape_q=latent_shape_bsa,
-                latent_shape_k=latent_shape_bsa,
-                **self.bsa_params
-            )  # [B, num_heads, N, head_dim]
-            
+            out = flash_attn_bsa_3d(q_bsa,
+                                    k_bsa,
+                                    v_bsa,
+                                    latent_shape_q=latent_shape_bsa,
+                                    latent_shape_k=latent_shape_bsa,
+                                    **self.bsa_params)  # [B, num_heads, N, head_dim]
+
             # Transpose back: [B, N, num_heads, head_dim]
             out = out.transpose(1, 2)
         else:
@@ -421,11 +417,11 @@ class LongCatSelfAttention(nn.Module):
         return out
 
     def forward_with_kv_cache(
-        self,
-        x: torch.Tensor,              # [B, N_noise, C] - only noise tokens
-        latent_shape: tuple,          # (T_noise, H, W) - shape for noise only
-        num_cond_latents: int,        # Number of conditioning latent frames
-        kv_cache: tuple,              # (k_cond, v_cond) - [B, heads, N_cond, head_dim]
+            self,
+            x: torch.Tensor,  # [B, N_noise, C] - only noise tokens
+            latent_shape: tuple,  # (T_noise, H, W) - shape for noise only
+            num_cond_latents: int,  # Number of conditioning latent frames
+            kv_cache: tuple,  # (k_cond, v_cond) - [B, heads, N_cond, head_dim]
     ) -> torch.Tensor:
         """
         Forward using cached K/V from conditioning frames.
@@ -476,30 +472,30 @@ class LongCatSelfAttention(nn.Module):
         # 1. Pad Q with dummy tokens matching k_cache shape
         # 2. Apply RoPE to full sequence (T_cond + T_noise)
         # 3. Extract only the noise portion of Q
-        
+
         # Create dummy Q padding to fill conditioning positions
         # k_cache shape: [B, heads, N_cond, head_dim]
         q_padding = torch.cat([torch.empty_like(k_cache), q_rope], dim=2).contiguous()
-        
+
         # Concatenate cached K with noise K for RoPE
         k_full = torch.cat([k_cache, k_rope], dim=2)
         v_full = torch.cat([v_cache, v], dim=2)
-        
+
         # Apply RoPE to full sequence (includes both cond and noise positions)
         # Grid size: (T_cond + T_noise, H, W)
         full_T = num_cond_latents + T
         q_padding, k_full = self.rope_3d(q_padding, k_full, grid_size=(full_T, H, W))
-        
+
         # Extract only the noise portion of Q (last N tokens)
         q_rope = q_padding[:, :, -N:].contiguous()
 
         # Run attention: Q_noise attends to full K/V (cond + noise)
-        out = torch.nn.functional.scaled_dot_product_attention(
-            q_rope, k_full, v_full,
-            attn_mask=None,
-            dropout_p=0.0,
-            is_causal=False
-        )  # [B, heads, N_noise, head_dim]
+        out = torch.nn.functional.scaled_dot_product_attention(q_rope,
+                                                               k_full,
+                                                               v_full,
+                                                               attn_mask=None,
+                                                               dropout_p=0.0,
+                                                               is_causal=False)  # [B, heads, N_noise, head_dim]
 
         # Transpose back: [B, N_noise, heads, head_dim]
         out = out.transpose(1, 2)
@@ -549,13 +545,12 @@ class LongCatCrossAttention(nn.Module):
         )
 
     def forward(
-        self,
-        x: torch.Tensor,              # [B, N_img, C]
-        context: torch.Tensor,        # [B, N_text, C]
-        latent_shape: tuple = None,   # (T, H, W) - needed for I2V
-        num_cond_latents: int = 0,    # Number of conditioning latent frames (for I2V)
-        **kwargs
-    ) -> torch.Tensor:
+            self,
+            x: torch.Tensor,  # [B, N_img, C]
+            context: torch.Tensor,  # [B, N_text, C]
+            latent_shape: tuple = None,  # (T, H, W) - needed for I2V
+            num_cond_latents: int = 0,  # Number of conditioning latent frames (for I2V)
+            **kwargs) -> torch.Tensor:
         """
         Forward pass for cross-attention (standard implementation).
         
@@ -575,15 +570,15 @@ class LongCatCrossAttention(nn.Module):
         if num_cond_latents > 0 and latent_shape is not None:
             T, H, W = latent_shape
             num_cond_tokens = num_cond_latents * (N_img // T)
-            
+
             # Only process noise tokens
             x_noise = x[:, num_cond_tokens:]  # [B, N_noise, C]
-            
+
             # Project Q, K, V for noise tokens only
             q, _ = self.to_q(x_noise)
             k, _ = self.to_k(context)
             v, _ = self.to_v(context)
-            
+
             N_text = context.shape[1]
             N_noise = x_noise.shape[1]
 
@@ -600,14 +595,10 @@ class LongCatCrossAttention(nn.Module):
             out_noise = self.attn(q, k, v)  # [B, N_noise, num_heads, head_dim]
             out_noise = out_noise.reshape(B, N_noise, C)
             out_noise, _ = self.to_out(out_noise)
-            
+
             # Conditioned tokens get zero output
-            out_cond = torch.zeros(
-                (B, num_cond_tokens, C), 
-                dtype=out_noise.dtype, 
-                device=out_noise.device
-            )
-            
+            out_cond = torch.zeros((B, num_cond_tokens, C), dtype=out_noise.dtype, device=out_noise.device)
+
             # Merge
             out = torch.cat([out_cond, out_noise], dim=1)
             return out
@@ -617,7 +608,7 @@ class LongCatCrossAttention(nn.Module):
         q, _ = self.to_q(x)
         k, _ = self.to_k(context)
         v, _ = self.to_v(context)
-        
+
         N_text = context.shape[1]
 
         # Reshape to heads
@@ -643,6 +634,7 @@ class LongCatCrossAttention(nn.Module):
 # ============================================================================
 # Feed-Forward Network
 # ============================================================================
+
 
 class LongCatSwiGLUFFN(nn.Module):
     """
@@ -681,6 +673,7 @@ class LongCatSwiGLUFFN(nn.Module):
 # Modulation Utilities
 # ============================================================================
 
+
 def modulate_fp32(norm: nn.Module, x: torch.Tensor, shift: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
     """
     Apply modulation in FP32 for numerical stability.
@@ -688,21 +681,22 @@ def modulate_fp32(norm: nn.Module, x: torch.Tensor, shift: torch.Tensor, scale: 
     Converts inputs to FP32 for the modulation operation, then casts back.
     """
     orig_dtype = x.dtype
-    
+
     # Convert to FP32 for numerical stability
     shift_fp32 = shift.float()
     scale_fp32 = scale.float()
-    
+
     # Normalize and modulate in FP32
     x_norm = norm(x.to(torch.float32))
     x_mod = x_norm * (scale_fp32 + 1) + shift_fp32
-    
+
     return x_mod.to(orig_dtype)
 
 
 # ============================================================================
 # Transformer Block
 # ============================================================================
+
 
 class LongCatTransformerBlock(nn.Module):
     """
@@ -771,17 +765,16 @@ class LongCatTransformerBlock(nn.Module):
         )
 
     def forward(
-        self,
-        x: torch.Tensor,              # [B, N, C]
-        context: torch.Tensor,        # [B, N_text, C]
-        t: torch.Tensor,              # [B, T, C_t]
-        latent_shape: tuple,          # (T, H, W)
-        num_cond_latents: int = 0,    # Number of conditioning latent frames (for I2V)
-        return_kv: bool = False,      # Return K/V for caching
-        kv_cache: tuple | None = None,  # Pre-computed K/V cache
-        skip_crs_attn: bool = False,  # Skip cross-attention (for cache init)
-        **kwargs
-    ) -> torch.Tensor | tuple:
+            self,
+            x: torch.Tensor,  # [B, N, C]
+            context: torch.Tensor,  # [B, N_text, C]
+            t: torch.Tensor,  # [B, T, C_t]
+            latent_shape: tuple,  # (T, H, W)
+            num_cond_latents: int = 0,  # Number of conditioning latent frames (for I2V)
+            return_kv: bool = False,  # Return K/V for caching
+            kv_cache: tuple | None = None,  # Pre-computed K/V cache
+            skip_crs_attn: bool = False,  # Skip cross-attention (for cache init)
+            **kwargs) -> torch.Tensor | tuple:
         """
         Forward pass with AdaLN modulation.
         
@@ -824,7 +817,7 @@ class LongCatTransformerBlock(nn.Module):
             kv_cache_new = None  # Don't return cache when using cache
         else:
             attn_result = self.self_attn(
-                x_norm, 
+                x_norm,
                 latent_shape=latent_shape,
                 num_cond_latents=num_cond_latents,
                 return_kv=return_kv,
@@ -845,12 +838,10 @@ class LongCatTransformerBlock(nn.Module):
             x_norm_cross = self.norm_cross(x)
             # When using KV cache, no need for num_cond_latents in cross-attn
             cross_num_cond = 0 if kv_cache is not None else num_cond_latents
-            cross_out = self.cross_attn(
-                x_norm_cross, 
-                context,
-                latent_shape=latent_shape,
-                num_cond_latents=cross_num_cond
-            )
+            cross_out = self.cross_attn(x_norm_cross,
+                                        context,
+                                        latent_shape=latent_shape,
+                                        num_cond_latents=cross_num_cond)
             x = x + cross_out
 
         # === FFN ===
@@ -872,6 +863,7 @@ class LongCatTransformerBlock(nn.Module):
 # ============================================================================
 # Final Layer
 # ============================================================================
+
 
 class FinalLayer(nn.Module):
     """
@@ -940,6 +932,7 @@ class FinalLayer(nn.Module):
 # Main Model
 # ============================================================================
 
+
 class LongCatTransformer3DModel(BaseDiT):
     """
     Native LongCat Video Transformer using FastVideo layers.
@@ -1004,8 +997,7 @@ class LongCatTransformer3DModel(BaseDiT):
                 mlp_ratio=self.mlp_ratio,
                 adaln_tembed_dim=config.adaln_tembed_dim,
                 config=config,
-            )
-            for _ in range(self.depth)
+            ) for _ in range(self.depth)
         ])
 
         # Output projection
@@ -1020,28 +1012,27 @@ class LongCatTransformer3DModel(BaseDiT):
         """Enable BSA for all self-attention layers."""
         for block in self.blocks:
             block.self_attn.enable_bsa = True
-    
+
     def disable_bsa(self):
         """Disable BSA for all self-attention layers."""
         for block in self.blocks:
             block.self_attn.enable_bsa = False
 
     def forward(
-        self,
-        hidden_states: torch.Tensor,           # [B, C, T, H, W]
-        encoder_hidden_states: torch.Tensor | list[torch.Tensor],   # [B, N_text, C_text]
-        timestep: torch.LongTensor,            # [B] or [B, T]
-        encoder_attention_mask: torch.Tensor | None = None,  # [B, N_text]
-        encoder_hidden_states_image: torch.Tensor | list[torch.Tensor] | None = None,
-        guidance: float | None = None,         # Unused, for API compatibility
-        num_cond_latents: int = 0,             # For I2V: number of conditioning latent frames
-        # === KV Cache Parameters ===
-        return_kv: bool = False,               # If True, return (output, kv_cache_dict)
-        kv_cache_dict: dict | None = None,     # Pre-computed {block_idx: (k, v)}
-        skip_crs_attn: bool = False,           # Skip cross-attention (for cache init)
-        offload_kv_cache: bool = False,        # Move cache to CPU after compute
-        **kwargs
-    ) -> torch.Tensor | tuple[torch.Tensor, dict]:
+            self,
+            hidden_states: torch.Tensor,  # [B, C, T, H, W]
+            encoder_hidden_states: torch.Tensor | list[torch.Tensor],  # [B, N_text, C_text]
+            timestep: torch.LongTensor,  # [B] or [B, T]
+            encoder_attention_mask: torch.Tensor | None = None,  # [B, N_text]
+            encoder_hidden_states_image: torch.Tensor | list[torch.Tensor] | None = None,
+            guidance: float | None = None,  # Unused, for API compatibility
+            num_cond_latents: int = 0,  # For I2V: number of conditioning latent frames
+            # === KV Cache Parameters ===
+        return_kv: bool = False,  # If True, return (output, kv_cache_dict)
+            kv_cache_dict: dict | None = None,  # Pre-computed {block_idx: (k, v)}
+            skip_crs_attn: bool = False,  # Skip cross-attention (for cache init)
+            offload_kv_cache: bool = False,  # Move cache to CPU after compute
+            **kwargs) -> torch.Tensor | tuple[torch.Tensor, dict]:
         """
         Forward pass with FastVideo parameter ordering.
         
@@ -1074,33 +1065,33 @@ class LongCatTransformer3DModel(BaseDiT):
         # Expand timestep from [B] to [B, T] if needed
         if timestep.ndim == 1:
             timestep = timestep.unsqueeze(1).expand(-1, N_t)  # [B, T]
-        
+
         t = self.time_embedder(timestep.flatten(), latent_shape=(N_t, N_h, N_w))
         if t.ndim == 2:
             t = t.reshape(B, N_t, -1)  # [B, T, C_t]
 
         # 3. Caption embedding (standard format, no compaction)
-        context = self.caption_embedder(
-            encoder_hidden_states,
-            encoder_attention_mask=encoder_attention_mask
-        )  # [B, N_text, C]
+        context = self.caption_embedder(encoder_hidden_states,
+                                        encoder_attention_mask=encoder_attention_mask)  # [B, N_text, C]
 
         # 4. Transformer blocks with optional KV cache
         kv_cache_dict_ret = {} if return_kv else None
-        
+
         for i, block in enumerate(self.blocks):
             # Get cache for this block if available
             block_kv_cache = kv_cache_dict.get(i, None) if kv_cache_dict else None
-            
+
             block_out = block(
-                x, context, t,
+                x,
+                context,
+                t,
                 latent_shape=(N_t, N_h, N_w),
                 num_cond_latents=num_cond_latents,
                 return_kv=return_kv,
                 kv_cache=block_kv_cache,
                 skip_crs_attn=skip_crs_attn,
             )
-            
+
             if return_kv:
                 x, kv_cache = block_out
                 # Store cache
@@ -1144,6 +1135,7 @@ class LongCatTransformer3DModel(BaseDiT):
             C_out=self.out_channels,
         )
         return x
+
 
 # Entry point for model registry
 EntryClass = LongCatTransformer3DModel

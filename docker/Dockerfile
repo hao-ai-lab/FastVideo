@@ -68,7 +68,7 @@ ARG FLASH_ATTN_WHEEL_RELEASE_ARM64=https://github.com/mjun0812/flash-attention-p
 # cutlass-4.4 `cute.core.ThrMma` API, which crashes on the cutlass-dsl 4.5 that
 # flashinfer/quack pull in. After the wheel install we overlay this cutlass-4.5-safe
 # upstream cute (flash-attn-4) so the image runs FA4 instead of the FA2 fallback.
-ARG FA4_CUTE_REF=82d6441eec5d4dfec120153db2c0145ae855a083
+ARG FA4_CUTE_REF=14c377950125c70b7a9dabf9c561fca53715ac7d
 
 # Provided automatically by BuildKit/buildx (e.g. "amd64" / "arm64") and used to
 # select the prebuilt flash-attn wheel. Empty under a plain `docker build` without
@@ -186,15 +186,40 @@ RUN --mount=type=cache,target=/opt/uv/cache \
 
 COPY . .
 
-# Install FastVideo Unified Kernel exactly once. build.sh initializes only its
-# CUTLASS/ThunderKittens submodules, then compiles for TORCH_CUDA_ARCH_LIST
-# (default Hopper sm_90a) without requiring a live GPU.
+# Build immutable FastVideo kernel wheels for the published image. The requested
+# architecture remains installed for normal image users; amd64 images also carry
+# an SM89 artifact so the predominant L40S Modal lanes can reuse it exactly.
+ARG FASTVIDEO_KERNEL_PREBUILT_DIR=/opt/fastvideo-kernel-prebuilt
 RUN --mount=type=cache,target=/opt/uv/cache \
     source $HOME/.local/bin/env && \
     source /opt/venv/bin/activate && \
+    default_arch="${TORCH_CUDA_ARCH_LIST}" && \
+    default_wheel_dir="${FASTVIDEO_KERNEL_PREBUILT_DIR}/${default_arch}" && \
+    export TORCH_CUDA_ARCH_LIST="${default_arch}" && \
     cd fastvideo-kernel && \
-    CMAKE_BUILD_PARALLEL_LEVEL=${CMAKE_BUILD_PARALLEL_LEVEL} \
-    TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST} ./build.sh
+    CMAKE_ARGS= CMAKE_BUILD_PARALLEL_LEVEL=${CMAKE_BUILD_PARALLEL_LEVEL} \
+    ./build.sh --wheel-dir "${default_wheel_dir}" && \
+    cd /FastVideo && \
+    CMAKE_ARGS= python fastvideo/tests/modal/kernel_build_cache.py write-build-info \
+        --wheel-dir "${default_wheel_dir}" \
+        --output "${default_wheel_dir}/metadata.json" && \
+    if [[ "${TARGETARCH:-amd64}" == "amd64" && "${default_arch}" != "8.9" ]]; then \
+        export TORCH_CUDA_ARCH_LIST=8.9 && \
+        l40s_wheel_dir="${FASTVIDEO_KERNEL_PREBUILT_DIR}/8.9" && \
+        cd /FastVideo/fastvideo-kernel && \
+        CMAKE_ARGS= CMAKE_BUILD_PARALLEL_LEVEL=${CMAKE_BUILD_PARALLEL_LEVEL} \
+        ./build.sh --wheel-dir "${l40s_wheel_dir}" && \
+        cd /FastVideo && \
+        CMAKE_ARGS= python fastvideo/tests/modal/kernel_build_cache.py write-build-info \
+            --wheel-dir "${l40s_wheel_dir}" \
+            --output "${l40s_wheel_dir}/metadata.json"; \
+    fi && \
+    export TORCH_CUDA_ARCH_LIST="${default_arch}" && \
+    default_wheel="$(find "${default_wheel_dir}" -maxdepth 1 -type f \
+        \( -name 'fastvideo_kernel-*.whl' -o -name 'fastvideo-kernel-*.whl' \) \
+        | sort | tail -n 1)" && \
+    uv pip install "${default_wheel}" \
+        --reinstall-package fastvideo-kernel --no-deps
 
 # Install FastVideo itself (editable) now that the source is present, and set up
 # shell configuration. Dependencies and the local kernel are already installed,

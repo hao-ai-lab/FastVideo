@@ -15,6 +15,7 @@ from fastvideo.configs.models.dits import Kandinsky5VideoConfig
 from fastvideo.layers.layernorm import LayerNormScaleShift
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.mlp import MLP
+from fastvideo.layers.quantization import QuantizationConfig
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.base import BaseDiT
 from fastvideo.platforms import AttentionBackendEnum
@@ -30,11 +31,11 @@ _ARCH_CONFIG_DEFAULTS = Kandinsky5VideoConfig().arch_config
 
 
 def _build_rotary_freqs(dim: int, max_period: float) -> torch.Tensor:
-    return torch.exp(-math.log(max_period) * torch.arange(
-        start=0, end=dim, dtype=torch.float32) / dim)
+    return torch.exp(-math.log(max_period) * torch.arange(start=0, end=dim, dtype=torch.float32) / dim)
 
 
-def local_patching(x: torch.Tensor, shape: tuple[int, int, int, int],
+def local_patching(x: torch.Tensor,
+                   shape: tuple[int, int, int, int],
                    group_size: tuple[int, int, int],
                    dim: int = 0) -> torch.Tensor:
     batch_size, duration, height, width = shape
@@ -63,7 +64,8 @@ def local_patching(x: torch.Tensor, shape: tuple[int, int, int, int],
     return x
 
 
-def local_merge(x: torch.Tensor, shape: tuple[int, int, int, int],
+def local_merge(x: torch.Tensor,
+                shape: tuple[int, int, int, int],
                 group_size: tuple[int, int, int],
                 dim: int = 0) -> torch.Tensor:
     batch_size, duration, height, width = shape
@@ -88,15 +90,11 @@ def local_merge(x: torch.Tensor, shape: tuple[int, int, int, int],
         dim + 5,
         *range(dim + 6, len(x.shape)),
     )
-    x = x.flatten(dim, dim + 1).flatten(dim + 1, dim + 2).flatten(
-        dim + 2, dim + 3)
+    x = x.flatten(dim, dim + 1).flatten(dim + 1, dim + 2).flatten(dim + 2, dim + 3)
     return x
 
 
-def fractal_flatten(x: torch.Tensor,
-                    rope: torch.Tensor,
-                    shape: tuple[int, int, int, int],
-                    block_mask: bool = False):
+def fractal_flatten(x: torch.Tensor, rope: torch.Tensor, shape: tuple[int, int, int, int], block_mask: bool = False):
     if block_mask:
         pixel_size = FRACTAL_PIXEL_SIZE
         x = local_patching(x, shape, (1, pixel_size, pixel_size), dim=1)
@@ -109,9 +107,7 @@ def fractal_flatten(x: torch.Tensor,
     return x, rope
 
 
-def fractal_unflatten(x: torch.Tensor,
-                      shape: tuple[int, int, int, int],
-                      block_mask: bool = False):
+def fractal_unflatten(x: torch.Tensor, shape: tuple[int, int, int, int], block_mask: bool = False):
     if block_mask:
         pixel_size = FRACTAL_PIXEL_SIZE
         x = x.reshape(x.shape[0], -1, pixel_size**2, *x.shape[2:])
@@ -123,8 +119,7 @@ def fractal_unflatten(x: torch.Tensor,
 
 class Kandinsky5TimeEmbeddings(nn.Module):
 
-    def __init__(self, model_dim: int, time_dim: int,
-                 max_period: float = 10000.0):
+    def __init__(self, model_dim: int, time_dim: int, max_period: float = 10000.0):
         super().__init__()
         assert model_dim % 2 == 0
         self.model_dim = model_dim
@@ -158,12 +153,10 @@ class Kandinsky5TextEmbeddings(nn.Module):
 
 class Kandinsky5VisualEmbeddings(nn.Module):
 
-    def __init__(self, visual_dim: int, model_dim: int,
-                 patch_size: tuple[int, int, int]):
+    def __init__(self, visual_dim: int, model_dim: int, patch_size: tuple[int, int, int]):
         super().__init__()
         self.patch_size = patch_size
-        self.in_layer = ReplicatedLinear(math.prod(patch_size) * visual_dim,
-                                         model_dim)
+        self.in_layer = ReplicatedLinear(math.prod(patch_size) * visual_dim, model_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         batch_size, duration, height, width, dim = x.shape
@@ -183,10 +176,7 @@ class Kandinsky5VisualEmbeddings(nn.Module):
 
 class Kandinsky5RoPE1D(nn.Module):
 
-    def __init__(self,
-                 dim: int,
-                 max_pos: int = 1024,
-                 max_period: float = 10000.0):
+    def __init__(self, dim: int, max_pos: int = 1024, max_period: float = 10000.0):
         super().__init__()
         self.max_period = max_period
         self.dim = dim
@@ -215,20 +205,16 @@ class Kandinsky5RoPE3D(nn.Module):
         self.max_pos = max_pos
         self.max_period = max_period
 
-        for i, (axes_dim, ax_max_pos) in enumerate(
-                zip(axes_dims, max_pos, strict=True)):
+        for i, (axes_dim, ax_max_pos) in enumerate(zip(axes_dims, max_pos, strict=True)):
             freq = _build_rotary_freqs(axes_dim // 2, max_period)
             pos = torch.arange(ax_max_pos, dtype=freq.dtype)
-            self.register_buffer(f"args_{i}",
-                                 torch.outer(pos, freq),
-                                 persistent=False)
+            self.register_buffer(f"args_{i}", torch.outer(pos, freq), persistent=False)
 
     def forward(self,
                 shape: tuple[int, int, int, int],
                 pos: tuple[torch.Tensor, torch.Tensor, torch.Tensor]
                 | list[torch.Tensor],
-                scale_factor: tuple[float, float,
-                                    float] = (1.0, 1.0, 1.0)):
+                scale_factor: tuple[float, float, float] = (1.0, 1.0, 1.0)):
         batch_size, duration, height, width = shape
         args_t = self.args_0[pos[0]] / scale_factor[0]
         args_h = self.args_1[pos[1]] / scale_factor[1]
@@ -236,12 +222,9 @@ class Kandinsky5RoPE3D(nn.Module):
 
         args = torch.cat(
             [
-                args_t.view(1, duration, 1, 1, -1).repeat(
-                    batch_size, 1, height, width, 1),
-                args_h.view(1, 1, height, 1, -1).repeat(
-                    batch_size, duration, 1, width, 1),
-                args_w.view(1, 1, 1, width, -1).repeat(
-                    batch_size, duration, height, 1, 1),
+                args_t.view(1, duration, 1, 1, -1).repeat(batch_size, 1, height, width, 1),
+                args_h.view(1, 1, height, 1, -1).repeat(batch_size, duration, 1, width, 1),
+                args_w.view(1, 1, 1, width, -1).repeat(batch_size, duration, height, 1, 1),
             ],
             dim=-1,
         )
@@ -257,9 +240,7 @@ class Kandinsky5Modulation(nn.Module):
     def __init__(self, time_dim: int, model_dim: int, num_params: int):
         super().__init__()
         self.activation = nn.SiLU()
-        self.out_layer = ReplicatedLinear(time_dim,
-                                          num_params * model_dim,
-                                          bias=True)
+        self.out_layer = ReplicatedLinear(time_dim, num_params * model_dim, bias=True)
         self.out_layer.weight.data.zero_()
         self.out_layer.bias.data.zero_()
 
@@ -285,6 +266,7 @@ class Kandinsky5Attention(nn.Module):
         supported_attention_backends: tuple[AttentionBackendEnum, ...] | None,
         prefix: str = "",
         use_nabla: bool = False,
+        quant_config: QuantizationConfig | None = None,
     ):
         super().__init__()
         assert num_channels % head_dim == 0
@@ -293,20 +275,24 @@ class Kandinsky5Attention(nn.Module):
         self.to_query = ReplicatedLinear(num_channels,
                                          num_channels,
                                          bias=True,
+                                         quant_config=quant_config,
                                          prefix=f"{prefix}.to_query")
         self.to_key = ReplicatedLinear(num_channels,
                                        num_channels,
                                        bias=True,
+                                       quant_config=quant_config,
                                        prefix=f"{prefix}.to_key")
         self.to_value = ReplicatedLinear(num_channels,
                                          num_channels,
                                          bias=True,
+                                         quant_config=quant_config,
                                          prefix=f"{prefix}.to_value")
         self.query_norm = nn.RMSNorm(head_dim)
         self.key_norm = nn.RMSNorm(head_dim)
         self.out_layer = ReplicatedLinear(num_channels,
                                           num_channels,
                                           bias=True,
+                                          quant_config=quant_config,
                                           prefix=f"{prefix}.out_layer")
         self.local_attention = LocalAttention(
             num_heads=self.num_heads,
@@ -389,12 +375,9 @@ class Kandinsky5Attention(nn.Module):
 
                 query_shape = query.shape[:-2]
                 key_shape = key.shape[:-2]
-                query = query.reshape(query_shape[0], -1, self.num_heads,
-                                      query.shape[-1]).transpose(1, 2)
-                key = key.reshape(key_shape[0], -1, self.num_heads,
-                                  key.shape[-1]).transpose(1, 2)
-                value = value.reshape(key_shape[0], -1, self.num_heads,
-                                      value.shape[-1]).transpose(1, 2)
+                query = query.reshape(query_shape[0], -1, self.num_heads, query.shape[-1]).transpose(1, 2)
+                key = key.reshape(key_shape[0], -1, self.num_heads, key.shape[-1]).transpose(1, 2)
+                value = value.reshape(key_shape[0], -1, self.num_heads, value.shape[-1]).transpose(1, 2)
                 hidden_states = F.scaled_dot_product_attention(
                     query,
                     key,
@@ -402,9 +385,8 @@ class Kandinsky5Attention(nn.Module):
                     attn_mask=None,
                     is_causal=False,
                 )
-                hidden_states = hidden_states.transpose(1, 2).reshape(
-                    *query_shape, self.num_heads, -1)
-                
+                hidden_states = hidden_states.transpose(1, 2).reshape(*query_shape, self.num_heads, -1)
+
         hidden_states = hidden_states.flatten(-2, -1)
 
         hidden_states, _ = self.out_layer(hidden_states)
@@ -413,9 +395,9 @@ class Kandinsky5Attention(nn.Module):
 
 class Kandinsky5FeedForward(nn.Module):
 
-    def __init__(self, dim: int, ff_dim: int):
+    def __init__(self, dim: int, ff_dim: int, prefix: str = "", quant_config: QuantizationConfig | None = None):
         super().__init__()
-        self.mlp = MLP(dim, ff_dim, bias=False, act_type="gelu")
+        self.mlp = MLP(dim, ff_dim, bias=False, act_type="gelu", quant_config=quant_config, prefix=f"{prefix}.mlp")
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.mlp(x)
@@ -423,26 +405,17 @@ class Kandinsky5FeedForward(nn.Module):
 
 class Kandinsky5OutLayer(nn.Module):
 
-    def __init__(self, model_dim: int, time_dim: int, visual_dim: int,
-                 patch_size: tuple[int, int, int]):
+    def __init__(self, model_dim: int, time_dim: int, visual_dim: int, patch_size: tuple[int, int, int]):
         super().__init__()
         self.patch_size = patch_size
         self.modulation = Kandinsky5Modulation(time_dim, model_dim, 2)
-        self.norm = nn.LayerNorm(model_dim,
-                                 eps=1e-5,
-                                 elementwise_affine=False)
-        self.out_layer = ReplicatedLinear(model_dim,
-                                          math.prod(patch_size) * visual_dim,
-                                          bias=True)
+        self.norm = nn.LayerNorm(model_dim, eps=1e-5, elementwise_affine=False)
+        self.out_layer = ReplicatedLinear(model_dim, math.prod(patch_size) * visual_dim, bias=True)
 
-    def forward(self, visual_embed: torch.Tensor,
-                time_embed: torch.Tensor) -> torch.Tensor:
-        shift, scale = torch.chunk(
-            self.modulation(time_embed).unsqueeze(dim=1), 2, dim=-1)
-        visual_embed = (
-            self.norm(visual_embed.float()) *
-            (scale.float()[:, None, None] + 1.0) +
-            shift.float()[:, None, None]).type_as(visual_embed)
+    def forward(self, visual_embed: torch.Tensor, time_embed: torch.Tensor) -> torch.Tensor:
+        shift, scale = torch.chunk(self.modulation(time_embed).unsqueeze(dim=1), 2, dim=-1)
+        visual_embed = (self.norm(visual_embed.float()) * (scale.float()[:, None, None] + 1.0) +
+                        shift.float()[:, None, None]).type_as(visual_embed)
 
         x, _ = self.out_layer(visual_embed)
 
@@ -456,59 +429,56 @@ class Kandinsky5OutLayer(nn.Module):
             self.patch_size[0],
             self.patch_size[1],
             self.patch_size[2],
-        ).permute(0, 1, 5, 2, 6, 3, 7, 4).flatten(1, 2).flatten(
-            2, 3).flatten(3, 4))
+        ).permute(0, 1, 5, 2, 6, 3, 7, 4).flatten(1, 2).flatten(2, 3).flatten(3, 4))
         return x
 
 
 class Kandinsky5TransformerEncoderBlock(nn.Module):
 
-    def __init__(self, model_dim: int, time_dim: int, ff_dim: int,
+    def __init__(self,
+                 model_dim: int,
+                 time_dim: int,
+                 ff_dim: int,
                  head_dim: int,
                  supported_attention_backends: tuple[AttentionBackendEnum, ...]
                  | None = None,
-                 prefix: str = ""):
+                 prefix: str = "",
+                 quant_config: QuantizationConfig | None = None):
         super().__init__()
         self.text_modulation = Kandinsky5Modulation(time_dim, model_dim, 6)
 
-        self.self_attention_norm = LayerNormScaleShift(
-            model_dim,
-            norm_type="layer",
-            eps=1e-5,
-            elementwise_affine=False,
-            dtype=torch.float32,
-            compute_dtype=torch.float32)
-        self.self_attention = Kandinsky5Attention(
-            model_dim,
-            head_dim,
-            supported_attention_backends=supported_attention_backends,
-            prefix=f"{prefix}.self_attention")
+        self.self_attention_norm = LayerNormScaleShift(model_dim,
+                                                       norm_type="layer",
+                                                       eps=1e-5,
+                                                       elementwise_affine=False,
+                                                       dtype=torch.float32,
+                                                       compute_dtype=torch.float32)
+        self.self_attention = Kandinsky5Attention(model_dim,
+                                                  head_dim,
+                                                  supported_attention_backends=supported_attention_backends,
+                                                  prefix=f"{prefix}.self_attention",
+                                                  quant_config=quant_config)
 
-        self.feed_forward_norm = LayerNormScaleShift(
-            model_dim,
-            norm_type="layer",
-            eps=1e-5,
-            elementwise_affine=False,
-            dtype=torch.float32,
-            compute_dtype=torch.float32)
-        self.feed_forward = Kandinsky5FeedForward(model_dim, ff_dim)
+        self.feed_forward_norm = LayerNormScaleShift(model_dim,
+                                                     norm_type="layer",
+                                                     eps=1e-5,
+                                                     elementwise_affine=False,
+                                                     dtype=torch.float32,
+                                                     compute_dtype=torch.float32)
+        self.feed_forward = Kandinsky5FeedForward(model_dim,
+                                                  ff_dim,
+                                                  prefix=f"{prefix}.feed_forward",
+                                                  quant_config=quant_config)
 
-    def forward(self, x: torch.Tensor, time_embed: torch.Tensor,
-                rope: torch.Tensor) -> torch.Tensor:
-        self_attn_params, ff_params = torch.chunk(
-            self.text_modulation(time_embed).unsqueeze(dim=1), 2, dim=-1)
+    def forward(self, x: torch.Tensor, time_embed: torch.Tensor, rope: torch.Tensor) -> torch.Tensor:
+        self_attn_params, ff_params = torch.chunk(self.text_modulation(time_embed).unsqueeze(dim=1), 2, dim=-1)
         shift, scale, gate = torch.chunk(self_attn_params, 3, dim=-1)
-        out = self.self_attention_norm(x.float(),
-                                       shift=shift,
-                                       scale=scale,
-                                       convert_modulation_dtype=True).type_as(x)
+        out = self.self_attention_norm(x.float(), shift=shift, scale=scale, convert_modulation_dtype=True).type_as(x)
         out = self.self_attention(out, rotary_emb=rope)
         x = (x.float() + gate.float() * out.float()).type_as(x)
 
         ff_shift, ff_scale, ff_gate = torch.chunk(ff_params, 3, dim=-1)
-        out = self.feed_forward_norm(x.float(),
-                                     shift=ff_shift,
-                                     scale=ff_scale,
+        out = self.feed_forward_norm(x.float(), shift=ff_shift, scale=ff_scale,
                                      convert_modulation_dtype=True).type_as(x)
         out = self.feed_forward(out)
         x = (x.float() + ff_gate.float() * out.float()).type_as(x)
@@ -518,87 +488,79 @@ class Kandinsky5TransformerEncoderBlock(nn.Module):
 
 class Kandinsky5TransformerDecoderBlock(nn.Module):
 
-    def __init__(self, model_dim: int, time_dim: int, ff_dim: int,
+    def __init__(self,
+                 model_dim: int,
+                 time_dim: int,
+                 ff_dim: int,
                  head_dim: int,
                  supported_attention_backends: tuple[AttentionBackendEnum, ...]
                  | None = None,
                  prefix: str = "",
-                 use_nabla: bool = False):
+                 use_nabla: bool = False,
+                 quant_config: QuantizationConfig | None = None):
         super().__init__()
         self.visual_modulation = Kandinsky5Modulation(time_dim, model_dim, 9)
 
-        self.self_attention_norm = LayerNormScaleShift(
-            model_dim,
-            norm_type="layer",
-            eps=1e-5,
-            elementwise_affine=False,
-            dtype=torch.float32,
-            compute_dtype=torch.float32)
-        self.self_attention = Kandinsky5Attention(
-            model_dim,
-            head_dim,
-            supported_attention_backends=supported_attention_backends,
-            prefix=f"{prefix}.self_attention",
-            use_nabla=use_nabla)
+        self.self_attention_norm = LayerNormScaleShift(model_dim,
+                                                       norm_type="layer",
+                                                       eps=1e-5,
+                                                       elementwise_affine=False,
+                                                       dtype=torch.float32,
+                                                       compute_dtype=torch.float32)
+        self.self_attention = Kandinsky5Attention(model_dim,
+                                                  head_dim,
+                                                  supported_attention_backends=supported_attention_backends,
+                                                  prefix=f"{prefix}.self_attention",
+                                                  use_nabla=use_nabla,
+                                                  quant_config=quant_config)
 
-        self.cross_attention_norm = LayerNormScaleShift(
-            model_dim,
-            norm_type="layer",
-            eps=1e-5,
-            elementwise_affine=False,
-            dtype=torch.float32,
-            compute_dtype=torch.float32)
-        self.cross_attention = Kandinsky5Attention(
-            model_dim,
-            head_dim,
-            supported_attention_backends=supported_attention_backends,
-            prefix=f"{prefix}.cross_attention")
+        self.cross_attention_norm = LayerNormScaleShift(model_dim,
+                                                        norm_type="layer",
+                                                        eps=1e-5,
+                                                        elementwise_affine=False,
+                                                        dtype=torch.float32,
+                                                        compute_dtype=torch.float32)
+        self.cross_attention = Kandinsky5Attention(model_dim,
+                                                   head_dim,
+                                                   supported_attention_backends=supported_attention_backends,
+                                                   prefix=f"{prefix}.cross_attention",
+                                                   quant_config=quant_config)
 
-        self.feed_forward_norm = LayerNormScaleShift(
-            model_dim,
-            norm_type="layer",
-            eps=1e-5,
-            elementwise_affine=False,
-            dtype=torch.float32,
-            compute_dtype=torch.float32)
-        self.feed_forward = Kandinsky5FeedForward(model_dim, ff_dim)
+        self.feed_forward_norm = LayerNormScaleShift(model_dim,
+                                                     norm_type="layer",
+                                                     eps=1e-5,
+                                                     elementwise_affine=False,
+                                                     dtype=torch.float32,
+                                                     compute_dtype=torch.float32)
+        self.feed_forward = Kandinsky5FeedForward(model_dim,
+                                                  ff_dim,
+                                                  prefix=f"{prefix}.feed_forward",
+                                                  quant_config=quant_config)
 
-    def forward(self, visual_embed: torch.Tensor, text_embed: torch.Tensor,
-                time_embed: torch.Tensor, rope: torch.Tensor,
-                sparse_params: dict[str, Any] | None) -> torch.Tensor:
+    def forward(self, visual_embed: torch.Tensor, text_embed: torch.Tensor, time_embed: torch.Tensor,
+                rope: torch.Tensor, sparse_params: dict[str, Any] | None) -> torch.Tensor:
         self_attn_params, cross_attn_params, ff_params = torch.chunk(
             self.visual_modulation(time_embed).unsqueeze(dim=1), 3, dim=-1)
 
-        self_shift, self_scale, self_gate = torch.chunk(self_attn_params,
-                                                        3,
-                                                        dim=-1)
+        self_shift, self_scale, self_gate = torch.chunk(self_attn_params, 3, dim=-1)
         visual_out = self.self_attention_norm(
             visual_embed.float(),
             shift=self_shift,
             scale=self_scale,
             convert_modulation_dtype=True,
         ).type_as(visual_embed)
-        visual_out = self.self_attention(visual_out,
-                                         rotary_emb=rope,
-                                         sparse_params=sparse_params)
-        visual_embed = (visual_embed.float() +
-                        self_gate.float() * visual_out.float()).type_as(
-                            visual_embed)
+        visual_out = self.self_attention(visual_out, rotary_emb=rope, sparse_params=sparse_params)
+        visual_embed = (visual_embed.float() + self_gate.float() * visual_out.float()).type_as(visual_embed)
 
-        cross_shift, cross_scale, cross_gate = torch.chunk(cross_attn_params,
-                                                           3,
-                                                           dim=-1)
+        cross_shift, cross_scale, cross_gate = torch.chunk(cross_attn_params, 3, dim=-1)
         visual_out = self.cross_attention_norm(
             visual_embed.float(),
             shift=cross_shift,
             scale=cross_scale,
             convert_modulation_dtype=True,
         ).type_as(visual_embed)
-        visual_out = self.cross_attention(
-            visual_out, encoder_hidden_states=text_embed)
-        visual_embed = (visual_embed.float() +
-                        cross_gate.float() * visual_out.float()).type_as(
-                            visual_embed)
+        visual_out = self.cross_attention(visual_out, encoder_hidden_states=text_embed)
+        visual_embed = (visual_embed.float() + cross_gate.float() * visual_out.float()).type_as(visual_embed)
 
         ff_shift, ff_scale, ff_gate = torch.chunk(ff_params, 3, dim=-1)
         visual_out = self.feed_forward_norm(
@@ -608,9 +570,7 @@ class Kandinsky5TransformerDecoderBlock(nn.Module):
             convert_modulation_dtype=True,
         ).type_as(visual_embed)
         visual_out = self.feed_forward(visual_out)
-        visual_embed = (visual_embed.float() +
-                        ff_gate.float() * visual_out.float()).type_as(
-                            visual_embed)
+        visual_embed = (visual_embed.float() + ff_gate.float() * visual_out.float()).type_as(visual_embed)
 
         return visual_embed
 
@@ -632,10 +592,11 @@ class Kandinsky5Transformer3DModel(BaseDiT):
     lora_param_names_mapping = _ARCH_CONFIG_DEFAULTS.lora_param_names_mapping
     _supported_attention_backends = _ARCH_CONFIG_DEFAULTS._supported_attention_backends
 
-    def __init__(self, config: Kandinsky5VideoConfig,
-                 hf_config: dict[str, Any]) -> None:
+    def __init__(self, config: Kandinsky5VideoConfig, hf_config: dict[str, Any]) -> None:
         super().__init__(config=config, hf_config=hf_config)
         arch = config.arch_config
+        quant_config = config.quant_config
+        self.quant_config = quant_config
 
         head_dim = sum(arch.axes_dims)
         self.in_visual_dim = arch.in_visual_dim
@@ -644,42 +605,37 @@ class Kandinsky5Transformer3DModel(BaseDiT):
         self.visual_cond = arch.visual_cond
         self.attention_type = arch.attention_type
 
-        visual_embed_dim = (2 * arch.in_visual_dim +
-                            1) if arch.visual_cond else arch.in_visual_dim
+        visual_embed_dim = (2 * arch.in_visual_dim + 1) if arch.visual_cond else arch.in_visual_dim
 
-        self.time_embeddings = Kandinsky5TimeEmbeddings(
-            arch.model_dim, arch.time_dim)
-        self.text_embeddings = Kandinsky5TextEmbeddings(
-            arch.in_text_dim, arch.model_dim)
-        self.pooled_text_embeddings = Kandinsky5TextEmbeddings(
-            arch.in_text_dim2, arch.time_dim)
-        self.visual_embeddings = Kandinsky5VisualEmbeddings(
-            visual_embed_dim, arch.model_dim, arch.patch_size)
+        self.time_embeddings = Kandinsky5TimeEmbeddings(arch.model_dim, arch.time_dim)
+        self.text_embeddings = Kandinsky5TextEmbeddings(arch.in_text_dim, arch.model_dim)
+        self.pooled_text_embeddings = Kandinsky5TextEmbeddings(arch.in_text_dim2, arch.time_dim)
+        self.visual_embeddings = Kandinsky5VisualEmbeddings(visual_embed_dim, arch.model_dim, arch.patch_size)
 
         self.text_rope_embeddings = Kandinsky5RoPE1D(head_dim)
         self.visual_rope_embeddings = Kandinsky5RoPE3D(arch.axes_dims)
 
         self.text_transformer_blocks = nn.ModuleList([
-            Kandinsky5TransformerEncoderBlock(arch.model_dim, arch.time_dim,
+            Kandinsky5TransformerEncoderBlock(arch.model_dim,
+                                              arch.time_dim,
                                               arch.ff_dim,
                                               head_dim,
                                               self._supported_attention_backends,
-                                              prefix=f"{config.prefix}.text_transformer_blocks.{i}")
-            for i in range(arch.num_text_blocks)
+                                              prefix=f"{config.prefix}.text_transformer_blocks.{i}",
+                                              quant_config=quant_config) for i in range(arch.num_text_blocks)
         ])
         self.visual_transformer_blocks = nn.ModuleList([
-            Kandinsky5TransformerDecoderBlock(arch.model_dim, arch.time_dim,
+            Kandinsky5TransformerDecoderBlock(arch.model_dim,
+                                              arch.time_dim,
                                               arch.ff_dim,
                                               head_dim,
                                               self._supported_attention_backends,
                                               prefix=f"{config.prefix}.visual_transformer_blocks.{i}",
-                                              use_nabla=arch.attention_type == "nabla")
-            for i in range(arch.num_visual_blocks)
+                                              use_nabla=arch.attention_type == "nabla",
+                                              quant_config=quant_config) for i in range(arch.num_visual_blocks)
         ])
 
-        self.out_layer = Kandinsky5OutLayer(arch.model_dim, arch.time_dim,
-                                            arch.out_visual_dim,
-                                            arch.patch_size)
+        self.out_layer = Kandinsky5OutLayer(arch.model_dim, arch.time_dim, arch.out_visual_dim, arch.patch_size)
         self.gradient_checkpointing = False
 
         self.hidden_size = arch.hidden_size
@@ -695,8 +651,7 @@ class Kandinsky5Transformer3DModel(BaseDiT):
         encoder_hidden_states_image: torch.Tensor | list[torch.Tensor]
         | None = None,
         pooled_projections: torch.Tensor | None = None,
-        visual_rope_pos: tuple[torch.Tensor, torch.Tensor,
-                               torch.Tensor] | list[torch.Tensor] | None = None,
+        visual_rope_pos: tuple[torch.Tensor, torch.Tensor, torch.Tensor] | list[torch.Tensor] | None = None,
         text_rope_pos: torch.Tensor | None = None,
         scale_factor: tuple[float, float, float] = (1.0, 1.0, 1.0),
         sparse_params: dict[str, Any] | None = None,
@@ -708,16 +663,13 @@ class Kandinsky5Transformer3DModel(BaseDiT):
 
         if pooled_projections is None:
             if encoder_hidden_states_image is None:
-                raise ValueError(
-                    "pooled_projections must be provided for Kandinsky5.")
+                raise ValueError("pooled_projections must be provided for Kandinsky5.")
             pooled_projections = encoder_hidden_states_image
         if isinstance(pooled_projections, list):
             pooled_projections = pooled_projections[0]
 
         if visual_rope_pos is None or text_rope_pos is None:
-            raise ValueError(
-                "visual_rope_pos and text_rope_pos are required for Kandinsky5."
-            )
+            raise ValueError("visual_rope_pos and text_rope_pos are required for Kandinsky5.")
 
         x = hidden_states
         text_embed = self.text_embeddings(encoder_hidden_states)
@@ -728,36 +680,29 @@ class Kandinsky5Transformer3DModel(BaseDiT):
 
         for text_transformer_block in self.text_transformer_blocks:
             if torch.is_grad_enabled() and self.gradient_checkpointing:
-                text_embed = torch.utils.checkpoint.checkpoint(
-                    text_transformer_block,
-                    text_embed,
-                    time_embed,
-                    text_rope,
-                    use_reentrant=False)
+                text_embed = torch.utils.checkpoint.checkpoint(text_transformer_block,
+                                                               text_embed,
+                                                               time_embed,
+                                                               text_rope,
+                                                               use_reentrant=False)
             else:
-                text_embed = text_transformer_block(text_embed, time_embed,
-                                                    text_rope)
+                text_embed = text_transformer_block(text_embed, time_embed, text_rope)
 
         visual_shape = visual_embed.shape[:-1]
-        visual_rope = self.visual_rope_embeddings(visual_shape, visual_rope_pos,
-                                                  scale_factor)
-        to_fractal = sparse_params[
-            "to_fractal"] if sparse_params is not None else False
-        
-        visual_embed, visual_rope = fractal_flatten(visual_embed, visual_rope,
-                                                    visual_shape,
-                                                    block_mask=to_fractal)
+        visual_rope = self.visual_rope_embeddings(visual_shape, visual_rope_pos, scale_factor)
+        to_fractal = sparse_params["to_fractal"] if sparse_params is not None else False
+
+        visual_embed, visual_rope = fractal_flatten(visual_embed, visual_rope, visual_shape, block_mask=to_fractal)
 
         for visual_transformer_block in self.visual_transformer_blocks:
             if torch.is_grad_enabled() and self.gradient_checkpointing:
-                visual_embed = torch.utils.checkpoint.checkpoint(
-                    visual_transformer_block,
-                    visual_embed,
-                    text_embed,
-                    time_embed,
-                    visual_rope,
-                    sparse_params,
-                    use_reentrant=False)
+                visual_embed = torch.utils.checkpoint.checkpoint(visual_transformer_block,
+                                                                 visual_embed,
+                                                                 text_embed,
+                                                                 time_embed,
+                                                                 visual_rope,
+                                                                 sparse_params,
+                                                                 use_reentrant=False)
             else:
                 visual_embed = visual_transformer_block(
                     visual_embed,
@@ -767,46 +712,30 @@ class Kandinsky5Transformer3DModel(BaseDiT):
                     sparse_params,
                 )
 
-        visual_embed = fractal_unflatten(visual_embed,
-                                         visual_shape,
-                                         block_mask=to_fractal)
+        visual_embed = fractal_unflatten(visual_embed, visual_shape, block_mask=to_fractal)
         x = self.out_layer(visual_embed, time_embed)
 
         if return_dict:
             return Kandinsky5TransformerOutput(sample=x)
-        
+
         return x
 
-    def materialize_non_persistent_buffers(self, device: torch.device,
-                                           dtype: torch.dtype | None = None
-                                           ) -> None:
-        if isinstance(self.time_embeddings.freqs,
-                      torch.Tensor) and self.time_embeddings.freqs.is_meta:
-            self.time_embeddings.freqs = _build_rotary_freqs(
-                self.time_embeddings.model_dim // 2,
-                self.time_embeddings.max_period).to(device=device)
+    def materialize_non_persistent_buffers(self, device: torch.device, dtype: torch.dtype | None = None) -> None:
+        if isinstance(self.time_embeddings.freqs, torch.Tensor) and self.time_embeddings.freqs.is_meta:
+            self.time_embeddings.freqs = _build_rotary_freqs(self.time_embeddings.model_dim // 2,
+                                                             self.time_embeddings.max_period).to(device=device)
 
-        if isinstance(self.text_rope_embeddings.args,
-                      torch.Tensor) and self.text_rope_embeddings.args.is_meta:
+        if isinstance(self.text_rope_embeddings.args, torch.Tensor) and self.text_rope_embeddings.args.is_meta:
             freq = _build_rotary_freqs(self.text_rope_embeddings.dim // 2,
-                                       self.text_rope_embeddings.max_period).to(
-                                           device=device)
-            pos = torch.arange(self.text_rope_embeddings.max_pos,
-                               dtype=freq.dtype,
-                               device=device)
+                                       self.text_rope_embeddings.max_period).to(device=device)
+            pos = torch.arange(self.text_rope_embeddings.max_pos, dtype=freq.dtype, device=device)
             self.text_rope_embeddings._buffers["args"] = torch.outer(pos, freq)
 
-        for i, (axes_dim,
-                ax_max_pos) in enumerate(
-                    zip(self.visual_rope_embeddings.axes_dims,
-                        self.visual_rope_embeddings.max_pos,
-                        strict=True)):
+        for i, (axes_dim, ax_max_pos) in enumerate(
+                zip(self.visual_rope_embeddings.axes_dims, self.visual_rope_embeddings.max_pos, strict=True)):
             name = f"args_{i}"
             buf = getattr(self.visual_rope_embeddings, name, None)
             if isinstance(buf, torch.Tensor) and buf.is_meta:
-                freq = _build_rotary_freqs(
-                    axes_dim // 2, self.visual_rope_embeddings.max_period).to(
-                        device=device)
+                freq = _build_rotary_freqs(axes_dim // 2, self.visual_rope_embeddings.max_period).to(device=device)
                 pos = torch.arange(ax_max_pos, dtype=freq.dtype, device=device)
-                self.visual_rope_embeddings._buffers[name] = torch.outer(
-                    pos, freq)
+                self.visual_rope_embeddings._buffers[name] = torch.outer(pos, freq)

@@ -2,6 +2,8 @@ import math
 import torch
 from .block_sparse_attn import block_sparse_attn
 from .block_sparse_attn_256 import (
+    block_sparse_attn_128,
+    block_sparse_attn_128_bshd,
     block_sparse_attn_256,
     block_sparse_attn_256_bshd,
 )
@@ -27,9 +29,7 @@ def sliding_tile_attention(
 ) -> torch.Tensor:
     # Check if the specific op is available
     if sta_fwd is None:
-        return sliding_tile_attention_triton(
-            q, k, v, window_size, text_length, has_text, seq_shape
-        )
+        return sliding_tile_attention_triton(q, k, v, window_size, text_length, has_text, seq_shape)
 
     seq_length = q.shape[2]
     shape_map = {"30x48x80": 1, "36x48x48": 2, "18x48x80": 3}
@@ -53,11 +53,7 @@ def sliding_tile_attention(
         k_h = k[:, head_idx:head_idx + 1].contiguous()
         v_h = v[:, head_idx:head_idx + 1].contiguous()
         o_h = torch.empty_like(q_h)
-        sta_fwd(
-            q_h, k_h,
-            v_h, o_h,
-            t, h, w, text_length, False, has_text, flag
-        )
+        sta_fwd(q_h, k_h, v_h, o_h, t, h, w, text_length, False, has_text, flag)
         output[:, head_idx:head_idx + 1] = o_h
 
     if has_text:
@@ -80,12 +76,13 @@ def video_sparse_attn(
 
     Dispatches the sparse branch by ``block_elements = prod(block_size)``:
     - 64  -> existing TK/Triton path (see ``block_sparse_attn_from_indices``).
+    - 128 -> Triton fallback or CuTe FA4 block-sparse attention.
     - 256 -> CuTe FA4 block-sparse attention (see ``block_sparse_attn_256``).
 
     Backend overrides:
     - ``FASTVIDEO_VSA_TRITON=1`` forces Triton in either path.
     - ``FASTVIDEO_VSA_TK=1`` prefers the sm_90 TK kernel in the 64-block path.
-    - ``FASTVIDEO_VSA_CUTEDSL=1`` prefers CuTe in the 256-block path.
+    - ``FASTVIDEO_VSA_CUTEDSL=1`` prefers CuTe in the 128/256-block paths.
     """
     if isinstance(block_size, int):
         block_size = (block_size, block_size, block_size)
@@ -96,35 +93,27 @@ def video_sparse_attn(
     if k.shape[0] != batch or v.shape[0] != batch or k.shape[1] != heads or v.shape[1] != heads:
         raise ValueError("Expected q/k/v to have the same batch and head dimensions.")
     if v.shape[2] != kv_seq_len:
-        raise ValueError(
-            f"Expected k and v to have the same sequence length, got "
-            f"k.shape[2]={kv_seq_len}, v.shape[2]={v.shape[2]}"
-        )
+        raise ValueError(f"Expected k and v to have the same sequence length, got "
+                         f"k.shape[2]={kv_seq_len}, v.shape[2]={v.shape[2]}")
 
     if q_seq_len % block_elements != 0 or kv_seq_len % block_elements != 0:
-        raise ValueError(
-            f"q_seq_len and kv_seq_len must be divisible by block_elements={block_elements}, "
-            f"got q_seq_len={q_seq_len}, kv_seq_len={kv_seq_len}"
-        )
+        raise ValueError(f"q_seq_len and kv_seq_len must be divisible by block_elements={block_elements}, "
+                         f"got q_seq_len={q_seq_len}, kv_seq_len={kv_seq_len}")
     q_num_blocks = q_seq_len // block_elements
     kv_num_blocks = kv_seq_len // block_elements
     if variable_block_sizes.numel() != kv_num_blocks:
-        raise ValueError(
-            f"variable_block_sizes must have length kv_num_blocks={kv_num_blocks}, "
-            f"got {variable_block_sizes.numel()}"
-        )
+        raise ValueError(f"variable_block_sizes must have length kv_num_blocks={kv_num_blocks}, "
+                         f"got {variable_block_sizes.numel()}")
     if q_variable_block_sizes.numel() != q_num_blocks:
-        raise ValueError(
-            f"q_variable_block_sizes must have length q_num_blocks={q_num_blocks}, "
-            f"got {q_variable_block_sizes.numel()}"
-        )
+        raise ValueError(f"q_variable_block_sizes must have length q_num_blocks={q_num_blocks}, "
+                         f"got {q_variable_block_sizes.numel()}")
 
     # Compression branch (fused Triton: bf16 read → fp32 accumulate → div → bf16 write)
     q_c = fused_block_mean(q, q_variable_block_sizes, block_elements)
     k_c = fused_block_mean(k, variable_block_sizes, block_elements)
     v_c = fused_block_mean(v, variable_block_sizes, block_elements)
 
-    scores = torch.matmul(q_c, k_c.transpose(-2, -1)) / (dim ** 0.5)
+    scores = torch.matmul(q_c, k_c.transpose(-2, -1)) / (dim**0.5)
     attn = torch.softmax(scores, dim=-1)
     out_c = torch.matmul(attn, v_c)
     out_c = out_c.view(batch, heads, q_num_blocks, 1, dim)
@@ -133,8 +122,9 @@ def video_sparse_attn(
     # Sparse branch (fused Triton topk mask)
     mask = fused_topk_mask(scores, topk)
 
-    if block_elements == 256:
-        out_s = block_sparse_attn_256(q, k, v, mask, variable_block_sizes)[0]
+    if block_elements in (128, 256):
+        attention = block_sparse_attn_128 if block_elements == 128 else block_sparse_attn_256
+        out_s = attention(q, k, v, mask, variable_block_sizes)[0]
     else:
         out_s = block_sparse_attn(q, k, v, mask, variable_block_sizes)[0]
 
@@ -156,83 +146,64 @@ def video_sparse_attn_bshd(
     """VSA entrypoint for [B, S, H, D] tensors.
 
     Avoids the BHSD<->BSHD round-trip that ``video_sparse_attn`` performs on
-    the CuTe 256-block path; the 64-block path still expects BHSD and is not
+    the CuTe 128/256-block paths; the 64-block path still expects BHSD and is not
     supported here.
     """
     if isinstance(block_size, int):
         block_size = (block_size, block_size, block_size)
     block_elements = block_size[0] * block_size[1] * block_size[2]
-    if block_elements != 256:
-        raise ValueError(
-            "video_sparse_attn_bshd is only defined for block_elements=256 "
-            f"(got {block_elements}); use video_sparse_attn for the 64-block path."
-        )
+    if block_elements not in (128, 256):
+        raise ValueError("video_sparse_attn_bshd is only defined for block_elements=128 or 256 "
+                         f"(got {block_elements}); use video_sparse_attn for the 64-block path.")
 
     batch, q_seq_len, heads, dim = q.shape
     kv_seq_len = k.shape[1]
     if k.shape[0] != batch or v.shape[0] != batch or k.shape[2] != heads or v.shape[2] != heads:
         raise ValueError("Expected q/k/v to have the same batch and head dimensions.")
     if v.shape[1] != kv_seq_len:
-        raise ValueError(
-            f"Expected k and v to have the same sequence length, got "
-            f"k.shape[1]={kv_seq_len}, v.shape[1]={v.shape[1]}"
-        )
+        raise ValueError(f"Expected k and v to have the same sequence length, got "
+                         f"k.shape[1]={kv_seq_len}, v.shape[1]={v.shape[1]}")
     if q_seq_len % block_elements != 0 or kv_seq_len % block_elements != 0:
-        raise ValueError(
-            f"q_seq_len and kv_seq_len must be divisible by block_elements={block_elements}, "
-            f"got q_seq_len={q_seq_len}, kv_seq_len={kv_seq_len}"
-        )
+        raise ValueError(f"q_seq_len and kv_seq_len must be divisible by block_elements={block_elements}, "
+                         f"got q_seq_len={q_seq_len}, kv_seq_len={kv_seq_len}")
     q_num_blocks = q_seq_len // block_elements
     kv_num_blocks = kv_seq_len // block_elements
     if variable_block_sizes.numel() != kv_num_blocks:
-        raise ValueError(
-            f"variable_block_sizes must have length kv_num_blocks={kv_num_blocks}, "
-            f"got {variable_block_sizes.numel()}"
-        )
+        raise ValueError(f"variable_block_sizes must have length kv_num_blocks={kv_num_blocks}, "
+                         f"got {variable_block_sizes.numel()}")
     if q_variable_block_sizes.numel() != q_num_blocks:
-        raise ValueError(
-            f"q_variable_block_sizes must have length q_num_blocks={q_num_blocks}, "
-            f"got {q_variable_block_sizes.numel()}"
-        )
+        raise ValueError(f"q_variable_block_sizes must have length q_num_blocks={q_num_blocks}, "
+                         f"got {q_variable_block_sizes.numel()}")
 
-    # Compression branch (BSHD-native: mean over the 256-token axis).
-    token_idx = torch.arange(block_elements, device=q.device, dtype=torch.int32)
-    q_token_valid = (token_idx.view(1, -1) < q_variable_block_sizes.view(-1, 1)).view(
-        1, q_num_blocks, block_elements, 1, 1
-    )
-    kv_token_valid = (token_idx.view(1, -1) < variable_block_sizes.view(-1, 1)).view(
-        1, kv_num_blocks, block_elements, 1, 1
-    )
-
+    # Compression branch (BSHD-native: match fused_block_mean's semantics).
+    # Padding values are expected to be zero; gradients are broadcast across
+    # the full padded block, just like the BHSD fused common path.
     q_c = q.view(batch, q_num_blocks, block_elements, heads, dim)
     k_c = k.view(batch, kv_num_blocks, block_elements, heads, dim)
     v_c = v.view(batch, kv_num_blocks, block_elements, heads, dim)
-    q_c = ((q_c.float() * q_token_valid).sum(dim=2)
-           / q_variable_block_sizes.view(1, -1, 1, 1)).to(q.dtype)
-    k_c = ((k_c.float() * kv_token_valid).sum(dim=2)
-           / variable_block_sizes.view(1, -1, 1, 1)).to(k.dtype)
-    v_c = ((v_c.float() * kv_token_valid).sum(dim=2)
-           / variable_block_sizes.view(1, -1, 1, 1)).to(v.dtype)
+    q_c = (q_c.float().sum(dim=2) / q_variable_block_sizes.view(1, -1, 1, 1)).to(q.dtype)
+    k_c = (k_c.float().sum(dim=2) / variable_block_sizes.view(1, -1, 1, 1)).to(k.dtype)
+    v_c = (v_c.float().sum(dim=2) / variable_block_sizes.view(1, -1, 1, 1)).to(v.dtype)
     q_ch = q_c.permute(0, 2, 1, 3).contiguous()
     k_ch = k_c.permute(0, 2, 1, 3).contiguous()
     v_ch = v_c.permute(0, 2, 1, 3).contiguous()
 
-    scores = torch.matmul(q_ch, k_ch.transpose(-2, -1)) / (dim ** 0.5)
+    scores = torch.matmul(q_ch, k_ch.transpose(-2, -1)) / (dim**0.5)
     attn = torch.softmax(scores, dim=-1)
     out_c_ch = torch.matmul(attn, v_ch)
     out_c_blk = out_c_ch.permute(0, 2, 1, 3).contiguous()
 
     # Sparse branch (fused Triton topk mask + CuTe BSHD).
     mask = fused_topk_mask(scores, topk)
-    out_s, _ = block_sparse_attn_256_bshd(q, k, v, mask, variable_block_sizes)
+    attention = block_sparse_attn_128_bshd if block_elements == 128 else block_sparse_attn_256_bshd
+    out_s, _ = attention(q, k, v, mask, variable_block_sizes)
 
-    out = out_s
-    out_view = out.view(batch, q_num_blocks, block_elements, heads, dim)
+    # Out-of-place: ``out_s`` is the tensor FA4's autograd node saved for its
+    # backward, so mutating it in place invalidates the graph.
+    out_view = out_s.view(batch, q_num_blocks, block_elements, heads, dim)
     if compress_attn_weight is not None:
-        gate_view = compress_attn_weight.view(
-            batch, q_num_blocks, block_elements, heads, dim
-        )
-        out_view.add_(out_c_blk.unsqueeze(2) * gate_view)
+        gate_view = compress_attn_weight.view(batch, q_num_blocks, block_elements, heads, dim)
+        out = out_view + out_c_blk.unsqueeze(2) * gate_view
     else:
-        out_view.add_(out_c_blk.unsqueeze(2))
-    return out
+        out = out_view + out_c_blk.unsqueeze(2)
+    return out.view(batch, q_seq_len, heads, dim)

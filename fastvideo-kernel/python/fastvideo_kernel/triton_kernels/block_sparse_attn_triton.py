@@ -104,8 +104,7 @@ def _attn_fwd_sparse(
                                block_shape=(HEAD_DIM, BLOCK_N),
                                order=(0, 1))
 
-    v_order: tl.constexpr = (0, 1) if V.dtype.element_ty == tl.float8e5 else (1,
-                                                                              0)
+    v_order: tl.constexpr = (0, 1) if V.dtype.element_ty == tl.float8e5 else (1, 0)
     V_base = tl.make_block_ptr(base=V + v_off,
                                shape=(N_CTX_KV, HEAD_DIM),
                                strides=(stride_vk, stride_vn),
@@ -178,10 +177,8 @@ def _attn_bwd_preprocess(
     off_hz = tl.program_id(1)
     off_n = tl.arange(0, HEAD_DIM)
     # load
-    o = tl.load(O + off_hz * HEAD_DIM * N_CTX + off_m[:, None] * HEAD_DIM +
-                off_n[None, :])
-    do = tl.load(DO + off_hz * HEAD_DIM * N_CTX + off_m[:, None] * HEAD_DIM +
-                 off_n[None, :]).to(tl.float32)
+    o = tl.load(O + off_hz * HEAD_DIM * N_CTX + off_m[:, None] * HEAD_DIM + off_n[None, :])
+    do = tl.load(DO + off_hz * HEAD_DIM * N_CTX + off_m[:, None] * HEAD_DIM + off_n[None, :]).to(tl.float32)
     delta = tl.sum(o * do, axis=1)
     # write-back
     tl.store(Delta + off_hz * N_CTX + off_m, delta)
@@ -235,8 +232,7 @@ def _attn_bwd_dkdv(
     block_size = tl.load(variable_block_sizes + kv_blk)
 
     for blk_idx in range(q_blocks * 2):
-        block_sparse_offset = (tl.load(q_ptr + blk_idx // 2).to(tl.int32) * 2 +
-                               blk_idx % 2) * step_m
+        block_sparse_offset = (tl.load(q_ptr + blk_idx // 2).to(tl.int32) * 2 + blk_idx % 2) * step_m
         qT = tl.load(qT_ptrs + block_sparse_offset * stride_tok)
         # Load m before computing qk to reduce pipeline stall.
         offs_m = start_m + block_sparse_offset + tl.arange(0, BLOCK_M1)
@@ -497,7 +493,7 @@ def _attn_bwd_dkdv_kernel(
         stride_tok,
         stride_d,  #
         # batch/head strides (may differ between Q and KV)
-        stride_qz,
+    stride_qz,
         stride_qh,
         stride_kz,
         stride_kh,
@@ -607,7 +603,7 @@ def _attn_bwd_dq_kernel(
         stride_tok,
         stride_d,  #
         # batch/head strides (may differ between Q and KV)
-        stride_qz,
+    stride_qz,
         stride_qh,
         stride_kz,
         stride_kh,
@@ -689,8 +685,7 @@ def _attn_bwd_dq_kernel(
 
 
 # ──────────────────────────── SPARSE ADDITION BEGIN ───────────────────────────
-def triton_block_sparse_attn_forward(q, k, v, q2k_index, q2k_num,
-                                     variable_block_sizes):
+def triton_block_sparse_attn_forward(q, k, v, q2k_index, q2k_num, variable_block_sizes):
     B, H, Tq, D = q.shape
     Tkv = k.shape[2]
     sm_scale = 1.0 / math.sqrt(D)
@@ -701,8 +696,7 @@ def triton_block_sparse_attn_forward(q, k, v, q2k_index, q2k_num,
         -1] == Tq // 64, f"shape mismatch, Tq // 64 = {Tq // 64}, q2k_num.shape[-2] = {q2k_num.shape[-2]}"
     assert variable_block_sizes.numel() == Tkv // 64, (
         f"shape mismatch, variable_block_sizes must have length {Tkv // 64}, "
-        f"got {variable_block_sizes.numel()}"
-    )
+        f"got {variable_block_sizes.numel()}")
     o = torch.empty_like(q)
     M = torch.empty((B, H, Tq), dtype=torch.float32, device=q.device)
 
@@ -743,8 +737,7 @@ def triton_block_sparse_attn_forward(q, k, v, q2k_index, q2k_num,
     return o, M
 
 
-def triton_block_sparse_attn_backward(do, q, k, v, o, M, q2k_index, q2k_num,
-                                      k2q_index, k2q_num, variable_block_sizes):
+def triton_block_sparse_attn_backward(do, q, k, v, o, M, q2k_index, q2k_num, k2q_index, k2q_num, variable_block_sizes):
     assert do.is_contiguous()
 
     B, H, Tq, D = q.shape

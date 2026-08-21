@@ -51,10 +51,8 @@ V2_REQUIRED_IDENTITY_FIELDS = (
 # and the generated recipe document owns that key in emitted records. A config
 # declaring it now fails validation loudly instead of being silently
 # overwritten by the generated one.
-V2_OPTIONAL_METADATA_FIELDS = (
-    "quality_metadata",
-)
-COMMON_OBJECT_FIELDS = ("regression_thresholds",)
+V2_OPTIONAL_METADATA_FIELDS = ("quality_metadata", )
+COMMON_OBJECT_FIELDS = ("regression_thresholds", )
 RESULT_SCHEMA_VERSION = 2
 VALID_RUN_SOURCES = {"pr", "local", "scheduled_main", "unknown"}
 OPTIONAL_RESULT_METADATA_FIELDS = ("quality_metadata", "variant_metadata")
@@ -92,7 +90,7 @@ def _validate_integer(value, field, path):
 
 
 def _validate_benchmark_config(cfg, path="<memory>"):
-    missing_common = [field for field in ("benchmark_id",) if field not in cfg]
+    missing_common = [field for field in ("benchmark_id", ) if field not in cfg]
     if missing_common:
         raise ValueError(f"{path}: missing required benchmark config fields: {', '.join(missing_common)}")
 
@@ -208,17 +206,14 @@ def _extract_component_times(result: dict) -> dict[str, float | None]:
         else:
             metric_key = STAGE_METRIC_MAP.get(stage_class)
         if metric_key is None:
-            logger.debug("Unmapped stage '%s' class '%s' (%.3fs)",
-                         stage_name,
-                         stage_class,
+            logger.debug("Unmapped stage '%s' class '%s' (%.3fs)", stage_name, stage_class,
                          stage_data.get("execution_time", 0))
             continue
         elapsed = stage_data.get("execution_time")
         if elapsed is None:
             continue
         existing = component_times[metric_key]
-        component_times[metric_key] = (
-            elapsed if existing is None else existing + elapsed)
+        component_times[metric_key] = (elapsed if existing is None else existing + elapsed)
     return component_times
 
 
@@ -260,8 +255,7 @@ def _resolve_num_gpus(
         ("init_kwargs.num_gpus", init_num_gpus),
         ("run_config.required_gpus", required_gpus),
     ):
-        if value is not None and (
-                isinstance(value, bool) or not isinstance(value, int) or value < 1):
+        if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 1):
             raise ValueError(f"{benchmark_id}: {field} must be a positive integer")
     parallel_sizes = []
     for field in ("tp_size", "sp_size"):
@@ -271,20 +265,14 @@ def _resolve_num_gpus(
         if isinstance(value, bool) or not isinstance(value, int) or value < 1:
             raise ValueError(f"{benchmark_id}: init_kwargs.{field} must be -1 or a positive integer")
         parallel_sizes.append(value)
-    if (
-        init_num_gpus is not None
-        and required_gpus is not None
-        and init_num_gpus != required_gpus
-    ):
-        raise ValueError(
-            f"{benchmark_id}: init_kwargs.num_gpus ({init_num_gpus}) must match "
-            f"run_config.required_gpus ({required_gpus})")
+    if (init_num_gpus is not None and required_gpus is not None and init_num_gpus != required_gpus):
+        raise ValueError(f"{benchmark_id}: init_kwargs.num_gpus ({init_num_gpus}) must match "
+                         f"run_config.required_gpus ({required_gpus})")
     declared_num_gpus = init_num_gpus or required_gpus
     parallel_num_gpus = max(parallel_sizes, default=1)
     if declared_num_gpus is not None and declared_num_gpus < parallel_num_gpus:
-        raise ValueError(
-            f"{benchmark_id}: declared GPU count ({declared_num_gpus}) must be at least "
-            f"max(tp_size, sp_size) ({parallel_num_gpus})")
+        raise ValueError(f"{benchmark_id}: declared GPU count ({declared_num_gpus}) must be at least "
+                         f"max(tp_size, sp_size) ({parallel_num_gpus})")
     return declared_num_gpus or parallel_num_gpus
 
 
@@ -319,7 +307,7 @@ def _collect_worker_identity(worker) -> dict[str, Any]:
     if isinstance(modules, Mapping):
         module_iter = modules.values()
     elif isinstance(pipeline, torch.nn.Module):
-        module_iter = (pipeline,)
+        module_iter = (pipeline, )
     else:
         module_iter = ()
 
@@ -368,10 +356,7 @@ def _runtime_identity_from_generator(generator) -> dict[str, Any]:
 
 def _benchmark_identity_fields(cfg):
     identity = benchmark_identity_from_config(cfg)
-    return {
-        key: identity[key]
-        for key in ("workload_id", "variant_id", "benchmark_version")
-    }
+    return {key: identity[key] for key in ("workload_id", "variant_id", "benchmark_version")}
 
 
 def _build_identity_fields(cfg, init_kwargs, prompt, runtime_identity):
@@ -457,11 +442,7 @@ def _ci_provenance_fields() -> dict[str, str]:
 
 
 def _configured_result_metadata(cfg: Mapping[str, Any]) -> dict[str, Any]:
-    return {
-        field: cfg[field]
-        for field in OPTIONAL_RESULT_METADATA_FIELDS
-        if field in cfg and cfg[field] is not None
-    }
+    return {field: cfg[field] for field in OPTIONAL_RESULT_METADATA_FIELDS if field in cfg and cfg[field] is not None}
 
 
 def _build_result_record(
@@ -491,42 +472,52 @@ def _build_result_record(
     if isinstance(num_frames, (int, float)) and avg_time > 0:
         throughput_fps = num_frames / avg_time
 
-    result_schema_fields = (
-        {"result_schema_version": RESULT_SCHEMA_VERSION}
-        if _is_v2_config(cfg)
-        else {}
-    )
+    result_schema_fields = ({"result_schema_version": RESULT_SCHEMA_VERSION} if _is_v2_config(cfg) else {})
 
     return {
-        "benchmark_id": cfg["benchmark_id"],
+        "benchmark_id":
+        cfg["benchmark_id"],
         **result_schema_fields,
-        "model_short_name": model_info.get("model_short_name", ""),
-        "device": device_name,
-        "num_gpus": num_gpus,
-        "num_warmup_runs": num_warmup,
-        "num_measurement_runs": num_measure,
-        "avg_generation_time_s": round(avg_time, 3),
+        "model_short_name":
+        model_info.get("model_short_name", ""),
+        "device":
+        device_name,
+        "num_gpus":
+        num_gpus,
+        "num_warmup_runs":
+        num_warmup,
+        "num_measurement_runs":
+        num_measure,
+        "avg_generation_time_s":
+        round(avg_time, 3),
         "individual_times_s": [round(t, 3) for t in times],
-        "throughput_fps": round(throughput_fps, 3)
-        if throughput_fps is not None else None,
-        "max_peak_memory_mb": round(max_peak_memory, 1),
+        "throughput_fps":
+        round(throughput_fps, 3) if throughput_fps is not None else None,
+        "max_peak_memory_mb":
+        round(max_peak_memory, 1),
         "individual_peak_memories_mb": [round(m, 1) for m in peak_memories],
-        "thresholds": dict(thresholds),
-        "regression_thresholds": cfg.get("regression_thresholds", {}),
-        "commit": os.environ.get("BUILDKITE_COMMIT", ""),
+        "thresholds":
+        dict(thresholds),
+        "regression_thresholds":
+        cfg.get("regression_thresholds", {}),
+        "commit":
+        os.environ.get("BUILDKITE_COMMIT", ""),
         **_ci_provenance_fields(),
-        "timestamp": timestamp or datetime.now(timezone.utc).isoformat(),
+        "timestamp":
+        timestamp or datetime.now(timezone.utc).isoformat(),
         **_configured_result_metadata(cfg),
-        "text_encoder_time_s": _avg_component(all_component_times,
-                                              "text_encoder_time_s"),
-        "dit_time_s": _avg_component(all_component_times, "dit_time_s"),
-        "vae_decode_time_s": _avg_component(all_component_times,
-                                            "vae_decode_time_s"),
+        "text_encoder_time_s":
+        _avg_component(all_component_times, "text_encoder_time_s"),
+        "dit_time_s":
+        _avg_component(all_component_times, "dit_time_s"),
+        "vae_decode_time_s":
+        _avg_component(all_component_times, "vae_decode_time_s"),
         **_build_identity_fields(cfg, init_kwargs, prompt, runtime_identity),
     }
 
 
 # -- Test -------------------------------------------------------------------
+
 
 def _run_benchmark(cfg):
     run_config = cfg.get("run_config") or {}
@@ -553,8 +544,7 @@ def _run_benchmark(cfg):
 
     # Output directory for generated videos
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    output_dir = os.path.join(script_dir, "generated_videos",
-                              cfg["benchmark_id"])
+    output_dir = os.path.join(script_dir, "generated_videos", cfg["benchmark_id"])
     os.makedirs(output_dir, exist_ok=True)
     gen_kwargs["output_path"] = output_dir
 
@@ -606,21 +596,18 @@ def _run_benchmark(cfg):
         device_name=device_name,
     )
 
-    logger.info(
-        "Performance results: avg_time=%.2fs, "
-        "max_peak_memory=%.0fMB", avg_time, max_peak_memory)
+    logger.info("Performance results: avg_time=%.2fs, "
+                "max_peak_memory=%.0fMB", avg_time, max_peak_memory)
     _write_results(results)
 
     max_time = thresholds["max_generation_time_s"]
     max_mem = thresholds["max_peak_memory_mb"]
 
-    assert avg_time <= max_time, (
-        f"Average generation time {avg_time:.2f}s exceeds "
-        f"threshold {max_time:.1f}s for {device_name}")
+    assert avg_time <= max_time, (f"Average generation time {avg_time:.2f}s exceeds "
+                                  f"threshold {max_time:.1f}s for {device_name}")
 
-    assert max_peak_memory <= max_mem, (
-        f"Peak memory {max_peak_memory:.0f}MB exceeds "
-        f"threshold {max_mem:.0f}MB for {device_name}")
+    assert max_peak_memory <= max_mem, (f"Peak memory {max_peak_memory:.0f}MB exceeds "
+                                        f"threshold {max_mem:.0f}MB for {device_name}")
 
     component_thresholds = {
         "text_encoder_time_s": thresholds.get("max_text_encoder_time_s"),
@@ -632,9 +619,8 @@ def _run_benchmark(cfg):
             continue
         actual = results[metric]
         if actual is not None:
-            assert actual <= max_val, (
-                f"{metric} {actual:.3f}s exceeds threshold {max_val:.3f}s "
-                f"for {device_name}")
+            assert actual <= max_val, (f"{metric} {actual:.3f}s exceeds threshold {max_val:.3f}s "
+                                       f"for {device_name}")
 
 
 @pytest.mark.parametrize(

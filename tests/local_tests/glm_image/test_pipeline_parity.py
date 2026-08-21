@@ -15,16 +15,12 @@ os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 FAMILY = "glm_image"
-LOCAL_WEIGHTS_DIR = Path(
-    os.getenv("GLM_IMAGE_LOCAL_WEIGHTS_DIR",
-              REPO_ROOT / "official_weights" / FAMILY))
+LOCAL_WEIGHTS_DIR = Path(os.getenv("GLM_IMAGE_LOCAL_WEIGHTS_DIR", REPO_ROOT / "official_weights" / FAMILY))
 TRANSFORMER_DIR = LOCAL_WEIGHTS_DIR / "transformer"
 
 
 def _has_weights() -> bool:
-    required = ["transformer", "vae", "text_encoder",
-                "vision_language_encoder", "processor", "tokenizer",
-                "scheduler"]
+    required = ["transformer", "vae", "text_encoder", "vision_language_encoder", "processor", "tokenizer", "scheduler"]
     return all((LOCAL_WEIGHTS_DIR / r).exists() for r in required)
 
 
@@ -34,8 +30,7 @@ def _upstream_glm_image_available() -> bool:
         import diffusers
     except ImportError:
         return False
-    return (hasattr(transformers, "GlmImageForConditionalGeneration")
-            and hasattr(diffusers, "GlmImagePipeline"))
+    return (hasattr(transformers, "GlmImageForConditionalGeneration") and hasattr(diffusers, "GlmImagePipeline"))
 
 
 pytestmark = [
@@ -51,9 +46,7 @@ pytestmark = [
     ),
 ]
 
-
-SAMPLE_PROMPT = (
-    "A landscape photo with rolling green hills under a clear blue sky.")
+SAMPLE_PROMPT = ("A landscape photo with rolling green hills under a clear blue sky.")
 SEED = 0
 HEIGHT = 512
 WIDTH = 512
@@ -115,8 +108,8 @@ def _ensure_distributed():
     FastVideo's world/TP groups. Initialize a single-rank (world_size=1) group
     in-process (mirrors tests/local_tests/sd35/test_sd35_component_parity.py)."""
     import torch.distributed as dist
-    from fastvideo.distributed.parallel_state import (
-        get_tp_group, init_distributed_environment, initialize_model_parallel)
+    from fastvideo.distributed.parallel_state import (get_tp_group, init_distributed_environment,
+                                                      initialize_model_parallel)
     try:
         get_tp_group()
         return
@@ -128,25 +121,19 @@ def _ensure_distributed():
         os.environ.setdefault("LOCAL_RANK", "0")
         torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
         store_path = f"/tmp/fastvideo_glm_pg_{os.getpid()}.store"
-        dist.init_process_group(backend="nccl",
-                                init_method=f"file://{store_path}",
-                                rank=0, world_size=1)
-    init_distributed_environment(world_size=1, rank=0, local_rank=0,
-                                 distributed_init_method="env://")
+        dist.init_process_group(backend="nccl", init_method=f"file://{store_path}", rank=0, world_size=1)
+    init_distributed_environment(world_size=1, rank=0, local_rank=0, distributed_init_method="env://")
     try:
         get_tp_group()
     except Exception:
-        initialize_model_parallel(tensor_model_parallel_size=1,
-                                  sequence_model_parallel_size=1,
-                                  data_parallel_size=1)
+        initialize_model_parallel(tensor_model_parallel_size=1, sequence_model_parallel_size=1, data_parallel_size=1)
 
 
 def _load_fastvideo_transformer(device, dtype):
     from fastvideo.configs.models.dits.glm_image import GlmImageDiTConfig
     from fastvideo.models.dits.glm_image import GlmImageTransformer2DModel
     cfg = GlmImageDiTConfig()
-    model = GlmImageTransformer2DModel(
-        cfg, {"_class_name": "GlmImageTransformer2DModel"})
+    model = GlmImageTransformer2DModel(cfg, {"_class_name": "GlmImageTransformer2DModel"})
     sd = _load_state_dict(TRANSFORMER_DIR)
     sd = _apply_param_mapping(sd, cfg.arch_config.param_names_mapping)
     missing, unexpected = model.load_state_dict(sd, strict=False)
@@ -155,16 +142,12 @@ def _load_fastvideo_transformer(device, dtype):
     return model.to(device, dtype=dtype).eval()
 
 
-def _fastvideo_denoise_latents(device, dtype, *, prompt_embeds, prior_token_ids,
-                               init_latents):
+def _fastvideo_denoise_latents(device, dtype, *, prompt_embeds, prior_token_ids, init_latents):
     """Drive the real GlmImageDenoisingStage with injected, matched inputs and
     return the denoised latents (1, 16, H/8, W/8)."""
-    from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
-        FlowMatchEulerDiscreteScheduler)
-    from fastvideo.pipelines.basic.glm_image.stages.before_denoising import (
-        calculate_shift)
-    from fastvideo.pipelines.basic.glm_image.stages.denoising import (
-        GlmImageDenoisingStage)
+    from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (FlowMatchEulerDiscreteScheduler)
+    from fastvideo.pipelines.basic.glm_image.stages.before_denoising import (calculate_shift)
+    from fastvideo.pipelines.basic.glm_image.stages.denoising import (GlmImageDenoisingStage)
     from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 
     _ensure_distributed()
@@ -177,19 +160,15 @@ def _fastvideo_denoise_latents(device, dtype, *, prompt_embeds, prior_token_ids,
     ntt = scheduler.config.num_train_timesteps
     patch = transformer.patch_size
     image_seq_len = ((HEIGHT // 8) * (WIDTH // 8)) // (patch**2)
-    sched_t = np.linspace(ntt, 1.0, STEPS + 1)[:-1].astype(
-        np.int64).astype(np.float32)
+    sched_t = np.linspace(ntt, 1.0, STEPS + 1)[:-1].astype(np.int64).astype(np.float32)
     scheduler.set_shift(calculate_shift(image_seq_len))
-    scheduler.set_timesteps(STEPS, device=device,
-                            sigmas=(sched_t / ntt).tolist(),
-                            timesteps=sched_t.tolist())
+    scheduler.set_timesteps(STEPS, device=device, sigmas=(sched_t / ntt).tolist(), timesteps=sched_t.tolist())
 
     batch = ForwardBatch(data_type="image")
     batch.prompt_embeds = [prompt_embeds.to(device, dtype)]
     batch.attention_mask = None  # match diffusers (no text padding mask)
     batch.prior_token_id = prior_token_ids.to(device)
-    batch.prior_token_drop = torch.zeros_like(prior_token_ids,
-                                              dtype=torch.bool, device=device)
+    batch.prior_token_drop = torch.zeros_like(prior_token_ids, dtype=torch.bool, device=device)
     batch.latents = init_latents.clone().unsqueeze(2).to(device, dtype)
     batch.timesteps = scheduler.timesteps
     batch.height, batch.width = HEIGHT, WIDTH
@@ -218,12 +197,12 @@ def _fastvideo_image(device) -> np.ndarray:
         from fastvideo import VideoGenerator
     except ImportError as e:
         pytest.skip(f"FastVideo VideoGenerator unavailable: {e}")
-    gen = VideoGenerator.from_pretrained(str(LOCAL_WEIGHTS_DIR), num_gpus=1,
-                                         trust_remote_code=True)
+    gen = VideoGenerator.from_pretrained(str(LOCAL_WEIGHTS_DIR), num_gpus=1, trust_remote_code=True)
     result = gen.generate_video(prompt=SAMPLE_PROMPT,
                                 save_video=False,
                                 return_frames=True,
-                                height=HEIGHT, width=WIDTH,
+                                height=HEIGHT,
+                                width=WIDTH,
                                 num_inference_steps=STEPS,
                                 guidance_scale=1.5,
                                 seed=SEED)
@@ -252,33 +231,35 @@ def test_pipeline_denoise_parity_deterministic(device):
     from diffusers.utils.torch_utils import randn_tensor
 
     dtype = torch.bfloat16
-    pipe = diffusers.GlmImagePipeline.from_pretrained(
-        str(LOCAL_WEIGHTS_DIR), torch_dtype=dtype).to(device)
+    pipe = diffusers.GlmImagePipeline.from_pretrained(str(LOCAL_WEIGHTS_DIR), torch_dtype=dtype).to(device)
 
     gen = torch.Generator(device=device).manual_seed(SEED)
 
     # --- shared, deterministic inputs (computed once, fed to both) ---------- #
-    pos, neg = pipe.encode_prompt(SAMPLE_PROMPT,
-                                  do_classifier_free_guidance=True,
-                                  device=device, dtype=dtype)
-    assert pos.shape[1] == neg.shape[1], (
-        f"quote-free prompt should give equal pos/neg glyph lengths, got "
-        f"{pos.shape[1]} vs {neg.shape[1]}")
-    prior_token_ids, _, _ = pipe.generate_prior_tokens(
-        SAMPLE_PROMPT, HEIGHT, WIDTH, image=None, device=device, generator=gen)
+    pos, neg = pipe.encode_prompt(SAMPLE_PROMPT, do_classifier_free_guidance=True, device=device, dtype=dtype)
+    assert pos.shape[1] == neg.shape[1], (f"quote-free prompt should give equal pos/neg glyph lengths, got "
+                                          f"{pos.shape[1]} vs {neg.shape[1]}")
+    prior_token_ids, _, _ = pipe.generate_prior_tokens(SAMPLE_PROMPT,
+                                                       HEIGHT,
+                                                       WIDTH,
+                                                       image=None,
+                                                       device=device,
+                                                       generator=gen)
     latent_ch = pipe.transformer.config.in_channels
-    init_latents = randn_tensor((1, latent_ch, HEIGHT // 8, WIDTH // 8),
-                                generator=gen, device=device, dtype=dtype)
+    init_latents = randn_tensor((1, latent_ch, HEIGHT // 8, WIDTH // 8), generator=gen, device=device, dtype=dtype)
 
     # --- official denoised latents ----------------------------------------- #
     # prompt=None: diffusers check_inputs rejects passing prompt + prompt_embeds
     # together; the embeds (and prior tokens) fully specify the run.
     official = pipe(prompt=None,
-                    prompt_embeds=pos, negative_prompt_embeds=neg,
+                    prompt_embeds=pos,
+                    negative_prompt_embeds=neg,
                     prior_token_ids=prior_token_ids,
                     latents=init_latents.clone(),
-                    height=HEIGHT, width=WIDTH,
-                    num_inference_steps=STEPS, guidance_scale=1.5,
+                    height=HEIGHT,
+                    width=WIDTH,
+                    num_inference_steps=STEPS,
+                    guidance_scale=1.5,
                     output_type="latent").images.float().cpu()
 
     # FastVideo packs CFG as a single [pos; neg] 2-row tensor (no padding here
@@ -286,17 +267,16 @@ def test_pipeline_denoise_parity_deterministic(device):
     packed = torch.cat([pos, neg], dim=0)
 
     # --- FastVideo denoised latents (real GlmImageDenoisingStage) ---------- #
-    fv = _fastvideo_denoise_latents(device, dtype,
+    fv = _fastvideo_denoise_latents(device,
+                                    dtype,
                                     prompt_embeds=packed,
                                     prior_token_ids=prior_token_ids,
                                     init_latents=init_latents)
 
-    assert official.shape == fv.shape, (
-        f"latent shape mismatch: {official.shape} vs {fv.shape}")
+    assert official.shape == fv.shape, (f"latent shape mismatch: {official.shape} vs {fv.shape}")
 
     # --- latent-level agreement -------------------------------------------- #
-    cos = torch.nn.functional.cosine_similarity(
-        official.flatten(), fv.flatten(), dim=0).item()
+    cos = torch.nn.functional.cosine_similarity(official.flatten(), fv.flatten(), dim=0).item()
     lat_mae = (official - fv).abs().mean().item()
     lat_scale = official.abs().mean().item()
     print(f"[glm-image denoise parity] latent cosine={cos:.6f} "
@@ -306,26 +286,20 @@ def test_pipeline_denoise_parity_deterministic(device):
     # --- decoded-image agreement (same VAE both sides isolates denoise) ----- #
     def _decode(lat):
         lat = lat.to(device, dtype)
-        mean = torch.tensor(pipe.vae.config.latents_mean).view(
-            1, -1, 1, 1).to(device, dtype)
-        std = torch.tensor(pipe.vae.config.latents_std).view(
-            1, -1, 1, 1).to(device, dtype)
+        mean = torch.tensor(pipe.vae.config.latents_mean).view(1, -1, 1, 1).to(device, dtype)
+        std = torch.tensor(pipe.vae.config.latents_std).view(1, -1, 1, 1).to(device, dtype)
         img = pipe.vae.decode((lat * std + mean), return_dict=False)[0]
-        return _to_uint8_hwc(pipe.image_processor.postprocess(
-            img, output_type="np")[0])
+        return _to_uint8_hwc(pipe.image_processor.postprocess(img, output_type="np")[0])
 
     off_img, fv_img = _decode(official), _decode(fv)
-    img_mae = np.abs(off_img.astype(np.float32)
-                     - fv_img.astype(np.float32)).mean()
+    img_mae = np.abs(off_img.astype(np.float32) - fv_img.astype(np.float32)).mean()
     print(f"[glm-image denoise parity] decoded image MAE={img_mae:.3f}/255 "
           f"(diffusers mean={off_img.mean():.1f}, fv mean={fv_img.mean():.1f})")
 
     del pipe
     torch.cuda.empty_cache()
 
-    assert cos > LATENT_COSINE_MIN, (
-        f"denoised-latent cosine {cos:.6f} < {LATENT_COSINE_MIN}: the FastVideo "
-        "and official denoise diverge well beyond kernel noise (wiring bug).")
-    assert img_mae < IMAGE_MAE_MAX, (
-        f"decoded-image MAE {img_mae:.3f}/255 >= {IMAGE_MAE_MAX}: outputs are "
-        "not equivalent under matched inputs (wiring/schedule bug).")
+    assert cos > LATENT_COSINE_MIN, (f"denoised-latent cosine {cos:.6f} < {LATENT_COSINE_MIN}: the FastVideo "
+                                     "and official denoise diverge well beyond kernel noise (wiring bug).")
+    assert img_mae < IMAGE_MAE_MAX, (f"decoded-image MAE {img_mae:.3f}/255 >= {IMAGE_MAE_MAX}: outputs are "
+                                     "not equivalent under matched inputs (wiring/schedule bug).")

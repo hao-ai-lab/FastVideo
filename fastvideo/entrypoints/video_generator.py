@@ -50,7 +50,7 @@ from fastvideo.api.schema import (
     SamplingConfig,
 )
 from fastvideo.api.sampling_param import SamplingParam
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.fastvideo_args import FastVideoArgs, WorkloadType
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import ForwardBatch
 from fastvideo.utils import align_to, shallow_asdict
@@ -71,6 +71,11 @@ _BATCH_EXTRA_PASSTHROUGH_KEYS: tuple[str, ...] = (
     "ltx2_audio_denoise_mask",
     "audio_num_frames",
     "video_position_offset_sec",
+    # MiniMax-H3 VSA per-request knobs (read by the H3 denoising stage;
+    # sparsity itself flows through the existing ForwardBatch.VSA_sparsity)
+    "vsa_mode",
+    "vsa_dense_first_n_steps",
+    "vsa_dense_layers",
 )
 
 _FROM_PRETRAINED_CONVENIENCE_KWARGS = frozenset({
@@ -110,6 +115,40 @@ def _infer_latent_batch_size(batch: ForwardBatch) -> int:
         raise ValueError("Cannot infer batch size from batch; no prompt or prompt_embeds found")
     latent_batch_size *= batch.num_videos_per_prompt
     return latent_batch_size
+
+
+def _resolve_output_size(
+    samples: torch.Tensor,
+    fallback: tuple[int, int, int],
+    *,
+    pixel_output: bool,
+) -> tuple[int, int, int]:
+    """Report the final decoded video's `(height, width, frames)`.
+
+    Refiner stages can produce a different resolution from the base request, so
+    pixel outputs use the final `[batch, channels, frames, height, width]` tensor.
+    Latent and audio outputs keep the requested fallback because their tensor
+    dimensions do not describe decoded pixels.
+    """
+    if pixel_output and samples.ndim == 5:
+        return (int(samples.shape[-2]), int(samples.shape[-1]), int(samples.shape[-3]))
+    return fallback
+
+
+def _validate_request_stage_overrides(model_path: str, request: GenerationRequest) -> None:
+    """Validate typed stage overrides against the model's registered preset."""
+    if not request.stage_overrides:
+        return
+    from fastvideo.api.presets import validate_preset_selection
+    from fastvideo.registry import get_preset_selection
+    preset_name, model_family = get_preset_selection(model_path)
+    if preset_name is None or model_family is None:
+        raise ValueError(f"Model {model_path!r} has no preset for stage override validation")
+    validate_preset_selection(
+        preset_name,
+        model_family,
+        stage_overrides=request.stage_overrides,
+    )
 
 
 class VideoGenerator:
@@ -443,6 +482,7 @@ class VideoGenerator:
         self,
         request: GenerationRequest,
     ) -> GenerationResult | list[GenerationResult]:
+        _validate_request_stage_overrides(self.fastvideo_args.model_path, request)
         if isinstance(request.prompt, list):
             if request.inputs.prompt_path is not None:
                 raise ValueError("request.prompt list cannot be combined with request.inputs.prompt_path")
@@ -565,7 +605,13 @@ class VideoGenerator:
 
         # Single prompt generation (original behavior)
         if prompt is None:
-            raise ValueError("Either prompt or prompt_txt must be provided")
+            if fastvideo_args.workload_type is WorkloadType.V2A:
+                # Video semantics are sufficient conditioning for V2A models;
+                # model-specific text stages interpret the empty string using
+                # their native tokenizer/empty-prompt contract.
+                prompt = ""
+            else:
+                raise ValueError("Either prompt or prompt_txt must be provided")
         output_path = self._prepare_output_path(sampling_param.output_path, prompt)
         kwargs["output_path"] = output_path
         if prompt_embeds is not None:
@@ -583,6 +629,13 @@ class VideoGenerator:
         if args is None:
             return False
         return args.workload_type.value.endswith("2i")
+
+    def _is_audio_workload(self) -> bool:
+        """Return True when the workload produces standalone audio."""
+        args = getattr(self, "fastvideo_args", None)
+        if args is None:
+            return False
+        return args.workload_type.value.endswith("2a")
 
     def _prepare_output_path(
         self,
@@ -603,7 +656,12 @@ class VideoGenerator:
           warning is logged.
         - If the target path already exists, a numeric suffix is appended.
         """
-        target_ext = ".png" if self._is_image_workload() else ".mp4"
+        if self._is_image_workload():
+            target_ext = ".png"
+        elif self._is_audio_workload():
+            target_ext = ".wav"
+        else:
+            target_ext = ".mp4"
 
         def _sanitize_filename_component(name: str) -> str:
             # Remove characters invalid on common filesystems, strip spaces/dots
@@ -816,6 +874,15 @@ class VideoGenerator:
         #   2. Audio-only workload — `samples` is a 1×3×1×8×8 placeholder
         #      no caller will use; skip the grid loop and save a `.wav`.
         #   3. Pixel video / image — the historical happy path.
+        # `GenerationResult.size` describes the produced media, not only the
+        # base-stage request. Refiner pipelines can change the final pixel
+        # dimensions, so derive this result metadata from the decoded output.
+        output_size = _resolve_output_size(
+            samples,
+            (target_height, target_width, batch.num_frames),
+            pixel_output=not is_latent_output and not audio_only,
+        )
+
         postprocess_start = time.perf_counter()
         frames: list[np.ndarray] | None
         if is_latent_output or audio_only:
@@ -938,7 +1005,7 @@ class VideoGenerator:
             "audio": output_batch.extra.get("audio"),
             "audio_sample_rate": output_batch.extra.get("audio_sample_rate"),
             "ltx2_audio_latents": output_batch.extra.get("ltx2_audio_latents"),
-            "size": (target_height, target_width, batch.num_frames),
+            "size": output_size,
             "generation_time": gen_time,
             "e2e_latency": e2e_time,
             "logging_info": logging_info,

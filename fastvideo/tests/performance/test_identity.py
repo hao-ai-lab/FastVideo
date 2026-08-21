@@ -99,8 +99,7 @@ def test_recipe_requires_first_class_benchmark_identity():
 def test_semantically_equivalent_sequence_forms_match():
     cfg = _benchmark_config()
     equivalent = deepcopy(cfg)
-    equivalent["init_kwargs"]["text_encoder_precisions"] = tuple(
-        equivalent["init_kwargs"]["text_encoder_precisions"])
+    equivalent["init_kwargs"]["text_encoder_precisions"] = tuple(equivalent["init_kwargs"]["text_encoder_precisions"])
 
     assert _fingerprint(cfg) == _fingerprint(equivalent)
 
@@ -120,14 +119,14 @@ def test_runtime_resolved_values_do_not_change_recipe_fingerprint():
     # degraded numbers seed a new baseline. Declared inputs (including
     # requested_backend) stay in the hash.
     cfg = _benchmark_config()
-    recipe = build_recipe_from_benchmark_config(
-        cfg, attention_backend="FLASH_ATTN",
-        resolved_attention_backend="FLASH_ATTN",
-        resolved_model_revision="aaaa1111")
-    changed = build_recipe_from_benchmark_config(
-        cfg, attention_backend="FLASH_ATTN",
-        resolved_attention_backend="TORCH_SDPA",
-        resolved_model_revision="bbbb2222")
+    recipe = build_recipe_from_benchmark_config(cfg,
+                                                attention_backend="FLASH_ATTN",
+                                                resolved_attention_backend="FLASH_ATTN",
+                                                resolved_model_revision="aaaa1111")
+    changed = build_recipe_from_benchmark_config(cfg,
+                                                 attention_backend="FLASH_ATTN",
+                                                 resolved_attention_backend="TORCH_SDPA",
+                                                 resolved_model_revision="bbbb2222")
 
     assert recipe["model"]["resolved_revision"] == "aaaa1111"  # kept for audit
     assert recipe["attention"]["resolved_backend"] == "FLASH_ATTN"  # kept for audit
@@ -167,8 +166,7 @@ def test_benchmark_version_changes_recipe_fingerprint():
 def test_attention_backend_changes_recipe_fingerprint():
     cfg = _benchmark_config()
 
-    assert _fingerprint(cfg, attention_backend="FLASH_ATTN") != _fingerprint(
-        cfg, attention_backend="TORCH_SDPA")
+    assert _fingerprint(cfg, attention_backend="FLASH_ATTN") != _fingerprint(cfg, attention_backend="TORCH_SDPA")
 
 
 def test_precision_changes_recipe_fingerprint():
@@ -289,8 +287,10 @@ def test_hardware_profile_id_uses_normalized_gpu_cohort():
     )
 
     assert profile == {
-        "device_type": "cuda",
-        "gpu_count": 2,
+        "device_type":
+        "cuda",
+        "gpu_count":
+        2,
         "gpus": [
             {
                 "name": "NVIDIA L40S",
@@ -303,12 +303,14 @@ def test_hardware_profile_id_uses_normalized_gpu_cohort():
                 "compute_capability": "8.9",
             },
         ],
-        "interconnect": "none_or_partial",
+        "interconnect":
+        "none_or_partial",
     }
     assert hardware_profile_id(profile).startswith("hw-")
 
 
 def test_hardware_profile_pads_missing_requested_cuda_devices(monkeypatch):
+
     class Props:
         name = "NVIDIA L40S"
         total_memory = 48 * 1024**3
@@ -349,14 +351,28 @@ def test_environment_metadata_is_separate_audit_fingerprint():
     audit_a = environment_metadata(
         env={"IMAGE_VERSION": "py3.12-cuda13.0.0"},
         package_versions={"triton": "3.4.1"},
-        hardware={"device_type": "cuda", "gpu_count": 2},
-        software={"python": "3.12", "pytorch": "2.12", "cuda": "13.0"},
+        hardware={
+            "device_type": "cuda",
+            "gpu_count": 2
+        },
+        software={
+            "python": "3.12",
+            "pytorch": "2.12",
+            "cuda": "13.0"
+        },
     )
     audit_b = environment_metadata(
         env={"IMAGE_VERSION": "py3.12-cuda13.0.1"},
         package_versions={"triton": "3.4.1"},
-        hardware={"device_type": "cuda", "gpu_count": 2},
-        software={"python": "3.12", "pytorch": "2.12", "cuda": "13.0"},
+        hardware={
+            "device_type": "cuda",
+            "gpu_count": 2
+        },
+        software={
+            "python": "3.12",
+            "pytorch": "2.12",
+            "cuda": "13.0"
+        },
     )
 
     assert recipe_hash == _fingerprint(cfg)
@@ -377,6 +393,7 @@ def test_runtime_identity_from_generator_summarizes_worker_records():
     revision = "b" * 40
 
     class FakeExecutor:
+
         def collective_rpc(self, _method):
             return [
                 {

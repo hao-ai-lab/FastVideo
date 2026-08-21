@@ -5,6 +5,7 @@ FastVideo supports the following hardware platforms:
 
 - [NVIDIA CUDA](installation/gpu.md)
 - [NVIDIA DGX Spark / GB10 (ARM64 + CUDA 13)](installation/spark.md)
+  ([performance & tuning](installation/spark_performance.md))
 - [Apple silicon](installation/mps.md)
 
 ## Quick Installation
@@ -54,8 +55,10 @@ UV_TORCH_BACKEND=cu126 uv pip install -e .
 uv pip install flash-attn --no-build-isolation -v
 ```
 
-## Hardware Requirements
+## Requirements
 
+- **Python**: 3.10-3.12 is the tested and recommended range (the commands
+  above pin 3.12)
 - **NVIDIA GPUs**: CUDA 12.6+ with compute capability 7.0+
 - **Apple Silicon**: macOS 14.0+ with M1/M2/M3/M4 chips
 - **CPU**: x86_64 architecture (for CPU-only inference)

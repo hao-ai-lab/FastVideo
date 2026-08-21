@@ -58,6 +58,29 @@ _LTX2_REFINE_ONLY_SUFFIXES = (
     ".video_to_audio_attn.to_v",
 )
 
+_LTX2_NVFP4_BLOCK_LINEAR_SUFFIXES = (
+    "attn1.to_q",
+    "attn1.to_k",
+    "attn1.to_v",
+    "attn1.to_out",
+    "attn2.to_q",
+    "attn2.to_out",
+    "audio_to_video_attn.to_q",
+    "audio_to_video_attn.to_out",
+    "video_to_audio_attn.to_k",
+    "video_to_audio_attn.to_v",
+    "ffn.fc_in",
+    "ffn.fc_out",
+)
+_LTX2_NVFP4_LINEAR_PREFIXES = frozenset(f"ltx2.blocks.{block_idx}.{suffix}" for block_idx in range(48)
+                                        for suffix in _LTX2_NVFP4_BLOCK_LINEAR_SUFFIXES) | frozenset(
+                                            ("ltx2.adaln_single.linear", ))
+
+
+def is_ltx2_nvfp4_linear_prefix(prefix: str) -> bool:
+    """Return whether *prefix* belongs to the LTX-2 NVFP4 deployment set."""
+    return prefix in _LTX2_NVFP4_LINEAR_PREFIXES
+
 
 def _is_ltx2_refine_only_prefix(prefix: str) -> bool:
     return any(prefix.endswith(suffix) for suffix in _LTX2_REFINE_ONLY_SUFFIXES)
@@ -286,6 +309,11 @@ class NVFP4QuantizeMethod(QuantizeMethodBase):
         self.x_global_sf = torch.tensor(1.0, device="cuda", dtype=torch.float32)
         self.layer_prefix = layer_prefix
         self._is_refine_only_layer = _is_ltx2_refine_only_prefix(layer_prefix)
+        # Set from NVFP4Config.retain_original_weights in get_quant_method:
+        # True = retain every original bf16 weight; None/False (default) =
+        # purge the purgeable set. Refine-only layers are always retained --
+        # the base stage profile runs them dense by deployment contract.
+        self._retain_original_weights: bool | None = None
 
     def create_weights(self, layer: torch.nn.Module, input_size_per_partition: int, output_partition_sizes: list[int],
                        input_size: int, output_size: int, params_dtype: torch.dtype, **extra_weight_attrs):
@@ -326,7 +354,11 @@ class NVFP4QuantizeMethod(QuantizeMethodBase):
         | None = None,
     ) -> torch.Tensor:
         SfLayout, _, _ = _require_flashinfer()
-        out_dim = layer.weight.shape[0]
+        # The original bf16 weight may have been purged after FP4 conversion
+        # (see convert_model_to_nvfp4); the packed FP4 weight keeps the
+        # output dim as its first dimension (only K is packed 2-per-byte).
+        weight = getattr(layer, "weight", None)
+        out_dim = weight.shape[0] if weight is not None else layer._nvfp4_weight.shape[0]
         original_shape = x.shape
 
         # Stage-aware profile: keep refine-only FP4 layers in dense mode
@@ -334,8 +366,13 @@ class NVFP4QuantizeMethod(QuantizeMethodBase):
         # quantize/dequantize tax for layers it never touches.
         stage_profile = _get_ltx2_fp4_stage_profile(default="refine")
         if self._is_refine_only_layer and stage_profile == "base":
-            out = (F.linear(x, layer.weight, bias) if torch.cuda.is_available() or bias is None else F.linear(
-                x, layer.weight, bias.to(x.dtype)))
+            if weight is None:
+                raise RuntimeError(f"NVFP4 layer {self.layer_prefix!r} hit the stage-profile dense path, "
+                                   "but its original weights were purged "
+                                   "(NVFP4Config(retain_original_weights=False)). Streaming/two-stage "
+                                   "deploys must load with retain_original_weights left unset (auto) or True.")
+            out = (F.linear(x, weight, bias) if torch.cuda.is_available() or bias is None else F.linear(
+                x, weight, bias.to(x.dtype)))
             return out.view(*original_shape[:-1], out_dim)
         if pre_quantized is not None:
             x_fp4, x_scale, x_global_sf = pre_quantized
@@ -393,11 +430,19 @@ class NVFP4Config(QuantizationConfig):
     instead of hardcoding it here.
     """
 
-    def __init__(self, layer_profile: str = "refine"):
+    def __init__(self, layer_profile: str = "refine", retain_original_weights: bool | None = None):
         super().__init__()
         # ``base``: stage-1 set (no attn2.to_out, no cross-modal AV
         # projections). ``refine``: full stage-2 set.
         self.layer_profile = layer_profile
+        # Original bf16 ``layer.weight`` retention after FP4 conversion.
+        # Default (None/False): purge the purgeable originals -- every
+        # always-FP4 layer. Refine-only layers (the cross-modal AV
+        # projections) are ALWAYS retained: the ``base`` stage profile runs
+        # them dense by deployment contract, including the distilled
+        # single-stage deploy. True: retain everything (debugging /
+        # pre-purge behavior).
+        self.retain_original_weights = retain_original_weights
 
     def get_name(self):
         return "nvfp4"
@@ -415,32 +460,20 @@ class NVFP4Config(QuantizationConfig):
 
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> NVFP4Config:
-        return cls(layer_profile=config.get("layer_profile", "refine"))
+        return cls(
+            layer_profile=config.get("layer_profile", "refine"),
+            retain_original_weights=config.get("retain_original_weights"),
+        )
 
     def get_quant_method(self, layer: torch.nn.Module, prefix: str):
         from fastvideo.layers.linear import LinearBase
 
         # Use the superset at build/load time, then switch active subset
         # dynamically in NVFP4QuantizeMethod.apply based on stage profile.
-        fp4_layers = [[
-            f"ltx2.blocks.{i}.attn1.to_q",
-            f"ltx2.blocks.{i}.attn1.to_k",
-            f"ltx2.blocks.{i}.attn1.to_v",
-            f"ltx2.blocks.{i}.attn1.to_out",
-            f"ltx2.blocks.{i}.attn2.to_q",
-            f"ltx2.blocks.{i}.attn2.to_out",
-            f"ltx2.blocks.{i}.audio_to_video_attn.to_q",
-            f"ltx2.blocks.{i}.audio_to_video_attn.to_out",
-            f"ltx2.blocks.{i}.video_to_audio_attn.to_k",
-            f"ltx2.blocks.{i}.video_to_audio_attn.to_v",
-            f"ltx2.blocks.{i}.ffn.fc_in",
-            f"ltx2.blocks.{i}.ffn.fc_out",
-        ] for i in range(48)]
-        fp4_layers.append([
-            "ltx2.adaln_single.linear",
-        ])
-        if isinstance(layer, LinearBase) and any(prefix in layer_names for layer_names in fp4_layers):
-            return NVFP4QuantizeMethod(layer_prefix=prefix)
+        if isinstance(layer, LinearBase) and is_ltx2_nvfp4_linear_prefix(prefix):
+            method = NVFP4QuantizeMethod(layer_prefix=prefix)
+            method._retain_original_weights = self.retain_original_weights
+            return method
         return None
 
 
@@ -448,6 +481,9 @@ def convert_model_to_nvfp4(model: torch.nn.Module) -> None:
     SfLayout, _, _ = _require_flashinfer()
     from torch.distributed.tensor import DTensor  # type: ignore
 
+    purged = 0
+    retained = 0
+    purged_bytes = 0
     for mod in model.modules():
         qm = getattr(mod, "quant_method", None)
         if isinstance(qm, NVFP4QuantizeMethod):
@@ -480,9 +516,40 @@ def convert_model_to_nvfp4(model: torch.nn.Module) -> None:
                 persistent=False,
             )
 
+            retain_flag = getattr(qm, "_retain_original_weights", None)
+            # Refine-only layers are NEVER purgeable: the "base" stage profile
+            # runs them dense by deployment contract (the distilled
+            # single-stage deploy included — its forward context is the base
+            # profile, so e.g. audio_to_video_attn routes dense every step).
+            # retain_original_weights therefore only widens retention
+            # (True = keep everything); it cannot narrow it below the
+            # dense-capable set.
+            retain = qm._is_refine_only_layer or retain_flag is True
+            if retain:
+                retained += 1
+            elif isinstance(weight, DTensor):
+                # ponytail: purging FSDP-sharded originals needs per-shard
+                # resharding bookkeeping; skip until a sharded deploy needs it.
+                retained += 1
+            else:
+                purged_bytes += weight.numel() * weight.element_size()
+                purged += 1
+                mod.register_parameter("weight", None)
+
+    if purged or retained:
+        logger.info(
+            "NVFP4 weight purge receipt: purged %d original bf16 weight tensors "
+            "(%.2f GiB freed); retained %d (refine-only dense fallback or "
+            "retain_original_weights).",
+            purged,
+            purged_bytes / (1 << 30),
+            retained,
+        )
+
 
 __all__ = [
     "NVFP4Config",
     "NVFP4QuantizeMethod",
     "convert_model_to_nvfp4",
+    "is_ltx2_nvfp4_linear_prefix",
 ]

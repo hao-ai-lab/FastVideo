@@ -304,6 +304,8 @@ def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, An
         for key in _LTX2_REFINE_FLAT_KEYS:
             if key in refine:
                 kwargs[f"ltx2_refine_{key}"] = refine[key]
+        if "enabled" in refine:
+            kwargs["refine_enabled"] = refine["enabled"]
     kwargs.update(preset_overrides)
     kwargs.update(deepcopy(normalized.pipeline.experimental))
     return FastVideoArgs.from_kwargs(**kwargs)

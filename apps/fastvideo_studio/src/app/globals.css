@@ -41,7 +41,7 @@
 
 	--border: #e2e8f0;
 	--input: #cbd5e1;
-	--ring: #94a3b8;
+	--ring: #1d4ed8;
 
 	--radius: 0.5rem;
 }
@@ -77,7 +77,7 @@
 
 	--border: #334155;
 	--input: #334155;
-	--ring: #cbd5e1;
+	--ring: #7dd3fc;
 }
 
 @theme inline {
@@ -125,6 +125,7 @@
 html,
 body {
 	min-height: 100%;
+	overflow-x: clip;
 }
 
 html {
@@ -161,6 +162,22 @@ body::after {
 
 a {
 	color: inherit;
+}
+
+:where(
+	a,
+	button,
+	input,
+	textarea,
+	select,
+	summary,
+	[role="button"],
+	[role="menuitem"],
+	[role="slider"],
+	[tabindex]
+):focus-visible {
+	outline: 3px solid var(--ring) !important;
+	outline-offset: 2px !important;
 }
 
 summary {

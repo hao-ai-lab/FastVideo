@@ -10,8 +10,7 @@ import torch
 from fastvideo.api.flux import FluxSamplingParam
 from fastvideo.logger import init_logger
 from fastvideo.tests.ssim.inference_similarity_utils import (
-    run_text_to_video_similarity_test,
-)
+    run_text_to_video_similarity_test, )
 from fastvideo.tests.ssim.reference_utils import (
     get_cuda_device_name,
     resolve_device_reference_folder,
@@ -34,6 +33,7 @@ device_reference_folder = resolve_device_reference_folder(
         ("A40", "A40"),
         ("L40S", "L40S"),
         ("H100", "H100"),
+        ("GB200", "GB200"),
         ("H200", "H200"),
         ("RTX 4090", "RTX4090"),
         ("4090", "RTX4090"),
@@ -102,10 +102,8 @@ def test_flux_t2i_similarity(
 ) -> None:
     is_hf_repo = "/" in FLUX_MODEL_PATH and not FLUX_MODEL_PATH.startswith("/")
     if not is_hf_repo and not os.path.isdir(FLUX_MODEL_PATH):
-        pytest.skip(
-            f"FLUX weights not found at {FLUX_MODEL_PATH} "
-            f"(set FLUX_T2I_MODEL_DIR to override)"
-        )
+        pytest.skip(f"FLUX weights not found at {FLUX_MODEL_PATH} "
+                    f"(set FLUX_T2I_MODEL_DIR to override)")
 
     run_text_to_video_similarity_test(
         logger=logger,

@@ -81,6 +81,7 @@ Common model parameters:
 | `disable_custom_init_weights` | `false` | Skip custom weight initialization (use for teacher/critic) |
 | `flow_shift` | `3.0` | Timestep shifting factor |
 | `enable_gradient_checkpointing_type` | `null` | Gradient checkpointing (`"full"` or `null`) |
+| `attention_backend` | `null` | Optional role-local backend for Wan models (for example `ATTN_QAT_TRAIN`); overrides the process default only while this role's transformer is built |
 
 Which roles are needed depends on the training method:
 
@@ -211,6 +212,29 @@ pipeline:
   flow_shift: 8
 ```
 
+Registered transformer linear-quantization configs can also be selected by
+name. For example, the LTX-2 NVFP4-QAT recipe applies real FP4 forward GEMMs
+with a straight-through-estimator backward to its deployment-targeted
+attention/FFN projections:
+
+```yaml
+pipeline:
+  dit_config:
+    quant_config: nvfp4_qat_train
+```
+
+The LTX-2 recipe in
+`examples/train/configs/overfit_ltx2_t2v_nvfp4_qat.yaml` combines that linear
+configuration with `models.student.attention_backend: ATTN_QAT_TRAIN` for
+video-attention forward/backward. On sm120, its validation callback temporarily
+switches those layers to `ATTN_QAT_INFER`.
+On GB200, set `callbacks.validation.attn_qat_infer: false` to keep validation on
+the train-time QAT backend; the inference kernel is sm120-only.
+
+User-adaptable LTX-2 fine-tuning recipes (full, LoRA, and NVFP4 QAT) live in
+`examples/train/configs/fine_tuning/ltx2/`, alongside the other model
+families under `examples/train/configs/fine_tuning/`.
+
 ---
 
 ## Training Methods
@@ -298,6 +322,8 @@ method:
 | `dmd_denoising_steps` | *(required)* | Timestep schedule for student rollout |
 | `generator_update_interval` | `1` | Update student every N critic steps |
 | `real_score_guidance_scale` | `1.0` | CFG scale for teacher predictions |
+| `min_timestep_ratio` | `0.0` | Lower bound for randomly sampled teacher/critic score timesteps |
+| `max_timestep_ratio` | `1.0` | Upper bound for randomly sampled teacher/critic score timesteps |
 | `fake_score_learning_rate` | *(required)* | Critic optimizer learning rate |
 | `fake_score_betas` | *(required)* | Critic optimizer Adam betas |
 | `fake_score_lr_scheduler` | *(required)* | Critic LR scheduler type |

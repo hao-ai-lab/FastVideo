@@ -21,12 +21,8 @@ def _function_strings(path: Path, function_name: str) -> str:
     tree = ast.parse(source)
     for node in tree.body:
         if isinstance(node, ast.FunctionDef) and node.name == function_name:
-            return "\n".join(
-                child.value
-                for child in ast.walk(node)
-                if isinstance(child, ast.Constant)
-                and isinstance(child.value, str)
-            )
+            return "\n".join(child.value for child in ast.walk(node)
+                             if isinstance(child, ast.Constant) and isinstance(child.value, str))
     raise AssertionError(f"{function_name} not found in {path}")
 
 
@@ -52,8 +48,7 @@ def test_performance_identity_env_reaches_modal_runtime():
 
 def test_performance_lane_classifies_pull_requests_before_main():
     function_strings = _function_strings(PR_TEST, "run_performance_tests")
-    assert function_strings.index(
-        "BUILDKITE_PULL_REQUEST") < function_strings.index("BUILDKITE_BRANCH")
+    assert function_strings.index("BUILDKITE_PULL_REQUEST") < function_strings.index("BUILDKITE_BRANCH")
 
 
 def test_vsa_training_lane_uses_strict_h100_pair():

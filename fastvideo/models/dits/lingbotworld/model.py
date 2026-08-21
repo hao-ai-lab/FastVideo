@@ -8,11 +8,9 @@ import torch.nn as nn
 
 from fastvideo.attention import DistributedAttention
 from fastvideo.configs.models.dits.lingbotworld import LingBotWorldVideoConfig
-from fastvideo.distributed.communication_op import (
-    sequence_model_parallel_all_gather_with_unpad,
-    sequence_model_parallel_shard)
-from fastvideo.layers.layernorm import (FP32LayerNorm, LayerNormScaleShift,
-                                        RMSNorm, ScaleResidual,
+from fastvideo.distributed.communication_op import (sequence_model_parallel_all_gather_with_unpad,
+                                                    sequence_model_parallel_shard)
+from fastvideo.layers.layernorm import (FP32LayerNorm, LayerNormScaleShift, RMSNorm, ScaleResidual,
                                         ScaleResidualLayerNormScaleShift)
 from fastvideo.layers.linear import ReplicatedLinear
 # from torch.nn import RMSNorm
@@ -51,8 +49,7 @@ class LingBotWorldCamConditioner(nn.Module):
             return hidden_states
         assert c2ws_plucker_emb.shape == hidden_states.shape, (
             f"c2ws_plucker_emb shape must match hidden_states shape, got "
-            f"{tuple(c2ws_plucker_emb.shape)} vs {tuple(hidden_states.shape)}"
-        )
+            f"{tuple(c2ws_plucker_emb.shape)} vs {tuple(hidden_states.shape)}")
         c2ws_hidden_states = self.cam_injector(c2ws_plucker_emb)
         c2ws_hidden_states = c2ws_hidden_states + c2ws_plucker_emb
         cam_scale = self.cam_scale_layer(c2ws_hidden_states)
@@ -82,12 +79,11 @@ class LingBotWorldTransformerBlock(nn.Module):
         self.to_v = ReplicatedLinear(dim, dim, bias=True)
 
         self.to_out = ReplicatedLinear(dim, dim, bias=True)
-        self.attn1 = DistributedAttention(
-            num_heads=num_heads,
-            head_size=dim // num_heads,
-            causal=False,
-            supported_attention_backends=supported_attention_backends,
-            prefix=f"{prefix}.attn1")
+        self.attn1 = DistributedAttention(num_heads=num_heads,
+                                          head_size=dim // num_heads,
+                                          causal=False,
+                                          supported_attention_backends=supported_attention_backends,
+                                          prefix=f"{prefix}.attn1")
         self.hidden_dim = dim
         self.num_attention_heads = num_heads
         dim_head = dim // num_heads
@@ -99,37 +95,28 @@ class LingBotWorldTransformerBlock(nn.Module):
             self.norm_q = RMSNorm(dim, eps=eps)
             self.norm_k = RMSNorm(dim, eps=eps)
         else:
-            raise NotImplementedError(
-                f"QK Norm type '{qk_norm}' not supported")
+            raise NotImplementedError(f"QK Norm type '{qk_norm}' not supported")
         assert cross_attn_norm is True
-        self.self_attn_residual_norm = ScaleResidualLayerNormScaleShift(
-            dim,
-            norm_type="layer",
-            eps=eps,
-            elementwise_affine=True,
-            dtype=torch.float32,
-            compute_dtype=torch.float32)
+        self.self_attn_residual_norm = ScaleResidualLayerNormScaleShift(dim,
+                                                                        norm_type="layer",
+                                                                        eps=eps,
+                                                                        elementwise_affine=True,
+                                                                        dtype=torch.float32,
+                                                                        compute_dtype=torch.float32)
 
         # 2. Cross-attention
         if added_kv_proj_dim is not None:
             # I2V
-            self.attn2 = WanI2VCrossAttention(dim,
-                                              num_heads,
-                                              qk_norm=qk_norm,
-                                              eps=eps)
+            self.attn2 = WanI2VCrossAttention(dim, num_heads, qk_norm=qk_norm, eps=eps)
         else:
             # T2V
-            self.attn2 = WanT2VCrossAttention(dim,
-                                              num_heads,
-                                              qk_norm=qk_norm,
-                                              eps=eps)
-        self.cross_attn_residual_norm = ScaleResidualLayerNormScaleShift(
-            dim,
-            norm_type="layer",
-            eps=eps,
-            elementwise_affine=False,
-            dtype=torch.float32,
-            compute_dtype=torch.float32)
+            self.attn2 = WanT2VCrossAttention(dim, num_heads, qk_norm=qk_norm, eps=eps)
+        self.cross_attn_residual_norm = ScaleResidualLayerNormScaleShift(dim,
+                                                                         norm_type="layer",
+                                                                         eps=eps,
+                                                                         elementwise_affine=False,
+                                                                         dtype=torch.float32,
+                                                                         compute_dtype=torch.float32)
 
         # 3. Feed-forward
         self.ffn = MLP(dim, ffn_dim, act_type="gelu_pytorch_tanh")
@@ -156,8 +143,7 @@ class LingBotWorldTransformerBlock(nn.Module):
         if temb.dim() == 4:
             # temb: batch_size, seq_len, 6, inner_dim (wan2.2 ti2v)
             shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = (
-                self.scale_shift_table.unsqueeze(0) + temb.float()
-            ).chunk(6, dim=2)
+                self.scale_shift_table.unsqueeze(0) + temb.float()).chunk(6, dim=2)
             # batch_size, seq_len, 1, inner_dim
             shift_msa = shift_msa.squeeze(2)
             scale_msa = scale_msa.squeeze(2)
@@ -168,13 +154,11 @@ class LingBotWorldTransformerBlock(nn.Module):
         else:
             # temb: batch_size, 6, inner_dim (wan2.1/wan2.2 14B)
             e = self.scale_shift_table + temb.float()
-            shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = e.chunk(
-                6, dim=1)
+            shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = e.chunk(6, dim=1)
         assert shift_msa.dtype == torch.float32
 
         # 1. Self-attention
-        norm_hidden_states = (self.norm1(hidden_states.float()) *
-                              (1 + scale_msa) + shift_msa).to(orig_dtype)
+        norm_hidden_states = (self.norm1(hidden_states.float()) * (1 + scale_msa) + shift_msa).to(orig_dtype)
         query, _ = self.to_q(norm_hidden_states)
         key, _ = self.to_k(norm_hidden_states)
         value, _ = self.to_v(norm_hidden_states)
@@ -200,10 +184,9 @@ class LingBotWorldTransformerBlock(nn.Module):
         attn_output = attn_output.squeeze(1)
 
         null_shift = null_scale = torch.tensor([0], device=hidden_states.device)
-        norm_hidden_states, hidden_states = self.self_attn_residual_norm(
-            hidden_states, attn_output, gate_msa, null_shift, null_scale)
-        norm_hidden_states, hidden_states = norm_hidden_states.to(
-            orig_dtype), hidden_states.to(orig_dtype)
+        norm_hidden_states, hidden_states = self.self_attn_residual_norm(hidden_states, attn_output, gate_msa,
+                                                                         null_shift, null_scale)
+        norm_hidden_states, hidden_states = norm_hidden_states.to(orig_dtype), hidden_states.to(orig_dtype)
         # Inject camera condition
         # must be applied after the self-attention residual update.
         hidden_states = self.cam_conditioner(hidden_states, c2ws_plucker_emb)
@@ -211,13 +194,10 @@ class LingBotWorldTransformerBlock(nn.Module):
         norm_hidden_states = norm_hidden_states.to(orig_dtype)
 
         # 2. Cross-attention
-        attn_output = self.attn2(norm_hidden_states,
-                                 context=encoder_hidden_states,
-                                 context_lens=None)
-        norm_hidden_states, hidden_states = self.cross_attn_residual_norm(
-            hidden_states, attn_output, 1, c_shift_msa, c_scale_msa)
-        norm_hidden_states, hidden_states = norm_hidden_states.to(
-            orig_dtype), hidden_states.to(orig_dtype)
+        attn_output = self.attn2(norm_hidden_states, context=encoder_hidden_states, context_lens=None)
+        norm_hidden_states, hidden_states = self.cross_attn_residual_norm(hidden_states, attn_output, 1, c_shift_msa,
+                                                                          c_scale_msa)
+        norm_hidden_states, hidden_states = norm_hidden_states.to(orig_dtype), hidden_states.to(orig_dtype)
 
         # 3. Feed-forward
         ff_output = self.ffn(norm_hidden_states)
@@ -230,14 +210,12 @@ class LingBotWorldTransformerBlock(nn.Module):
 class LingBotWorldTransformer3DModel(BaseDiT):
     _fsdp_shard_conditions = LingBotWorldVideoConfig()._fsdp_shard_conditions
     _compile_conditions = LingBotWorldVideoConfig()._compile_conditions
-    _supported_attention_backends = LingBotWorldVideoConfig(
-    )._supported_attention_backends
+    _supported_attention_backends = LingBotWorldVideoConfig()._supported_attention_backends
     param_names_mapping = LingBotWorldVideoConfig().param_names_mapping
     reverse_param_names_mapping = LingBotWorldVideoConfig().reverse_param_names_mapping
     lora_param_names_mapping = LingBotWorldVideoConfig().lora_param_names_mapping
 
-    def __init__(self, config: LingBotWorldVideoConfig, hf_config: dict[str,
-                                                               Any]) -> None:
+    def __init__(self, config: LingBotWorldVideoConfig, hf_config: dict[str, Any]) -> None:
         super().__init__(config=config, hf_config=hf_config)
 
         inner_dim = config.num_attention_heads * config.attention_head_dim
@@ -249,7 +227,8 @@ class LingBotWorldTransformer3DModel(BaseDiT):
         self.patch_size = config.patch_size
         self.text_len = config.text_len
 
-        assert config.num_attention_heads % get_sp_world_size() == 0, f"The number of attention heads ({config.num_attention_heads}) must be divisible by the sequence parallel size ({get_sp_world_size()})"
+        assert config.num_attention_heads % get_sp_world_size(
+        ) == 0, f"The number of attention heads ({config.num_attention_heads}) must be divisible by the sequence parallel size ({get_sp_world_size()})"
 
         # 1. Patch & position embedding
         self.patch_embedding = PatchEmbed(in_chans=config.in_channels,
@@ -280,8 +259,7 @@ class LingBotWorldTransformer3DModel(BaseDiT):
                               config.eps,
                               config.added_kv_proj_dim,
                               self._supported_attention_backends,
-                              prefix=f"{config.prefix}.blocks.{i}")
-            for i in range(config.num_layers)
+                              prefix=f"{config.prefix}.blocks.{i}") for i in range(config.num_layers)
         ])
 
         # 4. Output norm & projection
@@ -291,10 +269,8 @@ class LingBotWorldTransformer3DModel(BaseDiT):
                                             elementwise_affine=False,
                                             dtype=torch.float32,
                                             compute_dtype=torch.float32)
-        self.proj_out = nn.Linear(
-            inner_dim, config.out_channels * math.prod(config.patch_size))
-        self.scale_shift_table = nn.Parameter(
-            torch.randn(1, 2, inner_dim) / inner_dim**0.5)
+        self.proj_out = nn.Linear(inner_dim, config.out_channels * math.prod(config.patch_size))
+        self.scale_shift_table = nn.Parameter(torch.randn(1, 2, inner_dim) / inner_dim**0.5)
 
         self.gradient_checkpointing = False
         self.__post_init__()
@@ -311,11 +287,9 @@ class LingBotWorldTransformer3DModel(BaseDiT):
         orig_dtype = hidden_states.dtype
         if encoder_hidden_states is not None and not isinstance(encoder_hidden_states, torch.Tensor):
             encoder_hidden_states = encoder_hidden_states[0]
-        if isinstance(encoder_hidden_states_image,
-                      list) and len(encoder_hidden_states_image) > 0:
-            encoder_hidden_states_image = encoder_hidden_states_image[0]
-        else:
-            encoder_hidden_states_image = None
+        if isinstance(encoder_hidden_states_image, list):
+            encoder_hidden_states_image = (encoder_hidden_states_image[0]
+                                           if len(encoder_hidden_states_image) > 0 else None)
 
         batch_size, num_channels, num_frames, height, width = hidden_states.shape
         p_t, p_h, p_w = self.patch_size
@@ -326,34 +300,29 @@ class LingBotWorldTransformer3DModel(BaseDiT):
         # Get rotary embeddings
         d = self.hidden_size // self.num_attention_heads
         rope_dim_list = [d - 4 * (d // 6), 2 * (d // 6), 2 * (d // 6)]
-        freqs_cos, freqs_sin = get_rotary_pos_embed(
-            (post_patch_num_frames, post_patch_height,
-             post_patch_width),
-            self.hidden_size,
-            self.num_attention_heads,
-            rope_dim_list,
-            dtype=torch.float32 if current_platform.is_mps() else torch.float64,
-            rope_theta=10000)
-        freqs_cis = (freqs_cos.to(hidden_states.device).float(),
-                     freqs_sin.to(hidden_states.device).float())
+        freqs_cos, freqs_sin = get_rotary_pos_embed((post_patch_num_frames, post_patch_height, post_patch_width),
+                                                    self.hidden_size,
+                                                    self.num_attention_heads,
+                                                    rope_dim_list,
+                                                    dtype=torch.float32 if current_platform.is_mps() else torch.float64,
+                                                    rope_theta=10000)
+        freqs_cis = (freqs_cos.to(hidden_states.device).float(), freqs_sin.to(hidden_states.device).float())
 
         hidden_states = self.patch_embedding(hidden_states)
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
         c2ws_hidden_states = None
         if c2ws_plucker_emb is not None:
             c2ws_plucker_emb = self.patch_embedding_wancamctrl(
-                c2ws_plucker_emb.to(device=hidden_states.device, dtype=hidden_states.dtype)
-            )
+                c2ws_plucker_emb.to(device=hidden_states.device, dtype=hidden_states.dtype))
             c2ws_hidden_states = self.c2ws_mlp(c2ws_plucker_emb)
             c2ws_plucker_emb = c2ws_plucker_emb + c2ws_hidden_states
 
         # Shard with padding support - returns (sharded_tensor, original_seq_len)
         hidden_states, original_seq_len = sequence_model_parallel_shard(hidden_states, dim=1)
-        
+
         # Shard c2ws_plucker_emb
         if c2ws_plucker_emb is not None:
             c2ws_plucker_emb, _ = sequence_model_parallel_shard(c2ws_plucker_emb, dim=1)
-        
 
         # timestep shape: batch_size, or batch_size, seq_len (wan 2.2 ti2v)
         if timestep.dim() == 2:
@@ -373,28 +342,26 @@ class LingBotWorldTransformer3DModel(BaseDiT):
 
         if encoder_hidden_states_image is not None:
             if encoder_hidden_states is not None:
-                encoder_hidden_states = torch.concat(
-                    [encoder_hidden_states_image, encoder_hidden_states], dim=1)
+                encoder_hidden_states = torch.concat([encoder_hidden_states_image, encoder_hidden_states], dim=1)
             else:
                 encoder_hidden_states = encoder_hidden_states_image
 
         if current_platform.is_mps() or current_platform.is_npu():
             encoder_hidden_states = encoder_hidden_states.to(orig_dtype)
         else:
-            encoder_hidden_states = encoder_hidden_states # cast to orig_dtype for MPS & NPU
+            encoder_hidden_states = encoder_hidden_states  # cast to orig_dtype for MPS & NPU
 
         assert encoder_hidden_states.dtype == orig_dtype
 
         # 4. Transformer blocks
         if torch.is_grad_enabled() and self.gradient_checkpointing:
             for block in self.blocks:
-                hidden_states = self._gradient_checkpointing_func(
-                    block, hidden_states, encoder_hidden_states,
-                    timestep_proj, freqs_cis, original_seq_len, c2ws_plucker_emb)
+                hidden_states = self._gradient_checkpointing_func(block, hidden_states, encoder_hidden_states,
+                                                                  timestep_proj, freqs_cis, original_seq_len,
+                                                                  c2ws_plucker_emb)
         else:
             for block in self.blocks:
-                hidden_states = block(hidden_states, encoder_hidden_states,
-                                      timestep_proj, freqs_cis, original_seq_len,
+                hidden_states = block(hidden_states, encoder_hidden_states, timestep_proj, freqs_cis, original_seq_len,
                                       c2ws_plucker_emb)
         # 5. Output norm, projection & unpatchify
         if temb.dim() == 3:
@@ -405,23 +372,20 @@ class LingBotWorldTransformer3DModel(BaseDiT):
         else:
             # batch_size, inner_dim
             shift, scale = (self.scale_shift_table + temb.unsqueeze(1)).chunk(2, dim=1)
-            
 
         hidden_states = self.norm_out(hidden_states, shift, scale)
 
         # Gather and unpad in one operation
-        hidden_states = sequence_model_parallel_all_gather_with_unpad(
-            hidden_states, original_seq_len, dim=1)
+        hidden_states = sequence_model_parallel_all_gather_with_unpad(hidden_states, original_seq_len, dim=1)
         hidden_states = self.proj_out(hidden_states)
 
-        hidden_states = hidden_states.reshape(batch_size, post_patch_num_frames,
-                                              post_patch_height,
-                                              post_patch_width, p_t, p_h, p_w,
-                                              -1)
+        hidden_states = hidden_states.reshape(batch_size, post_patch_num_frames, post_patch_height, post_patch_width,
+                                              p_t, p_h, p_w, -1)
         hidden_states = hidden_states.permute(0, 7, 1, 4, 2, 5, 3, 6)
         output = hidden_states.flatten(6, 7).flatten(4, 5).flatten(2, 3)
 
         return output
+
 
 # Entry point for model registry
 EntryClass = LingBotWorldTransformer3DModel

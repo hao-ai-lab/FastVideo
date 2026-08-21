@@ -58,6 +58,10 @@ class DMD2Method(TrainingMethod):
         self._validate_preprocessed_data_type()
         self._configure_student_negative_conditioning()
         self._denoising_step_list: torch.Tensor | None = (None)
+        (
+            self._score_min_timestep,
+            self._score_max_timestep,
+        ) = self._parse_score_timestep_bounds()
 
         # Initialize preprocessors on student.
         self.student.init_preprocessors(self.training_config)
@@ -427,6 +431,51 @@ class DMD2Method(TrainingMethod):
         )
         return step_list[index]
 
+    def _parse_score_timestep_bounds(self) -> tuple[int, int]:
+        """Resolve the score-model timestep window used by legacy DMD.
+
+        The student rollout schedule is controlled separately by
+        ``dmd_denoising_steps``. These bounds apply only to the randomly
+        sampled teacher/critic score timestep.
+        """
+        min_ratio = get_optional_float(
+            self.method_config,
+            "min_timestep_ratio",
+            where="method.min_timestep_ratio",
+        )
+        max_ratio = get_optional_float(
+            self.method_config,
+            "max_timestep_ratio",
+            where="method.max_timestep_ratio",
+        )
+        min_ratio = 0.0 if min_ratio is None else float(min_ratio)
+        max_ratio = 1.0 if max_ratio is None else float(max_ratio)
+        if not 0.0 <= min_ratio <= max_ratio <= 1.0:
+            raise ValueError("method min/max_timestep_ratio must satisfy "
+                             "0 <= min <= max <= 1, got "
+                             f"min={min_ratio}, max={max_ratio}")
+
+        num_timesteps = int(self.student.num_train_timesteps)
+        return (
+            int(min_ratio * num_timesteps),
+            int(max_ratio * num_timesteps),
+        )
+
+    def _sample_score_timestep(self, device: torch.device) -> torch.Tensor:
+        timestep = torch.randint(
+            0,
+            int(self.student.num_train_timesteps),
+            [1],
+            device=device,
+            dtype=torch.long,
+            generator=self.cuda_generator,
+        )
+        timestep = self.student.shift_and_clamp_timestep(timestep)
+        return timestep.clamp(
+            self._score_min_timestep,
+            self._score_max_timestep,
+        )
+
     def _student_rollout(
         self,
         batch: Any,
@@ -557,15 +606,7 @@ class DMD2Method(TrainingMethod):
             generator_pred_x0 = self._student_rollout(batch, with_grad=False)
 
         device = generator_pred_x0.device
-        fake_score_timestep = torch.randint(
-            0,
-            int(self.student.num_train_timesteps),
-            [1],
-            device=device,
-            dtype=torch.long,
-            generator=self.cuda_generator,
-        )
-        fake_score_timestep = (self.student.shift_and_clamp_timestep(fake_score_timestep))
+        fake_score_timestep = self._sample_score_timestep(device)
 
         noise = torch.randn(
             generator_pred_x0.shape,
@@ -612,15 +653,7 @@ class DMD2Method(TrainingMethod):
         device = generator_pred_x0.device
 
         with torch.no_grad():
-            timestep = torch.randint(
-                0,
-                int(self.student.num_train_timesteps),
-                [1],
-                device=device,
-                dtype=torch.long,
-                generator=self.cuda_generator,
-            )
-            timestep = (self.student.shift_and_clamp_timestep(timestep))
+            timestep = self._sample_score_timestep(device)
 
             noise = torch.randn(
                 generator_pred_x0.shape,

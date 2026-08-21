@@ -97,9 +97,8 @@ def test_clip_encoder():
             logger.info("Testing prompt: '%s'", prompt)
 
             # Tokenize the prompt
-            tokens = tokenizer(prompt, padding="max_length", max_length=77, truncation=True, return_tensors="pt").to(
-                device
-            )
+            tokens = tokenizer(prompt, padding="max_length", max_length=77, truncation=True,
+                               return_tensors="pt").to(device)
             # Get embeddings from our implementation
             outputs1 = model1(input_ids=tokens.input_ids, output_hidden_states=True)
 
@@ -120,15 +119,13 @@ def test_clip_encoder():
             # print("last_hidden_state2", last_hidden_state2)
 
             assert last_hidden_state1.shape == last_hidden_state2.shape, (
-                f"Hidden state shapes don't match: {last_hidden_state1.shape} vs {last_hidden_state2.shape}"
-            )
+                f"Hidden state shapes don't match: {last_hidden_state1.shape} vs {last_hidden_state2.shape}")
             # Compare pooler outputs
             pooler_output1 = outputs1.pooler_output
             pooler_output2 = outputs2.pooler_output
 
             assert pooler_output1.shape == pooler_output2.shape, (
-                f"Pooler output shapes don't match: {pooler_output1.shape} vs {pooler_output2.shape}"
-            )
+                f"Pooler output shapes don't match: {pooler_output1.shape} vs {pooler_output2.shape}")
 
             assert_close(pooler_output1, pooler_output2, atol=1e-2, rtol=1e-3)
             assert_close(last_hidden_state1, last_hidden_state2, atol=1e-2, rtol=1e-3)

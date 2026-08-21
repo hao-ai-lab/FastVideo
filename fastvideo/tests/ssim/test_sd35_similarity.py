@@ -9,8 +9,7 @@ import torch
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.logger import init_logger
 from fastvideo.tests.ssim.inference_similarity_utils import (
-    run_text_to_video_similarity_test,
-)
+    run_text_to_video_similarity_test, )
 from fastvideo.tests.ssim.reference_utils import (
     get_cuda_device_name,
     resolve_device_reference_folder,
@@ -30,6 +29,7 @@ device_reference_folder = resolve_device_reference_folder(
         ("A40", "A40"),
         ("L40S", "L40S"),
         ("H100", "H100"),
+        ("GB200", "GB200"),
         ("H200", "H200"),
         ("RTX 4090", "RTX4090"),
         ("4090", "RTX4090"),
@@ -60,8 +60,7 @@ SD35_PARAMS = {
     "neg_prompt": "",
 }
 
-_SD35_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained(
-    SD35_MODEL_PATH)
+_SD35_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained(SD35_MODEL_PATH)
 SD35_FULL_QUALITY_PARAMS = {
     "num_gpus": 1,
     "model_path": SD35_MODEL_PATH,

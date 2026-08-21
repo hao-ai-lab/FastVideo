@@ -11,7 +11,7 @@ from fastvideo.models.encoders.base import TextEncoder
 
 
 class T5EncoderModel(TextEncoder):
-    
+
     supports_hf_from_pretrained: bool = True
 
     def __init__(self, config: T5Config, hf_model: Any | None = None) -> None:
@@ -37,9 +37,7 @@ class T5EncoderModel(TextEncoder):
             hf = HFT5EncoderModel.from_pretrained(model_path, dtype=dtype, **kwargs)
         except TypeError:
             # Backward-compatible fallback for older Transformers versions.
-            hf = HFT5EncoderModel.from_pretrained(
-                model_path, torch_dtype=dtype, **kwargs
-            )
+            hf = HFT5EncoderModel.from_pretrained(model_path, torch_dtype=dtype, **kwargs)
 
         hf = hf.eval().to(device=device, dtype=dtype)
         return cls(config=config, hf_model=hf).eval()
@@ -54,18 +52,14 @@ class T5EncoderModel(TextEncoder):
         **kwargs,
     ) -> BaseEncoderOutput:
         if self.hf_model is None:
-            raise RuntimeError(
-                "T5EncoderModel(HF) is not initialized. Use "
-                "`from_pretrained_local(...)` to construct a loaded instance."
-            )
+            raise RuntimeError("T5EncoderModel(HF) is not initialized. Use "
+                               "`from_pretrained_local(...)` to construct a loaded instance.")
 
         out = self.hf_model(
             input_ids=input_ids,
             attention_mask=attention_mask,
             inputs_embeds=inputs_embeds,
-            output_hidden_states=bool(output_hidden_states)
-            if output_hidden_states is not None
-            else False,
+            output_hidden_states=bool(output_hidden_states) if output_hidden_states is not None else False,
             return_dict=True,
         )
         return BaseEncoderOutput(

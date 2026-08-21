@@ -47,13 +47,11 @@ def test_persist_session_init_image_returns_none_when_missing_data():
 
 def test_persist_session_init_image_rejects_unsupported_mime():
     with pytest.raises(ValueError, match="PNG, JPEG, or WebP"):
-        persist_session_init_image(
-            {
-                "name": "frame.gif",
-                "mime_type": "image/gif",
-                "data_url": "data:image/gif;base64,R0lGODlhAQABAAAAACw=",
-            }
-        )
+        persist_session_init_image({
+            "name": "frame.gif",
+            "mime_type": "image/gif",
+            "data_url": "data:image/gif;base64,R0lGODlhAQABAAAAACw=",
+        })
 
 
 def test_persist_session_init_image_rejects_large_payload(monkeypatch):
@@ -66,10 +64,8 @@ def test_persist_session_init_image_rejects_large_payload(monkeypatch):
     monkeypatch.setattr(base64, "b64decode", fake_b64decode)
 
     with pytest.raises(ValueError, match="15 MB or smaller"):
-        persist_session_init_image(
-            {
-                "name": "frame.png",
-                "mime_type": "image/png",
-                "data_url": data_url,
-            }
-        )
+        persist_session_init_image({
+            "name": "frame.png",
+            "mime_type": "image/png",
+            "data_url": data_url,
+        })

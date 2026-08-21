@@ -81,15 +81,11 @@ class Gen3CPatchEmbed(nn.Module):
         p_t, p_h, p_w = self.patch_size
 
         # Rearrange: b c (t pt) (h ph) (w pw) -> b t h w (c pt ph pw)
-        hidden_states = hidden_states.reshape(
-            batch_size, num_channels,
-            num_frames // p_t, p_t,
-            height // p_h, p_h,
-            width // p_w, p_w
-        )
+        hidden_states = hidden_states.reshape(batch_size, num_channels, num_frames // p_t, p_t, height // p_h, p_h,
+                                              width // p_w, p_w)
         hidden_states = hidden_states.permute(0, 2, 4, 6, 1, 3, 5, 7)
         hidden_states = hidden_states.flatten(4, 7)  # Flatten patch dimensions
-        
+
         # Project to model dimension
         hidden_states, _ = self.proj(hidden_states)
         return hidden_states
@@ -115,13 +111,9 @@ class Gen3CTimestepEmbedding(nn.Module):
         self.activation = nn.SiLU()
 
         if use_adaln_lora:
-            self.linear_2 = ReplicatedLinear(out_features,
-                                             3 * out_features,
-                                             bias=False)
+            self.linear_2 = ReplicatedLinear(out_features, 3 * out_features, bias=False)
         else:
-            self.linear_2 = ReplicatedLinear(out_features,
-                                             out_features,
-                                             bias=False)
+            self.linear_2 = ReplicatedLinear(out_features, out_features, bias=False)
 
     def forward(self, sample: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor | None]:
         """
@@ -189,7 +181,7 @@ class Gen3CEmbedding(nn.Module):
         timestep = timestep.flatten()
         timesteps_proj = self.time_proj(timestep).to(dtype)  # (B, D)
         embedded_timestep, adaln_lora = self.t_embedder(timesteps_proj)
-        
+
         return embedded_timestep, adaln_lora
 
 
@@ -256,14 +248,12 @@ class Gen3CSelfAttention(nn.Module):
 
         if supported_attention_backends is None:
             supported_attention_backends = (AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA)
-        
-        self.attn = DistributedAttention(
-            num_heads=num_heads,
-            head_size=self.head_dim,
-            causal=False,
-            supported_attention_backends=supported_attention_backends,
-            prefix="self_attn"
-        )
+
+        self.attn = DistributedAttention(num_heads=num_heads,
+                                         head_size=self.head_dim,
+                                         causal=False,
+                                         supported_attention_backends=supported_attention_backends,
+                                         prefix="self_attn")
 
     def forward(
         self,
@@ -301,10 +291,8 @@ class Gen3CSelfAttention(nn.Module):
         query = query.transpose(1, 2)  # (B, H, S, D_h) -> (B, S, H, D_h)
         key = key.transpose(1, 2)
         value = value.transpose(1, 2)
-        
-        attn_output, _ = self.attn(
-            query, key, value, original_seq_len=original_seq_len
-        )
+
+        attn_output, _ = self.attn(query, key, value, original_seq_len=original_seq_len)
         attn_output = attn_output.flatten(-2, -1)  # (B, S, H*D_h)
 
         # Output projection
@@ -343,7 +331,7 @@ class Gen3CCrossAttention(nn.Module):
 
         if supported_attention_backends is None:
             supported_attention_backends = (AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA)
-        
+
         self.attn = LocalAttention(
             num_heads=num_heads,
             head_size=self.head_dim,
@@ -445,18 +433,12 @@ class Gen3CTransformerBlock(nn.Module):
                 ReplicatedLinear(adaln_lora_dim, 3 * hidden_size, bias=False),
             ])
         else:
-            self.adaln_modulation_self_attn = nn.ModuleList([
-                nn.SiLU(),
-                ReplicatedLinear(hidden_size, 3 * hidden_size, bias=False)
-            ])
-            self.adaln_modulation_cross_attn = nn.ModuleList([
-                nn.SiLU(),
-                ReplicatedLinear(hidden_size, 3 * hidden_size, bias=False)
-            ])
-            self.adaln_modulation_mlp = nn.ModuleList([
-                nn.SiLU(),
-                ReplicatedLinear(hidden_size, 3 * hidden_size, bias=False)
-            ])
+            self.adaln_modulation_self_attn = nn.ModuleList(
+                [nn.SiLU(), ReplicatedLinear(hidden_size, 3 * hidden_size, bias=False)])
+            self.adaln_modulation_cross_attn = nn.ModuleList(
+                [nn.SiLU(), ReplicatedLinear(hidden_size, 3 * hidden_size, bias=False)])
+            self.adaln_modulation_mlp = nn.ModuleList(
+                [nn.SiLU(), ReplicatedLinear(hidden_size, 3 * hidden_size, bias=False)])
 
     def forward(
         self,
@@ -487,24 +469,17 @@ class Gen3CTransformerBlock(nn.Module):
         # Compute modulation parameters
         if self.use_adaln_lora and adaln_lora is not None:
             shift_self_attn, scale_self_attn, gate_self_attn = (
-                _run_linear_stack(self.adaln_modulation_self_attn, affine_emb)
-                + adaln_lora
-            ).chunk(3, dim=-1)
+                _run_linear_stack(self.adaln_modulation_self_attn, affine_emb) + adaln_lora).chunk(3, dim=-1)
             shift_cross_attn, scale_cross_attn, gate_cross_attn = (
-                _run_linear_stack(self.adaln_modulation_cross_attn, affine_emb)
-                + adaln_lora
-            ).chunk(3, dim=-1)
-            shift_mlp, scale_mlp, gate_mlp = (
-                _run_linear_stack(self.adaln_modulation_mlp, affine_emb)
-                + adaln_lora
-            ).chunk(3, dim=-1)
+                _run_linear_stack(self.adaln_modulation_cross_attn, affine_emb) + adaln_lora).chunk(3, dim=-1)
+            shift_mlp, scale_mlp, gate_mlp = (_run_linear_stack(self.adaln_modulation_mlp, affine_emb) +
+                                              adaln_lora).chunk(3, dim=-1)
         else:
-            shift_self_attn, scale_self_attn, gate_self_attn = _run_linear_stack(
-                self.adaln_modulation_self_attn, affine_emb).chunk(3, dim=-1)
-            shift_cross_attn, scale_cross_attn, gate_cross_attn = _run_linear_stack(
-                self.adaln_modulation_cross_attn, affine_emb).chunk(3, dim=-1)
-            shift_mlp, scale_mlp, gate_mlp = _run_linear_stack(
-                self.adaln_modulation_mlp, affine_emb).chunk(3, dim=-1)
+            shift_self_attn, scale_self_attn, gate_self_attn = _run_linear_stack(self.adaln_modulation_self_attn,
+                                                                                 affine_emb).chunk(3, dim=-1)
+            shift_cross_attn, scale_cross_attn, gate_cross_attn = _run_linear_stack(self.adaln_modulation_cross_attn,
+                                                                                    affine_emb).chunk(3, dim=-1)
+            shift_mlp, scale_mlp, gate_mlp = _run_linear_stack(self.adaln_modulation_mlp, affine_emb).chunk(3, dim=-1)
 
         # Reshape modulation parameters for broadcasting: (B, D) -> (B, 1, D)
         shift_self_attn = shift_self_attn.unsqueeze(1).type_as(hidden_states)
@@ -553,13 +528,13 @@ class Gen3CRotaryPosEmbed(nn.Module):
     """
 
     def __init__(
-        self,
-        hidden_size: int,
-        max_size: tuple[int, int, int] = (128, 240, 240),
-        patch_size: tuple[int, int, int] = (1, 2, 2),
-        base_fps: int = 24,
-        rope_scale: tuple[float, float, float] = (1.0, 1.0, 1.0),
-        enable_fps_modulation: bool = True,
+            self,
+            hidden_size: int,
+            max_size: tuple[int, int, int] = (128, 240, 240),
+            patch_size: tuple[int, int, int] = (1, 2, 2),
+            base_fps: int = 24,
+            rope_scale: tuple[float, float, float] = (1.0, 1.0, 1.0),
+            enable_fps_modulation: bool = True,
     ) -> None:
         super().__init__()
 
@@ -574,13 +549,11 @@ class Gen3CRotaryPosEmbed(nn.Module):
         self.dim_t = hidden_size - self.dim_h - self.dim_w
 
         # NTK-aware extrapolation factors
-        self.h_ntk_factor = rope_scale[1] ** (self.dim_h / (self.dim_h - 2))
-        self.w_ntk_factor = rope_scale[2] ** (self.dim_w / (self.dim_w - 2))
-        self.t_ntk_factor = rope_scale[0] ** (self.dim_t / (self.dim_t - 2))
+        self.h_ntk_factor = rope_scale[1]**(self.dim_h / (self.dim_h - 2))
+        self.w_ntk_factor = rope_scale[2]**(self.dim_w / (self.dim_w - 2))
+        self.t_ntk_factor = rope_scale[0]**(self.dim_t / (self.dim_t - 2))
 
-    def forward(
-        self, hidden_states: torch.Tensor, fps: int | None = None
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, hidden_states: torch.Tensor, fps: int | None = None) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Generate 3D RoPE embeddings.
         """
@@ -594,13 +567,16 @@ class Gen3CRotaryPosEmbed(nn.Module):
 
         seq = torch.arange(max(self.max_size), device=device, dtype=torch.float32)
 
-        dim_h_range = torch.arange(0, self.dim_h, 2, device=device, dtype=torch.float32)[: (self.dim_h // 2)] / self.dim_h
-        dim_w_range = torch.arange(0, self.dim_w, 2, device=device, dtype=torch.float32)[: (self.dim_w // 2)] / self.dim_w
-        dim_t_range = torch.arange(0, self.dim_t, 2, device=device, dtype=torch.float32)[: (self.dim_t // 2)] / self.dim_t
+        dim_h_range = torch.arange(0, self.dim_h, 2, device=device,
+                                   dtype=torch.float32)[:(self.dim_h // 2)] / self.dim_h
+        dim_w_range = torch.arange(0, self.dim_w, 2, device=device,
+                                   dtype=torch.float32)[:(self.dim_w // 2)] / self.dim_w
+        dim_t_range = torch.arange(0, self.dim_t, 2, device=device,
+                                   dtype=torch.float32)[:(self.dim_t // 2)] / self.dim_t
 
-        h_spatial_freqs = 1.0 / (h_theta ** dim_h_range)
-        w_spatial_freqs = 1.0 / (w_theta ** dim_w_range)
-        temporal_freqs = 1.0 / (t_theta ** dim_t_range)
+        h_spatial_freqs = 1.0 / (h_theta**dim_h_range)
+        w_spatial_freqs = 1.0 / (w_theta**dim_w_range)
+        temporal_freqs = 1.0 / (t_theta**dim_t_range)
 
         # Generate positional embeddings
         half_emb_h = torch.outer(seq[:H], h_spatial_freqs)
@@ -622,7 +598,7 @@ class Gen3CRotaryPosEmbed(nn.Module):
 
         cos = torch.cos(freqs)
         sin = torch.sin(freqs)
-        
+
         return cos, sin
 
 
@@ -703,9 +679,7 @@ class Gen3CFinalLayer(nn.Module):
 
         # Output projection
         output_dim = out_channels * patch_size[0] * patch_size[1] * patch_size[2]
-        self.proj_out = ReplicatedLinear(hidden_size,
-                                         output_dim,
-                                         bias=False)
+        self.proj_out = ReplicatedLinear(hidden_size, output_dim, bias=False)
 
     def forward(
         self,
@@ -723,7 +697,7 @@ class Gen3CFinalLayer(nn.Module):
         modulation = _run_linear_stack(self.adaln_modulation, affine_emb)
 
         if self.use_adaln_lora and adaln_lora is not None:
-            modulation = modulation + adaln_lora[..., : 2 * self.hidden_size]
+            modulation = modulation + adaln_lora[..., :2 * self.hidden_size]
 
         shift, scale = modulation.chunk(2, dim=-1)
 
@@ -757,7 +731,7 @@ class Gen3CTransformer3DModel(BaseDiT):
     - Video conditioning with 3D cache buffers
     - Augment sigma embedding for conditioning noise augmentation
     """
-    
+
     _fsdp_shard_conditions = Gen3CVideoConfig()._fsdp_shard_conditions
     _compile_conditions = Gen3CVideoConfig()._compile_conditions
     param_names_mapping = Gen3CVideoConfig().param_names_mapping
@@ -780,7 +754,7 @@ class Gen3CTransformer3DModel(BaseDiT):
         self.adaln_lora_dim = getattr(config, "adaln_lora_dim", 256)
         self.extra_pos_embed_type = getattr(config, "extra_pos_embed_type", "learnable")
         self.affine_emb_norm = getattr(config, "affine_emb_norm", True)
-        
+
         # GEN3C-specific
         self.frame_buffer_max = getattr(config, "frame_buffer_max", 2)
         self.buffer_channels = self.frame_buffer_max * 32  # Each buffer: 16 (frame) + 16 (mask)
@@ -791,10 +765,8 @@ class Gen3CTransformer3DModel(BaseDiT):
         patch_embed_in_channels = config.in_channels + 1 + self.buffer_channels
         if config.concat_padding_mask:
             patch_embed_in_channels += 1
-        
-        self.patch_embed = Gen3CPatchEmbed(
-            patch_embed_in_channels, inner_dim, config.patch_size
-        )
+
+        self.patch_embed = Gen3CPatchEmbed(patch_embed_in_channels, inner_dim, config.patch_size)
 
         # 2. Positional Embeddings
         self.rope = Gen3CRotaryPosEmbed(
@@ -847,8 +819,7 @@ class Gen3CTransformer3DModel(BaseDiT):
                 use_adaln_lora=self.use_adaln_lora,
                 qk_norm=(config.qk_norm == "rms_norm"),
                 supported_attention_backends=config._supported_attention_backends,
-            )
-            for i in range(config.num_layers)
+            ) for i in range(config.num_layers)
         ])
 
         # 7. Final Layer
@@ -898,10 +869,13 @@ class Gen3CTransformer3DModel(BaseDiT):
             hidden_states = torch.cat([hidden_states, condition_video_input_mask], dim=1)
         else:
             # Default: zeros mask (no conditioning)
-            condition_video_input_mask = torch.zeros(
-                batch_size, 1, num_frames, height, width, 
-                device=hidden_states.device, dtype=hidden_states.dtype
-            )
+            condition_video_input_mask = torch.zeros(batch_size,
+                                                     1,
+                                                     num_frames,
+                                                     height,
+                                                     width,
+                                                     device=hidden_states.device,
+                                                     dtype=hidden_states.dtype)
             hidden_states = torch.cat([hidden_states, condition_video_input_mask], dim=1)
 
         # 2. Concatenate condition_video_pose (3D cache buffers)
@@ -909,19 +883,24 @@ class Gen3CTransformer3DModel(BaseDiT):
             hidden_states = torch.cat([hidden_states, condition_video_pose], dim=1)
         else:
             # Default: zeros for pose buffers
-            pose_zeros = torch.zeros(
-                batch_size, self.buffer_channels, num_frames, height, width,
-                device=hidden_states.device, dtype=hidden_states.dtype
-            )
+            pose_zeros = torch.zeros(batch_size,
+                                     self.buffer_channels,
+                                     num_frames,
+                                     height,
+                                     width,
+                                     device=hidden_states.device,
+                                     dtype=hidden_states.dtype)
             hidden_states = torch.cat([hidden_states, pose_zeros], dim=1)
 
         # 3. Concatenate padding mask if needed
         if self.concat_padding_mask:
             if padding_mask is None:
-                padding_mask = torch.ones(
-                    batch_size, 1, height, width,
-                    device=hidden_states.device, dtype=hidden_states.dtype
-                )
+                padding_mask = torch.ones(batch_size,
+                                          1,
+                                          height,
+                                          width,
+                                          device=hidden_states.device,
+                                          dtype=hidden_states.dtype)
             padding_mask = transforms.functional.resize(
                 padding_mask,
                 list(hidden_states.shape[-2:]),
@@ -955,9 +934,7 @@ class Gen3CTransformer3DModel(BaseDiT):
         sp_world_size = get_sp_world_size()
         original_seq_len = hidden_states.shape[1]
         if sp_world_size > 1:
-            hidden_states, original_seq_len = sequence_model_parallel_shard(
-                hidden_states, dim=1
-            )
+            hidden_states, original_seq_len = sequence_model_parallel_shard(hidden_states, dim=1)
             if extra_pos_emb is not None:
                 extra_pos_emb, _ = sequence_model_parallel_shard(extra_pos_emb, dim=1)
             rope_cos, _ = sequence_model_parallel_shard(rope_emb[0], dim=0)
@@ -1006,14 +983,10 @@ class Gen3CTransformer3DModel(BaseDiT):
         hidden_states = self.final_layer(hidden_states, affine_emb, adaln_lora)
 
         if sp_world_size > 1:
-            hidden_states = sequence_model_parallel_all_gather_with_unpad(
-                hidden_states, original_seq_len, dim=1
-            )
+            hidden_states = sequence_model_parallel_all_gather_with_unpad(hidden_states, original_seq_len, dim=1)
 
         # 12. Unpatchify: (B, S, P) -> (B, T', H', W', P) -> (B, C, T, H, W)
-        hidden_states = hidden_states.unflatten(
-            1, (post_patch_num_frames, post_patch_height, post_patch_width)
-        )
+        hidden_states = hidden_states.unflatten(1, (post_patch_num_frames, post_patch_height, post_patch_width))
         hidden_states = hidden_states.unflatten(-1, (p_t, p_h, p_w, self.out_channels))
         hidden_states = hidden_states.permute(0, 7, 1, 4, 2, 5, 3, 6)
         hidden_states = hidden_states.flatten(2, 3).flatten(3, 4).flatten(4, 5)

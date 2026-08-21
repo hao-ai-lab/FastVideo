@@ -50,19 +50,16 @@ def benchmark_loading(
     # Count total params and bytes on first pass
     total_params = 0
     total_bytes = 0
-    for name, tensor in safetensors_weights_iterator(
-            files, to_cpu=to_cpu, broadcast=broadcast):
+    for name, tensor in safetensors_weights_iterator(files, to_cpu=to_cpu, broadcast=broadcast):
         total_params += 1
         total_bytes += tensor.nelement() * tensor.element_size()
 
     if rank == 0:
-        logger.info("[%s] %d tensors, %.2f GB total",
-                    label, total_params, total_bytes / 1e9)
+        logger.info("[%s] %d tensors, %.2f GB total", label, total_params, total_bytes / 1e9)
 
     # Warmup
     for _ in range(warmup):
-        for _ in safetensors_weights_iterator(
-                files, to_cpu=to_cpu, broadcast=broadcast):
+        for _ in safetensors_weights_iterator(files, to_cpu=to_cpu, broadcast=broadcast):
             pass
         if dist.is_initialized():
             dist.barrier()
@@ -75,8 +72,7 @@ def benchmark_loading(
         torch.cuda.synchronize() if torch.cuda.is_available() else None
 
         t0 = time.perf_counter()
-        for _ in safetensors_weights_iterator(
-                files, to_cpu=to_cpu, broadcast=broadcast):
+        for _ in safetensors_weights_iterator(files, to_cpu=to_cpu, broadcast=broadcast):
             pass
         torch.cuda.synchronize() if torch.cuda.is_available() else None
 
@@ -92,27 +88,30 @@ def benchmark_loading(
         logger.info(
             "[%s] avg %.3fs | best %.3fs | throughput %.2f GB/s "
             "(over %d runs, %d warmup, %d GPU(s), node_size=%d)",
-            label, avg, best, throughput,
-            repeats, warmup, node_group.world_size, node_group.world_size,
+            label,
+            avg,
+            best,
+            throughput,
+            repeats,
+            warmup,
+            node_group.world_size,
+            node_group.world_size,
         )
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Benchmark model weight loading speed")
-    parser.add_argument(
-        "--model-path", type=str, required=True,
-        help="Path to a local model directory containing .safetensors files")
-    parser.add_argument(
-        "--subfolder", type=str, default=None,
-        help="Subfolder within model-path to load (e.g. 'transformer', "
-             "'text_encoder'). If not set, loads from model-path directly.")
-    parser.add_argument(
-        "--warmup", type=int, default=1,
-        help="Number of warmup iterations (default: 1)")
-    parser.add_argument(
-        "--repeats", type=int, default=3,
-        help="Number of timed iterations (default: 3)")
+    parser = argparse.ArgumentParser(description="Benchmark model weight loading speed")
+    parser.add_argument("--model-path",
+                        type=str,
+                        required=True,
+                        help="Path to a local model directory containing .safetensors files")
+    parser.add_argument("--subfolder",
+                        type=str,
+                        default=None,
+                        help="Subfolder within model-path to load (e.g. 'transformer', "
+                        "'text_encoder'). If not set, loads from model-path directly.")
+    parser.add_argument("--warmup", type=int, default=1, help="Number of warmup iterations (default: 1)")
+    parser.add_argument("--repeats", type=int, default=3, help="Number of timed iterations (default: 3)")
     args = parser.parse_args()
 
     load_path = args.model_path
@@ -141,13 +140,21 @@ def main() -> None:
         logger.info("World size: %d", world_size)
 
     # Benchmark: load to CPU (no broadcast, each rank reads independently)
-    benchmark_loading(files, to_cpu=True, broadcast=False, warmup=args.warmup,
-                      repeats=args.repeats, label="to_cpu=True")
+    benchmark_loading(files,
+                      to_cpu=True,
+                      broadcast=False,
+                      warmup=args.warmup,
+                      repeats=args.repeats,
+                      label="to_cpu=True")
 
     # Benchmark: load to GPU (rank 0 reads, broadcasts to others)
     if torch.cuda.is_available():
-        benchmark_loading(files, to_cpu=False, broadcast=True, warmup=args.warmup,
-                          repeats=args.repeats, label="to_cpu=False (broadcast)")
+        benchmark_loading(files,
+                          to_cpu=False,
+                          broadcast=True,
+                          warmup=args.warmup,
+                          repeats=args.repeats,
+                          label="to_cpu=False (broadcast)")
 
     cleanup_dist_env_and_memory()
 

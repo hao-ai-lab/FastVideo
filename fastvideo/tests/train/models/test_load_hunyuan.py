@@ -25,9 +25,7 @@ from fastvideo.forward_context import set_forward_context
 from fastvideo.train.models.hunyuan import HunyuanModel
 from fastvideo.train.utils.config import load_run_config
 
-_FIXTURE = str(
-    Path(__file__).resolve().parent.parent / "fixtures" /
-    "hunyuan_t2v_min.yaml")
+_FIXTURE = str(Path(__file__).resolve().parent.parent / "fixtures" / "hunyuan_t2v_min.yaml")
 
 
 @pytest.mark.usefixtures("distributed_setup")
@@ -71,7 +69,6 @@ def test_hunyuan_model_loads_and_forwards():
 
     if isinstance(out, tuple):
         out = out[0]
-    assert out.shape == hidden_states.shape, (
-        f"output shape {tuple(out.shape)} != input shape "
-        f"{tuple(hidden_states.shape)}")
+    assert out.shape == hidden_states.shape, (f"output shape {tuple(out.shape)} != input shape "
+                                              f"{tuple(hidden_states.shape)}")
     assert torch.isfinite(out).all().item(), "output contains NaN/Inf"

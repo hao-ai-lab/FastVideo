@@ -76,8 +76,7 @@ def test_many_identical_calls_keep_single_entry():
         ((4, 8, 8), 1536, 12, torch.float64, False),
     ],
 )
-def test_cached_matches_fresh_recompute(rope_sizes, hidden_size, heads_num,
-                                        dtype, use_real):
+def test_cached_matches_fresh_recompute(rope_sizes, hidden_size, heads_num, dtype, use_real):
     """Cached tensors are bitwise-equal to a fresh uncached recompute."""
     cos_cached, sin_cached = _call(rope_sizes=rope_sizes,
                                    hidden_size=hidden_size,
@@ -97,12 +96,36 @@ def test_cached_matches_fresh_recompute(rope_sizes, hidden_size, heads_num,
 @pytest.mark.parametrize(
     "kwargs_a,kwargs_b",
     [
-        ({"rope_sizes": (21, 30, 52)}, {"rope_sizes": (21, 45, 80)}),
-        ({"dtype": torch.float64}, {"dtype": torch.float32}),
-        ({"use_real": True}, {"use_real": False}),
-        ({"start_frame": 0}, {"start_frame": 3}),
-        ({"rope_theta": 10000.0}, {"rope_theta": 5000.0}),
-        ({"shard_dim": 0}, {"shard_dim": 1}),
+        ({
+            "rope_sizes": (21, 30, 52)
+        }, {
+            "rope_sizes": (21, 45, 80)
+        }),
+        ({
+            "dtype": torch.float64
+        }, {
+            "dtype": torch.float32
+        }),
+        ({
+            "use_real": True
+        }, {
+            "use_real": False
+        }),
+        ({
+            "start_frame": 0
+        }, {
+            "start_frame": 3
+        }),
+        ({
+            "rope_theta": 10000.0
+        }, {
+            "rope_theta": 5000.0
+        }),
+        ({
+            "shard_dim": 0
+        }, {
+            "shard_dim": 1
+        }),
     ],
 )
 def test_distinct_args_create_distinct_entries(kwargs_a, kwargs_b):
@@ -183,7 +206,7 @@ def test_cache_hit_refreshes_recency():
     for frame in range(1, _ROTARY_POS_EMBED_CACHE_MAXSIZE):
         _call(rope_sizes=(2, 2, 2), start_frame=frame)
     assert len(_ROTARY_POS_EMBED_CACHE) == _ROTARY_POS_EMBED_CACHE_MAXSIZE
-    _call(rope_sizes=(2, 2, 2), start_frame=0)   # hit -> frame 0 becomes most recent
+    _call(rope_sizes=(2, 2, 2), start_frame=0)  # hit -> frame 0 becomes most recent
     _call(rope_sizes=(2, 2, 2), start_frame=99)  # miss -> evicts now-oldest (frame 1)
     surviving = {key[-2] for key in _ROTARY_POS_EMBED_CACHE}
     assert 0 in surviving

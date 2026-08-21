@@ -22,7 +22,6 @@ import numpy as np
 import torch
 from PIL import Image, ImageDraw
 
-
 DEFAULT_PROMPT = "a photo of a banana on a wooden table, studio lighting"
 
 
@@ -188,14 +187,13 @@ def _save_comparison(
         "max_abs_diff": max_diff,
         "mean_abs_diff": float(diff.mean()),
         "median_abs_diff": float(np.median(diff)),
-        "rmse": float(np.sqrt(np.mean((upstream_arr - fastvideo_arr).astype(np.float32) ** 2))),
+        "rmse": float(np.sqrt(np.mean((upstream_arr - fastvideo_arr).astype(np.float32)**2))),
     }
 
     Image.fromarray(diff, mode="RGB").save(output_dir / "abs_diff.png")
     scale = 1 if max_diff == 0 else min(255.0 / max_diff, 64.0)
-    Image.fromarray(np.clip(diff.astype(np.float32) * scale, 0, 255).astype(np.uint8), mode="RGB").save(
-        output_dir / "abs_diff_scaled.png"
-    )
+    Image.fromarray(np.clip(diff.astype(np.float32) * scale, 0, 255).astype(np.uint8),
+                    mode="RGB").save(output_dir / "abs_diff_scaled.png")
 
     label_height = 34
     gap = 8
@@ -214,19 +212,17 @@ def _save_comparison(
     with (output_dir / "metrics.json").open("w", encoding="utf-8") as f:
         json.dump(metrics, f, indent=2, sort_keys=True)
     with (output_dir / "README.txt").open("w", encoding="utf-8") as f:
-        f.write(
-            "Full Flux2 H100 image comparison\n"
-            f"prompt: {metadata['prompt']}\n"
-            f"seed: {metadata['seed']}\n"
-            f"size: {metadata['size']}x{metadata['size']}\n"
-            f"steps: {metadata['steps']}\n"
-            f"guidance_scale: {metadata['guidance_scale']}\n"
-            f"max_sequence_length: {metadata['max_sequence_length']}\n"
-            f"max_abs_diff: {metrics['max_abs_diff']}\n"
-            f"mean_abs_diff: {metrics['mean_abs_diff']}\n"
-            f"median_abs_diff: {metrics['median_abs_diff']}\n"
-            f"rmse: {metrics['rmse']}\n"
-        )
+        f.write("Full Flux2 H100 image comparison\n"
+                f"prompt: {metadata['prompt']}\n"
+                f"seed: {metadata['seed']}\n"
+                f"size: {metadata['size']}x{metadata['size']}\n"
+                f"steps: {metadata['steps']}\n"
+                f"guidance_scale: {metadata['guidance_scale']}\n"
+                f"max_sequence_length: {metadata['max_sequence_length']}\n"
+                f"max_abs_diff: {metrics['max_abs_diff']}\n"
+                f"mean_abs_diff: {metrics['mean_abs_diff']}\n"
+                f"median_abs_diff: {metrics['median_abs_diff']}\n"
+                f"rmse: {metrics['rmse']}\n")
 
 
 def _attempt_dir(args: argparse.Namespace, size: int) -> Path:

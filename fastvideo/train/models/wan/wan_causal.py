@@ -9,6 +9,7 @@ from typing import Any, Literal, TYPE_CHECKING
 import torch
 
 from fastvideo.forward_context import set_forward_context
+from fastvideo.platforms import AttentionBackendEnum
 
 from fastvideo.train.models.base import CausalModelBase
 from fastvideo.train.models.wan.wan import WanModel
@@ -50,6 +51,7 @@ class WanCausalModel(WanModel, CausalModelBase):
         | None = None,
         lora: LoraConfig | dict[str, Any] | None = None,
         num_frames_per_block: int | None = None,
+        attention_backend: AttentionBackendEnum | str | None = None,
     ) -> None:
         super().__init__(
             init_from=init_from,
@@ -60,6 +62,7 @@ class WanCausalModel(WanModel, CausalModelBase):
             enable_gradient_checkpointing_type=(enable_gradient_checkpointing_type),
             transformer_override_safetensor=(transformer_override_safetensor),
             lora=lora,
+            attention_backend=attention_backend,
         )
         self._streaming_caches: (dict[tuple[int, str], _StreamingCaches]) = {}
 

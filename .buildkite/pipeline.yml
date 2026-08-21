@@ -1,6 +1,8 @@
 env:
   IMAGE_VERSION: "py3.12-latest"
   BUILDKITE_CLEAN_CHECKOUT: true
+  # Buildkite only launches Modal; remote jobs initialize their own submodules.
+  BUILDKITE_GIT_SUBMODULES: false
 
 notify:
   - github_commit_status:
@@ -57,6 +59,17 @@ steps:
         queue: "default"
     - label: ":microscope: Kernel Tests"
       if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "kernel_tests"
+      command: "timeout 90m .buildkite/scripts/pr_test.sh"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+      agents:
+        queue: "default"
+    - label: ":vertical_traffic_light: Golden-Gate Tests"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "golden_gate"
       command: "timeout 90m .buildkite/scripts/pr_test.sh"
       retry:
         automatic:
@@ -402,7 +415,7 @@ steps:
                 - "pyproject.toml"
                 - "docker/Dockerfile"
               config:
-                command: "timeout 15m .buildkite/scripts/pr_test.sh"
+                command: "timeout 25m .buildkite/scripts/pr_test.sh"
                 label: ":test_tube: Training Tests"
                 env:
                   - TEST_TYPE=training
@@ -413,7 +426,7 @@ steps:
                 - "pyproject.toml"
                 - "docker/Dockerfile"
               config:
-                command: "timeout 15m .buildkite/scripts/pr_test.sh"
+                command: "timeout 25m .buildkite/scripts/pr_test.sh"
                 label: ":test_tube: Distillation DMD Tests"
                 env:
                   - TEST_TYPE=distillation_dmd

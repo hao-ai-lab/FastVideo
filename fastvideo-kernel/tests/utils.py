@@ -1,5 +1,6 @@
 import torch
 
+
 def generate_block_sparse_mask_for_function(h, num_q_blocks, num_kv_blocks, k, device="cuda"):
     """
     Generate block sparse mask of shape [h, num_q_blocks, num_kv_blocks].
@@ -23,8 +24,7 @@ def generate_block_sparse_mask_for_function(h, num_q_blocks, num_kv_blocks, k, d
     return block_sparse_mask
 
 
-def create_full_mask_from_block_mask(block_sparse_mask, q_variable_block_sizes, 
-                                     kv_variable_block_sizes, device="cuda"):
+def create_full_mask_from_block_mask(block_sparse_mask, q_variable_block_sizes, kv_variable_block_sizes, device="cuda"):
     """
     Convert block-level sparse mask to full attention mask.
     
@@ -40,7 +40,7 @@ def create_full_mask_from_block_mask(block_sparse_mask, q_variable_block_sizes,
     h, num_q_blocks, num_kv_blocks = block_sparse_mask.shape
     total_q_seq_len = q_variable_block_sizes.sum().item()
     total_kv_seq_len = kv_variable_block_sizes.sum().item()
-    
+
     q_cumsum = torch.cat([torch.tensor([0], device=device), q_variable_block_sizes.cumsum(dim=0)[:-1]])
     kv_cumsum = torch.cat([torch.tensor([0], device=device), kv_variable_block_sizes.cumsum(dim=0)[:-1]])
 

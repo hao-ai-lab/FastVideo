@@ -43,12 +43,10 @@ def _add_official_to_path() -> Path:
 
 def _log_tensor_stats(label: str, tensor: torch.Tensor) -> None:
     value = tensor.detach().float()
-    print(
-        f"[{_MODEL_FAMILY} PIPELINE] {label}: shape={tuple(tensor.shape)} "
-        f"dtype={tensor.dtype} device={tensor.device} "
-        f"min={value.min().item():.6f} max={value.max().item():.6f} "
-        f"mean={value.mean().item():.6f} std={value.std().item():.6f}"
-    )
+    print(f"[{_MODEL_FAMILY} PIPELINE] {label}: shape={tuple(tensor.shape)} "
+          f"dtype={tensor.dtype} device={tensor.device} "
+          f"min={value.min().item():.6f} max={value.max().item():.6f} "
+          f"mean={value.mean().item():.6f} std={value.std().item():.6f}")
 
 
 def _extract_tensor(output: Any, key: str) -> torch.Tensor:
@@ -73,10 +71,8 @@ def _run_official_pipeline(
     device: torch.device,
 ) -> Any:
     del official_path, params, device
-    pytest.skip(
-        "TODO: import the official pipeline/factory, load official weights, "
-        "run with params, and return the comparison target."
-    )
+    pytest.skip("TODO: import the official pipeline/factory, load official weights, "
+                "run with params, and return the comparison target.")
 
 
 def _run_fastvideo_pipeline(model_path: Path, params: dict[str, Any]) -> Any:
@@ -146,8 +142,6 @@ def test_todo_model_family_pipeline_official_parity() -> None:
     assert official_tensor.shape == fastvideo_tensor.shape
 
     diff = (official_tensor - fastvideo_tensor).abs()
-    print(
-        f"diff max={diff.max().item():.6f} "
-        f"mean={diff.mean().item():.6f} median={diff.median().item():.6f}"
-    )
+    print(f"diff max={diff.max().item():.6f} "
+          f"mean={diff.mean().item():.6f} median={diff.median().item():.6f}")
     assert_close(fastvideo_tensor, official_tensor, atol=1e-2, rtol=1e-2)

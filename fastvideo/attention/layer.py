@@ -207,11 +207,13 @@ class DistributedAttention_VSA(DistributedAttention):
         ctx_attn_metadata = forward_context.attn_metadata
 
         batch_size, seq_len, num_heads, head_dim = q.shape
-        # Stack QKV
-        qkvg = torch.cat([q, k, v, gate_compress], dim=0)  # [4*batch, seq_len, num_heads, head_dim]
+        # Stack QKV (a caller with a structurally-zero gate passes None and
+        # skips the gate's share of the all-to-all/tile traffic)
+        stack = [q, k, v] if gate_compress is None else [q, k, v, gate_compress]
+        qkvg = torch.cat(stack, dim=0)  # [3or4*batch, seq_len, num_heads, head_dim]
 
         # Redistribute heads across sequence dimension
-        # Before: [4*batch, shard_seq_len, num_heads, head_dim]
+        # Before: [3or4*batch, shard_seq_len, num_heads, head_dim]
         # After:  [4*batch, full_seq_len, shard_num_heads, head_dim]
         qkvg = sequence_model_parallel_all_to_all_4D(qkvg, scatter_dim=2, gather_dim=1)
 
@@ -225,7 +227,10 @@ class DistributedAttention_VSA(DistributedAttention):
 
         qkvg = self.attn_impl.preprocess_qkv(qkvg, ctx_attn_metadata)
 
-        q, k, v, gate_compress = qkvg.chunk(4, dim=0)
+        if gate_compress is None:
+            q, k, v = qkvg.chunk(3, dim=0)
+        else:
+            q, k, v, gate_compress = qkvg.chunk(4, dim=0)
         output = self.attn_impl.forward(q, k, v, gate_compress, ctx_attn_metadata)  # type: ignore[call-arg]
 
         # Redistribute back if using sequence parallelism

@@ -48,37 +48,27 @@ def _dirs_with_tests() -> list[str]:
 
 
 def _ci_text() -> str:
-    return "\n".join(
-        src.read_text(errors="replace") for src in CI_SOURCES if src.exists())
+    return "\n".join(src.read_text(errors="replace") for src in CI_SOURCES if src.exists())
 
 
 def test_every_test_directory_is_collected_or_allowlisted():
     ci_text = _ci_text()
-    dark = [
-        name for name in _dirs_with_tests()
-        if f"tests/{name}" not in ci_text and name not in ALLOWLIST
-    ]
-    assert not dark, (
-        f"Test directories not referenced by any CI lane and not "
-        f"allowlisted: {dark}. Wire them into a lane in "
-        f"fastvideo/tests/modal/pr_test.py (or a Buildkite step), or add an "
-        f"allowlist entry with a reason in {__file__}.")
+    dark = [name for name in _dirs_with_tests() if f"tests/{name}" not in ci_text and name not in ALLOWLIST]
+    assert not dark, (f"Test directories not referenced by any CI lane and not "
+                      f"allowlisted: {dark}. Wire them into a lane in "
+                      f"fastvideo/tests/modal/pr_test.py (or a Buildkite step), or add an "
+                      f"allowlist entry with a reason in {__file__}.")
 
 
 def test_local_tests_stays_out_of_ci():
     # tests/local_tests/ (repo root) is developer-local by design (author
     # decision, 2026-07-05): parity scaffolds and machine-specific checks
     # that must never gate CI. Fail if any CI source starts collecting it.
-    assert "tests/local_tests" not in _ci_text(), (
-        "tests/local_tests/ is local-only by design; remove the CI "
-        "reference or move the tests into a fastvideo/tests/ lane.")
+    assert "tests/local_tests" not in _ci_text(), ("tests/local_tests/ is local-only by design; remove the CI "
+                                                   "reference or move the tests into a fastvideo/tests/ lane.")
 
 
 def test_allowlist_entries_are_still_real_directories():
     # A stale allowlist hides regressions; entries must track reality.
-    missing = [
-        name for name in ALLOWLIST
-        if name != "modal" and not (TESTS_ROOT / name).is_dir()
-    ]
-    assert not missing, (
-        f"Allowlisted directories no longer exist — remove them: {missing}")
+    missing = [name for name in ALLOWLIST if name != "modal" and not (TESTS_ROOT / name).is_dir()]
+    assert not missing, (f"Allowlisted directories no longer exist — remove them: {missing}")

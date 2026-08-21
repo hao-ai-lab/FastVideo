@@ -98,13 +98,11 @@ def test_build_latest_summary_requires_absolute_floor_for_computed_regression():
             "b" * 40,
             10.6,
             10.0,
-            regression_thresholds={
-                "latency": {
-                    "threshold_percent": 0.05,
-                    "threshold_absolute": 0.75,
-                    "gated": True,
-                }
-            },
+            regression_thresholds={"latency": {
+                "threshold_percent": 0.05,
+                "threshold_absolute": 0.75,
+                "gated": True,
+            }},
         ),
     ]
 
@@ -125,13 +123,11 @@ def test_build_latest_summary_separates_informational_threshold_crossing():
             "b" * 40,
             10.6,
             10.0,
-            regression_thresholds={
-                "latency": {
-                    "threshold_percent": 0.05,
-                    "threshold_absolute": 0.5,
-                    "gated": False,
-                }
-            },
+            regression_thresholds={"latency": {
+                "threshold_percent": 0.05,
+                "threshold_absolute": 0.5,
+                "gated": False,
+            }},
         ),
     ]
 
@@ -180,7 +176,6 @@ def test_build_latest_summary_run_source_filter_excludes_future_baselines():
     assert rows[0]["baseline_n"] == 1
     assert rows[0]["metrics"]["latency"]["baseline"] == 10.0
     assert rows[0]["metrics"]["throughput"]["baseline"] == 10.0
-
 
 
 def test_build_latest_summary_keeps_identity_cohorts_separate():
@@ -380,10 +375,11 @@ def test_partial_v2_identity_does_not_cross_model_or_gpu():
     rows = build_latest_summary(records)
     trends = build_trends(records)
 
-    assert {(row["model_id"], row["gpu_type"]) for row in rows} == {
-        ("wan", "NVIDIA L40S"),
-        ("ltx", "NVIDIA H100"),
-    }
+    assert {(row["model_id"], row["gpu_type"])
+            for row in rows} == {
+                ("wan", "NVIDIA L40S"),
+                ("ltx", "NVIDIA H100"),
+            }
     assert len(trends) == 2
 
 
@@ -509,10 +505,11 @@ def test_load_records_can_filter_baseline_eligible_records(tmp_path):
     records = hf_store.load_records(str(tmp_path), successful_only=True, baseline_eligible_only=True)
 
     assert len(records) == 2
-    assert {record["timestamp"] for record in records} == {
-        "2026-01-02T00:00:00+00:00",
-        "2026-01-03T00:00:00+00:00",
-    }
+    assert {record["timestamp"]
+            for record in records} == {
+                "2026-01-02T00:00:00+00:00",
+                "2026-01-03T00:00:00+00:00",
+            }
 
 
 def test_load_records_for_model_filters_identity_cohort(tmp_path):

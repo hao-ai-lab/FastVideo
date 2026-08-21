@@ -31,7 +31,6 @@ from fastvideo.entrypoints.streaming.gpu_pool import (
     _WorkerHandle,
 )
 
-
 # ----------------------------------------------------------------------
 # In-process pool
 # ----------------------------------------------------------------------
@@ -53,8 +52,7 @@ class _MockGenerator:
 class TestInProcessGpuPool:
 
     def test_is_gpu_pool(self):
-        assert isinstance(
-            InProcessGpuPool(_MockGenerator()), GpuPool)
+        assert isinstance(InProcessGpuPool(_MockGenerator()), GpuPool)
 
     def test_acquire_returns_deterministic_assignment(self):
         pool = InProcessGpuPool(_MockGenerator(), gpu_id=7)
@@ -83,8 +81,7 @@ class TestInProcessGpuPool:
 
         async def run():
             with pytest.raises(RuntimeError):
-                await pool.run(
-                    "sess-a", GenerationRequest(prompt="hi"))
+                await pool.run("sess-a", GenerationRequest(prompt="hi"))
 
         asyncio.run(run())
 
@@ -93,8 +90,7 @@ class TestInProcessGpuPool:
 
         async def run():
             await pool.acquire("sess-a")
-            return await pool.run(
-                "sess-a", GenerationRequest(prompt="hi"))
+            return await pool.run("sess-a", GenerationRequest(prompt="hi"))
 
         result = asyncio.run(run())
         assert result["prompt_echo"] == "hi"
@@ -106,8 +102,7 @@ class TestInProcessGpuPool:
             await pool.acquire("sess-a")
             await pool.release("sess-a")
             with pytest.raises(RuntimeError):
-                await pool.run(
-                    "sess-a", GenerationRequest(prompt="hi"))
+                await pool.run("sess-a", GenerationRequest(prompt="hi"))
 
         asyncio.run(run())
 
@@ -234,6 +229,7 @@ def _thread_worker_factory(generator_builder):
         threading.Thread(target=_await_ready, daemon=True).start()
 
         class _FakeProcess:
+
             def __init__(self, stop: threading.Event, worker: _ThreadWorker):
                 self._stop = stop
                 self._worker = worker
@@ -273,8 +269,7 @@ def pool_factory():
             generator_config=GeneratorConfig(model_path="/models/fake"),
             pool_config=GpuPoolConfig(num_workers=num_workers),
             warmup_config=WarmupConfig(enabled=False),
-            worker_factory=_thread_worker_factory(
-                lambda gpu_id: _MockGenerator()),
+            worker_factory=_thread_worker_factory(lambda gpu_id: _MockGenerator()),
         )
         await pool.start()
         return pool
@@ -285,6 +280,7 @@ def pool_factory():
 class TestSubprocessGpuPool:
 
     def test_start_spawns_requested_workers(self, pool_factory):
+
         async def run():
             pool = await pool_factory(num_workers=3)
             try:
@@ -297,6 +293,7 @@ class TestSubprocessGpuPool:
         asyncio.run(run())
 
     def test_acquire_decrements_available(self, pool_factory):
+
         async def run():
             pool = await pool_factory(num_workers=2)
             try:
@@ -309,6 +306,7 @@ class TestSubprocessGpuPool:
         asyncio.run(run())
 
     def test_acquire_timeout_when_all_busy(self, pool_factory):
+
         async def run():
             pool = await pool_factory(num_workers=1)
             try:
@@ -321,12 +319,12 @@ class TestSubprocessGpuPool:
         asyncio.run(run())
 
     def test_run_returns_worker_result(self, pool_factory):
+
         async def run():
             pool = await pool_factory(num_workers=1)
             try:
                 await pool.acquire("sess-a")
-                result = await pool.run(
-                    "sess-a", GenerationRequest(prompt="hello"))
+                result = await pool.run("sess-a", GenerationRequest(prompt="hello"))
                 assert result["prompt_echo"] == "hello"
             finally:
                 await pool.shutdown()
@@ -334,6 +332,7 @@ class TestSubprocessGpuPool:
         asyncio.run(run())
 
     def test_release_returns_worker_to_pool(self, pool_factory):
+
         async def run():
             pool = await pool_factory(num_workers=1)
             try:
@@ -348,6 +347,7 @@ class TestSubprocessGpuPool:
         asyncio.run(run())
 
     def test_sticky_binding_across_multiple_runs(self, pool_factory):
+
         async def run():
             pool = await pool_factory(num_workers=2)
             try:
@@ -363,18 +363,19 @@ class TestSubprocessGpuPool:
         asyncio.run(run())
 
     def test_run_without_acquire_raises(self, pool_factory):
+
         async def run():
             pool = await pool_factory(num_workers=1)
             try:
                 with pytest.raises(RuntimeError):
-                    await pool.run(
-                        "sess-x", GenerationRequest(prompt="x"))
+                    await pool.run("sess-x", GenerationRequest(prompt="x"))
             finally:
                 await pool.shutdown()
 
         asyncio.run(run())
 
     def test_shutdown_is_idempotent(self, pool_factory):
+
         async def run():
             pool = await pool_factory(num_workers=2)
             await pool.shutdown()
@@ -404,10 +405,13 @@ class TestSubprocessGpuPoolFailureModes:
                 boot_ok.set()
 
             class _AliveProcess:
+
                 def is_alive(self) -> bool:
                     return True
+
                 def join(self, timeout: float | None = None) -> None:
                     return
+
                 def kill(self) -> None:
                     return
 

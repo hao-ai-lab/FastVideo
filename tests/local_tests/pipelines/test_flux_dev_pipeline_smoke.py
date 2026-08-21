@@ -25,17 +25,14 @@ os.environ.setdefault("MASTER_ADDR", "localhost")
 os.environ.setdefault("MASTER_PORT", "29519")
 
 
-def test_flux_dev_pipeline_short_run_finite_output(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_flux_dev_pipeline_short_run_finite_output(monkeypatch: pytest.MonkeyPatch, ) -> None:
     import torch
 
     if not torch.cuda.is_available():
         pytest.skip("FLUX pipeline smoke requires CUDA")
     if not Path(_FLUX_DEV_ROOT, "model_index.json").is_file():
-        pytest.skip(
-            "official_weights/FLUX.1-dev missing (set FLUX_DEV_ROOT or download "
-            "black-forest-labs/FLUX.1-dev)")
+        pytest.skip("official_weights/FLUX.1-dev missing (set FLUX_DEV_ROOT or download "
+                    "black-forest-labs/FLUX.1-dev)")
 
     monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
 

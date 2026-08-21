@@ -70,8 +70,7 @@ def test_inference_vmoba():
         },
     }
 
-    with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".json", delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
         json.dump(config, f)
         config_path = f.name
 

@@ -78,7 +78,7 @@ def construct_variable_block_sizes(
     n_t, n_h, n_w = num_tiles
 
     def _sizes(dim_len: int, tile: int, n: int) -> torch.LongTensor:
-        sizes = torch.full((n,), tile, dtype=torch.int, device=device)
+        sizes = torch.full((n, ), tile, dtype=torch.int, device=device)
         remainder = dim_len - (n - 1) * tile
         sizes[-1] = remainder if remainder > 0 else tile
         return sizes
@@ -87,11 +87,7 @@ def construct_variable_block_sizes(
     h_sizes = _sizes(h, ts_h, n_h)
     w_sizes = _sizes(w, ts_w, n_w)
 
-    return (
-        t_sizes[:, None, None]
-        * h_sizes[None, :, None]
-        * w_sizes[None, None, :]
-    ).reshape(-1)
+    return (t_sizes[:, None, None] * h_sizes[None, :, None] * w_sizes[None, None, :]).reshape(-1)
 
 
 def get_non_pad_index(
@@ -134,10 +130,8 @@ def build_vsa_metadata(
     ts_t, ts_h, ts_w = tile_size
     max_block_size = math.prod(tile_size)
     if max_block_size not in _SUPPORTED_VSA_BLOCK_VOLUMES:
-        raise ValueError(
-            f"Unsupported VSA tile volume {max_block_size} for tile_size={tile_size}; "
-            f"supported volumes are {_SUPPORTED_VSA_BLOCK_VOLUMES}."
-        )
+        raise ValueError(f"Unsupported VSA tile volume {max_block_size} for tile_size={tile_size}; "
+                         f"supported volumes are {_SUPPORTED_VSA_BLOCK_VOLUMES}.")
 
     num_tiles = (
         math.ceil(T / ts_t),

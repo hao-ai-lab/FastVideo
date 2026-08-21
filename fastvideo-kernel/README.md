@@ -17,7 +17,7 @@ Runtime-JIT kernels (no build step, ship in every wheel/image):
 | Kernels | Where | Used when |
 |---|---|---|
 | Triton: STA, VSA block-sparse, SLA, fused compress+topk, FP4 QAT training, quant/norm utils | `python/fastvideo_kernel/triton_kernels/` | automatic fallback when the matching C++ op is absent (`ops.py`, `turbodiffusion_ops.py`) |
-| FA4 CuTe-DSL block-sparse (VSA-256 fastpath on `sm_100`) | `block_sparse_attn_cute_fwd.py` | optional `flash_attn.cute` dependency, see below |
+| FA4 CuTe-DSL block-sparse forward/backward (VSA-128/256 fastpath on `sm_100`) | `block_sparse_attn_cute_fwd.py` | optional `flash_attn.cute` dependency, see below |
 | VMoBA `moba_attn_varlen` | `vmoba.py` | wraps flash-attn varlen |
 
 ## What gets built where, and when
@@ -64,28 +64,49 @@ cd fastvideo-kernel
 ./build.sh --rocm
 ```
 
-### Optional: FA4 CuTe block-sparse backend (VSA-256 fastpath)
+### Optional: FA4 CuTe block-sparse backend (VSA-128/256 fastpath)
 
-The VSA-256 fastpath (tile volume 256, on NVIDIA Blackwell / sm_100) routes to the
+The VSA-128/256 fastpaths (tile volume 128 or 256, on NVIDIA Blackwell / sm_100) route to the
 FlashAttention-4 CuTe-DSL block-sparse kernel exposed as `flash_attn.cute`. This is
 an **optional** dependency: it is imported lazily, and `video_sparse_attn`
 transparently falls back to the Triton backend when it is absent (so the package is
 fully usable without it).
 
-The symbols the fastpath needs (`flash_attn.cute.block_sparsity.BlockSparseTensorsTorch`,
-`flash_attn.cute.interface._flash_attn_fwd`) are provided upstream by
+The symbols the fastpath needs (`flash_attn.cute.block_sparsity.BlockSparseTensorsTorch`
+and the public/private forward-backward bridges in `flash_attn.cute.interface`) are provided upstream by
 [Dao-AILab/flash-attention](https://github.com/Dao-AILab/flash-attention). Pin to
-commit `940cd9680f3315f2f06b43ab5bea2c2cf2d96806`, the revision FastVideo pins as
+commit `14c377950125c70b7a9dabf9c561fca53715ac7d`, the revision FastVideo pins as
 the `flash-attn-4` source in the repo-root `pyproject.toml`; other revisions may
-have an incompatible `_flash_attn_fwd` signature.
+have incompatible block-sparse forward/backward interfaces.
+
+Install it under its distribution name so its own runtime stack resolves with it.
+Do **not** pre-install `nvidia-cutlass-dsl` by hand: this revision pins
+`nvidia-cutlass-dsl==4.6.0.dev0` exactly, and a hand-installed 4.5.x floor either
+gets silently upgraded or, if something else holds it back, leaves the CuTe
+kernels broken.
 
 ```bash
-pip install "nvidia-cutlass-dsl>=4.5.0" torchvision
-pip install "git+https://github.com/Dao-AILab/flash-attention.git@940cd9680f3315f2f06b43ab5bea2c2cf2d96806#subdirectory=flash_attn/cute"
+pip install torchvision
+pip install "flash-attn-4 @ git+https://github.com/Dao-AILab/flash-attention.git@14c377950125c70b7a9dabf9c561fca53715ac7d#subdirectory=flash_attn/cute"
 ```
 
-The CuTe kernel JIT-compiles on first use. Verified on Blackwell (sm_100) against
-`tests/test_vsa256_forward*.py`.
+That resolves `nvidia-cutlass-dsl` to 4.6.0.dev0 and `quack-kernels` to 0.5.3, a
+combination this revision works with. A mismatched CuTe DSL only surfaces when the
+kernel JIT-compiles, so the error points at CuTe internals rather than at the
+install:
+
+| Error on first VSA-128/256 CuTe call | Cause |
+|---|---|
+| `TypeError: fmax() missing 1 required positional argument: 'b'` | `nvidia-cutlass-dsl` 4.5.x |
+| `AttributeError: module 'cutlass.cute.core' has no attribute 'ThrMma'` | `quack-kernels` older than 0.5.1 |
+| `ImportError: cannot import name 'alloc_reserved_mbarrier'` | `quack-kernels` 0.6.2 or newer |
+
+An environment whose `flash_attn.cute` came from a prebuilt flash-attn wheel rather
+than from this pin hits the first row; that is what the overlay step in
+`docker/Dockerfile` works around.
+
+The CuTe kernels JIT-compile on first use. Forward and backward are verified on
+Blackwell (sm_100) against `tests/test_vsa128_*.py` and `tests/test_vsa256_*.py`.
 
 ## Usage
 
@@ -108,6 +129,33 @@ out = moba_attn_varlen(q, k, v, cu_seqlens_q, cu_seqlens_k, ...)
 
 ## Benchmark
 
+### Attn-QAT training
+
+The default shape matches one sequence-parallel rank of the 4-GPU
+Wan2.1-T2V-1.3B MixKit recipe (`B=1, H=3, L=31200, D=128`):
+
+```bash
+cd fastvideo-kernel
+python benchmarks/benchmark_attn_qat_train.py
+```
+
+The benchmark reports both conventional attention FLOPs and the extra matrix
+multiplications executed by the QAT straight-through path. Override
+`--peak-tflops` when running on a GPU other than RTX 5090.
+
+The QAT kernel is entirely Triton and routes by architecture at runtime. SM100
+uses a large-tile forward and split 64x64 backward for the production
+non-causal, head-dimension-128 configuration with a 16-aligned KV length. SM120
+(including RTX 5090) keeps the previous tiling but joins the quantized and STE
+P@V operations and uses a shallower backward pipeline for long sequences. Set
+`FASTVIDEO_ATTN_QAT_SM120_JOIN_QAT_PV=0` to compare against the split P@V path.
+Unsupported configurations retain the previous implementation. Set
+`FASTVIDEO_ATTN_QAT_SM100_OPTIMIZED=0` to benchmark that previous path on SM100. Forward tuning is available through
+`FASTVIDEO_ATTN_QAT_FWD_MODE=fast|balanced|reference`; exact reference-order
+softmax statistics are controlled by `FASTVIDEO_ATTN_QAT_FWD_EXACT_M` and are
+disabled by default for maximum throughput. Set it to `1` for reference-order
+statistics and bitwise-compatible `dV`.
+
 ### VSA (block-sparse) TFLOPs
 
 After building/installing `fastvideo-kernel`, run:
@@ -115,6 +163,14 @@ After building/installing `fastvideo-kernel`, run:
 ```bash
 cd fastvideo-kernel
 python benchmarks/bench_vsa.py --batch_size 1 --num_heads 16 --head_dim 128 --q_seq_lens 49152 --topk 64
+
+# VSA-256 FA4 CuTe forward/backward on Blackwell
+python benchmarks/bench_vsa.py --block_size 256 --use_cute \
+  --batch_size 1 --num_heads 12 --head_dim 128 --q_seq_lens 39936 --topk 20
+
+# VSA-128 FA4 CuTe forward/backward on Blackwell
+python benchmarks/bench_vsa.py --block_size 128 --use_cute \
+  --batch_size 1 --num_heads 12 --head_dim 128 --q_seq_lens 39936 --topk 40
 ```
 
 ### TurboDiffusion Kernels

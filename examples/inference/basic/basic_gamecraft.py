@@ -33,21 +33,20 @@ MODEL_PATH = os.environ.get("GAMECRAFT_MODEL_PATH", "FastVideo/HunyuanGameCraft-
 
 # Default prompts for demo
 DEFAULT_PROMPTS = {
-    "village": "A charming medieval village with cobblestone streets, thatched-roof houses, and vibrant flower gardens under a bright blue sky.",
-    "temple": "A majestic ancient temple stands under a clear blue sky, its grandeur highlighted by towering Doric columns and intricate architectural details.",
-    "forest": "A lush green forest with tall trees, dappled sunlight filtering through the leaves, and a winding dirt path.",
+    "village":
+    "A charming medieval village with cobblestone streets, thatched-roof houses, and vibrant flower gardens under a bright blue sky.",
+    "temple":
+    "A majestic ancient temple stands under a clear blue sky, its grandeur highlighted by towering Doric columns and intricate architectural details.",
+    "forest":
+    "A lush green forest with tall trees, dappled sunlight filtering through the leaves, and a winding dirt path.",
     "beach": "A tropical beach with crystal clear turquoise water, white sand, and palm trees swaying in the breeze.",
 }
 
 # I2V: default reference image (URL). Can override with a local path.
-DEFAULT_I2V_IMAGE_URL = (
-    "https://huggingface.co/datasets/huggingface/documentation-images/"
-    "resolve/main/diffusers/astronaut.jpg"
-)
-DEFAULT_I2V_PROMPT = (
-    "An astronaut hatching from an egg, on the surface of the moon, "
-    "the darkness and depth of space realised in the background."
-)
+DEFAULT_I2V_IMAGE_URL = ("https://huggingface.co/datasets/huggingface/documentation-images/"
+                         "resolve/main/diffusers/astronaut.jpg")
+DEFAULT_I2V_PROMPT = ("An astronaut hatching from an egg, on the surface of the moon, "
+                      "the darkness and depth of space realised in the background.")
 
 OUTPUT_PATH = "video_samples_gamecraft"
 

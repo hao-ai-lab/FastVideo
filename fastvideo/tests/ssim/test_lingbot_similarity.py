@@ -35,15 +35,12 @@ def _find_lingbotworld_examples_root() -> str | None:
     script_dir = os.path.dirname(os.path.abspath(__file__))
     repo_root = os.path.abspath(os.path.join(script_dir, "..", "..", ".."))
     candidates = [
-        os.path.join(repo_root, "examples", "inference", "basic",
-                     "lingbotworld_examples"),
-        os.path.join(repo_root, "..", "FastVideo", "examples", "inference",
-                     "basic", "lingbotworld_examples"),
+        os.path.join(repo_root, "examples", "inference", "basic", "lingbotworld_examples"),
+        os.path.join(repo_root, "..", "FastVideo", "examples", "inference", "basic", "lingbotworld_examples"),
     ]
     for candidate in candidates:
         if (os.path.exists(os.path.join(candidate, "00", "poses.npy"))
-                and os.path.exists(
-                    os.path.join(candidate, "00", "intrinsics.npy"))):
+                and os.path.exists(os.path.join(candidate, "00", "intrinsics.npy"))):
             return os.path.abspath(candidate)
     return None
 
@@ -54,44 +51,56 @@ device_reference_folder = resolve_device_reference_folder(
         ("A40", "A40"),
         ("L40S", "L40S"),
         ("H100", "H100"),
+        # GB200 must precede any bare "B200" pattern: the lookup is a
+        # substring scan and "B200" is a substring of "NVIDIA GB200"
+        ("GB200", "GB200"),
         ("H200", "H200"),
     ),
     device_name=device_name,
     logger=logger,
 )
 
-
 LINGBOT_PARAMS = {
-    "model_path": "FastVideo/LingBot-World-Base-Cam-Diffusers",
-    "num_gpus": 2,
-    "height": 256,
-    "width": 448,
-    "num_frames": 45,  # must be 4k+1
-    "num_inference_steps": 4,
-    "guidance_scale": 5.0,
-    "guidance_scale_2": 5.0,
-    "embedded_cfg_scale": 6,
-    "flow_shift": 10.0,
-    "boundary_ratio": 0.947,
-    "seed": 42,
-    "fps": 16,
-    "spatial_scale": 8,
-    "example_case": "00",
-    "image_path": (
-        "https://raw.githubusercontent.com/Robbyant/lingbot-world/main/"
-        "examples/00/image.jpg"
-    ),
-    "negative_prompt": (
-        "画面突变，色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，"
-        "最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，"
-        "畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走，"
-        "镜头晃动，画面闪烁，模糊，噪点，水印，签名，文字，变形，扭曲，液化，不合逻辑的结构，卡顿，"
-        "PPT幻灯片感，过暗，欠曝，低对比度，霓虹灯光感，过度锐化，3D渲染感，人物，行人，游客，身体，"
-        "皮肤，肢体，面部特征，汽车，电线"
-    ),
+    "model_path":
+    "FastVideo/LingBot-World-Base-Cam-Diffusers",
+    "num_gpus":
+    2,
+    "height":
+    256,
+    "width":
+    448,
+    "num_frames":
+    45,  # must be 4k+1
+    "num_inference_steps":
+    4,
+    "guidance_scale":
+    5.0,
+    "guidance_scale_2":
+    5.0,
+    "embedded_cfg_scale":
+    6,
+    "flow_shift":
+    10.0,
+    "boundary_ratio":
+    0.947,
+    "seed":
+    42,
+    "fps":
+    16,
+    "spatial_scale":
+    8,
+    "example_case":
+    "00",
+    "image_path": ("https://raw.githubusercontent.com/Robbyant/lingbot-world/main/"
+                   "examples/00/image.jpg"),
+    "negative_prompt": ("画面突变，色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，"
+                        "最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，"
+                        "畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走，"
+                        "镜头晃动，画面闪烁，模糊，噪点，水印，签名，文字，变形，扭曲，液化，不合逻辑的结构，卡顿，"
+                        "PPT幻灯片感，过暗，欠曝，低对比度，霓虹灯光感，过度锐化，3D渲染感，人物，行人，游客，身体，"
+                        "皮肤，肢体，面部特征，汽车，电线"),
 }
-_LINGBOT_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained(
-    LINGBOT_PARAMS["model_path"])
+_LINGBOT_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained(LINGBOT_PARAMS["model_path"])
 LINGBOT_FULL_QUALITY_PARAMS = {
     "model_path": LINGBOT_PARAMS["model_path"],
     "num_gpus": LINGBOT_PARAMS["num_gpus"],
@@ -131,15 +140,12 @@ def test_lingbot_i2v_similarity(prompt: str, ATTENTION_BACKEND: str):
     if device_reference_folder is None:
         pytest.skip(f"Unsupported device for LingBot SSIM test: {device_name}")
     if torch.cuda.device_count() < params["num_gpus"]:
-        pytest.skip(
-            f"LingBot SSIM test requires {params['num_gpus']} GPUs, "
-            f"but only {torch.cuda.device_count()} detected."
-        )
+        pytest.skip(f"LingBot SSIM test requires {params['num_gpus']} GPUs, "
+                    f"but only {torch.cuda.device_count()} detected.")
 
     examples_root = _find_lingbotworld_examples_root()
     if examples_root is None:
-        pytest.skip(
-            "lingbotworld_examples not found under examples/inference/basic.")
+        pytest.skip("lingbotworld_examples not found under examples/inference/basic.")
 
     action_path = os.path.join(examples_root, params["example_case"])
     if not (os.path.exists(os.path.join(action_path, "poses.npy"))
@@ -194,16 +200,14 @@ def test_lingbot_i2v_similarity(prompt: str, ATTENTION_BACKEND: str):
 
     generator: VideoGenerator | None = None
     try:
-        generator = VideoGenerator.from_pretrained(
-            model_path=params["model_path"], **init_kwargs)
+        generator = VideoGenerator.from_pretrained(model_path=params["model_path"], **init_kwargs)
         generator.generate_video(prompt, **generation_kwargs)
     finally:
         if generator is not None:
             generator.shutdown()
 
     generated_video_path = os.path.join(output_dir, output_video_name)
-    assert os.path.exists(generated_video_path), (
-        f"Output video was not generated at {generated_video_path}")
+    assert os.path.exists(generated_video_path), (f"Output video was not generated at {generated_video_path}")
 
     reference_folder = build_reference_folder_path(
         script_dir,
@@ -212,8 +216,7 @@ def test_lingbot_i2v_similarity(prompt: str, ATTENTION_BACKEND: str):
         ATTENTION_BACKEND,
     )
     if not os.path.exists(reference_folder):
-        raise FileNotFoundError(
-            f"Reference video folder does not exist: {reference_folder}")
+        raise FileNotFoundError(f"Reference video folder does not exist: {reference_folder}")
 
     reference_video_name = None
     for filename in os.listdir(reference_folder):
@@ -221,24 +224,17 @@ def test_lingbot_i2v_similarity(prompt: str, ATTENTION_BACKEND: str):
             reference_video_name = filename
             break
     if not reference_video_name:
-        raise FileNotFoundError(
-            f"Reference video missing for prompt/backend under {reference_folder}"
-        )
+        raise FileNotFoundError(f"Reference video missing for prompt/backend under {reference_folder}")
 
     reference_video_path = os.path.join(reference_folder, reference_video_name)
-    logger.info("Computing SSIM between %s and %s", reference_video_path,
-                generated_video_path)
-    ssim_values = compute_video_ssim_torchvision(reference_video_path,
-                                                 generated_video_path,
-                                                 use_ms_ssim=True)
+    logger.info("Computing SSIM between %s and %s", reference_video_path, generated_video_path)
+    ssim_values = compute_video_ssim_torchvision(reference_video_path, generated_video_path, use_ms_ssim=True)
     mean_ssim = ssim_values[0]
     logger.info("SSIM mean value: %s", mean_ssim)
 
-    write_ssim_results(output_dir, ssim_values, reference_video_path,
-                       generated_video_path,
+    write_ssim_results(output_dir, ssim_values, reference_video_path, generated_video_path,
                        params["num_inference_steps"], prompt)
 
     min_acceptable_ssim = 0.70
-    assert mean_ssim >= min_acceptable_ssim, (
-        f"SSIM value {mean_ssim} is below threshold {min_acceptable_ssim} "
-        f"for {model_id} with backend {ATTENTION_BACKEND}")
+    assert mean_ssim >= min_acceptable_ssim, (f"SSIM value {mean_ssim} is below threshold {min_acceptable_ssim} "
+                                              f"for {model_id} with backend {ATTENTION_BACKEND}")

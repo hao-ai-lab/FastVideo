@@ -25,10 +25,7 @@ from fastvideo.train.methods.fine_tuning.tfsft import (
 from fastvideo.train.models.wan import WanCausalModel
 from fastvideo.train.utils.config import load_run_config
 
-
-_FIXTURE = str(
-    Path(__file__).resolve().parent.parent / "fixtures"
-    / "wan_causal_t2v_tfsft_min.yaml")
+_FIXTURE = str(Path(__file__).resolve().parent.parent / "fixtures" / "wan_causal_t2v_tfsft_min.yaml")
 
 
 def _build_synthetic_batch(
@@ -37,18 +34,14 @@ def _build_synthetic_batch(
 ) -> dict[str, torch.Tensor]:
     batch_size = 1
     return {
-        "text_embedding":
-        torch.randn(batch_size, 16, 4096, device=device, dtype=dtype),
-        "text_attention_mask":
-        torch.ones(batch_size, 16, device=device),
-        "vae_latent":
-        torch.randn(batch_size, 16, 6, 8, 8, device=device, dtype=dtype),
+        "text_embedding": torch.randn(batch_size, 16, 4096, device=device, dtype=dtype),
+        "text_attention_mask": torch.ones(batch_size, 16, device=device),
+        "vae_latent": torch.randn(batch_size, 16, 6, 8, 8, device=device, dtype=dtype),
     }
 
 
 @pytest.mark.usefixtures("distributed_setup")
-def test_wan_causal_tfsft_single_train_step(
-        monkeypatch: pytest.MonkeyPatch) -> None:
+def test_wan_causal_tfsft_single_train_step(monkeypatch: pytest.MonkeyPatch) -> None:
     if not torch.cuda.is_available():
         pytest.skip("requires CUDA")
 
@@ -81,14 +74,12 @@ def test_wan_causal_tfsft_single_train_step(
 
     loss = loss_map["total_loss"]
     assert torch.is_tensor(loss), "total_loss must be a torch.Tensor"
-    assert torch.isfinite(loss).item(), (
-        f"total_loss is not finite: {loss.item()}")
+    assert torch.isfinite(loss).item(), (f"total_loss is not finite: {loss.item()}")
 
     method.backward(loss_map, outputs, grad_accum_rounds=1)
 
     blocks = getattr(model.transformer, "blocks", None)
-    assert blocks is not None and len(blocks) > 0, (
-        "CausalWanTransformer is expected to expose ``.blocks``")
+    assert blocks is not None and len(blocks) > 0, ("CausalWanTransformer is expected to expose ``.blocks``")
     layer0 = blocks[0]
 
     trainable = [p for p in layer0.parameters() if p.requires_grad]
@@ -96,18 +87,13 @@ def test_wan_causal_tfsft_single_train_step(
 
     for i, p in enumerate(trainable):
         assert p.grad is not None, f"layer 0 param[{i}] has None grad"
-        assert torch.isfinite(p.grad).all().item(), (
-            f"layer 0 param[{i}] grad contains NaN/Inf")
+        assert torch.isfinite(p.grad).all().item(), (f"layer 0 param[{i}] grad contains NaN/Inf")
 
-    any_nonzero = any(
-        p.grad.detach().float().norm().item() > 0.0 for p in trainable)
-    assert any_nonzero, (
-        "all layer-0 grads are exactly zero; backward did not "
-        "reach the first transformer block")
+    any_nonzero = any(p.grad.detach().float().norm().item() > 0.0 for p in trainable)
+    assert any_nonzero, ("all layer-0 grads are exactly zero; backward did not "
+                         "reach the first transformer block")
 
     # Teacher forcing must build its own (concatenated) attention mask and
     # must not have constructed the diffusion-forcing mask.
-    assert model.transformer.teacher_forcing_block_mask is not None, (
-        "teacher-forcing mask was not constructed")
-    assert model.transformer.block_mask is None, (
-        "diffusion-forcing mask should not be built on the TF path")
+    assert model.transformer.teacher_forcing_block_mask is not None, ("teacher-forcing mask was not constructed")
+    assert model.transformer.block_mask is None, ("diffusion-forcing mask should not be built on the TF path")

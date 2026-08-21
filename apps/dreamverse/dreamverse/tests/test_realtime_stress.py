@@ -27,13 +27,8 @@ try:
 except ModuleNotFoundError:
     websockets = None  # type: ignore[assignment]
 
-
-DEFAULT_PRESET_FILE = (
-    Path(__file__).resolve().parents[2]
-    / "web"
-    / "prompts"
-    / "selected_ltx2_continuation_story_presets.json"
-)
+DEFAULT_PRESET_FILE = (Path(__file__).resolve().parents[2] / "web" / "prompts" /
+                       "selected_ltx2_continuation_story_presets.json")
 
 
 def utc_now_iso() -> str:
@@ -65,10 +60,7 @@ def safe_percentile(values: list[float], percentile: float) -> float | None:
     if lower == upper:
         return sorted_values[lower]
     fraction = rank - lower
-    return (
-        sorted_values[lower]
-        + (sorted_values[upper] - sorted_values[lower]) * fraction
-    )
+    return (sorted_values[lower] + (sorted_values[upper] - sorted_values[lower]) * fraction)
 
 
 def summarize_series(values: list[float]) -> dict[str, float | int | None]:
@@ -145,24 +137,16 @@ def load_curated_prompts(
     selected_id = str(selected.get("id", "")).strip() or "unknown_preset"
     raw_prompts = selected.get("segment_prompts", [])
     if not isinstance(raw_prompts, list):
-        raise ValueError(
-            f"Preset {selected_id} has invalid segment_prompts (must be list)."
-        )
+        raise ValueError(f"Preset {selected_id} has invalid segment_prompts (must be list).")
 
-    prompts = [
-        str(prompt).strip()
-        for prompt in raw_prompts
-        if isinstance(prompt, str) and str(prompt).strip()
-    ]
+    prompts = [str(prompt).strip() for prompt in raw_prompts if isinstance(prompt, str) and str(prompt).strip()]
     if not prompts:
         raise ValueError(f"Preset {selected_id} has no non-empty prompts.")
 
     limited = prompts[:curated_limit]
     if not limited:
-        raise ValueError(
-            f"curated_limit={curated_limit} produced no prompts for preset "
-            f"{selected_id}."
-        )
+        raise ValueError(f"curated_limit={curated_limit} produced no prompts for preset "
+                         f"{selected_id}.")
     return selected_id, limited, len(prompts)
 
 
@@ -224,11 +208,11 @@ async def run_single_session(
 
     try:
         async with websockets.connect(
-            url,
-            max_size=None,
-            ping_interval=None,
-            open_timeout=connect_timeout_s,
-            close_timeout=2.0,
+                url,
+                max_size=None,
+                ping_interval=None,
+                open_timeout=connect_timeout_s,
+                close_timeout=2.0,
         ) as ws:
             connect_finish_monotonic = time.monotonic()
             session_data["connect_finish_ts_utc"] = utc_now_iso()
@@ -249,9 +233,7 @@ async def run_single_session(
                 timeout_remaining = session_timeout_s - elapsed_s
                 if timeout_remaining <= 0:
                     session_data["status"] = "timeout"
-                    session_data["error"] = (
-                        f"Session timed out after {session_timeout_s:.1f}s."
-                    )
+                    session_data["error"] = (f"Session timed out after {session_timeout_s:.1f}s.")
                     break
 
                 recv_start_epoch = time.time()
@@ -265,9 +247,7 @@ async def run_single_session(
                     )
                 except asyncio.TimeoutError:
                     session_data["status"] = "timeout"
-                    session_data["error"] = (
-                        "Timed out waiting for websocket message."
-                    )
+                    session_data["error"] = ("Timed out waiting for websocket message.")
                     break
                 except Exception as exc:
                     session_data["status"] = "failed"
@@ -288,20 +268,16 @@ async def run_single_session(
 
                     chunk_gap_ms: float | None = None
                     if last_chunk_finish_monotonic is not None:
-                        chunk_gap_ms = (
-                            recv_finish_monotonic - last_chunk_finish_monotonic
-                        ) * 1000.0
+                        chunk_gap_ms = (recv_finish_monotonic - last_chunk_finish_monotonic) * 1000.0
 
-                    session_data["chunks"].append(
-                        {
-                            "segment_idx": current_segment_idx,
-                            "chunk_idx": session_data["total_chunks"],
-                            "size_bytes": len(message),
-                            "chunk_start_ts_utc": recv_start_iso,
-                            "chunk_finish_ts_utc": recv_finish_iso,
-                            "chunk_gap_ms": chunk_gap_ms,
-                        }
-                    )
+                    session_data["chunks"].append({
+                        "segment_idx": current_segment_idx,
+                        "chunk_idx": session_data["total_chunks"],
+                        "size_bytes": len(message),
+                        "chunk_start_ts_utc": recv_start_iso,
+                        "chunk_finish_ts_utc": recv_finish_iso,
+                        "chunk_gap_ms": chunk_gap_ms,
+                    })
                     last_chunk_finish_monotonic = recv_finish_monotonic
                     last_chunk_finish_epoch = recv_finish_epoch
                     session_data["last_chunk_finish_ts_utc"] = recv_finish_iso
@@ -321,9 +297,7 @@ async def run_single_session(
                 if msg_type == "gpu_assigned":
                     session_data["gpu_assigned_ts_utc"] = recv_finish_iso
                     if connect_finish_monotonic is not None:
-                        session_data["queue_wait_ms"] = (
-                            recv_finish_monotonic - connect_finish_monotonic
-                        ) * 1000.0
+                        session_data["queue_wait_ms"] = (recv_finish_monotonic - connect_finish_monotonic) * 1000.0
                 elif msg_type == "ltx2_stream_start":
                     if initial_total_segments is None:
                         parsed_total = parse_int(data.get("total_segments"))
@@ -338,20 +312,13 @@ async def run_single_session(
                     session_data["media_segments_completed"] += 1
                     if first_media_segment_complete_epoch is None:
                         first_media_segment_complete_epoch = recv_finish_epoch
-                        session_data[
-                            "first_media_segment_complete_ts_utc"
-                        ] = recv_finish_iso
+                        session_data["first_media_segment_complete_ts_utc"] = recv_finish_iso
                 elif msg_type == "ltx2_segment_complete":
                     session_data["segments_completed"] += 1
                     seg_idx = parse_int(data.get("segment_idx"))
-                    if (
-                        initial_total_segments is not None
-                        and seg_idx is not None
-                        and seg_idx >= initial_total_segments
-                    ):
-                        session_data[
-                            "target_segment_complete_ts_utc"
-                        ] = recv_finish_iso
+                    if (initial_total_segments is not None and seg_idx is not None
+                            and seg_idx >= initial_total_segments):
+                        session_data["target_segment_complete_ts_utc"] = recv_finish_iso
                         await asyncio.sleep(post_complete_wait_s)
                         session_data["leave_sent_ts_utc"] = utc_now_iso()
                         try:
@@ -362,15 +329,11 @@ async def run_single_session(
                         break
                 elif msg_type == "session_timeout":
                     session_data["status"] = "timeout"
-                    session_data["error"] = str(
-                        data.get("message") or "Backend session timeout"
-                    )
+                    session_data["error"] = str(data.get("message") or "Backend session timeout")
                     break
                 elif msg_type == "error":
                     session_data["status"] = "failed"
-                    session_data["error"] = str(
-                        data.get("message") or "Backend error message"
-                    )
+                    session_data["error"] = str(data.get("message") or "Backend error message")
                     break
 
             if session_data["status"] == "failed" and session_data["error"] is None:
@@ -379,29 +342,18 @@ async def run_single_session(
         session_data["status"] = "failed"
         session_data["error"] = f"WebSocket connect/run failed: {exc}"
 
-    if (
-        first_chunk_finish_epoch is not None
-        and last_chunk_finish_epoch is not None
-        and session_data["total_chunk_bytes"] > 0
-    ):
+    if (first_chunk_finish_epoch is not None and last_chunk_finish_epoch is not None
+            and session_data["total_chunk_bytes"] > 0):
         duration_s = last_chunk_finish_epoch - first_chunk_finish_epoch
         if duration_s > 0:
-            session_data["session_goodput_mbps"] = (
-                session_data["total_chunk_bytes"] * 8.0 / duration_s / 1_000_000.0
-            )
+            session_data["session_goodput_mbps"] = (session_data["total_chunk_bytes"] * 8.0 / duration_s / 1_000_000.0)
 
-    if (
-        first_chunk_finish_epoch is not None
-        and first_media_segment_complete_epoch is not None
-    ):
-        session_data["first_chunk_before_first_media_complete"] = (
-            first_chunk_finish_epoch < first_media_segment_complete_epoch
-        )
+    if (first_chunk_finish_epoch is not None and first_media_segment_complete_epoch is not None):
+        session_data["first_chunk_before_first_media_complete"] = (first_chunk_finish_epoch
+                                                                   < first_media_segment_complete_epoch)
 
     session_data["close_ts_utc"] = utc_now_iso()
-    session_data["duration_ms"] = (
-        time.monotonic() - session_start_monotonic
-    ) * 1000.0
+    session_data["duration_ms"] = (time.monotonic() - session_start_monotonic) * 1000.0
     return session_data
 
 
@@ -412,14 +364,11 @@ async def run_worker_sessions(
     config: dict[str, Any],
 ) -> list[dict[str, Any]]:
     tasks = [
-        asyncio.create_task(
-            run_single_session(
-                worker_id=worker_id,
-                worker_session_idx=idx,
-                config=config,
-            )
-        )
-        for idx in range(session_count)
+        asyncio.create_task(run_single_session(
+            worker_id=worker_id,
+            worker_session_idx=idx,
+            config=config,
+        )) for idx in range(session_count)
     ]
     if not tasks:
         return []
@@ -437,29 +386,23 @@ def worker_entry(
     try:
         ready_queue.put({"worker_id": worker_id, "status": "ready"})
         start_event.wait()
-        sessions = asyncio.run(
-            run_worker_sessions(
-                worker_id=worker_id,
-                session_count=session_count,
-                config=config,
-            )
-        )
-        result_queue.put(
-            {
-                "worker_id": worker_id,
-                "status": "ok",
-                "sessions": sessions,
-            }
-        )
+        sessions = asyncio.run(run_worker_sessions(
+            worker_id=worker_id,
+            session_count=session_count,
+            config=config,
+        ))
+        result_queue.put({
+            "worker_id": worker_id,
+            "status": "ok",
+            "sessions": sessions,
+        })
     except Exception as exc:
-        result_queue.put(
-            {
-                "worker_id": worker_id,
-                "status": "error",
-                "error": str(exc),
-                "traceback": traceback.format_exc(),
-            }
-        )
+        result_queue.put({
+            "worker_id": worker_id,
+            "status": "error",
+            "error": str(exc),
+            "traceback": traceback.format_exc(),
+        })
 
 
 def build_summary(
@@ -517,33 +460,22 @@ def build_summary(
     if len(all_chunk_finish_epochs) >= 2 and total_chunk_bytes > 0:
         duration_s = max(all_chunk_finish_epochs) - min(all_chunk_finish_epochs)
         if duration_s > 0:
-            global_goodput_mbps = (
-                total_chunk_bytes * 8.0 / duration_s / 1_000_000.0
-            )
+            global_goodput_mbps = (total_chunk_bytes * 8.0 / duration_s / 1_000_000.0)
 
-    bucket_throughputs_mbps = [
-        (bytes_count * 8.0) / 1_000_000.0
-        for _, bytes_count in sorted(bucket_bytes.items())
-    ]
+    bucket_throughputs_mbps = [(bytes_count * 8.0) / 1_000_000.0 for _, bytes_count in sorted(bucket_bytes.items())]
     bucket_stats = summarize_series(bucket_throughputs_mbps)
 
-    chunk_gap_threshold_breaches = [
-        value for value in chunk_gaps if value >= chunk_gap_threshold_ms
-    ]
+    chunk_gap_threshold_breaches = [value for value in chunk_gaps if value >= chunk_gap_threshold_ms]
     non_success = len(sessions) - status_counts.get("success", 0)
 
     fail_reasons: list[str] = []
     if non_success > 0:
-        fail_reasons.append(
-            f"{non_success} session(s) did not complete successfully."
-        )
+        fail_reasons.append(f"{non_success} session(s) did not complete successfully.")
     if not chunk_gaps:
         fail_reasons.append("No chunk gap data collected.")
     if chunk_gap_threshold_breaches:
-        fail_reasons.append(
-            f"{len(chunk_gap_threshold_breaches)} chunk gap(s) were >= "
-            f"{chunk_gap_threshold_ms:.0f}ms."
-        )
+        fail_reasons.append(f"{len(chunk_gap_threshold_breaches)} chunk gap(s) were >= "
+                            f"{chunk_gap_threshold_ms:.0f}ms.")
 
     passed = len(fail_reasons) == 0
     progressive_ratio = None
@@ -554,20 +486,18 @@ def build_summary(
         "passed": passed,
         "fail_reasons": fail_reasons,
         "sessions": {
-            "total": len(sessions),
-            "success": status_counts.get("success", 0),
-            "failed": status_counts.get("failed", 0),
-            "timeout": status_counts.get("timeout", 0),
-            "protocol_error": status_counts.get("protocol_error", 0),
-            "other": (
-                len(sessions)
-                - (
-                    status_counts.get("success", 0)
-                    + status_counts.get("failed", 0)
-                    + status_counts.get("timeout", 0)
-                    + status_counts.get("protocol_error", 0)
-                )
-            ),
+            "total":
+            len(sessions),
+            "success":
+            status_counts.get("success", 0),
+            "failed":
+            status_counts.get("failed", 0),
+            "timeout":
+            status_counts.get("timeout", 0),
+            "protocol_error":
+            status_counts.get("protocol_error", 0),
+            "other": (len(sessions) - (status_counts.get("success", 0) + status_counts.get("failed", 0) +
+                                       status_counts.get("timeout", 0) + status_counts.get("protocol_error", 0))),
         },
         "chunk_gap_ms": {
             **chunk_gap_stats,
@@ -606,51 +536,39 @@ def print_summary(
     bucket_bw = bandwidth["bucketed_1s"]
 
     print("=== LTX2 Realtime Stress Test Summary ===")
-    print(
-        "Run: "
-        f"url={run_info['url']} clients={run_info['clients']} "
-        f"processes={run_info['processes']} "
-        f"preset={run_info['preset_id']} "
-        f"curated_limit={run_info['curated_limit']}"
-    )
-    print(
-        "Sessions: "
-        f"total={sessions['total']} success={sessions['success']} "
-        f"failed={sessions['failed']} timeout={sessions['timeout']} "
-        f"protocol_error={sessions['protocol_error']}"
-    )
-    print(
-        "Chunk gap ms: "
-        f"min={format_num(chunk_gap['min'])} "
-        f"p50={format_num(chunk_gap['p50'])} "
-        f"p95={format_num(chunk_gap['p95'])} "
-        f"p99={format_num(chunk_gap['p99'])} "
-        f"max={format_num(chunk_gap['max'])} "
-        f"threshold={format_num(chunk_gap['threshold_ms'])} "
-        f"breaches={chunk_gap['breach_count']}"
-    )
-    print(
-        "Queue wait ms: "
-        f"min={format_num(queue_wait['min'])} "
-        f"p50={format_num(queue_wait['p50'])} "
-        f"p95={format_num(queue_wait['p95'])} "
-        f"max={format_num(queue_wait['max'])}"
-    )
+    print("Run: "
+          f"url={run_info['url']} clients={run_info['clients']} "
+          f"processes={run_info['processes']} "
+          f"preset={run_info['preset_id']} "
+          f"curated_limit={run_info['curated_limit']}")
+    print("Sessions: "
+          f"total={sessions['total']} success={sessions['success']} "
+          f"failed={sessions['failed']} timeout={sessions['timeout']} "
+          f"protocol_error={sessions['protocol_error']}")
+    print("Chunk gap ms: "
+          f"min={format_num(chunk_gap['min'])} "
+          f"p50={format_num(chunk_gap['p50'])} "
+          f"p95={format_num(chunk_gap['p95'])} "
+          f"p99={format_num(chunk_gap['p99'])} "
+          f"max={format_num(chunk_gap['max'])} "
+          f"threshold={format_num(chunk_gap['threshold_ms'])} "
+          f"breaches={chunk_gap['breach_count']}")
+    print("Queue wait ms: "
+          f"min={format_num(queue_wait['min'])} "
+          f"p50={format_num(queue_wait['p50'])} "
+          f"p95={format_num(queue_wait['p95'])} "
+          f"max={format_num(queue_wait['max'])}")
     ratio = progressive["ratio"]
     ratio_text = "n/a" if ratio is None else f"{ratio * 100:.2f}%"
-    print(
-        "Progressive streaming: "
-        f"{progressive['success_sessions']}/"
-        f"{progressive['eligible_sessions']} ({ratio_text})"
-    )
-    print(
-        "Bandwidth Mbps: "
-        f"per_session_avg={format_num(per_session_bw['avg'])} "
-        f"per_session_p95={format_num(per_session_bw['p95'])} "
-        f"global={format_num(bandwidth['global_goodput_mbps'])} "
-        f"bucket_avg={format_num(bucket_bw['avg_mbps'])} "
-        f"bucket_peak={format_num(bucket_bw['peak_mbps'])}"
-    )
+    print("Progressive streaming: "
+          f"{progressive['success_sessions']}/"
+          f"{progressive['eligible_sessions']} ({ratio_text})")
+    print("Bandwidth Mbps: "
+          f"per_session_avg={format_num(per_session_bw['avg'])} "
+          f"per_session_p95={format_num(per_session_bw['p95'])} "
+          f"global={format_num(bandwidth['global_goodput_mbps'])} "
+          f"bucket_avg={format_num(bucket_bw['avg_mbps'])} "
+          f"bucket_peak={format_num(bucket_bw['peak_mbps'])}")
     print(f"VERDICT: {'PASS' if summary['passed'] else 'FAIL'}")
     if summary["fail_reasons"]:
         print("Fail reasons:")
@@ -670,10 +588,8 @@ def distribute_sessions(total_clients: int, process_count: int) -> list[int]:
 
 def run_stress(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     if websockets is None:
-        raise RuntimeError(
-            "Missing dependency: websockets. Install it before running this "
-            "stress test."
-        )
+        raise RuntimeError("Missing dependency: websockets. Install it before running this "
+                           "stress test.")
 
     preset_file = Path(args.preset_file).expanduser().resolve()
     selected_preset_id, curated_prompts, total_prompt_count = load_curated_prompts(
@@ -735,13 +651,8 @@ def run_stress(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
 
         start_event.set()
 
-        result_deadline = (
-            time.monotonic()
-            + args.connect_timeout_s
-            + args.session_timeout_s
-            + args.post_complete_wait_s
-            + 180.0
-        )
+        result_deadline = (time.monotonic() + args.connect_timeout_s + args.session_timeout_s +
+                           args.post_complete_wait_s + 180.0)
         worker_results: list[dict[str, Any]] = []
         while len(worker_results) < len(processes):
             timeout_s = max(0.1, result_deadline - time.monotonic())
@@ -765,24 +676,20 @@ def run_stress(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
             if result.get("status") == "ok":
                 sessions.extend(result.get("sessions", []))
             else:
-                worker_errors.append(
-                    {
-                        "worker_id": result.get("worker_id"),
-                        "error": result.get("error"),
-                        "traceback": result.get("traceback"),
-                    }
-                )
+                worker_errors.append({
+                    "worker_id": result.get("worker_id"),
+                    "error": result.get("error"),
+                    "traceback": result.get("traceback"),
+                })
 
         received_workers = {result.get("worker_id") for result in worker_results}
         expected_workers = set(range(len(processes)))
         missing_workers = sorted(expected_workers - received_workers)
         for worker_id in missing_workers:
-            worker_errors.append(
-                {
-                    "worker_id": worker_id,
-                    "error": "No worker result received.",
-                }
-            )
+            worker_errors.append({
+                "worker_id": worker_id,
+                "error": "No worker result received.",
+            })
 
         run_end_epoch = time.time()
         run_end_iso = iso_from_epoch(run_end_epoch)
@@ -795,9 +702,8 @@ def run_stress(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
 
         if worker_errors:
             summary["passed"] = False
-            summary["fail_reasons"] = list(summary["fail_reasons"]) + [
-                f"{len(worker_errors)} worker error(s) occurred."
-            ]
+            summary["fail_reasons"] = list(
+                summary["fail_reasons"]) + [f"{len(worker_errors)} worker error(s) occurred."]
 
         output_payload = {
             "run_info": {
@@ -833,9 +739,7 @@ def run_stress(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Multiprocess realtime stress test for LTX2 streaming.",
-    )
+    parser = argparse.ArgumentParser(description="Multiprocess realtime stress test for LTX2 streaming.", )
     parser.add_argument(
         "-u",
         "--url",

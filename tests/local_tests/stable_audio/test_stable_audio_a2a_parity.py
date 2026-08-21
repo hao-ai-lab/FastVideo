@@ -41,8 +41,7 @@ def _load_official(device):
     from stable_audio_tools.models.factory import create_model_from_config
 
     cfg_path = hf_hub_download(repo_id=_HF_REPO_ID, filename=_MODEL_CFG, token=resolve_hf_token())
-    weights_path = hf_hub_download(repo_id=_HF_REPO_ID, filename=_MODEL_WEIGHTS,
-                                   token=resolve_hf_token())
+    weights_path = hf_hub_download(repo_id=_HF_REPO_ID, filename=_MODEL_WEIGHTS, token=resolve_hf_token())
     with open(cfg_path) as f:
         model_config = json.load(f)
     model = create_model_from_config(model_config)
@@ -64,10 +63,8 @@ def _make_init_audio(seed: int, sample_rate: int, seconds: float, channels: int 
     return base.unsqueeze(0).repeat(channels, 1).unsqueeze(0).contiguous()
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(),
-                    reason="Stable Audio A2A parity requires CUDA.")
-@pytest.mark.skipif(not can_access_repo(_HF_REPO_ID),
-                    reason=f"{_HF_REPO_ID} not accessible — gated.")
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="Stable Audio A2A parity requires CUDA.")
+@pytest.mark.skipif(not can_access_repo(_HF_REPO_ID), reason=f"{_HF_REPO_ID} not accessible — gated.")
 @pytest.mark.skipif(not _stable_audio_tools_inference_available(),
                     reason="`stable_audio_tools.inference` not importable.")
 def test_stable_audio_a2a_official_parity():
@@ -85,8 +82,7 @@ def test_stable_audio_a2a_official_parity():
     sample_rate = int(off_cfg["sample_rate"])
     full_sample_size = int(off_cfg["sample_size"])
 
-    init_audio = _make_init_audio(seed=seed, sample_rate=sample_rate,
-                                  seconds=audio_end_in_s)
+    init_audio = _make_init_audio(seed=seed, sample_rate=sample_rate, seconds=audio_end_in_s)
 
     cond = [{"prompt": prompt, "seconds_start": 0.0, "seconds_total": audio_end_in_s}]
 
@@ -156,8 +152,7 @@ def test_stable_audio_a2a_official_parity():
     diff_max = diff.max().item()
     diff_mean = diff.mean().item()
     diff_median = diff.median().item()
-    rel = abs(off_audio.abs().mean() - fv_audio.abs().mean()) / max(off_audio.abs().mean().item(),
-                                                                    1e-6)
+    rel = abs(off_audio.abs().mean() - fv_audio.abs().mean()) / max(off_audio.abs().mean().item(), 1e-6)
     print(f"diff max={diff_max:.6f} mean={diff_mean:.6f} median={diff_median:.6f} "
           f"abs_mean rel drift={rel:.4%}")
 

@@ -103,6 +103,17 @@ export default function CreateJobModal({
   const [fakeScoreModelPath, setFakeScoreModelPath] = React.useState('');
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [isLoadingModels, setIsLoadingModels] = React.useState(false);
+  const [isLoadingDatasets, setIsLoadingDatasets] = React.useState(false);
+  const [modelLoadError, setModelLoadError] = React.useState<string | null>(
+    null,
+  );
+  const [datasetLoadError, setDatasetLoadError] = React.useState<string | null>(
+    null,
+  );
+  const [imageUploadError, setImageUploadError] = React.useState<string | null>(
+    null,
+  );
+  const [submitError, setSubmitError] = React.useState<string | null>(null);
   const imageInputRef = React.useRef<HTMLInputElement>(null);
 
   // Seed field values from the persisted default options each time the modal
@@ -144,6 +155,10 @@ export default function CreateJobModal({
     setImageFileName('');
     setSelectedDatasetId('');
     setSelectedValidationDatasetId('');
+    setModelLoadError(null);
+    setDatasetLoadError(null);
+    setImageUploadError(null);
+    setSubmitError(null);
     if (workloadType === 'dmd_t2v') {
       setDmdUseVsa(false);
       setDmdVsaSparsity(0.8);
@@ -162,6 +177,7 @@ export default function CreateJobModal({
     // can't overwrite the current workload's model list/selection.
     let stale = false;
     setIsLoadingModels(true);
+    setModelLoadError(null);
     getModels(inferenceWorkload)
       .then((list) => {
         if (stale) return;
@@ -180,7 +196,13 @@ export default function CreateJobModal({
         }
       })
       .catch((e) => {
-        if (!stale) console.error('Failed to load models:', e);
+        if (stale) return;
+        console.error('Failed to load models:', e);
+        setModels([]);
+        setModelId('');
+        setModelLoadError(
+          'Models could not be loaded. Check the Studio API and reopen this form to try again.',
+        );
       })
       .finally(() => {
         if (!stale) setIsLoadingModels(false);
@@ -193,11 +215,22 @@ export default function CreateJobModal({
   // Training jobs need a dataset; load the ready datasets when relevant.
   React.useEffect(() => {
     if (isOpen && !isInference) {
+      setIsLoadingDatasets(true);
+      setDatasetLoadError(null);
       getDatasets()
         .then(setReadyDatasets)
-        .catch(() => setReadyDatasets([]));
+        .catch((error) => {
+          console.error('Failed to load datasets:', error);
+          setReadyDatasets([]);
+          setDatasetLoadError(
+            'Datasets could not be loaded. Check the Studio API and reopen this form to try again.',
+          );
+        })
+        .finally(() => setIsLoadingDatasets(false));
     } else {
       setReadyDatasets([]);
+      setIsLoadingDatasets(false);
+      setDatasetLoadError(null);
     }
   }, [isOpen, isInference]);
 
@@ -206,16 +239,24 @@ export default function CreateJobModal({
     if (!file) {
       setImagePath('');
       setImageFileName('');
+      setImageUploadError(null);
       return;
     }
     setIsUploadingImage(true);
     setImageFileName(file.name);
+    setImageUploadError(null);
     try {
       const { path } = await uploadImage(file);
       setImagePath(path);
-    } catch {
+    } catch (error) {
+      console.error('Failed to upload image:', error);
       setImagePath('');
       setImageFileName('');
+      setImageUploadError(
+        error instanceof Error
+          ? `${error.message}. Choose the image again to retry.`
+          : 'The image could not be uploaded. Choose it again to retry.',
+      );
     } finally {
       setIsUploadingImage(false);
     }
@@ -224,6 +265,7 @@ export default function CreateJobModal({
   function clearImage() {
     setImagePath('');
     setImageFileName('');
+    setImageUploadError(null);
     if (imageInputRef.current) imageInputRef.current.value = '';
   }
 
@@ -239,6 +281,7 @@ export default function CreateJobModal({
       workloadType === 'lora_t2v' ? 'lora' : jobType
     ) as JobType;
     setIsSubmitting(true);
+    setSubmitError(null);
     try {
       const payload: CreateJobRequest = {
         model_id: modelId,
@@ -296,6 +339,11 @@ export default function CreateJobModal({
       onClose();
     } catch (err) {
       console.error('Failed to create job:', err);
+      setSubmitError(
+        err instanceof Error
+          ? `${err.message}. Check the form and Studio API, then try again.`
+          : 'The job could not be created. Check the form and Studio API, then try again.',
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -343,7 +391,11 @@ export default function CreateJobModal({
               value={modelId}
               onChange={(e) => setModelId(e.target.value)}
               required
-              disabled={isSubmitting || isLoadingModels}
+              aria-describedby={
+                modelLoadError ? 'modal-model-error' : undefined
+              }
+              aria-invalid={modelLoadError ? true : undefined}
+              disabled={isSubmitting || isLoadingModels || !!modelLoadError}
             >
               <option value="" disabled>
                 {isLoadingModels
@@ -358,6 +410,15 @@ export default function CreateJobModal({
                 </option>
               ))}
             </NativeSelect>
+            {modelLoadError && (
+              <p
+                id="modal-model-error"
+                role="alert"
+                className="text-sm text-destructive"
+              >
+                {modelLoadError}
+              </p>
+            )}
           </FieldRow>
 
           {isInference && workloadType === 'i2v' && (
@@ -369,6 +430,10 @@ export default function CreateJobModal({
                 accept=".png,.jpg,.jpeg,.webp,.bmp"
                 onChange={handleImageChange}
                 disabled={isSubmitting || isUploadingImage}
+                aria-describedby={
+                  imageUploadError ? 'modal-image-error' : undefined
+                }
+                aria-invalid={imageUploadError ? true : undefined}
                 required
                 className="h-auto py-2 file:mr-3 file:cursor-pointer file:rounded-md file:border-0 file:bg-secondary file:px-2 file:py-1 file:text-sm file:text-secondary-foreground"
               />
@@ -384,6 +449,15 @@ export default function CreateJobModal({
                     Clear
                   </button>
                 </span>
+              )}
+              {imageUploadError && (
+                <p
+                  id="modal-image-error"
+                  role="alert"
+                  className="text-sm text-destructive"
+                >
+                  {imageUploadError}
+                </p>
               )}
             </FieldRow>
           )}
@@ -432,12 +506,22 @@ export default function CreateJobModal({
                     id="modal-dataset"
                     value={selectedDatasetId}
                     onChange={(e) => setSelectedDatasetId(e.target.value)}
-                    disabled={isSubmitting}
+                    aria-describedby={
+                      datasetLoadError ? 'modal-dataset-error' : undefined
+                    }
+                    aria-invalid={datasetLoadError ? true : undefined}
+                    disabled={
+                      isSubmitting || isLoadingDatasets || !!datasetLoadError
+                    }
                   >
                     <option value="" disabled>
-                      {readyDatasets.length === 0
-                        ? 'No datasets (add in Datasets tab)'
-                        : 'Select a dataset…'}
+                      {isLoadingDatasets
+                        ? 'Loading datasets…'
+                        : datasetLoadError
+                          ? 'Datasets unavailable'
+                          : readyDatasets.length === 0
+                            ? 'No datasets (add in Datasets tab)'
+                            : 'Select a dataset…'}
                     </option>
                     {readyDatasets.map((d) => (
                       <option key={d.id} value={d.id}>
@@ -445,6 +529,15 @@ export default function CreateJobModal({
                       </option>
                     ))}
                   </NativeSelect>
+                  {datasetLoadError && (
+                    <p
+                      id="modal-dataset-error"
+                      role="alert"
+                      className="text-sm text-destructive"
+                    >
+                      {datasetLoadError}
+                    </p>
+                  )}
                 </FieldRow>
                 <FieldRow
                   htmlFor="modal-validation-dataset"
@@ -457,7 +550,9 @@ export default function CreateJobModal({
                     onChange={(e) =>
                       setSelectedValidationDatasetId(e.target.value)
                     }
-                    disabled={isSubmitting}
+                    disabled={
+                      isSubmitting || isLoadingDatasets || !!datasetLoadError
+                    }
                   >
                     <option value="">None</option>
                     {readyDatasets.map((d) => (
@@ -811,9 +906,22 @@ export default function CreateJobModal({
             </details>
           )}
 
-          <div>
-            <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? 'Creating...' : 'Create Job'}
+          <div className="flex flex-col items-start gap-2">
+            {submitError && (
+              <p role="alert" className="text-sm text-destructive">
+                {submitError}
+              </p>
+            )}
+            <Button
+              type="submit"
+              disabled={
+                isSubmitting ||
+                isUploadingImage ||
+                !!modelLoadError ||
+                !!datasetLoadError
+              }
+            >
+              {isSubmitting ? 'Creating…' : 'Create Job'}
             </Button>
           </div>
         </form>

@@ -20,14 +20,12 @@ from omegaconf import OmegaConf
 from torch.testing import assert_close
 
 from fastvideo.forward_context import set_forward_context
-from fastvideo.configs.models.dits.dreamx_world import (
-    DreamXWorldArchConfig, DreamXWorldConfig)
+from fastvideo.configs.models.dits.dreamx_world import (DreamXWorldArchConfig, DreamXWorldConfig)
 from fastvideo.pipelines.basic.dreamx_world.camera_conditioning import build_dreamx_camera_condition
 from fastvideo.configs.pipelines.dreamx_world import make_dreamx_world_5b_cam_dit_config
 from fastvideo.platforms import AttentionBackendEnum
-from fastvideo.models.dits.dreamx_world import (
-    DreamXPropeSelfAttention, DreamXWorldTransformer3DModel,
-    DreamXWorldTransformerBlock)
+from fastvideo.models.dits.dreamx_world import (DreamXPropeSelfAttention, DreamXWorldTransformer3DModel,
+                                                DreamXWorldTransformerBlock)
 from fastvideo.models.loader.fsdp_load import load_model_from_full_model_state_dict
 from fastvideo.models.loader.utils import get_param_names_mapping
 from fastvideo.models.loader.weight_utils import resolve_safetensors_files, safetensors_weights_iterator
@@ -37,7 +35,8 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 OFFICIAL_REF_DIR = Path(os.getenv("DREAMX_WORLD_OFFICIAL_REF_DIR", REPO_ROOT / "DreamX-World"))
 LOCAL_WEIGHTS_DIR = Path(os.getenv("DREAMX_WORLD_LOCAL_WEIGHTS_DIR", REPO_ROOT / "official_weights" / "dreamx_world"))
 WAN_BASE_DIR = Path(os.getenv("DREAMX_WORLD_WAN_BASE_DIR", REPO_ROOT / "official_weights" / "Wan2.2-TI2V-5B"))
-CONVERTED_WEIGHTS_DIR = Path(os.getenv("DREAMX_WORLD_CONVERTED_WEIGHTS_DIR", REPO_ROOT / "converted_weights" / "dreamx_world"))
+CONVERTED_WEIGHTS_DIR = Path(
+    os.getenv("DREAMX_WORLD_CONVERTED_WEIGHTS_DIR", REPO_ROOT / "converted_weights" / "dreamx_world"))
 PARITY_SCOPE = "both"
 
 
@@ -57,6 +56,7 @@ def _install_xfuser_stub() -> None:
     distributed.model_parallel_is_initialized = lambda: False
 
     class XFuserLongContextAttention:
+
         def __call__(self, *args, **kwargs):
             raise RuntimeError("xfuser stub cannot execute attention")
 
@@ -70,21 +70,20 @@ def _install_xfuser_stub() -> None:
 
 
 def _make_tiny_dreamx_config() -> DreamXWorldConfig:
-    return DreamXWorldConfig(
-        arch_config=DreamXWorldArchConfig(
-            num_attention_heads=1,
-            attention_head_dim=8,
-            in_channels=16,
-            out_channels=16,
-            ffn_dim=32,
-            num_layers=1,
-            cross_attn_norm=True,
-            qk_norm="rms_norm_across_heads",
-            add_control_adapter=True,
-            cam_method="prope",
-            attn_compress=1,
-            cam_self_attn_layers=None,
-        ))
+    return DreamXWorldConfig(arch_config=DreamXWorldArchConfig(
+        num_attention_heads=1,
+        attention_head_dim=8,
+        in_channels=16,
+        out_channels=16,
+        ffn_dim=32,
+        num_layers=1,
+        cross_attn_norm=True,
+        qk_norm="rms_norm_across_heads",
+        add_control_adapter=True,
+        cam_method="prope",
+        attn_compress=1,
+        cam_self_attn_layers=None,
+    ))
 
 
 def _add_official_to_path() -> None:
@@ -168,9 +167,12 @@ def _make_inputs(device: torch.device, dtype: torch.dtype):
     context = [torch.randn(16, 4096, device=device, dtype=dtype)]
     seq_len = math.ceil((latent_h * latent_w) / 4 * latent_frames)
     timestep = torch.full((1, seq_len), 250, device=device, dtype=torch.long)
-    camera = build_dreamx_camera_condition(
-        ["w"], [4], num_frames=num_frames, height=height, width=width, dtype=dtype, device=device
-    )
+    camera = build_dreamx_camera_condition(["w"], [4],
+                                           num_frames=num_frames,
+                                           height=height,
+                                           width=width,
+                                           dtype=dtype,
+                                           device=device)
     camera = {key: value.unsqueeze(0) for key, value in camera.items()}
     return {"x": [x[0]], "context": context, "t": timestep, "seq_len": seq_len, "y_camera": camera}
 
@@ -186,9 +188,8 @@ def _run_official(model: torch.nn.Module, inputs: dict) -> torch.Tensor:
 
 def _run_fastvideo(model: torch.nn.Module, inputs: dict) -> torch.Tensor:
     hidden_states = torch.stack(inputs["x"], dim=0)
-    encoder_hidden_states = torch.stack([
-        torch.cat([inputs["context"][0], inputs["context"][0].new_zeros(512 - inputs["context"][0].shape[0], 4096)])
-    ])
+    encoder_hidden_states = torch.stack(
+        [torch.cat([inputs["context"][0], inputs["context"][0].new_zeros(512 - inputs["context"][0].shape[0], 4096)])])
     with torch.inference_mode(), set_forward_context(current_timestep=0, attn_metadata=None):
         output = model(
             hidden_states=hidden_states,
@@ -217,10 +218,7 @@ def test_dreamx_world_conversion_mapping_strict_load_smoke(monkeypatch):
         cam_method="prope",
     )
     official_state = official.state_dict()
-    diffusers_like_state = {
-        map_transformer_key(key): value.detach().clone()
-        for key, value in official_state.items()
-    }
+    diffusers_like_state = {map_transformer_key(key): value.detach().clone() for key, value in official_state.items()}
 
     import fastvideo.models.dits.dreamx_world as fastvideo_dreamx
     monkeypatch.setattr(fastvideo_dreamx, "get_sp_world_size", lambda: 1)
@@ -268,13 +266,10 @@ def test_dreamx_world_fastvideo_prope_branch_smoke():
         cam_method="prope",
         attn_compress=1,
         layer_idx=0,
-        supported_attention_backends=(AttentionBackendEnum.TORCH_SDPA,),
+        supported_attention_backends=(AttentionBackendEnum.TORCH_SDPA, ),
     )
     assert block.cam_self_attn is not None
-    assert [
-        name for name, _ in block.named_parameters()
-        if name.startswith("cam_self_attn.")
-    ][:8] == [
+    assert [name for name, _ in block.named_parameters() if name.startswith("cam_self_attn.")][:8] == [
         "cam_self_attn.q_proj.weight",
         "cam_self_attn.q_proj.bias",
         "cam_self_attn.k_proj.weight",
@@ -313,11 +308,15 @@ def test_dreamx_world_transformer_parity_scaffold(monkeypatch):
     import fastvideo.models.dits.dreamx_world as fastvideo_dreamx
     monkeypatch.setattr(attention_layer, "get_sp_parallel_rank", lambda: 0)
     monkeypatch.setattr(attention_layer, "get_sp_world_size", lambda: 1)
-    monkeypatch.setattr(attention_layer, "sequence_model_parallel_all_to_all_4D", lambda tensor, scatter_dim=2, gather_dim=1: tensor)
+    monkeypatch.setattr(attention_layer,
+                        "sequence_model_parallel_all_to_all_4D",
+                        lambda tensor, scatter_dim=2, gather_dim=1: tensor)
     monkeypatch.setattr(attention_layer, "sequence_model_parallel_all_gather", lambda tensor, dim=-1: tensor)
     monkeypatch.setattr(fastvideo_dreamx, "get_sp_world_size", lambda: 1)
     monkeypatch.setattr(communication_op, "get_sp_world_size", lambda: 1)
-    monkeypatch.setattr(fastvideo_dreamx, "sequence_model_parallel_shard", lambda tensor, dim=1: (tensor, tensor.shape[dim]))
+    monkeypatch.setattr(fastvideo_dreamx,
+                        "sequence_model_parallel_shard",
+                        lambda tensor, dim=1: (tensor, tensor.shape[dim]))
     monkeypatch.setattr(
         fastvideo_dreamx,
         "sequence_model_parallel_all_gather_with_unpad",

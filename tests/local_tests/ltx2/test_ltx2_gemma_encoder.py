@@ -38,9 +38,7 @@ def _load_connector_weights(path: str) -> dict[str, torch.Tensor]:
     reason="LTX-2 Gemma encoder parity test requires CUDA.",
 )
 def test_ltx2_gemma_text_encoder_parity():
-    diffusers_root = Path(
-        os.getenv("LTX2_DIFFUSERS_PATH", "converted/ltx2_diffusers")
-    )
+    diffusers_root = Path(os.getenv("LTX2_DIFFUSERS_PATH", "converted/ltx2_diffusers"))
     text_encoder_path = os.getenv(
         "LTX2_TEXT_ENCODER_PATH",
         str(diffusers_root / "text_encoder"),
@@ -53,14 +51,11 @@ def test_ltx2_gemma_text_encoder_parity():
 
     try:
         from ltx_core.text_encoders.gemma.embeddings_connector import (
-            Embeddings1DConnector,
-        )
+            Embeddings1DConnector, )
         from ltx_core.text_encoders.gemma.encoders.av_encoder import (
-            AVGemmaTextEncoderModel,
-        )
+            AVGemmaTextEncoderModel, )
         from ltx_core.text_encoders.gemma.feature_extractor import (
-            GemmaFeaturesExtractorProjLinear,
-        )
+            GemmaFeaturesExtractorProjLinear, )
         from ltx_core.text_encoders.gemma.tokenizer import LTXVGemmaTokenizer
         from transformers import Gemma3ForConditionalGeneration
     except Exception as exc:
@@ -87,25 +82,19 @@ def test_ltx2_gemma_text_encoder_parity():
     ).to(device)
     ref_model.eval()
 
-    connector_weights = _load_connector_weights(
-        os.path.join(text_encoder_path, "model.safetensors")
-    )
+    connector_weights = _load_connector_weights(os.path.join(text_encoder_path, "model.safetensors"))
     ref_model.load_state_dict(connector_weights, strict=False)
 
     prompt = "A fast moving train in a snowy landscape."
     token_pairs = tokenizer.tokenize_with_weights(prompt)["gemma"]
-    input_ids = torch.tensor(
-        [[t[0] for t in token_pairs]], device=device, dtype=torch.long
-    )
-    attention_mask = torch.tensor(
-        [[t[1] for t in token_pairs]], device=device, dtype=torch.long
-    )
+    input_ids = torch.tensor([[t[0] for t in token_pairs]], device=device, dtype=torch.long)
+    attention_mask = torch.tensor([[t[1] for t in token_pairs]], device=device, dtype=torch.long)
 
     args = FastVideoArgs(
         model_path=text_encoder_path,
         pipeline_config=PipelineConfig(
-            text_encoder_configs=(LTX2GemmaConfig(),),
-            text_encoder_precisions=("bf16",),
+            text_encoder_configs=(LTX2GemmaConfig(), ),
+            text_encoder_precisions=("bf16", ),
         ),
     )
     loader = TextEncoderLoader()
