@@ -34,7 +34,7 @@ try:
 
     HAS_FLASHINFER = True
 
-    def get_cuda_arch():
+    def get_cuda_arch() -> str:
         major, minor = torch.cuda.get_device_capability()
         return f"{major}.{minor}"
 
