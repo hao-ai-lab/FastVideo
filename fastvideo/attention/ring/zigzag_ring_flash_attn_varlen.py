@@ -26,9 +26,8 @@ try:
         unflatten_varlen_lse,
     )
 except:
-    from .utils import (
-        flatten_varlen_lse,
-        unflatten_varlen_lse,
+    from .utils import (  # type: ignore[no-redef]
+        flatten_varlen_lse, unflatten_varlen_lse,
     )
 
 
@@ -90,13 +89,14 @@ def zigzag_ring_flash_attn_varlen_forward(
     block_seq_len = q.shape[0] // 2
     q1 = q[half_index1]
 
-    out = None
-    lse = None
-    next_k, next_v = None, None
+    out: torch.Tensor | None = None
+    lse: torch.Tensor | None = None
+    next_k: torch.Tensor | None = None
+    next_v: torch.Tensor | None = None
     half_cu_seqlens = cu_seqlens // 2
     half_max_seqlen = max_seqlen // 2
 
-    def forward(q, k, v, causal):
+    def forward(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, causal: bool) -> tuple[torch.Tensor, torch.Tensor]:
         seqlen_q = q.shape[0]
         seqlen_kv = k.shape[0]
         cu_seqlens_q = half_cu_seqlens if seqlen_q == block_seq_len else cu_seqlens
@@ -124,8 +124,8 @@ def zigzag_ring_flash_attn_varlen_forward(
 
     for step in range(comm.world_size):
         if step + 1 != comm.world_size:
-            next_k: torch.Tensor = comm.send_recv(k)
-            next_v: torch.Tensor = comm.send_recv(v)
+            next_k = comm.send_recv(k)
+            next_v = comm.send_recv(v)
             comm.commit()
 
         if step == 0:
@@ -150,6 +150,7 @@ def zigzag_ring_flash_attn_varlen_forward(
                 block_lse,
                 cu_seqlens=half_cu_seqlens,
             )
+            assert out is not None and lse is not None
             out[half_index1], lse[half_index1] = update_out_and_lse(out[half_index1], lse[half_index1], block_out,
                                                                     block_lse)
 
@@ -164,32 +165,37 @@ def zigzag_ring_flash_attn_varlen_forward(
 
 
 def zigzag_ring_flash_attn_varlen_backward(
-        process_group,
-        dout,
-        q,
-        k,
-        v,
-        out,
-        softmax_lse,
-        cu_seqlens,
-        max_seqlen,
-        half_index0,
-        half_index1,
-        softmax_scale,
-        dropout_p=0,
-        causal=True,
-        window_size=(-1, -1),
-        softcap=0.0,
-        alibi_slopes=None,
-        deterministic=False,
-):
+    process_group,
+    dout: torch.Tensor,
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    out: torch.Tensor,
+    softmax_lse: torch.Tensor,
+    cu_seqlens,
+    max_seqlen,
+    half_index0,
+    half_index1,
+    softmax_scale: float | None,
+    dropout_p: float = 0,
+    causal: bool = True,
+    window_size: tuple[int, int] = (-1, -1),
+    softcap: float = 0.0,
+    alibi_slopes: torch.Tensor | None = None,
+    deterministic: bool = False,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     assert causal == True, "zigzag ring is meaningless for causal=False"
     kv_comm = RingComm(process_group)
     d_kv_comm = RingComm(process_group)
-    dq, dk, dv = None, None, None
-    next_dk, next_dv = None, None
-    next_k, next_v = None, None
-    dk_comm_buffer, dv_comm_buffer = None, None
+    dq: torch.Tensor | None = None
+    dk: torch.Tensor | None = None
+    dv: torch.Tensor | None = None
+    next_dk: torch.Tensor | None = None
+    next_dv: torch.Tensor | None = None
+    next_k: torch.Tensor | None = None
+    next_v: torch.Tensor | None = None
+    dk_comm_buffer: torch.Tensor | None = None
+    dv_comm_buffer: torch.Tensor | None = None
 
     dout1 = dout[half_index1]
     q1 = q[half_index1]
@@ -200,12 +206,13 @@ def zigzag_ring_flash_attn_varlen_backward(
     half_cu_seqlens = cu_seqlens // 2
     half_max_seqlen = max_seqlen // 2
 
-    # repeatly allocating buffer may be slow...
+    # repeatedly allocating buffer may be slow...
     dq_buffer = torch.empty(q.shape, dtype=q.dtype, device=q.device)
     dk_buffer = torch.empty(k.shape, dtype=k.dtype, device=k.device)
     dv_buffer = torch.empty(v.shape, dtype=v.dtype, device=v.device)
 
-    def backward(dout, q, k, v, out, softmax_lse, causal):
+    def backward(dout: torch.Tensor, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, out: torch.Tensor,
+                 softmax_lse: torch.Tensor, causal: bool) -> None:
         seqlen_q = q.shape[0]
         seqlen_kv = k.shape[0]
         cu_seqlens_q = half_cu_seqlens if seqlen_q == block_seq_len else cu_seqlens
@@ -256,6 +263,7 @@ def zigzag_ring_flash_attn_varlen_backward(
                 dq += dq_buffer
             else:
                 backward(dout1, q1, k, v, out1, softmax_lse1, causal=False)
+                assert dq is not None
                 dq[half_index1] += dq_buffer[:block_seq_len]
 
             d_kv_comm.wait()
@@ -263,6 +271,7 @@ def zigzag_ring_flash_attn_varlen_backward(
             dk, dv = next_dk, next_dv
 
             if step <= kv_comm.rank:
+                assert dk is not None and dv is not None
                 dk[half_index0] += dk_buffer[:block_seq_len]
                 dv[half_index0] += dv_buffer[:block_seq_len]
             else:
