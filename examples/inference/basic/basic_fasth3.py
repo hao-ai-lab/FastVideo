@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Few-step video+audio generation with the DMD2-distilled MiniMax H3 preview.
 
-FastVideo/FastH3-Preview-v0.1 is a 4-step distillation of
+FastVideo/FastVideo-Minimax-FastH3-Preview-v0.1 is a 4-step distillation of
 MiniMaxAI/MiniMax-H3 (data-free DMD2): it walks a 4-step grid on the release
 sampler's shift-12 schedule instead of the base model's 50 steps, generating
 synchronized video and audio in one pipeline call.
@@ -35,11 +35,11 @@ from fastvideo.api import (
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model-path", default="FastVideo/FastH3-Preview-v0.1")
+    parser.add_argument("--model-path", default="FastVideo/FastVideo-Minimax-FastH3-Preview-v0.1")
     # The HF repo is private while the MiniMax H3 Community License review
     # completes; until it flips public, pass --model-path with a local
     # snapshot of the release instead (e.g. the team export at
-    # /mnt/lustre/vlm-wlsaidhi/fastvideo/exports/FastH3-Preview-v0.1).
+    # /mnt/lustre/vlm-wlsaidhi/fastvideo/exports/FastVideo-Minimax-FastH3-Preview-v0.1).
     parser.add_argument("--prompt", required=True)
     parser.add_argument("--output", default="outputs/fasth3")
     parser.add_argument("--height", type=int, default=768)
