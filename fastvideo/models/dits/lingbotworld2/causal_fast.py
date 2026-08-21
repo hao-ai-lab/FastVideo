@@ -10,6 +10,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from fastvideo.attention.selector import get_attn_backend
 from fastvideo.configs.models.dits.lingbotworld2 import (
     LingBotWorld2CausalFastVideoConfig, )
 from fastvideo.distributed.communication_op import (
@@ -19,6 +20,7 @@ from fastvideo.distributed.communication_op import (
 from fastvideo.distributed.parallel_state import get_sp_parallel_rank, get_sp_world_size
 from fastvideo.models.dits.base import BaseDiT
 from fastvideo.platforms import AttentionBackendEnum
+from fastvideo.utils import get_compute_dtype
 
 try:
     import flash_attn_interface
@@ -151,6 +153,7 @@ def attention(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
+    backend: AttentionBackendEnum,
     q_lens: torch.Tensor | None = None,
     k_lens: torch.Tensor | None = None,
     dropout_p: float = 0.0,
@@ -162,8 +165,8 @@ def attention(
     dtype: torch.dtype = torch.bfloat16,
     fa_version: int | None = None,
 ) -> torch.Tensor:
-    """Dispatch LingBot World 2 attention to FlashAttention when available."""
-    if FLASH_ATTN_2_AVAILABLE or FLASH_ATTN_3_AVAILABLE:
+    """Dispatch LingBot World 2 attention through the selected backend."""
+    if backend == AttentionBackendEnum.FLASH_ATTN:
         return flash_attention(
             q=q,
             k=k,
@@ -180,6 +183,7 @@ def attention(
             version=fa_version,
         )
 
+    assert backend == AttentionBackendEnum.TORCH_SDPA
     if q_lens is not None or k_lens is not None:
         warnings.warn("Padding masks are disabled without FlashAttention.")
     q = q.transpose(1, 2).to(dtype)
@@ -262,6 +266,12 @@ class CausalWanSelfAttention(nn.Module):
         self.dim = dim
         self.num_heads = num_heads
         self.head_dim = dim // num_heads
+        attn_backend = get_attn_backend(
+            self.head_dim,
+            get_compute_dtype(),
+            supported_attention_backends=(AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA),
+        )
+        self.backend = AttentionBackendEnum[attn_backend.get_name()]
         self.local_attn_size = local_attn_size
         self.sink_size = sink_size
         self.qk_norm = qk_norm
@@ -348,7 +358,7 @@ class CausalWanSelfAttention(nn.Module):
 
         k_cache = kv_cache["k"][:, max(0, local_end_index - max_attention_size):local_end_index]
         v_cache = kv_cache["v"][:, max(0, local_end_index - max_attention_size):local_end_index]
-        x = attention(roped_query, k_cache, v_cache)
+        x = attention(roped_query, k_cache, v_cache, self.backend)
         kv_cache["global_end_index"].fill_(current_end)
         kv_cache["local_end_index"].fill_(local_end_index)
 
@@ -389,7 +399,11 @@ class WanCrossAttention(CausalWanSelfAttention):
         else:
             k = self.norm_k(self.k(context)).view(b, -1, n, d)
             v = self.v(context).view(b, -1, n, d)
-        x = flash_attention(q, k, v, k_lens=context_lens)
+        # Dispatch through `attention` so the TORCH_SDPA backend this model
+        # advertises actually works; self-attention already does the same. The
+        # SDPA path ignores `k_lens`, which is safe here because the caller
+        # always passes `context_lens=None`.
+        x = attention(q, k, v, self.backend, k_lens=context_lens)
         return self.o(x.flatten(2))
 
 
