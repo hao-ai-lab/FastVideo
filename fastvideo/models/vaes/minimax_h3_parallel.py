@@ -88,10 +88,18 @@ def _decode_segment(vae: AutoencoderKLMiniMaxH3, z_padded: torch.Tensor, chunk_i
 
 class _ChunkAssembler:
     """Replay the serial chunk-joining semantics of ``_decode_chunks`` +
-    ``_decode_to_pixels`` on gathered chunk segments, in chunk order."""
+    ``_decode_to_pixels`` on gathered chunk segments, in chunk order.
+
+    On CUDA the joining kernels and output copies run on a dedicated side
+    stream: they depend only on already-gathered segments, so running them
+    off the main stream keeps the assembling rank's next chunk decode (and
+    therefore every other rank's next collective) off the assembly's tail.
+    Stream placement cannot change values — the ops and their order are
+    identical — so bit-exactness with the serial path is unaffected.
+    """
 
     def __init__(self, vae: AutoencoderKLMiniMaxH3, output: torch.Tensor, output_num_frames: int,
-                 non_blocking: bool) -> None:
+                 non_blocking: bool, device: torch.device) -> None:
         self._vae = vae
         self._output = output
         self._output_num_frames = output_num_frames
@@ -99,9 +107,21 @@ class _ChunkAssembler:
         self._body_frames = vae.tokens_chunk_size * vae.temporal_compression_ratio - vae.frame_pre_padding
         self._overlap: torch.Tensor | None = None
         self._frame_start = 0
+        self._stream = torch.cuda.Stream(device) if device.type == "cuda" else None
 
     def push(self, segment: torch.Tensor) -> None:
         """Consume the next chunk's segment (``clip[:, :, frame_pre_padding:]``)."""
+        if self._stream is None:
+            self._push(segment)
+            return
+        # The segment is produced on the current (collective) stream; hand it
+        # to the assembly stream and pin its storage until assembly reads it.
+        self._stream.wait_stream(torch.cuda.current_stream(segment.device))
+        segment.record_stream(self._stream)
+        with torch.cuda.stream(self._stream):
+            self._push(segment)
+
+    def _push(self, segment: torch.Tensor) -> None:
         vae = self._vae
         chunk = segment[:, :, :self._body_frames]
         if self._overlap is not None:
@@ -117,11 +137,21 @@ class _ChunkAssembler:
     def finalize(self) -> None:
         """Emit the final overlap tail exactly as the serial generator does."""
         if self._overlap is not None and self._frame_start < self._output_num_frames:
-            self._emit(self._overlap[:, :, :self._output_num_frames - self._frame_start])
+            tail = self._overlap[:, :, :self._output_num_frames - self._frame_start]
+            if self._stream is None:
+                self._emit(tail)
+            else:
+                with torch.cuda.stream(self._stream):
+                    self._emit(tail)
         if self._frame_start != self._output.shape[2]:
             raise RuntimeError(
                 f"MiniMax-H3 decode wrote {self._frame_start} frames into an output buffer expecting "
                 f"{self._output.shape[2]}.")
+
+    def synchronize(self) -> None:
+        """Drain assembly kernels and output copies before the buffer is read."""
+        if self._stream is not None:
+            self._stream.synchronize()
 
     def _emit(self, chunk: torch.Tensor) -> None:
         pixels = self._vae.denormalize_pixels(chunk.float()).clamp_(0, 1)
@@ -204,39 +234,48 @@ def _decode_single_parallel(
     world_size = group.world_size
     rank = group.rank_in_group
 
-    # The leader always owns chunk 0 under round-robin assignment; decoding
-    # it before the first collective lets every rank size its placeholders
-    # from real metadata instead of guessing the autocast output dtype.
-    leader_segment = _decode_segment(vae, z, 0) if rank == 0 else None
-    segment_dtype, segment_shape = _broadcast_segment_meta(group, leader_segment)
+    # Every rank decodes its round-0 chunk BEFORE the metadata rendezvous so
+    # the first decodes run concurrently (a rank that waited on the broadcast
+    # first would idle a full chunk-decode behind the leader). The leader
+    # owns chunk 0 under round-robin assignment, so its segment supplies real
+    # dtype/shape for placeholder rounds instead of guessing autocast state.
+    first_segment = _decode_segment(vae, z, rank) if rank < num_chunks else None
+    segment_dtype, segment_shape = _broadcast_segment_meta(group, first_segment if rank == 0 else None)
 
     assembler = None
     if output is not None:
         non_blocking = vae._streams_chunk_copies(z, output)
-        assembler = _ChunkAssembler(vae, output, output_num_frames, non_blocking)
+        assembler = _ChunkAssembler(vae, output, output_num_frames, non_blocking, z.device)
 
-    segment_frames = segment_shape[2]
-    for round_index in range(_num_rounds(num_chunks, world_size)):
-        chunk_index = round_index * world_size + rank
-        if chunk_index >= num_chunks:
-            segment = torch.zeros(segment_shape, dtype=segment_dtype, device=z.device)
-        elif chunk_index == 0 and leader_segment is not None:
-            segment = leader_segment
-        else:
-            segment = _decode_segment(vae, z, chunk_index)
-        with nvtx_range(f"minimax_h3.vae.parallel_{strategy}.{round_index}"):
-            if strategy == "gather":
-                gathered = group.gather(segment, dst=0, dim=2)
+    try:
+        segment_frames = segment_shape[2]
+        for round_index in range(_num_rounds(num_chunks, world_size)):
+            chunk_index = round_index * world_size + rank
+            if chunk_index >= num_chunks:
+                segment = torch.zeros(segment_shape, dtype=segment_dtype, device=z.device)
+            elif round_index == 0 and first_segment is not None:
+                segment = first_segment
             else:
-                gathered = group.all_gather(segment, dim=2)
-        if assembler is None or gathered is None:
-            continue
-        for slot in range(world_size):
-            if round_index * world_size + slot >= num_chunks:
-                break
-            assembler.push(gathered.narrow(2, slot * segment_frames, segment_frames))
-    if assembler is not None:
-        assembler.finalize()
+                segment = _decode_segment(vae, z, chunk_index)
+            with nvtx_range(f"minimax_h3.vae.parallel_{strategy}.{round_index}"):
+                if strategy == "gather":
+                    gathered = group.gather(segment, dst=0, dim=2)
+                else:
+                    gathered = group.all_gather(segment, dim=2)
+            if assembler is None or gathered is None:
+                continue
+            for slot in range(world_size):
+                if round_index * world_size + slot >= num_chunks:
+                    break
+                assembler.push(gathered.narrow(2, slot * segment_frames, segment_frames))
+        if assembler is not None:
+            assembler.finalize()
+    finally:
+        # Drain assembly-stream copies into ``output`` even on the error path
+        # so an exception cannot leave an in-flight DMA into a buffer the
+        # caller may release.
+        if assembler is not None:
+            assembler.synchronize()
 
 
 def _encode_clip_moments(vae: AutoencoderKLMiniMaxH3, pixels: torch.Tensor, clip_index: int) -> torch.Tensor:
@@ -295,8 +334,10 @@ def _encode_single_parallel(vae: AutoencoderKLMiniMaxH3, pixels: torch.Tensor,
     world_size = group.world_size
     rank = group.rank_in_group
 
-    leader_moments = _encode_clip_moments(vae, pixels, 0) if rank == 0 else None
-    moment_dtype, moment_shape = _broadcast_segment_meta(group, leader_moments)
+    # Same first-work-then-rendezvous ordering as the decode path: encode the
+    # round-0 clip before the metadata broadcast so first encodes overlap.
+    first_moments = _encode_clip_moments(vae, pixels, rank) if rank < num_clips else None
+    moment_dtype, moment_shape = _broadcast_segment_meta(group, first_moments if rank == 0 else None)
 
     moment_tokens = moment_shape[2]
     parts: list[torch.Tensor] = []
@@ -304,8 +345,8 @@ def _encode_single_parallel(vae: AutoencoderKLMiniMaxH3, pixels: torch.Tensor,
         clip_index = round_index * world_size + rank
         if clip_index >= num_clips:
             moments = torch.zeros(moment_shape, dtype=moment_dtype, device=vae.pixel_mean.device)
-        elif clip_index == 0 and leader_moments is not None:
-            moments = leader_moments
+        elif round_index == 0 and first_moments is not None:
+            moments = first_moments
         else:
             moments = _encode_clip_moments(vae, pixels, clip_index)
         gathered = group.all_gather(moments, dim=2)
