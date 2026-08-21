@@ -47,6 +47,7 @@ class AudioBoxAestheticsMetric(BaseMetric):
         if self._predictor is not None:
             return
         from audiobox_aesthetics.infer import initialize_predictor
+
         predictor = initialize_predictor()
         # Upstream's setup_model() always lands on default CUDA (cuda:0).
         # Re-pin onto this worker's device so multi-GPU eval actually parallelizes.

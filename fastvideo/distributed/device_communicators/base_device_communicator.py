@@ -11,7 +11,7 @@ from torch.distributed import ProcessGroup, ReduceOp
 
 class DistributedAutograd:
     """Collection of autograd functions for distributed operations.
-    
+
     This class provides custom autograd functions for distributed operations like all_reduce,
     all_gather, and all_to_all. Each operation is implemented as a static inner class with
     proper forward and backward implementations.
@@ -19,7 +19,7 @@ class DistributedAutograd:
 
     class AllReduce(torch.autograd.Function):
         """Differentiable all_reduce operation.
-        
+
         The gradient of all_reduce is another all_reduce operation since the operation
         combines values from all ranks equally.
         """
@@ -40,7 +40,7 @@ class DistributedAutograd:
 
     class AllGather(torch.autograd.Function):
         """Differentiable all_gather operation.
-        
+
         The operation gathers tensors from all ranks and concatenates them along a specified dimension.
         The backward pass uses reduce_scatter to efficiently distribute gradients back to source ranks.
         """
@@ -56,23 +56,25 @@ class DistributedAutograd:
             if not input_.is_contiguous():
                 input_ = input_.contiguous()
             input_size = input_.size()
-            output_size = (input_size[0] * world_size, ) + input_size[1:]
+            output_size = (input_size[0] * world_size,) + input_size[1:]
             output_tensor = torch.empty(output_size, dtype=input_.dtype, device=input_.device)
 
             dist.all_gather_into_tensor(output_tensor, input_, group=group)
 
-            output_tensor = output_tensor.reshape((world_size, ) + input_size)
+            output_tensor = output_tensor.reshape((world_size,) + input_size)
             output_tensor = output_tensor.movedim(0, dim)
-            output_tensor = output_tensor.reshape(input_size[:dim] + (world_size * input_size[dim], ) +
-                                                  input_size[dim + 1:])
+            output_tensor = output_tensor.reshape(
+                input_size[:dim] + (world_size * input_size[dim],) + input_size[dim + 1 :]
+            )
             return output_tensor
 
         @staticmethod
         def backward(ctx: Any, grad_output: Tensor) -> tuple[None, Tensor, None, None]:
             # Split the gradient tensor along the gathered dimension
             dim_size = grad_output.size(ctx.dim) // ctx.world_size
-            grad_chunks = grad_output.reshape(grad_output.shape[:ctx.dim] + (ctx.world_size, dim_size) +
-                                              grad_output.shape[ctx.dim + 1:])
+            grad_chunks = grad_output.reshape(
+                grad_output.shape[: ctx.dim] + (ctx.world_size, dim_size) + grad_output.shape[ctx.dim + 1 :]
+            )
             grad_chunks = grad_chunks.movedim(ctx.dim, 0)
 
             # Each rank only needs its corresponding gradient
@@ -89,8 +91,9 @@ class DistributedAutograd:
         """
 
         @staticmethod
-        def forward(ctx: Any, group: ProcessGroup, input_: Tensor, world_size: int, dim: int,
-                    scale_grad: bool) -> Tensor:
+        def forward(
+            ctx: Any, group: ProcessGroup, input_: Tensor, world_size: int, dim: int, scale_grad: bool
+        ) -> Tensor:
             ctx.group = group
             ctx.world_size = world_size
             ctx.dim = dim
@@ -102,7 +105,7 @@ class DistributedAutograd:
 
             shard_size = input_.size(dim) // world_size
             output = input_.movedim(dim, 0)
-            output = output[ctx.rank * shard_size:(ctx.rank + 1) * shard_size]
+            output = output[ctx.rank * shard_size : (ctx.rank + 1) * shard_size]
             return output.movedim(0, dim).contiguous()
 
         @staticmethod
@@ -112,7 +115,7 @@ class DistributedAutograd:
 
             grad_output = grad_output.movedim(ctx.dim, 0).contiguous()
             shard_size = grad_output.shape[0]
-            grad_input_shape = (shard_size * ctx.world_size, ) + tuple(grad_output.shape[1:])
+            grad_input_shape = (shard_size * ctx.world_size,) + tuple(grad_output.shape[1:])
             grad_input = torch.empty(grad_input_shape, dtype=grad_output.dtype, device=grad_output.device)
             dist.all_gather_into_tensor(grad_input, grad_output, group=ctx.group)
             if ctx.scale_grad:
@@ -122,18 +125,19 @@ class DistributedAutograd:
 
     class AllToAll4D(torch.autograd.Function):
         """Differentiable all_to_all operation specialized for 4D tensors.
-        
+
         This operation is particularly useful for attention operations where we need to
         redistribute data across ranks for efficient parallel processing.
-        
+
         The operation supports two modes:
         1. scatter_dim=2, gather_dim=1: Used for redistributing attention heads
         2. scatter_dim=1, gather_dim=2: Used for redistributing sequence dimensions
         """
 
         @staticmethod
-        def forward(ctx: Any, group: ProcessGroup, input_: Tensor, world_size: int, scatter_dim: int,
-                    gather_dim: int) -> Tensor:
+        def forward(
+            ctx: Any, group: ProcessGroup, input_: Tensor, world_size: int, scatter_dim: int, gather_dim: int
+        ) -> Tensor:
             ctx.group = group
             ctx.world_size = world_size
             ctx.scatter_dim = scatter_dim
@@ -166,9 +170,12 @@ class DistributedAutograd:
 
                 input_ = input_.transpose(0, 2).contiguous()  # shard_hn, seqlen, bs, hd
 
-                input_ = input_.reshape(shard_hn, world_size, shard_seqlen, bs,
-                                        hd).transpose(0, 1).reshape(shard_hn * world_size, shard_seqlen, bs,
-                                                                    hd).contiguous()
+                input_ = (
+                    input_.reshape(shard_hn, world_size, shard_seqlen, bs, hd)
+                    .transpose(0, 1)
+                    .reshape(shard_hn * world_size, shard_seqlen, bs, hd)
+                    .contiguous()
+                )
 
                 output = torch.empty_like(input_)
 
@@ -180,7 +187,8 @@ class DistributedAutograd:
             else:
                 raise RuntimeError(
                     f"Invalid scatter_dim={scatter_dim}, gather_dim={gather_dim}. "
-                    f"Only (scatter_dim=2, gather_dim=1) and (scatter_dim=1, gather_dim=2) are supported.")
+                    f"Only (scatter_dim=2, gather_dim=1) and (scatter_dim=1, gather_dim=2) are supported."
+                )
 
         @staticmethod
         def backward(ctx: Any, grad_output: Tensor) -> tuple[None, Tensor, None, None, None]:
@@ -188,8 +196,9 @@ class DistributedAutograd:
                 return None, grad_output, None, None, None
 
             # For backward pass, we swap scatter_dim and gather_dim
-            output = DistributedAutograd.AllToAll4D.apply(ctx.group, grad_output, ctx.world_size, ctx.gather_dim,
-                                                          ctx.scatter_dim)
+            output = DistributedAutograd.AllToAll4D.apply(
+                ctx.group, grad_output, ctx.world_size, ctx.gather_dim, ctx.scatter_dim
+            )
             return None, output, None, None, None
 
 
@@ -201,11 +210,13 @@ class DeviceCommunicatorBase:
     communication backend), the `device_group` will also be given.
     """
 
-    def __init__(self,
-                 cpu_group: ProcessGroup,
-                 device: torch.device | None = None,
-                 device_group: ProcessGroup | None = None,
-                 unique_name: str = ""):
+    def __init__(
+        self,
+        cpu_group: ProcessGroup,
+        device: torch.device | None = None,
+        device_group: ProcessGroup | None = None,
+        unique_name: str = "",
+    ):
         self.device = device or torch.device("cpu")
         self.cpu_group = cpu_group
         self.device_group = device_group
@@ -244,7 +255,7 @@ class DeviceCommunicatorBase:
         NOTE: `dst` is the local rank of the destination rank.
         """
         world_size = self.world_size
-        assert -input_.dim() <= dim < input_.dim(), (f"Invalid dim ({dim}) for input tensor with shape {input_.size()}")
+        assert -input_.dim() <= dim < input_.dim(), f"Invalid dim ({dim}) for input tensor with shape {input_.size()}"
         if dim < 0:
             # Convert negative dim to positive.
             dim += input_.dim()

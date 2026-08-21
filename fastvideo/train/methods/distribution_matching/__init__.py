@@ -2,12 +2,15 @@
 
 from fastvideo.train.methods.distribution_matching.anyflow import AnyFlowMethod
 from fastvideo.train.methods.distribution_matching.anyflow_pretrain import (
-    AnyFlowPretrainMethod, )
+    AnyFlowPretrainMethod,
+)
 from fastvideo.train.methods.distribution_matching.dmd2 import DMD2Method
 from fastvideo.train.methods.distribution_matching.self_forcing import (
-    SelfForcingMethod, )
+    SelfForcingMethod,
+)
 from fastvideo.train.methods.distribution_matching.streaming_long_tuning import (
-    StreamingLongTuningMethod, )
+    StreamingLongTuningMethod,
+)
 
 __all__ = [
     "AnyFlowMethod",

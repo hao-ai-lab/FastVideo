@@ -54,8 +54,9 @@ _DEFAULT_DURATION_SECONDS = 5
 # subdir is the project-wide convention for upstream-provenance files
 # (matches the ``_``-prefixed auto-discovery skip and a single
 # codespell skip glob).
-_VENDORED_DESCRIPTIONS_CSV = (Path(__file__).resolve().parent.parent / "metrics" / "physics_iq" / "_vendored" /
-                              "descriptions.csv")
+_VENDORED_DESCRIPTIONS_CSV = (
+    Path(__file__).resolve().parent.parent / "metrics" / "physics_iq" / "_vendored" / "descriptions.csv"
+)
 
 # Public DeepMind bucket; HTTPS-readable, no auth. Override via
 # ``FASTVIDEO_PHYSICS_IQ_BUCKET_URL`` (e.g. for an internal mirror).
@@ -74,6 +75,7 @@ def _default_dataset_root() -> Path:
 @dataclass(frozen=True)
 class PhysicsIQScenario:
     """One row of the Physics-IQ manifest, fully resolved on disk."""
+
     scenario_id: str
     view: str
     scenario_name: str
@@ -114,8 +116,10 @@ class PhysicsIQPromptDataset(PromptDataset):
             loader will then raise ``FileNotFoundError`` on miss.
     """
 
-    description = ("Physics-IQ benchmark, 396 take-1 scenarios across 66 unique physics "
-                   "setups × 3 perspective views, each paired with a take-2 reference.")
+    description = (
+        "Physics-IQ benchmark, 396 take-1 scenarios across 66 unique physics "
+        "setups × 3 perspective views, each paired with a take-2 reference."
+    )
     requires_reference_video = True
 
     def __init__(
@@ -160,7 +164,7 @@ class PhysicsIQPromptDataset(PromptDataset):
         if limit is not None:
             take1_rows = take1_rows[:limit]
 
-        generated_dir_path = (Path(generated_dir).expanduser().resolve() if generated_dir else None)
+        generated_dir_path = Path(generated_dir).expanduser().resolve() if generated_dir else None
         scenarios: list[PhysicsIQScenario] = []
 
         for row in take1_rows:
@@ -204,8 +208,9 @@ class PhysicsIQPromptDataset(PromptDataset):
                 scenario_name=scenario_name,
                 fps=fps,
             )
-            generated_video_path = (str(generated_dir_path /
-                                        row["generated_video_name"]) if generated_dir_path is not None else None)
+            generated_video_path = (
+                str(generated_dir_path / row["generated_video_name"]) if generated_dir_path is not None else None
+            )
 
             scenarios.append(
                 PhysicsIQScenario(
@@ -220,7 +225,8 @@ class PhysicsIQPromptDataset(PromptDataset):
                     generated_video_path=generated_video_path,
                     take1_mask_path=str(take1_mask_path),
                     take2_mask_path=str(take2_mask_path),
-                ))
+                )
+            )
         return scenarios
 
     def _resolve_testing_video_path(
@@ -233,13 +239,13 @@ class PhysicsIQPromptDataset(PromptDataset):
         fps: int,
     ) -> Path:
         target_dir = self.dataset_dir / "split-videos" / "testing" / f"{fps}FPS"
-        target_name = (f"{scenario_id}_testing-videos_{fps}FPS_{view}_{take}_{scenario_name}.mp4")
+        target_name = f"{scenario_id}_testing-videos_{fps}FPS_{view}_{take}_{scenario_name}.mp4"
         target_path = target_dir / target_name
         if target_path.exists():
             return target_path
 
         # 30-FPS source: either present locally or auto-fetchable.
-        source_name = (f"{scenario_id}_testing-videos_30FPS_{view}_{take}_{scenario_name}.mp4")
+        source_name = f"{scenario_id}_testing-videos_30FPS_{view}_{take}_{scenario_name}.mp4"
         source_rel = f"split-videos/testing/30FPS/{source_name}"
         source_path = self.dataset_dir / source_rel
         self._ensure_remote_asset(source_rel, source_path)
@@ -261,7 +267,7 @@ class PhysicsIQPromptDataset(PromptDataset):
         view: str,
         scenario_name: str,
     ) -> Path:
-        rel = (f"switch-frames/{scenario_id}_switch-frames_anyFPS_{view}_{scenario_name}.jpg")
+        rel = f"switch-frames/{scenario_id}_switch-frames_anyFPS_{view}_{scenario_name}.jpg"
         target_path = self.dataset_dir / rel
         self._ensure_remote_asset(rel, target_path)
         return target_path
@@ -279,8 +285,7 @@ class PhysicsIQPromptDataset(PromptDataset):
         # regenerated downstream from the (downsampled) real videos by
         # the metric — see upstream ``run_physics_iq.py::ensure_binary_mask_structure``.
         # We only auto-fetch 30 FPS here.
-        rel = (f"video-masks/real/30FPS/"
-               f"{scenario_id}_video-masks_30FPS_{view}_{take}_{scenario_name}.mp4")
+        rel = f"video-masks/real/30FPS/{scenario_id}_video-masks_30FPS_{view}_{take}_{scenario_name}.mp4"
         target_path = self.dataset_dir / rel
         self._ensure_remote_asset(rel, target_path)
         if fps == _DEFAULT_FPS:
@@ -301,8 +306,10 @@ class PhysicsIQPromptDataset(PromptDataset):
         if target_path.exists():
             return target_path
         if not self.auto_download:
-            raise FileNotFoundError(f"Physics-IQ asset missing: {target_path}. "
-                                    "Set auto_download=True or pass dataset_root= a pre-downloaded copy.")
+            raise FileNotFoundError(
+                f"Physics-IQ asset missing: {target_path}. "
+                "Set auto_download=True or pass dataset_root= a pre-downloaded copy."
+            )
         target_path.parent.mkdir(parents=True, exist_ok=True)
         url = f"{self.bucket_url}/{rel_path.lstrip('/')}"
         tmp_path = target_path.with_suffix(target_path.suffix + ".part")
@@ -311,8 +318,9 @@ class PhysicsIQPromptDataset(PromptDataset):
         except Exception as exc:
             if tmp_path.exists():
                 tmp_path.unlink()
-            raise FileNotFoundError(f"Failed to fetch Physics-IQ asset {url} -> {target_path}: "
-                                    f"{type(exc).__name__}: {exc}") from exc
+            raise FileNotFoundError(
+                f"Failed to fetch Physics-IQ asset {url} -> {target_path}: {type(exc).__name__}: {exc}"
+            ) from exc
         tmp_path.rename(target_path)
         return target_path
 
@@ -343,9 +351,11 @@ def _resolve_descriptions_path(repo_root: Path, dataset_dir: Path) -> Path:
             return path
     if _VENDORED_DESCRIPTIONS_CSV.is_file():
         return _VENDORED_DESCRIPTIONS_CSV
-    raise FileNotFoundError("Could not locate Physics-IQ descriptions/descriptions.csv "
-                            f"(checked {[str(c) for c in candidates]} and vendored "
-                            f"{_VENDORED_DESCRIPTIONS_CSV})")
+    raise FileNotFoundError(
+        "Could not locate Physics-IQ descriptions/descriptions.csv "
+        f"(checked {[str(c) for c in candidates]} and vendored "
+        f"{_VENDORED_DESCRIPTIONS_CSV})"
+    )
 
 
 def _parse_scenario_filename(filename: str) -> tuple[str, str, str, str]:

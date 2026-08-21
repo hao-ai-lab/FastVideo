@@ -92,7 +92,7 @@ class RayDistributedExecutor(Executor):
         for bundle_id, bundle in enumerate(placement_group.bundle_specs):
             if bundle.get(current_platform.ray_device_key, 0):
                 bundle_indices.append(bundle_id)
-        bundle_indices = bundle_indices[:self.fastvideo_args.num_gpus]
+        bundle_indices = bundle_indices[: self.fastvideo_args.num_gpus]
 
         worker_metadata: list[RayWorkerMetaData] = []
         driver_ip = get_ip()
@@ -121,10 +121,12 @@ class RayDistributedExecutor(Executor):
                 )(RayWorkerWrapper).remote(fastvideo_args=self.fastvideo_args, rpc_rank=rank)
             worker_metadata.append(RayWorkerMetaData(worker=worker, created_rank=rank))
 
-        worker_ips = ray.get([
-            each.worker.get_node_ip.remote()  # type: ignore[attr-defined]
-            for each in worker_metadata
-        ])
+        worker_ips = ray.get(
+            [
+                each.worker.get_node_ip.remote()  # type: ignore[attr-defined]
+                for each in worker_metadata
+            ]
+        )
 
         for each, ip in zip(worker_metadata, worker_ips, strict=False):
             each.ip = ip
@@ -182,18 +184,22 @@ class RayDistributedExecutor(Executor):
         n_nodes = len(node_workers)
 
         if n_nodes != n_ips:
-            raise RuntimeError(f"Every node should have a unique IP address. Got {n_nodes}"
-                               f" nodes with node ids {list(node_workers.keys())} and "
-                               f"{n_ips} unique IP addresses {all_ips}. Please check your"
-                               " network configuration. If you set `FASTVIDEO_HOST_IP`"
-                               " environment variable, make sure it is unique for"
-                               " each node.")
+            raise RuntimeError(
+                f"Every node should have a unique IP address. Got {n_nodes}"
+                f" nodes with node ids {list(node_workers.keys())} and "
+                f"{n_ips} unique IP addresses {all_ips}. Please check your"
+                " network configuration. If you set `FASTVIDEO_HOST_IP`"
+                " environment variable, make sure it is unique for"
+                " each node."
+            )
 
         # Set environment variables for the driver and workers.
-        all_args_to_update_environment_variables: list[dict[str, str]] = [{
-            current_platform.device_control_env_var:
-            ",".join(map(str, node_gpus[node_id])),
-        } for (node_id, _) in worker_node_and_gpu_ids]
+        all_args_to_update_environment_variables: list[dict[str, str]] = [
+            {
+                current_platform.device_control_env_var: ",".join(map(str, node_gpus[node_id])),
+            }
+            for (node_id, _) in worker_node_and_gpu_ids
+        ]
 
         # Environment variables to copy from driver to workers
         env_vars_to_copy = get_env_vars_to_copy(
@@ -209,7 +215,7 @@ class RayDistributedExecutor(Executor):
                 if name in os.environ:
                     args[name] = os.environ[name]
 
-        self._env_vars_for_all_workers: list[dict[str, str]] = (all_args_to_update_environment_variables)
+        self._env_vars_for_all_workers: list[dict[str, str]] = all_args_to_update_environment_variables
 
         self._run_ray_workers("update_environment_variables", self._get_env_vars_to_be_updated())
 
@@ -313,18 +319,18 @@ class RayDistributedExecutor(Executor):
         )
         return result_batch
 
-    def set_lora_adapter(self,
-                         lora_nickname: str,
-                         lora_path: str | None = None,
-                         strength: float = 1.0,
-                         accumulate: bool = False) -> None:
-        responses = self.collective_rpc("set_lora_adapter",
-                                        kwargs={
-                                            "lora_nickname": lora_nickname,
-                                            "lora_path": lora_path,
-                                            "strength": strength,
-                                            "accumulate": accumulate
-                                        })
+    def set_lora_adapter(
+        self, lora_nickname: str, lora_path: str | None = None, strength: float = 1.0, accumulate: bool = False
+    ) -> None:
+        responses = self.collective_rpc(
+            "set_lora_adapter",
+            kwargs={
+                "lora_nickname": lora_nickname,
+                "lora_path": lora_path,
+                "strength": strength,
+                "accumulate": accumulate,
+            },
+        )
         for i, response in enumerate(responses):
             if response["status"] != "lora_adapter_set":
                 raise RuntimeError(f"Worker {i} failed to set LoRA adapter to {lora_path}")
@@ -341,11 +347,9 @@ class RayDistributedExecutor(Executor):
             if response["status"] != "lora_adapter_merged":
                 raise RuntimeError(f"Worker {i} failed to merge LoRA weights")
 
-    def collective_rpc(self,
-                       method: str | Callable,
-                       timeout: float | None = None,
-                       args: tuple = (),
-                       kwargs: dict | None = None) -> list[Any]:
+    def collective_rpc(
+        self, method: str | Callable, timeout: float | None = None, args: tuple = (), kwargs: dict | None = None
+    ) -> list[Any]:
         return self._run_ray_workers(method, *args, **(kwargs or {}))
 
     def _run_ray_workers(
@@ -367,10 +371,13 @@ class RayDistributedExecutor(Executor):
         return ray_worker_outputs
 
     def shutdown(self) -> None:
-        logger.info("Shutting down Ray distributed executor. If you see error log "
-                    "from logging.cc regarding SIGTERM received, please ignore because "
-                    "this is the expected termination process in Ray.")
+        logger.info(
+            "Shutting down Ray distributed executor. If you see error log "
+            "from logging.cc regarding SIGTERM received, please ignore because "
+            "this is the expected termination process in Ray."
+        )
         import ray
+
         for worker in self.workers:
             ray.kill(worker)
 

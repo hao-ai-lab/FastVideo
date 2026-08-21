@@ -11,6 +11,7 @@ Text encoders are the same as HunyuanVideo:
 - LLaVA-LLaMA-3-8B for primary text encoding (4096 dim)
 - CLIP ViT-L/14 for secondary pooled embeddings (768 dim)
 """
+
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -18,17 +19,21 @@ import torch
 
 from fastvideo.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.configs.models.dits import HunyuanGameCraftConfig
-from fastvideo.configs.models.encoders import (BaseEncoderOutput, CLIPTextConfig, LlamaConfig)
+from fastvideo.configs.models.encoders import BaseEncoderOutput, CLIPTextConfig, LlamaConfig
 from fastvideo.configs.models.vaes import GameCraftVAEConfig
 from fastvideo.configs.pipelines.base import PipelineConfig
-from fastvideo.configs.pipelines.hunyuan import (clip_postprocess_text, clip_preprocess_text, llama_postprocess_text,
-                                                 llama_preprocess_text)
+from fastvideo.configs.pipelines.hunyuan import (
+    clip_postprocess_text,
+    clip_preprocess_text,
+    llama_postprocess_text,
+    llama_preprocess_text,
+)
 
 
 @dataclass
 class HunyuanGameCraftPipelineConfig(PipelineConfig):
     """Configuration for HunyuanGameCraft pipeline.
-    
+
     Inherits text encoding from HunyuanVideo but uses:
     - GameCraft DiT with CameraNet
     - Same VAE (HunyuanVAE)
@@ -50,10 +55,12 @@ class HunyuanGameCraftPipelineConfig(PipelineConfig):
     # Text encoding stage - same as HunyuanVideo
     # Uses LLaMA-3-8B (via LLaVA) + CLIP
     text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (LlamaConfig(), CLIPTextConfig()))
-    preprocess_text_funcs: tuple[Callable[[str], str],
-                                 ...] = field(default_factory=lambda: (llama_preprocess_text, clip_preprocess_text))
-    postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.Tensor],
-                                  ...] = field(default_factory=lambda: (llama_postprocess_text, clip_postprocess_text))
+    preprocess_text_funcs: tuple[Callable[[str], str], ...] = field(
+        default_factory=lambda: (llama_preprocess_text, clip_preprocess_text)
+    )
+    postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.Tensor], ...] = field(
+        default_factory=lambda: (llama_postprocess_text, clip_postprocess_text)
+    )
 
     # Precision for each component
     dit_precision: str = "bf16"

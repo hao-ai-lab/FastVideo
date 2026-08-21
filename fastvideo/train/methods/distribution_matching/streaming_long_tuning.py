@@ -14,7 +14,8 @@ from fastvideo.logger import init_logger
 from fastvideo.models.utils import pred_noise_to_pred_video
 from fastvideo.train.methods.base import LogScalar
 from fastvideo.train.methods.distribution_matching.self_forcing import (
-    SelfForcingMethod, )
+    SelfForcingMethod,
+)
 from fastvideo.train.models.base import CausalModelBase
 from fastvideo.train.utils.config import get_optional_float, get_optional_int
 
@@ -138,9 +139,11 @@ def parse_multi_phased_distill_schedule(
                     where="multi_phased_distill_schedule.num_latent_t",
                 )
             else:
-                raise ValueError("multi_phased_distill_schedule string entries must be "
-                                 "'end_step:num_latent_t' or 'start:end:num_latent_t', "
-                                 f"got {part!r}")
+                raise ValueError(
+                    "multi_phased_distill_schedule string entries must be "
+                    "'end_step:num_latent_t' or 'start:end:num_latent_t', "
+                    f"got {part!r}"
+                )
             streaming = idx > 0
             stages.append(
                 DistillStage(
@@ -151,7 +154,8 @@ def parse_multi_phased_distill_schedule(
                     streaming_training=streaming,
                     streaming_chunk_size=(default_streaming_chunk_size if streaming else None),
                     streaming_max_length=num_latent_t if streaming else None,
-                ))
+                )
+            )
             previous_end = end_step
     elif isinstance(raw, list | tuple):
         for idx, stage_raw in enumerate(raw):
@@ -174,10 +178,14 @@ def parse_multi_phased_distill_schedule(
                 where=f"multi_phased_distill_schedule[{idx}].start_step",
             )
             end_raw = stage_raw.get("end_step", None)
-            end_step = (None if end_raw is None else _as_int(
-                end_raw,
-                where=f"multi_phased_distill_schedule[{idx}].end_step",
-            ))
+            end_step = (
+                None
+                if end_raw is None
+                else _as_int(
+                    end_raw,
+                    where=f"multi_phased_distill_schedule[{idx}].end_step",
+                )
+            )
             num_latent_t = _as_int(
                 stage_raw.get(
                     "num_latent_t",
@@ -199,27 +207,40 @@ def parse_multi_phased_distill_schedule(
                     end_step=end_step,
                     num_latent_t=num_latent_t,
                     streaming_training=streaming,
-                    streaming_chunk_size=(None if chunk_size is None else _as_int(
-                        chunk_size,
-                        where=("multi_phased_distill_schedule"
-                               f"[{idx}].streaming_chunk_size"),
-                    )),
-                    streaming_max_length=(None if streaming_max is None else _as_int(
-                        streaming_max,
-                        where=("multi_phased_distill_schedule"
-                               f"[{idx}].streaming_max_length"),
-                    )),
-                    streaming_min_new_frame=(None if min_new is None else _as_int(
-                        min_new,
-                        where=("multi_phased_distill_schedule"
-                               f"[{idx}].streaming_min_new_frame"),
-                    )),
-                    streaming_fixed_overlap_latents=(None if fixed_overlap is None else _as_int(
-                        fixed_overlap,
-                        where=("multi_phased_distill_schedule"
-                               f"[{idx}].streaming_fixed_overlap_latents"),
-                    )),
-                ))
+                    streaming_chunk_size=(
+                        None
+                        if chunk_size is None
+                        else _as_int(
+                            chunk_size,
+                            where=(f"multi_phased_distill_schedule[{idx}].streaming_chunk_size"),
+                        )
+                    ),
+                    streaming_max_length=(
+                        None
+                        if streaming_max is None
+                        else _as_int(
+                            streaming_max,
+                            where=(f"multi_phased_distill_schedule[{idx}].streaming_max_length"),
+                        )
+                    ),
+                    streaming_min_new_frame=(
+                        None
+                        if min_new is None
+                        else _as_int(
+                            min_new,
+                            where=(f"multi_phased_distill_schedule[{idx}].streaming_min_new_frame"),
+                        )
+                    ),
+                    streaming_fixed_overlap_latents=(
+                        None
+                        if fixed_overlap is None
+                        else _as_int(
+                            fixed_overlap,
+                            where=(f"multi_phased_distill_schedule[{idx}].streaming_fixed_overlap_latents"),
+                        )
+                    ),
+                )
+            )
             if end_step is not None:
                 previous_end = end_step
     else:
@@ -247,8 +268,7 @@ def parse_multi_phased_distill_schedule(
                 if stage.streaming_fixed_overlap_latents < 0:
                     raise ValueError("streaming_fixed_overlap_latents must be non-negative")
                 if stage.streaming_fixed_overlap_latents >= chunk_size:
-                    raise ValueError("streaming_fixed_overlap_latents must be smaller than "
-                                     "streaming_chunk_size")
+                    raise ValueError("streaming_fixed_overlap_latents must be smaller than streaming_chunk_size")
         if stage.end_step is not None:
             previous_end = stage.end_step
     return stages
@@ -318,7 +338,9 @@ class StreamingLongTuningMethod(SelfForcingMethod):
                 mcfg,
                 "streaming_anchor_inject_k",
                 where="method.streaming_anchor_inject_k",
-            ) or 1)
+            )
+            or 1
+        )
         if self._streaming_anchor_inject_k < 1:
             raise ValueError("method.streaming_anchor_inject_k must be >= 1")
         reencode_anchor_raw = mcfg.get("streaming_reencode_overlap_anchor", True)
@@ -347,20 +369,22 @@ class StreamingLongTuningMethod(SelfForcingMethod):
 
         max_stage_latents = max(s.num_latent_t for s in self._distill_stages)
         if max_stage_latents > default_num_latent_t:
-            raise ValueError("training.data.num_latent_t must be at least the largest "
-                             "multi-stage horizon so prepared conditioning is not trimmed "
-                             "before streaming: "
-                             f"num_latent_t={default_num_latent_t}, "
-                             f"max_stage_latents={max_stage_latents}")
+            raise ValueError(
+                "training.data.num_latent_t must be at least the largest "
+                "multi-stage horizon so prepared conditioning is not trimmed "
+                "before streaming: "
+                f"num_latent_t={default_num_latent_t}, "
+                f"max_stage_latents={max_stage_latents}"
+            )
 
     def single_train_step(
         self,
         batch: dict[str, Any],
         iteration: int,
     ) -> tuple[
-            dict[str, torch.Tensor],
-            dict[str, Any],
-            dict[str, LogScalar],
+        dict[str, torch.Tensor],
+        dict[str, Any],
+        dict[str, LogScalar],
     ]:
         stage = select_distill_stage(self._distill_stages, iteration)
         if not stage.streaming_training:
@@ -374,9 +398,9 @@ class StreamingLongTuningMethod(SelfForcingMethod):
         iteration: int,
         stage: DistillStage,
     ) -> tuple[
-            dict[str, torch.Tensor],
-            dict[str, Any],
-            dict[str, LogScalar],
+        dict[str, torch.Tensor],
+        dict[str, Any],
+        dict[str, LogScalar],
     ]:
         batch = self._with_padded_first_frame_latent(
             batch,
@@ -401,9 +425,9 @@ class StreamingLongTuningMethod(SelfForcingMethod):
         iteration: int,
         stage: DistillStage,
     ) -> tuple[
-            dict[str, torch.Tensor],
-            dict[str, Any],
-            dict[str, LogScalar],
+        dict[str, torch.Tensor],
+        dict[str, Any],
+        dict[str, LogScalar],
     ]:
         state = self._ensure_streaming_state(batch, stage)
         update_student = self._should_update_student(iteration)
@@ -441,11 +465,11 @@ class StreamingLongTuningMethod(SelfForcingMethod):
             generator_loss = generator_loss.detach()
             student_ctx = None
 
-        fake_score_loss, critic_ctx, critic_outputs = (self._critic_flow_matching_loss_for_x0(
+        fake_score_loss, critic_ctx, critic_outputs = self._critic_flow_matching_loss_for_x0(
             pred_x0.detach(),
             state.batch,
             chunk_mask=chunk_mask,
-        ))
+        )
         self._log_train_chunk(
             iteration=iteration,
             stage=stage,
@@ -485,9 +509,9 @@ class StreamingLongTuningMethod(SelfForcingMethod):
         stage: DistillStage,
         chunk_mask: torch.Tensor | None,
     ) -> tuple[
-            dict[str, torch.Tensor],
-            dict[str, Any],
-            dict[str, LogScalar],
+        dict[str, torch.Tensor],
+        dict[str, Any],
+        dict[str, LogScalar],
     ]:
         update_student = self._should_update_student(iteration)
 
@@ -525,11 +549,11 @@ class StreamingLongTuningMethod(SelfForcingMethod):
                 with_grad=False,
             )
 
-        fake_score_loss, critic_ctx, critic_outputs = (self._critic_flow_matching_loss_for_x0(
+        fake_score_loss, critic_ctx, critic_outputs = self._critic_flow_matching_loss_for_x0(
             generator_pred_x0,
             training_batch,
             chunk_mask=chunk_mask,
-        ))
+        )
 
         total_loss = generator_loss + fake_score_loss
         outputs: dict[str, Any] = dict(critic_outputs)
@@ -587,7 +611,7 @@ class StreamingLongTuningMethod(SelfForcingMethod):
         stage: DistillStage,
     ) -> _StreamingState:
         state = self._streaming_state
-        if (state is None or state.stage != stage or not self._can_generate_more(state)):
+        if state is None or state.stage != stage or not self._can_generate_more(state):
             if state is not None:
                 self.student.clear_caches(cache_tag=state.cache_tag)
             raw_batch = self._with_padded_first_frame_latent(
@@ -625,8 +649,9 @@ class StreamingLongTuningMethod(SelfForcingMethod):
         if first_frame_latent is None:
             return raw_batch
         if first_frame_latent.ndim != 5:
-            raise ValueError("first_frame_latent must have shape [B, C, T, H, W], "
-                             f"got {tuple(first_frame_latent.shape)}")
+            raise ValueError(
+                f"first_frame_latent must have shape [B, C, T, H, W], got {tuple(first_frame_latent.shape)}"
+            )
         target_latent_frames = int(target_latent_frames)
         if first_frame_latent.shape[2] >= target_latent_frames:
             return raw_batch
@@ -696,10 +721,12 @@ class StreamingLongTuningMethod(SelfForcingMethod):
         if rollout_block_size <= 0:
             raise ValueError("method.chunk_size must be positive")
         if self._streaming_require_full_blocks and new_frames % rollout_block_size != 0:
-            raise ValueError("Streaming new-frame count must be divisible by "
-                             "method.chunk_size: "
-                             f"new_frames={new_frames}, "
-                             f"chunk_size={rollout_block_size}")
+            raise ValueError(
+                "Streaming new-frame count must be divisible by "
+                "method.chunk_size: "
+                f"new_frames={new_frames}, "
+                f"chunk_size={rollout_block_size}"
+            )
 
         denoising_steps = self._get_denoising_step_list(device)
         num_steps = int(denoising_steps.numel())
@@ -738,7 +765,7 @@ class StreamingLongTuningMethod(SelfForcingMethod):
         local_start = 0
         for block_idx, block_frames in enumerate(block_lengths):
             block_start = current + local_start
-            noisy_block = noise_full[:, local_start:local_start + block_frames]
+            noisy_block = noise_full[:, local_start : local_start + block_frames]
             exit_idx = int(exit_indices[block_idx])
             pred_x0_block: torch.Tensor | None = None
 
@@ -749,7 +776,7 @@ class StreamingLongTuningMethod(SelfForcingMethod):
                     dtype=torch.float32,
                 )
                 exit_flag = step_idx == exit_idx
-                enable_grad = (bool(with_grad) and bool(self._enable_gradient_in_rollout) and torch.is_grad_enabled())
+                enable_grad = bool(with_grad) and bool(self._enable_gradient_in_rollout) and torch.is_grad_enabled()
 
                 if not exit_flag:
                     with torch.no_grad():
@@ -785,7 +812,8 @@ class StreamingLongTuningMethod(SelfForcingMethod):
                                 dtype=pred_x0_block.dtype,
                                 generator=self.cuda_generator,
                             ),
-                            next_timestep * torch.ones(
+                            next_timestep
+                            * torch.ones(
                                 (batch_size, block_frames),
                                 device=device,
                                 dtype=torch.float32,
@@ -906,9 +934,9 @@ class StreamingLongTuningMethod(SelfForcingMethod):
             )
 
         state.current_length = current + new_frames
-        temporal_compression_ratio = int(self.training_config.pipeline_config.vae_config.arch_config.
-                                         temporal_compression_ratio  # type: ignore[union-attr]
-                                         )
+        temporal_compression_ratio = int(
+            self.training_config.pipeline_config.vae_config.arch_config.temporal_compression_ratio  # type: ignore[union-attr]
+        )
         chunk_info = _StreamingChunkInfo(
             chunk_start=current - overlap,
             chunk_end=current + new_frames - 1,
@@ -937,8 +965,7 @@ class StreamingLongTuningMethod(SelfForcingMethod):
 
         if not dist.is_initialized() or dist.get_rank() == 0:
             logger.info(
-                "[StreamingLong] stage=%s start=%s new=%s overlap=%s "
-                "blocks=%s current_length=%s/%s",
+                "[StreamingLong] stage=%s start=%s new=%s overlap=%s blocks=%s current_length=%s/%s",
                 state.stage.name,
                 current,
                 new_frames,
@@ -965,7 +992,8 @@ class StreamingLongTuningMethod(SelfForcingMethod):
             torch.argmin(
                 (scheduler_timesteps - denoising_timestep).abs(),
                 dim=0,
-            ).item())
+            ).item()
+        )
         if exit_idx == int(step_list.numel()) - 1:
             return denoised_timestep_from, 0
 
@@ -974,7 +1002,8 @@ class StreamingLongTuningMethod(SelfForcingMethod):
             torch.argmin(
                 (scheduler_timesteps - next_denoising_timestep).abs(),
                 dim=0,
-            ).item())
+            ).item()
+        )
         return denoised_timestep_from, denoised_timestep_to
 
     def _process_first_frame_anchor(
@@ -998,7 +1027,7 @@ class StreamingLongTuningMethod(SelfForcingMethod):
         inject_k = min(int(self._streaming_anchor_inject_k), process_latents)
         if inject_k == 1:
             with torch.no_grad():
-                latents_to_decode = frames[:, :-(process_latents - 1), ...]
+                latents_to_decode = frames[:, : -(process_latents - 1), ...]
                 decode_latents = self._denormalize_wan_latents(
                     latents_to_decode,
                     vae=vae,
@@ -1011,7 +1040,7 @@ class StreamingLongTuningMethod(SelfForcingMethod):
                     like=frames,
                 )
 
-            remaining = frames[:, -(process_latents - 1):, ...]
+            remaining = frames[:, -(process_latents - 1) :, ...]
             return torch.cat([image_latent, remaining], dim=1)
 
         out_slice = frames[:, -process_latents:, ...]
@@ -1039,7 +1068,7 @@ class StreamingLongTuningMethod(SelfForcingMethod):
     ) -> torch.Tensor:
         latents = frames.permute(0, 2, 1, 3, 4).float()
         cfg = getattr(vae, "config", None)
-        if (cfg is not None and hasattr(cfg, "latents_mean") and hasattr(cfg, "latents_std")):
+        if cfg is not None and hasattr(cfg, "latents_mean") and hasattr(cfg, "latents_std"):
             latents_mean = torch.tensor(
                 cfg.latents_mean,
                 device=latents.device,
@@ -1075,7 +1104,7 @@ class StreamingLongTuningMethod(SelfForcingMethod):
         vae: Any,
     ) -> torch.Tensor:
         cfg = getattr(vae, "config", None)
-        if (cfg is not None and hasattr(cfg, "latents_mean") and hasattr(cfg, "latents_std")):
+        if cfg is not None and hasattr(cfg, "latents_mean") and hasattr(cfg, "latents_std"):
             latents_mean = torch.tensor(
                 cfg.latents_mean,
                 device=latents.device,
@@ -1120,7 +1149,7 @@ class StreamingLongTuningMethod(SelfForcingMethod):
         else:
             latent_dist = getattr(encoded, "latent_dist", None)
             if latent_dist is not None:
-                raw_latent = (latent_dist.mode() if hasattr(latent_dist, "mode") else latent_dist.mean)
+                raw_latent = latent_dist.mode() if hasattr(latent_dist, "mode") else latent_dist.mean
             else:
                 mean = getattr(encoded, "mean", None)
                 if not isinstance(mean, torch.Tensor):
@@ -1138,18 +1167,16 @@ class StreamingLongTuningMethod(SelfForcingMethod):
         target = getattr(vae, "module", vae)
         encoder = getattr(target, "encoder", None)
         if encoder is None:
-            raise RuntimeError("Streaming first-frame anchor requires a VAE "
-                               "loaded with encoder weights")
-        if (getattr(target, "use_feature_cache", False) and not hasattr(target, "_enc_feat_map")):
+            raise RuntimeError("Streaming first-frame anchor requires a VAE loaded with encoder weights")
+        if getattr(target, "use_feature_cache", False) and not hasattr(target, "_enc_feat_map"):
             config = getattr(target, "config", None)
             if config is not None:
                 config.load_encoder = True
             clear_cache = getattr(target, "clear_cache", None)
             if callable(clear_cache):
                 clear_cache()
-        if (getattr(target, "use_feature_cache", False) and not hasattr(target, "_enc_feat_map")):
-            raise RuntimeError("Streaming first-frame anchor requires VAE "
-                               "encoder feature-cache buffers")
+        if getattr(target, "use_feature_cache", False) and not hasattr(target, "_enc_feat_map"):
+            raise RuntimeError("Streaming first-frame anchor requires VAE encoder feature-cache buffers")
 
     def _vae_tensor_attr(
         self,
@@ -1243,13 +1270,13 @@ class StreamingLongTuningMethod(SelfForcingMethod):
             idx = torch.randint(
                 low=0,
                 high=len(choices),
-                size=(1, ),
+                size=(1,),
                 device=device,
                 dtype=torch.long,
                 generator=self.cuda_generator,
             )
         else:
-            idx = torch.empty((1, ), device=device, dtype=torch.long)
+            idx = torch.empty((1,), device=device, dtype=torch.long)
         if dist.is_initialized():
             dist.broadcast(idx, src=0)
         return int(choices[int(idx.item())])
@@ -1340,7 +1367,7 @@ class StreamingLongTuningMethod(SelfForcingMethod):
         )
         target = noise - generator_pred_x0
         flow_matching_loss = self._masked_mean(
-            (pred_noise - target)**2,
+            (pred_noise - target) ** 2,
             chunk_mask,
         )
 
@@ -1413,12 +1440,17 @@ class StreamingLongTuningMethod(SelfForcingMethod):
                 real_cfg_x0 = real_uncond_x0 + (real_cond_x0 - real_uncond_x0) * guidance_scale
             else:
                 real_cfg_x0 = real_cond_x0
-            denom = torch.abs(generator_pred_x0.float() - real_cfg_x0.float(), ).mean(dim=[1, 2, 3, 4],
-                                                                                      keepdim=True).clamp_min(1e-6)
+            denom = (
+                torch.abs(
+                    generator_pred_x0.float() - real_cfg_x0.float(),
+                )
+                .mean(dim=[1, 2, 3, 4], keepdim=True)
+                .clamp_min(1e-6)
+            )
             grad = (faker_x0 - real_cfg_x0) / denom
             grad = torch.nan_to_num(grad)
 
-        loss = 0.5 * (generator_pred_x0.float() - (generator_pred_x0.float() - grad.float()).detach())**2
+        loss = 0.5 * (generator_pred_x0.float() - (generator_pred_x0.float() - grad.float()).detach()) ** 2
         return self._masked_mean(loss, chunk_mask)
 
     def _score_timestep_from_ratio(self, key: str) -> int | None:

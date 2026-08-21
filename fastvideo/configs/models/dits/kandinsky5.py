@@ -31,7 +31,8 @@ class Kandinsky5ArchConfig(DiTArchConfig):
         default_factory=lambda: {
             r"^(.*feed_forward)\.in_layer\.(weight|bias)$": r"\1.mlp.fc_in.\2",
             r"^(.*feed_forward)\.out_layer\.(weight|bias)$": r"\1.mlp.fc_out.\2",
-        })
+        }
+    )
 
     reverse_param_names_mapping: dict = field(default_factory=lambda: {})
 

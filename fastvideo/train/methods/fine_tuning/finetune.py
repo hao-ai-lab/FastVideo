@@ -11,7 +11,8 @@ import torch.nn.functional as F
 from fastvideo.train.methods.base import TrainingMethod, LogScalar
 from fastvideo.train.models.base import ModelBase, NoisePrediction
 from fastvideo.train.utils.optimizer import (
-    build_optimizer_and_scheduler, )
+    build_optimizer_and_scheduler,
+)
 
 
 def _compute_finetune_loss_map(
@@ -98,9 +99,8 @@ class FineTuneMethod(TrainingMethod):
         if "student" not in role_models:
             raise ValueError("FineTuneMethod requires role 'student'")
         if not self.student._trainable:
-            raise ValueError("FineTuneMethod requires student to be "
-                             "trainable")
-        self._attn_kind: Literal["dense", "vsa"] = (self._infer_attn_kind())
+            raise ValueError("FineTuneMethod requires student to be trainable")
+        self._attn_kind: Literal["dense", "vsa"] = self._infer_attn_kind()
 
         # Initialize preprocessors on student.
         self.student.init_preprocessors(self.training_config)
@@ -121,9 +121,9 @@ class FineTuneMethod(TrainingMethod):
         batch: dict[str, Any],
         iteration: int,
     ) -> tuple[
-            dict[str, torch.Tensor],
-            dict[str, Any],
-            dict[str, LogScalar],
+        dict[str, torch.Tensor],
+        dict[str, Any],
+        dict[str, LogScalar],
     ]:
         """Prepare synchronized targets and compute supervised flow loss.
 
@@ -138,23 +138,18 @@ class FineTuneMethod(TrainingMethod):
         )
 
         if training_batch.latents is None:
-            raise RuntimeError("prepare_batch() must set "
-                               "TrainingBatch.latents")
+            raise RuntimeError("prepare_batch() must set TrainingBatch.latents")
         if training_batch.noisy_model_input is None:
-            raise RuntimeError("prepare_batch() must set "
-                               "TrainingBatch.noisy_model_input")
+            raise RuntimeError("prepare_batch() must set TrainingBatch.noisy_model_input")
         if training_batch.noise is None:
-            raise RuntimeError("prepare_batch() must set "
-                               "TrainingBatch.noise")
+            raise RuntimeError("prepare_batch() must set TrainingBatch.noise")
         if training_batch.sigmas is None:
-            raise RuntimeError("prepare_batch() must set "
-                               "TrainingBatch.sigmas")
+            raise RuntimeError("prepare_batch() must set TrainingBatch.sigmas")
         if training_batch.timesteps is None:
-            raise RuntimeError("prepare_batch() must set "
-                               "TrainingBatch.timesteps")
+            raise RuntimeError("prepare_batch() must set TrainingBatch.timesteps")
 
         clean_latents = training_batch.latents
-        noisy_latents = (training_batch.noisy_model_input.permute(0, 2, 1, 3, 4))
+        noisy_latents = training_batch.noisy_model_input.permute(0, 2, 1, 3, 4)
         noise = training_batch.noise.permute(0, 2, 1, 3, 4)
         sigmas = training_batch.sigmas
         timesteps = training_batch.timesteps
@@ -237,8 +232,7 @@ class FineTuneMethod(TrainingMethod):
 
         student_lr = float(tc.optimizer.learning_rate)
         if student_lr <= 0.0:
-            raise ValueError("training.learning_rate must be > 0 "
-                             "for finetune")
+            raise ValueError("training.learning_rate must be > 0 for finetune")
 
         student_betas = tc.optimizer.betas
         student_sched = str(tc.optimizer.lr_scheduler)

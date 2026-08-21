@@ -7,7 +7,7 @@ import torch
 
 from fastvideo.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.configs.models.dits import HunyuanVideoConfig
-from fastvideo.configs.models.encoders import (BaseEncoderOutput, CLIPTextConfig, LlamaConfig)
+from fastvideo.configs.models.encoders import BaseEncoderOutput, CLIPTextConfig, LlamaConfig
 from fastvideo.configs.models.vaes import HunyuanVAEConfig
 from fastvideo.configs.pipelines.base import PipelineConfig
 
@@ -18,7 +18,8 @@ PROMPT_TEMPLATE_ENCODE_VIDEO = (
     "3. Actions, events, behaviors temporal relationships, physical movement changes of the objects."
     "4. background environment, light, style and atmosphere."
     "5. camera angles, movements, and transitions used in the video:<|eot_id|>"
-    "<|start_header_id|>user<|end_header_id|>\n\n{}<|eot_id|>")
+    "<|start_header_id|>user<|end_header_id|>\n\n{}<|eot_id|>"
+)
 
 
 class PromptTemplate(TypedDict):
@@ -70,10 +71,12 @@ class HunyuanConfig(PipelineConfig):
 
     # Text encoding stage
     text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (LlamaConfig(), CLIPTextConfig()))
-    preprocess_text_funcs: tuple[Callable[[str], str],
-                                 ...] = field(default_factory=lambda: (llama_preprocess_text, clip_preprocess_text))
-    postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.tensor],
-                                  ...] = field(default_factory=lambda: (llama_postprocess_text, clip_postprocess_text))
+    preprocess_text_funcs: tuple[Callable[[str], str], ...] = field(
+        default_factory=lambda: (llama_preprocess_text, clip_preprocess_text)
+    )
+    postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.tensor], ...] = field(
+        default_factory=lambda: (llama_postprocess_text, clip_postprocess_text)
+    )
 
     # Precision for each component
     dit_precision: str = "bf16"

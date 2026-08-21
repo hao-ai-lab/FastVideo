@@ -13,8 +13,9 @@ def _is_minimax_h3_block(name: str, module: object) -> bool:
     """Select the main and text-refiner transformer blocks for FSDP."""
     del module
     parts = name.split(".")
-    return ((len(parts) == 2 and parts[0] == "transformer_blocks" and parts[1].isdigit())
-            or (len(parts) == 3 and parts[:2] == ["token_refiner", "refiner_blocks"] and parts[2].isdigit()))
+    return (len(parts) == 2 and parts[0] == "transformer_blocks" and parts[1].isdigit()) or (
+        len(parts) == 3 and parts[:2] == ["token_refiner", "refiner_blocks"] and parts[2].isdigit()
+    )
 
 
 @dataclass
@@ -39,7 +40,8 @@ class MiniMaxH3ArchConfig(DiTArchConfig):
             r"^(.*)\.attn\.to_out\.0\.(.*)$": r"\1.attn.to_out.\2",
             r"^(.*)\.ff\.net\.0\.proj\.(.*)$": r"\1.ff.fc_in.\2",
             r"^(.*)\.ff\.net\.2\.(.*)$": r"\1.ff.fc_out.\2",
-        })
+        }
+    )
     num_attention_heads: int = 56
     attention_head_dim: int = 128
     hidden_size: int = 5376
@@ -68,12 +70,15 @@ class MiniMaxH3ArchConfig(DiTArchConfig):
         self.num_channels_latents = self.in_channels
         self.out_channels = self.in_channels
         if self.adaln_rank is not None and not 0 < self.adaln_rank <= self.time_embed_dim:
-            raise ValueError(f"MiniMax H3 adaln_rank must be in (0, time_embed_dim={self.time_embed_dim}], "
-                             f"got {self.adaln_rank}.")
+            raise ValueError(
+                f"MiniMax H3 adaln_rank must be in (0, time_embed_dim={self.time_embed_dim}], got {self.adaln_rank}."
+            )
         rotary_dim = 2 * 3 * self.rope_freq_dim
         if rotary_dim > self.attention_head_dim or rotary_dim % 2:
-            raise ValueError(f"MiniMax H3 rotary width must be even and no larger than the head width; got "
-                             f"rotary_dim={rotary_dim}, attention_head_dim={self.attention_head_dim}.")
+            raise ValueError(
+                f"MiniMax H3 rotary width must be even and no larger than the head width; got "
+                f"rotary_dim={rotary_dim}, attention_head_dim={self.attention_head_dim}."
+            )
 
 
 @dataclass

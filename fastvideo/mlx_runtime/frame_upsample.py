@@ -59,8 +59,9 @@ def _interpolation_flag(mode: str) -> int:
     try:
         return flags[mode]
     except KeyError:
-        raise ValueError(f"Unsupported pixel upsample mode: {mode!r} "
-                         f"(expected one of {', '.join(PIXEL_UPSAMPLE_MODES)})") from None
+        raise ValueError(
+            f"Unsupported pixel upsample mode: {mode!r} (expected one of {', '.join(PIXEL_UPSAMPLE_MODES)})"
+        ) from None
 
 
 def unsharp(frame: np.ndarray, amount: float) -> np.ndarray:

@@ -37,11 +37,20 @@ try:
 except ImportError:
     block_sparse_attn_256_bshd = None
 
-from fastvideo.attention.backends.abstract import (AttentionBackend, AttentionImpl, AttentionMetadata,
-                                                   AttentionMetadataBuilder, layer_idx_from_prefix)
-from fastvideo.attention.backends.video_sparse_attn import (compute_topk, construct_variable_block_sizes,
-                                                            get_non_pad_index, get_tile_partition_indices,
-                                                            scatter_into_tile_buf)
+from fastvideo.attention.backends.abstract import (
+    AttentionBackend,
+    AttentionImpl,
+    AttentionMetadata,
+    AttentionMetadataBuilder,
+    layer_idx_from_prefix,
+)
+from fastvideo.attention.backends.video_sparse_attn import (
+    compute_topk,
+    construct_variable_block_sizes,
+    get_non_pad_index,
+    get_tile_partition_indices,
+    scatter_into_tile_buf,
+)
 from fastvideo.attention.backends.video_sparse_attn_h3_probe import probe_enabled, record_probe
 
 VSA_H3_TILE_SIZE = (4, 8, 8)  # 256 elements -> FA4 CuTe fastpath on sm10.x
@@ -88,15 +97,19 @@ def _h3_tile_geometry(
     num_video_tiles = int(video_sizes.numel())
 
     video_indices = get_tile_partition_indices(dit_seq_shape, VSA_H3_TILE_SIZE, device) + prefix_len
-    tile_partition_indices = torch.cat([
-        torch.arange(prefix_len, device=device, dtype=torch.long),
-        video_indices,
-    ])
+    tile_partition_indices = torch.cat(
+        [
+            torch.arange(prefix_len, device=device, dtype=torch.long),
+            video_indices,
+        ]
+    )
     # cat promotes the int32 helper output to int64 alongside the prefix sizes
-    variable_block_sizes = torch.cat([
-        torch.tensor(prefix_sizes, dtype=torch.long, device=device),
-        video_sizes,
-    ])
+    variable_block_sizes = torch.cat(
+        [
+            torch.tensor(prefix_sizes, dtype=torch.long, device=device),
+            video_sizes,
+        ]
+    )
 
     # get_non_pad_index is lru-cached on tensor identity; variable_block_sizes
     # is itself cached by this function, so the identity stays stable.
@@ -107,7 +120,6 @@ def _h3_tile_geometry(
 
 
 class MiniMaxH3VSABackend(AttentionBackend):
-
     accept_output_buffer: bool = True
 
     @staticmethod
@@ -150,7 +162,6 @@ class MiniMaxH3VSAMetadata(AttentionMetadata):
 
 
 class MiniMaxH3VSAMetadataBuilder(AttentionMetadataBuilder):
-
     def __init__(self) -> None:
         self._tile_buf_holder: list = [None]
 
@@ -158,24 +169,28 @@ class MiniMaxH3VSAMetadataBuilder(AttentionMetadataBuilder):
         pass
 
     def build(  # type: ignore
-            self,
-            current_timestep: int,
-            raw_latent_shape: tuple[int, int, int],
-            patch_size: tuple[int, int, int],
-            VSA_sparsity: float,
-            prefix_segments: tuple[int, ...],
-            device: torch.device,
-            exempt: bool = True,
-            dense_layers: tuple[int, ...] = (),
-            **kwargs: dict[str, Any],
+        self,
+        current_timestep: int,
+        raw_latent_shape: tuple[int, int, int],
+        patch_size: tuple[int, int, int],
+        VSA_sparsity: float,
+        prefix_segments: tuple[int, ...],
+        device: torch.device,
+        exempt: bool = True,
+        dense_layers: tuple[int, ...] = (),
+        **kwargs: dict[str, Any],
     ) -> MiniMaxH3VSAMetadata:
-        dit_seq_shape = (raw_latent_shape[0] // patch_size[0], raw_latent_shape[1] // patch_size[1],
-                         raw_latent_shape[2] // patch_size[2])
+        dit_seq_shape = (
+            raw_latent_shape[0] // patch_size[0],
+            raw_latent_shape[1] // patch_size[1],
+            raw_latent_shape[2] // patch_size[2],
+        )
         prefix_segments = tuple(int(s) for s in prefix_segments if s > 0)
         total_seq_length = sum(prefix_segments) + math.prod(dit_seq_shape)
 
-        (_tile_partition_indices, variable_block_sizes, untile_combined_index, num_prefix_tiles,
-         num_video_tiles) = _h3_tile_geometry(prefix_segments, dit_seq_shape, device)
+        (_tile_partition_indices, variable_block_sizes, untile_combined_index, num_prefix_tiles, num_video_tiles) = (
+            _h3_tile_geometry(prefix_segments, dit_seq_shape, device)
+        )
 
         return MiniMaxH3VSAMetadata(
             current_timestep=current_timestep,
@@ -233,7 +248,6 @@ def _build_block_mask(
 
 
 class MiniMaxH3VSAImpl(AttentionImpl):
-
     def __init__(
         self,
         num_heads: int,
@@ -255,9 +269,11 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         ``forward()`` read it immediately).
         """
         if x.shape[1] != attn_metadata.total_seq_length:
-            raise ValueError(f"VSA-H3 metadata was built for sequence length {attn_metadata.total_seq_length}, "
-                             f"got {x.shape[1]}. A non-packed sequence (e.g. the token refiner) is "
-                             "routed to the VSA-H3 backend; exclude it from the supported backends.")
+            raise ValueError(
+                f"VSA-H3 metadata was built for sequence length {attn_metadata.total_seq_length}, "
+                f"got {x.shape[1]}. A non-packed sequence (e.g. the token refiner) is "
+                "routed to the VSA-H3 backend; exclude it from the supported backends."
+            )
         n_tiles = attn_metadata.variable_block_sizes.numel()
         target_shape = (x.shape[0], n_tiles * _TILE_ELEMS, x.shape[-2], x.shape[-1])
 
@@ -293,7 +309,7 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         if layer_sparsity > 0.0 or gate_compress is not None or probe_dir is not None:
             q_pooled = _pool_tiles(query, attn_metadata.variable_block_sizes)
             k_pooled = _pool_tiles(key, attn_metadata.variable_block_sizes)
-            scores = torch.matmul(q_pooled, k_pooled.transpose(-2, -1)) / (query.shape[-1]**0.5)
+            scores = torch.matmul(q_pooled, k_pooled.transpose(-2, -1)) / (query.shape[-1] ** 0.5)
             if probe_dir is not None:
                 record_probe(probe_dir, self.layer_idx, query, key, scores, attn_metadata)
 

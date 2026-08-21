@@ -103,8 +103,11 @@ class ClipScoreScorer(torch.nn.Module):
             config = processor.to_dict()
             resize = T.Resize(get_size(config.get("size"))) if config.get("do_resize") else nn.Identity()
             crop = T.CenterCrop(get_size(config.get("crop_size"))) if config.get("do_center_crop") else nn.Identity()
-            normalize = (T.Normalize(mean=processor.image_mean, std=processor.image_std)
-                         if config.get("do_normalize") else nn.Identity())
+            normalize = (
+                T.Normalize(mean=processor.image_mean, std=processor.image_std)
+                if config.get("do_normalize")
+                else nn.Identity()
+            )
             return T.Compose([resize, crop, normalize])
 
         self.device = torch.device(device)

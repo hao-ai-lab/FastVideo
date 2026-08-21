@@ -3,20 +3,24 @@
 
 from fastvideo.api.presets import InferencePreset, PresetStageSpec
 
-_NEGATIVE_PROMPT_CN = ("色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，"
-                       "静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，"
-                       "多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，"
-                       "形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，"
-                       "背景人很多，倒着走")
+_NEGATIVE_PROMPT_CN = (
+    "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，"
+    "静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，"
+    "多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，"
+    "形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，"
+    "背景人很多，倒着走"
+)
 
 _DENOISE_STAGE = PresetStageSpec(
     name="denoise",
     kind="denoising",
     description="DreamX-World camera-conditioned denoising pass",
-    allowed_overrides=frozenset({
-        "num_inference_steps",
-        "guidance_scale",
-    }),
+    allowed_overrides=frozenset(
+        {
+            "num_inference_steps",
+            "guidance_scale",
+        }
+    ),
 )
 
 DREAMX_WORLD_5B_CAM = InferencePreset(
@@ -25,7 +29,7 @@ DREAMX_WORLD_5B_CAM = InferencePreset(
     model_family="dreamx_world",
     description="DreamX-World 5B camera-control video generation",
     workload_type="i2v",
-    stage_schemas=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE,),
     defaults={
         "height": 480,
         "width": 832,
@@ -43,7 +47,7 @@ DREAMX_WORLD_5B_AR = InferencePreset(
     model_family="dreamx_world",
     description="DreamX-World 5B autoregressive camera-control generation",
     workload_type="i2v",
-    stage_schemas=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE,),
     defaults={
         "height": 704,
         "width": 1280,

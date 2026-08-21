@@ -4,14 +4,17 @@ import torch
 from dataclasses import dataclass
 from torch.nn import functional as F
 from fastvideo.attention.backends.abstract import (  # FlashAttentionMetadata,
-    AttentionBackend, AttentionImpl, AttentionMetadata, AttentionMetadataBuilder)
+    AttentionBackend,
+    AttentionImpl,
+    AttentionMetadata,
+    AttentionMetadataBuilder,
+)
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 
 
 class SDPABackend(AttentionBackend):
-
     accept_output_buffer: bool = True
 
     @staticmethod
@@ -46,7 +49,6 @@ class SDPAMetadata(AttentionMetadata):
 
 
 class SDPAMetadataBuilder(AttentionMetadataBuilder):
-
     def __init__(self):
         pass
 
@@ -54,9 +56,9 @@ class SDPAMetadataBuilder(AttentionMetadataBuilder):
         pass
 
     def build(  # type: ignore
-            self,
-            current_timestep: int,
-            attn_mask: torch.Tensor,
+        self,
+        current_timestep: int,
+        attn_mask: torch.Tensor,
     ) -> SDPAMetadata:
         # Store the mask exactly as passed. The metadata is cross-backend:
         # call sites (HYWorld, HunyuanVideo15) build SDPAMetadata while the
@@ -83,8 +85,9 @@ def _normalize_attn_mask_for_sdpa(
 
     key_len = key.shape[-2]
     if attn_mask.shape[-1] > key_len:
-        raise ValueError("Invalid attention mask length for SDPA: "
-                         f"expected at most {key_len}, got {attn_mask.shape[-1]}")
+        raise ValueError(
+            f"Invalid attention mask length for SDPA: expected at most {key_len}, got {attn_mask.shape[-1]}"
+        )
     if attn_mask.shape[-1] < key_len:
         # Front-pad as "attend": double-stream layouts (HYWorld) prepend
         # non-text tokens the tokenizer mask does not cover.
@@ -104,7 +107,6 @@ def _normalize_attn_mask_for_sdpa(
 
 
 class SDPAImpl(AttentionImpl):
-
     def __init__(
         self,
         num_heads: int,
@@ -131,14 +133,15 @@ class SDPAImpl(AttentionImpl):
         key = key.transpose(1, 2)
         value = value.transpose(1, 2)
 
-        attn_mask = attn_metadata.attn_mask if (attn_metadata is not None
-                                                and hasattr(attn_metadata, "attn_mask")) else None
+        attn_mask = (
+            attn_metadata.attn_mask if (attn_metadata is not None and hasattr(attn_metadata, "attn_mask")) else None
+        )
         attn_mask = _normalize_attn_mask_for_sdpa(attn_mask, query, key)
         attn_kwargs = {
             "attn_mask": attn_mask,
             "dropout_p": self.dropout,
             "is_causal": self.causal,
-            "scale": self.softmax_scale
+            "scale": self.softmax_scale,
         }
         if query.shape[1] != key.shape[1]:
             attn_kwargs["enable_gqa"] = True

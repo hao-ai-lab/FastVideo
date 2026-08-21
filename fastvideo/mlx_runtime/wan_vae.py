@@ -35,8 +35,7 @@ from fastvideo.mlx_runtime.memory import cleanup_mlx, cleanup_torch_mps
 GIB = 1024**3
 
 TAEW2_1_URL = "https://raw.githubusercontent.com/madebyollin/taehv/main/taew2_1.pth"
-TAEW2_2_URL = ("https://raw.githubusercontent.com/madebyollin/taehv/"
-               "563f40bdc820ed86bcad72ea515ee48f06bd22ec/taew2_2.pth")
+TAEW2_2_URL = "https://raw.githubusercontent.com/madebyollin/taehv/563f40bdc820ed86bcad72ea515ee48f06bd22ec/taew2_2.pth"
 # Validated 2026-07-02 / 2026-07-09 against upstream madebyollin/taehv.
 TAEW2_1_SHA256 = "d26151e76cdc2c9424bef988de874b33d9a53f30ef3060cd556c429c469c797e"
 TAEW2_2_SHA256 = "d053e216ca50e2bb837bbcd79b85f0366bea00e5938025572382a773b74c559a"
@@ -80,9 +79,11 @@ def _verify_checkpoint(path: Path, expected_digest: str) -> None:
         raise ValueError("A valid lowercase SHA-256 digest is required for bundled TAEHV checkpoints")
     actual = _sha256(path)
     if actual != expected_digest:
-        raise RuntimeError(f"TAEHV checkpoint at {path} failed sha256 verification "
-                           f"(expected {expected_digest}, got {actual}). "
-                           "Delete the file to re-download it.")
+        raise RuntimeError(
+            f"TAEHV checkpoint at {path} failed sha256 verification "
+            f"(expected {expected_digest}, got {actual}). "
+            "Delete the file to re-download it."
+        )
 
 
 def ensure_taehv_checkpoint(*, z_dim: int, checkpoint_path: Path | None = None) -> Path:
@@ -116,13 +117,14 @@ def ensure_taehv_checkpoint(*, z_dim: int, checkpoint_path: Path | None = None) 
         print(f"Downloading {url} -> {path}")
         import socket
         import tempfile
+
         # Download to a temporary file, verify, then atomically rename.
         with tempfile.NamedTemporaryFile(
-                mode="wb",
-                dir=path.parent,
-                prefix=f".tmp_{name}_",
-                suffix=".pth",
-                delete=False,
+            mode="wb",
+            dir=path.parent,
+            prefix=f".tmp_{name}_",
+            suffix=".pth",
+            delete=False,
         ) as tmp_file:
             tmp_path = Path(tmp_file.name)
             try:
@@ -299,7 +301,7 @@ class MLXTAEHVDecoder:
         t_out = x.shape[0] // n
         x = x.reshape(n, t_out, c_out, hh, ww)
         if self.frames_to_trim > 0 and t_out > self.frames_to_trim:
-            x = x[:, self.frames_to_trim:]
+            x = x[:, self.frames_to_trim :]
         return mx.clip(x, 0.0, 1.0)
 
     def _run_decoder_parallel(self, x: Any, *, n: int) -> Any:

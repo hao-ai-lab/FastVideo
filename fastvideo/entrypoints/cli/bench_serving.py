@@ -65,7 +65,6 @@ class RequestFuncOutput:
 
 
 class BaseDataset(ABC):
-
     def __init__(self, args, api_url: str, model: str):
         self.args = args
         self.api_url = api_url
@@ -90,8 +89,12 @@ class VBenchDataset(BaseDataset):
     Supports t2v, i2v.
     """
 
-    T2V_PROMPT_URL = "https://raw.githubusercontent.com/Vchitect/VBench/master/prompts/prompts_per_dimension/subject_consistency.txt"
-    I2V_DOWNLOAD_SCRIPT_URL = "https://raw.githubusercontent.com/Vchitect/VBench/master/vbench2_beta_i2v/download_data.sh"
+    T2V_PROMPT_URL = (
+        "https://raw.githubusercontent.com/Vchitect/VBench/master/prompts/prompts_per_dimension/subject_consistency.txt"
+    )
+    I2V_DOWNLOAD_SCRIPT_URL = (
+        "https://raw.githubusercontent.com/Vchitect/VBench/master/vbench2_beta_i2v/download_data.sh"
+    )
 
     def __init__(self, args, api_url: str, model: str):
         super().__init__(args, api_url, model)
@@ -143,7 +146,7 @@ class VBenchDataset(BaseDataset):
         crop_dir = os.path.join(vbench_i2v_dir, "data", "crop")
         origin_dir = os.path.join(vbench_i2v_dir, "data", "origin")
 
-        if (os.path.exists(info_json_path) and is_dir_not_empty(crop_dir) and is_dir_not_empty(origin_dir)):
+        if os.path.exists(info_json_path) and is_dir_not_empty(crop_dir) and is_dir_not_empty(origin_dir):
             return vbench_i2v_dir
 
         logger.info("Downloading VBench I2V dataset to %s...", vbench_i2v_dir)
@@ -171,7 +174,8 @@ class VBenchDataset(BaseDataset):
                 package_list = ", ".join(f"'{cmd}'" for cmd in missing_packages)
                 raise RuntimeError(
                     f"Download script failed because the following commands are not installed: {package_list}.\n"
-                    "Please install them (e.g., on Ubuntu: `sudo apt install ...`) and try again.")
+                    "Please install them (e.g., on Ubuntu: `sudo apt install ...`) and try again."
+                )
             logger.info("Successfully downloaded VBench I2V dataset to %s", vbench_i2v_dir)
         except Exception as e:
             logger.info("Failed to download VBench I2V dataset: %s", e)
@@ -276,7 +280,7 @@ class VBenchDataset(BaseDataset):
             factor = (self.args.num_prompts // len(data)) + 1
             data = data * factor
 
-        return data[:self.args.num_prompts]
+        return data[: self.args.num_prompts]
 
     def __len__(self) -> int:
         return len(self.items)
@@ -301,7 +305,6 @@ class VBenchDataset(BaseDataset):
 
 
 class RandomDataset(BaseDataset):
-
     def __init__(self, args, api_url: str, model: str):
         self.args = args
         self.api_url = api_url
@@ -471,7 +474,7 @@ async def async_request_video_sglang(
                     resp_json = await response.json()
                     job_id = resp_json.get("id")
                 else:
-                    output.error = (f"Submit failed HTTP {response.status}: {await response.text()}")
+                    output.error = f"Submit failed HTTP {response.status}: {await response.text()}"
                     output.success = False
                     if pbar:
                         pbar.update(1)
@@ -504,7 +507,7 @@ async def async_request_video_sglang(
                     resp_json = await response.json()
                     job_id = resp_json.get("id")
                 else:
-                    output.error = (f"Submit failed HTTP {response.status}: {await response.text()}")
+                    output.error = f"Submit failed HTTP {response.status}: {await response.text()}"
                     output.success = False
                     if pbar:
                         pbar.update(1)
@@ -547,7 +550,7 @@ async def async_request_video_sglang(
                         await asyncio.sleep(1.0)
                 else:
                     output.success = False
-                    output.error = (f"Poll failed HTTP {response.status}: {await response.text()}")
+                    output.error = f"Poll failed HTTP {response.status}: {await response.text()}"
                     break
         except Exception as e:
             output.success = False
@@ -593,8 +596,8 @@ async def wait_for_service(base_url: str, timeout: int = 1200) -> None:
         while True:
             try:
                 async with session.get(
-                        f"{base_url}/health",
-                        timeout=aiohttp.ClientTimeout(total=1),
+                    f"{base_url}/health",
+                    timeout=aiohttp.ClientTimeout(total=1),
                 ) as resp:
                     if resp.status == 200:
                         logger.info("Service is ready.")
@@ -620,10 +623,13 @@ async def benchmark(args: argparse.Namespace) -> None:
 
     # Fetch model info
     try:
-        async with aiohttp.ClientSession() as session, session.get(
+        async with (
+            aiohttp.ClientSession() as session,
+            session.get(
                 f"{args.base_url}/v1/model_info",
                 timeout=aiohttp.ClientTimeout(total=5),
-        ) as resp:
+            ) as resp,
+        ):
             if resp.status == 200:
                 info = await resp.json()
                 if "model_path" in info and info["model_path"]:
@@ -635,8 +641,11 @@ async def benchmark(args: argparse.Namespace) -> None:
     task_name = model_info(args.model).pipeline_tag
 
     if args.task != task_name:
-        logger.warning("Task from args %s is different from huggingface pipeline_tag %s, args.task will be ignored!",
-                       args.task, task_name)
+        logger.warning(
+            "Task from args %s is different from huggingface pipeline_tag %s, args.task will be ignored!",
+            args.task,
+            task_name,
+        )
 
     if task_name in ("text-to-video", "image-to-video", "video-to-video"):
         api_url = f"{args.base_url}/v1/videos"
@@ -714,10 +723,12 @@ async def benchmark(args: argparse.Namespace) -> None:
     print(f"{'-' * 50}")
     print("{:<40} {:<15.2f}".format("Benchmark duration (s):", metrics["duration"]))
     print("{:<40} {:<15}".format("Request rate:", str(args.request_rate)))
-    print("{:<40} {:<15}".format(
-        "Max request concurrency:",
-        str(args.max_concurrency) if args.max_concurrency else "not set",
-    ))
+    print(
+        "{:<40} {:<15}".format(
+            "Max request concurrency:",
+            str(args.max_concurrency) if args.max_concurrency else "not set",
+        )
+    )
     print("{:<40} {}/{:<15}".format("Successful requests:", metrics["completed_requests"], len(requests_list)))
 
     # Section 3: Performance Metrics
@@ -777,8 +788,7 @@ def main() -> None:
             "video-to-video",
         ],
         default=None,
-        help=
-        "The task will be inferred from huggingface pipeline_tag. When huggingface pipeline_tag is not provided, --task will be used.",
+        help="The task will be inferred from huggingface pipeline_tag. When huggingface pipeline_tag is not provided, --task will be used.",
     )
     parser.add_argument(
         "--dataset-path",

@@ -1,36 +1,17 @@
 class InferenceArgs:
-
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "optional": {
-                "height": ("INT", {
-                    "default": 720
-                }),
-                "width": ("INT", {
-                    "default": 1280
-                }),
-                "num_frames": ("INT", {
-                    "default": 45
-                }),
-                "num_inference_steps": ("INT", {
-                    "default": 6
-                }),
-                "guidance_scale": ("FLOAT", {
-                    "default": 1.0
-                }),
-                "flow_shift": ("INT", {
-                    "default": 17
-                }),
-                "seed": ("INT", {
-                    "default": 1024
-                }),
-                "fps": ("INT", {
-                    "default": 24
-                }),
-                "image_path": ("STRING", {
-                    "default": "X://insert/path/here.mp4"
-                }),
+                "height": ("INT", {"default": 720}),
+                "width": ("INT", {"default": 1280}),
+                "num_frames": ("INT", {"default": 45}),
+                "num_inference_steps": ("INT", {"default": 6}),
+                "guidance_scale": ("FLOAT", {"default": 1.0}),
+                "flow_shift": ("INT", {"default": 17}),
+                "seed": ("INT", {"default": 1024}),
+                "fps": ("INT", {"default": 24}),
+                "image_path": ("STRING", {"default": "X://insert/path/here.mp4"}),
             }
         }
 
@@ -38,8 +19,8 @@ class InferenceArgs:
     def VALIDATE_INPUTS(cls, **kwargs):
         return True
 
-    RETURN_TYPES = ("INFERENCE_ARGS", )
-    RETURN_NAMES = ("inference_args", )
+    RETURN_TYPES = ("INFERENCE_ARGS",)
+    RETURN_NAMES = ("inference_args",)
     FUNCTION = "set_args"
     CATEGORY = "fastvideo"
 
@@ -81,4 +62,4 @@ class InferenceArgs:
                 # Include any value that causes an error in comparison
                 args[k] = v
 
-        return (args, )
+        return (args,)

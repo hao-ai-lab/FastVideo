@@ -11,7 +11,8 @@ import torch.nn.functional as F
 from fastvideo.train.methods.base import TrainingMethod, LogScalar
 from fastvideo.train.models.base import ModelBase
 from fastvideo.train.utils.optimizer import (
-    build_optimizer_and_scheduler, )
+    build_optimizer_and_scheduler,
+)
 
 
 class DiffusionForcingSFTMethod(TrainingMethod):
@@ -31,10 +32,10 @@ class DiffusionForcingSFTMethod(TrainingMethod):
             raise ValueError("DFSFT requires role 'student'")
         if not self.student._trainable:
             raise ValueError("DFSFT requires student to be trainable")
-        self._attn_kind: Literal["dense", "vsa"] = (self._infer_attn_kind())
+        self._attn_kind: Literal["dense", "vsa"] = self._infer_attn_kind()
 
         self._chunk_size = self._parse_chunk_size(self.method_config.get("chunk_size", None))
-        self._timestep_index_range = (self._parse_timestep_index_range())
+        self._timestep_index_range = self._parse_timestep_index_range()
         self._training_weights = self._build_training_weights()
 
         # Initialize preprocessors on student.
@@ -56,9 +57,9 @@ class DiffusionForcingSFTMethod(TrainingMethod):
         batch: dict[str, Any],
         iteration: int,
     ) -> tuple[
-            dict[str, torch.Tensor],
-            dict[str, Any],
-            dict[str, LogScalar],
+        dict[str, torch.Tensor],
+        dict[str, Any],
+        dict[str, LogScalar],
     ]:
         del iteration
         training_batch = self.student.prepare_batch(
@@ -74,9 +75,7 @@ class DiffusionForcingSFTMethod(TrainingMethod):
         if not torch.is_tensor(clean_latents):
             raise TypeError("TrainingBatch.latents must be a torch.Tensor")
         if clean_latents.ndim != 5:
-            raise ValueError("TrainingBatch.latents must be "
-                             "[B, T, C, H, W], got "
-                             f"shape={tuple(clean_latents.shape)}")
+            raise ValueError(f"TrainingBatch.latents must be [B, T, C, H, W], got shape={tuple(clean_latents.shape)}")
 
         batch_size, num_latents = (
             int(clean_latents.shape[0]),
@@ -88,11 +87,13 @@ class DiffusionForcingSFTMethod(TrainingMethod):
             "num_frame_per_block",
             None,
         )
-        if (expected_chunk is not None and int(expected_chunk) != int(self._chunk_size)):
-            raise ValueError("DFSFT chunk_size must match "
-                             "transformer.num_frame_per_block for "
-                             f"causal training (got {self._chunk_size}, "
-                             f"expected {expected_chunk}).")
+        if expected_chunk is not None and int(expected_chunk) != int(self._chunk_size):
+            raise ValueError(
+                "DFSFT chunk_size must match "
+                "transformer.num_frame_per_block for "
+                f"causal training (got {self._chunk_size}, "
+                f"expected {expected_chunk})."
+            )
 
         timestep_indices = self._sample_t_inhom_indices(
             batch_size=batch_size,
@@ -101,7 +102,7 @@ class DiffusionForcingSFTMethod(TrainingMethod):
         )
         sp_size = int(self.training_config.distributed.sp_size)
         sp_group = getattr(self.student, "sp_group", None)
-        if (sp_size > 1 and sp_group is not None and hasattr(sp_group, "broadcast")):
+        if sp_size > 1 and sp_group is not None and hasattr(sp_group, "broadcast"):
             sp_group.broadcast(timestep_indices, src=0)
 
         scheduler = self.student.noise_scheduler
@@ -125,8 +126,7 @@ class DiffusionForcingSFTMethod(TrainingMethod):
             noise = torch.randn_like(clean_latents)
         else:
             if not torch.is_tensor(noise):
-                raise TypeError("TrainingBatch.noise must be a "
-                                "torch.Tensor when set")
+                raise TypeError("TrainingBatch.noise must be a torch.Tensor when set")
             noise = noise.permute(0, 2, 1, 3, 4).to(dtype=clean_latents.dtype)
 
         noisy_latents = self.student.add_noise(
@@ -237,19 +237,15 @@ class DiffusionForcingSFTMethod(TrainingMethod):
         if raw in (None, ""):
             return 3
         if isinstance(raw, bool):
-            raise ValueError("method_config.chunk_size must be an int, "
-                             "got bool")
+            raise ValueError("method_config.chunk_size must be an int, got bool")
         if isinstance(raw, float) and not raw.is_integer():
-            raise ValueError("method_config.chunk_size must be an int, "
-                             "got float")
+            raise ValueError("method_config.chunk_size must be an int, got float")
         if isinstance(raw, str) and not raw.strip():
-            raise ValueError("method_config.chunk_size must be an int, "
-                             "got empty string")
+            raise ValueError("method_config.chunk_size must be an int, got empty string")
         try:
             value = int(raw)
         except (TypeError, ValueError) as e:
-            raise ValueError("method_config.chunk_size must be an int, "
-                             f"got {type(raw).__name__}") from e
+            raise ValueError(f"method_config.chunk_size must be an int, got {type(raw).__name__}") from e
         if value <= 0:
             raise ValueError("method_config.chunk_size must be > 0")
         return value
@@ -269,10 +265,11 @@ class DiffusionForcingSFTMethod(TrainingMethod):
             return float(raw)
         if isinstance(raw, str) and raw.strip():
             return float(raw)
-        raise ValueError(f"{where} must be a number/string, "
-                         f"got {type(raw).__name__}")
+        raise ValueError(f"{where} must be a number/string, got {type(raw).__name__}")
 
-    def _parse_timestep_index_range(self, ) -> tuple[int, int]:
+    def _parse_timestep_index_range(
+        self,
+    ) -> tuple[int, int]:
         scheduler = self.student.noise_scheduler
         if scheduler is None:
             raise ValueError("DFSFT requires student.noise_scheduler")
@@ -290,11 +287,9 @@ class DiffusionForcingSFTMethod(TrainingMethod):
         )
 
         if not (0.0 <= min_ratio <= 1.0 and 0.0 <= max_ratio <= 1.0):
-            raise ValueError("DFSFT timestep ratios must be in [0,1], "
-                             f"got min={min_ratio}, max={max_ratio}")
+            raise ValueError(f"DFSFT timestep ratios must be in [0,1], got min={min_ratio}, max={max_ratio}")
         if max_ratio < min_ratio:
-            raise ValueError("method_config.max_timestep_ratio must be "
-                             ">= min_timestep_ratio")
+            raise ValueError("method_config.max_timestep_ratio must be >= min_timestep_ratio")
 
         min_index = int(min_ratio * num_steps)
         max_index = int(max_ratio * num_steps)
@@ -310,8 +305,7 @@ class DiffusionForcingSFTMethod(TrainingMethod):
         tc = self.training_config
         student_lr = float(tc.optimizer.learning_rate)
         if student_lr <= 0.0:
-            raise ValueError("training.learning_rate must be > 0 "
-                             "for dfsft")
+            raise ValueError("training.learning_rate must be > 0 for dfsft")
 
         student_betas = tc.optimizer.betas
         student_sched = str(tc.optimizer.lr_scheduler)
@@ -336,7 +330,7 @@ class DiffusionForcingSFTMethod(TrainingMethod):
         device: torch.device,
     ) -> torch.Tensor:
         chunk_size = self._chunk_size
-        num_chunks = ((num_latents + chunk_size - 1) // chunk_size)
+        num_chunks = (num_latents + chunk_size - 1) // chunk_size
         low, high = self._timestep_index_range
         chunk_indices = torch.randint(
             low=low,
@@ -361,7 +355,7 @@ class DiffusionForcingSFTMethod(TrainingMethod):
             raise ValueError("DFSFT requires student.noise_scheduler")
         n = float(len(scheduler.timesteps))
         x = torch.arange(n, dtype=torch.float32)
-        y = torch.exp(-2 * ((x - n / 2) / n)**2)
+        y = torch.exp(-2 * ((x - n / 2) / n) ** 2)
         y_shifted = y - y.min()
         return y_shifted * (n / y_shifted.sum())
 

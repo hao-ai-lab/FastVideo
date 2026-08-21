@@ -33,8 +33,9 @@ class DreamXWorldARCausalDenoisingStage(DenoisingStage):
         target_dtype = torch.bfloat16
         autocast_enabled = device.type == "cuda" and not fastvideo_args.disable_autocast
 
-        frame_seq_length = (latents.shape[-2] // self.transformer.patch_size[1]) * (latents.shape[-1] //
-                                                                                    self.transformer.patch_size[2])
+        frame_seq_length = (latents.shape[-2] // self.transformer.patch_size[1]) * (
+            latents.shape[-1] // self.transformer.patch_size[2]
+        )
         timesteps = torch.tensor(
             tuple(getattr(fastvideo_args.pipeline_config, "dmd_denoising_steps", (1000, 750, 500, 250))),
             dtype=torch.long,
@@ -51,12 +52,11 @@ class DreamXWorldARCausalDenoisingStage(DenoisingStage):
         y_camera = batch.extra.get(DREAMX_Y_CAMERA_KEY, batch.extra.get("y_camera"))
         if isinstance(y_camera, dict):
             y_camera = {
-                k: v.to(device=device, dtype=target_dtype) if torch.is_tensor(v) else v
-                for k, v in y_camera.items()
+                k: v.to(device=device, dtype=target_dtype) if torch.is_tensor(v) else v for k, v in y_camera.items()
             }
 
         if batch.image_latent is not None and batch.image_latent.shape[1] == latents.shape[1]:
-            latents[:, :, :batch.image_latent.shape[2]] = batch.image_latent.to(device=device, dtype=latents.dtype)
+            latents[:, :, : batch.image_latent.shape[2]] = batch.image_latent.to(device=device, dtype=latents.dtype)
 
         kv_cache = self._initialize_kv_cache(latents.shape[0], target_dtype, device, frame_seq_length)
         crossattn_cache = self._initialize_crossattn_cache(latents.shape[0], target_dtype, device)
@@ -77,9 +77,9 @@ class DreamXWorldARCausalDenoisingStage(DenoisingStage):
         with tqdm(total=num_blocks * len(timesteps), desc="DreamX AR denoising", leave=False) as progress:
             for _ in range(num_blocks):
                 current_num_frames = self.num_frame_per_block
-                block_latents = latents[:, :, start:start + current_num_frames]
+                block_latents = latents[:, :, start : start + current_num_frames]
                 noisy_input = block_latents.clone()
-                mask_block = first_frame_mask[:, :, start:start + current_num_frames]
+                mask_block = first_frame_mask[:, :, start : start + current_num_frames]
                 camera_block = self._slice_camera(y_camera, start, current_num_frames)
 
                 for idx, current_timestep in enumerate(timesteps):
@@ -103,10 +103,12 @@ class DreamXWorldARCausalDenoisingStage(DenoisingStage):
                         )
                     denoised = denoised.to(latents.dtype)
                     if idx < len(timesteps) - 1:
-                        next_timestep = torch.full((latents.shape[0], current_num_frames),
-                                                   int(timesteps[idx + 1].item()),
-                                                   device=device,
-                                                   dtype=torch.long)
+                        next_timestep = torch.full(
+                            (latents.shape[0], current_num_frames),
+                            int(timesteps[idx + 1].item()),
+                            device=device,
+                            dtype=torch.long,
+                        )
                         noise_kwargs = {"device": device, "dtype": denoised.dtype}
                         if noise_generator is not None:
                             noise_kwargs["generator"] = noise_generator
@@ -122,10 +124,19 @@ class DreamXWorldARCausalDenoisingStage(DenoisingStage):
                         block_latents = denoised * mask_block + noisy_input * (1 - mask_block)
                     progress.update()
 
-                latents[:, :, start:start + current_num_frames] = block_latents
-                self._update_context_cache(block_latents, context, camera_block, kv_cache, crossattn_cache, start,
-                                           frame_seq_length, target_dtype, autocast_enabled,
-                                           float(getattr(fastvideo_args.pipeline_config, "context_noise", 0.1)))
+                latents[:, :, start : start + current_num_frames] = block_latents
+                self._update_context_cache(
+                    block_latents,
+                    context,
+                    camera_block,
+                    kv_cache,
+                    crossattn_cache,
+                    start,
+                    frame_seq_length,
+                    target_dtype,
+                    autocast_enabled,
+                    float(getattr(fastvideo_args.pipeline_config, "context_noise", 0.1)),
+                )
                 start += current_num_frames
 
         batch.latents = latents
@@ -149,18 +160,22 @@ class DreamXWorldARCausalDenoisingStage(DenoisingStage):
         if not isinstance(y_camera, dict):
             return y_camera
         return {
-            "viewmats": y_camera["viewmats"][:, start:start + num_frames],
-            "K": y_camera["K"][:, start:start + num_frames],
+            "viewmats": y_camera["viewmats"][:, start : start + num_frames],
+            "K": y_camera["K"][:, start : start + num_frames],
         }
 
-    def _initialize_kv_cache(self, batch_size: int, dtype: torch.dtype, device: torch.device,
-                             frame_seq_length: int) -> list[dict[str, Any]]:
+    def _initialize_kv_cache(
+        self, batch_size: int, dtype: torch.dtype, device: torch.device, frame_seq_length: int
+    ) -> list[dict[str, Any]]:
         size = self.local_attn_size * frame_seq_length if self.local_attn_size != -1 else 18480
         heads = self.transformer.num_attention_heads
         head_dim = self.transformer.attention_head_dim
         cam_self_attn = next(
-            (getattr(block, "cam_self_attn", None)
-             for block in self.transformer.blocks if getattr(block, "cam_self_attn", None) is not None),
+            (
+                getattr(block, "cam_self_attn", None)
+                for block in self.transformer.blocks
+                if getattr(block, "cam_self_attn", None) is not None
+            ),
             None,
         )
 
@@ -175,32 +190,42 @@ class DreamXWorldARCausalDenoisingStage(DenoisingStage):
             if cam_self_attn is not None:
                 cam_heads = int(cam_self_attn.num_heads)
                 cam_head_dim = int(cam_self_attn.head_dim)
-                cache.update({
-                    "prope_k":
-                    torch.zeros(batch_size, size, cam_heads, cam_head_dim, dtype=dtype, device=device),
-                    "prope_v":
-                    torch.zeros(batch_size, size, cam_heads, cam_head_dim, dtype=dtype, device=device),
-                    "prope_global_end_index":
-                    torch.tensor([0], dtype=torch.long, device=device),
-                    "prope_local_end_index":
-                    torch.tensor([0], dtype=torch.long, device=device),
-                })
+                cache.update(
+                    {
+                        "prope_k": torch.zeros(batch_size, size, cam_heads, cam_head_dim, dtype=dtype, device=device),
+                        "prope_v": torch.zeros(batch_size, size, cam_heads, cam_head_dim, dtype=dtype, device=device),
+                        "prope_global_end_index": torch.tensor([0], dtype=torch.long, device=device),
+                        "prope_local_end_index": torch.tensor([0], dtype=torch.long, device=device),
+                    }
+                )
             caches.append(cache)
         return caches
 
     def _initialize_crossattn_cache(self, batch_size: int, dtype: torch.dtype, device: torch.device):
         heads = self.transformer.num_attention_heads
         head_dim = self.transformer.attention_head_dim
-        return [{
-            "k": torch.zeros(batch_size, 512, heads, head_dim, dtype=dtype, device=device),
-            "v": torch.zeros(batch_size, 512, heads, head_dim, dtype=dtype, device=device),
-            "is_init": False,
-        } for _ in range(self.num_transformer_blocks)]
+        return [
+            {
+                "k": torch.zeros(batch_size, 512, heads, head_dim, dtype=dtype, device=device),
+                "v": torch.zeros(batch_size, 512, heads, head_dim, dtype=dtype, device=device),
+                "is_init": False,
+            }
+            for _ in range(self.num_transformer_blocks)
+        ]
 
-    def _update_context_cache(self, block_latents: torch.Tensor, context: Any, camera_block: Any,
-                              kv_cache: list[dict[str, Any]], crossattn_cache: list[dict[str, Any]], start: int,
-                              frame_seq_length: int, target_dtype: torch.dtype, autocast_enabled: bool,
-                              context_noise: float) -> None:
+    def _update_context_cache(
+        self,
+        block_latents: torch.Tensor,
+        context: Any,
+        camera_block: Any,
+        kv_cache: list[dict[str, Any]],
+        crossattn_cache: list[dict[str, Any]],
+        start: int,
+        frame_seq_length: int,
+        target_dtype: torch.dtype,
+        autocast_enabled: bool,
+        context_noise: float,
+    ) -> None:
         timestep = torch.full(
             (block_latents.shape[0], block_latents.shape[2] * frame_seq_length),
             self._context_noise_timestep(context_noise),

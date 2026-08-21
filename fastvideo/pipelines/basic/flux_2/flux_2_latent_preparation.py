@@ -73,7 +73,7 @@ class Flux2LatentPreparationStage(LatentPreparationStage):
         device = get_local_torch_device()
         generator = batch.generator
         latents = batch.latents
-        num_frames = (latent_num_frames if latent_num_frames is not None else batch.num_frames)
+        num_frames = latent_num_frames if latent_num_frames is not None else batch.num_frames
         height = batch.height
         width = batch.width
 
@@ -106,8 +106,10 @@ class Flux2LatentPreparationStage(LatentPreparationStage):
             bcthw_shape = shape
 
         if isinstance(generator, list) and len(generator) != batch_size:
-            raise ValueError(f"You have passed a list of generators of length {len(generator)}, "
-                             f"but requested an effective batch size of {batch_size}.")
+            raise ValueError(
+                f"You have passed a list of generators of length {len(generator)}, "
+                f"but requested an effective batch size of {batch_size}."
+            )
 
         if latents is None:
             latents = randn_tensor(
@@ -120,7 +122,7 @@ class Flux2LatentPreparationStage(LatentPreparationStage):
                 latents = latents * self.scheduler.init_noise_sigma
         else:
             latents = latents.to(device)
-            is_longcat_refine = (batch.refine_from is not None or batch.stage1_video is not None)
+            is_longcat_refine = batch.refine_from is not None or batch.stage1_video is not None
             if (not is_longcat_refine) and hasattr(self.scheduler, "init_noise_sigma"):
                 latents = latents * self.scheduler.init_noise_sigma
 

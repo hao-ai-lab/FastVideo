@@ -11,6 +11,7 @@ Encoder shape (verified from google/t5gemma-9b-9b-ul2/config.json):
     intermediate=14336, rope_theta=10000.0, max_pos=8192,
     layer_types alternate sliding_attention / full_attention.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

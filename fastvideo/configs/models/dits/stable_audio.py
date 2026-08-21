@@ -10,6 +10,7 @@ the rest of the DiT family apply (FSDP shard conditions, supported
 attention backends, future loader integrations) — they are not currently
 consumed by `fastvideo/models/loader/fsdp_load.py` for SA.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -21,7 +22,7 @@ from fastvideo.platforms import AttentionBackendEnum
 def _is_transformer_layer(n: str, m) -> bool:
     # Matches `transformer.layers.{i}` in the SA DiT module tree.
     parts = n.split(".")
-    return (len(parts) >= 3 and parts[-3] == "transformer" and parts[-2] == "layers" and parts[-1].isdigit())
+    return len(parts) >= 3 and parts[-3] == "transformer" and parts[-2] == "layers" and parts[-1].isdigit()
 
 
 @dataclass
@@ -38,7 +39,8 @@ class StableAudioArchConfig(DiTArchConfig):
             r"^model\.model\.(.*?)\.gamma$": r"\1.weight",
             r"^model\.model\.(.*?)\.beta$": r"\1.bias",
             r"^model\.model\.(.*)$": r"\1",
-        })
+        }
+    )
 
     # SA only supports backends compatible with single-GPU LocalAttention.
     _supported_attention_backends: tuple[AttentionBackendEnum, ...] = (

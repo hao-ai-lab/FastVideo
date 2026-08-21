@@ -40,6 +40,7 @@ def _install_compat_shims() -> None:
     try:
         import transformers.modeling_utils as _mu
         import transformers.pytorch_utils as _pu
+
         for _name in ("apply_chunking_to_forward", "find_pruneable_heads_and_indices", "prune_linear_layer"):
             if not hasattr(_mu, _name) and hasattr(_pu, _name):
                 setattr(_mu, _name, getattr(_pu, _name))
@@ -53,6 +54,7 @@ def _install_compat_shims() -> None:
     try:
         import types
         import numpy.lib as _nl
+
         if not hasattr(_nl, "function_base"):
             _stub = types.ModuleType("numpy.lib.function_base")
             _stub.disp = lambda *a, **k: None  # type: ignore[attr-defined]
@@ -74,7 +76,6 @@ def _install_modeling_finetune_hook() -> None:
     _target = "vbench.third_party.umt.models.modeling_finetune"
 
     class _Loader(importlib.abc.Loader):
-
         def __init__(self, real_loader: Any) -> None:
             self._real = real_loader
 

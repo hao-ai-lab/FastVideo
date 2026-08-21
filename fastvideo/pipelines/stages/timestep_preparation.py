@@ -23,7 +23,7 @@ logger = init_logger(__name__)
 class TimestepPreparationStage(PipelineStage):
     """
     Stage for preparing timesteps for the diffusion process.
-    
+
     This stage handles the preparation of the timestep sequence that will be used
     during the diffusion process.
     """
@@ -38,11 +38,11 @@ class TimestepPreparationStage(PipelineStage):
     ) -> ForwardBatch:
         """
         Prepare timesteps for the diffusion process.
-        
+
         Args:
             batch: The current batch information.
             fastvideo_args: The inference arguments.
-            
+
         Returns:
             The batch with prepared timesteps.
         """
@@ -61,14 +61,16 @@ class TimestepPreparationStage(PipelineStage):
         # Handle custom timesteps or sigmas
         if timesteps is not None and sigmas is not None:
             raise ValueError(
-                "Only one of `timesteps` or `sigmas` can be passed. Please choose one to set custom values")
+                "Only one of `timesteps` or `sigmas` can be passed. Please choose one to set custom values"
+            )
 
         if timesteps is not None:
             accepts_timesteps = "timesteps" in inspect.signature(scheduler.set_timesteps).parameters
             if not accepts_timesteps:
                 raise ValueError(
                     f"The current scheduler class {scheduler.__class__}'s `set_timesteps` does not support custom"
-                    f" timestep schedules. Please check whether you are using the correct scheduler.")
+                    f" timestep schedules. Please check whether you are using the correct scheduler."
+                )
             # Convert timesteps to CPU if it's a tensor (for numpy conversion in scheduler)
             timesteps_for_scheduler = timesteps.cpu() if isinstance(timesteps, torch.Tensor) else timesteps
             scheduler.set_timesteps(timesteps=timesteps_for_scheduler, device=device, **extra_set_timesteps_kwargs)
@@ -78,7 +80,8 @@ class TimestepPreparationStage(PipelineStage):
             if not accept_sigmas:
                 raise ValueError(
                     f"The current scheduler class {scheduler.__class__}'s `set_timesteps` does not support custom"
-                    f" sigmas schedules. Please check whether you are using the correct scheduler.")
+                    f" sigmas schedules. Please check whether you are using the correct scheduler."
+                )
             scheduler.set_timesteps(sigmas=sigmas, device=device, **extra_set_timesteps_kwargs)
             timesteps = scheduler.timesteps
         else:
@@ -170,8 +173,7 @@ class SD35TimestepPreparationStage(TimestepPreparationStage):
                 spatial_ratio = getattr(vae_arch, "spatial_compression_ratio", None)
 
                 if not isinstance(patch_size, int) or not isinstance(spatial_ratio, int):
-                    raise TypeError("SD3.5 dynamic shifting requires integer patch_size "
-                                    "and spatial_compression_ratio.")
+                    raise TypeError("SD3.5 dynamic shifting requires integer patch_size and spatial_compression_ratio.")
                 if batch.height is None or batch.width is None:
                     raise ValueError("height/width must be set before timesteps.")
 

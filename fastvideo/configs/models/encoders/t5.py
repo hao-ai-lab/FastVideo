@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 from dataclasses import dataclass, field
 
-from fastvideo.configs.models.encoders.base import (TextEncoderArchConfig, TextEncoderConfig)
+from fastvideo.configs.models.encoders.base import TextEncoderArchConfig, TextEncoderConfig
 
 
 def _is_transformer_layer(n: str, m) -> bool:
@@ -49,14 +49,17 @@ class T5ArchConfig(TextEncoderArchConfig):
     decoder_start_token_id: int = 0
     output_past: bool = True
     task_specific_params: dict | None = None
-    stacked_params_mapping: list[tuple[str, str, str]] = field(default_factory=lambda: [
-        # (param_name, shard_name, shard_id)
-        (".qkv_proj", ".q", "q"),
-        (".qkv_proj", ".k", "k"),
-        (".qkv_proj", ".v", "v"),
-    ])
+    stacked_params_mapping: list[tuple[str, str, str]] = field(
+        default_factory=lambda: [
+            # (param_name, shard_name, shard_id)
+            (".qkv_proj", ".q", "q"),
+            (".qkv_proj", ".k", "k"),
+            (".qkv_proj", ".v", "v"),
+        ]
+    )
     _fsdp_shard_conditions: list = field(
-        default_factory=lambda: [_is_transformer_layer, _is_embeddings, _is_final_layernorm])
+        default_factory=lambda: [_is_transformer_layer, _is_embeddings, _is_final_layernorm]
+    )
 
     # Referenced from https://github.com/huggingface/transformers/blob/main/src/transformers/models/t5/configuration_t5.py
     def __post_init__(self):
@@ -80,6 +83,7 @@ class T5ArchConfig(TextEncoderArchConfig):
 @dataclass
 class T5LargeArchConfig(T5ArchConfig):
     """T5 Large architecture config with parameters for your specific model."""
+
     d_model: int = 1024
     d_kv: int = 128
     d_ff: int = 65536
@@ -101,6 +105,7 @@ class T5Config(TextEncoderConfig):
 @dataclass
 class T5LargeConfig(TextEncoderConfig):
     """T5 Large configuration for your specific model."""
+
     arch_config: TextEncoderArchConfig = field(default_factory=T5LargeArchConfig)
 
     prefix: str = "t5"

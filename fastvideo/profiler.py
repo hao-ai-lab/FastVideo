@@ -206,6 +206,7 @@ def get_or_create_profiler(trace_dir: str | None) -> TorchProfilerController:
     # The trace only exports at stop(); inference paths have no shutdown hook
     # that calls it, so register one. stop() is idempotent.
     import atexit
+
     atexit.register(controller.stop)
     logger.info("Torch profiler started")
     return controller
@@ -230,13 +231,15 @@ class TorchProfilerConfig:
 
         requested_regions = {
             token.strip()
-            for token in (getattr(envs, "FASTVIDEO_TORCH_PROFILE_REGIONS", "") or "").split(",") if token.strip()
+            for token in (getattr(envs, "FASTVIDEO_TORCH_PROFILE_REGIONS", "") or "").split(",")
+            if token.strip()
         }
 
         if not requested_regions:
             available = ", ".join(region.name for region in list_profiler_regions())
-            raise ValueError("FASTVIDEO_TORCH_PROFILE_REGIONS must list at least one region; "
-                             f"available regions: {available}")
+            raise ValueError(
+                f"FASTVIDEO_TORCH_PROFILE_REGIONS must list at least one region; available regions: {available}"
+            )
 
         regions: dict[str, bool] = {}
         available_regions = list_profiler_regions()
@@ -250,8 +253,10 @@ class TorchProfilerConfig:
             regions[resolved.name] = True
 
         if not regions:
-            raise ValueError("FASTVIDEO_TORCH_PROFILE_REGIONS did not match any known regions; "
-                             f"requested={sorted(requested_regions)}, available={available_names}")
+            raise ValueError(
+                "FASTVIDEO_TORCH_PROFILE_REGIONS did not match any known regions; "
+                f"requested={sorted(requested_regions)}, available={available_names}"
+            )
 
         return cls(regions=regions)
 
@@ -343,7 +348,7 @@ class TorchProfilerController:
             return
         if self._collection_enabled == enabled:
             return
-        event = ("fastvideo.profiler.enable_collection" if enabled else "fastvideo.profiler.disable_collection")
+        event = "fastvideo.profiler.enable_collection" if enabled else "fastvideo.profiler.disable_collection"
         with torch.profiler.record_function(event):
             self._profiler.toggle_collection_dynamic(enabled, self._activities)
         self._collection_enabled = enabled
@@ -362,8 +367,11 @@ class TorchProfilerController:
             # a typo here would otherwise silently profile nothing, forever
             if region not in self._warned_unregistered:
                 self._warned_unregistered.add(region)
-                logger.warning("PROFILER: region %r is not registered (typo?); available: %s", region,
-                               ", ".join(r.name for r in list_profiler_regions()))
+                logger.warning(
+                    "PROFILER: region %r is not registered (typo?); available: %s",
+                    region,
+                    ", ".join(r.name for r in list_profiler_regions()),
+                )
             yield
             return
 
@@ -377,8 +385,9 @@ class TorchProfilerController:
             torch.cuda.nvtx.range_push(f"fastvideo.region::{region}")
         self._active_region_depth += 1
         if self._active_region_depth == 1:
-            logger.info("PROFILER: Setting collection to True (depth=%s) for region %s", self._active_region_depth,
-                        region)
+            logger.info(
+                "PROFILER: Setting collection to True (depth=%s) for region %s", self._active_region_depth, region
+            )
             self._set_collection(True)
         try:
             # record_function opens after collection is enabled so the region
@@ -416,18 +425,22 @@ class TorchProfilerController:
         try:
             import json as _json
             import os as _os
+
             rank = _os.environ.get("RANK", "0")
             averages = self._profiler.key_averages(group_by_input_shape=True)
             stem = _os.path.join(self._trace_dir, f"summary_rank{rank}")
             with open(f"{stem}.txt", "w") as fh:
                 fh.write(averages.table(sort_by="self_device_time_total", row_limit=60))
-            rows = [{
-                "name": e.key,
-                "shapes": str(e.input_shapes),
-                "self_device_us": e.self_device_time_total,
-                "device_us": e.device_time_total,
-                "count": e.count,
-            } for e in averages]
+            rows = [
+                {
+                    "name": e.key,
+                    "shapes": str(e.input_shapes),
+                    "self_device_us": e.self_device_time_total,
+                    "device_us": e.device_time_total,
+                    "count": e.count,
+                }
+                for e in averages
+            ]
             with open(f"{stem}.json", "w") as fh:
                 _json.dump(rows, fh)
             if rank == "0":
@@ -479,7 +492,6 @@ def profile_region(region: str) -> Callable[[Callable[..., Any]], Callable[..., 
     """Wrap a bound method so it runs inside a profiler region if available."""
 
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
-
         @functools.wraps(fn)
         def wrapped(self, *args, **kwargs):
             controller = getattr(self, "profiler_controller", None)

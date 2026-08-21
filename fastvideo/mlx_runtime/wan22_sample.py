@@ -81,9 +81,9 @@ def sample_wan22_dmd(
     """
     import mlx.core as mx
 
-    schedule, timesteps = build_wan22_dmd_schedule(dmd_denoising_steps,
-                                                   flow_shift=flow_shift,
-                                                   warp_denoising_step=warp_denoising_step)
+    schedule, timesteps = build_wan22_dmd_schedule(
+        dmd_denoising_steps, flow_shift=flow_shift, warp_denoising_step=warp_denoising_step
+    )
     # NumPy RNG so re-noise is bit-reproducible across MLX / torch A/B dumps.
     renoise_rng = np.random.default_rng(seed)
     latents = noise_latents

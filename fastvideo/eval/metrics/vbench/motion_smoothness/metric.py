@@ -22,7 +22,6 @@ from fastvideo.eval.types import MetricResult
 
 @register("vbench.motion_smoothness")
 class MotionSmoothnessMetric(BaseMetric):
-
     name = "vbench.motion_smoothness"
     requires_reference = False
     higher_is_better = True
@@ -182,7 +181,7 @@ class MotionSmoothnessMetric(BaseMetric):
 
         diffs: list[float] = []
         for i in range(n_pairs):
-            pred = all_preds[i:i + 1]
+            pred = all_preds[i : i + 1]
             pred_unpadded = padder.unpad(pred)[0]
             pred_np = tensor2img(pred_unpadded)
             gt_np = all_gt[i]

@@ -39,7 +39,7 @@ jobs:
             **How our CI works:**
 
             PRs run a two-tier CI system:
-            1. **Pre-commit** — formatting (yapf), linting (ruff), type checking (mypy). Runs immediately on every PR.
+            1. **Pre-commit** — formatting (ruff), linting (ruff), type checking (mypy). Runs immediately on every PR.
             2. **Fastcheck** — core GPU tests (encoders, VAEs, transformers, kernels, unit tests). Runs automatically via Buildkite on relevant file changes (~10-15 min).
             3. **Full Suite** — integration tests, training pipelines, SSIM regression. Runs only when a reviewer adds the `ready` label.
 

@@ -5,16 +5,20 @@ from dataclasses import dataclass
 import torch
 from einops import rearrange
 
-from fastvideo_kernel import (moba_attn_varlen, process_moba_input, process_moba_output)
-from fastvideo.attention.backends.abstract import (AttentionBackend, AttentionImpl, AttentionMetadata,
-                                                   AttentionMetadataBuilder, layer_idx_from_prefix)
+from fastvideo_kernel import moba_attn_varlen, process_moba_input, process_moba_output
+from fastvideo.attention.backends.abstract import (
+    AttentionBackend,
+    AttentionImpl,
+    AttentionMetadata,
+    AttentionMetadataBuilder,
+    layer_idx_from_prefix,
+)
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 
 
 class VMOBAAttentionBackend(AttentionBackend):
-
     accept_output_buffer: bool = True
 
     @staticmethod
@@ -59,7 +63,6 @@ class VideoMobaAttentionMetadata(AttentionMetadata):
 
 
 class VideoMobaAttentionMetadataBuilder(AttentionMetadataBuilder):
-
     def __init__(self) -> None:
         pass
 
@@ -77,9 +80,9 @@ class VideoMobaAttentionMetadataBuilder(AttentionMetadataBuilder):
         spatial_topk: int,
         st_chunk_size: tuple[int, int, int],
         st_topk: int,
-        moba_select_mode: str = 'threshold',
+        moba_select_mode: str = "threshold",
         moba_threshold: float = 0.25,
-        moba_threshold_type: str = 'query_head',
+        moba_threshold_type: str = "query_head",
         device: torch.device | None = None,
         first_full_layer: int = 0,
         first_full_step: int = 12,
@@ -90,9 +93,11 @@ class VideoMobaAttentionMetadataBuilder(AttentionMetadataBuilder):
     ) -> VideoMobaAttentionMetadata:
         if device is None:
             device = torch.device("cpu")
-        assert raw_latent_shape[0] % patch_size[0] == 0 and raw_latent_shape[1] % patch_size[
-            1] == 0 and raw_latent_shape[2] % patch_size[
-                2] == 0, f"spatial patch_resolution {raw_latent_shape} should be divisible by patch_size {patch_size}"
+        assert (
+            raw_latent_shape[0] % patch_size[0] == 0
+            and raw_latent_shape[1] % patch_size[1] == 0
+            and raw_latent_shape[2] % patch_size[2] == 0
+        ), f"spatial patch_resolution {raw_latent_shape} should be divisible by patch_size {patch_size}"
         patch_resolution = [t // pt for t, pt in zip(raw_latent_shape, patch_size, strict=False)]
 
         return VideoMobaAttentionMetadata(
@@ -116,18 +121,13 @@ class VideoMobaAttentionMetadataBuilder(AttentionMetadataBuilder):
 
 
 class VMOBAAttentionImpl(AttentionImpl):
-
-    def __init__(self,
-                 num_heads,
-                 head_size,
-                 softmax_scale,
-                 causal=False,
-                 num_kv_heads=None,
-                 prefix="",
-                 **extra_impl_args) -> None:
+    def __init__(
+        self, num_heads, head_size, softmax_scale, causal=False, num_kv_heads=None, prefix="", **extra_impl_args
+    ) -> None:
         self.prefix = prefix
         self.layer_idx = self._get_layer_idx(prefix)
         from flash_attn.bert_padding import pad_input
+
         self.pad_input = pad_input
 
     def _get_layer_idx(self, prefix: str) -> int | None:
@@ -159,7 +159,10 @@ class VMOBAAttentionImpl(AttentionImpl):
         elif moba_layer % loop_layer_num < attn_metadata.temporal_layer + attn_metadata.spatial_layer:
             moba_chunk_size = attn_metadata.spatial_chunk_size
             moba_topk = attn_metadata.spatial_topk
-        elif moba_layer % loop_layer_num < attn_metadata.temporal_layer + attn_metadata.spatial_layer + attn_metadata.st_layer:
+        elif (
+            moba_layer % loop_layer_num
+            < attn_metadata.temporal_layer + attn_metadata.spatial_layer + attn_metadata.st_layer
+        ):
             moba_chunk_size = attn_metadata.st_chunk_size
             moba_topk = attn_metadata.st_topk
         else:
@@ -170,11 +173,9 @@ class VMOBAAttentionImpl(AttentionImpl):
         value, chunk_size = process_moba_input(value, attn_metadata.patch_resolution, moba_chunk_size)
         max_seqlen = query.shape[1]
         indices_q = torch.arange(0, query.shape[0] * query.shape[1], device=query.device)
-        cu_seqlens = torch.arange(0,
-                                  query.shape[0] * query.shape[1] + 1,
-                                  query.shape[1],
-                                  dtype=torch.int32,
-                                  device=query.device)
+        cu_seqlens = torch.arange(
+            0, query.shape[0] * query.shape[1] + 1, query.shape[1], dtype=torch.int32, device=query.device
+        )
         query = rearrange(query, "b s ... -> (b s) ...")
         key = rearrange(key, "b s ... -> (b s) ...")
         value = rearrange(value, "b s ... -> (b s) ...")

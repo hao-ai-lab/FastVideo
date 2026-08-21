@@ -27,10 +27,10 @@ def lingbotworld2_t5_postprocess_text(outputs: BaseEncoderOutput) -> torch.Tenso
 class LingBotWorld2CausalFastI2V480PConfig(Wan2_2_I2V_A14B_Config):
     dit_config: DiTConfig = field(default_factory=LingBotWorld2CausalFastVideoConfig)
     vae_config: WanVAEConfig = field(default_factory=WanVAEConfig)
-    text_encoder_configs: tuple = field(default_factory=lambda: (LingBotWorld2UMT5Config(), ))
-    preprocess_text_funcs: tuple = field(default_factory=lambda: (lingbotworld2_whitespace_preprocess, ))
-    postprocess_text_funcs: tuple = field(default_factory=lambda: (lingbotworld2_t5_postprocess_text, ))
-    text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("bf16", ))
+    text_encoder_configs: tuple = field(default_factory=lambda: (LingBotWorld2UMT5Config(),))
+    preprocess_text_funcs: tuple = field(default_factory=lambda: (lingbotworld2_whitespace_preprocess,))
+    postprocess_text_funcs: tuple = field(default_factory=lambda: (lingbotworld2_t5_postprocess_text,))
+    text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("bf16",))
     flow_shift: float | None = 10.0
     boundary_ratio: float | None = 0.947
     vae_precision: str = "fp32"

@@ -29,12 +29,14 @@ class MMAudioV2AConfig(PipelineConfig):
     dit_config: DiTConfig = field(default_factory=MMAudioTransformerConfig)
     dit_precision: str = "bf16"
 
-    text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (MMAudioDFNCLIPTextConfig(), ))
-    text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("bf16", ))
-    image_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (
-        MMAudioDFNCLIPVisionConfig(),
-        MMAudioSynchformerConfig(),
-    ))
+    text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (MMAudioDFNCLIPTextConfig(),))
+    text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("bf16",))
+    image_encoder_configs: tuple[EncoderConfig, ...] = field(
+        default_factory=lambda: (
+            MMAudioDFNCLIPVisionConfig(),
+            MMAudioSynchformerConfig(),
+        )
+    )
     image_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("bf16", "bf16"))
 
     audio_decoder_config: ModelConfig = field(default_factory=MMAudioVAEConfig)

@@ -33,7 +33,6 @@ _COLOR_KEYWORDS = [
 
 @register("vbench.color")
 class ColorMetric(BaseMetric):
-
     name = "vbench.color"
     requires_reference = False
     higher_is_better = True
@@ -48,6 +47,7 @@ class ColorMetric(BaseMetric):
         if self._model is not None:
             return
         from fastvideo.eval.metrics.vbench._grit_helper import load_grit_model
+
         self._model = load_grit_model(self.device)
 
     @torch.no_grad()
@@ -99,8 +99,5 @@ class ColorMetric(BaseMetric):
         return MetricResult(
             name=self.name,
             score=float(score),
-            details={
-                "object_detected": cur_object,
-                "color_correct": cur_object_color
-            },
+            details={"object_detected": cur_object, "color_correct": cur_object_color},
         )

@@ -89,8 +89,7 @@ def _make_generation_inputs(args, num_frames: int):
     timesteps = _parse_timesteps(args.dmd_denoising_steps)
     renoise_by_step = [
         torch.randn(latents_seed.shape, generator=generator, dtype=torch.float32).numpy()
-        for _ in range(max(0,
-                           len(timesteps) - 1))
+        for _ in range(max(0, len(timesteps) - 1))
     ]
     prompt_embeds = encode_prompt(
         model_root=args.model_root,
@@ -168,8 +167,10 @@ def _write_report(args, result: dict) -> Path:
     ]
     for row in rows:
         table_lines.append(
-            "| {path} | {denoise_s:.3f} | {decode_s:.3f} | {gen_total_s:.3f} | {rife_s:.3f} | {net_s:.3f} | {speedup_vs_81:.3f}x |"
-            .format(**row))
+            "| {path} | {denoise_s:.3f} | {decode_s:.3f} | {gen_total_s:.3f} | {rife_s:.3f} | {net_s:.3f} | {speedup_vs_81:.3f}x |".format(
+                **row
+            )
+        )
     text = f"""# MetalFX/RIFE Generate-Fewer-Frames Benchmark Run
 
 Prompt: {args.prompt}
@@ -178,21 +179,21 @@ Resolution: {args.height}x{args.width}, fps={args.fps}, mode={args.mode}, decode
 
 | metric | value |
 | --- | ---: |
-| reconstruction_ms_ssim | {result['reconstruction_ms_ssim']:.6f} |
-| reference_frames | {result['reference_frames']} |
-| reduced_frames | {result['reduced_frames']} |
-| interpolated_frames | {result['interpolated_frames']} |
+| reconstruction_ms_ssim | {result["reconstruction_ms_ssim"]:.6f} |
+| reference_frames | {result["reference_frames"]} |
+| reduced_frames | {result["reduced_frames"]} |
+| interpolated_frames | {result["interpolated_frames"]} |
 
 {chr(10).join(table_lines)}
 
 Videos:
 
-- reference: `{result['videos']['reference']}`
-- reference drop-41 RIFE reconstruction: `{result['videos']['drop41_rife81']}`
-- generated 41 RIFE to 81: `{result['videos']['generated41_rife81']}`
-- generated 41 direct: `{result['videos']['generated41']}`
+- reference: `{result["videos"]["reference"]}`
+- reference drop-41 RIFE reconstruction: `{result["videos"]["drop41_rife81"]}`
+- generated 41 RIFE to 81: `{result["videos"]["generated41_rife81"]}`
+- generated 41 direct: `{result["videos"]["generated41"]}`
 
-Raw metrics are in `{_relative_to_output(args.output_dir / 'metrics.json', args.output_dir)}`.
+Raw metrics are in `{_relative_to_output(args.output_dir / "metrics.json", args.output_dir)}`.
 """
     report_path.write_text(text)
     return report_path
@@ -200,7 +201,8 @@ Raw metrics are in `{_relative_to_output(args.output_dir / 'metrics.json', args.
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Evaluate 41-frame generation plus MLX RIFE interpolation vs 81-frame generation.")
+        description="Evaluate 41-frame generation plus MLX RIFE interpolation vs 81-frame generation."
+    )
     parser.add_argument("--model-root", type=Path, default=DEFAULT_MODEL_ROOT)
     parser.add_argument("--prompt", default=FOX_PROMPT)
     parser.add_argument("--height", type=int, default=480)
@@ -228,7 +230,8 @@ def main() -> None:
 
     if args.reference_frames != (args.reduced_frames - 1) * 2 + 1:
         raise SystemExit(
-            "--reference-frames must equal (--reduced-frames - 1) * 2 + 1 for the default every-other-frame test")
+            "--reference-frames must equal (--reduced-frames - 1) * 2 + 1 for the default every-other-frame test"
+        )
     if args.compile:
         import os
 
@@ -301,30 +304,18 @@ def main() -> None:
     net_gen_rife_s = reduced_gen_total_s + generated41_rife_s
 
     result = {
-        "prompt":
-        args.prompt,
-        "model_root":
-        str(args.model_root),
-        "rife_impl":
-        "rife-mlx vendored at fastvideo/third_party/rife_mlx, weights mlx-community/RIFE-4.25",
-        "runtime_limits":
-        runtime_limits,
-        "reference_frames":
-        len(reference_frames),
-        "reduced_frames":
-        len(generated41_frames),
-        "interpolated_frames":
-        len(generated41_rife_frames),
-        "reconstruction_ms_ssim":
-        reconstruction_ms_ssim,
-        "reconstruction_rife_s":
-        recon_rife_s,
-        "generated41_rife_s":
-        generated41_rife_s,
-        "reference_metrics":
-        reference_cell.metrics,
-        "reduced_metrics":
-        reduced_cell.metrics,
+        "prompt": args.prompt,
+        "model_root": str(args.model_root),
+        "rife_impl": "rife-mlx vendored at fastvideo/third_party/rife_mlx, weights mlx-community/RIFE-4.25",
+        "runtime_limits": runtime_limits,
+        "reference_frames": len(reference_frames),
+        "reduced_frames": len(generated41_frames),
+        "interpolated_frames": len(generated41_rife_frames),
+        "reconstruction_ms_ssim": reconstruction_ms_ssim,
+        "reconstruction_rife_s": recon_rife_s,
+        "generated41_rife_s": generated41_rife_s,
+        "reference_metrics": reference_cell.metrics,
+        "reduced_metrics": reduced_cell.metrics,
         "speed_rows": [
             {
                 "path": "generate_81",

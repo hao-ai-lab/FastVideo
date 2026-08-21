@@ -5,7 +5,7 @@ from typing import Any
 def update_config_from_args(config: Any, args_dict: dict[str, Any], prefix: str = "", pop_args: bool = False) -> bool:
     """
     Update configuration object from arguments dictionary.
-    
+
     Args:
         config: The configuration object to update
         args_dict: Dictionary containing arguments
@@ -14,7 +14,7 @@ def update_config_from_args(config: Any, args_dict: dict[str, Any], prefix: str 
     """
     # Handle top-level attributes (no prefix)
     args_not_to_remove = [
-        'model_path',
+        "model_path",
     ]
     args_to_remove = []
     if prefix.strip() == "":
@@ -31,7 +31,7 @@ def update_config_from_args(config: Any, args_dict: dict[str, Any], prefix: str 
         prefix_with_dot = f"{prefix}."
         for key, value in args_dict.items():
             if key.startswith(prefix_with_dot) and value is not None:
-                attr_name = key[len(prefix_with_dot):]
+                attr_name = key[len(prefix_with_dot) :]
                 if hasattr(config, attr_name):
                     setattr(config, attr_name, value)
                 if pop_args:
@@ -51,7 +51,7 @@ def clean_cli_args(args: argparse.Namespace) -> dict[str, Any]:
     """
     provided_args = {}
     for k, v in vars(args).items():
-        if (v is not None and hasattr(args, '_provided') and k in args._provided):
+        if v is not None and hasattr(args, "_provided") and k in args._provided:
             provided_args[k] = v
 
     return provided_args

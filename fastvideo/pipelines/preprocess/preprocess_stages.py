@@ -9,9 +9,9 @@ from einops import rearrange
 from torchvision import transforms
 
 from fastvideo.configs.configs import VideoLoaderType
-from fastvideo.dataset.transform import (CenterCropResizeVideo, TemporalRandomCrop)
+from fastvideo.dataset.transform import CenterCropResizeVideo, TemporalRandomCrop
 from fastvideo.fastvideo_args import FastVideoArgs, WorkloadType
-from fastvideo.pipelines.pipeline_batch_info import (ForwardBatch, PreprocessBatch)
+from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, PreprocessBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 
 
@@ -20,8 +20,9 @@ class VideoTransformStage(PipelineStage):
     Crop a video in temporal dimension.
     """
 
-    def __init__(self, train_fps: int, num_frames: int, max_height: int, max_width: int,
-                 do_temporal_sample: bool) -> None:
+    def __init__(
+        self, train_fps: int, num_frames: int, max_height: int, max_width: int, do_temporal_sample: bool
+    ) -> None:
         self.train_fps = train_fps
         self.num_frames = num_frames
         if do_temporal_sample:
@@ -29,9 +30,11 @@ class VideoTransformStage(PipelineStage):
         else:
             self.temporal_sample_fn = None
 
-        self.video_transform = transforms.Compose([
-            CenterCropResizeVideo((max_height, max_width)),
-        ])
+        self.video_transform = transforms.Compose(
+            [
+                CenterCropResizeVideo((max_height, max_width)),
+            ]
+        )
 
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         batch = cast(PreprocessBatch, batch)
@@ -55,7 +58,7 @@ class VideoTransformStage(PipelineStage):
                     begin_index, end_index = self.temporal_sample_fn(len(frame_indices))
                     frame_indices = frame_indices[begin_index:end_index]
                 else:
-                    frame_indices = frame_indices[:self.num_frames]
+                    frame_indices = frame_indices[: self.num_frames]
 
             if fastvideo_args.preprocess_config.video_loader_type == VideoLoaderType.TORCHCODEC:
                 video = batch.video_loader[i].get_frames_at(frame_indices).data

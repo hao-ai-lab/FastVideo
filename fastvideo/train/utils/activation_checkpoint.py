@@ -59,8 +59,10 @@ def apply_activation_checkpointing(
     elif checkpointing_type == CheckpointType.BLOCK_SKIP:
         module = _apply_activation_checkpointing_blocks(module, n_layer)
     else:
-        raise ValueError(f"Checkpointing type '{checkpointing_type}' not supported. "
-                         f"Supported types are {CheckpointType.__members__.keys()}")
+        raise ValueError(
+            f"Checkpointing type '{checkpointing_type}' not supported. "
+            f"Supported types are {CheckpointType.__members__.keys()}"
+        )
     return module
 
 

@@ -5,6 +5,7 @@ Each WebSocket opens exactly one :class:`Session`. :class:`SessionManager`
 enforces the ``generation_segment_cap`` and ``session_timeout_seconds``
 budgets from :class:`fastvideo.api.StreamingConfig`.
 """
+
 from __future__ import annotations
 
 import enum
@@ -34,41 +35,41 @@ class SessionState(enum.Enum):
 
 
 _VALID_TRANSITIONS: dict[SessionState, frozenset[SessionState]] = {
-    SessionState.INITIALIZING:
-    frozenset({
-        SessionState.QUEUED,
-        SessionState.GPU_BINDING,
-        SessionState.REJECTED,
-        SessionState.ERROR,
-    }),
-    SessionState.QUEUED:
-    frozenset({
-        SessionState.GPU_BINDING,
-        SessionState.ERROR,
-        SessionState.TIMEOUT,
-        SessionState.REJECTED,
-    }),
-    SessionState.GPU_BINDING:
-    frozenset({
-        SessionState.ACTIVE,
-        SessionState.ERROR,
-        SessionState.TIMEOUT,
-    }),
-    SessionState.ACTIVE:
-    frozenset({
-        SessionState.ACTIVE,
-        SessionState.COMPLETE,
-        SessionState.ERROR,
-        SessionState.TIMEOUT,
-    }),
-    SessionState.COMPLETE:
-    frozenset(),
-    SessionState.ERROR:
-    frozenset(),
-    SessionState.TIMEOUT:
-    frozenset(),
-    SessionState.REJECTED:
-    frozenset(),
+    SessionState.INITIALIZING: frozenset(
+        {
+            SessionState.QUEUED,
+            SessionState.GPU_BINDING,
+            SessionState.REJECTED,
+            SessionState.ERROR,
+        }
+    ),
+    SessionState.QUEUED: frozenset(
+        {
+            SessionState.GPU_BINDING,
+            SessionState.ERROR,
+            SessionState.TIMEOUT,
+            SessionState.REJECTED,
+        }
+    ),
+    SessionState.GPU_BINDING: frozenset(
+        {
+            SessionState.ACTIVE,
+            SessionState.ERROR,
+            SessionState.TIMEOUT,
+        }
+    ),
+    SessionState.ACTIVE: frozenset(
+        {
+            SessionState.ACTIVE,
+            SessionState.COMPLETE,
+            SessionState.ERROR,
+            SessionState.TIMEOUT,
+        }
+    ),
+    SessionState.COMPLETE: frozenset(),
+    SessionState.ERROR: frozenset(),
+    SessionState.TIMEOUT: frozenset(),
+    SessionState.REJECTED: frozenset(),
 }
 
 
@@ -113,8 +114,7 @@ class Session:
         """
         allowed = _VALID_TRANSITIONS.get(self.state, frozenset())
         if target not in allowed and target is not self.state:
-            raise InvalidSessionTransition(f"{self.state.value} -> {target.value} is not a valid "
-                                           f"session transition")
+            raise InvalidSessionTransition(f"{self.state.value} -> {target.value} is not a valid session transition")
         self.state = target
         self.last_activity = time.monotonic()
 
@@ -190,10 +190,10 @@ class SessionManager:
         dead: list[str] = []
         for sid, session in self._sessions.items():
             if session.state in {
-                    SessionState.COMPLETE,
-                    SessionState.ERROR,
-                    SessionState.TIMEOUT,
-                    SessionState.REJECTED,
+                SessionState.COMPLETE,
+                SessionState.ERROR,
+                SessionState.TIMEOUT,
+                SessionState.REJECTED,
             }:
                 continue
             if now - session.last_activity > self._session_timeout_seconds:

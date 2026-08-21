@@ -22,16 +22,17 @@ from fastvideo.pipelines.stages.validators import VerificationResult
 class TextEncodingStage(PipelineStage):
     """
     Stage for encoding text prompts into embeddings for diffusion models.
-    
+
     This stage handles the encoding of text prompts into the embedding space
     expected by the diffusion model.
     """
+
     performance_component_metric = "text_encoder_time_s"
 
     def __init__(self, text_encoders, tokenizers) -> None:
         """
         Initialize the prompt encoding stage.
-        
+
         Args:
             enable_logging: Whether to enable logging for this stage.
             is_secondary: Whether this is a secondary text encoder.
@@ -49,11 +50,11 @@ class TextEncodingStage(PipelineStage):
     ) -> ForwardBatch:
         """
         Encode the prompt into text encoder hidden states.
-        
+
         Args:
             batch: The current batch information.
             fastvideo_args: The inference arguments.
-            
+
         Returns:
             The batch with encoded prompt embeddings.
         """
@@ -175,7 +176,7 @@ class TextEncodingStage(PipelineStage):
         num_encoders = len(self.text_encoders)
         for idx in indices:
             if idx < 0 or idx >= num_encoders:
-                raise IndexError(f"encoder index {idx} out of range [0, {num_encoders-1}]")
+                raise IndexError(f"encoder index {idx} out of range [0, {num_encoders - 1}]")
 
         # Validate indices are within range
         num_encoders = len(self.text_encoders)
@@ -217,8 +218,11 @@ class TextEncodingStage(PipelineStage):
             first_param = next(text_encoder.parameters(), None)
             encoder_device = first_param.device if first_param is not None else torch.device(target_device)
             moved_for_forward = False
-            if (first_param is not None and not isinstance(first_param, DTensor)
-                    and encoder_device.type != torch.device(target_device).type):
+            if (
+                first_param is not None
+                and not isinstance(first_param, DTensor)
+                and encoder_device.type != torch.device(target_device).type
+            ):
                 text_encoder = text_encoder.to(target_device)
                 encoder_device = torch.device(target_device)
                 moved_for_forward = True
@@ -256,8 +260,11 @@ class TextEncodingStage(PipelineStage):
                     # Qwen2-style tokenizers. Scoped via treat_empty_as_dot so
                     # models that legitimately use "" (e.g. negative_prompt="")
                     # are not affected.
-                    if isinstance(processed_text, str) and not processed_text.strip() and getattr(
-                            encoder_config, "treat_empty_as_dot", False):
+                    if (
+                        isinstance(processed_text, str)
+                        and not processed_text.strip()
+                        and getattr(encoder_config, "treat_empty_as_dot", False)
+                    ):
                         processed_text = "."
                     processed_texts.append(processed_text)
                 else:
@@ -302,7 +309,8 @@ class TextEncodingStage(PipelineStage):
             attention_mask = text_inputs["attention_mask"]
 
             want_hidden_states = bool(
-                getattr(getattr(encoder_config, "arch_config", None), "output_hidden_states", False))
+                getattr(getattr(encoder_config, "arch_config", None), "output_hidden_states", False)
+            )
 
             with set_forward_context(current_timestep=0, attn_metadata=None):
                 outputs = text_encoder(
@@ -364,7 +372,8 @@ class TextEncodingStage(PipelineStage):
         for t in embeds_list[1:]:
             if list(t.shape) != base_shape:
                 raise ValueError(
-                    f"Cannot stack embeddings with differing shapes: {[list(t.shape) for t in embeds_list]}")
+                    f"Cannot stack embeddings with differing shapes: {[list(t.shape) for t in embeds_list]}"
+                )
         stacked_embeds = torch.stack(embeds_list, dim=0)
         if return_attention_mask:
             base_mask_shape = list(attn_masks_list[0].shape)
@@ -381,8 +390,11 @@ class TextEncodingStage(PipelineStage):
         """Verify text encoding stage outputs."""
         result = VerificationResult()
         result.add_check("prompt_embeds", batch.prompt_embeds, V.list_of_tensors_min_dims(2))
-        result.add_check("negative_prompt_embeds", batch.negative_prompt_embeds,
-                         lambda x: not batch.do_classifier_free_guidance or V.list_of_tensors_with_min_dims(x, 2))
+        result.add_check(
+            "negative_prompt_embeds",
+            batch.negative_prompt_embeds,
+            lambda x: not batch.do_classifier_free_guidance or V.list_of_tensors_with_min_dims(x, 2),
+        )
         return result
 
 
@@ -392,6 +404,7 @@ class Cosmos25TextEncodingStage(PipelineStage):
     Cosmos 2.5 uses Reason1 (Qwen2.5-VL) and relies on the encoder's
     `compute_text_embeddings_online()`.
     """
+
     performance_component_metric = "text_encoder_time_s"
 
     def __init__(self, text_encoder) -> None:
@@ -436,6 +449,9 @@ class Cosmos25TextEncodingStage(PipelineStage):
     def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         result = VerificationResult()
         result.add_check("prompt_embeds", batch.prompt_embeds, V.list_of_tensors_min_dims(2))
-        result.add_check("negative_prompt_embeds", batch.negative_prompt_embeds,
-                         lambda x: not batch.do_classifier_free_guidance or V.list_not_empty(x))
+        result.add_check(
+            "negative_prompt_embeds",
+            batch.negative_prompt_embeds,
+            lambda x: not batch.do_classifier_free_guidance or V.list_not_empty(x),
+        )
         return result

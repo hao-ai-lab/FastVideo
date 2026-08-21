@@ -83,7 +83,8 @@ def persist_session_init_image(
         tempfile.mkdtemp(
             prefix="ltx2_session_init_",
             dir=str(temp_root) if temp_root is not None else None,
-        ))
+        )
+    )
     file_path = temp_dir / "initial_frame.png"
     normalized.save(file_path, format="PNG")
 

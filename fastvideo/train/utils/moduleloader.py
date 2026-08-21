@@ -15,7 +15,8 @@ from fastvideo.attention.selector import (
 from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.fastvideo_args import ExecutionMode, TrainingArgs
 from fastvideo.models.loader.component_loader import (
-    PipelineComponentLoader, )
+    PipelineComponentLoader,
+)
 from fastvideo.utils import (
     maybe_download_model,
     verify_model_config_and_directory,
@@ -24,7 +25,8 @@ from fastvideo.platforms import AttentionBackendEnum
 
 if TYPE_CHECKING:
     from fastvideo.train.utils.training_config import (
-        TrainingConfig, )
+        TrainingConfig,
+    )
 
 # ------------------------------------------------------------------
 # TrainingArgs builders (only place that creates FastVideoArgs)
@@ -109,13 +111,11 @@ def load_module_from_path(
     config = verify_model_config_and_directory(local_model_path)
 
     if module_type not in config:
-        raise ValueError(f"Module {module_type!r} not found in "
-                         f"config at {local_model_path}")
+        raise ValueError(f"Module {module_type!r} not found in config at {local_model_path}")
 
     module_info = config[module_type]
     if module_info is None:
-        raise ValueError(f"Module {module_type!r} has null value in "
-                         f"config at {local_model_path}")
+        raise ValueError(f"Module {module_type!r} has null value in config at {local_model_path}")
 
     # Trailing modular-manifest metadata does not change component dispatch;
     # the provider and architecture remain the first two fields.
@@ -131,14 +131,18 @@ def load_module_from_path(
         fastvideo_args.init_weights_from_safetensors = str(transformer_override_safetensor)
 
     if attention_backend is not None and module_type != "transformer":
-        raise ValueError("attention_backend can only be set when loading "
-                         f"a transformer, got module_type={module_type!r}")
+        raise ValueError(
+            f"attention_backend can only be set when loading a transformer, got module_type={module_type!r}"
+        )
     resolved_attention_backend = coerce_attn_backend(attention_backend)
     # Per-role request delivered as a construction scope: process-local,
     # exception-safe, and part of the selector's cache key (no global
     # mutation, no cache flushes between roles).
-    attention_context = (nullcontext() if resolved_attention_backend is None else _component_attention_backend_scope(
-        resolved_attention_backend, component=module_type))
+    attention_context = (
+        nullcontext()
+        if resolved_attention_backend is None
+        else _component_attention_backend_scope(resolved_attention_backend, component=module_type)
+    )
 
     if disable_custom_init_weights:
         fastvideo_args._loading_teacher_critic_model = True
@@ -154,6 +158,5 @@ def load_module_from_path(
         )
 
     if not isinstance(module, torch.nn.Module):
-        raise TypeError(f"Loaded {module_type!r} is not a "
-                        f"torch.nn.Module: {type(module)}")
+        raise TypeError(f"Loaded {module_type!r} is not a torch.nn.Module: {type(module)}")
     return module

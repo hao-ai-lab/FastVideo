@@ -34,7 +34,6 @@ def _clip_transform(frames: torch.Tensor) -> torch.Tensor:
 
 @register("vbench.aesthetic_quality")
 class AestheticQualityMetric(BaseMetric):
-
     name = "vbench.aesthetic_quality"
     requires_reference = False
     higher_is_better = True
@@ -61,6 +60,7 @@ class AestheticQualityMetric(BaseMetric):
 
         import clip
         from fastvideo.eval.models import ensure_checkpoint, get_cache_dir
+
         self._clip_model, _ = clip.load(
             "ViT-L/14",
             device=self.device,
@@ -86,7 +86,7 @@ class AestheticQualityMetric(BaseMetric):
         chunk = self._chunk_size or 32
         scores_list = []
         for i in range(0, frames.shape[0], chunk):
-            feats = self._clip_model.encode_image(frames[i:i + chunk]).float()
+            feats = self._clip_model.encode_image(frames[i : i + chunk]).float()
             feats = F.normalize(feats, dim=-1, p=2)
             scores_list.append(self._aesthetic_head(feats).squeeze(-1))
 

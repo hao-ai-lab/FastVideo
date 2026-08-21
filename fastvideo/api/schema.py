@@ -223,8 +223,9 @@ class RunConfig:
 @dataclass
 class WarmupConfig:
     enabled: bool = True
-    prompt: str = ("A cinematic drone shot over coastal cliffs at sunrise, "
-                   "golden light, gentle ocean waves, ultra detailed")
+    prompt: str = (
+        "A cinematic drone shot over coastal cliffs at sunrise, golden light, gentle ocean waves, ultra detailed"
+    )
     timeout_seconds: int = 2400
 
 
@@ -283,6 +284,7 @@ class ServeConfig:
     projection and ``entrypoints/openai/video_api.py::_build_generation_kwargs``
     for the merge.
     """
+
     generator: GeneratorConfig
     server: ServerConfig = field(default_factory=ServerConfig)
     default_request: GenerationRequest = field(default_factory=GenerationRequest)

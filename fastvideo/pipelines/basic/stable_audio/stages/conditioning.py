@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """Stable Audio conditioning stage."""
+
 from __future__ import annotations
 
 import torch
@@ -39,14 +40,15 @@ class StableAudioConditioningStage(PipelineStage):
         if audio_start_in_s < 0:
             raise ValueError(f"audio_start_in_s must be >= 0, got {audio_start_in_s}.")
         if audio_end_in_s <= audio_start_in_s:
-            raise ValueError(f"audio_end_in_s ({audio_end_in_s}) must be > audio_start_in_s "
-                             f"({audio_start_in_s}).")
+            raise ValueError(f"audio_end_in_s ({audio_end_in_s}) must be > audio_start_in_s ({audio_start_in_s}).")
         if audio_end_in_s > max_duration:
-            raise ValueError(f"audio_end_in_s ({audio_end_in_s}s) exceeds the model's fixed "
-                             f"window of {max_duration:.4f}s. Stable Audio Open 1.0 always "
-                             f"samples a 2,097,152-frame latent and slices to "
-                             f"[start, end] after decode; values past the window are silently "
-                             f"truncated. Lower audio_end_in_s or split the request.")
+            raise ValueError(
+                f"audio_end_in_s ({audio_end_in_s}s) exceeds the model's fixed "
+                f"window of {max_duration:.4f}s. Stable Audio Open 1.0 always "
+                f"samples a 2,097,152-frame latent and slices to "
+                f"[start, end] after decode; values past the window are silently "
+                f"truncated. Lower audio_end_in_s or split the request."
+            )
         guidance_scale = float(batch.guidance_scale or pc.guidance_scale)
         do_cfg = guidance_scale > 1.0
 
@@ -54,13 +56,14 @@ class StableAudioConditioningStage(PipelineStage):
             prompt = batch.prompt
         elif isinstance(batch.prompt, list):
             if len(batch.prompt) > 1:
-                raise ValueError(f"Stable Audio does not support batched prompts; got "
-                                 f"{len(batch.prompt)} entries. Pass a single string or a "
-                                 f"single-element list.")
+                raise ValueError(
+                    f"Stable Audio does not support batched prompts; got "
+                    f"{len(batch.prompt)} entries. Pass a single string or a "
+                    f"single-element list."
+                )
             prompt = batch.prompt[0] if batch.prompt else ""
         else:
-            raise TypeError(f"`prompt` must be a string or a list of strings, got "
-                            f"{type(batch.prompt).__name__}.")
+            raise TypeError(f"`prompt` must be a string or a list of strings, got {type(batch.prompt).__name__}.")
         # Send only the keys the conditioner declares (per-variant).
         all_cond_values = {
             "prompt": prompt,
@@ -82,7 +85,7 @@ class StableAudioConditioningStage(PipelineStage):
             neg_values = dict(all_cond_values, prompt=neg_prompt)
             neg_meta = [{k: neg_values[k] for k in active_ids if k in neg_values}]
             neg = self.conditioner(neg_meta, device)
-            neg_cross_attn_cond, neg_cross_attn_mask, neg_global_embed = (self.conditioner.get_conditioning_inputs(neg))
+            neg_cross_attn_cond, neg_cross_attn_mask, neg_global_embed = self.conditioner.get_conditioning_inputs(neg)
 
         if batch.extra is None:
             batch.extra = {}

@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """`PipelineConfig` for Stable Audio Open 1.0."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

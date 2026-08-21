@@ -45,7 +45,9 @@ def apply_overrides(config: Mapping[str, Any], overrides: Mapping[str, Any]) -> 
     return merged
 
 
-def normalize_overrides(overrides: list[str] | Mapping[str, Any] | None, ) -> dict[str, Any] | None:
+def normalize_overrides(
+    overrides: list[str] | Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
     """Normalize a CLI list or mapping of overrides into a flat dict."""
     if not overrides:
         return None
@@ -67,7 +69,7 @@ def _apply_single_override(config: dict[str, Any], dotted_key: str, value: Any) 
             cursor[part] = existing
         elif not isinstance(existing, dict):
             raise ConfigValidationError(
-                ".".join(parts[:depth + 1]),
+                ".".join(parts[: depth + 1]),
                 "cannot apply nested override through a non-mapping value",
             )
         cursor = existing

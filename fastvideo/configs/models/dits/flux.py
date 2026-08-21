@@ -7,7 +7,6 @@ from fastvideo.configs.models.dits.base import DiTArchConfig, DiTConfig
 
 @dataclass
 class FluxTransformer2DArchConfig(DiTArchConfig):
-
     patch_size: int = 1
     in_channels: int = 64
     out_channels: int | None = None

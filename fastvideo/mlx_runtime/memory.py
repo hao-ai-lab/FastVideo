@@ -217,27 +217,39 @@ def add_memory_limit_args(
         torch_mps_high_watermark_ratio (float | None): Default PyTorch MPS high-watermark ratio.
         torch_mps_low_watermark_ratio (float | None): Default PyTorch MPS low-watermark ratio.
     """
-    parser.add_argument("--mlx-memory-limit-gib",
-                        type=float,
-                        default=mlx_memory_limit_gib,
-                        help="Set MLX memory limit in GiB for memory-tier testing (DiT path).")
-    parser.add_argument("--mlx-cache-limit-gib",
-                        type=float,
-                        default=mlx_cache_limit_gib,
-                        help="Set MLX cache limit in GiB. Use --mlx-disable-cache to force 0.")
-    parser.add_argument("--mlx-disable-cache",
-                        action="store_true",
-                        default=mlx_disable_cache,
-                        help="Set MLX cache limit to 0 for stricter memory-tier tests.")
-    parser.add_argument("--mlx-wired-limit-gib",
-                        type=float,
-                        default=mlx_wired_limit_gib,
-                        help="Set MLX wired-memory limit in GiB where supported by macOS/MLX.")
-    parser.add_argument("--torch-mps-high-watermark-ratio",
-                        type=float,
-                        default=torch_mps_high_watermark_ratio,
-                        help="Set PYTORCH_MPS_HIGH_WATERMARK_RATIO before importing torch.")
-    parser.add_argument("--torch-mps-low-watermark-ratio",
-                        type=float,
-                        default=torch_mps_low_watermark_ratio,
-                        help="Set PYTORCH_MPS_LOW_WATERMARK_RATIO before importing torch.")
+    parser.add_argument(
+        "--mlx-memory-limit-gib",
+        type=float,
+        default=mlx_memory_limit_gib,
+        help="Set MLX memory limit in GiB for memory-tier testing (DiT path).",
+    )
+    parser.add_argument(
+        "--mlx-cache-limit-gib",
+        type=float,
+        default=mlx_cache_limit_gib,
+        help="Set MLX cache limit in GiB. Use --mlx-disable-cache to force 0.",
+    )
+    parser.add_argument(
+        "--mlx-disable-cache",
+        action="store_true",
+        default=mlx_disable_cache,
+        help="Set MLX cache limit to 0 for stricter memory-tier tests.",
+    )
+    parser.add_argument(
+        "--mlx-wired-limit-gib",
+        type=float,
+        default=mlx_wired_limit_gib,
+        help="Set MLX wired-memory limit in GiB where supported by macOS/MLX.",
+    )
+    parser.add_argument(
+        "--torch-mps-high-watermark-ratio",
+        type=float,
+        default=torch_mps_high_watermark_ratio,
+        help="Set PYTORCH_MPS_HIGH_WATERMARK_RATIO before importing torch.",
+    )
+    parser.add_argument(
+        "--torch-mps-low-watermark-ratio",
+        type=float,
+        default=torch_mps_low_watermark_ratio,
+        help="Set PYTORCH_MPS_LOW_WATERMARK_RATIO before importing torch.",
+    )

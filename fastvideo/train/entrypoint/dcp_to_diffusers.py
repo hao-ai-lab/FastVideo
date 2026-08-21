@@ -100,9 +100,9 @@ def _save_role_pretrained(
             if overwrite:
                 shutil.rmtree(dst, ignore_errors=True)
             else:
-                raise FileExistsError(f"Refusing to overwrite existing "
-                                      f"directory: {dst}. "
-                                      "Pass --overwrite to replace it.")
+                raise FileExistsError(
+                    f"Refusing to overwrite existing directory: {dst}. Pass --overwrite to replace it."
+                )
 
         def _copy_or_link(src: str, dest: str) -> None:
             # Resolve symlinks ourselves: os.link's follow_symlinks=True
@@ -116,8 +116,7 @@ def _save_role_pretrained(
                 shutil.copy2(real_src, dest)
 
         logger.info(
-            "Creating pretrained export dir at %s "
-            "(base=%s)",
+            "Creating pretrained export dir at %s (base=%s)",
             dst,
             local_base,
         )
@@ -139,14 +138,11 @@ def _save_role_pretrained(
 
     for module_name in module_names:
         if module_name not in modules:
-            raise KeyError(f"Role {role!r} does not have module "
-                           f"{module_name!r}. "
-                           f"Available: {sorted(modules.keys())}")
+            raise KeyError(f"Role {role!r} does not have module {module_name!r}. Available: {sorted(modules.keys())}")
 
         module_dir = dst / module_name
         if not module_dir.is_dir():
-            raise FileNotFoundError(f"Export directory missing component "
-                                    f"dir {module_name!r}: {module_dir}")
+            raise FileNotFoundError(f"Export directory missing component dir {module_name!r}: {module_dir}")
 
         options = StateDictOptions(
             full_state_dict=True,
@@ -172,15 +168,14 @@ def _save_role_pretrained(
             tensor_state: dict[str, torch.Tensor] = {}
             for key, value in state_dict.items():
                 if not isinstance(value, torch.Tensor):
-                    raise TypeError(f"Expected tensor in state_dict "
-                                    f"for {module_name}.{key}, "
-                                    f"got {type(value).__name__}")
+                    raise TypeError(
+                        f"Expected tensor in state_dict for {module_name}.{key}, got {type(value).__name__}"
+                    )
                 if key in reverse_mapping:
                     hf_key, merge_index, _ = reverse_mapping[key]
                     if merge_index is not None:
                         logger.warning(
-                            "Skipping reverse-mapping for merged param %s "
-                            "(merge_index=%s); saving under internal key.",
+                            "Skipping reverse-mapping for merged param %s (merge_index=%s); saving under internal key.",
                             key,
                             merge_index,
                         )
@@ -241,7 +236,8 @@ def convert(
     _ensure_distributed()
 
     from fastvideo.distributed import (
-        maybe_init_distributed_environment_and_model_parallel, )
+        maybe_init_distributed_environment_and_model_parallel,
+    )
     from fastvideo.train.utils.builder import build_from_config
     from fastvideo.train.utils.checkpoint import (
         CheckpointManager,
@@ -271,9 +267,7 @@ def convert(
         metadata = CheckpointManager.load_metadata(resolved)
         raw_config = metadata.get("config")
         if raw_config is None:
-            raise ValueError("Checkpoint metadata.json does not "
-                             "contain 'config'. Pass --config "
-                             "explicitly.")
+            raise ValueError("Checkpoint metadata.json does not contain 'config'. Pass --config explicitly.")
         cfg = _run_config_from_raw(raw_config)
 
     tc = cfg.training
@@ -306,9 +300,7 @@ def convert(
     model = method._role_models[role]
     base_model_path = str(tc.model_path)
     if not base_model_path:
-        raise ValueError("Cannot determine base_model_path from "
-                         "config. Ensure models.student.init_from "
-                         "is set.")
+        raise ValueError("Cannot determine base_model_path from config. Ensure models.student.init_from is set.")
 
     logger.info(
         "Exporting role=%s to %s (base=%s)",
@@ -331,7 +323,9 @@ def convert(
     return result
 
 
-def _run_config_from_raw(raw: dict[str, Any], ) -> Any:
+def _run_config_from_raw(
+    raw: dict[str, Any],
+) -> Any:
     """Reconstruct a RunConfig from a raw config dict.
 
     This mirrors ``load_run_config`` but operates on an
@@ -369,10 +363,14 @@ def _run_config_from_raw(raw: dict[str, Any], ) -> Any:
     method = dict(method_raw)
 
     callbacks_raw = raw.get("callbacks")
-    callbacks: dict[str, dict[str, Any]] = (_require_mapping(
-        callbacks_raw,
-        where="callbacks",
-    ) if callbacks_raw is not None else {})
+    callbacks: dict[str, dict[str, Any]] = (
+        _require_mapping(
+            callbacks_raw,
+            where="callbacks",
+        )
+        if callbacks_raw is not None
+        else {}
+    )
 
     pipeline_config = _parse_pipeline_config(
         raw,
@@ -400,17 +398,19 @@ def _run_config_from_raw(raw: dict[str, Any], ) -> Any:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=("Convert a DCP training checkpoint to a "
-                                                  "diffusers-style model directory. "
-                                                  "Only 1 GPU needed (DCP reshards "
-                                                  "automatically)."), )
+    parser = argparse.ArgumentParser(
+        description=(
+            "Convert a DCP training checkpoint to a "
+            "diffusers-style model directory. "
+            "Only 1 GPU needed (DCP reshards "
+            "automatically)."
+        ),
+    )
     parser.add_argument(
         "--checkpoint",
         type=str,
         required=True,
-        help=("Path to checkpoint-<step> dir, its dcp/ "
-              "subdir, or an output_dir (auto-picks "
-              "latest)."),
+        help=("Path to checkpoint-<step> dir, its dcp/ subdir, or an output_dir (auto-picks latest)."),
     )
     parser.add_argument(
         "--output-dir",
@@ -422,8 +422,7 @@ def main() -> None:
         "--config",
         type=str,
         default=None,
-        help=("Training YAML config. If omitted, read "
-              "from checkpoint metadata.json."),
+        help=("Training YAML config. If omitted, read from checkpoint metadata.json."),
     )
     parser.add_argument(
         "--role",
@@ -439,9 +438,11 @@ def main() -> None:
     parser.add_argument(
         "--verify",
         action="store_true",
-        help=("After exporting, strictly reload the transformer from "
-              "the exported directory to catch key-mapping bugs "
-              "immediately."),
+        help=(
+            "After exporting, strictly reload the transformer from "
+            "the exported directory to catch key-mapping bugs "
+            "immediately."
+        ),
     )
     args = parser.parse_args(sys.argv[1:])
 

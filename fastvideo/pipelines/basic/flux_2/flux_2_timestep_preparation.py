@@ -53,7 +53,7 @@ class Flux2TimestepPreparationStage(TimestepPreparationStage):
         # always supplies the resolution-dependent mu when the scheduler accepts
         # it.
         scheduler_config = getattr(scheduler, "config", None)
-        use_flow_sigmas = (getattr(scheduler_config, "use_flow_sigmas", False) if scheduler_config else False)
+        use_flow_sigmas = getattr(scheduler_config, "use_flow_sigmas", False) if scheduler_config else False
         if timesteps is None and sigmas is None and not use_flow_sigmas:
             sigmas = np.linspace(1.0, 1.0 / num_inference_steps, num_inference_steps)
 
@@ -61,27 +61,30 @@ class Flux2TimestepPreparationStage(TimestepPreparationStage):
             if batch.n_tokens is not None:
                 image_seq_len = batch.n_tokens
             else:
-                h = (batch.height if isinstance(batch.height, int) else (batch.height[0] if batch.height else None))
-                w = (batch.width if isinstance(batch.width, int) else (batch.width[0] if batch.width else None))
+                h = batch.height if isinstance(batch.height, int) else (batch.height[0] if batch.height else None)
+                w = batch.width if isinstance(batch.width, int) else (batch.width[0] if batch.width else None)
                 vae_config = getattr(fastvideo_args.pipeline_config, "vae_config", None)
                 if vae_config is not None:
                     arch = getattr(vae_config, "arch_config", None)
-                    scale = (getattr(arch, "spatial_compression_ratio", 8) if arch else 8)
+                    scale = getattr(arch, "spatial_compression_ratio", 8) if arch else 8
                 else:
                     scale = 8
-                image_seq_len = ((h // scale) * (w // scale) if h is not None and w is not None else 256)
+                image_seq_len = (h // scale) * (w // scale) if h is not None and w is not None else 256
             extra_set_timesteps_kwargs["mu"] = compute_empirical_mu(image_seq_len, num_inference_steps)
 
         if timesteps is not None and sigmas is not None:
-            raise ValueError("Only one of `timesteps` or `sigmas` can be passed. "
-                             "Please choose one to set custom values")
+            raise ValueError(
+                "Only one of `timesteps` or `sigmas` can be passed. Please choose one to set custom values"
+            )
 
         if timesteps is not None:
             accepts_timesteps = "timesteps" in inspect.signature(scheduler.set_timesteps).parameters
             if not accepts_timesteps:
-                raise ValueError(f"The current scheduler class {scheduler.__class__}'s "
-                                 f"`set_timesteps` does not support custom timestep schedules.")
-            timesteps_for_scheduler = (timesteps.cpu() if isinstance(timesteps, torch.Tensor) else timesteps)
+                raise ValueError(
+                    f"The current scheduler class {scheduler.__class__}'s "
+                    f"`set_timesteps` does not support custom timestep schedules."
+                )
+            timesteps_for_scheduler = timesteps.cpu() if isinstance(timesteps, torch.Tensor) else timesteps
             scheduler.set_timesteps(
                 timesteps=timesteps_for_scheduler,
                 device=device,
@@ -91,8 +94,10 @@ class Flux2TimestepPreparationStage(TimestepPreparationStage):
         elif sigmas is not None:
             accept_sigmas = "sigmas" in inspect.signature(scheduler.set_timesteps).parameters
             if not accept_sigmas:
-                raise ValueError(f"The current scheduler class {scheduler.__class__}'s "
-                                 f"`set_timesteps` does not support custom sigmas schedules.")
+                raise ValueError(
+                    f"The current scheduler class {scheduler.__class__}'s "
+                    f"`set_timesteps` does not support custom sigmas schedules."
+                )
             scheduler.set_timesteps(
                 sigmas=sigmas,
                 device=device,

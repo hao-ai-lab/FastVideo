@@ -25,6 +25,7 @@ Convention for ``auxiliary_info``: a *flat* dict of metric-keyed values
 ``{dim: {key: val}}``) flatten at load time so every consumer sees the
 same shape.
 """
+
 from __future__ import annotations
 
 from typing import TypedDict
@@ -39,6 +40,7 @@ class Sample(TypedDict, total=False):
     audio-bearing benchmarks can add their own fields without changing
     the base class.
     """
+
     prompt: str
     n_samples: int
     dimensions: list[str]

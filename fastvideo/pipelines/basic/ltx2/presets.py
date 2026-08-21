@@ -1,35 +1,41 @@
 # SPDX-License-Identifier: Apache-2.0
 """LTX2 model family pipeline presets."""
+
 from fastvideo.api.presets import InferencePreset, PresetStageSpec
 from fastvideo.pipelines.basic.ltx2.stage_overrides import (
-    refine_stage_override_fields, )
+    refine_stage_override_fields,
+)
 
-_LTX2_NEGATIVE_PROMPT = ("blurry, out of focus, overexposed, underexposed, low contrast, "
-                         "washed out colors, excessive noise, grainy texture, poor lighting, "
-                         "flickering, motion blur, distorted proportions, unnatural skin "
-                         "tones, deformed facial features, asymmetrical face, missing facial "
-                         "features, extra limbs, disfigured hands, wrong hand count, "
-                         "artifacts around text, inconsistent perspective, camera shake, "
-                         "incorrect depth of field, background too sharp, background clutter, "
-                         "distracting reflections, harsh shadows, inconsistent lighting "
-                         "direction, color banding, cartoonish rendering, 3D CGI look, "
-                         "unrealistic materials, uncanny valley effect, incorrect ethnicity, "
-                         "wrong gender, exaggerated expressions, wrong gaze direction, "
-                         "mismatched lip sync, silent or muted audio, distorted voice, "
-                         "robotic voice, echo, background noise, off-sync audio, incorrect "
-                         "dialogue, added dialogue, repetitive speech, jittery movement, "
-                         "awkward pauses, incorrect timing, unnatural transitions, "
-                         "inconsistent framing, tilted camera, flat lighting, inconsistent "
-                         "tone, cinematic oversaturation, stylized filters, or AI artifacts.")
+_LTX2_NEGATIVE_PROMPT = (
+    "blurry, out of focus, overexposed, underexposed, low contrast, "
+    "washed out colors, excessive noise, grainy texture, poor lighting, "
+    "flickering, motion blur, distorted proportions, unnatural skin "
+    "tones, deformed facial features, asymmetrical face, missing facial "
+    "features, extra limbs, disfigured hands, wrong hand count, "
+    "artifacts around text, inconsistent perspective, camera shake, "
+    "incorrect depth of field, background too sharp, background clutter, "
+    "distracting reflections, harsh shadows, inconsistent lighting "
+    "direction, color banding, cartoonish rendering, 3D CGI look, "
+    "unrealistic materials, uncanny valley effect, incorrect ethnicity, "
+    "wrong gender, exaggerated expressions, wrong gaze direction, "
+    "mismatched lip sync, silent or muted audio, distorted voice, "
+    "robotic voice, echo, background noise, off-sync audio, incorrect "
+    "dialogue, added dialogue, repetitive speech, jittery movement, "
+    "awkward pauses, incorrect timing, unnatural transitions, "
+    "inconsistent framing, tilted camera, flat lighting, inconsistent "
+    "tone, cinematic oversaturation, stylized filters, or AI artifacts."
+)
 
 _DENOISE_STAGE = PresetStageSpec(
     name="denoise",
     kind="denoising",
     description="Main denoising pass",
-    allowed_overrides=frozenset({
-        "num_inference_steps",
-        "guidance_scale",
-    }),
+    allowed_overrides=frozenset(
+        {
+            "num_inference_steps",
+            "guidance_scale",
+        }
+    ),
 )
 
 _REFINE_STAGE = PresetStageSpec(
@@ -45,7 +51,7 @@ LTX2_BASE = InferencePreset(
     model_family="ltx2",
     description="LTX-2 base at 512x768",
     workload_type="t2v",
-    stage_schemas=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE,),
     defaults={
         "seed": 10,
         "height": 512,
@@ -73,7 +79,7 @@ LTX2_3_BASE = InferencePreset(
     model_family="ltx2",
     description="LTX-2.3 base at 512x768",
     workload_type="t2v",
-    stage_schemas=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE,),
     defaults={
         "seed": 10,
         "height": 512,
@@ -103,7 +109,7 @@ LTX2_DISTILLED = InferencePreset(
     model_family="ltx2",
     description="LTX-2 distilled at 1024x1536",
     workload_type="t2v",
-    stage_schemas=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE,),
     defaults={
         "seed": 10,
         "height": 1024,

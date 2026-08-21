@@ -79,9 +79,9 @@ class TrainingMethod(torch.nn.Module, ABC):
         batch: dict[str, Any],
         iteration: int,
     ) -> tuple[
-            dict[str, torch.Tensor],
-            dict[str, Any],
-            dict[str, LogScalar],
+        dict[str, torch.Tensor],
+        dict[str, Any],
+        dict[str, LogScalar],
     ]:
         raise NotImplementedError
 
@@ -101,13 +101,11 @@ class TrainingMethod(torch.nn.Module, ABC):
 
     @property
     @abstractmethod
-    def _optimizer_dict(self) -> dict[str, Any]:
-        ...
+    def _optimizer_dict(self) -> dict[str, Any]: ...
 
     @property
     @abstractmethod
-    def _lr_scheduler_dict(self) -> dict[str, Any]:
-        ...
+    def _lr_scheduler_dict(self) -> dict[str, Any]: ...
 
     def checkpoint_state(self) -> dict[str, Any]:
         """Return DCP-ready checkpoint state for all trainable roles.
@@ -213,9 +211,9 @@ class TrainingMethod(torch.nn.Module, ABC):
         data_stream: Any,
         iteration: int,
     ) -> tuple[
-            dict[str, torch.Tensor],
-            dict[str, Any],
-            dict[str, LogScalar],
+        dict[str, torch.Tensor],
+        dict[str, Any],
+        dict[str, LogScalar],
     ]:
         """Run one method-managed step.
 
@@ -251,7 +249,8 @@ class TrainingMethod(torch.nn.Module, ABC):
 
     def on_train_start(self) -> None:
         from fastvideo.distributed import (
-            get_world_group, )
+            get_world_group,
+        )
         from fastvideo.utils import set_random_seed
 
         seed = self.training_config.data.seed
@@ -274,7 +273,7 @@ class TrainingMethod(torch.nn.Module, ABC):
 
     def _infer_attn_kind(self) -> Literal["dense", "vsa"]:
         """Derive metadata mode from the student's resolved backend."""
-        backend = (self.student.attention_backend_name or envs.FASTVIDEO_ATTENTION_BACKEND)
+        backend = self.student.attention_backend_name or envs.FASTVIDEO_ATTENTION_BACKEND
         if backend == "VIDEO_SPARSE_ATTN":
             return "vsa"
         return "dense"

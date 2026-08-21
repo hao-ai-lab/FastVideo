@@ -11,6 +11,7 @@ Invalid states are unrepresentable: a ``MediaChunk`` simply has no
 and a ``JoinAck`` can't accidentally default to ``kind="step_result"``
 because there is no ``kind`` string.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -21,6 +22,7 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class StepComplete:
     """Generation step finished.  Frames/audio were already sent via ``MediaChunk``."""
+
     user_id: str
     segment_idx: int
     timings: dict[str, float]
@@ -29,6 +31,7 @@ class StepComplete:
 @dataclass(frozen=True)
 class WorkerError:
     """Any worker failure.  ``user_id`` is None for system-scoped failures."""
+
     user_id: str | None
     message: str
 
@@ -81,6 +84,7 @@ class MediaChunk:
     ``chunk_length`` are set (read from the shared buffer).  The
     invariant is enforced in ``__post_init__``.
     """
+
     user_id: str
     segment_idx: int
     stream_id: str
@@ -91,10 +95,11 @@ class MediaChunk:
 
     def __post_init__(self) -> None:
         has_bytes = self.chunk is not None
-        has_offset = (self.chunk_offset is not None and self.chunk_length is not None)
+        has_offset = self.chunk_offset is not None and self.chunk_length is not None
         if has_bytes == has_offset:
-            raise ValueError("MediaChunk must carry either chunk bytes or "
-                             "(chunk_offset + chunk_length), not both or neither")
+            raise ValueError(
+                "MediaChunk must carry either chunk bytes or (chunk_offset + chunk_length), not both or neither"
+            )
 
 
 @dataclass(frozen=True)
@@ -119,18 +124,20 @@ class ShutdownAck:
     pass
 
 
-WorkerEvent = (StepComplete
-               | WorkerError
-               | JoinAck
-               | LeaveAck
-               | ReloadAck
-               | LoraAck
-               | WarmupComplete
-               | MediaInit
-               | MediaChunk
-               | MediaComplete
-               | InitAck
-               | ShutdownAck)
+WorkerEvent = (
+    StepComplete
+    | WorkerError
+    | JoinAck
+    | LeaveAck
+    | ReloadAck
+    | LoraAck
+    | WarmupComplete
+    | MediaInit
+    | MediaChunk
+    | MediaComplete
+    | InitAck
+    | ShutdownAck
+)
 
 # ---- Command payloads (main process → worker) ------------------------------
 #
@@ -167,4 +174,4 @@ class LoraStackPayload:
     stack: list[tuple[str, float]]
 
 
-CommandPayload = (UserStepPayload | WarmupPayload | ReloadModelPayload | LoraStackPayload)
+CommandPayload = UserStepPayload | WarmupPayload | ReloadModelPayload | LoraStackPayload

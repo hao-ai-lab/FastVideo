@@ -24,10 +24,11 @@ logger = init_logger(__name__)
 class DecodingStage(PipelineStage):
     """
     Stage for decoding latent representations into pixel space.
-    
+
     This stage handles the decoding of latent representations into the final
     output format (e.g., pixel values).
     """
+
     performance_component_metric = "vae_decode_time_s"
 
     def __init__(self, vae, pipeline=None) -> None:
@@ -85,17 +86,21 @@ class DecodingStage(PipelineStage):
         if latents_mean_value is not None and latents_std_value is not None:
             # Preserve the released LingBot reciprocal arithmetic and its float32 rounding for numeric alignment
             if type(fastvideo_args.pipeline_config).__name__.startswith("LingBotVideo"):
-                latents_mean = torch.tensor(latents_mean_value, device=latents.device,
-                                            dtype=torch.float32).view(1, -1, 1, 1, 1)
-                latents_std_inv = 1.0 / torch.tensor(latents_std_value, device=latents.device,
-                                                     dtype=torch.float32).view(1, -1, 1, 1, 1)
+                latents_mean = torch.tensor(latents_mean_value, device=latents.device, dtype=torch.float32).view(
+                    1, -1, 1, 1, 1
+                )
+                latents_std_inv = 1.0 / torch.tensor(
+                    latents_std_value, device=latents.device, dtype=torch.float32
+                ).view(1, -1, 1, 1, 1)
                 # See Lingbot: https://github.com/Robbyant/lingbot-video/blob/a638721cf2271804d02738b69f2ad788c4a559fc/lingbot_video/pipeline_lingbot_video.py#L282
                 return latents.float() / latents_std_inv + latents_mean
 
-            latents_mean = torch.tensor(latents_mean_value, device=latents.device,
-                                        dtype=latents.dtype).view(1, -1, 1, 1, 1)
-            latents_std = torch.tensor(latents_std_value, device=latents.device,
-                                       dtype=latents.dtype).view(1, -1, 1, 1, 1)
+            latents_mean = torch.tensor(latents_mean_value, device=latents.device, dtype=latents.dtype).view(
+                1, -1, 1, 1, 1
+            )
+            latents_std = torch.tensor(latents_std_value, device=latents.device, dtype=latents.dtype).view(
+                1, -1, 1, 1, 1
+            )
             return latents * latents_std + latents_mean
 
         # Diffusers-style: scaling_factor (+ optional shift_factor), read from
@@ -146,24 +151,25 @@ class DecodingStage(PipelineStage):
     def decode(self, latents: torch.Tensor, fastvideo_args: FastVideoArgs) -> torch.Tensor:
         """
         Decode latent representations into pixel space using VAE.
-        
+
         Args:
             latents: Input latent tensor with shape (batch, channels, frames, height_latents, width_latents)
             fastvideo_args: Configuration containing:
                 - disable_autocast: Whether to disable automatic mixed precision (default: False)
                 - pipeline_config.vae_precision: VAE computation precision ("fp32", "fp16", "bf16")
                 - pipeline_config.vae_tiling: Whether to enable VAE tiling for memory efficiency
-            
+
         Returns:
-            Decoded video tensor with shape (batch, channels, frames, height, width), 
+            Decoded video tensor with shape (batch, channels, frames, height, width),
             normalized to [0, 1] range and moved to CPU as float32
         """
         self.vae = self.vae.to(get_local_torch_device())
         latents = latents.to(get_local_torch_device())
 
         # Setup VAE precision (decode-only override falls back to vae_precision)
-        decode_precision = (fastvideo_args.pipeline_config.vae_decode_precision
-                            or fastvideo_args.pipeline_config.vae_precision)
+        decode_precision = (
+            fastvideo_args.pipeline_config.vae_decode_precision or fastvideo_args.pipeline_config.vae_precision
+        )
         vae_dtype = PRECISION_TO_TYPE[decode_precision]
         vae_autocast_enabled = (vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
 
@@ -173,7 +179,7 @@ class DecodingStage(PipelineStage):
 
         # The released LingBot decoder enters Wan VAE in channels-last-3d
         # layout; matching that boundary avoids selecting a different Conv3d path.
-        if (type(fastvideo_args.pipeline_config).__name__.startswith("LingBotVideo") and latents.ndim == 5):
+        if type(fastvideo_args.pipeline_config).__name__.startswith("LingBotVideo") and latents.ndim == 5:
             latents = latents.contiguous(memory_format=torch.channels_last_3d)
 
         # Decode latents
@@ -220,13 +226,13 @@ class DecodingStage(PipelineStage):
     ) -> tuple[torch.Tensor, list[torch.Tensor | None]]:
         """
         Decode latent representations into pixel space using VAE with streaming cache.
-        
+
         Args:
             latents: Input latent tensor with shape (batch, channels, frames, height_latents, width_latents)
             fastvideo_args: Configuration object.
             cache: VAE cache from previous call, or None to initialize a new cache.
             is_first_chunk: Whether this is the first chunk.
-            
+
         Returns:
             A tuple of (decoded_frames, updated_cache).
         """
@@ -234,8 +240,9 @@ class DecodingStage(PipelineStage):
         latents = latents.to(get_local_torch_device())
 
         # Setup VAE precision (decode-only override falls back to vae_precision)
-        decode_precision = (fastvideo_args.pipeline_config.vae_decode_precision
-                            or fastvideo_args.pipeline_config.vae_precision)
+        decode_precision = (
+            fastvideo_args.pipeline_config.vae_decode_precision or fastvideo_args.pipeline_config.vae_precision
+        )
         vae_dtype = PRECISION_TO_TYPE[decode_precision]
         vae_autocast_enabled = (vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
 
@@ -266,11 +273,11 @@ class DecodingStage(PipelineStage):
     ) -> ForwardBatch:
         """
         Decode latent representations into pixel space.
-        
+
         This method processes the batch through the VAE decoder, converting latent
         representations to pixel-space video/images. It also optionally decodes
         trajectory latents for visualization purposes.
-        
+
         Args:
             batch: The current batch containing:
                 - latents: Tensor to decode (batch, channels, frames, height_latents, width_latents)
@@ -282,7 +289,7 @@ class DecodingStage(PipelineStage):
                 - vae_cpu_offload: Whether to offload VAE to CPU after decoding
                 - model_loaded: Track VAE loading state
                 - model_paths: Path to VAE model if loading needed
-            
+
         Returns:
             Modified batch with:
                 - output: Decoded frames (batch, channels, frames, height, width) as CPU float32
@@ -321,20 +328,24 @@ class DecodingStage(PipelineStage):
         frames = frames.to(torch.float32)
 
         # Crop padding if this is a LongCat refinement
-        if hasattr(batch, 'num_cond_frames_added') and hasattr(batch, 'new_frame_size_before_padding'):
+        if hasattr(batch, "num_cond_frames_added") and hasattr(batch, "new_frame_size_before_padding"):
             num_cond_frames_added = batch.num_cond_frames_added
             new_frame_size = batch.new_frame_size_before_padding
             if num_cond_frames_added > 0 or frames.shape[2] != new_frame_size:
                 # frames is [B, C, T, H, W], crop temporal dimension
-                frames = frames[:, :, num_cond_frames_added:num_cond_frames_added + new_frame_size, :, :]
-                logger.info("Cropped LongCat refinement padding: %s:%s, final shape: %s", num_cond_frames_added,
-                            num_cond_frames_added + new_frame_size, frames.shape)
+                frames = frames[:, :, num_cond_frames_added : num_cond_frames_added + new_frame_size, :, :]
+                logger.info(
+                    "Cropped LongCat refinement padding: %s:%s, final shape: %s",
+                    num_cond_frames_added,
+                    num_cond_frames_added + new_frame_size,
+                    frames.shape,
+                )
 
         # Update batch with decoded image
         batch.output = frames
 
         # Offload models if needed
-        if hasattr(self, 'maybe_free_model_hooks'):
+        if hasattr(self, "maybe_free_model_hooks"):
             self.maybe_free_model_hooks()
 
         if fastvideo_args.vae_cpu_offload:

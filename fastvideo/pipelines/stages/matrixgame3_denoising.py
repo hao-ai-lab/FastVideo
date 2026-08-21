@@ -25,7 +25,6 @@ logger = init_logger(__name__)
 
 
 class MatrixGame3DenoisingStage(DenoisingStage):
-
     def _infer_num_iterations(self, batch: ForwardBatch) -> int:
         if batch.num_iterations is not None:
             return batch.num_iterations
@@ -44,8 +43,11 @@ class MatrixGame3DenoisingStage(DenoisingStage):
         result.add_check("eta", batch.eta, V.non_negative_float)
         result.add_check("generator", batch.generator, V.generator_or_list_generators)
         result.add_check("do_classifier_free_guidance", batch.do_classifier_free_guidance, V.bool_value)
-        result.add_check("negative_prompt_embeds", batch.negative_prompt_embeds,
-                         lambda x: not batch.do_classifier_free_guidance or V.list_not_empty(x))
+        result.add_check(
+            "negative_prompt_embeds",
+            batch.negative_prompt_embeds,
+            lambda x: not batch.do_classifier_free_guidance or V.list_not_empty(x),
+        )
         return result
 
     def forward(
@@ -126,7 +128,8 @@ class MatrixGame3DenoisingStage(DenoisingStage):
             "MatrixGame3 denoising stage requires batch_size=1 for action conditioning; "
             f"got batch.keyboard_cond.shape[0]={batch.keyboard_cond.shape[0]}. "
             "If batched action streams are needed, update build_extrinsics_from_actions "
-            "to handle per-batch-item trajectories.")
+            "to handle per-batch-item trajectories."
+        )
         extrinsics_all = build_extrinsics_from_actions(batch.keyboard_cond[0], batch.mouse_cond[0]).to(device)
         all_latents: list[torch.Tensor] = []
 
@@ -142,8 +145,9 @@ class MatrixGame3DenoisingStage(DenoisingStage):
             timesteps = self.scheduler.timesteps
 
             first_clip = clip_idx == 0
-            current_end_frame_idx = first_clip_frame if first_clip else first_clip_frame + clip_idx * (clip_frame -
-                                                                                                       past_frame)
+            current_end_frame_idx = (
+                first_clip_frame if first_clip else first_clip_frame + clip_idx * (clip_frame - past_frame)
+            )
             current_start_frame_idx = 0 if first_clip else current_end_frame_idx - clip_frame
             # 15 for first clip, 14 for later clips
             current_latent_frames = (first_clip_frame - 1) // 4 + 1 if first_clip else clip_frame // 4
@@ -159,14 +163,17 @@ class MatrixGame3DenoisingStage(DenoisingStage):
             current_latents = torch.randn(
                 (latents.shape[0], latents.shape[1], latent_end_idx - latent_start_idx, latent_h, latent_w),
                 generator=clip_generator if isinstance(clip_generator, torch.Generator) else None,
-                dtype=target_dtype).to(device)
+                dtype=target_dtype,
+            ).to(device)
             current_latents[:, :, :cond_frames] = img_cond[:, :, :cond_frames]
 
             c2ws_chunk = extrinsics_all[current_start_frame_idx:current_end_frame_idx]
-            src_indices = np.linspace(current_start_frame_idx, current_end_frame_idx - 1,
-                                      current_end_frame_idx - current_start_frame_idx)
-            tgt_indices = np.linspace(0 if first_clip else current_start_frame_idx + 3, current_end_frame_idx - 1,
-                                      current_latent_frames)
+            src_indices = np.linspace(
+                current_start_frame_idx, current_end_frame_idx - 1, current_end_frame_idx - current_start_frame_idx
+            )
+            tgt_indices = np.linspace(
+                0 if first_clip else current_start_frame_idx + 3, current_end_frame_idx - 1, current_latent_frames
+            )
 
             if batch.c2ws_plucker_emb is not None:
                 plucker_no_mem = batch.c2ws_plucker_emb[:, :, current_start_frame_idx:current_end_frame_idx]
@@ -208,7 +215,7 @@ class MatrixGame3DenoisingStage(DenoisingStage):
                     memory_latent_idx.append(get_latent_idx(mem_idx))
 
                     mem_idx_aligned = align_frame_to_block(mem_idx)
-                    mem_block = extrinsics_all[mem_idx_aligned:mem_idx_aligned + 4]
+                    mem_block = extrinsics_all[mem_idx_aligned : mem_idx_aligned + 4]
                     mem_src = np.linspace(mem_idx_aligned, mem_idx_aligned + mem_block.shape[0] - 1, mem_block.shape[0])
                     mem_tgt = np.array([mem_idx_aligned + 3], dtype=np.float32)
                     mem_pose = interpolate_camera_poses_handedness(
@@ -217,8 +224,9 @@ class MatrixGame3DenoisingStage(DenoisingStage):
                         src_trans_vec=mem_block[:, :3, 3].detach().cpu().numpy(),
                         tgt_indices=mem_tgt,
                     ).to(device=device, dtype=target_dtype)
-                    reference_pose = extrinsics_all[reference_idx:reference_idx + 1].to(device=device,
-                                                                                        dtype=target_dtype)
+                    reference_pose = extrinsics_all[reference_idx : reference_idx + 1].to(
+                        device=device, dtype=target_dtype
+                    )
                     rel_pair = torch.cat([reference_pose, mem_pose], dim=0)
                     rel_pose = compute_relative_poses(rel_pair, framewise=False)[1:2]
                     memory_pluckers.append(
@@ -228,7 +236,8 @@ class MatrixGame3DenoisingStage(DenoisingStage):
                             target_w=target_w,
                             latent_h=latent_h,
                             latent_w=latent_w,
-                        ).to(device=device, dtype=target_dtype))
+                        ).to(device=device, dtype=target_dtype)
+                    )
 
                 if memory_pluckers:
                     c2ws_plucker_emb = torch.cat(memory_pluckers + [plucker_no_mem], dim=2)
@@ -237,13 +246,16 @@ class MatrixGame3DenoisingStage(DenoisingStage):
                     mouse_cond_memory = torch.ones(
                         (clip_keyboard.shape[0], len(memory_latent_idx), clip_mouse.shape[-1]),
                         device=device,
-                        dtype=target_dtype)
+                        dtype=target_dtype,
+                    )
                     keyboard_cond_memory = -torch.ones(
                         (clip_keyboard.shape[0], len(memory_latent_idx), clip_keyboard.shape[-1]),
                         device=device,
-                        dtype=target_dtype)
+                        dtype=target_dtype,
+                    )
                     timestep_memory = x_memory.new_zeros(
-                        (x_memory.shape[0], x_memory.shape[2] * x_memory.shape[3] * x_memory.shape[4] // 4))
+                        (x_memory.shape[0], x_memory.shape[2] * x_memory.shape[3] * x_memory.shape[4] // 4)
+                    )
             with self.progress_bar(total=len(timesteps)) as progress_bar:
                 for timestep in timesteps:
                     latent_model_input = current_latents
@@ -259,10 +271,10 @@ class MatrixGame3DenoisingStage(DenoisingStage):
                     )
                     timestep_tokens[:cond_frames].zero_()
                     timestep_tokens = timestep_tokens.flatten().unsqueeze(0)
-                    with torch.autocast(device_type="cuda", dtype=target_dtype, enabled=autocast_enabled), \
-                        set_forward_context(current_timestep=timestep,
-                                            attn_metadata=None,
-                                            forward_batch=batch):
+                    with (
+                        torch.autocast(device_type="cuda", dtype=target_dtype, enabled=autocast_enabled),
+                        set_forward_context(current_timestep=timestep, attn_metadata=None, forward_batch=batch),
+                    ):
                         noise_pred = self.transformer(
                             latent_model_input,
                             prompt_embeds,
@@ -312,11 +324,9 @@ class MatrixGame3DenoisingStage(DenoisingStage):
                         noise_pred = noise_pred[:, :, :aligned_t, :aligned_h, :aligned_w]
                         current_latents = current_latents[:, :, :aligned_t, :aligned_h, :aligned_w]
 
-                    current_latents = self.scheduler.step(noise_pred,
-                                                          timestep,
-                                                          current_latents,
-                                                          **extra_step_kwargs,
-                                                          return_dict=False)[0]
+                    current_latents = self.scheduler.step(
+                        noise_pred, timestep, current_latents, **extra_step_kwargs, return_dict=False
+                    )[0]
                     current_latents[:, :, :cond_frames] = img_cond[:, :, :cond_frames]
                     progress_bar.update()
 

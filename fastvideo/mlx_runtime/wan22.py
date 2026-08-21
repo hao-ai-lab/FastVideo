@@ -82,13 +82,16 @@ class MLXWan22TransformerBlock:
         key = linear(norm_hidden, self.weights["to_k.weight"], self.weights.get("to_k.bias"))
         value = linear(norm_hidden, self.weights["to_v.weight"], self.weights.get("to_v.bias"))
 
-        query = rms_norm(query, self.weights["norm_q.weight"],
-                         eps=self.eps).reshape(batch, -1, self.num_heads, self.head_dim)
-        key = rms_norm(key, self.weights["norm_k.weight"], eps=self.eps).reshape(batch, -1, self.num_heads,
-                                                                                 self.head_dim)
+        query = rms_norm(query, self.weights["norm_q.weight"], eps=self.eps).reshape(
+            batch, -1, self.num_heads, self.head_dim
+        )
+        key = rms_norm(key, self.weights["norm_k.weight"], eps=self.eps).reshape(
+            batch, -1, self.num_heads, self.head_dim
+        )
         value = value.reshape(batch, -1, self.num_heads, self.head_dim)
 
         from fastvideo.mlx_runtime.fastwan import apply_rotary_emb
+
         query = apply_rotary_emb(query, cos, sin, is_neox_style=False)
         key = apply_rotary_emb(key, cos, sin, is_neox_style=False)
 
@@ -102,10 +105,12 @@ class MLXWan22TransformerBlock:
         attn = linear(attn, self.weights["to_out.weight"], self.weights.get("to_out.bias"))
 
         hidden_states = hidden_states + (attn * gate_msa).astype(orig_dtype)
-        norm_hidden = layer_norm(hidden_states.astype(mx.float32),
-                                 weight=self.weights["self_attn_residual_norm.norm.weight"],
-                                 bias=self.weights["self_attn_residual_norm.norm.bias"],
-                                 eps=self.eps).astype(orig_dtype)
+        norm_hidden = layer_norm(
+            hidden_states.astype(mx.float32),
+            weight=self.weights["self_attn_residual_norm.norm.weight"],
+            bias=self.weights["self_attn_residual_norm.norm.bias"],
+            eps=self.eps,
+        ).astype(orig_dtype)
 
         # 2. Cross-attention, then per-token shift/scale modulation.
         cross = self.attn2(norm_hidden, encoder_hidden_states)
@@ -160,21 +165,37 @@ class MLXWan22DiT:
         """Per-token conditioning. ``timestep`` is ``[B, L]`` (one level per token)."""
         batch, seq = timestep.shape
         t_freq = timestep_embedding(timestep.reshape(-1), self.freq_dim).astype(
-            weight_dtype(self.weights["condition_embedder.time_embedder.linear_1.weight"]))
-        temb = linear(t_freq, self.weights["condition_embedder.time_embedder.linear_1.weight"],
-                      self.weights["condition_embedder.time_embedder.linear_1.bias"])
+            weight_dtype(self.weights["condition_embedder.time_embedder.linear_1.weight"])
+        )
+        temb = linear(
+            t_freq,
+            self.weights["condition_embedder.time_embedder.linear_1.weight"],
+            self.weights["condition_embedder.time_embedder.linear_1.bias"],
+        )
         temb = silu(temb)
-        temb = linear(temb, self.weights["condition_embedder.time_embedder.linear_2.weight"],
-                      self.weights["condition_embedder.time_embedder.linear_2.bias"])
-        timestep_proj = linear(silu(temb), self.weights["condition_embedder.time_proj.weight"],
-                               self.weights["condition_embedder.time_proj.bias"])
+        temb = linear(
+            temb,
+            self.weights["condition_embedder.time_embedder.linear_2.weight"],
+            self.weights["condition_embedder.time_embedder.linear_2.bias"],
+        )
+        timestep_proj = linear(
+            silu(temb),
+            self.weights["condition_embedder.time_proj.weight"],
+            self.weights["condition_embedder.time_proj.bias"],
+        )
         timestep_proj = timestep_proj.reshape(batch, seq, 6, self.hidden_size)
 
-        ehs = linear(encoder_hidden_states, self.weights["condition_embedder.text_embedder.linear_1.weight"],
-                     self.weights["condition_embedder.text_embedder.linear_1.bias"])
+        ehs = linear(
+            encoder_hidden_states,
+            self.weights["condition_embedder.text_embedder.linear_1.weight"],
+            self.weights["condition_embedder.text_embedder.linear_1.bias"],
+        )
         ehs = gelu_tanh(ehs)
-        ehs = linear(ehs, self.weights["condition_embedder.text_embedder.linear_2.weight"],
-                     self.weights["condition_embedder.text_embedder.linear_2.bias"])
+        ehs = linear(
+            ehs,
+            self.weights["condition_embedder.text_embedder.linear_2.weight"],
+            self.weights["condition_embedder.text_embedder.linear_2.bias"],
+        )
         temb_out = temb.reshape(batch, seq, self.hidden_size)
         return temb_out, timestep_proj, ehs
 
@@ -242,18 +263,19 @@ def mlx_wan22_dit_from_diffusers_safetensors(
     compile: bool = False,
 ) -> MLXWan22DiT:
     """Load Wan2.2-TI2V-5B (FullAttn) into ``MLXWan22DiT`` via the dense loader."""
-    dense = mlx_dit_from_diffusers_safetensors(checkpoint_path,
-                                               config_path,
-                                               dtype=dtype,
-                                               num_blocks=num_blocks,
-                                               quantization=quantization)
+    dense = mlx_dit_from_diffusers_safetensors(
+        checkpoint_path, config_path, dtype=dtype, num_blocks=num_blocks, quantization=quantization
+    )
     inner_dim = int(dense.config["num_attention_heads"]) * int(dense.config["attention_head_dim"])
     blocks = [
-        MLXWan22TransformerBlock(block.weights,
-                                 dim=inner_dim,
-                                 ffn_dim=int(dense.config["ffn_dim"]),
-                                 num_heads=int(dense.config["num_attention_heads"]),
-                                 eps=float(dense.config.get("eps", 1e-6))) for block in dense.blocks
+        MLXWan22TransformerBlock(
+            block.weights,
+            dim=inner_dim,
+            ffn_dim=int(dense.config["ffn_dim"]),
+            num_heads=int(dense.config["num_attention_heads"]),
+            eps=float(dense.config.get("eps", 1e-6)),
+        )
+        for block in dense.blocks
     ]
     return MLXWan22DiT(dense.weights, blocks, dense.config, compile=compile)
 
@@ -281,6 +303,7 @@ def mlx_wan22_dit_from_mlx_checkpoint(
             ffn_dim=int(dense.config["ffn_dim"]),
             num_heads=int(dense.config["num_attention_heads"]),
             eps=float(dense.config.get("eps", 1e-6)),
-        ) for block in dense.blocks
+        )
+        for block in dense.blocks
     ]
     return MLXWan22DiT(dense.weights, blocks, dense.config, compile=compile)

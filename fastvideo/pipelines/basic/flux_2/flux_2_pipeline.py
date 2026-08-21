@@ -11,11 +11,14 @@ from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
 from fastvideo.pipelines.basic.flux_2.flux_2_latent_preparation import (
-    Flux2LatentPreparationStage, )
+    Flux2LatentPreparationStage,
+)
 from fastvideo.pipelines.basic.flux_2.flux_2_timestep_preparation import (
-    Flux2TimestepPreparationStage, )
+    Flux2TimestepPreparationStage,
+)
 from fastvideo.pipelines.basic.flux_2.flux_2_text_encoding import (
-    Flux2TextEncodingStage, )
+    Flux2TextEncodingStage,
+)
 from fastvideo.pipelines.stages import (
     ConditioningStage,
     DecodingStage,
@@ -70,7 +73,9 @@ class Flux2Pipeline(LoRAPipeline, ComposedPipelineBase):
 
         self.add_stage(
             stage_name="timestep_preparation_stage",
-            stage=Flux2TimestepPreparationStage(scheduler=self.get_module("scheduler"), ),
+            stage=Flux2TimestepPreparationStage(
+                scheduler=self.get_module("scheduler"),
+            ),
         )
 
         self.add_stage(

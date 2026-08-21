@@ -9,6 +9,7 @@ The message catalogue matches the contract in
 ``docs/design/server_contracts/streaming.md``; additions must land in
 both places in the same PR.
 """
+
 from __future__ import annotations
 
 from typing import Annotated, Any, Literal, Union
@@ -144,7 +145,7 @@ class MediaInit(BaseModel):
 
     type: Literal["media_init"] = "media_init"
     segment_idx: int
-    mime: str = "video/mp4; codecs=\"avc1.64001f, mp4a.40.2\""
+    mime: str = 'video/mp4; codecs="avc1.64001f, mp4a.40.2"'
     stream_id: str
     mode: Literal["av_fmp4"] = "av_fmp4"
 

@@ -36,8 +36,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse
 
 from fastvideo_studio.database import default_settings_dict
-from fastvideo_studio.models import (CreateDatasetRequest, CreateJobRequest, SettingsUpdate, UpdateCaptionRequest,
-                                     model_label)
+from fastvideo_studio.models import (
+    CreateDatasetRequest,
+    CreateJobRequest,
+    SettingsUpdate,
+    UpdateCaptionRequest,
+    model_label,
+)
 
 # --- Config -----------------------------------------------------------------
 
@@ -301,13 +306,12 @@ def _seed() -> None:
     """Seed a couple of datasets and one completed inference job."""
     now = time.time()
     seeds = [
-        ("Sunset Clips", ["sunset_01.mp4", "sunset_02.mp4"], {
-            "sunset_01.mp4": "A sunset over the ocean",
-            "sunset_02.mp4": "A sunset over the mountains"
-        }),
-        ("City Timelapse", ["city_01.mp4"], {
-            "city_01.mp4": "A busy city intersection at night"
-        }),
+        (
+            "Sunset Clips",
+            ["sunset_01.mp4", "sunset_02.mp4"],
+            {"sunset_01.mp4": "A sunset over the ocean", "sunset_02.mp4": "A sunset over the mountains"},
+        ),
+        ("City Timelapse", ["city_01.mp4"], {"city_01.mp4": "A busy city intersection at night"}),
     ]
     for idx, (name, file_names, captions) in enumerate(seeds):
         dataset_id = str(uuid.uuid4())
@@ -401,16 +405,18 @@ def list_gpus() -> dict[str, Any]:
     """Two fake GPUs with slight per-request jitter so the page looks live."""
     gpus = []
     for index, (base_util, used_mib) in enumerate([(62, 61_440), (7, 4_096)]):
-        gpus.append({
-            "index": index,
-            "name": "NVIDIA Mock GPU 80GB",
-            "utilization": max(0, min(100, base_util + random.randint(-5, 5))),
-            "memory_used_mib": used_mib + random.randint(-256, 256),
-            "memory_total_mib": 81_920,
-            "temperature_c": 55 + random.randint(-3, 3),
-            "power_watts": 310.0 + random.randint(-20, 20),
-            "power_limit_watts": 700.0,
-        })
+        gpus.append(
+            {
+                "index": index,
+                "name": "NVIDIA Mock GPU 80GB",
+                "utilization": max(0, min(100, base_util + random.randint(-5, 5))),
+                "memory_used_mib": used_mib + random.randint(-256, 256),
+                "memory_total_mib": 81_920,
+                "temperature_c": 55 + random.randint(-3, 3),
+                "power_watts": 310.0 + random.randint(-20, 20),
+                "power_limit_watts": 700.0,
+            }
+        )
     return {"available": True, "gpus": gpus, "error": None}
 
 

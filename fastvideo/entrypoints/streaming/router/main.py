@@ -10,6 +10,7 @@ primary, JSON + binary passthrough in both directions, and a
 ``/status`` endpoint for operators. Sticky-session routing (so a
 reconnect lands on the same backend) is left for a follow-up.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -61,7 +62,8 @@ def build_router_app(
                 registry=state.registry,
                 config=state.config,
                 stop_event=state.stop_event,
-            ))
+            )
+        )
         try:
             yield
         finally:
@@ -74,28 +76,35 @@ def build_router_app(
 
     @app.get("/status")
     async def _status() -> JSONResponse:
-        return JSONResponse({
-            "replicas": [{
-                "url": r.url,
-                "primary": r.primary,
-                "status": r.health.status.value,
-                "last_ok_at": r.health.last_ok_at,
-                "last_latency_ms": r.health.last_latency_ms,
-                "consecutive_failures": r.health.consecutive_failures,
-            } for r in state.registry.all()],
-        })
+        return JSONResponse(
+            {
+                "replicas": [
+                    {
+                        "url": r.url,
+                        "primary": r.primary,
+                        "status": r.health.status.value,
+                        "last_ok_at": r.health.last_ok_at,
+                        "last_latency_ms": r.health.last_latency_ms,
+                        "consecutive_failures": r.health.consecutive_failures,
+                    }
+                    for r in state.registry.all()
+                ],
+            }
+        )
 
     @app.websocket("/v1/stream")
     async def _proxy(websocket: WebSocket) -> None:
         await websocket.accept()
         replica = state.registry.select()
         if replica is None:
-            await websocket.send_json({
-                "type": "error",
-                "code": "gpu_unavailable",
-                "message": "router: no healthy replica available",
-                "retryable": True,
-            })
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "code": "gpu_unavailable",
+                    "message": "router: no healthy replica available",
+                    "retryable": True,
+                }
+            )
             await websocket.close(code=1013, reason="no_healthy_replica")
             return
 
@@ -107,12 +116,14 @@ def build_router_app(
         except Exception as exc:
             logger.exception("router: bridge failed: %s", exc)
             with contextlib.suppress(RuntimeError):
-                await websocket.send_json({
-                    "type": "error",
-                    "code": "worker_failed",
-                    "message": f"router bridge failed: {exc}",
-                    "retryable": True,
-                })
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "code": "worker_failed",
+                        "message": f"router bridge failed: {exc}",
+                        "retryable": True,
+                    }
+                )
             with contextlib.suppress(RuntimeError):
                 await websocket.close(code=1011)
 
@@ -206,9 +217,9 @@ async def _forward_backend_to_client(backend_ws, client_ws: WebSocket) -> None:
 
 def _websocket_url_for(http_url: str) -> str:
     if http_url.startswith("https://"):
-        return "wss://" + http_url[len("https://"):]
+        return "wss://" + http_url[len("https://") :]
     if http_url.startswith("http://"):
-        return "ws://" + http_url[len("http://"):]
+        return "ws://" + http_url[len("http://") :]
     return http_url
 
 

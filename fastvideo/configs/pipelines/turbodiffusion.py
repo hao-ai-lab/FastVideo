@@ -5,6 +5,7 @@ TurboDiffusion pipeline configurations.
 TurboDiffusion uses RCM (recurrent Consistency Model) scheduler with
 SLA (Sparse-Linear Attention) for fast 1-4 step video generation.
 """
+
 from dataclasses import dataclass, field
 
 from fastvideo.configs.models import DiTConfig, EncoderConfig, VAEConfig
@@ -21,10 +22,11 @@ from collections.abc import Callable
 @dataclass
 class TurboDiffusionT2VConfig(PipelineConfig):
     """Base configuration for TurboDiffusion T2V pipeline.
-    
+
     Uses RCM scheduler with sigma_max=80 for 1-4 step generation.
     No boundary_ratio (single model, no switching).
     """
+
     # DiT
     dit_config: DiTConfig = field(default_factory=WanVideoConfig)
     # VAE
@@ -39,14 +41,15 @@ class TurboDiffusionT2VConfig(PipelineConfig):
     boundary_ratio: float | None = None
 
     # Text encoding stage
-    text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (T5Config(), ))
-    postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.Tensor],
-                                  ...] = field(default_factory=lambda: (t5_postprocess_text, ))
+    text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (T5Config(),))
+    postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.Tensor], ...] = field(
+        default_factory=lambda: (t5_postprocess_text,)
+    )
 
     # Precision for each component
     precision: str = "bf16"
     vae_precision: str = "fp32"
-    text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("fp32", ))
+    text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("fp32",))
 
     # self-forcing params
     warp_denoising_step: bool = True
@@ -61,25 +64,28 @@ class TurboDiffusionT2VConfig(PipelineConfig):
 @dataclass
 class TurboDiffusionT2V_1_3B_Config(TurboDiffusionT2VConfig):
     """Configuration for TurboDiffusion T2V 1.3B model."""
+
     pass
 
 
 @dataclass
 class TurboDiffusionT2V_14B_Config(TurboDiffusionT2VConfig):
     """Configuration for TurboDiffusion T2V 14B model.
-    
+
     Uses same config as 1.3B but with higher flow_shift for 14B model.
     """
+
     flow_shift: float | None = 5.0
 
 
 @dataclass
 class TurboDiffusionI2VConfig(PipelineConfig):
     """Base configuration for TurboDiffusion I2V pipeline.
-    
+
     Uses RCM scheduler with sigma_max=200 for 1-4 step generation.
     Uses boundary_ratio=0.9 for high-noise to low-noise model switching.
     """
+
     # DiT
     dit_config: DiTConfig = field(default_factory=WanVideoConfig)
     # VAE
@@ -93,9 +99,10 @@ class TurboDiffusionI2VConfig(PipelineConfig):
     boundary_ratio: float | None = 0.9
 
     # Text encoding stage
-    text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (T5Config(), ))
-    postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.Tensor],
-                                  ...] = field(default_factory=lambda: (t5_postprocess_text, ))
+    text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (T5Config(),))
+    postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.Tensor], ...] = field(
+        default_factory=lambda: (t5_postprocess_text,)
+    )
 
     # Image encoder for I2V
     image_encoder_config: EncoderConfig = field(default_factory=CLIPVisionConfig)
@@ -104,7 +111,7 @@ class TurboDiffusionI2VConfig(PipelineConfig):
     # Precision for each component
     precision: str = "bf16"
     vae_precision: str = "fp32"
-    text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("fp32", ))
+    text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("fp32",))
 
     # self-forcing params
     warp_denoising_step: bool = True
@@ -118,4 +125,5 @@ class TurboDiffusionI2VConfig(PipelineConfig):
 @dataclass
 class TurboDiffusionI2V_A14B_Config(TurboDiffusionI2VConfig):
     """Configuration for TurboDiffusion I2V A14B model."""
+
     pass

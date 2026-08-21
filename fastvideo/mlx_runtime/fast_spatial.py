@@ -142,8 +142,9 @@ def plan_fast_spatial(
         ValueError: If the upsample mode is unsupported or ``sharpen`` is negative.
     """
     if upsample_mode not in PIXEL_UPSAMPLE_MODES:
-        raise ValueError(f"Unsupported upsample mode: {upsample_mode!r} "
-                         f"(expected one of {', '.join(PIXEL_UPSAMPLE_MODES)})")
+        raise ValueError(
+            f"Unsupported upsample mode: {upsample_mode!r} (expected one of {', '.join(PIXEL_UPSAMPLE_MODES)})"
+        )
     if sharpen < 0.0:
         raise ValueError(f"sharpen must be >= 0, got {sharpen}")
     plan = plan_refine_resolutions(

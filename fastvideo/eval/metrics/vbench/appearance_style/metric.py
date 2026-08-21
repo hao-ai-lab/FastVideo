@@ -31,7 +31,6 @@ def _clip_transform(frames: torch.Tensor) -> torch.Tensor:
 
 @register("vbench.appearance_style")
 class AppearanceStyleMetric(BaseMetric):
-
     name = "vbench.appearance_style"
     requires_reference = False
     higher_is_better = True
@@ -54,6 +53,7 @@ class AppearanceStyleMetric(BaseMetric):
             return
         import clip
         from fastvideo.eval.models import get_cache_dir
+
         self._model, _ = clip.load(
             "ViT-B/32",
             device=self.device,
@@ -75,7 +75,7 @@ class AppearanceStyleMetric(BaseMetric):
         chunk = self._chunk_size or 64
         img_feats = []
         for i in range(0, frames.shape[0], chunk):
-            f = self._model.encode_image(frames[i:i + chunk]).float()
+            f = self._model.encode_image(frames[i : i + chunk]).float()
             f = F.normalize(f, dim=-1, p=2)
             img_feats.append(f)
         img_feats = torch.cat(img_feats, dim=0)  # (T, D)

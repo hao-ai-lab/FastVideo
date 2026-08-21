@@ -3,13 +3,13 @@
 
 from dataclasses import dataclass, field
 
-from fastvideo.configs.models.encoders.base import (ImageEncoderArchConfig, ImageEncoderConfig)
+from fastvideo.configs.models.encoders.base import ImageEncoderArchConfig, ImageEncoderConfig
 
 
 @dataclass
 class SiglipVisionArchConfig(ImageEncoderArchConfig):
     """Architecture configuration for SigLIP vision encoder.
-    
+
     Fields match the config.json from HuggingFace SigLIP checkpoints.
     """
 
@@ -29,11 +29,13 @@ class SiglipVisionArchConfig(ImageEncoderArchConfig):
     patch_size: int = 14
 
     # FastVideo specific - QKV fusion mapping
-    stacked_params_mapping: list = field(default_factory=lambda: [
-        ("qkv_proj", "q_proj", "q"),
-        ("qkv_proj", "k_proj", "k"),
-        ("qkv_proj", "v_proj", "v"),
-    ])
+    stacked_params_mapping: list = field(
+        default_factory=lambda: [
+            ("qkv_proj", "q_proj", "q"),
+            ("qkv_proj", "k_proj", "k"),
+            ("qkv_proj", "v_proj", "v"),
+        ]
+    )
 
 
 @dataclass

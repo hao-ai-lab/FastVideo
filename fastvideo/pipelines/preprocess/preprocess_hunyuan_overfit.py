@@ -90,28 +90,36 @@ def main() -> None:
     vae.load_state_dict(loaded, strict=False)
     vae = vae.to(device=device, dtype=torch.float16).eval()
     vae.use_parallel_tiling = False
-    print(f"VAE loaded ({sum(p.numel() for p in vae.parameters())/1e6:.0f}M)")
+    print(f"VAE loaded ({sum(p.numel() for p in vae.parameters()) / 1e6:.0f}M)")
 
     # --- Load text encoders ---
     print("Loading LLaMA text encoder...")
     from transformers import AutoTokenizer, CLIPTextModel, LlamaModel
-    from fastvideo.configs.pipelines.hunyuan import (LlamaConfig, CLIPTextConfig)
+    from fastvideo.configs.pipelines.hunyuan import LlamaConfig, CLIPTextConfig
 
     llama_cfg = LlamaConfig()
     llama_tok = AutoTokenizer.from_pretrained(os.path.join(model_path, "tokenizer"))
-    llama_enc = LlamaModel.from_pretrained(
-        os.path.join(model_path, "text_encoder"),
-        torch_dtype=torch.float16,
-    ).to(device).eval()
+    llama_enc = (
+        LlamaModel.from_pretrained(
+            os.path.join(model_path, "text_encoder"),
+            torch_dtype=torch.float16,
+        )
+        .to(device)
+        .eval()
+    )
     llama_tok_kwargs = dict(llama_cfg.tokenizer_kwargs)
 
     print("Loading CLIP text encoder...")
     clip_cfg = CLIPTextConfig()
     clip_tok = AutoTokenizer.from_pretrained(os.path.join(model_path, "tokenizer_2"))
-    clip_enc = CLIPTextModel.from_pretrained(
-        os.path.join(model_path, "text_encoder_2"),
-        torch_dtype=torch.float16,
-    ).to(device).eval()
+    clip_enc = (
+        CLIPTextModel.from_pretrained(
+            os.path.join(model_path, "text_encoder_2"),
+            torch_dtype=torch.float16,
+        )
+        .to(device)
+        .eval()
+    )
     clip_tok_kwargs = dict(clip_cfg.tokenizer_kwargs)
 
     # --- Process each video ---
@@ -151,11 +159,15 @@ def main() -> None:
         # Combine: [pooled_clip_row, llama_embeds]
         llama_dim = llama_embeds.shape[-1]
         pooled_row = torch.zeros(llama_dim, device=device, dtype=torch.float16)
-        pooled_row[:clip_pooled.shape[-1]] = clip_pooled
-        text_embedding = torch.cat(
-            [pooled_row.unsqueeze(0), llama_embeds],
-            dim=0,
-        ).float().cpu()  # [seq+1, dim]
+        pooled_row[: clip_pooled.shape[-1]] = clip_pooled
+        text_embedding = (
+            torch.cat(
+                [pooled_row.unsqueeze(0), llama_embeds],
+                dim=0,
+            )
+            .float()
+            .cpu()
+        )  # [seq+1, dim]
         print(f"  Text embedding shape: {text_embedding.shape}")
 
         record = {
@@ -182,8 +194,7 @@ def main() -> None:
 
     # Write parquet
     table = pa.table(
-        {k: [r[k] for r in records]
-         for k in records[0]},
+        {k: [r[k] for r in records] for k in records[0]},
         schema=pyarrow_schema_t2v,
     )
     output_path = os.path.join(OUTPUT_DIR, "data_00000.parquet")

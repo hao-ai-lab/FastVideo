@@ -16,8 +16,12 @@ except ImportError:
 
 from typing import Any
 
-from fastvideo.attention.backends.abstract import (AttentionBackend, AttentionImpl, AttentionMetadata,
-                                                   AttentionMetadataBuilder)
+from fastvideo.attention.backends.abstract import (
+    AttentionBackend,
+    AttentionImpl,
+    AttentionMetadata,
+    AttentionMetadataBuilder,
+)
 from fastvideo.distributed import get_sp_group
 from fastvideo.logger import init_logger
 
@@ -41,8 +45,11 @@ def get_tile_partition_indices(
     for t in range(math.ceil(T / ts)):
         for h in range(math.ceil(H / hs)):
             for w in range(math.ceil(W / ws)):
-                ls.append(indices[t * ts:min(t * ts + ts, T), h * hs:min(h * hs + hs, H),
-                                  w * ws:min(w * ws + ws, W)].flatten())
+                ls.append(
+                    indices[
+                        t * ts : min(t * ts + ts, T), h * hs : min(h * hs + hs, H), w * ws : min(w * ws + ws, W)
+                    ].flatten()
+                )
     index = torch.cat(ls, dim=0)
     return index
 
@@ -79,7 +86,7 @@ def construct_variable_block_sizes(
 
     def _sizes(dim_len: int, tile: int, n_tiles: int) -> torch.LongTensor:
         """Vector with the size of each tile along one dimension."""
-        sizes = torch.full((n_tiles, ), tile, dtype=torch.int, device=device)
+        sizes = torch.full((n_tiles,), tile, dtype=torch.int, device=device)
         # size of last (possibly partial) tile
         remainder = dim_len - (n_tiles - 1) * tile
         sizes[-1] = remainder if remainder > 0 else tile
@@ -113,7 +120,6 @@ def get_non_pad_index(
 
 
 class VideoSparseAttentionBackend(AttentionBackend):
-
     accept_output_buffer: bool = True
 
     @staticmethod
@@ -183,14 +189,13 @@ def scatter_into_tile_buf(
     its aliasing contract: the result is only valid until the next call with
     the same buffer.
     """
-    if (buf is None or buf.shape != target_shape or buf.dtype != x.dtype or buf.device != x.device):
+    if buf is None or buf.shape != target_shape or buf.dtype != x.dtype or buf.device != x.device:
         buf = torch.zeros(target_shape, device=x.device, dtype=x.dtype)
     buf[:, dst_index] = x if src_index is None else x[:, src_index]
     return buf
 
 
 class VideoSparseAttentionMetadataBuilder(AttentionMetadataBuilder):
-
     def __init__(self) -> None:
         pass
 
@@ -208,11 +213,17 @@ class VideoSparseAttentionMetadataBuilder(AttentionMetadataBuilder):
         **kwargs: dict[str, Any],
     ) -> VideoSparseAttentionMetadata:
         patch_size = patch_size
-        dit_seq_shape = (raw_latent_shape[0] // patch_size[0], raw_latent_shape[1] // patch_size[1],
-                         raw_latent_shape[2] // patch_size[2])
+        dit_seq_shape = (
+            raw_latent_shape[0] // patch_size[0],
+            raw_latent_shape[1] // patch_size[1],
+            raw_latent_shape[2] // patch_size[2],
+        )
 
-        num_tiles = (math.ceil(dit_seq_shape[0] / VSA_TILE_SIZE[0]), math.ceil(dit_seq_shape[1] / VSA_TILE_SIZE[1]),
-                     math.ceil(dit_seq_shape[2] / VSA_TILE_SIZE[2]))
+        num_tiles = (
+            math.ceil(dit_seq_shape[0] / VSA_TILE_SIZE[0]),
+            math.ceil(dit_seq_shape[1] / VSA_TILE_SIZE[1]),
+            math.ceil(dit_seq_shape[2] / VSA_TILE_SIZE[2]),
+        )
         total_seq_length = math.prod(dit_seq_shape)
 
         tile_partition_indices = get_tile_partition_indices(dit_seq_shape, VSA_TILE_SIZE, device)
@@ -232,11 +243,11 @@ class VideoSparseAttentionMetadataBuilder(AttentionMetadataBuilder):
             variable_block_sizes=variable_block_sizes,
             non_pad_index=non_pad_index,
             untile_combined_index=untile_combined_index,
-            cache_tile_buf=cache_tile_buf)
+            cache_tile_buf=cache_tile_buf,
+        )
 
 
 class VideoSparseAttentionImpl(AttentionImpl):
-
     def __init__(
         self,
         num_heads: int,
@@ -269,14 +280,16 @@ class VideoSparseAttentionImpl(AttentionImpl):
         target_shape = (x.shape[0], t_padded_size * h_padded_size * w_padded_size, x.shape[-2], x.shape[-1])
 
         if not attn_metadata.cache_tile_buf:
-            return scatter_into_tile_buf(x, target_shape, attn_metadata.non_pad_index, None,
-                                         attn_metadata.tile_partition_indices)
+            return scatter_into_tile_buf(
+                x, target_shape, attn_metadata.non_pad_index, None, attn_metadata.tile_partition_indices
+            )
 
         # Buffer scoped to the per-step metadata (lazily allocated on the
         # first VSA layer's call within a denoising step), which keeps reuse
         # safe across concurrent requests.
-        buf = scatter_into_tile_buf(x, target_shape, attn_metadata.non_pad_index, attn_metadata.tile_buf,
-                                    attn_metadata.tile_partition_indices)
+        buf = scatter_into_tile_buf(
+            x, target_shape, attn_metadata.non_pad_index, attn_metadata.tile_buf, attn_metadata.tile_partition_indices
+        )
         attn_metadata.tile_buf = buf
         return buf
 
@@ -316,14 +329,16 @@ class VideoSparseAttentionImpl(AttentionImpl):
         # 256-element tiles auto-route to the FA4 CuTe BSHD fastpath, which
         # consumes [B, S, H, D] directly -- skip the transpose round-trip.
         if block_elements == 256 and video_sparse_attn_bshd is not None:
-            return video_sparse_attn_bshd(query,
-                                          key,
-                                          value,
-                                          attn_metadata.variable_block_sizes,
-                                          attn_metadata.variable_block_sizes,
-                                          cur_topk,
-                                          block_size=VSA_TILE_SIZE,
-                                          compress_attn_weight=gate_compress)
+            return video_sparse_attn_bshd(
+                query,
+                key,
+                value,
+                attn_metadata.variable_block_sizes,
+                attn_metadata.variable_block_sizes,
+                cur_topk,
+                block_size=VSA_TILE_SIZE,
+                compress_attn_weight=gate_compress,
+            )
 
         if video_sparse_attn is None:
             raise NotImplementedError("video_sparse_attn is not installed")
@@ -332,11 +347,13 @@ class VideoSparseAttentionImpl(AttentionImpl):
         key = key.transpose(1, 2).contiguous()
         value = value.transpose(1, 2).contiguous()
         gate_compress = gate_compress.transpose(1, 2).contiguous()
-        return video_sparse_attn(query,
-                                 key,
-                                 value,
-                                 attn_metadata.variable_block_sizes,
-                                 attn_metadata.variable_block_sizes,
-                                 cur_topk,
-                                 block_size=VSA_TILE_SIZE,
-                                 compress_attn_weight=gate_compress).transpose(1, 2)
+        return video_sparse_attn(
+            query,
+            key,
+            value,
+            attn_metadata.variable_block_sizes,
+            attn_metadata.variable_block_sizes,
+            cur_topk,
+            block_size=VSA_TILE_SIZE,
+            compress_attn_weight=gate_compress,
+        ).transpose(1, 2)

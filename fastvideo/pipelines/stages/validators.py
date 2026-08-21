@@ -252,7 +252,7 @@ class StageValidators:
         """Return a validator that checks if value is a positive integer divisible by divisor."""
 
         def validator(value: Any) -> bool:
-            return (isinstance(value, int) and value > 0 and StageValidators.divisible_by(value, divisor))
+            return isinstance(value, int) and value > 0 and StageValidators.divisible_by(value, divisor)
 
         return validator
 
@@ -278,11 +278,9 @@ class StageValidators:
 class ValidationFailure:
     """Details about a specific validation failure."""
 
-    def __init__(self,
-                 validator_name: str,
-                 actual_value: Any,
-                 expected: str | None = None,
-                 error_msg: str | None = None):
+    def __init__(
+        self, validator_name: str, actual_value: Any, expected: str | None = None, error_msg: str | None = None
+    ):
         self.validator_name = validator_name
         self.actual_value = actual_value
         self.expected = expected
@@ -333,27 +331,28 @@ class VerificationResult:
         self._checks: dict[str, bool] = {}
         self._failures: dict[str, list[ValidationFailure]] = {}
 
-    def add_check(self, field_name: str, value: Any,
-                  validators: Callable[[Any], bool] | list[Callable[[Any], bool]]) -> 'VerificationResult':
+    def add_check(
+        self, field_name: str, value: Any, validators: Callable[[Any], bool] | list[Callable[[Any], bool]]
+    ) -> "VerificationResult":
         """
         Add a validation check for a field.
-        
+
         Args:
             field_name: Name of the field being checked
             value: The actual value to validate
             validators: Single validation function or list of validation functions.
                        Each function will be called with the value as its first argument.
-            
+
         Returns:
             Self for method chaining
-            
+
         Examples:
             # Single validator
             result.add_check("tensor", my_tensor, V.is_tensor)
-            
+
             # Multiple validators (all must pass)
             result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])
-            
+
             # Using partial functions for parameters
             result.add_check("height", batch.height, [V.not_none, V.divisible(8)])
         """
@@ -374,10 +373,12 @@ class VerificationResult:
             except Exception as e:
                 # If any validator raises an exception, consider the check failed
                 all_passed = False
-                validator_name = getattr(validator, '__name__', str(validator))
-                failure = ValidationFailure(validator_name=validator_name,
-                                            actual_value=value,
-                                            error_msg=f"Exception during validation: {str(e)}")
+                validator_name = getattr(validator, "__name__", str(validator))
+                failure = ValidationFailure(
+                    validator_name=validator_name,
+                    actual_value=value,
+                    error_msg=f"Exception during validation: {str(e)}",
+                )
                 failures.append(failure)
 
         self._checks[field_name] = all_passed
@@ -388,51 +389,53 @@ class VerificationResult:
 
     def _create_validation_failure(self, validator: Callable, value: Any) -> ValidationFailure:
         """Create a ValidationFailure with detailed information."""
-        validator_name = getattr(validator, '__name__', str(validator))
+        validator_name = getattr(validator, "__name__", str(validator))
 
         # Try to extract meaningful expected value info based on validator type
         expected = None
         error_msg = None
 
         # Handle common validator patterns
-        if hasattr(validator, '__closure__') and validator.__closure__:
+        if hasattr(validator, "__closure__") and validator.__closure__:
             # This is likely a closure (like our helper functions)
-            if 'dims' in validator_name or 'with_dims' in str(validator):
+            if "dims" in validator_name or "with_dims" in str(validator):
                 if isinstance(value, torch.Tensor):
                     expected = f"tensor with {validator.__closure__[0].cell_contents} dimensions"
                 else:
                     expected = "tensor with specific dimensions"
-            elif 'divisible' in str(validator):
+            elif "divisible" in str(validator):
                 expected = f"integer divisible by {validator.__closure__[0].cell_contents}"
 
         # Handle specific validator types and check for NaN values
-        if validator_name == 'is_tensor':
+        if validator_name == "is_tensor":
             expected = "torch.Tensor without NaN values"
             if isinstance(value, torch.Tensor) and torch.isnan(value).any().item():
                 error_msg = f"tensor contains {torch.isnan(value).sum().item()} NaN values"
-        elif validator_name == 'positive_int':
+        elif validator_name == "positive_int":
             expected = "positive integer"
-        elif validator_name == 'non_negative_int':
+        elif validator_name == "non_negative_int":
             expected = "non-negative integer"
-        elif validator_name == 'not_none':
+        elif validator_name == "not_none":
             expected = "non-None value"
-        elif validator_name == 'list_not_empty':
+        elif validator_name == "list_not_empty":
             expected = "non-empty list"
-        elif validator_name == 'bool_value':
+        elif validator_name == "bool_value":
             expected = "boolean value"
-        elif 'tensor_with_dims' in validator_name or 'tensor_min_dims' in validator_name:
+        elif "tensor_with_dims" in validator_name or "tensor_min_dims" in validator_name:
             if isinstance(value, torch.Tensor):
                 if torch.isnan(value).any().item():
-                    error_msg = f"tensor has {value.dim()} dimensions but contains {torch.isnan(value).sum().item()} NaN values"
+                    error_msg = (
+                        f"tensor has {value.dim()} dimensions but contains {torch.isnan(value).sum().item()} NaN values"
+                    )
                 else:
                     error_msg = f"tensor has {value.dim()} dimensions"
-        elif validator_name == 'is_list':
+        elif validator_name == "is_list":
             expected = "list"
-        elif validator_name == 'none_or_tensor':
+        elif validator_name == "none_or_tensor":
             expected = "None or tensor without NaN values"
             if isinstance(value, torch.Tensor) and torch.isnan(value).any().item():
                 error_msg = f"tensor contains {torch.isnan(value).sum().item()} NaN values"
-        elif validator_name == 'list_of_tensors':
+        elif validator_name == "list_of_tensors":
             expected = "non-empty list of tensors without NaN values"
             if isinstance(value, list) and len(value) > 0:
                 nan_count = 0
@@ -441,7 +444,7 @@ class VerificationResult:
                         nan_count += torch.isnan(item).sum().item()
                 if nan_count > 0:
                     error_msg = f"list contains tensors with total {nan_count} NaN values"
-        elif 'list_of_tensors_with_dims' in validator_name:
+        elif "list_of_tensors_with_dims" in validator_name:
             expected = "non-empty list of tensors with specific dimensions and no NaN values"
             if isinstance(value, list) and len(value) > 0:
                 nan_count = 0
@@ -451,10 +454,9 @@ class VerificationResult:
                 if nan_count > 0:
                     error_msg = f"list contains tensors with total {nan_count} NaN values"
 
-        return ValidationFailure(validator_name=validator_name,
-                                 actual_value=value,
-                                 expected=expected,
-                                 error_msg=error_msg)
+        return ValidationFailure(
+            validator_name=validator_name, actual_value=value, expected=expected, error_msg=error_msg
+        )
 
     def is_valid(self) -> bool:
         """Check if all validations passed."""

@@ -19,9 +19,11 @@ from fastvideo.training.training_utils import normalize_dit_input
 
 from fastvideo.train.models.wan.wan import WanModel
 from fastvideo.train.utils.dataloader import (
-    build_parquet_matrixgame2_train_dataloader, )
+    build_parquet_matrixgame2_train_dataloader,
+)
 from fastvideo.train.utils.moduleloader import (
-    load_module_from_path, )
+    load_module_from_path,
+)
 
 
 class MatrixGame2Model(WanModel):
@@ -67,14 +69,14 @@ class MatrixGame2Model(WanModel):
         if latents_source == "zeros":
             latents = self._make_zero_latents(batch_size=batch_size)
         elif latents_source == "data":
-            latents = raw_batch["vae_latent"][:, :, :tc.data.num_latent_t]
+            latents = raw_batch["vae_latent"][:, :, : tc.data.num_latent_t]
             latents = latents.to(device=device, dtype=dtype)
         else:
             raise ValueError(f"Unknown latents_source: {latents_source!r}")
 
         clip_feature = raw_batch["clip_feature"].to(device=device, dtype=dtype)
         first_frame_latent = raw_batch["first_frame_latent"]
-        first_frame_latent = first_frame_latent[:, :, :tc.data.num_latent_t]
+        first_frame_latent = first_frame_latent[:, :, : tc.data.num_latent_t]
         first_frame_latent = first_frame_latent.to(device=device, dtype=dtype)
 
         pil_image = raw_batch.get("pil_image")
@@ -183,8 +185,9 @@ class MatrixGame2Model(WanModel):
                 num_latents=hidden_states.shape[2],
             )
             if cond_latents is None:
-                raise RuntimeError("Matrix-Game 2.0 requires image_latents in conditional_dict "
-                                   "when noise_input has 16 channels")
+                raise RuntimeError(
+                    "Matrix-Game 2.0 requires image_latents in conditional_dict when noise_input has 16 channels"
+                )
             hidden_states = torch.cat([hidden_states, cond_latents], dim=1)
         # For streaming long tuning, align actions to the same score window as
         # the latent/image condition; otherwise this falls back to the prefix.
@@ -238,13 +241,13 @@ class MatrixGame2Model(WanModel):
         image_latents: torch.Tensor,
     ) -> torch.Tensor:
         if image_latents.ndim != 5:
-            raise ValueError("first_frame_latent must have shape [B, C, T, H, W], "
-                             f"got {tuple(image_latents.shape)}")
+            raise ValueError(f"first_frame_latent must have shape [B, C, T, H, W], got {tuple(image_latents.shape)}")
         if image_latents.shape[1] == 20:
             return image_latents
         if image_latents.shape[1] != 16:
-            raise ValueError("Matrix-Game 2.0 expects first_frame_latent with 16 or 20 channels, "
-                             f"got {image_latents.shape[1]}")
+            raise ValueError(
+                f"Matrix-Game 2.0 expects first_frame_latent with 16 or 20 channels, got {image_latents.shape[1]}"
+            )
 
         temporal_compression_ratio = self._temporal_compression_ratio()
         batch_size, _, num_latent_t, latent_height, latent_width = image_latents.shape
@@ -292,9 +295,11 @@ class MatrixGame2Model(WanModel):
             condition_latents = batch_info.get("condition_image_latents")
             if condition_latents is not None:
                 if condition_latents.shape[2] != num_latents:
-                    raise ValueError("condition_image_latents temporal length must match "
-                                     "noise_input: "
-                                     f"{condition_latents.shape[2]} vs {num_latents}")
+                    raise ValueError(
+                        "condition_image_latents temporal length must match "
+                        "noise_input: "
+                        f"{condition_latents.shape[2]} vs {num_latents}"
+                    )
                 return condition_latents
 
         image_latents = text_dict.get("image_latents")
@@ -320,9 +325,11 @@ class MatrixGame2Model(WanModel):
             if action is None:
                 return None
             if action.shape[1] < action_frame_end:
-                raise ValueError("Matrix-Game 2.0 score action tensor is shorter than "
-                                 "the requested streaming window: "
-                                 f"got={action.shape[1]}, required>={action_frame_end}")
+                raise ValueError(
+                    "Matrix-Game 2.0 score action tensor is shorter than "
+                    "the requested streaming window: "
+                    f"got={action.shape[1]}, required>={action_frame_end}"
+                )
             return action[:, action_frame_start:action_frame_end]
 
         return (
@@ -379,7 +386,8 @@ class MatrixGame2Model(WanModel):
         if action is None:
             return None
         from fastvideo.models.dits.matrixgame2.utils import (
-            overlay_validation_actions_on_frames, )
+            overlay_validation_actions_on_frames,
+        )
 
         return overlay_validation_actions_on_frames(
             frames,
@@ -407,8 +415,10 @@ class MatrixGame2Model(WanModel):
             extra = action[..., expected_dim:]
             if bool(torch.count_nonzero(extra).item() == 0):
                 return action[..., :expected_dim]
-            raise ValueError(f"{name} feature dim mismatch: got={actual_dim}, "
-                             f"expected={expected_dim}, and trailing channels are not all zero.")
+            raise ValueError(
+                f"{name} feature dim mismatch: got={actual_dim}, "
+                f"expected={expected_dim}, and trailing channels are not all zero."
+            )
         raise ValueError(f"{name} feature dim mismatch: got={actual_dim}, expected={expected_dim}")
 
     def _expected_action_frames(self, num_latent_t: int) -> int:
@@ -416,9 +426,9 @@ class MatrixGame2Model(WanModel):
 
     def _temporal_compression_ratio(self) -> int:
         assert self.training_config is not None
-        return int(self.training_config.pipeline_config.vae_config.arch_config.
-                   temporal_compression_ratio  # type: ignore[union-attr]
-                   )
+        return int(
+            self.training_config.pipeline_config.vae_config.arch_config.temporal_compression_ratio  # type: ignore[union-attr]
+        )
 
     def _infer_batch_size(self, raw_batch: dict[str, Any]) -> int:
         if "vae_latent" in raw_batch:

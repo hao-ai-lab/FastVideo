@@ -35,7 +35,8 @@ class MatrixGame3WanVideoArchConfig(WanVideoArchConfig):
             r"^blocks\.(\d+)\.ffn\.2\.(.*)$": r"blocks.\1.ffn.fc_out.\2",
             r"^blocks\.(\d+)\.norm3\.(.*)$": r"blocks.\1.self_attn_residual_norm.norm.\2",
             r"^blocks\.(\d+)\.modulation$": r"blocks.\1.scale_shift_table",
-        })
+        }
+    )
     patch_size: tuple[int, int, int] = (1, 2, 2)
     in_channels: int = 48
     out_channels: int = 48
@@ -69,7 +70,8 @@ class MatrixGame3WanVideoArchConfig(WanVideoArchConfig):
             "rope_theta": 256,
             "vae_time_compression_ratio": 4,
             "windows_size": 3,
-        })
+        }
+    )
 
 
 @dataclass

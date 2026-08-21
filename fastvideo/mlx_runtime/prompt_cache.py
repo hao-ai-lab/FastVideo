@@ -34,12 +34,14 @@ def text_encoder_fingerprint(model_root: Path) -> dict[str, object]:
                     if not path.is_file():
                         continue
                     stat = path.stat()
-                    files.append([
-                        path.relative_to(root).as_posix(),
-                        stat.st_size,
-                        stat.st_mtime_ns,
-                        stat.st_ctime_ns,
-                    ])
+                    files.append(
+                        [
+                            path.relative_to(root).as_posix(),
+                            stat.st_size,
+                            stat.st_mtime_ns,
+                            stat.st_ctime_ns,
+                        ]
+                    )
                 except OSError:
                     complete = False
     except OSError:
@@ -85,11 +87,11 @@ def _atomic_write(path: Path, payload: bytes) -> None:
     temp_path: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
-                mode="wb",
-                dir=path.parent,
-                prefix=f".{path.name}.",
-                suffix=".tmp",
-                delete=False,
+            mode="wb",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
         ) as handle:
             temp_path = Path(handle.name)
             handle.write(payload)
@@ -112,13 +114,17 @@ def save_prompt_cache(
         buffer = io.BytesIO()
         np.save(buffer, np.asarray(embeds), allow_pickle=False)
         payload = buffer.getvalue()
-        metadata = (json.dumps(
-            {
-                "fingerprint_sha256": fingerprint_digest(fingerprint),
-                "data_sha256": hashlib.sha256(payload).hexdigest(),
-                "fingerprint": fingerprint,
-            },
-            indent=2) + "\n").encode("utf-8")
+        metadata = (
+            json.dumps(
+                {
+                    "fingerprint_sha256": fingerprint_digest(fingerprint),
+                    "data_sha256": hashlib.sha256(payload).hexdigest(),
+                    "fingerprint": fingerprint,
+                },
+                indent=2,
+            )
+            + "\n"
+        ).encode("utf-8")
         # Publish data first. Until metadata follows, old metadata's data digest
         # makes the torn pair a harmless miss rather than a stale cache hit.
         _atomic_write(cache_path, payload)

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 from dataclasses import dataclass, field
 
-from fastvideo.configs.models.encoders.base import (TextEncoderArchConfig, TextEncoderConfig)
+from fastvideo.configs.models.encoders.base import TextEncoderArchConfig, TextEncoderConfig
 
 
 def _is_transformer_layer(n: str, m) -> bool:
@@ -44,16 +44,18 @@ class Qwen2_5_VLArchConfig(TextEncoderArchConfig):
     model_type: str = "qwen2_5_vl_text"
     dtype: str = "bfloat16"
 
-    stacked_params_mapping: list[tuple[str, str, str
-                                       | int]] = field(default_factory=lambda: [
-                                           (".qkv_proj", ".q_proj", "q"),
-                                           (".qkv_proj", ".k_proj", "k"),
-                                           (".qkv_proj", ".v_proj", "v"),
-                                           (".gate_up_proj", ".gate_proj", 0),
-                                           (".gate_up_proj", ".up_proj", 1),
-                                       ])
+    stacked_params_mapping: list[tuple[str, str, str | int]] = field(
+        default_factory=lambda: [
+            (".qkv_proj", ".q_proj", "q"),
+            (".qkv_proj", ".k_proj", "k"),
+            (".qkv_proj", ".v_proj", "v"),
+            (".gate_up_proj", ".gate_proj", 0),
+            (".gate_up_proj", ".up_proj", 1),
+        ]
+    )
     _fsdp_shard_conditions: list = field(
-        default_factory=lambda: [_is_transformer_layer, _is_embeddings, _is_final_norm])
+        default_factory=lambda: [_is_transformer_layer, _is_embeddings, _is_final_norm]
+    )
 
     def __post_init__(self):
         super().__post_init__()
@@ -64,7 +66,8 @@ class Qwen2_5_VLArchConfig(TextEncoderArchConfig):
         if self.layer_types is None:
             self.layer_types = [
                 "sliding_attention"
-                if self.sliding_window is not None and i >= self.max_window_layers else "full_attention"
+                if self.sliding_window is not None and i >= self.max_window_layers
+                else "full_attention"
                 for i in range(self.num_hidden_layers)
             ]
         if self.rope_scaling is not None and "type" in self.rope_scaling:

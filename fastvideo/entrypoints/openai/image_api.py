@@ -8,7 +8,7 @@ import time
 
 import aiofiles
 
-from fastapi import (APIRouter, File, Form, HTTPException, Path, Query, UploadFile)
+from fastapi import APIRouter, File, Form, HTTPException, Path, Query, UploadFile
 from fastapi.responses import FileResponse
 
 from fastvideo.entrypoints.openai.state import (
@@ -153,24 +153,25 @@ async def generations(request: ImageGenerationsRequest):
 
 @router.post("/edits", response_model=ImageResponse)
 async def edits(
-        image: list[UploadFile] | None = File(None),  # noqa: B008
-        image_array: list[UploadFile] | None = File(  # noqa: B008
-            None, alias="image[]"),
-        url: list[str] | None = Form(None),  # noqa: B008
-        url_array: list[str] | None = Form(None, alias="url[]"),  # noqa: B008
-        prompt: str = Form(...),
-        model: str | None = Form(None),
-        n: int | None = Form(1),
-        response_format: str | None = Form(None),
-        size: str | None = Form(None),
-        output_format: str | None = Form(None),
-        background: str | None = Form("auto"),
-        seed: int | None = Form(1024),
-        negative_prompt: str | None = Form(None),
-        guidance_scale: float | None = Form(None),
-        true_cfg_scale: float | None = Form(None),
-        num_inference_steps: int | None = Form(None),
-        enable_teacache: bool | None = Form(False),
+    image: list[UploadFile] | None = File(None),  # noqa: B008
+    image_array: list[UploadFile] | None = File(  # noqa: B008
+        None, alias="image[]"
+    ),
+    url: list[str] | None = Form(None),  # noqa: B008
+    url_array: list[str] | None = Form(None, alias="url[]"),  # noqa: B008
+    prompt: str = Form(...),
+    model: str | None = Form(None),
+    n: int | None = Form(1),
+    response_format: str | None = Form(None),
+    size: str | None = Form(None),
+    output_format: str | None = Form(None),
+    background: str | None = Form("auto"),
+    seed: int | None = Form(1024),
+    negative_prompt: str | None = Form(None),
+    guidance_scale: float | None = Form(None),
+    true_cfg_scale: float | None = Form(None),
+    num_inference_steps: int | None = Form(None),
+    enable_teacache: bool | None = Form(False),
 ):
     request_id = generate_request_id()
     generator = get_generator()

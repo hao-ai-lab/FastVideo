@@ -40,8 +40,9 @@ def _get_hook_ctx(module: nn.Module | None):
     return nullcontext()
 
 
-def _named_module_by_prefix(module: nn.Module,
-                            prefixes: list[str]) -> list[tuple[str | None, list[tuple[str, nn.Module]]]]:
+def _named_module_by_prefix(
+    module: nn.Module, prefixes: list[str]
+) -> list[tuple[str | None, list[tuple[str, nn.Module]]]]:
     none_list: list[tuple[str, nn.Module]] = []
     prefix_list: list[tuple[str, list[tuple[str, nn.Module]]]] = [(prefix, []) for prefix in prefixes]
     for name, submodule in module.named_modules():
@@ -56,7 +57,6 @@ def _named_module_by_prefix(module: nn.Module,
 
 
 class LoRAModelLayers:
-
     def __init__(self, block_list: list[tuple[str, nn.Module]]) -> None:
         # block_name -> {layer_name -> layer}
         self.block_to_lora_layers: dict[str, dict[str, BaseLayerWithLoRA]] = {}
@@ -75,17 +75,21 @@ class LoRAModelLayers:
             self.block_to_lora_layers[block_name][layer_name] = layer
             self.lora_layers_to_block[layer_name] = block_name
 
-    def all_lora_layers(self, ) -> Generator[tuple[str, BaseLayerWithLoRA], Any, None]:
+    def all_lora_layers(
+        self,
+    ) -> Generator[tuple[str, BaseLayerWithLoRA], Any, None]:
         for block_layers in self.block_to_lora_layers.values():
             for name, layer in block_layers.items():
                 yield name, layer
         for name, layer in self.other_lora_layers.items():
             yield name, layer
 
-    def lora_layers_by_block(self, ) -> Generator[
-            tuple[nn.Module | None, dict[str, BaseLayerWithLoRA]],
-            Any,
-            None,
+    def lora_layers_by_block(
+        self,
+    ) -> Generator[
+        tuple[nn.Module | None, dict[str, BaseLayerWithLoRA]],
+        Any,
+        None,
     ]:
         for block_name, layers in self.block_to_lora_layers.items():
             yield self.block_mapping[block_name], layers
@@ -99,7 +103,8 @@ class LoRAPipeline(ComposedPipelineBase):
     """
 
     lora_adapters: dict[str, dict[str, torch.Tensor]] = defaultdict(
-        dict)  # state dicts of loaded lora adapters (includes lora_A, lora_B, and lora_alpha)
+        dict
+    )  # state dicts of loaded lora adapters (includes lora_A, lora_B, and lora_alpha)
     cur_adapter_name: str = ""
     cur_adapter_path: str = ""
     cur_adapter_strength: float = 1.0
@@ -122,8 +127,8 @@ class LoRAPipeline(ComposedPipelineBase):
         self.lora_adapter_paths = {}
         # build list of trainable transformers
         for transformer_name in self.trainable_transformer_names:
-            if (transformer_name in self.modules and self.modules[transformer_name] is not None):
-                self.trainable_transformer_modules[transformer_name] = (self.modules[transformer_name])
+            if transformer_name in self.modules and self.modules[transformer_name] is not None:
+                self.trainable_transformer_modules[transformer_name] = self.modules[transformer_name]
             # check for transformer_2 in case of Wan2.2 MoE or fake_score_transformer_2
             if transformer_name.endswith("_2"):
                 raise ValueError(
@@ -131,9 +136,10 @@ class LoRAPipeline(ComposedPipelineBase):
                 )
 
             secondary_transformer_name = transformer_name + "_2"
-            if (secondary_transformer_name in self.modules and self.modules[secondary_transformer_name] is not None):
+            if secondary_transformer_name in self.modules and self.modules[secondary_transformer_name] is not None:
                 self.trainable_transformer_modules[secondary_transformer_name] = self.modules[
-                    secondary_transformer_name]
+                    secondary_transformer_name
+                ]
 
         logger.info(
             "trainable_transformer_modules: %s",
@@ -141,10 +147,10 @@ class LoRAPipeline(ComposedPipelineBase):
         )
 
         for (
-                transformer_name,
-                transformer_module,
+            transformer_name,
+            transformer_module,
         ) in self.trainable_transformer_modules.items():
-            self.exclude_lora_layers[transformer_name] = (transformer_module.config.arch_config.exclude_lora_layers)
+            self.exclude_lora_layers[transformer_name] = transformer_module.config.arch_config.exclude_lora_layers
         self.lora_target_modules = self.fastvideo_args.lora_target_modules
         self.lora_path = self.fastvideo_args.lora_path
         self.lora_nickname = self.fastvideo_args.lora_nickname
@@ -198,7 +204,6 @@ class LoRAPipeline(ComposedPipelineBase):
         return any(target_name in module_name for target_name in self.lora_target_modules)
 
     def set_trainable(self) -> None:
-
         def set_lora_grads(lora_layers: LoRAModelLayers, device_mesh: DeviceMesh):
             for name, layer in lora_layers.all_lora_layers():
                 layer.lora_A.requires_grad_(True)
@@ -218,8 +223,8 @@ class LoRAPipeline(ComposedPipelineBase):
             mesh_dim_names=["fake", "replicate"],
         )
         for (
-                transformer_name,
-                transformer_module,
+            transformer_name,
+            transformer_module,
         ) in self.trainable_transformer_modules.items():
             transformer_module.train()
             transformer_module.requires_grad_(False)
@@ -236,8 +241,8 @@ class LoRAPipeline(ComposedPipelineBase):
             return
         self.lora_initialized = True
         for (
-                transformer_name,
-                transformer_module,
+            transformer_name,
+            transformer_module,
         ) in self.trainable_transformer_modules.items():
             converted_count = 0
             # init bookkeeping structures
@@ -253,11 +258,12 @@ class LoRAPipeline(ComposedPipelineBase):
             # scan every module and convert to LoRA layer if applicable
 
             for block_name, block_modules in _named_module_by_prefix(
-                    transformer_module,
-                    list(self.lora_layers[transformer_name].block_mapping),
+                transformer_module,
+                list(self.lora_layers[transformer_name].block_mapping),
             ):
-                if block_name is not None and (not self.fastvideo_args.training_mode
-                                               and self.fastvideo_args.dit_layerwise_offload):
+                if block_name is not None and (
+                    not self.fastvideo_args.training_mode and self.fastvideo_args.dit_layerwise_offload
+                ):
                     scope_ctx = _get_hook_ctx(self.lora_layers[transformer_name].block_mapping[block_name])
                 else:
                     scope_ctx = nullcontext()
@@ -283,21 +289,19 @@ class LoRAPipeline(ComposedPipelineBase):
                         if layer is not None:
                             block_name_split = name.split(".", 2)
                             if len(block_name_split) > 2:
-                                block_name = (block_name_split[0] + "." + block_name_split[1])
+                                block_name = block_name_split[0] + "." + block_name_split[1]
                             else:
                                 block_name = None
-                            if (block_name not in self.lora_layers[transformer_name].block_mapping):
+                            if block_name not in self.lora_layers[transformer_name].block_mapping:
                                 block_name = None
                             self.lora_layers[transformer_name].add_lora_layer(block_name, name, layer)
                             replace_submodule(transformer_module, name, layer)
                             converted_count += 1
             logger.info("Converted %d layers to LoRA layers", converted_count)
 
-    def set_lora_adapter(self,
-                         lora_nickname: str,
-                         lora_path: str | None = None,
-                         strength: float = 1.0,
-                         accumulate: bool = False):  # type: ignore
+    def set_lora_adapter(
+        self, lora_nickname: str, lora_path: str | None = None, strength: float = 1.0, accumulate: bool = False
+    ):  # type: ignore
         """
         Load a LoRA adapter into the pipeline and merge it into the transformer.
         Args:
@@ -321,7 +325,7 @@ class LoRAPipeline(ComposedPipelineBase):
             lora_param_names_mapping_fn = get_param_names_mapping(self.modules["transformer"].lora_param_names_mapping)
 
             # Extract alpha values and weights in a single pass
-            to_merge_params: defaultdict[Hashable, dict[Any, Any]] = (defaultdict(dict))
+            to_merge_params: defaultdict[Hashable, dict[Any, Any]] = defaultdict(dict)
             for name, weight in lora_state_dict.items():
                 # Extract weights (lora_A, lora_B, and lora_alpha)
                 name = name.replace("diffusion_model.", "")
@@ -335,12 +339,13 @@ class LoRAPipeline(ComposedPipelineBase):
                     target_name, _, _ = param_names_mapping_fn(layer_name)
                     # Store alpha alongside weights with same target_name base
                     alpha_key = target_name + ".lora_alpha"
-                    self.lora_adapters[lora_nickname][alpha_key] = (weight.item()
-                                                                    if weight.numel() == 1 else float(weight.mean()))
+                    self.lora_adapters[lora_nickname][alpha_key] = (
+                        weight.item() if weight.numel() == 1 else float(weight.mean())
+                    )
                     continue
 
                 name, _, _ = lora_param_names_mapping_fn(name)
-                target_name, merge_index, num_params_to_merge = (param_names_mapping_fn(name))
+                target_name, merge_index, num_params_to_merge = param_names_mapping_fn(name)
                 # for (in_dim, r) @ (r, out_dim), we only merge (r, out_dim * n) where n is the number of linear layers to fuse
                 # see param mapping in HunyuanVideoArchConfig
                 if merge_index is not None and "lora_B" in name:
@@ -361,8 +366,12 @@ class LoRAPipeline(ComposedPipelineBase):
             self.lora_adapter_paths[lora_nickname] = lora_path
             logger.info("Rank %d: loaded LoRA adapter %s", rank, lora_path)
 
-        if (not adapter_updated and self.cur_adapter_name == lora_nickname and self.cur_adapter_strength == strength
-                and not accumulate):
+        if (
+            not adapter_updated
+            and self.cur_adapter_name == lora_nickname
+            and self.cur_adapter_strength == strength
+            and not accumulate
+        ):
             return
         self.cur_adapter_name = lora_nickname
         self.cur_adapter_strength = strength
@@ -370,20 +379,22 @@ class LoRAPipeline(ComposedPipelineBase):
         # Merge the new adapter
         adapted_count = 0
         for (
-                transformer_name,
-                transformer_lora_layers,
+            transformer_name,
+            transformer_lora_layers,
         ) in self.lora_layers.items():
             for (
-                    module,
-                    layers,
+                module,
+                layers,
             ) in transformer_lora_layers.lora_layers_by_block():
                 with _get_hook_ctx(module):
                     for name, layer in layers.items():
                         lora_A_name = name + ".lora_A"
                         lora_B_name = name + ".lora_B"
                         lora_alpha_name = name + ".lora_alpha"
-                        if (lora_A_name in self.lora_adapters[lora_nickname]
-                                and lora_B_name in self.lora_adapters[lora_nickname]):
+                        if (
+                            lora_A_name in self.lora_adapters[lora_nickname]
+                            and lora_B_name in self.lora_adapters[lora_nickname]
+                        ):
                             # Get alpha value for this layer (defaults to None if not present)
                             lora_A = self.lora_adapters[lora_nickname][lora_A_name]
                             lora_B = self.lora_adapters[lora_nickname][lora_B_name]
@@ -424,12 +435,12 @@ class LoRAPipeline(ComposedPipelineBase):
 
     def merge_lora_weights(self) -> None:
         for (
-                transformer_name,
-                transformer_lora_layers,
+            transformer_name,
+            transformer_lora_layers,
         ) in self.lora_layers.items():
             for (
-                    module,
-                    layers,
+                module,
+                layers,
             ) in transformer_lora_layers.lora_layers_by_block():
                 with _get_hook_ctx(module):
                     for name, layer in layers.items():
@@ -437,12 +448,12 @@ class LoRAPipeline(ComposedPipelineBase):
 
     def unmerge_lora_weights(self) -> None:
         for (
-                transformer_name,
-                transformer_lora_layers,
+            transformer_name,
+            transformer_lora_layers,
         ) in self.lora_layers.items():
             for (
-                    module,
-                    layers,
+                module,
+                layers,
             ) in transformer_lora_layers.lora_layers_by_block():
                 with _get_hook_ctx(module):
                     for name, layer in layers.items():

@@ -15,7 +15,6 @@ from fastvideo.eval.types import MetricResult
 
 @register("vbench.object_class")
 class ObjectClassMetric(BaseMetric):
-
     name = "vbench.object_class"
     requires_reference = False
     higher_is_better = True
@@ -30,6 +29,7 @@ class ObjectClassMetric(BaseMetric):
         if self._model is not None:
             return
         from fastvideo.eval.metrics.vbench._grit_helper import load_grit_model
+
         # VBench's object_class uses ObjectDet head (init_submodules → "ObjectDet")
         self._model = load_grit_model(self.device, task="ObjectDet")
 
@@ -64,8 +64,5 @@ class ObjectClassMetric(BaseMetric):
         return MetricResult(
             name=self.name,
             score=float(score),
-            details={
-                "matching_frames": matching,
-                "total_frames": total
-            },
+            details={"matching_frames": matching, "total_frames": total},
         )

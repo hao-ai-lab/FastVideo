@@ -53,7 +53,6 @@ def _get_position_score(locality: str, obj1: list, obj2: list, iou_threshold: fl
 
 @register("vbench.spatial_relationship")
 class SpatialRelationshipMetric(BaseMetric):
-
     name = "vbench.spatial_relationship"
     requires_reference = False
     higher_is_better = True
@@ -68,6 +67,7 @@ class SpatialRelationshipMetric(BaseMetric):
         if self._model is not None:
             return
         from fastvideo.eval.metrics.vbench._grit_helper import load_grit_model
+
         # VBench's spatial_relationship uses ObjectDet head and matches
         # pred[0] against class names like "person"/"grass"
         self._model = load_grit_model(self.device, task="ObjectDet")
@@ -108,11 +108,13 @@ class SpatialRelationshipMetric(BaseMetric):
             cur_scores = [0.0]
             for i in range(len(obj_bboxes) - 1):
                 for j in range(i + 1, len(obj_bboxes)):
-                    cur_scores.append(_get_position_score(
-                        relation,
-                        obj_bboxes[i],
-                        obj_bboxes[j],
-                    ))
+                    cur_scores.append(
+                        _get_position_score(
+                            relation,
+                            obj_bboxes[i],
+                            obj_bboxes[j],
+                        )
+                    )
             frame_scores.append(max(cur_scores))
 
         score = float(np.mean(frame_scores)) if frame_scores else 0.0

@@ -11,7 +11,6 @@ logger = init_logger(__name__)
 
 
 class RaiseNotImplementedAction(argparse.Action):
-
     def __call__(self, parser, namespace, values, option_string=None):
         raise NotImplementedError(f"The {option_string} option is not yet implemented")
 
@@ -19,7 +18,7 @@ class RaiseNotImplementedAction(argparse.Action):
 def launch_distributed(num_gpus: int, args: list[str], master_port: int | None = None) -> int:
     """
     Launch a distributed job with the given arguments
-    
+
     Args:
         num_gpus: Number of GPUs to use
         args: Arguments to pass to v1_fastvideo_inference.py (defaults to sys.argv[1:])
@@ -43,17 +42,19 @@ def launch_distributed(num_gpus: int, args: list[str], master_port: int | None =
     logger.info("Launching command: %s", " ".join(cmd))
 
     current_env["PYTHONIOENCODING"] = "utf-8"
-    process = subprocess.Popen(cmd,
-                               env=current_env,
-                               stdout=subprocess.PIPE,
-                               stderr=subprocess.STDOUT,
-                               universal_newlines=True,
-                               bufsize=1,
-                               encoding='utf-8',
-                               errors='replace')
+    process = subprocess.Popen(
+        cmd,
+        env=current_env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        universal_newlines=True,
+        bufsize=1,
+        encoding="utf-8",
+        errors="replace",
+    )
 
     if process.stdout:
-        for line in iter(process.stdout.readline, ''):
+        for line in iter(process.stdout.readline, ""):
             print(line.strip())
 
     return process.wait()

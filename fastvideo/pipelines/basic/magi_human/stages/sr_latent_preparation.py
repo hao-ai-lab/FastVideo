@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """Super-resolution latent preparation for daVinci-MagiHuman SR-540p."""
+
 from __future__ import annotations
 
 from functools import partial
@@ -15,7 +16,8 @@ from PIL import Image
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.pipelines.basic.magi_human.stages.reference_image import (
-    _resizecrop, )
+    _resizecrop,
+)
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import VerificationResult
@@ -36,12 +38,15 @@ class ZeroSNRDDPMDiscretization:
         if keep_start and not post_shift:
             linear_start = linear_start / (shift_scale + (1 - shift_scale) * linear_start)
         self.num_timesteps = num_timesteps
-        betas = torch.linspace(
-            linear_start**0.5,
-            linear_end**0.5,
-            num_timesteps,
-            dtype=torch.float64,
-        )**2
+        betas = (
+            torch.linspace(
+                linear_start**0.5,
+                linear_end**0.5,
+                num_timesteps,
+                dtype=torch.float64,
+            )
+            ** 2
+        )
         alphas = 1.0 - betas.numpy()
         self.alphas_cumprod = np.cumprod(alphas, axis=0)
         self.post_shift = post_shift
@@ -60,7 +65,7 @@ class ZeroSNRDDPMDiscretization:
         sigmas = self.get_sigmas(n, device=device)
         if do_append_zero:
             sigmas = torch.cat([sigmas, sigmas.new_zeros([1])])
-        return torch.flip(sigmas, (0, )) if flip else sigmas
+        return torch.flip(sigmas, (0,)) if flip else sigmas
 
     def get_sigmas(
         self,
@@ -89,9 +94,10 @@ class ZeroSNRDDPMDiscretization:
         alphas_cumprod_sqrt *= alphas_cumprod_sqrt_0 / (alphas_cumprod_sqrt_0 - alphas_cumprod_sqrt_T)
 
         if self.post_shift:
-            alphas_cumprod_sqrt = (alphas_cumprod_sqrt**2 / (self.shift_scale +
-                                                             (1 - self.shift_scale) * alphas_cumprod_sqrt**2))**0.5
-        return torch.flip(alphas_cumprod_sqrt, (0, ))
+            alphas_cumprod_sqrt = (
+                alphas_cumprod_sqrt**2 / (self.shift_scale + (1 - self.shift_scale) * alphas_cumprod_sqrt**2)
+            ) ** 0.5
+        return torch.flip(alphas_cumprod_sqrt, (0,))
 
 
 class MagiHumanSRLatentPreparationStage(PipelineStage):
@@ -145,12 +151,12 @@ class MagiHumanSRLatentPreparationStage(PipelineStage):
         if self.noise_value != 0:
             noise = torch.randn_like(latent_video, device=device)
             sigma = self.sigmas.to(device)[self.noise_value]
-            latent_video = latent_video * sigma + noise * (1 - sigma**2)**0.5
+            latent_video = latent_video * sigma + noise * (1 - sigma**2) ** 0.5
 
         batch.latents = latent_video
-        batch.audio_latents = (
-            torch.randn_like(batch.audio_latents, device=batch.audio_latents.device) * self.sr_audio_noise_scale +
-            batch.audio_latents * (1 - self.sr_audio_noise_scale))
+        batch.audio_latents = torch.randn_like(
+            batch.audio_latents, device=batch.audio_latents.device
+        ) * self.sr_audio_noise_scale + batch.audio_latents * (1 - self.sr_audio_noise_scale)
         batch.height = actual_h
         batch.width = actual_w
         batch.magi_latent_T = latent_t

@@ -16,6 +16,7 @@ def _ensure_nvml() -> Any:
     """Import and initialize NVML once; raises on machines without it."""
     global _nvml_initialized  # noqa: PLW0603
     import pynvml
+
     if not _nvml_initialized:
         pynvml.nvmlInit()
         _nvml_initialized = True
@@ -38,7 +39,7 @@ def _device_snapshot(pynvml: Any, index: int) -> dict[str, Any]:
         temperature = int(pynvml.nvmlDeviceGetTemperature(handle, pynvml.NVML_TEMPERATURE_GPU))
     with contextlib.suppress(pynvml.NVMLError):
         power_watts = pynvml.nvmlDeviceGetPowerUsage(handle) / 1000.0
-        power_limit_watts = (pynvml.nvmlDeviceGetEnforcedPowerLimit(handle) / 1000.0)
+        power_limit_watts = pynvml.nvmlDeviceGetEnforcedPowerLimit(handle) / 1000.0
 
     return {
         "index": index,

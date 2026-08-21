@@ -63,6 +63,7 @@ class ImageBindScoreMetric(BaseMetric):
         if self._model is not None:
             return
         from imagebind.models import imagebind_model
+
         # Route the state-dict through ``ensure_checkpoint``; the stock
         # ``imagebind_huge(pretrained=True)`` hardcodes ``.checkpoints/`` in cwd.
         model = imagebind_model.imagebind_huge(pretrained=False)

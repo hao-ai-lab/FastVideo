@@ -10,8 +10,7 @@ except ImportError:
 
 def _require_flashinfer() -> Any:
     if flashinfer is None:
-        raise ImportError("flashinfer is required for FP4 linear layers. "
-                          "Please install flashinfer to use this path.")
+        raise ImportError("flashinfer is required for FP4 linear layers. Please install flashinfer to use this path.")
     return flashinfer
 
 
@@ -23,7 +22,6 @@ def _global_sf(t: torch.Tensor) -> torch.Tensor:
 
 
 class _LinearFWD4BWD16Fn(torch.autograd.Function):
-
     @staticmethod
     def forward(ctx, x, weight, bias, backend="cutlass", block_size=16, use_128x4_sf_layout=True):
         flashinfer_mod = _require_flashinfer()
@@ -45,8 +43,9 @@ class _LinearFWD4BWD16Fn(torch.autograd.Function):
 
         out2d = torch.empty((M, n), device=x.device, dtype=x.dtype)
 
-        a_sf_layout = (flashinfer_mod.SfLayout.layout_128x4
-                       if use_128x4_sf_layout else flashinfer_mod.SfLayout.layout_8x4)
+        a_sf_layout = (
+            flashinfer_mod.SfLayout.layout_128x4 if use_128x4_sf_layout else flashinfer_mod.SfLayout.layout_8x4
+        )
         global_sf_a = _global_sf(x2d)
         global_sf_b = _global_sf(weight_cast)
 

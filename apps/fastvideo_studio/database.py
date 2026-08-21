@@ -116,8 +116,18 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "settings", "auto_start_job", "INTEGER", "0")
     _add_column_if_missing(conn, "settings", "dataset_upload_path", "TEXT", "''")
     # Drop removed columns from datasets (SQLite 3.35+)
-    for col in ("workload_type", "output_path", "model_path", "raw_path", "dataset_type", "num_gpus", "media_type",
-                "status", "error", "log_file_path"):
+    for col in (
+        "workload_type",
+        "output_path",
+        "model_path",
+        "raw_path",
+        "dataset_type",
+        "num_gpus",
+        "media_type",
+        "status",
+        "error",
+        "log_file_path",
+    ):
         if col in _get_table_columns(conn, "datasets"):
             with contextlib.suppress(sqlite3.OperationalError):
                 # SQLite < 3.35 or column already dropped
@@ -334,7 +344,7 @@ class Database:
 
     def delete_job(self, job_id: str) -> bool:
         """Delete a job. Returns True if a row was deleted."""
-        cur = self._execute("DELETE FROM jobs WHERE id = ?", (job_id, ))
+        cur = self._execute("DELETE FROM jobs WHERE id = ?", (job_id,))
         self._commit()
         return cur.rowcount > 0
 
@@ -343,7 +353,7 @@ class Database:
         if job_type:
             cur = self._execute(
                 "SELECT * FROM jobs WHERE job_type = ? ORDER BY created_at DESC",
-                (job_type, ),
+                (job_type,),
             )
         else:
             cur = self._execute("SELECT * FROM jobs ORDER BY created_at DESC")
@@ -351,7 +361,7 @@ class Database:
 
     def get_job(self, job_id: str) -> dict[str, Any] | None:
         """Get a single job by ID."""
-        cur = self._execute("SELECT * FROM jobs WHERE id = ?", (job_id, ))
+        cur = self._execute("SELECT * FROM jobs WHERE id = ?", (job_id,))
         row = cur.fetchone()
         return _row_to_job(row) if row else None
 
@@ -376,7 +386,7 @@ class Database:
         """Return caption map: file_name -> caption."""
         cur = self._execute(
             "SELECT file_name, caption FROM dataset_captions WHERE dataset_id = ?",
-            (dataset_id, ),
+            (dataset_id,),
         )
         return {row["file_name"]: row["caption"] or "" for row in cur.fetchall()}
 
@@ -399,7 +409,7 @@ class Database:
 
     def delete_dataset(self, dataset_id: str) -> bool:
         """Delete a dataset. Returns True if a row was deleted."""
-        cur = self._execute("DELETE FROM datasets WHERE id = ?", (dataset_id, ))
+        cur = self._execute("DELETE FROM datasets WHERE id = ?", (dataset_id,))
         self._commit()
         return cur.rowcount > 0
 
@@ -410,7 +420,7 @@ class Database:
 
     def get_dataset(self, dataset_id: str) -> dict[str, Any] | None:
         """Get a single dataset by ID."""
-        cur = self._execute("SELECT * FROM datasets WHERE id = ?", (dataset_id, ))
+        cur = self._execute("SELECT * FROM datasets WHERE id = ?", (dataset_id,))
         row = cur.fetchone()
         return _row_to_dataset(row) if row else None
 
@@ -422,10 +432,13 @@ class Database:
         row = cur.fetchone()
         if not row:
             return default_settings_dict()
-        t2v = ((row["default_model_id_t2v"] or row["default_model_id"] or "") if "default_model_id_t2v" in row else
-               (row["default_model_id"] or ""))
-        i2v = ((row["default_model_id_i2v"] or "") if "default_model_id_i2v" in row else "")
-        t2i = ((row["default_model_id_t2i"] or "") if "default_model_id_t2i" in row else "")
+        t2v = (
+            (row["default_model_id_t2v"] or row["default_model_id"] or "")
+            if "default_model_id_t2v" in row
+            else (row["default_model_id"] or "")
+        )
+        i2v = (row["default_model_id_i2v"] or "") if "default_model_id_i2v" in row else ""
+        t2i = (row["default_model_id_t2i"] or "") if "default_model_id_t2i" in row else ""
         result = {
             "defaultModelId": row["default_model_id"] or "",
             "defaultModelIdT2v": t2v,
@@ -571,22 +584,22 @@ def _row_to_job(row: sqlite3.Row) -> dict[str, Any]:
     for col in ("vae_cpu_offload", "image_encoder_cpu_offload", "enable_torch_compile"):
         if col in row:
             result[col] = bool(row[col])
-    for col in ("vsa_sparsity", ):
+    for col in ("vsa_sparsity",):
         if col in row:
             result[col] = float(row[col])
     for col in ("tp_size", "sp_size"):
         if col in row:
             result[col] = int(row[col])
     for col in (
-            "data_path",
-            "validation_dataset_file",
+        "data_path",
+        "validation_dataset_file",
     ):
         if col in row:
             result[col] = (row[col] or "") or ""
     for col in int_defaults:
         if col in row:
             int_val_raw: Any = row[col]
-            result[col] = (int(int_val_raw) if int_val_raw is not None else int_defaults[col])
+            result[col] = int(int_val_raw) if int_val_raw is not None else int_defaults[col]
     if "learning_rate" in row:
         result["learning_rate"] = float(row["learning_rate"] or 5e-5)
     if "dmd_use_vsa" in row:
@@ -594,7 +607,7 @@ def _row_to_job(row: sqlite3.Row) -> dict[str, Any]:
     for col in float_defaults:
         if col in row:
             float_val_raw: Any = row[col]
-            result[col] = (float(float_val_raw) if float_val_raw is not None else float_defaults[col])
+            result[col] = float(float_val_raw) if float_val_raw is not None else float_defaults[col]
     for col in ("dmd_denoising_steps", "real_score_model_path", "fake_score_model_path"):
         if col in row:
             result[col] = (row[col] or "") or ""

@@ -89,16 +89,14 @@ PROMPT_SETS = {
 }
 
 BENCHMARK_PRESETS = {
-    "default":
-    BenchmarkPreset(
+    "default": BenchmarkPreset(
         height=480,
         width=832,
         num_frames=81,
         modes="fp16,bf16,int8,int4",
         decoders="taehv,wan-vae",
     ),
-    "mac-16gb":
-    BenchmarkPreset(
+    "mac-16gb": BenchmarkPreset(
         height=448,
         width=832,
         num_frames=61,
@@ -109,16 +107,14 @@ BENCHMARK_PRESETS = {
         torch_mps_high_watermark_ratio=0.57,
         torch_mps_low_watermark_ratio=0.0,
     ),
-    "mac-32gb":
-    BenchmarkPreset(
+    "mac-32gb": BenchmarkPreset(
         height=480,
         width=832,
         num_frames=81,
         modes="int8,fp16",
         decoders="taehv",
     ),
-    "mac-64gb":
-    BenchmarkPreset(
+    "mac-64gb": BenchmarkPreset(
         height=480,
         width=832,
         num_frames=81,
@@ -281,9 +277,11 @@ def _ms_ssim(reference_video: Path, candidate_video: Path, *, required: bool = F
     try:
         from fastvideo.tests.utils import compute_video_ssim_torchvision
     except ImportError as exc:
-        message = ("MS-SSIM is unavailable because `pytorch-msssim` is not installed. "
-                   "Install FastVideo with the test extra, e.g. `uv pip install -e '.[mlx,test]'`, "
-                   "or run without an SSIM assertion.")
+        message = (
+            "MS-SSIM is unavailable because `pytorch-msssim` is not installed. "
+            "Install FastVideo with the test extra, e.g. `uv pip install -e '.[mlx,test]'`, "
+            "or run without an SSIM assertion."
+        )
         if required:
             raise RuntimeError(message) from exc
         print(f"{message} Skipping MS-SSIM.")
@@ -292,9 +290,11 @@ def _ms_ssim(reference_video: Path, candidate_video: Path, *, required: bool = F
     try:
         ssim_values = compute_video_ssim_torchvision(str(reference_video), str(candidate_video), use_ms_ssim=True)
     except ImportError as exc:
-        message = ("MS-SSIM is unavailable because `pytorch-msssim` is not installed. "
-                   "Install FastVideo with the test extra, e.g. `uv pip install -e '.[mlx,test]'`, "
-                   "or run without an SSIM assertion.")
+        message = (
+            "MS-SSIM is unavailable because `pytorch-msssim` is not installed. "
+            "Install FastVideo with the test extra, e.g. `uv pip install -e '.[mlx,test]'`, "
+            "or run without an SSIM assertion."
+        )
         if required:
             raise RuntimeError(message) from exc
         print(f"{message} Skipping MS-SSIM.")
@@ -357,22 +357,23 @@ def _html_grid(rows: list[dict]) -> str:
                 media = f'<video src="{html.escape(str(video_path))}" muted loop controls playsinline></video>'
             else:
                 media = f'<div class="missing">No video<br>{html.escape(str(row.get("error", "")))}</div>'
-            metrics = (f"status={status} · total={_format_metric(row.get('total_s'))}s · "
-                       f"denoise={_format_metric(row.get('denoise_s'))}s · "
-                       f"decode={_format_metric(row.get('decode_s'))}s · "
-                       f"peak={_format_metric(row.get('peak_gib'))}GiB")
-            cards.append("<article>"
-                         f"<h3>{html.escape(title)}</h3>"
-                         f"{media}"
-                         f"<p>{html.escape(metrics)}</p>"
-                         "</article>")
-        sections.append("<section>"
-                        f"<h2>{html.escape(prompt_id)}</h2>"
-                        f"<p class=\"prompt\">{html.escape(prompt)}</p>"
-                        f"<div class=\"grid\">{''.join(cards)}</div>"
-                        "</section>")
+            metrics = (
+                f"status={status} · total={_format_metric(row.get('total_s'))}s · "
+                f"denoise={_format_metric(row.get('denoise_s'))}s · "
+                f"decode={_format_metric(row.get('decode_s'))}s · "
+                f"peak={_format_metric(row.get('peak_gib'))}GiB"
+            )
+            cards.append(f"<article><h3>{html.escape(title)}</h3>{media}<p>{html.escape(metrics)}</p></article>")
+        sections.append(
+            "<section>"
+            f"<h2>{html.escape(prompt_id)}</h2>"
+            f'<p class="prompt">{html.escape(prompt)}</p>'
+            f'<div class="grid">{"".join(cards)}</div>'
+            "</section>"
+        )
 
-    return """<!doctype html>
+    return (
+        """<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -396,10 +397,13 @@ def _html_grid(rows: list[dict]) -> str:
   <p>Use the controls below to start/stop every clip together for side-by-side inspection.</p>
   <button onclick="for (const v of document.querySelectorAll('video')) { v.currentTime = 0; v.play(); }">Restart + play all</button>
   <button onclick="for (const v of document.querySelectorAll('video')) v.pause();">Pause all</button>
-""" + "\n".join(sections) + """
+"""
+        + "\n".join(sections)
+        + """
 </body>
 </html>
 """
+    )
 
 
 def _write_html_grid(rows: list[dict], output_dir: Path) -> Path:
@@ -486,8 +490,11 @@ def _generate_cell(
     del dit, latents
     cleanup_mlx(mx)
 
-    video_path = (args.output_dir / f"{args.current_prompt_id}" /
-                  f"video_{mode}_{decoder}_{args.height}x{args.width}x{args.num_frames}.mp4")
+    video_path = (
+        args.output_dir
+        / f"{args.current_prompt_id}"
+        / f"video_{mode}_{decoder}_{args.height}x{args.width}x{args.num_frames}.mp4"
+    )
     decode_start = time.perf_counter()
     decode_latents_to_video(
         model_root=args.model_root,
@@ -551,18 +558,19 @@ def main() -> None:
     preset = BENCHMARK_PRESETS[preset_args.benchmark_preset]
 
     parser = argparse.ArgumentParser(description="MLX FastWan prove-out benchmark (latency + quality).")
-    parser.add_argument("--benchmark-preset",
-                        choices=tuple(BENCHMARK_PRESETS),
-                        default=preset_args.benchmark_preset,
-                        help="Memory-tier benchmark defaults. Explicit CLI flags override preset values.")
+    parser.add_argument(
+        "--benchmark-preset",
+        choices=tuple(BENCHMARK_PRESETS),
+        default=preset_args.benchmark_preset,
+        help="Memory-tier benchmark defaults. Explicit CLI flags override preset values.",
+    )
     parser.add_argument("--model-root", type=Path, default=DEFAULT_MODEL_ROOT)
     parser.add_argument("--prompt", default="A paper boat sails through a shallow stream in a mossy forest.")
     parser.add_argument(
         "--prompt-file",
         type=Path,
         default=None,
-        help=
-        "Optional prompt set. Plain text uses one prompt per non-empty line; .jsonl accepts prompt/text/caption plus optional id/name.",
+        help="Optional prompt set. Plain text uses one prompt per non-empty line; .jsonl accepts prompt/text/caption plus optional id/name.",
     )
     parser.add_argument(
         "--prompt-set",
@@ -589,13 +597,15 @@ def main() -> None:
         default=None,
         help="External reference mp4 to score every cell against. Defaults to the fp16+wan-vae cell.",
     )
-    parser.add_argument("--assert-min-ssim",
-                        type=float,
-                        default=None,
-                        help="Fail if any cell's MS-SSIM vs the reference falls below this value.")
-    parser.add_argument("--compile",
-                        action="store_true",
-                        help="Enable mx.compile on the DiT forward (sets FASTVIDEO_MLX_COMPILE=1).")
+    parser.add_argument(
+        "--assert-min-ssim",
+        type=float,
+        default=None,
+        help="Fail if any cell's MS-SSIM vs the reference falls below this value.",
+    )
+    parser.add_argument(
+        "--compile", action="store_true", help="Enable mx.compile on the DiT forward (sets FASTVIDEO_MLX_COMPILE=1)."
+    )
     parser.add_argument("--lpips", action="store_true", help="Also compute LPIPS (needs the `lpips` package).")
     parser.add_argument("--taehv-source-path", type=Path, default=None)
     parser.add_argument("--taehv-checkpoint-path", type=Path, default=None)
@@ -666,8 +676,7 @@ def main() -> None:
     # samples instead of only quantization or decoder differences.
     renoise_by_step = [
         torch.randn(latents_seed.shape, generator=generator, dtype=torch.float32).numpy()
-        for _ in range(max(0,
-                           len(timesteps) - 1))
+        for _ in range(max(0, len(timesteps) - 1))
     ]
 
     from fastvideo.mlx_runtime.fastwan import UnsupportedMLXQuantizationError
@@ -703,25 +712,29 @@ def main() -> None:
                             timesteps=timesteps,
                             latents_seed=latents_seed,
                             renoise_by_step=renoise_by_step,
-                        ))
+                        )
+                    )
                 except UnsupportedMLXQuantizationError as exc:
                     # Record the cell as unsupported and keep sweeping: a partial
                     # report on this MLX build beats crashing the whole run.
                     print(f"skipping cell (unsupported by this MLX build): {exc}")
-                    unsupported_rows.append({
-                        "prompt_id": prompt_case.id,
-                        "prompt": prompt_case.prompt,
-                        "mode": mode,
-                        "decoder": decoder,
-                        "status": "unsupported_by_mlx",
-                        "error": str(exc),
-                    })
+                    unsupported_rows.append(
+                        {
+                            "prompt_id": prompt_case.id,
+                            "prompt": prompt_case.prompt,
+                            "mode": mode,
+                            "decoder": decoder,
+                            "status": "unsupported_by_mlx",
+                            "error": str(exc),
+                        }
+                    )
 
     if not cells:
         metrics_path = args.output_dir / "metrics.json"
         metrics_path.write_text(json.dumps(unsupported_rows, indent=2))
-        raise SystemExit(f"No benchmark cell could run: every requested mode is unsupported by this MLX build. "
-                         f"Wrote {metrics_path}.")
+        raise SystemExit(
+            f"No benchmark cell could run: every requested mode is unsupported by this MLX build. Wrote {metrics_path}."
+        )
 
     # Resolve one internal reference per prompt. A single external reference, if
     # supplied, is used for every prompt and only video metrics are computed.
@@ -739,8 +752,9 @@ def main() -> None:
                 prompt_cells[0],
             )
             reference_by_prompt[prompt_case.id] = (ref_cell.video_path, ref_cell.latents)
-            print(f"Using internal reference cell for {prompt_case.id}: "
-                  f"mode={ref_cell.mode} decoder={ref_cell.decoder}")
+            print(
+                f"Using internal reference cell for {prompt_case.id}: mode={ref_cell.mode} decoder={ref_cell.decoder}"
+            )
 
     lpips_fn = _load_lpips() if args.lpips else None
 
@@ -753,11 +767,13 @@ def main() -> None:
         cell.metrics.update(runtime_limits)
         if reference_latents is not None:
             cell.metrics.update(_latent_delta_metrics(cell.latents, reference_latents))
-        cell.metrics["lpips_vs_ref"] = (_lpips_between(lpips_fn, Path(reference_video), cell.video_path)
-                                        if lpips_fn else None)
+        cell.metrics["lpips_vs_ref"] = (
+            _lpips_between(lpips_fn, Path(reference_video), cell.video_path) if lpips_fn else None
+        )
         if args.assert_min_ssim is not None and ms_ssim is not None and ms_ssim < args.assert_min_ssim:
             failures.append(
-                f"{cell.prompt_id}/{cell.mode}/{cell.decoder}: MS-SSIM {ms_ssim:.4f} < {args.assert_min_ssim}")
+                f"{cell.prompt_id}/{cell.mode}/{cell.decoder}: MS-SSIM {ms_ssim:.4f} < {args.assert_min_ssim}"
+            )
         rows.append(dict(cell.metrics))
         print(json.dumps(cell.metrics, indent=2))
     rows.extend(unsupported_rows)

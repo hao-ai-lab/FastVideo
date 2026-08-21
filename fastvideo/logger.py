@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/logger.py
 """Logging configuration for fastvideo."""
+
 import datetime
 import json
 import logging
@@ -20,15 +21,14 @@ FASTVIDEO_LOGGING_CONFIG_PATH = envs.FASTVIDEO_LOGGING_CONFIG_PATH
 FASTVIDEO_LOGGING_LEVEL = envs.FASTVIDEO_LOGGING_LEVEL
 FASTVIDEO_LOGGING_PREFIX = envs.FASTVIDEO_LOGGING_PREFIX
 
-RED = '\033[91m'
-GREEN = '\033[92m'
-RESET = '\033[0;0m'
+RED = "\033[91m"
+GREEN = "\033[92m"
+RESET = "\033[0;0m"
 
 _warned_local_main_process = False
 _warned_main_process = False
 
-_FORMAT = (f"{FASTVIDEO_LOGGING_PREFIX}%(levelname)s %(asctime)s.%(msecs)03d "
-           "[%(filename)s:%(lineno)d] %(message)s")
+_FORMAT = f"{FASTVIDEO_LOGGING_PREFIX}%(levelname)s %(asctime)s.%(msecs)03d [%(filename)s:%(lineno)d] %(message)s"
 _DATE_FORMAT = "%m-%d %H:%M:%S"
 
 DEFAULT_LOGGING_CONFIG = {
@@ -59,7 +59,7 @@ DEFAULT_LOGGING_CONFIG = {
         "level": "DEBUG",
     },
     "version": 1,
-    "disable_existing_loggers": False
+    "disable_existing_loggers": False,
 }
 
 
@@ -76,17 +76,19 @@ def _print_warning_once(logger: Logger, msg: str) -> None:
 
 
 # TODO(will): add env variable to control this process-aware logging behavior
-def _info(logger: Logger,
-          msg: object,
-          *args: Any,
-          main_process_only: bool = False,
-          local_main_process_only: bool = True,
-          **kwargs: Any) -> None:
+def _info(
+    logger: Logger,
+    msg: object,
+    *args: Any,
+    main_process_only: bool = False,
+    local_main_process_only: bool = True,
+    **kwargs: Any,
+) -> None:
     """Process-aware INFO level logging function.
-    
-    This function controls logging behavior based on the process rank, allowing for 
+
+    This function controls logging behavior based on the process rank, allowing for
     selective logging from specific processes in a distributed environment.
-    
+
     Args:
         logger: The logger instance to use for logging
         msg: The message format string to log
@@ -95,9 +97,9 @@ def _info(logger: Logger,
         local_main_process_only: If True, only log if this is the local main process (LOCAL_RANK=0)
         **kwargs: Additional keyword arguments to pass to the logger.log method
             - stacklevel: Defaults to 2 to show the original caller's location
-    
+
     Note:
-        - When both main_process_only and local_main_process_only are True, 
+        - When both main_process_only and local_main_process_only are True,
           the message will be logged only if both conditions are met
         - When both are False, the message will be logged from all processes
         - By default, only logs from processes with LOCAL_RANK=0
@@ -122,14 +124,14 @@ def _info(logger: Logger,
     if is_distributed:
         if not _warned_local_main_process and local_main_process_only:
             logger.warning(
-                '%s By default, logger.info(..) will only log from the local main process. Set logger.info(..., is_local_main_process=False) to log from all processes.%s',
+                "%s By default, logger.info(..) will only log from the local main process. Set logger.info(..., is_local_main_process=False) to log from all processes.%s",
                 GREEN,
                 RESET,
             )
             _warned_local_main_process = True
         if not _warned_main_process and main_process_only:
             logger.warning(
-                '%s is_main_process_only is set to True, logging only from the main (RANK==0) process.%s',
+                "%s is_main_process_only is set to True, logging only from the main (RANK==0) process.%s",
                 GREEN,
                 RESET,
             )
@@ -163,28 +165,33 @@ class _FastvideoLogger(Logger):
         _print_warning_once(self, msg)
 
     def info(  # type: ignore[override]
+        self,
+        msg: object,
+        *args: Any,
+        main_process_only: bool = False,
+        local_main_process_only: bool = True,
+        **kwargs: Any,
+    ) -> None:
+        _info(
             self,
-            msg: object,
-            *args: Any,
-            main_process_only: bool = False,
-            local_main_process_only: bool = True,
-            **kwargs: Any) -> None:
-        _info(self,
-              msg,
-              *args,
-              main_process_only=main_process_only,
-              local_main_process_only=local_main_process_only,
-              **kwargs)
+            msg,
+            *args,
+            main_process_only=main_process_only,
+            local_main_process_only=local_main_process_only,
+            **kwargs,
+        )
 
 
 def _configure_fastvideo_root_logger() -> None:
     logging_config = dict[str, Any]()
 
     if not FASTVIDEO_CONFIGURE_LOGGING and FASTVIDEO_LOGGING_CONFIG_PATH:
-        raise RuntimeError("FASTVIDEO_CONFIGURE_LOGGING evaluated to false, but "
-                           "FASTVIDEO_LOGGING_CONFIG_PATH was given. FASTVIDEO_LOGGING_CONFIG_PATH "
-                           "implies FASTVIDEO_CONFIGURE_LOGGING. Please enable "
-                           "FASTVIDEO_CONFIGURE_LOGGING or unset FASTVIDEO_LOGGING_CONFIG_PATH.")
+        raise RuntimeError(
+            "FASTVIDEO_CONFIGURE_LOGGING evaluated to false, but "
+            "FASTVIDEO_LOGGING_CONFIG_PATH was given. FASTVIDEO_LOGGING_CONFIG_PATH "
+            "implies FASTVIDEO_CONFIGURE_LOGGING. Please enable "
+            "FASTVIDEO_CONFIGURE_LOGGING or unset FASTVIDEO_LOGGING_CONFIG_PATH."
+        )
 
     if FASTVIDEO_CONFIGURE_LOGGING:
         logging_config = DEFAULT_LOGGING_CONFIG
@@ -236,7 +243,7 @@ logger = init_logger(__name__)
 
 
 def _trace_calls(log_path, root_dir, frame, event, arg=None):
-    if event in ['call', 'return']:
+    if event in ["call", "return"]:
         # Extract the filename, line number, function name, and the code object
         filename = frame.f_code.co_filename
         lineno = frame.f_lineno
@@ -256,18 +263,22 @@ def _trace_calls(log_path, root_dir, frame, event, arg=None):
                 last_filename = ""
                 last_lineno = 0
                 last_func_name = ""
-            with open(log_path, 'a') as f:
+            with open(log_path, "a") as f:
                 ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
-                if event == 'call':
-                    f.write(f"{ts} Call to"
-                            f" {func_name} in {filename}:{lineno}"
-                            f" from {last_func_name} in {last_filename}:"
-                            f"{last_lineno}\n")
+                if event == "call":
+                    f.write(
+                        f"{ts} Call to"
+                        f" {func_name} in {filename}:{lineno}"
+                        f" from {last_func_name} in {last_filename}:"
+                        f"{last_lineno}\n"
+                    )
                 else:
-                    f.write(f"{ts} Return from"
-                            f" {func_name} in {filename}:{lineno}"
-                            f" to {last_func_name} in {last_filename}:"
-                            f"{last_lineno}\n")
+                    f.write(
+                        f"{ts} Return from"
+                        f" {func_name} in {filename}:{lineno}"
+                        f" to {last_func_name} in {last_filename}:"
+                        f"{last_lineno}\n"
+                    )
         except NameError:
             # modules are deleted during shutdown
             pass
@@ -285,9 +296,11 @@ def enable_trace_function_call(log_file_path: str, root_dir: str | None = None):
     Note that this call is thread-level, any threads calling this function
     will have the trace enabled. Other threads will not be affected.
     """
-    logger.warning("FASTVIDEO_TRACE_FUNCTION is enabled. It will record every"
-                   " function executed by Python. This will slow down the code. It "
-                   "is suggested to be used for debugging hang or crashes only.")
+    logger.warning(
+        "FASTVIDEO_TRACE_FUNCTION is enabled. It will record every"
+        " function executed by Python. This will slow down the code. It "
+        "is suggested to be used for debugging hang or crashes only."
+    )
     logger.info("Trace frame log is saved to %s", log_file_path)
     if root_dir is None:
         # by default, this is the fastvideo root directory

@@ -67,7 +67,7 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
             raise ValueError("MiniMax-H3 video latents or raw geometry are missing at decode.")
         _, channels, num_frames, latent_height, latent_width = batch.raw_latent_shape
         latents = unpatchify_video_tokens(
-            batch.latents[layout.num_condition_video_rows:],
+            batch.latents[layout.num_condition_video_rows :],
             num_frames,
             latent_height,
             latent_width,
@@ -131,7 +131,7 @@ class MiniMaxH3AudioDecodingStage(PipelineStage):
         if batch.audio_latents is None:
             raise ValueError("MiniMax-H3 audio latents are missing at decode.")
         latents = unpack_audio_tokens(
-            batch.audio_latents[layout.num_condition_audio_rows:],
+            batch.audio_latents[layout.num_condition_audio_rows :],
             layout.num_audio_latents,
         )
         device = get_local_torch_device()
@@ -146,8 +146,10 @@ class MiniMaxH3AudioDecodingStage(PipelineStage):
 
             decoded = self.audio_vae.decode(latents).sample.float()
             if decoded.ndim != 3 or decoded.shape[0] != 2 or decoded.shape[1] != 1:
-                raise ValueError("MiniMax-H3 audio VAE must decode stereo channels as two mono batch items; "
-                                 f"got {tuple(decoded.shape)}.")
+                raise ValueError(
+                    "MiniMax-H3 audio VAE must decode stereo channels as two mono batch items; "
+                    f"got {tuple(decoded.shape)}."
+                )
             batch.extra["audio"] = decoded[:, 0].transpose(0, 1).contiguous().cpu()
             batch.extra["audio_sample_rate"] = self.audio_vae.sampling_rate
             self._clear_runtime(batch)

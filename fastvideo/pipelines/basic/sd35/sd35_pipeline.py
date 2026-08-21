@@ -8,7 +8,8 @@ from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.stages.input_validation import InputValidationStage
 from fastvideo.pipelines.stages.text_encoding import TextEncodingStage
 from fastvideo.pipelines.stages.timestep_preparation import (
-    SD35TimestepPreparationStage, )
+    SD35TimestepPreparationStage,
+)
 from fastvideo.pipelines.stages.sd35_conditioning import (
     SD35ConditioningStage,
     SD35DecodingStage,
@@ -43,8 +44,9 @@ class SD35Pipeline(ComposedPipelineBase):
                 te_cfgs[i].tokenizer_kwargs.setdefault("truncation", True)
                 te_cfgs[i].tokenizer_kwargs.setdefault("return_tensors", "pt")
         if len(te_cfgs) >= 3:
-            te_cfgs[2].tokenizer_kwargs["max_length"] = min(int(te_cfgs[2].tokenizer_kwargs.get("max_length", 256)),
-                                                            256)
+            te_cfgs[2].tokenizer_kwargs["max_length"] = min(
+                int(te_cfgs[2].tokenizer_kwargs.get("max_length", 256)), 256
+            )
             te_cfgs[2].tokenizer_kwargs.setdefault("padding", "max_length")
             te_cfgs[2].tokenizer_kwargs.setdefault("truncation", True)
             te_cfgs[2].tokenizer_kwargs.setdefault("return_tensors", "pt")
@@ -75,7 +77,9 @@ class SD35Pipeline(ComposedPipelineBase):
 
         self.add_stage(
             stage_name="latent_preparation_stage",
-            stage=SD35LatentPreparationStage(scheduler=self.get_module("scheduler"), ),
+            stage=SD35LatentPreparationStage(
+                scheduler=self.get_module("scheduler"),
+            ),
         )
 
         self.add_stage(
@@ -104,7 +108,9 @@ class SD35Pipeline(ComposedPipelineBase):
 
         self.add_stage(
             stage_name="decoding_stage",
-            stage=SD35DecodingStage(vae=self.get_module("vae"), ),
+            stage=SD35DecodingStage(
+                vae=self.get_module("vae"),
+            ),
         )
 
 

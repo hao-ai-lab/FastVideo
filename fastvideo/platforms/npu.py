@@ -7,13 +7,12 @@ from torch.distributed.distributed_c10d import PrefixStore
 
 import fastvideo.envs as envs
 from fastvideo.logger import init_logger
-from fastvideo.platforms.interface import (AttentionBackendEnum, Platform, PlatformEnum)
+from fastvideo.platforms.interface import AttentionBackendEnum, Platform, PlatformEnum
 
 logger = init_logger(__name__)
 
 
 class NPUPlatform(Platform):
-
     _enum = PlatformEnum.NPU
     device_name: str = "npu"
     device_type: str = "npu"
@@ -64,8 +63,9 @@ class NPUPlatform(Platform):
         torch.npu.reset_peak_memory_stats()
 
     @classmethod
-    def get_attn_backend_cls(cls, selected_backend: AttentionBackendEnum | None, head_size: int,
-                             dtype: torch.dtype) -> str:
+    def get_attn_backend_cls(
+        cls, selected_backend: AttentionBackendEnum | None, head_size: int, dtype: torch.dtype
+    ) -> str:
         logger.info("Trying FASTVIDEO_ATTENTION_BACKEND=%s", envs.FASTVIDEO_ATTENTION_BACKEND)
         if envs.FASTVIDEO_ATTENTION_BACKEND != "TORCH_SDPA":
             logger.info("Ascend NPU only supports the Torch SDPA backend.")

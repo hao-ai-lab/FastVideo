@@ -23,6 +23,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Rotary Positional Embeddings."""
+
 from typing import Any
 
 import torch
@@ -35,8 +36,8 @@ logger = init_logger(__name__)
 
 
 def _rotate_neox(x: torch.Tensor) -> torch.Tensor:
-    x1 = x[..., :x.shape[-1] // 2]
-    x2 = x[..., x.shape[-1] // 2:]
+    x1 = x[..., : x.shape[-1] // 2]
+    x2 = x[..., x.shape[-1] // 2 :]
     return torch.cat((-x2, x1), dim=-1)
 
 
@@ -115,7 +116,7 @@ def _apply_rotary_emb(
         sin: [num_tokens, head_size] or [num_tokens, head_size // 2]
         is_neox_style: Whether to use the Neox-style or GPT-J-style rotary
             positional embeddings.
-    
+
     The function auto-detects whether cos/sin are full or half head_size:
     - If cos/sin have head_size: use rotate_half style (for HunyuanVideo/GameCraft)
     - If cos/sin have head_size // 2: use Neox/GPT-J style
@@ -182,7 +183,7 @@ class RotaryEmbedding(CustomOp):
         # use CPU to compute the cache and then move it to GPU. However, we
         # create the cache on GPU for faster initialization. This may cause
         # a slight numerical difference between the HF implementation and ours.
-        inv_freq = 1.0 / (base**(torch.arange(0, self.rotary_dim, 2, dtype=torch.float) / self.rotary_dim))
+        inv_freq = 1.0 / (base ** (torch.arange(0, self.rotary_dim, 2, dtype=torch.float) / self.rotary_dim))
         return inv_freq
 
     def _compute_cos_sin_cache(self) -> torch.Tensor:
@@ -213,15 +214,15 @@ class RotaryEmbedding(CustomOp):
 
         query_shape = query.shape
         query = query.view(num_tokens, -1, self.head_size)
-        query_rot = query[..., :self.rotary_dim]
-        query_pass = query[..., self.rotary_dim:]
+        query_rot = query[..., : self.rotary_dim]
+        query_pass = query[..., self.rotary_dim :]
         query_rot = _apply_rotary_emb(query_rot, cos, sin, self.is_neox_style)
         query = torch.cat((query_rot, query_pass), dim=-1).reshape(query_shape)
 
         key_shape = key.shape
         key = key.view(num_tokens, -1, self.head_size)
-        key_rot = key[..., :self.rotary_dim]
-        key_pass = key[..., self.rotary_dim:]
+        key_rot = key[..., : self.rotary_dim]
+        key_pass = key[..., self.rotary_dim :]
         key_rot = _apply_rotary_emb(key_rot, cos, sin, self.is_neox_style)
         key = torch.cat((key_rot, key_pass), dim=-1).reshape(key_shape)
         return query, key
@@ -235,7 +236,7 @@ class RotaryEmbedding(CustomOp):
 
 def _to_tuple(x: int | tuple[int, ...], dim: int = 2) -> tuple[int, ...]:
     if isinstance(x, int):
-        return (x, ) * dim
+        return (x,) * dim
     elif len(x) == dim:
         return x
     else:
@@ -260,7 +261,7 @@ def get_meshgrid_nd(start: int | tuple[int, ...], *args: int | tuple[int, ...], 
     if len(args) == 0:
         # start is grid_size
         num = _to_tuple(start, dim=dim)
-        start = (0, ) * dim
+        start = (0,) * dim
         stop = num
     elif len(args) == 1:
         # start is start, args[0] is stop, step is 1
@@ -310,11 +311,11 @@ def get_1d_rotary_pos_embed(
         theta (float, optional): Scaling factor for frequency computation. Defaults to 10000.0.
         theta_rescale_factor (float, optional): Rescale factor for theta. Defaults to 1.0.
         interpolation_factor (float, optional): Factor to scale positions. Defaults to 1.0.
-        use_real (bool, optional): If True, output full head_dim with repeated cos/sin for 
+        use_real (bool, optional): If True, output full head_dim with repeated cos/sin for
             rotate_half style RoPE. If False, output half head_dim for complex style. Defaults to True.
 
     Returns:
-        freqs_cos, freqs_sin: Precomputed frequency tensor with real and imaginary parts separately. 
+        freqs_cos, freqs_sin: Precomputed frequency tensor with real and imaginary parts separately.
             Shape is [S, D] if use_real=True, [S, D/2] if use_real=False.
     """
     if isinstance(pos, int):
@@ -327,9 +328,9 @@ def get_1d_rotary_pos_embed(
     # proposed by reddit user bloc97, to rescale rotary embeddings to longer sequence length without fine-tuning
     # has some connection to NTK literature
     if theta_rescale_factor != 1.0:
-        theta *= theta_rescale_factor**(dim / (dim - 2))
+        theta *= theta_rescale_factor ** (dim / (dim - 2))
 
-    freqs = 1.0 / (theta**(torch.arange(0, dim, 2, device=pos.device)[:(dim // 2)].to(dtype) / dim))  # [D/2]
+    freqs = 1.0 / (theta ** (torch.arange(0, dim, 2, device=pos.device)[: (dim // 2)].to(dtype) / dim))  # [D/2]
     freqs = torch.outer(pos * interpolation_factor, freqs)  # [S, D/2]
     freqs_cos = freqs.cos()  # [S, D/2]
     freqs_sin = freqs.sin()  # [S, D/2]
@@ -388,8 +389,9 @@ def get_nd_rotary_pos_embed(
         full_grid[0] += start_frame
 
     # Shard the grid if using sequence parallelism (sp_world_size > 1)
-    assert shard_dim < len(
-        rope_dim_list), f"shard_dim {shard_dim} must be less than number of dimensions {len(rope_dim_list)}"
+    assert shard_dim < len(rope_dim_list), (
+        f"shard_dim {shard_dim} must be less than number of dimensions {len(rope_dim_list)}"
+    )
     if sp_world_size > 1:
         # Get the shape of the full grid
         grid_shape = list(full_grid.shape[1:])
@@ -397,7 +399,8 @@ def get_nd_rotary_pos_embed(
         # Ensure the dimension to shard is divisible by sp_world_size
         assert grid_shape[shard_dim] % sp_world_size == 0, (
             f"Dimension {shard_dim} with size {grid_shape[shard_dim]} is not divisible "
-            f"by sequence parallel world size {sp_world_size}")
+            f"by sequence parallel world size {sp_world_size}"
+        )
 
         # Compute the start and end indices for this rank's shard
         shard_size = grid_shape[shard_dim] // sp_world_size
@@ -411,7 +414,7 @@ def get_nd_rotary_pos_embed(
         # Shard the grid
         # Update grid shape for the sharded dimension
         grid_shape[shard_dim] = grid_shape[shard_dim] // sp_world_size
-        grid = torch.empty((len(rope_dim_list), ) + tuple(grid_shape), dtype=full_grid.dtype)
+        grid = torch.empty((len(rope_dim_list),) + tuple(grid_shape), dtype=full_grid.dtype)
         for i in range(len(rope_dim_list)):
             grid[i] = full_grid[i][tuple(slice_indices)]
     else:
@@ -421,15 +424,17 @@ def get_nd_rotary_pos_embed(
         theta_rescale_factor = [theta_rescale_factor] * len(rope_dim_list)
     elif isinstance(theta_rescale_factor, list) and len(theta_rescale_factor) == 1:
         theta_rescale_factor = [theta_rescale_factor[0]] * len(rope_dim_list)
-    assert len(theta_rescale_factor) == len(
-        rope_dim_list), "len(theta_rescale_factor) should equal to len(rope_dim_list)"
+    assert len(theta_rescale_factor) == len(rope_dim_list), (
+        "len(theta_rescale_factor) should equal to len(rope_dim_list)"
+    )
 
     if isinstance(interpolation_factor, int | float):
         interpolation_factor = [interpolation_factor] * len(rope_dim_list)
     elif isinstance(interpolation_factor, list) and len(interpolation_factor) == 1:
         interpolation_factor = [interpolation_factor[0]] * len(rope_dim_list)
-    assert len(interpolation_factor) == len(
-        rope_dim_list), "len(interpolation_factor) should equal to len(rope_dim_list)"
+    assert len(interpolation_factor) == len(rope_dim_list), (
+        "len(interpolation_factor) should equal to len(rope_dim_list)"
+    )
 
     # use 1/ndim of dimensions to encode grid_axis
     embs = []
@@ -481,7 +486,7 @@ def get_rotary_pos_embed(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Generate rotary positional embeddings for the given sizes.
-    
+
     Args:
         rope_sizes: Tuple of dimensions (t, h, w)
         hidden_size: Hidden dimension size
@@ -493,7 +498,7 @@ def get_rotary_pos_embed(
         shard_dim: Which dimension to shard for sequence parallelism. Defaults to 0.
         do_sp_sharding: Whether to shard the positional embeddings for sequence parallelism. Defaults to False.
         use_real: If True, output full head_dim for rotate_half style RoPE. Defaults to True.
-        
+
     Returns:
         Tuple of (cos, sin) tensors for rotary embeddings. Shape [S, D] if use_real, [S, D/2] otherwise.
     """

@@ -19,7 +19,7 @@ logger = init_logger(__name__)
 class LongCatI2VLatentPreparationStage(LatentPreparationStage):
     """
     Prepare latents with image conditioning for first frame.
-    
+
     This stage:
     1. Generates random noise for all frames
     2. Replaces first latent frame with encoded image latent
@@ -39,8 +39,9 @@ class LongCatI2VLatentPreparationStage(LatentPreparationStage):
         # The refine_init stage encodes stage1 video and mixes with noise - don't overwrite!
         if batch.latents is not None:
             logger.info(
-                "I2V Latent Prep: Skipping - latents already prepared "
-                "(shape=%s), likely from refinement stage", batch.latents.shape)
+                "I2V Latent Prep: Skipping - latents already prepared (shape=%s), likely from refinement stage",
+                batch.latents.shape,
+            )
             return batch
 
         # 1. Calculate dimensions
@@ -60,9 +61,13 @@ class LongCatI2VLatentPreparationStage(LatentPreparationStage):
         num_channels = self.transformer.config.in_channels
 
         logger.info(
-            "I2V Latent Prep: num_frames=%s, num_latent_frames=%s "
-            "(vae_temporal_scale=%s), latent_shape=(%s, %s)", num_frames, num_latent_frames, vae_temporal_scale,
-            latent_height, latent_width)
+            "I2V Latent Prep: num_frames=%s, num_latent_frames=%s (vae_temporal_scale=%s), latent_shape=(%s, %s)",
+            num_frames,
+            num_latent_frames,
+            vae_temporal_scale,
+            latent_height,
+            latent_width,
+        )
 
         # 2. Generate random noise for all frames
         # batch_size might not be set, default to 1

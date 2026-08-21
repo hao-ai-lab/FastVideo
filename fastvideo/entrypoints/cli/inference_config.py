@@ -55,13 +55,13 @@ def build_serve_config(
 
 def _load_nested_config(path: str | None) -> dict[str, Any]:
     if not path:
-        raise ValueError("Inference CLI requires --config PATH; use a nested config file "
-                         "plus optional dotted overrides")
+        raise ValueError(
+            "Inference CLI requires --config PATH; use a nested config file plus optional dotted overrides"
+        )
 
     raw = load_raw_config(path)
     if not isinstance(raw.get("generator"), Mapping):
-        raise ValueError("Inference config must use the nested schema with a top-level "
-                         "'generator' mapping")
+        raise ValueError("Inference config must use the nested schema with a top-level 'generator' mapping")
     return deepcopy(dict(raw))
 
 
@@ -77,8 +77,7 @@ def _apply_dotted_overrides(
     parsed = parse_cli_overrides(overrides)
     for key in parsed:
         if "." not in key:
-            raise ValueError("CLI overrides must use dotted config paths like "
-                             "--request.sampling.seed 42")
+            raise ValueError("CLI overrides must use dotted config paths like --request.sampling.seed 42")
         if not key.startswith(allowed_prefixes):
             allowed = ", ".join(allowed_prefixes)
             raise ValueError(f"Unsupported override path {key!r}. Allowed prefixes: {allowed}")
