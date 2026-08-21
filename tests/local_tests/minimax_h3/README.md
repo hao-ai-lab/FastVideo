@@ -49,7 +49,10 @@ pytest \
 ```
 
 With a gate enabled, missing CUDA, source, or weights is a failure. Recorded component evidence is exact for both DiT
-partitions, the video VAE, and all Qwen3-VL hidden states; audio decode has maximum absolute drift `2.4e-7`.
+partitions, the video VAE, and all Qwen3-VL hidden states; audio decode has maximum absolute drift `2.4e-7`. The
+production Qwen3-VL stack is now built only to the layer-50 conditioning tap by default
+(`num_hidden_layers_override`), so the encoder gate compares every hidden state the production model builds
+bit-exactly against the official full stack at the same index.
 
 FastVideo joint audio/video generation and SP=1/SP=4 latent consistency have been validated. T2VA, FL2VA, and
 Ref2VA video/audio latents match the pinned Diffusers pipeline exactly.

@@ -127,6 +127,16 @@ class MiniMaxH3Qwen3VLArchConfig(TextEncoderArchConfig):
     ])
 
     def __post_init__(self) -> None:
+        # Runs both at construction and after ``update_model_arch`` merges the
+        # checkpoint's config.json, so it also guards config-file overrides. A
+        # non-positive override would build no decoder layers at all, and a
+        # negative one would additionally make the surplus-key filter drop
+        # every ``language_model.layers.*`` checkpoint key, so the conditioner
+        # would "load" with no transformer stack and only fail at generation.
+        if self.num_hidden_layers_override is not None and self.num_hidden_layers_override < 1:
+            raise ValueError("MiniMax H3 Qwen3-VL num_hidden_layers_override must be a positive layer count "
+                             f"or None for the full stack; got {self.num_hidden_layers_override}.")
+
         rope_scaling = dict(self.rope_scaling or {})
         self.mrope_interleaved = bool(rope_scaling.get("mrope_interleaved", self.mrope_interleaved))
         if not self.mrope_interleaved:

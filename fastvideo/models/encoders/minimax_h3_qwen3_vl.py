@@ -530,6 +530,13 @@ class MiniMaxH3Qwen3VLConditioner(TextEncoder):
 
     @property
     def num_hidden_layers(self) -> int:
+        """The checkpoint architecture's nominal depth, matching its config.json.
+
+        When ``num_hidden_layers_override`` truncates the stack at the
+        conditioning tap, fewer layers exist; the built count is
+        ``self.language_model.num_layers``, and the hidden-state tuple has
+        ``num_layers + 1`` entries, not ``num_hidden_layers + 1``.
+        """
         return self.config.num_hidden_layers
 
     def _get_rope_index(
@@ -726,7 +733,12 @@ class MiniMaxH3Qwen3VLConditioner(TextEncoder):
         if not name.startswith(prefix):
             return False
         index = name[len(prefix):].split(".", 1)[0]
-        return index.isdigit() and int(index) >= language_model.num_layers
+        if not index.isdigit():
+            return False
+        # Only drop indexes the full stack would have built. Anything at or
+        # above the checkpoint's own num_hidden_layers is corrupt and must
+        # still raise below, exactly as it does without truncation.
+        return language_model.num_layers <= int(index) < self.config.num_hidden_layers
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         parameters = dict(self.named_parameters())

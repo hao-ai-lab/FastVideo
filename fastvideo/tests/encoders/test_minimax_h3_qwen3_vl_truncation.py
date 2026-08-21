@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 
+import pytest
 import torch
 
 # Matches the other encoder tests: the module registry these build against wants
@@ -107,6 +108,36 @@ def test_override_above_the_stack_does_not_over_build(distributed_setup) -> None
     assert model.norm is not None
 
 
+def test_override_equal_to_the_stack_keeps_the_norm(distributed_setup) -> None:
+    """The exact boundary of the clamp: a stack cut at its own depth is full.
+
+    A checkpoint with exactly ``override`` layers taps its final layer, whose
+    tuple entry sits after the norm in the full model, so the norm must stay
+    and nothing may be filtered from the checkpoint.
+    """
+    model = MiniMaxH3Qwen3VLLanguageModel(_small_config(num_hidden_layers_override=8))
+
+    assert model.num_layers == 8
+    assert model.norm is not None
+
+
+def test_non_positive_override_is_rejected() -> None:
+    """A non-positive override would build no decoder layers at all.
+
+    Worse, a negative one makes ``num_layers`` disagree with the built stack
+    and the surplus-key filter would then drop every layer key, so the
+    conditioner would load "successfully" with no transformer. Reject it at
+    config construction, and again when update_model_arch re-validates.
+    """
+    for override in (0, -1):
+        with pytest.raises(ValueError, match="num_hidden_layers_override"):
+            _small_arch(num_hidden_layers_override=override)
+
+    config = _small_config()
+    with pytest.raises(ValueError, match="num_hidden_layers_override"):
+        config.update_model_arch({"num_hidden_layers_override": 0})
+
+
 def test_tapped_hidden_state_is_unchanged_by_truncation(distributed_setup) -> None:
     """The whole point: entry `tap` must be bit-identical either way."""
     tap = 5
@@ -136,6 +167,13 @@ def test_tapped_hidden_state_is_unchanged_by_truncation(distributed_setup) -> No
     assert torch.equal(full_out.hidden_states[tap], cut_out.hidden_states[tap])
     # And the truncated model must not offer states it never computed.
     assert len(cut_out.hidden_states) == tap + 1
+    # The whole shared prefix must match, not just the tap: this is the same
+    # comparison the production-loader parity gate runs against the official
+    # model, and it is what catches a truncated stack that still applied the
+    # final norm to its last entry.
+    for index, (cut_state, full_state) in enumerate(zip(cut_out.hidden_states, full_out.hidden_states,
+                                                        strict=False)):
+        assert torch.equal(cut_state, full_state), f"hidden state {index} changed under truncation"
 
 
 def test_truncated_model_drops_the_surplus_checkpoint_keys(distributed_setup) -> None:
@@ -152,6 +190,12 @@ def test_truncated_model_drops_the_surplus_checkpoint_keys(distributed_setup) ->
     assert not conditioner._is_above_the_tap("language_model.layers.4.mlp.gate_proj.weight")
     assert not conditioner._is_above_the_tap("language_model.embed_tokens.weight")
     assert not conditioner._is_above_the_tap("visual.blocks.0.attn.qkv.weight")
+    # The filter only drops indexes the full stack would have built. A key at
+    # or above the checkpoint's own num_hidden_layers is corrupt, and it must
+    # keep raising as unexpected exactly as it does without truncation.
+    assert not conditioner._is_above_the_tap("language_model.layers.8.mlp.gate_proj.weight")
+    with pytest.raises(ValueError, match="Unexpected"):
+        conditioner.load_weights([("model.language_model.layers.8.mlp.gate_proj.weight", torch.zeros(1))])
 
 
 def test_full_stack_filters_nothing(distributed_setup) -> None:
