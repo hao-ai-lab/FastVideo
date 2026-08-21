@@ -279,3 +279,119 @@ def test_flashinfer_groupwise_path_pins_output_dtype_and_trtllm_scale_layout(mon
     assert receipt["checkpoint_weight"] is weight
     assert receipt["checkpoint_scale"] is weight_scale
     assert receipt["activation_scale"] is input_scale
+
+
+def test_flashinfer_groupwise_cutlass_path_pads_m_to_a_multiple_of_four(monkeypatch) -> None:
+    """FlashInfer documents that ``m`` must be padded to a multiple of 4, and
+    the CUTLASS groupwise module (the sm12x route) rejects unaligned ``m`` at
+    dispatch with ``cutlass gemm.can_implement failed``. m=559 is this PR's
+    own benchmark prompt length. The route must pad the quantized activation
+    rows and per-token scales, pin the MN scale layout, and slice the padded
+    rows off the output."""
+    m, k, n = 559, 256, 128
+    padded_m = 560
+    input_tensor = torch.zeros(m, k, dtype=torch.bfloat16)
+    weight = torch.zeros(n, k, dtype=torch.float8_e4m3fn)
+    weight_scale = torch.ones(n // 128, k // 128, dtype=torch.float32)
+    quantized_input = torch.zeros(m, k, dtype=torch.float8_e4m3fn)
+    input_scale = torch.ones(m, k // 128, dtype=torch.float32)
+    receipt: dict[str, object] = {}
+
+    def fake_quantize(
+        value: torch.Tensor,
+        group_size: int,
+        *,
+        column_major_scales: bool,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        assert value.data_ptr() == input_tensor.data_ptr()
+        assert group_size == 128
+        assert column_major_scales is False
+        return quantized_input, input_scale
+
+    def fake_gemm(
+        activation: torch.Tensor,
+        checkpoint_weight: torch.Tensor,
+        activation_scale: torch.Tensor,
+        checkpoint_scale: torch.Tensor,
+        *,
+        out_dtype: torch.dtype,
+        backend: str,
+        scale_major_mode: str,
+    ) -> torch.Tensor:
+        assert activation.shape[0] % 4 == 0, "cutlass GEMM requires m padded to a multiple of 4"
+        receipt.update(
+            activation=activation,
+            activation_scale=activation_scale,
+            checkpoint_scale=checkpoint_scale,
+            backend=backend,
+            scale_major_mode=scale_major_mode,
+        )
+        # Tag each row with a bf16-exact value (integers above 256 are not
+        # exactly representable in bf16) so the caller-side slice of the
+        # first m rows is observable.
+        rows = torch.arange(activation.shape[0], dtype=torch.float32) % 256
+        return rows.unsqueeze(1).expand(activation.shape[0], checkpoint_weight.shape[0]).contiguous().to(out_dtype)
+
+    monkeypatch.setattr(h3_fp8, "_get_flashinfer_groupwise_backend", lambda device: "cutlass")
+    monkeypatch.setattr(h3_fp8, "_sglang_per_token_group_quant_fp8", fake_quantize)
+    monkeypatch.setattr(h3_fp8, "_get_flashinfer_groupwise_fp8_gemm", lambda: fake_gemm)
+
+    output = h3_fp8._flashinfer_gemm_w8a8_block_fp8_linear_with_fallback(
+        input_tensor,
+        weight,
+        (128, 128),
+        weight_scale,
+    )
+
+    activation = receipt["activation"]
+    assert activation.shape == (padded_m, k)
+    assert torch.equal(activation[:m].view(torch.uint8), quantized_input.view(torch.uint8))
+    assert not activation[m:].view(torch.uint8).any(), "padded activation rows must be zero"
+
+    activation_scale = receipt["activation_scale"]
+    assert activation_scale.shape == (k // 128, padded_m)
+    assert torch.equal(activation_scale[:, :m], input_scale.transpose(-1, -2))
+    assert not activation_scale[:, m:].any(), "padded scale columns must be zero"
+
+    assert receipt["backend"] == "cutlass"
+    assert receipt["scale_major_mode"] == "MN"
+    assert receipt["checkpoint_scale"].shape == (k // 128, n // 128)
+
+    # The padded rows never reach the caller.
+    assert output.shape == (m, n)
+    assert output.dtype == torch.bfloat16
+    assert torch.equal(output.float()[:, 0], torch.arange(m, dtype=torch.float32) % 256)
+
+
+def test_flashinfer_groupwise_cutlass_path_leaves_aligned_m_unpadded(monkeypatch) -> None:
+    """Aligned token counts must not pay a padding copy on the cutlass route."""
+    m, k, n = 560, 256, 128
+    input_tensor = torch.zeros(m, k, dtype=torch.bfloat16)
+    weight = torch.zeros(n, k, dtype=torch.float8_e4m3fn)
+    weight_scale = torch.ones(k // 128, n // 128, dtype=torch.float32)
+    quantized_input = torch.zeros(m, k, dtype=torch.float8_e4m3fn)
+    input_scale = torch.ones(k // 128, m, dtype=torch.float32)
+    receipt: dict[str, object] = {}
+
+    def fake_quantize(value, group_size, *, column_major_scales):
+        return quantized_input, input_scale
+
+    def fake_gemm(activation, checkpoint_weight, activation_scale, checkpoint_scale, *,
+                  out_dtype, backend, scale_major_mode):
+        receipt.update(activation=activation, activation_scale=activation_scale)
+        return torch.zeros(activation.shape[0], checkpoint_weight.shape[0], dtype=out_dtype)
+
+    monkeypatch.setattr(h3_fp8, "_get_flashinfer_groupwise_backend", lambda device: "cutlass")
+    monkeypatch.setattr(h3_fp8, "_sglang_per_token_group_quant_fp8", fake_quantize)
+    monkeypatch.setattr(h3_fp8, "_get_flashinfer_groupwise_fp8_gemm", lambda: fake_gemm)
+
+    output = h3_fp8._flashinfer_gemm_w8a8_block_fp8_linear_with_fallback(
+        input_tensor,
+        weight,
+        (128, 128),
+        weight_scale,
+    )
+
+    assert receipt["activation"] is quantized_input
+    assert receipt["activation_scale"] is input_scale
+    assert output.shape == (m, n)

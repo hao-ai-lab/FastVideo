@@ -289,12 +289,27 @@ def _flashinfer_gemm_w8a8_block_fp8_linear_with_fallback(
     if backend == "cutlass":
         m, k = input_2d.shape
         n = weight.shape[0]
-        expected_x_scale_shape = (k // block_k, m)
-        expected_weight_scale_shape = (k // block_k, n // block_n)
         if x_scale.shape == (m, k // block_k):
             x_scale = x_scale.transpose(-1, -2).contiguous()
         if weight_scale.shape == (n // block_n, k // block_k):
             weight_scale = weight_scale.transpose(-1, -2).contiguous()
+        # FlashInfer documents that ``m`` "should be padded to a multiple of 4
+        # before calling this function", and the CUTLASS groupwise module
+        # rejects unaligned m at dispatch (``cutlass gemm.can_implement
+        # failed``). Prompt token counts are arbitrary, so pad the quantized
+        # activation rows and their per-token scales with zeros, then slice
+        # the padded rows off the GEMM output. The trtllm (sm100) route
+        # tolerates any m and stays unpadded.
+        padded_m = (m + 3) // 4 * 4
+        if padded_m != m:
+            padded_q_input = q_input.new_zeros((padded_m, q_input.shape[1]))
+            padded_q_input[:m] = q_input
+            q_input = padded_q_input
+            padded_x_scale = x_scale.new_zeros((x_scale.shape[0], padded_m))
+            padded_x_scale[:, :m] = x_scale
+            x_scale = padded_x_scale
+        expected_x_scale_shape = (k // block_k, padded_m)
+        expected_weight_scale_shape = (k // block_k, n // block_n)
         if x_scale.shape != expected_x_scale_shape or weight_scale.shape != expected_weight_scale_shape:
             raise RuntimeError("FlashInfer CUTLASS block-FP8 scale layout mismatch: "
                                f"x_scale={tuple(x_scale.shape)}, weight_scale={tuple(weight_scale.shape)}, "
@@ -310,6 +325,8 @@ def _flashinfer_gemm_w8a8_block_fp8_linear_with_fallback(
             backend="cutlass",
             scale_major_mode="MN",
         )
+        if padded_m != m:
+            output = output[:m]
     else:
         expected_x_scale_shape = (input_2d.shape[0], input_2d.shape[1] // block_k)
         expected_weight_scale_shape = (weight.shape[0] // block_n, weight.shape[1] // block_k)
