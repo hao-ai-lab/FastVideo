@@ -750,7 +750,12 @@ class AutoencoderKLMiniMaxH3(nn.Module):
             rows.append(row)
         latent_y_overlaps = [overlap // self.spatial_compression_ratio for overlap in y_overlaps]
         latent_x_overlaps = [overlap // self.spatial_compression_ratio for overlap in x_overlaps]
-        return self._stitch_tiles(rows, latent_y_overlaps, latent_x_overlaps)
+        # Under mode="reduce-overhead" the stitched canvas is a CUDA-graph
+        # static buffer that the next _stitch_tiles replay overwrites. Callers
+        # (_encode/_encode_pixels/encode_keyframe) collect per-clip results
+        # across replays before concatenating, so hand them a caller-owned
+        # tensor instead of cudagraph-pooled storage.
+        return self._stitch_tiles(rows, latent_y_overlaps, latent_x_overlaps).clone()
 
     def _decode_clip(self, z: torch.Tensor) -> torch.Tensor:
         """Decode one temporal clip, with optional overlapping spatial tiles."""
@@ -796,7 +801,13 @@ class AutoencoderKLMiniMaxH3(nn.Module):
                     rows.append(row)
 
             with nvtx_range("minimax_h3.vae.decode_clip.stitch_tiles"):
-                return self._stitch_tiles(rows, y_overlaps, x_overlaps)
+                # Same CUDA-graph output-ownership contract as _encode_clip:
+                # _decode collects chunks across _stitch_tiles replays before
+                # torch.cat, so the pooled canvas must not escape this driver.
+                # (The streaming _decode_to_pixels path copies each chunk out
+                # before the next decode and never held stale storage; the
+                # clone keeps that path correct too at one D2D copy per chunk.)
+                return self._stitch_tiles(rows, y_overlaps, x_overlaps).clone()
 
     def _encode(self, x: torch.Tensor) -> torch.Tensor:
         clip_length = self.config.clip_length
