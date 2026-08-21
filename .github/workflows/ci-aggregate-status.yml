@@ -43,7 +43,15 @@ jobs:
               s => FULL_SUITE_PREFIXES.some(p => s.context.startsWith(p))
             );
 
+            // Direct reruns may repair a failed suite, never create a gate for
+            // a suite that did not run.
+            const failedAggregate = context => data.statuses.some(
+              s => s.context === context && s.state === 'failure'
+            );
+
             if (
+              failedAggregate('fastcheck-passed')
+              &&
               fastcheck.length > 0
               && fastcheck.every(s => s.state === 'success')
             ) {
@@ -62,6 +70,8 @@ jobs:
             }
 
             if (
+              failedAggregate('full-suite-passed')
+              &&
               fullSuite.length > 0
               && fullSuite.every(s => s.state === 'success')
             ) {
