@@ -25,7 +25,7 @@ try:
         flatten_varlen_lse,
         unflatten_varlen_lse,
     )
-except:
+except ImportError:
     from .utils import (  # type: ignore[no-redef]
         flatten_varlen_lse, unflatten_varlen_lse,
     )
@@ -83,7 +83,7 @@ def zigzag_ring_flash_attn_varlen_forward(
         alibi_slopes=None,
         deterministic=False,
 ):
-    assert causal == True, "zigzag ring is meaningless for causal=False"
+    assert causal, "zigzag ring is meaningless for causal=False"
     comm = RingComm(process_group)
 
     block_seq_len = q.shape[0] // 2
@@ -184,7 +184,7 @@ def zigzag_ring_flash_attn_varlen_backward(
     alibi_slopes: torch.Tensor | None = None,
     deterministic: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    assert causal == True, "zigzag ring is meaningless for causal=False"
+    assert causal, "zigzag ring is meaningless for causal=False"
     kv_comm = RingComm(process_group)
     d_kv_comm = RingComm(process_group)
     dq: torch.Tensor | None = None
