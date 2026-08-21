@@ -25,7 +25,7 @@ def zigzag_ring_flash_attn_forward(
         deterministic=False,
         attn_type: AttnType = AttnType.FA,
 ):
-    assert causal == True, "zigzag ring is meaningless for causal=False"
+    assert causal, "zigzag ring is meaningless for causal=False"
     comm = RingComm(process_group)
 
     block_seq_len = q.shape[1] // 2
@@ -103,7 +103,7 @@ def zigzag_ring_flash_attn_backward(
         deterministic=False,
         attn_type: AttnType = AttnType.FA,
 ):
-    assert causal == True, "zigzag ring is meaningless for causal=False"
+    assert causal, "zigzag ring is meaningless for causal=False"
     kv_comm = RingComm(process_group)
     d_kv_comm = RingComm(process_group)
     dq: torch.Tensor | None = None

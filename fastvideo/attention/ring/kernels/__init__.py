@@ -14,10 +14,8 @@ from functools import partial
 import torch
 
 from ..capabilities import (
-    HAS_AITER,
     HAS_FLASH_ATTN,
     HAS_FLASH_ATTN_HOPPER,
-    HAS_NPU,
     HAS_SAGE_ATTENTION,
     HAS_SPARSE_SAGE_ATTENTION,
 )
