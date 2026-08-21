@@ -10,6 +10,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from fastvideo import envs
 from fastvideo.attention import DistributedAttention
 from fastvideo.attention.layer import DistributedAttention_VSA
 from fastvideo.attention.selector import get_attn_backend
@@ -23,12 +24,49 @@ from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.mlp import MLP
 from fastvideo.layers.quantization import QuantizationConfig
 from fastvideo.layers.visual_embedding import Timesteps
+from fastvideo.logger import init_logger
 from fastvideo.models.dits.base import BaseDiT
+from fastvideo.models.dits.minimax_h3_fusions import (
+    HAVE_TRITON,
+    fused_qknorm_rope,
+    fused_residual_gate_rmsnorm_modulate,
+    fused_rmsnorm_modulate,
+    minimax_h3_swiglu,
+)
 from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.utils import get_compute_dtype
 
+logger = init_logger(__name__)
+
 MINIMAX_H3_MODALITY_NUM = 3
 _CFG = MiniMaxH3Config()
+_MINIMAX_H3_FUSION_NAMES = frozenset({"modulate", "qknorm_rope", "swiglu"})
+
+
+def _enabled_minimax_h3_fusions(value: str | None = None) -> frozenset[str]:
+    """Parse the independently switchable inference fusion set."""
+    raw = envs.FASTVIDEO_MINIMAX_H3_FUSIONS if value is None else value
+    normalized = raw.strip().lower()
+    if normalized in {"", "0", "none"}:
+        return frozenset()
+    if normalized in {"1", "all"}:
+        return _MINIMAX_H3_FUSION_NAMES
+    enabled = frozenset(item.strip() for item in normalized.split(",") if item.strip())
+    unknown = enabled - _MINIMAX_H3_FUSION_NAMES
+    if unknown:
+        supported = ",".join(sorted(_MINIMAX_H3_FUSION_NAMES))
+        raise ValueError(f"Unknown MiniMax H3 fusion(s) {sorted(unknown)}; expected a subset of {supported}.")
+    return enabled
+
+
+def _can_run_minimax_h3_fusion(tensor: torch.Tensor) -> bool:
+    """Triton kernels are inference-only and stay outside Dynamo capture.
+
+    The ``HAVE_TRITON`` check makes the eager fallback exact: on a CUDA build
+    whose Triton failed to import, an enabled fusion falls back instead of
+    hitting the strict wrappers' hard RuntimeError mid-forward.
+    """
+    return (HAVE_TRITON and tensor.is_cuda and not torch.is_grad_enabled() and not torch.compiler.is_compiling())
 
 
 class MiniMaxH3RotaryPosEmbed(nn.Module):
@@ -62,6 +100,7 @@ class MiniMaxH3FeedForward(nn.Module):
         ffn_dim: int,
         quant_config: QuantizationConfig | None = None,
         prefix: str = "",
+        fuse_swiglu: bool = False,
     ) -> None:
         super().__init__()
         self.fc_in = ReplicatedLinear(
@@ -78,11 +117,15 @@ class MiniMaxH3FeedForward(nn.Module):
             quant_config=quant_config,
             prefix=f"{prefix}.fc_out",
         )
+        self.fuse_swiglu = fuse_swiglu
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         hidden_states, _ = self.fc_in(hidden_states)
-        hidden_states, gate = hidden_states.chunk(2, dim=-1)
-        hidden_states = hidden_states * F.silu(gate)
+        if self.fuse_swiglu and _can_run_minimax_h3_fusion(hidden_states):
+            hidden_states = minimax_h3_swiglu(hidden_states)
+        else:
+            hidden_states, gate = hidden_states.chunk(2, dim=-1)
+            hidden_states = hidden_states * F.silu(gate)
         hidden_states, _ = self.fc_out(hidden_states)
         return hidden_states
 
@@ -99,6 +142,7 @@ class MiniMaxH3Attention(nn.Module):
         supported_attention_backends: tuple[AttentionBackendEnum, ...],
         quant_config: QuantizationConfig | None,
         prefix: str,
+        fuse_qknorm_rope: bool = False,
     ) -> None:
         super().__init__()
         self.num_attention_heads = num_attention_heads
@@ -134,6 +178,7 @@ class MiniMaxH3Attention(nn.Module):
             quant_config=quant_config,
             prefix=f"{prefix}.to_out",
         )
+        self.fuse_qknorm_rope = fuse_qknorm_rope
         # VSA carries a learned gate on its pooled-compression branch. The H3
         # checkpoint has no such weight, so the loader zero-initializes it
         # (ALLOWED_NEW_PARAM_PATTERNS) and the branch is exactly disabled
@@ -211,11 +256,18 @@ class MiniMaxH3Attention(nn.Module):
         query = query.unflatten(-1, (self.num_attention_heads, self.attention_head_dim))
         key = key.unflatten(-1, (self.num_attention_heads, self.attention_head_dim))
         value = value.unflatten(-1, (self.num_attention_heads, self.attention_head_dim))
-        query = self.norm_q(query)
-        key = self.norm_k(key)
-        if rotary_emb is not None:
-            query = self._apply_rotary_emb(query, rotary_emb)
-            key = self._apply_rotary_emb(key, rotary_emb)
+        if (self.fuse_qknorm_rope and rotary_emb is not None and _can_run_minimax_h3_fusion(query)):
+            cos, sin = rotary_emb
+            cos = cos.to(query.dtype)
+            sin = sin.to(query.dtype)
+            query = fused_qknorm_rope(query, self.norm_q.weight, cos, sin, self.norm_q.eps)
+            key = fused_qknorm_rope(key, self.norm_k.weight, cos, sin, self.norm_k.eps)
+        else:
+            query = self.norm_q(query)
+            key = self.norm_k(key)
+            if rotary_emb is not None:
+                query = self._apply_rotary_emb(query, rotary_emb)
+                key = self._apply_rotary_emb(key, rotary_emb)
 
         # H3 rotates only 96/128 channels, which the generic `freqs_cis`
         # branch cannot express. Apply it above, then pass no RoPE here.
@@ -397,6 +449,9 @@ class MiniMaxH3TransformerBlock(nn.Module):
         quant_config: QuantizationConfig | None,
         prefix: str,
         adaln_apply_silu: bool = True,
+        fuse_modulate: bool = False,
+        fuse_qknorm_rope: bool = False,
+        fuse_swiglu: bool = False,
     ) -> None:
         super().__init__()
         self.norm1 = nn.RMSNorm(hidden_size, eps=norm_eps)
@@ -408,6 +463,7 @@ class MiniMaxH3TransformerBlock(nn.Module):
             supported_attention_backends,
             quant_config,
             prefix=f"{prefix}.attn",
+            fuse_qknorm_rope=fuse_qknorm_rope,
         )
         self.norm2 = nn.RMSNorm(hidden_size, eps=norm_eps)
         self.ff = MiniMaxH3FeedForward(
@@ -415,6 +471,7 @@ class MiniMaxH3TransformerBlock(nn.Module):
             ffn_dim,
             quant_config=quant_config,
             prefix=f"{prefix}.ff",
+            fuse_swiglu=fuse_swiglu,
         )
         self.adaln_proj = MiniMaxH3AdaLayerNormModulation(
             time_embed_dim,
@@ -423,6 +480,7 @@ class MiniMaxH3TransformerBlock(nn.Module):
             prefix=f"{prefix}.adaln_proj",
             apply_silu=adaln_apply_silu,
         )
+        self.fuse_modulate = fuse_modulate
 
     def forward(
         self,
@@ -435,19 +493,39 @@ class MiniMaxH3TransformerBlock(nn.Module):
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (
             t.to(hidden_states.dtype) for t in self.adaln_proj(temb))
 
-        residual = hidden_states
-        norm_hidden_states = self.norm1(hidden_states)
-        norm_hidden_states = norm_hidden_states * (
-            1.0 + scale_msa.index_select(0, adaln_indices)) + shift_msa.index_select(0, adaln_indices)
+        use_modulate_fusion = self.fuse_modulate and _can_run_minimax_h3_fusion(hidden_states)
+        if use_modulate_fusion:
+            norm_hidden_states = fused_rmsnorm_modulate(
+                hidden_states,
+                self.norm1.weight,
+                scale_msa,
+                shift_msa,
+                adaln_indices,
+                self.norm1.eps,
+            )
+        else:
+            norm_hidden_states = self.norm1(hidden_states)
+            norm_hidden_states = norm_hidden_states * (
+                1.0 + scale_msa.index_select(0, adaln_indices)) + shift_msa.index_select(0, adaln_indices)
         attention_output = self.attn(norm_hidden_states, rotary_emb, original_seq_len)
-        hidden_states = residual + gate_msa.index_select(0, adaln_indices) * attention_output
-
-        residual = hidden_states
-        norm_hidden_states = self.norm2(hidden_states)
-        norm_hidden_states = norm_hidden_states * (
-            1.0 + scale_mlp.index_select(0, adaln_indices)) + shift_mlp.index_select(0, adaln_indices)
+        if use_modulate_fusion:
+            hidden_states, norm_hidden_states = fused_residual_gate_rmsnorm_modulate(
+                hidden_states,
+                attention_output,
+                gate_msa,
+                self.norm2.weight,
+                scale_mlp,
+                shift_mlp,
+                adaln_indices,
+                self.norm2.eps,
+            )
+        else:
+            hidden_states = hidden_states + gate_msa.index_select(0, adaln_indices) * attention_output
+            norm_hidden_states = self.norm2(hidden_states)
+            norm_hidden_states = norm_hidden_states * (
+                1.0 + scale_mlp.index_select(0, adaln_indices)) + shift_mlp.index_select(0, adaln_indices)
         feed_forward_output = self.ff(norm_hidden_states)
-        return residual + gate_mlp.index_select(0, adaln_indices) * feed_forward_output
+        return hidden_states + gate_mlp.index_select(0, adaln_indices) * feed_forward_output
 
 
 class MiniMaxH3Transformer3DModel(BaseDiT):
@@ -493,6 +571,17 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
     def __init__(self, config: MiniMaxH3Config, hf_config: dict[str, Any]) -> None:
         super().__init__(config, hf_config)
         arch = config.arch_config
+        self.enabled_fusions = _enabled_minimax_h3_fusions()
+        if self.enabled_fusions:
+            if HAVE_TRITON:
+                logger.info(
+                    "MiniMax H3 inference fusions enabled: %s (CUDA inference-only; grad-enabled and "
+                    "torch.compile-captured forwards fall back to eager).",
+                    ",".join(sorted(self.enabled_fusions)))
+            else:
+                logger.warning(
+                    "FASTVIDEO_MINIMAX_H3_FUSIONS requested %s but Triton is unavailable; "
+                    "every forward stays on the eager path.", ",".join(sorted(self.enabled_fusions)))
         sp_world_size = get_sp_world_size() if model_parallel_is_initialized() else 1
         if arch.num_attention_heads % sp_world_size:
             raise ValueError(f"MiniMax H3 attention heads ({arch.num_attention_heads}) must be divisible by "
@@ -590,6 +679,9 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
                 config.quant_config,
                 prefix=f"{config.prefix}.transformer_blocks.{index}",
                 adaln_apply_silu=self.adaln_rank is None,
+                fuse_modulate="modulate" in self.enabled_fusions,
+                fuse_qknorm_rope="qknorm_rope" in self.enabled_fusions,
+                fuse_swiglu="swiglu" in self.enabled_fusions,
             ) for index in range(arch.num_layers)
         ])
         self.norm_out = MiniMaxH3AdaLayerNormOut(
@@ -615,6 +707,20 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
             prefix=f"{config.prefix}.audio_proj_out",
         )
         self.__post_init__()
+
+    def prepare_for_compile(self) -> None:
+        """Pipeline hook, called once right before torch.compile wraps the blocks.
+
+        Dynamo capture traces the eager branch of every fusion guard, so an
+        enabled ``FASTVIDEO_MINIMAX_H3_FUSIONS`` set is silently inert inside
+        compiled block forwards (H3 compiles per-block by default). Say so
+        once instead of leaving the flag looking active.
+        """
+        if self.enabled_fusions:
+            logger.warning(
+                "torch.compile is enabled for MiniMax H3, so the requested inference fusions (%s) are "
+                "inert inside compiled block forwards; the compiled eager path runs instead.",
+                ",".join(sorted(self.enabled_fusions)))
 
     def materialize_non_persistent_buffers(
         self,
