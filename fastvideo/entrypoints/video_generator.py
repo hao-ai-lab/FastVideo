@@ -808,14 +808,13 @@ class VideoGenerator:
         latent_batch_size = _infer_latent_batch_size(batch)
         is_latent_output = fastvideo_args.output_type == "latent"
         needs_frame_output = batch.return_frames or (batch.save_video and not is_latent_output)
-        # ``samples`` is consumed in exactly one place — the result dict
-        # (``"samples": samples if batch.return_frames else None``).
+        # A populated ``samples`` has exactly one consumer — the result
+        # dict (``"samples": samples if batch.return_frames else None``).
         # Post-decode frame building reads ``output_batch.output``
         # directly (the GPU ``vid_u8`` path), not ``samples``. So when
-        # ``return_frames=False`` the pinned ~50 MB fp32 alloc + D->H
-        # copy are dead weight — the typical generate flow
-        # (``save_video=True``, ``return_frames=False``) hits this on
-        # every call.
+        # ``return_frames=False`` the pinned fp32 alloc + D->H copy are
+        # dead weight — the CLI generate flow (``save_video=True``,
+        # ``return_frames=False``) hits this on every call.
         # ``output_type == "latent"`` keeps its existing branch (shape
         # mismatch falls through to ``.cpu()`` below) for callers that
         # *do* ask for the latent samples via ``return_frames=True``.
@@ -899,16 +898,15 @@ class VideoGenerator:
             # device->host copy. `samples` above is just the pinned-CPU
             # mirror of `output_batch.output` (`samples.copy_(output)` or
             # `output.cpu()`) with no intervening preprocessing, so reading
-            # `output_batch.output` here is the same data — but its
-            # non-blocking D->H had not completed, so the first op that
-            # touched `samples` blocked on the full fp32 video transfer
-            # (which scales with resolution x frames x batch and can be
-            # large) and then ran a single-threaded per-frame CPU
-            # *255/cast loop. Casting to uint8 on-device first makes the
-            # transfer 4x smaller and moves the elementwise work onto the
-            # GPU. clamp_() also fixes a latent overflow bug: VAE output
-            # slightly outside [0, 1] wrapped mod 256 in the old unclamped
-            # cast. (Equivalence is SSIM-gated, not bit-exact: float->uint8
+            # `output_batch.output` here is the same data. The old path
+            # paid a full fp32 video D->H copy (which scales with
+            # resolution x frames x batch) and then a single-threaded
+            # per-frame CPU *255/cast loop. Casting to uint8 on-device
+            # makes the transfer 4x smaller, ships it in a single copy,
+            # and moves the elementwise work onto the GPU. clamp_() also
+            # fixes a latent overflow bug: VAE output slightly outside
+            # [0, 1] wrapped mod 256 in the old unclamped cast.
+            # (Equivalence is SSIM-gated, not bit-exact: float->uint8
             # differs <=1 LSB CPU vs GPU.)
             src = output_batch.output
             vid_u8 = (src * 255).clamp_(0, 255).to(torch.uint8)
