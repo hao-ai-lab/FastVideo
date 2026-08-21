@@ -38,6 +38,25 @@ logger = init_logger(__name__)
 _GLOBAL_CONTROLLER: TorchProfilerController | None = None
 
 
+@contextlib.contextmanager
+def nvtx_range(name: str):
+    """Emit one optional NVTX range for an external CUDA profiler.
+
+    ``FASTVIDEO_NVTX_PROFILE=1`` enables the marker. The context manager stays
+    a no-op without CUDA so call sites can remain shared with CPU tests.
+    """
+    enabled = envs.FASTVIDEO_NVTX_PROFILE and torch.cuda.is_available()
+    if not enabled:
+        yield
+        return
+
+    torch.cuda.nvtx.range_push(name)
+    try:
+        yield
+    finally:
+        torch.cuda.nvtx.range_pop()
+
+
 @dataclass(frozen=True)
 class ProfilerRegion:
     """Metadata describing a profiler region."""

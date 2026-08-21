@@ -11,8 +11,8 @@ from fastvideo.attention.selector import component_attention_backend, get_attn_b
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
-from fastvideo.profiler import profiler_region
 from fastvideo.hooks.activation_trace import trace_step
+from fastvideo.profiler import nvtx_range, profiler_region
 from fastvideo.pipelines.basic.minimax_h3.packing import (
     MINIMAX_H3_KEYFRAME_NOISE_AUG,
     MiniMaxH3PackedLayout,
@@ -89,6 +89,7 @@ class MiniMaxH3DenoisingStage(PipelineStage):
 
     @torch.no_grad()
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+        """Denoise the packed H3 video and audio streams over one shared schedule."""
         layout = batch.extra.get(MINIMAX_H3_LAYOUT_KEY)
         if not isinstance(layout, MiniMaxH3PackedLayout):
             raise ValueError("MiniMax-H3 packed layout is missing before denoising.")
@@ -147,7 +148,9 @@ class MiniMaxH3DenoisingStage(PipelineStage):
             vsa_dense_first_n = int(batch.extra.get("vsa_dense_first_n_steps", 0))
 
         try:
-            with profiler_region("inference_denoising"):
+            # The stage range groups the complete denoising loop while the
+            # indexed model ranges retain timing detail for every H3 block.
+            with profiler_region("inference_denoising"), nvtx_range("minimax_h3.dit"):
                 for index, (video_timestep,
                             audio_timestep) in enumerate(zip(video_timesteps, audio_timesteps, strict=True)):
                     unique_timesteps, timestep_indices = row_timestep_plan[index]

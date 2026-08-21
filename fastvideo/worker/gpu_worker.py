@@ -4,6 +4,7 @@ from typing import Any, cast
 
 import torch
 
+import fastvideo.envs as envs
 from fastvideo.distributed import (cleanup_dist_env_and_memory, maybe_init_distributed_environment_and_model_parallel)
 from fastvideo.distributed.parallel_state import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -11,6 +12,14 @@ from fastvideo.logger import init_logger
 from fastvideo.pipelines import ForwardBatch, LoRAPipeline, build_pipeline
 
 logger = init_logger(__name__)
+
+
+def _log_cuda_device_uuid(rank: int, device: torch.device) -> None:
+    """Record an NVIDIA worker UUID when external NVTX profiling is enabled."""
+    if not envs.FASTVIDEO_NVTX_PROFILE:
+        return
+    device_uuid = torch.cuda.get_device_properties(device).uuid
+    logger.info("Worker %d CUDA device UUID: GPU-%s", rank, device_uuid, local_main_process_only=False)
 
 
 class Worker:
@@ -61,6 +70,8 @@ class Worker:
         if current_platform.is_cuda_alike():
             torch.cuda.set_device(self.device)
             self.init_gpu_memory = torch.cuda.mem_get_info(self.device)[0]
+            if current_platform.is_cuda():
+                _log_cuda_device_uuid(self.rank, self.device)
         else:
             # For MPS, we can't get memory info the same way
             self.init_gpu_memory = 0

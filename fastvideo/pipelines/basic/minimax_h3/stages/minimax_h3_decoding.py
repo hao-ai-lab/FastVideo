@@ -11,6 +11,7 @@ from fastvideo.distributed import get_local_torch_device, get_world_group, model
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.models.vaes.minimax_h3_audio import MiniMaxH3AudioVAE
 from fastvideo.models.vaes.minimax_h3_video import AutoencoderKLMiniMaxH3
+from fastvideo.profiler import nvtx_range
 from fastvideo.pipelines.basic.minimax_h3.packing import (
     MiniMaxH3PackedLayout,
     unpack_audio_tokens,
@@ -55,6 +56,7 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
 
     @torch.no_grad()
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+        """Decode H3 video latents into normalized CPU pixels."""
         if model_parallel_is_initialized() and not get_world_group().is_first_rank:
             # Distributed executors consume rank 0's ForwardBatch. Keep a
             # verifier-compatible placeholder on other ranks and avoid
@@ -88,8 +90,12 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
                 dtype=torch.float32,
                 pin_memory=fastvideo_args.pin_cpu_memory and is_pin_memory_available(),
             )
-            # The published decode recipe uses FP16 autocast over FP32 weights.
-            with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=device.type == "cuda"):
+            # Attribute the streamed decoder computation while retaining
+            # per-chunk device-to-host transfer and pinned-buffer reuse.
+            with (
+                    nvtx_range("minimax_h3.vae"),
+                    torch.autocast(device_type=device.type, dtype=torch.float16, enabled=device.type == "cuda"),
+            ):
                 self.vae.decode_to_pixels(latents, output)
             batch.output = output
             return batch
@@ -121,6 +127,7 @@ class MiniMaxH3AudioDecodingStage(PipelineStage):
 
     @torch.no_grad()
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+        """Decode H3 audio latents into a stereo CPU waveform."""
         if model_parallel_is_initialized() and not get_world_group().is_first_rank:
             batch.extra["audio"] = torch.empty((0, 2), device="cpu", dtype=torch.float32)
             batch.extra["audio_sample_rate"] = self.audio_vae.sampling_rate
@@ -144,7 +151,10 @@ class MiniMaxH3AudioDecodingStage(PipelineStage):
                 self._clear_runtime(batch)
                 return batch
 
-            decoded = self.audio_vae.decode(latents).sample.float()
+            # The range isolates waveform synthesis from packing and runtime
+            # cleanup so the audio decoder has one stable timeline boundary.
+            with nvtx_range("minimax_h3.audio_vae"):
+                decoded = self.audio_vae.decode(latents).sample.float()
             if decoded.ndim != 3 or decoded.shape[0] != 2 or decoded.shape[1] != 1:
                 raise ValueError("MiniMax-H3 audio VAE must decode stereo channels as two mono batch items; "
                                  f"got {tuple(decoded.shape)}.")

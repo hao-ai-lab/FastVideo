@@ -1,11 +1,40 @@
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 import torch
 
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.pipelines import ForwardBatch
-from fastvideo.worker.gpu_worker import Worker
+from fastvideo.worker.gpu_worker import Worker, _log_cuda_device_uuid
+
+
+def test_cuda_device_uuid_receipt_is_disabled_without_nvtx_profiling(monkeypatch) -> None:
+    """Avoid NVIDIA property access during ordinary worker initialization."""
+    get_device_properties = Mock()
+    monkeypatch.setenv("FASTVIDEO_NVTX_PROFILE", "0")
+    monkeypatch.setattr(torch.cuda, "get_device_properties", get_device_properties)
+
+    _log_cuda_device_uuid(0, torch.device("cuda:0"))
+
+    get_device_properties.assert_not_called()
+
+
+def test_cuda_device_uuid_receipt_identifies_profiled_worker(monkeypatch) -> None:
+    """Bind one profiled worker rank to its NVIDIA device UUID in logs."""
+    log_info = Mock()
+    monkeypatch.setenv("FASTVIDEO_NVTX_PROFILE", "1")
+    monkeypatch.setattr(torch.cuda, "get_device_properties", lambda device: SimpleNamespace(uuid="device-uuid"))
+    monkeypatch.setattr("fastvideo.worker.gpu_worker.logger.info", log_info)
+
+    _log_cuda_device_uuid(2, torch.device("cuda:0"))
+
+    log_info.assert_called_once_with(
+        "Worker %d CUDA device UUID: GPU-%s",
+        2,
+        "device-uuid",
+        local_main_process_only=False,
+    )
 
 
 def _worker_returning(output_batch: ForwardBatch) -> Worker:

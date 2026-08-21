@@ -19,7 +19,12 @@ from fastvideo.attention.backends.abstract import (
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
-logger.info("Using FlashAttention-%s backend", fa_version)
+# Every worker records the loaded FlashAttention implementation so a
+# distributed profiling log contains one backend receipt per rank.
+logger.info("Worker %s Using FlashAttention-%s backend",
+            os.environ.get("RANK", "0"),
+            fa_version,
+            local_main_process_only=False)
 
 # FP4 FA4 support: quantize Q/K to NVFP4 E2M1 for block-scaled MMA on Blackwell.
 # Requires: flash-attention-fp4, flashinfer, cutlass-dsl. Enable via nvfp4_fa4=True kwarg.
