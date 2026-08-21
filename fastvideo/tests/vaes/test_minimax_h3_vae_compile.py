@@ -1,11 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
-"""CPU contract tests for MiniMax H3 VAE compilation and profiling ranges."""
+"""CPU contract tests for MiniMax H3 VAE compilation and profiling ranges.
+
+The final test is a CUDA regression gate for the reduce-overhead tile path
+(real tiled decode/encode with an unmocked ``_stitch_tiles``).
+"""
 
 from contextlib import contextmanager
-from types import SimpleNamespace
+from types import MethodType, SimpleNamespace
 from typing import Any
 from unittest.mock import Mock, patch
 
+import pytest
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -297,7 +302,11 @@ def test_decode_clip_emits_tiled_stage_ranges() -> None:
     with patch("fastvideo.models.vaes.minimax_h3_video.nvtx_range", record_range):
         decoded_clip = vae._decode_clip(torch.zeros((1, 1, 1, 2, 2)))
 
-    assert decoded_clip is stitched_clip
+    # The tile driver must hand back a caller-owned copy: under
+    # mode="reduce-overhead" the stitched canvas is CUDA-graph pooled storage
+    # that the next replay overwrites, so returning it by identity is a bug.
+    assert decoded_clip is not stitched_clip
+    assert torch.equal(decoded_clip, stitched_clip)
     assert vae._split_tiles.call_count == 2
     assert vae._project_decoder_tile.call_count == 4
     assert vae._stitch_tiles.call_count == 1
@@ -327,3 +336,93 @@ def test_decode_clip_emits_tiled_stage_ranges() -> None:
         ("exit", "minimax_h3.vae.decode_clip.stitch_tiles"),
         ("exit", "minimax_h3.vae.decode_clip"),
     ]
+
+
+def _tiny_real_vae() -> AutoencoderKLMiniMaxH3:
+    """Random-weight VAE small enough for a real tiled decode/encode on GPU."""
+    from fastvideo.configs.models.vaes.minimax_h3_video import (
+        MiniMaxH3VideoVAEArchConfig,
+        MiniMaxH3VideoVAEConfig,
+    )
+
+    arch = MiniMaxH3VideoVAEArchConfig(
+        latent_channels=4,
+        block_out_channels=(32, 32),
+        layers_per_block=1,
+        spatial_downsample_factors=(2, 2),
+        temporal_downsample_factors=(2, 2),
+        decoder_num_layers=1,
+        decoder_num_attention_heads=1,
+        decoder_attention_head_dim=8,
+        decoder_num_register_tokens=2,
+        decoder_ffn_mult=1,
+        latents_mean=(0.0, ) * 4,
+        latents_std=(1.0, ) * 4,
+    )
+    return AutoencoderKLMiniMaxH3(
+        MiniMaxH3VideoVAEConfig(
+            arch_config=arch,
+            use_tiling=False,
+            use_temporal_tiling=False,
+            use_parallel_tiling=False,
+        )).eval()
+
+
+def _dynamo_original(compiled_function: Any) -> Any:
+    """Return the eager callable behind a ``torch.compile``-decorated function."""
+    original = getattr(compiled_function, "_torchdynamo_orig_callable", None)
+    if original is None:
+        original = getattr(compiled_function, "__wrapped__", None)
+    assert original is not None, "cannot recover the eager tile helpers"
+    return original
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="reduce-overhead tile compile requires CUDA graphs")
+@torch.inference_mode()
+def test_tiled_decode_and_encode_survive_cudagraph_buffer_reuse_on_cuda() -> None:
+    """Real tiled decode()/encode() with an unmocked reduce-overhead ``_stitch_tiles``.
+
+    Regression gate for the CUDA-graph output-clobbering bug: the stitched
+    canvas is a cudagraph static buffer, and the collect-then-``torch.cat``
+    consumers (``_decode``/``_encode``/``_encode_pixels``) hold chunk/clip
+    results across subsequent ``_stitch_tiles`` replays. Without the eager
+    ``.clone()`` at the tile-driver returns, the first tiled ``decode()`` with
+    >=2 temporal chunks raises ``accessing tensor output of CUDAGraphs that
+    has been overwritten by a subsequent run``. This test needs >=2 chunks
+    (decode), >=2 clips (encode), and a >=2x2 spatial tile grid.
+    """
+    torch.manual_seed(20260821)
+    vae = _tiny_real_vae().to("cuda")
+    vae.enable_tiling(16, 16, 4, 4)
+
+    # 8 latent tokens = 2 temporal chunks (tokens_chunk_size 5); 8x8 latents =
+    # 32x32 pixels = a 2x2 grid of 16px tiles.
+    z = torch.randn(1, 4, 8, 8, 8, device="cuda")
+    pad_tokens, num_chunks, _ = vae._temporal_decode_plan(z.shape[2])
+    assert num_chunks >= 2, "decode workload must span multiple stitch replays"
+
+    decoded_first = vae.decode(z).sample
+    decoded_second = vae.decode(z).sample
+    assert torch.equal(decoded_first, decoded_second)
+
+    # 34 frames = 2 encode clips of clip_length 17 -> 2 stitch replays.
+    pixels = torch.rand(1, 3, 34, 32, 32, device="cuda")
+    encoded_first = vae.encode(pixels).latent_dist.parameters
+    encoded_second = vae.encode(pixels).latent_dist.parameters
+    assert torch.equal(encoded_first, encoded_second)
+
+    uint8_pixels = torch.randint(0, 256, (1, 3, 34, 32, 32), dtype=torch.uint8)
+    streamed_first = vae.encode_pixels(uint8_pixels).latent_dist.parameters
+    streamed_second = vae.encode_pixels(uint8_pixels).latent_dist.parameters
+    assert torch.equal(streamed_first, streamed_second)
+
+    # Output parity vs the fully eager tile helpers (same weights, same math;
+    # the tolerance absorbs inductor fusion reassociation only).
+    eager_vae = _tiny_real_vae().to("cuda")
+    eager_vae.load_state_dict(vae.state_dict())
+    eager_vae.enable_tiling(16, 16, 4, 4)
+    eager_vae._stitch_tiles = MethodType(_dynamo_original(AutoencoderKLMiniMaxH3._stitch_tiles), eager_vae)
+    eager_vae._project_decoder_tile = MethodType(_dynamo_original(AutoencoderKLMiniMaxH3._project_decoder_tile),
+                                                 eager_vae)
+    torch.testing.assert_close(decoded_first, eager_vae.decode(z).sample, atol=2e-4, rtol=2e-4)
+    torch.testing.assert_close(encoded_first, eager_vae.encode(pixels).latent_dist.parameters, atol=2e-4, rtol=2e-4)
