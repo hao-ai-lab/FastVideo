@@ -69,7 +69,7 @@ def test_local_tests_stays_out_of_ci():
                                                    "reference or move the tests into a fastvideo/tests/ lane.")
 
 
-def test_unit_ci_routes_to_trusted_static_driver():
+def test_unit_ci_routes_direct_and_full_suite_to_trusted_static_driver():
     slash_commands = (REPO_ROOT / ".github/workflows/ci-slash-commands.yml").read_text()
     pipeline = (REPO_ROOT / ".buildkite/pipeline.yml").read_text()
 
@@ -78,9 +78,13 @@ def test_unit_ci_routes_to_trusted_static_driver():
     assert "[unit-ci]=unit_test_ci" in slash_commands
     assert '''    - label: ":microscope: Unit Tests"
       key: "unit-ci"
-      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "unit_test_ci"
+      if: |
+        build.env("TEST_SCOPE") == "full" ||
+        (build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "unit_test_ci")
       command: "/opt/fastvideo-ci-runner/run-unit"
       timeout_in_minutes: 90
+      env:
+        TEST_TYPE: "unit_test_ci"
       agents:
         queue: "ci-runner"''' in pipeline
 

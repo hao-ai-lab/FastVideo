@@ -1,7 +1,7 @@
 env:
   IMAGE_VERSION: "py3.12-latest"
   BUILDKITE_CLEAN_CHECKOUT: true
-  # Buildkite only launches Modal; remote jobs initialize their own submodules.
+  # Remote jobs initialize their own submodules.
   BUILDKITE_GIT_SUBMODULES: false
 
 notify:
@@ -92,9 +92,13 @@ steps:
         queue: "default"
     - label: ":microscope: Unit Tests"
       key: "unit-ci"
-      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "unit_test_ci"
+      if: |
+        build.env("TEST_SCOPE") == "full" ||
+        (build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "unit_test_ci")
       command: "/opt/fastvideo-ci-runner/run-unit"
       timeout_in_minutes: 90
+      env:
+        TEST_TYPE: "unit_test_ci"
       agents:
         queue: "ci-runner"
     - label: ":microscope: DreamVerse App Tests"

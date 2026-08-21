@@ -22,7 +22,7 @@ PR opened or updated
   |-- /merge, /test full, or ready label
         |
         `-- Tier 3: Full Suite
-              Buildkite orchestrates Modal GPU jobs
+              Buildkite orchestrates Modal GPU jobs and one Slurm unit job
               path-filtered integration, SSIM, training, eval, and performance checks
               |
               pass -> Mergify squash-merges when all merge conditions pass
@@ -35,7 +35,8 @@ CI is not one monolithic job:
   updates, docs deployment, image builds, package publishing, and community
   automations.
 - Buildkite owns the GPU test pipeline and path filtering.
-- Modal owns the actual GPU execution environment for test jobs.
+- Modal runs the existing GPU lanes; a dedicated CI runner dispatches the unit
+  lane to one isolated Slurm tray.
 - Mergify owns merge protection, labeling, and the final squash merge.
 
 ## CI Tiers
@@ -92,7 +93,7 @@ status.
 | Attribute | Value |
 |---|---|
 | Triggered by | `/merge`, adding `ready`, `/test full`, or a new push to a PR that already has `ready` |
-| Runner | Buildkite agent that launches Modal GPU jobs |
+| Runner | Buildkite agents that launch Modal GPU jobs and one Slurm unit job |
 | Definition | `.buildkite/pipeline.yml` |
 | Entrypoint | `.buildkite/scripts/pr_test.sh` -> `fastvideo/tests/modal/pr_test.py` |
 
@@ -121,6 +122,7 @@ it), while a GitHub outage or a >25 min wait lets it run anyway (fail open).
 | API Server Tests | `api_server` | OpenAI entrypoints, serve CLI, OpenAI API integration test |
 | Train Framework Tests | `train_framework` | `fastvideo/train/**`, train model/method tests, model loader, DiTs |
 | Eval Metrics Tests | `eval` | `fastvideo/eval/**`, `fastvideo/tests/eval/**`, `pyproject.toml`, `docker/Dockerfile` |
+| Unit Tests | `unit_test_ci` | Always runs for a Full Suite build on the dedicated CI runner. |
 
 See [Performance Benchmarks](performance_benchmarks.md) for the performance
 lane's thresholds, rolling baseline, artifacts, and reseeding process.
@@ -147,6 +149,7 @@ Valid direct test names:
 | `/test transformer` | `transformer` |
 | `/test kernel` | `kernel_tests` |
 | `/test unit` | `unit_test` |
+| `/test unit-ci` | `unit_test_ci` |
 | `/test dreamverse` | `dreamverse_app` |
 | `/test ssim` | `ssim` |
 | `/test training` | `training` |
@@ -232,7 +235,8 @@ Process labels:
 
 ## Modal Test Entrypoints
 
-All Buildkite test jobs go through `.buildkite/scripts/pr_test.sh`, which:
+Modal-backed Buildkite test jobs go through `.buildkite/scripts/pr_test.sh`,
+which:
 
 1. Reads Buildkite secrets for Modal, Hugging Face, and W&B when needed.
 2. Selects a Modal function based on `TEST_TYPE`.
@@ -240,6 +244,12 @@ All Buildkite test jobs go through `.buildkite/scripts/pr_test.sh`, which:
 4. Runs the selected test command from `fastvideo/tests/modal/pr_test.py` or
    `fastvideo/tests/modal/ssim_test.py`.
 5. Uploads performance artifacts for `TEST_TYPE=performance`.
+
+The `unit_test_ci` lane is the exception. Buildkite sends it to the dedicated
+`ci-runner` queue, whose host-owned `/opt/fastvideo-ci-runner/run-unit`
+dispatcher submits the immutable PR SHA to one exclusive Slurm tray. `/merge`
+and `/test full` include this lane; `/test unit-ci` runs it directly. The tray
+uses the same command as Modal: `.buildkite/scripts/unit_test.sh`.
 
 If you add a new CI test category:
 
