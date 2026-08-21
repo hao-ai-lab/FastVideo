@@ -228,7 +228,15 @@ class FlashAttentionImpl(AttentionImpl):
     ) -> None:
         self.causal = causal
         self.softmax_scale = softmax_scale
-        self.nvfp4_fa4 = extra_impl_args.get("nvfp4_fa4", False) or os.environ.get("FASTVIDEO_NVFP4_FA4", "0") == "1"
+        # An explicit ``nvfp4_fa4`` impl arg wins over the process-wide
+        # FASTVIDEO_NVFP4_FA4 env opt-in, so precision-sensitive layers (e.g.
+        # the FP32-pinned H3 VAE attention) can force-disable FP4 Q/K
+        # quantization while the DiT keeps it. When the arg is absent the env
+        # keeps its previous semantics.
+        nvfp4_fa4 = extra_impl_args.get("nvfp4_fa4")
+        if nvfp4_fa4 is None:
+            nvfp4_fa4 = os.environ.get("FASTVIDEO_NVFP4_FA4", "0") == "1"
+        self.nvfp4_fa4 = bool(nvfp4_fa4)
         if self.nvfp4_fa4:
             cap = torch.cuda.get_device_capability()
             assert cap in [(10, 0), (10, 3)], (f"NVFP4 FA4 requires Blackwell (sm100a/sm103a), got sm{cap[0]}{cap[1]}")

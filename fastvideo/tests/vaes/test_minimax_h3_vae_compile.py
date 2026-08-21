@@ -141,6 +141,8 @@ def test_video_attention_uses_selected_fastvideo_backend() -> None:
         "softmax_scale": 0.5,
         "num_kv_heads": 2,
         "causal": False,
+        # The FP32-pinned VAE opts out of the FASTVIDEO_NVFP4_FA4 env opt-in.
+        "nvfp4_fa4": False,
     }
     assert backend_call["shapes"] == ((1, 3, 2, 4), ) * 3
     assert backend_call["metadata"] is None

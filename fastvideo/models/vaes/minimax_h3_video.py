@@ -327,6 +327,10 @@ class MiniMaxH3VideoAttention(nn.Module):
                 softmax_scale=dim_head**-0.5,
                 num_kv_heads=heads,
                 causal=False,
+                # The FASTVIDEO_NVFP4_FA4 env opt-in targets the DiT; this VAE
+                # is FP32-pinned (_keep_in_fp32_modules), so force-disable FP4
+                # Q/K quantization for its attention regardless of the env.
+                nvfp4_fa4=False,
             )
 
     def forward(
