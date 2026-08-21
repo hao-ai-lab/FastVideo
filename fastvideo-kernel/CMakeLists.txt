@@ -115,9 +115,8 @@ list(APPEND TORCH_INCLUDE_DIRS ${TORCH_INCLUDE_PATHS})
 find_package(Torch REQUIRED)
 
 # Include directories
-# NCCL device API headers (2.28+). Headers only: torch already links libnccl.
-# nvidia.nccl is a namespace package, hence find_spec. Probe inside
-# nccl_device/ so a partial install cannot satisfy it.
+# NCCL device API headers (2.28+); torch already links libnccl.
+# nvidia.nccl is a namespace package, so find_spec rather than __file__.
 execute_process(COMMAND "${Python_EXECUTABLE}" -c
     "import importlib.util as u,os;s=u.find_spec('nvidia.nccl');print(os.path.join(list(s.submodule_search_locations)[0],'include') if s else '')"
     OUTPUT_VARIABLE NCCL_PIP_INCLUDE OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
@@ -316,8 +315,6 @@ if(BUILD_CXX_KERNELS)
         csrc/turbodiffusion/norm/rmsnorm.cu
         csrc/turbodiffusion/norm/layernorm.cu
         csrc/turbodiffusion/quant/quant.cu
-        # No arch gate: plain CUDA, builds for every arch in the list. Whether
-        # it can run is a runtime property NCCL reports (ncclTeamLsa).
         csrc/comm/ulysses_all_to_all.cu
     )
     

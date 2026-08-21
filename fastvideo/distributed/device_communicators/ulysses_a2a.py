@@ -1,13 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Fused NVLink all-to-all for Ulysses sequence parallelism.
 
-Drop-in replacement for DistributedAutograd.AllToAll4D on a single-node
-all-pairs NVLink mesh: same layout, byte-identical results, ~1.5x faster per
-attention layer. Anything else falls back to the NCCL path.
-
-The kernel stores straight into peers' memory through NCCL's device API
-(ncclGetLsaPointer), so NCCL owns the window, the topology and the barrier --
-there is no IPC handle exchange or topology probe here.
+Drop-in replacement for DistributedAutograd.AllToAll4D when the group is a
+load-store accessible NVLink mesh: same layout, byte-identical results, fewer
+passes over local memory. Anything else falls back to the NCCL path.
 """
 
 import torch
@@ -109,10 +105,10 @@ class UlyssesA2AHelper:
     def _build(self, nbytes: int) -> bool:
         """Collectively register the window. Returns True if it is armed."""
         # The kernel opens with a barrier across every rank, so a rank that falls
-        # back alone strands its peers until the NCCL watchdog fires. Hence the
-        # vote, before anything is registered. There is deliberately no second
-        # vote afterwards: window teardown is itself collective, so recovering
-        # from a split state would be that same deadlock.
+        # back alone strands its peers until the NCCL watchdog fires -- hence the
+        # vote, before anything is registered. No second vote afterwards: window
+        # teardown is itself collective, so recovering from a split state would
+        # be that same deadlock.
         ok, reason = self._can_attempt()
         if not self._agree(ok):
             self._disable(reason or "a peer rank cannot use the fused path")

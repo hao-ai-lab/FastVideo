@@ -18,20 +18,9 @@
  * limitations under the License.
  */
 
-// Fused-transpose Ulysses all-to-all over NVLink, on NCCL's device API.
-//
-// The index math and slab decomposition below are upstream's. What differs is
-// where the peer pointers and the barrier come from. Upstream hand-rolls CUDA
-// IPC: a table of peer pointers built with cudaIpcOpenMemHandle, plus vLLM's
-// Signal/multi_gpu_barrier. Since NCCL 2.28 both are available directly:
-//
-//   out_ptrs.ptrs[peer]                -> ncclGetLsaPointer(win, off, peer)
-//   multi_gpu_barrier<N, true>         -> bar.sync(coop, memory_order_relaxed)
-//   multi_gpu_barrier<N, false, true>  -> bar.sync(coop, memory_order_acq_rel)
-//
-// which removes the IPC choreography, the vendored barrier, and the NVML
-// topology probe -- NCCL already knows which ranks are load-store accessible,
-// and reports it as ncclTeamLsa.
+// Fused-transpose Ulysses all-to-all over NVLink. Peer addresses come from
+// ncclGetLsaPointer and synchronization from ncclLsaBarrierSession; the index
+// math and slab decomposition below are upstream's.
 //
 // head_dim == 2 layout, uniform sequence splits. With
 //   W        = ulysses world size
@@ -59,23 +48,18 @@ namespace comm {
 namespace ulysses {
 
 constexpr int kUlyssesThreads = 512;
-// Upstream's cap came from the vendored Signal struct's fixed-size counter
-// arrays. NCCL's barrier has no such limit, but the grid stays modest on
-// purpose: this is link-bandwidth bound, so a small grid leaves the rest of the
-// GPU free without costing throughput.
+// Deliberately modest: this is link-bandwidth bound, so a small grid leaves the
+// rest of the GPU free without costing throughput.
 constexpr int kMaxBlocks = 36;
 
 // Shared movement body for the fused-transpose all-to-all (no barriers).
 //
-// Rows are ordered as ((b * W + peer) * S_local + s), so consecutive rows share
-// the same (batch, peer) and are therefore contiguous on the "gather" side of
-// the transpose. Each block is assigned a *contiguous* slab of rows (rather than
-// an interleaved grid-stride), and threads are flattened over all 16B vector
-// units in that slab. This makes consecutive lanes/iterations issue back-to-back
-// addresses to a single peer buffer, so the remote NVLink writes coalesce into
-// large bursts instead of the tiny (H_local*D) scattered writes the naive
-// mapping produced (which collapsed badly at large world sizes where H_local is
-// small).
+// Rows are ordered ((b * W + peer) * S_local + s), so consecutive rows share a
+// (batch, peer) and are contiguous on the gather side of the transpose. Each
+// block takes a contiguous slab of rows and flattens its threads over the 16B
+// units in it, so consecutive lanes address one peer buffer back to back and the
+// remote writes coalesce into large bursts rather than (H_local * D)-sized
+// scattered ones.
 template <typename T, int NGPUS, int MODE>
 __device__ __forceinline__ void ulysses_a2a_move(const T* __restrict__ local_in,
                                                  void* const* peer_ptrs, int rank, int B,
@@ -154,8 +138,7 @@ template <typename T, int NGPUS, int MODE>
 __global__ void __launch_bounds__(kUlyssesThreads, 1)
     ulysses_a2a_kernel(const T* __restrict__ local_in, ncclDevComm devComm, ncclWindow_t win,
                        size_t win_offset, int rank, int B, int S_local, int H_local, int D) {
-  // Resolve the peer window pointers once: the movement loop would otherwise
-  // call ncclGetLsaPointer per 16B store.
+  // Resolved once; the movement loop would otherwise call this per 16B store.
   void* peer_ptrs[NGPUS];
 #pragma unroll
   for (int p = 0; p < NGPUS; ++p) {
@@ -164,11 +147,10 @@ __global__ void __launch_bounds__(kUlyssesThreads, 1)
 
   ncclLsaBarrierSession<ncclCoopCta> bar(ncclCoopCta(), devComm, ncclTeamTagLsa(), /*index=*/0);
 
-  // Ensure every rank has entered before we start writing into peer buffers.
+  // Every rank must have entered before anyone writes into peer buffers.
   bar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
   ulysses_a2a_move<T, NGPUS, MODE>(local_in, peer_ptrs, rank, B, S_local, H_local, D);
-  // Release-acquire so all peer writes are visible before any rank reads its
-  // own (now complete) window.
+  // Release-acquire: all peer writes visible before a rank reads its window.
   bar.sync(ncclCoopCta(), cuda::memory_order_acq_rel);
 }
 
