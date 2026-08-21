@@ -42,7 +42,7 @@ def flatten_kernel(
     tl.store(OUT, x, mask=rm[:, None] < seqlen)
 
 
-def flatten_varlen_lse(lse, cu_seqlens):
+def flatten_varlen_lse(lse: torch.Tensor, cu_seqlens: torch.Tensor) -> torch.Tensor:
     """
     Arguments:
         lse: (batch_size, nheads, max_seqlen)
@@ -106,7 +106,7 @@ def unflatten_kernel(
     tl.store(OUT, x, mask=rm[:, None] < seqlen)
 
 
-def unflatten_varlen_lse(lse, cu_seqlens, max_seqlen: int):
+def unflatten_varlen_lse(lse: torch.Tensor, cu_seqlens: torch.Tensor, max_seqlen: int) -> torch.Tensor:
     """
     Arguments:
         lse: (total_seqlen, nheads, 1)
