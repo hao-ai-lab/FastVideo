@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     FASTVIDEO_TRACE_FUNCTION: int = 0
     FASTVIDEO_ATTENTION_BACKEND: str | None = None
     FASTVIDEO_FA4: bool = False
+    FASTVIDEO_MINIMAX_H3_FUSIONS: str = ""
     FASTVIDEO_WORKER_MULTIPROC_METHOD: str = "spawn"
     FASTVIDEO_TARGET_DEVICE: str = "cuda"
     MAX_JOBS: str | None = None
@@ -216,6 +217,13 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # (FA4's backward asserts sm90+ and its pack_gqa fails to JIT there).
     "FASTVIDEO_FA4":
     lambda: os.getenv("FASTVIDEO_FA4", "0") != "0",
+
+    # Opt-in MiniMax-H3 inference-only Triton fusions adapted from the
+    # NVlabs/Sana Sol-Engine implementation. Accepts `all`, `1`, or a
+    # comma-separated subset of `modulate,qknorm_rope,swiglu`. An empty value
+    # (the default), `0`, or `none` keeps the eager implementation.
+    "FASTVIDEO_MINIMAX_H3_FUSIONS":
+    lambda: os.getenv("FASTVIDEO_MINIMAX_H3_FUSIONS", ""),
 
     # Use dedicated multiprocess context for workers.
     "FASTVIDEO_WORKER_MULTIPROC_METHOD":
