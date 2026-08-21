@@ -224,6 +224,8 @@ class DenoisingStage(PipelineStage):
             },
         )
 
+        s2v_kwargs, s2v_uncond_kwargs = self._s2v_conditioning_kwargs(batch, fastvideo_args)
+
         # Get latents and embeddings
         latents = batch.latents
         cast_embeds = getattr(fastvideo_args.pipeline_config.dit_config, "cast_prompt_embeds_to_dit_dtype", False)
@@ -413,7 +415,11 @@ class DenoisingStage(PipelineStage):
                             [latent_model_input, batch.video_latent, v2v_zero_pad],
                             dim=1,
                         ).to(target_dtype)
-                elif batch.image_latent is not None:
+                elif batch.image_latent is not None and "ref_latents" not in s2v_kwargs:
+                    # Models that consume the reference image by name (Wan-S2V's
+                    # ref_latents) get it as conditioning tokens, not extra input
+                    # channels -- concatenating here would double the channel
+                    # count and break their patch embedding.
                     assert not fastvideo_args.pipeline_config.ti2v_task, "image latents should not be provided for TI2V task"
                     latent_model_input = torch.cat([latent_model_input, batch.image_latent], dim=1).to(target_dtype)
 
@@ -522,6 +528,7 @@ class DenoisingStage(PipelineStage):
                             **dreamx_camera_kwargs,
                             **timesteps_r_kwarg,
                             **flux2_id_kwargs,
+                            **s2v_kwargs,
                         )
 
                     if batch.do_classifier_free_guidance:
@@ -565,6 +572,7 @@ class DenoisingStage(PipelineStage):
                                     **dreamx_camera_kwargs,
                                     **timesteps_r_kwarg,
                                     **flux2_id_kwargs,
+                                    **s2v_uncond_kwargs,
                                 )
                             _cfg_gate_fresh_uncond += 1
 
@@ -659,6 +667,34 @@ class DenoisingStage(PipelineStage):
             logger.info("Memory after deallocating transformer: %s", torch.mps.current_allocated_memory())
 
         return batch
+
+    def _s2v_conditioning_kwargs(self, batch: ForwardBatch,
+                                 fastvideo_args: FastVideoArgs) -> tuple[dict[str, Any], dict[str, Any]]:
+        """(conditional, unconditional) kwargs for audio-driven models (Wan-S2V).
+
+        Like the other kwarg groups, ``prepare_extra_func_kwargs`` drops every
+        key the transformer's forward does not name, so this is empty -- and a
+        no-op -- for all other models. The unconditional variant zeroes the
+        audio, matching the official recipe (speech2video.py passes
+        ``0.0 * audio_input`` for the CFG negative pass: the guidance contrast
+        is over text and audio jointly).
+        """
+        kwargs = self.prepare_extra_func_kwargs(
+            self.transformer.forward,
+            {
+                "audio_input": batch.audio_embeds,
+                "ref_latents": batch.image_latent,
+                "motion_latents": batch.extra.get("motion_latents"),
+                "cond_states": batch.extra.get("cond_states"),
+                "motion_frames": getattr(fastvideo_args.pipeline_config, "motion_frames", None),
+            },
+        )
+        # A None would override the model's own default, so drop empties.
+        kwargs = {k: v for k, v in kwargs.items() if v is not None}
+        uncond_kwargs = dict(kwargs)
+        if "audio_input" in uncond_kwargs:
+            uncond_kwargs["audio_input"] = torch.zeros_like(uncond_kwargs["audio_input"])
+        return kwargs, uncond_kwargs
 
     def prepare_extra_func_kwargs(self, func, kwargs) -> dict[str, Any]:
         """

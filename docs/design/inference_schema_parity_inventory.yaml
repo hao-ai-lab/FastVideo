@@ -132,6 +132,12 @@ surfaces:
 
   pipeline_config_extensions:
     preset_owned:
+      audio_encoder_precision:
+        sources:
+          - fastvideo.configs.pipelines.wan.WanS2V14BConfig
+      motion_frames:
+        sources:
+          - fastvideo.configs.pipelines.wan.WanS2V14BConfig
       flux2_text_encoder_type:
         sources:
           - fastvideo.configs.pipelines.flux_2.Flux2PipelineConfig
@@ -450,6 +456,7 @@ surfaces:
       video_path: request.inputs.video_path
       latents: request.inputs.latents
       audio_latents: request.inputs.audio_latents
+      audio_path: request.inputs.audio_path
       mouse_cond: request.inputs.mouse_cond
       keyboard_cond: request.inputs.keyboard_cond
       grid_sizes: request.inputs.grid_sizes

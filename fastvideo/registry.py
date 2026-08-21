@@ -52,6 +52,7 @@ from fastvideo.configs.pipelines.wan import (
     FastWan2_2_TI2V_5B_Config,
     LucyEditDevConfig,
     SelfForcingWan2_2_T2V480PConfig,
+    WanS2V14BConfig,
     SelfForcingWanT2V480PConfig,
     WANV2VConfig,
     Wan2_2_I2V_A14B_Config,
@@ -1053,6 +1054,17 @@ def _register_configs() -> None:
         ],
         model_family="wan",
         default_preset="fast_wan_2_2_ti2v_5b",
+    )
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=WanS2V14BConfig,
+        workload_types=(),
+        hf_model_paths=[
+            "FastVideo/Wan2.2-S2V-14B-Diffusers",
+        ],
+        model_detectors=[lambda path: "s2v" in path.lower()],
+        model_family="wan",
+        default_preset="wan_s2v_14b",
     )
     register_configs(
         sampling_param_cls=None,
