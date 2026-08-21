@@ -20,10 +20,8 @@
 // Torch host bindings for the fused Ulysses all-to-all. Kernel in
 // include/comm/ulysses_all_to_all.cuh.
 //
-// Upstream is TVM FFI over a hand-rolled IPC context; this is pybind11 over
-// NCCL's device API. The context is an ncclDevComm plus a registered window,
-// both created here from the caller's ncclComm_t, so there is no IPC handle
-// exchange to choreograph and no separate signal buffer to allocate.
+// The per-group context is an ncclDevComm plus a registered symmetric window,
+// both created here from the caller's ncclComm_t.
 
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
@@ -43,8 +41,8 @@ namespace fi = fastvideo::comm::ulysses;
 
 namespace {
 
-// Owns the per-group device context: a symmetric window every rank can store
-// into, and the ncclDevComm the kernel opens barrier sessions on.
+// A symmetric window every rank can store into, plus the ncclDevComm the
+// kernel opens barrier sessions on.
 struct UlyssesContext {
   ncclComm_t comm = nullptr;
   ncclWindow_t win = nullptr;
@@ -103,8 +101,8 @@ void dispose_ulysses_a2a(int64_t handle) {
   delete ctx;
 }
 
-// Whether the whole group is load-store accessible. This is the topology check:
-// NCCL determined it at ncclCommInitRank, so there is nothing to probe.
+// Whether the whole group is load-store accessible. NCCL determined this at
+// ncclCommInitRank.
 bool ulysses_lsa_covers_group(int64_t comm_ptr, int64_t world_size) {
   auto comm = reinterpret_cast<ncclComm_t>(comm_ptr);
   ncclTeam_t lsa = ncclTeamLsa(comm);

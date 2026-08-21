@@ -26,8 +26,7 @@ class CudaCommunicator(DeviceCommunicatorBase):
                 device=self.device,
             )
 
-        # Optional fused Ulysses all-to-all. Cheap and non-collective to create;
-        # it arms itself lazily on first use, once an operand shape is known.
+        # Cheap and non-collective to create; arms itself on first use.
         self.ulysses_a2a = maybe_create_helper(self.device_group, self.world_size, self.device, self.pynccl_comm)
 
     def all_reduce(self, input_, op: torch.distributed.ReduceOp | None = None):
@@ -79,8 +78,7 @@ class CudaCommunicator(DeviceCommunicatorBase):
 
     def destroy(self) -> None:
         if self.ulysses_a2a is not None:
-            # Collective while armed, so it must run before the process group is
-            # torn down -- hence first.
+            # Collective while armed, so it must precede process group teardown.
             self.ulysses_a2a.close()
             self.ulysses_a2a = None
         if self.pynccl_comm is not None:

@@ -3,7 +3,7 @@
 
 Thin wrappers over csrc/comm/ulysses_all_to_all.cu. The kernel stores directly
 into peers' memory through NCCL's device API, so the caller supplies an
-ncclComm_t and NCCL owns the window, the topology and the barrier.
+ncclComm_t for the group.
 """
 
 import torch
@@ -29,11 +29,7 @@ def _require() -> None:
 
 
 def lsa_covers_group(comm_ptr: int, world_size: int) -> bool:
-    """Whether every rank in the group is load-store accessible to every other.
-
-    This is the whole topology check: NCCL worked it out at ncclCommInitRank and
-    reports it as ncclTeamLsa, so there is nothing to probe.
-    """
+    """Whether every rank in the group is load-store accessible to every other."""
     _require()
     return bool(_ops.ulysses_lsa_covers_group(int(comm_ptr), int(world_size)))
 

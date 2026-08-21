@@ -228,12 +228,11 @@ environment_variables: dict[str, Callable[[], Any]] = {
     lambda: os.getenv("FASTVIDEO_MINIMAX_H3_FUSIONS", ""),
 
     # Sequence-parallel all-to-all backend.
-    # - "off"  (default): the NCCL path in DistributedAutograd.AllToAll4D
-    # - "auto": use FlashInfer's fused-transpose NVLink kernel when the group is
-    #   a verified single-node all-pairs NVLink mesh with world size 2/4/6/8,
-    #   and fall back to the NCCL path otherwise. Results are byte-identical
-    #   either way. Opt-in because the fused path JIT-compiles CUDA on first use
-    #   and pins a persistent IPC staging buffer.
+    # - "off" (default): the NCCL path in DistributedAutograd.AllToAll4D
+    # - "auto": use the fused NVLink kernel when the group is a load-store
+    #   accessible mesh with world size 2/4/6/8, else fall back to the NCCL
+    #   path. Results are byte-identical either way. Opt-in because it holds a
+    #   persistent registered window sized to the largest operand.
     "FASTVIDEO_ULYSSES_A2A":
     lambda: os.getenv("FASTVIDEO_ULYSSES_A2A", "off").strip().lower(),
 
