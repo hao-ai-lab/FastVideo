@@ -40,12 +40,13 @@ def ring_flash_attn_forward(
     out = None
     lse = None
 
-    next_k, next_v = None, None
+    next_k: torch.Tensor | None = None
+    next_v: torch.Tensor | None = None
 
     for step in range(comm.world_size):
         if step + 1 != comm.world_size:
-            next_k: torch.Tensor = comm.send_recv(k)
-            next_v: torch.Tensor = comm.send_recv(v)
+            next_k = comm.send_recv(k)
+            next_v = comm.send_recv(v)
             comm.commit()
 
         if not causal or step <= comm.rank:

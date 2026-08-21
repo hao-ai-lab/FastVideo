@@ -11,6 +11,7 @@ import torch
 import torch.distributed as dist
 import torch.nn.functional as F
 from einops import rearrange
+from typing import Any
 
 __all__ = ["update_out_and_lse", "RingComm"]
 
@@ -49,6 +50,7 @@ def update_out_and_lse(
         out = block_out.to(torch.float32)
         lse = block_lse.transpose(-2, -1).unsqueeze(dim=-1)
     elif slice_ is not None:
+        assert lse is not None
         slice_out, slice_lse = out[slice_], lse[slice_]
         slice_out, slice_lse = _update_out_and_lse(slice_out, slice_lse, block_out, block_lse)
         out[slice_], lse[slice_] = slice_out, slice_lse
@@ -57,13 +59,13 @@ def update_out_and_lse(
     return out, lse
 
 
-def update_npu_out(cur_attn_out,
-                   cur_softmax_max,
-                   cur_softmax_sum,
-                   prev_attn_out,
-                   prev_softmax_max,
-                   prev_softmax_sum,
-                   layout="BSND"):
+def update_npu_out(cur_attn_out: torch.Tensor,
+                   cur_softmax_max: torch.Tensor,
+                   cur_softmax_sum: torch.Tensor,
+                   prev_attn_out: torch.Tensor | None,
+                   prev_softmax_max: torch.Tensor | None,
+                   prev_softmax_sum: torch.Tensor | None,
+                   layout: str = "BSND") -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     assert layout == "BSND", "NPU currently only supports input data in BSND format."
     if prev_attn_out is None:
         return cur_attn_out, cur_softmax_max, cur_softmax_sum
@@ -106,7 +108,7 @@ def update_npu_out(cur_attn_out,
 
 
 @torch.jit.script
-def flatten_varlen_lse(lse, cu_seqlens):
+def flatten_varlen_lse(lse: torch.Tensor, cu_seqlens: torch.Tensor) -> torch.Tensor:
     new_lse = []
     for i in range(len(cu_seqlens) - 1):
         start, end = cu_seqlens[i], cu_seqlens[i + 1]
@@ -115,7 +117,7 @@ def flatten_varlen_lse(lse, cu_seqlens):
 
 
 @torch.jit.script
-def unflatten_varlen_lse(lse, cu_seqlens, max_seqlen: int):
+def unflatten_varlen_lse(lse: torch.Tensor, cu_seqlens: torch.Tensor, max_seqlen: int) -> torch.Tensor:
     num_seq = len(cu_seqlens) - 1
     num_head = lse.shape[-2]
     new_lse = torch.empty((num_seq, max_seqlen, num_head, 1), dtype=torch.float32, device=lse.device)
@@ -129,10 +131,10 @@ class RingComm:
 
     def __init__(self, process_group: dist.ProcessGroup):
         self._process_group = process_group
-        self._ops = []
+        self._ops: list[Any] = []
         self.rank = dist.get_rank(self._process_group)
         self.world_size = dist.get_world_size(self._process_group)
-        self._reqs = None
+        self._reqs: list[Any] | None = None
 
         self.send_rank = (self.rank + 1) % self.world_size
         self.recv_rank = (self.rank - 1) % self.world_size
@@ -154,12 +156,12 @@ class RingComm:
         self._ops.append(recv_op)
         return res
 
-    def commit(self):
+    def commit(self) -> None:
         if self._reqs is not None:
             raise RuntimeError("commit called twice")
         self._reqs = dist.batch_isend_irecv(self._ops)
 
-    def wait(self):
+    def wait(self) -> None:
         if self._reqs is None:
             raise RuntimeError("wait called before commit")
         for req in self._reqs:
