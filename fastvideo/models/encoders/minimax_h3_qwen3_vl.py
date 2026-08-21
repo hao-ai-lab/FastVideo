@@ -8,13 +8,13 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from fastvideo.configs.models.encoders import BaseEncoderOutput
 from fastvideo.configs.models.encoders.minimax_h3_qwen3_vl import MiniMaxH3Qwen3VLConfig
 from fastvideo.distributed import get_tp_world_size
 from fastvideo.layers.layernorm import RMSNorm
 from fastvideo.layers.linear import ColumnParallelLinear, RowParallelLinear
 from fastvideo.layers.vocab_parallel_embedding import VocabParallelEmbedding
 from fastvideo.models.encoders.base import TextEncoder
+from fastvideo.models.encoders.minimax_h3_checkpoint_fp8 import MiniMaxH3SerializedFP8Config
 from fastvideo.models.loader.weight_utils import default_weight_loader
 
 
@@ -227,19 +227,13 @@ class MiniMaxH3Qwen3VLLanguageModel(nn.Module):
             org_num_embeddings=config.vocab_size,
             quant_config=quant_config,
         )
-        # Build only as far as the consumer reads. The hidden-state tuple records
-        # each layer's input, so stopping after N layers still yields entry N,
-        # the output of layer N-1, unchanged. Everything above it exists only to
-        # feed `last_hidden_state`, which nothing consumes.
         override = config.num_hidden_layers_override
         self.num_layers = (config.num_hidden_layers
                            if override is None else min(config.num_hidden_layers, override))
+        self.output_hidden_state_index = config.output_hidden_state_index
         self.layers = nn.ModuleList(
             MiniMaxH3Qwen3VLTextDecoderLayer(config, prefix=f"{config.prefix}.language_model.layers.{index}")
             for index in range(self.num_layers))
-        # The final norm sits above the tapped layer, so a truncated stack drops
-        # it. Keeping it would overwrite the tapped entry with a normalised
-        # tensor and change conditioning without raising anything.
         self.norm = (RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
                      if self.num_layers == config.num_hidden_layers else None)
         self.rotary_emb = MiniMaxH3Qwen3VLTextRotaryEmbedding(config)
@@ -249,18 +243,14 @@ class MiniMaxH3Qwen3VLLanguageModel(nn.Module):
         inputs_embeds: torch.Tensor,
         position_ids: torch.Tensor,
         attention_mask: torch.Tensor | None,
-        output_hidden_states: bool,
         visual_pos_masks: torch.Tensor | None,
         deepstack_visual_embeds: list[torch.Tensor] | None,
-    ) -> BaseEncoderOutput:
+    ) -> torch.Tensor:
         if attention_mask is not None and bool(attention_mask.to(torch.bool).all()):
             attention_mask = None
         position_embeddings = self.rotary_emb(inputs_embeds, position_ids)
         hidden_states = inputs_embeds
-        all_hidden_states: tuple[torch.Tensor, ...] | None = () if output_hidden_states else None
         for layer_index, layer in enumerate(self.layers):
-            if all_hidden_states is not None:
-                all_hidden_states += (hidden_states, )
             hidden_states = layer(hidden_states, position_embeddings, attention_mask)
             if deepstack_visual_embeds is not None and layer_index < len(deepstack_visual_embeds):
                 if visual_pos_masks is None:
@@ -269,13 +259,9 @@ class MiniMaxH3Qwen3VLLanguageModel(nn.Module):
                 visual = deepstack_visual_embeds[layer_index].to(hidden_states.device, hidden_states.dtype)
                 updated = hidden_states[mask].clone() + visual
                 hidden_states[mask] = updated
-        if self.norm is not None:
-            hidden_states = self.norm(hidden_states)
-        # Truncated or not, the last entry is appended here, so the tapped index
-        # lands in the same place either way.
-        if all_hidden_states is not None:
-            all_hidden_states += (hidden_states, )
-        return BaseEncoderOutput(last_hidden_state=hidden_states, hidden_states=all_hidden_states)
+            if layer_index + 1 == self.output_hidden_state_index:
+                return hidden_states
+        raise RuntimeError(f"MiniMax-H3 text stack did not reach hidden_states[{self.output_hidden_state_index}]")
 
 
 class MiniMaxH3Qwen3VLVisionPatchEmbed(nn.Module):
@@ -513,10 +499,18 @@ class MiniMaxH3Qwen3VLVisionModel(nn.Module):
         return self.merger(hidden_states), deepstack_features
 
 
-class MiniMaxH3Qwen3VLConditioner(TextEncoder):
-    """FastVideo-native Qwen3-VL body without the unused language-model head."""
+class MiniMaxH3Qwen3VLConditioner(TextEncoder[torch.Tensor]):
+    """H3 conditioner returning the unnormalized layer-50 hidden tensor."""
 
     supports_hf_from_pretrained = False
+    supported_checkpoint_quantization_methods = frozenset({"fp8"})
+
+    @classmethod
+    def checkpoint_quantization_config_from_metadata(
+        cls,
+        metadata: dict[str, Any],
+    ) -> MiniMaxH3SerializedFP8Config:
+        return MiniMaxH3SerializedFP8Config.from_config(metadata)
 
     def __init__(self, config: MiniMaxH3Qwen3VLConfig) -> None:
         super().__init__(config)
@@ -530,14 +524,11 @@ class MiniMaxH3Qwen3VLConditioner(TextEncoder):
 
     @property
     def num_hidden_layers(self) -> int:
-        """The checkpoint architecture's nominal depth, matching its config.json.
-
-        When ``num_hidden_layers_override`` truncates the stack at the
-        conditioning tap, fewer layers exist; the built count is
-        ``self.language_model.num_layers``, and the hidden-state tuple has
-        ``num_layers + 1`` entries, not ``num_hidden_layers + 1``.
-        """
         return self.config.num_hidden_layers
+
+    @property
+    def num_built_hidden_layers(self) -> int:
+        return self.language_model.num_layers
 
     def _get_rope_index(
         self,
@@ -631,35 +622,39 @@ class MiniMaxH3Qwen3VLConditioner(TextEncoder):
                              f"tokens={int(mask.sum())}, features={features.shape[0]}")
         return mask
 
-    def forward(
+    # no_grad, NOT inference_mode: with text_encoder_cpu_offload=True (the
+    # FastVideoArgs default) the loader FSDP2-shards this conditioner, and
+    # FSDP2's wait_for_unshard reads tensor._version via
+    # _unsafe_preserve_version_counter - inference tensors do not track
+    # version counters, so inference_mode crashes the first encode. no_grad
+    # frees the same activation memory and keeps prompt_embeds ordinary
+    # tensors (safe for any future backward through the conditioning).
+    @torch.no_grad()
+    def encode_ids(
         self,
-        input_ids: torch.Tensor | None,
-        position_ids: torch.Tensor | None = None,
-        attention_mask: torch.Tensor | None = None,
-        inputs_embeds: torch.Tensor | None = None,
-        output_hidden_states: bool | None = None,
+        input_ids: torch.Tensor,
+        *,
         pixel_values: torch.Tensor | None = None,
-        pixel_values_videos: torch.Tensor | None = None,
         image_grid_thw: torch.Tensor | None = None,
+        pixel_values_videos: torch.Tensor | None = None,
         video_grid_thw: torch.Tensor | None = None,
-        mm_token_type_ids: torch.Tensor | None = None,
-        **kwargs: Any,
-    ) -> BaseEncoderOutput:
-        del mm_token_type_ids, kwargs
-        if (input_ids is None) == (inputs_embeds is None):
-            raise ValueError("Exactly one of input_ids or inputs_embeds is required")
-        if inputs_embeds is None:
-            assert input_ids is not None
-            inputs_embeds = self.language_model.embed_tokens(input_ids)
-        if input_ids is None and (pixel_values is not None or pixel_values_videos is not None):
-            raise ValueError("Multimodal Qwen3-VL inputs require input_ids for placeholder matching")
+    ) -> torch.Tensor:
+        if input_ids.ndim != 1:
+            raise ValueError(f"MiniMax-H3 slim forward expects 1-D input_ids, got shape={tuple(input_ids.shape)}")
+        if (pixel_values is None) != (image_grid_thw is None):
+            raise ValueError("pixel_values and image_grid_thw must be provided together")
+        if (pixel_values_videos is None) != (video_grid_thw is None):
+            raise ValueError("pixel_values_videos and video_grid_thw must be provided together")
+
+        input_ids = input_ids.unsqueeze(0)
+        inputs_embeds = self.language_model.embed_tokens(input_ids)
 
         image_mask = None
         video_mask = None
         image_deepstack = None
         video_deepstack = None
         if pixel_values is not None:
-            if input_ids is None or image_grid_thw is None:
+            if image_grid_thw is None:
                 raise ValueError("pixel_values require input_ids and image_grid_thw")
             image_features, image_deepstack = self._visual_features(pixel_values, image_grid_thw)
             image_features = image_features.to(inputs_embeds.device, inputs_embeds.dtype)
@@ -667,7 +662,7 @@ class MiniMaxH3Qwen3VLConditioner(TextEncoder):
                                                 "image")
             inputs_embeds = inputs_embeds.masked_scatter(image_mask.unsqueeze(-1), image_features)
         if pixel_values_videos is not None:
-            if input_ids is None or video_grid_thw is None:
+            if video_grid_thw is None:
                 raise ValueError("pixel_values_videos require input_ids and video_grid_thw")
             video_features, video_deepstack = self._visual_features(pixel_values_videos, video_grid_thw)
             video_features = video_features.to(inputs_embeds.device, inputs_embeds.dtype)
@@ -695,50 +690,34 @@ class MiniMaxH3Qwen3VLConditioner(TextEncoder):
             visual_mask = video_mask
             deepstack_features = video_deepstack
 
-        if position_ids is None:
-            if input_ids is None:
-                sequence_length = inputs_embeds.shape[1]
-                position_ids = torch.arange(sequence_length,
-                                            device=inputs_embeds.device).view(1, 1,
-                                                                              -1).expand(3, inputs_embeds.shape[0], -1)
-            else:
-                position_ids = self._get_rope_index(input_ids, image_grid_thw, video_grid_thw, attention_mask)
-        output_hidden_states = self.config.output_hidden_states if output_hidden_states is None else output_hidden_states
-        outputs = self.language_model(
+        position_ids = self._get_rope_index(input_ids, image_grid_thw, video_grid_thw, None)
+        hidden_states = self.language_model(
             inputs_embeds,
             position_ids,
-            attention_mask,
-            output_hidden_states,
+            None,
             visual_mask,
             deepstack_features,
         )
-        outputs.attention_mask = attention_mask
-        return outputs
+        if hidden_states.ndim != 3 or hidden_states.shape[0] != 1:
+            raise RuntimeError(f"MiniMax-H3 language model returned unexpected shape={tuple(hidden_states.shape)}")
+        return hidden_states[0]
 
-    def _is_above_the_tap(self, name: str) -> bool:
-        """Whether this checkpoint key belongs to a layer we did not build.
-
-        A truncated language stack still ships every layer in the checkpoint, and
-        the unexpected-key check below is strict on purpose, so the surplus keys
-        have to be dropped here rather than by relaxing it.
-        """
-        language_model = self.language_model
-        # The final norm is dropped exactly when the stack is truncated, so its
-        # absence is the signal.
-        if language_model.norm is not None:
-            return False
-        if name == "language_model.norm.weight":
-            return True
-        prefix = "language_model.layers."
-        if not name.startswith(prefix):
-            return False
-        index = name[len(prefix):].split(".", 1)[0]
-        if not index.isdigit():
-            return False
-        # Only drop indexes the full stack would have built. Anything at or
-        # above the checkpoint's own num_hidden_layers is corrupt and must
-        # still raise below, exactly as it does without truncation.
-        return language_model.num_layers <= int(index) < self.config.num_hidden_layers
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        *,
+        pixel_values: torch.Tensor | None = None,
+        image_grid_thw: torch.Tensor | None = None,
+        pixel_values_videos: torch.Tensor | None = None,
+        video_grid_thw: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        return self.encode_ids(
+            input_ids,
+            pixel_values=pixel_values,
+            image_grid_thw=image_grid_thw,
+            pixel_values_videos=pixel_values_videos,
+            video_grid_thw=video_grid_thw,
+        )
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         parameters = dict(self.named_parameters())
@@ -748,7 +727,7 @@ class MiniMaxH3Qwen3VLConditioner(TextEncoder):
             if source_name == "lm_head.weight":
                 continue
             name = source_name[6:] if source_name.startswith("model.") else source_name
-            if self._is_above_the_tap(name):
+            if self._is_omitted_checkpoint_key(name):
                 continue
             if name not in parameters:
                 raise ValueError(f"Unexpected MiniMax-H3 Qwen3-VL checkpoint key: {source_name}")
@@ -758,7 +737,23 @@ class MiniMaxH3Qwen3VLConditioner(TextEncoder):
             loaded.add(name)
         return loaded
 
+    def _is_omitted_checkpoint_key(self, name: str) -> bool:
+        """Return whether a valid checkpoint key belongs to an unbuilt layer."""
+        language_model = self.language_model
+        if language_model.norm is not None:
+            return False
+        if name == "language_model.norm.weight":
+            return True
+        prefix = "language_model.layers."
+        if not name.startswith(prefix):
+            return False
+        index = name[len(prefix):].split(".", 1)[0]
+        return (index.isdigit() and language_model.num_layers <= int(index) < self.config.num_hidden_layers)
+
 
 EntryClass = MiniMaxH3Qwen3VLConditioner
 
-__all__ = ["MiniMaxH3Qwen3VLConditioner"]
+__all__ = [
+    "MiniMaxH3Qwen3VLConditioner",
+    "MiniMaxH3SerializedFP8Config",
+]
