@@ -9,8 +9,10 @@ import numpy as np
 import torch
 from diffusers.utils.torch_utils import randn_tensor
 
-from fastvideo.distributed import get_local_torch_device
+from fastvideo.distributed import get_local_torch_device, get_sp_group, model_parallel_is_initialized
 from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.logger import init_logger
+from fastvideo.models.vaes.minimax_h3_parallel import encode_pixels_parallel
 from fastvideo.pipelines.basic.minimax_h3.packing import (
     MINIMAX_H3_AUDIO_CHANNELS,
     MINIMAX_H3_KEYFRAME_ENCODE_SEED,
@@ -35,6 +37,8 @@ from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
+
+logger = init_logger(__name__)
 
 MINIMAX_H3_LAYOUT_KEY = "minimax_h3_layout"
 
@@ -105,8 +109,20 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
         self,
         references: list[MiniMaxH3PreparedReference],
         device: torch.device,
+        fastvideo_args: FastVideoArgs,
     ) -> list[torch.Tensor]:
         patch_size = self.transformer.patch_size
+        # Reference encode runs on every rank (all ranks hold identical
+        # prepared references), so clip-parallel encode keeps participation
+        # uniform by construction: each rank encodes a clip subset and the
+        # all-gather leaves the identical full posterior everywhere.
+        parallel_group = None
+        if fastvideo_args.vae_parallel_encode and model_parallel_is_initialized():
+            sp_group = get_sp_group()
+            if sp_group.world_size > 1:
+                parallel_group = sp_group
+                logger.info_once(f"MiniMax-H3 reference VAE encode: sequence-parallel clips across "
+                                 f"{sp_group.world_size} ranks")
         rows: list[torch.Tensor] = []
         for reference in references:
             if reference.media_type == "audio":
@@ -120,7 +136,10 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
                     raise ValueError("MiniMax-H3 reference video frames are missing.")
                 frames = reference.frames[:trim_reference_num_frames(reference.frames.shape[0])]
                 pixels = torch.from_numpy(np.ascontiguousarray(frames)).permute(3, 0, 1, 2)[None]
-                posterior = self.vae.encode_pixels(pixels).latent_dist
+                if parallel_group is not None:
+                    posterior = encode_pixels_parallel(self.vae, pixels, parallel_group).latent_dist
+                else:
+                    posterior = self.vae.encode_pixels(pixels).latent_dist
                 latents = self.vae.normalize_latents(_sample_visual_posterior(posterior).to(
                     torch.float16).float()).cpu()
             reference.num_latent_frames = int(latents.shape[2])
@@ -201,7 +220,7 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
         vae_device = get_local_torch_device()
         self.vae.to(vae_device)
         try:
-            video_rows = self._encode_visual_rows(references, vae_device)
+            video_rows = self._encode_visual_rows(references, vae_device, fastvideo_args)
         finally:
             if fastvideo_args.vae_cpu_offload:
                 self.vae.to("cpu")

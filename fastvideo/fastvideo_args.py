@@ -146,6 +146,19 @@ class FastVideoArgs:
     vae_cpu_offload: bool = True
     pin_cpu_memory: bool = True
 
+    # Sequence-parallel MiniMax-H3 VAE (opt-in, default off). With SP > 1 the
+    # video VAE's temporal chunks (decode) and clips (reference encode) are
+    # round-robined across the sequence-parallel ranks and reassembled
+    # bit-exactly on the group's first rank instead of running serially on
+    # one rank while the others idle. ``__post_init__`` folds the
+    # FASTVIDEO_VAE_PARALLEL_DECODE / FASTVIDEO_VAE_PARALLEL_ENCODE env vars
+    # into these fields (parse-once, like attention_backend), and
+    # FASTVIDEO_VAE_PARALLEL_DECODE_STRATEGY overrides the chunk-transport
+    # collective ("gather" or "all_gather").
+    vae_parallel_decode: bool = False
+    vae_parallel_encode: bool = False
+    vae_parallel_decode_strategy: str | None = None
+
     # Compilation
     # ``enable_torch_compile`` covers the DiT path (transformer,
     # transformer_2, and the LTX-2 stage-2 transformer_refine).
@@ -287,7 +300,26 @@ class FastVideoArgs:
             env_backend = envs.FASTVIDEO_ATTENTION_BACKEND
             if env_backend is not None and backend_name_to_enum(env_backend) is not None:
                 self.attention_backend = env_backend
+        self._fold_vae_parallel_env()
         self.check_fastvideo_args()
+
+    def _fold_vae_parallel_env(self) -> None:
+        """Parse-once adapters for the sequence-parallel VAE env vars."""
+        import fastvideo.envs as envs
+
+        # Mirrors fastvideo.models.vaes.minimax_h3_parallel.DECODE_GATHER_STRATEGIES /
+        # DEFAULT_DECODE_GATHER_STRATEGY (kept literal here so constructing args
+        # never imports model modules; a unit test pins the two in sync).
+        strategies = ("gather", "all_gather")
+        if not self.vae_parallel_decode and envs.FASTVIDEO_VAE_PARALLEL_DECODE:
+            self.vae_parallel_decode = True
+        if not self.vae_parallel_encode and envs.FASTVIDEO_VAE_PARALLEL_ENCODE:
+            self.vae_parallel_encode = True
+        if self.vae_parallel_decode_strategy is None:
+            self.vae_parallel_decode_strategy = envs.FASTVIDEO_VAE_PARALLEL_DECODE_STRATEGY or "gather"
+        if self.vae_parallel_decode_strategy not in strategies:
+            raise ValueError(f"vae_parallel_decode_strategy must be one of {strategies}, "
+                             f"got {self.vae_parallel_decode_strategy!r}.")
 
     def _apply_transformer_quant(self) -> None:
         """Pin the typed ``transformer_quant`` instance onto ``dit_config``.
@@ -631,6 +663,18 @@ class FastVideoArgs:
             help=
             "Pin memory for CPU offload. Only added as a temp workaround if it throws \"CUDA error: invalid argument\". "
             "Should be enabled in almost all cases",
+        )
+        parser.add_argument(
+            "--vae-parallel-decode",
+            action=StoreBoolean,
+            help="With sequence parallelism, round-robin MiniMax-H3 VAE decode chunks across the SP ranks "
+            "and reassemble bit-exactly on the output rank (default: serial decode on the output rank)",
+        )
+        parser.add_argument(
+            "--vae-parallel-encode",
+            action=StoreBoolean,
+            help="With sequence parallelism, round-robin MiniMax-H3 reference-video VAE encode clips across "
+            "the SP ranks; every rank keeps the identical full encoding (default: serial encode on every rank)",
         )
         parser.add_argument(
             "--disable-autocast",

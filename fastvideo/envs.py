@@ -22,6 +22,9 @@ if TYPE_CHECKING:
     FASTVIDEO_ATTENTION_BACKEND: str | None = None
     FASTVIDEO_FA4: bool = False
     FASTVIDEO_MINIMAX_H3_FUSIONS: str = ""
+    FASTVIDEO_VAE_PARALLEL_DECODE: bool = False
+    FASTVIDEO_VAE_PARALLEL_ENCODE: bool = False
+    FASTVIDEO_VAE_PARALLEL_DECODE_STRATEGY: str | None = None
     FASTVIDEO_WORKER_MULTIPROC_METHOD: str = "spawn"
     FASTVIDEO_TARGET_DEVICE: str = "cuda"
     MAX_JOBS: str | None = None
@@ -218,6 +221,19 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # (FA4's backward asserts sm90+ and its pack_gqa fails to JIT there).
     "FASTVIDEO_FA4":
     lambda: os.getenv("FASTVIDEO_FA4", "0") != "0",
+
+    # If set (=1), MiniMax-H3 VAE decode (and, with the ENCODE variant,
+    # reference-video encode) round-robins its temporal chunks across the
+    # sequence-parallel ranks instead of running serially on the output rank.
+    # Folded into FastVideoArgs.vae_parallel_decode / vae_parallel_encode at
+    # construction (parse-once). The STRATEGY variant picks the chunk
+    # transport collective: "gather" (default) or "all_gather".
+    "FASTVIDEO_VAE_PARALLEL_DECODE":
+    lambda: os.getenv("FASTVIDEO_VAE_PARALLEL_DECODE", "0") != "0",
+    "FASTVIDEO_VAE_PARALLEL_ENCODE":
+    lambda: os.getenv("FASTVIDEO_VAE_PARALLEL_ENCODE", "0") != "0",
+    "FASTVIDEO_VAE_PARALLEL_DECODE_STRATEGY":
+    lambda: os.getenv("FASTVIDEO_VAE_PARALLEL_DECODE_STRATEGY", None),
 
     # Opt-in MiniMax-H3 inference-only Triton fusions adapted from the
     # NVlabs/Sana Sol-Engine implementation. Accepts `all`, `1`, or a
