@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     NVCC_THREADS: str | None = None
     CMAKE_BUILD_TYPE: str | None = None
     VERBOSE: bool = False
+    FASTVIDEO_NVTX_PROFILE: bool = False
     FASTVIDEO_TORCH_PROFILER_DIR: str | None = None
     FASTVIDEO_TORCH_PROFILER_RECORD_SHAPES: bool = False
     FASTVIDEO_TORCH_PROFILER_WITH_PROFILE_MEMORY: bool = False
@@ -228,6 +229,10 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # Use dedicated multiprocess context for workers.
     "FASTVIDEO_WORKER_MULTIPROC_METHOD":
     lambda: os.getenv("FASTVIDEO_WORKER_MULTIPROC_METHOD", "spawn"),
+
+    # Emit lightweight NVTX ranges for external profilers such as Nsight Systems.
+    "FASTVIDEO_NVTX_PROFILE":
+    lambda: os.getenv("FASTVIDEO_NVTX_PROFILE", "0") != "0",
 
     # Enables torch profiler if set. Path to the directory where torch profiler
     # traces are saved. Note that it must be an absolute path.
