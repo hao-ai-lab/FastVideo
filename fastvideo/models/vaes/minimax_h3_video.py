@@ -7,6 +7,7 @@ This module intentionally uses only PyTorch and FastVideo configuration types.
 """
 
 import math
+from collections.abc import Iterator
 from dataclasses import dataclass
 
 import torch
@@ -792,9 +793,13 @@ class AutoencoderKLMiniMaxH3(nn.Module):
             pad_frames = sum(intra_tail if intra_tail and (latent_num_frames + offset) %
                              tokens_chunk_size == 0 else temporal_ratio for offset in range(pad_tokens))
             decoded_num_frames -= pad_frames
+        if decoded_num_frames <= 0:
+            raise RuntimeError(
+                f"MiniMax-H3 decode plan produced {decoded_num_frames} frames for {latent_num_frames} latent "
+                "frames; the clip_length/token_drop configuration is inconsistent.")
         return pad_tokens, num_chunks, decoded_num_frames
 
-    def _decode_chunks(self, z: torch.Tensor):
+    def _decode_chunks(self, z: torch.Tensor) -> Iterator[torch.Tensor]:
         """Yield finalized temporal chunks in decode order."""
         tokens_chunk_size = self.tokens_chunk_size
         chunk_num_frames = tokens_chunk_size * self.temporal_compression_ratio
@@ -839,13 +844,36 @@ class AutoencoderKLMiniMaxH3(nn.Module):
             latent_width * self.spatial_compression_ratio,
         )
 
+    @staticmethod
+    def _streams_chunk_copies(z: torch.Tensor, output: torch.Tensor) -> bool:
+        """Whether finalized chunks copy to ``output`` asynchronously on the current CUDA stream."""
+        return z.device.type == "cuda" and output.is_pinned()
+
     def _decode_to_pixels(self, z: torch.Tensor, output: torch.Tensor) -> None:
-        """Decode temporal chunks and immediately copy finalized pixels to CPU."""
+        """Decode temporal chunks and immediately copy finalized pixels to CPU.
+
+        Device-to-host copies run per (batch, channel) plane: the temporal
+        slice of ``output`` is strided across channels, but each plane is
+        contiguous on both sides, so every transfer stays a direct memcpy
+        instead of staging through a pageable CPU temporary. With a pinned
+        ``output`` the copies are additionally asynchronous and overlap the
+        next chunk's decode; ``decode_to_pixels`` synchronizes once before
+        returning.
+        """
+        non_blocking = self._streams_chunk_copies(z, output)
         output_frame_start = 0
         for chunk in self._decode_chunks(z):
             num_frames = chunk.shape[2]
             pixels = self.denormalize_pixels(chunk.float()).clamp_(0, 1)
-            output[:, :, output_frame_start:output_frame_start + num_frames].copy_(pixels)
+            target = output[:, :, output_frame_start:output_frame_start + num_frames]
+            if z.device.type == "cuda":
+                pixels = pixels.contiguous()
+                for batch_index in range(pixels.shape[0]):
+                    for channel_index in range(pixels.shape[1]):
+                        target[batch_index, channel_index].copy_(pixels[batch_index, channel_index],
+                                                                 non_blocking=non_blocking)
+            else:
+                target.copy_(pixels)
             output_frame_start += num_frames
         if output_frame_start != output.shape[2]:
             raise RuntimeError(
@@ -874,6 +902,12 @@ class AutoencoderKLMiniMaxH3(nn.Module):
         pixels: torch.Tensor,
         return_dict: bool = True,
     ) -> AutoencoderKLOutput | tuple[DiagonalGaussianDistribution]:
+        """Encode CPU-resident pixels one VAE clip at a time.
+
+        ``pixels`` stays on CPU as ``uint8`` in ``[0, 255]`` or floating point
+        in ``[0, 1]``; each clip is moved to the VAE device, normalized, and
+        encoded so only one clip of pixels is resident on the accelerator.
+        """
         if pixels.ndim != 5 or pixels.shape[1] != self.config.in_channels or pixels.shape[2] <= 0:
             raise ValueError(
                 f"`pixels` must have shape [B, {self.config.in_channels}, T, H, W] with T > 0, "
@@ -924,11 +958,17 @@ class AutoencoderKLMiniMaxH3(nn.Module):
             raise ValueError(
                 "`output` must be a CPU float32 tensor with shape "
                 f"{expected_shape}, got device={output.device}, dtype={output.dtype}, shape={tuple(output.shape)}.")
-        if self.use_slicing and z.shape[0] > 1:
-            for batch_index, z_slice in enumerate(z.split(1)):
-                self._decode_to_pixels(z_slice, output[batch_index:batch_index + 1])
-        else:
-            self._decode_to_pixels(z, output)
+        try:
+            if self.use_slicing and z.shape[0] > 1:
+                for batch_index, z_slice in enumerate(z.split(1)):
+                    self._decode_to_pixels(z_slice, output[batch_index:batch_index + 1])
+            else:
+                self._decode_to_pixels(z, output)
+        finally:
+            # Drain async chunk copies before the caller (or an exception
+            # handler) can read or release the pinned buffer.
+            if self._streams_chunk_copies(z, output):
+                torch.cuda.current_stream(z.device).synchronize()
         return output
 
     def forward(
