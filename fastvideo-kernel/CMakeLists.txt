@@ -115,32 +115,14 @@ list(APPEND TORCH_INCLUDE_DIRS ${TORCH_INCLUDE_PATHS})
 find_package(Torch REQUIRED)
 
 # Include directories
-# NCCL headers for the sequence-parallel comm kernel (device API, needs 2.28+).
-# Only the headers: torch already links libnccl into libtorch_cuda, so the
-# symbols resolve at load time. Torch ships its own torch/csrc/cuda/nccl.h,
-# which is a different header, so NVIDIA's has to be found separately.
+# NCCL device API headers (2.28+). Headers only: torch already links libnccl.
+# nvidia.nccl is a namespace package, hence find_spec. Probe inside
+# nccl_device/ so a partial install cannot satisfy it.
+execute_process(COMMAND "${Python_EXECUTABLE}" -c
+    "import importlib.util as u,os;s=u.find_spec('nvidia.nccl');print(os.path.join(list(s.submodule_search_locations)[0],'include') if s else '')"
+    OUTPUT_VARIABLE NCCL_PIP_INCLUDE OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
 find_path(NCCL_INCLUDE_DIR nccl_device/coop.h
-    HINTS
-        ${NCCL_HOME}/include
-        $ENV{NCCL_HOME}/include
-        ${CUDAToolkit_INCLUDE_DIRS}
-    PATHS /usr/include /usr/local/include)
-if(NOT NCCL_INCLUDE_DIR)
-    # pip ships it as the nvidia.nccl namespace package, which has no
-    # __init__.py, so find_spec rather than __file__.
-    execute_process(
-        COMMAND "${Python_EXECUTABLE}" -c
-            "import importlib.util as u, os; s = u.find_spec('nvidia.nccl'); print(os.path.join(list(s.submodule_search_locations)[0], 'include') if s else '')"
-        OUTPUT_VARIABLE NCCL_INCLUDE_DIR OUTPUT_STRIP_TRAILING_WHITESPACE
-        ERROR_QUIET)
-endif()
-if(NCCL_INCLUDE_DIR AND EXISTS "${NCCL_INCLUDE_DIR}/nccl_device/coop.h")
-    message(STATUS "NCCL device API headers: ${NCCL_INCLUDE_DIR}")
-else()
-    message(FATAL_ERROR
-        "nccl_device.h not found. The Ulysses all-to-all kernel needs NCCL >= 2.28 "
-        "headers; set NCCL_HOME or install nvidia-nccl-cu12.")
-endif()
+    HINTS $ENV{NCCL_HOME}/include ${NCCL_PIP_INCLUDE} REQUIRED)
 
 include_directories(
     ${CMAKE_SOURCE_DIR}/include
@@ -334,11 +316,8 @@ if(BUILD_CXX_KERNELS)
         csrc/turbodiffusion/norm/rmsnorm.cu
         csrc/turbodiffusion/norm/layernorm.cu
         csrc/turbodiffusion/quant/quant.cu
-        # Ulysses sequence-parallel all-to-all. Needs no arch gate: it is plain
-        # CUDA (int4 vector loads) and builds for every arch in
-        # TORCH_CUDA_ARCH_LIST. Whether it can run is a runtime property --
-        # whether the group is load-store accessible -- which NCCL reports.
-        # Requires NCCL >= 2.28 for the device API (ncclGetLsaPointer).
+        # No arch gate: plain CUDA, builds for every arch in the list. Whether
+        # it can run is a runtime property NCCL reports (ncclTeamLsa).
         csrc/comm/ulysses_all_to_all.cu
     )
     
