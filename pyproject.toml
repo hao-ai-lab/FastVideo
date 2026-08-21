@@ -160,6 +160,14 @@ test = [
 # judge.* metrics (eval-judge) call a remote API and need a key, so they
 # are opt-in and intentionally kept out of the default [eval] set.
 eval-vbench     = ["openai-clip", "pyiqa", "easydict"]
+eval-vqeval = [
+    # VQeval uses the legacy mp.solutions API removed in MediaPipe 1.x.
+    "mediapipe>=0.10.0,<1",
+    "open_clip_torch>=2.24.0",
+    # Includes cv2 + quality.BRISQUE; MediaPipe depends on this same wheel.
+    "opencv-contrib-python>=4.8.0",
+    "pyiqa>=0.1.10",
+]
 eval-physics-iq = []
 eval-audio = ["jiwer", "librosa", "pyloudnorm", "hear21passt", "audiobox_aesthetics", "imagebind", "pytorchvideo"]
 eval-judge = ["google-genai"]
@@ -170,7 +178,7 @@ eval = [
     "fastvideo[eval-vbench]", "fastvideo[eval-physics-iq]",
 ]
 eval-fast-decode = ["decord"]
-eval-full = ["fastvideo[eval]", "fastvideo[eval-audio]", "qwen-omni-utils"]
+eval-full = ["fastvideo[eval]", "fastvideo[eval-audio]", "fastvideo[eval-vqeval]", "qwen-omni-utils"]
 
 dev = [ "fastvideo[lint]", "fastvideo[test]", ]
 
