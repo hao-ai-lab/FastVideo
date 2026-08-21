@@ -31,12 +31,13 @@ def stripe_flash_attn_forward(
     out = None
     lse = None
 
-    next_k, next_v = None, None
+    next_k: torch.Tensor | None = None
+    next_v: torch.Tensor | None = None
 
     for step in range(comm.world_size):
         if step + 1 != comm.world_size:
-            next_k: torch.Tensor = comm.send_recv(k)
-            next_v: torch.Tensor = comm.send_recv(v)
+            next_k = comm.send_recv(k)
+            next_v = comm.send_recv(v)
             comm.commit()
 
         if step <= comm.rank:
@@ -100,10 +101,15 @@ def stripe_flash_attn_backward(
     assert (causal), "stripe flash attn only supports causal attention, if not causal, ring flash attn instead"
     kv_comm = RingComm(process_group)
     d_kv_comm = RingComm(process_group)
-    dq, dk, dv = None, None, None
-    next_dk, next_dv = None, None
-    next_k, next_v = None, None
-    dk_comm_buffer, dv_comm_buffer = None, None
+    dq: torch.Tensor | None = None
+    dk: torch.Tensor | None = None
+    dv: torch.Tensor | None = None
+    next_dk: torch.Tensor | None = None
+    next_dv: torch.Tensor | None = None
+    next_k: torch.Tensor | None = None
+    next_v: torch.Tensor | None = None
+    dk_comm_buffer: torch.Tensor | None = None
+    dv_comm_buffer: torch.Tensor | None = None
 
     block_dq_buffer = torch.empty(q.shape, dtype=q.dtype, device=q.device)
     block_dk_buffer = torch.empty(k.shape, dtype=k.dtype, device=k.device)
@@ -180,6 +186,7 @@ def stripe_flash_attn_backward(
                 dk = block_dk_buffer + dk
                 dv = block_dv_buffer + dv
             else:
+                assert dk is not None and dv is not None
                 dk[:, :-1] += block_dk_buffer[:, :-1]
                 dv[:, :-1] += block_dv_buffer[:, :-1]
 
