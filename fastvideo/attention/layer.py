@@ -18,13 +18,13 @@ from fastvideo.layers.rotary_embedding import _apply_rotary_emb
 def _attention_compile_disabled() -> bool:
     """Whether to keep attention ``forward`` out of the torch.compile graph.
 
-    Defaults to ``True`` (the historical behavior: attention runs eager via
-    ``torch.compiler.disable``). Set ``FASTVIDEO_DISABLE_ATTENTION_COMPILE=0``
-    to let attention be traced/compiled into the surrounding graph.
+    Attention backends expose traceable custom-op boundaries, so compilation
+    is enabled by default. Set ``FASTVIDEO_DISABLE_ATTENTION_COMPILE=1`` for
+    an explicit eager escape hatch when debugging a backend.
     """
     val = os.environ.get("FASTVIDEO_DISABLE_ATTENTION_COMPILE")
     if val is None:
-        return True
+        return False
     return val.strip().lower() not in ("0", "false", "no", "off", "")
 
 
