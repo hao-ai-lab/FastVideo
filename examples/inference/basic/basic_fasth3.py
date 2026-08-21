@@ -45,9 +45,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--height", type=int, default=768)
     parser.add_argument("--width", type=int, default=1344)
     parser.add_argument("--num-frames", type=int, default=124)
-    # 4 is the grid the student was distilled for; other step counts are
-    # off-distribution.
-    parser.add_argument("--steps", type=int, default=4)
+    # num_inference_steps counts sigma-GRID POINTS, matching the base model's
+    # convention ("50 steps" = a 50-point grid = 49 transformer forwards). The
+    # student's distilled 4-step grid is 4 FORWARDS, i.e. a 5-point grid
+    # (t = 1000, 750, 500, 250 -> 0 on the shift-12 schedule) — so the correct
+    # default here is 5. Other grids are off-distribution.
+    parser.add_argument("--steps",
+                        type=int,
+                        default=5,
+                        help="num_inference_steps = sigma-grid points; N points run N-1 denoising "
+                        "forwards. 5 (default) is the distilled 4-forward grid")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--num-gpus", type=int, default=4)
     parser.add_argument("--vsa-sparsity",
