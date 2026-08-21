@@ -31,11 +31,12 @@ def zigzag_ring_flash_attn_forward(
     block_seq_len = q.shape[1] // 2
     q1 = q[:, block_seq_len:]
 
-    out = None
-    lse = None
-    next_k, next_v = None, None
+    out: torch.Tensor | None = None
+    lse: torch.Tensor | None = None
+    next_k: torch.Tensor | None = None
+    next_v: torch.Tensor | None = None
 
-    def forward(q, k, v, causal):
+    def forward(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, causal: bool) -> tuple[torch.Tensor, torch.Tensor]:
         fn = select_flash_attn_impl(attn_type, stage="fwd-only")
         block_out, block_lse = fn(
             q,
@@ -53,8 +54,8 @@ def zigzag_ring_flash_attn_forward(
 
     for step in range(comm.world_size):
         if step + 1 != comm.world_size:
-            next_k: torch.Tensor = comm.send_recv(k)
-            next_v: torch.Tensor = comm.send_recv(v)
+            next_k = comm.send_recv(k)
+            next_v = comm.send_recv(v)
             comm.commit()
 
         if step == 0:
@@ -105,10 +106,15 @@ def zigzag_ring_flash_attn_backward(
     assert causal == True, "zigzag ring is meaningless for causal=False"
     kv_comm = RingComm(process_group)
     d_kv_comm = RingComm(process_group)
-    dq, dk, dv = None, None, None
-    next_dk, next_dv = None, None
-    next_k, next_v = None, None
-    dk_comm_buffer, dv_comm_buffer = None, None
+    dq: torch.Tensor | None = None
+    dk: torch.Tensor | None = None
+    dv: torch.Tensor | None = None
+    next_dk: torch.Tensor | None = None
+    next_dv: torch.Tensor | None = None
+    next_k: torch.Tensor | None = None
+    next_v: torch.Tensor | None = None
+    dk_comm_buffer: torch.Tensor | None = None
+    dv_comm_buffer: torch.Tensor | None = None
 
     dout1 = dout.chunk(2, dim=1)[1]
     q1 = q.chunk(2, dim=1)[1]
@@ -116,12 +122,13 @@ def zigzag_ring_flash_attn_backward(
     softmax_lse1 = softmax_lse.chunk(2, dim=2)[1].contiguous()
     block_seq_len = q.shape[1] // 2
 
-    # repeatly allocating buffer may be slow...
+    # repeatedly allocating buffer may be slow...
     dq_buffer = torch.empty(q.shape, dtype=q.dtype, device=q.device)
     dk_buffer = torch.empty(k.shape, dtype=k.dtype, device=k.device)
     dv_buffer = torch.empty(v.shape, dtype=v.dtype, device=v.device)
 
-    def backward(dout, q, k, v, out, softmax_lse, causal):
+    def backward(dout: torch.Tensor, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, out: torch.Tensor,
+                 softmax_lse: torch.Tensor, causal: bool) -> None:
         seqlen_q = q.shape[1]
         seqlen_kv = k.shape[1]
         fn = select_flash_attn_impl(attn_type, stage="bwd-only")
@@ -165,6 +172,7 @@ def zigzag_ring_flash_attn_backward(
             else:
                 backward(dout1, q1, k, v, out1, softmax_lse1, causal=False)
                 # always use the first half in dq_buffer.
+                assert dq is not None
                 dq[:, block_seq_len:] += dq_buffer[:, :block_seq_len]
 
             d_kv_comm.wait()
@@ -172,6 +180,7 @@ def zigzag_ring_flash_attn_backward(
             dk, dv = next_dk, next_dv
 
             if step <= kv_comm.rank:
+                assert dk is not None and dv is not None
                 dk[:, :block_seq_len] += dk_buffer[:, :block_seq_len]
                 dv[:, :block_seq_len] += dv_buffer[:, :block_seq_len]
             else:

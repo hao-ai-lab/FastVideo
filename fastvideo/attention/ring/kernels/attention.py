@@ -1,4 +1,5 @@
 import math
+from typing import Any
 
 import torch
 
@@ -42,18 +43,18 @@ if HAS_NPU:
 
 
 def pytorch_attn_forward(
-        q: torch.Tensor,
-        k: torch.Tensor,
-        v: torch.Tensor,
-        dropout_p=0.0,
-        softmax_scale=None,
-        causal=True,
-        window_size=(-1, -1),
-        softcap=None,
-        alibi_slopes=None,
-        return_softmax=False,
-        op_type="flash",
-):
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    dropout_p: float = 0.0,
+    softmax_scale: float | None = None,
+    causal: bool = True,
+    window_size: tuple[int, int] = (-1, -1),
+    softcap: float | None = None,
+    alibi_slopes: torch.Tensor | None = None,
+    return_softmax: bool = False,
+    op_type: str = "flash",
+) -> tuple[torch.Tensor, torch.Tensor]:
     assert op_type in ["flash", "efficient", "math", "cudnn"], f"Invalid op_type: {op_type}"
     """
     q shape (bs, seqlen, nhead, hs)
@@ -145,42 +146,42 @@ def pytorch_attn_forward(
 
 
 def pytorch_attn_backward(
-    dout,
-    q,
-    k,
-    v,
-    out,
-    softmax_lse,
-    block_dq_buffer=None,  # Add new parameters with default values
-    block_dk_buffer=None,
-    block_dv_buffer=None,
-    dropout_p=0.0,
-    softmax_scale=None,
-    bwd_causal=None,  # This will replace the original causal parameter
-    window_size=None,
-    softcap=None,
-    alibi_slopes=None,
-    deterministic=True,
-    rng_state=None,
-    *args,
-    **kwargs,
-):
+    dout: torch.Tensor,
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    out: torch.Tensor,
+    softmax_lse: torch.Tensor,
+    block_dq_buffer: torch.Tensor | None = None,  # Add new parameters with default values
+    block_dk_buffer: torch.Tensor | None = None,
+    block_dv_buffer: torch.Tensor | None = None,
+    dropout_p: float = 0.0,
+    softmax_scale: float | None = None,
+    bwd_causal: bool | None = None,  # This will replace the original causal parameter
+    window_size: tuple[int, int] | None = None,
+    softcap: float | None = None,
+    alibi_slopes: torch.Tensor | None = None,
+    deterministic: bool = True,
+    rng_state: Any | None = None,
+    *args: Any,
+    **kwargs: Any,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     raise RuntimeError("Not implemented backward for PyTorch attention types")
     # TODO(optim): use pytorch _scaled_dot_product_efficient_attention_backward
     # Use efficient attention backward
     # https://github.com/pytorch/pytorch/blob/main/tools/autograd/derivatives.yaml#L2874
 
 
-def flash_attn_forward(q,
-                       k,
-                       v,
-                       dropout_p=0.0,
-                       softmax_scale=None,
-                       causal=False,
-                       window_size=(-1, -1),
-                       softcap=None,
-                       alibi_slopes=None,
-                       return_softmax=False):
+def flash_attn_forward(q: torch.Tensor,
+                       k: torch.Tensor,
+                       v: torch.Tensor,
+                       dropout_p: float = 0.0,
+                       softmax_scale: float | None = None,
+                       causal: bool = False,
+                       window_size: tuple[int, int] = (-1, -1),
+                       softcap: float | None = None,
+                       alibi_slopes: torch.Tensor | None = None,
+                       return_softmax: bool = False) -> tuple[torch.Tensor, torch.Tensor]:
     assert HAS_FLASH_ATTN, "FlashAttention is not available"
     if softmax_scale is None:
         softmax_scale = q.shape[-1]**(-0.5)
@@ -214,8 +215,11 @@ def flash_attn_forward(q,
     return block_out, block_lse
 
 
-def flash_attn_backward(dout, q, k, v, out, softmax_lse, block_dq_buffer, block_dk_buffer, block_dv_buffer, dropout_p,
-                        softmax_scale, bwd_causal, window_size, softcap, alibi_slopes, deterministic, rng_state):
+def flash_attn_backward(dout: torch.Tensor, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, out: torch.Tensor,
+                        softmax_lse: torch.Tensor, block_dq_buffer: torch.Tensor, block_dk_buffer: torch.Tensor,
+                        block_dv_buffer: torch.Tensor, dropout_p: float, softmax_scale: float | None, bwd_causal: bool,
+                        window_size: tuple[int, int], softcap: float | None, alibi_slopes: torch.Tensor | None,
+                        deterministic: bool, rng_state: Any) -> None:
     if softmax_scale is None:
         softmax_scale = q.shape[-1]**(-0.5)
     assert HAS_FLASH_ATTN
@@ -262,8 +266,10 @@ def flash_attn_backward(dout, q, k, v, out, softmax_lse, block_dq_buffer, block_
         )
 
 
-def flash_attn3_func_forward(q, k, v, dropout_p, softmax_scale, causal, window_size, softcap, alibi_slopes,
-                             return_softmax):
+def flash_attn3_func_forward(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, dropout_p: float,
+                             softmax_scale: float | None, causal: bool, window_size: tuple[int, int],
+                             softcap: float | None, alibi_slopes: torch.Tensor | None,
+                             return_softmax: bool) -> tuple[torch.Tensor, torch.Tensor]:
     assert HAS_FLASH_ATTN_HOPPER
     # current signature of flash_attn_forward_hopper:
     # (q, k, v, softmax_scale, causal, window_size, descale_q=None, descale_k=None, descale_v=None, gqa_parallel=False)
@@ -307,9 +313,11 @@ def flash_attn3_func_forward(q, k, v, dropout_p, softmax_scale, causal, window_s
     return out, softmax_lse
 
 
-def flash_attn3_func_backward(dout, q, k, v, out, softmax_lse, block_dq_buffer, block_dk_buffer, block_dv_buffer,
-                              dropout_p, softmax_scale, bwd_causal, window_size, softcap, alibi_slopes, deterministic,
-                              rng_state):
+def flash_attn3_func_backward(dout: torch.Tensor, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, out: torch.Tensor,
+                              softmax_lse: torch.Tensor, block_dq_buffer: torch.Tensor, block_dk_buffer: torch.Tensor,
+                              block_dv_buffer: torch.Tensor, dropout_p: float, softmax_scale: float | None,
+                              bwd_causal: bool, window_size: tuple[int, int], softcap: float | None,
+                              alibi_slopes: torch.Tensor | None, deterministic: bool, rng_state: Any) -> None:
     # (dout, q, k, v, out, softmax_lse, dq, dk, dv, softmax_scale, causal):
     assert HAS_FLASH_ATTN_HOPPER, "FlashAttention Hopper is not available"
 
@@ -338,16 +346,16 @@ def flash_attn3_func_backward(dout, q, k, v, out, softmax_lse, block_dq_buffer, 
     )
 
 
-def flash_attn_forward_aiter(q,
-                             k,
-                             v,
-                             dropout_p=0.0,
-                             softmax_scale=None,
-                             causal=False,
-                             window_size=(-1, -1),
-                             softcap=None,
-                             alibi_slopes=None,
-                             return_softmax=False):
+def flash_attn_forward_aiter(q: torch.Tensor,
+                             k: torch.Tensor,
+                             v: torch.Tensor,
+                             dropout_p: float = 0.0,
+                             softmax_scale: float | None = None,
+                             causal: bool = False,
+                             window_size: tuple[int, int] = (-1, -1),
+                             softcap: float | None = None,
+                             alibi_slopes: torch.Tensor | None = None,
+                             return_softmax: bool = False) -> tuple[torch.Tensor, torch.Tensor]:
     assert HAS_AITER, "Aiter is not available"
     block_out, block_lse = flash_attn_func_aiter(
         q,
@@ -425,15 +433,15 @@ def flashinfer_attn_backbward(
     raise RuntimeError("Not implemented backward for AttnType.FLASHINFER")
 
 
-def npu_fused_attn_forward(q,
-                           k,
-                           v,
-                           head_num=None,
-                           input_layout="BSND",
-                           scale=None,
-                           pre_tokens=65535,
-                           next_tokens=65535):
-    assert HAS_NPU, "torch_npu is not avaliable"
+def npu_fused_attn_forward(q: torch.Tensor,
+                           k: torch.Tensor,
+                           v: torch.Tensor,
+                           head_num: int | None = None,
+                           input_layout: str = "BSND",
+                           scale: float | None = None,
+                           pre_tokens: int = 65535,
+                           next_tokens: int = 65535) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    assert HAS_NPU, "torch_npu is not available"
     attention_out, softmax_max, softmax_sum, _, _, _, _ = torch_npu.npu_fusion_attention_v2(q,
                                                                                             k,
                                                                                             v,
@@ -447,17 +455,17 @@ def npu_fused_attn_forward(q,
     return attention_out, softmax_max, softmax_sum
 
 
-def npu_fused_attn_backward(q,
-                            k,
-                            v,
-                            grad_attention_out,
-                            head_num=None,
-                            input_layout="BSND",
-                            softmax_max=None,
-                            softmax_sum=None,
-                            attention_in=None,
-                            scale_value=None):
-    assert HAS_NPU, "torch_npu is not avaliable"
+def npu_fused_attn_backward(q: torch.Tensor,
+                            k: torch.Tensor,
+                            v: torch.Tensor,
+                            grad_attention_out: torch.Tensor,
+                            head_num: int | None = None,
+                            input_layout: str = "BSND",
+                            softmax_max: torch.Tensor | None = None,
+                            softmax_sum: torch.Tensor | None = None,
+                            attention_in: torch.Tensor | None = None,
+                            scale_value: float | None = None) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    assert HAS_NPU, "torch_npu is not available"
     dq, dk, dv, _, _, _ = torch_npu.npu_fusion_attention_grad_v2(q,
                                                                  k,
                                                                  v,

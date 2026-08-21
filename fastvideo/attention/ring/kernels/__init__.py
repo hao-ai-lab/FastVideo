@@ -264,7 +264,7 @@ def select_flash_attn_impl(impl_type: AttnType, stage: str = "fwd-bwd", attn_pro
             raise ImportError("SparseSageAttention is only available with a SparseAttentionProcessor class passed in")
         if stage == "fwd-only":
 
-            def fn(q, k, v, causal=False, softmax_scale=None, *args, **kwargs):
+            def sparse_sage_fn(q, k, v, causal=False, softmax_scale=None, *args, **kwargs):
                 return (
                     attn_processor(
                         q,
@@ -277,7 +277,7 @@ def select_flash_attn_impl(impl_type: AttnType, stage: str = "fwd-bwd", attn_pro
                     None,
                 )
 
-            return fn
+            return sparse_sage_fn
         else:
             raise ValueError(f"Unknown/Unsupported stage: {stage}")
 
