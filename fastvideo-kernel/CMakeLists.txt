@@ -318,6 +318,38 @@ if(BUILD_CXX_KERNELS)
 
     # Combined FastVideo Extension
     # Using name 'fastvideo_kernel_ops' to distinguish from the python package namespace
+    # ---------------------------------------------------------------------------
+    # VSA block-sparse attention forward, Blackwell (sm_100a) only.
+    #
+    # NOTE the "a" suffix: -arch=sm_100a is NOT enough -- it emits a plain sm_100 target and
+    # ptxas rejects every tcgen05 / setmaxnreg instruction. The explicit gencode spelling
+    # below is required, and matches the 10.0a entry in TORCH_CUDA_ARCH_LIST.
+    #
+    # Built for 64-token sparse blocks -- FastVideo's default (4,4,4) tiling, so no
+    # tile-size change and no top-k granularity change is needed. VSA_BHSD
+    # selects [B, H, S, D]. Both are compile-time; the Python is_supported() checks incoming
+    # tensors against them so callers fall back to Triton rather than getting a wrong answer.
+    # Read the ENVIRONMENT as well as the cache variable. When TORCH_CUDA_ARCH_LIST is
+    # exported (build.sh, and `pip install` with it set) the branch above only prints it --
+    # the cmake variable stays empty, so testing that alone silently skips the kernel and
+    # leaves a build that succeeds with the op missing.
+    set(ENABLE_VSA_SM100A OFF)
+    set(_VSA_ARCH_LIST "${TORCH_CUDA_ARCH_LIST}")
+    if(NOT _VSA_ARCH_LIST AND DEFINED ENV{TORCH_CUDA_ARCH_LIST})
+        set(_VSA_ARCH_LIST "$ENV{TORCH_CUDA_ARCH_LIST}")
+    endif()
+    if(_VSA_ARCH_LIST MATCHES "(^|[; ,])(10\\.0a|100a|sm_100a)([; ,]|$)")
+        set(ENABLE_VSA_SM100A ON)
+    endif()
+    if(ENABLE_VSA_SM100A)
+        message(STATUS "fastvideo-kernel: building block_sparse_sm100a (Blackwell, 64- and 128-token blocks)")
+        list(APPEND EXTENSION_SOURCES csrc/attention/block_sparse_sm100a.cu
+                                      csrc/attention/block_sparse_blk128_sm100a.cu)
+        set_source_files_properties(csrc/attention/block_sparse_sm100a.cu
+                                    csrc/attention/block_sparse_blk128_sm100a.cu PROPERTIES
+            COMPILE_OPTIONS "-gencode;arch=compute_100a,code=sm_100a;-DVSA_BHSD=true")
+    endif()
+
     Python_add_library(fastvideo_kernel_ops MODULE USE_SABI ${SKBUILD_SABI_VERSION} WITH_SOABI
         ${EXTENSION_SOURCES}
     )
@@ -333,9 +365,13 @@ if(BUILD_CXX_KERNELS)
 
     # Build compile definitions list
     set(COMPILE_DEFS TORCH_EXTENSION_NAME=fastvideo_kernel_ops)
+    if(ENABLE_VSA_SM100A)
+        list(APPEND COMPILE_DEFS TK_COMPILE_BLOCK_SPARSE_VSA_SM100A)
+    endif()
     if(ENABLE_TK_KERNELS)
         list(APPEND COMPILE_DEFS TK_COMPILE_ST_ATTN TK_COMPILE_BLOCK_SPARSE)
     endif()
+
 
     target_compile_definitions(fastvideo_kernel_ops PRIVATE ${COMPILE_DEFS})
 
