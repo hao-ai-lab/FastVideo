@@ -15,10 +15,12 @@
 #   fastvideo/attention/layer.py.
 
 import torch
+import torch.distributed as dist
 # from flash_attn.flash_attn_interface import _flash_attn_forward, _flash_attn_backward
 from .utils import RingComm, update_out_and_lse
 from .kernels import AttnType, select_flash_attn_impl
 
+_FIRST_RING_LOG = True
 
 def ring_flash_attn_forward(
     process_group,
@@ -34,7 +36,24 @@ def ring_flash_attn_forward(
     deterministic=False,
     attn_type: AttnType = AttnType.FA,
     attn_processor=None,
-):
+):  
+
+    global _FIRST_RING_LOG
+
+    if _FIRST_RING_LOG:
+        rank = dist.get_rank()
+        group_rank = dist.get_rank(process_group)
+        group_size = dist.get_world_size(process_group)
+        group_ranks = dist.get_process_group_ranks(process_group)
+
+        print(
+            f"[RingAttention] rank={rank}, "
+            f"group_rank={group_rank}/{group_size}, "
+            f"group_ranks={group_ranks}",
+            flush=True,
+        )
+        _FIRST_RING_LOG = False
+
     comm = RingComm(process_group)
 
     out = None
