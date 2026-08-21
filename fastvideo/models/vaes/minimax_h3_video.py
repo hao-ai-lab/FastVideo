@@ -15,7 +15,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 
+from fastvideo.attention import get_attn_backend
 from fastvideo.configs.models.vaes.minimax_h3_video import MiniMaxH3VideoVAEConfig
+from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.profiler import nvtx_range
 
 
@@ -293,6 +295,7 @@ class MiniMaxH3VideoRotaryPosEmbed(nn.Module):
 class MiniMaxH3VideoAttention(nn.Module):
 
     def __init__(self, dim: int, heads: int, dim_head: int, eps: float = 1e-5, bias: bool = True) -> None:
+        """Build projections and the selected dense FastVideo attention implementation."""
         super().__init__()
         self.heads = heads
         self.dim_head = dim_head
@@ -304,12 +307,34 @@ class MiniMaxH3VideoAttention(nn.Module):
         self.to_k = nn.Linear(dim, inner_dim, bias=bias)
         self.to_v = nn.Linear(dim, inner_dim, bias=bias)
         self.to_out = nn.ModuleList([nn.Linear(inner_dim, dim, bias=bias), nn.Dropout(0.0)])
+        self.attn_impl = None
+        from fastvideo.platforms import current_platform
+
+        if current_platform.is_cuda_alike():
+            attention_backend = get_attn_backend(
+                dim_head,
+                # FlashAttention executes the FP32 VAE activations in BF16 and
+                # restores FP32 output, so resolve against the kernel dtype.
+                torch.bfloat16,
+                supported_attention_backends=(
+                    AttentionBackendEnum.TORCH_SDPA,
+                    AttentionBackendEnum.FLASH_ATTN,
+                ),
+            )
+            self.attn_impl = attention_backend.get_impl_cls()(
+                num_heads=heads,
+                head_size=dim_head,
+                softmax_scale=dim_head**-0.5,
+                num_kv_heads=heads,
+                causal=False,
+            )
 
     def forward(
         self,
         hidden_states: torch.Tensor,
         rotary_emb: tuple[torch.Tensor, torch.Tensor] | None = None,
     ) -> torch.Tensor:
+        """Apply dense self-attention to one spatial VAE token sequence."""
         query = self.to_q(hidden_states).unflatten(2, (self.heads, -1))
         key = self.to_k(hidden_states).unflatten(2, (self.heads, -1))
         value = self.to_v(hidden_states).unflatten(2, (self.heads, -1))
@@ -330,9 +355,17 @@ class MiniMaxH3VideoAttention(nn.Module):
             query = torch.cat([query_rotary * cos + query_rotated * sin, query_pass], dim=-1)
             key = torch.cat([key_rotary * cos + key_rotated * sin, key_pass], dim=-1)
 
-        query, key, value = (tensor.permute(0, 2, 1, 3) for tensor in (query, key, value))
-        hidden_states = F.scaled_dot_product_attention(query, key, value)
-        hidden_states = hidden_states.permute(0, 2, 1, 3).flatten(2, 3)
+        if self.attn_impl is not None and query.device.type != "cpu":
+            # VAE decoding has no diffusion-step metadata, so call the selected
+            # backend implementation directly with dense BSHD tensors.
+            hidden_states = self.attn_impl.forward(query, key, value, None)
+            hidden_states = hidden_states.flatten(2, 3)
+        else:
+            # Keep CPU construction and execution available without requiring
+            # an accelerator attention backend.
+            query, key, value = (tensor.permute(0, 2, 1, 3) for tensor in (query, key, value))
+            hidden_states = F.scaled_dot_product_attention(query, key, value)
+            hidden_states = hidden_states.permute(0, 2, 1, 3).flatten(2, 3)
         return self.to_out[0](hidden_states)
 
 
