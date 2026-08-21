@@ -62,14 +62,7 @@ class MiniMaxH3Qwen3VLArchConfig(TextEncoderArchConfig):
     hidden_size: int = 5120
     intermediate_size: int = 25600
     num_hidden_layers: int = 64
-    # H3 conditions on one intermediate hidden state and reads nothing above it,
-    # so the remaining layers are built, weight-loaded and then discarded: 14
-    # layers, 13.7 GB in bf16. Building exactly this many leaves that hidden
-    # state bit-identical, because the tuple records each layer's *input*, so
-    # entry N is the output of layer N-1. Set to None to keep the full stack.
-    # Must equal MINIMAX_H3_TEXT_ENCODER_LAYER in
-    # fastvideo/pipelines/basic/minimax_h3/packing.py; a test pins them together
-    # rather than importing across the models -> pipelines boundary.
+    output_hidden_state_index: int = 50
     num_hidden_layers_override: int | None = 50
     num_attention_heads: int = 64
     num_key_value_heads: int = 8
@@ -116,7 +109,7 @@ class MiniMaxH3Qwen3VLArchConfig(TextEncoderArchConfig):
     vision_initializer_range: float = 0.02
     vision_deepstack_visual_indexes: tuple[int, ...] = (8, 16, 24)
 
-    output_hidden_states: bool = True
+    output_hidden_states: bool = False
     stacked_params_mapping: list[tuple[str, str, str | int]] = field(default_factory=list)
     _fsdp_shard_conditions: list = field(default_factory=lambda: [
         _is_language_transformer_layer,
@@ -127,15 +120,16 @@ class MiniMaxH3Qwen3VLArchConfig(TextEncoderArchConfig):
     ])
 
     def __post_init__(self) -> None:
-        # Runs both at construction and after ``update_model_arch`` merges the
-        # checkpoint's config.json, so it also guards config-file overrides. A
-        # non-positive override would build no decoder layers at all, and a
-        # negative one would additionally make the surplus-key filter drop
-        # every ``language_model.layers.*`` checkpoint key, so the conditioner
-        # would "load" with no transformer stack and only fail at generation.
-        if self.num_hidden_layers_override is not None and self.num_hidden_layers_override < 1:
-            raise ValueError("MiniMax H3 Qwen3-VL num_hidden_layers_override must be a positive layer count "
-                             f"or None for the full stack; got {self.num_hidden_layers_override}.")
+        if self.output_hidden_state_index <= 0 or self.output_hidden_state_index > self.num_hidden_layers:
+            raise ValueError("MiniMax H3 Qwen3-VL output_hidden_state_index must be in "
+                             f"[1, {self.num_hidden_layers}], got {self.output_hidden_state_index}.")
+        if self.num_hidden_layers_override is not None:
+            if self.num_hidden_layers_override <= 0:
+                raise ValueError("MiniMax H3 Qwen3-VL num_hidden_layers_override must be positive or None.")
+            if self.num_hidden_layers_override < self.output_hidden_state_index:
+                raise ValueError("MiniMax H3 Qwen3-VL num_hidden_layers_override must build through "
+                                 f"hidden_states[{self.output_hidden_state_index}], got "
+                                 f"{self.num_hidden_layers_override}.")
 
         rope_scaling = dict(self.rope_scaling or {})
         self.mrope_interleaved = bool(rope_scaling.get("mrope_interleaved", self.mrope_interleaved))

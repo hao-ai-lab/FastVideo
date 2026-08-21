@@ -14,7 +14,6 @@ from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.models.encoders.minimax_h3_qwen3_vl import MiniMaxH3Qwen3VLConditioner
 from fastvideo.pipelines.basic.minimax_h3.packing import (
     MINIMAX_H3_IMAGE_PAD_TOKEN,
-    MINIMAX_H3_TEXT_ENCODER_LAYER,
     MINIMAX_H3_TEXT_TAG,
     MINIMAX_H3_VIDEO_PAD_TOKEN,
     MINIMAX_H3_VIDEO_TAG,
@@ -40,25 +39,6 @@ def _token_ids(tokenized: Any) -> list[int]:
             raise ValueError("MiniMax H3 tokenization must produce exactly one sequence.")
         input_ids = input_ids[0]
     return [int(token_id) for token_id in input_ids]
-
-
-def _create_mm_token_type_ids(processor: Any, token_ids: list[int]) -> list[list[int]]:
-    """Build Qwen3-VL modality IDs across old and new Transformers releases."""
-    create_ids = getattr(processor, "create_mm_token_type_ids", None)
-    if callable(create_ids):
-        return create_ids([token_ids])
-
-    modality_ids = [0] * len(token_ids)
-    for modality, modality_type in (("image", 1), ("video", 2), ("audio", 3)):
-        special_ids = getattr(processor, f"{modality}_token_ids", None)
-        if special_ids is None:
-            special_id = getattr(processor, f"{modality}_token_id", None)
-            special_ids = [] if special_id is None else [special_id]
-        resolved_ids = {int(special_id) for special_id in special_ids if special_id is not None}
-        for index, token_id in enumerate(token_ids):
-            if token_id in resolved_ids:
-                modality_ids[index] = modality_type
-    return [modality_ids]
 
 
 def build_ref2va_presentation(
@@ -155,20 +135,10 @@ class MiniMaxH3ConditioningStage(PipelineStage):
         device: torch.device,
         **vision_inputs: torch.Tensor | None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        hidden_state_index = MINIMAX_H3_TEXT_ENCODER_LAYER
-        input_ids = torch.tensor([token_ids], dtype=torch.long, device=device)
-        mm_token_type_ids = torch.as_tensor(
-            _create_mm_token_type_ids(self.processor, token_ids),
-            dtype=torch.long,
-            device=device,
-        )
+        input_ids = torch.tensor(token_ids, dtype=torch.long, device=device)
         dtype = self.conditioner.dtype
-        outputs = self.conditioner(
-            input_ids=input_ids,
-            attention_mask=torch.ones_like(input_ids),
-            mm_token_type_ids=mm_token_type_ids,
-            use_cache=False,
-            output_hidden_states=True,
+        prompt_embeds = self.conditioner(
+            input_ids,
             **{
                 name:
                 None if value is None else value.to(
@@ -178,10 +148,10 @@ class MiniMaxH3ConditioningStage(PipelineStage):
                 for name, value in vision_inputs.items()
             },
         )
-        if outputs.hidden_states is None or len(outputs.hidden_states) <= hidden_state_index:
-            raise ValueError(f"Qwen3-VL did not return `hidden_states[{hidden_state_index}]`.")
+        if prompt_embeds.ndim != 2 or prompt_embeds.shape[0] != len(token_ids):
+            raise ValueError(f"MiniMax-H3 slim text encoder returned unexpected shape={tuple(prompt_embeds.shape)}")
         return (
-            outputs.hidden_states[hidden_state_index].to(device=device, dtype=dtype),
+            prompt_embeds.unsqueeze(0).to(device=device, dtype=dtype),
             torch.tensor(token_tags, dtype=torch.long),
         )
 
