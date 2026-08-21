@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     FASTVIDEO_LOGGING_LEVEL: str = "INFO"
     FASTVIDEO_LOGGING_PREFIX: str = ""
     FASTVIDEO_LOGGING_CONFIG_PATH: str | None = None
+    FASTVIDEO_LOG_ALL_PROCESSES: bool = False
     FASTVIDEO_TRACE_FUNCTION: int = 0
     FASTVIDEO_ATTENTION_BACKEND: str | None = None
     FASTVIDEO_FA4: bool = False
@@ -192,6 +193,13 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # if set, FASTVIDEO_LOGGING_PREFIX will be prepended to all log messages
     "FASTVIDEO_LOGGING_PREFIX":
     lambda: os.getenv("FASTVIDEO_LOGGING_PREFIX", ""),
+
+    # If set to 1, logger.info(..) will log from every process regardless of
+    # rank, overriding the default process-aware behavior (which only logs from
+    # the local main process) and the main_process_only / local_main_process_only
+    # arguments at each call site. Useful for debugging distributed runs.
+    "FASTVIDEO_LOG_ALL_PROCESSES":
+    lambda: bool(int(os.getenv("FASTVIDEO_LOG_ALL_PROCESSES", "0"))),
 
     # Trace function calls
     # If set to 1, fastvideo will trace function calls
