@@ -216,10 +216,11 @@ def _get_config_info(
         config = maybe_download_model_index(model_path, revision=revision)
 
     pipeline_name = config.get("_class_name", "").lower()
+    variant = config.get("fastvideo_ltx2_variant", "").lower()
 
     matched_model_names: list[str] = []
     for model_id, detector in _MODEL_NAME_DETECTORS:
-        if detector(model_path.lower()) or detector(pipeline_name):
+        if detector(model_path.lower()) or detector(pipeline_name) or detector(variant):
             logger.debug("Matched model name '%s' using a registered detector.", model_id)
             matched_model_names.append(model_id)
 
@@ -256,7 +257,40 @@ def _register_configs() -> None:
         pipeline_cls_name="MMAudioPipeline",
     )
 
-    # LTX-2 (distilled) — registered FIRST so its detector wins over
+    # LTX-2.5 distilled — registered before every older/generic LTX entry so
+    # its ancestral-sampling preset and architecture flags cannot be shadowed.
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=LTX2T2VConfig,
+        workload_types=(WorkloadType.T2V, WorkloadType.I2V),
+        hf_model_paths=[
+            "FastVideo/LTX-2.5-Distilled-Diffusers",
+            "FastVideo/LTX2.5-Distilled-Diffusers",
+        ],
+        model_detectors=[
+            lambda path: ("ltx-2.5" in path.lower() or "ltx2.5" in path.lower()) and "distilled" in path.lower(),
+        ],
+        model_family="ltx2",
+        default_preset="ltx2_5_distilled_two_stage",
+    )
+    # LTX-2.5 dev — raw Lightricks split checkpoints must first be converted
+    # into the standard component layout consumed by FastVideo loaders.
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=LTX2T2VConfig,
+        workload_types=(WorkloadType.T2V, WorkloadType.I2V),
+        hf_model_paths=[
+            "FastVideo/LTX-2.5-Dev-Diffusers",
+            "FastVideo/LTX2.5-Dev-Diffusers",
+        ],
+        model_detectors=[
+            lambda path: ("ltx-2.5" in path.lower() or "ltx2.5" in path.lower()) and "distilled" not in path.lower(),
+        ],
+        model_family="ltx2",
+        default_preset="ltx2_5_dev",
+    )
+
+    # LTX-2 (distilled) — registered before the generic base detector so its
     # the base detector when both fire. The detector loop in
     # ``get_model_name_for_path`` ORs the path-based check with a
     # pipeline-name check (``ltx2pipeline``) which the base detector's
