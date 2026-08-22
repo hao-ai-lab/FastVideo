@@ -164,6 +164,19 @@ class FastVideoArgs:
     torch_compile_kwargs_text_encoder: dict[str, Any] = field(default_factory=dict)
     torch_compile_kwargs_vae: dict[str, Any] = field(default_factory=dict)
     torch_compile_kwargs_audio_vae: dict[str, Any] = field(default_factory=dict)
+    # Regional (per-transformer-block) fullgraph torch.compile of the DiT at
+    # inference — the inference-side counterpart of the training regional
+    # compile ported from hao-ai-lab/FastVideo#1718. Applied by the loader
+    # right after the transformer loads, with fullgraph=True and inductor
+    # options {emulate_precision_casts: True} injected (no user kwargs
+    # needed). Attention backends that cannot be fullgraph-traced (VSA)
+    # degrade the transformer to eager with one warning. Dense FA2/FA3/FA4
+    # inference uses compile-visible custom-op
+    # boundaries. Opt-in via FASTVIDEO_INFERENCE_TORCH_COMPILE=1 (folded in
+    # __post_init__) or PipelineSelection.experimental
+    # {"inference_torch_compile": true}. Distinct from ``enable_torch_compile``,
+    # which keeps the pipeline-level compile semantics.
+    inference_torch_compile: bool = False
 
     disable_autocast: bool = False
 
@@ -272,6 +285,13 @@ class FastVideoArgs:
         self._apply_ltx2_vae_overrides()
         self._resolve_refine_args()
         self._apply_transformer_quant()
+        if not self.inference_torch_compile:
+            # Parse-once adapter (same pattern as attention_backend below): the
+            # environment variable is an input read once here, so the loader
+            # only ever consults the typed field.
+            import fastvideo.envs as envs
+            if envs.FASTVIDEO_INFERENCE_TORCH_COMPILE:
+                self.inference_torch_compile = True
         if self.attention_backend is not None:
             # Fail fast on typos instead of silently auto-selecting later.
             from fastvideo.attention.selector import coerce_attn_backend
@@ -591,6 +611,15 @@ class FastVideoArgs:
             default=None,
             help=
             "JSON string of kwargs to pass to torch.compile. Example: '{\"backend\":\"inductor\",\"mode\":\"reduce-overhead\"}'",
+        )
+        parser.add_argument(
+            "--inference-torch-compile",
+            action=StoreBoolean,
+            default=FastVideoArgs.inference_torch_compile,
+            help="Regional fullgraph torch.compile of each DiT transformer block at inference "
+            "(port of the #1718 training-side regional compile). The loader injects fullgraph=True "
+            "and inductor options {emulate_precision_casts: true}; non-traceable attention backends "
+            "(VSA) degrade to eager with one warning. FASTVIDEO_INFERENCE_TORCH_COMPILE=1 is equivalent.",
         )
 
         parser.add_argument(
