@@ -125,6 +125,8 @@ def test_default_off_routes_triton(routed, monkeypatch):
 def test_env_on_routes_sm100a_with_index_metadata(routed, monkeypatch):
     fake_sm, fake_triton, run, meta = routed
     monkeypatch.setenv(VSA_SM100A_ENV, "1")
+    messages = []
+    monkeypatch.setattr(vsa_h3.logger, "info_once", messages.append)
     out = run()
     assert fake_triton.calls == 0
     assert len(fake_sm.calls) == 1
@@ -135,6 +137,7 @@ def test_env_on_routes_sm100a_with_index_metadata(routed, monkeypatch):
     assert call["q2k_idx"].shape[-1] == n_tiles and call["q2k_idx"].dtype == torch.int32
     assert call["vbs"].dtype == torch.int32
     assert call["need_lse"] is False
+    assert messages == ["MiniMax-H3 VSA tile-64 forward: using the sm100a CUDA block-sparse kernel"]
     # BHSD kernel result comes back in the backend's BSHD layout
     assert out.shape == (1, n_tiles * 64, _HEADS, _DIM)
 

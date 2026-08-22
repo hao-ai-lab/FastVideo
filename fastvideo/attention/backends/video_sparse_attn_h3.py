@@ -528,6 +528,7 @@ class MiniMaxH3VSAImpl(AttentionImpl):
                     logger.warning_once(f"{VSA_SM100A_ENV}=1 but falling back to the Triton-64 kernels: {reason}")
 
             if use_sm100a:
+                logger.info_once("MiniMax-H3 VSA tile-64 forward: using the sm100a CUDA block-sparse kernel")
                 # The sm_100a entry is index-native; compact the bool map the
                 # same way the Triton bool entry does internally. Per-row
                 # counts are NON-uniform here (prefix query tiles are dense,
