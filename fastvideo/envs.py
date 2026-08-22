@@ -28,6 +28,8 @@ if TYPE_CHECKING:
     FASTVIDEO_VAE_PARALLEL_ENCODE: bool = False
     FASTVIDEO_VAE_PARALLEL_DECODE_STRATEGY: str | None = None
     FASTVIDEO_ULYSSES_A2A: str = "off"
+    FASTVIDEO_MINIMAX_H3_ADALN_PRECOMPUTE: bool = False
+    FASTVIDEO_MINIMAX_H3_PACKED_SP: bool = False
     FASTVIDEO_WORKER_MULTIPROC_METHOD: str = "spawn"
     FASTVIDEO_TARGET_DEVICE: str = "cuda"
     MAX_JOBS: str | None = None
@@ -269,6 +271,13 @@ environment_variables: dict[str, Callable[[], Any]] = {
     #   mesh of 2/4/6/8 ranks in eager execution, else the NCCL path.
     "FASTVIDEO_ULYSSES_A2A":
     lambda: os.getenv("FASTVIDEO_ULYSSES_A2A", "off").strip().lower(),
+
+    # Exact, inference-only MiniMax-H3 trajectory optimizations adapted from
+    # Sol-Engine. Kept separate from block-local fusions for clean A/B tests.
+    "FASTVIDEO_MINIMAX_H3_ADALN_PRECOMPUTE":
+    lambda: os.getenv("FASTVIDEO_MINIMAX_H3_ADALN_PRECOMPUTE", "0") != "0",
+    "FASTVIDEO_MINIMAX_H3_PACKED_SP":
+    lambda: os.getenv("FASTVIDEO_MINIMAX_H3_PACKED_SP", "0") != "0",
 
     # Use dedicated multiprocess context for workers.
     "FASTVIDEO_WORKER_MULTIPROC_METHOD":
