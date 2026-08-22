@@ -41,6 +41,24 @@ The default checkpoint `FastVideo/FastVideo-Minimax-FastH3-Preview-v0.1` is priv
 
 On Blackwell (sm_100) GPUs with a `fastvideo-kernel` build that carries the sm_100a block-sparse extension, `--vsa-kernel sm100a` routes the tile-64 attention forwards through the CUDA kernel instead of Triton (it sets `FASTVIDEO_VSA_SM100A=1` before the pipeline boots); if the extension or the arch is missing, the run warns once and falls back to Triton.
 
+For the fastest measured four-GPU Preview profile on GB200, keep the sparse DiT eager, compile and parallelize only the video VAE, replicate the DiT weights, and enable the inference-only H3 fusions explicitly:
+
+```bash
+FASTVIDEO_MINIMAX_H3_FUSIONS=all \
+python examples/inference/basic/basic_fasth3.py \
+  --prompt "your prompt" \
+  --num-gpus 4 \
+  --steps 5 \
+  --vsa-sparsity 0.9 \
+  --vsa-tile-size 64 \
+  --vsa-kernel sm100a \
+  --compile-vae \
+  --parallel-vae \
+  --replicated-dit
+```
+
+The fusion profile changes floating-point operation order and is a speed/quality evaluation route, not an exact-parity route. Omit `FASTVIDEO_MINIMAX_H3_FUSIONS` for strict sparse-DiT numerics; VAE chunk parallelism itself is bit-exact with the eager decoder.
+
 ## Basic Walkthrough
 
 All you need to generate videos using multi-gpus from state-of-the-art diffusion pipelines is the following few lines!

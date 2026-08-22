@@ -7,9 +7,11 @@ from typing import Any
 
 import torch
 
-from fastvideo.distributed import get_local_torch_device, get_world_group, model_parallel_is_initialized
+from fastvideo.distributed import get_local_torch_device, get_sp_group, get_world_group, model_parallel_is_initialized
 from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.logger import init_logger
 from fastvideo.models.vaes.minimax_h3_audio import MiniMaxH3AudioVAE
+from fastvideo.models.vaes.minimax_h3_parallel import DEFAULT_DECODE_GATHER_STRATEGY, decode_to_pixels_parallel
 from fastvideo.models.vaes.minimax_h3_video import AutoencoderKLMiniMaxH3
 from fastvideo.profiler import nvtx_range
 from fastvideo.pipelines.basic.minimax_h3.packing import (
@@ -24,12 +26,31 @@ from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 from fastvideo.utils import is_pin_memory_available
 
+logger = init_logger(__name__)
+
 
 def _layout(batch: ForwardBatch) -> MiniMaxH3PackedLayout:
     layout = batch.extra.get(MINIMAX_H3_LAYOUT_KEY)
     if not isinstance(layout, MiniMaxH3PackedLayout):
         raise ValueError("MiniMax-H3 packed layout is missing at decode.")
     return layout
+
+
+def _decode_participation(fastvideo_args: FastVideoArgs, want_parallel: bool) -> tuple[Any, bool, bool]:
+    """Resolve (sp_group, is_output_rank, parallel) for the VAE decode stages.
+
+    The existing serial path keeps its global-rank-zero output ownership.
+    Parallel decode assembles once per sequence-parallel group, on that
+    group's first rank. ``parallel`` is only true when every group rank will
+    run the decode body — the collectives inside require uniform
+    participation, so no rank-dependent branch may guard them.
+    """
+    if not model_parallel_is_initialized():
+        return None, True, False
+    sp_group = get_sp_group()
+    if bool(want_parallel) and sp_group.world_size > 1:
+        return sp_group, sp_group.is_first_rank, True
+    return sp_group, get_world_group().is_first_rank, False
 
 
 class MiniMaxH3VideoDecodingStage(PipelineStage):
@@ -57,11 +78,13 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
     @torch.no_grad()
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         """Decode H3 video latents into normalized CPU pixels."""
-        if model_parallel_is_initialized() and not get_world_group().is_first_rank:
-            # Distributed executors consume rank 0's ForwardBatch. Keep a
+        placeholder = torch.empty((0, 3, 0, 0, 0), device="cpu", dtype=torch.float32)
+        sp_group, is_output_rank, parallel = _decode_participation(fastvideo_args, fastvideo_args.vae_parallel_decode)
+        if not is_output_rank and not parallel:
+            # Consumers read the output rank's ForwardBatch. Keep a
             # verifier-compatible placeholder on other ranks and avoid
             # duplicating the full VAE decode and CPU output buffer.
-            batch.output = torch.empty((0, 3, 0, 0, 0), device="cpu", dtype=torch.float32)
+            batch.output = placeholder
             return batch
 
         layout = _layout(batch)
@@ -81,23 +104,33 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
         try:
             latents = self.vae.denormalize_latents(latents.to(device=device, dtype=torch.float32))
             if fastvideo_args.output_type == "latent":
-                batch.output = latents.detach().float().cpu()
+                # No collectives on this path, so uniform participation is
+                # trivial: every rank returns here.
+                batch.output = latents.detach().float().cpu() if is_output_rank else placeholder
                 return batch
 
-            output = torch.empty(
-                self.vae.decoded_pixel_shape(latents.shape),
-                device="cpu",
-                dtype=torch.float32,
-                pin_memory=fastvideo_args.pin_cpu_memory and is_pin_memory_available(),
-            )
+            output = None
+            if is_output_rank:
+                output = torch.empty(
+                    self.vae.decoded_pixel_shape(latents.shape),
+                    device="cpu",
+                    dtype=torch.float32,
+                    pin_memory=fastvideo_args.pin_cpu_memory and is_pin_memory_available(),
+                )
             # Attribute the streamed decoder computation while retaining
             # per-chunk device-to-host transfer and pinned-buffer reuse.
             with (
                     nvtx_range("minimax_h3.vae"),
                     torch.autocast(device_type=device.type, dtype=torch.float16, enabled=device.type == "cuda"),
             ):
-                self.vae.decode_to_pixels(latents, output)
-            batch.output = output
+                if parallel:
+                    strategy = fastvideo_args.vae_parallel_decode_strategy or DEFAULT_DECODE_GATHER_STRATEGY
+                    logger.info("MiniMax-H3 VAE decode: sequence-parallel chunks across %d ranks (%s)",
+                                sp_group.world_size, strategy)
+                    decode_to_pixels_parallel(self.vae, latents, output, sp_group, strategy=strategy)
+                else:
+                    self.vae.decode_to_pixels(latents, output)
+            batch.output = output if is_output_rank else placeholder
             return batch
         finally:
             if fastvideo_args.vae_cpu_offload:
@@ -128,6 +161,8 @@ class MiniMaxH3AudioDecodingStage(PipelineStage):
     @torch.no_grad()
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         """Decode H3 audio latents into a stereo CPU waveform."""
+        # Audio decode is sub-second, so preserve the serial path's global
+        # rank-zero ownership.
         if model_parallel_is_initialized() and not get_world_group().is_first_rank:
             batch.extra["audio"] = torch.empty((0, 2), device="cpu", dtype=torch.float32)
             batch.extra["audio_sample_rate"] = self.audio_vae.sampling_rate
