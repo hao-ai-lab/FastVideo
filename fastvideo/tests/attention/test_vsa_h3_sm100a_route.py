@@ -28,6 +28,7 @@ def _build_meta(
     device: torch.device = torch.device("cpu"),
     prefix_segments: tuple[int, ...] = _SPEC["prefix_segments"],
     sparsity: float = 0.0,
+    dense_layers: tuple[int, ...] = (),
     builder: MiniMaxH3VSAMetadataBuilder | None = None,
 ):
     builder = builder or MiniMaxH3VSAMetadataBuilder()
@@ -38,6 +39,7 @@ def _build_meta(
         VSA_sparsity=sparsity,
         prefix_segments=prefix_segments,
         device=device,
+        dense_layers=dense_layers,
         tile_size=64,
     )
 
@@ -139,6 +141,8 @@ def test_prepare_for_regional_compile_resolves_supported_route(monkeypatch):
     assert probe_q.dtype == torch.bfloat16
     assert probe_vbs.dtype == torch.int32
     assert probe_vbs.tolist() == [64, 64]
+    assert impl._regional_compile_layer_idx is not None
+    assert impl._regional_compile_layer_idx.item() == -1
 
 
 def test_prepare_for_regional_compile_env_off_skips_probe(monkeypatch):
@@ -217,6 +221,56 @@ def test_prepared_route_fullgraph_avoids_eager_dispatch(monkeypatch):
         with torch.inference_mode():
             actual = compiled(q, k, v)
         torch.testing.assert_close(actual, q, atol=0, rtol=0)
+    finally:
+        torch._dynamo.reset()
+
+
+def test_prepared_route_reuses_graph_across_layer_indices_and_preserves_dense_overrides(monkeypatch):
+    """Fifty H3 blocks must not specialize the shared graph on layer_idx."""
+    fake_sm = _FakeSm100a(supported=True)
+    monkeypatch.setattr(vsa_h3, "_sm100a", fake_sm)
+    monkeypatch.setenv(VSA_SM100A_ENV, "1")
+    monkeypatch.setattr(vsa_h3, "probe_enabled", lambda: None)
+    meta = _build_meta(sparsity=0.5, dense_layers=(0, 17))
+    assert meta.dense_layers_tensor.tolist() == [0, 17]
+    q, k, v = _tiled_qkv(meta)
+
+    def fail_eager_dispatch(*args, **kwargs):
+        raise AssertionError("compiled route re-entered eager dispatch")
+
+    def compile_safe_from_mask(q, k, v, block_map, variable_block_sizes):
+        del k, v, variable_block_sizes
+        # Encode the dense-layer decision in the result so this is a semantic
+        # test as well as a recompile-cache stress test.
+        return q + block_map.all().to(q.dtype), None
+
+    implementations = []
+    for layer_idx in range(20):
+        impl = MiniMaxH3VSAImpl(
+            num_heads=_HEADS,
+            head_size=_DIM,
+            causal=False,
+            softmax_scale=_DIM**-0.5,
+            prefix=f"transformer_blocks.{layer_idx}.attn",
+        )
+        impl.prepare_for_regional_compile(torch.device("cpu"))
+        implementations.append(impl)
+
+    monkeypatch.setattr(fake_sm, "is_supported", fail_eager_dispatch)
+    monkeypatch.setattr(fake_sm, "block_sparse_attn_sm100a", fail_eager_dispatch)
+    monkeypatch.setattr(fake_sm, "block_sparse_attn_sm100a_from_mask", compile_safe_from_mask)
+    monkeypatch.setattr(vsa_h3, "map_to_index", fail_eager_dispatch)
+    monkeypatch.setattr(vsa_h3, "_sm100a_unavailable_reason", fail_eager_dispatch)
+    monkeypatch.setattr(vsa_h3, "block_sparse_attn_64_bhsd", fail_eager_dispatch)
+
+    torch._dynamo.reset()
+    try:
+        compiled = [torch.compile(impl.forward, backend="eager", fullgraph=True) for impl in implementations]
+        with torch.inference_mode():
+            for layer_idx, run in enumerate(compiled):
+                actual = run(q, k, v, None, meta)
+                expected_delta = 1.0 if layer_idx in meta.dense_layers else 0.0
+                torch.testing.assert_close(actual, q + expected_delta, atol=0, rtol=0)
     finally:
         torch._dynamo.reset()
 

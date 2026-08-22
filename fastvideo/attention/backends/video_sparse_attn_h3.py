@@ -245,6 +245,10 @@ class MiniMaxH3VSAMetadata(AttentionMetadata):
     exempt: bool
     variable_block_sizes: torch.Tensor
     untile_combined_index: torch.Tensor
+    # Device-side copy of ``dense_layers``. Regional fullgraph capture uses
+    # this tensor with each implementation's tensor-valued layer index so the
+    # shared block code does not specialize once per Python ``layer_idx``.
+    dense_layers_tensor: torch.Tensor
     # tokens per tile (256 or 64); selects the tile geometry AND the kernel
     # route in forward() (256 -> VSA-256 CuTe/Triton, 64 -> native Triton)
     tile_elems: int = _TILE_ELEMS
@@ -288,6 +292,7 @@ class MiniMaxH3VSAMetadataBuilder(AttentionMetadataBuilder):
         (_tile_partition_indices, variable_block_sizes, untile_combined_index, num_prefix_tiles,
          num_video_tiles) = _h3_tile_geometry(prefix_segments, dit_seq_shape, device, tile_shape)
 
+        dense_layers = tuple(int(layer) for layer in dense_layers)
         return MiniMaxH3VSAMetadata(
             current_timestep=current_timestep,
             VSA_sparsity=VSA_sparsity,
@@ -298,7 +303,8 @@ class MiniMaxH3VSAMetadataBuilder(AttentionMetadataBuilder):
             variable_block_sizes=variable_block_sizes,
             untile_combined_index=untile_combined_index,
             tile_elems=int(tile_size),
-            dense_layers=tuple(int(layer) for layer in dense_layers),
+            dense_layers=dense_layers,
+            dense_layers_tensor=torch.tensor(dense_layers, device=device, dtype=torch.int64),
             tile_buf_holder=self._tile_buf_holder,
         )
 
@@ -382,6 +388,7 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         # request-time env/probe/fallback behavior; only Dynamo capture reads
         # the prepared, static route.
         self._regional_compile_sm100a_enabled: bool | None = None
+        self._regional_compile_layer_idx: torch.Tensor | None = None
 
     def prepare_for_regional_compile(self, device: torch.device) -> None:
         """Resolve the inference-only sm_100a route before fullgraph capture.
@@ -393,6 +400,12 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         the loaded model's device now, then let ``forward`` specialize on the
         resulting plain bool while Dynamo is compiling.
         """
+        # Dynamo specializes Python integer attributes of nn.Module-owned
+        # objects. All 50 H3 blocks share one forward code object, so reading
+        # ``self.layer_idx`` in every regional graph exhausts the recompile
+        # cache. Tensor contents stay dynamic and let the blocks share a graph.
+        self._regional_compile_layer_idx = torch.tensor(self.layer_idx, device=device, dtype=torch.int64)
+
         requested = os.environ.get(VSA_SM100A_ENV, "0") == "1"
         enabled = False
         reason = None
@@ -523,9 +536,20 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         logical_value = value[:, :logical_seq_len]
         logical_gate = gate_compress[:, :logical_seq_len] if gate_compress is not None else None
 
-        # probe-guided per-layer opt-out: diffuse layers run dense (all-True
-        # mask) while the rest keep the configured sparsity
-        layer_sparsity = 0.0 if self.layer_idx in attn_metadata.dense_layers else attn_metadata.VSA_sparsity
+        # Probe-guided per-layer opt-out: diffuse layers run dense (all-True
+        # mask) while the rest keep the configured sparsity. During regional
+        # capture, keep the layer decision tensor-valued so the 50 block
+        # instances reuse one graph instead of specializing on layer_idx.
+        force_dense = None
+        if compiling:
+            if self._regional_compile_layer_idx is None:
+                raise RuntimeError(
+                    "VSA-H3 layer routing was not resolved before torch.compile; "
+                    "call prepare_for_regional_compile(device) on every MiniMaxH3VSAImpl after loading weights.")
+            force_dense = (attn_metadata.dense_layers_tensor == self._regional_compile_layer_idx).any()
+            layer_sparsity = attn_metadata.VSA_sparsity
+        else:
+            layer_sparsity = 0.0 if self.layer_idx in attn_metadata.dense_layers else attn_metadata.VSA_sparsity
         probe_dir = None if compiling else probe_enabled()
 
         scores = None
@@ -546,6 +570,10 @@ class MiniMaxH3VSAImpl(AttentionImpl):
                 layer_sparsity,
                 attn_metadata.exempt,
             )
+        if force_dense is not None:
+            # A scalar bool tensor broadcasts over the block map. This exactly
+            # preserves the eager dense-layer contract without a Python branch.
+            mask = mask | force_dense
 
         if tile_elems == 64:
             # Native 64-token path: the block map is already at the kernels'
