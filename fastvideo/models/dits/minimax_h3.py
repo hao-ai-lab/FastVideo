@@ -222,11 +222,30 @@ class MiniMaxH3Attention(nn.Module):
         if torch.is_grad_enabled():
             return True
         if self._gate_compress_active is None:
+            if torch.compiler.is_compiling():
+                raise RuntimeError(
+                    "MiniMax H3 VSA compression gate was not resolved before torch.compile; "
+                    "call prepare_for_compile() after loading weights.")
+            self._resolve_gate_compress_for_compile()
+        assert self._gate_compress_active is not None
+        return self._gate_compress_active
+
+    def _resolve_gate_compress_for_compile(self) -> None:
+        """Resolve the inference-only compression-gate branch eagerly.
+
+        Regional compilation wraps each transformer block with
+        ``fullgraph=True``. Resolving the loaded weight before capture keeps
+        the GPU-to-host bool conversion and the cache mutation out of every
+        compiled block graph. Grad-enabled forwards ignore this cached value
+        in ``_gate_active`` so training can still learn from a zero gate.
+        """
+        if self.to_gate_compress is None:
+            return
+        if self._gate_compress_active is None:
             weight = self.to_gate_compress.weight
             # bool() on a DTensor reduction resolves collectively, so every
             # rank caches the same answer.
             self._gate_compress_active = bool((weight != 0).any())
-        return self._gate_compress_active
 
     @staticmethod
     def _apply_rotary_emb(
@@ -712,11 +731,37 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
     def prepare_for_compile(self) -> None:
         """Pipeline hook, called once right before torch.compile wraps the blocks.
 
+        Resolve each loaded VSA compression gate eagerly, then let the H3 VSA
+        implementation preselect its device-specific kernel route. This keeps
+        both choices static during fullgraph capture and prevents host-side
+        probes or cache mutation in Dynamo.
+
         Dynamo capture traces the eager branch of every fusion guard, so an
         enabled ``FASTVIDEO_MINIMAX_H3_FUSIONS`` set is silently inert inside
         compiled block forwards (H3 compiles per-block by default). Say so
         once instead of leaving the flag looking active.
         """
+        gate_states: list[bool] = []
+        prepared_vsa_impls = 0
+        for block in self.transformer_blocks:
+            attention = block.attn
+            if attention.to_gate_compress is not None:
+                attention._resolve_gate_compress_for_compile()
+                assert attention._gate_compress_active is not None
+                gate_states.append(attention._gate_compress_active)
+            prepare_vsa = getattr(attention.distributed_attention.attn_impl, "prepare_for_regional_compile", None)
+            if callable(prepare_vsa):
+                prepare_vsa(attention.to_q.weight.device)
+                prepared_vsa_impls += 1
+        if gate_states:
+            logger.info(
+                "Resolved MiniMax H3 VSA compression gates before torch.compile: %d active, %d inactive",
+                sum(gate_states),
+                len(gate_states) - sum(gate_states),
+            )
+        if prepared_vsa_impls:
+            logger.info("Prepared %d MiniMax H3 VSA attention implementations for regional torch.compile",
+                        prepared_vsa_impls)
         if self.enabled_fusions:
             logger.warning(
                 "torch.compile is enabled for MiniMax H3, so the requested inference fusions (%s) are "
