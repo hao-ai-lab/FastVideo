@@ -259,14 +259,14 @@ def maybe_load_fsdp_model(
 def _regional_compile_unsupported_reason(init_params: dict[str, Any]) -> str | None:
     """Return why regional fullgraph compile cannot run, or None if it can.
 
-    The VSA backends (Triton block-sparse kernels behind sequence-parallel
-    all-to-alls plus a host-synced metadata guard) are likewise not
-    fullgraph-traceable; a VSA-backed transformer (e.g. the FastH3 student)
-    falls back to eager while compile-safe dense loads still compile.
-
     Dense FA2, FA3, and FA4 inference all route through compile-visible
     custom-op boundaries. FA3's raw autograd.Function carve-out applies only
     to grad-enabled calls, outside this inference-only loader path.
+
+    The legacy VSA backend remains outside the fullgraph support envelope.
+    MiniMax H3's VSA backend has a model-specific ``prepare_for_compile``
+    hook that resolves its loaded compression gates before block capture, so
+    VIDEO_SPARSE_ATTN_H3 is allowed through this policy gate.
     """
     try:
         from fastvideo.attention.layer import _attention_compile_explicitly_disabled
@@ -286,7 +286,10 @@ def _regional_compile_unsupported_reason(init_params: dict[str, Any]) -> str | N
     config = init_params.get("config")
     resolved = getattr(config, "_resolved_attention_backend", None)
     resolved_name = getattr(resolved, "name", "")
-    if resolved_name in ("VIDEO_SPARSE_ATTN", "VIDEO_SPARSE_ATTN_H3"):
+    if resolved_name == "VIDEO_SPARSE_ATTN_H3" and os.environ.get("FASTVIDEO_H3_VSA_PROBE"):
+        return ("FASTVIDEO_H3_VSA_PROBE records tensors and files from the VSA-H3 attention body, which "
+                "regional fullgraph compile cannot capture; this model stays eager")
+    if resolved_name == "VIDEO_SPARSE_ATTN":
         return (f"attention backend resolved to {resolved_name}, whose Triton "
                 "kernels, sequence-parallel collectives, and sync metadata "
                 "guard graph-break (incompatible with fullgraph regional "

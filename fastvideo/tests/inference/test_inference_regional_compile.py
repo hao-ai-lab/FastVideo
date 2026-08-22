@@ -6,9 +6,9 @@ transformer loads (``FastVideoArgs.inference_torch_compile``, env
 ``FASTVIDEO_INFERENCE_TORCH_COMPILE=1``). These tests pin the two pieces that
 must not drift from the #1718 training-port semantics:
 
-- ``_regional_compile_unsupported_reason``: VSA backends (and the attention
-  eager escape hatch) degrade to eager with a reason instead of hard-failing
-  fullgraph capture at the first denoising forward.
+- ``_regional_compile_unsupported_reason``: legacy VSA (and the attention
+  eager escape hatch) degrades to eager, while prepared MiniMax-H3 VSA is
+  admitted to regional fullgraph capture.
 - attention forward dispatch: ordinary instances retain the historical
   compiler-disabled boundary; regional compile opts in only the selected
   model's instances.
@@ -30,6 +30,7 @@ from torch import nn
 
 from fastvideo.attention import layer as attention_layer
 from fastvideo.attention.layer import DistributedAttention
+from fastvideo.models.dits.minimax_h3 import MiniMaxH3Attention, MiniMaxH3Transformer3DModel
 from fastvideo.models.loader import fsdp_load
 from fastvideo.models.loader.fsdp_load import (
     _compile_model_regions,
@@ -43,19 +44,122 @@ def _init_params_for(backend_name: str | None) -> dict:
     return {"config": SimpleNamespace(_resolved_attention_backend=resolved)}
 
 
-@pytest.mark.parametrize("backend_name", ["VIDEO_SPARSE_ATTN", "VIDEO_SPARSE_ATTN_H3"])
-def test_vsa_backends_degrade_to_eager(backend_name, monkeypatch) -> None:
+def test_legacy_vsa_backend_degrades_to_eager(monkeypatch) -> None:
     monkeypatch.delenv("FASTVIDEO_DISABLE_ATTENTION_COMPILE", raising=False)
+    backend_name = "VIDEO_SPARSE_ATTN"
     reason = _regional_compile_unsupported_reason(_init_params_for(backend_name))
     assert reason is not None
     assert backend_name in reason
     assert "eager" in reason
 
 
-@pytest.mark.parametrize("backend_name", [None, "TORCH_SDPA"])
-def test_dense_backends_allow_compile(backend_name, monkeypatch) -> None:
+@pytest.mark.parametrize("backend_name", [None, "TORCH_SDPA", "VIDEO_SPARSE_ATTN_H3"])
+def test_supported_backends_allow_compile(backend_name, monkeypatch) -> None:
     monkeypatch.delenv("FASTVIDEO_DISABLE_ATTENTION_COMPILE", raising=False)
+    monkeypatch.delenv("FASTVIDEO_H3_VSA_PROBE", raising=False)
     assert _regional_compile_unsupported_reason(_init_params_for(backend_name)) is None
+
+
+def test_h3_vsa_probe_degrades_regional_compile_to_eager(monkeypatch) -> None:
+    monkeypatch.delenv("FASTVIDEO_DISABLE_ATTENTION_COMPILE", raising=False)
+    monkeypatch.setenv("FASTVIDEO_H3_VSA_PROBE", "/tmp/h3-vsa-probe")
+
+    reason = _regional_compile_unsupported_reason(_init_params_for("VIDEO_SPARSE_ATTN_H3"))
+
+    assert reason is not None
+    assert "FASTVIDEO_H3_VSA_PROBE" in reason
+    assert "eager" in reason
+
+
+class _RegionalPrepareProbe:
+
+    def __init__(self) -> None:
+        self.devices: list[torch.device] = []
+
+    def prepare_for_regional_compile(self, device: torch.device) -> None:
+        self.devices.append(device)
+
+
+class _GateBlock(nn.Module):
+
+    def __init__(self, gate_weight: float) -> None:
+        super().__init__()
+        attention = MiniMaxH3Attention.__new__(MiniMaxH3Attention)
+        nn.Module.__init__(attention)
+        attention.to_q = nn.Linear(1, 1, bias=False)
+        attention.to_gate_compress = nn.Linear(1, 1, bias=False)
+        with torch.no_grad():
+            attention.to_gate_compress.weight.fill_(gate_weight)
+        attention._gate_compress_active = None
+        attention.distributed_attention = SimpleNamespace(attn_impl=_RegionalPrepareProbe())
+        self.attn = attention
+
+
+class _GateProbe(nn.Module):
+
+    def __init__(self, attention: MiniMaxH3Attention) -> None:
+        super().__init__()
+        self.attention = attention
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.attention._gate_active():
+            return x + 1
+        return x - 1
+
+
+def _gate_model(*weights: float) -> MiniMaxH3Transformer3DModel:
+    model = MiniMaxH3Transformer3DModel.__new__(MiniMaxH3Transformer3DModel)
+    nn.Module.__init__(model)
+    model.transformer_blocks = nn.ModuleList([_GateBlock(weight) for weight in weights])
+    model.enabled_fusions = frozenset()
+    return model
+
+
+def test_minimax_h3_prepare_for_compile_resolves_loaded_vsa_gates() -> None:
+    model = _gate_model(0.0, 2.0)
+
+    model.prepare_for_compile()
+
+    assert [block.attn._gate_compress_active for block in model.transformer_blocks] == [False, True]
+    for block in model.transformer_blocks:
+        impl = block.attn.distributed_attention.attn_impl
+        assert impl.devices == [block.attn.to_q.weight.device]
+
+
+def test_unprepared_vsa_gate_cannot_mutate_cache_during_compile(monkeypatch) -> None:
+    attention = _gate_model(2.0).transformer_blocks[0].attn
+    monkeypatch.setattr(torch.compiler, "is_compiling", lambda: True)
+
+    with torch.no_grad(), pytest.raises(RuntimeError, match="not resolved before torch.compile"):
+        attention._gate_active()
+    assert attention._gate_compress_active is None
+
+
+@pytest.mark.parametrize(("gate_weight", "expected"), [(0.0, -1.0), (2.0, 1.0)])
+def test_prepared_vsa_gate_is_static_under_fullgraph_compile(gate_weight, expected) -> None:
+    model = _gate_model(gate_weight)
+    model.prepare_for_compile()
+    attention = model.transformer_blocks[0].attn
+    resolved = attention._gate_compress_active
+
+    try:
+        compiled = torch.compile(_GateProbe(attention), backend="eager", fullgraph=True)
+        with torch.no_grad():
+            actual = compiled(torch.zeros(1))
+        torch.testing.assert_close(actual, torch.full((1, ), expected))
+        assert attention._gate_compress_active is resolved
+    finally:
+        torch._dynamo.reset()
+
+
+def test_prepared_zero_vsa_gate_still_runs_in_grad_enabled_training() -> None:
+    model = _gate_model(0.0)
+    model.prepare_for_compile()
+    attention = model.transformer_blocks[0].attn
+
+    with torch.enable_grad():
+        assert attention._gate_active() is True
+    assert attention._gate_compress_active is False
 
 
 def test_attention_compile_escape_hatch_degrades_to_eager(monkeypatch) -> None:
