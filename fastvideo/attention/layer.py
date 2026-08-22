@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import os
+from functools import wraps
 
 import torch
 import torch.nn as nn
@@ -20,7 +21,7 @@ def _attention_compile_disabled() -> bool:
 
     Defaults to ``True`` (the historical behavior: attention runs eager via
     ``torch.compiler.disable``). Set ``FASTVIDEO_DISABLE_ATTENTION_COMPILE=0``
-    to let attention be traced/compiled into the surrounding graph.
+    to let attention instances constructed under that environment be traced.
     """
     val = os.environ.get("FASTVIDEO_DISABLE_ATTENTION_COMPILE")
     if val is None:
@@ -28,11 +29,32 @@ def _attention_compile_disabled() -> bool:
     return val.strip().lower() not in ("0", "false", "no", "off", "")
 
 
+def _attention_compile_explicitly_disabled() -> bool:
+    """Whether the environment explicitly requests the eager boundary.
+
+    Regional compile can override the historical default for one loaded
+    transformer, but it must still honor an explicit debugging escape hatch.
+    """
+    return "FASTVIDEO_DISABLE_ATTENTION_COMPILE" in os.environ and _attention_compile_disabled()
+
+
 def _maybe_compiler_disable(fn):
-    """Apply ``torch.compiler.disable`` unless disabled via env var."""
-    if _attention_compile_disabled():
-        return torch.compiler.disable(fn)
-    return fn
+    """Defer the eager/traceable choice to each attention instance.
+
+    A class-definition-time choice makes a process-wide default the only
+    option. The deferred wrapper keeps ordinary instances on the historical
+    eager boundary while allowing the regional loader to opt in only the
+    attention modules owned by the transformer it is compiling.
+    """
+    disabled_fn = torch.compiler.disable(fn)
+
+    @wraps(fn)
+    def _dispatch(self, *args, **kwargs):
+        if self._compile_forward_enabled:
+            return fn(self, *args, **kwargs)
+        return disabled_fn(self, *args, **kwargs)
+
+    return _dispatch
 
 
 class DistributedAttention(nn.Module):
@@ -77,6 +99,13 @@ class DistributedAttention(nn.Module):
         self.num_kv_heads = num_kv_heads
         self.backend = backend_name_to_enum(attn_backend.get_name())
         self.dtype = dtype
+        # Preserve the historical compiler-disabled default. The regional
+        # inference loader may enable this one instance after validating the
+        # transformer's resolved backend; no process-global default changes.
+        self._compile_forward_enabled = not _attention_compile_disabled()
+
+    def _set_compile_forward_enabled(self, enabled: bool) -> None:
+        self._compile_forward_enabled = enabled
 
     @_maybe_compiler_disable
     def forward(
