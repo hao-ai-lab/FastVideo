@@ -785,6 +785,14 @@ class VideoGenerator:
         for _ek, _ev in extra_overrides.items():
             batch.extra[_ek] = _ev
 
+        # External-launcher mode is SPMD: every rank runs the same pipeline
+        # collectives, while only world rank 0 owns user-facing outputs. Keep
+        # non-output ranks in the forward pass but skip their decoded-tensor
+        # host copy and disk write.
+        if not self.executor.is_output_rank:
+            batch.save_video = False
+            batch.return_frames = False
+
         # Run inference
         start_time = time.perf_counter()
 

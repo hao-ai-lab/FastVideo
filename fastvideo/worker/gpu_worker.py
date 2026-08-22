@@ -58,8 +58,11 @@ class Worker:
         # so that each worker uses the correct device
         if self.fastvideo_args.distributed_executor_backend == "mp":
             os.environ["LOCAL_RANK"] = str(self.local_rank)
-        os.environ["RANK"] = str(self.rank)
-        os.environ["WORLD_SIZE"] = str(self.fastvideo_args.num_gpus)
+        if self.fastvideo_args.distributed_executor_backend != "external_launcher":
+            # torchrun/srun already assigned the possibly multi-node global
+            # identity. Keep it intact for the env:// rendezvous.
+            os.environ["RANK"] = str(self.rank)
+            os.environ["WORLD_SIZE"] = str(self.fastvideo_args.num_gpus)
 
         # Platform-agnostic device initialization
         self.device = get_local_torch_device()

@@ -4,6 +4,7 @@ from collections.abc import Callable
 from queue import Queue
 from typing import Any, TypeVar, cast
 
+import fastvideo.envs as envs
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.pipelines import ForwardBatch
 from fastvideo.utils import init_logger
@@ -32,6 +33,10 @@ class Executor(ABC):
 
     @staticmethod
     def get_class(fastvideo_args: FastVideoArgs) -> type["Executor"]:
+        backend = fastvideo_args.distributed_executor_backend
+        if backend == "external_launcher" or (backend == "mp" and envs.FASTVIDEO_EXTERNAL_LAUNCHER):
+            from fastvideo.worker.external_launcher_executor import ExternalLauncherExecutor
+            return cast(type["Executor"], ExternalLauncherExecutor)
         if fastvideo_args.distributed_executor_backend == "mp":
             from fastvideo.worker.multiproc_executor import MultiprocExecutor
             return cast(type["Executor"], MultiprocExecutor)
@@ -40,6 +45,11 @@ class Executor(ABC):
             return cast(type["Executor"], RayDistributedExecutor)
         else:
             raise ValueError(f"Unsupported distributed executor backend: {fastvideo_args.distributed_executor_backend}")
+
+    @property
+    def is_output_rank(self) -> bool:
+        """Whether this process owns user-facing generated outputs."""
+        return True
 
     def execute_forward(
         self,

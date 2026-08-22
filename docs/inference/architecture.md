@@ -337,8 +337,25 @@ Key APIs: `get_tp_rank()`, `get_tp_world_size()`, `get_sp_rank()`,
 `warmup_sequence_parallel_communication()` pre-warms NCCL communicators
 to avoid slow first forward passes.
 
-Usage: `torchrun --nproc-per-node=N -m fastvideo.entrypoints.cli.main
-generate --model-path ... --tp-size N --sp-size M`.
+The default `mp` executor starts all workers locally. For a launcher-owned
+SPMD job (including multi-node inference), select the external-launcher
+executor and make `--num-gpus` equal the launcher's total world size:
+
+```bash
+torchrun --standalone --nproc-per-node=4 \
+  -m fastvideo.entrypoints.cli.main generate \
+  --model-path ... \
+  --num-gpus 4 \
+  --tp-size 1 \
+  --sp-size 4 \
+  --distributed-executor-backend external_launcher
+```
+
+For multiple nodes, use torchrun's `--nnodes`, `--node-rank`,
+`--master-addr`, and `--master-port` arguments. Every rank must issue the
+same generation requests in the same order; world rank 0 saves and returns
+the generated media. `FASTVIDEO_EXTERNAL_LAUNCHER=1` is an equivalent opt-in
+for callers that leave the backend at its default `mp` value.
 
 ### torch.compile Integration
 

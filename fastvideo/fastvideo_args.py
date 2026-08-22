@@ -448,7 +448,7 @@ class FastVideoArgs:
         parser.add_argument(
             "--distributed-executor-backend",
             type=str,
-            choices=["mp"],
+            choices=["mp", "external_launcher"],
             default=FastVideoArgs.distributed_executor_backend,
             help="The distributed executor backend to use",
         )
