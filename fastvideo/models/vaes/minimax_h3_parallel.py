@@ -32,10 +32,13 @@ Caveat — compiled decoders (``enable_torch_compile_vae``): inductor autotunes
 kernel configs per process at first call, so a compiled decoder is only
 deterministic WITHIN a process, not across processes. Chunks decoded on other
 ranks then differ from the serial rank's decode of the same chunk exactly as
-two serial runs in different processes would (measured on GB200 at 124f:
-max 63/255 on <0.5% of pixels, mean ~1e-2/255, first chunk bit-identical).
-With the eager decoder — the pipeline default — parallel output is bitwise
-equal to serial ``decode_to_pixels``.
+two serial runs in different processes would. Direct decoder tensors measured
+on GB200 at 124f had max absolute error 0.00268358 (0.684/255), mean absolute
+error 4.213e-05 (0.0107/255), and 24.59% nonzero values; the first chunk was
+bit-identical. A separate decoded-MP4 comparison reached 63/255 on <0.5% of
+pixels, but that includes lossy MP4 encoding and is not the decoder-tensor
+error envelope. With the eager decoder — the pipeline default — parallel
+output is bitwise equal to serial ``decode_to_pixels``.
 """
 
 from __future__ import annotations
