@@ -65,8 +65,9 @@ DEFAULT_LOGGING_CONFIG = {
 
 @lru_cache
 def _print_info_once(logger: Logger, msg: str) -> None:
-    # Set the stacklevel to 2 to print the original caller's line info
-    logger.info(msg, stacklevel=2)
+    # The process-aware info wrapper owns stacklevel; passing it here would
+    # supply the keyword twice when the wrapper delegates to Logger.log.
+    logger.info(msg)
 
 
 @lru_cache

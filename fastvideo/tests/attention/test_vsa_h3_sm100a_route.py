@@ -8,10 +8,13 @@ logical tile count, and (d) strip that partner before any fallback or returned
 output. Most probes are monkeypatched; the final test is a GB200 route receipt.
 """
 
+import logging
+
 import pytest
 import torch
 
 import fastvideo.attention.backends.video_sparse_attn_h3 as vsa_h3
+import fastvideo.logger as fastvideo_logger
 from fastvideo.attention.backends.video_sparse_attn_h3 import (VSA_SM100A_ENV, MiniMaxH3VSAImpl,
                                                                MiniMaxH3VSAMetadataBuilder, _sm100a_unavailable_reason)
 
@@ -140,6 +143,28 @@ def test_env_on_routes_sm100a_with_index_metadata(routed, monkeypatch):
     assert messages == ["MiniMax-H3 VSA tile-64 forward: using the sm100a CUDA block-sparse kernel"]
     # BHSD kernel result comes back in the backend's BSHD layout
     assert out.shape == (1, n_tiles * 64, _HEADS, _DIM)
+
+
+def test_sm100a_engagement_receipt_logs_once_without_stacklevel_conflict(routed, monkeypatch):
+    fake_sm, fake_triton, run, _ = routed
+    monkeypatch.setenv(VSA_SM100A_ENV, "1")
+    records = []
+
+    def capture_log(level, msg, *args, **kwargs):
+        records.append((level, msg, args, kwargs))
+
+    fastvideo_logger._print_info_once.cache_clear()
+    monkeypatch.setattr(vsa_h3.logger, "log", capture_log)
+    try:
+        run()
+        run()
+    finally:
+        fastvideo_logger._print_info_once.cache_clear()
+
+    assert fake_triton.calls == 0
+    assert len(fake_sm.calls) == 2
+    assert records == [(logging.INFO, "MiniMax-H3 VSA tile-64 forward: using the sm100a CUDA block-sparse kernel", (),
+                        {"stacklevel": 2})]
 
 
 def test_env_on_grad_inputs_fall_back_to_triton(routed, monkeypatch):
