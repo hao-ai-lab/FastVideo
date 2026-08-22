@@ -144,6 +144,7 @@ class MiniMaxH3Attention(nn.Module):
         quant_config: QuantizationConfig | None,
         prefix: str,
         fuse_qknorm_rope: bool = False,
+        fa4_packed_varlen: bool = False,
     ) -> None:
         super().__init__()
         self.num_attention_heads = num_attention_heads
@@ -196,6 +197,7 @@ class MiniMaxH3Attention(nn.Module):
             causal=False,
             supported_attention_backends=supported_attention_backends,
             prefix=prefix,
+            fa4_packed_varlen=fa4_packed_varlen,
         )
         self.to_gate_compress: ReplicatedLinear | None = None
         # None = unchecked; the first forward tests the loaded weight once and
@@ -453,6 +455,7 @@ class MiniMaxH3TransformerBlock(nn.Module):
         fuse_modulate: bool = False,
         fuse_qknorm_rope: bool = False,
         fuse_swiglu: bool = False,
+        fa4_packed_varlen: bool = False,
     ) -> None:
         super().__init__()
         self.norm1 = nn.RMSNorm(hidden_size, eps=norm_eps)
@@ -465,6 +468,7 @@ class MiniMaxH3TransformerBlock(nn.Module):
             quant_config,
             prefix=f"{prefix}.attn",
             fuse_qknorm_rope=fuse_qknorm_rope,
+            fa4_packed_varlen=fa4_packed_varlen,
         )
         self.norm2 = nn.RMSNorm(hidden_size, eps=norm_eps)
         self.ff = MiniMaxH3FeedForward(
@@ -683,6 +687,7 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
                 fuse_modulate="modulate" in self.enabled_fusions,
                 fuse_qknorm_rope="qknorm_rope" in self.enabled_fusions,
                 fuse_swiglu="swiglu" in self.enabled_fusions,
+                fa4_packed_varlen=envs.FASTVIDEO_MINIMAX_H3_FA4_PACKED_VARLEN,
             ) for index in range(arch.num_layers)
         ])
         self.norm_out = MiniMaxH3AdaLayerNormOut(

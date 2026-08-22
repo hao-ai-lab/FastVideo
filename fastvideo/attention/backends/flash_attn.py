@@ -10,6 +10,14 @@ from fastvideo.attention.utils.flash_attn_default import (
     flash_attn_func_compilable,
 )
 
+if fa_version == "4":
+    # The FA4 varlen wrapper is already a compile-safe custom op. Keep the
+    # import conditional so FA2/FA3 environments do not need flash_attn.cute.
+    from fastvideo.attention.utils.flash_attn_cute import (
+        flash_attn_varlen_func as flash_attn_varlen_func_compilable, )
+else:
+    flash_attn_varlen_func_compilable = None
+
 from fastvideo.attention.backends.abstract import (
     AttentionBackend,
     AttentionImpl,
@@ -38,6 +46,21 @@ except ImportError:
     _FA4_FP4_AVAILABLE = False
 
 _FA4_QUANT_OPS: tuple | None = None
+_FA4_PACKED_VARLEN_CONFIG_LOGGED = False
+
+
+def _log_fa4_packed_varlen_config() -> None:
+    """Emit one configuration receipt per worker process.
+
+    This intentionally does not claim that a particular forward used the
+    kernel: masks, gradients, batch size, unequal Q/K lengths, and NVFP4 are
+    runtime guards evaluated later in ``_forward_impl``.
+    """
+    global _FA4_PACKED_VARLEN_CONFIG_LOGGED
+    if not _FA4_PACKED_VARLEN_CONFIG_LOGGED:
+        logger.info("MiniMax-H3 dense attention: FA4 packed-varlen route configured (runtime guards apply)",
+                    local_main_process_only=False)
+        _FA4_PACKED_VARLEN_CONFIG_LOGGED = True
 
 
 def _import_fa4_quant_ops() -> tuple:
@@ -228,6 +251,12 @@ class FlashAttentionImpl(AttentionImpl):
     ) -> None:
         self.causal = causal
         self.softmax_scale = softmax_scale
+        # MiniMax-H3's dense DiT explicitly enables this faster FA4 entry
+        # point. It remains off for every other model and for the H3 text
+        # refiner; grad-enabled calls stay on the established fixed path.
+        self.fa4_packed_varlen = bool(extra_impl_args.get("fa4_packed_varlen", False))
+        if self.fa4_packed_varlen and fa_version == "4":
+            _log_fa4_packed_varlen_config()
         # An explicit ``nvfp4_fa4`` impl arg wins over the process-wide
         # FASTVIDEO_NVFP4_FA4 env opt-in, so precision-sensitive layers (e.g.
         # the FP32-pinned H3 VAE attention) can force-disable FP4 Q/K
@@ -330,6 +359,29 @@ class FlashAttentionImpl(AttentionImpl):
             output = flash_attn_no_pad(qkv, attn_mask_padded, causal=self.causal, dropout_p=0, softmax_scale=None)
         elif self.nvfp4_fa4:
             output = self._forward_nvfp4(query, key, value)
+
+        elif (self.fa4_packed_varlen and fa_version == "4" and not torch.is_grad_enabled() and query.shape[0] == 1
+              and query.shape[1] == key.shape[1] == value.shape[1]):
+            # FA4's packed-varlen entry point is materially faster for H3's
+            # long, single-document self-attention. Flatten only the batch
+            # dimension and describe that one sequence with CUDA int32
+            # cumulative lengths; the existing custom-op wrapper keeps this
+            # route traceable under torch.compile(fullgraph=True).
+            assert flash_attn_varlen_func_compilable is not None
+            sequence_length = query.shape[1]
+            cu_seqlens = torch.arange(2, dtype=torch.int32, device=query.device) * sequence_length
+            output = flash_attn_varlen_func_compilable(
+                query.squeeze(0),
+                key.squeeze(0),
+                value.squeeze(0),
+                cu_seqlens,
+                cu_seqlens,
+                sequence_length,
+                sequence_length,
+                dropout_p=0.0,
+                softmax_scale=self.softmax_scale,
+                causal=self.causal,
+            ).unsqueeze(0)
 
         else:
             # Route through the compilable wrapper so dynamo sees a
