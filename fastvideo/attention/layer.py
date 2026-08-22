@@ -125,8 +125,7 @@ class DistributedAttention(nn.Module):
                 raise ValueError("MiniMax-H3 packed QKV relayout currently requires batch size 1")
             if any(t is not None for t in (replicated_q, replicated_k, replicated_v, freqs_cis)):
                 raise ValueError("MiniMax-H3 packed QKV relayout does not support replicated tokens or deferred RoPE")
-            from fastvideo.attention.minimax_h3_relayout import (merge_heads,
-                                                                 pack_qkv_destination_major)
+            from fastvideo.models.dits.minimax_h3_fusions.relayout import (merge_heads, pack_qkv_destination_major)
 
             rows_local = q.shape[1]
             packed = pack_qkv_destination_major(q[0], k[0], v[0], world_size)

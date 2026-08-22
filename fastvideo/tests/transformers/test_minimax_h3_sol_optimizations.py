@@ -12,7 +12,7 @@ def test_minimax_h3_relayout_is_bit_exact_and_compile_safe() -> None:
         pytest.skip("CUDA is required")
     pytest.importorskip("triton")
 
-    from fastvideo.attention.minimax_h3_relayout import (
+    from fastvideo.models.dits.minimax_h3_fusions.relayout import (
         merge_heads,
         pack_qkv_destination_major,
     )
