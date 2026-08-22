@@ -114,6 +114,28 @@ def all_reduce_fake(tensor: torch.Tensor, group_name: str) -> torch.Tensor:
     return torch.empty_like(tensor)
 
 
+@torch.library.custom_op(
+    "fastvideo::direct_all_to_all_single",
+    mutates_args=(),
+    device_types="cuda",
+)
+def direct_all_to_all_single(tensor: torch.Tensor, group_name: str) -> torch.Tensor:
+    """Issue a synchronous all-to-all without the functional-collective wrapper."""
+    assert group_name in _groups, f"Group {group_name} is not found."
+    group = _groups[group_name]()
+    if group is None:
+        raise ValueError(f"Group {group_name} is destroyed.")
+    output = torch.empty_like(tensor)
+    torch.distributed.all_to_all_single(output, tensor, group=group.device_group)
+    return output
+
+
+@torch.library.register_fake("fastvideo::direct_all_to_all_single")
+def direct_all_to_all_single_fake(tensor: torch.Tensor, group_name: str) -> torch.Tensor:
+    del group_name
+    return torch.empty_like(tensor)
+
+
 class GroupCoordinator:
     """
     PyTorch ProcessGroup wrapper for a group of processes.

@@ -127,6 +127,13 @@ class MiniMaxH3DenoisingStage(PipelineStage):
             row_timestep_plan.append((unique.to(device), inverse.to(device)))
         batch.timesteps = video_timesteps
 
+        if bool(getattr(self.transformer, "adaln_precompute_enabled", False)):
+            if fastvideo_args.use_fsdp_inference:
+                raise RuntimeError(
+                    "MiniMax-H3 trajectory AdaLN precompute replaces projection modules after loading; "
+                    "use replicated inference weights, matching Sol-Engine, rather than FSDP inference.")
+            self.transformer.prepare_adaln_trajectory(row_timestep_plan)
+
         position_ids = layout.position_ids.to(device)
         token_tags = layout.token_tags.to(device)
         video_indices = layout.video_indices.to(device)
@@ -158,6 +165,7 @@ class MiniMaxH3DenoisingStage(PipelineStage):
                 for index, (video_timestep,
                             audio_timestep) in enumerate(zip(video_timesteps, audio_timesteps, strict=True)):
                     unique_timesteps, timestep_indices = row_timestep_plan[index]
+                    self.transformer.set_adaln_step(index)
                     attn_metadata = None
                     if vsa_metadata_builder is not None:
                         # Optional schedule: run the first N steps dense (sparsity 0

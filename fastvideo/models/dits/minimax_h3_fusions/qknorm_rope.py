@@ -121,6 +121,39 @@ def _validate_inputs(
     return batch, seq_len, num_heads, head_dim, rotary_dim
 
 
+if HAVE_TRITON:
+
+    @torch.library.triton_op("fastvideo::minimax_h3_qknorm_rope", mutates_args={})
+    def _qknorm_rope_op(
+        flat_x: torch.Tensor,
+        weight: torch.Tensor,
+        cos: torch.Tensor,
+        sin: torch.Tensor,
+        num_heads: int,
+        seq_len: int,
+        rotary_dim: int,
+        eps: float,
+        block_size: int,
+    ) -> torch.Tensor:
+        flat_out = torch.empty_like(flat_x)
+        torch.library.wrap_triton(_qknorm_partial_rope_kernel)[(flat_x.shape[0], )](
+            flat_out,
+            flat_x,
+            weight,
+            cos,
+            sin,
+            flat_x.shape[1],
+            rotary_dim,
+            rotary_dim // 2,
+            num_heads,
+            seq_len,
+            eps,
+            BLOCK_SIZE=block_size,
+            num_warps=4,
+        )
+        return flat_out
+
+
 def fused_qknorm_rope(
     x: torch.Tensor,
     weight: torch.Tensor,
@@ -151,22 +184,17 @@ def fused_qknorm_rope(
         raise RuntimeError("fused_qknorm_rope is inference-only and does not implement autograd")
 
     flat_x = x.reshape(-1, head_dim).contiguous()
-    flat_out = torch.empty_like(flat_x)
     block_size = 1 << (head_dim - 1).bit_length()
-    _qknorm_partial_rope_kernel[(flat_x.shape[0], )](
-        flat_out,
+    flat_out = _qknorm_rope_op(
         flat_x,
         weight,
         cos,
         sin,
-        head_dim,
-        rotary_dim,
-        rotary_dim // 2,
         num_heads,
         seq_len,
+        rotary_dim,
         eps,
-        BLOCK_SIZE=block_size,
-        num_warps=4,
+        block_size,
     )
     return flat_out.view(batch, seq_len, num_heads, head_dim)
 

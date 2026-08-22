@@ -61,13 +61,13 @@ def _enabled_minimax_h3_fusions(value: str | None = None) -> frozenset[str]:
 
 
 def _can_run_minimax_h3_fusion(tensor: torch.Tensor) -> bool:
-    """Triton kernels are inference-only and stay outside Dynamo capture.
+    """Triton kernels are inference-only and trace through Dynamo capture.
 
     The ``HAVE_TRITON`` check makes the eager fallback exact: on a CUDA build
     whose Triton failed to import, an enabled fusion falls back instead of
     hitting the strict wrappers' hard RuntimeError mid-forward.
     """
-    return (HAVE_TRITON and tensor.is_cuda and not torch.is_grad_enabled() and not torch.compiler.is_compiling())
+    return HAVE_TRITON and tensor.is_cuda and not torch.is_grad_enabled()
 
 
 class MiniMaxH3RotaryPosEmbed(nn.Module):
@@ -144,6 +144,7 @@ class MiniMaxH3Attention(nn.Module):
         quant_config: QuantizationConfig | None,
         prefix: str,
         fuse_qknorm_rope: bool = False,
+        packed_qkv_relayout: bool = False,
     ) -> None:
         super().__init__()
         self.num_attention_heads = num_attention_heads
@@ -196,6 +197,7 @@ class MiniMaxH3Attention(nn.Module):
             causal=False,
             supported_attention_backends=supported_attention_backends,
             prefix=prefix,
+            packed_qkv_relayout=packed_qkv_relayout,
         )
         self.to_gate_compress: ReplicatedLinear | None = None
         # None = unchecked; the first forward tests the loaded weight once and
@@ -397,6 +399,31 @@ class MiniMaxH3AdaLayerNormModulation(nn.Module):
         return temb.view(-1, 6 * self.hidden_size).chunk(6, dim=-1)
 
 
+class _MiniMaxH3StepCursor:
+
+    __slots__ = ("signature", "step")
+
+    def __init__(self, device: torch.device, signature: tuple[tuple[float, ...], ...]) -> None:
+        self.step = torch.zeros((), dtype=torch.long, device=device)
+        self.signature = signature
+
+    def set(self, index: int) -> None:
+        self.step.fill_(index)
+
+
+class _MiniMaxH3PrecomputedModulation(nn.Module):
+
+    def __init__(self, table: torch.Tensor, cursor: _MiniMaxH3StepCursor) -> None:
+        super().__init__()
+        self.register_buffer("table", table, persistent=False)
+        self.cursor = cursor
+
+    def forward(self, temb: torch.Tensor) -> tuple[torch.Tensor, ...]:
+        del temb
+        rows = self.table.index_select(0, self.cursor.step.reshape(1))[0]
+        return rows.chunk(6, dim=-1)
+
+
 class MiniMaxH3AdaLayerNormOut(nn.Module):
     """Final RMSNorm with per-timestep row modulation."""
 
@@ -453,6 +480,7 @@ class MiniMaxH3TransformerBlock(nn.Module):
         fuse_modulate: bool = False,
         fuse_qknorm_rope: bool = False,
         fuse_swiglu: bool = False,
+        packed_qkv_relayout: bool = False,
     ) -> None:
         super().__init__()
         self.norm1 = nn.RMSNorm(hidden_size, eps=norm_eps)
@@ -465,6 +493,7 @@ class MiniMaxH3TransformerBlock(nn.Module):
             quant_config,
             prefix=f"{prefix}.attn",
             fuse_qknorm_rope=fuse_qknorm_rope,
+            packed_qkv_relayout=packed_qkv_relayout,
         )
         self.norm2 = nn.RMSNorm(hidden_size, eps=norm_eps)
         self.ff = MiniMaxH3FeedForward(
@@ -573,11 +602,12 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         super().__init__(config, hf_config)
         arch = config.arch_config
         self.enabled_fusions = _enabled_minimax_h3_fusions()
+        self.adaln_precompute_enabled = envs.FASTVIDEO_MINIMAX_H3_ADALN_PRECOMPUTE
+        self.packed_sp_enabled = envs.FASTVIDEO_MINIMAX_H3_PACKED_SP
         if self.enabled_fusions:
             if HAVE_TRITON:
                 logger.info(
-                    "MiniMax H3 inference fusions enabled: %s (CUDA inference-only; grad-enabled and "
-                    "torch.compile-captured forwards fall back to eager).",
+                    "MiniMax H3 inference fusions enabled: %s (CUDA inference-only; torch.compile capture supported).",
                     ",".join(sorted(self.enabled_fusions)))
             else:
                 logger.warning(
@@ -683,6 +713,7 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
                 fuse_modulate="modulate" in self.enabled_fusions,
                 fuse_qknorm_rope="qknorm_rope" in self.enabled_fusions,
                 fuse_swiglu="swiglu" in self.enabled_fusions,
+                packed_qkv_relayout=self.packed_sp_enabled,
             ) for index in range(arch.num_layers)
         ])
         self.norm_out = MiniMaxH3AdaLayerNormOut(
@@ -709,18 +740,74 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         )
         self.__post_init__()
 
+    @torch.no_grad()
+    def prepare_adaln_trajectory(self, row_timestep_plan: list[tuple[torch.Tensor,
+                                                                    torch.Tensor]]) -> dict[str, float | int]:
+        """Replace full-rank per-block AdaLN projections by exact per-step tables."""
+        signature = tuple(tuple(float(value) for value in timestep.detach().cpu().flatten())
+                          for timestep, _ in row_timestep_plan)
+        cursor = getattr(self, "_h3_adaln_cursor", None)
+        if cursor is not None:
+            if cursor.signature != signature:
+                raise RuntimeError(
+                    "MiniMax-H3 AdaLN weights were replaced by a cached trajectory; reuse this transformer only "
+                    "with the same denoising schedule.")
+            return {"steps": len(row_timestep_plan), "blocks": len(self.transformer_blocks), "installed": 0}
+        if self.adaln_rank is not None:
+            raise RuntimeError("trajectory AdaLN precompute expects the stock full-rank MiniMax-H3 checkpoint")
+        if not row_timestep_plan:
+            raise ValueError("row_timestep_plan must not be empty")
+
+        device = next(self.parameters()).device
+        embeddings = []
+        for timestep, _ in row_timestep_plan:
+            temb = self.time_proj(timestep.to(device))
+            embeddings.append(self.time_embedder(temb.to(self.time_embedder.fc_in.weight.dtype)))
+        max_rows = max(int(timestep.numel()) for timestep, _ in row_timestep_plan) * MINIMAX_H3_MODALITY_NUM
+
+        def padded(rows: torch.Tensor) -> torch.Tensor:
+            if rows.shape[0] == max_rows:
+                return rows
+            return torch.cat((rows, rows.new_zeros(max_rows - rows.shape[0], rows.shape[1])))
+
+        cursor = _MiniMaxH3StepCursor(device, signature)
+        table_bytes = 0
+        freed_bytes = 0
+        for block in self.transformer_blocks:
+            projection = block.adaln_proj
+            table = torch.stack([padded(torch.cat(projection(temb), dim=-1)) for temb in embeddings])
+            table_bytes += table.numel() * table.element_size()
+            freed_bytes += sum(parameter.numel() * parameter.element_size()
+                               for parameter in projection.parameters())
+            block.adaln_proj = _MiniMaxH3PrecomputedModulation(table, cursor)
+        self._h3_adaln_cursor = cursor
+        torch.cuda.empty_cache()
+        stats: dict[str, float | int] = {
+            "steps": len(row_timestep_plan),
+            "blocks": len(self.transformer_blocks),
+            "table_gb": table_bytes / 1024**3,
+            "freed_gb": freed_bytes / 1024**3,
+            "installed": 1,
+        }
+        logger.info(
+            "MiniMax H3 AdaLN trajectory cached: %d blocks x %d steps, table %.2f GB, freed %.2f GB.",
+            stats["blocks"], stats["steps"], stats["table_gb"], stats["freed_gb"])
+        return stats
+
+    def set_adaln_step(self, index: int) -> None:
+        cursor = getattr(self, "_h3_adaln_cursor", None)
+        if cursor is not None:
+            cursor.set(index)
+
     def prepare_for_compile(self) -> None:
         """Pipeline hook, called once right before torch.compile wraps the blocks.
 
-        Dynamo capture traces the eager branch of every fusion guard, so an
-        enabled ``FASTVIDEO_MINIMAX_H3_FUSIONS`` set is silently inert inside
-        compiled block forwards (H3 compiles per-block by default). Say so
-        once instead of leaving the flag looking active.
+        The fusion wrappers use ``torch.library.wrap_triton`` so Dynamo keeps
+        the selected Triton kernels in the compiled per-block graph.
         """
         if self.enabled_fusions:
-            logger.warning(
-                "torch.compile is enabled for MiniMax H3, so the requested inference fusions (%s) are "
-                "inert inside compiled block forwards; the compiled eager path runs instead.",
+            logger.info(
+                "torch.compile is enabled for MiniMax H3; inference fusions remain active in compiled blocks: %s.",
                 ",".join(sorted(self.enabled_fusions)))
 
     def materialize_non_persistent_buffers(
