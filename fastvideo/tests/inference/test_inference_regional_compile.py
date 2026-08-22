@@ -65,18 +65,14 @@ def test_attention_compile_escape_hatch_degrades_to_eager(monkeypatch) -> None:
     assert "FASTVIDEO_DISABLE_ATTENTION_COMPILE" in reason
 
 
-@pytest.mark.parametrize(("fa_version", "allowed"), [("2", True), ("3", False), ("4", True)])
-def test_flash_attention_3_degrades_to_eager(fa_version, allowed, monkeypatch) -> None:
+@pytest.mark.parametrize("fa_version", ["2", "3", "4"])
+def test_dense_flash_attention_inference_allows_compile(fa_version, monkeypatch) -> None:
     monkeypatch.delenv("FASTVIDEO_DISABLE_ATTENTION_COMPILE", raising=False)
     fake_module = ModuleType("fastvideo.attention.utils.flash_attn_default")
     fake_module.fa_version = fa_version
     monkeypatch.setitem(sys.modules, fake_module.__name__, fake_module)
 
-    reason = _regional_compile_unsupported_reason(_init_params_for("FLASH_ATTN"))
-    assert (reason is None) is allowed
-    if not allowed:
-        assert "flash-attn 3" in reason
-        assert "eager" in reason
+    assert _regional_compile_unsupported_reason(_init_params_for("FLASH_ATTN")) is None
 
 
 def test_default_attention_dispatch_stays_compiler_disabled(monkeypatch) -> None:

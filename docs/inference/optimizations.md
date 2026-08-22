@@ -347,8 +347,8 @@ loader wraps each `_compile_conditions` block in
 `options={"emulate_precision_casts": True}` right after the transformer
 loads. The ordinary compile path keeps its historical compiler-disabled
 attention boundary by default; regional compile opts in only the compatible
-attention instances owned by this transformer. VSA, FLASH_ATTN on flash-attn
-3, and the explicit `FASTVIDEO_DISABLE_ATTENTION_COMPILE=1` escape hatch keep
+attention instances owned by this transformer. VSA and the explicit
+`FASTVIDEO_DISABLE_ATTENTION_COMPILE=1` escape hatch keep
 the transformer eager with one warning instead of failing mid-denoise.
 
 ```python

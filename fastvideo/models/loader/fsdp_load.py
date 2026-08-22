@@ -259,16 +259,14 @@ def maybe_load_fsdp_model(
 def _regional_compile_unsupported_reason(init_params: dict[str, Any]) -> str | None:
     """Return why regional fullgraph compile cannot run, or None if it can.
 
-    FA3's grad-enabled attention path deliberately routes to the raw
-    autograd.Function at the cost of a dynamo graph break (see
-    flash_attn_default.py) — under regional ``fullgraph=True`` that break is
-    a hard RuntimeError at the first compiled forward. FA2 and FA4 route
-    through traceable custom ops and are compile-safe.
-
     The VSA backends (Triton block-sparse kernels behind sequence-parallel
     all-to-alls plus a host-synced metadata guard) are likewise not
     fullgraph-traceable; a VSA-backed transformer (e.g. the FastH3 student)
     falls back to eager while compile-safe dense loads still compile.
+
+    Dense FA2, FA3, and FA4 inference all route through compile-visible
+    custom-op boundaries. FA3's raw autograd.Function carve-out applies only
+    to grad-enabled calls, outside this inference-only loader path.
     """
     try:
         from fastvideo.attention.layer import _attention_compile_explicitly_disabled
@@ -293,17 +291,6 @@ def _regional_compile_unsupported_reason(init_params: dict[str, Any]) -> str | N
                 "kernels, sequence-parallel collectives, and sync metadata "
                 "guard graph-break (incompatible with fullgraph regional "
                 "compile); this model stays eager")
-    if resolved is None or resolved_name != "FLASH_ATTN":
-        return None
-    try:
-        from fastvideo.attention.utils.flash_attn_default import fa_version
-    except Exception:  # pragma: no cover - flash-attn stack not importable
-        return None
-    if fa_version == "3":
-        return ("attention backend resolved to FLASH_ATTN with flash-attn 3, "
-                "whose grad-enabled path graph-breaks (incompatible with "
-                "fullgraph regional compile); use FA2, FA4 (FASTVIDEO_FA4=1), "
-                "or TORCH_SDPA for compiled runs; this model stays eager")
     return None
 
 
