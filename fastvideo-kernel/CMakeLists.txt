@@ -115,8 +115,17 @@ list(APPEND TORCH_INCLUDE_DIRS ${TORCH_INCLUDE_PATHS})
 find_package(Torch REQUIRED)
 
 # Include directories
+# NCCL device API headers (2.28+); torch already links libnccl.
+# nvidia.nccl is a namespace package, so find_spec rather than __file__.
+execute_process(COMMAND "${Python_EXECUTABLE}" -c
+    "import importlib.util as u,os;s=u.find_spec('nvidia.nccl');print(os.path.join(list(s.submodule_search_locations)[0],'include') if s else '')"
+    OUTPUT_VARIABLE NCCL_PIP_INCLUDE OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+find_path(NCCL_INCLUDE_DIR nccl_device/coop.h
+    HINTS $ENV{NCCL_HOME}/include ${NCCL_PIP_INCLUDE} REQUIRED)
+
 include_directories(
     ${CMAKE_SOURCE_DIR}/include
+    ${NCCL_INCLUDE_DIR}
     ${CMAKE_SOURCE_DIR}/include/cutlass/include
     ${CMAKE_SOURCE_DIR}/include/tk/include
     ${CMAKE_SOURCE_DIR}/include/tk/prototype
@@ -306,6 +315,7 @@ if(BUILD_CXX_KERNELS)
         csrc/turbodiffusion/norm/rmsnorm.cu
         csrc/turbodiffusion/norm/layernorm.cu
         csrc/turbodiffusion/quant/quant.cu
+        csrc/comm/ulysses_all_to_all.cu
     )
     
     # Conditionally add TK kernels
