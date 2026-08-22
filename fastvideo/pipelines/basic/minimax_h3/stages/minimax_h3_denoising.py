@@ -129,9 +129,8 @@ class MiniMaxH3DenoisingStage(PipelineStage):
 
         if bool(getattr(self.transformer, "adaln_precompute_enabled", False)):
             if fastvideo_args.use_fsdp_inference:
-                raise RuntimeError(
-                    "MiniMax-H3 trajectory AdaLN precompute replaces projection modules after loading; "
-                    "use replicated inference weights, matching Sol-Engine, rather than FSDP inference.")
+                raise RuntimeError("MiniMax-H3 trajectory AdaLN precompute replaces projection modules after loading; "
+                                   "use replicated inference weights, matching Sol-Engine, rather than FSDP inference.")
             self.transformer.prepare_adaln_trajectory(row_timestep_plan)
 
         position_ids = layout.position_ids.to(device)
