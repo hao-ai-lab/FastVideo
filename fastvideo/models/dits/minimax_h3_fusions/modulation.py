@@ -380,6 +380,7 @@ def fused_rmsnorm_modulate(
     device-side bounds check would synchronize); callers are safe by
     construction (``timestep_indices * 3 + token_tags``, SP pads with 0).
     """
+    _require_forward_only(x, weight, scale, shift)
     if torch.compiler.is_compiling():
         return torch.ops.fastvideo._minimax_h3_rmsnorm_modulate(x, weight, scale, shift, index, eps)
     return _fused_rmsnorm_modulate_impl(x, weight, scale, shift, index, eps)
@@ -400,6 +401,7 @@ def fused_residual_gate_rmsnorm_modulate(
     ``index`` values must lie in ``[0, table_rows)``; see
     :func:`fused_rmsnorm_modulate` for why the wrapper does not check them.
     """
+    _require_forward_only(residual, branch, gate, weight, scale, shift)
     if torch.compiler.is_compiling():
         return torch.ops.fastvideo._minimax_h3_residual_gate_rmsnorm_modulate(
             residual,
