@@ -116,6 +116,8 @@ def minimax_h3_swiglu(x: torch.Tensor) -> torch.Tensor:
     This is intentionally a strict kernel wrapper: callers own fallback policy and
     must only invoke it for a supported CUDA inference path.
     """
+    if torch.is_grad_enabled() and x.requires_grad:
+        raise RuntimeError("MiniMax H3 fused SwiGLU is forward-only and does not implement autograd")
     if torch.compiler.is_compiling():
         return torch.ops.fastvideo._minimax_h3_swiglu(x)
     return _minimax_h3_swiglu_impl(x)

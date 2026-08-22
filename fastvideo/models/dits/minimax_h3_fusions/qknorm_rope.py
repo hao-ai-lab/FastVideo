@@ -205,6 +205,9 @@ def fused_qknorm_rope(
     (about 300k tokens per rank at H3's 56 heads x 128 head_dim) address
     correctly.
     """
+    if torch.is_grad_enabled() and any(
+            isinstance(tensor, torch.Tensor) and tensor.requires_grad for tensor in (x, weight, cos, sin)):
+        raise RuntimeError("fused_qknorm_rope is inference-only and does not implement autograd")
     if torch.compiler.is_compiling():
         return torch.ops.fastvideo._minimax_h3_qknorm_rope(x, weight, cos, sin, eps)
     return _fused_qknorm_rope_impl(x, weight, cos, sin, eps)
