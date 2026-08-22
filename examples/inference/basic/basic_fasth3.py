@@ -85,6 +85,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--compile-mode",
                         default=None,
                         help='torch.compile mode, e.g. "reduce-overhead" for CUDA graphs')
+    parser.add_argument("--inference-torch-compile",
+                        action="store_true",
+                        help="regional fullgraph torch.compile of each DiT block after load. NOTE: this "
+                        "script always runs the VSA-H3 backend, which is not fullgraph-traceable — the "
+                        "loader logs one warning and keeps the transformer eager. The flag is exposed "
+                        "here to exercise exactly that guard")
     parser.add_argument("--repeats",
                         type=int,
                         default=1,
@@ -119,6 +125,8 @@ def main() -> None:
     }
     if args.vsa_sparsity > 0.0:
         experimental["VSA_sparsity"] = args.vsa_sparsity
+    if args.inference_torch_compile:
+        experimental["inference_torch_compile"] = True
 
     generator = VideoGenerator.from_config(
         GeneratorConfig(

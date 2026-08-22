@@ -136,6 +136,7 @@ def maybe_load_fsdp_model(
     pin_cpu_memory: bool = True,
     enable_torch_compile: bool = False,
     torch_compile_kwargs: dict[str, Any] | None = None,
+    inference_regional_compile: bool = False,
 ) -> torch.nn.Module:
     """
     Load the model with FSDP if is training, else load the model without FSDP.
@@ -235,7 +236,124 @@ def maybe_load_fsdp_model(
         logger.info("Enabling torch.compile for FSDP training module with kwargs=%s", compile_kwargs)
         model = torch.compile(model, **compile_kwargs)
         logger.info("torch.compile enabled for %s", type(model).__name__)
+    elif inference_regional_compile and not training_mode:
+        # Inference-side counterpart of the #1718 training regional compile:
+        # per-block fullgraph compile right after the transformer loads, no
+        # user kwargs needed (fullgraph + emulate_precision_casts injected).
+        unsupported = _regional_compile_unsupported_reason(init_params)
+        if unsupported is not None:
+            logger.warning(
+                "inference_torch_compile requested but disabled: %s. "
+                "Inference continues in eager mode.", unsupported)
+        else:
+            prepare_for_compile = getattr(model, "prepare_for_compile", None)
+            if callable(prepare_for_compile):
+                logger.info("Running prepare_for_compile for %s", type(model).__name__)
+                prepare_for_compile()
+            attention_count = _enable_regional_attention_compile(model)
+            logger.info("Enabled attention tracing for %d modules in %s", attention_count, type(model).__name__)
+            _compile_model_regions(model, torch_compile_kwargs or {})
     return model
+
+
+def _regional_compile_unsupported_reason(init_params: dict[str, Any]) -> str | None:
+    """Return why regional fullgraph compile cannot run, or None if it can.
+
+    The VSA backends (Triton block-sparse kernels behind sequence-parallel
+    all-to-alls plus a host-synced metadata guard) are likewise not
+    fullgraph-traceable; a VSA-backed transformer (e.g. the FastH3 student)
+    falls back to eager while compile-safe dense loads still compile.
+
+    Dense FA2, FA3, and FA4 inference all route through compile-visible
+    custom-op boundaries. FA3's raw autograd.Function carve-out applies only
+    to grad-enabled calls, outside this inference-only loader path.
+    """
+    try:
+        from fastvideo.attention.layer import _attention_compile_explicitly_disabled
+    except Exception:  # pragma: no cover - attention stack not importable
+        pass
+    else:
+        if _attention_compile_explicitly_disabled():
+            # The escape hatch wraps attention forwards in
+            # torch.compiler.disable, which is a hard dynamo error inside a
+            # fullgraph region ("Skip inlining `torch.compiler.disable()`d
+            # function"). Degrade to eager instead, matching the hatch's
+            # debugging intent.
+            return ("FASTVIDEO_DISABLE_ATTENTION_COMPILE=1 keeps attention "
+                    "forwards out of compiled graphs via torch.compiler."
+                    "disable, which fullgraph regional compile cannot trace; "
+                    "this model stays eager")
+    config = init_params.get("config")
+    resolved = getattr(config, "_resolved_attention_backend", None)
+    resolved_name = getattr(resolved, "name", "")
+    if resolved_name in ("VIDEO_SPARSE_ATTN", "VIDEO_SPARSE_ATTN_H3"):
+        return (f"attention backend resolved to {resolved_name}, whose Triton "
+                "kernels, sequence-parallel collectives, and sync metadata "
+                "guard graph-break (incompatible with fullgraph regional "
+                "compile); this model stays eager")
+    return None
+
+
+def _enable_regional_attention_compile(model: nn.Module) -> int:
+    """Opt in distributed-attention instances owned by ``model`` only."""
+    from fastvideo.attention.layer import DistributedAttention
+
+    enabled_count = 0
+    for submodule in model.modules():
+        if isinstance(submodule, DistributedAttention):
+            submodule._set_compile_forward_enabled(True)
+            enabled_count += 1
+    return enabled_count
+
+
+def _compile_model_regions(model: nn.Module, compile_kwargs: dict[str, Any]) -> int:
+    """Compile repeated mathematical regions of a loaded model.
+
+    Only the selected module ``forward`` is replaced. This keeps activation
+    checkpoint wrappers structurally transparent while any module-level hooks
+    (FSDP pre/post, layerwise offload) execute outside the compiled region.
+    """
+    compile_conditions = getattr(model, "_compile_conditions", None)
+    if not compile_conditions:
+        raise ValueError(f"{type(model).__name__} does not declare _compile_conditions")
+
+    if compile_kwargs.get("fullgraph", True) is not True:
+        raise ValueError("Regional compile requires fullgraph=True")
+    if "mode" in compile_kwargs:
+        # torch.compile forbids passing both `mode` and `options`, and
+        # regional compile always injects options (emulate_precision_casts)
+        # to match the training-side regional-compile configuration. Fail here
+        # with an actionable message instead of letting torch raise a
+        # mode/options conflict about an `options` key the user never wrote.
+        raise ValueError("Regional compile sets inductor options "
+                         "(emulate_precision_casts) and cannot be combined "
+                         "with torch_compile_kwargs['mode']. Remove 'mode' or "
+                         "express its effect via torch_compile_kwargs['options'].")
+    kwargs = {**compile_kwargs, "fullgraph": True}
+    options = {"emulate_precision_casts": True}
+    options.update(kwargs.get("options") or {})
+    kwargs["options"] = options
+    compiled_count = 0
+    for name, submodule in list(model.named_modules()):
+        if not name:
+            continue
+        if any(condition(name, submodule) for condition in compile_conditions):
+            # Activation checkpoint wrappers are control-flow boundaries, not
+            # mathematical regions. Keep their saved-tensor/recompute logic
+            # eager and compile only the repeated block they own.
+            compile_target = getattr(submodule, "_checkpoint_wrapped_module", submodule)
+            compile_target.forward = torch.compile(compile_target.forward, **kwargs)
+            compiled_count += 1
+
+    if compiled_count == 0:
+        raise ValueError(f"No submodules in {type(model).__name__} matched _compile_conditions")
+    logger.info(
+        "Enabled regional torch.compile for %d submodules in %s with kwargs=%s",
+        compiled_count,
+        type(model).__name__,
+        kwargs,
+    )
+    return compiled_count
 
 
 def shard_model(

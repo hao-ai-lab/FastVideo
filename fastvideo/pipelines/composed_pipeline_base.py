@@ -203,6 +203,14 @@ class ComposedPipelineBase(ABC):
                 vae_compile_kwargs = (self.fastvideo_args.torch_compile_kwargs_vae or global_compile_kwargs)
                 audio_vae_compile_kwargs = (self.fastvideo_args.torch_compile_kwargs_audio_vae or global_compile_kwargs)
 
+                if compile_transformer and self.fastvideo_args.inference_torch_compile:
+                    # The loader already applied the regional fullgraph
+                    # compile to the DiT blocks (inference_torch_compile);
+                    # wrapping the same forwards again here would stack
+                    # compiled callables.
+                    logger.info("inference_torch_compile already compiled the DiT regions in the "
+                                "loader; skipping the pipeline-level DiT compile")
+                    compile_transformer = False
                 if compile_transformer:
                     self._maybe_compile_pipeline_module(
                         module_name="transformer",

@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     FASTVIDEO_ATTENTION_BACKEND: str | None = None
     FASTVIDEO_FA4: bool = False
     FASTVIDEO_MINIMAX_H3_FA4_PACKED_VARLEN: bool = False
+    FASTVIDEO_INFERENCE_TORCH_COMPILE: bool = False
     FASTVIDEO_MINIMAX_H3_FUSIONS: str = ""
     FASTVIDEO_WORKER_MULTIPROC_METHOD: str = "spawn"
     FASTVIDEO_TARGET_DEVICE: str = "cuda"
@@ -226,6 +227,17 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # an explicit inference-only speed/quality opt-in.
     "FASTVIDEO_MINIMAX_H3_FA4_PACKED_VARLEN":
     lambda: os.getenv("FASTVIDEO_MINIMAX_H3_FA4_PACKED_VARLEN", "0") != "0",
+
+    # If set (=1), enable regional (per-transformer-block) fullgraph
+    # torch.compile for the DiT at inference — the inference-side counterpart
+    # of the training regional-compile port of hao-ai-lab/FastVideo#1718.
+    # Equivalent to FastVideoArgs.inference_torch_compile=True (e.g. via
+    # PipelineSelection.experimental={"inference_torch_compile": True}). VSA
+    # and other non-fullgraph-traceable attention backends degrade to eager
+    # with one warning; see _regional_compile_unsupported_reason in
+    # fastvideo/models/loader/fsdp_load.py.
+    "FASTVIDEO_INFERENCE_TORCH_COMPILE":
+    lambda: os.getenv("FASTVIDEO_INFERENCE_TORCH_COMPILE", "0") != "0",
 
     # Opt-in MiniMax-H3 inference-only Triton fusions adapted from the
     # NVlabs/Sana Sol-Engine implementation. Accepts `all`, `1`, or a

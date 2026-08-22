@@ -15,6 +15,7 @@ from fastvideo.api import (
     OffloadConfig,
     OutputConfig,
     ParallelismConfig,
+    PipelineSelection,
     SamplingConfig,
 )
 
@@ -41,6 +42,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--compile-mode",
                         default=None,
                         help='torch.compile mode, e.g. "reduce-overhead" for CUDA graphs')
+    parser.add_argument("--inference-torch-compile",
+                        action="store_true",
+                        help="regional fullgraph torch.compile of each DiT block after load (the #1718 "
+                        "training-port semantics: no kwargs; fullgraph + emulate_precision_casts injected). "
+                        "First generation pays the inductor JIT (~1-2 min); use --repeats >= 2 and time "
+                        "the last repeat. FASTVIDEO_INFERENCE_TORCH_COMPILE=1 is equivalent")
     parser.add_argument("--repeats",
                         type=int,
                         default=1,
@@ -54,9 +61,16 @@ def main() -> None:
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Boot-time run configuration folded into FastVideoArgs (the same
+    # experimental-dict route basic_fasth3.py uses for the VSA knobs).
+    experimental: dict[str, object] = {}
+    if args.inference_torch_compile:
+        experimental["inference_torch_compile"] = True
+
     generator = VideoGenerator.from_config(
         GeneratorConfig(
             model_path=args.model_path,
+            pipeline=PipelineSelection(experimental=experimental),
             engine=EngineConfig(
                 num_gpus=args.num_gpus,
                 use_fsdp_inference=args.num_gpus > 1,
