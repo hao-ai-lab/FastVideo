@@ -1,18 +1,26 @@
-import subprocess
-import sys
+from unittest.mock import patch, MagicMock
+from fastvideo.training.runner import main
+import argparse
 
-def test_runner_help():
-    # Run the runner with --help to ensure it parses arguments correctly
-    # and doesn't have any syntax errors or missing imports.
-    result = subprocess.run(
-        [sys.executable, "-m", "fastvideo.training.runner", "--help"],
-        capture_output=True,
-        text=True
-    )
-    
-    # Check if the process completed successfully
-    assert result.returncode == 0, f"Runner failed with exit code {result.returncode}.\nStderr: {result.stderr}"
-    
-    # Check if help output is printed
-    assert "--pipeline_class" in result.stdout
-    assert "--pipeline_module" in result.stdout
+def test_runner_invokes_correct_class():
+    with patch('fastvideo.training.runner.importlib.import_module') as mock_import_module:
+        mock_module = MagicMock()
+        mock_import_module.return_value = mock_module
+        
+        mock_pipeline_class = MagicMock()
+        setattr(mock_module, "WanTrainingPipeline", mock_pipeline_class)
+        
+        mock_pipeline_instance = MagicMock()
+        mock_pipeline_class.from_pretrained.return_value = mock_pipeline_instance
+        
+        args = argparse.Namespace(
+            pipeline_module="fastvideo.training.wan_training_pipeline",
+            pipeline_class="WanTrainingPipeline",
+            pretrained_model_name_or_path="test_model"
+        )
+        
+        main(args)
+        
+        mock_import_module.assert_called_once_with("fastvideo.training.wan_training_pipeline")
+        mock_pipeline_class.from_pretrained.assert_called_once_with("test_model", args=args)
+        mock_pipeline_instance.train.assert_called_once()
