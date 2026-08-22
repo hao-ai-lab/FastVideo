@@ -11,9 +11,10 @@ from huggingface_hub import snapshot_download
 from fastvideo.utils import logger
 # Import the training pipeline
 sys.path.append(str(Path(__file__).parent.parent.parent.parent.parent))
-from fastvideo.training.wan_self_forcing_distillation_pipeline import WanSelfForcingDistillationPipeline
+
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.utils import FlexibleArgumentParser
+from fastvideo.training.runner import main
 
 wandb_name = "test_self_forcing_distill"
 
@@ -148,10 +149,11 @@ def run_worker():
     ])
 
     # Call the main training function
-    pipeline = WanSelfForcingDistillationPipeline.from_pretrained(args.pretrained_model_name_or_path, args=args)
-    args = pipeline.training_args
-    pipeline.train()
-    logger.info("Self-forcing distillation training pipeline done")
+    args.pipeline_class = "WanSelfForcingDistillationPipeline"
+    args.pipeline_module = "fastvideo.training.wan_self_forcing_distillation_pipeline"
+    
+    # Call the main training function
+    main(args)
 
 
 def test_distributed_training():

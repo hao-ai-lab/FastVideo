@@ -14,7 +14,7 @@ sys.path.append(str(Path(__file__).parent.parent.parent.parent.parent))
 
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.utils import FlexibleArgumentParser
-from fastvideo.training.wan_training_pipeline import WanTrainingPipeline
+from fastvideo.training.runner import main
 
 wandb_name = "test_training_loss"
 a40_reference_wandb_summary_file = "fastvideo/tests/training/Vanilla/a40_reference_wandb_summary.json"
@@ -50,10 +50,11 @@ def run_worker():
         "--not_apply_cfg_solver", "--dit_precision", "fp32", "--max_grad_norm", "1.0"
     ])
     # Call the main training function
-    pipeline = WanTrainingPipeline.from_pretrained(args.pretrained_model_name_or_path, args=args)
-    args = pipeline.training_args
-    pipeline.train()
-    logger.info("Training pipeline done")
+    args.pipeline_class = "WanTrainingPipeline"
+    args.pipeline_module = "fastvideo.training.wan_training_pipeline"
+    
+    # Call the main training function
+    main(args)
 
 
 def test_distributed_training():
