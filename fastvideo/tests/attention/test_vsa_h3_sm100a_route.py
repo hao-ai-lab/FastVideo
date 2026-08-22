@@ -231,7 +231,7 @@ def test_prepared_route_reuses_graph_across_layer_indices_and_preserves_dense_ov
     monkeypatch.setattr(vsa_h3, "_sm100a", fake_sm)
     monkeypatch.setenv(VSA_SM100A_ENV, "1")
     monkeypatch.setattr(vsa_h3, "probe_enabled", lambda: None)
-    meta = _build_meta(sparsity=0.5, dense_layers=(0, 17))
+    meta = _build_meta(sparsity=0.5, dense_layers=(0, 17), prefix_segments=(64, 64))
     assert meta.dense_layers_tensor.tolist() == [0, 17]
     q, k, v = _tiled_qkv(meta)
 
