@@ -49,6 +49,15 @@ def make_case(block, num_blocks=8, topk=4, heads=4, batch=1, ragged=False, seed=
     return q, k, v, idx, num, vbs
 
 
+def make_block_map(idx, num, batch, heads, num_blocks):
+    """Expand the test's compact rows to the bool map H3 produces."""
+    block_map = torch.zeros((batch, heads, num_blocks, num_blocks), dtype=torch.bool, device=idx.device)
+    rows = block_map.view(-1, num_blocks)
+    for row in range(rows.shape[0]):
+        rows[row, idx[row, :int(num[row])].long()] = True
+    return block_map
+
+
 def reference(q, k, v, idx, num, vbs, block):
     """Dense attention restricted to the selected blocks, with padded keys masked."""
     if not vsa.BHSD:
@@ -121,6 +130,66 @@ def test_lse_is_not_vacuous(block):
     _, got_lse = vsa.block_sparse_attn_sm100a(q, k, v, idx, num, vbs)
     _, ref_lse = reference(q, k, v, idx, num, vbs, block)
     assert (got_lse.float() - (ref_lse + 1.0)).abs().max().item() > 0.5
+
+
+@pytest.mark.parametrize("block", BLOCK_SIZES)
+def test_inference_no_lse_matches_eager_under_fullgraph_compile(block):
+    """The production no-LSE route is one opaque, fake-backed graph node."""
+    q, k, v, idx, num, vbs = make_case(block, ragged=True)
+
+    def inference_path(q, k, v, idx, num, vbs):
+        out, lse = vsa.block_sparse_attn_sm100a(q, k, v, idx, num, vbs, need_lse=False)
+        assert lse is None
+        return out
+
+    with torch.inference_mode():
+        expected = inference_path(q, k, v, idx, num, vbs)
+        compiled = torch.compile(inference_path, backend="eager", fullgraph=True)
+        actual = compiled(q, k, v, idx, num, vbs)
+    torch.testing.assert_close(actual, expected, atol=0, rtol=0)
+
+
+@pytest.mark.parametrize("block", BLOCK_SIZES)
+def test_inference_custom_op_fake_matches_real(block):
+    """Pin the custom op schema and fake output metadata used by Dynamo."""
+    q, k, v, idx, num, vbs = make_case(block, ragged=True)
+    torch.library.opcheck(
+        torch.ops.fastvideo_kernel.block_sparse_attn_sm100a_inference.default,
+        (q, k, v, idx, num, vbs),
+        test_utils=("test_schema", "test_faketensor", "test_aot_dispatch_dynamic"),
+    )
+
+
+@pytest.mark.parametrize("block", BLOCK_SIZES)
+def test_mask_inference_matches_index_route_under_fullgraph_compile(block):
+    """H3's bool mask compaction and sm_100a launch stay in one opaque op."""
+    batch, heads, num_blocks = 1, 4, 8
+    q, k, v, idx, num, vbs = make_case(block, batch=batch, heads=heads, num_blocks=num_blocks, ragged=True)
+    block_map = make_block_map(idx, num, batch, heads, num_blocks)
+
+    def inference_path(q, k, v, block_map, vbs):
+        out, lse = vsa.block_sparse_attn_sm100a_from_mask(q, k, v, block_map, vbs)
+        assert lse is None
+        return out
+
+    with torch.inference_mode():
+        expected, _ = vsa.block_sparse_attn_sm100a(q, k, v, idx, num, vbs, need_lse=False)
+        compiled = torch.compile(inference_path, backend="eager", fullgraph=True)
+        actual = compiled(q, k, v, block_map, vbs)
+    torch.testing.assert_close(actual, expected, atol=0, rtol=0)
+
+
+@pytest.mark.parametrize("block", BLOCK_SIZES)
+def test_mask_inference_custom_op_fake_matches_real(block):
+    """Pin schema/fake metadata for H3's mask-taking opaque boundary."""
+    batch, heads, num_blocks = 1, 4, 8
+    q, k, v, idx, num, vbs = make_case(block, batch=batch, heads=heads, num_blocks=num_blocks, ragged=True)
+    block_map = make_block_map(idx, num, batch, heads, num_blocks)
+    torch.library.opcheck(
+        torch.ops.fastvideo_kernel.block_sparse_attn_sm100a_from_mask_inference.default,
+        (q, k, v, block_map, vbs),
+        test_utils=("test_schema", "test_faketensor", "test_aot_dispatch_dynamic"),
+    )
 
 
 def test_unsupported_is_rejected():

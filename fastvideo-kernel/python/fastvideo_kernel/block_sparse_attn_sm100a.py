@@ -84,6 +84,107 @@ def is_supported(q: torch.Tensor, variable_block_sizes: torch.Tensor) -> bool:
     return True
 
 
+@torch.library.custom_op(
+    "fastvideo_kernel::block_sparse_attn_sm100a_inference",
+    mutates_args=(),
+    device_types="cuda",
+)
+def _block_sparse_attn_sm100a_inference(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    q2k_idx: torch.Tensor,
+    q2k_num: torch.Tensor,
+    variable_block_sizes: torch.Tensor,
+) -> torch.Tensor:
+    """Opaque no-LSE launch used by the inference-only sm_100a route.
+
+    The extension is exposed as a raw pybind function rather than a dispatcher
+    op. Calling it directly makes Dynamo descend through a Python/C++ boundary
+    that has no fake implementation, so ``torch.compile(fullgraph=True)``
+    cannot capture a sparse H3 block. Keep that boundary inside this custom op;
+    its inputs have already been normalized by the public wrapper below.
+    """
+    fwd = _FWD_BY_BLOCK[_block_size(q, variable_block_sizes)]
+    sm_scale = 1.0 / (q.shape[-1]**0.5)
+    res = fwd(q, k, v, None, q2k_idx, q2k_num, variable_block_sizes, sm_scale, False)
+    return res[0]
+
+
+@torch.library.register_fake("fastvideo_kernel::block_sparse_attn_sm100a_inference")
+def _block_sparse_attn_sm100a_inference_fake(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    q2k_idx: torch.Tensor,
+    q2k_num: torch.Tensor,
+    variable_block_sizes: torch.Tensor,
+) -> torch.Tensor:
+    # The C++ binding allocates its output with torch::empty_like(q).
+    return torch.empty_like(q)
+
+
+@torch.library.custom_op(
+    "fastvideo_kernel::block_sparse_attn_sm100a_from_mask_inference",
+    mutates_args=(),
+    device_types="cuda",
+)
+def _block_sparse_attn_sm100a_from_mask_inference(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    block_map: torch.Tensor,
+    variable_block_sizes: torch.Tensor,
+) -> torch.Tensor:
+    """Opaque mask compaction plus no-LSE sm_100a launch for inference.
+
+    H3 naturally produces a bool block map. Its Triton ``map_to_index`` call
+    must live behind the same opaque boundary as the raw pybind launch;
+    otherwise Dynamo sees that kernel before reaching the index-native custom
+    op and full-graph capture still fails.
+    """
+    from fastvideo_kernel.triton_kernels.index import map_to_index
+
+    q2k_idx, q2k_num = map_to_index(block_map)
+    return _block_sparse_attn_sm100a_inference(
+        q,
+        k,
+        v,
+        q2k_idx.to(torch.int32).contiguous(),
+        q2k_num.to(torch.int32).contiguous(),
+        variable_block_sizes,
+    )
+
+
+@torch.library.register_fake("fastvideo_kernel::block_sparse_attn_sm100a_from_mask_inference")
+def _block_sparse_attn_sm100a_from_mask_inference_fake(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    block_map: torch.Tensor,
+    variable_block_sizes: torch.Tensor,
+) -> torch.Tensor:
+    return torch.empty_like(q)
+
+
+def block_sparse_attn_sm100a_from_mask(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    block_map: torch.Tensor,
+    variable_block_sizes: torch.Tensor,
+) -> Tuple[torch.Tensor, None]:
+    """Inference forward from a bool block map, with compaction kept opaque."""
+    out = _block_sparse_attn_sm100a_from_mask_inference(
+        q.contiguous(),
+        k.contiguous(),
+        v.contiguous(),
+        block_map.to(torch.bool).contiguous(),
+        variable_block_sizes.to(torch.int32).contiguous(),
+    )
+    return out, None
+
+
 def block_sparse_attn_sm100a(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -92,13 +193,24 @@ def block_sparse_attn_sm100a(
     q2k_num: torch.Tensor,
     variable_block_sizes: torch.Tensor,
     need_lse: bool = True,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor | None]:
     """Forward pass. Returns ``(out, lse)``; ``out`` has q's layout."""
-    fwd = _FWD_BY_BLOCK[_block_size(q, variable_block_sizes)]
+    q = q.contiguous()
+    k = k.contiguous()
+    v = v.contiguous()
     idx = q2k_idx.to(torch.int32).contiguous()
     num = q2k_num.to(torch.int32).contiguous()
     vbs = variable_block_sizes.to(torch.int32).contiguous()
+
+    if not need_lse:
+        # This is the production inference path. The custom op keeps the raw
+        # pybind launch opaque to Dynamo while its fake kernel carries output
+        # metadata through full-graph capture.
+        return _block_sparse_attn_sm100a_inference(q, k, v, idx, num, vbs), None
+
+    # Preserve the established LSE-producing path for correctness tests and
+    # any future forward/backward pairing; only inference needs the opaque op.
+    fwd = _FWD_BY_BLOCK[_block_size(q, vbs)]
     sm_scale = 1.0 / (q.shape[-1]**0.5)
-    res = fwd(q.contiguous(), k.contiguous(), v.contiguous(), None,
-              idx, num, vbs, sm_scale, need_lse)
-    return (res[0], res[1]) if need_lse else (res[0], None)
+    res = fwd(q, k, v, None, idx, num, vbs, sm_scale, True)
+    return res[0], res[1]
