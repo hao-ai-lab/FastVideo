@@ -576,8 +576,8 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         if self.enabled_fusions:
             if HAVE_TRITON:
                 logger.info(
-                    "MiniMax H3 inference fusions enabled: %s (CUDA inference-only; grad-enabled and "
-                    "torch.compile-captured forwards fall back to eager).",
+                    "MiniMax H3 inference fusions enabled: %s (CUDA inference-only; grad-enabled forwards "
+                    "fall back to eager; torch.compile captures opaque custom-op boundaries).",
                     ",".join(sorted(self.enabled_fusions)))
             else:
                 logger.warning(
