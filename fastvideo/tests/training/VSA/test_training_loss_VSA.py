@@ -13,9 +13,10 @@ os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN"
 
 # Import the training pipeline
 sys.path.append(str(Path(__file__).parent.parent.parent.parent.parent))
-from fastvideo.training.wan_training_pipeline import main
+
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.utils import FlexibleArgumentParser
+from fastvideo.training.runner import main
 
 wandb_name = "test_training_loss_VSA"
 reference_wandb_summary_file = "fastvideo/tests/training/VSA/h100_reference_wandb_summary_VSA.json"
@@ -50,6 +51,9 @@ def run_worker():
         "1", "--VSA_sparsity", "0.9"
     ])
 
+    args.pipeline_class = "WanTrainingPipeline"
+    args.pipeline_module = "fastvideo.training.wan_training_pipeline"
+    
     # Call the main training function
     main(args)
 
