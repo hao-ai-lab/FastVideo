@@ -32,6 +32,14 @@ def sequence_model_parallel_all_to_all_4D(input_: torch.Tensor,
     return get_sp_group().all_to_all_4D(input_, scatter_dim, gather_dim)
 
 
+def sequence_model_parallel_direct_all_to_all(input_: torch.Tensor) -> torch.Tensor:
+    """Synchronous equal-split all-to-all used by the packed H3 inference path."""
+    group = get_sp_group()
+    if group.world_size == 1:
+        return input_
+    return torch.ops.fastvideo.direct_all_to_all_single(input_, group.unique_name)
+
+
 def sequence_model_parallel_all_gather(input_: torch.Tensor, dim: int = -1) -> torch.Tensor:
     """All-gather the input tensor across model parallel group."""
     return get_sp_group().all_gather(input_, dim)

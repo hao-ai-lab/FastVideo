@@ -65,6 +65,28 @@ def _num_warps(block_size: int) -> int:
     return 4
 
 
+if HAVE_TRITON:
+
+    @torch.library.triton_op("fastvideo::minimax_h3_swiglu", mutates_args={})
+    def _minimax_h3_swiglu_op(
+        flat: torch.Tensor,
+        ffn_dim: int,
+        block_size: int,
+        num_warps: int,
+    ) -> torch.Tensor:
+        out = torch.empty((flat.shape[0], ffn_dim), dtype=flat.dtype, device=flat.device)
+        torch.library.wrap_triton(_minimax_h3_swiglu_kernel)[(flat.shape[0], )](
+            out,
+            flat,
+            ffn_dim,
+            flat.stride(0),
+            out.stride(0),
+            BLOCK_SIZE=block_size,
+            num_warps=num_warps,
+        )
+        return out
+
+
 def minimax_h3_swiglu(x: torch.Tensor) -> torch.Tensor:
     """Run the forward-only Triton fusion over an H3 ``(..., 2 * ffn_dim)`` input.
 
@@ -87,16 +109,12 @@ def minimax_h3_swiglu(x: torch.Tensor) -> torch.Tensor:
     if flat.shape[0] == 0:
         return torch.empty(output_shape, dtype=x.dtype, device=x.device)
 
-    out = torch.empty((flat.shape[0], ffn_dim), dtype=x.dtype, device=x.device)
     block_size = triton.next_power_of_2(ffn_dim)
-    _minimax_h3_swiglu_kernel[(flat.shape[0],)](
-        out,
+    out = _minimax_h3_swiglu_op(
         flat,
         ffn_dim,
-        flat.stride(0),
-        out.stride(0),
-        BLOCK_SIZE=block_size,
-        num_warps=_num_warps(block_size),
+        block_size,
+        _num_warps(block_size),
     )
     return out.view(output_shape)
 

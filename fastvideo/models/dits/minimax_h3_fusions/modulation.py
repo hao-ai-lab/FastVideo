@@ -202,6 +202,76 @@ def _row_addressable(table: torch.Tensor) -> torch.Tensor:
     return table if table.stride(-1) == 1 else table.contiguous()
 
 
+if triton is not None:
+
+    @torch.library.triton_op("fastvideo::minimax_h3_rmsnorm_modulate", mutates_args={})
+    def _rmsnorm_modulate_op(
+        flat_x: torch.Tensor,
+        weight: torch.Tensor,
+        scale: torch.Tensor,
+        shift: torch.Tensor,
+        index: torch.Tensor,
+        eps: float,
+        block_size: int,
+        num_warps: int,
+    ) -> torch.Tensor:
+        output = torch.empty_like(flat_x)
+        torch.library.wrap_triton(_rmsnorm_modulate_kernel)[(flat_x.shape[0], )](
+            output,
+            flat_x,
+            weight,
+            scale,
+            shift,
+            index,
+            flat_x.shape[1],
+            index.numel(),
+            eps,
+            flat_x.stride(0),
+            scale.stride(0),
+            shift.stride(0),
+            BLOCK=block_size,
+            num_warps=num_warps,
+        )
+        return output
+
+    @torch.library.triton_op("fastvideo::minimax_h3_residual_gate_rmsnorm_modulate", mutates_args={})
+    def _residual_gate_rmsnorm_modulate_op(
+        flat_residual: torch.Tensor,
+        flat_branch: torch.Tensor,
+        gate: torch.Tensor,
+        weight: torch.Tensor,
+        scale: torch.Tensor,
+        shift: torch.Tensor,
+        index: torch.Tensor,
+        eps: float,
+        block_size: int,
+        num_warps: int,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        hidden = torch.empty_like(flat_residual)
+        modulated = torch.empty_like(flat_residual)
+        torch.library.wrap_triton(_residual_gate_rmsnorm_modulate_kernel)[(flat_residual.shape[0], )](
+            hidden,
+            modulated,
+            flat_residual,
+            flat_branch,
+            gate,
+            weight,
+            scale,
+            shift,
+            index,
+            flat_residual.shape[1],
+            index.numel(),
+            eps,
+            flat_residual.stride(0),
+            gate.stride(0),
+            scale.stride(0),
+            shift.stride(0),
+            BLOCK=block_size,
+            num_warps=num_warps,
+        )
+        return hidden, modulated
+
+
 def fused_rmsnorm_modulate(
     x: torch.Tensor,
     weight: torch.Tensor,
@@ -227,23 +297,16 @@ def fused_rmsnorm_modulate(
     scale = _row_addressable(scale)
     shift = _row_addressable(shift)
     index = index.contiguous()
-    output = torch.empty_like(flat_x)
     block_size = _next_power_of_two(hidden_size)
-    _rmsnorm_modulate_kernel[(flat_x.shape[0], )](
-        output,
+    output = _rmsnorm_modulate_op(
         flat_x,
         weight,
         scale,
         shift,
         index,
-        hidden_size,
-        index.numel(),
         eps,
-        flat_x.stride(0),
-        scale.stride(0),
-        shift.stride(0),
-        BLOCK=block_size,
-        num_warps=_num_warps(block_size),
+        block_size,
+        _num_warps(block_size),
     )
     return output.view_as(x)
 
@@ -276,12 +339,8 @@ def fused_residual_gate_rmsnorm_modulate(
     scale = _row_addressable(scale)
     shift = _row_addressable(shift)
     index = index.contiguous()
-    hidden = torch.empty_like(flat_residual)
-    modulated = torch.empty_like(flat_residual)
     block_size = _next_power_of_two(hidden_size)
-    _residual_gate_rmsnorm_modulate_kernel[(flat_residual.shape[0], )](
-        hidden,
-        modulated,
+    hidden, modulated = _residual_gate_rmsnorm_modulate_op(
         flat_residual,
         flat_branch,
         gate,
@@ -289,14 +348,8 @@ def fused_residual_gate_rmsnorm_modulate(
         scale,
         shift,
         index,
-        hidden_size,
-        index.numel(),
         eps,
-        flat_residual.stride(0),
-        gate.stride(0),
-        scale.stride(0),
-        shift.stride(0),
-        BLOCK=block_size,
-        num_warps=_num_warps(block_size),
+        block_size,
+        _num_warps(block_size),
     )
     return hidden.view_as(residual), modulated.view_as(residual)

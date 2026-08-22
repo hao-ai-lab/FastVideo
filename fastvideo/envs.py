@@ -22,6 +22,8 @@ if TYPE_CHECKING:
     FASTVIDEO_ATTENTION_BACKEND: str | None = None
     FASTVIDEO_FA4: bool = False
     FASTVIDEO_MINIMAX_H3_FUSIONS: str = ""
+    FASTVIDEO_MINIMAX_H3_ADALN_PRECOMPUTE: bool = False
+    FASTVIDEO_MINIMAX_H3_PACKED_SP: bool = False
     FASTVIDEO_WORKER_MULTIPROC_METHOD: str = "spawn"
     FASTVIDEO_TARGET_DEVICE: str = "cuda"
     MAX_JOBS: str | None = None
@@ -225,6 +227,13 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # (the default), `0`, or `none` keeps the eager implementation.
     "FASTVIDEO_MINIMAX_H3_FUSIONS":
     lambda: os.getenv("FASTVIDEO_MINIMAX_H3_FUSIONS", ""),
+
+    # Exact, inference-only MiniMax-H3 trajectory optimizations adapted from
+    # Sol-Engine. Kept separate from block-local fusions for clean A/B tests.
+    "FASTVIDEO_MINIMAX_H3_ADALN_PRECOMPUTE":
+    lambda: os.getenv("FASTVIDEO_MINIMAX_H3_ADALN_PRECOMPUTE", "0") != "0",
+    "FASTVIDEO_MINIMAX_H3_PACKED_SP":
+    lambda: os.getenv("FASTVIDEO_MINIMAX_H3_PACKED_SP", "0") != "0",
 
     # Use dedicated multiprocess context for workers.
     "FASTVIDEO_WORKER_MULTIPROC_METHOD":
