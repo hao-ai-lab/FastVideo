@@ -20,13 +20,13 @@ _SPEC = dict(raw_latent_shape=(4, 8, 16), patch_size=(1, 2, 2), prefix_segments=
 _HEADS, _DIM = 2, 128
 
 
-def _build_meta(*, sparsity=0.0, dense_layers=()):
+def _build_meta(*, sparsity=0.0, dense_layers=(), prefix_segments=_SPEC["prefix_segments"]):
     return MiniMaxH3VSAMetadataBuilder().build(
         current_timestep=0,
         raw_latent_shape=_SPEC["raw_latent_shape"],
         patch_size=_SPEC["patch_size"],
         VSA_sparsity=sparsity,
-        prefix_segments=_SPEC["prefix_segments"],
+        prefix_segments=prefix_segments,
         device=torch.device("cpu"),
         dense_layers=dense_layers,
         tile_size=64,
@@ -220,7 +220,7 @@ def test_prepared_route_reuses_graph_across_layer_indices_and_preserves_dense_ov
     monkeypatch.setattr(vsa_h3, "_sm100a", fake_sm)
     monkeypatch.setenv(VSA_SM100A_ENV, "1")
     monkeypatch.setattr(vsa_h3, "probe_enabled", lambda: None)
-    meta = _build_meta(sparsity=0.5, dense_layers=(0, 17))
+    meta = _build_meta(sparsity=0.5, dense_layers=(0, 17), prefix_segments=(64, 64))
     assert meta.dense_layers_tensor.tolist() == [0, 17]
     q, k, v = _tiled_qkv(meta)
 
