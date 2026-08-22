@@ -144,6 +144,7 @@ class MiniMaxH3Attention(nn.Module):
         quant_config: QuantizationConfig | None,
         prefix: str,
         fuse_qknorm_rope: bool = False,
+        fa4_packed_varlen: bool = False,
     ) -> None:
         super().__init__()
         self.num_attention_heads = num_attention_heads
@@ -196,6 +197,7 @@ class MiniMaxH3Attention(nn.Module):
             causal=False,
             supported_attention_backends=supported_attention_backends,
             prefix=prefix,
+            fa4_packed_varlen=fa4_packed_varlen,
         )
         self.to_gate_compress: ReplicatedLinear | None = None
         # None = unchecked; the first forward tests the loaded weight once and
@@ -465,6 +467,10 @@ class MiniMaxH3TransformerBlock(nn.Module):
             quant_config,
             prefix=f"{prefix}.attn",
             fuse_qknorm_rope=fuse_qknorm_rope,
+            # The packed multimodal document is a single long self-attention
+            # sequence. FA4's varlen API is substantially faster for this
+            # shape; the backend keeps grad/training and non-FA4 calls fixed.
+            fa4_packed_varlen=True,
         )
         self.norm2 = nn.RMSNorm(hidden_size, eps=norm_eps)
         self.ff = MiniMaxH3FeedForward(

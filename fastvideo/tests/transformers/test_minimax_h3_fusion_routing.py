@@ -9,6 +9,42 @@ import torch
 from fastvideo.platforms import AttentionBackendEnum
 
 
+def test_only_packed_minimax_h3_blocks_enable_fa4_varlen(monkeypatch: pytest.MonkeyPatch) -> None:
+    import fastvideo.models.dits.minimax_h3 as h3
+
+    routed: list[bool] = []
+
+    class RecordingAttention(torch.nn.Module):
+
+        def __init__(self, *args, fa4_packed_varlen: bool = False, **kwargs) -> None:
+            super().__init__()
+            del args, kwargs
+            routed.append(fa4_packed_varlen)
+
+    monkeypatch.setattr(h3, "MiniMaxH3Attention", RecordingAttention)
+    common = dict(
+        hidden_size=8,
+        num_attention_heads=1,
+        attention_head_dim=8,
+        ffn_dim=16,
+        norm_eps=1e-5,
+        qk_norm_eps=1e-5,
+        supported_attention_backends=(AttentionBackendEnum.FLASH_ATTN, ),
+        quant_config=None,
+    )
+    h3.MiniMaxH3TransformerBlock(
+        **common,
+        time_embed_dim=4,
+        prefix="minimax_h3.transformer_blocks.0",
+    )
+    h3.MiniMaxH3TokenRefinerBlock(
+        **common,
+        prefix="minimax_h3.token_refiner.refiner_blocks.0",
+    )
+
+    assert routed == [True, False]
+
+
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
