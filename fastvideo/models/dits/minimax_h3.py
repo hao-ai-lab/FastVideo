@@ -61,13 +61,13 @@ def _enabled_minimax_h3_fusions(value: str | None = None) -> frozenset[str]:
 
 
 def _can_run_minimax_h3_fusion(tensor: torch.Tensor) -> bool:
-    """Triton kernels are inference-only and stay outside Dynamo capture.
+    """Triton kernels are inference-only and trace as opaque custom ops.
 
     The ``HAVE_TRITON`` check makes the eager fallback exact: on a CUDA build
     whose Triton failed to import, an enabled fusion falls back instead of
     hitting the strict wrappers' hard RuntimeError mid-forward.
     """
-    return (HAVE_TRITON and tensor.is_cuda and not torch.is_grad_enabled() and not torch.compiler.is_compiling())
+    return HAVE_TRITON and tensor.is_cuda and not torch.is_grad_enabled()
 
 
 class MiniMaxH3RotaryPosEmbed(nn.Module):
@@ -712,16 +712,15 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
     def prepare_for_compile(self) -> None:
         """Pipeline hook, called once right before torch.compile wraps the blocks.
 
-        Dynamo capture traces the eager branch of every fusion guard, so an
-        enabled ``FASTVIDEO_MINIMAX_H3_FUSIONS`` set is silently inert inside
-        compiled block forwards (H3 compiles per-block by default). Say so
-        once instead of leaving the flag looking active.
+        The inference-only Triton fusions expose fake-backed custom operators,
+        so Dynamo can keep them active as opaque nodes inside each fullgraph
+        block instead of tracing into their launcher implementation.
         """
         if self.enabled_fusions:
-            logger.warning(
-                "torch.compile is enabled for MiniMax H3, so the requested inference fusions (%s) are "
-                "inert inside compiled block forwards; the compiled eager path runs instead.",
-                ",".join(sorted(self.enabled_fusions)))
+            logger.info(
+                "MiniMax H3 inference fusions remain active under torch.compile through custom-op boundaries: %s",
+                ",".join(sorted(self.enabled_fusions)),
+            )
 
     def materialize_non_persistent_buffers(
         self,

@@ -65,12 +65,7 @@ def _num_warps(block_size: int) -> int:
     return 4
 
 
-def minimax_h3_swiglu(x: torch.Tensor) -> torch.Tensor:
-    """Run the forward-only Triton fusion over an H3 ``(..., 2 * ffn_dim)`` input.
-
-    This is intentionally a strict kernel wrapper: callers own fallback policy and
-    must only invoke it for a supported CUDA inference path.
-    """
+def _minimax_h3_swiglu_impl(x: torch.Tensor) -> torch.Tensor:
     ffn_dim = _validate_input(x)
     if not x.is_cuda:
         raise ValueError("MiniMax H3 fused SwiGLU requires a CUDA tensor")
@@ -99,6 +94,31 @@ def minimax_h3_swiglu(x: torch.Tensor) -> torch.Tensor:
         num_warps=_num_warps(block_size),
     )
     return out.view(output_shape)
+
+
+@torch.library.custom_op(
+    "fastvideo::_minimax_h3_swiglu",
+    mutates_args=(),
+    device_types="cuda",
+)
+def _minimax_h3_swiglu_op(x: torch.Tensor) -> torch.Tensor:
+    return _minimax_h3_swiglu_impl(x)
+
+
+@torch.library.register_fake("fastvideo::_minimax_h3_swiglu")
+def _minimax_h3_swiglu_fake(x: torch.Tensor) -> torch.Tensor:
+    return x.new_empty((*x.shape[:-1], x.shape[-1] // 2))
+
+
+def minimax_h3_swiglu(x: torch.Tensor) -> torch.Tensor:
+    """Run the forward-only Triton fusion over an H3 ``(..., 2 * ffn_dim)`` input.
+
+    This is intentionally a strict kernel wrapper: callers own fallback policy and
+    must only invoke it for a supported CUDA inference path.
+    """
+    if torch.compiler.is_compiling():
+        return torch.ops.fastvideo._minimax_h3_swiglu(x)
+    return _minimax_h3_swiglu_impl(x)
 
 
 __all__ = ["HAVE_TRITON", "minimax_h3_swiglu"]
