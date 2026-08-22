@@ -250,6 +250,8 @@ def maybe_load_fsdp_model(
             if callable(prepare_for_compile):
                 logger.info("Running prepare_for_compile for %s", type(model).__name__)
                 prepare_for_compile()
+            attention_count = _enable_regional_attention_compile(model)
+            logger.info("Enabled attention tracing for %d modules in %s", attention_count, type(model).__name__)
             _compile_model_regions(model, torch_compile_kwargs or {})
     return model
 
@@ -269,11 +271,11 @@ def _regional_compile_unsupported_reason(init_params: dict[str, Any]) -> str | N
     falls back to eager while compile-safe dense loads still compile.
     """
     try:
-        from fastvideo.attention.layer import _attention_compile_disabled
+        from fastvideo.attention.layer import _attention_compile_explicitly_disabled
     except Exception:  # pragma: no cover - attention stack not importable
         pass
     else:
-        if _attention_compile_disabled():
+        if _attention_compile_explicitly_disabled():
             # The escape hatch wraps attention forwards in
             # torch.compiler.disable, which is a hard dynamo error inside a
             # fullgraph region ("Skip inlining `torch.compiler.disable()`d
@@ -301,8 +303,20 @@ def _regional_compile_unsupported_reason(init_params: dict[str, Any]) -> str | N
         return ("attention backend resolved to FLASH_ATTN with flash-attn 3, "
                 "whose grad-enabled path graph-breaks (incompatible with "
                 "fullgraph regional compile); use FA2, FA4 (FASTVIDEO_FA4=1), "
-                "or TORCH_SDPA for compiled runs")
+                "or TORCH_SDPA for compiled runs; this model stays eager")
     return None
+
+
+def _enable_regional_attention_compile(model: nn.Module) -> int:
+    """Opt in distributed-attention instances owned by ``model`` only."""
+    from fastvideo.attention.layer import DistributedAttention
+
+    enabled_count = 0
+    for submodule in model.modules():
+        if isinstance(submodule, DistributedAttention):
+            submodule._set_compile_forward_enabled(True)
+            enabled_count += 1
+    return enabled_count
 
 
 def _compile_model_regions(model: nn.Module, compile_kwargs: dict[str, Any]) -> int:
@@ -321,9 +335,9 @@ def _compile_model_regions(model: nn.Module, compile_kwargs: dict[str, Any]) -> 
     if "mode" in compile_kwargs:
         # torch.compile forbids passing both `mode` and `options`, and
         # regional compile always injects options (emulate_precision_casts)
-        # for bf16 numerics parity. Fail here with an actionable message
-        # instead of letting torch raise a mode/options conflict about an
-        # `options` key the user never wrote.
+        # to match the training-side regional-compile configuration. Fail here
+        # with an actionable message instead of letting torch raise a
+        # mode/options conflict about an `options` key the user never wrote.
         raise ValueError("Regional compile sets inductor options "
                          "(emulate_precision_casts) and cannot be combined "
                          "with torch_compile_kwargs['mode']. Remove 'mode' or "

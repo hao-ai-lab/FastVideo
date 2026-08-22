@@ -345,10 +345,11 @@ training-side regional compile of
 loader wraps each `_compile_conditions` block in
 `torch.compile(fullgraph=True)` with inductor
 `options={"emulate_precision_casts": True}` right after the transformer
-loads. Attention backends that cannot be traced end-to-end (VSA,
-FLASH_ATTN on flash-attn 3, or the `FASTVIDEO_DISABLE_ATTENTION_COMPILE=1`
-escape hatch) degrade the transformer to eager with one warning instead of
-failing mid-denoise.
+loads. The ordinary compile path keeps its historical compiler-disabled
+attention boundary by default; regional compile opts in only the compatible
+attention instances owned by this transformer. VSA, FLASH_ATTN on flash-attn
+3, and the explicit `FASTVIDEO_DISABLE_ATTENTION_COMPILE=1` escape hatch keep
+the transformer eager with one warning instead of failing mid-denoise.
 
 ```python
 generator = VideoGenerator.from_pretrained(
@@ -362,7 +363,12 @@ inductor options, and torch.compile forbids mode+options); it is
 independent of `enable_torch_compile`, and when both are set the regional
 compile wins for the DiT.
 
-### What to expect
+### What to expect from generic compile
+
+The Wan result below measures the existing generic
+`enable_torch_compile=True` path. It is useful evidence that compile can help,
+but it is **not** a benchmark or numerical gate for the stricter regional
+fullgraph path above.
 
 | Config | Effect |
 |---|---|
@@ -377,6 +383,16 @@ seconds to minutes, model-dependent). It amortizes over subsequent
 generations with the same input shapes. Always exclude the first
 (warmup) generation when measuring steady-state latency — measuring the
 warmup is the most common way to wrongly conclude "compile is slower".
+
+**Regional MiniMax-H3 accuracy caveat (job 2660).** On one GB200 at
+768×1344×124, the native 50-point schedule ran exactly 49 transformer
+forwards. After one warmup, three fixed-prompt/fixed-seed repeats averaged
+**185.08s → 157.01s end to end** and **174.90s → 147.12s denoising**. Each
+leg was independently pixel-deterministic, but compiled output did **not**
+match eager: mean absolute pixel error **20.247/255**, PSNR **16.67 dB**,
+mean SSIM **0.7108**, and mean MS-SSIM **0.6370** across 124 frames. Treat
+regional MiniMax-H3 compile as an opt-in performance experiment, not an
+eager-parity-safe mode.
 
 **Numerics.** Inductor's lowering is designed to preserve eager
 semantics within floating-point tolerance, but per-model equivalence is
@@ -396,9 +412,13 @@ MS-SSIM gate on *your* config, especially when combining
   hao-ai-lab/FastVideo#1365 — keep that fix to get a clean compiled
   region under the default offload path.
 - **`mode="reduce-overhead"` / CUDA graphs**: not yet supported
-  end-to-end. The attention dispatch is an untraceable custom op and
-  still breaks the graph, which CUDA-graph trees cannot span. Use the
-  default inductor mode (shown above) until that is resolved.
+  by regional compile because that path injects inductor `options`, and
+  PyTorch rejects `mode` together with `options`. The generic compile path
+  can accept `mode`, but CUDA-graph compatibility remains backend- and
+  shape-dependent. FA2/FA3 inference and FA4 expose traceable custom-op
+  boundaries; VSA and the FA3 grad-enabled path remain outside the regional
+  support envelope. Use the default inductor mode shown above unless your
+  exact configuration has its own gate.
 
 Extra `torch.compile` options are passed through `torch_compile_kwargs`
 (a dict), accepted by `VideoGenerator.from_pretrained(...)` and by the
