@@ -741,6 +741,13 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         compiled block forwards (H3 compiles per-block by default). Say so
         once instead of leaving the flag looking active.
         """
+        compile_state = next(self.parameters(), None)
+        if compile_state is None:
+            compile_state = next(self.buffers(), None)
+        if compile_state is None:
+            raise RuntimeError("MiniMax H3 has no materialized parameter or buffer to identify its compile device.")
+        compile_device = compile_state.device
+
         gate_states: list[bool] = []
         prepared_vsa_impls = 0
         for block in self.transformer_blocks:
@@ -751,7 +758,10 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
                 gate_states.append(attention._gate_compress_active)
             prepare_vsa = getattr(attention.distributed_attention.attn_impl, "prepare_for_regional_compile", None)
             if callable(prepare_vsa):
-                prepare_vsa(attention.to_q.weight.device)
+                # Generic post-load quantization may replace to_q.weight with
+                # packed buffers before this hook runs. The transformer state
+                # remains materialized on the same local device.
+                prepare_vsa(compile_device)
                 prepared_vsa_impls += 1
         if gate_states:
             logger.info(
