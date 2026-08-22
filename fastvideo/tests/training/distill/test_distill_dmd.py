@@ -11,10 +11,10 @@ from huggingface_hub import snapshot_download
 from fastvideo.utils import logger
 # Import the training pipeline
 sys.path.append(str(Path(__file__).parent.parent.parent.parent.parent))
-from fastvideo.training.wan_training_pipeline import main
+
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.utils import FlexibleArgumentParser
-from fastvideo.training.wan_distillation_pipeline import WanDistillationPipeline
+from fastvideo.training.runner import main
 
 wandb_name = "test_distill_dmd"
 
@@ -49,10 +49,11 @@ def run_worker():
         "--enable_gradient_checkpointing_type", "full"
     ])
     # Call the main training function
-    pipeline = WanDistillationPipeline.from_pretrained(args.pretrained_model_name_or_path, args=args)
-    args = pipeline.training_args
-    pipeline.train()
-    logger.info("Training pipeline done")
+    args.pipeline_class = "WanDistillationPipeline"
+    args.pipeline_module = "fastvideo.training.wan_distillation_pipeline"
+    
+    # Call the main training function
+    main(args)
 
 
 def test_distributed_training():

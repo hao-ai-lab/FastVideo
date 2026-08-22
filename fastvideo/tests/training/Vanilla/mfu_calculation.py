@@ -14,10 +14,10 @@ import json
 from huggingface_hub import snapshot_download
 from fastvideo.utils import logger
 # Import the training pipeline
-from fastvideo.training.wan_training_pipeline import main
+
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.utils import FlexibleArgumentParser
-from fastvideo.training.wan_training_pipeline import WanTrainingPipeline
+from fastvideo.training.runner import main
 
 MODEL_PATH = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 DATA_PATH = "data/crush-smol_processed_t2v/training_dataset/worker_1/worker_0/"
@@ -123,10 +123,11 @@ def run_worker():
         "1"
     ])
     # Call the main training function
-    pipeline = WanTrainingPipeline.from_pretrained(args.pretrained_model_name_or_path, args=args)
-    args = pipeline.training_args
-    pipeline.train()
-    logger.info("Training pipeline done")
+    args.pipeline_class = "WanTrainingPipeline"
+    args.pipeline_module = "fastvideo.training.wan_training_pipeline"
+    
+    # Call the main training function
+    main(args)
 
 
 def test_distributed_training():
