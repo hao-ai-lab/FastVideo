@@ -117,13 +117,27 @@ def _gate_model(*weights: float) -> MiniMaxH3Transformer3DModel:
 
 def test_minimax_h3_prepare_for_compile_resolves_loaded_vsa_gates() -> None:
     model = _gate_model(0.0, 2.0)
+    expected_device = next(model.parameters()).device
 
     model.prepare_for_compile()
 
     assert [block.attn._gate_compress_active for block in model.transformer_blocks] == [False, True]
     for block in model.transformer_blocks:
         impl = block.attn.distributed_attention.attn_impl
-        assert impl.devices == [block.attn.to_q.weight.device]
+        assert impl.devices == [expected_device]
+
+
+def test_minimax_h3_prepare_for_compile_does_not_require_quantized_q_weight() -> None:
+    model = _gate_model(2.0)
+    attention = model.transformer_blocks[0].attn
+    removed_weight = attention.to_q._parameters.pop("weight")
+    attention.to_q.register_buffer("_fp8_weight", removed_weight.detach(), persistent=False)
+    expected_device = next(model.parameters()).device
+
+    model.prepare_for_compile()
+
+    impl = attention.distributed_attention.attn_impl
+    assert impl.devices == [expected_device]
 
 
 def test_unprepared_vsa_gate_cannot_mutate_cache_during_compile(monkeypatch) -> None:
