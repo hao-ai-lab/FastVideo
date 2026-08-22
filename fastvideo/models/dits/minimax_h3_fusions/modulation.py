@@ -202,7 +202,7 @@ def _row_addressable(table: torch.Tensor) -> torch.Tensor:
     return table if table.stride(-1) == 1 else table.contiguous()
 
 
-def fused_rmsnorm_modulate(
+def _fused_rmsnorm_modulate_impl(
     x: torch.Tensor,
     weight: torch.Tensor,
     scale: torch.Tensor,
@@ -210,13 +210,6 @@ def fused_rmsnorm_modulate(
     index: torch.Tensor,
     eps: float,
 ) -> torch.Tensor:
-    """Run RMSNorm and row-indexed modulation in one strict Triton kernel.
-
-    ``index`` values must lie in ``[0, table_rows)``. Unlike eager
-    ``index_select``, the kernel does not raise on out-of-range values (a
-    device-side bounds check would synchronize); callers are safe by
-    construction (``timestep_indices * 3 + token_tags``, SP pads with 0).
-    """
     _validate_contract(x, weight, (scale, shift), index, eps)
     _require_forward_only(x, weight, scale, shift)
     _require_triton_cuda(x)
@@ -248,7 +241,7 @@ def fused_rmsnorm_modulate(
     return output.view_as(x)
 
 
-def fused_residual_gate_rmsnorm_modulate(
+def _fused_residual_gate_rmsnorm_modulate_impl(
     residual: torch.Tensor,
     branch: torch.Tensor,
     gate: torch.Tensor,
@@ -258,11 +251,6 @@ def fused_residual_gate_rmsnorm_modulate(
     index: torch.Tensor,
     eps: float,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Fuse residual update, row-indexed gate, RMSNorm, and modulation.
-
-    ``index`` values must lie in ``[0, table_rows)``; see
-    :func:`fused_rmsnorm_modulate` for why the wrapper does not check them.
-    """
     _validate_residual_branch(residual, branch)
     _validate_contract(residual, weight, (gate, scale, shift), index, eps)
     _require_forward_only(residual, branch, gate, weight, scale, shift)
@@ -300,3 +288,136 @@ def fused_residual_gate_rmsnorm_modulate(
         num_warps=_num_warps(block_size),
     )
     return hidden.view_as(residual), modulated.view_as(residual)
+
+
+# Dynamo must see the Triton launches as opaque nodes.  In eager mode the
+# public wrappers below keep their strict, actionable input validation; while
+# compiling, these custom-op boundaries avoid tracing into Triton's launcher
+# and let the surrounding H3 block remain one full graph.
+@torch.library.custom_op(
+    "fastvideo::_minimax_h3_rmsnorm_modulate",
+    mutates_args=(),
+    device_types="cuda",
+)
+def _fused_rmsnorm_modulate_op(
+    x: torch.Tensor,
+    weight: torch.Tensor,
+    scale: torch.Tensor,
+    shift: torch.Tensor,
+    index: torch.Tensor,
+    eps: float,
+) -> torch.Tensor:
+    return _fused_rmsnorm_modulate_impl(x, weight, scale, shift, index, eps)
+
+
+@torch.library.register_fake("fastvideo::_minimax_h3_rmsnorm_modulate")
+def _fused_rmsnorm_modulate_fake(
+    x: torch.Tensor,
+    weight: torch.Tensor,
+    scale: torch.Tensor,
+    shift: torch.Tensor,
+    index: torch.Tensor,
+    eps: float,
+) -> torch.Tensor:
+    del weight, scale, shift, index, eps
+    return x.new_empty(x.shape)
+
+
+@torch.library.custom_op(
+    "fastvideo::_minimax_h3_residual_gate_rmsnorm_modulate",
+    mutates_args=(),
+    device_types="cuda",
+)
+def _fused_residual_gate_rmsnorm_modulate_op(
+    residual: torch.Tensor,
+    branch: torch.Tensor,
+    gate: torch.Tensor,
+    weight: torch.Tensor,
+    scale: torch.Tensor,
+    shift: torch.Tensor,
+    index: torch.Tensor,
+    eps: float,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    return _fused_residual_gate_rmsnorm_modulate_impl(
+        residual,
+        branch,
+        gate,
+        weight,
+        scale,
+        shift,
+        index,
+        eps,
+    )
+
+
+@torch.library.register_fake("fastvideo::_minimax_h3_residual_gate_rmsnorm_modulate")
+def _fused_residual_gate_rmsnorm_modulate_fake(
+    residual: torch.Tensor,
+    branch: torch.Tensor,
+    gate: torch.Tensor,
+    weight: torch.Tensor,
+    scale: torch.Tensor,
+    shift: torch.Tensor,
+    index: torch.Tensor,
+    eps: float,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    del branch, gate, weight, scale, shift, index, eps
+    return residual.new_empty(residual.shape), residual.new_empty(residual.shape)
+
+
+def fused_rmsnorm_modulate(
+    x: torch.Tensor,
+    weight: torch.Tensor,
+    scale: torch.Tensor,
+    shift: torch.Tensor,
+    index: torch.Tensor,
+    eps: float,
+) -> torch.Tensor:
+    """Run RMSNorm and row-indexed modulation in one strict Triton kernel.
+
+    ``index`` values must lie in ``[0, table_rows)``. Unlike eager
+    ``index_select``, the kernel does not raise on out-of-range values (a
+    device-side bounds check would synchronize); callers are safe by
+    construction (``timestep_indices * 3 + token_tags``, SP pads with 0).
+    """
+    if torch.compiler.is_compiling():
+        return torch.ops.fastvideo._minimax_h3_rmsnorm_modulate(x, weight, scale, shift, index, eps)
+    return _fused_rmsnorm_modulate_impl(x, weight, scale, shift, index, eps)
+
+
+def fused_residual_gate_rmsnorm_modulate(
+    residual: torch.Tensor,
+    branch: torch.Tensor,
+    gate: torch.Tensor,
+    weight: torch.Tensor,
+    scale: torch.Tensor,
+    shift: torch.Tensor,
+    index: torch.Tensor,
+    eps: float,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Fuse residual update, row-indexed gate, RMSNorm, and modulation.
+
+    ``index`` values must lie in ``[0, table_rows)``; see
+    :func:`fused_rmsnorm_modulate` for why the wrapper does not check them.
+    """
+    if torch.compiler.is_compiling():
+        return torch.ops.fastvideo._minimax_h3_residual_gate_rmsnorm_modulate(
+            residual,
+            branch,
+            gate,
+            weight,
+            scale,
+            shift,
+            index,
+            eps,
+        )
+    return _fused_residual_gate_rmsnorm_modulate_impl(
+        residual,
+        branch,
+        gate,
+        weight,
+        scale,
+        shift,
+        index,
+        eps,
+    )
