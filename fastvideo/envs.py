@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     FASTVIDEO_TRACE_FUNCTION: int = 0
     FASTVIDEO_ATTENTION_BACKEND: str | None = None
     FASTVIDEO_FA4: bool = False
+    FASTVIDEO_MINIMAX_H3_FA4_PACKED_VARLEN: bool = False
     FASTVIDEO_INFERENCE_TORCH_COMPILE: bool = False
     FASTVIDEO_MINIMAX_H3_FUSIONS: str = ""
     FASTVIDEO_WORKER_MULTIPROC_METHOD: str = "spawn"
@@ -219,6 +220,13 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # (FA4's backward asserts sm90+ and its pack_gqa fails to JIT there).
     "FASTVIDEO_FA4":
     lambda: os.getenv("FASTVIDEO_FA4", "0") != "0",
+
+    # Use FA4's packed-varlen entry point for the long, single-document
+    # MiniMax-H3 dense DiT self-attention path. This changes floating-point
+    # reduction order relative to the fixed-length entry point, so it remains
+    # an explicit inference-only speed/quality opt-in.
+    "FASTVIDEO_MINIMAX_H3_FA4_PACKED_VARLEN":
+    lambda: os.getenv("FASTVIDEO_MINIMAX_H3_FA4_PACKED_VARLEN", "0") != "0",
 
     # If set (=1), enable regional (per-transformer-block) fullgraph
     # torch.compile for the DiT at inference — the inference-side counterpart

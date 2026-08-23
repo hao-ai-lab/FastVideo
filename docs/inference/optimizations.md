@@ -97,6 +97,21 @@ sm90+) and GQA attention (FA4's `pack_gqa` fails to JIT-compile below sm90).
 On sm90+ both run on FA4. If FA4 is unusable while `FASTVIDEO_FA4=1` is set,
 FastVideo fails loudly instead of silently falling back.
 
+MiniMax-H3 can additionally use FA4's packed-varlen entry point for its long,
+single-sequence dense DiT self-attention:
+
+```bash
+export FASTVIDEO_FA4=1
+export FASTVIDEO_MINIMAX_H3_FA4_PACKED_VARLEN=1
+```
+
+This route is inference-only and remains disabled by default. Runtime guards
+keep masked attention, batch sizes above one, unequal query/key lengths,
+grad-enabled calls, and NVFP4 on their established paths. It does not apply to
+the Preview checkpoint's sparse VSA blocks. Packed-varlen changes floating-point
+reduction order relative to fixed-length FA4, so treat it as a speed/quality
+evaluation option rather than an exact-parity mode.
+
 ### FP4 Flash Attention 4 (Blackwell only)
 
 **`FLASH_ATTN`** with **`--nvfp4_fa4`**
