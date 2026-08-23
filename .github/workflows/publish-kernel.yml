@@ -62,8 +62,9 @@ jobs:
               cuda-version: '13.0.0'
               torch-cuda-short: 'cu130'
           platform:
-            # x86_64 builds the full cu126 + cu130 set (cu130 ships the consumer
-            # Blackwell sm_120a FP4 kernels).
+            # x86_64 builds the full cu126 + cu130 set. cu130 ships the
+            # data-center Blackwell sm_100a VSA and consumer sm_120a FP4
+            # kernels.
             - os: ubuntu-22.04
               arch: x86_64
               wheel-plat: manylinux_2_35_x86_64
@@ -124,7 +125,7 @@ jobs:
       - name: Install dependencies (GCC, Clang, CUDA Paths, Git)
         run: |
           sudo apt update
-          sudo apt install -y git patchelf gcc-11 g++-11 clang-11
+          sudo apt install -y git gcc-11 g++-11 clang-11
           sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100 --slave /usr/bin/g++ g++ /usr/bin/g++-11
 
           # Allow Git to Access Safe Directory
@@ -168,7 +169,8 @@ jobs:
           #     covers sm_120a; turbodiffusion covers sm_100a+sm_120a. The sm_100 FP4
           #     forward is the FA4 CuTe DSL path in the fastvideo package (PR #1221),
           #     JIT-compiled at runtime — not built into this wheel.
-          #   * x86_64 cu130 = Hopper TK + consumer Blackwell sm_120a FP4.
+          #   * x86_64 cu130 = Hopper TK + data-center Blackwell sm_100a VSA
+          #     + consumer Blackwell sm_120a FP4.
           #   * x86_64 cu126 = Hopper TK only (older drivers; CUDA < 12.8 has no FP4).
           # The per-arch split in CMakeLists pins the FP4 targets to sm_120a and builds
           # the main extension for the full arch list. CMAKE_BUILD_PARALLEL_LEVEL caps
@@ -178,7 +180,7 @@ jobs:
             export CMAKE_ARGS="${CMAKE_ARGS:-} -DFASTVIDEO_KERNEL_BUILD_TK=OFF -DFASTVIDEO_KERNEL_BUILD_ATTN_QAT_INFER=ON"
             export CMAKE_BUILD_PARALLEL_LEVEL=1
           elif [ "${{ matrix.torch-cuda.torch-cuda-short }}" = "cu130" ]; then
-            export TORCH_CUDA_ARCH_LIST="9.0a;12.0a"
+            export TORCH_CUDA_ARCH_LIST="9.0a;10.0a;12.0a"
             export CMAKE_ARGS="${CMAKE_ARGS:-} -DFASTVIDEO_KERNEL_BUILD_TK=ON -DFASTVIDEO_KERNEL_BUILD_ATTN_QAT_INFER=ON -DCMAKE_CUDA_ARCHITECTURES=90a"
             # A single FP4 TU (attn_qat_infer) can use ~8-12 GB on its own, so serialize.
             export CMAKE_BUILD_PARALLEL_LEVEL=1
@@ -194,7 +196,11 @@ jobs:
           python -m build --wheel --outdir dist
 
           # Fix the wheel to be manylinux compliant
-          uv pip install --system auditwheel
+          # Ubuntu 22.04 ships patchelf 0.14.3, while current auditwheel
+          # requires at least 0.14.5. Use the stable PyPI binary on both
+          # x86_64 and aarch64 release runners.
+          uv pip install --system auditwheel patchelf==0.17.2.4
+          patchelf --version
           # Point auditwheel at torch libs, but do not vendor them into the wheel.
           TORCH_LIB_DIR=$(python - <<'PY'
           import os

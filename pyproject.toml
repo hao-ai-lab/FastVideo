@@ -81,7 +81,7 @@ dependencies = [
     # (MPS) and other non-Linux platforms don't try to build it from source;
     # every fastvideo_kernel import elsewhere is already guarded to degrade
     # gracefully when the package is absent.
-    "fastvideo-kernel==0.3.2; sys_platform == 'linux'",
+    "fastvideo-kernel==0.3.4; sys_platform == 'linux'",
     "wheel",
 
     # Training Dependencies
@@ -173,6 +173,13 @@ eval-fast-decode = ["decord"]
 eval-full = ["fastvideo[eval]", "fastvideo[eval-audio]", "qwen-omni-utils"]
 
 dev = [ "fastvideo[lint]", "fastvideo[test]", ]
+
+# Dependencies required by the measured FastH3 Preview profile. The pinned
+# flash-attn-4 source above keeps the CuTe DSL stack reproducible for uv
+# installs without putting a direct URL in published package metadata.
+fasth3 = [
+    "flash-attn-4",
+]
 
 prompt-safety = [
     "fasttext",

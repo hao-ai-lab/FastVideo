@@ -34,6 +34,14 @@ python examples/inference/basic/basic_dmd_new_api.py
 ```
 
 For the few-step (4-forward, DMD2-distilled) MiniMax-H3 preview, generating synchronized video and audio with its trained block-sparse VSA attention:
+
+```bash
+UV_TORCH_BACKEND=cu130 uv pip install -e ".[fasth3]"
+```
+
+This installs the pinned FA4 CuTe package and FastVideo kernel release used by
+the measured GB200 profile. Then run:
+
 ```
 python examples/inference/basic/basic_fasth3.py --prompt "your prompt"
 ```

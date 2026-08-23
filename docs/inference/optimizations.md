@@ -88,6 +88,7 @@ runtime on some GPU/shape combinations. To use FA4, install the pinned
 `flash-attn-4` build (see the `flash-attn-4` source in `pyproject.toml`) and set:
 
 ```bash
+UV_TORCH_BACKEND=cu130 uv pip install -e ".[fasth3]"
 export FASTVIDEO_FA4=1
 ```
 

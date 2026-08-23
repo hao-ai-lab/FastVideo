@@ -5,6 +5,8 @@ import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from fastvideo.models.schedulers.scheduling_minimax_h3 import MiniMaxH3Scheduler
 
 
@@ -139,6 +141,22 @@ def test_opt_outs_override_inherited_environment(monkeypatch):
     assert config.engine.offload.pin_cpu_memory is False
 
 
+def test_selected_fast_profile_requires_its_optional_routes(monkeypatch):
+    monkeypatch.setattr(fasth3, "_fa4_is_installed", lambda: False)
+    monkeypatch.setattr(fasth3, "_sm100a_kernel_is_installed", lambda: False)
+
+    with pytest.raises(RuntimeError, match="flash-attn-4"):
+        fasth3.validate_profile_dependencies(_args())
+    with pytest.raises(RuntimeError, match="fastvideo-kernel 0.3.4"):
+        fasth3.validate_profile_dependencies(_args("--no-fa4"))
+
+    fasth3.validate_profile_dependencies(_args("--no-fa4", "--vsa-kernel", "triton"))
+
+    monkeypatch.setattr(fasth3, "_fa4_is_installed", lambda: True)
+    monkeypatch.setattr(fasth3, "_sm100a_kernel_is_installed", lambda: True)
+    fasth3.validate_profile_dependencies(_args())
+
+
 def test_run_excludes_warmup_and_uses_distinct_measured_outputs(monkeypatch, tmp_path, capsys):
     calls = []
 
@@ -168,6 +186,7 @@ def test_run_excludes_warmup_and_uses_distinct_measured_outputs(monkeypatch, tmp
 
     for name in fasth3.profile_environment(_args()):
         monkeypatch.setenv(name, "inherited-experiment-value")
+    monkeypatch.setattr(fasth3, "validate_profile_dependencies", lambda args: None)
     monkeypatch.setattr(fasth3, "VideoGenerator", FakeVideoGenerator)
     clock = iter((10.0, 15.0, 20.0, 26.0, 30.0, 37.0, 40.0, 48.0))
     monkeypatch.setattr(fasth3.time, "perf_counter", lambda: next(clock))

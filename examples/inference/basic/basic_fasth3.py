@@ -16,6 +16,7 @@ rest of the measured recipe.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import os
 import statistics
 import time
@@ -78,8 +79,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--vsa-kernel",
                         choices=("triton", "sm100a"),
                         default="sm100a",
-                        help="tile-64 sparse kernel; sm100a is the measured GB200 route and falls back with a warning "
-                        "when unavailable")
+                        help="tile-64 sparse kernel; sm100a is the measured GB200 route and requires a compatible "
+                        "fastvideo-kernel build")
     parser.add_argument("--fa4",
                         action=argparse.BooleanOptionalAction,
                         default=True,
@@ -145,7 +146,7 @@ def profile_environment(args: argparse.Namespace) -> dict[str, str | None]:
         "FASTVIDEO_ATTENTION_BACKEND": "VIDEO_SPARSE_ATTN_H3",
         "FASTVIDEO_VSA_SM100A": "1" if args.vsa_kernel == "sm100a" else "0",
         "FASTVIDEO_VSA_CUTEDSL": "0",
-        # Presence, rather than truthiness, enables the diagnostic probe.
+        # A non-empty output path enables the diagnostic probe.
         "FASTVIDEO_H3_VSA_PROBE": None,
         "FASTVIDEO_DISABLE_ATTENTION_COMPILE": "0",
         "FASTVIDEO_FA4": "1" if args.fa4 else "0",
@@ -169,6 +170,34 @@ def configure_environment(args: argparse.Namespace) -> dict[str, str | None]:
         else:
             os.environ[name] = value
     return environment
+
+
+def _fa4_is_installed() -> bool:
+    try:
+        return importlib.util.find_spec("flash_attn.cute") is not None
+    except (ImportError, ModuleNotFoundError):
+        return False
+
+
+def _sm100a_kernel_is_installed() -> bool:
+    try:
+        from fastvideo_kernel import block_sparse_attn_sm100a
+    except ImportError:
+        return False
+    return bool(getattr(block_sparse_attn_sm100a, "_HAS_VSA_SM100A", False))
+
+
+def validate_profile_dependencies(args: argparse.Namespace) -> None:
+    """Fail before model loading when the selected measured route is absent."""
+    if args.fa4 and not _fa4_is_installed():
+        raise RuntimeError(
+            "FastH3's FA4 profile requires the pinned flash-attn-4 package. Install it with "
+            "`UV_TORCH_BACKEND=cu130 uv pip install -e \".[fasth3]\"`, or pass --no-fa4.")
+    if args.vsa_kernel == "sm100a" and not _sm100a_kernel_is_installed():
+        raise RuntimeError(
+            "FastH3's sm100a profile requires fastvideo-kernel 0.3.4 built with the Blackwell VSA extension. "
+            "Install this checkout with `UV_TORCH_BACKEND=cu130 uv pip install -e \".[fasth3]\"` (or run "
+            "`cd fastvideo-kernel && ./build.sh`), or pass --vsa-kernel triton.")
 
 
 def build_generator_config(args: argparse.Namespace) -> GeneratorConfig:
@@ -247,6 +276,7 @@ def run(args: argparse.Namespace) -> list[float]:
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
     environment = configure_environment(args)
+    validate_profile_dependencies(args)
 
     print(f"Profile: {args.profile} ({'non-parity fusions' if _h3_fusions_enabled(args) else 'fusions off'})")
     print(f"Output directory: {output_dir.resolve()}")
