@@ -13,7 +13,7 @@ from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.profiler import profiler_region
 from fastvideo.hooks.activation_trace import trace_step
-from fastvideo.profiler import nvtx_range, profiler_region
+from fastvideo.profiler import nvtx_range
 from fastvideo.pipelines.basic.minimax_h3.packing import (
     MINIMAX_H3_KEYFRAME_NOISE_AUG,
     MiniMaxH3PackedLayout,
