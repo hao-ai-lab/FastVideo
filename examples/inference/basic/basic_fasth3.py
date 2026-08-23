@@ -82,6 +82,16 @@ def parse_args() -> argparse.Namespace:
                         "run time the attention layer logs one warning and falls back to Triton. Only "
                         "meaningful with --vsa-tile-size 64")
     parser.add_argument("--torch-compile", action="store_true", help="torch.compile the DiT transformer path")
+    parser.add_argument("--compile-vae",
+                        action="store_true",
+                        help="torch.compile the video VAE decoder independently of the DiT")
+    parser.add_argument("--parallel-vae",
+                        action="store_true",
+                        help="round-robin video VAE temporal chunks across sequence-parallel ranks")
+    parser.add_argument("--replicated-dit",
+                        action="store_true",
+                        help="replicate DiT weights on every GPU instead of FSDP-sharding them; faster when the "
+                        "checkpoint fits on each GPU")
     parser.add_argument("--compile-mode",
                         default=None,
                         help='torch.compile mode, e.g. "reduce-overhead" for CUDA graphs')
@@ -127,6 +137,8 @@ def main() -> None:
         experimental["VSA_sparsity"] = args.vsa_sparsity
     if args.inference_torch_compile:
         experimental["inference_torch_compile"] = True
+    if args.parallel_vae:
+        experimental["vae_parallel_decode"] = True
 
     generator = VideoGenerator.from_config(
         GeneratorConfig(
@@ -134,7 +146,7 @@ def main() -> None:
             pipeline=PipelineSelection(experimental=experimental),
             engine=EngineConfig(
                 num_gpus=args.num_gpus,
-                use_fsdp_inference=args.num_gpus > 1,
+                use_fsdp_inference=args.num_gpus > 1 and not args.replicated_dit,
                 parallelism=ParallelismConfig(tp_size=1, sp_size=args.num_gpus),
                 offload=OffloadConfig(
                     dit=False,
@@ -146,6 +158,7 @@ def main() -> None:
                 compile=CompileConfig(
                     enabled=args.torch_compile,
                     mode=args.compile_mode,
+                    vae_enabled=args.compile_vae,
                 ),
             ),
         ))

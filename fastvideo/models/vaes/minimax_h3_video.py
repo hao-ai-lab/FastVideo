@@ -972,31 +972,42 @@ class AutoencoderKLMiniMaxH3(nn.Module):
         """Whether finalized chunks copy to ``output`` asynchronously on the current CUDA stream."""
         return z.device.type == "cuda" and output.is_pinned()
 
-    def _decode_to_pixels(self, z: torch.Tensor, output: torch.Tensor) -> None:
-        """Decode temporal chunks and immediately copy finalized pixels to CPU.
+    @staticmethod
+    def _copy_chunk_pixels(pixels: torch.Tensor, output: torch.Tensor, frame_start: int, non_blocking: bool) -> None:
+        """Copy one finalized fp32 pixel chunk into the CPU ``output`` buffer.
 
         Device-to-host copies run per (batch, channel) plane: the temporal
         slice of ``output`` is strided across channels, but each plane is
         contiguous on both sides, so every transfer stays a direct memcpy
         instead of staging through a pageable CPU temporary. With a pinned
-        ``output`` the copies are additionally asynchronous and overlap the
-        next chunk's decode; ``decode_to_pixels`` synchronizes once before
-        returning.
+        ``output`` and ``non_blocking=True`` the copies are additionally
+        asynchronous on the current CUDA stream; callers synchronize once
+        before releasing the buffer.
+        """
+        target = output[:, :, frame_start:frame_start + pixels.shape[2]]
+        if pixels.device.type == "cuda":
+            pixels = pixels.contiguous()
+            for batch_index in range(pixels.shape[0]):
+                for channel_index in range(pixels.shape[1]):
+                    target[batch_index, channel_index].copy_(pixels[batch_index, channel_index],
+                                                             non_blocking=non_blocking)
+        else:
+            target.copy_(pixels)
+
+    def _decode_to_pixels(self, z: torch.Tensor, output: torch.Tensor) -> None:
+        """Decode temporal chunks and immediately copy finalized pixels to CPU.
+
+        Each finalized chunk streams through ``_copy_chunk_pixels`` (direct
+        per-plane memcpys; asynchronous with a pinned ``output``) so the
+        copies overlap the next chunk's decode; ``decode_to_pixels``
+        synchronizes once before returning.
         """
         non_blocking = self._streams_chunk_copies(z, output)
         output_frame_start = 0
         for chunk in self._decode_chunks(z):
             num_frames = chunk.shape[2]
             pixels = self.denormalize_pixels(chunk.float()).clamp_(0, 1)
-            target = output[:, :, output_frame_start:output_frame_start + num_frames]
-            if z.device.type == "cuda":
-                pixels = pixels.contiguous()
-                for batch_index in range(pixels.shape[0]):
-                    for channel_index in range(pixels.shape[1]):
-                        target[batch_index, channel_index].copy_(pixels[batch_index, channel_index],
-                                                                 non_blocking=non_blocking)
-            else:
-                target.copy_(pixels)
+            self._copy_chunk_pixels(pixels, output, output_frame_start, non_blocking)
             output_frame_start += num_frames
         if output_frame_start != output.shape[2]:
             raise RuntimeError(
