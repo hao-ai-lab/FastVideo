@@ -29,7 +29,7 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <cstring>
+#include <memory>
 #include <vector>
 
 #include <nccl.h>
@@ -49,6 +49,8 @@ struct UlyssesContext {
   void* buf = nullptr;
   size_t nbytes = 0;
   ncclDevComm devComm{};
+  bool dev_comm_created = false;
+  int device = -1;
   int rank = 0;
   int world = 0;
 };
@@ -61,52 +63,99 @@ struct UlyssesContext {
 
 }  // namespace
 
-// Create the context. Collective: every rank must call together, because window
-// registration and devcomm creation are collective.
-int64_t init_ulysses_a2a(int64_t comm_ptr, int64_t nbytes, int64_t rank, int64_t world_size) {
+// Allocate the local half of a context. This is intentionally separate from
+// registration so Python can vote after local allocation: if one rank is OOM,
+// no peer enters a collective window registration alone.
+int64_t allocate_ulysses_a2a(int64_t nbytes, int64_t rank, int64_t world_size,
+                             int64_t device_index) {
   TORCH_CHECK(world_size == 2 || world_size == 4 || world_size == 6 || world_size == 8,
               "ulysses a2a only supports world size in (2, 4, 6, 8), got ", world_size);
   TORCH_CHECK(rank >= 0 && rank < world_size, "invalid rank");
   TORCH_CHECK(nbytes > 0, "nbytes must be positive");
+  TORCH_CHECK(device_index >= 0, "device index must be non-negative");
 
-  auto* ctx = new UlyssesContext();
-  ctx->comm = reinterpret_cast<ncclComm_t>(comm_ptr);
+  const at::cuda::CUDAGuard device_guard(
+      c10::Device(c10::DeviceType::CUDA, static_cast<c10::DeviceIndex>(device_index)));
+  auto ctx = std::make_unique<UlyssesContext>();
   ctx->nbytes = static_cast<size_t>(nbytes);
+  ctx->device = static_cast<int>(device_index);
   ctx->rank = static_cast<int>(rank);
   ctx->world = static_cast<int>(world_size);
 
   // The window must come from NCCL's allocator (4096B aligned per
   // NCCL_WIN_REQUIRED_ALIGNMENT), which is why this is not a torch tensor.
   NCCL_TRY(ncclMemAlloc(&ctx->buf, ctx->nbytes), "ncclMemAlloc");
+
+  return reinterpret_cast<int64_t>(ctx.release());
+}
+
+// Register the user window. Collective: every rank must call together.
+void register_ulysses_a2a_window(int64_t handle, int64_t comm_ptr) {
+  auto* ctx = reinterpret_cast<UlyssesContext*>(handle);
+  TORCH_CHECK(ctx != nullptr, "handle must come from allocate_ulysses_a2a");
+  TORCH_CHECK(ctx->buf != nullptr && ctx->win == nullptr && !ctx->dev_comm_created,
+              "ulysses a2a context is not in the allocated state");
+
+  const at::cuda::CUDAGuard device_guard(
+      c10::Device(c10::DeviceType::CUDA, static_cast<c10::DeviceIndex>(ctx->device)));
+  ctx->comm = reinterpret_cast<ncclComm_t>(comm_ptr);
   NCCL_TRY(ncclCommWindowRegister(ctx->comm, ctx->buf, ctx->nbytes, &ctx->win,
                                   NCCL_WIN_COLL_SYMMETRIC),
            "ncclCommWindowRegister");
+}
 
-  ncclDevCommRequirements reqs;
-  std::memset(&reqs, 0, sizeof(reqs));
-  reqs.lsaBarrierCount = 1;  // the barrier the kernel opens a session on
+// Create the device communicator only after Python has voted that every rank
+// registered its window. This operation is collective as well.
+void create_ulysses_a2a_dev_comm(int64_t handle) {
+  auto* ctx = reinterpret_cast<UlyssesContext*>(handle);
+  TORCH_CHECK(ctx != nullptr, "handle must come from allocate_ulysses_a2a");
+  TORCH_CHECK(ctx->comm != nullptr && ctx->win != nullptr && !ctx->dev_comm_created,
+              "ulysses a2a context is not in the window-registered state");
+
+  const at::cuda::CUDAGuard device_guard(
+      c10::Device(c10::DeviceType::CUDA, static_cast<c10::DeviceIndex>(ctx->device)));
+
+  ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
+  reqs.lsaBarrierCount = fi::kMaxBlocks;
   NCCL_TRY(ncclDevCommCreate(ctx->comm, &reqs, &ctx->devComm), "ncclDevCommCreate");
+  ctx->dev_comm_created = true;
+}
 
-  return reinterpret_cast<int64_t>(ctx);
+static ncclResult_t first_error(ncclResult_t current, ncclResult_t next) {
+  return current == ncclSuccess ? next : current;
 }
 
 void dispose_ulysses_a2a(int64_t handle) {
   auto* ctx = reinterpret_cast<UlyssesContext*>(handle);
   if (ctx == nullptr) return;
-  if (ctx->comm != nullptr) {
-    ncclDevCommDestroy(ctx->comm, &ctx->devComm);
-    if (ctx->win != nullptr) ncclCommWindowDeregister(ctx->comm, ctx->win);
+
+  const at::cuda::CUDAGuard device_guard(
+      c10::Device(c10::DeviceType::CUDA, static_cast<c10::DeviceIndex>(ctx->device)));
+  ncclResult_t result = ncclSuccess;
+  if (ctx->comm != nullptr && ctx->dev_comm_created) {
+    result = first_error(result, ncclDevCommDestroy(ctx->comm, &ctx->devComm));
+    ctx->dev_comm_created = false;
   }
-  if (ctx->buf != nullptr) ncclMemFree(ctx->buf);
+  if (ctx->comm != nullptr && ctx->win != nullptr) {
+    result = first_error(result, ncclCommWindowDeregister(ctx->comm, ctx->win));
+    ctx->win = nullptr;
+  }
+  if (ctx->buf != nullptr) {
+    result = first_error(result, ncclMemFree(ctx->buf));
+    ctx->buf = nullptr;
+  }
   delete ctx;
+  TORCH_CHECK(result == ncclSuccess, "ulysses a2a cleanup failed: rc=", static_cast<int>(result));
 }
 
 // Whether the whole group is load-store accessible. NCCL determined this at
 // ncclCommInitRank.
 bool ulysses_lsa_covers_group(int64_t comm_ptr, int64_t world_size) {
   auto comm = reinterpret_cast<ncclComm_t>(comm_ptr);
+  ncclCommProperties properties = NCCL_COMM_PROPERTIES_INITIALIZER;
+  NCCL_TRY(ncclCommQueryProperties(comm, &properties), "ncclCommQueryProperties");
   ncclTeam_t lsa = ncclTeamLsa(comm);
-  return lsa.nRanks == static_cast<int>(world_size);
+  return properties.deviceApiSupport && lsa.nRanks == static_cast<int>(world_size);
 }
 
 // Fused-transpose Ulysses all-to-all.
@@ -116,7 +165,7 @@ bool ulysses_lsa_covers_group(int64_t comm_ptr, int64_t world_size) {
 void ulysses_a2a(int64_t handle, torch::Tensor inp, torch::Tensor out, int64_t B, int64_t S_local,
                  int64_t H, int64_t D, int64_t mode) {
   auto* ctx = reinterpret_cast<UlyssesContext*>(handle);
-  TORCH_CHECK(ctx != nullptr, "handle must come from init_ulysses_a2a");
+  TORCH_CHECK(ctx != nullptr, "handle must come from allocate_ulysses_a2a");
 
   const at::cuda::CUDAGuard device_guard(inp.device());
   auto stream = at::cuda::getCurrentCUDAStream();
@@ -126,6 +175,8 @@ void ulysses_a2a(int64_t handle, torch::Tensor inp, torch::Tensor out, int64_t B
   TORCH_CHECK(inp.device() == out.device(), "inp and out must be on the same device");
   TORCH_CHECK(inp.scalar_type() == out.scalar_type(), "inp and out must share a dtype");
   TORCH_CHECK(inp.numel() == out.numel(), "inp and out must have equal element counts");
+  TORCH_CHECK(inp.get_device() == ctx->device, "input is on CUDA device ", inp.get_device(),
+              " but the Ulysses context belongs to device ", ctx->device);
   TORCH_CHECK(mode == 0 || mode == 1, "mode must be 0 or 1");
   TORCH_CHECK(inp.dim() == 4 && out.dim() == 4, "inp and out must be 4-D");
 
@@ -216,7 +267,11 @@ void ulysses_a2a(int64_t handle, torch::Tensor inp, torch::Tensor out, int64_t B
 }
 
 void register_ulysses_a2a(pybind11::module_& m) {
-  m.def("init_ulysses_a2a", &init_ulysses_a2a, "create the ulysses a2a window + devcomm");
+  m.def("allocate_ulysses_a2a", &allocate_ulysses_a2a, "allocate a local ulysses a2a window");
+  m.def("register_ulysses_a2a_window", &register_ulysses_a2a_window,
+        "register the ulysses a2a window collectively");
+  m.def("create_ulysses_a2a_dev_comm", &create_ulysses_a2a_dev_comm,
+        "create the ulysses a2a device communicator collectively");
   m.def("dispose_ulysses_a2a", &dispose_ulysses_a2a, "release a ulysses a2a context");
   m.def("ulysses_lsa_covers_group", &ulysses_lsa_covers_group,
         "whether the whole group is load-store accessible");

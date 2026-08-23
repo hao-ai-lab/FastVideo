@@ -145,7 +145,11 @@ __global__ void __launch_bounds__(kUlyssesThreads, 1)
     peer_ptrs[p] = ncclGetLsaPointer(win, win_offset, p);
   }
 
-  ncclLsaBarrierSession<ncclCoopCta> bar(ncclCoopCta(), devComm, ncclTeamTagLsa(), /*index=*/0);
+  // Each CTA owns one barrier generation. Sharing index 0 across independently
+  // scheduled CTAs races the generation counter and is unsupported by NCCL's
+  // device API. The host reserves kMaxBlocks slots when it creates devComm.
+  ncclLsaBarrierSession<ncclCoopCta> bar(
+      ncclCoopCta(), devComm, ncclTeamTagLsa(), /*index=*/blockIdx.x);
 
   // Every rank must have entered before anyone writes into peer buffers.
   bar.sync(ncclCoopCta(), cuda::memory_order_relaxed);

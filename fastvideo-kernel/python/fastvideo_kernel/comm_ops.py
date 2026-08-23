@@ -14,11 +14,19 @@ except ImportError:  # pragma: no cover - no compiled extension in this install
     _ops = None
 
 _SUPPORTED_WORLD_SIZES = (2, 4, 6, 8)
+_REQUIRED_OPS = (
+    "allocate_ulysses_a2a",
+    "register_ulysses_a2a_window",
+    "create_ulysses_a2a_dev_comm",
+    "dispose_ulysses_a2a",
+    "ulysses_lsa_covers_group",
+    "ulysses_a2a",
+)
 
 
 def is_available() -> bool:
     """Whether this wheel was built with the Ulysses all-to-all kernel."""
-    return _ops is not None and hasattr(_ops, "ulysses_a2a")
+    return _ops is not None and all(hasattr(_ops, name) for name in _REQUIRED_OPS)
 
 
 def _require() -> None:
@@ -34,21 +42,32 @@ def lsa_covers_group(comm_ptr: int, world_size: int) -> bool:
     return bool(_ops.ulysses_lsa_covers_group(int(comm_ptr), int(world_size)))
 
 
-def init(comm_ptr: int, nbytes: int, rank: int, world_size: int) -> int:
-    """Register a symmetric window and create the device comm. Collective.
-
-    ``comm_ptr`` is an ncclComm_t for the group. Returns an opaque handle, freed
-    with :func:`dispose`.
-    """
+def allocate(nbytes: int, rank: int, world_size: int, device_index: int) -> int:
+    """Allocate one rank's local symmetric window without a collective."""
     _require()
     if world_size not in _SUPPORTED_WORLD_SIZES:
         raise ValueError(f"ulysses a2a supports world sizes {_SUPPORTED_WORLD_SIZES}, "
                          f"got {world_size}")
-    return int(_ops.init_ulysses_a2a(int(comm_ptr), int(nbytes), int(rank), int(world_size)))
+    return int(_ops.allocate_ulysses_a2a(int(nbytes), int(rank), int(world_size), int(device_index)))
+
+
+def register_window(handle: int, comm_ptr: int) -> None:
+    """Register an allocated window with the supplied communicator.
+
+    Every rank in ``comm_ptr`` must call this together.
+    """
+    _require()
+    _ops.register_ulysses_a2a_window(int(handle), int(comm_ptr))
+
+
+def create_dev_comm(handle: int) -> None:
+    """Create the device communicator for a registered window collectively."""
+    _require()
+    _ops.create_ulysses_a2a_dev_comm(int(handle))
 
 
 def dispose(handle: int) -> None:
-    """Release a handle from :func:`init`. It is dangling afterwards."""
+    """Release a handle from :func:`allocate`. It is dangling afterwards."""
     _require()
     _ops.dispose_ulysses_a2a(int(handle))
 

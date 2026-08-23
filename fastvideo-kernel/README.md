@@ -10,6 +10,7 @@ Compiled CUDA extensions (CMake, see the build summary printed at the end of eve
 |---|---|---|---|---|
 | `fastvideo_kernel._C.fastvideo_kernel_ops` | TurboDiffusion INT8 GEMM, quant, RMSNorm, LayerNorm | `csrc/turbodiffusion/` | every arch in `TORCH_CUDA_ARCH_LIST` | always built |
 | same extension, optional part | ThunderKittens sliding-tile attention (`sta_fwd`) and VSA block-sparse (`block_sparse_fwd/bwd`) | `csrc/attention/*_h100.cu` | Hopper `sm_90a` only | `FASTVIDEO_KERNEL_BUILD_TK` (AUTO = ON iff `9.0a` is in the arch list; always OFF on aarch64 hosts — TK headers don't compile there) |
+| same extension, optional part | fused NVLink Ulysses all-to-all | `csrc/comm/ulysses_all_to_all.cu` | CUDA | `FASTVIDEO_KERNEL_BUILD_ULYSSES_A2A` (AUTO = ON with NCCL 2.29+ device headers and library; always OFF on ROCm) |
 | `fp4attn_cuda`, `fp4quant_cuda` | FP4 attention + quantization ("attn_qat_infer", modified SageAttention3) | `attn_qat_infer/` | consumer Blackwell `sm_120a` only, CUDA ≥ 12.8 | `FASTVIDEO_KERNEL_BUILD_ATTN_QAT_INFER` (AUTO = ON iff `12.0a` is in the arch list) |
 
 Runtime-JIT kernels (no build step, ship in every wheel/image):
@@ -22,20 +23,22 @@ Runtime-JIT kernels (no build step, ship in every wheel/image):
 
 ## What gets built where, and when
 
-| Surface | Trigger | Leg | `TORCH_CUDA_ARCH_LIST` | TK | FP4 |
-|---|---|---|---|---|---|
-| PyPI wheels (`.github/workflows/publish-kernel.yml`) | version bump in `fastvideo-kernel/pyproject.toml` on main, or manual dispatch | x86_64 cu126 | `9.0a` | ON | — (CUDA < 12.8) |
-| | | x86_64 cu130 | `9.0a;12.0a` | ON | ON |
-| | | aarch64 cu130 | `10.0a;12.0a` | — | ON |
-| Docker images `ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev` (`.github/workflows/infra-build-image.yml`) | `docker/Dockerfile` changes on main, or manual dispatch | amd64 cuda12.6.3 + cuda13.0.0 | `9.0a` | ON | — |
-| | | arm64 cuda12.6.3 (GH200) | `9.0a` | — (aarch64) | — |
-| | | arm64 cuda13.0.0 (GB10 / DGX Spark) | `12.1` | — | — |
-| Local `./build.sh` | manual | probes the visible GPU via torch | detected | ON iff sm_90 (non-aarch64 host) | ON iff sm_120 |
+| Surface | Trigger | Leg | `TORCH_CUDA_ARCH_LIST` | TK | Ulysses | FP4 |
+|---|---|---|---|---|---|---|
+| PyPI wheels (`.github/workflows/publish-kernel.yml`) | version bump in `fastvideo-kernel/pyproject.toml` on main, or manual dispatch | x86_64 cu126 | `9.0a` | ON | AUTO | — (CUDA < 12.8) |
+| | | x86_64 cu130 | `9.0a;12.0a` | ON | AUTO | ON |
+| | | aarch64 cu130 | `10.0a;12.0a` | — | AUTO | ON |
+| Docker images `ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev` (`.github/workflows/infra-build-image.yml`) | `docker/Dockerfile` changes on main, or manual dispatch | amd64 cuda12.6.3 + cuda13.0.0 | `9.0a` | ON | AUTO | — |
+| | | arm64 cuda12.6.3 (GH200) | `9.0a` | — (aarch64) | AUTO | — |
+| | | arm64 cuda13.0.0 (GB10 / DGX Spark) | `12.1` | — | AUTO | — |
+| Local `./build.sh` | manual | probes the visible GPU via torch | detected | ON iff sm_90 (non-aarch64 host) | AUTO | ON iff sm_120 |
 
 Notes:
 
 - No Docker image ships the FP4 kernels; only the x86_64/aarch64 cu130 wheels do.
 - On arm64 images (GH200 included) STA/VSA run on the Triton fallbacks, since TK never builds on aarch64.
+- Ulysses AUTO builds only when CMake finds a NCCL library and device-API headers with the 2.29 initializers. Use
+  `-DFASTVIDEO_KERNEL_BUILD_ULYSSES_A2A=ON` to require it or `OFF` to test the portable build.
 - Kernel tests run on Buildkite GPU CI for PRs touching `fastvideo-kernel/**` (see `.buildkite/pipeline.yml`).
 
 ## Installation

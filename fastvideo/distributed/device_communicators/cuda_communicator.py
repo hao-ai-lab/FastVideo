@@ -26,8 +26,9 @@ class CudaCommunicator(DeviceCommunicatorBase):
                 device=self.device,
             )
 
-        # Cheap and non-collective to create; arms itself on first use.
-        self.ulysses_a2a = maybe_create_helper(self.device_group, self.world_size, self.device, self.pynccl_comm)
+        # Capability is agreed once; the persistent window arms on first use.
+        self.ulysses_a2a = maybe_create_helper(self.cpu_group, self.device_group, self.world_size, self.device,
+                                               self.pynccl_comm)
 
     def all_reduce(self, input_, op: torch.distributed.ReduceOp | None = None):
         pynccl_comm = self.pynccl_comm
@@ -78,7 +79,7 @@ class CudaCommunicator(DeviceCommunicatorBase):
 
     def destroy(self) -> None:
         if self.ulysses_a2a is not None:
-            # Collective while armed, so it must precede process group teardown.
+            # The helper still needs its NCCL communicator during teardown.
             self.ulysses_a2a.close()
             self.ulysses_a2a = None
         if self.pynccl_comm is not None:

@@ -211,7 +211,8 @@ jobs:
             --exclude libtorch.so \
             --exclude libc10.so \
             --exclude libc10_cuda.so \
-            --exclude libtorch_python.so
+            --exclude libtorch_python.so \
+            --exclude libnccl.so.2
           # Move fixed wheels back to dist for upload consistency
           rm dist/*.whl
           mv fixed_dist/*.whl dist/

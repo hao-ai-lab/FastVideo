@@ -18,7 +18,15 @@ logger = init_logger(__name__)
 # The kernel is template-specialized on the world size, so only these dispatch.
 SUPPORTED_WORLD_SIZES = (2, 4, 6, 8)
 
-_SUPPORTED_DTYPES = (torch.float16, torch.bfloat16, torch.float32)
+_DTYPE_CODES = {
+    torch.float16: 1,
+    torch.bfloat16: 2,
+    torch.float32: 3,
+}
+
+# Bound persistent registered memory per rank. Larger operands use NCCL instead
+# of growing the window without limit.
+MAX_WINDOW_BYTES = 1024**3
 
 # (scatter_dim, gather_dim) -> kernel mode.
 #   0: [B, S_local, H, D]        -> [B, S_global, H_local, D]
@@ -55,11 +63,13 @@ class _FusedUlyssesA2A(torch.autograd.Function):
 class UlyssesA2AHelper:
     """Owns the fused all-to-all context for one sequence-parallel group.
 
-    Construction is cheap and non-collective; the NCCL window is registered on
-    first use, once an operand size is known.
+    Group capability is agreed during construction; the NCCL window is
+    registered on first use, once an operand size is known.
     """
 
-    def __init__(self, device_group: ProcessGroup, world_size: int, device: torch.device, pynccl_comm):
+    def __init__(self, cpu_group: ProcessGroup, device_group: ProcessGroup, world_size: int, device: torch.device,
+                 pynccl_comm):
+        self.cpu_group = cpu_group
         self.device_group = device_group
         self.world_size = world_size
         self.device = device
@@ -98,48 +108,222 @@ class UlyssesA2AHelper:
 
     def _agree(self, ok: bool) -> bool:
         """Reduce a local yes/no to a group-wide verdict: True only if all agree."""
-        vote = torch.tensor([1 if ok else 0], device=self.device, dtype=torch.int32)
-        dist.all_reduce(vote, op=dist.ReduceOp.MIN, group=self.device_group)
+        vote = torch.tensor([1 if ok else 0], dtype=torch.int32)
+        dist.all_reduce(vote, op=dist.ReduceOp.MIN, group=self.cpu_group)
         return bool(vote.item())
+
+    def _allocate(self, nbytes: int) -> int:
+        """Allocate locally; split out so allocation-failure tests can inject."""
+        from fastvideo_kernel import comm_ops
+
+        device_index = self.device.index
+        if device_index is None:
+            device_index = torch.cuda.current_device()
+        return comm_ops.allocate(nbytes, self.pynccl_comm.rank, self.world_size, device_index)
+
+    def _register_window(self, handle: int) -> None:
+        """Register the user window collectively."""
+        from fastvideo_kernel import comm_ops
+
+        comm_ops.register_window(handle, self._comm_ptr())
+
+    def _create_dev_comm(self, handle: int) -> None:
+        """Create the NCCL device communicator collectively."""
+        from fastvideo_kernel import comm_ops
+
+        comm_ops.create_dev_comm(handle)
+
+    def _dispose(self, handle: int, *, synchronize: bool) -> None:
+        from fastvideo_kernel import comm_ops
+
+        if synchronize:
+            # Kernel launches and copy-out are asynchronous. Do not deregister a
+            # window that a prior call on this device is still accessing.
+            torch.cuda.synchronize(self.device)
+        comm_ops.dispose(handle)
+
+    def _dispose_after_failure(self, handle: int | None) -> bool:
+        """Best-effort group cleanup after a setup phase failed.
+
+        Every rank votes after attempting cleanup, including a rank that never
+        obtained a local allocation. This keeps the helper permanently disabled
+        if teardown was not unanimous instead of re-entering with split state.
+        """
+        cleanup_ok = True
+        if handle is not None:
+            try:
+                self._dispose(handle, synchronize=False)
+            except Exception:  # noqa: BLE001 - converted to a group verdict below
+                cleanup_ok = False
+                logger.warning("Ulysses partial-context cleanup failed", exc_info=True)
+        return self._agree(cleanup_ok)
+
+    def _call_signature(self, x: torch.Tensor, scatter_dim: int, gather_dim: int) -> tuple[tuple[int, ...], str]:
+        """Return a rank-comparable call contract and any local decline reason."""
+        mode = _MODE_FROM_DIMS.get((scatter_dim, gather_dim))
+        dtype_code = _DTYPE_CODES.get(x.dtype, 0)
+        shape = tuple(int(dim) for dim in x.shape) if x.dim() == 4 else (0, 0, 0, 0)
+        status = 1
+        reason = ""
+
+        if self._disabled_reason is not None:
+            status, reason = -1, self._disabled_reason
+        elif not is_enabled():
+            status, reason = 0, "FASTVIDEO_ULYSSES_A2A is not auto"
+        elif x.is_cuda and torch.cuda.is_current_stream_capturing():
+            status, reason = 0, "the current CUDA stream is being captured"
+        elif mode is None:
+            status, reason = 0, "unsupported scatter/gather dimensions"
+        elif x.dim() != 4:
+            status, reason = 0, "input is not 4-D"
+        elif dtype_code == 0:
+            status, reason = 0, f"unsupported dtype {x.dtype}"
+        elif not x.is_cuda or x.device != self.device:
+            status, reason = 0, f"input device {x.device} does not match {self.device}"
+        elif not x.is_contiguous():
+            status, reason = 0, "input is not contiguous"
+        elif mode == 0 and shape[2] % self.world_size != 0:
+            status, reason = 0, "head count is not divisible by the group"
+        elif mode == 1 and shape[1] % self.world_size != 0:
+            status, reason = 0, "sequence length is not divisible by the group"
+
+        nbytes = int(x.numel() * x.element_size())
+        if status == 1 and nbytes == 0:
+            status, reason = 0, "input is empty"
+        elif status == 1 and nbytes > MAX_WINDOW_BYTES:
+            status, reason = 0, f"operand exceeds the {MAX_WINDOW_BYTES}-byte window cap"
+
+        # status, armed, mode, dtype, B, S, H, D, bytes, capacity. Comparing the
+        # whole vector prevents equal-size but differently-shaped ranks from
+        # entering the fused kernel with incompatible address math. CUDA device
+        # ordinals are deliberately absent: rank-local ordinals normally differ.
+        signature = (status, int(self._handle is not None), -1 if mode is None else mode, dtype_code, *shape, nbytes,
+                     self._nbytes)
+        return signature, reason
+
+    def _agree_call(self, signature: tuple[int, ...]) -> tuple[bool, bool, bool]:
+        """Agree on eligibility and the complete call signature across ranks.
+
+        Returns ``(use_fused, permanently_unavailable, lifecycle_consistent)``. This control
+        collective is intentionally eager-only; compiled regions use the NCCL
+        implementation before reaching here.
+        """
+        # Host-side Gloo control keeps this agreement outside CUDA graph capture
+        # and avoids inserting a second NCCL collective ahead of the data path.
+        local = torch.tensor(signature, dtype=torch.int64)
+        gathered = torch.empty(self.world_size * local.numel(), dtype=local.dtype)
+        dist.all_gather_into_tensor(gathered, local, group=self.cpu_group)
+        contracts = gathered.view(self.world_size, local.numel())
+        identical = bool(torch.all(contracts == contracts[0]).item())
+        statuses = contracts[:, 0]
+        use_fused = identical and bool(torch.all(statuses == 1).item())
+        permanently_unavailable = bool(torch.any(statuses < 0).item())
+        lifecycle_consistent = (bool(torch.all(contracts[:, 1] == contracts[0, 1]).item())
+                                and bool(torch.all(contracts[:, -1] == contracts[0, -1]).item()))
+        return use_fused, permanently_unavailable, lifecycle_consistent
 
     def _build(self, nbytes: int) -> bool:
         """Collectively register the window. Returns True if it is armed."""
-        # The kernel opens with a barrier across every rank, so a rank that falls
-        # back alone strands its peers until the NCCL watchdog fires -- hence the
-        # vote, before anything is registered. No second vote afterwards: window
-        # teardown is itself collective, so recovering from a split state would
-        # be that same deadlock.
-        ok, reason = self._can_attempt()
-        if not self._agree(ok):
-            self._disable(reason or "a peer rank cannot use the fused path")
-            return False
-
-        from fastvideo_kernel import comm_ops
-
+        handle: int | None = None
+        allocation_reason = ""
         try:
-            self._handle = comm_ops.init(self._comm_ptr(), nbytes, self.pynccl_comm.rank, self.world_size)
-        except Exception as e:  # noqa: BLE001 - never break the caller
-            self._disable(f"window registration failed ({type(e).__name__}: {e})")
+            handle = self._allocate(nbytes)
+        except Exception as e:  # noqa: BLE001 - converted to a group verdict below
+            allocation_reason = f"window allocation failed ({type(e).__name__}: {e})"
+
+        # Allocation is local, so vote before any rank enters registration.
+        if not self._agree(handle is not None):
+            cleanup_ok = self._dispose_after_failure(handle)
+            reason = allocation_reason or "a peer rank could not allocate the window"
+            if not cleanup_ok:
+                reason += "; partial-context cleanup failed on a peer"
+            self._disable(reason)
             return False
 
+        assert handle is not None
+        window_registered = False
+        registration_reason = ""
+        try:
+            self._register_window(handle)
+            window_registered = True
+        except Exception as e:  # noqa: BLE001 - converted to a group verdict below
+            registration_reason = f"window registration failed ({type(e).__name__}: {e})"
+
+        if not self._agree(window_registered):
+            cleanup_ok = self._dispose_after_failure(handle)
+            reason = registration_reason or "a peer rank could not register the window"
+            if not cleanup_ok:
+                reason += "; partial-context cleanup failed on a peer"
+            self._disable(reason)
+            return False
+
+        dev_comm_created = False
+        creation_reason = ""
+        try:
+            self._create_dev_comm(handle)
+            dev_comm_created = True
+        except Exception as e:  # noqa: BLE001 - converted to a group verdict below
+            creation_reason = f"device communicator creation failed ({type(e).__name__}: {e})"
+
+        if not self._agree(dev_comm_created):
+            cleanup_ok = self._dispose_after_failure(handle)
+            reason = creation_reason or "a peer rank could not create the device communicator"
+            if not cleanup_ok:
+                reason += "; partial-context cleanup failed on a peer"
+            self._disable(reason)
+            return False
+
+        self._handle = handle
         self._nbytes = nbytes
         logger.info("Ulysses fused all-to-all armed: world_size=%d window=%.0f MiB", self.world_size, nbytes / 2**20)
         return True
 
-    def close(self) -> None:
-        """Deregister the window.
+    def close(self) -> bool:
+        """Collectively destroy the device communicator and its window.
 
-        Collective while armed, so every rank must reach it via
-        GroupCoordinator.destroy().
+        Returns whether all ranks completed teardown. An armed/unarmed split
+        cannot safely enter NCCL window deregistration, so that exceptional
+        state is leaked until process exit and permanently disabled instead of
+        risking a distributed deadlock.
         """
-        if self._handle is None:
-            return
-        handle, self._handle = self._handle, None
+        handle = self._handle
+        all_armed = self._agree(handle is not None)
+        all_unarmed = self._agree(handle is None)
+        if all_unarmed:
+            self._nbytes = 0
+            return True
+        if not all_armed:
+            self._handle = None
+            self._nbytes = 0
+            self._disable("ranks disagreed on whether a fused window was armed during teardown")
+            return False
+
+        assert handle is not None
+        synchronize_ok = True
         try:
-            from fastvideo_kernel import comm_ops
-            comm_ops.dispose(handle)
+            torch.cuda.synchronize(self.device)
+        except Exception:  # noqa: BLE001 - converted to a group verdict below
+            synchronize_ok = False
+            logger.warning("Ulysses pre-teardown synchronization failed", exc_info=True)
+        if not self._agree(synchronize_ok):
+            self._disable("a peer rank could not synchronize before fused-window teardown")
+            return False
+
+        dispose_ok = True
+        try:
+            self._dispose(handle, synchronize=False)
         except Exception:  # noqa: BLE001 - teardown must not mask a real error
+            dispose_ok = False
             logger.warning("Ulysses window deregistration failed", exc_info=True)
+
+        group_ok = self._agree(dispose_ok)
+        # The native disposer consumes the handle even when a cleanup call
+        # reports an error, so never retry a potentially dangling pointer.
+        self._handle = None
+        self._nbytes = 0
+        if not group_ok:
+            self._disable("fused-window teardown failed on a peer rank")
+        return group_ok
 
     # -- collective ----------------------------------------------------------
 
@@ -161,53 +345,69 @@ class UlyssesA2AHelper:
 
     def try_all_to_all_4D(self, x: torch.Tensor, scatter_dim: int, gather_dim: int) -> torch.Tensor | None:
         """Fused collective, or None to let the caller use the NCCL path."""
-        if self._disabled_reason is not None or not is_enabled():
+        if self._disabled_reason is not None:
             return None
 
-        mode = _MODE_FROM_DIMS.get((scatter_dim, gather_dim))
-        if mode is None:
+        # Python lifecycle checks, votes, and pybind calls are not valid inside
+        # a fullgraph region. The inherited NCCL path is compiler-visible, so
+        # regional compile stays fullgraph by declining before any tensor read.
+        if torch.compiler.is_compiling():
             return None
 
-        if x.dim() != 4 or x.dtype not in _SUPPORTED_DTYPES or not x.is_contiguous():
-            return None
-        if x.device != self.device:
-            return None
-
-        # Scatter splits the heads, gather splits the global sequence.
-        if mode == 0 and x.shape[2] % self.world_size != 0:
-            return None
-        if mode == 1 and x.shape[1] % self.world_size != 0:
-            return None
-
-        # Spin-wait barriers make the fused kernel unsafe to capture.
-        if torch.cuda.is_current_stream_capturing():
+        signature, reason = self._call_signature(x, scatter_dim, gather_dim)
+        use_fused, permanently_unavailable, lifecycle_consistent = self._agree_call(signature)
+        if not use_fused:
+            if not lifecycle_consistent:
+                self.close()
+                self._disable("ranks disagreed on the fused-window lifecycle")
+            if permanently_unavailable:
+                self._disable(reason or "a peer rank cannot use the fused path")
             return None
 
-        # The window is fixed at registration and the first operand is not
-        # necessarily the largest, so grow rather than fall back.
-        nbytes = x.numel() * x.element_size()
+        mode = signature[2]
+        nbytes = signature[-2]
         if self._handle is None:
             if not self._build(nbytes):
                 return None
         elif nbytes > self._nbytes:
             logger.info("Ulysses window grow: %d -> %d bytes", self._nbytes, nbytes)
-            self.close()
+            if not self.close():
+                return None
             if not self._build(nbytes):
                 return None
 
         return _FusedUlyssesA2A.apply(self, x, mode)
 
 
-def maybe_create_helper(device_group: ProcessGroup | None, world_size: int, device: torch.device | None,
-                        pynccl_comm) -> UlyssesA2AHelper | None:
-    """Create a helper if the fused path could apply to this group."""
-    if not is_enabled():
-        return None
-    if world_size <= 1 or device_group is None or device is None or device.type != "cuda":
+def maybe_create_helper(cpu_group: ProcessGroup | None, device_group: ProcessGroup | None, world_size: int,
+                        device: torch.device | None, pynccl_comm) -> UlyssesA2AHelper | None:
+    """Collectively create a helper only when every rank can use it."""
+    if (world_size <= 1 or cpu_group is None or device_group is None or device is None or device.type != "cuda"):
         return None
     if not dist.is_initialized():
         return None
-    # The kernel needs an ncclComm_t for the group; PyNcclCommunicator has one.
-    if pynccl_comm is None or pynccl_comm.disabled:
+
+    helper = None
+    reason = ""
+    if not is_enabled():
+        reason = "FASTVIDEO_ULYSSES_A2A is not auto"
+    elif world_size not in SUPPORTED_WORLD_SIZES:
+        reason = f"world size {world_size} is not one of {SUPPORTED_WORLD_SIZES}"
+    elif pynccl_comm is None or pynccl_comm.disabled:
+        reason = "the group has no usable PyNccl communicator"
+    else:
+        try:
+            candidate = UlyssesA2AHelper(cpu_group, device_group, world_size, device, pynccl_comm)
+            can_attempt, reason = candidate._can_attempt()
+            if can_attempt:
+                helper = candidate
+        except Exception as e:  # noqa: BLE001 - converted to a group verdict below
+            reason = f"helper construction failed ({type(e).__name__}: {e})"
+
+    vote = torch.tensor([int(helper is not None)], dtype=torch.int32)
+    dist.all_reduce(vote, op=dist.ReduceOp.MIN, group=cpu_group)
+    if not bool(vote.item()):
+        if dist.get_rank(cpu_group) == 0:
+            logger.info("Ulysses fused all-to-all unavailable: %s", reason or "a peer rank declined")
         return None
-    return UlyssesA2AHelper(device_group, world_size, device, pynccl_comm)
+    return helper
