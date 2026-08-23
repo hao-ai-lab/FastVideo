@@ -19,7 +19,9 @@ def test_fasth3_extra_and_root_kernel_pin_match_source_release():
     dependencies = root_project["project"]["dependencies"]
     kernel_requirement = next(Requirement(value) for value in dependencies if value.startswith("fastvideo-kernel"))
     assert Version(kernel_version) in kernel_requirement.specifier
-    assert root_project["project"]["optional-dependencies"]["fasth3"] == ["flash-attn-4"]
+    fasth3_extra = root_project["project"]["optional-dependencies"]["fasth3"]
+    assert "flash-attn-4" in fasth3_extra
+    assert any(value.startswith("fastvideo-kernel") for value in fasth3_extra)
     kernel_sources = root_project["tool"]["uv"]["sources"]["fastvideo-kernel"]
     assert {
         "path": "fastvideo-kernel",

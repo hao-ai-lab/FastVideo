@@ -186,6 +186,7 @@ dev = [ "fastvideo[lint]", "fastvideo[test]", ]
 # installs without putting a direct URL in published package metadata.
 fasth3 = [
     "flash-attn-4",
+    "fastvideo-kernel>=0.3.2,<0.3.5; sys_platform == 'linux'",
 ]
 
 prompt-safety = [
