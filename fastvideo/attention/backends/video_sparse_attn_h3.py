@@ -490,8 +490,8 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         self._regional_compile_layer_idx = (torch.tensor(self.layer_idx, device=device, dtype=torch.int64)
                                             if enabled else None)
         if enabled:
-            route = ("native fastvideo-kernel mask entry"
-                     if callable(getattr(_sm100a, "block_sparse_attn_sm100a_from_mask", None)) else
+            route = ("native fastvideo-kernel mask entry" if callable(
+                getattr(_sm100a, "block_sparse_attn_sm100a_from_mask", None)) else
                      "FastVideo compatibility mask adapter")
             logger.info_once(f"VSA-H3 regional compile mask route: {route}")
         if requested and reason is not None:
@@ -516,14 +516,13 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         compiling = torch.compiler.is_compiling()
         regional_compiling = compiling and self._regional_compile_layer_idx is not None
         if regional_compiling:
-            sm100a_requested = self._regional_compile_sm100a_enabled
+            sm100a_requested = bool(self._regional_compile_sm100a_enabled)
         elif compiling:
             # Training/generic compile keeps the long-standing Triton route.
             sm100a_requested = False
         else:
             sm100a_requested = os.environ.get(VSA_SM100A_ENV, "0") == "1"
-        needs_sm100a_pair = (attn_metadata.tile_elems == 64 and n_tiles % 2 != 0 and not grad_mode
-                             and sm100a_requested)
+        needs_sm100a_pair = (attn_metadata.tile_elems == 64 and n_tiles % 2 != 0 and not grad_mode and sm100a_requested)
         kernel_tiles = n_tiles + int(needs_sm100a_pair)
         target_shape = (x.shape[0], kernel_tiles * attn_metadata.tile_elems, x.shape[-2], x.shape[-1])
 
