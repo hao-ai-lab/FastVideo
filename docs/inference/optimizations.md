@@ -88,6 +88,7 @@ runtime on some GPU/shape combinations. To use FA4, install the pinned
 `flash-attn-4` build (see the `flash-attn-4` source in `pyproject.toml`) and set:
 
 ```bash
+UV_TORCH_BACKEND=cu130 uv pip install -e ".[fasth3]"
 export FASTVIDEO_FA4=1
 ```
 
@@ -362,9 +363,13 @@ loader wraps each `_compile_conditions` block in
 `options={"emulate_precision_casts": True}` right after the transformer
 loads. The ordinary compile path keeps its historical compiler-disabled
 attention boundary by default; regional compile opts in only the compatible
-attention instances owned by this transformer. VSA and the explicit
-`FASTVIDEO_DISABLE_ATTENTION_COMPILE=1` escape hatch keep
-the transformer eager with one warning instead of failing mid-denoise.
+attention instances owned by this transformer. MiniMax-H3 VSA is supported
+only by the inference-only sm_100a tile-64 route
+(`FASTVIDEO_VSA_SM100A=1` and `VSA_tile_size=64`); the loader probes that
+route before capture and keeps the transformer eager when the kernel or
+device is unsupported. Legacy VSA, MiniMax-H3 tile-256 VSA, and the explicit
+`FASTVIDEO_DISABLE_ATTENTION_COMPILE=1` escape hatch keep the transformer
+eager with one warning instead of failing mid-denoise.
 
 ```python
 generator = VideoGenerator.from_pretrained(
@@ -409,6 +414,14 @@ mean SSIM **0.7108**, and mean MS-SSIM **0.6370** across 124 frames. Treat
 regional MiniMax-H3 compile as an opt-in performance experiment, not an
 eager-parity-safe mode.
 
+The same caveat applies to sparse MiniMax-H3 regional compile. Its mask
+compaction, sm_100a launch, trained compression gates, and inference-only H3
+fusions are fullgraph-compatible, but compilation can still change model
+numerics. The FastH3 `all` profile enables regional compile by default because
+it is the fastest measured route at 124, 243, and 345 frames. Use
+`--no-inference-torch-compile` when comparing against the eager sparse-DiT
+route.
+
 **Numerics.** Inductor's lowering is designed to preserve eager
 semantics within floating-point tolerance, but per-model equivalence is
 not asserted by any standing SSIM regression here — the SSIM tests in
@@ -431,9 +444,10 @@ MS-SSIM gate on *your* config, especially when combining
   PyTorch rejects `mode` together with `options`. The generic compile path
   can accept `mode`, but CUDA-graph compatibility remains backend- and
   shape-dependent. FA2/FA3 inference and FA4 expose traceable custom-op
-  boundaries; VSA and the FA3 grad-enabled path remain outside the regional
-  support envelope. Use the default inductor mode shown above unless your
-  exact configuration has its own gate.
+  boundaries. MiniMax-H3's sm_100a tile-64 inference route is the only VSA
+  path in the regional support envelope; other VSA paths and the FA3
+  grad-enabled path remain outside it. Use the default inductor mode shown
+  above unless your exact configuration has its own gate.
 
 Extra `torch.compile` options are passed through `torch_compile_kwargs`
 (a dict), accepted by `VideoGenerator.from_pretrained(...)` and by the

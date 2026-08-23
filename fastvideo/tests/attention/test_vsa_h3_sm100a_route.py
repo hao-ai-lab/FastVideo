@@ -28,6 +28,7 @@ def _build_meta(
     device: torch.device = torch.device("cpu"),
     prefix_segments: tuple[int, ...] = _SPEC["prefix_segments"],
     sparsity: float = 0.0,
+    dense_layers: tuple[int, ...] = (),
     builder: MiniMaxH3VSAMetadataBuilder | None = None,
 ):
     builder = builder or MiniMaxH3VSAMetadataBuilder()
@@ -38,6 +39,7 @@ def _build_meta(
         VSA_sparsity=sparsity,
         prefix_segments=prefix_segments,
         device=device,
+        dense_layers=dense_layers,
         tile_size=64,
     )
 
@@ -56,13 +58,20 @@ class _FakeSm100a:
     def __init__(self, supported=True):
         self.supported = supported
         self.calls = []
+        self.support_calls = []
+        self.mask_calls = []
 
     def is_supported(self, q, variable_block_sizes):
+        self.support_calls.append((q, variable_block_sizes))
         return self.supported
 
     def block_sparse_attn_sm100a(self, q, k, v, q2k_idx, q2k_num, variable_block_sizes, need_lse=True):
         self.calls.append(dict(q=q, q2k_idx=q2k_idx, q2k_num=q2k_num, vbs=variable_block_sizes,
                                need_lse=need_lse))
+        return q.clone(), None
+
+    def block_sparse_attn_sm100a_from_mask(self, q, k, v, block_map, variable_block_sizes):
+        self.mask_calls.append(dict(q=q, block_map=block_map, vbs=variable_block_sizes))
         return q.clone(), None
 
 
@@ -117,10 +126,203 @@ def test_reason_covers_every_precondition():
     assert _sm100a_unavailable_reason(ok, q, vbs, grad_mode=False) is None
 
 
+def test_prepare_for_regional_compile_resolves_supported_route(monkeypatch):
+    fake_sm = _FakeSm100a(supported=True)
+    monkeypatch.setattr(vsa_h3, "_sm100a", fake_sm)
+    monkeypatch.setenv(VSA_SM100A_ENV, "1")
+    impl = MiniMaxH3VSAImpl(num_heads=_HEADS, head_size=_DIM, causal=False, softmax_scale=_DIM**-0.5)
+
+    unsupported = impl.prepare_for_regional_compile(torch.device("cpu"))
+
+    assert unsupported is None
+    assert impl._regional_compile_sm100a_enabled is True
+    assert len(fake_sm.support_calls) == 1
+    probe_q, probe_vbs = fake_sm.support_calls[0]
+    assert probe_q.shape == (1, 1, 128, _DIM)
+    assert probe_q.dtype == torch.bfloat16
+    assert probe_vbs.dtype == torch.int32
+    assert probe_vbs.tolist() == [64, 64]
+    assert impl._regional_compile_layer_idx is not None
+    assert impl._regional_compile_layer_idx.item() == -1
+
+
+def test_prepare_for_regional_compile_env_off_skips_probe(monkeypatch):
+    fake_sm = _FakeSm100a(supported=True)
+    monkeypatch.setattr(vsa_h3, "_sm100a", fake_sm)
+    monkeypatch.delenv(VSA_SM100A_ENV, raising=False)
+    impl = MiniMaxH3VSAImpl(num_heads=_HEADS, head_size=_DIM, causal=False, softmax_scale=_DIM**-0.5)
+
+    unsupported = impl.prepare_for_regional_compile(torch.device("cpu"))
+
+    assert unsupported is not None
+    assert VSA_SM100A_ENV in unsupported
+    assert impl._regional_compile_sm100a_enabled is False
+    assert impl._regional_compile_layer_idx is None
+    assert fake_sm.support_calls == []
+
+
+def test_prepare_for_regional_compile_requires_mask_entry(monkeypatch):
+
+    class _IndexOnlySm100a:
+
+        def is_supported(self, q, variable_block_sizes):
+            raise AssertionError("missing mask entry must be rejected before the support probe")
+
+    monkeypatch.setattr(vsa_h3, "_sm100a", _IndexOnlySm100a())
+    monkeypatch.setenv(VSA_SM100A_ENV, "1")
+    warnings = []
+    monkeypatch.setattr(vsa_h3.logger, "warning_once", warnings.append)
+    impl = MiniMaxH3VSAImpl(num_heads=_HEADS, head_size=_DIM, causal=False, softmax_scale=_DIM**-0.5)
+
+    unsupported = impl.prepare_for_regional_compile(torch.device("cpu"))
+
+    assert unsupported is not None
+    assert impl._regional_compile_sm100a_enabled is False
+    assert impl._regional_compile_layer_idx is None
+    assert len(warnings) == 1
+    assert "compatibility route" in warnings[0]
+
+
+def test_mask_dispatch_uses_local_compatibility_route_for_older_kernel_wheel(monkeypatch):
+    class _RawOnlySm100a:
+
+        def block_sparse_attn_sm100a(self, *args, **kwargs):
+            raise AssertionError("raw entry must remain behind the compatibility custom op")
+
+    fake_sm = _RawOnlySm100a()
+    monkeypatch.setattr(vsa_h3, "_sm100a", fake_sm)
+    monkeypatch.setattr(vsa_h3, "map_to_index", lambda mask: (mask, mask))
+    calls = []
+
+    def compat(q, k, v, block_map, variable_block_sizes):
+        calls.append((block_map, variable_block_sizes))
+        return q + 1
+
+    monkeypatch.setattr(vsa_h3, "_h3_vsa_sm100a_from_mask_compat", compat)
+    q = torch.zeros(1, 1, 128, _DIM)
+    mask = torch.ones(1, 1, 2, 2, dtype=torch.bool)
+    vbs = torch.full((2, ), 64, dtype=torch.int32)
+
+    out, lse = vsa_h3._sm100a_from_mask(q, q, q, mask, vbs)
+
+    assert vsa_h3._sm100a_has_compile_safe_mask_route(fake_sm)
+    torch.testing.assert_close(out, q + 1)
+    assert lse is None and calls == [(mask, vbs)]
+
+
+def test_prepared_route_fullgraph_avoids_eager_dispatch(monkeypatch):
+    """Capture must not revisit env/capability checks or raw map_to_index."""
+    fake_sm = _FakeSm100a(supported=True)
+    monkeypatch.setattr(vsa_h3, "_sm100a", fake_sm)
+    monkeypatch.setenv(VSA_SM100A_ENV, "1")
+    monkeypatch.setattr(vsa_h3, "probe_enabled", lambda: None)
+    impl = MiniMaxH3VSAImpl(num_heads=_HEADS, head_size=_DIM, causal=False, softmax_scale=_DIM**-0.5)
+    impl.prepare_for_regional_compile(torch.device("cpu"))
+
+    # Four total tiles (two prefix + two video) satisfy the real kernel's
+    # adjacent-query-block contract.
+    meta = MiniMaxH3VSAMetadataBuilder().build(
+        current_timestep=0,
+        raw_latent_shape=_SPEC["raw_latent_shape"],
+        patch_size=_SPEC["patch_size"],
+        VSA_sparsity=0.0,
+        prefix_segments=(64, 64),
+        device=torch.device("cpu"),
+        tile_size=64,
+    )
+    q, k, v = _tiled_qkv(meta)
+
+    def fail_eager_dispatch(*args, **kwargs):
+        raise AssertionError("compiled route re-entered eager dispatch")
+
+    def compile_safe_from_mask(q, k, v, block_map, variable_block_sizes):
+        assert block_map.dtype == torch.bool
+        return q.clone(), None
+
+    monkeypatch.setattr(fake_sm, "is_supported", fail_eager_dispatch)
+    monkeypatch.setattr(fake_sm, "block_sparse_attn_sm100a", fail_eager_dispatch)
+    monkeypatch.setattr(fake_sm, "block_sparse_attn_sm100a_from_mask", compile_safe_from_mask)
+    monkeypatch.setattr(vsa_h3, "map_to_index", fail_eager_dispatch)
+    monkeypatch.setattr(vsa_h3, "_sm100a_unavailable_reason", fail_eager_dispatch)
+    monkeypatch.setattr(vsa_h3, "block_sparse_attn_64_bhsd", fail_eager_dispatch)
+
+    def run(q, k, v):
+        return impl.forward(q, k, v, None, meta)
+
+    try:
+        compiled = torch.compile(run, backend="eager", fullgraph=True)
+        with torch.inference_mode():
+            actual = compiled(q, k, v)
+        torch.testing.assert_close(actual, q, atol=0, rtol=0)
+    finally:
+        torch._dynamo.reset()
+
+
+def test_prepared_route_reuses_graph_across_layer_indices_and_preserves_dense_overrides(monkeypatch):
+    """Fifty H3 blocks must not specialize the shared graph on layer_idx."""
+    fake_sm = _FakeSm100a(supported=True)
+    monkeypatch.setattr(vsa_h3, "_sm100a", fake_sm)
+    monkeypatch.setenv(VSA_SM100A_ENV, "1")
+    monkeypatch.setattr(vsa_h3, "probe_enabled", lambda: None)
+    meta = _build_meta(sparsity=0.5, dense_layers=(0, 17), prefix_segments=(64, 64))
+    assert meta.dense_layers_tensor.tolist() == [0, 17]
+    q, k, v = _tiled_qkv(meta)
+
+    def fail_eager_dispatch(*args, **kwargs):
+        raise AssertionError("compiled route re-entered eager dispatch")
+
+    def compile_safe_from_mask(q, k, v, block_map, variable_block_sizes):
+        del k, v, variable_block_sizes
+        # Encode the dense-layer decision in the result so this is a semantic
+        # test as well as a recompile-cache stress test.
+        return q + block_map.all().to(q.dtype), None
+
+    implementations = []
+    for layer_idx in range(20):
+        impl = MiniMaxH3VSAImpl(
+            num_heads=_HEADS,
+            head_size=_DIM,
+            causal=False,
+            softmax_scale=_DIM**-0.5,
+            prefix=f"transformer_blocks.{layer_idx}.attn",
+        )
+        impl.prepare_for_regional_compile(torch.device("cpu"))
+        implementations.append(impl)
+
+    monkeypatch.setattr(fake_sm, "is_supported", fail_eager_dispatch)
+    monkeypatch.setattr(fake_sm, "block_sparse_attn_sm100a", fail_eager_dispatch)
+    monkeypatch.setattr(fake_sm, "block_sparse_attn_sm100a_from_mask", compile_safe_from_mask)
+    monkeypatch.setattr(vsa_h3, "map_to_index", fail_eager_dispatch)
+    monkeypatch.setattr(vsa_h3, "_sm100a_unavailable_reason", fail_eager_dispatch)
+    monkeypatch.setattr(vsa_h3, "block_sparse_attn_64_bhsd", fail_eager_dispatch)
+
+    torch._dynamo.reset()
+    try:
+        compiled = [torch.compile(impl.forward, backend="eager", fullgraph=True) for impl in implementations]
+        with torch.inference_mode():
+            for layer_idx, run in enumerate(compiled):
+                actual = run(q, k, v, None, meta)
+                expected_delta = 1.0 if layer_idx in meta.dense_layers else 0.0
+                torch.testing.assert_close(actual, q + expected_delta, atol=0, rtol=0)
+    finally:
+        torch._dynamo.reset()
+
+
 def test_default_off_routes_triton(routed, monkeypatch):
     fake_sm, fake_triton, run, _ = routed
     monkeypatch.delenv(VSA_SM100A_ENV, raising=False)
     run()
+    assert fake_triton.calls == 1
+    assert fake_sm.calls == []
+
+
+def test_unprepared_training_compile_keeps_existing_triton_route(routed, monkeypatch):
+    fake_sm, fake_triton, run, _ = routed
+    monkeypatch.setenv(VSA_SM100A_ENV, "1")
+    monkeypatch.setattr(torch.compiler, "is_compiling", lambda: True)
+
+    run(requires_grad=True)
+
     assert fake_triton.calls == 1
     assert fake_sm.calls == []
 
@@ -382,3 +584,38 @@ def test_real_sm100a_odd_route_matches_triton_oracle(monkeypatch):
     assert sm100a_tiled.shape[1] == triton_tiled.shape[1] + 64
     assert sm100a_output.shape == triton_output.shape == (1, meta.total_seq_length, _HEADS, _DIM)
     torch.testing.assert_close(sm100a_output.float(), triton_output.float(), atol=0.04, rtol=0.02)
+
+
+def test_real_sm100a_odd_preprocess_forward_postprocess_fullgraph(monkeypatch):
+    """Capture #1745's odd transport buffer mutation with real Inductor."""
+    if not torch.cuda.is_available() or torch.cuda.get_device_capability() != (10, 0):
+        pytest.skip("requires a GB200 (sm_100a) compute node")
+    if vsa_h3._sm100a is None or not vsa_h3._sm100a._HAS_VSA_SM100A:
+        pytest.skip("requires a fastvideo_kernel build containing sm_100a VSA")
+
+    device = torch.device("cuda")
+    monkeypatch.setenv(VSA_SM100A_ENV, "1")
+    meta = _build_meta(device=device, sparsity=0.5)
+    assert meta.variable_block_sizes.numel() % 2 == 1
+    impl = MiniMaxH3VSAImpl(num_heads=_HEADS, head_size=_DIM, causal=False, softmax_scale=_DIM**-0.5)
+    assert impl.prepare_for_regional_compile(device) is None
+    torch.manual_seed(17)
+    raw_qkv = torch.randn(3, meta.total_seq_length, _HEADS, _DIM, device=device, dtype=torch.bfloat16)
+
+    def run(raw):
+        tiled = impl.preprocess_qkv(raw, meta)
+        query, key, value = tiled.chunk(3, dim=0)
+        output = impl.forward(query, key, value, None, meta)
+        return impl.postprocess_output(output, meta)
+
+    torch._dynamo.reset()
+    try:
+        with torch.inference_mode():
+            compiled = torch.compile(run, fullgraph=True)
+            output = compiled(raw_qkv)
+            torch.cuda.synchronize()
+    finally:
+        torch._dynamo.reset()
+
+    assert output.shape == (1, meta.total_seq_length, _HEADS, _DIM)
+    assert torch.isfinite(output).all()

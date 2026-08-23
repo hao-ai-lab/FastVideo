@@ -61,13 +61,13 @@ def _enabled_minimax_h3_fusions(value: str | None = None) -> frozenset[str]:
 
 
 def _can_run_minimax_h3_fusion(tensor: torch.Tensor) -> bool:
-    """Triton kernels are inference-only and stay outside Dynamo capture.
+    """Triton kernels are inference-only and trace as opaque custom ops.
 
     The ``HAVE_TRITON`` check makes the eager fallback exact: on a CUDA build
     whose Triton failed to import, an enabled fusion falls back instead of
     hitting the strict wrappers' hard RuntimeError mid-forward.
     """
-    return (HAVE_TRITON and tensor.is_cuda and not torch.is_grad_enabled() and not torch.compiler.is_compiling())
+    return HAVE_TRITON and tensor.is_cuda and not torch.is_grad_enabled()
 
 
 class MiniMaxH3RotaryPosEmbed(nn.Module):
@@ -224,11 +224,30 @@ class MiniMaxH3Attention(nn.Module):
         if torch.is_grad_enabled():
             return True
         if self._gate_compress_active is None:
+            if torch.compiler.is_compiling():
+                raise RuntimeError(
+                    "MiniMax H3 VSA compression gate was not resolved before torch.compile; "
+                    "call prepare_for_compile() after loading weights.")
+            self._resolve_gate_compress_for_compile()
+        assert self._gate_compress_active is not None
+        return self._gate_compress_active
+
+    def _resolve_gate_compress_for_compile(self) -> None:
+        """Resolve the inference-only compression-gate branch eagerly.
+
+        Regional compilation wraps each transformer block with
+        ``fullgraph=True``. Resolving the loaded weight before capture keeps
+        the GPU-to-host bool conversion and the cache mutation out of every
+        compiled block graph. Grad-enabled forwards ignore this cached value
+        in ``_gate_active`` so training can still learn from a zero gate.
+        """
+        if self.to_gate_compress is None:
+            return
+        if self._gate_compress_active is None:
             weight = self.to_gate_compress.weight
             # bool() on a DTensor reduction resolves collectively, so every
             # rank caches the same answer.
             self._gate_compress_active = bool((weight != 0).any())
-        return self._gate_compress_active
 
     @staticmethod
     def _apply_rotary_emb(
@@ -580,8 +599,8 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         if self.enabled_fusions:
             if HAVE_TRITON:
                 logger.info(
-                    "MiniMax H3 inference fusions enabled: %s (CUDA inference-only; grad-enabled and "
-                    "torch.compile-captured forwards fall back to eager).",
+                    "MiniMax H3 inference fusions enabled: %s (CUDA inference-only; grad-enabled forwards "
+                    "fall back to eager; torch.compile captures opaque custom-op boundaries).",
                     ",".join(sorted(self.enabled_fusions)))
             else:
                 logger.warning(
@@ -717,16 +736,61 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
     def prepare_for_compile(self) -> None:
         """Pipeline hook, called once right before torch.compile wraps the blocks.
 
-        Dynamo capture traces the eager branch of every fusion guard, so an
-        enabled ``FASTVIDEO_MINIMAX_H3_FUSIONS`` set is silently inert inside
-        compiled block forwards (H3 compiles per-block by default). Say so
-        once instead of leaving the flag looking active.
+        Resolve each loaded VSA compression gate eagerly. Generic and training
+        compile retain their established attention dispatch; only the
+        inference loader's separate ``prepare_for_regional_compile`` hook may
+        preselect the inference-only sm_100a path.
+
+        The inference-only Triton fusions expose fake-backed custom operators,
+        so Dynamo can keep them active as opaque nodes inside each fullgraph
+        block instead of tracing into their launcher implementation.
         """
+        gate_states: list[bool] = []
+        for block in self.transformer_blocks:
+            attention = block.attn
+            if attention.to_gate_compress is not None:
+                attention._resolve_gate_compress_for_compile()
+                assert attention._gate_compress_active is not None
+                gate_states.append(attention._gate_compress_active)
+        if gate_states:
+            logger.info(
+                "Resolved MiniMax H3 VSA compression gates before torch.compile: %d active, %d inactive",
+                sum(gate_states),
+                len(gate_states) - sum(gate_states),
+            )
         if self.enabled_fusions:
-            logger.warning(
-                "torch.compile is enabled for MiniMax H3, so the requested inference fusions (%s) are "
-                "inert inside compiled block forwards; the compiled eager path runs instead.",
-                ",".join(sorted(self.enabled_fusions)))
+            logger.info(
+                "MiniMax H3 inference fusions remain active under torch.compile through custom-op boundaries: %s",
+                ",".join(sorted(self.enabled_fusions)),
+            )
+
+    def prepare_for_regional_compile(self) -> str | None:
+        """Resolve state used only by inference regional fullgraph compile."""
+        self.prepare_for_compile()
+        prepared_vsa_impls = 0
+        unsupported_reasons: set[str] = set()
+        for block in self.transformer_blocks:
+            attention = block.attn
+            prepare_vsa = getattr(attention.distributed_attention.attn_impl, "prepare_for_regional_compile", None)
+            if not callable(prepare_vsa):
+                continue
+            # Post-load FP8 conversion may replace to_q.weight with packed
+            # buffers. Either representation identifies the local device.
+            query_state = next(attention.to_q.parameters(), None)
+            if query_state is None:
+                query_state = next(attention.to_q.buffers(), None)
+            if query_state is None:
+                raise RuntimeError("MiniMax H3 to_q has no materialized parameter or buffer for compile setup.")
+            unsupported = prepare_vsa(query_state.device)
+            if unsupported:
+                unsupported_reasons.add(str(unsupported))
+            prepared_vsa_impls += 1
+        if prepared_vsa_impls:
+            logger.info("Prepared %d MiniMax H3 VSA attention implementations for regional torch.compile",
+                        prepared_vsa_impls)
+        if unsupported_reasons:
+            return "; ".join(sorted(unsupported_reasons))
+        return None
 
     def materialize_non_persistent_buffers(
         self,

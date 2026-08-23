@@ -1,22 +1,26 @@
 # SPDX-License-Identifier: Apache-2.0
 """Few-step video+audio generation with the DMD2-distilled MiniMax H3 preview.
 
-FastVideo/FastVideo-Minimax-FastH3-Preview-v0.1 is a 4-step distillation of
-MiniMaxAI/MiniMax-H3 (data-free DMD2): it walks a 4-step grid on the release
-sampler's shift-12 schedule instead of the base model's 50 steps, generating
-synchronized video and audio in one pipeline call.
+The default ``all`` profile reproduces the fastest measured FastH3 Preview
+recipe on four GB200 GPUs. It runs the checkpoint's native five-point sigma
+grid (exactly four DiT forwards), trained VSA policy, Blackwell sparse kernel,
+regional fullgraph DiT compile, compiled/parallel video VAE, and inference-only
+H3 fusions. One compile warmup is excluded before three measured requests.
 
-The student was trained with block-sparse video attention (VSA, 64-token
-tiles) and its checkpoint carries the trained sparse-gate parameters
-(``attn.to_gate_compress``), so this script always runs the VSA-H3 attention
-backend. At the default ``--vsa-sparsity 0.0`` the attention math is exactly
-dense (every tile is selected); raise the sparsity for additional speedup.
+Both regional compile and the default fusions can change floating-point
+operation order, so ``all`` is a report-only performance profile.
+``--profile strict`` disables the H3 fusions but preserves regional compile;
+combine it with ``--no-inference-torch-compile`` for the eager strict route.
 """
 
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import os
+import statistics
+import time
+from collections.abc import Sequence
 from pathlib import Path
 
 from fastvideo import VideoGenerator
@@ -32,169 +36,305 @@ from fastvideo.api import (
     SamplingConfig,
 )
 
+DEFAULT_MODEL = "FastVideo/FastVideo-Minimax-FastH3-Preview-v0.1"
 
-def parse_args() -> argparse.Namespace:
+
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model-path", default="FastVideo/FastVideo-Minimax-FastH3-Preview-v0.1")
-    # The HF repo is private while the MiniMax H3 Community License review
-    # completes; until it flips public, pass --model-path with a local
-    # snapshot of the release instead (e.g. the team export at
-    # /mnt/lustre/vlm-wlsaidhi/fastvideo/exports/FastVideo-Minimax-FastH3-Preview-v0.1).
+    parser.add_argument("--model-path", default=DEFAULT_MODEL)
+    # The HF repo may require authentication while the MiniMax H3 Community
+    # License review completes. A local snapshot can be passed here instead.
     parser.add_argument("--prompt", required=True)
     parser.add_argument("--output", default="outputs/fasth3")
+    parser.add_argument("--profile",
+                        choices=("all", "strict"),
+                        default="all",
+                        help="all enables the fastest measured, non-parity H3 fusions; strict disables only them")
     parser.add_argument("--height", type=int, default=768)
     parser.add_argument("--width", type=int, default=1344)
     parser.add_argument("--num-frames", type=int, default=124)
-    # num_inference_steps counts sigma-GRID POINTS, matching the base model's
-    # convention ("50 steps" = a 50-point grid = 49 transformer forwards). The
-    # student's distilled 4-step grid is 4 FORWARDS, i.e. a 5-point grid
-    # (t = 1000, 750, 500, 250 -> 0 on the shift-12 schedule) — so the correct
-    # default here is 5. Other grids are off-distribution.
+    # num_inference_steps counts sigma-GRID POINTS. The distilled schedule is
+    # t=1000,750,500,250 -> 0: five points and exactly four DiT forwards.
     parser.add_argument("--steps",
                         type=int,
                         default=5,
-                        help="num_inference_steps = sigma-grid points; N points run N-1 denoising "
-                        "forwards. 5 (default) is the distilled 4-forward grid")
-    parser.add_argument("--seed", type=int, default=0)
+                        help="sigma-grid points; N points run N-1 DiT forwards (the trained default is 5)")
+    parser.add_argument("--seed", type=int, default=1000, help="seed reused for every measured request")
+    parser.add_argument("--warmup-seed", type=int, default=999)
+    parser.add_argument("--repeats", type=int, default=3, help="number of measured requests after warmup")
+    parser.add_argument("--warmup",
+                        action=argparse.BooleanOptionalAction,
+                        default=True,
+                        help="run one excluded request before timing")
     parser.add_argument("--num-gpus", type=int, default=4)
     parser.add_argument("--vsa-sparsity",
                         type=float,
-                        default=0.0,
-                        help="Run-level VSA sparsity in [0, 1). 0.0 (default) selects every tile, which is "
-                        "exactly dense attention; the student was trained at 0.9")
-    # 64 is the trained contract: the student was TRAINED with 64-token
-    # (4,4,4) tiles, and its to_gate_compress gates were learned against
-    # pooling at that granularity — keep 64 unless you are ablating.
+                        default=0.9,
+                        help="run-level VSA sparsity in [0, 1); 0.9 is the checkpoint's trained policy")
     parser.add_argument("--vsa-tile-size",
                         type=int,
                         choices=(64, 256),
                         default=64,
-                        help="VSA-H3 tile size in tokens; 64 (default) is what the student was trained "
-                        "with and runs the native Triton block-sparse path, 256 is the FA4-CuTe-capable "
-                        "geometry for ablations")
+                        help="VSA-H3 tile size; 64 is the checkpoint's trained and measured geometry")
     parser.add_argument("--vsa-kernel",
                         choices=("triton", "sm100a"),
-                        default="triton",
-                        help="Block-sparse kernel for the tile-64 attention forward: triton (default, "
-                        "portable fwd+bwd) or sm100a — the opt-in Blackwell CUDA forward "
-                        "(fastvideo_kernel.block_sparse_attn_sm100a). sm100a needs an sm_100 GPU and a "
-                        "fastvideo-kernel build that carries the extension; if a precondition fails at "
-                        "run time the attention layer logs one warning and falls back to Triton. Only "
-                        "meaningful with --vsa-tile-size 64")
-    parser.add_argument("--torch-compile", action="store_true", help="torch.compile the DiT transformer path")
+                        default="sm100a",
+                        help="tile-64 sparse kernel; sm100a is the measured GB200 route and requires a compatible "
+                        "fastvideo-kernel build")
+    parser.add_argument("--fa4",
+                        action=argparse.BooleanOptionalAction,
+                        default=True,
+                        help="use FA4 for eligible non-VSA attention paths")
+    parser.add_argument("--h3-fusions",
+                        action=argparse.BooleanOptionalAction,
+                        default=None,
+                        help="override the profile's H3 fusion policy (changes model numerics when enabled)")
     parser.add_argument("--compile-vae",
-                        action="store_true",
-                        help="torch.compile the video VAE decoder independently of the DiT")
+                        action=argparse.BooleanOptionalAction,
+                        default=True,
+                        help="compile the video VAE decoder independently of the DiT")
     parser.add_argument("--parallel-vae",
-                        action="store_true",
-                        help="round-robin video VAE temporal chunks across sequence-parallel ranks")
+                        action=argparse.BooleanOptionalAction,
+                        default=True,
+                        help="round-robin VAE temporal chunks across sequence-parallel ranks")
     parser.add_argument("--replicated-dit",
-                        action="store_true",
-                        help="replicate DiT weights on every GPU instead of FSDP-sharding them; faster when the "
-                        "checkpoint fits on each GPU")
+                        action=argparse.BooleanOptionalAction,
+                        default=True,
+                        help="replicate DiT weights instead of FSDP-sharding them")
+    parser.add_argument("--pin-cpu-memory",
+                        action=argparse.BooleanOptionalAction,
+                        default=True,
+                        help="pin CPU-offloaded text-encoder and VAE weights")
+    parser.add_argument("--torch-compile",
+                        action=argparse.BooleanOptionalAction,
+                        default=False,
+                        help="compile the whole DiT path (off in the fastest FastH3 profile)")
+    parser.add_argument("--inference-torch-compile",
+                        action=argparse.BooleanOptionalAction,
+                        default=True,
+                        help="regionally compile DiT blocks (enabled in the fastest FastH3 profile)")
+    parser.add_argument("--ulysses-a2a",
+                        choices=("off", "auto"),
+                        default="off",
+                        help="sequence-parallel all-to-all route; off reproduces the fastest FastH3 profile, while "
+                        "auto opts into the fused NVLink kernel when the installed kernel package supports it")
     parser.add_argument("--compile-mode",
                         default=None,
-                        help='torch.compile mode, e.g. "reduce-overhead" for CUDA graphs')
-    parser.add_argument("--inference-torch-compile",
-                        action="store_true",
-                        help="regional fullgraph torch.compile of each DiT block after load. NOTE: this "
-                        "script always runs the VSA-H3 backend, which is not fullgraph-traceable — the "
-                        "loader logs one warning and keeps the transformer eager. The flag is exposed "
-                        "here to exercise exactly that guard")
-    parser.add_argument("--repeats",
-                        type=int,
-                        default=1,
-                        help="generate N times; with --torch-compile the first run pays "
-                        "compilation, so steady-state is the last repeat")
-    return parser.parse_args()
+                        help='whole-DiT torch.compile mode, e.g. "reduce-overhead"; requires '
+                        "--no-inference-torch-compile")
+    args = parser.parse_args(argv)
+    if args.repeats < 1:
+        parser.error("--repeats must be at least 1")
+    if args.num_gpus < 1:
+        parser.error("--num-gpus must be at least 1")
+    if not 0.0 <= args.vsa_sparsity < 1.0:
+        parser.error("--vsa-sparsity must be in [0, 1)")
+    if args.compile_mode is not None and args.inference_torch_compile:
+        parser.error("--compile-mode cannot be combined with regional compile; pass --no-inference-torch-compile")
+    return args
+
+
+def _h3_fusions_enabled(args: argparse.Namespace) -> bool:
+    if args.h3_fusions is not None:
+        return bool(args.h3_fusions)
+    return args.profile == "all"
+
+
+def profile_environment(args: argparse.Namespace) -> dict[str, str | None]:
+    """Return the complete boot-time environment for this profile.
+
+    ``None`` means the variable must be removed. Values are explicit even for
+    disabled features so a shell's inherited experiment settings cannot
+    silently change the advertised profile.
+    """
+    return {
+        "FASTVIDEO_ATTENTION_BACKEND": "VIDEO_SPARSE_ATTN_H3",
+        "FASTVIDEO_VSA_SM100A": "1" if args.vsa_kernel == "sm100a" else "0",
+        "FASTVIDEO_VSA_CUTEDSL": "0",
+        # A non-empty output path enables the diagnostic probe.
+        "FASTVIDEO_H3_VSA_PROBE": None,
+        "FASTVIDEO_DISABLE_ATTENTION_COMPILE": "0",
+        "FASTVIDEO_FA4": "1" if args.fa4 else "0",
+        "FASTVIDEO_NVFP4_FA4": "0",
+        "FASTVIDEO_MINIMAX_H3_FA4_PACKED_VARLEN": "0",
+        "FASTVIDEO_MINIMAX_H3_FUSIONS": "all" if _h3_fusions_enabled(args) else "0",
+        "FASTVIDEO_INFERENCE_TORCH_COMPILE": "1" if args.inference_torch_compile else "0",
+        "FASTVIDEO_VAE_PARALLEL_DECODE": "1" if args.parallel_vae else "0",
+        "FASTVIDEO_VAE_PARALLEL_ENCODE": "0",
+        "FASTVIDEO_VAE_PARALLEL_DECODE_STRATEGY": "gather",
+        "FASTVIDEO_ULYSSES_A2A": args.ulysses_a2a,
+        "FASTVIDEO_STAGE_LOGGING": "1",
+    }
+
+
+def configure_environment(args: argparse.Namespace) -> dict[str, str | None]:
+    environment = profile_environment(args)
+    for name, value in environment.items():
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = value
+    return environment
+
+
+def _fa4_is_installed() -> bool:
+    try:
+        return importlib.util.find_spec("flash_attn.cute") is not None
+    except (ImportError, ModuleNotFoundError):
+        return False
+
+
+def _sm100a_kernel_is_installed() -> bool:
+    try:
+        from fastvideo_kernel import block_sparse_attn_sm100a
+    except ImportError:
+        return False
+    return bool(getattr(block_sparse_attn_sm100a, "_HAS_VSA_SM100A", False))
+
+
+def validate_profile_dependencies(args: argparse.Namespace) -> None:
+    """Fail before model loading when the selected measured route is absent."""
+    if args.fa4 and not _fa4_is_installed():
+        raise RuntimeError(
+            "FastH3's FA4 profile requires the pinned flash-attn-4 package. Install it with "
+            "`UV_TORCH_BACKEND=cu130 uv pip install -e \".[fasth3]\"`, or pass --no-fa4.")
+    if args.vsa_kernel == "sm100a" and not _sm100a_kernel_is_installed():
+        raise RuntimeError(
+            "FastH3's sm100a profile requires fastvideo-kernel 0.3.4 built with the Blackwell VSA extension. "
+            "Install this checkout with `UV_TORCH_BACKEND=cu130 uv pip install -e \".[fasth3]\"` (or run "
+            "`cd fastvideo-kernel && ./build.sh`), or pass --vsa-kernel triton.")
+
+
+def build_generator_config(args: argparse.Namespace) -> GeneratorConfig:
+    experimental: dict[str, object] = {
+        "attention_backend": "VIDEO_SPARSE_ATTN_H3",
+        "VSA_sparsity": args.vsa_sparsity,
+        "VSA_tile_size": args.vsa_tile_size,
+        "inference_torch_compile": args.inference_torch_compile,
+        "vae_parallel_decode": args.parallel_vae,
+        "vae_parallel_decode_strategy": "gather",
+    }
+    return GeneratorConfig(
+        model_path=args.model_path,
+        pipeline=PipelineSelection(experimental=experimental),
+        engine=EngineConfig(
+            num_gpus=args.num_gpus,
+            use_fsdp_inference=args.num_gpus > 1 and not args.replicated_dit,
+            parallelism=ParallelismConfig(tp_size=1, sp_size=args.num_gpus),
+            offload=OffloadConfig(
+                dit=False,
+                dit_layerwise=False,
+                text_encoder=True,
+                vae=True,
+                pin_cpu_memory=args.pin_cpu_memory,
+            ),
+            compile=CompileConfig(
+                enabled=args.torch_compile,
+                mode=args.compile_mode,
+                vae_enabled=args.compile_vae,
+            ),
+        ),
+    )
+
+
+def build_request(args: argparse.Namespace, output_path: Path, seed: int) -> GenerationRequest:
+    return GenerationRequest(
+        prompt=args.prompt,
+        negative_prompt="",
+        sampling=SamplingConfig(
+            height=args.height,
+            width=args.width,
+            num_frames=args.num_frames,
+            fps=24,
+            num_inference_steps=args.steps,
+            # MiniMax-H3 is guidance-distilled; FastH3 inherits that contract.
+            guidance_scale=1.0,
+            batch_cfg=False,
+            seed=seed,
+        ),
+        output=OutputConfig(
+            output_path=str(output_path),
+            save_video=True,
+            return_frames=False,
+        ),
+    )
+
+
+def _actual_output_path(result: object, requested: Path) -> Path:
+    video_path = getattr(result, "video_path", None)
+    return Path(video_path) if video_path else requested
+
+
+def _denoise_seconds(result: object) -> float | None:
+    stages = getattr(getattr(result, "logging_info", None), "stages", None)
+    if not stages:
+        return None
+    for stage_name, metrics in stages.items():
+        if "denois" not in stage_name.lower():
+            continue
+        execution_time = metrics.get("execution_time")
+        return float(execution_time) if execution_time is not None else None
+    return None
+
+
+def run(args: argparse.Namespace) -> list[float]:
+    output_dir = Path(args.output)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    environment = configure_environment(args)
+    validate_profile_dependencies(args)
+
+    print(f"Profile: {args.profile} ({'non-parity fusions' if _h3_fusions_enabled(args) else 'fusions off'})")
+    print(f"Output directory: {output_dir.resolve()}")
+    print("Denoising contract: 5 sigma points = 4 DiT forwards" if args.steps == 5 else
+          f"Denoising contract override: {args.steps} sigma points = {args.steps - 1} DiT forwards")
+    print("Profile environment: " + " ".join(f"{key}={value if value is not None else '<unset>'}"
+                                                  for key, value in environment.items()))
+
+    generator = VideoGenerator.from_config(build_generator_config(args))
+    measured_wall_times: list[float] = []
+    measured_denoise_times: list[float] = []
+    try:
+        if args.warmup:
+            warmup_path = output_dir / "_fasth3_warmup.mp4"
+            print(f"[warmup] generating (excluded from timing summary): {warmup_path}")
+            started = time.perf_counter()
+            warmup_result = generator.generate(build_request(args, warmup_path, args.warmup_seed))
+            warmup_wall = time.perf_counter() - started
+            actual_warmup_path = _actual_output_path(warmup_result, warmup_path)
+            print(f"[warmup] wall={warmup_wall:.3f}s (excluded)")
+            print(f"Warmup output written to: {actual_warmup_path}")
+
+        for index in range(1, args.repeats + 1):
+            requested_path = output_dir / f"fasth3_{args.profile}_run_{index:02d}.mp4"
+            print(f"[measured {index}/{args.repeats}] generating: {requested_path}")
+            started = time.perf_counter()
+            result = generator.generate(build_request(args, requested_path, args.seed))
+            wall = time.perf_counter() - started
+            measured_wall_times.append(wall)
+            actual_path = _actual_output_path(result, requested_path)
+            print(f"Output written to: {actual_path}")
+            print(f"E2E wall time: {wall:.3f}s")
+            generation_time = getattr(result, "generation_time", None)
+            if generation_time is not None:
+                print(f"Generation time: {float(generation_time):.3f}s")
+            denoise_time = _denoise_seconds(result)
+            if denoise_time is not None:
+                measured_denoise_times.append(denoise_time)
+                print(f"Denoising time: {denoise_time:.3f}s")
+
+        median = statistics.median(measured_wall_times)
+        print(f"Measured E2E wall times (n={len(measured_wall_times)}, warmup excluded): "
+              f"{[round(value, 3) for value in measured_wall_times]}")
+        print(f"Median E2E wall time: {median:.3f}s")
+        if measured_denoise_times:
+            print(f"Median denoising time: {statistics.median(measured_denoise_times):.3f}s")
+        return measured_wall_times
+    finally:
+        generator.shutdown()
 
 
 def main() -> None:
-    args = parse_args()
-    output_dir = Path(args.output)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    if args.vsa_kernel == "sm100a":
-        # The attention backend reads FASTVIDEO_VSA_SM100A per forward; set it
-        # before the pipeline boots so spawned GPU workers inherit it. The
-        # kernel is forward-only and inference runs under no-grad, so every
-        # denoising forward qualifies for the CUDA route.
-        os.environ["FASTVIDEO_VSA_SM100A"] = "1"
-
-    # Boot-time run configuration, folded into FastVideoArgs (the same route
-    # examples/inference/basic/basic_minimax_h3_t2v.py uses for sparsity):
-    # - attention_backend: the checkpoint carries trained to_gate_compress
-    #   gates, which only exist under the VSA-H3 backend — a dense-backend
-    #   load would reject them as unexpected weights. Layers that do not
-    #   support VSA-H3 (e.g. the token refiner) fall back to flash attention.
-    # - VSA_tile_size: forwarded even at sparsity 0.0 because the gate-compress
-    #   branch pools per tile, and the gates were trained at 64 tokens/tile.
-    experimental: dict[str, object] = {
-        "attention_backend": "VIDEO_SPARSE_ATTN_H3",
-        "VSA_tile_size": args.vsa_tile_size,
-    }
-    if args.vsa_sparsity > 0.0:
-        experimental["VSA_sparsity"] = args.vsa_sparsity
-    if args.inference_torch_compile:
-        experimental["inference_torch_compile"] = True
-    if args.parallel_vae:
-        experimental["vae_parallel_decode"] = True
-
-    generator = VideoGenerator.from_config(
-        GeneratorConfig(
-            model_path=args.model_path,
-            pipeline=PipelineSelection(experimental=experimental),
-            engine=EngineConfig(
-                num_gpus=args.num_gpus,
-                use_fsdp_inference=args.num_gpus > 1 and not args.replicated_dit,
-                parallelism=ParallelismConfig(tp_size=1, sp_size=args.num_gpus),
-                offload=OffloadConfig(
-                    dit=False,
-                    dit_layerwise=False,
-                    text_encoder=True,
-                    vae=True,
-                    pin_cpu_memory=False,
-                ),
-                compile=CompileConfig(
-                    enabled=args.torch_compile,
-                    mode=args.compile_mode,
-                    vae_enabled=args.compile_vae,
-                ),
-            ),
-        ))
-    try:
-        request = GenerationRequest(
-            prompt=args.prompt,
-            negative_prompt="",
-            sampling=SamplingConfig(
-                height=args.height,
-                width=args.width,
-                num_frames=args.num_frames,
-                fps=24,
-                num_inference_steps=args.steps,
-                # the base model is guidance-distilled; the student inherits it
-                guidance_scale=1.0,
-                batch_cfg=False,
-                seed=args.seed,
-            ),
-            output=OutputConfig(
-                output_path=str(output_dir / "fasth3.mp4"),
-                save_video=True,
-                return_frames=False,
-            ),
-        )
-        result = generator.generate(request)
-        print(f"Output written to: {result.video_path}")
-        if result.generation_time is not None:
-            # machine-readable: benchmark harnesses parse this line to separate
-            # generation from model-load time (last occurrence = steady state)
-            print(f"Generation time: {result.generation_time:.2f}s")
-        for _ in range(args.repeats - 1):
-            result = generator.generate(request)
-            if result.generation_time is not None:
-                print(f"Generation time: {result.generation_time:.2f}s")
-    finally:
-        generator.shutdown()
+    run(parse_args())
 
 
 if __name__ == "__main__":

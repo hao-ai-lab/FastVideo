@@ -182,10 +182,10 @@ class FastVideoArgs:
     # compile ported from hao-ai-lab/FastVideo#1718. Applied by the loader
     # right after the transformer loads, with fullgraph=True and inductor
     # options {emulate_precision_casts: True} injected (no user kwargs
-    # needed). Attention backends that cannot be fullgraph-traced (VSA)
-    # degrade the transformer to eager with one warning. Dense FA2/FA3/FA4
-    # inference uses compile-visible custom-op
-    # boundaries. Opt-in via FASTVIDEO_INFERENCE_TORCH_COMPILE=1 (folded in
+    # needed). MiniMax-H3 VSA is supported only by its compile-safe sm_100a
+    # tile-64 inference route; other VSA routes degrade the transformer to
+    # eager with one warning. Dense FA2/FA3/FA4 inference uses compile-visible
+    # custom-op boundaries. Opt-in via FASTVIDEO_INFERENCE_TORCH_COMPILE=1 (folded in
     # __post_init__) or PipelineSelection.experimental
     # {"inference_torch_compile": true}. Distinct from ``enable_torch_compile``,
     # which keeps the pipeline-level compile semantics.

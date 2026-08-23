@@ -33,20 +33,28 @@ For the typed config/request path added during the inference API refactor:
 python examples/inference/basic/basic_dmd_new_api.py
 ```
 
-For the few-step (4-step, DMD2-distilled) MiniMax-H3 preview, generating synchronized video and audio, optionally with block-sparse VSA attention:
+For the few-step (4-forward, DMD2-distilled) MiniMax-H3 preview, generating synchronized video and audio with its trained block-sparse VSA attention:
+
+```bash
+UV_TORCH_BACKEND=cu130 uv pip install -e ".[fasth3]"
 ```
-python examples/inference/basic/basic_fasth3.py --prompt "your prompt" [--vsa-sparsity 0.9]
+
+This installs the pinned FA4 CuTe package and FastVideo kernel release used by
+the measured GB200 profile. Then run:
+
+```
+python examples/inference/basic/basic_fasth3.py --prompt "your prompt"
 ```
 The default checkpoint `FastVideo/FastVideo-Minimax-FastH3-Preview-v0.1` is private on the Hub while its license review completes; until it flips public, pass `--model-path` with a local snapshot of the release.
 
-On Blackwell (sm_100) GPUs with a `fastvideo-kernel` build that carries the sm_100a block-sparse extension, `--vsa-kernel sm100a` routes the tile-64 attention forwards through the CUDA kernel instead of Triton (it sets `FASTVIDEO_VSA_SM100A=1` before the pipeline boots); if the extension or the arch is missing, the run warns once and falls back to Triton.
+The default `all` profile is the fastest measured four-GPU Preview recipe on GB200. It selects VSA sparsity 0.9 with 64-token tiles and the sm_100a sparse kernel, enables FA4 for eligible non-VSA paths, regionally compiles and replicates the sparse DiT, compiles and temporally parallelizes the video VAE with the `gather` strategy, and pins CPU-offloaded component memory. It also pins the benchmark protocol: five sigma-grid points (exactly four DiT forwards), one excluded seed-999 warmup, then three timed seed-1000 requests with distinct output paths.
 
-For the fastest measured four-GPU Preview profile on GB200, keep the sparse DiT eager, compile and parallelize only the video VAE, replicate the DiT weights, and enable the inference-only H3 fusions explicitly:
+The equivalent explicit command is:
 
 ```bash
-FASTVIDEO_MINIMAX_H3_FUSIONS=all \
 python examples/inference/basic/basic_fasth3.py \
   --prompt "your prompt" \
+  --profile all \
   --num-gpus 4 \
   --steps 5 \
   --vsa-sparsity 0.9 \
@@ -54,10 +62,36 @@ python examples/inference/basic/basic_fasth3.py \
   --vsa-kernel sm100a \
   --compile-vae \
   --parallel-vae \
-  --replicated-dit
+  --replicated-dit \
+  --pin-cpu-memory \
+  --fa4 \
+  --no-torch-compile \
+  --inference-torch-compile \
+  --ulysses-a2a off \
+  --warmup \
+  --repeats 3 \
+  --seed 1000 \
+  --warmup-seed 999
 ```
 
-The fusion profile changes floating-point operation order and is a speed/quality evaluation route, not an exact-parity route. Omit `FASTVIDEO_MINIMAX_H3_FUSIONS` for strict sparse-DiT numerics; VAE chunk parallelism itself is bit-exact with the eager decoder.
+`all` enables the inference-only H3 fusions and regional compile. Both can change floating-point operation order, so this is a report-only performance profile rather than an exact-parity route. Use `--profile strict` to disable the H3 fusions while preserving regional compile, or `--profile strict --no-inference-torch-compile` for the eager strict route. Individual `--no-*` switches are available for portability and attribution; in particular, use `--vsa-kernel triton --no-fa4` if the Blackwell kernels are unavailable. The script preserves the warmup and each measured video under distinct paths, then prints per-request wall time plus a warmup-excluded median.
+
+One script covers each validated duration; regional compile is the fastest
+measured DiT route for all three:
+
+```bash
+# 5 s
+python examples/inference/basic/basic_fasth3.py \
+  --prompt "your prompt" --output outputs/fasth3_5s
+# 10 s
+python examples/inference/basic/basic_fasth3.py \
+  --prompt "your prompt" --num-frames 243 --output outputs/fasth3_10s
+# 15 s
+python examples/inference/basic/basic_fasth3.py \
+  --prompt "your prompt" --num-frames 345 --output outputs/fasth3_15s
+```
+
+Pass `--no-inference-torch-compile` to recover the eager sparse-DiT route.
 
 ## Basic Walkthrough
 

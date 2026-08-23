@@ -121,23 +121,13 @@ def _validate_inputs(
     return batch, seq_len, num_heads, head_dim, rotary_dim
 
 
-def fused_qknorm_rope(
+def _fused_qknorm_rope_impl(
     x: torch.Tensor,
     weight: torch.Tensor,
     cos: torch.Tensor,
     sin: torch.Tensor,
     eps: float,
 ) -> torch.Tensor:
-    """Run per-head RMSNorm and partial RoPE in one Sol-Engine-style kernel.
-
-    RMSNorm reduction and RoPE arithmetic stay in FP32 registers until the
-    final store. Triton's reduction order and the absence of eager's BF16
-    intermediate materializations can produce small, expected rounding drift.
-
-    Row offsets are computed in int64, so inputs beyond 2**31 total elements
-    (about 300k tokens per rank at H3's 56 heads x 128 head_dim) address
-    correctly.
-    """
     batch, seq_len, num_heads, head_dim, rotary_dim = _validate_inputs(x, weight, cos, sin, eps)
     if not weight.is_contiguous():
         raise ValueError("weight must be contiguous")
@@ -169,6 +159,58 @@ def fused_qknorm_rope(
         num_warps=4,
     )
     return flat_out.view(batch, seq_len, num_heads, head_dim)
+
+
+@torch.library.custom_op(
+    "fastvideo::_minimax_h3_qknorm_rope",
+    mutates_args=(),
+    device_types="cuda",
+)
+def _fused_qknorm_rope_op(
+    x: torch.Tensor,
+    weight: torch.Tensor,
+    cos: torch.Tensor,
+    sin: torch.Tensor,
+    eps: float,
+) -> torch.Tensor:
+    return _fused_qknorm_rope_impl(x, weight, cos, sin, eps)
+
+
+@torch.library.register_fake("fastvideo::_minimax_h3_qknorm_rope")
+def _fused_qknorm_rope_fake(
+    x: torch.Tensor,
+    weight: torch.Tensor,
+    cos: torch.Tensor,
+    sin: torch.Tensor,
+    eps: float,
+) -> torch.Tensor:
+    del weight, cos, sin, eps
+    return x.new_empty(x.shape)
+
+
+def fused_qknorm_rope(
+    x: torch.Tensor,
+    weight: torch.Tensor,
+    cos: torch.Tensor,
+    sin: torch.Tensor,
+    eps: float,
+) -> torch.Tensor:
+    """Run per-head RMSNorm and partial RoPE in one Sol-Engine-style kernel.
+
+    RMSNorm reduction and RoPE arithmetic stay in FP32 registers until the
+    final store. Triton's reduction order and the absence of eager's BF16
+    intermediate materializations can produce small, expected rounding drift.
+
+    Row offsets are computed in int64, so inputs beyond 2**31 total elements
+    (about 300k tokens per rank at H3's 56 heads x 128 head_dim) address
+    correctly.
+    """
+    if torch.is_grad_enabled() and any(
+            isinstance(tensor, torch.Tensor) and tensor.requires_grad for tensor in (x, weight, cos, sin)):
+        raise RuntimeError("fused_qknorm_rope is inference-only and does not implement autograd")
+    if torch.compiler.is_compiling():
+        return torch.ops.fastvideo._minimax_h3_qknorm_rope(x, weight, cos, sin, eps)
+    return _fused_qknorm_rope_impl(x, weight, cos, sin, eps)
 
 
 __all__ = ["HAVE_TRITON", "fused_qknorm_rope"]
