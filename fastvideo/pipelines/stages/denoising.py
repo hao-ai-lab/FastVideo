@@ -429,11 +429,16 @@ class DenoisingStage(PipelineStage):
         # cache-dit skips blocks via data-dependent control flow (a per-step
         # residual-diff decision), which torch.compile cannot trace without
         # graph breaks/recompiles. Disallow the combination for now (eager
-        # only); compile support is a follow-up.
-        if fastvideo_args.use_cachedit and fastvideo_args.enable_torch_compile:
-            raise ValueError("use_cachedit is currently incompatible with enable_torch_compile: cache-dit "
+        # only); compile support is a follow-up. ``inference_torch_compile``
+        # (regional fullgraph compile of each DiT block) is even stricter —
+        # the loader compiles the blocks with fullgraph=True before this stage
+        # ever runs, so the skip decision cannot graph-break out.
+        if fastvideo_args.use_cachedit and (fastvideo_args.enable_torch_compile
+                                            or fastvideo_args.inference_torch_compile):
+            _flag = ("enable_torch_compile" if fastvideo_args.enable_torch_compile else "inference_torch_compile")
+            raise ValueError(f"use_cachedit is currently incompatible with {_flag}: cache-dit "
                              "introduces data-dependent control flow that torch.compile cannot trace cleanly. "
-                             "Set enable_torch_compile=False (eager); compile support is a follow-up.")
+                             f"Set {_flag}=False (eager); compile support is a follow-up.")
         # Enable cache-dit on the transformer(s) once, then refresh the cache
         # context each generation so state never leaks across prompts.
         if fastvideo_args.use_cachedit:
