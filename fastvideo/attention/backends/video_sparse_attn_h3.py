@@ -692,7 +692,11 @@ class MiniMaxH3VSAImpl(AttentionImpl):
                     logger.warning_once(f"{VSA_SM100A_ENV}=1 but falling back to the Triton-64 kernels: {reason}")
 
             if use_sm100a:
-                logger.info_once("MiniMax-H3 VSA tile-64 forward: using the sm100a CUDA block-sparse kernel")
+                # Regional preparation emits the compile-route receipt before
+                # capture. Logging from this branch would itself break a
+                # ``fullgraph=True`` forward.
+                if not compiling:
+                    logger.info_once("MiniMax-H3 VSA tile-64 forward: using the sm100a CUDA block-sparse kernel")
                 if regional_compiling:
                     # The compile-safe wrapper keeps both Triton mask
                     # compaction and the raw pybind launch behind one
