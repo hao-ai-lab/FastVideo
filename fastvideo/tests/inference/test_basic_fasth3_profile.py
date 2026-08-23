@@ -29,7 +29,7 @@ def _args(*overrides: str):
     return fasth3.parse_args(["--prompt", "a test prompt", *overrides])
 
 
-def test_default_all_profile_matches_fastest_f4_contract(tmp_path):
+def test_default_all_profile_matches_fastest_contract(tmp_path):
     args = _args()
     config = fasth3.build_generator_config(args)
     request = fasth3.build_request(args, tmp_path / "result.mp4", args.seed)
@@ -96,6 +96,16 @@ def test_fast_profile_supports_measured_durations_without_separate_scripts(tmp_p
     assert args.ulysses_a2a == "off"
     assert config.pipeline.experimental["inference_torch_compile"] is True
     assert request.sampling.num_frames == num_frames
+
+
+def test_compile_mode_requires_regional_compile_opt_out(capsys):
+    with pytest.raises(SystemExit):
+        _args("--compile-mode", "reduce-overhead")
+    assert "--compile-mode cannot be combined with regional compile" in capsys.readouterr().err
+
+    args = _args("--compile-mode", "reduce-overhead", "--no-inference-torch-compile")
+    assert args.compile_mode == "reduce-overhead"
+    assert args.inference_torch_compile is False
 
 
 def test_default_sigma_grid_runs_exactly_four_dit_forwards():

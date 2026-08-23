@@ -7,10 +7,10 @@ grid (exactly four DiT forwards), trained VSA policy, Blackwell sparse kernel,
 regional fullgraph DiT compile, compiled/parallel video VAE, and inference-only
 H3 fusions. One compile warmup is excluded before three measured requests.
 
-The default fusions change floating-point operation order and therefore make
-``all`` a report-only performance profile. ``--profile strict`` changes only
-that one setting: it disables the non-parity H3 fusions while preserving the
-rest of the measured recipe.
+Both regional compile and the default fusions can change floating-point
+operation order, so ``all`` is a report-only performance profile.
+``--profile strict`` disables the H3 fusions but preserves regional compile;
+combine it with ``--no-inference-torch-compile`` for the eager strict route.
 """
 
 from __future__ import annotations
@@ -118,7 +118,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
                         default="off",
                         help="sequence-parallel all-to-all route; off reproduces the measured F4 profile, while "
                         "auto opts into the fused NVLink kernel when the installed kernel package supports it")
-    parser.add_argument("--compile-mode", default=None, help='torch.compile mode, e.g. "reduce-overhead"')
+    parser.add_argument("--compile-mode",
+                        default=None,
+                        help='whole-DiT torch.compile mode, e.g. "reduce-overhead"; requires '
+                        "--no-inference-torch-compile")
     args = parser.parse_args(argv)
     if args.repeats < 1:
         parser.error("--repeats must be at least 1")
@@ -126,6 +129,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error("--num-gpus must be at least 1")
     if not 0.0 <= args.vsa_sparsity < 1.0:
         parser.error("--vsa-sparsity must be in [0, 1)")
+    if args.compile_mode is not None and args.inference_torch_compile:
+        parser.error("--compile-mode cannot be combined with regional compile; pass --no-inference-torch-compile")
     return args
 
 

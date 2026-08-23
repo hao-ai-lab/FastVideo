@@ -74,18 +74,21 @@ python examples/inference/basic/basic_fasth3.py \
   --warmup-seed 999
 ```
 
-`all` enables the inference-only H3 fusions. They change floating-point operation order, so this is a report-only performance profile rather than an exact-parity route. Use `--profile strict` to disable only those fusions while preserving every other setting. Individual `--no-*` switches are available for portability and attribution; in particular, use `--vsa-kernel triton --no-fa4` if the Blackwell kernels are unavailable. The script preserves the warmup and each measured video under distinct paths, then prints per-request wall time plus a warmup-excluded median.
+`all` enables the inference-only H3 fusions and regional compile. Both can change floating-point operation order, so this is a report-only performance profile rather than an exact-parity route. Use `--profile strict` to disable the H3 fusions while preserving regional compile, or `--profile strict --no-inference-torch-compile` for the eager strict route. Individual `--no-*` switches are available for portability and attribution; in particular, use `--vsa-kernel triton --no-fa4` if the Blackwell kernels are unavailable. The script preserves the warmup and each measured video under distinct paths, then prints per-request wall time plus a warmup-excluded median.
 
 One script covers each validated duration; regional compile is the fastest
 measured DiT route for all three:
 
 ```bash
 # 5 s
-python examples/inference/basic/basic_fasth3.py --prompt "your prompt"
+python examples/inference/basic/basic_fasth3.py \
+  --prompt "your prompt" --output outputs/fasth3_5s
 # 10 s
-python examples/inference/basic/basic_fasth3.py --prompt "your prompt" --num-frames 243
+python examples/inference/basic/basic_fasth3.py \
+  --prompt "your prompt" --num-frames 243 --output outputs/fasth3_10s
 # 15 s
-python examples/inference/basic/basic_fasth3.py --prompt "your prompt" --num-frames 345
+python examples/inference/basic/basic_fasth3.py \
+  --prompt "your prompt" --num-frames 345 --output outputs/fasth3_15s
 ```
 
 Pass `--no-inference-torch-compile` to recover the eager sparse-DiT route.
