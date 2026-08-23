@@ -81,7 +81,11 @@ dependencies = [
     # (MPS) and other non-Linux platforms don't try to build it from source;
     # every fastvideo_kernel import elsewhere is already guarded to degrade
     # gracefully when the package is absent.
-    "fastvideo-kernel==0.3.4; sys_platform == 'linux'",
+    # Keep ordinary installs compatible with the currently published wheel
+    # while the in-repo FastH3 extra selects this checkout's kernel source.
+    # Fresh registry installs select 0.3.4 once the version-bump publisher
+    # completes after merge.
+    "fastvideo-kernel>=0.3.2,<0.3.5; sys_platform == 'linux'",
     "wheel",
 
     # Training Dependencies
@@ -108,12 +112,15 @@ members = ["apps/dreamverse"]
 
 [tool.uv.sources]
 # PyPI's aarch64 fastvideo-kernel wheels do not cover the NVIDIA DGX Spark /
-# GB10 (sm_121), so on ARM build from the in-tree source instead; x86_64 keeps
-# the published PyPI wheel. This table is uv-only: plain pip ignores it. Pass
-# --no-sources to bypass it (e.g. when the kernel is already installed, as in
-# the Spark install guide).
+# GB10 (sm_121), so on ARM build from the in-tree source instead. The FastH3
+# extra also selects the in-tree source on x86_64 so a PR checkout can build
+# its matching sm_100a route before that version reaches PyPI. Other x86_64
+# installs keep the published wheel. This table is uv-only: plain pip ignores
+# it. Pass --no-sources to bypass it (e.g. when the kernel is already
+# installed, as in the Spark install guide).
 fastvideo-kernel = [
   { path = "fastvideo-kernel", marker = "platform_machine == 'aarch64'" },
+  { path = "fastvideo-kernel", marker = "platform_machine == 'x86_64'", extra = "fasth3" },
 ]
 # torch / torchvision / torchaudio are intentionally NOT pinned to a PyTorch
 # index here. Pick the supported build explicitly at install time:
