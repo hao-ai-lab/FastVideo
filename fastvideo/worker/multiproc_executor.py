@@ -551,18 +551,22 @@ class WorkerMultiprocProc:
                 shutdown_requested = True
                 raise _WorkerSignalExit(signum)
 
-        # Either SIGTERM or SIGINT will terminate the worker
-        signal.signal(signal.SIGTERM, signal_handler)
-        signal.signal(signal.SIGINT, signal_handler)
-        kill_itself_when_parent_died()
-        faulthandler.enable()
-        parent_process = psutil.Process().parent()
-
         worker = None
         ready_pipe = kwargs.pop("ready_pipe")
         rank = kwargs.get("rank")
+        parent_process = None
 
         try:
+            # Keep all setup after handler installation inside this guarded
+            # region. The parent may terminate peer workers as soon as one
+            # worker fails, including while another peer is still starting.
+            # Either SIGTERM or SIGINT will terminate the worker.
+            signal.signal(signal.SIGTERM, signal_handler)
+            signal.signal(signal.SIGINT, signal_handler)
+            kill_itself_when_parent_died()
+            faulthandler.enable()
+            parent_process = psutil.Process().parent()
+
             worker = WorkerMultiprocProc(*args, **kwargs)
 
             # Send READY once we know everything is loaded
