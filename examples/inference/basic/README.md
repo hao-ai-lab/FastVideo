@@ -59,6 +59,7 @@ python examples/inference/basic/basic_fasth3.py \
   --fa4 \
   --no-torch-compile \
   --no-inference-torch-compile \
+  --ulysses-a2a off \
   --warmup \
   --repeats 3 \
   --seed 1000 \

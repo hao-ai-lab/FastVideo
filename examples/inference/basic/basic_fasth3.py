@@ -112,6 +112,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
                         action=argparse.BooleanOptionalAction,
                         default=False,
                         help="regionally compile DiT blocks (off in the measured F4 profile)")
+    parser.add_argument("--ulysses-a2a",
+                        choices=("off", "auto"),
+                        default="off",
+                        help="sequence-parallel all-to-all route; off reproduces the measured F4 profile, while "
+                        "auto opts into the fused NVLink kernel when the installed kernel package supports it")
     parser.add_argument("--compile-mode", default=None, help='torch.compile mode, e.g. "reduce-overhead"')
     args = parser.parse_args(argv)
     if args.repeats < 1:
@@ -151,7 +156,7 @@ def profile_environment(args: argparse.Namespace) -> dict[str, str | None]:
         "FASTVIDEO_VAE_PARALLEL_DECODE": "1" if args.parallel_vae else "0",
         "FASTVIDEO_VAE_PARALLEL_ENCODE": "0",
         "FASTVIDEO_VAE_PARALLEL_DECODE_STRATEGY": "gather",
-        "FASTVIDEO_ULYSSES_A2A": "off",
+        "FASTVIDEO_ULYSSES_A2A": args.ulysses_a2a,
         "FASTVIDEO_STAGE_LOGGING": "1",
     }
 
@@ -226,6 +231,18 @@ def _actual_output_path(result: object, requested: Path) -> Path:
     return Path(video_path) if video_path else requested
 
 
+def _denoise_seconds(result: object) -> float | None:
+    stages = getattr(getattr(result, "logging_info", None), "stages", None)
+    if not stages:
+        return None
+    for stage_name, metrics in stages.items():
+        if "denois" not in stage_name.lower():
+            continue
+        execution_time = metrics.get("execution_time")
+        return float(execution_time) if execution_time is not None else None
+    return None
+
+
 def run(args: argparse.Namespace) -> list[float]:
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -240,6 +257,7 @@ def run(args: argparse.Namespace) -> list[float]:
 
     generator = VideoGenerator.from_config(build_generator_config(args))
     measured_wall_times: list[float] = []
+    measured_denoise_times: list[float] = []
     try:
         if args.warmup:
             warmup_path = output_dir / "_fasth3_warmup.mp4"
@@ -264,11 +282,17 @@ def run(args: argparse.Namespace) -> list[float]:
             generation_time = getattr(result, "generation_time", None)
             if generation_time is not None:
                 print(f"Generation time: {float(generation_time):.3f}s")
+            denoise_time = _denoise_seconds(result)
+            if denoise_time is not None:
+                measured_denoise_times.append(denoise_time)
+                print(f"Denoising time: {denoise_time:.3f}s")
 
         median = statistics.median(measured_wall_times)
         print(f"Measured E2E wall times (n={len(measured_wall_times)}, warmup excluded): "
               f"{[round(value, 3) for value in measured_wall_times]}")
         print(f"Median E2E wall time: {median:.3f}s")
+        if measured_denoise_times:
+            print(f"Median denoising time: {statistics.median(measured_denoise_times):.3f}s")
         return measured_wall_times
     finally:
         generator.shutdown()

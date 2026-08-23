@@ -42,6 +42,7 @@ def test_default_all_profile_matches_measured_f4_contract(tmp_path):
     assert args.warmup_seed == 999
     assert args.warmup is True
     assert args.repeats == 3
+    assert args.ulysses_a2a == "off"
 
     assert config.engine.num_gpus == 4
     assert config.engine.parallelism.tp_size == 1
@@ -147,7 +148,11 @@ def test_run_excludes_warmup_and_uses_distinct_measured_outputs(monkeypatch, tmp
         def generate(self, request):
             calls.append(request)
             Path(request.output.output_path).touch()
-            return SimpleNamespace(video_path=request.output.output_path, generation_time=1.25)
+            return SimpleNamespace(
+                video_path=request.output.output_path,
+                generation_time=1.25,
+                logging_info=SimpleNamespace(stages={"denoising": {"execution_time": 2.5}}),
+            )
 
         def shutdown(self):
             self.shutdown_called = True
@@ -184,5 +189,7 @@ def test_run_excludes_warmup_and_uses_distinct_measured_outputs(monkeypatch, tmp
     assert "[warmup] wall=5.000s (excluded)" in output
     assert f"Warmup output written to: {tmp_path / '_fasth3_warmup.mp4'}" in output
     assert output.count("Output written to:") == 3
+    assert output.count("Denoising time: 2.500s") == 3
     assert "Measured E2E wall times (n=3, warmup excluded): [6.0, 7.0, 8.0]" in output
     assert "Median E2E wall time: 7.000s" in output
+    assert "Median denoising time: 2.500s" in output
