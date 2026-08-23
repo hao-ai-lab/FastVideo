@@ -35,7 +35,7 @@ python examples/inference/basic/basic_dmd_new_api.py
 
 ### FastH3 Preview
 
-For the few-step (4-forward, DMD2-distilled) MiniMax-H3 preview, generating synchronized video and audio with its trained block-sparse VSA attention:
+The verified [basic FastH3 example](basic_fasth3.py) runs the few-step (4-forward, DMD2-distilled) MiniMax-H3 preview, generating synchronized video and audio with its trained block-sparse VSA attention:
 
 ```bash
 UV_TORCH_BACKEND=cu130 uv pip install -e ".[fasth3]"
@@ -47,7 +47,7 @@ the measured GB200 profile. Then run:
 ```
 python examples/inference/basic/basic_fasth3.py --prompt "your prompt"
 ```
-The default checkpoint, [FastH3 Preview v0.1](https://huggingface.co/FastVideo/FastVideo-Minimax-FastH3-Preview-v0.1), is public on the Hub under the MiniMax H3 Community License. Review its model card and license before use or redistribution.
+The default checkpoint, [FastH3 Preview v0.2](https://huggingface.co/FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2), is public on the Hub under the MiniMax H3 Community License. Review its model card and license before use or redistribution.
 
 The default `all` profile is the fastest measured four-GPU Preview recipe on GB200. It selects VSA sparsity 0.9 with 64-token tiles and the sm_100a sparse kernel, enables FA4 for eligible non-VSA paths, regionally compiles and replicates the sparse DiT, compiles and temporally parallelizes the video VAE with the `gather` strategy, and pins CPU-offloaded component memory. It also pins the benchmark protocol: five sigma-grid points (exactly four DiT forwards), one excluded seed-999 warmup, then three timed seed-1000 requests with distinct output paths.
 

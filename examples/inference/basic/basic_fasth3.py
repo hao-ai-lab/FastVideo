@@ -36,7 +36,7 @@ from fastvideo.api import (
     SamplingConfig,
 )
 
-DEFAULT_MODEL = "FastVideo/FastVideo-Minimax-FastH3-Preview-v0.1"
+DEFAULT_MODEL = "FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2"
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
