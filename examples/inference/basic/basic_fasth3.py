@@ -108,15 +108,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--torch-compile",
                         action=argparse.BooleanOptionalAction,
                         default=False,
-                        help="compile the whole DiT path (off in the measured F4 profile)")
+                        help="compile the whole DiT path (off in the fastest FastH3 profile)")
     parser.add_argument("--inference-torch-compile",
                         action=argparse.BooleanOptionalAction,
                         default=True,
-                        help="regionally compile DiT blocks (enabled in the fastest measured F4 profile)")
+                        help="regionally compile DiT blocks (enabled in the fastest FastH3 profile)")
     parser.add_argument("--ulysses-a2a",
                         choices=("off", "auto"),
                         default="off",
-                        help="sequence-parallel all-to-all route; off reproduces the measured F4 profile, while "
+                        help="sequence-parallel all-to-all route; off reproduces the fastest FastH3 profile, while "
                         "auto opts into the fused NVLink kernel when the installed kernel package supports it")
     parser.add_argument("--compile-mode",
                         default=None,
