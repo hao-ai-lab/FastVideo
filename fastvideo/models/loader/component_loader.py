@@ -1127,6 +1127,7 @@ class TransformerLoader(ComponentLoader):
                 enable_torch_compile=fastvideo_args.enable_torch_compile,
                 torch_compile_kwargs=fastvideo_args.torch_compile_kwargs,
                 inference_regional_compile=fastvideo_args.inference_torch_compile,
+                inference_vsa_tile_size=fastvideo_args.VSA_tile_size,
             )
 
         total_params = sum(p.numel() for p in model.parameters())

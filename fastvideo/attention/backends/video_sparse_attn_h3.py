@@ -94,6 +94,65 @@ VSA_H3_TILE_SHAPES: dict[int, tuple[int, int, int]] = {
 }
 
 
+@torch.library.custom_op(
+    "fastvideo::h3_vsa_sm100a_from_mask_compat",
+    mutates_args=(),
+    device_types="cuda",
+)
+def _h3_vsa_sm100a_from_mask_compat(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    block_map: torch.Tensor,
+    variable_block_sizes: torch.Tensor,
+) -> torch.Tensor:
+    """Compile-safe mask adapter for kernel wheels predating the mask API."""
+    if _sm100a is None or map_to_index is None:
+        raise RuntimeError("The sm100a compatibility route requires the raw kernel and map_to_index")
+    q2k_idx, q2k_num = map_to_index(block_map)
+    out, _ = _sm100a.block_sparse_attn_sm100a(
+        q,
+        k,
+        v,
+        q2k_idx.to(torch.int32).contiguous(),
+        q2k_num.to(torch.int32).contiguous(),
+        variable_block_sizes.to(torch.int32).contiguous(),
+        need_lse=False,
+    )
+    return out
+
+
+@torch.library.register_fake("fastvideo::h3_vsa_sm100a_from_mask_compat")
+def _h3_vsa_sm100a_from_mask_compat_fake(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    block_map: torch.Tensor,
+    variable_block_sizes: torch.Tensor,
+) -> torch.Tensor:
+    del k, v, block_map, variable_block_sizes
+    return torch.empty_like(q)
+
+
+def _sm100a_has_compile_safe_mask_route(sm100a_mod: Any) -> bool:
+    return (callable(getattr(sm100a_mod, "block_sparse_attn_sm100a_from_mask", None))
+            or (callable(getattr(sm100a_mod, "block_sparse_attn_sm100a", None)) and map_to_index is not None))
+
+
+def _sm100a_from_mask(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    block_map: torch.Tensor,
+    variable_block_sizes: torch.Tensor,
+) -> tuple[torch.Tensor, None]:
+    """Use the native mask entry when installed, otherwise the local adapter."""
+    native = getattr(_sm100a, "block_sparse_attn_sm100a_from_mask", None)
+    if callable(native):
+        return native(q, k, v, block_map, variable_block_sizes)
+    return _h3_vsa_sm100a_from_mask_compat(q, k, v, block_map, variable_block_sizes), None
+
+
 def token_tile_and_valid(variable_block_sizes: torch.Tensor,
                          tile_elems: int = _TILE_ELEMS) -> tuple[torch.Tensor, torch.Tensor]:
     """Per padded-token tile id and pad-validity mask.
@@ -390,7 +449,7 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         self._regional_compile_sm100a_enabled: bool | None = None
         self._regional_compile_layer_idx: torch.Tensor | None = None
 
-    def prepare_for_regional_compile(self, device: torch.device) -> None:
+    def prepare_for_regional_compile(self, device: torch.device) -> str | None:
         """Resolve the inference-only sm_100a route before fullgraph capture.
 
         The ordinary eager route probes the environment, extension, device,
@@ -400,21 +459,15 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         the loaded model's device now, then let ``forward`` specialize on the
         resulting plain bool while Dynamo is compiling.
         """
-        # Dynamo specializes Python integer attributes of nn.Module-owned
-        # objects. All 50 H3 blocks share one forward code object, so reading
-        # ``self.layer_idx`` in every regional graph exhausts the recompile
-        # cache. Tensor contents stay dynamic and let the blocks share a graph.
-        self._regional_compile_layer_idx = torch.tensor(self.layer_idx, device=device, dtype=torch.int64)
-
         requested = os.environ.get(VSA_SM100A_ENV, "0") == "1"
         enabled = False
-        reason = None
+        reason = None if requested else f"{VSA_SM100A_ENV}=1 is required for compile-safe VSA-H3 attention"
         if requested:
             if _sm100a is None:
                 reason = "fastvideo_kernel.block_sparse_attn_sm100a is not installed"
-            elif not callable(getattr(_sm100a, "block_sparse_attn_sm100a_from_mask", None)):
-                reason = ("fastvideo_kernel.block_sparse_attn_sm100a_from_mask is not installed; "
-                          "rebuild fastvideo-kernel with the compile-safe mask entry")
+            elif not _sm100a_has_compile_safe_mask_route(_sm100a):
+                reason = ("neither a native block_sparse_attn_sm100a_from_mask entry nor the raw sm100a "
+                          "kernel plus map_to_index compatibility route is installed")
             else:
                 # Two 64-token blocks exercise the exact sm_100a inference
                 # specialization while keeping the one-time probe tiny.  The
@@ -432,8 +485,18 @@ class MiniMaxH3VSAImpl(AttentionImpl):
                 enabled = reason is None
 
         self._regional_compile_sm100a_enabled = enabled
+        # Keep this marker unset when preparation fails. Generic/training
+        # torch.compile must retain the established Triton attention route.
+        self._regional_compile_layer_idx = (torch.tensor(self.layer_idx, device=device, dtype=torch.int64)
+                                            if enabled else None)
+        if enabled:
+            route = ("native fastvideo-kernel mask entry"
+                     if callable(getattr(_sm100a, "block_sparse_attn_sm100a_from_mask", None)) else
+                     "FastVideo compatibility mask adapter")
+            logger.info_once(f"VSA-H3 regional compile mask route: {route}")
         if requested and reason is not None:
-            logger.warning_once(f"{VSA_SM100A_ENV}=1 but falling back to the Triton-64 kernels: {reason}")
+            logger.warning_once(f"VSA-H3 regional compile is unavailable and will stay eager: {reason}")
+        return reason
 
     def tile(self, x: torch.Tensor, attn_metadata: MiniMaxH3VSAMetadata) -> torch.Tensor:
         """Scatter rows into the padded tile buffer (pad positions stay zero).
@@ -451,12 +514,12 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         n_tiles = attn_metadata.variable_block_sizes.numel()
         grad_mode = torch.is_grad_enabled() and x.requires_grad
         compiling = torch.compiler.is_compiling()
-        if compiling:
-            if self._regional_compile_sm100a_enabled is None:
-                raise RuntimeError(
-                    "VSA-H3 sm_100a routing was not resolved before torch.compile; "
-                    "call prepare_for_regional_compile(device) on every MiniMaxH3VSAImpl after loading weights.")
+        regional_compiling = compiling and self._regional_compile_layer_idx is not None
+        if regional_compiling:
             sm100a_requested = self._regional_compile_sm100a_enabled
+        elif compiling:
+            # Training/generic compile keeps the long-standing Triton route.
+            sm100a_requested = False
         else:
             sm100a_requested = os.environ.get(VSA_SM100A_ENV, "0") == "1"
         needs_sm100a_pair = (attn_metadata.tile_elems == 64 and n_tiles % 2 != 0 and not grad_mode
@@ -497,7 +560,13 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         gate_compress: torch.Tensor | None,
         attn_metadata: MiniMaxH3VSAMetadata,
     ) -> torch.Tensor:
+        compiling = torch.compiler.is_compiling()
+        regional_compiling = compiling and self._regional_compile_layer_idx is not None
+
         tile_elems = attn_metadata.tile_elems
+        if regional_compiling and tile_elems != 64:
+            raise RuntimeError("VSA-H3 regional fullgraph compile requires 64-token tiles; disable "
+                               "inference_torch_compile for tile-256/CuTe runs.")
         if tile_elems == 64:
             if block_sparse_attn_64_bhsd is None:
                 raise NotImplementedError("fastvideo_kernel.block_sparse_attn is not installed")
@@ -507,8 +576,6 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         # Probe recording performs filesystem writes and host synchronizations,
         # so the loader keeps probe-enabled runs eager. Avoid even reading that
         # environment switch while Dynamo captures a regional full graph.
-        compiling = torch.compiler.is_compiling()
-
         # The metadata always describes the trained logical geometry.
         # ``tile()`` may append exactly one transport-only partner for an odd
         # tile-64 sm100a call. Keep score selection and the gate branch on the
@@ -541,11 +608,8 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         # capture, keep the layer decision tensor-valued so the 50 block
         # instances reuse one graph instead of specializing on layer_idx.
         force_dense = None
-        if compiling:
-            if self._regional_compile_layer_idx is None:
-                raise RuntimeError(
-                    "VSA-H3 layer routing was not resolved before torch.compile; "
-                    "call prepare_for_regional_compile(device) on every MiniMaxH3VSAImpl after loading weights.")
+        if regional_compiling:
+            assert self._regional_compile_layer_idx is not None
             force_dense = (attn_metadata.dense_layers_tensor == self._regional_compile_layer_idx).any()
             layer_sparsity = attn_metadata.VSA_sparsity
         else:
@@ -604,7 +668,7 @@ class MiniMaxH3VSAImpl(AttentionImpl):
             # fwd/bwd pairing is possible, but it is not built here.
             grad_mode = torch.is_grad_enabled() and (query.requires_grad or key.requires_grad or value.requires_grad)
             use_sm100a = False
-            if compiling:
+            if regional_compiling:
                 if self._regional_compile_sm100a_enabled is None:
                     raise RuntimeError(
                         "VSA-H3 sm_100a routing was not resolved before torch.compile; "
@@ -613,9 +677,13 @@ class MiniMaxH3VSAImpl(AttentionImpl):
                 # support.  Keep only static tensor/geometry facts here; no
                 # env access, device-capability query, or is_supported call may
                 # enter the Dynamo graph.
-                use_sm100a = (self._regional_compile_sm100a_enabled and not grad_mode and q_bhsd.dtype == torch.bfloat16
-                              and q_bhsd.shape[-1] == 128 and sm100a_variable_block_sizes.numel() % 2 == 0)
-            elif os.environ.get(VSA_SM100A_ENV, "0") == "1":
+                if not (self._regional_compile_sm100a_enabled and not grad_mode and q_bhsd.dtype == torch.bfloat16
+                        and q_bhsd.shape[-1] == 128 and sm100a_variable_block_sizes.numel() % 2 == 0):
+                    raise RuntimeError(
+                        "VSA-H3 regional fullgraph compile requires the prepared sm_100a BF16/head-128 route "
+                        "on a supported device; disable inference_torch_compile for this request.")
+                use_sm100a = True
+            elif not compiling and os.environ.get(VSA_SM100A_ENV, "0") == "1":
                 reason = _sm100a_unavailable_reason(_sm100a, q_bhsd, sm100a_variable_block_sizes, grad_mode)
                 if reason is None and map_to_index is None:
                     reason = "fastvideo_kernel.triton_kernels.index (map_to_index) is not importable"
@@ -626,11 +694,11 @@ class MiniMaxH3VSAImpl(AttentionImpl):
 
             if use_sm100a:
                 logger.info_once("MiniMax-H3 VSA tile-64 forward: using the sm100a CUDA block-sparse kernel")
-                if compiling:
+                if regional_compiling:
                     # The compile-safe wrapper keeps both Triton mask
                     # compaction and the raw pybind launch behind one
                     # fake-backed custom-op boundary.
-                    out_bhsd, _ = _sm100a.block_sparse_attn_sm100a_from_mask(
+                    out_bhsd, _ = _sm100a_from_mask(
                         q_bhsd,
                         k_bhsd,
                         v_bhsd,

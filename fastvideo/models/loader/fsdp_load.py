@@ -117,6 +117,23 @@ def set_default_dtype(dtype: torch.dtype) -> Generator[None, None, None]:
         torch.set_default_dtype(old_dtype)
 
 
+def _prepare_model_for_compile(model: nn.Module, *, regional: bool) -> str | None:
+    """Run a model compile hook, preferring its regional specialization."""
+    prepare = None
+    hook_name = "prepare_for_compile"
+    if regional:
+        prepare = getattr(model, "prepare_for_regional_compile", None)
+        hook_name = "prepare_for_regional_compile"
+    if not callable(prepare):
+        prepare = getattr(model, "prepare_for_compile", None)
+        hook_name = "prepare_for_compile"
+    if not callable(prepare):
+        return None
+    logger.info("Running %s for %s", hook_name, type(model).__name__)
+    unsupported = prepare()
+    return unsupported if isinstance(unsupported, str) and unsupported else None
+
+
 # Supports optional torch.compile for FSDP-wrapped models during training
 def maybe_load_fsdp_model(
     model_cls: type[nn.Module],
@@ -137,6 +154,7 @@ def maybe_load_fsdp_model(
     enable_torch_compile: bool = False,
     torch_compile_kwargs: dict[str, Any] | None = None,
     inference_regional_compile: bool = False,
+    inference_vsa_tile_size: int | None = None,
 ) -> torch.nn.Module:
     """
     Load the model with FSDP if is training, else load the model without FSDP.
@@ -232,31 +250,40 @@ def maybe_load_fsdp_model(
 
     compile_in_loader = enable_torch_compile and training_mode
     if compile_in_loader:
-        compile_kwargs = torch_compile_kwargs or {}
-        logger.info("Enabling torch.compile for FSDP training module with kwargs=%s", compile_kwargs)
-        model = torch.compile(model, **compile_kwargs)
-        logger.info("torch.compile enabled for %s", type(model).__name__)
+        unsupported = _prepare_model_for_compile(model, regional=False)
+        if unsupported is not None:
+            logger.warning("Training torch.compile requested but disabled: %s. Model stays eager.", unsupported)
+        else:
+            compile_kwargs = torch_compile_kwargs or {}
+            logger.info("Enabling torch.compile for FSDP training module with kwargs=%s", compile_kwargs)
+            model = torch.compile(model, **compile_kwargs)
+            logger.info("torch.compile enabled for %s", type(model).__name__)
     elif inference_regional_compile and not training_mode:
         # Inference-side counterpart of the #1718 training regional compile:
         # per-block fullgraph compile right after the transformer loads, no
         # user kwargs needed (fullgraph + emulate_precision_casts injected).
-        unsupported = _regional_compile_unsupported_reason(init_params)
+        unsupported = _regional_compile_unsupported_reason(
+            init_params,
+            vsa_tile_size=inference_vsa_tile_size,
+        )
+        if unsupported is None:
+            unsupported = _prepare_model_for_compile(model, regional=True)
         if unsupported is not None:
             logger.warning(
                 "inference_torch_compile requested but disabled: %s. "
                 "Inference continues in eager mode.", unsupported)
         else:
-            prepare_for_compile = getattr(model, "prepare_for_compile", None)
-            if callable(prepare_for_compile):
-                logger.info("Running prepare_for_compile for %s", type(model).__name__)
-                prepare_for_compile()
             attention_count = _enable_regional_attention_compile(model)
             logger.info("Enabled attention tracing for %d modules in %s", attention_count, type(model).__name__)
             _compile_model_regions(model, torch_compile_kwargs or {})
     return model
 
 
-def _regional_compile_unsupported_reason(init_params: dict[str, Any]) -> str | None:
+def _regional_compile_unsupported_reason(
+    init_params: dict[str, Any],
+    *,
+    vsa_tile_size: int | None = None,
+) -> str | None:
     """Return why regional fullgraph compile cannot run, or None if it can.
 
     Dense FA2, FA3, and FA4 inference all route through compile-visible
@@ -264,9 +291,9 @@ def _regional_compile_unsupported_reason(init_params: dict[str, Any]) -> str | N
     to grad-enabled calls, outside this inference-only loader path.
 
     The legacy VSA backend remains outside the fullgraph support envelope.
-    MiniMax H3's VSA backend has a model-specific ``prepare_for_compile``
-    hook that resolves its loaded compression gates before block capture, so
-    VIDEO_SPARSE_ATTN_H3 is allowed through this policy gate.
+    MiniMax H3's VSA backend is supported only through the inference-only
+    sm_100a tile-64 route; its regional hook resolves loaded compression
+    gates and probes the kernel before block capture.
     """
     try:
         from fastvideo.attention.layer import _attention_compile_explicitly_disabled
@@ -286,9 +313,16 @@ def _regional_compile_unsupported_reason(init_params: dict[str, Any]) -> str | N
     config = init_params.get("config")
     resolved = getattr(config, "_resolved_attention_backend", None)
     resolved_name = getattr(resolved, "name", "")
-    if resolved_name == "VIDEO_SPARSE_ATTN_H3" and os.environ.get("FASTVIDEO_H3_VSA_PROBE"):
-        return ("FASTVIDEO_H3_VSA_PROBE records tensors and files from the VSA-H3 attention body, which "
-                "regional fullgraph compile cannot capture; this model stays eager")
+    if resolved_name == "VIDEO_SPARSE_ATTN_H3":
+        if os.environ.get("FASTVIDEO_H3_VSA_PROBE"):
+            return ("FASTVIDEO_H3_VSA_PROBE records tensors and files from the VSA-H3 attention body, which "
+                    "regional fullgraph compile cannot capture; this model stays eager")
+        if os.environ.get("FASTVIDEO_VSA_SM100A", "0") != "1":
+            return ("VIDEO_SPARSE_ATTN_H3 regional compile requires the compile-safe sm_100a route "
+                    "(FASTVIDEO_VSA_SM100A=1); Triton/CuTe VSA stays eager")
+        if vsa_tile_size != 64:
+            return ("VIDEO_SPARSE_ATTN_H3 regional compile requires VSA_tile_size=64; "
+                    f"got {vsa_tile_size!r}, so tile-256/CuTe VSA stays eager")
     if resolved_name == "VIDEO_SPARSE_ATTN":
         return (f"attention backend resolved to {resolved_name}, whose Triton "
                 "kernels, sequence-parallel collectives, and sync metadata "

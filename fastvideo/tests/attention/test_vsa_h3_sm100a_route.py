@@ -132,8 +132,9 @@ def test_prepare_for_regional_compile_resolves_supported_route(monkeypatch):
     monkeypatch.setenv(VSA_SM100A_ENV, "1")
     impl = MiniMaxH3VSAImpl(num_heads=_HEADS, head_size=_DIM, causal=False, softmax_scale=_DIM**-0.5)
 
-    impl.prepare_for_regional_compile(torch.device("cpu"))
+    unsupported = impl.prepare_for_regional_compile(torch.device("cpu"))
 
+    assert unsupported is None
     assert impl._regional_compile_sm100a_enabled is True
     assert len(fake_sm.support_calls) == 1
     probe_q, probe_vbs = fake_sm.support_calls[0]
@@ -151,9 +152,12 @@ def test_prepare_for_regional_compile_env_off_skips_probe(monkeypatch):
     monkeypatch.delenv(VSA_SM100A_ENV, raising=False)
     impl = MiniMaxH3VSAImpl(num_heads=_HEADS, head_size=_DIM, causal=False, softmax_scale=_DIM**-0.5)
 
-    impl.prepare_for_regional_compile(torch.device("cpu"))
+    unsupported = impl.prepare_for_regional_compile(torch.device("cpu"))
 
+    assert unsupported is not None
+    assert VSA_SM100A_ENV in unsupported
     assert impl._regional_compile_sm100a_enabled is False
+    assert impl._regional_compile_layer_idx is None
     assert fake_sm.support_calls == []
 
 
@@ -170,11 +174,40 @@ def test_prepare_for_regional_compile_requires_mask_entry(monkeypatch):
     monkeypatch.setattr(vsa_h3.logger, "warning_once", warnings.append)
     impl = MiniMaxH3VSAImpl(num_heads=_HEADS, head_size=_DIM, causal=False, softmax_scale=_DIM**-0.5)
 
-    impl.prepare_for_regional_compile(torch.device("cpu"))
+    unsupported = impl.prepare_for_regional_compile(torch.device("cpu"))
 
+    assert unsupported is not None
     assert impl._regional_compile_sm100a_enabled is False
+    assert impl._regional_compile_layer_idx is None
     assert len(warnings) == 1
-    assert "block_sparse_attn_sm100a_from_mask" in warnings[0]
+    assert "compatibility route" in warnings[0]
+
+
+def test_mask_dispatch_uses_local_compatibility_route_for_older_kernel_wheel(monkeypatch):
+    class _RawOnlySm100a:
+
+        def block_sparse_attn_sm100a(self, *args, **kwargs):
+            raise AssertionError("raw entry must remain behind the compatibility custom op")
+
+    fake_sm = _RawOnlySm100a()
+    monkeypatch.setattr(vsa_h3, "_sm100a", fake_sm)
+    monkeypatch.setattr(vsa_h3, "map_to_index", lambda mask: (mask, mask))
+    calls = []
+
+    def compat(q, k, v, block_map, variable_block_sizes):
+        calls.append((block_map, variable_block_sizes))
+        return q + 1
+
+    monkeypatch.setattr(vsa_h3, "_h3_vsa_sm100a_from_mask_compat", compat)
+    q = torch.zeros(1, 1, 128, _DIM)
+    mask = torch.ones(1, 1, 2, 2, dtype=torch.bool)
+    vbs = torch.full((2, ), 64, dtype=torch.int32)
+
+    out, lse = vsa_h3._sm100a_from_mask(q, q, q, mask, vbs)
+
+    assert vsa_h3._sm100a_has_compile_safe_mask_route(fake_sm)
+    torch.testing.assert_close(out, q + 1)
+    assert lse is None and calls == [(mask, vbs)]
 
 
 def test_prepared_route_fullgraph_avoids_eager_dispatch(monkeypatch):
@@ -279,6 +312,17 @@ def test_default_off_routes_triton(routed, monkeypatch):
     fake_sm, fake_triton, run, _ = routed
     monkeypatch.delenv(VSA_SM100A_ENV, raising=False)
     run()
+    assert fake_triton.calls == 1
+    assert fake_sm.calls == []
+
+
+def test_unprepared_training_compile_keeps_existing_triton_route(routed, monkeypatch):
+    fake_sm, fake_triton, run, _ = routed
+    monkeypatch.setenv(VSA_SM100A_ENV, "1")
+    monkeypatch.setattr(torch.compiler, "is_compiling", lambda: True)
+
+    run(requires_grad=True)
+
     assert fake_triton.calls == 1
     assert fake_sm.calls == []
 
@@ -540,3 +584,38 @@ def test_real_sm100a_odd_route_matches_triton_oracle(monkeypatch):
     assert sm100a_tiled.shape[1] == triton_tiled.shape[1] + 64
     assert sm100a_output.shape == triton_output.shape == (1, meta.total_seq_length, _HEADS, _DIM)
     torch.testing.assert_close(sm100a_output.float(), triton_output.float(), atol=0.04, rtol=0.02)
+
+
+def test_real_sm100a_odd_preprocess_forward_postprocess_fullgraph(monkeypatch):
+    """Capture #1745's odd transport buffer mutation with real Inductor."""
+    if not torch.cuda.is_available() or torch.cuda.get_device_capability() != (10, 0):
+        pytest.skip("requires a GB200 (sm_100a) compute node")
+    if vsa_h3._sm100a is None or not vsa_h3._sm100a._HAS_VSA_SM100A:
+        pytest.skip("requires a fastvideo_kernel build containing sm_100a VSA")
+
+    device = torch.device("cuda")
+    monkeypatch.setenv(VSA_SM100A_ENV, "1")
+    meta = _build_meta(device=device, sparsity=0.5)
+    assert meta.variable_block_sizes.numel() % 2 == 1
+    impl = MiniMaxH3VSAImpl(num_heads=_HEADS, head_size=_DIM, causal=False, softmax_scale=_DIM**-0.5)
+    assert impl.prepare_for_regional_compile(device) is None
+    torch.manual_seed(17)
+    raw_qkv = torch.randn(3, meta.total_seq_length, _HEADS, _DIM, device=device, dtype=torch.bfloat16)
+
+    def run(raw):
+        tiled = impl.preprocess_qkv(raw, meta)
+        query, key, value = tiled.chunk(3, dim=0)
+        output = impl.forward(query, key, value, None, meta)
+        return impl.postprocess_output(output, meta)
+
+    torch._dynamo.reset()
+    try:
+        with torch.inference_mode():
+            compiled = torch.compile(run, fullgraph=True)
+            output = compiled(raw_qkv)
+            torch.cuda.synchronize()
+    finally:
+        torch._dynamo.reset()
+
+    assert output.shape == (1, meta.total_seq_length, _HEADS, _DIM)
+    assert torch.isfinite(output).all()

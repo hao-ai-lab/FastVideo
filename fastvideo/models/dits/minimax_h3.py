@@ -736,51 +736,61 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
     def prepare_for_compile(self) -> None:
         """Pipeline hook, called once right before torch.compile wraps the blocks.
 
-        Resolve each loaded VSA compression gate eagerly, then let the H3 VSA
-        implementation preselect its device-specific kernel route. This keeps
-        both choices static during fullgraph capture and prevents host-side
-        probes or cache mutation in Dynamo.
+        Resolve each loaded VSA compression gate eagerly. Generic and training
+        compile retain their established attention dispatch; only the
+        inference loader's separate ``prepare_for_regional_compile`` hook may
+        preselect the inference-only sm_100a path.
 
         The inference-only Triton fusions expose fake-backed custom operators,
         so Dynamo can keep them active as opaque nodes inside each fullgraph
         block instead of tracing into their launcher implementation.
         """
-        compile_state = next(self.parameters(), None)
-        if compile_state is None:
-            compile_state = next(self.buffers(), None)
-        if compile_state is None:
-            raise RuntimeError("MiniMax H3 has no materialized parameter or buffer to identify its compile device.")
-        compile_device = compile_state.device
-
         gate_states: list[bool] = []
-        prepared_vsa_impls = 0
         for block in self.transformer_blocks:
             attention = block.attn
             if attention.to_gate_compress is not None:
                 attention._resolve_gate_compress_for_compile()
                 assert attention._gate_compress_active is not None
                 gate_states.append(attention._gate_compress_active)
-            prepare_vsa = getattr(attention.distributed_attention.attn_impl, "prepare_for_regional_compile", None)
-            if callable(prepare_vsa):
-                # Generic post-load quantization may replace to_q.weight with
-                # packed buffers before this hook runs. The transformer state
-                # remains materialized on the same local device.
-                prepare_vsa(compile_device)
-                prepared_vsa_impls += 1
         if gate_states:
             logger.info(
                 "Resolved MiniMax H3 VSA compression gates before torch.compile: %d active, %d inactive",
                 sum(gate_states),
                 len(gate_states) - sum(gate_states),
             )
-        if prepared_vsa_impls:
-            logger.info("Prepared %d MiniMax H3 VSA attention implementations for regional torch.compile",
-                        prepared_vsa_impls)
         if self.enabled_fusions:
             logger.info(
                 "MiniMax H3 inference fusions remain active under torch.compile through custom-op boundaries: %s",
                 ",".join(sorted(self.enabled_fusions)),
             )
+
+    def prepare_for_regional_compile(self) -> str | None:
+        """Resolve state used only by inference regional fullgraph compile."""
+        self.prepare_for_compile()
+        prepared_vsa_impls = 0
+        unsupported_reasons: set[str] = set()
+        for block in self.transformer_blocks:
+            attention = block.attn
+            prepare_vsa = getattr(attention.distributed_attention.attn_impl, "prepare_for_regional_compile", None)
+            if not callable(prepare_vsa):
+                continue
+            # Post-load FP8 conversion may replace to_q.weight with packed
+            # buffers. Either representation identifies the local device.
+            query_state = next(attention.to_q.parameters(), None)
+            if query_state is None:
+                query_state = next(attention.to_q.buffers(), None)
+            if query_state is None:
+                raise RuntimeError("MiniMax H3 to_q has no materialized parameter or buffer for compile setup.")
+            unsupported = prepare_vsa(query_state.device)
+            if unsupported:
+                unsupported_reasons.add(str(unsupported))
+            prepared_vsa_impls += 1
+        if prepared_vsa_impls:
+            logger.info("Prepared %d MiniMax H3 VSA attention implementations for regional torch.compile",
+                        prepared_vsa_impls)
+        if unsupported_reasons:
+            return "; ".join(sorted(unsupported_reasons))
+        return None
 
     def materialize_non_persistent_buffers(
         self,

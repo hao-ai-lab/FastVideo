@@ -35,6 +35,7 @@ from fastvideo.models.loader import fsdp_load
 from fastvideo.models.loader.fsdp_load import (
     _compile_model_regions,
     _enable_regional_attention_compile,
+    _prepare_model_for_compile,
     _regional_compile_unsupported_reason,
 )
 
@@ -53,11 +54,42 @@ def test_legacy_vsa_backend_degrades_to_eager(monkeypatch) -> None:
     assert "eager" in reason
 
 
-@pytest.mark.parametrize("backend_name", [None, "TORCH_SDPA", "VIDEO_SPARSE_ATTN_H3"])
+@pytest.mark.parametrize("backend_name", [None, "TORCH_SDPA"])
 def test_supported_backends_allow_compile(backend_name, monkeypatch) -> None:
     monkeypatch.delenv("FASTVIDEO_DISABLE_ATTENTION_COMPILE", raising=False)
     monkeypatch.delenv("FASTVIDEO_H3_VSA_PROBE", raising=False)
     assert _regional_compile_unsupported_reason(_init_params_for(backend_name)) is None
+
+
+def test_h3_vsa_sm100a_tile64_allows_compile(monkeypatch) -> None:
+    monkeypatch.delenv("FASTVIDEO_DISABLE_ATTENTION_COMPILE", raising=False)
+    monkeypatch.delenv("FASTVIDEO_H3_VSA_PROBE", raising=False)
+    monkeypatch.setenv("FASTVIDEO_VSA_SM100A", "1")
+
+    reason = _regional_compile_unsupported_reason(
+        _init_params_for("VIDEO_SPARSE_ATTN_H3"),
+        vsa_tile_size=64,
+    )
+
+    assert reason is None
+
+
+@pytest.mark.parametrize(("sm100a", "tile_size"), [(False, 64), (True, 256), (True, None)])
+def test_h3_vsa_unsupported_compile_route_degrades_to_eager(sm100a, tile_size, monkeypatch) -> None:
+    monkeypatch.delenv("FASTVIDEO_DISABLE_ATTENTION_COMPILE", raising=False)
+    monkeypatch.delenv("FASTVIDEO_H3_VSA_PROBE", raising=False)
+    if sm100a:
+        monkeypatch.setenv("FASTVIDEO_VSA_SM100A", "1")
+    else:
+        monkeypatch.delenv("FASTVIDEO_VSA_SM100A", raising=False)
+
+    reason = _regional_compile_unsupported_reason(
+        _init_params_for("VIDEO_SPARSE_ATTN_H3"),
+        vsa_tile_size=tile_size,
+    )
+
+    assert reason is not None
+    assert "eager" in reason
 
 
 def test_h3_vsa_probe_degrades_regional_compile_to_eager(monkeypatch) -> None:
@@ -73,11 +105,13 @@ def test_h3_vsa_probe_degrades_regional_compile_to_eager(monkeypatch) -> None:
 
 class _RegionalPrepareProbe:
 
-    def __init__(self) -> None:
+    def __init__(self, unsupported: str | None = None) -> None:
         self.devices: list[torch.device] = []
+        self.unsupported = unsupported
 
-    def prepare_for_regional_compile(self, device: torch.device) -> None:
+    def prepare_for_regional_compile(self, device: torch.device) -> str | None:
         self.devices.append(device)
+        return self.unsupported
 
 
 class _GateBlock(nn.Module):
@@ -117,27 +151,59 @@ def _gate_model(*weights: float) -> MiniMaxH3Transformer3DModel:
 
 def test_minimax_h3_prepare_for_compile_resolves_loaded_vsa_gates() -> None:
     model = _gate_model(0.0, 2.0)
-    expected_device = next(model.parameters()).device
 
     model.prepare_for_compile()
 
     assert [block.attn._gate_compress_active for block in model.transformer_blocks] == [False, True]
     for block in model.transformer_blocks:
         impl = block.attn.distributed_attention.attn_impl
-        assert impl.devices == [expected_device]
+        assert impl.devices == []
 
 
-def test_minimax_h3_prepare_for_compile_does_not_require_quantized_q_weight() -> None:
+def test_training_compile_prepare_does_not_probe_inference_kernel() -> None:
+    model = _gate_model(2.0)
+
+    reason = _prepare_model_for_compile(model, regional=False)
+
+    assert reason is None
+    attention = model.transformer_blocks[0].attn
+    assert attention._gate_compress_active is True
+    assert attention.distributed_attention.attn_impl.devices == []
+
+
+def test_regional_compile_prepare_prefers_specialized_hook() -> None:
+    model = _gate_model(2.0)
+    expected_device = next(model.parameters()).device
+
+    reason = _prepare_model_for_compile(model, regional=True)
+
+    assert reason is None
+    impl = model.transformer_blocks[0].attn.distributed_attention.attn_impl
+    assert impl.devices == [expected_device]
+
+
+def test_minimax_h3_prepare_for_regional_compile_does_not_require_quantized_q_weight() -> None:
     model = _gate_model(2.0)
     attention = model.transformer_blocks[0].attn
     removed_weight = attention.to_q._parameters.pop("weight")
     attention.to_q.register_buffer("_fp8_weight", removed_weight.detach(), persistent=False)
     expected_device = next(model.parameters()).device
 
-    model.prepare_for_compile()
+    reason = model.prepare_for_regional_compile()
 
+    assert reason is None
     impl = attention.distributed_attention.attn_impl
     assert impl.devices == [expected_device]
+
+
+def test_minimax_h3_prepare_for_regional_compile_propagates_backend_rejection() -> None:
+    model = _gate_model(2.0)
+    impl = model.transformer_blocks[0].attn.distributed_attention.attn_impl
+    impl.unsupported = "sm100a probe failed"
+
+    reason = model.prepare_for_regional_compile()
+
+    assert reason == "sm100a probe failed"
 
 
 def test_unprepared_vsa_gate_cannot_mutate_cache_during_compile(monkeypatch) -> None:
