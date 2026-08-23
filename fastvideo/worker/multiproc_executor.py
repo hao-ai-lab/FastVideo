@@ -36,6 +36,16 @@ from fastvideo.worker.worker_base import WorkerWrapperBase
 logger = init_logger(__name__)
 
 
+class _WorkerSignalExit(SystemExit):
+    """Carry the signal that requested worker shutdown through ``SystemExit``."""
+
+    def __init__(self, signum: int) -> None:
+        # Keep the original argument-less SystemExit semantics while retaining
+        # the signal identity for diagnostics.
+        super().__init__()
+        self.signum = signum
+
+
 def _make_queue_log_handler(log_queue: Queue) -> logging.Handler:
     """Create a QueueHandler that forwards fastvideo logs to a multiprocessing queue."""
     return logging.handlers.QueueHandler(log_queue)
@@ -539,7 +549,7 @@ class WorkerMultiprocProc:
             nonlocal shutdown_requested
             if not shutdown_requested:
                 shutdown_requested = True
-                raise SystemExit()
+                raise _WorkerSignalExit(signum)
 
         # Either SIGTERM or SIGINT will terminate the worker
         signal.signal(signal.SIGTERM, signal_handler)
@@ -565,7 +575,7 @@ class WorkerMultiprocProc:
 
             worker.worker_busy_loop()
 
-        except SystemExit:
+        except _WorkerSignalExit as exc:
             # Raised by the SIGTERM/SIGINT handler installed above, so it is a
             # BaseException and not an Exception: without this clause it walks
             # straight past the handler below and the worker dies having reported
@@ -576,11 +586,18 @@ class WorkerMultiprocProc:
             # runs on top of whatever the process was executing, so the frames
             # here are the frames that were interrupted, which is the only clue
             # to what the worker was doing when it was told to stop.
-            logger.exception(
-                "Worker %d was terminated by a signal while running. This is usually an external "
-                "process, such as an out-of-memory daemon, or the parent forcing shutdown after a "
-                "worker failed to exit. The stack below is where execution was interrupted, not the "
-                "cause.", rank)
+            signal_name = signal.Signals(exc.signum).name
+            if exc.signum == signal.SIGINT:
+                logger.exception(
+                    "Worker %d received %s (%d) while running. This normally means the user interrupted "
+                    "the parent process. The stack below is where execution was interrupted, not the cause.", rank,
+                    signal_name, exc.signum)
+            else:
+                logger.exception(
+                    "Worker %d received %s (%d) while running. This can come from an external process, "
+                    "such as an out-of-memory daemon, or from the parent forcing shutdown after a worker "
+                    "failed to exit. The stack below is where execution was interrupted, not the cause.", rank,
+                    signal_name, exc.signum)
             raise
 
         except Exception as exc:
