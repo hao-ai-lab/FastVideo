@@ -29,7 +29,7 @@ def _args(*overrides: str):
     return fasth3.parse_args(["--prompt", "a test prompt", *overrides])
 
 
-def test_default_all_profile_matches_measured_f4_contract(tmp_path):
+def test_default_all_profile_matches_fastest_f4_contract(tmp_path):
     args = _args()
     config = fasth3.build_generator_config(args)
     request = fasth3.build_request(args, tmp_path / "result.mp4", args.seed)
@@ -44,6 +44,7 @@ def test_default_all_profile_matches_measured_f4_contract(tmp_path):
     assert args.warmup_seed == 999
     assert args.warmup is True
     assert args.repeats == 3
+    assert args.inference_torch_compile is True
     assert args.ulysses_a2a == "off"
 
     assert config.engine.num_gpus == 4
@@ -60,7 +61,7 @@ def test_default_all_profile_matches_measured_f4_contract(tmp_path):
         "attention_backend": "VIDEO_SPARSE_ATTN_H3",
         "VSA_sparsity": 0.9,
         "VSA_tile_size": 64,
-        "inference_torch_compile": False,
+        "inference_torch_compile": True,
         "vae_parallel_decode": True,
         "vae_parallel_decode_strategy": "gather",
     }
@@ -72,7 +73,7 @@ def test_default_all_profile_matches_measured_f4_contract(tmp_path):
     assert environment["FASTVIDEO_NVFP4_FA4"] == "0"
     assert environment["FASTVIDEO_MINIMAX_H3_FA4_PACKED_VARLEN"] == "0"
     assert environment["FASTVIDEO_MINIMAX_H3_FUSIONS"] == "all"
-    assert environment["FASTVIDEO_INFERENCE_TORCH_COMPILE"] == "0"
+    assert environment["FASTVIDEO_INFERENCE_TORCH_COMPILE"] == "1"
     assert environment["FASTVIDEO_VAE_PARALLEL_DECODE"] == "1"
     assert environment["FASTVIDEO_VAE_PARALLEL_DECODE_STRATEGY"] == "gather"
     assert environment["FASTVIDEO_ULYSSES_A2A"] == "off"
@@ -83,6 +84,18 @@ def test_default_all_profile_matches_measured_f4_contract(tmp_path):
     assert request.sampling.guidance_scale == 1.0
     assert request.sampling.batch_cfg is False
     assert request.output.output_path == str(tmp_path / "result.mp4")
+
+
+@pytest.mark.parametrize("num_frames", (124, 243, 345))
+def test_fast_profile_supports_measured_durations_without_separate_scripts(tmp_path, num_frames):
+    args = _args("--num-frames", str(num_frames))
+    config = fasth3.build_generator_config(args)
+    request = fasth3.build_request(args, tmp_path / f"result_{num_frames}.mp4", args.seed)
+
+    assert args.inference_torch_compile is True
+    assert args.ulysses_a2a == "off"
+    assert config.pipeline.experimental["inference_torch_compile"] is True
+    assert request.sampling.num_frames == num_frames
 
 
 def test_default_sigma_grid_runs_exactly_four_dit_forwards():
@@ -116,6 +129,7 @@ def test_opt_outs_override_inherited_environment(monkeypatch):
         "--no-parallel-vae",
         "--no-replicated-dit",
         "--no-pin-cpu-memory",
+        "--no-inference-torch-compile",
     )
     expected = fasth3.profile_environment(args)
     for name in expected:

@@ -47,7 +47,7 @@ python examples/inference/basic/basic_fasth3.py --prompt "your prompt"
 ```
 The default checkpoint `FastVideo/FastVideo-Minimax-FastH3-Preview-v0.1` is private on the Hub while its license review completes; until it flips public, pass `--model-path` with a local snapshot of the release.
 
-The default `all` profile is the fastest measured four-GPU Preview recipe on GB200. It selects VSA sparsity 0.9 with 64-token tiles and the sm_100a sparse kernel, enables FA4 for eligible non-VSA paths, keeps the sparse DiT eager and replicated, compiles and temporally parallelizes the video VAE with the `gather` strategy, and pins CPU-offloaded component memory. It also pins the benchmark protocol: five sigma-grid points (exactly four DiT forwards), one excluded seed-999 warmup, then three timed seed-1000 requests with distinct output paths.
+The default `all` profile is the fastest measured four-GPU Preview recipe on GB200. It selects VSA sparsity 0.9 with 64-token tiles and the sm_100a sparse kernel, enables FA4 for eligible non-VSA paths, regionally compiles and replicates the sparse DiT, compiles and temporally parallelizes the video VAE with the `gather` strategy, and pins CPU-offloaded component memory. It also pins the benchmark protocol: five sigma-grid points (exactly four DiT forwards), one excluded seed-999 warmup, then three timed seed-1000 requests with distinct output paths.
 
 The equivalent explicit command is:
 
@@ -66,7 +66,7 @@ python examples/inference/basic/basic_fasth3.py \
   --pin-cpu-memory \
   --fa4 \
   --no-torch-compile \
-  --no-inference-torch-compile \
+  --inference-torch-compile \
   --ulysses-a2a off \
   --warmup \
   --repeats 3 \
@@ -75,6 +75,20 @@ python examples/inference/basic/basic_fasth3.py \
 ```
 
 `all` enables the inference-only H3 fusions. They change floating-point operation order, so this is a report-only performance profile rather than an exact-parity route. Use `--profile strict` to disable only those fusions while preserving every other setting. Individual `--no-*` switches are available for portability and attribution; in particular, use `--vsa-kernel triton --no-fa4` if the Blackwell kernels are unavailable. The script preserves the warmup and each measured video under distinct paths, then prints per-request wall time plus a warmup-excluded median.
+
+One script covers each validated duration; regional compile is the fastest
+measured DiT route for all three:
+
+```bash
+# 5 s
+python examples/inference/basic/basic_fasth3.py --prompt "your prompt"
+# 10 s
+python examples/inference/basic/basic_fasth3.py --prompt "your prompt" --num-frames 243
+# 15 s
+python examples/inference/basic/basic_fasth3.py --prompt "your prompt" --num-frames 345
+```
+
+Pass `--no-inference-torch-compile` to recover the eager sparse-DiT route.
 
 ## Basic Walkthrough
 

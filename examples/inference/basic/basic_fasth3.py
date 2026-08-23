@@ -4,8 +4,8 @@
 The default ``all`` profile reproduces the fastest measured FastH3 Preview
 recipe on four GB200 GPUs. It runs the checkpoint's native five-point sigma
 grid (exactly four DiT forwards), trained VSA policy, Blackwell sparse kernel,
-compiled/parallel video VAE, and inference-only H3 fusions. One compile warmup
-is excluded before three measured requests.
+regional fullgraph DiT compile, compiled/parallel video VAE, and inference-only
+H3 fusions. One compile warmup is excluded before three measured requests.
 
 The default fusions change floating-point operation order and therefore make
 ``all`` a report-only performance profile. ``--profile strict`` changes only
@@ -111,8 +111,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
                         help="compile the whole DiT path (off in the measured F4 profile)")
     parser.add_argument("--inference-torch-compile",
                         action=argparse.BooleanOptionalAction,
-                        default=False,
-                        help="regionally compile DiT blocks (off in the measured F4 profile)")
+                        default=True,
+                        help="regionally compile DiT blocks (enabled in the fastest measured F4 profile)")
     parser.add_argument("--ulysses-a2a",
                         choices=("off", "auto"),
                         default="off",

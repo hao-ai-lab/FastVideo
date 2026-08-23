@@ -417,9 +417,10 @@ eager-parity-safe mode.
 The same caveat applies to sparse MiniMax-H3 regional compile. Its mask
 compaction, sm_100a launch, trained compression gates, and inference-only H3
 fusions are fullgraph-compatible, but compilation can still change model
-numerics. The FastH3 `all` profile therefore keeps the sparse DiT eager by
-default; enable regional compile only after a quality and latency gate for
-the exact checkpoint and shape.
+numerics. The FastH3 `all` profile enables regional compile by default because
+it is the fastest measured route at 124, 243, and 345 frames. Use
+`--no-inference-torch-compile` when comparing against the eager sparse-DiT
+route.
 
 **Numerics.** Inductor's lowering is designed to preserve eager
 semantics within floating-point tolerance, but per-model equivalence is
