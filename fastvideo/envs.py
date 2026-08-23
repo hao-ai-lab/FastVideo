@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     FASTVIDEO_VAE_PARALLEL_DECODE: bool = False
     FASTVIDEO_VAE_PARALLEL_ENCODE: bool = False
     FASTVIDEO_VAE_PARALLEL_DECODE_STRATEGY: str | None = None
+    FASTVIDEO_ULYSSES_A2A: str = "off"
     FASTVIDEO_WORKER_MULTIPROC_METHOD: str = "spawn"
     FASTVIDEO_TARGET_DEVICE: str = "cuda"
     MAX_JOBS: str | None = None
@@ -261,6 +262,13 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # (the default), `0`, or `none` keeps the eager implementation.
     "FASTVIDEO_MINIMAX_H3_FUSIONS":
     lambda: os.getenv("FASTVIDEO_MINIMAX_H3_FUSIONS", ""),
+
+    # Sequence-parallel all-to-all backend.
+    # - "off" (default): the NCCL path in DistributedAutograd.AllToAll4D
+    # - "auto": fused NVLink kernel when the group is a load-store accessible
+    #   mesh of 2/4/6/8 ranks in eager execution, else the NCCL path.
+    "FASTVIDEO_ULYSSES_A2A":
+    lambda: os.getenv("FASTVIDEO_ULYSSES_A2A", "off").strip().lower(),
 
     # Use dedicated multiprocess context for workers.
     "FASTVIDEO_WORKER_MULTIPROC_METHOD":

@@ -22,6 +22,11 @@ extern std::vector<torch::Tensor> block_sparse_attention_backward(
 );
 #endif
 
+#ifdef FASTVIDEO_KERNEL_COMPILE_ULYSSES_A2A
+// Ulysses sequence-parallel all-to-all (csrc/comm/)
+void register_ulysses_a2a(pybind11::module_ &);
+#endif
+
 // TurboDiffusion kernels
 void register_quant(pybind11::module_ &);
 void register_rms_norm(pybind11::module_ &);
@@ -59,6 +64,11 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
 #ifdef TK_COMPILE_BLOCK_SPARSE
     m.def("block_sparse_fwd", torch::wrap_pybind_function(block_sparse_attention_forward), "block sparse attention forward (Hopper)");
     m.def("block_sparse_bwd", torch::wrap_pybind_function(block_sparse_attention_backward), "block sparse attention backward (Hopper)");
+#endif
+
+#ifdef FASTVIDEO_KERNEL_COMPILE_ULYSSES_A2A
+    // Ulysses sequence-parallel all-to-all
+    register_ulysses_a2a(m);
 #endif
 
     // TurboDiffusion
