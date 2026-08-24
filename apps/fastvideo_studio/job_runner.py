@@ -145,6 +145,7 @@ class Job:
     negative_prompt: str = ""
     num_gpus: int = 1
     dit_cpu_offload: bool = False
+    dit_layerwise_offload: bool = False
     text_encoder_cpu_offload: bool = False
     vae_cpu_offload: bool = False
     image_encoder_cpu_offload: bool = False
@@ -202,6 +203,7 @@ class Job:
             "negative_prompt": self.negative_prompt,
             "num_gpus": self.num_gpus,
             "dit_cpu_offload": self.dit_cpu_offload,
+            "dit_layerwise_offload": self.dit_layerwise_offload,
             "text_encoder_cpu_offload": self.text_encoder_cpu_offload,
             "vae_cpu_offload": self.vae_cpu_offload,
             "image_encoder_cpu_offload": self.image_encoder_cpu_offload,
@@ -350,6 +352,7 @@ class JobRunner:
                     negative_prompt=row.get("negative_prompt", "") or "",
                     num_gpus=row.get("num_gpus", 1),
                     dit_cpu_offload=row.get("dit_cpu_offload", False),
+                    dit_layerwise_offload=row.get("dit_layerwise_offload", False),
                     text_encoder_cpu_offload=row.get("text_encoder_cpu_offload", False),
                     vae_cpu_offload=row.get("vae_cpu_offload", False),
                     image_encoder_cpu_offload=row.get("image_encoder_cpu_offload", False),
@@ -422,6 +425,7 @@ class JobRunner:
         num_gpus: int = 1,
         negative_prompt: str = "",
         dit_cpu_offload: bool = False,
+        dit_layerwise_offload: bool = False,
         text_encoder_cpu_offload: bool = False,
         vae_cpu_offload: bool = False,
         image_encoder_cpu_offload: bool = False,
@@ -464,6 +468,7 @@ class JobRunner:
             negative_prompt=negative_prompt or "",
             num_gpus=num_gpus,
             dit_cpu_offload=dit_cpu_offload,
+            dit_layerwise_offload=dit_layerwise_offload,
             text_encoder_cpu_offload=text_encoder_cpu_offload,
             vae_cpu_offload=vae_cpu_offload,
             image_encoder_cpu_offload=image_encoder_cpu_offload,
@@ -623,6 +628,7 @@ class JobRunner:
         workload_type: str,
         num_gpus: int,
         dit_cpu_offload: bool = False,
+        dit_layerwise_offload: bool = False,
         text_encoder_cpu_offload: bool = False,
         vae_cpu_offload: bool = False,
         image_encoder_cpu_offload: bool = False,
@@ -638,6 +644,7 @@ class JobRunner:
             workload_type,
             num_gpus,
             dit_cpu_offload,
+            dit_layerwise_offload,
             text_encoder_cpu_offload,
             vae_cpu_offload,
             image_encoder_cpu_offload,
@@ -677,6 +684,15 @@ class JobRunner:
         gen = VideoGenerator.from_pretrained(
             model_id,
             workload_type=workload_type,
+            # num_gpus is accepted, cache-keyed and logged by this method but was
+            # never forwarded, so every job silently ran at the FastVideoArgs
+            # default of 1 GPU regardless of the UI's "GPUs" field.
+            num_gpus=num_gpus,
+            # Forwarded explicitly: FastVideoArgs defaults this to True, which
+            # unconditionally cancels use_fsdp_inference (fastvideo_args.py:859)
+            # and would silently collapse multi-GPU jobs to world_size=1. The UI
+            # keeps it mutually exclusive with FSDP / dit_cpu_offload.
+            dit_layerwise_offload=dit_layerwise_offload,
             dit_cpu_offload=dit_cpu_offload,
             text_encoder_cpu_offload=text_encoder_cpu_offload,
             vae_cpu_offload=vae_cpu_offload,
@@ -875,56 +891,38 @@ class JobRunner:
             buf.phase = "loading model"
             logger.info("Loading model...")
 
-            # Run generator creation in a background thread so we
-            # can poll _stop_event while the (potentially slow)
-            # model download / load is in progress.
-            _gen_result: list[Any] = []
-            _gen_error: list[BaseException] = []
+            # NOTE: the generator MUST be created on this thread. Building it
+            # spawns the MultiprocExecutor's worker processes; if the creating
+            # thread then exits, the workers are torn down with it and the first
+            # collective_rpc after "N workers ready" fails with
+            # ConnectionResetError (Errno 104) before any real work happens.
+            # This previously ran in a short-lived helper thread so _stop_event
+            # could be polled during model load; that cancellation window is
+            # traded away for workers that survive the job.
+            if job._stop_event.is_set():
+                job.status = JobStatus.STOPPED
+                job.finished_at = time.time()
+                self._save_job(job)
+                logger.warning("Job %s stopped before model loading", job.id)
+                buf.phase = "stopped"
+                return
 
-            def _load_generator() -> None:
-                try:
-                    gen = self._get_or_create_generator(
-                        job.model_id,
-                        job.workload_type,
-                        job.num_gpus,
-                        dit_cpu_offload=job.dit_cpu_offload,
-                        text_encoder_cpu_offload=(job.text_encoder_cpu_offload),
-                        vae_cpu_offload=job.vae_cpu_offload,
-                        image_encoder_cpu_offload=(job.image_encoder_cpu_offload),
-                        use_fsdp_inference=job.use_fsdp_inference,
-                        enable_torch_compile=(job.enable_torch_compile),
-                        vsa_sparsity=job.vsa_sparsity,
-                        tp_size=job.tp_size,
-                        sp_size=job.sp_size,
-                        log_queue=log_queue,
-                    )
-                    _gen_result.append(gen)
-                except BaseException as exc:
-                    _gen_error.append(exc)
-
-            loader = threading.Thread(
-                target=_load_generator,
-                daemon=True,
+            generator = self._get_or_create_generator(
+                job.model_id,
+                job.workload_type,
+                job.num_gpus,
+                dit_cpu_offload=job.dit_cpu_offload,
+                dit_layerwise_offload=job.dit_layerwise_offload,
+                text_encoder_cpu_offload=(job.text_encoder_cpu_offload),
+                vae_cpu_offload=job.vae_cpu_offload,
+                image_encoder_cpu_offload=(job.image_encoder_cpu_offload),
+                use_fsdp_inference=job.use_fsdp_inference,
+                enable_torch_compile=(job.enable_torch_compile),
+                vsa_sparsity=job.vsa_sparsity,
+                tp_size=job.tp_size,
+                sp_size=job.sp_size,
+                log_queue=log_queue,
             )
-            loader.start()
-
-            while loader.is_alive():
-                if job._stop_event.is_set():
-                    job.status = JobStatus.STOPPED
-                    job.finished_at = time.time()
-                    self._save_job(job)
-                    logger.warning(
-                        "Job %s stopped during model loading",
-                        job.id,
-                    )
-                    buf.phase = "stopped"
-                    return
-                loader.join(timeout=0.5)
-
-            if _gen_error:
-                raise _gen_error[0]
-
-            generator = _gen_result[0]
             buf.phase = "generating"
             logger.info("Starting generation for job %s (model=%s)", job.id, job.model_id)
 
@@ -977,7 +975,7 @@ class JobRunner:
 
         except Exception as exception:
             error_msg = str(exception)
-            logger.error("Critical error in job thread: %s", error_msg)
+            logger.error("Critical error in job thread: %s", error_msg, exc_info=True)
             job.status = JobStatus.FAILED
             job.error = f"Critical error ({type(exception).__name__}): {error_msg}"
             job.finished_at = time.time()

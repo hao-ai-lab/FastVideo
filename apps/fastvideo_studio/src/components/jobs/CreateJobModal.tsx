@@ -70,12 +70,43 @@ export default function CreateJobModal({
   const [seed, setSeed] = React.useState(1024);
   const [numGpus, setNumGpus] = React.useState(1);
   const [ditCpuOffload, setDitCpuOffload] = React.useState(false);
+  const [ditLayerwiseOffload, setDitLayerwiseOffload] = React.useState(false);
   const [textEncoderCpuOffload, setTextEncoderCpuOffload] =
     React.useState(false);
   const [vaeCpuOffload, setVaeCpuOffload] = React.useState(false);
   const [imageEncoderCpuOffload, setImageEncoderCpuOffload] =
     React.useState(false);
   const [useFsdpInference, setUseFsdpInference] = React.useState(false);
+
+  // Layerwise offload and FSDP both want ownership of the DiT weights, and
+  // FastVideoArgs silently picks a winner (fastvideo_args.py:859). Resolve that
+  // visibly here instead. dit_cpu_offload is deliberately NOT interlocked: it is
+  // a modifier rather than a competing strategy, and the backend already handles
+  // every combination, so the user's setting is never changed behind their back.
+  const handleDitLayerwiseOffloadChange = React.useCallback((next: boolean) => {
+    setDitLayerwiseOffload(next);
+    if (next) {
+      setUseFsdpInference(false);
+    }
+  }, []);
+
+  const handleUseFsdpInferenceChange = React.useCallback((next: boolean) => {
+    setUseFsdpInference(next);
+    if (next) {
+      setDitLayerwiseOffload(false);
+    }
+  }, []);
+
+  const handleNumGpusChange = React.useCallback((next: number) => {
+    setNumGpus(next);
+    if (next > 1) {
+      // Raising the GPU count turns FSDP on as a convenience; dropping back to
+      // one leaves it alone, since single-GPU FSDP is a valid way to reach
+      // FSDP's own CPU offload (docs/inference/offloading.md).
+      setUseFsdpInference(true);
+      setDitLayerwiseOffload(false);
+    }
+  }, []);
   const [enableTorchCompile, setEnableTorchCompile] = React.useState(false);
   const [vsaSparsity, setVsaSparsity] = React.useState(0);
   const [tpSize, setTpSize] = React.useState(-1);
@@ -137,6 +168,7 @@ export default function CreateJobModal({
     setSeed(opts.seed);
     setNumGpus(opts.numGpus);
     setDitCpuOffload(opts.ditCpuOffload);
+    setDitLayerwiseOffload(opts.ditLayerwiseOffload ?? false);
     setTextEncoderCpuOffload(opts.textEncoderCpuOffload);
     setVaeCpuOffload(opts.vaeCpuOffload);
     setImageEncoderCpuOffload(opts.imageEncoderCpuOffload);
@@ -304,6 +336,7 @@ export default function CreateJobModal({
               seed,
               num_gpus: numGpus,
               dit_cpu_offload: ditCpuOffload,
+              dit_layerwise_offload: ditLayerwiseOffload,
               text_encoder_cpu_offload: textEncoderCpuOffload,
               vae_cpu_offload: vaeCpuOffload,
               image_encoder_cpu_offload: imageEncoderCpuOffload,
@@ -850,6 +883,13 @@ export default function CreateJobModal({
                   disabled={isSubmitting}
                 />
                 <ToggleRow
+                  id="modal-dit-layerwise-offload"
+                  label="DiT Layerwise Offload"
+                  checked={ditLayerwiseOffload}
+                  onChange={handleDitLayerwiseOffloadChange}
+                  disabled={isSubmitting}
+                />
+                <ToggleRow
                   id="modal-text-encoder-cpu-offload"
                   label="Text Encoder CPU Offload"
                   checked={textEncoderCpuOffload}
@@ -860,7 +900,7 @@ export default function CreateJobModal({
                   id="modal-use-fsdp-inference"
                   label="Use FSDP Inference"
                   checked={useFsdpInference}
-                  onChange={setUseFsdpInference}
+                  onChange={handleUseFsdpInferenceChange}
                   disabled={isSubmitting}
                 />
                 <ToggleRow
@@ -891,7 +931,7 @@ export default function CreateJobModal({
                   max={8}
                   step={1}
                   value={numGpus}
-                  onChange={setNumGpus}
+                  onChange={handleNumGpusChange}
                   disabled={isSubmitting}
                 />
                 <NumberRow

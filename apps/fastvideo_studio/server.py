@@ -304,6 +304,7 @@ def create_job(req: CreateJobRequest) -> dict[str, Any]:
         seed=req.seed,
         num_gpus=req.num_gpus,
         dit_cpu_offload=req.dit_cpu_offload,
+        dit_layerwise_offload=req.dit_layerwise_offload,
         text_encoder_cpu_offload=req.text_encoder_cpu_offload,
         vae_cpu_offload=req.vae_cpu_offload,
         image_encoder_cpu_offload=req.image_encoder_cpu_offload,

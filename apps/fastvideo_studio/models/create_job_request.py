@@ -28,6 +28,7 @@ class CreateJobRequest(BaseModel):
     seed: int = 1024
     num_gpus: int = 1
     dit_cpu_offload: bool = False
+    dit_layerwise_offload: bool = False
     text_encoder_cpu_offload: bool = False
     vae_cpu_offload: bool = False
     image_encoder_cpu_offload: bool = False
