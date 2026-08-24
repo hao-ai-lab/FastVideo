@@ -49,6 +49,26 @@ def _force_tk() -> bool:
     return os.environ.get("FASTVIDEO_VSA_TK", "0") == "1"
 
 
+def _force_sm100a() -> bool:
+    """True iff the sm_100a (Blackwell) forward is explicitly opted into.
+
+    Opt-in only (same env the H3 backend honors): the sm_100a extension is
+    forward-only, so this routing pairs it with the Triton backward -- its lse
+    is already in Triton's M format. Honored only when
+    ``block_sparse_attn_sm100a.is_supported`` passes; otherwise falls through
+    to the default selection. ``FASTVIDEO_VSA_TRITON`` still wins.
+    """
+    return os.environ.get("FASTVIDEO_VSA_SM100A", "0") == "1"
+
+
+def _sm100a_is_supported(q: torch.Tensor, variable_block_sizes: torch.Tensor) -> bool:
+    try:
+        from fastvideo_kernel import block_sparse_attn_sm100a as vsa_sm100a
+    except Exception:
+        return False
+    return vsa_sm100a.is_supported(q, variable_block_sizes)
+
+
 # ---------------------------------------------------------------------------
 # Index helpers
 # ---------------------------------------------------------------------------
@@ -340,6 +360,76 @@ def _backward_sm90(ctx, grad_o, grad_lse):
 block_sparse_attn_sm90.register_autograd(_backward_sm90, setup_context=_setup_context_sm90)
 
 # ---------------------------------------------------------------------------
+# SM100A backend custom op (index-native)
+#
+# Forward runs the sm_100a CUDA extension; backward reuses the Triton kernels.
+# The sm_100a forward emits lse in exactly Triton's M format (max*log2e +
+# log2(l)), so the pairing needs no conversion. The Triton backward is
+# hardcoded to 64-token blocks, hence the block-size assert below.
+# ---------------------------------------------------------------------------
+
+
+@torch.library.custom_op(
+    "fastvideo_kernel::block_sparse_attn_sm100a",
+    mutates_args=(),
+    device_types="cuda",
+)
+def block_sparse_attn_sm100a_op(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    q2k_idx: torch.Tensor,
+    q2k_num: torch.Tensor,
+    variable_block_sizes: torch.Tensor,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    from fastvideo_kernel.block_sparse_attn_sm100a import block_sparse_attn_sm100a
+
+    o, M = block_sparse_attn_sm100a(q, k, v, q2k_idx, q2k_num, variable_block_sizes,
+                                    need_lse=True)
+    return o, M
+
+
+@torch.library.register_fake("fastvideo_kernel::block_sparse_attn_sm100a")
+def _block_sparse_attn_sm100a_fake(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    q2k_idx: torch.Tensor,
+    q2k_num: torch.Tensor,
+    variable_block_sizes: torch.Tensor,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    o = torch.empty_like(q)
+    M = torch.empty(
+        (q.shape[0], q.shape[1], q.shape[2]),
+        device=q.device,
+        dtype=torch.float32,
+    )
+    return o, M
+
+
+def _setup_context_sm100a(ctx, inputs, output):
+    q, k, v, q2k_idx, q2k_num, variable_block_sizes = inputs
+    o, M = output
+    ctx.save_for_backward(q, k, v, o, M, q2k_idx, q2k_num, variable_block_sizes)
+
+
+def _backward_sm100a(ctx, grad_o, grad_M):
+    q, k, v, o, M, q2k_idx, q2k_num, variable_block_sizes = ctx.saved_tensors
+    block = q.shape[2] // variable_block_sizes.numel()
+    if block != 64:
+        raise RuntimeError(
+            "block_sparse_attn_sm100a backward pairs the sm_100a forward with the "
+            f"Triton backward, which is hardcoded to 64-token blocks; got {block}. "
+            "Run 128-token-block metadata without grad, or use the Triton forward.")
+    dq, dk, dv = block_sparse_attn_backward_triton(grad_o, q, k, v, o, M, q2k_idx,
+                                                   q2k_num, variable_block_sizes)
+    return dq, dk, dv, None, None, None
+
+
+block_sparse_attn_sm100a_op.register_autograd(_backward_sm100a,
+                                              setup_context=_setup_context_sm100a)
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -364,11 +454,16 @@ def block_sparse_attn_from_indices(
 
     # Backend resolution:
     # - FASTVIDEO_VSA_TRITON forces Triton everywhere.
+    # - FASTVIDEO_VSA_SM100A opts into the sm_100a forward (Triton backward);
+    #   honored only when is_supported() passes, else falls through.
     # - FASTVIDEO_VSA_TK requests sm_90 TK; honored only when it's actually
     #   available (else falls through to the default below).
     # - Otherwise: TK on sm_90 if available, else Triton.
     if _force_triton():
         use_sm90 = False
+    elif _force_sm100a() and _sm100a_is_supported(q, variable_block_sizes):
+        return block_sparse_attn_sm100a_op(q, k, v, q2k_idx, q2k_num,
+                                           variable_block_sizes)
     elif _force_tk():
         use_sm90 = sm90_available
     else:
