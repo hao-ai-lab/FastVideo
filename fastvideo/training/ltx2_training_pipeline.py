@@ -114,12 +114,14 @@ class LTX2TrainingPipeline(TrainingPipeline):
         else:
             text_padding_length = (training_args.pipeline_config.text_encoder_configs[0].arch_config.text_len)
             self.with_audio = False
+            # cfg_rate stays 0 here: LTX2Model.prepare_batch does the CFG drop
+            # so dropped samples carry the empty-prompt embedding, not zeros.
             self.train_dataset, self.train_dataloader = (build_parquet_map_style_dataloader(
                 training_args.data_path,
                 training_args.train_batch_size,
                 num_data_workers=training_args.dataloader_num_workers,
                 parquet_schema=pyarrow_schema_text_only,
-                cfg_rate=training_args.training_cfg_rate,
+                cfg_rate=0.0,
                 drop_last=True,
                 text_padding_length=text_padding_length,
                 seed=self.seed,
