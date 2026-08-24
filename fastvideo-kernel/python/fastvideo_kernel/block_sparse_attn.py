@@ -55,8 +55,10 @@ def _force_sm100a() -> bool:
     Opt-in only (same env the H3 backend honors): the sm_100a extension is
     forward-only, so this routing pairs it with the Triton backward -- its lse
     is already in Triton's M format. Honored only when
-    ``block_sparse_attn_sm100a.is_supported`` passes; otherwise falls through
-    to the default selection. ``FASTVIDEO_VSA_TRITON`` still wins.
+    ``block_sparse_attn_sm100a.is_supported`` passes. Unsupported 64-token
+    metadata falls through to the default selection; unsupported 128-token
+    metadata raises because Triton has no compatible fallback.
+    ``FASTVIDEO_VSA_TRITON`` still wins.
     """
     return os.environ.get("FASTVIDEO_VSA_SM100A", "0") == "1"
 
@@ -67,6 +69,14 @@ def _sm100a_is_supported(q: torch.Tensor, variable_block_sizes: torch.Tensor) ->
     except Exception:
         return False
     return vsa_sm100a.is_supported(q, variable_block_sizes)
+
+
+def _infer_block_size(q: torch.Tensor, variable_block_sizes: torch.Tensor) -> int:
+    num_blocks = variable_block_sizes.numel()
+    seq_len = q.shape[2]
+    if num_blocks == 0 or seq_len % num_blocks != 0:
+        return 0
+    return seq_len // num_blocks
 
 
 # ---------------------------------------------------------------------------
@@ -454,16 +464,24 @@ def block_sparse_attn_from_indices(
 
     # Backend resolution:
     # - FASTVIDEO_VSA_TRITON forces Triton everywhere.
-    # - FASTVIDEO_VSA_SM100A opts into the sm_100a forward (Triton backward);
-    #   honored only when is_supported() passes, else falls through.
+    # - FASTVIDEO_VSA_SM100A opts into the sm_100a forward (Triton backward).
+    #   Unsupported 64-token metadata falls through; unsupported 128-token
+    #   metadata raises because Triton cannot consume it.
     # - FASTVIDEO_VSA_TK requests sm_90 TK; honored only when it's actually
     #   available (else falls through to the default below).
     # - Otherwise: TK on sm_90 if available, else Triton.
     if _force_triton():
         use_sm90 = False
-    elif _force_sm100a() and _sm100a_is_supported(q, variable_block_sizes):
-        return block_sparse_attn_sm100a_op(q, k, v, q2k_idx, q2k_num,
-                                           variable_block_sizes)
+    elif _force_sm100a():
+        if _sm100a_is_supported(q, variable_block_sizes):
+            return block_sparse_attn_sm100a_op(q, k, v, q2k_idx, q2k_num,
+                                               variable_block_sizes)
+        if _infer_block_size(q, variable_block_sizes) == 128:
+            raise NotImplementedError(
+                "128-token block-sparse attention requires the sm_100a forward; "
+                "the Triton fallback only supports 64-token blocks, and the "
+                "sm_100a route is unavailable for this input.")
+        use_sm90 = sm90_available
     elif _force_tk():
         use_sm90 = sm90_available
     else:

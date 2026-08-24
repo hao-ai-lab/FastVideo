@@ -86,6 +86,15 @@ def test_unsupported_input_falls_back_to_triton(monkeypatch):
     assert torch.equal(got[0], ref[0]) and torch.equal(got[1], ref[1])
 
 
+def test_unsupported_blk128_raises_not_implemented(monkeypatch):
+    """128-token metadata cannot fall back to Triton's 64-token kernels."""
+    monkeypatch.setenv(ENV, "1")
+    q, k, v, idx, num, vbs = make_case(128, num_blocks=7, topk=3)
+    assert not vsa.is_supported(q, vbs)
+    with pytest.raises(NotImplementedError, match="128-token"):
+        block_sparse_attn_from_indices(q, k, v, idx, num, vbs)
+
+
 def test_force_triton_overrides_sm100a(monkeypatch):
     monkeypatch.setenv(ENV, "1")
     monkeypatch.setenv("FASTVIDEO_VSA_TRITON", "1")
