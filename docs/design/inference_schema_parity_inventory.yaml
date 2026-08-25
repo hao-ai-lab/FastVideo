@@ -124,12 +124,14 @@ surfaces:
       vae_precision: "Precision override pending dedicated typed component precision design."
       vae_decode_precision: "Decode-only precision override pending dedicated typed component precision design."
       image_encoder_precision: "Precision override pending dedicated typed component precision design."
+      image_encoder_precisions: "Precision overrides pending dedicated typed component precision design."
       text_encoder_precisions: "Precision override pending dedicated typed component precision design."
     internal_only:
       dit_config: "Legacy internal component config object."
       upsampler_config: "Legacy internal component config object."
       vae_config: "Legacy internal component config object."
       image_encoder_config: "Legacy internal component config object."
+      image_encoder_configs: "Legacy internal component config objects."
       text_encoder_configs: "Legacy internal component config object."
       preprocess_text_funcs: "Internal text preprocessing hooks."
       postprocess_text_funcs: "Internal text postprocessing hooks."
@@ -366,6 +368,30 @@ surfaces:
         sources: [fastvideo.configs.pipelines.matrixgame2.MatrixGame2I2V480PConfig]
       num_frames_per_block:
         sources: [fastvideo.configs.pipelines.matrixgame2.MatrixGame2I2V480PConfig]
+      duration_s:
+        sources: [fastvideo.configs.pipelines.mmaudio.MMAudioV2AConfig]
+      spectrogram_frame_rate:
+        sources: [fastvideo.configs.pipelines.mmaudio.MMAudioV2AConfig]
+      latent_downsample_rate:
+        sources: [fastvideo.configs.pipelines.mmaudio.MMAudioV2AConfig]
+      clip_frame_rate:
+        sources: [fastvideo.configs.pipelines.mmaudio.MMAudioV2AConfig]
+      sync_frame_rate:
+        sources: [fastvideo.configs.pipelines.mmaudio.MMAudioV2AConfig]
+      sync_segment_size:
+        sources: [fastvideo.configs.pipelines.mmaudio.MMAudioV2AConfig]
+      sync_segment_stride:
+        sources: [fastvideo.configs.pipelines.mmaudio.MMAudioV2AConfig]
+      sync_downsample_rate:
+        sources: [fastvideo.configs.pipelines.mmaudio.MMAudioV2AConfig]
+      clip_image_size:
+        sources: [fastvideo.configs.pipelines.mmaudio.MMAudioV2AConfig]
+      sync_image_size:
+        sources: [fastvideo.configs.pipelines.mmaudio.MMAudioV2AConfig]
+      clip_batch_size_multiplier:
+        sources: [fastvideo.configs.pipelines.mmaudio.MMAudioV2AConfig]
+      sync_batch_size_multiplier:
+        sources: [fastvideo.configs.pipelines.mmaudio.MMAudioV2AConfig]
       audio_channels:
         sources:
           - fastvideo.configs.pipelines.stable_audio.StableAudioT2AConfig
@@ -380,6 +406,7 @@ surfaces:
           - fastvideo.configs.pipelines.stable_audio.StableAudioOpenSmallConfig
       max_audio_duration_s:
         sources:
+          - fastvideo.configs.pipelines.mmaudio.MMAudioV2AConfig
           - fastvideo.configs.pipelines.stable_audio.StableAudioT2AConfig
           - fastvideo.configs.pipelines.stable_audio.StableAudioOpenSmallConfig
       sample_size:
@@ -388,6 +415,7 @@ surfaces:
           - fastvideo.configs.pipelines.stable_audio.StableAudioOpenSmallConfig
       sampling_rate:
         sources:
+          - fastvideo.configs.pipelines.mmaudio.MMAudioV2AConfig
           - fastvideo.configs.pipelines.stable_audio.StableAudioT2AConfig
           - fastvideo.configs.pipelines.stable_audio.StableAudioOpenSmallConfig
       audio_txt_guidance_scale:

@@ -19,8 +19,8 @@ from fastvideo.configs.models.encoders import T5Config, T5LargeConfig
 
 logger = init_logger(__name__)
 
-os.environ["MASTER_ADDR"] = "localhost"
-os.environ["MASTER_PORT"] = "29503"
+os.environ.setdefault("MASTER_ADDR", "localhost")
+os.environ.setdefault("MASTER_PORT", "29503")
 
 
 @pytest.fixture

@@ -27,14 +27,14 @@ videos and compare them against device-specific reference videos.
   `pytest fastvideo/tests/ssim/test_wan_t2v_similarity.py -vs`
 - Single model split:
   `FASTVIDEO_SSIM_MODEL_ID=<model_id> pytest fastvideo/tests/ssim/test_wan_t2v_similarity.py -vs`
-- Modal orchestrator (CI-style scheduling):
-  `modal run fastvideo/tests/modal/ssim_test.py`
+- Slurm orchestrator (CI-style four-GPU scheduling):
+  `python fastvideo/tests/ssim/ci_runner.py`
 
 ## Authoring Rules
 - Name files `test_<feature>_similarity.py`.
 - Set `REQUIRED_GPUS = <int>` near the top of each test module.
 - For multi-model suites, keep configs in `*_MODEL_TO_PARAMS` dictionaries.
-  The Modal scheduler auto-discovers these keys and runs one subprocess per
+  The Slurm scheduler auto-discovers these keys and runs one subprocess per
   model id.
 - Keep runs deterministic when possible (fixed prompts/seeds/frames/backend).
 - Persist metrics with `write_ssim_results(...)`.

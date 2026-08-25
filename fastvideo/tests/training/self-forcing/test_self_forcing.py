@@ -1,7 +1,7 @@
 import os
 
-os.environ["MASTER_ADDR"] = "localhost"
-os.environ["MASTER_PORT"] = "29513"
+os.environ.setdefault("MASTER_ADDR", "localhost")
+os.environ.setdefault("MASTER_PORT", "29513")
 import sys
 import subprocess
 from pathlib import Path

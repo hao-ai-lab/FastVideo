@@ -94,7 +94,7 @@ def test_matrixgame2_finetune_single_train_step(monkeypatch: pytest.MonkeyPatch)
     # Matrix-Game 2.0 uses its own parquet dataloader; stub it out so
     # construction does not require a real ``training.data.data_path``.
     monkeypatch.setattr(
-        "fastvideo.train.utils.dataloader."
+        "fastvideo.train.models.matrixgame2.matrixgame2."
         "build_parquet_matrixgame2_train_dataloader",
         lambda *args, **kwargs: None,
     )

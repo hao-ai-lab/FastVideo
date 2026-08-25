@@ -14,15 +14,15 @@ forward/backward is reproducible within bf16 reduction noise on a given GPU.
 
 Why device-keyed: grad norms differ across GPU architectures (kernels,
 accumulation order), so a single golden value can't cover every runner. The
-JSON currently carries refs for the two GPUs we actually run on — ``L40S`` (CI)
-and ``GB200`` (our Blackwell dev box; ``B200`` maps to the same key).
+JSON carries legacy ``L40S`` references and active Slinky CI ``GB200``
+references (``B200`` maps to the same Blackwell key).
 
 Seeding a reference for the current device:
 
-- **CI / L40S** — invoke ``modal run`` against ``seed_grad_norm_references`` in
-  ``fastvideo/tests/modal/pr_test.py`` (pinned to ``gpu="L40S:1"``), then copy
-  the recorded value from the log into ``grad_norm_refs.json``.
-- **Local / non-L40S GPUs** — on that workstation::
+- **CI / GB200** — run the target train-framework lane on the Slinky Slurm
+  runner with update mode only during an intentional reviewed reseed, then
+  copy the recorded value from the log into ``grad_norm_refs.json``.
+- **Local / other GPUs** — on that workstation::
 
       FASTVIDEO_GRADNORM_UPDATE=1 \\
           pytest fastvideo/tests/train/methods -vs -rs

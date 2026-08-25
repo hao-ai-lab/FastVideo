@@ -26,8 +26,6 @@ from fastvideo.tests.golden_gate._harness import GateSpec, distributed_runtime, 
 
 __all__ = ["distributed_runtime"]
 
-os.environ.setdefault("FASTVIDEO_FA4", "0")  # test_kandinsky5_similarity.py:84
-
 MODEL_DIM = 1792  # Kandinsky-5.0-T2V-Lite transformer/config.json
 TIME_DIM = 512
 FF_DIM = 7168
@@ -99,5 +97,11 @@ SPEC = GateSpec(
 )
 
 
-def test_kandinsky5_golden_gate(distributed_runtime) -> None:
+def test_kandinsky5_golden_gate(distributed_runtime, monkeypatch) -> None:
+    # Pin FA4 off for THIS test only (test_kandinsky5_similarity.py:84). A
+    # module-level os.environ.setdefault here leaked into every other
+    # golden-gate test's env fingerprint at pytest collection time, breaking
+    # full-directory runs in environments where FASTVIDEO_FA4 is unset
+    # (observed on the self-hosted CI runner lane).
+    monkeypatch.setenv("FASTVIDEO_FA4", os.environ.get("FASTVIDEO_FA4", "0"))
     run_gate(SPEC)

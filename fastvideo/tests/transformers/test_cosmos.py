@@ -18,8 +18,8 @@ from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 
 logger = init_logger(__name__)
 
-os.environ["MASTER_ADDR"] = "localhost"
-os.environ["MASTER_PORT"] = "29504"
+os.environ.setdefault("MASTER_ADDR", "localhost")
+os.environ.setdefault("MASTER_PORT", "29504")
 
 BASE_MODEL_PATH = "nvidia/Cosmos-Predict2-2B-Video2World"
 

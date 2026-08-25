@@ -23,8 +23,8 @@ It serves three audiences:
 pytest fastvideo/tests/performance/ -vs
 
 # Optional: compare against the rolling HF baseline.
-# PERF_REPORTS_DIR defaults to /root/data/perf_reports for Modal/CI, so
-# override it when running outside the container.
+# PERF_REPORTS_DIR defaults to /root/data/perf_reports in a CI container, so
+# override it for a local run.
 PERF_REPORTS_DIR=/tmp/fastvideo_perf_reports \
 python fastvideo/tests/performance/compare_baseline.py
 
@@ -459,16 +459,17 @@ FlashInfer, Cutlass DSL, SageAttention, Triton, and xFormers when installed.
 | `FASTVIDEO_FA4` | `0` | `test_inference_performance.py` | FlashAttention-4 toggle included in `software_profile_id`. |
 | `FASTVIDEO_PERFORMANCE_PROFILE_VERSION` | unset | `test_inference_performance.py` | Optional explicit software cohort/profile version included in `software_profile_id`. |
 | `IMAGE_VERSION` | unset | `test_inference_performance.py` | CI container image/profile version included in `software_profile_id` when available. |
-| `FASTVIDEO_CONTAINER_IMAGE_REF` | unset | `pr_test.py`, `launch_l40s_job.py`, `test_inference_performance.py` | Resolved CI container image ref or digest recorded in `environment_metadata` for audit without changing `software_profile_id`. |
+| `FASTVIDEO_CONTAINER_IMAGE_REF` | unset | Slurm runner, `test_inference_performance.py` | Pinned CI container image digest recorded in `environment_metadata` and `software_profile_id`. |
 | `FASTVIDEO_STAGE_LOGGING` | set by the pytest test | `test_inference_performance.py` | Enables pipeline stage timing capture for component metrics during benchmark runs. |
 
 ## CI integration
 
 The performance step can run on demand with `/test performance` and as part of
-the Full Suite (see [CI/CD Architecture](ci_architecture.md)). The Modal entry
-point is `fastvideo/tests/modal/pr_test.py:run_performance_tests` and the
-Buildkite artifact upload is in
-`.buildkite/scripts/pr_test.sh:upload_performance_artifacts`.
+the Full Suite (see [CI/CD Architecture](ci_architecture.md)). The weekly
+`fastvideo-performance-lane` schedule runs the same Slurm payload. The active
+entry point is `.buildkite/scripts/lanes/performance.sh`; the trusted host
+dispatcher relays its allowlisted reports to Buildkite after the isolated
+container exits.
 
 Each performance build runs pytest first. PR and direct runs only continue to
 `compare_baseline.py` when that fixed-threshold phase passes; if pytest fails,

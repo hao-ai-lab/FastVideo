@@ -1,6 +1,19 @@
 #!/bin/bash
 set -uo pipefail
 
+# DORMANT ROLLBACK ONLY. Active CI is Slurm-only and pipeline.yml never calls
+# this launcher. Refuse every Buildkite invocation even if a stale step or
+# operator typo reaches this file; local rollback experiments require an
+# explicit opt-in.
+if [ -n "${BUILDKITE:-}" ]; then
+  echo "Legacy Modal CI is disabled; use the Slinky Slurm runner." >&2
+  exit 2
+fi
+if [ "${FASTVIDEO_ENABLE_LEGACY_MODAL_CI:-0}" != 1 ]; then
+  echo "Legacy Modal CI is dormant. Set FASTVIDEO_ENABLE_LEGACY_MODAL_CI=1 only for a manual rollback test." >&2
+  exit 2
+fi
+
 log() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
 }

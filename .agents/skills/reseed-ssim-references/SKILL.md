@@ -1,6 +1,6 @@
 ---
 name: reseed-ssim-references
-description: Re-seed HF reference videos for a single existing SSIM test on Modal L40S. Always backs up current refs locally first, regenerates on Modal, pauses for the user to eyeball before-vs-after quality, then overwrites the targeted `<model_id>` subtree on `FastVideo/ssim-reference-videos` with `--force`. Use when an intentional code change (model port fix, attention backend swap, kernel upgrade, hyperparameter change) has invalidated existing refs and they need to be regenerated. Pairs with `seed-ssim-references`, which is for first-time seeding only.
+description: Re-seed HF reference videos for a single existing SSIM test on Modal L40S. Always backs up current refs locally first, regenerates on Modal, pauses for the user to eyeball before-vs-after quality, then overwrites the targeted model subtree on `FastVideo/ssim-reference-videos` with `--force`. Use when an intentional code change (model port fix, attention backend swap, kernel upgrade, hyperparameter change) has invalidated existing refs and they need to be regenerated. Pairs with `seed-ssim-references`, which is for first-time seeding only.
 ---
 
 # Re-seed SSIM Reference Videos
@@ -13,7 +13,7 @@ on HF — the old refs are overwritten — so the skill always:
 
 1. Confirms intent with a one-liner the user has to type.
 2. Downloads the existing refs as a local, timestamped backup.
-3. Regenerates on Modal L40S (same code path that CI uses).
+3. Regenerates through the manual legacy Modal L40S maintenance path.
 4. Pauses for a side-by-side eyeball of backup vs new mp4s.
 5. Uploads with `--force`, scoped to the single `--model-id`.
 6. Reminds the user to keep the backup until the PR lands.
@@ -51,8 +51,9 @@ harder to recover from than failing closed.
 
 Hardcoded:
 
-- Modal GPU: **L40S** (matches CI; re-seeding from another SKU produces refs
-  that L40S CI cannot match).
+- Modal GPU: **L40S**. This is a manual reference-maintenance target, not the
+  active Slurm CI compute path; changing the SKU also changes the historical
+  `L40S_reference_videos` contract.
 - Quality tier: **`default`**. `full_quality` is a separate, deliberate
   operation.
 - HF repo: `FastVideo/ssim-reference-videos` (override via

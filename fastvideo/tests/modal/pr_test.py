@@ -1,3 +1,9 @@
+"""Dormant manual Modal launcher.
+
+Production PR CI is Slinky/Slurm-only. This module is retained as rollback
+code and is not referenced by the Buildkite pipeline or slash commands.
+"""
+
 import os
 import re
 import shutil
@@ -243,7 +249,7 @@ def run_test_command(test_command: str, build_kernel: bool, install_command: str
               volumes={"/root/data": model_vol})
 def run_encoder_tests():
     run_test(
-        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/encoders -vs"
+        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && bash .buildkite/scripts/lanes/encoder.sh"
     )
 
 
@@ -254,7 +260,7 @@ def run_encoder_tests():
               volumes={"/root/data": model_vol})
 def run_vae_tests():
     run_test(
-        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/vaes -vs")
+        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && bash .buildkite/scripts/lanes/vae.sh")
 
 
 @app.function(gpu="L40S:1",
@@ -268,7 +274,7 @@ def run_golden_gate_tests():
     # SSIM generation for that model cannot have regressed. Downloads only the
     # shards holding the gated layer, never full checkpoints.
     run_test(
-        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/golden_gate -vs"
+        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && bash .buildkite/scripts/lanes/golden_gate.sh"
     )
 
 
@@ -279,7 +285,7 @@ def run_golden_gate_tests():
               volumes={"/root/data": model_vol})
 def run_transformer_tests():
     run_test("export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && "
-             "FASTVIDEO_FA4=0 pytest ./fastvideo/tests/transformers -vs")
+             "FASTVIDEO_FA4=0 bash .buildkite/scripts/lanes/transformer.sh")
 
 
 @app.function(gpu="L40S:4",
@@ -313,7 +319,7 @@ def run_training_tests_VSA():
 
 @app.function(gpu="H100:1", image=image, timeout=900, secrets=[ci_env_secret])
 def run_kernel_tests():
-    run_test("pytest fastvideo-kernel/tests/ -vs")
+    run_test("bash .buildkite/scripts/lanes/kernel_tests.sh")
 
 
 # @app.function(gpu="H100:1", image=image, timeout=900, secrets=[ci_env_secret])
@@ -328,17 +334,17 @@ def run_kernel_tests():
 
 @app.function(gpu="L40S:1", image=image, timeout=900, secrets=[ci_env_secret])
 def run_inference_tests_vmoba():
-    run_test('python fastvideo/tests/inference/vmoba/test_vmoba_inference.py')
+    run_test("bash .buildkite/scripts/lanes/inference_vmoba.sh")
 
 
 @app.function(gpu="L40S:1", image=image, timeout=1200, secrets=[ci_env_secret])
 def run_inference_lora_tests():
-    run_test("pytest ./fastvideo/tests/inference/lora/test_lora_inference_similarity.py -vs")
+    run_test("bash .buildkite/scripts/lanes/inference_lora.sh")
 
 
 @app.function(gpu="L40S:2", image=image, timeout=900, secrets=[ci_env_secret])
 def run_distill_dmd_tests():
-    run_test("FASTVIDEO_FA4=0 pytest ./fastvideo/tests/training/distill/test_distill_dmd.py -vs")
+    run_test("FASTVIDEO_FA4=0 bash .buildkite/scripts/lanes/distillation_dmd.sh")
 
 
 @app.function(gpu="L40S:2", image=image, timeout=900, secrets=[wandb_secret, ci_env_secret])
@@ -349,15 +355,7 @@ def run_self_forcing_tests():
 
 @app.function(gpu="L40S:1", image=image, timeout=900, secrets=[ci_env_secret])
 def run_unit_test():
-    run_test("pytest ./fastvideo/tests/api/ ./fastvideo/tests/contract/ ./fastvideo/tests/dataset/ "
-             "./fastvideo/tests/workflow/ ./fastvideo/tests/entrypoints/ ./fastvideo/tests/train/ "
-             "./fastvideo/tests/stages/ ./fastvideo/tests/ops/ ./fastvideo/tests/worker/ "
-             "./fastvideo/tests/training/test_trackers.py "
-             "./fastvideo/tests/attention/test_sdpa_metadata_mask_contract.py "
-             "./fastvideo/tests/modal/test_kernel_build_cache.py ./fastvideo/tests/modal/test_pr_test.py "
-             "./fastvideo/tests/modal/test_ssim_test.py "
-             "--ignore=./fastvideo/tests/entrypoints/test_openai_api_integration.py "
-             "--ignore=./fastvideo/tests/train/models --ignore=./fastvideo/tests/train/methods -vs")
+    run_test("bash .buildkite/scripts/unit_test.sh")
 
 
 # TODO: David: GPU only used to resolve import time requirement (not needed for this test). Maybe make those imports lazy?
@@ -405,7 +403,7 @@ def run_dreamverse_app_tests():
               volumes={"/root/data": model_vol})
 def run_train_framework_tests():
     run_test("export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && "
-             "FASTVIDEO_FA4=0 pytest ./fastvideo/tests/train/models ./fastvideo/tests/train/methods -vs")
+             "FASTVIDEO_FA4=0 bash .buildkite/scripts/lanes/train_framework.sh")
 
 
 @app.function(gpu="L40S:1",
@@ -414,10 +412,10 @@ def run_train_framework_tests():
               secrets=[hf_secret, ci_env_secret],
               volumes={"/root/data": model_vol})
 def seed_grad_norm_references():
-    """Record the per-method grad-norm reference for the **CI GPU (L40S only)**.
+    """Record the legacy L40S per-method grad-norm reference.
 
     Phase 2 / 5a-ii one-off seeding entrypoint. Pinned to ``gpu="L40S:1"`` (the
-    Modal CI runner), so this function only seeds the ``L40S`` key in
+    dormant Modal rollback runtime), so this function only seeds the ``L40S`` key in
     ``fastvideo/tests/train/methods/grad_norm_refs.json``.
 
     ``FASTVIDEO_GRADNORM_UPDATE=1`` makes ``check_grad_norm_regression`` record
@@ -451,7 +449,7 @@ def run_eval_tests():
     # pass vacuously. detectron2-backed vbench metrics remain skipped by
     # design (not pip-installable; see fastvideo/eval/README.md).
     run_test_command(
-        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/eval -vs",
+        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && bash .buildkite/scripts/lanes/eval.sh",
         build_kernel=True,
         install_command='uv pip install -e ".[test,eval-full]"')
 

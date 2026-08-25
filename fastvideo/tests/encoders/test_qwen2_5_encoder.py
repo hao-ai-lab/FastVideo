@@ -16,8 +16,8 @@ from fastvideo.configs.models.encoders import Qwen2_5_VLConfig
 
 logger = init_logger(__name__)
 
-os.environ["MASTER_ADDR"] = "localhost"
-os.environ["MASTER_PORT"] = "29505"
+os.environ.setdefault("MASTER_ADDR", "localhost")
+os.environ.setdefault("MASTER_PORT", "29505")
 
 
 @pytest.fixture

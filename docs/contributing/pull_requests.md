@@ -53,8 +53,8 @@ FastVideo has three validation tiers:
 | Tier | Runs when | What it does |
 |---|---|---|
 | Pre-commit | Pull requests and `/test pre-commit` | Formatting, linting, typing, spelling, Markdown, workflow syntax, filename checks |
-| Fastcheck | PR Buildkite builds | Path-filtered component and unit checks on Modal GPU runners |
-| Full Suite | `/merge`, `ready`, `/test full`, or new pushes to ready PRs | Path-filtered integration, SSIM, training, eval, API, and performance checks |
+| Fastcheck | PR Buildkite builds | Six component, kernel, unit, and app lanes on Slinky Slurm |
+| Full Suite | `/merge`, `ready`, `/test full`, or new pushes to ready PRs | All twenty hard-gated GPU lanes on Slinky Slurm |
 
 See [CI/CD Architecture](ci_architecture.md#ci-tiers) for exact jobs, path
 filters, and workflow files.
