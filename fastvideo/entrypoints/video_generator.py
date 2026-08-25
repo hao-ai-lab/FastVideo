@@ -53,7 +53,7 @@ from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.fastvideo_args import FastVideoArgs, WorkloadType
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import ForwardBatch
-from fastvideo.utils import align_to, shallow_asdict
+from fastvideo.utils import allocate_cpu_tensor_with_pin_fallback, align_to, shallow_asdict
 from fastvideo.worker.executor import Executor
 
 fcntl: types.ModuleType | None
@@ -824,9 +824,8 @@ class VideoGenerator:
         if skip_pixel_prealloc:
             samples = torch.empty(0, device='cpu')
         else:
-            samples = torch.empty(
+            samples = allocate_cpu_tensor_with_pin_fallback(
                 (latent_batch_size, 3, sampling_param.num_frames, sampling_param.height, sampling_param.width),
-                device='cpu',
                 pin_memory=fastvideo_args.pin_cpu_memory)
         thread.join()
 

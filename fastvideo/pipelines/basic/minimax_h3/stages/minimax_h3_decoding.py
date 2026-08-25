@@ -24,7 +24,7 @@ from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
-from fastvideo.utils import is_pin_memory_available
+from fastvideo.utils import allocate_cpu_tensor_with_pin_fallback
 
 logger = init_logger(__name__)
 
@@ -111,11 +111,10 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
 
             output = None
             if is_output_rank:
-                output = torch.empty(
+                output = allocate_cpu_tensor_with_pin_fallback(
                     self.vae.decoded_pixel_shape(latents.shape),
-                    device="cpu",
                     dtype=torch.float32,
-                    pin_memory=fastvideo_args.pin_cpu_memory and is_pin_memory_available(),
+                    pin_memory=fastvideo_args.pin_cpu_memory,
                 )
             # Attribute the streamed decoder computation while retaining
             # per-chunk device-to-host transfer and pinned-buffer reuse.

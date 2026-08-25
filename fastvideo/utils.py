@@ -1306,3 +1306,35 @@ def _cached_pin_memory_available(pid: int) -> bool:
 
 def is_pin_memory_available() -> bool:
     return _cached_pin_memory_available(os.getpid())
+
+
+def allocate_cpu_tensor_with_pin_fallback(
+    size: tuple[int, ...] | torch.Size,
+    *,
+    dtype: torch.dtype | None = None,
+    pin_memory: bool = False,
+) -> torch.Tensor:
+    """Allocate a CPU tensor, retrying pageable memory if pinning fails.
+
+    ``is_pin_memory_available`` intentionally uses a small capability probe.
+    Large decoded-video buffers can still exhaust the CUDA host allocator after
+    that probe succeeds, especially on unified-memory systems. Treat pinning as
+    a performance preference: preserve the requested shape and dtype by
+    retrying the allocation without pinning.
+    """
+    kwargs: dict[str, object] = {"device": "cpu"}
+    if dtype is not None:
+        kwargs["dtype"] = dtype
+
+    if not pin_memory or not is_pin_memory_available():
+        return torch.empty(size, **kwargs)
+
+    try:
+        return torch.empty(size, pin_memory=True, **kwargs)
+    except RuntimeError as exc:
+        logger.warning(
+            "Pinned CPU allocation failed for shape %s; retrying with pageable memory: %s",
+            tuple(size),
+            exc,
+        )
+        return torch.empty(size, **kwargs)
