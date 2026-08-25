@@ -117,6 +117,13 @@ def list_models(workload_type: str | None = None) -> list[dict[str, Any]]:
 
 
 ALLOWED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+# MiniMax-H3 Ref2VA takes ordered image / video / audio references, so the
+# upload endpoint has to accept more than keyframes.
+ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm", ".avi"}
+ALLOWED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".m4a", ".ogg"}
+ALLOWED_MEDIA_EXTENSIONS = (ALLOWED_IMAGE_EXTENSIONS
+                            | ALLOWED_VIDEO_EXTENSIONS
+                            | ALLOWED_AUDIO_EXTENSIONS)
 
 
 @app.post("/api/upload-image")
@@ -148,6 +155,48 @@ async def upload_image(file: Annotated[UploadFile, File()], ) -> dict[str, str]:
             detail=f"Failed to save upload: {e}",
         ) from e
     return {"path": os.path.abspath(dest_path)}
+
+
+@app.post("/api/upload-media")
+async def upload_media(file: Annotated[UploadFile, File()], ) -> dict[str, str]:
+    """Upload an image, video or audio file for Ref2VA references.
+
+    Returns the absolute path plus the media_type MiniMax-H3 expects, so the
+    caller does not have to re-derive it from the extension.
+    """
+    global upload_dir  # noqa: PLW0603
+    if not upload_dir:
+        raise HTTPException(
+            status_code=503,
+            detail="Upload directory not configured",
+        )
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in ALLOWED_MEDIA_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=(f"Invalid file type. Allowed: "
+                    f"{', '.join(sorted(ALLOWED_MEDIA_EXTENSIONS))}"),
+        )
+    if ext in ALLOWED_VIDEO_EXTENSIONS:
+        media_type = "video"
+    elif ext in ALLOWED_AUDIO_EXTENSIONS:
+        media_type = "audio"
+    else:
+        media_type = "image"
+
+    os.makedirs(upload_dir, exist_ok=True)
+    unique_name = f"{uuid.uuid4().hex}{ext}"
+    dest_path = os.path.join(upload_dir, unique_name)
+    try:
+        contents = await file.read()
+        with open(dest_path, "wb") as f:
+            f.write(contents)
+    except OSError as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to save upload: {e}",
+        ) from e
+    return {"path": os.path.abspath(dest_path), "media_type": media_type}
 
 
 ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".webm", ".avi", ".mov", ".mkv"}
@@ -286,6 +335,8 @@ def create_job(req: CreateJobRequest) -> dict[str, Any]:
         workload_type=req.workload_type or "t2v",
         job_type=job_type,
         image_path=req.image_path or "",
+        last_image_path=req.last_image_path or "",
+        references=req.references or [],
         data_path=data_path,
         max_train_steps=req.max_train_steps,
         train_batch_size=req.train_batch_size,

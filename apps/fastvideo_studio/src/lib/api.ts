@@ -152,6 +152,32 @@ export async function updateSettings(
 	return response.json();
 }
 
+export type MediaType = "image" | "video" | "audio";
+
+/**
+ * Upload an image, video or audio file for a MiniMax-H3 Ref2VA reference.
+ * The server derives media_type from the extension and returns it, so callers
+ * do not have to duplicate that mapping.
+ */
+export async function uploadMedia(
+	file: File,
+): Promise<{ path: string; media_type: MediaType }> {
+	const baseApiUrl = getApiBaseUrl();
+	const formData = new FormData();
+	formData.append("file", file);
+	const response = await fetch(`${baseApiUrl}/upload-media`, {
+		method: "POST",
+		body: formData,
+	});
+	if (!response.ok) {
+		const err = await response
+			.json()
+			.catch(() => ({ detail: "Upload failed" }));
+		throw new Error(err.detail || "Upload failed");
+	}
+	return response.json();
+}
+
 export async function uploadImage(file: File): Promise<{ path: string }> {
 	const baseApiUrl = getApiBaseUrl();
 	const formData = new FormData();

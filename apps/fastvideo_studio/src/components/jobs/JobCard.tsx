@@ -166,6 +166,15 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
           {job.prompt}
         </span>
         <span className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
+          {/* Short job id: the log files, output directory and API responses are
+              all keyed on the full UUID, so surface enough of it to correlate a
+              card with ~/h3_studio_logs/<id>.log at a glance. Full id on hover. */}
+          <span
+            className="font-mono text-muted-foreground/80"
+            title={job.id}
+          >
+            {job.id.slice(0, 8)}
+          </span>
           {job.job_type === 'inference' ? (
             <>
               <span>{job.num_frames} frames</span>

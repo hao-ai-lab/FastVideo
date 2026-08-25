@@ -25,12 +25,20 @@ import {
   getDatasets,
   getModels,
   uploadImage,
+  uploadMedia,
   type CreateJobRequest,
   type Model,
 } from '@/lib/api';
 import { getDefaultModelForWorkload } from '@/lib/defaultOptions';
 import { WORKLOAD_OPTIONS } from '@/lib/jobConfig';
 import type { JobType } from '@/lib/types';
+import {
+  H3_MAX_REFERENCES,
+  labelReferences,
+  referencePromptTemplate,
+  validateReferences,
+  type H3Reference,
+} from '@/lib/h3References';
 
 export interface CreateJobModalProps {
   isOpen: boolean;
@@ -57,6 +65,15 @@ export default function CreateJobModal({
   const [modelId, setModelId] = React.useState('');
   const [prompt, setPrompt] = React.useState('');
   const [imagePath, setImagePath] = React.useState('');
+  const [lastImagePath, setLastImagePath] = React.useState('');
+  const [references, setReferences] = React.useState<H3Reference[]>([]);
+  const [isUploadingReference, setIsUploadingReference] = React.useState(false);
+  const [referenceError, setReferenceError] = React.useState<string | null>(null);
+  const [lastImageFileName, setLastImageFileName] = React.useState('');
+  const [isUploadingLastImage, setIsUploadingLastImage] = React.useState(false);
+  const [lastImageUploadError, setLastImageUploadError] = React.useState<
+    string | null
+  >(null);
   const [imageFileName, setImageFileName] = React.useState('');
   const [isUploadingImage, setIsUploadingImage] = React.useState(false);
   const [negativePrompt, setNegativePrompt] = React.useState('');
@@ -77,6 +94,12 @@ export default function CreateJobModal({
   const [imageEncoderCpuOffload, setImageEncoderCpuOffload] =
     React.useState(false);
   const [useFsdpInference, setUseFsdpInference] = React.useState(false);
+
+  // MiniMax-H3's FL2VA pipeline is the only registered model that takes an
+  // optional end frame (first/last-frame-to-video+audio), so only offer the
+  // field when it is selected.
+  const supportsLastImage = modelId.toLowerCase().includes('minimax-h3');
+  const usingReferences = supportsLastImage && references.length > 0;
 
   // Layerwise offload and FSDP both want ownership of the DiT weights, and
   // FastVideoArgs silently picks a winner (fastvideo_args.py:859). Resolve that
@@ -185,6 +208,11 @@ export default function CreateJobModal({
     );
     setImagePath('');
     setImageFileName('');
+    setLastImagePath('');
+    setLastImageFileName('');
+    setLastImageUploadError(null);
+    setReferences([]);
+    setReferenceError(null);
     setSelectedDatasetId('');
     setSelectedValidationDatasetId('');
     setModelLoadError(null);
@@ -294,6 +322,83 @@ export default function CreateJobModal({
     }
   }
 
+  async function handleLastImageChange(
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) {
+    const file = e.target.files?.[0];
+    if (!file) {
+      setLastImagePath('');
+      setLastImageFileName('');
+      setLastImageUploadError(null);
+      return;
+    }
+    setIsUploadingLastImage(true);
+    setLastImageFileName(file.name);
+    setLastImageUploadError(null);
+    try {
+      const { path } = await uploadImage(file);
+      setLastImagePath(path);
+    } catch (error) {
+      console.error('Failed to upload end image:', error);
+      setLastImagePath('');
+      setLastImageFileName('');
+      setLastImageUploadError(
+        error instanceof Error
+          ? `${error.message}. Choose the image again to retry.`
+          : 'The image could not be uploaded. Choose it again to retry.',
+      );
+    } finally {
+      setIsUploadingLastImage(false);
+    }
+  }
+
+  async function handleAddReference(
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) {
+    const file = e.target.files?.[0];
+    e.target.value = '';               // allow re-picking the same file
+    if (!file) return;
+    setIsUploadingReference(true);
+    setReferenceError(null);
+    try {
+      const { path, media_type } = await uploadMedia(file);
+      const next: H3Reference[] = [
+        ...references,
+        {
+          id: `${Date.now()}-${file.name}`,
+          source: path,
+          media_type,
+          fileName: file.name,
+        },
+      ];
+      setReferences(next);
+      setReferenceError(validateReferences(next));
+    } catch (error) {
+      console.error('Failed to upload reference:', error);
+      setReferenceError(
+        error instanceof Error ? error.message : 'The file could not be uploaded.',
+      );
+    } finally {
+      setIsUploadingReference(false);
+    }
+  }
+
+  function removeReference(id: string) {
+    const next = references.filter((r) => r.id !== id);
+    setReferences(next);
+    setReferenceError(validateReferences(next));
+  }
+
+  function insertReferenceTemplate() {
+    setPrompt(referencePromptTemplate(references));
+  }
+
+  function clearLastImage() {
+    setLastImagePath('');
+    setLastImageFileName('');
+    setLastImageUploadError(null);
+  }
+
   function clearImage() {
     setImagePath('');
     setImageFileName('');
@@ -303,7 +408,9 @@ export default function CreateJobModal({
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (isInference && workloadType === 'i2v' && !imagePath) return;
+    if (isInference && workloadType === 'i2v' && !imagePath && !usingReferences)
+      return;
+    if (usingReferences && validateReferences(references)) return;
     // Send the dataset id; the backend resolves it to the on-disk media dir.
     const effectiveDataPath = selectedDatasetId ?? '';
     if (!isInference && !selectedDatasetId) return;
@@ -322,8 +429,25 @@ export default function CreateJobModal({
         job_type: effectiveJobType,
         ...(isInference
           ? {
-              ...(workloadType === 'i2v' && imagePath
+              // Ref2VA and the FL2VA keyframes are mutually exclusive:
+              // _prepare_ref2va rejects image_path/last_image_path outright
+              // when references are present.
+              ...(workloadType === 'i2v' && !usingReferences && imagePath
                 ? { image_path: imagePath }
+                : {}),
+              ...(workloadType === 'i2v' &&
+              supportsLastImage &&
+              !usingReferences &&
+              lastImagePath
+                ? { last_image_path: lastImagePath }
+                : {}),
+              ...(workloadType === 'i2v' && supportsLastImage && references.length
+                ? {
+                    references: references.map((r) => ({
+                      source: r.source,
+                      media_type: r.media_type,
+                    })),
+                  }
                 : {}),
               negative_prompt: negativePrompt,
               num_inference_steps: numInferenceSteps,
@@ -462,12 +586,12 @@ export default function CreateJobModal({
                 type="file"
                 accept=".png,.jpg,.jpeg,.webp,.bmp"
                 onChange={handleImageChange}
-                disabled={isSubmitting || isUploadingImage}
+                disabled={isSubmitting || isUploadingImage || usingReferences}
                 aria-describedby={
                   imageUploadError ? 'modal-image-error' : undefined
                 }
                 aria-invalid={imageUploadError ? true : undefined}
-                required
+                required={!usingReferences}
                 className="h-auto py-2 file:mr-3 file:cursor-pointer file:rounded-md file:border-0 file:bg-secondary file:px-2 file:py-1 file:text-sm file:text-secondary-foreground"
               />
               {imageFileName && (
@@ -492,6 +616,109 @@ export default function CreateJobModal({
                   {imageUploadError}
                 </p>
               )}
+            </FieldRow>
+          )}
+
+          {isInference && workloadType === 'i2v' && supportsLastImage && (
+            <FieldRow htmlFor="modal-last-image" label="End Frame (optional)">
+              <Input
+                id="modal-last-image"
+                type="file"
+                accept=".png,.jpg,.jpeg,.webp,.bmp"
+                onChange={handleLastImageChange}
+                disabled={isSubmitting || isUploadingLastImage}
+                aria-describedby={
+                  lastImageUploadError ? 'modal-last-image-error' : undefined
+                }
+                aria-invalid={lastImageUploadError ? true : undefined}
+                className="h-auto py-2 file:mr-3 file:cursor-pointer file:rounded-md file:border-0 file:bg-secondary file:px-2 file:py-1 file:text-sm file:text-secondary-foreground"
+              />
+              {lastImageFileName && (
+                <span className="mt-0.5 text-xs text-muted-foreground">
+                  {isUploadingLastImage ? 'Uploading…' : lastImageFileName} ·{' '}
+                  <button
+                    type="button"
+                    onClick={clearLastImage}
+                    disabled={isSubmitting || isUploadingLastImage}
+                    className="text-accent-blue underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Clear
+                  </button>
+                </span>
+              )}
+              {lastImageUploadError && (
+                <p
+                  id="modal-last-image-error"
+                  role="alert"
+                  className="text-sm text-destructive"
+                >
+                  {lastImageUploadError}
+                </p>
+              )}
+            </FieldRow>
+          )}
+
+          {isInference && workloadType === 'i2v' && supportsLastImage && (
+            <FieldRow htmlFor="modal-reference" label="References (Ref2VA)">
+              <Input
+                id="modal-reference"
+                type="file"
+                accept=".png,.jpg,.jpeg,.webp,.bmp,.mp4,.mov,.mkv,.webm,.avi,.wav,.mp3,.flac,.m4a,.ogg"
+                onChange={handleAddReference}
+                disabled={
+                  isSubmitting ||
+                  isUploadingReference ||
+                  references.length >= H3_MAX_REFERENCES
+                }
+                className="h-auto py-2 file:mr-3 file:cursor-pointer file:rounded-md file:border-0 file:bg-secondary file:px-2 file:py-1 file:text-sm file:text-secondary-foreground"
+              />
+              {isUploadingReference && (
+                <span className="mt-0.5 text-xs text-muted-foreground">
+                  Uploading…
+                </span>
+              )}
+              {references.length > 0 && (
+                <ul className="mt-1 flex list-none flex-col gap-1 p-0">
+                  {references.map((reference, index) => (
+                    <li
+                      key={reference.id}
+                      className="flex items-center gap-2 text-xs text-muted-foreground"
+                    >
+                      <code className="font-mono text-accent-blue">
+                        {labelReferences(references)[index]}
+                      </code>
+                      <span className="truncate">{reference.fileName}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeReference(reference.id)}
+                        disabled={isSubmitting}
+                        className="ml-auto text-accent-blue underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Remove
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {references.length > 0 && (
+                <button
+                  type="button"
+                  onClick={insertReferenceTemplate}
+                  disabled={isSubmitting}
+                  className="mt-1 self-start text-xs text-accent-blue underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Insert reference prompt template
+                </button>
+              )}
+              {referenceError && (
+                <p role="alert" className="mt-0.5 text-xs text-destructive">
+                  {referenceError}
+                </p>
+              )}
+              <span className="mt-0.5 text-xs text-muted-foreground">
+                Ref2VA replaces the keyframes: up to 9 images, 3 videos, 3 audio
+                (12 total). Audio needs at least one image or video.
+              </span>
             </FieldRow>
           )}
 

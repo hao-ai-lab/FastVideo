@@ -11,6 +11,7 @@ import atexit
 import collections
 import contextlib
 import enum
+import json
 import logging
 import logging.handlers
 import multiprocessing as mp
@@ -127,6 +128,8 @@ class Job:
     workload_type: str = "t2v"
     job_type: str = "inference"
     image_path: str = ""
+    last_image_path: str = ""
+    references: list[dict[str, Any]] = field(default_factory=list)
     status: JobStatus = JobStatus.PENDING
     created_at: float = field(default_factory=time.time)
     started_at: float | None = None
@@ -185,6 +188,8 @@ class Job:
             "workload_type": self.workload_type,
             "job_type": self.job_type,
             "image_path": self.image_path,
+            "last_image_path": self.last_image_path,
+            "references": self.references,
             "status": self.status.value,
             "created_at": self.created_at,
             "started_at": self.started_at,
@@ -232,6 +237,68 @@ class Job:
             "progress_msg": self._log_buf.progress_msg,
             "phase": self._log_buf.phase,
         }
+
+
+MINIMAX_H3_REF2VA_PIPELINE = "MiniMaxH3Ref2VAModularPipeline"
+
+
+def _build_h3_references(raw: list[dict[str, Any]]) -> list[Any]:
+    """Turn the API's reference dicts into MiniMaxH3Reference objects.
+
+    Imported lazily so the API server starts without pulling in fastvideo.
+    """
+    from fastvideo.pipelines.basic.minimax_h3 import MiniMaxH3Reference
+
+    built = []
+    for i, ref in enumerate(raw):
+        source = (ref or {}).get("source")
+        if not source:
+            raise ValueError(f"reference {i} has no source")
+        if not os.path.isfile(source):
+            raise ValueError(f"reference {i} source not found: {source}")
+        kwargs: dict[str, Any] = {
+            "source": source,
+            "media_type": (ref.get("media_type") or "image"),
+        }
+        # Optional per-reference overrides the pipeline understands.
+        for opt in ("soundtrack", "fps", "sample_rate"):
+            if ref.get(opt) not in (None, ""):
+                kwargs[opt] = ref[opt]
+        built.append(MiniMaxH3Reference(**kwargs))
+    return built
+
+
+def _decode_references(value: Any) -> list[dict[str, Any]]:
+    """Reference lists round-trip through the DB as JSON text."""
+    if not value:
+        return []
+    if isinstance(value, list):
+        return list(value)
+    try:
+        decoded = json.loads(value)
+    except (TypeError, ValueError):
+        logger.warning("Could not decode stored references: %r", value)
+        return []
+    return list(decoded) if isinstance(decoded, list) else []
+
+
+def _generator_is_alive(generator: Any) -> bool:
+    """True if the generator's worker processes are all still running.
+
+    A cached VideoGenerator holds a MultiprocExecutor whose workers are separate
+    processes; nothing notices when they exit. Probing `proc.is_alive()` is what
+    the executor itself uses during shutdown. Anything unexpected in the object
+    graph is treated as alive so a probe failure can never wedge the cache.
+    """
+    executor = getattr(generator, "executor", None)
+    workers = getattr(executor, "workers", None)
+    if not workers:
+        return True
+    try:
+        return all(w.proc.is_alive() for w in workers)
+    except Exception:
+        logger.debug("Worker liveness probe failed", exc_info=True)
+        return True
 
 
 class JobRunner:
@@ -320,6 +387,8 @@ class JobRunner:
                     workload_type=row.get("workload_type", "t2v"),
                     job_type=row.get("job_type", "inference"),
                     image_path=row.get("image_path", "") or "",
+                    last_image_path=row.get("last_image_path", "") or "",
+                    references=_decode_references(row.get("references")),
                     data_path=row.get("data_path", "") or "",
                     max_train_steps=row.get("max_train_steps", 1000),
                     train_batch_size=row.get("train_batch_size", 1),
@@ -400,6 +469,8 @@ class JobRunner:
         workload_type: str = "t2v",
         job_type: str = "inference",
         image_path: str = "",
+        last_image_path: str = "",
+        references: list[dict[str, Any]] | None = None,
         data_path: str = "",
         max_train_steps: int = 1000,
         train_batch_size: int = 1,
@@ -443,6 +514,8 @@ class JobRunner:
             workload_type=workload_type or "t2v",
             job_type=job_type or "inference",
             image_path=image_path or "",
+            last_image_path=last_image_path or "",
+            references=list(references or []),
             data_path=data_path or "",
             max_train_steps=max_train_steps,
             train_batch_size=train_batch_size,
@@ -629,6 +702,7 @@ class JobRunner:
         num_gpus: int,
         dit_cpu_offload: bool = False,
         dit_layerwise_offload: bool = False,
+        override_pipeline_cls_name: str | None = None,
         text_encoder_cpu_offload: bool = False,
         vae_cpu_offload: bool = False,
         image_encoder_cpu_offload: bool = False,
@@ -645,6 +719,9 @@ class JobRunner:
             num_gpus,
             dit_cpu_offload,
             dit_layerwise_offload,
+            # Ref2VA loads different DiT weights (transformer_ref), so the
+            # override must key the cache or a t2v/i2v generator gets reused.
+            override_pipeline_cls_name,
             text_encoder_cpu_offload,
             vae_cpu_offload,
             image_encoder_cpu_offload,
@@ -657,8 +734,26 @@ class JobRunner:
 
         # Generators are cached by model_id and configuration parameters
         with self._generators_lock:
-            if cache_key in self._generators:
-                return self._generators[cache_key]
+            cached = self._generators.get(cache_key)
+            if cached is not None:
+                if _generator_is_alive(cached):
+                    return cached
+                # The executor's worker processes have exited (they can die
+                # while the generator sits idle in the cache, leaving zombies).
+                # Handing this back would fail the job on the first
+                # collective_rpc with BrokenPipeError / ConnectionResetError,
+                # and would keep failing for every later job with the same
+                # config. Evict it and load a fresh one instead.
+                logger.warning(
+                    "Cached generator for %s has dead workers; reloading.",
+                    model_id,
+                )
+                self._generators.pop(cache_key, None)
+                try:
+                    cached.shutdown()
+                except Exception:
+                    logger.debug("Shutdown of the dead generator failed",
+                                 exc_info=True)
 
         # Import lazily so starting the server is fast even without a GPU.
         from fastvideo import VideoGenerator
@@ -693,6 +788,8 @@ class JobRunner:
             # and would silently collapse multi-GPU jobs to world_size=1. The UI
             # keeps it mutually exclusive with FSDP / dit_cpu_offload.
             dit_layerwise_offload=dit_layerwise_offload,
+            **({"override_pipeline_cls_name": override_pipeline_cls_name}
+               if override_pipeline_cls_name else {}),
             dit_cpu_offload=dit_cpu_offload,
             text_encoder_cpu_offload=text_encoder_cpu_offload,
             vae_cpu_offload=vae_cpu_offload,
@@ -913,6 +1010,8 @@ class JobRunner:
                 job.num_gpus,
                 dit_cpu_offload=job.dit_cpu_offload,
                 dit_layerwise_offload=job.dit_layerwise_offload,
+                override_pipeline_cls_name=(MINIMAX_H3_REF2VA_PIPELINE
+                                            if job.references else None),
                 text_encoder_cpu_offload=(job.text_encoder_cpu_offload),
                 vae_cpu_offload=job.vae_cpu_offload,
                 image_encoder_cpu_offload=(job.image_encoder_cpu_offload),
@@ -943,6 +1042,17 @@ class JobRunner:
             }
             if job.image_path:
                 gen_kwargs["image_path"] = job.image_path
+            if job.references:
+                # Ref2VA: ordered image/video/audio references. Mutually
+                # exclusive with the FL2VA keyframe fields, which the pipeline
+                # rejects outright when references are present.
+                gen_kwargs["references"] = _build_h3_references(job.references)
+            if job.last_image_path:
+                # MiniMax-H3 FL2VA accepts an optional end frame. Unlike
+                # image_path, the pipeline does not resolve a path for this one
+                # (_prepare_fl2va requires a PIL image), so load it here.
+                from PIL import Image as _PILImage
+                gen_kwargs["last_image"] = _PILImage.open(job.last_image_path)
             generator.generate_video(**gen_kwargs)
 
             buf.phase = "saving"
