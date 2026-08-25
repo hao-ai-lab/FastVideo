@@ -48,6 +48,12 @@ def parse_args() -> argparse.Namespace:
                         "training-port semantics: no kwargs; fullgraph + emulate_precision_casts injected). "
                         "First generation pays the inductor JIT (~1-2 min); use --repeats >= 2 and time "
                         "the last repeat. FASTVIDEO_INFERENCE_TORCH_COMPILE=1 is equivalent")
+    parser.add_argument("--lazy-module-load",
+                        action="store_true",
+                        help="load each heavy component on first use and free it after the last stage that "
+                        "needs it, so peak memory is the largest overlapping set instead of the sum of every "
+                        "component. Enable when the model does not fit at load time; costs a reload per "
+                        "generation, so leave it off when it does fit")
     parser.add_argument("--repeats",
                         type=int,
                         default=1,
@@ -81,6 +87,7 @@ def main() -> None:
                     text_encoder=True,
                     vae=True,
                     pin_cpu_memory=False,
+                    lazy_module_load=args.lazy_module_load,
                 ),
                 compile=CompileConfig(
                     enabled=args.torch_compile,
