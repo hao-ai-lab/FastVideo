@@ -885,6 +885,10 @@ def mlx_dit_from_diffusers_safetensors(
     import mlx.core as mx
     from safetensors import safe_open
 
+    from fastvideo.mlx_runtime.checkpoint_compat import raise_if_unsupported_mlx_checkpoint
+
+    raise_if_unsupported_mlx_checkpoint(checkpoint_path, config_path)
+
     config = json.loads(Path(config_path).read_text())
     total_blocks = int(config["num_layers"])
     if num_blocks is None:

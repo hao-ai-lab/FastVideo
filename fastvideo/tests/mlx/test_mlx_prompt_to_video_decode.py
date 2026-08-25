@@ -78,8 +78,12 @@ def test_default_model_resolution_downloads_only_needed_transformer(monkeypatch,
     monkeypatch.setattr(huggingface_hub, "snapshot_download", fake_snapshot_download)
 
     assert module.resolve_model_root(None, include_transformer=True) == tmp_path
+    assert calls[-1][0] == module.DEFAULT_MODEL_ID
+    assert module.DEFAULT_MODEL_ID == "FastVideo/FastMetal-1.3B-QAD"
     assert "transformer/*" in calls[-1][1]
+    assert "mlx_dit.json" in calls[-1][1]
     assert module.resolve_model_root(None, include_transformer=False) == tmp_path
     assert "transformer/*" not in calls[-1][1]
+    assert "mlx_dit.json" in calls[-1][1]
     assert module.resolve_model_root(tmp_path) == tmp_path
     assert len(calls) == 2

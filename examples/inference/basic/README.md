@@ -18,10 +18,24 @@ git clone https://github.com/hao-ai-lab/FastVideo.git && cd FastVideo
 python examples/inference/basic/basic.py
 ```
 
-For an example on Apple silicon: 
+### Apple Silicon (FastMetal-QAD)
+
+Use the MLX runtime with FastMetal-QAD. See the
+[Apple Silicon guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/mps/).
+
+```bash
+hf download FastVideo/FastMetal-1.3B-QAD --local-dir ./FastMetal-1.3B-QAD
+
+python examples/inference/basic/mlx_wan_prompt_to_video.py \
+  --model-root ./FastMetal-1.3B-QAD \
+  --mlx-checkpoint ./FastMetal-1.3B-QAD \
+  --prompt "A bird's-eye view of a misty forest valley at dawn."
 ```
-python examples/inference/basic/basic_mps.py
-```
+
+5B uses [`mlx_wan22_generate.py`](mlx_wan22_generate.py) with
+`FastVideo/FastMetal-5B-QAD`.
+
+`examples/inference/basic/basic_mps.py` is the older PyTorch MPS demo.
 
 For an example running DMD+VSA inference:
 ```

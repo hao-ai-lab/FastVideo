@@ -197,8 +197,8 @@ def load_mlx_dit_checkpoint(checkpoint_dir: str | Path, *, compile: bool = False
     manifest_path = checkpoint_dir / MANIFEST_FILENAME
     weights_path = checkpoint_dir / WEIGHTS_FILENAME
     if not manifest_path.exists() or not weights_path.exists():
-        raise FileNotFoundError(f"Not an MLX DiT checkpoint directory: {checkpoint_dir} "
-                                f"(expected {MANIFEST_FILENAME} and {WEIGHTS_FILENAME}).")
+        from fastvideo.mlx_runtime.checkpoint_compat import mlx_checkpoint_missing_hint
+        raise FileNotFoundError(mlx_checkpoint_missing_hint(checkpoint_dir))
 
     manifest = json.loads(manifest_path.read_text())
     version = manifest.get("format_version")
