@@ -161,6 +161,7 @@ def encode_prompt(
     text_encoder = UMT5EncoderModel.from_pretrained(
         model_root / "text_encoder",
         torch_dtype=dtype,
+        low_cpu_mem_usage=True,
         local_files_only=True,
     ).to(device)
     text_encoder.eval()
@@ -402,6 +403,7 @@ def decode_latents_to_video(
     vae = AutoencoderKLWan.from_pretrained(
         model_root / "vae",
         torch_dtype=dtype,
+        low_cpu_mem_usage=True,
         local_files_only=True,
     ).to(device)
     vae.eval()
