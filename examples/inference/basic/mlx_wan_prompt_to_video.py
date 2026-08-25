@@ -1,11 +1,25 @@
-"""Generate a FastWan text-to-video clip with the Apple Silicon MLX runtime.
+"""Generate a FastMetal text-to-video clip with the Apple Silicon MLX runtime.
 
-This is the supported source-tree entrypoint for the FastWan-QAD-INT8-1.3B
-Apple release:
+This is the supported source-tree entrypoint for FastMetal-QAD (Wan2.1 1.3B
+and 14B). Use ``mlx_wan22_generate.py`` for FastMetal-5B-QAD.
+
+Download FastMetal-QAD and point ``--model-root`` / ``--mlx-checkpoint`` at it:
+
+    hf download FastVideo/FastMetal-1.3B-QAD --local-dir ./FastMetal-1.3B-QAD
+    python examples/inference/basic/mlx_wan_prompt_to_video.py \\
+      --model-root ./FastMetal-1.3B-QAD --mlx-checkpoint ./FastMetal-1.3B-QAD
+
+CUDA FastWan-QAD (``FastVideo/FastWan-QAD-1.3B``, ``FastVideo/FastWan-QAD-FP8-1.3B``)
+is a separate NVIDIA release.
+
+FastMetal-QAD Hugging Face repos ship ``mlx_dit.json`` + ``mlx_dit.safetensors``,
+not a Diffusers ``transformer/`` tree. Do not copy ``transformer/config.json``
+from Wan2.1 or other checkpoints; point ``--mlx-checkpoint`` at the FastMetal
+directory and the example reads the DiT config from ``mlx_dit.json``.
 
 - Hugging Face/torch encodes the prompt with UMT5 (bf16 by default: fp32
   exponent range without fp16 overflow risk, at fp16 memory cost).
-- MLX runs the FastWan DiT denoising loop (INT8 by default, compiled with
+- MLX runs the FastMetal DiT denoising loop (INT8 by default, compiled with
   ``mx.compile`` unless ``--no-mlx-compile``).
 - TAEHV (default, fast/low-memory) or the full Wan VAE (``--decode-backend
   wan-vae``, higher fidelity, bf16) decodes the final latents.
@@ -56,13 +70,18 @@ from fastvideo.mlx_runtime.prompt_cache import (
     save_prompt_cache,
     text_encoder_fingerprint,
 )
+from fastvideo.mlx_runtime.checkpoint_compat import (
+    UnsupportedMLXCheckpointError,
+    raise_if_unsupported_mlx_checkpoint,
+    resolve_mlx_checkpoint,
+)
 from fastvideo.mlx_runtime.rife_interp import aligned_keyframe_count
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from fastvideo.mlx_runtime.fast_spatial import FastSpatialPlan
 
 
-DEFAULT_MODEL_ID = "FastVideo/FastWan2.1-T2V-1.3B-Diffusers"
+DEFAULT_MODEL_ID = "FastVideo/FastMetal-1.3B-QAD"
 
 # Legacy pinned-snapshot location, kept for callers that import it (the MLX
 # benchmark harness). New code should prefer resolve_model_root(None), which
@@ -99,6 +118,10 @@ def resolve_model_root(
         "tokenizer/*",
         "text_encoder/*",
         "vae/*",
+        "mlx_dit.json",
+        "mlx_dit.safetensors",
+        "ema/mlx_dit.json",
+        "ema/mlx_dit.safetensors",
         "transformer/*" if include_transformer else "transformer/config.json",
     ]
     return Path(snapshot_download(
@@ -138,6 +161,7 @@ def encode_prompt(
     text_encoder = UMT5EncoderModel.from_pretrained(
         model_root / "text_encoder",
         torch_dtype=dtype,
+        low_cpu_mem_usage=True,
         local_files_only=True,
     ).to(device)
     text_encoder.eval()
@@ -379,6 +403,7 @@ def decode_latents_to_video(
     vae = AutoencoderKLWan.from_pretrained(
         model_root / "vae",
         torch_dtype=dtype,
+        low_cpu_mem_usage=True,
         local_files_only=True,
     ).to(device)
     vae.eval()
@@ -471,11 +496,16 @@ def _rife_interpolate_video(*, video_path: Path, target_frames: int, factor: int
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Prompt-to-video FastWan generation using MLX for the DiT")
+    parser = argparse.ArgumentParser(
+        description="Prompt-to-video FastMetal-QAD generation using the Apple Silicon MLX runtime")
     parser.add_argument("--model-root", type=Path, default=None,
-                        help=f"Model directory. Defaults to the local HF cache for {DEFAULT_MODEL_ID} "
+                        help="FastMetal-QAD directory (tokenizer, UMT5, VAE, packed MLX DiT). "
+                        f"Defaults to the local HF cache for {DEFAULT_MODEL_ID} "
                         "(downloading it if missing).")
-    parser.add_argument("--prompt", default="A paper boat sails through a shallow stream in a mossy forest.")
+    parser.add_argument(
+        "--prompt",
+        default="A bird's-eye view of a misty forest valley at dawn.",
+    )
     parser.add_argument("--output-path", type=Path, default=Path("video_samples/mlx_fastwan_prompt_to_video.mp4"))
     parser.add_argument("--height", type=int, default=480)
     parser.add_argument("--width", type=int, default=832)
@@ -639,9 +669,8 @@ def main() -> None:
                         "keyed by (model, prompt, length, dtype), so repeat runs skip "
                         "the text encoder entirely. Default: on.")
     parser.add_argument("--mlx-checkpoint", type=Path, default=None,
-                        help="Load the DiT from a pre-quantized MLX checkpoint directory "
-                        "(created with --save-mlx-checkpoint) instead of casting/quantizing "
-                        "the Diffusers weights on every run.")
+                        help="Packed FastMetal MLX DiT directory (mlx_dit.json + mlx_dit.safetensors). "
+                        "Defaults to --model-root when that directory already contains those files.")
     parser.add_argument("--save-mlx-checkpoint", type=Path, default=None,
                         help="After loading the DiT, save it (cast + quantized) as an MLX "
                         "checkpoint directory for fast reloads via --mlx-checkpoint.")
@@ -690,6 +719,12 @@ def main() -> None:
         np.save(args.encode_prompt_only, prompt_embeds.cpu().numpy())
         return
 
+    mlx_checkpoint = resolve_mlx_checkpoint(args.mlx_checkpoint, model_root)
+    try:
+        raise_if_unsupported_mlx_checkpoint(mlx_checkpoint or model_root)
+    except UnsupportedMLXCheckpointError as exc:
+        raise SystemExit(str(exc)) from exc
+
     import mlx.core as mx
     import torch
     from diffusers import UniPCMultistepScheduler
@@ -719,17 +754,21 @@ def main() -> None:
 
     config_path = model_root / "transformer/config.json"
     checkpoint_path = model_root / "transformer/diffusion_pytorch_model.safetensors"
-    config = json.loads(config_path.read_text())
-    # A pre-quantized MLX DiT can be paired with a lightweight asset root for
-    # UMT5/TAEHV.  In that case the model root is *not* the architecture
-    # authority: use the checkpoint's embedded transformer config for the
-    # sampler guard and latent geometry.
-    dit_config = config
-    if args.mlx_checkpoint is not None:
-        mlx_config_path = Path(args.mlx_checkpoint) / "mlx_dit.json"
-        if mlx_config_path.is_file():
-            mlx_checkpoint_config = json.loads(mlx_config_path.read_text())
-            dit_config = mlx_checkpoint_config.get("config", mlx_checkpoint_config)
+    # Packed FastMetal checkpoints are the architecture authority. Do not
+    # require transformer/config.json when mlx_dit.json is already present.
+    if mlx_checkpoint is not None:
+        mlx_checkpoint_config = json.loads((mlx_checkpoint / "mlx_dit.json").read_text())
+        dit_config = mlx_checkpoint_config.get("config", mlx_checkpoint_config)
+        config = dit_config
+    else:
+        if not config_path.is_file():
+            raise SystemExit(
+                f"No packed MLX DiT (mlx_dit.json) and no Diffusers transformer config at {config_path}. "
+                "FastMetal-QAD checkpoints intentionally omit transformer/; download "
+                "FastVideo/FastMetal-1.3B-QAD and pass --model-root / --mlx-checkpoint at that directory."
+            )
+        config = json.loads(config_path.read_text())
+        dit_config = config
     if int(dit_config.get("in_channels", 0)) == 48 and int(dit_config.get("out_channels", 0)) == 48:
         raise SystemExit(
             "Wan2.2-TI2V-5B uses 48-channel, per-token timestep conditioning. "
@@ -835,10 +874,10 @@ def main() -> None:
     load_start = time.perf_counter()
     mx.clear_cache()
     mx.reset_peak_memory()
-    if args.mlx_checkpoint is not None:
+    if mlx_checkpoint is not None:
         from fastvideo.mlx_runtime.checkpoint import load_mlx_dit_checkpoint
 
-        dit = load_mlx_dit_checkpoint(args.mlx_checkpoint, compile=args.mlx_compile)
+        dit = load_mlx_dit_checkpoint(mlx_checkpoint, compile=args.mlx_compile)
         config = dit.config
     else:
         dit = mlx_dit_from_diffusers_safetensors(

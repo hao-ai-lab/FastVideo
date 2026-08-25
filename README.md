@@ -64,9 +64,10 @@ UV_TORCH_BACKEND=cu126 uv pip install fastvideo
 Use `UV_TORCH_BACKEND=cu130` on CUDA 13. Apple silicon users should follow the
 [MPS installation guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/mps/).
 
-> **On an Apple Silicon Mac?** FastVideo runs FastWan text-to-video natively
-> through an MLX runtime — a 5-second 480p clip generated locally, no cloud,
-> no discrete GPU. Install with `uv pip install -e '.[mlx]'` and follow the
+> **On an Apple Silicon Mac?** FastVideo runs FastMetal-QAD through an MLX
+> runtime. Install with `uv pip install -e '.[mlx]'`, download
+> [`FastVideo/FastMetal-1.3B-QAD`](https://huggingface.co/FastVideo/FastMetal-1.3B-QAD),
+> and follow the
 > [Apple Silicon guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/mps/).
 
 Please see our [docs](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/) for more detailed installation instructions.

@@ -1,6 +1,10 @@
 # MPS (Apple Silicon)
 
-Instructions to install FastVideo for Apple Silicon.
+Install FastVideo on Apple Silicon and run FastMetal-QAD.
+
+Apple Silicon uses the MLX runtime and the FastMetal-QAD INT8 checkpoints.
+See the [FastMetal-QAD blog](https://haoailab.com/blogs/fastmetal/) and the
+[FastMetal collection](https://huggingface.co/collections/FastVideo/fastmetal).
 
 ## Requirements
 
@@ -49,7 +53,7 @@ brew install ffmpeg
 
 ### Installation
 
-FastWan's native Apple Silicon runtime requires the `mlx` extra.
+FastMetal's native Apple Silicon runtime requires the `mlx` extra.
 
 #### With uv (recommended)
 
@@ -87,6 +91,47 @@ Alternative with Conda environment:
 uv pip install -e ".[mlx]"
 ```
 
+## Run FastMetal-QAD
+
+Each release is self-contained. Download one checkpoint and point both
+`--model-root` and `--mlx-checkpoint` at it (the example also auto-detects
+`mlx_dit.json` under `--model-root`).
+
+| Checkpoint | Script | Mac tier |
+| --- | --- | --- |
+| [`FastVideo/FastMetal-1.3B-QAD`](https://huggingface.co/FastVideo/FastMetal-1.3B-QAD) | `mlx_wan_prompt_to_video.py` | 16 GB+ |
+| [`FastVideo/FastMetal-5B-QAD`](https://huggingface.co/FastVideo/FastMetal-5B-QAD) | `mlx_wan22_generate.py` | 16 GB+ |
+| [`FastVideo/FastMetal-14B-QAD`](https://huggingface.co/FastVideo/FastMetal-14B-QAD) | `mlx_wan_prompt_to_video.py` | 36 GB+ |
+
+```bash
+hf download FastVideo/FastMetal-1.3B-QAD --local-dir ./FastMetal-1.3B-QAD
+
+python examples/inference/basic/mlx_wan_prompt_to_video.py \
+  --model-root ./FastMetal-1.3B-QAD \
+  --mlx-checkpoint ./FastMetal-1.3B-QAD \
+  --height 480 --width 832 --num-frames 81 \
+  --prompt "A bird's-eye view of a misty forest valley at dawn."
+```
+
+14B uses the same script. Point both flags at `./FastMetal-14B-QAD`. That repo also ships an EMA variant: keep `--model-root` at the repo root and set `--mlx-checkpoint ./FastMetal-14B-QAD/ema`.
+
+Wan2.2 5B uses a different latent layout, so it has its own entrypoint:
+
+```bash
+hf download FastVideo/FastMetal-5B-QAD --local-dir ./FastMetal-5B-QAD
+
+python examples/inference/basic/mlx_wan22_generate.py \
+  --mlx-checkpoint ./FastMetal-5B-QAD \
+  --text-encoder-root ./FastMetal-5B-QAD \
+  --vae-root ./FastMetal-5B-QAD/vae \
+  --height 704 --width 1280 --num-frames 81 \
+  --prompt "A cinematic portrait with soft neon lighting and smooth camera motion."
+```
+
+CUDA FastWan-QAD (`FastVideo/FastWan-QAD-1.3B`, `FastVideo/FastWan-QAD-FP8-1.3B`) is a separate NVIDIA release. The MLX examples look for FastMetal packed weights (`mlx_dit.json`).
+
+`basic_mps.py` is a generic PyTorch MPS demo. For local video on Mac, use the FastMetal commands above.
+
 ## Development Environment Setup
 
 If you're planning to contribute to FastVideo please see the following page:
@@ -94,9 +139,9 @@ If you're planning to contribute to FastVideo please see the following page:
 
 ## Hardware Requirements
 
-### For Basic Inference
-
-- Mac M1, M2, M3, or M4 (at least 32 GB RAM is preferable for high quality video generation)
+- **1.3B / 5B:** 16 GB unified memory and up (M1 and later)
+- **14B:** 36 GB unified memory and up
+- Fanless 13-inch MacBook Air can run 1.3B and 5B at the same resolutions
 
 ## Troubleshooting
 

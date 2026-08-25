@@ -24,6 +24,12 @@ from fastvideo.mlx_runtime.checkpoint import (
     load_mlx_dit_checkpoint,
     save_mlx_dit_checkpoint,
 )
+from fastvideo.mlx_runtime.checkpoint_compat import (
+    UnsupportedMLXCheckpointError,
+    discover_mlx_checkpoint,
+    raise_if_unsupported_mlx_checkpoint,
+    resolve_mlx_checkpoint,
+)
 from fastvideo.mlx_runtime.memory import (
     AppliedMemoryLimits,
     add_memory_limit_args,
@@ -81,6 +87,7 @@ __all__ = [
     "MLXWanTransformerBlock",
     "RefinePlan",
     "TwoPassResult",
+    "UnsupportedMLXCheckpointError",
     "UnsupportedMLXQuantizationError",
     "add_memory_limit_args",
     "apply_fast_spatial_upsample",
@@ -92,8 +99,11 @@ __all__ = [
     "fastwan_shape",
     "fastwan_shape_from_config",
     "gib_to_bytes",
+    "discover_mlx_checkpoint",
     "load_mlx_dit_checkpoint",
     "load_or_enhance_prompt",
+    "raise_if_unsupported_mlx_checkpoint",
+    "resolve_mlx_checkpoint",
     "mlx_dit_from_diffusers_safetensors",
     "mlx_block_weights_from_diffusers_safetensors",
     "mlx_block_weights_from_torch",

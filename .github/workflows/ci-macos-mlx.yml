@@ -78,6 +78,7 @@ jobs:
             fastvideo/tests/mlx/test_mlx_dit_parity.py \
             fastvideo/tests/mlx/test_mlx_compile_parity.py \
             fastvideo/tests/mlx/test_mlx_checkpoint.py \
+            fastvideo/tests/mlx/test_mlx_checkpoint_compat.py \
             fastvideo/tests/mlx/test_mlx_fastwan_benchmark.py \
             fastvideo/tests/mlx/test_taehv_decode.py \
             fastvideo/tests/mlx/test_frame_upsample.py \
@@ -134,6 +135,7 @@ jobs:
             fastvideo/tests/mlx/test_mlx_dit_parity.py \
             fastvideo/tests/mlx/test_mlx_compile_parity.py \
             fastvideo/tests/mlx/test_mlx_checkpoint.py \
+            fastvideo/tests/mlx/test_mlx_checkpoint_compat.py \
             fastvideo/tests/mlx/test_mlx_fastwan_benchmark.py \
             fastvideo/tests/mlx/test_taehv_decode.py \
             fastvideo/tests/mlx/test_frame_upsample.py \
