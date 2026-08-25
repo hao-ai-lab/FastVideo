@@ -166,6 +166,7 @@ def _fastmetal_howto() -> str:
     return ("The Apple Silicon MLX runtime requires FastMetal-QAD INT8 checkpoints, "
             f"not CUDA FastWan-QAD weights.\n"
             f"  Download: hf download FastVideo/FastMetal-1.3B-QAD --local-dir ./FastMetal-1.3B-QAD\n"
+            "  FastMetal repos ship mlx_dit.json (not transformer/config.json).\n"
             f"  Run: python examples/inference/basic/mlx_wan_prompt_to_video.py "
             f"--model-root ./FastMetal-1.3B-QAD --mlx-checkpoint ./FastMetal-1.3B-QAD\n"
             f"  5B uses examples/inference/basic/mlx_wan22_generate.py with FastMetal-5B-QAD.\n"

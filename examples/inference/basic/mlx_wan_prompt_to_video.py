@@ -12,6 +12,11 @@ Download FastMetal-QAD and point ``--model-root`` / ``--mlx-checkpoint`` at it:
 CUDA FastWan-QAD (``FastVideo/FastWan-QAD-1.3B``, ``FastVideo/FastWan-QAD-FP8-1.3B``)
 is a separate NVIDIA release.
 
+FastMetal-QAD Hugging Face repos ship ``mlx_dit.json`` + ``mlx_dit.safetensors``,
+not a Diffusers ``transformer/`` tree. Do not copy ``transformer/config.json``
+from Wan2.1 or other checkpoints; point ``--mlx-checkpoint`` at the FastMetal
+directory and the example reads the DiT config from ``mlx_dit.json``.
+
 - Hugging Face/torch encodes the prompt with UMT5 (bf16 by default: fp32
   exponent range without fp16 overflow risk, at fp16 memory cost).
 - MLX runs the FastMetal DiT denoising loop (INT8 by default, compiled with
@@ -757,7 +762,8 @@ def main() -> None:
         if not config_path.is_file():
             raise SystemExit(
                 f"No packed MLX DiT (mlx_dit.json) and no Diffusers transformer config at {config_path}. "
-                "Download FastVideo/FastMetal-1.3B-QAD and pass --model-root / --mlx-checkpoint at that directory."
+                "FastMetal-QAD checkpoints intentionally omit transformer/; download "
+                "FastVideo/FastMetal-1.3B-QAD and pass --model-root / --mlx-checkpoint at that directory."
             )
         config = json.loads(config_path.read_text())
         dit_config = config
