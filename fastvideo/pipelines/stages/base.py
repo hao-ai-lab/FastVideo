@@ -15,6 +15,7 @@ import torch
 import fastvideo.envs as envs
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
+from fastvideo.pipelines.lazy_module import LazyModule
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.validators import VerificationResult
 
@@ -35,6 +36,12 @@ class PipelineStage(ABC):
     for a specific part of the process, such as prompt encoding, latent preparation, etc.
     """
     performance_component_metric: str | None = None
+    # Deferred modules this stage is the last user of, installed by the
+    # pipeline under ``lazy_module_load``. Released once __call__ returns.
+    # Living here rather than in the pipeline's stage loop means a pipeline
+    # that overrides forward still frees, since __call__ is the one entry
+    # point subclasses are told not to override.
+    _lazy_modules_to_release: tuple[LazyModule, ...] = ()
 
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         """
@@ -177,6 +184,9 @@ class PipelineStage(ABC):
             except Exception as e:
                 logger.error("Output verification failed for %s: %s", stage_name, str(e))
                 raise
+
+        for lazy_module in self._lazy_modules_to_release:
+            lazy_module.release()
 
         return result
 
