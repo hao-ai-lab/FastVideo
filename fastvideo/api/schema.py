@@ -30,6 +30,12 @@ class OffloadConfig:
     image_encoder: bool = True
     vae: bool = True
     pin_cpu_memory: bool = True
+    # Not a CPU offload: loads each heavy component on first use and frees it
+    # after the last stage that needs it, so peak memory is the largest
+    # overlapping set rather than the sum. Grouped here because it is the same
+    # decision the offload knobs answer, which is how much of the model has to
+    # be resident at once.
+    lazy_module_load: bool = False
 
 
 @dataclass

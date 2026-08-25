@@ -30,6 +30,7 @@ surfaces:
       image_encoder_cpu_offload: generator.engine.offload.image_encoder
       vae_cpu_offload: generator.engine.offload.vae
       pin_cpu_memory: generator.engine.offload.pin_cpu_memory
+      lazy_module_load: generator.engine.offload.lazy_module_load
       enable_torch_compile: generator.engine.compile.enabled
       enable_torch_compile_text_encoder: generator.engine.compile.text_encoder_enabled
       enable_torch_compile_vae: generator.engine.compile.vae_enabled

@@ -12,6 +12,7 @@ text_encoder_cpu_offload: bool = True
 image_encoder_cpu_offload: bool = True
 vae_cpu_offload: bool = True
 pin_cpu_memory: bool = True
+lazy_module_load: bool = False
 ```
 
 On unified-memory accelerators such as NVIDIA GB10 and Apple silicon, FastVideo
@@ -121,6 +122,36 @@ These options introduce performance overhead due to PCIe data transfer.
 
 We recommend enabling these options when OOM happens.
 
+### `lazy_module_load`
+
+Every option above moves weights between host and device. This one changes
+whether they are in memory at all.
+
+By default a pipeline loads every component before the first stage runs, so
+peak memory is the sum of all of them even though no two are needed at the same
+moment. With `lazy_module_load` enabled, each heavy component loads on first use
+and is freed once the last stage that needs it has returned, so peak memory
+becomes the largest overlapping set instead of the sum. For a text-to-video
+pipeline that is roughly `max(text encoder, DiT + VAE)` rather than
+`text encoder + DiT + VAE`.
+
+#### Performance Impact
+
+A freed component is read from disk again on the next generation, so a
+multi-prompt run pays one reload per component per request. For a large text
+encoder that is tens of seconds.
+
+#### Usage Recommendation
+
+Enable this when a model does not fit at load time, which the CPU offload
+options above cannot help with because they act after loading. It is
+particularly relevant on unified-memory devices, where host and device draw on
+the same pool and moving weights to the host frees nothing. Leave it off when
+the model already fits.
+
+This option applies to inference only. Training keeps every component resident
+and logs a warning if the flag is set.
+
 ## General Recommendations
 
 ### Single GPU Inference
@@ -130,6 +161,12 @@ We recommend enabling `dit_layerwise_offload`. If OOM happens, also enable `imag
 ### Multi-GPU Inference
 
 We recommend enabling `use_fsdp_inference` and disabling both `dit_layerwise_offload` and `dit_cpu_offload`. If OOM happens, consider enabling `text_encoder_cpu_offload`, `image_encoder_cpu_offload`, and `vae_cpu_offload`. If OOM still happens, consider enabling `dit_cpu_offload`.
+
+### When the Model Does Not Fit at Load Time
+
+The offload options only help once loading has finished. If the run dies while
+components are still being placed, or if the machine has unified memory so
+there is no separate host pool to offload into, enable `lazy_module_load`.
 
 ## Examples
 

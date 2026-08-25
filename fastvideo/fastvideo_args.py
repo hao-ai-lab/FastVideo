@@ -173,6 +173,15 @@ class FastVideoArgs:
     taeh3_checkpoint: str | None = None
     taeh3_chunk_size: int = 5
 
+    # Load each heavy component on first use and free it once the last stage
+    # that holds it has run, instead of keeping every component resident from
+    # load time to shutdown. Peak memory becomes the largest overlapping set
+    # rather than the sum of all components. Off by default: a released
+    # component is re-read from disk on the next generation, so this trades
+    # per-request latency for headroom and only pays off when the sum does not
+    # fit. Inference only; training keeps every component resident.
+    lazy_module_load: bool = False
+
     # Sequence-parallel MiniMax-H3 VAE (opt-in, default off). With SP > 1 the
     # video VAE's temporal chunks (decode) and clips (reference encode) are
     # round-robined across the sequence-parallel ranks and reassembled
@@ -720,6 +729,13 @@ class FastVideoArgs:
             "--vae-cpu-offload",
             action=StoreBoolean,
             help="Use CPU offload for VAE. Enable if run out of memory.",
+        )
+        parser.add_argument(
+            "--lazy-module-load",
+            action=StoreBoolean,
+            help="Load each heavy component on first use and free it after the last stage that needs it, "
+            "so peak memory is the largest overlapping set of components instead of their sum. Enable when a "
+            "model does not fit at load time. Costs a reload per generation, so leave it off when it does fit.",
         )
         parser.add_argument(
             "--pin-cpu-memory",
