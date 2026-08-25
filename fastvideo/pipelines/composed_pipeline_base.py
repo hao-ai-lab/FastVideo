@@ -24,6 +24,7 @@ from fastvideo.hooks.activation_trace import attach_activation_trace, detach_act
 from fastvideo.logger import init_logger
 from fastvideo.profiler import get_or_create_profiler
 from fastvideo.models.loader.component_loader import PipelineComponentLoader
+from fastvideo.pipelines.lazy_module import LazyModule, is_lazy_module
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages import PipelineStage
 import fastvideo.envs as envs
@@ -51,6 +52,23 @@ class ComposedPipelineBase(ABC):
     trainable_transformer_names: list[str] = ["transformer"]
     trainable_transformer_modules: dict[str, torch.nn.Module] = {}
     post_init_called: bool = False
+    # Components eligible for deferred loading under ``lazy_module_load``.
+    # These are the weight-bearing ones; tokenizers, processors, and
+    # schedulers are cheap and stay resident so the pipeline can inspect them
+    # at construction time. Names follow the diffusers manifest convention, so
+    # the default list covers most pipelines; override per pipeline if a
+    # component is named differently or must never be released.
+    _lazy_module_names: tuple[str, ...] = (
+        "transformer",
+        "transformer_2",
+        "transformer_ref",
+        "transformer_refine",
+        "text_encoder",
+        "text_encoder_2",
+        "image_encoder",
+        "vae",
+        "audio_vae",
+    )
 
     @classmethod
     def get_hf_download_component_dirs(cls) -> tuple[str, ...] | None:
@@ -154,6 +172,13 @@ class ComposedPipelineBase(ABC):
             return
 
         module = self.modules[module_name]
+        if is_lazy_module(module):
+            # torch.compile replaces the entry in self.modules, which would
+            # drop the proxy and with it the ability to release. Load now and
+            # keep this component resident for the run.
+            logger.info("torch.compile requested for %s; loading it eagerly instead of deferring", module_name)
+            module = module.materialize()
+            self.modules[module_name] = module
         if fsdp_module_cls is not None and isinstance(module, fsdp_module_cls):
             logger.info(
                 "%s is already FSDP-wrapped; skipping torch.compile in pipeline",
@@ -275,6 +300,9 @@ class ComposedPipelineBase(ABC):
         if not self.fastvideo_args.training_mode:
             logger.info("Creating pipeline stages...")
             self.create_pipeline_stages(self.fastvideo_args)
+
+            if self._lazy_module_load_enabled(self.fastvideo_args):
+                self._install_lazy_release_hooks()
 
             # Warmup NCCL communicators for sequence parallelism to avoid
             # slow first forward pass due to lazy initialization
@@ -486,13 +514,23 @@ class ComposedPipelineBase(ABC):
                 load_module_name = module_name
 
             component_model_path = os.path.join(self.model_path, load_module_name)
-            module = PipelineComponentLoader.load_module(
-                module_name=load_module_name,
-                component_model_path=component_model_path,
-                transformers_or_diffusers=transformers_or_diffusers,
-                fastvideo_args=fastvideo_args,
-            )
-            logger.info("Loaded module %s from %s", module_name, component_model_path)
+
+            def load_component(load_module_name: str = load_module_name,
+                               component_model_path: str = component_model_path,
+                               transformers_or_diffusers: str = transformers_or_diffusers) -> Any:
+                return PipelineComponentLoader.load_module(
+                    module_name=load_module_name,
+                    component_model_path=component_model_path,
+                    transformers_or_diffusers=transformers_or_diffusers,
+                    fastvideo_args=fastvideo_args,
+                )
+
+            if self._lazy_module_load_enabled(fastvideo_args) and module_name in self._lazy_module_names:
+                module = LazyModule(module_name, load_component)
+                logger.info("Deferred module %s from %s", module_name, component_model_path)
+            else:
+                module = load_component()
+                logger.info("Loaded module %s from %s", module_name, component_model_path)
 
             if module_name in modules:
                 logger.warning("Overwriting module %s", module_name)
@@ -506,6 +544,79 @@ class ComposedPipelineBase(ABC):
                 )
 
         return modules
+
+    @staticmethod
+    def _lazy_module_load_enabled(fastvideo_args: FastVideoArgs) -> bool:
+        """Deferred loading is inference only; training needs every component."""
+        if not fastvideo_args.lazy_module_load:
+            return False
+        if fastvideo_args.training_mode:
+            logger.warning("lazy_module_load is not supported in training mode; loading all modules eagerly")
+            return False
+        return True
+
+    def _build_lazy_release_schedule(self) -> dict[int, list[str]]:
+        """Map each stage index to the deferred modules it is the last user of.
+
+        Derived from what the stages actually hold rather than declared per
+        pipeline, so a stage added later cannot have its module freed out from
+        under it. A module no stage references is never released, which is the
+        safe direction: it stays loaded rather than disappearing mid-run.
+        """
+        lazy_names_by_id = {id(module): name for name, module in self.modules.items() if is_lazy_module(module)}
+        if not lazy_names_by_id:
+            return {}
+
+        last_use: dict[str, int] = {}
+        for index, stage in enumerate(self._stages):
+            for key, value in vars(stage).items():
+                if key == "_lazy_modules_to_release":
+                    # Installed by this schedule, not a real use.
+                    continue
+                # is_lazy_module first: isinstance() on a proxy forwards
+                # __class__ and would load every deferred module just to work
+                # out where to release it.
+                if is_lazy_module(value):
+                    candidates: tuple[Any, ...] = (value, )
+                elif isinstance(value, list | tuple):
+                    candidates = tuple(value)
+                elif isinstance(value, dict):
+                    candidates = tuple(value.values())
+                else:
+                    continue
+                for candidate in candidates:
+                    name = lazy_names_by_id.get(id(candidate))
+                    if name is not None:
+                        last_use[name] = index
+
+        schedule: dict[int, list[str]] = {}
+        for name, index in sorted(last_use.items()):
+            schedule.setdefault(index, []).append(name)
+
+        unreferenced = sorted(set(lazy_names_by_id.values()) - set(last_use))
+        if unreferenced:
+            logger.info("Deferred modules held by no stage, so never released: %s", unreferenced)
+        return schedule
+
+    def _install_lazy_release_hooks(self) -> None:
+        """Tell each stage which deferred modules to free once it returns."""
+        schedule = self._build_lazy_release_schedule()
+        for index, stage in enumerate(self._stages):
+            stage._lazy_modules_to_release = tuple(self.modules[name] for name in schedule.get(index, ()))
+
+        if not schedule:
+            # Deferring without releasing still lowers the load-time peak, but
+            # it is not what the flag promises, so say so rather than let a
+            # no-op look like a win.
+            logger.warning(
+                "lazy_module_load is on but no deferred module is held by a stage, so nothing will be "
+                "freed mid-run. Pipeline %s may load its modules eagerly or hold them outside its stages.",
+                type(self).__name__)
+            return
+
+        for index, names in sorted(schedule.items()):
+            logger.info("Deferred modules to free after stage %d (%s): %s", index,
+                        getattr(self._stages[index], "_pipeline_stage_name", "?"), names)
 
     def add_stage(self, stage_name: str, stage: PipelineStage):
         assert self.modules is not None, "No modules are registered"
