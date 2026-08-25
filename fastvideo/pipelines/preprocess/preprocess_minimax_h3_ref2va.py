@@ -4,38 +4,63 @@
 from __future__ import annotations
 
 import argparse
+import gc
 from pathlib import Path
 import shutil
 from typing import Any
 
+import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
+import torch
 
 from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
-from fastvideo.dataset.minimax_h3_ref2va_dataset import pyarrow_schema_minimax_h3_ref2va
+from fastvideo.dataset.minimax_h3_ref2va_dataset import (
+    MINIMAX_H3_REF2VA_AUDIO_ROW_WIDTH,
+    MINIMAX_H3_REF2VA_SCHEMA_VERSION,
+    MINIMAX_H3_REF2VA_VISUAL_ROW_WIDTH,
+    collate_minimax_h3_ref2va_rows,
+    pyarrow_schema_minimax_h3_ref2va,
+)
 from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.models.schedulers.scheduling_minimax_h3 import MiniMaxH3Scheduler
+from fastvideo.pipelines import ForwardBatch
+from fastvideo.pipelines.basic.minimax_h3.packing import (
+    MINIMAX_H3_KEYFRAME_ENCODE_SEED,
+    MINIMAX_H3_KEYFRAME_NOISE_AUG,
+    audio_latent_num_frames,
+    keyframe_condition_noise,
+    patchify_video_latents,
+    video_latent_num_frames,
+)
 from fastvideo.pipelines.basic.minimax_h3.ref2va_manifest import (
     MiniMaxH3RawReference,
     MiniMaxH3Ref2VARawSample,
     build_minimax_h3_references,
     load_minimax_h3_ref2va_raw_samples,
 )
-from fastvideo.pipelines.basic.minimax_h3.reference import MiniMaxH3PreparedReference, prepare_reference
+from fastvideo.pipelines.basic.minimax_h3.reference import (
+    MiniMaxH3PreparedReference,
+    prepare_reference,
+    trim_reference_num_frames,
+)
+from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_conditioning import (
+    MINIMAX_H3_TEXT_TOKEN_TAGS_KEY,
+    MiniMaxH3ConditioningStage,
+)
+from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_input_preparation import MINIMAX_H3_KEYFRAMES_KEY
 from fastvideo.pipelines.preprocess.preprocess_minimax_h3_overfit import (
     AUDIO_SAMPLE_RATE,
     MODEL_PATH,
     NUM_FRAMES,
+    VIDEO_HEIGHT,
+    VIDEO_WIDTH,
     _init_single_process_distributed,
+    _load_component,
+    build_parquet_record,
     encode_audio_latents,
     encode_video_latents,
     load_training_media,
-)
-from fastvideo.pipelines.preprocess.preprocess_minimax_h3_ref2va_overfit import (
-    build_ref2va_parquet_record,
-    encode_ref2va_conditioning,
-    encode_ref_audio_anchor,
-    encode_ref_visual_anchor,
-    validate_record_contract,
 )
 from fastvideo.utils import verify_model_config_and_directory
 
@@ -52,6 +77,241 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--validate-manifest-only", action="store_true")
     parser.add_argument("--validate-only", action="store_true")
     return parser.parse_args()
+
+
+def _sample_visual_posterior(posterior: Any) -> torch.Tensor:
+    generator = torch.Generator("cpu").manual_seed(MINIMAX_H3_KEYFRAME_ENCODE_SEED)
+    return posterior.sample(generator=generator)
+
+
+def encode_ref_visual_anchor(
+    references: list[MiniMaxH3PreparedReference],
+    model_path: Path,
+    model_index: dict[str, Any],
+    fastvideo_args: FastVideoArgs,
+    patch_size: tuple[int, int, int],
+) -> torch.Tensor:
+    """Encode and cache official 0.999-noised ordered visual condition rows."""
+    visual_references = [reference for reference in references if reference.media_type != "audio"]
+    if not visual_references:
+        return torch.empty((0, MINIMAX_H3_REF2VA_VISUAL_ROW_WIDTH), dtype=torch.float32)
+
+    print("Loading MiniMax H3 video VAE for Ref2VA visual anchors")
+    vae = _load_component("vae", model_path, model_index, fastvideo_args)
+    device = torch.device("cuda:0")
+    clean_rows: list[torch.Tensor] = []
+    latent_channels = int(vae.latent_channels)
+    with torch.no_grad():
+        for reference in references:
+            if reference.media_type == "audio":
+                continue
+            if reference.media_type == "image":
+                if reference.image is None:
+                    raise ValueError("Prepared image reference is missing pixels")
+                pixels = torch.from_numpy(np.asarray(reference.image).copy()).permute(2, 0, 1)[None, :, None]
+                pixels = pixels.to(device=device, dtype=torch.float32).div_(255.0)
+                posterior = vae.encode_keyframe(vae.normalize_pixels(pixels)).latent_dist
+            else:
+                if reference.frames is None:
+                    raise ValueError("Prepared video reference is missing frames")
+                frames = reference.frames[:trim_reference_num_frames(reference.frames.shape[0])]
+                pixels = torch.from_numpy(frames.copy()).permute(3, 0, 1, 2)[None]
+                pixels = pixels.to(device=device, dtype=torch.float32).div_(255.0)
+                posterior = vae.encode(vae.normalize_pixels(pixels)).latent_dist
+
+            # The fp16 round trip before latent normalization is part of the
+            # released Ref2VA condition encoding path.
+            latents = vae.normalize_latents(_sample_visual_posterior(posterior).to(torch.float16).float()).cpu()
+            if latents.ndim != 5 or latents.shape[0] != 1 or latents.shape[1] != latent_channels:
+                raise ValueError(f"Unexpected reference visual latent shape: {tuple(latents.shape)}")
+            reference.num_latent_frames = int(latents.shape[2])
+            reference.latent_height = int(latents.shape[3])
+            reference.latent_width = int(latents.shape[4])
+            clean_rows.append(patchify_video_latents(latents, patch_size).float().contiguous())
+            del posterior, latents, pixels
+
+        clean_anchor = torch.cat(clean_rows).to(device=device, dtype=torch.float32)
+        shapes = tuple((reference.num_latent_frames, reference.latent_height, reference.latent_width)
+                       for reference in references if reference.media_type != "audio")
+        noise_generator = torch.Generator("cpu").manual_seed(MINIMAX_H3_KEYFRAME_ENCODE_SEED)
+        noise = keyframe_condition_noise(
+            shapes,
+            patch_size,
+            latent_channels,
+            generator=noise_generator,
+            device=device,
+            dtype=torch.float32,
+        )
+        anchor = MiniMaxH3Scheduler(shift=12.0).scale_noise(
+            clean_anchor,
+            MINIMAX_H3_KEYFRAME_NOISE_AUG,
+            noise,
+        ).float().cpu().contiguous()
+
+    expected_width = latent_channels * int(np.prod(patch_size))
+    if expected_width != MINIMAX_H3_REF2VA_VISUAL_ROW_WIDTH or anchor.shape[1] != expected_width:
+        raise ValueError(
+            f"Ref2VA visual anchor width must be {MINIMAX_H3_REF2VA_VISUAL_ROW_WIDTH}, got {anchor.shape[1]}")
+    del clean_anchor, clean_rows, noise, vae
+    gc.collect()
+    torch.cuda.empty_cache()
+    print(f"Ref2VA visual anchor shape: {tuple(anchor.shape)} at fixed clean-time 0.999")
+    return anchor
+
+
+def encode_ref_audio_anchor(
+    references: list[MiniMaxH3PreparedReference],
+    model_path: Path,
+    model_index: dict[str, Any],
+    fastvideo_args: FastVideoArgs,
+) -> torch.Tensor:
+    """Encode clean channel-major audio anchors in ordered-reference order."""
+    if not any(reference.has_audio for reference in references):
+        return torch.empty((0, MINIMAX_H3_REF2VA_AUDIO_ROW_WIDTH), dtype=torch.float32)
+
+    print("Loading MiniMax H3 audio VAE for Ref2VA audio anchors")
+    audio_vae = _load_component("audio_vae", model_path, model_index, fastvideo_args)
+    device = torch.device("cuda:0")
+    latent_channels = int(audio_vae.latent_channels)
+    if int(audio_vae.sampling_rate) != AUDIO_SAMPLE_RATE:
+        raise ValueError(f"Audio VAE sampling rate must be {AUDIO_SAMPLE_RATE}, got {audio_vae.sampling_rate}")
+    rows: list[torch.Tensor] = []
+    with torch.no_grad():
+        for reference in references:
+            if not reference.has_audio:
+                continue
+            if reference.waveform is None:
+                raise ValueError("Audio-bearing reference is missing its prepared waveform")
+            posterior = audio_vae.encode(reference.waveform.to(device=device, dtype=torch.float32)[:, None]).latent_dist
+            latents = audio_vae.normalize_latents(posterior.mode().float()).cpu().transpose(1, 2)
+            if latents.ndim != 3 or latents.shape[0] != 2 or latents.shape[2] != latent_channels:
+                raise ValueError(f"Unexpected reference audio latent shape: {tuple(latents.shape)}")
+            reference.num_audio_latents = int(latents.shape[1])
+            rows.append(latents.reshape(-1, latent_channels).float().contiguous())
+            del posterior, latents
+    anchor = torch.cat(rows).float().contiguous()
+    if latent_channels != MINIMAX_H3_REF2VA_AUDIO_ROW_WIDTH or anchor.shape[1] != latent_channels:
+        raise ValueError(
+            f"Ref2VA audio anchor width must be {MINIMAX_H3_REF2VA_AUDIO_ROW_WIDTH}, got {anchor.shape[1]}")
+    del rows, audio_vae
+    gc.collect()
+    torch.cuda.empty_cache()
+    print(f"Ref2VA audio anchor shape: {tuple(anchor.shape)}")
+    return anchor
+
+
+def encode_ref2va_conditioning(
+    caption: str,
+    references: list[MiniMaxH3PreparedReference],
+    model_path: Path,
+    model_index: dict[str, Any],
+    fastvideo_args: FastVideoArgs,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Encode the exact ordered presentation without padding or truncation."""
+    print("Loading MiniMax H3 tokenizer, processor, and Qwen3-VL encoder")
+    tokenizer = _load_component("tokenizer", model_path, model_index, fastvideo_args)
+    processor = _load_component("processor", model_path, model_index, fastvideo_args)
+    conditioner = _load_component("text_encoder", model_path, model_index, fastvideo_args)
+    stage = MiniMaxH3ConditioningStage(
+        conditioner=conditioner,
+        tokenizer=tokenizer,
+        processor=processor,
+        ref2va=bool(references),
+    )
+    batch = ForwardBatch(data_type="video", prompt=caption, references=references)
+    if not references:
+        # The Ref stage intentionally rejects an empty list. Prompt-only rows
+        # use the exact T2VA tokenizer path and contain only text tags.
+        batch.extra[MINIMAX_H3_KEYFRAMES_KEY] = []
+    batch = stage.forward(batch, fastvideo_args)
+    if len(batch.prompt_embeds) != 1:
+        raise RuntimeError("MiniMax H3 conditioning must return exactly one embedding")
+    text_embedding = batch.prompt_embeds[0].squeeze(0).float().cpu().contiguous()
+    text_token_tags = batch.extra.get(MINIMAX_H3_TEXT_TOKEN_TAGS_KEY)
+    if not isinstance(text_token_tags, torch.Tensor):
+        raise RuntimeError("MiniMax H3 conditioning did not return text token tags")
+    text_token_tags = text_token_tags.to(dtype=torch.long, device="cpu").contiguous()
+    if text_embedding.ndim != 2 or text_embedding.shape[1] != 5120 or text_embedding.shape[0] == 0:
+        raise ValueError(f"Unexpected Qwen embedding shape: {tuple(text_embedding.shape)}")
+    if text_token_tags.shape != text_embedding.shape[:1]:
+        raise ValueError("Qwen text token tags do not align with its hidden states")
+    if not bool(((text_token_tags == 0) | (text_token_tags == 1)).all()):
+        raise ValueError("Qwen text token tags may contain only vision=0 and text=1")
+
+    dynamic_length = int(text_embedding.shape[0])
+    print(f"Qwen Ref2VA conditioning shape: {tuple(text_embedding.shape)}; preserving all {dynamic_length} tokens")
+    del batch, stage, conditioner, processor, tokenizer
+    gc.collect()
+    torch.cuda.empty_cache()
+    return text_embedding, text_token_tags
+
+
+def _serialize_float32_tensor(record: dict[str, Any], name: str, tensor: torch.Tensor) -> None:
+    tensor = tensor.detach().float().cpu().contiguous()
+    record[f"{name}_bytes"] = tensor.numpy().tobytes()
+    record[f"{name}_shape"] = list(tensor.shape)
+    record[f"{name}_dtype"] = "float32"
+
+
+def _canonical_prepared_references(references: list[MiniMaxH3PreparedReference]) -> list[dict[str, Any]]:
+    canonical: list[dict[str, Any]] = []
+    for reference in references:
+        is_audio = reference.media_type == "audio"
+        canonical.append({
+            "media_type": reference.media_type,
+            "has_audio": bool(reference.has_audio),
+            # MiniMaxH3PreparedReference defaults num_latent_frames to 1, so
+            # standalone audio must be canonicalized explicitly to zero visual
+            # geometry rather than copying dataclass defaults.
+            "num_latent_frames": 0 if is_audio else int(reference.num_latent_frames),
+            "latent_height": 0 if is_audio else int(reference.latent_height),
+            "latent_width": 0 if is_audio else int(reference.latent_width),
+            "num_audio_latents": int(reference.num_audio_latents),
+        })
+    return canonical
+
+
+def build_ref2va_parquet_record(
+    *,
+    file_name: str,
+    caption: str,
+    video_latents: torch.Tensor,
+    audio_latents: torch.Tensor,
+    text_embedding: torch.Tensor,
+    text_token_tags: torch.Tensor,
+    ref_visual_anchor: torch.Tensor,
+    ref_audio_anchor: torch.Tensor,
+    references: list[MiniMaxH3PreparedReference],
+) -> dict[str, Any]:
+    record = build_parquet_record(
+        file_name=file_name,
+        caption=caption,
+        video_latents=video_latents,
+        audio_latents=audio_latents,
+        text_embedding=text_embedding,
+    )
+    record["schema_version"] = MINIMAX_H3_REF2VA_SCHEMA_VERSION
+    record["text_token_tags"] = text_token_tags.to(dtype=torch.long, device="cpu").tolist()
+    _serialize_float32_tensor(record, "ref_visual_anchor", ref_visual_anchor)
+    _serialize_float32_tensor(record, "ref_audio_anchor", ref_audio_anchor)
+    record["references"] = _canonical_prepared_references(references)
+    return record
+
+
+def validate_record_contract(record: dict[str, Any]) -> None:
+    missing = [name for name in pyarrow_schema_minimax_h3_ref2va.names if name not in record]
+    if missing:
+        raise ValueError(f"Ref2VA record is missing schema fields: {missing}")
+    expected_target_shapes = {
+        "vae_latent_shape": [24, video_latent_num_frames(NUM_FRAMES), VIDEO_HEIGHT // 16, VIDEO_WIDTH // 16],
+        "audio_latent_shape": [2, 32, audio_latent_num_frames(NUM_FRAMES)],
+    }
+    for name, expected in expected_target_shapes.items():
+        if record[name] != expected:
+            raise ValueError(f"{name} must be {expected}, got {record[name]}")
+    # Reuse the actual training collator as the authoritative nested-reference,
+    # empty-anchor, dtype, row-count, and dynamic-text validation gate.
+    collate_minimax_h3_ref2va_rows([record])
 
 
 def _prepare_references(references: tuple[MiniMaxH3RawReference, ...], ) -> list[MiniMaxH3PreparedReference]:
@@ -118,6 +378,7 @@ def _build_record(
         fastvideo_args,
     )
     record = build_ref2va_parquet_record(
+        file_name=sample.target_file,
         caption=sample.caption,
         video_latents=video_latents,
         audio_latents=audio_latents,
@@ -128,7 +389,6 @@ def _build_record(
         references=references,
     )
     record["id"] = sample.sample_id
-    record["file_name"] = sample.target_file
     validate_record_contract(record)
     return record
 
