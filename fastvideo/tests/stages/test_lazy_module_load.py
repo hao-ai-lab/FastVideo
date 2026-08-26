@@ -6,6 +6,8 @@ derives from what its stages hold; no model weights are touched.
 """
 
 import dataclasses
+
+import torch
 from types import SimpleNamespace
 
 import pytest
@@ -173,6 +175,16 @@ def test_loader_returning_none_raises_instead_of_proxying_none():
 # ----------------------------------------------------------------------
 
 
+class _EchoStage(PipelineStage):
+
+    def __init__(self, **held):
+        for name, value in held.items():
+            setattr(self, name, value)
+
+    def forward(self, batch, fastvideo_args):
+        return batch
+
+
 class _FakePipeline(ComposedPipelineBase):
     """Just enough pipeline to exercise the schedule; no weights, no loading."""
 
@@ -199,10 +211,10 @@ def test_schedule_releases_after_the_last_stage_that_holds_a_module():
     modules = {"text_encoder": text_encoder, "transformer": transformer, "vae": vae, "scheduler": object()}
 
     stages = [
-        SimpleNamespace(vae=vae),  # 0 input prep
-        SimpleNamespace(conditioner=text_encoder),  # 1 conditioning
-        SimpleNamespace(transformer=transformer),  # 2 denoising
-        SimpleNamespace(vae=vae, transformer=transformer),  # 3 decoding
+        _EchoStage(vae=vae),  # 0 input prep
+        _EchoStage(conditioner=text_encoder),  # 1 conditioning
+        _EchoStage(transformer=transformer),  # 2 denoising
+        _EchoStage(vae=vae, transformer=transformer),  # 3 decoding
     ]
 
     assert _schedule(modules, stages) == {1: ["text_encoder"], 3: ["transformer", "vae"]}
@@ -219,8 +231,8 @@ def test_building_the_schedule_does_not_materialize_anything():
 
     text_encoder, transformer = tracked("text_encoder"), tracked("transformer")
     stages = [
-        SimpleNamespace(conditioner=text_encoder, flags=[1, 2], opts={"a": 1}, ref2va=False),
-        SimpleNamespace(transformer=transformer),
+        _EchoStage(conditioner=text_encoder, flags=[1, 2], opts={"a": 1}, ref2va=False),
+        _EchoStage(transformer=transformer),
     ]
 
     _schedule({"text_encoder": text_encoder, "transformer": transformer}, stages)
@@ -232,7 +244,7 @@ def test_schedule_ignores_eager_modules():
     transformer = _lazy("transformer")
     scheduler = object()
     modules = {"transformer": transformer, "scheduler": scheduler}
-    stages = [SimpleNamespace(transformer=transformer, scheduler=scheduler)]
+    stages = [_EchoStage(transformer=transformer, scheduler=scheduler)]
 
     assert _schedule(modules, stages) == {0: ["transformer"]}
 
@@ -242,8 +254,8 @@ def test_schedule_finds_modules_held_inside_containers():
     vae = _lazy("vae")
     modules = {"text_encoder": text_encoder, "vae": vae}
     stages = [
-        SimpleNamespace(text_encoders=[text_encoder]),
-        SimpleNamespace(by_name={"vae": vae}),
+        _EchoStage(text_encoders=[text_encoder]),
+        _EchoStage(by_name={"vae": vae}),
     ]
 
     assert _schedule(modules, stages) == {0: ["text_encoder"], 1: ["vae"]}
@@ -254,11 +266,11 @@ def test_unreferenced_module_is_never_released():
     # disappearing under a caller the schedule cannot see.
     orphan = _lazy("image_encoder")
 
-    assert _schedule({"image_encoder": orphan}, [SimpleNamespace(other=1)]) == {}
+    assert _schedule({"image_encoder": orphan}, [_EchoStage(other=1)]) == {}
 
 
 def test_schedule_is_empty_without_lazy_modules():
-    assert _schedule({"vae": object()}, [SimpleNamespace(vae=object())]) == {}
+    assert _schedule({"vae": object()}, [_EchoStage(vae=object())]) == {}
 
 
 # ----------------------------------------------------------------------
@@ -288,16 +300,6 @@ def test_flag_defaults_to_off():
 # ----------------------------------------------------------------------
 # Release hooks on the stages
 # ----------------------------------------------------------------------
-
-
-class _EchoStage(PipelineStage):
-
-    def __init__(self, **held):
-        for name, value in held.items():
-            setattr(self, name, value)
-
-    def forward(self, batch, fastvideo_args):
-        return batch
 
 
 def test_hooks_land_on_the_last_stage_that_holds_each_module():
@@ -405,3 +407,106 @@ def test_a_stage_added_after_the_schedule_rebuilds_it(caplog):
     assert "rebuilding the schedule" in caplog.text
     assert first._lazy_modules_to_release == ()
     assert later._lazy_modules_to_release == (vae, )
+
+
+class _CompositeStage(PipelineStage):
+    """Mirrors Cosmos25AutoDenoisingStage: the component lives in a child."""
+
+    def __init__(self, **held):
+        self._child = _EchoStage(**held)
+
+    def forward(self, batch, fastvideo_args):
+        return self._child.forward(batch, fastvideo_args)
+
+
+def test_schedule_walks_into_nested_stages():
+    # A stage can compose others rather than hold the component itself. Left
+    # unwalked, the component reads as unreferenced and is never freed.
+    transformer = _lazy("transformer")
+    stages = [_EchoStage(other=1), _CompositeStage(transformer=transformer)]
+
+    assert _schedule({"transformer": transformer}, stages) == {1: ["transformer"]}
+
+
+def test_nested_walk_survives_a_cycle():
+    vae = _lazy("vae")
+    outer = _EchoStage(vae=vae)
+    inner = _EchoStage(back=outer)
+    outer.inner = inner
+
+    assert _schedule({"vae": vae}, [outer]) == {0: ["vae"]}
+
+
+def test_a_raising_stage_still_releases_its_modules():
+    # The retry a memory-constrained caller attempts must not start from a
+    # worse position than the request that just failed.
+    class _Boom(_EchoStage):
+
+        def forward(self, batch, fastvideo_args):
+            raise RuntimeError("out of activation memory")
+
+    vae = LazyModule("vae", lambda: torch.nn.Linear(2, 2))
+    stage = _Boom(vae=vae)
+    pipeline = _FakePipeline({"vae": vae}, [stage])
+    pipeline._install_lazy_release_hooks()
+    vae.materialize()
+
+    with pytest.raises(RuntimeError, match="out of activation memory"):
+        stage(object(), SimpleNamespace(enable_stage_verification=False))
+
+    assert not vae.is_materialized
+
+
+def test_a_failing_release_does_not_mask_the_original_error():
+    class _Boom(_EchoStage):
+
+        def forward(self, batch, fastvideo_args):
+            raise RuntimeError("original")
+
+    class _BadRelease(LazyModule):
+
+        def release(self):
+            raise ValueError("cleanup blew up")
+
+    stage = _Boom(vae=None)
+    stage._lazy_modules_to_release = (_BadRelease("vae", lambda: object()), )
+
+    with pytest.raises(RuntimeError, match="original"):
+        stage(object(), SimpleNamespace(enable_stage_verification=False))
+
+
+def test_deferral_is_opt_in_per_pipeline():
+    # A pipeline that has not been checked must get no deferral at all,
+    # because releasing and reloading is only safe when nothing outside the
+    # loader mutates the component or reads it while stages are built.
+    from fastvideo.pipelines.basic.minimax_h3.minimax_h3_pipeline import MiniMaxH3BasePipeline
+
+    assert ComposedPipelineBase._lazy_module_names == ()
+    assert set(MiniMaxH3BasePipeline._lazy_module_names) == {"text_encoder", "transformer", "vae", "audio_vae"}
+
+
+def test_an_aborted_run_releases_everything_already_materialized():
+    # A stage frees only what it is the last user of. When the run aborts
+    # earlier, the rest would stay for the life of the generator.
+    vae = LazyModule("vae", lambda: torch.nn.Linear(2, 2))
+    transformer = LazyModule("transformer", lambda: torch.nn.Linear(2, 2))
+
+    class _Boom(_EchoStage):
+
+        def forward(self, batch, fastvideo_args):
+            raise RuntimeError("out of activation memory")
+
+    early = _EchoStage(vae=vae)
+    boom = _Boom(transformer=transformer)
+    late = _EchoStage(vae=vae)
+    pipeline = _FakePipeline({"vae": vae, "transformer": transformer}, [early, boom, late])
+    pipeline._install_lazy_release_hooks()
+    vae.materialize()
+    transformer.materialize()
+
+    assert vae.is_materialized and transformer.is_materialized
+
+    pipeline._release_all_lazy_modules()
+
+    assert not vae.is_materialized
+    assert not transformer.is_materialized

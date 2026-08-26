@@ -152,6 +152,15 @@ the model already fits.
 This option applies to inference only. Training keeps every component resident
 and logs a warning if the flag is set.
 
+Deferral is opt-in per pipeline. Releasing a component and loading it again is
+only safe when nothing outside the loader has changed it, and two common habits
+break that without raising: mutating a component after load, as LongCat does
+when it enables block-sparse attention, and reading a component's attributes
+while stages are built, as the shared denoising stage does to pick an attention
+backend. A pipeline therefore lists the components it has checked in
+`_lazy_module_names`, which is empty in the base class. MiniMax-H3 opts in. On
+a pipeline that has not, the flag logs a warning and changes nothing.
+
 ## General Recommendations
 
 ### Single GPU Inference
