@@ -363,7 +363,9 @@ class HeliosChunkDecodingStage(DecodingStage):
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         if fastvideo_args.output_type == "latent":
             assert batch.latents is not None
-            batch.output = batch.latents.to(torch.float32)
+            batch.output = batch.latents.detach().to(dtype=torch.float32, device="cpu")
+            batch.latents = None
+            batch.helios_latent_chunks = None
             return batch
 
         pipeline = self.pipeline() if self.pipeline else None
@@ -381,7 +383,9 @@ class HeliosChunkDecodingStage(DecodingStage):
 
         temporal_scale = fastvideo_args.pipeline_config.vae_config.arch_config.scale_factor_temporal
         generated_frames = get_generated_pixel_frames(frames.shape[2], temporal_scale)
-        batch.output = frames[:, :, :generated_frames].to(torch.float32)
+        batch.output = frames[:, :, :generated_frames].detach().to(dtype=torch.float32, device="cpu")
+        batch.latents = None
+        batch.helios_latent_chunks = None
 
         if fastvideo_args.vae_cpu_offload:
             self.vae.to("cpu")

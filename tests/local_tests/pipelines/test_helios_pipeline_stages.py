@@ -296,6 +296,10 @@ decode_args = SimpleNamespace(
 )
 decoded = HeliosChunkDecodingStage(vae).forward(decode_batch, decode_args).output
 
+latent_batch = ForwardBatch(data_type="video", latents=expected)
+latent_args = SimpleNamespace(output_type="latent")
+latent_output = HeliosChunkDecodingStage(vae).forward(latent_batch, latent_args).output
+
 print(json.dumps({
     "cuda_available": True,
     "latent_max_diff": (actual_batch.latents - expected).abs().max().item(),
@@ -308,8 +312,10 @@ print(json.dumps({
     "autoregressive_second_short_prefix_mean": autoregressive_model.calls[6]["short_prefix_mean"],
     "vae_calls": vae.calls,
     "decoded_shape": list(decoded.shape),
+    "decoded_device": decoded.device.type,
     "decoded_first_mean": decoded[:, :, :33].mean().item(),
     "decoded_second_mean": decoded[:, :, 33:].mean().item(),
+    "latent_output_device": latent_output.device.type,
 }))
 """
     result = subprocess.run(
@@ -368,5 +374,7 @@ def test_chunk_decoder_calls_vae_per_chunk_and_matches_frame_rounding():
     result = _results()
     assert result["vae_calls"] == [[1, 2, 9, 8, 8], [1, 2, 9, 8, 8]]
     assert result["decoded_shape"] == [1, 3, 65, 64, 64]
+    assert result["decoded_device"] == "cpu"
     assert result["decoded_first_mean"] == 0
     assert result["decoded_second_mean"] == 1
+    assert result["latent_output_device"] == "cpu"
