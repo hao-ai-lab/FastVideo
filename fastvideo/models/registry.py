@@ -141,6 +141,7 @@ _SCHEDULERS = {
     "SelfForcingFlowMatchScheduler":
     ("schedulers", "scheduling_self_forcing_flow_match", "SelfForcingFlowMatchScheduler"),
     "RCMScheduler": ("schedulers", "scheduling_rcm", "RCMScheduler"),
+    "HeliosDMDScheduler": ("schedulers", "scheduling_helios_dmd", "HeliosDMDScheduler"),
 }
 
 _UPSAMPLERS = {
