@@ -40,7 +40,6 @@ _SELECTIVE_ACTIVATION_CHECKPOINTING_OP_NAMES = {
     "aten::_scaled_dot_product_flash_attention",
     "aten::_scaled_dot_product_efficient_attention",
     "aten::_scaled_dot_product_cudnn_attention",
-    "aten::_scaled_dot_product_attention_math",
     "fastvideo::_flash_attn_default_forward",
     "fastvideo::_flash_attn_cute_forward",
     "fastvideo::_flash_attn_cute_varlen_forward",
@@ -50,6 +49,7 @@ _SELECTIVE_ACTIVATION_CHECKPOINTING_OP_NAMES = {
     # VSA dispatches block_sparse_attn; video_sparse_attn is its Python entry
     # point, not an op, and naming that here would match nothing.
     "fastvideo_kernel::block_sparse_attn_sm90",
+    "fastvideo_kernel::block_sparse_attn_sm100a",
     "fastvideo_kernel::block_sparse_attn_triton",
 }
 
@@ -62,8 +62,10 @@ _SELECTIVE_ACTIVATION_CHECKPOINTING_OP_NAMES = {
 # all-gather, and retaining that would keep every checkpointed block's unsharded
 # weights resident at once, which is what FSDP exists to avoid.
 
-# VMoBA and the FA3 training path go through torch.autograd.Function rather than
-# the dispatcher, so no policy can reach them; they get full recomputation.
+# Math SDPA is decomposed before this policy sees it. VMoBA, the FA3 training
+# path, and ATTN_QAT_TRAIN go through torch.autograd.Function rather than the
+# dispatcher. No policy entry can retain those attention outputs, so they get
+# full recomputation.
 
 
 def apply_activation_checkpointing(
