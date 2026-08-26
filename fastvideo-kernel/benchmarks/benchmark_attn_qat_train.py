@@ -14,7 +14,7 @@ from collections.abc import Callable
 
 import torch
 
-from device_specs import resolve_peak_tflops
+from device_specs import format_tflops_with_mfu, resolve_peak_tflops
 
 from fastvideo_kernel.triton_kernels.attn_qat_train import attention
 
@@ -62,14 +62,15 @@ def _format_result(
     timing_ms: tuple[float, float, float],
     algorithmic_flops: int,
     executed_matmul_flops: int,
-    peak_tflops: float,
+    peak_tflops: float | None,
 ) -> str:
     median_ms, min_ms, max_ms = timing_ms
     algorithmic_tflops = algorithmic_flops / (median_ms * 1e9)
     executed_tflops = executed_matmul_flops / (median_ms * 1e9)
+    algorithmic_result = format_tflops_with_mfu(algorithmic_tflops, peak_tflops)
+    executed_result = format_tflops_with_mfu(executed_tflops, peak_tflops)
     return (f"{label}: {median_ms:.3f} ms (min={min_ms:.3f}, max={max_ms:.3f}), "
-            f"algorithmic={algorithmic_tflops:.2f} TFLOPS/{100 * algorithmic_tflops / peak_tflops:.2f}% MFU, "
-            f"executed_matmul={executed_tflops:.2f} TFLOPS/{100 * executed_tflops / peak_tflops:.2f}% MFU")
+            f"algorithmic={algorithmic_result}, executed_matmul={executed_result}")
 
 
 def main() -> None:
@@ -86,7 +87,7 @@ def main() -> None:
         type=float,
         default=None,
         help="Dense BF16 Tensor TFLOPS with FP32 accumulation. Defaults to the "
-        "device table in device_specs.py; required for devices not listed there.",
+        "device table in device_specs.py. Unknown devices report MFU as N/A.",
     )
     args = parser.parse_args()
     kv_length = args.kv_length or args.query_length
@@ -119,7 +120,10 @@ def main() -> None:
     # QAT additionally computes the STE high-precision P@V path in forward and
     # the quantized-P dV path in backward, for 6*base and 14*base matmul FLOPs.
     print(f"device: {device_name}")
-    print(f"peak: {peak_tflops:.1f} dense BF16 TFLOPS ({peak_source})")
+    if peak_tflops is None:
+        print(f"peak: unavailable ({peak_source})")
+    else:
+        print(f"peak: {peak_tflops:.2f} dense BF16 TFLOPS ({peak_source})")
     print(f"q: {q_shape}; k/v: {kv_shape}; compile+first-forward: {compile_seconds:.3f} s")
     print(_format_result("forward", forward_ms, 4 * base_flops, 6 * base_flops, peak_tflops))
     print(_format_result("backward", backward_ms, 10 * base_flops, 14 * base_flops, peak_tflops))
