@@ -1055,11 +1055,13 @@ class _attention(torch.autograd.Function):
         use_global_sf_QKV=True,
     ):
         if smooth_q:
-            # The backward path needs triton_group_mean (attn_qat_infer),
-            # whose import is currently disabled; fail fast instead of
-            # crashing mid-backward on a None q_m.
-            raise NotImplementedError("smooth_q=True is not supported: it requires "
-                                      "triton_group_mean from attn_qat_infer, which is currently disabled")
+            # Not implemented, not merely disabled: only the backward kernels
+            # carry a SMOOTH_Q path (_attn_fwd has none), so restoring the
+            # triton_group_mean wiring would yield silently wrong gradients
+            # rather than a feature. The flag is kept for signature
+            # compatibility only.
+            raise NotImplementedError("smooth_q=True is not supported: the forward kernel has no "
+                                      "SMOOTH_Q path, so enabling it would produce incorrect gradients")
 
         # shape constraints
         HEAD_DIM_Q, HEAD_DIM_K = q.shape[-1], k.shape[-1]
