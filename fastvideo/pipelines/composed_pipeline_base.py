@@ -52,6 +52,10 @@ class ComposedPipelineBase(ABC):
     trainable_transformer_names: list[str] = ["transformer"]
     trainable_transformer_modules: dict[str, torch.nn.Module] = {}
     post_init_called: bool = False
+    # Set once the deferred-release schedule has been derived from the stage
+    # list, so a stage added afterwards can rebuild it instead of running
+    # against a plan that predates it.
+    _lazy_release_hooks_installed: bool = False
     # Components eligible for deferred loading under ``lazy_module_load``.
     # These are the weight-bearing ones; tokenizers, processors, and
     # schedulers are cheap and stay resident so the pipeline can inspect them
@@ -612,11 +616,13 @@ class ComposedPipelineBase(ABC):
                 "lazy_module_load is on but no deferred module is held by a stage, so nothing will be "
                 "freed mid-run. Pipeline %s may load its modules eagerly or hold them outside its stages.",
                 type(self).__name__)
+            self._lazy_release_hooks_installed = True
             return
 
         for index, names in sorted(schedule.items()):
             logger.info("Deferred modules to free after stage %d (%s): %s", index,
                         getattr(self._stages[index], "_pipeline_stage_name", "?"), names)
+        self._lazy_release_hooks_installed = True
 
     def add_stage(self, stage_name: str, stage: PipelineStage):
         assert self.modules is not None, "No modules are registered"
@@ -627,6 +633,15 @@ class ComposedPipelineBase(ABC):
         self._stages.append(stage)
         self._stage_name_mapping[stage_name] = stage
         setattr(self, stage_name, stage)
+
+        if self._lazy_release_hooks_installed:
+            # The schedule maps each deferred module to its last holder. A
+            # stage appended afterwards may hold a module an earlier stage has
+            # already been told to free, which would hand it a released
+            # component mid-run. Rebuild rather than trust the stale plan.
+            logger.warning("Stage %s was added after the deferred-release schedule was built; rebuilding the schedule",
+                           stage_name)
+            self._install_lazy_release_hooks()
 
     # TODO(will): don't hardcode no_grad
     @torch.no_grad()
