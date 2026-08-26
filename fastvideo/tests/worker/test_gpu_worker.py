@@ -39,7 +39,7 @@ def test_cuda_device_uuid_receipt_identifies_profiled_worker(monkeypatch) -> Non
 
 def _worker_returning(output_batch: ForwardBatch) -> Worker:
     worker = Worker.__new__(Worker)
-    worker.fastvideo_args = SimpleNamespace()
+    worker.fastvideo_args = SimpleNamespace(is_output_rank=True)
     worker.pipeline = SimpleNamespace(forward=lambda batch, args: output_batch)
     return worker
 
