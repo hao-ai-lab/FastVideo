@@ -16,9 +16,14 @@ that skip is not parity evidence.
 
 ```bash
 pytest \
+  fastvideo/tests/encoders/test_minimax_h3_qwen3_vl_vision.py \
   fastvideo/tests/vaes/test_minimax_h3_video_vae_streaming.py \
   fastvideo/tests/stages/test_minimax_h3_vae_streaming.py -q
 ```
+
+The Qwen3-VL vision test covers production image/video grids, packed grids, exact float32 accumulation against
+Transformers' public interpolation helper, and the bounded four-tap workspace. The official helper is a required
+oracle for this test: an unavailable or incompatible Transformers install fails instead of skipping parity.
 
 ## Registry smoke
 
@@ -60,6 +65,35 @@ With a gate enabled, missing CUDA, source, or weights is a failure. Recorded com
 partitions and the video VAE; audio decode has maximum absolute drift `2.4e-7`. The encoder gate compares the slim
 forward's selected layer-50 hidden state bit-exactly against the same state from the official full stack across text,
 image, and video inputs.
+
+On 2026-08-26, the encoder gate passed all three cases on GB10 with PyTorch `2.12.0+cu130` and Transformers `5.15.1`:
+every selected layer-50 state had `max_abs=0` and `mean_abs=0`.
+
+## Qwen3-VL interpolation memory benchmark
+
+Use the same benchmark-script checkout for both source trees. Each invocation runs in a fresh process and reports
+absolute and incremental CUDA allocated/reserved peaks, the source revision and dirty state, output metadata, and a
+deterministic FP32 output sum.
+
+```bash
+python tests/local_tests/encoders/benchmark_minimax_h3_qwen3_vl_interpolation_memory.py \
+  --source-root /path/to/candidate
+
+python tests/local_tests/encoders/benchmark_minimax_h3_qwen3_vl_interpolation_memory.py \
+  --source-root /path/to/baseline
+
+# Repeat --grid to measure a packed request.
+python tests/local_tests/encoders/benchmark_minimax_h3_qwen3_vl_interpolation_memory.py \
+  --source-root /path/to/candidate --grid 1,128,224 --grid 15,42,74
+```
+
+The default `[15, 42, 74]` grid and hidden width `1152` reproduce a production video interpolation. On GB10 with
+PyTorch `2.12.0+cu130`, the unbounded float32 implementation at `fa75864b` used `1,291,986,432` incremental allocated
+bytes; the bounded implementation used `284,866,048` bytes with the same output shape, dtype, and FP32 sum. A direct
+comparison against the Transformers helper was bit-exact for all `46,620 x 1,152` output elements. Fresh CPU
+processes reduced maximum resident set size from `2,988,420` to `1,244,088` KiB for the same tensor, eliminating
+`1,744,332` KiB (`1.66` GiB) of peak retention. The mixed `[1, 128, 224] + [15, 42, 74]` packed case reduced
+incremental CUDA allocation from `2,086,086,144` to `418,362,880` bytes with the same FP32 sum.
 
 The video VAE test verifies the reference checkout at commit
 `abc5e9bf71fd38f53cd471bc3acaa84bc5ecbfdc` and compares the production CPU `uint8` `encode_pixels()` path against
