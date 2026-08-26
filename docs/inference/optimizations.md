@@ -113,6 +113,45 @@ the Preview checkpoint's sparse VSA blocks. Packed-varlen changes floating-point
 reduction order relative to fixed-length FA4, so treat it as a speed/quality
 evaluation option rather than an exact-parity mode.
 
+### MiniMax-H3 AdaLN trajectory and packed sequence parallelism (opt-in)
+
+Two additional released Sol-Engine-style DiT optimizations are independently
+available for controlled MiniMax-H3 inference experiments:
+
+```bash
+export FASTVIDEO_MINIMAX_H3_ADALN_PRECOMPUTE=1
+export FASTVIDEO_MINIMAX_H3_PACKED_SP=1
+```
+
+Both flags default to off. They do not enable VSA, cross-step caches,
+quantization, or VAE optimizations.
+
+- `FASTVIDEO_MINIMAX_H3_ADALN_PRECOMPUTE` evaluates each full-rank block AdaLN
+  projection once for every step in the fixed denoising schedule, installs
+  non-persistent lookup tables, and releases the projection modules. The table
+  values match the original projections, but the loaded transformer is then
+  tied to that schedule for the rest of its lifetime. It requires a stock
+  full-rank checkpoint with replicated, materialized weights:
+  `dit_layerwise_offload=False` and `use_fsdp_inference=False`. Setup briefly
+  holds the original projections and all replacement tables together. In the
+  reported 50-step workload the tables used 0.88 GB and replaced 24.23 GB of
+  projection weights; other schedules and checkpoints have different costs.
+- `FASTVIDEO_MINIMAX_H3_PACKED_SP` fuses the Q/K/V communication layout around
+  two direct NCCL all-to-all collectives. It engages only for inference with
+  sequence-parallel world size greater than one, batch size one, dense
+  FlashAttention, no replicated tokens or deferred RoPE, and no VSA. A
+  grad-enabled forward automatically retains the autograd-aware generic
+  Ulysses route. The packed direct collective is separate from the optional
+  `FASTVIDEO_ULYSSES_A2A=auto` transport.
+
+At SP=1 the packed flag is deliberately inert, so it provides no acceleration
+on a one-GPU GB10 and does not force FlashAttention over the configured GB10
+backend. The contribution's performance evidence is scoped to dense BF16 FA4
+on 4× GB200, SP=4, 1344×768×124, with one post-warmup sample; it is not evidence
+for a sparse/VSA route or a one-GPU system. These exact table/relayout features
+also do not make regional `torch.compile` eager-parity-safe: the MiniMax-H3
+accuracy caveat below still applies to the complete serving profile.
+
 ### FP4 Flash Attention 4 (Blackwell only)
 
 **`FLASH_ATTN`** with **`--nvfp4_fa4`**

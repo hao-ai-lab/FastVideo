@@ -26,6 +26,19 @@ from fastvideo.pipelines.stages.validators import VerificationResult
 from fastvideo.utils import get_compute_dtype
 
 
+def _validate_adaln_precompute_configuration(fastvideo_args: FastVideoArgs) -> None:
+    """Reject loader modes whose parameter lifecycle precompute bypasses."""
+    if fastvideo_args.dit_layerwise_offload:
+        raise RuntimeError(
+            "MiniMax-H3 trajectory AdaLN precompute cannot run with dit_layerwise_offload=True because "
+            "the projection weights are materialized only by each block forward hook; disable layerwise offload "
+            "or disable FASTVIDEO_MINIMAX_H3_ADALN_PRECOMPUTE")
+    if fastvideo_args.use_fsdp_inference:
+        raise RuntimeError(
+            "MiniMax-H3 trajectory AdaLN precompute replaces projection modules after loading; use replicated "
+            "inference weights, matching Sol-Engine, rather than FSDP inference")
+
+
 def _h3_vsa_metadata_builder(transformer: Any, fastvideo_args: FastVideoArgs) -> Any:
     """Builder instance when the transformer resolved to VSA-H3, else None.
 
@@ -128,9 +141,7 @@ class MiniMaxH3DenoisingStage(PipelineStage):
         batch.timesteps = video_timesteps
 
         if bool(getattr(self.transformer, "adaln_precompute_enabled", False)):
-            if fastvideo_args.use_fsdp_inference:
-                raise RuntimeError("MiniMax-H3 trajectory AdaLN precompute replaces projection modules after loading; "
-                                   "use replicated inference weights, matching Sol-Engine, rather than FSDP inference.")
+            _validate_adaln_precompute_configuration(fastvideo_args)
             self.transformer.prepare_adaln_trajectory(row_timestep_plan)
 
         position_ids = layout.position_ids.to(device)

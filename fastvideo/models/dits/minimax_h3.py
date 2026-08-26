@@ -70,6 +70,13 @@ def _can_run_minimax_h3_fusion(tensor: torch.Tensor) -> bool:
     return HAVE_TRITON and tensor.is_cuda and not torch.is_grad_enabled()
 
 
+def _packed_sp_active(requested: bool, world_size: int) -> bool:
+    """Packed H3 relayout is meaningful only for multi-rank inference."""
+    if world_size < 1:
+        raise ValueError(f"sequence parallel world size must be positive, got {world_size}")
+    return requested and world_size > 1
+
+
 class MiniMaxH3RotaryPosEmbed(nn.Module):
     """Three-axis rotary frequencies over packed `(t, h, w)` coordinates."""
 
@@ -429,6 +436,8 @@ class _MiniMaxH3StepCursor:
         self.signature = signature
 
     def set(self, index: int) -> None:
+        if index < 0 or index >= len(self.signature):
+            raise IndexError(f"AdaLN trajectory step must be in [0, {len(self.signature)}), got {index}")
         self.step.fill_(index)
 
 
@@ -626,7 +635,15 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         arch = config.arch_config
         self.enabled_fusions = _enabled_minimax_h3_fusions()
         self.adaln_precompute_enabled = envs.FASTVIDEO_MINIMAX_H3_ADALN_PRECOMPUTE
-        self.packed_sp_enabled = envs.FASTVIDEO_MINIMAX_H3_PACKED_SP
+        sp_world_size = get_sp_world_size() if model_parallel_is_initialized() else 1
+        packed_sp_requested = envs.FASTVIDEO_MINIMAX_H3_PACKED_SP
+        self.packed_sp_enabled = _packed_sp_active(packed_sp_requested, sp_world_size)
+        if packed_sp_requested and not self.packed_sp_enabled:
+            logger.info("FASTVIDEO_MINIMAX_H3_PACKED_SP is inert at SP=1; using the configured attention backend")
+        elif self.packed_sp_enabled:
+            logger.info(
+                "MiniMax H3 packed sequence parallelism enabled for SP=%d (dense FlashAttention, batch-1, "
+                "inference-only; grad-enabled forwards retain the autograd-aware Ulysses path)", sp_world_size)
         if self.enabled_fusions:
             if HAVE_TRITON:
                 logger.info(
@@ -637,7 +654,6 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
                 logger.warning(
                     "FASTVIDEO_MINIMAX_H3_FUSIONS requested %s but Triton is unavailable; "
                     "every forward stays on the eager path.", ",".join(sorted(self.enabled_fusions)))
-        sp_world_size = get_sp_world_size() if model_parallel_is_initialized() else 1
         if arch.num_attention_heads % sp_world_size:
             raise ValueError(f"MiniMax H3 attention heads ({arch.num_attention_heads}) must be divisible by "
                              f"sequence parallel size ({sp_world_size}).")
@@ -798,15 +814,21 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         cursor = _MiniMaxH3StepCursor(device, signature)
         table_bytes = 0
         freed_bytes = 0
+        replacements: list[_MiniMaxH3PrecomputedModulation] = []
         for block in self.transformer_blocks:
             projection = block.adaln_proj
             table = torch.stack([padded(torch.cat(projection(temb), dim=-1)) for temb in embeddings])
             table_bytes += table.numel() * table.element_size()
             freed_bytes += sum(parameter.numel() * parameter.element_size()
                                for parameter in projection.parameters())
-            block.adaln_proj = _MiniMaxH3PrecomputedModulation(table, cursor)
+            replacements.append(_MiniMaxH3PrecomputedModulation(table, cursor))
+        # Build every table before mutating the transformer. A projection or
+        # allocation failure therefore leaves all original modules intact.
+        for block, replacement in zip(self.transformer_blocks, replacements, strict=True):
+            block.adaln_proj = replacement
         self._h3_adaln_cursor = cursor
-        torch.cuda.empty_cache()
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
         stats: dict[str, float | int] = {
             "steps": len(row_timestep_plan),
             "blocks": len(self.transformer_blocks),

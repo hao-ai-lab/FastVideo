@@ -8,13 +8,13 @@ import torch.nn as nn
 
 from fastvideo.attention.selector import backend_name_to_enum, get_attn_backend
 from fastvideo.distributed.communication_op import (sequence_model_parallel_all_gather,
-                                                    sequence_model_parallel_direct_all_to_all,
-                                                    sequence_model_parallel_all_to_all_4D)
+                                                    sequence_model_parallel_all_to_all_4D,
+                                                    sequence_model_parallel_direct_all_to_all)
 from fastvideo.distributed.parallel_state import (get_sp_parallel_rank, get_sp_world_size)
 from fastvideo.forward_context import ForwardContext, get_forward_context
+from fastvideo.layers.rotary_embedding import _apply_rotary_emb
 from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.utils import get_compute_dtype
-from fastvideo.layers.rotary_embedding import _apply_rotary_emb
 
 
 def _attention_compile_disabled() -> bool:
@@ -149,9 +149,16 @@ class DistributedAttention(nn.Module):
         forward_context: ForwardContext = get_forward_context()
         ctx_attn_metadata = forward_context.attn_metadata
 
-        if self.packed_qkv_relayout and world_size > 1:
+        # The direct packed collective is deliberately inference-only. A
+        # training process may inherit the opt-in environment variable, but a
+        # grad-enabled forward must retain the established autograd-aware
+        # Ulysses path.
+        if self.packed_qkv_relayout and world_size > 1 and not torch.is_grad_enabled():
             if batch_size != 1:
                 raise ValueError("MiniMax-H3 packed QKV relayout currently requires batch size 1")
+            if num_heads % world_size:
+                raise ValueError(
+                    f"MiniMax-H3 packed QKV relayout requires {num_heads} heads to be divisible by SP={world_size}")
             if any(t is not None for t in (replicated_q, replicated_k, replicated_v, freqs_cis)):
                 raise ValueError("MiniMax-H3 packed QKV relayout does not support replicated tokens or deferred RoPE")
             from fastvideo.models.dits.minimax_h3_fusions.relayout import (merge_heads, pack_qkv_destination_major)
@@ -163,6 +170,8 @@ class DistributedAttention(nn.Module):
             packed = packed.reshape(world_size * rows_local, heads_local, 3 * self.head_size)
             q_full, k_full, v_full = packed.split(self.head_size, dim=-1)
             original_seq_len = original_seq_len or q_full.shape[0]
+            if original_seq_len < 1 or original_seq_len > q_full.shape[0]:
+                raise ValueError(f"original_seq_len must be in [1, {q_full.shape[0]}], got {original_seq_len}")
             pad_seq_len = q_full.shape[0] - original_seq_len
             output = self.attn_impl.forward(
                 q_full[:original_seq_len].unsqueeze(0),

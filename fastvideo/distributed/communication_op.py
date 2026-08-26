@@ -33,10 +33,30 @@ def sequence_model_parallel_all_to_all_4D(input_: torch.Tensor,
 
 
 def sequence_model_parallel_direct_all_to_all(input_: torch.Tensor) -> torch.Tensor:
-    """Synchronous equal-split all-to-all used by the packed H3 inference path."""
+    """Synchronous equal-split all-to-all used by the packed H3 inference path.
+
+    This primitive intentionally has no autograd formula. The owning attention
+    route falls back to ``all_to_all_4D`` whenever gradients are enabled; this
+    guard keeps other callers from discovering the restriction at backward.
+    """
     group = get_sp_group()
     if group.world_size == 1:
         return input_
+    if torch.is_grad_enabled() and input_.requires_grad:
+        raise RuntimeError("sequence_model_parallel_direct_all_to_all is inference-only and has no autograd formula; "
+                           "use sequence_model_parallel_all_to_all_4D for grad-enabled execution")
+    if input_.ndim < 1 or input_.shape[0] % group.world_size:
+        raise ValueError(
+            "direct all-to-all requires the leading dimension to be evenly divisible by the SP world size; "
+            f"got shape {tuple(input_.shape)} and SP={group.world_size}")
+    if not input_.is_contiguous():
+        raise ValueError("direct all-to-all requires a contiguous input tensor")
+    # CPU/Gloo is useful for the real multi-rank contract test. The production
+    # packed H3 route is CUDA/Triton and takes the compiler-visible custom op.
+    if not input_.is_cuda:
+        output = torch.empty_like(input_)
+        torch.distributed.all_to_all_single(output, input_, group=group.device_group)
+        return output
     return torch.ops.fastvideo.direct_all_to_all_single(input_, group.unique_name)
 
 
