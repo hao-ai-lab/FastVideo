@@ -61,6 +61,11 @@ Notes:
 - `generator` and `request` are the top-level keys for generation configs.
 - `serve` configs use `generator`, `server`, and optional `default_request`.
 - Prompt text files belong under `request.inputs.prompt_path`.
+- Launcher-owned multi-node jobs set
+  `generator.engine.execution_backend: external_launcher` in this same nested
+  config. This backend is offline-only and is rejected by `fastvideo serve`;
+  see [Distributed Inference](architecture.md#distributed-inference) for
+  `torchrun` and native `srun` commands.
 
 ## Examples
 

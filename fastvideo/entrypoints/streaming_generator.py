@@ -15,6 +15,7 @@ from fastvideo.logger import init_logger
 from fastvideo.pipelines import ForwardBatch
 from fastvideo.utils import align_to, shallow_asdict
 from fastvideo.worker.executor import Executor
+from fastvideo.worker.executor import reject_external_launcher
 from fastvideo.worker.multiproc_executor import MultiprocExecutor
 
 logger = init_logger(__name__)
@@ -92,6 +93,10 @@ class StreamingVideoGenerator(VideoGenerator):
 
     @classmethod
     def from_fastvideo_args(cls, fastvideo_args: FastVideoArgs) -> "StreamingVideoGenerator":
+        reject_external_launcher(
+            fastvideo_args.distributed_executor_backend,
+            entrypoint="StreamingVideoGenerator",
+        )
         executor_class = Executor.get_class(fastvideo_args)
         return cls(
             fastvideo_args=fastvideo_args,

@@ -103,6 +103,20 @@ request:
     output_path: outputs/
 ```
 
+`generator.engine.execution_backend` accepts `mp`, `ray`, or
+`external_launcher`. The last option is for synchronized offline generation
+under `torchrun` or `srun`; it is not supported by `fastvideo serve`. Set
+`generator.engine.num_gpus` and the relevant parallelism sizes to the total
+launcher world size. See the [distributed inference contract](architecture.md#distributed-inference)
+and the [MiniMax-H3 run config](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/minimax_h3_external_launcher.yaml).
+
+`generator.engine.parallelism.dist_timeout` is an optional positive integer
+in **seconds**. FastVideo applies it to the default process group when
+FastVideo initializes that group, and to every FastVideo-created device and
+Gloo control group. If it is omitted, PyTorch's backend defaults apply. This
+timeout bounds a missing collective participant; external launchers should
+still supervise the full worker group and terminate peers when one rank exits.
+
 Override individual values from the CLI with dotted paths:
 
 ```bash

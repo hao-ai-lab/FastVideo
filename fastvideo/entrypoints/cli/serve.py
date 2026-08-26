@@ -15,6 +15,15 @@ logger = init_logger(__name__)
 _VALIDATED_SERVE_CONFIG_ATTR = "_fastvideo_validated_serve_config"
 
 
+def _validate_execution_backend(serve_config) -> None:
+    from fastvideo.worker.executor import reject_external_launcher
+
+    reject_external_launcher(
+        serve_config.generator.engine.execution_backend,
+        entrypoint="fastvideo serve",
+    )
+
+
 class ServeSubcommand(CLISubcommand):
     """Starts an OpenAI-compatible API server."""
 
@@ -29,6 +38,7 @@ class ServeSubcommand(CLISubcommand):
                 args,
                 overrides=getattr(args, "_unknown", None),
             )
+        _validate_execution_backend(serve_config)
 
         logger.info("CLI serve config: %s", serve_config)
 
@@ -64,14 +74,12 @@ class ServeSubcommand(CLISubcommand):
                              "serve config plus optional dotted overrides")
         if not os.path.exists(args.config):
             raise ValueError(f"Config file not found: {args.config}")
-        setattr(
+        serve_config = build_serve_config(
             args,
-            _VALIDATED_SERVE_CONFIG_ATTR,
-            build_serve_config(
-                args,
-                overrides=getattr(args, "_unknown", None),
-            ),
+            overrides=getattr(args, "_unknown", None),
         )
+        _validate_execution_backend(serve_config)
+        setattr(args, _VALIDATED_SERVE_CONFIG_ATTR, serve_config)
 
     def subparser_init(self, subparsers: argparse._SubParsersAction) -> FlexibleArgumentParser:
         serve_parser = subparsers.add_parser(

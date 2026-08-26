@@ -110,7 +110,7 @@ class FastVideoArgs:
     sp_size: int = -1
     hsdp_replicate_dim: int = 1
     hsdp_shard_dim: int = -1
-    dist_timeout: int | None = None  # timeout for torch.distributed
+    dist_timeout: int | None = None  # torch.distributed timeout in seconds
 
     pipeline_config: PipelineConfig = field(default_factory=PipelineConfig)
     preprocess_config: PreprocessConfig | None = None
@@ -286,6 +286,20 @@ class FastVideoArgs:
     def training_mode(self) -> bool:
         return not self.inference_mode
 
+    @property
+    def is_output_rank(self) -> bool:
+        """Whether this process may materialize user-facing outputs.
+
+        This is runtime state assigned by an SPMD executor, not a public
+        configuration field, so dataclass serialization and typed config
+        parsing deliberately ignore it.
+        """
+        return getattr(self, "_is_output_rank", True)
+
+    @is_output_rank.setter
+    def is_output_rank(self, value: bool) -> None:
+        self._is_output_rank = bool(value)
+
     def __post_init__(self):
         if self.moba_config_path:
             try:
@@ -448,7 +462,7 @@ class FastVideoArgs:
         parser.add_argument(
             "--distributed-executor-backend",
             type=str,
-            choices=["mp"],
+            choices=["mp", "ray", "external_launcher"],
             default=FastVideoArgs.distributed_executor_backend,
             help="The distributed executor backend to use",
         )
@@ -509,7 +523,7 @@ class FastVideoArgs:
             "--dist-timeout",
             type=int,
             default=FastVideoArgs.dist_timeout,
-            help="Set timeout for torch.distributed initialization.",
+            help="Set the torch.distributed process-group timeout in seconds.",
         )
 
         # Output type
@@ -851,6 +865,9 @@ class FastVideoArgs:
     def check_fastvideo_args(self) -> None:
         """Validate inference arguments for consistency"""
         from fastvideo.platforms import current_platform
+
+        if self.dist_timeout is not None and self.dist_timeout <= 0:
+            raise ValueError(f"dist_timeout must be greater than zero seconds, got {self.dist_timeout}")
 
         if current_platform.is_mps():
             self.use_fsdp_inference = False

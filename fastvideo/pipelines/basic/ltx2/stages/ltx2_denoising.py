@@ -378,7 +378,7 @@ class LTX2DenoisingStage(PipelineStage):
                         audio_shape.channels,
                         audio_shape.mel_bins,
                     ).permute(0, 2, 1, 3).contiguous()
-                if audio_latent_path:
+                if audio_latent_path and fastvideo_args.is_output_rank:
                     self._save_audio_latents(audio_latent_path, audio_latents)
             audio_timestep_template = torch.ones(
                 (latents.shape[0], audio_shape.frames, 1),

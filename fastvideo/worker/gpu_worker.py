@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 import os
+from datetime import timedelta
 from typing import Any, cast
 
 import torch
@@ -12,6 +13,12 @@ from fastvideo.logger import init_logger
 from fastvideo.pipelines import ForwardBatch, LoRAPipeline, build_pipeline
 
 logger = init_logger(__name__)
+_NON_OUTPUT_EXTRA_KEYS = frozenset({
+    "audio",
+    "audio_sample_rate",
+    "decoded_audio",
+    "ltx2_audio_latents",
+})
 
 
 def _log_cuda_device_uuid(rank: int, device: torch.device) -> None:
@@ -58,8 +65,11 @@ class Worker:
         # so that each worker uses the correct device
         if self.fastvideo_args.distributed_executor_backend == "mp":
             os.environ["LOCAL_RANK"] = str(self.local_rank)
-        os.environ["RANK"] = str(self.rank)
-        os.environ["WORLD_SIZE"] = str(self.fastvideo_args.num_gpus)
+        if self.fastvideo_args.distributed_executor_backend != "external_launcher":
+            # torchrun/srun already assigned the possibly multi-node global
+            # identity. Keep it intact for the env:// rendezvous.
+            os.environ["RANK"] = str(self.rank)
+            os.environ["WORLD_SIZE"] = str(self.fastvideo_args.num_gpus)
 
         # Platform-agnostic device initialization
         self.device = get_local_torch_device()
@@ -77,12 +87,22 @@ class Worker:
             self.init_gpu_memory = 0
 
         # Initialize the distributed environment.
-        maybe_init_distributed_environment_and_model_parallel(self.fastvideo_args.tp_size, self.fastvideo_args.sp_size,
-                                                              self.distributed_init_method)
+        dist_timeout = (timedelta(
+            seconds=self.fastvideo_args.dist_timeout) if self.fastvideo_args.dist_timeout is not None else None)
+        maybe_init_distributed_environment_and_model_parallel(self.fastvideo_args.tp_size,
+                                                              self.fastvideo_args.sp_size,
+                                                              self.distributed_init_method,
+                                                              timeout=dist_timeout)
 
         self.pipeline = build_pipeline(self.fastvideo_args)
 
     def execute_forward(self, forward_batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+        if not self.fastvideo_args.is_output_rank:
+            forward_batch.save_video = False
+            forward_batch.return_frames = False
+            forward_batch.return_trajectory_latents = False
+            forward_batch.return_trajectory_decoded = False
+            forward_batch.return_continuation_state = False
         output_batch = self.pipeline.forward(forward_batch, self.fastvideo_args)
         needs_output = forward_batch.return_frames or (forward_batch.save_video
                                                        and fastvideo_args.output_type != "latent"
@@ -91,6 +111,15 @@ class Worker:
             # Drop the decoded tensor before multiprocessing or Ray transports
             # the worker result back to the generator.
             output_batch.output = torch.empty(0, device="cpu")
+        if not self.fastvideo_args.is_output_rank:
+            for key in _NON_OUTPUT_EXTRA_KEYS:
+                output_batch.extra.pop(key, None)
+            output_batch.latents = None
+            output_batch.audio_latents = None
+            output_batch.trajectory_latents = None
+            output_batch.trajectory_timesteps = None
+            output_batch.trajectory_decoded = None
+            output_batch.continuation_state = None
         return cast(ForwardBatch, output_batch)
 
     def shutdown(self) -> dict[str, Any]:

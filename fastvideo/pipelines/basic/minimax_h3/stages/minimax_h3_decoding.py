@@ -40,16 +40,19 @@ def _decode_participation(fastvideo_args: FastVideoArgs, want_parallel: bool) ->
     """Resolve (sp_group, is_output_rank, parallel) for the VAE decode stages.
 
     The existing serial path keeps its global-rank-zero output ownership.
-    Parallel decode assembles once per sequence-parallel group, on that
-    group's first rank. ``parallel`` is only true when every group rank will
-    run the decode body — the collectives inside require uniform
-    participation, so no rank-dependent branch may guard them.
+    Parallel decode runs only in the sequence-parallel group containing the
+    global output rank and assembles on that rank. Every rank in any other SP
+    group skips the decode uniformly. ``parallel`` is only true when every
+    rank in the active group will run the decode body, because its collectives
+    require group-uniform participation.
     """
     if not model_parallel_is_initialized():
         return None, True, False
     sp_group = get_sp_group()
     if bool(want_parallel) and sp_group.world_size > 1:
-        return sp_group, sp_group.is_first_rank, True
+        world_group = get_world_group()
+        active_group = world_group.first_rank in sp_group.ranks
+        return sp_group, world_group.is_first_rank, active_group
     return sp_group, get_world_group().is_first_rank, False
 
 

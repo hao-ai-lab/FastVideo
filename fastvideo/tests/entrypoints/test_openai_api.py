@@ -378,6 +378,18 @@ class TestValidateDefaultRequestAgainstPreset:
                 _validate_default_request_against_preset(default_request, "Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
 
 
+def test_openai_app_rejects_external_launcher_before_server_start():
+    from fastvideo.entrypoints.openai.api_server import create_app
+    from fastvideo.fastvideo_args import FastVideoArgs
+
+    args = FastVideoArgs(
+        model_path="test-model",
+        distributed_executor_backend="external_launcher",
+    )
+    with pytest.raises(ValueError, match="synchronized offline generation"):
+        create_app(args)
+
+
 # ---------------------------------------------------------------------------
 # Server state accessors
 # ---------------------------------------------------------------------------

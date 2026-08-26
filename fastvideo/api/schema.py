@@ -18,7 +18,7 @@ class ParallelismConfig:
     sp_size: int = -1
     hsdp_replicate_dim: int = 1
     hsdp_shard_dim: int = -1
-    dist_timeout: int | None = None
+    dist_timeout: int | None = None  # positive process-group timeout in seconds
 
 
 @dataclass
@@ -74,7 +74,7 @@ class QuantizationConfig:
 @dataclass
 class EngineConfig:
     num_gpus: int = 1
-    execution_backend: Literal["mp", "ray"] = "mp"
+    execution_backend: Literal["mp", "ray", "external_launcher"] = "mp"
     parallelism: ParallelismConfig = field(default_factory=ParallelismConfig)
     offload: OffloadConfig = field(default_factory=OffloadConfig)
     compile: CompileConfig = field(default_factory=CompileConfig)

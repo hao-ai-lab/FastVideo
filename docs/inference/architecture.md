@@ -337,8 +337,74 @@ Key APIs: `get_tp_rank()`, `get_tp_world_size()`, `get_sp_rank()`,
 `warmup_sequence_parallel_communication()` pre-warms NCCL communicators
 to avoid slow first forward passes.
 
-Usage: `torchrun --nproc-per-node=N -m fastvideo.entrypoints.cli.main
-generate --model-path ... --tp-size N --sp-size M`.
+The default `mp` executor starts all workers locally. For synchronized offline
+SPMD generation (including multi-node inference), select the
+`external_launcher` executor in the typed run config and make
+`generator.engine.num_gpus` equal the launcher's total world size. The
+[MiniMax-H3 external-launcher example](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/minimax_h3_external_launcher.yaml)
+contains a complete request:
+
+```bash
+torchrun --standalone --nproc-per-node=4 \
+  -m fastvideo.entrypoints.cli.main generate \
+  --config examples/inference/basic/minimax_h3_external_launcher.yaml
+```
+
+For two nodes with four GPUs each, launch the same command on both nodes and
+set `NODE_RANK` to `0` or `1`:
+
+```bash
+torchrun --nnodes=2 --nproc-per-node=4 \
+  --node-rank="$NODE_RANK" \
+  --master-addr="$MASTER_ADDR" --master-port="$MASTER_PORT" \
+  -m fastvideo.entrypoints.cli.main generate \
+  --config examples/inference/basic/minimax_h3_external_launcher.yaml \
+  --generator.engine.num_gpus 8 \
+  --generator.engine.parallelism.sp_size 8
+```
+
+Native Slurm variables are also accepted: `SLURM_PROCID`, `SLURM_NTASKS`,
+and `SLURM_LOCALID` map to global rank, world size, and local rank. Slurm does
+not choose the env rendezvous endpoint, so export a reachable rank-zero host
+and a job-unique port. Preserve a scheduler/CI-provided `MASTER_PORT` when one
+already exists. This uniform `2 x 4` example exposes all four allocated GPUs
+to every task so `SLURM_LOCALID` is a valid device index:
+
+```bash
+export MASTER_ADDR="${MASTER_ADDR:-$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)}"
+export MASTER_PORT="${MASTER_PORT:-$((20000 + SLURM_JOB_ID % 20000))}"
+srun --nodes=2 --ntasks-per-node=4 --gpus-per-node=4 --gpu-bind=none \
+  --kill-on-bad-exit=1 \
+  python -m fastvideo.entrypoints.cli.main generate \
+  --config examples/inference/basic/minimax_h3_external_launcher.yaml \
+  --generator.engine.num_gpus 8 \
+  --generator.engine.parallelism.sp_size 8
+```
+
+Every rank must enter the same requests in the same order. The CLI config and
+model/media inputs therefore need to resolve identically on every node. Rank
+zero alone reads prompt-list files, creates output directories, saves media,
+and returns generated frames/audio/latents/trajectories; only that rank needs
+a writable output path. For MiniMax-H3 parallel VAE decode, every rank in the
+SP group containing global rank zero participates in the decoder collectives,
+but only rank zero assembles the CPU output. All ranks in every other SP group
+skip the decode uniformly, so multiple SP groups do not materialize duplicate
+outputs.
+
+Set `generator.engine.parallelism.dist_timeout` to an optional positive
+integer number of **seconds** to apply one timeout to the default process
+group (when FastVideo initializes it) and every FastVideo-created device and
+Gloo control group. Omitting the key preserves PyTorch's backend defaults. A
+local-rank error, an out-of-range rendezvous port, or a device index outside
+the process-visible accelerator set fails before model loading. The process-
+group timeout bounds a missing collective participant;
+`--kill-on-bad-exit=1` (or torchrun's worker-group supervision) remains
+necessary to terminate the rest of the worker group after a rank failure.
+
+`FASTVIDEO_EXTERNAL_LAUNCHER=1` is an equivalent offline-only opt-in for
+callers that leave `execution_backend: mp`. External-launcher mode is rejected
+by REST and streaming servers because those request loops do not provide a
+rank-zero SPMD control plane.
 
 ### torch.compile Integration
 

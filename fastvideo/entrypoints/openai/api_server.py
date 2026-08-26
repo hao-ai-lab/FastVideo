@@ -19,6 +19,7 @@ from fastvideo.entrypoints.video_generator import VideoGenerator
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.registry import get_preset_selection
+from fastvideo.worker.executor import reject_external_launcher
 
 logger = init_logger(__name__)
 
@@ -55,6 +56,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     output_dir: str = app.state.output_dir
     default_request: GenerationRequest | None = getattr(app.state, "default_request", None)
 
+    reject_external_launcher(
+        args.distributed_executor_backend,
+        entrypoint="the OpenAI-compatible server",
+    )
     logger.info("Loading model from %s ...", args.model_path)
     generator = VideoGenerator.from_fastvideo_args(args)
     logger.info("Model loaded successfully.")
@@ -75,6 +80,11 @@ def create_app(
     default_request: GenerationRequest | None = None,
 ) -> FastAPI:
     """Build the FastAPI application with all routers mounted"""
+
+    reject_external_launcher(
+        fastvideo_args.distributed_executor_backend,
+        entrypoint="the OpenAI-compatible server",
+    )
 
     app = FastAPI(
         title="FastVideo OpenAI-Compatible API",

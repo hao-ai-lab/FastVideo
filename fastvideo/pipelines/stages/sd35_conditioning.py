@@ -308,6 +308,12 @@ class SD35DecodingStage(PipelineStage):
 
     @torch.no_grad()
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+        if not fastvideo_args.is_output_rank:
+            # SD3.5 decoding has no collectives. Avoid duplicating the VAE
+            # forward and device-to-host pixel copy on non-output SPMD ranks.
+            batch.output = torch.empty((0, 3, 0, 0, 0), device="cpu", dtype=torch.float32)
+            return batch
+
         if batch.latents is None:
             raise ValueError("latents must be set before SD35DecodingStage")
 

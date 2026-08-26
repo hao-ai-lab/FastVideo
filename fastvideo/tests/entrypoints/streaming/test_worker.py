@@ -13,17 +13,21 @@ the in-process pieces:
 """
 from __future__ import annotations
 
+import queue
+import threading
 from dataclasses import dataclass, field
 from typing import Any
 
 from fastvideo.api.schema import (
     ContinuationState,
+    GeneratorConfig,
     GenerationRequest,
     WarmupConfig,
 )
 from fastvideo.entrypoints.streaming.worker import (
     _extract_continuation_state,
     _warmup_worker,
+    worker_main,
 )
 
 
@@ -87,3 +91,24 @@ class TestExtractContinuationState:
     def test_returns_none_for_missing(self) -> None:
         assert _extract_continuation_state({}) is None
         assert _extract_continuation_state(object()) is None
+
+
+def test_worker_rejects_external_launcher_before_generator_construction() -> None:
+    result_queue: queue.Queue = queue.Queue()
+    config = GeneratorConfig(model_path="/models/fake")
+    config.engine.execution_backend = "external_launcher"
+
+    worker_main(
+        gpu_id=0,
+        worker_id="worker-0",
+        generator_config=config,
+        warmup_config=WarmupConfig(enabled=False),
+        job_queue=queue.Queue(),
+        result_queue=result_queue,
+        shutdown_event=threading.Event(),
+    )
+
+    result = result_queue.get_nowait()
+    assert result["kind"] == "error"
+    assert "external_launcher is supported only" in result["error"]
+    assert "streaming worker" in result["error"]
