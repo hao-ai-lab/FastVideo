@@ -7,6 +7,7 @@ exec pytest \
   ./fastvideo/tests/dataset/ \
   ./fastvideo/tests/workflow/ \
   ./fastvideo/tests/entrypoints/ \
+  ./fastvideo/tests/loader/ \
   ./fastvideo/tests/train/ \
   ./fastvideo/tests/stages/ \
   ./fastvideo/tests/ops/ \
