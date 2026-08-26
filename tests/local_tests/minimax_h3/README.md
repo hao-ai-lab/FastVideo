@@ -21,9 +21,10 @@ pytest \
   fastvideo/tests/stages/test_minimax_h3_vae_streaming.py -q
 ```
 
-The Qwen3-VL vision test covers production image/video grids, packed grids, exact float32 accumulation against
-Transformers' public interpolation helper, and the bounded four-tap workspace. The official helper is a required
-oracle for this test: an unavailable or incompatible Transformers install fails instead of skipping parity.
+The Qwen3-VL vision test covers production image/video grids, packed grids, exact float32 accumulation against a
+self-contained Transformers 5.15 contract reference, and the bounded four-tap workspace. When Transformers 5.15 or
+newer is installed, a separate test checks that reference against its public helper. Older supported Transformers
+versions skip only that library cross-check; the exact contract and independent PyTorch interpolation gates still run.
 
 ## Registry smoke
 
