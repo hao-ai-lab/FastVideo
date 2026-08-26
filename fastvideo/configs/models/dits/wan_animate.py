@@ -49,6 +49,19 @@ from fastvideo.configs.models.dits.base import DiTArchConfig, DiTConfig
 from fastvideo.configs.models.dits.wanvideo import WanVideoArchConfig
 
 
+def _animate_lora_param_names_mapping() -> dict:
+    """Base Wan LoRA mapping (native -> diffusers naming) + the I2V image-KV heads.
+
+    The relighting LoRA was trained on the official (native-naming) model,
+    whose I2V cross-attention carries ``k_img``/``v_img`` projections the base
+    mapping does not cover. Harmless when a given adapter does not target them.
+    """
+    mapping = dict(WanVideoArchConfig().lora_param_names_mapping)
+    mapping[r"^blocks\.(\d+)\.cross_attn\.k_img\.(.*)$"] = r"blocks.\1.attn2.add_k_proj.\2"
+    mapping[r"^blocks\.(\d+)\.cross_attn\.v_img\.(.*)$"] = r"blocks.\1.attn2.add_v_proj.\2"
+    return mapping
+
+
 def _animate_param_names_mapping() -> dict:
     """Base Wan (diffusers-naming) mapping + the one Animate-specific entry.
 
@@ -68,6 +81,7 @@ def _animate_param_names_mapping() -> dict:
 @dataclass
 class WanAnimateArchConfig(WanVideoArchConfig):
     param_names_mapping: dict = field(default_factory=_animate_param_names_mapping)
+    lora_param_names_mapping: dict = field(default_factory=_animate_lora_param_names_mapping)
 
     # --- I2V skeleton knobs (config.json: in_channels 36 / image_dim 1280) ---
     in_channels: int = 36
