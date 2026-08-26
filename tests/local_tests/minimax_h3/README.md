@@ -29,7 +29,35 @@ The LoRA ownership test starts two CPU/Gloo ranks, shards the adapter with
 composable FSDP/DTensor, compares two synchronized optimization steps against
 the exact unsharded mean-loss reference, and round-trips adapter state through
 DCP. Export tests prove that Ref2VA replaces `transformer_ref/`, that LoRA is
-merged back to native keys, and that the exported state strictly reloads.
+merged back to native keys even inside a real PyTorch `CheckpointWrapper`, and
+that strict native reload preserves the forward result. They also exercise
+canonical Diffusers single-file and sharded safetensors layouts while retaining
+the legacy filename for model plugins that have not opted in.
+
+The complete local checkpoint may be used for a later explicit real-model
+gate, but not on a 121 GiB unified-memory GB10: export gathers the roughly
+62 GiB H3 transformer on CPU while the live model is still resident. Use a
+machine with comfortably more than the combined model, gathered state, and
+runtime working set. `--verify` releases the training graph before reload but
+does not make the initial full-state gather streaming.
+
+The narrower real-weight initialization gate is safe for one GB10 because it
+loads only `transformer_ref`, keeps checkpointing disabled, and never gathers a
+state dict. Its expected unified-memory working set is approximately 70--80
+GiB. Run it in isolation after other GPU work has stopped:
+
+```bash
+cd /home/will/src/FastVideo-pr-worktrees/pr1757
+CUDA_VISIBLE_DEVICES=0 \
+MINIMAX_H3_MODEL_ROOT=/home/will/models/MiniMax-H3 \
+MINIMAX_H3_RUN_LORA_REAL_INIT=1 \
+/home/will/src/FastVideo/.venv/bin/torchrun --standalone --nproc-per-node=1 \
+  -m pytest tests/local_tests/minimax_h3/test_minimax_h3_lora_real_init.py -q -s
+```
+
+This asserts strict base loading, 312 LoRA wrappers and 624 trainable adapter
+parameters, shared FSDP/DTensor placement with each base weight, CUDA residency,
+and absence of per-layer CPU snapshots. It performs no forward or export.
 
 ## Registry smoke
 

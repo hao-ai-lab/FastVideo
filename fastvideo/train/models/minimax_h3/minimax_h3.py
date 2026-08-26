@@ -52,6 +52,10 @@ class MiniMaxH3Model(ModelBase):
 
     _transformer_cls_name = "MiniMaxH3Transformer3DModel"
     _transformer_module_type = "transformer"
+    # Published H3 components use Diffusers' canonical safetensors naming and
+    # shard index. Other training plugins retain the converter's legacy
+    # ``model.safetensors`` handoff unless they opt in explicitly.
+    export_diffusers_weight_layout = True
 
     def __init__(
         self,

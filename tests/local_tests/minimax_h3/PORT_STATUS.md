@@ -6,7 +6,7 @@
 - component parity: complete
 - FastVideo runtime acceptance: complete
 - official end-to-end pipeline parity: complete
-- modular Ref2VA/LoRA training: CPU contracts complete; full-checkpoint run pending
+- modular Ref2VA/LoRA training: CPU contracts complete; full-checkpoint train/export/inference run pending
 
 ## Coverage
 
@@ -25,13 +25,14 @@
 | Official end-to-end pipeline | exact T2VA, FL2VA, and Ref2VA video/audio latents | complete |
 | Modular Ref2VA packing | target-only loss slicing plus pinned row/position/tag parity | complete |
 | LoRA ownership | exact 312-layer coverage; two-rank FSDP gradient and DCP-resume parity | complete |
-| Training export | native merged LoRA keys; physical `transformer_ref` handoff and strict reload | complete |
+| Training export | checkpoint-wrapper-safe native LoRA merge; physical `transformer_ref`; canonical Diffusers shards | CPU contract complete; real checkpoint pending |
 
 ## Current validation
 
 T2VA, FL2VA, and Ref2VA match the official video/audio latents exactly.
-The added training contracts do not claim an official full-checkpoint training
-parity run; no complete MiniMax H3 checkpoint was available in this worktree.
+The added training contracts do not claim an official full-checkpoint training,
+export, reload, or inference run. A local complete checkpoint is available for
+a future scoped gate, but this change has not executed that high-memory gate.
 
 ## Decisions
 
@@ -46,8 +47,16 @@ parity run; no complete MiniMax H3 checkpoint was available in this worktree.
   transformer's ownership, gradient synchronization, and checkpoint topology.
 - Export H3 training adapters merged into the native physical component;
   standalone adapter loading is not part of the inference contract.
+- Remove activation-checkpoint wrapper path segments when mapping discovered
+  LoRA modules to their canonical state-dict keys.
+- Emit H3 weights with Diffusers' conventional safetensors names and 5 GB
+  shards; keep the converter's legacy `model.safetensors` contract for model
+  plugins that have not opted into this layout.
 
 ## Evidence boundary
 
 Completed rows summarize recorded component and FastVideo runtime runs. Registry smoke, generated media, and
 FastVideo SP consistency are supporting checks, not substitutes for the recorded official comparisons.
+The synthetic fixture is repository-owned test input, not model-quality evidence. Full H3 checkpoint export remains
+ungated because rank 0 must gather a roughly 62 GiB transformer while the live model is resident; a 121 GiB
+unified-memory GB10 is not a supported target for that full-state operation.

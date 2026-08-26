@@ -1,8 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """Convert a DCP training checkpoint to a diffusers-style model directory.
 
-Works on a single GPU regardless of how many GPUs were used for training
-(DCP handles resharding automatically).
+The converter can reshard a distributed checkpoint onto one GPU, but exporting
+a full model is a high-memory operation: rank 0 temporarily owns both the live
+model and its gathered CPU state.  Use a machine with enough CPU or unified
+memory for both copies plus runtime overhead.
 
 Usage (no torchrun needed)::
 
@@ -34,6 +36,7 @@ a standalone H3 adapter.
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import os
 import sys
@@ -42,6 +45,20 @@ from typing import Any
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
+
+_CHECKPOINT_WRAPPER_SEGMENT = "_checkpoint_wrapped_module"
+_EXPORT_MAX_SHARD_SIZE = "5GB"
+
+
+def _canonical_state_prefix(module_name: str) -> str:
+    """Map a module traversal name to its checkpoint state-dict prefix.
+
+    PyTorch's ``CheckpointWrapper`` intentionally hides its
+    ``_checkpoint_wrapped_module`` implementation detail from state-dict keys,
+    while ``named_modules()`` still exposes it.  LoRA discovery uses module
+    traversal, so remove only that exact path segment before looking up state.
+    """
+    return ".".join(segment for segment in module_name.split(".") if segment != _CHECKPOINT_WRAPPER_SEGMENT)
 
 
 def _transformer_component_name(model: Any) -> str:
@@ -73,9 +90,18 @@ def _native_export_state_dict(
     # while materializing every merged tensor would nearly duplicate them.
     exported = state_dict
     reverse_lookup_aliases: dict[str, str] = {}
-    wrappers = [(name, child) for name, child in module.named_modules()
-                if name and isinstance(child, BaseLayerWithLoRA)]
-    for prefix, wrapper in wrappers:
+    wrappers: dict[str, BaseLayerWithLoRA] = {}
+    for module_name, child in module.named_modules():
+        if not module_name or not isinstance(child, BaseLayerWithLoRA):
+            continue
+        prefix = _canonical_state_prefix(module_name)
+        if not prefix:
+            raise ValueError(f"LoRA module {module_name!r} has an empty canonical state prefix")
+        if prefix in wrappers:
+            raise ValueError(f"LoRA modules collide at canonical state prefix {prefix!r}")
+        wrappers[prefix] = child
+
+    for prefix, wrapper in wrappers.items():
         lora_a_key = f"{prefix}.lora_A"
         lora_b_key = f"{prefix}.lora_B"
         base_weight_key = f"{prefix}.base_layer.weight"
@@ -115,6 +141,58 @@ def _native_export_state_dict(
     if unexpected_wrapper_keys:
         raise ValueError(f"LoRA export left wrapper-only keys: {unexpected_wrapper_keys[:10]}")
     return exported, reverse_lookup_aliases, bool(wrappers)
+
+
+def _save_diffusers_safetensors(
+    tensor_state: dict[str, Any],
+    module_dir: Any,
+    *,
+    max_shard_size: int | str = _EXPORT_MAX_SHARD_SIZE,
+) -> list[str]:
+    """Write a canonical Diffusers safetensors component, releasing each shard.
+
+    Small components use ``diffusion_pytorch_model.safetensors``. Large ones
+    use the conventional numbered shards plus
+    ``diffusion_pytorch_model.safetensors.index.json``.
+    """
+    from pathlib import Path
+
+    import torch
+    from diffusers.utils import SAFE_WEIGHTS_INDEX_NAME, SAFETENSORS_WEIGHTS_NAME
+    from huggingface_hub import split_torch_state_dict_into_shards
+    from safetensors.torch import save_file
+
+    destination = Path(module_dir)
+    split = split_torch_state_dict_into_shards(
+        tensor_state,
+        filename_pattern=SAFETENSORS_WEIGHTS_NAME.replace(".safetensors", "{suffix}.safetensors"),
+        max_shard_size=max_shard_size,
+    )
+    written: list[str] = []
+    for filename, tensor_names in split.filename_to_tensors.items():
+        shard: dict[str, torch.Tensor] = {}
+        for name in tensor_names:
+            value = tensor_state.pop(name)
+            if not isinstance(value, torch.Tensor):
+                raise TypeError(f"Expected tensor for {name!r}, got {type(value).__name__}")
+            shard[name] = value
+        save_file(shard, str(destination / filename))
+        written.append(filename)
+        del shard
+
+    if tensor_state:
+        raise RuntimeError(f"Safetensors shard plan left unsaved keys: {list(tensor_state)[:10]}")
+    if split.is_sharded:
+        index = {
+            "metadata": split.metadata,
+            "weight_map": split.tensor_to_filename,
+        }
+        (destination / SAFE_WEIGHTS_INDEX_NAME).write_text(
+            json.dumps(index, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        written.append(SAFE_WEIGHTS_INDEX_NAME)
+    return written
 
 
 def _ensure_distributed() -> None:
@@ -210,6 +288,7 @@ def _save_role_pretrained(
     _barrier()
 
     transformer_component = _transformer_component_name(model)
+    use_diffusers_weight_layout = bool(getattr(model, "export_diffusers_weight_layout", False))
     modules: dict[str, torch.nn.Module] = {}
     if model.transformer is not None:
         modules[transformer_component] = model.transformer
@@ -238,8 +317,14 @@ def _save_role_pretrained(
         )
 
         if _rank() == 0:
-            for path in module_dir.glob("*.safetensors"):
-                path.unlink(missing_ok=True)
+            for pattern in (
+                    "*.safetensors",
+                    "*.safetensors.index.json",
+                    "diffusion_pytorch_model*.bin",
+                    "diffusion_pytorch_model.bin.index.json",
+            ):
+                for path in module_dir.glob(pattern):
+                    path.unlink(missing_ok=True)
 
             # Convert internal parameter names back to HF format.
             # load_model_from_full_model_state_dict builds reverse_param_names_mapping
@@ -273,16 +358,31 @@ def _save_role_pretrained(
                     key = hf_key
                 tensor_state[key] = value.detach().cpu()
 
-            from safetensors.torch import save_file
-
-            out_path = module_dir / "model.safetensors"
             logger.info(
-                "Saving %s weights to %s (%s tensors)",
+                "Saving %s weights to %s (%s tensors, max shard %s)",
                 module_name,
-                out_path,
+                module_dir,
                 len(tensor_state),
+                _EXPORT_MAX_SHARD_SIZE,
             )
-            save_file(tensor_state, str(out_path))
+            # ``native_state`` aliases the gathered DCP mapping. Clear that
+            # mapping before writing so it does not retain the CPU snapshot.
+            native_state.clear()
+            if use_diffusers_weight_layout:
+                # H3 publishes native Diffusers component folders and opts in
+                # to the conventional filename/shard contract. The shard
+                # writer pops each completed shard to reduce post-save memory.
+                written_weights = _save_diffusers_safetensors(tensor_state, module_dir)
+            else:
+                # Preserve the global converter's established contract for
+                # QAT/KD and other model plugins whose scripts consume this
+                # exact path as a transformer override.
+                from safetensors.torch import save_file
+                legacy_name = "model.safetensors"
+                save_file(tensor_state, str(module_dir / legacy_name))
+                tensor_state.clear()
+                written_weights = [legacy_name]
+            logger.info("Saved %s weight artifacts: %s", module_name, written_weights)
 
             metadata_path = dst / "fastvideo_training_export.json"
             metadata_path.write_text(
@@ -383,7 +483,8 @@ def convert(
 
     tc = cfg.training
 
-    # -- Init distributed (1 GPU is enough; DCP reshards) --
+    # -- Init distributed for the one-rank export process. DCP can reshard the
+    # checkpoint, but full-state gathering still requires substantial memory.
     maybe_init_distributed_environment_and_model_parallel(
         tp_size=1,
         sp_size=1,
@@ -432,6 +533,13 @@ def convert(
     logger.info("Export complete: %s", result)
 
     if verify:
+        # Do not keep the live FSDP training graph and DCP state mapping alive
+        # while loading a second full transformer for strict verification.
+        del states, model, method
+        gc.collect()
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         _strict_reload_verify(
             output_dir=result,
             training_config=tc,
@@ -511,9 +619,10 @@ def _run_config_from_raw(raw: dict[str, Any], ) -> Any:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=("Convert a DCP training checkpoint to a "
-                                                  "diffusers-style model directory. "
-                                                  "Only 1 GPU needed (DCP reshards "
-                                                  "automatically)."), )
+                                                  "diffusers-style model directory. DCP can "
+                                                  "reshard onto one GPU, but full-model export "
+                                                  "requires memory for the live model and a "
+                                                  "gathered CPU state."), )
     parser.add_argument(
         "--checkpoint",
         type=str,

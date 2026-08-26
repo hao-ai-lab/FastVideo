@@ -525,6 +525,19 @@ MiniMax H3 Ref2VA exports `transformer_ref/`, while T2VA exports
 weights because the H3 inference pipeline does not load a standalone training
 adapter. The export records this choice in `fastvideo_training_export.json`.
 
+H3 opts into Diffusers' conventional
+`diffusion_pytorch_model.safetensors` naming (or numbered 5 GB shards plus
+`diffusion_pytorch_model.safetensors.index.json`). Existing model plugins keep
+the legacy `model.safetensors` handoff until they opt in, so QAT/KD override
+paths remain compatible.
+
+Export is not a streaming state-dict conversion. Rank 0 temporarily owns the
+live model and a full CPU-gathered state. `--verify` releases the training
+object graph and gathered mapping before strict reload, but the initial gather
+still needs enough CPU or unified memory for both copies plus runtime overhead.
+For a roughly 62 GiB H3 transformer, a 121 GiB unified-memory GB10 is not a
+validated full-export target; use a larger-memory host.
+
 ### Reproducibility
 
 The training entrypoint enables deterministic mode automatically:
