@@ -42,6 +42,7 @@ jobs:
         # merge gate must still be triggered by the steps below, so a failure
         # here is reported and stepped over rather than ending the job.
         continue-on-error: true
+        timeout-minutes: 3
         if: steps.check.outputs.has_ready == 'true'
         env:
           BK_ORG: ${{ vars.BUILDKITE_ORG_SLUG }}
@@ -60,11 +61,12 @@ jobs:
             exit 1
           fi
 
-          if ! curl -sS --fail-with-body --get \
+          if ! curl -sS --fail-with-body --connect-timeout 5 --max-time 20 --get \
             -H "Authorization: Bearer $BUILDKITE_API_TOKEN" \
             --data-urlencode "branch=$PR_BRANCH" \
             --data-urlencode "state[]=running" \
             --data-urlencode "state[]=scheduled" \
+            --data-urlencode "state[]=failing" \
             --data-urlencode "exclude_jobs=true" \
             --data-urlencode "exclude_pipeline=true" \
             --output "$response_file" \
@@ -110,7 +112,7 @@ jobs:
           cancellation_failed=0
           while IFS= read -r build_num; do
             echo "Cancelling Buildkite build #$build_num"
-            if ! curl -sS --fail-with-body -o /dev/null -X PUT \
+            if ! curl -sS --fail-with-body --connect-timeout 5 --max-time 20 -o /dev/null -X PUT \
               -H "Authorization: Bearer $BUILDKITE_API_TOKEN" \
               "https://api.buildkite.com/v2/organizations/${BK_ORG}/pipelines/${BK_PIPELINE}/builds/${build_num}/cancel"; then
               echo "::warning::Could not cancel Buildkite build #$build_num; trying remaining builds."

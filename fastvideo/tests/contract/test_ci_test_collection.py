@@ -174,13 +174,17 @@ def test_merge_gate_buildkite_cancellation_is_best_effort_and_strict():
     # Stale-build cleanup is best effort; creating the replacement gate remains
     # a hard failure so merge protection can never pass without a test build.
     assert cancel_step["continue-on-error"] is True
+    assert cancel_step["timeout-minutes"] == 3
     assert trigger_step.get("continue-on-error") is not True
     assert "curl -sS --fail-with-body -X POST" in trigger_step["run"]
 
     assert cancel_script.splitlines()[0] == "set -euo pipefail"
-    assert "curl -sS --fail-with-body --get" in cancel_script
+    assert cancel_script.count("--connect-timeout 5") == 2
+    assert cancel_script.count("--max-time 20") == 2
+    assert "curl -sS --fail-with-body --connect-timeout 5 --max-time 20 --get" in cancel_script
     assert cancel_script.count('--data-urlencode "state[]=running"') == 1
     assert cancel_script.count('--data-urlencode "state[]=scheduled"') == 1
+    assert cancel_script.count('--data-urlencode "state[]=failing"') == 1
     assert cancel_script.count('--data-urlencode "exclude_jobs=true"') == 1
     assert cancel_script.count('--data-urlencode "exclude_pipeline=true"') == 1
     assert 'state=running,scheduled' not in cancel_script
@@ -197,7 +201,8 @@ def test_merge_gate_buildkite_cancellation_is_best_effort_and_strict():
     # and one failure does not stop attempts for the remaining build numbers.
     assert '--output "$response_file"' in cancel_script
     assert 'cat "$response_file"' not in cancel_script
-    assert "if ! curl -sS --fail-with-body -o /dev/null -X PUT" in cancel_script
+    assert ("if ! curl -sS --fail-with-body --connect-timeout 5 --max-time 20 "
+            "-o /dev/null -X PUT") in cancel_script
     assert "cancellation_failed=1" in cancel_script
     assert cancel_script.index("cancellation_failed=1") < cancel_script.index('done < "$builds_file"')
     assert cancel_script.index('done < "$builds_file"') < cancel_script.index("if (( cancellation_failed != 0 ))")
