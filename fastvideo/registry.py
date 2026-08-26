@@ -24,6 +24,7 @@ from fastvideo.configs.pipelines.dreamx_world import DreamXWorld5BARPipelineConf
 from fastvideo.configs.pipelines.hunyuan import FastHunyuanConfig, HunyuanConfig
 from fastvideo.configs.pipelines.hunyuangamecraft import HunyuanGameCraftPipelineConfig
 from fastvideo.configs.pipelines.gen3c import Gen3CConfig
+from fastvideo.configs.pipelines.helios import HeliosPipelineConfig
 from fastvideo.configs.pipelines.hunyuan15 import (Hunyuan15T2V480PConfig, Hunyuan15I2V480PStepDistilledConfig,
                                                    Hunyuan15T2V720PConfig, Hunyuan15I2V720PConfig,
                                                    Hunyuan15SR1080PConfig)
@@ -216,6 +217,13 @@ def _get_config_info(
         config = maybe_download_model_index(model_path, revision=revision)
 
     pipeline_name = config.get("_class_name", "").lower()
+    scheduler = config.get("scheduler")
+    if (pipeline_name == "heliospyramidpipeline" and config.get("is_distilled") is True and isinstance(scheduler, list)
+            and len(scheduler) >= 2 and scheduler[1] == "HeliosDMDScheduler"):
+        helios_model_id = _MODEL_HF_PATH_TO_NAME.get("BestWishYsh/Helios-Distilled")
+        if helios_model_id is not None:
+            logger.debug("Resolved Helios-Distilled from authoritative model index metadata.")
+            return _CONFIG_REGISTRY.get(helios_model_id)
 
     matched_model_names: list[str] = []
     for model_id, detector in _MODEL_NAME_DETECTORS:
@@ -240,6 +248,17 @@ def _get_config_info(
 
 
 def _register_configs() -> None:
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=HeliosPipelineConfig,
+        workload_types=(WorkloadType.T2V, ),
+        hf_model_paths=["BestWishYsh/Helios-Distilled"],
+        model_detectors=[],
+        model_family="helios",
+        default_preset="helios_distilled_t2v",
+        pipeline_cls_name="HeliosPyramidPipeline",
+    )
+
     # MMAudio large-44k-v2 (video/text-to-audio). The checkpoint is converted
     # into standard per-component FastVideo/Diffusers-style directories by
     # scripts/checkpoint_conversion/convert_mmaudio_to_diffusers.py.
@@ -1306,6 +1325,8 @@ def _register_presets() -> None:
         ALL_PRESETS as HUNYUAN_PRESETS, )
     from fastvideo.pipelines.basic.hunyuan15.presets import (
         ALL_PRESETS as HUNYUAN15_PRESETS, )
+    from fastvideo.pipelines.basic.helios.presets import (
+        ALL_PRESETS as HELIOS_PRESETS, )
     from fastvideo.pipelines.basic.hyworld.presets import (
         ALL_PRESETS as HYWORLD_PRESETS, )
     from fastvideo.pipelines.basic.kandinsky5.presets import (
@@ -1349,6 +1370,7 @@ def _register_presets() -> None:
         GEN3C_PRESETS,
         HUNYUAN_PRESETS,
         HUNYUAN15_PRESETS,
+        HELIOS_PRESETS,
         HYWORLD_PRESETS,
         KANDINSKY5_PRESETS,
         LINGBOT_VIDEO_PRESETS,
