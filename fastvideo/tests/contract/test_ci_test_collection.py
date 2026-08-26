@@ -164,6 +164,45 @@ def test_merge_comment_has_one_change_aware_trigger_path():
     assert "__FASTVIDEO_CI_PLAN_ALL__" in ready_workflow
 
 
+def test_merge_gate_buildkite_cancellation_is_best_effort_and_strict():
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/ci-trigger-full-suite.yml").read_text())
+    steps = workflow["jobs"]["trigger"]["steps"]
+    cancel_step = next(step for step in steps if step.get("name") == "Cancel previous Buildkite builds")
+    trigger_step = next(step for step in steps if step.get("name") == "Trigger Buildkite merge gate")
+    cancel_script = cancel_step["run"]
+
+    # Stale-build cleanup is best effort; creating the replacement gate remains
+    # a hard failure so merge protection can never pass without a test build.
+    assert cancel_step["continue-on-error"] is True
+    assert trigger_step.get("continue-on-error") is not True
+    assert "curl -sS --fail-with-body -X POST" in trigger_step["run"]
+
+    assert cancel_script.splitlines()[0] == "set -euo pipefail"
+    assert "curl -sS --fail-with-body --get" in cancel_script
+    assert cancel_script.count('--data-urlencode "state[]=running"') == 1
+    assert cancel_script.count('--data-urlencode "state[]=scheduled"') == 1
+    assert cancel_script.count('--data-urlencode "exclude_jobs=true"') == 1
+    assert cancel_script.count('--data-urlencode "exclude_pipeline=true"') == 1
+    assert 'state=running,scheduled' not in cancel_script
+
+    # Only a validated array of build records can reach the URL construction.
+    assert 'if type != "array" then false' in cancel_script
+    assert 'if type != "object" then false' in cancel_script
+    assert 'if type == "number" then . > 0 and floor == .' in cancel_script
+    assert 'if ($env | type) != "object" then false' in cancel_script
+    assert '$env.TEST_SCOPE?' in cancel_script
+    assert '$env.PR_NUMBER?' in cancel_script
+
+    # API bodies are kept out of annotations, every cancellation is checked,
+    # and one failure does not stop attempts for the remaining build numbers.
+    assert '--output "$response_file"' in cancel_script
+    assert 'cat "$response_file"' not in cancel_script
+    assert "if ! curl -sS --fail-with-body -o /dev/null -X PUT" in cancel_script
+    assert "cancellation_failed=1" in cancel_script
+    assert cancel_script.index("cancellation_failed=1") < cancel_script.index('done < "$builds_file"')
+    assert cancel_script.index('done < "$builds_file"') < cancel_script.index("if (( cancellation_failed != 0 ))")
+
+
 def test_full_ssim_has_a_weekly_slurm_schedule():
     workflow = (REPO_ROOT / ".github/workflows/ci-scheduled-ssim.yml").read_text()
     ssim_step = next(step for step in _pipeline_steps() if step["key"] == "ssim")

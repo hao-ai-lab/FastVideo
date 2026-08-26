@@ -44,37 +44,83 @@ jobs:
         continue-on-error: true
         if: steps.check.outputs.has_ready == 'true'
         env:
+          BK_ORG: ${{ vars.BUILDKITE_ORG_SLUG }}
+          BK_PIPELINE: ${{ vars.BUILDKITE_PIPELINE_SLUG }}
           BUILDKITE_API_TOKEN: ${{ secrets.BUILDKITE_API_TOKEN }}
           PR_BRANCH: ${{ github.event.pull_request.head.ref }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          # `curl` without --fail-with-body treats an HTTP error as success and
-          # pipes the error body onward. Buildkite answers a rate limit or an
-          # unauthorized read with an object such as {"message": "Not Found"},
-          # and `.[]` over an object yields its values, so `.env` then runs
-          # against a string and jq exits non-zero.
-          if ! response=$(curl -sS --get --fail-with-body \
+          set -euo pipefail
+          response_file=$(mktemp)
+          builds_file=$(mktemp)
+          trap 'rm -f "$response_file" "$builds_file"' EXIT
+
+          if [[ ! "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::warning::Invalid pull request number; stale Buildkite builds may continue."
+            exit 1
+          fi
+
+          if ! curl -sS --fail-with-body --get \
             -H "Authorization: Bearer $BUILDKITE_API_TOKEN" \
             --data-urlencode "branch=$PR_BRANCH" \
-            --data-urlencode "state=running,scheduled" \
-            "https://api.buildkite.com/v2/organizations/${{ vars.BUILDKITE_ORG_SLUG }}/pipelines/${{ vars.BUILDKITE_PIPELINE_SLUG }}/builds" 2>&1); then
-            echo "::warning::Could not list Buildkite builds, skipping cancellation: $response"
-            exit 0
+            --data-urlencode "state[]=running" \
+            --data-urlencode "state[]=scheduled" \
+            --data-urlencode "exclude_jobs=true" \
+            --data-urlencode "exclude_pipeline=true" \
+            --output "$response_file" \
+            "https://api.buildkite.com/v2/organizations/${BK_ORG}/pipelines/${BK_PIPELINE}/builds"; then
+            echo "::warning::Could not list Buildkite builds; stale merge-gate builds may continue."
+            exit 1
+          fi
+
+          if ! jq -e '
+            if type != "array" then false
+            else all(.[];
+              if type != "object" then false
+              else
+                (.number | if type == "number" then . > 0 and floor == . else false end)
+                and (
+                  (.env? | if . == null then {} else . end) as $env
+                  | if ($env | type) != "object" then false
+                    else
+                      ($env.TEST_SCOPE? | . == null or type == "string")
+                      and ($env.PR_NUMBER? | . == null or type == "string")
+                    end
+                )
+              end
+            )
+            end
+          ' "$response_file" >/dev/null 2>&1; then
+            # Do not print the response body: it is remote data and may contain
+            # multiline values that would be interpreted as workflow commands.
+            echo "::warning::Buildkite returned an invalid build list; stale merge-gate builds may continue."
+            exit 1
           fi
 
           # Match both branch and PR number: forks can reuse the same branch name.
-          if ! builds=$(printf '%s' "$response" | jq -r --arg pr_number "$PR_NUMBER" \
-            'if type == "array" then .[] else empty end
-             | select((.env.TEST_SCOPE? == "merge") and (.env.PR_NUMBER? == $pr_number))
-             | .number' 2>&1); then
-            echo "::warning::Could not parse the Buildkite build list, skipping cancellation: $builds"
-            exit 0
+          if ! jq -r --arg pr_number "$PR_NUMBER" '
+            .[]
+            | select((.env.TEST_SCOPE? == "merge") and (.env.PR_NUMBER? == $pr_number))
+            | .number
+          ' "$response_file" > "$builds_file"; then
+            echo "::warning::Could not select stale Buildkite builds; stale merge-gate builds may continue."
+            exit 1
           fi
-          for build_num in $builds; do
+
+          cancellation_failed=0
+          while IFS= read -r build_num; do
             echo "Cancelling Buildkite build #$build_num"
-            curl -sS -X PUT -H "Authorization: Bearer $BUILDKITE_API_TOKEN" \
-              "https://api.buildkite.com/v2/organizations/${{ vars.BUILDKITE_ORG_SLUG }}/pipelines/${{ vars.BUILDKITE_PIPELINE_SLUG }}/builds/${build_num}/cancel"
-          done
+            if ! curl -sS --fail-with-body -o /dev/null -X PUT \
+              -H "Authorization: Bearer $BUILDKITE_API_TOKEN" \
+              "https://api.buildkite.com/v2/organizations/${BK_ORG}/pipelines/${BK_PIPELINE}/builds/${build_num}/cancel"; then
+              echo "::warning::Could not cancel Buildkite build #$build_num; trying remaining builds."
+              cancellation_failed=1
+            fi
+          done < "$builds_file"
+
+          if (( cancellation_failed != 0 )); then
+            exit 1
+          fi
 
       # Check out the immutable BASE SHA: pull_request_target must never run a
       # planner or gate script from the untrusted PR head.
