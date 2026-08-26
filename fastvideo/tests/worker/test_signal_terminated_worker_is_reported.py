@@ -28,6 +28,11 @@ import pytest
 import fastvideo.worker.multiproc_executor as multiproc_executor
 from fastvideo.worker.multiproc_executor import WorkerMultiprocProc
 
+# The spawn context reimports PyTorch and FastVideo in every child. That takes
+# nearly five seconds even on the local GB10 and can take longer on a loaded ARM
+# CI node, so a five-second startup deadline makes the signal contract flaky.
+_SUBPROCESS_TIMEOUT_SECONDS = 30
+
 
 class _ReadyPipe:
 
@@ -179,16 +184,17 @@ def test_worker_main_forwards_real_signal_traceback_across_processes(signum: int
     child_ready_pipe.close()
 
     try:
-        assert entered_signal_point.wait(timeout=5), "child did not reach the requested signal point"
+        reached_signal_point = entered_signal_point.wait(timeout=_SUBPROCESS_TIMEOUT_SECONDS)
+        assert reached_signal_point, "child did not reach the requested signal point"
         if signal_point == "worker_loop":
             assert parent_ready_pipe.recv() == {"status": "READY"}
 
         os.kill(process.pid, signum)
-        process.join(timeout=5)
+        process.join(timeout=_SUBPROCESS_TIMEOUT_SECONDS)
         assert not process.is_alive(), "signalled worker did not exit"
         assert process.exitcode == 0  # Preserve the historical argument-less SystemExit status.
 
-        record = log_queue.get(timeout=5)
+        record = log_queue.get(timeout=_SUBPROCESS_TIMEOUT_SECONDS)
         message = record.getMessage()
         assert f"Worker 7 received {signal.Signals(signum).name} ({signum})" in message
         assert "Traceback (most recent call last)" in message
@@ -203,7 +209,7 @@ def test_worker_main_forwards_real_signal_traceback_across_processes(signum: int
     finally:
         if process.is_alive():
             process.kill()
-            process.join(timeout=5)
+            process.join(timeout=_SUBPROCESS_TIMEOUT_SECONDS)
         parent_ready_pipe.close()
         log_queue.close()
         log_queue.join_thread()
