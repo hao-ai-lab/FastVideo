@@ -27,8 +27,6 @@ from .attention import (
     flash_attn3_func_forward,
     flashinfer_attn_backbward,
     flashinfer_attn_forward,
-    npu_fused_attn_backward,
-    npu_fused_attn_forward,
     pytorch_attn_backward,
     pytorch_attn_forward,
 )
@@ -58,7 +56,6 @@ class AttnType(Enum):
     SAGE_FP8 = "sage_fp8"
     SAGE_FP8_SM90 = "sage_fp8_sm90"
     SPARSE_SAGE = "sparse_sage"
-    NPU = 'npu'
 
     @classmethod
     def from_string(cls, s: str):
@@ -278,16 +275,6 @@ def select_flash_attn_impl(impl_type: AttnType, stage: str = "fwd-bwd", attn_pro
             return sparse_sage_fn
         else:
             raise ValueError(f"Unknown/Unsupported stage: {stage}")
-
-    elif impl_type == AttnType.NPU:
-        if stage == "fwd-only":
-            return npu_fused_attn_forward
-        elif stage == "bwd-only":
-            return npu_fused_attn_backward
-        elif stage == "fwd-bwd":
-            return npu_fused_attn_forward
-        else:
-            raise ValueError(f"Unknown stage: {stage}")
 
     elif attn_processor is not None:
         return attn_processor
