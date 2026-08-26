@@ -51,7 +51,7 @@ torchrun --nproc_per_node=8 \
 ## Config Format
 
 Every run is defined by a single YAML file with five top-level sections.
-See `examples/train/example.yaml` for a fully-commented reference.
+See `examples/train/configs/example.yaml` for a fully-commented reference.
 
 ### `models` — Role-based model instances
 

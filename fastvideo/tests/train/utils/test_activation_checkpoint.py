@@ -14,6 +14,11 @@ from fastvideo.train.utils.activation_checkpoint import apply_activation_checkpo
 
 _TEST_OP_NAME = "fastvideo_activation_checkpoint_test::expensive_op"
 _TEST_OP_CALLS = 0
+_KNOWN_TRAINING_BLOCK_SPARSE_ATTENTION_OP_NAMES = {
+    "fastvideo_kernel::block_sparse_attn_sm90",
+    "fastvideo_kernel::block_sparse_attn_sm100a",
+    "fastvideo_kernel::block_sparse_attn_triton",
+}
 
 
 @torch.library.custom_op(_TEST_OP_NAME, mutates_args=())
@@ -150,8 +155,19 @@ def test_checkpointing_rejects_transformers_without_known_block_lists(checkpoint
         apply_activation_checkpointing(nn.Linear(4, 4), checkpointing_type)
 
 
-def test_all_training_block_sparse_attention_ops_are_retained() -> None:
-    block_sparse_attention = importlib.import_module("fastvideo_kernel.block_sparse_attn")
+def test_known_training_block_sparse_attention_ops_are_retained() -> None:
+    missing_op_names = (_KNOWN_TRAINING_BLOCK_SPARSE_ATTENTION_OP_NAMES
+                        - activation_checkpoint._SELECTIVE_ACTIVATION_CHECKPOINTING_OP_NAMES)
+
+    assert not missing_op_names, (
+        f"Known training block-sparse attention ops missing from checkpoint save policy: {missing_op_names}")
+
+
+def test_all_available_training_block_sparse_attention_ops_are_retained() -> None:
+    try:
+        block_sparse_attention = importlib.import_module("fastvideo_kernel.block_sparse_attn")
+    except ImportError as exc:
+        pytest.skip(f"fastvideo_kernel is unavailable on this platform: {exc}")
     training_op_names = {
         candidate._qualname
         for candidate in vars(block_sparse_attention).values()
@@ -161,4 +177,56 @@ def test_all_training_block_sparse_attention_ops_are_retained() -> None:
 
     assert training_op_names
     missing_op_names = training_op_names - activation_checkpoint._SELECTIVE_ACTIVATION_CHECKPOINTING_OP_NAMES
-    assert not missing_op_names, f"Training block-sparse attention ops missing from checkpoint save policy: {missing_op_names}"
+    assert not missing_op_names, (
+        f"Available training block-sparse attention ops missing from checkpoint save policy: {missing_op_names}")
+
+
+@pytest.mark.parametrize(
+    "module_name",
+    [
+        "fastvideo.train.models.kandinsky5.kandinsky5",
+        "fastvideo.train.models.ltx2.ltx2",
+        "fastvideo.train.models.minimax_h3.minimax_h3",
+        "fastvideo.train.models.wan.wan",
+    ],
+)
+def test_modular_model_plugins_use_modular_activation_checkpointing(module_name: str) -> None:
+    model_module = importlib.import_module(module_name)
+
+    assert model_module.apply_activation_checkpointing is apply_activation_checkpointing
+
+
+@pytest.mark.parametrize(
+    ("role_checkpointing_type", "fallback_checkpointing_type", "trainable", "expected_type", "expected_safe"),
+    [
+        ("ops", "full", True, "ops", True),
+        (None, "full", True, "full", True),
+        (None, None, True, None, False),
+        ("ops", None, False, "ops", False),
+    ],
+)
+def test_wan_causal_checkpoint_safe_cache_uses_resolved_role_config(
+    monkeypatch: pytest.MonkeyPatch,
+    role_checkpointing_type: str | None,
+    fallback_checkpointing_type: str | None,
+    trainable: bool,
+    expected_type: str | None,
+    expected_safe: bool,
+) -> None:
+    from fastvideo.train.models.wan.wan import WanModel
+    from fastvideo.train.models.wan.wan_causal import WanCausalModel
+    from fastvideo.train.utils.training_config import TrainingConfig
+
+    training_config = TrainingConfig()
+    training_config.model.enable_gradient_checkpointing_type = fallback_checkpointing_type
+    monkeypatch.setattr(WanModel, "_load_transformer", lambda self, **kwargs: nn.Module())
+
+    model = WanCausalModel(
+        init_from="unused-by-test",
+        training_config=training_config,
+        trainable=trainable,
+        enable_gradient_checkpointing_type=role_checkpointing_type,
+    )
+
+    assert model._resolved_gradient_checkpointing_type == expected_type
+    assert model._should_use_checkpoint_safe_kv_cache() is expected_safe
