@@ -36,6 +36,12 @@ def test_helios_public_sampling_fields_reach_forward_batch() -> None:
     assert expected <= batch_fields
 
 
+def test_helios_internal_chunk_state_is_declared_on_forward_batch() -> None:
+    batch_fields = {item.name for item in fields(ForwardBatch)}
+
+    assert "helios_latent_chunks" in batch_fields
+
+
 def test_helios_typed_request_maps_sampling_fields() -> None:
     request = normalize_generation_request({"sampling": HELIOS_SAMPLING_VALUES})
     sampling = request_to_sampling_param(
