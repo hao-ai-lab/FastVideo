@@ -38,19 +38,38 @@ jobs:
             if (!hasReady) core.info('No ready label — skipping merge-gate trigger.');
 
       - name: Cancel previous Buildkite builds
+        # Cancelling stale builds only saves agent time. If it cannot run, the
+        # merge gate must still be triggered by the steps below, so a failure
+        # here is reported and stepped over rather than ending the job.
+        continue-on-error: true
         if: steps.check.outputs.has_ready == 'true'
         env:
           BUILDKITE_API_TOKEN: ${{ secrets.BUILDKITE_API_TOKEN }}
           PR_BRANCH: ${{ github.event.pull_request.head.ref }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          # Match both branch and PR number: forks can reuse the same branch name.
-          builds=$(curl -sS --get -H "Authorization: Bearer $BUILDKITE_API_TOKEN" \
+          # `curl` without --fail-with-body treats an HTTP error as success and
+          # pipes the error body onward. Buildkite answers a rate limit or an
+          # unauthorized read with an object such as {"message": "Not Found"},
+          # and `.[]` over an object yields its values, so `.env` then runs
+          # against a string and jq exits non-zero.
+          if ! response=$(curl -sS --get --fail-with-body \
+            -H "Authorization: Bearer $BUILDKITE_API_TOKEN" \
             --data-urlencode "branch=$PR_BRANCH" \
             --data-urlencode "state=running,scheduled" \
-            "https://api.buildkite.com/v2/organizations/${{ vars.BUILDKITE_ORG_SLUG }}/pipelines/${{ vars.BUILDKITE_PIPELINE_SLUG }}/builds" \
-            | jq -r --arg pr_number "$PR_NUMBER" \
-              '.[] | select((.env.TEST_SCOPE? == "merge") and (.env.PR_NUMBER? == $pr_number)) | .number')
+            "https://api.buildkite.com/v2/organizations/${{ vars.BUILDKITE_ORG_SLUG }}/pipelines/${{ vars.BUILDKITE_PIPELINE_SLUG }}/builds" 2>&1); then
+            echo "::warning::Could not list Buildkite builds, skipping cancellation: $response"
+            exit 0
+          fi
+
+          # Match both branch and PR number: forks can reuse the same branch name.
+          if ! builds=$(printf '%s' "$response" | jq -r --arg pr_number "$PR_NUMBER" \
+            'if type == "array" then .[] else empty end
+             | select((.env.TEST_SCOPE? == "merge") and (.env.PR_NUMBER? == $pr_number))
+             | .number' 2>&1); then
+            echo "::warning::Could not parse the Buildkite build list, skipping cancellation: $builds"
+            exit 0
+          fi
           for build_num in $builds; do
             echo "Cancelling Buildkite build #$build_num"
             curl -sS -X PUT -H "Authorization: Bearer $BUILDKITE_API_TOKEN" \
