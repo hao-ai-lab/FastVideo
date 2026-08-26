@@ -125,6 +125,11 @@ class InputConfig:
     prompt_path: str | None = None
     image_path: str | list[str] | None = None
     video_path: str | list[str] | None = None
+    pose_video_path: str | list[str] | None = None
+    face_video_path: str | list[str] | None = None
+    background_video_path: str | list[str] | None = None
+    mask_video_path: str | list[str] | None = None
+    animate_mode: str | None = None
     pil_image: Any | None = None
     last_image: Any | None = None
     references: list[Any] | None = None

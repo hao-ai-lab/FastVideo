@@ -31,6 +31,17 @@ class SamplingParam:
     # Video inputs
     video_path: str | None = None
 
+    # Wan-Animate driving inputs: paths to the *preprocessed* artifacts the
+    # official preprocessing pipeline produces (src_pose.mp4, src_face.mp4;
+    # replace mode adds src_bg.mp4 + src_mask.mp4). `animate_mode` selects
+    # animation (character on the reference image's background) vs replace
+    # (character composited into the background video).
+    pose_video_path: str | None = None
+    face_video_path: str | None = None
+    background_video_path: str | None = None
+    mask_video_path: str | None = None
+    animate_mode: str | None = None
+
     # Optional pre-generated diffusion latents. Used by parity/debug harnesses
     # and advanced callers that need deterministic latent reuse.
     latents: Any | None = None
@@ -404,6 +415,37 @@ class SamplingParam:
             type=str,
             default=SamplingParam.video_path,
             help="Path to input video for video-to-video generation",
+        )
+        parser.add_argument(
+            "--pose-video-path",
+            type=str,
+            default=SamplingParam.pose_video_path,
+            help="Wan-Animate: path to the preprocessed skeleton video (src_pose.mp4)",
+        )
+        parser.add_argument(
+            "--face-video-path",
+            type=str,
+            default=SamplingParam.face_video_path,
+            help="Wan-Animate: path to the preprocessed face-crop video (src_face.mp4)",
+        )
+        parser.add_argument(
+            "--background-video-path",
+            type=str,
+            default=SamplingParam.background_video_path,
+            help="Wan-Animate replace mode: path to the background video (src_bg.mp4)",
+        )
+        parser.add_argument(
+            "--mask-video-path",
+            type=str,
+            default=SamplingParam.mask_video_path,
+            help="Wan-Animate replace mode: path to the character mask video (src_mask.mp4, white = generate)",
+        )
+        parser.add_argument(
+            "--animate-mode",
+            type=str,
+            choices=["animation", "replace"],
+            default=SamplingParam.animate_mode,
+            help="Wan-Animate: animate the character on the reference background, or replace into the source video",
         )
         parser.add_argument(
             "--refine-from",

@@ -155,7 +155,7 @@ class AnimateConditioningLatentsStage(ImageVAEEncodingStage):
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         assert batch.pil_image is not None and isinstance(batch.pil_image, PIL.Image.Image)
         assert batch.height is not None and batch.width is not None and batch.num_frames is not None
-        mode = batch.animate_mode
+        mode = batch.animate_mode or "animation"
         device = get_local_torch_device()
         self.vae.to(device)
 
@@ -201,7 +201,8 @@ class AnimateConditioningLatentsStage(ImageVAEEncodingStage):
 
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         result = VerificationResult()
-        result.add_check("animate_mode", batch.animate_mode, lambda v: v in ANIMATE_MODES)
+        # None normalises to "animation" in forward (the API layer's default).
+        result.add_check("animate_mode", batch.animate_mode, lambda v: v is None or v in ANIMATE_MODES)
         # Segment length must be 4k + 1 or the mask folding above misaligns.
         result.add_check("num_frames", batch.num_frames,
                          lambda v: isinstance(v, int) and v > 0 and (v - 1) % 4 == 0)
