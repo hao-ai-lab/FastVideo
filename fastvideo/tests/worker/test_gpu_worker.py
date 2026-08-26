@@ -1,3 +1,4 @@
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -7,6 +8,32 @@ import torch
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.pipelines import ForwardBatch
 from fastvideo.worker.gpu_worker import Worker, _log_cuda_device_uuid
+
+
+@pytest.mark.parametrize("dist_timeout", [0, -1])
+def test_fastvideo_args_rejects_non_positive_dist_timeout(dist_timeout) -> None:
+    with pytest.raises(ValueError, match="greater than zero seconds"):
+        FastVideoArgs(model_path="test", dist_timeout=dist_timeout)
+
+
+def test_worker_threads_dist_timeout_to_distributed_groups(monkeypatch) -> None:
+    init_distributed = Mock()
+    monkeypatch.setattr("fastvideo.worker.gpu_worker.get_local_torch_device", lambda: torch.device("cpu"))
+    monkeypatch.setattr("fastvideo.platforms.current_platform",
+                        SimpleNamespace(is_mps=lambda: False, is_cuda_alike=lambda: False, is_cuda=lambda: False))
+    monkeypatch.setattr("fastvideo.worker.gpu_worker.maybe_init_distributed_environment_and_model_parallel",
+                        init_distributed)
+    monkeypatch.setattr("fastvideo.worker.gpu_worker.build_pipeline", lambda args: SimpleNamespace())
+    args = FastVideoArgs(model_path="test",
+                         num_gpus=2,
+                         sp_size=2,
+                         dist_timeout=7,
+                         distributed_executor_backend="external_launcher")
+    worker = Worker(args, local_rank=1, rank=1, distributed_init_method="env://")
+
+    worker.init_device()
+
+    init_distributed.assert_called_once_with(1, 2, "env://", timeout=timedelta(seconds=7))
 
 
 def test_cuda_device_uuid_receipt_is_disabled_without_nvtx_profiling(monkeypatch) -> None:

@@ -302,7 +302,8 @@ class ExternalLauncherExecutor(Executor):
         if timeout is not None:
             raise NotImplementedError(
                 "ExternalLauncherExecutor.collective_rpc does not support per-call timeouts; "
-                "configure the distributed process-group timeout and launcher kill-on-failure policy instead.")
+                "set generator.engine.parallelism.dist_timeout in seconds and configure the launcher's "
+                "kill-on-failure policy instead.")
         self._bind_worker_device()
         try:
             response = self.worker.execute_method(method, *args, **(kwargs or {}))

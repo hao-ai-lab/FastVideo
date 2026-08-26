@@ -4,6 +4,7 @@
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+import pytest
 import torch
 
 from fastvideo.pipelines import ForwardBatch
@@ -11,6 +12,8 @@ from fastvideo.pipelines.basic.ltx2.stages.ltx2_audio_decoding import LTX2AudioD
 from fastvideo.pipelines.basic.magi_human.stages.audio_decoding import MagiHumanAudioDecodingStage
 from fastvideo.pipelines.basic.mmaudio.stages import MMAudioDecodingStage
 from fastvideo.pipelines.basic.stable_audio.stages.decoding import StableAudioDecodingStage
+from fastvideo.pipelines.stages.flux_stages import FluxDecodingStage
+from fastvideo.pipelines.stages.sd35_conditioning import SD35DecodingStage
 
 
 def _non_output_args(*, output_type="pil"):
@@ -100,3 +103,17 @@ def test_magi_human_non_output_rank_skips_audio_decode():
     assert result.latents is None
     assert result.audio_latents is None
     assert "audio" not in result.extra
+
+
+@pytest.mark.parametrize("stage_cls", [FluxDecodingStage, SD35DecodingStage])
+def test_image_decoder_non_output_rank_skips_vae_and_host_payload(stage_cls):
+    vae = Mock()
+    stage = stage_cls(vae)
+
+    result = stage.forward(ForwardBatch(data_type="image"), _non_output_args())
+
+    vae.decode.assert_not_called()
+    vae.parameters.assert_not_called()
+    assert result.output is not None
+    assert result.output.device.type == "cpu"
+    assert result.output.shape == (0, 3, 0, 0, 0)

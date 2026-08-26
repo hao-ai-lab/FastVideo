@@ -7,6 +7,7 @@ generator:
     parallelism:
       tp_size: 1
       sp_size: 4
+      dist_timeout: 600  # seconds; applies to device and Gloo control groups
     offload:
       dit: false
       dit_layerwise: false

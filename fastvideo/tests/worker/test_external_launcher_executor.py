@@ -490,3 +490,32 @@ def test_external_launcher_real_two_process_peer_exit_is_bounded():
 
     assert completed.returncode != 0
     assert "injected pre-request rank exit" in completed.stderr
+
+
+def test_external_launcher_real_two_process_missing_collective_honors_dist_timeout():
+    helper = Path(__file__).with_name("external_launcher_lifecycle_smoke.py")
+    repo_root = Path(__file__).resolve().parents[3]
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(repo_root)
+    env["FASTVIDEO_TARGET_DEVICE"] = "cpu"
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "torch.distributed.run",
+            "--standalone",
+            "--nproc-per-node=2",
+            str(helper),
+            "--mode",
+            "collective-timeout",
+        ],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert completed.returncode != 0
+    assert "collective_timeout rank=0" in completed.stdout, completed.stdout + completed.stderr

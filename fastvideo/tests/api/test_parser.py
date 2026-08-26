@@ -103,6 +103,7 @@ def test_external_launcher_example_is_a_valid_run_config() -> None:
     assert config.generator.engine.execution_backend == "external_launcher"
     assert config.generator.engine.num_gpus == 4
     assert config.generator.engine.parallelism.sp_size == 4
+    assert config.generator.engine.parallelism.dist_timeout == 600
     assert config.request.output.return_frames is False
 
 

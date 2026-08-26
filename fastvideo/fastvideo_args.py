@@ -110,7 +110,7 @@ class FastVideoArgs:
     sp_size: int = -1
     hsdp_replicate_dim: int = 1
     hsdp_shard_dim: int = -1
-    dist_timeout: int | None = None  # timeout for torch.distributed
+    dist_timeout: int | None = None  # torch.distributed timeout in seconds
 
     pipeline_config: PipelineConfig = field(default_factory=PipelineConfig)
     preprocess_config: PreprocessConfig | None = None
@@ -523,7 +523,7 @@ class FastVideoArgs:
             "--dist-timeout",
             type=int,
             default=FastVideoArgs.dist_timeout,
-            help="Set timeout for torch.distributed initialization.",
+            help="Set the torch.distributed process-group timeout in seconds.",
         )
 
         # Output type
@@ -865,6 +865,9 @@ class FastVideoArgs:
     def check_fastvideo_args(self) -> None:
         """Validate inference arguments for consistency"""
         from fastvideo.platforms import current_platform
+
+        if self.dist_timeout is not None and self.dist_timeout <= 0:
+            raise ValueError(f"dist_timeout must be greater than zero seconds, got {self.dist_timeout}")
 
         if current_platform.is_mps():
             self.use_fsdp_inference = False

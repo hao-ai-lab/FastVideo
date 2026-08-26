@@ -385,10 +385,21 @@ Every rank must enter the same requests in the same order. The CLI config and
 model/media inputs therefore need to resolve identically on every node. Rank
 zero alone reads prompt-list files, creates output directories, saves media,
 and returns generated frames/audio/latents/trajectories; only that rank needs
-a writable output path. A local-rank error, an out-of-range rendezvous port,
-or a device index outside the process-visible accelerator set fails before
-model loading. `--kill-on-bad-exit=1` (or torchrun's worker-group supervision)
-then terminates peers after a rank failure.
+a writable output path. For MiniMax-H3 parallel VAE decode, every rank in the
+SP group containing global rank zero participates in the decoder collectives,
+but only rank zero assembles the CPU output. All ranks in every other SP group
+skip the decode uniformly, so multiple SP groups do not materialize duplicate
+outputs.
+
+Set `generator.engine.parallelism.dist_timeout` to an optional positive
+integer number of **seconds** to apply one timeout to the default process
+group (when FastVideo initializes it) and every FastVideo-created device and
+Gloo control group. Omitting the key preserves PyTorch's backend defaults. A
+local-rank error, an out-of-range rendezvous port, or a device index outside
+the process-visible accelerator set fails before model loading. The process-
+group timeout bounds a missing collective participant;
+`--kill-on-bad-exit=1` (or torchrun's worker-group supervision) remains
+necessary to terminate the rest of the worker group after a rank failure.
 
 `FASTVIDEO_EXTERNAL_LAUNCHER=1` is an equivalent offline-only opt-in for
 callers that leave `execution_backend: mp`. External-launcher mode is rejected

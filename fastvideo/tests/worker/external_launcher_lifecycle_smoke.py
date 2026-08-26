@@ -4,27 +4,21 @@
 from __future__ import annotations
 
 import argparse
+from datetime import timedelta
 import os
+import time
 
 import torch
 
+import fastvideo.distributed.parallel_state as parallel_state
+import fastvideo.platforms as platforms
 import fastvideo.worker.external_launcher_executor as external_launcher
 from fastvideo.api.schema import GenerationRequest
+from fastvideo.distributed import cleanup_dist_env_and_memory, init_distributed_environment
 from fastvideo.entrypoints.video_generator import VideoGenerator
 from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.platforms.cpu import CpuPlatform
 from fastvideo.pipelines import ForwardBatch
-
-
-class _GlooWorld:
-
-    @property
-    def cpu_group(self):
-        return torch.distributed.group.WORLD
-
-    def broadcast_object(self, value, src=0):
-        values = [value]
-        torch.distributed.broadcast_object_list(values, src=src, group=self.cpu_group)
-        return values[0]
 
 
 class _SmokeWorkerWrapper:
@@ -43,11 +37,14 @@ class _SmokeWorkerWrapper:
         self.local_rank = kwargs["local_rank"]
 
     def init_device(self):
-        torch.distributed.init_process_group(
-            backend="gloo",
-            init_method="env://",
+        timeout = (timedelta(seconds=self.fastvideo_args.dist_timeout)
+                   if self.fastvideo_args.dist_timeout is not None else None)
+        init_distributed_environment(
             rank=self.rank,
             world_size=int(os.environ["WORLD_SIZE"]),
+            distributed_init_method="env://",
+            local_rank=self.local_rank,
+            timeout=timeout,
         )
 
     def execute_method(self, method, *args, **kwargs):
@@ -69,17 +66,25 @@ class _SmokeWorkerWrapper:
             return
         self._shutdown = True
         if torch.distributed.is_initialized():
-            torch.distributed.destroy_process_group()
+            cleanup_dist_env_and_memory()
 
 
 def _run(mode: str) -> None:
+    # Keep this lifecycle test CPU/Gloo-only even when the host exposes GPUs.
+    # Platform selection is lazy but another imported module may have already
+    # resolved it, so replace both the cached platform and device resolver.
+    platforms._current_platform = CpuPlatform()
+    parallel_state.get_local_torch_device = lambda: torch.device("cpu")
     external_launcher.WorkerWrapperBase = _SmokeWorkerWrapper
-    external_launcher.get_world_group = lambda: _GlooWorld()
     external_launcher.torch.cuda.is_available = lambda: False
 
     world_size = int(os.environ["WORLD_SIZE"])
-    args = FastVideoArgs(model_path="external-launcher-smoke", num_gpus=world_size, sp_size=world_size)
+    args = FastVideoArgs(model_path="external-launcher-smoke",
+                         num_gpus=world_size,
+                         sp_size=world_size,
+                         dist_timeout=3)
     executor = external_launcher.ExternalLauncherExecutor(args)
+    assert external_launcher.get_world_group().timeout == timedelta(seconds=3)
     try:
         generator = VideoGenerator.__new__(VideoGenerator)
         generator.executor = executor
@@ -93,6 +98,27 @@ def _run(mode: str) -> None:
         divergent_request = GenerationRequest(prompt=f"rank-{executor.rank}-request")
         synchronized_request = generator._synchronize_request_prompt(divergent_request)
         assert synchronized_request.prompt == "rank-0-request"
+
+        if mode == "collective-timeout":
+            if executor.rank == 1:
+                # Stay alive but deliberately never enter rank zero's
+                # collective. torchrun will terminate this process after rank
+                # zero observes the configured process-group timeout.
+                time.sleep(30)
+                raise AssertionError("sleeping peer unexpectedly survived rank-zero timeout")
+
+            started = time.monotonic()
+            try:
+                executor.collective_rpc("identity")
+            except RuntimeError as error:
+                elapsed = time.monotonic() - started
+                assert 1.0 <= elapsed < 15.0, f"unexpected collective timeout latency: {elapsed:.3f}s"
+                assert "timed out" in str(error).lower(), str(error)
+                print(f"collective_timeout rank=0 elapsed={elapsed:.3f}s", flush=True)
+                # Avoid teardown collectives on a failed process group and let
+                # torchrun promptly supervise the intentionally sleeping peer.
+                os._exit(17)
+            raise AssertionError("missing collective participant did not time out")
 
         if mode == "rank-failure":
             def fail_output_setup():
@@ -154,7 +180,8 @@ def _run(mode: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=("success", "rank-failure", "rank-exit"), required=True)
+    parser.add_argument("--mode", choices=("success", "rank-failure", "rank-exit", "collective-timeout"),
+                        required=True)
     parsed = parser.parse_args()
     _run(parsed.mode)
 

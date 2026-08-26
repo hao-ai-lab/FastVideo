@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 import os
+from datetime import timedelta
 from typing import Any, cast
 
 import torch
@@ -86,8 +87,12 @@ class Worker:
             self.init_gpu_memory = 0
 
         # Initialize the distributed environment.
-        maybe_init_distributed_environment_and_model_parallel(self.fastvideo_args.tp_size, self.fastvideo_args.sp_size,
-                                                              self.distributed_init_method)
+        dist_timeout = (timedelta(
+            seconds=self.fastvideo_args.dist_timeout) if self.fastvideo_args.dist_timeout is not None else None)
+        maybe_init_distributed_environment_and_model_parallel(self.fastvideo_args.tp_size,
+                                                              self.fastvideo_args.sp_size,
+                                                              self.distributed_init_method,
+                                                              timeout=dist_timeout)
 
         self.pipeline = build_pipeline(self.fastvideo_args)
 

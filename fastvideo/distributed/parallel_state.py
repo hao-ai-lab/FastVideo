@@ -31,6 +31,7 @@ from collections import namedtuple
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import timedelta
 from multiprocessing import shared_memory
 from typing import Any, Optional
 from unittest.mock import patch
@@ -139,6 +140,7 @@ class GroupCoordinator:
     rank_in_group: int  # rank inside the group
     cpu_group: ProcessGroup  # group for CPU communication
     device_group: ProcessGroup  # group for device communication
+    timeout: timedelta | None  # timeout applied to this coordinator's process groups
     use_device_communicator: bool  # whether to use device communicator
     device_communicator: DeviceCommunicatorBase  # device communicator
     mq_broadcaster: Any | None  # shared memory broadcaster
@@ -151,6 +153,7 @@ class GroupCoordinator:
         use_device_communicator: bool,
         use_message_queue_broadcaster: bool = False,
         group_name: str | None = None,
+        timeout: timedelta | None = None,
     ):
         group_name = group_name or "anonymous"
         self.unique_name = _get_unique_name(group_name)
@@ -158,14 +161,18 @@ class GroupCoordinator:
 
         self.rank = torch.distributed.get_rank()
         self.local_rank = local_rank
+        self.timeout = timeout
         self.device_group = None
         self.cpu_group = None
 
         for ranks in group_ranks:
-            device_group = torch.distributed.new_group(ranks, backend=torch_distributed_backend)
+            group_kwargs: dict[str, Any] = {}
+            if timeout is not None:
+                group_kwargs["timeout"] = timeout
+            device_group = torch.distributed.new_group(ranks, backend=torch_distributed_backend, **group_kwargs)
             # a group with `gloo` backend, to allow direct coordination between
             # processes through the CPU.
-            cpu_group = torch.distributed.new_group(ranks, backend="gloo")
+            cpu_group = torch.distributed.new_group(ranks, backend="gloo", **group_kwargs)
             if self.rank in ranks:
                 self.ranks = ranks
                 self.world_size = len(ranks)
@@ -658,13 +665,19 @@ def get_world_group() -> GroupCoordinator:
     return _WORLD
 
 
-def init_world_group(ranks: list[int], local_rank: int, backend: str) -> GroupCoordinator:
+def init_world_group(
+    ranks: list[int],
+    local_rank: int,
+    backend: str,
+    timeout: timedelta | None = None,
+) -> GroupCoordinator:
     return GroupCoordinator(
         group_ranks=[ranks],
         local_rank=local_rank,
         torch_distributed_backend=backend,
         use_device_communicator=True,
         group_name="world",
+        timeout=timeout,
     )
 
 
@@ -694,7 +707,11 @@ def init_model_parallel_group(
     backend: str,
     use_message_queue_broadcaster: bool = False,
     group_name: str | None = None,
+    timeout: timedelta | None = None,
 ) -> GroupCoordinator:
+
+    if timeout is None and _WORLD is not None:
+        timeout = _WORLD.timeout
 
     return GroupCoordinator(
         group_ranks=group_ranks,
@@ -703,6 +720,7 @@ def init_model_parallel_group(
         use_device_communicator=True,
         use_message_queue_broadcaster=use_message_queue_broadcaster,
         group_name=group_name,
+        timeout=timeout,
     )
 
 
@@ -729,6 +747,7 @@ def init_distributed_environment(
     local_rank: int = 0,
     backend: str = "nccl",
     device_id: torch.device | None = None,
+    timeout: timedelta | None = None,
 ):
     # Determine the appropriate backend based on the platform
     from fastvideo.platforms import current_platform
@@ -749,10 +768,14 @@ def init_distributed_environment(
         assert distributed_init_method is not None, ("distributed_init_method must be provided when initializing "
                                                      "distributed environment")
 
+        init_kwargs: dict[str, Any] = {}
+        if timeout is not None:
+            init_kwargs["timeout"] = timeout
         torch.distributed.init_process_group(backend=backend,
                                              init_method=distributed_init_method,
                                              world_size=world_size,
-                                             rank=rank)
+                                             rank=rank,
+                                             **init_kwargs)
     # set the local rank
     # local_rank is not available in torch ProcessGroup,
     # see https://github.com/pytorch/pytorch/issues/122816
@@ -763,7 +786,7 @@ def init_distributed_environment(
     global _WORLD
     if _WORLD is None:
         ranks = list(range(torch.distributed.get_world_size()))
-        _WORLD = init_world_group(ranks, local_rank, backend)
+        _WORLD = init_world_group(ranks, local_rank, backend, timeout=timeout)
     else:
         assert _WORLD.world_size == torch.distributed.get_world_size(), (
             "world group already initialized with a different world size")
@@ -894,7 +917,8 @@ def get_local_torch_device() -> torch.device:
 
 def maybe_init_distributed_environment_and_model_parallel(tp_size: int,
                                                           sp_size: int,
-                                                          distributed_init_method: str = "env://"):
+                                                          distributed_init_method: str = "env://",
+                                                          timeout: timedelta | None = None):
     if _WORLD is not None and model_parallel_is_initialized():
         # make sure the tp and sp sizes are correct
         assert get_tp_world_size(
@@ -915,7 +939,8 @@ def maybe_init_distributed_environment_and_model_parallel(tp_size: int,
                                  rank=rank,
                                  local_rank=local_rank,
                                  distributed_init_method=distributed_init_method,
-                                 device_id=device)
+                                 device_id=device,
+                                 timeout=timeout)
     initialize_model_parallel(tensor_model_parallel_size=tp_size, sequence_model_parallel_size=sp_size)
 
     # set device if we're on a CUDA/NPU platform
