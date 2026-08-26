@@ -138,6 +138,7 @@ def _loader_args(cpu_offload: bool) -> SimpleNamespace:
         override_text_encoder_quant=None,
         override_text_encoder_safetensors=None,
         pin_cpu_memory=False,
+        disable_offload_on_unified_memory=lambda device_id, offload_flag=None: False,
     )
 
 
@@ -264,6 +265,7 @@ def _print_diag(label: str, ref: torch.Tensor, fv: torch.Tensor) -> torch.Tensor
 )
 def test_qwen3_production_loader_avoids_device_context_and_honors_placement(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
     cpu_offload: bool,
     target_device: torch.device,
     expected_device: torch.device,
@@ -315,17 +317,15 @@ def test_qwen3_production_loader_avoids_device_context_and_honors_placement(
         ),
     )
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
-    monkeypatch.setattr(
-        "fastvideo.distributed.get_local_torch_device",
-        lambda: torch.device("cuda"),
-    )
+    monkeypatch.setattr("fastvideo.models.loader.component_loader.get_local_torch_device",
+                        lambda: torch.device("cuda"))
 
     config = Qwen3TextConfig()
     # The pinned checkpoint names the causal wrapper even though the official
     # Z-Image loader intentionally asks Transformers for the body-only model.
     config.arch_config.architectures = ["Qwen3ForCausalLM"]
     loaded = TextEncoderLoader().load_model(
-        "unused-by-mock",
+        str(tmp_path),
         config,
         target_device,
         _loader_args(cpu_offload=cpu_offload),

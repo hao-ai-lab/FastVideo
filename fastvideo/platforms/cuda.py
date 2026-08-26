@@ -4,6 +4,7 @@
 pynvml. However, it should not initialize cuda context.
 """
 
+import ctypes
 import os
 from collections.abc import Callable
 from functools import lru_cache, wraps
@@ -23,6 +24,56 @@ _P = ParamSpec("_P")
 _R = TypeVar("_R")
 
 pynvml = import_pynvml()  # type: ignore[no-untyped-call]
+
+_CUDA_SUCCESS = 0
+# Stable value from CUDA's public CUdevice_attribute enum.
+_CU_DEVICE_ATTRIBUTE_INTEGRATED = 18
+_CUDA_DRIVER_LIBRARY = "nvcuda.dll" if os.name == "nt" else "libcuda.so.1"
+
+
+def _cuda_driver_device_is_integrated(device_id: int) -> bool:
+    """Query ``CU_DEVICE_ATTRIBUTE_INTEGRATED`` without creating a context.
+
+    ``cuInit`` loads the CUDA driver, while these device-management calls only
+    inspect the logical device ordinal. They neither create nor retain a CUDA
+    context. Driver initialization is not pre-fork safe, so this probe must
+    remain worker-local after process creation and device binding. Using the
+    driver ordinal preserves CUDA_VISIBLE_DEVICES ordering, including UUID and
+    MIG selectors.
+    """
+    try:
+        driver = ctypes.CDLL(_CUDA_DRIVER_LIBRARY)
+        driver.cuInit.argtypes = [ctypes.c_uint]
+        driver.cuInit.restype = ctypes.c_int
+        driver.cuDeviceGet.argtypes = [ctypes.POINTER(ctypes.c_int), ctypes.c_int]
+        driver.cuDeviceGet.restype = ctypes.c_int
+        driver.cuDeviceGetAttribute.argtypes = [
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.c_int,
+            ctypes.c_int,
+        ]
+        driver.cuDeviceGetAttribute.restype = ctypes.c_int
+
+        if driver.cuInit(0) != _CUDA_SUCCESS:
+            return False
+
+        device = ctypes.c_int()
+        if driver.cuDeviceGet(ctypes.byref(device), device_id) != _CUDA_SUCCESS:
+            return False
+
+        is_integrated = ctypes.c_int()
+        if driver.cuDeviceGetAttribute(
+                ctypes.byref(is_integrated),
+                _CU_DEVICE_ATTRIBUTE_INTEGRATED,
+                device,
+        ) != _CUDA_SUCCESS:
+            return False
+        return bool(is_integrated.value)
+    except Exception:
+        # Missing/incompatible driver libraries and unavailable devices must
+        # preserve the established discrete-memory offload policy.
+        return False
+
 
 # pytorch 2.5 uses cudnn sdpa by default, which will cause crash on some models
 # see https://github.com/huggingface/diffusers/issues/9704 for details
@@ -78,6 +129,12 @@ class CudaPlatformBase(Platform):
     @classmethod
     def get_device_total_memory(cls, device_id: int = 0) -> int:
         raise NotImplementedError
+
+    @classmethod
+    def has_unified_memory(cls, device_id: int = 0) -> bool:
+        # This is cudaDeviceProp::integrated's driver-level source of truth. It
+        # is true on parts such as GB10 and Jetson whose GPU reads host memory.
+        return _cuda_driver_device_is_integrated(device_id)
 
     @classmethod
     def is_async_output_supported(cls, enforce_eager: bool | None) -> bool:
