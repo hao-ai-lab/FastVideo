@@ -3,6 +3,9 @@
 
 from argparse import ArgumentParser
 from dataclasses import fields
+from types import SimpleNamespace
+
+import pytest
 
 from fastvideo.api.compat import normalize_generation_request, request_to_sampling_param
 from fastvideo.api.sampling_param import SamplingParam
@@ -79,3 +82,56 @@ def test_helios_sampling_fields_are_available_from_cli() -> None:
     assert args.use_zero_init is True
     assert args.zero_steps == 2
     assert args.is_amplify_first_chunk is True
+
+
+def _valid_helios_batch(**overrides) -> ForwardBatch:
+    values = {
+        "data_type": "video",
+        "prompt": "A paper boat floats across a rain puddle.",
+        "seed": 42,
+        "height": 128,
+        "width": 192,
+        "num_frames": 33,
+        "num_inference_steps": 2,
+        "guidance_scale": 1.0,
+        "pyramid_num_inference_steps_list": [2, 2, 2],
+        "history_sizes": [16, 2, 1],
+        "num_latent_frames_per_chunk": 9,
+        "keep_first_frame": True,
+        "is_skip_first_chunk": False,
+        "zero_steps": 1,
+    }
+    values.update(overrides)
+    return ForwardBatch(**values)
+
+
+def _validation_args():
+    return SimpleNamespace(
+        pipeline_config=SimpleNamespace(
+            ti2v_task=False,
+            is_causal=False,
+        ), )
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"height": 120}, "divisible by 64"),
+        ({"pyramid_num_inference_steps_list": [2, 2]}, "three positive pyramid step counts"),
+        ({"pyramid_num_inference_steps_list": [2, 0, 2]}, "three positive pyramid step counts"),
+        ({"history_sizes": [16, 2]}, "three positive history sizes"),
+        ({"history_sizes": [16, 0, 1]}, "three positive history sizes"),
+        ({"num_latent_frames_per_chunk": 8}, "requires num_latent_frames_per_chunk=9"),
+        ({"keep_first_frame": False}, "requires keep_first_frame=True"),
+        ({"is_skip_first_chunk": True}, "only meaningful for conditioned Helios modes"),
+        ({"zero_steps": -1}, "zero_steps must be non-negative"),
+    ],
+)
+def test_helios_input_validation_rejects_unverified_contracts(overrides, message) -> None:
+    try:
+        from fastvideo.pipelines.basic.helios.stages import HeliosInputValidationStage
+    except ImportError as exc:
+        raise AssertionError("HeliosInputValidationStage has not been implemented") from exc
+
+    with pytest.raises(ValueError, match=message):
+        HeliosInputValidationStage().forward(_valid_helios_batch(**overrides), _validation_args())
