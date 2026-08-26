@@ -4,7 +4,14 @@
 set -euo pipefail
 
 golden_root=./fastvideo/tests/golden_gate
-selected=${FASTVIDEO_GOLDEN_TEST_FILES:-all}
+selected=${FASTVIDEO_GOLDEN_TEST_FILES-}
+if [ -z "$selected" ]; then
+  if [ "${TEST_SCOPE:-}" = merge ]; then
+    echo "Missing FASTVIDEO_GOLDEN_TEST_FILES for merge scope" >&2
+    exit 2
+  fi
+  selected=all
+fi
 if [ "$selected" = all ]; then
   exec pytest "$golden_root" -vs
 fi

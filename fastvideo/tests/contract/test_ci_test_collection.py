@@ -254,6 +254,8 @@ def test_ssim_lane_uses_the_local_four_gpu_scheduler():
     assert "MODEL_TO_PARAMS" in scheduler
     assert "--test-file" in scheduler
     assert "FASTVIDEO_SSIM_TEST_FILES" in lane_script
+    assert 'if [ "${TEST_SCOPE:-}" = merge ]; then' in lane_script
+    assert "Missing FASTVIDEO_SSIM_TEST_FILES for merge scope" in lane_script
 
 
 def test_golden_lane_accepts_only_focused_test_basenames():
@@ -262,6 +264,8 @@ def test_golden_lane_accepts_only_focused_test_basenames():
     assert "FASTVIDEO_GOLDEN_TEST_FILES" in lane_script
     assert "test_[a-z0-9_]+" in lane_script
     assert 'golden_root=./fastvideo/tests/golden_gate' in lane_script
+    assert 'if [ "${TEST_SCOPE:-}" = merge ]; then' in lane_script
+    assert "Missing FASTVIDEO_GOLDEN_TEST_FILES for merge scope" in lane_script
 
 
 def test_allowlist_entries_are_still_real_directories():
