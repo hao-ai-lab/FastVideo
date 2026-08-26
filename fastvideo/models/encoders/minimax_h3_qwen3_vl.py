@@ -18,6 +18,9 @@ from fastvideo.models.encoders.minimax_h3_checkpoint_fp8 import MiniMaxH3Seriali
 from fastvideo.models.loader.weight_utils import default_weight_loader
 
 
+_VISION_INTERPOLATION_WORKSPACE_BYTES = 64 * 1024 * 1024
+
+
 def _rotate_half(tensor: torch.Tensor) -> torch.Tensor:
     first, second = tensor.chunk(2, dim=-1)
     return torch.cat((-second, first), dim=-1)
@@ -70,10 +73,25 @@ def _interpolate_vision_position_embeddings(
     num_grid_per_side: int,
     spatial_merge_size: int,
 ) -> torch.Tensor:
-    """Interpolate in float32, matching Transformers 5.15's Qwen3-VL path."""
+    """Keep interpolation weights and accumulation in float32 until the vision residual add."""
     grid_thw = grid_thw.to(position_embedding.device)
     indices, weights = _vision_interpolation_indices_and_weights(grid_thw, num_grid_per_side, spatial_merge_size)
-    return (F.embedding(indices, position_embedding) * weights[:, :, None]).sum(1)
+    output_dtype = torch.promote_types(position_embedding.dtype, weights.dtype)
+    output = torch.empty(
+        (indices.shape[0], position_embedding.shape[1]),
+        dtype=output_dtype,
+        device=position_embedding.device,
+    )
+
+    # Packed reference videos can otherwise promote a multi-GiB four-tap gather at once.
+    bytes_per_patch = indices.shape[1] * position_embedding.shape[1] * (
+        position_embedding.element_size() + torch.empty((), dtype=output_dtype).element_size())
+    chunk_size = max(1, _VISION_INTERPOLATION_WORKSPACE_BYTES // bytes_per_patch)
+    for start in range(0, indices.shape[0], chunk_size):
+        stop = min(start + chunk_size, indices.shape[0])
+        output[start:stop] = (F.embedding(indices[start:stop], position_embedding) *
+                              weights[start:stop, :, None]).sum(1)
+    return output
 
 
 class MiniMaxH3Qwen3VLTextRotaryEmbedding(nn.Module):
@@ -495,8 +513,7 @@ class MiniMaxH3Qwen3VLVisionModel(nn.Module):
 
     def forward(self, pixels: torch.Tensor, grid_thw: torch.Tensor) -> tuple[torch.Tensor, list[torch.Tensor]]:
         hidden_states = self.patch_embed(pixels)
-        interpolated_positions = self._interpolate_position_embeddings(grid_thw)
-        hidden_states = hidden_states + interpolated_positions.to(hidden_states.dtype)
+        hidden_states = hidden_states + self._interpolate_position_embeddings(grid_thw).to(hidden_states.dtype)
         rotary = self._rotary_positions(grid_thw).reshape(hidden_states.shape[0], -1)
         embedding = torch.cat((rotary, rotary), dim=-1)
         position_embeddings = (embedding.cos(), embedding.sin())
