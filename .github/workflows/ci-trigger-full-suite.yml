@@ -44,16 +44,31 @@ jobs:
           PR_BRANCH: ${{ github.event.pull_request.head.ref }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
+          set -euo pipefail
           # Match both branch and PR number: forks can reuse the same branch name.
-          builds=$(curl -sS --get -H "Authorization: Bearer $BUILDKITE_API_TOKEN" \
+          response=$(curl -sS --fail-with-body --get -H "Authorization: Bearer $BUILDKITE_API_TOKEN" \
             --data-urlencode "branch=$PR_BRANCH" \
-            --data-urlencode "state=running,scheduled" \
-            "https://api.buildkite.com/v2/organizations/${{ vars.BUILDKITE_ORG_SLUG }}/pipelines/${{ vars.BUILDKITE_PIPELINE_SLUG }}/builds" \
-            | jq -r --arg pr_number "$PR_NUMBER" \
-              '.[] | select((.env.TEST_SCOPE? == "merge") and (.env.PR_NUMBER? == $pr_number)) | .number')
+            --data-urlencode "state[]=running" \
+            --data-urlencode "state[]=scheduled" \
+            --data-urlencode "exclude_jobs=true" \
+            --data-urlencode "exclude_pipeline=true" \
+            "https://api.buildkite.com/v2/organizations/${{ vars.BUILDKITE_ORG_SLUG }}/pipelines/${{ vars.BUILDKITE_PIPELINE_SLUG }}/builds")
+          if ! jq -e '
+            type == "array"
+            and all(.[];
+              type == "object"
+              and (.number | type == "number")
+              and ((.env // {}) | type == "object"))
+          ' >/dev/null <<< "$response"; then
+            echo "::error::Buildkite list-builds response had an unexpected shape."
+            exit 1
+          fi
+          builds=$(jq -r --arg pr_number "$PR_NUMBER" \
+            '.[] | select((.env.TEST_SCOPE? == "merge") and (.env.PR_NUMBER? == $pr_number)) | .number' \
+            <<< "$response")
           for build_num in $builds; do
             echo "Cancelling Buildkite build #$build_num"
-            curl -sS -X PUT -H "Authorization: Bearer $BUILDKITE_API_TOKEN" \
+            curl -sS --fail-with-body -o /dev/null -X PUT -H "Authorization: Bearer $BUILDKITE_API_TOKEN" \
               "https://api.buildkite.com/v2/organizations/${{ vars.BUILDKITE_ORG_SLUG }}/pipelines/${{ vars.BUILDKITE_PIPELINE_SLUG }}/builds/${build_num}/cancel"
           done
 
