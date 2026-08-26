@@ -347,11 +347,24 @@ class TextEncoderLoader(ComponentLoader):
             dtype: str = "fp16",
             use_text_encoder_override: bool = False,  # prevent subclasses from misusing
             cpu_offload: bool | None = None,
+            offload_flag: str = "text_encoder_cpu_offload",
     ):
-        if cpu_offload is None:
-            cpu_offload = fastvideo_args.text_encoder_cpu_offload
-        use_cpu_offload = (cpu_offload and len(getattr(model_config, "_fsdp_shard_conditions", [])) > 0)
         runtime_device = get_local_torch_device()
+        device_id = runtime_device.index if runtime_device.index is not None else 0
+        requested_cpu_offload = getattr(fastvideo_args, offload_flag) if cpu_offload is None else cpu_offload
+        disable_cpu_offload = fastvideo_args.disable_offload_on_unified_memory(device_id,
+                                                                               offload_flag=offload_flag)
+
+        if requested_cpu_offload and disable_cpu_offload:
+            # Direct loader callers can choose a CPU target before the worker
+            # applies its device-local policy. Reset both the request and the
+            # target so the model is never constructed on the host first.
+            logger.info("Disabling %s on unified-memory device %d", offload_flag, device_id)
+            cpu_offload = False
+            target_device = runtime_device
+        else:
+            cpu_offload = requested_cpu_offload
+        use_cpu_offload = (cpu_offload and len(getattr(model_config, "_fsdp_shard_conditions", [])) > 0)
 
         from fastvideo.platforms import current_platform
 
@@ -555,6 +568,7 @@ class ImageEncoderLoader(TextEncoderLoader):
             fastvideo_args,
             encoder_precision,
             cpu_offload=fastvideo_args.image_encoder_cpu_offload,
+            offload_flag="image_encoder_cpu_offload",
         )
 
 
