@@ -67,6 +67,11 @@ subprocesses by GPU demand. Logs are printed in deterministic order for failed
 tasks (file name, then model id), and fail-fast is enabled: if one task fails,
 active tasks are terminated and the full SSIM step fails.
 
+Change-aware merge gates can pass repeated `--test-file <basename>` arguments,
+so a model-family PR runs only its owning SSIM files. Shared scheduler/helper
+changes, `/test ssim`, `/test full`, and the weekly `main` schedule run the
+complete discovered matrix.
+
 The orchestrator auto-discovers every `test_*.py` file here, so no CI config
 changes are needed when adding a new test. To declare how many GPUs your test
 requires, add a module-level constant near the top of the file:

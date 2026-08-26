@@ -58,6 +58,24 @@ def test_discovery_rejects_a_task_larger_than_the_slurm_tray(tmp_path: Path) -> 
         discover_tasks(tmp_path)
 
 
+def test_discovery_can_select_exact_test_basenames(tmp_path: Path) -> None:
+    (tmp_path / "test_alpha.py").write_text("REQUIRED_GPUS = 1\n", encoding="utf-8")
+    (tmp_path / "test_beta.py").write_text("REQUIRED_GPUS = 2\n", encoding="utf-8")
+
+    tasks = discover_tasks(tmp_path, ["test_beta.py"])
+
+    assert [(task.name, task.required_gpus) for task in tasks] == [("test_beta.py", 2)]
+
+
+def test_discovery_rejects_missing_or_unsafe_test_file_selections(tmp_path: Path) -> None:
+    (tmp_path / "test_alpha.py").write_text("REQUIRED_GPUS = 1\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="do not exist"):
+        discover_tasks(tmp_path, ["test_missing.py"])
+    with pytest.raises(ValueError, match="Invalid SSIM test file"):
+        discover_tasks(tmp_path, ["../test_alpha.py"])
+
+
 def test_visible_gpu_ids_preserve_the_slurm_lease(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "2,3,2")
 

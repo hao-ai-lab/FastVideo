@@ -11,10 +11,13 @@ notify:
     if: build.env("TEST_SCOPE") == "fastcheck" || build.env("TEST_SCOPE") == null
   - github_commit_status:
       context: "full-suite-passed"
-    if: build.env("TEST_SCOPE") == "full"
+    if: build.env("TEST_SCOPE") == "full" || build.env("TEST_SCOPE") == "merge"
   - github_commit_status:
       context: "direct-test-completed"
     if: build.env("TEST_SCOPE") == "direct"
+  - github_commit_status:
+      context: "scheduled-ssim-passed"
+    if: build.env("TEST_SCOPE") == "scheduled"
 
 # This is the complete active GPU CI surface. Every command is a trusted host
 # dispatcher, and every test payload executes inside the Slinky Slurm tray.
@@ -25,6 +28,8 @@ steps:
     key: "encoder"
     if: |
       build.env("TEST_SCOPE") == "full" ||
+      (build.env("TEST_SCOPE") == "merge" &&
+       build.env("MERGE_TEST_PLAN") =~ /,encoder,/) ||
       build.env("TEST_SCOPE") == "fastcheck" ||
       build.env("TEST_SCOPE") == null ||
       (build.env("TEST_SCOPE") == "direct" &&
@@ -46,6 +51,8 @@ steps:
     key: "vae"
     if: |
       build.env("TEST_SCOPE") == "full" ||
+      (build.env("TEST_SCOPE") == "merge" &&
+       build.env("MERGE_TEST_PLAN") =~ /,vae,/) ||
       build.env("TEST_SCOPE") == "fastcheck" ||
       build.env("TEST_SCOPE") == null ||
       (build.env("TEST_SCOPE") == "direct" &&
@@ -67,6 +74,8 @@ steps:
     key: "transformer"
     if: |
       build.env("TEST_SCOPE") == "full" ||
+      (build.env("TEST_SCOPE") == "merge" &&
+       build.env("MERGE_TEST_PLAN") =~ /,transformer,/) ||
       build.env("TEST_SCOPE") == "fastcheck" ||
       build.env("TEST_SCOPE") == null ||
       (build.env("TEST_SCOPE") == "direct" &&
@@ -88,6 +97,8 @@ steps:
     key: "kernel-tests"
     if: |
       build.env("TEST_SCOPE") == "full" ||
+      (build.env("TEST_SCOPE") == "merge" &&
+       build.env("MERGE_TEST_PLAN") =~ /,kernel-tests,/) ||
       build.env("TEST_SCOPE") == "fastcheck" ||
       build.env("TEST_SCOPE") == null ||
       (build.env("TEST_SCOPE") == "direct" &&
@@ -109,6 +120,8 @@ steps:
     key: "unit"
     if: |
       build.env("TEST_SCOPE") == "full" ||
+      (build.env("TEST_SCOPE") == "merge" &&
+       build.env("MERGE_TEST_PLAN") =~ /,unit,/) ||
       build.env("TEST_SCOPE") == "fastcheck" ||
       build.env("TEST_SCOPE") == null ||
       (build.env("TEST_SCOPE") == "direct" &&
@@ -130,6 +143,8 @@ steps:
     key: "dreamverse"
     if: |
       build.env("TEST_SCOPE") == "full" ||
+      (build.env("TEST_SCOPE") == "merge" &&
+       build.env("MERGE_TEST_PLAN") =~ /,dreamverse,/) ||
       build.env("TEST_SCOPE") == "fastcheck" ||
       build.env("TEST_SCOPE") == null ||
       (build.env("TEST_SCOPE") == "direct" &&
@@ -151,6 +166,8 @@ steps:
     key: "golden-gate"
     if: |
       build.env("TEST_SCOPE") == "full" ||
+      (build.env("TEST_SCOPE") == "merge" &&
+       build.env("MERGE_TEST_PLAN") =~ /,golden-gate,/) ||
       (build.env("TEST_SCOPE") == "direct" &&
        (build.env("TEST_TYPE") == "golden_gate" || build.env("TEST_TYPE") == "golden_gate_ci"))
     command: "/opt/fastvideo-ci-runner/run-ci"
@@ -170,6 +187,9 @@ steps:
     key: "ssim"
     if: |
       build.env("TEST_SCOPE") == "full" ||
+      build.env("TEST_SCOPE") == "scheduled" ||
+      (build.env("TEST_SCOPE") == "merge" &&
+       build.env("MERGE_TEST_PLAN") =~ /,ssim,/) ||
       (build.env("TEST_SCOPE") == "direct" &&
        (build.env("TEST_TYPE") == "ssim" || build.env("TEST_TYPE") == "ssim_ci"))
     command: "/opt/fastvideo-ci-runner/run-ci"
@@ -193,6 +213,8 @@ steps:
     key: "lora-inference"
     if: |
       build.env("TEST_SCOPE") == "full" ||
+      (build.env("TEST_SCOPE") == "merge" &&
+       build.env("MERGE_TEST_PLAN") =~ /,lora-inference,/) ||
       (build.env("TEST_SCOPE") == "direct" &&
        (build.env("TEST_TYPE") == "inference_lora" || build.env("TEST_TYPE") == "inference_lora_ci"))
     command: "/opt/fastvideo-ci-runner/run-ci"
@@ -212,6 +234,8 @@ steps:
     key: "lora-extraction"
     if: |
       build.env("TEST_SCOPE") == "full" ||
+      (build.env("TEST_SCOPE") == "merge" &&
+       build.env("MERGE_TEST_PLAN") =~ /,lora-extraction,/) ||
       (build.env("TEST_SCOPE") == "direct" &&
        (build.env("TEST_TYPE") == "lora_extraction" || build.env("TEST_TYPE") == "lora_extraction_ci"))
     command: "/opt/fastvideo-ci-runner/run-ci"
@@ -231,6 +255,8 @@ steps:
     key: "training"
     if: |
       build.env("TEST_SCOPE") == "full" ||
+      (build.env("TEST_SCOPE") == "merge" &&
+       build.env("MERGE_TEST_PLAN") =~ /,training,/) ||
       (build.env("TEST_SCOPE") == "direct" &&
        (build.env("TEST_TYPE") == "training" || build.env("TEST_TYPE") == "training_ci"))
     command: "/opt/fastvideo-ci-runner/run-ci"
@@ -252,6 +278,8 @@ steps:
     key: "distillation"
     if: |
       build.env("TEST_SCOPE") == "full" ||
+      (build.env("TEST_SCOPE") == "merge" &&
+       build.env("MERGE_TEST_PLAN") =~ /,distillation,/) ||
       (build.env("TEST_SCOPE") == "direct" &&
        (build.env("TEST_TYPE") == "distillation_dmd" || build.env("TEST_TYPE") == "distillation_dmd_ci"))
     command: "/opt/fastvideo-ci-runner/run-ci"
@@ -271,6 +299,8 @@ steps:
     key: "self-forcing"
     if: |
       build.env("TEST_SCOPE") == "full" ||
+      (build.env("TEST_SCOPE") == "merge" &&
+       build.env("MERGE_TEST_PLAN") =~ /,self-forcing,/) ||
       (build.env("TEST_SCOPE") == "direct" &&
        (build.env("TEST_TYPE") == "self_forcing" || build.env("TEST_TYPE") == "self_forcing_ci"))
     command: "/opt/fastvideo-ci-runner/run-ci"
@@ -290,6 +320,8 @@ steps:
     key: "lora-training"
     if: |
       build.env("TEST_SCOPE") == "full" ||
+      (build.env("TEST_SCOPE") == "merge" &&
+       build.env("MERGE_TEST_PLAN") =~ /,lora-training,/) ||
       (build.env("TEST_SCOPE") == "direct" &&
        (build.env("TEST_TYPE") == "training_lora" || build.env("TEST_TYPE") == "training_lora_ci"))
     command: "/opt/fastvideo-ci-runner/run-ci"
@@ -311,6 +343,8 @@ steps:
     key: "training-vsa"
     if: |
       build.env("TEST_SCOPE") == "full" ||
+      (build.env("TEST_SCOPE") == "merge" &&
+       build.env("MERGE_TEST_PLAN") =~ /,training-vsa,/) ||
       (build.env("TEST_SCOPE") == "direct" &&
        (build.env("TEST_TYPE") == "training_vsa" || build.env("TEST_TYPE") == "training_vsa_ci"))
     command: "/opt/fastvideo-ci-runner/run-ci"
@@ -332,6 +366,8 @@ steps:
     key: "inference-vmoba"
     if: |
       build.env("TEST_SCOPE") == "full" ||
+      (build.env("TEST_SCOPE") == "merge" &&
+       build.env("MERGE_TEST_PLAN") =~ /,inference-vmoba,/) ||
       (build.env("TEST_SCOPE") == "direct" &&
        (build.env("TEST_TYPE") == "inference_vmoba" || build.env("TEST_TYPE") == "inference_vmoba_ci"))
     command: "/opt/fastvideo-ci-runner/run-ci"
@@ -351,6 +387,8 @@ steps:
     key: "performance"
     if: |
       build.env("TEST_SCOPE") == "full" ||
+      (build.env("TEST_SCOPE") == "merge" &&
+       build.env("MERGE_TEST_PLAN") =~ /,performance,/) ||
       (build.env("TEST_SCOPE") == "direct" &&
        (build.env("TEST_TYPE") == "performance" || build.env("TEST_TYPE") == "performance_ci"))
     command: "/opt/fastvideo-ci-runner/run-ci"
@@ -370,6 +408,8 @@ steps:
     key: "api-server"
     if: |
       build.env("TEST_SCOPE") == "full" ||
+      (build.env("TEST_SCOPE") == "merge" &&
+       build.env("MERGE_TEST_PLAN") =~ /,api-server,/) ||
       (build.env("TEST_SCOPE") == "direct" &&
        (build.env("TEST_TYPE") == "api_server" || build.env("TEST_TYPE") == "api_server_ci"))
     command: "/opt/fastvideo-ci-runner/run-ci"
@@ -389,6 +429,8 @@ steps:
     key: "train-framework"
     if: |
       build.env("TEST_SCOPE") == "full" ||
+      (build.env("TEST_SCOPE") == "merge" &&
+       build.env("MERGE_TEST_PLAN") =~ /,train-framework,/) ||
       (build.env("TEST_SCOPE") == "direct" &&
        (build.env("TEST_TYPE") == "train_framework" || build.env("TEST_TYPE") == "train_framework_ci"))
     command: "/opt/fastvideo-ci-runner/run-ci"
@@ -408,6 +450,8 @@ steps:
     key: "eval"
     if: |
       build.env("TEST_SCOPE") == "full" ||
+      (build.env("TEST_SCOPE") == "merge" &&
+       build.env("MERGE_TEST_PLAN") =~ /,eval,/) ||
       (build.env("TEST_SCOPE") == "direct" &&
        (build.env("TEST_TYPE") == "eval" || build.env("TEST_TYPE") == "eval_ci"))
     command: "/opt/fastvideo-ci-runner/run-ci"

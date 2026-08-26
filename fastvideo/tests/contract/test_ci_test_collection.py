@@ -133,6 +133,8 @@ def test_all_gpu_ci_routes_use_the_trusted_slurm_dispatcher():
             assert "concurrency_group" not in step
         condition = str(step["if"])
         assert 'build.env("TEST_SCOPE") == "full"' in condition
+        assert 'build.env("TEST_SCOPE") == "merge"' in condition
+        assert f'/,{step_key},/' in condition
         assert 'build.env("TEST_SCOPE") == "direct"' in condition
         assert f'build.env("TEST_TYPE") == "{public_type}"' in condition
         assert f'build.env("TEST_TYPE") == "{runner_type}"' in condition
@@ -141,7 +143,7 @@ def test_all_gpu_ci_routes_use_the_trusted_slurm_dispatcher():
             assert 'build.env("TEST_SCOPE") == null' in condition
 
 
-def test_merge_comment_has_one_full_suite_trigger_path():
+def test_merge_comment_has_one_change_aware_trigger_path():
     slash_commands = (REPO_ROOT / ".github/workflows/ci-slash-commands.yml").read_text()
     merge_job = slash_commands.split("  parse-command:", maxsplit=1)[0]
     ready_workflow = (REPO_ROOT / ".github/workflows/ci-trigger-full-suite.yml").read_text()
@@ -152,8 +154,25 @@ def test_merge_comment_has_one_full_suite_trigger_path():
     assert "api.buildkite.com" in ready_workflow
     assert 'jq -r --arg pr_number "$PR_NUMBER"' in ready_workflow
     assert '.env.PR_NUMBER? == $pr_number' in ready_workflow
-    assert 'TEST_SCOPE: "full"' in ready_workflow
+    assert 'TEST_SCOPE: "merge"' in ready_workflow
     assert 'FULL_SUITE: "true"' in ready_workflow
+    assert "plan_merge_ci.py" in ready_workflow
+    assert "github.event.pull_request.base.sha" in ready_workflow
+    assert "MERGE_TEST_PLAN" in ready_workflow
+    assert "MERGE_GOLDEN_TESTS" in ready_workflow
+    assert "MERGE_SSIM_TESTS" in ready_workflow
+    assert "__FASTVIDEO_CI_PLAN_ALL__" in ready_workflow
+
+
+def test_full_ssim_has_a_weekly_slurm_schedule():
+    workflow = (REPO_ROOT / ".github/workflows/ci-scheduled-ssim.yml").read_text()
+    ssim_step = next(step for step in _pipeline_steps() if step["key"] == "ssim")
+
+    assert 'cron: "0 5 * * 0"' in workflow
+    assert 'TEST_SCOPE: "scheduled"' in workflow
+    assert 'TEST_TYPE: "ssim"' in workflow
+    assert "modal" not in workflow.lower()
+    assert 'build.env("TEST_SCOPE") == "scheduled"' in str(ssim_step["if"])
 
 
 def test_active_pipeline_has_no_modal_or_untrusted_compute_path():
@@ -233,6 +252,16 @@ def test_ssim_lane_uses_the_local_four_gpu_scheduler():
     assert "MAX_GPUS = 4" in scheduler
     assert "REQUIRED_GPUS" in scheduler
     assert "MODEL_TO_PARAMS" in scheduler
+    assert "--test-file" in scheduler
+    assert "FASTVIDEO_SSIM_TEST_FILES" in lane_script
+
+
+def test_golden_lane_accepts_only_focused_test_basenames():
+    lane_script = (REPO_ROOT / ".buildkite/scripts/lanes/golden_gate.sh").read_text()
+
+    assert "FASTVIDEO_GOLDEN_TEST_FILES" in lane_script
+    assert "test_[a-z0-9_]+" in lane_script
+    assert 'golden_root=./fastvideo/tests/golden_gate' in lane_script
 
 
 def test_allowlist_entries_are_still_real_directories():

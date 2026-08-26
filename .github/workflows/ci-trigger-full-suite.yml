@@ -1,4 +1,4 @@
-name: Trigger Full Suite
+name: Trigger Merge Gate
 
 on:
   pull_request_target:
@@ -10,7 +10,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: full-suite-${{ github.event.pull_request.number }}
+  group: merge-gate-${{ github.event.pull_request.number }}
   cancel-in-progress: false
 
 jobs:
@@ -34,7 +34,8 @@ jobs:
             });
             const hasReady = pr.labels.some(l => l.name === 'ready');
             core.setOutput('has_ready', String(hasReady));
-            if (!hasReady) core.info('No ready label — skipping Full Suite trigger.');
+            core.setOutput('changed_files', String(pr.changed_files));
+            if (!hasReady) core.info('No ready label — skipping merge-gate trigger.');
 
       - name: Cancel previous Buildkite builds
         if: steps.check.outputs.has_ready == 'true'
@@ -49,18 +50,56 @@ jobs:
             --data-urlencode "state=running,scheduled" \
             "https://api.buildkite.com/v2/organizations/${{ vars.BUILDKITE_ORG_SLUG }}/pipelines/${{ vars.BUILDKITE_PIPELINE_SLUG }}/builds" \
             | jq -r --arg pr_number "$PR_NUMBER" \
-              '.[] | select((.env.TEST_SCOPE? == "full") and (.env.PR_NUMBER? == $pr_number)) | .number')
+              '.[] | select((.env.TEST_SCOPE? == "merge") and (.env.PR_NUMBER? == $pr_number)) | .number')
           for build_num in $builds; do
             echo "Cancelling Buildkite build #$build_num"
             curl -sS -X PUT -H "Authorization: Bearer $BUILDKITE_API_TOKEN" \
               "https://api.buildkite.com/v2/organizations/${{ vars.BUILDKITE_ORG_SLUG }}/pipelines/${{ vars.BUILDKITE_PIPELINE_SLUG }}/builds/${build_num}/cancel"
           done
 
-      # Checks out the BASE branch (default for pull_request_target), so PR
-      # authors cannot tamper with the gate script.
-      - name: Checkout gate script
+      # Check out the immutable BASE SHA: pull_request_target must never run a
+      # planner or gate script from the untrusted PR head.
+      - name: Checkout trusted merge planner
         if: steps.check.outputs.has_ready == 'true'
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+
+      - name: Collect changed paths
+        if: steps.check.outputs.has_ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          EXPECTED_CHANGED_FILES: ${{ steps.check.outputs.changed_files }}
+        run: |
+          set -euo pipefail
+          changed_json="$RUNNER_TEMP/merge-changed-files.json"
+          changed_paths="$RUNNER_TEMP/merge-changed-paths.txt"
+          if gh api --paginate --slurp \
+              "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files?per_page=100" \
+              > "$changed_json"; then
+            observed=$(jq '[.[][] | .filename] | unique | length' "$changed_json")
+            if [ "$observed" = "$EXPECTED_CHANGED_FILES" ]; then
+              jq -r '.[][] | .filename, (.previous_filename // empty)' "$changed_json" \
+                | sort -u > "$changed_paths"
+            else
+              echo "::warning::Changed-file API returned $observed of $EXPECTED_CHANGED_FILES paths; selecting all merge lanes."
+              echo '__FASTVIDEO_CI_PLAN_ALL__' > "$changed_paths"
+            fi
+          else
+            echo "::warning::Changed-file API failed; selecting all merge lanes."
+            echo '__FASTVIDEO_CI_PLAN_ALL__' > "$changed_paths"
+          fi
+
+      - name: Select minimal merge tests
+        id: plan
+        if: steps.check.outputs.has_ready == 'true'
+        run: |
+          python3 .github/scripts/plan_merge_ci.py \
+            --paths-file "$RUNNER_TEMP/merge-changed-paths.txt" \
+            --github-output "$GITHUB_OUTPUT" \
+            --summary-file "$GITHUB_STEP_SUMMARY"
 
       - name: Wait for pre-commit and docs build
         if: steps.check.outputs.has_ready == 'true'
@@ -70,7 +109,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: bash .github/scripts/gate_full_suite.sh
 
-      - name: Trigger Buildkite Full Suite
+      - name: Trigger Buildkite merge gate
         if: steps.check.outputs.has_ready == 'true'
         env:
           BUILDKITE_API_TOKEN: ${{ secrets.BUILDKITE_API_TOKEN }}
@@ -80,6 +119,10 @@ jobs:
           PR_TITLE: ${{ github.event.pull_request.title }}
           BK_ORG: ${{ vars.BUILDKITE_ORG_SLUG }}
           BK_PIPELINE: ${{ vars.BUILDKITE_PIPELINE_SLUG }}
+          MERGE_TEST_PLAN: ${{ steps.plan.outputs.merge_test_plan }}
+          MERGE_GOLDEN_TESTS: ${{ steps.plan.outputs.merge_golden_tests }}
+          MERGE_SSIM_TESTS: ${{ steps.plan.outputs.merge_ssim_tests }}
+          MERGE_PLAN_LABEL: ${{ steps.plan.outputs.merge_plan_label }}
         run: |
           curl -sS --fail-with-body -X POST \
             "https://api.buildkite.com/v2/organizations/${BK_ORG}/pipelines/${BK_PIPELINE}/builds" \
@@ -88,8 +131,11 @@ jobs:
             --data-raw "$(jq -n \
               --arg commit "$PR_SHA" \
               --arg branch "$PR_BRANCH" \
-              --arg message "Full Suite for PR #${PR_NUMBER}" \
+              --arg message "Merge gate [${MERGE_PLAN_LABEL}] for PR #${PR_NUMBER}" \
               --arg pr_title "$PR_TITLE" \
+              --arg merge_test_plan "$MERGE_TEST_PLAN" \
+              --arg merge_golden_tests "$MERGE_GOLDEN_TESTS" \
+              --arg merge_ssim_tests "$MERGE_SSIM_TESTS" \
               --argjson pr_id "$PR_NUMBER" \
               '{
                 commit: $commit,
@@ -99,8 +145,11 @@ jobs:
                 pull_request_id: $pr_id,
                 pull_request_base_branch: "main",
                 env: {
-                  TEST_SCOPE: "full",
+                  TEST_SCOPE: "merge",
                   FULL_SUITE: "true",
+                  MERGE_TEST_PLAN: $merge_test_plan,
+                  MERGE_GOLDEN_TESTS: $merge_golden_tests,
+                  MERGE_SSIM_TESTS: $merge_ssim_tests,
                   PR_NUMBER: ($pr_id | tostring),
                   PR_TITLE: $pr_title
                 }

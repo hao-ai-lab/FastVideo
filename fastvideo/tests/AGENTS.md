@@ -63,8 +63,10 @@ working tree but are not part of the package suite.
 
 `tests/ssim/ci_runner.py` is the active CI orchestrator. It auto-discovers
 `test_*.py` files under `ssim/` and schedules one subprocess per `*_MODEL_TO_PARAMS`
-key across the four GPUs granted by the Slinky Slurm lane. New SSIM tests need
-no pipeline wiring — just declare `REQUIRED_GPUS = N`.
+key across the four GPUs granted by the Slinky Slurm lane. The change-aware
+merge planner may pass repeated `--test-file` basenames for focused model-family
+coverage; direct and scheduled full runs omit the filter. New SSIM tests need no
+pipeline wiring — just declare `REQUIRED_GPUS = N`.
 
 The modules in `tests/modal/` are retained for dormant manual rollback and
 must not be referenced by active Buildkite or slash-command routes.

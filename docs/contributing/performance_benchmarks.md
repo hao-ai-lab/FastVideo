@@ -464,12 +464,13 @@ FlashInfer, Cutlass DSL, SageAttention, Triton, and xFormers when installed.
 
 ## CI integration
 
-The performance step can run on demand with `/test performance` and as part of
-the Full Suite (see [CI/CD Architecture](ci_architecture.md)). The weekly
-`fastvideo-performance-lane` schedule runs the same Slurm payload. The active
-entry point is `.buildkite/scripts/lanes/performance.sh`; the trusted host
-dispatcher relays its allowlisted reports to Buildkite after the isolated
-container exits.
+The performance step can run on demand with `/test performance`, through a
+merge gate when performance tests or benchmark policy changed, and as part of
+an explicit `/test full` run (see [CI/CD Architecture](ci_architecture.md)).
+The weekly `fastvideo-performance-lane` schedule runs the same Slurm payload.
+The active entry point is `.buildkite/scripts/lanes/performance.sh`; the
+trusted host dispatcher relays its allowlisted reports to Buildkite after the
+isolated container exits.
 
 Each performance build runs pytest first. PR and direct runs only continue to
 `compare_baseline.py` when that fixed-threshold phase passes; if pytest fails,

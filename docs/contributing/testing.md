@@ -146,6 +146,11 @@ discovers the suite without importing test modules, packs independent pytest
 processes across the four assigned GPUs, and stops the lane on the first
 failure.
 
+The change-aware `/merge` planner may run only the SSIM test basenames owned
+by the changed model family. Shared SSIM harness changes still select the
+complete lane. Independently, `main` runs the full SSIM matrix every Sunday at
+05:00 UTC so infrequently touched model families retain periodic coverage.
+
 For a focused developer run, invoke pytest directly and optionally select one
 model from a parameterized test through `FASTVIDEO_SSIM_MODEL_ID`:
 
@@ -191,6 +196,7 @@ Slurm workers. The main files are:
 | File | Purpose |
 |---|---|
 | `.buildkite/pipeline.yml` | Static, validated 20-lane Slurm test graph. |
+| `.github/scripts/plan_merge_ci.py` | Trusted path-to-lane and focused quality-test policy for `/merge`. |
 | `.buildkite/scripts/unit_test.sh`, `.buildkite/scripts/lanes/*.sh` | Repository-owned test payloads executed inside Slurm containers. |
 | `fastvideo/tests/ssim/ci_runner.py` | Four-GPU SSIM task discovery and scheduling. |
 | `.buildkite/scripts/pr_test.sh`, `fastvideo/tests/modal/*.py` | Dormant manual rollback path; rejected in Buildkite. |
@@ -203,8 +209,8 @@ see [CI/CD Architecture](ci_architecture.md).
 If a new test does not fit an existing lane:
 
 1. Put the test payload in an executable `.buildkite/scripts/lanes/<lane>.sh`.
-2. Add its static step to `.buildkite/pipeline.yml` and extend the CI contract
-   tests.
+2. Add its static step to `.buildkite/pipeline.yml`, its changed-path ownership
+   to `.github/scripts/plan_merge_ci.py`, and extend the CI contract tests.
 3. Add the `/test` mapping in `.github/workflows/ci-slash-commands.yml`.
 4. Coordinate the matching GPU, timeout, dependency, secret, and artifact
    policy in the private Slurm runner allowlist.

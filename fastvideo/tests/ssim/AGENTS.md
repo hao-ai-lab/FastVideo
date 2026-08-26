@@ -29,6 +29,8 @@ videos and compare them against device-specific reference videos.
   `FASTVIDEO_SSIM_MODEL_ID=<model_id> pytest fastvideo/tests/ssim/test_wan_t2v_similarity.py -vs`
 - Slurm orchestrator (CI-style four-GPU scheduling):
   `python fastvideo/tests/ssim/ci_runner.py`
+- Focused Slurm selection:
+  `python fastvideo/tests/ssim/ci_runner.py --test-file test_wan_t2v_similarity.py`
 
 ## Authoring Rules
 - Name files `test_<feature>_similarity.py`.
@@ -37,6 +39,8 @@ videos and compare them against device-specific reference videos.
   The Slurm scheduler auto-discovers these keys and runs one subprocess per
   model id.
 - Keep runs deterministic when possible (fixed prompts/seeds/frames/backend).
+- Keep SSIM filenames in `test_[a-z0-9_]+.py` form; the merge planner passes
+  validated basenames rather than arbitrary pytest expressions.
 - Persist metrics with `write_ssim_results(...)`.
 - Use `pytest.skip(...)` for unsupported hardware, missing assets, or
   insufficient GPU count.

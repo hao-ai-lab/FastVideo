@@ -18,6 +18,7 @@ import signal
 import subprocess
 import tempfile
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -80,9 +81,21 @@ def extract_model_ids(path: Path) -> list[str]:
     return list(dict.fromkeys(model_ids))
 
 
-def discover_tasks(ssim_dir: Path) -> list[SSIMTask]:
+def discover_tasks(ssim_dir: Path, test_files: Sequence[str] | None = None) -> list[SSIMTask]:
+    paths = sorted(ssim_dir.glob("test_*.py"))
+    if test_files:
+        requested = set(test_files)
+        invalid = sorted(name for name in requested if not re.fullmatch(r"test_[a-z0-9_]+\.py", name))
+        if invalid:
+            raise ValueError(f"Invalid SSIM test file selection: {invalid}")
+        available = {path.name: path for path in paths}
+        missing = sorted(requested - set(available))
+        if missing:
+            raise ValueError(f"Selected SSIM test files do not exist: {missing}")
+        paths = [path for path in paths if path.name in requested]
+
     tasks: list[SSIMTask] = []
-    for path in sorted(ssim_dir.glob("test_*.py")):
+    for path in paths:
         required_gpus = extract_required_gpus(path)
         if not 1 <= required_gpus <= MAX_GPUS:
             raise ValueError(f"{path} requests {required_gpus} GPUs; supported range is 1-{MAX_GPUS}")
@@ -242,6 +255,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--reference-repo", default="")
     parser.add_argument("--skip-reference-download", action="store_true")
     parser.add_argument("--bootstrap-mode", action="store_true")
+    parser.add_argument(
+        "--test-file",
+        action="append",
+        default=[],
+        help="Run one SSIM test basename; repeat for a focused merge gate.",
+    )
     parser.add_argument("-k", dest="pytest_k", default="")
     return parser.parse_args()
 
@@ -259,7 +278,7 @@ def main() -> int:
         pytest_args.append("--ssim-bootstrap-mode")
     if args.pytest_k:
         pytest_args.extend(["-k", args.pytest_k])
-    tasks = discover_tasks(Path("fastvideo/tests/ssim"))
+    tasks = discover_tasks(Path("fastvideo/tests/ssim"), args.test_file)
     if not tasks:
         raise RuntimeError("No SSIM tests discovered")
     print(f"Discovered {len(tasks)} SSIM tasks across {len(visible_gpu_ids())} GPUs")

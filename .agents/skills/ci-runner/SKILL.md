@@ -1,6 +1,6 @@
 ---
 name: ci-runner
-description: Work on FastVideo's Slurm-only GPU CI lanes, static Buildkite graph, trusted ci-runner policy, lane scripts, and GB200 validation.
+description: Work on FastVideo's Slurm-only, change-aware GPU CI lanes, static Buildkite graph, trusted ci-runner policy, lane scripts, and GB200 validation.
 ---
 
 # Slinky Slurm CI lanes
@@ -35,9 +35,18 @@ and the coordination contract with that bundle.
   `fastvideo/slinky/whole-tray` Buildkite concurrency group with a limit of one
   so the second job does not consume an agent or command timeout while waiting
   for the same tray.
-- Every Full Suite (`/merge`, `ready`, or `/test full`) schedules all twenty
-  lanes. The trusted uploader normalizes and validates that exact graph before
-  Buildkite accepts it.
+- `/test full` schedules all twenty lanes. `/merge`, `ready`, and new pushes to
+  ready PRs use the trusted base-branch planner in
+  `.github/scripts/plan_merge_ci.py`: automatic Fastcheck remains the universal
+  six-lane baseline, and the merge build adds only path-relevant integration
+  lanes. Unknown source/build paths fail closed to all fourteen additive lanes.
+  The trusted uploader still normalizes and validates the complete static graph
+  before Buildkite evaluates its plan conditions.
+- Focused merge builds may pass allowlisted golden-gate and SSIM test basenames.
+  The private host validates the lane plan and basenames before staging them,
+  and the in-container scripts validate them again. Direct `/test ssim`,
+  explicit `/test full`, and the weekly main-branch schedule run the complete
+  SSIM matrix.
 - The trusted uploader serves exactly three entry pipelines:
   `pr-fastcheck` for automatic PR builds, `ci` for slash-command/ready-label
   API builds, and `fastvideo-performance-lane` for the weekly schedule. Keep
@@ -67,17 +76,20 @@ and the coordination contract with that bundle.
    Keep it deterministic and free of host-specific paths or credential fetches.
 3. Add the static pipeline step and canonical `/test <name>` mapping. Keep the
    `<name>-ci` alias only when compatibility requires it.
-4. Extend `fastvideo/tests/contract/test_ci_test_collection.py` and focused
-   CPU-only scheduler/policy tests.
+4. Add its source/test path ownership to `.github/scripts/plan_merge_ci.py`.
+   Prefer the narrowest correctness-preserving lane set; leave unknown paths
+   fail-closed. Extend `fastvideo/tests/contract/test_ci_test_collection.py`,
+   `test_merge_ci_plan.py`, and focused CPU-only scheduler/policy tests.
 5. Coordinate the private lane row: GPU count (1-4), wall time, script, scope
    pairs, step key, command, HF cache/token, tracking mode, extras, attention
    backend policy, kernel policy, and artifact relay. Active training lanes
    keep W&B offline and do not stage a W&B credential.
 6. Update the trusted pipeline-uploader schema. A mismatch must reject the
    pipeline rather than silently skip a lane.
-7. Run `pre-commit run --files <changed paths>`, contract tests, private driver
-   tests, and a real GB200 canary. Multi-GPU, hardware-reference, training,
-   performance, and SSIM changes need their own target-hardware evidence.
+7. Run `pre-commit run --files <changed paths>`, the planner's representative
+   diff matrix, contract tests, private driver tests, and a real GB200 canary.
+   Multi-GPU, hardware-reference, training, performance, and SSIM changes need
+   their own target-hardware evidence.
 
 ## Rollback
 

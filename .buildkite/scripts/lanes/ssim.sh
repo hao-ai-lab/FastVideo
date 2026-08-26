@@ -18,4 +18,15 @@ args=()
 if [ "${FASTVIDEO_SSIM_BOOTSTRAP_MODE:-0}" = 1 ]; then
   args+=(--bootstrap-mode)
 fi
+selected=${FASTVIDEO_SSIM_TEST_FILES:-all}
+if [ "$selected" != all ]; then
+  [[ $selected =~ ^test_[a-z0-9_]+\.py(,test_[a-z0-9_]+\.py)*$ ]] || {
+    echo "Invalid FASTVIDEO_SSIM_TEST_FILES selection" >&2
+    exit 2
+  }
+  IFS=, read -r -a ssim_files <<< "$selected"
+  for ssim_file in "${ssim_files[@]}"; do
+    args+=(--test-file "$ssim_file")
+  done
+fi
 exec python fastvideo/tests/ssim/ci_runner.py "${args[@]}"

@@ -20,14 +20,21 @@ PR opened or updated
   |     Buildkite schedules six lanes on the Slinky Slurm cluster
   |     encoder, VAE, transformer, kernel, unit, DreamVerse
   |
-  |-- /merge, /test full, or ready label
+  |-- /merge or ready label
         |
-        `-- Tier 3: Full Suite
-              Buildkite schedules all twenty GPU lanes on Slinky Slurm
-              integration, quality, training, API, and performance coverage
+        `-- Tier 3: Change-aware merge gate
+              trusted base-branch planner classifies the complete PR diff
+              Buildkite adds only relevant integration, quality, training,
+              API, or performance lanes on Slinky Slurm
               |
               pass -> Mergify squash-merges when all merge conditions pass
               fail -> fix, push, and re-run
+
+  |-- /test full
+        `-- Explicit all-20-lane diagnostic run
+
+  `-- weekly schedule on main
+        `-- Complete four-GPU SSIM matrix
 ```
 
 CI is not one monolithic job:
@@ -52,7 +59,7 @@ Three Buildkite entry pipelines share the validated graph:
 | Pipeline | Trigger | Scope |
 |---|---|---|
 | `pr-fastcheck` | Automatic pull-request webhook | Six Fastcheck lanes |
-| `ci` | `/merge`, `ready`, and `/test` API builds | Full Suite, Fastcheck reruns, or one direct lane |
+| `ci` | `/merge`, `ready`, schedules, and `/test` API builds | Change-aware merge gates, scheduled SSIM, explicit Full Suite, Fastcheck reruns, or one direct lane |
 | `fastvideo-performance-lane` | Weekly scheduler | Direct performance lane |
 
 Each entry pipeline starts with the same trusted `pipeline-upload` job on the
@@ -101,17 +108,28 @@ kernels, unit tests, and DreamVerse. Static steps replace the former
 host-side path-filter plugin: the login plane never checks out or executes PR
 code.
 
-### Tier 3: Full Suite
+### Tier 3: Change-Aware Merge Gate
 
 | Attribute | Value |
 |---|---|
-| Triggered by | `/merge`, adding `ready`, `/test full`, or a new push to a PR that already has `ready` |
+| Triggered by | `/merge`, adding `ready`, or a new push to a PR that already has `ready` |
 | Compute | Slinky Slurm only (`ci-runner` queue) |
 | Definition | `.buildkite/pipeline.yml` |
 | Entrypoint | `/opt/fastvideo-ci-runner/run-ci` (`run-unit` is a compatibility wrapper) |
 
-Full Suite schedules every lane below. All are hard gates; there are no
-additive parity jobs or soft-fail hardware lanes.
+Fastcheck is the universal six-lane baseline. The merge gate does not repeat
+those jobs: it classifies every changed path and adds only the relevant lanes
+from the fourteen-lane integration set below. Selected jobs are hard gates;
+there are no soft-fail hardware lanes. A documentation-only PR can therefore
+finish its merge build after the trusted uploader, while model-family changes
+typically add focused golden-gate and SSIM files and a training-only change
+adds only its owning training lane.
+
+`.github/scripts/plan_merge_ci.py` is the canonical path policy. It runs from
+the immutable base SHA under `pull_request_target`; PR code is never executed
+on the GitHub runner. The changed-file list includes both sides of renames. An
+API failure, truncated response, empty list, unknown build input, or unknown
+source path fails closed to all fourteen integration lanes.
 
 A `ready`-labeled PR does not hit Buildkite immediately:
 `ci-trigger-full-suite.yml` first runs `.github/scripts/gate_full_suite.sh`,
@@ -120,28 +138,38 @@ head. A red cheap check blocks the suite (fail closed; the next push re-arms
 it), while a GitHub outage or a >25 min wait lets it run anyway (fail open).
 `/test full` bypasses the gate.
 
-| Lane | Public `TEST_TYPE` | GPUs |
-|---|---|---:|
-| Encoder | `encoder` | 1 |
-| VAE | `vae` | 1 |
-| Transformer | `transformer` | 1 |
-| Kernel | `kernel_tests` | 1 |
-| Unit | `unit_test` | 1 |
-| DreamVerse | `dreamverse_app` | 1 |
-| Golden gate | `golden_gate` | 1 |
-| SSIM | `ssim` | 4 |
-| LoRA inference | `inference_lora` | 1 |
-| LoRA extraction | `lora_extraction` | 1 |
-| Vanilla training | `training` | 4 |
-| DMD distillation | `distillation_dmd` | 2 |
-| Self-forcing | `self_forcing` | 2 |
-| LoRA training | `training_lora` | 2 |
-| VSA training | `training_vsa` | 2 |
-| VMoBA inference | `inference_vmoba` | 1 |
-| Performance | `performance` | 2 |
-| API server | `api_server` | 1 |
-| Modular train framework | `train_framework` | 1 |
-| Eval metrics | `eval` | 1 |
+The complete static graph remains available through `/test full`; path
+selection never deletes or dynamically invents a Buildkite step.
+
+| Lane | Public `TEST_TYPE` | GPUs | Typical merge trigger |
+|---|---|---:|---|
+| Encoder | `encoder` | 1 | Universal Fastcheck |
+| VAE | `vae` | 1 | Universal Fastcheck |
+| Transformer | `transformer` | 1 | Universal Fastcheck |
+| Kernel | `kernel_tests` | 1 | Universal Fastcheck |
+| Unit | `unit_test` | 1 | Universal Fastcheck |
+| DreamVerse | `dreamverse_app` | 1 | Universal Fastcheck |
+| Golden gate | `golden_gate` | 1 | Model, pipeline, attention, layer, or output changes |
+| SSIM | `ssim` | 4 | Matching model/SSIM paths; focused files when possible |
+| LoRA inference | `inference_lora` | 1 | LoRA inference/shared LoRA paths |
+| LoRA extraction | `lora_extraction` | 1 | LoRA extraction/shared LoRA paths |
+| Vanilla training | `training` | 4 | Legacy vanilla/shared training paths |
+| DMD distillation | `distillation_dmd` | 2 | DMD/shared training paths |
+| Self-forcing | `self_forcing` | 2 | Self-forcing/shared training paths |
+| LoRA training | `training_lora` | 2 | LoRA/shared training paths |
+| VSA training | `training_vsa` | 2 | VSA/shared training paths |
+| VMoBA inference | `inference_vmoba` | 1 | VMoBA backend/config paths |
+| Performance | `performance` | 2 | Performance tests or benchmark policy |
+| API server | `api_server` | 1 | API, worker, or server entrypoint paths |
+| Modular train framework | `train_framework` | 1 | `fastvideo/train/` and its tests |
+| Eval metrics | `eval` | 1 | `fastvideo/eval/` and its tests |
+
+Golden-gate and SSIM selections are basenames, not arbitrary pytest arguments.
+The private host checks the comma-separated allowlist before staging, and the
+container checks it again before invoking pytest. Shared quality-harness
+changes still run the complete owning lane. The full SSIM matrix also runs on
+`main` every Sunday at 05:00 UTC through `ci-scheduled-ssim.yml`; `/test ssim`
+and `/test full` remain available for deliberate complete runs.
 
 The four Buildkite workers may accept multiple jobs concurrently. The
 agent-owned lease broker packs their requested GPU counts onto one persistent
@@ -166,11 +194,13 @@ The Buildkite agent and Slurm have deliberately separate responsibilities:
 ```text
 /merge PR comment
   -> GitHub verifies write permission and refreshes the `ready` label
-  -> base-branch `ci-trigger-full-suite` workflow gates on cheap checks, then
-     sends the PR SHA to pipeline `ci` with TEST_SCOPE=full and FULL_SUITE=true
+  -> base-branch `ci-trigger-full-suite` workflow fetches the PR file list,
+     computes MERGE_TEST_PLAN plus focused golden/SSIM basenames, and gates on
+     cheap checks
+  -> sends the PR SHA to pipeline `ci` with TEST_SCOPE=merge and FULL_SUITE=true
   -> trusted `pipeline-upload` job on queue `ci-runner`
        fetch exact-SHA .buildkite/pipeline.yml
-       normalize + validate the complete 20-lane policy
+       normalize + validate the complete static 20-lane policy and conditions
        upload static Buildkite steps
   -> each accepted step reaches the host policy hook
        validate org/repo/SHA/ref/step key/command/scope/timeout
@@ -183,7 +213,7 @@ The Buildkite agent and Slurm have deliberately separate responsibilities:
        run the repository-owned lane script
        write numeric exit status and approved artifacts
   -> trusted host returns that status to Buildkite
-  -> Buildkite publishes `full-suite-passed` only when every lane passes
+  -> Buildkite publishes `full-suite-passed` only when every selected lane passes
 ```
 
 The pipeline uploader and dispatcher run on the Slurm login plane, but those
@@ -209,7 +239,7 @@ Repository write permission is required.
 
 | Command | Effect |
 |---|---|
-| `/merge` | Adds `ready` and triggers Full Suite for the PR head branch. |
+| `/merge` | Adds `ready` and triggers the path-aware merge gate for the PR head. |
 | `/test full` | Runs the whole Full Suite with `TEST_SCOPE=full`. |
 | `/test fastcheck` | Runs the whole Fastcheck suite with `TEST_SCOPE=fastcheck`. |
 | `/test pre-commit` | Re-runs the pre-commit workflow on the PR merge ref. |
@@ -261,7 +291,7 @@ Mergify enforces these conditions before it squash-merges to `main`:
 |---|---|
 | `check-success~=pre-commit` | Tier 1 passed. |
 | `check-success=fastcheck-passed` | All triggered Fastcheck jobs passed. |
-| `check-success=full-suite-passed` | All triggered Full Suite jobs passed. |
+| `check-success=full-suite-passed` | The selected merge gate or explicit Full Suite passed. |
 | `#approved-reviews-by>=1` | At least one approving review. |
 | Valid title regex | PR title starts with an accepted `[type]` tag. |
 | `label=ready` | The PR has entered the merge flow. |
@@ -310,7 +340,7 @@ Process labels:
 
 | Label | Who sets it | Meaning |
 |---|---|---|
-| `ready` | `/merge` or maintainer action | Triggers/keeps Full Suite active and enables auto-merge. |
+| `ready` | `/merge` or maintainer action | Triggers/keeps the change-aware merge gate active and enables auto-merge. |
 | `needs-rebase` | Mergify | PR has merge conflicts. |
 | `do-not-merge` | Maintainer | Blocks merge regardless of CI status. |
 
@@ -337,10 +367,12 @@ If you add a new CI test category:
 
 1. Add an executable `.buildkite/scripts/lanes/<lane>.sh` containing the test
    payload only.
-2. Add the static Buildkite step in `.buildkite/pipeline.yml` and the `/test`
-   mapping in `.github/workflows/ci-slash-commands.yml`.
-3. Extend `fastvideo/tests/contract/test_ci_test_collection.py` and the trusted
-   private runner's lane table plus uploader policy in the same rollout.
+2. Add the static Buildkite step in `.buildkite/pipeline.yml`, its source/test
+   ownership in `.github/scripts/plan_merge_ci.py`, and the `/test` mapping in
+   `.github/workflows/ci-slash-commands.yml`.
+3. Extend `fastvideo/tests/contract/test_ci_test_collection.py`,
+   `test_merge_ci_plan.py`, and the trusted private runner's lane table plus
+   uploader policy in the same rollout.
 4. Validate on the target GB200 hardware before making the lane a merge gate.
 5. Document the lane here and link any domain-specific authoring guide.
 
@@ -418,8 +450,10 @@ The reusable implementation lives in
 | `.github/mergify.yml` | Merge protection, PR title validation, PR labels, conflict labels, auto-merge |
 | `.github/workflows/ci-precommit.yml` | Tier 1 pre-commit |
 | `.github/workflows/ci-slash-commands.yml` | `/merge` and `/test` handling |
-| `.github/workflows/ci-trigger-full-suite.yml` | Full Suite trigger for `ready` PRs and new pushes to ready PRs |
-| `.github/workflows/ci-aggregate-status.yml` | Aggregate Fastcheck/Full Suite commit statuses |
+| `.github/workflows/ci-trigger-full-suite.yml` | Change-aware merge-gate trigger for `ready` PRs and new pushes |
+| `.github/workflows/ci-scheduled-ssim.yml` | Weekly complete SSIM trigger on `main` |
+| `.github/scripts/plan_merge_ci.py` | Trusted changed-path to integration-lane planner |
+| `.github/workflows/ci-aggregate-status.yml` | Aggregate Fastcheck and explicit Full Suite direct-rerun statuses |
 | `.buildkite/pipeline.yml` | Static 20-lane Slurm Buildkite graph |
 | `.buildkite/scripts/unit_test.sh`, `.buildkite/scripts/lanes/*.sh` | Active Slurm lane payloads |
 | `fastvideo/tests/ssim/ci_runner.py` | Four-GPU Slurm SSIM scheduler |
