@@ -31,6 +31,11 @@ auto quant(
   std::optional<torch::Tensor>& Output_S
 ) {
 
+  TORCH_CHECK(
+    Input.scalar_type() == torch::kHalf || Input.scalar_type() == torch::kBFloat16,
+    "Unsupported input data type for quant_cuda (int8 quantization)."
+  );
+
   using ElementOut = int8_t;
   static constexpr int BlockSize = 128;
   static constexpr int NumThrPerCta = 256;
@@ -62,8 +67,7 @@ auto quant(
     }
 
     default: {
-      std::cerr << "Observing: " << Input.scalar_type() << " for the input datatype which is invalid";
-      throw std::runtime_error("Unsupported input data type for quant_cuda (int8 quantization).");
+      TORCH_CHECK(false, "Unsupported input data type for quant_cuda (int8 quantization).");
     }
   }
   
