@@ -139,9 +139,6 @@ surfaces:
 
   pipeline_config_extensions:
     preset_owned:
-      refert_num:
-        sources:
-          - fastvideo.configs.pipelines.wan.WanAnimate14BConfig
       flux2_text_encoder_type:
         sources:
           - fastvideo.configs.pipelines.flux_2.Flux2PipelineConfig

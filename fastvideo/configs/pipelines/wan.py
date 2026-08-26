@@ -345,8 +345,3 @@ class WanAnimate14BConfig(WanI2V720PConfig):
     """
 
     dit_config: DiTConfig = field(default_factory=WanAnimateDiTConfig)
-
-    # Number of previously generated frames re-encoded as temporal guidance at
-    # the head of each subsequent 77-frame segment (official runner:
-    # ``refert_num``, 1 or 5). Segment stride is 77 - refert_num.
-    refert_num: int = 1

@@ -6,7 +6,7 @@ Ported against both references: the official ``Wan-Video/Wan2.2``
 The official Diffusers-format checkpoint (``Wan-AI/Wan2.2-Animate-14B-Diffusers``)
 uses the diffusers naming, which this port loads directly.
 
-Unlike S2V, Animate required no new tower: it is the stock Wan-I2V transformer
+Animate required no new tower: it is the stock Wan-I2V transformer
 (channel-concat conditioning, 36-channel input, CLIP image branch, single
 global timestep, standard RoPE grid), so this class *subclasses*
 ``WanTransformer3DModel`` -- the base ``__init__`` builds the entire tower from
@@ -25,20 +25,20 @@ global timestep, standard RoPE grid), so this class *subclasses*
 Sequence parallelism is not wired up in this first version: the face adapter's
 per-frame reshape needs the full token sequence, and an SP shard splits frames
 across ranks mid-frame. Single-GPU and FSDP-style weight sharding work
-(``forward`` raises on sp_world_size > 1). Same scoping as the S2V port.
+(``__init__`` raises on sp_world_size > 1).
 """
 from typing import Any
 
 import torch
 from torch import nn
 
+import fastvideo.envs as envs
 from fastvideo.configs.models.dits.wan_animate import WanAnimateConfig
 from fastvideo.distributed.parallel_state import get_sp_world_size
 from fastvideo.layers.rotary_embedding import get_rotary_pos_embed
 from fastvideo.layers.visual_embedding import PatchEmbed
-from fastvideo.models.dits.wan_animate_face import (ANIMATE_ATTENTION_BACKENDS, MotionConv2d,
-                                                    WanAnimateFaceCrossAttention, WanAnimateFaceEncoder,
-                                                    WanAnimateMotionEncoder)
+from fastvideo.models.dits.wan_animate_face import (MotionConv2d, WanAnimateFaceCrossAttention,
+                                                    WanAnimateFaceEncoder, WanAnimateMotionEncoder)
 from fastvideo.models.dits.wanvideo import WanTransformer3DModel
 from fastvideo.platforms import current_platform
 
@@ -48,20 +48,32 @@ class WanAnimateTransformer3DModel(WanTransformer3DModel):
 
     _fsdp_shard_conditions = WanAnimateConfig()._fsdp_shard_conditions
     _compile_conditions = WanAnimateConfig()._compile_conditions
-    _supported_attention_backends = ANIMATE_ATTENTION_BACKENDS
+    _supported_attention_backends = WanAnimateConfig()._supported_attention_backends
     param_names_mapping = WanAnimateConfig().param_names_mapping
     reverse_param_names_mapping = WanAnimateConfig().reverse_param_names_mapping
     lora_param_names_mapping = WanAnimateConfig().lora_param_names_mapping
 
     def __init__(self, config: WanAnimateConfig, hf_config: dict[str, Any]) -> None:
+        if envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN":
+            raise ValueError(
+                "Wan-Animate has no VSA checkpoint. The base __init__ would swap in "
+                "WanTransformerBlock_VSA, whose to_gate_compress weights are absent here and get "
+                "silently zero-filled by the loader (fsdp_load ALLOWED_NEW_PARAM_PATTERNS). Unset "
+                "FASTVIDEO_ATTENTION_BACKEND.")
+        if get_sp_world_size() > 1:
+            raise NotImplementedError(
+                "Wan-Animate does not support sequence parallelism yet: the face adapter's "
+                "per-frame attention needs the whole token sequence on one rank. Run with "
+                "sp_world_size=1 (FSDP weight sharding is unaffected).")
         super().__init__(config=config, hf_config=hf_config)
         arch = config.arch_config
         inner_dim = arch.hidden_size
         self.inject_face_latents_blocks = arch.inject_face_latents_blocks
         self.motion_encoder_batch_size = arch.motion_encoder_batch_size
 
-        # Pose door: same PatchEmbed wrapper as the base patch_embedding, so the
-        # checkpoint's pose_patch_embedding.* lands on .proj via the mapping.
+        # Second patchifier for the pose video: same PatchEmbed wrapper as the
+        # base patch_embedding, so the checkpoint's pose_patch_embedding.*
+        # lands on .proj via the mapping.
         self.pose_patch_embedding = PatchEmbed(in_chans=arch.latent_channels,
                                                embed_dim=inner_dim,
                                                patch_size=arch.patch_size,
@@ -83,13 +95,23 @@ class WanAnimateTransformer3DModel(WanTransformer3DModel):
             for _ in range(arch.num_layers // arch.inject_face_latents_blocks)
         ])
 
+    def _get_parameter_dtype(self, name: str, default_dtype: torch.dtype) -> torch.dtype:
+        """Diffusers pins this tensor fp32 (_keep_in_fp32_modules); match it.
+
+        The QR basis is re-orthonormalised from it every forward, so bf16
+        rounding changes the basis itself, not just its precision -- upcasting
+        inside forward is too late.
+        """
+        return torch.float32 if name == "motion_encoder.motion_synthesis_weight" else default_dtype
+
     def materialize_non_persistent_buffers(self, device: torch.device, dtype: torch.dtype | None = None) -> None:
         """Rebuild the motion encoder's anti-aliasing blur kernels after meta load.
 
         TransformerLoader builds the model under ``torch.device("meta")`` and
         streams checkpoint weights in; non-persistent buffers are not in the
-        checkpoint and stay on meta until recreated here (fsdp_load calls this
-        hook). Kernels stay fp32 -- forward casts them to the activation dtype.
+        checkpoint and stay on meta until this hook (called by fsdp_load)
+        recreates them. Kernels stay fp32 -- forward casts them to the
+        activation dtype.
         """
         for module in self.modules():
             if isinstance(module, MotionConv2d) and module.blur and module.blur_kernel.is_meta:
@@ -148,11 +170,6 @@ class WanAnimateTransformer3DModel(WanTransformer3DModel):
         Returns the full [B, 16, T+1, H, W] velocity; the decode stage drops
         the reference slot (and any guidance frames).
         """
-        if get_sp_world_size() > 1:
-            raise NotImplementedError(
-                "Wan-Animate does not support sequence parallelism yet: the face adapter's "
-                "per-frame attention needs the whole token sequence on one rank. Run with "
-                "sp_world_size=1 (FSDP weight sharding is unaffected).")
         if pose_latents is None or face_pixel_values is None:
             raise ValueError(
                 "Wan-Animate needs both a pose video and a face video. Got "
@@ -163,8 +180,8 @@ class WanAnimateTransformer3DModel(WanTransformer3DModel):
                                                    and not encoder_hidden_states_image):
             raise ValueError("Wan-Animate needs CLIP features of the reference image "
                              "(encoder_hidden_states_image): the I2V cross-attention splits off "
-                             "the first 257 context tokens as image tokens, so omitting them "
-                             "would silently misread the text tokens instead.")
+                             "the first 257 context tokens as image tokens positionally, so this "
+                             "must fail here rather than misread the text tokens.")
         if pose_latents.shape[2] + 1 != hidden_states.shape[2]:
             raise ValueError(
                 f"pose_latents has {pose_latents.shape[2]} frames but must have exactly one fewer "
@@ -186,13 +203,13 @@ class WanAnimateTransformer3DModel(WanTransformer3DModel):
         freqs_cis = self._rotary_embeddings(post_patch_num_frames, post_patch_height, post_patch_width,
                                             hidden_states.device)
 
-        # 1. Patchify + pose door (skips the reference frame).
+        # 1. Patchify, then add pose tokens to every frame but the reference.
         hidden_states = self._patchify_with_pose(hidden_states, pose_latents)
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
         original_seq_len = hidden_states.shape[1]
 
         # 2. Face tokens: one 4+1 group per latent frame, zero row for the ref.
-        motion_vec = self._encode_face(face_pixel_values.to(orig_dtype))
+        motion_vec = self._encode_face(face_pixel_values)
         if motion_vec.shape[1] != post_patch_num_frames:
             raise ValueError(
                 f"face/video misalignment: the face video produced {motion_vec.shape[1]} latent-"
@@ -205,9 +222,13 @@ class WanAnimateTransformer3DModel(WanTransformer3DModel):
             timestep, encoder_hidden_states, encoder_hidden_states_image, timestep_seq_len=None)
         timestep_proj = timestep_proj.unflatten(1, (6, -1))
         encoder_hidden_states = torch.concat([encoder_hidden_states_image, encoder_hidden_states], dim=1)
-        assert encoder_hidden_states.dtype == orig_dtype
+        # The blocks add cross-attention output straight onto hidden_states, so
+        # a context in another dtype would silently upcast the residual stream.
+        assert encoder_hidden_states.dtype == orig_dtype, (
+            f"context dtype {encoder_hidden_states.dtype} != latent dtype {orig_dtype}")
 
-        # 4. The tower, with a face hatch after every inject-stride-th block.
+        # 4. The tower, with a face cross-attention residual after every
+        #    inject-stride-th block.
         for idx, block in enumerate(self.blocks):
             hidden_states = block(hidden_states, encoder_hidden_states, timestep_proj, freqs_cis, original_seq_len)
             if idx % self.inject_face_latents_blocks == 0:
@@ -225,7 +246,7 @@ class WanAnimateTransformer3DModel(WanTransformer3DModel):
 
     def _rotary_embeddings(self, frames: int, height: int, width: int,
                            device: torch.device) -> tuple[torch.Tensor, torch.Tensor]:
-        """Standard Wan 3D RoPE grid -- Animate needs no S2V-style span surgery."""
+        """Copy of the base model's inline RoPE block; keep the dim split in sync."""
         d = self.hidden_size // self.num_attention_heads
         rope_dim_list = [d - 4 * (d // 6), 2 * (d // 6), 2 * (d // 6)]
         freqs_cos, freqs_sin = get_rotary_pos_embed(
@@ -239,6 +260,5 @@ class WanAnimateTransformer3DModel(WanTransformer3DModel):
 
 
 # Entry point for model registry: auto-discovered by class name, which matches
-# the checkpoint's _class_name ("WanAnimateTransformer3DModel") -- unlike S2V,
-# no registry alias is needed.
+# the checkpoint's _class_name -- no registry alias table entry is needed.
 EntryClass = WanAnimateTransformer3DModel

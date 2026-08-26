@@ -10,9 +10,9 @@ blocks bolted onto the 40-block tower (one after every
 
 Ported against BOTH references -- the official ``Wan-Video/Wan2.2``
 (``wan/modules/animate/{motion_encoder,face_blocks}.py``) and diffusers'
-``transformer_wan_animate.py`` (merged; the official
-``Wan-AI/Wan2.2-Animate-14B-Diffusers`` checkpoint follows the diffusers
-naming, which this module reproduces exactly so every tensor loads verbatim).
+``transformer_wan_animate.py``. The official Diffusers-format checkpoint
+follows the diffusers naming, which this module reproduces exactly so every
+tensor loads verbatim.
 
 **The StyleGAN2 weight-scaling contract.** The motion encoder is LIA's
 appearance/motion network, built from StyleGAN2 ``EqualConv2d``/``EqualLinear``
@@ -41,12 +41,13 @@ import torch.nn.functional as F
 from torch import nn
 
 from fastvideo.attention import LocalAttention
+from fastvideo.configs.models.dits.wan_animate import WanAnimateArchConfig
 from fastvideo.layers.layernorm import RMSNorm
 from fastvideo.layers.linear import ReplicatedLinear
-from fastvideo.platforms import AttentionBackendEnum
 
-# Shared with the DiT in wan_animate.py, which imports this module.
-ANIMATE_ATTENTION_BACKENDS = (AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA)
+# Single source of truth is the arch config; the DiT in wan_animate.py reads
+# the same tuple through its config class attributes.
+ANIMATE_ATTENTION_BACKENDS = WanAnimateArchConfig()._supported_attention_backends
 
 # LIA appearance-encoder channel width per feature-map size. config.json ships
 # motion_encoder_channel_sizes: null, which means "use this table" (it is the
@@ -65,26 +66,21 @@ WAN_ANIMATE_MOTION_ENCODER_CHANNEL_SIZES = {
 
 
 class FusedLeakyReLU(nn.Module):
-    """StyleGAN2's activation: add a channel bias, leaky-ReLU, scale by sqrt(2).
+    """StyleGAN2's activation: add a channel bias, leaky-ReLU(0.2), scale by sqrt(2).
 
     The sqrt(2) keeps activation variance roughly constant through the leaky
     ReLU; the bias lives here (``act_fn.bias`` in the checkpoint) rather than
     on the conv because StyleGAN2 fuses bias-add into the activation kernel.
     """
 
-    def __init__(self, negative_slope: float = 0.2, scale: float = 2**0.5,
-                 bias_channels: int | None = None) -> None:
+    def __init__(self, bias_channels: int) -> None:
         super().__init__()
-        self.negative_slope = negative_slope
-        self.scale = scale
-        self.bias = nn.Parameter(torch.zeros(bias_channels)) if bias_channels is not None else None
+        self.bias = nn.Parameter(torch.zeros(bias_channels))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.bias is not None:
-            expanded_shape = [1] * x.ndim
-            expanded_shape[1] = self.bias.shape[0]
-            x = x + self.bias.reshape(*expanded_shape)
-        return F.leaky_relu(x, self.negative_slope) * self.scale
+        expanded_shape = [1] * x.ndim
+        expanded_shape[1] = self.bias.shape[0]
+        return F.leaky_relu(x + self.bias.reshape(*expanded_shape), 0.2) * 2**0.5
 
 
 class MotionConv2d(nn.Module):
@@ -104,7 +100,6 @@ class MotionConv2d(nn.Module):
         self.in_channels = in_channels
         self.stride = stride
         self.padding = padding
-        self.use_activation = use_activation
 
         self.blur = blur_kernel is not None
         self._blur_kernel_taps = tuple(blur_kernel) if blur_kernel is not None else None
@@ -132,8 +127,8 @@ class MotionConv2d(nn.Module):
             expanded = self.blur_kernel[None, None, :, :].expand(self.in_channels, 1, -1, -1)
             x = F.conv2d(x, expanded.to(x.dtype), padding=self.blur_padding, groups=self.in_channels)
         # Cast activations to the weight dtype: face crops arrive fp32 from the
-        # pipeline while the loaded weights are bf16, and a raw (no-autocast)
-        # forward must not mix them -- the S2V dtype lesson, pre-applied.
+        # pipeline while the loaded weights are bf16, and this module also runs
+        # outside autocast (raw forwards, CPU tests).
         x = x.to(self.weight.dtype)
         x = F.conv2d(x, self.weight * self.scale, bias=self.bias, stride=self.stride, padding=self.padding)
         if self.act_fn is not None:
@@ -144,18 +139,14 @@ class MotionConv2d(nn.Module):
 class MotionLinear(nn.Module):
     """StyleGAN2 EqualLinear: unit-scale stored weight, ``1/sqrt(fan_in)`` at forward."""
 
-    def __init__(self, in_dim: int, out_dim: int, bias: bool = True, use_activation: bool = False) -> None:
+    def __init__(self, in_dim: int, out_dim: int) -> None:
         super().__init__()
         self.weight = nn.Parameter(torch.randn(out_dim, in_dim))
         self.scale = 1 / math.sqrt(in_dim)
-        self.bias = nn.Parameter(torch.zeros(out_dim)) if (bias and not use_activation) else None
-        self.act_fn = FusedLeakyReLU(bias_channels=out_dim) if use_activation else None
+        self.bias = nn.Parameter(torch.zeros(out_dim))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = F.linear(x.to(self.weight.dtype), self.weight * self.scale, bias=self.bias)
-        if self.act_fn is not None:
-            x = self.act_fn(x)
-        return x
+        return F.linear(x.to(self.weight.dtype), self.weight * self.scale, bias=self.bias)
 
 
 class MotionEncoderResBlock(nn.Module):
@@ -203,7 +194,9 @@ class WanAnimateMotionEncoder(nn.Module):
         self.conv_in = MotionConv2d(3, channels[str(size)], 1, use_activation=True)
         self.res_blocks = nn.ModuleList()
         in_channels = channels[str(size)]
-        for i in range(int(math.log(size, 2)), 2, -1):
+        # bit_length is exact where float log2 can land just below the integer;
+        # a size missing from the channel table fails loudly on the lookup.
+        for i in range(size.bit_length() - 1, 2, -1):
             out_channels = channels[str(2**(i - 1))]
             self.res_blocks.append(MotionEncoderResBlock(in_channels, out_channels))
             in_channels = out_channels
@@ -233,7 +226,7 @@ class WanAnimateMotionEncoder(nn.Module):
         weight = (self.motion_synthesis_weight + 1e-8).to(torch.float32)
         original_dtype = motion_feat.dtype
         motion_feat = motion_feat.to(torch.float32)
-        q = torch.linalg.qr(weight)[0].to(motion_feat.device)
+        q = torch.linalg.qr(weight)[0]
         motion_vec = torch.matmul(torch.diag_embed(motion_feat), q.T).sum(dim=1)
         return motion_vec.to(original_dtype)
 
@@ -242,13 +235,12 @@ class WanAnimateFaceEncoder(nn.Module):
     """Per-frame motion vectors -> per-latent-frame face tokens.
 
     The two stride-2 causal convs downsample time 4x -- exactly the VAE's
-    temporal compression, so one token group lines up with one latent frame
-    (the same clock-matching move as S2V's audio funnel). Emits
-    ``num_heads`` content tokens + 1 learned padding token per frame.
+    temporal compression, so one token group lines up with one latent frame.
+    Emits ``num_heads`` content tokens + 1 learned padding token per frame.
 
-    Convs are plain ``nn.Conv1d`` with the causal left-pad applied inline
-    (checkpoint keys ``face_encoder.conv2.weight``, no ``.conv.`` wrapper --
-    this differs from S2V's CausalConv1d module and is pinned by a test).
+    Convs are plain ``nn.Conv1d`` with the causal left-pad applied inline:
+    the checkpoint keys are ``face_encoder.conv2.weight`` with no wrapper
+    sublevel, and a test pins that naming.
     """
 
     def __init__(self, in_dim: int, out_dim: int, hidden_dim: int = 1024, num_heads: int = 4,
@@ -287,16 +279,19 @@ class WanAnimateFaceEncoder(nn.Module):
 
 
 class WanAnimateFaceCrossAttention(nn.Module):
-    """One face hatch: each latent frame's video tokens query that frame's 5 face tokens.
+    """Face cross-attention: each latent frame's video tokens query that frame's 5 face tokens.
 
     The per-frame confinement (reshape ``[B, T*S_f] -> [(B*T), S_f]``) is the
     entire expression-sync mechanism -- frame i can only see frame i's face.
     Applied residually *outside* this module, after every
-    ``inject_face_latents_blocks``-th transformer block.
+    ``inject_face_latents_blocks``-th transformer block. The caller guarantees
+    one face-token group per latent frame (checked loudly in the model).
 
     qk-norm here is per-head RMSNorm over ``head_dim`` (checkpoint:
     ``norm_q.weight`` of shape (128,)) -- NOT the across-heads norm the main
-    tower uses. Pre-norms are affine-free and contribute no tensors.
+    tower uses. Pre-norms are affine-free and contribute no tensors. The
+    reference's optional multiplicative motion mask is not ported: the Animate
+    pipeline never supplies one.
     """
 
     def __init__(self, dim: int, num_heads: int, eps: float = 1e-6) -> None:
@@ -320,11 +315,6 @@ class WanAnimateFaceCrossAttention(nn.Module):
         """hidden_states [B, S, C]; motion_vec [B, T, N, C]. Returns the residual (not added)."""
         b, s, _ = hidden_states.shape
         t, n = motion_vec.shape[1], motion_vec.shape[2]
-        if s % t:
-            raise ValueError(
-                f"face/video misalignment: {s} video tokens do not divide into {t} latent frames. "
-                "The face video must produce exactly one motion-vector group per latent frame "
-                "(pixel frames = 4 * video latent frames - 3, e.g. 77 for 20).")
 
         q_in = self.pre_norm_q(hidden_states)
         kv_in = self.pre_norm_kv(motion_vec).flatten(1, 2)  # [B, T*N, C]

@@ -286,6 +286,27 @@ LUCY_EDIT_DEV = InferencePreset(
     },
 )
 
+WAN_ANIMATE_14B = InferencePreset(
+    name="wan_animate_14b",
+    version=1,
+    model_family="wan",
+    description="Wan 2.2 Animate 14B character animation/replacement at 720P",
+    workload_type="i2v",
+    stage_schemas=(_DENOISE_STAGE, ),
+    defaults={
+        # Official wan_animate_14B.py runtime: 720p-area, 77-frame segments at
+        # 30 fps, 20 UniPC steps, guidance 1.0 (CFG off; the prompt is non-core).
+        "height": 720,
+        "width": 1280,
+        "num_frames": 77,
+        "fps": 30,
+        "guidance_scale": 1.0,
+        "num_inference_steps": 20,
+        # Inert at guidance 1.0; live if a caller overrides guidance_scale.
+        "negative_prompt": _NEGATIVE_PROMPT_CN,
+    },
+)
+
 # -------------------------------------------------------------------
 # Self-Forcing (causal) presets
 # -------------------------------------------------------------------
@@ -342,26 +363,6 @@ SF_WAN_2_2_I2V_A14B = InferencePreset(
         "guidance_scale": 4.0,
         "guidance_scale_2": 3.0,
         "num_inference_steps": 8,
-        "negative_prompt": _NEGATIVE_PROMPT_CN,
-    },
-)
-
-WAN_ANIMATE_14B = InferencePreset(
-    name="wan_animate_14b",
-    version=1,
-    model_family="wan",
-    description="Wan 2.2 Animate 14B character animation/replacement at 720P",
-    workload_type="i2v",
-    stage_schemas=(_DENOISE_STAGE, ),
-    defaults={
-        # Official wan_animate_14B.py runtime: 720p-area, 77-frame segments at
-        # 30 fps, 20 UniPC steps, guidance 1.0 (CFG off; the prompt is non-core).
-        "height": 720,
-        "width": 1280,
-        "num_frames": 77,
-        "fps": 30,
-        "guidance_scale": 1.0,
-        "num_inference_steps": 20,
         "negative_prompt": _NEGATIVE_PROMPT_CN,
     },
 )

@@ -417,37 +417,6 @@ class SamplingParam:
             help="Path to input video for video-to-video generation",
         )
         parser.add_argument(
-            "--pose-video-path",
-            type=str,
-            default=SamplingParam.pose_video_path,
-            help="Wan-Animate: path to the preprocessed skeleton video (src_pose.mp4)",
-        )
-        parser.add_argument(
-            "--face-video-path",
-            type=str,
-            default=SamplingParam.face_video_path,
-            help="Wan-Animate: path to the preprocessed face-crop video (src_face.mp4)",
-        )
-        parser.add_argument(
-            "--background-video-path",
-            type=str,
-            default=SamplingParam.background_video_path,
-            help="Wan-Animate replace mode: path to the background video (src_bg.mp4)",
-        )
-        parser.add_argument(
-            "--mask-video-path",
-            type=str,
-            default=SamplingParam.mask_video_path,
-            help="Wan-Animate replace mode: path to the character mask video (src_mask.mp4, white = generate)",
-        )
-        parser.add_argument(
-            "--animate-mode",
-            type=str,
-            choices=["animation", "replace"],
-            default=SamplingParam.animate_mode,
-            help="Wan-Animate: animate the character on the reference background, or replace into the source video",
-        )
-        parser.add_argument(
             "--refine-from",
             type=str,
             default=SamplingParam.refine_from,

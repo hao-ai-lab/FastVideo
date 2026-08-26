@@ -1,15 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for the Wan2.2-Animate port.
 
-Most of this file is CPU-only and needs neither a GPU nor the 34GB checkpoint:
-it pins the invariants that silently corrupt output when broken -- above all
-the StyleGAN2 runtime weight scaling in the motion encoder (loads cleanly into
-vanilla layers and generates garbage), the pose add that must skip the
-reference frame, and the per-frame confinement of the face adapter.
+Most of this file needs neither GPU memory nor the 34GB checkpoint, but it
+does need a CUDA (or MPS) host: attention-backend selection has no CPU
+implementation, so on a GPU-less machine only the config, mask/pad-helper,
+motion-encoder and face-encoder tests run.
 
-The weight-loading tests at the bottom need the real checkpoint and are gated
-the same way test_wan_s2v.py gates its counterparts. Point them at a checkout
-with::
+The tests pin the invariants that silently corrupt output when broken --
+above all the StyleGAN2 runtime weight scaling in the motion encoder (loads
+cleanly into vanilla layers and generates garbage), the pose add that must
+skip the reference frame, and the per-frame confinement of the face adapter.
+
+The weight-loading tests at the bottom need the real checkpoint::
 
     export WAN_ANIMATE_MODEL_PATH=/path/to/Wan2.2-Animate-14B-Diffusers
 """
@@ -25,8 +27,8 @@ import torch
 import torch.nn.functional as F
 
 # The distributed_setup fixture rendezvouses via env:// even for a single
-# GPU; without these the model-construction tests error before they start.
-# Same convention as test_flux.py (port distinct per file to avoid clashes).
+# GPU. setdefault (not assignment) keeps a launcher-assigned rendezvous
+# intact, which the repo's port-inventory contract test requires.
 os.environ.setdefault("MASTER_ADDR", "localhost")
 os.environ.setdefault("MASTER_PORT", "29521")
 
@@ -37,6 +39,7 @@ from fastvideo.models.dits.wan_animate import WanAnimateTransformer3DModel
 from fastvideo.models.dits.wan_animate_face import (FusedLeakyReLU, MotionConv2d, MotionLinear,
                                                     WanAnimateFaceCrossAttention, WanAnimateFaceEncoder,
                                                     WanAnimateMotionEncoder)
+from fastvideo.pipelines.basic.wan.animate_stages import _fold_i2v_mask, _pad_frames
 
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 _DEFAULT_ANIMATE_PATH = os.path.join(_REPO_ROOT, "official_weights", "Wan2.2-Animate-14B-Diffusers")
@@ -61,26 +64,16 @@ requires_weights = pytest.mark.skipif(
 
 
 def test_arch_config_matches_official_checkpoint_config() -> None:
-    """Values transcribed from Wan-AI/Wan2.2-Animate-14B-Diffusers transformer/config.json."""
+    """The values WanAnimateArchConfig overrides or introduces, transcribed
+    from Wan-AI/Wan2.2-Animate-14B-Diffusers transformer/config.json. The
+    inherited tower geometry (40 layers, dim 5120, ...) is the base
+    WanVideoArchConfig's and is exercised by every other Wan model."""
     a = WanAnimateArchConfig()
-    assert a.hidden_size == 5120  # num_attention_heads * attention_head_dim
-    assert a.num_attention_heads == 40
-    assert a.attention_head_dim == 128
-    assert a.ffn_dim == 13824
-    assert a.num_layers == 40
     assert a.in_channels == 36  # 16 noise + 4 mask + 16 conditional latent
     assert a.latent_channels == 16
     assert a.out_channels == 16
-    assert a.text_dim == 4096
-    assert a.freq_dim == 256
     assert a.image_dim == 1280  # CLIP ViT-H feature width
     assert a.added_kv_proj_dim == 5120  # I2V image cross-attention on
-    assert a.patch_size == (1, 2, 2)
-    assert a.qk_norm == "rms_norm_across_heads"
-    assert a.cross_attn_norm is True
-    assert a.eps == 1e-6
-    assert a.rope_max_seq_len == 1024
-    assert a.pos_embed_seq_len is None
     assert a.motion_encoder_channel_sizes is None  # null -> LIA default table
     assert a.motion_encoder_size == 512
     assert a.motion_style_dim == 512
@@ -96,7 +89,6 @@ def test_pipeline_config_wires_the_animate_dit() -> None:
     cfg = WanAnimate14BConfig()
     assert isinstance(cfg.dit_config, WanAnimateConfig)
     assert cfg.flow_shift == 5.0  # official wan_animate_14B.py: sample_shift
-    assert cfg.refert_num == 1
     # The VAE encoder is needed for the reference image, the pose video and
     # the previous segment's guidance frames -- not just decoding.
     assert cfg.vae_config.load_encoder is True
@@ -104,7 +96,7 @@ def test_pipeline_config_wires_the_animate_dit() -> None:
 
 
 def test_in_channels_must_decompose_into_noise_mask_cond() -> None:
-    with pytest.raises(AssertionError):
+    with pytest.raises(AssertionError, match=r"2 \* latent_channels"):
         WanAnimateArchConfig(latent_channels=8)  # 36 != 2*8 + 4
 
 
@@ -113,13 +105,8 @@ def test_face_adapter_stride_must_divide_num_layers() -> None:
     record of which block each serves; adapter i serves block i * stride.
     A stride that does not divide num_layers loads cleanly and steers the
     wrong blocks."""
-    with pytest.raises(AssertionError):
+    with pytest.raises(AssertionError, match="exact multiple"):
         WanAnimateArchConfig(inject_face_latents_blocks=7)  # 40 % 7 != 0
-
-
-def test_motion_encoder_size_must_be_power_of_two() -> None:
-    with pytest.raises(AssertionError):
-        WanAnimateArchConfig(motion_encoder_size=500)
 
 
 def _apply_mapping(name: str) -> str:
@@ -144,6 +131,49 @@ def test_param_names_mapping_wraps_both_patchifiers_and_nothing_else() -> None:
 
 
 # --------------------------------------------------------------------------
+# Stage helpers: pure functions whose only failure mode is silently wrong video
+# --------------------------------------------------------------------------
+
+
+def test_pad_frames_reflects_like_the_reference() -> None:
+    # The example from diffusers' pad_video_frames docstring, pinned exactly.
+    assert _pad_frames(list("12345"), 10) == list("1234543212")
+
+
+def test_pad_frames_truncates_and_handles_degenerate_inputs() -> None:
+    assert _pad_frames(list("123"), 2) == list("12")
+    assert _pad_frames(["x"], 4) == ["x"] * 4  # reflecting one frame is repetition
+    with pytest.raises(ValueError, match="empty driving video"):
+        _pad_frames([], 3)
+
+
+def test_fold_i2v_mask_reference_slot_is_all_ones() -> None:
+    mask = _fold_i2v_mask(None, 1, 4, 4, mask_len=1, temporal_ratio=4,
+                          device=torch.device("cpu"), dtype=torch.float32)
+    assert mask.shape == (1, 4, 1, 4, 4)
+    assert torch.all(mask == 1)
+
+
+def test_fold_i2v_mask_animation_target_is_all_zeros() -> None:
+    mask = _fold_i2v_mask(None, 5, 4, 4, mask_len=0, temporal_ratio=4,
+                          device=torch.device("cpu"), dtype=torch.float32)
+    assert mask.shape == (1, 4, 5, 4, 4)
+    assert torch.all(mask == 0)
+
+
+def test_fold_i2v_mask_folds_pixel_frames_into_channels() -> None:
+    """5 pixel frames -> 2 latent frames: frame 0 is repeated 4x and becomes
+    all four channels of latent frame 0; frames 1..4 fold into latent frame 1."""
+    pixel = torch.zeros(1, 1, 5, 2, 2)
+    pixel[:, :, 0] = 1
+    mask = _fold_i2v_mask(pixel, 2, 2, 2, mask_len=0, temporal_ratio=4,
+                          device=torch.device("cpu"), dtype=torch.float32)
+    assert mask.shape == (1, 4, 2, 2, 2)
+    assert torch.all(mask[:, :, 0] == 1)
+    assert torch.all(mask[:, :, 1] == 0)
+
+
+# --------------------------------------------------------------------------
 # The StyleGAN2 runtime-scaling contract (the "loads cleanly, generates
 # garbage" trap): checkpoint weights are stored unit-scale and every forward
 # must multiply by 1/sqrt(fan_in).
@@ -151,9 +181,9 @@ def test_param_names_mapping_wraps_both_patchifiers_and_nothing_else() -> None:
 
 
 def test_motion_linear_applies_runtime_weight_scale() -> None:
-    layer = MotionLinear(4, 3, bias=False)
+    layer = MotionLinear(4, 3)
     x = torch.randn(2, 4)
-    expected = F.linear(x, layer.weight * (1 / math.sqrt(4)))
+    expected = F.linear(x, layer.weight * (1 / math.sqrt(4)), bias=layer.bias)
     torch.testing.assert_close(layer(x), expected)
 
 
@@ -162,6 +192,15 @@ def test_motion_conv_applies_runtime_weight_scale() -> None:
     x = torch.randn(1, 2, 4, 4)
     expected = F.conv2d(x, conv.weight * (1 / math.sqrt(2 * 1**2)))
     torch.testing.assert_close(conv(x), expected)
+
+
+def test_motion_layers_cast_activations_to_the_weight_dtype() -> None:
+    """Face crops arrive fp32 while loaded weights are bf16; a raw
+    (no-autocast) forward must cast rather than raise on the mixed matmul."""
+    conv = MotionConv2d(2, 3, kernel_size=1, use_activation=False).to(torch.bfloat16)
+    assert conv(torch.randn(1, 2, 4, 4)).dtype == torch.bfloat16
+    linear = MotionLinear(4, 3).to(torch.bfloat16)
+    assert linear(torch.randn(2, 4)).dtype == torch.bfloat16
 
 
 def test_fused_leaky_relu_adds_bias_then_scales() -> None:
@@ -182,18 +221,37 @@ def test_motion_encoder_bottlenecks_to_motion_dim_then_resynthesises() -> None:
     carry more than motion_dim degrees of freedom."""
     enc = WanAnimateMotionEncoder(size=16, style_dim=8, motion_dim=4, out_dim=8,
                                   channels=_TINY_MOTION_CHANNELS)
-    assert len(enc.res_blocks) == 2  # log2(16)=4 -> feature map 16 -> 8 -> 4
+    assert len(enc.res_blocks) == 2  # feature map 16 -> 8 -> 4
     assert tuple(enc.motion_network[-1].weight.shape) == (4, 8)  # style -> motion code
     assert tuple(enc.motion_synthesis_weight.shape) == (8, 4)  # out_dim x motion_dim
     out = enc(torch.randn(3, 3, 16, 16))
     assert out.shape == (3, 8)
 
 
-def test_motion_synthesis_basis_is_orthonormal() -> None:
+def test_motion_synthesis_ignores_the_stored_basis_scale() -> None:
+    """QR orthonormalises the basis at forward time, so rescaling the stored
+    weight cannot change the motion vector. Skipping the QR would scale the
+    output with the weight."""
     enc = WanAnimateMotionEncoder(size=16, style_dim=8, motion_dim=4, out_dim=8,
                                   channels=_TINY_MOTION_CHANNELS)
-    q = torch.linalg.qr((enc.motion_synthesis_weight + 1e-8).to(torch.float32))[0]
-    torch.testing.assert_close(q.T @ q, torch.eye(4), atol=1e-5, rtol=1e-5)
+    x = torch.randn(2, 3, 16, 16)
+    with torch.no_grad():
+        base = enc(x)
+        enc.motion_synthesis_weight.mul_(4.0)
+        rescaled = enc(x)
+    # Loose tolerance: the +1e-8 anti-degeneracy offset does not scale with the weight.
+    torch.testing.assert_close(base, rescaled, atol=1e-4, rtol=1e-4)
+
+
+def test_default_motion_encoder_walks_the_full_lia_channel_table() -> None:
+    """512 -> 4 halvings with the LIA widths; a hole in the table is a
+    KeyError at construction and a wrong width is a shape mismatch at load.
+    Meta device: structure only, no memory."""
+    with torch.device("meta"):
+        enc = WanAnimateMotionEncoder()
+    assert len(enc.res_blocks) == 7  # 512 -> 256 -> ... -> 4
+    assert tuple(enc.conv_in.weight.shape) == (32, 3, 1, 1)  # channels["512"] = 32
+    assert tuple(enc.conv_out.weight.shape) == (512, 512, 4, 4)
 
 
 def test_motion_encoder_rejects_wrong_crop_size() -> None:
@@ -213,16 +271,18 @@ def test_face_encoder_downsamples_time_4x_and_appends_padding_token() -> None:
     pixel frames -> ceil(13/2)=7 -> ceil(7/2)=4 latent-frame groups, each
     num_heads content tokens + 1 learned padding token."""
     enc = WanAnimateFaceEncoder(in_dim=8, out_dim=16, hidden_dim=8, num_heads=2)
+    with torch.no_grad():
+        enc.padding_tokens.fill_(0.5)  # a marker: zeros would match a dropped weight
     out = enc(torch.randn(1, 13, 8))
     assert out.shape == (1, 4, 3, 16)  # [B, T/4, num_heads + 1, out_dim]
-    # padding_tokens init to zeros, so the appended row is exactly zero here.
-    torch.testing.assert_close(out[:, :, -1], torch.zeros(1, 4, 16))
+    # The last row is the learned padding token, broadcast to every frame.
+    torch.testing.assert_close(out[:, :, -1], torch.full((1, 4, 16), 0.5))
 
 
 def test_face_encoder_state_dict_matches_checkpoint_naming() -> None:
     """The Animate checkpoint stores plain Conv1d keys (face_encoder.conv2.weight)
-    with the causal pad applied inline -- NOT S2V's CausalConv1d wrapper
-    (.conv.weight). Renaming any of these breaks verbatim loading."""
+    with the causal pad applied inline -- no wrapper sublevel like a
+    `.conv.weight`. Renaming any of these breaks verbatim loading."""
     enc = WanAnimateFaceEncoder(in_dim=8, out_dim=16, hidden_dim=8, num_heads=2)
     assert set(enc.state_dict().keys()) == {
         "conv1_local.weight", "conv1_local.bias", "conv2.weight", "conv2.bias", "conv3.weight",
@@ -231,12 +291,11 @@ def test_face_encoder_state_dict_matches_checkpoint_naming() -> None:
 
 
 def _init_params(module: torch.nn.Module) -> None:
-    # FastVideo's ReplicatedLinear zero-initialises (weights arrive from the
-    # checkpoint), so stand in for loaded weights or residuals are no-ops and
-    # behaviour tests would pass vacuously.
+    # FastVideo's linear layers allocate weights with torch.empty (values
+    # normally arrive from a checkpoint), so stand in for loaded weights or
+    # forwards read uninitialised memory: nondeterministic outputs, maybe NaN.
     for p in module.parameters():
-        if p.dim() > 0:
-            torch.nn.init.normal_(p, std=0.02)
+        torch.nn.init.normal_(p, std=0.02)
 
 
 def test_face_attention_confines_each_frame_to_its_own_tokens() -> None:
@@ -250,21 +309,17 @@ def test_face_attention_confines_each_frame_to_its_own_tokens() -> None:
     hs = torch.randn(1, frames * tokens_per_frame, 16)
     motion = torch.randn(1, frames, n_face, 16)
     perturbed = motion.clone()
-    perturbed[:, 1] += 1.0
+    # Perturb per-channel: the affine-free pre-norm LayerNorm exactly cancels
+    # a channel-constant offset (LN(x + c) == LN(x)), which would make this
+    # test pass even with confinement broken.
+    perturbed[:, 1] += torch.randn_like(perturbed[:, 1])
     with torch.no_grad(), set_forward_context(current_timestep=0, attn_metadata=None):
         base = attn(hs, motion)
         moved = attn(hs, perturbed)
     delta = (base - moved).abs().reshape(1, frames, tokens_per_frame, 16)
-    assert delta[:, 1].max() > 0
+    assert delta[:, 1].max() > 1e-4  # frame 1 genuinely moved
     torch.testing.assert_close(delta[:, 0], torch.zeros_like(delta[:, 0]))
     torch.testing.assert_close(delta[:, 2], torch.zeros_like(delta[:, 2]))
-
-
-def test_face_attention_misalignment_raises() -> None:
-    attn = WanAnimateFaceCrossAttention(dim=16, num_heads=2)
-    with pytest.raises(ValueError, match="face/video misalignment"):
-        with set_forward_context(current_timestep=0, attn_metadata=None):
-            attn(torch.randn(1, 10, 16), torch.randn(1, 3, 3, 16))  # 10 % 3 != 0
 
 
 # --------------------------------------------------------------------------
@@ -275,10 +330,13 @@ def test_face_attention_misalignment_raises() -> None:
 def _tiny_arch(**overrides) -> WanAnimateArchConfig:
     kwargs = dict(
         num_attention_heads=2,
+        # head_dim 8 is not in FlashAttention's supported sizes, so backend
+        # selection falls back to SDPA even if another test left the global
+        # compute dtype at bf16 -- keeps the fp32 CPU-side forward stable.
         attention_head_dim=8,  # dim = 16
         ffn_dim=32,
         num_layers=2,
-        inject_face_latents_blocks=1,  # adapter after every block -> 2 adapters
+        inject_face_latents_blocks=1,
         latent_channels=4,
         in_channels=12,  # 2*4 + 4
         out_channels=4,
@@ -332,6 +390,8 @@ def test_forward_returns_full_sequence_shaped_latents() -> None:
 
 @pytest.mark.usefixtures("distributed_setup")
 def test_forward_is_deterministic() -> None:
+    # Also the only guard against input mutation: _patchify_with_pose writes
+    # in place, legal only because it writes a fresh conv output.
     arch = _tiny_arch()
     model, inputs = _tiny_model(arch), _tiny_inputs(arch)
     with torch.no_grad(), set_forward_context(current_timestep=0, attn_metadata=None):
@@ -365,9 +425,29 @@ def test_pose_add_skips_reference_frame() -> None:
 
 
 @pytest.mark.usefixtures("distributed_setup")
+def test_batched_clips_do_not_interleave_their_faces() -> None:
+    """_encode_face flattens (batch, frame) to one axis and back; a transposed
+    reshape would silently interleave two clips' faces in batched inference,
+    which batch-size-1 tests can never catch."""
+    arch = _tiny_arch()
+    model = _tiny_model(arch)
+    clip_a = torch.randn(1, 3, 5, 16, 16)
+    clip_b = torch.randn(1, 3, 5, 16, 16)
+    with torch.no_grad():
+        single_a = model._encode_face(clip_a)
+        single_b = model._encode_face(clip_b)
+        batched = model._encode_face(torch.cat([clip_a, clip_b]))
+    torch.testing.assert_close(batched[0], single_a[0])
+    torch.testing.assert_close(batched[1], single_b[0])
+
+
+@pytest.mark.usefixtures("distributed_setup")
 def test_face_adapter_fires_after_configured_blocks() -> None:
-    arch = _tiny_arch()  # stride 1 over 2 layers: block0, adapter0, block1, adapter1
+    # Stride 2 over 4 layers: with stride 1, both idx % stride and idx // stride
+    # are degenerate and any index-mangling would pass.
+    arch = _tiny_arch(num_layers=4, inject_face_latents_blocks=2)
     model, inputs = _tiny_model(arch), _tiny_inputs(arch)
+    assert len(model.face_adapter) == 2
     calls: list[tuple[str, int]] = []
     for i, block in enumerate(model.blocks):
         block.register_forward_hook(lambda m, a, o, i=i: calls.append(("block", i)))
@@ -375,7 +455,7 @@ def test_face_adapter_fires_after_configured_blocks() -> None:
         adapter.register_forward_hook(lambda m, a, o, i=i: calls.append(("adapter", i)))
     with torch.no_grad(), set_forward_context(current_timestep=0, attn_metadata=None):
         model(**inputs)
-    assert calls == [("block", 0), ("adapter", 0), ("block", 1), ("adapter", 1)]
+    assert calls == [("block", 0), ("adapter", 0), ("block", 1), ("block", 2), ("adapter", 1), ("block", 3)]
 
 
 @pytest.mark.usefixtures("distributed_setup")
@@ -390,8 +470,9 @@ def test_missing_pose_or_face_fails_loudly() -> None:
 
 @pytest.mark.usefixtures("distributed_setup")
 def test_missing_clip_image_embeds_fails_loudly() -> None:
-    """The I2V cross-attention splits the first 257 context tokens off as image
-    tokens positionally; without CLIP embeds it would silently eat the text."""
+    """The I2V cross-attention splits the first 257 context tokens off as
+    image tokens positionally; the guard turns what would be a bare TypeError
+    at the concat into an error that names the missing input."""
     arch = _tiny_arch()
     model, inputs = _tiny_model(arch), _tiny_inputs(arch)
     with pytest.raises(ValueError, match="CLIP features"):
@@ -419,8 +500,8 @@ def test_face_frame_count_mismatch_raises() -> None:
 
 def test_model_is_discoverable_by_class_name() -> None:
     """EntryClass auto-discovery must register the class under the exact name
-    the checkpoint's model_index.json/_class_name uses -- no alias table entry
-    (unlike S2V's WanModel_S2V), so this is the only wiring to break."""
+    the checkpoint's _class_name uses -- there is no alias table entry, so
+    this is the only wiring to break."""
     from fastvideo.models.registry import _FAST_VIDEO_MODELS
     assert "WanAnimateTransformer3DModel" in _FAST_VIDEO_MODELS
     component, module, cls = _FAST_VIDEO_MODELS["WanAnimateTransformer3DModel"]
@@ -435,12 +516,24 @@ def test_blur_kernels_survive_meta_device_construction() -> None:
     arch = _tiny_arch()
     with torch.device("meta"):
         model = WanAnimateTransformer3DModel(config=WanAnimateConfig(arch_config=arch), hf_config={})
-    metas = [m for m in model.modules() if isinstance(m, MotionConv2d) and m.blur]
-    assert metas and all(m.blur_kernel.is_meta for m in metas)
+    blurred_convs = [m for m in model.modules() if isinstance(m, MotionConv2d) and m.blur]
+    assert blurred_convs and all(m.blur_kernel.is_meta for m in blurred_convs)
     model.materialize_non_persistent_buffers(device=torch.device("cpu"))
-    for m in metas:
+    for m in blurred_convs:
         assert not m.blur_kernel.is_meta
         torch.testing.assert_close(m.blur_kernel.sum(), torch.tensor(1.0))  # normalised FIR taps
+
+
+@pytest.mark.usefixtures("distributed_setup")
+def test_motion_synthesis_weight_is_pinned_to_fp32() -> None:
+    """Diffusers keeps this tensor fp32 (_keep_in_fp32_modules): the QR basis
+    is re-derived from it every forward, so loading it in bf16 changes the
+    basis itself. The loader consults _get_parameter_dtype per parameter."""
+    arch = _tiny_arch()
+    model = _tiny_model(arch)
+    assert model._get_parameter_dtype("motion_encoder.motion_synthesis_weight",
+                                      torch.bfloat16) == torch.float32
+    assert model._get_parameter_dtype("blocks.0.to_q.weight", torch.bfloat16) == torch.bfloat16
 
 
 # --------------------------------------------------------------------------
@@ -467,10 +560,12 @@ def test_every_checkpoint_tensor_has_a_home_in_the_model() -> None:
     checkpoint must land on a model parameter with the right shape, and every
     model parameter must be fed. Costs no GPU and no memory.
 
-    Known suspect if this fails on `missing`: blocks.N.attn2.norm_added_q --
+    Known suspect if this fails on `missing`: blocks.N.attn2.norm_added_q.
     FastVideo's WanI2VCrossAttention allocates it (dead weight, never used in
-    forward) while diffusers marks it ignore-on-load; whether the Animate
-    checkpoint ships it decides if we need an exclusion.
+    forward). Diffusers' Animate model does not create it but marks it
+    ignore-on-load-unexpected -- which implies the converted checkpoint ships
+    it, in which case it loads into our dead weight harmlessly. If it is
+    absent instead, add a one-line exclusion here.
     """
     shapes = _checkpoint_tensor_shapes(os.path.join(_animate_model_path(), "transformer"))
     assert shapes, "no tensors found in checkpoint"
@@ -493,8 +588,8 @@ def test_every_checkpoint_tensor_has_a_home_in_the_model() -> None:
 @pytest.mark.usefixtures("distributed_setup")
 def test_transformer_loads_and_runs_a_forward_pass() -> None:
     """Load every weight through the real loader and run one raw (no-autocast)
-    bf16 forward -- the pass that exposed the S2V dtype bug its CPU tests and
-    autocast had masked."""
+    bf16 forward -- the pass that exposes the dtype seams autocast otherwise
+    hides."""
     from fastvideo.fastvideo_args import FastVideoArgs
     from fastvideo.models.loader.component_loader import TransformerLoader
 

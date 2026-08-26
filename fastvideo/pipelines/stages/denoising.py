@@ -681,11 +681,9 @@ class DenoisingStage(PipelineStage):
                 "face_pixel_values": batch.face_pixel_values,
             },
         )
-        # A None would override the model's own default, so drop empties.
-        kwargs = {k: v for k, v in kwargs.items() if v is not None}
         uncond_kwargs = dict(kwargs)
-        if "face_pixel_values" in uncond_kwargs:
-            uncond_kwargs["face_pixel_values"] = uncond_kwargs["face_pixel_values"] * 0 - 1
+        if uncond_kwargs.get("face_pixel_values") is not None:
+            uncond_kwargs["face_pixel_values"] = torch.full_like(uncond_kwargs["face_pixel_values"], -1.0)
         return kwargs, uncond_kwargs
 
     def prepare_extra_func_kwargs(self, func, kwargs) -> dict[str, Any]:
