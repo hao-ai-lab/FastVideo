@@ -18,7 +18,10 @@ initializing a distributed process group or model.
 """
 from __future__ import annotations
 
+import multiprocessing as mp
+import os
 import signal
+import sys
 
 import pytest
 
@@ -45,10 +48,36 @@ class _ParentlessProcess:
         return None
 
 
+def _run_real_signal_probe(ready_pipe, log_queue, signal_point, entered_signal_point, shutdown_called) -> None:
+
+    class SignalWaitingWorker:
+
+        READY_STR = "READY"
+
+        def __init__(self, *args, **kwargs) -> None:
+            if signal_point == "worker_construction":
+                entered_signal_point.set()
+                signal.pause()
+
+        def worker_busy_loop(self) -> None:
+            assert signal_point == "worker_loop"
+            entered_signal_point.set()
+            signal.pause()
+
+        def shutdown(self) -> None:
+            shutdown_called.set()
+
+    multiproc_executor.kill_itself_when_parent_died = lambda: None
+    multiproc_executor.faulthandler.enable = lambda: None
+    multiproc_executor.psutil.Process = _ParentlessProcess
+    multiproc_executor.WorkerMultiprocProc = SignalWaitingWorker
+    WorkerMultiprocProc.worker_main(ready_pipe=ready_pipe, rank=7, log_queue=log_queue)
+
+
 @pytest.mark.parametrize(
     ("signum", "expected_reason", "unexpected_reason"),
     [
-        (signal.SIGTERM, "out-of-memory daemon", "user interrupted"),
+        (signal.SIGTERM, "parent cleaning up workers", "user interrupted"),
         (signal.SIGINT, "user interrupted", "out-of-memory daemon"),
     ],
 )
@@ -130,3 +159,51 @@ def test_worker_main_preserves_unrelated_system_exit(monkeypatch: pytest.MonkeyP
     assert exc_info.value.code == 23
     assert ready_pipe.closed
     assert logged_messages == []
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="POSIX signal delivery is a Linux worker contract")
+@pytest.mark.parametrize("signum", [signal.SIGTERM, signal.SIGINT])
+@pytest.mark.parametrize("signal_point", ["worker_construction", "worker_loop"])
+def test_worker_main_forwards_real_signal_traceback_across_processes(signum: int, signal_point: str) -> None:
+    context = mp.get_context("spawn")
+    entered_signal_point = context.Event()
+    shutdown_called = context.Event()
+    parent_ready_pipe, child_ready_pipe = context.Pipe(duplex=False)
+    log_queue = context.Queue()
+
+    process = context.Process(
+        target=_run_real_signal_probe,
+        args=(child_ready_pipe, log_queue, signal_point, entered_signal_point, shutdown_called),
+    )
+    process.start()
+    child_ready_pipe.close()
+
+    try:
+        assert entered_signal_point.wait(timeout=5), "child did not reach the requested signal point"
+        if signal_point == "worker_loop":
+            assert parent_ready_pipe.recv() == {"status": "READY"}
+
+        os.kill(process.pid, signum)
+        process.join(timeout=5)
+        assert not process.is_alive(), "signalled worker did not exit"
+        assert process.exitcode == 0  # Preserve the historical argument-less SystemExit status.
+
+        record = log_queue.get(timeout=5)
+        message = record.getMessage()
+        assert f"Worker 7 received {signal.Signals(signum).name} ({signum})" in message
+        assert "Traceback (most recent call last)" in message
+        assert "The stack below is where execution was interrupted, not the cause." in message
+
+        if signal_point == "worker_loop":
+            assert shutdown_called.wait(timeout=1)
+        else:
+            assert not shutdown_called.is_set()
+            with pytest.raises(EOFError):
+                parent_ready_pipe.recv()
+    finally:
+        if process.is_alive():
+            process.kill()
+            process.join(timeout=5)
+        parent_ready_pipe.close()
+        log_queue.close()
+        log_queue.join_thread()

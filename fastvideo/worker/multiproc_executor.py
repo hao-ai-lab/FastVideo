@@ -599,9 +599,9 @@ class WorkerMultiprocProc:
             else:
                 logger.exception(
                     "Worker %d received %s (%d) while running. This can come from an external process, "
-                    "such as an out-of-memory daemon, or from the parent forcing shutdown after a worker "
-                    "failed to exit. The stack below is where execution was interrupted, not the cause.", rank,
-                    signal_name, exc.signum)
+                    "such as an out-of-memory daemon, or from the parent cleaning up workers, including "
+                    "after another worker failed. The stack below is where execution was interrupted, not "
+                    "the cause.", rank, signal_name, exc.signum)
             raise
 
         except Exception as exc:

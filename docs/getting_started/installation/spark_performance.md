@@ -158,6 +158,11 @@ is power-cycled. To avoid it:
   bare foreground high-parallelism build.
 - Leave `*_cpu_offload` at the example defaults — "CPU" offload is the *same*
   unified RAM on the GB10, so the win is tiling + sane resolution, not offloading.
+- Some Spark images run `earlyoom` with a preference for terminating Python
+  processes under memory pressure. A worker's SIGTERM log and traceback show
+  where it was interrupted, not why it was selected; confirm the cause in the
+  `earlyoom` service or system logs. A later SIGKILL or kernel OOM kill cannot be
+  caught and reported by Python.
 
 ## Gotchas specific to the GB10
 
