@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from contextlib import nullcontext
 from typing import Any, TYPE_CHECKING
 
@@ -92,6 +93,7 @@ def load_module_from_path(
     override_transformer_cls_name: str | None = None,
     transformer_override_safetensor: str | None = None,
     attention_backend: AttentionBackendEnum | str | None = None,
+    pre_fsdp_model_transform: Callable[[torch.nn.Module], None] | None = None,
 ) -> torch.nn.Module:
     """Load one pipeline component with its role-scoped attention policy.
 
@@ -129,6 +131,11 @@ def load_module_from_path(
 
     if transformer_override_safetensor:
         fastvideo_args.init_weights_from_safetensors = str(transformer_override_safetensor)
+
+    if pre_fsdp_model_transform is not None:
+        if module_type not in {"transformer", "transformer_ref"}:
+            raise ValueError("pre_fsdp_model_transform can only be used for transformer components")
+        fastvideo_args._pre_fsdp_model_transform = pre_fsdp_model_transform
 
     if attention_backend is not None and module_type not in {
             "transformer",

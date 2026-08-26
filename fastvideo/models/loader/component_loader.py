@@ -1147,6 +1147,9 @@ class TransformerLoader(ComponentLoader):
                 # once the module tree exists.
                 lora_path=getattr(fastvideo_args, "lora_path", None),
                 lora_strength=getattr(fastvideo_args, "lora_strength", 1.0),
+                # Training adapters must be installed before FSDP establishes the
+                # module's sharding topology.
+                pre_fsdp_model_transform=getattr(fastvideo_args, "_pre_fsdp_model_transform", None),
             )
 
         total_params = sum(p.numel() for p in model.parameters())

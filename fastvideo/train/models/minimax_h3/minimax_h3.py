@@ -27,7 +27,7 @@ from fastvideo.train.models.base import ModelBase, NoisePrediction
 from fastvideo.train.utils.activation_checkpoint import apply_activation_checkpointing
 from fastvideo.train.utils.module_state import apply_trainable
 from fastvideo.train.utils.moduleloader import load_module_from_path
-from fastvideo.train.utils.lora import LoraConfig
+from fastvideo.train.utils.lora import finalize_lora_training, LoraConfig
 
 if TYPE_CHECKING:
     from fastvideo.train.utils.training_config import TrainingConfig
@@ -63,10 +63,12 @@ class MiniMaxH3Model(ModelBase):
         enable_gradient_checkpointing_type: str | None = None,
         transformer_override_safetensor: str | None = None,
         attention_backend: AttentionBackendEnum | str | None = AttentionBackendEnum.TORCH_SDPA,
+        lora: LoraConfig | dict[str, Any] | None = None,
     ) -> None:
         """Validate the single-document T2VA contract and load the transformer."""
         super().__init__(
             trainable=trainable,
+            lora=lora,
             attention_backend=attention_backend,
         )
         # PyTorch scaled dot product attention (SDPA) provides dense attention
@@ -116,6 +118,20 @@ class MiniMaxH3Model(ModelBase):
         transformer_override_safetensor: str | None,
     ) -> torch.nn.Module:
         """Load H3 through the training FSDP loader and apply block checkpointing."""
+        pre_fsdp_model_transform = None
+        if self._lora_config is not None and self._lora_config.enable:
+
+            def _prepare_lora(transformer: torch.nn.Module) -> None:
+                enabled = self._enable_lora_if_configured(
+                    transformer,
+                    prepare_for_fsdp=True,
+                    initialization_seed=int(self.training_config.data.seed or 0),
+                )
+                if not enabled:
+                    raise RuntimeError("Failed to prepare MiniMax H3 LoRA before FSDP sharding")
+
+            pre_fsdp_model_transform = _prepare_lora
+
         transformer = load_module_from_path(
             model_path=self._init_from,
             module_type=self._transformer_module_type,
@@ -124,6 +140,7 @@ class MiniMaxH3Model(ModelBase):
             override_transformer_cls_name=self._transformer_cls_name,
             transformer_override_safetensor=transformer_override_safetensor,
             attention_backend=self.attention_backend,
+            pre_fsdp_model_transform=pre_fsdp_model_transform,
         )
         checkpointing_type = (enable_gradient_checkpointing_type
                               or self.training_config.model.enable_gradient_checkpointing_type)
@@ -132,6 +149,12 @@ class MiniMaxH3Model(ModelBase):
                 transformer,
                 checkpointing_type=checkpointing_type,
             )
+        if self._lora_config is not None and self._lora_config.enable:
+            finalized_layers = finalize_lora_training(transformer)
+            if finalized_layers != self._num_lora_layers:
+                raise RuntimeError("MiniMax H3 LoRA layer count changed during FSDP loading: "
+                                   f"{self._num_lora_layers} -> {finalized_layers}")
+            return transformer
         return apply_trainable(transformer, trainable=trainable)
 
     def init_preprocessors(self, training_config: TrainingConfig) -> None:
@@ -435,14 +458,8 @@ class MiniMaxH3LoraModel(MiniMaxH3Model):
             enable_gradient_checkpointing_type=enable_gradient_checkpointing_type,
             transformer_override_safetensor=transformer_override_safetensor,
             attention_backend=attention_backend,
+            lora=lora_config,
         )
-
-        # MiniMaxH3Model intentionally remains unchanged. The LoRA-specific
-        # subclass activates the shared modular-training LoRA implementation
-        # only after the sharded transformer has been loaded.
-        self._lora_config = lora_config
-        if not self._enable_lora_if_configured(self.transformer):
-            raise RuntimeError("Failed to enable MiniMax H3 LoRA training")
 
         if (expected_layers is not None and self._num_lora_layers != expected_layers):
             raise ValueError("Unexpected MiniMax H3 LoRA layer count: "
