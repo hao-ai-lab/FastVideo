@@ -92,6 +92,10 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
         "scheduler",
         "audio_scheduler",
     ]
+    # Deferral is safe here: no stage reads a component's attributes while it
+    # is being constructed, and `initialize_pipeline` only inspects the
+    # schedulers, which are never deferred.
+    _lazy_module_names = ("text_encoder", "transformer", "vae", "audio_vae")
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         self._ref2va = False

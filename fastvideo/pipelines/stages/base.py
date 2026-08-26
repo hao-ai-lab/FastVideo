@@ -151,6 +151,34 @@ class PipelineStage(ABC):
                 raise
 
         # Execute the actual stage logic
+        try:
+            result = self._execute(batch, fastvideo_args, stage_key, stage_class_name, stage_name)
+        except BaseException:
+            self._release_deferred_modules(stage_name)
+            raise
+
+        if enable_verification:
+            # Post-execution output verification
+            try:
+                output_result = self.verify_output(result, fastvideo_args)
+                self._run_verification(output_result, stage_name, "output")
+            except Exception as e:
+                logger.error("Output verification failed for %s: %s", stage_name, str(e))
+                self._release_deferred_modules(stage_name)
+                raise
+
+        self._release_deferred_modules(stage_name)
+        return result
+
+    def _execute(
+        self,
+        batch: ForwardBatch,
+        fastvideo_args: FastVideoArgs,
+        stage_key: str,
+        stage_class_name: str,
+        stage_name: str,
+    ) -> ForwardBatch:
+        """Run forward, with the optional timing and logging wrapper."""
         if envs.FASTVIDEO_STAGE_LOGGING:
             logger.info("[%s] Starting execution", stage_name)
             torch.cuda.synchronize()
@@ -176,19 +204,23 @@ class PipelineStage(ABC):
             # Direct execution (current behavior)
             result = self.forward(batch, fastvideo_args)
 
-        if enable_verification:
-            # Post-execution output verification
-            try:
-                output_result = self.verify_output(result, fastvideo_args)
-                self._run_verification(output_result, stage_name, "output")
-            except Exception as e:
-                logger.error("Output verification failed for %s: %s", stage_name, str(e))
-                raise
-
-        for lazy_module in self._lazy_modules_to_release:
-            lazy_module.release()
-
         return result
+
+    def _release_deferred_modules(self, stage_name: str) -> None:
+        """Free the deferred components this stage is the last user of.
+
+        Called on the way out whether or not the stage succeeded. A stage that
+        raises after materializing a multi-gigabyte component would otherwise
+        keep it for the life of the generator, and the retry that a
+        memory-constrained caller is most likely to attempt would start from a
+        worse position than the request that just failed.
+        """
+        for lazy_module in self._lazy_modules_to_release:
+            try:
+                lazy_module.release()
+            except Exception:
+                # Never let cleanup replace the exception being propagated.
+                logger.exception("Failed to release deferred module after %s", stage_name)
 
     @abstractmethod
     def forward(
