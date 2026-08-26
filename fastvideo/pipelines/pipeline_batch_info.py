@@ -134,6 +134,7 @@ class ForwardBatch:
     image_latent: torch.Tensor | None = None
     # Normalized clean first frame for Wan TI2V and causal-DMD conditioning.
     first_frame_latent: torch.Tensor | None = None
+    helios_latent_chunks: list[torch.Tensor] | None = None
 
     # Action control inputs (Matrix-Game)
     mouse_cond: torch.Tensor | None = None  # Shape: (B, T, 2)
