@@ -37,14 +37,15 @@ def test_cuda_device_uuid_receipt_identifies_profiled_worker(monkeypatch) -> Non
     )
 
 
-def test_init_device_applies_offload_policy_after_binding_worker_device(monkeypatch) -> None:
+@pytest.mark.parametrize("executor_backend", ["mp", "ray"])
+def test_init_device_applies_offload_policy_after_binding_worker_device(monkeypatch, executor_backend: str) -> None:
     """The runtime probe must see this worker's device, never driver device 0."""
     events = []
-    args = FastVideoArgs(model_path="test", num_gpus=1)
+    args = FastVideoArgs(model_path="test", num_gpus=1, distributed_executor_backend=executor_backend)
     args.disable_offload_on_unified_memory = Mock(side_effect=lambda device_id: events.append(("policy", device_id)))
     worker = Worker(args, local_rank=3, rank=3, distributed_init_method="env://")
 
-    monkeypatch.setattr("fastvideo.worker.gpu_worker.get_local_torch_device", lambda: torch.device("cuda:3"))
+    monkeypatch.setenv("LOCAL_RANK", "0")
     monkeypatch.setattr("fastvideo.platforms.current_platform.is_cuda_alike", lambda: True)
     monkeypatch.setattr("fastvideo.platforms.current_platform.is_cuda", lambda: False)
     monkeypatch.setattr(torch.cuda, "set_device", lambda device: events.append(("set_device", device.index)))

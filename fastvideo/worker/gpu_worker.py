@@ -56,8 +56,11 @@ class Worker:
 
         # Set environment variables BEFORE calling get_local_torch_device()
         # so that each worker uses the correct device
-        if self.fastvideo_args.distributed_executor_backend == "mp":
-            os.environ["LOCAL_RANK"] = str(self.local_rank)
+        # Both multiprocessing and Ray pass the worker-local rank explicitly.
+        # Ray deliberately excludes LOCAL_RANK from the copied driver
+        # environment and exposes all GPUs assigned to the node, so leaving an
+        # inherited or missing value here would bind every Ray actor to cuda:0.
+        os.environ["LOCAL_RANK"] = str(self.local_rank)
         os.environ["RANK"] = str(self.rank)
         os.environ["WORLD_SIZE"] = str(self.fastvideo_args.num_gpus)
 
