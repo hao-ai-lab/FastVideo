@@ -8,6 +8,7 @@ This module defines the base class for pipelines that are composed of multiple s
 import argparse
 import os
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from typing import Any, cast
 
 import torch
@@ -33,6 +34,40 @@ from fastvideo.utils import (maybe_download_model, verify_model_config_and_direc
 logger = init_logger(__name__)
 
 
+def _iter_held_objects(stage: PipelineStage) -> Iterator[Any]:
+    """Yield everything a stage holds, walking into nested stages.
+
+    A stage can compose others rather than hold a component directly:
+    ``Cosmos25AutoDenoisingStage`` keeps the transformer inside its ``_t2w``
+    and ``_v2w`` children. A scan that stopped at the outer stage would call
+    that transformer unreferenced and never free it, so the flag would quietly
+    deliver less than it promises on those pipelines.
+    """
+    stack: list[Any] = [stage]
+    visited: set[int] = set()
+    while stack:
+        obj = stack.pop()
+        # is_lazy_module first: isinstance() on a proxy forwards __class__ and
+        # would load every deferred component just to work out where to free it.
+        if is_lazy_module(obj):
+            yield obj
+            continue
+        if isinstance(obj, PipelineStage | list | tuple | dict):
+            if id(obj) in visited:
+                continue
+            visited.add(id(obj))
+        if isinstance(obj, PipelineStage):
+            for key, value in vars(obj).items():
+                if key == "_lazy_modules_to_release":
+                    # Installed by this schedule, not a real use.
+                    continue
+                stack.append(value)
+        elif isinstance(obj, list | tuple):
+            stack.extend(obj)
+        elif isinstance(obj, dict):
+            stack.extend(obj.values())
+
+
 class ComposedPipelineBase(ABC):
     """
     Base class for pipelines composed of multiple stages.
@@ -56,23 +91,23 @@ class ComposedPipelineBase(ABC):
     # list, so a stage added afterwards can rebuild it instead of running
     # against a plan that predates it.
     _lazy_release_hooks_installed: bool = False
-    # Components eligible for deferred loading under ``lazy_module_load``.
-    # These are the weight-bearing ones; tokenizers, processors, and
-    # schedulers are cheap and stay resident so the pipeline can inspect them
-    # at construction time. Names follow the diffusers manifest convention, so
-    # the default list covers most pipelines; override per pipeline if a
-    # component is named differently or must never be released.
-    _lazy_module_names: tuple[str, ...] = (
-        "transformer",
-        "transformer_2",
-        "transformer_ref",
-        "transformer_refine",
-        "text_encoder",
-        "text_encoder_2",
-        "image_encoder",
-        "vae",
-        "audio_vae",
-    )
+    # Components this pipeline allows ``lazy_module_load`` to defer and free.
+    # Empty by default: deferral is opt-in per pipeline, because releasing a
+    # component and loading it again is only safe when nothing outside the
+    # loader has changed it. Two habits break that and neither raises:
+    #
+    #   * mutating a component after load. ``LongCatPipeline.initialize_pipeline``
+    #     turns on block-sparse attention and writes parameters into every
+    #     transformer block. That runs once, so a re-materialized component
+    #     silently comes back with the feature off.
+    #   * reading a component's attributes while building stages. The shared
+    #     ``DenoisingStage.__init__`` derives the attention backend from
+    #     ``transformer.hidden_size``, which materializes the DiT before the
+    #     first request and defeats the deferral it was meant to gain.
+    #
+    # A pipeline opts in by listing the components it has checked. Names match
+    # the diffusers manifest.
+    _lazy_module_names: tuple[str, ...] = ()
 
     @classmethod
     def get_hf_download_component_dirs(cls) -> tuple[str, ...] | None:
@@ -175,14 +210,12 @@ class ComposedPipelineBase(ABC):
         if module_name not in self.modules:
             return
 
-        module = self.modules[module_name]
-        if is_lazy_module(module):
-            # torch.compile replaces the entry in self.modules, which would
-            # drop the proxy and with it the ability to release. Load now and
-            # keep this component resident for the run.
-            logger.info("torch.compile requested for %s; loading it eagerly instead of deferring", module_name)
-            module = module.materialize()
-            self.modules[module_name] = module
+        entry = self.modules[module_name]
+        # Materialize into a local. The dict keeps the proxy until we know a
+        # compiled callable is actually going to replace it, so a component
+        # that turns out to be FSDP-wrapped is neither compiled nor stripped of
+        # its release hook.
+        module = entry.materialize() if is_lazy_module(entry) else entry
         if fsdp_module_cls is not None and isinstance(module, fsdp_module_cls):
             logger.info(
                 "%s is already FSDP-wrapped; skipping torch.compile in pipeline",
@@ -207,6 +240,9 @@ class ComposedPipelineBase(ABC):
 
         # Backward-compatible fallback: compile full module if no condition matched.
         logger.info("Enabling torch.compile for %s with kwargs=%s", module_name, compile_kwargs)
+        if is_lazy_module(entry):
+            logger.info("Whole-module torch.compile replaces the deferred %s, so it stays resident for the run",
+                        module_name)
         self.modules[module_name] = torch.compile(module, **compile_kwargs)
 
     def post_init(self) -> None:
@@ -299,7 +335,15 @@ class ComposedPipelineBase(ABC):
                     )
                     logger.info("Torch Compile enabled for audio VAE")
 
-        self._trace_mgr = attach_activation_trace(self.modules.get("transformer"))
+        trace_target = self.modules.get("transformer")
+        if is_lazy_module(trace_target):
+            # The hook manager keeps a strong reference to every module it
+            # wraps, so attaching here would materialize the DiT before the
+            # first request and pin that instance past any release.
+            logger.warning("Activation trace is not attached to a deferred transformer; "
+                           "turn off lazy_module_load to trace it")
+            trace_target = None
+        self._trace_mgr = attach_activation_trace(trace_target)
 
         if not self.fastvideo_args.training_mode:
             logger.info("Creating pipeline stages...")
@@ -573,25 +617,10 @@ class ComposedPipelineBase(ABC):
 
         last_use: dict[str, int] = {}
         for index, stage in enumerate(self._stages):
-            for key, value in vars(stage).items():
-                if key == "_lazy_modules_to_release":
-                    # Installed by this schedule, not a real use.
-                    continue
-                # is_lazy_module first: isinstance() on a proxy forwards
-                # __class__ and would load every deferred module just to work
-                # out where to release it.
-                if is_lazy_module(value):
-                    candidates: tuple[Any, ...] = (value, )
-                elif isinstance(value, list | tuple):
-                    candidates = tuple(value)
-                elif isinstance(value, dict):
-                    candidates = tuple(value.values())
-                else:
-                    continue
-                for candidate in candidates:
-                    name = lazy_names_by_id.get(id(candidate))
-                    if name is not None:
-                        last_use[name] = index
+            for held in _iter_held_objects(stage):
+                name = lazy_names_by_id.get(id(held))
+                if name is not None:
+                    last_use[name] = index
 
         schedule: dict[int, list[str]] = {}
         for name, index in sorted(last_use.items()):
@@ -623,6 +652,17 @@ class ComposedPipelineBase(ABC):
             logger.info("Deferred modules to free after stage %d (%s): %s", index,
                         getattr(self._stages[index], "_pipeline_stage_name", "?"), names)
         self._lazy_release_hooks_installed = True
+
+    def _release_all_lazy_modules(self) -> None:
+        """Free every deferred component that is currently materialized."""
+        for module_name, module in self.modules.items():
+            if not is_lazy_module(module):
+                continue
+            try:
+                module.release()
+            except Exception:
+                # Never let cleanup replace the exception being propagated.
+                logger.exception("Failed to release deferred module %s", module_name)
 
     def add_stage(self, stage_name: str, stage: PipelineStage):
         assert self.modules is not None, "No modules are registered"
@@ -665,8 +705,17 @@ class ComposedPipelineBase(ABC):
         # Execute each stage
         logger.info("Running pipeline stages: %s", self._stage_name_mapping.keys())
         # logger.info("Batch: %s", batch)
-        for stage in self.stages:
-            batch = stage(batch, fastvideo_args)
+        try:
+            for stage in self.stages:
+                batch = stage(batch, fastvideo_args)
+        except BaseException:
+            # A stage's own hook frees only what that stage was the last user
+            # of. When the run aborts earlier, everything already materialized
+            # stays for the life of the generator, and the retry a
+            # memory-constrained caller is most likely to attempt starts from a
+            # worse position than the request that just failed.
+            self._release_all_lazy_modules()
+            raise
 
         # Return the output
         return batch
