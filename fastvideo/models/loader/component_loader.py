@@ -351,18 +351,19 @@ class TextEncoderLoader(ComponentLoader):
     ):
         runtime_device = get_local_torch_device()
         device_id = runtime_device.index if runtime_device.index is not None else 0
+        requested_cpu_offload = getattr(fastvideo_args, offload_flag) if cpu_offload is None else cpu_offload
         disable_cpu_offload = fastvideo_args.disable_offload_on_unified_memory(device_id,
                                                                                offload_flag=offload_flag)
 
-        if cpu_offload is None:
-            cpu_offload = getattr(fastvideo_args, offload_flag)
-        elif cpu_offload and disable_cpu_offload:
-            # Direct loader callers can override the args-level flag. Apply the
-            # same device-local policy here before choosing the load target so
-            # the model is never constructed on the host in the first place.
-            logger.info("Disabling explicit %s on unified-memory device %d", offload_flag, device_id)
+        if requested_cpu_offload and disable_cpu_offload:
+            # Direct loader callers can choose a CPU target before the worker
+            # applies its device-local policy. Reset both the request and the
+            # target so the model is never constructed on the host first.
+            logger.info("Disabling %s on unified-memory device %d", offload_flag, device_id)
             cpu_offload = False
             target_device = runtime_device
+        else:
+            cpu_offload = requested_cpu_offload
         use_cpu_offload = (cpu_offload and len(getattr(model_config, "_fsdp_shard_conditions", [])) > 0)
 
         from fastvideo.platforms import current_platform

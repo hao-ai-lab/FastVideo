@@ -28,8 +28,16 @@ def _model_config():
     return SimpleNamespace(architectures=["PassthroughEncoder"], _fsdp_shard_conditions=[], quant_config=None)
 
 
-@pytest.mark.parametrize("cpu_offload", [None, True])
-def test_unified_memory_uses_worker_device_before_model_construction(monkeypatch, tmp_path, cpu_offload) -> None:
+@pytest.mark.parametrize(
+    ("cpu_offload", "requested_target"),
+    [
+        (None, torch.device("cuda:5")),
+        (None, torch.device("cpu")),
+        (True, torch.device("cpu")),
+    ],
+)
+def test_unified_memory_uses_worker_device_before_model_construction(monkeypatch, tmp_path, cpu_offload,
+                                                                     requested_target) -> None:
     probe = Mock(return_value=True)
     monkeypatch.setattr("fastvideo.models.loader.component_loader.get_local_torch_device",
                         lambda: torch.device("cuda:5"))
@@ -40,7 +48,6 @@ def test_unified_memory_uses_worker_device_before_model_construction(monkeypatch
         lambda architectures: (_PassthroughEncoder, None),
     )
     args = FastVideoArgs(model_path=str(tmp_path), text_encoder_cpu_offload=True)
-    requested_target = torch.device("cpu") if cpu_offload is True else torch.device("cuda:5")
 
     model = TextEncoderLoader().load_model(
         str(tmp_path),
