@@ -383,3 +383,25 @@ def test_a_stage_that_rebinds_through_to_can_still_be_released():
     stage(object(), SimpleNamespace(enable_stage_verification=False))
 
     assert not vae.is_materialized
+
+
+def test_a_stage_added_after_the_schedule_rebuilds_it(caplog):
+    # The schedule is derived from the stage list. A stage appended afterwards
+    # could hold a module an earlier stage was already told to free, which
+    # would hand it a released component mid-run.
+    vae = _lazy("vae")
+    first = _EchoStage(vae=vae)
+    pipeline = _FakePipeline({"vae": vae}, [])
+    pipeline._stage_name_mapping = {}
+    pipeline.add_stage("first", first)
+    pipeline._install_lazy_release_hooks()
+
+    assert first._lazy_modules_to_release == (vae, )
+
+    later = _EchoStage(vae=vae)
+    with caplog.at_level("WARNING"):
+        pipeline.add_stage("later", later)
+
+    assert "rebuilding the schedule" in caplog.text
+    assert first._lazy_modules_to_release == ()
+    assert later._lazy_modules_to_release == (vae, )
