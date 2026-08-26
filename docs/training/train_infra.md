@@ -505,6 +505,26 @@ training:
     resume_from_checkpoint: outputs/my_run/checkpoint-2000
 ```
 
+### Exporting a checkpoint for inference
+
+A DCP directory is training state, not a pipeline model directory. Export one
+trainable role into a copy of its configured base model, and strictly reload
+the result before inference:
+
+```bash
+python -m fastvideo.train.entrypoint.dcp_to_diffusers \
+  --checkpoint outputs/my_run/checkpoint-2000 \
+  --output-dir outputs/my_run/export-2000 \
+  --role student \
+  --verify
+```
+
+The model plugin selects the physical transformer component. In particular,
+MiniMax H3 Ref2VA exports `transformer_ref/`, while T2VA exports
+`transformer/`. Training LoRA wrappers are merged into native transformer
+weights because the H3 inference pipeline does not load a standalone training
+adapter. The export records this choice in `fastvideo_training_export.json`.
+
 ### Reproducibility
 
 The training entrypoint enables deterministic mode automatically:

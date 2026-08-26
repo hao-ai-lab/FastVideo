@@ -24,11 +24,17 @@ YAML.
 Pass ``--verify`` to strictly reload the exported transformer immediately
 after writing it, so a key-mapping bug fails here instead of deep inside a
 later training/inference launch that loads the exported directory.
+
+Model plugins select the physical component name (for example H3 Ref2VA uses
+``transformer_ref``). Training LoRA wrappers are exported as merged native
+weights because the public inference pipeline cannot consume those wrappers or
+a standalone H3 adapter.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from typing import Any
@@ -36,6 +42,79 @@ from typing import Any
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
+
+
+def _transformer_component_name(model: Any) -> str:
+    """Return the physical Diffusers component owned by a training model."""
+    component_name = str(getattr(model, "transformer_module_type", "transformer"))
+    if not component_name or component_name in {".", ".."} or os.path.basename(component_name) != component_name:
+        raise ValueError(f"Invalid transformer component name: {component_name!r}")
+    return component_name
+
+
+def _native_export_state_dict(
+    module: Any,
+    state_dict: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, str], bool]:
+    """Merge training LoRA wrappers into the native transformer key surface.
+
+    H3 inference does not expose a public adapter-loading API.  Its supported
+    training handoff is therefore a normal Diffusers-style component with each
+    adapter merged into ``weight`` and every ``base_layer``/``lora_*`` key
+    removed.  The returned alias map lets reverse HF-name mapping still consult
+    the checkpoint mapping recorded for ``base_layer.weight``.
+    """
+    import torch
+
+    from fastvideo.layers.lora.linear import BaseLayerWithLoRA
+
+    # Consume the gathered state in place. H3's target projections account for
+    # tens of GiB; keeping the original base tensors alive in a second mapping
+    # while materializing every merged tensor would nearly duplicate them.
+    exported = state_dict
+    reverse_lookup_aliases: dict[str, str] = {}
+    wrappers = [(name, child) for name, child in module.named_modules()
+                if name and isinstance(child, BaseLayerWithLoRA)]
+    for prefix, wrapper in wrappers:
+        lora_a_key = f"{prefix}.lora_A"
+        lora_b_key = f"{prefix}.lora_B"
+        base_weight_key = f"{prefix}.base_layer.weight"
+        native_weight_key = f"{prefix}.weight"
+        missing = [key for key in (lora_a_key, lora_b_key, base_weight_key) if key not in exported]
+        if missing:
+            raise KeyError(f"LoRA export is missing state for {prefix!r}: {missing}")
+
+        lora_a = exported.pop(lora_a_key)
+        lora_b = exported.pop(lora_b_key)
+        base_weight = exported.pop(base_weight_key)
+        if not all(isinstance(value, torch.Tensor) for value in (lora_a, lora_b, base_weight)):
+            raise TypeError(f"LoRA export expected tensor state for {prefix!r}")
+        if wrapper.lora_rank is None or wrapper.lora_rank <= 0:
+            raise ValueError(f"LoRA export has invalid rank for {prefix!r}: {wrapper.lora_rank!r}")
+        alpha = wrapper.lora_alpha if wrapper.lora_alpha is not None else wrapper.lora_rank
+        scale = (float(alpha) / float(wrapper.lora_rank)) * float(wrapper.lora_strength)
+        exported[native_weight_key] = torch.addmm(
+            base_weight,
+            wrapper.slice_lora_b_weights(lora_b.to(base_weight)),
+            wrapper.slice_lora_a_weights(lora_a.to(base_weight)),
+            alpha=scale,
+        )
+        reverse_lookup_aliases[native_weight_key] = base_weight_key
+
+        base_prefix = f"{prefix}.base_layer."
+        for key in [name for name in exported if name.startswith(base_prefix)]:
+            native_key = f"{prefix}.{key[len(base_prefix):]}"
+            if native_key in exported:
+                raise ValueError(f"LoRA export key collision at {native_key!r}")
+            exported[native_key] = exported.pop(key)
+            reverse_lookup_aliases[native_key] = key
+
+    unexpected_wrapper_keys = [
+        name for name in exported if ".base_layer." in name or name.endswith((".lora_A", ".lora_B"))
+    ]
+    if unexpected_wrapper_keys:
+        raise ValueError(f"LoRA export left wrapper-only keys: {unexpected_wrapper_keys[:10]}")
+    return exported, reverse_lookup_aliases, bool(wrappers)
 
 
 def _ensure_distributed() -> None:
@@ -130,9 +209,10 @@ def _save_role_pretrained(
 
     _barrier()
 
+    transformer_component = _transformer_component_name(model)
     modules: dict[str, torch.nn.Module] = {}
     if model.transformer is not None:
-        modules["transformer"] = model.transformer
+        modules[transformer_component] = model.transformer
 
     if module_names is None:
         module_names = sorted(modules.keys())
@@ -169,14 +249,19 @@ def _save_role_pretrained(
             # (e.g. → "patch_embedding.proj.proj.bias").
             reverse_mapping: dict = getattr(modules[module_name], "reverse_param_names_mapping", {})
 
+            native_state, reverse_lookup_aliases, merged_lora = _native_export_state_dict(
+                modules[module_name],
+                state_dict,
+            )
             tensor_state: dict[str, torch.Tensor] = {}
-            for key, value in state_dict.items():
+            for key, value in native_state.items():
                 if not isinstance(value, torch.Tensor):
                     raise TypeError(f"Expected tensor in state_dict "
                                     f"for {module_name}.{key}, "
                                     f"got {type(value).__name__}")
-                if key in reverse_mapping:
-                    hf_key, merge_index, _ = reverse_mapping[key]
+                reverse_key = reverse_lookup_aliases.get(key, key)
+                if reverse_key in reverse_mapping:
+                    hf_key, merge_index, _ = reverse_mapping[reverse_key]
                     if merge_index is not None:
                         logger.warning(
                             "Skipping reverse-mapping for merged param %s "
@@ -199,12 +284,32 @@ def _save_role_pretrained(
             )
             save_file(tensor_state, str(out_path))
 
+            metadata_path = dst / "fastvideo_training_export.json"
+            metadata_path.write_text(
+                json.dumps(
+                    {
+                        "format_version": 1,
+                        "role": role,
+                        "transformer_component": transformer_component,
+                        "lora": "merged" if merged_lora else "none",
+                    },
+                    indent=2,
+                    sort_keys=True,
+                ) + "\n",
+                encoding="utf-8",
+            )
+
         _barrier()
 
     return str(dst)
 
 
-def _strict_reload_verify(*, output_dir: str, training_config: Any) -> None:
+def _strict_reload_verify(
+    *,
+    output_dir: str,
+    training_config: Any,
+    module_type: str,
+) -> None:
     """Reload the just-exported transformer from disk and fail loudly on
     any key mismatch.
 
@@ -216,10 +321,10 @@ def _strict_reload_verify(*, output_dir: str, training_config: Any) -> None:
     """
     from fastvideo.train.utils.moduleloader import load_module_from_path
 
-    logger.info("Verifying export: strictly reloading transformer from %s", output_dir)
+    logger.info("Verifying export: strictly reloading %s from %s", module_type, output_dir)
     load_module_from_path(
         model_path=output_dir,
-        module_type="transformer",
+        module_type=module_type,
         training_config=training_config,
     )
     logger.info("Strict reload verification passed.")
@@ -316,6 +421,7 @@ def convert(
         output_dir,
         base_model_path,
     )
+    transformer_component = _transformer_component_name(model)
     result = _save_role_pretrained(
         role=role,
         base_model_path=base_model_path,
@@ -326,7 +432,11 @@ def convert(
     logger.info("Export complete: %s", result)
 
     if verify:
-        _strict_reload_verify(output_dir=result, training_config=tc)
+        _strict_reload_verify(
+            output_dir=result,
+            training_config=tc,
+            module_type=transformer_component,
+        )
 
     return result
 
