@@ -166,6 +166,16 @@ class SamplingConfig:
     boundary_ratio: float | None = None
     sigmas: list[float] | None = None
 
+    # Helios autoregressive spatial-pyramid sampling.
+    pyramid_num_inference_steps_list: list[int] | None = None
+    history_sizes: list[int] | None = None
+    num_latent_frames_per_chunk: int = 9
+    keep_first_frame: bool = True
+    is_skip_first_chunk: bool = False
+    use_zero_init: bool = True
+    zero_steps: int = 1
+    is_amplify_first_chunk: bool = False
+
 
 @dataclass
 class RequestRuntimeConfig:
