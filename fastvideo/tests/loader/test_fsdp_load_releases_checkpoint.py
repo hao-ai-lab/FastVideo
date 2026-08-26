@@ -2,11 +2,10 @@
 """The loader must not hold the whole checkpoint alive while it copies it.
 
 ``hf_to_custom_state_dict`` drains the weight iterator into one dict before a
-single parameter is placed. Every value in that dict is a view into a mmap'd
-safetensors shard, so as long as the dict is alive the pages the copy faults in
-stay referenced and the kernel cannot reclaim them. Peak memory becomes
-checkpoint plus model rather than just model, which on a unified-memory device
-is the difference between loading and being killed partway through.
+single parameter is placed. Production safetensors values may retain
+memory-mapped shard storage, and mapped or merged parameters can own ordinary
+allocations. Keeping every source reference until loading finishes raises the
+host or unified-memory working set enough to kill a large-model load.
 
 Checking after the call proves nothing, because the dict is a local and dies
 with the frame. So these tests keep a reference to that dict from the outside

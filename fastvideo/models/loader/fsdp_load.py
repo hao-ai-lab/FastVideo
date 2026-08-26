@@ -545,11 +545,12 @@ def load_model_from_full_model_state_dict(
     sharded_sd = {}
     custom_param_sd, reverse_param_names_mapping = hf_to_custom_state_dict(full_sd_iterator,
                                                                            param_names_mapping)  # type: ignore
-    # Drain rather than iterate. Every value here is a view into a mmap'd
-    # safetensors shard, so holding the dict holds the whole checkpoint: the
-    # pages faulted in by the copy below stay referenced and the kernel cannot
-    # reclaim them, and peak memory becomes checkpoint + model instead of just
-    # model. Popping each entry lets its pages go as soon as the copy is done.
+    # Drain rather than iterate. Production safetensors values may retain
+    # memory-mapped shard storage, while mapped or merged parameters can own
+    # ordinary allocations. Keeping the dict retains all of that source
+    # storage until loading finishes; popping releases each reference as soon
+    # as its conversion completes and lowers the host/unified-memory working
+    # set.
     for target_param_name in list(custom_param_sd):
         full_tensor = custom_param_sd.pop(target_param_name)
         meta_sharded_param = meta_sd.get(target_param_name)
