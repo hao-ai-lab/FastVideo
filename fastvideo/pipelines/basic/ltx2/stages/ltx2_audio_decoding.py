@@ -49,6 +49,11 @@ class LTX2AudioDecodingStage(PipelineStage):
         audio_latents = batch.extra.get("ltx2_audio_latents")
         if audio_latents is None:
             return batch
+        if not fastvideo_args.is_output_rank:
+            batch.extra.pop("audio", None)
+            batch.extra.pop("audio_sample_rate", None)
+            batch.extra.pop("ltx2_audio_latents", None)
+            return batch
 
         device = get_local_torch_device()
         self.audio_decoder = self.audio_decoder.to(device)

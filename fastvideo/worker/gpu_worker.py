@@ -12,6 +12,12 @@ from fastvideo.logger import init_logger
 from fastvideo.pipelines import ForwardBatch, LoRAPipeline, build_pipeline
 
 logger = init_logger(__name__)
+_NON_OUTPUT_EXTRA_KEYS = frozenset({
+    "audio",
+    "audio_sample_rate",
+    "decoded_audio",
+    "ltx2_audio_latents",
+})
 
 
 def _log_cuda_device_uuid(rank: int, device: torch.device) -> None:
@@ -86,6 +92,12 @@ class Worker:
         self.pipeline = build_pipeline(self.fastvideo_args)
 
     def execute_forward(self, forward_batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+        if not self.fastvideo_args.is_output_rank:
+            forward_batch.save_video = False
+            forward_batch.return_frames = False
+            forward_batch.return_trajectory_latents = False
+            forward_batch.return_trajectory_decoded = False
+            forward_batch.return_continuation_state = False
         output_batch = self.pipeline.forward(forward_batch, self.fastvideo_args)
         needs_output = forward_batch.return_frames or (forward_batch.save_video
                                                        and fastvideo_args.output_type != "latent"
@@ -94,6 +106,15 @@ class Worker:
             # Drop the decoded tensor before multiprocessing or Ray transports
             # the worker result back to the generator.
             output_batch.output = torch.empty(0, device="cpu")
+        if not self.fastvideo_args.is_output_rank:
+            for key in _NON_OUTPUT_EXTRA_KEYS:
+                output_batch.extra.pop(key, None)
+            output_batch.latents = None
+            output_batch.audio_latents = None
+            output_batch.trajectory_latents = None
+            output_batch.trajectory_timesteps = None
+            output_batch.trajectory_decoded = None
+            output_batch.continuation_state = None
         return cast(ForwardBatch, output_batch)
 
     def shutdown(self) -> dict[str, Any]:

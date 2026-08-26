@@ -15,10 +15,11 @@ import time
 import tempfile
 import types
 import warnings
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from contextlib import suppress
 from copy import deepcopy
-from typing import Any
+from functools import partial
+from typing import Any, cast, TypeVar
 
 import imageio
 import numpy as np
@@ -64,6 +65,7 @@ except ImportError:
 
 logger = init_logger(__name__)
 _FFMPEG_ENCODER_OPTION_CACHE: dict[tuple[str, str, str], bool] = {}
+_T = TypeVar("_T")
 
 _BATCH_EXTRA_PASSTHROUGH_KEYS: tuple[str, ...] = (
     "ltx2_audio_latents",
@@ -286,13 +288,50 @@ class VideoGenerator:
         # Initialize distributed environment if needed
         # initialize_distributed_and_parallelism(fastvideo_args)
 
-        executor_class = Executor.get_class(fastvideo_args)
+        executor_class = Executor.get_class(fastvideo_args, allow_external_launcher=True)
         return cls(
             fastvideo_args=fastvideo_args,
             executor_class=executor_class,
             log_stats=False,  # TODO: implement
             log_queue=log_queue,
         )
+
+    def _run_on_output_rank(
+        self,
+        operation: Callable[[], _T],
+        *,
+        description: str,
+    ) -> _T:
+        """Run rank-local setup on rank zero and broadcast its result/error."""
+        if not self.executor.uses_spmd_execution:
+            return operation()
+
+        payload: tuple[bool, _T | str] | None = None
+        source_error: Exception | None = None
+        if self.executor.is_output_rank:
+            try:
+                payload = (True, operation())
+            except Exception as error:
+                source_error = error
+                payload = (False, f"{type(error).__name__}: {error}")
+
+        synchronized = self.executor.broadcast_from_output_rank(payload)
+        if not synchronized[0]:
+            propagated = RuntimeError(f"External-launcher {description} failed on output rank: {synchronized[1]}")
+            if source_error is not None:
+                raise propagated from source_error
+            raise propagated
+        return cast(_T, synchronized[1])
+
+    def _synchronize_request_prompt(self, request: GenerationRequest) -> GenerationRequest:
+        """Use rank zero's prompt selection for an offline SPMD request."""
+        if not self.executor.uses_spmd_execution:
+            return request
+        synchronized = deepcopy(request)
+        prompt_and_path = self.executor.broadcast_from_output_rank((
+            request.prompt, request.inputs.prompt_path) if self.executor.is_output_rank else None)
+        synchronized.prompt, synchronized.inputs.prompt_path = prompt_and_path
+        return synchronized
 
     def generate(
         self,
@@ -315,7 +354,7 @@ class VideoGenerator:
             `GenerationResult` objects when the request expands into multiple
             prompts.
         """
-        normalized_request = normalize_generation_request(request)
+        normalized_request = self._synchronize_request_prompt(normalize_generation_request(request))
         if log_queue:
             self.executor.set_log_queue(log_queue)
 
@@ -352,7 +391,7 @@ class VideoGenerator:
         """
         import asyncio
 
-        normalized = normalize_generation_request(request)
+        normalized = self._synchronize_request_prompt(normalize_generation_request(request))
         total_steps = max(1, normalized.sampling.num_inference_steps)
         yield VideoProgressEvent(step=0, total_steps=total_steps, stage="denoise")
 
@@ -544,6 +583,9 @@ class VideoGenerator:
         if sampling_param is None:
             sampling_param = SamplingParam.from_pretrained(fastvideo_args.model_path)
 
+        if self.executor.uses_spmd_execution:
+            prompt = self.executor.broadcast_from_output_rank(prompt if self.executor.is_output_rank else None)
+
         # Add action control inputs to kwargs if provided
         if mouse_cond is not None:
             kwargs['mouse_cond'] = mouse_cond
@@ -561,17 +603,26 @@ class VideoGenerator:
         sampling_param.update(kwargs)
         kwargs["_extra_overrides"] = extra_overrides
 
-        if fastvideo_args.prompt_txt is not None or sampling_param.prompt_path is not None:
-            prompt_txt_path = sampling_param.prompt_path or fastvideo_args.prompt_txt
-            if not prompt_txt_path or not os.path.exists(prompt_txt_path):
-                raise FileNotFoundError(f"Prompt text file not found: {prompt_txt_path}")
+        prompt_txt_path = sampling_param.prompt_path or fastvideo_args.prompt_txt
+        if self.executor.uses_spmd_execution:
+            prompt_txt_path = self.executor.broadcast_from_output_rank(
+                prompt_txt_path if self.executor.is_output_rank else None)
 
-            # Read prompts from file
-            with open(prompt_txt_path, encoding='utf-8') as f:
-                prompts = [line.strip() for line in f if line.strip()]
+        if prompt_txt_path is not None:
 
-            if not prompts:
-                raise ValueError(f"No prompts found in file: {prompt_txt_path}")
+            def _load_prompt_file() -> tuple[str, list[str]]:
+                if not prompt_txt_path or not os.path.exists(prompt_txt_path):
+                    raise FileNotFoundError(f"Prompt text file not found: {prompt_txt_path}")
+                with open(prompt_txt_path, encoding='utf-8') as f:
+                    prompts = [line.strip() for line in f if line.strip()]
+                if not prompts:
+                    raise ValueError(f"No prompts found in file: {prompt_txt_path}")
+                return prompt_txt_path, prompts
+
+            prompt_txt_path, prompts = self._run_on_output_rank(
+                _load_prompt_file,
+                description="prompt-file setup",
+            )
 
             logger.info("Found %d prompts in %s", len(prompts), prompt_txt_path)
 
@@ -580,7 +631,10 @@ class VideoGenerator:
                 logger.info("Processing prompt %d/%d: %s...", i + 1, len(prompts), batch_prompt[:100])
                 try:
                     # Generate video for this prompt using the same logic below
-                    output_path = self._prepare_output_path(sampling_param.output_path, batch_prompt)
+                    output_path = self._run_on_output_rank(
+                        partial(self._prepare_output_path, sampling_param.output_path, batch_prompt),
+                        description="output-path setup",
+                    )
                     kwargs["output_path"] = output_path
                     result = self._generate_single_video(
                         prompt=batch_prompt,
@@ -598,6 +652,8 @@ class VideoGenerator:
 
                 except Exception as e:
                     logger.error("Failed to generate video for prompt %d: %s", i + 1, e)
+                    if self.executor.uses_spmd_execution:
+                        raise
                     continue
 
             logger.info("Completed batch processing. Generated %d videos successfully.", len(results))
@@ -612,7 +668,10 @@ class VideoGenerator:
                 prompt = ""
             else:
                 raise ValueError("Either prompt or prompt_txt must be provided")
-        output_path = self._prepare_output_path(sampling_param.output_path, prompt)
+        output_path = self._run_on_output_rank(
+            lambda: self._prepare_output_path(sampling_param.output_path, prompt),
+            description="output-path setup",
+        )
         kwargs["output_path"] = output_path
         if prompt_embeds is not None:
             kwargs["prompt_embeds"] = prompt_embeds
@@ -792,6 +851,9 @@ class VideoGenerator:
         if not self.executor.is_output_rank:
             batch.save_video = False
             batch.return_frames = False
+            batch.return_trajectory_latents = False
+            batch.return_trajectory_decoded = False
+            batch.return_continuation_state = False
 
         # Run inference
         start_time = time.perf_counter()
@@ -1013,16 +1075,17 @@ class VideoGenerator:
             # Audio is the primary output for audio workloads — return it
             # whenever the pipeline produced one, regardless of
             # `return_frames` (which gates the video-shaped buffers).
-            "audio": output_batch.extra.get("audio"),
-            "audio_sample_rate": output_batch.extra.get("audio_sample_rate"),
-            "ltx2_audio_latents": output_batch.extra.get("ltx2_audio_latents"),
+            "audio": output_batch.extra.get("audio") if self.executor.is_output_rank else None,
+            "audio_sample_rate": output_batch.extra.get("audio_sample_rate") if self.executor.is_output_rank else None,
+            "ltx2_audio_latents":
+            output_batch.extra.get("ltx2_audio_latents") if self.executor.is_output_rank else None,
             "size": output_size,
             "generation_time": gen_time,
             "e2e_latency": e2e_time,
             "logging_info": logging_info,
-            "trajectory": output_batch.trajectory_latents,
-            "trajectory_timesteps": output_batch.trajectory_timesteps,
-            "trajectory_decoded": output_batch.trajectory_decoded,
+            "trajectory": output_batch.trajectory_latents if self.executor.is_output_rank else None,
+            "trajectory_timesteps": output_batch.trajectory_timesteps if self.executor.is_output_rank else None,
+            "trajectory_decoded": output_batch.trajectory_decoded if self.executor.is_output_rank else None,
             "video_path": output_path if save_to_disk else None,
             "peak_memory_mb": output_batch.extra.get("peak_memory_mb"),
         }

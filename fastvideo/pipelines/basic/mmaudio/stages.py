@@ -425,6 +425,15 @@ class MMAudioDecodingStage(PipelineStage):
     @torch.inference_mode()
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         assert batch.latents is not None
+        if not fastvideo_args.is_output_rank:
+            batch.extra.pop("audio", None)
+            batch.extra.pop("audio_sample_rate", None)
+            batch.extra.pop("decoded_audio", None)
+            batch.extra["audio_only"] = True
+            batch.data_type = "audio"
+            batch.output = torch.empty(0, device="cpu")
+            batch.latents = None
+            return batch
         if fastvideo_args.output_type == "latent":
             batch.output = batch.latents.detach().cpu()
             return batch

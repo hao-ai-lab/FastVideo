@@ -286,6 +286,20 @@ class FastVideoArgs:
     def training_mode(self) -> bool:
         return not self.inference_mode
 
+    @property
+    def is_output_rank(self) -> bool:
+        """Whether this process may materialize user-facing outputs.
+
+        This is runtime state assigned by an SPMD executor, not a public
+        configuration field, so dataclass serialization and typed config
+        parsing deliberately ignore it.
+        """
+        return getattr(self, "_is_output_rank", True)
+
+    @is_output_rank.setter
+    def is_output_rank(self, value: bool) -> None:
+        self._is_output_rank = bool(value)
+
     def __post_init__(self):
         if self.moba_config_path:
             try:
@@ -448,7 +462,7 @@ class FastVideoArgs:
         parser.add_argument(
             "--distributed-executor-backend",
             type=str,
-            choices=["mp", "external_launcher"],
+            choices=["mp", "ray", "external_launcher"],
             default=FastVideoArgs.distributed_executor_backend,
             help="The distributed executor backend to use",
         )
