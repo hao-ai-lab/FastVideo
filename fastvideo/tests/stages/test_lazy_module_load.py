@@ -510,3 +510,101 @@ def test_an_aborted_run_releases_everything_already_materialized():
 
     assert not vae.is_materialized
     assert not transformer.is_materialized
+
+
+# ----------------------------------------------------------------------
+# Production wiring
+#
+# The tests above build stages and pipelines by hand. These two run the real
+# code paths where the two defects review found would live: a `load_modules`
+# that never reaches the deferral, and a stage constructor that reads a
+# component's attributes and materializes it before the first request.
+# ----------------------------------------------------------------------
+
+
+class _StubLoader:
+    """Stands in for PipelineComponentLoader and counts what it is asked for."""
+
+    def __init__(self):
+        self.loaded: list[str] = []
+
+    def load_module(self, *, module_name, component_model_path, transformers_or_diffusers, fastvideo_args):
+        self.loaded.append(module_name)
+        return _Component(module_name)
+
+
+def _run_real_load_modules(monkeypatch, lazy_names, manifest_modules):
+    from fastvideo.pipelines import composed_pipeline_base as cpb
+
+    stub = _StubLoader()
+    monkeypatch.setattr(cpb.PipelineComponentLoader, "load_module", stub.load_module)
+
+    class _Pipeline(ComposedPipelineBase):
+        _required_config_modules = list(manifest_modules)
+        _lazy_module_names = lazy_names
+
+        def __init__(self):  # deliberately does not call super()
+            self.model_path = "/nowhere"
+            self.fastvideo_args = None
+
+        def _load_config(self, model_path):
+            index = {"_class_name": "X", "_diffusers_version": "0"}
+            index.update({name: ["diffusers", "Cls", {}] for name in manifest_modules})
+            return index
+
+        def create_pipeline_stages(self, fastvideo_args):
+            raise NotImplementedError
+
+    args = SimpleNamespace(lazy_module_load=True, training_mode=False, revision=None)
+    modules = _Pipeline().load_modules(args)
+    return modules, stub.loaded
+
+
+def test_real_load_modules_defers_only_the_opted_in_components(monkeypatch):
+    modules, loaded = _run_real_load_modules(monkeypatch, ("transformer", "vae"), ["transformer", "vae", "scheduler"])
+
+    assert is_lazy_module(modules["transformer"])
+    assert is_lazy_module(modules["vae"])
+    assert not is_lazy_module(modules["scheduler"])
+    # The loader is asked only for what stays eager.
+    assert loaded == ["scheduler"]
+
+
+def test_real_load_modules_defers_nothing_when_the_pipeline_opts_out(monkeypatch):
+    # The base class ships an empty list, so an unchecked pipeline must load
+    # everything eagerly even with the flag on.
+    modules, loaded = _run_real_load_modules(monkeypatch, (), ["transformer", "vae", "scheduler"])
+
+    assert not any(is_lazy_module(m) for m in modules.values())
+    assert sorted(loaded) == ["scheduler", "transformer", "vae"]
+
+
+def test_building_the_real_h3_stages_materializes_nothing():
+    # `DenoisingStage.__init__` in the shared stage set reads
+    # `transformer.hidden_size` to pick an attention backend, which would pull
+    # the DiT in during post_init. H3's stages must not acquire that habit.
+    from fastvideo.pipelines.basic.minimax_h3.minimax_h3_pipeline import MiniMaxH3Pipeline
+
+    loaded: list[str] = []
+
+    def tracked(name):
+        return LazyModule(name, lambda: loaded.append(name) or _Component(name))
+
+    pipeline = MiniMaxH3Pipeline.__new__(MiniMaxH3Pipeline)
+    pipeline._stages = []
+    pipeline._stage_name_mapping = {}
+    pipeline.modules = {
+        "text_encoder": tracked("text_encoder"),
+        "transformer": tracked("transformer"),
+        "vae": tracked("vae"),
+        "audio_vae": tracked("audio_vae"),
+        "tokenizer": object(),
+        "processor": object(),
+        "scheduler": object(),
+        "audio_scheduler": object(),
+    }
+
+    pipeline._add_stages(ref2va=False)
+
+    assert loaded == [], f"building stages materialized {loaded}"
+    assert len(pipeline._stages) == 6
