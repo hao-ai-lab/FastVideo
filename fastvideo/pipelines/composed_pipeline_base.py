@@ -100,7 +100,7 @@ class ComposedPipelineBase(ABC):
         if fastvideo_args.inference_mode:
             local_device = get_local_torch_device()
             device_id = local_device.index if local_device.index is not None else 0
-            fastvideo_args.disable_offload_on_unified_memory(device_id)
+            fastvideo_args.finalize_device_offload_policy(device_id)
 
         # Torch profiler. Enabled and configured through env vars:
         # FASTVIDEO_TORCH_PROFILER_DIR=/path/to/save/trace

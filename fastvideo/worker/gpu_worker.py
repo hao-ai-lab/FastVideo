@@ -84,7 +84,7 @@ class Worker:
         # its own device. The worker-local args object is what every loader and
         # pipeline stage below will consume.
         device_id = self.device.index if self.device.index is not None else 0
-        self.fastvideo_args.disable_offload_on_unified_memory(device_id)
+        self.fastvideo_args.finalize_device_offload_policy(device_id)
 
         # Initialize the distributed environment.
         maybe_init_distributed_environment_and_model_parallel(self.fastvideo_args.tp_size, self.fastvideo_args.sp_size,

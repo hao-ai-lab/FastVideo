@@ -4,12 +4,11 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 from types import SimpleNamespace
-from unittest.mock import Mock
 
 import torch
 
 import fastvideo.pipelines.composed_pipeline_base as composed_pipeline_base
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.fastvideo_args import UNIFIED_MEMORY_OFFLOAD_FLAGS, FastVideoArgs
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 
 
@@ -25,7 +24,9 @@ class _Pipeline(ComposedPipelineBase):
 
     def load_modules(self, fastvideo_args, loaded_modules=None):
         del loaded_modules
-        self.events.append(("load_modules", fastvideo_args.text_encoder_cpu_offload))
+        policy_state = {flag: getattr(fastvideo_args, flag) for flag in UNIFIED_MEMORY_OFFLOAD_FLAGS}
+        policy_state["use_fsdp_inference"] = fastvideo_args.use_fsdp_inference
+        self.events.append(("load_modules", policy_state))
         return {}
 
     def create_pipeline_stages(self, fastvideo_args):
@@ -35,14 +36,11 @@ class _Pipeline(ComposedPipelineBase):
 def test_direct_pipeline_applies_policy_after_device_initialization(monkeypatch) -> None:
     events = []
     monkeypatch.setattr(_Pipeline, "events", events)
-    args = FastVideoArgs(model_path="unused", text_encoder_cpu_offload=True)
+    args = FastVideoArgs(model_path="unused", use_fsdp_inference=True)
 
-    def apply_policy(device_id):
+    def classify_device(device_id):
         events.append(("offload_policy", device_id))
-        args.text_encoder_cpu_offload = False
         return True
-
-    args.disable_offload_on_unified_memory = Mock(side_effect=apply_policy)
 
     monkeypatch.setattr(
         composed_pipeline_base,
@@ -52,6 +50,9 @@ def test_direct_pipeline_applies_policy_after_device_initialization(monkeypatch)
     monkeypatch.setattr(composed_pipeline_base, "get_local_torch_device", lambda: torch.device("cuda:4"))
     monkeypatch.setattr(composed_pipeline_base, "get_world_group", lambda: SimpleNamespace(local_rank=4))
     monkeypatch.setattr(composed_pipeline_base, "get_or_create_profiler", lambda trace_dir: _Profiler())
+    monkeypatch.setattr("fastvideo.platforms.current_platform.has_unified_memory", classify_device)
+    monkeypatch.setattr("fastvideo.platforms.current_platform.get_device_name", lambda device_id: "NVIDIA GB10")
+    monkeypatch.setattr("fastvideo.platforms.current_platform.is_mps", lambda: False)
 
     pipeline = _Pipeline("unused", args, required_config_modules=[])
 
@@ -59,5 +60,11 @@ def test_direct_pipeline_applies_policy_after_device_initialization(monkeypatch)
     assert events == [
         ("distributed", None),
         ("offload_policy", 4),
-        ("load_modules", False),
+        (
+            "load_modules",
+            {
+                **{flag: False for flag in UNIFIED_MEMORY_OFFLOAD_FLAGS},
+                "use_fsdp_inference": True,
+            },
+        ),
     ]

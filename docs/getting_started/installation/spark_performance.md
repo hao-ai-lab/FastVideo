@@ -156,8 +156,11 @@ is power-cycled. To avoid it:
 
 - **Builds** (flash-attn, kernel): `nice -n 19`, `MAX_JOBS=2`, `nohup`. Never a
   bare foreground high-parallelism build.
-- Leave `*_cpu_offload` at the example defaults — "CPU" offload is the *same*
-  unified RAM on the GB10, so the win is tiling + sane resolution, not offloading.
+- FastVideo automatically disables DiT layerwise/CPU offload and encoder/VAE CPU
+  offload after each worker binds its GB10 device. Do not force those modes back
+  on: "CPU" offload uses the same unified RAM. Multi-GPU FSDP sharding remains
+  available because it partitions weights without parking them in a separate
+  host pool.
 
 ## Gotchas specific to the GB10
 

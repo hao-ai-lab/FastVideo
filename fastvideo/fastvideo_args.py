@@ -861,20 +861,6 @@ class FastVideoArgs:
 
     def check_fastvideo_args(self) -> None:
         """Validate inference arguments for consistency"""
-        from fastvideo.platforms import current_platform
-
-        if current_platform.is_mps():
-            self.use_fsdp_inference = False
-            self.dit_layerwise_offload = False
-
-        if self.dit_layerwise_offload:
-            if self.use_fsdp_inference:
-                logger.warning("dit_layerwise_offload is enabled, automatically disabling use_fsdp_inference.")
-                self.use_fsdp_inference = False
-            if self.dit_cpu_offload:
-                logger.warning("dit_layerwise_offload is enabled, automatically disabling dit_cpu_offload.")
-                self.dit_cpu_offload = False
-
         # Validate mode and inference_mode consistency
         assert isinstance(self.mode, ExecutionMode), f"Mode must be an ExecutionMode enum, got {type(self.mode)}"
         assert self.mode in ExecutionMode.choices(), f"Invalid execution mode: {self.mode}"
@@ -890,6 +876,14 @@ class FastVideoArgs:
         elif self.mode in [ExecutionMode.INFERENCE, ExecutionMode.PREPROCESS] and not self.inference_mode:
             logger.warning("Mode is '%s' but inference_mode is False. Setting inference_mode to True.", self.mode)
             self.inference_mode = True
+
+        # Inference policy must wait until a worker owns and binds its device:
+        # a unified-memory device disables layerwise offload before conflicts
+        # are resolved, preserving an explicit FSDP request. Training does not
+        # pass through the inference worker boundary, so retain its historical
+        # constructor-time normalization.
+        if not self.inference_mode:
+            self._resolve_device_offload_conflicts()
 
         if not self.inference_mode:
             assert self.hsdp_replicate_dim != -1, "hsdp_replicate_dim must be set for training"
@@ -925,6 +919,28 @@ class FastVideoArgs:
                 self.pipeline_config.vae_config.load_encoder = True
             self.preprocess_config.check_preprocess_config()
 
+    def _resolve_device_offload_conflicts(self) -> None:
+        """Resolve offload modes after device-local policy has been applied."""
+        from fastvideo.platforms import current_platform
+
+        if current_platform.is_mps():
+            self.use_fsdp_inference = False
+            self.dit_layerwise_offload = False
+
+        if self.dit_layerwise_offload:
+            if self.use_fsdp_inference:
+                logger.warning("dit_layerwise_offload is enabled, automatically disabling use_fsdp_inference.")
+                self.use_fsdp_inference = False
+            if self.dit_cpu_offload:
+                logger.warning("dit_layerwise_offload is enabled, automatically disabling dit_cpu_offload.")
+                self.dit_cpu_offload = False
+
+    def finalize_device_offload_policy(self, device_id: int = 0) -> bool:
+        """Apply device-local memory policy, then resolve incompatible modes."""
+        has_unified_memory = self.disable_offload_on_unified_memory(device_id)
+        self._resolve_device_offload_conflicts()
+        return has_unified_memory
+
     def disable_offload_on_unified_memory(self, device_id: int = 0, *, offload_flag: str | None = None) -> bool:
         """Disable host offload after a worker has selected its device.
 
@@ -938,20 +954,29 @@ class FastVideoArgs:
         """
         from fastvideo.platforms import current_platform
 
-        if not current_platform.has_unified_memory(device_id):
+        cached_device_id = getattr(self, "_unified_memory_device_id", None)
+        cached_result = getattr(self, "_unified_memory_result", None)
+        if cached_device_id != device_id or cached_result is None:
+            cached_result = current_platform.has_unified_memory(device_id)
+            self._unified_memory_device_id = device_id
+            self._unified_memory_result = cached_result
+
+        if not cached_result:
             return False
 
-        try:
-            device_name = current_platform.get_device_name(device_id)
-        except Exception:
-            # Device naming is diagnostic only. NVML can be unavailable on an
-            # integrated GPU (for example Jetson), and its physical-ordinal
-            # lookup cannot interpret CUDA_VISIBLE_DEVICES UUID/MIG selectors.
-            # Neither case should undo an authoritative driver classification.
-            device_name = current_platform.device_name
+        enabled_flags = [flag for flag in UNIFIED_MEMORY_OFFLOAD_FLAGS if getattr(self, flag)]
+        if enabled_flags:
+            try:
+                device_name = current_platform.get_device_name(device_id)
+            except Exception:
+                # Device naming is diagnostic only. NVML can be unavailable on
+                # an integrated GPU (for example Jetson), and its physical-
+                # ordinal lookup cannot interpret CUDA_VISIBLE_DEVICES UUID/MIG
+                # selectors. Neither case should undo an authoritative driver
+                # classification.
+                device_name = current_platform.device_name
 
-        for flag in UNIFIED_MEMORY_OFFLOAD_FLAGS:
-            if getattr(self, flag):
+            for flag in enabled_flags:
                 logger.info(
                     "Disabling %s: %s has unified memory, so moving weights to the host duplicates "
                     "them rather than freeing device memory.", flag, device_name)
