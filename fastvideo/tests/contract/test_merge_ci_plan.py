@@ -51,6 +51,15 @@ def test_changed_ssim_test_selects_only_that_file():
     assert plan.encoded_ssim_tests() == "test_flux_t2i_similarity.py"
 
 
+def test_h3_packed_sp_contract_selects_existing_strict_four_gpu_lane():
+    plan = PLAN_MERGE_CI.classify_paths([
+        "fastvideo/tests/distributed/test_minimax_h3_packed_sp.py"
+    ])
+
+    assert plan.encoded_lanes() == ",ssim,"
+    assert plan.encoded_ssim_tests() == "test_minimax_h3_similarity.py"
+
+
 def test_shared_golden_harness_or_reference_requires_full_golden_lane():
     plan = PLAN_MERGE_CI.classify_paths(["fastvideo/tests/golden_gate/_harness.py"])
 

@@ -130,7 +130,13 @@ quantization, or VAE optimizations.
   projection once for every step in the fixed denoising schedule, installs
   non-persistent lookup tables, and releases the projection modules. The table
   values match the original projections, but the loaded transformer is then
-  tied to that schedule for the rest of its lifetime. It requires a stock
+  tied to that schedule for the rest of its lifetime. The runtime cursor is a
+  non-persistent buffer and follows transformer device moves, including full
+  CPU offload. The replacement tables and cursor are deliberately omitted
+  from `state_dict`, while the original projection parameters no longer
+  exist: a post-precompute state dict is therefore not reloadable. Save or
+  convert checkpoints before enabling precompute, and reload the stock model
+  to change schedules. It requires a stock
   full-rank checkpoint with replicated, materialized weights:
   `dit_layerwise_offload=False` and `use_fsdp_inference=False`. Setup briefly
   holds the original projections and all replacement tables together. In the

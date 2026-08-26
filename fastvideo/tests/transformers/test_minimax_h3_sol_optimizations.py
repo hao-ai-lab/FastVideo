@@ -60,6 +60,45 @@ class _TrajectoryTransformer(nn.Module):
         self.adaln_rank = None
 
 
+class _TrackingTrajectoryTransformer(_TrajectoryTransformer):
+
+    adaln_precompute_enabled = True
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.device_moves: list[torch.device | str] = []
+
+    def to(self, device: torch.device | str, *args: object, **kwargs: object) -> "_TrackingTrajectoryTransformer":
+        self.device_moves.append(device)
+        return super().to(device, *args, **kwargs)
+
+    def prepare_adaln_trajectory(self, plan: list[tuple[torch.Tensor, torch.Tensor]]) -> dict[str, float | int]:
+        from fastvideo.models.dits.minimax_h3 import MiniMaxH3Transformer3DModel
+
+        return MiniMaxH3Transformer3DModel.prepare_adaln_trajectory(self, plan)
+
+
+class _StageLayout:
+
+    def __init__(self) -> None:
+        self.position_ids = torch.zeros(1, dtype=torch.long)
+        self.token_tags = torch.zeros(1, dtype=torch.long)
+        self.video_indices = torch.zeros(1, dtype=torch.long)
+        self.audio_indices = torch.zeros(1, dtype=torch.long)
+        self.text_indices = torch.zeros(1, dtype=torch.long)
+
+
+class _StageScheduler:
+
+    def __init__(self, values: tuple[float, ...] = (1.0, )) -> None:
+        self.timesteps: torch.Tensor | None = None
+        self.values = values
+
+    def set_timesteps(self, steps: int, device: torch.device) -> None:
+        del steps
+        self.timesteps = torch.tensor(self.values, device=device)
+
+
 class _IdentityAttentionImpl(nn.Module):
 
     def preprocess_qkv(self, qkv: torch.Tensor, metadata: object) -> torch.Tensor:
@@ -111,6 +150,23 @@ def test_minimax_h3_relayout_is_bit_exact_and_compile_safe() -> None:
     compiled_merge = torch.compile(merge_heads, fullgraph=True, dynamic=False)
     actual_merge = compiled_merge(packed_output)
     assert torch.equal(actual_merge, expected_merge)
+
+
+def test_minimax_h3_relayout_validates_world_device_dtype_and_cuda() -> None:
+    from fastvideo.models.dits.minimax_h3_fusions import relayout
+
+    q = torch.zeros(2, 4, 8)
+    with patch.object(relayout, "HAVE_TRITON", True):
+        with pytest.raises(ValueError, match="world size must be positive"):
+            relayout.pack_qkv_destination_major(q, q, q, 0)
+        with pytest.raises(ValueError, match="one device"):
+            relayout.pack_qkv_destination_major(q, torch.zeros_like(q, device="meta"), q, 2)
+        with pytest.raises(ValueError, match="one dtype"):
+            relayout.pack_qkv_destination_major(q, q.double(), q, 2)
+        with pytest.raises(ValueError, match="requires CUDA"):
+            relayout.pack_qkv_destination_major(q, q, q, 2)
+        with pytest.raises(ValueError, match="requires a CUDA tensor"):
+            relayout.merge_heads(torch.zeros(2, 2, 2, 8))
 
 
 def test_adaln_precompute_rejects_a_different_trajectory() -> None:
@@ -166,6 +222,36 @@ def test_adaln_precompute_matches_projection_tables_and_reuses_schedule() -> Non
         MiniMaxH3Transformer3DModel.set_adaln_step(transformer, 2)
 
 
+def test_adaln_precompute_cursor_follows_transformer_device_and_is_nonpersistent() -> None:
+    from fastvideo.models.dits.minimax_h3 import MiniMaxH3Transformer3DModel
+
+    transformer = _TrajectoryTransformer()
+    MiniMaxH3Transformer3DModel.prepare_adaln_trajectory(
+        transformer, [(torch.tensor([1.0]), torch.tensor([0]))])
+
+    named_buffers = dict(transformer.named_buffers())
+    assert any(name.endswith("cursor.step") for name in named_buffers)
+    assert not any(name.endswith("cursor.step") for name in transformer.state_dict())
+    transformer.to("meta")
+    assert transformer._h3_adaln_cursor.step.device.type == "meta"
+
+
+def test_adaln_precompute_state_dict_is_explicitly_not_reloadable() -> None:
+    from fastvideo.models.dits.minimax_h3 import MiniMaxH3Transformer3DModel
+
+    transformer = _TrajectoryTransformer()
+    original_keys = set(transformer.state_dict())
+    assert any("adaln_proj.linear" in key for key in original_keys)
+    MiniMaxH3Transformer3DModel.prepare_adaln_trajectory(
+        transformer, [(torch.tensor([1.0]), torch.tensor([0]))])
+    transformed_state = transformer.state_dict()
+
+    assert not any("adaln_proj.linear" in key for key in transformed_state)
+    assert not any("adaln_proj.table" in key or "cursor.step" in key for key in transformed_state)
+    with pytest.raises(RuntimeError, match="Missing key"):
+        _TrajectoryTransformer().load_state_dict(transformed_state)
+
+
 def test_adaln_precompute_failure_does_not_partially_replace_blocks() -> None:
     from fastvideo.models.dits.minimax_h3 import MiniMaxH3Transformer3DModel
 
@@ -182,6 +268,73 @@ def test_adaln_precompute_failure_does_not_partially_replace_blocks() -> None:
         MiniMaxH3Transformer3DModel.prepare_adaln_trajectory(transformer, plan)
     assert [block.adaln_proj for block in transformer.transformer_blocks] == originals
     assert not hasattr(transformer, "_h3_adaln_cursor")
+
+
+@pytest.mark.parametrize(
+    ("failure", "message"),
+    [
+        ("latent_transfer", "injected latent transfer failure"),
+        ("projection", "injected projection failure"),
+        ("rank_reduced", "stock full-rank"),
+        ("schedule_reuse", "same denoising schedule"),
+        ("scheduler_mismatch", "same number of intervals"),
+    ],
+)
+def test_denoising_preparation_failures_restore_full_cpu_offload(failure: str, message: str) -> None:
+    from fastvideo.models.dits.minimax_h3 import _MiniMaxH3StepCursor
+    from fastvideo.pipelines.basic.minimax_h3.stages import minimax_h3_denoising as denoising
+
+    transformer = _TrackingTrajectoryTransformer()
+    if failure == "projection":
+        def fail_projection(embeddings: torch.Tensor) -> tuple[torch.Tensor, ...]:
+            del embeddings
+            raise RuntimeError("injected projection failure")
+
+        transformer.transformer_blocks[1].adaln_proj.forward = fail_projection
+    elif failure == "rank_reduced":
+        transformer.adaln_rank = 4
+    elif failure == "schedule_reuse":
+        transformer._h3_adaln_cursor = _MiniMaxH3StepCursor(torch.device("cpu"), ((0.5, ), ))
+
+    audio_scheduler = _StageScheduler((1.0, 0.5)) if failure == "scheduler_mismatch" else _StageScheduler()
+    stage = denoising.MiniMaxH3DenoisingStage(transformer, _StageScheduler(), audio_scheduler)
+    layout = _StageLayout()
+    batch = SimpleNamespace(
+        extra={denoising.MINIMAX_H3_LAYOUT_KEY: layout},
+        prompt_embeds=[torch.zeros(1, 1, 2)],
+        latents=torch.zeros(1, 2),
+        audio_latents=torch.zeros(1, 2),
+        num_inference_steps=1,
+    )
+    if failure == "latent_transfer":
+
+        class _FailingLatents:
+
+            def to(self, _device: torch.device) -> torch.Tensor:
+                raise RuntimeError("injected latent transfer failure")
+
+        batch.latents = _FailingLatents()
+    args = SimpleNamespace(
+        dit_cpu_offload=True,
+        dit_layerwise_offload=False,
+        use_fsdp_inference=False,
+    )
+    with (
+        patch.object(denoising, "MiniMaxH3PackedLayout", _StageLayout),
+        patch.object(denoising, "get_local_torch_device", return_value=torch.device("cpu")),
+        patch.object(
+            denoising,
+            "build_row_timesteps",
+            side_effect=lambda *_args, **_kwargs: (torch.tensor([1.0]), torch.tensor([0])),
+        ),
+        patch.object(denoising, "_h3_vsa_metadata_builder", return_value=None),
+        pytest.raises((RuntimeError, ValueError), match=message),
+    ):
+        stage.forward(batch, args)
+
+    assert transformer.device_moves[0] == torch.device("cpu")
+    assert transformer.device_moves[-1] == "cpu"
+    assert len(transformer.device_moves) == 2
 
 
 @pytest.mark.parametrize(
@@ -252,6 +405,32 @@ def test_packed_sp_falls_back_to_autograd_aware_collective_when_grad_enabled() -
     direct.assert_not_called()
 
 
+def test_packed_sp_rejects_zero_semantic_rows_instead_of_treating_them_as_unspecified() -> None:
+    from fastvideo.attention.layer import DistributedAttention
+    from fastvideo.forward_context import set_forward_context
+
+    attention = DistributedAttention.__new__(DistributedAttention)
+    nn.Module.__init__(attention)
+    attention.attn_impl = _IdentityAttentionImpl()
+    attention.head_size = 2
+    attention.packed_qkv_relayout = True
+    attention._compile_forward_enabled = True
+    q = torch.randn(1, 2, 4, 2)
+
+    packed = torch.zeros(2, 2, 2, 6)
+    with (
+        patch("fastvideo.attention.layer.get_sp_world_size", return_value=2),
+        patch("fastvideo.attention.layer.get_sp_parallel_rank", return_value=0),
+        patch("fastvideo.models.dits.minimax_h3_fusions.relayout.pack_qkv_destination_major",
+              return_value=packed),
+        patch("fastvideo.attention.layer.sequence_model_parallel_direct_all_to_all", side_effect=lambda tensor: tensor),
+        torch.inference_mode(),
+        set_forward_context(current_timestep=0, attn_metadata=None),
+        pytest.raises(ValueError, match=r"original_seq_len must be in \[1, 4\], got 0"),
+    ):
+        attention(q, q, q, original_seq_len=0)
+
+
 def test_direct_packed_collective_rejects_unsupported_inputs_before_launch() -> None:
     from fastvideo.distributed.communication_op import sequence_model_parallel_direct_all_to_all
 
@@ -265,6 +444,57 @@ def test_direct_packed_collective_rejects_unsupported_inputs_before_launch() -> 
             sequence_model_parallel_direct_all_to_all(torch.randn(2, 4).transpose(0, 1))
 
 
+def test_direct_packed_collective_is_an_identity_at_sp1_without_a_process_group() -> None:
+    from fastvideo.distributed.communication_op import sequence_model_parallel_direct_all_to_all
+
+    tensor = torch.randn(3, 2)
+    group = SimpleNamespace(world_size=1, device_group=None)
+    with patch("fastvideo.distributed.communication_op.get_sp_group", return_value=group):
+        assert sequence_model_parallel_direct_all_to_all(tensor) is tensor
+
+
+@pytest.mark.parametrize(
+    ("actual_world", "backend", "device", "message"),
+    [
+        (2, "nccl", torch.device("cpu"), "requires the gloo backend"),
+        (3, "gloo", torch.device("cpu"), "world size mismatch"),
+        (2, "gloo", torch.device("cuda:0"), "does not match coordinator device"),
+        (2, "gloo", None, "does not declare its collective device"),
+    ],
+)
+def test_direct_packed_collective_validates_live_group_backend_world_and_device(
+        actual_world: int, backend: str, device: torch.device | None, message: str) -> None:
+    from fastvideo.distributed.communication_op import sequence_model_parallel_direct_all_to_all
+
+    process_group = object()
+    group = SimpleNamespace(world_size=2, device_group=process_group, device=device)
+    tensor = torch.randn(2, 3)
+    with (
+        patch("fastvideo.distributed.communication_op.get_sp_group", return_value=group),
+        patch("torch.distributed.is_initialized", return_value=True),
+        patch("torch.distributed.get_world_size", return_value=actual_world),
+        patch("torch.distributed.get_rank", return_value=0),
+        patch("torch.distributed.get_backend", return_value=backend),
+        torch.no_grad(),
+        pytest.raises(RuntimeError, match=message),
+    ):
+        sequence_model_parallel_direct_all_to_all(tensor)
+
+
+def test_direct_packed_collective_rejects_missing_or_dead_process_group() -> None:
+    from fastvideo.distributed.communication_op import sequence_model_parallel_direct_all_to_all
+
+    tensor = torch.randn(2, 3)
+    group = SimpleNamespace(world_size=2, device_group=None, device=torch.device("cpu"))
+    with (
+        patch("fastvideo.distributed.communication_op.get_sp_group", return_value=group),
+        patch("torch.distributed.is_initialized", return_value=False),
+        torch.no_grad(),
+        pytest.raises(RuntimeError, match="live distributed process group"),
+    ):
+        sequence_model_parallel_direct_all_to_all(tensor)
+
+
 def test_direct_packed_collective_captures_as_a_fullgraph_custom_op(tmp_path) -> None:
     if not torch.cuda.is_available():
         pytest.skip("CUDA is required")
@@ -276,6 +506,8 @@ def test_direct_packed_collective_captures_as_a_fullgraph_custom_op(tmp_path) ->
     class Group:
         unique_name = "minimax_h3_direct_compile_test"
         device_group = None
+        world_size = 1
+        device = torch.device("cuda:0")
 
     group = Group()
     torch.distributed.init_process_group(

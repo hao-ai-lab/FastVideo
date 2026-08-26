@@ -100,6 +100,14 @@ class MiniMaxH3DenoisingStage(PipelineStage):
         result.add_check("step_index", batch.step_index, V.non_negative_int)
         return result
 
+    def _release_denoising_resources(self, fastvideo_args: FastVideoArgs, full_cpu_offload: bool) -> None:
+        if bool(getattr(fastvideo_args, "dit_layerwise_offload", False)):
+            manager = getattr(self.transformer, "_layerwise_offload_manager", None)
+            if manager is not None and getattr(manager, "enabled", False):
+                manager.release_all()
+        if full_cpu_offload:
+            self.transformer.to("cpu")
+
     @torch.no_grad()
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         """Denoise the packed H3 video and audio streams over one shared schedule."""
@@ -112,61 +120,66 @@ class MiniMaxH3DenoisingStage(PipelineStage):
         full_cpu_offload = (fastvideo_args.dit_cpu_offload and not fastvideo_args.dit_layerwise_offload
                             and not fastvideo_args.use_fsdp_inference)
         device = get_local_torch_device()
-        if full_cpu_offload:
-            self.transformer.to(device)
-            batch.latents = batch.latents.to(device)
-            batch.audio_latents = batch.audio_latents.to(device)
+        preparation_complete = False
+        try:
+            if full_cpu_offload:
+                self.transformer.to(device)
+                batch.latents = batch.latents.to(device)
+                batch.audio_latents = batch.audio_latents.to(device)
+            self.scheduler.set_timesteps(batch.num_inference_steps, device=device)
+            self.audio_scheduler.set_timesteps(batch.num_inference_steps, device=device)
+            video_timesteps = self.scheduler.timesteps
+            audio_timesteps = self.audio_scheduler.timesteps
+            if video_timesteps is None or audio_timesteps is None:
+                raise ValueError("MiniMax-H3 schedulers did not produce timesteps.")
+            if len(video_timesteps) != len(audio_timesteps):
+                raise ValueError("MiniMax-H3 video and audio schedules must have the same number of intervals.")
 
-        self.scheduler.set_timesteps(batch.num_inference_steps, device=device)
-        self.audio_scheduler.set_timesteps(batch.num_inference_steps, device=device)
-        video_timesteps = self.scheduler.timesteps
-        audio_timesteps = self.audio_scheduler.timesteps
-        if video_timesteps is None or audio_timesteps is None:
-            raise ValueError("MiniMax-H3 schedulers did not produce timesteps.")
-        if len(video_timesteps) != len(audio_timesteps):
-            raise ValueError("MiniMax-H3 video and audio schedules must have the same number of intervals.")
+            row_timestep_plan = []
+            for video_timestep, audio_timestep in zip(video_timesteps, audio_timesteps, strict=True):
+                video_value = float(video_timestep.item())
+                audio_value = float(audio_timestep.item())
+                unique, inverse = build_row_timesteps(
+                    layout,
+                    video_timestep=video_value,
+                    audio_timestep=audio_value,
+                    condition_video_timestep=max(video_value, MINIMAX_H3_KEYFRAME_NOISE_AUG),
+                    condition_audio_timestep=1.0,
+                )
+                row_timestep_plan.append((unique.to(device), inverse.to(device)))
+            batch.timesteps = video_timesteps
 
-        row_timestep_plan = []
-        for video_timestep, audio_timestep in zip(video_timesteps, audio_timesteps, strict=True):
-            video_value = float(video_timestep.item())
-            audio_value = float(audio_timestep.item())
-            unique, inverse = build_row_timesteps(
-                layout,
-                video_timestep=video_value,
-                audio_timestep=audio_value,
-                condition_video_timestep=max(video_value, MINIMAX_H3_KEYFRAME_NOISE_AUG),
-                condition_audio_timestep=1.0,
-            )
-            row_timestep_plan.append((unique.to(device), inverse.to(device)))
-        batch.timesteps = video_timesteps
+            if bool(getattr(self.transformer, "adaln_precompute_enabled", False)):
+                _validate_adaln_precompute_configuration(fastvideo_args)
+                self.transformer.prepare_adaln_trajectory(row_timestep_plan)
 
-        if bool(getattr(self.transformer, "adaln_precompute_enabled", False)):
-            _validate_adaln_precompute_configuration(fastvideo_args)
-            self.transformer.prepare_adaln_trajectory(row_timestep_plan)
+            position_ids = layout.position_ids.to(device)
+            token_tags = layout.token_tags.to(device)
+            video_indices = layout.video_indices.to(device)
+            audio_indices = layout.audio_indices.to(device)
+            text_indices = layout.text_indices.to(device)
+            prompt_embeds = batch.prompt_embeds[0].to(device)
 
-        position_ids = layout.position_ids.to(device)
-        token_tags = layout.token_tags.to(device)
-        video_indices = layout.video_indices.to(device)
-        audio_indices = layout.audio_indices.to(device)
-        text_indices = layout.text_indices.to(device)
-        prompt_embeds = batch.prompt_embeds[0].to(device)
-
-        vsa_metadata_builder = _h3_vsa_metadata_builder(self.transformer, fastvideo_args)
-        if vsa_metadata_builder is not None:
-            vsa_patch_size = fastvideo_args.pipeline_config.dit_config.patch_size
-            vsa_prefix_segments = _h3_vsa_prefix_segments(layout, vsa_patch_size)
-            # Per-request knobs (sweeps flip these between generate_video calls
-            # without respawning workers); mode None defers to the env default.
-            vsa_mode = batch.extra.get("vsa_mode", "exempt")
-            if vsa_mode not in ("exempt", "compete"):
-                raise ValueError(f"vsa_mode must be 'exempt' or 'compete', got {vsa_mode!r}.")
-            vsa_exempt = vsa_mode == "exempt"
-            vsa_dense_layers = tuple(batch.extra.get("vsa_dense_layers", ()))
-            vsa_dense_first_n = int(batch.extra.get("vsa_dense_first_n_steps", 0))
-            # Run-level tile geometry (256 default, 64 = native Triton path),
-            # plumbed like the run-level sparsity; the builder validates the
-            # value against VSA_H3_TILE_SHAPES.
-            vsa_tile_size = int(fastvideo_args.VSA_tile_size)
+            vsa_metadata_builder = _h3_vsa_metadata_builder(self.transformer, fastvideo_args)
+            if vsa_metadata_builder is not None:
+                vsa_patch_size = fastvideo_args.pipeline_config.dit_config.patch_size
+                vsa_prefix_segments = _h3_vsa_prefix_segments(layout, vsa_patch_size)
+                # Per-request knobs (sweeps flip these between generate_video calls
+                # without respawning workers); mode None defers to the env default.
+                vsa_mode = batch.extra.get("vsa_mode", "exempt")
+                if vsa_mode not in ("exempt", "compete"):
+                    raise ValueError(f"vsa_mode must be 'exempt' or 'compete', got {vsa_mode!r}.")
+                vsa_exempt = vsa_mode == "exempt"
+                vsa_dense_layers = tuple(batch.extra.get("vsa_dense_layers", ()))
+                vsa_dense_first_n = int(batch.extra.get("vsa_dense_first_n_steps", 0))
+                # Run-level tile geometry (256 default, 64 = native Triton path),
+                # plumbed like the run-level sparsity; the builder validates the
+                # value against VSA_H3_TILE_SHAPES.
+                vsa_tile_size = int(fastvideo_args.VSA_tile_size)
+            preparation_complete = True
+        finally:
+            if not preparation_complete:
+                self._release_denoising_resources(fastvideo_args, full_cpu_offload)
 
         try:
             # The stage range groups the complete denoising loop while the
@@ -235,12 +248,7 @@ class MiniMaxH3DenoisingStage(PipelineStage):
                     batch.step_index = index
                     batch.timestep = video_timestep
         finally:
-            if bool(getattr(fastvideo_args, "dit_layerwise_offload", False)):
-                manager = getattr(self.transformer, "_layerwise_offload_manager", None)
-                if manager is not None and getattr(manager, "enabled", False):
-                    manager.release_all()
-            if full_cpu_offload:
-                self.transformer.to("cpu")
+            self._release_denoising_resources(fastvideo_args, full_cpu_offload)
         return batch
 
 

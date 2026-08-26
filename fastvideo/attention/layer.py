@@ -169,7 +169,8 @@ class DistributedAttention(nn.Module):
             heads_local = num_heads // world_size
             packed = packed.reshape(world_size * rows_local, heads_local, 3 * self.head_size)
             q_full, k_full, v_full = packed.split(self.head_size, dim=-1)
-            original_seq_len = original_seq_len or q_full.shape[0]
+            if original_seq_len is None:
+                original_seq_len = q_full.shape[0]
             if original_seq_len < 1 or original_seq_len > q_full.shape[0]:
                 raise ValueError(f"original_seq_len must be in [1, {q_full.shape[0]}], got {original_seq_len}")
             pad_seq_len = q_full.shape[0] - original_seq_len

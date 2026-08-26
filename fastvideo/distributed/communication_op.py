@@ -14,6 +14,36 @@ logger = init_logger(__name__)
 _sp_warmup_done = False
 
 
+def _validate_direct_all_to_all_group(group: object, input_: torch.Tensor, expected_backend: str) -> None:
+    """Validate the live process group immediately before a direct collective."""
+    process_group = getattr(group, "device_group", None)
+    if process_group is None or not torch.distributed.is_initialized():
+        raise RuntimeError("direct all-to-all requires a live distributed process group")
+    try:
+        actual_world = torch.distributed.get_world_size(process_group)
+        torch.distributed.get_rank(process_group)
+        backend = str(torch.distributed.get_backend(process_group)).lower()
+    except (RuntimeError, ValueError) as error:
+        raise RuntimeError("direct all-to-all process group is not live") from error
+    configured_world = int(getattr(group, "world_size", 0))
+    if actual_world != configured_world:
+        raise RuntimeError(
+            f"direct all-to-all group world size mismatch: coordinator={configured_world}, process_group={actual_world}"
+        )
+    if backend != expected_backend:
+        raise RuntimeError(
+            f"direct all-to-all requires the {expected_backend} backend for {input_.device.type} tensors, got {backend}"
+        )
+    configured_device = getattr(group, "device", None)
+    if configured_device is None:
+        raise RuntimeError("direct all-to-all coordinator does not declare its collective device")
+    expected_device = torch.device(configured_device)
+    if (expected_device.type != input_.device.type
+            or (expected_device.index is not None and expected_device.index != input_.device.index)):
+        raise RuntimeError(
+            f"direct all-to-all tensor device {input_.device} does not match coordinator device {expected_device}")
+
+
 def tensor_model_parallel_all_reduce(input_: torch.Tensor) -> torch.Tensor:
     """All-reduce the input tensor across model parallel group."""
     return get_tp_group().all_reduce(input_)
@@ -40,6 +70,8 @@ def sequence_model_parallel_direct_all_to_all(input_: torch.Tensor) -> torch.Ten
     guard keeps other callers from discovering the restriction at backward.
     """
     group = get_sp_group()
+    # Packed SP is deliberately inert at SP=1 and must not require distributed
+    # initialization merely to preserve the identity path.
     if group.world_size == 1:
         return input_
     if torch.is_grad_enabled() and input_.requires_grad:
@@ -51,6 +83,10 @@ def sequence_model_parallel_direct_all_to_all(input_: torch.Tensor) -> torch.Ten
             f"got shape {tuple(input_.shape)} and SP={group.world_size}")
     if not input_.is_contiguous():
         raise ValueError("direct all-to-all requires a contiguous input tensor")
+    # Dynamo reaches the CUDA custom op below, whose opaque runtime body
+    # repeats these checks. Eager and CPU/Gloo execution validate here.
+    if not torch.compiler.is_compiling():
+        _validate_direct_all_to_all_group(group, input_, "nccl" if input_.is_cuda else "gloo")
     # CPU/Gloo is useful for the real multi-rank contract test. The production
     # packed H3 route is CUDA/Triton and takes the compiler-visible custom op.
     if not input_.is_cuda:

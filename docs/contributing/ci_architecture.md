@@ -164,6 +164,14 @@ selection never deletes or dynamically invents a Buildkite step.
 | Modular train framework | `train_framework` | 1 | `fastvideo/train/` and its tests |
 | Eval metrics | `eval` | 1 | `fastvideo/eval/` and its tests |
 
+The transformer Fastcheck lane also runs the MiniMax-H3 packed sequence-
+parallel world-4 contract with Gloo. That portable test proves rank ordering,
+padding/trim behavior, and Q/K/V-dependent scatter/gather semantics; it is not
+CUDA performance or NCCL/Triton evidence. The existing four-GPU SSIM lane runs
+the same contract first in strict mode, which fails unless all four CUDA
+devices are visible and the production NCCL plus Triton relayout route runs.
+No separate distributed lane is introduced.
+
 Golden-gate and SSIM selections are basenames, not arbitrary pytest arguments.
 The private host checks the comma-separated allowlist before staging, and the
 container checks it again before invoking pytest. Shared quality-harness
@@ -352,7 +360,8 @@ table binds each internal `*_ci` type to that script, its GPU count, wall-clock
 limit, dependency extras, kernel-build policy, secrets, and artifacts. The
 internal suffix is an implementation detail; there is only one active backend.
 
-SSIM uses `fastvideo/tests/ssim/ci_runner.py` inside a single four-GPU lease.
+SSIM first runs the strict MiniMax-H3 packed-SP production preflight, then uses
+`fastvideo/tests/ssim/ci_runner.py` inside the same four-GPU lease.
 It discovers `REQUIRED_GPUS` and `*_MODEL_TO_PARAMS` with AST parsing, then
 packs independent pytest subprocesses across the visible GPUs with fail-fast
 termination. Performance writes reports to a host-mounted artifact directory;

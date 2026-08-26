@@ -121,10 +121,41 @@ def all_reduce_fake(tensor: torch.Tensor, group_name: str) -> torch.Tensor:
 )
 def direct_all_to_all_single(tensor: torch.Tensor, group_name: str) -> torch.Tensor:
     """Issue a synchronous all-to-all without the functional-collective wrapper."""
-    assert group_name in _groups, f"Group {group_name} is not found."
+    if group_name not in _groups:
+        raise RuntimeError(f"Group {group_name} is not registered.")
     group = _groups[group_name]()
     if group is None:
-        raise ValueError(f"Group {group_name} is destroyed.")
+        raise RuntimeError(f"Group {group_name} is destroyed.")
+    process_group = getattr(group, "device_group", None)
+    if process_group is None or not torch.distributed.is_initialized():
+        raise RuntimeError("direct all-to-all requires a live NCCL process group")
+    try:
+        actual_world = torch.distributed.get_world_size(process_group)
+        torch.distributed.get_rank(process_group)
+        backend = str(torch.distributed.get_backend(process_group)).lower()
+    except (RuntimeError, ValueError) as error:
+        raise RuntimeError("direct all-to-all process group is not live") from error
+    configured_world = int(getattr(group, "world_size", 0))
+    if actual_world != configured_world:
+        raise RuntimeError(
+            f"direct all-to-all group world size mismatch: coordinator={configured_world}, process_group={actual_world}"
+        )
+    if backend != "nccl":
+        raise RuntimeError(f"direct all-to-all CUDA tensors require the NCCL backend, got {backend}")
+    configured_device = getattr(group, "device", None)
+    if configured_device is None:
+        raise RuntimeError("direct all-to-all coordinator does not declare its CUDA device")
+    expected_device = torch.device(configured_device)
+    if (expected_device.type != "cuda"
+            or (expected_device.index is not None and expected_device.index != tensor.device.index)):
+        raise RuntimeError(
+            f"direct all-to-all tensor device {tensor.device} does not match coordinator device {expected_device}")
+    if tensor.ndim < 1 or tensor.shape[0] % actual_world:
+        raise ValueError(
+            "direct all-to-all requires the leading dimension to be evenly divisible by the live group world size; "
+            f"got shape {tuple(tensor.shape)} and world={actual_world}")
+    if not tensor.is_contiguous():
+        raise ValueError("direct all-to-all requires a contiguous input tensor")
     output = torch.empty_like(tensor)
     torch.distributed.all_to_all_single(output, tensor, group=group.device_group)
     return output

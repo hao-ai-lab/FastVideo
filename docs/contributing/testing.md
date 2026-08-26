@@ -16,6 +16,7 @@ slash-command mappings, and workflow ownership live in
 | Inference tests | `fastvideo/tests/inference` | Validate specialized inference paths such as LoRA inference and V-MoBA. |
 | Performance tests | `fastvideo/tests/performance` | Gate latency, throughput, peak memory, and stage timings. See [Performance Benchmarks](performance_benchmarks.md). |
 | Eval tests | `fastvideo/tests/eval` | Check eval metrics against pinned reference scores and assets. |
+| Distributed contracts | `fastvideo/tests/distributed` | Exercise selected real multi-rank communication contracts; most remain manual unless an existing lane names them explicitly. |
 | DreamVerse app tests | `apps/dreamverse` | Validate the DreamVerse backend, frontend, and mock-backed browser flows. |
 
 ## Running Tests Locally
@@ -150,6 +151,14 @@ The change-aware `/merge` planner may run only the SSIM test basenames owned
 by the changed model family. Shared SSIM harness changes still select the
 complete lane. Independently, `main` runs the full SSIM matrix every Sunday at
 05:00 UTC so infrequently touched model families retain periodic coverage.
+
+Before scheduling SSIM cases, the lane uses its existing four-GPU allocation
+to run the MiniMax-H3 packed-SP world-4 contract in strict CUDA mode. Strict
+mode rejects a Gloo fallback and therefore covers the production NCCL and
+Triton relayout route. The one-GPU transformer Fastcheck lane runs the same
+test with its portable Gloo fallback; that result covers collective ordering
+and Q/K/V semantics only, not CUDA behavior or performance. Both nested
+torchrun invocations preserve the Slurm runner's assigned `MASTER_PORT`.
 
 For a focused developer run, invoke pytest directly and optionally select one
 model from a parameterized test through `FASTVIDEO_SSIM_MODEL_ID`:

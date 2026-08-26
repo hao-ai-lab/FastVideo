@@ -427,12 +427,14 @@ class MiniMaxH3AdaLayerNormModulation(nn.Module):
         return temb.view(-1, 6 * self.hidden_size).chunk(6, dim=-1)
 
 
-class _MiniMaxH3StepCursor:
-
-    __slots__ = ("signature", "step")
+class _MiniMaxH3StepCursor(nn.Module):
 
     def __init__(self, device: torch.device, signature: tuple[tuple[float, ...], ...]) -> None:
-        self.step = torch.zeros((), dtype=torch.long, device=device)
+        super().__init__()
+        # The cursor is runtime-only state shared by every precomputed block.
+        # Registering it makes model.to(...) follow the transformer lifecycle,
+        # while persistent=False keeps it out of checkpoint state.
+        self.register_buffer("step", torch.zeros((), dtype=torch.long, device=device), persistent=False)
         self.signature = signature
 
     def set(self, index: int) -> None:
@@ -784,7 +786,13 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
     @torch.no_grad()
     def prepare_adaln_trajectory(self, row_timestep_plan: list[tuple[torch.Tensor,
                                                                     torch.Tensor]]) -> dict[str, float | int]:
-        """Replace full-rank per-block AdaLN projections by exact per-step tables."""
+        """Replace full-rank per-block AdaLN projections by exact per-step tables.
+
+        This is an irreversible inference transformation. The tables and their
+        device-following cursor are intentionally absent from ``state_dict``;
+        after installation, the transformed module cannot be checkpointed and
+        reloaded as either the stock model or an equivalent cached model.
+        """
         signature = tuple(tuple(float(value) for value in timestep.detach().cpu().flatten())
                           for timestep, _ in row_timestep_plan)
         cursor = getattr(self, "_h3_adaln_cursor", None)

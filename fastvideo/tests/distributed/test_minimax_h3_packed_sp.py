@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import contextlib
 import os
-import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -21,17 +20,18 @@ SP_WORLD_SIZE = 4
 
 class _TestGroup:
 
-    def __init__(self, world_size: int) -> None:
+    def __init__(self, world_size: int, device: torch.device) -> None:
         self.world_size = world_size
+        self.device = device
         self.device_group = dist.group.WORLD
         self.unique_name = "minimax_h3_packed_sp_test"
 
 
-class _IdentityAttentionImpl(nn.Module):
+class _QKVOracleAttentionImpl(nn.Module):
 
     def forward(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, metadata: object) -> torch.Tensor:
-        del k, v, metadata
-        return q
+        del metadata
+        return q + 2 * k + 3 * v
 
     def postprocess_output(self, output: torch.Tensor, metadata: object) -> torch.Tensor:
         del metadata
@@ -58,6 +58,16 @@ def _reference_merge(output: torch.Tensor) -> torch.Tensor:
     return output.permute(1, 0, 2, 3).contiguous().reshape(rows, world * heads_local, head_dim)
 
 
+def _exact_cuda_route(world: int) -> bool:
+    strict_cuda = os.environ.get("FASTVIDEO_MINIMAX_H3_PACKED_SP_STRICT_CUDA", "0") == "1"
+    visible_cuda_devices = torch.cuda.device_count()
+    if strict_cuda and visible_cuda_devices < world:
+        raise RuntimeError(
+            "strict MiniMax-H3 packed-SP preflight requires one visible CUDA device per rank; "
+            f"world={world}, visible={visible_cuda_devices}")
+    return visible_cuda_devices >= world
+
+
 def _worker() -> None:
     from fastvideo.attention.layer import DistributedAttention
     from fastvideo.distributed import communication_op, parallel_state
@@ -67,22 +77,22 @@ def _worker() -> None:
     world = int(os.environ["WORLD_SIZE"])
     rank = int(os.environ["RANK"])
     local_rank = int(os.environ["LOCAL_RANK"])
-    exact_cuda_route = torch.cuda.device_count() >= world
-    backend = "nccl" if exact_cuda_route else "gloo"
-    dist.init_process_group(backend=backend)
+    exact_cuda_route = _exact_cuda_route(world)
     if exact_cuda_route:
         torch.cuda.set_device(local_rank)
         device = torch.device(f"cuda:{local_rank}")
         dtype = torch.bfloat16
+        dist.init_process_group(backend="nccl", device_id=device)
     else:
         device = torch.device("cpu")
         dtype = torch.float32
+        dist.init_process_group(backend="gloo")
 
-    group = _TestGroup(world)
+    group = _TestGroup(world, device)
     parallel_state._register_group(group)
     attention = DistributedAttention.__new__(DistributedAttention)
     nn.Module.__init__(attention)
-    attention.attn_impl = _IdentityAttentionImpl()
+    attention.attn_impl = _QKVOracleAttentionImpl()
     attention.head_size = 16
     attention.packed_qkv_relayout = True
     attention._compile_forward_enabled = True
@@ -93,7 +103,7 @@ def _worker() -> None:
     k = q + 100
     v = q + 200
     semantic_rows = world * rows_local - 3
-    expected = q.clone()
+    expected = q + 2 * k + 3 * v
     if rank == world - 1:
         expected[:, -3:] = 0
 
@@ -131,31 +141,43 @@ def _worker() -> None:
         dist.destroy_process_group()
 
 
-def _free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return int(sock.getsockname()[1])
-
-
 def test_minimax_h3_packed_sp_world4_collective_contract() -> None:
     environment = dict(os.environ, OMP_NUM_THREADS="1")
+    launcher = [
+        sys.executable,
+        "-m",
+        "torch.distributed.run",
+        f"--nproc_per_node={SP_WORLD_SIZE}",
+    ]
+    inherited_master_port = os.environ.get("MASTER_PORT")
+    if inherited_master_port:
+        launcher.append(f"--master_port={inherited_master_port}")
+    else:
+        # Local invocations have no scheduler-assigned port. Let torchrun own
+        # discovery instead of racing a bind-and-close port probe.
+        launcher.append("--standalone")
+    launcher.extend([
+        str(Path(__file__).resolve()),
+        "--worker",
+    ])
     process = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "torch.distributed.run",
-            f"--nproc_per_node={SP_WORLD_SIZE}",
-            f"--master_port={_free_port()}",
-            str(Path(__file__).resolve()),
-            "--worker",
-        ],
+        launcher,
         env=environment,
         capture_output=True,
         text=True,
         timeout=300,
     )
-    assert process.returncode == 0 and "MINIMAX_H3_PACKED_SP_OK" in process.stdout, (
+    strict_cuda = os.environ.get("FASTVIDEO_MINIMAX_H3_PACKED_SP_STRICT_CUDA", "0") == "1"
+    expected_mode = "mode=cuda-production" if strict_cuda else "MINIMAX_H3_PACKED_SP_OK"
+    assert process.returncode == 0 and expected_mode in process.stdout, (
         f"stdout:\n{process.stdout[-6000:]}\nstderr:\n{process.stderr[-6000:]}")
+
+
+def test_minimax_h3_packed_sp_strict_mode_rejects_insufficient_cuda(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FASTVIDEO_MINIMAX_H3_PACKED_SP_STRICT_CUDA", "1")
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: SP_WORLD_SIZE - 1)
+    with pytest.raises(RuntimeError, match="one visible CUDA device per rank"):
+        _exact_cuda_route(SP_WORLD_SIZE)
 
 
 if __name__ == "__main__" and "--worker" in sys.argv:
