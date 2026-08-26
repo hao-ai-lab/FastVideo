@@ -1,7 +1,7 @@
 import os
 
-os.environ["MASTER_ADDR"] = "localhost"
-os.environ["MASTER_PORT"] = "29514"
+os.environ.setdefault("MASTER_ADDR", "localhost")
+os.environ.setdefault("MASTER_PORT", "29514")
 import sys
 import subprocess
 from pathlib import Path
@@ -18,7 +18,7 @@ NUM_GPUS_PER_NODE = "2"
 
 def test_lora_training():
     """Test the LoRA training setup"""
-    os.environ["WANDB_MODE"] = "online"
+    os.environ.setdefault("WANDB_MODE", "offline")
 
     data_dir = Path("data/crush-smol_processed_t2v")
 
@@ -55,7 +55,8 @@ def test_lora_training():
     summary_file = '/workspace/tracker/wandb/latest-run/files/wandb-summary.json'
 
     device_name = torch.cuda.get_device_name()
-    assert "L40S" in device_name, "Test must be run on L40S"
+    assert "L40S" in device_name or "B200" in device_name, (f"LoRA training regression supports L40S and the "
+                                                               f"GB200 Slurm CI target, got {device_name}")
     reference_wandb_summary_file = l40s_reference_wandb_summary_file
     reference_wandb_summary = json.load(open(reference_wandb_summary_file))
 

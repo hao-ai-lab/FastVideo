@@ -56,7 +56,7 @@ def run_worker():
 
 def test_distributed_training():
     """Test the distributed training setup"""
-    os.environ["WANDB_MODE"] = "online"
+    os.environ.setdefault("WANDB_MODE", "offline")
 
     data_dir = Path("data/mini_dataset_i2v_VSA")
 
@@ -79,8 +79,8 @@ def test_distributed_training():
 
     device_name = torch.cuda.get_device_name()
     print(f"INFO: device: {device_name}")
-    if "H100" not in device_name:
-        raise ValueError(f"VSA training regression requires H100 GPUs, got: {device_name}")
+    if "H100" not in device_name and "B200" not in device_name:
+        raise ValueError(f"VSA training regression supports H100 and the GB200 Slurm CI target, got: {device_name}")
 
     reference_wandb_summary = json.load(open(reference_wandb_summary_file))
     wandb_summary = json.load(open(summary_file))

@@ -18,8 +18,8 @@ from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 
 logger = init_logger(__name__)
 
-os.environ["MASTER_ADDR"] = "localhost"
-os.environ["MASTER_PORT"] = "29503"
+os.environ.setdefault("MASTER_ADDR", "localhost")
+os.environ.setdefault("MASTER_PORT", "29503")
 
 BASE_MODEL_PATH = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 MODEL_PATH = maybe_download_model(BASE_MODEL_PATH, local_dir=os.path.join("data", BASE_MODEL_PATH))

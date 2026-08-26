@@ -35,7 +35,8 @@ The skill is run **manually**, once per new test. Before invoking it, the user
 has already sanity-tested the new test locally — it launches `VideoGenerator`
 and writes an artefact without crashing (the missing-reference assertion at
 the end is expected). The skill does not re-test locally; it goes straight
-to Modal L40S (which is what CI uses).
+to the manual legacy Modal L40S reference-maintenance target. Active CI runs
+on the Slinky Slurm cluster and only consumes the resulting references.
 
 ## When to use
 
@@ -61,7 +62,8 @@ Prompt the user for it if they didn't supply it.
 
 Everything else is fixed:
 
-- Modal runner GPU: **L40S** (hardcoded in `fastvideo/tests/modal/ssim_test.py`).
+- Modal maintenance GPU: **L40S** (hardcoded in
+  `fastvideo/tests/modal/ssim_test.py`; this is not the active CI compute path).
 - Device folder: `L40S_reference_videos`.
 - Quality tier: `default` (the tier CI runs). The `full_quality` tier is not
   seeded by this skill.

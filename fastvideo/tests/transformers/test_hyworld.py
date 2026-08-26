@@ -20,14 +20,19 @@ from fastvideo.utils import maybe_download_model
 
 logger = init_logger(__name__)
 
-os.environ["MASTER_ADDR"] = "localhost"
-os.environ["MASTER_PORT"] = "29503"
+os.environ.setdefault("MASTER_ADDR", "localhost")
+os.environ.setdefault("MASTER_PORT", "29503")
 
 MODEL_PATH = maybe_download_model("FastVideo/HY-WorldPlay-Bidirectional-Diffusers")
 TRANSFORMER_PATH = os.path.join(MODEL_PATH, "transformer")
 REFERENCE_LATENTS = {
     AttentionBackendEnum.FLASH_ATTN: -197132.85557549074,
     AttentionBackendEnum.TORCH_SDPA: -211007.95158730447,
+}
+GB200_REFERENCE_LATENTS = {
+    # Blackwell uses a different deterministic FlashAttention reduction path.
+    # Measured on the Slinky NVIDIA GB200 CI tray (build 4967).
+    AttentionBackendEnum.FLASH_ATTN: -201149.9431345705,
 }
 
 
@@ -146,7 +151,9 @@ def test_hyworld_transformer():
 
     latent = output.double().sum().item()
 
-    reference_latent = REFERENCE_LATENTS[attention_backend]
+    device_name = torch.cuda.get_device_name(device)
+    device_references = GB200_REFERENCE_LATENTS if "B200" in device_name else REFERENCE_LATENTS
+    reference_latent = device_references.get(attention_backend, REFERENCE_LATENTS[attention_backend])
     diff = abs(reference_latent - latent)
     relative_diff = diff / abs(reference_latent)
     logger.info(f"Reference latent: {reference_latent}, Current latent: {latent}")

@@ -29,10 +29,10 @@ WANDB_SUMMARY_FILE = OUTPUT_DIR / "tracker/wandb/latest-run/files/wandb-summary.
 NUM_NODES = "1"
 NUM_GPUS_PER_NODE = "2"
 GRAD_ACCUM = "1"
-MASTER_PORT = "29504"
+MASTER_PORT = os.environ.get("MASTER_PORT", "29504")
 
-os.environ["MASTER_ADDR"] = "localhost"
-os.environ["MASTER_PORT"] = MASTER_PORT
+os.environ.setdefault("MASTER_ADDR", "localhost")
+os.environ.setdefault("MASTER_PORT", MASTER_PORT)
 
 
 def run_worker():
@@ -131,7 +131,7 @@ def run_worker():
 
 def test_distributed_training():
     """Test the distributed training setup"""
-    os.environ["WANDB_MODE"] = "online"
+    os.environ.setdefault("WANDB_MODE", "offline")
 
     data_dir = Path("data/crush-smol_processed_t2v")
 

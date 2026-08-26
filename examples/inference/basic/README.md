@@ -32,7 +32,9 @@ python examples/inference/basic/mlx_wan_prompt_to_video.py \
   --prompt "A bird's-eye view of a misty forest valley at dawn."
 ```
 
-5B uses [`mlx_wan22_generate.py`](mlx_wan22_generate.py) with
+5B uses
+[`mlx_wan22_generate.py`](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/mlx_wan22_generate.py)
+with
 `FastVideo/FastMetal-5B-QAD`.
 
 `examples/inference/basic/basic_mps.py` is the older PyTorch MPS demo.
@@ -49,7 +51,9 @@ python examples/inference/basic/basic_dmd_new_api.py
 
 ### FastH3 Preview
 
-The verified [basic FastH3 example](basic_fasth3.py) runs the few-step (4-forward, DMD2-distilled) MiniMax-H3 preview, generating synchronized video and audio with its trained block-sparse VSA attention:
+The verified [basic FastH3 example](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_fasth3.py)
+runs the few-step (4-forward, DMD2-distilled) MiniMax-H3 preview, generating
+synchronized video and audio with its trained block-sparse VSA attention:
 
 ```bash
 UV_TORCH_BACKEND=cu130 uv pip install -e ".[fasth3]"

@@ -138,47 +138,31 @@ pytest fastvideo/tests/ssim/ -vs
 
 Use a machine whose GPU and backend match the reference folder you are testing.
 
-## Modal Runs For SSIM
+## Slurm CI Runs For SSIM
 
-For CI-like SSIM execution, use `fastvideo/tests/modal/ssim_test.py`:
+Comment `/test ssim` on a pull request to run the canonical four-GPU SSIM
+lane on the Slinky Slurm cluster. `fastvideo/tests/ssim/ci_runner.py`
+discovers the suite without importing test modules, packs independent pytest
+processes across the four assigned GPUs, and stops the lane on the first
+failure.
 
-```bash
-python -m modal run fastvideo/tests/modal/ssim_test.py::run_ssim_tests
-```
+The change-aware `/merge` planner may run only the SSIM test basenames owned
+by the changed model family. Shared SSIM harness changes still select the
+complete lane. Independently, `main` runs the full SSIM matrix every Sunday at
+05:00 UTC so infrequently touched model families retain periodic coverage.
 
-Target specific files or model ids:
-
-```bash
-python -m modal run fastvideo/tests/modal/ssim_test.py::run_ssim_tests \
-  --test-files test_wan_t2v_similarity.py \
-  --model-ids Wan2.1-T2V-1.3B-Diffusers
-```
-
-If `HF_API_KEY`, `HUGGINGFACE_HUB_TOKEN`, or `HF_TOKEN` is not set, the local
-entrypoint fails fast.
-
-To export raw generated videos from Modal to the shared volume:
+For a focused developer run, invoke pytest directly and optionally select one
+model from a parameterized test through `FASTVIDEO_SSIM_MODEL_ID`:
 
 ```bash
-python -m modal run fastvideo/tests/modal/ssim_test.py::run_ssim_tests \
-  --sync-generated-to-volume
+pytest fastvideo/tests/ssim/test_wan_t2v_similarity.py -vs
+
+FASTVIDEO_SSIM_MODEL_ID=Wan2.1-T2V-1.3B-Diffusers \
+pytest fastvideo/tests/ssim/test_wan_t2v_similarity.py -vs
 ```
 
-The raw export path is quality-tiered:
-
-- default params: `ssim_generated_videos/default/<subdir>/generated_videos`
-- full-quality params: `ssim_generated_videos/full_quality/<subdir>/generated_videos`
-
-The printed `modal volume get` command downloads into
-`./generated_videos_modal/<quality-tier>`. Convert those outputs into local
-references with `copy-local`:
-
-```bash
-python fastvideo/tests/ssim/reference_videos_cli.py copy-local \
-  --quality-tier full_quality \
-  --generated-dir ./generated_videos_modal/full_quality/L40S_reference_videos \
-  --device-folder L40S_reference_videos
-```
+The files under `fastvideo/tests/modal/` are retained only as a disabled
+manual rollback implementation. No active CI trigger invokes them.
 
 ### SSIM Bootstrap Mode
 
@@ -206,28 +190,30 @@ python fastvideo/tests/ssim/reference_videos_cli.py promote-draft \
 
 ## CI Integration
 
-FastVideo CI tests are orchestrated by Buildkite and run on Modal GPU
-instances. The main files are:
+FastVideo GPU CI is orchestrated by Buildkite and runs only on isolated Slinky
+Slurm workers. The main files are:
 
 | File | Purpose |
 |---|---|
-| `.buildkite/pipeline.yml` | Buildkite test graph and path filters. |
-| `.buildkite/scripts/pr_test.sh` | Dispatches `TEST_TYPE` to a Modal function. |
-| `fastvideo/tests/modal/pr_test.py` | Modal functions for most test lanes. |
-| `fastvideo/tests/modal/ssim_test.py` | Modal functions and partitioning for SSIM. |
+| `.buildkite/pipeline.yml` | Static, validated 20-lane Slurm test graph. |
+| `.github/scripts/plan_merge_ci.py` | Trusted path-to-lane and focused quality-test policy for `/merge`. |
+| `.buildkite/scripts/unit_test.sh`, `.buildkite/scripts/lanes/*.sh` | Repository-owned test payloads executed inside Slurm containers. |
+| `fastvideo/tests/ssim/ci_runner.py` | Four-GPU SSIM task discovery and scheduling. |
+| `.buildkite/scripts/pr_test.sh`, `fastvideo/tests/modal/*.py` | Dormant manual rollback path; rejected in Buildkite. |
 
-For exact tier membership, path filters, slash commands, and aggregate statuses,
+For exact tier membership, slash commands, runner isolation, and aggregate statuses,
 see [CI/CD Architecture](ci_architecture.md).
 
 ### Adding A New CI Test Category
 
 If a new test does not fit an existing lane:
 
-1. Add a Modal function in `fastvideo/tests/modal/pr_test.py` or a focused
-   companion module.
-2. Add a matching `TEST_TYPE` case in `.buildkite/scripts/pr_test.sh`.
-3. Add Buildkite direct-test and path-filter entries in `.buildkite/pipeline.yml`.
-4. Add the `/test` mapping in `.github/workflows/ci-slash-commands.yml`.
+1. Put the test payload in an executable `.buildkite/scripts/lanes/<lane>.sh`.
+2. Add its static step to `.buildkite/pipeline.yml`, its changed-path ownership
+   to `.github/scripts/plan_merge_ci.py`, and extend the CI contract tests.
+3. Add the `/test` mapping in `.github/workflows/ci-slash-commands.yml`.
+4. Coordinate the matching GPU, timeout, dependency, secret, and artifact
+   policy in the private Slurm runner allowlist.
 5. Document the new category in [CI/CD Architecture](ci_architecture.md) and add
    authoring notes here if contributors need them.
 

@@ -18,8 +18,8 @@ from fastvideo.worker import MultiprocExecutor
 import torch
 
 logger = init_logger(__name__)
-os.environ["MASTER_ADDR"] = "localhost"
-os.environ["MASTER_PORT"] = "29500"
+os.environ.setdefault("MASTER_ADDR", "localhost")
+os.environ.setdefault("MASTER_PORT", "29500")
 
 # Base parameters for LoRA inference tests
 WAN_LORA_PARAMS = {

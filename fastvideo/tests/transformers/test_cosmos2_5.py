@@ -33,8 +33,8 @@ if os.path.exists(COSMOS_PREDICT2_5_PATH):
 else:
     logger.warning(f"cosmos-predict2.5 not found at: {COSMOS_PREDICT2_5_PATH}")
 
-os.environ["MASTER_ADDR"] = "localhost"
-os.environ["MASTER_PORT"] = "29505"
+os.environ.setdefault("MASTER_ADDR", "localhost")
+os.environ.setdefault("MASTER_PORT", "29505")
 
 # COSMOS 2.5 model path - update this based on the actual HuggingFace model ID
 # The model has subdirectories: base/pre-trained, base/post-trained, auto/multiview, robot/action-cond

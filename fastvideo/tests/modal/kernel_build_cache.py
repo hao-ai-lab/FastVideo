@@ -1,4 +1,4 @@
-"""Build and reuse FastVideo kernel wheels in Modal CI.
+"""Build and reuse FastVideo kernel wheels in the dormant Modal rollback path.
 
 This module stays standalone because Modal launchers execute it from a freshly
 cloned checkout after dependency installation. Shared cache consumers are
@@ -22,7 +22,7 @@ import zipfile
 from email.parser import Parser
 from pathlib import Path
 
-CACHE_SCHEMA_VERSION = 3
+CACHE_SCHEMA_VERSION = 4
 DEFAULT_PREBUILT_INFO_PATH = "/opt/fastvideo-kernel-prebuilt"
 KERNEL_RELATIVE_DIR = "fastvideo-kernel"
 DEFAULT_BUILD_INFO_OUTPUT = "/opt/fastvideo-kernel-prebuilt/default/metadata.json"
@@ -166,6 +166,7 @@ def _torch_metadata() -> dict[str, object]:
         return {
             "torch_version": str(torch.__version__),
             "torch_cuda_version": str(torch.version.cuda),
+            "torch_git_version": str(getattr(torch.version, "git_version", "")),
             "torch_file": str(getattr(torch, "__file__", "")),
             "torch_config": str(torch.__config__.show()),
             "cxx11_abi": cxx11_abi,
@@ -174,6 +175,7 @@ def _torch_metadata() -> dict[str, object]:
         return {
             "torch_version": f"<unavailable: {error}>",
             "torch_cuda_version": "<unavailable>",
+            "torch_git_version": "<unavailable>",
             "torch_file": "<unavailable>",
             "torch_config": "<unavailable>",
             "cxx11_abi": "<unavailable>",
@@ -223,6 +225,11 @@ def _compiler_libc_metadata() -> dict[str, object]:
 def _build_metadata(repo_root: Path) -> dict[str, object]:
     explicit_arch = os.environ.get("TORCH_CUDA_ARCH_LIST", "").strip()
     resolved_arch = explicit_arch or _detect_arch_from_torch()
+    torch_metadata = _torch_metadata()
+    torch_cache_metadata = {
+        name: torch_metadata[name]
+        for name in ("torch_version", "torch_cuda_version", "torch_git_version", "cxx11_abi")
+    }
     cache_key_build = {
         "gpu_backend": os.environ.get("GPU_BACKEND", "CUDA"),
         "resolved_torch_cuda_arch_list": resolved_arch,
@@ -242,7 +249,7 @@ def _build_metadata(repo_root: Path) -> dict[str, object]:
             "platform": sysconfig.get_platform(),
             "machine": platform.machine(),
         },
-        "torch": _torch_metadata(),
+        "torch": torch_cache_metadata,
         "cuda": {
             "cuda_home": os.environ.get("CUDA_HOME", ""),
             "nvcc": _selected_command_metadata("CUDACXX", "nvcc"),
@@ -252,6 +259,7 @@ def _build_metadata(repo_root: Path) -> dict[str, object]:
     }
     metadata = {
         **cache_key_metadata,
+        "torch": torch_metadata,
         "build": {
             **cache_key_build,
             "torch_cuda_arch_list": explicit_arch,

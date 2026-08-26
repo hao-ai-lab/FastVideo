@@ -1,7 +1,7 @@
 import os
 
-os.environ["MASTER_ADDR"] = "localhost"
-os.environ["MASTER_PORT"] = "29512"
+os.environ.setdefault("MASTER_ADDR", "localhost")
+os.environ.setdefault("MASTER_PORT", "29512")
 import sys
 import subprocess
 from pathlib import Path
@@ -58,7 +58,7 @@ def run_worker():
 
 def test_distributed_training():
     """Test the distributed training setup"""
-    os.environ["WANDB_MODE"] = "online"
+    os.environ.setdefault("WANDB_MODE", "offline")
 
     data_dir = Path("data/crush-smol_processed_t2v")
 
@@ -99,6 +99,11 @@ def test_distributed_training():
     elif "L40S" in device_name:
         reference_wandb_summary_file = l40s_reference_wandb_summary_file
     elif "H200" in device_name:
+        reference_wandb_summary_file = h200_reference_wandb_summary_file
+    elif "B200" in device_name:
+        # GB200 is the Slurm CI target. Use the closest high-memory baseline;
+        # correctness fields remain gated while the generous timing bounds
+        # intentionally absorb hardware throughput differences.
         reference_wandb_summary_file = h200_reference_wandb_summary_file
     else:
         raise ValueError(f"Unknown device: {device_name}")
