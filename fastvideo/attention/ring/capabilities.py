@@ -65,10 +65,3 @@ try:
     HAS_SPARSE_SAGE_ATTENTION = True
 except ImportError:
     HAS_SPARSE_SAGE_ATTENTION = False
-
-try:
-    import torch_npu  # noqa: F401
-
-    HAS_NPU = True
-except ImportError:
-    HAS_NPU = False
