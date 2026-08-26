@@ -367,7 +367,7 @@ def test_wave1_lane_functions_use_shared_scripts(monkeypatch):
     for script, payload in {
             "kernel_tests.sh": "pytest fastvideo-kernel/tests/ -vs",
             "inference_vmoba.sh": "python fastvideo/tests/inference/vmoba/test_vmoba_inference.py",
-            "golden_gate.sh": "pytest ./fastvideo/tests/golden_gate -vs",
+            "golden_gate.sh": 'exec pytest "$golden_root" -vs',
             "encoder.sh": "pytest ./fastvideo/tests/encoders -vs",
             "vae.sh": "pytest ./fastvideo/tests/vaes -vs",
             "transformer.sh": "pytest ./fastvideo/tests/transformers -vs",
@@ -377,6 +377,7 @@ def test_wave1_lane_functions_use_shared_scripts(monkeypatch):
             "eval.sh": "pytest ./fastvideo/tests/eval -vs",
     }.items():
         assert payload in (lanes_dir / script).read_text(), script
+    assert "golden_root=./fastvideo/tests/golden_gate" in (lanes_dir / "golden_gate.sh").read_text()
 
     # run_eval_tests goes through run_test_command (custom install extras);
     # pin its shared script + install command textually.
