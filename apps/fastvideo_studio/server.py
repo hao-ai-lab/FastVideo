@@ -18,6 +18,7 @@ import argparse
 import contextlib
 import logging
 import os
+import re
 import shutil
 import signal
 import time
@@ -116,6 +117,26 @@ def list_models(workload_type: str | None = None) -> list[dict[str, Any]]:
     return _available_models
 
 
+def _safe_upload_name(filename: str | None, ext: str) -> str:
+    """A filesystem-safe version of the client's filename, keeping it readable.
+
+    Uploads live under a per-file uuid directory, so the basename does not have
+    to be unique -- only safe. Keeping the original name means the path stays
+    self-describing wherever it travels: the database, job logs, and payloads
+    copied back out to the API.
+    """
+    stem = os.path.basename(filename or "").rsplit(".", 1)[0]
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "_", stem).strip("._-")
+    return f"{stem[:80] or 'upload'}{ext}"
+
+
+def _upload_destination(ext: str, filename: str | None) -> str:
+    """<upload_dir>/<uuid4>/<safe original name><ext>"""
+    directory = os.path.join(upload_dir, uuid.uuid4().hex)
+    os.makedirs(directory, exist_ok=True)
+    return os.path.join(directory, _safe_upload_name(filename, ext))
+
+
 ALLOWED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 # MiniMax-H3 Ref2VA takes ordered image / video / audio references, so the
 # upload endpoint has to accept more than keyframes.
@@ -143,8 +164,7 @@ async def upload_image(file: Annotated[UploadFile, File()], ) -> dict[str, str]:
                     f"{', '.join(ALLOWED_IMAGE_EXTENSIONS)}"),
         )
     os.makedirs(upload_dir, exist_ok=True)
-    unique_name = f"{uuid.uuid4().hex}{ext}"
-    dest_path = os.path.join(upload_dir, unique_name)
+    dest_path = _upload_destination(ext, file.filename)
     try:
         contents = await file.read()
         with open(dest_path, "wb") as f:
@@ -185,8 +205,7 @@ async def upload_media(file: Annotated[UploadFile, File()], ) -> dict[str, str]:
         media_type = "image"
 
     os.makedirs(upload_dir, exist_ok=True)
-    unique_name = f"{uuid.uuid4().hex}{ext}"
-    dest_path = os.path.join(upload_dir, unique_name)
+    dest_path = _upload_destination(ext, file.filename)
     try:
         contents = await file.read()
         with open(dest_path, "wb") as f:
@@ -385,6 +404,28 @@ def create_job(req: CreateJobRequest) -> dict[str, Any]:
                     exc,
                 )
 
+    return job.to_dict()
+
+
+@app.post("/api/jobs/{job_id}/duplicate", status_code=201)
+def duplicate_job(job_id: str) -> dict[str, Any]:
+    """Create a new pending job with the same configuration as an existing one."""
+    try:
+        job = job_runner.duplicate_job(job_id, str(uuid.uuid4()))
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    return job.to_dict()
+
+
+@app.patch("/api/jobs/{job_id}")
+def update_job(job_id: str, updates: dict[str, Any]) -> dict[str, Any]:
+    """Edit a pending job's configuration. Started jobs cannot be edited."""
+    try:
+        job = job_runner.update_job_config(job_id, updates)
+    except ValueError as e:
+        detail = str(e)
+        status = 404 if "not found" in detail else 400
+        raise HTTPException(status_code=status, detail=detail) from e
     return job.to_dict()
 
 

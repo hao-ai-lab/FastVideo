@@ -59,50 +59,42 @@ export function validateReferences(refs: H3Reference[]): string | null {
 }
 
 /**
- * Scaffold the six-section prompt from
- * docs/VIDEO_PROMPT_WRITING_GUIDE_ref_en.md, pre-filled with the labels this
- * reference list will actually receive.
+ * Seed the guided prompt fields from the current reference list.
+ *
+ * Content is flush left and retention_analysis uses the
+ * "status - explanation" form from the guide's complete example; blank
+ * sections are left blank so serializeH3Prompt can fill them with N/A.
  */
-export function referencePromptTemplate(refs: H3Reference[]): string {
+export function referencePromptSeed(
+	refs: H3Reference[],
+): Record<string, string> {
 	const labels = labelReferences(refs);
 	const visual = labels.filter((l) => !l.startsWith("<Audio"));
-	const subjects = visual.length
-		? visual
-				.map(
-					(label, i) =>
-						`  <Subject ${i + 1}> is the subject from ${label}; describe appearance, distinguishing features, and what must stay consistent.`,
-				)
-				.join("\n")
-		: "  <Subject 1> is ...";
 	const audio = labels.filter((l) => l.startsWith("<Audio"));
-	const audioLine = audio.length
-		? `\n  Audio: reuse ${audio.join(", ")} as described below.`
-		: "";
 
-	return [
-		"subject_definitions:",
-		subjects + audioLine,
-		"",
-		"summary:",
-		"  Full-reference generation. Describe the target video and which reference supplies what.",
-		"",
-		"retention_analysis:",
-		labels
-			.map(
-				(label) =>
-					`  ${label}: state whether it is fully preserved, partially preserved, transferred, or reused, and where it appears.`,
-			)
-			.join("\n"),
-		"",
-		"detailed_description:",
-		"  Describe composition, subject appearance and position, environment and lighting,",
-		"  actions and state changes, camera movement, and sound, in playback order.",
-		"  Say explicitly where each referenced item appears or takes effect.",
-		"",
-		"overall_soundscape:",
-		"  Ambience and physical sounds.",
-		"",
-		"non_diegetic_music:",
-		"  Background music audible only to the audience.",
-	].join("\n");
+	const subjects = visual.map(
+		(label, i) =>
+			`<Subject ${i + 1}> is the subject from ${label}; describe appearance and distinguishing features.`,
+	);
+	for (const label of audio) {
+		subjects.push(`${label} is the audio reference; describe what it provides.`);
+	}
+
+	const retention = visual.map(
+		(_, i) =>
+			`<Subject ${i + 1}> (appears in [Shot 1]): fully_preserved - what is retained.`,
+	);
+	for (const label of audio) {
+		retention.push(`${label}: reference - how it guides the audio.`);
+	}
+
+	return {
+		subject_definitions: subjects.join("\n"),
+		summary: "[reference generation] Describe the target video and each reference's role.",
+		retention_analysis: retention.join("\n"),
+		detailed_description:
+			"[Shot 1] Describe composition, subjects, environment, lighting, action and camera movement, saying where each reference takes effect.",
+		overall_soundscape: "",
+		non_diegetic_music: "",
+	};
 }

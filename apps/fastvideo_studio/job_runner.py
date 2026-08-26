@@ -10,6 +10,7 @@ from __future__ import annotations
 import atexit
 import collections
 import contextlib
+import copy
 import enum
 import json
 import logging
@@ -268,6 +269,14 @@ def _build_h3_references(raw: list[dict[str, Any]]) -> list[Any]:
     return built
 
 
+JOB_LOG_FILENAME = "out.log"
+
+
+def _job_log_path(output_dir: str, job_id: str) -> str:
+    """Each job's log lives beside its outputs: <output_dir>/<job_id>/out.log."""
+    return os.path.join(output_dir, job_id, JOB_LOG_FILENAME)
+
+
 def _decode_references(value: Any) -> list[dict[str, Any]]:
     """Reference lists round-trip through the DB as JSON text."""
     if not value:
@@ -345,7 +354,7 @@ class JobRunner:
         """Populate job's log buffer from its log file if it exists."""
         path = job.log_file_path
         if not path:
-            path = os.path.join(self.log_dir, f"{job.id}.log")
+            path = _job_log_path(self.output_dir, job.id)
         if not os.path.isfile(path):
             return
         try:
@@ -599,6 +608,55 @@ class JobRunner:
         logger.info("Deleted job %s", job.id)
         return True
 
+    # Config fields a job carries; everything else on Job is runtime state.
+    CONFIG_FIELDS: tuple[str, ...] = (
+        "model_id", "prompt", "workload_type", "job_type", "image_path",
+        "last_image_path", "references", "negative_prompt", "num_inference_steps",
+        "num_frames", "height", "width", "guidance_scale", "guidance_rescale",
+        "fps", "seed", "num_gpus", "dit_cpu_offload", "dit_layerwise_offload",
+        "text_encoder_cpu_offload", "vae_cpu_offload", "image_encoder_cpu_offload",
+        "use_fsdp_inference", "enable_torch_compile", "vsa_sparsity", "tp_size",
+        "sp_size", "data_path", "max_train_steps", "train_batch_size",
+        "learning_rate", "num_latent_t", "validation_dataset_file", "lora_rank",
+        "dmd_use_vsa", "dmd_vsa_sparsity", "dmd_denoising_steps",
+        "real_score_guidance_scale", "generator_update_interval",
+        "real_score_model_path", "fake_score_model_path",
+    )
+
+    def duplicate_job(self, job_id: str, new_job_id: str) -> Job:
+        """Create a new pending job with an existing job's configuration.
+
+        Runtime state (status, timings, logs, outputs) is not carried over.
+        """
+        with self._jobs_lock:
+            source = self._jobs.get(job_id)
+        if source is None:
+            raise ValueError(f"Job {job_id} not found")
+        config = {f: copy.deepcopy(getattr(source, f)) for f in self.CONFIG_FIELDS}
+        return self.create_job(job_id=new_job_id, **config)
+
+    def update_job_config(self, job_id: str, updates: dict[str, Any]) -> Job:
+        """Edit a not-yet-started job's configuration.
+
+        Only pending jobs may be edited: once a job has run, its config no longer
+        describes its output, and Studio has no way to re-derive that.
+        """
+        with self._jobs_lock:
+            job = self._jobs.get(job_id)
+        if job is None:
+            raise ValueError(f"Job {job_id} not found")
+        if job.status != JobStatus.PENDING:
+            raise ValueError(
+                f"Only pending jobs can be edited (job is {job.status.value}). "
+                "Duplicate it instead.")
+        unknown = set(updates) - set(self.CONFIG_FIELDS)
+        if unknown:
+            raise ValueError(f"Not editable: {', '.join(sorted(unknown))}")
+        for field_name, value in updates.items():
+            setattr(job, field_name, value)
+        self._save_job(job)
+        return job
+
     def start_job(self, job_id: str) -> Job:
         """Start (or restart) a pending / stopped / failed job.
         
@@ -819,10 +877,9 @@ class JobRunner:
     def _run_training_job(self, job: Job):
         """Run a finetuning, distillation, or LoRA job via subprocess."""
         buf = job._log_buf
-        os.makedirs(self.log_dir, exist_ok=True)
-        job.log_file_path = os.path.join(self.log_dir, f"{job.id}.log")
         job_output_dir = os.path.join(self.output_dir, job.id)
         os.makedirs(job_output_dir, exist_ok=True)
+        job.log_file_path = _job_log_path(self.output_dir, job.id)
 
         if not job.data_path or not os.path.isdir(job.data_path):
             job.status = JobStatus.FAILED
@@ -940,8 +997,8 @@ class JobRunner:
 
     def _run_inference_job(self, job: Job):
         buf = job._log_buf
-        os.makedirs(self.log_dir, exist_ok=True)
-        job.log_file_path = os.path.join(self.log_dir, f"{job.id}.log")
+        os.makedirs(os.path.join(self.output_dir, job.id), exist_ok=True)
+        job.log_file_path = _job_log_path(self.output_dir, job.id)
 
         # Add file handler to persist logs
         file_handler = logging.FileHandler(job.log_file_path, mode='w', encoding='utf-8')

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	labelReferences,
-	referencePromptTemplate,
+	referencePromptSeed,
 	validateReferences,
 	type H3Reference,
 } from "@/lib/h3References";
@@ -42,25 +42,29 @@ describe("validateReferences", () => {
 	});
 });
 
-describe("referencePromptTemplate", () => {
-	it("includes all six guide sections and cites the real labels", () => {
-		const out = referencePromptTemplate([ref("image", 1), ref("video", 1)]);
-		for (const section of [
-			"subject_definitions:",
-			"summary:",
-			"retention_analysis:",
-			"detailed_description:",
-			"overall_soundscape:",
-			"non_diegetic_music:",
-		]) {
-			expect(out).toContain(section);
+describe("referencePromptSeed", () => {
+	it("cites the real labels and never indents content", () => {
+		const seed = referencePromptSeed([ref("image", 1), ref("video", 1)]);
+		expect(seed.subject_definitions).toContain("<Picture 1>");
+		expect(seed.subject_definitions).toContain("<Video 1>");
+		for (const value of Object.values(seed)) {
+			expect(value).not.toMatch(/^ {2}\S/m);
 		}
-		expect(out).toContain("<Picture 1>");
-		expect(out).toContain("<Video 1>");
 	});
 
-	it("mentions audio references when present", () => {
-		const out = referencePromptTemplate([ref("image", 1), ref("audio", 1)]);
-		expect(out).toContain("<Audio 1>");
+	it("uses the guide's retention_analysis form", () => {
+		const seed = referencePromptSeed([ref("image", 1)]);
+		expect(seed.retention_analysis).toMatch(/fully_preserved - /);
+	});
+
+	it("starts the summary with a bracketed task type", () => {
+		const seed = referencePromptSeed([ref("image", 1)]);
+		expect(seed.summary).toMatch(/^\[[a-z +]+\]/);
+	});
+
+	it("describes audio references separately", () => {
+		const seed = referencePromptSeed([ref("image", 1), ref("audio", 1)]);
+		expect(seed.subject_definitions).toContain("<Audio 1>");
+		expect(seed.retention_analysis).toContain("<Audio 1>: reference -");
 	});
 });

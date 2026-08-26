@@ -22,6 +22,7 @@ import { useStore } from '@/hooks/useStore';
 import { defaultOptionsStore } from '@/stores/defaultOptions';
 import {
   createJob,
+  updateJob,
   getDatasets,
   getModels,
   uploadImage,
@@ -35,10 +36,21 @@ import type { JobType } from '@/lib/types';
 import {
   H3_MAX_REFERENCES,
   labelReferences,
-  referencePromptTemplate,
+  referencePromptSeed,
   validateReferences,
   type H3Reference,
 } from '@/lib/h3References';
+import {
+  EMPTY_H3_PROMPT_FIELDS,
+  H3_PROMPT_SECTIONS,
+  H3_SECTION_HINTS,
+  H3_SECTION_LABELS,
+  isEmptyPromptFields,
+  parseH3Prompt,
+  serializeH3Prompt,
+  type H3PromptFields,
+} from '@/lib/h3Prompt';
+import { jobToFormFields, type JobLike } from '@/lib/jobToFields';
 
 export interface CreateJobModalProps {
   isOpen: boolean;
@@ -46,6 +58,8 @@ export interface CreateJobModalProps {
   onSuccess: () => void;
   jobType: JobType;
   workloadType: string;
+  /** When set, the modal edits this pending job instead of creating a new one. */
+  editingJob?: JobLike | null;
 }
 
 export default function CreateJobModal({
@@ -54,6 +68,7 @@ export default function CreateJobModal({
   onSuccess,
   jobType,
   workloadType,
+  editingJob,
 }: CreateJobModalProps) {
   const { options } = useStore(defaultOptionsStore);
 
@@ -69,6 +84,10 @@ export default function CreateJobModal({
   const [references, setReferences] = React.useState<H3Reference[]>([]);
   const [isUploadingReference, setIsUploadingReference] = React.useState(false);
   const [referenceError, setReferenceError] = React.useState<string | null>(null);
+  const [promptFields, setPromptFields] = React.useState<H3PromptFields>(
+    EMPTY_H3_PROMPT_FIELDS,
+  );
+  const [useGuidedPrompt, setUseGuidedPrompt] = React.useState(true);
   const [lastImageFileName, setLastImageFileName] = React.useState('');
   const [isUploadingLastImage, setIsUploadingLastImage] = React.useState(false);
   const [lastImageUploadError, setLastImageUploadError] = React.useState<
@@ -100,6 +119,12 @@ export default function CreateJobModal({
   // field when it is selected.
   const supportsLastImage = modelId.toLowerCase().includes('minimax-h3');
   const usingReferences = supportsLastImage && references.length > 0;
+
+  // JobCard re-renders on every job-list poll, so `editingJob` is a fresh
+  // object each time even when unchanged. Effects must depend on stable
+  // primitives from it, never the object, or they re-run in a loop.
+  const editingJobId = editingJob?.id ?? null;
+  const editingJobModelId = editingJob?.model_id ?? null;
 
   // Layerwise offload and FSDP both want ownership of the DiT weights, and
   // FastVideoArgs silently picks a winner (fastvideo_args.py:859). Resolve that
@@ -180,6 +205,46 @@ export default function CreateJobModal({
     const justOpened = isOpen && !justOpenedRef.current;
     justOpenedRef.current = isOpen;
     if (!justOpened) return;
+    if (editingJob) {
+      // Editing must not seed from defaults at all: a partially-seeded form
+      // silently edits values the user never saw.
+      const f = jobToFormFields(editingJob);
+      setModelId(f.modelId);
+      setPrompt(f.prompt);
+      setNegativePrompt(f.negativePrompt);
+      setImagePath(f.imagePath);
+      setImageFileName(f.imagePath.split('/').pop() ?? '');
+      setLastImagePath(f.lastImagePath);
+      setLastImageFileName(f.lastImagePath.split('/').pop() ?? '');
+      setReferences(f.references);
+      setPromptFields(f.promptFields ?? EMPTY_H3_PROMPT_FIELDS);
+      setUseGuidedPrompt(f.promptFields !== null);
+      setNumInferenceSteps(f.numInferenceSteps);
+      setNumFrames(f.numFrames);
+      setHeight(f.height);
+      setWidth(f.width);
+      setGuidanceScale(f.guidanceScale);
+      setGuidanceRescale(f.guidanceRescale);
+      setFps(f.fps);
+      setSeed(f.seed);
+      setNumGpus(f.numGpus);
+      setDitCpuOffload(f.ditCpuOffload);
+      setDitLayerwiseOffload(f.ditLayerwiseOffload);
+      setTextEncoderCpuOffload(f.textEncoderCpuOffload);
+      setVaeCpuOffload(f.vaeCpuOffload);
+      setImageEncoderCpuOffload(f.imageEncoderCpuOffload);
+      setUseFsdpInference(f.useFsdpInference);
+      setEnableTorchCompile(f.enableTorchCompile);
+      setVsaSparsity(f.vsaSparsity);
+      setTpSize(f.tpSize);
+      setSpSize(f.spSize);
+      setReferenceError(null);
+      setModelLoadError(null);
+      setImageUploadError(null);
+      setLastImageUploadError(null);
+      setSubmitError(null);
+      return;
+    }
     const opts = options;
     setNumInferenceSteps(opts.numInferenceSteps);
     setNumFrames(workloadType === 't2i' ? 1 : opts.numFrames);
@@ -213,6 +278,8 @@ export default function CreateJobModal({
     setLastImageUploadError(null);
     setReferences([]);
     setReferenceError(null);
+    setPromptFields(EMPTY_H3_PROMPT_FIELDS);
+    setUseGuidedPrompt(true);
     setSelectedDatasetId('');
     setSelectedValidationDatasetId('');
     setModelLoadError(null);
@@ -228,7 +295,7 @@ export default function CreateJobModal({
       setRealScoreModelPath('');
       setFakeScoreModelPath('');
     }
-  }, [isOpen, workloadType, inferenceWorkload, options]);
+  }, [isOpen, workloadType, inferenceWorkload, options, editingJobId]);
 
   // Load the models available for this workload.
   React.useEffect(() => {
@@ -248,7 +315,16 @@ export default function CreateJobModal({
           opts,
           inferenceWorkload as 't2v' | 'i2v' | 't2i',
         );
-        const chosen = ids.includes(defaultId) ? defaultId : (list[0]?.id ?? '');
+        // When editing, the job's own model wins over the workload default --
+        // this resolves after the seeding effect, so choosing a default here
+        // would silently swap the model out from under the user.
+        const editedId = editingJobModelId;
+        const chosen =
+          editedId && ids.includes(editedId)
+            ? editedId
+            : ids.includes(defaultId)
+              ? defaultId
+              : (list[0]?.id ?? '');
         setModelId(chosen);
         if (workloadType === 'dmd_t2v') {
           setRealScoreModelPath(chosen);
@@ -270,7 +346,7 @@ export default function CreateJobModal({
     return () => {
       stale = true;
     };
-  }, [isOpen, inferenceWorkload, workloadType]);
+  }, [isOpen, inferenceWorkload, workloadType, editingJobModelId]);
 
   // Training jobs need a dataset; load the ready datasets when relevant.
   React.useEffect(() => {
@@ -389,8 +465,31 @@ export default function CreateJobModal({
     setReferenceError(validateReferences(next));
   }
 
-  function insertReferenceTemplate() {
-    setPrompt(referencePromptTemplate(references));
+  function seedPromptFields() {
+    setPromptFields({
+      ...EMPTY_H3_PROMPT_FIELDS,
+      ...referencePromptSeed(references),
+    });
+    setUseGuidedPrompt(true);
+  }
+
+  function setPromptField(section: string, value: string) {
+    setPromptFields((prev) => ({ ...prev, [section]: value }));
+  }
+
+  // Switching between the guided fields and the raw editor keeps whatever was
+  // typed: serialize on the way out, parse back on the way in.
+  function toggleGuidedPrompt() {
+    if (useGuidedPrompt) {
+      if (!isEmptyPromptFields(promptFields)) {
+        setPrompt(serializeH3Prompt(promptFields));
+      }
+      setUseGuidedPrompt(false);
+    } else {
+      const parsed = parseH3Prompt(prompt);
+      if (parsed) setPromptFields(parsed);
+      setUseGuidedPrompt(true);
+    }
   }
 
   function clearLastImage() {
@@ -411,6 +510,13 @@ export default function CreateJobModal({
     if (isInference && workloadType === 'i2v' && !imagePath && !usingReferences)
       return;
     if (usingReferences && validateReferences(references)) return;
+    if (
+      usingReferences &&
+      useGuidedPrompt &&
+      isEmptyPromptFields(promptFields) &&
+      !prompt.trim()
+    )
+      return;
     // Send the dataset id; the backend resolves it to the on-disk media dir.
     const effectiveDataPath = selectedDatasetId ?? '';
     if (!isInference && !selectedDatasetId) return;
@@ -424,7 +530,10 @@ export default function CreateJobModal({
     try {
       const payload: CreateJobRequest = {
         model_id: modelId,
-        prompt,
+        prompt:
+          usingReferences && useGuidedPrompt && !isEmptyPromptFields(promptFields)
+            ? serializeH3Prompt(promptFields)
+            : prompt,
         workload_type: workloadType,
         job_type: effectiveJobType,
         ...(isInference
@@ -491,7 +600,16 @@ export default function CreateJobModal({
                 : {}),
             }),
       };
-      await createJob(payload);
+      if (editingJob) {
+        // PATCH only accepts pending jobs; the API re-checks, since a job can
+        // start between opening this modal and saving.
+        await updateJob(
+          editingJob.id,
+          payload as unknown as Record<string, unknown>,
+        );
+      } else {
+        await createJob(payload);
+      }
       onSuccess();
       onClose();
     } catch (err) {
@@ -513,9 +631,9 @@ export default function CreateJobModal({
 
   const workloadLabel =
     WORKLOAD_OPTIONS[jobType]?.find((o) => o.type === workloadType)?.label ?? '';
-  const title = `New ${jobType.charAt(0).toUpperCase() + jobType.slice(1)} Job${
-    workloadLabel ? ` (${workloadLabel})` : ''
-  }`;
+  const title = `${editingJob ? 'Edit' : 'New'} ${
+    jobType.charAt(0).toUpperCase() + jobType.slice(1)
+  } Job${workloadLabel ? ` (${workloadLabel})` : ''}`;
 
   return (
     <Dialog
@@ -703,11 +821,11 @@ export default function CreateJobModal({
               {references.length > 0 && (
                 <button
                   type="button"
-                  onClick={insertReferenceTemplate}
+                  onClick={seedPromptFields}
                   disabled={isSubmitting}
                   className="mt-1 self-start text-xs text-accent-blue underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Insert reference prompt template
+                  Fill prompt sections from references
                 </button>
               )}
               {referenceError && (
@@ -722,24 +840,68 @@ export default function CreateJobModal({
             </FieldRow>
           )}
 
-          <FieldRow
-            htmlFor="modal-prompt"
-            label={isInference ? 'Prompt' : 'Description'}
-          >
-            <Textarea
-              id="modal-prompt"
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              rows={isInference ? 3 : 2}
-              placeholder={
-                isInference
-                  ? 'A curious raccoon peers through a vibrant field of yellow sunflowers…'
-                  : 'Brief description of this training job…'
-              }
-              required
-              disabled={isSubmitting}
-            />
-          </FieldRow>
+          {usingReferences && useGuidedPrompt ? (
+            /* Ref2VA prompts follow the six-section format in
+               docs/VIDEO_PROMPT_WRITING_GUIDE_ref_en.md. One field per section
+               keeps the serialization correct and lets each carry its own rules. */
+            <>
+              {H3_PROMPT_SECTIONS.map((section) => (
+                <FieldRow
+                  key={section}
+                  htmlFor={`modal-prompt-${section}`}
+                  label={H3_SECTION_LABELS[section]}
+                >
+                  <Textarea
+                    id={`modal-prompt-${section}`}
+                    value={promptFields[section]}
+                    onChange={(e) => setPromptField(section, e.target.value)}
+                    rows={section === 'detailed_description' ? 5 : 2}
+                    placeholder={H3_SECTION_HINTS[section]}
+                    disabled={isSubmitting}
+                  />
+                </FieldRow>
+              ))}
+              <button
+                type="button"
+                onClick={toggleGuidedPrompt}
+                disabled={isSubmitting}
+                className="self-start text-xs text-accent-blue underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Edit as raw prompt
+              </button>
+            </>
+          ) : (
+            <>
+              <FieldRow
+                htmlFor="modal-prompt"
+                label={isInference ? 'Prompt' : 'Description'}
+              >
+                <Textarea
+                  id="modal-prompt"
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  rows={isInference ? 3 : 2}
+                  placeholder={
+                    isInference
+                      ? 'A curious raccoon peers through a vibrant field of yellow sunflowers…'
+                      : 'Brief description of this training job…'
+                  }
+                  required={!(usingReferences && useGuidedPrompt)}
+                  disabled={isSubmitting}
+                />
+              </FieldRow>
+              {usingReferences && (
+                <button
+                  type="button"
+                  onClick={toggleGuidedPrompt}
+                  disabled={isSubmitting}
+                  className="self-start text-xs text-accent-blue underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Edit as prompt sections
+                </button>
+              )}
+            </>
+          )}
 
           {isInference && (
             <FieldRow htmlFor="modal-negative-prompt" label="Negative Prompt">
@@ -1188,7 +1350,13 @@ export default function CreateJobModal({
                 !!datasetLoadError
               }
             >
-              {isSubmitting ? 'Creating…' : 'Create Job'}
+              {isSubmitting
+                ? editingJob
+                  ? 'Saving…'
+                  : 'Creating…'
+                : editingJob
+                  ? 'Save Changes'
+                  : 'Create Job'}
             </Button>
           </div>
         </form>

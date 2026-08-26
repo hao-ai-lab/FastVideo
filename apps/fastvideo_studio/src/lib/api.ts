@@ -159,6 +159,39 @@ export type MediaType = "image" | "video" | "audio";
  * The server derives media_type from the extension and returns it, so callers
  * do not have to duplicate that mapping.
  */
+/** Create a new pending job with the same configuration as an existing one. */
+export async function duplicateJob(jobId: string): Promise<{ id: string }> {
+	const baseApiUrl = getApiBaseUrl();
+	const response = await fetch(`${baseApiUrl}/jobs/${jobId}/duplicate`, {
+		method: "POST",
+	});
+	if (!response.ok) {
+		const err = await response
+			.json()
+			.catch(() => ({ detail: "Duplicate failed" }));
+		throw new Error(err.detail || "Duplicate failed");
+	}
+	return response.json();
+}
+
+/** Edit a pending job's configuration. Started jobs are rejected by the API. */
+export async function updateJob(
+	jobId: string,
+	updates: Record<string, unknown>,
+): Promise<unknown> {
+	const baseApiUrl = getApiBaseUrl();
+	const response = await fetch(`${baseApiUrl}/jobs/${jobId}`, {
+		method: "PATCH",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(updates),
+	});
+	if (!response.ok) {
+		const err = await response.json().catch(() => ({ detail: "Update failed" }));
+		throw new Error(err.detail || "Update failed");
+	}
+	return response.json();
+}
+
 export async function uploadMedia(
 	file: File,
 ): Promise<{ path: string; media_type: MediaType }> {

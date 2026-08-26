@@ -3,11 +3,13 @@
 import * as React from 'react';
 import { Timer } from 'lucide-react';
 
+import CreateJobModal from '@/components/jobs/CreateJobModal';
 import { Badge, type BadgeProps } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useStore } from '@/hooks/useStore';
 import {
   deleteJob,
+  duplicateJob,
   downloadJobVideo,
   startJob,
   stopJob,
@@ -62,6 +64,7 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
   const isSelected = activeJobId === job.id;
 
   const [isLoading, setIsLoading] = React.useState(false);
+  const [isEditing, setIsEditing] = React.useState(false);
   const [currentTime, setCurrentTime] = React.useState(() => Date.now());
 
   const elapsedTime = computeElapsed(job, currentTime);
@@ -98,6 +101,21 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
       onJobUpdated?.();
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to stop job');
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function handleDuplicate(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (isLoading) return;
+    setIsLoading(true);
+    try {
+      await duplicateJob(job.id);
+      onJobUpdated?.();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to duplicate job');
     } finally {
       setIsLoading(false);
     }
@@ -235,6 +253,30 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
               Download Video
             </Button>
           )}
+        {job.status === 'pending' && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setIsEditing(true);
+            }}
+            disabled={isLoading}
+            title="Edit this job's configuration"
+          >
+            Edit
+          </Button>
+        )}
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={handleDuplicate}
+          disabled={isLoading}
+          title="Create a new pending job with this configuration"
+        >
+          Duplicate
+        </Button>
         <Button
           size="sm"
           variant="destructive"
@@ -244,6 +286,22 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
           Delete
         </Button>
       </div>
+      {/* Rendered per-card rather than lifting the modal into the page: it is
+          already parameterised by jobType/workloadType, so passing the job's
+          own values is enough, and only one instance is mounted at a time. */}
+      {isEditing && (
+        <CreateJobModal
+          isOpen
+          editingJob={job}
+          jobType={(job.job_type ?? 'inference') as never}
+          workloadType={job.workload_type ?? 't2v'}
+          onClose={() => setIsEditing(false)}
+          onSuccess={() => {
+            setIsEditing(false);
+            onJobUpdated?.();
+          }}
+        />
+      )}
     </article>
   );
 }
