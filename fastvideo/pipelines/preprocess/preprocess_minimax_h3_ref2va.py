@@ -5,9 +5,12 @@ from __future__ import annotations
 
 import argparse
 import gc
+import os
 from pathlib import Path
 import shutil
+import tempfile
 from typing import Any
+import uuid
 
 import numpy as np
 import pyarrow as pa
@@ -76,6 +79,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--validate-manifest-only", action="store_true")
     parser.add_argument("--validate-only", action="store_true")
+    parser.add_argument(
+        "--replace-existing",
+        action="store_true",
+        help=("Replace a non-empty output directory after the staged dataset "
+              "validates; retain the previous directory as a backup."),
+    )
     return parser.parse_args()
 
 
@@ -393,11 +402,43 @@ def _build_record(
     return record
 
 
-def _reset_output_shards(output_dir: Path) -> None:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    for parquet_path in output_dir.glob("*.parquet"):
-        parquet_path.unlink()
-    shutil.rmtree(output_dir / "map_style_cache", ignore_errors=True)
+def _validate_output_destination(output_dir: Path, *, replace_existing: bool) -> None:
+    if not output_dir.exists():
+        return
+    if not output_dir.is_dir():
+        raise NotADirectoryError(f"Preprocessing output exists but is not a directory: {output_dir}")
+    if any(output_dir.iterdir()) and not replace_existing:
+        raise FileExistsError(f"Refusing to replace non-empty preprocessing output {output_dir}. "
+                              "Pass --replace-existing to stage and validate a replacement.")
+
+
+def _new_staging_directory(output_dir: Path) -> Path:
+    output_dir.parent.mkdir(parents=True, exist_ok=True)
+    return Path(tempfile.mkdtemp(prefix=f".{output_dir.name}.staging-", dir=str(output_dir.parent)))
+
+
+def _promote_staged_dataset(
+    staging_dir: Path,
+    output_dir: Path,
+    *,
+    replace_existing: bool,
+) -> Path | None:
+    """Promote one validated sibling directory and retain any old dataset."""
+    _validate_output_destination(output_dir, replace_existing=replace_existing)
+    backup_dir: Path | None = None
+    if output_dir.exists() and any(output_dir.iterdir()):
+        backup_dir = output_dir.with_name(f".{output_dir.name}.backup-{uuid.uuid4().hex}")
+        os.replace(output_dir, backup_dir)
+    try:
+        # A sibling rename is atomic when the destination is absent (or an
+        # existing empty directory). The old non-empty dataset was moved, not
+        # deleted, and is restored if promotion fails.
+        os.replace(staging_dir, output_dir)
+    except BaseException:
+        if backup_dir is not None and backup_dir.exists() and not output_dir.exists():
+            os.replace(backup_dir, output_dir)
+        raise
+    return backup_dir
 
 
 def _write_record(record: dict[str, Any], output_dir: Path, index: int) -> Path:
@@ -445,13 +486,17 @@ def preprocess(
     manifest_path: Path,
     model_path: Path,
     output_dir: Path,
+    replace_existing: bool = False,
 ) -> list[Path]:
     samples = load_minimax_h3_ref2va_raw_samples(manifest_path)
-    _init_single_process_distributed()
     model_path = model_path.expanduser().resolve()
     output_dir = output_dir.expanduser().resolve()
+    _validate_output_destination(output_dir, replace_existing=replace_existing)
+    if output_dir.is_relative_to(model_path) or model_path.is_relative_to(output_dir):
+        raise ValueError("Preprocessing output and MiniMax H3 model directories must not overlap")
     if not model_path.is_dir():
         raise FileNotFoundError(f"MiniMax H3 model directory is missing at {model_path}")
+    _init_single_process_distributed()
     model_index = verify_model_config_and_directory(str(model_path))
     required_components = {"vae", "audio_vae", "tokenizer", "processor", "text_encoder", "transformer_ref"}
     missing_components = sorted(required_components - set(model_index))
@@ -459,23 +504,34 @@ def preprocess(
         raise ValueError(f"MiniMax H3 Ref2VA checkpoint is missing components: {missing_components}")
     fastvideo_args, patch_size = _build_fastvideo_args(model_path)
 
-    _reset_output_shards(output_dir)
-    output_paths: list[Path] = []
-    for index, sample in enumerate(samples):
-        print(f"Preprocessing sample {index + 1}/{len(samples)}: {sample.sample_id}")
-        record = _build_record(
-            sample,
-            model_path=model_path,
-            model_index=model_index,
-            fastvideo_args=fastvideo_args,
-            patch_size=patch_size,
-        )
-        output_path = _write_record(record, output_dir, index)
-        output_paths.append(output_path)
-        print(f"Wrote {sample.sample_id} to {output_path}")
+    staging_dir = _new_staging_directory(output_dir)
+    try:
+        staged_paths: list[Path] = []
+        for index, sample in enumerate(samples):
+            print(f"Preprocessing sample {index + 1}/{len(samples)}: {sample.sample_id}")
+            record = _build_record(
+                sample,
+                model_path=model_path,
+                model_index=model_index,
+                fastvideo_args=fastvideo_args,
+                patch_size=patch_size,
+            )
+            output_path = _write_record(record, staging_dir, index)
+            staged_paths.append(output_path)
+            print(f"Staged {sample.sample_id} at {output_path}")
 
-    validate_preprocessed_dataset(manifest_path=manifest_path, output_dir=output_dir)
-    return output_paths
+        validate_preprocessed_dataset(manifest_path=manifest_path, output_dir=staging_dir)
+        backup_dir = _promote_staged_dataset(
+            staging_dir,
+            output_dir,
+            replace_existing=replace_existing,
+        )
+        if backup_dir is not None:
+            print(f"Retained previous preprocessing output at {backup_dir}")
+        return [output_dir / path.name for path in staged_paths]
+    finally:
+        if staging_dir.exists():
+            shutil.rmtree(staging_dir, ignore_errors=True)
 
 
 def main() -> None:
@@ -493,6 +549,7 @@ def main() -> None:
         manifest_path=manifest_path,
         model_path=args.model_path,
         output_dir=output_dir,
+        replace_existing=bool(args.replace_existing),
     )
     print(f"Prepared {len(output_paths)} MiniMax H3 Ref2VA training shard(s) in {output_dir}")
 

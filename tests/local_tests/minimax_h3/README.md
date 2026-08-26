@@ -16,9 +16,20 @@ that skip is not parity evidence.
 
 ```bash
 pytest \
+  fastvideo/tests/train/models/test_minimax_h3_lora.py \
+  fastvideo/tests/train/models/test_minimax_h3_ref2va.py \
+  fastvideo/tests/train/utils/test_dcp_to_diffusers_h3.py \
+  fastvideo/tests/train/utils/test_lora_fsdp.py \
+  fastvideo/tests/workflow/test_minimax_h3_ref2va_preprocess.py \
   fastvideo/tests/vaes/test_minimax_h3_video_vae_streaming.py \
   fastvideo/tests/stages/test_minimax_h3_vae_streaming.py -q
 ```
+
+The LoRA ownership test starts two CPU/Gloo ranks, shards the adapter with
+composable FSDP/DTensor, compares two synchronized optimization steps against
+the exact unsharded mean-loss reference, and round-trips adapter state through
+DCP. Export tests prove that Ref2VA replaces `transformer_ref/`, that LoRA is
+merged back to native keys, and that the exported state strictly reloads.
 
 ## Registry smoke
 

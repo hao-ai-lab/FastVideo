@@ -1,7 +1,6 @@
 # MiniMax H3 T2VA 400-step overfit experiment on one Crush-Smol record.
 #
-# Submit eight H200 nodes through the fixed launch script:
-#   bash examples/train/launch_minimax_h3_t2va_crush_smol_validation.sh
+# DCP export merges the adapter into the native transformer component.
 
 models:
   student:

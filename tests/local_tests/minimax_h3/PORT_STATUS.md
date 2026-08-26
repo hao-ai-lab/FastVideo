@@ -6,6 +6,7 @@
 - component parity: complete
 - FastVideo runtime acceptance: complete
 - official end-to-end pipeline parity: complete
+- modular Ref2VA/LoRA training: CPU contracts complete; full-checkpoint run pending
 
 ## Coverage
 
@@ -22,10 +23,15 @@
 | Public surface | manifest resolution, pipeline registration, and three presets | complete |
 | FastVideo distributed runtime | valid joint AV outputs; SP=1/SP=4 latent consistency | complete |
 | Official end-to-end pipeline | exact T2VA, FL2VA, and Ref2VA video/audio latents | complete |
+| Modular Ref2VA packing | target-only loss slicing plus pinned row/position/tag parity | complete |
+| LoRA ownership | exact 312-layer coverage; two-rank FSDP gradient and DCP-resume parity | complete |
+| Training export | native merged LoRA keys; physical `transformer_ref` handoff and strict reload | complete |
 
 ## Current validation
 
 T2VA, FL2VA, and Ref2VA match the official video/audio latents exactly.
+The added training contracts do not claim an official full-checkpoint training
+parity run; no complete MiniMax H3 checkpoint was available in this worktree.
 
 ## Decisions
 
@@ -36,6 +42,10 @@ T2VA, FL2VA, and Ref2VA match the official video/audio latents exactly.
 - Keep `last_image`, `references`, and `audio_latents` on the typed request path.
 - Treat the published component folders as the loading boundary.
 - Keep reference videos on CPU between VAE clips and decode final pixels only on the executor's output rank.
+- Insert H3 LoRA modules on the meta model before FSDP so adapters share the
+  transformer's ownership, gradient synchronization, and checkpoint topology.
+- Export H3 training adapters merged into the native physical component;
+  standalone adapter loading is not part of the inference contract.
 
 ## Evidence boundary
 

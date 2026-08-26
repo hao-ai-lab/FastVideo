@@ -1,4 +1,5 @@
-# MiniMax H3 Ref2VA LoRA overfit experiment on one synthetic record.
+# MiniMax H3 Ref2VA LoRA overfit experiment on the bundled synthetic fixture.
+# DCP export merges the adapter into the native transformer_ref component.
 
 
 models:
