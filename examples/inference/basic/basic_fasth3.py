@@ -48,6 +48,12 @@ def build_parser(description: str | None = None) -> argparse.ArgumentParser:
     # License review completes. A local snapshot can be passed here instead.
     parser.add_argument("--prompt", required=True)
     parser.add_argument("--output", default="outputs/fasth3")
+    parser.add_argument("--lazy-module-load",
+                        action="store_true",
+                        help="load each heavy component on first use and free it after the last stage that "
+                        "needs it, so peak memory is the largest overlapping set instead of the sum of every "
+                        "component. Enable when the model does not fit at load time; costs a reload per "
+                        "generation, so leave it off when it does fit")
     parser.add_argument("--profile",
                         choices=("all", "strict"),
                         default="all",
@@ -269,6 +275,7 @@ def build_generator_config(args: argparse.Namespace) -> GeneratorConfig:
                 text_encoder=True,
                 vae=True,
                 pin_cpu_memory=args.pin_cpu_memory,
+                lazy_module_load=args.lazy_module_load,
             ),
             compile=CompileConfig(
                 enabled=args.torch_compile,
