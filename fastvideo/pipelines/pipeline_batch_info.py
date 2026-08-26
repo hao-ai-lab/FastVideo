@@ -92,6 +92,17 @@ class ForwardBatch:
     video_path: str | None = None
     video_latent: torch.Tensor | None = None
 
+    # Wan-Animate inputs: paths to the *preprocessed* driving artifacts (the
+    # official wan/modules/animate/preprocess outputs), and the tensors the
+    # animate stages derive from them. background/mask are replace-mode only.
+    pose_video_path: str | None = None
+    face_video_path: str | None = None
+    background_video_path: str | None = None
+    mask_video_path: str | None = None
+    animate_mode: str = "animation"
+    pose_latents: torch.Tensor | None = None
+    face_pixel_values: torch.Tensor | None = None
+
     # Refine inputs (LongCat)
     refine_from: str | None = None
     t_thresh: float = 0.5

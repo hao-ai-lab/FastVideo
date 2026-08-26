@@ -224,6 +224,8 @@ class DenoisingStage(PipelineStage):
             },
         )
 
+        animate_kwargs, animate_uncond_kwargs = self._animate_conditioning_kwargs(batch)
+
         # Get latents and embeddings
         latents = batch.latents
         cast_embeds = getattr(fastvideo_args.pipeline_config.dit_config, "cast_prompt_embeds_to_dit_dtype", False)
@@ -522,6 +524,7 @@ class DenoisingStage(PipelineStage):
                             **dreamx_camera_kwargs,
                             **timesteps_r_kwarg,
                             **flux2_id_kwargs,
+                            **animate_kwargs,
                         )
 
                     if batch.do_classifier_free_guidance:
@@ -565,6 +568,7 @@ class DenoisingStage(PipelineStage):
                                     **dreamx_camera_kwargs,
                                     **timesteps_r_kwarg,
                                     **flux2_id_kwargs,
+                                    **animate_uncond_kwargs,
                                 )
                             _cfg_gate_fresh_uncond += 1
 
@@ -659,6 +663,30 @@ class DenoisingStage(PipelineStage):
             logger.info("Memory after deallocating transformer: %s", torch.mps.current_allocated_memory())
 
         return batch
+
+    def _animate_conditioning_kwargs(self, batch: ForwardBatch) -> tuple[dict[str, Any], dict[str, Any]]:
+        """(conditional, unconditional) kwargs for pose/face-driven models (Wan-Animate).
+
+        Like the other kwarg groups, ``prepare_extra_func_kwargs`` drops every
+        key the transformer's forward does not name, so this is empty -- and a
+        no-op -- for all other models. The unconditional variant keeps the pose
+        and blanks the face crops to -1 (black in the [-1, 1] pixel range),
+        matching diffusers' WanAnimatePipeline (``face * 0 - 1``); note Animate
+        runs with guidance 1.0 by default, so the uncond pass rarely fires.
+        """
+        kwargs = self.prepare_extra_func_kwargs(
+            self.transformer.forward,
+            {
+                "pose_latents": batch.pose_latents,
+                "face_pixel_values": batch.face_pixel_values,
+            },
+        )
+        # A None would override the model's own default, so drop empties.
+        kwargs = {k: v for k, v in kwargs.items() if v is not None}
+        uncond_kwargs = dict(kwargs)
+        if "face_pixel_values" in uncond_kwargs:
+            uncond_kwargs["face_pixel_values"] = uncond_kwargs["face_pixel_values"] * 0 - 1
+        return kwargs, uncond_kwargs
 
     def prepare_extra_func_kwargs(self, func, kwargs) -> dict[str, Any]:
         """
