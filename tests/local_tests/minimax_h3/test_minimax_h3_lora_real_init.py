@@ -3,9 +3,11 @@
 
 This gate loads only ``transformer_ref``. It does not build a dataloader, run a
 forward pass, gather a state dict, export, or retain a CPU model snapshot.
-Expected GB10 unified-memory working set is approximately 70--80 GiB: about
-62 GiB of BF16 transformer weights, at most one roughly 5 GiB input shard, the
-rank-32 adapters/FSDP metadata, and loader/runtime overhead.
+The checkpoint payload is 61.73 GiB. The loader first stages its CPU mapping,
+then destructively consumes and releases each source tensor while the
+CUDA/FSDP state grows, avoiding simultaneous complete CPU and CUDA copies.
+Rank-32 adapters add 0.32 GiB; FSDP/CUDA/runtime overhead brings the expected
+isolated GB10 working set to approximately 70--80 GiB.
 """
 
 from __future__ import annotations
@@ -44,7 +46,10 @@ def test_minimax_h3_ref2va_real_checkpoint_lora_fsdp_init() -> None:
     if int(os.environ.get("WORLD_SIZE", "1")) != 1:
         pytest.fail("the scoped real-checkpoint init gate requires WORLD_SIZE=1", pytrace=False)
 
-    model_root = Path(os.environ.get("MINIMAX_H3_MODEL_ROOT", "/home/will/models/MiniMax-H3")).resolve()
+    model_root_value = os.environ.get("MINIMAX_H3_MODEL_ROOT")
+    if not model_root_value:
+        pytest.fail("MINIMAX_H3_RUN_LORA_REAL_INIT=1 requires MINIMAX_H3_MODEL_ROOT", pytrace=False)
+    model_root = Path(model_root_value).resolve()
     component = model_root / "transformer_ref"
     if not (model_root / "model_index.json").is_file() or not (component / "config.json").is_file():
         pytest.fail(f"complete MiniMax H3 transformer_ref checkpoint missing under {model_root}", pytrace=False)

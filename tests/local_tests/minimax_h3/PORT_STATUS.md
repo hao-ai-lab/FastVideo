@@ -6,7 +6,7 @@
 - component parity: complete
 - FastVideo runtime acceptance: complete
 - official end-to-end pipeline parity: complete
-- modular Ref2VA/LoRA training: CPU contracts complete; full-checkpoint train/export/inference run pending
+- modular Ref2VA/LoRA training: single-rank real-checkpoint LoRA/FSDP initialization complete; full train/export/inference pending
 
 ## Coverage
 
@@ -25,14 +25,17 @@
 | Official end-to-end pipeline | exact T2VA, FL2VA, and Ref2VA video/audio latents | complete |
 | Modular Ref2VA packing | target-only loss slicing plus pinned row/position/tag parity | complete |
 | LoRA ownership | exact 312-layer coverage; two-rank FSDP gradient and DCP-resume parity | complete |
+| Real checkpoint LoRA init | strict `transformer_ref` load; 312 wrappers/624 DTensor adapters; CUDA/FSDP ownership | complete on one GB10 |
 | Training export | checkpoint-wrapper-safe native LoRA merge; physical `transformer_ref`; canonical Diffusers shards | CPU contract complete; real checkpoint pending |
 
 ## Current validation
 
 T2VA, FL2VA, and Ref2VA match the official video/audio latents exactly.
-The added training contracts do not claim an official full-checkpoint training,
-export, reload, or inference run. A local complete checkpoint is available for
-a future scoped gate, but this change has not executed that high-memory gate.
+The single-rank real-checkpoint gate strictly loaded the 33.30B-parameter
+`transformer_ref` component on one GB10, verified 312 LoRA wrappers and 624
+trainable DTensor adapters, and recorded 62.08 GiB peak CUDA allocation. It did
+not run a forward pass. The added training contracts do not claim an official
+full training, export, reload, or inference run.
 
 ## Decisions
 

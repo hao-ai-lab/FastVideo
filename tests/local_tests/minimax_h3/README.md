@@ -41,23 +41,28 @@ machine with comfortably more than the combined model, gathered state, and
 runtime working set. `--verify` releases the training graph before reload but
 does not make the initial full-state gather streaming.
 
-The narrower real-weight initialization gate is safe for one GB10 because it
-loads only `transformer_ref`, keeps checkpointing disabled, and never gathers a
-state dict. Its expected unified-memory working set is approximately 70--80
-GiB. Run it in isolation after other GPU work has stopped:
+The narrower real-weight initialization gate has been validated on one 121 GiB
+GB10. It loads only `transformer_ref`, keeps checkpointing disabled, and never
+gathers a state dict. The 61.73 GiB checkpoint is first staged as a CPU mapping;
+the loader then consumes and releases each source tensor while its CUDA/FSDP
+state grows, avoiding two simultaneous complete copies. Rank-32 adapters and
+runtime overhead bring the expected isolated unified-memory working set to
+approximately 70--80 GiB. Run it in isolation after other GPU work has stopped:
 
 ```bash
-cd /home/will/src/FastVideo-pr-worktrees/pr1757
+cd /path/to/FastVideo
 CUDA_VISIBLE_DEVICES=0 \
-MINIMAX_H3_MODEL_ROOT=/home/will/models/MiniMax-H3 \
+MINIMAX_H3_MODEL_ROOT=/path/to/MiniMax-H3 \
 MINIMAX_H3_RUN_LORA_REAL_INIT=1 \
-/home/will/src/FastVideo/.venv/bin/torchrun --standalone --nproc-per-node=1 \
+torchrun --standalone --nproc-per-node=1 \
   -m pytest tests/local_tests/minimax_h3/test_minimax_h3_lora_real_init.py -q -s
 ```
 
 This asserts strict base loading, 312 LoRA wrappers and 624 trainable adapter
 parameters, shared FSDP/DTensor placement with each base weight, CUDA residency,
-and absence of per-layer CPU snapshots. It performs no forward or export.
+and absence of per-layer CPU snapshots. The recorded GB10 run loaded 33.30B
+parameters in 279.56 seconds with 62.08 GiB peak CUDA allocation and 62.50 GiB
+peak reservation. It performs no forward or export.
 
 ## Registry smoke
 

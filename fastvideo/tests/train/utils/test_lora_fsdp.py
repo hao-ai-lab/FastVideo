@@ -3,9 +3,11 @@
 
 from __future__ import annotations
 
+import gc
 import os
 from pathlib import Path
 import socket
+import weakref
 
 import torch
 import torch.distributed as dist
@@ -51,6 +53,23 @@ class _TinyTransformer(torch.nn.Module):
 
     def forward(self, value: torch.Tensor) -> torch.Tensor:
         return self.block(value)
+
+
+class _TrackedCheckpointTensor:
+
+    def __init__(
+        self,
+        value: torch.Tensor,
+        released_before_copy: weakref.ReferenceType[torch.Tensor] | None = None,
+    ) -> None:
+        self.value = value
+        self.released_before_copy = released_before_copy
+
+    def to(self, *, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
+        if self.released_before_copy is not None:
+            gc.collect()
+            assert self.released_before_copy() is None
+        return self.value.to(device=device, dtype=dtype)
 
 
 def _prepare_lora(model: _TinyTransformer) -> None:
@@ -136,6 +155,45 @@ def test_h3_hf_mapping_is_applied_before_lora_checkpoint_alias() -> None:
     torch.testing.assert_close(model.block.attn.to_out.base_layer.weight, base_weight)
     assert model.reverse_param_names_mapping["block.attn.to_out.base_layer.weight"][0] == (
         "block.attn.to_out.0.weight")
+
+
+def test_checkpoint_sources_are_released_while_device_state_is_materialized() -> None:
+    """Release each staged CPU checkpoint tensor before converting the next one."""
+
+    class _TwoParameterModel(torch.nn.Module):
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.first = torch.nn.Parameter(torch.empty(1))
+            self.second = torch.nn.Parameter(torch.empty(1))
+
+    first_source_refs: list[weakref.ReferenceType[torch.Tensor]] = []
+
+    def checkpoint_tensors():
+        first_source = torch.ones(1, dtype=torch.float64)
+        first_source_refs.append(weakref.ref(first_source))
+        yield "first", _TrackedCheckpointTensor(first_source)
+        del first_source
+        yield "second", _TrackedCheckpointTensor(
+            torch.full((1, ), 2.0, dtype=torch.float64),
+            released_before_copy=first_source_refs[0],
+        )
+
+    model = _TwoParameterModel()
+    incompatible = load_model_from_full_model_state_dict(
+        model,
+        checkpoint_tensors(),
+        torch.device("cpu"),
+        torch.float32,
+        strict=True,
+        param_names_mapping=lambda name: (name, None, None),
+    )
+
+    assert incompatible.missing_keys == []
+    assert incompatible.unexpected_keys == []
+    assert first_source_refs[0]() is None
+    torch.testing.assert_close(model.first, torch.ones(1))
+    torch.testing.assert_close(model.second, torch.full((1, ), 2.0))
 
 
 def _free_port() -> int:
