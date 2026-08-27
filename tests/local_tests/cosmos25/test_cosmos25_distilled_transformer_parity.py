@@ -42,6 +42,63 @@ CHECKPOINT_ENV = "COSMOS25_DISTILLED_CHECKPOINT"
 ModuleT = TypeVar("ModuleT", bound=torch.nn.Module)
 
 
+class _ReferenceRMSNorm(torch.nn.Module):
+    """PyTorch equivalent of the TE RMSNorm used by the reference DiT."""
+
+    def __init__(self, hidden_size: int, eps: float = 1e-6) -> None:
+        super().__init__()
+        self.weight = torch.nn.Parameter(torch.ones(hidden_size))
+        self.eps = eps
+
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        input_dtype = hidden_states.dtype
+        normalized = hidden_states.float()
+        variance = normalized.square().mean(dim=-1, keepdim=True)
+        normalized = normalized * torch.rsqrt(variance + self.eps)
+        return normalized.to(input_dtype) * self.weight
+
+
+def _reference_apply_rotary_pos_emb(
+    hidden_states: torch.Tensor,
+    rotary_pos_emb: torch.Tensor,
+    *,
+    tensor_format: str,
+    fused: bool,
+) -> torch.Tensor:
+    """PyTorch equivalent of TE's rotate-half RoPE for BSHD tensors."""
+    assert tensor_format == "bshd"
+    del fused
+    frequencies = rotary_pos_emb[:, 0, 0, :]
+    cos = frequencies.cos()[None, :, None, :]
+    sin = frequencies.sin()[None, :, None, :]
+    first_half, second_half = hidden_states.chunk(2, dim=-1)
+    rotated = torch.cat((-second_half, first_half), dim=-1)
+    return (hidden_states.float() * cos + rotated.float() * sin).to(hidden_states.dtype)
+
+
+def _install_transformer_engine_reference_shim() -> None:
+    """Provide only the two TE operations needed by the torch-backend DiT."""
+    if "transformer_engine" in sys.modules:
+        return
+
+    transformer_engine = types.ModuleType("transformer_engine")
+    transformer_engine_pytorch = types.ModuleType("transformer_engine.pytorch")
+    transformer_engine_attention = types.ModuleType("transformer_engine.pytorch.attention")
+    transformer_engine_rope = types.ModuleType("transformer_engine.pytorch.attention.rope")
+
+    transformer_engine.__dict__["pytorch"] = transformer_engine_pytorch
+    transformer_engine_pytorch.__dict__["RMSNorm"] = _ReferenceRMSNorm
+    transformer_engine_pytorch.__dict__["attention"] = transformer_engine_attention
+    transformer_engine_attention.__dict__["apply_rotary_pos_emb"] = _reference_apply_rotary_pos_emb
+    transformer_engine_attention.__dict__["rope"] = transformer_engine_rope
+    transformer_engine_rope.__dict__["apply_rotary_pos_emb"] = _reference_apply_rotary_pos_emb
+
+    sys.modules["transformer_engine"] = transformer_engine
+    sys.modules["transformer_engine.pytorch"] = transformer_engine_pytorch
+    sys.modules["transformer_engine.pytorch.attention"] = transformer_engine_attention
+    sys.modules["transformer_engine.pytorch.attention.rope"] = transformer_engine_rope
+
+
 @pytest.fixture
 def distributed_setup():
     maybe_init_distributed_environment_and_model_parallel(1, 1)
@@ -100,6 +157,7 @@ def _official_model_class() -> type[torch.nn.Module]:
 
         conditioner.__dict__["DataType"] = DataType
         sys.modules[conditioner_name] = conditioner
+    _install_transformer_engine_reference_shim()
     try:
         from cosmos_predict2._src.predict2.networks.minimal_v1_lvg_dit import (
             MinimalV1LVGDiT,
