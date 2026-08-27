@@ -60,7 +60,8 @@ def _pad_frames(frames: list, target: int) -> list:
         return list(frames[:target])
     if len(frames) == 1:
         return [frames[0]] * target  # reflecting a single frame is repetition
-    idx, flip, out = 0, False, []
+    out: list = []
+    idx, flip = 0, False
     while len(out) < target:
         out.append(frames[idx])
         idx = idx - 1 if flip else idx + 1
@@ -69,8 +70,7 @@ def _pad_frames(frames: list, target: int) -> list:
     return out
 
 
-def _frames_to_tensor(frames: list[PIL.Image.Image], height: int, width: int,
-                      grayscale: bool = False) -> torch.Tensor:
+def _frames_to_tensor(frames: list[PIL.Image.Image], height: int, width: int, grayscale: bool = False) -> torch.Tensor:
     """PIL frames -> [1, C, T, H, W] float tensor.
 
     RGB frames are normalised to [-1, 1] (the VAE/motion-encoder input range);
@@ -82,9 +82,8 @@ def _frames_to_tensor(frames: list[PIL.Image.Image], height: int, width: int,
     return video.permute(1, 0, 2, 3).unsqueeze(0)  # [1, C, T, H, W]
 
 
-def _fold_i2v_mask(mask_pixel: torch.Tensor | None, latent_t: int, latent_h: int, latent_w: int,
-                   mask_len: int, temporal_ratio: int, device: torch.device,
-                   dtype: torch.dtype) -> torch.Tensor:
+def _fold_i2v_mask(mask_pixel: torch.Tensor | None, latent_t: int, latent_h: int, latent_w: int, mask_len: int,
+                   temporal_ratio: int, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
     """Fold a per-pixel-frame binary mask into Wan-I2V's 4-channel latent mask.
 
     Convention: 1 = preserved/clean, 0 = generate. The first pixel frame is
@@ -92,8 +91,7 @@ def _fold_i2v_mask(mask_pixel: torch.Tensor | None, latent_t: int, latent_h: int
     pixel frames folds into the channel axis -> [1, 4, T_lat, h, w].
     """
     if mask_pixel is None:
-        mask = torch.zeros(1, 1, (latent_t - 1) * temporal_ratio + 1, latent_h, latent_w,
-                           dtype=dtype, device=device)
+        mask = torch.zeros(1, 1, (latent_t - 1) * temporal_ratio + 1, latent_h, latent_w, dtype=dtype, device=device)
     else:
         mask = mask_pixel.clone().to(device=device, dtype=dtype)
     mask[:, :, :mask_len] = 1
@@ -182,13 +180,19 @@ class AnimateConditioningLatentsStage(ImageVAEEncodingStage):
         image = self.preprocess(batch.pil_image, vae_scale_factor=spatial, height=height,
                                 width=width).to(device, dtype=torch.float32).unsqueeze(2)
         ref_latent = _encode_normalized(self, image, fastvideo_args)
-        ref_mask = _fold_i2v_mask(None, 1, latent_h, latent_w, mask_len=1, temporal_ratio=temporal,
-                                  device=ref_latent.device, dtype=ref_latent.dtype)
+        ref_mask = _fold_i2v_mask(None,
+                                  1,
+                                  latent_h,
+                                  latent_w,
+                                  mask_len=1,
+                                  temporal_ratio=temporal,
+                                  device=ref_latent.device,
+                                  dtype=ref_latent.dtype)
         ref_part = torch.cat([ref_mask, ref_latent], dim=1)
 
         # --- target frames: zeros video (animation) or background video (replace) ---
         if mode == "replace":
-            # Diffusers splits the background into [first refert frames | rest]
+            # Diffusers splits the background into [carried frames | rest]
             # and rejoins it -- the identity for a single segment; the split only
             # matters once the head frames come from the previous segment.
             bg_frames = _pad_frames(load_video(batch.background_video_path), num_frames)
@@ -207,8 +211,13 @@ class AnimateConditioningLatentsStage(ImageVAEEncodingStage):
         cond_latents = _encode_normalized(self, cond_video, fastvideo_args)
         # Single segment: no temporal-guidance frames yet, so mask_len=0 (the
         # official runner's `mask_len = refert_num if start_frame > 0 else 0`).
-        cond_mask = _fold_i2v_mask(mask_pixel, latent_t, latent_h, latent_w, mask_len=0,
-                                   temporal_ratio=temporal, device=cond_latents.device,
+        cond_mask = _fold_i2v_mask(mask_pixel,
+                                   latent_t,
+                                   latent_h,
+                                   latent_w,
+                                   mask_len=0,
+                                   temporal_ratio=temporal,
+                                   device=cond_latents.device,
                                    dtype=cond_latents.dtype)
         target_part = torch.cat([cond_mask, cond_latents], dim=1)
 
@@ -295,8 +304,7 @@ class AnimateFaceVideoStage(PipelineStage):
         assert batch.num_frames is not None
         size = fastvideo_args.pipeline_config.dit_config.motion_encoder_size
         frames = _pad_frames(load_video(batch.face_video_path), batch.num_frames)
-        batch.face_pixel_values = _frames_to_tensor(frames, size, size).to(get_local_torch_device(),
-                                                                           torch.float32)
+        batch.face_pixel_values = _frames_to_tensor(frames, size, size).to(get_local_torch_device(), torch.float32)
         return batch
 
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:

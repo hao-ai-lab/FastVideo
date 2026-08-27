@@ -53,14 +53,13 @@ class WanAnimateArchConfig(WanVideoArchConfig):
     _fsdp_shard_conditions: list = field(default_factory=lambda: [_dit_blocks_only])
     # The face adapter's per-frame attention is implemented on these two only;
     # notably no VSA -- the checkpoint has no gate weights for VSA blocks.
-    _supported_attention_backends: tuple[AttentionBackendEnum, ...] = (AttentionBackendEnum.FLASH_ATTN,
-                                                                       AttentionBackendEnum.TORCH_SDPA)
+    _supported_attention_backends: tuple[AttentionBackendEnum,
+                                         ...] = (AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA)
 
     # Appending last is safe despite first-match-wins: the base
     # `^patch_embedding\.` regex cannot match `pose_patch_embedding.*`.
-    param_names_mapping: dict = field(
-        default_factory=lambda: WanVideoArchConfig().param_names_mapping |
-        {r"^pose_patch_embedding\.(.*)$": r"pose_patch_embedding.proj.\1"})
+    param_names_mapping: dict = field(default_factory=lambda: WanVideoArchConfig().param_names_mapping |
+                                      {r"^pose_patch_embedding\.(.*)$": r"pose_patch_embedding.proj.\1"})
     # The relighting LoRA was trained on the official (native-naming) model,
     # whose I2V cross-attention carries k_img/v_img projections the base LoRA
     # mapping does not cover. Harmless for adapters that do not target them.
