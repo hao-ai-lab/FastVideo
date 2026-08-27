@@ -154,6 +154,30 @@ def test_release_then_reload_is_correct_not_broken():
     assert second.tag == "c"
 
 
+def test_materialize_transform_applies_to_every_loaded_instance_without_loading_eagerly():
+    loader, calls = _counting_loader()
+    transformed = []
+    module = LazyModule("vae", loader)
+
+    def transform(component):
+        transformed.append(component)
+        component.tag = f"compiled-{component.tag}"
+        return component
+
+    module.set_materialize_transform(transform)
+    assert calls == []
+
+    first = module.materialize()
+    assert first.tag == "compiled-c"
+    assert module.release() is True
+
+    second = module.materialize()
+    assert second.tag == "compiled-c"
+    assert second is not first
+    assert calls == ["c", "c"]
+    assert transformed == [first, second]
+
+
 def test_release_without_materializing_is_a_noop():
     loader, calls = _counting_loader()
     module = LazyModule("text_encoder", loader)
@@ -202,6 +226,93 @@ def _schedule(modules, stages):
 
 def _lazy(name):
     return LazyModule(name, lambda: _Component(name))
+
+
+def test_pipeline_compile_is_reapplied_after_lazy_release(monkeypatch):
+    loads = []
+    compile_calls = []
+
+    class _CompileAwareComponent(torch.nn.Module):
+        _compile_conditions = (lambda name, module: name == "block", )
+
+        def __init__(self):
+            super().__init__()
+            self.block = torch.nn.Linear(2, 2)
+            self.prepare_calls = 0
+
+        def prepare_for_compile(self):
+            self.prepare_calls += 1
+
+    def load_component():
+        component = _CompileAwareComponent()
+        loads.append(component)
+        return component
+
+    def fake_compile(target, **kwargs):
+        compile_calls.append((target, kwargs))
+        return target
+
+    monkeypatch.setattr(torch, "compile", fake_compile)
+    lazy = LazyModule("vae", load_component)
+    pipeline = _FakePipeline({"vae": lazy}, [])
+
+    pipeline._maybe_compile_pipeline_module("vae", None, {"mode": "reduce-overhead"})
+    assert loads == []
+
+    first = lazy.materialize()
+    assert first.prepare_calls == 1
+    assert lazy.release() is True
+
+    second = lazy.materialize()
+    assert second is not first
+    assert second.prepare_calls == 1
+    assert loads == [first, second]
+    assert len(compile_calls) == 2
+    assert [kwargs for _, kwargs in compile_calls] == [
+        {"mode": "reduce-overhead"},
+        {"mode": "reduce-overhead"},
+    ]
+
+
+def test_whole_module_compile_keeps_lazy_proxy_and_recompiles_after_release(monkeypatch):
+    loads = []
+    compile_calls = []
+
+    class _WholeComponent(torch.nn.Module):
+
+        def forward(self, value):
+            return value
+
+    class _Compiled:
+
+        def __init__(self, original):
+            self.original = original
+
+    def load_component():
+        component = _WholeComponent()
+        loads.append(component)
+        return component
+
+    def fake_compile(target, **kwargs):
+        compile_calls.append((target, kwargs))
+        return _Compiled(target)
+
+    monkeypatch.setattr(torch, "compile", fake_compile)
+    lazy = LazyModule("text_encoder", load_component)
+    pipeline = _FakePipeline({"text_encoder": lazy}, [])
+
+    pipeline._maybe_compile_pipeline_module("text_encoder", None, {"dynamic": True})
+    assert pipeline.modules["text_encoder"] is lazy
+    assert loads == []
+
+    first = lazy.materialize()
+    assert first.original is loads[0]
+    assert lazy.release() is True
+
+    second = lazy.materialize()
+    assert second.original is loads[1]
+    assert second is not first
+    assert len(compile_calls) == 2
 
 
 def test_schedule_releases_after_the_last_stage_that_holds_a_module():

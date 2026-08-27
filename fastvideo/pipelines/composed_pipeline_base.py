@@ -9,6 +9,7 @@ import argparse
 import os
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
+from functools import partial
 from typing import Any, cast
 
 import torch
@@ -201,6 +202,40 @@ class ComposedPipelineBase(ABC):
                 compiled_count += 1
         return compiled_count
 
+    @staticmethod
+    def _compile_pipeline_module_instance(
+        module_name: str,
+        module: torch.nn.Module,
+        fsdp_module_cls: type | None,
+        compile_kwargs: dict[str, Any],
+    ) -> Any:
+        """Apply pipeline-level compile setup to one loaded component."""
+        if fsdp_module_cls is not None and isinstance(module, fsdp_module_cls):
+            logger.info(
+                "%s is already FSDP-wrapped; skipping torch.compile in pipeline",
+                module_name.capitalize(),
+            )
+            return module
+
+        prepare_for_compile = getattr(module, "prepare_for_compile", None)
+        if callable(prepare_for_compile):
+            logger.info("Running prepare_for_compile for %s", module_name)
+            prepare_for_compile()
+
+        compiled_count = ComposedPipelineBase._compile_with_conditions(module, compile_kwargs)
+        if compiled_count > 0:
+            logger.info(
+                "Enabled torch.compile for %d submodules in %s via _compile_conditions with kwargs=%s",
+                compiled_count,
+                module_name,
+                compile_kwargs,
+            )
+            return module
+
+        # Backward-compatible fallback: compile full module if no condition matched.
+        logger.info("Enabling torch.compile for %s with kwargs=%s", module_name, compile_kwargs)
+        return torch.compile(module, **compile_kwargs)
+
     def _maybe_compile_pipeline_module(
         self,
         module_name: str,
@@ -211,39 +246,27 @@ class ComposedPipelineBase(ABC):
             return
 
         entry = self.modules[module_name]
-        # Materialize into a local. The dict keeps the proxy until we know a
-        # compiled callable is actually going to replace it, so a component
-        # that turns out to be FSDP-wrapped is neither compiled nor stripped of
-        # its release hook.
-        module = entry.materialize() if is_lazy_module(entry) else entry
-        if fsdp_module_cls is not None and isinstance(module, fsdp_module_cls):
-            logger.info(
-                "%s is already FSDP-wrapped; skipping torch.compile in pipeline",
-                module_name.capitalize(),
-            )
-            return
-
-        prepare_for_compile = getattr(module, "prepare_for_compile", None)
-        if callable(prepare_for_compile):
-            logger.info("Running prepare_for_compile for %s", module_name)
-            prepare_for_compile()
-
-        compiled_count = self._compile_with_conditions(module, compile_kwargs)
-        if compiled_count > 0:
-            logger.info(
-                "Enabled torch.compile for %d submodules in %s via _compile_conditions with kwargs=%s",
-                compiled_count,
-                module_name,
-                compile_kwargs,
-            )
-            return
-
-        # Backward-compatible fallback: compile full module if no condition matched.
-        logger.info("Enabling torch.compile for %s with kwargs=%s", module_name, compile_kwargs)
         if is_lazy_module(entry):
-            logger.info("Whole-module torch.compile replaces the deferred %s, so it stays resident for the run",
-                        module_name)
-        self.modules[module_name] = torch.compile(module, **compile_kwargs)
+            # Compilation is part of materialization, not a one-time mutation
+            # of the first loaded instance. The proxy remains in the module
+            # map, so whole-module and conditional compile both survive every
+            # release/reload cycle without making initialization eager.
+            entry.set_materialize_transform(
+                partial(
+                    ComposedPipelineBase._compile_pipeline_module_instance,
+                    module_name,
+                    fsdp_module_cls=fsdp_module_cls,
+                    compile_kwargs=dict(compile_kwargs),
+                ))
+            logger.info("Configured torch.compile for every materialization of deferred %s", module_name)
+            return
+
+        self.modules[module_name] = self._compile_pipeline_module_instance(
+            module_name,
+            entry,
+            fsdp_module_cls,
+            compile_kwargs,
+        )
 
     def post_init(self) -> None:
         assert self.fastvideo_args is not None, "fastvideo_args must be set"
