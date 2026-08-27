@@ -40,6 +40,12 @@ from tests.local_tests.cosmos25._reference import reference_root  # noqa: E402
 
 CHECKPOINT_ENV = "COSMOS25_DISTILLED_CHECKPOINT"
 ModuleT = TypeVar("ModuleT", bound=torch.nn.Module)
+REFERENCE_TRAINING_COUNTERS = {
+    "accum_image_sample_counter",
+    "accum_iteration",
+    "accum_train_in_hours",
+    "accum_video_sample_counter",
+}
 
 
 class _ReferenceRMSNorm(torch.nn.Module):
@@ -248,7 +254,11 @@ def _load_official_model(student: Mapping[str, torch.Tensor], device: torch.devi
             official_state[target_key] = tensor
 
     missing, unexpected = model.load_state_dict(official_state, strict=False)
-    important_missing = [key for key in missing if not key.endswith("._extra_state")]
+    important_missing = [
+        key
+        for key in missing
+        if not key.endswith("._extra_state") and key not in REFERENCE_TRAINING_COUNTERS
+    ]
     assert not important_missing, f"Official model missing inference keys: {important_missing[:20]}"
     assert not unexpected, f"Official model received unexpected keys: {unexpected[:20]}"
     return model.to(device=device, dtype=torch.bfloat16).eval()
