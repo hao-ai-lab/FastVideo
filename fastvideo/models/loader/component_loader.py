@@ -1146,6 +1146,7 @@ class TransformerLoader(ComponentLoader):
                 # tensors are still unsharded; LoRAPipeline merges the low-rank half
                 # once the module tree exists.
                 lora_path=getattr(fastvideo_args, "lora_path", None),
+                lora_strength=getattr(fastvideo_args, "lora_strength", 1.0),
             )
 
         total_params = sum(p.numel() for p in model.parameters())

@@ -4,6 +4,7 @@
 import argparse
 import dataclasses
 import json
+import math
 from contextlib import contextmanager
 from dataclasses import field
 from enum import Enum
@@ -130,6 +131,7 @@ class FastVideoArgs:
     # (Wenxuan) prefer to keep it here instead of in pipeline config to not make it complicated.
     lora_path: str | None = None
     lora_nickname: str = "default"  # for swapping adapters in the pipeline
+    lora_strength: float = 1.0
     # can restrict layers to adapt, e.g. ["q_proj"]
     # Will adapt only q, k, v, o by default.
     lora_target_modules: list[str] | None = None
@@ -298,6 +300,8 @@ class FastVideoArgs:
         return not self.inference_mode
 
     def __post_init__(self):
+        if not math.isfinite(self.lora_strength):
+            raise ValueError(f"lora_strength must be finite, got {self.lora_strength}")
         if self.moba_config_path:
             try:
                 with open(self.moba_config_path) as f:
@@ -601,6 +605,12 @@ class FastVideoArgs:
             type=str,
             default=FastVideoArgs.lora_nickname,
             help="Nickname to refer to the loaded LoRA adapter (useful for swapping).",
+        )
+        parser.add_argument(
+            "--lora-strength",
+            type=float,
+            default=FastVideoArgs.lora_strength,
+            help="Scale applied to every part of the inference LoRA adapter (default: 1.0).",
         )
         parser.add_argument(
             "--lora-target-modules",

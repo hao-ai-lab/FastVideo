@@ -94,6 +94,7 @@ class ComponentConfig:
     vae_weights: str | None = None
     upsampler_weights: str | None = None
     lora_path: str | None = None
+    lora_strength: float = 1.0
     override_pipeline_cls_name: str | None = None
     override_transformer_cls_name: str | None = None
 

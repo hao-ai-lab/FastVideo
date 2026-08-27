@@ -26,6 +26,7 @@ from pathlib import Path
 from fastvideo import VideoGenerator
 from fastvideo.api import (
     CompileConfig,
+    ComponentConfig,
     EngineConfig,
     GenerationRequest,
     GeneratorConfig,
@@ -39,8 +40,9 @@ from fastvideo.api import (
 DEFAULT_MODEL = "FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2"
 
 
-def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
+def build_parser(description: str | None = None) -> argparse.ArgumentParser:
+    """Build the shared FastH3 preview CLI used by full and LoRA checkpoints."""
+    parser = argparse.ArgumentParser(description=description or __doc__)
     parser.add_argument("--model-path", default=DEFAULT_MODEL)
     # The HF repo may require authentication while the MiniMax H3 Community
     # License review completes. A local snapshot can be passed here instead.
@@ -122,7 +124,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
                         default=None,
                         help='whole-DiT torch.compile mode, e.g. "reduce-overhead"; requires '
                         "--no-inference-torch-compile")
-    args = parser.parse_args(argv)
+    return parser
+
+
+def validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> argparse.Namespace:
     if args.repeats < 1:
         parser.error("--repeats must be at least 1")
     if args.num_gpus < 1:
@@ -132,6 +137,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     if args.compile_mode is not None and args.inference_torch_compile:
         parser.error("--compile-mode cannot be combined with regional compile; pass --no-inference-torch-compile")
     return args
+
+
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    parser = build_parser()
+    return validate_args(parser, parser.parse_args(argv))
+
+
+def _uses_vsa(args: argparse.Namespace) -> bool:
+    """Full FastH3 checkpoints use VSA; LoRA previews may select dense attention."""
+    return bool(getattr(args, "vsa", True))
 
 
 def _h3_fusions_enabled(args: argparse.Namespace) -> bool:
@@ -147,9 +162,10 @@ def profile_environment(args: argparse.Namespace) -> dict[str, str | None]:
     disabled features so a shell's inherited experiment settings cannot
     silently change the advertised profile.
     """
+    use_vsa = _uses_vsa(args)
     return {
-        "FASTVIDEO_ATTENTION_BACKEND": "VIDEO_SPARSE_ATTN_H3",
-        "FASTVIDEO_VSA_SM100A": "1" if args.vsa_kernel == "sm100a" else "0",
+        "FASTVIDEO_ATTENTION_BACKEND": "VIDEO_SPARSE_ATTN_H3" if use_vsa else "FLASH_ATTN",
+        "FASTVIDEO_VSA_SM100A": "1" if use_vsa and args.vsa_kernel == "sm100a" else "0",
         "FASTVIDEO_VSA_CUTEDSL": "0",
         # A non-empty output path enables the diagnostic probe.
         "FASTVIDEO_H3_VSA_PROBE": None,
@@ -198,7 +214,7 @@ def validate_profile_dependencies(args: argparse.Namespace) -> None:
         raise RuntimeError(
             "FastH3's FA4 profile requires the pinned flash-attn-4 package. Install it with "
             "`UV_TORCH_BACKEND=cu130 uv pip install -e \".[fasth3]\"`, or pass --no-fa4.")
-    if args.vsa_kernel == "sm100a" and not _sm100a_kernel_is_installed():
+    if _uses_vsa(args) and args.vsa_kernel == "sm100a" and not _sm100a_kernel_is_installed():
         raise RuntimeError(
             "FastH3's sm100a profile requires fastvideo-kernel 0.3.4 built with the Blackwell VSA extension. "
             "Install this checkout with `UV_TORCH_BACKEND=cu130 uv pip install -e \".[fasth3]\"` (or run "
@@ -206,17 +222,27 @@ def validate_profile_dependencies(args: argparse.Namespace) -> None:
 
 
 def build_generator_config(args: argparse.Namespace) -> GeneratorConfig:
+    use_vsa = _uses_vsa(args)
     experimental: dict[str, object] = {
-        "attention_backend": "VIDEO_SPARSE_ATTN_H3",
-        "VSA_sparsity": args.vsa_sparsity,
-        "VSA_tile_size": args.vsa_tile_size,
+        "attention_backend": "VIDEO_SPARSE_ATTN_H3" if use_vsa else "FLASH_ATTN",
         "inference_torch_compile": args.inference_torch_compile,
         "vae_parallel_decode": args.parallel_vae,
         "vae_parallel_decode_strategy": "gather",
     }
+    if use_vsa:
+        experimental.update({
+            "VSA_sparsity": args.vsa_sparsity,
+            "VSA_tile_size": args.vsa_tile_size,
+        })
     return GeneratorConfig(
         model_path=args.model_path,
-        pipeline=PipelineSelection(experimental=experimental),
+        pipeline=PipelineSelection(
+            components=ComponentConfig(
+                lora_path=getattr(args, "lora_path", None),
+                lora_strength=float(getattr(args, "lora_strength", 1.0)),
+            ),
+            experimental=experimental,
+        ),
         engine=EngineConfig(
             num_gpus=args.num_gpus,
             use_fsdp_inference=args.num_gpus > 1 and not args.replicated_dit,

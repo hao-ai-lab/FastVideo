@@ -2,6 +2,7 @@
 from collections import defaultdict
 from collections.abc import Hashable
 from contextlib import nullcontext
+import math
 from typing import Any
 from collections.abc import Generator
 
@@ -22,7 +23,7 @@ from fastvideo.layers.lora.linear import (
     replace_submodule,
 )
 from fastvideo.logger import init_logger
-from fastvideo.models.loader.lora_patch import normalize_lora_key
+from fastvideo.models.loader.lora_patch import DenseLoRAPatch, normalize_lora_key
 from fastvideo.models.loader.utils import get_param_names_mapping
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.utils import maybe_download_lora
@@ -113,14 +114,26 @@ class LoRAPipeline(ComposedPipelineBase):
     lora_target_modules: list[str] | None = None
     lora_path: str | None = None
     lora_nickname: str = "default"
+    lora_strength: float = 1.0
     lora_rank: int | None = None
     lora_alpha: int | None = None
     lora_initialized: bool = False
+    _constructor_dense_lora_path: str | None = None
+    _setting_constructor_adapter: bool = False
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.device = get_local_torch_device()
+        # Adapter tensors and wrapped model layers belong to this pipeline's module
+        # instances. Sharing either cache across two generators can apply one model's
+        # adapter to another model's layers.
+        self.lora_adapters = defaultdict(dict)
         self.lora_adapter_paths = {}
+        self.lora_layers = {}
+        self.exclude_lora_layers = {}
+        self.cur_adapter_name = ""
+        self.cur_adapter_path = ""
+        self.cur_adapter_strength = 1.0
         # build list of trainable transformers
         for transformer_name in self.trainable_transformer_names:
             if (transformer_name in self.modules and self.modules[transformer_name] is not None):
@@ -153,6 +166,9 @@ class LoRAPipeline(ComposedPipelineBase):
             self.lora_target_modules = self.fastvideo_args.lora_target_modules
         self.lora_path = self.fastvideo_args.lora_path
         self.lora_nickname = self.fastvideo_args.lora_nickname
+        self.lora_strength = self.fastvideo_args.lora_strength
+        constructor_patch = DenseLoRAPatch.from_adapter(self.lora_path) if self.lora_path else None
+        self._constructor_dense_lora_path = self.lora_path if constructor_patch is not None else None
         self.training_mode = self.fastvideo_args.training_mode
         if self.training_mode and getattr(self.fastvideo_args, "lora_training", False):
             assert isinstance(self.fastvideo_args, TrainingArgs)
@@ -192,10 +208,15 @@ class LoRAPipeline(ComposedPipelineBase):
         # Inference
         elif not self.training_mode and self.lora_path is not None:
             self.convert_to_lora_layers()
-            self.set_lora_adapter(
-                self.lora_nickname,  # type: ignore
-                self.lora_path,
-            )  # type: ignore
+            self._setting_constructor_adapter = True
+            try:
+                self.set_lora_adapter(
+                    self.lora_nickname,  # type: ignore
+                    self.lora_path,
+                    strength=self.lora_strength,
+                )  # type: ignore
+            finally:
+                self._setting_constructor_adapter = False
 
     def is_target_layer(self, module_name: str) -> bool:
         if self.lora_target_modules is None:
@@ -308,7 +329,30 @@ class LoRAPipeline(ComposedPipelineBase):
         Args:
             lora_nickname: The "nick name" of the adapter when referenced in the pipeline.
             lora_path: The path to the adapter, either a local path or a Hugging Face repo id.
+            strength: Scale for the low-rank adapter. Hybrid adapters must set this at construction
+                so their dense payload receives the same scale.
+            accumulate: Add this adapter to an already merged pure low-rank adapter.
         """
+
+        if not math.isfinite(strength):
+            raise ValueError(f"LoRA strength must be finite, got {strength}")
+
+        requested_path = lora_path or self.lora_adapter_paths.get(lora_nickname)
+        exact_current_adapter = (self.cur_adapter_name == lora_nickname and self.cur_adapter_path == requested_path
+                                 and self.cur_adapter_strength == strength and not accumulate)
+        if exact_current_adapter:
+            return
+
+        if not self._setting_constructor_adapter:
+            if self._constructor_dense_lora_path is not None:
+                raise RuntimeError(
+                    "The active LoRA contains constructor-time .diff/.set_weight payload. "
+                    "Changing its adapter or strength at runtime would leave that dense payload stale; "
+                    "create a new VideoGenerator with ComponentConfig(lora_path=..., lora_strength=...).")
+            if requested_path is not None and DenseLoRAPatch.from_adapter(requested_path) is not None:
+                raise RuntimeError(
+                    "Adapters containing .diff/.set_weight payload must be supplied when VideoGenerator is "
+                    "constructed with ComponentConfig(lora_path=..., lora_strength=...).")
 
         if lora_nickname not in self.lora_adapters and lora_path is None:
             raise ValueError(f"Adapter {lora_nickname} not found in the pipeline. Please provide lora_path to load it.")

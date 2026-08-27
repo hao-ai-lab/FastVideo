@@ -113,6 +113,32 @@ python examples/inference/basic/basic_fasth3.py \
 
 Pass `--no-inference-torch-compile` to recover the eager sparse-DiT route.
 
+### FastH3 Preview LoRAs
+
+The LoRA release runs on top of `MiniMaxAI/MiniMax-H3` with the same default
+compile, fusion, FA4, VSA, and parallel-VAE profile as the full FastH3 example:
+
+```bash
+bash examples/inference/basic/run_fasth3_lora_preview_vsa_datafree.sh \
+  --prompt "your prompt"
+```
+
+The four release launchers are:
+
+- `run_fasth3_lora_preview_vsa_datafree.sh`
+- `run_fasth3_lora_preview_vsa_synthetic_step1300.sh`
+- `run_fasth3_lora_preview_vsa_synthetic_step1900.sh`
+- `run_fasth3_lora_preview_dense_datafree.sh`
+
+Each downloads its exact private adapter file from
+`FastVideo/FastVideo-FastH3-4-step-Preview-v1-LoRA`; authenticate with `hf auth
+login` first. Pass `--lora-strength 0.5` to interpolate every adapter payload at
+half strength. Strength `1` applies the published rank-64 adapter at its trained
+scale and approximates the full student; `0` removes its weight deltas. VSA
+launchers still use sparse attention at strength `0` and require FastVideo's
+tile-64 VSA kernel; the dense launcher selects FA4. Each launcher writes to its
+own variant directory by default so comparison outputs do not collide.
+
 ## Basic Walkthrough
 
 All you need to generate videos using multi-gpus from state-of-the-art diffusion pipelines is the following few lines!

@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 from collections.abc import Sequence
 from pathlib import Path
@@ -56,6 +57,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--model-path", default="MiniMaxAI/MiniMax-H3", help="the BASE checkpoint the adapter targets")
     parser.add_argument("--lora-path", default=None, help="adapter file or directory; omit to render the base model")
     parser.add_argument("--lora-nickname", default="fasth3")
+    parser.add_argument("--lora-strength", type=float, default=1.0)
     parser.add_argument("--prompt", default=None)
     parser.add_argument("--prompts-file", default=None, help="JSONL with a 'prompt' field per line")
     parser.add_argument("--limit", type=int, default=None, help="use only the first N prompts")
@@ -71,8 +73,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--steps", type=int, default=5)
     parser.add_argument("--seed", type=int, default=1000)
     parser.add_argument("--num-gpus", type=int, default=4)
-    parser.add_argument("--vsa", action=argparse.BooleanOptionalAction, default=True,
-                        help="video sparse attention; required for any adapter carrying to_gate_compress")
+    parser.add_argument("--vsa", action=argparse.BooleanOptionalAction, default=None,
+                        help="video sparse attention; inferred from the adapter when omitted")
     parser.add_argument("--vsa-sparsity", type=float, default=0.9)
     parser.add_argument("--vsa-tile-size", type=int, choices=(64, 256), default=64)
     parser.add_argument("--vsa-kernel", choices=("triton", "sm100a"), default="sm100a")
@@ -88,6 +90,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error(f"MiniMax-H3 generates {MIN_DURATION}-{MAX_DURATION}s at {FPS} fps; "
                      f"aligned num_frames={aligned} is {aligned / FPS:.1f}s")
     args.num_frames = aligned
+    if not math.isfinite(args.lora_strength):
+        parser.error("--lora-strength must be finite")
     return args
 
 
@@ -98,17 +102,28 @@ def configure_environment(args: argparse.Namespace) -> None:
     which attention path the run actually took, which is the one thing this comparison
     cannot afford to be vague about.
     """
-    env = {
+    env: dict[str, str | None] = {
         "FASTVIDEO_ATTENTION_BACKEND": "VIDEO_SPARSE_ATTN_H3" if args.vsa else "FLASH_ATTN",
         "FASTVIDEO_VSA_SM100A": "1" if (args.vsa and args.vsa_kernel == "sm100a") else "0",
         "FASTVIDEO_VSA_CUTEDSL": "0",
+        "FASTVIDEO_H3_VSA_PROBE": None,
+        "FASTVIDEO_DISABLE_ATTENTION_COMPILE": "0",
         "FASTVIDEO_FA4": "1" if args.fa4 else "0",
+        "FASTVIDEO_NVFP4_FA4": "0",
+        "FASTVIDEO_MINIMAX_H3_FA4_PACKED_VARLEN": "0",
         "FASTVIDEO_MINIMAX_H3_FUSIONS": "all",
-        "FASTVIDEO_INFERENCE_TORCH_COMPILE": "0",
+        "FASTVIDEO_INFERENCE_TORCH_COMPILE": "1",
+        "FASTVIDEO_VAE_PARALLEL_DECODE": "1",
+        "FASTVIDEO_VAE_PARALLEL_ENCODE": "0",
+        "FASTVIDEO_VAE_PARALLEL_DECODE_STRATEGY": "gather",
+        "FASTVIDEO_ULYSSES_A2A": "off",
         "FASTVIDEO_STAGE_LOGGING": "1",
     }
     for name, value in env.items():
-        os.environ[name] = value
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = value
 
 
 def load_prompts(args: argparse.Namespace) -> list[dict]:
@@ -133,28 +148,31 @@ def load_prompts(args: argparse.Namespace) -> list[dict]:
 
 def main(argv: Sequence[str] | None = None) -> None:
     args = parse_args(argv)
-    configure_environment(args)
-
-    # Imported after the environment is set: backend selection is read at import time.
+    # Backend selection is finalized from the adapter before model construction.
     from fastvideo.models.loader.lora_patch import DenseLoRAPatch
     from fastvideo import VideoGenerator
-    from fastvideo.api import (ComponentConfig, EngineConfig, GenerationRequest, GeneratorConfig, OffloadConfig,
-                               OutputConfig, ParallelismConfig, PipelineSelection, SamplingConfig)
+    from fastvideo.api import (CompileConfig, ComponentConfig, EngineConfig, GenerationRequest, GeneratorConfig,
+                               OffloadConfig, OutputConfig, ParallelismConfig, PipelineSelection, SamplingConfig)
 
     # An adapter carrying to_gate_compress needs the VSA backend, because that is the
     # only configuration in which the module exists. One that does not carry it runs
     # fine either way, so the requirement is read off the file rather than assumed from
     # the presence of an adapter at all.
-    patch = DenseLoRAPatch.from_adapter(args.lora_path) if args.lora_path else None
+    patch = (DenseLoRAPatch.from_adapter(args.lora_path, strength=args.lora_strength)
+             if args.lora_path else None)
     needs_vsa = bool(patch and any("gate_compress" in name for name in patch.replacement_parameters))
+    if args.vsa is None:
+        args.vsa = needs_vsa
     if needs_vsa and not args.vsa:
         raise SystemExit(f"{args.lora_path} carries to_gate_compress, which exists only under the VSA "
                          "attention backend. Drop --no-vsa.")
     if args.vsa and args.lora_path and not needs_vsa:
         print(f"note: {args.lora_path} carries no VSA gate; running under VSA leaves the "
               "compression branch at its zero-initialized value.")
+    configure_environment(args)
 
     experimental: dict[str, object] = {
+        "inference_torch_compile": True,
         "vae_parallel_decode": True,
         "vae_parallel_decode_strategy": "gather",
     }
@@ -168,7 +186,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     config = GeneratorConfig(
         model_path=args.model_path,
         pipeline=PipelineSelection(
-            components=ComponentConfig(lora_path=args.lora_path),
+            components=ComponentConfig(lora_path=args.lora_path, lora_strength=args.lora_strength),
             experimental=experimental,
         ),
         engine=EngineConfig(
@@ -176,6 +194,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             use_fsdp_inference=False,
             parallelism=ParallelismConfig(tp_size=1, sp_size=args.num_gpus),
             offload=OffloadConfig(dit=False, dit_layerwise=False, text_encoder=True, vae=True, pin_cpu_memory=True),
+            compile=CompileConfig(enabled=False, vae_enabled=True),
         ),
     )
 

@@ -103,6 +103,7 @@ class BaseLayerWithLoRA(nn.Module):
                 delta = delta * (
                     self.lora_alpha / self.lora_rank  # type: ignore
                 )  # type: ignore
+            delta = delta * self.lora_strength
             out, output_bias = self.base_layer(x)
             return out + delta, output_bias
         else:

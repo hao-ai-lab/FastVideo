@@ -166,6 +166,7 @@ def maybe_load_fsdp_model(
     inference_regional_compile: bool = False,
     inference_vsa_tile_size: int | None = None,
     lora_path: str | None = None,
+    lora_strength: float = 1.0,
 ) -> torch.nn.Module:
     """
     Load the model with FSDP if is training, else load the model without FSDP.
@@ -240,6 +241,23 @@ def maybe_load_fsdp_model(
 
     weight_iterator = safetensors_weights_iterator(weight_dir_list, to_cpu=True)
     param_names_mapping_fn = get_param_names_mapping(model.param_names_mapping)
+    dense_lora_patch = DenseLoRAPatch.from_adapter(
+        lora_path,
+        param_names_mapping_fn,
+        strength=lora_strength,
+    )
+    if dense_lora_patch is not None:
+        # H3's compression gate is created only by the VSA attention backend. Loading a
+        # VSA student under dense attention would otherwise warn about 50 unmatched
+        # replacements and continue with a silently incomplete model.
+        model_parameter_names = {name for name, _ in model.named_parameters()}
+        missing_vsa_gates = sorted(name for name in dense_lora_patch.replacement_parameters
+                                   if "gate_compress" in name and name not in model_parameter_names)
+        if missing_vsa_gates:
+            raise ValueError(
+                "This LoRA adapter provides MiniMax H3 VSA compression gates, but the selected attention backend "
+                "did not construct them. Use attention_backend='VIDEO_SPARSE_ATTN_H3'. Missing parameters: "
+                + ", ".join(missing_vsa_gates[:3]) + (" ..." if len(missing_vsa_gates) > 3 else ""))
     load_model_from_full_model_state_dict(
         model,
         weight_iterator,
@@ -248,7 +266,7 @@ def maybe_load_fsdp_model(
         strict=strict,
         cpu_offload=cpu_offload,
         param_names_mapping=param_names_mapping_fn,
-        dense_lora_patch=DenseLoRAPatch.from_adapter(lora_path, param_names_mapping_fn),
+        dense_lora_patch=dense_lora_patch,
     )
     if hasattr(model, "materialize_non_persistent_buffers"):
         model.materialize_non_persistent_buffers(device=device, dtype=default_dtype)

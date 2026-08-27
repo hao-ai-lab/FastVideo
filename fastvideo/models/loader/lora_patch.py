@@ -36,6 +36,7 @@ through :meth:`LoRAPipeline.set_lora_adapter`, which handles the low-rank half o
 
 from __future__ import annotations
 
+import math
 import os
 import re
 from collections.abc import Callable
@@ -109,11 +110,14 @@ class DenseLoRAPatch:
     """
 
     def __init__(self, files: list[str], additive: dict[str, tuple[str, str]],
-                 replacement: dict[str, tuple[str, str]]) -> None:
+                 replacement: dict[str, tuple[str, str]], strength: float = 1.0) -> None:
+        if not math.isfinite(strength):
+            raise ValueError(f"LoRA strength must be finite, got {strength}")
         self._files = files
         # target parameter name -> (file, adapter key)
         self._additive = additive
         self._replacement = replacement
+        self._strength = float(strength)
         self._applied: set[str] = set()
 
     @classmethod
@@ -121,6 +125,8 @@ class DenseLoRAPatch:
         cls,
         lora_path: str | None,
         param_names_mapping: Callable[[str], tuple[str, Any, Any]] | None = None,
+        *,
+        strength: float = 1.0,
     ) -> DenseLoRAPatch | None:
         """Build a patch from an adapter, or ``None`` when it carries no dense payload.
 
@@ -159,7 +165,7 @@ class DenseLoRAPatch:
         logger.info(
             "LoRA adapter %s carries a dense payload: %d additive (.diff/.diff_b), %d replacement (.set_weight)",
             lora_path, len(additive), len(replacement))
-        return cls(files, additive, replacement)
+        return cls(files, additive, replacement, strength)
 
     def apply_to(self, param_name: str, tensor: torch.Tensor) -> torch.Tensor:
         """Add this parameter's ``.diff``/``.diff_b`` delta, if the adapter has one.
@@ -176,7 +182,7 @@ class DenseLoRAPatch:
             raise ValueError(f"LoRA diff for {param_name} has shape {tuple(delta.shape)}, "
                              f"but the parameter is {tuple(tensor.shape)}")
         self._applied.add(param_name)
-        return tensor.to(torch.float32) + delta.to(torch.float32)
+        return tensor.to(torch.float32) + delta.to(torch.float32) * self._strength
 
     def provides(self, param_name: str) -> bool:
         """Whether the adapter carries this parameter whole, without reading it."""
@@ -198,7 +204,10 @@ class DenseLoRAPatch:
         if entry is None:
             return None
         self._applied.add(param_name)
-        return self._read(entry)
+        # Replacement payloads address parameters absent from the base checkpoint. The
+        # loader initializes those parameters to zero, so scaling the supplied value is
+        # the same interpolation contract as ``base + strength * delta``.
+        return self._read(entry).to(torch.float32) * self._strength
 
     def report_unapplied(self) -> None:
         """Warn about dense keys that never reached a parameter.
