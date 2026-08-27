@@ -76,6 +76,7 @@ class _ShardIndex:
         component_dir = Path(component_dir)
         index_path = component_dir / "model.safetensors.index.json"
         self.key_to_shard: dict[str, str] = {}
+        self._header_cache: dict[str, tuple[dict, int]] = {}
         if index_path.exists():
             weight_map = json.loads(index_path.read_text())["weight_map"]
             self.key_to_shard = {k: str(component_dir / s) for k, s in weight_map.items()}
@@ -88,6 +89,20 @@ class _ShardIndex:
                 (header_len, ) = struct.unpack("<Q", handle.read(8))
                 header = json.loads(handle.read(header_len))
             self.key_to_shard = {k: str(single) for k in header if k != "__metadata__"}
+        # Pre-cache all shard headers
+        for shard_path in set(self.key_to_shard.values()):
+            self._cache_header(shard_path)
+
+    def _cache_header(self, path: str) -> tuple[dict, int]:
+        """Parse and cache a shard's header, returning (header_dict, data_start_offset)."""
+        if path not in self._header_cache:
+            import struct
+            with open(path, "rb") as handle:
+                (header_len, ) = struct.unpack("<Q", handle.read(8))
+                header = json.loads(handle.read(header_len))
+            data_start = 8 + header_len
+            self._header_cache[path] = (header, data_start)
+        return self._header_cache[path]
 
     def has(self, prefix: str) -> bool:
         return any(key.startswith(prefix) for key in self.key_to_shard)
@@ -97,11 +112,13 @@ class _ShardIndex:
 
     def get(self, key: str) -> np.ndarray:
         shard = self.key_to_shard[key]
-        return _read_safetensors_bf16(shard, key)
+        header, data_start = self._header_cache[shard]
+        return _read_safetensors_bf16(shard, key, header, data_start)
 
     def get_row(self, key: str, row: int) -> np.ndarray:
         shard = self.key_to_shard[key]
-        return _read_safetensors_row(shard, key, row)
+        header, data_start = self._header_cache[shard]
+        return _read_safetensors_row(shard, key, row, header, data_start)
 
     def close(self) -> None:
         gc.collect()
@@ -110,15 +127,9 @@ class _ShardIndex:
 _DTYPES = {"F32": np.float32, "F16": np.float16, "I64": np.int64, "I32": np.int32}
 
 
-def _read_safetensors_bf16(path: str, key: str) -> np.ndarray:
+def _read_safetensors_bf16(path: str, key: str, header: dict, data_start: int) -> np.ndarray:
     """Read one tensor (any dtype incl. BF16) without loading the shard."""
-    import struct
-
-    with open(path, "rb") as handle:
-        (header_len, ) = struct.unpack("<Q", handle.read(8))
-        header = json.loads(handle.read(header_len))
     meta = header[key]
-    data_start = 8 + header_len
     begin, end = meta["data_offsets"]
     count = end - begin
     dtype = meta["dtype"]
@@ -135,13 +146,8 @@ def _read_safetensors_bf16(path: str, key: str) -> np.ndarray:
                   shape=(count // np.dtype(_DTYPES[dtype]).itemsize, )).reshape(meta["shape"]))
 
 
-def _read_safetensors_row(path: str, key: str, row: int) -> np.ndarray:
+def _read_safetensors_row(path: str, key: str, row: int, header: dict, data_start: int) -> np.ndarray:
     """Read one leading-dimension row without materializing the full tensor."""
-    import struct
-
-    with open(path, "rb") as handle:
-        (header_len, ) = struct.unpack("<Q", handle.read(8))
-        header = json.loads(handle.read(header_len))
     meta = header[key]
     shape = tuple(int(value) for value in meta["shape"])
     if len(shape) < 2:
@@ -154,7 +160,6 @@ def _read_safetensors_row(path: str, key: str, row: int) -> np.ndarray:
         raise ValueError(f"Unsupported safetensors dtype {dtype} in {path}:{key}")
     item_size = 2 if dtype in {"BF16", "F16"} else np.dtype(_DTYPES[dtype]).itemsize
     row_count = int(np.prod(shape[1:], dtype=np.int64))
-    data_start = 8 + header_len
     begin = int(meta["data_offsets"][0]) + row * row_count * item_size
     if dtype == "BF16":
         raw = np.memmap(path, dtype=np.uint16, mode="r", offset=data_start + begin, shape=(row_count, ))

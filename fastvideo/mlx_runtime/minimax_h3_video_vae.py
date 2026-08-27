@@ -332,7 +332,7 @@ class MLXMiniMaxH3VideoVAE:
     # -- normalization -------------------------------------------------
 
     def normalize_latents(self, latents):
-        return latents - mx.array(self._latents_mean)
+        return (latents - mx.array(self._latents_mean)) / mx.array(self._latents_std)
 
     def denormalize_latents(self, latents):
         return latents * mx.array(self._latents_std) + mx.array(self._latents_mean)

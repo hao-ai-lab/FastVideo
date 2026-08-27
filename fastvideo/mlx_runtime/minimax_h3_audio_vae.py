@@ -183,8 +183,8 @@ def _snake(x, alpha):
 
 def _snake_beta(x, alpha, beta):
     """SnakeBeta: x + sin(exp(alpha)*x)^2 / (exp(beta) + 1e-9)."""
-    a = mx.exp(alpha)[None, :, None]
-    b = mx.exp(beta)[None, :, None]
+    a = mx.exp(mx.reshape(alpha, (-1, )))[None, :, None]
+    b = mx.exp(mx.reshape(beta, (-1, )))[None, :, None]
     return x + mx.sin(a * x)**2 / (b + 1e-9)
 
 

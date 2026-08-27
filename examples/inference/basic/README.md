@@ -42,14 +42,14 @@ with
 FastH3 Preview T2VA also runs through the native MLX runtime. Convert the DiT
 to INT8, INT6, or INT4 first, then run:
 
-~~~bash
+```bash
 python examples/inference/basic/mlx_fasth3.py \
   --model-root ./FastH3-Preview-v0.2 \
   --mlx-checkpoint ./FastH3-MLX/int6 \
   --prompt "(S1) A presenter says <d>[English] Fast H3 is amazing.</d>" \
   --height 480 --width 832 --num-frames 124 \
   --output-path ./outputs/fasth3_int6.mp4
-~~~
+```
 
 Pass `--fast` for temporal RIFE fast mode. This MLX entrypoint currently
 supports T2VA only; FL2VA, Ref2VA, spatial fast mode, and two-pass refinement
