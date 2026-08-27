@@ -31,7 +31,7 @@ pytest tests/local_tests/cosmos25/test_cosmos25_distilled_scheduler_parity.py -v
 The parity test pins NVIDIA's scaling source and compares the full four-step
 preconditioning/x0/fixed-noise rollout. It does not load model weights.
 
-## Conversion scaffold
+## Conversion
 
 The converter keeps only the official student's native `net.*` tensors and
 reuses non-transformer components from an existing FastVideo-loadable Cosmos
@@ -51,22 +51,31 @@ Local conversion contracts:
 pytest tests/local_tests/cosmos25/test_cosmos25_distilled_conversion.py -q
 ```
 
-This scaffold is locally tested, but conversion of the released 4 GB checkpoint
-and production-loader strictness have not yet been validated.
+The released checkpoint conversion and production FastVideo strict load passed
+on the Spark validation host: 685 student tensors and no training counters.
 
-## Remaining GPU gates
+## Remaining GPU gate
 
-Before wiring a public pipeline or running DreamVerse:
+Conversion, strict load, and the real-weight DiT comparison pass. The remaining
+gate is an end-to-end T2W generation from the converted package. Distilled
+V2W/rolling remains explicitly outside the initial support claim.
 
-1. Run the converter on the released distilled transformer and verify its
-   reported tensor count and production-loader missing/unexpected keys.
-2. Compare one real student DiT forward against the official implementation.
-3. Compare deterministic T2W latents end to end for the official four-step
-   schedule.
-4. Only after T2W parity, evaluate experimental V2W/rolling conditioning.
+Run the cheap pipeline contracts, then a small wiring smoke before the full
+four-step quality gate:
 
-Those checks require the released checkpoint and a CUDA machine. A skipped
-local parity test is not pass evidence.
+```bash
+pytest tests/local_tests/cosmos25/test_cosmos25_distilled_pipeline.py -q
+
+FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA \
+python examples/inference/basic/basic_cosmos2_5_distilled_t2w.py \
+  --model /path/to/converted-model \
+  --steps 1 --frames 9 --height 256 --width 448 \
+  --output outputs_video/cosmos25_distilled_smoke.mp4
+
+FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA \
+python examples/inference/basic/basic_cosmos2_5_distilled_t2w.py \
+  --model /path/to/converted-model
+```
 
 ## Real student DiT parity
 
@@ -83,4 +92,5 @@ FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA \
 pytest tests/local_tests/cosmos25/test_cosmos25_distilled_transformer_parity.py -v -s
 ```
 
-The test must report `PASSED`, not `SKIPPED`, before distilled pipeline wiring.
+The Spark gate passed with first-block relative mean error `0.000655` and final
+relative mean error `0.038397`, with smooth BF16 drift and no discontinuity.
