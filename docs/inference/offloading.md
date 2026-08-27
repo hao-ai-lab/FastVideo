@@ -139,7 +139,9 @@ pipeline that is roughly `max(text encoder, DiT + VAE)` rather than
 
 A freed component is read from disk again on the next generation, so a
 multi-prompt run pays one reload per component per request. For a large text
-encoder that is tens of seconds.
+encoder that is tens of seconds. If pipeline-level `torch.compile` is enabled,
+the compile setup is reapplied after each reload; PyTorch can reuse its graph
+and kernel caches when the component structure and input shapes are unchanged.
 
 #### Usage Recommendation
 

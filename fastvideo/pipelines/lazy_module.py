@@ -43,11 +43,12 @@ class LazyModule:
     early is a latency cost, never a correctness one.
     """
 
-    __slots__ = ("_lazy_name", "_lazy_loader", "_lazy_module")
+    __slots__ = ("_lazy_name", "_lazy_loader", "_lazy_materialize_transform", "_lazy_module")
 
     def __init__(self, name: str, loader: Callable[[], Any]) -> None:
         object.__setattr__(self, "_lazy_name", name)
         object.__setattr__(self, "_lazy_loader", loader)
+        object.__setattr__(self, "_lazy_materialize_transform", None)
         object.__setattr__(self, "_lazy_module", None)
 
     @property
@@ -70,12 +71,39 @@ class LazyModule:
         module = loader()
         if module is None:
             raise ValueError(f"Deferred loader for module {name} returned None")
+
+        transform = object.__getattribute__(self, "_lazy_materialize_transform")
+        if transform is not None:
+            module = transform(module)
+            if module is None:
+                raise ValueError(f"Materialize transform for module {name} returned None")
         object.__setattr__(self, "_lazy_module", module)
 
         allocated = _cuda_allocated_gib()
         if allocated is not None:
             logger.info("Loaded deferred module %s, cuda allocated now %.2f GiB", name, allocated)
         return module
+
+    def set_materialize_transform(self, transform: Callable[[Any], Any]) -> None:
+        """Apply ``transform`` to this and every future loaded instance.
+
+        Registering a transform does not itself load a deferred component. If
+        something has already materialized the component, transform that
+        instance immediately so current and future instances have the same
+        setup. A transform may return a wrapper, as ``torch.compile`` does.
+        """
+        current_transform = object.__getattribute__(self, "_lazy_materialize_transform")
+        if current_transform is not None:
+            raise RuntimeError(f"Materialize transform for module {self.lazy_name} is already set")
+
+        module = object.__getattribute__(self, "_lazy_module")
+        transformed = transform(module) if module is not None else None
+        if module is not None and transformed is None:
+            raise ValueError(f"Materialize transform for module {self.lazy_name} returned None")
+
+        object.__setattr__(self, "_lazy_materialize_transform", transform)
+        if module is not None:
+            object.__setattr__(self, "_lazy_module", transformed)
 
     def release(self) -> bool:
         """Drop the real component. Returns True if something was released."""
