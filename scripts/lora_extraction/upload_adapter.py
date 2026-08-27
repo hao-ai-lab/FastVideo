@@ -42,40 +42,34 @@ tags:
 # {title}
 
 LoRA extraction of [{finetuned}](https://huggingface.co/{finetuned}), a four-step DMD2
-distillation of [MiniMax-H3](https://huggingface.co/MiniMaxAI/MiniMax-H3) under video
-sparse attention (VSA).
+distillation of [MiniMax-H3](https://huggingface.co/MiniMaxAI/MiniMax-H3){attention_clause}.
 
 ## What is in the file
 
 {variant_table}
 
-Each adapter is three kinds of payload, because a distillation of this model is not
-purely low-rank:
+This is not a purely low-rank adapter, because the distillation it captures is not a
+purely low-rank change:
 
 | kind | keys | what it is |
 |---|---|---|
 | low-rank factors | `<module>.lora_A/.lora_B` | attention, feed-forward and AdaLN projections |
-| exact deltas | `<module>.diff`, `<module>.diff_b` | norms and biases, where a rank-r factorization would cost more than the tensor |
-| whole parameters | `attn.to_gate_compress.set_weight` | the VSA compression gate, which **does not exist in base MiniMax-H3** |
-
-The `.set_weight` keys are why this is not an ordinary LoRA. `to_gate_compress` is
-created only under the VSA attention backend and is zero-initialized when a checkpoint
-does not carry it, so a loader that ignores those keys produces a model with the
-compression branch switched off — quietly, and without an error.
-
+| exact deltas | `<module>.diff`, `<module>.diff_b` | norms and biases, where a rank-r factorization of a length-n vector would cost more than the vector |
+{gate_row}
+{gate_note}
 ## Usage (FastVideo)
 
 ```bash
 python examples/inference/lora/minimax_h3_lora_inference.py \\
     --model-path MiniMaxAI/MiniMax-H3 \\
     --lora-path {repo_id} \\
-    --prompt "your prompt here"
+    --prompt "your prompt here"{usage_flags}
 ```
 
 The adapter must be supplied when the pipeline is constructed, not swapped in later: a
 parameter the base model lacks has to arrive while weights are still unsharded.
-Sample with **4 steps** (5 sigma-grid points), **cfg 1.0** — the checkpoint is
-guidance-distilled — and the VSA backend enabled.
+Sample with **4 steps** (5 sigma-grid points) and **cfg 1.0** — the checkpoint is
+guidance-distilled.{sampling_note}
 
 ## Fidelity
 
@@ -113,6 +107,12 @@ def inspect(path: Path) -> dict:
 
 
 def build_card(repo_id: str, variants: list[dict], fidelity: str) -> str:
+    """Render the card from what the files contain.
+
+    The VSA paragraphs are conditional on the adapter actually carrying gates: the dense
+    variants of these checkpoints have none, and a card that describes a payload the repo
+    does not hold is exactly the drift generating the card was supposed to prevent.
+    """
     finetuned = next((v["metadata"].get("finetuned_model") for v in variants if v["metadata"].get("finetuned_model")),
                      "")
     rows = ["| file | rank | low-rank | .diff | .set_weight | size |", "|---|---|---|---|---|---|"]
@@ -120,11 +120,27 @@ def build_card(repo_id: str, variants: list[dict], fidelity: str) -> str:
         rel = v["path"].relative_to(v["path"].parents[1])
         rows.append(f"| `{rel}` | {v['rank']} | {v['n_low_rank']} | {v['n_diff']} | "
                     f"{v['n_set']} | {v['size_gib']:.2f} GiB |")
+
+    has_gates = any(v["n_set"] for v in variants)
+    gate_row = ("| whole parameters | `attn.to_gate_compress.set_weight` | the VSA compression gate, which "
+                "**does not exist in base MiniMax-H3** |\n" if has_gates else "")
+    gate_note = ("\nThe `.set_weight` keys are why this needs a loader that understands them. "
+                 "`to_gate_compress` is created only under the VSA attention backend, and is zero-initialized "
+                 "when a checkpoint does not carry it — so a loader that ignores those keys silently produces a "
+                 "model with the compression branch switched off.\n" if has_gates else "")
+
     return CARD.format(
         title=repo_id.split("/")[-1],
         finetuned=finetuned,
         repo_id=repo_id,
         variant_table="\n".join(rows),
+        attention_clause=(" under video sparse attention (VSA)" if has_gates else
+                          " with dense attention (no VSA gates in this adapter)"),
+        gate_row=gate_row,
+        gate_note=gate_note,
+        usage_flags=" \\\n    --vsa" if has_gates else " \\\n    --no-vsa",
+        sampling_note=(" Enable the VSA backend: without it the gate has no module to load into and the "
+                       "loader will refuse." if has_gates else ""),
         fidelity=fidelity or "_not measured for this build_",
     )
 
@@ -134,7 +150,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--adapter-dir", required=True, help="directory holding rank-*/adapter_model.safetensors")
     parser.add_argument("--repo-id", required=True)
-    parser.add_argument("--fidelity-json", default=None, help="verification summary to quote in the card")
+    parser.add_argument("--rank",
+                        type=int,
+                        action="append",
+                        default=None,
+                        help="publish only this rank; repeat for several. Default: every rank present.")
+    parser.add_argument("--fidelity-md", default=None, help="markdown fragment of measured reconstruction error")
     parser.add_argument("--private", action="store_true")
     parser.add_argument("--dry-run", action="store_true", help="write the card locally and stop")
     parser.add_argument("--allow-bare-weights",
@@ -144,10 +165,14 @@ def main() -> None:
 
     root = Path(args.adapter_dir)
     files = sorted(root.glob("rank-*/adapter_model.safetensors"))
+    if args.rank:
+        wanted = {f"rank-{r}" for r in args.rank}
+        files = [f for f in files if f.parent.name in wanted]
     if not files:
-        raise SystemExit(f"no rank-*/adapter_model.safetensors under {root}")
+        raise SystemExit(f"no matching rank-*/adapter_model.safetensors under {root}")
 
     variants = [inspect(f) for f in files]
+    variants_paths = [v["path"] for v in variants]
     for v in variants:
         LOG.info("%s: rank=%s low_rank=%d diff=%d set_weight=%d bare=%d %.2f GiB", v["path"].parent.name, v["rank"],
                  v["n_low_rank"], v["n_diff"], v["n_set"], v["n_bare"], v["size_gib"])
@@ -156,9 +181,7 @@ def main() -> None:
                              f"loaders drop silently -- run finalize_adapter.py first, or pass "
                              f"--allow-bare-weights if you really mean it.")
 
-    fidelity = ""
-    if args.fidelity_json:
-        fidelity = "```\n" + Path(args.fidelity_json).read_text().strip() + "\n```"
+    fidelity = Path(args.fidelity_md).read_text().strip() if args.fidelity_md else ""
 
     card_path = root / "README.md"
     card_path.write_text(build_card(args.repo_id, variants, fidelity))
@@ -176,8 +199,9 @@ def main() -> None:
         folder_path=str(root),
         repo_id=args.repo_id,
         repo_type="model",
-        # Bookkeeping from the finalize step; the card already carries the numbers.
-        ignore_patterns=["*.json.tmp", "finalize_summary.json"],
+        # Only the ranks selected above, plus the card. Bookkeeping from the finalize
+        # step stays local; the card already carries the numbers that matter.
+        allow_patterns=[f"{f.parent.name}/*" for f in variants_paths] + ["README.md"],
     )
     LOG.info("done: https://huggingface.co/%s", args.repo_id)
 
