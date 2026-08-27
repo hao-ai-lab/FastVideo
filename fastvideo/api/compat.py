@@ -165,6 +165,8 @@ def legacy_from_pretrained_to_config(
             pipeline["workload_type"] = value
         elif key == "lora_path":
             components["lora_path"] = value
+        elif key == "lora_strength":
+            components["lora_strength"] = value
         elif key == "override_pipeline_cls_name":
             components["override_pipeline_cls_name"] = value
         elif key == "override_transformer_cls_name":
@@ -283,6 +285,7 @@ def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, An
         kwargs["pipeline_config"] = components.pipeline_config_path
     if components.lora_path is not None:
         kwargs["lora_path"] = components.lora_path
+        kwargs["lora_strength"] = components.lora_strength
     if components.override_pipeline_cls_name is not None:
         kwargs["override_pipeline_cls_name"] = components.override_pipeline_cls_name
     if components.override_transformer_cls_name is not None:

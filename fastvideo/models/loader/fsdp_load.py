@@ -7,6 +7,7 @@
 from __future__ import annotations
 import os
 import contextlib
+import re
 from collections.abc import Callable, Generator
 from itertools import chain
 from typing import Any
@@ -19,11 +20,20 @@ from torch.distributed.fsdp import (CPUOffloadPolicy, FSDPModule, MixedPrecision
 from torch.nn.modules.module import _IncompatibleKeys
 
 from fastvideo.logger import init_logger
+from fastvideo.models.loader.lora_patch import DenseLoRAPatch
 from fastvideo.models.loader.utils import (get_param_names_mapping, hf_to_custom_state_dict)
 from fastvideo.models.loader.weight_utils import safetensors_weights_iterator
 from fastvideo.utils import set_mixed_precision_policy, is_pin_memory_available
 
 logger = init_logger(__name__)
+
+
+def _summarize_param_names(names: set[str]) -> str:
+    """Collapse per-layer parameter names into one ``blocks.*.suffix xN`` entry each."""
+    families: dict[str, int] = {}
+    for name in names:
+        families[re.sub(r"\.\d+\.", ".*.", name)] = families.get(re.sub(r"\.\d+\.", ".*.", name), 0) + 1
+    return ", ".join(f"{family} x{count}" if count > 1 else family for family, count in sorted(families.items()))
 
 
 def _maybe_quantize_model(model: nn.Module) -> None:
@@ -155,9 +165,18 @@ def maybe_load_fsdp_model(
     torch_compile_kwargs: dict[str, Any] | None = None,
     inference_regional_compile: bool = False,
     inference_vsa_tile_size: int | None = None,
+    lora_path: str | None = None,
+    lora_strength: float = 1.0,
 ) -> torch.nn.Module:
     """
     Load the model with FSDP if is training, else load the model without FSDP.
+
+    ``lora_path`` is consulted only for the part of an adapter that addresses whole
+    parameters (``.diff`` / ``.set_weight``); see
+    :mod:`fastvideo.models.loader.lora_patch`. The low-rank half is merged later by
+    ``LoRAPipeline``. Passing it here is what lets an adapter contribute a parameter the
+    base checkpoint does not contain, which has to happen while the tensor is still
+    unsharded.
     """
     # NOTE(will): cast_forward_inputs=True shouldn't be needed as we are
     # manually casting the inputs to the model
@@ -222,6 +241,23 @@ def maybe_load_fsdp_model(
 
     weight_iterator = safetensors_weights_iterator(weight_dir_list, to_cpu=True)
     param_names_mapping_fn = get_param_names_mapping(model.param_names_mapping)
+    dense_lora_patch = DenseLoRAPatch.from_adapter(
+        lora_path,
+        param_names_mapping_fn,
+        strength=lora_strength,
+    )
+    if dense_lora_patch is not None:
+        # H3's compression gate is created only by the VSA attention backend. Loading a
+        # VSA student under dense attention would otherwise warn about 50 unmatched
+        # replacements and continue with a silently incomplete model.
+        model_parameter_names = {name for name, _ in model.named_parameters()}
+        missing_vsa_gates = sorted(name for name in dense_lora_patch.replacement_parameters
+                                   if "gate_compress" in name and name not in model_parameter_names)
+        if missing_vsa_gates:
+            raise ValueError(
+                "This LoRA adapter provides MiniMax H3 VSA compression gates, but the selected attention backend "
+                "did not construct them. Use attention_backend='VIDEO_SPARSE_ATTN_H3'. Missing parameters: "
+                + ", ".join(missing_vsa_gates[:3]) + (" ..." if len(missing_vsa_gates) > 3 else ""))
     load_model_from_full_model_state_dict(
         model,
         weight_iterator,
@@ -230,6 +266,7 @@ def maybe_load_fsdp_model(
         strict=strict,
         cpu_offload=cpu_offload,
         param_names_mapping=param_names_mapping_fn,
+        dense_lora_patch=dense_lora_patch,
     )
     if hasattr(model, "materialize_non_persistent_buffers"):
         model.materialize_non_persistent_buffers(device=device, dtype=default_dtype)
@@ -518,6 +555,7 @@ def load_model_from_full_model_state_dict(
     cpu_offload: bool = False,
     param_names_mapping: Callable[[str], tuple[str, Any, Any]] | None = None,
     training_mode: bool = True,
+    dense_lora_patch: DenseLoRAPatch | None = None,
 ) -> _IncompatibleKeys:
     """
     Converting full state dict into a sharded state dict
@@ -531,6 +569,9 @@ def load_model_from_full_model_state_dict(
         cpu_offload (bool): flag to check if FSDP offload is enabled
         param_names_mapping (Optional[Callable[[str], str]]): a function that maps full param name to sharded param name
         training_mode (bool): apply FSDP only for training
+        dense_lora_patch (Optional[DenseLoRAPatch]): whole-parameter adapter payload,
+            folded into each full tensor before it is sharded so that FSDP/TP placement
+            is inherited from this function rather than reimplemented downstream
     Returns:
         ``NamedTuple`` with ``missing_keys`` and ``unexpected_keys`` fields:
             * **missing_keys** is a list of str containing the missing keys
@@ -581,6 +622,10 @@ def load_model_from_full_model_state_dict(
         dtype_selector = getattr(model, "_get_parameter_dtype", None)
         if callable(dtype_selector):
             target_dtype = dtype_selector(target_param_name, param_dtype)
+        if dense_lora_patch is not None:
+            # Returns float32 when a delta was added, so the cast below is what lands
+            # the parameter in its storage dtype.
+            full_tensor = dense_lora_patch.apply_to(target_param_name, full_tensor)
         if not hasattr(meta_sharded_param, "device_mesh"):
             full_tensor = full_tensor.to(device=device, dtype=target_dtype)
             target_param = named_parameters.get(target_param_name)
@@ -617,12 +662,28 @@ def load_model_from_full_model_state_dict(
     model.reverse_param_names_mapping = reverse_param_names_mapping
     unused_keys = set(meta_sd.keys()) - set(sharded_sd.keys())
     if unused_keys:
-        logger.warning("Found unloaded parameters in meta state dict: %s", unused_keys)
+        # Say which of these the adapter is about to fill in. Reporting all of them as
+        # "unloaded" was accurate when zero-init was the only outcome; with an adapter
+        # supplying real values it reads as a problem that is not one. Names are
+        # summarized because a 50-layer model prints 50 near-identical lines otherwise.
+        from_adapter = ({key for key in unused_keys if dense_lora_patch.provides(key)} if dense_lora_patch is not None
+                        else set())
+        zero_init = unused_keys - from_adapter
+        if from_adapter:
+            logger.info("Parameters absent from the checkpoint and supplied by the LoRA adapter: %d (%s)",
+                        len(from_adapter), _summarize_param_names(from_adapter))
+        if zero_init:
+            logger.warning("Found unloaded parameters in meta state dict, zero-initializing: %d (%s)", len(zero_init),
+                           _summarize_param_names(zero_init))
 
     # List of allowed parameter name patterns
     ALLOWED_NEW_PARAM_PATTERNS = ["gate_compress", "proj_l"]  # Can be extended as needed
     for new_param_name in unused_keys:
-        if not any(pattern in new_param_name for pattern in ALLOWED_NEW_PARAM_PATTERNS):
+        # An adapter that ships the parameter outright both supplies the value and
+        # authorizes it: the allowlist exists to catch a checkpoint silently missing a
+        # weight, which is not the case when something deliberately provides one.
+        adapter_value = (dense_lora_patch.replacement_for(new_param_name) if dense_lora_patch is not None else None)
+        if adapter_value is None and not any(pattern in new_param_name for pattern in ALLOWED_NEW_PARAM_PATTERNS):
             logger.error("Unsupported new parameter: %s. Allowed patterns: %s", new_param_name,
                          ALLOWED_NEW_PARAM_PATTERNS)
             raise ValueError(f"New parameter '{new_param_name}' is not supported. "
@@ -632,7 +693,22 @@ def load_model_from_full_model_state_dict(
         dtype_selector = getattr(model, "_get_parameter_dtype", None)
         if callable(dtype_selector):
             target_dtype = dtype_selector(new_param_name, param_dtype)
-        if not hasattr(meta_sharded_param, "device_mesh"):
+        if adapter_value is not None:
+            if tuple(adapter_value.shape) != tuple(meta_sharded_param.shape):
+                raise ValueError(f"LoRA set_weight for {new_param_name} has shape {tuple(adapter_value.shape)}, "
+                                 f"but the parameter is {tuple(meta_sharded_param.shape)}")
+            full_tensor = adapter_value.to(device=device, dtype=target_dtype)
+            if not hasattr(meta_sharded_param, "device_mesh"):
+                sharded_tensor = full_tensor
+            else:
+                sharded_tensor = distribute_tensor(
+                    full_tensor,
+                    meta_sharded_param.device_mesh,
+                    meta_sharded_param.placements,
+                )
+                if cpu_offload:
+                    sharded_tensor = sharded_tensor.cpu()
+        elif not hasattr(meta_sharded_param, "device_mesh"):
             # Initialize with zeros
             sharded_tensor = torch.zeros_like(meta_sharded_param, device=device, dtype=target_dtype)
         else:
@@ -646,6 +722,9 @@ def load_model_from_full_model_state_dict(
             if cpu_offload:
                 sharded_tensor = sharded_tensor.cpu()
         sharded_sd[new_param_name] = nn.Parameter(sharded_tensor)
+
+    if dense_lora_patch is not None:
+        dense_lora_patch.report_unapplied()
 
     # choose `assign=True` since we cannot call `copy_` on meta tensor
     return model.load_state_dict(sharded_sd, strict=strict, assign=True)

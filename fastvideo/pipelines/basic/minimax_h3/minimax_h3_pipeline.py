@@ -14,10 +14,32 @@ from fastvideo.pipelines.basic.minimax_h3.stages import (
     MiniMaxH3VideoDecodingStage,
 )
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
+from fastvideo.pipelines.lora_pipeline import LoRAPipeline
 
 
-class MiniMaxH3BasePipeline(ComposedPipelineBase):
-    """Shared loading and target-generation path for MiniMax H3."""
+class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
+    """Shared loading and target-generation path for MiniMax H3.
+
+    Inherits ``LoRAPipeline`` so acceleration and distillation adapters can be merged
+    in; without it every adapter is rejected with "pipeline is not a LoRAPipeline".
+    """
+
+    # The linears every published H3 adapter targets. Left unset, ``LoRAPipeline``
+    # wraps *every* linear in the DiT -- including ``proj_in``, whose ``.weight`` the
+    # forward pass reads directly. ``BaseLayerWithLoRA`` exposes no ``.weight``, so
+    # that wrapping turns generation into an AttributeError before the first step.
+    lora_target_modules = [
+        "attn.to_q",
+        "attn.to_k",
+        "attn.to_v",
+        "attn.to_out",
+        "ff.fc_in",
+        "ff.fc_out",
+        "adaln_proj.linear",
+        # The final AdaLN projection. Published community adapters (larryvrh's Turbo)
+        # target it as `final_layer.adaln_proj.linear`.
+        "norm_out.linear",
+    ]
 
     pipeline_config_cls: type[MiniMaxH3PipelineConfig] = MiniMaxH3PipelineConfig
     _required_config_modules = [
