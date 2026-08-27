@@ -11,8 +11,8 @@
 - local_tests_readme: `tests/local_tests/cosmos25/README.md`
 
 ## Current Phase
-- phase: DreamVerse frame-return contract
-- status: in_progress
+- phase: initial T2W support
+- status: complete
 - owner: pipeline
 - last_updated: 2026-08-27
 
@@ -43,7 +43,7 @@
 | pipeline contracts | `pytest tests/local_tests/cosmos25/test_cosmos25_distilled_pipeline.py -q` | 9 passed | Spark; CPU-only sampler/stage isolation checks |
 | pipeline smoke | `python examples/inference/basic/basic_cosmos2_5_distilled_t2w.py --model /path/to/converted-model --steps 1 --frames 9 --height 256 --width 448` | passed | 2.19 s end-to-end after load; 2026-08-27 |
 | full T2W quality | `python examples/inference/basic/basic_cosmos2_5_distilled_t2w.py --model /path/to/converted-model` | passed + eye gate | 704x1280x77, 4 steps; 143.53 s end-to-end after load; visually coherent |
-| DreamVerse frames | example command with `--return-frames` | pending | requires nonempty decoded `frames` list without MP4 save |
+| DreamVerse frames | example command with `--return-frames` | passed | 9 RGB frames; first shape `(256, 448, 3)`; 2026-08-27 |
 
 ## Open Questions
 | ID | Question | Owner | Needed By Phase | Status | Resolution |
@@ -73,10 +73,12 @@
 | 2026-08-27 | Accept calibrated BF16 DiT parity | Preprocess is exact, first-block drift is 0.000655 relative, and drift grows smoothly to 0.038397 final relative | Clears the component gate without claiming bitwise equality |
 | 2026-08-27 | Select distilled stages from the packaged scheduler class | The package already carries authoritative inference semantics | Existing full Cosmos2.5 packages remain on their unchanged path |
 | 2026-08-27 | Accept the full-resolution T2W quality gate | The four-step 704x1280x77 run completed without runtime faults and passed visual inspection | Clears basic FastVideo T2W support; does not claim continuation or real-time latency |
+| 2026-08-27 | Accept the decoded-frame return contract | The small Spark run returned 9 RGB frames with shape `(256, 448, 3)` without writing an MP4 | Clears the downstream frame-consumer contract without claiming DreamVerse integration |
 
 ## Handoff Notes
 - CPU scheduler unit and pinned-reference parity tests pass locally without skips.
 - Released checkpoint conversion, production strict load, and official-vs-FastVideo DiT parity pass on Spark.
 - Small and full-resolution T2W generation pass on Spark; the full video passed visual inspection.
-- Next gate is DreamVerse's `save_video=False`, `return_frames=True` result contract.
+- The `save_video=False`, `return_frames=True` result contract passes on Spark.
+- A public converted package ID remains open; until then, use the documented local conversion flow.
 - Do not use the prior FlowUniPC/Karras Spark run as distilled parity evidence.

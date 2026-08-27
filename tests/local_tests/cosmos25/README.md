@@ -54,11 +54,11 @@ pytest tests/local_tests/cosmos25/test_cosmos25_distilled_conversion.py -q
 The released checkpoint conversion and production FastVideo strict load passed
 on the Spark validation host: 685 student tensors and no training counters.
 
-## Remaining GPU gate
+## Validated GPU gates
 
-Conversion, strict load, and the real-weight DiT comparison pass. The remaining
-gate is an end-to-end T2W generation from the converted package. Distilled
-V2W/rolling remains explicitly outside the initial support claim.
+Conversion, strict load, the real-weight DiT comparison, end-to-end T2W
+generation, and decoded-frame return all pass on the Spark validation host.
+Distilled V2W/rolling remains explicitly outside the initial support claim.
 
 Run the cheap pipeline contracts, then a small wiring smoke before the full
 four-step quality gate:
@@ -86,6 +86,10 @@ python examples/inference/basic/basic_cosmos2_5_distilled_t2w.py \
   --model /path/to/converted-model \
   --steps 1 --frames 9 --height 256 --width 448 --return-frames
 ```
+
+The Spark frame-return gate produced 9 RGB frames with shape `(256, 448, 3)`.
+The full four-step `704x1280x77` run completed in 143.53 seconds after model
+load and passed visual inspection.
 
 ## Real student DiT parity
 
