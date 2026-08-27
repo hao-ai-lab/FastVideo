@@ -64,6 +64,8 @@ class MLXQuantizationSpec:
             return None
         if name == "int8":
             return cls(mode="affine", bits=8, group_size=64)
+        if name == "int6":
+            return cls(mode="affine", bits=6, group_size=64)
         if name == "int4":
             return cls(mode="affine", bits=4, group_size=64)
         if name == "mxfp8":

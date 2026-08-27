@@ -1,10 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Experimental Apple MLX runtime helpers.
-
-This package is intentionally small for now. It exists to grow the Apple-native
-FastWan path in measurable steps: shape planning, primitive benchmarks, then
-Wan block parity, then full DiT/runtime support.
-"""
+"""Apple Silicon MLX inference helpers."""
 
 from fastvideo.mlx_runtime.fastwan import (
     FastWanShape,
@@ -71,6 +66,12 @@ from fastvideo.mlx_runtime.prompt_enhance import (
     enhance_result_as_metrics,
     load_or_enhance_prompt,
 )
+from fastvideo.mlx_runtime.minimax_h3_pipeline import (
+    FastTemporalPlan,
+    GenerationResult,
+    MiniMaxH3MLXPipeline,
+    plan_fast_temporal,
+)
 
 __all__ = [
     "AppliedMemoryLimits",
@@ -81,10 +82,13 @@ __all__ = [
     "DEFAULT_REFINE_SIGMA",
     "EnhanceResult",
     "FastSpatialPlan",
+    "FastTemporalPlan",
     "FastWanShape",
+    "GenerationResult",
     "MLXQuantizationSpec",
     "MLXWanDiT",
     "MLXWanTransformerBlock",
+    "MiniMaxH3MLXPipeline",
     "RefinePlan",
     "TwoPassResult",
     "UnsupportedMLXCheckpointError",
@@ -110,6 +114,7 @@ __all__ = [
     "PIXEL_UPSAMPLE_MODES",
     "default_refine_timesteps",
     "plan_fast_spatial",
+    "plan_fast_temporal",
     "plan_refine_resolutions",
     "prepare_refine_latents",
     "quantization_support_error",

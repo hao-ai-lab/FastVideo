@@ -135,3 +135,43 @@ def interpolate(
             out.append(interpolate_pair(left, right, step / factor, model=model, scale=scale))
     out.append(frame_list[-1])
     return out
+
+
+def interpolate_to_frame_count(
+    frames: list[np.ndarray] | Iterable[np.ndarray],
+    target_frames: int,
+    *,
+    model=None,
+    scale: float = 1.0,
+) -> list[np.ndarray]:
+    """Interpolate a sparse sequence to an exact frame count.
+
+    Unlike :func:`interpolate`, this accepts targets that are not an integer
+    multiple of the source interval count. The first and last source frames
+    remain the first and last output frames, and every intermediate output is
+    evaluated at its uniformly spaced source-time position.
+    """
+    frame_list = [_require_hwc_rgb(frame, idx) for idx, frame in enumerate(frames)]
+    if target_frames < len(frame_list):
+        raise ValueError(f"target_frames must be at least the source count ({len(frame_list)}), got {target_frames}.")
+    if target_frames == len(frame_list):
+        return [frame.copy() for frame in frame_list]
+    if len(frame_list) < 2:
+        raise ValueError("at least two source frames are required for interpolation")
+
+    if model is None:
+        model = load_model()
+
+    positions = np.linspace(0.0, len(frame_list) - 1, target_frames, dtype=np.float64)
+    out: list[np.ndarray] = []
+    for position in positions:
+        left = int(np.floor(position))
+        if left >= len(frame_list) - 1:
+            out.append(frame_list[-1].copy())
+            continue
+        fraction = float(position - left)
+        if fraction <= 1e-12:
+            out.append(frame_list[left].copy())
+            continue
+        out.append(interpolate_pair(frame_list[left], frame_list[left + 1], fraction, model=model, scale=scale))
+    return out

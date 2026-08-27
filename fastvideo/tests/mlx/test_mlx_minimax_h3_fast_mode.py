@@ -1,0 +1,72 @@
+# SPDX-License-Identifier: Apache-2.0
+"""Contracts for MiniMax-H3 temporal fast mode on Apple Silicon."""
+
+from __future__ import annotations
+
+import numpy as np
+import pytest
+
+pytest.importorskip("mlx.core", reason="MLX is required for MiniMax H3 fast-mode tests")
+
+from fastvideo.mlx_runtime.minimax_h3 import (  # noqa: E402
+    audio_latent_num_frames,
+    build_packed_layout,
+    video_latent_num_frames,
+)
+from fastvideo.mlx_runtime.minimax_h3_pipeline import (  # noqa: E402
+    _center_crop_frames,
+    plan_fast_temporal,
+)
+from fastvideo.mlx_runtime import rife_interp  # noqa: E402
+
+
+def test_fast_plan_keeps_full_audio_and_reduces_only_video() -> None:
+    plan = plan_fast_temporal(124, factor=2)
+
+    assert plan.target_frames == 124
+    assert plan.source_frames == 73
+    assert plan.source_frames % 17 == 5
+    assert video_latent_num_frames(plan.source_frames) == 22
+    assert video_latent_num_frames(plan.target_frames) == 37
+    assert audio_latent_num_frames(plan.target_frames) == 207
+    assert plan.video_temporal_scale > 1.0
+
+
+def test_fast_layout_stretches_video_positions_without_changing_audio() -> None:
+    baseline = build_packed_layout(8, 22, 46, 80, 207)
+    fast = build_packed_layout(8, 22, 46, 80, 207, video_temporal_scale=1.7)
+
+    np.testing.assert_array_equal(fast.audio_indices, baseline.audio_indices)
+    np.testing.assert_array_equal(
+        fast.position_ids[fast.audio_indices],
+        baseline.position_ids[baseline.audio_indices],
+    )
+    baseline_video_time = baseline.position_ids[baseline.video_indices, 0] - 8.0
+    fast_video_time = fast.position_ids[fast.video_indices, 0] - 8.0
+    np.testing.assert_allclose(fast_video_time, baseline_video_time * 1.7)
+
+
+def test_rife_interpolates_to_exact_non_multiple_count(monkeypatch: pytest.MonkeyPatch) -> None:
+    source = [np.full((4, 6, 3), value, dtype=np.uint8) for value in (0, 100, 200)]
+    sentinel_model = object()
+
+    def fake_pair(left, right, timestep, *, model, scale=1.0):
+        assert model is sentinel_model
+        return np.rint(left * (1.0 - timestep) + right * timestep).astype(np.uint8)
+
+    monkeypatch.setattr(rife_interp, "interpolate_pair", fake_pair)
+    result = rife_interp.interpolate_to_frame_count(source, 6, model=sentinel_model)
+
+    assert len(result) == 6
+    np.testing.assert_array_equal(result[0], source[0])
+    np.testing.assert_array_equal(result[-1], source[-1])
+    assert [int(frame[0, 0, 0]) for frame in result] == [0, 40, 80, 120, 160, 200]
+
+
+def test_fast_mode_center_crops_internal_736p_canvas_to_720p() -> None:
+    frames = np.arange(2 * 736 * 1280 * 3, dtype=np.uint8).reshape(2, 736, 1280, 3)
+    cropped = _center_crop_frames(frames, 720, 1280)
+
+    assert cropped.shape == (2, 720, 1280, 3)
+    np.testing.assert_array_equal(cropped[:, 0], frames[:, 8])
+    np.testing.assert_array_equal(cropped[:, -1], frames[:, 727])
