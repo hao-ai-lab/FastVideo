@@ -36,6 +36,9 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
         "ff.fc_in",
         "ff.fc_out",
         "adaln_proj.linear",
+        # The final AdaLN projection. Published community adapters (larryvrh's Turbo)
+        # target it as `final_layer.adaln_proj.linear`.
+        "norm_out.linear",
     ]
 
     pipeline_config_cls: type[MiniMaxH3PipelineConfig] = MiniMaxH3PipelineConfig
