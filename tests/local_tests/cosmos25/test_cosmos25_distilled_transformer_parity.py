@@ -435,6 +435,14 @@ def test_distilled_student_forward_matches_official() -> None:
         handle.remove()
 
     _print_capture_drift(official_captures, fastvideo_captures)
+    for component in ("patch", "time_norm", "text"):
+        assert_close(fastvideo_captures[component], official_captures[component], atol=0, rtol=0)
+
+    _, _, first_block_relative_mean = _drift(
+        official_captures["block.0"],
+        fastvideo_captures["block.0"],
+    )
+    assert first_block_relative_mean < 0.001
 
     mean_abs, max_abs, relative_mean = _drift(official_output, fastvideo_output)
     print(
@@ -443,4 +451,8 @@ def test_distilled_student_forward_matches_official() -> None:
     )
 
     assert relative_mean < 0.05
-    assert_close(fastvideo_output, official_output, atol=0.1, rtol=0.1)
+    # The two implementations enter block 0 within 0.1%, then BF16 rounding
+    # accumulates through 28 residual blocks. As with FastVideo's real-weight
+    # FLUX DiT parity gate, aggregate drift carries the primary assertion and
+    # a loose absolute bound catches isolated runaway values.
+    assert_close(fastvideo_output, official_output, atol=0.5, rtol=0)
