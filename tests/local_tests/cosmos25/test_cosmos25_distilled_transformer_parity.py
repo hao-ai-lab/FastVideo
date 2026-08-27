@@ -6,6 +6,7 @@ from __future__ import annotations
 import gc
 import os
 import sys
+import types
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, TypeVar
@@ -70,6 +71,15 @@ def _official_model_class() -> type[torch.nn.Module]:
     root_string = str(root)
     if root_string not in sys.path:
         sys.path.insert(0, root_string)
+    # The published package root enforces installation of its full CUDA extra.
+    # Component parity only needs the checked-out Python modules, so install a
+    # namespace package that preserves normal submodule imports without running
+    # that unrelated environment guard.
+    if "cosmos_predict2" not in sys.modules:
+        package = types.ModuleType("cosmos_predict2")
+        package.__path__ = [str(root / "cosmos_predict2")]  # type: ignore[attr-defined]
+        package.__package__ = "cosmos_predict2"
+        sys.modules["cosmos_predict2"] = package
     try:
         from cosmos_predict2._src.predict2.networks.minimal_v1_lvg_dit import (
             MinimalV1LVGDiT,
