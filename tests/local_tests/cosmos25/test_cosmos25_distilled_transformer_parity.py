@@ -208,6 +208,57 @@ def _construct_bf16(factory: Callable[[], ModuleT]) -> ModuleT:
         torch.set_default_dtype(previous_dtype)
 
 
+def _register_forward_captures(
+    modules: Mapping[str, torch.nn.Module],
+) -> tuple[dict[str, torch.Tensor], list[Any]]:
+    captures: dict[str, torch.Tensor] = {}
+    handles: list[Any] = []
+
+    def make_hook(name: str):
+        def capture(_module, _inputs, output) -> None:
+            outputs = output if isinstance(output, tuple) else (output,)
+            for index, value in enumerate(outputs):
+                if isinstance(value, torch.Tensor):
+                    key = name if len(outputs) == 1 else f"{name}.{index}"
+                    captures[key] = value.detach().float().cpu()
+
+        return capture
+
+    for name, module in modules.items():
+        handles.append(module.register_forward_hook(make_hook(name)))
+    return captures, handles
+
+
+def _drift(reference: torch.Tensor, candidate: torch.Tensor) -> tuple[float, float, float]:
+    absolute = (candidate - reference).abs()
+    mean_abs = float(absolute.mean())
+    max_abs = float(absolute.max())
+    relative_mean = mean_abs / max(float(reference.abs().mean()), 1e-8)
+    return mean_abs, max_abs, relative_mean
+
+
+def _print_capture_drift(
+    reference_captures: Mapping[str, torch.Tensor],
+    fastvideo_captures: Mapping[str, torch.Tensor],
+) -> None:
+    comparable = ["patch", "time_norm", "text", *[f"block.{index}" for index in range(28)], "final"]
+    print("Cosmos25 distilled DiT intermediate drift:")
+    for name in comparable:
+        mean_abs, max_abs, relative_mean = _drift(reference_captures[name], fastvideo_captures[name])
+        print(f"  {name:>9}: mean_abs={mean_abs:.8f} max_abs={max_abs:.8f} relative_mean={relative_mean:.8f}")
+
+    reference_angles = reference_captures["rope_angles"][:, 0, 0, :]
+    for index, function in enumerate((torch.cos, torch.sin)):
+        mean_abs, max_abs, relative_mean = _drift(
+            function(reference_angles),
+            fastvideo_captures[f"rope.{index}"],
+        )
+        print(
+            f"  rope.{index:>4}: mean_abs={mean_abs:.8f} "
+            f"max_abs={max_abs:.8f} relative_mean={relative_mean:.8f}"
+        )
+
+
 def _load_official_model(student: Mapping[str, torch.Tensor], device: torch.device):
     model_class = _official_model_class()
     model = _construct_bf16(
@@ -321,6 +372,15 @@ def test_distilled_student_forward_matches_official() -> None:
     inputs = _inputs()
 
     official = _load_official_model(student, device)
+    official_modules = {
+        "patch": official.x_embedder,
+        "rope_angles": official.pos_embedder,
+        "time_norm": official.t_embedding_norm,
+        "text": official.crossattn_proj,
+        **{f"block.{index}": block for index, block in enumerate(official.blocks)},
+        "final": official.final_layer,
+    }
+    official_captures, official_handles = _register_forward_captures(official_modules)
     from cosmos_predict2._src.predict2.conditioner import DataType
 
     with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
@@ -337,11 +397,22 @@ def test_distilled_student_forward_matches_official() -> None:
             .float()
             .cpu()
         )
+    for handle in official_handles:
+        handle.remove()
     del official
     gc.collect()
     torch.cuda.empty_cache()
 
     fastvideo = _load_fastvideo_model(student, device)
+    fastvideo_modules = {
+        "patch": fastvideo.patch_embed,
+        "rope": fastvideo.rope,
+        "time_norm": fastvideo.time_embed.norm,
+        "text": fastvideo.crossattn_proj,
+        **{f"block.{index}": block for index, block in enumerate(fastvideo.transformer_blocks)},
+        "final": fastvideo.final_layer,
+    }
+    fastvideo_captures, fastvideo_handles = _register_forward_captures(fastvideo_modules)
     forward_batch = ForwardBatch(data_type="dummy")
     with (
         torch.inference_mode(),
@@ -360,12 +431,12 @@ def test_distilled_student_forward_matches_official() -> None:
             .float()
             .cpu()
         )
+    for handle in fastvideo_handles:
+        handle.remove()
 
-    absolute = (fastvideo_output - official_output).abs()
-    mean_abs = float(absolute.mean())
-    max_abs = float(absolute.max())
-    reference_abs_mean = float(official_output.abs().mean())
-    relative_mean = mean_abs / max(reference_abs_mean, 1e-8)
+    _print_capture_drift(official_captures, fastvideo_captures)
+
+    mean_abs, max_abs, relative_mean = _drift(official_output, fastvideo_output)
     print(
         "Cosmos25 distilled DiT parity: "
         f"max_abs={max_abs:.8f}, mean_abs={mean_abs:.8f}, relative_mean={relative_mean:.8f}"
