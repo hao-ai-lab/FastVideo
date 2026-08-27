@@ -34,7 +34,8 @@ def test_model_family_change_selects_focused_golden_and_ssim():
     assert plan.encoded_lanes() == ",golden-gate,ssim,"
     assert plan.encoded_golden_tests() == "test_wan_t2v.py"
     assert plan.encoded_ssim_tests() == (
-        "test_causal_similarity.py,test_wan_i2v_similarity.py,test_wan_t2v_similarity.py")
+        "test_causal_similarity.py,test_wan_i2v_similarity.py,test_wan_t2v_similarity.py,"
+        "test_wan_ti2v_similarity.py")
 
 
 def test_flux2_change_does_not_pull_unrelated_flux1_quality_tests():
