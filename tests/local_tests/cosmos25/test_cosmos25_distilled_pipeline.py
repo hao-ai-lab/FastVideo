@@ -116,8 +116,14 @@ def test_distilled_denoising_uses_per_frame_timesteps_and_official_rollout(
     assert len(transformer.calls) == 2
     assert transformer.calls[0]["timestep"].shape == (1, 2)
     assert_close(transformer.calls[0]["timestep"].float(), torch.ones(1, 2))
-    assert_close(transformer.calls[0]["condition_mask"], torch.zeros(1, 1, 2, 3, 4))
-    assert_close(transformer.calls[0]["padding_mask"], torch.ones(1, 1, 3, 4))
+    assert_close(
+        transformer.calls[0]["condition_mask"],
+        torch.zeros(1, 1, 2, 3, 4, dtype=torch.bfloat16),
+    )
+    assert_close(
+        transformer.calls[0]["padding_mask"],
+        torch.ones(1, 1, 3, 4, dtype=torch.bfloat16),
+    )
 
 
 @pytest.mark.parametrize("field", ["image_path", "pil_image", "preprocessed_image", "video_path", "video_latent"])
