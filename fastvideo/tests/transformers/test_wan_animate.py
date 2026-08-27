@@ -294,8 +294,19 @@ def _init_params(module: torch.nn.Module) -> None:
     # FastVideo's linear layers allocate weights with torch.empty (values
     # normally arrive from a checkpoint), so stand in for loaded weights or
     # forwards read uninitialised memory: nondeterministic outputs, maybe NaN.
-    for p in module.parameters():
-        torch.nn.init.normal_(p, std=0.02)
+    # Scaling matters: a flat std=0.02 attenuates the face signal into
+    # numerical dust over its ~15-layer path (verified on GPU: face influence
+    # became bitwise invisible at the output). Weights get unit gain per layer;
+    # the StyleGAN2-style motion-encoder layers divide by sqrt(fan_in) at
+    # runtime and therefore expect unit-scale weights.
+    for name, p in module.named_parameters():
+        if p.dim() <= 1:
+            torch.nn.init.normal_(p, std=0.02)
+        elif "motion_encoder" in name:
+            torch.nn.init.normal_(p, std=1.0)
+        else:
+            fan_in = p.shape[1] * (p[0][0].numel() if p.dim() > 2 else 1)
+            torch.nn.init.normal_(p, std=fan_in**-0.5)
 
 
 def test_face_attention_confines_each_frame_to_its_own_tokens() -> None:
@@ -560,12 +571,10 @@ def test_every_checkpoint_tensor_has_a_home_in_the_model() -> None:
     checkpoint must land on a model parameter with the right shape, and every
     model parameter must be fed. Costs no GPU and no memory.
 
-    Known suspect if this fails on `missing`: blocks.N.attn2.norm_added_q.
-    FastVideo's WanI2VCrossAttention allocates it (dead weight, never used in
-    forward). Diffusers' Animate model does not create it but marks it
-    ignore-on-load-unexpected -- which implies the converted checkpoint ships
-    it, in which case it loads into our dead weight harmlessly. If it is
-    absent instead, add a one-line exclusion here.
+    Settled on the real weights: the checkpoint ships no attn2.norm_added_q
+    (the dead weight base Wan-I2V checkpoints carry), so the Animate model
+    drops that parameter at construction -- both directions of this check
+    must therefore come out empty.
     """
     shapes = _checkpoint_tensor_shapes(os.path.join(_animate_model_path(), "transformer"))
     assert shapes, "no tensors found in checkpoint"

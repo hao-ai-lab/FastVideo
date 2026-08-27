@@ -95,6 +95,15 @@ class WanAnimateTransformer3DModel(WanTransformer3DModel):
             for _ in range(arch.num_layers // arch.inject_face_latents_blocks)
         ])
 
+        # The Animate checkpoint ships no attn2.norm_added_q (verified on the
+        # real weights: 40 missing keys under strict load). FastVideo's
+        # WanI2VCrossAttention allocates it only because base Wan-I2V
+        # checkpoints ship it; it is never used in forward. Drop it so the
+        # strict load has neither missing nor unexpected keys.
+        for block in self.blocks:
+            if hasattr(block.attn2, "norm_added_q"):
+                block.attn2.norm_added_q = nn.Identity()
+
     def _get_parameter_dtype(self, name: str, default_dtype: torch.dtype) -> torch.dtype:
         """Diffusers pins this tensor fp32 (_keep_in_fp32_modules); match it.
 
