@@ -8,6 +8,7 @@ import os
 import sys
 import types
 from collections.abc import Callable, Mapping
+from enum import Enum
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -80,6 +81,25 @@ def _official_model_class() -> type[torch.nn.Module]:
         package.__path__ = [str(root / "cosmos_predict2")]  # type: ignore[attr-defined]
         package.__package__ = "cosmos_predict2"
         sys.modules["cosmos_predict2"] = package
+
+    # The DiT only uses DataType for an enum type check and the VIDEO value.
+    # Importing the published conditioner solely for that enum pulls in the
+    # training/configuration stack (including iopath), which is unrelated to
+    # transformer parity and is not a FastVideo runtime dependency.
+    conditioner_name = "cosmos_predict2._src.predict2.conditioner"
+    if conditioner_name not in sys.modules:
+        conditioner = types.ModuleType(conditioner_name)
+
+        class DataType(str, Enum):
+            IMAGE = "image"
+            VIDEO = "video"
+            MIX = "mix"
+
+            def __str__(self) -> str:
+                return self.value
+
+        conditioner.__dict__["DataType"] = DataType
+        sys.modules[conditioner_name] = conditioner
     try:
         from cosmos_predict2._src.predict2.networks.minimal_v1_lvg_dit import (
             MinimalV1LVGDiT,
