@@ -23,6 +23,7 @@ from safetensors import safe_open
 from safetensors.torch import save_file
 
 STATE_DICT_KEYS = ("state_dict", "model", "ema", "ema_model", "module")
+STUDENT_SKIP_PREFIXES = ("net.accum_",)
 REQUIRED_BASE_PATHS = (
     "model_index.json",
     "transformer/config.json",
@@ -73,7 +74,12 @@ def extract_student_state_dict(checkpoint: object) -> dict[str, torch.Tensor]:
     student = {
         key: tensor.detach().to(device="cpu", dtype=torch.bfloat16).contiguous()
         for key, tensor in state_dict.items()
-        if isinstance(key, str) and key.startswith("net.") and torch.is_tensor(tensor)
+        if (
+            isinstance(key, str)
+            and key.startswith("net.")
+            and not key.startswith(STUDENT_SKIP_PREFIXES)
+            and torch.is_tensor(tensor)
+        )
     }
     if not student:
         raise ConversionError("The resolved checkpoint contains no 'net.*' tensors")

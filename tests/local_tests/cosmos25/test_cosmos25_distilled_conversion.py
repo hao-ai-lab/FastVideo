@@ -44,6 +44,7 @@ def test_extracts_only_native_student_tensors(nested_key: str | None) -> None:
     state = {
         "net.layer.weight": torch.ones(2, 3),
         "net.layer.bias": torch.zeros(2),
+        "net.accum_iteration": torch.tensor(12),
         "net_teacher.layer.weight": torch.full((2, 3), 2.0),
         "optimizer.step": torch.tensor(4),
         "metadata": "ignored",
