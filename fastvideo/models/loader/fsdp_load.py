@@ -57,13 +57,20 @@ def _maybe_quantize_model(model: nn.Module) -> None:
     from fastvideo.layers.quantization.nvfp4_qat_train_config import (
         NVFP4QATTrainQuantizeMethod, )
     from fastvideo.layers.quantization.fp8_config import (
+        FP8Config,
         FP8QuantizeMethod,
         convert_model_to_fp8,
     )
 
     qat_train_attached = 0
     qat_train_skipped = 0
-    for mod in model.modules():
+    # Reaching the end of this loop means no conversion ran. If FP8 was
+    # requested and nothing matched, that is 0% coverage, which the converter
+    # cannot report because it is never called. Silence there is exactly the
+    # failure that hid MiniMax H3's unquantized feed-forward.
+    fp8_requested = 0
+    fp8_unmatched_names: set[str] = set()
+    for name, mod in model.named_modules():
         qm = getattr(mod, "quant_method", None)
         if isinstance(qm, NVFP4QuantizeMethod):
             logger.info("Converting loaded model weights for NVFP4 linear layers")
@@ -84,6 +91,14 @@ def _maybe_quantize_model(model: nn.Module) -> None:
             qat_train_attached += 1
         elif isinstance(mod, LinearBase):
             qat_train_skipped += 1
+            if isinstance(getattr(mod, "quant_config", None), FP8Config):
+                fp8_requested += 1
+                fp8_unmatched_names.add(".".join(name.split(".")[-2:]))
+    if fp8_requested:
+        logger.warning(
+            "FP8 was requested for %d linear layers but none of them matched a "
+            "_FP8_SUFFIXES entry, so the model is running unquantized. Names "
+            "seen: %s", fp8_requested, ", ".join(sorted(fp8_unmatched_names)))
     if qat_train_attached:
         logger.info("NVFP4 QAT: attached %d linears (%d skipped by prefix filter)", qat_train_attached,
                     qat_train_skipped)

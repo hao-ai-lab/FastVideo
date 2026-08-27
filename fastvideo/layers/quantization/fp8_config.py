@@ -1,7 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """Generic FP8 quantization backed by ``torch._scaled_mm``.
 
-Matches linear layers by suffix (``to_q/k/v/to_out``, ``ffn.fc_in/fc_out``).
+Matches linear layers by substring (``to_q/k/v/to_out``, ``ffn.fc_in/fc_out``)
+or by true suffix (``.ff.fc_in/fc_out``). Adding a model whose linears use different names
+requires a new entry in ``_FP8_SUFFIXES``; the conversion log line reports
+how many parameters were left unquantized so a miss is visible.
 Supports per-tensor (default, fast) and per-channel (higher accuracy) granularity.
 Falls back to bf16 dequant on GPUs older than sm89.
 """
@@ -41,6 +44,21 @@ _FP8_SUFFIXES = (
     "cross_attention.out_layer",
     "feed_forward.mlp.fc_in",
     "feed_forward.mlp.fc_out",
+)
+
+# MiniMax-H3 mounts its feed-forward on ``.ff``, not ``.ffn``, so the entries
+# above never matched it and every H3 FFN stayed in bf16.
+#
+# These are matched with ``endswith`` rather than the substring rule used for
+# the tuple above. ``DiTConfig.prefix`` is settable from the CLI, so a root
+# prefix containing ".ff.fc_in" would make a substring rule match every
+# descendant, including ``adaln_proj.linear`` whose forward reads
+# ``self.linear.weight.dtype`` after the converter has removed that weight.
+# The tuple above keeps substring matching because it relies on it: "to_q"
+# is also how Kandinsky5's "to_query" is reached.
+_FP8_EXACT_SUFFIXES = (
+    ".ff.fc_in",
+    ".ff.fc_out",
 )
 
 
@@ -203,24 +221,56 @@ class FP8Config(QuantizationConfig):
     def get_quant_method(self, layer: torch.nn.Module, prefix: str):
         from fastvideo.layers.linear import LinearBase
 
-        if isinstance(layer, LinearBase) and any(s in prefix for s in _FP8_SUFFIXES):
+        if not isinstance(layer, LinearBase):
+            return None
+        if any(s in prefix for s in _FP8_SUFFIXES) or prefix.endswith(_FP8_EXACT_SUFFIXES):
             return FP8QuantizeMethod(granularity=self.granularity)
         return None
 
 
 def convert_model_to_fp8(model: torch.nn.Module) -> None:
-    """Quantize all FP8-tagged linear layers in-place after weights are loaded."""
+    """Quantize all FP8-tagged linear layers in-place after weights are loaded.
+
+    A layer that was handed an ``FP8Config`` but matched no entry keeps its
+    loaded dtype. That is intended for embedders and projections, but it also
+    silently swallows a whole feed-forward stack when a model names its modules
+    differently, so the totals and the unmatched names are logged. Layers that
+    were never handed an ``FP8Config`` are counted separately: they were never
+    candidates, and reporting them as allowlist misses would bury the ones that
+    are.
+    """
     import gc
     from torch.distributed.tensor import DTensor  # type: ignore
 
+    from fastvideo.layers.linear import LinearBase
+
+    quantized_layers = unmatched_layers = untagged_layers = 0
+    quantized_params = unmatched_params = 0
+    unmatched_names: set[str] = set()
+
     with torch.no_grad():
-        for mod in model.modules():
+        # ``named_modules`` rather than ``modules``: a layer built without a
+        # ``prefix`` carries an empty one, and the true dotted path is what a
+        # new ``_FP8_SUFFIXES`` entry would have to spell.
+        for name, mod in model.named_modules():
             qm = getattr(mod, "quant_method", None)
             if not isinstance(qm, FP8QuantizeMethod):
+                if isinstance(mod, LinearBase) and getattr(mod, "weight", None) is not None:
+                    # A linear never handed an FP8Config was never a candidate.
+                    # Reporting it as an allowlist miss would bury the layers
+                    # that really are one.
+                    if isinstance(getattr(mod, "quant_config", None), FP8Config):
+                        unmatched_layers += 1
+                        unmatched_params += mod.weight.numel()
+                        unmatched_names.add(".".join(name.split(".")[-2:]))
+                    else:
+                        untagged_layers += 1
                 continue
             weight = getattr(mod, "weight", None)
             if weight is None:
                 continue
+            quantized_layers += 1
+            quantized_params += weight.numel()
             weight_local = weight.to_local() if isinstance(weight, DTensor) else weight  # type: ignore[arg-type]
             if getattr(qm, "granularity", "tensor") == "channel":
                 w_absmax = weight_local.detach().abs().amax(dim=1).nan_to_num().float()
@@ -237,6 +287,13 @@ def convert_model_to_fp8(model: torch.nn.Module) -> None:
             if removed_weight is not None:
                 removed_weight.grad = None
             del removed_weight, weight, weight_local, w_absmax, w_scale, w_fp8
+
+    logger.info(
+        "FP8: quantized %d linear layers holding %.2fB parameters; left %d "
+        "requested linear layers holding %.2fB parameters in their loaded dtype "
+        "because their names match no _FP8_SUFFIXES entry: %s; %d further linear "
+        "layers were never handed an FP8Config", quantized_layers, quantized_params / 1e9, unmatched_layers,
+        unmatched_params / 1e9, ", ".join(sorted(unmatched_names)) or "none", untagged_layers)
 
     gc.collect()
     torch.cuda.empty_cache()
