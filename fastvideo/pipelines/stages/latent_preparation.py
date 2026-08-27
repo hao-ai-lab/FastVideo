@@ -658,6 +658,67 @@ class Cosmos25T2WLatentPreparationStage(PipelineStage):
         return Cosmos25LatentPreparationStage.verify_output(self, batch, fastvideo_args)  # type: ignore[misc]
 
 
+class Cosmos25DistilledT2WLatentPreparationStage(Cosmos25T2WLatentPreparationStage):
+    """Official FP32 initial-noise preparation for the distilled T2W sampler."""
+
+    def forward(
+        self,
+        batch: ForwardBatch,
+        fastvideo_args: FastVideoArgs,
+    ) -> ForwardBatch:
+        if isinstance(batch.prompt, list):
+            batch_size = len(batch.prompt)
+        elif batch.prompt is not None:
+            batch_size = 1
+        else:
+            batch_size = batch.prompt_embeds[0].shape[0]
+        batch_size *= batch.num_videos_per_prompt
+
+        device = get_local_torch_device()
+        height = batch.height
+        width = batch.width
+        if height is None or width is None:
+            raise ValueError("Height and width must be provided")
+
+        num_latent_frames = (batch.num_frames - 1) // 4 + 1
+        shape = (
+            batch_size,
+            self.transformer.config.in_channels,
+            num_latent_frames,
+            height // 8,
+            width // 8,
+        )
+
+        if batch.latents is None:
+            # NVIDIA's released distilled inference creates FP32 noise on the
+            # execution device, then carries the sampler state in FP64.
+            seeds = batch.seeds or [int(batch.seed if batch.seed is not None else 0) + i for i in range(batch_size)]
+            if len(seeds) != batch_size:
+                seeds = [int(batch.seed if batch.seed is not None else 0) + i for i in range(batch_size)]
+            samples = []
+            for seed in seeds:
+                generator = torch.Generator(device=device).manual_seed(seed)
+                samples.append(torch.randn(
+                    shape[1:],
+                    generator=generator,
+                    device=device,
+                    dtype=torch.float32,
+                ))
+            latents = torch.stack(samples)
+        else:
+            latents = batch.latents.to(device=device, dtype=torch.float32)
+
+        batch.latents = latents
+        batch.raw_latent_shape = latents.shape
+        batch.conditioning_latents = None
+        batch.cond_indicator = None
+        batch.uncond_indicator = None
+        batch.cond_mask = None
+        batch.uncond_mask = None
+        batch.padding_mask = None
+        return batch
+
+
 class Cosmos25V2WLatentPreparationStage(Cosmos25LatentPreparationStage):
     """Cosmos 2.5 V2W/I2W latent preparation stage (conditioning-aware)."""
 
