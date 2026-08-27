@@ -22,6 +22,7 @@ from fastvideo.layers.lora.linear import (
     replace_submodule,
 )
 from fastvideo.logger import init_logger
+from fastvideo.models.loader.lora_patch import normalize_lora_key
 from fastvideo.models.loader.utils import get_param_names_mapping
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.utils import maybe_download_lora
@@ -145,7 +146,11 @@ class LoRAPipeline(ComposedPipelineBase):
                 transformer_module,
         ) in self.trainable_transformer_modules.items():
             self.exclude_lora_layers[transformer_name] = (transformer_module.config.arch_config.exclude_lora_layers)
-        self.lora_target_modules = self.fastvideo_args.lora_target_modules
+        # Only override the pipeline class's own default when the caller actually set
+        # one. Assigning unconditionally erases per-model defaults, and a model that
+        # declares one usually does so because wrapping every linear breaks its forward.
+        if self.fastvideo_args.lora_target_modules is not None:
+            self.lora_target_modules = self.fastvideo_args.lora_target_modules
         self.lora_path = self.fastvideo_args.lora_path
         self.lora_nickname = self.fastvideo_args.lora_nickname
         self.training_mode = self.fastvideo_args.training_mode
@@ -324,7 +329,10 @@ class LoRAPipeline(ComposedPipelineBase):
             to_merge_params: defaultdict[Hashable, dict[Any, Any]] = (defaultdict(dict))
             for name, weight in lora_state_dict.items():
                 # Extract weights (lora_A, lora_B, and lora_alpha)
-                name = name.replace("diffusion_model.", "")
+                normalized = normalize_lora_key(name)
+                if normalized is None:
+                    continue
+                name = normalized
                 name = name.replace(".weight", "")
 
                 if "lora_alpha" in name:
@@ -369,6 +377,7 @@ class LoRAPipeline(ComposedPipelineBase):
 
         # Merge the new adapter
         adapted_count = 0
+        consumed: set[str] = set()
         for (
                 transformer_name,
                 transformer_lora_layers,
@@ -407,6 +416,7 @@ class LoRAPipeline(ComposedPipelineBase):
                                 )
                                 raise e
                             adapted_count += 1
+                            consumed.update((lora_A_name, lora_B_name, lora_alpha_name))
                         else:
                             if rank == 0:
                                 logger.warning(
@@ -421,6 +431,17 @@ class LoRAPipeline(ComposedPipelineBase):
             lora_path,
             adapted_count,
         )
+        # The loop above reports model layers the adapter has nothing for. This is the
+        # other direction -- adapter weights that reached no layer -- which is the
+        # quieter failure: the adapter loads, generation runs, and the result is simply
+        # a partially-applied model with nothing in the log to say so.
+        if rank == 0:
+            unmatched = sorted(set(self.lora_adapters[lora_nickname]) - consumed)
+            for target in unmatched:
+                logger.warning("LoRA key not loaded: %s (adapter %s has no matching layer in the model)", target,
+                               lora_path)
+            if unmatched:
+                logger.warning("LoRA adapter %s: %d weights did not reach a layer", lora_path, len(unmatched))
 
     def merge_lora_weights(self) -> None:
         for (
