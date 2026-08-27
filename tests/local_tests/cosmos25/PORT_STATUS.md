@@ -39,7 +39,7 @@
 | scheduler unit | `pytest fastvideo/tests/schedulers/test_cosmos25_distilled_scheduler.py -q` | 7 passed | CPU-only; includes registry resolution; 2026-08-27 |
 | official scheduler | `COSMOS25_OFFICIAL_REF_DIR=/path/to/Cosmos-Predict2.5 pytest tests/local_tests/cosmos25/test_cosmos25_distilled_scheduler_parity.py -v -s` | 2 passed, non-skip | CPU-only; pinned source; 2026-08-27 |
 | conversion contracts | `pytest tests/local_tests/cosmos25/test_cosmos25_distilled_conversion.py -q` | 7 passed | Synthetic checkpoints/layout; 2026-08-27 |
-| student DiT | not yet created | not run | requires CUDA and released weights |
+| student DiT | `COSMOS25_OFFICIAL_REF_DIR=/path/to/Cosmos-Predict2.5 COSMOS25_DISTILLED_CHECKPOINT=/path/to/distilled.pt pytest tests/local_tests/cosmos25/test_cosmos25_distilled_transformer_parity.py -v -s` | scaffold pending Spark run | requires CUDA, official source dependencies, and released weights |
 | pipeline | not yet created | not run | forbidden until component parity passes |
 
 ## Open Questions
