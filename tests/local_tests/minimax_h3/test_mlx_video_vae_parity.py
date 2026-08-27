@@ -141,6 +141,15 @@ def test_rotary_embedding_matches_torch() -> None:
     _stats("rope.sin", _to_np(sin_m), sin_t, atol=2e-5, rtol=2e-5)
 
 
+def test_reflect_padding_matches_numpy() -> None:
+    from fastvideo.mlx_runtime.minimax_h3_video_vae import _reflect_pad_axis
+
+    values = np.arange(12, dtype=np.float32).reshape(1, 3, 4, 1)
+    actual = np.asarray(_reflect_pad_axis(mx.array(values), axis=2, left=2, right=1))
+    expected = np.pad(values, ((0, 0), (0, 0), (2, 1), (0, 0)), mode="reflect")
+    np.testing.assert_array_equal(actual, expected)
+
+
 def test_encoder_moments_match_torch() -> None:
     model = build_torch_model()
     vae = build_mlx_model(model)
@@ -188,7 +197,8 @@ def test_chunked_decode_matches_torch() -> None:
     model = build_torch_model()
     vae = build_mlx_model(model)
     cfg = vae.config
-    num_tokens = 2 * cfg.tokens_chunk_size - token_pad(cfg)  # forces padding branch
+    # decode() adds token_drop before chunking, so this hits the padding branch.
+    num_tokens = 2 * cfg.tokens_chunk_size
     rng = np.random.default_rng(SEED + 4)
     z_np = rng.standard_normal((1, TINY_ARCH["latent_channels"], num_tokens, 4, 4)).astype(np.float32)
     with torch.no_grad():
@@ -196,10 +206,6 @@ def test_chunked_decode_matches_torch() -> None:
     out = vae.decode(mx.array(z_np))
     assert out.shape == ref.shape
     _stats("decoder.chunked", _to_np(out), ref, atol=5e-4, rtol=5e-4)
-
-
-def token_pad(vae: MLXMiniMaxH3VideoVAE) -> int:
-    return 0
 
 
 def test_tiled_decode_matches_untiled() -> None:

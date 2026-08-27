@@ -148,6 +148,20 @@ def _cleanup_mlx() -> None:
         clear()
 
 
+def _default_metal_wired_limit_gib(mx) -> float:
+    """Keep the default below both physical memory and the tested 30 GiB cap."""
+    metal = getattr(mx, "metal", None)
+    if metal is None:
+        return 30.0
+    try:
+        total_bytes = int(metal.device_info().get("memory_size", 0))
+    except (AttributeError, TypeError, ValueError):
+        return 30.0
+    if total_bytes <= 0:
+        return 30.0
+    return min(30.0, 0.84 * total_bytes / 2**30)
+
+
 MINIMAX_H3_PROMPT_CACHE_VERSION = "v2-attention-layout"
 
 
@@ -209,7 +223,7 @@ class MiniMaxH3MLXPipeline:
         prompt_cache_dir: str | Path | None = None,
         conditioner_dir: str | Path | None = None,
         tokenizer_dir: str | Path | None = None,
-        metal_wired_limit_gib: float = 30.0,
+        metal_wired_limit_gib: float | None = None,
     ) -> None:
         import mlx.core as mx
 
@@ -219,6 +233,8 @@ class MiniMaxH3MLXPipeline:
         if set_limit is not None:
             # Keep large resident models inside a predictable wired budget.
             try:
+                if metal_wired_limit_gib is None:
+                    metal_wired_limit_gib = _default_metal_wired_limit_gib(mx)
                 set_limit(int(metal_wired_limit_gib * 2**30))
             except Exception as error:  # noqa: BLE001 - best effort on older MLX
                 logger.info("Could not raise the Metal wired limit: %s", error)
@@ -229,6 +245,13 @@ class MiniMaxH3MLXPipeline:
         self.conditioner_dir = Path(conditioner_dir) if conditioner_dir else self.model_root / "text_encoder"
         self.tokenizer_dir = Path(tokenizer_dir) if tokenizer_dir else self.model_root / "tokenizer"
         self._validate_inputs_before_loading()
+        manifest = json.loads((self.dit_checkpoint / H3_MANIFEST_FILENAME).read_text())
+        dit_config = manifest["config"]
+        patch_size = dit_config["patch_size"]
+        if len(patch_size) != 3:
+            raise ValueError(f"H3 DiT patch_size must have three dimensions, got {patch_size}.")
+        self._dit_patch_size = (int(patch_size[0]), int(patch_size[1]), int(patch_size[2]))
+        self._dit_in_channels = int(dit_config["in_channels"])
 
     # -- input validation (before anything heavy loads) -------------------
 
@@ -238,9 +261,9 @@ class MiniMaxH3MLXPipeline:
             missing.append(str(self.dit_checkpoint))
         vae_dir = self.model_root / "vae"
         audio_dir = self.model_root / "audio_vae"
-        if not any(vae_dir.glob("*.safetensors")) if vae_dir.exists() else True:
+        if not (vae_dir.exists() and any(vae_dir.glob("*.safetensors"))):
             missing.append(str(vae_dir))
-        if not any(audio_dir.glob("*.safetensors")) if audio_dir.exists() else True:
+        if not (audio_dir.exists() and any(audio_dir.glob("*.safetensors"))):
             missing.append(str(audio_dir))
         if missing:
             raise FileNotFoundError(f"Missing required H3 components: {missing}")
@@ -292,7 +315,13 @@ class MiniMaxH3MLXPipeline:
         _cleanup_mlx()
         if cache_key is not None:
             cache_key.parent.mkdir(parents=True, exist_ok=True)
-            np.savez(cache_key, hidden_states=hidden, token_tags=tags)
+            tmp_cache = cache_key.with_name(f".{cache_key.name}.tmp")
+            try:
+                with tmp_cache.open("wb") as handle:
+                    np.savez(handle, hidden_states=hidden, token_tags=tags)
+                tmp_cache.replace(cache_key)
+            finally:
+                tmp_cache.unlink(missing_ok=True)
         return hidden, tags
 
     def load_prompt_cache(self, path: str | Path) -> tuple[np.ndarray, np.ndarray]:
@@ -330,16 +359,6 @@ class MiniMaxH3MLXPipeline:
 
         geometry = self.resolve_geometry(height, width, num_frames, enforce_duration=audio_num_frames is None)
         audio_frames = geometry["num_frames"] if audio_num_frames is None else align_num_frames(audio_num_frames)
-        layout = build_packed_layout(
-            len(token_tags),
-            geometry["latent_frame_count"],
-            geometry["latent_height"],
-            geometry["latent_width"],
-            audio_latent_num_frames(audio_frames),
-            patch_size=(1, 2, 2),
-            text_token_tags=np.asarray(token_tags, dtype=np.int64),
-            video_temporal_scale=video_temporal_scale,
-        )
 
         owned_dit = dit is None
         if owned_dit:
@@ -347,6 +366,17 @@ class MiniMaxH3MLXPipeline:
             t0 = time.perf_counter()
             dit = load_mlx_h3_checkpoint(self.dit_checkpoint)
             logger.info("Loaded MLX H3 DiT from %s in %.1fs", self.dit_checkpoint, time.perf_counter() - t0)
+
+        layout = build_packed_layout(
+            len(token_tags),
+            geometry["latent_frame_count"],
+            geometry["latent_height"],
+            geometry["latent_width"],
+            audio_latent_num_frames(audio_frames),
+            patch_size=dit.patch_size,
+            text_token_tags=np.asarray(token_tags, dtype=np.int64),
+            video_temporal_scale=video_temporal_scale,
+        )
 
         video_scheduler = MiniMaxH3SchedulerState.create(MINIMAX_H3_VIDEO_SHIFT, num_steps)
         audio_scheduler = MiniMaxH3SchedulerState.create(MINIMAX_H3_AUDIO_SHIFT, num_steps)
@@ -366,8 +396,8 @@ class MiniMaxH3MLXPipeline:
         video_key, audio_key = mx.random.split(mx.random.key(seed))
         target_video_rows = int(layout.video_indices.shape[0] - layout.num_condition_video_rows)
         target_audio_rows = int(layout.audio_indices.shape[0] - layout.num_condition_audio_rows)
-        x_v = mx.random.normal((target_video_rows, 96), key=video_key)
-        x_a = mx.random.normal((target_audio_rows, 32), key=audio_key)
+        x_v = mx.random.normal((target_video_rows, dit.patch_dim), key=video_key)
+        x_a = mx.random.normal((target_audio_rows, dit.audio_in_channels), key=audio_key)
         text = mx.array(text_rows.astype(np.float32))
 
         for step_index in range(num_steps):
@@ -417,15 +447,24 @@ class MiniMaxH3MLXPipeline:
         from fastvideo.mlx_runtime.minimax_h3_video_vae import mlx_h3_video_vae_from_dir
 
         geometry = self.resolve_geometry(height, width, num_frames, enforce_duration=False)
+        vae = mlx_h3_video_vae_from_dir(self.model_root / "vae", include_encoder=False, storage_dtype=self.vae_dtype)
+        expected_height = height // vae.spatial_compression_ratio
+        expected_width = width // vae.spatial_compression_ratio
+        if (geometry["latent_height"], geometry["latent_width"]) != (expected_height, expected_width):
+            raise RuntimeError("H3 pipeline/VAE spatial compression mismatch: "
+                               f"pipeline={(geometry['latent_height'], geometry['latent_width'])}, "
+                               f"VAE={(expected_height, expected_width)}.")
+        if vae.latent_channels != self._dit_in_channels:
+            raise RuntimeError(
+                f"H3 DiT/VAE latent-channel mismatch: DiT={self._dit_in_channels}, VAE={vae.latent_channels}.")
         latents = unpatchify_video_tokens(
             video_rows,
             geometry["latent_frame_count"],
             geometry["latent_height"],
             geometry["latent_width"],
-            24,
-            (1, 2, 2),
+            vae.latent_channels,
+            self._dit_patch_size,
         )
-        vae = mlx_h3_video_vae_from_dir(self.model_root / "vae", include_encoder=False, storage_dtype=self.vae_dtype)
         z = mx.array(latents)
         z = vae.denormalize_latents(z)
         decoded = vae.decode(z,
@@ -479,56 +518,59 @@ class MiniMaxH3MLXPipeline:
         pcm = (np.clip(waveform.T, -1.0, 1.0) * 32767.0).astype("<i2")  # (S, 2)
         import wave
 
-        with wave.open(str(tmp_audio), "wb") as handle:
-            handle.setnchannels(2)
-            handle.setsampwidth(2)
-            handle.setframerate(sample_rate)
-            handle.writeframes(pcm.tobytes())
+        try:
+            with wave.open(str(tmp_audio), "wb") as handle:
+                handle.setnchannels(2)
+                handle.setsampwidth(2)
+                handle.setframerate(sample_rate)
+                handle.writeframes(pcm.tobytes())
 
-        height, width = frames.shape[1:3]
-        ffmpeg = shutil.which("ffmpeg")
-        if ffmpeg is None:
-            raise RuntimeError("ffmpeg is required for MP4 muxing.")
-        subprocess.run(
-            [
-                ffmpeg,
-                "-y",
-                "-loglevel",
-                "error",
-                "-f",
-                "rawvideo",
-                "-pix_fmt",
-                "rgb24",
-                "-s",
-                f"{width}x{height}",
-                "-r",
-                str(fps),
-                "-i",
-                "-",
-                "-i",
-                str(tmp_audio),
-                "-c:v",
-                "libx264",
-                "-preset",
-                "medium",
-                "-crf",
-                "18",
-                "-pix_fmt",
-                "yuv420p",
-                "-c:a",
-                "aac",
-                "-b:a",
-                "192k",
-                "-shortest",
-                "-movflags",
-                "+faststart",
-                str(tmp_video),
-            ],
-            input=frames.tobytes(),
-            check=True,
-        )
-        tmp_audio.unlink(missing_ok=True)
-        tmp_video.replace(output_path)
+            height, width = frames.shape[1:3]
+            ffmpeg = shutil.which("ffmpeg")
+            if ffmpeg is None:
+                raise RuntimeError("ffmpeg is required for MP4 muxing.")
+            subprocess.run(
+                [
+                    ffmpeg,
+                    "-y",
+                    "-loglevel",
+                    "error",
+                    "-f",
+                    "rawvideo",
+                    "-pix_fmt",
+                    "rgb24",
+                    "-s",
+                    f"{width}x{height}",
+                    "-r",
+                    str(fps),
+                    "-i",
+                    "-",
+                    "-i",
+                    str(tmp_audio),
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "medium",
+                    "-crf",
+                    "18",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-c:a",
+                    "aac",
+                    "-b:a",
+                    "192k",
+                    "-shortest",
+                    "-movflags",
+                    "+faststart",
+                    str(tmp_video),
+                ],
+                input=frames.tobytes(),
+                check=True,
+            )
+            tmp_video.replace(output_path)
+        finally:
+            tmp_audio.unlink(missing_ok=True)
+            tmp_video.unlink(missing_ok=True)
         return output_path
 
     # -- end-to-end ----------------------------------------------------------

@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -16,8 +18,10 @@ from fastvideo.mlx_runtime.minimax_h3 import (  # noqa: E402
     video_latent_num_frames,
 )
 from fastvideo.mlx_runtime.minimax_h3_pipeline import (  # noqa: E402
+    MiniMaxH3MLXPipeline,
     _adaln_schedule_union,
     _center_crop_frames,
+    _default_metal_wired_limit_gib,
     _preflight_media_dependencies,
     _validate_checkpoint_step_ladder,
     plan_fast_temporal,
@@ -103,3 +107,29 @@ def test_fast_media_preflight_resolves_rife_weights(monkeypatch: pytest.MonkeyPa
     _preflight_media_dependencies(fast=True, fast_sharpen=0.6, rife_weights_dir="/tmp/rife")
 
     assert calls == [{"weights_dir": "/tmp/rife"}]
+
+
+def test_default_wired_limit_scales_down_and_keeps_tested_cap() -> None:
+    small = SimpleNamespace(metal=SimpleNamespace(device_info=lambda: {"memory_size": 24 * 2**30}))
+    large = SimpleNamespace(metal=SimpleNamespace(device_info=lambda: {"memory_size": 64 * 2**30}))
+
+    assert _default_metal_wired_limit_gib(small) == pytest.approx(20.16)
+    assert _default_metal_wired_limit_gib(large) == 30.0
+
+
+def test_mux_cleans_temporary_files_after_ffmpeg_failure(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    pipeline = MiniMaxH3MLXPipeline.__new__(MiniMaxH3MLXPipeline)
+    output = tmp_path / "output.mp4"
+    frames = np.zeros((1, 2, 2, 3), dtype=np.uint8)
+    waveform = np.zeros((2, 32), dtype=np.float32)
+    monkeypatch.setattr("fastvideo.mlx_runtime.minimax_h3_pipeline.shutil.which", lambda _name: "/opt/ffmpeg")
+
+    def fail(*_args, **_kwargs):
+        raise subprocess.CalledProcessError(1, "ffmpeg")
+
+    monkeypatch.setattr("fastvideo.mlx_runtime.minimax_h3_pipeline.subprocess.run", fail)
+    with pytest.raises(subprocess.CalledProcessError):
+        pipeline.mux(frames, waveform, output)
+
+    assert not output.with_suffix(".tmp.mp4").exists()
+    assert not output.with_suffix(".tmp.wav").exists()

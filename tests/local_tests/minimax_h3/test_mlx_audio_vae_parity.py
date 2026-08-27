@@ -146,12 +146,12 @@ def test_activation1d_matches_torch() -> None:
     from fastvideo.models.vaes.minimax_h3_audio import (
         MiniMaxH3AudioActivation1d,
         MiniMaxH3AudioDownSample1d,
+        MiniMaxH3AudioSnakeBeta,
         MiniMaxH3AudioUpSample1d,
     )
 
     torch.manual_seed(SEED + 1)
-    act = MiniMaxH3AudioActivation1d(activation=__import__("fastvideo.models.vaes.minimax_h3_audio",
-                                                            fromlist=["MiniMaxH3AudioSnakeBeta"]).MiniMaxH3AudioSnakeBeta(4))
+    act = MiniMaxH3AudioActivation1d(activation=MiniMaxH3AudioSnakeBeta(4))
     with torch.no_grad():
         act.act.alpha.normal_(0.0, 0.1)
         act.act.beta.normal_(0.0, 0.1)
@@ -241,6 +241,15 @@ def test_directory_loader_rejects_non_fp32_storage(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="storage_dtype='fp32'"):
         mlx_h3_audio_vae_from_dir(tmp_path, storage_dtype="bf16")
+
+
+def test_audio_loader_validates_decoder_weights_before_construction(tmp_path) -> None:
+    from fastvideo.mlx_runtime.minimax_h3_audio_vae import mlx_h3_audio_vae_from_file
+
+    weights_path = tmp_path / "audio.safetensors"
+    mx.save_safetensors(str(weights_path), {"unrelated": mx.zeros((1, ))})
+    with pytest.raises(KeyError, match="dec_in_proj.weight"):
+        mlx_h3_audio_vae_from_file(weights_path, include_encoder=False, config=build_mlx_model().config)
 
 
 # ---------------------------------------------------------------------------

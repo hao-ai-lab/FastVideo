@@ -85,12 +85,7 @@ class MiniMaxH3AudioVAEConfigView:
     def hop_length(self) -> int:
         return math.prod(self.encoder_rates)
 
-    @property
-    def activation_ratio(self) -> int:
-        return ACTIVATION_RATIO
 
-
-ACTIVATION_KERNEL_SIZE = 12
 ACTIVATION_RATIO = 2
 
 # ---------------------------------------------------------------------------
@@ -463,13 +458,14 @@ def mlx_h3_audio_vae_from_file(weights_path: str | Path,
     del arrays
     gc.collect()
     mx.clear_cache()
-    vae = MLXMiniMaxH3AudioVAE(weights, config, include_encoder=include_encoder)
+    required = ["dec_in_proj.weight", "decoder.conv_pre.weight_v", "decoder.conv_post.weight_v"]
     if include_encoder:
-        for required in ("mean_proj.weight", "logs_proj.weight", "pre_block.attn.qkv.weight",
-                         "encoder.block.0.weight_v"):
-            if required not in weights:
-                raise KeyError(f"H3 audio VAE is missing required tensor '{required}'.")
-    return vae
+        required.extend(
+            ("mean_proj.weight", "logs_proj.weight", "pre_block.attn.qkv.weight", "encoder.block.0.weight_v"))
+    missing = [key for key in required if key not in weights]
+    if missing:
+        raise KeyError(f"H3 audio VAE is missing required tensors: {missing}")
+    return MLXMiniMaxH3AudioVAE(weights, config, include_encoder=include_encoder)
 
 
 def mlx_h3_audio_vae_from_dir(component_dir: str | Path,

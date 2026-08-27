@@ -28,6 +28,8 @@ import numpy as np
 from fastvideo.logger import init_logger
 from fastvideo.mlx_runtime.fastwan import MLXQuantizationSpec, ensure_quantization_supported
 from fastvideo.mlx_runtime.minimax_h3 import (
+    H3_MANIFEST_FILENAME,
+    H3_WEIGHTS_FILENAME,
     MINIMAX_H3_AUDIO_SHIFT,
     MINIMAX_H3_VIDEO_SHIFT,
     mlx_h3_dit_from_diffusers_safetensors,
@@ -74,7 +76,7 @@ def main() -> None:
         ensure_quantization_supported(spec)
         dtype = "bf16"
         out_dir = out_base / fmt
-        if (out_dir / "mlx_h3_dit.json").exists() and (out_dir / "mlx_h3_dit.safetensors").exists():
+        if (out_dir / H3_MANIFEST_FILENAME).exists() and (out_dir / H3_WEIGHTS_FILENAME).exists():
             print(f"[skip] {fmt} already converted at {out_dir}", flush=True)
             continue
         print(f"[convert] {fmt} (dtype={dtype}, spec={spec})", flush=True)

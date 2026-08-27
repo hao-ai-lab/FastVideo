@@ -22,6 +22,7 @@ import numpy as np
 import pytest
 
 pytest.importorskip("mlx.core", reason="MLX is required for MiniMax H3 parity tests")
+torch = pytest.importorskip("torch", reason="PyTorch supplies the independent H3 reference")
 
 from fastvideo.mlx_runtime.fastwan import MLXQuantizationSpec  # noqa: E402
 from fastvideo.mlx_runtime.minimax_h3 import (  # noqa: E402
@@ -35,17 +36,14 @@ from fastvideo.mlx_runtime.minimax_h3 import (  # noqa: E402
     save_mlx_h3_checkpoint,
 )
 from fastvideo.tests.mlx.tiny_h3 import (  # noqa: E402
-    AUDIO_TIMESTEP,
     LATENT_HEIGHT,
     LATENT_WIDTH,
     NUM_AUDIO_LATENTS,
     NUM_LATENT_FRAMES,
     NUM_TEXT_TOKENS,
     TINY_ARCH,
-    VIDEO_TIMESTEP,
     build_hf_config,
     build_inputs,
-    build_schedulers,
     build_tiny_h3_config,
     build_torch_model,
     mlx_cache_output,
@@ -85,7 +83,7 @@ def test_packed_layout_matches_upstream_builder(distributed_setup) -> None:
         patch_size=tuple(TINY_ARCH["patch_size"]),
     )
     reference = build_packed_sequence(
-        __import__("torch").full((NUM_TEXT_TOKENS, ), 1, dtype=__import__("torch").long),
+        torch.full((NUM_TEXT_TOKENS, ), 1, dtype=torch.long),
         NUM_LATENT_FRAMES,
         LATENT_HEIGHT,
         LATENT_WIDTH,
@@ -103,8 +101,6 @@ def test_packed_layout_matches_upstream_builder(distributed_setup) -> None:
 def test_packed_layout_with_keyframes(distributed_setup) -> None:
     """FL2VA anchors: 'first' pins time at n_text; 'last' at span - 5/3."""
     from fastvideo.pipelines.basic.minimax_h3.packing import build_packed_sequence
-    import torch
-
     layout = build_packed_layout(
         NUM_TEXT_TOKENS,
         NUM_LATENT_FRAMES,

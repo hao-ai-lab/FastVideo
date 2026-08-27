@@ -75,11 +75,6 @@ MINIMAX_H3_AUDIO_TAG = 2
 MINIMAX_H3_MODALITY_NUM = 3
 
 MINIMAX_H3_FPS = 24
-MINIMAX_H3_SHORT_EDGE = 768
-MINIMAX_H3_MAX_PIXELS = 768 * 1344
-MINIMAX_H3_CANVAS_MULTIPLE = 32
-MINIMAX_H3_MIN_ASPECT_RATIO = 1 / 4
-MINIMAX_H3_MAX_ASPECT_RATIO = 4
 MINIMAX_H3_FRAMES_PER_CHUNK = 17
 MINIMAX_H3_LATENTS_PER_CHUNK = 5
 MINIMAX_H3_AUDIO_LATENTS_PER_SECOND = 40
@@ -130,24 +125,6 @@ def _is_ignored_dense_key(key: str) -> bool:
 # ---------------------------------------------------------------------------
 # Geometry (numpy, float64 — the reference RoPE coordinate arithmetic)
 # ---------------------------------------------------------------------------
-
-
-def resolve_canvas_size(aspect_width: float, aspect_height: float) -> tuple[int, int]:
-    if aspect_width <= 0 or aspect_height <= 0:
-        raise ValueError(f"The aspect ratio must be positive, got {aspect_width}:{aspect_height}.")
-    ratio = aspect_width / aspect_height
-    if not MINIMAX_H3_MIN_ASPECT_RATIO <= ratio <= MINIMAX_H3_MAX_ASPECT_RATIO:
-        raise ValueError(f"MiniMax-H3 supports aspect ratios from 1:4 to 4:1, got {aspect_width}:{aspect_height}.")
-    if ratio >= 1:
-        width, height = MINIMAX_H3_SHORT_EDGE * ratio, float(MINIMAX_H3_SHORT_EDGE)
-    else:
-        width, height = float(MINIMAX_H3_SHORT_EDGE), MINIMAX_H3_SHORT_EDGE / ratio
-    area = width * height
-    if area > MINIMAX_H3_MAX_PIXELS:
-        scale = (MINIMAX_H3_MAX_PIXELS / area)**0.5
-        width, height = width * scale, height * scale
-    multiple = MINIMAX_H3_CANVAS_MULTIPLE
-    return max(multiple, round(height / multiple) * multiple), max(multiple, round(width / multiple) * multiple)
 
 
 def align_num_frames(num_frames: int) -> int:
@@ -644,11 +621,7 @@ class MLXMiniMaxH3DiT:
         blocks: list[dict[str, Any]],
         refiner: list[dict[str, Any]],
         config: dict[str, Any],
-        *,
-        compile: bool = False,
     ) -> None:
-        import os
-
         self.weights = weights
         self.blocks = blocks
         self.refiner = refiner
@@ -669,8 +642,6 @@ class MLXMiniMaxH3DiT:
         self.qk_norm_eps = float(config["qk_norm_eps"])
         self.final_norm_eps = float(config["final_norm_eps"])
         self.patch_dim = self.in_channels * math.prod(self.patch_size)
-        self._enable_compile = compile or os.environ.get("FASTVIDEO_MLX_COMPILE", "0") == "1"
-        self._compiled_forward = None
         self._adaln_cache: MiniMaxH3StepCache | None = None
 
     # -- conditioning ------------------------------------------------------
@@ -877,7 +848,7 @@ class MLXMiniMaxH3DiT:
         # Sync per block: without this, MLX enqueues the entire 50-block graph
         # while the GPU lags behind, allocating every intermediate at once
         # (observed as an OOM kill on 36 GiB Macs at 480x832).
-        for block, tables in zip(self.blocks, cache.block_tables, strict=False):
+        for block, tables in zip(self.blocks, cache.block_tables, strict=True):
             packed = _transformer_block(
                 block,
                 packed,
@@ -1124,158 +1095,6 @@ def mlx_h3_dit_from_diffusers_safetensors(
     )
     dit._adaln_cache = cache
     return dit
-
-
-def mlx_h3_bf16_forward_streamed_from_diffusers_safetensors(
-    transformer_path: str | Path,
-    video_rows,
-    audio_rows,
-    text_rows,
-    *,
-    position_ids,
-    token_tags,
-    timestep_indices,
-    timesteps,
-    video_indices,
-    audio_indices,
-    text_indices,
-):
-    """Run one bf16 H3 reference forward with one main block resident at a time.
-
-    The released dense reference remains about 37 GiB after excluding VSA
-    gates and cannot be resident on a 36 GiB Mac. Safetensors arrays stay
-    memory-mapped; global/refiner weights remain resident and each of the 50
-    main blocks is cast, evaluated, used, and released in sequence.
-    """
-    import gc
-
-    import mlx.core as mx
-
-    transformer_path = Path(transformer_path)
-    config_path = transformer_path / "config.json" if transformer_path.is_dir() else transformer_path.with_name(
-        "config.json")
-    config = json.loads(Path(config_path).read_text())
-    num_blocks = int(config["num_layers"])
-    num_refiner = int(config["num_refiner_layers"])
-
-    shards = _safetensors_shards(transformer_path)
-    shard_by_name = {shard.name: shard for shard in shards}
-    index_path = transformer_path / "diffusion_pytorch_model.safetensors.index.json"
-    keys_by_shard: dict[str, list[str]] = {name: [] for name in shard_by_name}
-    if index_path.exists():
-        weight_map = json.loads(index_path.read_text())["weight_map"]
-        for key, shard_name in weight_map.items():
-            keys_by_shard[shard_name].append(key)
-    else:
-        for shard in shards:
-            shard_arrays = mx.load(str(shard))
-            keys_by_shard[shard.name] = list(shard_arrays)
-            del shard_arrays
-
-    weights: dict[str, Any] = {}
-    refiner: list[dict[str, Any] | None] = [None] * num_refiner
-    for shard_name, shard_keys in keys_by_shard.items():
-        selected_keys = [
-            key for key in shard_keys if not key.startswith("transformer_blocks.") and not key.startswith("rope.")
-            and not _is_ignored_dense_key(key)
-        ]
-        if not selected_keys:
-            continue
-        shard_arrays = mx.load(str(shard_by_name[shard_name]))
-        for key in selected_keys:
-            keep_fp32 = key.split(".", 1)[0] in FP32_MODULE_PREFIXES
-            value = _load_array(shard_arrays[key], mx.float32 if keep_fp32 else mx.bfloat16)
-            if key.startswith("token_refiner.refiner_blocks."):
-                _, _, index_str, sub = key.split(".", 3)
-                index = int(index_str)
-                refiner_block = refiner[index]
-                if refiner_block is None:
-                    refiner_block = {}
-                    refiner[index] = refiner_block
-                refiner_block[sub] = value
-            else:
-                weights[key] = value
-        del shard_arrays
-        gc.collect()
-        mx.clear_cache()
-    if any(block is None for block in refiner):
-        raise KeyError("Missing token refiner weights for streamed BF16 forward.")
-
-    dit = MLXMiniMaxH3DiT(weights, [], [block for block in refiner if block is not None], config)
-    sequence_length = position_ids.shape[0]
-    cos, sin = rope_cos_sin(position_ids, dit.rope_freq_dim, dit.rope_theta)
-    video_embeds = linear(
-        video_rows.astype(weight_dtype(weights["proj_in.weight"])),
-        weights["proj_in.weight"],
-        weights["proj_in.bias"],
-    )
-    audio_embeds = linear(
-        audio_rows.astype(weight_dtype(weights["audio_proj_in.weight"])),
-        weights["audio_proj_in.weight"],
-        weights["audio_proj_in.bias"],
-    )
-    text_embeds = dit.refine_text(text_rows)
-    packed = mx.zeros((sequence_length, dit.hidden_size), dtype=text_embeds.dtype)
-    packed[_as_mx_indices(text_indices)] = text_embeds
-    packed[_as_mx_indices(video_indices)] = video_embeds.astype(text_embeds.dtype)
-    packed[_as_mx_indices(audio_indices)] = audio_embeds.astype(text_embeds.dtype)
-    temb = dit.compute_temb(timesteps)
-    adaln_indices = (timestep_indices * MINIMAX_H3_MODALITY_NUM + token_tags).astype(mx.int32)
-    mx.eval(packed, temb, cos, sin)
-    if not bool(mx.all(mx.isfinite(packed))) or not bool(mx.all(mx.isfinite(temb))):
-        raise FloatingPointError("Non-finite H3 activations before the first streamed bf16 transformer block.")
-
-    for block_index in range(num_blocks):
-        prefix = f"transformer_blocks.{block_index}."
-        block: dict[str, Any] = {}
-        for shard_name, shard_keys in keys_by_shard.items():
-            selected_keys = [key for key in shard_keys if key.startswith(prefix) and not _is_ignored_dense_key(key)]
-            if not selected_keys:
-                continue
-            shard_arrays = mx.load(str(shard_by_name[shard_name]))
-            for key in selected_keys:
-                block[key[len(prefix):]] = _load_array(shard_arrays[key], mx.bfloat16)
-            del shard_arrays
-        tables = _adaln_tables(block, temb)
-        packed = _transformer_block(
-            block,
-            packed,
-            tables,
-            adaln_indices,
-            cos,
-            sin,
-            num_heads=dit.num_heads,
-            head_dim=dit.head_dim,
-            norm_eps=dit.norm_eps,
-            qk_norm_eps=dit.qk_norm_eps,
-        )
-        mx.eval(packed)
-        if not bool(mx.all(mx.isfinite(packed))):
-            raise FloatingPointError(f"Non-finite H3 activations after streamed bf16 transformer block {block_index}.")
-        del tables, block
-        gc.collect()
-        mx.clear_cache()
-
-    shift_scale = linear(
-        silu(temb).astype(weight_dtype(weights["norm_out.linear.weight"])),
-        weights["norm_out.linear.weight"],
-        weights["norm_out.linear.bias"],
-    )
-    shift_rows, scale_rows = mx.split(shift_scale, 2, axis=-1)
-    normed = rms_norm(packed, weights["norm_out.norm.weight"], eps=dit.final_norm_eps)
-    normed = normed * (1.0 + scale_rows[timestep_indices]) + shift_rows[timestep_indices]
-    video_output = linear(
-        normed[_as_mx_indices(video_indices)].astype(weight_dtype(weights["proj_out.weight"])),
-        weights["proj_out.weight"],
-        weights["proj_out.bias"],
-    )
-    audio_output = linear(
-        normed[_as_mx_indices(audio_indices)].astype(weight_dtype(weights["audio_proj_out.weight"])),
-        weights["audio_proj_out.weight"],
-        weights["audio_proj_out.bias"],
-    )
-    mx.eval(video_output, audio_output)
-    return video_output, audio_output
 
 
 H3_FORMAT_VERSION = 1

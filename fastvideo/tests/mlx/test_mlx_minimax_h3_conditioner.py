@@ -18,6 +18,7 @@ from fastvideo.mlx_runtime.minimax_h3_conditioner import (  # noqa: E402
 )
 from fastvideo.mlx_runtime.minimax_h3_pipeline import (  # noqa: E402
     MINIMAX_H3_PROMPT_CACHE_VERSION,
+    MiniMaxH3MLXPipeline,
     _audio_sample_count,
     prompt_cache_path,
 )
@@ -127,6 +128,32 @@ def test_prompt_cache_is_versioned_for_conditioner_layout() -> None:
     legacy_digest = __import__("hashlib").sha256(b"/tmp/model::two people").hexdigest()[:24]
     assert MINIMAX_H3_PROMPT_CACHE_VERSION == "v2-attention-layout"
     assert current.name != f"prompt_embeds_{legacy_digest}.npz"
+
+
+def test_prompt_cache_write_is_atomic(tmp_path, monkeypatch) -> None:
+    class FakeConditioner:
+        def encode_prompt(self, _prompt):
+            return np.ones((2, 3), dtype=np.float32), np.ones((2, ), dtype=np.int64)
+
+        def close(self):
+            return None
+
+    pipeline = MiniMaxH3MLXPipeline.__new__(MiniMaxH3MLXPipeline)
+    pipeline.prompt_cache_dir = tmp_path
+    pipeline.model_root = tmp_path / "model"
+    monkeypatch.setattr(MiniMaxH3MLXPipeline, "_load_conditioner", lambda _self: FakeConditioner())
+
+    def interrupted_save(handle, **_arrays):
+        handle.write(b"partial")
+        raise RuntimeError("interrupted")
+
+    monkeypatch.setattr(np, "savez", interrupted_save)
+    cache_path = prompt_cache_path(tmp_path, pipeline.model_root, "prompt")
+    with pytest.raises(RuntimeError, match="interrupted"):
+        pipeline.encode_prompt("prompt")
+
+    assert not cache_path.exists()
+    assert not cache_path.with_name(f".{cache_path.name}.tmp").exists()
 
 
 def test_video_vae_decode_defaults_to_reference_spatial_tiles() -> None:

@@ -104,12 +104,6 @@ class _ShardIndex:
             self._header_cache[path] = (header, data_start)
         return self._header_cache[path]
 
-    def has(self, prefix: str) -> bool:
-        return any(key.startswith(prefix) for key in self.key_to_shard)
-
-    def keys_with_prefix(self, prefix: str) -> list[str]:
-        return sorted(key for key in self.key_to_shard if key.startswith(prefix))
-
     def get(self, key: str) -> np.ndarray:
         shard = self.key_to_shard[key]
         header, data_start = self._header_cache[shard]

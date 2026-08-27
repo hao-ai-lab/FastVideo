@@ -143,8 +143,14 @@ def _reflect_pad_axis(x, axis: int, left: int, right: int):
     if left == 0 and right == 0:
         return x
     size = x.shape[axis]
-    indices = list(range(left, 0, -1)) + list(range(size)) + list(range(size - 2, size - 2 - right, -1))
-    return mx.concatenate([mx.take(x, mx.array([i]), axis=axis) for i in indices], axis=axis)
+    pieces = []
+    if left > 0:
+        pieces.append(mx.take(x, mx.array(list(range(left, 0, -1))), axis=axis))
+    pieces.append(x)
+    if right > 0:
+        indices = list(range(size - 2, size - 2 - right, -1))
+        pieces.append(mx.take(x, mx.array(indices), axis=axis))
+    return mx.contiguous(mx.concatenate(pieces, axis=axis))
 
 
 def _causal_conv3d(x, weight, bias=None, *, stride=(1, 1, 1), spatial_padding: int = 0, temporal_padding: int = 0):
