@@ -477,7 +477,8 @@ def mlx_h3_audio_vae_from_dir(component_dir: str | Path,
                               include_encoder: bool = True,
                               storage_dtype: str = "fp32") -> MLXMiniMaxH3AudioVAE:
     """Load from the released component directory (audio_vae/)."""
-    import mlx.core as _mx  # noqa: F401  (already imported at module level)
+    if storage_dtype != "fp32":
+        raise ValueError(f"H3 audio VAE numerics require storage_dtype='fp32', got {storage_dtype!r}.")
 
     component_dir = Path(component_dir)
     single = component_dir / "diffusion_pytorch_model.safetensors"

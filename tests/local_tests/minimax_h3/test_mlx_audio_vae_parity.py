@@ -236,6 +236,13 @@ def test_latent_normalization_roundtrip() -> None:
     _stats("denormalize", denorm, latents, atol=1e-5, rtol=1e-5)
 
 
+def test_directory_loader_rejects_non_fp32_storage(tmp_path) -> None:
+    from fastvideo.mlx_runtime.minimax_h3_audio_vae import mlx_h3_audio_vae_from_dir
+
+    with pytest.raises(ValueError, match="storage_dtype='fp32'"):
+        mlx_h3_audio_vae_from_dir(tmp_path, storage_dtype="bf16")
+
+
 # ---------------------------------------------------------------------------
 # Real released weights (bounded segment)
 # ---------------------------------------------------------------------------

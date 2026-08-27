@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from functools import lru_cache
+from pathlib import Path
 
 import numpy as np
 from huggingface_hub.utils import LocalEntryNotFoundError
@@ -20,6 +21,28 @@ class RIFEBackendError(RuntimeError):
 
 class RIFEWeightsUnavailableError(RIFEBackendError):
     """Raised when uncached RIFE weights cannot be downloaded."""
+
+
+def ensure_weights_available(version: str = "4.25", weights_dir: str | None = None) -> Path:
+    """Resolve or download RIFE weights without constructing the MLX model."""
+    try:
+        from fastvideo.third_party.rife_mlx.config import VERSIONS
+        from fastvideo.third_party.rife_mlx.utils.weights import _resolve_dir
+    except ImportError as exc:
+        raise RIFEBackendError("MLX RIFE is unavailable; install with `uv pip install -e '.[mlx]'`.") from exc
+
+    try:
+        config = VERSIONS[version]
+        resolved = Path(_resolve_dir(config, weights_dir))
+    except LocalEntryNotFoundError as exc:
+        raise RIFEWeightsUnavailableError(f"MLX RIFE {version} weights are unavailable: {exc}") from exc
+    except (KeyError, OSError) as exc:
+        raise RIFEWeightsUnavailableError(f"MLX RIFE {version} weights are unavailable: {exc}") from exc
+
+    missing = [name for name in ("config.json", "model.safetensors") if not (resolved / name).is_file()]
+    if missing:
+        raise RIFEWeightsUnavailableError(f"MLX RIFE {version} weights under {resolved} are missing {missing}.")
+    return resolved
 
 
 def aligned_keyframe_count(target_frames: int, factor: int, temporal_compression: int = 4) -> int:

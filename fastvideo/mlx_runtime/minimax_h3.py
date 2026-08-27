@@ -624,7 +624,8 @@ class MiniMaxH3StepCache:
     def positions(self, step_timesteps: np.ndarray) -> np.ndarray:
         """Map a step's unique timesteps to rows in the cached union."""
         positions = np.searchsorted(self.timesteps, step_timesteps)
-        if positions.size and not np.allclose(self.timesteps[positions], step_timesteps, atol=1e-6):
+        if (positions.size and (np.any(positions >= len(self.timesteps))
+                                or not np.allclose(self.timesteps[positions], step_timesteps, atol=1e-6))):
             raise ValueError(f"Step timesteps {step_timesteps} are not in the cached schedule union.")
         return positions.astype(np.int64)
 

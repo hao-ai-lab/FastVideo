@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pytest
 
@@ -14,7 +16,10 @@ from fastvideo.mlx_runtime.minimax_h3 import (  # noqa: E402
     video_latent_num_frames,
 )
 from fastvideo.mlx_runtime.minimax_h3_pipeline import (  # noqa: E402
+    _adaln_schedule_union,
     _center_crop_frames,
+    _preflight_media_dependencies,
+    _validate_checkpoint_step_ladder,
     plan_fast_temporal,
 )
 from fastvideo.mlx_runtime import rife_interp  # noqa: E402
@@ -70,3 +75,31 @@ def test_fast_mode_center_crops_internal_736p_canvas_to_720p() -> None:
     assert cropped.shape == (2, 720, 1280, 3)
     np.testing.assert_array_equal(cropped[:, 0], frames[:, 8])
     np.testing.assert_array_equal(cropped[:, -1], frames[:, 727])
+
+
+def test_fixed_adaln_checkpoint_rejects_different_step_count(tmp_path) -> None:
+    manifest = {"adaln_cache": {"timesteps": _adaln_schedule_union(4).tolist()}}
+    (tmp_path / "mlx_h3_dit.json").write_text(json.dumps(manifest))
+
+    _validate_checkpoint_step_ladder(tmp_path, 4)
+    with pytest.raises(ValueError, match=r"does not support --steps 6"):
+        _validate_checkpoint_step_ladder(tmp_path, 6)
+
+
+def test_media_preflight_checks_ffmpeg_before_generation(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("fastvideo.mlx_runtime.minimax_h3_pipeline.shutil.which", lambda _name: None)
+
+    with pytest.raises(RuntimeError, match="ffmpeg is required"):
+        _preflight_media_dependencies(fast=False, fast_sharpen=0.0, rife_weights_dir=None)
+
+
+def test_fast_media_preflight_resolves_rife_weights(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = []
+    monkeypatch.setattr("fastvideo.mlx_runtime.minimax_h3_pipeline.shutil.which", lambda _name: "/opt/ffmpeg")
+    monkeypatch.setattr("fastvideo.mlx_runtime.minimax_h3_pipeline.importlib.util.find_spec",
+                        lambda _name: object())
+    monkeypatch.setattr(rife_interp, "ensure_weights_available", lambda **kwargs: calls.append(kwargs))
+
+    _preflight_media_dependencies(fast=True, fast_sharpen=0.6, rife_weights_dir="/tmp/rife")
+
+    assert calls == [{"weights_dir": "/tmp/rife"}]

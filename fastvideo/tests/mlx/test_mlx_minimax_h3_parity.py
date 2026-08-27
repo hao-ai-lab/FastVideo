@@ -28,8 +28,11 @@ from fastvideo.mlx_runtime.minimax_h3 import (  # noqa: E402
     MINIMAX_H3_AUDIO_SHIFT,
     MINIMAX_H3_VIDEO_SHIFT,
     MiniMaxH3SchedulerState,
+    MiniMaxH3StepCache,
     build_packed_layout,
+    load_mlx_h3_checkpoint,
     minimax_h3_sigmas,
+    save_mlx_h3_checkpoint,
 )
 from fastvideo.tests.mlx.tiny_h3 import (  # noqa: E402
     AUDIO_TIMESTEP,
@@ -188,6 +191,50 @@ def test_adaln_cache_matches_faithful_forward(distributed_setup) -> None:
     for block in dit.blocks:
         assert block["adaln_proj.linear.weight"] is None
         assert block["adaln_proj.linear.bias"] is None
+
+
+def test_quantized_checkpoint_with_adaln_cache_round_trips(tmp_path, distributed_setup) -> None:
+    """The converted checkpoint format must preserve quantization and cached inference."""
+    import mlx.core as mx
+
+    model = build_torch_model()
+    hf_config = build_hf_config(build_tiny_h3_config())
+    layout, _, mlx_inputs = build_inputs()
+    dit = mlx_dit_from_torch_model(
+        model,
+        hf_config,
+        quantization=MLXQuantizationSpec.from_name("int8"),
+    )
+    expected_video, expected_audio = mlx_cache_output(dit, layout, mlx_inputs)
+    save_mlx_h3_checkpoint(dit, tmp_path)
+
+    restored = load_mlx_h3_checkpoint(tmp_path)
+    video, audio = restored.forward_with_cache(
+        mx.array(mlx_inputs["video_rows"]),
+        mx.array(mlx_inputs["audio_rows"]),
+        mx.array(mlx_inputs["text_rows"]),
+        layout=layout,
+        step_timesteps=mlx_inputs["timesteps"],
+        row_timestep_inverse=mlx_inputs["timestep_indices"],
+    )
+    mx.eval(video, audio)
+
+    np.testing.assert_allclose(np.asarray(video), expected_video, atol=CACHE_ATOL, rtol=CACHE_ATOL)
+    np.testing.assert_allclose(np.asarray(audio), expected_audio, atol=CACHE_ATOL, rtol=CACHE_ATOL)
+    assert restored._adaln_cache is not None
+    assert all("adaln_proj.linear.weight" not in block for block in restored.blocks)
+
+
+def test_step_cache_reports_out_of_range_timestep() -> None:
+    cache = MiniMaxH3StepCache(
+        timesteps=np.asarray([0.25, 0.5], dtype=np.float32),
+        block_tables=[],
+        norm_out_shift=None,
+        norm_out_scale=None,
+    )
+
+    with pytest.raises(ValueError, match="not in the cached schedule union"):
+        cache.positions(np.asarray([0.75], dtype=np.float32))
 
 
 def test_full_dit_forward_int8_stays_close_to_fp32(distributed_setup) -> None:

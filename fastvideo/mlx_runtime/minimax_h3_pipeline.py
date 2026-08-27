@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import gc
 import hashlib
+import importlib.util
+import json
 import math
 import shutil
 import subprocess
@@ -32,6 +34,7 @@ import numpy as np
 
 from fastvideo.logger import init_logger
 from fastvideo.mlx_runtime.minimax_h3 import (
+    H3_MANIFEST_FILENAME,
     MINIMAX_H3_AUDIO_SHIFT,
     MINIMAX_H3_FPS,
     MINIMAX_H3_KEYFRAME_NOISE_AUG,
@@ -156,6 +159,42 @@ def prompt_cache_path(cache_dir: str | Path, model_root: str | Path, prompt: str
 
 def _audio_sample_count(num_frames: int, fps: int = MINIMAX_H3_FPS, sample_rate: int = 32000) -> int:
     return math.ceil(num_frames / fps * sample_rate)
+
+
+def _adaln_schedule_union(num_steps: int) -> np.ndarray:
+    video = MiniMaxH3SchedulerState.create(MINIMAX_H3_VIDEO_SHIFT, num_steps)
+    audio = MiniMaxH3SchedulerState.create(MINIMAX_H3_AUDIO_SHIFT, num_steps)
+    return np.unique(np.concatenate([video.timesteps, audio.timesteps, [1.0]]).astype(np.float32))
+
+
+def _validate_checkpoint_step_ladder(checkpoint_dir: str | Path, num_steps: int) -> None:
+    """Reject a schedule that a fixed, AdaLN-dropped checkpoint cannot serve."""
+    checkpoint_dir = Path(checkpoint_dir)
+    manifest_path = checkpoint_dir / H3_MANIFEST_FILENAME
+    if not manifest_path.is_file():
+        raise FileNotFoundError(f"Missing MLX H3 checkpoint manifest: {manifest_path}")
+    cache_info = json.loads(manifest_path.read_text()).get("adaln_cache")
+    if cache_info is None:
+        return
+    cached = np.asarray(cache_info["timesteps"], dtype=np.float32)
+    requested = _adaln_schedule_union(num_steps)
+    if not np.array_equal(cached, requested):
+        raise ValueError(
+            f"MLX H3 checkpoint {checkpoint_dir} has a fixed AdaLN ladder that does not support --steps "
+            f"{num_steps}. Use the step count used during conversion (normally 4), or re-export the checkpoint.")
+
+
+def _preflight_media_dependencies(*, fast: bool, fast_sharpen: float, rife_weights_dir: str | Path | None) -> None:
+    """Fail before conditioning when required output dependencies are unavailable."""
+    if shutil.which("ffmpeg") is None:
+        raise RuntimeError("ffmpeg is required for MP4 muxing; install it before generation.")
+    if not fast:
+        return
+    if fast_sharpen > 0 and importlib.util.find_spec("cv2") is None:
+        raise RuntimeError("OpenCV is required when --fast-sharpen is greater than zero.")
+    from fastvideo.mlx_runtime.rife_interp import ensure_weights_available
+
+    ensure_weights_available(weights_dir=str(rife_weights_dir) if rife_weights_dir is not None else None)
 
 
 class MiniMaxH3MLXPipeline:
@@ -304,6 +343,7 @@ class MiniMaxH3MLXPipeline:
 
         owned_dit = dit is None
         if owned_dit:
+            _validate_checkpoint_step_ladder(self.dit_checkpoint, num_steps)
             t0 = time.perf_counter()
             dit = load_mlx_h3_checkpoint(self.dit_checkpoint)
             logger.info("Loaded MLX H3 DiT from %s in %.1fs", self.dit_checkpoint, time.perf_counter() - t0)
@@ -311,12 +351,7 @@ class MiniMaxH3MLXPipeline:
         video_scheduler = MiniMaxH3SchedulerState.create(MINIMAX_H3_VIDEO_SHIFT, num_steps)
         audio_scheduler = MiniMaxH3SchedulerState.create(MINIMAX_H3_AUDIO_SHIFT, num_steps)
         # The released artifacts persist the converter grid: video ∪ audio ∪ {1.0}.
-        union = np.unique(
-            np.concatenate([
-                video_scheduler.timesteps,
-                audio_scheduler.timesteps,
-                [1.0],
-            ]).astype(np.float32))
+        union = _adaln_schedule_union(num_steps)
         # The keyframe-noise timestep (0.999) is only exercised by FL2VA/Ref2VA
         # conditioning rows; those modes recompute the ladder before denoise.
 
@@ -518,11 +553,17 @@ class MiniMaxH3MLXPipeline:
         timings: dict[str, float] = {}
         peaks: dict[str, float] = {}
 
+        if fast_sharpen < 0:
+            raise ValueError(f"fast_sharpen must be non-negative, got {fast_sharpen}.")
+        _validate_checkpoint_step_ladder(self.dit_checkpoint, num_steps)
+        _preflight_media_dependencies(
+            fast=fast,
+            fast_sharpen=fast_sharpen,
+            rife_weights_dir=rife_weights_dir,
+        )
         canvas_height, canvas_width = _model_canvas_size(height, width)
         target_geometry = self.resolve_geometry(canvas_height, canvas_width, num_frames)
         fast_plan = plan_fast_temporal(target_geometry["num_frames"], fast_factor) if fast else None
-        if fast_sharpen < 0:
-            raise ValueError(f"fast_sharpen must be non-negative, got {fast_sharpen}.")
         video_num_frames = fast_plan.source_frames if fast_plan is not None else target_geometry["num_frames"]
         video_temporal_scale = fast_plan.video_temporal_scale if fast_plan is not None else 1.0
         video_geometry = self.resolve_geometry(
