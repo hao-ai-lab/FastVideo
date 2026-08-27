@@ -27,14 +27,29 @@ from pathlib import Path
 
 import gradio as gr
 
-# (row label, true-checkpoint arm, adapter arm)
-PAIRS = [
-    ("FastH3 4-step v1", "v1-true", "v1-lora-r64"),
-    ("FastH3 4-step v1.1", "v1.1-true", "v1.1-lora-r64"),
-    ("FastH3 4-step v1.2", "v1.2-true", "v1.2-lora-r64"),
-    ("FastH3 Dense 4-step v1", "dense_v1-true", "dense_v1-lora-r64"),
-]
 FLOOR_ARM = "base"
+
+
+def discover_pairs(arms: list[str]) -> tuple[list[tuple[str, str, str]], list[str]]:
+    """Split the arms present into checkpoint/adapter pairs and everything else.
+
+    Pairs are found by name -- ``<x>-true`` next to ``<x>-lora-<rank>`` -- rather than
+    listed, so adding an arm to the render directory is enough to get it on the page.
+    Arms that pair with nothing (a third-party adapter with no checkpoint to compare
+    against) still get shown, on their own row, instead of being silently dropped.
+    """
+    pairs, used = [], set()
+    for arm in sorted(arms):
+        if not arm.endswith("-true"):
+            continue
+        stem = arm[:-len("-true")]
+        partner = next((a for a in arms if a.startswith(f"{stem}-lora")), None)
+        if partner is None:
+            continue
+        pairs.append((stem, arm, partner))
+        used.update({arm, partner})
+    standalone = [a for a in sorted(arms) if a not in used and a != FLOOR_ARM]
+    return pairs, standalone
 
 
 def probe(path: Path) -> str:
@@ -115,8 +130,9 @@ def build(runs: Runs, height: int) -> gr.Blocks:
             floor = gr.Video(label="base MiniMax-H3, 4 steps (floor)", height=height, loop=True,
                              autoplay=False, interactive=False)
 
+        pairs, standalone = discover_pairs(runs.arms)
         players: list[tuple[gr.Video, str, str]] = []
-        for row_label, true_arm, lora_arm in PAIRS:
+        for row_label, true_arm, lora_arm in pairs:
             gr.Markdown(f"### {row_label}")
             with gr.Row():
                 left = gr.Video(label=f"{row_label} — checkpoint", height=height, loop=True,
@@ -125,6 +141,13 @@ def build(runs: Runs, height: int) -> gr.Blocks:
                                  autoplay=False, interactive=False)
             players.append((left, true_arm, "checkpoint"))
             players.append((right, lora_arm, "base + adapter"))
+
+        if standalone:
+            gr.Markdown("### Other adapters (no matching checkpoint to compare against)")
+            with gr.Row():
+                for arm in standalone:
+                    players.append((gr.Video(label=arm, height=height, loop=True, autoplay=False,
+                                             interactive=False), arm, arm))
 
         def show(label: str):
             index = runs.by_label(label)
