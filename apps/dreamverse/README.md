@@ -138,6 +138,27 @@ dreamverse-server --host 0.0.0.0 --port 8009
 The Dreamverse backend defaults to `0.0.0.0:8009` and starts one GPU worker on
 the first visible GPU by default.
 
+### Cosmos Predict2.5 distilled (experimental)
+
+Dreamverse can run the FastVideo-converted Cosmos Predict2.5 2B distilled
+package as an independent text-to-world segment generator. Point the runtime at
+the converted package and disable startup warmup for the first validation run:
+
+```bash
+export DREAMVERSE_MODEL_ID=cosmos25-distilled
+export DREAMVERSE_MODEL_PATH=/path/to/Cosmos-Predict2.5-2B-Distilled-TrigFlow-FastVideo
+export FASTVIDEO_ENABLE_STARTUP_WARMUP=0
+export ENABLE_TORCH_COMPILE=0
+dreamverse-server --host 0.0.0.0 --port 8009
+```
+
+This initial integration uses Torch SDPA with BF16 weights and the validated
+Cosmos profile: 704x1280, 77 frames at 16 FPS, and four distilled steps. Cosmos
+does not produce audio, so Dreamverse muxes a matching silent track to preserve
+the existing browser streaming contract. Image input, LoRA, and cross-segment
+continuation are not supported in this first profile; later prompts generate
+independent clips.
+
 ### Check Readiness
 
 In another shell, verify that the backend process is alive:

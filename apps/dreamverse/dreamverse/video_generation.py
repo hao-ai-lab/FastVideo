@@ -1,4 +1,4 @@
-"""LTX2 model lifecycle and continuation conditioning.
+"""DreamVerse model lifecycle and continuation conditioning.
 
 Runs inside a GPU worker subprocess.  Owns the model, the audio
 encoder, and the per-session continuation state carried across
@@ -91,6 +91,7 @@ class StepResult:
     frames: list
     audio: Any
     audio_sample_rate: int | None
+    fps: int
     timings: dict
     head_trim_frames: int
     head_trim_audio_frames: int
@@ -203,7 +204,7 @@ class ContinuationState:
 
 
 class VideoGenerationWorker:
-    """Single-GPU LTX2 generator with continuation state.
+    """Single-GPU generator with model-aware continuation state.
 
     Caller must set ``os.environ["CUDA_VISIBLE_DEVICES"]`` before
     instantiating, and call ``initialize()`` before any
@@ -239,7 +240,7 @@ class VideoGenerationWorker:
                                 f"{model_root}. Checked: {', '.join(candidates)}")
 
     def initialize(self, model_config: dict | None = None) -> None:
-        """Load (or reload) the LTX2 generator on the visible GPU."""
+        """Load (or reload) the selected generator on the visible GPU."""
         if model_config is not None:
             self.current_model_config = model_config
 
@@ -259,6 +260,9 @@ class VideoGenerationWorker:
               f"{self.current_model_config['model_path']}")
         print(f"[GPU {self.gpu_id}] Before model load: {self._gpu_mem()}")
 
+        attention_backend = str(self.current_model_config.get("attention_backend", "FLASH_ATTN"))
+        os.environ["FASTVIDEO_ATTENTION_BACKEND"] = attention_backend
+
         from fastvideo.api.schema import (
             CompileConfig,
             ComponentConfig,
@@ -272,11 +276,13 @@ class VideoGenerationWorker:
         from fastvideo.utils import maybe_download_model
 
         model_root = maybe_download_model(self.current_model_config["model_path"])
-        refine_upsampler_path = self._resolve_refine_upsampler_path(model_root)
+        uses_refine = bool(self.current_model_config.get("uses_refine", True))
+        refine_upsampler_path = self._resolve_refine_upsampler_path(model_root) if uses_refine else None
         config_model_path = (self.current_model_config.get("config_model_path")
                              or self.current_model_config["model_path"])
 
-        enable_compile = os.getenv("ENABLE_TORCH_COMPILE", "1") == "1"
+        enable_compile = (os.getenv("ENABLE_TORCH_COMPILE", "1") == "1"
+                          and bool(self.current_model_config.get("compile", True)))
         compile_mode = "max-autotune-no-cudagraphs" if DREAMVERSE_MAX_AUTOTUNE else None
 
         components = ComponentConfig(
@@ -287,6 +293,14 @@ class VideoGenerationWorker:
         if init_weights:
             components.transformer_weights = init_weights
 
+        preset_overrides = ({
+            "refine": {
+                "enabled": True,
+                "num_inference_steps": 2,
+                "guidance_scale": 1.0,
+                "add_noise": True,
+            },
+        } if uses_refine else {})
         generator_config = GeneratorConfig(
             model_path=model_root,
             engine=EngineConfig(
@@ -308,19 +322,12 @@ class VideoGenerationWorker:
                     dynamic=False,
                 ),
                 use_fsdp_inference=False,
-                quantization=QuantizationConfig(transformer_quant="NVFP4"),
+                quantization=QuantizationConfig(transformer_quant=self.current_model_config.get("transformer_quant"), ),
             ),
             pipeline=PipelineSelection(
                 components=components,
                 vae_tiling=False,
-                preset_overrides={
-                    "refine": {
-                        "enabled": True,
-                        "num_inference_steps": 2,
-                        "guidance_scale": 1.0,
-                        "add_noise": True,
-                    },
-                },
+                preset_overrides=preset_overrides,
             ),
         )
 
@@ -329,6 +336,9 @@ class VideoGenerationWorker:
 
         lora_stack = DREAMVERSE_LORA_STACK or ([(DREAMVERSE_LORA_PATH,
                                                  DREAMVERSE_LORA_STRENGTH)] if DREAMVERSE_LORA_PATH else [])
+        supports_lora = bool(self.current_model_config.get("supports_lora", True))
+        if lora_stack and not supports_lora:
+            raise RuntimeError(f"{self.current_model_config['name']} does not support DreamVerse LoRA stacks")
         for i, (lora_path, lora_strength) in enumerate(lora_stack):
             nickname = DREAMVERSE_LORA_NICKNAME if i == 0 else f"{DREAMVERSE_LORA_NICKNAME}_{i}"
             print(f"[GPU {self.gpu_id}] Applying LoRA '{nickname}' from {lora_path} "
@@ -342,8 +352,9 @@ class VideoGenerationWorker:
         if lora_stack:
             print(f"[GPU {self.gpu_id}] LoRA stack applied ({len(lora_stack)})")
 
-        self._load_audio_encoder(model_root)
-        print(f"[GPU {self.gpu_id}] LTX2 model loaded (warmup pending)")
+        if bool(self.current_model_config.get("supports_audio", True)):
+            self._load_audio_encoder(model_root)
+        print(f"[GPU {self.gpu_id}] {self.current_model_config['name']} loaded (warmup pending)")
 
     def apply_lora_stack(
         self,
@@ -352,6 +363,8 @@ class VideoGenerationWorker:
         """Re-apply a runtime LoRA stack and update the active style trigger."""
         if self.generator is None:
             raise RuntimeError("Generator not initialized; cannot apply LoRA stack.")
+        if not bool(self.current_model_config.get("supports_lora", True)):
+            raise RuntimeError(f"{self.current_model_config['name']} does not support DreamVerse LoRA stacks")
 
         try:
             self.generator.unmerge_lora_weights()
@@ -478,21 +491,35 @@ class VideoGenerationWorker:
 
         prompt = self._inject_style_trigger(prompt)
 
+        height = int(self.current_model_config.get("height", FRAME_HEIGHT))
+        width = int(self.current_model_config.get("width", FRAME_WIDTH))
+        num_frames = int(self.current_model_config.get("num_frames", NUM_FRAMES))
+        fps = int(self.current_model_config.get("fps", 24))
+        num_inference_steps = int(self.current_model_config.get("num_inference_steps", NUM_INFERENCE_STEPS))
+        seed = int(self.current_model_config.get("seed", 10))
+        supports_audio = bool(self.current_model_config.get("supports_audio", True))
+        supports_continuation = bool(self.current_model_config.get("supports_continuation", True))
+
+        if image_path is not None and self.current_model_config.get("family") == "cosmos25_distilled":
+            raise RuntimeError("Cosmos Predict2.5 distilled DreamVerse support is currently text-to-world only")
+
         request_kwargs = dict(
             prompt=prompt,
             negative_prompt="",
             save_video=False,
-            height=FRAME_HEIGHT,
-            width=FRAME_WIDTH,
-            num_frames=NUM_FRAMES,
-            fps=24,
-            num_inference_steps=NUM_INFERENCE_STEPS,
+            return_frames=True,
+            height=height,
+            width=width,
+            num_frames=num_frames,
+            fps=fps,
+            num_inference_steps=num_inference_steps,
             guidance_scale=1.0,
-            seed=10,
-            ltx2_image_crf=0.0,
+            seed=seed,
             image_path=image_path if segment_idx == 1 else None,
             return_continuation_state=False,
         )
+        if self.current_model_config.get("family") == "ltx2":
+            request_kwargs["ltx2_image_crf"] = 0.0
 
         if reset_conditioning:
             self.continuation.clear()
@@ -500,8 +527,9 @@ class VideoGenerationWorker:
         audio_lps = (DEFAULT_LTX2_AUDIO_SAMPLE_RATE / DEFAULT_LTX2_AUDIO_HOP_LENGTH / DEFAULT_LTX2_AUDIO_DOWNSAMPLE)
 
         # Phase 1: seed kwargs with prior-segment conditioning.
-        self.continuation.apply_video(request_kwargs, segment_idx)
-        self.continuation.apply_audio(request_kwargs, segment_idx, audio_lps)
+        if supports_continuation:
+            self.continuation.apply_video(request_kwargs, segment_idx)
+            self.continuation.apply_audio(request_kwargs, segment_idx, audio_lps)
 
         # Phase 2: generate.
         t0 = time.perf_counter()
@@ -516,6 +544,12 @@ class VideoGenerationWorker:
             raise RuntimeError("Generation did not return frames.")
         audio = result.get("audio")
         audio_sample_rate = result.get("audio_sample_rate")
+        if not supports_audio:
+            audio_sample_rate = 24000
+            audio = torch.zeros(
+                max(1, int(round((len(frames) / float(fps)) * audio_sample_rate))),
+                dtype=torch.float32,
+            )
         if audio is not None and audio_sample_rate is None:
             # LTX2 audio decoding stage uses 24kHz output by default.
             audio_sample_rate = 24000
@@ -527,21 +561,22 @@ class VideoGenerationWorker:
         # Phase 3: snapshot continuation state for the next segment.
         t_save_start = time.perf_counter()
         self.continuation.clear()
-        self.continuation.save_video(frames)
-        next_audio_latents = self._derive_next_audio_latents(audio, audio_sample_rate, result, segment_idx)
-        self.continuation.save_audio_latents(next_audio_latents)
+        if supports_continuation:
+            self.continuation.save_video(frames)
+            next_audio_latents = self._derive_next_audio_latents(audio, audio_sample_rate, result, segment_idx)
+            self.continuation.save_audio_latents(next_audio_latents)
 
         timings["save_conditioning_ms"] = (time.perf_counter() - t_save_start) * 1000
         timings["e2e_latency_ms"] = (time.perf_counter() - t0) * 1000
 
-        print(f"[GPU {self.gpu_id}] LTX2 segment {segment_idx}: "
+        print(f"[GPU {self.gpu_id}] {self.current_model_config['name']} segment {segment_idx}: "
               f"{len(frames)} frames, gen={timings['generation_ms']:.0f}ms, "
               f"save_conditioning={timings['save_conditioning_ms']:.0f}ms, "
               f"e2e={timings['e2e_latency_ms']:.0f}ms")
 
         # Head-trim values for downstream AV streaming — computed here so
         # the streaming layer never needs to know conditioning constants.
-        is_continuation = segment_idx > 1 and not reset_conditioning
+        is_continuation = supports_continuation and segment_idx > 1 and not reset_conditioning
         head_trim_frames = (LTX2_VIDEO_CONDITIONING_NUM_FRAMES if is_continuation else 0)
         audio_extra = (max(0, AUDIO_CONDITIONING_NUM_FRAMES -
                            LTX2_VIDEO_CONDITIONING_NUM_FRAMES) if ENABLE_AUDIO_COND else 0)
@@ -551,6 +586,7 @@ class VideoGenerationWorker:
             frames=frames,
             audio=audio,
             audio_sample_rate=audio_sample_rate,
+            fps=fps,
             timings=timings,
             head_trim_frames=head_trim_frames,
             head_trim_audio_frames=head_trim_audio_frames,
@@ -588,8 +624,8 @@ class VideoGenerationWorker:
         if not warmup_prompt:
             raise RuntimeError("Startup warmup prompt must be non-empty.")
 
-        print(f"[GPU {self.gpu_id}] Startup warmup starting "
-              "(synthetic segments: seg1, seg2, seg1-post-LoRA)")
+        supports_continuation = bool(self.current_model_config.get("supports_continuation", True))
+        print(f"[GPU {self.gpu_id}] Startup warmup starting")
         warmup_t0 = time.perf_counter()
 
         r1 = self.generate_step(
@@ -598,6 +634,16 @@ class VideoGenerationWorker:
             image_path=None,
             reset_conditioning=True,
         )
+        if not supports_continuation:
+            warmup_total_ms = (time.perf_counter() - warmup_t0) * 1000.0
+            self.continuation.clear()
+            segment1_ms = float(r1.timings.get("e2e_latency_ms", 0.0))
+            print(f"[GPU {self.gpu_id}] Startup warmup complete: "
+                  f"segment1={segment1_ms:.0f}ms, total={warmup_total_ms:.0f}ms")
+            return {
+                "warmup_segment1_ms": segment1_ms,
+                "warmup_total_ms": warmup_total_ms,
+            }
         r2 = self.generate_step(
             warmup_prompt,
             segment_idx=2,

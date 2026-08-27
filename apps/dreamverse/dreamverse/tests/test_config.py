@@ -144,6 +144,42 @@ def test_config_uses_five_minute_session_timeout(monkeypatch):
     assert module.SESSION_TIMEOUT_SECONDS == 300
 
 
+def test_config_selects_cosmos25_distilled_profile(monkeypatch, tmp_path):
+    _set_required_prompt_keys(monkeypatch)
+    model_path = tmp_path / "cosmos25-distilled"
+    monkeypatch.setenv("DREAMVERSE_MODEL_ID", "cosmos25-distilled")
+    monkeypatch.setenv("DREAMVERSE_MODEL_PATH", str(model_path))
+
+    module = _load_config_module()
+
+    expected_config = {
+        **module.MODEL_REGISTRY["cosmos25-distilled"],
+        "model_path": str(model_path),
+        "config_model_path": str(model_path),
+    }
+    assert module.ACTIVE_MODEL_ID == "cosmos25-distilled"
+    assert module.DEFAULT_MODEL_ID == "cosmos25-distilled"
+    assert expected_config == module.MODEL_CONFIG
+    assert module.MODEL_CONFIG["attention_backend"] == "TORCH_SDPA"
+    assert module.MODEL_CONFIG["transformer_quant"] is None
+    assert module.MODEL_CONFIG["supports_audio"] is False
+    assert module.MODEL_CONFIG["supports_continuation"] is False
+    assert module.MODEL_CONFIG["num_inference_steps"] == 4
+    assert module.MODEL_CONFIG["fps"] == 16
+
+
+def test_config_unknown_model_falls_back_to_builtin_default(monkeypatch):
+    _set_required_prompt_keys(monkeypatch)
+    monkeypatch.setenv("DREAMVERSE_MODEL_ID", "not-a-model")
+    monkeypatch.delenv("DREAMVERSE_MODEL_PATH", raising=False)
+
+    module = _load_config_module()
+
+    assert module.ACTIVE_MODEL_ID == "fast-ltx2"
+    assert module.DEFAULT_MODEL_ID == "fast-ltx2"
+    assert module.MODEL_CONFIG["family"] == "ltx2"
+
+
 def test_config_rejects_invalid_prompt_provider(monkeypatch):
     monkeypatch.setenv("FASTVIDEO_PROMPT_PROVIDER", "unsupported")
     _set_required_prompt_keys(monkeypatch)
