@@ -50,6 +50,9 @@ class _ReferenceRMSNorm(torch.nn.Module):
         self.weight = torch.nn.Parameter(torch.ones(hidden_size))
         self.eps = eps
 
+    def reset_parameters(self) -> None:
+        torch.nn.init.ones_(self.weight)
+
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         input_dtype = hidden_states.dtype
         normalized = hidden_states.float()
