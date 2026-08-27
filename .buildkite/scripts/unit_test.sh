@@ -8,6 +8,8 @@ exec pytest \
   ./fastvideo/tests/workflow/ \
   ./fastvideo/tests/entrypoints/ \
   ./fastvideo/tests/loader/ \
+  ./fastvideo/tests/pipelines/ \
+  ./fastvideo/tests/platforms/ \
   ./fastvideo/tests/train/ \
   ./fastvideo/tests/stages/ \
   ./fastvideo/tests/ops/ \

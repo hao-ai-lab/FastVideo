@@ -14,6 +14,13 @@ vae_cpu_offload: bool = True
 pin_cpu_memory: bool = True
 ```
 
+On unified-memory accelerators such as NVIDIA GB10 and Apple silicon, FastVideo
+detects the selected device inside each worker and disables all five host-offload
+modes before loading modules. Host and accelerator allocations share one physical
+pool there, so offload adds transfers and duplicate residency instead of freeing
+memory. CUDA FSDP sharding remains enabled when requested; MPS continues to
+disable FSDP. `pin_cpu_memory` is not an offload mode and is left unchanged.
+
 ## Behavior Explanation
 
 !!! note

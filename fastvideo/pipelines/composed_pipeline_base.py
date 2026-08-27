@@ -13,7 +13,11 @@ from typing import Any, cast
 import torch
 
 from fastvideo.configs.pipelines import PipelineConfig
-from fastvideo.distributed import (maybe_init_distributed_environment_and_model_parallel, get_world_group)
+from fastvideo.distributed import (
+    get_local_torch_device,
+    get_world_group,
+    maybe_init_distributed_environment_and_model_parallel,
+)
 from fastvideo.distributed.communication_op import (warmup_sequence_parallel_communication)
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.hooks.activation_trace import attach_activation_trace, detach_activation_trace
@@ -89,6 +93,14 @@ class ComposedPipelineBase(ABC):
             raise NotImplementedError("Subclass must set _required_config_modules")
 
         maybe_init_distributed_environment_and_model_parallel(fastvideo_args.tp_size, fastvideo_args.sp_size)
+
+        # VideoGenerator applies this in each Worker before building the
+        # pipeline. Keep direct from_pretrained/build_pipeline callers aligned,
+        # but only after distributed setup has selected this process's device.
+        if fastvideo_args.inference_mode:
+            local_device = get_local_torch_device()
+            device_id = local_device.index if local_device.index is not None else 0
+            fastvideo_args.finalize_device_offload_policy(device_id)
 
         # Torch profiler. Enabled and configured through env vars:
         # FASTVIDEO_TORCH_PROFILER_DIR=/path/to/save/trace
