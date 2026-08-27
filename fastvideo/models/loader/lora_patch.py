@@ -182,6 +182,16 @@ class DenseLoRAPatch:
         """Whether the adapter carries this parameter whole, without reading it."""
         return param_name in self._replacement
 
+    @property
+    def replacement_parameters(self) -> frozenset[str]:
+        """Names of the parameters this adapter supplies outright.
+
+        Lets a caller decide what the adapter needs from the runtime -- an H3 adapter
+        carrying ``to_gate_compress`` only works under the VSA backend -- without
+        reading any tensor or guessing from the file name.
+        """
+        return frozenset(self._replacement)
+
     def replacement_for(self, param_name: str) -> torch.Tensor | None:
         """The adapter's whole-tensor value for a parameter, or ``None``."""
         entry = self._replacement.get(param_name)

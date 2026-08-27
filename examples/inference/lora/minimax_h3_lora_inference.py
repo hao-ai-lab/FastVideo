@@ -10,9 +10,12 @@ three have to land for the result to match the checkpoint:
 * ``.set_weight`` values for ``attn.to_gate_compress``, the VSA compression gate that
   does not exist in the base model at all
 
-The last one is why ``--vsa`` is not optional here. Under any other attention backend
-the gate module is never constructed, so half the distillation has nowhere to go; the
-loader will say so rather than quietly produce a worse video.
+An adapter carrying that last one needs ``--vsa``: under any other attention backend the
+gate module is never constructed, so part of the distillation has nowhere to go. The
+requirement is read off the adapter rather than assumed, because community adapters
+built against the ComfyUI layout carry no gate and run fine either way -- run one of
+those with ``--no-vsa`` (see ``scripts/checkpoint_conversion/convert_minimax_h3_comfy_lora.py``
+for getting them into a layout this loads).
 
 Because a parameter the base lacks has to be supplied while weights are still unsharded,
 the adapter is passed at construction rather than swapped in afterwards.
@@ -77,9 +80,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     args = parser.parse_args(argv)
     if not args.prompt and not args.prompts_file:
         parser.error("pass --prompt or --prompts-file")
-    if args.lora_path and not args.vsa:
-        parser.error("--no-vsa with an adapter: to_gate_compress would have no module to load into. "
-                     "Drop --no-vsa, or use an adapter with no .set_weight keys.")
+    # Whether VSA is required is a property of the adapter, not of having one at all --
+    # community adapters built against the ComfyUI layout carry no gate. Checked in
+    # main(), once the path has been resolved.
     aligned = align_num_frames(args.num_frames)
     if not MIN_DURATION <= aligned / FPS <= MAX_DURATION:
         parser.error(f"MiniMax-H3 generates {MIN_DURATION}-{MAX_DURATION}s at {FPS} fps; "
@@ -133,9 +136,23 @@ def main(argv: Sequence[str] | None = None) -> None:
     configure_environment(args)
 
     # Imported after the environment is set: backend selection is read at import time.
+    from fastvideo.models.loader.lora_patch import DenseLoRAPatch
     from fastvideo import VideoGenerator
     from fastvideo.api import (ComponentConfig, EngineConfig, GenerationRequest, GeneratorConfig, OffloadConfig,
                                OutputConfig, ParallelismConfig, PipelineSelection, SamplingConfig)
+
+    # An adapter carrying to_gate_compress needs the VSA backend, because that is the
+    # only configuration in which the module exists. One that does not carry it runs
+    # fine either way, so the requirement is read off the file rather than assumed from
+    # the presence of an adapter at all.
+    patch = DenseLoRAPatch.from_adapter(args.lora_path) if args.lora_path else None
+    needs_vsa = bool(patch and any("gate_compress" in name for name in patch.replacement_parameters))
+    if needs_vsa and not args.vsa:
+        raise SystemExit(f"{args.lora_path} carries to_gate_compress, which exists only under the VSA "
+                         "attention backend. Drop --no-vsa.")
+    if args.vsa and args.lora_path and not needs_vsa:
+        print(f"note: {args.lora_path} carries no VSA gate; running under VSA leaves the "
+              "compression branch at its zero-initialized value.")
 
     experimental: dict[str, object] = {
         "vae_parallel_decode": True,
