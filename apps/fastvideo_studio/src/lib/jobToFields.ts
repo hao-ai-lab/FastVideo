@@ -11,6 +11,7 @@ import { parseH3Prompt, type H3PromptFields } from "@/lib/h3Prompt";
 export interface JobLike {
 	id: string;
 	model_id: string;
+	name?: string;
 	prompt: string;
 	workload_type?: string;
 	job_type?: string;
@@ -41,6 +42,7 @@ export interface JobLike {
 
 export interface JobFormFields {
 	modelId: string;
+	name: string;
 	workloadType: string;
 	jobType: string;
 	prompt: string;
@@ -85,6 +87,7 @@ export function jobToFormFields(job: JobLike): JobFormFields {
 
 	return {
 		modelId: job.model_id,
+		name: job.name ?? "",
 		workloadType: job.workload_type ?? "t2v",
 		jobType: job.job_type ?? "inference",
 		prompt: job.prompt ?? "",

@@ -89,6 +89,7 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "jobs", "fps", "INTEGER", "24")
     _add_column_if_missing(conn, "jobs", "workload_type", "TEXT", "'t2v'")
     _add_column_if_missing(conn, "jobs", "image_path", "TEXT", "''")
+    _add_column_if_missing(conn, "jobs", "name", "TEXT", "''")
     _add_column_if_missing(conn, "jobs", "last_image_path", "TEXT", "''")
     # Ref2VA reference list, stored as a JSON array of
     # {"source": ..., "media_type": ...} objects.
@@ -252,7 +253,7 @@ class Database:
         self._execute(
             """
             INSERT INTO jobs (
-                id, model_id, prompt, workload_type, image_path,
+                id, model_id, name, prompt, workload_type, image_path,
                 last_image_path, references_json, job_type, status,
                 created_at, started_at, finished_at, error, output_path, log_file_path,
                 num_inference_steps, num_frames, height, width, guidance_scale,
@@ -265,11 +266,12 @@ class Database:
                 dmd_use_vsa, dmd_vsa_sparsity, dmd_denoising_steps,
                 real_score_guidance_scale,
                 generator_update_interval, real_score_model_path, fake_score_model_path
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 job["id"],
                 job["model_id"],
+                job.get("name", ""),
                 job["prompt"],
                 job.get("workload_type", "t2v"),
                 job.get("image_path", ""),
@@ -553,6 +555,7 @@ def _row_to_job(row: sqlite3.Row) -> dict[str, Any]:
     result = {
         "id": row["id"],
         "model_id": row["model_id"],
+        "name": _sqlite_row_get(row, "name", "") or "",
         "prompt": row["prompt"],
         "workload_type": _sqlite_row_get(row, "workload_type", "t2v"),
         "image_path": _sqlite_row_get(row, "image_path", "") or "",

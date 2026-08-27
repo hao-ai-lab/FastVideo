@@ -66,10 +66,19 @@ def test_edit_pending_job(runner):
     assert updated.seed == 7
 
 
-def test_edit_rejects_started_job(runner):
+@pytest.mark.parametrize("status", [JobStatus.FAILED, JobStatus.STOPPED])
+def test_edit_allows_restartable_jobs(runner, status):
+    """Editable exactly when startable: neither has produced an output."""
     job = _make(runner)
-    job.status = JobStatus.COMPLETED
-    with pytest.raises(ValueError, match="Only pending jobs"):
+    job.status = status
+    assert runner.update_job_config(job.id, {"seed": 7}).seed == 7
+
+
+@pytest.mark.parametrize("status", [JobStatus.COMPLETED, JobStatus.RUNNING])
+def test_edit_rejects_jobs_with_or_producing_a_result(runner, status):
+    job = _make(runner)
+    job.status = status
+    with pytest.raises(ValueError, match="can be edited"):
         runner.update_job_config(job.id, {"seed": 7})
 
 
@@ -77,3 +86,14 @@ def test_edit_rejects_unknown_field(runner):
     job = _make(runner)
     with pytest.raises(ValueError, match="Not editable"):
         runner.update_job_config(job.id, {"status": "completed"})
+
+
+def test_name_is_carried_by_duplicate(runner):
+    src = _make(runner, name="wukong swap v2")
+    dup = runner.duplicate_job(src.id, str(uuid.uuid4()))
+    assert dup.name == "wukong swap v2"
+
+
+def test_name_is_editable(runner):
+    job = _make(runner, name="a")
+    assert runner.update_job_config(job.id, {"name": "b"}).name == "b"

@@ -8,6 +8,8 @@ from pydantic import BaseModel
 
 class CreateJobRequest(BaseModel):
     model_id: str
+    # Optional human-readable label; falls back to the prompt for display.
+    name: str = ""
     prompt: str
     workload_type: str = "t2v"
     job_type: str = "inference"

@@ -125,7 +125,8 @@ class LogBufferHandler(logging.Handler):
 class Job:
     id: str
     model_id: str
-    prompt: str
+    name: str = ""
+    prompt: str = ""
     workload_type: str = "t2v"
     job_type: str = "inference"
     image_path: str = ""
@@ -185,6 +186,7 @@ class Job:
         return {
             "id": self.id,
             "model_id": self.model_id,
+            "name": self.name,
             "prompt": self.prompt,
             "workload_type": self.workload_type,
             "job_type": self.job_type,
@@ -392,6 +394,7 @@ class JobRunner:
                 job = Job(
                     id=row["id"],
                     model_id=row["model_id"],
+                    name=row.get("name", "") or "",
                     prompt=row["prompt"],
                     workload_type=row.get("workload_type", "t2v"),
                     job_type=row.get("job_type", "inference"),
@@ -475,6 +478,7 @@ class JobRunner:
         job_id: str,
         model_id: str,
         prompt: str,
+        name: str = "",
         workload_type: str = "t2v",
         job_type: str = "inference",
         image_path: str = "",
@@ -519,6 +523,7 @@ class JobRunner:
         job = Job(
             id=job_id,
             model_id=model_id,
+            name=(name or "").strip(),
             prompt=prompt.strip(),
             workload_type=workload_type or "t2v",
             job_type=job_type or "inference",
@@ -610,7 +615,7 @@ class JobRunner:
 
     # Config fields a job carries; everything else on Job is runtime state.
     CONFIG_FIELDS: tuple[str, ...] = (
-        "model_id", "prompt", "workload_type", "job_type", "image_path",
+        "model_id", "name", "prompt", "workload_type", "job_type", "image_path",
         "last_image_path", "references", "negative_prompt", "num_inference_steps",
         "num_frames", "height", "width", "guidance_scale", "guidance_rescale",
         "fps", "seed", "num_gpus", "dit_cpu_offload", "dit_layerwise_offload",
@@ -635,19 +640,22 @@ class JobRunner:
         config = {f: copy.deepcopy(getattr(source, f)) for f in self.CONFIG_FIELDS}
         return self.create_job(job_id=new_job_id, **config)
 
-    def update_job_config(self, job_id: str, updates: dict[str, Any]) -> Job:
-        """Edit a not-yet-started job's configuration.
+    #: A job's configuration may be changed exactly when the job can still be
+    #: started -- the same set start_job() accepts. A running job would race the
+    #: worker, and a completed job's config describes an output that already
+    #: exists, so editing it would silently misdescribe that result.
+    EDITABLE_STATUSES = (JobStatus.PENDING, JobStatus.FAILED, JobStatus.STOPPED)
 
-        Only pending jobs may be edited: once a job has run, its config no longer
-        describes its output, and Studio has no way to re-derive that.
-        """
+    def update_job_config(self, job_id: str, updates: dict[str, Any]) -> Job:
+        """Edit the configuration of a job that has not produced a result."""
         with self._jobs_lock:
             job = self._jobs.get(job_id)
         if job is None:
             raise ValueError(f"Job {job_id} not found")
-        if job.status != JobStatus.PENDING:
+        if job.status not in self.EDITABLE_STATUSES:
+            allowed = ", ".join(s.value for s in self.EDITABLE_STATUSES)
             raise ValueError(
-                f"Only pending jobs can be edited (job is {job.status.value}). "
+                f"Job is {job.status.value}; only {allowed} jobs can be edited. "
                 "Duplicate it instead.")
         unknown = set(updates) - set(self.CONFIG_FIELDS)
         if unknown:
@@ -1082,9 +1090,16 @@ class JobRunner:
             buf.phase = "generating"
             logger.info("Starting generation for job %s (model=%s)", job.id, job.model_id)
 
+            # A named job writes <job dir>/<name>.mp4; without a name FastVideo
+            # derives the filename from the prompt, which for a six-section
+            # reference prompt is unreadable.
+            safe_name = re.sub(r'[\\/:*?"<>|]+', "", job.name).strip().strip(".")
+            output_target = (
+                os.path.join(job_output_dir, f"{safe_name[:80]}.mp4")
+                if safe_name else job_output_dir)
             gen_kwargs: dict[str, Any] = {
                 "prompt": job.prompt,
-                "output_path": job_output_dir,
+                "output_path": output_target,
                 "save_video": True,
                 "num_inference_steps": job.num_inference_steps,
                 "num_frames": job.num_frames,

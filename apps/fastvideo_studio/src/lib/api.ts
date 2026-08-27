@@ -56,6 +56,8 @@ export function getJobVideoUrl(jobId: string): string {
 
 export interface CreateJobRequest {
 	model_id: string;
+	/** Optional label; the card and output filename fall back to the prompt. */
+	name?: string;
 	prompt: string;
 	workload_type?: string;
 	job_type?: JobType;

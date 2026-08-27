@@ -65,6 +65,7 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
 
   const [isLoading, setIsLoading] = React.useState(false);
   const [isEditing, setIsEditing] = React.useState(false);
+  const [isViewing, setIsViewing] = React.useState(false);
   const [currentTime, setCurrentTime] = React.useState(() => Date.now());
 
   const elapsedTime = computeElapsed(job, currentTime);
@@ -174,14 +175,14 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
       >
         <span className="flex flex-wrap items-center justify-between gap-2">
           <span className="text-[0.95rem] font-semibold text-foreground">
-            {job.model_id}
+            {job.name?.trim() || job.model_id}
           </span>
           <Badge variant={BADGE_VARIANTS[job.status] ?? 'secondary'}>
             {job.status}
           </Badge>
         </span>
         <span className="max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-sm text-muted-foreground">
-          {job.prompt}
+          {job.name?.trim() ? `${job.model_id} · ${job.prompt}` : job.prompt}
         </span>
         <span className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
           {/* Short job id: the log files, output directory and API responses are
@@ -253,7 +254,28 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
               Download Video
             </Button>
           )}
-        {job.status === 'pending' && (
+        {!(
+          job.status === 'pending' ||
+          job.status === 'failed' ||
+          job.status === 'stopped'
+        ) && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setIsViewing(true);
+            }}
+            disabled={isLoading}
+            title="View this job's configuration"
+          >
+            View
+          </Button>
+        )}
+        {(job.status === 'pending' ||
+          job.status === 'failed' ||
+          job.status === 'stopped') && (
           <Button
             size="sm"
             variant="outline"
@@ -289,6 +311,17 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
       {/* Rendered per-card rather than lifting the modal into the page: it is
           already parameterised by jobType/workloadType, so passing the job's
           own values is enough, and only one instance is mounted at a time. */}
+      {isViewing && (
+        <CreateJobModal
+          isOpen
+          readOnly
+          editingJob={job}
+          jobType={(job.job_type ?? 'inference') as never}
+          workloadType={job.workload_type ?? 't2v'}
+          onClose={() => setIsViewing(false)}
+          onSuccess={() => setIsViewing(false)}
+        />
+      )}
       {isEditing && (
         <CreateJobModal
           isOpen

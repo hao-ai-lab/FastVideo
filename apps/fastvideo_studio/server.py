@@ -350,6 +350,7 @@ def create_job(req: CreateJobRequest) -> dict[str, Any]:
     job = job_runner.create_job(
         job_id=str(uuid.uuid4()),
         model_id=req.model_id,
+        name=req.name or "",
         prompt=req.prompt,
         workload_type=req.workload_type or "t2v",
         job_type=job_type,

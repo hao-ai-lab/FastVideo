@@ -60,6 +60,8 @@ export interface CreateJobModalProps {
   workloadType: string;
   /** When set, the modal edits this pending job instead of creating a new one. */
   editingJob?: JobLike | null;
+  /** Show the configuration without allowing changes (started/finished jobs). */
+  readOnly?: boolean;
 }
 
 export default function CreateJobModal({
@@ -69,6 +71,7 @@ export default function CreateJobModal({
   jobType,
   workloadType,
   editingJob,
+  readOnly = false,
 }: CreateJobModalProps) {
   const { options } = useStore(defaultOptionsStore);
 
@@ -78,6 +81,7 @@ export default function CreateJobModal({
 
   const [models, setModels] = React.useState<Model[]>([]);
   const [modelId, setModelId] = React.useState('');
+  const [name, setName] = React.useState('');
   const [prompt, setPrompt] = React.useState('');
   const [imagePath, setImagePath] = React.useState('');
   const [lastImagePath, setLastImagePath] = React.useState('');
@@ -210,6 +214,7 @@ export default function CreateJobModal({
       // silently edits values the user never saw.
       const f = jobToFormFields(editingJob);
       setModelId(f.modelId);
+      setName(f.name);
       setPrompt(f.prompt);
       setNegativePrompt(f.negativePrompt);
       setImagePath(f.imagePath);
@@ -271,6 +276,7 @@ export default function CreateJobModal({
         inferenceWorkload as 't2v' | 'i2v' | 't2i',
       ),
     );
+    setName('');
     setImagePath('');
     setImageFileName('');
     setLastImagePath('');
@@ -530,6 +536,7 @@ export default function CreateJobModal({
     try {
       const payload: CreateJobRequest = {
         model_id: modelId,
+        name: name.trim(),
         prompt:
           usingReferences && useGuidedPrompt && !isEmptyPromptFields(promptFields)
             ? serializeH3Prompt(promptFields)
@@ -631,7 +638,7 @@ export default function CreateJobModal({
 
   const workloadLabel =
     WORKLOAD_OPTIONS[jobType]?.find((o) => o.type === workloadType)?.label ?? '';
-  const title = `${editingJob ? 'Edit' : 'New'} ${
+  const title = `${readOnly ? 'View' : editingJob ? 'Edit' : 'New'} ${
     jobType.charAt(0).toUpperCase() + jobType.slice(1)
   } Job${workloadLabel ? ` (${workloadLabel})` : ''}`;
 
@@ -660,6 +667,21 @@ export default function CreateJobModal({
           autoComplete="off"
           className="flex flex-col gap-3.5"
         >
+          <fieldset
+            disabled={readOnly}
+            style={{ display: 'contents' }}
+            className="contents"
+          >
+          <FieldRow htmlFor="modal-name" label="Name (optional)">
+            <Input
+              id="modal-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Shown on the job card and used for the output filename"
+              disabled={isSubmitting}
+            />
+          </FieldRow>
+
           <FieldRow htmlFor="modal-modelId" label="Model">
             <NativeSelect
               id="modal-modelId"
@@ -1335,6 +1357,8 @@ export default function CreateJobModal({
             </details>
           )}
 
+          </fieldset>
+
           <div className="flex flex-col items-start gap-2">
             {submitError && (
               <p role="alert" className="text-sm text-destructive">
@@ -1343,7 +1367,9 @@ export default function CreateJobModal({
             )}
             <Button
               type="submit"
+              hidden={readOnly}
               disabled={
+                readOnly ||
                 isSubmitting ||
                 isUploadingImage ||
                 !!modelLoadError ||
