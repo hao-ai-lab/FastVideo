@@ -16,6 +16,11 @@ def main() -> None:
     parser.add_argument("--width", type=int, default=1280)
     parser.add_argument("--fps", type=int, default=16)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--return-frames",
+        action="store_true",
+        help="Return decoded frames without writing an MP4 (DreamVerse contract smoke)",
+    )
     args = parser.parse_args()
 
     generator = VideoGenerator.from_pretrained(
@@ -41,12 +46,19 @@ def main() -> None:
         "Bright blue-white sparks scatter over the metal while smoke rises, "
         "cinematic lighting, steady camera, realistic motion."
     )
-    generator.generate_video(
+    result = generator.generate_video(
         prompt,
         sampling_param=sampling,
         output_path=args.output,
-        save_video=True,
+        save_video=not args.return_frames,
+        return_frames=args.return_frames,
     )
+    if args.return_frames:
+        frames = result.get("frames") if isinstance(result, dict) else None
+        if not isinstance(frames, list) or not frames:
+            raise RuntimeError("DreamVerse contract failed: generation did not return a nonempty frames list")
+        first_shape = getattr(frames[0], "shape", None)
+        print(f"COSMOS25_DREAMVERSE_FRAMES: PASS count={len(frames)} first_shape={first_shape}")
     generator.shutdown()
 
 

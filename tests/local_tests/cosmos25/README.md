@@ -77,6 +77,16 @@ python examples/inference/basic/basic_cosmos2_5_distilled_t2w.py \
   --model /path/to/converted-model
 ```
 
+For the DreamVerse frame-return contract, rerun the small smoke without MP4
+output and require a nonempty decoded frame list:
+
+```bash
+FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA \
+python examples/inference/basic/basic_cosmos2_5_distilled_t2w.py \
+  --model /path/to/converted-model \
+  --steps 1 --frames 9 --height 256 --width 448 --return-frames
+```
+
 ## Real student DiT parity
 
 This gate loads the raw NVIDIA student into the official and FastVideo DiTs,

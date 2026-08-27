@@ -11,7 +11,7 @@
 - local_tests_readme: `tests/local_tests/cosmos25/README.md`
 
 ## Current Phase
-- phase: pipeline integration
+- phase: DreamVerse frame-return contract
 - status: in_progress
 - owner: pipeline
 - last_updated: 2026-08-27
@@ -23,7 +23,7 @@
 | student DiT | transformer | reuse Cosmos25 architecture with distilled weights | `MinimalV1LVGDiT` through distillation model | `get_x0_fn_from_batch` / `denoise_edm` | `Cosmos25Transformer3DModel` | existing | complete | non-skip BF16 pass | none |
 | Reason1 encoder | text encoder | reuse | Predict2.5 Video2World config | distilled inference CLI | existing Cosmos25 encoder | existing | packaged passthrough | production loader pass | none |
 | tokenizer VAE | VAE | reuse | Predict2.5 tokenizer | distilled inference CLI | existing Cosmos25 VAE | existing | packaged passthrough | production loader pass | none |
-| T2W pipeline | pipeline | isolated scheduler-selected route | `generate_samples_from_batch` | distilled inference CLI | Cosmos2_5 staged pipeline | in progress | complete | pending end-to-end latent/video smoke | I003 |
+| T2W pipeline | pipeline | isolated scheduler-selected route | `generate_samples_from_batch` | distilled inference CLI | Cosmos2_5 staged pipeline | complete | complete | full-resolution video and eye gate pass | none |
 
 ## Conversion State
 - conversion_script: `scripts/checkpoint_conversion/cosmos25_distilled_to_diffusers.py`
@@ -40,8 +40,10 @@
 | official scheduler | `COSMOS25_OFFICIAL_REF_DIR=/path/to/Cosmos-Predict2.5 pytest tests/local_tests/cosmos25/test_cosmos25_distilled_scheduler_parity.py -v -s` | 2 passed, non-skip | CPU-only; pinned source; 2026-08-27 |
 | conversion contracts | `pytest tests/local_tests/cosmos25/test_cosmos25_distilled_conversion.py -q` | 7 passed | Synthetic checkpoints/layout; 2026-08-27 |
 | student DiT | `COSMOS25_OFFICIAL_REF_DIR=/path/to/Cosmos-Predict2.5 COSMOS25_DISTILLED_CHECKPOINT=/path/to/distilled.pt pytest tests/local_tests/cosmos25/test_cosmos25_distilled_transformer_parity.py -v -s` | passed, non-skip | Spark BF16: first-block relative mean 0.000655; final relative mean 0.038397; 2026-08-27 |
-| pipeline contracts | `pytest tests/local_tests/cosmos25/test_cosmos25_distilled_pipeline.py -q` | pending | CPU-only sampler/stage isolation checks |
-| pipeline smoke | pending command | not run | requires converted package and CUDA |
+| pipeline contracts | `pytest tests/local_tests/cosmos25/test_cosmos25_distilled_pipeline.py -q` | 9 passed | Spark; CPU-only sampler/stage isolation checks |
+| pipeline smoke | `python examples/inference/basic/basic_cosmos2_5_distilled_t2w.py --model /path/to/converted-model --steps 1 --frames 9 --height 256 --width 448` | passed | 2.19 s end-to-end after load; 2026-08-27 |
+| full T2W quality | `python examples/inference/basic/basic_cosmos2_5_distilled_t2w.py --model /path/to/converted-model` | passed + eye gate | 704x1280x77, 4 steps; 143.53 s end-to-end after load; visually coherent |
+| DreamVerse frames | example command with `--return-frames` | pending | requires nonempty decoded `frames` list without MP4 save |
 
 ## Open Questions
 | ID | Question | Owner | Needed By Phase | Status | Resolution |
@@ -54,7 +56,7 @@
 |---|---|---|---|---|---|---|---|---|
 | I001 | parity | student DiT | high | No non-skip real-weight distilled forward comparison yet | Spark official-vs-FastVideo BF16 comparison | parity | closed | passed at final relative mean 0.038397 |
 | I002 | conversion | packaged model | high | Released official checkpoint is not yet isolated in a FastVideo-loadable component layout | Converted package and strict production load | conversion | closed | 685 clean student tensors; load pass |
-| I003 | pipeline | T2W | high | End-to-end distilled generation is not yet validated | component gates are now complete | pipeline | open | isolated route implemented; run latent/video smoke |
+| I003 | pipeline | T2W | high | End-to-end distilled generation is not yet validated | small and full-resolution Spark runs plus visual inspection | pipeline | closed | full T2W quality gate passed |
 
 ## Escape Hatches
 | ID | Phase | Decision Type | Question | Recommended Option | Status | Resolution |
@@ -70,9 +72,11 @@
 | 2026-08-27 | Preserve native `net.*` student keys during conversion | Existing Cosmos25 loader owns the authoritative mapping | Converter only isolates student tensors and emits package metadata |
 | 2026-08-27 | Accept calibrated BF16 DiT parity | Preprocess is exact, first-block drift is 0.000655 relative, and drift grows smoothly to 0.038397 final relative | Clears the component gate without claiming bitwise equality |
 | 2026-08-27 | Select distilled stages from the packaged scheduler class | The package already carries authoritative inference semantics | Existing full Cosmos2.5 packages remain on their unchanged path |
+| 2026-08-27 | Accept the full-resolution T2W quality gate | The four-step 704x1280x77 run completed without runtime faults and passed visual inspection | Clears basic FastVideo T2W support; does not claim continuation or real-time latency |
 
 ## Handoff Notes
 - CPU scheduler unit and pinned-reference parity tests pass locally without skips.
 - Released checkpoint conversion, production strict load, and official-vs-FastVideo DiT parity pass on Spark.
-- Next gate is one isolated end-to-end T2W latent/video smoke from the converted package.
+- Small and full-resolution T2W generation pass on Spark; the full video passed visual inspection.
+- Next gate is DreamVerse's `save_video=False`, `return_frames=True` result contract.
 - Do not use the prior FlowUniPC/Karras Spark run as distilled parity evidence.
