@@ -67,3 +67,20 @@ Before wiring a public pipeline or running DreamVerse:
 
 Those checks require the released checkpoint and a CUDA machine. A skipped
 local parity test is not pass evidence.
+
+## Real student DiT parity
+
+This gate loads the raw NVIDIA student into the official and FastVideo DiTs,
+runs the same small deterministic BF16 forward through each implementation, and
+compares the raw network outputs. It loads the models sequentially to limit GPU
+memory use.
+
+```bash
+export COSMOS25_OFFICIAL_REF_DIR=/path/to/Cosmos-Predict2.5
+export COSMOS25_DISTILLED_CHECKPOINT=/path/to/575edf0f-d973-4c74-b52c-69929a08d0a5_ema_bf16.pt
+
+FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA \
+pytest tests/local_tests/cosmos25/test_cosmos25_distilled_transformer_parity.py -v -s
+```
+
+The test must report `PASSED`, not `SKIPPED`, before distilled pipeline wiring.
