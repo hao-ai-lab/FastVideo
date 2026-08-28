@@ -17,7 +17,7 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS \
     --model_path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
     --real_score_model_path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
     --fake_score_model_path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
-    --inference_mode False\
+    --inference_mode False \
     --pretrained_model_name_or_path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
     --cache_dir "/home/ray/.cache" \
     --data_path "$DATA_DIR" \

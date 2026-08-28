@@ -23,10 +23,14 @@ def main(args) -> None:
 if __name__ == "__main__":
     parser = FlexibleArgumentParser()
     parser.add_argument("--pipeline_class",
+                        "--pipeline-class",
+                        dest="pipeline_class",
                         type=str,
                         required=True,
                         help="Name of the pipeline class to run, e.g., WanTrainingPipeline")
     parser.add_argument("--pipeline_module",
+                        "--pipeline-module",
+                        dest="pipeline_module",
                         type=str,
                         required=True,
                         help="Module containing the pipeline class, e.g., fastvideo.training.wan_training_pipeline")
