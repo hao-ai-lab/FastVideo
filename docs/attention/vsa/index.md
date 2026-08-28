@@ -6,6 +6,33 @@ Sparse attention mechanism selecting top-k blocks.
 
 VSA is included in the `fastvideo-kernel` package. See the [main Attention page](../index.md) for build instructions.
 
+## Apple Silicon (MiniMax H3 / FastH3)
+
+The native MLX runtime has an inference-only H3 VSA path that is separate from
+the CUDA `fastvideo-kernel` package:
+
+- **INT8 / INT6 / INT4** are **weight-only**. They cover linear matrices,
+  including `attn.to_gate_compress` when you convert with `--include-vsa`.
+  Attention Q/K/V stay BF16 (or the selected activation dtype). There is no
+  INT6 Q/K/V attention kernel.
+- **Dense-only checkpoints** (the default converter) drop the 50 gate
+  matrices and keep fused SDPA. They remain valid for dense inference.
+- **VSA-capable checkpoints** retain those gates, quantize them on the same
+  affine grid, and record `vsa.capable` in `mlx_h3_dit.json`. Runtime VSA is
+  still off until you pass `--vsa`.
+- **Tile sizes** 64 `(4, 4, 4)` and 256 `(4, 8, 8)`. Prefix keys can be
+  `exempt` or `compete`. `--vsa-dense-first-n-steps` and `--vsa-dense-layers`
+  force dense SDPA on the selected steps or blocks.
+- **`--vsa-impl auto`** uses the chunked gather+SDPA **reference** path. Pass
+  `--vsa-impl metal` to run the inference-only Metal block-sparse kernel
+  (`mx.fast.metal_kernel`). On MLX 0.31.2 the Metal kernel is a correctness
+  path, not a speedup versus fused SDPA. Use `--vsa-impl reference` for
+  explicit parity tests.
+
+See the [Apple Silicon guide](../../getting_started/installation/mps.md) for
+conversion and `mlx_fasth3.py` flags. Do not enable VSA on a dense-only
+checkpoint; reconvert with `--include-vsa` first.
+
 ## Usage
 
 ```python
