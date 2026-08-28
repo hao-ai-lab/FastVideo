@@ -28,6 +28,7 @@ class OpenAIServingEngine:
         self._generator = generator
         self._generation_lock = asyncio.Lock()
         self._closed = False
+        self._unhealthy_reason: str | None = None
 
     @property
     def generator(self) -> VideoGenerator:
@@ -37,17 +38,48 @@ class OpenAIServingEngine:
     def closed(self) -> bool:
         return self._closed
 
-    async def generate(self, request: GenerationRequest) -> Any:
-        """Generate one typed request without blocking the event loop."""
-        return await self.run_serialized(self._generator.generate, request)
+    @property
+    def healthy(self) -> bool:
+        if self._closed or self._unhealthy_reason is not None:
+            return False
+        executor = getattr(self._generator, "executor", None)
+        workers = getattr(executor, "workers", None)
+        if workers is None:
+            return True
+        return bool(workers) and all(worker.proc.is_alive() for worker in workers)
 
-    async def run_serialized(self, function: Callable[..., _T], *args: Any, **kwargs: Any) -> _T:
+    @property
+    def unhealthy_reason(self) -> str | None:
+        if self._unhealthy_reason is not None:
+            return self._unhealthy_reason
+        if not self.healthy:
+            return "one or more generation workers are not alive"
+        return None
+
+    async def generate(
+        self,
+        request: GenerationRequest,
+        *,
+        on_start: Callable[[], Awaitable[None]] | None = None,
+    ) -> Any:
+        """Generate one typed request without blocking the event loop."""
+        return await self.run_serialized(self._generator.generate, request, on_start=on_start)
+
+    async def run_serialized(
+        self,
+        function: Callable[..., _T],
+        *args: Any,
+        on_start: Callable[[], Awaitable[None]] | None = None,
+        **kwargs: Any,
+    ) -> _T:
         """Run a synchronous pipeline operation under the serving lock."""
         if self._closed:
             raise RuntimeError("FastVideo serving engine is shutting down")
         async with self._generation_lock:
             if self._closed:
                 raise RuntimeError("FastVideo serving engine is shutting down")
+            if on_start is not None:
+                await on_start()
             worker = asyncio.create_task(asyncio.to_thread(function, *args, **kwargs))
             try:
                 return await asyncio.shield(worker)
@@ -55,7 +87,10 @@ class OpenAIServingEngine:
                 # Python cannot stop a running worker thread. Keep the lock
                 # until the pipeline call really exits so cancellation cannot
                 # expose mutable model state to a second request.
-                await asyncio.shield(worker)
+                await self._wait_after_cancellation(worker)
+                raise
+            except (BrokenPipeError, EOFError) as error:
+                self._unhealthy_reason = str(error)
                 raise
 
     async def run_async_serialized(self, function: Callable[[], Awaitable[_T]]) -> _T:
@@ -69,8 +104,21 @@ class OpenAIServingEngine:
             try:
                 return await asyncio.shield(worker)
             except asyncio.CancelledError:
-                await asyncio.shield(worker)
+                await self._wait_after_cancellation(worker)
                 raise
+
+    @staticmethod
+    async def _wait_after_cancellation(worker: asyncio.Future[Any]) -> None:
+        """Keep waiting for an uninterruptible worker despite repeated cancellation."""
+        while not worker.done():
+            try:
+                await asyncio.shield(worker)
+            except asyncio.CancelledError:
+                continue
+            except Exception:
+                break
+        if not worker.cancelled():
+            worker.exception()
 
     async def shutdown(self) -> None:
         """Stop accepting requests and release the generator after in-flight work."""

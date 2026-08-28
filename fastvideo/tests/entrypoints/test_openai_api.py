@@ -207,10 +207,9 @@ class TestVideoBuildGenerationKwargs:
         kw = self._build(seed=123)
         assert kw["seed"] == 123
 
-    def test_custom_output_path_overrides_default(self, tmp_path):
-        custom = str(tmp_path / "custom")
-        kw = self._build(output_path=custom)
-        assert kw["output_path"].startswith(custom)
+    def test_client_output_path_is_rejected(self, tmp_path):
+        with pytest.raises(Exception, match="output_path"):
+            self._build(output_path=str(tmp_path / "custom"))
 
 
 # ---------------------------------------------------------------------------
@@ -291,22 +290,14 @@ class TestVideoDefaultRequestMerge:
         assert kw["width"] == 640
         assert kw["height"] == 360
 
-    def test_default_output_path_used_as_output_dir(self, tmp_path):
+    def test_default_output_path_does_not_escape_server_directory(self, tmp_path):
         custom = str(tmp_path / "from_default")
         kw = self._build(default_raw={"output": {"output_path": custom}})
-        assert kw["output_path"].startswith(custom)
+        assert kw["output_path"].startswith(os.path.join(str(tmp_path), "videos"))
 
-    def test_body_output_path_overrides_default(self, tmp_path):
-        body_dir = str(tmp_path / "body")
-        default_dir = str(tmp_path / "default")
-        kw = self._build(
-            default_raw={"output": {
-                "output_path": default_dir
-            }},
-            output_path=body_dir,
-        )
-        assert kw["output_path"].startswith(body_dir)
-        assert default_dir not in kw["output_path"]
+    def test_body_output_path_is_not_public(self, tmp_path):
+        with pytest.raises(Exception, match="output_path"):
+            self._build(output_path=str(tmp_path / "body"))
 
     def test_default_negative_prompt_flows_through(self):
         kw = self._build(default_raw={"negative_prompt": "low quality, blur"})

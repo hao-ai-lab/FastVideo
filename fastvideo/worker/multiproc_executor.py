@@ -34,6 +34,16 @@ from fastvideo.worker.executor import Executor
 from fastvideo.worker.worker_base import WorkerWrapperBase
 
 logger = init_logger(__name__)
+_RPC_ERROR_KEY = "__fastvideo_rpc_error__"
+
+
+def _raise_for_rpc_errors(method: str | Callable, responses: list[Any]) -> None:
+    errors = []
+    for rank, response in enumerate(responses):
+        if isinstance(response, dict) and response.get(_RPC_ERROR_KEY):
+            errors.append(f"worker {rank}: {response.get('error', 'unknown error')}")
+    if errors:
+        raise RuntimeError(f"RPC {method!r} failed: " + "; ".join(errors))
 
 
 def _make_queue_log_handler(log_queue: Queue) -> logging.Handler:
@@ -285,6 +295,7 @@ class MultiprocExecutor(Executor):
             for worker in self.workers:
                 response = worker.pipe.recv()
                 responses.append(response)
+            _raise_for_rpc_errors(method, responses)
             return responses
         except TimeoutError as e:
             raise TimeoutError(f"RPC call to {method} timed out.") from e
@@ -314,7 +325,9 @@ class MultiprocExecutor(Executor):
             return await loop.run_in_executor(None, worker.pipe.recv)
 
         responses = await asyncio.gather(*[recv_from_worker(worker) for worker in self.workers])
-        return list(responses)
+        result = list(responses)
+        _raise_for_rpc_errors(method, result)
+        return result
 
     def shutdown(self) -> None:
         """Properly shut down the executor and its workers"""
@@ -710,6 +723,9 @@ class WorkerMultiprocProc:
                 else:
                     result = self.worker.execute_method(method, *args, **kwargs)
                     self.pipe.send(result)
+            except EOFError:
+                logger.info("Worker %d RPC pipe closed; exiting event loop", self.rank)
+                break
             except KeyboardInterrupt:
                 logger.error("Worker %d in loop received KeyboardInterrupt, aborting forward pass", self.rank)
                 try:
@@ -718,6 +734,17 @@ class WorkerMultiprocProc:
                 except Exception as e:
                     logger.error("Worker %d failed to send error response: %s", self.rank, str(e))
                 continue
+            except Exception as error:
+                logger.exception("Worker %d failed RPC without exiting", self.rank)
+                try:
+                    self.pipe.send({
+                        _RPC_ERROR_KEY: True,
+                        "error": f"{type(error).__name__}: {error}",
+                        "traceback": get_exception_traceback(),
+                    })
+                except Exception:
+                    logger.exception("Worker %d could not return its RPC error", self.rank)
+                    break
 
     def streaming_queue_loop(self) -> None:
         if self.streaming_input_queue is None or self.streaming_output_queue is None:

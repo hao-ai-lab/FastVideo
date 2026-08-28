@@ -6,7 +6,7 @@ import uuid
 from enum import Enum
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 
 class ImageResponseData(BaseModel):
@@ -82,7 +82,7 @@ class FileImageReference(BaseModel):
 
 class UrlImageReference(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    image_url: str
+    image_url: str = Field(min_length=1)
 
 
 ImageReference = UrlImageReference | FileImageReference
@@ -95,7 +95,7 @@ class FileVideoReference(BaseModel):
 
 class UrlVideoReference(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    video_url: str
+    video_url: str = Field(min_length=1)
 
 
 VideoReference = UrlVideoReference | FileVideoReference
@@ -103,7 +103,7 @@ VideoReference = UrlVideoReference | FileVideoReference
 
 class UrlAudioReference(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    audio_url: str
+    audio_url: str = Field(min_length=1)
 
 
 AudioReference = UrlAudioReference
@@ -117,11 +117,11 @@ class VideoGenerationRequest(BaseModel):
     predate vLLM-Omni's typed reference objects.
     """
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
-    prompt: str
+    prompt: str = Field(min_length=1)
     model: str | None = None
-    seconds: int | SecondStr | None = None
+    seconds: Annotated[int, Field(ge=1, le=_INT64_MAX)] | SecondStr | None = None
     size: SizeStr | None = None
     image_reference: ImageReference | list[ImageReference] | None = None
     video_reference: VideoReference | list[VideoReference] | None = None
@@ -145,7 +145,7 @@ class VideoGenerationRequest(BaseModel):
     # SGLang spelling retained as an alias-like input field.
     n: int | None = Field(default=None, ge=1, le=10)
     start_time_seconds: float | None = Field(default=None, ge=0.0)
-    quality: str | None = None
+    quality: Literal["auto", "default", "standard", "hd"] | None = None
     negative_prompt: str | None = None
     num_inference_steps: int | None = Field(default=None, ge=1, le=200)
     guidance_scale: float | None = Field(default=None, ge=0.0, le=20.0)
@@ -166,7 +166,13 @@ class VideoGenerationRequest(BaseModel):
 
     lora: dict[str, Any] | None = None
     extra_params: dict[str, Any] | None = None
-    output_path: str | None = None
+
+    @field_validator("prompt")
+    @classmethod
+    def validate_prompt(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("prompt must not be empty")
+        return value
 
     def resolve_video_params(self) -> VideoParams:
         """Resolve top-level, nested, and ``size`` dimensions like vLLM-Omni."""

@@ -51,6 +51,8 @@ def get_output_dir() -> str:
 def get_served_model_name() -> str:
     """Return the public model id advertised by the OpenAI server."""
     args = get_server_args()
+    if args.lora_path:
+        return args.lora_nickname
     return _served_model_name or args.model_path
 
 
