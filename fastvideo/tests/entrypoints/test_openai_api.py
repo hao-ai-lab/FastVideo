@@ -426,8 +426,8 @@ class TestProtocolModels:
 
     def test_video_request_defaults(self):
         req = VideoGenerationsRequest(prompt="hello")
-        assert req.seconds == 4
-        assert req.seed == 1024
+        assert req.seconds is None
+        assert req.seed is None
 
     def test_video_response_defaults(self):
         resp = VideoResponse(id="v1")
