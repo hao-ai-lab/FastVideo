@@ -206,10 +206,10 @@ python examples/inference/basic/mlx_fasth3.py \
   --output-path ./outputs/fasth3_int6_vsa_720p.mp4
 ```
 
-`--vsa-impl auto` uses the chunked gather+SDPA **reference** path. The Metal
-block-sparse kernel is available as `--vsa-impl metal` for parity experiments;
-on MLX 0.31.2 it is much slower than fused SDPA at 720p, so it is not the
-default. `--vsa-impl reference` is the same as `auto` today.
+`--vsa-impl auto` uses the chunked gather+SDPA **reference** path.
+`--vsa-impl simd` is an opt-in SIMD-group kernel (tile 64, head dim 128) that
+falls back to reference on unsupported shapes. It is not the default.
+`--vsa-impl reference` is the same as `auto`.
 
 !!! note "Current MLX scope"
     This source runtime supports T2VA, temporal `--fast`, and opt-in VSA.

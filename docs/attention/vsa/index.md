@@ -23,11 +23,12 @@ the CUDA `fastvideo-kernel` package:
 - **Tile sizes** 64 `(4, 4, 4)` and 256 `(4, 8, 8)`. Prefix keys can be
   `exempt` or `compete`. `--vsa-dense-first-n-steps` and `--vsa-dense-layers`
   force dense SDPA on the selected steps or blocks.
-- **`--vsa-impl auto`** uses the chunked gather+SDPA **reference** path. Pass
-  `--vsa-impl metal` to run the inference-only Metal block-sparse kernel
-  (`mx.fast.metal_kernel`). On MLX 0.31.2 the Metal kernel is a correctness
-  path, not a speedup versus fused SDPA. Use `--vsa-impl reference` for
-  explicit parity tests.
+- **`--vsa-impl auto`** uses the chunked gather+SDPA **reference** path.
+  `--vsa-impl simd` runs the SIMD-group Metal kernel (tile 64, head dim 128)
+  and falls back to reference on unsupported shapes or compilation failure.
+  It is not the default: 480p four-step generation is faster than reference
+  but does not yet match reference video. `--vsa-impl reference` is the same
+  as `auto`.
 
 See the [Apple Silicon guide](../../getting_started/installation/mps.md) for
 conversion and `mlx_fasth3.py` flags. Do not enable VSA on a dense-only

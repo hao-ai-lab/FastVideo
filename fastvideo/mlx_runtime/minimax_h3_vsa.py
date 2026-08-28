@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # mypy: disable-error-code=no-untyped-call
-"""Inference-only MiniMax H3 Video Sparse Attention for the MLX runtime.
+"""MiniMax H3 Video Sparse Attention for the native MLX runtime.
 
 Ports the packed-sequence VSA-H3 contract from
 ``fastvideo/attention/backends/video_sparse_attn_h3.py``:
@@ -13,16 +13,13 @@ Ports the packed-sequence VSA-H3 contract from
 - Optional dense-first steps and per-layer dense overrides.
 - Trained ``to_gate_compress`` pooled-compression branch.
 
-Two execution paths:
+Execution backends:
 
 - **reference** (``auto`` default) — grouped gather plus batched
-  ``mx.fast.scaled_dot_product_attention``. Correctness baseline. On MLX 0.31.2
-  / M4 Max this is close to dense fused SDPA at 720p; the Metal kernel is not.
-- **metal** — inference-only ``mx.fast.metal_kernel`` block-sparse attention
-  over BF16 Q/K/V activations and an explicit per-query block index. Kept for
-  parity testing. INT6 applies only to linear weights (including the gate
-  projection), not to Q/K/V. ``compile_options`` is used on MLX 0.32.2+ and
-  omitted on 0.31.2.
+  ``mx.fast.scaled_dot_product_attention``. Correctness baseline.
+- **simd** — opt-in SIMD-group 8x8 matrix operations over the reference tile
+  map for tile size 64 and head dimension 128. Unsupported shapes and kernel
+  failures fall back to the reference backend.
 
 Dense fused SDPA remains the default when VSA is disabled, the geometry is
 unsupported, or a dense-only checkpoint is loaded.
@@ -46,12 +43,14 @@ VSA_H3_TILE_SHAPES: dict[int, tuple[int, int, int]] = {
 }
 VSA_GATE_KEY_SUFFIX = "attn.to_gate_compress.weight"
 VSA_PREFIX_MODES = ("exempt", "compete")
-VSA_IMPLS = ("auto", "reference", "metal")
-_METAL_MAX_HEAD_DIM = 128
+PUBLIC_VSA_IMPLS = ("auto", "reference", "simd")
+VSA_IMPLS = PUBLIC_VSA_IMPLS
+# SIMD is opt-in until its dynamically routed output is accepted as the default.
+_AUTO_PREFERS_SIMD = False
 _REFERENCE_FULL_MASK_TILE_LIMIT = 24
 
 PrefixMode = Literal["exempt", "compete"]
-VSAImpl = Literal["auto", "reference", "metal"]
+VSAImpl = Literal["auto", "reference", "simd"]
 
 
 class DenseOnlyVSACheckpointError(ValueError):
@@ -516,8 +515,7 @@ def _reference_gather_sdpa(
 
     Full-sequence gather at 720p materializes tens of GiB of selected K/V, so
     query tiles are processed in memory-bounded chunks. This is the correctness
-    baseline and the default ``auto`` path: on MLX 0.31.2 / M4 Max the fused
-    SDPA gather is much faster than the scalar Metal kernel.
+    baseline and the default ``auto`` path.
     """
     import mlx.core as mx
 
@@ -554,216 +552,6 @@ def _reference_gather_sdpa(
     return mx.concatenate([prefix, video_flat], axis=0)
 
 
-_METAL_KERNEL = None
-_METAL_KERNEL_ERROR: str | None = None
-
-# Cooperative K/V staging: 32 tokens x 128 dims x 4 bytes = 16 KiB of threadgroup
-# memory. Every query thread in the tile reuses that staging buffer instead of
-# reloading the same K/V rows from device memory. Do not early-return before
-# barriers — padded query lanes still participate.
-_METAL_SOURCE = """
-    const int CHUNK = 32;
-    const int MAXD = 128;
-    threadgroup float smem[32 * 128];
-    uint token = thread_position_in_grid.x;
-    uint q_tile = thread_position_in_grid.y;
-    uint head = thread_position_in_grid.z;
-    uint tid = thread_position_in_threadgroup.x;
-    uint nthreads = threads_per_threadgroup.x;
-    int D = meta_i[0];
-    int TILE = meta_i[1];
-    int S = meta_i[2];
-    int k_max = meta_i[4];
-    int n_prefix = meta_i[5];
-    int n_video = meta_i[6];
-    float scale = meta_f[0];
-    if ((int)token >= TILE || (int)q_tile >= n_video || (int)head >= (int)q_shape[0]) {
-        return;
-    }
-    int qt = n_prefix + (int)q_tile;
-    int q_valid = vbs[qt];
-    int q_base = (((int)head * S) + qt * TILE + (int)token) * D;
-    float qreg[128];
-    for (int d = 0; d < MAXD; d++) {
-        qreg[d] = (d < D && (int)token < q_valid) ? float(q[q_base + d]) : 0.0f;
-    }
-    int nsel = block_num[(int)head * n_video + (int)q_tile];
-    float m = -3.402823466e+38f;
-    float lse = 0.0f;
-    float acc[128];
-    for (int d = 0; d < MAXD; d++) {
-        acc[d] = 0.0f;
-    }
-    for (int s = 0; s < nsel; s++) {
-        int kt = block_idx[(((int)head * n_video) + (int)q_tile) * k_max + s];
-        int k_valid = vbs[kt];
-        int tile_base = (((int)head * S) + kt * TILE) * D;
-        for (int j0 = 0; j0 < TILE; j0 += CHUNK) {
-            int n_elems = CHUNK * MAXD;
-            for (uint i = tid; (int)i < n_elems; i += nthreads) {
-                int tok = (int)i / MAXD;
-                int d = (int)i - tok * MAXD;
-                int gtok = j0 + tok;
-                float val = 0.0f;
-                if (gtok < k_valid && gtok < TILE && d < D) {
-                    val = float(k[tile_base + gtok * D + d]);
-                }
-                smem[i] = val;
-            }
-            threadgroup_barrier(metal::mem_flags::mem_threadgroup);
-            float scores[32];
-            float cmax = -3.402823466e+38f;
-            for (int t = 0; t < CHUNK; t++) {
-                int gtok = j0 + t;
-                float score = 0.0f;
-                if (gtok < k_valid && gtok < TILE) {
-                    int sbase = t * MAXD;
-                    for (int d = 0; d < D && d < MAXD; d++) {
-                        score += qreg[d] * smem[sbase + d];
-                    }
-                    score *= scale;
-                } else {
-                    score = -3.402823466e+38f;
-                }
-                scores[t] = score;
-                cmax = metal::max(cmax, score);
-            }
-            float m_new = metal::max(m, cmax);
-            float alpha = metal::exp(m - m_new);
-            lse *= alpha;
-            for (int d = 0; d < D && d < MAXD; d++) {
-                acc[d] *= alpha;
-            }
-            m = m_new;
-            threadgroup_barrier(metal::mem_flags::mem_threadgroup);
-            for (uint i = tid; (int)i < n_elems; i += nthreads) {
-                int tok = (int)i / MAXD;
-                int d = (int)i - tok * MAXD;
-                int gtok = j0 + tok;
-                float val = 0.0f;
-                if (gtok < k_valid && gtok < TILE && d < D) {
-                    val = float(v[tile_base + gtok * D + d]);
-                }
-                smem[i] = val;
-            }
-            threadgroup_barrier(metal::mem_flags::mem_threadgroup);
-            for (int t = 0; t < CHUNK; t++) {
-                float weight = ((j0 + t) < k_valid && (j0 + t) < TILE) ? metal::exp(scores[t] - m) : 0.0f;
-                lse += weight;
-                int sbase = t * MAXD;
-                for (int d = 0; d < D && d < MAXD; d++) {
-                    acc[d] += weight * smem[sbase + d];
-                }
-            }
-            threadgroup_barrier(metal::mem_flags::mem_threadgroup);
-        }
-    }
-    float denom = lse > 0.0f ? lse : 1.0f;
-    for (int d = 0; d < D && d < MAXD; d++) {
-        out[q_base + d] = ((int)token < q_valid) ? T(acc[d] / denom) : T(0);
-    }
-"""
-
-
-def metal_kernel_available() -> bool:
-    try:
-        import mlx.core as mx
-    except ImportError:
-        return False
-    return hasattr(getattr(mx, "fast", None), "metal_kernel")
-
-
-def _metal_kernel():
-    global _METAL_KERNEL, _METAL_KERNEL_ERROR
-    if _METAL_KERNEL is not None:
-        return _METAL_KERNEL
-    if _METAL_KERNEL_ERROR is not None:
-        return None
-    try:
-        import mlx.core as mx
-
-        if not hasattr(mx.fast, "metal_kernel"):
-            _METAL_KERNEL_ERROR = "mx.fast.metal_kernel is not available in this MLX build"
-            return None
-        kwargs = {
-            "name": "h3_vsa_block_sparse",
-            "input_names": ["q", "k", "v", "block_idx", "block_num", "vbs", "meta_i", "meta_f"],
-            "output_names": ["out"],
-            "source": _METAL_SOURCE,
-        }
-        try:
-            # MLX 0.32.2+ accepts compile_options (math_mode=safe).
-            _METAL_KERNEL = mx.fast.metal_kernel(**kwargs, compile_options={"math_mode": "safe"})
-        except TypeError:
-            # MLX 0.31.2's metal_kernel() has no compile_options argument.
-            _METAL_KERNEL = mx.fast.metal_kernel(**kwargs)
-    except Exception as error:  # noqa: BLE001 - keep dense/reference usable
-        _METAL_KERNEL_ERROR = str(error)
-        _METAL_KERNEL = None
-    return _METAL_KERNEL
-
-
-def metal_supported(head_dim: int, tile_elems: int) -> bool:
-    if not (0 < head_dim <= _METAL_MAX_HEAD_DIM and tile_elems in VSA_H3_TILE_SHAPES):
-        return False
-    return _metal_kernel() is not None
-
-
-def _metal_block_sparse(
-    q_tiled,
-    k_tiled,
-    v_tiled,
-    block_idx,
-    block_num,
-    geometry: MiniMaxH3VSAGeometry,
-    scale: float,
-):
-    import mlx.core as mx
-
-    kernel = _metal_kernel()
-    if kernel is None:
-        raise RuntimeError(_METAL_KERNEL_ERROR or "Metal VSA kernel is unavailable")
-    heads, dim = q_tiled.shape[1], q_tiled.shape[2]
-    q = mx.contiguous(q_tiled.transpose(1, 0, 2))  # [H, S, D]
-    k = mx.contiguous(k_tiled.transpose(1, 0, 2))
-    v = mx.contiguous(v_tiled.transpose(1, 0, 2))
-    meta_i = mx.array(
-        [
-            dim,
-            geometry.tile_elems,
-            geometry.padded_length,
-            geometry.num_tiles,
-            int(block_idx.shape[-1]),
-            geometry.num_prefix_tiles,
-            geometry.num_video_tiles,
-        ],
-        dtype=mx.int32,
-    )
-    meta_f = mx.array([scale], dtype=mx.float32)
-    call_kwargs = {
-        "inputs": [
-            q,
-            k,
-            v,
-            mx.contiguous(block_idx.astype(mx.int32)),
-            mx.contiguous(block_num.astype(mx.int32)),
-            mx.array(geometry.variable_block_sizes.astype(np.int32)),
-            meta_i,
-            meta_f,
-        ],
-        "template": [("T", q.dtype)],
-        "grid": (geometry.tile_elems, geometry.num_video_tiles, heads),
-        "threadgroup": (min(geometry.tile_elems, 256), 1, 1),
-        "output_shapes": [q.shape],
-        "output_dtypes": [q.dtype],
-    }
-    try:
-        outputs = kernel(**call_kwargs, init_value=0)
-    except TypeError:
-        outputs = kernel(**call_kwargs)
-    return outputs[0].transpose(1, 0, 2)
-
-
 def _gate_compress_output(scores, v_tiled, gate_tiled, geometry: MiniMaxH3VSAGeometry):
     import mlx.core as mx
 
@@ -777,17 +565,24 @@ def _gate_compress_output(scores, v_tiled, gate_tiled, geometry: MiniMaxH3VSAGeo
 
 
 def resolve_impl(requested: VSAImpl, head_dim: int, tile_elems: int) -> str:
-    if requested == "reference":
+    if requested in ("reference", "auto") and not _AUTO_PREFERS_SIMD:
         return "reference"
-    if requested == "metal":
-        if not metal_supported(head_dim, tile_elems):
-            reason = _METAL_KERNEL_ERROR or "Metal VSA kernel is unavailable for this shape"
-            raise RuntimeError(reason)
-        return "metal"
-    # Measured on M4 Max / MLX 0.31.2 at 720p (H=56, D=128, tile=64, sparsity=0.9):
-    # dense fused SDPA ~2.5s, chunked gather+SDPA ~2.9s, Metal kernel ~29s.
-    # Prefer the gather reference unless the caller explicitly asked for Metal.
-    return "reference"
+
+    from fastvideo.mlx_runtime.minimax_h3_vsa_simd import simd_kernel_available, simd_kernel_error
+
+    if tile_elems != 64 or head_dim != 128:
+        if requested == "simd":
+            logger.warning(
+                "SIMD VSA requires tile 64 and head dim 128 (got tile=%s head_dim=%s); using reference VSA",
+                tile_elems,
+                head_dim,
+            )
+        return "reference"
+    if not simd_kernel_available():
+        reason = simd_kernel_error() or "SIMD-group VSA kernel is unavailable"
+        logger.warning("SIMD VSA kernel unavailable (%s); using reference VSA", reason)
+        return "reference"
+    return "simd"
 
 
 def h3_vsa_attention(
@@ -847,8 +642,17 @@ def h3_vsa_attention(
         )
         chosen = resolve_impl(impl, dim, geometry.tile_elems)
         prefix_out = _dense_sdpa(query[:geometry.prefix_length], key, value, scale)
-        if chosen == "metal":
-            video_tiled = _metal_block_sparse(q_tiled, k_tiled, v_tiled, block_idx, block_num, geometry, scale)
+        if chosen == "simd":
+            from fastvideo.mlx_runtime.minimax_h3_vsa_simd import simd_block_sparse
+
+            try:
+                video_tiled = simd_block_sparse(q_tiled, k_tiled, v_tiled, block_idx, block_num, geometry, scale)
+            except Exception as error:  # noqa: BLE001 - keep generation alive on kernel failure
+                logger.warning("SIMD VSA kernel failed (%s); falling back to reference gather+SDPA", error)
+                chosen = "reference"
+                if stats is not None:
+                    stats.dense_fallback_reason = f"simd kernel failed: {error}"
+                video_tiled = _reference_gather_sdpa(q_tiled, k_tiled, v_tiled, block_idx, geometry, scale)
             out_tiled = video_tiled
         elif geometry.num_tiles <= _REFERENCE_FULL_MASK_TILE_LIMIT:
             scores_np = np.array(scores, dtype=np.float32)

@@ -63,7 +63,6 @@ from fastvideo.mlx_runtime.fastwan import (
     ensure_quantization_supported,
     linear,
     quantize_matrix,
-    rms_norm,
     silu,
     timestep_embedding,
     weight_dtype,
@@ -510,6 +509,13 @@ def _gate_weight_is_active(weight: Any) -> bool:
     return bool(mx.any(weight != 0).item())
 
 
+def _h3_rms_norm(x, weight, eps: float):
+    """Use MLX's fused normalization kernel for H3's last-axis RMSNorm."""
+    import mlx.core as mx
+
+    return mx.fast.rms_norm(x, weight, eps)
+
+
 def _attention(
     weights: dict[str, Any],
     x,
@@ -534,8 +540,8 @@ def _attention(
     q = linear(x, weights["attn.to_q.weight"]).reshape(seq_len, num_heads, head_dim)
     k = linear(x, weights["attn.to_k.weight"]).reshape(seq_len, num_heads, head_dim)
     v = linear(x, weights["attn.to_v.weight"]).reshape(seq_len, num_heads, head_dim)
-    q = rms_norm(q, weights["attn.norm_q.weight"], eps=eps)
-    k = rms_norm(k, weights["attn.norm_k.weight"], eps=eps)
+    q = _h3_rms_norm(q, weights["attn.norm_q.weight"], eps)
+    k = _h3_rms_norm(k, weights["attn.norm_k.weight"], eps)
     if use_rope:
         q = apply_h3_rotary(q, cos, sin)
         k = apply_h3_rotary(k, cos, sin)
@@ -561,14 +567,13 @@ def _attention(
         if vsa_stats is not None and use_rope:
             vsa_stats.impl = "dense"
             vsa_stats.dense_fallback_reason = None if vsa_geometry is None else "dense schedule or disabled VSA"
-        # contiguous() guards against MLX fused-SDPA mis-computation on strided views.
         attended = mx.fast.scaled_dot_product_attention(
-            mx.contiguous(q.transpose(1, 0, 2))[None],
-            mx.contiguous(k.transpose(1, 0, 2))[None],
-            mx.contiguous(v.transpose(1, 0, 2))[None],
+            q.transpose(1, 0, 2)[None],
+            k.transpose(1, 0, 2)[None],
+            v.transpose(1, 0, 2)[None],
             scale=head_dim**-0.5,
         )[0].transpose(1, 0, 2)
-    attended = mx.contiguous(attended.reshape(seq_len, num_heads * head_dim))
+    attended = attended.reshape(seq_len, num_heads * head_dim)
     return linear(attended, weights["attn.to_out.0.weight"])
 
 
@@ -617,7 +622,7 @@ def _transformer_block(
     shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = tables
 
     residual = hidden_states
-    normed = rms_norm(hidden_states, weights["norm1.weight"], eps=norm_eps)
+    normed = _h3_rms_norm(hidden_states, weights["norm1.weight"], norm_eps)
     normed = normed * (1.0 + scale_msa[adaln_indices]) + shift_msa[adaln_indices]
     attn_output = _attention(
         weights,
@@ -638,7 +643,7 @@ def _transformer_block(
     hidden_states = residual + gate_msa[adaln_indices] * attn_output
 
     residual = hidden_states
-    normed = rms_norm(hidden_states, weights["norm2.weight"], eps=norm_eps)
+    normed = _h3_rms_norm(hidden_states, weights["norm2.weight"], norm_eps)
     normed = normed * (1.0 + scale_mlp[adaln_indices]) + shift_mlp[adaln_indices]
     ff_output = _feed_forward(weights, normed.astype(weight_dtype(weights["ff.net.0.proj.weight"])))
     return residual + gate_mlp[adaln_indices] * ff_output
@@ -654,7 +659,7 @@ def _refiner_block(
     qk_norm_eps: float,
 ):
     residual = hidden_states
-    normed = rms_norm(hidden_states, weights["norm1.weight"], eps=norm_eps)
+    normed = _h3_rms_norm(hidden_states, weights["norm1.weight"], norm_eps)
     attn_output = _attention(
         weights,
         normed.astype(weight_dtype(weights["attn.to_q.weight"])),
@@ -666,7 +671,7 @@ def _refiner_block(
         use_rope=False,
     )
     hidden_states = residual + attn_output
-    normed = rms_norm(hidden_states, weights["norm2.weight"], eps=norm_eps)
+    normed = _h3_rms_norm(hidden_states, weights["norm2.weight"], norm_eps)
     return hidden_states + _feed_forward(weights, normed.astype(weight_dtype(weights["ff.net.0.proj.weight"])))
 
 
@@ -768,7 +773,7 @@ class MLXMiniMaxH3DiT:
                 norm_eps=self.norm_eps,
                 qk_norm_eps=self.qk_norm_eps,
             )
-        return rms_norm(hidden, self.weights["token_refiner.final_norm.weight"], eps=self.final_norm_eps)
+        return _h3_rms_norm(hidden, self.weights["token_refiner.final_norm.weight"], self.final_norm_eps)
 
     # -- AdaLN cache --------------------------------------------------------
 
@@ -925,7 +930,7 @@ class MLXMiniMaxH3DiT:
             self.weights["norm_out.linear.bias"],
         )
         shift_rows, scale_rows = mx.split(shift_scale, 2, axis=-1)
-        normed = rms_norm(packed, self.weights["norm_out.norm.weight"], eps=self.final_norm_eps)
+        normed = _h3_rms_norm(packed, self.weights["norm_out.norm.weight"], self.final_norm_eps)
         normed = normed * (1.0 + scale_rows[timestep_indices]) + shift_rows[timestep_indices]
         video_output = linear(
             normed[_as_mx_indices(video_indices)].astype(weight_dtype(self.weights["proj_out.weight"])),
@@ -1011,7 +1016,7 @@ class MLXMiniMaxH3DiT:
             mx.eval(packed)
 
         row_positions = positions[row_inverse]
-        normed = rms_norm(packed, self.weights["norm_out.norm.weight"], eps=self.final_norm_eps)
+        normed = _h3_rms_norm(packed, self.weights["norm_out.norm.weight"], self.final_norm_eps)
         normed = normed * (1.0 + cache.norm_out_scale[row_positions]) + cache.norm_out_shift[row_positions]
         video_output = linear(
             normed[mx.array(layout.video_indices)].astype(weight_dtype(self.weights["proj_out.weight"])),

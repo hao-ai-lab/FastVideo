@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""MLX MiniMax H3 VSA: geometry, routing, attention, converter, and Metal parity.
+"""MLX MiniMax H3 VSA: geometry, routing, conversion, and SIMD parity.
 
 None of these tests require a CUDA GPU. Geometry and routing compare against
 the CPU PyTorch H3 backend; attention tests use tiny deterministic MLX tensors.
@@ -33,18 +33,20 @@ from fastvideo.mlx_runtime.minimax_h3 import (  # noqa: E402
 )
 from fastvideo.mlx_runtime.minimax_h3_vsa import (  # noqa: E402
     MiniMaxH3VSAConfig,
+    PUBLIC_VSA_IMPLS,
     VSA_GATE_KEY_SUFFIX,
+    _untile_hidden,
     build_block_mask,
     build_h3_tile_geometry,
     compute_topk,
     expected_vsa_gate_keys,
     h3_vsa_attention,
-    metal_kernel_available,
-    metal_supported,
     parse_dense_layers,
     prefix_segments_from_layout,
+    resolve_impl,
     token_tile_and_valid,
 )
+from fastvideo.mlx_runtime.minimax_h3_vsa_simd import simd_kernel_available  # noqa: E402
 
 _TINY = dict(raw_latent_shape=(8, 8, 12), patch_size=(1, 2, 2), prefix_segments=(7, 5, 3))
 _TINY64 = dict(raw_latent_shape=(9, 20, 26), patch_size=(1, 2, 2), prefix_segments=(70, 5, 130))
@@ -335,25 +337,61 @@ def test_vsa_rejected_for_dense_only_checkpoint(tmp_path: Path) -> None:
         )
 
 
-def test_metal_kernel_parity_with_reference() -> None:
-    if not metal_kernel_available():
-        pytest.skip("mx.fast.metal_kernel is not available")
-    spec = _TINY
-    geo = build_h3_tile_geometry(spec["prefix_segments"], _dit_shape(spec), 256)
-    if not metal_supported(8, geo.tile_elems):
-        pytest.skip("Metal VSA kernel does not support this tiny head dim/tile pair")
-    q, k, v = _tiny_qkv(geo.total_seq_length, seed=8)
+def test_simd_kernel_parity_with_reference_identical_tiles() -> None:
+    if not simd_kernel_available():
+        pytest.skip("SIMD-group VSA kernel is not available")
+    geo = build_h3_tile_geometry((16, 16), (8, 8, 8), tile_size=64)
+    q, k, v = _tiny_qkv(geo.total_seq_length, heads=2, dim=128, seed=11)
     reference = h3_vsa_attention(q, k, v, geo, sparsity=0.5, exempt=True, impl="reference")
-    metal = h3_vsa_attention(
+    simd = h3_vsa_attention(
         q.astype(mx.bfloat16),
         k.astype(mx.bfloat16),
         v.astype(mx.bfloat16),
         geo,
         sparsity=0.5,
         exempt=True,
-        impl="metal",
+        impl="simd",
     )
-    assert mx.allclose(metal.astype(mx.float32), reference.astype(mx.float32), atol=5e-2, rtol=5e-2).item()
+    _, valid = token_tile_and_valid(geo.variable_block_sizes, geo.tile_elems)
+    # Packed rows are valid tokens only after untile.
+    assert mx.allclose(simd.astype(mx.float32), reference.astype(mx.float32), atol=5e-2, rtol=5e-2).item()
+    assert valid.sum() == geo.total_seq_length
+
+
+def test_untile_hidden_never_consumes_padded_query_rows() -> None:
+    """Pad slots exist in the tiled buffer; _untile_hidden must never gather them.
+
+    The SIMD kernel may zero padded query rows only because this gather map is
+    the exclusive consumer of tiled attention output.
+    """
+    geo = build_h3_tile_geometry((18, 414), (37, 15, 26), tile_size=64)
+    _, valid = token_tile_and_valid(geo.variable_block_sizes, geo.tile_elems)
+    pad_slots = np.flatnonzero(~valid.astype(bool))
+    assert pad_slots.size > 0
+    gathered = set(int(i) for i in geo.untile_combined_index.tolist())
+    assert gathered.isdisjoint(int(i) for i in pad_slots.tolist())
+    assert geo.untile_combined_index.shape == (geo.total_seq_length, )
+
+    buf = np.ones((geo.padded_length, 2, 4), dtype=np.float32)
+    buf[~valid.astype(bool)] = 999.0
+    out = _untile_hidden(mx.array(buf), geo)
+    mx.eval(out)
+    assert out.shape[0] == geo.total_seq_length
+    assert not bool(mx.any(out == 999.0).item())
+    assert bool(mx.all(out == 1.0).item())
+
+
+def test_simd_unsupported_tile_falls_back_to_reference() -> None:
+    assert PUBLIC_VSA_IMPLS == ("auto", "reference", "simd")
+    assert "metal" not in PUBLIC_VSA_IMPLS
+    assert resolve_impl("simd", head_dim=128, tile_elems=256) == "reference"
+    assert resolve_impl("simd", head_dim=64, tile_elems=64) == "reference"
+    assert resolve_impl("auto", head_dim=128, tile_elems=64) == "reference"
+    geo = build_h3_tile_geometry((8, 0, 8), (8, 8, 8), tile_size=256)
+    q, k, v = _tiny_qkv(geo.total_seq_length, heads=2, dim=128, seed=12)
+    explicit = h3_vsa_attention(q, k, v, geo, sparsity=0.5, exempt=True, impl="reference")
+    fallback = h3_vsa_attention(q, k, v, geo, sparsity=0.5, exempt=True, impl="simd")
+    assert mx.allclose(explicit, fallback, atol=0, rtol=0).item()
 
 
 def test_reference_gather_path_matches_token_mask() -> None:

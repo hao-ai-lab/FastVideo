@@ -34,7 +34,7 @@ import argparse
 import json
 from pathlib import Path
 
-from fastvideo.mlx_runtime.minimax_h3_vsa import parse_dense_layers
+from fastvideo.mlx_runtime.minimax_h3_vsa import PUBLIC_VSA_IMPLS, parse_dense_layers
 
 
 def parse_args() -> argparse.Namespace:
@@ -93,8 +93,8 @@ def parse_args() -> argparse.Namespace:
                         help="prefix-key policy: always keep (exempt) or FLOP-matched top-k (compete)")
     parser.add_argument("--vsa-dense-first-n-steps", type=int, default=0, help="run the first N denoise steps dense")
     parser.add_argument("--vsa-dense-layers", default="", help="comma-separated layer indices forced dense")
-    parser.add_argument("--vsa-impl", choices=("auto", "reference", "metal"), default="auto",
-                        help="sparse attention implementation; auto uses chunked gather+SDPA (metal is opt-in)")
+    parser.add_argument("--vsa-impl", choices=PUBLIC_VSA_IMPLS, default="auto",
+                        help="sparse attention implementation; auto uses chunked gather+SDPA (simd is opt-in)")
     return parser.parse_args()
 
 
