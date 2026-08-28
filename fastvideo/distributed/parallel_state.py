@@ -851,14 +851,9 @@ def _build_usp_subgroup_ranks(
     return ulysses_group_ranks, ring_group_ranks
 
 
-def get_ring_group() -> ProcessGroup | None:
-    """Return the raw ``torch.distributed.ProcessGroup`` used by Ring Attention.
-
-    Returns ``None`` when Ring Attention is disabled (``ring_size == 1``).
-    """
-    if _RING_GROUP is None:
-        return None
-    return _RING_GROUP.device_group
+def get_ring_group() -> GroupCoordinator | None:
+    """Return the Ring Attention subgroup coordinator, or ``None`` if disabled (``ring_size == 1``)."""
+    return _RING_GROUP
 
 
 def get_ring_world_size() -> int:
