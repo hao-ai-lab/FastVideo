@@ -48,6 +48,7 @@ VSA_IMPLS = PUBLIC_VSA_IMPLS
 # SIMD is opt-in until its dynamically routed output is accepted as the default.
 _AUTO_PREFERS_SIMD = False
 _REFERENCE_FULL_MASK_TILE_LIMIT = 24
+_REFERENCE_FULL_MASK_MAX_ELEMENTS = 256 * 1024**2
 
 PrefixMode = Literal["exempt", "compete"]
 VSAImpl = Literal["auto", "reference", "simd"]
@@ -465,6 +466,13 @@ def _reference_token_sdpa(q_tiled, k_tiled, v_tiled, block_mask: np.ndarray, geo
     )[0].transpose(1, 0, 2)
 
 
+def _reference_full_mask_fits(geometry: MiniMaxH3VSAGeometry, heads: int) -> bool:
+    """Bound the dense token mask by both tile count and materialized size."""
+    mask_elements = heads * geometry.padded_length**2
+    return (geometry.num_tiles <= _REFERENCE_FULL_MASK_TILE_LIMIT
+            and mask_elements <= _REFERENCE_FULL_MASK_MAX_ELEMENTS)
+
+
 def _gather_selected_kv(k_tiles, v_tiles, block_idx, tile_elems: int):
     """Gather K/V tiles for one query-tile batch.
 
@@ -511,7 +519,7 @@ def _reference_gather_sdpa(
     geometry: MiniMaxH3VSAGeometry,
     scale: float,
 ):
-    """Grouped gather + batched SDPA over video query tiles; prefix stays dense-equivalent.
+    """Grouped gather + batched SDPA over video query tiles.
 
     Full-sequence gather at 720p materializes tens of GiB of selected K/V, so
     query tiles are processed in memory-bounded chunks. This is the correctness
@@ -547,9 +555,7 @@ def _reference_gather_sdpa(
         mx.eval(out)
         chunks.append(out)
     out = mx.concatenate(chunks, axis=1) if len(chunks) > 1 else chunks[0]
-    video_flat = out.transpose(1, 2, 0, 3).reshape(n_q * tile_elems, heads, dim)
-    prefix = q_tiled[:geometry.num_prefix_tiles * tile_elems]
-    return mx.concatenate([prefix, video_flat], axis=0)
+    return out.transpose(1, 2, 0, 3).reshape(n_q * tile_elems, heads, dim)
 
 
 def _gate_compress_output(scores, v_tiled, gate_tiled, geometry: MiniMaxH3VSAGeometry):
@@ -642,19 +648,20 @@ def h3_vsa_attention(
         )
         chosen = resolve_impl(impl, dim, geometry.tile_elems)
         prefix_out = _dense_sdpa(query[:geometry.prefix_length], key, value, scale)
+        n_prefix_pad = geometry.num_prefix_tiles * geometry.tile_elems
         if chosen == "simd":
             from fastvideo.mlx_runtime.minimax_h3_vsa_simd import simd_block_sparse
 
             try:
                 video_tiled = simd_block_sparse(q_tiled, k_tiled, v_tiled, block_idx, block_num, geometry, scale)
+                video_tiled = video_tiled[n_prefix_pad:]
             except Exception as error:  # noqa: BLE001 - keep generation alive on kernel failure
                 logger.warning("SIMD VSA kernel failed (%s); falling back to reference gather+SDPA", error)
                 chosen = "reference"
                 if stats is not None:
                     stats.dense_fallback_reason = f"simd kernel failed: {error}"
                 video_tiled = _reference_gather_sdpa(q_tiled, k_tiled, v_tiled, block_idx, geometry, scale)
-            out_tiled = video_tiled
-        elif geometry.num_tiles <= _REFERENCE_FULL_MASK_TILE_LIMIT:
+        elif _reference_full_mask_fits(geometry, heads):
             scores_np = np.array(scores, dtype=np.float32)
             mask = build_block_mask(
                 scores_np,
@@ -663,10 +670,10 @@ def h3_vsa_attention(
                 sparsity,
                 exempt,
             )
-            out_tiled = _reference_token_sdpa(q_tiled, k_tiled, v_tiled, mask, geometry, scale)
+            video_tiled = _reference_token_sdpa(q_tiled, k_tiled, v_tiled, mask, geometry, scale)[n_prefix_pad:]
         else:
-            out_tiled = _reference_gather_sdpa(q_tiled, k_tiled, v_tiled, block_idx, geometry, scale)
-        out_tiled = out_tiled.astype(query.dtype)
+            video_tiled = _reference_gather_sdpa(q_tiled, k_tiled, v_tiled, block_idx, geometry, scale)
+        video_tiled = video_tiled.astype(query.dtype)
         prefix_tiled = _tile_hidden(
             mx.concatenate([
                 prefix_out,
@@ -676,8 +683,7 @@ def h3_vsa_attention(
             geometry,
         )
         # Prefix query tiles are dense; keep fused-SDPA prefix rows and sparse video tiles.
-        n_prefix_pad = geometry.num_prefix_tiles * geometry.tile_elems
-        out_tiled = mx.concatenate([prefix_tiled[:n_prefix_pad], out_tiled[n_prefix_pad:]], axis=0)
+        out_tiled = mx.concatenate([prefix_tiled[:n_prefix_pad], video_tiled], axis=0)
 
     if gate_compress is not None:
         gate_tiled = _tile_hidden(gate_compress, geometry)

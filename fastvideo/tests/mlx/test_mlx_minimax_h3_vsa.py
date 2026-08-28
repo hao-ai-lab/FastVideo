@@ -411,6 +411,19 @@ def test_reference_gather_path_matches_token_mask() -> None:
     assert mx.allclose(gather, masked, atol=2e-4, rtol=2e-4).item()
 
 
+def test_reference_full_mask_is_bounded_by_materialized_size() -> None:
+    from fastvideo.mlx_runtime import minimax_h3_vsa as vsa_mod
+
+    small = build_h3_tile_geometry((8, 0, 8), (4, 8, 8), tile_size=64)
+    assert vsa_mod._reference_full_mask_fits(small, heads=40)
+
+    # Twenty-four 256-token tiles pass the tile-count gate, but a 40-head
+    # token mask would contain more than 1.5 billion elements.
+    large = build_h3_tile_geometry((256, ), (4, 8, 184), tile_size=256)
+    assert large.num_tiles == 24
+    assert not vsa_mod._reference_full_mask_fits(large, heads=40)
+
+
 def test_prefix_segments_from_t2va_layout_drop_empty_condition() -> None:
     layout = MiniMaxH3PackedLayout(
         sequence_length=20,
