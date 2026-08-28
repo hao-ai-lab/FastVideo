@@ -6,9 +6,12 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 import threading
+import time
 from types import SimpleNamespace
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from fastvideo.entrypoints.openai.protocol import VideoGenerationRequest
 from fastvideo.entrypoints.openai.request_adapter import (
@@ -16,6 +19,7 @@ from fastvideo.entrypoints.openai.request_adapter import (
     build_generation_request,
 )
 from fastvideo.entrypoints.openai.serving_engine import OpenAIServingEngine
+from fastvideo.entrypoints.openai.stores import VIDEO_STORE
 
 
 class _BlockingGenerator:
@@ -32,6 +36,23 @@ class _BlockingGenerator:
 
     def shutdown(self) -> None:
         self.shutdown_called = True
+
+
+class _FileGenerator:
+
+    def generate(self, request):
+        output = Path(request.output.output_path)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"\x00\x00\x00\x18ftypmp42fastvideo-test")
+        return SimpleNamespace(
+            video_path=str(output),
+            generation_time=0.01,
+            peak_memory_mb=12.5,
+            logging_info=None,
+        )
+
+    def shutdown(self) -> None:
+        return None
 
 
 def _args(model_path: str, **overrides):
@@ -174,3 +195,75 @@ def test_unsupported_vllm_postprocessing_fails_at_admission(tmp_path: Path) -> N
             served_model_name="wan",
             output_dir=str(tmp_path),
         )
+
+
+def test_video_routes_cover_async_sync_list_content_and_delete(tmp_path: Path) -> None:
+    from fastvideo.entrypoints.openai import state
+    from fastvideo.entrypoints.openai.video_api import router
+
+    generator = _FileGenerator()
+    engine = OpenAIServingEngine(generator)  # type: ignore[arg-type]
+    args = _args("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
+    state.set_state(
+        generator,  # type: ignore[arg-type]
+        engine,
+        args,  # type: ignore[arg-type]
+        str(tmp_path),
+        served_model_name="wan-test",
+    )
+    asyncio.run(VIDEO_STORE.clear())
+    app = FastAPI()
+    app.include_router(router)
+
+    try:
+        with TestClient(app) as client:
+            created = client.post(
+                "/v1/videos",
+                json={
+                    "model": "wan-test",
+                    "prompt": "a fox",
+                    "size": "64x64",
+                    "num_frames": 1,
+                },
+            )
+            assert created.status_code == 200
+            video_id = created.json()["id"]
+
+            for _ in range(50):
+                detail = client.get(f"/v1/videos/{video_id}")
+                if detail.json()["status"] == "completed":
+                    break
+                time.sleep(0.01)
+            assert detail.status_code == 200
+            assert detail.json()["status"] == "completed"
+
+            listing = client.get("/v1/videos", params={"limit": 1})
+            assert listing.status_code == 200
+            assert listing.json()["data"][0]["id"] == video_id
+
+            content = client.get(f"/v1/videos/{video_id}/content")
+            assert content.status_code == 200
+            assert content.content[4:8] == b"ftyp"
+
+            deleted = client.delete(f"/v1/videos/{video_id}")
+            assert deleted.status_code == 200
+            assert deleted.json() == {
+                "id": video_id,
+                "deleted": True,
+                "object": "video.deleted",
+            }
+
+            sync = client.post(
+                "/v1/videos/sync",
+                json={
+                    "prompt": "a fox",
+                    "size": "64x64",
+                    "num_frames": 1,
+                },
+            )
+            assert sync.status_code == 200
+            assert sync.headers["x-model"] == "wan-test"
+            assert sync.content[4:8] == b"ftyp"
+    finally:
+        asyncio.run(VIDEO_STORE.clear())
+        state.clear_state()
