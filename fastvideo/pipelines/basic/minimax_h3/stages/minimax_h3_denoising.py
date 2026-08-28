@@ -14,7 +14,6 @@ from fastvideo.configs.pipelines.minimax_h3_token_reduction import MiniMaxH3Toke
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
-from fastvideo.profiler import profiler_region
 from fastvideo.hooks.activation_trace import trace_step
 from fastvideo.layers.pdd import PDDModalitySchedule, PDDSamplingPlan, build_pdd_sampling_plan
 from fastvideo.logger import init_logger
