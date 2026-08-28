@@ -46,8 +46,11 @@ def _args(model_path: str, **overrides):
     return SimpleNamespace(**values)
 
 
-@pytest.mark.asyncio
-async def test_engine_cancellation_keeps_pipeline_locked() -> None:
+def test_engine_cancellation_keeps_pipeline_locked() -> None:
+    asyncio.run(_assert_engine_cancellation_keeps_pipeline_locked())
+
+
+async def _assert_engine_cancellation_keeps_pipeline_locked() -> None:
     generator = _BlockingGenerator()
     engine = OpenAIServingEngine(generator)  # type: ignore[arg-type]
 
