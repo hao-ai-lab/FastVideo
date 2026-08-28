@@ -11,14 +11,17 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from fastvideo.api.schema import GenerationRequest
+    from fastvideo.entrypoints.openai.serving_engine import OpenAIServingEngine
     from fastvideo.entrypoints.video_generator import VideoGenerator
     from fastvideo.fastvideo_args import FastVideoArgs
 
 DEFAULT_OUTPUT_DIR = "outputs"
 
 _generator: VideoGenerator | None = None
+_serving_engine: OpenAIServingEngine | None = None
 _fastvideo_args: FastVideoArgs | None = None
 _output_dir: str = DEFAULT_OUTPUT_DIR
+_served_model_name: str | None = None
 _default_request: GenerationRequest | None = None
 
 
@@ -26,6 +29,12 @@ def get_generator() -> VideoGenerator:
     """Return the global VideoGenerator instance (set during startup)."""
     assert _generator is not None, "Server not initialized — generator is None"
     return _generator
+
+
+def get_serving_engine() -> OpenAIServingEngine:
+    """Return the shared model-agnostic OpenAI serving engine."""
+    assert _serving_engine is not None, "Server not initialized — serving engine is None"
+    return _serving_engine
 
 
 def get_server_args() -> FastVideoArgs:
@@ -39,6 +48,12 @@ def get_output_dir() -> str:
     return _output_dir
 
 
+def get_served_model_name() -> str:
+    """Return the public model id advertised by the OpenAI server."""
+    args = get_server_args()
+    return _served_model_name or args.model_path
+
+
 def get_default_request() -> GenerationRequest | None:
     """Return the ServeConfig.default_request set at startup, if any."""
     return _default_request
@@ -46,21 +61,27 @@ def get_default_request() -> GenerationRequest | None:
 
 def set_state(
     generator: VideoGenerator,
+    serving_engine: OpenAIServingEngine,
     fastvideo_args: FastVideoArgs,
     output_dir: str,
     default_request: GenerationRequest | None = None,
+    served_model_name: str | None = None,
 ) -> None:
     """Set all server state at once (called from lifespan)."""
-    global _generator, _fastvideo_args, _output_dir, _default_request
+    global _generator, _serving_engine, _fastvideo_args, _output_dir, _served_model_name, _default_request
     _generator = generator
+    _serving_engine = serving_engine
     _fastvideo_args = fastvideo_args
     _output_dir = output_dir
+    _served_model_name = served_model_name
     _default_request = default_request
 
 
 def clear_state() -> None:
     """Clear server state on shutdown."""
-    global _generator, _fastvideo_args, _default_request
+    global _generator, _serving_engine, _fastvideo_args, _served_model_name, _default_request
     _generator = None
+    _serving_engine = None
     _fastvideo_args = None
+    _served_model_name = None
     _default_request = None

@@ -1,7 +1,6 @@
 # Adapted from SGLang
 # (https://github.com/sgl-project/sglang/blob/main/python/sglang/multimodal_gen/runtime/entrypoints/openai/image_api.py)
 
-import asyncio
 import base64
 import os
 import time
@@ -12,8 +11,8 @@ from fastapi import (APIRouter, File, Form, HTTPException, Path, Query, UploadFi
 from fastapi.responses import FileResponse
 
 from fastvideo.entrypoints.openai.state import (
-    get_generator,
     get_output_dir,
+    get_serving_engine,
 )
 from fastvideo.entrypoints.openai.protocol import (
     ImageGenerationsRequest,
@@ -89,8 +88,7 @@ def _build_generation_kwargs(
 @router.post("", response_model=ImageResponse)
 async def generations(request: ImageGenerationsRequest):
     request_id = generate_request_id()
-    generator = get_generator()
-    loop = asyncio.get_running_loop()
+    engine = get_serving_engine()
 
     gen_kwargs = _build_generation_kwargs(
         request_id=request_id,
@@ -109,7 +107,7 @@ async def generations(request: ImageGenerationsRequest):
 
     start = time.perf_counter()
     try:
-        await loop.run_in_executor(None, lambda: generator.generate_video(**gen_kwargs))
+        await engine.run_serialized(engine.generator.generate_video, **gen_kwargs)
     except Exception as e:
         logger.error("Image generation failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e)) from None
@@ -173,8 +171,7 @@ async def edits(
         enable_teacache: bool | None = Form(False),
 ):
     request_id = generate_request_id()
-    generator = get_generator()
-    loop = asyncio.get_running_loop()
+    engine = get_serving_engine()
 
     images = image or image_array
     urls = url or url_array
@@ -213,7 +210,7 @@ async def edits(
 
     start = time.perf_counter()
     try:
-        await loop.run_in_executor(None, lambda: generator.generate_video(**gen_kwargs))
+        await engine.run_serialized(engine.generator.generate_video, **gen_kwargs)
     except Exception as e:
         logger.error("Image edit failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e)) from None

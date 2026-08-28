@@ -5,8 +5,10 @@ from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from fastvideo.api.presets import validate_preset_selection
 from fastvideo.api.schema import GenerationRequest
@@ -15,6 +17,7 @@ from fastvideo.entrypoints.openai.state import (
     clear_state,
     set_state,
 )
+from fastvideo.entrypoints.openai.serving_engine import OpenAIServingEngine
 from fastvideo.entrypoints.video_generator import VideoGenerator
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
@@ -53,26 +56,40 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Load model on startup, clean up on shutdown"""
     args: FastVideoArgs = app.state.fastvideo_args
     output_dir: str = app.state.output_dir
+    served_model_name: str | None = app.state.served_model_name
     default_request: GenerationRequest | None = getattr(app.state, "default_request", None)
 
     logger.info("Loading model from %s ...", args.model_path)
     generator = VideoGenerator.from_fastvideo_args(args)
+    serving_engine = OpenAIServingEngine(generator)
     logger.info("Model loaded successfully.")
 
-    set_state(generator, args, output_dir, default_request=default_request)
+    set_state(
+        generator,
+        serving_engine,
+        args,
+        output_dir,
+        default_request=default_request,
+        served_model_name=served_model_name,
+    )
 
-    yield  # server is running
+    try:
+        yield  # server is running
+    finally:
+        logger.info("Shutting down — releasing model resources ...")
+        from fastvideo.entrypoints.openai.video_api import shutdown_video_jobs
 
-    logger.info("Shutting down — releasing model resources ...")
-    generator.shutdown()
-    clear_state()
-    logger.info("Shutdown complete.")
+        await shutdown_video_jobs()
+        await serving_engine.shutdown()
+        clear_state()
+        logger.info("Shutdown complete.")
 
 
 def create_app(
     fastvideo_args: FastVideoArgs,
     output_dir: str = DEFAULT_OUTPUT_DIR,
     default_request: GenerationRequest | None = None,
+    served_model_name: str | None = None,
 ) -> FastAPI:
     """Build the FastAPI application with all routers mounted"""
 
@@ -84,6 +101,7 @@ def create_app(
     app.state.fastvideo_args = fastvideo_args
     app.state.output_dir = output_dir
     app.state.default_request = default_request
+    app.state.served_model_name = served_model_name
 
     app.add_middleware(
         CORSMiddleware,
@@ -92,6 +110,35 @@ def create_app(
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.exception_handler(HTTPException)
+    async def openai_http_error(_request: Request, exc: HTTPException) -> JSONResponse:
+        """Return the error envelope consumed by OpenAI-compatible clients."""
+        message = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+        return JSONResponse(
+            status_code=exc.status_code,
+            headers=exc.headers,
+            content={
+                "error": {
+                    "message": message,
+                    "type": "invalid_request_error" if exc.status_code < 500 else "server_error",
+                    "param": None,
+                    "code": exc.status_code,
+                }
+            },
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def openai_validation_error(_request: Request, exc: RequestValidationError) -> JSONResponse:
+        return JSONResponse(
+            status_code=400,
+            content={"error": {
+                "message": str(exc),
+                "type": "invalid_request_error",
+                "param": None,
+                "code": 400,
+            }},
+        )
 
     # Import and mount routers
     from fastvideo.entrypoints.openai.common_api import router as common_router
@@ -137,6 +184,7 @@ def run_server(
     port: int = DEFAULT_PORT,
     output_dir: str = DEFAULT_OUTPUT_DIR,
     default_request: GenerationRequest | None = None,
+    served_model_name: str | None = None,
 ):
     """Create the app and run it with uvicorn"""
     if default_request is not None:
@@ -146,6 +194,7 @@ def run_server(
         fastvideo_args,
         output_dir=output_dir,
         default_request=default_request,
+        served_model_name=served_model_name,
     )
 
     logger.info("Starting FastVideo server on %s:%d", host, port)

@@ -21,6 +21,8 @@ surfaces:
       hsdp_shard_dim: generator.engine.parallelism.hsdp_shard_dim
       dist_timeout: generator.engine.parallelism.dist_timeout
       lora_path: generator.pipeline.components.lora_path
+      lora_nickname: generator.pipeline.components.lora_nickname
+      lora_strength: generator.pipeline.components.lora_strength
       dit_cpu_offload: generator.engine.offload.dit
       use_fsdp_inference: generator.engine.use_fsdp_inference
       dit_layerwise_offload: generator.engine.offload.dit_layerwise
@@ -72,7 +74,6 @@ surfaces:
     compatibility_only:
       mode: "Legacy multi-mode FastVideoArgs switch; typed inference config should not expose execution mode."
       inference_mode: "Legacy boolean mirror of mode; kept only through adapters while FastVideoArgs remains."
-      lora_nickname: "Legacy adapter-selection surface pending LoRA API cleanup."
       lora_target_modules: "Legacy LoRA configuration surface pending dedicated component API."
       output_type: "Legacy output formatting surface pending GenerationResult cleanup."
       VSA_sparsity: "Model-specific inference optimization not yet represented in the typed public schema."
@@ -590,15 +591,31 @@ surfaces:
   openai_video_request:
     kept:
       model: "HTTP adapter model-routing field."
+      user: "OpenAI-compatible caller tracking field."
+      task: "SGLang-compatible MiniMax-H3 task selector validated against the startup pipeline."
+      quality: "vLLM-Omni-compatible quality-intent field; model-specific."
+      lora: "vLLM-Omni-compatible selector for the adapter fixed at server startup."
     moved:
       prompt: request.prompt
       input_reference: request.inputs.image_path
       reference_url: request.inputs.image_path
+      image_reference: request.inputs.image_path,last_image,references
+      video_reference: request.inputs.video_path,references
+      audio_reference: request.inputs.references
+      video_path: request.inputs.video_path
+      video_url: request.inputs.video_path
+      video_params: request.sampling.width,height,num_frames,fps
       size:
         target: request.sampling.width,height
         note: "Adapter parses OpenAI size strings as WIDTHxHEIGHT and forwards width then height."
+      width: request.sampling.width
+      height: request.sampling.height
       fps: request.sampling.fps
       num_frames: request.sampling.num_frames
+      aspect_ratio: request.sampling.width,height
+      short_edge: request.sampling.width,height
+      num_outputs_per_prompt: request.sampling.num_videos_per_prompt
+      n: request.sampling.num_videos_per_prompt
       seed: request.sampling.seed
       num_inference_steps: request.sampling.num_inference_steps
       guidance_scale: request.sampling.guidance_scale
@@ -606,11 +623,22 @@ surfaces:
       true_cfg_scale: request.sampling.true_cfg_scale
       negative_prompt: request.negative_prompt
       enable_teacache: request.runtime.enable_teacache
+      max_sequence_length: request.sampling.max_sequence_length
+      boundary_ratio: request.sampling.boundary_ratio
+      extra_params: request.extensions
       output_path: request.output.output_path
     compatibility_only:
       seconds:
         target: request.sampling.num_frames
         note: "HTTP adapter duration convenience field. If num_frames is omitted, the adapter computes num_frames = fps * seconds."
+      start_time_seconds: "vLLM-Omni reference-video offset; rejected by pipelines that cannot represent it."
+      flow_shift: "vLLM-Omni request field; accepted only when the selected model exposes a matching request parameter."
+      generate_sound: "vLLM-Omni audio-output intent; accepted only by models with a matching request parameter."
+      sound_duration: "vLLM-Omni audio-duration intent; accepted only by models with a matching request parameter."
+      enable_frame_interpolation: "vLLM-Omni post-processing field; unavailable until FastVideo exposes a frame-interpolation stage."
+      frame_interpolation_exp: "vLLM-Omni post-processing field; unavailable until FastVideo exposes a frame-interpolation stage."
+      frame_interpolation_scale: "vLLM-Omni post-processing field; unavailable until FastVideo exposes a frame-interpolation stage."
+      frame_interpolation_model_path: "vLLM-Omni post-processing field; unavailable until FastVideo exposes a frame-interpolation stage."
 
 cli:
   notes:

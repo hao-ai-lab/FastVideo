@@ -7,7 +7,7 @@ from fastapi import APIRouter
 from fastapi.responses import ORJSONResponse
 from pydantic import BaseModel, Field
 
-from fastvideo.entrypoints.openai.state import get_server_args
+from fastvideo.entrypoints.openai.state import get_served_model_name, get_server_args
 from fastvideo.logger import init_logger
 
 router = APIRouter(prefix="/v1")
@@ -28,15 +28,21 @@ class ModelCard(BaseModel):
 async def available_models():
     """Show available models"""
     args = get_server_args()
-    card = ModelCard(id=args.model_path, root=args.model_path)
-    return {"object": "list", "data": [card.model_dump()]}
+    cards = [ModelCard(id=get_served_model_name(), root=args.model_path)]
+    if args.lora_path and args.lora_nickname != get_served_model_name():
+        cards.append(ModelCard(id=args.lora_nickname, root=args.model_path))
+    return {"object": "list", "data": [card.model_dump() for card in cards]}
 
 
 @router.get("/models/{model:path}", response_class=ORJSONResponse)
 async def retrieve_model(model: str):
     """Retrieve a model by name"""
     args = get_server_args()
-    if model != args.model_path:
+    served_model_name = get_served_model_name()
+    available = {served_model_name}
+    if args.lora_path:
+        available.add(args.lora_nickname)
+    if model not in available:
         return ORJSONResponse(
             status_code=404,
             content={
@@ -48,7 +54,7 @@ async def retrieve_model(model: str):
                 }
             },
         )
-    card = ModelCard(id=model, root=model)
+    card = ModelCard(id=model, root=args.model_path)
     return card.model_dump()
 
 
@@ -56,4 +62,14 @@ async def retrieve_model(model: str):
 async def model_info():
     """Get basic model information"""
     args = get_server_args()
-    return {"model_path": args.model_path}
+    return {
+        "model_path":
+        args.model_path,
+        "served_model_name":
+        get_served_model_name(),
+        "lora": ({
+            "name": args.lora_nickname,
+            "path": args.lora_path,
+            "scale": args.lora_strength,
+        } if args.lora_path else None),
+    }
