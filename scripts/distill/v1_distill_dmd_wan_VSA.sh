@@ -12,8 +12,8 @@ export TOKENIZERS_PARALLELISM=false
 # Make sure that num_latent_t is a multiple of sp_size
 torchrun --nnodes 1 --nproc_per_node $NUM_GPUS \
     fastvideo/training/runner.py \
-    --pipeline_class WanDistillationPipeline \
-    --pipeline_module fastvideo.training.wan_distillation_pipeline \
+    --pipeline-class WanDistillationPipeline \
+    --pipeline-module fastvideo.training.wan_distillation_pipeline \
     --model_path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
     --real_score_model_path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
     --fake_score_model_path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \

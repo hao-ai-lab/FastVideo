@@ -32,14 +32,10 @@ def test_runner_cli_argument_parsing():
 
     def build_parser():
         parser = FlexibleArgumentParser()
-        parser.add_argument("--pipeline_class",
-                            "--pipeline-class",
-                            dest="pipeline_class",
+        parser.add_argument("--pipeline-class",
                             type=str,
                             required=True)
-        parser.add_argument("--pipeline_module",
-                            "--pipeline-module",
-                            dest="pipeline_module",
+        parser.add_argument("--pipeline-module",
                             type=str,
                             required=True)
         parser = TrainingArgs.add_cli_args(parser)
