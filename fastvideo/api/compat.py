@@ -384,9 +384,7 @@ def request_to_sampling_param(
     for key, value in updates.items():
         if hasattr(sampling_param, key):
             setattr(sampling_param, key, deepcopy(value))
-        elif key in _REQUEST_PIPELINE_OVERRIDE_FIELDS:
-            continue
-        elif key in REQUEST_BATCH_EXTRA_PASSTHROUGH_FIELDS:
+        elif key in _REQUEST_PIPELINE_OVERRIDE_FIELDS or key in REQUEST_BATCH_EXTRA_PASSTHROUGH_FIELDS:
             continue
         elif value == _SCHEMA_DEFAULT_UPDATES.get(key, _MISSING):
             # Schema-default field that isn't on SamplingParam; tolerated
@@ -489,8 +487,7 @@ def request_to_batch_extra(request: GenerationRequest) -> dict[str, Any]:
     """Extract typed-request extensions consumed through ``ForwardBatch.extra``."""
     return {
         key: deepcopy(value)
-        for key, value in explicit_request_updates(request).items()
-        if key in REQUEST_BATCH_EXTRA_PASSTHROUGH_FIELDS
+        for key, value in explicit_request_updates(request).items() if key in REQUEST_BATCH_EXTRA_PASSTHROUGH_FIELDS
     }
 
 

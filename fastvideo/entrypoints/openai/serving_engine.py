@@ -65,7 +65,7 @@ class OpenAIServingEngine:
         async with self._generation_lock:
             if self._closed:
                 raise RuntimeError("FastVideo serving engine is shutting down")
-            worker = asyncio.create_task(function())
+            worker: asyncio.Future[_T] = asyncio.ensure_future(function())
             try:
                 return await asyncio.shield(worker)
             except asyncio.CancelledError:

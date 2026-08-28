@@ -132,14 +132,12 @@ def create_app(
     async def openai_validation_error(_request: Request, exc: RequestValidationError) -> JSONResponse:
         return JSONResponse(
             status_code=400,
-            content={
-                "error": {
-                    "message": str(exc),
-                    "type": "invalid_request_error",
-                    "param": None,
-                    "code": 400,
-                }
-            },
+            content={"error": {
+                "message": str(exc),
+                "type": "invalid_request_error",
+                "param": None,
+                "code": 400,
+            }},
         )
 
     # Import and mount routers

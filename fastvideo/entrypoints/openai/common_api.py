@@ -63,8 +63,10 @@ async def model_info():
     """Get basic model information"""
     args = get_server_args()
     return {
-        "model_path": args.model_path,
-        "served_model_name": get_served_model_name(),
+        "model_path":
+        args.model_path,
+        "served_model_name":
+        get_served_model_name(),
         "lora": ({
             "name": args.lora_nickname,
             "path": args.lora_path,

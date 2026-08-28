@@ -98,15 +98,15 @@ def _build_generation_kwargs(
         kwargs["num_frames"] = int(req.seconds) * int(kwargs["fps"])
 
     for name in (
-        "seed",
-        "num_inference_steps",
-        "guidance_scale",
-        "guidance_scale_2",
-        "true_cfg_scale",
-        "negative_prompt",
-        "enable_teacache",
-        "max_sequence_length",
-        "boundary_ratio",
+            "seed",
+            "num_inference_steps",
+            "guidance_scale",
+            "guidance_scale_2",
+            "true_cfg_scale",
+            "negative_prompt",
+            "enable_teacache",
+            "max_sequence_length",
+            "boundary_ratio",
     ):
         if name in body_set and getattr(req, name) is not None:
             kwargs[name] = getattr(req, name)
@@ -173,7 +173,10 @@ async def _run_generation(
 ) -> None:
     await VIDEO_STORE.update_fields(
         request_id,
-        {"status": VideoGenerationStatus.IN_PROGRESS, "progress": 0},
+        {
+            "status": VideoGenerationStatus.IN_PROGRESS,
+            "progress": 0
+        },
     )
     started = time.perf_counter()
     try:
@@ -208,7 +211,10 @@ async def _run_generation(
             request_id,
             {
                 "status": VideoGenerationStatus.FAILED,
-                "error": {"code": 500, "message": str(error)},
+                "error": {
+                    "code": 500,
+                    "message": str(error)
+                },
                 "inference_time_s": time.perf_counter() - started,
             },
         )
@@ -366,9 +372,9 @@ async def create_video_sync(raw_request: Request) -> FileResponse:
 
 @router.get("", response_model=VideoListResponse)
 async def list_videos(
-    after: str | None = Query(None),
-    limit: int | None = Query(None, ge=0, le=100),
-    order: str = Query("desc", pattern="^(asc|desc)$"),
+        after: str | None = Query(None),
+        limit: int | None = Query(None, ge=0, le=100),
+        order: str = Query("desc", pattern="^(asc|desc)$"),
 ) -> VideoListResponse:
     jobs = await VIDEO_STORE.list_values()
     jobs.sort(key=lambda job: job.get("created_at", 0), reverse=order == "desc")

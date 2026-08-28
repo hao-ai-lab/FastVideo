@@ -42,9 +42,7 @@ def _image_sources(request: VideoGenerationRequest) -> list[str]:
     legacy = request.input_reference or request.reference_url
     if legacy is not None:
         if sources:
-            raise RequestAdaptationError(
-                "Provide only one of input_reference/reference_url or image_reference."
-            )
+            raise RequestAdaptationError("Provide only one of input_reference/reference_url or image_reference.")
         sources.append(legacy)
     return sources
 
@@ -92,8 +90,7 @@ def _apply_aspect_ratio(
 
         if request.short_edge is not None and request.short_edge != MINIMAX_H3_SHORT_EDGE:
             raise RequestAdaptationError(
-                f"MiniMax-H3 currently uses a fixed short_edge={MINIMAX_H3_SHORT_EDGE}, got {request.short_edge}."
-            )
+                f"MiniMax-H3 currently uses a fixed short_edge={MINIMAX_H3_SHORT_EDGE}, got {request.short_edge}.")
         height, width = resolve_canvas_size(aspect_width, aspect_height)
     elif request.short_edge is not None:
         if aspect_width >= aspect_height:
@@ -125,16 +122,14 @@ def validate_model_and_lora(
     if request.model is not None and request.model not in allowed_models:
         choices = ", ".join(sorted(allowed_models))
         raise RequestAdaptationError(
-            f"Model mismatch: request specifies {request.model!r}; this server provides {choices}."
-        )
+            f"Model mismatch: request specifies {request.model!r}; this server provides {choices}.")
 
     if request.lora is None:
         return
     if not args.lora_path:
         raise RequestAdaptationError(
             "This server has no startup LoRA. Configure generator.pipeline.components.lora_path before using "
-            "the request lora selector."
-        )
+            "the request lora selector.")
 
     body = request.lora
     name = next((body[key] for key in ("name", "lora_name", "adapter") if body.get(key) is not None), None)
@@ -143,13 +138,10 @@ def validate_model_and_lora(
     if name is None and path is None:
         raise RequestAdaptationError("lora must provide a name or path")
     if name is not None and str(name) not in {args.lora_nickname, served_model_name}:
-        raise RequestAdaptationError(
-            f"Requested LoRA {name!r} is not the startup adapter {args.lora_nickname!r}."
-        )
+        raise RequestAdaptationError(f"Requested LoRA {name!r} is not the startup adapter {args.lora_nickname!r}.")
     if path is not None and str(path) != args.lora_path:
         raise RequestAdaptationError(
-            f"Requested LoRA path {path!r} does not match the startup adapter {args.lora_path!r}."
-        )
+            f"Requested LoRA path {path!r} does not match the startup adapter {args.lora_path!r}.")
     if scale is not None:
         try:
             scale_value = float(scale)
@@ -157,8 +149,7 @@ def validate_model_and_lora(
             raise RequestAdaptationError(f"Invalid LoRA scale {scale!r}") from error
         if not math.isclose(scale_value, args.lora_strength, rel_tol=0.0, abs_tol=1e-8):
             raise RequestAdaptationError(
-                f"Requested LoRA scale {scale_value:g} does not match startup strength {args.lora_strength:g}."
-            )
+                f"Requested LoRA scale {scale_value:g} does not match startup strength {args.lora_strength:g}.")
 
 
 def _apply_reference_inputs(
@@ -179,12 +170,10 @@ def _apply_reference_inputs(
             raise RequestAdaptationError("MiniMax-H3 task must be one of t2va, fl2va, or ref2va.")
         if normalized_task == "ref2va" and not ref2va:
             raise RequestAdaptationError(
-                "MiniMax-H3 task='ref2va' requires MiniMaxH3Ref2VAModularPipeline at server startup."
-            )
+                "MiniMax-H3 task='ref2va' requires MiniMaxH3Ref2VAModularPipeline at server startup.")
         if normalized_task != "ref2va" and ref2va:
             raise RequestAdaptationError(
-                f"This server is configured for MiniMax-H3 Ref2VA, not task={normalized_task!r}."
-            )
+                f"This server is configured for MiniMax-H3 Ref2VA, not task={normalized_task!r}.")
         if normalized_task == "t2va" and (images or videos or audios):
             raise RequestAdaptationError("MiniMax-H3 task='t2va' does not accept reference media.")
         if normalized_task == "fl2va" and not images:
@@ -204,10 +193,8 @@ def _apply_reference_inputs(
         raise RequestAdaptationError("The task selector is only defined for MiniMax-H3 servers.")
 
     if model_family == "minimax_h3" and (videos or audios):
-        raise RequestAdaptationError(
-            "MiniMax-H3 video/audio references require a server configured with "
-            "override_pipeline_cls_name=MiniMaxH3Ref2VAModularPipeline."
-        )
+        raise RequestAdaptationError("MiniMax-H3 video/audio references require a server configured with "
+                                     "override_pipeline_cls_name=MiniMaxH3Ref2VAModularPipeline.")
     if len(images) > 2:
         raise RequestAdaptationError("The loaded pipeline accepts at most first and last image references.")
     if images:
@@ -304,9 +291,9 @@ def build_generation_request(
     if "enable_frame_interpolation" in body_set and request.enable_frame_interpolation:
         kwargs["enable_frame_interpolation"] = True
         for name in (
-            "frame_interpolation_exp",
-            "frame_interpolation_scale",
-            "frame_interpolation_model_path",
+                "frame_interpolation_exp",
+                "frame_interpolation_scale",
+                "frame_interpolation_model_path",
         ):
             kwargs[name] = getattr(request, name)
     if request.extra_params:
