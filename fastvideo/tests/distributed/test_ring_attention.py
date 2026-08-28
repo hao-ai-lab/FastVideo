@@ -41,6 +41,11 @@ import torch
 SEED = 2026
 MULTI_GPU_RING_WORLD_SIZE = 2
 
+# Hybrid Ring x Ulysses (USP): ring_size=2, so ulysses_size = world_size //
+# ring_size = 2. NUM_HEADS must be divisible by ulysses_size.
+HYBRID_USP_WORLD_SIZE = 4
+HYBRID_RING_SIZE = 2
+
 BATCH_SIZE = 1
 GLOBAL_SEQ_LEN = 256
 NUM_HEADS = 4
@@ -465,10 +470,159 @@ def _run_multi_gpu_worker(output_path: Path) -> None:
             dist.destroy_process_group()
 
 
+def _run_hybrid_usp_worker(output_path: Path) -> None:
+    """Ring x Ulysses (USP) hybrid worker: ring_size=2, ulysses_size=2.
+
+    Unlike ``_run_multi_gpu_worker`` (which drives ``ring_flash_attn_func``
+    directly against ``dist.group.WORLD``), this exercises FastVideo's actual
+    distributed plumbing: ``maybe_init_distributed_environment_and_model_parallel``
+    builds the ring x ulysses rank mesh via ``initialize_model_parallel``, and
+    the Ulysses all-to-all / Ring Attention / Ulysses all-to-all sequence
+    mirrors ``DistributedAttention._forward_ring_attention`` in
+    ``fastvideo.attention.layer`` exactly. This is the numerical parity check
+    for the ``1 < ring_size < sp_size`` hybrid path documented by
+    ``--ring-size`` and accepted by ``_check_ring_attention_args`` -- that
+    path has no other test driving real KV/Ulysses communication.
+    """
+    import torch.distributed as dist
+    from flash_attn import flash_attn_func
+
+    from fastvideo.attention.ring import ring_flash_attn_func
+    from fastvideo.distributed import cleanup_dist_env_and_memory
+    from fastvideo.distributed.communication_op import ulysses_all_to_all_4D
+    from fastvideo.distributed.parallel_state import (
+        get_ring_group,
+        maybe_init_distributed_environment_and_model_parallel,
+    )
+
+    local_rank = int(os.environ["LOCAL_RANK"])
+    rank = int(os.environ["RANK"])
+    world_size = int(os.environ["WORLD_SIZE"])
+
+    device = torch.device(f"cuda:{local_rank}")
+    torch.cuda.set_device(device)
+
+    def log(message: str) -> None:
+        print(f"[rank {rank}] {message}", flush=True)
+
+    try:
+        log("initializing FastVideo distributed environment + USP model parallel state")
+
+        maybe_init_distributed_environment_and_model_parallel(
+            tp_size=1,
+            sp_size=world_size,
+            ring_size=HYBRID_RING_SIZE,
+        )
+
+        log("USP model parallel state initialized")
+
+        if GLOBAL_SEQ_LEN % world_size != 0:
+            raise ValueError(
+                f"GLOBAL_SEQ_LEN={GLOBAL_SEQ_LEN} must be divisible by "
+                f"world_size={world_size}."
+            )
+
+        local_seq_len = GLOBAL_SEQ_LEN // world_size
+
+        # Every rank generates identical Q/K/V independently.
+        q_global, k_global, v_global = _make_qkv(
+            batch_size=BATCH_SIZE,
+            sequence_length=GLOBAL_SEQ_LEN,
+            num_heads=NUM_HEADS,
+            head_size=HEAD_SIZE,
+            device=device,
+        )
+
+        torch.cuda.synchronize(device)
+        log("deterministic global QKV created")
+
+        start = rank * local_seq_len
+        end = start + local_seq_len
+
+        q_local = q_global[:, start:end].contiguous()
+        k_local = k_global[:, start:end].contiguous()
+        v_local = v_global[:, start:end].contiguous()
+
+        softmax_scale = HEAD_SIZE**-0.5
+
+        # Ulysses step: redistribute heads -> sequence within this rank's
+        # Ulysses subgroup so each Ring rank holds one full Ring chunk.
+        qkv_local = torch.cat([q_local, k_local, v_local], dim=0)
+        qkv_local = ulysses_all_to_all_4D(qkv_local, scatter_dim=2, gather_dim=1)
+        q_ring, k_ring, v_ring = qkv_local.chunk(3, dim=0)
+
+        ring_group = get_ring_group()
+        assert ring_group is not None, "Ring process group must be initialized for ring_size > 1"
+
+        log("entering ring_flash_attn_func (hybrid USP)")
+
+        output_ring = ring_flash_attn_func(
+            q_ring,
+            k_ring,
+            v_ring,
+            dropout_p=0.0,
+            softmax_scale=softmax_scale,
+            causal=False,
+            group=ring_group.device_group,
+        )
+
+        torch.cuda.synchronize(device)
+        log("ring_flash_attn_func complete")
+
+        # Ulysses step back: redistribute sequence -> heads to restore the
+        # original per-rank shard shape.
+        output_local = ulysses_all_to_all_4D(output_ring, scatter_dim=1, gather_dim=2).contiguous()
+
+        gathered_outputs = [
+            torch.empty_like(output_local)
+            for _ in range(world_size)
+        ]
+
+        dist.all_gather(
+            gathered_outputs,
+            output_local,
+        )
+
+        torch.cuda.synchronize(device)
+        log("all_gather complete")
+
+        usp_output_global = torch.cat(
+            gathered_outputs,
+            dim=1,
+        )
+
+        if rank == 0:
+            reference = flash_attn_func(
+                q_global,
+                k_global,
+                v_global,
+                dropout_p=0.0,
+                softmax_scale=softmax_scale,
+                causal=False,
+            )
+
+            torch.cuda.synchronize(device)
+
+            torch.save(
+                {
+                    "usp_output": usp_output_global.cpu(),
+                    "reference": reference.cpu(),
+                },
+                output_path,
+            )
+
+            log("reference saved")
+
+    finally:
+        log("tearing down FastVideo distributed state")
+        cleanup_dist_env_and_memory()
+
+
 def _run_torchrun(
     script_path: Path,
     nproc_per_node: int,
     output_path: Path,
+    worker_flag: str = "--ring-worker",
 ) -> None:
     cmd = [
         "torchrun",
@@ -476,7 +630,7 @@ def _run_torchrun(
         "--nnodes=1",
         f"--nproc_per_node={nproc_per_node}",
         str(script_path),
-        "--ring-worker",
+        worker_flag,
         "--output",
         str(output_path),
     ]
@@ -591,10 +745,63 @@ def test_multi_gpu_ring_attention_matches_full_attention(
     )
 
 
+def test_multi_gpu_hybrid_usp_matches_full_attention(
+    tmp_path: Path,
+) -> None:
+    """Validate the Ring x Ulysses (USP) hybrid (1 < ring_size < sp_size).
+
+    ``_check_ring_attention_args`` accepts this configuration and
+    ``--ring-size`` documents it as supported, but
+    ``test_multi_gpu_ring_attention_matches_full_attention`` above only
+    exercises pure Ring (``ring_size == sp_size``) and
+    ``test_usp_group_layout.py`` only checks the rank-mesh arithmetic as a
+    pure function. This is the numerical parity check for the hybrid path
+    itself, driving real Ulysses all-to-all + Ring KV communication across
+    four GPUs.
+    """
+
+    if not torch.cuda.is_available():
+        pytest.skip("This test requires CUDA.")
+
+    if torch.cuda.device_count() < HYBRID_USP_WORLD_SIZE:
+        pytest.skip(
+            "Hybrid USP test requires at least "
+            f"{HYBRID_USP_WORLD_SIZE} CUDA devices."
+        )
+
+    script_path = Path(__file__).resolve()
+    output_path = tmp_path / "usp_vs_full.pt"
+
+    _run_torchrun(
+        script_path=script_path,
+        nproc_per_node=HYBRID_USP_WORLD_SIZE,
+        output_path=output_path,
+        worker_flag="--hybrid-usp-worker",
+    )
+
+    saved = torch.load(
+        output_path,
+        map_location="cpu",
+        weights_only=True,
+    )
+
+    usp_output = saved["usp_output"]
+    reference = saved["reference"]
+
+    _assert_attention_close(
+        usp_output,
+        reference,
+    )
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--ring-worker",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--hybrid-usp-worker",
         action="store_true",
     )
     parser.add_argument(
@@ -619,7 +826,7 @@ def _parse_args() -> argparse.Namespace:
 if __name__ == "__main__":
     args = _parse_args()
 
-    if not args.ring_worker:
+    if not args.ring_worker and not args.hybrid_usp_worker:
         raise SystemExit(
             "This module is intended to be run by pytest."
         )
@@ -629,6 +836,11 @@ if __name__ == "__main__":
             "--output is required in worker mode."
         )
 
-    _run_multi_gpu_worker(
-        Path(args.output),
-    )
+    if args.hybrid_usp_worker:
+        _run_hybrid_usp_worker(
+            Path(args.output),
+        )
+    else:
+        _run_multi_gpu_worker(
+            Path(args.output),
+        )
