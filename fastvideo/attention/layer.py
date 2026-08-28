@@ -284,6 +284,12 @@ class DistributedAttention(nn.Module):
                     f"sp_world_size={get_sp_world_size()} (expected original_seq_len == "
                     f"local_seq_len * sp_world_size == {global_seq_len}).")
 
+        if q.dtype not in (torch.float16, torch.bfloat16):
+            raise NotImplementedError(
+                f"Ring Attention requires fp16/bf16 inputs (the underlying FlashAttention kernel does not "
+                f"support fp32), got {q.dtype}. Cast Q/K/V before calling this layer instead of relying on "
+                f"a silent cast here.")
+
     @staticmethod
     def _slice_local_rope(
         freqs_cis: tuple[torch.Tensor, torch.Tensor],
@@ -379,12 +385,6 @@ class DistributedAttention(nn.Module):
         if ring_group is None:
             raise RuntimeError("Ring Attention is enabled, but the Ring process group is not initialized.")
 
-        orig_dtype = q.dtype
-        if orig_dtype not in (torch.float16, torch.bfloat16):
-            q = q.to(torch.bfloat16)
-            k = k.to(torch.bfloat16)
-            v = v.to(torch.bfloat16)
-
         output = ring_flash_attn_func(
             q,
             k,
@@ -392,11 +392,8 @@ class DistributedAttention(nn.Module):
             dropout_p=0.0,
             softmax_scale=self.softmax_scale,
             causal=False,
-            group=ring_group,
+            group=ring_group.device_group,
         )
-
-        if output.dtype != orig_dtype:
-            output = output.to(orig_dtype)
 
         # Ulysses step back (no-op when ulysses_size == 1): redistribute
         # sequence -> heads to restore the original per-rank shard shape.
