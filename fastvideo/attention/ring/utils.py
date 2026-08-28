@@ -7,11 +7,11 @@
 # which itself derives from ring-flash-attention:
 #   https://github.com/zhuzilin/ring-flash-attention
 
+from typing import Any
+
 import torch
 import torch.distributed as dist
 import torch.nn.functional as F
-from einops import rearrange
-from typing import Any
 
 __all__ = ["update_out_and_lse", "RingComm"]
 
@@ -57,74 +57,6 @@ def update_out_and_lse(
     else:
         out, lse = _update_out_and_lse(out, lse, block_out, block_lse)
     return out, lse
-
-
-def update_npu_out(cur_attn_out: torch.Tensor,
-                   cur_softmax_max: torch.Tensor,
-                   cur_softmax_sum: torch.Tensor,
-                   prev_attn_out: torch.Tensor | None,
-                   prev_softmax_max: torch.Tensor | None,
-                   prev_softmax_sum: torch.Tensor | None,
-                   layout: str = "BSND") -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    assert layout == "BSND", "NPU currently only supports input data in BSND format."
-    if prev_attn_out is None:
-        return cur_attn_out, cur_softmax_max, cur_softmax_sum
-    attn_h = cur_attn_out.shape[2]
-
-    # attn_out [b, s, n, d] -> [s, b, h]
-    cur_attn_out = rearrange(cur_attn_out, 'b s n d -> s b (n d)').contiguous()
-    prev_attn_out = rearrange(prev_attn_out, 'b s n d -> s b (n d)').contiguous()
-
-    # update softmax_max
-    origin_dtype = prev_attn_out.dtype
-    softmax_max = torch.maximum(prev_softmax_max, cur_softmax_max)
-    prev_scale = torch.exp(prev_softmax_max - softmax_max)
-    cur_scale = torch.exp(cur_softmax_max - softmax_max)
-
-    # update softmax_sum
-    prev_softmax_sum_scaled = prev_softmax_sum * prev_scale
-    cur_softmax_sum_scaled = cur_softmax_sum * cur_scale
-    softmax_sum = prev_softmax_sum_scaled + cur_softmax_sum_scaled
-
-    # out updating scale
-    prev_out_scale = prev_softmax_sum_scaled / softmax_sum
-    cur_out_scale = cur_softmax_sum_scaled / softmax_sum
-
-    # out_scale: [b, n, s, 8] -> [s, b, h]
-    n = prev_out_scale.shape[1]
-    h = prev_attn_out.shape[-1]
-    d = h // n
-    prev_out_scale = prev_out_scale[..., 0].unsqueeze(3).repeat(1, 1, 1, d)
-    prev_out_scale = rearrange(prev_out_scale, 'b n s d -> s b (n d)').contiguous()
-    cur_out_scale = cur_out_scale[..., 0].unsqueeze(3).repeat(1, 1, 1, d)
-    cur_out_scale = rearrange(cur_out_scale, 'b n s d -> s b (n d)').contiguous()
-
-    attn_out = prev_attn_out * prev_out_scale + cur_attn_out * cur_out_scale
-    attn_out = attn_out.to(origin_dtype)
-
-    # attn_out: [s, b, h] -> [b, s, n d]
-    attn_out = rearrange(attn_out, 's b (n d) -> b s n d', n=attn_h).contiguous()
-    return attn_out, softmax_max, softmax_sum
-
-
-@torch.jit.script
-def flatten_varlen_lse(lse: torch.Tensor, cu_seqlens: torch.Tensor) -> torch.Tensor:
-    new_lse = []
-    for i in range(len(cu_seqlens) - 1):
-        start, end = cu_seqlens[i], cu_seqlens[i + 1]
-        new_lse.append(lse[i, :, :end - start])
-    return torch.cat(new_lse, dim=1)
-
-
-@torch.jit.script
-def unflatten_varlen_lse(lse: torch.Tensor, cu_seqlens: torch.Tensor, max_seqlen: int) -> torch.Tensor:
-    num_seq = len(cu_seqlens) - 1
-    num_head = lse.shape[-2]
-    new_lse = torch.empty((num_seq, max_seqlen, num_head, 1), dtype=torch.float32, device=lse.device)
-    for i in range(num_seq):
-        start, end = cu_seqlens[i], cu_seqlens[i + 1]
-        new_lse[i, :end - start] = lse[start:end]
-    return new_lse.squeeze(dim=-1).transpose(1, 2).contiguous()
 
 
 class RingComm:
