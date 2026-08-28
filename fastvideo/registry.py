@@ -20,6 +20,10 @@ from fastvideo.configs.pipelines.cosmos2_5 import (
     Cosmos25Config,
     Cosmos25_14BConfig,
 )
+from fastvideo.configs.pipelines.cosmos_predict import (
+    CosmosPredictConfig,
+    CosmosPredict14BConfig,
+)
 from fastvideo.configs.pipelines.dreamx_world import DreamXWorld5BARPipelineConfig, DreamXWorld5BCamPipelineConfig
 from fastvideo.configs.pipelines.hunyuan import FastHunyuanConfig, HunyuanConfig
 from fastvideo.configs.pipelines.hunyuangamecraft import HunyuanGameCraftPipelineConfig
@@ -878,6 +882,20 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=None,
         pipeline_config_cls=CosmosConfig,
+        workload_types=(WorkloadType.T2V, WorkloadType.I2V),
+        hf_model_paths=[
+            "nvidia/Cosmos-1.0-Autoregression-7B-Video",
+        ],
+        model_detectors=[
+            lambda path: "cosmos" in path.lower() and "autoregression" in path.lower(),
+        ],
+        model_family="cosmos",
+        default_preset="cosmos_ar_7b",
+    )
+    
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=CosmosConfig,
         workload_types=(WorkloadType.T2V, ),
         hf_model_paths=[
             "nvidia/Cosmos-Predict2-2B-Video2World",
@@ -888,6 +906,35 @@ def _register_configs() -> None:
         ],
         model_family="cosmos",
         default_preset="cosmos_predict2_2b",
+    )
+
+    # Cosmos Predict (Prompt2World)
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=CosmosPredictConfig,
+        workload_types=(WorkloadType.T2V, WorkloadType.I2V),
+        hf_model_paths=[
+            "nvidia/Cosmos-1.0-Prompt2World-7B-Video",
+        ],
+        model_detectors=[
+            lambda path: "cosmos" in path.lower() and "prompt2world-7b" in path.lower(),
+        ],
+        model_family="cosmos_predict",
+        default_preset="cosmos_predict_preset",
+    )
+
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=CosmosPredict14BConfig,
+        workload_types=(WorkloadType.T2V, WorkloadType.I2V),
+        hf_model_paths=[
+            "nvidia/Cosmos-1.0-Prompt2World-14B-Video",
+        ],
+        model_detectors=[
+            lambda path: "cosmos" in path.lower() and "prompt2world-14b" in path.lower(),
+        ],
+        model_family="cosmos_predict",
+        default_preset="cosmos_predict_14b_preset",
     )
 
     # TurboDiffusion
