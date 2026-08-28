@@ -80,7 +80,10 @@ def parse_args() -> argparse.Namespace:
         "--vsa",
         action=argparse.BooleanOptionalAction,
         default=False,
-        help="enable MiniMax H3 VSA; requires a VSA-capable MLX checkpoint from --include-vsa",
+        help=(
+            "enable MiniMax H3 VSA; requires a VSA-capable MLX checkpoint "
+            "from --include-vsa"
+        ),
     )
     parser.add_argument(
         "--vsa-sparsity",
@@ -88,13 +91,42 @@ def parse_args() -> argparse.Namespace:
         default=0.9,
         help="VSA sparsity in [0, 1); 0.9 is the trained FastH3 policy",
     )
-    parser.add_argument("--vsa-tile-size", type=int, default=64, choices=(64, 256), help="VSA tile size in tokens")
-    parser.add_argument("--vsa-prefix-mode", choices=("exempt", "compete"), default="exempt",
-                        help="prefix-key policy: always keep (exempt) or FLOP-matched top-k (compete)")
-    parser.add_argument("--vsa-dense-first-n-steps", type=int, default=0, help="run the first N denoise steps dense")
-    parser.add_argument("--vsa-dense-layers", default="", help="comma-separated layer indices forced dense")
-    parser.add_argument("--vsa-impl", choices=PUBLIC_VSA_IMPLS, default="auto",
-                        help="sparse attention implementation; auto uses chunked gather+SDPA (simd is opt-in)")
+    parser.add_argument(
+        "--vsa-tile-size",
+        type=int,
+        default=64,
+        choices=(64, 256),
+        help="VSA tile size in tokens",
+    )
+    parser.add_argument(
+        "--vsa-prefix-mode",
+        choices=("exempt", "compete"),
+        default="exempt",
+        help=(
+            "prefix-key policy: always keep (exempt) or FLOP-matched top-k "
+            "(compete)"
+        ),
+    )
+    parser.add_argument(
+        "--vsa-dense-first-n-steps",
+        type=int,
+        default=0,
+        help="run the first N denoise steps dense",
+    )
+    parser.add_argument(
+        "--vsa-dense-layers",
+        default="",
+        help="comma-separated layer indices forced dense",
+    )
+    parser.add_argument(
+        "--vsa-impl",
+        choices=PUBLIC_VSA_IMPLS,
+        default="auto",
+        help=(
+            "sparse attention implementation; auto uses chunked gather+SDPA "
+            "(simd is opt-in)"
+        ),
+    )
     return parser.parse_args()
 
 
