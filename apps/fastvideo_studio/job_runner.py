@@ -613,17 +613,48 @@ class JobRunner:
         return True
 
     CONFIG_FIELDS: tuple[str, ...] = (
-        "model_id", "name", "prompt", "workload_type", "job_type", "image_path",
-        "last_image_path", "references", "negative_prompt", "num_inference_steps",
-        "num_frames", "height", "width", "guidance_scale", "guidance_rescale",
-        "fps", "seed", "num_gpus", "dit_cpu_offload", "dit_layerwise_offload",
-        "text_encoder_cpu_offload", "vae_cpu_offload", "image_encoder_cpu_offload",
-        "use_fsdp_inference", "enable_torch_compile", "vsa_sparsity", "tp_size",
-        "sp_size", "data_path", "max_train_steps", "train_batch_size",
-        "learning_rate", "num_latent_t", "validation_dataset_file", "lora_rank",
-        "dmd_use_vsa", "dmd_vsa_sparsity", "dmd_denoising_steps",
-        "real_score_guidance_scale", "generator_update_interval",
-        "real_score_model_path", "fake_score_model_path",
+        "model_id",
+        "name",
+        "prompt",
+        "workload_type",
+        "job_type",
+        "image_path",
+        "last_image_path",
+        "references",
+        "negative_prompt",
+        "num_inference_steps",
+        "num_frames",
+        "height",
+        "width",
+        "guidance_scale",
+        "guidance_rescale",
+        "fps",
+        "seed",
+        "num_gpus",
+        "dit_cpu_offload",
+        "dit_layerwise_offload",
+        "text_encoder_cpu_offload",
+        "vae_cpu_offload",
+        "image_encoder_cpu_offload",
+        "use_fsdp_inference",
+        "enable_torch_compile",
+        "vsa_sparsity",
+        "tp_size",
+        "sp_size",
+        "data_path",
+        "max_train_steps",
+        "train_batch_size",
+        "learning_rate",
+        "num_latent_t",
+        "validation_dataset_file",
+        "lora_rank",
+        "dmd_use_vsa",
+        "dmd_vsa_sparsity",
+        "dmd_denoising_steps",
+        "real_score_guidance_scale",
+        "generator_update_interval",
+        "real_score_model_path",
+        "fake_score_model_path",
     )
 
     def duplicate_job(self, job_id: str, new_job_id: str) -> Job:
@@ -649,9 +680,8 @@ class JobRunner:
             raise ValueError(f"Job {job_id} not found")
         if job.status not in self.EDITABLE_STATUSES:
             allowed = ", ".join(s.value for s in self.EDITABLE_STATUSES)
-            raise ValueError(
-                f"Job is {job.status.value}; only {allowed} jobs can be edited. "
-                "Duplicate it instead.")
+            raise ValueError(f"Job is {job.status.value}; only {allowed} jobs can be edited. "
+                             "Duplicate it instead.")
         unknown = set(updates) - set(self.CONFIG_FIELDS)
         if unknown:
             raise ValueError(f"Not editable: {', '.join(sorted(unknown))}")
@@ -809,8 +839,7 @@ class JobRunner:
                 try:
                     cached.shutdown()
                 except Exception:
-                    logger.debug("Shutdown of the dead generator failed",
-                                 exc_info=True)
+                    logger.debug("Shutdown of the dead generator failed", exc_info=True)
 
         # Import lazily so starting the server is fast even without a GPU.
         from fastvideo import VideoGenerator
@@ -838,8 +867,9 @@ class JobRunner:
             workload_type=workload_type,
             num_gpus=num_gpus,
             dit_layerwise_offload=dit_layerwise_offload,
-            **({"override_pipeline_cls_name": override_pipeline_cls_name}
-               if override_pipeline_cls_name else {}),
+            **({
+                "override_pipeline_cls_name": override_pipeline_cls_name
+            } if override_pipeline_cls_name else {}),
             dit_cpu_offload=dit_cpu_offload,
             text_encoder_cpu_offload=text_encoder_cpu_offload,
             vae_cpu_offload=vae_cpu_offload,
@@ -1056,8 +1086,7 @@ class JobRunner:
                 job.num_gpus,
                 dit_cpu_offload=job.dit_cpu_offload,
                 dit_layerwise_offload=job.dit_layerwise_offload,
-                override_pipeline_cls_name=(MINIMAX_H3_REF2VA_PIPELINE
-                                            if job.references else None),
+                override_pipeline_cls_name=(MINIMAX_H3_REF2VA_PIPELINE if job.references else None),
                 text_encoder_cpu_offload=(job.text_encoder_cpu_offload),
                 vae_cpu_offload=job.vae_cpu_offload,
                 image_encoder_cpu_offload=(job.image_encoder_cpu_offload),
@@ -1073,9 +1102,7 @@ class JobRunner:
 
             # Without a name FastVideo derives the filename from the prompt.
             safe_name = re.sub(r'[\\/:*?"<>|]+', "", job.name).strip().strip(".")
-            output_target = (
-                os.path.join(job_output_dir, f"{safe_name[:80]}.mp4")
-                if safe_name else job_output_dir)
+            output_target = (os.path.join(job_output_dir, f"{safe_name[:80]}.mp4") if safe_name else job_output_dir)
             gen_kwargs: dict[str, Any] = {
                 "prompt": job.prompt,
                 "output_path": output_target,
@@ -1131,7 +1158,7 @@ class JobRunner:
 
         except Exception as exception:
             error_msg = str(exception)
-            logger.error("Critical error in job thread: %s", error_msg, exc_info=True)
+            logger.exception("Critical error in job thread: %s", error_msg)
             job.status = JobStatus.FAILED
             job.error = f"Critical error ({type(exception).__name__}): {error_msg}"
             job.finished_at = time.time()

@@ -53,7 +53,7 @@ def _sqlite_row_get(row: sqlite3.Row, key: str, default: Any) -> Any:
     check has to go through .keys() -- otherwise every lookup falls back to the
     default and jobs restored from the database lose their stored fields.
     """
-    return row[key] if key in row.keys() else default  # noqa: SIM401
+    return row[key] if key in row.keys() else default  # noqa: SIM401, SIM118
 
 
 def _get_db_path(data_dir: Path) -> Path:

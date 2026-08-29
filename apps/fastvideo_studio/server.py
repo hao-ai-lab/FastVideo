@@ -140,9 +140,7 @@ def _upload_destination(ext: str, filename: str | None) -> str:
 ALLOWED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm", ".avi"}
 ALLOWED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".m4a", ".ogg"}
-ALLOWED_MEDIA_EXTENSIONS = (ALLOWED_IMAGE_EXTENSIONS
-                            | ALLOWED_VIDEO_EXTENSIONS
-                            | ALLOWED_AUDIO_EXTENSIONS)
+ALLOWED_MEDIA_EXTENSIONS = (ALLOWED_IMAGE_EXTENSIONS | ALLOWED_VIDEO_EXTENSIONS | ALLOWED_AUDIO_EXTENSIONS)
 
 
 @app.post("/api/upload-image")
