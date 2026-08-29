@@ -133,6 +133,9 @@ fastvideo/tests/ssim/reference_videos/**
 !fastvideo/tests/ssim/reference_videos/**/*.mp4
 !fastvideo/tests/ssim/reference_videos/**/*.png
 
+# Local H3 MLX kernel / exactness benches (JSON, logs, frames, videos)
+.kernel_bench/
+
 # Editor logs and local Python version pins (accidentally committed)
 *.nvimlog
 .nvimlog
