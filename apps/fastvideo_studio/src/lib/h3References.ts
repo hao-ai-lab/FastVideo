@@ -1,10 +1,6 @@
 /**
- * MiniMax-H3 Ref2VA reference helpers.
- *
- * Labels mirror `build_ref2va_presentation` in
- * fastvideo/pipelines/basic/minimax_h3/stages/minimax_h3_conditioning.py:
- * per-type counters incremented in list order, so the label a user sees here is
- * the one the model is shown.
+ * MiniMax-H3 Ref2VA reference helpers. Labels mirror the per-type counters in
+ * `build_ref2va_presentation`, so what the user sees is what the model is shown.
  */
 import type { MediaType } from "@/lib/api";
 
@@ -58,13 +54,7 @@ export function validateReferences(refs: H3Reference[]): string | null {
 	return null;
 }
 
-/**
- * Seed the guided prompt fields from the current reference list.
- *
- * Content is flush left and retention_analysis uses the
- * "status - explanation" form from the guide's complete example; blank
- * sections are left blank so serializeH3Prompt can fill them with N/A.
- */
+/** Seed the guided prompt fields from the current reference list. */
 export function referencePromptSeed(
 	refs: H3Reference[],
 ): Record<string, string> {

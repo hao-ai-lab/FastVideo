@@ -1,9 +1,7 @@
 /**
- * Map a persisted job back onto the create-job form's fields.
- *
- * Edit mode reuses the whole create form, so every value the form seeds from
- * defaults has to be overridden from the job instead -- otherwise the defaults
- * effect wins and the user silently edits the wrong numbers.
+ * Map a persisted job back onto the create-job form's fields. Every value the
+ * form seeds from defaults must be covered here, or edit mode silently shows
+ * defaults for whatever is missing.
  */
 import type { H3Reference } from "@/lib/h3References";
 import { parseH3Prompt, type H3PromptFields } from "@/lib/h3Prompt";

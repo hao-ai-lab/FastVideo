@@ -118,23 +118,19 @@ export default function CreateJobModal({
     React.useState(false);
   const [useFsdpInference, setUseFsdpInference] = React.useState(false);
 
-  // MiniMax-H3's FL2VA pipeline is the only registered model that takes an
-  // optional end frame (first/last-frame-to-video+audio), so only offer the
-  // field when it is selected.
+  // H3 is the only registered model with an end frame or references.
   const supportsLastImage = modelId.toLowerCase().includes('minimax-h3');
   const usingReferences = supportsLastImage && references.length > 0;
 
   // JobCard re-renders on every job-list poll, so `editingJob` is a fresh
-  // object each time even when unchanged. Effects must depend on stable
-  // primitives from it, never the object, or they re-run in a loop.
+  // object each time. Effects must depend on these, never on the object.
   const editingJobId = editingJob?.id ?? null;
   const editingJobModelId = editingJob?.model_id ?? null;
 
-  // Layerwise offload and FSDP both want ownership of the DiT weights, and
-  // FastVideoArgs silently picks a winner (fastvideo_args.py:859). Resolve that
-  // visibly here instead. dit_cpu_offload is deliberately NOT interlocked: it is
-  // a modifier rather than a competing strategy, and the backend already handles
-  // every combination, so the user's setting is never changed behind their back.
+  // Layerwise offload and FSDP compete for the DiT weights and FastVideoArgs
+  // silently picks a winner (fastvideo_args.py:859); resolve it visibly here.
+  // dit_cpu_offload is deliberately not interlocked -- it is a modifier, not a
+  // competing strategy.
   const handleDitLayerwiseOffloadChange = React.useCallback((next: boolean) => {
     setDitLayerwiseOffload(next);
     if (next) {
@@ -152,9 +148,8 @@ export default function CreateJobModal({
   const handleNumGpusChange = React.useCallback((next: number) => {
     setNumGpus(next);
     if (next > 1) {
-      // Raising the GPU count turns FSDP on as a convenience; dropping back to
-      // one leaves it alone, since single-GPU FSDP is a valid way to reach
-      // FSDP's own CPU offload (docs/inference/offloading.md).
+      // Dropping back to one GPU leaves FSDP alone: single-GPU FSDP is a
+      // valid way to reach its CPU offload (docs/inference/offloading.md).
       setUseFsdpInference(true);
       setDitLayerwiseOffload(false);
     }
@@ -210,8 +205,8 @@ export default function CreateJobModal({
     justOpenedRef.current = isOpen;
     if (!justOpened) return;
     if (editingJob) {
-      // Editing must not seed from defaults at all: a partially-seeded form
-      // silently edits values the user never saw.
+      // Must not fall through to the defaults below: a partially-seeded
+      // form silently edits values the user never saw.
       const f = jobToFormFields(editingJob);
       setModelId(f.modelId);
       setName(f.name);
@@ -608,8 +603,6 @@ export default function CreateJobModal({
             }),
       };
       if (editingJob) {
-        // PATCH only accepts pending jobs; the API re-checks, since a job can
-        // start between opening this modal and saving.
         await updateJob(
           editingJob.id,
           payload as unknown as Record<string, unknown>,
@@ -667,6 +660,8 @@ export default function CreateJobModal({
           autoComplete="off"
           className="flex flex-col gap-3.5"
         >
+          {/* disabled cascades to every control inside; display:contents
+              keeps the parent's flex layout. */}
           <fieldset
             disabled={readOnly}
             style={{ display: 'contents' }}
@@ -863,9 +858,7 @@ export default function CreateJobModal({
           )}
 
           {usingReferences && useGuidedPrompt ? (
-            /* Ref2VA prompts follow the six-section format in
-               docs/VIDEO_PROMPT_WRITING_GUIDE_ref_en.md. One field per section
-               keeps the serialization correct and lets each carry its own rules. */
+            /* Six-section format from the model's reference prompt guide. */
             <>
               {H3_PROMPT_SECTIONS.map((section) => (
                 <FieldRow

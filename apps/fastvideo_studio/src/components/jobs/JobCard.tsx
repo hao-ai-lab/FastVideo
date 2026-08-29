@@ -185,9 +185,7 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
           {job.name?.trim() ? `${job.model_id} · ${job.prompt}` : job.prompt}
         </span>
         <span className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
-          {/* Short job id: the log files, output directory and API responses are
-              all keyed on the full UUID, so surface enough of it to correlate a
-              card with ~/h3_studio_logs/<id>.log at a glance. Full id on hover. */}
+          {/* Short job id; logs and output dirs are keyed on the full UUID. */}
           <span
             className="font-mono text-muted-foreground/80"
             title={job.id}
@@ -308,9 +306,6 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
           Delete
         </Button>
       </div>
-      {/* Rendered per-card rather than lifting the modal into the page: it is
-          already parameterised by jobType/workloadType, so passing the job's
-          own values is enough, and only one instance is mounted at a time. */}
       {isViewing && (
         <CreateJobModal
           isOpen

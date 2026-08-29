@@ -263,7 +263,6 @@ def _build_h3_references(raw: list[dict[str, Any]]) -> list[Any]:
             "source": source,
             "media_type": (ref.get("media_type") or "image"),
         }
-        # Optional per-reference overrides the pipeline understands.
         for opt in ("soundtrack", "fps", "sample_rate"):
             if ref.get(opt) not in (None, ""):
                 kwargs[opt] = ref[opt]
@@ -613,7 +612,6 @@ class JobRunner:
         logger.info("Deleted job %s", job.id)
         return True
 
-    # Config fields a job carries; everything else on Job is runtime state.
     CONFIG_FIELDS: tuple[str, ...] = (
         "model_id", "name", "prompt", "workload_type", "job_type", "image_path",
         "last_image_path", "references", "negative_prompt", "num_inference_steps",
@@ -640,10 +638,7 @@ class JobRunner:
         config = {f: copy.deepcopy(getattr(source, f)) for f in self.CONFIG_FIELDS}
         return self.create_job(job_id=new_job_id, **config)
 
-    #: A job's configuration may be changed exactly when the job can still be
-    #: started -- the same set start_job() accepts. A running job would race the
-    #: worker, and a completed job's config describes an output that already
-    #: exists, so editing it would silently misdescribe that result.
+    #: Editable exactly when startable: the same set start_job() accepts.
     EDITABLE_STATUSES = (JobStatus.PENDING, JobStatus.FAILED, JobStatus.STOPPED)
 
     def update_job_config(self, job_id: str, updates: dict[str, Any]) -> Job:
@@ -804,12 +799,8 @@ class JobRunner:
             if cached is not None:
                 if _generator_is_alive(cached):
                     return cached
-                # The executor's worker processes have exited (they can die
-                # while the generator sits idle in the cache, leaving zombies).
-                # Handing this back would fail the job on the first
-                # collective_rpc with BrokenPipeError / ConnectionResetError,
-                # and would keep failing for every later job with the same
-                # config. Evict it and load a fresh one instead.
+                # Workers can exit while a generator sits idle in the cache;
+                # reusing it fails every later job with the same config.
                 logger.warning(
                     "Cached generator for %s has dead workers; reloading.",
                     model_id,
@@ -845,14 +836,7 @@ class JobRunner:
         gen = VideoGenerator.from_pretrained(
             model_id,
             workload_type=workload_type,
-            # num_gpus is accepted, cache-keyed and logged by this method but was
-            # never forwarded, so every job silently ran at the FastVideoArgs
-            # default of 1 GPU regardless of the UI's "GPUs" field.
             num_gpus=num_gpus,
-            # Forwarded explicitly: FastVideoArgs defaults this to True, which
-            # unconditionally cancels use_fsdp_inference (fastvideo_args.py:859)
-            # and would silently collapse multi-GPU jobs to world_size=1. The UI
-            # keeps it mutually exclusive with FSDP / dit_cpu_offload.
             dit_layerwise_offload=dit_layerwise_offload,
             **({"override_pipeline_cls_name": override_pipeline_cls_name}
                if override_pipeline_cls_name else {}),
@@ -1053,14 +1037,11 @@ class JobRunner:
             buf.phase = "loading model"
             logger.info("Loading model...")
 
-            # NOTE: the generator MUST be created on this thread. Building it
-            # spawns the MultiprocExecutor's worker processes; if the creating
-            # thread then exits, the workers are torn down with it and the first
-            # collective_rpc after "N workers ready" fails with
-            # ConnectionResetError (Errno 104) before any real work happens.
-            # This previously ran in a short-lived helper thread so _stop_event
-            # could be polled during model load; that cancellation window is
-            # traded away for workers that survive the job.
+            # The generator MUST be created on this thread: building it spawns
+            # the executor's worker processes, and they are torn down if the
+            # creating thread exits. Running it in a helper thread (to poll
+            # _stop_event during load) made every collective_rpc fail with
+            # ConnectionResetError.
             if job._stop_event.is_set():
                 job.status = JobStatus.STOPPED
                 job.finished_at = time.time()
@@ -1090,9 +1071,7 @@ class JobRunner:
             buf.phase = "generating"
             logger.info("Starting generation for job %s (model=%s)", job.id, job.model_id)
 
-            # A named job writes <job dir>/<name>.mp4; without a name FastVideo
-            # derives the filename from the prompt, which for a six-section
-            # reference prompt is unreadable.
+            # Without a name FastVideo derives the filename from the prompt.
             safe_name = re.sub(r'[\\/:*?"<>|]+', "", job.name).strip().strip(".")
             output_target = (
                 os.path.join(job_output_dir, f"{safe_name[:80]}.mp4")
@@ -1115,14 +1094,9 @@ class JobRunner:
             if job.image_path:
                 gen_kwargs["image_path"] = job.image_path
             if job.references:
-                # Ref2VA: ordered image/video/audio references. Mutually
-                # exclusive with the FL2VA keyframe fields, which the pipeline
-                # rejects outright when references are present.
                 gen_kwargs["references"] = _build_h3_references(job.references)
             if job.last_image_path:
-                # MiniMax-H3 FL2VA accepts an optional end frame. Unlike
-                # image_path, the pipeline does not resolve a path for this one
-                # (_prepare_fl2va requires a PIL image), so load it here.
+                # _prepare_fl2va requires a PIL image, not a path.
                 from PIL import Image as _PILImage
                 gen_kwargs["last_image"] = _PILImage.open(job.last_image_path)
             generator.generate_video(**gen_kwargs)

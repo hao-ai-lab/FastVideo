@@ -1,10 +1,7 @@
 /**
- * MiniMax-H3 full-reference prompt sections.
- *
- * Serialization follows the complete example in
- * docs/VIDEO_PROMPT_WRITING_GUIDE_ref_en.md (MiniMaxAI/MiniMax-H3):
- * `section_name:` on its own line, content flush left on the lines below,
- * one blank line between sections. Sections appear in a fixed order.
+ * MiniMax-H3 full-reference prompt sections. Serialization follows the worked
+ * example in the model's VIDEO_PROMPT_WRITING_GUIDE_ref_en.md: `section_name:`
+ * on its own line, content flush left, one blank line between sections.
  */
 
 export const H3_PROMPT_SECTIONS = [

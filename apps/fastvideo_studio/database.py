@@ -91,8 +91,6 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "jobs", "image_path", "TEXT", "''")
     _add_column_if_missing(conn, "jobs", "name", "TEXT", "''")
     _add_column_if_missing(conn, "jobs", "last_image_path", "TEXT", "''")
-    # Ref2VA reference list, stored as a JSON array of
-    # {"source": ..., "media_type": ...} objects.
     _add_column_if_missing(conn, "jobs", "references_json", "TEXT", "''")
     _add_column_if_missing(conn, "jobs", "job_type", "TEXT", "'inference'")
     _add_column_if_missing(conn, "jobs", "data_path", "TEXT", "''")

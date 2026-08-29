@@ -138,8 +138,6 @@ def _upload_destination(ext: str, filename: str | None) -> str:
 
 
 ALLOWED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
-# MiniMax-H3 Ref2VA takes ordered image / video / audio references, so the
-# upload endpoint has to accept more than keyframes.
 ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm", ".avi"}
 ALLOWED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".m4a", ".ogg"}
 ALLOWED_MEDIA_EXTENSIONS = (ALLOWED_IMAGE_EXTENSIONS
