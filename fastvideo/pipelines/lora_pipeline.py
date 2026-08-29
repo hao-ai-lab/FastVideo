@@ -127,6 +127,7 @@ class LoRAPipeline(ComposedPipelineBase):
         # Adapter tensors and wrapped model layers belong to this pipeline's module
         # instances. Sharing either cache across two generators can apply one model's
         # adapter to another model's layers.
+        self.trainable_transformer_modules = {}
         self.lora_adapters = defaultdict(dict)
         self.lora_adapter_paths = {}
         self.lora_layers = {}
@@ -154,11 +155,6 @@ class LoRAPipeline(ComposedPipelineBase):
             self.trainable_transformer_modules.keys(),
         )
 
-        for (
-                transformer_name,
-                transformer_module,
-        ) in self.trainable_transformer_modules.items():
-            self.exclude_lora_layers[transformer_name] = (transformer_module.config.arch_config.exclude_lora_layers)
         # Only override the pipeline class's own default when the caller actually set
         # one. Assigning unconditionally erases per-model defaults, and a model that
         # declares one usually does so because wrapping every linear breaks its forward.
@@ -265,6 +261,14 @@ class LoRAPipeline(ComposedPipelineBase):
                 transformer_name,
                 transformer_module,
         ) in self.trainable_transformer_modules.items():
+            excluded_lora_layers = self.exclude_lora_layers.get(transformer_name)
+            if excluded_lora_layers is None:
+                # Reading a LazyModule's config materializes it. Defer that read
+                # until LoRA conversion is actually requested so a base inference
+                # pipeline can keep its transformer unloaded through conditioning.
+                excluded_lora_layers = list(transformer_module.config.arch_config.exclude_lora_layers)
+                self.exclude_lora_layers[transformer_name] = excluded_lora_layers
+
             converted_count = 0
             # init bookkeeping structures
             if transformer_name not in self.lora_layers:
@@ -293,7 +297,7 @@ class LoRAPipeline(ComposedPipelineBase):
                             continue
 
                         excluded = False
-                        for exclude_layer in self.exclude_lora_layers[transformer_name]:
+                        for exclude_layer in excluded_lora_layers:
                             if exclude_layer in name:
                                 excluded = True
                                 break
