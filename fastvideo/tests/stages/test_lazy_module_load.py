@@ -719,3 +719,82 @@ def test_building_the_real_h3_stages_materializes_nothing():
 
     assert loaded == [], f"building stages materialized {loaded}"
     assert len(pipeline._stages) == 6
+
+
+class _LoRAConfigComponent(torch.nn.Module):
+
+    def __init__(self, excluded_layers):
+        super().__init__()
+        self.config = SimpleNamespace(
+            arch_config=SimpleNamespace(exclude_lora_layers=excluded_layers),
+        )
+        self.blocks = torch.nn.ModuleList([torch.nn.Linear(2, 2)])
+
+
+def _build_stub_lora_pipeline(monkeypatch, transformer):
+    from fastvideo.pipelines import lora_pipeline as lora_module
+
+    args = SimpleNamespace(
+        lora_target_modules=None,
+        lora_path=None,
+        lora_nickname="default",
+        lora_strength=1.0,
+        training_mode=False,
+        lora_training=False,
+        dit_layerwise_offload=False,
+    )
+
+    def initialize_base(pipeline, *unused_args, **unused_kwargs):
+        pipeline.fastvideo_args = args
+        pipeline.modules = {"transformer": transformer}
+
+    monkeypatch.setattr(ComposedPipelineBase, "__init__", initialize_base)
+    monkeypatch.setattr(lora_module, "get_local_torch_device", lambda: torch.device("cpu"))
+
+    class _Pipeline(lora_module.LoRAPipeline):
+
+        def create_pipeline_stages(self, fastvideo_args):
+            raise NotImplementedError
+
+    return _Pipeline("unused", args)
+
+
+def test_no_lora_setup_keeps_the_transformer_deferred(monkeypatch):
+    loaded = []
+    transformer = LazyModule(
+        "transformer",
+        lambda: loaded.append("transformer") or _LoRAConfigComponent(["proj_out"]),
+    )
+
+    pipeline = _build_stub_lora_pipeline(monkeypatch, transformer)
+
+    assert loaded == []
+    assert not transformer.is_materialized
+    assert pipeline.exclude_lora_layers == {}
+    assert pipeline.trainable_transformer_modules == {"transformer": transformer}
+
+
+def test_lora_conversion_initializes_exclusions_when_first_requested(monkeypatch):
+    loaded = []
+    transformer = LazyModule(
+        "transformer",
+        lambda: loaded.append("transformer") or _LoRAConfigComponent(["proj_out"]),
+    )
+    pipeline = _build_stub_lora_pipeline(monkeypatch, transformer)
+
+    pipeline.convert_to_lora_layers()
+
+    assert loaded == ["transformer"]
+    assert transformer.is_materialized
+    assert pipeline.exclude_lora_layers == {"transformer": ["proj_out"]}
+
+
+def test_lora_transformer_bookkeeping_is_per_pipeline(monkeypatch):
+    first_transformer = LazyModule("transformer", lambda: _LoRAConfigComponent([]))
+    first = _build_stub_lora_pipeline(monkeypatch, first_transformer)
+    second_transformer = LazyModule("transformer", lambda: _LoRAConfigComponent([]))
+    second = _build_stub_lora_pipeline(monkeypatch, second_transformer)
+
+    assert first.trainable_transformer_modules == {"transformer": first_transformer}
+    assert second.trainable_transformer_modules == {"transformer": second_transformer}
+    assert first.trainable_transformer_modules is not second.trainable_transformer_modules
