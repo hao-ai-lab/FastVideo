@@ -15,6 +15,7 @@ from multiprocessing.queues import Queue
 import os
 import queue
 import signal
+import sys
 import time
 from collections.abc import Callable
 from multiprocessing.process import BaseProcess
@@ -35,6 +36,45 @@ from fastvideo.worker.worker_base import WorkerWrapperBase
 
 logger = init_logger(__name__)
 _RPC_ERROR_KEY = "__fastvideo_rpc_error__"
+_WORKER_GRACEFUL_SHUTDOWN_TIMEOUT_S = 30.0
+_WORKER_TERMINATE_TIMEOUT_S = 2.0
+_WORKER_KILL_JOIN_TIMEOUT_S = 1.0
+
+
+def _shutdown_torch_compile_workers() -> None:
+    """Close an already-initialized Inductor pool before interpreter exit.
+
+    PyTorch registers the same cleanup as an ``atexit`` callback. Running it
+    while the FastVideo worker is still in its graceful shutdown phase avoids
+    having the parent send SIGTERM while that callback is waiting for the
+    compiler subprocess. Do not import Inductor here: eager workers should not
+    initialize compiler state just because they are exiting.
+    """
+    async_compile = sys.modules.get("torch._inductor.async_compile")
+    if async_compile is None:
+        return
+
+    shutdown_compile_workers = getattr(async_compile, "shutdown_compile_workers", None)
+    if not callable(shutdown_compile_workers):
+        return
+
+    try:
+        shutdown_compile_workers()
+    except Exception:
+        # Compiler cleanup must not prevent the worker process from exiting.
+        # PyTorch's atexit callback can make one final best-effort attempt.
+        logger.exception("Failed to shut down torch.compile workers cleanly")
+
+
+def _wait_for_processes_to_exit(processes: list[BaseProcess], timeout: float) -> bool:
+    """Join processes against one shared deadline and report if all exited."""
+    deadline = time.monotonic() + timeout
+    for process in processes:
+        if not process.is_alive():
+            continue
+        remaining = max(0.0, deadline - time.monotonic())
+        process.join(timeout=remaining)
+    return all(not process.is_alive() for process in processes)
 
 
 def _raise_for_rpc_errors(method: str | Callable, responses: list[Any]) -> None:
@@ -350,30 +390,34 @@ class MultiprocExecutor(Executor):
                 with contextlib.suppress(Exception):
                     worker.pipe.send({"method": "shutdown", "args": (), "kwargs": {}})
 
-            # Give workers some time to exit gracefully
-            start_time = time.perf_counter()
-            while time.perf_counter() - start_time < 5.0:  # 5 seconds timeout
-                if all(not worker.proc.is_alive() for worker in self.workers):
-                    break
-                time.sleep(0.1)
+            worker_processes = [worker.proc for worker in self.workers]
+
+            # torch.compile keeps an Inductor subprocess pool alive. Let the
+            # worker close that pool before escalating to SIGTERM; five seconds
+            # is too short on low-priority or memory-constrained hosts.
+            exited_gracefully = _wait_for_processes_to_exit(
+                worker_processes,
+                _WORKER_GRACEFUL_SHUTDOWN_TIMEOUT_S,
+            )
 
             # Force terminate any remaining workers
-            for worker in self.workers:
-                if worker.proc.is_alive():
-                    worker.proc.terminate()
+            if not exited_gracefully:
+                logger.warning(
+                    "Workers did not exit within %.1f seconds; sending SIGTERM",
+                    _WORKER_GRACEFUL_SHUTDOWN_TIMEOUT_S,
+                )
+                for process in worker_processes:
+                    if process.is_alive():
+                        process.terminate()
 
             # Final timeout for terminate
-            start_time = time.perf_counter()
-            while time.perf_counter() - start_time < 2.0:  # 2 seconds timeout
-                if all(not worker.proc.is_alive() for worker in self.workers):
-                    break
-                time.sleep(0.1)
+            _wait_for_processes_to_exit(worker_processes, _WORKER_TERMINATE_TIMEOUT_S)
 
             # Kill if still alive
-            for worker in self.workers:
-                if worker.proc.is_alive():
-                    worker.proc.kill()
-                worker.proc.join(timeout=1.0)
+            for process in worker_processes:
+                if process.is_alive():
+                    process.kill()
+                process.join(timeout=_WORKER_KILL_JOIN_TIMEOUT_S)
 
         except Exception as e:
             logger.error("Error during shutdown: %s", e)
@@ -478,6 +522,8 @@ class WorkerMultiprocProc:
         self.streaming_input_queue = streaming_input_queue
         self.streaming_output_queue = streaming_output_queue
         self._initial_log_handler = _initial_log_handler
+        self._shutdown_complete = False
+        self._shutdown_response: dict[str, Any] | None = None
         wrapper = WorkerWrapperBase(fastvideo_args=fastvideo_args, rpc_rank=rank)
 
         all_kwargs: list[dict] = [{} for _ in range(fastvideo_args.num_gpus)]
@@ -669,7 +715,15 @@ class WorkerMultiprocProc:
         return cast(list[WorkerProcHandle], ready_proc_handles)
 
     def shutdown(self) -> dict[str, Any]:
-        return self.worker.shutdown()
+        if getattr(self, "_shutdown_complete", False):
+            assert self._shutdown_response is not None
+            return self._shutdown_response
+
+        response = self.worker.shutdown()
+        _shutdown_torch_compile_workers()
+        self._shutdown_response = response
+        self._shutdown_complete = True
+        return response
 
     def worker_busy_loop(self) -> None:
         """Main busy loop for Multiprocessing Workers"""
