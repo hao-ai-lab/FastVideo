@@ -4,6 +4,8 @@ Tools for extracting and merging LoRA adapters for FastVideo models.
 
 ## Extract LoRA Adapter
 
+The default remains exact CPU SVD:
+
 ```bash
 python extract_lora.py \
   --base Wan-AI/Wan2.2-TI2V-5B-Diffusers \
@@ -12,15 +14,52 @@ python extract_lora.py \
   --rank 32
 ```
 
-**Options:**
-- `--base`: Base model (HuggingFace ID or local path)
-- `--ft`: Fine-tuned model (HuggingFace ID or local path)
-- `--out`: Output adapter file
-- `--rank`: LoRA rank (16, 32, 64, 128)
-- `--full-rank`: Extract full-rank adapter (optional)
+For large transformers, stream their indexed safetensors and factorize on a GPU:
 
+```bash
+python extract_lora.py \
+  --base MiniMaxAI/MiniMax-H3 \
+  --ft FastVideo/FastVideo-FastH3-8-step-Preview-v1-VSA-DataFree \
+  --out adapter_r64.safetensors \
+  --rank 64 \
+  --load-mode indexed \
+  --device cuda:0 \
+  --svd-method randomized \
+  --randomized-q 320 \
+  --niter 4 \
+  --factor-dtype float16 \
+  --dense-dtype float32 \
+  --replacement-dtype source \
+  --exact-tensor-pattern '^audio_proj_(in|out)\\.weight$' \
+  --exact-tensor-pattern '^context_embedder\\.weight$' \
+  --exact-tensor-pattern '^proj_(in|out)\\.weight$' \
+  --exact-tensor-pattern '^time_embedder\\.'
+```
 
-> **Note:** The script automatically handles architectural differences (e.g., FastWan has extra `gate_compress` layers) by falling back to direct safetensors loading for both models if pipeline loading fails.
+`q=320, niter=4` retained 99.9355% of the energy captured by exact rank-64 SVD in a 362-matrix MiniMax-H3 comparison. Exact CPU SVD is still the default; randomized SVD must be requested explicitly.
+
+Important options:
+
+- `--base`, `--ft`: Hugging Face model IDs or local paths.
+- `--rank`: requested LoRA rank.
+- `--load-mode indexed`: download/read only `transformer/*` and stream one tensor pair at a time.
+- `--device`: factorization device, such as `cpu` or `cuda:0`.
+- `--svd-method`: `exact` or `randomized`.
+- `--randomized-q`, `--niter`, `--seed`: randomized SVD accuracy and reproducibility.
+- `--factor-dtype`: storage dtype for `lora_A` and `lora_B`.
+- `--dense-dtype`: storage dtype for exact `.diff` and `.diff_b` payloads.
+- `--replacement-dtype`: storage dtype for fine-tuned-only `.set_weight` parameters.
+- `--exact-tensor-pattern`: repeatable regex selecting matrices to retain as exact dense deltas.
+- `--work-dir`, `--resume`: resume a partially completed streaming extraction.
+
+Fine-tuned parameters that cannot or should not be factorized are retained automatically:
+
+- a changed base weight becomes `.diff`;
+- a changed base bias becomes `.diff_b`;
+- a fine-tuned-only weight, such as a VSA compression gate, becomes `.set_weight`;
+- a bit-identical parameter is omitted.
+
+Indexed loading is preferred and downloads only the transformer component. `--load-mode auto` falls back to legacy pipeline loading when indexed safetensors are unavailable.
 
 
 ## Merge Adapter

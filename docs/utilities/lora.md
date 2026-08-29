@@ -12,13 +12,40 @@ python scripts/lora_extraction/extract_lora.py \
   --rank 32
 ```
 
-**Options:**
+Exact CPU SVD remains the default. For a large transformer, stream its indexed safetensors and factorize on a GPU:
 
-- `--base`: Base model (HuggingFace ID or local path)
-- `--ft`: Fine-tuned model (HuggingFace ID or local path)
-- `--out`: Output adapter file
-- `--rank`: LoRA rank (16, 32, 64, 128)
-- `--full-rank`: Extract full-rank adapter (optional)
+```bash
+python scripts/lora_extraction/extract_lora.py \
+  --base <base-model-or-path> \
+  --ft <finetuned-model-or-path> \
+  --out adapter_r64.safetensors \
+  --rank 64 \
+  --load-mode indexed \
+  --device cuda:0 \
+  --svd-method randomized \
+  --randomized-q 320 \
+  --niter 4 \
+  --factor-dtype float16 \
+  --dense-dtype float32 \
+  --replacement-dtype source
+```
+
+`--load-mode indexed` downloads only `transformer/*` for a Hugging Face model and reads one base/fine-tuned tensor pair at a time. The default `auto` mode tries indexed loading first and falls back to the legacy FastVideo pipeline loader; `pipeline` selects the legacy loader directly.
+
+Important options:
+
+- `--base`, `--ft`: Hugging Face model IDs or local paths.
+- `--rank`, `--full-rank`: truncated or full factorization rank.
+- `--device`: factorization device, such as `cpu` or `cuda:0`.
+- `--svd-method`: `exact` or `randomized`.
+- `--randomized-q`, `--niter`, `--seed`: randomized SVD accuracy and reproducibility.
+- `--factor-dtype`, `--dense-dtype`, `--replacement-dtype`: adapter storage precision.
+- `--exact-tensor-pattern`: repeatable regex for a matrix that should remain an exact dense delta.
+- `--work-dir`, `--resume`: resume an interrupted streaming extraction.
+
+The adapter retains changes that do not fit a low-rank product: `.diff` and `.diff_b` hold exact additive weight/bias deltas, while `.set_weight` holds a parameter absent from the base checkpoint, such as a VSA compression gate. Bit-identical parameters are omitted. The extractor writes an adjacent `*.report.json` with tensor counts, settings, and reconstruction residuals.
+
+For the validated MiniMax-H3 rank-64 command, including its exact-boundary patterns, see [`scripts/lora_extraction/README.md`](https://github.com/hao-ai-lab/FastVideo/blob/main/scripts/lora_extraction/README.md).
 
 ## Merge Adapter
 

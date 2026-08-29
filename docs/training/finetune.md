@@ -131,6 +131,13 @@ python scripts/lora_extraction/extract_lora.py \
 | `--out` | Output adapter file (.safetensors) |
 | `--rank` | LoRA rank (16, 32, 64, 128) |
 | `--full-rank` | Extract full-rank adapter (optional) |
+| `--load-mode` | `auto` (indexed, then pipeline fallback), `indexed`, or `pipeline` |
+| `--device` | SVD device, such as `cpu` or `cuda:0` |
+| `--svd-method` | Exact or randomized SVD |
+| `--factor-dtype` | Storage dtype for the low-rank factors |
+| `--dense-dtype` | Storage dtype for exact `.diff`/`.diff_b` payloads |
+
+For large checkpoints, indexed loading streams one transformer tensor pair at a time and downloads only `transformer/*`. The extractor also preserves changed norms and biases as exact deltas and fine-tuned-only weights as `.set_weight`. See [LoRA Extraction and Merging](../utilities/lora.md) for the GPU/randomized-SVD command, resume options, and accuracy controls.
 
 ### Merge LoRA Adapter
 
