@@ -442,12 +442,21 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         self.prefix = prefix
         self.layer_idx = layer_idx_from_prefix(prefix, default=-1)
         self.head_size = head_size
+        # Generic torch.compile must not specialize the shared VSA forward on
+        # the Python ``layer_idx`` value of each of H3's 50 blocks. This
+        # tensor is prepared after weights load and drives only the compiled
+        # dense-layer decision; it does not opt the module into sm_100a.
+        self._compile_layer_idx: torch.Tensor | None = None
         # None means the regional-compile preparation hook has not run.  The
         # eager path deliberately ignores this cache and preserves its
         # request-time env/probe/fallback behavior; only Dynamo capture reads
         # the prepared, static route.
         self._regional_compile_sm100a_enabled: bool | None = None
         self._regional_compile_layer_idx: torch.Tensor | None = None
+
+    def prepare_for_compile(self, device: torch.device) -> None:
+        """Tensorize per-layer state shared by every torch.compile route."""
+        self._compile_layer_idx = torch.tensor(self.layer_idx, device=device, dtype=torch.int64)
 
     def prepare_for_regional_compile(self, device: torch.device) -> str | None:
         """Resolve the inference-only sm_100a route before fullgraph capture.
@@ -459,6 +468,7 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         the loaded model's device now, then let ``forward`` specialize on the
         resulting plain bool while Dynamo is compiling.
         """
+        self.prepare_for_compile(device)
         requested = os.environ.get(VSA_SM100A_ENV, "0") == "1"
         enabled = False
         reason = None if requested else f"{VSA_SM100A_ENV}=1 is required for compile-safe VSA-H3 attention"
@@ -603,13 +613,14 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         logical_gate = gate_compress[:, :logical_seq_len] if gate_compress is not None else None
 
         # Probe-guided per-layer opt-out: diffuse layers run dense (all-True
-        # mask) while the rest keep the configured sparsity. During regional
-        # capture, keep the layer decision tensor-valued so the 50 block
-        # instances reuse one graph instead of specializing on layer_idx.
+        # mask) while the rest keep the configured sparsity. During any
+        # prepared capture, keep the layer decision tensor-valued so the 50
+        # block instances reuse one graph instead of specializing on the
+        # Python layer_idx attribute.
         force_dense = None
-        if regional_compiling:
-            assert self._regional_compile_layer_idx is not None
-            force_dense = (attn_metadata.dense_layers_tensor == self._regional_compile_layer_idx).any()
+        compile_layer_idx = self._compile_layer_idx if compiling else None
+        if compile_layer_idx is not None:
+            force_dense = (attn_metadata.dense_layers_tensor == compile_layer_idx).any()
             layer_sparsity = attn_metadata.VSA_sparsity
         else:
             layer_sparsity = 0.0 if self.layer_idx in attn_metadata.dense_layers else attn_metadata.VSA_sparsity

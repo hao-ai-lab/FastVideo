@@ -308,6 +308,61 @@ def test_prepared_route_reuses_graph_across_layer_indices_and_preserves_dense_ov
         torch._dynamo.reset()
 
 
+def test_generic_compile_reuses_graph_across_layer_indices_and_stays_on_triton(monkeypatch):
+    """Pipeline compile must share one graph without selecting sm_100a."""
+    fake_sm = _FakeSm100a(supported=True)
+    monkeypatch.setattr(vsa_h3, "_sm100a", fake_sm)
+    monkeypatch.setenv(VSA_SM100A_ENV, "1")
+    monkeypatch.setattr(vsa_h3, "probe_enabled", lambda: None)
+    meta = _build_meta(sparsity=0.5, dense_layers=(0, 17), prefix_segments=(64, 64))
+    q, k, v = _tiled_qkv(meta)
+
+    def fake_triton(q, k, v, block_map, variable_block_sizes):
+        del k, v, variable_block_sizes
+        return q + block_map.all().to(q.dtype), None
+
+    def fail_sm100a(*args, **kwargs):
+        raise AssertionError("generic torch.compile unexpectedly selected sm_100a")
+
+    monkeypatch.setattr(vsa_h3, "block_sparse_attn_64_bhsd", fake_triton)
+    monkeypatch.setattr(fake_sm, "is_supported", fail_sm100a)
+    monkeypatch.setattr(fake_sm, "block_sparse_attn_sm100a", fail_sm100a)
+    monkeypatch.setattr(fake_sm, "block_sparse_attn_sm100a_from_mask", fail_sm100a)
+    monkeypatch.setattr(vsa_h3, "_sm100a_unavailable_reason", fail_sm100a)
+
+    implementations = []
+    for layer_idx in range(20):
+        impl = MiniMaxH3VSAImpl(
+            num_heads=_HEADS,
+            head_size=_DIM,
+            causal=False,
+            softmax_scale=_DIM**-0.5,
+            prefix=f"transformer_blocks.{layer_idx}.attn",
+        )
+        impl.prepare_for_compile(torch.device("cpu"))
+        implementations.append(impl)
+
+    compiled_graphs = []
+
+    def recording_backend(graph_module, _example_inputs):
+        compiled_graphs.append(graph_module)
+        return graph_module.forward
+
+    torch._dynamo.reset()
+    try:
+        compiled = [torch.compile(impl.forward, backend=recording_backend, fullgraph=True)
+                    for impl in implementations]
+        with torch.inference_mode():
+            for layer_idx, run in enumerate(compiled):
+                actual = run(q, k, v, None, meta)
+                expected_delta = 1.0 if layer_idx in meta.dense_layers else 0.0
+                torch.testing.assert_close(actual, q + expected_delta, atol=0, rtol=0)
+    finally:
+        torch._dynamo.reset()
+
+    assert len(compiled_graphs) == 1
+
+
 def test_default_off_routes_triton(routed, monkeypatch):
     fake_sm, fake_triton, run, _ = routed
     monkeypatch.delenv(VSA_SM100A_ENV, raising=False)
