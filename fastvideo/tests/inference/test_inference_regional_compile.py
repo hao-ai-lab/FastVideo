@@ -106,11 +106,15 @@ def test_h3_vsa_probe_degrades_regional_compile_to_eager(monkeypatch) -> None:
 class _RegionalPrepareProbe:
 
     def __init__(self, unsupported: str | None = None) -> None:
-        self.devices: list[torch.device] = []
+        self.compile_devices: list[torch.device] = []
+        self.regional_devices: list[torch.device] = []
         self.unsupported = unsupported
 
+    def prepare_for_compile(self, device: torch.device) -> None:
+        self.compile_devices.append(device)
+
     def prepare_for_regional_compile(self, device: torch.device) -> str | None:
-        self.devices.append(device)
+        self.regional_devices.append(device)
         return self.unsupported
 
 
@@ -157,7 +161,8 @@ def test_minimax_h3_prepare_for_compile_resolves_loaded_vsa_gates() -> None:
     assert [block.attn._gate_compress_active for block in model.transformer_blocks] == [False, True]
     for block in model.transformer_blocks:
         impl = block.attn.distributed_attention.attn_impl
-        assert impl.devices == []
+        assert impl.compile_devices == [next(block.parameters()).device]
+        assert impl.regional_devices == []
 
 
 def test_training_compile_prepare_does_not_probe_inference_kernel() -> None:
@@ -168,7 +173,9 @@ def test_training_compile_prepare_does_not_probe_inference_kernel() -> None:
     assert reason is None
     attention = model.transformer_blocks[0].attn
     assert attention._gate_compress_active is True
-    assert attention.distributed_attention.attn_impl.devices == []
+    impl = attention.distributed_attention.attn_impl
+    assert impl.compile_devices == [next(model.parameters()).device]
+    assert impl.regional_devices == []
 
 
 def test_regional_compile_prepare_prefers_specialized_hook() -> None:
@@ -179,7 +186,8 @@ def test_regional_compile_prepare_prefers_specialized_hook() -> None:
 
     assert reason is None
     impl = model.transformer_blocks[0].attn.distributed_attention.attn_impl
-    assert impl.devices == [expected_device]
+    assert impl.compile_devices == [expected_device]
+    assert impl.regional_devices == [expected_device]
 
 
 def test_minimax_h3_prepare_for_regional_compile_does_not_require_quantized_q_weight() -> None:
@@ -193,7 +201,8 @@ def test_minimax_h3_prepare_for_regional_compile_does_not_require_quantized_q_we
 
     assert reason is None
     impl = attention.distributed_attention.attn_impl
-    assert impl.devices == [expected_device]
+    assert impl.compile_devices == [expected_device]
+    assert impl.regional_devices == [expected_device]
 
 
 def test_minimax_h3_prepare_for_regional_compile_propagates_backend_rejection() -> None:
