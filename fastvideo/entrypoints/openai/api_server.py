@@ -3,6 +3,7 @@
 
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
+import os
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
@@ -151,6 +152,11 @@ def create_app(
 
     @app.get("/health")
     async def health():
+        from fastvideo.entrypoints.openai.state import get_serving_engine
+
+        engine = get_serving_engine()
+        if not engine.healthy:
+            raise HTTPException(status_code=503, detail=engine.unhealthy_reason or "generation engine is unhealthy")
         return {"status": "ok"}
 
     return app
@@ -187,6 +193,7 @@ def run_server(
     served_model_name: str | None = None,
 ):
     """Create the app and run it with uvicorn"""
+    os.environ.setdefault("FASTVIDEO_STAGE_LOGGING", "1")
     if default_request is not None:
         _validate_default_request_against_preset(default_request, fastvideo_args.model_path)
 

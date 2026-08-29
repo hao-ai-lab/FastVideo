@@ -29,8 +29,6 @@ async def available_models():
     """Show available models"""
     args = get_server_args()
     cards = [ModelCard(id=get_served_model_name(), root=args.model_path)]
-    if args.lora_path and args.lora_nickname != get_served_model_name():
-        cards.append(ModelCard(id=args.lora_nickname, root=args.model_path))
     return {"object": "list", "data": [card.model_dump() for card in cards]}
 
 
@@ -40,8 +38,6 @@ async def retrieve_model(model: str):
     args = get_server_args()
     served_model_name = get_served_model_name()
     available = {served_model_name}
-    if args.lora_path:
-        available.add(args.lora_nickname)
     if model not in available:
         return ORJSONResponse(
             status_code=404,

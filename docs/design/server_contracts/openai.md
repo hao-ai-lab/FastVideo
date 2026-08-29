@@ -73,8 +73,9 @@ spellings.
 Reference objects support URL or local-path strings through `image_url`,
 `video_url`, and `audio_url`. `file_id` references are schema-compatible but
 return HTTP 400 because FastVideo does not provide an OpenAI Files store.
-Multipart `input_reference` uploads are saved under the configured output
-directory.
+Image URLs, data URLs, local paths, and multipart `input_reference` uploads are
+materialized and decoded under the configured output directory during
+admission. Invalid media returns HTTP 400 before a job is created.
 
 ## Jobs and synchronous responses
 
@@ -85,7 +86,12 @@ timings, and peak-memory metadata when the pipeline reports them.
 
 `POST /v1/videos/sync` returns `video/mp4` bytes. It includes
 `X-Request-Id`, `X-Model`, `X-Inference-Time-S`, `X-Stage-Durations`, and
-`X-Peak-Memory-MB` headers.
+`X-Peak-Memory-MB` headers. Its temporary MP4 is removed after the response is
+streamed. Asynchronous artifacts remain available until their job is deleted.
+
+Output paths are controlled by the server. Clients cannot choose filesystem
+destinations; every video is written beneath `server.output_dir` with a unique
+request id.
 
 FastVideo's synchronous CUDA execution cannot be interrupted after launch.
 Deleting an in-progress resource removes it from the API immediately; the
@@ -98,8 +104,8 @@ checkpoint path is used. Requests that name another model fail with HTTP 400.
 
 LoRAs are configured under
 `generator.pipeline.components.{lora_path,lora_nickname,lora_strength}`. The
-startup adapter appears in `/v1/models`, and requests can use either its model
-nickname or a vLLM-Omni selector:
+startup adapter is the only model advertised by a LoRA server, and requests can
+select it by its model nickname or with a selector:
 
 ```json
 {
@@ -156,3 +162,9 @@ Errors use the OpenAI envelope:
 Parse, model-selection, startup-LoRA, and unsupported-parameter failures are
 HTTP 400; missing resources are HTTP 404; generation failures are stored on
 asynchronous jobs and returned as HTTP 500 when that job is retrieved.
+Unknown top-level fields are rejected. `extra_params` accepts only the explicit
+request-batch passthrough fields supported by the typed request adapter.
+
+`GET /health` also verifies that the generation engine is open and all local
+multiprocess workers are alive. It returns HTTP 503 when the worker pool is no
+longer usable.

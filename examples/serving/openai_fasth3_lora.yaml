@@ -34,7 +34,7 @@ server:
   host: 0.0.0.0
   port: 8000
   output_dir: outputs/openai_fasth3_lora
-  served_model_name: minimax-h3
+  served_model_name: fasth3-dense-datafree
 
 default_request:
   negative_prompt: ""
@@ -49,4 +49,3 @@ default_request:
     seed: 1000
   output:
     return_frames: false
-

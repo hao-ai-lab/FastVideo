@@ -626,7 +626,6 @@ surfaces:
       max_sequence_length: request.sampling.max_sequence_length
       boundary_ratio: request.sampling.boundary_ratio
       extra_params: request.extensions
-      output_path: request.output.output_path
     compatibility_only:
       seconds:
         target: request.sampling.num_frames

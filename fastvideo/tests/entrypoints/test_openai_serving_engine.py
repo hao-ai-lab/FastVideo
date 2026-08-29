@@ -13,10 +13,13 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from fastvideo.api.parser import parse_config
+from fastvideo.api.schema import GenerationRequest
 from fastvideo.entrypoints.openai.protocol import VideoGenerationRequest
 from fastvideo.entrypoints.openai.request_adapter import (
     RequestAdaptationError,
     build_generation_request,
+    prepare_reference_media,
 )
 from fastvideo.entrypoints.openai.serving_engine import OpenAIServingEngine
 from fastvideo.entrypoints.openai.stores import VIDEO_STORE
@@ -40,8 +43,12 @@ class _BlockingGenerator:
 
 class _FileGenerator:
 
+    def __init__(self) -> None:
+        self.last_output: Path | None = None
+
     def generate(self, request):
         output = Path(request.output.output_path)
+        self.last_output = output
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_bytes(b"\x00\x00\x00\x18ftypmp42fastvideo-test")
         return SimpleNamespace(
@@ -78,6 +85,8 @@ async def _assert_engine_cancellation_keeps_pipeline_locked() -> None:
     first = asyncio.create_task(engine.generate("first"))  # type: ignore[arg-type]
     await asyncio.to_thread(generator.started.wait, 2)
     first.cancel()
+    await asyncio.sleep(0)
+    first.cancel()
 
     second_started = threading.Event()
 
@@ -96,6 +105,45 @@ async def _assert_engine_cancellation_keeps_pipeline_locked() -> None:
 
     await engine.shutdown()
     assert generator.shutdown_called
+
+
+def test_protocol_rejects_unknown_and_client_output_fields() -> None:
+    with pytest.raises(Exception, match="prompt_path"):
+        VideoGenerationRequest(prompt="a fox", prompt_path="/srv/prompts.txt")
+    with pytest.raises(Exception, match="output_path"):
+        VideoGenerationRequest(prompt="a fox", output_path="/srv/keep.mp4")
+
+
+def test_request_adapter_restricts_extra_params(tmp_path: Path) -> None:
+    request = VideoGenerationRequest(prompt="a fox", extra_params={"prompt_path": "/srv/prompts.txt"})
+    with pytest.raises(RequestAdaptationError, match="Unsupported extra_params fields: prompt_path"):
+        build_generation_request(
+            "video_gen_test",
+            request,
+            _args("Wan-AI/Wan2.1-T2V-1.3B-Diffusers"),
+            served_model_name="wan",
+            output_dir=str(tmp_path),
+        )
+
+
+def test_request_adapter_owns_output_path(tmp_path: Path) -> None:
+    request = VideoGenerationRequest(prompt="a fox", size="64x64", num_frames=1)
+    default_request = parse_config(GenerationRequest, {"output": {"output_path": "/srv/untrusted-default.mp4"}})
+    adapted = build_generation_request(
+        "video_gen_test",
+        request,
+        _args("Wan-AI/Wan2.1-T2V-1.3B-Diffusers"),
+        served_model_name="wan",
+        output_dir=str(tmp_path),
+        default_request=default_request,
+    )
+    assert adapted.output.output_path == str(tmp_path / "videos" / "video_gen_test.mp4")
+
+
+def test_missing_reference_fails_during_admission(tmp_path: Path) -> None:
+    request = VideoGenerationRequest(prompt="a fox", input_reference=str(tmp_path / "missing.png"))
+    with pytest.raises(RequestAdaptationError, match="does not exist"):
+        asyncio.run(prepare_reference_media("request", request, str(tmp_path)))
 
 
 def test_request_adapter_resolves_vllm_nested_params(tmp_path: Path) -> None:
@@ -184,6 +232,103 @@ def test_fasth3_request_uses_the_general_adapter(tmp_path: Path) -> None:
     assert adapted.sampling.num_frames == 124
 
 
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"aspect_ratio": "16:9", "num_frames": 22}, "generates 5-15 seconds"),
+        ({"size": "100x100", "num_frames": 124}, "positive multiples of 32"),
+        ({"aspect_ratio": "1:9", "num_frames": 124}, "supports aspect ratios"),
+        ({"aspect_ratio": "16:9", "num_frames": 120}, "causal-VAE grid"),
+    ],
+)
+def test_fasth3_invalid_geometry_fails_at_admission(tmp_path: Path, overrides, message) -> None:
+    request = VideoGenerationRequest(prompt="a fox", **overrides)
+    with pytest.raises(RequestAdaptationError, match=message):
+        build_generation_request(
+            "video_gen_test",
+            request,
+            _args("FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2"),
+            served_model_name="fasth3",
+            output_dir=str(tmp_path),
+        )
+
+
+def test_fasth3_seconds_align_to_causal_vae_grid(tmp_path: Path) -> None:
+    request = VideoGenerationRequest(prompt="a fox", aspect_ratio="16:9", seconds="5")
+    adapted = build_generation_request(
+        "video_gen_test",
+        request,
+        _args("FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2"),
+        served_model_name="fasth3",
+        output_dir=str(tmp_path),
+    )
+    assert adapted.sampling.num_frames == 124
+
+
+def test_fasth3_ref2va_limits_references_at_admission(tmp_path: Path) -> None:
+    request = VideoGenerationRequest(
+        prompt="a fox",
+        task="ref2va",
+        aspect_ratio="16:9",
+        num_frames=124,
+        image_reference=[{"image_url": f"/tmp/reference-{index}.png"} for index in range(10)],
+    )
+    with pytest.raises(RequestAdaptationError, match="at most 9 image references"):
+        build_generation_request(
+            "video_gen_test",
+            request,
+            _args(
+                "MiniMaxAI/MiniMax-H3",
+                override_pipeline_cls_name="MiniMaxH3Ref2VAModularPipeline",
+            ),
+            served_model_name="minimax-h3",
+            output_dir=str(tmp_path),
+        )
+
+
+def test_aspect_ratio_overrides_operator_dimensions(tmp_path: Path) -> None:
+    default_request = parse_config(
+        GenerationRequest,
+        {"sampling": {
+            "width": 1344,
+            "height": 768,
+            "num_frames": 124,
+        }},
+    )
+    request = VideoGenerationRequest(prompt="a fox", aspect_ratio="9:16")
+    adapted = build_generation_request(
+        "video_gen_test",
+        request,
+        _args("FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2"),
+        served_model_name="fasth3",
+        output_dir=str(tmp_path),
+        default_request=default_request,
+    )
+    assert adapted.sampling.width == 768
+    assert adapted.sampling.height == 1344
+
+
+def test_explicit_null_uses_seconds_and_operator_fps(tmp_path: Path) -> None:
+    default_request = parse_config(
+        GenerationRequest,
+        {"sampling": {
+            "fps": 30,
+            "num_frames": 99,
+        }},
+    )
+    request = VideoGenerationRequest(prompt="a fox", seconds=2, fps=None, num_frames=None)
+    adapted = build_generation_request(
+        "video_gen_test",
+        request,
+        _args("Wan-AI/Wan2.1-T2V-1.3B-Diffusers"),
+        served_model_name="wan",
+        output_dir=str(tmp_path),
+        default_request=default_request,
+    )
+    assert adapted.sampling.fps == 30
+    assert adapted.sampling.num_frames == 60
+
+
 def test_unsupported_vllm_postprocessing_fails_at_admission(tmp_path: Path) -> None:
     request = VideoGenerationRequest(prompt="a fox", enable_frame_interpolation=True)
 
@@ -264,6 +409,8 @@ def test_video_routes_cover_async_sync_list_content_and_delete(tmp_path: Path) -
             assert sync.status_code == 200
             assert sync.headers["x-model"] == "wan-test"
             assert sync.content[4:8] == b"ftyp"
+            assert generator.last_output is not None
+            assert not generator.last_output.exists()
     finally:
         asyncio.run(VIDEO_STORE.clear())
         state.clear_state()

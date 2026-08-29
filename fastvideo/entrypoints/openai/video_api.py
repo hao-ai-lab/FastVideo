@@ -13,6 +13,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Path, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import ValidationError
+from starlette.background import BackgroundTask
 from starlette.datastructures import UploadFile
 
 from fastvideo.api.compat import explicit_request_updates, request_to_sampling_param
@@ -25,7 +26,11 @@ from fastvideo.entrypoints.openai.protocol import (
     VideoResponse,
     generate_request_id,
 )
-from fastvideo.entrypoints.openai.request_adapter import RequestAdaptationError, build_generation_request
+from fastvideo.entrypoints.openai.request_adapter import (
+    build_generation_request,
+    prepare_reference_media,
+    validate_model_and_lora,
+)
 from fastvideo.entrypoints.openai.state import (
     get_default_request,
     get_output_dir,
@@ -50,6 +55,7 @@ _JSON_FORM_FIELDS = {
     "lora",
     "extra_params",
 }
+_VIDEO_EXTENSIONS = {".avi", ".mkv", ".mov", ".mp4", ".mpeg", ".mpg", ".webm"}
 
 
 def _build_generation_kwargs(
@@ -115,9 +121,8 @@ def _build_generation_kwargs(
     if "input_reference" in body_set and req.input_reference is not None:
         kwargs["image_path"] = req.input_reference
 
-    configured_output = kwargs.pop("output_path", None)
-    requested_output = req.output_path if "output_path" in body_set else None
-    output_dir = requested_output or configured_output or os.path.join(get_output_dir(), "videos")
+    kwargs.pop("output_path", None)
+    output_dir = os.path.join(os.path.abspath(get_output_dir()), "videos")
     os.makedirs(output_dir, exist_ok=True)
     kwargs["output_path"] = os.path.join(output_dir, f"{request_id}.mp4")
     kwargs["save_video"] = True
@@ -128,6 +133,15 @@ def _result_value(result: Any, name: str, default: Any = None) -> Any:
     if isinstance(result, dict):
         return result.get(name, default)
     return getattr(result, name, default)
+
+
+def _remove_artifact(file_path: str | None) -> None:
+    if not file_path or not os.path.isfile(file_path):
+        return
+    try:
+        os.unlink(file_path)
+    except OSError:
+        logger.warning("Failed to delete video artifact %s", file_path, exc_info=True)
 
 
 def _stage_durations(result: Any) -> dict[str, float]:
@@ -163,7 +177,8 @@ def _make_video_job(
         "quality": req.quality or "default",
         # ``file_path`` is a FastVideo compatibility extension. vLLM-Omni's
         # public job shape uses ``file_name`` after completion.
-        "file_path": generation_request.output.output_path,
+        "file_path": None,
+        "_sequence": time.monotonic_ns(),
     }
 
 
@@ -171,16 +186,22 @@ async def _run_generation(
     request_id: str,
     generation_request: GenerationRequest,
 ) -> None:
-    await VIDEO_STORE.update_fields(
-        request_id,
-        {
-            "status": VideoGenerationStatus.IN_PROGRESS,
-            "progress": 0
-        },
-    )
-    started = time.perf_counter()
+    started = 0.0
+    video_path = generation_request.output.output_path
+
+    async def mark_started() -> None:
+        nonlocal started
+        started = time.perf_counter()
+        await VIDEO_STORE.update_fields(
+            request_id,
+            {
+                "status": VideoGenerationStatus.IN_PROGRESS,
+                "progress": 0
+            },
+        )
+
     try:
-        result = await get_serving_engine().generate(generation_request)
+        result = await get_serving_engine().generate(generation_request, on_start=mark_started)
         if isinstance(result, list):
             if not result:
                 raise RuntimeError("FastVideo returned no generation results")
@@ -215,18 +236,17 @@ async def _run_generation(
                     "code": 500,
                     "message": str(error)
                 },
-                "inference_time_s": time.perf_counter() - started,
+                "inference_time_s": time.perf_counter() - started if started else 0.0,
             },
         )
     finally:
         if request_id in _DELETED_VIDEO_IDS:
             _DELETED_VIDEO_IDS.discard(request_id)
-            output_path = generation_request.output.output_path
-            if output_path and os.path.isfile(output_path):
+            if video_path and os.path.isfile(video_path):
                 try:
-                    os.unlink(output_path)
+                    os.unlink(video_path)
                 except OSError:
-                    logger.warning("Failed to clean up deleted video artifact %s", output_path, exc_info=True)
+                    logger.warning("Failed to clean up deleted video artifact %s", video_path, exc_info=True)
 
 
 def _track_video_job(request_id: str, task: asyncio.Task[None]) -> None:
@@ -270,7 +290,8 @@ async def _parse_video_request(raw_request: Request) -> VideoGenerationRequest:
                 filename = os.path.basename(value.filename or "reference")
                 target = os.path.join(uploads_dir, f"{generate_request_id()}_{filename}")
                 saved_path = await save_image_to_path(value, target)
-                if (value.content_type or "").lower().startswith("video/"):
+                upload_ext = os.path.splitext(filename)[1].lower()
+                if (value.content_type or "").lower().startswith("video/") or upload_ext in _VIDEO_EXTENSIONS:
                     payload["video_reference"] = {"video_url": saved_path}
                 else:
                     payload["input_reference"] = saved_path
@@ -308,9 +329,12 @@ async def _parse_video_request(raw_request: Request) -> VideoGenerationRequest:
         raise HTTPException(status_code=400, detail=f"Invalid request body: {error}") from error
 
 
-def _adapt_request(request_id: str, request: VideoGenerationRequest) -> GenerationRequest:
+async def _adapt_request(request_id: str, request: VideoGenerationRequest) -> GenerationRequest:
     try:
-        return build_generation_request(
+        validate_model_and_lora(request, get_server_args(), get_served_model_name())
+        await prepare_reference_media(request_id, request, get_output_dir())
+        return await asyncio.to_thread(
+            build_generation_request,
             request_id,
             request,
             get_server_args(),
@@ -318,7 +342,7 @@ def _adapt_request(request_id: str, request: VideoGenerationRequest) -> Generati
             output_dir=get_output_dir(),
             default_request=get_default_request(),
         )
-    except RequestAdaptationError as error:
+    except Exception as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
 
@@ -328,7 +352,7 @@ async def create_video(raw_request: Request) -> VideoResponse:
     """Create an asynchronous video generation job."""
     request = await _parse_video_request(raw_request)
     request_id = f"video_gen_{generate_request_id()}"
-    generation_request = _adapt_request(request_id, request)
+    generation_request = await _adapt_request(request_id, request)
     job = _make_video_job(request_id, request, generation_request)
     await VIDEO_STORE.upsert(request_id, job)
     task = asyncio.create_task(_run_generation(request_id, generation_request), name=f"video-job-{request_id}")
@@ -341,7 +365,7 @@ async def create_video_sync(raw_request: Request) -> FileResponse:
     """Generate synchronously and return raw MP4 bytes with vLLM headers."""
     request = await _parse_video_request(raw_request)
     request_id = f"video_sync-{generate_request_id()}"
-    generation_request = _adapt_request(request_id, request)
+    generation_request = await _adapt_request(request_id, request)
     started = time.perf_counter()
     try:
         result = await get_serving_engine().generate(generation_request)
@@ -367,17 +391,21 @@ async def create_video_sync(raw_request: Request) -> FileResponse:
             "X-Stage-Durations": json.dumps(_stage_durations(result), separators=(",", ":")),
             "X-Peak-Memory-MB": f"{float(_result_value(result, 'peak_memory_mb', 0.0) or 0.0):.3f}",
         },
+        background=BackgroundTask(_remove_artifact, video_path),
     )
 
 
 @router.get("", response_model=VideoListResponse)
 async def list_videos(
         after: str | None = Query(None),
-        limit: int | None = Query(None, ge=0, le=100),
-        order: str = Query("desc", pattern="^(asc|desc)$"),
+        limit: int | None = Query(None, ge=1, le=100),
+        order: str = Query("desc"),
 ) -> VideoListResponse:
+    order = order.lower()
+    if order not in {"asc", "desc"}:
+        raise HTTPException(status_code=400, detail="order must be 'asc' or 'desc'")
     jobs = await VIDEO_STORE.list_values()
-    jobs.sort(key=lambda job: job.get("created_at", 0), reverse=order == "desc")
+    jobs.sort(key=lambda job: (job.get("created_at", 0), job.get("_sequence", 0)), reverse=order == "desc")
     if after is not None:
         index = next((i for i, job in enumerate(jobs) if job.get("id") == after), None)
         jobs = [] if index is None else jobs[index + 1:]
@@ -410,18 +438,20 @@ async def delete_video(video_id: str = Path(...)) -> VideoDeleteResponse:
     if job is None:
         raise HTTPException(status_code=404, detail="Video not found")
     task = _VIDEO_JOB_TASKS.get(video_id)
-    if task is not None:
+    status = VideoGenerationStatus(job.get("status", VideoGenerationStatus.QUEUED))
+    if task is not None and not task.done():
         # The current synchronous generator cannot abort a CUDA call once it
         # starts. Remove the API resource immediately and let the tracked task
         # clean up its artifact on exit while the serving lock stays held.
-        _DELETED_VIDEO_IDS.add(video_id)
+        if status is VideoGenerationStatus.QUEUED:
+            task.cancel()
+        else:
+            _DELETED_VIDEO_IDS.add(video_id)
+            task.cancel()
     popped = await VIDEO_STORE.pop(video_id)
     file_path = None if popped is None else popped.get("file_path")
-    if file_path and os.path.isfile(file_path):
-        try:
-            os.unlink(file_path)
-        except OSError:
-            logger.warning("Failed to delete video artifact %s", file_path, exc_info=True)
+    if status in {VideoGenerationStatus.COMPLETED, VideoGenerationStatus.FAILED}:
+        _remove_artifact(file_path)
     return VideoDeleteResponse(id=video_id, deleted=True)
 
 
