@@ -382,7 +382,11 @@ class HeliosChunkDecodingStage(DecodingStage):
         frames = torch.cat(decoded_chunks, dim=2)
 
         temporal_scale = fastvideo_args.pipeline_config.vae_config.arch_config.scale_factor_temporal
-        generated_frames = get_generated_pixel_frames(frames.shape[2], temporal_scale)
+        assert isinstance(batch.num_frames, int)
+        generated_frames = min(
+            batch.num_frames,
+            get_generated_pixel_frames(frames.shape[2], temporal_scale),
+        )
         batch.output = frames[:, :, :generated_frames].detach().to(dtype=torch.float32, device="cpu")
         batch.latents = None
         batch.helios_latent_chunks = None

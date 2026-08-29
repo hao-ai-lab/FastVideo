@@ -279,7 +279,7 @@ class TinyVAE(nn.Module):
 
 
 vae = TinyVAE().to(device)
-decode_batch = ForwardBatch(data_type="video")
+decode_batch = ForwardBatch(data_type="video", num_frames=34)
 decode_batch.latents = torch.cat([expected, expected], dim=2)
 decode_batch.helios_latent_chunks = [expected, expected]
 decode_args = SimpleNamespace(
@@ -370,10 +370,10 @@ def test_tiny_pyramid_stage_uses_history_on_second_chunk():
     assert abs(result["autoregressive_second_short_prefix_mean"]) > 1e-5
 
 
-def test_chunk_decoder_calls_vae_per_chunk_and_matches_frame_rounding():
+def test_chunk_decoder_calls_vae_per_chunk_and_trims_to_requested_frames():
     result = _results()
     assert result["vae_calls"] == [[1, 2, 9, 8, 8], [1, 2, 9, 8, 8]]
-    assert result["decoded_shape"] == [1, 3, 65, 64, 64]
+    assert result["decoded_shape"] == [1, 3, 34, 64, 64]
     assert result["decoded_device"] == "cpu"
     assert result["decoded_first_mean"] == 0
     assert result["decoded_second_mean"] == 1
