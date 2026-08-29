@@ -121,7 +121,9 @@ python scripts/lora_extraction/extract_lora.py \
   --base Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
   --ft path/to/your/finetuned_model \
   --out adapter_r32.safetensors \
-  --rank 32
+  --rank 32 \
+  --exact-tensor-pattern '^condition_embedder\.' \
+  --exact-tensor-pattern '^proj_out\.weight$'
 ```
 
 | Argument | Description |
@@ -136,8 +138,9 @@ python scripts/lora_extraction/extract_lora.py \
 | `--svd-method` | Exact or randomized SVD |
 | `--factor-dtype` | Storage dtype for the low-rank factors |
 | `--dense-dtype` | Storage dtype for exact `.diff`/`.diff_b`/`.diff_param` payloads |
+| `--exact-tensor-pattern` | Repeatable regex for matrices the target runtime cannot load as LoRA factors |
 
-For large checkpoints, indexed loading streams one transformer tensor pair at a time and downloads only `transformer/*`. The extractor also preserves changed norms, biases, and standalone parameters as exact deltas, and fine-tuned-only parameters as `.set_weight` or `.set_param`. See [LoRA Extraction and Merging](../utilities/lora.md) for the GPU/randomized-SVD command, resume options, and accuracy controls.
+For large checkpoints, indexed loading streams one transformer tensor pair at a time and downloads only `transformer/*`. The extractor also preserves changed norms, biases, and standalone parameters as exact deltas, and fine-tuned-only parameters as `.set_weight` or `.set_param`. Matrix selection is runtime-agnostic, so full-finetune extraction must keep runtime-unsupported matrices exact, as the Wan example does. See [LoRA Extraction and Merging](../utilities/lora.md) for the GPU/randomized-SVD command, resume options, and accuracy controls.
 
 ### Merge LoRA Adapter
 

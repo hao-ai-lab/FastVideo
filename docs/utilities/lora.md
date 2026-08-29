@@ -9,8 +9,15 @@ python scripts/lora_extraction/extract_lora.py \
   --base Wan-AI/Wan2.2-TI2V-5B-Diffusers \
   --ft FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers \
   --out adapter_r32.safetensors \
-  --rank 32
+  --rank 32 \
+  --exact-tensor-pattern '^condition_embedder\.' \
+  --exact-tensor-pattern '^proj_out\.weight$'
 ```
+
+The extractor is runtime-agnostic by default and cannot determine from checkpoint tensors whether the target runtime
+wraps a given matrix as a LoRA layer. Use `--exact-tensor-pattern` for changed matrices that the runtime does not wrap;
+the extractor preserves them as exact `.diff` tensors. The Wan patterns above cover its excluded condition embedders
+and its unwrapped output projection.
 
 Exact CPU SVD remains the default. For a large transformer, stream its indexed safetensors and factorize on a GPU:
 

@@ -1,80 +1,92 @@
-"""Test LoRA extraction, merging, and verification pipeline."""
-import sys
+"""Test extraction through the real FastVideo LoRA loading path."""
 from pathlib import Path
+import sys
+import tempfile
 
 import pytest
 import torch
+
+from fastvideo import VideoGenerator
+from fastvideo.api import ComponentConfig, EngineConfig, GeneratorConfig, OffloadConfig, ParallelismConfig, PipelineSelection
 
 # Add scripts/lora_extraction to path for imports
 repo_root = Path(__file__).parents[3]
 lora_scripts = repo_root / "scripts" / "lora_extraction"
 sys.path.insert(0, str(lora_scripts))
 
-# Import the core functions
-from extract_lora import extract_lora_adapter
-from merge_lora import merge_lora
-from verify_lora import main as verify_lora_main
+from extract_lora import extract_lora_adapter  # noqa: E402
 
 
-@pytest.mark.parametrize(
-    "extraction_device",
-    [
-        pytest.param("cpu", id="cpu"),
-        pytest.param(
-            "cuda:0",
-            id="gpu",
-            marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is unavailable"),
-        ),
-    ],
-)
-def test_lora_extraction_pipeline(extraction_device: str):
-    """Test the existing Wan2.2 extraction workflow on CPU and GPU."""
-    import tempfile
+def _collect_lora_application(worker) -> dict[str, object]:
+    """Inspect the worker after the constructor applied its adapter."""
+    pipeline = worker.pipeline
+    adapter = pipeline.lora_adapters[pipeline.cur_adapter_name]
+    available: set[str] = set()
+    adapted = 0
+    for transformer_layers in pipeline.lora_layers.values():
+        for _, layers in transformer_layers.lora_layers_by_block():
+            for name, layer in layers.items():
+                available.update((name + ".lora_A", name + ".lora_B", name + ".lora_alpha"))
+                if layer.lora_A is not None and layer.lora_B is not None and not layer.disable_lora:
+                    adapted += 1
+    unmatched = sorted(set(adapter) - available)
+    return {
+        "adapted": adapted,
+        "pipeline": type(pipeline).__name__,
+        "unmatched": unmatched,
+    }
 
-    # Use temp directory for outputs to avoid polluting repo
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="Wan2.2 integration requires a CUDA GPU")
+def test_lora_extraction_pipeline() -> None:
+    """Extract Wan2.2 on a GPU and require every factor to reach the DMD pipeline."""
+    base = "Wan-AI/Wan2.2-TI2V-5B-Diffusers"
     with tempfile.TemporaryDirectory() as tmpdir:
-        tmpdir_path = Path(tmpdir)
-        device_name = extraction_device.replace(":", "-")
-        adapter_path = tmpdir_path / f"adapter_r16_{device_name}.safetensors"
-        merged_dir = tmpdir_path / f"merged_r16_{device_name}"
-
-        # 1. Extract rank-16 adapter
-        print(f"\nExtracting rank-16 adapter on {extraction_device}")
+        adapter_path = Path(tmpdir) / "adapter_r16.safetensors"
         extract_lora_adapter(
-            base="Wan-AI/Wan2.2-TI2V-5B-Diffusers",
+            base=base,
             ft="FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers",
             out=str(adapter_path),
             rank=16,
             load_mode="indexed",
-            device=extraction_device,
+            device="cuda:0",
             svd_method="exact",
+            exact_tensor_patterns=(r"^condition_embedder\.", r"^proj_out\.weight$"),
         )
-        assert adapter_path.exists(), "Adapter file was not created"
 
-        # 2. Merge adapter
-        print("\nMerging adapter")
-        merge_lora(
-            base="Wan-AI/Wan2.2-TI2V-5B-Diffusers",
-            adapter=str(adapter_path),
-            ft="FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers",
-            output=str(merged_dir),
-        )
-        assert merged_dir.exists(), "Merged model directory was not created"
-
-        # 3. Verify numerical accuracy
-        print("\nVerifying merged model")
-        # verify_lora uses sys.argv, so we need to mock it
-        old_argv = sys.argv
+        generator = VideoGenerator.from_config(
+            GeneratorConfig(
+                model_path=base,
+                pipeline=PipelineSelection(
+                    components=ComponentConfig(
+                        lora_path=str(adapter_path),
+                        override_pipeline_cls_name="WanDMDPipeline",
+                    ),
+                    experimental={
+                        "dmd_denoising_steps": [1000, 757, 522],
+                        "flow_shift": 5.0,
+                    },
+                ),
+                engine=EngineConfig(
+                    num_gpus=1,
+                    use_fsdp_inference=False,
+                    parallelism=ParallelismConfig(tp_size=1, sp_size=1),
+                    offload=OffloadConfig(
+                        dit=False,
+                        dit_layerwise=False,
+                        text_encoder=True,
+                        vae=True,
+                        pin_cpu_memory=False,
+                    ),
+                ),
+            ))
         try:
-            sys.argv = [
-                "verify_lora.py",
-                "--merged",
-                str(merged_dir),
-                "--ft",
-                "FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers",
-            ]
-            verify_lora_main()
+            summaries = generator.executor.collective_rpc(_collect_lora_application)
         finally:
-            sys.argv = old_argv
+            generator.shutdown()
 
-        print("\nLoRA extraction pipeline test PASSED")
+        assert summaries == [{
+            "adapted": 300,
+            "pipeline": "WanDMDPipeline",
+            "unmatched": [],
+        }]
