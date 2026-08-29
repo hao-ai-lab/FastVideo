@@ -196,6 +196,12 @@ def test_helios_pipeline_config_and_text_contract() -> None:
     assert torch.count_nonzero(output[0, 3:]) == 0
     assert torch.equal(output[1, :5], hidden[1, :5])
 
+    long_hidden = torch.arange(520 * 4, dtype=torch.float32).reshape(1, 520, 4)
+    long_mask = torch.ones(1, 520, dtype=torch.long)
+    long_output = postprocess(BaseEncoderOutput(last_hidden_state=long_hidden, attention_mask=long_mask))
+    assert long_output.shape == (1, 512, 4)
+    assert torch.equal(long_output[0], long_hidden[0, :512])
+
 
 def test_helios_preset_matches_official_distilled_defaults() -> None:
     _, _, _, _, preset = _pipeline_symbols()

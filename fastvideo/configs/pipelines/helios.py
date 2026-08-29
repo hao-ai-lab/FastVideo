@@ -46,7 +46,7 @@ def helios_postprocess_text(output: BaseEncoderOutput) -> torch.Tensor:
     sequence_lengths = output.attention_mask.gt(0).sum(dim=1).long()
     if torch.isnan(hidden_states).any():
         raise ValueError("Helios UMT5 produced NaN hidden states")
-    trimmed = [hidden[:length] for hidden, length in zip(hidden_states, sequence_lengths, strict=True)]
+    trimmed = [hidden[:min(int(length), 512)] for hidden, length in zip(hidden_states, sequence_lengths, strict=True)]
     return torch.stack(
         [torch.cat([hidden, hidden.new_zeros(512 - hidden.shape[0], hidden.shape[1])]) for hidden in trimmed],
         dim=0,
