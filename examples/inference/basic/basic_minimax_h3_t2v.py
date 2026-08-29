@@ -114,10 +114,14 @@ def main() -> None:
             # machine-readable: benchmark harnesses parse this line to separate
             # generation from model-load time (last occurrence = steady state)
             print(f"Generation time: {result.generation_time:.2f}s")
+        if result.peak_memory_mb is not None:
+            print(f"Peak memory: {result.peak_memory_mb:.1f} MB")
         for _ in range(args.repeats - 1):
             result = generator.generate(request)
             if result.generation_time is not None:
                 print(f"Generation time: {result.generation_time:.2f}s")
+            if result.peak_memory_mb is not None:
+                print(f"Peak memory: {result.peak_memory_mb:.1f} MB")
     finally:
         generator.shutdown()
 
