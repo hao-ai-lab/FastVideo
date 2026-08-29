@@ -9,13 +9,14 @@ not fit silently loses real signal.
 Two payload kinds cover the gap, named after the convention ComfyUI's loader already
 reads so one file works in both places:
 
-``<module>.diff`` / ``<module>.diff_b``
+``<module>.diff`` / ``<module>.diff_b`` / ``<parameter>.diff_param``
     An exact additive delta for a parameter the base model has. Used where a rank-``r``
     factorization buys nothing or cannot be formed at all -- RMSNorm vectors, biases,
-    and matrices whose smaller dimension is already at or below the rank that would be
-    chosen. Factoring a length-``n`` vector into rank ``r`` costs ``r(1 + n) > n``.
+    standalone parameters such as ``scale_shift_table``, and matrices whose smaller
+    dimension is already at or below the rank that would be chosen. Factoring a
+    length-``n`` vector into rank ``r`` costs ``r(1 + n) > n``.
 
-``<module>.set_weight``
+``<module>.set_weight`` / ``<parameter>.set_param``
     A whole parameter the base model does not carry, so no delta is expressible. MiniMax
     H3's VSA ``to_gate_compress`` is the case that motivated this: it exists only under
     the sparse-attention backend, and :func:`load_model_from_full_model_state_dict`
@@ -49,11 +50,11 @@ from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 
-# Suffix -> the parameter suffix it targets. ``.diff``/``.diff_b`` are additive,
-# ``.set_weight`` replaces. Ordered longest-first so ``.diff_b`` is tested before
-# ``.diff`` would match a truncated key.
-ADDITIVE_SUFFIXES: dict[str, str] = {".diff_b": ".bias", ".diff": ".weight"}
-REPLACEMENT_SUFFIXES: dict[str, str] = {".set_weight": ".weight"}
+# Suffix -> the parameter suffix it targets. An empty target suffix preserves the
+# full parameter name for standalone nn.Parameters. Ordered longest-first so the
+# generic spellings are tested before the shorter weight/bias spellings.
+ADDITIVE_SUFFIXES: dict[str, str] = {".diff_param": "", ".diff_b": ".bias", ".diff": ".weight"}
+REPLACEMENT_SUFFIXES: dict[str, str] = {".set_weight": ".weight", ".set_param": ""}
 
 # Recognized elsewhere in an adapter and deliberately not our business: the low-rank
 # half, which ``LoRAPipeline`` merges through the wrapped-module path.
@@ -163,7 +164,7 @@ class DenseLoRAPatch:
         if not additive and not replacement:
             return None
         logger.info(
-            "LoRA adapter %s carries a dense payload: %d additive (.diff/.diff_b), %d replacement (.set_weight)",
+            "LoRA adapter %s carries a dense payload: %d additive, %d replacement parameters",
             lora_path, len(additive), len(replacement))
         return cls(files, additive, replacement, strength)
 

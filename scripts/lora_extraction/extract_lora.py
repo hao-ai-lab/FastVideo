@@ -3,8 +3,8 @@
 The extractor supports ordinary low-rank matrix deltas as well as parameters
 that cannot be represented by a LoRA product:
 
-* ``<module>.diff`` / ``<module>.diff_b`` store exact additive deltas.
-* ``<module>.set_weight`` stores a parameter absent from the base checkpoint.
+* ``.diff`` / ``.diff_b`` / ``.diff_param`` store exact additive deltas.
+* ``.set_weight`` / ``.set_param`` store parameters absent from the base checkpoint.
 
 Indexed safetensors are streamed one tensor at a time, so extracting from large
 transformers does not require both state dictionaries in host memory. Exact CPU
@@ -45,7 +45,9 @@ INDEX_FILENAME = "diffusion_pytorch_model.safetensors.index.json"
 FORMAT_VERSION = "fastvideo-lora-v2"
 DIFF_SUFFIX = ".diff"
 DIFF_BIAS_SUFFIX = ".diff_b"
+DIFF_PARAM_SUFFIX = ".diff_param"
 SET_WEIGHT_SUFFIX = ".set_weight"
+SET_PARAM_SUFFIX = ".set_param"
 
 _DTYPE_MAP = {
     "float32": torch.float32,
@@ -321,12 +323,12 @@ def is_extractable_weight(key: str) -> bool:
     return not any(fragment in lowered for fragment in ("norm", "bias", "embedding"))
 
 
-def dense_payload_key(param_name: str) -> str | None:
+def dense_payload_key(param_name: str) -> str:
     if param_name.endswith(".weight"):
         return param_name.removesuffix(".weight") + DIFF_SUFFIX
     if param_name.endswith(".bias"):
         return param_name.removesuffix(".bias") + DIFF_BIAS_SUFFIX
-    return None
+    return param_name + DIFF_PARAM_SUFFIX
 
 
 def build_dense_payload(
@@ -343,8 +345,9 @@ def build_dense_payload(
         finetuned = ft_sd[key].detach().cpu()
         base = base_sd.get(key)
         if base is None:
-            if key.endswith(".weight"):
-                payload[key.removesuffix(".weight") + SET_WEIGHT_SUFFIX] = finetuned.contiguous()
+            output_key = (key.removesuffix(".weight") + SET_WEIGHT_SUFFIX
+                          if key.endswith(".weight") else key + SET_PARAM_SUFFIX)
+            payload[output_key] = finetuned.contiguous()
             continue
         if base.shape != finetuned.shape or torch.equal(base.cpu(), finetuned):
             continue
@@ -488,9 +491,8 @@ def _extract_layers(
                 }
                 _atomic_json_dump(manifest, manifest_path)
                 continue
-            if not key.endswith(".weight"):
-                raise ValueError(f"Fine-tuned-only parameter has no supported replacement suffix: {key}")
-            output_key = key.removesuffix(".weight") + SET_WEIGHT_SUFFIX
+            output_key = (key.removesuffix(".weight") + SET_WEIGHT_SUFFIX
+                          if key.endswith(".weight") else key + SET_PARAM_SUFFIX)
             output_dtype = _resolve_output_dtype(config.replacement_dtype, finetuned_tensor.dtype)
             _save_layer_payload(tensor_file, {output_key: finetuned_tensor.to(output_dtype)}, key)
             manifest["layers"][key] = {
@@ -561,8 +563,6 @@ def _extract_layers(
             del lora_a, lora_b, singular_values, payload
         else:
             output_key = dense_payload_key(key)
-            if output_key is None:
-                raise ValueError(f"Changed parameter has no supported dense suffix: {key}")
             if config.dense_payload:
                 output_dtype = _resolve_output_dtype(config.dense_dtype, finetuned_tensor.dtype)
                 _save_layer_payload(tensor_file, {output_key: delta.to(output_dtype)}, key)
@@ -754,7 +754,7 @@ def extract_lora_adapter(
         "diff_tensors": str(counts.get("diff", 0)),
         "set_weight_tensors": str(counts.get("set_weight", 0)),
         "dropped_unchanged": str(counts.get("unchanged", 0)),
-        "application": "W = W_base + lora_B @ lora_A; then .diff/.diff_b added and .set_weight assigned",
+        "application": "W = W_base + lora_B @ lora_A; then dense diffs added and replacements assigned",
     }
     _assemble_adapter(out_path, effective_work_dir, manifest, metadata)
     _verify_adapter(out_path, manifest)

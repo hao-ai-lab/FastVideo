@@ -47,8 +47,8 @@ Important options:
 - `--svd-method`: `exact` or `randomized`.
 - `--randomized-q`, `--niter`, `--seed`: randomized SVD accuracy and reproducibility.
 - `--factor-dtype`: storage dtype for `lora_A` and `lora_B`.
-- `--dense-dtype`: storage dtype for exact `.diff` and `.diff_b` payloads.
-- `--replacement-dtype`: storage dtype for fine-tuned-only `.set_weight` parameters.
+- `--dense-dtype`: storage dtype for exact `.diff`, `.diff_b`, and `.diff_param` payloads.
+- `--replacement-dtype`: storage dtype for fine-tuned-only `.set_weight` and `.set_param` parameters.
 - `--exact-tensor-pattern`: repeatable regex selecting matrices to retain as exact dense deltas.
 - `--work-dir`, `--resume`: resume a partially completed streaming extraction.
 
@@ -56,7 +56,9 @@ Fine-tuned parameters that cannot or should not be factorized are retained autom
 
 - a changed base weight becomes `.diff`;
 - a changed base bias becomes `.diff_b`;
+- another changed parameter, such as `scale_shift_table`, becomes `.diff_param`;
 - a fine-tuned-only weight, such as a VSA compression gate, becomes `.set_weight`;
+- another fine-tuned-only parameter becomes `.set_param`;
 - a bit-identical parameter is omitted.
 
 Indexed loading is preferred and downloads only the transformer component. `--load-mode auto` falls back to legacy pipeline loading when indexed safetensors are unavailable.

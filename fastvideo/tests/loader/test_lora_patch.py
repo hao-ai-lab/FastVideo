@@ -48,6 +48,8 @@ def test_normalize_lora_key_accepts_every_published_spelling(raw, expected):
     "blocks.0.norm1.diff",
     "blocks.0.attn.to_q.diff_b",
     "blocks.0.attn.to_gate_compress.set_weight",
+    "blocks.0.scale_shift_table.diff_param",
+    "blocks.0.extra_table.set_param",
     "blocks.0.attn.to_q.dora_scale",
 ])
 def test_normalize_lora_key_disclaims_non_low_rank_keys(raw):
@@ -82,13 +84,23 @@ def test_from_adapter_splits_additive_from_replacement(tmp_path):
             "blocks.0.attn.to_q.lora_A.weight": torch.zeros(4, 8),
             "blocks.0.norm1.diff": torch.zeros(8),
             "blocks.0.attn.to_q.diff_b": torch.zeros(8),
+            "blocks.0.scale_shift_table.diff_param": torch.zeros(8),
             "blocks.0.attn.to_gate_compress.set_weight": torch.zeros(8, 8),
+            "blocks.0.extra_table.set_param": torch.zeros(8),
         })
     patch = DenseLoRAPatch.from_adapter(path)
     assert patch is not None
-    # `.diff` targets `.weight`; `.diff_b` targets `.bias`; `.set_weight` targets `.weight`.
-    assert set(patch._additive) == {"blocks.0.norm1.weight", "blocks.0.attn.to_q.bias"}
-    assert set(patch._replacement) == {"blocks.0.attn.to_gate_compress.weight"}
+    # Weight/bias suffixes restore their parameter suffix; generic parameter
+    # payloads preserve the complete name.
+    assert set(patch._additive) == {
+        "blocks.0.norm1.weight",
+        "blocks.0.attn.to_q.bias",
+        "blocks.0.scale_shift_table",
+    }
+    assert set(patch._replacement) == {
+        "blocks.0.attn.to_gate_compress.weight",
+        "blocks.0.extra_table",
+    }
 
 
 def test_param_names_mapping_is_applied_to_dense_keys(tmp_path):
@@ -134,6 +146,13 @@ def test_apply_to_adds_the_delta(tmp_path):
     assert torch.allclose(out, torch.full((4, ), 1.25))
 
 
+def test_apply_to_supports_standalone_parameters(tmp_path):
+    path = write_adapter(tmp_path, {"blocks.0.scale_shift_table.diff_param": torch.full((4, ), 0.25)})
+    patch = DenseLoRAPatch.from_adapter(path)
+    out = patch.apply_to("blocks.0.scale_shift_table", torch.ones(4))
+    assert torch.allclose(out, torch.full((4, ), 1.25))
+
+
 def test_apply_to_leaves_unrelated_parameters_untouched(tmp_path):
     path = write_adapter(tmp_path, {"blocks.0.norm1.diff": torch.full((4, ), 0.25)})
     patch = DenseLoRAPatch.from_adapter(path)
@@ -166,6 +185,13 @@ def test_apply_to_rejects_a_shape_mismatch(tmp_path):
     patch = DenseLoRAPatch.from_adapter(path)
     with pytest.raises(ValueError, match="shape"):
         patch.apply_to("blocks.0.norm1.weight", torch.zeros(4))
+
+
+def test_replacement_for_supports_standalone_parameters(tmp_path):
+    table = torch.randn(6, 4)
+    path = write_adapter(tmp_path, {"blocks.0.extra_table.set_param": table})
+    patch = DenseLoRAPatch.from_adapter(path)
+    assert torch.equal(patch.replacement_for("blocks.0.extra_table"), table)
 
 
 def test_replacement_for_returns_the_whole_tensor(tmp_path):
