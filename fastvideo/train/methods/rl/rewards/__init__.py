@@ -15,6 +15,7 @@ from fastvideo.train.methods.rl.rewards.frame_rewards import (
 from fastvideo.train.methods.rl.rewards.media import (
     MultiRewardScorer,
     RewardScorer,
+    media_to_float_tensor,
     media_to_uint8_array,
     select_first_frame,
 )
@@ -26,7 +27,8 @@ class MeanLuminanceScorer:
     @torch.no_grad()
     def __call__(self, media: torch.Tensor, prompts) -> torch.Tensor:
         del prompts
-        return media.detach().float().mean(dim=tuple(range(1, media.ndim)))
+        value = media_to_float_tensor(media)
+        return value.mean(dim=tuple(range(1, value.ndim)))
 
 
 def _parse_reward_specs(raw: Mapping[str, Any]) -> tuple[dict[str, float], dict[str, dict[str, Any]]]:
@@ -111,6 +113,7 @@ __all__ = [
     "PickScoreScorer",
     "RewardScorer",
     "build_multi_reward_scorer",
+    "media_to_float_tensor",
     "media_to_uint8_array",
     "select_first_frame",
 ]
