@@ -26,7 +26,13 @@ Apple Silicon memory controls:
   the repeated AdaLN projection work from each denoising step.
 - **Affine INT8, INT6, or INT4 quantization** of attention/FFN matrices
   (group size 64). Modulation, embeddings, norms, and input/output projections
-  remain in higher precision.
+  remain in higher precision. Quantization is weight-only: attention Q/K/V
+  stay BF16 (or the selected activation dtype).
+- **Optional VSA.** Dense conversion still drops
+  ``transformer_blocks.*.attn.to_gate_compress.weight``. ``--include-vsa``
+  keeps those 50 projections, quantizes them with the same affine grid, and
+  records ``vsa.capable`` in the manifest. Runtime VSA is opt-in and never
+  enabled for dense-only checkpoints.
 
 Checkpoint layout: the released H3 checkpoint uses the diffusers reference
 module names 1:1 (``transformer_blocks.{i}.attn.to_out.0.weight``,
@@ -57,10 +63,20 @@ from fastvideo.mlx_runtime.fastwan import (
     ensure_quantization_supported,
     linear,
     quantize_matrix,
-    rms_norm,
     silu,
     timestep_embedding,
     weight_dtype,
+)
+from fastvideo.mlx_runtime.minimax_h3_vsa import (
+    MiniMaxH3VSAConfig,
+    MiniMaxH3VSAGeometry,
+    MiniMaxH3VSAStats,
+    VSA_GATE_KEY_SUFFIX,
+    build_h3_tile_geometry,
+    dense_only_vsa_error,
+    dit_seq_shape_from_layout,
+    h3_vsa_attention,
+    prefix_segments_from_layout,
 )
 
 logger = init_logger(__name__)
@@ -107,18 +123,22 @@ _QUANTIZABLE_SUFFIXES = (
     "ff.net.0.proj.weight",
     "ff.net.2.weight",
 )
+_VSA_QUANTIZABLE_SUFFIXES = _QUANTIZABLE_SUFFIXES + (VSA_GATE_KEY_SUFFIX, )
 
-# The released FastH3 student carries VSA routing projections. The MLX path is
-# dense, so retaining these weights wastes about 3.6 GiB without affecting a
-# single output value.
+# The released FastH3 student carries VSA routing projections. Dense MLX
+# conversion drops them (~3.6 GiB BF16) because they do not affect fused SDPA.
+# Pass include_vsa=True to keep and quantize them.
 _IGNORED_DENSE_KEY_PARTS = ("attn.to_gate_compress", )
 
 
-def _is_quantizable(key: str) -> bool:
-    return key.endswith(_QUANTIZABLE_SUFFIXES)
+def _is_quantizable(key: str, *, include_vsa: bool = False) -> bool:
+    suffixes = _VSA_QUANTIZABLE_SUFFIXES if include_vsa else _QUANTIZABLE_SUFFIXES
+    return key.endswith(suffixes)
 
 
-def _is_ignored_dense_key(key: str) -> bool:
+def _is_ignored_dense_key(key: str, *, include_vsa: bool = False) -> bool:
+    if include_vsa:
+        return False
     return any(part in key for part in _IGNORED_DENSE_KEY_PARTS)
 
 
@@ -473,7 +493,44 @@ def apply_h3_rotary(x, cos, sin):
     return mx.concatenate([out.astype(x.dtype), x_pass], axis=-1)
 
 
-def _attention(weights: dict[str, Any], x, cos, sin, *, num_heads: int, head_dim: int, eps: float, use_rope: bool):
+def _gate_weight_is_active(weight: Any) -> bool:
+    import mlx.core as mx
+
+    if weight is None:
+        return False
+    if isinstance(weight, QuantizedMatrix):
+        # Affine quantization clamps scales above zero even for an all-zero gate.
+        active = mx.any(weight.weight != 0)
+        if weight.biases is not None:
+            active = active | mx.any(weight.biases != 0)
+        return bool(active.item())
+    return bool(mx.any(weight != 0).item())
+
+
+def _h3_rms_norm(x, weight, eps: float):
+    """H3 uses fused RMSNorm by default; FASTVIDEO_MLX_FAST_NORM is Wan-only."""
+    import mlx.core as mx
+
+    return mx.fast.rms_norm(x, weight, eps)
+
+
+def _attention(
+    weights: dict[str, Any],
+    x,
+    cos,
+    sin,
+    *,
+    num_heads: int,
+    head_dim: int,
+    eps: float,
+    use_rope: bool,
+    vsa_geometry: MiniMaxH3VSAGeometry | None = None,
+    vsa_sparsity: float = 0.0,
+    vsa_exempt: bool = True,
+    vsa_impl: str = "auto",
+    vsa_stats: MiniMaxH3VSAStats | None = None,
+    use_gate_compress: bool = False,
+):
     """H3 attention: bias-free qkv, per-head qk RMSNorm, partial RoPE."""
     import mlx.core as mx
 
@@ -481,19 +538,43 @@ def _attention(weights: dict[str, Any], x, cos, sin, *, num_heads: int, head_dim
     q = linear(x, weights["attn.to_q.weight"]).reshape(seq_len, num_heads, head_dim)
     k = linear(x, weights["attn.to_k.weight"]).reshape(seq_len, num_heads, head_dim)
     v = linear(x, weights["attn.to_v.weight"]).reshape(seq_len, num_heads, head_dim)
-    q = rms_norm(q, weights["attn.norm_q.weight"], eps=eps)
-    k = rms_norm(k, weights["attn.norm_k.weight"], eps=eps)
+    q = _h3_rms_norm(q, weights["attn.norm_q.weight"], eps)
+    k = _h3_rms_norm(k, weights["attn.norm_k.weight"], eps)
     if use_rope:
         q = apply_h3_rotary(q, cos, sin)
         k = apply_h3_rotary(k, cos, sin)
-    # contiguous() guards against MLX fused-SDPA mis-computation on strided views.
-    attended = mx.fast.scaled_dot_product_attention(
-        mx.contiguous(q.transpose(1, 0, 2))[None],
-        mx.contiguous(k.transpose(1, 0, 2))[None],
-        mx.contiguous(v.transpose(1, 0, 2))[None],
-        scale=head_dim**-0.5,
-    )[0].transpose(1, 0, 2)
-    attended = mx.contiguous(attended.reshape(seq_len, num_heads * head_dim))
+    gate = None
+    if use_gate_compress and "attn.to_gate_compress.weight" in weights:
+        gate = linear(x, weights["attn.to_gate_compress.weight"]).reshape(seq_len, num_heads, head_dim)
+    use_vsa = (vsa_geometry is not None and use_rope and (vsa_sparsity > 0.0 or gate is not None)
+               and vsa_geometry.total_seq_length == seq_len)
+    if use_vsa:
+        assert vsa_geometry is not None
+        attended = h3_vsa_attention(
+            q,
+            k,
+            v,
+            vsa_geometry,
+            sparsity=vsa_sparsity,
+            exempt=vsa_exempt,
+            gate_compress=gate,
+            impl=vsa_impl,  # type: ignore[arg-type]
+            stats=vsa_stats,
+        )
+    else:
+        if vsa_stats is not None and use_rope:
+            vsa_stats.impl = "dense"
+            if vsa_geometry is not None:
+                vsa_stats.num_prefix_tiles = vsa_geometry.num_prefix_tiles
+                vsa_stats.num_video_tiles = vsa_geometry.num_video_tiles
+                vsa_stats.video_keep = vsa_geometry.num_video_tiles
+        attended = mx.fast.scaled_dot_product_attention(
+            q.transpose(1, 0, 2)[None],
+            k.transpose(1, 0, 2)[None],
+            v.transpose(1, 0, 2)[None],
+            scale=head_dim**-0.5,
+        )[0].transpose(1, 0, 2)
+    attended = attended.reshape(seq_len, num_heads * head_dim)
     return linear(attended, weights["attn.to_out.0.weight"])
 
 
@@ -532,11 +613,17 @@ def _transformer_block(
     head_dim: int,
     norm_eps: float,
     qk_norm_eps: float,
+    vsa_geometry: MiniMaxH3VSAGeometry | None = None,
+    vsa_sparsity: float = 0.0,
+    vsa_exempt: bool = True,
+    vsa_impl: str = "auto",
+    vsa_stats: MiniMaxH3VSAStats | None = None,
+    use_gate_compress: bool = False,
 ):
     shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = tables
 
     residual = hidden_states
-    normed = rms_norm(hidden_states, weights["norm1.weight"], eps=norm_eps)
+    normed = _h3_rms_norm(hidden_states, weights["norm1.weight"], norm_eps)
     normed = normed * (1.0 + scale_msa[adaln_indices]) + shift_msa[adaln_indices]
     attn_output = _attention(
         weights,
@@ -547,11 +634,17 @@ def _transformer_block(
         head_dim=head_dim,
         eps=qk_norm_eps,
         use_rope=True,
+        vsa_geometry=vsa_geometry,
+        vsa_sparsity=vsa_sparsity,
+        vsa_exempt=vsa_exempt,
+        vsa_impl=vsa_impl,
+        vsa_stats=vsa_stats,
+        use_gate_compress=use_gate_compress,
     )
     hidden_states = residual + gate_msa[adaln_indices] * attn_output
 
     residual = hidden_states
-    normed = rms_norm(hidden_states, weights["norm2.weight"], eps=norm_eps)
+    normed = _h3_rms_norm(hidden_states, weights["norm2.weight"], norm_eps)
     normed = normed * (1.0 + scale_mlp[adaln_indices]) + shift_mlp[adaln_indices]
     ff_output = _feed_forward(weights, normed.astype(weight_dtype(weights["ff.net.0.proj.weight"])))
     return residual + gate_mlp[adaln_indices] * ff_output
@@ -567,7 +660,7 @@ def _refiner_block(
     qk_norm_eps: float,
 ):
     residual = hidden_states
-    normed = rms_norm(hidden_states, weights["norm1.weight"], eps=norm_eps)
+    normed = _h3_rms_norm(hidden_states, weights["norm1.weight"], norm_eps)
     attn_output = _attention(
         weights,
         normed.astype(weight_dtype(weights["attn.to_q.weight"])),
@@ -579,7 +672,7 @@ def _refiner_block(
         use_rope=False,
     )
     hidden_states = residual + attn_output
-    normed = rms_norm(hidden_states, weights["norm2.weight"], eps=norm_eps)
+    normed = _h3_rms_norm(hidden_states, weights["norm2.weight"], norm_eps)
     return hidden_states + _feed_forward(weights, normed.astype(weight_dtype(weights["ff.net.0.proj.weight"])))
 
 
@@ -643,6 +736,11 @@ class MLXMiniMaxH3DiT:
         self.final_norm_eps = float(config["final_norm_eps"])
         self.patch_dim = self.in_channels * math.prod(self.patch_size)
         self._adaln_cache: MiniMaxH3StepCache | None = None
+        self.vsa_config = MiniMaxH3VSAConfig()
+        self._vsa_geometry: MiniMaxH3VSAGeometry | None = None
+        self._vsa_capable = any("attn.to_gate_compress.weight" in block for block in blocks)
+        self._gate_active: list[bool | None] = [None] * len(blocks)
+        self.last_vsa_stats: MiniMaxH3VSAStats | None = None
 
     # -- conditioning ------------------------------------------------------
 
@@ -676,7 +774,7 @@ class MLXMiniMaxH3DiT:
                 norm_eps=self.norm_eps,
                 qk_norm_eps=self.qk_norm_eps,
             )
-        return rms_norm(hidden, self.weights["token_refiner.final_norm.weight"], eps=self.final_norm_eps)
+        return _h3_rms_norm(hidden, self.weights["token_refiner.final_norm.weight"], self.final_norm_eps)
 
     # -- AdaLN cache --------------------------------------------------------
 
@@ -712,6 +810,70 @@ class MLXMiniMaxH3DiT:
                 block["adaln_proj.linear.bias"] = None
         return self._adaln_cache
 
+    @property
+    def vsa_capable(self) -> bool:
+        return self._vsa_capable
+
+    def configure_vsa(self, config: MiniMaxH3VSAConfig | None) -> None:
+        config = config or MiniMaxH3VSAConfig()
+        if config.enabled and not self._vsa_capable:
+            raise dense_only_vsa_error("this MLX H3 DiT")
+        if any(layer >= len(self.blocks) for layer in config.dense_layers):
+            raise ValueError(f"VSA dense_layers must be below the model's block count ({len(self.blocks)}).")
+        self.vsa_config = config
+        self._vsa_geometry = None
+        self.reset_vsa_stats()
+
+    def reset_vsa_stats(self) -> None:
+        self.last_vsa_stats = MiniMaxH3VSAStats(
+            configured_sparsity=self.vsa_config.sparsity,
+            tile_size=self.vsa_config.tile_size,
+            prefix_mode=self.vsa_config.prefix_mode,
+        ) if self.vsa_config.enabled else None
+
+    def prepare_vsa_geometry(self, layout: MiniMaxH3PackedLayout) -> MiniMaxH3VSAGeometry | None:
+        if not self.vsa_config.enabled:
+            self._vsa_geometry = None
+            return None
+        prefix = tuple(segment for segment in prefix_segments_from_layout(layout, self.patch_size) if segment > 0)
+        video_shape = dit_seq_shape_from_layout(layout, self.patch_size)
+        geometry = self._vsa_geometry
+        if geometry is not None and (geometry.prefix_segments, geometry.dit_seq_shape,
+                                     geometry.tile_elems) == (prefix, video_shape, self.vsa_config.tile_size):
+            return geometry
+        try:
+            geometry = build_h3_tile_geometry(prefix, video_shape, self.vsa_config.tile_size)
+        except ValueError as error:
+            raise ValueError(f"H3 VSA cannot run with this packed layout (prefix={prefix}, "
+                             f"video={video_shape}, tile_size={self.vsa_config.tile_size}): {error}. "
+                             "Disable VSA or pick a supported tile size (64 or 256).") from error
+        self._vsa_geometry = geometry
+        return self._vsa_geometry
+
+    def _block_gate_active(self, block_index: int) -> bool:
+        cached = self._gate_active[block_index]
+        if cached is not None:
+            return cached
+        weight = self.blocks[block_index].get("attn.to_gate_compress.weight")
+        active = _gate_weight_is_active(weight)
+        self._gate_active[block_index] = active
+        if weight is not None and not active:
+            logger.info_once("MiniMax H3 VSA compression gate is all-zero; skipping the pooled branch.")
+        return active
+
+    def _vsa_block_kwargs(self, block_index: int, step_index: int) -> dict[str, Any]:
+        geometry = self._vsa_geometry if self.vsa_config.enabled else None
+        sparsity = self.vsa_config.layer_sparsity(block_index, step_index) if geometry is not None else 0.0
+        stats = MiniMaxH3VSAStats() if self.vsa_config.enabled else None
+        return {
+            "vsa_geometry": geometry,
+            "vsa_sparsity": sparsity,
+            "vsa_exempt": self.vsa_config.exempt,
+            "vsa_impl": self.vsa_config.impl,
+            "vsa_stats": stats,
+            "use_gate_compress": geometry is not None and self._block_gate_active(block_index),
+        }
+
     # -- forward ------------------------------------------------------------
 
     def forward(
@@ -734,9 +896,14 @@ class MLXMiniMaxH3DiT:
         projects *all* packed rows through both heads and then selects; this
         selects first and projects only the relevant rows — row-wise
         identical math at a fraction of the cost.
+
+        This entrypoint is dense-only. VSA requires ``forward_with_cache``
+        with a packed layout and step index.
         """
         import mlx.core as mx
 
+        if self.vsa_config.enabled:
+            raise ValueError("VSA requires forward_with_cache() with layout and step_index; forward() is dense-only.")
         sequence_length = position_ids.shape[0]
         cos, sin = rope_cos_sin(position_ids, self.rope_freq_dim, self.rope_theta)
 
@@ -760,7 +927,7 @@ class MLXMiniMaxH3DiT:
         temb = self.compute_temb(timesteps)
         adaln_indices = (timestep_indices * MINIMAX_H3_MODALITY_NUM + token_tags).astype(mx.int32)
 
-        for block in self.blocks:
+        for block_index, block in enumerate(self.blocks):
             tables = _adaln_tables(block, temb)
             packed = _transformer_block(
                 block,
@@ -773,6 +940,7 @@ class MLXMiniMaxH3DiT:
                 head_dim=self.head_dim,
                 norm_eps=self.norm_eps,
                 qk_norm_eps=self.qk_norm_eps,
+                **self._vsa_block_kwargs(block_index, 0),
             )
             mx.eval(packed)  # per-block sync: see forward_with_cache note
 
@@ -782,7 +950,7 @@ class MLXMiniMaxH3DiT:
             self.weights["norm_out.linear.bias"],
         )
         shift_rows, scale_rows = mx.split(shift_scale, 2, axis=-1)
-        normed = rms_norm(packed, self.weights["norm_out.norm.weight"], eps=self.final_norm_eps)
+        normed = _h3_rms_norm(packed, self.weights["norm_out.norm.weight"], self.final_norm_eps)
         normed = normed * (1.0 + scale_rows[timestep_indices]) + shift_rows[timestep_indices]
         video_output = linear(
             normed[_as_mx_indices(video_indices)].astype(weight_dtype(self.weights["proj_out.weight"])),
@@ -805,6 +973,7 @@ class MLXMiniMaxH3DiT:
         layout: MiniMaxH3PackedLayout,
         step_timesteps: np.ndarray,
         row_timestep_inverse: np.ndarray,
+        step_index: int = 0,
     ):
         """Denoise-step forward served entirely from the AdaLN cache.
 
@@ -817,6 +986,8 @@ class MLXMiniMaxH3DiT:
 
         if self._adaln_cache is None:
             raise RuntimeError("precompute_adaln() must run before forward_with_cache().")
+        if self.vsa_config.enabled:
+            self.prepare_vsa_geometry(layout)
         cache = self._adaln_cache
         positions = mx.array(cache.positions(step_timesteps))
 
@@ -848,7 +1019,8 @@ class MLXMiniMaxH3DiT:
         # Sync per block: without this, MLX enqueues the entire 50-block graph
         # while the GPU lags behind, allocating every intermediate at once
         # (observed as an OOM kill on 36 GiB Macs at 480x832).
-        for block, tables in zip(self.blocks, cache.block_tables, strict=True):
+        for block_index, (block, tables) in enumerate(zip(self.blocks, cache.block_tables, strict=True)):
+            vsa_kwargs = self._vsa_block_kwargs(block_index, step_index)
             packed = _transformer_block(
                 block,
                 packed,
@@ -860,11 +1032,14 @@ class MLXMiniMaxH3DiT:
                 head_dim=self.head_dim,
                 norm_eps=self.norm_eps,
                 qk_norm_eps=self.qk_norm_eps,
+                **vsa_kwargs,
             )
             mx.eval(packed)
+            if self.last_vsa_stats is not None:
+                self.last_vsa_stats.record(vsa_kwargs["vsa_stats"])
 
         row_positions = positions[row_inverse]
-        normed = rms_norm(packed, self.weights["norm_out.norm.weight"], eps=self.final_norm_eps)
+        normed = _h3_rms_norm(packed, self.weights["norm_out.norm.weight"], self.final_norm_eps)
         normed = normed * (1.0 + cache.norm_out_scale[row_positions]) + cache.norm_out_shift[row_positions]
         video_output = linear(
             normed[mx.array(layout.video_indices)].astype(weight_dtype(self.weights["proj_out.weight"])),
@@ -932,6 +1107,7 @@ def mlx_h3_dit_from_diffusers_safetensors(
     num_blocks: int | None = None,
     quantization: str | MLXQuantizationSpec | None = None,
     adaln_cache_timesteps: np.ndarray | None = None,
+    include_vsa: bool = False,
 ) -> MLXMiniMaxH3DiT:
     """Load the released H3 transformer (diffusers layout) into MLX.
 
@@ -944,6 +1120,10 @@ def mlx_h3_dit_from_diffusers_safetensors(
     block at a time while the checkpoint is read. The 13B projection weights
     are never retained together and are omitted from the returned model. This
     is the memory-bounded build path for the released 33B student.
+
+    ``include_vsa`` keeps ``attn.to_gate_compress`` matrices and quantizes them
+    with the same affine grid as the other linear weights. Dense conversion
+    continues to drop them.
     """
     import mlx.core as mx
     transformer_path = Path(transformer_path)
@@ -1020,7 +1200,7 @@ def mlx_h3_dit_from_diffusers_safetensors(
     for shard in _safetensors_shards(transformer_path):
         shard_arrays = mx.load(str(shard))
         for key, source in shard_arrays.items():
-            if _is_ignored_dense_key(key):
+            if _is_ignored_dense_key(key, include_vsa=include_vsa):
                 continue
             if temb is not None and key.startswith("time_embedder."):
                 continue
@@ -1051,7 +1231,7 @@ def mlx_h3_dit_from_diffusers_safetensors(
                     block["adaln_proj.linear.bias"] = None
                     del pending_adaln[index]
                 continue
-            if spec is not None and _is_quantizable(key) and not keep_fp32:
+            if spec is not None and _is_quantizable(key, include_vsa=include_vsa) and not keep_fp32:
                 value = quantize_matrix(array, spec)
                 del array
             else:
@@ -1087,9 +1267,19 @@ def mlx_h3_dit_from_diffusers_safetensors(
         raise KeyError(f"Missing transformer block weights for indices {missing}.")
     if any(block is None for block in refiner):
         raise KeyError("Missing token refiner weights.")
+    loaded_blocks = [block for block in blocks if block is not None]
+    if include_vsa:
+        missing_gates = [
+            index for index, block in enumerate(loaded_blocks) if "attn.to_gate_compress.weight" not in block
+        ]
+        if missing_gates:
+            raise KeyError("VSA conversion requested but gate projections are missing for transformer blocks "
+                           f"{missing_gates}. The source checkpoint must contain "
+                           f"`transformer_blocks.*.{VSA_GATE_KEY_SUFFIX}`.")
+        logger.info("Retained %d VSA gate projections (%s).", len(loaded_blocks), VSA_GATE_KEY_SUFFIX)
     dit = MLXMiniMaxH3DiT(
         weights,
-        [block for block in blocks if block is not None],
+        loaded_blocks,
         [block for block in refiner if block is not None],
         config,
     )
@@ -1100,6 +1290,19 @@ def mlx_h3_dit_from_diffusers_safetensors(
 H3_FORMAT_VERSION = 1
 H3_WEIGHTS_FILENAME = "mlx_h3_dit.safetensors"
 H3_MANIFEST_FILENAME = "mlx_h3_dit.json"
+
+
+def mlx_h3_checkpoint_vsa_capable(checkpoint_dir: str | Path) -> bool:
+    """True when a saved MLX H3 checkpoint retained the VSA gate projections."""
+    manifest_path = Path(checkpoint_dir) / H3_MANIFEST_FILENAME
+    if not manifest_path.is_file():
+        return False
+    manifest = json.loads(manifest_path.read_text())
+    if bool((manifest.get("vsa") or {}).get("capable")):
+        return True
+    quantized_keys = manifest.get("quantized_keys") or {}
+    return any("attn.to_gate_compress.weight" in key for key in quantized_keys)
+
 
 _DTYPE_TO_NAME = {"float16": "fp16", "bfloat16": "bf16", "float32": "fp32"}
 
@@ -1183,6 +1386,18 @@ def save_mlx_h3_checkpoint(dit: MLXMiniMaxH3DiT, checkpoint_dir: str | Path) -> 
         },
         "quantized_keys": quantized,
         "adaln_cache": cache_manifest,
+        "vsa": {
+            "capable":
+            bool(dit.vsa_capable),
+            "num_gate_matrices":
+            sum(1 for block in dit.blocks if "attn.to_gate_compress.weight" in block),
+            "gate_key_suffix":
+            VSA_GATE_KEY_SUFFIX,
+            "attention_activations":
+            "bf16",
+            "note": ("Gate projections are quantized with the checkpoint's affine INT8/INT6/INT4 "
+                     "weight-only grid. VSA attention Q/K/V remain unquantized activations."),
+        },
     }
     weights_path = checkpoint_dir / H3_WEIGHTS_FILENAME
     mx.save_safetensors(str(weights_path), arrays)

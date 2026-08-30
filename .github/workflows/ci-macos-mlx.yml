@@ -8,6 +8,8 @@ on:
       - "fastvideo/mlx_runtime/**"
       - "fastvideo/tests/mlx/**"
       - "fastvideo/tests/platforms/test_mps_vsa_error.py"
+      - "fastvideo/tests/platforms/test_cpu_sdpa.py"
+      - "fastvideo/platforms/cpu.py"
       - "fastvideo/platforms/mps.py"
       - "fastvideo/platforms/__init__.py"
       - "fastvideo/__init__.py"
@@ -79,6 +81,10 @@ jobs:
             fastvideo/tests/mlx/test_mlx_compile_parity.py \
             fastvideo/tests/mlx/test_mlx_checkpoint.py \
             fastvideo/tests/mlx/test_mlx_checkpoint_compat.py \
+            fastvideo/tests/mlx/test_mlx_minimax_h3_parity.py \
+            fastvideo/tests/mlx/test_mlx_minimax_h3_vsa.py \
+            fastvideo/tests/mlx/test_mlx_minimax_h3_vsa_regressions.py \
+            fastvideo/tests/mlx/test_mlx_minimax_h3_fast_mode.py \
             fastvideo/tests/mlx/test_mlx_fastwan_benchmark.py \
             fastvideo/tests/mlx/test_taehv_decode.py \
             fastvideo/tests/mlx/test_frame_upsample.py \
@@ -91,7 +97,8 @@ jobs:
             fastvideo/tests/mlx/test_mlx_rife_interpolation.py::test_rife_download_unavailable_has_specific_error \
             fastvideo/tests/mlx/test_mlx_rife_interpolation.py::test_rife_backend_regression_is_not_skip_eligible \
             fastvideo/tests/platforms/test_mps_vsa_error.py \
-            -q
+            fastvideo/tests/platforms/test_cpu_sdpa.py \
+            -v -s -o faulthandler_timeout=120
 
   # Same tests on MLX's CPU backend. Hosted macOS runners are scarce and
   # slower to schedule; this Linux job gives fast PR signal on the identical
@@ -136,6 +143,10 @@ jobs:
             fastvideo/tests/mlx/test_mlx_compile_parity.py \
             fastvideo/tests/mlx/test_mlx_checkpoint.py \
             fastvideo/tests/mlx/test_mlx_checkpoint_compat.py \
+            fastvideo/tests/mlx/test_mlx_minimax_h3_parity.py \
+            fastvideo/tests/mlx/test_mlx_minimax_h3_vsa.py \
+            fastvideo/tests/mlx/test_mlx_minimax_h3_vsa_regressions.py \
+            fastvideo/tests/mlx/test_mlx_minimax_h3_fast_mode.py \
             fastvideo/tests/mlx/test_mlx_fastwan_benchmark.py \
             fastvideo/tests/mlx/test_taehv_decode.py \
             fastvideo/tests/mlx/test_frame_upsample.py \
@@ -148,4 +159,5 @@ jobs:
             fastvideo/tests/mlx/test_mlx_rife_interpolation.py::test_rife_download_unavailable_has_specific_error \
             fastvideo/tests/mlx/test_mlx_rife_interpolation.py::test_rife_backend_regression_is_not_skip_eligible \
             fastvideo/tests/platforms/test_mps_vsa_error.py \
-            -q
+            fastvideo/tests/platforms/test_cpu_sdpa.py \
+            -v -s -o faulthandler_timeout=120

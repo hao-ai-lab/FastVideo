@@ -44,12 +44,15 @@ from fastvideo.mlx_runtime.minimax_h3 import (
     audio_latent_num_frames,
     build_packed_layout,
     build_row_timesteps,
+    dense_only_vsa_error,
     load_mlx_h3_checkpoint,
+    mlx_h3_checkpoint_vsa_capable,
     temporal_position_grid,
     unpatchify_video_tokens,
     unpack_audio_tokens,
     video_latent_num_frames,
 )
+from fastvideo.mlx_runtime.minimax_h3_vsa import MiniMaxH3VSAConfig
 
 logger = init_logger(__name__)
 
@@ -62,6 +65,7 @@ class GenerationResult:
     sample_rate: int
     timings: dict[str, float] = field(default_factory=dict)
     peak_memory_gib: dict[str, float] = field(default_factory=dict)
+    vsa: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -252,6 +256,8 @@ class MiniMaxH3MLXPipeline:
             raise ValueError(f"H3 DiT patch_size must have three dimensions, got {patch_size}.")
         self._dit_patch_size = (int(patch_size[0]), int(patch_size[1]), int(patch_size[2]))
         self._dit_in_channels = int(dit_config["in_channels"])
+        self.last_dit_forward_s = 0.0
+        self.last_vsa_stats: dict[str, Any] | None = None
 
     # -- input validation (before anything heavy loads) -------------------
 
@@ -353,6 +359,7 @@ class MiniMaxH3MLXPipeline:
         seed: int,
         num_steps: int = 4,
         dit: Any | None = None,
+        vsa_config: MiniMaxH3VSAConfig | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Denoise joint latents; returns (normalized video rows, audio rows)."""
         import mlx.core as mx
@@ -366,6 +373,10 @@ class MiniMaxH3MLXPipeline:
             t0 = time.perf_counter()
             dit = load_mlx_h3_checkpoint(self.dit_checkpoint)
             logger.info("Loaded MLX H3 DiT from %s in %.1fs", self.dit_checkpoint, time.perf_counter() - t0)
+        if vsa_config is not None:
+            dit.configure_vsa(vsa_config)
+        if hasattr(dit, "reset_vsa_stats"):
+            dit.reset_vsa_stats()
 
         layout = build_packed_layout(
             len(token_tags),
@@ -377,6 +388,8 @@ class MiniMaxH3MLXPipeline:
             text_token_tags=np.asarray(token_tags, dtype=np.int64),
             video_temporal_scale=video_temporal_scale,
         )
+        if getattr(dit, "vsa_config", None) is not None and dit.vsa_config.enabled:
+            dit.prepare_vsa_geometry(layout)
 
         video_scheduler = MiniMaxH3SchedulerState.create(MINIMAX_H3_VIDEO_SHIFT, num_steps)
         audio_scheduler = MiniMaxH3SchedulerState.create(MINIMAX_H3_AUDIO_SHIFT, num_steps)
@@ -399,6 +412,7 @@ class MiniMaxH3MLXPipeline:
         x_v = mx.random.normal((target_video_rows, dit.patch_dim), key=video_key)
         x_a = mx.random.normal((target_audio_rows, dit.audio_in_channels), key=audio_key)
         text = mx.array(text_rows.astype(np.float32))
+        dit_forward_s = 0.0
 
         for step_index in range(num_steps):
             video_t = float(video_scheduler.timesteps[step_index])
@@ -410,6 +424,7 @@ class MiniMaxH3MLXPipeline:
                 condition_video_timestep=max(video_t, MINIMAX_H3_KEYFRAME_NOISE_AUG),
                 condition_audio_timestep=1.0,
             )
+            step_started = time.perf_counter()
             video_velocity, audio_velocity = dit.forward_with_cache(
                 x_v,
                 x_a,
@@ -417,6 +432,7 @@ class MiniMaxH3MLXPipeline:
                 layout=layout,
                 step_timesteps=unique,
                 row_timestep_inverse=inverse,
+                step_index=step_index,
             )
             # Only target rows are being denoised (no conditions in T2VA).
             video_velocity = video_velocity[layout.num_condition_video_rows:]
@@ -424,6 +440,28 @@ class MiniMaxH3MLXPipeline:
             x_v = video_scheduler.step(video_velocity, step_index, x_v)
             x_a = audio_scheduler.step(audio_velocity, step_index, x_a)
             mx.eval(x_v, x_a)
+            dit_forward_s += time.perf_counter() - step_started
+
+        self.last_dit_forward_s = dit_forward_s
+        stats = getattr(dit, "last_vsa_stats", None)
+        self.last_vsa_stats = None if stats is None else {
+            "enabled": bool(getattr(dit.vsa_config, "enabled", False)),
+            "configured_sparsity": stats.configured_sparsity,
+            "layer_sparsity": stats.layer_sparsity,
+            "achieved_sparsity": stats.achieved_sparsity,
+            "tile_size": stats.tile_size,
+            "prefix_mode": stats.prefix_mode,
+            "impl": stats.impl,
+            "num_prefix_tiles": stats.num_prefix_tiles,
+            "num_video_tiles": stats.num_video_tiles,
+            "video_keep": stats.video_keep,
+            "dense_fallback_reason": stats.dense_fallback_reason,
+            "attention_calls": stats.attention_calls,
+            "sparse_calls": stats.sparse_calls,
+            "impl_counts": stats.impl_counts,
+            "fallback_reasons": stats.fallback_reasons,
+            "checkpoint_vsa_capable": bool(getattr(dit, "vsa_capable", False)),
+        }
 
         video_rows = np.asarray(x_v, dtype=np.float32)
         audio_rows = np.asarray(x_a, dtype=np.float32)
@@ -576,21 +614,28 @@ class MiniMaxH3MLXPipeline:
     # -- end-to-end ----------------------------------------------------------
 
     def generate(
-        self,
-        prompt: str,
-        *,
-        output_path: str | Path,
-        height: int = 480,
-        width: int = 832,
-        num_frames: int = 124,
-        seed: int = 0,
-        num_steps: int = 4,
-        save_frames: bool = False,
-        tiled_video_decode: bool = True,
-        fast: bool = False,
-        fast_factor: int = 2,
-        fast_sharpen: float = 0.6,
-        rife_weights_dir: str | Path | None = None,
+            self,
+            prompt: str,
+            *,
+            output_path: str | Path,
+            height: int = 480,
+            width: int = 832,
+            num_frames: int = 124,
+            seed: int = 0,
+            num_steps: int = 4,
+            save_frames: bool = False,
+            tiled_video_decode: bool = True,
+            fast: bool = False,
+            fast_factor: int = 2,
+            fast_sharpen: float = 0.6,
+            rife_weights_dir: str | Path | None = None,
+            vsa: bool = False,
+            vsa_sparsity: float = 0.9,
+            vsa_tile_size: int = 64,
+            vsa_prefix_mode: str = "exempt",
+            vsa_dense_first_n_steps: int = 0,
+            vsa_dense_layers: tuple[int, ...] = (),
+            vsa_impl: str = "auto",
     ) -> GenerationResult:
         timings: dict[str, float] = {}
         peaks: dict[str, float] = {}
@@ -598,6 +643,17 @@ class MiniMaxH3MLXPipeline:
         if fast_sharpen < 0:
             raise ValueError(f"fast_sharpen must be non-negative, got {fast_sharpen}.")
         _validate_checkpoint_step_ladder(self.dit_checkpoint, num_steps)
+        vsa_config = MiniMaxH3VSAConfig(
+            enabled=vsa,
+            sparsity=vsa_sparsity,
+            tile_size=vsa_tile_size,
+            prefix_mode=vsa_prefix_mode,  # type: ignore[arg-type]
+            dense_first_n_steps=vsa_dense_first_n_steps,
+            dense_layers=vsa_dense_layers,
+            impl=vsa_impl,  # type: ignore[arg-type]
+        ) if vsa else MiniMaxH3VSAConfig()
+        if vsa_config.enabled and not mlx_h3_checkpoint_vsa_capable(self.dit_checkpoint):
+            raise dense_only_vsa_error(self.dit_checkpoint)
         _preflight_media_dependencies(
             fast=fast,
             fast_sharpen=fast_sharpen,
@@ -645,8 +701,10 @@ class MiniMaxH3MLXPipeline:
             video_temporal_scale=video_temporal_scale,
             seed=seed,
             num_steps=num_steps,
+            vsa_config=vsa_config,
         )
         timings["denoise_s"] = time.perf_counter() - started
+        timings["dit_forward_s"] = float(getattr(self, "last_dit_forward_s", 0.0))
         peaks["denoise_gib"] = _peak_memory_gib()
         del text_rows
         _cleanup_mlx()
@@ -700,6 +758,9 @@ class MiniMaxH3MLXPipeline:
         started = time.perf_counter()
         video_path = self.mux(frames, waveform, output_path)
         timings["mux_s"] = time.perf_counter() - started
+        timings["generate_s"] = sum(
+            timings.get(key, 0.0)
+            for key in ("condition_s", "denoise_s", "video_decode_s", "rife_s", "audio_decode_s", "mux_s"))
 
         result = GenerationResult(
             video_path=str(video_path),
@@ -708,6 +769,10 @@ class MiniMaxH3MLXPipeline:
             sample_rate=32000,
             timings=timings,
             peak_memory_gib=peaks,
+            vsa=getattr(self, "last_vsa_stats", None) or {
+                "enabled": vsa_config.enabled,
+                "checkpoint_vsa_capable": mlx_h3_checkpoint_vsa_capable(self.dit_checkpoint),
+            },
         )
         logger.info("Generation complete: %s | timings=%s peaks=%s", video_path, timings, peaks)
         return result

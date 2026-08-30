@@ -153,6 +153,20 @@ python scripts/checkpoint_conversion/convert_minimax_h3_mlx.py \
   --formats "int6"
 ```
 
+Dense conversion drops the trained VSA gate projections. To keep them (INT6
+weight-only, same affine grid as the other linear matrices) write a **new**
+directory:
+
+```bash
+python scripts/checkpoint_conversion/convert_minimax_h3_mlx.py \
+  --model-root ./FastH3-Preview-v0.2/transformer \
+  --out ./FastH3-MLX-vsa \
+  --formats "int6" \
+  --include-vsa
+```
+
+Do not overwrite an existing dense export such as `./FastH3-MLX/int6`.
+
 Run the baseline path:
 
 ```bash
@@ -178,10 +192,32 @@ python examples/inference/basic/mlx_fasth3.py \
   --output-path ./outputs/fasth3_int6_fast_720p.mp4
 ```
 
+VSA is off by default. A dense-only checkpoint (no `--include-vsa`) keeps the
+existing fused-SDPA path. After converting with `--include-vsa`, enable the
+sparse path explicitly:
+
+```bash
+python examples/inference/basic/mlx_fasth3.py \
+  --model-root ./FastH3-Preview-v0.2 \
+  --mlx-checkpoint ./FastH3-MLX-vsa/int6 \
+  --vsa --vsa-sparsity 0.9 --vsa-tile-size 64 --vsa-prefix-mode exempt \
+  --prompt "(S1) A presenter says <d>[English] Fast H3 is amazing.</d>" \
+  --height 720 --width 1280 --num-frames 124 --seed 2026 \
+  --output-path ./outputs/fasth3_int6_vsa_720p.mp4
+```
+
+`--vsa-impl auto` uses the chunked gather+SDPA **reference** path.
+`--vsa-impl simd` is an opt-in SIMD-group kernel (tile 64, head dim 128) that
+falls back to reference on unsupported shapes. It is not the default.
+`--vsa-impl reference` is the same as `auto`.
+
 !!! note "Current MLX scope"
-    This source runtime supports T2VA and temporal `--fast`. FL2VA, Ref2VA,
-    spatial fast mode, two-pass refinement, VSA, and `VideoGenerator`
-    registry dispatch are not wired yet. The checkpoint uses the MiniMax H3
+    This source runtime supports T2VA, temporal `--fast`, and opt-in VSA.
+    FL2VA, Ref2VA, spatial fast mode, two-pass refinement, and
+    `VideoGenerator` registry dispatch are not wired yet. INT8/INT6/INT4
+    quantization is **weight-only**; VSA attention Q/K/V stay BF16. Old dense
+    MLX checkpoints remain valid for dense inference and raise a reconvert
+    error if `--vsa` is set. The checkpoint uses the MiniMax H3
     Community License; review the model card before use or redistribution.
 
 ## Development Environment Setup

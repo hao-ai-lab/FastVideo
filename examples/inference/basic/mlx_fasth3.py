@@ -21,6 +21,12 @@ center-cropped after decode.
 
 This entrypoint currently supports text-to-video-with-audio only. It does not
 yet wire FL2VA, Ref2VA, spatial fast mode, or two-pass refinement.
+
+VSA is off by default; existing dense MLX checkpoints remain supported.
+H3 uses fused MLX RMSNorm, which can change BF16 rounding compared with the
+older explicit normalization path. Convert with ``--include-vsa`` and pass
+``--vsa`` to enable the sparse path. Attention activations stay BF16; INT6/INT8/INT4 apply only to
+linear weights, including the optional gate projection.
 """
 
 from __future__ import annotations
@@ -28,6 +34,13 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+
+
+def _dense_layers(value: str) -> tuple[int, ...]:
+    layers = tuple(int(part.strip()) for part in value.split(",") if part.strip())
+    if any(layer < 0 for layer in layers):
+        raise argparse.ArgumentTypeError("dense layer indices must be non-negative")
+    return layers
 
 
 def parse_args() -> argparse.Namespace:
@@ -69,6 +82,58 @@ def parse_args() -> argparse.Namespace:
         default=True,
         help="decode with the reference 256px overlapping VAE tiles (disable only for diagnostics)",
     )
+    parser.add_argument(
+        "--vsa",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "enable MiniMax H3 VSA; requires a VSA-capable MLX checkpoint "
+            "from --include-vsa"
+        ),
+    )
+    parser.add_argument(
+        "--vsa-sparsity",
+        type=float,
+        default=0.9,
+        help="VSA sparsity in [0, 1); 0.9 is the trained FastH3 policy",
+    )
+    parser.add_argument(
+        "--vsa-tile-size",
+        type=int,
+        default=64,
+        choices=(64, 256),
+        help="VSA tile size in tokens",
+    )
+    parser.add_argument(
+        "--vsa-prefix-mode",
+        choices=("exempt", "compete"),
+        default="exempt",
+        help=(
+            "prefix-key policy: always keep (exempt) or FLOP-matched top-k "
+            "(compete)"
+        ),
+    )
+    parser.add_argument(
+        "--vsa-dense-first-n-steps",
+        type=int,
+        default=0,
+        help="run the first N denoise steps dense",
+    )
+    parser.add_argument(
+        "--vsa-dense-layers",
+        type=_dense_layers,
+        default=(),
+        help="comma-separated layer indices forced dense",
+    )
+    parser.add_argument(
+        "--vsa-impl",
+        choices=("auto", "reference", "simd"),
+        default="auto",
+        help=(
+            "sparse attention implementation; auto uses chunked gather+SDPA "
+            "(simd is opt-in)"
+        ),
+    )
     return parser.parse_args()
 
 
@@ -95,11 +160,19 @@ def main() -> None:
         fast_factor=args.fast_factor,
         fast_sharpen=args.fast_sharpen,
         rife_weights_dir=args.rife_weights_dir,
+        vsa=args.vsa,
+        vsa_sparsity=args.vsa_sparsity,
+        vsa_tile_size=args.vsa_tile_size,
+        vsa_prefix_mode=args.vsa_prefix_mode,
+        vsa_dense_first_n_steps=args.vsa_dense_first_n_steps,
+        vsa_dense_layers=args.vsa_dense_layers,
+        vsa_impl=args.vsa_impl,
     )
     print(json.dumps({
         "video_path": result.video_path,
         "timings_s": {k: round(v, 2) for k, v in result.timings.items()},
         "peak_memory_gib": {k: round(v, 2) for k, v in result.peak_memory_gib.items()},
+        "vsa": result.vsa,
         "audio_samples": int(result.waveform.shape[-1]),
     }, indent=2))
 
