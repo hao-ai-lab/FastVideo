@@ -51,11 +51,12 @@ python examples/inference/basic/mlx_fasth3.py \
   --output-path ./outputs/fasth3_int6.mp4
 ```
 
-Pass `--fast` for temporal RIFE fast mode. VSA is opt-in: convert with
-`--include-vsa` and pass `--vsa` (see the
+Pass `--fast` for temporal RIFE fast mode and `--fast-spatial` for spatial
+fast mode (reduced-canvas denoise + pixel-space upsample); the two compose.
+VSA is opt-in: convert with `--include-vsa` and pass `--vsa` (see the
 [Apple Silicon guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/mps/)).
-This MLX entrypoint currently supports T2VA only; FL2VA, Ref2VA, spatial fast
-mode, and two-pass refinement remain follow-up work. INT6/INT8/INT4 are
+This MLX entrypoint currently supports T2VA only; FL2VA, Ref2VA, and
+two-pass refinement remain follow-up work. INT6/INT8/INT4 are
 weight-only; VSA attention activations stay BF16. Dense-only checkpoints keep
 working for dense inference.
 

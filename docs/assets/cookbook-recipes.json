@@ -476,7 +476,7 @@
       },
       "evidence": "Verified",
       "expected_artifact": "MP4 with H.264 video and stereo AAC audio at outputs/fasth3_int6.mp4",
-      "limitations": ["The MLX path supports T2VA and optional temporal --fast mode. FL2VA, Ref2VA, spatial fast mode, two-pass refinement, and VSA are not wired."]
+      "limitations": ["The MLX path supports T2VA and optional temporal --fast and spatial --fast-spatial modes. FL2VA, Ref2VA, two-pass refinement, and VSA are not wired."]
     },
     {
       "id": "minimax-h3-fl2va",
