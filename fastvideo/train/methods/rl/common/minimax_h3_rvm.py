@@ -4,20 +4,22 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 import torch
 
 from fastvideo.pipelines import TrainingBatch
 from fastvideo.train.models.minimax_h3.minimax_h3_rvm import MiniMaxH3RVMModel
 
+_DEFAULT_DENOISING_STEPS = (1000, 750, 500, 250)
+
 
 @dataclass(frozen=True, slots=True)
 class H3RVMSamplingConfig:
     """The released FastH3 schedule uses four forwards and terminal zero."""
 
-    denoising_steps: tuple[int, ...] = (1000, 750, 500, 250)
-    attn_kind: str = "vsa"
+    denoising_steps: tuple[int, ...] = _DEFAULT_DENOISING_STEPS
+    attn_kind: Literal["dense", "vsa"] = "vsa"
 
     @classmethod
     def from_mapping(cls, raw: dict[str, Any] | None) -> "H3RVMSamplingConfig":
@@ -25,7 +27,7 @@ class H3RVMSamplingConfig:
         unknown = sorted(set(raw) - {"denoising_steps", "attn_kind"})
         if unknown:
             raise ValueError(f"Unsupported H3 RVM sampling keys: {unknown}")
-        steps = tuple(int(value) for value in raw.get("denoising_steps", cls.denoising_steps))
+        steps = tuple(int(value) for value in raw.get("denoising_steps", _DEFAULT_DENOISING_STEPS))
         if not steps:
             raise ValueError("denoising_steps must be nonempty")
         if steps[0] != 1000 or any(a <= b for a, b in zip(steps, steps[1:], strict=False)):
@@ -35,7 +37,10 @@ class H3RVMSamplingConfig:
         attn_kind = str(raw.get("attn_kind", "vsa")).strip().lower()
         if attn_kind not in {"dense", "vsa"}:
             raise ValueError("attn_kind must be 'dense' or 'vsa'")
-        return cls(denoising_steps=steps, attn_kind=attn_kind)
+        return cls(
+            denoising_steps=steps,
+            attn_kind=attn_kind,  # type: ignore[arg-type]
+        )
 
 
 @dataclass(slots=True)
@@ -85,7 +90,7 @@ class MiniMaxH3RVMSampler:
                     timestep,
                     batch,
                     conditional=True,
-                    attn_kind=self.config.attn_kind,  # type: ignore[arg-type]
+                    attn_kind=self.config.attn_kind,
                 )
                 if next_step == 0:
                     current = clean
