@@ -8,6 +8,8 @@ from typing import Any
 
 import torch
 
+from fastvideo.train.methods.rl.rewards.media import media_to_float_tensor
+
 _RAFT_CACHE: dict[tuple[str, str], tuple[Any, Any]] = {}
 
 
@@ -81,7 +83,7 @@ class DynamicTrackingScorer:
         del prompts
         if media.ndim != 5 or media.shape[1] not in (1, 3):
             raise ValueError(f"media must be [B,C,T,H,W], got {tuple(media.shape)}")
-        videos = media.detach().float().clamp(0, 1).to(self.device)
+        videos = media_to_float_tensor(media, device=self.device)
         if videos.shape[1] == 1:
             videos = videos.repeat(1, 3, 1, 1, 1)
         batch_size, _, num_frames, height, width = videos.shape
