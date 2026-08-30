@@ -61,7 +61,7 @@ from fastvideo.mlx_runtime.fastwan import (
     MLXQuantizationSpec,
     QuantizedMatrix,
     ensure_quantization_supported,
-    linear,
+    linear as _shared_linear,
     quantize_matrix,
     silu,
     timestep_embedding,
@@ -80,6 +80,12 @@ from fastvideo.mlx_runtime.minimax_h3_vsa import (
 )
 
 logger = init_logger(__name__)
+
+
+def linear(x, weight, bias=None):
+    """Run an H3 linear with its measured wide-row affine dispatch enabled."""
+    return _shared_linear(x, weight, bias, use_affine_dq_gemm=True)
+
 
 # ---------------------------------------------------------------------------
 # Constants (mirrors fastvideo/pipelines/basic/minimax_h3/packing.py)

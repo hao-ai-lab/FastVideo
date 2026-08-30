@@ -81,6 +81,7 @@ jobs:
             fastvideo/tests/mlx/test_mlx_compile_parity.py \
             fastvideo/tests/mlx/test_mlx_checkpoint.py \
             fastvideo/tests/mlx/test_mlx_checkpoint_compat.py \
+            fastvideo/tests/mlx/test_mlx_affine_dq_gemm.py \
             fastvideo/tests/mlx/test_mlx_minimax_h3_parity.py \
             fastvideo/tests/mlx/test_mlx_minimax_h3_vsa.py \
             fastvideo/tests/mlx/test_mlx_minimax_h3_vsa_regressions.py \
@@ -143,6 +144,7 @@ jobs:
             fastvideo/tests/mlx/test_mlx_compile_parity.py \
             fastvideo/tests/mlx/test_mlx_checkpoint.py \
             fastvideo/tests/mlx/test_mlx_checkpoint_compat.py \
+            fastvideo/tests/mlx/test_mlx_affine_dq_gemm.py \
             fastvideo/tests/mlx/test_mlx_minimax_h3_parity.py \
             fastvideo/tests/mlx/test_mlx_minimax_h3_vsa.py \
             fastvideo/tests/mlx/test_mlx_minimax_h3_vsa_regressions.py \
