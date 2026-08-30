@@ -306,8 +306,10 @@ def quantize_matrix(weight, spec: MLXQuantizationSpec | None):
 # Affine quantized_matmul is slower than dequantize + steel GEMM at H3's packed
 # token width. Measured on Apple M4 Max / MLX 0.32.2, INT6 group 64, BF16 acts,
 # Q 5376→7168: M=256 qmm is faster; M=512 dequant+GEMM is +6.4%; M≥1024 ~10%.
-# 832×480×124 packed M is ~14862–14994. Do not cache dequantized weights.
-# Override: FASTVIDEO_MLX_DQ_GEMM=0 off, =1 measured floor, =<int> explicit floor.
+# 832×480×124 packed M is ~14862–14994. H3 opts into this path explicitly;
+# shared FastWan and Wan 2.2 linears stay on quantized_matmul. Do not cache
+# dequantized weights. Override: FASTVIDEO_MLX_DQ_GEMM=0 off, =1 measured
+# floor, =<int> explicit floor.
 _AFFINE_DQ_GEMM_BITS = frozenset({2, 3, 4, 5, 6, 8})
 MLX_AFFINE_DQ_GEMM_DEFAULT_MIN_M = 768
 _dq_gemm_engaged = 0
@@ -345,12 +347,12 @@ def _matmul_leading_rows(x) -> int:
     return int(x.size) // last
 
 
-def _quantized_linear(x, weight: QuantizedMatrix):
+def _quantized_linear(x, weight: QuantizedMatrix, *, use_affine_dq_gemm: bool = False):
     import mlx.core as mx
 
     global _dq_gemm_engaged, _dq_gemm_logged
     spec = weight.spec
-    min_m = affine_dq_gemm_min_m()
+    min_m = affine_dq_gemm_min_m() if use_affine_dq_gemm else None
     rows = _matmul_leading_rows(x)
     if (min_m is not None and spec.mode == "affine" and spec.bits in _AFFINE_DQ_GEMM_BITS
             and spec.group_size is not None and rows >= min_m):
@@ -381,8 +383,9 @@ def _quantized_linear(x, weight: QuantizedMatrix):
     ).astype(x.dtype)
 
 
-def linear(x, weight, bias=None):
-    y = _quantized_linear(x, weight) if isinstance(weight, QuantizedMatrix) else x @ weight.T
+def linear(x, weight, bias=None, *, use_affine_dq_gemm: bool = False):
+    y = (_quantized_linear(x, weight, use_affine_dq_gemm=use_affine_dq_gemm)
+         if isinstance(weight, QuantizedMatrix) else x @ weight.T)
     if bias is not None:
         y = y + bias
     return y
