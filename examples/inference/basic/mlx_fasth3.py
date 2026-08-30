@@ -22,9 +22,10 @@ center-cropped after decode.
 This entrypoint currently supports text-to-video-with-audio only. It does not
 yet wire FL2VA, Ref2VA, spatial fast mode, or two-pass refinement.
 
-VSA is off by default so existing dense MLX checkpoints keep the same
-behavior. Convert with ``--include-vsa`` and pass ``--vsa`` to enable the
-sparse path. Attention activations stay BF16; INT6/INT8/INT4 apply only to
+VSA is off by default; existing dense MLX checkpoints remain supported.
+H3 uses fused MLX RMSNorm, which can change BF16 rounding compared with the
+older explicit normalization path. Convert with ``--include-vsa`` and pass
+``--vsa`` to enable the sparse path. Attention activations stay BF16; INT6/INT8/INT4 apply only to
 linear weights, including the optional gate projection.
 """
 
@@ -34,7 +35,12 @@ import argparse
 import json
 from pathlib import Path
 
-from fastvideo.mlx_runtime.minimax_h3_vsa import PUBLIC_VSA_IMPLS, parse_dense_layers
+
+def _dense_layers(value: str) -> tuple[int, ...]:
+    layers = tuple(int(part.strip()) for part in value.split(",") if part.strip())
+    if any(layer < 0 for layer in layers):
+        raise argparse.ArgumentTypeError("dense layer indices must be non-negative")
+    return layers
 
 
 def parse_args() -> argparse.Namespace:
@@ -115,12 +121,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--vsa-dense-layers",
-        default="",
+        type=_dense_layers,
+        default=(),
         help="comma-separated layer indices forced dense",
     )
     parser.add_argument(
         "--vsa-impl",
-        choices=PUBLIC_VSA_IMPLS,
+        choices=("auto", "reference", "simd"),
         default="auto",
         help=(
             "sparse attention implementation; auto uses chunked gather+SDPA "
@@ -158,7 +165,7 @@ def main() -> None:
         vsa_tile_size=args.vsa_tile_size,
         vsa_prefix_mode=args.vsa_prefix_mode,
         vsa_dense_first_n_steps=args.vsa_dense_first_n_steps,
-        vsa_dense_layers=parse_dense_layers(args.vsa_dense_layers),
+        vsa_dense_layers=args.vsa_dense_layers,
         vsa_impl=args.vsa_impl,
     )
     print(json.dumps({

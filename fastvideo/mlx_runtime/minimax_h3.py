@@ -75,7 +75,6 @@ from fastvideo.mlx_runtime.minimax_h3_vsa import (
     build_h3_tile_geometry,
     dense_only_vsa_error,
     dit_seq_shape_from_layout,
-    geometry_is_supported,
     h3_vsa_attention,
     prefix_segments_from_layout,
 )
@@ -500,9 +499,8 @@ def _gate_weight_is_active(weight: Any) -> bool:
     if weight is None:
         return False
     if isinstance(weight, QuantizedMatrix):
-        # Affine dequant is scale * code + bias. Packed codes with a zero scale
-        # do not contribute; a zero-scale / nonzero-bias group is a constant.
-        active = mx.any(weight.scales != 0)
+        # Affine quantization clamps scales above zero even for an all-zero gate.
+        active = mx.any(weight.weight != 0)
         if weight.biases is not None:
             active = active | mx.any(weight.biases != 0)
         return bool(active.item())
@@ -510,7 +508,7 @@ def _gate_weight_is_active(weight: Any) -> bool:
 
 
 def _h3_rms_norm(x, weight, eps: float):
-    """Use MLX's fused normalization kernel for H3's last-axis RMSNorm."""
+    """H3 uses fused RMSNorm by default; FASTVIDEO_MLX_FAST_NORM is Wan-only."""
     import mlx.core as mx
 
     return mx.fast.rms_norm(x, weight, eps)
@@ -566,7 +564,10 @@ def _attention(
     else:
         if vsa_stats is not None and use_rope:
             vsa_stats.impl = "dense"
-            vsa_stats.dense_fallback_reason = None if vsa_geometry is None else "dense schedule or disabled VSA"
+            if vsa_geometry is not None:
+                vsa_stats.num_prefix_tiles = vsa_geometry.num_prefix_tiles
+                vsa_stats.num_video_tiles = vsa_geometry.num_video_tiles
+                vsa_stats.video_keep = vsa_geometry.num_video_tiles
         attended = mx.fast.scaled_dot_product_attention(
             q.transpose(1, 0, 2)[None],
             k.transpose(1, 0, 2)[None],
@@ -814,22 +815,39 @@ class MLXMiniMaxH3DiT:
         return self._vsa_capable
 
     def configure_vsa(self, config: MiniMaxH3VSAConfig | None) -> None:
-        self.vsa_config = config or MiniMaxH3VSAConfig()
-        if self.vsa_config.enabled and not self._vsa_capable:
+        config = config or MiniMaxH3VSAConfig()
+        if config.enabled and not self._vsa_capable:
             raise dense_only_vsa_error("this MLX H3 DiT")
+        if any(layer >= len(self.blocks) for layer in config.dense_layers):
+            raise ValueError(f"VSA dense_layers must be below the model's block count ({len(self.blocks)}).")
+        self.vsa_config = config
+        self._vsa_geometry = None
+        self.reset_vsa_stats()
+
+    def reset_vsa_stats(self) -> None:
+        self.last_vsa_stats = MiniMaxH3VSAStats(
+            configured_sparsity=self.vsa_config.sparsity,
+            tile_size=self.vsa_config.tile_size,
+            prefix_mode=self.vsa_config.prefix_mode,
+        ) if self.vsa_config.enabled else None
 
     def prepare_vsa_geometry(self, layout: MiniMaxH3PackedLayout) -> MiniMaxH3VSAGeometry | None:
         if not self.vsa_config.enabled:
             self._vsa_geometry = None
             return None
-        prefix = prefix_segments_from_layout(layout, self.patch_size)
+        prefix = tuple(segment for segment in prefix_segments_from_layout(layout, self.patch_size) if segment > 0)
         video_shape = dit_seq_shape_from_layout(layout, self.patch_size)
-        reason = geometry_is_supported(prefix, video_shape, self.vsa_config.tile_size)
-        if reason is not None:
+        geometry = self._vsa_geometry
+        if geometry is not None and (geometry.prefix_segments, geometry.dit_seq_shape,
+                                     geometry.tile_elems) == (prefix, video_shape, self.vsa_config.tile_size):
+            return geometry
+        try:
+            geometry = build_h3_tile_geometry(prefix, video_shape, self.vsa_config.tile_size)
+        except ValueError as error:
             raise ValueError(f"H3 VSA cannot run with this packed layout (prefix={prefix}, "
-                             f"video={video_shape}, tile_size={self.vsa_config.tile_size}): {reason}. "
-                             "Disable VSA or pick a supported tile size (64 or 256).")
-        self._vsa_geometry = build_h3_tile_geometry(prefix, video_shape, self.vsa_config.tile_size)
+                             f"video={video_shape}, tile_size={self.vsa_config.tile_size}): {error}. "
+                             "Disable VSA or pick a supported tile size (64 or 256).") from error
+        self._vsa_geometry = geometry
         return self._vsa_geometry
 
     def _block_gate_active(self, block_index: int) -> bool:
@@ -846,10 +864,7 @@ class MLXMiniMaxH3DiT:
     def _vsa_block_kwargs(self, block_index: int, step_index: int) -> dict[str, Any]:
         geometry = self._vsa_geometry if self.vsa_config.enabled else None
         sparsity = self.vsa_config.layer_sparsity(block_index, step_index) if geometry is not None else 0.0
-        stats = None
-        if block_index == 0:
-            stats = MiniMaxH3VSAStats()
-            self.last_vsa_stats = stats
+        stats = MiniMaxH3VSAStats() if self.vsa_config.enabled else None
         return {
             "vsa_geometry": geometry,
             "vsa_sparsity": sparsity,
@@ -881,9 +896,14 @@ class MLXMiniMaxH3DiT:
         projects *all* packed rows through both heads and then selects; this
         selects first and projects only the relevant rows — row-wise
         identical math at a fraction of the cost.
+
+        This entrypoint is dense-only. VSA requires ``forward_with_cache``
+        with a packed layout and step index.
         """
         import mlx.core as mx
 
+        if self.vsa_config.enabled:
+            raise ValueError("VSA requires forward_with_cache() with layout and step_index; forward() is dense-only.")
         sequence_length = position_ids.shape[0]
         cos, sin = rope_cos_sin(position_ids, self.rope_freq_dim, self.rope_theta)
 
@@ -966,7 +986,7 @@ class MLXMiniMaxH3DiT:
 
         if self._adaln_cache is None:
             raise RuntimeError("precompute_adaln() must run before forward_with_cache().")
-        if self.vsa_config.enabled and self._vsa_geometry is None:
+        if self.vsa_config.enabled:
             self.prepare_vsa_geometry(layout)
         cache = self._adaln_cache
         positions = mx.array(cache.positions(step_timesteps))
@@ -1000,6 +1020,7 @@ class MLXMiniMaxH3DiT:
         # while the GPU lags behind, allocating every intermediate at once
         # (observed as an OOM kill on 36 GiB Macs at 480x832).
         for block_index, (block, tables) in enumerate(zip(self.blocks, cache.block_tables, strict=True)):
+            vsa_kwargs = self._vsa_block_kwargs(block_index, step_index)
             packed = _transformer_block(
                 block,
                 packed,
@@ -1011,9 +1032,11 @@ class MLXMiniMaxH3DiT:
                 head_dim=self.head_dim,
                 norm_eps=self.norm_eps,
                 qk_norm_eps=self.qk_norm_eps,
-                **self._vsa_block_kwargs(block_index, step_index),
+                **vsa_kwargs,
             )
             mx.eval(packed)
+            if self.last_vsa_stats is not None:
+                self.last_vsa_stats.record(vsa_kwargs["vsa_stats"])
 
         row_positions = positions[row_inverse]
         normed = _h3_rms_norm(packed, self.weights["norm_out.norm.weight"], self.final_norm_eps)

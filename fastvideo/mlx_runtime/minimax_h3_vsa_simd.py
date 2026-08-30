@@ -73,6 +73,7 @@ _SIMD_SOURCE = """
 
     thread simdgroup_float8x8 qfrag[16];
     for (int kk = 0; kk < 16; kk++) {
+        simdgroup_barrier(mem_flags::mem_threadgroup);
         int r0 = (int)lane / 8;
         int c0 = (int)lane % 8;
         int g0 = qrow0 + r0;
@@ -218,6 +219,13 @@ def simd_kernel_error() -> str | None:
     return _SIMD_KERNEL_ERROR
 
 
+def disable_simd_kernel(error: Exception) -> None:
+    """Remember a failed compile or execution so subsequent blocks use reference."""
+    global _SIMD_KERNEL, _SIMD_KERNEL_ERROR
+    _SIMD_KERNEL_ERROR = str(error)
+    _SIMD_KERNEL = None
+
+
 def simd_kernel_available() -> bool:
     return _simd_kernel() is not None
 
@@ -231,6 +239,9 @@ def _simd_kernel() -> Any | None:
     try:
         import mlx.core as mx
 
+        if not mx.metal.is_available():
+            _SIMD_KERNEL_ERROR = "Metal is not available in this MLX build"
+            return None
         if not hasattr(mx.fast, "metal_kernel"):
             _SIMD_KERNEL_ERROR = "mx.fast.metal_kernel is not available in this MLX build"
             return None
@@ -242,9 +253,21 @@ def _simd_kernel() -> Any | None:
             "header": _SIMD_HEADER,
         }
         try:
-            _SIMD_KERNEL = mx.fast.metal_kernel(**kwargs, compile_options={"math_mode": "safe"})
+            kernel = mx.fast.metal_kernel(**kwargs, compile_options={"math_mode": "safe"})
         except TypeError:
-            _SIMD_KERNEL = mx.fast.metal_kernel(**kwargs)
+            kernel = mx.fast.metal_kernel(**kwargs)
+        from fastvideo.mlx_runtime.minimax_h3_vsa import build_h3_tile_geometry
+
+        geometry = build_h3_tile_geometry((1, ), (4, 4, 4), 64)
+        indices = mx.array([[[0, 1]]], dtype=mx.int32)
+        counts = mx.array([[2]], dtype=mx.int32)
+        # Constructing a CustomKernel does not compile it. Execute every
+        # supported dtype once before advertising this backend as available.
+        for dtype in (mx.float32, mx.float16, mx.bfloat16):
+            q = mx.zeros((geometry.padded_length, 1, 128), dtype=dtype)
+            probe = _launch_simd_block_sparse(kernel, q, q, q, indices, counts, geometry, 128**-0.5)
+            mx.eval(probe)
+        _SIMD_KERNEL = kernel
     except Exception as error:  # noqa: BLE001 - keep reference usable
         _SIMD_KERNEL_ERROR = str(error)
         _SIMD_KERNEL = None
@@ -261,11 +284,17 @@ def simd_block_sparse(
     scale: float,
 ):
     """Block-sparse attention over tiled ``[S, H, D]`` using the reference tile map."""
-    import mlx.core as mx
 
     kernel = _simd_kernel()
     if kernel is None:
         raise RuntimeError(_SIMD_KERNEL_ERROR or "SIMD-group VSA kernel is unavailable")
+    return _launch_simd_block_sparse(kernel, q_tiled, k_tiled, v_tiled, block_idx, block_num, geometry, scale)
+
+
+def _launch_simd_block_sparse(kernel: Any, q_tiled: Any, k_tiled: Any, v_tiled: Any, block_idx: Any, block_num: Any,
+                              geometry: Any, scale: float) -> Any:
+    import mlx.core as mx
+
     if geometry.tile_elems != 64:
         raise ValueError(f"SIMD-group VSA kernel supports tile 64 only, got {geometry.tile_elems}")
     heads, dim = q_tiled.shape[1], q_tiled.shape[2]

@@ -325,12 +325,13 @@ def linear(x, weight, bias=None):
 
 
 def _use_fast_norm() -> bool:
-    """Opt-in to MLX's fused ``mx.fast`` normalization kernels.
+    """Opt-in to MLX's fused ``mx.fast`` normalization kernels for Wan.
 
     Off by default so the numerically-explicit reference path stays the
     baseline. Set ``FASTVIDEO_MLX_FAST_NORM=1`` to route LayerNorm/RMSNorm
     through single fused Metal kernels (fewer intermediates, less memory
     traffic) and benchmark the speedup.
+    H3 uses its own fused RMSNorm default and does not consult this toggle.
     """
     import os
 

@@ -342,7 +342,10 @@ def test_simd_kernel_parity_with_reference_identical_tiles() -> None:
         pytest.skip("SIMD-group VSA kernel is not available")
     geo = build_h3_tile_geometry((16, 16), (8, 8, 8), tile_size=64)
     q, k, v = _tiny_qkv(geo.total_seq_length, heads=2, dim=128, seed=11)
+    q, k, v = [x.astype(mx.bfloat16) for x in (q, k, v)]
     reference = h3_vsa_attention(q, k, v, geo, sparsity=0.5, exempt=True, impl="reference")
+    from fastvideo.mlx_runtime.minimax_h3_vsa import MiniMaxH3VSAStats
+    stats = MiniMaxH3VSAStats()
     simd = h3_vsa_attention(
         q.astype(mx.bfloat16),
         k.astype(mx.bfloat16),
@@ -351,7 +354,10 @@ def test_simd_kernel_parity_with_reference_identical_tiles() -> None:
         sparsity=0.5,
         exempt=True,
         impl="simd",
+        stats=stats,
     )
+    mx.eval(simd)
+    assert stats.impl == "simd" and stats.dense_fallback_reason is None
     _, valid = token_tile_and_valid(geo.variable_block_sizes, geo.tile_elems)
     # Packed rows are valid tokens only after untile.
     assert mx.allclose(simd.astype(mx.float32), reference.astype(mx.float32), atol=5e-2, rtol=5e-2).item()

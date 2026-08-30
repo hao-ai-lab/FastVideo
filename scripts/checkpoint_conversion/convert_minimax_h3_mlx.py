@@ -99,10 +99,12 @@ def main() -> None:
             if bool(capable) == bool(args.include_vsa):
                 print(f"[skip] {fmt} already converted at {out_dir} (vsa.capable={capable})", flush=True)
                 continue
-            raise SystemExit(
-                f"{out_dir} already exists as a {'VSA-capable' if capable else 'dense-only'} checkpoint, "
-                f"but this run requested include_vsa={args.include_vsa}. "
-                "Write to a new directory (do not overwrite an existing dense export).")
+            logger.warning(
+                "Skipping %s: existing checkpoint has vsa.capable=%s, requested include_vsa=%s. "
+                "Use a new output directory to convert this format in the requested mode.",
+                out_dir, capable, args.include_vsa,
+            )
+            continue
         print(f"[convert] {fmt} (dtype={dtype}, spec={spec}, include_vsa={args.include_vsa})", flush=True)
         if hasattr(mx, "reset_peak_memory"):
             mx.reset_peak_memory()

@@ -375,6 +375,8 @@ class MiniMaxH3MLXPipeline:
             logger.info("Loaded MLX H3 DiT from %s in %.1fs", self.dit_checkpoint, time.perf_counter() - t0)
         if vsa_config is not None:
             dit.configure_vsa(vsa_config)
+        if hasattr(dit, "reset_vsa_stats"):
+            dit.reset_vsa_stats()
 
         layout = build_packed_layout(
             len(token_tags),
@@ -454,6 +456,10 @@ class MiniMaxH3MLXPipeline:
             "num_video_tiles": stats.num_video_tiles,
             "video_keep": stats.video_keep,
             "dense_fallback_reason": stats.dense_fallback_reason,
+            "attention_calls": stats.attention_calls,
+            "sparse_calls": stats.sparse_calls,
+            "impl_counts": stats.impl_counts,
+            "fallback_reasons": stats.fallback_reasons,
             "checkpoint_vsa_capable": bool(getattr(dit, "vsa_capable", False)),
         }
 
@@ -645,7 +651,7 @@ class MiniMaxH3MLXPipeline:
             dense_first_n_steps=vsa_dense_first_n_steps,
             dense_layers=vsa_dense_layers,
             impl=vsa_impl,  # type: ignore[arg-type]
-        )
+        ) if vsa else MiniMaxH3VSAConfig()
         if vsa_config.enabled and not mlx_h3_checkpoint_vsa_capable(self.dit_checkpoint):
             raise dense_only_vsa_error(self.dit_checkpoint)
         _preflight_media_dependencies(

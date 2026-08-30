@@ -28,7 +28,9 @@ unsupported, or a dense-only checkpoint is loaded.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from functools import cached_property
+from numbers import Integral
 from typing import Any, Literal
 
 import numpy as np
@@ -81,6 +83,9 @@ class MiniMaxH3VSAConfig:
             raise ValueError(f"VSA impl must be one of {VSA_IMPLS}, got {self.impl!r}.")
         if self.dense_first_n_steps < 0:
             raise ValueError(f"vsa_dense_first_n_steps must be >= 0, got {self.dense_first_n_steps}.")
+        if isinstance(self.dense_layers, str) or any(
+                not isinstance(layer, Integral) or isinstance(layer, bool) or layer < 0 for layer in self.dense_layers):
+            raise ValueError("VSA dense_layers must be a sequence of non-negative integer indices.")
         object.__setattr__(self, "dense_layers", tuple(int(layer) for layer in self.dense_layers))
 
     @property
@@ -124,6 +129,28 @@ class MiniMaxH3VSAGeometry:
     def prefix_length(self) -> int:
         return int(sum(self.prefix_segments))
 
+    @cached_property
+    def tile_gather_index(self):
+        import mlx.core as mx
+
+        index = np.full(self.padded_length, self.total_seq_length, dtype=np.int32)
+        index[self.untile_combined_index] = np.arange(self.total_seq_length, dtype=np.int32)
+        return mx.array(index)
+
+    @cached_property
+    def prefix_gather_index(self):
+        import mlx.core as mx
+
+        index = np.full(self.num_prefix_tiles * self.tile_elems, self.prefix_length, dtype=np.int32)
+        index[self.untile_combined_index[:self.prefix_length]] = np.arange(self.prefix_length, dtype=np.int32)
+        return mx.array(index)
+
+    @cached_property
+    def untile_index(self):
+        import mlx.core as mx
+
+        return mx.array(self.untile_combined_index, dtype=mx.int32)
+
 
 @dataclass
 class MiniMaxH3VSAStats:
@@ -136,9 +163,28 @@ class MiniMaxH3VSAStats:
     impl: str = "dense"
     num_prefix_tiles: int = 0
     num_video_tiles: int = 0
-    video_keep: int = 0
+    video_keep: float = 0.0
     achieved_sparsity: float = 0.0
     dense_fallback_reason: str | None = None
+    attention_calls: int = 0
+    sparse_calls: int = 0
+    impl_counts: dict[str, int] = field(default_factory=dict)
+    fallback_reasons: list[str] = field(default_factory=list)
+
+    def record(self, call: MiniMaxH3VSAStats) -> None:
+        """Aggregate equally sized video-query tile maps across blocks and steps."""
+        self.attention_calls += 1
+        self.sparse_calls += int(call.layer_sparsity > 0.0)
+        self.impl_counts[call.impl] = self.impl_counts.get(call.impl, 0) + 1
+        self.impl = next(iter(self.impl_counts)) if len(self.impl_counts) == 1 else "mixed"
+        for name in ("layer_sparsity", "video_keep", "achieved_sparsity"):
+            old = getattr(self, name)
+            setattr(self, name, old + (getattr(call, name) - old) / self.attention_calls)
+        self.num_prefix_tiles = call.num_prefix_tiles
+        self.num_video_tiles = call.num_video_tiles
+        if call.dense_fallback_reason and call.dense_fallback_reason not in self.fallback_reasons:
+            self.fallback_reasons.append(call.dense_fallback_reason)
+        self.dense_fallback_reason = "; ".join(self.fallback_reasons) or None
 
 
 def vsa_gate_key(block_index: int) -> str:
@@ -280,6 +326,8 @@ def build_h3_tile_geometry(
     tile_shape = VSA_H3_TILE_SHAPES.get(int(tile_size))
     if tile_shape is None:
         raise ValueError(f"VSA-H3 tile_size must be one of {sorted(VSA_H3_TILE_SHAPES)}, got {tile_size!r}")
+    if len(dit_seq_shape) != 3 or any(axis <= 0 for axis in dit_seq_shape):
+        raise ValueError(f"VSA-H3 video axes must be positive, got {dit_seq_shape}.")
     tile_elems = math.prod(tile_shape)
     prefix_segments = tuple(int(segment) for segment in prefix_segments if int(segment) > 0)
     prefix_len = sum(prefix_segments)
@@ -357,21 +405,17 @@ def build_block_mask(
 
 
 def _tile_hidden(x, geometry: MiniMaxH3VSAGeometry):
-    """Scatter packed rows ``[S, H, D]`` into the zero-padded tile buffer."""
+    """Gather packed rows into tiles, mapping every padding slot to one zero row."""
     import mlx.core as mx
 
     seq, heads, dim = x.shape
     if seq != geometry.total_seq_length:
         raise ValueError(f"VSA-H3 metadata was built for sequence length {geometry.total_seq_length}, got {seq}.")
-    buf = mx.zeros((geometry.padded_length, heads, dim), dtype=x.dtype)
-    buf = buf.at[mx.array(geometry.untile_combined_index)].add(x)
-    return buf
+    return mx.concatenate([x, mx.zeros((1, heads, dim), dtype=x.dtype)])[geometry.tile_gather_index]
 
 
 def _untile_hidden(tiled, geometry: MiniMaxH3VSAGeometry):
-    import mlx.core as mx
-
-    return tiled[mx.array(geometry.untile_combined_index)]
+    return tiled[geometry.untile_index]
 
 
 def _pool_tiles(x, variable_block_sizes, tile_elems: int):
@@ -389,9 +433,9 @@ def _dense_sdpa(q, k, v, scale: float):
     import mlx.core as mx
 
     return mx.fast.scaled_dot_product_attention(
-        mx.contiguous(q.transpose(1, 0, 2))[None],
-        mx.contiguous(k.transpose(1, 0, 2))[None],
-        mx.contiguous(v.transpose(1, 0, 2))[None],
+        q.transpose(1, 0, 2)[None],
+        k.transpose(1, 0, 2)[None],
+        v.transpose(1, 0, 2)[None],
         scale=scale,
     )[0].transpose(1, 0, 2)
 
@@ -456,13 +500,12 @@ def _reference_token_sdpa(q_tiled, k_tiled, v_tiled, block_mask: np.ndarray, geo
     import mlx.core as mx
 
     allow = _token_mask_from_block_mask(block_mask, geometry)
-    bias = mx.where(mx.array(allow), mx.array(0.0, dtype=mx.float32), mx.array(-1e9, dtype=mx.float32))
     return mx.fast.scaled_dot_product_attention(
         mx.contiguous(q_tiled.transpose(1, 0, 2))[None],
         mx.contiguous(k_tiled.transpose(1, 0, 2))[None],
         mx.contiguous(v_tiled.transpose(1, 0, 2))[None],
         scale=scale,
-        mask=bias[None],
+        mask=mx.array(allow)[None],
     )[0].transpose(1, 0, 2)
 
 
@@ -571,22 +614,20 @@ def _gate_compress_output(scores, v_tiled, gate_tiled, geometry: MiniMaxH3VSAGeo
 
 
 def resolve_impl(requested: VSAImpl, head_dim: int, tile_elems: int) -> str:
-    if requested in ("reference", "auto") and not _AUTO_PREFERS_SIMD:
+    if requested == "reference" or (requested == "auto" and not _AUTO_PREFERS_SIMD):
         return "reference"
 
     from fastvideo.mlx_runtime.minimax_h3_vsa_simd import simd_kernel_available, simd_kernel_error
 
     if tile_elems != 64 or head_dim != 128:
         if requested == "simd":
-            logger.warning(
-                "SIMD VSA requires tile 64 and head dim 128 (got tile=%s head_dim=%s); using reference VSA",
-                tile_elems,
-                head_dim,
-            )
+            logger.warning_once(
+                f"SIMD VSA requires tile 64 and head dim 128 (got tile={tile_elems} head_dim={head_dim}); "
+                "using reference VSA")
         return "reference"
     if not simd_kernel_available():
         reason = simd_kernel_error() or "SIMD-group VSA kernel is unavailable"
-        logger.warning("SIMD VSA kernel unavailable (%s); using reference VSA", reason)
+        logger.warning_once(f"SIMD VSA kernel unavailable ({reason}); using reference VSA")
         return "reference"
     return "simd"
 
@@ -606,7 +647,7 @@ def h3_vsa_attention(
     """Packed ``[S, H, D]`` VSA attention. Falls back to dense SDPA when sparsity is 0."""
     import mlx.core as mx
 
-    seq, heads, dim = query.shape
+    _, heads, dim = query.shape
     scale = dim**-0.5
     if stats is not None:
         stats.configured_sparsity = sparsity
@@ -646,17 +687,29 @@ def h3_vsa_attention(
             sparsity,
             exempt,
         )
+        if stats is not None and not exempt:
+            stats.video_keep = float(mx.mean(mx.sum(block_idx >= geometry.num_prefix_tiles, axis=-1)).item())
+            stats.achieved_sparsity = 1.0 - stats.video_keep / geometry.num_video_tiles
         chosen = resolve_impl(impl, dim, geometry.tile_elems)
-        prefix_out = _dense_sdpa(query[:geometry.prefix_length], key, value, scale)
+        if stats is not None and impl == "simd" and chosen != "simd":
+            from fastvideo.mlx_runtime.minimax_h3_vsa_simd import simd_kernel_error
+
+            stats.dense_fallback_reason = ("SIMD requires tile 64 and head dim 128"
+                                           if geometry.tile_elems != 64 or dim != 128 else simd_kernel_error())
+        prefix_out = (_dense_sdpa(query[:geometry.prefix_length], key, value, scale)
+                      if geometry.prefix_length else query[:0])
         n_prefix_pad = geometry.num_prefix_tiles * geometry.tile_elems
         if chosen == "simd":
-            from fastvideo.mlx_runtime.minimax_h3_vsa_simd import simd_block_sparse
+            from fastvideo.mlx_runtime.minimax_h3_vsa_simd import disable_simd_kernel, simd_block_sparse
 
             try:
                 video_tiled = simd_block_sparse(q_tiled, k_tiled, v_tiled, block_idx, block_num, geometry, scale)
+                # MLX compiles and executes custom Metal kernels lazily.
+                mx.eval(video_tiled)
                 video_tiled = video_tiled[n_prefix_pad:]
             except Exception as error:  # noqa: BLE001 - keep generation alive on kernel failure
-                logger.warning("SIMD VSA kernel failed (%s); falling back to reference gather+SDPA", error)
+                disable_simd_kernel(error)
+                logger.warning_once(f"SIMD VSA kernel failed ({error}); falling back to reference gather+SDPA")
                 chosen = "reference"
                 if stats is not None:
                     stats.dense_fallback_reason = f"simd kernel failed: {error}"
@@ -674,16 +727,12 @@ def h3_vsa_attention(
         else:
             video_tiled = _reference_gather_sdpa(q_tiled, k_tiled, v_tiled, block_idx, geometry, scale)
         video_tiled = video_tiled.astype(query.dtype)
-        prefix_tiled = _tile_hidden(
-            mx.concatenate([
-                prefix_out,
-                mx.zeros((seq - geometry.prefix_length, heads, dim), dtype=query.dtype),
-            ],
-                           axis=0),
-            geometry,
-        )
+        prefix_tiled = mx.concatenate([
+            prefix_out,
+            mx.zeros((1, heads, dim), dtype=query.dtype),
+        ])[geometry.prefix_gather_index]
         # Prefix query tiles are dense; keep fused-SDPA prefix rows and sparse video tiles.
-        out_tiled = mx.concatenate([prefix_tiled[:n_prefix_pad], video_tiled], axis=0)
+        out_tiled = mx.concatenate([prefix_tiled, video_tiled], axis=0)
 
     if gate_compress is not None:
         gate_tiled = _tile_hidden(gate_compress, geometry)
