@@ -1,0 +1,119 @@
+# SPDX-License-Identifier: Apache-2.0
+"""Frame-aggregated HPSv3 rewards used by the RVM video recipe."""
+
+from __future__ import annotations
+
+import os
+import tempfile
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+from PIL import Image
+import torch
+
+from fastvideo.train.methods.rl.rewards.media import media_to_uint8_array
+
+_INFERENCERS: dict[str, Any] = {}
+
+
+def _get_inferencer(device: torch.device) -> Any:
+    key = str(device)
+    if key not in _INFERENCERS:
+        try:
+            from hpsv3 import HPSv3RewardInferencer
+        except ImportError as exc:
+            raise ImportError("HPSv3 rewards require `pip install hpsv3==1.0.0`.") from exc
+        _INFERENCERS[key] = HPSv3RewardInferencer(device=device)
+    return _INFERENCERS[key]
+
+
+def _scalar(value: Any) -> float:
+    if isinstance(value, (list, tuple)) and value:
+        value = value[0]
+    if torch.is_tensor(value):
+        if value.numel() == 0:
+            return 0.0
+        return float(value.flatten()[0].item())
+    if hasattr(value, "item"):
+        return float(value.item())
+    return float(value)
+
+
+def _sample_frame_indices(num_frames: int, max_frames: int | None) -> list[int]:
+    if num_frames <= 0:
+        raise ValueError("video contains no frames")
+    if max_frames is None or max_frames <= 0 or num_frames <= max_frames:
+        return list(range(num_frames))
+    return torch.linspace(0, num_frames - 1, int(max_frames)).round().long().tolist()
+
+
+class _HPSv3VideoScorer:
+    def __init__(
+        self,
+        *,
+        device: torch.device | str = "cuda",
+        max_frames: int | None = 53,
+    ) -> None:
+        self.device = torch.device(device)
+        self.max_frames = None if max_frames is None else int(max_frames)
+
+    def _frame_prompts(self, prompt: str, count: int) -> list[str]:
+        raise NotImplementedError
+
+    def _aggregate(self, values: list[float]) -> float:
+        raise NotImplementedError
+
+    @torch.no_grad()
+    def __call__(self, media: torch.Tensor, prompts) -> torch.Tensor:
+        inferencer = _get_inferencer(self.device)
+        videos = media_to_uint8_array(media)
+        all_paths: list[str] = []
+        all_prompts: list[str] = []
+        owners: list[int] = []
+        with tempfile.TemporaryDirectory(prefix="fastvideo_hpsv3_") as temp_dir:
+            root = Path(temp_dir)
+            for sample_index, (video, prompt) in enumerate(zip(videos, prompts, strict=True)):
+                frames = video[None] if video.ndim == 3 else video
+                indices = _sample_frame_indices(len(frames), self.max_frames)
+                selected_prompts = self._frame_prompts(str(prompt), len(indices))
+                for local_index, (frame_index, frame_prompt) in enumerate(
+                    zip(indices, selected_prompts, strict=True)
+                ):
+                    path = root / f"sample_{sample_index:04d}_frame_{local_index:04d}.png"
+                    Image.fromarray(frames[frame_index]).save(path)
+                    all_paths.append(str(path))
+                    all_prompts.append(frame_prompt)
+                    owners.append(sample_index)
+            with torch.autocast(device_type=self.device.type, enabled=self.device.type == "cuda"):
+                raw = inferencer.reward(all_prompts, image_paths=all_paths)
+            grouped: list[list[float]] = [[] for _ in prompts]
+            for owner, value in zip(owners, raw, strict=True):
+                grouped[owner].append(_scalar(value))
+        scores = [self._aggregate(values) if values else 0.0 for values in grouped]
+        return torch.tensor(scores, device=self.device, dtype=torch.float32)
+
+
+class HPSv3GeneralScorer(_HPSv3VideoScorer):
+    """Mean frame preference under the generic quality prompt."""
+
+    def _frame_prompts(self, prompt: str, count: int) -> list[str]:
+        del prompt
+        return ["A high-quality image"] * count
+
+    def _aggregate(self, values: list[float]) -> float:
+        return float(np.mean(values))
+
+
+class HPSv3PercentileScorer(_HPSv3VideoScorer):
+    """Mean of the top 30% prompt-conditioned frame scores."""
+
+    def _frame_prompts(self, prompt: str, count: int) -> list[str]:
+        return [prompt] * count
+
+    def _aggregate(self, values: list[float]) -> float:
+        count = max(1, int(len(values) * 0.3))
+        return float(np.mean(sorted(values, reverse=True)[:count]))
+
+
+__all__ = ["HPSv3GeneralScorer", "HPSv3PercentileScorer"]
