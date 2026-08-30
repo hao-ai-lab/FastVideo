@@ -34,6 +34,13 @@ class MiniMaxH3RVMModel(MiniMaxH3DMDModel):
             raise ValueError("MiniMaxH3RVMModel requires models.student.lora.enable=true")
         if not self._enable_lora_if_configured(self.transformer):
             raise RuntimeError("Failed to enable the configured H3 RVM LoRA")
+        # The frozen 35B base can remain BF16, but optimizer updates of a small
+        # LoRA at 1e-5 are easily rounded away in BF16 parameter storage. Keep
+        # only trainable adapter masters in FP32; every LoRA forward casts them
+        # to the activation dtype before its matmuls.
+        for parameter in self.transformer.parameters():
+            if parameter.requires_grad and parameter.dtype != torch.float32:
+                parameter.data = parameter.data.to(dtype=torch.float32)
 
     def refresh_vsa_metadata(self, batch: TrainingBatch, *, current_timestep: int) -> None:
         """Build the VSA-H3 mask for the actual four-step rollout index."""
