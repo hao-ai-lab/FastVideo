@@ -75,10 +75,9 @@ class MiniMaxH3RVMModel(MiniMaxH3DMDModel):
 
     @torch.no_grad()
     def decode_latents(self, packed: torch.Tensor) -> torch.Tensor:
-        """Decode packed endpoints to float video media ``[B,C,T,H,W]``."""
-        decoded = self.decode_vis_latents(packed)
-        media = torch.from_numpy(decoded).float().div_(255.0)
-        return media.permute(0, 2, 1, 3, 4).contiguous()
+        """Decode packed endpoints to uint8 video media ``[B,C,T,H,W]``."""
+        decoded = torch.from_numpy(self.decode_vis_latents(packed))
+        return decoded.permute(0, 2, 1, 3, 4).contiguous()
 
 
 __all__ = ["MiniMaxH3RVMModel"]
