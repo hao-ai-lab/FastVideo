@@ -13,7 +13,7 @@ import torch
 @dataclass(slots=True)
 class RLValidationConfig:
     every_steps: int = 0
-    num_steps: int = 40  # Reference DiffusionNFT sampling num steps for best visual quality
+    num_steps: int = 40
     num_prompts: int = 16
     batch_size: int = 16
     log_samples: bool = True
@@ -22,7 +22,7 @@ class RLValidationConfig:
     sampling: dict[str, Any] | None = None
 
     @classmethod
-    def from_mapping(cls, raw: dict[str, Any] | None) -> RLValidationConfig:
+    def from_mapping(cls, raw: dict[str, Any] | None) -> "RLValidationConfig":
         if raw is None:
             return cls()
         if not isinstance(raw, dict):
@@ -66,16 +66,13 @@ def validation_caption(
 
 
 def media_to_video_array(media: torch.Tensor) -> Any:
-    """Convert decoded media to a tracker video array.
-
-    Accepts ``[C, T, H, W]`` tensors. ``[C, H, W]`` tensors are treated as
-    ``T=1`` media. Output follows the existing tracker convention used
-    elsewhere in FastVideo: ``[T, C, H, W]`` uint8.
-    """
+    """Convert ``[C,T,H,W]`` media to tracker ``[T,C,H,W]`` uint8."""
     if media.ndim == 3:
         media = media.unsqueeze(1)
     if media.ndim != 4:
         raise ValueError("media must have shape [C, T, H, W] or [C, H, W], "
                          f"got {tuple(media.shape)}")
-    video = (media.detach().float().clamp(0, 1) * 255).round().to(torch.uint8)
-    return video.permute(1, 0, 2, 3).contiguous().cpu().numpy()
+    value = media.detach().cpu()
+    if value.dtype != torch.uint8:
+        value = (value.float().clamp(0, 1) * 255).round().to(torch.uint8)
+    return value.permute(1, 0, 2, 3).contiguous().numpy()
