@@ -1,6 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """Reusable reward models for training methods."""
 
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import Any
+
+import torch
+
 from fastvideo.train.methods.rl.rewards.frame_rewards import (
     ClipScoreScorer,
     PickScoreScorer,
@@ -8,8 +15,79 @@ from fastvideo.train.methods.rl.rewards.frame_rewards import (
 from fastvideo.train.methods.rl.rewards.media import (
     MultiRewardScorer,
     RewardScorer,
+    media_to_uint8_array,
     select_first_frame,
 )
+
+
+class MeanLuminanceScorer:
+    """Dependency-free scorer used only by correctness smoke tests."""
+
+    @torch.no_grad()
+    def __call__(self, media: torch.Tensor, prompts) -> torch.Tensor:
+        del prompts
+        return media.detach().float().mean(dim=tuple(range(1, media.ndim)))
+
+
+def _parse_reward_specs(raw: Mapping[str, Any]) -> tuple[dict[str, float], dict[str, dict[str, Any]]]:
+    if "rewards" in raw:
+        raw = raw["rewards"]
+    if not isinstance(raw, Mapping) or not raw:
+        raise ValueError("reward config must be a nonempty mapping")
+    weights: dict[str, float] = {}
+    options: dict[str, dict[str, Any]] = {}
+    for raw_name, value in raw.items():
+        name = str(raw_name).strip().lower()
+        if isinstance(value, Mapping):
+            spec = dict(value)
+            if "weight" not in spec:
+                raise ValueError(f"reward {name!r} must define a numeric weight")
+            weights[name] = float(spec.pop("weight"))
+            options[name] = spec
+        else:
+            weights[name] = float(value)
+            options[name] = {}
+    return weights, options
+
+
+def _build_scorer(name: str, *, device: torch.device | str, options: dict[str, Any]) -> RewardScorer:
+    if name == "pickscore":
+        return PickScoreScorer(device=device)
+    if name == "clipscore":
+        return ClipScoreScorer(device=device)
+    if name == "mean_luminance":
+        if options:
+            raise ValueError("mean_luminance does not accept options")
+        return MeanLuminanceScorer()
+    if name == "videoalign_ta":
+        from fastvideo.train.methods.rl.rewards.videoalign import VideoAlignTextAlignmentScorer
+
+        return VideoAlignTextAlignmentScorer(device=device, **options)
+    if name == "videoalign_mq":
+        from fastvideo.train.methods.rl.rewards.videoalign import VideoAlignMotionQualityScorer
+
+        return VideoAlignMotionQualityScorer(device=device, **options)
+    if name == "videoalign_vq":
+        from fastvideo.train.methods.rl.rewards.videoalign import VideoAlignVisualQualityScorer
+
+        return VideoAlignVisualQualityScorer(device=device, **options)
+    if name == "hpsv3_general":
+        from fastvideo.train.methods.rl.rewards.hpsv3 import HPSv3GeneralScorer
+
+        return HPSv3GeneralScorer(device=device, **options)
+    if name == "hpsv3_percentile":
+        from fastvideo.train.methods.rl.rewards.hpsv3 import HPSv3PercentileScorer
+
+        return HPSv3PercentileScorer(device=device, **options)
+    if name == "dynamic_tracking":
+        from fastvideo.train.methods.rl.rewards.dynamic_tracking import DynamicTrackingScorer
+
+        return DynamicTrackingScorer(device=device, **options)
+    raise ValueError(
+        f"Unsupported reward {name!r}. Available: clipscore, pickscore, mean_luminance, "
+        "videoalign_ta, videoalign_mq, videoalign_vq, hpsv3_general, "
+        "hpsv3_percentile, dynamic_tracking"
+    )
 
 
 def build_multi_reward_scorer(
@@ -18,20 +96,21 @@ def build_multi_reward_scorer(
     device="cuda",
     scorers: dict[str, RewardScorer] | None = None,
 ) -> MultiRewardScorer:
+    weights, options = _parse_reward_specs(reward_weights)
     available: dict[str, RewardScorer] = dict(scorers or {})
-    if not available:
-        available = {
-            "pickscore": PickScoreScorer(device=device),
-            "clipscore": ClipScoreScorer(device=device),
-        }
-    return MultiRewardScorer(reward_weights, scorers=available)
+    for name in weights:
+        if name not in available:
+            available[name] = _build_scorer(name, device=device, options=options[name])
+    return MultiRewardScorer(weights, scorers=available)
 
 
 __all__ = [
     "ClipScoreScorer",
+    "MeanLuminanceScorer",
     "MultiRewardScorer",
     "PickScoreScorer",
     "RewardScorer",
     "build_multi_reward_scorer",
+    "media_to_uint8_array",
     "select_first_frame",
 ]
