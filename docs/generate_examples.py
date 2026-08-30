@@ -25,23 +25,127 @@ COOKBOOK_SOURCE_ROOTS = (
     ROOT_DIR / "examples/inference",
     ROOT_DIR / "scripts/inference",
 )
+# Cookbook families mirror the `model_family` values declared in
+# fastvideo/registry.py, plus "flux" for models that register no family
+# (e.g. black-forest-labs/FLUX.1-dev) and are grouped for documentation only.
+COOKBOOK_FAMILIES = {
+    "wan",
+    "turbodiffusion",
+    "ltx2",
+    "hunyuan",
+    "cosmos",
+    "kandinsky5",
+    "flux",
+    "glm_image",
+    "zimage",
+    "sd35",
+    "minimax_h3",
+    "longcat",
+    "stable_audio",
+    "mmaudio",
+    "matrixgame",
+}
+# Lifecycle stages a recipe can belong to. Only "inference" has recipes today;
+# the rest exist so the schema (and UI) can grow without another migration.
+COOKBOOK_STAGES = {
+    "inference",
+    "distillation",
+    "fine-tuning",
+    "training",
+    "lora-training",
+    "evaluation",
+    "optimization",
+    "deployment",
+}
+# Explicit evidence states; never conflate these in recipe entries.
+COOKBOOK_EVIDENCE_STATES = {
+    "Verified",
+    "Source-backed",
+    "Estimated",
+    "Community-reported",
+    "Unknown",
+    "Unsupported",
+}
+COOKBOOK_HARDWARE_EVIDENCE = {"validated", "source-configured", "estimated", "unknown"}
+COOKBOOK_HARDWARE_PLATFORMS = {"cuda", "mlx", "mps"}
+COOKBOOK_GPU_TYPES = {"NVIDIA", "Apple Silicon"}
+COOKBOOK_HARDWARE_TEXT_FIELDS = {
+    "accelerator",
+    "system_memory",
+    "minimum_memory",
+    "peak_memory",
+    "evidence_url",
+}
 
 
 def validate_cookbook() -> None:
     """Keep cookbook entries tied to checked-in runnable sources."""
-    recipes = json.loads(COOKBOOK_DATA.read_text(encoding="utf-8")).get("recipes")
+    data = json.loads(COOKBOOK_DATA.read_text(encoding="utf-8"))
+    recipes = data.get("recipes")
     if not isinstance(recipes, list) or not recipes:
         raise ValueError(f"{COOKBOOK_DATA}: recipes must be a non-empty list")
 
     seen: set[str] = set()
     for recipe in recipes:
-        required = ("id", "task", "label", "model", "source", "command")
+        required = ("id", "family", "task", "label", "model", "source", "command")
         missing = {key for key in required if not recipe.get(key)}
         if missing:
             raise ValueError(f"Cookbook recipe is missing: {', '.join(sorted(missing))}")
         if recipe["id"] in seen:
             raise ValueError(f"Duplicate cookbook recipe id: {recipe['id']}")
         seen.add(recipe["id"])
+
+        if recipe["family"] not in COOKBOOK_FAMILIES:
+            raise ValueError(f"Cookbook recipe has an unknown family: {recipe['id']}: {recipe['family']}")
+
+        stage = recipe.get("stage", "inference")
+        if stage not in COOKBOOK_STAGES:
+            raise ValueError(f"Cookbook recipe has an unknown stage: {recipe['id']}: {stage}")
+
+        evidence = recipe.get("evidence", "Source-backed")
+        if evidence not in COOKBOOK_EVIDENCE_STATES:
+            raise ValueError(f"Cookbook recipe has an unknown evidence state: {recipe['id']}: {evidence}")
+
+        hardware = recipe.get("hardware")
+        if not isinstance(hardware, dict):
+            raise ValueError(f"Cookbook recipe is missing hardware info: {recipe['id']}")
+        platform = hardware.get("platform", "cuda")
+        if platform not in COOKBOOK_HARDWARE_PLATFORMS:
+            raise ValueError(f"Cookbook recipe has an unknown hardware platform: {recipe['id']}: {platform}")
+        gpu_count = hardware.get("gpu_count")
+        if platform == "cuda" and (not isinstance(gpu_count, int) or gpu_count < 1):
+            raise ValueError(f"CUDA cookbook recipe needs an integer gpu_count >= 1: {recipe['id']}")
+        if platform != "cuda" and gpu_count is not None:
+            raise ValueError(f"Non-CUDA cookbook recipe must not use gpu_count: {recipe['id']}")
+        hardware_evidence = hardware.get("evidence")
+        if hardware_evidence not in COOKBOOK_HARDWARE_EVIDENCE:
+            raise ValueError(f"Cookbook recipe has unknown hardware evidence: {recipe['id']}: {hardware_evidence}\n"
+                             f"Expected one of {sorted(COOKBOOK_HARDWARE_EVIDENCE)}. Never guess GPU compatibility.")
+        for field_name in COOKBOOK_HARDWARE_TEXT_FIELDS:
+            value = hardware.get(field_name)
+            if value is not None and not (isinstance(value, str) and value.strip()):
+                raise ValueError(f"Cookbook hardware field must be a non-empty string: {recipe['id']}: {field_name}")
+        if hardware_evidence == "validated" and not hardware.get("accelerator"):
+            raise ValueError(f"Validated cookbook hardware needs an exact accelerator: {recipe['id']}")
+        if hardware_evidence == "source-configured":
+            recorded_fields = {"accelerator", "system_memory", "peak_memory"}.intersection(hardware)
+            if recorded_fields:
+                raise ValueError(f"Source-configured hardware cannot claim recorded run details: {recipe['id']}: "
+                                 f"{', '.join(sorted(recorded_fields))}")
+        evidence_url = hardware.get("evidence_url")
+        if evidence_url is not None and not evidence_url.startswith("https://github.com/hao-ai-lab/FastVideo/"):
+            raise ValueError(f"Cookbook hardware evidence must link to the FastVideo repository: {recipe['id']}")
+        gpu_types = recipe.get("gpu_types", [])
+        if not isinstance(gpu_types, list) or any(gpu not in COOKBOOK_GPU_TYPES for gpu in gpu_types):
+            raise ValueError(f"Cookbook recipe has an unknown gpu_types entry: {recipe['id']}: {gpu_types}")
+
+        revision = recipe.get("revision")
+        if revision is not None and not (isinstance(revision, str) and revision.strip()):
+            raise ValueError(f"Cookbook recipe revision must be a non-empty string when present: {recipe['id']}")
+
+        related = recipe.get("related", [])
+        if not isinstance(related, list):
+            raise ValueError(f"Cookbook recipe related must be a list of recipe ids: {recipe['id']}")
 
         source = (ROOT_DIR / recipe["source"]).resolve()
         if not any(source.is_relative_to(root.resolve()) for root in COOKBOOK_SOURCE_ROOTS):
@@ -50,10 +154,20 @@ def validate_cookbook() -> None:
             raise ValueError(f"Cookbook source does not exist: {recipe['source']}")
 
         source_text = source.read_text(encoding="utf-8")
-        if recipe["model"] not in source_text:
-            raise ValueError(f"Cookbook model is not present in {recipe['source']}: {recipe['model']}")
+        # The model must be traceable to the checked-in source itself, or be
+        # passed explicitly on the command line (e.g. --model-path <model> or
+        # MODEL_PATH=<model>) when the source reads it from arguments/env.
+        if recipe["model"] not in source_text and recipe["model"] not in recipe["command"]:
+            raise ValueError(f"Cookbook model is not present in {recipe['source']} or its command: {recipe['id']}")
         if recipe["source"] not in recipe["command"]:
             raise ValueError(f"Cookbook command does not invoke its source: {recipe['id']}")
+
+    # Second pass so `related` may point forward at recipes defined later.
+    ids = {recipe["id"] for recipe in recipes}
+    for recipe in recipes:
+        for related_id in recipe.get("related", []):
+            if related_id not in ids:
+                raise ValueError(f"Cookbook recipe references unknown related id: {recipe['id']}: {related_id}")
 
 
 def fix_case(text: str) -> str:
