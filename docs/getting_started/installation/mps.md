@@ -196,7 +196,10 @@ Add `--fast-spatial` for spatial fast mode, `--fast`'s spatial twin. It
 denoises and decodes on the smallest 32px-aligned canvas covering the
 requested size divided by `--fast-spatial-scale` (a 480x832 request runs on a
 256x416 canvas), then resamples the decoded frames up to the requested size
-in pixel space. It composes with `--fast`:
+in pixel space. It composes with `--fast`. This is a speed/quality trade-off
+and stays off by default: the output carries the reduced canvas's detail
+budget, so it reads softer than a native-resolution render, with the unsharp
+pass countering some but not all of the difference:
 
 ```bash
 python examples/inference/basic/mlx_fasth3.py \

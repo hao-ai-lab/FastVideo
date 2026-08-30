@@ -23,6 +23,9 @@ center-cropped after decode.
 denoises and decodes on the smallest 32px-aligned canvas covering
 height/width divided by ``--fast-spatial-scale``, then resamples the decoded
 frames up to the requested size in pixel space. The two modes compose.
+This trades fine detail for speed: the output carries the reduced canvas's
+detail budget and reads softer than a native-resolution render, so it stays
+off by default.
 
 This entrypoint currently supports text-to-video-with-audio only. It does not
 yet wire FL2VA, Ref2VA, or two-pass refinement.
@@ -81,7 +84,8 @@ def parse_args() -> argparse.Namespace:
         action=argparse.BooleanOptionalAction,
         default=False,
         help="denoise and decode at height/width // fast-spatial-scale on H3's 32px grid, "
-        "then resample the decoded frames up to the requested size; composes with --fast",
+        "then resample the decoded frames up to the requested size; composes with --fast. "
+        "Trades fine detail for speed",
     )
     parser.add_argument("--fast-spatial-scale", type=int, default=2,
                         help="spatial reduction factor for --fast-spatial (default: 2)")
