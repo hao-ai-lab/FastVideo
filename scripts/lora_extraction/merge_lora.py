@@ -95,6 +95,65 @@ def load_adapter(adapter_path: str) -> dict:
     return fix_adapter_naming(adapter)
 
 
+# Suffix -> the parameter suffix it targets, mirroring fastvideo.models.loader.lora_patch.
+# An empty target keeps the full name, for standalone nn.Parameters.
+ADDITIVE_SUFFIXES: dict[str, str] = {".diff_param": "", ".diff_b": ".bias", ".diff": ".weight"}
+REPLACEMENT_SUFFIXES: dict[str, str] = {".set_weight": ".weight", ".set_param": ""}
+LORA_SUFFIXES = (".lora_A.weight", ".lora_B.weight", ".lora_rank", ".lora_alpha")
+
+
+def group_dense_keys(adapter: dict) -> tuple[dict, dict, list]:
+    """Split the non-factorized half of an adapter into additive and replacement params.
+
+    ``--exact-tensor-pattern`` keeps selected matrices as exact dense deltas instead of
+    LoRA factors, so an adapter merged without these is missing those tensors entirely.
+    """
+    additive: dict = {}
+    replacement: dict = {}
+    unrecognized: list = []
+
+    for key, tensor in adapter.items():
+        if key.endswith(LORA_SUFFIXES):
+            continue
+        for suffix, param_suffix in ADDITIVE_SUFFIXES.items():
+            if key.endswith(suffix):
+                additive[key.removesuffix(suffix) + param_suffix] = tensor
+                break
+        else:
+            for suffix, param_suffix in REPLACEMENT_SUFFIXES.items():
+                if key.endswith(suffix):
+                    replacement[key.removesuffix(suffix) + param_suffix] = tensor
+                    break
+            else:
+                unrecognized.append(key)
+
+    return additive, replacement, unrecognized
+
+
+def merge_dense_into_base(merged_sd: dict, additive: dict, replacement: dict) -> tuple[int, list]:
+    """Apply exact dense deltas and replacement parameters in place."""
+    merged_count = 0
+    skipped: list = []
+
+    for param_name, tensor in additive.items():
+        target = merged_sd.get(param_name)
+        if target is None or tuple(target.shape) != tuple(tensor.shape):
+            skipped.append(param_name)
+            continue
+        merged_sd[param_name] = (target.to(torch.float32) + tensor.to(torch.float32)).to(target.dtype)
+        merged_count += 1
+
+    for param_name, tensor in replacement.items():
+        target = merged_sd.get(param_name)
+        if target is not None and tuple(target.shape) != tuple(tensor.shape):
+            skipped.append(param_name)
+            continue
+        merged_sd[param_name] = tensor.to(target.dtype) if target is not None else tensor
+        merged_count += 1
+
+    return merged_count, skipped
+
+
 def group_adapter_keys(adapter: dict) -> dict:
     grouped = defaultdict(dict)
 
@@ -214,7 +273,17 @@ def merge_lora_into_base(base_sd: dict, adapter: dict) -> dict:
         merged_sd[weight_key] = merged_weight.to(base_sd[weight_key].dtype)
         merged_count += 1
 
-    LOG.info(f"Merged {merged_count} layers, skipped {skipped_count}")
+    additive, replacement, unrecognized = group_dense_keys(adapter)
+    dense_merged, dense_skipped = merge_dense_into_base(merged_sd, additive, replacement)
+
+    LOG.info(f"Merged {merged_count} LoRA layers, skipped {skipped_count}")
+    LOG.info(f"Merged {dense_merged} dense tensors ({len(additive)} additive, {len(replacement)} replacement)")
+    if dense_skipped:
+        LOG.warning(f"Skipped {len(dense_skipped)} dense tensors absent or mismatched in the base model: "
+                    f"{dense_skipped[:5]}")
+    if unrecognized:
+        LOG.warning(f"Ignored {len(unrecognized)} adapter keys with an unrecognized suffix: {unrecognized[:5]}")
+
     return merged_sd
 
 

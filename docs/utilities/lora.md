@@ -48,7 +48,8 @@ Important options:
 - `--randomized-q`, `--niter`, `--seed`: randomized SVD accuracy and reproducibility.
 - `--factor-dtype`, `--dense-dtype`, `--replacement-dtype`: adapter storage precision.
 - `--exact-tensor-pattern`: repeatable regex for a matrix that should remain an exact dense delta.
-- `--work-dir`, `--resume`: resume an interrupted streaming extraction.
+- `--work-dir`, `--resume`: resume an interrupted streaming extraction. Scratch is written to a
+  `fastvideo-lora-extract/` subdirectory of `--work-dir`, and only that subdirectory is cleaned up.
 
 The adapter retains changes that do not fit a low-rank product: `.diff` and `.diff_b` hold exact additive weight/bias deltas, `.diff_param` handles standalone parameters such as `scale_shift_table`, and `.set_weight`/`.set_param` hold parameters absent from the base checkpoint. Bit-identical parameters are omitted. The extractor writes an adjacent `*.report.json` with tensor counts, settings, and reconstruction residuals.
 

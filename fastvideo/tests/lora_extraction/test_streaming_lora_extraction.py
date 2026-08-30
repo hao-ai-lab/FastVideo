@@ -320,3 +320,99 @@ def test_hub_resolution_downloads_only_transformer(monkeypatch: pytest.MonkeyPat
         "revision": "revision",
         "allow_patterns": ["transformer/*"],
     }]
+
+
+def _toy_checkpoints(tmp_path: Path) -> tuple[Path, Path]:
+    base, finetuned = _toy_states()
+    base_dir = tmp_path / "base"
+    finetuned_dir = tmp_path / "finetuned"
+    _write_transformer(base_dir, base)
+    _write_transformer(finetuned_dir, finetuned)
+    return base_dir, finetuned_dir
+
+
+def _extract(base_dir: Path, finetuned_dir: Path, output: Path, **overrides: object) -> Path:
+    kwargs: dict[str, object] = {
+        "rank": 2,
+        "min_delta": 1e-8,
+        "load_mode": "indexed",
+        "device": "cpu",
+        "svd_method": "exact",
+    }
+    kwargs.update(overrides)
+    return extract_lora.extract_lora_adapter(base=str(base_dir), ft=str(finetuned_dir), out=str(output), **kwargs)
+
+
+def test_work_dir_leaves_unrelated_files_alone(tmp_path: Path) -> None:
+    """--work-dir names where to put scratch, so its other contents must survive."""
+    base_dir, finetuned_dir = _toy_checkpoints(tmp_path)
+    work_dir = tmp_path / "shared_scratch"
+    (work_dir / "nested").mkdir(parents=True)
+    keeper = work_dir / "unrelated.txt"
+    keeper.write_text("do not delete me", encoding="utf-8")
+
+    _extract(base_dir, finetuned_dir, tmp_path / "adapter.safetensors", work_dir=str(work_dir))
+
+    assert keeper.read_text(encoding="utf-8") == "do not delete me"
+    assert (work_dir / "nested").is_dir()
+    assert not (work_dir / extract_lora.WORK_SUBDIR).exists()
+
+
+def test_work_dir_scratch_is_confined_to_a_subdirectory(tmp_path: Path) -> None:
+    base_dir, finetuned_dir = _toy_checkpoints(tmp_path)
+    work_dir = tmp_path / "shared_scratch"
+
+    _extract(base_dir,
+             finetuned_dir,
+             tmp_path / "adapter.safetensors",
+             work_dir=str(work_dir),
+             keep_work_dir=True)
+
+    assert (work_dir / extract_lora.WORK_SUBDIR / "manifest.json").is_file()
+
+
+def test_unmatched_exact_tensor_pattern_is_rejected(tmp_path: Path) -> None:
+    """A pattern that matches nothing silently factorizes the tensors it was meant to keep."""
+    base_dir, finetuned_dir = _toy_checkpoints(tmp_path)
+
+    with pytest.raises(ValueError, match="matched no tensor"):
+        _extract(base_dir,
+                 finetuned_dir,
+                 tmp_path / "adapter.safetensors",
+                 exact_tensor_patterns=[r"^context\\.weight$"])
+
+    _extract(base_dir,
+             finetuned_dir,
+             tmp_path / "adapter.safetensors",
+             exact_tensor_patterns=[r"^context\.weight$"])
+    assert "context.diff" in load_file(tmp_path / "adapter.safetensors")
+
+
+def test_rerun_with_a_different_config_reuses_the_work_dir(tmp_path: Path) -> None:
+    """A leftover work dir must not make a fresh (non-resume) rerun fail."""
+    base_dir, finetuned_dir = _toy_checkpoints(tmp_path)
+    output = tmp_path / "adapter.safetensors"
+
+    _extract(base_dir, finetuned_dir, output, rank=2, keep_work_dir=True)
+    work_dir = output.parent / f".{output.name}.work"
+    assert (work_dir / "manifest.json").is_file()
+
+    _extract(base_dir, finetuned_dir, output, rank=4)
+    assert output.is_file()
+
+
+def test_resume_still_rejects_a_mismatched_config(tmp_path: Path) -> None:
+    base_dir, finetuned_dir = _toy_checkpoints(tmp_path)
+    output = tmp_path / "adapter.safetensors"
+
+    _extract(base_dir, finetuned_dir, output, rank=2, keep_work_dir=True)
+    with pytest.raises(ValueError, match="Resume configuration does not match"):
+        _extract(base_dir, finetuned_dir, output, rank=4, resume=True)
+
+
+def test_non_safetensors_output_is_rejected(tmp_path: Path) -> None:
+    """The writer is always safetensors, so a .pt name would be a mislabeled file."""
+    base_dir, finetuned_dir = _toy_checkpoints(tmp_path)
+
+    with pytest.raises(ValueError, match="must end in .safetensors"):
+        _extract(base_dir, finetuned_dir, tmp_path / "adapter.pt")

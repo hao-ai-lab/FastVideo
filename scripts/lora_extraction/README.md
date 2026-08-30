@@ -37,10 +37,10 @@ python extract_lora.py \
   --factor-dtype float16 \
   --dense-dtype float32 \
   --replacement-dtype source \
-  --exact-tensor-pattern '^audio_proj_(in|out)\\.weight$' \
-  --exact-tensor-pattern '^context_embedder\\.weight$' \
-  --exact-tensor-pattern '^proj_(in|out)\\.weight$' \
-  --exact-tensor-pattern '^time_embedder\\.'
+  --exact-tensor-pattern '^audio_proj_(in|out)\.weight$' \
+  --exact-tensor-pattern '^context_embedder\.weight$' \
+  --exact-tensor-pattern '^proj_(in|out)\.weight$' \
+  --exact-tensor-pattern '^time_embedder\.'
 ```
 
 `q=320, niter=4` retained 99.9355% of the energy captured by exact rank-64 SVD in a 362-matrix MiniMax-H3 comparison. Exact CPU SVD is still the default; randomized SVD must be requested explicitly.
@@ -57,7 +57,8 @@ Important options:
 - `--dense-dtype`: storage dtype for exact `.diff`, `.diff_b`, and `.diff_param` payloads.
 - `--replacement-dtype`: storage dtype for fine-tuned-only `.set_weight` and `.set_param` parameters.
 - `--exact-tensor-pattern`: repeatable regex selecting matrices to retain as exact dense deltas.
-- `--work-dir`, `--resume`: resume a partially completed streaming extraction.
+- `--work-dir`, `--resume`: resume a partially completed streaming extraction. Scratch is written to a
+  `fastvideo-lora-extract/` subdirectory of `--work-dir`, and only that subdirectory is cleaned up.
 
 Fine-tuned parameters that cannot or should not be factorized are retained automatically:
 

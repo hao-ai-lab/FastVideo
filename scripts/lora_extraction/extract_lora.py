@@ -14,8 +14,8 @@ SVD remains the default for compatibility; GPU and randomized SVD are opt-in.
 from __future__ import annotations
 
 import argparse
-from collections.abc import Iterator, Sequence
-from contextlib import ExitStack, contextmanager
+from collections.abc import Iterable, Iterator, Sequence
+from contextlib import ExitStack, contextmanager, suppress
 from dataclasses import asdict, dataclass
 import hashlib
 import json
@@ -43,6 +43,10 @@ from tqdm import tqdm
 LOG = logging.getLogger("extract_lora")
 INDEX_FILENAME = "diffusion_pytorch_model.safetensors.index.json"
 FORMAT_VERSION = "fastvideo-lora-v2"
+# Scratch lives in a subdirectory we create so cleanup never reaches a caller's files
+# when --work-dir points at a directory that already holds something else.
+WORK_SUBDIR = "fastvideo-lora-extract"
+
 DIFF_SUFFIX = ".diff"
 DIFF_BIAS_SUFFIX = ".diff_b"
 DIFF_PARAM_SUFFIX = ".diff_param"
@@ -369,6 +373,24 @@ def _compile_patterns(patterns: Sequence[str]) -> tuple[re.Pattern[str], ...]:
     return tuple(re.compile(pattern) for pattern in patterns)
 
 
+def _validate_exact_patterns(patterns: Sequence[str], keys: Iterable[str]) -> None:
+    """Reject a pattern that matches no tensor rather than silently factorizing it anyway.
+
+    A pattern is only ever used to *exclude* tensors from factorization, so one that
+    matches nothing is indistinguishable from not passing it at all -- the usual cause
+    is shell escaping, where a doubled backslash makes ``\\.`` mean "backslash, any
+    character" instead of a literal dot.
+    """
+    keys = sorted(keys)
+    unmatched = [pattern for pattern in patterns if not any(re.search(pattern, key) for key in keys)]
+    if unmatched:
+        rendered = ", ".join(repr(pattern) for pattern in unmatched)
+        raise ValueError(
+            "--exact-tensor-pattern matched no tensor in the fine-tuned checkpoint: " + rendered +
+            ". Those tensors would be rank-truncated instead of kept exact; check the escaping "
+            r"(inside shell single quotes write '\.', not '\\.').")
+
+
 def _should_factor(
     key: str,
     shape: tuple[int, ...],
@@ -421,20 +443,27 @@ def _factorize_delta(
     return lora_a, lora_b, singular_values, method_description
 
 
+def _clear_work_dir(work_dir: Path) -> None:
+    """Remove the scratch artifacts this script writes, never the directory itself.
+
+    Assembly is driven by the manifest rather than by a directory listing, so dropping
+    the manifest is what makes a rerun start clean; the tensor shards only cost disk.
+    """
+    shutil.rmtree(work_dir / "tensors", ignore_errors=True)
+    (work_dir / "manifest.json").unlink(missing_ok=True)
+
+
 def _prepare_work_dir(work_dir: Path, config: ExtractionConfig, resume: bool) -> tuple[Path, dict[str, Any]]:
     manifest_path = work_dir / "manifest.json"
     expected = asdict(config)
     expected["exact_tensor_patterns"] = list(config.exact_tensor_patterns)
-    if manifest_path.is_file():
+    if resume and manifest_path.is_file():
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         if manifest.get("config") != expected:
             raise ValueError(f"Resume configuration does not match {manifest_path}")
-        if not resume:
-            shutil.rmtree(work_dir)
-        else:
-            return manifest_path, manifest
-    elif work_dir.exists() and not resume:
-        shutil.rmtree(work_dir)
+        return manifest_path, manifest
+    if not resume:
+        _clear_work_dir(work_dir)
 
     (work_dir / "tensors").mkdir(parents=True, exist_ok=True)
     manifest = {"format": FORMAT_VERSION, "config": expected, "layers": {}}
@@ -702,8 +731,11 @@ def extract_lora_adapter(
         raise ValueError("randomized_q must be positive")
 
     out_path = Path(out).expanduser()
+    if out_path.suffix != ".safetensors":
+        raise ValueError(f"--out must end in .safetensors; adapters are always written as safetensors: {out_path}")
     if work_dir is not None:
-        effective_work_dir = Path(work_dir).expanduser()
+        # --work-dir names where to put scratch, not a directory to take over.
+        effective_work_dir = Path(work_dir).expanduser() / WORK_SUBDIR
     elif checkpoint is not None:
         effective_work_dir = Path(checkpoint).expanduser().with_suffix(".work")
     else:
@@ -711,6 +743,7 @@ def extract_lora_adapter(
 
     with _open_readers(base, ft, base_revision, ft_revision, load_mode) as (base_reader, finetuned_reader):
         _validate_key_sets(base_reader, finetuned_reader)
+        _validate_exact_patterns(exact_tensor_patterns, finetuned_reader.keys)
         config = ExtractionConfig(
             base_source=base_reader.source,
             finetuned_source=finetuned_reader.source,
@@ -764,7 +797,9 @@ def extract_lora_adapter(
     LOG.info("Saved adapter to %s (%.2f GiB); report=%s", out_path, out_path.stat().st_size / 2**30, report_path)
 
     if not keep_work_dir:
-        shutil.rmtree(effective_work_dir)
+        _clear_work_dir(effective_work_dir)
+        with suppress(OSError):
+            effective_work_dir.rmdir()
     return out_path
 
 
