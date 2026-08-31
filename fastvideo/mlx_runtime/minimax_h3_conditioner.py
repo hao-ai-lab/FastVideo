@@ -7,8 +7,8 @@ hidden states after the first 50 language-model layers plus the per-token
 modality tags for text prompts.
 
 Memory contract for the 36 GiB tier: the released conditioner is ~66 GB of
-BF16 and never becomes resident. Tensors are memory-mapped per-key from the
-safetensors shards and only the pieces a given forward needs are materialized:
+BF16 and never becomes resident. Tensors are read per-key from the safetensors
+shards and only the pieces a given forward needs are materialized:
 
 - token embedding table row-gathered per batch (full table never copied);
 - one decoder layer (~1 GB BF16) resident at a time, computed in FP32,
@@ -66,7 +66,7 @@ class ConditionerConfig:
 
 
 class _ShardIndex:
-    """Per-key memory-mapped access across the diffusers safetensors shards.
+    """Per-key access across the diffusers safetensors shards.
 
     Reads tensors directly through the safetensors header so BF16 weights
     stream from disk without loading a shard (and without torch).
@@ -109,6 +109,19 @@ class _ShardIndex:
         header, data_start = self._header_cache[shard]
         return _read_safetensors_bf16(shard, key, header, data_start)
 
+    def get_mlx(self, key: str) -> mx.array:
+        """Read one weight in FP32 without expanding BF16 on the CPU."""
+        shard = self.key_to_shard[key]
+        header, data_start = self._header_cache[shard]
+        if header[key]["dtype"] != "BF16":
+            return mx.array(np.asarray(self.get(key), dtype=np.float32))
+        raw = _read_bf16_words(shard, key, header, data_start)
+        weight = mx.array(raw).view(mx.bfloat16).astype(mx.float32)
+        # Finish each cast before constructing the layer graph, releasing its
+        # BF16 input instead of retaining a second copy of every layer weight.
+        mx.eval(weight)
+        return weight
+
     def get_row(self, key: str, row: int) -> np.ndarray:
         shard = self.key_to_shard[key]
         header, data_start = self._header_cache[shard]
@@ -121,6 +134,21 @@ class _ShardIndex:
 _DTYPES = {"F32": np.float32, "F16": np.float16, "I64": np.int64, "I32": np.int32}
 
 
+def _read_bf16_words(path: str, key: str, header: dict, data_start: int) -> np.ndarray:
+    """Bulk-read one BF16 tensor; avoid faulting in a large mmap during conversion."""
+    meta = header[key]
+    begin, end = meta["data_offsets"]
+    if begin < 0 or end < begin or (end - begin) % 2:
+        raise ValueError(f"Invalid BF16 data offsets {begin}:{end} in {path}:{key}")
+    count = (end - begin) // 2
+    with open(path, "rb") as handle:
+        handle.seek(data_start + begin)
+        raw = np.fromfile(handle, dtype=np.uint16, count=count)
+    if raw.size != count:
+        raise EOFError(f"Truncated safetensors tensor {path}:{key}: expected {count} BF16 values, got {raw.size}")
+    return raw.reshape(meta["shape"])
+
+
 def _read_safetensors_bf16(path: str, key: str, header: dict, data_start: int) -> np.ndarray:
     """Read one tensor (any dtype incl. BF16) without loading the shard."""
     meta = header[key]
@@ -128,8 +156,10 @@ def _read_safetensors_bf16(path: str, key: str, header: dict, data_start: int) -
     count = end - begin
     dtype = meta["dtype"]
     if dtype == "BF16":
-        raw = np.memmap(path, dtype=np.uint16, mode="r", offset=data_start + begin, shape=(count // 2, ))
-        return (raw.astype(np.uint32) << 16).view(np.float32).reshape(meta["shape"])
+        raw = _read_bf16_words(path, key, header, data_start)
+        expanded = raw.astype(np.uint32)
+        expanded <<= 16  # Shift the owned conversion buffer, never the read-only mapping.
+        return expanded.view(np.float32).reshape(meta["shape"])
     if dtype not in _DTYPES:
         raise ValueError(f"Unsupported safetensors dtype {dtype} in {path}:{key}")
     return np.asarray(
@@ -157,7 +187,9 @@ def _read_safetensors_row(path: str, key: str, row: int, header: dict, data_star
     begin = int(meta["data_offsets"][0]) + row * row_count * item_size
     if dtype == "BF16":
         raw = np.memmap(path, dtype=np.uint16, mode="r", offset=data_start + begin, shape=(row_count, ))
-        return (raw.astype(np.uint32) << 16).view(np.float32).reshape(shape[1:])
+        expanded = raw.astype(np.uint32)
+        expanded <<= 16
+        return expanded.view(np.float32).reshape(shape[1:])
     return np.array(
         np.memmap(path, dtype=_DTYPES[dtype], mode="r", offset=data_start + begin, shape=(row_count, )),
         copy=True,
@@ -276,7 +308,7 @@ class StreamedMiniMaxH3TextConditioner:
         prefix = f"model.language_model.layers.{index}."
 
         def w(name):
-            return mx.array(np.asarray(self.index.get(prefix + name)).astype(np.float32))
+            return self.index.get_mlx(prefix + name)
 
         # Self-attention block.
         residual = hidden

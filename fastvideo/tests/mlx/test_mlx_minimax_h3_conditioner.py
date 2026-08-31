@@ -32,6 +32,9 @@ class _ArrayIndex:
     def get(self, key: str) -> np.ndarray:
         return self.weights[key]
 
+    def get_mlx(self, key: str):
+        return mx.array(np.asarray(self.get(key), dtype=np.float32))
+
 
 def test_bf16_embedding_row_read_does_not_materialize_full_table(tmp_path, monkeypatch) -> None:
     from safetensors.torch import save_file
