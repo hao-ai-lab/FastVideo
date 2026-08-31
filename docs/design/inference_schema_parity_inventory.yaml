@@ -80,6 +80,7 @@ surfaces:
       VSA_tile_size: "VSA-H3 tile geometry request; model-specific optimization not yet represented in the typed public schema."
       inference_torch_compile: "Regional inference compile opt-in currently carried through PipelineSelection.experimental rather than CompileConfig."
       vae_parallel_decode: "MiniMax-H3 sequence-parallel VAE decode opt-in; model-specific optimization not yet represented in the typed public schema."
+      h3_sequential_load: "MiniMax-H3 sequential text-encoder then DiT/VAE load; model-specific optimization not yet represented in the typed public schema."
       vae_parallel_encode: "MiniMax-H3 sequence-parallel reference VAE encode opt-in; model-specific optimization not yet represented in the typed public schema."
       vae_parallel_decode_strategy: "Chunk-transport collective for vae_parallel_decode; model-specific optimization not yet represented in the typed public schema."
       attention_backend: "Process-wide default attention-backend request applied per component at load time; kernel-selection knob not yet represented in the typed public schema."

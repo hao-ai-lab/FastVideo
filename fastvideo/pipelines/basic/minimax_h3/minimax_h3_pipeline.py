@@ -113,7 +113,21 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
                 raise ValueError(f"MiniMax-H3 {modality} scheduler must expose shift={expected_shift:g}, got {shift}.")
 
     def _defer_denoise_modules(self, fastvideo_args: FastVideoArgs) -> bool:
-        return bool(fastvideo_args.inference_mode) and not bool(getattr(fastvideo_args, "training_mode", False))
+        if not fastvideo_args.inference_mode or bool(getattr(fastvideo_args, "training_mode", False)):
+            return False
+        requested = fastvideo_args.h3_sequential_load
+        if requested is True:
+            return True
+        if requested is False:
+            return False
+        from fastvideo.pipelines import composed_pipeline_base
+        from fastvideo.platforms import current_platform
+
+        device = composed_pipeline_base.get_local_torch_device()
+        device_id = 0 if device.index is None else int(device.index)
+        unified = bool(current_platform.has_unified_memory(device_id))
+        logger.info("MiniMax-H3 sequential module load auto=%s (unified_memory=%s)", unified, unified)
+        return unified
 
     def _denoise_modules_loaded(self) -> bool:
         return all(self.get_module(name) is not None for name in _DENOISE_MODULE_NAMES)

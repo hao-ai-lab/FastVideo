@@ -9,6 +9,7 @@ import torch
 
 import fastvideo.pipelines.composed_pipeline_base as composed_pipeline_base
 from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.utils import FlexibleArgumentParser
 from fastvideo.pipelines.basic.minimax_h3.minimax_h3_pipeline import (
     MiniMaxH3Pipeline,
     _DENOISE_MODULE_NAMES,
@@ -68,7 +69,11 @@ def test_inference_defers_dit_and_vae_until_after_conditioning(monkeypatch) -> N
 
     monkeypatch.setattr(ComposedPipelineBase, "load_modules", fake_load)
 
-    args = FastVideoArgs(model_path="unused/for-this-test", enable_stage_verification=False)
+    args = FastVideoArgs(
+        model_path="unused/for-this-test",
+        enable_stage_verification=False,
+        h3_sequential_load=True,
+    )
     pipeline = MiniMaxH3Pipeline("unused/for-this-test", args)
     pipeline.post_init()
 
@@ -124,7 +129,71 @@ def test_injected_denoise_weights_skip_the_deferred_split(monkeypatch) -> None:
 
     monkeypatch.setattr(ComposedPipelineBase, "load_modules", fake_load)
     injected = {name: _stub_module(name) for name in MiniMaxH3Pipeline._required_config_modules}
-    args = FastVideoArgs(model_path="unused/for-this-test")
+    args = FastVideoArgs(model_path="unused/for-this-test", h3_sequential_load=True)
     MiniMaxH3Pipeline("unused/for-this-test", args, loaded_modules=injected)
 
     assert loads == [list(MiniMaxH3Pipeline._required_config_modules)]
+
+
+def test_explicit_false_loads_encoder_dit_and_vae_together(monkeypatch) -> None:
+    events: list = []
+    _patch_pipeline_construction(monkeypatch, events)
+    loads: list[list[str]] = []
+
+    def fake_load(self, fastvideo_args, loaded_modules=None):
+        del fastvideo_args, loaded_modules
+        loads.append(list(self.required_config_modules))
+        return {name: _stub_module(name) for name in self.required_config_modules}
+
+    monkeypatch.setattr(ComposedPipelineBase, "load_modules", fake_load)
+    monkeypatch.setattr("fastvideo.platforms.current_platform.has_unified_memory", lambda device_id: True)
+    args = FastVideoArgs(model_path="unused/for-this-test", h3_sequential_load=False)
+    MiniMaxH3Pipeline("unused/for-this-test", args)
+
+    assert loads == [list(MiniMaxH3Pipeline._required_config_modules)]
+    assert "text_encoder" in loads[0]
+    assert all(name in loads[0] for name in _DENOISE_MODULE_NAMES)
+
+
+def test_auto_defers_on_unified_memory(monkeypatch) -> None:
+    events: list = []
+    _patch_pipeline_construction(monkeypatch, events)
+    loads: list[list[str]] = []
+
+    def fake_load(self, fastvideo_args, loaded_modules=None):
+        del fastvideo_args, loaded_modules
+        loads.append(list(self.required_config_modules))
+        return {name: _stub_module(name) for name in self.required_config_modules}
+
+    monkeypatch.setattr(ComposedPipelineBase, "load_modules", fake_load)
+    monkeypatch.setattr("fastvideo.platforms.current_platform.has_unified_memory", lambda device_id: True)
+    args = FastVideoArgs(model_path="unused/for-this-test")
+    MiniMaxH3Pipeline("unused/for-this-test", args)
+
+    assert loads
+    assert "text_encoder" in loads[0]
+    assert all(name not in loads[0] for name in _DENOISE_MODULE_NAMES)
+
+
+def test_auto_loads_together_without_unified_memory(monkeypatch) -> None:
+    events: list = []
+    _patch_pipeline_construction(monkeypatch, events)
+    loads: list[list[str]] = []
+
+    def fake_load(self, fastvideo_args, loaded_modules=None):
+        del fastvideo_args, loaded_modules
+        loads.append(list(self.required_config_modules))
+        return {name: _stub_module(name) for name in self.required_config_modules}
+
+    monkeypatch.setattr(ComposedPipelineBase, "load_modules", fake_load)
+    args = FastVideoArgs(model_path="unused/for-this-test")
+    MiniMaxH3Pipeline("unused/for-this-test", args)
+
+    assert loads == [list(MiniMaxH3Pipeline._required_config_modules)]
+
+
+def test_cli_tri_state_h3_sequential_load() -> None:
+    parser = FastVideoArgs.add_cli_args(FlexibleArgumentParser())
+    assert parser.parse_args([]).h3_sequential_load is None
+    assert parser.parse_args(["--h3-sequential-load"]).h3_sequential_load is True
+    assert parser.parse_args(["--no-h3-sequential-load"]).h3_sequential_load is False

@@ -99,6 +99,11 @@ def build_parser(description: str | None = None) -> argparse.ArgumentParser:
                         action=argparse.BooleanOptionalAction,
                         default=True,
                         help="round-robin VAE temporal chunks across sequence-parallel ranks")
+    parser.add_argument("--h3-sequential-load",
+                        action=argparse.BooleanOptionalAction,
+                        default=None,
+                        help="encode with Qwen3-VL, release it, then load DiT/VAEs. Default auto: on for "
+                        "unified-memory devices (GB10), off on discrete GPUs")
     parser.add_argument("--replicated-dit",
                         action=argparse.BooleanOptionalAction,
                         default=True,
@@ -229,6 +234,8 @@ def build_generator_config(args: argparse.Namespace) -> GeneratorConfig:
         "vae_parallel_decode": args.parallel_vae,
         "vae_parallel_decode_strategy": "gather",
     }
+    if args.h3_sequential_load is not None:
+        experimental["h3_sequential_load"] = args.h3_sequential_load
     if use_vsa:
         experimental.update({
             "VSA_sparsity": args.vsa_sparsity,
