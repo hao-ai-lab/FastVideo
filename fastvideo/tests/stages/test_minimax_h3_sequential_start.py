@@ -1,0 +1,130 @@
+# SPDX-License-Identifier: Apache-2.0
+"""CPU contracts for MiniMax-H3 Mac-style sequential module loading."""
+from __future__ import annotations
+
+from contextlib import nullcontext
+from types import SimpleNamespace
+
+import torch
+
+import fastvideo.pipelines.composed_pipeline_base as composed_pipeline_base
+from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.pipelines.basic.minimax_h3.minimax_h3_pipeline import (
+    MiniMaxH3Pipeline,
+    _DENOISE_MODULE_NAMES,
+)
+from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
+from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+
+
+class _Profiler:
+
+    def region(self, name):
+        del name
+        return nullcontext()
+
+
+def _stub_module(name: str) -> SimpleNamespace:
+    if name in {"scheduler"}:
+        return SimpleNamespace(shift=12.0, name=name)
+    if name in {"audio_scheduler"}:
+        return SimpleNamespace(shift=3.0, name=name)
+    if name == "transformer":
+        # LoRAPipeline reads exclude_lora_layers off the DiT arch config.
+        return SimpleNamespace(
+            name=name,
+            config=SimpleNamespace(arch_config=SimpleNamespace(exclude_lora_layers=[])),
+        )
+    return SimpleNamespace(name=name)
+
+
+def _patch_pipeline_construction(monkeypatch, events: list) -> None:
+    monkeypatch.setattr(
+        composed_pipeline_base,
+        "maybe_init_distributed_environment_and_model_parallel",
+        lambda *args, **kwargs: events.append(("distributed", None)),
+    )
+    monkeypatch.setattr(composed_pipeline_base, "get_local_torch_device", lambda: torch.device("cpu"))
+    monkeypatch.setattr(composed_pipeline_base, "get_world_group", lambda: SimpleNamespace(local_rank=0))
+    monkeypatch.setattr(composed_pipeline_base, "get_or_create_profiler", lambda trace_dir: _Profiler())
+    monkeypatch.setattr(composed_pipeline_base, "warmup_sequence_parallel_communication", lambda: None)
+    monkeypatch.setattr("fastvideo.platforms.current_platform.has_unified_memory", lambda device_id: False)
+    monkeypatch.setattr("fastvideo.platforms.current_platform.is_mps", lambda: False)
+
+
+def test_inference_defers_dit_and_vae_until_after_conditioning(monkeypatch) -> None:
+    events: list = []
+    _patch_pipeline_construction(monkeypatch, events)
+    loads: list[list[str]] = []
+
+    def fake_load(self, fastvideo_args, loaded_modules=None):
+        del fastvideo_args
+        requested = list(self.required_config_modules)
+        loads.append(requested)
+        modules = dict(loaded_modules or {})
+        for name in requested:
+            modules.setdefault(name, _stub_module(name))
+        return modules
+
+    monkeypatch.setattr(ComposedPipelineBase, "load_modules", fake_load)
+
+    args = FastVideoArgs(model_path="unused/for-this-test", enable_stage_verification=False)
+    pipeline = MiniMaxH3Pipeline("unused/for-this-test", args)
+    pipeline.post_init()
+
+    assert loads, "condition modules should load during construction"
+    assert "text_encoder" in loads[0]
+    assert all(name not in loads[0] for name in _DENOISE_MODULE_NAMES)
+    assert pipeline.get_module("text_encoder") is not None
+    assert pipeline.get_module("transformer") is None
+    assert list(pipeline._stage_name_mapping) == ["input_preparation_stage", "conditioning_stage"]
+
+    condition_stage = pipeline._stage_name_mapping["conditioning_stage"]
+    passthrough = lambda batch, _args: batch
+    monkeypatch.setattr(pipeline._stage_name_mapping["input_preparation_stage"], "forward", passthrough)
+    monkeypatch.setattr(condition_stage, "forward", passthrough)
+
+    original_add_denoise = pipeline._add_denoise_stages
+
+    def fake_add_denoise(*, ref2va: bool) -> None:
+        original_add_denoise(ref2va=ref2va)
+        for name in (
+                "latent_preparation_stage",
+                "denoising_stage",
+                "video_decoding_stage",
+                "audio_decoding_stage",
+        ):
+            monkeypatch.setattr(pipeline._stage_name_mapping[name], "forward", passthrough)
+
+    monkeypatch.setattr(pipeline, "_add_denoise_stages", fake_add_denoise)
+
+    batch = ForwardBatch(data_type="video", prompt="alpine dancer")
+    out = pipeline.forward(batch, args)
+
+    assert out is batch
+    assert len(loads) == 2
+    assert "transformer" in loads[1]
+    assert "vae" in loads[1]
+    assert "text_encoder" not in loads[1]
+    assert pipeline.get_module("text_encoder") is None
+    assert condition_stage.conditioner is None
+    assert pipeline.get_module("transformer") is not None
+    assert pipeline._denoise_stages_ready is True
+
+
+def test_injected_denoise_weights_skip_the_deferred_split(monkeypatch) -> None:
+    events: list = []
+    _patch_pipeline_construction(monkeypatch, events)
+    loads: list[list[str]] = []
+
+    def fake_load(self, fastvideo_args, loaded_modules=None):
+        del fastvideo_args
+        loads.append(list(self.required_config_modules))
+        return dict(loaded_modules or {})
+
+    monkeypatch.setattr(ComposedPipelineBase, "load_modules", fake_load)
+    injected = {name: _stub_module(name) for name in MiniMaxH3Pipeline._required_config_modules}
+    args = FastVideoArgs(model_path="unused/for-this-test")
+    MiniMaxH3Pipeline("unused/for-this-test", args, loaded_modules=injected)
+
+    assert loads == [list(MiniMaxH3Pipeline._required_config_modules)]
