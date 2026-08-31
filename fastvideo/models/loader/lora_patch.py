@@ -127,14 +127,14 @@ class DenseLoRAPatch:
         lora_path: str | None,
         param_names_mapping: Callable[[str], tuple[str, Any, Any]] | None = None,
         *,
+        lora_param_names_mapping: Callable[[str], tuple[str, Any, Any]] | None = None,
         strength: float = 1.0,
     ) -> DenseLoRAPatch | None:
         """Build a patch from an adapter, or ``None`` when it carries no dense payload.
 
-        ``param_names_mapping`` is the same callable the checkpoint loader uses, so
-        adapter keys are resolved into the model's own parameter names by the identical
-        rules -- an adapter written against the published checkpoint layout needs no
-        separate conversion table.
+        ``lora_param_names_mapping`` first translates adapter-specific official names
+        into the published checkpoint layout. ``param_names_mapping`` then resolves that
+        layout into the model's parameter names, matching the low-rank loader's order.
         """
         if not lora_path:
             return None
@@ -151,7 +151,7 @@ class DenseLoRAPatch:
         for path in files:
             with safe_open(path, framework="pt") as handle:
                 for key in handle.keys():
-                    resolved = _resolve(key, param_names_mapping)
+                    resolved = _resolve(key, lora_param_names_mapping, param_names_mapping)
                     if resolved is None:
                         continue
                     target, kind = resolved
@@ -235,6 +235,7 @@ class DenseLoRAPatch:
 
 def _resolve(
     key: str,
+    lora_param_names_mapping: Callable[[str], tuple[str, Any, Any]] | None,
     param_names_mapping: Callable[[str], tuple[str, Any, Any]] | None,
 ) -> tuple[str, str] | None:
     """Map an adapter key to ``(model parameter name, "add" | "set")``.
@@ -246,20 +247,37 @@ def _resolve(
         return None
     for suffix, param_suffix in ADDITIVE_SUFFIXES.items():
         if key.endswith(suffix):
-            return _map_name(key[:-len(suffix)] + param_suffix, param_names_mapping, key), "add"
+            return _map_name(
+                key[:-len(suffix)] + param_suffix,
+                lora_param_names_mapping,
+                param_names_mapping,
+                key,
+            ), "add"
     for suffix, param_suffix in REPLACEMENT_SUFFIXES.items():
         if key.endswith(suffix):
-            return _map_name(key[:-len(suffix)] + param_suffix, param_names_mapping, key), "set"
+            return _map_name(
+                key[:-len(suffix)] + param_suffix,
+                lora_param_names_mapping,
+                param_names_mapping,
+                key,
+            ), "set"
     return None
 
 
 def _map_name(
     param_name: str,
+    lora_param_names_mapping: Callable[[str], tuple[str, Any, Any]] | None,
     param_names_mapping: Callable[[str], tuple[str, Any, Any]] | None,
     source_key: str,
 ) -> str:
-    """Run the checkpoint loader's own renaming rules over a resolved parameter name."""
+    """Run the low-rank loader's two-stage renaming rules over a dense parameter."""
     param_name = param_name.replace("diffusion_model.", "")
+    if lora_param_names_mapping is not None:
+        param_name, merge_index, _ = lora_param_names_mapping(param_name)
+        if merge_index is not None:
+            raise NotImplementedError(f"LoRA dense key {source_key} resolves to a fused parameter during the "
+                                      "adapter-specific mapping; whole-tensor payloads for fused parameters "
+                                      "are not supported")
     if param_names_mapping is None:
         return param_name
     mapped, merge_index, _ = param_names_mapping(param_name)

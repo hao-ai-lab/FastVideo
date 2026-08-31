@@ -9,8 +9,9 @@ import pytest
 import torch
 from safetensors.torch import save_file
 
+from fastvideo.configs.models.dits.wanvideo import WanVideoConfig
 from fastvideo.models.loader.lora_patch import DenseLoRAPatch, normalize_lora_key
-
+from fastvideo.models.loader.utils import get_param_names_mapping
 
 
 def write_adapter(tmp_path, tensors, name="adapter_model.safetensors"):
@@ -112,6 +113,17 @@ def test_param_names_mapping_is_applied_to_dense_keys(tmp_path):
 
     patch = DenseLoRAPatch.from_adapter(path, mapping)
     assert set(patch._additive) == {"blocks.0.ff.fc_in.weight"}
+
+
+def test_official_wan_dense_key_uses_lora_then_checkpoint_mapping(tmp_path):
+    path = write_adapter(tmp_path, {"blocks.0.self_attn.q.diff": torch.zeros(4)})
+    config = WanVideoConfig()
+    patch = DenseLoRAPatch.from_adapter(
+        path,
+        get_param_names_mapping(config.param_names_mapping),
+        lora_param_names_mapping=get_param_names_mapping(config.lora_param_names_mapping),
+    )
+    assert set(patch._additive) == {"blocks.0.to_q.weight"}
 
 
 def test_fused_target_is_refused_rather_than_guessed(tmp_path):

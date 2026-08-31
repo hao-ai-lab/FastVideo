@@ -69,6 +69,7 @@ class TensorReader(Protocol):
     """Random access to one checkpoint's transformer tensors."""
 
     source: str
+    fingerprint: str
 
     @property
     def keys(self) -> set[str]: ...
@@ -76,6 +77,8 @@ class TensorReader(Protocol):
     def get_tensor(self, key: str) -> torch.Tensor: ...
 
     def get_shape(self, key: str) -> tuple[int, ...]: ...
+
+    def assert_unchanged(self) -> None: ...
 
     def __enter__(self) -> "TensorReader": ...
 
@@ -88,6 +91,7 @@ class DictTensorReader:
     def __init__(self, state_dict: dict[str, torch.Tensor], source: str) -> None:
         self.state_dict = state_dict
         self.source = source
+        self.fingerprint = f"pipeline:{source}"
 
     @property
     def keys(self) -> set[str]:
@@ -98,6 +102,9 @@ class DictTensorReader:
 
     def get_shape(self, key: str) -> tuple[int, ...]:
         return tuple(self.state_dict[key].shape)
+
+    def assert_unchanged(self) -> None:
+        return None
 
     def __enter__(self) -> "DictTensorReader":
         return self
@@ -127,11 +134,29 @@ class IndexedSafetensorsReader:
         if not self.weight_map:
             raise ValueError(f"No transformer safetensors found under {transformer_dir}")
 
-        self._stack = ExitStack()
-        self._shards = {
-            shard: self._stack.enter_context(safe_open(transformer_dir / shard, framework="pt", device="cpu"))
-            for shard in sorted(set(self.weight_map.values()))
-        }
+        shard_names = sorted(set(self.weight_map.values()))
+        identity_files = ([index_path] if index_path.is_file() else []) + [
+            transformer_dir / shard for shard in shard_names
+        ]
+        before = _file_stats(identity_files)
+        self.fingerprint = _fingerprint_files(identity_files, transformer_dir)
+        after = _file_stats(identity_files)
+        if before != after:
+            raise RuntimeError(f"Checkpoint files changed while fingerprinting {transformer_dir}")
+        self._identity_files = identity_files
+        self._file_stats = after
+
+        stack = ExitStack()
+        try:
+            shards = {
+                shard: stack.enter_context(safe_open(transformer_dir / shard, framework="pt", device="cpu"))
+                for shard in shard_names
+            }
+        except Exception:
+            stack.close()
+            raise
+        self._stack = stack
+        self._shards = shards
 
     @property
     def keys(self) -> set[str]:
@@ -142,6 +167,10 @@ class IndexedSafetensorsReader:
 
     def get_shape(self, key: str) -> tuple[int, ...]:
         return tuple(self._shards[self.weight_map[key]].get_slice(key).get_shape())
+
+    def assert_unchanged(self) -> None:
+        if _file_stats(self._identity_files) != self._file_stats:
+            raise RuntimeError(f"Checkpoint files changed during extraction: {self.transformer_dir}")
 
     def __enter__(self) -> "IndexedSafetensorsReader":
         return self
@@ -154,6 +183,8 @@ class IndexedSafetensorsReader:
 class ExtractionConfig:
     base_source: str
     finetuned_source: str
+    base_fingerprint: str
+    finetuned_fingerprint: str
     rank: int
     full_rank: bool
     min_delta: float
@@ -187,6 +218,24 @@ def _atomic_json_dump(data: Any, path: Path) -> None:
     temporary.replace(path)
 
 
+def _file_stats(paths: Sequence[Path]) -> dict[str, tuple[int, int, int]]:
+    return {
+        str(path.resolve()): (path.stat().st_size, path.stat().st_mtime_ns, path.stat().st_ino)
+        for path in paths
+    }
+
+
+def _fingerprint_files(paths: Sequence[Path], root: Path) -> str:
+    """Strong checkpoint identity used to reject stale resume shards."""
+    digest = hashlib.sha256()
+    for path in sorted(paths, key=lambda item: str(item)):
+        digest.update(str(path.relative_to(root)).encode("utf-8"))
+        with path.open("rb") as handle:
+            while chunk := handle.read(8 * 1024 * 1024):
+                digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _torch_dtype(name: str) -> torch.dtype:
     try:
         return _DTYPE_MAP[name.lower()]
@@ -207,6 +256,8 @@ def _resolve_transformer_dir(model: str, revision: str | None = None) -> Path:
     """
     path = Path(model).expanduser()
     if path.exists():
+        if revision is not None:
+            raise ValueError(f"revision={revision!r} cannot be used with local model path {path}")
         if (path / "transformer").is_dir():
             return path / "transformer"
         if (path / INDEX_FILENAME).is_file() or any(path.glob("*.safetensors")):
@@ -294,6 +345,9 @@ def _open_readers(
     finetuned_revision: str | None,
     load_mode: str,
 ) -> Iterator[tuple[TensorReader, TensorReader]]:
+    revisions_requested = base_revision is not None or finetuned_revision is not None
+    if load_mode == "pipeline" and revisions_requested:
+        raise ValueError("--base-revision/--ft-revision require indexed loading; pipeline loading cannot honor them")
     if load_mode in {"auto", "indexed"}:
         stack = ExitStack()
         try:
@@ -302,7 +356,7 @@ def _open_readers(
                 IndexedSafetensorsReader(_resolve_transformer_dir(finetuned, finetuned_revision)))
         except Exception:
             stack.close()
-            if load_mode == "indexed":
+            if load_mode == "indexed" or revisions_requested:
                 raise
             LOG.warning("Indexed loading failed; falling back to pipeline loading", exc_info=True)
         else:
@@ -441,6 +495,13 @@ def _factorize_delta(
     lora_b = (u[:, :chosen_rank].float() * sqrt_s.unsqueeze(0)).contiguous()
     lora_a = (v[:, :chosen_rank].float() * sqrt_s.unsqueeze(0)).mT.contiguous()
     return lora_a, lora_b, singular_values, method_description
+
+
+def _work_namespace(out_path: Path) -> str:
+    resolved = str(out_path.expanduser().resolve(strict=False))
+    digest = hashlib.sha256(resolved.encode("utf-8")).hexdigest()[:12]
+    stem = re.sub(r"[^A-Za-z0-9_.-]+", "-", out_path.stem).strip("-.") or "adapter"
+    return f"{stem}-{digest}"
 
 
 def _clear_work_dir(work_dir: Path) -> None:
@@ -715,7 +776,7 @@ def extract_lora_adapter(
     niter: int = 4,
     seed: int = 42,
     factor_dtype: str = "float32",
-    dense_dtype: str = "source",
+    dense_dtype: str = "float32",
     replacement_dtype: str = "source",
     exact_tensor_patterns: Sequence[str] = (),
     work_dir: str | None = None,
@@ -733,20 +794,27 @@ def extract_lora_adapter(
     out_path = Path(out).expanduser()
     if out_path.suffix != ".safetensors":
         raise ValueError(f"--out must end in .safetensors; adapters are always written as safetensors: {out_path}")
+    work_root: Path | None = None
     if work_dir is not None:
-        # --work-dir names where to put scratch, not a directory to take over.
-        effective_work_dir = Path(work_dir).expanduser() / WORK_SUBDIR
+        # --work-dir is a shared root; each output gets an independent namespace.
+        work_root = Path(work_dir).expanduser() / WORK_SUBDIR
+        effective_work_dir = work_root / _work_namespace(out_path)
     elif checkpoint is not None:
         effective_work_dir = Path(checkpoint).expanduser().with_suffix(".work")
     else:
         effective_work_dir = out_path.parent / f".{out_path.name}.work"
 
     with _open_readers(base, ft, base_revision, ft_revision, load_mode) as (base_reader, finetuned_reader):
+        if resume and (not isinstance(base_reader, IndexedSafetensorsReader)
+                       or not isinstance(finetuned_reader, IndexedSafetensorsReader)):
+            raise ValueError("--resume requires indexed safetensors so checkpoint identity can be validated")
         _validate_key_sets(base_reader, finetuned_reader)
         _validate_exact_patterns(exact_tensor_patterns, finetuned_reader.keys)
         config = ExtractionConfig(
             base_source=base_reader.source,
             finetuned_source=finetuned_reader.source,
+            base_fingerprint=base_reader.fingerprint,
+            finetuned_fingerprint=finetuned_reader.fingerprint,
             rank=rank,
             full_rank=full_rank,
             min_delta=min_delta,
@@ -764,6 +832,8 @@ def extract_lora_adapter(
         )
         manifest_path, manifest = _prepare_work_dir(effective_work_dir, config, resume)
         _extract_layers(base_reader, finetuned_reader, effective_work_dir, manifest_path, manifest, config)
+        base_reader.assert_unchanged()
+        finetuned_reader.assert_unchanged()
 
     counts: dict[str, int] = {}
     for layer in manifest["layers"].values():
@@ -800,6 +870,9 @@ def extract_lora_adapter(
         _clear_work_dir(effective_work_dir)
         with suppress(OSError):
             effective_work_dir.rmdir()
+        if work_root is not None:
+            with suppress(OSError):
+                work_root.rmdir()
     return out_path
 
 
@@ -824,7 +897,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--niter", type=int, default=4)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--factor-dtype", choices=("float32", "float16", "bfloat16"), default="float32")
-    parser.add_argument("--dense-dtype", choices=("source", "float32", "float16", "bfloat16"), default="source")
+    parser.add_argument("--dense-dtype", choices=("source", "float32", "float16", "bfloat16"), default="float32")
     parser.add_argument("--replacement-dtype", choices=("source", "float32", "float16", "bfloat16"),
                         default="source")
     parser.add_argument("--exact-tensor-pattern", action="append", default=[],

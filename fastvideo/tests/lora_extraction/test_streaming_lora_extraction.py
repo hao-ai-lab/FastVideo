@@ -163,6 +163,41 @@ def test_streaming_extraction_emits_lora_diff_and_replacement(tmp_path: Path) ->
         assert handle.metadata()["factor_dtype"] == "float16"
 
 
+@pytest.mark.parametrize(
+    ("dtype", "base_value", "finetuned_value"),
+    [
+        (torch.float16, -0.72412109375, 0.07098388671875),
+        (torch.bfloat16, 0.5078125, -0.0556640625),
+    ],
+)
+def test_dense_deltas_default_to_exact_float32(
+    tmp_path: Path,
+    dtype: torch.dtype,
+    base_value: float,
+    finetuned_value: float,
+) -> None:
+    base = {"blocks.0.norm.weight": torch.tensor([base_value], dtype=dtype)}
+    finetuned = {"blocks.0.norm.weight": torch.tensor([finetuned_value], dtype=dtype)}
+    base_dir = tmp_path / "base"
+    finetuned_dir = tmp_path / "finetuned"
+    output = tmp_path / "adapter.safetensors"
+    _write_transformer(base_dir, base)
+    _write_transformer(finetuned_dir, finetuned)
+
+    extract_lora.extract_lora_adapter(
+        base=str(base_dir),
+        ft=str(finetuned_dir),
+        out=str(output),
+        load_mode="indexed",
+        min_delta=0.0,
+    )
+
+    delta = load_file(output)["blocks.0.norm.diff"]
+    assert delta.dtype == torch.float32
+    reconstructed = (base["blocks.0.norm.weight"].float() + delta).to(dtype)
+    assert torch.equal(reconstructed, finetuned["blocks.0.norm.weight"])
+
+
 def test_standalone_parameters_use_generic_dense_suffixes(tmp_path: Path) -> None:
     base = {"blocks.0.scale_shift_table": torch.ones(4)}
     finetuned = {
@@ -343,6 +378,10 @@ def _extract(base_dir: Path, finetuned_dir: Path, output: Path, **overrides: obj
     return extract_lora.extract_lora_adapter(base=str(base_dir), ft=str(finetuned_dir), out=str(output), **kwargs)
 
 
+def _scratch_dir(work_root: Path, output: Path) -> Path:
+    return work_root / extract_lora.WORK_SUBDIR / extract_lora._work_namespace(output)
+
+
 def test_work_dir_leaves_unrelated_files_alone(tmp_path: Path) -> None:
     """--work-dir names where to put scratch, so its other contents must survive."""
     base_dir, finetuned_dir = _toy_checkpoints(tmp_path)
@@ -368,7 +407,20 @@ def test_work_dir_scratch_is_confined_to_a_subdirectory(tmp_path: Path) -> None:
              work_dir=str(work_dir),
              keep_work_dir=True)
 
-    assert (work_dir / extract_lora.WORK_SUBDIR / "manifest.json").is_file()
+    assert (_scratch_dir(work_dir, tmp_path / "adapter.safetensors") / "manifest.json").is_file()
+
+
+def test_work_dir_namespaces_different_outputs(tmp_path: Path) -> None:
+    base_dir, finetuned_dir = _toy_checkpoints(tmp_path)
+    work_dir = tmp_path / "shared_scratch"
+    outputs = [tmp_path / "rank64.safetensors", tmp_path / "rank128.safetensors"]
+
+    for output in outputs:
+        _extract(base_dir, finetuned_dir, output, work_dir=str(work_dir), keep_work_dir=True)
+
+    scratch_dirs = {_scratch_dir(work_dir, output) for output in outputs}
+    assert len(scratch_dirs) == 2
+    assert all((path / "manifest.json").is_file() for path in scratch_dirs)
 
 
 def test_unmatched_exact_tensor_pattern_is_rejected(tmp_path: Path) -> None:
@@ -408,6 +460,60 @@ def test_resume_still_rejects_a_mismatched_config(tmp_path: Path) -> None:
     _extract(base_dir, finetuned_dir, output, rank=2, keep_work_dir=True)
     with pytest.raises(ValueError, match="Resume configuration does not match"):
         _extract(base_dir, finetuned_dir, output, rank=4, resume=True)
+
+
+def test_resume_rejects_changed_checkpoint_contents(tmp_path: Path) -> None:
+    base_dir, finetuned_dir = _toy_checkpoints(tmp_path)
+    output = tmp_path / "adapter.safetensors"
+    _extract(base_dir, finetuned_dir, output, keep_work_dir=True)
+
+    _, changed = _toy_states()
+    changed["blocks.0.linear.weight"] += 1.0
+    shard = finetuned_dir / "transformer" / "diffusion_pytorch_model-00001-of-00001.safetensors"
+    save_file(changed, shard)
+
+    with pytest.raises(ValueError, match="Resume configuration does not match"):
+        _extract(base_dir, finetuned_dir, output, resume=True)
+
+
+def test_local_paths_reject_hugging_face_revisions(tmp_path: Path) -> None:
+    base_dir, finetuned_dir = _toy_checkpoints(tmp_path)
+    with pytest.raises(ValueError, match="cannot be used with local model path"):
+        _extract(base_dir,
+                 finetuned_dir,
+                 tmp_path / "adapter.safetensors",
+                 base_revision="abc123")
+
+
+def test_pipeline_mode_rejects_revisions_before_loading(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="require indexed loading"):
+        extract_lora.extract_lora_adapter(
+            base="org/base",
+            ft="org/finetuned",
+            out=str(tmp_path / "adapter.safetensors"),
+            load_mode="pipeline",
+            base_revision="abc123",
+        )
+
+
+def test_auto_mode_does_not_drop_revision_during_fallback(monkeypatch: pytest.MonkeyPatch,
+                                                           tmp_path: Path) -> None:
+    def indexed_failure(*args, **kwargs):
+        raise RuntimeError("indexed unavailable")
+
+    def forbidden_pipeline_load(*args, **kwargs):
+        raise AssertionError("pipeline fallback would ignore the requested revision")
+
+    monkeypatch.setattr(extract_lora, "_resolve_transformer_dir", indexed_failure)
+    monkeypatch.setattr(extract_lora, "load_transformer_state_dict_from_model", forbidden_pipeline_load)
+    with pytest.raises(RuntimeError, match="indexed unavailable"):
+        extract_lora.extract_lora_adapter(
+            base="org/base",
+            ft="org/finetuned",
+            out=str(tmp_path / "adapter.safetensors"),
+            load_mode="auto",
+            base_revision="abc123",
+        )
 
 
 def test_non_safetensors_output_is_rejected(tmp_path: Path) -> None:

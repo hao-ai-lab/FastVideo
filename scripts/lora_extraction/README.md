@@ -54,11 +54,13 @@ Important options:
 - `--svd-method`: `exact` or `randomized`.
 - `--randomized-q`, `--niter`, `--seed`: randomized SVD accuracy and reproducibility.
 - `--factor-dtype`: storage dtype for `lora_A` and `lora_B`.
-- `--dense-dtype`: storage dtype for exact `.diff`, `.diff_b`, and `.diff_param` payloads.
+- `--dense-dtype`: storage dtype for exact `.diff`, `.diff_b`, and `.diff_param` payloads (default: `float32`).
 - `--replacement-dtype`: storage dtype for fine-tuned-only `.set_weight` and `.set_param` parameters.
 - `--exact-tensor-pattern`: repeatable regex selecting matrices to retain as exact dense deltas.
-- `--work-dir`, `--resume`: resume a partially completed streaming extraction. Scratch is written to a
-  `fastvideo-lora-extract/` subdirectory of `--work-dir`, and only that subdirectory is cleaned up.
+- `--base-revision`, `--ft-revision`: pin Hugging Face inputs in indexed mode. Revisions are rejected for local paths and pipeline loading rather than silently ignored.
+- `--work-dir`, `--resume`: resume a partially completed streaming extraction. Scratch is written to an
+  output-specific directory under `fastvideo-lora-extract/`, and only that namespace is cleaned up. Resume requires indexed
+  safetensors and validates both checkpoints' index/shard fingerprints before reusing partial results.
 
 Fine-tuned parameters that cannot or should not be factorized are retained automatically:
 
@@ -87,6 +89,7 @@ python merge_lora.py \
 - `--adapter`: LoRA adapter file (.safetensors)
 - `--ft`: Fine-tuned model (for configuration)
 - `--output`: Output directory
+- `--allow-unmatched`: Opt in to writing an output when adapter keys cannot be applied; strict matching is the default.
 
 ## Validate Quality (Optional)
 

@@ -241,9 +241,11 @@ def maybe_load_fsdp_model(
 
     weight_iterator = safetensors_weights_iterator(weight_dir_list, to_cpu=True)
     param_names_mapping_fn = get_param_names_mapping(model.param_names_mapping)
+    lora_param_names_mapping_fn = get_param_names_mapping(model.lora_param_names_mapping)
     dense_lora_patch = DenseLoRAPatch.from_adapter(
         lora_path,
         param_names_mapping_fn,
+        lora_param_names_mapping=lora_param_names_mapping_fn,
         strength=lora_strength,
     )
     if dense_lora_patch is not None:

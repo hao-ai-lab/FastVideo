@@ -46,10 +46,12 @@ Important options:
 - `--device`: factorization device, such as `cpu` or `cuda:0`.
 - `--svd-method`: `exact` or `randomized`.
 - `--randomized-q`, `--niter`, `--seed`: randomized SVD accuracy and reproducibility.
-- `--factor-dtype`, `--dense-dtype`, `--replacement-dtype`: adapter storage precision.
+- `--factor-dtype`, `--dense-dtype`, `--replacement-dtype`: adapter storage precision. Exact dense deltas default to `float32`.
 - `--exact-tensor-pattern`: repeatable regex for a matrix that should remain an exact dense delta.
-- `--work-dir`, `--resume`: resume an interrupted streaming extraction. Scratch is written to a
-  `fastvideo-lora-extract/` subdirectory of `--work-dir`, and only that subdirectory is cleaned up.
+- `--base-revision`, `--ft-revision`: pin Hugging Face inputs in indexed mode; revisions are rejected for local paths and pipeline loading.
+- `--work-dir`, `--resume`: resume an interrupted streaming extraction. Scratch is written to an
+  output-specific namespace under `fastvideo-lora-extract/`, and only that namespace is cleaned up. Resume requires indexed
+  safetensors and validates both checkpoints' index/shard fingerprints before reusing partial results.
 
 The adapter retains changes that do not fit a low-rank product: `.diff` and `.diff_b` hold exact additive weight/bias deltas, `.diff_param` handles standalone parameters such as `scale_shift_table`, and `.set_weight`/`.set_param` hold parameters absent from the base checkpoint. Bit-identical parameters are omitted. The extractor writes an adjacent `*.report.json` with tensor counts, settings, and reconstruction residuals.
 
@@ -71,6 +73,7 @@ python scripts/lora_extraction/merge_lora.py \
 - `--adapter`: LoRA adapter file (.safetensors)
 - `--ft`: Fine-tuned model (for configuration)
 - `--output`: Output directory
+- `--allow-unmatched`: Allow an output even when adapter keys cannot be applied (strict matching is the default)
 
 ## Validate Quality (Optional)
 
