@@ -51,9 +51,16 @@ python examples/inference/basic/mlx_fasth3.py \
   --output-path ./outputs/fasth3_int6.mp4
 ```
 
-Pass `--fast` for temporal RIFE fast mode. This MLX entrypoint currently
-supports T2VA only; FL2VA, Ref2VA, spatial fast mode, and two-pass refinement
-remain follow-up work. The complete setup and conversion commands are in the
+Pass `--fast` for temporal RIFE fast mode and `--fast-spatial` for spatial
+fast mode (reduced-canvas denoise + pixel-space upsample); the two compose.
+VSA is opt-in: convert with `--include-vsa` and pass `--vsa` (see the
+[Apple Silicon guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/mps/)).
+This MLX entrypoint currently supports T2VA only; FL2VA, Ref2VA, and
+two-pass refinement remain follow-up work. INT6/INT8/INT4 are
+weight-only; VSA attention activations stay BF16. Dense-only checkpoints keep
+working for dense inference.
+
+The complete setup and conversion commands are in the
 [Apple Silicon guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/mps/).
 
 For an example running DMD+VSA inference:
@@ -111,7 +118,7 @@ python examples/inference/basic/basic_fasth3.py \
   --warmup-seed 999
 ```
 
-`all` enables the inference-only H3 fusions and regional compile. Both can change floating-point operation order, so this is a report-only performance profile rather than an exact-parity route. Use `--profile strict` to disable the H3 fusions while preserving regional compile, or `--profile strict --no-inference-torch-compile` for the eager strict route. Individual `--no-*` switches are available for portability and attribution; in particular, use `--vsa-kernel triton --no-fa4` if the Blackwell kernels are unavailable. The script preserves the warmup and each measured video under distinct paths, then prints per-request wall time plus a warmup-excluded median.
+`all` enables the inference-only H3 fusions and regional compile. Both can change floating-point operation order, so this is a report-only performance profile rather than an exact-parity route. Use `--profile strict` to disable the H3 fusions while preserving regional compile, or `--profile strict --no-inference-torch-compile` for the eager strict route. Individual `--no-*` switches are available for portability and attribution; in particular, use `--vsa-kernel triton --no-fa4` if the Blackwell kernels are unavailable. `--h3-sequential-load` / `--no-h3-sequential-load` override the auto split that releases Qwen3-VL before DiT/VAE load (on by default on GB10, off on discrete GPUs). The script preserves the warmup and each measured video under distinct paths, then prints per-request wall time plus a warmup-excluded median.
 
 One script covers each validated duration; regional compile is the fastest
 measured DiT route for all three:

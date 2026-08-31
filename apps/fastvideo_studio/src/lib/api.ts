@@ -56,6 +56,8 @@ export function getJobVideoUrl(jobId: string): string {
 
 export interface CreateJobRequest {
 	model_id: string;
+	/** Optional label; the card and output filename fall back to the prompt. */
+	name?: string;
 	prompt: string;
 	workload_type?: string;
 	job_type?: JobType;
@@ -148,6 +150,65 @@ export async function updateSettings(
 	});
 	if (!response.ok) {
 		throw new Error("Failed to update settings");
+	}
+	return response.json();
+}
+
+export type MediaType = "image" | "video" | "audio";
+
+/**
+ * Upload an image, video or audio file for a MiniMax-H3 Ref2VA reference.
+ * The server derives media_type from the extension and returns it, so callers
+ * do not have to duplicate that mapping.
+ */
+/** Create a new pending job with the same configuration as an existing one. */
+export async function duplicateJob(jobId: string): Promise<{ id: string }> {
+	const baseApiUrl = getApiBaseUrl();
+	const response = await fetch(`${baseApiUrl}/jobs/${jobId}/duplicate`, {
+		method: "POST",
+	});
+	if (!response.ok) {
+		const err = await response
+			.json()
+			.catch(() => ({ detail: "Duplicate failed" }));
+		throw new Error(err.detail || "Duplicate failed");
+	}
+	return response.json();
+}
+
+/** Edit a pending job's configuration. Started jobs are rejected by the API. */
+export async function updateJob(
+	jobId: string,
+	updates: Record<string, unknown>,
+): Promise<unknown> {
+	const baseApiUrl = getApiBaseUrl();
+	const response = await fetch(`${baseApiUrl}/jobs/${jobId}`, {
+		method: "PATCH",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(updates),
+	});
+	if (!response.ok) {
+		const err = await response.json().catch(() => ({ detail: "Update failed" }));
+		throw new Error(err.detail || "Update failed");
+	}
+	return response.json();
+}
+
+export async function uploadMedia(
+	file: File,
+): Promise<{ path: string; media_type: MediaType }> {
+	const baseApiUrl = getApiBaseUrl();
+	const formData = new FormData();
+	formData.append("file", file);
+	const response = await fetch(`${baseApiUrl}/upload-media`, {
+		method: "POST",
+		body: formData,
+	});
+	if (!response.ok) {
+		const err = await response
+			.json()
+			.catch(() => ({ detail: "Upload failed" }));
+		throw new Error(err.detail || "Upload failed");
 	}
 	return response.json();
 }

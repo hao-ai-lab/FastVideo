@@ -16,6 +16,7 @@ export interface DefaultOptions {
 	seed: number;
 	numGpus: number;
 	ditCpuOffload: boolean;
+	ditLayerwiseOffload: boolean;
 	textEncoderCpuOffload: boolean;
 	vaeCpuOffload: boolean;
 	imageEncoderCpuOffload: boolean;
@@ -44,6 +45,7 @@ export const DEFAULT_OPTIONS: DefaultOptions = {
 	seed: 1024,
 	numGpus: 1,
 	ditCpuOffload: false,
+	ditLayerwiseOffload: false,
 	textEncoderCpuOffload: false,
 	vaeCpuOffload: false,
 	imageEncoderCpuOffload: false,

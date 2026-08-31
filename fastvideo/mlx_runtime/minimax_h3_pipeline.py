@@ -33,6 +33,11 @@ from typing import Any
 import numpy as np
 
 from fastvideo.logger import init_logger
+from fastvideo.mlx_runtime.frame_upsample import (
+    DEFAULT_PIXEL_UPSAMPLE_MODE,
+    PIXEL_UPSAMPLE_MODES,
+    upsample_frames,
+)
 from fastvideo.mlx_runtime.minimax_h3 import (
     H3_MANIFEST_FILENAME,
     MINIMAX_H3_AUDIO_SHIFT,
@@ -44,12 +49,15 @@ from fastvideo.mlx_runtime.minimax_h3 import (
     audio_latent_num_frames,
     build_packed_layout,
     build_row_timesteps,
+    dense_only_vsa_error,
     load_mlx_h3_checkpoint,
+    mlx_h3_checkpoint_vsa_capable,
     temporal_position_grid,
     unpatchify_video_tokens,
     unpack_audio_tokens,
     video_latent_num_frames,
 )
+from fastvideo.mlx_runtime.minimax_h3_vsa import MiniMaxH3VSAConfig
 
 logger = init_logger(__name__)
 
@@ -62,6 +70,8 @@ class GenerationResult:
     sample_rate: int
     timings: dict[str, float] = field(default_factory=dict)
     peak_memory_gib: dict[str, float] = field(default_factory=dict)
+    vsa: dict[str, Any] = field(default_factory=dict)
+    video_decode_backend: str = "h3-vae"
 
 
 @dataclass(frozen=True)
@@ -92,6 +102,72 @@ def plan_fast_temporal(target_frames: int, factor: int = 2) -> FastTemporalPlan:
         source_frames=source_frames,
         factor=factor,
         video_temporal_scale=video_temporal_scale,
+    )
+
+
+# Resampling from a smaller decode softens output the same way on every
+# runtime; 0.4 matches the tuned Wan default without the halos that show
+# up by ~0.8.
+DEFAULT_FAST_SPATIAL_SHARPEN = 0.4
+
+
+@dataclass(frozen=True)
+class FastSpatialPlan:
+    """Reduced-canvas geometry for spatial fast mode (RIFE's spatial twin)."""
+
+    target_height: int
+    target_width: int
+    stage1_height: int
+    stage1_width: int
+    canvas_height: int
+    canvas_width: int
+    scale: int
+    upsample_mode: str
+    sharpen: float
+
+
+def plan_fast_spatial(
+    height: int,
+    width: int,
+    *,
+    scale: int = 2,
+    upsample_mode: str = DEFAULT_PIXEL_UPSAMPLE_MODE,
+    sharpen: float = DEFAULT_FAST_SPATIAL_SHARPEN,
+) -> FastSpatialPlan:
+    """Choose the smallest H3-valid canvas that covers ``target / scale``.
+
+    H3 geometry rounds *up* to the 32px model grid and center-crops after
+    decode — the same convention plain 720p generation uses via
+    ``_model_canvas_size`` — so no size the full-resolution path accepts is
+    rejected here. The return trip to the target size runs in pixel space
+    after the VAE decode, never on latents; see
+    :mod:`fastvideo.mlx_runtime.frame_upsample` for why.
+    """
+    if scale < 2:
+        raise ValueError(f"fast-spatial scale must be at least 2, got {scale}.")
+    if upsample_mode not in PIXEL_UPSAMPLE_MODES:
+        raise ValueError(f"Unsupported upsample mode: {upsample_mode!r} "
+                         f"(expected one of {', '.join(PIXEL_UPSAMPLE_MODES)})")
+    if sharpen < 0:
+        raise ValueError(f"fast_spatial_sharpen must be non-negative, got {sharpen}.")
+    target_canvas_height, target_canvas_width = _model_canvas_size(height, width)
+    stage1_height = math.ceil(height / scale)
+    stage1_width = math.ceil(width / scale)
+    canvas_height, canvas_width = _model_canvas_size(stage1_height, stage1_width)
+    if canvas_height * canvas_width >= target_canvas_height * target_canvas_width:
+        raise ValueError(
+            f"fast-spatial scale {scale} does not reduce the H3 canvas for {height}x{width} "
+            f"(stage-1 canvas {canvas_width}x{canvas_height} vs {target_canvas_width}x{target_canvas_height}).")
+    return FastSpatialPlan(
+        target_height=height,
+        target_width=width,
+        stage1_height=stage1_height,
+        stage1_width=stage1_width,
+        canvas_height=canvas_height,
+        canvas_width=canvas_width,
+        scale=scale,
+        upsample_mode=upsample_mode,
+        sharpen=sharpen,
     )
 
 
@@ -198,10 +274,16 @@ def _validate_checkpoint_step_ladder(checkpoint_dir: str | Path, num_steps: int)
             f"{num_steps}. Use the step count used during conversion (normally 4), or re-export the checkpoint.")
 
 
-def _preflight_media_dependencies(*, fast: bool, fast_sharpen: float, rife_weights_dir: str | Path | None) -> None:
+def _preflight_media_dependencies(*,
+                                  fast: bool,
+                                  fast_sharpen: float,
+                                  rife_weights_dir: str | Path | None,
+                                  fast_spatial: bool = False) -> None:
     """Fail before conditioning when required output dependencies are unavailable."""
     if shutil.which("ffmpeg") is None:
         raise RuntimeError("ffmpeg is required for MP4 muxing; install it before generation.")
+    if fast_spatial and importlib.util.find_spec("cv2") is None:
+        raise RuntimeError("OpenCV is required for --fast-spatial resampling.")
     if not fast:
         return
     if fast_sharpen > 0 and importlib.util.find_spec("cv2") is None:
@@ -224,6 +306,9 @@ class MiniMaxH3MLXPipeline:
         conditioner_dir: str | Path | None = None,
         tokenizer_dir: str | Path | None = None,
         metal_wired_limit_gib: float | None = None,
+        video_decode_backend: str = "h3-vae",
+        taeh3_checkpoint: str | Path | None = None,
+        taeh3_chunk_size: int = 5,
     ) -> None:
         import mlx.core as mx
 
@@ -241,6 +326,15 @@ class MiniMaxH3MLXPipeline:
         self.model_root = Path(model_root)
         self.dit_checkpoint = Path(mlx_dit_checkpoint)
         self.vae_dtype = vae_dtype
+        if video_decode_backend not in ("h3-vae", "taeh3"):
+            raise ValueError(f"Unknown H3 video decoder: {video_decode_backend}")
+        if taeh3_chunk_size < 1:
+            raise ValueError("taeh3_chunk_size must be positive.")
+        if taeh3_checkpoint is not None and video_decode_backend != "taeh3":
+            raise ValueError("taeh3_checkpoint requires video_decode_backend='taeh3'.")
+        self.video_decode_backend = video_decode_backend
+        self.taeh3_checkpoint = taeh3_checkpoint
+        self.taeh3_chunk_size = taeh3_chunk_size
         self.prompt_cache_dir = Path(prompt_cache_dir) if prompt_cache_dir else None
         self.conditioner_dir = Path(conditioner_dir) if conditioner_dir else self.model_root / "text_encoder"
         self.tokenizer_dir = Path(tokenizer_dir) if tokenizer_dir else self.model_root / "tokenizer"
@@ -252,6 +346,8 @@ class MiniMaxH3MLXPipeline:
             raise ValueError(f"H3 DiT patch_size must have three dimensions, got {patch_size}.")
         self._dit_patch_size = (int(patch_size[0]), int(patch_size[1]), int(patch_size[2]))
         self._dit_in_channels = int(dit_config["in_channels"])
+        self.last_dit_forward_s = 0.0
+        self.last_vsa_stats: dict[str, Any] | None = None
 
     # -- input validation (before anything heavy loads) -------------------
 
@@ -261,7 +357,7 @@ class MiniMaxH3MLXPipeline:
             missing.append(str(self.dit_checkpoint))
         vae_dir = self.model_root / "vae"
         audio_dir = self.model_root / "audio_vae"
-        if not (vae_dir.exists() and any(vae_dir.glob("*.safetensors"))):
+        if self.video_decode_backend == "h3-vae" and not (vae_dir.exists() and any(vae_dir.glob("*.safetensors"))):
             missing.append(str(vae_dir))
         if not (audio_dir.exists() and any(audio_dir.glob("*.safetensors"))):
             missing.append(str(audio_dir))
@@ -353,6 +449,7 @@ class MiniMaxH3MLXPipeline:
         seed: int,
         num_steps: int = 4,
         dit: Any | None = None,
+        vsa_config: MiniMaxH3VSAConfig | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Denoise joint latents; returns (normalized video rows, audio rows)."""
         import mlx.core as mx
@@ -366,6 +463,10 @@ class MiniMaxH3MLXPipeline:
             t0 = time.perf_counter()
             dit = load_mlx_h3_checkpoint(self.dit_checkpoint)
             logger.info("Loaded MLX H3 DiT from %s in %.1fs", self.dit_checkpoint, time.perf_counter() - t0)
+        if vsa_config is not None:
+            dit.configure_vsa(vsa_config)
+        if hasattr(dit, "reset_vsa_stats"):
+            dit.reset_vsa_stats()
 
         layout = build_packed_layout(
             len(token_tags),
@@ -377,6 +478,8 @@ class MiniMaxH3MLXPipeline:
             text_token_tags=np.asarray(token_tags, dtype=np.int64),
             video_temporal_scale=video_temporal_scale,
         )
+        if getattr(dit, "vsa_config", None) is not None and dit.vsa_config.enabled:
+            dit.prepare_vsa_geometry(layout)
 
         video_scheduler = MiniMaxH3SchedulerState.create(MINIMAX_H3_VIDEO_SHIFT, num_steps)
         audio_scheduler = MiniMaxH3SchedulerState.create(MINIMAX_H3_AUDIO_SHIFT, num_steps)
@@ -399,6 +502,7 @@ class MiniMaxH3MLXPipeline:
         x_v = mx.random.normal((target_video_rows, dit.patch_dim), key=video_key)
         x_a = mx.random.normal((target_audio_rows, dit.audio_in_channels), key=audio_key)
         text = mx.array(text_rows.astype(np.float32))
+        dit_forward_s = 0.0
 
         for step_index in range(num_steps):
             video_t = float(video_scheduler.timesteps[step_index])
@@ -410,6 +514,7 @@ class MiniMaxH3MLXPipeline:
                 condition_video_timestep=max(video_t, MINIMAX_H3_KEYFRAME_NOISE_AUG),
                 condition_audio_timestep=1.0,
             )
+            step_started = time.perf_counter()
             video_velocity, audio_velocity = dit.forward_with_cache(
                 x_v,
                 x_a,
@@ -417,6 +522,7 @@ class MiniMaxH3MLXPipeline:
                 layout=layout,
                 step_timesteps=unique,
                 row_timestep_inverse=inverse,
+                step_index=step_index,
             )
             # Only target rows are being denoised (no conditions in T2VA).
             video_velocity = video_velocity[layout.num_condition_video_rows:]
@@ -424,6 +530,28 @@ class MiniMaxH3MLXPipeline:
             x_v = video_scheduler.step(video_velocity, step_index, x_v)
             x_a = audio_scheduler.step(audio_velocity, step_index, x_a)
             mx.eval(x_v, x_a)
+            dit_forward_s += time.perf_counter() - step_started
+
+        self.last_dit_forward_s = dit_forward_s
+        stats = getattr(dit, "last_vsa_stats", None)
+        self.last_vsa_stats = None if stats is None else {
+            "enabled": bool(getattr(dit.vsa_config, "enabled", False)),
+            "configured_sparsity": stats.configured_sparsity,
+            "layer_sparsity": stats.layer_sparsity,
+            "achieved_sparsity": stats.achieved_sparsity,
+            "tile_size": stats.tile_size,
+            "prefix_mode": stats.prefix_mode,
+            "impl": stats.impl,
+            "num_prefix_tiles": stats.num_prefix_tiles,
+            "num_video_tiles": stats.num_video_tiles,
+            "video_keep": stats.video_keep,
+            "dense_fallback_reason": stats.dense_fallback_reason,
+            "attention_calls": stats.attention_calls,
+            "sparse_calls": stats.sparse_calls,
+            "impl_counts": stats.impl_counts,
+            "fallback_reasons": stats.fallback_reasons,
+            "checkpoint_vsa_capable": bool(getattr(dit, "vsa_capable", False)),
+        }
 
         video_rows = np.asarray(x_v, dtype=np.float32)
         audio_rows = np.asarray(x_a, dtype=np.float32)
@@ -447,6 +575,22 @@ class MiniMaxH3MLXPipeline:
         from fastvideo.mlx_runtime.minimax_h3_video_vae import mlx_h3_video_vae_from_dir
 
         geometry = self.resolve_geometry(height, width, num_frames, enforce_duration=False)
+        if self.video_decode_backend == "taeh3":
+            from fastvideo.mlx_runtime.minimax_h3_taeh3 import decode_latents_taeh3_mlx
+
+            if self._dit_in_channels != 24:
+                raise ValueError("TAEH3 requires a 24-channel H3 checkpoint.")
+            latents = unpatchify_video_tokens(video_rows, geometry["latent_frame_count"], geometry["latent_height"],
+                                              geometry["latent_width"], self._dit_in_channels, self._dit_patch_size)
+            pixels = decode_latents_taeh3_mlx(latents,
+                                              checkpoint_path=self.taeh3_checkpoint,
+                                              dtype=self.vae_dtype,
+                                              chunk_size=self.taeh3_chunk_size)
+            frames = (pixels[0] * 255.0).astype(np.uint8)
+            if frames.shape != (geometry["num_frames"], height, width, 3):
+                raise RuntimeError(f"TAEH3 produced unexpected frame shape: {frames.shape}")
+            _cleanup_mlx()
+            return frames
         vae = mlx_h3_video_vae_from_dir(self.model_root / "vae", include_encoder=False, storage_dtype=self.vae_dtype)
         expected_height = height // vae.spatial_compression_ratio
         expected_width = width // vae.spatial_compression_ratio
@@ -576,21 +720,32 @@ class MiniMaxH3MLXPipeline:
     # -- end-to-end ----------------------------------------------------------
 
     def generate(
-        self,
-        prompt: str,
-        *,
-        output_path: str | Path,
-        height: int = 480,
-        width: int = 832,
-        num_frames: int = 124,
-        seed: int = 0,
-        num_steps: int = 4,
-        save_frames: bool = False,
-        tiled_video_decode: bool = True,
-        fast: bool = False,
-        fast_factor: int = 2,
-        fast_sharpen: float = 0.6,
-        rife_weights_dir: str | Path | None = None,
+            self,
+            prompt: str,
+            *,
+            output_path: str | Path,
+            height: int = 480,
+            width: int = 832,
+            num_frames: int = 124,
+            seed: int = 0,
+            num_steps: int = 4,
+            save_frames: bool = False,
+            tiled_video_decode: bool = True,
+            fast: bool = False,
+            fast_factor: int = 2,
+            fast_sharpen: float = 0.6,
+            rife_weights_dir: str | Path | None = None,
+            fast_spatial: bool = False,
+            fast_spatial_scale: int = 2,
+            fast_spatial_upsample_mode: str = DEFAULT_PIXEL_UPSAMPLE_MODE,
+            fast_spatial_sharpen: float = DEFAULT_FAST_SPATIAL_SHARPEN,
+            vsa: bool = False,
+            vsa_sparsity: float = 0.9,
+            vsa_tile_size: int = 64,
+            vsa_prefix_mode: str = "exempt",
+            vsa_dense_first_n_steps: int = 0,
+            vsa_dense_layers: tuple[int, ...] = (),
+            vsa_impl: str = "auto",
     ) -> GenerationResult:
         timings: dict[str, float] = {}
         peaks: dict[str, float] = {}
@@ -598,12 +753,34 @@ class MiniMaxH3MLXPipeline:
         if fast_sharpen < 0:
             raise ValueError(f"fast_sharpen must be non-negative, got {fast_sharpen}.")
         _validate_checkpoint_step_ladder(self.dit_checkpoint, num_steps)
+        vsa_config = MiniMaxH3VSAConfig(
+            enabled=vsa,
+            sparsity=vsa_sparsity,
+            tile_size=vsa_tile_size,
+            prefix_mode=vsa_prefix_mode,  # type: ignore[arg-type]
+            dense_first_n_steps=vsa_dense_first_n_steps,
+            dense_layers=vsa_dense_layers,
+            impl=vsa_impl,  # type: ignore[arg-type]
+        ) if vsa else MiniMaxH3VSAConfig()
+        if vsa_config.enabled and not mlx_h3_checkpoint_vsa_capable(self.dit_checkpoint):
+            raise dense_only_vsa_error(self.dit_checkpoint)
+        spatial_plan = plan_fast_spatial(
+            height,
+            width,
+            scale=fast_spatial_scale,
+            upsample_mode=fast_spatial_upsample_mode,
+            sharpen=fast_spatial_sharpen,
+        ) if fast_spatial else None
         _preflight_media_dependencies(
             fast=fast,
             fast_sharpen=fast_sharpen,
             rife_weights_dir=rife_weights_dir,
+            fast_spatial=fast_spatial,
         )
-        canvas_height, canvas_width = _model_canvas_size(height, width)
+        if spatial_plan is not None:
+            canvas_height, canvas_width = spatial_plan.canvas_height, spatial_plan.canvas_width
+        else:
+            canvas_height, canvas_width = _model_canvas_size(height, width)
         target_geometry = self.resolve_geometry(canvas_height, canvas_width, num_frames)
         fast_plan = plan_fast_temporal(target_geometry["num_frames"], fast_factor) if fast else None
         video_num_frames = fast_plan.source_frames if fast_plan is not None else target_geometry["num_frames"]
@@ -615,7 +792,7 @@ class MiniMaxH3MLXPipeline:
             enforce_duration=fast_plan is None,
         )
         logger.info(
-            "Geometry: output=%dx%dx%d model=%dx%dx%d audio_frames=%d fast=%s",
+            "Geometry: output=%dx%dx%d model=%dx%dx%d audio_frames=%d fast=%s fast_spatial=%s",
             width,
             height,
             target_geometry["num_frames"],
@@ -624,7 +801,16 @@ class MiniMaxH3MLXPipeline:
             video_geometry["num_frames"],
             target_geometry["num_frames"],
             fast_plan,
+            spatial_plan,
         )
+
+        if self.video_decode_backend == "taeh3":
+            from fastvideo.mlx_runtime.minimax_h3_taeh3 import ensure_taeh3_checkpoint
+
+            started = time.perf_counter()
+            ensure_taeh3_checkpoint(self.taeh3_checkpoint)
+            timings["decoder_prepare_s"] = time.perf_counter() - started
+            logger.warning("TAEH3 is an approximate preview decoder; reconstruction differs from the full H3 VAE.")
 
         _reset_peak_memory()
         started = time.perf_counter()
@@ -645,8 +831,10 @@ class MiniMaxH3MLXPipeline:
             video_temporal_scale=video_temporal_scale,
             seed=seed,
             num_steps=num_steps,
+            vsa_config=vsa_config,
         )
         timings["denoise_s"] = time.perf_counter() - started
+        timings["dit_forward_s"] = float(getattr(self, "last_dit_forward_s", 0.0))
         peaks["denoise_gib"] = _peak_memory_gib()
         del text_rows
         _cleanup_mlx()
@@ -660,7 +848,10 @@ class MiniMaxH3MLXPipeline:
             num_frames=video_geometry["num_frames"],
             tiled=tiled_video_decode,
         )
-        frames = _center_crop_frames(frames, height, width)
+        if spatial_plan is not None:
+            frames = _center_crop_frames(frames, spatial_plan.stage1_height, spatial_plan.stage1_width)
+        else:
+            frames = _center_crop_frames(frames, height, width)
         timings["video_decode_s"] = time.perf_counter() - started
         peaks["video_decode_gib"] = _peak_memory_gib()
         _cleanup_mlx()
@@ -677,7 +868,8 @@ class MiniMaxH3MLXPipeline:
                     target_geometry["num_frames"],
                     model=model,
                 )
-                interpolated = _sharpen_frames(interpolated, fast_sharpen)
+                if spatial_plan is None:
+                    interpolated = _sharpen_frames(interpolated, fast_sharpen)
                 frames = np.stack(interpolated)
                 if frames.shape[0] != target_geometry["num_frames"]:
                     raise RuntimeError(
@@ -690,6 +882,22 @@ class MiniMaxH3MLXPipeline:
                 del model
                 _cleanup_mlx()
 
+        if spatial_plan is not None:
+            started = time.perf_counter()
+            # One sharpen pass, at full resolution: RIFE and the resample soften
+            # for the same reason, so the stronger requested amount is applied
+            # once instead of stacking two unsharp masks.
+            sharpen = spatial_plan.sharpen if fast_plan is None else max(spatial_plan.sharpen, fast_sharpen)
+            frames = np.stack(
+                upsample_frames(
+                    frames,
+                    width=spatial_plan.target_width,
+                    height=spatial_plan.target_height,
+                    mode=spatial_plan.upsample_mode,
+                    sharpen=sharpen,
+                ))
+            timings["spatial_upsample_s"] = time.perf_counter() - started
+
         _reset_peak_memory()
         started = time.perf_counter()
         waveform = self.decode_audio(audio_rows, num_frames=target_geometry["num_frames"])
@@ -700,6 +908,9 @@ class MiniMaxH3MLXPipeline:
         started = time.perf_counter()
         video_path = self.mux(frames, waveform, output_path)
         timings["mux_s"] = time.perf_counter() - started
+        timings["generate_s"] = sum(
+            timings.get(key, 0.0) for key in ("decoder_prepare_s", "condition_s", "denoise_s", "video_decode_s",
+                                              "rife_s", "spatial_upsample_s", "audio_decode_s", "mux_s"))
 
         result = GenerationResult(
             video_path=str(video_path),
@@ -708,6 +919,11 @@ class MiniMaxH3MLXPipeline:
             sample_rate=32000,
             timings=timings,
             peak_memory_gib=peaks,
+            video_decode_backend=self.video_decode_backend,
+            vsa=getattr(self, "last_vsa_stats", None) or {
+                "enabled": vsa_config.enabled,
+                "checkpoint_vsa_capable": mlx_h3_checkpoint_vsa_capable(self.dit_checkpoint),
+            },
         )
         logger.info("Generation complete: %s | timings=%s peaks=%s", video_path, timings, peaks)
         return result
