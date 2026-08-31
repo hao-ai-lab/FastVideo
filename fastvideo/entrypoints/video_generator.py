@@ -27,6 +27,7 @@ import torchvision
 from einops import rearrange
 
 from fastvideo.api.compat import (
+    REQUEST_BATCH_EXTRA_PASSTHROUGH_FIELDS,
     expand_request_prompt_batch,
     generator_config_to_fastvideo_args,
     legacy_from_pretrained_to_config,
@@ -34,6 +35,7 @@ from fastvideo.api.compat import (
     load_generator_config_from_file,
     normalize_generation_request,
     normalize_generator_config,
+    request_to_batch_extra,
     request_to_pipeline_overrides,
     request_to_sampling_param,
 )
@@ -65,18 +67,7 @@ except ImportError:
 logger = init_logger(__name__)
 _FFMPEG_ENCODER_OPTION_CACHE: dict[tuple[str, str, str], bool] = {}
 
-_BATCH_EXTRA_PASSTHROUGH_KEYS: tuple[str, ...] = (
-    "ltx2_audio_latents",
-    "ltx2_audio_clean_latent",
-    "ltx2_audio_denoise_mask",
-    "audio_num_frames",
-    "video_position_offset_sec",
-    # MiniMax-H3 VSA per-request knobs (read by the H3 denoising stage;
-    # sparsity itself flows through the existing ForwardBatch.VSA_sparsity)
-    "vsa_mode",
-    "vsa_dense_first_n_steps",
-    "vsa_dense_layers",
-)
+_BATCH_EXTRA_PASSTHROUGH_KEYS = tuple(REQUEST_BATCH_EXTRA_PASSTHROUGH_FIELDS)
 
 _FROM_PRETRAINED_CONVENIENCE_KWARGS = frozenset({
     "num_gpus",
@@ -99,6 +90,8 @@ _FROM_PRETRAINED_CONVENIENCE_KWARGS = frozenset({
     "pin_cpu_memory",
     "enable_torch_compile",
     "torch_compile_kwargs",
+    "lora_path",
+    "lora_strength",
     "output_type",
     "nvfp4_fa4",
 })
@@ -518,10 +511,12 @@ class VideoGenerator:
             request,
             model_path=self.fastvideo_args.model_path,
         )
+        batch_extra = request_to_batch_extra(request)
         result = self._generate_video_impl(
             prompt=request.prompt,
             sampling_param=sampling_param,
             fastvideo_args=fastvideo_args,
+            **batch_extra,
         )
         return self._wrap_legacy_result(result)
 

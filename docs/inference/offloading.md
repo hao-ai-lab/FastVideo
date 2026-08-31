@@ -21,6 +21,19 @@ pool there, so offload adds transfers and duplicate residency instead of freeing
 memory. CUDA FSDP sharding remains enabled when requested; MPS continues to
 disable FSDP. `pin_cpu_memory` is not an offload mode and is left unchanged.
 
+MiniMax H3 CUDA inference can use a second lever that does not copy weights to a
+host pool: load the Qwen3-VL text encoder, run conditioning, then release that
+encoder before loading the DiT and video/audio VAEs. `h3_sequential_load`
+defaults to auto (`None`): on for unified-memory devices such as GB10, off on
+discrete GPUs. Pass `--h3-sequential-load` to force it, or
+`--no-h3-sequential-load` to keep the encoder resident for later `generate()`
+calls on the same worker. Sequential load currently cannot re-encode a new prompt
+on that worker; start a new generator until prompt-cache reload exists. The MLX
+FastH3 runtime always uses this phase order. When host offload is off, DiT
+safetensors are read onto the accelerator instead of CPU-then-copy.
+Input-preparation geometry (spatial ratio, latent channels, audio sample rate)
+comes from the VAE arch configs until those weights load.
+
 ## Behavior Explanation
 
 !!! note
@@ -64,6 +77,25 @@ This option introduces negligible performance overhead.
 #### Usage Recommendation
 
 We recommend enabling this option for single GPU usage. This option is not compatible with FSDP.
+
+### `h3_sequential_load`
+
+MiniMax H3 only. When enabled, the pipeline loads Qwen3-VL, runs conditioning,
+releases that encoder, then loads the DiT and VAEs. Default is auto: enabled on
+unified-memory accelerators, disabled on discrete GPUs.
+
+#### Performance Impact
+
+On GB10 / Spark this is required so encoder, DiT, and VAE weights are not all
+resident in one unified pool. On discrete GPUs (for example 4×GB200) sequential
+load is unnecessary and it blocks a second `generate()` on the same worker
+because the encoder has been released.
+
+#### Usage Recommendation
+
+Leave the default on Spark / DGX Spark. Force `--h3-sequential-load` only when
+you need the split on a discrete GPU. Use `--no-h3-sequential-load` when you
+need more than one prompt per worker and have enough memory to keep the encoder.
 
 ### `text_encoder_cpu_offload`
 

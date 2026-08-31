@@ -10,7 +10,9 @@ from __future__ import annotations
 import atexit
 import collections
 import contextlib
+import copy
 import enum
+import json
 import logging
 import logging.handlers
 import multiprocessing as mp
@@ -123,10 +125,13 @@ class LogBufferHandler(logging.Handler):
 class Job:
     id: str
     model_id: str
-    prompt: str
+    name: str = ""
+    prompt: str = ""
     workload_type: str = "t2v"
     job_type: str = "inference"
     image_path: str = ""
+    last_image_path: str = ""
+    references: list[dict[str, Any]] = field(default_factory=list)
     status: JobStatus = JobStatus.PENDING
     created_at: float = field(default_factory=time.time)
     started_at: float | None = None
@@ -145,6 +150,7 @@ class Job:
     negative_prompt: str = ""
     num_gpus: int = 1
     dit_cpu_offload: bool = False
+    dit_layerwise_offload: bool = False
     text_encoder_cpu_offload: bool = False
     vae_cpu_offload: bool = False
     image_encoder_cpu_offload: bool = False
@@ -180,10 +186,13 @@ class Job:
         return {
             "id": self.id,
             "model_id": self.model_id,
+            "name": self.name,
             "prompt": self.prompt,
             "workload_type": self.workload_type,
             "job_type": self.job_type,
             "image_path": self.image_path,
+            "last_image_path": self.last_image_path,
+            "references": self.references,
             "status": self.status.value,
             "created_at": self.created_at,
             "started_at": self.started_at,
@@ -202,6 +211,7 @@ class Job:
             "negative_prompt": self.negative_prompt,
             "num_gpus": self.num_gpus,
             "dit_cpu_offload": self.dit_cpu_offload,
+            "dit_layerwise_offload": self.dit_layerwise_offload,
             "text_encoder_cpu_offload": self.text_encoder_cpu_offload,
             "vae_cpu_offload": self.vae_cpu_offload,
             "image_encoder_cpu_offload": self.image_encoder_cpu_offload,
@@ -230,6 +240,75 @@ class Job:
             "progress_msg": self._log_buf.progress_msg,
             "phase": self._log_buf.phase,
         }
+
+
+MINIMAX_H3_REF2VA_PIPELINE = "MiniMaxH3Ref2VAModularPipeline"
+
+
+def _build_h3_references(raw: list[dict[str, Any]]) -> list[Any]:
+    """Turn the API's reference dicts into MiniMaxH3Reference objects.
+
+    Imported lazily so the API server starts without pulling in fastvideo.
+    """
+    from fastvideo.pipelines.basic.minimax_h3 import MiniMaxH3Reference
+
+    built = []
+    for i, ref in enumerate(raw):
+        source = (ref or {}).get("source")
+        if not source:
+            raise ValueError(f"reference {i} has no source")
+        if not os.path.isfile(source):
+            raise ValueError(f"reference {i} source not found: {source}")
+        kwargs: dict[str, Any] = {
+            "source": source,
+            "media_type": (ref.get("media_type") or "image"),
+        }
+        for opt in ("soundtrack", "fps", "sample_rate"):
+            if ref.get(opt) not in (None, ""):
+                kwargs[opt] = ref[opt]
+        built.append(MiniMaxH3Reference(**kwargs))
+    return built
+
+
+JOB_LOG_FILENAME = "out.log"
+
+
+def _job_log_path(output_dir: str, job_id: str) -> str:
+    """Each job's log lives beside its outputs: <output_dir>/<job_id>/out.log."""
+    return os.path.join(output_dir, job_id, JOB_LOG_FILENAME)
+
+
+def _decode_references(value: Any) -> list[dict[str, Any]]:
+    """Reference lists round-trip through the DB as JSON text."""
+    if not value:
+        return []
+    if isinstance(value, list):
+        return list(value)
+    try:
+        decoded = json.loads(value)
+    except (TypeError, ValueError):
+        logger.warning("Could not decode stored references: %r", value)
+        return []
+    return list(decoded) if isinstance(decoded, list) else []
+
+
+def _generator_is_alive(generator: Any) -> bool:
+    """True if the generator's worker processes are all still running.
+
+    A cached VideoGenerator holds a MultiprocExecutor whose workers are separate
+    processes; nothing notices when they exit. Probing `proc.is_alive()` is what
+    the executor itself uses during shutdown. Anything unexpected in the object
+    graph is treated as alive so a probe failure can never wedge the cache.
+    """
+    executor = getattr(generator, "executor", None)
+    workers = getattr(executor, "workers", None)
+    if not workers:
+        return True
+    try:
+        return all(w.proc.is_alive() for w in workers)
+    except Exception:
+        logger.debug("Worker liveness probe failed", exc_info=True)
+        return True
 
 
 class JobRunner:
@@ -276,7 +355,7 @@ class JobRunner:
         """Populate job's log buffer from its log file if it exists."""
         path = job.log_file_path
         if not path:
-            path = os.path.join(self.log_dir, f"{job.id}.log")
+            path = _job_log_path(self.output_dir, job.id)
         if not os.path.isfile(path):
             return
         try:
@@ -314,10 +393,13 @@ class JobRunner:
                 job = Job(
                     id=row["id"],
                     model_id=row["model_id"],
+                    name=row.get("name", "") or "",
                     prompt=row["prompt"],
                     workload_type=row.get("workload_type", "t2v"),
                     job_type=row.get("job_type", "inference"),
                     image_path=row.get("image_path", "") or "",
+                    last_image_path=row.get("last_image_path", "") or "",
+                    references=_decode_references(row.get("references")),
                     data_path=row.get("data_path", "") or "",
                     max_train_steps=row.get("max_train_steps", 1000),
                     train_batch_size=row.get("train_batch_size", 1),
@@ -350,6 +432,7 @@ class JobRunner:
                     negative_prompt=row.get("negative_prompt", "") or "",
                     num_gpus=row.get("num_gpus", 1),
                     dit_cpu_offload=row.get("dit_cpu_offload", False),
+                    dit_layerwise_offload=row.get("dit_layerwise_offload", False),
                     text_encoder_cpu_offload=row.get("text_encoder_cpu_offload", False),
                     vae_cpu_offload=row.get("vae_cpu_offload", False),
                     image_encoder_cpu_offload=row.get("image_encoder_cpu_offload", False),
@@ -394,9 +477,12 @@ class JobRunner:
         job_id: str,
         model_id: str,
         prompt: str,
+        name: str = "",
         workload_type: str = "t2v",
         job_type: str = "inference",
         image_path: str = "",
+        last_image_path: str = "",
+        references: list[dict[str, Any]] | None = None,
         data_path: str = "",
         max_train_steps: int = 1000,
         train_batch_size: int = 1,
@@ -422,6 +508,7 @@ class JobRunner:
         num_gpus: int = 1,
         negative_prompt: str = "",
         dit_cpu_offload: bool = False,
+        dit_layerwise_offload: bool = False,
         text_encoder_cpu_offload: bool = False,
         vae_cpu_offload: bool = False,
         image_encoder_cpu_offload: bool = False,
@@ -435,10 +522,13 @@ class JobRunner:
         job = Job(
             id=job_id,
             model_id=model_id,
+            name=(name or "").strip(),
             prompt=prompt.strip(),
             workload_type=workload_type or "t2v",
             job_type=job_type or "inference",
             image_path=image_path or "",
+            last_image_path=last_image_path or "",
+            references=list(references or []),
             data_path=data_path or "",
             max_train_steps=max_train_steps,
             train_batch_size=train_batch_size,
@@ -464,6 +554,7 @@ class JobRunner:
             negative_prompt=negative_prompt or "",
             num_gpus=num_gpus,
             dit_cpu_offload=dit_cpu_offload,
+            dit_layerwise_offload=dit_layerwise_offload,
             text_encoder_cpu_offload=text_encoder_cpu_offload,
             vae_cpu_offload=vae_cpu_offload,
             image_encoder_cpu_offload=image_encoder_cpu_offload,
@@ -520,6 +611,84 @@ class JobRunner:
             logger.warning("Failed to delete job %s from database: %s", job_id, exc)
         logger.info("Deleted job %s", job.id)
         return True
+
+    CONFIG_FIELDS: tuple[str, ...] = (
+        "model_id",
+        "name",
+        "prompt",
+        "workload_type",
+        "job_type",
+        "image_path",
+        "last_image_path",
+        "references",
+        "negative_prompt",
+        "num_inference_steps",
+        "num_frames",
+        "height",
+        "width",
+        "guidance_scale",
+        "guidance_rescale",
+        "fps",
+        "seed",
+        "num_gpus",
+        "dit_cpu_offload",
+        "dit_layerwise_offload",
+        "text_encoder_cpu_offload",
+        "vae_cpu_offload",
+        "image_encoder_cpu_offload",
+        "use_fsdp_inference",
+        "enable_torch_compile",
+        "vsa_sparsity",
+        "tp_size",
+        "sp_size",
+        "data_path",
+        "max_train_steps",
+        "train_batch_size",
+        "learning_rate",
+        "num_latent_t",
+        "validation_dataset_file",
+        "lora_rank",
+        "dmd_use_vsa",
+        "dmd_vsa_sparsity",
+        "dmd_denoising_steps",
+        "real_score_guidance_scale",
+        "generator_update_interval",
+        "real_score_model_path",
+        "fake_score_model_path",
+    )
+
+    def duplicate_job(self, job_id: str, new_job_id: str) -> Job:
+        """Create a new pending job with an existing job's configuration.
+
+        Runtime state (status, timings, logs, outputs) is not carried over.
+        """
+        with self._jobs_lock:
+            source = self._jobs.get(job_id)
+        if source is None:
+            raise ValueError(f"Job {job_id} not found")
+        config = {f: copy.deepcopy(getattr(source, f)) for f in self.CONFIG_FIELDS}
+        return self.create_job(job_id=new_job_id, **config)
+
+    #: Editable exactly when startable: the same set start_job() accepts.
+    EDITABLE_STATUSES = (JobStatus.PENDING, JobStatus.FAILED, JobStatus.STOPPED)
+
+    def update_job_config(self, job_id: str, updates: dict[str, Any]) -> Job:
+        """Edit the configuration of a job that has not produced a result."""
+        with self._jobs_lock:
+            job = self._jobs.get(job_id)
+        if job is None:
+            raise ValueError(f"Job {job_id} not found")
+        if job.status not in self.EDITABLE_STATUSES:
+            allowed = ", ".join(s.value for s in self.EDITABLE_STATUSES)
+            raise ValueError(f"Job is {job.status.value}; only {allowed} jobs can be edited. "
+                             "Duplicate it instead.")
+        unknown = set(updates) - set(self.CONFIG_FIELDS)
+        if unknown:
+            raise ValueError(f"Not editable: {', '.join(sorted(unknown))}")
+        for field_name, value in updates.items():
+            setattr(job, field_name, value)
+        self._save_job(job)
+        return job
 
     def start_job(self, job_id: str) -> Job:
         """Start (or restart) a pending / stopped / failed job.
@@ -623,6 +792,8 @@ class JobRunner:
         workload_type: str,
         num_gpus: int,
         dit_cpu_offload: bool = False,
+        dit_layerwise_offload: bool = False,
+        override_pipeline_cls_name: str | None = None,
         text_encoder_cpu_offload: bool = False,
         vae_cpu_offload: bool = False,
         image_encoder_cpu_offload: bool = False,
@@ -638,6 +809,10 @@ class JobRunner:
             workload_type,
             num_gpus,
             dit_cpu_offload,
+            dit_layerwise_offload,
+            # Ref2VA loads different DiT weights (transformer_ref), so the
+            # override must key the cache or a t2v/i2v generator gets reused.
+            override_pipeline_cls_name,
             text_encoder_cpu_offload,
             vae_cpu_offload,
             image_encoder_cpu_offload,
@@ -650,8 +825,21 @@ class JobRunner:
 
         # Generators are cached by model_id and configuration parameters
         with self._generators_lock:
-            if cache_key in self._generators:
-                return self._generators[cache_key]
+            cached = self._generators.get(cache_key)
+            if cached is not None:
+                if _generator_is_alive(cached):
+                    return cached
+                # Workers can exit while a generator sits idle in the cache;
+                # reusing it fails every later job with the same config.
+                logger.warning(
+                    "Cached generator for %s has dead workers; reloading.",
+                    model_id,
+                )
+                self._generators.pop(cache_key, None)
+                try:
+                    cached.shutdown()
+                except Exception:
+                    logger.debug("Shutdown of the dead generator failed", exc_info=True)
 
         # Import lazily so starting the server is fast even without a GPU.
         from fastvideo import VideoGenerator
@@ -677,6 +865,11 @@ class JobRunner:
         gen = VideoGenerator.from_pretrained(
             model_id,
             workload_type=workload_type,
+            num_gpus=num_gpus,
+            dit_layerwise_offload=dit_layerwise_offload,
+            **({
+                "override_pipeline_cls_name": override_pipeline_cls_name
+            } if override_pipeline_cls_name else {}),
             dit_cpu_offload=dit_cpu_offload,
             text_encoder_cpu_offload=text_encoder_cpu_offload,
             vae_cpu_offload=vae_cpu_offload,
@@ -706,10 +899,9 @@ class JobRunner:
     def _run_training_job(self, job: Job):
         """Run a finetuning, distillation, or LoRA job via subprocess."""
         buf = job._log_buf
-        os.makedirs(self.log_dir, exist_ok=True)
-        job.log_file_path = os.path.join(self.log_dir, f"{job.id}.log")
         job_output_dir = os.path.join(self.output_dir, job.id)
         os.makedirs(job_output_dir, exist_ok=True)
+        job.log_file_path = _job_log_path(self.output_dir, job.id)
 
         if not job.data_path or not os.path.isdir(job.data_path):
             job.status = JobStatus.FAILED
@@ -827,8 +1019,8 @@ class JobRunner:
 
     def _run_inference_job(self, job: Job):
         buf = job._log_buf
-        os.makedirs(self.log_dir, exist_ok=True)
-        job.log_file_path = os.path.join(self.log_dir, f"{job.id}.log")
+        os.makedirs(os.path.join(self.output_dir, job.id), exist_ok=True)
+        job.log_file_path = _job_log_path(self.output_dir, job.id)
 
         # Add file handler to persist logs
         file_handler = logging.FileHandler(job.log_file_path, mode='w', encoding='utf-8')
@@ -875,62 +1067,45 @@ class JobRunner:
             buf.phase = "loading model"
             logger.info("Loading model...")
 
-            # Run generator creation in a background thread so we
-            # can poll _stop_event while the (potentially slow)
-            # model download / load is in progress.
-            _gen_result: list[Any] = []
-            _gen_error: list[BaseException] = []
+            # The generator MUST be created on this thread: building it spawns
+            # the executor's worker processes, and they are torn down if the
+            # creating thread exits. Running it in a helper thread (to poll
+            # _stop_event during load) made every collective_rpc fail with
+            # ConnectionResetError.
+            if job._stop_event.is_set():
+                job.status = JobStatus.STOPPED
+                job.finished_at = time.time()
+                self._save_job(job)
+                logger.warning("Job %s stopped before model loading", job.id)
+                buf.phase = "stopped"
+                return
 
-            def _load_generator() -> None:
-                try:
-                    gen = self._get_or_create_generator(
-                        job.model_id,
-                        job.workload_type,
-                        job.num_gpus,
-                        dit_cpu_offload=job.dit_cpu_offload,
-                        text_encoder_cpu_offload=(job.text_encoder_cpu_offload),
-                        vae_cpu_offload=job.vae_cpu_offload,
-                        image_encoder_cpu_offload=(job.image_encoder_cpu_offload),
-                        use_fsdp_inference=job.use_fsdp_inference,
-                        enable_torch_compile=(job.enable_torch_compile),
-                        vsa_sparsity=job.vsa_sparsity,
-                        tp_size=job.tp_size,
-                        sp_size=job.sp_size,
-                        log_queue=log_queue,
-                    )
-                    _gen_result.append(gen)
-                except BaseException as exc:
-                    _gen_error.append(exc)
-
-            loader = threading.Thread(
-                target=_load_generator,
-                daemon=True,
+            generator = self._get_or_create_generator(
+                job.model_id,
+                job.workload_type,
+                job.num_gpus,
+                dit_cpu_offload=job.dit_cpu_offload,
+                dit_layerwise_offload=job.dit_layerwise_offload,
+                override_pipeline_cls_name=(MINIMAX_H3_REF2VA_PIPELINE if job.references else None),
+                text_encoder_cpu_offload=(job.text_encoder_cpu_offload),
+                vae_cpu_offload=job.vae_cpu_offload,
+                image_encoder_cpu_offload=(job.image_encoder_cpu_offload),
+                use_fsdp_inference=job.use_fsdp_inference,
+                enable_torch_compile=(job.enable_torch_compile),
+                vsa_sparsity=job.vsa_sparsity,
+                tp_size=job.tp_size,
+                sp_size=job.sp_size,
+                log_queue=log_queue,
             )
-            loader.start()
-
-            while loader.is_alive():
-                if job._stop_event.is_set():
-                    job.status = JobStatus.STOPPED
-                    job.finished_at = time.time()
-                    self._save_job(job)
-                    logger.warning(
-                        "Job %s stopped during model loading",
-                        job.id,
-                    )
-                    buf.phase = "stopped"
-                    return
-                loader.join(timeout=0.5)
-
-            if _gen_error:
-                raise _gen_error[0]
-
-            generator = _gen_result[0]
             buf.phase = "generating"
             logger.info("Starting generation for job %s (model=%s)", job.id, job.model_id)
 
+            # Without a name FastVideo derives the filename from the prompt.
+            safe_name = re.sub(r'[\\/:*?"<>|]+', "", job.name).strip().strip(".")
+            output_target = (os.path.join(job_output_dir, f"{safe_name[:80]}.mp4") if safe_name else job_output_dir)
             gen_kwargs: dict[str, Any] = {
                 "prompt": job.prompt,
-                "output_path": job_output_dir,
+                "output_path": output_target,
                 "save_video": True,
                 "num_inference_steps": job.num_inference_steps,
                 "num_frames": job.num_frames,
@@ -945,6 +1120,12 @@ class JobRunner:
             }
             if job.image_path:
                 gen_kwargs["image_path"] = job.image_path
+            if job.references:
+                gen_kwargs["references"] = _build_h3_references(job.references)
+            if job.last_image_path:
+                # _prepare_fl2va requires a PIL image, not a path.
+                from PIL import Image as _PILImage
+                gen_kwargs["last_image"] = _PILImage.open(job.last_image_path)
             generator.generate_video(**gen_kwargs)
 
             buf.phase = "saving"
@@ -977,7 +1158,7 @@ class JobRunner:
 
         except Exception as exception:
             error_msg = str(exception)
-            logger.error("Critical error in job thread: %s", error_msg)
+            logger.exception("Critical error in job thread: %s", error_msg)
             job.status = JobStatus.FAILED
             job.error = f"Critical error ({type(exception).__name__}): {error_msg}"
             job.finished_at = time.time()

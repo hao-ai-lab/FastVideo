@@ -1126,17 +1126,24 @@ def _register_configs() -> None:
         sampling_param_cls=None,
         pipeline_config_cls=MiniMaxH3PipelineConfig,
         workload_types=(WorkloadType.T2V, WorkloadType.I2V),
-        hf_model_paths=["MiniMaxAI/MiniMax-H3"],
+        hf_model_paths=[
+            "MiniMaxAI/MiniMax-H3",
+            "FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2",
+        ],
         model_detectors=[
             lambda path: any(token in path.lower() for token in (
                 "minimax-h3",
                 "minimax_h3",
+                "fasth3",
                 "minimaxh3modularpipeline",
                 "minimaxh3ref2vamodularpipeline",
             )),
         ],
         model_family="minimax_h3",
         default_preset="minimax_h3_t2va",
+        # FastH3 full checkpoints need not carry a Diffusers model_index.json;
+        # the native full-checkpoint loader still uses the standard H3 graph.
+        pipeline_cls_name="MiniMaxH3ModularPipeline",
     )
 
     # SD3.5

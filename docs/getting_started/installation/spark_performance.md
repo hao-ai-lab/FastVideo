@@ -161,6 +161,15 @@ is power-cycled. To avoid it:
   on: "CPU" offload uses the same unified RAM. Multi-GPU FSDP sharding remains
   available because it partitions weights without parking them in a separate
   host pool.
+- **MiniMax H3 / FastH3** still needs sequential loading on one GB10. The Qwen3-VL
+  conditioner is tens of gigabytes of BF16. If the DiT and VAEs load while that
+  encoder is still resident, the process is a typical `earlyoom` kill (Python is
+  preferred). `h3_sequential_load` defaults to auto and turns this split on for
+  unified-memory devices. Do not pass `--no-h3-sequential-load` here. Force
+  `--h3-sequential-load` only if auto-detect misses the device. The CUDA pipeline
+  encodes first, releases the encoder, then loads DiT and VAEs onto the
+  accelerator (`to_cpu` follows `cpu_offload`, which is off here). See
+  [Offloading](../../inference/offloading.md).
 
 ## Gotchas specific to the GB10
 
@@ -177,6 +186,11 @@ A few things that surprise people on this box (beyond the memory notes above):
 - **Cosmos-2.5** uses a Qwen2.5-VL text encoder; make sure you're on a FastVideo
   build recent enough to include its `transformers`-compatibility handling before
   running it.
+- **MiniMax H3 worker init can look healthy and still die on the first generate**
+  if sequential load is off (`--no-h3-sequential-load`, or auto-off on a
+  misclassified device) and encoder, VAE, and DiT load together. Confirm the log
+  contains `Released MiniMax-H3 text encoder after conditioning` before
+  `Loading MiniMax-H3 denoise modules`.
 
 ## Reproduce these numbers
 

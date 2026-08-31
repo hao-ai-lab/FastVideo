@@ -44,6 +44,16 @@ _LEGACY_REQUEST_ALIASES = {
 _REQUEST_PIPELINE_OVERRIDE_FIELDS = frozenset({
     "embedded_cfg_scale",
 })
+REQUEST_BATCH_EXTRA_PASSTHROUGH_FIELDS = (
+    "ltx2_audio_latents",
+    "ltx2_audio_clean_latent",
+    "ltx2_audio_denoise_mask",
+    "audio_num_frames",
+    "video_position_offset_sec",
+    "vsa_mode",
+    "vsa_dense_first_n_steps",
+    "vsa_dense_layers",
+)
 # torch.compile kwargs that map to first-class CompileConfig fields.
 _COMPILE_TYPED_KEYS = ("backend", "fullgraph", "mode", "dynamic")
 # LTX-2 refine flat kwargs (init + per-request) known to FastVideoArgs.
@@ -165,6 +175,10 @@ def legacy_from_pretrained_to_config(
             pipeline["workload_type"] = value
         elif key == "lora_path":
             components["lora_path"] = value
+        elif key == "lora_nickname":
+            components["lora_nickname"] = value
+        elif key == "lora_strength":
+            components["lora_strength"] = value
         elif key == "override_pipeline_cls_name":
             components["override_pipeline_cls_name"] = value
         elif key == "override_transformer_cls_name":
@@ -283,6 +297,8 @@ def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, An
         kwargs["pipeline_config"] = components.pipeline_config_path
     if components.lora_path is not None:
         kwargs["lora_path"] = components.lora_path
+        kwargs["lora_nickname"] = components.lora_nickname
+        kwargs["lora_strength"] = components.lora_strength
     if components.override_pipeline_cls_name is not None:
         kwargs["override_pipeline_cls_name"] = components.override_pipeline_cls_name
     if components.override_transformer_cls_name is not None:
@@ -368,7 +384,7 @@ def request_to_sampling_param(
     for key, value in updates.items():
         if hasattr(sampling_param, key):
             setattr(sampling_param, key, deepcopy(value))
-        elif key in _REQUEST_PIPELINE_OVERRIDE_FIELDS:
+        elif key in _REQUEST_PIPELINE_OVERRIDE_FIELDS or key in REQUEST_BATCH_EXTRA_PASSTHROUGH_FIELDS:
             continue
         elif value == _SCHEMA_DEFAULT_UPDATES.get(key, _MISSING):
             # Schema-default field that isn't on SamplingParam; tolerated
@@ -465,6 +481,14 @@ def request_to_pipeline_overrides(request: GenerationRequest) -> dict[str, Any]:
         if key in _REQUEST_PIPELINE_OVERRIDE_FIELDS:
             overrides[key] = deepcopy(value)
     return overrides
+
+
+def request_to_batch_extra(request: GenerationRequest) -> dict[str, Any]:
+    """Extract typed-request extensions consumed through ``ForwardBatch.extra``."""
+    return {
+        key: deepcopy(value)
+        for key, value in explicit_request_updates(request).items() if key in REQUEST_BATCH_EXTRA_PASSTHROUGH_FIELDS
+    }
 
 
 def explicit_request_updates(request: GenerationRequest) -> dict[str, Any]:
@@ -640,6 +664,7 @@ def _validate_batched_input_length(
 
 
 __all__ = [
+    "REQUEST_BATCH_EXTRA_PASSTHROUGH_FIELDS",
     "explicit_request_updates",
     "generator_config_to_fastvideo_args",
     "legacy_from_pretrained_to_config",
@@ -648,6 +673,7 @@ __all__ = [
     "normalize_generation_request",
     "normalize_generator_config",
     "register_continuation_kind",
+    "request_to_batch_extra",
     "request_to_pipeline_overrides",
     "request_to_sampling_param",
 ]

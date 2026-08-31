@@ -10,6 +10,7 @@ class ServerConfig:
     host: str = "0.0.0.0"
     port: int = 8000
     output_dir: str = "outputs/"
+    served_model_name: str | None = None
 
 
 @dataclass
@@ -94,6 +95,8 @@ class ComponentConfig:
     vae_weights: str | None = None
     upsampler_weights: str | None = None
     lora_path: str | None = None
+    lora_nickname: str = "default"
+    lora_strength: float = 1.0
     override_pipeline_cls_name: str | None = None
     override_transformer_cls_name: str | None = None
 
