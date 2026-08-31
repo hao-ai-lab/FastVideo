@@ -15,7 +15,6 @@ behaviour was first reported.
 from __future__ import annotations
 
 import contextlib
-import os
 import socket
 
 import pytest
@@ -75,14 +74,23 @@ def test_helper_reports_only_layers_the_converter_would_touch() -> None:
     assert _has_fp8_convertible_layers(plain) is False
 
 
-def test_loader_refuses_fp8_when_the_shard_dim_is_greater_than_one() -> None:
+def test_loader_refuses_fp8_when_the_shard_dim_is_greater_than_one(monkeypatch) -> None:
     """The guard must fire before the loader builds a device mesh.
 
     ``maybe_load_fsdp_model`` hard-codes a CUDA mesh for every non-NPU
     platform, so a guard placed after mesh creation could not be reached on a
     CPU host at all, and on a GPU host would fire only after sharding had
     already started.
+
+    The platform is pinned because the loader turns FSDP off entirely on MPS.
+    Left alone, this would skip the guard on a Mac and fail later for an
+    unrelated reason, so the test would only really run on Linux.
     """
+    from fastvideo import platforms
+    from fastvideo.platforms.cpu import CpuPlatform
+
+    monkeypatch.setattr(platforms, "_current_platform", CpuPlatform())
+
     with pytest.raises(NotImplementedError) as excinfo:
         maybe_load_fsdp_model(
             model_cls=_FP8Linear,
@@ -105,9 +113,11 @@ def test_loader_refuses_fp8_when_the_shard_dim_is_greater_than_one() -> None:
 def _sharded_conversion_worker(rank: int, world_size: int, port: int) -> None:
     from torch.distributed.tensor import Shard, distribute_tensor, init_device_mesh
 
-    os.environ["MASTER_ADDR"] = "127.0.0.1"
-    os.environ["MASTER_PORT"] = str(port)
-    dist.init_process_group("gloo", rank=rank, world_size=world_size)
+    # The rendezvous goes through init_method, not the environment.
+    # ``test_gpu_tests_preserve_a_launcher_assigned_rendezvous_port`` scans
+    # every file under fastvideo/tests and fails on a written MASTER_PORT,
+    # because that would clobber the port the CI runner leased to the lane.
+    dist.init_process_group("gloo", init_method=f"tcp://127.0.0.1:{port}", rank=rank, world_size=world_size)
     try:
         mesh = init_device_mesh("cpu", (world_size, ))
         model = _FP8Linear()

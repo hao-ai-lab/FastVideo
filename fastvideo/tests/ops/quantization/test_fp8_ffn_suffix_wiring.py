@@ -11,8 +11,8 @@ parameters were converted and nothing said so.
 
 These are CPU-only contracts. Attaching ``quant_method`` needs neither a GPU
 nor real weights. The one test that builds a real H3 block takes
-``cpu_attention_platform``, because constructing the block resolves an
-attention backend and that is the only GPU-shaped dependency in this file.
+``cpu_attention_platform``, which pins the CPU platform so the block resolves
+the same attention backend on every host.
 """
 from __future__ import annotations
 
@@ -62,33 +62,21 @@ def test_minimax_h3_feed_forward_linears_get_fp8_method() -> None:
 
 @pytest.fixture
 def cpu_attention_platform(monkeypatch):
-    """Resolve attention to SDPA so an H3 block can be built without a GPU.
+    """Build the H3 block against the real CPU platform, on any host.
 
-    ``MiniMaxH3Attention.__init__`` and ``DistributedAttention.__init__`` both
-    call ``get_attn_backend``, which asks the platform for a backend qualname
-    and raises ``Invalid attention backend for ...`` on an empty string
-    (``selector.py``). A CPU-only host has no platform that answers, so the
-    block raises during construction and the FP8 assertions below never run.
-
-    Only the name is resolved here. ``SDPAImpl.__init__`` stores scalars and
-    touches no device, and nothing in this test runs attention.
+    Constructing the block reaches ``set_weight_attrs``, which calls
+    ``current_platform.is_tpu()``, and then ``get_attn_backend``, which asks the
+    platform for a backend qualname. Pinning ``CpuPlatform`` rather than a stub
+    means no future platform call can be missed, and the test takes the same
+    path on a CUDA host, a Mac and a CPU-only runner. ``CpuPlatform`` answers
+    ``TORCH_SDPA``; ``SDPAImpl.__init__`` stores scalars and touches no device,
+    and nothing here runs attention.
     """
     from fastvideo import platforms
     from fastvideo.attention import selector
+    from fastvideo.platforms.cpu import CpuPlatform
 
-    class _SDPAOnlyPlatform:
-        device_name = "cpu-test"
-
-        @classmethod
-        def is_mps(cls) -> bool:
-            return False
-
-        @classmethod
-        def get_attn_backend_cls(cls, selected_backend, head_size, dtype) -> str:
-            del selected_backend, head_size, dtype
-            return "fastvideo.attention.backends.sdpa.SDPABackend"
-
-    monkeypatch.setattr(platforms, "_current_platform", _SDPAOnlyPlatform())
+    monkeypatch.setattr(platforms, "_current_platform", CpuPlatform())
     # The resolution is memoized on inputs that do not include the platform,
     # so a real entry from another test would survive the swap.
     selector._cached_get_attn_backend.cache_clear()
