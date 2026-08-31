@@ -119,6 +119,7 @@ def test_default_wired_limit_scales_down_and_keeps_tested_cap() -> None:
 
 def test_mux_cleans_temporary_files_after_ffmpeg_failure(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     pipeline = MiniMaxH3MLXPipeline.__new__(MiniMaxH3MLXPipeline)
+    pipeline.video_decode_backend = "h3-vae"
     output = tmp_path / "output.mp4"
     frames = np.zeros((1, 2, 2, 3), dtype=np.uint8)
     waveform = np.zeros((2, 32), dtype=np.float32)

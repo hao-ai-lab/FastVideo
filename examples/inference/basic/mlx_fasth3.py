@@ -98,6 +98,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--rife-weights-dir", type=Path, default=None,
                         help="optional local mlx-community/RIFE-4.25 snapshot")
     parser.add_argument("--vae-dtype", choices=("fp32", "fp16", "bf16"), default="fp32")
+    parser.add_argument("--video-decode-backend", choices=("h3-vae", "taeh3"), default="h3-vae",
+                        help="full H3 VAE or approximate TAEH3 preview decoder; audio is unchanged")
+    parser.add_argument("--taeh3-checkpoint", type=Path, default=None,
+                        help="local TAEH3 safetensors; otherwise download hash-verified upstream weights")
+    parser.add_argument("--taeh3-chunk-size", type=int, default=5,
+                        help="latent frames per TAEH3 chunk; causal memory persists across chunks")
     parser.add_argument("--prompt-cache-dir", type=Path, default=None,
                         help="directory for reusable prompt embedding caches")
     parser.add_argument(
@@ -169,6 +175,9 @@ def main() -> None:
         model_root=args.model_root,
         mlx_dit_checkpoint=args.mlx_checkpoint,
         vae_dtype=args.vae_dtype,
+        video_decode_backend=args.video_decode_backend,
+        taeh3_checkpoint=args.taeh3_checkpoint,
+        taeh3_chunk_size=args.taeh3_chunk_size,
         prompt_cache_dir=args.prompt_cache_dir,
     )
     result = pipeline.generate(
@@ -201,6 +210,7 @@ def main() -> None:
         "timings_s": {k: round(v, 2) for k, v in result.timings.items()},
         "peak_memory_gib": {k: round(v, 2) for k, v in result.peak_memory_gib.items()},
         "vsa": result.vsa,
+        "video_decode_backend": result.video_decode_backend,
         "audio_samples": int(result.waveform.shape[-1]),
     }, indent=2))
 

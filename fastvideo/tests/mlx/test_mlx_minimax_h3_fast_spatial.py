@@ -91,6 +91,7 @@ def _generate_with_mocked_phases(monkeypatch, tmp_path, **generate_kwargs):
     calls: dict = {}
 
     pipeline = MiniMaxH3MLXPipeline.__new__(MiniMaxH3MLXPipeline)
+    pipeline.video_decode_backend = "h3-vae"
     pipeline.dit_checkpoint = tmp_path
 
     monkeypatch.setattr("fastvideo.mlx_runtime.minimax_h3_pipeline._validate_checkpoint_step_ladder",
