@@ -247,3 +247,11 @@ def test_run_excludes_warmup_and_uses_distinct_measured_outputs(monkeypatch, tmp
     assert "Measured E2E wall times (n=3, warmup excluded): [6.0, 7.0, 8.0]" in output
     assert "Median E2E wall time: 7.000s" in output
     assert "Median denoising time: 2.500s" in output
+
+
+def test_taeh3_backend_is_opt_in_experimental():
+    default = fasth3.build_generator_config(_args())
+    taeh3 = fasth3.build_generator_config(_args("--video-decode-backend", "taeh3"))
+
+    assert "video_decode_backend" not in default.pipeline.experimental
+    assert taeh3.pipeline.experimental["video_decode_backend"] == "taeh3"

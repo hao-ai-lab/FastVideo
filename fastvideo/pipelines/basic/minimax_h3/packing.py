@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import torch
@@ -37,6 +37,19 @@ MINIMAX_H3_AUDIO_LATENTS_PER_SECOND = 40
 MINIMAX_H3_AUDIO_CHANNELS = 2
 MINIMAX_H3_KEYFRAME_NOISE_AUG = 0.999
 MINIMAX_H3_KEYFRAME_ENCODE_SEED = 42
+
+
+def h3_dit_patch_size(fastvideo_args: Any) -> tuple[int, int, int]:
+    """Read DiT patch size from pipeline config, not live transformer weights."""
+    dit_config = getattr(getattr(fastvideo_args, "pipeline_config", None), "dit_config", None)
+    patch_size = getattr(dit_config, "patch_size", None)
+    if patch_size is None:
+        raise ValueError("MiniMax-H3 requires pipeline_config.dit_config.patch_size.")
+    values = tuple(int(axis) for axis in patch_size)
+    if len(values) != 3 or min(values) <= 0:
+        raise ValueError(f"MiniMax-H3 patch_size must be three positive ints, got {patch_size!r}.")
+    return values
+
 
 MINIMAX_H3_ROPE_FRAME_RESCALE = 5.0 / 3.0
 MINIMAX_H3_ROPE_FRAMES_PER_LATENT = (1, 4, 4, 4, 4)

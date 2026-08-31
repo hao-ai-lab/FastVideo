@@ -104,6 +104,11 @@ def build_parser(description: str | None = None) -> argparse.ArgumentParser:
                         default=None,
                         help="encode with Qwen3-VL, release it, then load DiT/VAEs. Default auto: on for "
                         "unified-memory devices (GB10), off on discrete GPUs")
+    parser.add_argument("--video-decode-backend",
+                        choices=("h3-vae", "taeh3"),
+                        default="h3-vae",
+                        help="h3-vae is the full MiniMax VAE; taeh3 is the fast approximate preview decoder")
+    parser.add_argument("--taeh3-checkpoint", default=None, help="local taeh3.safetensors; unset uses the pinned cache")
     parser.add_argument("--replicated-dit",
                         action=argparse.BooleanOptionalAction,
                         default=True,
@@ -236,6 +241,10 @@ def build_generator_config(args: argparse.Namespace) -> GeneratorConfig:
     }
     if args.h3_sequential_load is not None:
         experimental["h3_sequential_load"] = args.h3_sequential_load
+    if args.video_decode_backend != "h3-vae":
+        experimental["video_decode_backend"] = args.video_decode_backend
+    if args.taeh3_checkpoint is not None:
+        experimental["taeh3_checkpoint"] = args.taeh3_checkpoint
     if use_vsa:
         experimental.update({
             "VSA_sparsity": args.vsa_sparsity,

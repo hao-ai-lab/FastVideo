@@ -197,3 +197,54 @@ def test_cli_tri_state_h3_sequential_load() -> None:
     assert parser.parse_args([]).h3_sequential_load is None
     assert parser.parse_args(["--h3-sequential-load"]).h3_sequential_load is True
     assert parser.parse_args(["--no-h3-sequential-load"]).h3_sequential_load is False
+
+
+def test_taeh3_t2va_skips_video_vae_on_the_deferred_load(monkeypatch) -> None:
+    events: list = []
+    _patch_pipeline_construction(monkeypatch, events)
+    loads: list[list[str]] = []
+
+    def fake_load(self, fastvideo_args, loaded_modules=None):
+        del fastvideo_args
+        requested = list(self.required_config_modules)
+        loads.append(requested)
+        modules = dict(loaded_modules or {})
+        for name in requested:
+            modules.setdefault(name, _stub_module(name))
+        return modules
+
+    monkeypatch.setattr(ComposedPipelineBase, "load_modules", fake_load)
+    args = FastVideoArgs(
+        model_path="unused/for-this-test",
+        enable_stage_verification=False,
+        h3_sequential_load=True,
+        video_decode_backend="taeh3",
+    )
+    pipeline = MiniMaxH3Pipeline("unused/for-this-test", args)
+    pipeline.post_init()
+
+    condition_stage = pipeline._stage_name_mapping["conditioning_stage"]
+    passthrough = lambda batch, _args: batch
+    monkeypatch.setattr(pipeline._stage_name_mapping["input_preparation_stage"], "forward", passthrough)
+    monkeypatch.setattr(condition_stage, "forward", passthrough)
+    original_add_denoise = pipeline._add_denoise_stages
+
+    def fake_add_denoise(*, ref2va: bool) -> None:
+        original_add_denoise(ref2va=ref2va)
+        for name in (
+                "latent_preparation_stage",
+                "denoising_stage",
+                "video_decoding_stage",
+                "audio_decoding_stage",
+        ):
+            monkeypatch.setattr(pipeline._stage_name_mapping[name], "forward", passthrough)
+
+    monkeypatch.setattr(pipeline, "_add_denoise_stages", fake_add_denoise)
+    pipeline.forward(ForwardBatch(data_type="video", prompt="alpine dancer"), args)
+
+    assert "text_encoder" in loads[0]
+    assert all(name not in loads[0] for name in _DENOISE_MODULE_NAMES)
+    assert "transformer" in loads[1]
+    assert "vae" not in loads[1]
+    assert pipeline.get_module("vae") is None
+    assert pipeline.get_module("transformer") is not None
