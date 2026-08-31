@@ -1142,6 +1142,11 @@ class TransformerLoader(ComponentLoader):
                 torch_compile_kwargs=fastvideo_args.torch_compile_kwargs,
                 inference_regional_compile=fastvideo_args.inference_torch_compile,
                 inference_vsa_tile_size=fastvideo_args.VSA_tile_size,
+                # Only the whole-parameter half of the adapter is applied here, while
+                # tensors are still unsharded; LoRAPipeline merges the low-rank half
+                # once the module tree exists.
+                lora_path=getattr(fastvideo_args, "lora_path", None),
+                lora_strength=getattr(fastvideo_args, "lora_strength", 1.0),
             )
 
         total_params = sum(p.numel() for p in model.parameters())

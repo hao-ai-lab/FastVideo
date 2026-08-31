@@ -39,6 +39,30 @@ with
 
 `examples/inference/basic/basic_mps.py` is the older PyTorch MPS demo.
 
+FastH3 Preview T2VA also runs through the native MLX runtime. Convert the DiT
+to INT8, INT6, or INT4 first, then run:
+
+```bash
+python examples/inference/basic/mlx_fasth3.py \
+  --model-root ./FastH3-Preview-v0.2 \
+  --mlx-checkpoint ./FastH3-MLX/int6 \
+  --prompt "(S1) A presenter says <d>[English] Fast H3 is amazing.</d>" \
+  --height 480 --width 832 --num-frames 124 \
+  --output-path ./outputs/fasth3_int6.mp4
+```
+
+Pass `--fast` for temporal RIFE fast mode and `--fast-spatial` for spatial
+fast mode (reduced-canvas denoise + pixel-space upsample); the two compose.
+VSA is opt-in: convert with `--include-vsa` and pass `--vsa` (see the
+[Apple Silicon guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/mps/)).
+This MLX entrypoint currently supports T2VA only; FL2VA, Ref2VA, and
+two-pass refinement remain follow-up work. INT6/INT8/INT4 are
+weight-only; VSA attention activations stay BF16. Dense-only checkpoints keep
+working for dense inference.
+
+The complete setup and conversion commands are in the
+[Apple Silicon guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/mps/).
+
 For an example running DMD+VSA inference:
 ```
 python examples/inference/basic/basic_dmd.py
@@ -94,7 +118,7 @@ python examples/inference/basic/basic_fasth3.py \
   --warmup-seed 999
 ```
 
-`all` enables the inference-only H3 fusions and regional compile. Both can change floating-point operation order, so this is a report-only performance profile rather than an exact-parity route. Use `--profile strict` to disable the H3 fusions while preserving regional compile, or `--profile strict --no-inference-torch-compile` for the eager strict route. Individual `--no-*` switches are available for portability and attribution; in particular, use `--vsa-kernel triton --no-fa4` if the Blackwell kernels are unavailable. The script preserves the warmup and each measured video under distinct paths, then prints per-request wall time plus a warmup-excluded median.
+`all` enables the inference-only H3 fusions and regional compile. Both can change floating-point operation order, so this is a report-only performance profile rather than an exact-parity route. Use `--profile strict` to disable the H3 fusions while preserving regional compile, or `--profile strict --no-inference-torch-compile` for the eager strict route. Individual `--no-*` switches are available for portability and attribution; in particular, use `--vsa-kernel triton --no-fa4` if the Blackwell kernels are unavailable. `--h3-sequential-load` / `--no-h3-sequential-load` override the auto split that releases Qwen3-VL before DiT/VAE load (on by default on GB10, off on discrete GPUs). The script preserves the warmup and each measured video under distinct paths, then prints per-request wall time plus a warmup-excluded median.
 
 One script covers each validated duration; regional compile is the fastest
 measured DiT route for all three:
@@ -112,6 +136,32 @@ python examples/inference/basic/basic_fasth3.py \
 ```
 
 Pass `--no-inference-torch-compile` to recover the eager sparse-DiT route.
+
+### FastH3 Preview LoRAs
+
+The LoRA release runs on top of `MiniMaxAI/MiniMax-H3` with the same default
+compile, fusion, FA4, VSA, and parallel-VAE profile as the full FastH3 example:
+
+```bash
+bash examples/inference/basic/run_fasth3_lora_preview_vsa_datafree.sh \
+  --prompt "your prompt"
+```
+
+The four release launchers are:
+
+- `run_fasth3_lora_preview_vsa_datafree.sh`
+- `run_fasth3_lora_preview_vsa_synthetic_step1300.sh`
+- `run_fasth3_lora_preview_vsa_synthetic_step1900.sh`
+- `run_fasth3_lora_preview_dense_datafree.sh`
+
+Each downloads its exact private adapter file from
+`FastVideo/FastVideo-FastH3-4-step-Preview-v1-LoRA`; authenticate with `hf auth
+login` first. Pass `--lora-strength 0.5` to interpolate every adapter payload at
+half strength. Strength `1` applies the published rank-64 adapter at its trained
+scale and approximates the full student; `0` removes its weight deltas. VSA
+launchers still use sparse attention at strength `0` and require FastVideo's
+tile-64 VSA kernel; the dense launcher selects FA4. Each launcher writes to its
+own variant directory by default so comparison outputs do not collide.
 
 ## Basic Walkthrough
 

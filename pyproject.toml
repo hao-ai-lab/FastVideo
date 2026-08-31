@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fastvideo"
-version = "0.2.0"
+version = "0.2.1"
 description = "FastVideo"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -81,11 +81,11 @@ dependencies = [
     # (MPS) and other non-Linux platforms don't try to build it from source;
     # every fastvideo_kernel import elsewhere is already guarded to degrade
     # gracefully when the package is absent.
-    # Keep ordinary installs compatible with the currently published wheel
-    # while the in-repo FastH3 extra selects this checkout's kernel source.
-    # Fresh registry installs select 0.3.4 once the version-bump publisher
-    # completes after merge.
-    "fastvideo-kernel>=0.3.2,<0.3.5; sys_platform == 'linux'",
+    # Pin the exact published kernel so every install resolves the same
+    # tested wheel; the in-repo FastH3 extra still selects this checkout's
+    # kernel source via the uv sources mapping. Bump this pin in the
+    # companion PR of each kernel release.
+    "fastvideo-kernel==0.3.5; sys_platform == 'linux'",
     "wheel",
 
     # Training Dependencies
@@ -186,7 +186,7 @@ dev = [ "fastvideo[lint]", "fastvideo[test]", ]
 # installs without putting a direct URL in published package metadata.
 fasth3 = [
     "flash-attn-4",
-    "fastvideo-kernel>=0.3.2,<0.3.5; sys_platform == 'linux'",
+    "fastvideo-kernel==0.3.5; sys_platform == 'linux'",
 ]
 
 prompt-safety = [

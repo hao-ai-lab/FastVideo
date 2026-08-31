@@ -4,6 +4,7 @@
 import argparse
 import dataclasses
 import json
+import math
 from contextlib import contextmanager
 from dataclasses import field
 from enum import Enum
@@ -130,6 +131,7 @@ class FastVideoArgs:
     # (Wenxuan) prefer to keep it here instead of in pipeline config to not make it complicated.
     lora_path: str | None = None
     lora_nickname: str = "default"  # for swapping adapters in the pipeline
+    lora_strength: float = 1.0
     # can restrict layers to adapt, e.g. ["q_proj"]
     # Will adapt only q, k, v, o by default.
     lora_target_modules: list[str] | None = None
@@ -156,6 +158,13 @@ class FastVideoArgs:
     image_encoder_cpu_offload: bool = True
     vae_cpu_offload: bool = True
     pin_cpu_memory: bool = True
+
+    # MiniMax-H3 inference load order. ``None`` (auto) defers DiT/VAE load until
+    # after the Qwen3-VL encoder is released, but only on unified-memory
+    # devices (GB10 / Spark). Discrete GPUs keep the encoder resident so a
+    # later ``generate()`` on the same worker can re-encode. Explicit True /
+    # False overrides the probe. Training never defers.
+    h3_sequential_load: bool | None = None
 
     # Sequence-parallel MiniMax-H3 VAE (opt-in, default off). With SP > 1 the
     # video VAE's temporal chunks (decode) and clips (reference encode) are
@@ -298,6 +307,8 @@ class FastVideoArgs:
         return not self.inference_mode
 
     def __post_init__(self):
+        if not math.isfinite(self.lora_strength):
+            raise ValueError(f"lora_strength must be finite, got {self.lora_strength}")
         if self.moba_config_path:
             try:
                 with open(self.moba_config_path) as f:
@@ -603,6 +614,12 @@ class FastVideoArgs:
             help="Nickname to refer to the loaded LoRA adapter (useful for swapping).",
         )
         parser.add_argument(
+            "--lora-strength",
+            type=float,
+            default=FastVideoArgs.lora_strength,
+            help="Scale applied to every part of the inference LoRA adapter (default: 1.0).",
+        )
+        parser.add_argument(
             "--lora-target-modules",
             nargs="+",
             type=str,
@@ -703,6 +720,14 @@ class FastVideoArgs:
             help=
             "Pin memory for CPU offload. Only added as a temp workaround if it throws \"CUDA error: invalid argument\". "
             "Should be enabled in almost all cases",
+        )
+        parser.add_argument(
+            "--h3-sequential-load",
+            action=argparse.BooleanOptionalAction,
+            default=None,
+            help="MiniMax-H3: encode with Qwen3-VL, release that encoder, then load DiT and VAEs. "
+            "Omit for auto (on for unified-memory devices such as GB10; off on discrete GPUs). "
+            "Pass --no-h3-sequential-load to keep the encoder resident for later generate() calls.",
         )
         parser.add_argument(
             "--vae-parallel-decode",

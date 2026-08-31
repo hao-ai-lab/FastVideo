@@ -129,6 +129,17 @@ def test_strict_profile_changes_only_non_parity_fusions():
     assert fasth3.build_generator_config(all_args) == fasth3.build_generator_config(strict_args)
 
 
+def test_h3_sequential_load_is_opt_in_experimental():
+    default = fasth3.build_generator_config(_args())
+    assert "h3_sequential_load" not in default.pipeline.experimental
+
+    enabled = fasth3.build_generator_config(_args("--h3-sequential-load"))
+    assert enabled.pipeline.experimental["h3_sequential_load"] is True
+
+    disabled = fasth3.build_generator_config(_args("--no-h3-sequential-load"))
+    assert disabled.pipeline.experimental["h3_sequential_load"] is False
+
+
 def test_opt_outs_override_inherited_environment(monkeypatch):
     args = _args(
         "--vsa-kernel",

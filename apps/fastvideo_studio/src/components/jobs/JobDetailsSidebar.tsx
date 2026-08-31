@@ -153,9 +153,16 @@ export default function JobDetailsSidebar({
       }}
     >
       <div className="flex items-center justify-between border-b border-border px-5 py-4">
-        <h2 className="m-0 text-base font-semibold text-foreground">
-          Job Details
-        </h2>
+        <div className="min-w-0">
+          <h2 className="m-0 text-base font-semibold text-foreground">
+            Job Details
+          </h2>
+          {/* Full job id: keys ~/h3_studio_logs/<id>.log, the output directory
+              and every API route, so make it selectable for copy/paste. */}
+          <code className="mt-0.5 block select-all truncate font-mono text-xs text-muted-foreground">
+            {job.id}
+          </code>
+        </div>
         <div className="flex items-center gap-2">
           <Button
             type="button"

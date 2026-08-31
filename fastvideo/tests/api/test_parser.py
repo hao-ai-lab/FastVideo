@@ -148,6 +148,8 @@ def test_load_run_config_supports_yaml_roundtrip(tmp_path) -> None:
                     "vae_weights": None,
                     "upsampler_weights": None,
                     "lora_path": None,
+                    "lora_nickname": "default",
+                    "lora_strength": 1.0,
                     "override_pipeline_cls_name": None,
                     "override_transformer_cls_name": None,
                 },
