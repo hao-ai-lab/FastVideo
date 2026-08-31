@@ -3,5 +3,6 @@
 
 from fastvideo.train.methods.rl.diffusion_nft import DiffusionNFTMethod
 from fastvideo.train.methods.rl.rvm import RVMMethod
+from fastvideo.train.methods.rl.rvm_local_metrics import RVMWithLocalMetricsMethod
 
-__all__ = ["DiffusionNFTMethod", "RVMMethod"]
+__all__ = ["DiffusionNFTMethod", "RVMMethod", "RVMWithLocalMetricsMethod"]
