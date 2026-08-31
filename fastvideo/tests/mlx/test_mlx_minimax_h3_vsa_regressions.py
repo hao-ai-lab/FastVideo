@@ -163,6 +163,7 @@ def test_dense_generate_ignores_unused_vsa_parameters(tmp_path, monkeypatch):
     from fastvideo.mlx_runtime import minimax_h3_pipeline as pipeline_mod
 
     pipeline = object.__new__(pipeline_mod.MiniMaxH3MLXPipeline)
+    pipeline.video_decode_backend = "h3-vae"
     pipeline.dit_checkpoint = tmp_path
     monkeypatch.setattr(pipeline_mod, "_validate_checkpoint_step_ladder", lambda *a: None)
     def stop_at_media_preflight(**kwargs):

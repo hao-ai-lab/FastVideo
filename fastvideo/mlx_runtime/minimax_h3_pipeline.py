@@ -71,6 +71,7 @@ class GenerationResult:
     timings: dict[str, float] = field(default_factory=dict)
     peak_memory_gib: dict[str, float] = field(default_factory=dict)
     vsa: dict[str, Any] = field(default_factory=dict)
+    video_decode_backend: str = "h3-vae"
 
 
 @dataclass(frozen=True)
@@ -305,6 +306,9 @@ class MiniMaxH3MLXPipeline:
         conditioner_dir: str | Path | None = None,
         tokenizer_dir: str | Path | None = None,
         metal_wired_limit_gib: float | None = None,
+        video_decode_backend: str = "h3-vae",
+        taeh3_checkpoint: str | Path | None = None,
+        taeh3_chunk_size: int = 5,
     ) -> None:
         import mlx.core as mx
 
@@ -322,6 +326,15 @@ class MiniMaxH3MLXPipeline:
         self.model_root = Path(model_root)
         self.dit_checkpoint = Path(mlx_dit_checkpoint)
         self.vae_dtype = vae_dtype
+        if video_decode_backend not in ("h3-vae", "taeh3"):
+            raise ValueError(f"Unknown H3 video decoder: {video_decode_backend}")
+        if taeh3_chunk_size < 1:
+            raise ValueError("taeh3_chunk_size must be positive.")
+        if taeh3_checkpoint is not None and video_decode_backend != "taeh3":
+            raise ValueError("taeh3_checkpoint requires video_decode_backend='taeh3'.")
+        self.video_decode_backend = video_decode_backend
+        self.taeh3_checkpoint = taeh3_checkpoint
+        self.taeh3_chunk_size = taeh3_chunk_size
         self.prompt_cache_dir = Path(prompt_cache_dir) if prompt_cache_dir else None
         self.conditioner_dir = Path(conditioner_dir) if conditioner_dir else self.model_root / "text_encoder"
         self.tokenizer_dir = Path(tokenizer_dir) if tokenizer_dir else self.model_root / "tokenizer"
@@ -344,7 +357,7 @@ class MiniMaxH3MLXPipeline:
             missing.append(str(self.dit_checkpoint))
         vae_dir = self.model_root / "vae"
         audio_dir = self.model_root / "audio_vae"
-        if not (vae_dir.exists() and any(vae_dir.glob("*.safetensors"))):
+        if self.video_decode_backend == "h3-vae" and not (vae_dir.exists() and any(vae_dir.glob("*.safetensors"))):
             missing.append(str(vae_dir))
         if not (audio_dir.exists() and any(audio_dir.glob("*.safetensors"))):
             missing.append(str(audio_dir))
@@ -562,6 +575,22 @@ class MiniMaxH3MLXPipeline:
         from fastvideo.mlx_runtime.minimax_h3_video_vae import mlx_h3_video_vae_from_dir
 
         geometry = self.resolve_geometry(height, width, num_frames, enforce_duration=False)
+        if self.video_decode_backend == "taeh3":
+            from fastvideo.mlx_runtime.minimax_h3_taeh3 import decode_latents_taeh3_mlx
+
+            if self._dit_in_channels != 24:
+                raise ValueError("TAEH3 requires a 24-channel H3 checkpoint.")
+            latents = unpatchify_video_tokens(video_rows, geometry["latent_frame_count"], geometry["latent_height"],
+                                              geometry["latent_width"], self._dit_in_channels, self._dit_patch_size)
+            pixels = decode_latents_taeh3_mlx(latents,
+                                              checkpoint_path=self.taeh3_checkpoint,
+                                              dtype=self.vae_dtype,
+                                              chunk_size=self.taeh3_chunk_size)
+            frames = (pixels[0] * 255.0).astype(np.uint8)
+            if frames.shape != (geometry["num_frames"], height, width, 3):
+                raise RuntimeError(f"TAEH3 produced unexpected frame shape: {frames.shape}")
+            _cleanup_mlx()
+            return frames
         vae = mlx_h3_video_vae_from_dir(self.model_root / "vae", include_encoder=False, storage_dtype=self.vae_dtype)
         expected_height = height // vae.spatial_compression_ratio
         expected_width = width // vae.spatial_compression_ratio
@@ -775,6 +804,14 @@ class MiniMaxH3MLXPipeline:
             spatial_plan,
         )
 
+        if self.video_decode_backend == "taeh3":
+            from fastvideo.mlx_runtime.minimax_h3_taeh3 import ensure_taeh3_checkpoint
+
+            started = time.perf_counter()
+            ensure_taeh3_checkpoint(self.taeh3_checkpoint)
+            timings["decoder_prepare_s"] = time.perf_counter() - started
+            logger.warning("TAEH3 is an approximate preview decoder; reconstruction differs from the full H3 VAE.")
+
         _reset_peak_memory()
         started = time.perf_counter()
         text_rows, token_tags = self.encode_prompt(prompt)
@@ -872,8 +909,8 @@ class MiniMaxH3MLXPipeline:
         video_path = self.mux(frames, waveform, output_path)
         timings["mux_s"] = time.perf_counter() - started
         timings["generate_s"] = sum(
-            timings.get(key, 0.0) for key in ("condition_s", "denoise_s", "video_decode_s", "rife_s",
-                                              "spatial_upsample_s", "audio_decode_s", "mux_s"))
+            timings.get(key, 0.0) for key in ("decoder_prepare_s", "condition_s", "denoise_s", "video_decode_s",
+                                              "rife_s", "spatial_upsample_s", "audio_decode_s", "mux_s"))
 
         result = GenerationResult(
             video_path=str(video_path),
@@ -882,6 +919,7 @@ class MiniMaxH3MLXPipeline:
             sample_rate=32000,
             timings=timings,
             peak_memory_gib=peaks,
+            video_decode_backend=self.video_decode_backend,
             vsa=getattr(self, "last_vsa_stats", None) or {
                 "enabled": vsa_config.enabled,
                 "checkpoint_vsa_capable": mlx_h3_checkpoint_vsa_capable(self.dit_checkpoint),
