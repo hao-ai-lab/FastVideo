@@ -11,7 +11,7 @@ from contextlib import suppress
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Path, Query, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse
 from pydantic import ValidationError
 from starlette.background import BackgroundTask
 from starlette.datastructures import UploadFile
@@ -233,7 +233,7 @@ async def _run_generation(
             {
                 "status": VideoGenerationStatus.FAILED,
                 "error": {
-                    "code": 500,
+                    "code": "generation_failed",
                     "message": str(error)
                 },
                 "inference_time_s": time.perf_counter() - started if started else 0.0,
@@ -421,15 +421,14 @@ async def list_videos(
     )
 
 
-@router.get("/{video_id}", response_model=None)
-async def retrieve_video(video_id: str = Path(...)) -> VideoResponse | JSONResponse:
+@router.get("/{video_id}", response_model=VideoResponse)
+async def retrieve_video(video_id: str = Path(...)) -> VideoResponse:
     job = await VIDEO_STORE.get(video_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Video not found")
-    response = VideoResponse(**job)
-    if response.status is VideoGenerationStatus.FAILED:
-        return JSONResponse(status_code=500, content=response.model_dump(mode="json"))
-    return response
+    # A failed generation is still a successfully retrieved resource. SDK
+    # polling helpers need its terminal status, not a retryable HTTP error.
+    return VideoResponse(**job)
 
 
 @router.delete("/{video_id}", response_model=VideoDeleteResponse)
@@ -457,7 +456,8 @@ async def delete_video(video_id: str = Path(...)) -> VideoDeleteResponse:
 
 @router.get("/{video_id}/content")
 async def download_video_content(video_id: str = Path(...), variant: str | None = Query(None)) -> FileResponse:
-    del variant
+    if variant not in {None, "video"}:
+        raise HTTPException(status_code=400, detail="Only the video content variant is supported")
     job = await VIDEO_STORE.get(video_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Video not found")

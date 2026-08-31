@@ -1,0 +1,11 @@
+{
+  "name": "fastvideo-openai-client-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "node video.mjs"
+  },
+  "dependencies": {
+    "openai": "7.8.0"
+  }
+}

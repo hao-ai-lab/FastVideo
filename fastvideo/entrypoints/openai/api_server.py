@@ -144,11 +144,13 @@ def create_app(
     # Import and mount routers
     from fastvideo.entrypoints.openai.common_api import router as common_router
     from fastvideo.entrypoints.openai.image_api import router as image_router
+    from fastvideo.entrypoints.openai.playground import router as playground_router
     from fastvideo.entrypoints.openai.video_api import router as video_router
 
     app.include_router(common_router)
     app.include_router(video_router)
     app.include_router(image_router)
+    app.include_router(playground_router)
 
     @app.get("/health")
     async def health():

@@ -30,6 +30,15 @@ requests. HTTP handling and job polling remain asynchronous.
 | `GET` | `/health` | Liveness probe |
 
 `POST /v1/videos/generations` remains an alias for older FastVideo clients.
+The OpenAI Python and JavaScript clients can create, retrieve, list, download,
+and delete video jobs. Use the [H3 server cookbook](../../cookbook/openai-api.md)
+for pinned client versions and executable examples. Download variants other
+than `video` return HTTP 400. Remix, extensions, and characters are not implemented.
+
+An H3 text-to-video/audio server also serves `/playground/`. This same-origin
+browser client uses the video routes above and shares their loaded pipeline.
+`GET /playground/config` reports the model alias and operator-explicit sampling
+defaults. The playground does not add authentication or a second model process.
 
 ## Video requests
 
@@ -160,8 +169,11 @@ Errors use the OpenAI envelope:
 ```
 
 Parse, model-selection, startup-LoRA, and unsupported-parameter failures are
-HTTP 400; missing resources are HTTP 404; generation failures are stored on
-asynchronous jobs and returned as HTTP 500 when that job is retrieved.
+HTTP 400; missing resources are HTTP 404. Generation failures are stored on
+asynchronous jobs. Retrieving a failed job returns HTTP 200 with `status: "failed"`
+and a string error code, so OpenAI SDK polling returns the terminal resource
+instead of retrying it as a transport error. Synchronous generation failures
+still return HTTP 500.
 Unknown top-level fields are rejected. `extra_params` accepts only the explicit
 request-batch passthrough fields supported by the typed request adapter.
 

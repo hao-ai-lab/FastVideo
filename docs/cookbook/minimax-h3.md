@@ -5,7 +5,7 @@ hide:
 
 # MiniMax H3 recipes
 
-<div class="cookbook-shell cookbook-family-page" data-cookbook data-family="minimax_h3" data-recipes="../../assets/cookbook-recipes.json?v=5">
+<div class="cookbook-shell cookbook-family-page" data-cookbook data-family="minimax_h3" data-default-recipe="fasth3-preview-cuda" data-recipes="../../assets/cookbook-recipes.json?v=6">
   <header class="cookbook-family-header">
     <a class="cookbook-back-link" href="../"><span aria-hidden="true">←</span> All model families</a>
     <div class="cookbook-family-header__body">
@@ -15,7 +15,7 @@ hide:
       <div>
         <p class="cookbook-eyebrow">Primary focus · Inference</p>
         <h2>MiniMax H3 recipes</h2>
-        <p>Generate synchronized video and audio with the full H3 checkpoint, the four-step FastH3 Preview, reference and frame-conditioned CUDA paths, or the native Apple Silicon MLX T2VA runtime.</p>
+        <p>Generate video and audio with H3. Keep a CUDA server running for prompt iteration, or use Python directly on CUDA and Apple Silicon MLX.</p>
         <span class="cookbook-count" data-cookbook-count>6 maintained recipes</span>
       </div>
     </div>
@@ -118,6 +118,17 @@ hide:
         </div>
 
         <p class="cookbook-selection-description" data-cookbook-description>Loading recipe details...</p>
+        <div class="cookbook-selection-row" data-cookbook-usage>
+          <div class="cookbook-selection-row__label">
+            <strong>Workflow</strong>
+            <span>Both can run locally</span>
+          </div>
+          <div class="cookbook-option-grid cookbook-option-grid--hardware" role="group" aria-label="How to run this recipe">
+            <button type="button" data-cookbook-mode="server" aria-pressed="false"><strong>Run a server</strong><span>Playground, cURL, or an API client</span></button>
+            <button type="button" data-cookbook-mode="python" aria-pressed="false"><strong>Use Python directly</strong><span>Call the model in your own process</span></button>
+          </div>
+        </div>
+        <p class="cookbook-hardware-note" data-cookbook-serving-availability></p>
         <p class="cookbook-hardware-note">Exact device and memory details appear only when a recorded run supports them.</p>
 
         <div class="cookbook-hardware-state" data-cookbook-hardware-state role="status" aria-live="polite">
@@ -146,7 +157,44 @@ hide:
           <div class="cookbook-command__bar">
             <span>Terminal</span>
           </div>
-          <pre><code class="language-bash" data-cookbook-command>Loading...</code></pre>
+          <pre id="cookbook-local-command"><code class="language-bash" data-cookbook-command>Loading...</code></pre>
+        </div>
+        <p class="cookbook-hardware-note" data-cookbook-python-note>Running this script again starts a new process and reloads the model. To iterate in Python, create the generator once and reuse it for multiple prompts.</p>
+
+        <div class="cookbook-serving" data-cookbook-serving hidden>
+          <p class="cookbook-serving__intro">Start once, then change prompts in the playground or your app. Each job reuses the loaded model. You can run the server and clients on the same machine.</p>
+          <section class="cookbook-serving__step" aria-labelledby="serving-install-heading">
+            <h4 id="serving-install-heading"><span aria-hidden="true">1</span> Install on the GPU machine</h4>
+            <p>Run from your FastVideo clone in an activated Python environment. See <a href="../../getting_started/installation/gpu/">installation requirements</a>.</p>
+            <div class="cookbook-command"><div class="cookbook-command__bar"><span>GPU machine · Terminal</span></div><pre id="cookbook-server-install"><code class="language-bash" data-cookbook-server-install></code></pre></div>
+          </section>
+          <section class="cookbook-serving__step" aria-labelledby="serving-start-heading">
+            <h4 id="serving-start-heading"><span aria-hidden="true">2</span> Start the server</h4>
+            <p>Keep this terminal running. The model loads at startup; later requests reuse the loaded pipeline.</p>
+            <div class="cookbook-command"><div class="cookbook-command__bar"><span>GPU machine · Terminal</span></div><pre id="cookbook-server-command"><code class="language-bash" data-cookbook-server-command></code></pre></div>
+            <details class="cookbook-serving__check"><summary>Check that the server is ready</summary><p>In another terminal, this returns <code>{"status":"ok"}</code> after startup.</p><div class="cookbook-command"><pre id="cookbook-health-command"><code class="language-bash" data-cookbook-health-command></code></pre></div></details>
+          </section>
+          <section class="cookbook-serving__step" aria-labelledby="serving-client-heading">
+            <h4 id="serving-client-heading"><span aria-hidden="true">3</span> Generate and download a video</h4>
+            <div class="cookbook-serving__playground">
+              <div><strong>Try prompts in your browser</strong><p>Edit a prompt, generate, and watch the result. The playground uses the same server as cURL and your app.</p></div>
+              <a class="cookbook-serving__launch" data-cookbook-playground href="http://127.0.0.1:8000/playground/" target="_blank" rel="noopener">Open playground <span aria-hidden="true">↗</span></a>
+            </div>
+            <p class="cookbook-serving__local-hint">Open after the server is ready. On a remote GPU machine, <a href="../openai-api/#connect-your-app">forward port 8000</a> to your computer first. This opens a local page, not a hosted demo.</p>
+            <details class="cookbook-serving__code"><summary>Use cURL or an SDK</summary>
+            <p>Each example submits a job, checks its status, and saves the MP4. The Python and JavaScript examples use OpenAI-compatible clients; no OpenAI account is needed.</p>
+            <div class="cookbook-serving__clients" role="group" aria-label="API client language">
+              <button type="button" data-cookbook-client="curl" aria-pressed="false">cURL</button>
+              <button type="button" data-cookbook-client="python" aria-pressed="true">Python</button>
+              <button type="button" data-cookbook-client="javascript" aria-pressed="false">JavaScript</button>
+            </div>
+            <div class="cookbook-command"><div class="cookbook-command__bar"><span>Client dependencies</span></div><pre id="cookbook-client-install"><code class="language-bash" data-cookbook-client-install></code></pre></div>
+            <div class="cookbook-command cookbook-command--client"><div class="cookbook-command__bar"><span data-cookbook-client-filename>video.py</span><a data-cookbook-client-source href="https://github.com/hao-ai-lab/FastVideo/tree/main/examples/serving/clients">View source</a></div><pre id="cookbook-client-code"><code data-cookbook-client-code></code></pre></div>
+            <p data-cookbook-client-run></p>
+            </details>
+          </section>
+          <p class="cookbook-serving__boundary">This is a local development server without built-in API-key authentication. The client key <code>local</code> is a placeholder. Keep the server on loopback; use an authenticated TLS proxy before exposing it publicly. Run the JavaScript client in your webapp's backend, not in a browser with a private key.</p>
+          <a href="../openai-api/">Server guide and API compatibility →</a>
         </div>
 
         <div class="cookbook-result__footer">
@@ -160,6 +208,7 @@ hide:
     <noscript>
       <div class="cookbook-noscript">
         JavaScript is needed for the guided selector. You can still browse the
+        <a href="../openai-api/">H3 server guide</a> or the
         <a href="../../inference/examples/examples_inference_index/">maintained inference examples</a>.
       </div>
     </noscript>

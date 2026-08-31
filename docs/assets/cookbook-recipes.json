@@ -451,6 +451,10 @@
       "summary": "Run the DMD2-distilled FastH3 Preview with four DiT forwards, trained H3 sparse attention, compiled decode, and synchronized audio.",
       "model": "FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2",
       "source": "examples/inference/basic/basic_fasth3.py",
+      "serving": {
+        "source": "examples/serving/openai_fasth3.yaml",
+        "install": "UV_TORCH_BACKEND=cu130 uv pip install -e \".[fasth3]\""
+      },
       "command": "UV_TORCH_BACKEND=cu130 uv pip install -e \".[fasth3]\"\npython examples/inference/basic/basic_fasth3.py --prompt \"(S1) A presenter says <d>[English] FastVideo runs FastH3.</d>\" --profile all",
       "gpu_types": ["NVIDIA"],
       "hardware": {

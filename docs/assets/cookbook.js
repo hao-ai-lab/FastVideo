@@ -220,6 +220,9 @@
     const count = root.querySelector("[data-cookbook-count]");
     const result = root.querySelector(".cookbook-result");
     const commandBlock = root.querySelector(".cookbook-command");
+    const servingPanel = root.querySelector("[data-cookbook-serving]");
+    const usage = root.querySelector("[data-cookbook-usage]");
+    const servingAvailability = root.querySelector("[data-cookbook-serving-availability]");
 
     modelOptions.setAttribute("aria-label", "Recipe");
     hardwareOptions.setAttribute("aria-label", "Runtime");
@@ -236,6 +239,18 @@
 
     const familyRecipes = recipes.filter((recipe) => recipe.family === family);
     if (!familyRecipes.length) return;
+
+    let servingProfiles = {};
+    let servingLoadFailed = false;
+    if (servingPanel && familyRecipes.some((recipe) => recipe.serving)) {
+      try {
+        const dataUrl = new URL(root.dataset.recipes, document.baseURI);
+        servingProfiles = await loadRecipes(new URL("cookbook-serving.json", dataUrl));
+      } catch (error) {
+        servingLoadFailed = true;
+        console.error("Failed to load FastVideo serving profiles", error);
+      }
+    }
 
     const byId = new Map(familyRecipes.map((recipe) => [recipe.id, recipe]));
     const groups = new Map();
@@ -263,13 +278,21 @@
 
     const query = new URLSearchParams(window.location.search);
     const requestedRecipe = query.get("recipe");
-    const defaultRecipeId = familyRecipes[0].id;
+    const defaultRecipeId = byId.has(root.dataset.defaultRecipe) ? root.dataset.defaultRecipe : familyRecipes[0].id;
     let selectedRecipeId = requestedRecipe && byId.has(requestedRecipe) ? requestedRecipe : defaultRecipeId;
     let selectedGroupId = groupIdFor(byId.get(selectedRecipeId));
     let renderedRuntimeGroup = null;
+    // Keep previously shared local/openai links working after renaming workflows.
+    const workflow = (value) => ["local", "python"].includes(value) ? "python" : "server";
+    let usagePreference = workflow(query.get("use"));
+    let selectedClient = ["python", "javascript", "curl"].includes(query.get("client")) ? query.get("client") : "curl";
+    const clientDetails = servingPanel?.querySelector(".cookbook-serving__code");
+    if (clientDetails && query.has("client")) clientDetails.open = true;
 
     const renderRuntimeOptions = () => {
       const groupRecipes = groups.get(selectedGroupId) || [];
+      const renderedIds = [...hardwareOptions.querySelectorAll("[data-recipe-id]")].map((option) => option.dataset.recipeId);
+      if (renderedIds.join(",") === groupRecipes.map((recipe) => recipe.id).join(",")) return;
       hardwareOptions.replaceChildren();
       groupRecipes.forEach((recipe) => {
         const runtime = runtimeFor(recipe);
@@ -313,6 +336,47 @@
         renderedRuntimeGroup = selectedGroupId;
       }
       const runtime = runtimeFor(recipe);
+      const profile = servingPanel && servingProfiles[recipe.id];
+      const useServer = Boolean(profile && usagePreference === "server");
+      // The measured local profile and the server config have separate evidence.
+      const activeRecipe = useServer ? { ...recipe, hardware: profile.hardware, evidence: "Source-backed" } : recipe;
+
+      if (usage) {
+        usage.querySelectorAll("[data-cookbook-mode]").forEach((option) => {
+          const selected = option.dataset.cookbookMode === (useServer ? "server" : "python");
+          option.disabled = option.dataset.cookbookMode === "server" && !profile;
+          option.classList.toggle("cookbook-option--selected", selected);
+          option.setAttribute("aria-pressed", String(selected));
+        });
+        servingAvailability.textContent = profile
+          ? "The server keeps the model loaded between requests. Python can do the same when you reuse the generator in one process."
+          : servingLoadFailed
+            ? "Server examples could not be loaded. Open the H3 server guide below, or use Python directly."
+            : "This recipe uses Python directly. For the playground and API clients, choose FastH3 Preview with CUDA.";
+        servingPanel.hidden = !useServer;
+        commandBlock.hidden = useServer;
+        root.querySelector("[data-cookbook-python-note]").hidden = useServer;
+      }
+
+      if (useServer) {
+        servingPanel.querySelector("[data-cookbook-server-install]").textContent = profile.install;
+        servingPanel.querySelector("[data-cookbook-server-command]").textContent = profile.command;
+        servingPanel.querySelector("[data-cookbook-health-command]").textContent = profile.health_command;
+        servingPanel.querySelector("[data-cookbook-playground]").href = profile.playground_url;
+        const client = profile.clients[selectedClient];
+        const filename = client.source.split("/").pop();
+        servingPanel.querySelector("[data-cookbook-client-install]").textContent = client.install;
+        const clientCode = servingPanel.querySelector("[data-cookbook-client-code]");
+        clientCode.className = `language-${selectedClient === "curl" ? "bash" : selectedClient}`;
+        clientCode.textContent = client.code;
+        servingPanel.querySelector("[data-cookbook-client-filename]").textContent = filename;
+        servingPanel.querySelector("[data-cookbook-client-source]").href = `https://github.com/hao-ai-lab/FastVideo/blob/main/${client.source}`;
+        const runner = { python: "python", javascript: "node", curl: "bash" }[selectedClient];
+        servingPanel.querySelector("[data-cookbook-client-run]").textContent = `Save as ${filename} and run ${runner} ${filename}. The MP4 is saved with the job ID as its filename.`;
+        servingPanel.querySelectorAll("[data-cookbook-client]").forEach((option) => {
+          option.setAttribute("aria-pressed", String(option.dataset.cookbookClient === selectedClient));
+        });
+      }
 
       modelOptions.querySelectorAll("button").forEach((option) => {
         const selected = option.dataset.recipeGroup === selectedGroupId;
@@ -323,26 +387,38 @@
         const selected = option.dataset.recipeId === recipe.id;
         option.classList.toggle("cookbook-option--selected", selected);
         option.setAttribute("aria-pressed", String(selected));
+        const candidate = byId.get(option.dataset.recipeId);
+        const candidateProfile = servingProfiles[candidate.id];
+        const candidateRuntime = runtimeFor(candidateProfile && usagePreference === "server"
+          ? { ...candidate, hardware: candidateProfile.hardware } : candidate);
+        option.querySelector("span").textContent = candidateRuntime.hint;
       });
 
-      description.textContent = recipe.summary;
-      label.textContent = recipe.label;
+      description.textContent = useServer
+        ? "FastH3 Preview generates video with audio. This server profile uses the checked-in CUDA configuration."
+        : recipe.summary;
+      label.textContent = useServer ? `${recipe.group_label || recipe.label} · Server` : recipe.label;
       model.textContent = recipe.model;
       task.textContent = recipe.task;
-      hardwareValue.textContent = runtimeSummary(recipe);
-      if (artifact) artifact.textContent = recipe.expected_artifact || "Not yet documented for this recipe.";
+      hardwareValue.textContent = runtimeSummary(activeRecipe);
+      if (artifact) artifact.textContent = useServer ? "MP4 with audio" : recipe.expected_artifact || "Not yet documented for this recipe.";
       if (evidenceCell) {
-        evidenceCell.textContent = recipe.evidence || "Source-backed";
-        evidenceCell.classList.toggle("cookbook-badge--verified", recipe.evidence === "Verified");
-        evidenceCell.classList.toggle("cookbook-badge--source-backed", recipe.evidence !== "Verified");
+        evidenceCell.textContent = activeRecipe.evidence || "Source-backed";
+        evidenceCell.classList.toggle("cookbook-badge--verified", activeRecipe.evidence === "Verified");
+        evidenceCell.classList.toggle("cookbook-badge--source-backed", activeRecipe.evidence !== "Verified");
       }
-      source.href = `https://github.com/hao-ai-lab/FastVideo/blob/main/${recipe.source}`;
+      source.href = `https://github.com/hao-ai-lab/FastVideo/blob/main/${useServer ? profile.source : recipe.source}`;
+      source.textContent = useServer ? "View server configuration" : "Open example source";
       modelLink.href = `https://huggingface.co/${recipe.model}`;
       command.textContent = recipe.command;
 
-      renderHardwareEvidence(hardwareState, hardwareBadge, recipe);
+      renderHardwareEvidence(hardwareState, hardwareBadge, activeRecipe);
 
-      const limitations = recipe.limitations || [];
+      const limitations = useServer ? [
+        "This server config has no recorded serving benchmark. Compilation is disabled, unlike the measured Python performance profile.",
+        `${profile.sampling.width} × ${profile.sampling.height} · ${profile.sampling.num_frames} frames · ${profile.sampling.fps} fps. The server supplies these defaults; the client sends the model and prompt.`,
+        "Generation is serialized. Job metadata is held in memory and is lost when the server restarts.",
+      ] : recipe.limitations || [];
       notes.replaceChildren();
       notes.hidden = limitations.length === 0;
       if (limitations.length) {
@@ -361,10 +437,16 @@
       nextQuery.set("recipe", recipe.id);
       nextQuery.set("runtime", runtime.id);
       nextQuery.delete("gpus");
+      if (usage) {
+        nextQuery.set("use", useServer ? "server" : "python");
+        if (useServer && clientDetails?.open) nextQuery.set("client", selectedClient);
+        else nextQuery.delete("client");
+      }
       const nextUrl = `${window.location.pathname}?${nextQuery.toString()}${window.location.hash}`;
       if (historyMode === "push") window.history.pushState({}, "", nextUrl);
       else if (historyMode === "replace") window.history.replaceState({}, "", nextUrl);
-      status.textContent = `${recipe.label} selected for ${runtime.label}.`;
+      const modeSummary = useServer ? " with a persistent server" : "";
+      status.textContent = `${recipe.label} selected for ${runtime.label}${modeSummary}.`;
     };
 
     modelOptions.addEventListener("click", (event) => {
@@ -380,6 +462,18 @@
       selectedGroupId = groupIdFor(byId.get(selectedRecipeId));
       render({ historyMode: "push" });
     });
+    usage?.addEventListener("click", (event) => {
+      const option = event.target.closest("button[data-cookbook-mode]");
+      if (!option || option.disabled) return;
+      usagePreference = option.dataset.cookbookMode;
+      render({ historyMode: "push" });
+    });
+    servingPanel?.addEventListener("click", (event) => {
+      const option = event.target.closest("button[data-cookbook-client]");
+      if (!option) return;
+      selectedClient = option.dataset.cookbookClient;
+      render({ historyMode: "push" });
+    });
 
     render();
 
@@ -389,6 +483,9 @@
       const nextRecipe = nextQuery.get("recipe");
       selectedRecipeId = nextRecipe && byId.has(nextRecipe) ? nextRecipe : defaultRecipeId;
       selectedGroupId = groupIdFor(byId.get(selectedRecipeId));
+      usagePreference = workflow(nextQuery.get("use"));
+      selectedClient = ["python", "javascript", "curl"].includes(nextQuery.get("client")) ? nextQuery.get("client") : "curl";
+      if (clientDetails) clientDetails.open = nextQuery.has("client");
       render({ historyMode: "none" });
     };
     bindFamilyPopstate();
