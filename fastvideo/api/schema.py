@@ -34,8 +34,8 @@ class OffloadConfig:
     # after the last stage that needs it, so peak memory is the largest
     # overlapping set rather than the sum. Grouped here because it is the same
     # decision the offload knobs answer, which is how much of the model has to
-    # be resident at once.
-    lazy_module_load: bool = False
+    # be resident at once. ``None`` auto-enables on unified-memory devices.
+    lazy_module_load: bool | None = None
 
 
 @dataclass

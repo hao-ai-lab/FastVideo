@@ -49,11 +49,13 @@ def build_parser(description: str | None = None) -> argparse.ArgumentParser:
     parser.add_argument("--prompt", required=True)
     parser.add_argument("--output", default="outputs/fasth3")
     parser.add_argument("--lazy-module-load",
-                        action="store_true",
+                        action=argparse.BooleanOptionalAction,
+                        default=None,
                         help="load each heavy component on first use and free it after the last stage that "
                         "needs it, so peak memory is the largest overlapping set instead of the sum of every "
-                        "component. Enable when the model does not fit at load time; costs a reload per "
-                        "generation, so leave it off when it does fit")
+                        "component. Default: on when --num-gpus is 1; FastVideo also auto-enables on unified "
+                        "memory. Costs a reload per generation; pass --no-lazy-module-load to keep every "
+                        "component resident")
     parser.add_argument("--profile",
                         choices=("all", "strict"),
                         default="all",
@@ -275,7 +277,8 @@ def build_generator_config(args: argparse.Namespace) -> GeneratorConfig:
                 text_encoder=True,
                 vae=True,
                 pin_cpu_memory=args.pin_cpu_memory,
-                lazy_module_load=args.lazy_module_load,
+                lazy_module_load=(True if args.lazy_module_load is None and args.num_gpus == 1 else
+                                  args.lazy_module_load),
             ),
             compile=CompileConfig(
                 enabled=args.torch_compile,

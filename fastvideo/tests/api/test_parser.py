@@ -114,7 +114,7 @@ def test_load_run_config_supports_yaml_roundtrip(tmp_path) -> None:
                     "image_encoder": True,
                     "vae": True,
                     "pin_cpu_memory": True,
-                    "lazy_module_load": False,
+                    "lazy_module_load": None,
                 },
                 "compile": {
                     "enabled": False,

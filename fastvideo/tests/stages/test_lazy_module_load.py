@@ -394,6 +394,7 @@ def test_schedule_is_empty_without_lazy_modules():
     (True, False, True),
     (True, True, False),
     (False, True, False),
+    (None, False, False),
 ])
 def test_training_mode_never_defers(lazy, training, expected):
     args = SimpleNamespace(lazy_module_load=lazy, training_mode=training)
@@ -401,11 +402,11 @@ def test_training_mode_never_defers(lazy, training, expected):
     assert ComposedPipelineBase._lazy_module_load_enabled(args) is expected
 
 
-def test_flag_defaults_to_off():
+def test_flag_defaults_to_auto():
     from fastvideo.fastvideo_args import FastVideoArgs
 
     fields = {f.name: f for f in dataclasses.fields(FastVideoArgs)}
-    assert fields["lazy_module_load"].default is False
+    assert fields["lazy_module_load"].default is None
 
 
 # ----------------------------------------------------------------------
@@ -694,7 +695,9 @@ def test_building_the_real_h3_stages_materializes_nothing():
     # `DenoisingStage.__init__` in the shared stage set reads
     # `transformer.hidden_size` to pick an attention backend, which would pull
     # the DiT in during post_init. H3's stages must not acquire that habit.
+    from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
     from fastvideo.pipelines.basic.minimax_h3.minimax_h3_pipeline import MiniMaxH3Pipeline
+    from fastvideo.pipelines.composed_pipeline_base import _iter_held_objects
 
     loaded: list[str] = []
 
@@ -714,11 +717,62 @@ def test_building_the_real_h3_stages_materializes_nothing():
         "scheduler": object(),
         "audio_scheduler": object(),
     }
+    args = SimpleNamespace(pipeline_config=MiniMaxH3PipelineConfig())
 
-    pipeline._add_stages(ref2va=False)
+    pipeline._add_stages(args, ref2va=False)
 
     assert loaded == [], f"building stages materialized {loaded}"
     assert len(pipeline._stages) == 6
+    input_held = {id(obj) for obj in _iter_held_objects(pipeline._stage_name_mapping["input_preparation_stage"])}
+    latent_held = {id(obj) for obj in _iter_held_objects(pipeline._stage_name_mapping["latent_preparation_stage"])}
+    decode_held = {id(obj) for obj in _iter_held_objects(pipeline._stage_name_mapping["video_decoding_stage"])}
+    denoise_held = {id(obj) for obj in _iter_held_objects(pipeline._stage_name_mapping["denoising_stage"])}
+    assert id(pipeline.modules["vae"]) not in input_held
+    assert id(pipeline.modules["transformer"]) not in input_held
+    assert id(pipeline.modules["transformer"]) not in latent_held
+    assert id(pipeline.modules["transformer"]) not in decode_held
+    assert id(pipeline.modules["transformer"]) in denoise_held
+    assert id(pipeline.modules["vae"]) in decode_held
+
+
+def test_h3_lazy_release_drops_dit_before_vae_decode():
+    from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
+    from fastvideo.pipelines.basic.minimax_h3.minimax_h3_pipeline import MiniMaxH3Pipeline
+
+    pipeline = MiniMaxH3Pipeline.__new__(MiniMaxH3Pipeline)
+    pipeline._stages = []
+    pipeline._stage_name_mapping = {}
+    pipeline.modules = {
+        "text_encoder": LazyModule("text_encoder", lambda: _Component("text_encoder")),
+        "transformer": LazyModule("transformer", lambda: _Component("transformer")),
+        "vae": LazyModule("vae", lambda: _Component("vae")),
+        "audio_vae": LazyModule("audio_vae", lambda: _Component("audio_vae")),
+        "tokenizer": object(),
+        "processor": object(),
+        "scheduler": object(),
+        "audio_scheduler": object(),
+    }
+    args = SimpleNamespace(pipeline_config=MiniMaxH3PipelineConfig())
+    pipeline._add_stages(args, ref2va=False)
+    schedule = pipeline._build_lazy_release_schedule()
+    names = {pipeline._stages[index]._pipeline_stage_name: modules for index, modules in schedule.items()}
+    assert names["conditioning_stage"] == ["text_encoder"]
+    assert names["denoising_stage"] == ["transformer"]
+    assert "transformer" not in names.get("video_decoding_stage", [])
+    assert "vae" in names["video_decoding_stage"]
+
+
+def test_h3_checkpoint_json_updates_dit_patch_size_without_weights(tmp_path):
+    from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
+    from fastvideo.pipelines.basic.minimax_h3.minimax_h3_pipeline import _apply_h3_checkpoint_arch_configs
+
+    transformer_dir = tmp_path / "transformer"
+    transformer_dir.mkdir()
+    (transformer_dir / "config.json").write_text('{"patch_size": [1, 1, 1]}')
+    args = SimpleNamespace(pipeline_config=MiniMaxH3PipelineConfig())
+    assert tuple(args.pipeline_config.dit_config.patch_size) == (1, 2, 2)
+    _apply_h3_checkpoint_arch_configs(str(tmp_path), args, {})
+    assert tuple(args.pipeline_config.dit_config.patch_size) == (1, 1, 1)
 
 
 class _LoRAConfigComponent(torch.nn.Module):

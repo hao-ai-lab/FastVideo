@@ -12,7 +12,7 @@ text_encoder_cpu_offload: bool = True
 image_encoder_cpu_offload: bool = True
 vae_cpu_offload: bool = True
 pin_cpu_memory: bool = True
-lazy_module_load: bool = False
+lazy_module_load: bool | None = None
 ```
 
 On unified-memory accelerators such as NVIDIA GB10 and Apple silicon, FastVideo
@@ -22,18 +22,21 @@ pool there, so offload adds transfers and duplicate residency instead of freeing
 memory. CUDA FSDP sharding remains enabled when requested; MPS continues to
 disable FSDP. `pin_cpu_memory` is not an offload mode and is left unchanged.
 
-MiniMax H3 CUDA inference can use a second lever that does not copy weights to a
-host pool: load the Qwen3-VL text encoder, run conditioning, then release that
-encoder before loading the DiT and video/audio VAEs. `h3_sequential_load`
-defaults to auto (`None`): on for unified-memory devices such as GB10, off on
-discrete GPUs. Pass `--h3-sequential-load` to force it, or
-`--no-h3-sequential-load` to keep the encoder resident for later `generate()`
-calls on the same worker. Sequential load currently cannot re-encode a new prompt
-on that worker; start a new generator until prompt-cache reload exists. The MLX
-FastH3 runtime always uses this phase order. When host offload is off, DiT
-safetensors are read onto the accelerator instead of CPU-then-copy.
-Input-preparation geometry (spatial ratio, latent channels, audio sample rate)
-comes from the VAE arch configs until those weights load.
+MiniMax H3 CUDA inference can use two levers that do not copy weights to a host
+pool. `h3_sequential_load` (already the GB10 default) loads the Qwen3-VL text
+encoder, runs conditioning, then releases that encoder before loading the DiT
+and video/audio VAEs. Sequential load currently cannot re-encode a new prompt on
+that worker; start a new generator until prompt-cache reload exists.
+`lazy_module_load` is the general follow-on: each opted-in component loads on
+first use and is freed after its last stage, so a later `generate()` reloads
+from disk in-process and the DiT can drop before VAE decode. Input preparation
+and unpatchify read geometry from checkpoint `config.json` (VAE spatial ratio /
+latent channels, DiT patch size) so those stages do not materialize weights just
+to read two integers. The MLX FastH3 runtime always uses this phase order. When
+host offload is off, DiT safetensors are read onto the accelerator instead of
+CPU-then-copy. Both flags default to auto (`None`) and turn on for
+unified-memory devices such as GB10. Pass `--no-h3-sequential-load` or
+`--no-lazy-module-load` to keep the matching components resident.
 
 ## Behavior Explanation
 
@@ -131,9 +134,9 @@ By default a pipeline loads every component before the first stage runs, so
 peak memory is the sum of all of them even though no two are needed at the same
 moment. With `lazy_module_load` enabled, each heavy component loads on first use
 and is freed once the last stage that needs it has returned, so peak memory
-becomes the largest overlapping set instead of the sum. For a text-to-video
-pipeline that is roughly `max(text encoder, DiT + VAE)` rather than
-`text encoder + DiT + VAE`.
+becomes the largest overlapping set instead of the sum. MiniMax-H3 T2VA is
+`max(text encoder, DiT, VAE)` rather than `text encoder + DiT + VAE`, because
+the DiT is not held through VAE decode.
 
 #### Performance Impact
 
@@ -148,8 +151,10 @@ and kernel caches when the component structure and input shapes are unchanged.
 Enable this when a model does not fit at load time, which the CPU offload
 options above cannot help with because they act after loading. It is
 particularly relevant on unified-memory devices, where host and device draw on
-the same pool and moving weights to the host frees nothing. Leave it off when
-the model already fits.
+the same pool and moving weights to the host frees nothing. FastVideo
+auto-enables it there (`lazy_module_load=None`). Leave it off when the model
+already fits, or pass `--no-lazy-module-load` to keep components resident for
+later `generate()` calls.
 
 This option applies to inference only. Training keeps every component resident
 and logs a warning if the flag is set.

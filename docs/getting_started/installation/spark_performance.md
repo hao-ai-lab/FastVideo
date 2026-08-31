@@ -168,7 +168,10 @@ is power-cycled. To avoid it:
   unified-memory devices. Do not pass `--no-h3-sequential-load` here. Force
   `--h3-sequential-load` only if auto-detect misses the device. The CUDA pipeline
   encodes first, releases the encoder, then loads DiT and VAEs onto the
-  accelerator (`to_cpu` follows `cpu_offload`, which is off here). See
+  accelerator (`to_cpu` follows `cpu_offload`, which is off here).
+  `lazy_module_load` is also auto on unified memory: it can drop the DiT before
+  VAE decode and reload from disk on a later `generate()`. Geometry scalars come
+  from checkpoint `config.json`, not live weights. See
   [Offloading](../../inference/offloading.md).
 - **FastH3 TAEH3** (`--video-decode-backend taeh3`) is an opt-in preview decoder.
   T2VA never materializes the 9.7 GiB video VAE (DiT still loads after Qwen via
