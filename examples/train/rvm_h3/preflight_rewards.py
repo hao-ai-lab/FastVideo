@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 
 import torch
 
@@ -31,6 +32,7 @@ def make_media(frames: int = 17, height: int = 256, width: int = 448) -> torch.T
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--device", default="cuda")
+    parser.add_argument("--output", type=Path, default=None)
     args = parser.parse_args()
     scorer = build_multi_reward_scorer(
         {
@@ -68,7 +70,11 @@ def main() -> None:
             "Dynamic tracking did not score the moving synthetic clip above the static clip; "
             f"scores={serializable['dynamic_tracking']}"
         )
-    print(json.dumps(serializable, indent=2))
+    text = json.dumps(serializable, indent=2, sort_keys=True) + "\n"
+    if args.output is not None:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(text, encoding="utf-8")
+    print(text, end="")
 
 
 if __name__ == "__main__":
