@@ -181,7 +181,7 @@ def ring_flash_attn_backward(
 
     d_kv_comm.wait()
 
-    return dq.to(torch.bfloat16), next_dk.to(q.dtype), next_dv.to(q.dtype)
+    return dq.to(q.dtype), next_dk.to(q.dtype), next_dv.to(q.dtype)
 
 
 class RingFlashAttnFunc(torch.autograd.Function):
