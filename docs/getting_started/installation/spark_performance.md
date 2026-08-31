@@ -165,7 +165,8 @@ is power-cycled. To avoid it:
   conditioner is tens of gigabytes of BF16. If the DiT and VAEs load while that
   encoder is still resident, the process is a typical `earlyoom` kill (Python is
   preferred). The CUDA pipeline now encodes first, releases the encoder, then
-  loads DiT and VAEs. See [Offloading](../../inference/offloading.md).
+  loads DiT and VAEs onto the accelerator (`to_cpu` follows `cpu_offload`, which
+  is off here). See [Offloading](../../inference/offloading.md).
 
 ## Gotchas specific to the GB10
 
