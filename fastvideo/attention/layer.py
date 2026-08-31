@@ -11,7 +11,7 @@ from fastvideo.attention.selector import backend_name_to_enum, get_attn_backend
 from fastvideo.distributed.communication_op import (sequence_model_parallel_all_gather,
                                                     sequence_model_parallel_all_to_all_4D, ulysses_all_to_all_4D)
 from fastvideo.distributed.parallel_state import (get_ring_group, get_ring_rank, get_ring_size, get_sp_parallel_rank,
-                                                  get_sp_world_size)
+                                                  get_sp_world_size, get_ulysses_group)
 from fastvideo.forward_context import ForwardContext, get_forward_context
 from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.utils import get_compute_dtype
@@ -126,6 +126,18 @@ class DistributedAttention(nn.Module):
                     "The Ring+Ulysses (USP) hybrid requires num_heads to be divisible by the Ulysses "
                     f"subgroup size. Got num_heads={num_heads}, ulysses_size={ulysses_size} "
                     f"(sp_world_size={sp_world_size} // ring_size={self.ring_size}).")
+            # Ring Attention is only dispatched from DistributedAttention.forward
+            # itself (see below). A subclass that overrides forward() wholesale
+            # (e.g. LTXDistributedAttention, DistributedAttention_VSA) would
+            # otherwise never check self.use_ring_attention and silently keep
+            # running plain Ulysses SP -- fail loudly here instead of letting
+            # that divergence pass unnoticed.
+            if type(self).forward is not DistributedAttention.forward:
+                raise NotImplementedError(
+                    f"Ring Attention is not implemented for {type(self).__name__}, which overrides "
+                    "DistributedAttention.forward() directly instead of using the base dispatch. "
+                    "Disable Ring Attention (ring_size=1) for this model, or wire Ring Attention "
+                    "dispatch into its forward().")
         # Preserve the historical compiler-disabled default. The regional
         # inference loader may enable this one instance after validating the
         # transformer's resolved backend; no process-global default changes.
@@ -360,12 +372,16 @@ class DistributedAttention(nn.Module):
 
         batch_size, local_seq_len, _, _ = q.shape
 
-        # Ulysses step (no-op when ulysses_size == 1, i.e. pure Ring):
-        # redistribute heads -> sequence within this rank's Ulysses subgroup
-        # so that each Ring rank holds one full, contiguous Ring chunk.
-        qkv = torch.cat([q, k, v], dim=0)
-        qkv = ulysses_all_to_all_4D(qkv, scatter_dim=2, gather_dim=1)
-        q, k, v = qkv.chunk(3, dim=0)
+        # Ulysses step (skipped entirely when ulysses_size == 1, i.e. pure
+        # Ring): redistribute heads -> sequence within this rank's Ulysses
+        # subgroup so that each Ring rank holds one full, contiguous Ring
+        # chunk. The stack-into-one-all-to-all-then-chunk below costs a real
+        # copy of Q/K/V, so only pay it when there is an actual Ulysses
+        # subgroup to redistribute within.
+        if get_ulysses_group() is not None:
+            qkv = torch.cat([q, k, v], dim=0)
+            qkv = ulysses_all_to_all_4D(qkv, scatter_dim=2, gather_dim=1)
+            q, k, v = qkv.chunk(3, dim=0)
 
         ring_local_seq_len = q.shape[1]
 
