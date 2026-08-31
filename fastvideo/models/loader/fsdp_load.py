@@ -36,14 +36,14 @@ def _summarize_param_names(names: set[str]) -> str:
     return ", ".join(f"{family} x{count}" if count > 1 else family for family, count in sorted(families.items()))
 
 
-def _maybe_quantize_model(model: nn.Module) -> None:
-    """Quantize NVFP4- or FP8-tagged linear layers in-place after weights are loaded.
+def _maybe_quantize_model(model: nn.Module, *, defer_mxfp8_weight_conversion: bool = False) -> None:
+    """Quantize inference linear weights after checkpoint loading.
 
-    Walks the module tree once, looking for layers whose ``quant_method``
-    is an :class:`NVFP4QuantizeMethod` or :class:`FP8QuantizeMethod` (attached
-    at construction time by the respective ``get_quant_method``). When at least
+    Walks the module tree once, looking for layers whose ``quant_method`` is an
+    inference quantization method attached at construction time. When at least
     one such layer exists, calls the matching conversion function to register
-    quantized weight buffers on each targeted layer.
+    quantized weight buffers on each targeted layer. MXFP8 conversion can be
+    deferred until a configured inference LoRA is merged.
 
     The walk returns on the first quantized layer found so unquantized callers
     pay only an ``isinstance`` check per module. Both imports are deferred so
@@ -70,6 +70,10 @@ def _maybe_quantize_model(model: nn.Module) -> None:
         FP8QuantizeMethod,
         convert_model_to_fp8,
     )
+    from fastvideo.layers.quantization.mxfp8_config import (
+        MXFP8QuantizeMethod,
+        convert_model_to_mxfp8,
+    )
 
     qat_train_attached = 0
     qat_train_skipped = 0
@@ -86,6 +90,13 @@ def _maybe_quantize_model(model: nn.Module) -> None:
         if isinstance(qm, FP8QuantizeMethod):
             logger.info("Converting loaded model weights for FP8 linear layers")
             convert_model_to_fp8(model)
+            return
+        if isinstance(qm, MXFP8QuantizeMethod):
+            if defer_mxfp8_weight_conversion:
+                logger.info("Deferring MXFP8 weight conversion until the inference LoRA merge completes")
+                return
+            logger.info("Converting loaded model weights for MXFP8 linear layers")
+            convert_model_to_mxfp8(model)
             return
         # QAT-train configs are mutually exclusive with the inference schemes
         # above (one quant_config per model), so when they're active the loop
@@ -287,7 +298,7 @@ def maybe_load_fsdp_model(
     # responsibility is just to materialize the quantized weight buffers
     # from the freshly-loaded bf16 weights. No-op when no quantized layers
     # are present (lazy imports inside the helper).
-    _maybe_quantize_model(model)
+    _maybe_quantize_model(model, defer_mxfp8_weight_conversion=lora_path is not None)
 
     compile_in_loader = enable_torch_compile and training_mode
     if compile_in_loader:

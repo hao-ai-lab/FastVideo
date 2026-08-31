@@ -21,6 +21,7 @@ from fastvideo.distributed.communication_op import (
 )
 from fastvideo.distributed.parallel_state import get_sp_world_size, model_parallel_is_initialized
 from fastvideo.layers.linear import ReplicatedLinear
+from fastvideo.layers.quantization.mxfp8_config import MXFP8QuantizeMethod
 from fastvideo.layers.mlp import MLP
 from fastvideo.layers.quantization import QuantizationConfig
 from fastvideo.layers.visual_embedding import Timesteps
@@ -119,8 +120,14 @@ class MiniMaxH3FeedForward(nn.Module):
             prefix=f"{prefix}.fc_out",
         )
         self.fuse_swiglu = fuse_swiglu
+        self.use_mxfp8 = isinstance(self.fc_in.quant_method, MXFP8QuantizeMethod) and isinstance(
+            self.fc_out.quant_method, MXFP8QuantizeMethod)
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        if self.use_mxfp8:
+            from fastvideo.layers.mxfp8linear import mxfp8_swiglu_feed_forward
+
+            return mxfp8_swiglu_feed_forward(hidden_states, self.fc_in, self.fc_out)
         hidden_states, _ = self.fc_in(hidden_states)
         if self.fuse_swiglu and _can_run_minimax_h3_fusion(hidden_states):
             hidden_states = minimax_h3_swiglu(hidden_states)

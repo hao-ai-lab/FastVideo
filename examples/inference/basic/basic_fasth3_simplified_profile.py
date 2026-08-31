@@ -20,6 +20,7 @@ from fastvideo.api import (
     OutputConfig,
     ParallelismConfig,
     PipelineSelection,
+    QuantizationConfig,
     SamplingConfig,
 )
 from fastvideo.profiler import nvtx_range
@@ -77,6 +78,7 @@ def main() -> None:
                 parallelism=ParallelismConfig(tp_size=1, sp_size=4),
                 offload=OffloadConfig(dit=False, dit_layerwise=False),
                 compile=CompileConfig(vae_enabled=True),
+                quantization=QuantizationConfig(transformer_quant="MXFP8"),
             ),
         )
     )

@@ -43,6 +43,14 @@ def _get_hook_ctx(module: nn.Module | None):
     return nullcontext()
 
 
+def _convert_mxfp8_weights_after_lora_merge(transformer_modules: dict[str, nn.Module]) -> None:
+    """Prequantize final inference weights after all LoRA layers are merged."""
+    from fastvideo.layers.quantization.mxfp8_config import convert_model_to_mxfp8
+
+    for transformer_module in transformer_modules.values():
+        convert_model_to_mxfp8(transformer_module)
+
+
 def _named_module_by_prefix(module: nn.Module,
                             prefixes: list[str]) -> list[tuple[str | None, list[tuple[str, nn.Module]]]]:
     none_list: list[tuple[str, nn.Module]] = []
@@ -532,6 +540,7 @@ class LoRAPipeline(ComposedPipelineBase):
                                lora_path)
             if unmatched:
                 logger.warning("LoRA adapter %s: %d weights did not reach a layer", lora_path, len(unmatched))
+        _convert_mxfp8_weights_after_lora_merge(self.trainable_transformer_modules)
 
     def merge_lora_weights(self) -> None:
         for (
