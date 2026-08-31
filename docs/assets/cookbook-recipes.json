@@ -1,5 +1,5 @@
 {
-  "version": 4,
+  "version": 5,
   "recipes": [
     {
       "id": "fastwan21-t2v",
@@ -82,15 +82,18 @@
       },
       "evidence": "Verified",
       "expected_artifact": "MP4 video at outputs/fastmetal_1_3b.mp4",
-      "limitations": ["This is the native MLX FastMetal path. basic_mps.py is the older PyTorch MPS demo."]
+      "modes": ["T2V", "temporal --fast", "spatial --fast-spatial", "two-pass --refine"],
+      "limitations": [
+        "Native MLX FastMetal T2V. Add --fast for temporal RIFE, --fast-spatial to denoise at half resolution, or --refine for a two-pass upsample. basic_mps.py is the older PyTorch MPS demo."
+      ]
     },
     {
       "id": "fastmetal-5b-mlx",
       "family": "wan",
       "stage": "inference",
-      "task": "Text or image to video",
+      "task": "Text to video",
       "label": "FastMetal 5B",
-      "summary": "Run the released Wan2.2 5B FastMetal checkpoint with MLX DiT denoising and MLX TAEHV decode.",
+      "summary": "Run the released Wan2.2 5B FastMetal checkpoint as MLX T2V with MLX DiT denoising and MLX TAEHV decode. The CUDA Wan2.2 TI2V 5B recipe is the image-capable path.",
       "model": "FastVideo/FastMetal-5B-QAD",
       "source": "examples/inference/basic/mlx_wan22_generate.py",
       "command": "hf download FastVideo/FastMetal-5B-QAD --local-dir ./FastMetal-5B-QAD\npython examples/inference/basic/mlx_wan22_generate.py --mlx-checkpoint ./FastMetal-5B-QAD --text-encoder-root ./FastMetal-5B-QAD --vae-root ./FastMetal-5B-QAD/vae --height 704 --width 1280 --num-frames 81 --prompt \"A cinematic portrait with soft neon lighting and smooth camera motion.\" --output-path ./outputs/fastmetal_5b.mp4",
@@ -105,7 +108,11 @@
         "evidence_url": "https://github.com/hao-ai-lab/FastVideo/pull/1638"
       },
       "evidence": "Verified",
-      "expected_artifact": "MP4 video at outputs/fastmetal_5b.mp4"
+      "expected_artifact": "MP4 video at outputs/fastmetal_5b.mp4",
+      "modes": ["T2V", "temporal --fast", "spatial --fast-spatial", "two-pass --refine"],
+      "limitations": [
+        "The checked-in MLX example is T2V. Image-to-video is not in mlx_wan22_generate.py. Add --fast, --fast-spatial, or --refine on the same script."
+      ]
     },
     {
       "id": "fastmetal-14b-mlx",
@@ -128,7 +135,11 @@
         "evidence_url": "https://github.com/hao-ai-lab/FastVideo/pull/1638"
       },
       "evidence": "Verified",
-      "expected_artifact": "MP4 video at outputs/fastmetal_14b.mp4"
+      "expected_artifact": "MP4 video at outputs/fastmetal_14b.mp4",
+      "modes": ["T2V", "temporal --fast", "spatial --fast-spatial", "two-pass --refine"],
+      "limitations": [
+        "Native MLX FastMetal T2V on 36 GB+ unified memory. Same --fast, --fast-spatial, and --refine flags as the 1.3B script."
+      ]
     },
     {
       "id": "turbodiffusion-wan21-1-3b-t2v",
@@ -425,6 +436,7 @@
       "hardware": {"platform": "cuda", "gpu_count": 4, "evidence": "source-configured"},
       "evidence": "Source-backed",
       "expected_artifact": "MP4 with synchronized audio at outputs/minimax_h3_t2v/minimax_h3_t2v.mp4",
+      "modes": ["T2VA"],
       "limitations": ["The checked-in example defaults to four-way sequence parallelism. It does not record a GPU model or memory requirement."]
     },
     {
@@ -450,6 +462,7 @@
       },
       "evidence": "Verified",
       "expected_artifact": "Warmup and measured MP4 files under outputs/fasth3/",
+      "modes": ["T2VA", "4-step FastH3"],
       "limitations": ["The default all profile is the measured GB200 performance route and can change floating-point operation order. Use --profile strict --no-inference-torch-compile for the eager strict route."]
     },
     {
@@ -476,7 +489,10 @@
       },
       "evidence": "Verified",
       "expected_artifact": "MP4 with H.264 video and stereo AAC audio at outputs/fasth3_int6.mp4",
-      "limitations": ["The MLX path supports T2VA and optional temporal --fast and spatial --fast-spatial modes. FL2VA, Ref2VA, two-pass refinement, and VSA are not wired."]
+      "modes": ["T2VA", "temporal --fast", "spatial --fast-spatial", "opt-in VSA"],
+      "limitations": [
+        "The MLX path supports T2VA, optional temporal --fast, optional spatial --fast-spatial, and opt-in VSA on --include-vsa checkpoints. FL2VA, Ref2VA, and two-pass refinement are not wired."
+      ]
     },
     {
       "id": "minimax-h3-fl2va",
@@ -492,6 +508,7 @@
       "hardware": {"platform": "cuda", "gpu_count": 4, "evidence": "source-configured"},
       "evidence": "Source-backed",
       "expected_artifact": "MP4 with synchronized audio at outputs/minimax_h3_fl2va/minimax_h3_fl2va.mp4",
+      "modes": ["FL2VA"],
       "limitations": ["Pass --last-image to constrain the final frame. The checked-in source defaults to four GPUs."]
     },
     {
@@ -508,6 +525,7 @@
       "hardware": {"platform": "cuda", "gpu_count": 4, "evidence": "source-configured"},
       "evidence": "Source-backed",
       "expected_artifact": "MP4 with synchronized audio at outputs/minimax_h3_ref2va/minimax_h3_ref2va.mp4",
+      "modes": ["Ref2VA"],
       "limitations": ["Pass --reference-audio for an additional audio reference. The checked-in source defaults to four GPUs."]
     },
     {
@@ -530,6 +548,7 @@
       },
       "evidence": "Verified",
       "expected_artifact": "Warmup and measured MP4 files under outputs/fasth3_lora_preview/",
+      "modes": ["T2VA", "FastH3 LoRA"],
       "limitations": ["Supply a compatible FastH3 adapter. The script infers dense or VSA attention from the adapter payload unless you override it."]
     },
     {

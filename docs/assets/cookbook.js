@@ -1,5 +1,7 @@
 (() => {
-  const patternCharacters = "0123456789ABCDEF";
+  const PATTERN_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  const PATTERN_LENGTH = 900;
+  const SCRAMBLE_MS = 140;
 
   const loadRecipes = (url) =>
     fetch(url).then((response) => {
@@ -7,18 +9,81 @@
       return response.json();
     });
 
-  const initPatterns = (root) => {
-    root.querySelectorAll("[data-cookbook-pattern]").forEach((pattern, patternIndex) => {
-      if (pattern.dataset.patternReady) return;
-      pattern.dataset.patternReady = "true";
-      let value = "";
-      for (let index = 0; index < 1800; index += 1) {
-        const characterIndex = (index * 7 + patternIndex * 11) % patternCharacters.length;
-        value += patternCharacters.charAt(characterIndex);
-        if (index % 4 === 3 && index % 32 !== 31) value += " ";
-        if (index % 32 === 31) value += "\n";
-      }
-      pattern.textContent = value;
+  const generatePattern = (length) => {
+    const chars = new Array(length);
+    for (let index = 0; index < length; index += 1) {
+      chars[index] = PATTERN_CHARS.charAt((Math.random() * PATTERN_CHARS.length) | 0);
+    }
+    return chars.join("");
+  };
+
+  const motionQuery = () =>
+    window.matchMedia("(hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference)");
+
+  const initEvervault = (root) => {
+    root.querySelectorAll("[data-evervault]").forEach((visual) => {
+      if (visual.dataset.evervaultReady) return;
+      visual.dataset.evervaultReady = "true";
+      const noise = visual.querySelector("[data-cookbook-pattern]");
+      if (!noise) return;
+
+      const query = motionQuery();
+      if (!query.matches) return;
+
+      let rect = null;
+      let pointerX = 0;
+      let pointerY = 0;
+      let frame = 0;
+      let lastScramble = 0;
+      let patternReady = false;
+
+      const paint = (scramble) => {
+        visual.style.setProperty("--mouse-x", `${pointerX}px`);
+        visual.style.setProperty("--mouse-y", `${pointerY}px`);
+        if (scramble) noise.textContent = generatePattern(PATTERN_LENGTH);
+        frame = 0;
+      };
+
+      const onEnter = () => {
+        rect = visual.getBoundingClientRect();
+        if (!patternReady) {
+          noise.textContent = generatePattern(PATTERN_LENGTH);
+          patternReady = true;
+        }
+      };
+      const onMove = (event) => {
+        if (!rect) rect = visual.getBoundingClientRect();
+        pointerX = event.clientX - rect.left;
+        pointerY = event.clientY - rect.top;
+        if (frame) return;
+        frame = window.requestAnimationFrame(() => {
+          const now = performance.now();
+          const scramble = now - lastScramble >= SCRAMBLE_MS;
+          if (scramble) lastScramble = now;
+          paint(scramble);
+        });
+      };
+      const onLeave = () => {
+        if (frame) window.cancelAnimationFrame(frame);
+        frame = 0;
+        rect = null;
+        pointerX = 0;
+        pointerY = 0;
+        visual.style.setProperty("--mouse-x", "50%");
+        visual.style.setProperty("--mouse-y", "50%");
+      };
+      visual.addEventListener("mouseenter", onEnter);
+      visual.addEventListener("mousemove", onMove);
+      visual.addEventListener("mouseleave", onLeave);
+    });
+  };
+
+  let familyPopstate = null;
+  const bindFamilyPopstate = () => {
+    if (bindFamilyPopstate.bound) return;
+    bindFamilyPopstate.bound = true;
+    window.addEventListener("popstate", () => {
+      if (typeof familyPopstate === "function") familyPopstate();
     });
   };
 
@@ -137,28 +202,9 @@
 
     compactLifecycle(root);
 
-    const builderHeading = root.querySelector(".cookbook-builder__intro h2");
-    const builderIntro = root.querySelector(".cookbook-builder__intro > p");
-    if (builderHeading) builderHeading.textContent = "Pick a recipe and runtime";
-    if (builderIntro) {
-      builderIntro.textContent =
-        "Start with the result you want, then choose one of the runtimes FastVideo actually maintains for it.";
-    }
-
-    const selectionLabels = root.querySelectorAll(".cookbook-selection-row__label");
-    if (selectionLabels[0]) {
-      selectionLabels[0].querySelector("strong").textContent = "Recipe";
-      selectionLabels[0].querySelector("span").textContent = "Task and checkpoint";
-    }
-    if (selectionLabels[1]) {
-      selectionLabels[1].querySelector("strong").textContent = "Runtime";
-      selectionLabels[1].querySelector("span").textContent = "Maintained paths only";
-    }
-
     const modelOptions = root.querySelector("[data-cookbook-model-options]");
     const hardwareOptions = root.querySelector("[data-cookbook-hardware-options]");
     const description = root.querySelector("[data-cookbook-description]");
-    const hardwareNote = root.querySelector(".cookbook-hardware-note");
     const label = root.querySelector("[data-cookbook-label]");
     const model = root.querySelector("[data-cookbook-model]");
     const task = root.querySelector("[data-cookbook-task]");
@@ -178,12 +224,6 @@
     modelOptions.setAttribute("aria-label", "Recipe");
     hardwareOptions.setAttribute("aria-label", "Runtime");
 
-    if (hardwareNote) {
-      hardwareNote.textContent = "Exact device and memory details appear only when a recorded run supports them.";
-    }
-    const runtimeFactLabel = hardwareValue?.closest("div")?.querySelector("dt");
-    if (runtimeFactLabel) runtimeFactLabel.textContent = "Hardware";
-
     let recipes;
     try {
       ({ recipes } = await loadRecipes(root.dataset.recipes));
@@ -192,6 +232,7 @@
       console.error("Failed to load FastVideo cookbook recipes", error);
       return;
     }
+    if (!root.isConnected) return;
 
     const familyRecipes = recipes.filter((recipe) => recipe.family === family);
     if (!familyRecipes.length) return;
@@ -225,6 +266,7 @@
     const defaultRecipeId = familyRecipes[0].id;
     let selectedRecipeId = requestedRecipe && byId.has(requestedRecipe) ? requestedRecipe : defaultRecipeId;
     let selectedGroupId = groupIdFor(byId.get(selectedRecipeId));
+    let renderedRuntimeGroup = null;
 
     const renderRuntimeOptions = () => {
       const groupRecipes = groups.get(selectedGroupId) || [];
@@ -255,6 +297,7 @@
     }
 
     const render = ({ groupChanged = false, historyMode = "replace" } = {}) => {
+      if (!root.isConnected) return;
       if (!byId.has(selectedRecipeId)) selectedRecipeId = defaultRecipeId;
       let recipe = byId.get(selectedRecipeId);
       if (groupChanged || groupIdFor(recipe) !== selectedGroupId) {
@@ -265,7 +308,10 @@
       }
 
       selectedGroupId = groupIdFor(recipe);
-      renderRuntimeOptions();
+      if (renderedRuntimeGroup !== selectedGroupId) {
+        renderRuntimeOptions();
+        renderedRuntimeGroup = selectedGroupId;
+      }
       const runtime = runtimeFor(recipe);
 
       modelOptions.querySelectorAll("button").forEach((option) => {
@@ -337,17 +383,19 @@
 
     render();
 
-    window.addEventListener("popstate", () => {
+    familyPopstate = () => {
+      if (!root.isConnected) return;
       const nextQuery = new URLSearchParams(window.location.search);
       const nextRecipe = nextQuery.get("recipe");
       selectedRecipeId = nextRecipe && byId.has(nextRecipe) ? nextRecipe : defaultRecipeId;
       selectedGroupId = groupIdFor(byId.get(selectedRecipeId));
       render({ historyMode: "none" });
-    });
+    };
+    bindFamilyPopstate();
   };
 
   const init = () => {
-    initPatterns(document);
+    initEvervault(document);
     document.querySelectorAll("[data-cookbook][data-family]").forEach((root) => {
       if (root.dataset.initialized) return;
       root.dataset.initialized = "true";

@@ -5,7 +5,7 @@ hide:
 
 # Z-Image recipes
 
-<div class="cookbook-shell cookbook-family-page" data-cookbook data-family="zimage" data-recipes="../../assets/cookbook-recipes.json?v=4">
+<div class="cookbook-shell cookbook-family-page" data-cookbook data-family="zimage" data-recipes="../../assets/cookbook-recipes.json?v=5">
   <header class="cookbook-family-header">
     <a class="cookbook-back-link" href="../"><span aria-hidden="true">←</span> All model families</a>
     <div class="cookbook-family-header__body">
@@ -31,10 +31,8 @@ hide:
 
   <section class="cookbook-builder" id="recipe-builder" aria-labelledby="builder-heading">
     <div class="cookbook-builder__intro">
-      <h2 id="builder-heading">Choose a model and GPU count</h2>
-      <p>Choose a model, then pick a GPU count. Each selection maps to one
-      checked-in recipe. If that recipe does not use your chosen count, the
-      page says so instead of guessing.</p>
+      <h2 id="builder-heading">Pick a recipe and runtime</h2>
+      <p>Start with the result you want, then choose one of the runtimes FastVideo actually maintains for it.</p>
     </div>
 
     <div class="cookbook-builder__layout">

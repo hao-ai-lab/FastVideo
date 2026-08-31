@@ -145,62 +145,6 @@ img {
     background: transparent;
 }
 
-.md-typeset .cookbook-journey {
-    display: grid !important;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 0;
-    padding: 0;
-    margin: 2.5rem 0 0;
-    list-style: none;
-    border-top: 1px solid var(--cookbook-border);
-}
-
-.cookbook-journey li {
-    position: relative;
-    min-width: 0;
-    padding: 1.2rem 1.5rem 0 0;
-    margin: 0;
-}
-
-.cookbook-journey li:not(:last-child)::after {
-    position: absolute;
-    top: 1.85rem;
-    right: 0.75rem;
-    width: 1.25rem;
-    height: 1px;
-    background: var(--cookbook-border);
-    content: "";
-}
-
-.cookbook-journey li > span {
-    display: inline-grid;
-    width: 1.35rem;
-    height: 1.35rem;
-    margin-bottom: 0.55rem;
-    place-items: center;
-    border-radius: 999px;
-    color: #fff;
-    background: var(--cookbook-accent);
-    font-size: 0.58rem;
-    font-weight: 720;
-}
-
-.cookbook-journey strong,
-.cookbook-journey small {
-    display: block;
-}
-
-.cookbook-journey strong {
-    font-size: 0.72rem;
-}
-
-.cookbook-journey small {
-    margin-top: 0.2rem;
-    color: var(--md-default-fg-color--light);
-    font-size: 0.62rem;
-    line-height: 1.4;
-}
-
 .cookbook-section,
 .cookbook-builder,
 .cookbook-roadmap {
@@ -217,8 +161,14 @@ img {
 }
 
 .cookbook-catalog .cookbook-section {
-    padding-top: 0;
+    padding: 2.25rem 0 0.5rem;
     border-top: 0;
+}
+
+.cookbook-catalog .cookbook-section + .cookbook-section {
+    margin-top: 1.5rem;
+    padding-top: 1.75rem;
+    border-top: 1px solid var(--cookbook-border);
 }
 
 .cookbook-section__heading {
@@ -254,27 +204,27 @@ img {
 }
 
 .md-typeset .cookbook-family-tile {
-    display: block;
+    display: flex;
+    flex-direction: column;
     overflow: hidden;
     border: 1px solid var(--cookbook-border);
-    border-radius: 0.75rem;
+    border-radius: 0.95rem;
     color: var(--md-default-fg-color);
     background: var(--cookbook-surface);
     text-decoration: none;
-    transition: border-color 180ms ease;
+    transition-property: border-color, box-shadow;
+    transition-duration: 150ms;
+    transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
 }
 
-/* Identical restrained hover/focus treatment for every tile: a border and
-   accent change plus the pattern reveal. No transforms, so card geometry
-   never shifts on hover. */
 .md-typeset a.cookbook-family-tile:focus-visible,
 .cookbook-family-tile--coming:focus-visible {
     border-color: var(--cookbook-accent);
     color: var(--md-default-fg-color);
 }
 
-.cookbook-family-tile--ready {
-    border-color: color-mix(in srgb, var(--cookbook-accent) 54%, var(--cookbook-border));
+.cookbook-family-tile--featured {
+    border-color: color-mix(in srgb, var(--cookbook-accent) 48%, var(--cookbook-border));
 }
 
 .cookbook-family-tile--coming {
@@ -286,41 +236,63 @@ img {
     display: grid;
     aspect-ratio: 4 / 3;
     overflow: hidden;
+    isolation: isolate;
     place-items: center;
     border-bottom: 1px solid var(--cookbook-border);
-    background: #f7f7f5;
+    background: linear-gradient(145deg, #fafafa, #f0f1f5);
+    --mouse-x: 50%;
+    --mouse-y: 50%;
 }
 
-.cookbook-card-pattern {
+.cookbook-evervault {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0;
+    mask-image: radial-gradient(42% at var(--mouse-x) var(--mouse-y), #fff 18%, transparent 72%);
+    -webkit-mask-image: radial-gradient(42% at var(--mouse-x) var(--mouse-y), #fff 18%, transparent 72%);
+    transition-property: opacity;
+    transition-duration: 150ms;
+    transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+.cookbook-evervault__gradient {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(to right in oklab, #4f46e5, #0ea5e9);
+}
+
+.cookbook-evervault__noise {
     position: absolute;
     inset: 0;
     overflow: hidden;
-    color: rgba(255, 255, 255, 0.8);
-    background: var(--cookbook-accent);
+    color: #fff;
     font-family: var(--md-code-font-family);
-    font-size: 0.52rem;
+    font-size: 0.5rem;
     font-weight: 700;
-    line-height: 1.04;
-    opacity: 0;
+    line-height: 1.05;
+    letter-spacing: 0.04em;
+    word-break: break-all;
     overflow-wrap: anywhere;
-    transition: opacity 200ms ease;
+    mix-blend-mode: overlay;
 }
 
-/* Every tile gets the same reveal on hover; links also reveal it when they
-   receive keyboard focus, so hover is never the only cue. */
-a.cookbook-family-tile:focus-visible .cookbook-card-pattern {
+.md-typeset a.cookbook-family-tile:focus-visible .cookbook-evervault {
     opacity: 1;
 }
 
 @media (hover: hover) and (pointer: fine) {
-    .md-typeset a.cookbook-family-tile:hover,
-    .cookbook-family-tile--coming:hover {
-        border-color: var(--cookbook-accent);
+    .md-typeset a.cookbook-family-tile:hover {
+        border-color: color-mix(in srgb, var(--cookbook-accent) 62%, var(--cookbook-border));
         color: var(--md-default-fg-color);
     }
 
-    .cookbook-family-tile:hover .cookbook-card-pattern {
+    .md-typeset a.cookbook-family-tile:hover .cookbook-evervault {
         opacity: 1;
+    }
+
+    .cookbook-family-tile--coming:hover {
+        border-color: var(--cookbook-border);
     }
 }
 
@@ -332,8 +304,8 @@ a.cookbook-family-tile:focus-visible .cookbook-card-pattern {
     height: 8.4rem;
     place-items: center;
     border-radius: 999px;
-    background: rgba(255, 255, 255, 0.96);
-    box-shadow: 0 0.7rem 2rem rgba(34, 29, 92, 0.12);
+    background: rgba(255, 255, 255, 0.92);
+    box-shadow: 0 0.8rem 2rem rgba(15, 23, 42, 0.12);
     backdrop-filter: blur(8px);
 }
 
@@ -367,17 +339,44 @@ a.cookbook-family-tile:focus-visible .cookbook-card-pattern {
 
 .cookbook-family-tile__footer {
     display: flex;
-    min-height: 4.25rem;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.75rem;
-    padding: 0.8rem 0.9rem;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+    padding: 0.85rem 0.95rem 1rem;
 }
 
-.cookbook-family-tile__footer > span:first-child,
+.cookbook-family-tile__footer-top {
+    display: flex;
+    align-items: start;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
 .cookbook-family-tile__footer strong,
 .cookbook-family-tile__footer small {
     display: block;
+}
+
+.md-typeset ul.cookbook-mode-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    padding: 0;
+    margin: 0;
+    list-style: none;
+}
+
+.md-typeset .cookbook-mode-row li {
+    display: inline-flex;
+    padding: 0.18rem 0.45rem;
+    border: 1px solid var(--cookbook-border);
+    border-radius: 999px;
+    color: var(--md-default-fg-color--light);
+    background: var(--cookbook-surface-raised);
+    font-size: 0.7rem;
+    font-weight: 650;
+    line-height: 1.25;
+    white-space: nowrap;
 }
 
 .cookbook-family-page {
@@ -440,7 +439,7 @@ a.cookbook-family-tile:focus-visible .cookbook-card-pattern {
     margin-bottom: 0.4rem;
 }
 
-.cookbook-family-header__body p:last-child {
+.cookbook-family-header__body h2 + p {
     margin: 0.55rem 0 0;
     color: var(--md-default-fg-color--light);
     font-size: 0.76rem;
@@ -858,17 +857,18 @@ a.cookbook-family-tile:focus-visible .cookbook-card-pattern {
 }
 
 @media (max-width: 52rem) {
-    .md-typeset .cookbook-journey {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        row-gap: 1rem;
-    }
-
-    .cookbook-journey li::after {
-        display: none;
-    }
-
     .cookbook-family-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .cookbook-section__heading {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 0.45rem;
+    }
+
+    .cookbook-section__heading > p {
+        text-align: start;
     }
 
     .cookbook-selection-row {
@@ -889,11 +889,24 @@ a.cookbook-family-tile:focus-visible .cookbook-card-pattern {
         padding-top: 1.5rem;
     }
 
-    .md-typeset .cookbook-journey,
     .cookbook-family-grid,
     .cookbook-option-grid--models,
     .cookbook-result__facts {
         grid-template-columns: 1fr;
+    }
+
+    .cookbook-family-tile__visual {
+        max-height: 12rem;
+    }
+
+    .cookbook-family-tile__logo-wrap {
+        width: 6.5rem;
+        height: 6.5rem;
+    }
+
+    .cookbook-family-tile__logo-wrap img {
+        width: 4.75rem;
+        height: 4.75rem;
     }
 
     .cookbook-section__heading,
@@ -903,7 +916,7 @@ a.cookbook-family-tile:focus-visible .cookbook-card-pattern {
     }
 
     .cookbook-section__heading > p {
-        text-align: left;
+        text-align: start;
     }
 
     .cookbook-builder {
@@ -927,14 +940,19 @@ a.cookbook-family-tile:focus-visible .cookbook-card-pattern {
 @media (prefers-reduced-motion: reduce) {
     .md-typeset .cookbook-button,
     .md-typeset .cookbook-family-tile,
-    .cookbook-card-pattern,
+    .cookbook-evervault,
     .cookbook-option-grid button {
         transition: none;
     }
 
-    .md-typeset .cookbook-button:hover,
-    .md-typeset .cookbook-family-tile:hover {
-        transform: none;
+    .cookbook-evervault {
+        mask-image: none;
+        -webkit-mask-image: none;
+    }
+
+    .md-typeset a.cookbook-family-tile:hover .cookbook-evervault,
+    .md-typeset a.cookbook-family-tile:focus-visible .cookbook-evervault {
+        opacity: 0.28;
     }
 }
 
@@ -958,12 +976,8 @@ a.cookbook-family-tile:focus-visible .cookbook-card-pattern {
 .md-typeset .cookbook-family-tile,
 .md-typeset .cookbook-family-tile--ready {
     border-color: var(--cookbook-border);
-    border-radius: 0.95rem;
     background: var(--cookbook-surface);
     box-shadow: 0 0.1rem 0.25rem rgba(15, 23, 42, 0.04);
-    transition-property: transform, border-color, box-shadow;
-    transition-duration: 180ms;
-    transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
 }
 
 .cookbook-family-tile--featured {
@@ -971,75 +985,77 @@ a.cookbook-family-tile:focus-visible .cookbook-card-pattern {
     box-shadow: 0 0 0 1px color-mix(in srgb, var(--cookbook-accent) 12%, transparent);
 }
 
-.cookbook-family-tile__visual {
-    background: linear-gradient(145deg, #fafafa, #f0f1f5);
-}
-
-.cookbook-card-pattern {
-    color: rgba(255, 255, 255, 0.58);
-    background:
-        radial-gradient(circle at 20% 10%, rgba(129, 140, 248, 0.95), transparent 38%),
-        linear-gradient(145deg, #3730a3, #111827 76%);
-    opacity: 0;
-    transform: scale(1.035);
-    transition-property: opacity, transform;
-    transition-duration: 200ms;
-    transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
-}
-
-.cookbook-family-tile__logo-wrap {
-    box-shadow: 0 0.8rem 2rem rgba(15, 23, 42, 0.12);
-    transition-property: transform, box-shadow;
-    transition-duration: 200ms;
-    transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
-}
-
-.cookbook-family-tile__footer {
-    min-height: 4.7rem;
-    padding: 0.9rem 1rem;
-}
-
 .cookbook-family-tile__footer strong {
     font-size: 0.8rem;
-    transition: color 150ms ease;
 }
 
 .cookbook-family-tile__footer small {
-    max-width: 19ch;
+    max-width: 28ch;
     margin-top: 0.18rem;
     font-size: 0.61rem;
     line-height: 1.35;
 }
 
-.cookbook-family-tile:focus-visible .cookbook-card-pattern {
-    opacity: 1;
-    transform: scale(1);
+[data-md-color-scheme="slate"] .cookbook-family-tile__visual {
+    background: linear-gradient(145deg, #1c2130, #11151f);
 }
 
-.cookbook-family-tile:focus-visible .cookbook-family-tile__logo-wrap {
-    transform: translateY(-0.2rem) scale(0.96);
+[data-md-color-scheme="slate"] .cookbook-family-tile__logo-wrap {
+    background: rgba(17, 21, 31, 0.92);
+    box-shadow: 0 0.8rem 2rem rgba(0, 0, 0, 0.35);
 }
 
-@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
-    .md-typeset .cookbook-family-tile:hover {
-        border-color: color-mix(in srgb, var(--cookbook-accent) 62%, var(--cookbook-border));
-        box-shadow: 0 1rem 2.4rem rgba(15, 23, 42, 0.14);
-        transform: translateY(-0.3rem);
-    }
+[data-md-color-scheme="slate"] .cookbook-family-tile__monogram {
+    color: #d7dbe7;
+}
 
-    .cookbook-family-tile:hover .cookbook-card-pattern {
-        opacity: 1;
-        transform: scale(1);
-    }
+.cookbook-modes {
+    margin: 0 0 2rem;
+    text-align: start;
+}
 
-    .cookbook-family-tile:hover .cookbook-family-tile__logo-wrap {
-        box-shadow: 0 1.1rem 2.4rem rgba(15, 23, 42, 0.22);
-        transform: translateY(-0.2rem) scale(0.96);
-    }
+.cookbook-family-page .cookbook-modes {
+    max-width: 48rem;
+    margin-inline: auto;
+}
 
-    .cookbook-family-tile:hover .cookbook-family-tile__footer strong {
-        color: var(--cookbook-accent-strong);
-    }
+.md-typeset .cookbook-modes h2 {
+    margin: 0 0 0.5rem;
+    font-size: 1.05rem;
+    letter-spacing: -0.02em;
+}
+
+.cookbook-modes > p {
+    max-width: 66ch;
+    margin: 0 0 0.85rem;
+    color: var(--md-default-fg-color--light);
+    font-size: 0.74rem;
+    line-height: 1.55;
+}
+
+.cookbook-modes__table-wrap {
+    overflow-x: auto;
+}
+
+.md-typeset .cookbook-modes table {
+    display: table;
+    width: 100%;
+    margin: 0;
+    font-size: 0.68rem;
+}
+
+.md-typeset .cookbook-modes th,
+.md-typeset .cookbook-modes td {
+    padding: 0.55rem 0.7rem;
+    vertical-align: top;
+}
+
+.md-typeset [data-cookbook-modes-row] {
+    grid-column: 1 / -1;
+}
+
+.md-typeset [data-cookbook-modes-row] dd {
+    overflow-wrap: anywhere;
 }
 
 .cookbook-family-page {
@@ -1092,7 +1108,7 @@ a.cookbook-family-tile:focus-visible .cookbook-card-pattern {
     text-wrap: balance;
 }
 
-.cookbook-family-header__body p:last-child {
+.cookbook-family-header__body h2 + p {
     max-width: 66ch;
     font-size: 0.8rem;
     line-height: 1.6;
@@ -1446,7 +1462,7 @@ a.cookbook-family-tile:focus-visible .cookbook-card-pattern {
 
 @media (prefers-reduced-motion: reduce) {
     .md-typeset .cookbook-family-tile,
-    .cookbook-card-pattern,
+    .cookbook-evervault,
     .cookbook-family-tile__logo-wrap,
     .cookbook-option-grid button {
         transition: none;

@@ -5,7 +5,7 @@ hide:
 
 # MiniMax H3 recipes
 
-<div class="cookbook-shell cookbook-family-page" data-cookbook data-family="minimax_h3" data-recipes="../../assets/cookbook-recipes.json?v=4">
+<div class="cookbook-shell cookbook-family-page" data-cookbook data-family="minimax_h3" data-recipes="../../assets/cookbook-recipes.json?v=5">
   <header class="cookbook-family-header">
     <a class="cookbook-back-link" href="../"><span aria-hidden="true">←</span> All model families</a>
     <div class="cookbook-family-header__body">
@@ -15,7 +15,7 @@ hide:
       <div>
         <p class="cookbook-eyebrow">Primary focus · Inference</p>
         <h2>MiniMax H3 recipes</h2>
-        <p>Generate synchronized video and audio with the full H3 checkpoint, the four-step FastH3 Preview, reference and frame-conditioned paths, or the native Apple Silicon MLX runtime.</p>
+        <p>Generate synchronized video and audio with the full H3 checkpoint, the four-step FastH3 Preview, reference and frame-conditioned CUDA paths, or the native Apple Silicon MLX T2VA runtime.</p>
         <span class="cookbook-count" data-cookbook-count>6 maintained recipes</span>
       </div>
     </div>
@@ -29,6 +29,64 @@ hide:
       <span class="cookbook-lifecycle__stage">Deployment <small>planned</small></span>
     </div>
   </header>
+
+  <section class="cookbook-modes" aria-labelledby="h3-modes-heading">
+    <h2 id="h3-modes-heading">Supported modes</h2>
+    <p>
+      CUDA covers T2VA, FL2VA, and Ref2VA on the full checkpoint, plus FastH3
+      Preview and FastH3 LoRA. MLX is T2VA only. Temporal <code>--fast</code>,
+      spatial <code>--fast-spatial</code>, and opt-in VSA are flags on the same
+      MLX script, not extra recipes.
+    </p>
+    <div class="cookbook-modes__table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Mode</th>
+            <th>CUDA</th>
+            <th>MLX FastH3</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>T2VA</td>
+            <td>Full H3, FastH3 Preview, FastH3 LoRA</td>
+            <td>FastH3 Preview after a local DiT conversion</td>
+          </tr>
+          <tr>
+            <td>FL2VA</td>
+            <td>Full H3</td>
+            <td>Not wired</td>
+          </tr>
+          <tr>
+            <td>Ref2VA</td>
+            <td>Full H3</td>
+            <td>Not wired</td>
+          </tr>
+          <tr>
+            <td>Temporal <code>--fast</code></td>
+            <td>No cookbook recipe</td>
+            <td>Shorter video denoise, MLX RIFE back to <code>--num-frames</code>, full-duration audio</td>
+          </tr>
+          <tr>
+            <td>VSA</td>
+            <td>Trained sparse attention on FastH3 CUDA</td>
+            <td>Opt-in. Convert with <code>--include-vsa</code> into a new directory such as <code>./FastH3-MLX-vsa</code>, then pass <code>--vsa</code>. Do not overwrite an existing dense export.</td>
+          </tr>
+          <tr>
+            <td>Spatial <code>--fast-spatial</code></td>
+            <td>No cookbook recipe</td>
+            <td>Denoise and decode at height/width divided by <code>--fast-spatial-scale</code>, then resample. Composes with <code>--fast</code>.</td>
+          </tr>
+          <tr>
+            <td>Two-pass refine</td>
+            <td>No cookbook recipe</td>
+            <td>Not wired</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
 
   <section class="cookbook-builder" id="recipe-builder" aria-labelledby="builder-heading">
     <div class="cookbook-builder__intro">
@@ -135,7 +193,7 @@ for the download, conversion, and storage requirements.
 
 - The full CUDA H3 examples request four GPUs by default. Their sources do not claim a GPU model or memory minimum.
 - The FastH3 CUDA performance profile was measured on four GB200 GPUs. Use its strict profile when exact operation order matters more than the measured performance configuration.
-- The MLX source runtime is limited to T2VA. FL2VA, Ref2VA, VSA, and two-pass refinement are not wired on MLX.
+- The MLX source runtime supports T2VA, optional temporal `--fast`, optional spatial `--fast-spatial`, and opt-in VSA on `--include-vsa` checkpoints. FL2VA, Ref2VA, and two-pass refinement are not wired.
 - Gated or missing checkpoints: run `huggingface-cli login` and confirm you accepted the model's license on Hugging Face.
 
 ## Evidence status
