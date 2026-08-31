@@ -349,16 +349,24 @@
           option.setAttribute("aria-pressed", String(selected));
         });
         servingAvailability.textContent = profile
-          ? "The server keeps the model loaded between requests. Python can do the same when you reuse the generator in one process."
+          ? "The playground and API clients share one server process. Both workflows can run on your own machine."
           : servingLoadFailed
             ? "Server examples could not be loaded. Open the H3 server guide below, or use Python directly."
-            : "This recipe uses Python directly. For the playground and API clients, choose FastH3 Preview with CUDA.";
+            : "This recipe uses Python directly. For the playground and API clients, choose FastH3 Preview with CUDA or MLX.";
         servingPanel.hidden = !useServer;
         commandBlock.hidden = useServer;
         root.querySelector("[data-cookbook-python-note]").hidden = useServer;
       }
 
       if (useServer) {
+        const isMLX = profile.runtime === "mlx";
+        servingPanel.querySelector("[data-cookbook-server-lifetime]").textContent = isMLX
+          ? "Start once, then change prompts in the playground or your app. MLX reuses its pipeline and prompt cache, but loads and releases model components between phases to limit unified-memory use. It does not keep all weights resident."
+          : "Start once, then change prompts in the playground or your app. CUDA requests reuse the loaded model. The Python SDK can also reuse a generator within one process.";
+        servingPanel.querySelector("[data-cookbook-install-guide]").href = isMLX
+          ? "../../getting_started/installation/mps/#run-fasth3-preview" : "../../getting_started/installation/gpu/";
+        servingPanel.querySelector("[data-cookbook-prepare]").hidden = !profile.prepare;
+        servingPanel.querySelector("[data-cookbook-server-prepare]").textContent = profile.prepare;
         servingPanel.querySelector("[data-cookbook-server-install]").textContent = profile.install;
         servingPanel.querySelector("[data-cookbook-server-command]").textContent = profile.command;
         servingPanel.querySelector("[data-cookbook-health-command]").textContent = profile.health_command;
@@ -395,7 +403,7 @@
       });
 
       description.textContent = useServer
-        ? "FastH3 Preview generates video with audio. This server profile uses the checked-in CUDA configuration."
+        ? `FastH3 Preview generates video with audio. This server profile uses the checked-in ${profile.runtime.toUpperCase()} configuration.`
         : recipe.summary;
       label.textContent = useServer ? `${recipe.group_label || recipe.label} · Server` : recipe.label;
       model.textContent = recipe.model;
@@ -415,7 +423,9 @@
       renderHardwareEvidence(hardwareState, hardwareBadge, activeRecipe);
 
       const limitations = useServer ? [
-        "This server config has no recorded serving benchmark. Compilation is disabled, unlike the measured Python performance profile.",
+        profile.runtime === "mlx"
+          ? "This MLX server config has no recorded hardware run. Measurements from the Python recipe are not server memory requirements. Only text-to-video/audio is wired; reference inputs and fast modes are not exposed here."
+          : "This server config has no recorded serving benchmark. Compilation is disabled, unlike the measured Python performance profile.",
         `${profile.sampling.width} × ${profile.sampling.height} · ${profile.sampling.num_frames} frames · ${profile.sampling.fps} fps. The server supplies these defaults; the client sends the model and prompt.`,
         "Generation is serialized. Job metadata is held in memory and is lost when the server restarts.",
       ] : recipe.limitations || [];

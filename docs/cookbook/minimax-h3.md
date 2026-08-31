@@ -15,7 +15,7 @@ hide:
       <div>
         <p class="cookbook-eyebrow">Primary focus · Inference</p>
         <h2>MiniMax H3 recipes</h2>
-        <p>Generate video and audio with H3. Keep a CUDA server running for prompt iteration, or use Python directly on CUDA and Apple Silicon MLX.</p>
+        <p>Generate video and audio with H3. Run a server on CUDA or Apple Silicon MLX to iterate on prompts, or call the pipeline directly from Python.</p>
         <span class="cookbook-count" data-cookbook-count>6 maintained recipes</span>
       </div>
     </div>
@@ -30,7 +30,8 @@ hide:
     </div>
   </header>
 
-  <section class="cookbook-modes" aria-labelledby="h3-modes-heading">
+  <details class="cookbook-modes">
+    <summary>Compare H3 modes and options</summary>
     <h2 id="h3-modes-heading">Supported modes</h2>
     <p>
       CUDA covers T2VA, FL2VA, and Ref2VA on the full checkpoint, plus FastH3
@@ -86,7 +87,7 @@ hide:
         </tbody>
       </table>
     </div>
-  </section>
+  </details>
 
   <section class="cookbook-builder" id="recipe-builder" aria-labelledby="builder-heading">
     <div class="cookbook-builder__intro">
@@ -162,15 +163,16 @@ hide:
         <p class="cookbook-hardware-note" data-cookbook-python-note>Running this script again starts a new process and reloads the model. To iterate in Python, create the generator once and reuse it for multiple prompts.</p>
 
         <div class="cookbook-serving" data-cookbook-serving hidden>
-          <p class="cookbook-serving__intro">Start once, then change prompts in the playground or your app. Each job reuses the loaded model. You can run the server and clients on the same machine.</p>
+          <p class="cookbook-serving__intro" data-cookbook-server-lifetime>Start once, then change prompts in the playground or your app. You can run the server and clients on the same machine.</p>
           <section class="cookbook-serving__step" aria-labelledby="serving-install-heading">
-            <h4 id="serving-install-heading"><span aria-hidden="true">1</span> Install on the GPU machine</h4>
-            <p>Run from your FastVideo clone in an activated Python environment. See <a href="../../getting_started/installation/gpu/">installation requirements</a>.</p>
+            <h4 id="serving-install-heading"><span aria-hidden="true">1</span> Prepare the machine</h4>
+            <p>Run from your FastVideo clone in an activated Python environment. See <a data-cookbook-install-guide href="../../getting_started/installation/gpu/">installation requirements</a>.</p>
             <div class="cookbook-command"><div class="cookbook-command__bar"><span>GPU machine · Terminal</span></div><pre id="cookbook-server-install"><code class="language-bash" data-cookbook-server-install></code></pre></div>
+            <details class="cookbook-serving__prepare" data-cookbook-prepare hidden><summary>Download and convert MLX weights once</summary><p>Skip this if the weights are already prepared. Edit the paths in <code>examples/serving/mlx_fasth3.yaml</code> to use your existing files. Install <code>ffmpeg</code> for video and audio output.</p><div class="cookbook-command"><pre id="cookbook-server-prepare"><code class="language-bash" data-cookbook-server-prepare></code></pre></div></details>
           </section>
           <section class="cookbook-serving__step" aria-labelledby="serving-start-heading">
             <h4 id="serving-start-heading"><span aria-hidden="true">2</span> Start the server</h4>
-            <p>Keep this terminal running. The model loads at startup; later requests reuse the loaded pipeline.</p>
+            <p>Keep this terminal running while you use the playground or API clients.</p>
             <div class="cookbook-command"><div class="cookbook-command__bar"><span>GPU machine · Terminal</span></div><pre id="cookbook-server-command"><code class="language-bash" data-cookbook-server-command></code></pre></div>
             <details class="cookbook-serving__check"><summary>Check that the server is ready</summary><p>In another terminal, this returns <code>{"status":"ok"}</code> after startup.</p><div class="cookbook-command"><pre id="cookbook-health-command"><code class="language-bash" data-cookbook-health-command></code></pre></div></details>
           </section>

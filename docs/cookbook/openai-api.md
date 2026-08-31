@@ -1,22 +1,26 @@
 # Run H3 with a server and playground
 
-Load FastH3 once, then iterate on prompts in a browser, with cURL, or from your
-app. The server and clients can run on the same machine. Each job reuses the
-loaded model until you stop the server.
+Start FastH3 on CUDA or Apple Silicon MLX, then iterate on prompts in a browser,
+with cURL, or from your app. The server and clients can run on the same machine.
 
 The server supports the OpenAI-compatible video-job API. The Python and
 JavaScript client examples use that interface, but requests go to FastVideo.
 You do not need an OpenAI account or cloud key.
 
 The [H3 recipe selector](minimax-h3.md) provides the same workflow with runtime
-selection. MLX recipes use Python directly; they do not have a server adapter.
+selection. This guide covers FastH3 Preview text-to-video/audio. Other H3
+recipes keep their direct Python commands.
 
-The Python SDK can also keep a model loaded. Create one `VideoGenerator` and
-reuse it for multiple `generate()` calls in the same process. Re-running a
-standalone script creates a new process and loads the model again. Use a server
-when you want separate clients to share that process.
+CUDA requests reuse one loaded `VideoGenerator`. The Python SDK can do the same
+when you reuse the generator across `generate()` calls. MLX keeps one
+`MiniMaxH3MLXPipeline` and a prompt-embedding cache, but still loads and releases
+components between phases to fit unified memory. MLX serving does not keep all
+weights resident or remove phase-loading time. Use a server when you want
+separate clients to share the process without restarting scripts.
 
 ## Install and start the server
+
+### CUDA
 
 Use a FastVideo clone and an activated Python environment. Complete the
 [CUDA installation requirements](../getting_started/installation/gpu.md)
@@ -39,6 +43,47 @@ curl --fail-with-body http://127.0.0.1:8000/health
 ```
 
 After model loading completes, the response is `{"status":"ok"}`.
+
+### Apple Silicon MLX
+
+Complete the [Apple Silicon installation](../getting_started/installation/mps.md#run-fasth3-preview),
+including `ffmpeg`. From your FastVideo clone, install the MLX extra:
+
+```bash
+uv pip install -e ".[mlx]"
+```
+
+Download and convert the weights once. Skip this step if you already have the
+snapshot and converted DiT:
+
+```bash
+hf download FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2 --local-dir ./FastH3-Preview-v0.2
+python scripts/checkpoint_conversion/convert_minimax_h3_mlx.py --model-root ./FastH3-Preview-v0.2/transformer --out ./FastH3-MLX --formats "int6"
+```
+
+Edit `generator.model_root` and `generator.mlx_checkpoint` in
+`examples/serving/mlx_fasth3.yaml` if your weights are elsewhere. Paths are
+relative to the directory where you launch the server. Start it with:
+
+```bash
+python -m fastvideo.entrypoints.openai.mlx_server --config examples/serving/mlx_fasth3.yaml
+```
+
+This uses the native MLX pipeline, not PyTorch MPS. The default output is
+832 × 480, 124 frames at 24 fps, with four DiT forwards and the full H3 VAE.
+The HTTP field `num_inference_steps=5` describes five sigma points; the adapter
+passes `num_steps=4` to MLX. Temporal/spatial fast modes, VSA, reference inputs,
+LoRA selection, and alternate decoders are not exposed by this server adapter.
+Unsupported request options return HTTP 400 before a job starts.
+
+The server binds to `127.0.0.1:8000` and advertises `fasth3`, so the playground
+and clients below work unchanged. Do not run CUDA and MLX servers on the same
+port. MLX readiness means the pipeline is initialized; components load during
+generation. The first request can take longer than a repeated cached prompt.
+
+The MLX server has no recorded device or unified-memory requirement. The
+direct Python recipe's M4 Max measurements are not a server benchmark or a
+minimum-memory claim.
 
 ## Open the playground
 
@@ -65,9 +110,9 @@ or manage a GPU server for you.
 ## Generate with cURL or an SDK
 
 These examples use the server's resolution, frame count, and sampling defaults.
-Do not copy Sora-specific durations or resolutions onto H3. The server config
-uses 1344 × 768, 124 frames, 24 fps, and the five-point distilled sigma schedule
-with four DiT forwards.
+Do not copy Sora-specific durations or resolutions onto H3. Both server configs
+use 124 frames, 24 fps, and the five-point distilled sigma schedule with four
+DiT forwards. CUDA uses 1344 × 768; MLX uses 832 × 480.
 
 Each client submits a job, checks for completion or failure, and downloads an
 MP4 named after the job ID. Polling stops after 30 minutes; a timeout does not

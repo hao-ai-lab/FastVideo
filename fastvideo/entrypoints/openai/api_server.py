@@ -2,7 +2,7 @@
 # (https://github.com/sgl-project/sglang/blob/main/python/sglang/multimodal_gen/runtime/entrypoints/http_server.py)
 
 from contextlib import asynccontextmanager
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 import os
 
 import uvicorn
@@ -18,7 +18,8 @@ from fastvideo.entrypoints.openai.state import (
     clear_state,
     set_state,
 )
-from fastvideo.entrypoints.openai.serving_engine import OpenAIServingEngine
+from fastvideo.entrypoints.openai.serving_engine import OpenAIServingEngine, ServingGenerator
+from fastvideo.entrypoints.openai.protocol import VideoGenerationRequest
 from fastvideo.entrypoints.video_generator import VideoGenerator
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
@@ -60,10 +61,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     served_model_name: str | None = app.state.served_model_name
     default_request: GenerationRequest | None = getattr(app.state, "default_request", None)
 
-    logger.info("Loading model from %s ...", args.model_path)
-    generator = VideoGenerator.from_fastvideo_args(args)
-    serving_engine = OpenAIServingEngine(generator)
-    logger.info("Model loaded successfully.")
+    logger.info("Initializing %s generation runtime for %s ...", app.state.runtime, args.model_path)
+    factory = app.state.generator_factory
+    generator = factory() if factory is not None else VideoGenerator.from_fastvideo_args(args)
+    serving_engine = OpenAIServingEngine(generator, app.state.video_request_validator)
+    logger.info("Generation runtime ready.")
 
     set_state(
         generator,
@@ -91,6 +93,10 @@ def create_app(
     output_dir: str = DEFAULT_OUTPUT_DIR,
     default_request: GenerationRequest | None = None,
     served_model_name: str | None = None,
+    *,
+    generator_factory: Callable[[], ServingGenerator] | None = None,
+    video_request_validator: Callable[[VideoGenerationRequest], None] | None = None,
+    runtime: str = "cuda",
 ) -> FastAPI:
     """Build the FastAPI application with all routers mounted"""
 
@@ -103,6 +109,9 @@ def create_app(
     app.state.output_dir = output_dir
     app.state.default_request = default_request
     app.state.served_model_name = served_model_name
+    app.state.generator_factory = generator_factory
+    app.state.video_request_validator = video_request_validator
+    app.state.runtime = runtime
 
     app.add_middleware(
         CORSMiddleware,
@@ -149,7 +158,8 @@ def create_app(
 
     app.include_router(common_router)
     app.include_router(video_router)
-    app.include_router(image_router)
+    if runtime != "mlx":
+        app.include_router(image_router)
     app.include_router(playground_router)
 
     @app.get("/health")

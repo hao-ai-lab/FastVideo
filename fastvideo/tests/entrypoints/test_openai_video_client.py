@@ -23,6 +23,8 @@ from fastvideo.entrypoints.cli.inference_config import build_serve_config
 from fastvideo.entrypoints.openai.api_server import create_app
 from fastvideo.entrypoints.openai.stores import VIDEO_STORE
 from fastvideo.api.compat import normalize_generation_request
+from fastvideo.entrypoints.openai.mlx_server import MLXH3Generator, create_mlx_app, load_config, validate_mlx_video_request
+from fastvideo.entrypoints.openai.protocol import VideoGenerationRequest
 
 ROOT = Path(__file__).resolve().parents[3]
 MODEL = "FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2"
@@ -48,9 +50,12 @@ class FileGenerator:
         pass
 
 
-@pytest.fixture
-def local_server(monkeypatch, tmp_path):
+@pytest.fixture(params=["cuda", "mlx"])
+def local_server(request, monkeypatch, tmp_path):
     generator = FileGenerator()
+    generator.runtime = request.param
+    generator.native_calls = []
+    generator.thread_ids = []
     def load(args):
         generator.loads += 1
         return generator
@@ -71,6 +76,28 @@ def local_server(monkeypatch, tmp_path):
     assert config.generator.model_path == MODEL
     assert config.generator.engine.num_gpus == 4
     app = create_app(args, str(tmp_path / "server"), config.default_request, config.server.served_model_name)
+    if request.param == "mlx":
+        def native_generate(prompt, **kwargs):
+            generator.thread_ids.append(threading.get_ident())
+            generator.native_calls.append(kwargs)
+            request = normalize_generation_request({
+                "prompt": prompt,
+                "sampling": {key: kwargs[key] for key in ["height", "width", "num_frames", "seed"]},
+                "output": {"output_path": kwargs["output_path"]},
+            })
+            request.sampling.num_inference_steps = kwargs["num_steps"] + 1
+            return generator.generate(request)
+
+        def load_native(config):
+            generator.loads += 1
+            generator.thread_ids.append(threading.get_ident())
+            return SimpleNamespace(generate=native_generate)
+
+        monkeypatch.setattr(MLXH3Generator, "_load", staticmethod(load_native))
+        monkeypatch.setattr("fastvideo.mlx_runtime.minimax_h3_pipeline._cleanup_mlx", lambda: None)
+        mlx_config = load_config(str(ROOT / "examples/serving/mlx_fasth3.yaml"))
+        mlx_config.server.output_dir = str(tmp_path / "server")
+        app = create_mlx_app(mlx_config)
     server = uvicorn.Server(uvicorn.Config(app, log_level="error"))
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
@@ -97,7 +124,7 @@ def test_openai_video_lifecycle(local_server):
     video = client.videos.create_and_poll(model="fasth3", prompt="a fox", poll_interval_ms=1)
     assert video.status == "completed"
     assert video.model == "fasth3"
-    assert video.size == "1344x768"
+    assert video.size == ("832x480" if generator.runtime == "mlx" else "1344x768")
     assert video.error is None
     request = generator.requests[0]
     assert request.sampling.num_frames == 124
@@ -149,6 +176,9 @@ def test_prompt_iteration_reuses_the_loaded_generator(local_server):
     assert first.status == second.status == "completed"
     assert [request.prompt for request in generator.requests] == ["a fox", "a fox in snow"]
     assert generator.loads == 1
+    if generator.runtime == "mlx":
+        assert len(set(generator.thread_ids)) == 1
+        assert [call["num_steps"] for call in generator.native_calls] == [4, 4]
 
 
 def test_playground_assets_and_config_do_not_generate(local_server):
@@ -168,7 +198,10 @@ def test_playground_assets_and_config_do_not_generate(local_server):
         config = json.load(response)
     assert config == {
         "model": "fasth3",
-        "defaults": {"width": 1344, "height": 768, "num_frames": 124, "fps": 24, "seed": 1000},
+        "runtime": generator.runtime,
+        "defaults": {"width": 832, "height": 480, "num_frames": 124, "fps": 24, "seed": 2026}
+        if generator.runtime == "mlx" else
+        {"width": 1344, "height": 768, "num_frames": 124, "fps": 24, "seed": 1000},
     }
     with pytest.raises(HTTPError) as error:
         urlopen(origin + "/playground/api_server.py")
@@ -200,6 +233,34 @@ def test_playground_is_limited_to_h3_text_generation(local_server, monkeypatch, 
         urlopen(base_url.removesuffix("/v1") + "/playground/")
     assert error.value.code == 404
     assert not generator.requests
+
+
+@pytest.mark.parametrize("fields", [
+    {"image_reference": "https://example.com/input.png"}, {"task": "fl2va"},
+    {"guidance_scale": 2}, {"num_inference_steps": 4}, {"negative_prompt": "bad"},
+    {"seed": -1}, {"seed": 2**32}, {"extra_params": {"vsa_mode": "exempt"}},
+    {"enable_frame_interpolation": True},
+])
+def test_mlx_rejects_unsupported_options_before_generation(fields):
+    if "image_reference" in fields:
+        fields = {"image_reference": {"image_url": fields["image_reference"]}}
+    with pytest.raises(ValueError):
+        validate_mlx_video_request(VideoGenerationRequest(prompt="a fox", **fields))
+
+
+def test_mlx_http_rejects_reference_media_and_image_routes(local_server):
+    client, generator, base_url = local_server
+    if generator.runtime != "mlx":
+        return
+    with pytest.raises(openai.BadRequestError, match="image_reference"):
+        client.videos.create(model="fasth3", prompt="a fox", extra_body={
+            "image_reference": {"image_url": "http://127.0.0.1:1/must-not-fetch"},
+        })
+    assert not generator.requests
+    assert not client.videos.list().data
+    with urlopen(base_url.removesuffix("/v1") + "/openapi.json") as response:
+        spec = json.load(response)
+    assert "/v1/images" not in spec["paths"]
 
 
 @pytest.mark.parametrize("filename,runner", [("video.py", sys.executable), ("video.sh", "bash"), ("video.mjs", "node")])

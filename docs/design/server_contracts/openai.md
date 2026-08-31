@@ -40,6 +40,13 @@ browser client uses the video routes above and shares their loaded pipeline.
 `GET /playground/config` reports the model alias and operator-explicit sampling
 defaults. The playground does not add authentication or a second model process.
 
+For native FastH3 MLX, launch
+`python -m fastvideo.entrypoints.openai.mlx_server --config examples/serving/mlx_fasth3.yaml`.
+This adapter shares the video-job API and executes pipeline calls on one MLX
+thread. It rejects unsupported options before media fetching or job creation.
+Image routes are not mounted. MLX keeps its existing phase-memory policy, so a
+persistent server does not imply persistent residency of all model weights.
+
 ## Video requests
 
 The canonical shape follows vLLM-Omni and accepts SGLang's common flat

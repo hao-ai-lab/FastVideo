@@ -17,7 +17,7 @@
   <main>
     <div class="intro">
       <p class="eyebrow">Text to video + audio</p>
-      <h1>A new prompt. The same loaded model.</h1>
+      <h1>A new prompt. The same running server.</h1>
       <p>Generate, watch, and refine. This page and your API clients share one running FastVideo server.</p>
     </div>
     <div class="connection-bar">
@@ -37,7 +37,7 @@
           </div>
           <p class="settings" id="settings">Resolution and sampling come from the server configuration.</p>
           <button class="primary" id="generate" type="submit" disabled>Generate video <span aria-hidden="true">↗</span></button>
-          <p class="hint">The model stays loaded until you stop the server. Closing this page does not cancel a job.</p>
+          <p class="hint" id="lifetime">Closing this page does not cancel a job.</p>
         </form>
         <details class="request-details">
           <summary>Use this prompt with cURL</summary>

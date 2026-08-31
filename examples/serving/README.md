@@ -34,8 +34,15 @@ adapter also needs `attention_backend: VIDEO_SPARSE_ATTN_H3`, `VSA_sparsity`,
 and `VSA_tile_size` like the full-checkpoint config.
 
 After startup, open `http://127.0.0.1:8000/playground/` to generate and review
-H3 videos in your browser. New prompts reuse the loaded model. The playground
+H3 videos in your browser. CUDA prompts reuse the loaded model. The playground
 and API clients share the same server; both can run locally.
+
+For native Apple Silicon MLX, use
+`python -m fastvideo.entrypoints.openai.mlx_server --config examples/serving/mlx_fasth3.yaml`
+after preparing the weights and editing their paths in that configuration.
+The same playground and clients work with MLX. Its pipeline still loads and
+releases components between phases to limit unified-memory use. See the
+cookbook for setup and the supported text-to-video/audio request fields.
 
 Or submit, poll, and download with the OpenAI Python client:
 

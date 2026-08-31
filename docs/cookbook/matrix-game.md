@@ -5,7 +5,7 @@ hide:
 
 # Matrix Game recipes
 
-<div class="cookbook-shell cookbook-family-page" data-cookbook data-family="matrixgame" data-recipes="../../assets/cookbook-recipes.json?v=5">
+<div class="cookbook-shell cookbook-family-page" data-cookbook data-family="matrixgame" data-recipes="../../assets/cookbook-recipes.json?v=6">
   <header class="cookbook-family-header">
     <a class="cookbook-back-link" href="../"><span aria-hidden="true">←</span> All model families</a>
     <div class="cookbook-family-header__body">

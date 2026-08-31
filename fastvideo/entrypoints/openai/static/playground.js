@@ -5,6 +5,7 @@
   const labels = { queued: "Queued", in_progress: "Generating", completed: "Completed", failed: "Failed" };
   const active = (job) => ["queued", "in_progress"].includes(job.status);
   let model = "";
+  let readyLabel = "Server ready";
   let busy = false;
   let currentJob = null;
   let pollVersion = 0;
@@ -89,7 +90,7 @@
       $("video").src = `${path}/content`;
       $("download").href = `${path}/content`;
       $("download").download = `${job.id}.mp4`;
-      $("job-status").textContent = "Video ready. Change the prompt and generate again with the same loaded model.";
+      $("job-status").textContent = "Video ready. Change the prompt and generate again without restarting the server.";
     } else {
       $("video").pause();
       $("video").removeAttribute("src");
@@ -108,10 +109,17 @@
     setBusy(true);
     $("check-status").hidden = true;
     const deadline = Date.now() + 30 * 60 * 1000;
+    let restorePrompt = !$("prompt").value.trim();
     try {
       while (version === pollVersion) {
         const job = await api(`/v1/videos/${encodeURIComponent(id)}`);
         if (version !== pollVersion) return;
+        $("connection").textContent = readyLabel;
+        if (restorePrompt) {
+          $("prompt").value = job.prompt || "";
+          updateCurl();
+          restorePrompt = false;
+        }
         renderJob(job);
         if (!active(job)) break;
         if (Date.now() >= deadline) throw new Error("Stopped checking after 30 minutes. The job may still be running.");
@@ -119,6 +127,7 @@
       }
     } catch (error) {
       if (version !== pollVersion) return;
+      $("connection").textContent = "Job status unavailable · check the server";
       showError(`${error.message} Select Check status to reconnect. A connection error does not cancel generation. If the job is missing, the server may have restarted or the job was deleted.`);
       $("check-status").hidden = false;
     } finally {
@@ -176,7 +185,11 @@
       await api("/health");
       const config = await api("/playground/config");
       model = config.model;
-      $("connection").textContent = "Server ready · model loaded";
+      readyLabel = config.runtime === "mlx" ? "Server ready · MLX" : "Server ready · model loaded";
+      $("connection").textContent = readyLabel;
+      $("lifetime").textContent = config.runtime === "mlx"
+        ? "MLX keeps the server and prompt cache available, but releases model components between phases to limit unified-memory use. Closing this page does not cancel a job."
+        : "The model stays loaded until you stop the server. Closing this page does not cancel a job.";
       $("model").textContent = model;
       const d = config.defaults;
       const facts = [];

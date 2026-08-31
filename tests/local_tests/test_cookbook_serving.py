@@ -31,6 +31,20 @@ def test_cookbook_serving_does_not_inherit_local_benchmark():
     validate_cookbook()
 
 
+def test_mlx_serving_profile_has_native_launcher_and_no_invented_memory():
+    recipes = json.loads(COOKBOOK_DATA.read_text())["recipes"]
+    recipe = next(item for item in recipes if item["id"] == "fasth3-preview-mlx")
+    profile = cookbook_serving_profile(recipe)
+    assert profile["hardware"] == {"platform": "mlx", "evidence": "source-configured"}
+    assert profile["command"] == (
+        "python -m fastvideo.entrypoints.openai.mlx_server --config examples/serving/mlx_fasth3.yaml"
+    )
+    assert profile["prepare"] in recipe["command"]
+    assert profile["sampling"]["num_inference_steps"] == 5
+    for client in profile["clients"].values():
+        assert client["code"] == (ROOT / client["source"]).read_text()
+
+
 @pytest.mark.parametrize("field,value", [("model", "wrong-checkpoint"), ("hardware", {"platform": "mlx"})])
 def test_cookbook_rejects_mismatched_serving_recipe(field, value):
     recipe = copy.deepcopy(serving_recipe())
@@ -68,6 +82,6 @@ def test_h3_command_blocks_have_unique_copy_targets():
 
     parser = CodeBlocks()
     parser.feed((ROOT / "docs/cookbook/minimax-h3.md").read_text())
-    assert len(parser.ids) == 6
+    assert len(parser.ids) == 7
     assert all(parser.ids)
     assert len(set(parser.ids)) == len(parser.ids)

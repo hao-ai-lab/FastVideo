@@ -203,12 +203,13 @@ def cookbook_serving_profile(recipe: dict) -> dict:
     serving = recipe["serving"]
     if not isinstance(serving, dict) or not serving.get("source") or not serving.get("install"):
         raise ValueError(f"Serving recipe needs source and install fields: {recipe['id']}")
-    if recipe["hardware"].get("platform", "cuda") != "cuda":
-        raise ValueError(f"Cookbook HTTP serving is only wired for CUDA: {recipe['id']}")
     source = (ROOT_DIR / serving["source"]).resolve()
     if not source.is_relative_to(ROOT_DIR / "examples/serving") or not source.is_file():
         raise ValueError(f"Serving config must exist under examples/serving: {recipe['id']}")
     config = yaml.safe_load(source.read_text(encoding="utf-8"))
+    runtime = config.get("runtime", "cuda")
+    if runtime not in {"cuda", "mlx"} or runtime != recipe["hardware"].get("platform", "cuda"):
+        raise ValueError(f"Serving runtime does not match recipe: {recipe['id']}")
     generator = config["generator"]
     if generator["model_path"] != recipe["model"]:
         raise ValueError(f"Serving checkpoint does not match recipe: {recipe['id']}")
@@ -219,9 +220,19 @@ def cookbook_serving_profile(recipe: dict) -> dict:
     if not isinstance(model, str) or not re.fullmatch(r"[A-Za-z0-9._/-]+", model):
         raise ValueError(f"Serving model alias must be safe for client examples: {recipe['id']}")
     port = server["port"]
-    count = generator["engine"]["num_gpus"]
-    if type(port) is not int or not 1 <= port <= 65535 or type(count) is not int or count < 1:
-        raise ValueError(f"Serving config needs a valid port and GPU count: {recipe['id']}")
+    if type(port) is not int or not 1 <= port <= 65535:
+        raise ValueError(f"Serving config needs a valid port: {recipe['id']}")
+    hardware = {"platform": runtime, "evidence": "source-configured"}
+    if runtime == "cuda":
+        count = generator["engine"]["num_gpus"]
+        if type(count) is not int or count < 1:
+            raise ValueError(f"Serving config needs a valid GPU count: {recipe['id']}")
+        hardware["gpu_count"] = count
+        command = f"fastvideo serve --config {serving['source']} --server.host 127.0.0.1"
+    else:
+        if server.get("host") != "127.0.0.1":
+            raise ValueError(f"MLX cookbook server must bind to loopback: {recipe['id']}")
+        command = f"python -m fastvideo.entrypoints.openai.mlx_server --config {serving['source']}"
     base_url = f"http://127.0.0.1:{port}/v1"
     clients = {}
     for language, (filename, install) in COOKBOOK_CLIENTS.items():
@@ -236,16 +247,14 @@ def cookbook_serving_profile(recipe: dict) -> dict:
     return {
         "source": serving["source"],
         "install": serving["install"],
-        "command": f"fastvideo serve --config {serving['source']} --server.host 127.0.0.1",
+        "command": command,
+        "runtime": runtime,
+        "prepare": serving.get("prepare", ""),
         "model": model,
         "base_url": base_url,
         "playground_url": f"http://127.0.0.1:{port}/playground/",
         "health_command": f"curl --fail-with-body http://127.0.0.1:{port}/health",
-        "hardware": {
-            "platform": "cuda",
-            "gpu_count": count,
-            "evidence": "source-configured"
-        },
+        "hardware": hardware,
         "sampling": config["default_request"]["sampling"],
         "clients": clients,
     }

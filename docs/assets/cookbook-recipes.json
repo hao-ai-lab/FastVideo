@@ -1,5 +1,5 @@
 {
-  "version": 5,
+  "version": 6,
   "recipes": [
     {
       "id": "fastwan21-t2v",
@@ -471,6 +471,11 @@
     },
     {
       "id": "fasth3-preview-mlx",
+      "serving": {
+        "source": "examples/serving/mlx_fasth3.yaml",
+        "install": "uv pip install -e \".[mlx]\"",
+        "prepare": "hf download FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2 --local-dir ./FastH3-Preview-v0.2\npython scripts/checkpoint_conversion/convert_minimax_h3_mlx.py --model-root ./FastH3-Preview-v0.2/transformer --out ./FastH3-MLX --formats \"int6\""
+      },
       "group": "fasth3-preview",
       "group_label": "FastH3 Preview",
       "group_task": "4-step text to video + audio",

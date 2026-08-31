@@ -1475,6 +1475,10 @@ img {
     display: none;
 }
 
+[data-cookbook-prepare][hidden] {
+    display: none;
+}
+
 .cookbook-serving {
     min-width: 0;
     font-size: 0.7rem;
@@ -1594,6 +1598,21 @@ img {
 
 [data-family="minimax_h3"] .cookbook-selection-description {
     margin-block: 1rem;
+}
+
+[data-family="minimax_h3"] .cookbook-option-grid button.cookbook-option--selected strong {
+    color: var(--md-default-fg-color);
+}
+
+.md-typeset details.cookbook-modes {
+    margin-block: 0 1.6rem;
+    border-color: var(--cookbook-border);
+    box-shadow: none;
+}
+
+.md-typeset details.cookbook-modes > summary {
+    background: var(--cookbook-surface-raised);
+    font-size: 0.72rem;
 }
 
 .cookbook-serving__playground {

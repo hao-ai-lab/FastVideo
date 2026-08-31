@@ -3,7 +3,7 @@
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 
 from fastvideo.api.compat import explicit_request_updates
@@ -39,13 +39,14 @@ async def playground() -> FileResponse:
 
 
 @router.get("/config")
-async def playground_config() -> dict:
+async def playground_config(raw_request: Request) -> dict:
     request = get_default_request()
     # Report operator defaults only; do not guess model presets or hardware.
     sampling = explicit_request_updates(request) if request is not None else {}
     fields = ("width", "height", "num_frames", "fps", "seed")
     return {
         "model": get_served_model_name(),
+        "runtime": raw_request.app.state.runtime,
         "defaults": {
             field: sampling.get(field)
             for field in fields

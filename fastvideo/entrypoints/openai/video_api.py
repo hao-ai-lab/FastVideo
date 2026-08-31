@@ -331,6 +331,7 @@ async def _parse_video_request(raw_request: Request) -> VideoGenerationRequest:
 
 async def _adapt_request(request_id: str, request: VideoGenerationRequest) -> GenerationRequest:
     try:
+        get_serving_engine().validate_video_request(request)
         validate_model_and_lora(request, get_server_args(), get_served_model_name())
         await prepare_reference_media(request_id, request, get_output_dir())
         return await asyncio.to_thread(
