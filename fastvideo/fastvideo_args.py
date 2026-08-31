@@ -988,6 +988,10 @@ class FastVideoArgs:
         if self.sp_size < 1:
             raise ValueError(f"sp_size must be >= 1 after automatic resolution, got {self.sp_size}.")
 
+        # Previously num_gpus was silently bumped up to max(tp_size, sp_size)
+        # instead of raising here. Fail loud instead: a caller who set
+        # sp_size without num_gpus should see why, not have num_gpus grow
+        # underneath them.
         if self.sp_size > self.num_gpus:
             raise ValueError(f"sp_size ({self.sp_size}) cannot exceed "
                              f"num_gpus ({self.num_gpus}).")
@@ -995,6 +999,14 @@ class FastVideoArgs:
         if self.num_gpus % self.sp_size != 0:
             raise ValueError(f"num_gpus ({self.num_gpus}) must be divisible by "
                              f"sp_size ({self.sp_size}).")
+
+        if self.hsdp_replicate_dim > self.num_gpus or self.num_gpus % self.hsdp_replicate_dim != 0:
+            raise ValueError(f"num_gpus ({self.num_gpus}) must be >= and divisible by "
+                             f"hsdp_replicate_dim ({self.hsdp_replicate_dim}).")
+
+        if self.hsdp_shard_dim > self.num_gpus or self.num_gpus % self.hsdp_shard_dim != 0:
+            raise ValueError(f"num_gpus ({self.num_gpus}) must be >= and divisible by "
+                             f"hsdp_shard_dim ({self.hsdp_shard_dim}).")
 
         self._check_ring_attention_args()
 
