@@ -520,6 +520,19 @@ def _h3_rms_norm(x, weight, eps: float):
     return mx.fast.rms_norm(x, weight, eps)
 
 
+_compiled_modulation = None
+
+
+def _modulate(hidden_states, scale, shift):
+    """Apply row-expanded AdaLN scale and shift through one reusable graph."""
+    import mlx.core as mx
+
+    global _compiled_modulation
+    if _compiled_modulation is None:
+        _compiled_modulation = mx.compile(lambda value, scales, shifts: value * scales + shifts, shapeless=True)
+    return _compiled_modulation(hidden_states, scale, shift)
+
+
 def _attention(
     weights: dict[str, Any],
     x,
@@ -630,7 +643,7 @@ def _transformer_block(
 
     residual = hidden_states
     normed = _h3_rms_norm(hidden_states, weights["norm1.weight"], norm_eps)
-    normed = normed * (1.0 + scale_msa[adaln_indices]) + shift_msa[adaln_indices]
+    normed = _modulate(normed, (1.0 + scale_msa)[adaln_indices], shift_msa[adaln_indices])
     attn_output = _attention(
         weights,
         normed.astype(weight_dtype(weights["attn.to_q.weight"])),
@@ -651,7 +664,7 @@ def _transformer_block(
 
     residual = hidden_states
     normed = _h3_rms_norm(hidden_states, weights["norm2.weight"], norm_eps)
-    normed = normed * (1.0 + scale_mlp[adaln_indices]) + shift_mlp[adaln_indices]
+    normed = _modulate(normed, (1.0 + scale_mlp)[adaln_indices], shift_mlp[adaln_indices])
     ff_output = _feed_forward(weights, normed.astype(weight_dtype(weights["ff.net.0.proj.weight"])))
     return residual + gate_mlp[adaln_indices] * ff_output
 
