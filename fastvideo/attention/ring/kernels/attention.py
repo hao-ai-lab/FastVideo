@@ -1,3 +1,4 @@
+import re
 from typing import Any
 
 import torch
@@ -7,6 +8,19 @@ from ..capabilities import HAS_FLASH_ATTN
 if HAS_FLASH_ATTN:
     import flash_attn
     from flash_attn.flash_attn_interface import _flash_attn_backward, _flash_attn_forward
+
+    def _parse_version(version: str) -> tuple[int, ...]:
+        # A plain string compare (e.g. "2.10.0" <= "2.6.3") is lexicographic
+        # and misclassifies once a two-digit minor version ships, so parse
+        # to an int tuple instead. Non-numeric suffixes (e.g. "2.6.3.post1")
+        # are tolerated by defaulting an unparsable segment to 0.
+        parts = []
+        for part in version.split(".")[:3]:
+            match = re.match(r"\d+", part)
+            parts.append(int(match.group()) if match else 0)
+        return tuple(parts)
+
+    _FLASH_ATTN_VERSION = _parse_version(flash_attn.__version__)
 
 
 def flash_attn_forward(q: torch.Tensor,
@@ -22,7 +36,7 @@ def flash_attn_forward(q: torch.Tensor,
     assert HAS_FLASH_ATTN, "FlashAttention is not available"
     if softmax_scale is None:
         softmax_scale = q.shape[-1]**(-0.5)
-    if flash_attn.__version__ <= '2.6.3':
+    if _FLASH_ATTN_VERSION <= (2, 6, 3):
         block_out, _, _, _, _, block_lse, _, _ = _flash_attn_forward(
             q,
             k,
@@ -60,7 +74,7 @@ def flash_attn_backward(dout: torch.Tensor, q: torch.Tensor, k: torch.Tensor, v:
     if softmax_scale is None:
         softmax_scale = q.shape[-1]**(-0.5)
     assert HAS_FLASH_ATTN
-    if flash_attn.__version__ <= '2.6.3':
+    if _FLASH_ATTN_VERSION <= (2, 6, 3):
         _flash_attn_backward(
             dout,
             q,
