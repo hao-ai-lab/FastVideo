@@ -26,6 +26,24 @@ from fastvideo.utils import set_mixed_precision_policy, is_pin_memory_available
 logger = init_logger(__name__)
 
 
+def _has_fp8_convertible_layers(model: nn.Module) -> bool:
+    """True when ``convert_model_to_fp8`` would convert at least one layer.
+
+    Mirrors the dispatch in :func:`_maybe_quantize_model`: the converter acts
+    on ``FP8QuantizeMethod``, which ``FP8Config.get_quant_method`` attaches
+    only to layers whose prefix matched a suffix entry. A model carrying an
+    ``FP8Config`` that matched nothing converts nothing, so it is unaffected
+    and must not be rejected.
+
+    Deliberately narrow. ``AbsMaxFP8Config``, ``FP8QATTrainConfig`` and
+    ``NVFP4QATConfig`` are separate schemes with their own weight handling and
+    are not what this guard is about.
+    """
+    from fastvideo.layers.quantization.fp8_config import FP8QuantizeMethod
+
+    return any(isinstance(getattr(mod, "quant_method", None), FP8QuantizeMethod) for mod in model.modules())
+
+
 def _maybe_quantize_model(model: nn.Module) -> None:
     """Quantize NVFP4- or FP8-tagged linear layers in-place after weights are loaded.
 
@@ -206,6 +224,21 @@ def maybe_load_fsdp_model(
         logger.info("Disabling FSDP for MPS platform as it's not compatible")
 
     if use_fsdp:
+        # `_maybe_quantize_model` runs after `shard_model` below, so by then
+        # every weight is a sharded DTensor. `convert_model_to_fp8` reads
+        # `weight.to_local()`, registers that shard as a plain `_fp8_weight`
+        # buffer and removes the FSDP-managed parameter, so
+        # `FP8QuantizeMethod.apply` reads the local shard and no all-gather
+        # ever happens. The forward then multiplies mismatched shapes. Refuse
+        # rather than return wrong numbers; single-shard FSDP is unaffected
+        # because `to_local()` is then the whole weight.
+        if hsdp_shard_dim > 1 and _has_fp8_convertible_layers(model):
+            raise NotImplementedError(
+                f"FP8 quantization does not support FSDP sharding "
+                f"(hsdp_shard_dim={hsdp_shard_dim}). The post-load converter "
+                f"replaces each FSDP-managed parameter with its local shard, so "
+                f"the forward would multiply mismatched shapes. Set "
+                f"hsdp_shard_dim=1, or load this model without FP8.")
         pin_cpu_memory = pin_cpu_memory and is_pin_memory_available()
         world_size = hsdp_replicate_dim * hsdp_shard_dim
         if not training_mode and not fsdp_inference:
