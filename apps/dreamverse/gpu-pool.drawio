@@ -70,7 +70,7 @@
                 <mxCell id="dispatcher" value="command dispatcher&#xa;&#xa;gpu_worker_process() branches on&#xa;CommandType; asserts payload type&#xa;&#xa;INIT / WARMUP / RELOAD_MODEL&#xa;USER_JOIN / USER_STEP / USER_LEAVE&#xa;SHUTDOWN" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;align=left;spacingLeft=10;spacingTop=8;fontStyle=1;" parent="1" vertex="1">
                     <mxGeometry x="120" y="1120" width="240" height="120" as="geometry"/>
                 </mxCell>
-                <mxCell id="do_step" value="VideoGenerationWorker.generate_step()&#xa;video_generation.py:380&#xa;&#xa;reads + updates ContinuationState,&#xa;calls generator" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;align=left;spacingLeft=10;spacingTop=8;fontStyle=1;" parent="1" vertex="1">
+                <mxCell id="do_step" value="VideoGenerationWorker.generate_step()&#xa;ltx2_generation.py:380&#xa;&#xa;reads + updates ContinuationState,&#xa;calls generator" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;align=left;spacingLeft=10;spacingTop=8;fontStyle=1;" parent="1" vertex="1">
                     <mxGeometry x="460" y="1120" width="240" height="120" as="geometry"/>
                 </mxCell>
                 <mxCell id="stream_av" value="stream_fmp4()&#xa;av_streaming.py:121&#xa;&#xa;trims overlap, pipes to ffmpeg,&#xa;publishes StreamInit / StreamChunk /&#xa;StreamComplete via callback" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#b1d8d7;strokeColor=#23445d;fontSize=11;align=left;spacingLeft=10;spacingTop=8;fontStyle=1;" parent="1" vertex="1">
@@ -79,13 +79,13 @@
                 <mxCell id="Ot8BU52QTIb4EhyRSe7I-2" value="" style="edgeStyle=none;html=1;" parent="1" source="generator" target="Ot8BU52QTIb4EhyRSe7I-1" edge="1">
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
-                <mxCell id="generator" value="VideoGenerator  (fastvideo)&#xa;&#xa;LTX2 DiT + refine upsampler&#xa;FP4 quant, torch.compile&#xa;&#xa;owned by VideoGenerationWorker&#xa;video_generation.py:211" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" parent="1" vertex="1">
+                <mxCell id="generator" value="VideoGenerator  (fastvideo)&#xa;&#xa;LTX2 DiT + refine upsampler&#xa;FP4 quant, torch.compile&#xa;&#xa;owned by VideoGenerationWorker&#xa;ltx2_generation.py:211" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" parent="1" vertex="1">
                     <mxGeometry x="460" y="1300" width="240" height="100" as="geometry"/>
                 </mxCell>
                 <mxCell id="ffmpeg" value="ffmpeg subprocess&#xa;&#xa;libx264 / *_nvenc&#xa;fragmented mp4" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;fontSize=11;" parent="1" vertex="1">
                     <mxGeometry x="800" y="1300" width="260" height="100" as="geometry"/>
                 </mxCell>
-                <mxCell id="caches" value="ContinuationState&#xa;video_generation.py:89&#xa;&#xa;• video_images: list[PIL.Image]&#xa;• audio_latents: torch.Tensor (CPU)&#xa;&#xa;carried across segments" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;align=left;spacingLeft=10;spacingTop=8;" parent="1" vertex="1">
+                <mxCell id="caches" value="ContinuationState&#xa;ltx2_generation.py:89&#xa;&#xa;• video_images: list[PIL.Image]&#xa;• audio_latents: torch.Tensor (CPU)&#xa;&#xa;carried across segments" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;align=left;spacingLeft=10;spacingTop=8;" parent="1" vertex="1">
                     <mxGeometry x="120" y="1300" width="240" height="100" as="geometry"/>
                 </mxCell>
                 <mxCell id="e_cp" value="acquire" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#6c8ebf;endArrow=classic;fontSize=11;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="client" target="pool" edge="1">
@@ -250,7 +250,7 @@
                         <mxPoint x="690" y="880"/>
                     </Array>
                 </mxCell>
-                <mxCell id="legend" value="Legend&#xa;&#xa;■ blue  client / external&#xa;■ green  main-process pool/slot&#xa;    (methods — italic label)&#xa;■ yellow  containers (routing state)&#xa;■ red  IPC primitives (mp.Queue, mp.RawArray)&#xa;&#xa;Worker subprocess modules:&#xa;■ orange  gpu_pool.py (dispatcher)&#xa;■ lavender  video_generation.py&#xa;■ teal  av_streaming.py&#xa;■ gray  worker_ipc.py (shared types)&#xa;&#xa;Flow:&#xa;  client → pool → slot&#xa;  → _send_command(_tagged) → command_queue&#xa;  → dispatcher → generate_step()&#xa;  → stream_fmp4() → ffmpeg&#xa;  → shared_buf + response_queue&#xa;  → _response_reader → futures / stream_queues&#xa;  → client awaits (via main.py AV loop)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;fontSize=11;align=left;spacingLeft=10;spacingTop=8;" parent="1" vertex="1">
+                <mxCell id="legend" value="Legend&#xa;&#xa;■ blue  client / external&#xa;■ green  main-process pool/slot&#xa;    (methods — italic label)&#xa;■ yellow  containers (routing state)&#xa;■ red  IPC primitives (mp.Queue, mp.RawArray)&#xa;&#xa;Worker subprocess modules:&#xa;■ orange  gpu_pool.py (dispatcher)&#xa;■ lavender  ltx2_generation.py&#xa;■ teal  av_streaming.py&#xa;■ gray  worker_ipc.py (shared types)&#xa;&#xa;Flow:&#xa;  client → pool → slot&#xa;  → _send_command(_tagged) → command_queue&#xa;  → dispatcher → generate_step()&#xa;  → stream_fmp4() → ffmpeg&#xa;  → shared_buf + response_queue&#xa;  → _response_reader → futures / stream_queues&#xa;  → client awaits (via main.py AV loop)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;fontSize=11;align=left;spacingLeft=10;spacingTop=8;" parent="1" vertex="1">
                     <mxGeometry x="39" y="-200" width="270" height="380" as="geometry"/>
                 </mxCell>
                 <mxCell id="Ot8BU52QTIb4EhyRSe7I-1" value="FastVideo video_generator" style="whiteSpace=wrap;html=1;fontSize=11;fillColor=#e1d5e7;strokeColor=#9673a6;rounded=1;" parent="1" vertex="1">
@@ -389,10 +389,10 @@
                 <mxCell id="cw2" value="from fastvideo.entrypoints.video_generator import VideoGenerator&#xa;from fastvideo.models.dits.ltx2 import DEFAULT_LTX2_AUDIO_*&#xa;&#xa;** Dreamverse reaches into fastvideo internals here **" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe0b2;strokeColor=#d79b00;fontSize=10;align=left;spacingLeft=8;fontFamily=monospace;" parent="1" vertex="1">
                     <mxGeometry x="675" y="695" width="550" height="60" as="geometry"/>
                 </mxCell>
-                <mxCell id="cw3" value="on Command(INIT):&#xa;   VideoGenerationWorker.initialize()    (video_generation.py:247)&#xa;      maybe_download_model(model_id)&#xa;      VideoGenerator.from_pretrained(path, FP4Config, PipelineConfig)&#xa;      load audio VAE, resolve refine upsampler&#xa;      resp_q.put(InitAck(success=True))" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;fontSize=10;align=left;spacingLeft=8;fontFamily=monospace;" parent="1" vertex="1">
+                <mxCell id="cw3" value="on Command(INIT):&#xa;   VideoGenerationWorker.initialize()    (ltx2_generation.py:247)&#xa;      maybe_download_model(model_id)&#xa;      VideoGenerator.from_pretrained(path, FP4Config, PipelineConfig)&#xa;      load audio VAE, resolve refine upsampler&#xa;      resp_q.put(InitAck(success=True))" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;fontSize=10;align=left;spacingLeft=8;fontFamily=monospace;" parent="1" vertex="1">
                     <mxGeometry x="675" y="765" width="550" height="95" as="geometry"/>
                 </mxCell>
-                <mxCell id="cw4" value="on Command(WARMUP) with WarmupPayload:&#xa;   VideoGenerationWorker.warmup(payload.prompt)    (video_generation.py:518)&#xa;      two synthetic segments prime caches + torch.compile&#xa;   resp_q.put(WarmupComplete(timings=...))" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;fontSize=10;align=left;spacingLeft=8;fontFamily=monospace;" parent="1" vertex="1">
+                <mxCell id="cw4" value="on Command(WARMUP) with WarmupPayload:&#xa;   VideoGenerationWorker.warmup(payload.prompt)    (ltx2_generation.py:518)&#xa;      two synthetic segments prime caches + torch.compile&#xa;   resp_q.put(WarmupComplete(timings=...))" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;fontSize=10;align=left;spacingLeft=8;fontFamily=monospace;" parent="1" vertex="1">
                     <mxGeometry x="675" y="870" width="550" height="55" as="geometry"/>
                 </mxCell>
                 <mxCell id="cw5" value="enter main worker loop → waits for JOIN_USER / USER_STEP / LEAVE" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#c8e6c9;strokeColor=#388e3c;fontSize=11;fontStyle=1;fontFamily=monospace;" parent="1" vertex="1">
@@ -534,7 +534,7 @@
                         <mxPoint x="1040" y="1610" as="targetPoint"/>
                     </mxGeometry>
                 </mxCell>
-                <mxCell id="dm11a" value="10a. worker runs:&#xa;VideoGenerationWorker.generate_step()&#xa;    (video_generation.py:380)&#xa;  → generator.generate_video()&#xa;  → updates ContinuationState&#xa;then stream_fmp4() (av_streaming.py:121)&#xa;  → ffmpeg (rawvideo+wav → fmp4)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe0b2;strokeColor=#d79b00;fontSize=10;align=left;spacingLeft=8;fontFamily=monospace;" parent="1" vertex="1">
+                <mxCell id="dm11a" value="10a. worker runs:&#xa;VideoGenerationWorker.generate_step()&#xa;    (ltx2_generation.py:380)&#xa;  → generator.generate_video()&#xa;  → updates ContinuationState&#xa;then stream_fmp4() (av_streaming.py:121)&#xa;  → ffmpeg (rawvideo+wav → fmp4)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe0b2;strokeColor=#d79b00;fontSize=10;align=left;spacingLeft=8;fontFamily=monospace;" parent="1" vertex="1">
                     <mxGeometry x="955" y="1640" width="180" height="70" as="geometry"/>
                 </mxCell>
                 <mxCell id="dm11" value="10b. resp_q.put(MediaInit / MediaChunk / MediaComplete / StepComplete)" style="endArrow=classic;html=1;strokeColor=#b85450;fontSize=10;labelBackgroundColor=#ffffff;" parent="1" edge="1">

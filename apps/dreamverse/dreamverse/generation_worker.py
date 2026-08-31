@@ -9,7 +9,7 @@ from dreamverse.generation_contracts import GenerationBackend, StepResult
 def _create_generation_backend(backend_name: str, gpu_id: int) -> GenerationBackend:
     """Construct the backend that owns the selected model family's behavior."""
     if backend_name == "ltx2":
-        from dreamverse.video_generation import LTX2GenerationBackend
+        from dreamverse.ltx2_generation import LTX2GenerationBackend
 
         return LTX2GenerationBackend(gpu_id)
     if backend_name == "minimax_h3":
