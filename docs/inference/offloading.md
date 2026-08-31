@@ -22,6 +22,16 @@ pool there, so offload adds transfers and duplicate residency instead of freeing
 memory. CUDA FSDP sharding remains enabled when requested; MPS continues to
 disable FSDP. `pin_cpu_memory` is not an offload mode and is left unchanged.
 
+MiniMax H3 CUDA inference uses a second lever that does not copy weights to a
+host pool. The pipeline loads the Qwen3-VL text encoder, runs conditioning, then
+releases that encoder before it loads the DiT and video/audio VAEs. The MLX FastH3
+runtime uses the same phase order. When host offload is off, DiT safetensors are
+read onto the accelerator instead of CPU-then-copy. Input-preparation geometry
+(spatial ratio, latent channels, audio sample rate) comes from the VAE arch
+configs until those weights load. A later `generate()` on the same worker
+currently re-enters conditioning after the encoder has been released; start a
+new generator for a new prompt until prompt-cache reload exists.
+
 ## Behavior Explanation
 
 !!! note
