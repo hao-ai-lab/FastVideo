@@ -81,6 +81,9 @@ COOKBOOK_HARDWARE_TEXT_FIELDS = {
 def validate_cookbook() -> None:
     """Keep cookbook entries tied to checked-in runnable sources."""
     data = json.loads(COOKBOOK_DATA.read_text(encoding="utf-8"))
+    version = data.get("version")
+    if not isinstance(version, int):
+        raise ValueError(f"{COOKBOOK_DATA}: version must be an integer")
     recipes = data.get("recipes")
     if not isinstance(recipes, list) or not recipes:
         raise ValueError(f"{COOKBOOK_DATA}: recipes must be a non-empty list")
@@ -147,6 +150,11 @@ def validate_cookbook() -> None:
         if not isinstance(related, list):
             raise ValueError(f"Cookbook recipe related must be a list of recipe ids: {recipe['id']}")
 
+        modes = recipe.get("modes")
+        if modes is not None and (not isinstance(modes, list) or not modes
+                                  or any(not isinstance(item, str) or not item.strip() for item in modes)):
+            raise ValueError(f"Cookbook recipe modes must be a non-empty list of strings: {recipe['id']}")
+
         source = (ROOT_DIR / recipe["source"]).resolve()
         if not any(source.is_relative_to(root.resolve()) for root in COOKBOOK_SOURCE_ROOTS):
             raise ValueError(f"Cookbook source is outside an approved directory: {recipe['source']}")
@@ -168,6 +176,15 @@ def validate_cookbook() -> None:
         for related_id in recipe.get("related", []):
             if related_id not in ids:
                 raise ValueError(f"Cookbook recipe references unknown related id: {recipe['id']}: {related_id}")
+
+    cache_bust = f"cookbook-recipes.json?v={version}"
+    cookbook_pages = ROOT_DIR / "docs/cookbook"
+    for page in sorted(cookbook_pages.glob("*.md")):
+        text = page.read_text(encoding="utf-8")
+        if "cookbook-recipes.json" not in text:
+            continue
+        if cache_bust not in text:
+            raise ValueError(f"{page}: recipe JSON cache-bust must be {cache_bust}")
 
 
 def fix_case(text: str) -> str:

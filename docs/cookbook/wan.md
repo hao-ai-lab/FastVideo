@@ -5,7 +5,7 @@ hide:
 
 # Wan recipes
 
-<div class="cookbook-shell cookbook-family-page" data-cookbook data-family="wan" data-recipes="../../assets/cookbook-recipes.json?v=4">
+<div class="cookbook-shell cookbook-family-page" data-cookbook data-family="wan" data-recipes="../../assets/cookbook-recipes.json?v=5">
   <header class="cookbook-family-header">
     <a class="cookbook-back-link" href="../"><span aria-hidden="true">←</span> All model families</a>
     <div class="cookbook-family-header__body">
@@ -15,7 +15,7 @@ hide:
       <div>
         <p class="cookbook-eyebrow">Maintained family · Inference</p>
         <h2>Wan inference recipes</h2>
-        <p>Wan recipes span maintained CUDA examples and the released FastMetal 1.3B, 5B, and 14B native MLX paths for Apple Silicon.</p>
+        <p>CUDA covers FastWan and Wan2.1/2.2 text and image recipes. Apple Silicon uses the released FastMetal 1.3B, 5B, and 14B MLX T2V paths. The speed flags below are switches on those same scripts, not extra recipes.</p>
         <span class="cookbook-count" data-cookbook-count>7 maintained recipes</span>
       </div>
     </div>
@@ -29,6 +29,62 @@ hide:
       <span class="cookbook-lifecycle__stage">Deployment <small>planned</small></span>
     </div>
   </header>
+
+  <section class="cookbook-modes" aria-labelledby="wan-modes-heading">
+    <h2 id="wan-modes-heading">Supported modes</h2>
+    <p>
+      FastMetal MLX is T2V in the checked-in examples. Image-to-video and
+      TI2V stay on the CUDA recipes. Temporal <code>--fast</code> composes
+      with either spatial path. <code>--refine</code> and
+      <code>--fast-spatial</code> cannot run together.
+      <code>--refine</code> wins if both are set.
+      <code>basic_mps.py</code> is the older PyTorch MPS demo and is not a
+      FastMetal recipe.
+    </p>
+    <div class="cookbook-modes__table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Mode</th>
+            <th>CUDA</th>
+            <th>MLX FastMetal</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>T2V</td>
+            <td>FastWan2.1 1.3B, Wan2.2 A14B</td>
+            <td>1.3B, 5B, and 14B</td>
+          </tr>
+          <tr>
+            <td>I2V</td>
+            <td>Wan2.1 14B 480P</td>
+            <td>Not in the released examples</td>
+          </tr>
+          <tr>
+            <td>TI2V</td>
+            <td>Wan2.2 TI2V 5B</td>
+            <td>FastMetal 5B is T2V in <code>mlx_wan22_generate.py</code></td>
+          </tr>
+          <tr>
+            <td>Temporal <code>--fast</code></td>
+            <td>No cookbook recipe</td>
+            <td>RIFE. Fewer frames, then interpolate to <code>--num-frames</code></td>
+          </tr>
+          <tr>
+            <td>Spatial <code>--fast-spatial</code></td>
+            <td>No cookbook recipe</td>
+            <td>Denoise and decode at half resolution, then upsample. No second denoise</td>
+          </tr>
+          <tr>
+            <td>Two-pass <code>--refine</code></td>
+            <td>No cookbook recipe</td>
+            <td>Denoise at base resolution, upsample, re-noise, denoise again. Wins over <code>--fast-spatial</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
 
   <section class="cookbook-builder" id="recipe-builder" aria-labelledby="builder-heading">
     <div class="cookbook-builder__intro">
@@ -123,6 +179,8 @@ the supported model and optimization surface.
 
 - Out of memory on the A14B recipes: the checked-in sources already enable CPU offload; see [Configuration](../inference/configuration.md) for the offload surface before reducing resolution or frames.
 - The FastWan2.1 recipe requires `VIDEO_SPARSE_ATTN`; confirm the environment variable in the command was set in the same shell.
+- FastMetal MLX: install with `uv pip install -e ".[mlx]"`, then follow the [Apple Silicon guide](../getting_started/installation/mps.md). CUDA FastWan-QAD checkpoints are refused on the MLX runtime.
+- FastMetal 5B uses `mlx_wan22_generate.py`. 1.3B and 14B use `mlx_wan_prompt_to_video.py`.
 - Gated or missing checkpoints: run `huggingface-cli login` and confirm you accepted the model's license on Hugging Face.
 
 ## Evidence status
