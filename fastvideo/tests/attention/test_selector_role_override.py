@@ -69,6 +69,21 @@ def test_unsupported_role_override_honors_layer_default(monkeypatch) -> None:
         selector._cached_get_attn_backend.cache_clear()
 
 
+def test_flashinfer_is_compatible_with_dense_flash_attn_layers(monkeypatch) -> None:
+    monkeypatch.setattr(platforms, "_current_platform", _FakePlatform())
+    monkeypatch.setattr(selector, "resolve_obj_by_qualname", lambda name: name)
+
+    try:
+        assert selector.get_attn_backend(
+            head_size=128,
+            dtype=torch.bfloat16,
+            supported_attention_backends=(AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA),
+            requested=AttentionBackendEnum.FLASHINFER,
+        ) == "FLASHINFER"
+    finally:
+        selector._cached_get_attn_backend.cache_clear()
+
+
 def test_explicit_backend_config_rejects_typos() -> None:
     try:
         selector.coerce_attn_backend("attn_qat_typo")
