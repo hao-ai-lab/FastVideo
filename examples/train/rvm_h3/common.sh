@@ -30,6 +30,15 @@ export PYTHONPATH="${REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 mkdir -p "${RVM_ARTIFACT_ROOT}" "${HF_HOME}"
 
 activate_rvm_env() {
+    # Modal/Docker images already own the Python environment. Explicitly opt
+    # out of conda activation rather than installing a nested environment.
+    if [[ "${RVM_SKIP_CONDA:-0}" == "1" ]]; then
+        if ! command -v python >/dev/null 2>&1; then
+            echo "RVM_SKIP_CONDA=1 but python is not on PATH." >&2
+            exit 1
+        fi
+        return
+    fi
     if [[ -n "${CONDA_EXE:-}" ]]; then
         # shellcheck disable=SC1090
         source "$(dirname "$(dirname "${CONDA_EXE}")")/etc/profile.d/conda.sh"
