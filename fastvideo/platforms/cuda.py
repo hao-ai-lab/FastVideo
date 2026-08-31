@@ -173,7 +173,26 @@ class CudaPlatformBase(Platform):
 
         logger.info("Trying FASTVIDEO_ATTENTION_BACKEND=%s", envs.FASTVIDEO_ATTENTION_BACKEND)
         logger.info("Selected backend: %s", selected_backend)
-        if selected_backend == AttentionBackendEnum.SAGE_ATTN:
+        if selected_backend == AttentionBackendEnum.FLASHINFER:
+            if not cls.has_device_capability(80):
+                raise RuntimeError("FLASHINFER requires an NVIDIA GPU with compute capability sm80 or newer.")
+            if dtype not in (torch.float16, torch.bfloat16):
+                logger.info("FLASHINFER will cast %s inputs to bfloat16 for the kernel.", dtype)
+            try:
+                from flashinfer.prefill import single_prefill_with_kv_cache  # noqa: F401
+
+                from fastvideo.attention.backends.flashinfer import (  # noqa: F401
+                    FlashInferBackend)
+            except ImportError as e:
+                raise ImportError("FLASHINFER selected but flashinfer-python is not importable. "
+                                  "Install the FastVideo Linux dependencies or "
+                                  "`uv pip install flashinfer-python`.") from e
+            if head_size not in FlashInferBackend.get_supported_head_sizes():
+                raise ValueError(f"FLASHINFER does not safely support head size {head_size}; "
+                                 f"supported sizes are {FlashInferBackend.get_supported_head_sizes()}.")
+            logger.info("Using FlashInfer attention backend.")
+            return "fastvideo.attention.backends.flashinfer.FlashInferBackend"
+        elif selected_backend == AttentionBackendEnum.SAGE_ATTN:
             try:
                 from sageattention import sageattn  # noqa: F401
 
