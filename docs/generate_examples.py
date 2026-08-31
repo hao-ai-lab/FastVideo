@@ -151,10 +151,9 @@ def validate_cookbook() -> None:
             raise ValueError(f"Cookbook recipe related must be a list of recipe ids: {recipe['id']}")
 
         modes = recipe.get("modes")
-        if modes is not None:
-            if (not isinstance(modes, list) or not modes
-                    or any(not isinstance(item, str) or not item.strip() for item in modes)):
-                raise ValueError(f"Cookbook recipe modes must be a non-empty list of strings: {recipe['id']}")
+        if modes is not None and (not isinstance(modes, list) or not modes
+                                  or any(not isinstance(item, str) or not item.strip() for item in modes)):
+            raise ValueError(f"Cookbook recipe modes must be a non-empty list of strings: {recipe['id']}")
 
         source = (ROOT_DIR / recipe["source"]).resolve()
         if not any(source.is_relative_to(root.resolve()) for root in COOKBOOK_SOURCE_ROOTS):
