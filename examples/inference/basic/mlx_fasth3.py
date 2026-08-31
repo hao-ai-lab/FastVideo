@@ -19,8 +19,16 @@ denoising fewer video frames, then uses MLX RIFE 4.25 to reconstruct the
 requested frame count. A 1280x720 request runs on H3's 1280x736 grid and is
 center-cropped after decode.
 
+``--fast-spatial`` is spatial fast mode, ``--fast``'s spatial twin. It
+denoises and decodes on the smallest 32px-aligned canvas covering
+height/width divided by ``--fast-spatial-scale``, then resamples the decoded
+frames up to the requested size in pixel space. The two modes compose.
+This trades fine detail for speed: the output carries the reduced canvas's
+detail budget and reads softer than a native-resolution render, so it stays
+off by default.
+
 This entrypoint currently supports text-to-video-with-audio only. It does not
-yet wire FL2VA, Ref2VA, spatial fast mode, or two-pass refinement.
+yet wire FL2VA, Ref2VA, or two-pass refinement.
 
 VSA is off by default; existing dense MLX checkpoints remain supported.
 H3 uses fused MLX RMSNorm, which can change BF16 rounding compared with the
@@ -71,6 +79,22 @@ def parse_args() -> argparse.Namespace:
                         help="temporal reduction target for --fast (default: 2)")
     parser.add_argument("--fast-sharpen", type=float, default=0.6,
                         help="unsharp strength after RIFE interpolation (0 disables)")
+    parser.add_argument(
+        "--fast-spatial",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="denoise and decode at height/width // fast-spatial-scale on H3's 32px grid, "
+        "then resample the decoded frames up to the requested size; composes with --fast. "
+        "Trades fine detail for speed",
+    )
+    parser.add_argument("--fast-spatial-scale", type=int, default=2,
+                        help="spatial reduction factor for --fast-spatial (default: 2)")
+    parser.add_argument("--fast-spatial-upsample-mode",
+                        choices=("lanczos", "cubic", "bilinear", "nearest"),
+                        default="lanczos",
+                        help="pixel interpolation kernel for the post-decode upsample")
+    parser.add_argument("--fast-spatial-sharpen", type=float, default=0.4,
+                        help="unsharp strength after the upsample (0 disables)")
     parser.add_argument("--rife-weights-dir", type=Path, default=None,
                         help="optional local mlx-community/RIFE-4.25 snapshot")
     parser.add_argument("--vae-dtype", choices=("fp32", "fp16", "bf16"), default="fp32")
@@ -160,6 +184,10 @@ def main() -> None:
         fast_factor=args.fast_factor,
         fast_sharpen=args.fast_sharpen,
         rife_weights_dir=args.rife_weights_dir,
+        fast_spatial=args.fast_spatial,
+        fast_spatial_scale=args.fast_spatial_scale,
+        fast_spatial_upsample_mode=args.fast_spatial_upsample_mode,
+        fast_spatial_sharpen=args.fast_spatial_sharpen,
         vsa=args.vsa,
         vsa_sparsity=args.vsa_sparsity,
         vsa_tile_size=args.vsa_tile_size,

@@ -192,6 +192,25 @@ python examples/inference/basic/mlx_fasth3.py \
   --output-path ./outputs/fasth3_int6_fast_720p.mp4
 ```
 
+Add `--fast-spatial` for spatial fast mode, `--fast`'s spatial twin. It
+denoises and decodes on the smallest 32px-aligned canvas covering the
+requested size divided by `--fast-spatial-scale` (a 480x832 request runs on a
+256x416 canvas), then resamples the decoded frames up to the requested size
+in pixel space. It composes with `--fast`. This is a speed/quality trade-off
+and stays off by default: the output carries the reduced canvas's detail
+budget, so it reads softer than a native-resolution render, with the unsharp
+pass countering some but not all of the difference:
+
+```bash
+python examples/inference/basic/mlx_fasth3.py \
+  --model-root ./FastH3-Preview-v0.2 \
+  --mlx-checkpoint ./FastH3-MLX/int6 \
+  --prompt "(S1) A presenter says <d>[English] Fast H3 is fastest.</d>" \
+  --height 480 --width 832 --num-frames 124 --seed 2028 \
+  --fast --fast-spatial \
+  --output-path ./outputs/fasth3_int6_fast_spatial.mp4
+```
+
 VSA is off by default. A dense-only checkpoint (no `--include-vsa`) keeps the
 existing fused-SDPA path. After converting with `--include-vsa`, enable the
 sparse path explicitly:
@@ -212,8 +231,8 @@ falls back to reference on unsupported shapes. It is not the default.
 `--vsa-impl reference` is the same as `auto`.
 
 !!! note "Current MLX scope"
-    This source runtime supports T2VA, temporal `--fast`, and opt-in VSA.
-    FL2VA, Ref2VA, spatial fast mode, two-pass refinement, and
+    This source runtime supports T2VA, temporal `--fast`, spatial
+    `--fast-spatial`, and opt-in VSA. FL2VA, Ref2VA, two-pass refinement, and
     `VideoGenerator` registry dispatch are not wired yet. INT8/INT6/INT4
     quantization is **weight-only**; VSA attention Q/K/V stay BF16. Old dense
     MLX checkpoints remain valid for dense inference and raise a reconvert

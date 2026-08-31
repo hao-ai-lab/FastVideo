@@ -135,7 +135,7 @@ for the download, conversion, and storage requirements.
 
 - The full CUDA H3 examples request four GPUs by default. Their sources do not claim a GPU model or memory minimum.
 - The FastH3 CUDA performance profile was measured on four GB200 GPUs. Use its strict profile when exact operation order matters more than the measured performance configuration.
-- The MLX source runtime is limited to T2VA. FL2VA, Ref2VA, VSA, spatial fast mode, and two-pass refinement are not wired on MLX.
+- The MLX source runtime is limited to T2VA. FL2VA, Ref2VA, VSA, and two-pass refinement are not wired on MLX.
 - Gated or missing checkpoints: run `huggingface-cli login` and confirm you accepted the model's license on Hugging Face.
 
 ## Evidence status

@@ -33,6 +33,11 @@ from typing import Any
 import numpy as np
 
 from fastvideo.logger import init_logger
+from fastvideo.mlx_runtime.frame_upsample import (
+    DEFAULT_PIXEL_UPSAMPLE_MODE,
+    PIXEL_UPSAMPLE_MODES,
+    upsample_frames,
+)
 from fastvideo.mlx_runtime.minimax_h3 import (
     H3_MANIFEST_FILENAME,
     MINIMAX_H3_AUDIO_SHIFT,
@@ -96,6 +101,72 @@ def plan_fast_temporal(target_frames: int, factor: int = 2) -> FastTemporalPlan:
         source_frames=source_frames,
         factor=factor,
         video_temporal_scale=video_temporal_scale,
+    )
+
+
+# Resampling from a smaller decode softens output the same way on every
+# runtime; 0.4 matches the tuned Wan default without the halos that show
+# up by ~0.8.
+DEFAULT_FAST_SPATIAL_SHARPEN = 0.4
+
+
+@dataclass(frozen=True)
+class FastSpatialPlan:
+    """Reduced-canvas geometry for spatial fast mode (RIFE's spatial twin)."""
+
+    target_height: int
+    target_width: int
+    stage1_height: int
+    stage1_width: int
+    canvas_height: int
+    canvas_width: int
+    scale: int
+    upsample_mode: str
+    sharpen: float
+
+
+def plan_fast_spatial(
+    height: int,
+    width: int,
+    *,
+    scale: int = 2,
+    upsample_mode: str = DEFAULT_PIXEL_UPSAMPLE_MODE,
+    sharpen: float = DEFAULT_FAST_SPATIAL_SHARPEN,
+) -> FastSpatialPlan:
+    """Choose the smallest H3-valid canvas that covers ``target / scale``.
+
+    H3 geometry rounds *up* to the 32px model grid and center-crops after
+    decode — the same convention plain 720p generation uses via
+    ``_model_canvas_size`` — so no size the full-resolution path accepts is
+    rejected here. The return trip to the target size runs in pixel space
+    after the VAE decode, never on latents; see
+    :mod:`fastvideo.mlx_runtime.frame_upsample` for why.
+    """
+    if scale < 2:
+        raise ValueError(f"fast-spatial scale must be at least 2, got {scale}.")
+    if upsample_mode not in PIXEL_UPSAMPLE_MODES:
+        raise ValueError(f"Unsupported upsample mode: {upsample_mode!r} "
+                         f"(expected one of {', '.join(PIXEL_UPSAMPLE_MODES)})")
+    if sharpen < 0:
+        raise ValueError(f"fast_spatial_sharpen must be non-negative, got {sharpen}.")
+    target_canvas_height, target_canvas_width = _model_canvas_size(height, width)
+    stage1_height = math.ceil(height / scale)
+    stage1_width = math.ceil(width / scale)
+    canvas_height, canvas_width = _model_canvas_size(stage1_height, stage1_width)
+    if canvas_height * canvas_width >= target_canvas_height * target_canvas_width:
+        raise ValueError(
+            f"fast-spatial scale {scale} does not reduce the H3 canvas for {height}x{width} "
+            f"(stage-1 canvas {canvas_width}x{canvas_height} vs {target_canvas_width}x{target_canvas_height}).")
+    return FastSpatialPlan(
+        target_height=height,
+        target_width=width,
+        stage1_height=stage1_height,
+        stage1_width=stage1_width,
+        canvas_height=canvas_height,
+        canvas_width=canvas_width,
+        scale=scale,
+        upsample_mode=upsample_mode,
+        sharpen=sharpen,
     )
 
 
@@ -202,10 +273,16 @@ def _validate_checkpoint_step_ladder(checkpoint_dir: str | Path, num_steps: int)
             f"{num_steps}. Use the step count used during conversion (normally 4), or re-export the checkpoint.")
 
 
-def _preflight_media_dependencies(*, fast: bool, fast_sharpen: float, rife_weights_dir: str | Path | None) -> None:
+def _preflight_media_dependencies(*,
+                                  fast: bool,
+                                  fast_sharpen: float,
+                                  rife_weights_dir: str | Path | None,
+                                  fast_spatial: bool = False) -> None:
     """Fail before conditioning when required output dependencies are unavailable."""
     if shutil.which("ffmpeg") is None:
         raise RuntimeError("ffmpeg is required for MP4 muxing; install it before generation.")
+    if fast_spatial and importlib.util.find_spec("cv2") is None:
+        raise RuntimeError("OpenCV is required for --fast-spatial resampling.")
     if not fast:
         return
     if fast_sharpen > 0 and importlib.util.find_spec("cv2") is None:
@@ -629,6 +706,10 @@ class MiniMaxH3MLXPipeline:
             fast_factor: int = 2,
             fast_sharpen: float = 0.6,
             rife_weights_dir: str | Path | None = None,
+            fast_spatial: bool = False,
+            fast_spatial_scale: int = 2,
+            fast_spatial_upsample_mode: str = DEFAULT_PIXEL_UPSAMPLE_MODE,
+            fast_spatial_sharpen: float = DEFAULT_FAST_SPATIAL_SHARPEN,
             vsa: bool = False,
             vsa_sparsity: float = 0.9,
             vsa_tile_size: int = 64,
@@ -654,12 +735,23 @@ class MiniMaxH3MLXPipeline:
         ) if vsa else MiniMaxH3VSAConfig()
         if vsa_config.enabled and not mlx_h3_checkpoint_vsa_capable(self.dit_checkpoint):
             raise dense_only_vsa_error(self.dit_checkpoint)
+        spatial_plan = plan_fast_spatial(
+            height,
+            width,
+            scale=fast_spatial_scale,
+            upsample_mode=fast_spatial_upsample_mode,
+            sharpen=fast_spatial_sharpen,
+        ) if fast_spatial else None
         _preflight_media_dependencies(
             fast=fast,
             fast_sharpen=fast_sharpen,
             rife_weights_dir=rife_weights_dir,
+            fast_spatial=fast_spatial,
         )
-        canvas_height, canvas_width = _model_canvas_size(height, width)
+        if spatial_plan is not None:
+            canvas_height, canvas_width = spatial_plan.canvas_height, spatial_plan.canvas_width
+        else:
+            canvas_height, canvas_width = _model_canvas_size(height, width)
         target_geometry = self.resolve_geometry(canvas_height, canvas_width, num_frames)
         fast_plan = plan_fast_temporal(target_geometry["num_frames"], fast_factor) if fast else None
         video_num_frames = fast_plan.source_frames if fast_plan is not None else target_geometry["num_frames"]
@@ -671,7 +763,7 @@ class MiniMaxH3MLXPipeline:
             enforce_duration=fast_plan is None,
         )
         logger.info(
-            "Geometry: output=%dx%dx%d model=%dx%dx%d audio_frames=%d fast=%s",
+            "Geometry: output=%dx%dx%d model=%dx%dx%d audio_frames=%d fast=%s fast_spatial=%s",
             width,
             height,
             target_geometry["num_frames"],
@@ -680,6 +772,7 @@ class MiniMaxH3MLXPipeline:
             video_geometry["num_frames"],
             target_geometry["num_frames"],
             fast_plan,
+            spatial_plan,
         )
 
         _reset_peak_memory()
@@ -718,7 +811,10 @@ class MiniMaxH3MLXPipeline:
             num_frames=video_geometry["num_frames"],
             tiled=tiled_video_decode,
         )
-        frames = _center_crop_frames(frames, height, width)
+        if spatial_plan is not None:
+            frames = _center_crop_frames(frames, spatial_plan.stage1_height, spatial_plan.stage1_width)
+        else:
+            frames = _center_crop_frames(frames, height, width)
         timings["video_decode_s"] = time.perf_counter() - started
         peaks["video_decode_gib"] = _peak_memory_gib()
         _cleanup_mlx()
@@ -735,7 +831,8 @@ class MiniMaxH3MLXPipeline:
                     target_geometry["num_frames"],
                     model=model,
                 )
-                interpolated = _sharpen_frames(interpolated, fast_sharpen)
+                if spatial_plan is None:
+                    interpolated = _sharpen_frames(interpolated, fast_sharpen)
                 frames = np.stack(interpolated)
                 if frames.shape[0] != target_geometry["num_frames"]:
                     raise RuntimeError(
@@ -748,6 +845,22 @@ class MiniMaxH3MLXPipeline:
                 del model
                 _cleanup_mlx()
 
+        if spatial_plan is not None:
+            started = time.perf_counter()
+            # One sharpen pass, at full resolution: RIFE and the resample soften
+            # for the same reason, so the stronger requested amount is applied
+            # once instead of stacking two unsharp masks.
+            sharpen = spatial_plan.sharpen if fast_plan is None else max(spatial_plan.sharpen, fast_sharpen)
+            frames = np.stack(
+                upsample_frames(
+                    frames,
+                    width=spatial_plan.target_width,
+                    height=spatial_plan.target_height,
+                    mode=spatial_plan.upsample_mode,
+                    sharpen=sharpen,
+                ))
+            timings["spatial_upsample_s"] = time.perf_counter() - started
+
         _reset_peak_memory()
         started = time.perf_counter()
         waveform = self.decode_audio(audio_rows, num_frames=target_geometry["num_frames"])
@@ -759,8 +872,8 @@ class MiniMaxH3MLXPipeline:
         video_path = self.mux(frames, waveform, output_path)
         timings["mux_s"] = time.perf_counter() - started
         timings["generate_s"] = sum(
-            timings.get(key, 0.0)
-            for key in ("condition_s", "denoise_s", "video_decode_s", "rife_s", "audio_decode_s", "mux_s"))
+            timings.get(key, 0.0) for key in ("condition_s", "denoise_s", "video_decode_s", "rife_s",
+                                              "spatial_upsample_s", "audio_decode_s", "mux_s"))
 
         result = GenerationResult(
             video_path=str(video_path),
