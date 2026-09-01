@@ -25,6 +25,12 @@ if [ "$selected" != all ]; then
   done
 fi
 
+# This lane owns a whole four-GPU tray. Exercise the exact NCCL + Triton
+# MiniMax-H3 packed-SP route before output-quality jobs, while retaining the
+# scheduler-provided rendezvous port in the nested torchrun invocation.
+FASTVIDEO_MINIMAX_H3_PACKED_SP_STRICT_CUDA=1 \
+  pytest ./fastvideo/tests/distributed/test_minimax_h3_packed_sp.py -vs
+
 # MoGe's utils3d dependency builds glcontext from source on ARM64. The current
 # runner image predates the baked-in X11 headers below, so keep this guarded
 # bootstrap until every deployed image digest contains libx11-dev.

@@ -62,7 +62,6 @@ SLURM_LANES = [
 ALLOWLIST = {
     "attention": "no lane yet — GPU attention-backend tests, run manually",
     "audio": "no lane yet — audio encoder tests, run manually",
-    "distributed": "no lane yet — multi-GPU torchrun tests, run manually",
     "hooks": "no lane yet — run manually",
     "layers": "no lane yet — torchrun FSDP dispatch tests, run manually",
     "nightly": "by design: nightly cadence, not per-PR",
@@ -197,6 +196,20 @@ def test_gpu_tests_preserve_a_launcher_assigned_rendezvous_port():
     assert not overwrites, f"Tests overwrite the CI runner's per-lease MASTER_PORT: {overwrites}"
 
 
+def test_minimax_h3_world4_contract_has_portable_and_strict_cuda_owners():
+    transformer_lane = (REPO_ROOT / ".buildkite/scripts/lanes/transformer.sh").read_text()
+    ssim_lane = (REPO_ROOT / ".buildkite/scripts/lanes/ssim.sh").read_text()
+    contract = (TESTS_ROOT / "distributed/test_minimax_h3_packed_sp.py").read_text()
+
+    assert "fastvideo/tests/distributed/test_minimax_h3_packed_sp.py" in transformer_lane
+    assert "fastvideo/tests/distributed/test_minimax_h3_packed_sp.py" in ssim_lane
+    assert "FASTVIDEO_MINIMAX_H3_PACKED_SP_STRICT_CUDA=1" in ssim_lane
+    assert 'os.environ.get("MASTER_PORT")' in contract
+    assert 'launcher.append(f"--master_port={inherited_master_port}")' in contract
+    assert 'launcher.append("--standalone")' in contract
+    assert "socket" not in contract
+
+
 def test_dreamverse_lane_keeps_arm64_browser_coverage_explicit():
     lane = (REPO_ROOT / ".buildkite/scripts/lanes/dreamverse.sh").read_text()
 
@@ -256,6 +269,8 @@ def test_ssim_lane_uses_the_local_four_gpu_scheduler():
     assert "FASTVIDEO_SSIM_TEST_FILES" in lane_script
     assert 'if [ "${TEST_SCOPE:-}" = merge ]; then' in lane_script
     assert "Missing FASTVIDEO_SSIM_TEST_FILES for merge scope" in lane_script
+    assert "FASTVIDEO_MINIMAX_H3_PACKED_SP_STRICT_CUDA=1" in lane_script
+    assert "test_minimax_h3_packed_sp.py" in lane_script
 
 
 def test_golden_lane_accepts_only_focused_test_basenames():

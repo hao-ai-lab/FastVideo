@@ -62,7 +62,8 @@ def test_pr_model_load_and_training_lanes_disable_fa4():
     # scripts used by the Slurm runner.
     lanes = {
         "run_transformer_tests":
-        ("pytest ./fastvideo/tests/transformers -vs", ".buildkite/scripts/lanes/transformer.sh"),
+        ("pytest ./fastvideo/tests/transformers ./fastvideo/tests/distributed/test_minimax_h3_packed_sp.py -vs",
+         ".buildkite/scripts/lanes/transformer.sh"),
         "run_training_tests": ("pytest ./fastvideo/tests/training/Vanilla -srP", None),
         "run_training_lora_tests": ("pytest ./fastvideo/tests/training/lora/test_lora_training.py -srP", None),
         "run_training_tests_VSA": ("pytest ./fastvideo/tests/training/VSA -srP", None),

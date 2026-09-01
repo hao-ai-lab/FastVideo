@@ -373,6 +373,13 @@ def classify_paths(paths: list[str]) -> MergePlan:
                 plan.add_lanes("ssim", reason=f"shared SSIM harness/reference: {path}")
             continue
 
+        if path == "fastvideo/tests/distributed/test_minimax_h3_packed_sp.py":
+            # Fastcheck owns the portable world-4 Gloo contract. Also select
+            # the existing four-GPU SSIM lane, whose preflight makes the same
+            # test require the production NCCL + Triton route.
+            plan.add_ssim(("test_minimax_h3_similarity.py", ), reason=f"MiniMax-H3 packed-SP CUDA preflight: {path}")
+            continue
+
         if path.startswith("fastvideo/tests/performance/") or path.startswith(".buildkite/performance-benchmarks/"):
             plan.add_lanes("performance", reason=f"performance coverage: {path}")
             continue

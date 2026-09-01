@@ -370,7 +370,8 @@ def test_wave1_lane_functions_use_shared_scripts(monkeypatch):
             "golden_gate.sh": 'exec pytest "$golden_root" -vs',
             "encoder.sh": "pytest ./fastvideo/tests/encoders -vs",
             "vae.sh": "pytest ./fastvideo/tests/vaes -vs",
-            "transformer.sh": "pytest ./fastvideo/tests/transformers -vs",
+            "transformer.sh":
+            "pytest ./fastvideo/tests/transformers ./fastvideo/tests/distributed/test_minimax_h3_packed_sp.py -vs",
             "inference_lora.sh": "pytest ./fastvideo/tests/inference/lora/test_lora_inference_similarity.py -vs",
             "distillation_dmd.sh": "pytest ./fastvideo/tests/training/distill/test_distill_dmd.py -vs",
             "train_framework.sh": "pytest ./fastvideo/tests/train/models ./fastvideo/tests/train/methods -vs",
