@@ -224,6 +224,10 @@ def test_standalone_parameters_use_generic_dense_suffixes(tmp_path: Path) -> Non
     adapter = load_file(output)
     torch.testing.assert_close(adapter["blocks.0.scale_shift_table.diff_param"], torch.full((4, ), 0.25))
     torch.testing.assert_close(adapter["blocks.0.extra_table.set_param"], finetuned["blocks.0.extra_table"])
+    report = json.loads(output.with_suffix(".safetensors.report.json").read_text())
+    assert report["counts"] == {"diff": 1, "set_param": 1}
+    with safe_open(output, framework="pt") as handle:
+        assert handle.metadata()["set_param_tensors"] == "1"
 
 
 def test_randomized_extraction_is_seeded_and_reports_residual(tmp_path: Path) -> None:
@@ -337,6 +341,27 @@ def test_randomized_factorization_runs_on_gpu() -> None:
     assert randomized_error <= exact_error * 1.02
     assert method == "randomized-q12-niter4"
     assert random_a.is_cuda and random_b.is_cuda
+
+
+def test_pipeline_loading_disables_layerwise_offload(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    class FakePipeline:
+
+        @classmethod
+        def from_pretrained(cls, _model_path: str, **kwargs: object):
+            calls.append(kwargs)
+            pipeline = cls()
+            pipeline.pipeline = cls()
+            pipeline.pipeline.transformer = torch.nn.Linear(3, 2)
+            return pipeline
+
+    monkeypatch.setattr(extract_lora, "get_pipeline_class_for_model", lambda _model_path: FakePipeline)
+
+    state_dict = extract_lora.load_transformer_state_dict_from_model("org/model")
+
+    assert calls[0]["dit_layerwise_offload"] is False
+    assert state_dict["weight"].shape == (2, 3)
 
 
 def test_hub_resolution_downloads_only_transformer(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -462,42 +487,84 @@ def test_resume_still_rejects_a_mismatched_config(tmp_path: Path) -> None:
         _extract(base_dir, finetuned_dir, output, rank=4, resume=True)
 
 
-def test_resume_rejects_changed_checkpoint_contents(tmp_path: Path) -> None:
+@pytest.mark.parametrize("changed_side", ["base", "finetuned"])
+def test_resume_rejects_changed_checkpoint_contents(tmp_path: Path, changed_side: str) -> None:
     base_dir, finetuned_dir = _toy_checkpoints(tmp_path)
     output = tmp_path / "adapter.safetensors"
     _extract(base_dir, finetuned_dir, output, keep_work_dir=True)
 
-    _, changed = _toy_states()
+    base, finetuned = _toy_states()
+    changed = base if changed_side == "base" else finetuned
     changed["blocks.0.linear.weight"] += 1.0
-    shard = finetuned_dir / "transformer" / "diffusion_pytorch_model-00001-of-00001.safetensors"
+    changed_dir = base_dir if changed_side == "base" else finetuned_dir
+    shard = changed_dir / "transformer" / "diffusion_pytorch_model-00001-of-00001.safetensors"
     save_file(changed, shard)
 
     with pytest.raises(ValueError, match="Resume configuration does not match"):
         _extract(base_dir, finetuned_dir, output, resume=True)
 
 
-def test_local_paths_reject_hugging_face_revisions(tmp_path: Path) -> None:
+@pytest.mark.parametrize("revision_kw", ["base_revision", "ft_revision"])
+def test_local_paths_reject_hugging_face_revisions(tmp_path: Path, revision_kw: str) -> None:
     base_dir, finetuned_dir = _toy_checkpoints(tmp_path)
     with pytest.raises(ValueError, match="cannot be used with local model path"):
-        _extract(base_dir,
-                 finetuned_dir,
-                 tmp_path / "adapter.safetensors",
-                 base_revision="abc123")
+        _extract(
+            base_dir,
+            finetuned_dir,
+            tmp_path / "adapter.safetensors",
+            **{revision_kw: "abc123"},
+        )
 
 
-def test_pipeline_mode_rejects_revisions_before_loading(tmp_path: Path) -> None:
+def test_pipeline_mode_rejects_resume_before_loading(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    def forbidden_pipeline_load(*args, **kwargs):
+        raise AssertionError("resume must fail before materializing pipeline checkpoints")
+
+    monkeypatch.setattr(extract_lora, "load_transformer_state_dict_from_model", forbidden_pipeline_load)
+    with pytest.raises(ValueError, match="resume requires indexed safetensors"):
+        extract_lora.extract_lora_adapter(
+            base="org/base",
+            ft="org/finetuned",
+            out=str(tmp_path / "adapter.safetensors"),
+            load_mode="pipeline",
+            resume=True,
+        )
+
+
+@pytest.mark.parametrize("revision_kw", ["base_revision", "ft_revision"])
+def test_pipeline_mode_rejects_revisions_before_loading(tmp_path: Path, revision_kw: str) -> None:
     with pytest.raises(ValueError, match="require indexed loading"):
         extract_lora.extract_lora_adapter(
             base="org/base",
             ft="org/finetuned",
             out=str(tmp_path / "adapter.safetensors"),
             load_mode="pipeline",
-            base_revision="abc123",
+            **{revision_kw: "abc123"},
         )
 
 
-def test_auto_mode_does_not_drop_revision_during_fallback(monkeypatch: pytest.MonkeyPatch,
-                                                           tmp_path: Path) -> None:
+def test_auto_resume_does_not_fall_back_to_pipeline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    def indexed_failure(*args, **kwargs):
+        raise RuntimeError("indexed unavailable")
+
+    def forbidden_pipeline_load(*args, **kwargs):
+        raise AssertionError("pipeline fallback cannot validate checkpoint identity")
+
+    monkeypatch.setattr(extract_lora, "_resolve_transformer_dir", indexed_failure)
+    monkeypatch.setattr(extract_lora, "load_transformer_state_dict_from_model", forbidden_pipeline_load)
+    with pytest.raises(RuntimeError, match="indexed unavailable"):
+        extract_lora.extract_lora_adapter(
+            base="org/base",
+            ft="org/finetuned",
+            out=str(tmp_path / "adapter.safetensors"),
+            load_mode="auto",
+            resume=True,
+        )
+
+
+@pytest.mark.parametrize("revision_kw", ["base_revision", "ft_revision"])
+def test_auto_mode_does_not_drop_revision_during_fallback(monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+                                                           revision_kw: str) -> None:
     def indexed_failure(*args, **kwargs):
         raise RuntimeError("indexed unavailable")
 
@@ -512,8 +579,13 @@ def test_auto_mode_does_not_drop_revision_during_fallback(monkeypatch: pytest.Mo
             ft="org/finetuned",
             out=str(tmp_path / "adapter.safetensors"),
             load_mode="auto",
-            base_revision="abc123",
+            **{revision_kw: "abc123"},
         )
+
+
+def test_cli_defaults_exact_dense_deltas_to_float32(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "argv", ["extract_lora.py", "--base", "base", "--ft", "finetuned"])
+    assert extract_lora.parse_args().dense_dtype == "float32"
 
 
 def test_non_safetensors_output_is_rejected(tmp_path: Path) -> None:

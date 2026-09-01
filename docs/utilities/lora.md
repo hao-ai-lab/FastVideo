@@ -1,6 +1,6 @@
 # LoRA Extraction and Merging
 
-Tools for extracting and merging LoRA adapters for FastVideo models.
+Generic runtime adapter extraction plus the existing legacy merge utilities for FastVideo models.
 
 ## Extract LoRA Adapter
 
@@ -14,10 +14,10 @@ python scripts/lora_extraction/extract_lora.py \
   --exact-tensor-pattern '^proj_out\.weight$'
 ```
 
-The extractor is runtime-agnostic by default and cannot determine from checkpoint tensors whether the target runtime
+The extractor is runtime-agnostic and cannot determine from checkpoint tensors whether the target runtime
 wraps a given matrix as a LoRA layer. Use `--exact-tensor-pattern` for changed matrices that the runtime does not wrap;
-the extractor preserves them as exact `.diff` tensors. The Wan patterns above cover its excluded condition embedders
-and its unwrapped output projection.
+the extractor preserves them as exact `.diff` tensors instead of emitting factors that the runtime cannot apply. The
+Wan patterns above cover its excluded condition embedders and its unwrapped output projection.
 
 Exact CPU SVD remains the default. For a large transformer, stream its indexed safetensors and factorize on a GPU:
 
@@ -43,6 +43,7 @@ Important options:
 
 - `--base`, `--ft`: Hugging Face model IDs or local paths.
 - `--rank`, `--full-rank`: truncated or full factorization rank.
+- `--min-delta`: omit tensors whose maximum absolute FP32 delta is at or below this threshold (default: `1e-8`).
 - `--device`: factorization device, such as `cpu` or `cuda:0`.
 - `--svd-method`: `exact` or `randomized`.
 - `--randomized-q`, `--niter`, `--seed`: randomized SVD accuracy and reproducibility.
@@ -57,23 +58,29 @@ The adapter retains changes that do not fit a low-rank product: `.diff` and `.di
 
 For the validated MiniMax-H3 rank-64 command, including its exact-boundary patterns, see [`scripts/lora_extraction/README.md`](https://github.com/hao-ai-lab/FastVideo/blob/main/scripts/lora_extraction/README.md).
 
-## Merge Adapter
+Mixed low-rank/dense adapters produced by the generic extractor must be supplied when constructing FastVideo through
+`ComponentConfig(lora_path=...)`; their dense payload cannot be swapped later with `set_lora_adapter`. The legacy
+offline merger below retains its existing scope and is not part of this extraction workflow.
+
+## Legacy Merge Adapter
+
+The command below documents the pre-existing merger for adapters it already supports. Do not pass a mixed adapter from
+the generic extractor to it: the legacy merger does not apply the adapter's exact dense or replacement payloads.
 
 ```bash
 python scripts/lora_extraction/merge_lora.py \
   --base Wan-AI/Wan2.2-TI2V-5B-Diffusers \
-  --adapter adapter_r32.safetensors \
+  --adapter legacy_factor_only_adapter.safetensors \
   --ft FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers \
   --output merged_model
 ```
 
 **Options:**
 
-- `--base`: Base model (HuggingFace ID or local path)
+- `--base`: Base model (Hugging Face ID or local path)
 - `--adapter`: LoRA adapter file (.safetensors)
 - `--ft`: Fine-tuned model (for configuration)
 - `--output`: Output directory
-- `--allow-unmatched`: Allow an output even when adapter keys cannot be applied (strict matching is the default)
 
 ## Validate Quality (Optional)
 

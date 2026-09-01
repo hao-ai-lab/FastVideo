@@ -305,6 +305,9 @@ def load_transformer_state_dict_from_model(
         num_gpus=num_gpus,
         inference_mode=True,
         dit_cpu_offload=dit_cpu_offload,
+        # This helper must materialize real parameters. Layerwise offload may expose
+        # placeholder tensors through state_dict() before a layer is activated.
+        dit_layerwise_offload=False,
         vae_cpu_offload=vae_cpu_offload,
         text_encoder_cpu_offload=text_encoder_cpu_offload,
         pin_cpu_memory=pin_cpu_memory,
@@ -313,6 +316,9 @@ def load_transformer_state_dict_from_model(
     if transformer is None:
         modules = getattr(pipeline, "modules", None)
         transformer = modules.get("transformer") if isinstance(modules, dict) else None
+    if transformer is None:
+        nested_pipeline = getattr(pipeline, "pipeline", None)
+        transformer = getattr(nested_pipeline, "transformer", None)
     if transformer is None:
         raise RuntimeError("Transformer not found in pipeline")
 
@@ -581,12 +587,12 @@ def _extract_layers(
                 }
                 _atomic_json_dump(manifest, manifest_path)
                 continue
-            output_key = (key.removesuffix(".weight") + SET_WEIGHT_SUFFIX
-                          if key.endswith(".weight") else key + SET_PARAM_SUFFIX)
+            is_weight = key.endswith(".weight")
+            output_key = (key.removesuffix(".weight") + SET_WEIGHT_SUFFIX if is_weight else key + SET_PARAM_SUFFIX)
             output_dtype = _resolve_output_dtype(config.replacement_dtype, finetuned_tensor.dtype)
             _save_layer_payload(tensor_file, {output_key: finetuned_tensor.to(output_dtype)}, key)
             manifest["layers"][key] = {
-                "kind": "set_weight",
+                "kind": "set_weight" if is_weight else "set_param",
                 "shape": list(finetuned_tensor.shape),
                 "tensor_file": tensor_file.name,
                 "output_keys": [output_key],
@@ -723,7 +729,7 @@ def _verify_adapter(out_path: Path, manifest: dict[str, Any]) -> None:
                 b_shape = tuple(adapter.get_slice(f"{module_name}.lora_B.weight").get_shape())
                 if a_shape != (rank, shape[1]) or b_shape != (shape[0], rank):
                     raise ValueError(f"Invalid factor shapes for {source_key}: A={a_shape}, B={b_shape}")
-            elif kind in {"diff", "set_weight"}:
+            elif kind in {"diff", "set_weight", "set_param"}:
                 output_key = layer["output_keys"][0]
                 output_shape = tuple(adapter.get_slice(output_key).get_shape())
                 if output_shape != shape:
@@ -790,6 +796,9 @@ def extract_lora_adapter(
         raise ValueError(f"Unsupported SVD method: {svd_method}")
     if randomized_q is not None and randomized_q < 1:
         raise ValueError("randomized_q must be positive")
+    if resume and load_mode == "pipeline":
+        raise ValueError("--resume requires indexed safetensors; pipeline loading cannot validate checkpoint identity")
+    reader_load_mode = "indexed" if resume else load_mode
 
     out_path = Path(out).expanduser()
     if out_path.suffix != ".safetensors":
@@ -804,7 +813,7 @@ def extract_lora_adapter(
     else:
         effective_work_dir = out_path.parent / f".{out_path.name}.work"
 
-    with _open_readers(base, ft, base_revision, ft_revision, load_mode) as (base_reader, finetuned_reader):
+    with _open_readers(base, ft, base_revision, ft_revision, reader_load_mode) as (base_reader, finetuned_reader):
         if resume and (not isinstance(base_reader, IndexedSafetensorsReader)
                        or not isinstance(finetuned_reader, IndexedSafetensorsReader)):
             raise ValueError("--resume requires indexed safetensors so checkpoint identity can be validated")
@@ -856,6 +865,7 @@ def extract_lora_adapter(
         "lora_layers": str(counts.get("lora", 0)),
         "diff_tensors": str(counts.get("diff", 0)),
         "set_weight_tensors": str(counts.get("set_weight", 0)),
+        "set_param_tensors": str(counts.get("set_param", 0)),
         "dropped_unchanged": str(counts.get("unchanged", 0)),
         "application": "W = W_base + lora_B @ lora_A; then dense diffs added and replacements assigned",
     }

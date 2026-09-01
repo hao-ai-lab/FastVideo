@@ -6,8 +6,8 @@ base checkpoint must already contain the parameter, and the delta must actually 
 rank. Distilled video checkpoints break both often enough that dropping whatever does
 not fit silently loses real signal.
 
-Two payload kinds cover the gap, named after the convention ComfyUI's loader already
-reads so one file works in both places:
+Two payload kinds cover the gap. The weight/bias spellings follow conventions used by
+ComfyUI; the ``*_param`` spellings extend them to standalone FastVideo parameters:
 
 ``<module>.diff`` / ``<module>.diff_b`` / ``<parameter>.diff_param``
     An exact additive delta for a parameter the base model has. Used where a rank-``r``
@@ -55,12 +55,6 @@ logger = init_logger(__name__)
 # generic spellings are tested before the shorter weight/bias spellings.
 ADDITIVE_SUFFIXES: dict[str, str] = {".diff_param": "", ".diff_b": ".bias", ".diff": ".weight"}
 REPLACEMENT_SUFFIXES: dict[str, str] = {".set_weight": ".weight", ".set_param": ""}
-
-# Recognized elsewhere in an adapter and deliberately not our business: the low-rank
-# half, which ``LoRAPipeline`` merges through the wrapped-module path.
-_LOW_RANK_MARKERS = (".lora_A", ".lora_B", ".lora_up", ".lora_down", ".lora_alpha", ".lora_rank", ".alpha",
-                     ".dora_scale")
-
 
 # One low-rank pair has many spellings. PEFT writes ``.lora_A.weight``, and interposes
 # the adapter's name when it is not the default (``.lora_A.default.weight``); kohya and
@@ -243,8 +237,8 @@ def _resolve(
     Returns ``None`` for anything that is not a dense payload key, which includes every
     low-rank factor -- those belong to ``LoRAPipeline``, not here.
     """
-    if any(marker in key for marker in _LOW_RANK_MARKERS):
-        return None
+    # A terminal dense suffix is authoritative even when an ordinary module name
+    # contains text such as ``.alpha`` or ``.lora_A``.
     for suffix, param_suffix in ADDITIVE_SUFFIXES.items():
         if key.endswith(suffix):
             return _map_name(

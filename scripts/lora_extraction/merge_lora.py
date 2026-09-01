@@ -16,8 +16,6 @@ import shutil
 import logging
 from pathlib import Path
 from collections import defaultdict
-from collections.abc import Callable
-from typing import Any
 
 os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
 os.environ.setdefault("MASTER_PORT", "29500")
@@ -97,118 +95,6 @@ def load_adapter(adapter_path: str) -> dict:
     return fix_adapter_naming(adapter)
 
 
-# Suffix -> the parameter suffix it targets, mirroring fastvideo.models.loader.lora_patch.
-# An empty target keeps the full name, for standalone nn.Parameters.
-ADDITIVE_SUFFIXES: dict[str, str] = {".diff_param": "", ".diff_b": ".bias", ".diff": ".weight"}
-REPLACEMENT_SUFFIXES: dict[str, str] = {".set_weight": ".weight", ".set_param": ""}
-LORA_SUFFIXES = (".lora_A.weight", ".lora_B.weight", ".lora_rank", ".lora_alpha")
-
-
-def group_dense_keys(adapter: dict) -> tuple[dict, dict, list]:
-    """Split the non-factorized half of an adapter into additive and replacement params.
-
-    ``--exact-tensor-pattern`` keeps selected matrices as exact dense deltas instead of
-    LoRA factors, so an adapter merged without these is missing those tensors entirely.
-    """
-    additive: dict = {}
-    replacement: dict = {}
-    unrecognized: list = []
-
-    for key, tensor in adapter.items():
-        if key.endswith(LORA_SUFFIXES):
-            continue
-        for suffix, param_suffix in ADDITIVE_SUFFIXES.items():
-            if key.endswith(suffix):
-                additive[key.removesuffix(suffix) + param_suffix] = tensor
-                break
-        else:
-            for suffix, param_suffix in REPLACEMENT_SUFFIXES.items():
-                if key.endswith(suffix):
-                    replacement[key.removesuffix(suffix) + param_suffix] = tensor
-                    break
-            else:
-                unrecognized.append(key)
-
-    return additive, replacement, unrecognized
-
-
-ParamMapping = Callable[[str], tuple[str, Any, Any]]
-
-
-def map_adapter_parameter(
-    name: str,
-    lora_param_names_mapping: ParamMapping | None,
-    param_names_mapping: ParamMapping | None,
-) -> tuple[str, int | None, int | None]:
-    """Apply the same official-LoRA -> HF -> FastVideo mapping order as runtime loading."""
-    if lora_param_names_mapping is not None:
-        name, merge_index, total = lora_param_names_mapping(name)
-        if merge_index is not None:
-            raise NotImplementedError(f"Adapter-specific mapping unexpectedly fused {name} ({merge_index}/{total})")
-    if param_names_mapping is None:
-        return name, None, None
-    return param_names_mapping(name)
-
-
-def _mapped_slice(target: torch.Tensor, merge_index: int | None,
-                  total: int | None) -> tuple[Any, tuple[int, ...]] | None:
-    if merge_index is None:
-        return Ellipsis, tuple(target.shape)
-    if total is None or total < 1 or target.ndim < 1 or target.shape[0] % total:
-        return None
-    chunk = target.shape[0] // total
-    return slice(merge_index * chunk, (merge_index + 1) * chunk), (chunk, *target.shape[1:])
-
-
-def merge_dense_into_base(
-    merged_sd: dict,
-    additive: dict,
-    replacement: dict,
-    lora_param_names_mapping: ParamMapping | None = None,
-    param_names_mapping: ParamMapping | None = None,
-) -> tuple[int, list[str]]:
-    """Apply exact dense deltas and replacement parameters in place."""
-    merged_count = 0
-    skipped: list[str] = []
-
-    for source_name, tensor in additive.items():
-        param_name, merge_index, total = map_adapter_parameter(source_name, lora_param_names_mapping,
-                                                               param_names_mapping)
-        target = merged_sd.get(param_name)
-        target_slice = _mapped_slice(target, merge_index, total) if target is not None else None
-        if target is None or target_slice is None or target_slice[1] != tuple(tensor.shape):
-            skipped.append(f"{source_name} -> {param_name}")
-            continue
-        index, _ = target_slice
-        updated = target.to(torch.float32).clone()
-        updated[index] += tensor.to(torch.float32)
-        merged_sd[param_name] = updated.to(target.dtype)
-        merged_count += 1
-
-    for source_name, tensor in replacement.items():
-        param_name, merge_index, total = map_adapter_parameter(source_name, lora_param_names_mapping,
-                                                               param_names_mapping)
-        target = merged_sd.get(param_name)
-        if target is None:
-            if merge_index is not None:
-                skipped.append(f"{source_name} -> {param_name}")
-                continue
-            merged_sd[param_name] = tensor
-            merged_count += 1
-            continue
-        target_slice = _mapped_slice(target, merge_index, total)
-        if target_slice is None or target_slice[1] != tuple(tensor.shape):
-            skipped.append(f"{source_name} -> {param_name}")
-            continue
-        index, _ = target_slice
-        updated = target.clone()
-        updated[index] = tensor.to(target.dtype)
-        merged_sd[param_name] = updated
-        merged_count += 1
-
-    return merged_count, skipped
-
-
 def group_adapter_keys(adapter: dict) -> dict:
     grouped = defaultdict(dict)
 
@@ -226,7 +112,7 @@ def group_adapter_keys(adapter: dict) -> dict:
     return grouped
 
 
-def get_reverse_param_mapping(base_model_path: str) -> tuple[dict, ParamMapping, ParamMapping]:
+def get_reverse_param_mapping(base_model_path: str):
     LOG.info("Loading base model for parameter mapping")
 
     pipeline_cls = get_pipeline_class_for_model(base_model_path)
@@ -250,16 +136,16 @@ def get_reverse_param_mapping(base_model_path: str) -> tuple[dict, ParamMapping,
     if transformer is None:
         raise RuntimeError("Could not find transformer in pipeline")
 
-    param_names_mapping_fn = get_param_names_mapping(transformer.param_names_mapping)
-    lora_param_names_mapping_fn = get_param_names_mapping(transformer.lora_param_names_mapping)
-
-    if getattr(transformer, "reverse_param_names_mapping", None):
+    if hasattr(transformer, "reverse_param_names_mapping"):
         reverse_mapping = transformer.reverse_param_names_mapping
     elif hasattr(transformer, "config") and hasattr(transformer.config, "arch_config"):
         arch_config = transformer.config.arch_config
-        if getattr(arch_config, "reverse_param_names_mapping", None):
+        if hasattr(arch_config, "reverse_param_names_mapping"):
             reverse_mapping = arch_config.reverse_param_names_mapping
         else:
+            param_mapping = arch_config.param_names_mapping
+            param_names_mapping_fn = get_param_names_mapping(param_mapping)
+
             from diffusers import DiffusionPipeline
             from huggingface_hub import snapshot_download
 
@@ -284,48 +170,36 @@ def get_reverse_param_mapping(base_model_path: str) -> tuple[dict, ParamMapping,
     del transformer
     torch.cuda.empty_cache()
 
-    return reverse_mapping, param_names_mapping_fn, lora_param_names_mapping_fn
+    return reverse_mapping
 
 
-def merge_lora_into_base(
-    base_sd: dict,
-    adapter: dict,
-    *,
-    lora_param_names_mapping: ParamMapping | None = None,
-    param_names_mapping: ParamMapping | None = None,
-    strict: bool = True,
-) -> dict:
+def merge_lora_into_base(base_sd: dict, adapter: dict) -> dict:
     LOG.info("Merging LoRA into base weights")
 
     adapter_layers = group_adapter_keys(adapter)
     merged_sd = dict(base_sd)
 
     merged_count = 0
-    skipped: list[str] = []
+    skipped_count = 0
 
     for base_name, parts in adapter_layers.items():
-        source_weight_key = base_name if base_name.endswith(".weight") else base_name + ".weight"
-        weight_key, merge_index, total = map_adapter_parameter(source_weight_key, lora_param_names_mapping,
-                                                               param_names_mapping)
-        base_tensor = merged_sd.get(weight_key)
-        if base_tensor is None:
-            skipped.append(f"{source_weight_key} -> {weight_key} (missing base parameter)")
+        weight_key = base_name if base_name.endswith(".weight") else base_name + ".weight"
+
+        if weight_key not in base_sd:
+            skipped_count += 1
             continue
 
         if "A" not in parts or "B" not in parts:
-            skipped.append(f"{source_weight_key} (incomplete factor pair)")
+            skipped_count += 1
             continue
 
         lora_A = parts["A"].to(torch.float32)
         lora_B = parts["B"].to(torch.float32)
-        target_slice = _mapped_slice(base_tensor, merge_index, total)
-        if target_slice is None:
-            skipped.append(f"{source_weight_key} -> {weight_key} (invalid fused mapping)")
-            continue
-        index, expected_shape = target_slice
-        out_dim, in_dim = expected_shape
+        base_weight = base_sd[weight_key].to(torch.float32)
+
+        out_dim, in_dim = base_weight.shape
         if lora_B.shape[0] != out_dim or lora_A.shape[1] != in_dim or lora_B.shape[1] != lora_A.shape[0]:
-            skipped.append(f"{source_weight_key} -> {weight_key} (factor shape mismatch)")
+            skipped_count += 1
             continue
 
         delta = lora_B @ lora_A
@@ -336,28 +210,11 @@ def merge_lora_into_base(
         if rank != 0 and alpha != rank:
             delta = delta * (alpha / float(rank))
 
-        updated = base_tensor.to(torch.float32).clone()
-        updated[index] += delta
-        merged_sd[weight_key] = updated.to(base_tensor.dtype)
+        merged_weight = base_weight + delta
+        merged_sd[weight_key] = merged_weight.to(base_sd[weight_key].dtype)
         merged_count += 1
 
-    additive, replacement, unrecognized = group_dense_keys(adapter)
-    dense_merged, dense_skipped = merge_dense_into_base(
-        merged_sd,
-        additive,
-        replacement,
-        lora_param_names_mapping,
-        param_names_mapping,
-    )
-
-    LOG.info("Merged %d LoRA layers, skipped %d", merged_count, len(skipped))
-    LOG.info("Merged %d dense tensors (%d additive, %d replacement)", dense_merged, len(additive), len(replacement))
-    problems = skipped + dense_skipped + [f"unrecognized adapter key {key}" for key in unrecognized]
-    if problems and strict:
-        raise ValueError(f"Adapter merge left {len(problems)} keys/layers unapplied: {problems[:5]}")
-    if problems:
-        LOG.warning("Adapter merge left %d keys/layers unapplied: %s", len(problems), problems[:5])
-
+    LOG.info(f"Merged {merged_count} layers, skipped {skipped_count}")
     return merged_sd
 
 
@@ -424,7 +281,6 @@ def merge_lora(
     ft: str,
     output: str,
     log_level: str = "INFO",
-    allow_unmatched: bool = False,
 ) -> None:
     """Merge LoRA adapter into base model.
     
@@ -434,7 +290,6 @@ def merge_lora(
         ft: Finetuned model ID (for config)
         output: Output directory
         log_level: Logging level
-        allow_unmatched: Write output even if recognized adapter payloads cannot be applied
     """
     configure_logging(log_level)
 
@@ -442,20 +297,14 @@ def merge_lora(
     LOG.info(f"Adapter: {adapter}")
     LOG.info(f"Output: {output}")
 
-    reverse_mapping, param_names_mapping_fn, lora_param_names_mapping_fn = get_reverse_param_mapping(base)
+    reverse_mapping = get_reverse_param_mapping(base)
 
     LOG.info(f"Loading base model: {base}")
     base_sd = load_transformer_state_dict_from_model(base)
     LOG.info(f"Loaded { len(base_sd)} parameters")
 
     adapter_sd = load_adapter(adapter)
-    merged_sd = merge_lora_into_base(
-        base_sd,
-        adapter_sd,
-        lora_param_names_mapping=lora_param_names_mapping_fn,
-        param_names_mapping=param_names_mapping_fn,
-        strict=not allow_unmatched,
-    )
+    merged_sd = merge_lora_into_base(base_sd, adapter_sd)
 
     save_merged_model(merged_sd, base, ft, output, reverse_mapping)
     LOG.info("Merge complete")
@@ -469,8 +318,6 @@ def main():
     parser.add_argument("--ft", required=True, help="Finetuned model ID (for config)")
     parser.add_argument("--output", required=True, help="Output directory")
     parser.add_argument("--log-level", default="INFO", help="Logging level")
-    parser.add_argument("--allow-unmatched", action="store_true",
-                        help="Write the merged model even when adapter keys cannot be applied")
     args = parser.parse_args()
 
     merge_lora(
@@ -479,7 +326,6 @@ def main():
         ft=args.ft,
         output=args.output,
         log_level=args.log_level,
-        allow_unmatched=args.allow_unmatched,
     )
 
 

@@ -110,7 +110,7 @@ Key differences from full finetune:
 
 ## LoRA Extraction and Merging
 
-FastVideo provides tools to extract LoRA adapters from finetuned models and merge them back.
+FastVideo provides generic runtime adapter extraction and retains a legacy merger for its previously supported adapter layouts.
 
 ### Extract LoRA Adapter
 
@@ -128,11 +128,12 @@ python scripts/lora_extraction/extract_lora.py \
 
 | Argument | Description |
 |----------|-------------|
-| `--base` | Base model (HuggingFace ID or local path) |
-| `--ft` | Finetuned model path |
-| `--out` | Output adapter file (.safetensors) |
-| `--rank` | LoRA rank (16, 32, 64, 128) |
+| `--base` | Base model (Hugging Face ID or local path) |
+| `--ft` | Fine-tuned model (Hugging Face ID or local path) |
+| `--out` | Output adapter file (`.safetensors`) |
+| `--rank` | Requested LoRA rank (for example, 16, 32, 64, or 128) |
 | `--full-rank` | Extract full-rank adapter (optional) |
+| `--min-delta` | Omit tensors whose maximum absolute FP32 delta is at or below the threshold (default: `1e-8`) |
 | `--load-mode` | `auto` (indexed, then pipeline fallback), `indexed`, or `pipeline` |
 | `--device` | SVD device, such as `cpu` or `cuda:0` |
 | `--svd-method` | Exact or randomized SVD |
@@ -140,16 +141,21 @@ python scripts/lora_extraction/extract_lora.py \
 | `--dense-dtype` | Storage dtype for exact `.diff`/`.diff_b`/`.diff_param` payloads (default: `float32`) |
 | `--exact-tensor-pattern` | Repeatable regex for matrices the target runtime cannot load as LoRA factors |
 
-For large checkpoints, indexed loading streams one transformer tensor pair at a time and downloads only `transformer/*`. The extractor also preserves changed norms, biases, and standalone parameters as exact deltas, and fine-tuned-only parameters as `.set_weight` or `.set_param`. Matrix selection is runtime-agnostic, so full-finetune extraction must keep runtime-unsupported matrices exact, as the Wan example does. See [LoRA Extraction and Merging](../utilities/lora.md) for the GPU/randomized-SVD command, resume options, and accuracy controls.
+For large checkpoints, indexed loading streams one transformer tensor pair at a time and downloads only `transformer/*`. The extractor also preserves changed norms, biases, and standalone parameters as exact deltas, and fine-tuned-only parameters as `.set_weight` or `.set_param`. Matrix selection is runtime-agnostic, so full-finetune extraction must keep runtime-unsupported matrices exact, as the Wan example does. See the [LoRA utilities](../utilities/lora.md) for the GPU/randomized-SVD command, resume options, and accuracy controls.
 
-### Merge LoRA Adapter
+Mixed low-rank/dense adapters from the generic extractor must be supplied when constructing FastVideo through
+`ComponentConfig(lora_path=...)`; their dense payload cannot be swapped later with `set_lora_adapter`. The legacy
+offline merger below is not part of this extraction workflow.
 
-Merge an adapter back into a base model:
+### Legacy Merge LoRA Adapter
+
+The command below documents the pre-existing merger for adapters it already supports. Do not pass a mixed adapter from
+the generic extractor to it: the legacy merger does not apply exact dense or replacement payloads.
 
 ```bash
 python scripts/lora_extraction/merge_lora.py \
   --base Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
-  --adapter adapter_r32.safetensors \
+  --adapter legacy_factor_only_adapter.safetensors \
   --ft path/to/your/finetuned_model \
   --output merged_model
 ```
