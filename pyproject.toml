@@ -151,6 +151,7 @@ lint = [
 
 test = [
     "av",
+    "openai==3.6.0",  # OpenAI video-client compatibility tests; no cloud requests.
     "pytorch-msssim>=1.0.0",
     "pytest",
     "pandas",
@@ -234,6 +235,7 @@ where = [".", "apps/dreamverse"]
 exclude = ["assets*", "docker*", "docs", "scripts*", "apps*", "dreamverse.tests*"]
 
 [tool.setuptools.package-data]
+"fastvideo.entrypoints.openai" = ["static/*.html", "static/*.css", "static/*.js"]
 dreamverse = ["prompts/*.md"]
 "fastvideo.third_party.rife_mlx" = ["LICENSE"]
 "fastvideo.third_party.taehv" = ["LICENSE"]

@@ -20,6 +20,7 @@ hide:
     <a class="cookbook-inline-link" href="../inference/support_matrix/">
       View the full support matrix <span aria-hidden="true">→</span>
     </a>
+    <a class="cookbook-inline-link" href="./openai-api/">Run FastH3 with a playground and API <span aria-hidden="true">→</span></a>
   </header>
 
   <section class="cookbook-section" id="video-models" aria-labelledby="video-models-heading">

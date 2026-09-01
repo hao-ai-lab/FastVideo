@@ -156,6 +156,7 @@ nav:
     - V1 API: getting_started/v1_api.md
   - Cookbook:
     - Overview: cookbook/index.md
+    - H3 server and playground: cookbook/openai-api.md
     - Video:
       - MiniMax H3: cookbook/minimax-h3.md
       - Wan: cookbook/wan.md

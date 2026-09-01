@@ -5,12 +5,21 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from typing import Any, TypeVar
+from typing import Any, Protocol, TypeVar
 
 from fastvideo.api.schema import GenerationRequest
-from fastvideo.entrypoints.video_generator import VideoGenerator
+from fastvideo.entrypoints.openai.protocol import VideoGenerationRequest
 
 _T = TypeVar("_T")
+
+
+class ServingGenerator(Protocol):
+
+    def generate(self, request: GenerationRequest) -> Any:
+        ...
+
+    def shutdown(self) -> None:
+        ...
 
 
 class OpenAIServingEngine:
@@ -24,15 +33,22 @@ class OpenAIServingEngine:
     the lock without changing the transport contract.
     """
 
-    def __init__(self, generator: VideoGenerator) -> None:
+    def __init__(self,
+                 generator: ServingGenerator,
+                 video_request_validator: Callable[[VideoGenerationRequest], None] | None = None) -> None:
         self._generator = generator
+        self._video_request_validator = video_request_validator
         self._generation_lock = asyncio.Lock()
         self._closed = False
         self._unhealthy_reason: str | None = None
 
     @property
-    def generator(self) -> VideoGenerator:
+    def generator(self) -> ServingGenerator:
         return self._generator
+
+    def validate_video_request(self, request: VideoGenerationRequest) -> None:
+        if self._video_request_validator is not None:
+            self._video_request_validator(request)
 
     @property
     def closed(self) -> bool:
