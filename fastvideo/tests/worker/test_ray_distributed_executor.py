@@ -2,12 +2,21 @@
 from inspect import signature
 
 from fastvideo.worker.executor import Executor
-from fastvideo.worker.ray_distributed_executor import RayDistributedExecutor
+from fastvideo.worker.ray_distributed_executor import (
+    RayDistributedExecutor,
+    should_use_gloo_loopback,
+)
 
 
 def test_ray_executor_implements_executor_abc() -> None:
     remaining = getattr(RayDistributedExecutor, "__abstractmethods__", frozenset())
     assert remaining == frozenset(), remaining
+
+
+def test_gloo_loopback_follows_worker_ips_not_node_count() -> None:
+    assert should_use_gloo_loopback(["192.168.23.2"]) is True
+    assert should_use_gloo_loopback(["192.168.23.2", "192.168.23.2"]) is True
+    assert should_use_gloo_loopback(["192.168.23.2", "192.168.23.1"]) is False
 
 
 def test_ray_log_queue_stays_on_the_driver() -> None:

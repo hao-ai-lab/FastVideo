@@ -116,6 +116,13 @@ def test_inference_defers_dit_and_vae_until_after_conditioning(monkeypatch) -> N
     assert pipeline.get_module("transformer") is not None
     assert pipeline._denoise_stages_ready is True
 
+    second = pipeline.forward(ForwardBatch(data_type="video", prompt="second clip"), args)
+    assert second is not None
+    assert len(loads) == 3
+    assert loads[2] == ["text_encoder"]
+    assert pipeline.get_module("text_encoder") is None
+    assert condition_stage.conditioner is None
+
 
 def test_injected_denoise_weights_skip_the_deferred_split(monkeypatch) -> None:
     events: list = []

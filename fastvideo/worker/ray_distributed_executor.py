@@ -36,6 +36,16 @@ if TYPE_CHECKING:
 logger = init_logger(__name__)
 
 
+def should_use_gloo_loopback(worker_ips: list[str]) -> bool:
+    """Loopback is only safe when every worker shares one host IP.
+
+    Two Sparks each expose one GPU, so ``len(node_gpus)`` can still be 1 while
+    worker IPs already span the QSFP link. Gloo then dials 127.0.0.1 on the
+    remote box and times out.
+    """
+    return len(set(worker_ips)) <= 1
+
+
 @dataclass
 class RayWorkerMetaData:
     """
@@ -75,6 +85,7 @@ class RayDistributedExecutor(Executor):
         "NCCL_NVLS_ENABLE",
         "NCCL_DEBUG",
         "NCCL_DEBUG_SUBSYS",
+        "GLOO_SOCKET_IFNAME",
     }
 
     def _init_executor(self) -> None:
@@ -227,15 +238,7 @@ class RayDistributedExecutor(Executor):
 
         self._run_ray_workers("update_environment_variables", self._get_env_vars_to_be_updated())
 
-        if len(node_gpus) == 1:
-            # in single node case, we don't need to get the IP address.
-            # the loopback address is sufficient
-            # NOTE: a node may have several IP addresses, one for each
-            # network interface. `get_ip()` might return any of them,
-            # while they might not work for communication inside the node
-            # if the network setup is complicated. Using the loopback address
-            # solves this issue, as it always works for communication inside
-            # the node.
+        if should_use_gloo_loopback(worker_ips):
             driver_ip = "127.0.0.1"
         distributed_init_method = get_distributed_init_method(driver_ip, get_open_port())
 

@@ -227,6 +227,42 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
+    def _ensure_text_encoder(self, fastvideo_args: FastVideoArgs) -> None:
+        """Reload Qwen3-VL after `_release_text_encoder` so a later request can encode."""
+        encoder = self.get_module("text_encoder")
+        stage = self._stage_name_mapping.get("conditioning_stage")
+        if encoder is not None:
+            if stage is not None and getattr(stage, "conditioner", None) is None:
+                stage.conditioner = encoder
+            return
+        saved = list(self.required_config_modules)
+        self._required_config_modules = ["text_encoder"]
+        try:
+            logger.info("Reloading MiniMax-H3 text encoder for a subsequent request")
+            loaded = super().load_modules(fastvideo_args, loaded_modules=self.modules)
+            for name, module in loaded.items():
+                self.add_module(name, module)
+        finally:
+            self._required_config_modules = saved
+        if stage is not None:
+            stage.conditioner = self.get_module("text_encoder")
+
+    def _run_condition_then_denoise(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+        for name in ("input_preparation_stage", "conditioning_stage"):
+            batch = self._stage_name_mapping[name](batch, fastvideo_args)
+        self._release_text_encoder()
+        self._load_denoise_modules(fastvideo_args)
+        if not self._denoise_stages_ready:
+            self._add_denoise_stages(ref2va=self._ref2va)
+        for name in (
+                "latent_preparation_stage",
+                "denoising_stage",
+                "video_decoding_stage",
+                "audio_decoding_stage",
+        ):
+            batch = self._stage_name_mapping[name](batch, fastvideo_args)
+        return batch
+
     def _input_video_geometry(self, fastvideo_args: FastVideoArgs) -> Any:
         """Read canvas scalars from checkpoint JSON, not a live VAE proxy."""
         arch = getattr(getattr(fastvideo_args.pipeline_config, "vae_config", None), "arch_config", None)
@@ -307,23 +343,12 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
         if not self.post_init_called:
             self.post_init()
 
+        self._ensure_text_encoder(fastvideo_args)
         if self._denoise_stages_ready:
-            return super().forward(batch, fastvideo_args)
-
-        logger.info("Running MiniMax-H3 condition stages before loading DiT/VAE weights")
-        for stage in self.stages:
-            batch = stage(batch, fastvideo_args)
-        self._release_text_encoder()
-        self._load_denoise_modules(fastvideo_args)
-        self._add_denoise_stages(ref2va=self._ref2va)
-        for name in (
-                "latent_preparation_stage",
-                "denoising_stage",
-                "video_decoding_stage",
-                "audio_decoding_stage",
-        ):
-            batch = self._stage_name_mapping[name](batch, fastvideo_args)
-        return batch
+            logger.info("Running MiniMax-H3 condition stages before denoise (subsequent request)")
+        else:
+            logger.info("Running MiniMax-H3 condition stages before loading DiT/VAE weights")
+        return self._run_condition_then_denoise(batch, fastvideo_args)
 
 
 class MiniMaxH3Pipeline(MiniMaxH3BasePipeline):
