@@ -9,11 +9,11 @@ OUTPUT_DIR="${RVM_ARTIFACT_ROOT}/inference_smoke"
 mkdir -p "${OUTPUT_DIR}"
 PROMPT="${RVM_SMOKE_PROMPT:-integrated_multimodal_description: [Shot 1] Live-action, cinematic. A red race car drives along a wet mountain road while the camera tracks beside it at steady speed. overall_soundscape: Tire noise on wet asphalt, wind, and a distant engine echo. non_diegetic_music: N/A}"
 
-python examples/inference/basic/fasth3.py \
+FASTVIDEO_DMD_DENOISING_STEPS=1000,750,500,250 \
+python examples/inference/basic/basic_minimax_h3_t2v.py \
     --model-path "${FASTH3_MODEL_DIR}" \
     --prompt "${PROMPT}" \
     --output "${OUTPUT_DIR}" \
-    --profile strict \
     --height 480 \
     --width 832 \
     --num-frames 124 \
@@ -22,12 +22,6 @@ python examples/inference/basic/fasth3.py \
     --repeats 1 \
     --num-gpus 1 \
     --vsa-sparsity 0.9 \
-    --vsa-tile-size 64 \
-    --vsa-kernel triton \
-    --no-fa4 \
-    --no-h3-fusions \
-    --no-inference-torch-compile \
-    --no-compile-vae \
-    --no-parallel-vae
+    --dit-cpu-offload
 
 echo "Strict FastH3 inference output: ${OUTPUT_DIR}"

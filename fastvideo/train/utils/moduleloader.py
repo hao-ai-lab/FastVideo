@@ -112,7 +112,10 @@ def load_module_from_path(
     fastvideo_args: Any = _make_training_args(training_config, model_path=model_path)
 
     local_model_path = maybe_download_model(model_path)
-    config = verify_model_config_and_directory(local_model_path)
+    config = verify_model_config_and_directory(
+        local_model_path,
+        required_component_dirs=(module_type, ),
+    )
 
     if module_type not in config:
         raise ValueError(f"Module {module_type!r} not found in "

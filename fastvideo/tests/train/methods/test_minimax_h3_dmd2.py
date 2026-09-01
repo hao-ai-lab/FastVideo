@@ -10,6 +10,7 @@ import math
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 import torch
 import yaml
@@ -19,6 +20,7 @@ from fastvideo.forward_context import get_forward_context
 from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.train.methods.distribution_matching.dmd2 import DMD2Method
 from fastvideo.train.models.minimax_h3 import MiniMaxH3DMDModel, MiniMaxH3Model
+from fastvideo.train.models.minimax_h3.minimax_h3_rvm import MiniMaxH3RVMModel
 from fastvideo.train.models.minimax_h3.minimax_h3 import shift_noise_amount
 from fastvideo.train.utils.config import load_run_config
 
@@ -191,6 +193,14 @@ def test_packed_adapter_roundtrip_and_prepare_batch(monkeypatch: pytest.MonkeyPa
     torch.testing.assert_close(video_out, video)
     torch.testing.assert_close(audio_out, audio)
 
+    batched_video = video.repeat(2, 1, 1, 1, 1)
+    batched_audio = audio.repeat(2, 1, 1, 1)
+    batched_packed = model.pack_latents(batched_video, batched_audio)
+    assert batched_packed.shape == (2, _PACKED_NUMEL)
+    batched_video_out, batched_audio_out = model.unpack_latents(batched_packed)
+    torch.testing.assert_close(batched_video_out, batched_video)
+    torch.testing.assert_close(batched_audio_out, batched_audio)
+
     raw_batch = _raw_batch()
     batch = model.prepare_batch(
         raw_batch,
@@ -203,6 +213,24 @@ def test_packed_adapter_roundtrip_and_prepare_batch(monkeypatch: pytest.MonkeyPa
         raw_batch["vae_latent"].permute(0, 2, 1, 3, 4).to(torch.bfloat16),
     )
     torch.testing.assert_close(audio_clean, batch.audio_latents)
+
+
+def test_rvm_decode_latents_honors_decode_batch_size(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reward-media decoding must bound VAE activation batch size."""
+    model = MiniMaxH3RVMModel.__new__(MiniMaxH3RVMModel)
+    decoded_batch_sizes = []
+
+    def decode_vis_latents(chunk: torch.Tensor) -> np.ndarray:
+        decoded_batch_sizes.append(chunk.shape[0])
+        return np.zeros((chunk.shape[0], 2, 3, 4, 5), dtype=np.uint8)
+
+    model.decode_vis_latents = decode_vis_latents
+    monkeypatch.setenv("FASTVIDEO_RVM_VAE_DECODE_BATCH_SIZE", "2")
+
+    decoded = model.decode_latents(torch.zeros(5, 7))
+
+    assert decoded_batch_sizes == [2, 2, 1]
+    assert decoded.shape == (5, 3, 2, 4, 5)
 
 
 def test_packed_add_noise_applies_modality_shifts(monkeypatch: pytest.MonkeyPatch) -> None:

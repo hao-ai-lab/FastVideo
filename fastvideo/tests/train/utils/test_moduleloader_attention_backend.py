@@ -28,7 +28,7 @@ def test_load_transformer_scopes_attention_backend(monkeypatch, tmp_path) -> Non
     monkeypatch.setattr(
         moduleloader,
         "verify_model_config_and_directory",
-        lambda path: {"transformer": ("diffusers", "FakeTransformer", {
+        lambda path, **kwargs: {"transformer": ("diffusers", "FakeTransformer", {
             "subfolder": "transformer"
         })},
     )
@@ -69,7 +69,7 @@ def test_load_transformer_restores_backend_when_loading_fails(
     monkeypatch.setattr(
         moduleloader,
         "verify_model_config_and_directory",
-        lambda path: {"transformer": ("diffusers", "FakeTransformer")},
+        lambda path, **kwargs: {"transformer": ("diffusers", "FakeTransformer")},
     )
 
     def _raise_during_load(**kwargs):

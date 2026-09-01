@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any, TYPE_CHECKING
 
 import torch
@@ -76,7 +77,11 @@ class MiniMaxH3RVMModel(MiniMaxH3DMDModel):
     @torch.no_grad()
     def decode_latents(self, packed: torch.Tensor) -> torch.Tensor:
         """Decode packed endpoints to uint8 video media ``[B,C,T,H,W]``."""
-        decoded = torch.from_numpy(self.decode_vis_latents(packed))
+        decode_batch_size = int(os.environ.get("FASTVIDEO_RVM_VAE_DECODE_BATCH_SIZE", packed.shape[0]))
+        if decode_batch_size <= 0:
+            raise ValueError("FASTVIDEO_RVM_VAE_DECODE_BATCH_SIZE must be positive")
+        decoded = torch.cat(
+            [torch.from_numpy(self.decode_vis_latents(chunk)) for chunk in packed.split(decode_batch_size, dim=0)])
         return decoded.permute(0, 2, 1, 3, 4).contiguous()
 
 

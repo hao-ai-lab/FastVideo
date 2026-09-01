@@ -32,8 +32,8 @@ class MiniMaxH3DMDModel(MiniMaxH3Model):
 
     ``DMD2Method``'s rollout and loss math assume one latent tensor per
     sample. This adapter flattens both modality latents into one ``[1, N]``
-    tensor (video's ``[1, T, 24, H, W]`` elements first, stereo audio's
-    ``[1, 2, 32, Ta]`` elements after) so ``dmd2.py`` stays model-agnostic.
+    tensor (video's ``[B, T, 24, H, W]`` elements first, stereo audio's
+    ``[B, 2, 32, Ta]`` elements after) so ``dmd2.py`` stays model-agnostic.
     Integer method timesteps become one shared base noise amount that is
     shifted per modality (video 12.0, audio 3.0), exactly as H3's paired
     schedulers synchronize the two streams during fine-tuning and inference.
@@ -74,9 +74,13 @@ class MiniMaxH3DMDModel(MiniMaxH3Model):
         video_latents: torch.Tensor,
         audio_latents: torch.Tensor,
     ) -> torch.Tensor:
-        """Flatten both modality latents into one ``[1, N]`` tensor."""
+        """Flatten both modality latents into one ``[B, N]`` tensor."""
+        if video_latents.shape[0] != audio_latents.shape[0]:
+            raise ValueError("Video and audio latent batches must match, got "
+                             f"{video_latents.shape[0]} and {audio_latents.shape[0]}")
+        batch_size = video_latents.shape[0]
         return torch.cat(
-            (video_latents.reshape(1, -1), audio_latents.reshape(1, -1)),
+            (video_latents.reshape(batch_size, -1), audio_latents.reshape(batch_size, -1)),
             dim=1,
         )
 
@@ -95,15 +99,17 @@ class MiniMaxH3DMDModel(MiniMaxH3Model):
         )
 
     def unpack_latents(self, packed: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """Split one packed ``[1, N]`` tensor back into (video, audio) latents."""
+        """Split packed ``[B, N]`` rows back into (video, audio) latents."""
         video_shape, audio_shape = self._modality_shapes()
         split = math.prod(video_shape)
-        if packed.shape != (1, split + math.prod(audio_shape)):
+        packed_width = split + math.prod(audio_shape)
+        if packed.ndim != 2 or packed.shape[1] != packed_width:
             raise ValueError("Packed latents must have shape "
-                             f"[1, {split + math.prod(audio_shape)}], got {tuple(packed.shape)}")
+                             f"[B, {packed_width}], got {tuple(packed.shape)}")
+        batch_size = packed.shape[0]
         return (
-            packed[:, :split].reshape(video_shape),
-            packed[:, split:].reshape(audio_shape),
+            packed[:, :split].reshape(batch_size, *video_shape[1:]),
+            packed[:, split:].reshape(batch_size, *audio_shape[1:]),
         )
 
     def _noise_amounts(self, timestep: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -259,7 +265,10 @@ class MiniMaxH3DMDModel(MiniMaxH3Model):
         from fastvideo.models.loader.component_loader import PipelineComponentLoader
         from fastvideo.utils import verify_model_config_and_directory
 
-        model_index = verify_model_config_and_directory(self._init_from)
+        model_index = verify_model_config_and_directory(
+            self._init_from,
+            required_component_dirs=("vae", ),
+        )
         transformers_or_diffusers, _ = model_index["vae"][:2]
         args = FastVideoArgs(
             model_path=self._init_from,
@@ -278,6 +287,15 @@ class MiniMaxH3DMDModel(MiniMaxH3Model):
             transformers_or_diffusers=transformers_or_diffusers,
             fastvideo_args=args,
         )
+        if int(self.training_config.distributed.num_gpus) == 1:
+            # A full BF16 H3 student leaves too little headroom for the
+            # visualization VAE's default spatial tiles on an 80GB H100.
+            from fastvideo.hooks.layerwise_offload import enable_layerwise_offload
+            enable_layerwise_offload(vae.decoder)
+            vae.enable_tiling(
+                tile_sample_min_height=128,
+                tile_sample_min_width=128,
+            )
         vae.to("cpu")
         self._vis_vae_module = vae
         return vae
@@ -294,6 +312,10 @@ class MiniMaxH3DMDModel(MiniMaxH3Model):
         video_latents, _ = self.unpack_latents(packed.detach())
         latents = video_latents.permute(0, 2, 1, 3, 4).to(device=self.device, dtype=torch.float32)
         vae = self._load_vis_vae()
+        if self.device.type == "cuda":
+            # Rollout sampling can leave hundreds of MiB in fragmented cache
+            # blocks. Release those unused blocks before materializing the VAE.
+            torch.cuda.empty_cache()
         vae.to(self.device)
         try:
             latents = vae.denormalize_latents(latents)

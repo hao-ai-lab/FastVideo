@@ -21,9 +21,9 @@ python -m py_compile \
 
 pytest -q \
     fastvideo/tests/train/methods/test_rvm_utils.py \
-    fastvideo/tests/train/methods/test_minimax_h3_rvm_sampler.py \
+    fastvideo/tests/train/methods/test_minimax_h3_dmd2.py \
     fastvideo/tests/train/methods/test_rvm_configs.py \
-    fastvideo/tests/train/utils/test_lora_context.py
+    fastvideo/tests/inference/lora/test_merge_lora_math.py
 
 # This loads all five production rewards and verifies that the RAFT term ranks
 # a moving synthetic video above an otherwise matching static one.

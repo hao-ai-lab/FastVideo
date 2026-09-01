@@ -49,22 +49,15 @@ class BaseLayerWithLoRA(nn.Module):
             in_dim = self.base_layer.weight.shape[1]
             out_dim = self.base_layer.weight.shape[0]
             self.lora_A = nn.Parameter(
-                torch.zeros(self.lora_rank,
-                            in_dim,
-                            device=self.base_layer.weight.device,
-                            dtype=self.base_layer.weight.dtype))
+                torch.zeros(self.lora_rank, in_dim, device=self.base_layer.weight.device, dtype=torch.float32))
             self.lora_B = nn.Parameter(
-                torch.zeros(out_dim,
-                            self.lora_rank,
-                            device=self.base_layer.weight.device,
-                            dtype=self.base_layer.weight.dtype))
+                torch.zeros(out_dim, self.lora_rank, device=self.base_layer.weight.device, dtype=torch.float32))
             torch.nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
             torch.nn.init.zeros_(self.lora_B)
         else:
             self.lora_A = None
             self.lora_B = None
 
-    @torch.compile()
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         lora_A = self.lora_A
         lora_B = self.lora_B

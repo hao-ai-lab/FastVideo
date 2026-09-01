@@ -47,7 +47,7 @@ method:
     num_prompts: 8
     data_path: artifacts/rvm_h3/data/eval
     seed: 4242
-    run_at_start: true
+    run_at_start: false
     log_samples: true
     log_sample_limit: 8
     save_videos: true

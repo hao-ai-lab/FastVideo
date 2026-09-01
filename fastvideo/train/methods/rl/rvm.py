@@ -33,7 +33,6 @@ from fastvideo.distributed import (
     get_world_group,
 )
 from fastvideo.logger import init_logger
-from fastvideo.pipelines import TrainingBatch
 from fastvideo.train.methods.base import LogScalar, TrainingMethod
 from fastvideo.train.methods.rl.common import (
     H3RVMSamplingConfig,
@@ -176,14 +175,14 @@ class RVMMethod(TrainingMethod):
     def on_train_start(self) -> None:
         super().on_train_start()
         self._sp_group = get_sp_group()
+        if self._sp_group is None:
+            raise RuntimeError("RVM requires an initialized sequence-parallel process group")
         self._is_sp_leader = int(self._sp_group.rank_in_group) == 0
         self._dp_rank = int(get_dp_rank())
         self._dp_world_size = int(get_dp_world_size())
         if self._prompt_groups_per_rollout % self._dp_world_size != 0:
-            raise ValueError(
-                "prompt_groups_per_rollout must be divisible by the number of data-parallel H3 replicas "
-                f"({self._prompt_groups_per_rollout} vs {self._dp_world_size})"
-            )
+            raise ValueError("prompt_groups_per_rollout must be divisible by the number of data-parallel H3 replicas "
+                             f"({self._prompt_groups_per_rollout} vs {self._dp_world_size})")
         if self._is_sp_leader:
             reward_device: torch.device | str
             if self._reward_device_spec == "cuda":
@@ -197,8 +196,7 @@ class RVMMethod(TrainingMethod):
         self._log_progress(
             "RVM initialized: "
             f"K={self._samples_per_prompt}, global_prompt_groups={self._prompt_groups_per_rollout}, "
-            f"updates_per_rollout={self._updates_per_rollout}, validation_every={self._validation.every_steps}"
-        )
+            f"updates_per_rollout={self._updates_per_rollout}, validation_every={self._validation.every_steps}")
 
     def managed_train_step(
         self,
@@ -224,9 +222,9 @@ class RVMMethod(TrainingMethod):
         return loss_map, {}, metrics
 
     def on_validation_begin(self, iteration: int = 0) -> dict[str, LogScalar]:
-        should_run = (iteration == 0 and self._validation.run_at_start) or (
-            iteration > 0 and iteration % self._validation.every_steps == 0
-        )
+        should_run = (iteration == 0
+                      and self._validation.run_at_start) or (iteration > 0
+                                                             and iteration % self._validation.every_steps == 0)
         if not should_run:
             return {}
         return self._run_validation(iteration)
@@ -239,10 +237,8 @@ class RVMMethod(TrainingMethod):
         reward_count = 0
         zero_std_count = 0
 
-        self._log_progress(
-            f"RVM step {iteration}: collecting {local_groups} local prompt groups x "
-            f"{self._samples_per_prompt} samples"
-        )
+        self._log_progress(f"RVM step {iteration}: collecting {local_groups} local prompt groups x "
+                           f"{self._samples_per_prompt} samples")
         with torch.no_grad():
             for _ in range(local_groups):
                 raw_batch = self._clone_raw_batch(next(data_stream))
@@ -283,13 +279,15 @@ class RVMMethod(TrainingMethod):
                             endpoint=endpoint,
                             advantage=float(advantages[sample_index]),
                             prompt=full_prompt,
-                        )
-                    )
+                        ))
 
+        if torch.cuda.is_available():
+            # VAE/reward allocations must be released before the metric
+            # all-reduces below ask NCCL for its communication buffers.
+            torch.cuda.empty_cache()
         self._collection_count += 1
-        cpu_generator = torch.Generator(device="cpu").manual_seed(
-            int(self.training_config.data.seed) + 100_000 + self._collection_count
-        )
+        cpu_generator = torch.Generator(
+            device="cpu").manual_seed(int(self.training_config.data.seed) + 100_000 + self._collection_count)
         self._buffer_partitions = partition_indices(
             len(self._buffer),
             self._updates_per_rollout,
@@ -300,9 +298,7 @@ class RVMMethod(TrainingMethod):
 
         metrics: dict[str, LogScalar] = {
             "rvm/rollout_samples": float(self._prompt_groups_per_rollout * self._samples_per_prompt),
-            "rvm/zero_std_group_ratio": self._global_leader_mean(
-                float(zero_std_count), float(local_groups)
-            ),
+            "rvm/zero_std_group_ratio": self._global_leader_mean(float(zero_std_count), float(local_groups)),
         }
         for key, value in reward_sums.items():
             metrics[f"reward/{key}"] = self._global_leader_mean(value, float(reward_count))
@@ -406,7 +402,7 @@ class RVMMethod(TrainingMethod):
         timestep_index_tensor = torch.randint(
             0,
             len(self._sampling_config.denoising_steps),
-            (1,),
+            (1, ),
             device=self.student.device,
             generator=self._require_generator(),
         )
@@ -507,9 +503,8 @@ class RVMMethod(TrainingMethod):
             )
             full_prompt = self._extract_prompt(raw_batch)
             visual_prompt = visual_text_from_h3_prompt(full_prompt)
-            generator = torch.Generator(device=self.student.device).manual_seed(
-                self._validation.seed + int(global_index)
-            )
+            generator = torch.Generator(device=self.student.device).manual_seed(self._validation.seed +
+                                                                                int(global_index))
             prepared = self.student.prepare_batch(
                 raw_batch,
                 generator=generator,
@@ -540,27 +535,27 @@ class RVMMethod(TrainingMethod):
                     path = str(output_root / f"prompt-{global_index:06d}.mp4")
                     self._write_video(path, media[0])
                 if self._validation.log_samples and len(local_artifacts) < self._validation.log_sample_limit:
-                    local_artifacts.append(
-                        {
-                            "index": int(global_index),
-                            "prompt": full_prompt,
-                            "path": path,
-                            "media": None if path is not None else media[0],
-                            "rewards": {key: float(rewards[key][0]) for key in self._reward_keys},
-                        }
-                    )
+                    local_artifacts.append({
+                        "index": int(global_index),
+                        "prompt": full_prompt,
+                        "path": path,
+                        "media": None if path is not None else media[0],
+                        "rewards": {
+                            key: float(rewards[key][0])
+                            for key in self._reward_keys
+                        },
+                    })
 
         metrics: dict[str, LogScalar] = {}
         for key in self._reward_keys:
-            metrics[f"validation/reward/{key}"] = self._global_leader_mean(
-                local_sums[key], float(local_count)
-            )
+            metrics[f"validation/reward/{key}"] = self._global_leader_mean(local_sums[key], float(local_count))
         metrics["validation/num_prompts"] = self._global_leader_sum(float(local_count))
         if self._validation.log_samples:
             self._log_validation_artifacts(local_artifacts, iteration)
         if was_training:
             self.student.transformer.train()
-        self._log_progress(f"RVM validation step {iteration}: evaluated {int(metrics['validation/num_prompts'])} prompts")
+        self._log_progress(
+            f"RVM validation step {iteration}: evaluated {int(metrics['validation/num_prompts'])} prompts")
         return metrics
 
     def _get_validation_indices(self) -> list[int]:
@@ -574,9 +569,8 @@ class RVMMethod(TrainingMethod):
             if self._validation.data_path is None:
                 self._log_progress(
                     "No separate validation parquet was configured; using a deterministic held-out sample "
-                    f"of {num_prompts} training prompts."
-                )
-        return self._validation_items[self._dp_rank :: self._dp_world_size]
+                    f"of {num_prompts} training prompts.")
+        return self._validation_items[self._dp_rank::self._dp_world_size]
 
     def _validation_dataset_metadata(self) -> tuple[list[str], list[int], Any, int]:
         dataset = getattr(getattr(self.student, "dataloader", None), "dataset", None)
@@ -596,7 +590,7 @@ class RVMMethod(TrainingMethod):
         if int(get_world_group().rank) != 0 or not gathered or self.tracker is None:
             return
         artifacts = []
-        for item in sorted(gathered, key=lambda value: int(value["index"]))[: self._validation.log_sample_limit]:
+        for item in sorted(gathered, key=lambda value: int(value["index"]))[:self._validation.log_sample_limit]:
             data = item["path"] if item["path"] is not None else media_to_video_array(item["media"])
             artifact = self.tracker.video(
                 data,

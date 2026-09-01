@@ -105,7 +105,10 @@ def main(args: argparse.Namespace) -> None:
     model_path = args.model_path.resolve()
     if not model_path.is_dir():
         raise FileNotFoundError(f"MiniMax H3 model directory is missing at {model_path}")
-    model_index = verify_model_config_and_directory(str(model_path))
+    model_index = verify_model_config_and_directory(
+        str(model_path),
+        required_component_dirs=("tokenizer", "processor", "text_encoder"),
+    )
 
     shard = _load_shard_prompts(args.prompts_file, args.shard_index, args.num_shards)
     shard_dir = args.output_dir / f"shard_{args.shard_index:02d}"

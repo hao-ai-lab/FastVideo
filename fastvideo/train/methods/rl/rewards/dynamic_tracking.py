@@ -64,19 +64,27 @@ class DynamicTrackingScorer:
         *,
         device: torch.device | str = "cuda",
         num_pairs: int = 8,
+        frame_pairs: int | None = None,
         top_fraction: float = 0.05,
         variant: str = "large",
         pair_batch_size: int = 4,
+        resize_short_edge: int | None = None,
+        pretrained: bool = True,
     ) -> None:
         self.device = torch.device(device)
-        self.num_pairs = int(num_pairs)
+        self.num_pairs = int(frame_pairs if frame_pairs is not None else num_pairs)
         self.top_fraction = float(top_fraction)
         self.variant = str(variant).strip().lower()
         self.pair_batch_size = int(pair_batch_size)
+        self.resize_short_edge = None if resize_short_edge is None else int(resize_short_edge)
+        if not pretrained:
+            raise ValueError("Dynamic tracking requires pretrained RAFT weights")
         if not 0.0 < self.top_fraction <= 1.0:
             raise ValueError("top_fraction must be in (0, 1]")
         if self.pair_batch_size <= 0:
             raise ValueError("pair_batch_size must be positive")
+        if self.resize_short_edge is not None and self.resize_short_edge <= 0:
+            raise ValueError("resize_short_edge must be positive")
 
     @torch.no_grad()
     def __call__(self, media: torch.Tensor, prompts) -> torch.Tensor:
@@ -87,6 +95,17 @@ class DynamicTrackingScorer:
         if videos.shape[1] == 1:
             videos = videos.repeat(1, 3, 1, 1, 1)
         batch_size, _, num_frames, height, width = videos.shape
+        if self.resize_short_edge is not None and min(height, width) != self.resize_short_edge:
+            scale = self.resize_short_edge / min(height, width)
+            resized_height = max(8, 8 * round(height * scale / 8))
+            resized_width = max(8, 8 * round(width * scale / 8))
+            videos = torch.nn.functional.interpolate(
+                videos.permute(0, 2, 1, 3, 4).flatten(0, 1),
+                size=(resized_height, resized_width),
+                mode="bilinear",
+                align_corners=False,
+            ).unflatten(0, (batch_size, num_frames)).permute(0, 2, 1, 3, 4)
+            height, width = resized_height, resized_width
         pairs = _pair_indices(num_frames, self.num_pairs)
         first: list[torch.Tensor] = []
         second: list[torch.Tensor] = []
@@ -101,8 +120,8 @@ class DynamicTrackingScorer:
         pair_scores: list[torch.Tensor] = []
         threshold = 6.0 * min(height, width) / 256.0
         for start in range(0, len(first), self.pair_batch_size):
-            image1 = torch.stack(first[start : start + self.pair_batch_size])
-            image2 = torch.stack(second[start : start + self.pair_batch_size])
+            image1 = torch.stack(first[start:start + self.pair_batch_size])
+            image2 = torch.stack(second[start:start + self.pair_batch_size])
             image1, image2 = transforms(image1, image2)
             flow = model(image1, image2)[-1].float()
             magnitude = torch.linalg.vector_norm(flow, dim=1).flatten(1)

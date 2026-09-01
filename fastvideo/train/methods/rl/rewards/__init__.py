@@ -32,7 +32,12 @@ class MeanLuminanceScorer:
 
 
 def _parse_reward_specs(raw: Mapping[str, Any]) -> tuple[dict[str, float], dict[str, dict[str, Any]]]:
+    configured_options: Mapping[str, Any] = {}
     if "rewards" in raw:
+        candidate_options = raw.get("options", {})
+        if not isinstance(candidate_options, Mapping):
+            raise ValueError("reward config options must be a mapping")
+        configured_options = candidate_options
         raw = raw["rewards"]
     if not isinstance(raw, Mapping) or not raw:
         raise ValueError("reward config must be a nonempty mapping")
@@ -40,19 +45,25 @@ def _parse_reward_specs(raw: Mapping[str, Any]) -> tuple[dict[str, float], dict[
     options: dict[str, dict[str, Any]] = {}
     for raw_name, value in raw.items():
         name = str(raw_name).strip().lower()
+        base_options = configured_options.get(name, {})
+        if not isinstance(base_options, Mapping):
+            raise ValueError(f"reward options for {name!r} must be a mapping")
+        merged_options = dict(base_options)
         if isinstance(value, Mapping):
             spec = dict(value)
             if "weight" not in spec:
                 raise ValueError(f"reward {name!r} must define a numeric weight")
             weights[name] = float(spec.pop("weight"))
-            options[name] = spec
+            merged_options.update(spec)
         else:
             weights[name] = float(value)
-            options[name] = {}
+        options[name] = merged_options
     return weights, options
 
 
 def _build_scorer(name: str, *, device: torch.device | str, options: dict[str, Any]) -> RewardScorer:
+    options = dict(options)
+    scorer_device = options.pop("device", device)
     if name == "pickscore":
         return PickScoreScorer(device=device)
     if name == "clipscore":
@@ -64,32 +75,30 @@ def _build_scorer(name: str, *, device: torch.device | str, options: dict[str, A
     if name == "videoalign_ta":
         from fastvideo.train.methods.rl.rewards.videoalign import VideoAlignTextAlignmentScorer
 
-        return VideoAlignTextAlignmentScorer(device=device, **options)
+        return VideoAlignTextAlignmentScorer(device=scorer_device, **options)
     if name == "videoalign_mq":
         from fastvideo.train.methods.rl.rewards.videoalign import VideoAlignMotionQualityScorer
 
-        return VideoAlignMotionQualityScorer(device=device, **options)
+        return VideoAlignMotionQualityScorer(device=scorer_device, **options)
     if name == "videoalign_vq":
         from fastvideo.train.methods.rl.rewards.videoalign import VideoAlignVisualQualityScorer
 
-        return VideoAlignVisualQualityScorer(device=device, **options)
+        return VideoAlignVisualQualityScorer(device=scorer_device, **options)
     if name == "hpsv3_general":
         from fastvideo.train.methods.rl.rewards.hpsv3 import HPSv3GeneralScorer
 
-        return HPSv3GeneralScorer(device=device, **options)
+        return HPSv3GeneralScorer(device=scorer_device, **options)
     if name == "hpsv3_percentile":
         from fastvideo.train.methods.rl.rewards.hpsv3 import HPSv3PercentileScorer
 
-        return HPSv3PercentileScorer(device=device, **options)
+        return HPSv3PercentileScorer(device=scorer_device, **options)
     if name == "dynamic_tracking":
         from fastvideo.train.methods.rl.rewards.dynamic_tracking import DynamicTrackingScorer
 
-        return DynamicTrackingScorer(device=device, **options)
-    raise ValueError(
-        f"Unsupported reward {name!r}. Available: clipscore, pickscore, mean_luminance, "
-        "videoalign_ta, videoalign_mq, videoalign_vq, hpsv3_general, "
-        "hpsv3_percentile, dynamic_tracking"
-    )
+        return DynamicTrackingScorer(device=scorer_device, **options)
+    raise ValueError(f"Unsupported reward {name!r}. Available: clipscore, pickscore, mean_luminance, "
+                     "videoalign_ta, videoalign_mq, videoalign_vq, hpsv3_general, "
+                     "hpsv3_percentile, dynamic_tracking")
 
 
 def build_multi_reward_scorer(

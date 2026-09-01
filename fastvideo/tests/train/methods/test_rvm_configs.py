@@ -23,7 +23,7 @@ def assert_common(config: dict) -> None:
     assert model["attention_backend"] == "VIDEO_SPARSE_ATTN_H3"
     assert model["lora"]["enable"] is True
     assert model["lora"]["target_modules"] == ["to_q", "to_k", "to_v", "to_out"]
-    assert method["_target_"].endswith("RVMMethod")
+    assert method["_target_"].endswith(("RVMMethod", "RVMWithLocalMetricsMethod"))
     assert method["sampling"]["denoising_steps"] == [1000, 750, 500, 250]
     assert method["sampling"]["attn_kind"] == "vsa"
     assert training["data"]["training_cfg_rate"] == 0.0
@@ -42,7 +42,15 @@ def assert_common(config: dict) -> None:
 
 def test_all_rvm_configs_obey_h3_contract() -> None:
     paths = sorted(CONFIG_ROOT.glob("rvm_h3_*.yaml"))
-    assert len(paths) == 5
+    assert {path.name for path in paths} == {
+        "rvm_h3_1gpu_smoke.yaml",
+        "rvm_h3_8gpu_audio_anchor.yaml",
+        "rvm_h3_8gpu_exact.yaml",
+        "rvm_h3_8gpu_full.yaml",
+        "rvm_h3_8gpu_full_anchor.yaml",
+        "rvm_h3_modal_1gpu.yaml",
+        "rvm_h3_modal_4gpu.yaml",
+    }
     for path in paths:
         assert_common(load(path.name))
 

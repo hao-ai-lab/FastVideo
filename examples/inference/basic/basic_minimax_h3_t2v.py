@@ -34,6 +34,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--width", type=int, default=1344)
     parser.add_argument("--num-frames", type=int, default=124)
     parser.add_argument("--steps", type=int, default=50)
+    parser.add_argument("--vsa-sparsity", type=float, default=0.0)
+    parser.add_argument("--dit-cpu-offload", action="store_true")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--num-gpus", type=int, default=4)
     parser.add_argument("--torch-compile", action="store_true", help="torch.compile the DiT transformer path")
@@ -61,7 +63,7 @@ def main() -> None:
                 use_fsdp_inference=args.num_gpus > 1,
                 parallelism=ParallelismConfig(tp_size=1, sp_size=args.num_gpus),
                 offload=OffloadConfig(
-                    dit=False,
+                    dit=args.dit_cpu_offload,
                     dit_layerwise=False,
                     text_encoder=True,
                     vae=True,
@@ -73,6 +75,7 @@ def main() -> None:
                 ),
             ),
         ))
+    generator.fastvideo_args.VSA_sparsity = args.vsa_sparsity
     try:
         request = GenerationRequest(
             prompt=args.prompt,
