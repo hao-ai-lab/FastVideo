@@ -181,10 +181,12 @@ def validate_cookbook() -> None:
                 raise ValueError(f"Cookbook recipe knob flag must start with --: {recipe['id']}: {knob['key']}")
             options = knob["options"]
             if not isinstance(options, list) or not options:
-                raise ValueError(f"Cookbook recipe knob options must be a non-empty list: {recipe['id']}: {knob['key']}")
+                raise ValueError(
+                    f"Cookbook recipe knob options must be a non-empty list: {recipe['id']}: {knob['key']}")
             option_values = [option["value"] if isinstance(option, dict) else option for option in options]
             if knob["default"] not in option_values:
-                raise ValueError(f"Cookbook recipe knob default must be one of its options: {recipe['id']}: {knob['key']}")
+                raise ValueError(
+                    f"Cookbook recipe knob default must be one of its options: {recipe['id']}: {knob['key']}")
 
         source = (ROOT_DIR / recipe["source"]).resolve()
         if not any(source.is_relative_to(root.resolve()) for root in COOKBOOK_SOURCE_ROOTS):
