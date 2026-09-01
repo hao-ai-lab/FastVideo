@@ -1,22 +1,22 @@
 # FastH3 RVM post-training
 
-This directory contains the executable experiment package for reward-aligning
-the released four-step FastH3 VSA checkpoint with **Reward-based Velocity
-Matching (RVM)**. The production path follows the RVM video recipe rather than
+This directory contains the executable experiment package for post-training the
+released four-step FastH3 VSA checkpoint with **Reward-based Velocity Matching
+(RVM)**. The production path follows the published RVM video recipe rather than
 introducing a new diffusion-RL objective.
 
-> **Current implementation:** use `RVMFaithfulMethod` or
-> `RVMWithLocalMetricsMethod`. The older `RVMMethod` remains only as the exact
-> implementation used by the first runtime pilots; it uses per-group reward
-> standard deviations and deployment-grid training times and is not the default
-> for new scientific runs.
+> **Production method:** use `RVMFaithfulMethod` or
+> `RVMWithLocalMetricsMethod`. The older `RVMMethod` is retained only to
+> reproduce the first runtime pilots; it used per-group reward standard
+> deviations and deployment-grid regression times and is not the default for
+> new scientific runs.
 
 ## Method
 
 For prompt group `g` and candidate `i`, FastH3 generates an endpoint `x0[g,i]`
 with its exact four-forward VSA sampler. The five public rewards are combined,
-centered within each prompt group, and divided by one reward standard deviation
-computed over the entire rollout collection:
+centered within each prompt group, and divided by one standard deviation
+computed over the whole rollout collection:
 
 ```text
 centered[g,i] = reward[g,i] - mean_i reward[g,i]
@@ -24,7 +24,7 @@ global_std = std_{g,i}(reward[g,i])
 advantage[g,i] = 0.1 * clip(centered[g,i] / (global_std + 1e-4), -5, 5)
 ```
 
-Then one continuous training time is sampled:
+One continuous RVM regression time is then sampled:
 
 ```text
 t ~ Uniform(0, 1)
@@ -82,14 +82,50 @@ ceiling. All component values and global standard deviations are logged.
 | CFG | guidance `1.0`; conditioning dropout `0.0` |
 | Attention | `VIDEO_SPARSE_ATTN_H3` |
 | VSA sparsity | `0.90` |
-| Geometry | `480x832`, 124 frames, 24 FPS |
+| Production geometry | `480x832`, 124 frames, 24 FPS |
 | Full LoRA | rank 128, alpha 64 |
 | Trainable modules | `to_q,to_k,to_v,to_out` |
 | Training time | continuous `Uniform(0,1)` |
 | Reward normalization | per-prompt center, batch-global std |
 
-A five-second H3 chunk requires 124 frames. Do not silently replace it with the
-53-frame Wan geometry from the RVM paper.
+A five-second H3 chunk requires 124 frames. The one-H100 topology smoke uses a
+clearly labeled compact config only to exercise the runtime path.
+
+## Portable execution architecture
+
+All reusable experiment logic lives outside provider-specific launchers:
+
+| Layer | Source of truth |
+|---|---|
+| Python/runtime dependencies | `00_install_current_env.sh` |
+| Conda bootstrap | `00_create_conda_env.sh` |
+| Model/reward downloads | `01_download_models.sh` |
+| Prompt download, split, and H3 encoding | `02_prepare_dataset.sh` |
+| Hyperparameters and topology | `examples/train/configs/rl/minimax_h3/*.yaml` |
+| One-/four-GPU smoke orchestration | `12_run_portable_smoke.sh` |
+| 8/16-GPU production campaign | numbered node scripts plus `common.sh` |
+| Modal transport | `modal_h3_rvm.py` |
+
+`modal_h3_rvm.py` is deliberately a thin test-only wrapper. It only allocates
+one or four GPUs, mounts persistent volumes, clones an exact Git ref, and calls
+`12_run_portable_smoke.sh`. It contains no reward definitions, training
+hyperparameters, dataset processing, runtime source patching, or training-loop
+implementation. The Modal file can be removed before final merge without
+affecting the custom-node workflow.
+
+The portable smoke runner can also be called directly on another cloud service:
+
+```bash
+RVM_SKIP_CONDA=1 \
+RVM_ARTIFACT_ROOT=/persistent/rvm_h3 \
+RVM_SMOKE_RUN_ROOT=/persistent/runs \
+RVM_SMOKE_GPUS=4 \
+RVM_SMOKE_MODE=pilot \
+RVM_SMOKE_MAX_STEPS=10 \
+RVM_SMOKE_EVAL_PROMPTS=8 \
+RVM_SMOKE_MAX_TRAIN_PROMPTS=64 \
+  bash examples/train/rvm_h3/12_run_portable_smoke.sh
+```
 
 ## Setup
 
@@ -107,32 +143,77 @@ bash examples/train/rvm_h3/03_preflight_1gpu.sh
 bash examples/train/rvm_h3/04_run_1gpu_smoke.sh
 ```
 
+For a container that already owns its Python environment:
+
+```bash
+RVM_SKIP_CONDA=1 \
+  bash examples/train/rvm_h3/00_install_current_env.sh
+```
+
 The Qwen3-VL layer-50 prompt embeddings are large. Use 4,096 prompts for the
 medium campaign, then encode the complete prompt bank before the final run.
 Preparation downloads the pinned DanceGRPO/VidProM prompt file, creates a
 deterministic held-out split, and wraps prompts as H3 documents with audio fields
 set to `N/A`.
 
-## 8-GPU campaign
+## Optional Modal testing
 
-Run in this order:
+Modal is used only for early one-/four-GPU correctness and short reward pilots:
 
 ```bash
-# SP4 x DP2, K=8, checkpoint/resume/export gate.
+# One strict H100 compact optimizer smoke.
+H3_RVM_MODAL_GPU_1='H100!' \
+H3_RVM_MODAL_GPU_4='H100!:4' \
+H3_RVM_MODAL_SECRETS='hf-adamlee00,wandb-adamlee00' \
+  modal run examples/train/rvm_h3/modal_h3_rvm.py \
+    --gpus 1 \
+    --mode smoke \
+    --max-steps 1 \
+    --eval-prompts 1
+
+# Four strict H100 production-geometry pilot.
+H3_RVM_MODAL_GPU_1='H100!' \
+H3_RVM_MODAL_GPU_4='H100!:4' \
+H3_RVM_MODAL_SECRETS='hf-adamlee00,wandb-adamlee00' \
+  modal run examples/train/rvm_h3/modal_h3_rvm.py \
+    --gpus 4 \
+    --mode pilot \
+    --max-steps 10 \
+    --eval-prompts 8
+```
+
+Do not use Modal for the 8/16-H100 production campaign.
+
+## Custom-node 8/16-GPU campaign
+
+The production campaign runs on the custom node. `common.sh` derives the
+data-parallel replica count from `NUM_GPUS / RVM_SP_SIZE`.
+
+Eight H100s:
+
+```bash
+export NUM_GPUS=8
+export RVM_SP_SIZE=4
+
 bash examples/train/rvm_h3/05_run_8gpu_topology_smoke.sh
-
-# Matched paper-faithful LR bracket.
 bash examples/train/rvm_h3/05_run_8gpu_lr_sweep.sh
-
-# Exact vs audio-anchor vs full-anchor comparison.
 RVM_SELECTED_LR=<winner> \
   bash examples/train/rvm_h3/06_run_8gpu_anchor_sweep.sh
-
-# First trend-detection run: 50 updates, K=8, 8 prompt groups.
 RVM_SELECTED_LR=<winner> \
 RVM_SCALEUP_CONFIG=<winning-config> \
   bash examples/train/rvm_h3/07_run_8gpu_scaleup_pilot.sh
 ```
+
+Sixteen H100s use the same provider-agnostic scripts:
+
+```bash
+export NUM_GPUS=16
+export RVM_SP_SIZE=4
+```
+
+This resolves to `SP4 x DP4`. The 16-GPU path is supported by the topology
+arguments but must pass its own two-update smoke before a long run; it has not
+yet been validated by the completed four-GPU pilots.
 
 The full 180-update/23,040-endpoint run is deliberately gated:
 
@@ -144,7 +225,7 @@ RVM_AUDIO_ANCHOR_BETA=<winner> \
   bash examples/train/rvm_h3/07_run_8gpu_full.sh
 ```
 
-Do not set `RVM_FULL_APPROVED=1` until the topology, LR, anchor, held-out reward,
+Do not set `RVM_FULL_APPROVED=1` until topology, LR, anchor, held-out reward,
 qualitative, audio, resume, and export gates pass.
 
 ## Evaluation
@@ -193,9 +274,9 @@ experiment.
 
 ## Validation boundary
 
-The earlier 1×H100 and 4×H100 runs validated model loading, full-geometry VSA
+Earlier 1×H100 and 4×H100 runs validated model loading, full-geometry VSA
 rollouts, all reward models, LoRA backward, Adam, checkpointing, and validation.
-The new batch-global normalization and continuous-time RVM path must still pass
-the one-GPU preflight and the exact 8-GPU topology gate before a quality claim or
-long production launch. Repository code being committed is not evidence that a
-GPU experiment succeeded.
+The batch-global normalization and continuous-time RVM path still requires a
+fresh one-GPU smoke and exact 8-GPU topology gate. The refactored provider-
+agnostic smoke runner and thin Modal wrapper have been syntax-checked, but have
+not yet been executed on Modal or the custom node.
