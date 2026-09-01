@@ -13,9 +13,9 @@ xDiT vendor. Do not install xDiT for this path.
 
 | Goal | How | Use two Sparks? |
 |---|---|---|
-| Two independent videos at once | One process per box, `num_gpus=1` | Throughput only. Each clip still takes ~6 min. |
-| One clip, faster | Ray + `sp_size=2` + parallel VAE | **Yes.** Measured 292 s vs 374 s on the same 124-frame FastH3 recipe. |
-| One clip, longer | Same, more frames | **Yes.** 345 frames (~14.4 s at 24 fps) finished in 587 s. |
+| Two independent videos at once | One process per box, `num_gpus=1` | Throughput only. Each clip still takes the 1-GPU time for that size. |
+| One clip, faster | Ray + `sp_size=2` + parallel VAE | **Yes.** One 768×1344×124 recipe was 292 s vs 374 s on one GB10. |
+| One clip, longer | Same, more frames | **Yes.** 345 frames (~14.4 s at 24 fps) finished in 587 s at 768×1344. |
 
 Sequence parallel **replicates** the DiT (~66 GiB per node). Sequential load
 and lazy module load are still required on each box. FSDP would shard weights;
@@ -71,10 +71,11 @@ On **both** nodes, from the FastVideo repo, with the venv active:
 source examples/inference/optimizations/spark_pair_env.sh
 ```
 
-That script pins NCCL to the QSFP NIC/HCA, disables NVLink-style P2P (there is
-none between boxes), and turns off Ray's memory monitor. The monitor treats
-GB10 unified RSS during a 14-shard DiT load as a runaway and SIGTERMs the
-worker around shard 11/14.
+That script pins NCCL and Gloo to the QSFP NIC/HCA, disables NVLink-style P2P
+(there is none between boxes), and turns off Ray's memory monitor. The monitor
+treats GB10 unified RSS during a 14-shard DiT load as a runaway and SIGTERMs
+the worker around shard 11/14. Override `NCCL_SOCKET_IFNAME` /
+`GLOO_SOCKET_IFNAME` if `ibdev2netdev` shows a different name.
 
 Cap Ray's object store. The default (~30% of 128 GB) leaves too little room
 for the DiT:
@@ -99,7 +100,22 @@ Check `ray status` on the head: `0.0/2.0 GPU` idle.
 
 ## 3. Generate one FastH3 clip on both GPUs
 
-Run the driver on the **head**, same venv, same QSFP IP:
+Run the driver on the **head**, same venv, same QSFP IP.
+
+`basic_fasth3.py` defaults target a four-GPU GB200 profile: 768×1344, `sm100a`
+VSA, FA4, four GPUs. On Sparks you must override the kernel flags. Height,
+width, frames, steps, seed, and prompt are yours. Change them. Legal
+`num_frames` values are `17n+5`, capped at 345.
+
+GB10 has no FA4 / sm_100a VSA kernel, so `--vsa-kernel triton --no-fa4` stays
+required on this box. `--execution-backend ray` is optional when `RAY_ADDRESS`
+is already set.
+
+`--warmup --repeats 3` prints a median of three `generate()` calls after an
+excluded warmup. Sequential load reloads Qwen for each later request, so that
+protocol works. For a single cold process, pass `--no-warmup --repeats 1`.
+
+The command below is one example, not a required recipe:
 
 ```bash
 source examples/inference/optimizations/spark_pair_env.sh
@@ -110,18 +126,15 @@ python examples/inference/basic/basic_fasth3.py \
   --model-path FastVideo/FastVideo-FastH3-4-step-Preview-v1-VSA-DataFree \
   --num-gpus 2 --execution-backend ray \
   --vsa-kernel triton --no-fa4 \
-  --repeats 1 --no-warmup --parallel-vae \
+  --warmup --repeats 3 --parallel-vae \
   --height 768 --width 1344 --num-frames 124 --steps 5 \
   --seed 2026 \
   --prompt "A wide cinematic shot of an alpine meadow at sunrise, pale pink mountain peaks above a blue valley filled with thin morning mist." \
   --output outputs/fasth3_spark_pair
 ```
 
-`--execution-backend ray` is optional when `RAY_ADDRESS` is already set;
-`basic_fasth3.py` selects Ray in that case. GB10 has no FA4 / sm_100a VSA
-kernel, so `--vsa-kernel triton --no-fa4` is required.
-
-Config-first equivalent:
+Config-first equivalent. Edit the YAML the same way, `request.sampling` is not
+locked:
 
 ```bash
 FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 \
@@ -140,9 +153,12 @@ clips longer than **15 s**. The longest legal length is **345 frames**
 
 ## Measured on two GB10s (2026-08-31)
 
-Same alpine prompt, 768×1344, 5 sigma points (4 DiT forwards), Triton VSA,
-sequential + lazy load (auto on GB10), parallel VAE, cold process (no warmup).
-Denoise times include deferred DiT load (~35 s).
+These rows are full H3 VAE decode, Triton VSA, sequential + lazy load (auto on
+GB10), parallel VAE. They are not a required size. Denoise times include
+deferred DiT load (~35 s on the first generate).
+
+Cold process, `--no-warmup --repeats 1`, alpine prompt, 768×1344, 5 sigma
+points (4 DiT forwards):
 
 | Run | GPUs | Frames | E2E | Denoise | VAE decode |
 |---|---:|---:|---:|---:|---:|
@@ -150,12 +166,22 @@ Denoise times include deferred DiT load (~35 s).
 | Two Sparks, SP=2 | 2 | 124 | **292 s** | **122 s** | **102 s** |
 | Two Sparks, SP=2 | 2 | 345 | **587 s** | **351 s** | **173 s** |
 
-The ~330 s one-Spark number from earlier FastH3 bring-up is the same recipe
-without this pair path and without TAEH3. 292 s is faster than that 1-GPU
-clip. It is **not** a lower bound: the first decode pays `torch.compile` on
-the VAE (~1 min of the 102 s); a second `generate()` in the same workers is
-cheaper. TAEH3 preview decode ([#1795](https://github.com/hao-ai-lab/FastVideo/pull/1795))
-is a separate opt-in and was not used here.
+Warmup excluded, `--warmup --repeats 3` median, 512×896, 5 sigma points, full
+VAE, same 4-step schedule:
+
+| Run | GPUs | Frames | Median E2E | Median denoise |
+|---|---:|---:|---:|---:|
+| One Spark | 1 | 124 | **251.4 s** | 94.2 s |
+| Two Sparks, SP=2 | 2 | 124 | **215.2 s** | 72.4 s |
+
+Those medians used `--height` / `--width` / `--num-frames` as CLI flags. Swap
+them. Native 480p on this model is 480×832, 124 frames. The 15 s cap is 345
+frames.
+
+The first VAE decode still pays `torch.compile`. Later `generate()` calls in
+the same workers are cheaper. GB10 regional DiT compile stays off because the
+sm_100a VSA kernel is not on this chip, so denoise is slower than a GB200
+`sm100a` run at the same geometry.
 
 ## Troubleshooting
 
@@ -165,6 +191,8 @@ is a separate opt-in and was not used here.
 | `RayDistributedExecutor` TypeError / abstract `set_log_queue` | Use a FastVideo build that implements those methods on the Ray executor (this page). |
 | Worker SIGTERM during DiT shard 11/14 | `RAY_memory_monitor_refresh_ms=0` **before** `ray start`. Do not leave Ray's default 30% object store. |
 | NCCL hangs or uses Wi-Fi | `source spark_pair_env.sh`. Confirm `NCCL_SOCKET_IFNAME` is the QSFP NIC. |
+| Gloo `connectFullMesh` / `remote=[127.0.0.1]` | Two 1-GPU nodes must not use loopback as the Gloo store. Source `spark_pair_env.sh` so `GLOO_SOCKET_IFNAME` is the QSFP NIC. Use a FastVideo build that keys loopback on unique worker IPs. |
+| Second `generate()` crashes `NoneType.parameters` | Sequential load used to drop the text encoder without reloading it. This branch reloads Qwen for later requests so `--warmup --repeats N` works. |
 | OOM / `earlyoom` prefers Python | Sequential load and lazy module load must stay on (do not pass `--no-h3-sequential-load` or `--no-lazy-module-load`). Peak GPU during 345-frame denoise is ~90 GiB/node. |
 | `num_gpus=2` on one Spark | Each Spark has one GPU. Use Ray across two nodes, or `num_gpus=1` on one box. |
 

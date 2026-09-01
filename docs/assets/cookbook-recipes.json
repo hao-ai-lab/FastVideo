@@ -666,7 +666,7 @@
       "evidence": "Verified",
       "expected_artifact": "MP4 under outputs/fasth3_spark_pair/",
       "modes": ["T2VA", "2-Spark SP"],
-      "limitations": ["Requires a two-node Ray cluster on the QSFP interconnect. See docs/getting_started/installation/spark_pair.md."]
+      "limitations": ["Requires a two-node Ray cluster on the QSFP interconnect. Height, width, frames, and steps in the YAML are examples. Edit them or pass CLI flags. See docs/getting_started/installation/spark_pair.md."]
     },
     {
       "id": "matrix-game-2",

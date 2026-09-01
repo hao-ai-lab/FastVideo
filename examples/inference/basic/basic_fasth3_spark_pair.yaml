@@ -1,6 +1,10 @@
 # FastH3 on two DGX Sparks (one GPU each) over QSFP RoCE.
 # Bring up the Ray cluster first: docs/getting_started/installation/spark_pair.md
 #
+# request.sampling below is an example, not a required recipe. Change height,
+# width, num_frames, num_inference_steps, seed, and prompt. Legal H3 frame
+# counts are 17n+5, max 345 (15 s).
+#
 #   source examples/inference/optimizations/spark_pair_env.sh
 #   export RAY_ADDRESS=<qsfp-head>:6379
 #   export FASTVIDEO_HOST_IP=<qsfp-head>

@@ -180,10 +180,10 @@ is power-cycled. To avoid it:
   end-to-end. Reconstruction is approximate, not lossless. FL2VA/Ref2VA still
   need the full VAE to encode references.
 - **Two Sparks, one clip.** Sequence parallel (`sp_size=2`) over the QSFP RoCE
-  link ran the same 768×1344×124 FastH3 recipe in **292 s** vs **374–393 s** on
-  one GB10, and a 345-frame (~14.4 s) clip in **587 s**. Weights stay replicated,
-  so sequential load and lazy module load are still required on each box.
-  Bring-up, env vars, and the cookbook recipe:
+  link ran one 768×1344×124 FastH3 recipe in **292 s** vs **374–393 s** on
+  one GB10, and a 345-frame (~14.4 s) clip in **587 s**. Other heights, widths,
+  and frame counts are valid. Weights stay replicated, so sequential load and
+  lazy module load are still required on each box. Bring-up and knobs:
   [Pair two NVIDIA DGX Sparks](spark_pair.md).
 
 ## Gotchas specific to the GB10
