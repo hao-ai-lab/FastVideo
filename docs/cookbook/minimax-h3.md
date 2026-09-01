@@ -16,7 +16,7 @@ hide:
         <p class="cookbook-eyebrow">Primary focus · Inference</p>
         <h2>MiniMax H3 recipes</h2>
         <p>Generate video and audio with H3. Run a server on CUDA or Apple Silicon MLX to iterate on prompts, or call the pipeline directly from Python.</p>
-        <span class="cookbook-count" data-cookbook-count>6 maintained recipes</span>
+        <span class="cookbook-count" data-cookbook-count>7 maintained recipes</span>
       </div>
     </div>
     <div class="cookbook-lifecycle" aria-label="Lifecycle stages">
@@ -41,7 +41,8 @@ hide:
     <h2 id="h3-modes-heading">Supported modes</h2>
     <p>
       CUDA covers T2VA, FL2VA, and Ref2VA on the full checkpoint, plus FastH3
-      Preview and FastH3 LoRA. MLX is T2VA only. Temporal <code>--fast</code>,
+      Preview, FastH3 LoRA, and a two-node FastH3 Preview recipe over Ray
+      sequence parallel. MLX is T2VA only. Temporal <code>--fast</code>,
       spatial <code>--fast-spatial</code>, and opt-in VSA are flags on the same
       MLX script, not extra recipes.
     </p>
@@ -88,6 +89,11 @@ hide:
           <tr>
             <td>Two-pass refine</td>
             <td>No cookbook recipe</td>
+            <td>Not wired</td>
+          </tr>
+          <tr>
+            <td>2-Spark SP</td>
+            <td>FastH3 Preview across two DGX Sparks with Ray sequence parallel (<code>sp_size=2</code>) over QSFP RoCE</td>
             <td>Not wired</td>
           </tr>
         </tbody>
@@ -237,6 +243,9 @@ cd FastVideo</code></pre>
       <p class="cookbook-eyebrow">Apple Silicon</p>
       <pre><code>uv pip install -e ".[mlx]"</code></pre>
       <p>Follow the <a href="../../getting_started/installation/mps/#run-fasth3-preview">Apple Silicon guide</a> for the download, conversion, and storage requirements.</p>
+      <p class="cookbook-eyebrow">Two DGX Sparks</p>
+      <pre><code>uv pip install ray</code></pre>
+      <p>The 2-Spark recipe needs two DGX Sparks on an active QSFP link, the same FastH3 snapshot on both NVMes, and a Ray cluster on top. Follow <a href="../../getting_started/installation/spark_pair/">pairing two Sparks</a> before running it.</p>
   </div>
 </details>
 
@@ -248,6 +257,7 @@ cd FastVideo</code></pre>
         <li>The FastH3 CUDA performance profile was measured on four GB200 GPUs. Use its strict profile when exact operation order matters more than the measured performance configuration.</li>
         <li>The MLX source runtime supports T2VA, optional temporal <code>--fast</code>, optional spatial <code>--fast-spatial</code>, and opt-in VSA on <code>--include-vsa</code> checkpoints. FL2VA, Ref2VA, and two-pass refinement are not wired.</li>
         <li>GPU count and VAE decode backend are configurable in the builder above for FastH3 recipes. Only the value shown by default has a recorded run; other supported values are unmeasured here.</li>
+        <li>The 2-Spark recipe fixes its own GPU count and execution backend in its YAML config and is not affected by the GPU count knob above. It requires a two-node Ray cluster on the QSFP interconnect; see the setup step above.</li>
         <li>Gated or missing checkpoints: run <code>huggingface-cli login</code> and confirm you accepted the model's license on Hugging Face.</li>
       </ul>
   </div>
