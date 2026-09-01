@@ -161,13 +161,13 @@ _COMMON = {
 
 
 @app.function(gpu=GPU_1, **_COMMON)
-def run_1gpu(**kwargs: Any) -> dict[str, Any]:
-    return _run(gpus=1, **kwargs)
+def run_1gpu(options: dict[str, Any]) -> dict[str, Any]:
+    return _run(gpus=1, **options)
 
 
 @app.function(gpu=GPU_4, **_COMMON)
-def run_4gpu(**kwargs: Any) -> dict[str, Any]:
-    return _run(gpus=4, **kwargs)
+def run_4gpu(options: dict[str, Any]) -> dict[str, Any]:
+    return _run(gpus=4, **options)
 
 
 @app.local_entrypoint()
@@ -208,5 +208,5 @@ def main(
     }
     result = (
         run_1gpu if gpus == 1 else run_4gpu
-    ).remote(**kwargs)
+    ).remote(kwargs)
     print(json.dumps(result, indent=2, sort_keys=True))
