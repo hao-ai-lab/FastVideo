@@ -242,3 +242,51 @@ exceed the requested 12-hour training window.
   The Modal preflight exercised the focused test set, while the completed pilot
   and final run exercised the current HPS chunking and cache-ordering paths at
   production scale.
+
+## Post-run reward interpretation
+
+The r45 and r46 validation values should not be read as one continuous learning
+curve. r45 evaluated one fixed prompt, whereas r46 averaged eight fixed prompts.
+The apparently stronger r45 baseline is therefore primarily a prompt-selection
+effect. Within each run, validation is paired and deterministic: the prompt
+indices are selected with seed `4242`, and each prompt is sampled with seed
+`4242 + prompt_index`. Baseline-to-final changes are model changes on those
+fixed prompt/noise pairs, not fresh validation sampling noise.
+
+r45's one-prompt aggregate drop (`-0.67567`) was dominated by VideoAlign MQ
+(`-0.77497` before weighting). A single fixed sample cannot establish a
+population regression. In r46, the weighted contributions to the aggregate
+delta were approximately `+0.01985` dynamic tracking, `+0.01031` HPSv3 general,
+`+0.02224` HPSv3 percentile, `-0.01441` VideoAlign MQ, and `-0.08506`
+VideoAlign TA. Thus the small net change (`-0.04707`) was mostly the
+`1.5`-weighted TA decrease, while three of five components improved.
+
+The completed run was intentionally a runtime/non-collapse gate, not a
+published-scale reward-optimization run. It used 17 fresh rollout collections,
+four prompts per collection, K=4, and 272 rewarded endpoints total. The RVM
+paper's Wan video recipe uses 90 rollout collections, 32 prompts per collection,
+K=8, two optimizer updates per collection, and 23,040 rewarded endpoints. The
+repository's full H3 config mirrors that 180-update/23,040-endpoint budget. r46
+therefore covered about 19% of the intended optimizer-update horizon but only
+about 1.2% of the published rewarded-sample budget. Its LR (`1e-5`) is also
+five times lower than the paper's Wan recipe (`5e-5`). A weak or mixed held-out
+reward change after r46 is consequently expected and is not evidence that RVM
+has converged.
+
+Training longer is warranted, but additional passes over the same 64 prompts
+are less informative than increasing rollout diversity. The next quality run
+should prioritize more prompt groups per collection and a larger held-out set,
+retain paired seeds, report per-prompt deltas with uncertainty, and evaluate an
+external benchmark such as VBench in addition to the optimized rewards. This
+matters because the RVM paper trained on 48,998 prompts and evaluated 946 VBench
+prompts, while DanceGRPO used more than 10,000 training prompts and 1,000 video
+evaluation prompts. Earlier video reward-fine-tuning work also found that some
+RL/RWR objectives plateaued or deteriorated with more wall time, so longer runs
+should be checkpointed and selected by held-out metrics and qualitative review
+rather than duration alone.
+
+Primary references:
+
+- [Scaling Reinforcement Learning for Diffusion Models via Velocity Matching](https://arxiv.org/abs/2608.23664)
+- [DanceGRPO: Unleashing GRPO on Visual Generation](https://arxiv.org/abs/2505.07818)
+- [InstructVideo: Instructing Video Diffusion Models with Human Feedback](https://arxiv.org/abs/2312.12490)
