@@ -464,6 +464,13 @@ def _run_multi_gpu_worker(output_path: Path) -> None:
 
             log("reference saved")
 
+        # Rank 0 performs extra reference computation and file I/O. Keep the
+        # other ranks alive until that work is complete so they do not tear
+        # down NCCL while rank 0 is still using the CUDA context.
+        dist.barrier()
+        torch.cuda.synchronize(device)
+        log("worker complete; all ranks ready for teardown")
+
     finally:
         if dist.is_available() and dist.is_initialized():
             log("destroying torch distributed process group")
@@ -478,8 +485,8 @@ def _run_hybrid_usp_worker(output_path: Path) -> None:
     distributed plumbing: ``maybe_init_distributed_environment_and_model_parallel``
     builds the ring x ulysses rank mesh via ``initialize_model_parallel``, and
     the Ulysses all-to-all / Ring Attention / Ulysses all-to-all sequence
-    mirrors ``DistributedAttention._forward_ring_attention`` in
-    ``fastvideo.attention.layer`` exactly. This is the numerical parity check
+    mirrors ``RingAttention.forward`` in ``fastvideo.attention.ring_attention``
+    exactly. This is the numerical parity check
     for the ``1 < ring_size < sp_size`` hybrid path documented by
     ``--ring-size`` and accepted by ``_check_ring_attention_args`` -- that
     path has no other test driving real KV/Ulysses communication.
@@ -613,6 +620,13 @@ def _run_hybrid_usp_worker(output_path: Path) -> None:
 
             log("reference saved")
 
+        # The subgroup communicators are destroyed collectively by
+        # cleanup_dist_env_and_memory(). Do not let nonzero ranks enter that
+        # teardown while rank 0 is still computing/saving the reference.
+        dist.barrier()
+        torch.cuda.synchronize(device)
+        log("worker complete; all ranks ready for teardown")
+
     finally:
         log("tearing down FastVideo distributed state")
         cleanup_dist_env_and_memory()
@@ -656,14 +670,19 @@ def _run_torchrun(
     env.update(
         {
             "PYTHONUNBUFFERED": "1",
-            "NCCL_DEBUG": env.get("NCCL_DEBUG", "INFO"),
-            "TORCH_DISTRIBUTED_DEBUG": env.get(
-                "TORCH_DISTRIBUTED_DEBUG",
-                "DETAIL",
-            ),
             "TORCH_NCCL_ASYNC_ERROR_HANDLING": "1",
         }
     )
+
+    # Detailed distributed logging is useful when diagnosing a hang, but it
+    # must not be the default test environment. In particular, PyTorch's
+    # DETAIL wrapper can deadlock a raw NCCL P2P send/recv on some NCCL and GPU
+    # combinations before Ring Attention itself is reached. Preserve any
+    # values explicitly supplied by the caller, and only provide verbose
+    # defaults when the test-specific debug switch is enabled.
+    if env.get("FASTVIDEO_RING_TEST_DEBUG") == "1":
+        env.setdefault("NCCL_DEBUG", "INFO")
+        env.setdefault("TORCH_DISTRIBUTED_DEBUG", "DETAIL")
 
     # # Some containerized hosts have broken CUDA P2P/IPC/SHM paths while
     # # NCCL socket transport remains functional. Keep normal NCCL behavior by
@@ -705,6 +724,59 @@ def _run_torchrun(
         raise RuntimeError(
             f"Ring Attention worker exited with code {returncode}."
         )
+
+
+@pytest.mark.parametrize(
+    ("debug_enabled", "expected_nccl", "expected_torch"),
+    [
+        (False, None, None),
+        (True, "INFO", "DETAIL"),
+    ],
+)
+def test_torchrun_debug_defaults_are_opt_in(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    debug_enabled: bool,
+    expected_nccl: str | None,
+    expected_torch: str | None,
+) -> None:
+    """The harness must not enable distributed debug wrappers by default."""
+    captured_env: dict[str, str] = {}
+
+    class _CompletedProcess:
+        pid = 1
+
+        @staticmethod
+        def wait(timeout: int | None = None) -> int:
+            del timeout
+            return 0
+
+    def fake_popen(
+        cmd: list[str],
+        *,
+        env: dict[str, str],
+        start_new_session: bool,
+    ) -> _CompletedProcess:
+        del cmd, start_new_session
+        captured_env.update(env)
+        return _CompletedProcess()
+
+    monkeypatch.delenv("NCCL_DEBUG", raising=False)
+    monkeypatch.delenv("TORCH_DISTRIBUTED_DEBUG", raising=False)
+    if debug_enabled:
+        monkeypatch.setenv("FASTVIDEO_RING_TEST_DEBUG", "1")
+    else:
+        monkeypatch.delenv("FASTVIDEO_RING_TEST_DEBUG", raising=False)
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+    _run_torchrun(
+        script_path=Path(__file__),
+        nproc_per_node=2,
+        output_path=tmp_path / "unused.pt",
+    )
+
+    assert captured_env.get("NCCL_DEBUG") == expected_nccl
+    assert captured_env.get("TORCH_DISTRIBUTED_DEBUG") == expected_torch
 
 
 def test_multi_gpu_ring_attention_matches_full_attention(
