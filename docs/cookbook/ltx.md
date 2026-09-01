@@ -5,7 +5,7 @@ hide:
 
 # LTX recipes
 
-<div class="cookbook-shell cookbook-family-page" data-cookbook data-family="ltx2" data-recipes="../../assets/cookbook-recipes.json?v=6">
+<div class="cookbook-shell cookbook-family-page" data-cookbook data-family="ltx2" data-recipes="../../assets/cookbook-recipes.json?v=7">
   <header class="cookbook-family-header">
     <a class="cookbook-back-link" href="../"><span aria-hidden="true">←</span> All model families</a>
     <div class="cookbook-family-header__body">
@@ -28,6 +28,12 @@ hide:
       <span class="cookbook-lifecycle__stage">Deployment <small>planned</small></span>
     </div>
   </header>
+  <nav class="cookbook-jumpnav" aria-label="Recipe page sections">
+    <a href="#recipe-builder">Builder</a>
+    <a href="#cookbook-setup">Setup</a>
+    <a href="#cookbook-troubleshooting">Troubleshooting</a>
+    <a href="#cookbook-evidence">Evidence</a>
+  </nav>
 
   <section class="cookbook-builder" id="recipe-builder" aria-labelledby="builder-heading">
     <div class="cookbook-builder__intro">
@@ -106,24 +112,30 @@ hide:
   </section>
 </div>
 
-## Before you run
+<details class="cookbook-collapsible" id="cookbook-setup">
+  <summary>Setup</summary>
+  <div class="cookbook-collapsible__body">
+      <p>The generated commands expect a local clone:</p>
+      <pre><code>git clone https://github.com/hao-ai-lab/FastVideo.git
+cd FastVideo</code></pre>
+      <p>Use <a href="../../inference/configuration/">Configuration</a> for supported Python and CLI settings, <a href="../../inference/optimizations/">Optimizations</a> for attention and memory tradeoffs, and the <a href="../../inference/support_matrix/">support matrix</a> for the supported model and optimization surface.</p>
+  </div>
+</details>
 
-The generated commands expect a local clone:
+<details class="cookbook-collapsible" id="cookbook-troubleshooting">
+  <summary>Troubleshooting</summary>
+  <div class="cookbook-collapsible__body">
+      <ul>
+        <li>The distilled recipe is source-configured for four GPUs; running it on fewer GPUs is unverified and may fail during distributed setup.</li>
+        <li>Audio-less output usually means the base checkpoint resolved instead of the distilled LTX-2 checkpoint with audio; check the loaded model ID in the logs.</li>
+        <li>Gated or missing checkpoints: run <code>huggingface-cli login</code> and confirm you accepted the model's license on Hugging Face.</li>
+      </ul>
+  </div>
+</details>
 
-    git clone https://github.com/hao-ai-lab/FastVideo.git
-    cd FastVideo
-
-Use [Configuration](../inference/configuration.md) for supported Python and
-CLI settings, [Optimizations](../inference/optimizations.md) for attention and
-memory tradeoffs, and the [support matrix](../inference/support_matrix.md) for
-the supported model and optimization surface.
-
-## Troubleshooting
-
-- The distilled recipe is source-configured for four GPUs; running it on fewer GPUs is unverified and may fail during distributed setup.
-- Audio-less output usually means the base checkpoint resolved instead of the distilled LTX-2 checkpoint with audio; check the loaded model ID in the logs.
-- Gated or missing checkpoints: run `huggingface-cli login` and confirm you accepted the model's license on Hugging Face.
-
-## Evidence status
-
-All recipes on this page are **Source-backed**: their commands, model IDs, and flags were validated against the checked-in FastVideo sources listed above (static validation). No runtime GPU validation is recorded for these recipes, so GPU model fit, memory use, throughput, and runtime duration are **Unknown** and deliberately not claimed. Runtime buttons show only the GPU counts configured in checked-in sources.
+<details class="cookbook-collapsible" id="cookbook-evidence">
+  <summary>Evidence status</summary>
+  <div class="cookbook-collapsible__body">
+      <p>All recipes on this page are <strong>Source-backed</strong>: their commands, model IDs, and flags were validated against the checked-in FastVideo sources listed above (static validation). No runtime GPU validation is recorded for these recipes, so GPU model fit, memory use, throughput, and runtime duration are <strong>Unknown</strong> and deliberately not claimed. Runtime buttons show only the GPU counts configured in checked-in sources.</p>
+  </div>
+</details>

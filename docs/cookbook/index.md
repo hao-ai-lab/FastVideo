@@ -454,19 +454,6 @@ hide:
       </article>
     </div>
   </section>
-
-  <section class="cookbook-roadmap" aria-labelledby="roadmap-heading">
-    <h2 id="roadmap-heading">Inference first, then the full workflow</h2>
-    <p>
-      Inference is the first complete stage. Distillation, fine-tuning,
-      training, evaluation, optimization, and deployment will reuse the same
-      family-first structure as their recipes land. Each family page shows
-      which stages are available and which are planned. Two DGX Sparks: bring up
-      the QSFP Ray cluster first
-      (<a href="../getting_started/installation/spark_pair/">pair two Sparks</a>),
-      then pick the FastH3 two-Spark recipe.
-    </p>
-  </section>
 </div>
 
 <small class="cookbook-logo-credit">

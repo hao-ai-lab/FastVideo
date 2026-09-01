@@ -5,7 +5,7 @@ hide:
 
 # MiniMax H3 recipes
 
-<div class="cookbook-shell cookbook-family-page" data-cookbook data-family="minimax_h3" data-default-recipe="fasth3-preview-cuda" data-recipes="../../assets/cookbook-recipes.json?v=6">
+<div class="cookbook-shell cookbook-family-page" data-cookbook data-family="minimax_h3" data-default-recipe="fasth3-preview-cuda" data-recipes="../../assets/cookbook-recipes.json?v=7">
   <header class="cookbook-family-header">
     <a class="cookbook-back-link" href="../"><span aria-hidden="true">←</span> All model families</a>
     <div class="cookbook-family-header__body">
@@ -29,6 +29,12 @@ hide:
       <span class="cookbook-lifecycle__stage">Deployment <small>planned</small></span>
     </div>
   </header>
+  <nav class="cookbook-jumpnav" aria-label="Recipe page sections">
+    <a href="#recipe-builder">Builder</a>
+    <a href="#cookbook-setup">Setup</a>
+    <a href="#cookbook-troubleshooting">Troubleshooting</a>
+    <a href="#cookbook-evidence">Evidence</a>
+  </nav>
 
   <details class="cookbook-modes">
     <summary>Compare H3 modes and options</summary>
@@ -117,6 +123,8 @@ hide:
             <button type="button" disabled>Loading runtimes...</button>
           </div>
         </div>
+
+        <div data-cookbook-knobs></div>
 
         <p class="cookbook-selection-description" data-cookbook-description>Loading recipe details...</p>
         <div class="cookbook-selection-row" data-cookbook-usage>
@@ -217,36 +225,37 @@ hide:
   </section>
 </div>
 
-## Before you run
+<details class="cookbook-collapsible" id="cookbook-setup">
+  <summary>Setup</summary>
+  <div class="cookbook-collapsible__body">
+      <p>The generated commands expect a local clone:</p>
+      <pre><code>git clone https://github.com/hao-ai-lab/FastVideo.git
+cd FastVideo</code></pre>
+      <p>Use <a href="../../inference/configuration/">Configuration</a> for supported Python and CLI settings, <a href="../../inference/optimizations/">Optimizations</a> for attention and memory tradeoffs, and the <a href="../../inference/support_matrix/">support matrix</a> for the supported model and optimization surface.</p>
+      <p class="cookbook-eyebrow">CUDA</p>
+      <pre><code>UV_TORCH_BACKEND=cu130 uv pip install -e ".[fasth3]"</code></pre>
+      <p class="cookbook-eyebrow">Apple Silicon</p>
+      <pre><code>uv pip install -e ".[mlx]"</code></pre>
+      <p>Follow the <a href="../../getting_started/installation/mps/#run-fasth3-preview">Apple Silicon guide</a> for the download, conversion, and storage requirements.</p>
+  </div>
+</details>
 
-The generated commands expect a local clone:
+<details class="cookbook-collapsible" id="cookbook-troubleshooting">
+  <summary>Troubleshooting</summary>
+  <div class="cookbook-collapsible__body">
+      <ul>
+        <li>The full CUDA H3 examples request four GPUs by default. Their sources do not claim a GPU model or memory minimum.</li>
+        <li>The FastH3 CUDA performance profile was measured on four GB200 GPUs. Use its strict profile when exact operation order matters more than the measured performance configuration.</li>
+        <li>The MLX source runtime supports T2VA, optional temporal <code>--fast</code>, optional spatial <code>--fast-spatial</code>, and opt-in VSA on <code>--include-vsa</code> checkpoints. FL2VA, Ref2VA, and two-pass refinement are not wired.</li>
+        <li>GPU count and VAE decode backend are configurable in the builder above for FastH3 recipes. Only the value shown by default has a recorded run; other supported values are unmeasured here.</li>
+        <li>Gated or missing checkpoints: run <code>huggingface-cli login</code> and confirm you accepted the model's license on Hugging Face.</li>
+      </ul>
+  </div>
+</details>
 
-    git clone https://github.com/hao-ai-lab/FastVideo.git
-    cd FastVideo
-
-Use [Configuration](../inference/configuration.md) for supported Python and
-CLI settings, [Optimizations](../inference/optimizations.md) for attention and
-memory tradeoffs, and the [support matrix](../inference/support_matrix.md) for
-the supported model and optimization surface.
-
-CUDA FastH3 uses the pinned performance dependencies:
-
-    UV_TORCH_BACKEND=cu130 uv pip install -e ".[fasth3]"
-
-Apple Silicon uses the native MLX extra and a locally converted H3 DiT:
-
-    uv pip install -e ".[mlx]"
-
-Follow the [Apple Silicon guide](../getting_started/installation/mps.md#run-fasth3-preview)
-for the download, conversion, and storage requirements.
-
-## Troubleshooting
-
-- The full CUDA H3 examples request four GPUs by default. Their sources do not claim a GPU model or memory minimum.
-- The FastH3 CUDA performance profile was measured on four GB200 GPUs. Use its strict profile when exact operation order matters more than the measured performance configuration.
-- The MLX source runtime supports T2VA, optional temporal `--fast`, optional spatial `--fast-spatial`, and opt-in VSA on `--include-vsa` checkpoints. FL2VA, Ref2VA, and two-pass refinement are not wired.
-- Gated or missing checkpoints: run `huggingface-cli login` and confirm you accepted the model's license on Hugging Face.
-
-## Evidence status
-
-Every command, model ID, and flag on this page maps to a checked-in FastVideo source. Recipes marked **Verified** also have a recorded hardware path in linked FastVideo evidence. The full H3 CUDA examples remain **Source-backed** where the source records a GPU count but no GPU model or memory requirement. Unlisted hardware is unknown, not unsupported.
+<details class="cookbook-collapsible" id="cookbook-evidence">
+  <summary>Evidence status</summary>
+  <div class="cookbook-collapsible__body">
+      <p>Every command, model ID, and flag on this page maps to a checked-in FastVideo source. Recipes marked <strong>Verified</strong> also have a recorded hardware path in linked FastVideo evidence. The full H3 CUDA examples remain <strong>Source-backed</strong> where the source records a GPU count but no GPU model or memory requirement. Unlisted hardware is unknown, not unsupported.</p>
+  </div>
+</details>

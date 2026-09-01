@@ -5,7 +5,7 @@ hide:
 
 # Matrix Game recipes
 
-<div class="cookbook-shell cookbook-family-page" data-cookbook data-family="matrixgame" data-recipes="../../assets/cookbook-recipes.json?v=6">
+<div class="cookbook-shell cookbook-family-page" data-cookbook data-family="matrixgame" data-recipes="../../assets/cookbook-recipes.json?v=7">
   <header class="cookbook-family-header">
     <a class="cookbook-back-link" href="../"><span aria-hidden="true">←</span> All model families</a>
     <div class="cookbook-family-header__body">
@@ -28,6 +28,12 @@ hide:
       <span class="cookbook-lifecycle__stage">Deployment <small>planned</small></span>
     </div>
   </header>
+  <nav class="cookbook-jumpnav" aria-label="Recipe page sections">
+    <a href="#recipe-builder">Builder</a>
+    <a href="#cookbook-setup">Setup</a>
+    <a href="#cookbook-troubleshooting">Troubleshooting</a>
+    <a href="#cookbook-evidence">Evidence</a>
+  </nav>
 
   <section class="cookbook-builder" id="recipe-builder" aria-labelledby="builder-heading">
     <div class="cookbook-builder__intro">
@@ -106,23 +112,29 @@ hide:
   </section>
 </div>
 
-## Before you run
+<details class="cookbook-collapsible" id="cookbook-setup">
+  <summary>Setup</summary>
+  <div class="cookbook-collapsible__body">
+      <p>The generated commands expect a local clone:</p>
+      <pre><code>git clone https://github.com/hao-ai-lab/FastVideo.git
+cd FastVideo</code></pre>
+      <p>Use <a href="../../inference/configuration/">Configuration</a> for supported Python and CLI settings, <a href="../../inference/optimizations/">Optimizations</a> for attention and memory tradeoffs, and the <a href="../../inference/support_matrix/">support matrix</a> for the supported model and optimization surface.</p>
+  </div>
+</details>
 
-The generated commands expect a local clone:
+<details class="cookbook-collapsible" id="cookbook-troubleshooting">
+  <summary>Troubleshooting</summary>
+  <div class="cookbook-collapsible__body">
+      <ul>
+        <li>Matrix Game 3.0 downloads its reference input image from GitHub; offline machines should pre-download it and edit the <code>IMAGE_URL</code> constant locally.</li>
+        <li>Streaming variants of Matrix Game 2.0 exist under <code>examples/inference/basic/basic_matrixgame2_streaming.py</code> but are not included as cookbook recipes.</li>
+      </ul>
+  </div>
+</details>
 
-    git clone https://github.com/hao-ai-lab/FastVideo.git
-    cd FastVideo
-
-Use [Configuration](../inference/configuration.md) for supported Python and
-CLI settings, [Optimizations](../inference/optimizations.md) for attention and
-memory tradeoffs, and the [support matrix](../inference/support_matrix.md) for
-the supported model and optimization surface.
-
-## Troubleshooting
-
-- Matrix Game 3.0 downloads its reference input image from GitHub; offline machines should pre-download it and edit the `IMAGE_URL` constant locally.
-- Streaming variants of Matrix Game 2.0 exist under `examples/inference/basic/basic_matrixgame2_streaming.py` but are not included as cookbook recipes.
-
-## Evidence status
-
-All recipes on this page are **Source-backed**: their commands, model IDs, and flags were validated against the checked-in FastVideo sources listed above (static validation). No runtime GPU validation is recorded for these recipes, so GPU model fit, memory use, throughput, and runtime duration are **Unknown** and deliberately not claimed. Runtime buttons show only the GPU counts configured in checked-in sources.
+<details class="cookbook-collapsible" id="cookbook-evidence">
+  <summary>Evidence status</summary>
+  <div class="cookbook-collapsible__body">
+      <p>All recipes on this page are <strong>Source-backed</strong>: their commands, model IDs, and flags were validated against the checked-in FastVideo sources listed above (static validation). No runtime GPU validation is recorded for these recipes, so GPU model fit, memory use, throughput, and runtime duration are <strong>Unknown</strong> and deliberately not claimed. Runtime buttons show only the GPU counts configured in checked-in sources.</p>
+  </div>
+</details>

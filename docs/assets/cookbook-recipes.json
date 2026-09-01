@@ -1,5 +1,5 @@
 {
-  "version": 6,
+  "version": 7,
   "recipes": [
     {
       "id": "fastwan21-t2v",
@@ -437,6 +437,9 @@
       "evidence": "Source-backed",
       "expected_artifact": "MP4 with synchronized audio at outputs/minimax_h3_t2v/minimax_h3_t2v.mp4",
       "modes": ["T2VA"],
+      "knobs": [
+        {"key": "num_gpus", "label": "GPUs", "hint": "Sequence-parallel degree", "flag": "--num-gpus", "options": [1, 2, 4, 8], "default": 4}
+      ],
       "limitations": ["The checked-in example defaults to four-way sequence parallelism. It does not record a GPU model or memory requirement."]
     },
     {
@@ -467,6 +470,10 @@
       "evidence": "Verified",
       "expected_artifact": "Warmup and measured MP4 files under outputs/fasth3/",
       "modes": ["T2VA", "4-step FastH3"],
+      "knobs": [
+        {"key": "num_gpus", "label": "GPUs", "hint": "Sequence-parallel degree", "flag": "--num-gpus", "options": [1, 2, 4, 8], "default": 4},
+        {"key": "video_decode_backend", "label": "VAE decode", "hint": "Fidelity vs. speed", "flag": "--video-decode-backend", "options": [{"value": "h3-vae", "label": "Full H3 VAE"}, {"value": "taeh3", "label": "TAEH3 preview"}], "default": "h3-vae"}
+      ],
       "limitations": ["The default all profile is the measured GB200 performance route and can change floating-point operation order. Use --profile strict --no-inference-torch-compile for the eager strict route."]
     },
     {
@@ -499,6 +506,9 @@
       "evidence": "Verified",
       "expected_artifact": "MP4 with H.264 video and stereo AAC audio at outputs/fasth3_int6.mp4",
       "modes": ["T2VA", "temporal --fast", "spatial --fast-spatial", "opt-in VSA"],
+      "knobs": [
+        {"key": "video_decode_backend", "label": "VAE decode", "hint": "Fidelity vs. speed", "flag": "--video-decode-backend", "options": [{"value": "h3-vae", "label": "Full H3 VAE"}, {"value": "taeh3", "label": "TAEH3 preview"}], "default": "h3-vae"}
+      ],
       "limitations": [
         "The MLX path supports T2VA, optional temporal --fast, optional spatial --fast-spatial, and opt-in VSA on --include-vsa checkpoints. FL2VA, Ref2VA, and two-pass refinement are not wired."
       ]
@@ -518,6 +528,9 @@
       "evidence": "Source-backed",
       "expected_artifact": "MP4 with synchronized audio at outputs/minimax_h3_fl2va/minimax_h3_fl2va.mp4",
       "modes": ["FL2VA"],
+      "knobs": [
+        {"key": "num_gpus", "label": "GPUs", "hint": "Sequence-parallel degree", "flag": "--num-gpus", "options": [1, 2, 4, 8], "default": 4}
+      ],
       "limitations": ["Pass --last-image to constrain the final frame. The checked-in source defaults to four GPUs."]
     },
     {
@@ -535,6 +548,9 @@
       "evidence": "Source-backed",
       "expected_artifact": "MP4 with synchronized audio at outputs/minimax_h3_ref2va/minimax_h3_ref2va.mp4",
       "modes": ["Ref2VA"],
+      "knobs": [
+        {"key": "num_gpus", "label": "GPUs", "hint": "Sequence-parallel degree", "flag": "--num-gpus", "options": [1, 2, 4, 8], "default": 4}
+      ],
       "limitations": ["Pass --reference-audio for an additional audio reference. The checked-in source defaults to four GPUs."]
     },
     {
@@ -558,6 +574,10 @@
       "evidence": "Verified",
       "expected_artifact": "Warmup and measured MP4 files under outputs/fasth3_lora_preview/",
       "modes": ["T2VA", "FastH3 LoRA"],
+      "knobs": [
+        {"key": "num_gpus", "label": "GPUs", "hint": "Sequence-parallel degree", "flag": "--num-gpus", "options": [1, 2, 4, 8], "default": 4},
+        {"key": "video_decode_backend", "label": "VAE decode", "hint": "Fidelity vs. speed", "flag": "--video-decode-backend", "options": [{"value": "h3-vae", "label": "Full H3 VAE"}, {"value": "taeh3", "label": "TAEH3 preview"}], "default": "h3-vae"}
+      ],
       "limitations": ["Supply a compatible FastH3 adapter. The script infers dense or VSA attention from the adapter payload unless you override it."]
     },
     {
