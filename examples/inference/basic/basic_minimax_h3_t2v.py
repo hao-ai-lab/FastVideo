@@ -47,6 +47,11 @@ def parse_args() -> argparse.Namespace:
         "Default: ray when RAY_ADDRESS is set, otherwise mp",
     )
     parser.add_argument("--torch-compile", action="store_true", help="torch.compile the DiT transformer path")
+    parser.add_argument("--compile-vae",
+                        action=argparse.BooleanOptionalAction,
+                        default=True,
+                        help="compile the video VAE decoder independently of the DiT (on by default; "
+                        "the Spark lazy-load path needs this registered before first materialize)")
     parser.add_argument("--compile-mode",
                         default=None,
                         help='torch.compile mode, e.g. "reduce-overhead" for CUDA graphs')
@@ -105,6 +110,7 @@ def main() -> None:
                 compile=CompileConfig(
                     enabled=args.torch_compile,
                     mode=args.compile_mode,
+                    vae_enabled=args.compile_vae,
                 ),
             ),
         ))
