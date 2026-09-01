@@ -1,0 +1,23 @@
+# Native MLX FastMetal 5B (Wan2.2-TI2V) server. Run from the repository root
+# after downloading FastVideo/FastMetal-5B-QAD (it ships a pre-packed MLX DiT,
+# so model_root and mlx_checkpoint are the same directory).
+#   python -m fastvideo.entrypoints.openai.mlx_wan_server --config examples/serving/mlx_wan22_5b.yaml
+runtime: mlx
+generator:
+  model_path: FastVideo/FastMetal-5B-QAD
+  model_root: ./FastMetal-5B-QAD
+  mlx_checkpoint: ./FastMetal-5B-QAD
+server:
+  host: 127.0.0.1
+  port: 8000
+  served_model_name: fastwan22-5b-mlx
+  output_dir: outputs/mlx_wan22_5b
+default_request:
+  sampling:
+    height: 704
+    width: 1280
+    num_frames: 81
+    fps: 24
+    num_inference_steps: 3
+    guidance_scale: 1.0
+    seed: 1234

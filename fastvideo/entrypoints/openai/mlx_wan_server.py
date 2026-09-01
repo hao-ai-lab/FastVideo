@@ -21,16 +21,24 @@ from fastvideo.api.schema import GenerationRequest
 from fastvideo.entrypoints.openai.api_server import create_app
 from fastvideo.entrypoints.openai.protocol import VideoGenerationRequest
 
-MODEL: Literal["FastVideo/FastMetal-1.3B-QAD"] = "FastVideo/FastMetal-1.3B-QAD"
-# The DMD-distilled step ladder the validated 1.3B recipe uses (fixed count,
-# same reason H3 MLX serving pins num_inference_steps to its own ladder size).
+# The DMD-distilled step ladder the validated recipes use (fixed count, same
+# reason H3 MLX serving pins num_inference_steps to its own ladder size).
 _DMD_STEP_COUNT = 3
+
+# Maps a served model id to the pipeline class that generates it: 1.3B/14B
+# share Wan2.1's architecture (MLXWanPipeline), 5B is Wan2.2-TI2V instead
+# (MLXWan22Pipeline, 48-channel latents, a different DiT and sampler).
+_PIPELINE_CLASS_NAMES = {
+    "FastVideo/FastMetal-1.3B-QAD": "MLXWanPipeline",
+    "FastVideo/FastMetal-14B-QAD": "MLXWanPipeline",
+    "FastVideo/FastMetal-5B-QAD": "MLXWan22Pipeline",
+}
 
 
 class MLXWanGeneratorConfig(BaseModel):
     """Where the two FastMetal checkpoint halves live on disk."""
     model_config = ConfigDict(extra="forbid")
-    model_path: Literal["FastVideo/FastMetal-1.3B-QAD"] = MODEL
+    model_path: Literal["FastVideo/FastMetal-1.3B-QAD", "FastVideo/FastMetal-14B-QAD", "FastVideo/FastMetal-5B-QAD"]
     model_root: str
     mlx_checkpoint: str
 
@@ -107,9 +115,10 @@ class MLXWanGenerator:
             raise RuntimeError("Wan MLX serving requires an Apple Silicon Mac.")
         if shutil.which("ffmpeg") is None:
             raise RuntimeError("Install ffmpeg before starting the Wan MLX server.")
-        from fastvideo.mlx_runtime.wan_pipeline import MLXWanPipeline
+        import fastvideo.mlx_runtime.wan_pipeline as wan_pipeline_module
 
-        return MLXWanPipeline(
+        pipeline_cls = getattr(wan_pipeline_module, _PIPELINE_CLASS_NAMES[config.model_path])
+        return pipeline_cls(
             model_root=Path(config.model_root).expanduser(),
             mlx_checkpoint=Path(config.mlx_checkpoint).expanduser(),
         )
@@ -166,7 +175,7 @@ def create_mlx_wan_app(config: MLXWanServeConfig):
         raise ValueError("Wan MLX default_request must set: " + ", ".join(sorted(required - set(explicit))))
     validate_wan_video_request(VideoGenerationRequest(prompt="validate config", **explicit))
     # Transport admission uses the registered Wan family, not CUDA engine options.
-    args = SimpleNamespace(model_path=MODEL,
+    args = SimpleNamespace(model_path=config.generator.model_path,
                            lora_path=None,
                            lora_nickname="default",
                            lora_strength=1.0,
