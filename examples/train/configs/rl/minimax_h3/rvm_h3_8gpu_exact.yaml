@@ -1,4 +1,4 @@
-# Exact unanchored RVM ablation on 8 GPUs (default topology: SP4 x DP2).
+# Paper-faithful unanchored RVM on 8 GPUs (SP4 x DP2).
 models:
   student:
     _target_: fastvideo.train.models.minimax_h3.MiniMaxH3RVMModel
@@ -13,7 +13,7 @@ models:
       target_modules: [to_q, to_k, to_v, to_out]
 
 method:
-  _target_: fastvideo.train.methods.rl.rvm.RVMMethod
+  _target_: fastvideo.train.methods.rl.RVMFaithfulMethod
   samples_per_prompt: 8
   prompt_groups_per_rollout: 32
   optimizer_updates_per_rollout: 2
@@ -27,8 +27,14 @@ method:
   max_grad_norm: 1.0
   reward_device: cuda
   sampling:
+    # Behavior rollouts always use the released four-step FastH3 policy.
     denoising_steps: [1000, 750, 500, 250]
     attn_kind: vsa
+  training_timestep:
+    # Published RVM: analytically noise endpoints at t ~ Uniform(0, 1).
+    mode: continuous_uniform
+    min: 0.0
+    max: 1.0
   reward_fn:
     backend: genrl
     rewards:

@@ -22,10 +22,30 @@ def assert_common(config: dict) -> None:
     assert model["_target_"].endswith("MiniMaxH3RVMModel")
     assert model["attention_backend"] == "VIDEO_SPARSE_ATTN_H3"
     assert model["lora"]["enable"] is True
-    assert model["lora"]["target_modules"] == ["to_q", "to_k", "to_v", "to_out"]
-    assert method["_target_"].endswith(("RVMMethod", "RVMWithLocalMetricsMethod"))
-    assert method["sampling"]["denoising_steps"] == [1000, 750, 500, 250]
+    assert model["lora"]["target_modules"] == [
+        "to_q",
+        "to_k",
+        "to_v",
+        "to_out",
+    ]
+    assert method["_target_"].endswith(
+        (
+            "RVMFaithfulMethod",
+            "RVMWithLocalMetricsMethod",
+        )
+    )
+    assert method["sampling"]["denoising_steps"] == [
+        1000,
+        750,
+        500,
+        250,
+    ]
     assert method["sampling"]["attn_kind"] == "vsa"
+    assert method["training_timestep"] == {
+        "mode": "continuous_uniform",
+        "min": 0.0,
+        "max": 1.0,
+    }
     assert training["data"]["training_cfg_rate"] == 0.0
     assert training["data"]["num_frames"] == 124
     assert training["data"]["num_latent_t"] == 37
@@ -41,7 +61,9 @@ def assert_common(config: dict) -> None:
 
 
 def test_all_rvm_configs_obey_h3_contract() -> None:
-    paths = sorted(CONFIG_ROOT.glob("rvm_h3_*.yaml"))
+    paths = sorted(
+        CONFIG_ROOT.glob("rvm_h3_*.yaml")
+    )
     assert {path.name for path in paths} == {
         "rvm_h3_1gpu_smoke.yaml",
         "rvm_h3_8gpu_audio_anchor.yaml",
@@ -61,17 +83,37 @@ def test_full_run_budget_and_five_percent_interval() -> None:
     max_steps = config["training"]["loop"]["max_train_steps"]
     assert max_steps == 180
     assert method["optimizer_updates_per_rollout"] == 2
-    rollout_collections = max_steps // method["optimizer_updates_per_rollout"]
-    generated = rollout_collections * method["prompt_groups_per_rollout"] * method["samples_per_prompt"]
+    rollout_collections = (
+        max_steps
+        // method["optimizer_updates_per_rollout"]
+    )
+    generated = (
+        rollout_collections
+        * method["prompt_groups_per_rollout"]
+        * method["samples_per_prompt"]
+    )
     assert generated == 23_040
     assert math.ceil(max_steps * 0.05) == 9
     assert method["validation"]["every_steps"] == 0
+    assert (
+        method["video_anchor_beta"],
+        method["audio_anchor_beta"],
+    ) == (0.0, 0.0)
 
 
 def test_anchor_ablation_is_isolated() -> None:
     exact = load("rvm_h3_8gpu_exact.yaml")["method"]
     audio = load("rvm_h3_8gpu_audio_anchor.yaml")["method"]
     full = load("rvm_h3_8gpu_full_anchor.yaml")["method"]
-    assert (exact["video_anchor_beta"], exact["audio_anchor_beta"]) == (0.0, 0.0)
-    assert (audio["video_anchor_beta"], audio["audio_anchor_beta"]) == (0.0, 1e-3)
-    assert (full["video_anchor_beta"], full["audio_anchor_beta"]) == (1e-3, 1e-3)
+    assert (
+        exact["video_anchor_beta"],
+        exact["audio_anchor_beta"],
+    ) == (0.0, 0.0)
+    assert (
+        audio["video_anchor_beta"],
+        audio["audio_anchor_beta"],
+    ) == (0.0, 1e-3)
+    assert (
+        full["video_anchor_beta"],
+        full["audio_anchor_beta"],
+    ) == (1e-3, 1e-3)

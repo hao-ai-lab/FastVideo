@@ -1,5 +1,4 @@
-# Full published-scale FastH3 RVM run after the LR/anchor sweeps select a winner.
-# Default here is the recommended video-RVM + audio-anchor configuration.
+# Published-scale paper-faithful RVM candidate after LR/anchor selection.
 models:
   student:
     _target_: fastvideo.train.models.minimax_h3.MiniMaxH3RVMModel
@@ -14,7 +13,7 @@ models:
       target_modules: [to_q, to_k, to_v, to_out]
 
 method:
-  _target_: fastvideo.train.methods.rl.rvm.RVMMethod
+  _target_: fastvideo.train.methods.rl.RVMFaithfulMethod
   samples_per_prompt: 8
   prompt_groups_per_rollout: 32
   optimizer_updates_per_rollout: 2
@@ -23,13 +22,19 @@ method:
   advantage_clip: 5.0
   positive_only_steps: 0
   video_anchor_beta: 0.0
-  audio_anchor_beta: 1.0e-3
+  audio_anchor_beta: 0.0
   audio_loss_weight: 1.0
   max_grad_norm: 1.0
   reward_device: cuda
   sampling:
+    # Behavior rollouts always use the released four-step FastH3 policy.
     denoising_steps: [1000, 750, 500, 250]
     attn_kind: vsa
+  training_timestep:
+    # Published RVM: analytically noise endpoints at t ~ Uniform(0, 1).
+    mode: continuous_uniform
+    min: 0.0
+    max: 1.0
   reward_fn:
     backend: genrl
     rewards:
@@ -45,7 +50,7 @@ method:
         resize_short_edge: 256
         pretrained: true
   validation:
-    # 0 means auto-compute ceil(5% * max_train_steps): 9 for 180 updates.
+    # 0 means ceil(5% * max_train_steps): 9 for this 180-step run.
     every_steps: 0
     num_prompts: 100
     data_path: artifacts/rvm_h3/data/eval

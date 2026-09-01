@@ -11,8 +11,12 @@ require_path "${VIDEOALIGN_CHECKPOINT_PATH}"
 
 python -m py_compile \
     fastvideo/train/methods/rl/rvm.py \
+    fastvideo/train/methods/rl/rvm_faithful.py \
+    fastvideo/train/methods/rl/rvm_local_metrics.py \
     fastvideo/train/methods/rl/common/rvm_utils.py \
     fastvideo/train/methods/rl/common/minimax_h3_rvm.py \
+    fastvideo/train/methods/rl/rewards/media.py \
+    fastvideo/train/methods/rl/rewards/dynamic_tracking.py \
     fastvideo/train/models/minimax_h3/minimax_h3_rvm.py \
     fastvideo/train/entrypoint/export_rvm_lora.py \
     examples/train/rvm_h3/prepare_prompts.py \
@@ -21,6 +25,7 @@ python -m py_compile \
 
 pytest -q \
     fastvideo/tests/train/methods/test_rvm_utils.py \
+    fastvideo/tests/train/methods/test_rvm_reward_diagnostics.py \
     fastvideo/tests/train/methods/test_minimax_h3_dmd2.py \
     fastvideo/tests/train/methods/test_rvm_configs.py \
     fastvideo/tests/inference/lora/test_merge_lora_math.py

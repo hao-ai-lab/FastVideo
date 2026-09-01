@@ -1,4 +1,4 @@
-# Modal one-GPU correctness run. Designed for one B200-class GPU.
+# Modal one-GPU correctness run; compact overrides are applied by the launcher.
 models:
   student:
     _target_: fastvideo.train.models.minimax_h3.MiniMaxH3RVMModel
@@ -27,8 +27,14 @@ method:
   max_grad_norm: 1.0
   reward_device: cuda
   sampling:
+    # Behavior rollouts always use the released four-step FastH3 policy.
     denoising_steps: [1000, 750, 500, 250]
     attn_kind: vsa
+  training_timestep:
+    # Published RVM: analytically noise endpoints at t ~ Uniform(0, 1).
+    mode: continuous_uniform
+    min: 0.0
+    max: 1.0
   reward_fn:
     rewards:
       videoalign_ta: 1.5

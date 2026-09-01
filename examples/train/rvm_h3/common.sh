@@ -81,5 +81,6 @@ run_rvm_training() {
     shift
     local topology=()
     while IFS= read -r line; do topology+=("${line}"); done < <(rvm_topology_args)
+    python examples/train/rvm_h3/verify_clean_source.py
     NUM_GPUS="${NUM_GPUS:-8}" bash examples/train/run.sh "${config}" "${topology[@]}" "$@"
 }
