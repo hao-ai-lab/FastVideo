@@ -22,6 +22,7 @@ pool there, so offload adds transfers and duplicate residency instead of freeing
 memory. CUDA FSDP sharding remains enabled when requested; MPS continues to
 disable FSDP. `pin_cpu_memory` is not an offload mode and is left unchanged.
 
+<<<<<<< Updated upstream
 MiniMax H3 CUDA inference can use a second lever that does not copy weights to a
 host pool: load the Qwen3-VL text encoder, run conditioning, then release that
 encoder before loading the DiT and video/audio VAEs. `h3_sequential_load`
@@ -35,6 +36,8 @@ safetensors are read onto the accelerator instead of CPU-then-copy.
 Input-preparation geometry (spatial ratio, latent channels, audio sample rate)
 comes from the VAE arch configs until those weights load.
 
+=======
+>>>>>>> Stashed changes
 ## Behavior Explanation
 
 !!! note
@@ -127,21 +130,25 @@ We recommend enabling these options when OOM happens.
 Every option above moves weights between host and device. This one changes
 whether they are in memory at all.
 
-By default a pipeline loads every component before the first stage runs, so
-peak memory is the sum of all of them even though no two are needed at the same
-moment. With `lazy_module_load` enabled, each heavy component loads on first use
-and is freed once the last stage that needs it has returned, so peak memory
-becomes the largest overlapping set instead of the sum. For a text-to-video
-pipeline that is roughly `max(text encoder, DiT + VAE)` rather than
-`text encoder + DiT + VAE`.
+The flag defaults to `False`. By default a pipeline loads every component before
+the first stage runs, so peak memory is the sum of all of them even when they are
+used in different phases. With `lazy_module_load` enabled, each opted-in heavy
+component loads on first use and is freed once the last stage holding it has
+returned. Peak component memory then becomes the largest live set required by a
+pipeline phase instead of the sum of every component.
+
+The FastH3 example enables lazy loading by default when `--num-gpus 1` is used
+and leaves it off for multi-GPU runs. `--lazy-module-load` and
+`--no-lazy-module-load` override that example-specific default. Other entrypoints
+keep the API default of `False` unless the option is set explicitly.
 
 #### Performance Impact
 
-A freed component is read from disk again on the next generation, so a
-multi-prompt run pays one reload per component per request. For a large text
-encoder that is tens of seconds. If pipeline-level `torch.compile` is enabled,
-the compile setup is reapplied after each reload; PyTorch can reuse its graph
-and kernel caches when the component structure and input shapes are unchanged.
+A freed component is read from disk again on every later `generate()`, so a
+multi-prompt run pays one reload per released component per request. If
+pipeline-level `torch.compile` is enabled, the compile setup is reapplied after
+each reload; PyTorch can reuse its graph and kernel caches when the component
+structure and input shapes are unchanged.
 
 #### Usage Recommendation
 

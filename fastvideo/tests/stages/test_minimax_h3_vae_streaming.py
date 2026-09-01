@@ -73,7 +73,12 @@ def test_decode_stage_uses_cpu_output_buffer(monkeypatch) -> None:
     latent_shape = (1, 4, 2, 4, 4)
     latents = torch.randn(latent_shape)
     rows = patchify_video_latents(latents, (1, 1, 1))
-    batch = ForwardBatch(data_type="video", latents=rows, raw_latent_shape=latent_shape)
+    batch = ForwardBatch(
+        data_type="video",
+        latents=rows,
+        raw_latent_shape=latent_shape,
+        minimax_h3_patch_size=(1, 1, 1),
+    )
     batch.extra[MINIMAX_H3_LAYOUT_KEY] = _layout(rows.shape[0], latent_shape)
     observed = {}
 
@@ -95,7 +100,7 @@ def test_decode_stage_uses_cpu_output_buffer(monkeypatch) -> None:
             output.fill_(0.25)
 
     monkeypatch.setattr(minimax_h3_decoding, "get_local_torch_device", lambda: torch.device("cpu"))
-    result = MiniMaxH3VideoDecodingStage(VAE(), SimpleNamespace(patch_size=(1, 1, 1))).forward(
+    result = MiniMaxH3VideoDecodingStage(VAE()).forward(
         batch,
         SimpleNamespace(output_type="pil", pin_cpu_memory=False, vae_cpu_offload=False, vae_parallel_decode=False),
     )
@@ -120,7 +125,7 @@ def test_decode_stages_skip_vae_on_non_output_rank(monkeypatch) -> None:
     monkeypatch.setattr(minimax_h3_decoding, "get_world_group", lambda: SimpleNamespace(is_first_rank=False))
     args = SimpleNamespace(output_type="pil", pin_cpu_memory=False, vae_cpu_offload=True, vae_parallel_decode=False)
 
-    video = MiniMaxH3VideoDecodingStage(VAE(), SimpleNamespace()).forward(ForwardBatch(data_type="video"), args)
+    video = MiniMaxH3VideoDecodingStage(VAE()).forward(ForwardBatch(data_type="video"), args)
     assert video.output.shape == (0, 3, 0, 0, 0)
 
     audio_batch = ForwardBatch(data_type="audio", latents=torch.zeros(1), audio_latents=torch.zeros(1))
@@ -173,9 +178,14 @@ def test_parallel_decode_runs_on_every_rank(monkeypatch) -> None:
             lambda rank=rank, is_first=is_first: SimpleNamespace(is_first_rank=is_first,
                                                                  world_size=4,
                                                                  rank_in_group=rank))
-        batch = ForwardBatch(data_type="video", latents=rows.clone(), raw_latent_shape=latent_shape)
+        batch = ForwardBatch(
+            data_type="video",
+            latents=rows.clone(),
+            raw_latent_shape=latent_shape,
+            minimax_h3_patch_size=(1, 1, 1),
+        )
         batch.extra[MINIMAX_H3_LAYOUT_KEY] = _layout(rows.shape[0], latent_shape)
-        result = MiniMaxH3VideoDecodingStage(VAE(), SimpleNamespace(patch_size=(1, 1, 1))).forward(batch, args)
+        result = MiniMaxH3VideoDecodingStage(VAE()).forward(batch, args)
         if is_first:
             assert result.output.shape == (1, 3, 5, 16, 16)
             assert torch.all(result.output == 0.5)

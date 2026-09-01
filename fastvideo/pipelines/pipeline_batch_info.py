@@ -163,6 +163,9 @@ class ForwardBatch:
     height_latents: list[int] | int | None = None
     width_latents: list[int] | int | None = None
     num_frames: list[int] | int = 1  # Default for image models
+    # MiniMax H3 carries this from latent preparation so video decode does not
+    # retain the DiT solely to read its patch geometry.
+    minimax_h3_patch_size: tuple[int, int, int] | None = None
 
     # Original dimensions (before VAE scaling)
     height: list[int] | int | None = None

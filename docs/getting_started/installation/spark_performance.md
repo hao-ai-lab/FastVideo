@@ -161,6 +161,7 @@ is power-cycled. To avoid it:
   on: "CPU" offload uses the same unified RAM. Multi-GPU FSDP sharding remains
   available because it partitions weights without parking them in a separate
   host pool.
+<<<<<<< Updated upstream
 - **MiniMax H3 / FastH3** still needs sequential loading on one GB10. The Qwen3-VL
   conditioner is tens of gigabytes of BF16. If the DiT and VAEs load while that
   encoder is still resident, the process is a typical `earlyoom` kill (Python is
@@ -169,7 +170,25 @@ is power-cycled. To avoid it:
   `--h3-sequential-load` only if auto-detect misses the device. The CUDA pipeline
   encodes first, releases the encoder, then loads DiT and VAEs onto the
   accelerator (`to_cpu` follows `cpu_offload`, which is off here). See
-  [Offloading](../../inference/offloading.md).
+=======
+- **MiniMax H3 / FastH3** requires lazy component loading on one GB10; otherwise
+  the text encoder, DiT, and VAEs are loaded together and can trigger an
+  `earlyoom` kill. The FastH3 example turns this on automatically with
+  `--num-gpus 1`, but make the requirement explicit in reproducible Spark
+  commands:
+
+  ```bash
+  nice -n 19 python examples/inference/basic/basic_fasth3.py \
+      --prompt "your prompt" --num-gpus 1 --lazy-module-load \
+      --vsa-kernel triton --no-fa4
+  ```
+
+  Lazy loading reads released components from disk again on every generation,
+  and it only lowers component residency; resolution-dependent activations must
+  still fit. With host offload disabled, DiT checkpoint tensors load directly
+  onto the accelerator (`to_cpu` follows `cpu_offload`, which is off here). See
+>>>>>>> Stashed changes
+[Offloading](../../inference/offloading.md).
 
 ## Gotchas specific to the GB10
 

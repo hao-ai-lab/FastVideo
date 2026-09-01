@@ -49,11 +49,12 @@ def build_parser(description: str | None = None) -> argparse.ArgumentParser:
     parser.add_argument("--prompt", required=True)
     parser.add_argument("--output", default="outputs/fasth3")
     parser.add_argument("--lazy-module-load",
-                        action="store_true",
+                        action=argparse.BooleanOptionalAction,
+                        default=None,
                         help="load each heavy component on first use and free it after the last stage that "
                         "needs it, so peak memory is the largest overlapping set instead of the sum of every "
-                        "component. Enable when the model does not fit at load time; costs a reload per "
-                        "generation, so leave it off when it does fit")
+                        "component. Defaults on for one GPU and off for multi-GPU; each generation reloads "
+                        "released components from disk")
     parser.add_argument("--profile",
                         choices=("all", "strict"),
                         default="all",
@@ -143,6 +144,8 @@ def validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> 
         parser.error("--repeats must be at least 1")
     if args.num_gpus < 1:
         parser.error("--num-gpus must be at least 1")
+    if args.lazy_module_load is None:
+        args.lazy_module_load = args.num_gpus == 1
     if not 0.0 <= args.vsa_sparsity < 1.0:
         parser.error("--vsa-sparsity must be in [0, 1)")
     if args.compile_mode is not None and args.inference_torch_compile:

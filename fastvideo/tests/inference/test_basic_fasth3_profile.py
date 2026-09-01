@@ -44,6 +44,7 @@ def test_default_all_profile_matches_fastest_contract(tmp_path):
     assert args.warmup_seed == 999
     assert args.warmup is True
     assert args.repeats == 3
+    assert args.lazy_module_load is False
     assert args.inference_torch_compile is True
     assert args.ulysses_a2a == "off"
 
@@ -55,6 +56,7 @@ def test_default_all_profile_matches_fastest_contract(tmp_path):
     assert config.engine.offload.text_encoder is True
     assert config.engine.offload.vae is True
     assert config.engine.offload.pin_cpu_memory is True
+    assert config.engine.offload.lazy_module_load is False
     assert config.engine.compile.enabled is False
     assert config.engine.compile.vae_enabled is True
     assert config.pipeline.experimental == {
@@ -84,6 +86,18 @@ def test_default_all_profile_matches_fastest_contract(tmp_path):
     assert request.sampling.guidance_scale == 1.0
     assert request.sampling.batch_cfg is False
     assert request.output.output_path == str(tmp_path / "result.mp4")
+
+
+@pytest.mark.parametrize(("overrides", "expected"), [
+    (("--num-gpus", "1"), True),
+    (("--num-gpus", "1", "--no-lazy-module-load"), False),
+    (("--lazy-module-load", ), True),
+])
+def test_lazy_module_loading_defaults_on_only_for_one_gpu(overrides, expected):
+    args = _args(*overrides)
+
+    assert args.lazy_module_load is expected
+    assert fasth3.build_generator_config(args).engine.offload.lazy_module_load is expected
 
 
 @pytest.mark.parametrize("num_frames", (124, 243, 345))

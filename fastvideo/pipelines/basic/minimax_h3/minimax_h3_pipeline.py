@@ -4,13 +4,10 @@
 from __future__ import annotations
 
 import gc
-from dataclasses import dataclass
 from typing import Any
 
 import torch
 
-from fastvideo.configs.models.vaes.minimax_h3_audio import MiniMaxH3AudioVAEArchConfig
-from fastvideo.configs.models.vaes.minimax_h3_video import MiniMaxH3VideoVAEArchConfig
 from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
@@ -32,29 +29,6 @@ logger = init_logger(__name__)
 # then load DiT + VAEs. Keeping them resident together OOMs unified-memory
 # boxes (GB10 / Spark) even though host offload is correctly disabled there.
 _DENOISE_MODULE_NAMES = ("vae", "audio_vae", "transformer")
-
-
-@dataclass(frozen=True)
-class _H3VideoGeometry:
-    spatial_compression_ratio: int
-    latent_channels: int
-
-
-@dataclass(frozen=True)
-class _H3AudioGeometry:
-    sampling_rate: int
-
-
-def _default_video_geometry() -> _H3VideoGeometry:
-    arch = MiniMaxH3VideoVAEArchConfig()
-    return _H3VideoGeometry(
-        spatial_compression_ratio=int(arch.spatial_compression_ratio),
-        latent_channels=int(arch.latent_channels),
-    )
-
-
-def _default_audio_geometry() -> _H3AudioGeometry:
-    return _H3AudioGeometry(sampling_rate=int(MiniMaxH3AudioVAEArchConfig().sampling_rate))
 
 
 class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
@@ -117,6 +91,9 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
                 raise ValueError(f"MiniMax-H3 {modality} scheduler must expose shift={expected_shift:g}, got {shift}.")
 
     def _defer_denoise_modules(self, fastvideo_args: FastVideoArgs) -> bool:
+        if self._lazy_module_load_enabled(fastvideo_args):
+            logger.info("lazy_module_load supersedes MiniMax-H3 sequential module loading")
+            return False
         if not fastvideo_args.inference_mode or bool(getattr(fastvideo_args, "training_mode", False)):
             return False
         requested = fastvideo_args.h3_sequential_load
@@ -180,22 +157,10 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-    def _input_vae(self) -> Any:
-        return self.get_module("vae") or _default_video_geometry()
-
-    def _input_audio_vae(self, *, ref2va: bool) -> Any | None:
-        if not ref2va:
-            return None
-        return self.get_module("audio_vae") or _default_audio_geometry()
-
     def _add_condition_stages(self, *, ref2va: bool) -> None:
         self.add_stage(
             "input_preparation_stage",
-            MiniMaxH3InputPreparationStage(
-                vae=self._input_vae(),
-                audio_vae=self._input_audio_vae(ref2va=ref2va),
-                ref2va=ref2va,
-            ),
+            MiniMaxH3InputPreparationStage(ref2va=ref2va),
         )
         self.add_stage(
             "conditioning_stage",
@@ -233,7 +198,7 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
                 audio_scheduler=audio_scheduler,
             ),
         )
-        self.add_stage("video_decoding_stage", MiniMaxH3VideoDecodingStage(vae=vae, transformer=transformer))
+        self.add_stage("video_decoding_stage", MiniMaxH3VideoDecodingStage(vae=vae))
         self.add_stage("audio_decoding_stage", MiniMaxH3AudioDecodingStage(audio_vae=audio_vae))
         self._denoise_stages_ready = True
 

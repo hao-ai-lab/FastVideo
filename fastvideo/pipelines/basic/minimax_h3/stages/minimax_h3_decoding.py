@@ -36,6 +36,14 @@ def _layout(batch: ForwardBatch) -> MiniMaxH3PackedLayout:
     return layout
 
 
+def _patch_size(batch: ForwardBatch) -> tuple[int, int, int]:
+    patch_size = batch.minimax_h3_patch_size
+    if (not isinstance(patch_size, tuple) or len(patch_size) != 3
+            or not all(isinstance(value, int) and value > 0 for value in patch_size)):
+        raise ValueError("MiniMax-H3 patch geometry is missing at decode.")
+    return patch_size
+
+
 def _decode_participation(fastvideo_args: FastVideoArgs, want_parallel: bool) -> tuple[Any, bool, bool]:
     """Resolve (sp_group, is_output_rank, parallel) for the VAE decode stages.
 
@@ -58,16 +66,21 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
 
     performance_component_metric = "vae_decode_time_s"
 
-    def __init__(self, vae: AutoencoderKLMiniMaxH3, transformer: Any) -> None:
+    def __init__(self, vae: AutoencoderKLMiniMaxH3) -> None:
         super().__init__()
         self.vae = vae
-        self.transformer = transformer
 
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         result = VerificationResult()
         result.add_check("layout", batch.extra.get(MINIMAX_H3_LAYOUT_KEY), V.not_none)
         result.add_check("latents", batch.latents, V.with_dims(2))
         result.add_check("raw_latent_shape", batch.raw_latent_shape, V.not_none)
+        result.add_check(
+            "minimax_h3_patch_size",
+            batch.minimax_h3_patch_size,
+            lambda value: isinstance(value, tuple) and len(value) == 3 and all(
+                isinstance(item, int) and item > 0 for item in value),
+        )
         return result
 
     def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
@@ -90,6 +103,7 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
         layout = _layout(batch)
         if batch.latents is None or batch.raw_latent_shape is None or len(batch.raw_latent_shape) != 5:
             raise ValueError("MiniMax-H3 video latents or raw geometry are missing at decode.")
+        patch_size = _patch_size(batch)
         _, channels, num_frames, latent_height, latent_width = batch.raw_latent_shape
         latents = unpatchify_video_tokens(
             batch.latents[layout.num_condition_video_rows:],
@@ -97,7 +111,7 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
             latent_height,
             latent_width,
             channels,
-            self.transformer.patch_size,
+            patch_size,
         )
         device = get_local_torch_device()
         self.vae.to(device)
@@ -207,6 +221,7 @@ class MiniMaxH3AudioDecodingStage(PipelineStage):
         batch.latents = None
         batch.audio_latents = None
         batch.references = None
+        batch.minimax_h3_patch_size = None
         for key in tuple(batch.extra):
             if key.startswith("minimax_h3_"):
                 batch.extra.pop(key)

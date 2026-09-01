@@ -139,10 +139,15 @@ def _build_operation(args, vae, device):
     latents = torch.randn(latent_shape, generator=generator, device=device, dtype=torch.float32)
     rows = patchify_video_latents(latents, patch_size)
     layout = _make_layout(rows, latent_shape)
-    stage = MiniMaxH3VideoDecodingStage(vae, transformer)
+    stage = MiniMaxH3VideoDecodingStage(vae)
 
     def run_once():
-        batch = ForwardBatch(data_type="video", latents=rows, raw_latent_shape=latent_shape)
+        batch = ForwardBatch(
+            data_type="video",
+            latents=rows,
+            raw_latent_shape=latent_shape,
+            minimax_h3_patch_size=patch_size,
+        )
         batch.extra[MINIMAX_H3_LAYOUT_KEY] = layout
         return stage.forward(batch, runtime_args).output
 

@@ -293,6 +293,8 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
 
     @torch.no_grad()
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+        patch_t, patch_h, patch_w = self.transformer.patch_size
+        batch.minimax_h3_patch_size = (int(patch_t), int(patch_h), int(patch_w))
         video_noise = batch.latents
         audio_noise = batch.audio_latents
         device = get_local_torch_device()

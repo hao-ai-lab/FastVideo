@@ -3,11 +3,14 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import cast
 
 from PIL import Image, ImageOps
 import torch
 
+from fastvideo.configs.models.vaes.minimax_h3_audio import MiniMaxH3AudioVAEArchConfig
+from fastvideo.configs.models.vaes.minimax_h3_video import MiniMaxH3VideoVAEArchConfig
+from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.models.vision_utils import load_image
 from fastvideo.pipelines.basic.minimax_h3.packing import (
@@ -69,7 +72,11 @@ def prepare_common_request(batch: ForwardBatch) -> None:
     batch.fps = MINIMAX_H3_FPS
 
 
-def resolve_target_canvas(batch: ForwardBatch, vae: Any, default_aspect: tuple[int, int]) -> tuple[int, int, int]:
+def resolve_target_canvas(
+    batch: ForwardBatch,
+    spatial_compression_ratio: int,
+    default_aspect: tuple[int, int],
+) -> tuple[int, int, int]:
     """Resolve target geometry independently of the selected condition mode."""
     if (batch.height is None) != (batch.width is None):
         raise ValueError("MiniMax-H3 `height` and `width` must be passed together, or neither.")
@@ -83,7 +90,7 @@ def resolve_target_canvas(batch: ForwardBatch, vae: Any, default_aspect: tuple[i
             raise ValueError(f"MiniMax-H3 `height` and `width` must be positive multiples of "
                              f"{MINIMAX_H3_CANVAS_MULTIPLE}, got {height}x{width}.")
 
-    ratio = int(vae.spatial_compression_ratio)
+    ratio = int(spatial_compression_ratio)
     if height % ratio or width % ratio:
         raise ValueError(f"MiniMax-H3 canvas {height}x{width} is not divisible by VAE ratio {ratio}.")
     return height, width, ratio
@@ -104,12 +111,8 @@ def resolve_target_num_frames(num_frames: object) -> int:
 class MiniMaxH3InputPreparationStage(PipelineStage):
     """Prepare FL2VA/T2VA or Ref2VA inputs without a parallel family state object."""
 
-    def __init__(self, vae: Any, audio_vae: Any | None = None, *, ref2va: bool = False) -> None:
+    def __init__(self, *, ref2va: bool = False) -> None:
         super().__init__()
-        if ref2va and audio_vae is None:
-            raise ValueError("MiniMax-H3 Ref2VA input preparation requires an audio VAE.")
-        self.vae = vae
-        self.audio_vae = audio_vae
         self.ref2va = ref2va
 
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
@@ -153,11 +156,18 @@ class MiniMaxH3InputPreparationStage(PipelineStage):
             )
         return result
 
-    def _write_target_geometry(self, batch: ForwardBatch, height: int, width: int, ratio: int, num_frames: int) -> None:
+    def _write_target_geometry(
+        self,
+        batch: ForwardBatch,
+        height: int,
+        width: int,
+        ratio: int,
+        num_frames: int,
+        latent_channels: int,
+    ) -> None:
         latent_height = height // ratio
         latent_width = width // ratio
         num_latent_frames = video_latent_num_frames(num_frames)
-        latent_channels = int(self.vae.latent_channels)
 
         batch.height = height
         batch.width = width
@@ -166,7 +176,7 @@ class MiniMaxH3InputPreparationStage(PipelineStage):
         batch.width_latents = latent_width
         batch.raw_latent_shape = (1, latent_channels, num_latent_frames, latent_height, latent_width)
 
-    def _prepare_fl2va(self, batch: ForwardBatch) -> None:
+    def _prepare_fl2va(self, batch: ForwardBatch, spatial_ratio: int, latent_channels: int) -> None:
         if batch.references:
             raise ValueError("MiniMax-H3 references belong to the Ref2VA pipeline.")
 
@@ -180,9 +190,9 @@ class MiniMaxH3InputPreparationStage(PipelineStage):
                          for anchor, image in (("first", batch.pil_image), ("last", batch.last_image))
                          if image is not None]
         default_aspect = raw_keyframes[0][1].size if raw_keyframes else (16, 9)
-        height, width, ratio = resolve_target_canvas(batch, self.vae, default_aspect)
+        height, width, ratio = resolve_target_canvas(batch, spatial_ratio, default_aspect)
         num_frames = resolve_target_num_frames(batch.num_frames)
-        self._write_target_geometry(batch, height, width, ratio, num_frames)
+        self._write_target_geometry(batch, height, width, ratio, num_frames, latent_channels)
 
         batch.extra[MINIMAX_H3_KEYFRAME_ANCHORS_KEY] = tuple(anchor for anchor, _ in raw_keyframes)
         batch.extra[MINIMAX_H3_KEYFRAMES_KEY] = [
@@ -190,29 +200,41 @@ class MiniMaxH3InputPreparationStage(PipelineStage):
             for index, (_, image) in enumerate(raw_keyframes)
         ]
 
-    def _prepare_ref2va(self, batch: ForwardBatch) -> None:
+    def _prepare_ref2va(
+        self,
+        batch: ForwardBatch,
+        spatial_ratio: int,
+        latent_channels: int,
+        audio_sampling_rate: int,
+    ) -> None:
         if batch.image_path is not None or batch.pil_image is not None or batch.last_image is not None:
             raise ValueError("MiniMax-H3 Ref2VA accepts media through `references`, not FL2VA keyframe fields.")
         references = validate_references(list(batch.references or []))
-        if self.audio_vae is None:
-            raise RuntimeError("MiniMax-H3 Ref2VA input preparation has no audio VAE.")
 
-        height, width, ratio = resolve_target_canvas(batch, self.vae, (16, 9))
+        height, width, ratio = resolve_target_canvas(batch, spatial_ratio, (16, 9))
         num_frames = resolve_target_num_frames(batch.num_frames)
-        target_sample_rate = int(self.audio_vae.sampling_rate)
-        batch.references = [prepare_reference(reference, num_frames, target_sample_rate) for reference in references]
-        self._write_target_geometry(batch, height, width, ratio, num_frames)
+        batch.references = [prepare_reference(reference, num_frames, audio_sampling_rate) for reference in references]
+        self._write_target_geometry(batch, height, width, ratio, num_frames, latent_channels)
         batch.extra[MINIMAX_H3_KEYFRAMES_KEY] = []
         batch.extra[MINIMAX_H3_KEYFRAME_ANCHORS_KEY] = ()
 
     @torch.no_grad()
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
-        del fastvideo_args
+        pipeline_config = cast(MiniMaxH3PipelineConfig, fastvideo_args.pipeline_config)
+        video_arch = cast(MiniMaxH3VideoVAEArchConfig, pipeline_config.vae_config.arch_config)
+        audio_arch = cast(MiniMaxH3AudioVAEArchConfig, pipeline_config.audio_vae_config.arch_config)
+        spatial_ratio = int(video_arch.spatial_compression_ratio)
+        latent_channels = int(video_arch.latent_channels)
         prepare_common_request(batch)
         if self.ref2va:
-            self._prepare_ref2va(batch)
+            self._prepare_ref2va(
+                batch,
+                spatial_ratio,
+                latent_channels,
+                int(audio_arch.sampling_rate),
+            )
         else:
-            self._prepare_fl2va(batch)
+            self._prepare_fl2va(batch, spatial_ratio, latent_channels)
         return batch
 
 

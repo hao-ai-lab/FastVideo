@@ -721,6 +721,78 @@ def test_building_the_real_h3_stages_materializes_nothing():
     assert len(pipeline._stages) == 6
 
 
+def test_real_h3_input_prep_uses_arch_config_without_materializing_vaes():
+    from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
+    from fastvideo.pipelines.basic.minimax_h3.minimax_h3_pipeline import MiniMaxH3Pipeline
+    from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+
+    loaded: list[str] = []
+
+    def tracked(name):
+        return LazyModule(name, lambda: loaded.append(name) or _Component(name))
+
+    pipeline = MiniMaxH3Pipeline.__new__(MiniMaxH3Pipeline)
+    pipeline._stages = []
+    pipeline._stage_name_mapping = {}
+    pipeline.modules = {
+        "text_encoder": tracked("text_encoder"),
+        "transformer": tracked("transformer"),
+        "vae": tracked("vae"),
+        "audio_vae": tracked("audio_vae"),
+        "tokenizer": object(),
+        "processor": object(),
+        "scheduler": object(),
+        "audio_scheduler": object(),
+    }
+    pipeline._add_stages(ref2va=False)
+    batch = ForwardBatch(
+        data_type="video",
+        prompt="A test prompt",
+        height=192,
+        width=320,
+        num_frames=124,
+    )
+    args = SimpleNamespace(pipeline_config=MiniMaxH3PipelineConfig())
+
+    result = pipeline._stages[0].forward(batch, args)
+
+    assert result is batch
+    assert loaded == []
+    assert batch.height_latents == 12
+    assert batch.width_latents == 20
+    assert batch.raw_latent_shape is not None
+    assert batch.raw_latent_shape[1] == 24
+
+
+def test_real_h3_release_schedule_drops_transformer_before_video_decode():
+    from fastvideo.pipelines.basic.minimax_h3.minimax_h3_pipeline import MiniMaxH3Pipeline
+
+    def tracked(name):
+        return LazyModule(name, lambda: _Component(name))
+
+    pipeline = MiniMaxH3Pipeline.__new__(MiniMaxH3Pipeline)
+    pipeline._stages = []
+    pipeline._stage_name_mapping = {}
+    pipeline.modules = {
+        "text_encoder": tracked("text_encoder"),
+        "transformer": tracked("transformer"),
+        "vae": tracked("vae"),
+        "audio_vae": tracked("audio_vae"),
+        "tokenizer": object(),
+        "processor": object(),
+        "scheduler": object(),
+        "audio_scheduler": object(),
+    }
+    pipeline._add_stages(ref2va=False)
+
+    assert pipeline._build_lazy_release_schedule() == {
+        1: ["text_encoder"],
+        3: ["transformer"],
+        4: ["vae"],
+        5: ["audio_vae"],
+    }
+
+
 class _LoRAConfigComponent(torch.nn.Module):
 
     def __init__(self, excluded_layers):
