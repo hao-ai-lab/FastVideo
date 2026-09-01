@@ -5,7 +5,7 @@ hide:
 
 # Kandinsky 5 recipes
 
-<div class="cookbook-shell cookbook-family-page" data-cookbook data-family="kandinsky5" data-recipes="../../assets/cookbook-recipes.json?v=6">
+<div class="cookbook-shell cookbook-family-page" data-cookbook data-family="kandinsky5" data-recipes="../../assets/cookbook-recipes.json?v=7">
   <header class="cookbook-family-header">
     <a class="cookbook-back-link" href="../"><span aria-hidden="true">←</span> All model families</a>
     <div class="cookbook-family-header__body">
@@ -28,6 +28,12 @@ hide:
       <span class="cookbook-lifecycle__stage">Deployment <small>planned</small></span>
     </div>
   </header>
+  <nav class="cookbook-jumpnav" aria-label="Recipe page sections">
+    <a href="#recipe-builder">Builder</a>
+    <a href="#cookbook-setup">Setup</a>
+    <a href="#cookbook-troubleshooting">Troubleshooting</a>
+    <a href="#cookbook-evidence">Evidence</a>
+  </nav>
 
   <section class="cookbook-builder" id="recipe-builder" aria-labelledby="builder-heading">
     <div class="cookbook-builder__intro">
@@ -106,23 +112,29 @@ hide:
   </section>
 </div>
 
-## Before you run
+<details class="cookbook-collapsible" id="cookbook-setup">
+  <summary>Setup</summary>
+  <div class="cookbook-collapsible__body">
+      <p>The generated commands expect a local clone:</p>
+      <pre><code>git clone https://github.com/hao-ai-lab/FastVideo.git
+cd FastVideo</code></pre>
+      <p>Use <a href="../../inference/configuration/">Configuration</a> for supported Python and CLI settings, <a href="../../inference/optimizations/">Optimizations</a> for attention and memory tradeoffs, and the <a href="../../inference/support_matrix/">support matrix</a> for the supported model and optimization surface.</p>
+  </div>
+</details>
 
-The generated commands expect a local clone:
+<details class="cookbook-collapsible" id="cookbook-troubleshooting">
+  <summary>Troubleshooting</summary>
+  <div class="cookbook-collapsible__body">
+      <ul>
+        <li>Alternative Lite/Pro checkpoints are listed inline in the maintained examples; swap the model string only after checking its Hugging Face card.</li>
+        <li>Gated or missing checkpoints: run <code>huggingface-cli login</code> and confirm you accepted the model's license on Hugging Face.</li>
+      </ul>
+  </div>
+</details>
 
-    git clone https://github.com/hao-ai-lab/FastVideo.git
-    cd FastVideo
-
-Use [Configuration](../inference/configuration.md) for supported Python and
-CLI settings, [Optimizations](../inference/optimizations.md) for attention and
-memory tradeoffs, and the [support matrix](../inference/support_matrix.md) for
-the supported model and optimization surface.
-
-## Troubleshooting
-
-- Alternative Lite/Pro checkpoints are listed inline in the maintained examples; swap the model string only after checking its Hugging Face card.
-- Gated or missing checkpoints: run `huggingface-cli login` and confirm you accepted the model's license on Hugging Face.
-
-## Evidence status
-
-Both recipes map to checked-in FastVideo examples and recorded single-GPU B200 runs. The image-to-video run also records 10,365.89 MB peak GPU memory. These measurements describe the recorded runs; they are not minimum hardware requirements.
+<details class="cookbook-collapsible" id="cookbook-evidence">
+  <summary>Evidence status</summary>
+  <div class="cookbook-collapsible__body">
+      <p>Both recipes map to checked-in FastVideo examples and recorded single-GPU B200 runs. The image-to-video run also records 10,365.89 MB peak GPU memory. These measurements describe the recorded runs; they are not minimum hardware requirements.</p>
+  </div>
+</details>

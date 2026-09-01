@@ -5,7 +5,7 @@ hide:
 
 # Stable Audio recipes
 
-<div class="cookbook-shell cookbook-family-page" data-cookbook data-family="stable_audio" data-recipes="../../assets/cookbook-recipes.json?v=6">
+<div class="cookbook-shell cookbook-family-page" data-cookbook data-family="stable_audio" data-recipes="../../assets/cookbook-recipes.json?v=7">
   <header class="cookbook-family-header">
     <a class="cookbook-back-link" href="../"><span aria-hidden="true">←</span> All model families</a>
     <div class="cookbook-family-header__body">
@@ -28,6 +28,12 @@ hide:
       <span class="cookbook-lifecycle__stage">Deployment <small>planned</small></span>
     </div>
   </header>
+  <nav class="cookbook-jumpnav" aria-label="Recipe page sections">
+    <a href="#recipe-builder">Builder</a>
+    <a href="#cookbook-setup">Setup</a>
+    <a href="#cookbook-troubleshooting">Troubleshooting</a>
+    <a href="#cookbook-evidence">Evidence</a>
+  </nav>
 
   <section class="cookbook-builder" id="recipe-builder" aria-labelledby="builder-heading">
     <div class="cookbook-builder__intro">
@@ -106,23 +112,29 @@ hide:
   </section>
 </div>
 
-## Before you run
+<details class="cookbook-collapsible" id="cookbook-setup">
+  <summary>Setup</summary>
+  <div class="cookbook-collapsible__body">
+      <p>The generated commands expect a local clone:</p>
+      <pre><code>git clone https://github.com/hao-ai-lab/FastVideo.git
+cd FastVideo</code></pre>
+      <p>Use <a href="../../inference/configuration/">Configuration</a> for supported Python and CLI settings, <a href="../../inference/optimizations/">Optimizations</a> for attention and memory tradeoffs, and the <a href="../../inference/support_matrix/">support matrix</a> for the supported model and optimization surface.</p>
+  </div>
+</details>
 
-The generated commands expect a local clone:
+<details class="cookbook-collapsible" id="cookbook-troubleshooting">
+  <summary>Troubleshooting</summary>
+  <div class="cookbook-collapsible__body">
+      <ul>
+        <li>Loader errors about monolithic checkpoints mean an upstream <code>stabilityai/stable-audio-open-*</code> ID was used; use the FastVideo converted repos from the recipes.</li>
+        <li>Duration and step knobs (<code>audio_end_in_s</code>, <code>num_inference_steps</code>) are documented inline in the example source.</li>
+      </ul>
+  </div>
+</details>
 
-    git clone https://github.com/hao-ai-lab/FastVideo.git
-    cd FastVideo
-
-Use [Configuration](../inference/configuration.md) for supported Python and
-CLI settings, [Optimizations](../inference/optimizations.md) for attention and
-memory tradeoffs, and the [support matrix](../inference/support_matrix.md) for
-the supported model and optimization surface.
-
-## Troubleshooting
-
-- Loader errors about monolithic checkpoints mean an upstream `stabilityai/stable-audio-open-*` ID was used; use the FastVideo converted repos from the recipes.
-- Duration and step knobs (`audio_end_in_s`, `num_inference_steps`) are documented inline in the example source.
-
-## Evidence status
-
-The Stable Audio Open 1.0 recipe maps to a checked-in example and a recorded single-GPU B200 run. The Stable Audio Open Small recipe remains **Source-backed** because the implementation PR did not record a full run for that gated checkpoint. Neither recipe claims a minimum VRAM requirement.
+<details class="cookbook-collapsible" id="cookbook-evidence">
+  <summary>Evidence status</summary>
+  <div class="cookbook-collapsible__body">
+      <p>The Stable Audio Open 1.0 recipe maps to a checked-in example and a recorded single-GPU B200 run. The Stable Audio Open Small recipe remains <strong>Source-backed</strong> because the implementation PR did not record a full run for that gated checkpoint. Neither recipe claims a minimum VRAM requirement.</p>
+  </div>
+</details>

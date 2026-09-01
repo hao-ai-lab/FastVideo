@@ -163,6 +163,31 @@ def validate_cookbook() -> None:
                                   or any(not isinstance(item, str) or not item.strip() for item in modes)):
             raise ValueError(f"Cookbook recipe modes must be a non-empty list of strings: {recipe['id']}")
 
+        knobs = recipe.get("knobs", [])
+        if not isinstance(knobs, list):
+            raise ValueError(f"Cookbook recipe knobs must be a list: {recipe['id']}")
+        knob_keys: set[str] = set()
+        for knob in knobs:
+            if not isinstance(knob, dict):
+                raise ValueError(f"Cookbook recipe knob must be an object: {recipe['id']}")
+            required_knob = ("key", "label", "flag", "options", "default")
+            missing_knob = {key for key in required_knob if key not in knob}
+            if missing_knob:
+                raise ValueError(f"Cookbook recipe knob is missing: {recipe['id']}: {', '.join(sorted(missing_knob))}")
+            if knob["key"] in knob_keys:
+                raise ValueError(f"Duplicate cookbook recipe knob key: {recipe['id']}: {knob['key']}")
+            knob_keys.add(knob["key"])
+            if not isinstance(knob["flag"], str) or not knob["flag"].startswith("--"):
+                raise ValueError(f"Cookbook recipe knob flag must start with --: {recipe['id']}: {knob['key']}")
+            options = knob["options"]
+            if not isinstance(options, list) or not options:
+                raise ValueError(
+                    f"Cookbook recipe knob options must be a non-empty list: {recipe['id']}: {knob['key']}")
+            option_values = [option["value"] if isinstance(option, dict) else option for option in options]
+            if knob["default"] not in option_values:
+                raise ValueError(
+                    f"Cookbook recipe knob default must be one of its options: {recipe['id']}: {knob['key']}")
+
         source = (ROOT_DIR / recipe["source"]).resolve()
         if not any(source.is_relative_to(root.resolve()) for root in COOKBOOK_SOURCE_ROOTS):
             raise ValueError(f"Cookbook source is outside an approved directory: {recipe['source']}")
@@ -170,6 +195,19 @@ def validate_cookbook() -> None:
             raise ValueError(f"Cookbook source does not exist: {recipe['source']}")
 
         source_text = source.read_text(encoding="utf-8")
+        if knobs:
+            # A script that shares its argument parser with a sibling module
+            # (e.g. `from . import basic_fasth3`) inherits that module's
+            # flags without the flag text appearing in its own source.
+            knob_source_text = source_text
+            for match in re.finditer(r'(?:from\s+\.\s+import|^\s*import)\s+(\w+)', source_text, flags=re.MULTILINE):
+                sibling = source.parent / f"{match.group(1)}.py"
+                if sibling.is_file() and sibling != source:
+                    knob_source_text += "\n" + sibling.read_text(encoding="utf-8")
+            for knob in knobs:
+                if knob["flag"] not in knob_source_text:
+                    raise ValueError(f"Cookbook recipe knob flag is not in its source: {recipe['id']}: {knob['flag']}")
+
         # The model must be traceable to the checked-in source itself, or be
         # passed explicitly on the command line (e.g. --model-path <model> or
         # MODEL_PATH=<model>) when the source reads it from arguments/env.

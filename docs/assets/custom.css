@@ -146,8 +146,7 @@ img {
 }
 
 .cookbook-section,
-.cookbook-builder,
-.cookbook-roadmap {
+.cookbook-builder {
     scroll-margin-top: 4.5rem;
 }
 
@@ -180,8 +179,7 @@ img {
 }
 
 .md-typeset .cookbook-section__heading h2,
-.md-typeset .cookbook-builder__intro h2,
-.md-typeset .cookbook-roadmap h2 {
+.md-typeset .cookbook-builder__intro h2 {
     margin: 0;
     color: var(--md-default-fg-color);
     font-size: clamp(1.4rem, 2.6vw, 1.85rem);
@@ -493,8 +491,7 @@ img {
     max-width: 45rem;
 }
 
-.cookbook-builder__intro > p,
-.cookbook-roadmap > p {
+.cookbook-builder__intro > p {
     color: var(--md-default-fg-color--light);
     font-size: 0.75rem;
     line-height: 1.6;
@@ -767,12 +764,6 @@ img {
     margin-top: 0.8rem;
     font-size: 0.62rem;
     font-weight: 700;
-}
-
-.cookbook-roadmap {
-    padding: 2.5rem 0;
-    margin: 3.5rem 0 1rem;
-    border-top: 1px solid var(--cookbook-border);
 }
 
 /* Lifecycle roadmap on family pages: inference is live; later stages are
@@ -1058,6 +1049,55 @@ img {
     overflow-wrap: anywhere;
 }
 
+.cookbook-jumpnav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.1rem;
+    max-width: 48rem;
+    margin: 0 auto 1.75rem;
+    padding: 0.55rem 0;
+    border-top: 1px solid var(--cookbook-border);
+    border-bottom: 1px solid var(--cookbook-border);
+}
+
+.md-typeset .cookbook-jumpnav a {
+    font-family: var(--md-code-font-family);
+    font-size: 0.7rem;
+    letter-spacing: 0.02em;
+    color: var(--md-default-fg-color--light);
+    text-decoration: none;
+}
+
+.md-typeset .cookbook-jumpnav a:hover {
+    color: var(--cookbook-accent-strong);
+}
+
+.cookbook-family-page details.cookbook-collapsible {
+    max-width: 48rem;
+    margin: 0 auto 0.75rem;
+    border-color: var(--cookbook-border);
+    box-shadow: none;
+}
+
+.md-typeset details.cookbook-collapsible > summary {
+    background: var(--cookbook-surface-raised);
+    font-size: 0.85rem;
+}
+
+.md-typeset .cookbook-collapsible__body {
+    font-size: 0.8rem;
+    line-height: 1.65;
+    color: var(--md-default-fg-color--light);
+}
+
+.md-typeset .cookbook-collapsible__body .cookbook-eyebrow {
+    margin-top: 0.9rem;
+}
+
+.md-typeset .cookbook-collapsible__body pre {
+    margin: 0.5rem 0 1rem;
+}
+
 .cookbook-family-page {
     max-width: 62rem;
 }
@@ -1181,6 +1221,10 @@ img {
 }
 
 .cookbook-selection-row + .cookbook-selection-row {
+    margin-top: 0.55rem;
+}
+
+[data-cookbook-knobs]:not(:empty) {
     margin-top: 0.55rem;
 }
 

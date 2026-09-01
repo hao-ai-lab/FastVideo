@@ -41,13 +41,14 @@ hide:
         <span class="cookbook-family-tile__footer">
           <span class="cookbook-family-tile__footer-top">
             <span><strong>MiniMax H3</strong><small>Video + stereo audio</small></span>
-            <span class="cookbook-count">6 recipes</span>
+            <span class="cookbook-count">7 recipes</span>
           </span>
           <ul class="cookbook-mode-row">
             <li>T2VA</li>
             <li>FL2VA</li>
             <li>Ref2VA</li>
             <li>MLX T2VA</li>
+            <li>2-Spark SP</li>
           </ul>
         </span>
       </a>
@@ -453,19 +454,6 @@ hide:
         </span>
       </article>
     </div>
-  </section>
-
-  <section class="cookbook-roadmap" aria-labelledby="roadmap-heading">
-    <h2 id="roadmap-heading">Inference first, then the full workflow</h2>
-    <p>
-      Inference is the first complete stage. Distillation, fine-tuning,
-      training, evaluation, optimization, and deployment will reuse the same
-      family-first structure as their recipes land. Each family page shows
-      which stages are available and which are planned. Two DGX Sparks: bring up
-      the QSFP Ray cluster first
-      (<a href="../getting_started/installation/spark_pair/">pair two Sparks</a>),
-      then pick the FastH3 two-Spark recipe.
-    </p>
   </section>
 </div>
 

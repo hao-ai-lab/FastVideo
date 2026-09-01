@@ -94,6 +94,31 @@
     return `${count} GPU${count === 1 ? "" : "s"}`;
   };
 
+  const knobsFor = (recipe) => recipe.knobs || [];
+
+  const knobOptions = (knob) =>
+    knob.options.map((option) =>
+      option !== null && typeof option === "object" ? option : { value: option, label: String(option) },
+    );
+
+  const knobDefaultLabel = (knob) => {
+    const match = knobOptions(knob).find((option) => option.value === knob.default);
+    return match ? match.label : String(knob.default);
+  };
+
+  // Knob flags are always shown explicitly in the displayed command, even at
+  // their default value, so the command stays copy-pasteable and precise
+  // about what it runs -- not just "trust the script's own default".
+  const appendKnobFlags = (commandText, knobs, knobValues) => {
+    const flags = knobs
+      .filter((knob) => knobValues[knob.key] !== undefined)
+      .map((knob) => `${knob.flag} ${knobValues[knob.key]}`);
+    if (!flags.length) return commandText;
+    const lines = commandText.split("\n");
+    lines[lines.length - 1] = `${lines[lines.length - 1]} ${flags.join(" ")}`;
+    return lines.join("\n");
+  };
+
   const runtimeFor = (recipe) => {
     const platform = recipe.hardware?.platform || "cuda";
     if (platform === "mlx") {
@@ -223,6 +248,7 @@
     const servingPanel = root.querySelector("[data-cookbook-serving]");
     const usage = root.querySelector("[data-cookbook-usage]");
     const servingAvailability = root.querySelector("[data-cookbook-serving-availability]");
+    const knobsContainer = root.querySelector("[data-cookbook-knobs]");
 
     modelOptions.setAttribute("aria-label", "Recipe");
     hardwareOptions.setAttribute("aria-label", "Runtime");
@@ -289,6 +315,63 @@
     const clientDetails = servingPanel?.querySelector(".cookbook-serving__code");
     if (clientDetails && query.has("client")) clientDetails.open = true;
 
+    const knobDefs = new Map();
+    familyRecipes.forEach((recipe) => knobsFor(recipe).forEach((knob) => {
+      if (!knobDefs.has(knob.key)) knobDefs.set(knob.key, knob);
+    }));
+    const knobValues = {};
+    knobDefs.forEach((knob, key) => {
+      const fromQuery = query.get(key);
+      const validValues = knobOptions(knob).map((option) => String(option.value));
+      const useQueryValue = fromQuery !== null && validValues.includes(fromQuery);
+      const raw = useQueryValue ? fromQuery : knob.default;
+      knobValues[key] = typeof knob.default === "number" ? Number(raw) : raw;
+    });
+
+    const renderKnobs = (recipe, hidden) => {
+      if (!knobsContainer) return;
+      const knobs = knobsFor(recipe);
+      const renderedKeys = [...knobsContainer.querySelectorAll("[data-knob-row]")].map((row) => row.dataset.knobRow);
+      if (renderedKeys.join(",") !== knobs.map((knob) => knob.key).join(",")) {
+        knobsContainer.replaceChildren();
+        knobs.forEach((knob) => {
+          const row = document.createElement("div");
+          row.className = "cookbook-selection-row";
+          row.dataset.knobRow = knob.key;
+          const labelWrap = document.createElement("div");
+          labelWrap.className = "cookbook-selection-row__label";
+          const strongLabel = document.createElement("strong");
+          strongLabel.textContent = knob.label;
+          const hintLabel = document.createElement("span");
+          hintLabel.textContent = knob.hint || "";
+          labelWrap.append(strongLabel, hintLabel);
+          const grid = document.createElement("div");
+          grid.className = "cookbook-option-grid cookbook-option-grid--hardware";
+          grid.setAttribute("role", "group");
+          grid.setAttribute("aria-label", knob.label);
+          knobOptions(knob).forEach((option) => {
+            const optionButton = document.createElement("button");
+            optionButton.type = "button";
+            optionButton.dataset.knobKey = knob.key;
+            optionButton.dataset.knobValue = String(option.value);
+            optionButton.setAttribute("aria-pressed", "false");
+            const optionLabel = document.createElement("strong");
+            optionLabel.textContent = option.label;
+            optionButton.append(optionLabel);
+            grid.append(optionButton);
+          });
+          row.append(labelWrap, grid);
+          knobsContainer.append(row);
+        });
+      }
+      knobsContainer.hidden = hidden || knobs.length === 0;
+      knobsContainer.querySelectorAll("button[data-knob-key]").forEach((optionButton) => {
+        const selected = String(knobValues[optionButton.dataset.knobKey]) === optionButton.dataset.knobValue;
+        optionButton.classList.toggle("cookbook-option--selected", selected);
+        optionButton.setAttribute("aria-pressed", String(selected));
+      });
+    };
+
     const renderRuntimeOptions = () => {
       const groupRecipes = groups.get(selectedGroupId) || [];
       const renderedIds = [...hardwareOptions.querySelectorAll("[data-recipe-id]")].map((option) => option.dataset.recipeId);
@@ -340,6 +423,8 @@
       const useServer = Boolean(profile && usagePreference === "server");
       // The measured local profile and the server config have separate evidence.
       const activeRecipe = useServer ? { ...recipe, hardware: profile.hardware, evidence: "Source-backed" } : recipe;
+      const knobs = knobsFor(recipe);
+      renderKnobs(recipe, useServer);
 
       if (usage) {
         usage.querySelectorAll("[data-cookbook-mode]").forEach((option) => {
@@ -418,17 +503,21 @@
       source.href = `https://github.com/hao-ai-lab/FastVideo/blob/main/${useServer ? profile.source : recipe.source}`;
       source.textContent = useServer ? "View server configuration" : "Open example source";
       modelLink.href = `https://huggingface.co/${recipe.model}`;
-      command.textContent = recipe.command;
+      command.textContent = useServer ? recipe.command : appendKnobFlags(recipe.command, knobs, knobValues);
 
       renderHardwareEvidence(hardwareState, hardwareBadge, activeRecipe);
 
-      const limitations = useServer ? [
+      const knobCaveats = useServer ? [] : knobs
+        .filter((knob) => String(knobValues[knob.key]) !== String(knob.default))
+        .map((knob) => `${knob.label} is set away from its recorded default (${knobDefaultLabel(knob)}). ` +
+          "The script accepts this value, but it has not been benchmarked here.");
+      const limitations = [...(useServer ? [
         profile.runtime === "mlx"
           ? "This MLX server config has no recorded hardware run. Measurements from the Python recipe are not server memory requirements. Only text-to-video/audio is wired; reference inputs and fast modes are not exposed here."
           : "This server config has no recorded serving benchmark. Compilation is disabled, unlike the measured Python performance profile.",
         `${profile.sampling.width} × ${profile.sampling.height} · ${profile.sampling.num_frames} frames · ${profile.sampling.fps} fps. The server supplies these defaults; the client sends the model and prompt.`,
         "Generation is serialized. Job metadata is held in memory and is lost when the server restarts.",
-      ] : recipe.limitations || [];
+      ] : recipe.limitations || []), ...knobCaveats];
       notes.replaceChildren();
       notes.hidden = limitations.length === 0;
       if (limitations.length) {
@@ -447,6 +536,10 @@
       nextQuery.set("recipe", recipe.id);
       nextQuery.set("runtime", runtime.id);
       nextQuery.delete("gpus");
+      knobDefs.forEach((knob, key) => {
+        if (knobs.some((activeKnob) => activeKnob.key === key)) nextQuery.set(key, String(knobValues[key]));
+        else nextQuery.delete(key);
+      });
       if (usage) {
         nextQuery.set("use", useServer ? "server" : "python");
         if (useServer && clientDetails?.open) nextQuery.set("client", selectedClient);
@@ -484,6 +577,14 @@
       selectedClient = option.dataset.cookbookClient;
       render({ historyMode: "push" });
     });
+    knobsContainer?.addEventListener("click", (event) => {
+      const option = event.target.closest("button[data-knob-key]");
+      if (!option) return;
+      const knob = knobDefs.get(option.dataset.knobKey);
+      knobValues[option.dataset.knobKey] = typeof knob.default === "number"
+        ? Number(option.dataset.knobValue) : option.dataset.knobValue;
+      render({ historyMode: "push" });
+    });
 
     render();
 
@@ -496,6 +597,13 @@
       usagePreference = workflow(nextQuery.get("use"));
       selectedClient = ["python", "javascript", "curl"].includes(nextQuery.get("client")) ? nextQuery.get("client") : "curl";
       if (clientDetails) clientDetails.open = nextQuery.has("client");
+      knobDefs.forEach((knob, key) => {
+        const fromQuery = nextQuery.get(key);
+        const validValues = knobOptions(knob).map((option) => String(option.value));
+        if (fromQuery !== null && validValues.includes(fromQuery)) {
+          knobValues[key] = typeof knob.default === "number" ? Number(fromQuery) : fromQuery;
+        }
+      });
       render({ historyMode: "none" });
     };
     bindFamilyPopstate();
