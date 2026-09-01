@@ -4,8 +4,9 @@
 FastVideo supports the following hardware platforms:
 
 - [NVIDIA CUDA](installation/gpu.md)
-- [NVIDIA DGX Spark / GB10 (ARM64 + CUDA 13)](installation/spark.md)
-  ([performance & tuning](installation/spark_performance.md))
+- **NVIDIA DGX Spark / GB10 (ARM64 + CUDA 13)** — [install](installation/spark.md),
+  [performance](installation/spark_performance.md),
+  [pair two Sparks](installation/spark_pair.md)
 - [Apple silicon](installation/mps.md)
 
 ## Quick Installation

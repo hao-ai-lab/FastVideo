@@ -84,6 +84,18 @@ def test_default_all_profile_matches_fastest_contract(tmp_path):
     assert request.sampling.guidance_scale == 1.0
     assert request.sampling.batch_cfg is False
     assert request.output.output_path == str(tmp_path / "result.mp4")
+    assert config.engine.offload.lazy_module_load is None
+
+
+def test_lazy_module_load_is_tri_state():
+    config = fasth3.build_generator_config(_args("--num-gpus", "1"))
+    assert config.engine.offload.lazy_module_load is None
+
+    enabled = fasth3.build_generator_config(_args("--lazy-module-load"))
+    assert enabled.engine.offload.lazy_module_load is True
+
+    disabled = fasth3.build_generator_config(_args("--no-lazy-module-load"))
+    assert disabled.engine.offload.lazy_module_load is False
 
 
 @pytest.mark.parametrize("num_frames", (124, 243, 345))

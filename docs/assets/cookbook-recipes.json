@@ -646,6 +646,29 @@
       "limitations": ["The upstream checkpoint must be converted to Diffusers layout via scripts/checkpoint_conversion/convert_mmaudio_to_diffusers.py unless loaded from the FastVideo converted repo as done here."]
     },
     {
+      "id": "fasth3-spark-pair",
+      "family": "minimax_h3",
+      "stage": "inference",
+      "task": "Few-step text to video (with audio)",
+      "label": "FastH3 on two DGX Sparks (sequence parallel)",
+      "summary": "Run one FastH3 clip across two GB10s with Ray sequence parallel over QSFP RoCE. Sequential load and lazy module load stay on because SP replicates the DiT on each node.",
+      "model": "FastVideo/FastVideo-FastH3-4-step-Preview-v1-VSA-DataFree",
+      "source": "examples/inference/basic/basic_fasth3_spark_pair.yaml",
+      "command": "source examples/inference/optimizations/spark_pair_env.sh && FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 FASTVIDEO_VAE_PARALLEL_DECODE=1 fastvideo generate --config examples/inference/basic/basic_fasth3_spark_pair.yaml",
+      "gpu_types": ["NVIDIA"],
+      "hardware": {
+        "platform": "cuda",
+        "gpu_count": 2,
+        "accelerator": "NVIDIA GB10 (DGX Spark pair)",
+        "evidence": "validated",
+        "evidence_url": "https://github.com/hao-ai-lab/FastVideo/pull/1803"
+      },
+      "evidence": "Verified",
+      "expected_artifact": "MP4 under outputs/fasth3_spark_pair/",
+      "modes": ["T2VA", "2-Spark SP"],
+      "limitations": ["Requires a two-node Ray cluster on the QSFP interconnect. Height, width, frames, and steps in the YAML are examples. Edit them or pass CLI flags. See docs/getting_started/installation/spark_pair.md."]
+    },
+    {
       "id": "matrix-game-2",
       "family": "matrixgame",
       "stage": "inference",

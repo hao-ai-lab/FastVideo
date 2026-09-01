@@ -173,6 +173,17 @@ class FastVideoArgs:
     taeh3_checkpoint: str | None = None
     taeh3_chunk_size: int = 5
 
+    # Load each heavy component on first use and free it once the last stage
+    # that holds it has run, instead of keeping every component resident from
+    # load time to shutdown. Peak memory becomes the largest overlapping set
+    # rather than the sum of all components. ``None`` (auto) turns this on for
+    # unified-memory devices (GB10 / Spark) after the worker binds its device,
+    # and leaves it off on discrete GPUs. Explicit True / False overrides the
+    # probe. A released component is re-read from disk on the next generation,
+    # so this trades per-request latency for headroom. Inference only; training
+    # keeps every component resident.
+    lazy_module_load: bool | None = None
+
     # Sequence-parallel MiniMax-H3 VAE (opt-in, default off). With SP > 1 the
     # video VAE's temporal chunks (decode) and clips (reference encode) are
     # round-robined across the sequence-parallel ranks and reassembled
@@ -722,6 +733,15 @@ class FastVideoArgs:
             help="Use CPU offload for VAE. Enable if run out of memory.",
         )
         parser.add_argument(
+            "--lazy-module-load",
+            action=argparse.BooleanOptionalAction,
+            default=None,
+            help="Load each heavy component on first use and free it after the last stage that needs it, "
+            "so peak memory is the largest overlapping set of components instead of their sum. "
+            "Omit for auto (on for unified-memory devices such as GB10; off on discrete GPUs). "
+            "Pass --no-lazy-module-load to keep every component resident.",
+        )
+        parser.add_argument(
             "--pin-cpu-memory",
             action=StoreBoolean,
             help=
@@ -989,6 +1009,20 @@ class FastVideoArgs:
     def finalize_device_offload_policy(self, device_id: int = 0) -> bool:
         """Apply device-local memory policy, then resolve incompatible modes."""
         has_unified_memory = self.disable_offload_on_unified_memory(device_id)
+        if self.lazy_module_load is None:
+            self.lazy_module_load = bool(has_unified_memory) and not self.training_mode
+            if self.lazy_module_load:
+                from fastvideo.platforms import current_platform
+
+                try:
+                    device_name = current_platform.get_device_name(device_id)
+                except Exception:
+                    device_name = current_platform.device_name
+                logger.info(
+                    "Enabling lazy_module_load: %s has unified memory, so encoder, DiT, and VAEs cannot stay "
+                    "resident together. Pass --no-lazy-module-load to keep every component loaded.",
+                    device_name,
+                )
         self._resolve_device_offload_conflicts()
         return has_unified_memory
 

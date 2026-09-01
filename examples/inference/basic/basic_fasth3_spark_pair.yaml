@@ -1,0 +1,59 @@
+# FastH3 on two DGX Sparks (one GPU each) over QSFP RoCE.
+# Bring up the Ray cluster first: docs/getting_started/installation/spark_pair.md
+#
+# request.sampling below is an example, not a required recipe. Change height,
+# width, num_frames, num_inference_steps, seed, and prompt. Legal H3 frame
+# counts are 17n+5, max 345 (15 s).
+#
+#   source examples/inference/optimizations/spark_pair_env.sh
+#   export RAY_ADDRESS=<qsfp-head>:6379
+#   export FASTVIDEO_HOST_IP=<qsfp-head>
+#   FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 \
+#     FASTVIDEO_VAE_PARALLEL_DECODE=1 FASTVIDEO_STAGE_LOGGING=1 \
+#     fastvideo generate --config examples/inference/basic/basic_fasth3_spark_pair.yaml
+generator:
+  model_path: FastVideo/FastVideo-FastH3-4-step-Preview-v1-VSA-DataFree
+  engine:
+    num_gpus: 2
+    execution_backend: ray
+    use_fsdp_inference: false
+    parallelism:
+      tp_size: 1
+      sp_size: 2
+    offload:
+      dit: false
+      dit_layerwise: false
+      text_encoder: true
+      vae: true
+      pin_cpu_memory: true
+      lazy_module_load: true
+    compile:
+      enabled: false
+      vae_enabled: true
+  pipeline:
+    experimental:
+      attention_backend: VIDEO_SPARSE_ATTN_H3
+      VSA_sparsity: 0.9
+      VSA_tile_size: 64
+      inference_torch_compile: true
+      vae_parallel_decode: true
+      vae_parallel_decode_strategy: gather
+      h3_sequential_load: true
+request:
+  prompt: >-
+    A wide cinematic shot of an alpine meadow at sunrise, pale pink mountain
+    peaks above a blue valley filled with thin morning mist.
+  negative_prompt: ""
+  sampling:
+    seed: 2026
+    height: 768
+    width: 1344
+    num_frames: 124
+    fps: 24
+    num_inference_steps: 5
+    guidance_scale: 1.0
+    batch_cfg: false
+  output:
+    output_path: outputs/fasth3_spark_pair/
+    save_video: true
+    return_frames: false

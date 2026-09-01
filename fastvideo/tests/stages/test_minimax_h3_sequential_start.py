@@ -116,6 +116,13 @@ def test_inference_defers_dit_and_vae_until_after_conditioning(monkeypatch) -> N
     assert pipeline.get_module("transformer") is not None
     assert pipeline._denoise_stages_ready is True
 
+    second = pipeline.forward(ForwardBatch(data_type="video", prompt="second clip"), args)
+    assert second is not None
+    assert len(loads) == 3
+    assert loads[2] == ["text_encoder"]
+    assert pipeline.get_module("text_encoder") is None
+    assert condition_stage.conditioner is None
+
 
 def test_injected_denoise_weights_skip_the_deferred_split(monkeypatch) -> None:
     events: list = []
@@ -167,12 +174,31 @@ def test_auto_defers_on_unified_memory(monkeypatch) -> None:
 
     monkeypatch.setattr(ComposedPipelineBase, "load_modules", fake_load)
     monkeypatch.setattr("fastvideo.platforms.current_platform.has_unified_memory", lambda device_id: True)
-    args = FastVideoArgs(model_path="unused/for-this-test")
+    args = FastVideoArgs(model_path="unused/for-this-test", lazy_module_load=False)
     MiniMaxH3Pipeline("unused/for-this-test", args)
 
     assert loads
     assert "text_encoder" in loads[0]
     assert all(name not in loads[0] for name in _DENOISE_MODULE_NAMES)
+
+
+def test_lazy_module_load_owns_deferral_when_both_would_arm(monkeypatch) -> None:
+    events: list = []
+    _patch_pipeline_construction(monkeypatch, events)
+    loads: list[list[str]] = []
+
+    def fake_load(self, fastvideo_args, loaded_modules=None):
+        del fastvideo_args, loaded_modules
+        loads.append(list(self.required_config_modules))
+        return {name: _stub_module(name) for name in self.required_config_modules}
+
+    monkeypatch.setattr(ComposedPipelineBase, "load_modules", fake_load)
+    monkeypatch.setattr("fastvideo.platforms.current_platform.has_unified_memory", lambda device_id: True)
+    args = FastVideoArgs(model_path="unused/for-this-test", h3_sequential_load=True)
+    MiniMaxH3Pipeline("unused/for-this-test", args)
+
+    assert loads == [list(MiniMaxH3Pipeline._required_config_modules)]
+    assert all(name in loads[0] for name in _DENOISE_MODULE_NAMES)
 
 
 def test_auto_loads_together_without_unified_memory(monkeypatch) -> None:
@@ -248,3 +274,52 @@ def test_taeh3_t2va_skips_video_vae_on_the_deferred_load(monkeypatch) -> None:
     assert "vae" not in loads[1]
     assert pipeline.get_module("vae") is None
     assert pipeline.get_module("transformer") is not None
+
+
+def test_generic_pipeline_config_does_not_crash_geometry_overlay(monkeypatch) -> None:
+    events: list = []
+    _patch_pipeline_construction(monkeypatch, events)
+
+    def fake_load(self, fastvideo_args, loaded_modules=None):
+        del fastvideo_args, loaded_modules
+        return {name: _stub_module(name) for name in self.required_config_modules}
+
+    monkeypatch.setattr(ComposedPipelineBase, "load_modules", fake_load)
+    args = FastVideoArgs(model_path="unused/for-this-test", h3_sequential_load=True)
+    pipeline = MiniMaxH3Pipeline("unused/for-this-test", args)
+    pipeline.post_init()
+    assert pipeline.get_module("text_encoder") is not None
+
+
+def test_resident_path_does_not_reread_encoder_on_later_request(monkeypatch) -> None:
+    events: list = []
+    _patch_pipeline_construction(monkeypatch, events)
+    loads: list[list[str]] = []
+
+    def fake_load(self, fastvideo_args, loaded_modules=None):
+        del fastvideo_args
+        requested = list(self.required_config_modules)
+        loads.append(requested)
+        modules = dict(loaded_modules or {})
+        for name in requested:
+            modules.setdefault(name, _stub_module(name))
+        return modules
+
+    monkeypatch.setattr(ComposedPipelineBase, "load_modules", fake_load)
+    args = FastVideoArgs(
+        model_path="unused/for-this-test",
+        enable_stage_verification=False,
+        h3_sequential_load=False,
+        lazy_module_load=False,
+    )
+    pipeline = MiniMaxH3Pipeline("unused/for-this-test", args)
+    pipeline.post_init()
+    passthrough = lambda batch, _args: batch
+    for stage in pipeline._stages:
+        monkeypatch.setattr(stage, "forward", passthrough)
+
+    first = pipeline.forward(ForwardBatch(data_type="video", prompt="one"), args)
+    second = pipeline.forward(ForwardBatch(data_type="video", prompt="two"), args)
+    assert first is not None and second is not None
+    assert len(loads) == 1
+    assert pipeline.get_module("text_encoder") is not None

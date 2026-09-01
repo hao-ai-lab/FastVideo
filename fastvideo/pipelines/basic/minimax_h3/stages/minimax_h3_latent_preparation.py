@@ -22,6 +22,7 @@ from fastvideo.pipelines.basic.minimax_h3.packing import (
     build_packed_sequence,
     build_ref2va_packed_sequence,
     h3_dit_patch_size,
+    h3_latent_channels,
     keyframe_condition_noise,
     patchify_video_latents,
 )
@@ -57,6 +58,17 @@ def _video_geometry(batch: ForwardBatch) -> tuple[int, int, int, int]:
 def _sample_visual_posterior(posterior: Any) -> torch.Tensor:
     generator = torch.Generator("cpu").manual_seed(MINIMAX_H3_KEYFRAME_ENCODE_SEED)
     return posterior.sample(generator=generator)
+
+
+def _video_latent_channels(fastvideo_args: FastVideoArgs) -> int:
+    return h3_latent_channels(fastvideo_args.pipeline_config.vae_config, "vae_config")
+
+
+def _audio_latent_channels(fastvideo_args: FastVideoArgs) -> int:
+    return h3_latent_channels(
+        getattr(fastvideo_args.pipeline_config, "audio_vae_config", None),
+        "audio_vae_config",
+    )
 
 
 class MiniMaxH3LatentPreparationStage(PipelineStage):
@@ -196,7 +208,7 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
         noise = keyframe_condition_noise(
             shapes,
             h3_dit_patch_size(fastvideo_args),
-            self.vae.latent_channels,
+            _video_latent_channels(fastvideo_args),
             generator=batch.generator,
             device=device,
         )
@@ -244,7 +256,7 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
         noise = keyframe_condition_noise(
             shapes,
             h3_dit_patch_size(fastvideo_args),
-            self.vae.latent_channels,
+            _video_latent_channels(fastvideo_args),
             generator=batch.generator,
             device=device,
         )
@@ -320,10 +332,11 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
                                             h3_dit_patch_size(fastvideo_args))
 
         num_audio_latents = layout.num_audio_latents
-        expected_audio_shape = (MINIMAX_H3_AUDIO_CHANNELS, self.audio_vae.latent_channels, num_audio_latents)
+        audio_channels = _audio_latent_channels(fastvideo_args)
+        expected_audio_shape = (MINIMAX_H3_AUDIO_CHANNELS, audio_channels, num_audio_latents)
         if audio_noise is None:
             audio_rows = randn_tensor(
-                (num_audio_latents * MINIMAX_H3_AUDIO_CHANNELS, self.audio_vae.latent_channels),
+                (num_audio_latents * MINIMAX_H3_AUDIO_CHANNELS, audio_channels),
                 generator=batch.generator,
                 device=device,
                 dtype=torch.float32,
@@ -332,9 +345,7 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
             if tuple(audio_noise.shape) != expected_audio_shape:
                 raise ValueError(f"MiniMax-H3 injected audio latents must have shape {expected_audio_shape}, "
                                  f"got {tuple(audio_noise.shape)}.")
-            audio_rows = audio_noise.to(device=device,
-                                        dtype=torch.float32).permute(0, 2,
-                                                                     1).reshape(-1, self.audio_vae.latent_channels)
+            audio_rows = audio_noise.to(device=device, dtype=torch.float32).permute(0, 2, 1).reshape(-1, audio_channels)
 
         if condition_video is not None:
             video_rows = torch.cat((condition_video.to(device), video_rows))

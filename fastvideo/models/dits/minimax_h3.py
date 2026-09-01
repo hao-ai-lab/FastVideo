@@ -733,31 +733,49 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         )
         self.__post_init__()
 
+    @staticmethod
+    def _compile_setup_device(attention: MiniMaxH3Attention) -> torch.device:
+        """Return the loaded device even when FP8 replaced the query weight."""
+        query_state = next(attention.to_q.parameters(), None)
+        if query_state is None:
+            query_state = next(attention.to_q.buffers(), None)
+        if query_state is None:
+            raise RuntimeError("MiniMax H3 to_q has no materialized parameter or buffer for compile setup.")
+        return query_state.device
+
     def prepare_for_compile(self) -> None:
         """Pipeline hook, called once right before torch.compile wraps the blocks.
 
-        Resolve each loaded VSA compression gate eagerly. Generic and training
-        compile retain their established attention dispatch; only the
-        inference loader's separate ``prepare_for_regional_compile`` hook may
-        preselect the inference-only sm_100a path.
+        Resolve each loaded VSA compression gate eagerly and tensorize its
+        layer identity so repeated blocks share one Dynamo graph. Generic and
+        training compile retain their established attention dispatch; only
+        the inference loader's separate ``prepare_for_regional_compile`` hook
+        may preselect the inference-only sm_100a path.
 
         The inference-only Triton fusions expose fake-backed custom operators,
         so Dynamo can keep them active as opaque nodes inside each fullgraph
         block instead of tracing into their launcher implementation.
         """
         gate_states: list[bool] = []
+        prepared_vsa_impls = 0
         for block in self.transformer_blocks:
             attention = block.attn
             if attention.to_gate_compress is not None:
                 attention._resolve_gate_compress_for_compile()
                 assert attention._gate_compress_active is not None
                 gate_states.append(attention._gate_compress_active)
+            prepare_vsa = getattr(attention.distributed_attention.attn_impl, "prepare_for_compile", None)
+            if callable(prepare_vsa):
+                prepare_vsa(self._compile_setup_device(attention))
+                prepared_vsa_impls += 1
         if gate_states:
             logger.info(
                 "Resolved MiniMax H3 VSA compression gates before torch.compile: %d active, %d inactive",
                 sum(gate_states),
                 len(gate_states) - sum(gate_states),
             )
+        if prepared_vsa_impls:
+            logger.info("Prepared %d MiniMax H3 VSA layer indices for torch.compile", prepared_vsa_impls)
         if self.enabled_fusions:
             logger.info(
                 "MiniMax H3 inference fusions remain active under torch.compile through custom-op boundaries: %s",
@@ -774,14 +792,7 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
             prepare_vsa = getattr(attention.distributed_attention.attn_impl, "prepare_for_regional_compile", None)
             if not callable(prepare_vsa):
                 continue
-            # Post-load FP8 conversion may replace to_q.weight with packed
-            # buffers. Either representation identifies the local device.
-            query_state = next(attention.to_q.parameters(), None)
-            if query_state is None:
-                query_state = next(attention.to_q.buffers(), None)
-            if query_state is None:
-                raise RuntimeError("MiniMax H3 to_q has no materialized parameter or buffer for compile setup.")
-            unsupported = prepare_vsa(query_state.device)
+            unsupported = prepare_vsa(self._compile_setup_device(attention))
             if unsupported:
                 unsupported_reasons.add(str(unsupported))
             prepared_vsa_impls += 1
