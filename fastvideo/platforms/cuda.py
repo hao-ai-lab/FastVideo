@@ -177,7 +177,7 @@ class CudaPlatformBase(Platform):
             if not cls.has_device_capability(80):
                 raise RuntimeError("FLASHINFER requires an NVIDIA GPU with compute capability sm80 or newer.")
             if dtype not in (torch.float16, torch.bfloat16):
-                logger.info("FLASHINFER will cast %s inputs to bfloat16 for the kernel.", dtype)
+                logger.warning("FLASHINFER will cast %s inputs to bfloat16 for the kernel.", dtype)
             try:
                 from flashinfer.prefill import single_prefill_with_kv_cache  # noqa: F401
 

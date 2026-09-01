@@ -6,6 +6,17 @@ That path preserves FastVideo's BSHD/SP contract and supports self-attention,
 cross-attention, GQA, causal attention, and tokenizer-style padding masks.
 FlashInfer's prefill API is inference-only here; training must use FLASH_ATTN or
 TORCH_SDPA.
+
+``forward`` reads ``attn_mask``/``is_causal`` off ``attn_metadata`` by
+attribute, not by ``isinstance(FlashInferMetadata)``: several model forwards
+(e.g. HYWorld) build ``SDPAMetadata`` directly and hand it to whichever
+backend the selector resolved. Any metadata dataclass with the same field
+names satisfies this backend; do not add a strict type check here without
+also updating those call sites.
+
+A layer must list FLASHINFER explicitly in its ``supported_attention_backends``
+to use this backend — there is no implicit bridge from FLASH_ATTN support, since
+this kernel's masking/GQA conventions have not been vetted per-model.
 """
 
 from dataclasses import dataclass

@@ -276,14 +276,7 @@ def _cached_get_attn_backend(
     # get device-specific attn_backend
     from fastvideo.platforms import current_platform
 
-    # FLASHINFER implements the same dense BSHD semantic contract as
-    # FLASH_ATTN. Treat every layer that already declares FLASH_ATTN support
-    # as FlashInfer-capable, avoiding model-by-model tuple churn while keeping
-    # sparse-only layers protected by their existing declarations.
-    selected_is_supported = (selected_backend in supported_attention_backends or
-                             (selected_backend == AttentionBackendEnum.FLASHINFER
-                              and AttentionBackendEnum.FLASH_ATTN in supported_attention_backends))
-    if selected_backend is not None and not selected_is_supported:
+    if (selected_backend is not None and selected_backend not in supported_attention_backends):
         fallback_backend = (default_backend if default_backend in supported_attention_backends else None)
         logger.warning(
             "Requested attention backend %s is not supported by this "
