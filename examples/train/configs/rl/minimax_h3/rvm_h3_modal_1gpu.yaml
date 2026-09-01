@@ -1,4 +1,6 @@
-# Modal one-GPU correctness run; compact overrides are applied by the launcher.
+# One-H100 topology smoke. This is intentionally compact and is not a
+# production-quality configuration. All constraints live here rather than in
+# the Modal wrapper, so the same config runs on any cloud or local node.
 models:
   student:
     _target_: fastvideo.train.models.minimax_h3.MiniMaxH3RVMModel
@@ -8,8 +10,8 @@ models:
     attention_backend: VIDEO_SPARSE_ATTN_H3
     lora:
       enable: true
-      rank: 16
-      alpha: 16
+      rank: 1
+      alpha: 1
       target_modules: [to_q, to_k, to_v, to_out]
 
 method:
@@ -27,11 +29,9 @@ method:
   max_grad_norm: 1.0
   reward_device: cuda
   sampling:
-    # Behavior rollouts always use the released four-step FastH3 policy.
     denoising_steps: [1000, 750, 500, 250]
     attn_kind: vsa
   training_timestep:
-    # Published RVM: analytically noise endpoints at t ~ Uniform(0, 1).
     mode: continuous_uniform
     min: 0.0
     max: 1.0
@@ -43,7 +43,18 @@ method:
       hpsv3_percentile: 0.1
       dynamic_tracking: 0.7
     options:
+      videoalign_ta:
+        device: cpu
+      videoalign_mq:
+        device: cpu
+      hpsv3_general:
+        device: cpu
+        max_frames: 4
+      hpsv3_percentile:
+        device: cpu
+        max_frames: 4
       dynamic_tracking:
+        device: cpu
         frame_pairs: 4
         top_fraction: 0.05
         resize_short_edge: 256
@@ -72,10 +83,10 @@ training:
     train_batch_size: 1
     training_cfg_rate: 0.0
     seed: 42
-    num_latent_t: 37
-    num_height: 480
-    num_width: 832
-    num_frames: 124
+    num_latent_t: 12
+    num_height: 320
+    num_width: 576
+    num_frames: 39
   optimizer:
     learning_rate: 5.0e-6
     betas: [0.9, 0.999]
@@ -83,15 +94,15 @@ training:
     lr_scheduler: constant
     lr_warmup_steps: 0
   loop:
-    max_train_steps: 4
+    max_train_steps: 1
     gradient_accumulation_steps: 1
   checkpoint:
     output_dir: outputs/rvm_h3/modal_1gpu
-    training_state_checkpointing_steps: 2
+    training_state_checkpointing_steps: 1
     checkpoints_total_limit: 2
   tracker:
     project_name: fasth3-rvm
-    run_name: rvm-h3-modal-1gpu
+    run_name: rvm-h3-1gpu-smoke
   model:
     precondition_outputs: false
     enable_gradient_checkpointing_type: full

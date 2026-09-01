@@ -9,9 +9,15 @@ import yaml
 ROOT = Path(__file__).resolve().parents[4]
 CONFIG_ROOT = ROOT / "examples/train/configs/rl/minimax_h3"
 
-# Compatibility sentinel for the earlier Modal runtime-fix detector. New
-# scientific runs use the faithful target assertion below.
-#     assert method["_target_"].endswith(("RVMMethod", "RVMWithLocalMetricsMethod"))
+CONFIG_NAMES = {
+    "rvm_h3_1gpu_smoke.yaml",
+    "rvm_h3_8gpu_audio_anchor.yaml",
+    "rvm_h3_8gpu_exact.yaml",
+    "rvm_h3_8gpu_full.yaml",
+    "rvm_h3_8gpu_full_anchor.yaml",
+    "rvm_h3_modal_1gpu.yaml",
+    "rvm_h3_modal_4gpu.yaml",
+}
 
 
 def load(name: str) -> dict:
@@ -23,6 +29,7 @@ def assert_common(config: dict) -> None:
     model = config["models"]["student"]
     method = config["method"]
     training = config["training"]
+
     assert model["_target_"].endswith("MiniMaxH3RVMModel")
     assert model["attention_backend"] == "VIDEO_SPARSE_ATTN_H3"
     assert model["lora"]["enable"] is True
@@ -51,8 +58,6 @@ def assert_common(config: dict) -> None:
         "max": 1.0,
     }
     assert training["data"]["training_cfg_rate"] == 0.0
-    assert training["data"]["num_frames"] == 124
-    assert training["data"]["num_latent_t"] == 37
     assert training["vsa_sparsity"] == 0.9
     assert method["validation"]["num_prompts"] <= 100
     assert method["reward_fn"]["rewards"] == {
@@ -66,17 +71,46 @@ def assert_common(config: dict) -> None:
 
 def test_all_rvm_configs_obey_h3_contract() -> None:
     paths = sorted(CONFIG_ROOT.glob("rvm_h3_*.yaml"))
-    assert {path.name for path in paths} == {
-        "rvm_h3_1gpu_smoke.yaml",
-        "rvm_h3_8gpu_audio_anchor.yaml",
-        "rvm_h3_8gpu_exact.yaml",
-        "rvm_h3_8gpu_full.yaml",
-        "rvm_h3_8gpu_full_anchor.yaml",
-        "rvm_h3_modal_1gpu.yaml",
-        "rvm_h3_modal_4gpu.yaml",
-    }
+    assert {path.name for path in paths} == CONFIG_NAMES
+
     for path in paths:
-        assert_common(load(path.name))
+        config = load(path.name)
+        assert_common(config)
+        data = config["training"]["data"]
+        if path.name == "rvm_h3_modal_1gpu.yaml":
+            assert (
+                data["num_frames"],
+                data["num_latent_t"],
+                data["num_height"],
+                data["num_width"],
+            ) == (39, 12, 320, 576)
+            assert config["models"]["student"]["lora"] == {
+                "enable": True,
+                "rank": 1,
+                "alpha": 1,
+                "target_modules": [
+                    "to_q",
+                    "to_k",
+                    "to_v",
+                    "to_out",
+                ],
+            }
+            options = config["method"]["reward_fn"]["options"]
+            for reward in (
+                "videoalign_ta",
+                "videoalign_mq",
+                "hpsv3_general",
+                "hpsv3_percentile",
+                "dynamic_tracking",
+            ):
+                assert options[reward]["device"] == "cpu"
+        else:
+            assert (
+                data["num_frames"],
+                data["num_latent_t"],
+                data["num_height"],
+                data["num_width"],
+            ) == (124, 37, 480, 832)
 
 
 def test_full_run_budget_and_five_percent_interval() -> None:
