@@ -20,6 +20,7 @@ hide:
     <a class="cookbook-inline-link" href="../inference/support_matrix/">
       View the full support matrix <span aria-hidden="true">→</span>
     </a>
+    <a class="cookbook-inline-link" href="./openai-api/">Run FastH3 with a playground and API <span aria-hidden="true">→</span></a>
   </header>
 
   <section class="cookbook-section" id="video-models" aria-labelledby="video-models-heading">
@@ -460,7 +461,10 @@ hide:
       Inference is the first complete stage. Distillation, fine-tuning,
       training, evaluation, optimization, and deployment will reuse the same
       family-first structure as their recipes land. Each family page shows
-      which stages are available and which are planned.
+      which stages are available and which are planned. Two DGX Sparks: bring up
+      the QSFP Ray cluster first
+      (<a href="../getting_started/installation/spark_pair/">pair two Sparks</a>),
+      then pick the FastH3 two-Spark recipe.
     </p>
   </section>
 </div>

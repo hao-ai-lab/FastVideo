@@ -30,6 +30,7 @@ surfaces:
       image_encoder_cpu_offload: generator.engine.offload.image_encoder
       vae_cpu_offload: generator.engine.offload.vae
       pin_cpu_memory: generator.engine.offload.pin_cpu_memory
+      lazy_module_load: generator.engine.offload.lazy_module_load
       enable_torch_compile: generator.engine.compile.enabled
       enable_torch_compile_text_encoder: generator.engine.compile.text_encoder_enabled
       enable_torch_compile_vae: generator.engine.compile.vae_enabled
@@ -81,6 +82,9 @@ surfaces:
       inference_torch_compile: "Regional inference compile opt-in currently carried through PipelineSelection.experimental rather than CompileConfig."
       vae_parallel_decode: "MiniMax-H3 sequence-parallel VAE decode opt-in; model-specific optimization not yet represented in the typed public schema."
       h3_sequential_load: "MiniMax-H3 sequential text-encoder then DiT/VAE load; model-specific optimization not yet represented in the typed public schema."
+      video_decode_backend: "MiniMax-H3 video decoder selection (full VAE vs TAEH3 preview); model-specific optimization not yet represented in the typed public schema."
+      taeh3_checkpoint: "Optional local TAEH3 safetensors path; model-specific optimization not yet represented in the typed public schema."
+      taeh3_chunk_size: "TAEH3 temporal chunk length; model-specific optimization not yet represented in the typed public schema."
       vae_parallel_encode: "MiniMax-H3 sequence-parallel reference VAE encode opt-in; model-specific optimization not yet represented in the typed public schema."
       vae_parallel_decode_strategy: "Chunk-transport collective for vae_parallel_decode; model-specific optimization not yet represented in the typed public schema."
       attention_backend: "Process-wide default attention-backend request applied per component at load time; kernel-selection knob not yet represented in the typed public schema."

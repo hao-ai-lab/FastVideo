@@ -1469,6 +1469,211 @@ img {
     }
 }
 
+.cookbook-serving[hidden],
+.cookbook-command[hidden],
+[data-cookbook-python-note][hidden] {
+    display: none;
+}
+
+[data-cookbook-prepare][hidden] {
+    display: none;
+}
+
+.cookbook-serving {
+    min-width: 0;
+    font-size: 0.7rem;
+}
+
+.cookbook-serving__intro {
+    max-width: 70ch;
+    color: var(--md-default-fg-color--light);
+}
+
+.cookbook-serving__step {
+    margin-block: 1.8rem;
+    padding-block-start: 1.25rem;
+    border-block-start: 1px solid var(--cookbook-border);
+}
+
+.md-typeset .cookbook-serving__step h4 {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-block: 0 0.6rem;
+    font-size: 0.85rem;
+}
+
+.cookbook-serving__step h4 > span {
+    display: grid;
+    flex-shrink: 0;
+    place-items: center;
+    width: 1.5rem;
+    height: 1.5rem;
+    border: 1px solid var(--cookbook-border);
+    border-radius: 50%;
+    font-size: 0.65rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.cookbook-serving__step > p {
+    max-width: 75ch;
+    color: var(--md-default-fg-color--light);
+}
+
+.cookbook-serving .cookbook-command {
+    margin-block: 0.65rem;
+}
+
+.cookbook-serving .cookbook-command pre > code {
+    min-height: 3.8rem;
+}
+
+.cookbook-command--client pre > code {
+    max-height: 28rem;
+    overflow: auto;
+}
+
+.cookbook-serving__clients {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    margin-block: 1rem;
+}
+
+.cookbook-serving__clients button {
+    min-height: 2.2rem;
+    padding: 0.45rem 0.8rem;
+    border: 1px solid var(--cookbook-border);
+    border-radius: 0.45rem;
+    background: var(--cookbook-surface);
+    color: var(--md-default-fg-color);
+    font: inherit;
+    cursor: pointer;
+}
+
+.cookbook-serving__clients button[aria-pressed="true"] {
+    border-color: var(--cookbook-accent);
+    background: var(--cookbook-accent-soft);
+    color: var(--cookbook-accent-strong);
+    font-weight: 600;
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+}
+
+.cookbook-serving__clients button:focus-visible {
+    outline: 2px solid var(--md-default-fg-color);
+    outline-offset: 3px;
+}
+
+.cookbook-option-grid button:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.cookbook-serving__boundary {
+    padding-block: 0.8rem;
+    border-block-start: 1px solid var(--cookbook-border);
+    color: var(--md-default-fg-color--light);
+}
+
+/* Keep the H3 workflow compact without changing the other family pages. */
+[data-family="minimax_h3"] .cookbook-family-header {
+    padding-block: 0.75rem 1.75rem;
+}
+
+[data-family="minimax_h3"] .cookbook-family-header__body {
+    gap: 0.75rem;
+}
+
+[data-family="minimax_h3"] .cookbook-family-header__logo {
+    width: 4.5rem;
+    height: 4.5rem;
+    flex-basis: 4.5rem;
+}
+
+[data-family="minimax_h3"] .cookbook-family-header__logo img {
+    width: 3.25rem;
+    height: 3.25rem;
+}
+
+[data-family="minimax_h3"] .cookbook-selection-description {
+    margin-block: 1rem;
+}
+
+[data-family="minimax_h3"] .cookbook-option-grid button.cookbook-option--selected strong {
+    color: var(--md-default-fg-color);
+}
+
+.md-typeset details.cookbook-modes {
+    margin-block: 0 1.6rem;
+    border-color: var(--cookbook-border);
+    box-shadow: none;
+}
+
+.md-typeset details.cookbook-modes > summary {
+    background: var(--cookbook-surface-raised);
+    font-size: 0.72rem;
+}
+
+.cookbook-serving__playground {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1.25rem;
+    padding: 1rem;
+    border: 1px solid var(--cookbook-border);
+    border-radius: 0.6rem;
+    background: var(--cookbook-surface-raised);
+}
+
+.cookbook-serving__playground p {
+    max-width: 50ch;
+    margin-block: 0.35rem 0;
+    color: var(--md-default-fg-color--light);
+}
+
+.md-typeset a.cookbook-serving__launch {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    flex-shrink: 0;
+    min-height: 2.2rem;
+    padding: 0.6rem 0.9rem;
+    border: 1px solid var(--cookbook-accent);
+    border-radius: 0.4rem;
+    background: var(--cookbook-accent-soft);
+    color: var(--cookbook-accent-strong);
+    font-weight: 600;
+}
+
+.cookbook-serving__launch:focus-visible {
+    outline: 2px solid var(--md-default-fg-color);
+    outline-offset: 3px;
+}
+
+.md-typeset .cookbook-serving__code {
+    margin-block: 1.2rem;
+    border-color: var(--cookbook-border);
+    box-shadow: none;
+    font-size: inherit;
+}
+
+.md-typeset .cookbook-serving__code > summary {
+    background: var(--cookbook-surface-raised);
+}
+
+.cookbook-serving__local-hint {
+    font-size: 0.65rem;
+}
+
+@media (max-width: 600px) {
+    .cookbook-serving__playground {
+        align-items: stretch;
+        flex-direction: column;
+    }
+}
+
 .md-typeset .copy-page-button.md-button {
     float: right;
     margin: 0 0 1rem 1rem;

@@ -48,6 +48,14 @@ def build_parser(description: str | None = None) -> argparse.ArgumentParser:
     # License review completes. A local snapshot can be passed here instead.
     parser.add_argument("--prompt", required=True)
     parser.add_argument("--output", default="outputs/fasth3")
+    parser.add_argument("--lazy-module-load",
+                        action=argparse.BooleanOptionalAction,
+                        default=None,
+                        help="load each heavy component on first use and free it after the last stage that "
+                        "needs it, so peak memory is the largest overlapping set instead of the sum of every "
+                        "component. Omit for auto (on for unified-memory devices such as GB10; off on discrete "
+                        "GPUs). Costs a reload per generation; pass --no-lazy-module-load to keep every "
+                        "component resident")
     parser.add_argument("--profile",
                         choices=("all", "strict"),
                         default="all",
@@ -69,6 +77,13 @@ def build_parser(description: str | None = None) -> argparse.ArgumentParser:
                         default=True,
                         help="run one excluded request before timing")
     parser.add_argument("--num-gpus", type=int, default=4)
+    parser.add_argument(
+        "--execution-backend",
+        choices=("mp", "ray"),
+        default=None,
+        help="mp for one node; ray for a Ray cluster (two DGX Sparks). "
+        "Default: ray when RAY_ADDRESS is set, otherwise mp",
+    )
     parser.add_argument("--vsa-sparsity",
                         type=float,
                         default=0.9,
@@ -104,6 +119,11 @@ def build_parser(description: str | None = None) -> argparse.ArgumentParser:
                         default=None,
                         help="encode with Qwen3-VL, release it, then load DiT/VAEs. Default auto: on for "
                         "unified-memory devices (GB10), off on discrete GPUs")
+    parser.add_argument("--video-decode-backend",
+                        choices=("h3-vae", "taeh3"),
+                        default="h3-vae",
+                        help="h3-vae is the full MiniMax VAE; taeh3 is the fast approximate preview decoder")
+    parser.add_argument("--taeh3-checkpoint", default=None, help="local taeh3.safetensors; unset uses the pinned cache")
     parser.add_argument("--replicated-dit",
                         action=argparse.BooleanOptionalAction,
                         default=True,
@@ -226,6 +246,12 @@ def validate_profile_dependencies(args: argparse.Namespace) -> None:
             "`cd fastvideo-kernel && ./build.sh`), or pass --vsa-kernel triton.")
 
 
+def _execution_backend(args: argparse.Namespace) -> str:
+    if args.execution_backend is not None:
+        return args.execution_backend
+    return "ray" if os.environ.get("RAY_ADDRESS") else "mp"
+
+
 def build_generator_config(args: argparse.Namespace) -> GeneratorConfig:
     use_vsa = _uses_vsa(args)
     experimental: dict[str, object] = {
@@ -236,6 +262,10 @@ def build_generator_config(args: argparse.Namespace) -> GeneratorConfig:
     }
     if args.h3_sequential_load is not None:
         experimental["h3_sequential_load"] = args.h3_sequential_load
+    if args.video_decode_backend != "h3-vae":
+        experimental["video_decode_backend"] = args.video_decode_backend
+    if args.taeh3_checkpoint is not None:
+        experimental["taeh3_checkpoint"] = args.taeh3_checkpoint
     if use_vsa:
         experimental.update({
             "VSA_sparsity": args.vsa_sparsity,
@@ -252,6 +282,7 @@ def build_generator_config(args: argparse.Namespace) -> GeneratorConfig:
         ),
         engine=EngineConfig(
             num_gpus=args.num_gpus,
+            execution_backend=_execution_backend(args),
             use_fsdp_inference=args.num_gpus > 1 and not args.replicated_dit,
             parallelism=ParallelismConfig(tp_size=1, sp_size=args.num_gpus),
             offload=OffloadConfig(
@@ -260,6 +291,7 @@ def build_generator_config(args: argparse.Namespace) -> GeneratorConfig:
                 text_encoder=True,
                 vae=True,
                 pin_cpu_memory=args.pin_cpu_memory,
+                lazy_module_load=args.lazy_module_load,
             ),
             compile=CompileConfig(
                 enabled=args.torch_compile,
@@ -322,6 +354,7 @@ def run(args: argparse.Namespace) -> list[float]:
           f"Denoising contract override: {args.steps} sigma points = {args.steps - 1} DiT forwards")
     print("Profile environment: " + " ".join(f"{key}={value if value is not None else '<unset>'}"
                                                   for key, value in environment.items()))
+    print(f"Execution backend: {_execution_backend(args)}")
 
     generator = VideoGenerator.from_config(build_generator_config(args))
     measured_wall_times: list[float] = []

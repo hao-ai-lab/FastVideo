@@ -8,6 +8,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import yaml
+
 ROOT_DIR = Path(__file__).parent.parent.resolve()
 ROOT_DIR_RELATIVE = '../..'
 EXAMPLE_DIR = ROOT_DIR / "examples"
@@ -21,6 +23,12 @@ GENERATED_DOC_PREFIXES = (
     "distillation/examples/",
 )
 COOKBOOK_DATA = ROOT_DIR / "docs/assets/cookbook-recipes.json"
+COOKBOOK_SERVING_DATA = ROOT_DIR / "docs/assets/cookbook-serving.json"
+COOKBOOK_CLIENTS = {
+    "python": ("video.py", "python -m pip install openai==3.6.0"),
+    "javascript": ("video.mjs", "npm install openai@7.8.0"),
+    "curl": ("video.sh", "# Requires curl and jq"),
+}
 COOKBOOK_SOURCE_ROOTS = (
     ROOT_DIR / "examples/inference",
     ROOT_DIR / "scripts/inference",
@@ -170,6 +178,9 @@ def validate_cookbook() -> None:
         if recipe["source"] not in recipe["command"]:
             raise ValueError(f"Cookbook command does not invoke its source: {recipe['id']}")
 
+        if "serving" in recipe:
+            cookbook_serving_profile(recipe)
+
     # Second pass so `related` may point forward at recipes defined later.
     ids = {recipe["id"] for recipe in recipes}
     for recipe in recipes:
@@ -185,6 +196,75 @@ def validate_cookbook() -> None:
             continue
         if cache_bust not in text:
             raise ValueError(f"{page}: recipe JSON cache-bust must be {cache_bust}")
+
+
+def cookbook_serving_profile(recipe: dict) -> dict:
+    """Read server facts separately from the local inference run's evidence."""
+    serving = recipe["serving"]
+    if not isinstance(serving, dict) or not serving.get("source") or not serving.get("install"):
+        raise ValueError(f"Serving recipe needs source and install fields: {recipe['id']}")
+    source = (ROOT_DIR / serving["source"]).resolve()
+    if not source.is_relative_to(ROOT_DIR / "examples/serving") or not source.is_file():
+        raise ValueError(f"Serving config must exist under examples/serving: {recipe['id']}")
+    config = yaml.safe_load(source.read_text(encoding="utf-8"))
+    runtime = config.get("runtime", "cuda")
+    if runtime not in {"cuda", "mlx"} or runtime != recipe["hardware"].get("platform", "cuda"):
+        raise ValueError(f"Serving runtime does not match recipe: {recipe['id']}")
+    generator = config["generator"]
+    if generator["model_path"] != recipe["model"]:
+        raise ValueError(f"Serving checkpoint does not match recipe: {recipe['id']}")
+    if config.get("streaming") is not None:
+        raise ValueError(f"Cookbook OpenAI serving requires a REST config: {recipe['id']}")
+    server = config["server"]
+    model = server["served_model_name"]
+    if not isinstance(model, str) or not re.fullmatch(r"[A-Za-z0-9._/-]+", model):
+        raise ValueError(f"Serving model alias must be safe for client examples: {recipe['id']}")
+    port = server["port"]
+    if type(port) is not int or not 1 <= port <= 65535:
+        raise ValueError(f"Serving config needs a valid port: {recipe['id']}")
+    hardware = {"platform": runtime, "evidence": "source-configured"}
+    if runtime == "cuda":
+        count = generator["engine"]["num_gpus"]
+        if type(count) is not int or count < 1:
+            raise ValueError(f"Serving config needs a valid GPU count: {recipe['id']}")
+        hardware["gpu_count"] = count
+        command = f"fastvideo serve --config {serving['source']} --server.host 127.0.0.1"
+    else:
+        if server.get("host") != "127.0.0.1":
+            raise ValueError(f"MLX cookbook server must bind to loopback: {recipe['id']}")
+        command = f"python -m fastvideo.entrypoints.openai.mlx_server --config {serving['source']}"
+    base_url = f"http://127.0.0.1:{port}/v1"
+    clients = {}
+    for language, (filename, install) in COOKBOOK_CLIENTS.items():
+        path = ROOT_DIR / "examples/serving/clients" / filename
+        text = path.read_text(encoding="utf-8")
+        # Keep displayed snippets identical to executable sources for the
+        # checked-in H3 profile, with only endpoint and alias substitutions.
+        text = text.replace("http://127.0.0.1:8000/v1", base_url)
+        text = text.replace('"fasth3"', json.dumps(model)).replace("${FASTVIDEO_MODEL:-fasth3}",
+                                                                   "${FASTVIDEO_MODEL:-" + model + "}")
+        clients[language] = {"source": path.relative_to(ROOT_DIR).as_posix(), "code": text, "install": install}
+    return {
+        "source": serving["source"],
+        "install": serving["install"],
+        "command": command,
+        "runtime": runtime,
+        "prepare": serving.get("prepare", ""),
+        "model": model,
+        "base_url": base_url,
+        "playground_url": f"http://127.0.0.1:{port}/playground/",
+        "health_command": f"curl --fail-with-body http://127.0.0.1:{port}/health",
+        "hardware": hardware,
+        "sampling": config["default_request"]["sampling"],
+        "clients": clients,
+    }
+
+
+def generate_cookbook_serving() -> None:
+    """Publish executable clients and config facts through the docs build."""
+    data = json.loads(COOKBOOK_DATA.read_text(encoding="utf-8"))
+    profiles = {recipe["id"]: cookbook_serving_profile(recipe) for recipe in data["recipes"] if "serving" in recipe}
+    COOKBOOK_SERVING_DATA.write_text(json.dumps(profiles, indent=2) + "\n", encoding="utf-8")
 
 
 def fix_case(text: str) -> str:
@@ -325,8 +405,18 @@ class Example:
         """ # noqa: E501
         if self.path.is_file():
             return []
-        is_other_file = lambda file: file.is_file() and file != self.main_file
-        return [file for file in self.path.rglob("*") if is_other_file(file)]  # type: ignore[no-untyped-call]
+        other_files = []
+        for directory, subdirectories, filenames in os.walk(self.path):
+            # Local client dependencies and caches are not example sources.
+            subdirectories[:] = [
+                name for name in subdirectories
+                if not name.startswith(".") and name not in {"node_modules", "__pycache__"}
+            ]
+            for name in filenames:
+                file = Path(directory) / name
+                if not name.startswith(".") and file != self.main_file:
+                    other_files.append(file)
+        return other_files
 
     def determine_title(self) -> str:
         return fix_case(self.path.stem.replace("_", " ").title())
@@ -586,7 +676,7 @@ def generate_flat_examples(examples: list[Example], category_indices: dict[str, 
 
         # Generate the example documentation
         doc_path = index.path.parent / f"{example.path.stem}.md"
-        with open(doc_path, "w+") as f:
+        with open(doc_path, "w+", encoding="utf-8") as f:
             f.write(example.generate())
         index.documents.append(example.path.stem)
 
@@ -613,7 +703,7 @@ def generate_nested_examples(nested_structures: dict[str, dict[str, dict[str, di
                 # Generate dataset examples using the Example class
                 for dataset, nested_struct in datasets.items():
                     doc_path = category_base_dir / f"{nested_struct.filename}.md"
-                    with open(doc_path, "w+") as f:
+                    with open(doc_path, "w+", encoding="utf-8") as f:
                         f.write(nested_struct.example.generate())
 
                 # Create model-level index
@@ -628,14 +718,14 @@ def generate_nested_examples(nested_structures: dict[str, dict[str, dict[str, di
                     model_index.documents.append(nested_struct.filename)
 
                 # Write model index
-                with open(model_index.path, "w+") as f:
+                with open(model_index.path, "w+", encoding="utf-8") as f:
                     f.write(model_index.generate())
 
                 # Add model to method index
                 method_index.documents.append(model)
 
             # Write method index
-            with open(method_index.path, "w+") as f:
+            with open(method_index.path, "w+", encoding="utf-8") as f:
                 f.write(method_index.generate())
 
             # Add method to main category index
@@ -688,12 +778,12 @@ def generate_examples(generate_main_index: bool = False) -> None:
                 examples_index.documents.insert(0, str(rel_path).replace("\\", "/").replace(".md", ""))
 
             # Write the category index file
-            with open(category_index.path, "w+") as f:
+            with open(category_index.path, "w+", encoding="utf-8") as f:
                 f.write(category_index.generate())
 
     # Write the main index file if requested
     if generate_main_index and examples_index:
-        with open(examples_index.path, "w+") as f:
+        with open(examples_index.path, "w+", encoding="utf-8") as f:
             f.write(examples_index.generate())
 
 
@@ -703,6 +793,7 @@ def on_pre_build(config, **kwargs):
     This function is called automatically by MkDocs' native hook system.
     """
     validate_cookbook()
+    generate_cookbook_serving()
     print("Generating example documentation...")
     generate_examples(generate_main_index=True)
     print("Example documentation generated successfully!")
@@ -717,6 +808,7 @@ def on_page_context(context, page, **kwargs):
 
 if __name__ == "__main__":
     validate_cookbook()
+    generate_cookbook_serving()
     print("Generating example documentation...")
     generate_examples(generate_main_index=True)
     print("Example documentation generated successfully!")

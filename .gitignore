@@ -55,6 +55,8 @@ eggs/
 
 # MkDocs documentation
 site/
+docs/assets/cookbook-serving.json
+examples/serving/clients/node_modules/
 docs/getting_started/examples/
 docs/examples/
 docs/inference/examples/

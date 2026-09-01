@@ -1,5 +1,5 @@
 {
-  "version": 5,
+  "version": 6,
   "recipes": [
     {
       "id": "fastwan21-t2v",
@@ -451,6 +451,10 @@
       "summary": "Run the DMD2-distilled FastH3 Preview with four DiT forwards, trained H3 sparse attention, compiled decode, and synchronized audio.",
       "model": "FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2",
       "source": "examples/inference/basic/basic_fasth3.py",
+      "serving": {
+        "source": "examples/serving/openai_fasth3.yaml",
+        "install": "UV_TORCH_BACKEND=cu130 uv pip install -e \".[fasth3]\""
+      },
       "command": "UV_TORCH_BACKEND=cu130 uv pip install -e \".[fasth3]\"\npython examples/inference/basic/basic_fasth3.py --prompt \"(S1) A presenter says <d>[English] FastVideo runs FastH3.</d>\" --profile all",
       "gpu_types": ["NVIDIA"],
       "hardware": {
@@ -467,6 +471,11 @@
     },
     {
       "id": "fasth3-preview-mlx",
+      "serving": {
+        "source": "examples/serving/mlx_fasth3.yaml",
+        "install": "uv pip install -e \".[mlx]\"",
+        "prepare": "hf download FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2 --local-dir ./FastH3-Preview-v0.2\npython scripts/checkpoint_conversion/convert_minimax_h3_mlx.py --model-root ./FastH3-Preview-v0.2/transformer --out ./FastH3-MLX --formats \"int6\""
+      },
       "group": "fasth3-preview",
       "group_label": "FastH3 Preview",
       "group_task": "4-step text to video + audio",
@@ -635,6 +644,29 @@
       "hardware": {"gpu_count": 1, "evidence": "source-configured"},
       "evidence": "Source-backed",
       "limitations": ["The upstream checkpoint must be converted to Diffusers layout via scripts/checkpoint_conversion/convert_mmaudio_to_diffusers.py unless loaded from the FastVideo converted repo as done here."]
+    },
+    {
+      "id": "fasth3-spark-pair",
+      "family": "minimax_h3",
+      "stage": "inference",
+      "task": "Few-step text to video (with audio)",
+      "label": "FastH3 on two DGX Sparks (sequence parallel)",
+      "summary": "Run one FastH3 clip across two GB10s with Ray sequence parallel over QSFP RoCE. Sequential load and lazy module load stay on because SP replicates the DiT on each node.",
+      "model": "FastVideo/FastVideo-FastH3-4-step-Preview-v1-VSA-DataFree",
+      "source": "examples/inference/basic/basic_fasth3_spark_pair.yaml",
+      "command": "source examples/inference/optimizations/spark_pair_env.sh && FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 FASTVIDEO_VAE_PARALLEL_DECODE=1 fastvideo generate --config examples/inference/basic/basic_fasth3_spark_pair.yaml",
+      "gpu_types": ["NVIDIA"],
+      "hardware": {
+        "platform": "cuda",
+        "gpu_count": 2,
+        "accelerator": "NVIDIA GB10 (DGX Spark pair)",
+        "evidence": "validated",
+        "evidence_url": "https://github.com/hao-ai-lab/FastVideo/pull/1803"
+      },
+      "evidence": "Verified",
+      "expected_artifact": "MP4 under outputs/fasth3_spark_pair/",
+      "modes": ["T2VA", "2-Spark SP"],
+      "limitations": ["Requires a two-node Ray cluster on the QSFP interconnect. Height, width, frames, and steps in the YAML are examples. Edit them or pass CLI flags. See docs/getting_started/installation/spark_pair.md."]
     },
     {
       "id": "matrix-game-2",

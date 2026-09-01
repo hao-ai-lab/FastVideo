@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import torch
@@ -37,6 +37,36 @@ MINIMAX_H3_AUDIO_LATENTS_PER_SECOND = 40
 MINIMAX_H3_AUDIO_CHANNELS = 2
 MINIMAX_H3_KEYFRAME_NOISE_AUG = 0.999
 MINIMAX_H3_KEYFRAME_ENCODE_SEED = 42
+
+_PATCH_SIZE_CACHE: dict[int, tuple[int, int, int]] = {}
+
+
+def h3_dit_patch_size(fastvideo_args: Any) -> tuple[int, int, int]:
+    """Read DiT patch size from pipeline config, not live transformer weights."""
+    dit_config = getattr(getattr(fastvideo_args, "pipeline_config", None), "dit_config", None)
+    cached = _PATCH_SIZE_CACHE.get(id(dit_config)) if dit_config is not None else None
+    if cached is not None:
+        return cached
+    patch_size = getattr(dit_config, "patch_size", None)
+    if patch_size is None:
+        raise ValueError("MiniMax-H3 requires pipeline_config.dit_config.patch_size.")
+    axes = tuple(int(axis) for axis in patch_size)
+    if len(axes) != 3 or min(axes) <= 0:
+        raise ValueError(f"MiniMax-H3 patch_size must be three positive ints, got {patch_size!r}.")
+    values = (axes[0], axes[1], axes[2])
+    if dit_config is not None:
+        _PATCH_SIZE_CACHE[id(dit_config)] = values
+    return values
+
+
+def h3_latent_channels(model_config: Any, name: str) -> int:
+    """Read VAE latent width from arch config, not a live VAE proxy."""
+    arch = getattr(model_config, "arch_config", None)
+    value = getattr(arch, "latent_channels", None)
+    if value is None:
+        raise ValueError(f"MiniMax-H3 requires {name}.arch_config.latent_channels")
+    return int(value)
+
 
 MINIMAX_H3_ROPE_FRAME_RESCALE = 5.0 / 3.0
 MINIMAX_H3_ROPE_FRAMES_PER_LATENT = (1, 4, 4, 4, 4)

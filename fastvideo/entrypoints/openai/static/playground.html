@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>H3 playground · FastVideo</title>
+  <link rel="stylesheet" href="./playground.css">
+  <script src="./playground.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#prompt">Skip to prompt</a>
+  <header class="site-header">
+    <a class="wordmark" href="./">FastVideo <span> / H3 playground</span></a>
+    <a href="/docs">API reference <span aria-hidden="true">↗</span></a>
+  </header>
+  <main>
+    <div class="intro">
+      <p class="eyebrow">Text to video + audio</p>
+      <h1>A new prompt. The same running server.</h1>
+      <p>Generate, watch, and refine. This page and your API clients share one running FastVideo server.</p>
+    </div>
+    <div class="connection-bar">
+      <span id="connection" role="status">Connecting to server…</span>
+      <span id="model">Reading model…</span>
+    </div>
+    <div class="workspace">
+      <section class="composer" aria-labelledby="compose-heading">
+        <h2 id="compose-heading">Create a video</h2>
+        <form id="generate-form">
+          <label for="prompt">Prompt</label>
+          <p class="hint" id="prompt-hint">Describe the scene, motion, and sound you want.</p>
+          <textarea id="prompt" name="prompt" rows="7" required aria-describedby="prompt-hint" placeholder="A fox runs through fresh snow. The camera follows at ground level as snow crunches under its paws."></textarea>
+          <div class="seed-row">
+            <div><label for="seed">Seed <span class="optional">optional</span></label><p class="hint" id="seed-hint">Keep it fixed while changing the prompt.</p></div>
+            <input id="seed" name="seed" type="number" min="0" max="4294967295" step="1" placeholder="Server default" aria-describedby="seed-hint">
+          </div>
+          <p class="settings" id="settings">Resolution and sampling come from the server configuration.</p>
+          <button class="primary" id="generate" type="submit" disabled>Generate video <span aria-hidden="true">↗</span></button>
+          <p class="hint" id="lifetime">Closing this page does not cancel a job.</p>
+        </form>
+        <details class="request-details">
+          <summary>Use this prompt with cURL</summary>
+          <p class="hint">This creates the same job from a terminal on this machine. Copying does not submit it.</p>
+          <pre><code id="curl-command"></code></pre>
+          <button id="copy-curl" type="button" disabled>Copy cURL</button>
+          <span id="copy-status" role="status"></span>
+        </details>
+      </section>
+      <section class="output" aria-labelledby="output-heading">
+        <div class="section-heading"><h2 id="output-heading">Result</h2><span class="state" id="job-state">No job yet</span></div>
+        <div class="preview">
+          <div id="empty-preview"><span class="play-mark" aria-hidden="true">▷</span><h3>Your video will appear here</h3><p>Write a prompt, then select Generate video.</p></div>
+          <video id="video" controls playsinline preload="metadata" aria-label="Generated video" hidden></video>
+        </div>
+        <p id="job-status" role="status" aria-live="polite">No generation starts until you submit a prompt.</p>
+        <p class="error" id="error" role="alert" hidden></p>
+        <div class="result-actions">
+          <a class="button" id="download" hidden>Download MP4</a>
+          <button id="check-status" type="button" hidden>Check status</button>
+          <a id="job-link" hidden>View job JSON</a>
+        </div>
+        <p class="job-id" id="job-id"></p>
+        <section class="history" aria-labelledby="history-heading">
+          <div class="section-heading"><h3 id="history-heading">Recent jobs</h3><button id="refresh-jobs" type="button">Refresh jobs</button></div>
+          <p class="hint">Shared with other clients. Job history clears when the server restarts.</p>
+          <ul id="jobs"></ul>
+          <p class="hint" id="history-status" role="status">Loading recent jobs…</p>
+        </section>
+      </section>
+    </div>
+    <footer>Local development only. FastVideo does not check API keys. Keep the server on loopback or behind an authenticated proxy.</footer>
+    <noscript>This playground needs JavaScript. Use the cURL examples in the FastVideo cookbook instead.</noscript>
+  </main>
+</body>
+</html>
