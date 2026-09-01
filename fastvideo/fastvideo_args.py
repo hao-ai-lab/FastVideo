@@ -166,6 +166,13 @@ class FastVideoArgs:
     # False overrides the probe. Training never defers.
     h3_sequential_load: bool | None = None
 
+    # MiniMax-H3 video reconstruction. ``h3-vae`` is the full ViT decoder.
+    # ``taeh3`` is Ollin Boer Bohan's tiny preview decoder; it changes quality
+    # and is opt-in. T2VA with TAEH3 does not need the video VAE weights.
+    video_decode_backend: str = "h3-vae"
+    taeh3_checkpoint: str | None = None
+    taeh3_chunk_size: int = 5
+
     # Sequence-parallel MiniMax-H3 VAE (opt-in, default off). With SP > 1 the
     # video VAE's temporal chunks (decode) and clips (reference encode) are
     # round-robined across the sequence-parallel ranks and reassembled
@@ -728,6 +735,25 @@ class FastVideoArgs:
             help="MiniMax-H3: encode with Qwen3-VL, release that encoder, then load DiT and VAEs. "
             "Omit for auto (on for unified-memory devices such as GB10; off on discrete GPUs). "
             "Pass --no-h3-sequential-load to keep the encoder resident for later generate() calls.",
+        )
+        parser.add_argument(
+            "--video-decode-backend",
+            type=str,
+            choices=("h3-vae", "taeh3"),
+            default=FastVideoArgs.video_decode_backend,
+            help="MiniMax-H3 video decoder. taeh3 is a fast approximate preview decoder; h3-vae is the full VAE.",
+        )
+        parser.add_argument(
+            "--taeh3-checkpoint",
+            type=str,
+            default=None,
+            help="Local taeh3.safetensors path. Unset downloads the pinned upstream weights into the cache.",
+        )
+        parser.add_argument(
+            "--taeh3-chunk-size",
+            type=int,
+            default=FastVideoArgs.taeh3_chunk_size,
+            help="TAEH3 latent frames per execution chunk.",
         )
         parser.add_argument(
             "--vae-parallel-decode",

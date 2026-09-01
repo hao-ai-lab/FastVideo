@@ -170,6 +170,12 @@ is power-cycled. To avoid it:
   encodes first, releases the encoder, then loads DiT and VAEs onto the
   accelerator (`to_cpu` follows `cpu_offload`, which is off here). See
   [Offloading](../../inference/offloading.md).
+- **FastH3 TAEH3** (`--video-decode-backend taeh3`) is an opt-in preview decoder.
+  T2VA never materializes the 9.7 GiB video VAE (DiT still loads after Qwen via
+  sequential start). On this box, alpine 768×1344×124 decoded in **2.4 s** versus
+  **68 s** for the full VAE, and one T2VA generation finished in **224 s**
+  end-to-end. Reconstruction is approximate, not lossless. FL2VA/Ref2VA still
+  need the full VAE to encode references.
 
 ## Gotchas specific to the GB10
 
