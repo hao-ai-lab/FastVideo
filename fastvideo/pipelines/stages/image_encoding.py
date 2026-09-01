@@ -119,9 +119,10 @@ class Hy15ImageEncodingStage(ImageEncodingStage):
         Encode the prompt into image encoder hidden states.
         """
         device = get_local_torch_device()
+        batch_size = batch.raw_latent_shape[0]
 
         if batch.pil_image is None:
-            batch.image_embeds = [torch.zeros(1, 729, 1152, device=device)]
+            batch.image_embeds = [torch.zeros(batch_size, 729, 1152, device=device)]
             raw_latent_shape = list(batch.raw_latent_shape)
             raw_latent_shape[1] = 1
             batch.video_latent = torch.zeros(tuple(raw_latent_shape), device=device)
@@ -145,7 +146,15 @@ class Hy15ImageEncodingStage(ImageEncodingStage):
             return_tensors="pt",
         ).to(device=device, dtype=encoder_dtype)
         with set_forward_context(current_timestep=0, attn_metadata=None):
-            batch.image_embeds = [self.image_encoder(**image_inputs).last_hidden_state]
+            image_embeds = self.image_encoder(**image_inputs).last_hidden_state
+        # The public input is one reference image. Encode it once, then reuse
+        # the conditioning for every latent requested from that image.
+        if image_embeds.shape[0] == 1:
+            image_embeds = image_embeds.repeat(batch_size, 1, 1)
+        elif image_embeds.shape[0] != batch_size:
+            raise ValueError(f"HunyuanVideo 1.5 image embeddings have batch size {image_embeds.shape[0]}, "
+                             f"but the latent batch size is {batch_size}.")
+        batch.image_embeds = [image_embeds]
         if fastvideo_args.image_encoder_cpu_offload:
             self.image_encoder.to("cpu")
 
@@ -155,22 +164,48 @@ class Hy15ImageEncodingStage(ImageEncodingStage):
         vae_dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.vae_precision]
         vae_autocast_enabled = (vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
 
-        image_processor = ImageProcessor(vae_scale_factor=8)
+        # The HunyuanVideo 1.5 VAE compresses space by 16 and latent
+        # preparation divides by the same ratio, so aligning the reference
+        # image to 8 lets a height like 552 reach the encoder and fail
+        # inside its reshape.
+        image_processor = ImageProcessor(
+            vae_scale_factor=fastvideo_args.pipeline_config.vae_config.arch_config.spatial_compression_ratio)
         pixels = image_processor.preprocess(batch.pil_image, batch.height, batch.width)
         pixels = pixels.unsqueeze(2).to(device=device, dtype=vae_dtype)
 
         self.vae = self.vae.to(device)
         with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
+            # The decoding stage turns tiling on and nothing turns it back off,
+            # and both stages hold the same VAE. Without this the first
+            # generation in a process encodes the reference image untiled and
+            # every later one encodes it tiled, so the same image and seed give
+            # different conditioning. Decide from the config, as the other
+            # VAE-encoding stages in this file do.
+            if fastvideo_args.pipeline_config.vae_tiling:
+                self.vae.enable_tiling()
             cond_latents = self.vae.encode(pixels).mode()
             cond_latents = cond_latents * self.vae.config.scaling_factor
         if fastvideo_args.vae_cpu_offload:
             self.vae.to("cpu")
 
-        cond_latents = cond_latents.repeat(1, 1, latent_temporal, 1, 1)
-        cond_latents[:, :, 1:] = 0.0
+        if cond_latents.shape[0] == 1:
+            cond_latents = cond_latents.repeat(batch_size, 1, 1, 1, 1)
+        elif cond_latents.shape[0] != batch_size:
+            raise ValueError(f"HunyuanVideo 1.5 conditioning latents have batch size {cond_latents.shape[0]}, "
+                             f"but the requested latent batch size is {batch_size}.")
+
+        first_frame_latents = cond_latents[:, :, :1]
+        cond_latents = cond_latents.new_zeros(
+            batch_size,
+            latent_channels,
+            latent_temporal,
+            latent_height,
+            latent_width,
+        )
+        cond_latents[:, :, :1] = first_frame_latents
 
         mask = torch.zeros(
-            1,
+            batch_size,
             1,
             latent_temporal,
             latent_height,

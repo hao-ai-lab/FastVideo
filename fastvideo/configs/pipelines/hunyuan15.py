@@ -112,7 +112,7 @@ class Hunyuan15T2V480PConfig(PipelineConfig):
 
     vae_tiling: bool = True
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         self.vae_config.load_encoder = False
         self.vae_config.load_decoder = True
         if self.text_encoder_configs:
@@ -127,6 +127,15 @@ class Hunyuan15I2V480PStepDistilledConfig(Hunyuan15T2V480PConfig):
     # The i2v checkpoints ship a SigLIP vision tower; declaring it here is what
     # makes the loader build one.
     image_encoder_config: EncoderConfig = field(default_factory=SiglipVisionConfig)
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.vae_config.load_encoder = True
+
+    def check_pipeline_config(self) -> None:
+        super().check_pipeline_config()
+        if not self.vae_config.load_encoder:
+            raise ValueError("HunyuanVideo 1.5 I2V requires the VAE encoder.")
 
 
 @dataclass
@@ -145,6 +154,15 @@ class Hunyuan15I2V720PConfig(Hunyuan15T2V720PConfig):
     flow_shift: int = 7
 
     image_encoder_config: EncoderConfig = field(default_factory=SiglipVisionConfig)
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.vae_config.load_encoder = True
+
+    def check_pipeline_config(self) -> None:
+        super().check_pipeline_config()
+        if not self.vae_config.load_encoder:
+            raise ValueError("HunyuanVideo 1.5 I2V requires the VAE encoder.")
 
 
 @dataclass
