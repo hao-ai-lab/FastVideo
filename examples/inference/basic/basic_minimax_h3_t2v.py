@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
 from fastvideo import VideoGenerator
@@ -38,6 +39,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--steps", type=int, default=50)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--num-gpus", type=int, default=4)
+    parser.add_argument(
+        "--execution-backend",
+        choices=("mp", "ray"),
+        default=None,
+        help="mp for one node; ray for a Ray cluster (two DGX Sparks). "
+        "Default: ray when RAY_ADDRESS is set, otherwise mp",
+    )
     parser.add_argument("--torch-compile", action="store_true", help="torch.compile the DiT transformer path")
     parser.add_argument("--compile-mode",
                         default=None,
@@ -75,12 +83,14 @@ def main() -> None:
     if args.inference_torch_compile:
         experimental["inference_torch_compile"] = True
 
+    execution_backend = args.execution_backend or ("ray" if os.environ.get("RAY_ADDRESS") else "mp")
     generator = VideoGenerator.from_config(
         GeneratorConfig(
             model_path=args.model_path,
             pipeline=PipelineSelection(experimental=experimental),
             engine=EngineConfig(
                 num_gpus=args.num_gpus,
+                execution_backend=execution_backend,
                 use_fsdp_inference=args.num_gpus > 1,
                 parallelism=ParallelismConfig(tp_size=1, sp_size=args.num_gpus),
                 offload=OffloadConfig(

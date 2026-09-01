@@ -174,12 +174,31 @@ def test_auto_defers_on_unified_memory(monkeypatch) -> None:
 
     monkeypatch.setattr(ComposedPipelineBase, "load_modules", fake_load)
     monkeypatch.setattr("fastvideo.platforms.current_platform.has_unified_memory", lambda device_id: True)
-    args = FastVideoArgs(model_path="unused/for-this-test")
+    args = FastVideoArgs(model_path="unused/for-this-test", lazy_module_load=False)
     MiniMaxH3Pipeline("unused/for-this-test", args)
 
     assert loads
     assert "text_encoder" in loads[0]
     assert all(name not in loads[0] for name in _DENOISE_MODULE_NAMES)
+
+
+def test_lazy_module_load_owns_deferral_when_both_would_arm(monkeypatch) -> None:
+    events: list = []
+    _patch_pipeline_construction(monkeypatch, events)
+    loads: list[list[str]] = []
+
+    def fake_load(self, fastvideo_args, loaded_modules=None):
+        del fastvideo_args, loaded_modules
+        loads.append(list(self.required_config_modules))
+        return {name: _stub_module(name) for name in self.required_config_modules}
+
+    monkeypatch.setattr(ComposedPipelineBase, "load_modules", fake_load)
+    monkeypatch.setattr("fastvideo.platforms.current_platform.has_unified_memory", lambda device_id: True)
+    args = FastVideoArgs(model_path="unused/for-this-test", h3_sequential_load=True)
+    MiniMaxH3Pipeline("unused/for-this-test", args)
+
+    assert loads == [list(MiniMaxH3Pipeline._required_config_modules)]
+    assert all(name in loads[0] for name in _DENOISE_MODULE_NAMES)
 
 
 def test_auto_loads_together_without_unified_memory(monkeypatch) -> None:

@@ -147,6 +147,16 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
     def _defer_denoise_modules(self, fastvideo_args: FastVideoArgs) -> bool:
         if not fastvideo_args.inference_mode or bool(getattr(fastvideo_args, "training_mode", False)):
             return False
+        # Both mechanisms defer the same four modules and both decide when to
+        # free them. Running them together strips DiT/VAEs from the first load
+        # (sequential) while the base wraps the encoder in a proxy (lazy), so
+        # post_init's VAE compile transform has nothing to attach to. Lazy is
+        # the more general owner — including auto-on for unified memory — so it
+        # wins whenever it is on. Sequential remains the H3-only fallback when
+        # lazy is off.
+        if bool(getattr(fastvideo_args, "lazy_module_load", False)):
+            logger.info("MiniMax-H3 sequential module load off: lazy_module_load owns deferral")
+            return False
         requested = fastvideo_args.h3_sequential_load
         if requested is True:
             return True

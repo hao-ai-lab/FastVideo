@@ -1,8 +1,8 @@
 # Pair two NVIDIA DGX Sparks
 
 One GB10 is 128 GB of unified LPDDR5X. FastH3 still fits on a single Spark with
-[`h3_sequential_load`](../../inference/offloading.md) (auto on GB10) and
-[`lazy_module_load`](../../inference/offloading.md). Two boxes connected
+[`lazy_module_load`](../../inference/offloading.md) (auto on GB10; sequential
+load stands down when lazy owns deferral). Two boxes connected
 by the QSFP ConnectX-7 cables can run **one clip faster** and can hold a
 **longer clip** (up to the FastH3 15 s cap).
 
@@ -17,8 +17,8 @@ xDiT vendor. Do not install xDiT for this path.
 | One clip, faster | Ray + `sp_size=2` + parallel VAE | **Yes.** One 768×1344×124 recipe was 292 s vs 374 s on one GB10. |
 | One clip, longer | Same, more frames | **Yes.** 345 frames (~14.4 s at 24 fps) finished in 587 s at 768×1344. |
 
-Sequence parallel **replicates** the DiT (~66 GiB per node). Sequential load
-and lazy module load are still required on each box. FSDP would shard weights;
+Sequence parallel **replicates** the DiT (~66 GiB per node). Lazy module load
+is still required on each box. FSDP would shard weights;
 it is untested on this fabric and is likely slower because every layer gathers
 over ~21 GB/s RoCE.
 
@@ -193,7 +193,7 @@ sm_100a VSA kernel is not on this chip, so denoise is slower than a GB200
 | NCCL hangs or uses Wi-Fi | `source spark_pair_env.sh`. Confirm `NCCL_SOCKET_IFNAME` is the QSFP NIC. |
 | Gloo `connectFullMesh` / `remote=[127.0.0.1]` | Two 1-GPU nodes must not use loopback as the Gloo store. Source `spark_pair_env.sh` so `GLOO_SOCKET_IFNAME` is the QSFP NIC. Use a FastVideo build that keys loopback on unique worker IPs. |
 | Second `generate()` crashes `NoneType.parameters` | Sequential load used to drop the text encoder without reloading it. This branch reloads Qwen for later requests so `--warmup --repeats N` works. |
-| OOM / `earlyoom` prefers Python | Sequential load and lazy module load must stay on (do not pass `--no-h3-sequential-load` or `--no-lazy-module-load`). Peak GPU during 345-frame denoise is ~90 GiB/node. |
+| OOM / `earlyoom` prefers Python | Lazy module load must stay on (do not pass `--no-lazy-module-load`). Peak GPU during 345-frame denoise is ~90 GiB/node. |
 | `num_gpus=2` on one Spark | Each Spark has one GPU. Use Ray across two nodes, or `num_gpus=1` on one box. |
 
 ## What we are not claiming

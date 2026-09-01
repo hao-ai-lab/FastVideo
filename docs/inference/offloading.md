@@ -23,20 +23,21 @@ memory. CUDA FSDP sharding remains enabled when requested; MPS continues to
 disable FSDP. `pin_cpu_memory` is not an offload mode and is left unchanged.
 
 MiniMax H3 CUDA inference can use two levers that do not copy weights to a host
-pool. `h3_sequential_load` (already the GB10 default) loads the Qwen3-VL text
-encoder, runs conditioning, then releases that encoder before loading the DiT
-and video/audio VAEs. Sequential load currently cannot re-encode a new prompt on
-that worker; start a new generator until prompt-cache reload exists.
-`lazy_module_load` is the general follow-on: each opted-in component loads on
+pool. `lazy_module_load` is the general path: each opted-in component loads on
 first use and is freed after its last stage, so a later `generate()` reloads
-from disk in-process and the DiT can drop before VAE decode. Input preparation
-and unpatchify read geometry from checkpoint `config.json` (VAE spatial ratio /
-latent channels, DiT patch size) so those stages do not materialize weights just
-to read two integers. The MLX FastH3 runtime always uses this phase order. When
+from disk in-process and the DiT can drop before VAE decode. On GB10 it
+auto-enables and owns deferral. `h3_sequential_load` is the H3-only fallback
+when lazy is off: load Qwen3-VL, run conditioning, release that encoder, then
+load the DiT and VAEs. When both would arm, sequential stands down so VAE
+`torch.compile` can attach to the lazy proxy. Input preparation and unpatchify
+read geometry from checkpoint `config.json` (VAE spatial ratio / latent
+channels, DiT patch size) so those stages do not materialize weights just to
+read two integers. The MLX FastH3 runtime always uses this phase order. When
 host offload is off, DiT safetensors are read onto the accelerator instead of
 CPU-then-copy. Both flags default to auto (`None`) and turn on for
-unified-memory devices such as GB10. Pass `--no-h3-sequential-load` or
-`--no-lazy-module-load` to keep the matching components resident. Two-node Spark
+unified-memory devices such as GB10; lazy then disables sequential. Pass
+`--no-lazy-module-load` to keep every component resident (sequential may still
+auto-arm). Two-node Spark
 jobs still need this split: sequence parallel replicates the DiT on each GB10
 (~66 GiB of weights plus activations). See
 [Pair two NVIDIA DGX Sparks](../getting_started/installation/spark_pair.md).
@@ -100,9 +101,12 @@ because the encoder has been released.
 
 #### Usage Recommendation
 
-Leave the default on Spark / DGX Spark. Force `--h3-sequential-load` only when
-you need the split on a discrete GPU. Use `--no-h3-sequential-load` when you
-need more than one prompt per worker and have enough memory to keep the encoder.
+Leave the default on Spark / DGX Spark when `lazy_module_load` is off. When
+both would arm (the GB10 auto case), lazy owns deferral and sequential stands
+down so VAE `torch.compile` can attach to the lazy proxy. Force
+`--h3-sequential-load` only when you need the split on a discrete GPU without
+lazy load. Use `--no-h3-sequential-load` when you need more than one prompt per
+worker and have enough memory to keep the encoder.
 
 ### `text_encoder_cpu_offload`
 
