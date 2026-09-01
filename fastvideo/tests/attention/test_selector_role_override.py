@@ -69,7 +69,14 @@ def test_unsupported_role_override_honors_layer_default(monkeypatch) -> None:
         selector._cached_get_attn_backend.cache_clear()
 
 
-def test_flashinfer_is_compatible_with_dense_flash_attn_layers(monkeypatch) -> None:
+def test_flashinfer_requires_explicit_layer_support(monkeypatch) -> None:
+    """A layer must list FLASHINFER itself; declaring FLASH_ATTN is not enough.
+
+    FlashInfer's dense kernel has not been vetted per-model (head sizes,
+    masking conventions, SP contract), so unlike the old bridge, a layer that
+    only declares FLASH_ATTN support falls back rather than silently
+    running FlashInfer.
+    """
     monkeypatch.setattr(platforms, "_current_platform", _FakePlatform())
     monkeypatch.setattr(selector, "resolve_obj_by_qualname", lambda name: name)
 
@@ -78,6 +85,15 @@ def test_flashinfer_is_compatible_with_dense_flash_attn_layers(monkeypatch) -> N
             head_size=128,
             dtype=torch.bfloat16,
             supported_attention_backends=(AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA),
+            default_backend=AttentionBackendEnum.FLASH_ATTN,
+            requested=AttentionBackendEnum.FLASHINFER,
+        ) == "FLASH_ATTN"
+
+        assert selector.get_attn_backend(
+            head_size=128,
+            dtype=torch.bfloat16,
+            supported_attention_backends=(AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.FLASHINFER,
+                                          AttentionBackendEnum.TORCH_SDPA),
             requested=AttentionBackendEnum.FLASHINFER,
         ) == "FLASHINFER"
     finally:
