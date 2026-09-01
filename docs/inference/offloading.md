@@ -36,7 +36,10 @@ to read two integers. The MLX FastH3 runtime always uses this phase order. When
 host offload is off, DiT safetensors are read onto the accelerator instead of
 CPU-then-copy. Both flags default to auto (`None`) and turn on for
 unified-memory devices such as GB10. Pass `--no-h3-sequential-load` or
-`--no-lazy-module-load` to keep the matching components resident.
+`--no-lazy-module-load` to keep the matching components resident. Two-node Spark
+jobs still need this split: sequence parallel replicates the DiT on each GB10
+(~66 GiB of weights plus activations). See
+[Pair two NVIDIA DGX Sparks](../getting_started/installation/spark_pair.md).
 
 ## Behavior Explanation
 

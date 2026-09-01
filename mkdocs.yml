@@ -152,6 +152,8 @@ nav:
   - Getting Started:
     - Installation: getting_started/installation.md
     - Apple Silicon FastWan: getting_started/installation/mps.md
+    - NVIDIA DGX Spark: getting_started/installation/spark.md
+    - Pair two DGX Sparks: getting_started/installation/spark_pair.md
     - Quick Start: getting_started/quick_start.md
     - V1 API: getting_started/v1_api.md
   - Cookbook:

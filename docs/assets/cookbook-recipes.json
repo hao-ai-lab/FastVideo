@@ -646,6 +646,14 @@
       "limitations": ["The upstream checkpoint must be converted to Diffusers layout via scripts/checkpoint_conversion/convert_mmaudio_to_diffusers.py unless loaded from the FastVideo converted repo as done here."]
     },
     {
+      "id": "fasth3-spark-pair",
+      "task": "Text to video",
+      "label": "FastH3 on two DGX Sparks (sequence parallel)",
+      "model": "FastVideo/FastVideo-FastH3-4-step-Preview-v1-VSA-DataFree",
+      "source": "examples/inference/basic/basic_fasth3_spark_pair.yaml",
+      "command": "source examples/inference/optimizations/spark_pair_env.sh && FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 FASTVIDEO_VAE_PARALLEL_DECODE=1 fastvideo generate --config examples/inference/basic/basic_fasth3_spark_pair.yaml"
+    },
+    {
       "id": "matrix-game-2",
       "family": "matrixgame",
       "stage": "inference",

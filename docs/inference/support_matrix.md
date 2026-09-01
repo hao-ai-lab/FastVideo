@@ -221,6 +221,8 @@ Per the installation guides:
   [GPU install guide](../getting_started/installation/gpu.md).
 - **NVIDIA DGX Spark (GB10, aarch64)** — CUDA 13, from-source kernel build; see
   the [DGX Spark install guide](../getting_started/installation/spark.md).
+  Two Sparks over QSFP use Ray sequence parallel; see
+  [Pair two NVIDIA DGX Sparks](../getting_started/installation/spark_pair.md).
 - **Apple silicon** — macOS 14 or newer; FastMetal-QAD via the MLX runtime. See the
   [Apple Silicon guide](../getting_started/installation/mps.md). The older
   [`basic_mps.py`](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_mps.py)

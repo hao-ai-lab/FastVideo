@@ -3,6 +3,7 @@
 
 import asyncio
 from collections import defaultdict
+from queue import Queue
 import os
 import cloudpickle
 
@@ -60,8 +61,21 @@ class RayDistributedExecutor(Executor):
         "CUDA_VISIBLE_DEVICES",
     }
 
-    # These non-vLLM env vars are copied from the driver to workers
-    ADDITIONAL_ENV_VARS = {"HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"}
+    # These non-vLLM env vars are copied from the driver to workers.
+    # NCCL_* must be copied explicitly: they are not FastVideo-declared env vars,
+    # and two-node Spark / RoCE jobs fail if workers fall back to Wi-Fi.
+    ADDITIONAL_ENV_VARS = {
+        "HF_TOKEN",
+        "HUGGING_FACE_HUB_TOKEN",
+        "NCCL_SOCKET_IFNAME",
+        "NCCL_IB_HCA",
+        "NCCL_IB_DISABLE",
+        "NCCL_P2P_DISABLE",
+        "NCCL_CUMEM_ENABLE",
+        "NCCL_NVLS_ENABLE",
+        "NCCL_DEBUG",
+        "NCCL_DEBUG_SUBSYS",
+    }
 
     def _init_executor(self) -> None:
         initialize_ray_cluster(self.fastvideo_args)
@@ -340,6 +354,17 @@ class RayDistributedExecutor(Executor):
         for i, response in enumerate(responses):
             if response["status"] != "lora_adapter_merged":
                 raise RuntimeError(f"Worker {i} failed to merge LoRA weights")
+
+    def set_log_queue(self, log_queue: Queue | None) -> None:
+        """Keep the driver-side queue locally.
+
+        ``multiprocessing.Queue`` is not picklable across Ray nodes, so worker
+        logs stay in the Ray session log dir instead of being forwarded.
+        """
+        self._log_queue = log_queue
+
+    def clear_log_queue(self) -> None:
+        self._log_queue = None
 
     def collective_rpc(self,
                        method: str | Callable,

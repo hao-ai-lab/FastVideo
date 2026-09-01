@@ -77,6 +77,13 @@ def build_parser(description: str | None = None) -> argparse.ArgumentParser:
                         default=True,
                         help="run one excluded request before timing")
     parser.add_argument("--num-gpus", type=int, default=4)
+    parser.add_argument(
+        "--execution-backend",
+        choices=("mp", "ray"),
+        default=None,
+        help="mp for one node; ray for a Ray cluster (two DGX Sparks). "
+        "Default: ray when RAY_ADDRESS is set, otherwise mp",
+    )
     parser.add_argument("--vsa-sparsity",
                         type=float,
                         default=0.9,
@@ -239,6 +246,12 @@ def validate_profile_dependencies(args: argparse.Namespace) -> None:
             "`cd fastvideo-kernel && ./build.sh`), or pass --vsa-kernel triton.")
 
 
+def _execution_backend(args: argparse.Namespace) -> str:
+    if args.execution_backend is not None:
+        return args.execution_backend
+    return "ray" if os.environ.get("RAY_ADDRESS") else "mp"
+
+
 def build_generator_config(args: argparse.Namespace) -> GeneratorConfig:
     use_vsa = _uses_vsa(args)
     experimental: dict[str, object] = {
@@ -269,6 +282,7 @@ def build_generator_config(args: argparse.Namespace) -> GeneratorConfig:
         ),
         engine=EngineConfig(
             num_gpus=args.num_gpus,
+            execution_backend=_execution_backend(args),
             use_fsdp_inference=args.num_gpus > 1 and not args.replicated_dit,
             parallelism=ParallelismConfig(tp_size=1, sp_size=args.num_gpus),
             offload=OffloadConfig(
@@ -341,6 +355,7 @@ def run(args: argparse.Namespace) -> list[float]:
           f"Denoising contract override: {args.steps} sigma points = {args.steps - 1} DiT forwards")
     print("Profile environment: " + " ".join(f"{key}={value if value is not None else '<unset>'}"
                                                   for key, value in environment.items()))
+    print(f"Execution backend: {_execution_backend(args)}")
 
     generator = VideoGenerator.from_config(build_generator_config(args))
     measured_wall_times: list[float] = []
