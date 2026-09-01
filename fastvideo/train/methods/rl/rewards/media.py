@@ -8,39 +8,62 @@ from collections.abc import Callable, Mapping, Sequence
 import numpy as np
 import torch
 
-RewardScorer = Callable[[torch.Tensor, Sequence[str]], torch.Tensor]
+RewardScorer = Callable[
+    [torch.Tensor, Sequence[str]],
+    torch.Tensor,
+]
 
 
 def select_first_frame(media: torch.Tensor) -> torch.Tensor:
     """Return first-frame media as ``[B, C, H, W]``."""
     if not torch.is_tensor(media):
-        raise TypeError(f"media must be a torch.Tensor, got {type(media).__name__}")
+        raise TypeError(
+            "media must be a torch.Tensor, "
+            f"got {type(media).__name__}"
+        )
     if media.ndim == 5:
         return media[:, :, 0]
     if media.ndim == 4:
         return media
-    raise ValueError("media must have shape [B, C, H, W] or [B, C, T, H, W], "
-                     f"got {tuple(media.shape)}")
+    raise ValueError(
+        "media must have shape [B, C, H, W] or "
+        "[B, C, T, H, W], "
+        f"got {tuple(media.shape)}"
+    )
 
 
-def media_to_float_tensor(media: torch.Tensor, *, device: torch.device | str | None = None) -> torch.Tensor:
-    """Convert uint8 or floating media to float ``[0, 1]`` without changing layout."""
+def media_to_float_tensor(
+    media: torch.Tensor,
+    *,
+    device: torch.device | str | None = None,
+) -> torch.Tensor:
+    """Convert uint8 or floating media to float ``[0, 1]``."""
     value = media.detach()
     if value.dtype == torch.uint8:
         value = value.float().div_(255.0)
     else:
         value = value.float().clamp_(0.0, 1.0)
-    return value.to(device) if device is not None else value
+    return (
+        value.to(device)
+        if device is not None
+        else value
+    )
 
 
-def media_to_uint8_array(media: torch.Tensor | np.ndarray) -> np.ndarray:
+def media_to_uint8_array(
+    media: torch.Tensor | np.ndarray,
+) -> np.ndarray:
     """Convert image/video media to uint8 NHWC or NFHWC arrays."""
     if isinstance(media, torch.Tensor):
         tensor = media.detach().cpu()
         if tensor.dtype == torch.uint8:
             media = tensor.numpy()
         else:
-            media = tensor.float().clamp(0, 1).numpy()
+            media = (
+                tensor.float()
+                .clamp(0, 1)
+                .numpy()
+            )
     media = np.asarray(media)
     if media.ndim == 4:
         if media.shape[-1] in (1, 3):
@@ -51,17 +74,40 @@ def media_to_uint8_array(media: torch.Tensor | np.ndarray) -> np.ndarray:
         if media.shape[-1] in (1, 3):
             pass
         elif media.shape[2] in (1, 3):
-            media = media.transpose(0, 1, 3, 4, 2)
+            media = media.transpose(
+                0,
+                1,
+                3,
+                4,
+                2,
+            )
         elif media.shape[1] in (1, 3):
-            media = media.transpose(0, 2, 3, 4, 1)
+            media = media.transpose(
+                0,
+                2,
+                3,
+                4,
+                1,
+            )
     else:
-        raise ValueError("media must have shape [B, C, H, W], [B, H, W, C], "
-                         "[B, C, T, H, W], [B, T, C, H, W], or "
-                         f"[B, T, H, W, C], got {tuple(media.shape)}")
+        raise ValueError(
+            "media must have shape [B, C, H, W], "
+            "[B, H, W, C], [B, C, T, H, W], "
+            "[B, T, C, H, W], or [B, T, H, W, C], "
+            f"got {tuple(media.shape)}"
+        )
     if np.issubdtype(media.dtype, np.floating):
-        media = np.clip(media * 255.0, 0, 255).round().astype(np.uint8)
+        media = (
+            np.clip(media * 255.0, 0, 255)
+            .round()
+            .astype(np.uint8)
+        )
     elif media.dtype != np.uint8:
-        media = np.clip(media, 0, 255).astype(np.uint8)
+        media = np.clip(
+            media,
+            0,
+            255,
+        ).astype(np.uint8)
     return media
 
 
@@ -74,13 +120,24 @@ class MultiRewardScorer:
         *,
         scorers: Mapping[str, RewardScorer],
     ) -> None:
-        self.reward_weights = {str(k): float(v) for k, v in reward_weights.items()}
+        self.reward_weights = {
+            str(key): float(value)
+            for key, value in reward_weights.items()
+        }
         if not self.reward_weights:
-            raise ValueError("reward_weights must contain at least one reward")
+            raise ValueError(
+                "reward_weights must contain at least one reward"
+            )
         self.scorers = dict(scorers)
-        unsupported = sorted(set(self.reward_weights) - set(self.scorers))
+        unsupported = sorted(
+            set(self.reward_weights)
+            - set(self.scorers)
+        )
         if unsupported:
-            raise ValueError(f"Unsupported reward(s): {unsupported}. Available rewards: {sorted(self.scorers)}")
+            raise ValueError(
+                f"Unsupported reward(s): {unsupported}. "
+                f"Available rewards: {sorted(self.scorers)}"
+            )
 
     @torch.no_grad()
     def __call__(
@@ -90,16 +147,86 @@ class MultiRewardScorer:
     ) -> dict[str, torch.Tensor]:
         prompt_count = len(prompts)
         if media.shape[0] != prompt_count:
-            raise ValueError(f"media batch size ({media.shape[0]}) must match prompt count ({prompt_count})")
+            raise ValueError(
+                f"media batch size ({media.shape[0]}) "
+                f"must match prompt count ({prompt_count})"
+            )
         total: torch.Tensor | None = None
         details: dict[str, torch.Tensor] = {}
         for name, weight in self.reward_weights.items():
-            scores = self.scorers[name](media, prompts).detach().float()
-            if scores.ndim != 1 or int(scores.shape[0]) != prompt_count:
-                raise ValueError(f"Reward {name!r} must return shape [{prompt_count}], got {tuple(scores.shape)}")
+            scorer = self.scorers[name]
+            scores = scorer(
+                media,
+                prompts,
+            ).detach().float()
+            self._validate_scores(
+                name,
+                scores,
+                prompt_count,
+            )
             details[name] = scores
             weighted = scores * float(weight)
-            total = weighted if total is None else total.to(weighted.device) + weighted
+            total = (
+                weighted
+                if total is None
+                else total.to(weighted.device) + weighted
+            )
+
+            diagnostics = getattr(
+                scorer,
+                "last_diagnostics",
+                None,
+            )
+            if isinstance(diagnostics, Mapping):
+                for diagnostic_name, values in diagnostics.items():
+                    key = (
+                        f"{name}_"
+                        f"{str(diagnostic_name).strip().lower()}"
+                    )
+                    diagnostic = torch.as_tensor(
+                        values,
+                        device=scores.device,
+                        dtype=torch.float32,
+                    ).detach()
+                    self._validate_scores(
+                        key,
+                        diagnostic,
+                        prompt_count,
+                    )
+                    if key in details:
+                        raise ValueError(
+                            f"Duplicate reward diagnostic key: {key}"
+                        )
+                    details[key] = diagnostic
+
         assert total is not None
         details["avg"] = total
         return details
+
+    @staticmethod
+    def _validate_scores(
+        name: str,
+        scores: torch.Tensor,
+        prompt_count: int,
+    ) -> None:
+        if (
+            scores.ndim != 1
+            or int(scores.shape[0]) != prompt_count
+        ):
+            raise ValueError(
+                f"Reward {name!r} must return shape "
+                f"[{prompt_count}], got {tuple(scores.shape)}"
+            )
+        if not bool(torch.isfinite(scores).all()):
+            raise RuntimeError(
+                f"Reward {name!r} returned NaN or Inf"
+            )
+
+
+__all__ = [
+    "MultiRewardScorer",
+    "RewardScorer",
+    "media_to_float_tensor",
+    "media_to_uint8_array",
+    "select_first_frame",
+]

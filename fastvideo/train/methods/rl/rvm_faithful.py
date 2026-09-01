@@ -82,6 +82,13 @@ class RVMFaithfulMethod(RVMMethod):
             raise ValueError(
                 "method.training_timestep requires 0 <= min < max <= 1"
             )
+        if "dynamic_tracking" in self._reward_names:
+            self._reward_keys = [
+                *self._reward_names,
+                "dynamic_tracking_raw",
+                "dynamic_tracking_saturation",
+                "avg",
+            ]
 
     def on_train_start(self) -> None:
         super().on_train_start()
@@ -147,9 +154,13 @@ class RVMFaithfulMethod(RVMMethod):
             # NCCL for communication buffers.
             torch.cuda.empty_cache()
 
-        global_reward_mean, global_reward_std = self._global_reward_stats(
-            [group.rewards["avg"] for group in pending]
-        )
+        reward_stats = {
+            key: self._global_reward_stats(
+                [group.rewards[key] for group in pending]
+            )
+            for key in self._reward_keys
+        }
+        global_reward_mean, global_reward_std = reward_stats["avg"]
         positive_only = iteration <= self._positive_only_steps
         zero_std_count = 0
         group_std_sum = 0.0
@@ -235,6 +246,7 @@ class RVMFaithfulMethod(RVMMethod):
                 value,
                 float(reward_count),
             )
+            metrics[f"reward_std/{key}"] = reward_stats[key][1]
         self._collection_metrics = metrics
 
     def _global_reward_stats(
