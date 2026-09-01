@@ -33,22 +33,48 @@ def standardize_group_rewards(
     eps: float = 1e-4,
     clip: float | None = 5.0,
     positive_only: bool = False,
+    normalization_std: torch.Tensor | float | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Convert one prompt's reward vector into RVM advantages.
 
-    The normalization follows the RVM video setup: subtract the group mean,
-    divide by the population standard deviation, then multiply by a small
-    global scale. Equal-reward groups therefore produce exactly zero signal.
+    The numerator is always centered within the prompt group. By default the
+    denominator is that group's population standard deviation, preserving the
+    legacy behavior. Passing ``normalization_std`` implements the published RVM
+    video recipe: subtract each prompt-group mean but divide every sample in the
+    rollout batch by one globally computed reward standard deviation.
+
+    The returned second value is the prompt group's own population standard
+    deviation, which remains useful for zero-variance diagnostics.
     """
     if rewards.ndim != 1:
-        raise ValueError(f"rewards must be one-dimensional, got {tuple(rewards.shape)}")
+        raise ValueError(
+            f"rewards must be one-dimensional, got {tuple(rewards.shape)}"
+        )
     if rewards.numel() < 2:
-        raise ValueError("RVM group normalization requires at least two samples")
+        raise ValueError(
+            "RVM group normalization requires at least two samples"
+        )
     values = rewards.detach().float()
     group_std = values.std(unbiased=False)
-    advantages = (values - values.mean()) / (group_std + float(eps))
+    denominator = group_std
+    if normalization_std is not None:
+        denominator = torch.as_tensor(
+            normalization_std,
+            device=values.device,
+            dtype=values.dtype,
+        )
+        if denominator.numel() != 1:
+            raise ValueError("normalization_std must be scalar")
+        if float(denominator) < 0.0:
+            raise ValueError("normalization_std must be nonnegative")
+    advantages = (
+        values - values.mean()
+    ) / (denominator + float(eps))
     if clip is not None:
-        advantages = advantages.clamp(-float(clip), float(clip))
+        advantages = advantages.clamp(
+            -float(clip),
+            float(clip),
+        )
     if positive_only:
         advantages = advantages.clamp_min(0.0)
     return advantages * float(scale), group_std
@@ -74,28 +100,51 @@ def detached_rvm_surrogate(
     under the same elementwise-mean normalization as ordinary flow matching.
     """
     if prediction.shape != target.shape:
-        raise ValueError("prediction and target must have identical shapes")
+        raise ValueError(
+            "prediction and target must have identical shapes"
+        )
     pred_detached = prediction.detach()
-    coeff = torch.as_tensor(coefficient, device=prediction.device, dtype=prediction.dtype)
+    coeff = torch.as_tensor(
+        coefficient,
+        device=prediction.device,
+        dtype=prediction.dtype,
+    )
     while coeff.ndim < prediction.ndim:
         coeff = coeff.unsqueeze(-1)
-    gradient = coeff * (pred_detached - target.detach())
+    gradient = coeff * (
+        pred_detached - target.detach()
+    )
     if float(anchor_beta) != 0.0:
         if reference is None:
-            raise ValueError("reference is required when anchor_beta is nonzero")
+            raise ValueError(
+                "reference is required when anchor_beta is nonzero"
+            )
         if reference.shape != prediction.shape:
-            raise ValueError("reference and prediction must have identical shapes")
-        gradient = gradient + float(anchor_beta) * (pred_detached - reference.detach())
-    surrogate_target = (pred_detached - gradient).detach()
-    return 0.5 * torch.mean((prediction - surrogate_target)**2)
+            raise ValueError(
+                "reference and prediction must have identical shapes"
+            )
+        gradient = gradient + float(anchor_beta) * (
+            pred_detached - reference.detach()
+        )
+    surrogate_target = (
+        pred_detached - gradient
+    ).detach()
+    return 0.5 * torch.mean(
+        (prediction - surrogate_target) ** 2
+    )
 
 
 def five_percent_interval(max_optimizer_steps: int) -> int:
     """Return the integer interval corresponding to 5% of a run."""
     steps = int(max_optimizer_steps)
     if steps <= 0:
-        raise ValueError("max_optimizer_steps must be positive")
-    return max(1, int(math.ceil(0.05 * steps)))
+        raise ValueError(
+            "max_optimizer_steps must be positive"
+        )
+    return max(
+        1,
+        int(math.ceil(0.05 * steps)),
+    )
 
 
 def partition_indices(
@@ -111,6 +160,16 @@ def partition_indices(
     if count <= 0:
         raise ValueError("num_items must be positive")
     if parts <= 0 or parts > count:
-        raise ValueError("num_partitions must be in [1, num_items]")
-    order = torch.randperm(count, generator=generator, device=device)
-    return [chunk for chunk in torch.tensor_split(order, parts) if chunk.numel()]
+        raise ValueError(
+            "num_partitions must be in [1, num_items]"
+        )
+    order = torch.randperm(
+        count,
+        generator=generator,
+        device=device,
+    )
+    return [
+        chunk
+        for chunk in torch.tensor_split(order, parts)
+        if chunk.numel()
+    ]
