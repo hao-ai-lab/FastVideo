@@ -676,7 +676,7 @@ def generate_flat_examples(examples: list[Example], category_indices: dict[str, 
 
         # Generate the example documentation
         doc_path = index.path.parent / f"{example.path.stem}.md"
-        with open(doc_path, "w+") as f:
+        with open(doc_path, "w+", encoding="utf-8") as f:
             f.write(example.generate())
         index.documents.append(example.path.stem)
 
@@ -703,7 +703,7 @@ def generate_nested_examples(nested_structures: dict[str, dict[str, dict[str, di
                 # Generate dataset examples using the Example class
                 for dataset, nested_struct in datasets.items():
                     doc_path = category_base_dir / f"{nested_struct.filename}.md"
-                    with open(doc_path, "w+") as f:
+                    with open(doc_path, "w+", encoding="utf-8") as f:
                         f.write(nested_struct.example.generate())
 
                 # Create model-level index
@@ -718,14 +718,14 @@ def generate_nested_examples(nested_structures: dict[str, dict[str, dict[str, di
                     model_index.documents.append(nested_struct.filename)
 
                 # Write model index
-                with open(model_index.path, "w+") as f:
+                with open(model_index.path, "w+", encoding="utf-8") as f:
                     f.write(model_index.generate())
 
                 # Add model to method index
                 method_index.documents.append(model)
 
             # Write method index
-            with open(method_index.path, "w+") as f:
+            with open(method_index.path, "w+", encoding="utf-8") as f:
                 f.write(method_index.generate())
 
             # Add method to main category index
@@ -778,12 +778,12 @@ def generate_examples(generate_main_index: bool = False) -> None:
                 examples_index.documents.insert(0, str(rel_path).replace("\\", "/").replace(".md", ""))
 
             # Write the category index file
-            with open(category_index.path, "w+") as f:
+            with open(category_index.path, "w+", encoding="utf-8") as f:
                 f.write(category_index.generate())
 
     # Write the main index file if requested
     if generate_main_index and examples_index:
-        with open(examples_index.path, "w+") as f:
+        with open(examples_index.path, "w+", encoding="utf-8") as f:
             f.write(examples_index.generate())
 
 
