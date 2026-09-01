@@ -1,95 +1,64 @@
 # FastH3 RVM GPU-agent runbook
 
-This document is the operating contract for the agent responsible for running,
-debugging, and tuning FastH3 RVM on the GPU node. The objective is not novelty;
-it is a reproducible quality improvement over the released four-step FastH3
-checkpoint.
+This is the operating contract for the agent running and debugging FastH3 RVM.
+The goal is a reproducible quality improvement over the released four-forward
+FastH3 checkpoint—not a novel algorithm and not a merely successful process
+exit.
 
-## 1. Method and intuition
+## 1. Method
 
-RVM is endpoint-only reward-weighted self-distillation. The current behavior
-policy generates a clean endpoint `x0`. A black-box reward assigns a scalar.
-The endpoint is analytically noised at one training time and the model is
-updated with its original flow-matching regression target.
+RVM is endpoint-only reward-weighted self-distillation. The behavior policy
+samples complete FastH3 outputs, black-box rewards rank those outputs, and each
+endpoint is analytically noised once for the model's native velocity-matching
+update.
 
-For one generated sample:
-
-```text
-x_t = (1 - sigma) * x0 + sigma * epsilon
-velocity_target = epsilon - x0
-```
-
-For prompt group `g`, candidate `i`:
+For prompt group `g` and candidate `i`:
 
 ```text
-A_i = 0.1 * clip((R_i - mean_g R) / (std_g R + 1e-4), -5, 5)
+R[g,i] = weighted reward
+C[g,i] = R[g,i] - mean_i R[g,i]
+s = population_std over every R[g,i] in the rollout collection
+A[g,i] = 0.1 * clip(C[g,i] / (s + 1e-4), -5, 5)
 ```
 
-The desired video-output gradient is:
+The numerator is prompt-relative; the denominator is batch-global. Do not
+replace this with a separate unit-variance normalization for every K-sample
+group. That would amplify low-spread scorer noise to the same magnitude as
+large reward differences.
+
+For each endpoint `x0`, sample:
 
 ```text
-g_video = A_i * (v_video - velocity_target_video)
-          + beta_video * (v_video - v_reference_video)
+t ~ Uniform(0, 1)
+epsilon ~ Normal(0, I)
+x_t = (1 - sigma(t)) * x0 + sigma(t) * epsilon
+v_target = epsilon - x0
 ```
 
-Audio receives no reward coefficient in the initial runs:
+H3 maps the shared base time through video shift 12 and audio shift 3. The video
+output gradient is:
 
 ```text
-g_audio = beta_audio * (v_audio - v_reference_audio)
+A * (v_video - v_target_video)
++ beta_video * (v_video - v_reference_video)
 ```
 
-The code constructs a detached target `v - g` and minimizes an ordinary
-nonnegative MSE against it. Because the target is detached, the derivative with
-respect to `v` is exactly `g`, including signed negative advantages. Do not
-replace this with a literal negative-weighted MSE: the scalar would be
-unbounded below and harder to monitor safely.
+Audio receives no visual reward coefficient:
 
-The reference field is the same released FastH3 backbone with the new quality
-LoRA temporarily disabled. It does not require a second H3 checkpoint in GPU
-memory.
+```text
+beta_audio * (v_audio - v_reference_audio)
+```
 
-### Why this method was chosen
+The implementation builds a detached target `v - gradient` and minimizes a
+nonnegative MSE against it. Its derivative is exactly the signed RVM update.
+Do not replace it with a literal negative-weighted MSE.
 
-The RVM paper's controlled video experiments found that endpoint velocity
-matching can outperform substantially more expensive trajectory-policy methods
-while preserving the original pretraining objective. It also found that reward
-choice—especially an explicit motion term—matters more than small differences
-among closely related velocity losses. Therefore this implementation follows
-its public data/reward/loss setup as closely as H3 permits.
+The behavior rollout is always the released FastH3 four-step VSA policy. The
+continuous time is used only for the forward-noised RVM regression example.
+For VSA at a continuous state, the nearest released deployment-step mask is
+used. Treat deployment-grid training as an ablation, not the default.
 
-H3 differs from the paper's Wan model in three important ways:
-
-1. it is already a native four-forward distilled model;
-2. it jointly generates video and audio with different scheduler shifts;
-3. the public checkpoint uses 90% VSA sparsity.
-
-The code handles those differences without changing the core RVM algorithm.
-
-## 2. Non-negotiable invariants
-
-Never silently modify these to get a run to start:
-
-| Invariant | Required value | Why |
-|---|---:|---|
-| Behavior sampling | current FastH3 policy before its attached updates | RVM is on-policy/recent-policy |
-| Base steps | `1000,750,500,250` | released four-step student schedule |
-| CFG | guidance `1.0`; dropout `0.0`; no negative prompt | H3 is guidance-distilled |
-| Attention | `VIDEO_SPARSE_ATTN_H3` | dense is not the deployed checkpoint |
-| VSA | sparsity `0.90`, tile `64` | trained deployment policy |
-| Video shift | `12` | H3 scheduler contract |
-| Audio shift | `3` | H3 scheduler contract |
-| FPS | `24` | H3 fixed FPS |
-| Frames | `124` | valid five-second H3 chunk geometry |
-| Modality reductions | independent video/audio means | packed video otherwise erases audio |
-| LoRA target | `to_q,to_k,to_v,to_out` | avoids changing sparse gate |
-| VSA gate | frozen | prevents architecture/reward confound |
-| LoRA master dtype | FP32 | prevents 1e-5 updates rounding away |
-| Reward prompt | visual description only | sound fields must not enter visual TA/HPS |
-
-Any experiment that changes one must receive a distinct run name and a written
-rationale in the experiment log.
-
-## 3. Reward stack
+## 2. Reward stack
 
 Production weights:
 
@@ -101,60 +70,69 @@ hpsv3_percentile    0.1
 dynamic_tracking    0.7
 ```
 
-### Meaning
+Meaning:
 
-- **VideoAlign TA:** semantic adherence to the visual prompt.
-- **VideoAlign MQ:** temporal stability and motion plausibility.
-- **HPSv3 general:** frame-level broad human preference using the generic
-  prompt `A high-quality image`.
-- **HPSv3 percentile:** prompt-conditioned mean over the best 30% frames,
-  matching the public RVM/GenRL recipe.
-- **Dynamic tracking:** RAFT flow magnitude over four frame pairs, taking the
-  largest 5% spatial values before averaging.
+- **VideoAlign TA:** visual prompt adherence.
+- **VideoAlign MQ:** motion quality, evaluated on grayscale video.
+- **HPSv3 general:** mean frame preference under `A high-quality image`.
+- **HPSv3 percentile:** prompt-conditioned mean of the top 30% frames.
+- **Dynamic Tracking:** clipped RAFT top-5%-pixel flow reward.
 
-### Reward preflight
+VideoAlign runs temporary MP4s at 8 FPS, matching the public GenRL reward path.
+HPSv3 evaluates up to 53 evenly sampled H3 frames and preserves the published
+mean/top-30% aggregation while chunking inference to avoid OOM.
 
-`03_preflight_1gpu.sh` must finish before training. It verifies all models load,
-all outputs are finite, and the moving synthetic clip receives more dynamic
-tracking reward than a matched static clip.
+Dynamic Tracking additionally reports:
 
-Before the full run, perform a 200-pair human audit containing:
+```text
+dynamic_tracking_raw
+dynamic_tracking_saturation
+```
 
-- current FastH3 versus Base H3;
-- two FastH3 seeds;
-- moving subject versus frozen subject;
-- subject motion versus pure camera pan;
-- clean static shot versus flicker;
-- prompt-correct versus pretty-but-wrong;
-- good video with weak audio versus weaker video with good audio.
+The raw metric is the unclipped flow ratio; saturation is the fraction of frame
+pairs at or above the clipped reward ceiling. These are diagnostics only and do
+not alter the weighted reward.
 
-Target at least about 65% pairwise agreement for the aggregate reward. If it is
-lower, fix preprocessing/weights before spending the full compute budget.
+A DT reward near 1.0 is not necessarily continued progress. When saturation is
+high, DT acts mainly as a static-collapse guardrail. Inspect global/camera motion
+qualitatively before increasing its weight.
 
-### Static-collapse diagnosis
+## 3. Non-negotiable model contract
 
-Symptoms:
+| Variable | Value |
+|---|---|
+| Checkpoint | `FastVideo/FastVideo-FastH3-4-step-Preview-v1-VSA-DataFree` |
+| Base rollout steps | `1000,750,500,250` |
+| DiT calls | 4 |
+| CFG | guidance 1.0; conditioning dropout 0.0 |
+| Attention | `VIDEO_SPARSE_ATTN_H3` |
+| VSA sparsity | 0.90 |
+| Video shift | 12 |
+| Audio shift | 3 |
+| Geometry | 480x832, 124 frames, 24 FPS |
+| LoRA target | `to_q,to_k,to_v,to_out` |
+| Full LoRA | rank 128, alpha 64 |
+| VSA compression gate | frozen |
+| LoRA master dtype | FP32 |
+| Reward text | visual description only |
+| Training time | continuous Uniform(0,1) |
+| Reward center/std | per-prompt / global collection |
 
-- aggregate reward rises;
-- dynamic tracking, dynamic degree, or foreground flow falls;
-- outputs repeat frames or become still images.
-
-Actions, in order:
-
-1. verify `dynamic_tracking` is actually nonzero and included with weight `0.7`;
-2. verify reward media has temporal dimension `[B,C,T,H,W]`, not first frame;
-3. verify RAFT is pretrained and did not silently fall back to random weights;
-4. inspect VideoAlign MQ preprocessing/FPS;
-5. reduce LR one bracket;
-6. stop the run if held-out motion worsens despite reward growth.
-
-Do not simply increase the motion weight without inspecting whether camera
-motion is gaming it. Report foreground and global flow separately in analysis.
+Do not silently switch to dense attention, add CFG, change the four rollout
+steps, shorten the production video, include audio text in visual rewards, or
+train the VSA gate just to clear a runtime error.
 
 ## 4. Data
 
-Primary source: the pinned DanceGRPO/VidProM prompt file. Preparation is
-deterministic and records a SHA256 digest in `artifacts/rvm_h3/prompts/metadata.json`.
+The primary prompt source is the pinned DanceGRPO/VidProM list. Preparation:
+
+1. downloads or reads the exact source;
+2. normalizes and deduplicates prompts;
+3. shuffles with a fixed seed;
+4. reserves the fixed evaluation split;
+5. writes H3 documents;
+6. precomputes Qwen3-VL layer-50 conditioning embeddings;
+7. records the source SHA-256 and row counts.
 
 H3 documents use:
 
@@ -164,82 +142,98 @@ overall_soundscape: N/A
 non_diegetic_music: N/A
 ```
 
-The training reward receives only the integrated visual description. H3 still
-receives the full structured document.
+The visual reward receives only `integrated_multimodal_description`.
 
-### Prompt embedding storage
+Prompt embeddings are large. Use 256 prompts for smoke tests, at least 4,096 for
+the medium 8-GPU pilot, and the complete roughly 48.9K training split for the
+full campaign. Check available disk before full preprocessing.
 
-The preprocessor writes Qwen3-VL layer-50 embeddings as FP32. One prompt may be
-roughly six megabytes, so a 50K-prompt bank may consume around 300 GB before
-filesystem overhead. Never begin the full preprocessing job without checking:
+## 5. Required gates
+
+### Gate A: public inference parity
+
+Run:
 
 ```bash
-df -h "$RVM_ARTIFACT_ROOT"
-du -sh "$RVM_ARTIFACT_ROOT"
+bash examples/train/rvm_h3/03_public_inference_smoke.sh
 ```
 
-For debugging use `RVM_MAX_TRAIN_PROMPTS=256` or `1024`. Do not accidentally
-publish results from the tiny smoke bank as the full run.
+Archive prompt, seed, Git SHA/tree, model digest, scheduler, VSA configuration,
+stage timings, video stream, and audio stream. Fixed repeats must be identical
+under the strict profile.
 
-## 5. Execution gates
+### Gate B: preflight
 
-### Gate A: strict inference
+Run:
 
-Run `03_public_inference_smoke.sh` and verify:
+```bash
+bash examples/train/rvm_h3/03_preflight_1gpu.sh
+```
 
-- exactly five sigma points / four DiT forwards;
-- guidance scale is 1.0;
-- VSA sparsity is 0.9, tile 64;
-- output video and audio are present;
-- no unrequested fusion/compile profile changed numerics.
-
-Archive the prompt, seed, environment, output, and stage timing.
-
-### Gate B: static/reward/config preflight
-
-Run `03_preflight_1gpu.sh`. It must pass:
-
-- Python compilation;
-- RVM gradient-sign tests;
-- scheduler/video-audio shift tests;
-- LoRA disable/restore tests;
-- config invariants;
-- reward checkpoint inference;
-- actual H3 config build.
+It must pass compilation, focused unit tests, YAML invariants, all reward-model
+loads, synthetic reward checks, and a real H3 dry-run config build.
 
 ### Gate C: one-GPU optimizer smoke
 
-Run four optimizer updates. Required checks:
+Run:
 
-1. validation at step zero generates valid media;
-2. `total_loss`, component losses, rewards, advantages, and grad norm are finite;
-3. zero-initialized LoRA reproduces the released checkpoint before the first
-   update;
-4. both positive and negative advantage paths produce nonzero gradients;
-5. audio anchor loss starts at or very near zero;
-6. a checkpoint saves, reloads, and exports;
-7. exported LoRA loads into inference and produces the same output as the
-   unexported checkpoint within numerical tolerance.
+```bash
+bash examples/train/rvm_h3/04_run_1gpu_smoke.sh
+```
 
-A one-GPU run is a correctness test, not evidence of a quality improvement.
+This compact test must show:
 
-### Gate D: eight-GPU distributed smoke
+- finite rollout rewards and global reward std;
+- finite continuous training times spanning more than one value;
+- nonzero signed velocity gradients;
+- FP32 LoRA masters and BF16 compute;
+- finite Adam update;
+- checkpoint save;
+- validation media;
+- no source-tree mutation.
 
-Before any sweep, override the selected topology and run two optimizer updates.
+This is not a quality result.
+
+### Gate D: exact 8-GPU topology/resume/export
+
+Run:
+
+```bash
+bash examples/train/rvm_h3/05_run_8gpu_topology_smoke.sh
+```
+
+The gate uses:
+
+```text
+8 H100s
+SP4 x DP2
+K=8
+4 global prompt groups
+2 prompts per DP replica
+16 local videos per replica
+one update, checkpoint, resume to update two, export LoRA
+```
+
 Verify:
 
-- all ranks use the same prompt/noise inside each SP group;
-- only SP leaders load reward models;
-- scalar rewards are identical across the ranks of each SP group;
-- DP groups receive different prompt groups;
-- no rank enters a mismatched collective;
-- checkpoint metadata contains all trainable LoRA and optimizer state.
+- SP ranks share prompt/noise and reward scalars;
+- DP replicas receive different prompts;
+- only SP leaders contribute to global reward sufficient statistics;
+- the globally logged mean/std agree on every rank;
+- checkpoint 1 resumes to checkpoint 2;
+- optimizer, scheduler, and RNG state advance correctly;
+- exported LoRA contains every expected A/B tensor and scaling metadata;
+- fixed-seed checkpoint and exported-adapter inference agree numerically.
 
-## 6. Hyperparameter policy
+### Gate E: LR sweep
 
-### Learning rate
+Run:
 
-Run exactly this first bracket:
+```bash
+bash examples/train/rvm_h3/05_run_8gpu_lr_sweep.sh
+```
+
+Default bracket:
 
 ```text
 5e-6
@@ -247,245 +241,209 @@ Run exactly this first bracket:
 2e-5
 ```
 
-Use the same prompts, evaluation set, seeds, reward stack, anchor, and update
-count. Select the **largest** LR satisfying all of:
+The Wan paper's 5e-5 can be added explicitly after lower rates are stable. Use
+the same prompt bank, K, prompt groups, seeds, reward stack, anchor setting, and
+validation prompts for every LR.
 
-- finite gradients;
-- fewer than roughly 10% persistently clipped steps;
-- held-out aggregate and component rewards improve;
-- videos do not become static/repetitive;
-- audio metrics and listening checks do not regress;
-- validation quality is not merely oversaturated/sharpened.
+Select the largest LR satisfying:
 
-The default is `1e-5`. Do not jump to the Wan paper's larger LR merely because
-its model was smaller and less aggressively distilled.
+- held-out aggregate improves;
+- TA and MQ do not materially regress;
+- gradient clipping is uncommon rather than persistent;
+- reward global std stays finite and nontrivial;
+- no static, repeated-frame, flicker, oversaturation, or camera-motion exploit;
+- audio remains present and coherent.
 
-### Anchor
+### Gate F: anchor sweep
 
-Compare:
+Run:
+
+```bash
+RVM_SELECTED_LR=<winner> \
+  bash examples/train/rvm_h3/06_run_8gpu_anchor_sweep.sh
+```
+
+Compare only:
 
 ```text
 exact:        beta_video=0,    beta_audio=0
-video reward: beta_video=0,    beta_audio=1e-3  (recommended)
-full anchor:  beta_video=1e-3, beta_audio=1e-3
+ audio-safe:  beta_video=0,    beta_audio=1e-3
+full-anchor:  beta_video=1e-3, beta_audio=1e-3
 ```
 
-Only increase audio beta to `1e-2` when measured audio drift persists. A larger
-anchor reduces learning capacity and should not be the first response to an
-unrelated reward or sampler bug.
+Exact RVM is the paper reference. Choose an anchor only when measured
+preservation gains outweigh reward-learning loss.
 
-### Group size
+### Gate G: medium scale-up
 
-Production `K=8`. For systems debugging only, use `K=2`. Do not compare reward
-curves across different K without noting that group-normalized advantage
-statistics changed.
+Prepare at least 4,096 prompts and run:
 
-Zero group variance means RVM has no learning signal for that prompt. Monitor
-`rvm/zero_std_group_ratio`. If it exceeds about 30%:
+```bash
+RVM_SELECTED_LR=<winner> \
+RVM_SCALEUP_CONFIG=<winning-config> \
+  bash examples/train/rvm_h3/07_run_8gpu_scaleup_pilot.sh
+```
 
-1. verify seeds differ among candidates;
-2. verify reward batching returns one scalar per candidate;
-3. inspect scorer saturation;
-4. increase K or prompt diversity only after fixing implementation errors.
+Default budget:
 
-### LoRA rank
+```text
+50 optimizer updates
+25 fresh rollout collections
+8 prompts per collection
+K=8
+1,600 rewarded endpoints
+32 fixed validation prompts every 5% of optimizer progress
+```
 
-- smoke: 16;
-- production: 128, alpha 64;
-- memory fallback: 64, alpha 64.
+This is the first run intended to establish a learning trend.
 
-Changing rank changes capacity and should be isolated from LR/reward changes.
+### Gate H: full campaign
 
-### Gradient clipping
+Only after Gate G wins on held-out and qualitative evaluation:
 
-Default `1.0`. If repeated severe clipping and quality collapse occur, lower LR
-first. DanceGRPO reports that reducing max grad norm can help reward collapse,
-but clipping should not conceal exploding gradients caused by a sign, CFG, or
-normalization bug.
+```bash
+RVM_FULL_APPROVED=1 \
+RVM_SELECTED_LR=<winner> \
+RVM_VIDEO_ANCHOR_BETA=<winner> \
+RVM_AUDIO_ANCHOR_BETA=<winner> \
+  bash examples/train/rvm_h3/07_run_8gpu_full.sh
+```
 
-## 7. Validation and checkpoint selection
+Full budget:
 
-Automatic interval:
+```text
+90 rollout collections
+32 prompts per collection
+K=8
+2 updates per collection
+180 optimizer updates
+23,040 rewarded endpoints
+100 fixed validation prompts every 9 steps
+```
+
+## 6. Evaluation policy
+
+Evaluation interval is:
 
 ```text
 ceil(0.05 * max_train_steps)
 ```
 
-For 180 steps: every 9 steps. Up to 100 fixed prompts and seeds are scored at
-each checkpoint. The method saves all MP4s and uploads only a bounded subset.
+Use the same prompt indices and seeds at baseline and every checkpoint. Report
+training rollout reward separately from held-out reward.
 
-Track at minimum:
+At minimum inspect:
 
-- weighted reward;
-- every reward component;
-- group reward standard deviation;
-- zero-variance group ratio;
-- advantage mean/min/max and clipping ratio;
-- video RVM loss;
-- audio anchor loss;
-- gradient norm;
-- LR;
-- repeated-frame/static-video rate;
-- independent VideoAlign VQ or another non-training metric;
-- audio CLAP/ASR/AV-sync on a fixed audio subset.
+```text
+validation/reward/avg
+validation/reward/videoalign_ta
+validation/reward/videoalign_mq
+validation/reward/hpsv3_general
+validation/reward/hpsv3_percentile
+validation/reward/dynamic_tracking
+validation/reward/dynamic_tracking_raw
+validation/reward/dynamic_tracking_saturation
+rvm/reward_global_std
+rvm/group_reward_std_mean
+rvm/zero_std_group_ratio
+rvm/advantage_abs_mean
+rvm/advantage_clip_ratio
+rvm/grad_norm
+rvm/grad_clipped
+rvm/training_timestep_mean/min/max
+```
 
-Do not select the last checkpoint automatically. Select the checkpoint with the
-best held-out/human tradeoff before any deterioration.
+Do not automatically choose the last checkpoint. Use paired held-out deltas,
+confidence intervals when enough prompts exist, full-video inspection, and an
+independent benchmark or human comparison.
 
-Stop immediately when:
+Stop when:
 
-- training reward rises while held-out human preference falls;
-- repeated/static rate rises by more than five percentage points;
-- foreground motion falls while global camera motion rises;
-- audio becomes missing, corrupted, or desynchronized;
-- loss/gradients become non-finite;
-- reward models disagree increasingly and no human audit supports the aggregate.
+- training reward rises but fixed held-out reward falls persistently;
+- TA/MQ decline beyond ordinary prompt-sample noise;
+- clipping occurs on most updates;
+- reward global std collapses or becomes dominated by outliers;
+- DT saturates broadly while subject motion does not improve;
+- static/repeated/flicker failure rises;
+- audio disappears, corrupts, or desynchronizes;
+- any loss, reward, gradient, or parameter becomes non-finite.
 
-## 8. Runtime recovery
+## 7. Runtime recovery
 
-### CUDA OOM during behavior sampling
+### CUDA OOM during rollout/reward
 
-Try, in this order:
+In order:
 
-1. keep four-step/VSA/geometry fixed and set
-   `FASTVIDEO_RVM_VAE_DECODE_BATCH_SIZE=1`;
-2. confirm only SP leaders hold reward models;
-3. run reward inference after moving the VAE back to CPU;
-4. use `SP8 x DP1` instead of `SP4 x DP2` on eight 80-GB GPUs;
-5. reduce LoRA rank 128 -> 64;
-6. reduce prompt groups per collection while keeping K=8;
-7. only for the one-GPU correctness smoke, use CPU/offloaded reward inference.
-
-Do not reduce the four FastH3 steps, VSA policy, or clip below five seconds to
-solve memory errors; that changes the actual model contract.
+1. confirm only SP leaders hold reward models;
+2. set `FASTVIDEO_RVM_VAE_DECODE_BATCH_SIZE=1`;
+3. ensure VAE/reward tensors are released before NCCL collectives;
+4. reduce prompt groups per collection while preserving K=8;
+5. use SP8 x DP1 on 8x80GB only as a documented topology fallback;
+6. reduce LoRA rank 128 to 64 only after the above;
+7. do not change rollout steps, CFG, VSA, or production geometry.
 
 ### OOM during backward
 
-1. verify only LoRA parameters require gradients;
-2. verify the base transformer is frozen;
-3. verify full activation checkpointing is active;
-4. set `vsa_cache_tile_buf: false`;
-5. switch SP4 -> SP8;
-6. lower LoRA rank;
-7. inspect for retained decoded video/reward-model tensors.
+Confirm only LoRA parameters require gradients, full activation checkpointing
+is active, VSA tile buffer is disabled, no decoded/reward tensors remain, and
+LoRA masters—not the frozen backbone—are FP32.
 
-### VSA backend errors
+### Reward model failure
 
-Check:
+- VideoAlign: verify pinned source/checkpoint, Transformers-5 compatibility
+  bridge, BF16 reward model, 8-FPS MP4s, grayscale MQ and color TA.
+- HPSv3: verify `hpsv3==1.0.0`, correct trained reward head, frame chunking, and
+  mean/top-30% aggregation.
+- RAFT: verify pretrained weights and moving-over-static synthetic preflight.
+  A random or unavailable RAFT model invalidates the run.
 
-```bash
-echo "$FASTVIDEO_ATTENTION_BACKEND"
-echo "$FASTVIDEO_VSA_SM100A"
-python -c 'import fastvideo_kernel; print(fastvideo_kernel)'
-```
+### Zero or tiny global reward std
 
-Use the Triton tile-64 path first for correctness. Enable the `sm100a` kernel
-only on a compatible Blackwell build after strict output parity is established.
-Never silently fall back to dense attention.
+Check that seeds differ, each scorer returns one value per candidate, rewards
+are not cached across candidates, and the prompt bank is not duplicated. Do not
+artificially re-normalize each group to unit variance.
 
-### VideoAlign failure
+### High clipping rate
 
-Verify:
+First verify reward normalization and gradient sign. Then reduce LR one bracket.
+Do not hide a broken update by only lowering the clip threshold.
 
-```bash
-test -f "$VIDEOALIGN_RUNTIME_PATH/inference.py"
-test -d "$VIDEOALIGN_CHECKPOINT_PATH"
-```
+### Static/camera-motion exploit
 
-Common causes:
+Inspect full videos and compare clipped DT, raw DT, and saturation. A high raw
+flow score can come from camera movement or flicker. Keep DT as a guardrail; do
+not blindly raise its weight.
 
-- old Qwen2-VL key names versus Transformers 5;
-- missing `qwen-vl-utils`, `trl`, or `liger-kernel`;
-- unavailable torchvision video reader;
-- temporary MP4 codec failure;
-- reward model left on a different CUDA device.
+### Audio regression
 
-The FastVideo adapter includes key-remapping and OpenCV fallback patches. Do not
-downgrade FastVideo's entire transformers/torch environment to VideoAlign's old
-standalone environment.
+Confirm audio's reward coefficient is zero, audio has an independent reduction,
+and the reference prediction is evaluated at the same noisy audio state and
+continuous base time. Then test the `1e-3` audio anchor. Do not train audio from
+VideoAlign/HPS/RAFT.
 
-### HPSv3 failure
+### Resume/export mismatch
 
-Confirm `hpsv3==1.0.0`, HF access, sufficient cache space, and that frames are
-uint8 RGB. HPSv3 is frame-based; a video score is aggregated across frames by
-the adapter. Verify the expected general versus percentile path rather than
-replacing both with a first-frame score.
+Resume with the same Git tree, config, topology, prompt digest, reward versions,
+and output path. Regenerate the rollout buffer if interruption occurred between
+attached updates. Compare fixed-seed inference from the DCP checkpoint and the
+exported LoRA before continuing.
 
-### RAFT download/failure
+## 8. Reproducibility and reporting
 
-The dynamic scorer uses `ptlflow>=0.4` and a pretrained RAFT checkpoint. The
-first launch may download weights through the library. Cache them before a
-multi-node job. A random/uninitialized RAFT model invalidates the reward stack
-and must fail preflight.
+Every reported run must record:
 
-### NaN or Inf
+- Git `HEAD` and `HEAD^{tree}`;
+- clean tracked source;
+- model and prompt-source identifiers/digests;
+- actual GPU names and memory;
+- full command and config overrides;
+- package versions;
+- reward checkpoint/source versions;
+- prompt counts and seeds;
+- topology, K, rollout collections, endpoints, optimizer updates;
+- all checkpoints, validation metrics, and media;
+- every runtime fix as a committed change followed by a fresh smoke test.
 
-1. stop optimizer updates;
-2. print each reward component before normalization;
-3. verify group std and epsilon;
-4. inspect endpoint/noise/prediction ranges per modality;
-5. verify signed gradient is implemented via detached target;
-6. verify FP32 LoRA masters and optimizer state;
-7. reduce LR after implementation checks pass;
-8. restart from the last clean checkpoint—do not continue a contaminated run.
-
-### Audio degradation
-
-1. confirm audio coefficient is exactly zero in the reward term;
-2. confirm audio uses its own packed slice mean;
-3. confirm LoRA-disabled reference prediction is evaluated at the same noisy
-   audio state and timestep;
-4. increase `audio_anchor_beta` from `1e-3` to `1e-2` only after those checks;
-5. do not tune audio from VideoAlign/HPS/RAFT, which are visual rewards.
-
-### Resume mismatch
-
-Resume with the same config, topology, prompt bank, reward versions, and output
-path. Check `metadata.json` and RNG snapshots. The rollout buffer is regenerated
-if interruption occurred between attached optimizer updates. Validate the first
-resumed checkpoint before continuing.
-
-### LoRA export mismatch
-
-Use `09_export_lora.sh` with the topology used to save the checkpoint. Then:
-
-1. inspect the generated JSON manifest;
-2. ensure every expected LoRA layer has A, B, and alpha tensors;
-3. generate a fixed prompt/seed from the training checkpoint and exported
-   adapter;
-4. compare video/audio latents or decoded output;
-5. do not publish an adapter before this parity test passes.
-
-## 9. Required experiment record
-
-For every run, save:
-
-- git branch and exact commit SHA;
-- full resolved YAML and CLI overrides;
-- container/conda package lock or `pip freeze`;
-- GPU model/count, topology, CUDA/driver, kernel versions;
-- FastH3 and reward checkpoint revisions;
-- prompt-source SHA and split metadata;
-- all random seeds;
-- W&B/local logs;
-- evaluation MP4 directories;
-- failure reason and exact fix for every restart;
-- checkpoint selected and why.
-
-Never alter a configuration after failure and reuse the same run name. A fix is
-a new run with a recorded diff.
-
-## 10. Go/no-go criteria for the full run
-
-Proceed from sweeps to the full run only when the best candidate:
-
-- wins at least 55% of a blinded pilot against released FastH3, or shows a
-  clearly positive held-out metric delta corroborated by inspection;
-- improves prompt adherence/aesthetics without a static-video increase;
-- keeps audio metrics/listening within roughly 2% of baseline;
-- preserves four-step inference latency after adapter merge;
-- exports and reloads reproducibly.
-
-A blog post should report the released baseline, exact compute/sample budget,
-all reward/evaluation methods, both positive and negative dimensions, and the
-actual selected checkpoint—not only the maximum training reward.
+Never describe a run as improved because its final on-policy training batch had a
+larger reward than baseline validation. Only paired fixed-prompt evaluation and
+inspected outputs support a quality claim.

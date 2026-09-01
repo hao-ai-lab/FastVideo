@@ -1,199 +1,126 @@
-# FastH3 RVM fidelity and 8-GPU scale-up runbook
+# RVM fidelity and FastH3 scale-up contract
 
-This document supersedes any earlier description that said FastH3 RVM divides
-reward residuals by a separate standard deviation for each prompt group or
-trains only at the four deployment timesteps. The production implementation now
-matches the published RVM video update on both points.
+This file records the method-level corrections required after the first
+successful 4×H100 runtime pilots. New scientific runs must use the committed
+paper-faithful path, not the legacy per-group-normalized pilot implementation.
 
-## 1. Exact training update
+## Corrections
 
-For prompt group `g` and candidate `i`, let `R[g,i]` be the weighted reward:
+### Reward normalization
 
-```text
-1.5 * VideoAlign TA
-+ 1.0 * VideoAlign MQ
-+ 0.1 * HPSv3 general
-+ 0.1 * HPSv3 percentile
-+ 0.7 * Dynamic Tracking
-```
-
-RVM centers each candidate against the other samples for the same prompt but
-uses one standard deviation over every reward in the rollout collection:
+For prompt group `g` and candidate `i`:
 
 ```text
-centered[g,i] = R[g,i] - mean_i R[g,i]
-global_std = std_{g,i}(R[g,i])
-advantage[g,i] = 0.1 * clip(centered[g,i] / (global_std + 1e-4), -5, 5)
+C[g,i] = R[g,i] - mean_i R[g,i]
+s_global = std over every raw aggregate reward R[g,i] in the rollout collection
+A[g,i] = 0.1 * clip(C[g,i] / (s_global + 1e-4), -5, 5)
 ```
 
-This distinction matters. A prompt whose candidates differ only by scorer noise
-must not receive the same update magnitude as a prompt with a large, meaningful
-reward spread. The implementation computes global sufficient statistics only
-on sequence-parallel leaders and all-reduces them across data-parallel replicas,
-so every generated sample is counted exactly once.
+The mean is prompt-relative; the standard deviation is batch-global across DP
+replicas. Only SP leaders contribute sufficient statistics, so each sample is
+counted once.
 
-For one generated endpoint `x0`, sample a continuous base time:
+### Training time
+
+The published RVM endpoint regression samples:
 
 ```text
-t ~ Uniform(0, 1)
+t ~ Uniform(0,1)
 ```
 
-H3 maps this shared base time through its video and audio scheduler shifts. The
-endpoint is analytically noised and receives the original flow-matching target:
+FastH3 then maps the shared base time through its video/audio scheduler shifts.
+The four deployment timesteps remain the behavior-rollout schedule; they are not
+the default distribution for the analytic training state. A deployment-grid
+training-time mode remains available only as a named ablation.
+
+### Motion diagnostics
+
+The optimized Dynamic Tracking score stays clipped to `[0,1]`. The same RAFT
+forward also records:
 
 ```text
-x_t = (1 - sigma(t)) * x0 + sigma(t) * epsilon
-velocity_target = epsilon - x0
+dynamic_tracking_raw
+dynamic_tracking_saturation
 ```
 
-Only the video slice receives the signed reward coefficient. Audio receives no
-visual reward; an optional reference-field anchor is tested separately. The
-signed update remains implemented through a detached nonnegative surrogate, so
-its gradient equals RVM without exposing AMP to an unbounded negative scalar
-loss.
+These diagnostics do not affect reward weighting. They reveal when the motion
+term has become a saturated guardrail rather than a useful ranking signal.
 
-Behavior rollouts remain the exact released four-forward FastH3 VSA sampler at
-base steps `1000, 750, 500, 250`. Continuous time applies only to the analytic
-post-training regression state. `training_timestep.mode: deployment_grid`
-remains available as an explicit H3 ablation, not the production default.
+### Reproducibility
 
-## 2. Fixed scientific contract
+Numbered launch scripts execute `verify_clean_source.py` before training and
+record Git `HEAD` and `HEAD^{tree}`. Reported runs must never use dirty tracked
+source or uncommitted runtime patches.
 
-Do not silently change:
+## Production defaults
 
-| Setting | Required value |
+| Setting | Value |
 |---|---|
-| FastH3 checkpoint | `FastVideo/FastVideo-FastH3-4-step-Preview-v1-VSA-DataFree` |
-| Rollout steps | `1000,750,500,250` plus terminal zero |
-| CFG | guidance `1.0`, conditioning dropout `0.0` |
-| Attention | `VIDEO_SPARSE_ATTN_H3` |
-| VSA sparsity | `0.90` |
-| Geometry | `480x832`, 124 frames, 24 FPS |
-| LoRA | rank 128, alpha 64, `to_q/to_k/to_v/to_out` |
-| VSA compression gate | frozen |
-| Advantage scale / clip | `0.1` / `[-5,5]` |
-| Training-time distribution | continuous `Uniform(0,1)` |
-| Reward centering / scale | per-prompt mean / batch-global std |
+| Behavior sampler | four-step FastH3 VSA |
+| Base steps | `1000,750,500,250` |
+| CFG | off; guidance 1.0, dropout 0.0 |
+| Geometry | `480x832x124`, 24 FPS |
+| VSA | 90% sparsity |
+| LoRA | rank 128, alpha 64, Q/K/V/out only |
+| Advantage | scale 0.1, clip 5 |
+| Training time | continuous Uniform(0,1) |
+| Default paper reference | no video/audio anchor |
+| Reward | TA 1.5, MQ 1.0, HPS general 0.1, HPS percentile 0.1, DT 0.7 |
 
-All numbered training scripts fail when tracked source differs from the checked
-out Git commit. The source manifest records both `HEAD` and `HEAD^{tree}`.
-`RVM_ALLOW_DIRTY_SOURCE=1` exists only for deliberate debugging and must never
-be used for a reported experiment.
+Audio-only and full anchors are matched H3 safety ablations. They must not be
+silently mixed into the paper-reference run.
 
-## 3. New diagnostics
+## Required sequence
 
-The optimized Dynamic Tracking reward is clipped to `[0,1]`, matching RVM. The
-same RAFT pass now also logs two non-optimized diagnostics:
-
-- `dynamic_tracking_raw`: mean unclipped `flow_ratio`;
-- `dynamic_tracking_saturation`: fraction of sampled frame pairs at or above
-  the clipping threshold.
-
-The training loop also logs:
-
-- global aggregate-reward mean and standard deviation;
-- global standard deviation for every reward component;
-- mean prompt-group reward standard deviation;
-- zero-variance prompt-group ratio;
-- mean absolute advantage and clipping ratio;
-- gradient norm and whether clipping was applied;
-- continuous training-time mean, minimum, maximum, and nearest deployment bin.
-
-Do not interpret a clipped DT value of `1.0` as continued progress when its
-saturation fraction is already near one. In that regime DT is a collapse
-barrier, not a useful ranking signal.
-
-## 4. Required experiment order
-
-### A. One-GPU correctness gate
+### 1. Preflight and compact smoke
 
 ```bash
 bash examples/train/rvm_h3/03_preflight_1gpu.sh
 bash examples/train/rvm_h3/04_run_1gpu_smoke.sh
 ```
 
-This verifies imports, reward checkpoints, continuous-time config, global-std
-unit tests, VSA forward/backward, Adam, checkpointing, and validation. It is not
-a quality result.
-
-### B. Exact 8-GPU topology/resume/export gate
+### 2. Eight-GPU topology, resume, and export
 
 ```bash
 bash examples/train/rvm_h3/05_run_8gpu_topology_smoke.sh
 ```
 
-This uses `SP4 x DP2`, `K=8`, four global prompt groups, one update, resumes to
-a second update, and exports the LoRA. Each DP replica processes two prompts
-and 16 videos locally—the same local rollout load as the successful four-GPU
-`K=4` pilot.
+This uses SP4×DP2, K=8, four global prompt groups, checkpoints after one update,
+resumes to update two, then exports the LoRA.
 
-Accept only when:
-
-- both reward leaders return finite, non-identical candidate rewards;
-- global reward statistics agree on all ranks;
-- DP replicas receive different prompts while SP ranks agree;
-- checkpoint resume advances from step 1 to step 2;
-- the exported adapter contains all expected layers;
-- validation videos and audio remain valid.
-
-### C. Learning-rate bracket
+### 3. Learning-rate sweep
 
 ```bash
 bash examples/train/rvm_h3/05_run_8gpu_lr_sweep.sh
 ```
 
-Defaults:
+Defaults: `5e-6,1e-5,2e-5`, K=8, four global prompt groups, eight optimizer
+updates, 32 fixed validation prompts, and evaluation every 5% of optimizer
+progress. Add `5e-5` explicitly only after lower rates are stable.
 
-```text
-LRs: 5e-6, 1e-5, 2e-5
-K: 8
-four global prompt groups
-8 optimizer updates
-32 fixed validation prompts
-validation at baseline and final only
-```
-
-The short sweep deliberately does not run 100-video evaluation after every
-step. Add the Wan paper's `5e-5` LR through `RVM_LR_SWEEP` only when the lower
-bracket is stable; FastH3 is a much larger, already distilled model.
-
-Select the largest LR satisfying all of:
-
-- held-out aggregate reward improves;
-- VideoAlign TA and MQ do not materially regress;
-- fewer than roughly 10-20% of steps are clipped at norm 1;
-- no static/repeated-frame or oversaturation collapse;
-- reward global std remains finite and useful;
-- audio remains coherent.
-
-### D. Anchor sweep
+### 4. Anchor sweep
 
 ```bash
 RVM_SELECTED_LR=<winner> \
   bash examples/train/rvm_h3/06_run_8gpu_anchor_sweep.sh
 ```
 
-Compare exact RVM, audio-only anchor `1e-3`, and full video/audio anchor `1e-3`.
-The exact unanchored run is the published reference. Choose the audio anchor
-only when it measurably protects audio without erasing video reward gains.
+Compare exact, audio-only `1e-3`, and full `1e-3` anchors under matched prompts,
+seeds, reward stack, LR, and sample budget. Evaluation remains every 5%.
 
-### E. Medium scale-up pilot
-
-Prepare at least 4,096 prompts, then run:
+### 5. Medium trend run
 
 ```bash
 RVM_SELECTED_LR=<winner> \
-RVM_SCALEUP_CONFIG=<winning-anchor-config> \
+RVM_SCALEUP_CONFIG=<winning-config> \
   bash examples/train/rvm_h3/07_run_8gpu_scaleup_pilot.sh
 ```
 
-Defaults: 50 optimizer updates, 8 prompt groups per collection, `K=8`, and 32
-fixed validation prompts every 5% of steps. This produces 1,600 fresh rewarded
-endpoints and is the first run intended to establish a learning trend.
+Defaults: 50 optimizer steps, 8 prompts per collection, K=8, 1,600 rewarded
+endpoints, at least 4,096 encoded training prompts, and 32 fixed validation
+prompts every 5%.
 
-### F. Published-scale run
-
-Only after the previous gates produce a held-out and qualitative win:
+### 6. Full run
 
 ```bash
 RVM_FULL_APPROVED=1 \
@@ -203,37 +130,27 @@ RVM_AUDIO_ANCHOR_BETA=<winner> \
   bash examples/train/rvm_h3/07_run_8gpu_full.sh
 ```
 
-The full run uses 90 rollout collections, 32 prompt groups, `K=8`, two attached
-updates per collection, 180 optimizer updates, and 23,040 rewarded endpoints.
-It evaluates 100 fixed prompts every nine steps, exactly 5% of the optimizer
-horizon. Use the complete 48,998-prompt RVM/VidProM bank when storage permits;
-the launcher refuses fewer than 10,000 rows by default.
+The full campaign uses 90 collections, 32 prompts per collection, K=8, 180
+optimizer updates, 23,040 rewarded endpoints, and 100-prompt evaluation every
+nine steps. By default the launcher requires at least 48,000 encoded training
+prompts, corresponding to the complete pinned corpus after reserving evaluation
+prompts.
 
-## 5. Checkpoint selection
+## Go/no-go rule
 
-Never select the final checkpoint automatically. For each fixed validation
-prompt, retain the same prompt index and seed across baseline/checkpoints. Track
-at minimum:
+Do not launch the full campaign until:
 
-- aggregate and every component reward;
-- VideoAlign TA and MQ separately;
-- DT raw and saturation diagnostics;
-- group/global reward variance;
-- gradient clipping fraction;
-- repeated/static/flicker failures;
-- independent quality evaluation;
-- full-video blinded preference;
-- audio presence, quality, and synchronization.
+1. SP4×DP2/K8 checkpoint, resume, and export pass from one immutable clean SHA.
+2. The selected LR improves paired held-out aggregate reward.
+3. VideoAlign TA and MQ do not show a persistent meaningful decline.
+4. Gradient clipping is uncommon rather than the dominant update regime.
+5. Batch-global reward variance is finite and not collapsed.
+6. DT saturation is measured and understood.
+7. Full-video inspection shows no static, flicker, repetition, camera-motion, or
+   oversaturation exploit.
+8. Trained-checkpoint audio remains present and coherent.
 
-A larger rollout reward on different sampled prompts is not an apples-to-apples
-quality claim. Scale only when paired held-out deltas and inspected videos agree.
-
-## 6. References
-
-- **Scaling Reinforcement Learning for Diffusion Models via Velocity Matching**
-  (`arXiv:2608.23664`): endpoint RVM objective, batch-global reward standard
-  deviation, continuous training time, video reward mixture, and published
-  sample budget.
-- **Flow-Factory AdvantageProcessor**: independent implementation whose
-  `global_std=True` path computes a global standard deviation over aggregated
-  rewards while subtracting each prompt-group mean.
+The previous 34-step 4×H100 run remains useful evidence that the model/reward/
+optimizer/checkpoint stack works, but it used the legacy normalization and
+training-time choices. It is not evidence that the corrected RVM recipe has
+already improved quality.

@@ -32,7 +32,7 @@ for variant in exact audio_anchor full_anchor; do
         --method.prompt_groups_per_rollout "${ANCHOR_GROUPS}" \
         --method.validation.num_prompts "${ANCHOR_EVAL_PROMPTS}" \
         --method.validation.log_sample_limit "${ANCHOR_LOG_VIDEOS}" \
-        --method.validation.every_steps "${ANCHOR_STEPS}" \
+        --method.validation.every_steps 0 \
         --training.checkpoint.output_dir "outputs/rvm_h3/anchor_${variant}" \
         --training.checkpoint.training_state_checkpointing_steps "${ANCHOR_STEPS}" \
         --training.tracker.run_name "rvm-h3-faithful-anchor-${variant}"
@@ -45,5 +45,5 @@ Decision rule:
     materially reducing video reward gains;
   - full_anchor wins only if broad video quality drifts under the other two.
 Use the same fixed validation prompts, seeds, LR, and rollout budget for all
-three runs. Validation runs at baseline and final step for this short sweep.
+three runs. Validation follows the automatic 5%-of-progress cadence.
 EOF

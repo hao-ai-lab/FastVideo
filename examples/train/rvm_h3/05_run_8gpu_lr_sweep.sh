@@ -32,7 +32,7 @@ for learning_rate in "${LEARNING_RATES[@]}"; do
         --method.prompt_groups_per_rollout "${SWEEP_GROUPS}" \
         --method.validation.num_prompts "${SWEEP_EVAL_PROMPTS}" \
         --method.validation.log_sample_limit "${SWEEP_LOG_VIDEOS}" \
-        --method.validation.every_steps "${SWEEP_STEPS}" \
+        --method.validation.every_steps 0 \
         --training.checkpoint.output_dir "outputs/rvm_h3/lr_${tag}" \
         --training.checkpoint.training_state_checkpointing_steps "${SWEEP_STEPS}" \
         --training.tracker.run_name "rvm-h3-faithful-lr-${tag}"
@@ -40,10 +40,10 @@ done
 
 cat <<'EOF'
 The sweep uses paper-faithful, unanchored RVM: batch-global reward standard
-deviation and continuous Uniform(0,1) training times. Validation runs at the
-baseline and final step only so a short LR bracket is not dominated by reward
-inference. Select the largest LR with improving held-out rewards, low clipping
-frequency, non-saturated useful reward variance, and no qualitative collapse.
-The Wan paper's 5e-5 LR may be added through RVM_LR_SWEEP only after the lower
-bracket is stable on 35B FastH3.
+deviation and continuous Uniform(0,1) training times. Validation follows the
+required automatic 5%-of-optimizer-progress cadence on a bounded 32-prompt set;
+the full run uses 100 prompts. Select the largest LR with improving held-out
+rewards, low clipping frequency, non-saturated useful reward variance, and no
+qualitative collapse. The Wan paper's 5e-5 LR may be added through RVM_LR_SWEEP
+only after the lower bracket is stable on 35B FastH3.
 EOF

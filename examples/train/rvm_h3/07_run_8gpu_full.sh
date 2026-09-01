@@ -21,7 +21,7 @@ CONFIG="${RVM_FULL_CONFIG:-examples/train/configs/rl/minimax_h3/rvm_h3_8gpu_full
 SELECTED_LR="${RVM_SELECTED_LR:-1e-5}"
 VIDEO_ANCHOR="${RVM_VIDEO_ANCHOR_BETA:-0.0}"
 AUDIO_ANCHOR="${RVM_AUDIO_ANCHOR_BETA:-0.0}"
-MIN_TRAIN_PROMPTS="${RVM_FULL_MIN_TRAIN_PROMPTS:-10000}"
+MIN_TRAIN_PROMPTS="${RVM_FULL_MIN_TRAIN_PROMPTS:-48000}"
 
 python - "${RVM_TRAIN_DATA}" "${MIN_TRAIN_PROMPTS}" <<'PY'
 from pathlib import Path
@@ -35,7 +35,7 @@ print(f"full-run training prompts: {rows}")
 if rows < minimum:
     raise RuntimeError(
         f"Full RVM run requires at least {minimum} encoded prompts, found {rows}. "
-        "Use the complete 48,998-prompt RVM/VidProM bank when storage permits."
+        "Encode the complete pinned RVM/VidProM training split before launch."
     )
 PY
 

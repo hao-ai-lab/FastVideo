@@ -1,79 +1,97 @@
 # FastH3 RVM post-training
 
-This directory is the executable experiment package for reward-aligning the
-released four-step FastH3 VSA checkpoint with **Reward-based Velocity Matching
-(RVM)**. It intentionally follows the published RVM video recipe instead of
+This directory contains the executable experiment package for reward-aligning
+the released four-step FastH3 VSA checkpoint with **Reward-based Velocity
+Matching (RVM)**. The production path follows the RVM video recipe rather than
 introducing a new diffusion-RL objective.
 
-## What this trains
+> **Current implementation:** use `RVMFaithfulMethod` or
+> `RVMWithLocalMetricsMethod`. The older `RVMMethod` remains only as the exact
+> implementation used by the first runtime pilots; it uses per-group reward
+> standard deviations and deployment-grid training times and is not the default
+> for new scientific runs.
 
-The behavior policy is the current FastH3 quality LoRA. For every prompt it
-samples `K` complete FastH3 endpoints with the exact deployed four-step VSA
-sampler, scores the decoded videos, and standardizes reward within the prompt
-group:
+## Method
+
+For prompt group `g` and candidate `i`, FastH3 generates an endpoint `x0[g,i]`
+with its exact four-forward VSA sampler. The five public rewards are combined,
+centered within each prompt group, and divided by one reward standard deviation
+computed over the entire rollout collection:
 
 ```text
-advantage = 0.1 * clip((reward - group_mean) / (group_std + 1e-4), -5, 5)
+centered[g,i] = reward[g,i] - mean_i reward[g,i]
+global_std = std_{g,i}(reward[g,i])
+advantage[g,i] = 0.1 * clip(centered[g,i] / (global_std + 1e-4), -5, 5)
 ```
 
-A generated endpoint `x0` is analytically forward-noised once. The model then
-receives the ordinary rectified-flow target `epsilon - x0`; the coefficient on
-that regression is the signed group-relative advantage. The signed gradient is
-implemented through a detached MSE target, so the logged scalar remains finite
-and nonnegative while the gradient is exactly the intended RVM gradient.
+Then one continuous training time is sampled:
 
-H3 uses one transformer for video and audio. The initial production recipe:
+```text
+t ~ Uniform(0, 1)
+x_t = (1 - sigma(t)) * x0 + sigma(t) * epsilon
+velocity_target = epsilon - x0
+```
 
-- applies reward only to the **video** slice;
-- computes video and audio means independently;
-- optionally anchors the audio velocity to the released FastH3 field;
-- obtains the reference prediction by disabling the quality LoRA in-place,
-  rather than loading a second 35B model.
+The video velocity receives the signed RVM update. Audio receives no visual
+reward term. Optional audio/video reference anchors are isolated ablations and
+use the released FastH3 field obtained by temporarily disabling the new quality
+LoRA; no second 35B model is loaded.
 
-## Fixed model contract
+The signed gradient is implemented through a detached nonnegative MSE target.
+This produces the exact RVM gradient while avoiding an unbounded negative scalar
+loss for negative advantages.
 
-Do not change these during debugging unless the run is explicitly labeled as an
-ablation:
+FastH3-specific details:
 
-| Contract | Value |
-|---|---|
-| Checkpoint | `FastVideo/FastVideo-FastH3-4-step-Preview-v1-VSA-DataFree` |
-| Inference jumps | base timesteps `[1000, 750, 500, 250]`, then terminal zero |
-| DiT forwards | 4 |
-| CFG | disabled; guidance `1.0`, conditioning dropout `0.0` |
-| Attention | `VIDEO_SPARSE_ATTN_H3` |
-| VSA sparsity / tile | `0.90` / `64` |
-| Training geometry | `480 x 832`, `124` frames at H3's fixed 24 FPS |
-| Trainable layers | LoRA on `to_q`, `to_k`, `to_v`, `to_out` |
-| Frozen layer | VSA `to_gate_compress` |
-| Full-run LoRA | rank `128`, alpha `64` |
+- behavior rollouts always use base steps `1000,750,500,250` plus terminal zero;
+- video and audio use their native scheduler shifts, 12 and 3;
+- continuous time applies to the analytic RVM regression state, not the rollout;
+- VSA metadata uses the nearest released deployment bin for a continuous state;
+- video and audio reductions are computed independently;
+- only LoRA parameters on `to_q`, `to_k`, `to_v`, and `to_out` are trained;
+- the VSA compression gate remains frozen.
 
-H3's released input contract has a five-second minimum. Therefore the training
-recipe uses 124 frames, not the 53-frame Wan setup from the RVM paper.
-
-## Reward mixture
-
-The production config reproduces the RVM paper's video reward family:
+## Reward recipe
 
 ```text
 1.5 * VideoAlign text alignment
 1.0 * VideoAlign motion quality
 0.1 * HPSv3 general quality
-0.1 * HPSv3 prompt-conditioned top-frame percentile
+0.1 * HPSv3 prompt-conditioned top-30%-frame score
 0.7 * RAFT dynamic tracking
 ```
 
-Dynamic tracking averages the largest five percent of optical-flow magnitudes
-across four evenly spaced frame pairs. It is included because preference and
-visual-quality rewards alone can converge toward clean but nearly static
-videos.
+Dynamic tracking is the published clipped reward. The same RAFT pass also logs
+non-optimized diagnostics:
 
-All component scores and the weighted sum are logged separately. Do not judge a
-run from the weighted reward alone.
+```text
+dynamic_tracking_raw
+dynamic_tracking_saturation
+```
 
-## Complete workflow
+These distinguish useful motion variation from a reward already pinned at its
+ceiling. All component values and global standard deviations are logged.
 
-Clone this branch and run the numbered scripts in order:
+## Fixed model contract
+
+| Contract | Value |
+|---|---|
+| Checkpoint | `FastVideo/FastVideo-FastH3-4-step-Preview-v1-VSA-DataFree` |
+| Rollout forwards | 4 |
+| Base steps | `1000,750,500,250` |
+| CFG | guidance `1.0`; conditioning dropout `0.0` |
+| Attention | `VIDEO_SPARSE_ATTN_H3` |
+| VSA sparsity | `0.90` |
+| Geometry | `480x832`, 124 frames, 24 FPS |
+| Full LoRA | rank 128, alpha 64 |
+| Trainable modules | `to_q,to_k,to_v,to_out` |
+| Training time | continuous `Uniform(0,1)` |
+| Reward normalization | per-prompt center, batch-global std |
+
+A five-second H3 chunk requires 124 frames. Do not silently replace it with the
+53-frame Wan geometry from the RVM paper.
+
+## Setup
 
 ```bash
 git clone --branch adam/h3-rvm-posttraining \
@@ -82,136 +100,102 @@ cd FastVideo
 
 bash examples/train/rvm_h3/00_create_conda_env.sh
 bash examples/train/rvm_h3/01_download_models.sh
-bash examples/train/rvm_h3/02_prepare_dataset.sh
+RVM_MAX_TRAIN_PROMPTS=4096 \
+  bash examples/train/rvm_h3/02_prepare_dataset.sh
 bash examples/train/rvm_h3/03_public_inference_smoke.sh
 bash examples/train/rvm_h3/03_preflight_1gpu.sh
 bash examples/train/rvm_h3/04_run_1gpu_smoke.sh
+```
+
+The Qwen3-VL layer-50 prompt embeddings are large. Use 4,096 prompts for the
+medium campaign, then encode the complete prompt bank before the final run.
+Preparation downloads the pinned DanceGRPO/VidProM prompt file, creates a
+deterministic held-out split, and wraps prompts as H3 documents with audio fields
+set to `N/A`.
+
+## 8-GPU campaign
+
+Run in this order:
+
+```bash
+# SP4 x DP2, K=8, checkpoint/resume/export gate.
+bash examples/train/rvm_h3/05_run_8gpu_topology_smoke.sh
+
+# Matched paper-faithful LR bracket.
 bash examples/train/rvm_h3/05_run_8gpu_lr_sweep.sh
-bash examples/train/rvm_h3/06_run_8gpu_anchor_sweep.sh
-bash examples/train/rvm_h3/07_run_8gpu_full.sh
+
+# Exact vs audio-anchor vs full-anchor comparison.
+RVM_SELECTED_LR=<winner> \
+  bash examples/train/rvm_h3/06_run_8gpu_anchor_sweep.sh
+
+# First trend-detection run: 50 updates, K=8, 8 prompt groups.
+RVM_SELECTED_LR=<winner> \
+RVM_SCALEUP_CONFIG=<winning-config> \
+  bash examples/train/rvm_h3/07_run_8gpu_scaleup_pilot.sh
 ```
 
-Recovery and deployment:
+The full 180-update/23,040-endpoint run is deliberately gated:
 
 ```bash
-bash examples/train/rvm_h3/08_resume_8gpu.sh \
-  examples/train/configs/rl/minimax_h3/rvm_h3_8gpu_full.yaml \
-  outputs/rvm_h3/8gpu_full/checkpoint-90
-
-bash examples/train/rvm_h3/09_export_lora.sh \
-  examples/train/configs/rl/minimax_h3/rvm_h3_8gpu_full.yaml \
-  outputs/rvm_h3/8gpu_full/checkpoint-180 \
-  outputs/rvm_h3/fasth3_rvm_lora.safetensors
-
-bash examples/train/rvm_h3/10_infer_lora.sh \
-  outputs/rvm_h3/fasth3_rvm_lora.safetensors
+RVM_FULL_APPROVED=1 \
+RVM_SELECTED_LR=<winner> \
+RVM_VIDEO_ANCHOR_BETA=<winner> \
+RVM_AUDIO_ANCHOR_BETA=<winner> \
+  bash examples/train/rvm_h3/07_run_8gpu_full.sh
 ```
 
-Every script supports environment overrides. The shared defaults are defined in
-`common.sh`.
+Do not set `RVM_FULL_APPROVED=1` until the topology, LR, anchor, held-out reward,
+qualitative, audio, resume, and export gates pass.
 
-## Dataset preparation
+## Evaluation
 
-`prepare_prompts.py` downloads the pinned DanceGRPO/VidProM video prompt list,
-deduplicates it, creates deterministic train/evaluation splits, and wraps every
-prompt in H3's document format:
+Production evaluation runs every:
 
 ```text
-integrated_multimodal_description: ...
-overall_soundscape: N/A
-non_diegetic_music: N/A
+ceil(0.05 * max_optimizer_steps)
 ```
 
-Audio is deliberately not optimized by the first RVM runs. `N/A` avoids asking
-the model to generate arbitrary audio content while the audio field is
-preserved by the anchor.
+The full 180-step run therefore evaluates every nine steps on up to 100 fixed
+prompts and seeds. A separate encoded eval split is used when present; otherwise
+the method deterministically samples at most 100 training prompts and records
+the fallback.
 
-The Qwen3-VL layer-50 prompt embeddings are FP32 and large—approximately six
-megabytes per prompt. Encoding the full prompt bank can require hundreds of
-gigabytes. For the first node test:
+Track:
 
-```bash
-RVM_MAX_TRAIN_PROMPTS=256 RVM_PREPROCESS_GPUS=1 \
-  bash examples/train/rvm_h3/02_prepare_dataset.sh
-```
+- aggregate and every component reward;
+- global aggregate/component reward standard deviations;
+- prompt-group standard deviation and zero-variance ratio;
+- advantage magnitude and clipping ratio;
+- gradient norm and clipping indicator;
+- continuous training-time statistics;
+- DT raw value and saturation fraction;
+- generated validation videos and checkpoints.
 
-After the smoke and sweep gates pass, unset `RVM_MAX_TRAIN_PROMPTS` and encode
-the complete bank.
+Training rollout reward and held-out reward are not interchangeable. Select
+checkpoints from paired fixed-prompt evaluation plus inspected full videos, not
+from the last training batch.
 
-## Evaluation every five percent
+## Source reproducibility
 
-When `method.validation.every_steps: 0`, the method computes:
+Every numbered training script runs `verify_clean_source.py` before launching.
+It fails when tracked files differ from the checked-out Git commit and records
+`HEAD` and `HEAD^{tree}`. Never use `RVM_ALLOW_DIRTY_SOURCE=1` for a reported
+experiment.
 
-```text
-ceil(0.05 * training.loop.max_train_steps)
-```
+## Documentation
 
-For the 180-update run this is every nine optimizer updates. Evaluation uses up
-to 100 deterministic prompts and fixed seeds. If `data_path` points at the
-encoded evaluation split, it uses that split. If no separate split is present,
-it deterministically samples at most 100 training prompts and logs the fallback.
+- [`00_RVM_FIDELITY_AND_SCALEUP.md`](00_RVM_FIDELITY_AND_SCALEUP.md): exact
+  method and scale-up contract.
+- [`AGENT_RUNBOOK.md`](AGENT_RUNBOOK.md): operational debugging and tuning
+  policy.
+- [`PR3_MODAL_PROGRESS_REPORT.md`](PR3_MODAL_PROGRESS_REPORT.md): completed
+  pre-fidelity runtime pilots and their limitations.
 
-All selected videos are generated and scored. Their MP4 files are saved under:
+## Validation boundary
 
-```text
-<output_dir>/validation/step-XXXXXX/
-```
-
-To avoid flooding W&B, only `log_sample_limit` videos are uploaded to the
-tracker, while metrics still cover the full set of at most 100 videos.
-
-## Configurations
-
-| Config | Purpose |
-|---|---|
-| `rvm_h3_1gpu_smoke.yaml` | Four-update correctness gate, K=2, rank-16 LoRA |
-| `rvm_h3_8gpu_exact.yaml` | Unanchored RVM comparison |
-| `rvm_h3_8gpu_audio_anchor.yaml` | Recommended video-RVM + audio-preservation run |
-| `rvm_h3_8gpu_full_anchor.yaml` | Conservative video+audio function-space anchor |
-| `rvm_h3_8gpu_full.yaml` | 180-update, 23,040-rollout production candidate |
-
-The full sample budget is:
-
-```text
-90 rollout collections
-x 32 prompt groups
-x 8 candidates
-= 23,040 generated training videos
-
-2 optimizer updates per collection
-= 180 optimizer updates
-```
-
-## Eight-GPU topology
-
-The default is `SP4 x DP2` on memory-rich B200/GB200 nodes. On eight 80-GB
-H100/H200 GPUs, use one sequence-parallel replica:
-
-```bash
-NUM_GPUS=8 RVM_SP_SIZE=8 bash examples/train/rvm_h3/05_run_8gpu_lr_sweep.sh
-```
-
-The reward models are loaded only on the first rank of each sequence-parallel
-replica. Those leaders decode and score videos, then broadcast scalar rewards
-to the remaining SP ranks.
-
-## Required experiment order
-
-1. **Strict inference parity:** public FastH3 runner, four forwards, CFG-free.
-2. **One-GPU preflight:** imports, unit tests, all reward models, config build.
-3. **One-GPU training smoke:** finite forward/backward/checkpoint/export.
-4. **Learning-rate bracket:** `5e-6`, `1e-5`, `2e-5`.
-5. **Anchor comparison:** exact, audio anchor, full anchor.
-6. **Full run:** only after a sweep variant improves held-out videos without
-   audio/static-collapse regressions.
-
-The full operational and debugging policy is in
-[`AGENT_RUNBOOK.md`](AGENT_RUNBOOK.md).
-
-## Honest validation status
-
-The repository implementation has CPU/static/unit-test coverage. The actual H3
-model, VSA CUDA kernels, VAEs, reward checkpoints, and distributed optimizer
-must still pass the numbered one-GPU and eight-GPU gates on the target node.
-Do not describe the training run as successful until generated validation media
-has been inspected and the held-out metrics/human comparisons improve.
+The earlier 1×H100 and 4×H100 runs validated model loading, full-geometry VSA
+rollouts, all reward models, LoRA backward, Adam, checkpointing, and validation.
+The new batch-global normalization and continuous-time RVM path must still pass
+the one-GPU preflight and the exact 8-GPU topology gate before a quality claim or
+long production launch. Repository code being committed is not evidence that a
+GPU experiment succeeded.
