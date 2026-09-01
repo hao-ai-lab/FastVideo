@@ -1,0 +1,45 @@
+# OpenAI-compatible server for Wan2.1 I2V 14B 480P. Each request must supply
+# its own source image (POST inputs.image_path); there is no default image.
+#   fastvideo serve --config examples/serving/openai_wan21_i2v_14b.yaml
+generator:
+  model_path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers
+  engine:
+    num_gpus: 2
+    parallelism:
+      tp_size: 2
+      sp_size: 2
+    offload:
+      dit: true
+      vae: true
+      text_encoder: true
+      image_encoder: true
+      pin_cpu_memory: true
+  pipeline:
+    workload_type: i2v
+    experimental:
+      flow_shift: 3.0
+
+server:
+  host: 0.0.0.0
+  port: 8000
+  output_dir: outputs/openai_wan21_i2v_14b
+  served_model_name: wan21-i2v-14b
+
+default_request:
+  negative_prompt: >-
+    Bright tones, overexposed, static, blurred details, subtitles, style,
+    works, paintings, images, static, overall gray, worst quality, low
+    quality, JPEG compression residue, ugly, incomplete, extra fingers,
+    poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen
+    limbs, fused fingers, still picture, messy background, three legs, many
+    people in the background, walking backwards
+  sampling:
+    seed: 1024
+    num_frames: 77
+    height: 480
+    width: 832
+    fps: 16
+    num_inference_steps: 40
+    guidance_scale: 5.0
+  output:
+    return_frames: false
