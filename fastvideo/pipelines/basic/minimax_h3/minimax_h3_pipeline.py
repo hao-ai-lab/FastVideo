@@ -119,6 +119,15 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
     def _defer_denoise_modules(self, fastvideo_args: FastVideoArgs) -> bool:
         if not fastvideo_args.inference_mode or bool(getattr(fastvideo_args, "training_mode", False)):
             return False
+        # Both mechanisms defer the same four modules and both decide when to
+        # free them. Running them together interleaves two owners over one set
+        # of components: this override would strip the denoise modules from the
+        # load list while the base wrapped the encoder in a proxy, and both
+        # would then release it. `lazy_module_load` is asked for explicitly and
+        # is the more general path, so it wins when it is on.
+        if bool(getattr(fastvideo_args, "lazy_module_load", False)):
+            logger.info("MiniMax-H3 sequential module load off: lazy_module_load owns deferral")
+            return False
         requested = fastvideo_args.h3_sequential_load
         if requested is True:
             return True
