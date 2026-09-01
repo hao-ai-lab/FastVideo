@@ -43,13 +43,14 @@ class LazyModule:
     early is a latency cost, never a correctness one.
     """
 
-    __slots__ = ("_lazy_name", "_lazy_loader", "_lazy_materialize_transform", "_lazy_module")
+    __slots__ = ("_lazy_name", "_lazy_loader", "_lazy_materialize_transform", "_lazy_module", "_lazy_release_callbacks")
 
     def __init__(self, name: str, loader: Callable[[], Any]) -> None:
         object.__setattr__(self, "_lazy_name", name)
         object.__setattr__(self, "_lazy_loader", loader)
         object.__setattr__(self, "_lazy_materialize_transform", None)
         object.__setattr__(self, "_lazy_module", None)
+        object.__setattr__(self, "_lazy_release_callbacks", [])
 
     @property
     def lazy_name(self) -> str:
@@ -93,17 +94,31 @@ class LazyModule:
         setup. A transform may return a wrapper, as ``torch.compile`` does.
         """
         current_transform = object.__getattribute__(self, "_lazy_materialize_transform")
-        if current_transform is not None:
-            raise RuntimeError(f"Materialize transform for module {self.lazy_name} is already set")
-
         module = object.__getattribute__(self, "_lazy_module")
-        transformed = transform(module) if module is not None else None
+        if current_transform is not None:
+            inner = current_transform
+
+            def chained(loaded: Any) -> Any:
+                return transform(inner(loaded))
+
+            stored: Callable[[Any], Any] = chained
+            # The resident instance already ran ``inner``; only apply the new outer.
+            immediate = transform
+        else:
+            stored = transform
+            immediate = transform
+
+        transformed = immediate(module) if module is not None else None
         if module is not None and transformed is None:
             raise ValueError(f"Materialize transform for module {self.lazy_name} returned None")
 
-        object.__setattr__(self, "_lazy_materialize_transform", transform)
+        object.__setattr__(self, "_lazy_materialize_transform", stored)
         if module is not None:
             object.__setattr__(self, "_lazy_module", transformed)
+
+    def add_release_callback(self, callback: Callable[[], None]) -> None:
+        """Run ``callback`` each time the real component is dropped."""
+        object.__getattribute__(self, "_lazy_release_callbacks").append(callback)
 
     def release(self) -> bool:
         """Drop the real component. Returns True if something was released."""
@@ -115,6 +130,8 @@ class LazyModule:
         before = _cuda_allocated_gib()
         object.__setattr__(self, "_lazy_module", None)
         del module
+        for callback in list(object.__getattribute__(self, "_lazy_release_callbacks")):
+            callback()
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()

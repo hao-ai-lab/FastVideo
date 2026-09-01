@@ -63,20 +63,26 @@ def _apply_h3_checkpoint_arch_configs(model_path: str, fastvideo_args: FastVideo
                                       extra_config_module_map: dict[str, str]) -> None:
     """Overlay checkpoint config.json onto pipeline configs without loading weights."""
     root = Path(model_path)
-    vae_dir = root / "vae"
+    vae_dir = root / extra_config_module_map.get("vae", "vae")
     if (vae_dir / "config.json").is_file():
         fastvideo_args.pipeline_config.vae_config.update_model_arch(get_diffusers_config(str(vae_dir)))
+    audio_vae_dir = root / extra_config_module_map.get("audio_vae", "audio_vae")
+    audio_vae_config = getattr(fastvideo_args.pipeline_config, "audio_vae_config", None)
+    if audio_vae_config is not None and (audio_vae_dir / "config.json").is_file():
+        audio_vae_config.update_model_arch(get_diffusers_config(str(audio_vae_dir)))
     transformer_dir = root / extra_config_module_map.get("transformer", "transformer")
     if (transformer_dir / "config.json").is_file():
         fastvideo_args.pipeline_config.dit_config.update_model_arch(get_diffusers_config(str(transformer_dir)))
-    dit_arch = getattr(fastvideo_args.pipeline_config.dit_config, "arch_config", None)
+    dit_config = fastvideo_args.pipeline_config.dit_config
     vae_arch = getattr(fastvideo_args.pipeline_config.vae_config, "arch_config", None)
-    logger.info(
-        "MiniMax-H3 geometry from config: patch_size=%s spatial_compression_ratio=%s latent_channels=%s",
-        getattr(dit_arch, "patch_size", None),
-        getattr(vae_arch, "spatial_compression_ratio", None),
-        getattr(vae_arch, "latent_channels", None),
-    )
+    patch_size = getattr(dit_config, "patch_size", None)
+    if patch_size is not None and vae_arch is not None:
+        logger.info(
+            "MiniMax-H3 geometry from config: patch_size=%s spatial_compression_ratio=%s latent_channels=%s",
+            tuple(patch_size),
+            int(getattr(vae_arch, "spatial_compression_ratio", 0)),
+            int(getattr(vae_arch, "latent_channels", 0)),
+        )
 
 
 def _use_taeh3_t2va(fastvideo_args: FastVideoArgs | None, *, ref2va: bool) -> bool:
@@ -221,6 +227,7 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
             loaded = super().load_modules(fastvideo_args, loaded_modules=self.modules)
             for name, module in loaded.items():
                 self.add_module(name, module)
+            self._apply_inference_compile(tuple(name for name in loaded if name in _DENOISE_MODULE_NAMES))
         finally:
             self._required_config_modules = saved
 
@@ -252,6 +259,7 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
             loaded = super().load_modules(fastvideo_args, loaded_modules=self.modules)
             for name, module in loaded.items():
                 self.add_module(name, module)
+            self._apply_inference_compile(("text_encoder", ))
         finally:
             self._required_config_modules = saved
         if stage is not None:
@@ -286,9 +294,12 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
             return live
         return self._input_video_geometry(self.fastvideo_args)
 
-    def _input_audio_vae(self, *, ref2va: bool) -> Any | None:
+    def _input_audio_vae(self, fastvideo_args: FastVideoArgs, *, ref2va: bool) -> Any | None:
         if not ref2va:
             return None
+        arch = getattr(getattr(fastvideo_args.pipeline_config, "audio_vae_config", None), "arch_config", None)
+        if arch is not None:
+            return arch
         return _default_audio_geometry()
 
     def _add_condition_stages(self, fastvideo_args: FastVideoArgs, *, ref2va: bool) -> None:
@@ -296,7 +307,7 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
             "input_preparation_stage",
             MiniMaxH3InputPreparationStage(
                 vae=self._input_video_geometry(fastvideo_args),
-                audio_vae=self._input_audio_vae(ref2va=ref2va),
+                audio_vae=self._input_audio_vae(fastvideo_args, ref2va=ref2va),
                 ref2va=ref2va,
             ),
         )
@@ -353,12 +364,23 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
         if not self.post_init_called:
             self.post_init()
 
-        self._ensure_text_encoder(fastvideo_args)
-        if self._denoise_stages_ready:
-            logger.info("Running MiniMax-H3 condition stages before denoise (subsequent request)")
-        else:
-            logger.info("Running MiniMax-H3 condition stages before loading DiT/VAE weights")
-        return self._run_condition_then_denoise(batch, fastvideo_args)
+        # Sequential encode-then-release is the H3-only fallback. Lazy and the
+        # fully-resident discrete-GPU path both keep a complete stage list and
+        # must use the base forward so abort cleanup and text_encoder_cpu_offload
+        # still apply. Releasing Qwen on every request was re-reading it from disk
+        # when neither deferral flag was on.
+        if self._defer_denoise_modules(fastvideo_args):
+            try:
+                self._ensure_text_encoder(fastvideo_args)
+                if self._denoise_stages_ready:
+                    logger.info("Running MiniMax-H3 condition stages before denoise (subsequent request)")
+                else:
+                    logger.info("Running MiniMax-H3 condition stages before loading DiT/VAE weights")
+                return self._run_condition_then_denoise(batch, fastvideo_args)
+            except BaseException:
+                self._release_all_lazy_modules()
+                raise
+        return super().forward(batch, fastvideo_args)
 
 
 class MiniMaxH3Pipeline(MiniMaxH3BasePipeline):

@@ -173,7 +173,10 @@ when it enables block-sparse attention, and reading a component's attributes
 while stages are built, as the shared denoising stage does to pick an attention
 backend. A pipeline therefore lists the components it has checked in
 `_lazy_module_names`, which is empty in the base class. MiniMax-H3 opts in. On
-a pipeline that has not, the flag logs a warning and changes nothing.
+a pipeline that has not, the flag is a no-op: hooks are not installed and no
+warning is logged. Sequential MiniMax-H3 (`h3_sequential_load`) reloads the
+text encoder for a later `generate()` on the same worker; you do not need to
+start a new generator.
 
 ## General Recommendations
 

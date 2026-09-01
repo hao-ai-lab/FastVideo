@@ -452,7 +452,6 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         # request-time env/probe/fallback behavior; only Dynamo capture reads
         # the prepared, static route.
         self._regional_compile_sm100a_enabled: bool | None = None
-        self._regional_compile_layer_idx: torch.Tensor | None = None
 
     def prepare_for_compile(self, device: torch.device) -> None:
         """Tensorize per-layer state shared by every torch.compile route."""
@@ -468,7 +467,8 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         the loaded model's device now, then let ``forward`` specialize on the
         resulting plain bool while Dynamo is compiling.
         """
-        self.prepare_for_compile(device)
+        if self._compile_layer_idx is None:
+            self.prepare_for_compile(device)
         requested = os.environ.get(VSA_SM100A_ENV, "0") == "1"
         enabled = False
         reason = None if requested else f"{VSA_SM100A_ENV}=1 is required for compile-safe VSA-H3 attention"
@@ -495,10 +495,6 @@ class MiniMaxH3VSAImpl(AttentionImpl):
                 enabled = reason is None
 
         self._regional_compile_sm100a_enabled = enabled
-        # Keep this marker unset when preparation fails. Generic/training
-        # torch.compile must retain the established Triton attention route.
-        self._regional_compile_layer_idx = (torch.tensor(self.layer_idx, device=device, dtype=torch.int64)
-                                            if enabled else None)
         if enabled:
             route = ("native fastvideo-kernel mask entry" if callable(
                 getattr(_sm100a, "block_sparse_attn_sm100a_from_mask", None)) else
@@ -524,7 +520,7 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         n_tiles = attn_metadata.variable_block_sizes.numel()
         grad_mode = torch.is_grad_enabled() and x.requires_grad
         compiling = torch.compiler.is_compiling()
-        regional_compiling = compiling and self._regional_compile_layer_idx is not None
+        regional_compiling = compiling and self._regional_compile_sm100a_enabled is True
         if regional_compiling:
             sm100a_requested = bool(self._regional_compile_sm100a_enabled)
         elif compiling:
@@ -570,7 +566,7 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         attn_metadata: MiniMaxH3VSAMetadata,
     ) -> torch.Tensor:
         compiling = torch.compiler.is_compiling()
-        regional_compiling = compiling and self._regional_compile_layer_idx is not None
+        regional_compiling = compiling and self._regional_compile_sm100a_enabled is True
 
         tile_elems = attn_metadata.tile_elems
         if regional_compiling and tile_elems != 64:

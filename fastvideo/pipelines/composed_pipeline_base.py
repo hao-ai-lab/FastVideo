@@ -268,6 +268,95 @@ class ComposedPipelineBase(ABC):
             compile_kwargs,
         )
 
+    def _apply_inference_compile(self, module_names: tuple[str, ...] | None = None) -> None:
+        """Attach pipeline-level compile to modules that are present now.
+
+        Sequential MiniMax-H3 loads DiT/VAEs after ``post_init``, so this is
+        also called once those modules appear. Lazy proxies register a
+        materialize transform and can be configured at ``post_init``.
+        """
+        if self.fastvideo_args is None:
+            return
+        compile_requested = any((
+            self.fastvideo_args.enable_torch_compile,
+            self.fastvideo_args.enable_torch_compile_text_encoder,
+            self.fastvideo_args.enable_torch_compile_vae,
+            self.fastvideo_args.enable_torch_compile_audio_vae,
+        ))
+        if self.fastvideo_args.training_mode and compile_requested:
+            logger.info("Torch Compile enabled via FSDP loader for training; skipping additional pipeline compile")
+        if self.fastvideo_args.training_mode:
+            return
+
+        compile_transformer = self.fastvideo_args.enable_torch_compile
+        compile_text_encoder = self.fastvideo_args.enable_torch_compile_text_encoder
+        compile_vae = self.fastvideo_args.enable_torch_compile_vae
+        compile_audio_vae = self.fastvideo_args.enable_torch_compile_audio_vae
+        if not (compile_transformer or compile_text_encoder or compile_vae or compile_audio_vae):
+            return
+
+        wanted = None if module_names is None else set(module_names)
+
+        def _want(name: str) -> bool:
+            return wanted is None or name in wanted
+
+        fsdp_module_cls = None
+        try:
+            from torch.distributed.fsdp import FSDPModule  # type: ignore
+            fsdp_module_cls = FSDPModule
+        except Exception:  # pragma: no cover - FSDP not always available
+            fsdp_module_cls = None
+
+        global_compile_kwargs = (self.fastvideo_args.torch_compile_kwargs or {})
+        dit_compile_kwargs = (self.fastvideo_args.torch_compile_kwargs_dit or global_compile_kwargs)
+        text_compile_kwargs = (self.fastvideo_args.torch_compile_kwargs_text_encoder or global_compile_kwargs)
+        vae_compile_kwargs = (self.fastvideo_args.torch_compile_kwargs_vae or global_compile_kwargs)
+        audio_vae_compile_kwargs = (self.fastvideo_args.torch_compile_kwargs_audio_vae or global_compile_kwargs)
+
+        if compile_transformer and self.fastvideo_args.inference_torch_compile:
+            logger.info("inference_torch_compile already compiled the DiT regions in the "
+                        "loader; skipping the pipeline-level DiT compile")
+            compile_transformer = False
+        if compile_transformer and any(_want(name) for name in ("transformer", "transformer_refine", "transformer_2")):
+            for name in ("transformer", "transformer_refine", "transformer_2"):
+                if _want(name):
+                    self._maybe_compile_pipeline_module(
+                        module_name=name,
+                        fsdp_module_cls=fsdp_module_cls,
+                        compile_kwargs=dit_compile_kwargs,
+                    )
+            if any(name in self.modules for name in ("transformer", "transformer_refine", "transformer_2")):
+                logger.info("Torch Compile enabled for DiT")
+
+        if compile_text_encoder and any(_want(name) for name in ("text_encoder", "text_encoder_2")):
+            for name in ("text_encoder", "text_encoder_2"):
+                if _want(name):
+                    self._maybe_compile_pipeline_module(
+                        module_name=name,
+                        fsdp_module_cls=fsdp_module_cls,
+                        compile_kwargs=text_compile_kwargs,
+                    )
+            if any(name in self.modules for name in ("text_encoder", "text_encoder_2")):
+                logger.info("Torch Compile enabled for text encoder")
+
+        if compile_vae and _want("vae"):
+            self._maybe_compile_pipeline_module(
+                module_name="vae",
+                fsdp_module_cls=fsdp_module_cls,
+                compile_kwargs=vae_compile_kwargs,
+            )
+            if "vae" in self.modules:
+                logger.info("Torch Compile enabled for VAE")
+
+        if compile_audio_vae and _want("audio_vae"):
+            self._maybe_compile_pipeline_module(
+                module_name="audio_vae",
+                fsdp_module_cls=fsdp_module_cls,
+                compile_kwargs=audio_vae_compile_kwargs,
+            )
+            if "audio_vae" in self.modules:
+                logger.info("Torch Compile enabled for audio VAE")
+
     def post_init(self) -> None:
         assert self.fastvideo_args is not None, "fastvideo_args must be set"
         if self.post_init_called:
@@ -282,89 +371,16 @@ class ComposedPipelineBase(ABC):
                 self.initialize_validation_pipeline(self.training_args)
 
         self.initialize_pipeline(self.fastvideo_args)
-        compile_transformer = self.fastvideo_args.enable_torch_compile
-        compile_text_encoder = (self.fastvideo_args.enable_torch_compile_text_encoder)
-        compile_vae = self.fastvideo_args.enable_torch_compile_vae
-        compile_audio_vae = self.fastvideo_args.enable_torch_compile_audio_vae
-        if (compile_transformer or compile_text_encoder or compile_vae or compile_audio_vae):
-            if self.fastvideo_args.training_mode:
-                logger.info("Torch Compile enabled via FSDP loader for training; skipping additional pipeline compile")
-            else:
-                fsdp_module_cls = None
-                try:
-                    from torch.distributed.fsdp import FSDPModule  # type: ignore
-                    fsdp_module_cls = FSDPModule
-                except Exception:  # pragma: no cover - FSDP not always available
-                    fsdp_module_cls = None
-
-                global_compile_kwargs = (self.fastvideo_args.torch_compile_kwargs or {})
-                dit_compile_kwargs = (self.fastvideo_args.torch_compile_kwargs_dit or global_compile_kwargs)
-                text_compile_kwargs = (self.fastvideo_args.torch_compile_kwargs_text_encoder or global_compile_kwargs)
-                vae_compile_kwargs = (self.fastvideo_args.torch_compile_kwargs_vae or global_compile_kwargs)
-                audio_vae_compile_kwargs = (self.fastvideo_args.torch_compile_kwargs_audio_vae or global_compile_kwargs)
-
-                if compile_transformer and self.fastvideo_args.inference_torch_compile:
-                    # The loader already applied the regional fullgraph
-                    # compile to the DiT blocks (inference_torch_compile);
-                    # wrapping the same forwards again here would stack
-                    # compiled callables.
-                    logger.info("inference_torch_compile already compiled the DiT regions in the "
-                                "loader; skipping the pipeline-level DiT compile")
-                    compile_transformer = False
-                if compile_transformer:
-                    self._maybe_compile_pipeline_module(
-                        module_name="transformer",
-                        fsdp_module_cls=fsdp_module_cls,
-                        compile_kwargs=dit_compile_kwargs,
-                    )
-                    self._maybe_compile_pipeline_module(
-                        module_name="transformer_refine",
-                        fsdp_module_cls=fsdp_module_cls,
-                        compile_kwargs=dit_compile_kwargs,
-                    )
-                    self._maybe_compile_pipeline_module(
-                        module_name="transformer_2",
-                        fsdp_module_cls=fsdp_module_cls,
-                        compile_kwargs=dit_compile_kwargs,
-                    )
-                    logger.info("Torch Compile enabled for DiT")
-
-                if compile_text_encoder:
-                    self._maybe_compile_pipeline_module(
-                        module_name="text_encoder",
-                        fsdp_module_cls=fsdp_module_cls,
-                        compile_kwargs=text_compile_kwargs,
-                    )
-                    self._maybe_compile_pipeline_module(
-                        module_name="text_encoder_2",
-                        fsdp_module_cls=fsdp_module_cls,
-                        compile_kwargs=text_compile_kwargs,
-                    )
-                    logger.info("Torch Compile enabled for text encoder")
-
-                if compile_vae:
-                    self._maybe_compile_pipeline_module(
-                        module_name="vae",
-                        fsdp_module_cls=fsdp_module_cls,
-                        compile_kwargs=vae_compile_kwargs,
-                    )
-                    logger.info("Torch Compile enabled for VAE")
-
-                if compile_audio_vae:
-                    self._maybe_compile_pipeline_module(
-                        module_name="audio_vae",
-                        fsdp_module_cls=fsdp_module_cls,
-                        compile_kwargs=audio_vae_compile_kwargs,
-                    )
-                    logger.info("Torch Compile enabled for audio VAE")
+        self._apply_inference_compile()
 
         trace_target = self.modules.get("transformer")
         if is_lazy_module(trace_target):
             # The hook manager keeps a strong reference to every module it
             # wraps, so attaching here would materialize the DiT before the
             # first request and pin that instance past any release.
-            logger.warning("Activation trace is not attached to a deferred transformer; "
-                           "turn off lazy_module_load to trace it")
+            if envs.FASTVIDEO_TRACE_ACTIVATIONS:
+                logger.warning("Activation trace is not attached to a deferred transformer; "
+                               "turn off lazy_module_load to trace it")
             trace_target = None
         self._trace_mgr = attach_activation_trace(trace_target)
 
@@ -372,7 +388,7 @@ class ComposedPipelineBase(ABC):
             logger.info("Creating pipeline stages...")
             self.create_pipeline_stages(self.fastvideo_args)
 
-            if self._lazy_module_load_enabled(self.fastvideo_args):
+            if self._lazy_module_load_enabled(self.fastvideo_args) and self._lazy_module_names:
                 self._install_lazy_release_hooks()
 
             # Warmup NCCL communicators for sequence parallelism to avoid
@@ -435,7 +451,13 @@ class ComposedPipelineBase(ABC):
         return self.modules[module_name]
 
     def add_module(self, module_name: str, module: Any):
+        previous = self.modules.get(module_name)
         self.modules[module_name] = module
+        # The release schedule keys proxies by identity. Replacing a deferred
+        # module (or swapping a proxy for a freshly loaded instance) leaves
+        # stages holding the old object unless the schedule is rebuilt.
+        if self._lazy_release_hooks_installed and (is_lazy_module(previous) or is_lazy_module(module)):
+            self._install_lazy_release_hooks()
 
     def _load_config(self, model_path: str) -> dict[str, Any]:
         revision = getattr(self.fastvideo_args, "revision", None)
@@ -656,6 +678,11 @@ class ComposedPipelineBase(ABC):
 
     def _install_lazy_release_hooks(self) -> None:
         """Tell each stage which deferred modules to free once it returns."""
+        if not self._lazy_module_names:
+            # Unified-memory auto-enable turns the flag on for every pipeline.
+            # Only opted-in families (currently MiniMax-H3) should log about it.
+            self._lazy_release_hooks_installed = True
+            return
         schedule = self._build_lazy_release_schedule()
         for index, stage in enumerate(self._stages):
             stage._lazy_modules_to_release = tuple(self.modules[name] for name in schedule.get(index, ()))
@@ -702,8 +729,10 @@ class ComposedPipelineBase(ABC):
             # stage appended afterwards may hold a module an earlier stage has
             # already been told to free, which would hand it a released
             # component mid-run. Rebuild rather than trust the stale plan.
-            logger.warning("Stage %s was added after the deferred-release schedule was built; rebuilding the schedule",
-                           stage_name)
+            # H3 sequential load adds denoise stages on the first request; that
+            # is the designed path, so do not log it as a warning.
+            logger.debug("Stage %s was added after the deferred-release schedule was built; rebuilding the schedule",
+                         stage_name)
             self._install_lazy_release_hooks()
 
     # TODO(will): don't hardcode no_grad

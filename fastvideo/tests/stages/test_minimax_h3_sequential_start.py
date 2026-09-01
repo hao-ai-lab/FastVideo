@@ -274,3 +274,52 @@ def test_taeh3_t2va_skips_video_vae_on_the_deferred_load(monkeypatch) -> None:
     assert "vae" not in loads[1]
     assert pipeline.get_module("vae") is None
     assert pipeline.get_module("transformer") is not None
+
+
+def test_generic_pipeline_config_does_not_crash_geometry_overlay(monkeypatch) -> None:
+    events: list = []
+    _patch_pipeline_construction(monkeypatch, events)
+
+    def fake_load(self, fastvideo_args, loaded_modules=None):
+        del fastvideo_args, loaded_modules
+        return {name: _stub_module(name) for name in self.required_config_modules}
+
+    monkeypatch.setattr(ComposedPipelineBase, "load_modules", fake_load)
+    args = FastVideoArgs(model_path="unused/for-this-test", h3_sequential_load=True)
+    pipeline = MiniMaxH3Pipeline("unused/for-this-test", args)
+    pipeline.post_init()
+    assert pipeline.get_module("text_encoder") is not None
+
+
+def test_resident_path_does_not_reread_encoder_on_later_request(monkeypatch) -> None:
+    events: list = []
+    _patch_pipeline_construction(monkeypatch, events)
+    loads: list[list[str]] = []
+
+    def fake_load(self, fastvideo_args, loaded_modules=None):
+        del fastvideo_args
+        requested = list(self.required_config_modules)
+        loads.append(requested)
+        modules = dict(loaded_modules or {})
+        for name in requested:
+            modules.setdefault(name, _stub_module(name))
+        return modules
+
+    monkeypatch.setattr(ComposedPipelineBase, "load_modules", fake_load)
+    args = FastVideoArgs(
+        model_path="unused/for-this-test",
+        enable_stage_verification=False,
+        h3_sequential_load=False,
+        lazy_module_load=False,
+    )
+    pipeline = MiniMaxH3Pipeline("unused/for-this-test", args)
+    pipeline.post_init()
+    passthrough = lambda batch, _args: batch
+    for stage in pipeline._stages:
+        monkeypatch.setattr(stage, "forward", passthrough)
+
+    first = pipeline.forward(ForwardBatch(data_type="video", prompt="one"), args)
+    second = pipeline.forward(ForwardBatch(data_type="video", prompt="two"), args)
+    assert first is not None and second is not None
+    assert len(loads) == 1
+    assert pipeline.get_module("text_encoder") is not None

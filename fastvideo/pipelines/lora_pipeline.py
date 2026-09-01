@@ -26,6 +26,7 @@ from fastvideo.logger import init_logger
 from fastvideo.models.loader.lora_patch import DenseLoRAPatch, normalize_lora_key
 from fastvideo.models.loader.utils import get_param_names_mapping
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
+from fastvideo.pipelines.lazy_module import is_lazy_module
 from fastvideo.utils import maybe_download_lora
 
 logger = init_logger(__name__)
@@ -204,15 +205,16 @@ class LoRAPipeline(ComposedPipelineBase):
         # Inference
         elif not self.training_mode and self.lora_path is not None:
             self.convert_to_lora_layers()
-            self._setting_constructor_adapter = True
-            try:
-                self.set_lora_adapter(
-                    self.lora_nickname,  # type: ignore
-                    self.lora_path,
-                    strength=self.lora_strength,
-                )  # type: ignore
-            finally:
-                self._setting_constructor_adapter = False
+            if not any(is_lazy_module(module) for module in self.trainable_transformer_modules.values()):
+                self._setting_constructor_adapter = True
+                try:
+                    self.set_lora_adapter(
+                        self.lora_nickname,  # type: ignore
+                        self.lora_path,
+                        strength=self.lora_strength,
+                    )  # type: ignore
+                finally:
+                    self._setting_constructor_adapter = False
 
     def is_target_layer(self, module_name: str) -> bool:
         if self.lora_target_modules is None:
@@ -250,6 +252,91 @@ class LoRAPipeline(ComposedPipelineBase):
             else:
                 raise ValueError(f"Transformer {transformer_name} should be trainable but not found in lora_layers")
 
+    def _exclude_lora_layers_for(self, transformer_name: str, transformer_module: Any) -> list[str]:
+        excluded = self.exclude_lora_layers.get(transformer_name)
+        if excluded is not None:
+            return excluded
+        # Prefer the pipeline config so a LazyModule is not materialized just to
+        # read a list of layer name fragments.
+        dit_config = getattr(getattr(self.fastvideo_args, "pipeline_config", None), "dit_config", None)
+        arch = getattr(dit_config, "arch_config", None)
+        if arch is not None and hasattr(arch, "exclude_lora_layers"):
+            excluded = list(arch.exclude_lora_layers)
+        elif is_lazy_module(transformer_module):
+            excluded = []
+        else:
+            excluded = list(transformer_module.config.arch_config.exclude_lora_layers)
+        self.exclude_lora_layers[transformer_name] = excluded
+        return excluded
+
+    def _apply_constructor_adapter(self) -> None:
+        if self.lora_path is None:
+            return
+        self.cur_adapter_name = ""
+        self.cur_adapter_path = ""
+        self._setting_constructor_adapter = True
+        try:
+            self.set_lora_adapter(
+                self.lora_nickname,
+                self.lora_path,
+                strength=self.lora_strength,
+            )
+        finally:
+            self._setting_constructor_adapter = False
+
+    def _convert_one_transformer(self, transformer_name: str, transformer_module: nn.Module) -> None:
+        excluded_lora_layers = self._exclude_lora_layers_for(transformer_name, transformer_module)
+        # Fresh instance after a lazy rematerialize must not keep the previous
+        # block mapping — those modules pin the released DiT and never get freed.
+        block_list = []
+        for name, submodule in transformer_module.named_children():
+            if isinstance(submodule, nn.ModuleList):
+                block_list = [(f"{name}.{i}", m) for i, m in enumerate(submodule)]
+                break
+        self.lora_layers[transformer_name] = LoRAModelLayers(block_list)
+        logger.info("Converting %s to LoRA Transformer", transformer_name)
+        converted_count = 0
+        for block_name, block_modules in _named_module_by_prefix(
+                transformer_module,
+                list(self.lora_layers[transformer_name].block_mapping),
+        ):
+            if block_name is not None and (not self.fastvideo_args.training_mode
+                                           and self.fastvideo_args.dit_layerwise_offload):
+                scope_ctx = _get_hook_ctx(self.lora_layers[transformer_name].block_mapping[block_name])
+            else:
+                scope_ctx = nullcontext()
+            with scope_ctx:
+                for name, layer in block_modules:
+                    if not self.is_target_layer(name):
+                        continue
+
+                    excluded = False
+                    for exclude_layer in excluded_lora_layers:
+                        if exclude_layer in name:
+                            excluded = True
+                            break
+                    if excluded:
+                        continue
+
+                    layer = get_lora_layer(
+                        layer,
+                        lora_rank=self.lora_rank,
+                        lora_alpha=self.lora_alpha,
+                        training_mode=self.training_mode,
+                    )
+                    if layer is not None:
+                        block_name_split = name.split(".", 2)
+                        if len(block_name_split) > 2:
+                            block_name = (block_name_split[0] + "." + block_name_split[1])
+                        else:
+                            block_name = None
+                        if (block_name not in self.lora_layers[transformer_name].block_mapping):
+                            block_name = None
+                        self.lora_layers[transformer_name].add_lora_layer(block_name, name, layer)
+                        replace_submodule(transformer_module, name, layer)
+                        converted_count += 1
+        logger.info("Converted %d layers to LoRA layers", converted_count)
+
     def convert_to_lora_layers(self) -> None:
         """
         Unified method to convert the transformer to a LoRA transformer.
@@ -261,67 +348,22 @@ class LoRAPipeline(ComposedPipelineBase):
                 transformer_name,
                 transformer_module,
         ) in self.trainable_transformer_modules.items():
-            excluded_lora_layers = self.exclude_lora_layers.get(transformer_name)
-            if excluded_lora_layers is None:
-                # Reading a LazyModule's config materializes it. Defer that read
-                # until LoRA conversion is actually requested so a base inference
-                # pipeline can keep its transformer unloaded through conditioning.
-                excluded_lora_layers = list(transformer_module.config.arch_config.exclude_lora_layers)
-                self.exclude_lora_layers[transformer_name] = excluded_lora_layers
+            if is_lazy_module(transformer_module):
 
-            converted_count = 0
-            # init bookkeeping structures
-            if transformer_name not in self.lora_layers:
-                # get block list
-                block_list = []
-                for name, submodule in transformer_module.named_children():
-                    if isinstance(submodule, nn.ModuleList):
-                        block_list = [(f"{name}.{i}", m) for i, m in enumerate(submodule)]
-                        break
-                self.lora_layers[transformer_name] = LoRAModelLayers(block_list)
-            logger.info("Converting %s to LoRA Transformer", transformer_name)
-            # scan every module and convert to LoRA layer if applicable
+                def _drop_lora_refs(*, _name: str = transformer_name) -> None:
+                    self.lora_layers.pop(_name, None)
+                    self.cur_adapter_name = ""
+                    self.cur_adapter_path = ""
 
-            for block_name, block_modules in _named_module_by_prefix(
-                    transformer_module,
-                    list(self.lora_layers[transformer_name].block_mapping),
-            ):
-                if block_name is not None and (not self.fastvideo_args.training_mode
-                                               and self.fastvideo_args.dit_layerwise_offload):
-                    scope_ctx = _get_hook_ctx(self.lora_layers[transformer_name].block_mapping[block_name])
-                else:
-                    scope_ctx = nullcontext()
-                with scope_ctx:
-                    for name, layer in block_modules:
-                        if not self.is_target_layer(name):
-                            continue
+                def _lora_after_load(module: nn.Module, *, _name: str = transformer_name) -> nn.Module:
+                    self._convert_one_transformer(_name, module)
+                    self._apply_constructor_adapter()
+                    return module
 
-                        excluded = False
-                        for exclude_layer in excluded_lora_layers:
-                            if exclude_layer in name:
-                                excluded = True
-                                break
-                        if excluded:
-                            continue
-
-                        layer = get_lora_layer(
-                            layer,
-                            lora_rank=self.lora_rank,
-                            lora_alpha=self.lora_alpha,
-                            training_mode=self.training_mode,
-                        )
-                        if layer is not None:
-                            block_name_split = name.split(".", 2)
-                            if len(block_name_split) > 2:
-                                block_name = (block_name_split[0] + "." + block_name_split[1])
-                            else:
-                                block_name = None
-                            if (block_name not in self.lora_layers[transformer_name].block_mapping):
-                                block_name = None
-                            self.lora_layers[transformer_name].add_lora_layer(block_name, name, layer)
-                            replace_submodule(transformer_module, name, layer)
-                            converted_count += 1
-            logger.info("Converted %d layers to LoRA layers", converted_count)
+                transformer_module.add_release_callback(_drop_lora_refs)
+                transformer_module.set_materialize_transform(_lora_after_load)
+                continue
+            self._convert_one_transformer(transformer_name, transformer_module)
 
     def set_lora_adapter(self,
                          lora_nickname: str,

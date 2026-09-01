@@ -178,6 +178,29 @@ def test_materialize_transform_applies_to_every_loaded_instance_without_loading_
     assert transformed == [first, second]
 
 
+def test_materialize_transforms_compose_in_registration_order():
+    loader, calls = _counting_loader()
+    module = LazyModule("vae", loader)
+    tags = []
+
+    def inner(component):
+        tags.append("inner")
+        component.tag = f"inner-{component.tag}"
+        return component
+
+    def outer(component):
+        tags.append("outer")
+        component.tag = f"outer-{component.tag}"
+        return component
+
+    module.set_materialize_transform(inner)
+    module.set_materialize_transform(outer)
+    first = module.materialize()
+    assert first.tag == "outer-inner-c"
+    assert tags == ["inner", "outer"]
+    assert calls == ["c"]
+
+
 def test_release_without_materializing_is_a_noop():
     loader, calls = _counting_loader()
     module = LazyModule("text_encoder", loader)
@@ -215,6 +238,7 @@ class _FakePipeline(ComposedPipelineBase):
     def __init__(self, modules, stages):  # deliberately does not call super()
         self.modules = modules
         self._stages = stages
+        self._lazy_module_names = tuple(name for name, module in modules.items() if is_lazy_module(module))
 
     def create_pipeline_stages(self, fastvideo_args):
         raise NotImplementedError
@@ -480,6 +504,13 @@ def test_pipeline_warns_when_no_stage_holds_a_deferred_module(caplog):
     assert "nothing will be freed" in caplog.text
 
 
+def test_empty_opt_in_list_is_silent(caplog):
+    pipeline = _FakePipeline({}, [_EchoStage(other=1)])
+    with caplog.at_level("WARNING"):
+        pipeline._install_lazy_release_hooks()
+    assert caplog.text == ""
+
+
 def test_a_stage_that_rebinds_through_to_can_still_be_released():
     # The end-to-end shape of the identity rule: a stage does the
     # `self.vae = self.vae.to(device)` dance, the pipeline still releases.
@@ -513,7 +544,7 @@ def test_a_stage_added_after_the_schedule_rebuilds_it(caplog):
     assert first._lazy_modules_to_release == (vae, )
 
     later = _EchoStage(vae=vae)
-    with caplog.at_level("WARNING"):
+    with caplog.at_level("DEBUG"):
         pipeline.add_stage("later", later)
 
     assert "rebuilding the schedule" in caplog.text
@@ -775,6 +806,20 @@ def test_h3_checkpoint_json_updates_dit_patch_size_without_weights(tmp_path):
     assert tuple(args.pipeline_config.dit_config.patch_size) == (1, 1, 1)
 
 
+def test_h3_checkpoint_json_updates_audio_sampling_rate_without_weights(tmp_path):
+    from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
+    from fastvideo.pipelines.basic.minimax_h3.minimax_h3_pipeline import _apply_h3_checkpoint_arch_configs
+
+    audio_dir = tmp_path / "audio_vae"
+    audio_dir.mkdir()
+    (audio_dir / "config.json").write_text('{"sampling_rate": 16000, "latent_channels": 16}')
+    args = SimpleNamespace(pipeline_config=MiniMaxH3PipelineConfig())
+    assert int(args.pipeline_config.audio_vae_config.arch_config.sampling_rate) == 32000
+    _apply_h3_checkpoint_arch_configs(str(tmp_path), args, {})
+    assert int(args.pipeline_config.audio_vae_config.arch_config.sampling_rate) == 16000
+    assert int(args.pipeline_config.audio_vae_config.arch_config.latent_channels) == 16
+
+
 class _LoRAConfigComponent(torch.nn.Module):
 
     def __init__(self, excluded_layers):
@@ -785,7 +830,7 @@ class _LoRAConfigComponent(torch.nn.Module):
         self.blocks = torch.nn.ModuleList([torch.nn.Linear(2, 2)])
 
 
-def _build_stub_lora_pipeline(monkeypatch, transformer):
+def _build_stub_lora_pipeline(monkeypatch, transformer, excluded_layers=None):
     from fastvideo.pipelines import lora_pipeline as lora_module
 
     args = SimpleNamespace(
@@ -796,6 +841,11 @@ def _build_stub_lora_pipeline(monkeypatch, transformer):
         training_mode=False,
         lora_training=False,
         dit_layerwise_offload=False,
+        pipeline_config=SimpleNamespace(
+            dit_config=SimpleNamespace(
+                arch_config=SimpleNamespace(exclude_lora_layers=list(excluded_layers or [])),
+            ),
+        ),
     )
 
     def initialize_base(pipeline, *unused_args, **unused_kwargs):
@@ -828,19 +878,48 @@ def test_no_lora_setup_keeps_the_transformer_deferred(monkeypatch):
     assert pipeline.trainable_transformer_modules == {"transformer": transformer}
 
 
-def test_lora_conversion_initializes_exclusions_when_first_requested(monkeypatch):
+def test_lora_conversion_does_not_materialize_a_deferred_dit(monkeypatch):
     loaded = []
     transformer = LazyModule(
         "transformer",
         lambda: loaded.append("transformer") or _LoRAConfigComponent(["proj_out"]),
     )
-    pipeline = _build_stub_lora_pipeline(monkeypatch, transformer)
+    pipeline = _build_stub_lora_pipeline(monkeypatch, transformer, excluded_layers=["proj_out"])
 
     pipeline.convert_to_lora_layers()
 
+    assert loaded == []
+    assert not transformer.is_materialized
+    assert pipeline.exclude_lora_layers == {}
+
+    transformer.materialize()
     assert loaded == ["transformer"]
     assert transformer.is_materialized
     assert pipeline.exclude_lora_layers == {"transformer": ["proj_out"]}
+
+
+def test_lora_release_drops_block_mapping_so_the_dit_can_free(monkeypatch):
+    import gc
+    import weakref
+
+    holder = {}
+
+    def load():
+        component = _LoRAConfigComponent([])
+        holder["component"] = component
+        return component
+
+    transformer = LazyModule("transformer", load)
+    pipeline = _build_stub_lora_pipeline(monkeypatch, transformer)
+    pipeline.convert_to_lora_layers()
+    transformer.materialize()
+    ref = weakref.ref(holder["component"])
+    del holder["component"]
+
+    assert transformer.release() is True
+    gc.collect()
+    assert ref() is None
+    assert pipeline.lora_layers == {}
 
 
 def test_lora_transformer_bookkeeping_is_per_pipeline(monkeypatch):

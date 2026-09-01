@@ -150,22 +150,21 @@ class PipelineStage(ABC):
                 logger.error("Input verification failed for %s: %s", stage_name, str(e))
                 raise
 
-        # Execute the actual stage logic
+        # Execute the actual stage logic, then optional output verification.
+        # One BaseException net: KeyboardInterrupt inside verify_output must
+        # still free this stage's deferred modules (OOM is already an Exception).
         try:
             result = self._execute(batch, fastvideo_args, stage_key, stage_class_name, stage_name)
+            if enable_verification:
+                try:
+                    output_result = self.verify_output(result, fastvideo_args)
+                    self._run_verification(output_result, stage_name, "output")
+                except Exception as e:
+                    logger.error("Output verification failed for %s: %s", stage_name, str(e))
+                    raise
         except BaseException:
             self._release_deferred_modules(stage_name)
             raise
-
-        if enable_verification:
-            # Post-execution output verification
-            try:
-                output_result = self.verify_output(result, fastvideo_args)
-                self._run_verification(output_result, stage_name, "output")
-            except Exception as e:
-                logger.error("Output verification failed for %s: %s", stage_name, str(e))
-                self._release_deferred_modules(stage_name)
-                raise
 
         self._release_deferred_modules(stage_name)
         return result

@@ -142,8 +142,8 @@ def test_prepare_for_regional_compile_resolves_supported_route(monkeypatch):
     assert probe_q.dtype == torch.bfloat16
     assert probe_vbs.dtype == torch.int32
     assert probe_vbs.tolist() == [64, 64]
-    assert impl._regional_compile_layer_idx is not None
-    assert impl._regional_compile_layer_idx.item() == -1
+    assert impl._compile_layer_idx is not None
+    assert impl._compile_layer_idx.item() == -1
 
 
 def test_prepare_for_regional_compile_env_off_skips_probe(monkeypatch):
@@ -156,8 +156,8 @@ def test_prepare_for_regional_compile_env_off_skips_probe(monkeypatch):
 
     assert unsupported is not None
     assert VSA_SM100A_ENV in unsupported
+    assert impl._compile_layer_idx is not None
     assert impl._regional_compile_sm100a_enabled is False
-    assert impl._regional_compile_layer_idx is None
     assert fake_sm.support_calls == []
 
 
@@ -177,8 +177,8 @@ def test_prepare_for_regional_compile_requires_mask_entry(monkeypatch):
     unsupported = impl.prepare_for_regional_compile(torch.device("cpu"))
 
     assert unsupported is not None
+    assert impl._compile_layer_idx is not None
     assert impl._regional_compile_sm100a_enabled is False
-    assert impl._regional_compile_layer_idx is None
     assert len(warnings) == 1
     assert "compatibility route" in warnings[0]
 
