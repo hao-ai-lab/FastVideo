@@ -213,16 +213,71 @@ selection, and caching without downloading the 4.43 GB checkpoint.
 
 The official MJ-VIDEO code was authored against an older Transformers API,
 whereas FastVideo currently pins Transformers 5. The adapter intentionally
-raises a detailed error if that import or strict model load fails. Phase 3 adds
-the exact pinned asset downloader and a real-checkpoint preflight. Any required
+raises a detailed error if that import or strict model load fails. Any required
 compatibility change must be committed and tested; it must not be applied as an
 untracked cloud-launcher patch.
 
+## Phase 3 — pinned assets and baseline calibration workflow
+
+**Status:** implementation complete; real asset/preflight/calibration execution
+pending.
+
+**Implementation commit:** `1d2a3077eedc216c5a790b1f94757f3d895bd671`
+
+### Implemented
+
+- Extended `common.sh` with provider-independent paths for:
+  - official MJ-VIDEO source;
+  - MJ-VIDEO-2B checkpoint;
+  - InternVL2-2B base model;
+  - fixed Physion reward calibration artifact.
+- Added `01_download_mj_video.sh`:
+  - clones and checks out the exact official source commit;
+  - downloads the exact MJ-VIDEO model revision;
+  - downloads the pinned InternVL2 base revision;
+  - writes revision markers consumed by the runtime adapter;
+  - validates all required source/model files.
+- Added `h3_rvm_calibration_bank.yaml`:
+  - generates up to 100 fixed released-FastH3 videos at the exact production
+    geometry and four-step VSA sampler;
+  - uses deterministic held-out prompt indices and seeds;
+  - runs calibration on the step-zero model before the near-zero-LR launcher
+    compatibility update;
+  - avoids loading the expensive learned reward stack during generation.
+- Added `calibrate_reward_profile.py`:
+  - decodes the fixed baseline MP4s with PyAV;
+  - scores raw VideoAlign TA, MJ C&C, MJ Fineness, and Dynamic Tracking;
+  - uses fixed `median` and `1.4826 * MAD` statistics;
+  - falls back to population standard deviation only when MAD is degenerate;
+  - refuses a constant component unless the operator gives an explicit audited
+    fallback scale;
+  - writes a versioned calibration JSON and per-video score JSONL;
+  - records Git head, model/source revisions, prompt/video hashes, sample count,
+    and reward preprocessing settings.
+- Added `04_calibrate_physion_mj_rewards.sh` to generate/reuse the deterministic
+  baseline bank and build/validate the calibration artifact.
+- Added `preflight_mj_video.py` and `03_preflight_mj_video.sh`:
+  - compile and run the focused unit tests;
+  - strictly load the real pinned MJ checkpoint;
+  - score deterministic videos;
+  - verify finite distinct C&C/Fineness outputs;
+  - verify one shared forward per video rather than one per aspect.
+- Added `test_reward_calibration_cli.py` for median/MAD behavior, constant-scale
+  failures/overrides, and prompt-index/video discovery.
+
+### Deliberate separation from the original RVM setup
+
+The original `01_download_models.sh` remains unchanged. MJ-VIDEO is downloaded
+only when the alternate profile is requested, so existing RVM users do not pay
+for the additional source checkout, base model, or 4.43 GB reward checkpoint.
+All calibration and profile setup lives in ordinary repository scripts; no
+Modal-only code or runtime patching is involved.
+
 ### Next phase
 
-Add provider-independent asset download paths, revision markers, baseline
-validation manifests, the fixed calibration CLI, and a dedicated real MJ-VIDEO
-preflight/calibration script.
+Add the selectable `rvm_h3_8gpu_physion_mj.yaml` configuration and a matched
+original-RVM-versus-Physion reward-profile sweep. Add config tests proving the
+loss/model/topology differ only where intended.
 
 ## Commit log
 
@@ -231,10 +286,11 @@ preflight/calibration script.
 | 0 | `55d60aec` | Plan, source inventory, and implementation contract | Source audit |
 | 1 | `9848405f` | Fixed calibration, output contracts, distributed profile method | AST parse; tests authored |
 | 2 | `c3445e32` | Official MJ-VIDEO adapter, exact preprocessing, shared aspect cache | AST parse; fake-runtime tests authored |
+| 3 | `1d2a3077` | Pinned assets, baseline bank, robust calibration, real-model preflight | AST/shell parsing pending final audit |
 
 ## GPU validation boundary
 
 No new GPU execution has occurred for this MJ-VIDEO extension. Existing H3 RVM
 GPU results validate the pre-existing model/rollout/reward path only. The new
-MJ-VIDEO adapter and calibrated profile must pass a fresh real-checkpoint
-preflight before any training-quality claim.
+MJ-VIDEO adapter and calibrated profile must pass the committed real-checkpoint
+preflight and calibration workflow before any training-quality claim.
