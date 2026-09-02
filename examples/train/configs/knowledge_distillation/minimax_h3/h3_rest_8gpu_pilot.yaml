@@ -1,0 +1,74 @@
+# First quality-bearing REST/AMD pilot. SP4 x DP2, 100 optimizer updates.
+# Rewards are absent from this process: it consumes the immutable full-H3 cache.
+models:
+  student:
+    _target_: fastvideo.train.models.minimax_h3.MiniMaxH3RESTModel
+    init_from: artifacts/rvm_h3/models/fasth3
+    trainable: true
+    enable_gradient_checkpointing_type: full
+    attention_backend: VIDEO_SPARSE_ATTN_H3
+    student_timesteps: [1000, 750, 500, 250, 0]
+    verify_cache_hashes: false
+    lora:
+      enable: true
+      rank: 128
+      alpha: 128
+      target_modules: [to_q, to_k, to_v, to_out]
+
+method:
+  _target_: fastvideo.train.methods.knowledge_distillation.H3RESTMethod
+  attn_kind: vsa
+  amd_scale: 1.0
+  amd_bias: 0.5
+  amd_coefficient_clip: null
+  audio_loss_weight: 1.0
+  ema_regularization_weight: 0.2
+  ema_decay: 0.9
+
+training:
+  distributed:
+    num_gpus: 8
+    sp_size: 4
+    tp_size: 1
+    hsdp_replicate_dim: 2
+    hsdp_shard_dim: 4
+  data:
+    data_path: artifacts/rvm_h3/rest_cache/full
+    preprocessed_data_type: text_only
+    dataloader_num_workers: 2
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    seed: 42
+    num_latent_t: 37
+    num_height: 480
+    num_width: 832
+    num_frames: 124
+  optimizer:
+    learning_rate: 1.0e-5
+    betas: [0.9, 0.999]
+    weight_decay: 1.0e-4
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+  loop:
+    max_train_steps: 100
+    gradient_accumulation_steps: 1
+  checkpoint:
+    output_dir: outputs/h3_rest/8gpu_pilot
+    training_state_checkpointing_steps: 5
+    checkpoints_total_limit: 21
+  tracker:
+    project_name: fasth3-rest
+    run_name: h3-rest-8gpu-pilot
+  model:
+    precondition_outputs: false
+    enable_gradient_checkpointing_type: full
+  vsa_sparsity: 0.9
+  vsa_cache_tile_buf: false
+  model_path: artifacts/rvm_h3/models/fasth3
+  dit_precision: bf16
+
+callbacks:
+  grad_clip:
+    _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
+    max_grad_norm: 1.0
+pipeline: {}
