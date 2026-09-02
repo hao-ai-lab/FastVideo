@@ -1,0 +1,130 @@
+# Physion-aligned reward profile with the paper-faithful FastH3 RVM loss.
+models:
+  student:
+    _target_: fastvideo.train.models.minimax_h3.MiniMaxH3RVMModel
+    init_from: artifacts/rvm_h3/models/fasth3
+    trainable: true
+    enable_gradient_checkpointing_type: full
+    attention_backend: VIDEO_SPARSE_ATTN_H3
+    lora:
+      enable: true
+      rank: 128
+      alpha: 64
+      target_modules: [to_q, to_k, to_v, to_out]
+
+method:
+  # This subclass changes only reward-output synchronization. It inherits the
+  # exact RVM rollout, advantage, continuous-time velocity loss, and optimizer.
+  _target_: fastvideo.train.methods.rl.RVMRewardProfileMethod
+  samples_per_prompt: 8
+  prompt_groups_per_rollout: 32
+  optimizer_updates_per_rollout: 2
+  advantage_scale: 0.1
+  advantage_eps: 1.0e-4
+  advantage_clip: 5.0
+  positive_only_steps: 0
+  video_anchor_beta: 0.0
+  audio_anchor_beta: 0.0
+  audio_loss_weight: 1.0
+  max_grad_norm: 1.0
+  reward_device: cuda
+  sampling:
+    # Behavior rollouts remain the released four-step FastH3 VSA policy.
+    denoising_steps: [1000, 750, 500, 250]
+    attn_kind: vsa
+  training_timestep:
+    # Same paper-faithful RVM analytic regression time as the original profile.
+    mode: continuous_uniform
+    min: 0.0
+    max: 1.0
+  reward_fn:
+    rewards:
+      videoalign_ta: 0.30
+      mjvideo_cc: 0.40
+      mjvideo_fineness: 0.25
+      dynamic_tracking: 0.05
+    calibration:
+      # Generated once from fixed released-FastH3 held-out videos by
+      # 04_calibrate_physion_mj_rewards.sh. Live-policy moments are never used.
+      path: artifacts/rvm_h3/rewards/physion_mj_calibration.json
+      required: true
+      eps: 1.0e-6
+      clip: 5.0
+    options:
+      mjvideo_cc:
+        runtime_path: artifacts/rvm_h3/rewards/MJ-Video
+        model_path: artifacts/rvm_h3/rewards/MJ-VIDEO-2B
+        base_model_path: artifacts/rvm_h3/rewards/InternVL2-2B
+        verify_revision: true
+        num_segments: 8
+        input_size: 448
+        max_num: 1
+        batch_size: 1
+      mjvideo_fineness:
+        runtime_path: artifacts/rvm_h3/rewards/MJ-Video
+        model_path: artifacts/rvm_h3/rewards/MJ-VIDEO-2B
+        base_model_path: artifacts/rvm_h3/rewards/InternVL2-2B
+        verify_revision: true
+        num_segments: 8
+        input_size: 448
+        max_num: 1
+        batch_size: 1
+      dynamic_tracking:
+        frame_pairs: 4
+        top_fraction: 0.05
+        resize_short_edge: 256
+        pretrained: true
+  validation:
+    every_steps: 0
+    num_prompts: 100
+    data_path: artifacts/rvm_h3/data/eval
+    seed: 4242
+    run_at_start: true
+    log_samples: true
+    log_sample_limit: 16
+    save_videos: true
+
+training:
+  distributed:
+    num_gpus: 8
+    sp_size: 4
+    tp_size: 1
+    hsdp_replicate_dim: 2
+    hsdp_shard_dim: 4
+  data:
+    data_path: artifacts/rvm_h3/data/train
+    preprocessed_data_type: text_only
+    dataloader_num_workers: 0
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    seed: 42
+    num_latent_t: 37
+    num_height: 480
+    num_width: 832
+    num_frames: 124
+  optimizer:
+    learning_rate: 1.0e-5
+    betas: [0.9, 0.999]
+    weight_decay: 1.0e-4
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+  loop:
+    max_train_steps: 20
+    gradient_accumulation_steps: 1
+  checkpoint:
+    output_dir: outputs/rvm_h3/8gpu_physion_mj
+    training_state_checkpointing_steps: 5
+    checkpoints_total_limit: 3
+  tracker:
+    project_name: fasth3-rvm
+    run_name: rvm-h3-8gpu-physion-mj
+  model:
+    precondition_outputs: false
+    enable_gradient_checkpointing_type: full
+  vsa_sparsity: 0.9
+  vsa_cache_tile_buf: false
+  model_path: artifacts/rvm_h3/models/fasth3
+  dit_precision: bf16
+
+callbacks: {}
+pipeline: {}

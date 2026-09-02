@@ -7,6 +7,8 @@ from fastvideo.train.methods.rl.rewards.media import MultiRewardScorer
 
 def test_multi_reward_exposes_diagnostics_without_changing_total() -> None:
     class DiagnosticScorer:
+        diagnostic_names = ("raw", "saturation")
+
         def __init__(self) -> None:
             self.last_diagnostics: dict[str, torch.Tensor] = {}
 
@@ -28,6 +30,12 @@ def test_multi_reward_exposes_diagnostics_without_changing_total() -> None:
         ["first", "second"],
     )
 
+    assert scorer.output_keys == (
+        "dynamic_tracking",
+        "dynamic_tracking_raw",
+        "dynamic_tracking_saturation",
+        "avg",
+    )
     assert torch.allclose(
         result["avg"],
         torch.tensor([0.7, 1.4]),
