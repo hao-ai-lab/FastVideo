@@ -72,7 +72,7 @@ if(NOT GPU_BACKEND STREQUAL "ROCM")
         else()
             # Best-effort probe of the visible GPU (mirrors build.sh detect_with_torch).
             execute_process(
-                COMMAND "${Python_EXECUTABLE}" -c "import torch; assert torch.cuda.is_available(); mj, mn = torch.cuda.get_device_capability(0); print(f'{mj}.{mn}a' if (mj, mn) in ((9, 0), (12, 0)) else f'{mj}.{mn}')"
+                COMMAND "${Python_EXECUTABLE}" -c "import torch; assert torch.cuda.is_available(); mj, mn = torch.cuda.get_device_capability(0); print(f'{mj}.{mn}a' if (mj, mn) in ((9, 0), (12, 0), (12, 1)) else f'{mj}.{mn}')"
                 OUTPUT_VARIABLE _FV_ARCH_LIST
                 OUTPUT_STRIP_TRAILING_WHITESPACE
                 RESULT_VARIABLE _fv_detect_rc
@@ -269,7 +269,7 @@ else()
     elseif(FASTVIDEO_KERNEL_BUILD_ATTN_QAT_INFER STREQUAL "AUTO")
         if(TORCH_CUDA_ARCH_LIST)
             string(REGEX MATCH
-                "(^|[; ,])((12\\.0a)|(120a)|(sm_120a))([; ,]|$)"
+                "(^|[; ,])((12\\.0a)|(120a)|(sm_120a)|(12\\.1a)|(121a)|(sm_121a))([; ,]|$)"
                 _HAS_120A "${TORCH_CUDA_ARCH_LIST}")
             if(_HAS_120A)
                 set(_WANTS_ATTN_QAT_INFER ON)
@@ -313,14 +313,16 @@ set(BUILD_CXX_KERNELS ON)
 # ---------------------------------------------------------------------------
 # Per-arch split for the Blackwell FP4 (attn_qat_infer) build
 # ---------------------------------------------------------------------------
-# The FP4 kernels are sm_120a-only (they emit `cvt.e2m1x2` etc.), while the main
-# extension (Hopper-only TK + generic turbodiffusion) targets the full arch list.
+# The FP4 kernels are Blackwell-only (sm_120a, plus sm_121a on CUDA >= 12.9; they
+# emit `cvt.e2m1x2` etc.), while the main extension (Hopper-only TK + generic
+# turbodiffusion) targets the full arch list.
 # find_package(Torch) injects ONE global -gencode list into CMAKE_CUDA_FLAGS that
 # forces every target onto every arch, so the FP4 sources also get the sm_90a pass
 # and ptxas rejects their Blackwell instructions. Strip that global list and drive
-# arch per target via CUDA_ARCHITECTURES instead (the fp4* targets pin 120a below;
-# the main extension gets the full list). Only do this for the FP4 build with an
-# explicit arch list, so the cu126 / local autodetect paths stay untouched.
+# arch per target via CUDA_ARCHITECTURES instead (the fp4* targets pin their arch
+# below via _fv_fp4_archs; the main extension gets the full list). Only do this for
+# the FP4 build with an explicit arch list, so the cu126 / local autodetect paths
+# stay untouched.
 if(ENABLE_ATTN_QAT_INFER AND TORCH_CUDA_ARCH_LIST)
     message(STATUS "[per-arch] CMAKE_CUDA_FLAGS before strip: ${CMAKE_CUDA_FLAGS}")
     string(REGEX REPLACE "-gencode[ =]+arch=[^ ]+" "" CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS}")
@@ -330,7 +332,7 @@ if(ENABLE_ATTN_QAT_INFER AND TORCH_CUDA_ARCH_LIST)
     set(FASTVIDEO_MAIN_CUDA_ARCHS "${TORCH_CUDA_ARCH_LIST}")
     string(REPLACE "sm_" "" FASTVIDEO_MAIN_CUDA_ARCHS "${FASTVIDEO_MAIN_CUDA_ARCHS}")
     string(REPLACE "." "" FASTVIDEO_MAIN_CUDA_ARCHS "${FASTVIDEO_MAIN_CUDA_ARCHS}")
-    message(STATUS "[per-arch] main extension archs=${FASTVIDEO_MAIN_CUDA_ARCHS}, fp4* archs=120a")
+    message(STATUS "[per-arch] main extension archs=${FASTVIDEO_MAIN_CUDA_ARCHS}")
 endif()
 
 # Compiler flags
@@ -506,6 +508,15 @@ if(ENABLE_ATTN_QAT_INFER)
         "-DDQINRMEM"
     )
 
+    # The FP4 kernels are arch-conditional (sm_120a). Add sm_121a (GB10 / DGX
+    # Spark) only when the toolkit knows it -- compute_121 first exists in CUDA
+    # 12.9, so unconditionally adding it would break sm_120a builds on CUDA 12.8.
+    set(_fv_fp4_archs "120a")
+    if(NOT CUDAToolkit_VERSION VERSION_LESS 12.9)
+        list(APPEND _fv_fp4_archs "121a")
+    endif()
+    message(STATUS "[per-arch] fp4* archs=${_fv_fp4_archs} (CUDAToolkit ${CUDAToolkit_VERSION})")
+
     Python_add_library(fp4attn_cuda MODULE WITH_SOABI
         attn_qat_infer/blackwell/api.cu
     )
@@ -516,7 +527,7 @@ if(ENABLE_ATTN_QAT_INFER)
         $<$<COMPILE_LANGUAGE:CUDA>:${ATTN_QAT_INFER_CUDA_FLAGS}>
     )
     set_target_properties(fp4attn_cuda PROPERTIES
-        CUDA_ARCHITECTURES "120a"
+        CUDA_ARCHITECTURES "${_fv_fp4_archs}"
         CXX_STANDARD 17
         CUDA_STANDARD 17
     )
@@ -532,7 +543,7 @@ if(ENABLE_ATTN_QAT_INFER)
         $<$<COMPILE_LANGUAGE:CUDA>:${ATTN_QAT_INFER_CUDA_FLAGS}>
     )
     set_target_properties(fp4quant_cuda PROPERTIES
-        CUDA_ARCHITECTURES "120a"
+        CUDA_ARCHITECTURES "${_fv_fp4_archs}"
         CXX_STANDARD 17
         CUDA_STANDARD 17
     )
