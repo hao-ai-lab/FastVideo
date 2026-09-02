@@ -1,6 +1,6 @@
 # Run H3 with a server and playground
 
-Start FastH3 on CUDA or Apple Silicon MLX, then iterate on prompts in a browser,
+Start FastH3 on CUDA, one DGX Spark, or Apple Silicon MLX, then iterate on prompts in a browser,
 with cURL, or from your app. The server and clients can run on the same machine.
 
 The server supports the OpenAI-compatible video-job API. The Python and
@@ -44,6 +44,32 @@ curl --fail-with-body http://127.0.0.1:8000/health
 
 After model loading completes, the response is `{"status":"ok"}`.
 
+### NVIDIA DGX Spark
+
+Complete the [DGX Spark installation](../getting_started/installation/spark.md)
+before running these commands. GB10 has no FA4 / sm_100a VSA kernel:
+
+```bash
+UV_TORCH_BACKEND=cu130 uv pip install -e .
+FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 \
+  fastvideo serve --config examples/serving/openai_fasth3_spark.yaml --server.host 127.0.0.1
+```
+
+The configuration loads `FastVideo/FastVideo-FastH3-4-step-Preview-v1-VSA-DataFree`
+on one GB10 and advertises it as `fasth3`. Lazy module load still reloads
+Qwen3-VL and the DiT between phases of each request. Legal `num_frames` values
+are `17n+5`, capped at 345 (15 s); a 345-frame request on one Spark can OOM.
+There is no cookbook server for two Sparks; use the generate YAML after
+[pairing two Sparks](../getting_started/installation/spark_pair.md).
+
+Keep the server running. In another terminal, check readiness:
+
+```bash
+curl --fail-with-body http://127.0.0.1:8000/health
+```
+
+After model loading completes, the response is `{"status":"ok"}`.
+
 ### Apple Silicon MLX
 
 Complete the [Apple Silicon installation](../getting_started/installation/mps.md#run-fasth3-preview),
@@ -77,8 +103,8 @@ LoRA selection, and alternate decoders are not exposed by this server adapter.
 Unsupported request options return HTTP 400 before a job starts.
 
 The server binds to `127.0.0.1:8000` and advertises `fasth3`, so the playground
-and clients below work unchanged. Do not run CUDA and MLX servers on the same
-port. MLX readiness means the pipeline is initialized; components load during
+and clients below work unchanged. Do not run CUDA, Spark, and MLX servers on the
+same port. MLX readiness means the pipeline is initialized; components load during
 generation. The first request can take longer than a repeated cached prompt.
 
 The MLX server has no recorded device or unified-memory requirement. The
@@ -112,7 +138,7 @@ or manage a GPU server for you.
 These examples use the server's resolution, frame count, and sampling defaults.
 Do not copy Sora-specific durations or resolutions onto H3. Both server configs
 use 124 frames, 24 fps, and the five-point distilled sigma schedule with four
-DiT forwards. CUDA uses 1344 × 768; MLX uses 832 × 480.
+DiT forwards. CUDA and one Spark use 1344 × 768; MLX uses 832 × 480.
 
 Each client submits a job, checks for completion or failure, and downloads an
 MP4 named after the job ID. Polling stops after 30 minutes; a timeout does not

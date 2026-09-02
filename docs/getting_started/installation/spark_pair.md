@@ -6,6 +6,10 @@ load stands down when lazy owns deferral). Two boxes connected
 by the QSFP ConnectX-7 cables can run **one clip faster** and can hold a
 **longer clip** (up to the FastH3 15 s cap).
 
+Copy-paste commands for both counts are on the
+[MiniMax H3 cookbook](../../cookbook/minimax-h3.md): FastH3 Preview → NVIDIA DGX
+Spark → 1 Spark or 2 Sparks.
+
 This is FastVideo sequence parallel (`sp_size=2`) over Ray, not a third-party
 xDiT vendor. Do not install xDiT for this path.
 

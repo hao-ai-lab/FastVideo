@@ -41,14 +41,14 @@ hide:
         <span class="cookbook-family-tile__footer">
           <span class="cookbook-family-tile__footer-top">
             <span><strong>MiniMax H3</strong><small>Video + stereo audio</small></span>
-            <span class="cookbook-count">7 recipes</span>
+            <span class="cookbook-count">8 recipes</span>
           </span>
           <ul class="cookbook-mode-row">
             <li>T2VA</li>
             <li>FL2VA</li>
             <li>Ref2VA</li>
             <li>MLX T2VA</li>
-            <li>2-Spark SP</li>
+            <li>DGX Spark</li>
           </ul>
         </span>
       </a>

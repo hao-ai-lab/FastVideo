@@ -89,8 +89,10 @@
 
   const groupIdFor = (recipe) => recipe.group || recipe.id;
 
-  const gpuCountLabel = (hardware) => {
+  const gpuCountLabel = (hardware, runtimeId) => {
     const count = hardware?.gpu_count;
+    if (count == null) return "";
+    if (runtimeId === "spark") return `${count} Spark${count === 1 ? "" : "s"}`;
     return `${count} GPU${count === 1 ? "" : "s"}`;
   };
 
@@ -139,12 +141,19 @@
       };
     }
     const hardware = recipe.hardware || {};
+    if (hardware.device === "spark") {
+      return {
+        id: "spark",
+        label: "NVIDIA DGX Spark",
+        hint: "GB10 · 128 GB unified memory",
+      };
+    }
     return {
       id: "cuda",
       label: "NVIDIA CUDA",
       hint: hardware.accelerator
-        ? `${hardware.accelerator} · ${gpuCountLabel(hardware)}`
-        : `${gpuCountLabel(hardware)} configured · GPU model not recorded`,
+        ? `${hardware.accelerator} · ${gpuCountLabel(hardware, "cuda")}`
+        : `${gpuCountLabel(hardware, "cuda")} configured · GPU model not recorded`,
     };
   };
 
@@ -161,8 +170,11 @@
         .filter(Boolean)
         .join(" · ");
     }
-    if (hardware.accelerator) return [hardware.accelerator, gpuCountLabel(hardware)].join(" · ");
-    return `NVIDIA CUDA · ${gpuCountLabel(hardware)} configured · GPU model and VRAM not recorded`;
+    if (runtime.id === "spark") {
+      return [hardware.accelerator || "NVIDIA GB10", gpuCountLabel(hardware, "spark")].filter(Boolean).join(" · ");
+    }
+    if (hardware.accelerator) return [hardware.accelerator, gpuCountLabel(hardware, runtime.id)].join(" · ");
+    return `NVIDIA CUDA · ${gpuCountLabel(hardware, "cuda")} configured · GPU model and VRAM not recorded`;
   };
 
   const renderHardwareEvidence = (container, badge, recipe) => {
@@ -182,15 +194,17 @@
     if (isValidated) {
       const recorded = [
         hardware.accelerator,
-        runtime.id === "cuda" ? gpuCountLabel(hardware) : hardware.system_memory,
+        runtime.id === "mlx" || runtime.id === "mps" ? hardware.system_memory : gpuCountLabel(hardware, runtime.id),
       ].filter(Boolean);
       const statements = [`${recorded.join(" · ")}.`];
       if (hardware.minimum_memory) statements.push(`Documented minimum: ${hardware.minimum_memory}.`);
       if (hardware.peak_memory) statements.push(`Measured: ${hardware.peak_memory}.`);
       if (!hardware.minimum_memory) statements.push("This recorded device is not a minimum requirement.");
       details.textContent = ` ${statements.join(" ")}`;
+    } else if (runtime.id === "spark") {
+      details.textContent = ` NVIDIA DGX Spark · ${gpuCountLabel(hardware, "spark")}. GB10 has no FA4 / sm_100a VSA kernel; keep Triton VSA and FA4 off.`;
     } else if (runtime.id === "cuda") {
-      details.textContent = ` NVIDIA CUDA · ${gpuCountLabel(hardware)}. The source does not record the GPU model or VRAM.`;
+      details.textContent = ` NVIDIA CUDA · ${gpuCountLabel(hardware, "cuda")}. The source does not record the GPU model or VRAM.`;
     } else {
       details.textContent = ` ${runtime.label}. The source does not record a device or memory requirement.`;
     }
@@ -249,6 +263,9 @@
     const usage = root.querySelector("[data-cookbook-usage]");
     const servingAvailability = root.querySelector("[data-cookbook-serving-availability]");
     const knobsContainer = root.querySelector("[data-cookbook-knobs]");
+    const deviceRow = root.querySelector("[data-cookbook-device-row]");
+    const deviceOptions = root.querySelector("[data-cookbook-device-options]");
+    const deviceCaption = root.querySelector("[data-cookbook-device-caption]");
 
     modelOptions.setAttribute("aria-label", "Recipe");
     hardwareOptions.setAttribute("aria-label", "Runtime");
@@ -372,16 +389,39 @@
       });
     };
 
+    const recipesForRuntime = (runtimeId, groupRecipes) =>
+      groupRecipes.filter((item) => runtimeFor(item).id === runtimeId);
+
+    const uniqueRuntimeIds = (groupRecipes) => {
+      const ids = [];
+      groupRecipes.forEach((item) => {
+        const id = runtimeFor(item).id;
+        if (!ids.includes(id)) ids.push(id);
+      });
+      return ids;
+    };
+
+    const pickRecipeForRuntime = (runtimeId, preferredCount, groupRecipes) => {
+      const siblings = recipesForRuntime(runtimeId, groupRecipes);
+      if (!siblings.length) return null;
+      if (preferredCount != null) {
+        const match = siblings.find((item) => item.hardware?.gpu_count === preferredCount);
+        if (match) return match;
+      }
+      return siblings.find((item) => item.hardware?.gpu_count === 1) || siblings[0];
+    };
+
     const renderRuntimeOptions = () => {
       const groupRecipes = groups.get(selectedGroupId) || [];
-      const renderedIds = [...hardwareOptions.querySelectorAll("[data-recipe-id]")].map((option) => option.dataset.recipeId);
-      if (renderedIds.join(",") === groupRecipes.map((recipe) => recipe.id).join(",")) return;
+      const runtimeIds = uniqueRuntimeIds(groupRecipes);
+      const renderedIds = [...hardwareOptions.querySelectorAll("[data-runtime-id]")].map((option) => option.dataset.runtimeId);
+      if (renderedIds.join(",") === runtimeIds.join(",")) return;
       hardwareOptions.replaceChildren();
-      groupRecipes.forEach((recipe) => {
-        const runtime = runtimeFor(recipe);
+      runtimeIds.forEach((runtimeId) => {
+        const representative = pickRecipeForRuntime(runtimeId, 1, groupRecipes);
+        const runtime = runtimeFor(representative);
         const option = document.createElement("button");
         option.type = "button";
-        option.dataset.recipeId = recipe.id;
         option.dataset.runtimeId = runtime.id;
         option.setAttribute("aria-pressed", "false");
         const optionLabel = document.createElement("strong");
@@ -390,6 +430,49 @@
         optionHint.textContent = runtime.hint;
         option.append(optionLabel, optionHint);
         hardwareOptions.append(option);
+      });
+    };
+
+    const renderDeviceOptions = (recipe) => {
+      if (!deviceRow || !deviceOptions) return;
+      const groupRecipes = groups.get(selectedGroupId) || [];
+      const runtime = runtimeFor(recipe);
+      const siblings = recipesForRuntime(runtime.id, groupRecipes)
+        .slice()
+        .sort((left, right) => (left.hardware?.gpu_count || 0) - (right.hardware?.gpu_count || 0));
+      const show = siblings.length > 1;
+      deviceRow.hidden = !show;
+      if (deviceCaption) {
+        deviceCaption.textContent = runtime.id === "spark" ? "1 Spark or a QSFP pair" : "GPU count for this runtime";
+      }
+      if (!show) {
+        deviceOptions.replaceChildren();
+        return;
+      }
+      const renderedIds = [...deviceOptions.querySelectorAll("[data-recipe-id]")].map((option) => option.dataset.recipeId);
+      if (renderedIds.join(",") !== siblings.map((item) => item.id).join(",")) {
+        deviceOptions.replaceChildren();
+        siblings.forEach((candidate) => {
+          const option = document.createElement("button");
+          option.type = "button";
+          option.dataset.recipeId = candidate.id;
+          option.setAttribute("aria-pressed", "false");
+          const optionLabel = document.createElement("strong");
+          optionLabel.textContent = gpuCountLabel(candidate.hardware, runtime.id);
+          const optionHint = document.createElement("span");
+          optionHint.textContent = runtime.id === "spark" && candidate.hardware?.gpu_count === 2
+            ? "Ray sequence parallel over QSFP"
+            : runtime.id === "spark"
+              ? "One GB10, local process"
+              : `${gpuCountLabel(candidate.hardware, runtime.id)} configured`;
+          option.append(optionLabel, optionHint);
+          deviceOptions.append(option);
+        });
+      }
+      deviceOptions.querySelectorAll("button").forEach((option) => {
+        const selected = option.dataset.recipeId === recipe.id;
+        option.classList.toggle("cookbook-option--selected", selected);
+        option.setAttribute("aria-pressed", String(selected));
       });
     };
 
@@ -408,8 +491,9 @@
       let recipe = byId.get(selectedRecipeId);
       if (groupChanged || groupIdFor(recipe) !== selectedGroupId) {
         const currentRuntime = runtimeFor(recipe).id;
+        const currentCount = recipe.hardware?.gpu_count;
         const groupRecipes = groups.get(selectedGroupId) || [];
-        recipe = groupRecipes.find((candidate) => runtimeFor(candidate).id === currentRuntime) || groupRecipes[0];
+        recipe = pickRecipeForRuntime(currentRuntime, currentCount, groupRecipes) || groupRecipes[0];
         selectedRecipeId = recipe.id;
       }
 
@@ -418,6 +502,7 @@
         renderRuntimeOptions();
         renderedRuntimeGroup = selectedGroupId;
       }
+      renderDeviceOptions(recipe);
       const runtime = runtimeFor(recipe);
       const profile = servingPanel && servingProfiles[recipe.id];
       const useServer = Boolean(profile && usagePreference === "server");
@@ -437,7 +522,7 @@
           ? "The playground and API clients share one server process. Both workflows can run on your own machine."
           : servingLoadFailed
             ? "Server examples could not be loaded. Open the H3 server guide below, or use Python directly."
-            : "This recipe uses Python directly. For the playground and API clients, choose FastH3 Preview with CUDA or MLX.";
+            : "This recipe uses Python directly. For the playground and API clients, choose FastH3 Preview with CUDA, MLX, or one Spark.";
         servingPanel.hidden = !useServer;
         commandBlock.hidden = useServer;
         root.querySelector("[data-cookbook-python-note]").hidden = useServer;
@@ -445,11 +530,17 @@
 
       if (useServer) {
         const isMLX = profile.runtime === "mlx";
+        const isSpark = runtime.id === "spark";
         servingPanel.querySelector("[data-cookbook-server-lifetime]").textContent = isMLX
           ? "Start once, then change prompts in the playground or your app. MLX reuses its pipeline and prompt cache, but loads and releases model components between phases to limit unified-memory use. It does not keep all weights resident."
-          : "Start once, then change prompts in the playground or your app. CUDA requests reuse the loaded model. The Python SDK can also reuse a generator within one process.";
+          : isSpark
+            ? "Start once, then change prompts in the playground or your app. On a DGX Spark, lazy module load still reloads Qwen3-VL and the DiT between phases of each request, so later prompts are not a free hot cache."
+            : "Start once, then change prompts in the playground or your app. CUDA requests reuse the loaded model. The Python SDK can also reuse a generator within one process.";
         servingPanel.querySelector("[data-cookbook-install-guide]").href = isMLX
-          ? "../../getting_started/installation/mps/#run-fasth3-preview" : "../../getting_started/installation/gpu/";
+          ? "../../getting_started/installation/mps/#run-fasth3-preview"
+          : isSpark
+            ? "../../getting_started/installation/spark/"
+            : "../../getting_started/installation/gpu/";
         servingPanel.querySelector("[data-cookbook-prepare]").hidden = !profile.prepare;
         servingPanel.querySelector("[data-cookbook-server-prepare]").textContent = profile.prepare;
         servingPanel.querySelector("[data-cookbook-server-install]").textContent = profile.install;
@@ -477,18 +568,13 @@
         option.setAttribute("aria-pressed", String(selected));
       });
       hardwareOptions.querySelectorAll("button").forEach((option) => {
-        const selected = option.dataset.recipeId === recipe.id;
+        const selected = option.dataset.runtimeId === runtime.id;
         option.classList.toggle("cookbook-option--selected", selected);
         option.setAttribute("aria-pressed", String(selected));
-        const candidate = byId.get(option.dataset.recipeId);
-        const candidateProfile = servingProfiles[candidate.id];
-        const candidateRuntime = runtimeFor(candidateProfile && usagePreference === "server"
-          ? { ...candidate, hardware: candidateProfile.hardware } : candidate);
-        option.querySelector("span").textContent = candidateRuntime.hint;
       });
 
       description.textContent = useServer
-        ? `FastH3 Preview generates video with audio. This server profile uses the checked-in ${profile.runtime.toUpperCase()} configuration.`
+        ? `FastH3 Preview generates video with audio. This server profile uses the checked-in ${runtime.label} configuration.`
         : recipe.summary;
       label.textContent = useServer ? `${recipe.group_label || recipe.label} · Server` : recipe.label;
       model.textContent = recipe.model;
@@ -514,7 +600,9 @@
       const limitations = [...(useServer ? [
         profile.runtime === "mlx"
           ? "This MLX server config has no recorded hardware run. Measurements from the Python recipe are not server memory requirements. Only text-to-video/audio is wired; reference inputs and fast modes are not exposed here."
-          : "This server config has no recorded serving benchmark. Compilation is disabled, unlike the measured Python performance profile.",
+          : runtime.id === "spark"
+            ? "This Spark server config has no recorded serving benchmark. Lazy module load reloads Qwen3-VL and the DiT between phases of each request. Compilation of the DiT is disabled."
+            : "This server config has no recorded serving benchmark. Compilation is disabled, unlike the measured Python performance profile.",
         `${profile.sampling.width} × ${profile.sampling.height} · ${profile.sampling.num_frames} frames · ${profile.sampling.fps} fps. The server supplies these defaults; the client sends the model and prompt.`,
         "Generation is serialized. Job metadata is held in memory and is lost when the server restarts.",
       ] : recipe.limitations || []), ...knobCaveats];
@@ -535,7 +623,12 @@
       const nextQuery = new URLSearchParams(window.location.search);
       nextQuery.set("recipe", recipe.id);
       nextQuery.set("runtime", runtime.id);
-      nextQuery.delete("gpus");
+      const deviceSiblings = recipesForRuntime(runtime.id, groups.get(selectedGroupId) || []);
+      if (deviceSiblings.length > 1 && recipe.hardware?.gpu_count != null) {
+        nextQuery.set("gpus", String(recipe.hardware.gpu_count));
+      } else {
+        nextQuery.delete("gpus");
+      }
       knobDefs.forEach((knob, key) => {
         if (knobs.some((activeKnob) => activeKnob.key === key)) nextQuery.set(key, String(knobValues[key]));
         else nextQuery.delete(key);
@@ -559,6 +652,17 @@
       render({ groupChanged: true, historyMode: "push" });
     });
     hardwareOptions.addEventListener("click", (event) => {
+      const option = event.target.closest("button[data-runtime-id]");
+      if (!option) return;
+      const groupRecipes = groups.get(selectedGroupId) || [];
+      const currentCount = byId.get(selectedRecipeId)?.hardware?.gpu_count;
+      const nextRecipe = pickRecipeForRuntime(option.dataset.runtimeId, currentCount, groupRecipes);
+      if (!nextRecipe) return;
+      selectedRecipeId = nextRecipe.id;
+      selectedGroupId = groupIdFor(nextRecipe);
+      render({ historyMode: "push" });
+    });
+    deviceOptions?.addEventListener("click", (event) => {
       const option = event.target.closest("button[data-recipe-id]");
       if (!option) return;
       selectedRecipeId = option.dataset.recipeId;
