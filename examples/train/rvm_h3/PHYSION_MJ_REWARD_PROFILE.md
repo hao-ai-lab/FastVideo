@@ -108,8 +108,8 @@ change the reward.
 
 ## Build the fixed calibration artifact
 
-Generate or reuse up to 100 deterministic released-FastH3 held-out videos and
-score all four raw components:
+Generate or reuse up to 100 deterministic released-FastH3 videos sampled from
+the **training prompt split**, then score all four raw components:
 
 ```bash
 export NUM_GPUS=4
@@ -130,7 +130,9 @@ hashes, sample count, quantiles, median, MAD, standard deviation, and the chosen
 scale for every component.
 
 Do not calibrate from a partially trained policy. The calibration distribution
-is the released FastH3 baseline and remains fixed for every compared run.
+is the released FastH3 baseline and remains fixed for every compared run. The
+calibration bank uses `train_h3.txt` and `data/train`; `eval_h3.txt` and
+`data/eval` remain untouched for model selection and final reporting.
 
 ## Run either profile
 
@@ -244,7 +246,7 @@ implementation loads under the current FastVideo environment. The sequence is:
 
 ```text
 real MJ preflight
--> fixed baseline calibration
+-> fixed training-split baseline calibration
 -> one/four-GPU profile smoke
 -> 8-GPU matched profile sweep
 -> only then a longer run
