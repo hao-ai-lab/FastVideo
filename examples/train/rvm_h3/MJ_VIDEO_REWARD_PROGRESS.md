@@ -21,7 +21,9 @@ replaced.
 
 ## Phase 0 — source audit and implementation plan
 
-**Status:** complete; awaiting commit.
+**Status:** complete.
+
+**Commit:** `55d60aec720be847daea4966bc0e98e57eda7abf`
 
 ### Current FastVideo implementation inspected
 
@@ -80,23 +82,87 @@ replaced.
    same 2B model twice. A shared runtime and result cache are required.
 4. Raw reward units are not comparable. Fixed calibration artifacts must be
    generated from baseline FastH3 outputs and versioned with source provenance.
-5. RVM currently knows some diagnostic keys through a Dynamic Tracking-specific
-   branch. General reward-output-key discovery is needed before calibrated/MJ
-   diagnostics can be broadcast safely across SP ranks.
+5. Distributed RVM must know every raw/diagnostic output key before tensor
+   broadcasts. The scorer now declares this contract explicitly.
+
+## Phase 1 — fixed calibration and reward-output contracts
+
+**Status:** implementation complete; GPU-independent tests authored.
+
+**Implementation commit:** `9848405f27400781fa9ba8b8478ec975034fa97b`
+
+### Implemented
+
+- Added `fastvideo/train/methods/rl/rewards/calibration.py`.
+- Added versioned calibration schema `1` with strict validation of finite
+  centers, positive scales, optional sample counts, required component coverage,
+  and optional symmetric clipping.
+- Added `CalibratedRewardScorer`:
+  - applies only a fixed affine transform `(raw - center) / scale`;
+  - preserves each raw score as `<reward>_unnormalized`;
+  - preserves diagnostics from the wrapped scorer;
+  - does not modify the wrapped reward implementation.
+- Extended `build_multi_reward_scorer` with an optional
+  `reward_fn.calibration` block using either a versioned JSON artifact or inline
+  entries for tests.
+- Preserved existing behavior when no calibration is configured: the same raw
+  component scores and weighted sum are used.
+- Added an explicit `MultiRewardScorer.output_keys` contract. It validates that
+  runtime diagnostics exactly match names declared by each scorer.
+- Added `RVMRewardProfileMethod`, a thin subclass of the existing
+  `RVMWithLocalMetricsMethod`. It synchronizes the scorer-declared key tuple over
+  each SP group's CPU process group. It does not override the RVM rollout,
+  advantage, velocity loss, optimizer, or validation equations.
+- Declared the existing Dynamic Tracking `raw` and `saturation` diagnostics in
+  the reward builder so the general output contract includes them.
+
+### Tests added
+
+`fastvideo/tests/train/methods/test_reward_calibration.py` covers:
+
+- exact affine calibration and clipping;
+- raw/nested diagnostic propagation;
+- required-component failures;
+- JSON metadata parsing;
+- invalid zero, negative, NaN, and infinite scales;
+- deterministic output-key ordering;
+- unchanged uncalibrated weighted sums;
+- calibrated weighted sums and raw-score logging.
+
+The new Python sources and tests were parsed with Python's AST before commit.
+A complete repository pytest/pre-commit run has not yet been executed in this
+environment and remains part of the final audit.
+
+### Why this is separate from RVM normalization
+
+The fixed component calibration makes unrelated reward units comparable:
+
+```text
+raw reward -> fixed baseline z-score -> configured weighted sum
+```
+
+The existing RVM code then computes the policy update:
+
+```text
+weighted sum -> per-prompt centering -> rollout-global std -> signed coefficient
+```
+
+The second stage is unchanged. Calibration never estimates live-policy moments,
+so the reward target does not drift during training.
 
 ### Next phase
 
-Implement and test the fixed reward-calibration layer and general reward-output
-key discovery. This phase must preserve byte-for-byte aggregate behavior for the
-existing reward profile when calibration is not configured.
+Implement the pinned MJ-VIDEO runtime adapter, exact eight-frame preprocessing,
+aspect extraction, one-model/two-scorer shared cache, and fake-runtime tests.
+Then add a real-checkpoint GPU preflight; no compatibility claim will be made
+until that forward succeeds.
 
 ## Commit log
 
-This table is updated after every pushed phase.
-
 | Phase | Commit | Summary | Validation |
 |---|---|---|---|
-| 0 | pending | Plan, source inventory, and implementation contract | Source audit only |
+| 0 | `55d60aec` | Plan, source inventory, and implementation contract | Source audit |
+| 1 | `9848405f` | Fixed calibration, output contracts, distributed profile method | AST parse; tests authored |
 
 ## GPU validation boundary
 
