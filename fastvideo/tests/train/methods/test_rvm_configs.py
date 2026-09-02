@@ -131,6 +131,21 @@ def test_physion_mj_profile_is_fixed_and_calibrated() -> None:
         assert options["batch_size"] == 1
 
 
+def test_calibration_bank_does_not_consume_held_out_eval_split() -> None:
+    calibration = load("h3_rvm_calibration_bank.yaml")
+    physion = load("rvm_h3_8gpu_physion_mj.yaml")
+
+    assert calibration["training"]["data"]["data_path"] == (
+        "artifacts/rvm_h3/data/train"
+    )
+    assert calibration["method"]["validation"]["data_path"] == (
+        "artifacts/rvm_h3/data/train"
+    )
+    assert physion["method"]["validation"]["data_path"] == (
+        "artifacts/rvm_h3/data/eval"
+    )
+
+
 def test_reward_profile_switch_does_not_change_rvm_or_model() -> None:
     published = deepcopy(load("rvm_h3_8gpu_exact.yaml"))
     physion = deepcopy(load("rvm_h3_8gpu_physion_mj.yaml"))
