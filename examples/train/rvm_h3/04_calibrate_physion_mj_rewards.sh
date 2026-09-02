@@ -6,8 +6,7 @@ activate_rvm_env
 
 require_path "${FASTH3_MODEL_DIR}"
 require_path "${RVM_TRAIN_DATA}"
-require_path "${RVM_EVAL_DATA}"
-require_path "${RVM_PROMPT_DIR}/eval_h3.txt"
+require_path "${RVM_PROMPT_DIR}/train_h3.txt"
 require_path "${VIDEOALIGN_RUNTIME_PATH}"
 require_path "${VIDEOALIGN_CHECKPOINT_PATH}"
 require_path "${MJ_VIDEO_RUNTIME_PATH}"
@@ -43,7 +42,7 @@ if [[ "${RVM_FORCE_CALIBRATION_BANK:-0}" == "1" ]] ||
     run_rvm_training \
         "${CALIBRATION_CONFIG}" \
         --method.validation.num_prompts "${CALIBRATION_VIDEOS}" \
-        --method.validation.data_path "${RVM_EVAL_DATA}" \
+        --method.validation.data_path "${RVM_TRAIN_DATA}" \
         --training.checkpoint.output_dir "${CALIBRATION_ROOT}" \
         --training.tracker.run_name "rvm-h3-calibration-bank-${CALIBRATION_VIDEOS}"
 fi
@@ -56,7 +55,7 @@ fi
 
 calibration_args=(
     --video-dir "${CALIBRATION_VIDEO_DIR}"
-    --prompt-file "${RVM_PROMPT_DIR}/eval_h3.txt"
+    --prompt-file "${RVM_PROMPT_DIR}/train_h3.txt"
     --output "${MJ_VIDEO_CALIBRATION_PATH}"
     --device "${RVM_CALIBRATION_DEVICE:-cuda}"
     --batch-size "${RVM_CALIBRATION_BATCH_SIZE:-1}"
@@ -98,12 +97,18 @@ for name, entry in components.items():
         )
     if float(entry["scale"]) <= 0:
         raise RuntimeError(f"{name} has non-positive calibration scale")
+provenance = payload.get("provenance", {})
+if not str(provenance.get("prompt_file", "")).endswith("train_h3.txt"):
+    raise RuntimeError(
+        "Calibration must use the training prompt split, not held-out eval prompts"
+    )
 print(
     {
         "calibration": str(path),
         "profile": payload.get("profile"),
         "videos": expected,
         "components": sorted(components),
+        "prompt_split": "train",
     }
 )
 PY
