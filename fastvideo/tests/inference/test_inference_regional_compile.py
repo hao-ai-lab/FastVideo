@@ -38,11 +38,21 @@ from fastvideo.models.loader.fsdp_load import (
     _prepare_model_for_compile,
     _regional_compile_unsupported_reason,
 )
+from fastvideo.platforms import AttentionBackendEnum
 
 
 def _init_params_for(backend_name: str | None) -> dict:
     resolved = None if backend_name is None else SimpleNamespace(name=backend_name)
     return {"config": SimpleNamespace(_resolved_attention_backend=resolved)}
+
+
+def _model_with_actual_backend(backend: AttentionBackendEnum) -> nn.Module:
+    attention = DistributedAttention.__new__(DistributedAttention)
+    nn.Module.__init__(attention)
+    attention.backend = backend
+    model = nn.Module()
+    model.add_module("attention", attention)
+    return model
 
 
 def test_legacy_vsa_backend_degrades_to_eager(monkeypatch) -> None:
@@ -266,6 +276,37 @@ def test_dense_flash_attention_inference_allows_compile(fa_version, monkeypatch)
     monkeypatch.setitem(sys.modules, fake_module.__name__, fake_module)
 
     assert _regional_compile_unsupported_reason(_init_params_for("FLASH_ATTN")) is None
+
+
+def test_automatic_flash_attention_fa3_training_degrades_to_eager(monkeypatch) -> None:
+    monkeypatch.delenv("FASTVIDEO_DISABLE_ATTENTION_COMPILE", raising=False)
+    fake_module = ModuleType("fastvideo.attention.utils.flash_attn_default")
+    fake_module.fa_version = "3"
+    monkeypatch.setitem(sys.modules, fake_module.__name__, fake_module)
+    model = _model_with_actual_backend(AttentionBackendEnum.FLASH_ATTN)
+
+    reason = _regional_compile_unsupported_reason(
+        _init_params_for(None),
+        model=model,
+        training=True,
+    )
+
+    assert reason is not None
+    assert "flash-attn 3" in reason
+
+
+def test_actual_sdpa_backend_overrides_flash_request_for_fa3_guard(monkeypatch) -> None:
+    monkeypatch.delenv("FASTVIDEO_DISABLE_ATTENTION_COMPILE", raising=False)
+    fake_module = ModuleType("fastvideo.attention.utils.flash_attn_default")
+    fake_module.fa_version = "3"
+    monkeypatch.setitem(sys.modules, fake_module.__name__, fake_module)
+    model = _model_with_actual_backend(AttentionBackendEnum.TORCH_SDPA)
+
+    assert _regional_compile_unsupported_reason(
+        _init_params_for("FLASH_ATTN"),
+        model=model,
+        training=True,
+    ) is None
 
 
 def test_default_attention_dispatch_stays_compiler_disabled(monkeypatch) -> None:

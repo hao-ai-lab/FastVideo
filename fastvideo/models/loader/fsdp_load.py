@@ -312,6 +312,7 @@ def maybe_load_fsdp_model(
         else:
             unsupported = _regional_compile_unsupported_reason(
                 init_params,
+                model=model,
                 training=True,
                 vsa_tile_size=inference_vsa_tile_size,
             )
@@ -331,6 +332,7 @@ def maybe_load_fsdp_model(
         # user kwargs needed (fullgraph + emulate_precision_casts injected).
         unsupported = _regional_compile_unsupported_reason(
             init_params,
+            model=model,
             vsa_tile_size=inference_vsa_tile_size,
         )
         if unsupported is None:
@@ -361,6 +363,7 @@ def _strip_checkpoint_wrapper_prefix(name: str) -> str:
 def _regional_compile_unsupported_reason(
     init_params: dict[str, Any],
     *,
+    model: nn.Module | None = None,
     training: bool = False,
     vsa_tile_size: int | None = None,
 ) -> str | None:
@@ -390,21 +393,41 @@ def _regional_compile_unsupported_reason(
                     "forwards out of compiled graphs via torch.compiler."
                     "disable, which fullgraph regional compile cannot trace; "
                     "this model stays eager")
-    config = init_params.get("config")
-    resolved = getattr(config, "_resolved_attention_backend", None)
-    resolved_name = getattr(resolved, "name", "")
-    if training and resolved_name == "FLASH_ATTN":
+    backend_names: set[str] = set()
+    if model is not None:
+        from fastvideo.attention.layer import DistributedAttention, LocalAttention
+
+        for submodule in model.modules():
+            if not isinstance(submodule, (DistributedAttention, LocalAttention)):
+                continue
+            backend = getattr(submodule, "backend", None)
+            backend_name = getattr(backend, "name", "")
+            if backend_name:
+                backend_names.add(backend_name)
+
+    # The component config stores the requested backend. ``None`` means
+    # platform automatic selection, so once a constructed model is available
+    # its attention instances are the source of truth. Keep the config fallback
+    # for callers that validate policy before or without model construction.
+    if not backend_names:
+        config = init_params.get("config")
+        resolved = getattr(config, "_resolved_attention_backend", None)
+        resolved_name = getattr(resolved, "name", "")
+        if resolved_name:
+            backend_names.add(resolved_name)
+
+    if training and "FLASH_ATTN" in backend_names:
         try:
             from fastvideo.attention.utils.flash_attn_default import fa_version
         except Exception:  # pragma: no cover - flash-attn stack not importable
             pass
         else:
             if fa_version == "3":
-                return ("attention backend resolved to FLASH_ATTN with flash-attn 3, "
+                return ("model uses FLASH_ATTN with flash-attn 3, "
                         "whose grad-enabled path graph-breaks (incompatible with "
                         "fullgraph regional compile); use FA2, FA4 (FASTVIDEO_FA4=1), "
                         "or TORCH_SDPA for compiled training")
-    if resolved_name == "VIDEO_SPARSE_ATTN_H3":
+    if "VIDEO_SPARSE_ATTN_H3" in backend_names:
         if training:
             return ("VIDEO_SPARSE_ATTN_H3 regional compile is supported only for inference; "
                     "compiled training stays eager")
@@ -417,8 +440,8 @@ def _regional_compile_unsupported_reason(
         if vsa_tile_size != 64:
             return ("VIDEO_SPARSE_ATTN_H3 regional compile requires VSA_tile_size=64; "
                     f"got {vsa_tile_size!r}, so tile-256/CuTe VSA stays eager")
-    if resolved_name == "VIDEO_SPARSE_ATTN":
-        return (f"attention backend resolved to {resolved_name}, whose Triton "
+    if "VIDEO_SPARSE_ATTN" in backend_names:
+        return ("attention backend resolved to VIDEO_SPARSE_ATTN, whose Triton "
                 "kernels, sequence-parallel collectives, and sync metadata "
                 "guard graph-break (incompatible with fullgraph regional "
                 "compile); this model stays eager")
