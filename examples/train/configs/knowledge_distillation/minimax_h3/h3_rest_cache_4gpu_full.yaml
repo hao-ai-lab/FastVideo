@@ -1,0 +1,104 @@
+# Production full-H3 scored-trajectory cache for REST/AMD.
+# 100 prompts x K=8 trajectories x 48 dense H3 forwards. Student boundaries
+# are exactly 1000 -> 750 -> 500 -> 250 -> 0; all K trajectories are retained.
+models:
+  student:
+    _target_: fastvideo.train.models.minimax_h3.MiniMaxH3RESTTeacherModel
+    init_from: artifacts/rvm_h3/models/minimax-h3-teacher
+    trainable: false
+    disable_custom_init_weights: true
+    attention_backend: TORCH_SDPA
+
+method:
+  _target_: fastvideo.train.methods.knowledge_distillation.H3RESTMethod
+  cache_output_dir: artifacts/rvm_h3/rest_cache/full
+  allow_dirty_source: false
+  teacher_revision: bfc8ed0353f5a9733be73e6b2c98ec0948195b86
+  student_timesteps: [1000, 750, 500, 250, 0]
+  teacher_substeps_per_segment: 12
+  samples_per_prompt: 8
+  max_prompts: 100
+  seed: 42000
+  advantage_eps: 1.0e-6
+  advantage_clip: 1.0
+  reward_device: cuda
+  reward_revisions:
+    mj_video_source: cc1d2c9587a620e9ebd3599ae4cdd21b5fd7c87a
+    mj_video_checkpoint: 5d32c2416bf5ffb9331a175890744e73defb54c4
+    internvl2_base: e4f6747
+  reward_fn:
+    rewards:
+      videoalign_ta: 0.30
+      mj_video_coherence_consistency: 0.40
+      mj_video_fineness: 0.25
+      dynamic_tracking: 0.05
+    options:
+      videoalign_ta:
+        model_path: artifacts/rvm_h3/rewards/VideoReward
+        runtime_path: artifacts/rvm_h3/rewards/VideoAlign
+      mj_video_coherence_consistency:
+        model_path: artifacts/rvm_h3/rewards/MJ-VIDEO-2B
+        runtime_path: artifacts/rvm_h3/rewards/MJ-Video
+        base_model_path: artifacts/rvm_h3/rewards/InternVL2-2B
+        source_revision: cc1d2c9587a620e9ebd3599ae4cdd21b5fd7c87a
+        checkpoint_revision: 5d32c2416bf5ffb9331a175890744e73defb54c4
+        base_revision: e4f6747
+        num_frames: 8
+        input_size: 448
+      mj_video_fineness:
+        model_path: artifacts/rvm_h3/rewards/MJ-VIDEO-2B
+        runtime_path: artifacts/rvm_h3/rewards/MJ-Video
+        base_model_path: artifacts/rvm_h3/rewards/InternVL2-2B
+        source_revision: cc1d2c9587a620e9ebd3599ae4cdd21b5fd7c87a
+        checkpoint_revision: 5d32c2416bf5ffb9331a175890744e73defb54c4
+        base_revision: e4f6747
+        num_frames: 8
+        input_size: 448
+      dynamic_tracking:
+        frame_pairs: 32
+        top_fraction: 0.05
+        resize_short_edge: 256
+        pretrained: true
+
+training:
+  distributed:
+    num_gpus: 4
+    sp_size: 4
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 4
+  data:
+    data_path: artifacts/rvm_h3/data/train
+    preprocessed_data_type: text_only
+    dataloader_num_workers: 0
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    seed: 42
+    num_latent_t: 37
+    num_height: 480
+    num_width: 832
+    num_frames: 124
+  optimizer:
+    learning_rate: 1.0e-6
+    betas: [0.9, 0.999]
+    weight_decay: 0.0
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+  loop:
+    max_train_steps: 1
+    gradient_accumulation_steps: 1
+  checkpoint:
+    output_dir: outputs/h3_rest/cache_builder_full
+    training_state_checkpointing_steps: 1
+    checkpoints_total_limit: 1
+  tracker:
+    project_name: fasth3-rest
+    run_name: h3-rest-cache-full
+  model:
+    precondition_outputs: false
+    enable_gradient_checkpointing_type: null
+  model_path: artifacts/rvm_h3/models/minimax-h3-teacher
+  dit_precision: bf16
+
+callbacks: {}
+pipeline: {}
