@@ -147,11 +147,26 @@ def _build_scorer(
         )
         scorer.diagnostic_names = ("raw", "saturation")
         return scorer
+    if name in {"mjvideo_cc", "mjvideo_fineness"}:
+        from fastvideo.train.methods.rl.rewards.mj_video import (
+            MJVideoAspectScorer,
+        )
+
+        aspect = (
+            "cc"
+            if name == "mjvideo_cc"
+            else "fineness"
+        )
+        return MJVideoAspectScorer(
+            aspect=aspect,
+            device=scorer_device,
+            **options,
+        )
     raise ValueError(
         f"Unsupported reward {name!r}. Available: clipscore, "
         "pickscore, mean_luminance, videoalign_ta, videoalign_mq, "
         "videoalign_vq, hpsv3_general, hpsv3_percentile, "
-        "dynamic_tracking"
+        "dynamic_tracking, mjvideo_cc, mjvideo_fineness"
     )
 
 
