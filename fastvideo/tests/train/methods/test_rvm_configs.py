@@ -34,7 +34,7 @@ def load(name: str) -> dict:
         return yaml.safe_load(handle)
 
 
-def assert_common(config: dict) -> None:
+def assert_common(config: dict, *, compact_one_gpu: bool = False) -> None:
     model = config["models"]["student"]
     method = config["method"]
     training = config["training"]
@@ -67,8 +67,19 @@ def assert_common(config: dict) -> None:
         "max": 1.0,
     }
     assert training["data"]["training_cfg_rate"] == 0.0
-    assert training["data"]["num_frames"] == 124
-    assert training["data"]["num_latent_t"] == 37
+    if compact_one_gpu:
+        assert training["distributed"]["num_gpus"] == 1
+        assert training["data"]["num_frames"] == 39
+        assert training["data"]["num_latent_t"] == 12
+        assert training["data"]["num_height"] == 320
+        assert training["data"]["num_width"] == 576
+        assert model["lora"]["rank"] == 1
+        assert model["lora"]["alpha"] == 1
+    else:
+        assert training["data"]["num_frames"] == 124
+        assert training["data"]["num_latent_t"] == 37
+        assert training["data"]["num_height"] == 480
+        assert training["data"]["num_width"] == 832
     assert training["vsa_sparsity"] == 0.9
     assert method["validation"]["num_prompts"] <= 100
 
@@ -86,7 +97,10 @@ def test_all_rvm_configs_obey_h3_contract() -> None:
         "rvm_h3_modal_4gpu.yaml",
     }
     for path in paths:
-        assert_common(load(path.name))
+        assert_common(
+            load(path.name),
+            compact_one_gpu=(path.name == "rvm_h3_modal_1gpu.yaml"),
+        )
 
 
 def test_original_rvm_configs_keep_published_reward_profile() -> None:
