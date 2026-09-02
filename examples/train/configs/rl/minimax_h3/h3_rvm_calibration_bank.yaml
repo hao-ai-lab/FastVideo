@@ -37,11 +37,11 @@ method:
     rewards:
       mean_luminance: 1.0
   validation:
-    # Run only at step zero; the one near-zero-LR optimizer step is a launcher
-    # compatibility detail and does not affect the calibration videos.
+    # Run only at step zero on a deterministic sample from the training split.
+    # Reward-scale calibration must not consume the held-out evaluation prompts.
     every_steps: 999
     num_prompts: 100
-    data_path: artifacts/rvm_h3/data/eval
+    data_path: artifacts/rvm_h3/data/train
     seed: 4242
     run_at_start: true
     log_samples: false
