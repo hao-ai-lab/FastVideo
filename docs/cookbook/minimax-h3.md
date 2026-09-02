@@ -5,7 +5,7 @@ hide:
 
 # MiniMax H3 recipes
 
-<div class="cookbook-shell cookbook-family-page" data-cookbook data-family="minimax_h3" data-default-recipe="fasth3-preview-cuda" data-recipes="../../assets/cookbook-recipes.json?v=7">
+<div class="cookbook-shell cookbook-family-page" data-cookbook data-family="minimax_h3" data-default-recipe="fasth3-preview-cuda" data-recipes="../../assets/cookbook-recipes.json?v=8">
   <header class="cookbook-family-header">
     <a class="cookbook-back-link" href="../"><span aria-hidden="true">←</span> All model families</a>
     <div class="cookbook-family-header__body">
@@ -15,8 +15,8 @@ hide:
       <div>
         <p class="cookbook-eyebrow">Primary focus · Inference</p>
         <h2>MiniMax H3 recipes</h2>
-        <p>Generate video and audio with H3. Run a server on CUDA or Apple Silicon MLX to iterate on prompts, or call the pipeline directly from Python.</p>
-        <span class="cookbook-count" data-cookbook-count>7 maintained recipes</span>
+        <p>Generate video and audio with H3. Run a server on CUDA, one DGX Spark, or Apple Silicon MLX to iterate on prompts, or call the pipeline directly from Python.</p>
+        <span class="cookbook-count" data-cookbook-count>8 maintained recipes</span>
       </div>
     </div>
     <div class="cookbook-lifecycle" aria-label="Lifecycle stages">
@@ -41,8 +41,8 @@ hide:
     <h2 id="h3-modes-heading">Supported modes</h2>
     <p>
       CUDA covers T2VA, FL2VA, and Ref2VA on the full checkpoint, plus FastH3
-      Preview, FastH3 LoRA, and a two-node FastH3 Preview recipe over Ray
-      sequence parallel. MLX is T2VA only. Temporal <code>--fast</code>,
+      Preview and FastH3 LoRA. FastH3 Preview also has a DGX Spark runtime with
+      a 1-Spark or 2-Spark device row. MLX is T2VA only. Temporal <code>--fast</code>,
       spatial <code>--fast-spatial</code>, and opt-in VSA are flags on the same
       MLX script, not extra recipes.
     </p>
@@ -92,8 +92,8 @@ hide:
             <td>Not wired</td>
           </tr>
           <tr>
-            <td>2-Spark SP</td>
-            <td>FastH3 Preview across two DGX Sparks with Ray sequence parallel (<code>sp_size=2</code>) over QSFP RoCE</td>
+            <td>DGX Spark</td>
+            <td>FastH3 Preview on one GB10, or two Sparks with Ray sequence parallel (<code>sp_size=2</code>) over QSFP RoCE. Select NVIDIA DGX Spark, then 1 Spark or 2 Sparks.</td>
             <td>Not wired</td>
           </tr>
         </tbody>
@@ -104,7 +104,7 @@ hide:
   <section class="cookbook-builder" id="recipe-builder" aria-labelledby="builder-heading">
     <div class="cookbook-builder__intro">
       <h2 id="builder-heading">Pick an H3 recipe and runtime</h2>
-      <p>Choose the result you want, then use a maintained CUDA or MLX path.
+      <p>Choose the result you want, then use a maintained CUDA, DGX Spark, or MLX path.
       Device claims stay tied to checked-in sources and recorded runs.</p>
     </div>
 
@@ -127,6 +127,15 @@ hide:
           </div>
           <div class="cookbook-option-grid cookbook-option-grid--hardware" data-cookbook-hardware-options role="group" aria-label="Runtime">
             <button type="button" disabled>Loading runtimes...</button>
+          </div>
+        </div>
+
+        <div class="cookbook-selection-row" data-cookbook-device-row hidden>
+          <div class="cookbook-selection-row__label">
+            <strong>Devices</strong>
+            <span data-cookbook-device-caption>1 Spark or a QSFP pair</span>
+          </div>
+          <div class="cookbook-option-grid cookbook-option-grid--hardware" data-cookbook-device-options role="group" aria-label="Devices">
           </div>
         </div>
 
@@ -243,9 +252,11 @@ cd FastVideo</code></pre>
       <p class="cookbook-eyebrow">Apple Silicon</p>
       <pre><code>uv pip install -e ".[mlx]"</code></pre>
       <p>Follow the <a href="../../getting_started/installation/mps/#run-fasth3-preview">Apple Silicon guide</a> for the download, conversion, and storage requirements.</p>
-      <p class="cookbook-eyebrow">Two DGX Sparks</p>
+      <p class="cookbook-eyebrow">NVIDIA DGX Spark</p>
+      <pre><code>UV_TORCH_BACKEND=cu130 uv pip install -e .</code></pre>
+      <p>Follow the <a href="../../getting_started/installation/spark/">DGX Spark install guide</a> for ARM64 CUDA 13. One Spark is a local process. Two Sparks need Ray on the QSFP link:</p>
       <pre><code>uv pip install ray</code></pre>
-      <p>The 2-Spark recipe needs two DGX Sparks on an active QSFP link, the same FastH3 snapshot on both NVMes, and a Ray cluster on top. Follow <a href="../../getting_started/installation/spark_pair/">pairing two Sparks</a> before running it.</p>
+      <p>Bring up the cluster from <a href="../../getting_started/installation/spark_pair/">pairing two Sparks</a> before selecting 2 Sparks in the builder.</p>
   </div>
 </details>
 
@@ -256,8 +267,9 @@ cd FastVideo</code></pre>
         <li>The full CUDA H3 examples request four GPUs by default. Their sources do not claim a GPU model or memory minimum.</li>
         <li>The FastH3 CUDA performance profile was measured on four GB200 GPUs. Use its strict profile when exact operation order matters more than the measured performance configuration.</li>
         <li>The MLX source runtime supports T2VA, optional temporal <code>--fast</code>, optional spatial <code>--fast-spatial</code>, and opt-in VSA on <code>--include-vsa</code> checkpoints. FL2VA, Ref2VA, and two-pass refinement are not wired.</li>
-        <li>GPU count and VAE decode backend are configurable in the builder above for FastH3 recipes. Only the value shown by default has a recorded run; other supported values are unmeasured here.</li>
-        <li>The 2-Spark recipe fixes its own GPU count and execution backend in its YAML config and is not affected by the GPU count knob above. It requires a two-node Ray cluster on the QSFP interconnect; see the setup step above.</li>
+        <li>GPU count and VAE decode backend are configurable in the builder above for FastH3 CUDA recipes. Only the value shown by default has a recorded run; other supported values are unmeasured here.</li>
+        <li>DGX Spark is a runtime on FastH3 Preview, not a separate family card. Select NVIDIA DGX Spark, then 1 Spark or 2 Sparks. The CUDA GPU-count knob does not apply to Spark.</li>
+        <li>GB10 has no FA4 / sm_100a VSA kernel. Keep <code>FASTVIDEO_FA4=0</code> and <code>FASTVIDEO_VSA_SM100A=0</code>. Legal <code>num_frames</code> values are <code>17n+5</code>, capped at 345 (15 s). A 345-frame request on one Spark can OOM.</li>
         <li>Gated or missing checkpoints: run <code>huggingface-cli login</code> and confirm you accepted the model's license on Hugging Face.</li>
       </ul>
   </div>

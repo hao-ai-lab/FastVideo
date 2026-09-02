@@ -31,6 +31,28 @@ def test_cookbook_serving_does_not_inherit_local_benchmark():
     validate_cookbook()
 
 
+def test_spark_preview_is_a_runtime_with_one_or_two_devices():
+    recipes = json.loads(COOKBOOK_DATA.read_text())["recipes"]
+    one = next(item for item in recipes if item["id"] == "fasth3-preview-spark")
+    pair = next(item for item in recipes if item["id"] == "fasth3-spark-pair")
+    assert one["group"] == pair["group"] == "fasth3-preview"
+    assert one["hardware"]["device"] == pair["hardware"]["device"] == "spark"
+    assert one["hardware"]["gpu_count"] == 1
+    assert pair["hardware"]["gpu_count"] == 2
+    assert "serving" in one
+    assert "serving" not in pair
+    profile = cookbook_serving_profile(one)
+    assert profile["hardware"] == {
+        "platform": "cuda",
+        "device": "spark",
+        "gpu_count": 1,
+        "evidence": "source-configured",
+    }
+    assert profile["command"].startswith("FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0")
+    assert "openai_fasth3_spark.yaml" in profile["command"]
+    assert "--server.host 127.0.0.1" in profile["command"]
+
+
 def test_mlx_serving_profile_has_native_launcher_and_no_invented_memory():
     recipes = json.loads(COOKBOOK_DATA.read_text())["recipes"]
     recipe = next(item for item in recipes if item["id"] == "fasth3-preview-mlx")
@@ -78,10 +100,19 @@ def test_h3_command_blocks_have_unique_copy_targets():
 
         def handle_starttag(self, tag, attrs):
             if tag == "pre":
-                self.ids.append(dict(attrs).get("id"))
+                block_id = dict(attrs).get("id")
+                if block_id:
+                    self.ids.append(block_id)
 
     parser = CodeBlocks()
     parser.feed((ROOT / "docs/cookbook/minimax-h3.md").read_text())
-    assert len(parser.ids) == 7
-    assert all(parser.ids)
+    assert parser.ids == [
+        "cookbook-local-command",
+        "cookbook-server-install",
+        "cookbook-server-prepare",
+        "cookbook-server-command",
+        "cookbook-health-command",
+        "cookbook-client-install",
+        "cookbook-client-code",
+    ]
     assert len(set(parser.ids)) == len(parser.ids)

@@ -1,0 +1,59 @@
+# FastH3 on one DGX Spark (one GB10). Install: docs/getting_started/installation/spark.md
+#
+# GB10 has no FA4 / sm_100a VSA kernel. Keep the env prefix below, or pass
+# equivalent CLI flags on examples/inference/basic/basic_fasth3.py
+# (`--vsa-kernel triton --no-fa4 --num-gpus 1`).
+#
+# request.sampling below is an example, not a required recipe. Change height,
+# width, num_frames, num_inference_steps, seed, and prompt. Legal H3 frame
+# counts are 17n+5, max 345 (15 s). Native 16:9 sizes include 832x480 and
+# 1344x768. 1024x576 is a common recipe-matched 16:9.
+#
+#   FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 \
+#     FASTVIDEO_STAGE_LOGGING=1 \
+#     fastvideo generate --config examples/inference/basic/basic_fasth3_spark.yaml
+generator:
+  model_path: FastVideo/FastVideo-FastH3-4-step-Preview-v1-VSA-DataFree
+  engine:
+    num_gpus: 1
+    use_fsdp_inference: false
+    parallelism:
+      tp_size: 1
+      sp_size: 1
+    offload:
+      dit: false
+      dit_layerwise: false
+      text_encoder: true
+      vae: true
+      pin_cpu_memory: true
+      lazy_module_load: true
+    compile:
+      enabled: false
+      vae_enabled: true
+  pipeline:
+    experimental:
+      attention_backend: VIDEO_SPARSE_ATTN_H3
+      VSA_sparsity: 0.9
+      VSA_tile_size: 64
+      inference_torch_compile: true
+      vae_parallel_decode: true
+      vae_parallel_decode_strategy: gather
+      h3_sequential_load: true
+request:
+  prompt: >-
+    A wide cinematic shot of an alpine meadow at sunrise, pale pink mountain
+    peaks above a blue valley filled with thin morning mist.
+  negative_prompt: ""
+  sampling:
+    seed: 2026
+    height: 768
+    width: 1344
+    num_frames: 124
+    fps: 24
+    num_inference_steps: 5
+    guidance_scale: 1.0
+    batch_cfg: false
+  output:
+    output_path: outputs/fasth3_spark/
+    save_video: true
+    return_frames: false
