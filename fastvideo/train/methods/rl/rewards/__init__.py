@@ -148,6 +148,11 @@ def _build_scorer(
         scorer.diagnostic_names = ("raw", "saturation")
         return scorer
     if name in {"mjvideo_cc", "mjvideo_fineness"}:
+        from fastvideo.train.methods.rl.rewards.mj_video_compat import (
+            install_mj_video_transformers_compat,
+        )
+
+        install_mj_video_transformers_compat()
         from fastvideo.train.methods.rl.rewards.mj_video import (
             MJVideoAspectScorer,
         )

@@ -13,6 +13,7 @@ require_path "${MJ_VIDEO_BASE_MODEL_PATH}/.fastvideo_revision"
 
 python -m py_compile \
     fastvideo/train/methods/rl/rewards/calibration.py \
+    fastvideo/train/methods/rl/rewards/mj_video_compat.py \
     fastvideo/train/methods/rl/rewards/mj_video.py \
     fastvideo/train/methods/rl/rvm_reward_profile.py \
     examples/train/rvm_h3/preflight_mj_video.py \
@@ -21,7 +22,9 @@ python -m py_compile \
 pytest -q \
     fastvideo/tests/train/methods/test_reward_calibration.py \
     fastvideo/tests/train/methods/test_reward_calibration_cli.py \
-    fastvideo/tests/train/methods/test_mj_video_reward.py
+    fastvideo/tests/train/methods/test_mj_video_reward.py \
+    fastvideo/tests/train/methods/test_rvm_reward_diagnostics.py \
+    fastvideo/tests/train/methods/test_rvm_configs.py
 
 python examples/train/rvm_h3/preflight_mj_video.py \
     --device "${MJ_VIDEO_PREFLIGHT_DEVICE:-cuda}" \
