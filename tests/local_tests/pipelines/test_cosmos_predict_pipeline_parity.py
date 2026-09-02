@@ -35,16 +35,16 @@ def _run_fastvideo_pipeline(request_kwargs: dict[str, Any]) -> torch.Tensor:
         pass  # already initialized
 
     fastvideo_args = FastVideoArgs(
-        model_name="nvidia/Cosmos-1.0-Prompt2World-7B-Video",
+        model_path="nvidia/Cosmos-1.0-Prompt2World-7B-Video",
         dtype="bfloat16",
     )
     
-    config_cls, sampling_param_cls = get_pipeline_config_classes("CosmosPredictPipeline")
-    sampling_param = sampling_param_cls.from_pretrained(fastvideo_args.model_name)
+    sampling_param = SamplingParam.from_pretrained(fastvideo_args.model_path)
     sampling_param.update({key: value for key, value in request_kwargs.items() if key not in {"prompt"}})
     sampling_param.prompt = request_kwargs["prompt"]
 
     batch = ForwardBatch(
+        data_type="video",
         **shallow_asdict(sampling_param),
         eta=0.0,
         n_tokens=sampling_param.num_frames * (sampling_param.height // 8) * (sampling_param.width // 8),

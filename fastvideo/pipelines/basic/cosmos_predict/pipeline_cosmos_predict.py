@@ -91,8 +91,8 @@ class CosmosPredictLatentPreparationStage(PipelineStage):
         device = self.transformer.device if hasattr(self.transformer, "device") else torch.device("cuda")
         
         b, c, t, h, w = batch.batch_size, 16, batch.num_frames, batch.height, batch.width
-        # Patching size downsampling
-        t = t
+        # Patching size downsampling (CV8x8x8 VAE tokenizer)
+        t = (t - 1) // 8 + 1
         h = h // 8
         w = w // 8
         
