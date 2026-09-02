@@ -1,0 +1,80 @@
+name: Temporary RVM MJ reward audit
+
+on:
+  push:
+    branches:
+      - adam/h3-rvm-posttraining
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  static-and-focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install static-test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install PyYAML pytest numpy pillow av
+          python -m pip install \
+            --index-url https://download.pytorch.org/whl/cpu \
+            torch torchvision
+          python -m pip install \
+            transformers safetensors timm diffusers accelerate \
+            omegaconf einops loguru imageio imageio-ffmpeg pyarrow peft
+          python -m pip install --no-deps -e .
+
+      - name: Compile changed Python entry points
+        run: |
+          python -m py_compile \
+            fastvideo/train/methods/rl/rewards/calibration.py \
+            fastvideo/train/methods/rl/rewards/media.py \
+            fastvideo/train/methods/rl/rewards/mj_video_compat.py \
+            fastvideo/train/methods/rl/rewards/mj_video.py \
+            fastvideo/train/methods/rl/rvm_reward_profile.py \
+            examples/train/rvm_h3/preflight_mj_video.py \
+            examples/train/rvm_h3/calibrate_reward_profile.py
+
+      - name: Parse shell and YAML artifacts
+        run: |
+          bash -n \
+            examples/train/rvm_h3/01_download_mj_video.sh \
+            examples/train/rvm_h3/03_preflight_mj_video.sh \
+            examples/train/rvm_h3/04_calibrate_physion_mj_rewards.sh \
+            examples/train/rvm_h3/05_run_8gpu_topology_smoke.sh \
+            examples/train/rvm_h3/06_run_8gpu_reward_profile_sweep.sh \
+            examples/train/rvm_h3/07_run_8gpu_scaleup_pilot.sh \
+            examples/train/rvm_h3/07_run_8gpu_full.sh
+          python - <<'PY'
+          from pathlib import Path
+          import yaml
+
+          paths = [
+              Path("examples/train/configs/rl/minimax_h3/h3_rvm_calibration_bank.yaml"),
+              Path("examples/train/configs/rl/minimax_h3/rvm_h3_8gpu_physion_mj.yaml"),
+          ]
+          for path in paths:
+              payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+              assert isinstance(payload, dict), path
+              print(path)
+          PY
+
+      - name: Run focused CPU tests
+        run: |
+          pytest -q \
+            fastvideo/tests/train/methods/test_reward_calibration.py \
+            fastvideo/tests/train/methods/test_reward_calibration_cli.py \
+            fastvideo/tests/train/methods/test_mj_video_reward.py \
+            fastvideo/tests/train/methods/test_rvm_reward_diagnostics.py \
+            fastvideo/tests/train/methods/test_rvm_configs.py
+
+      - name: Check patch whitespace
+        run: git diff --check
