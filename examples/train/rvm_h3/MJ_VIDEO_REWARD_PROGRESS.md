@@ -1,331 +1,327 @@
 # MJ-VIDEO reward implementation progress
 
-This report tracks the incremental implementation of a selectable
-Physion-aligned reward profile for FastH3 RVM. Every phase is committed before
-the next begins so partial work is not lost.
+This report records the incremental implementation of a selectable
+Physion-aligned reward profile for FastH3 RVM. The alternate profile changes the
+reward scalar only; the existing paper-faithful RVM rollout, advantage, velocity
+loss, optimizer, LoRA, and FastH3 inference contract remain unchanged.
 
-## Fixed scope
-
-The alternate scalar reward is:
+## Fixed objective
 
 ```text
-0.30 * z(VideoAlign TA)
-+ 0.40 * z(MJ-VIDEO Coherence & Consistency)
-+ 0.25 * z(MJ-VIDEO Fineness)
-+ 0.05 * z(RAFT Dynamic Tracking)
+R_physion =
+    0.30 * z(VideoAlign text alignment)
+  + 0.40 * z(MJ-VIDEO Coherence & Consistency)
+  + 0.25 * z(MJ-VIDEO Fineness)
+  + 0.05 * z(RAFT Dynamic Tracking)
 ```
 
-The RVM loss, endpoint sampling, advantage construction, continuous regression
-time, FastH3 rollout, LoRA target modules, and optimizer semantics are not being
-replaced.
+For each component `j`, `z` is fixed from released-FastH3 calibration videos:
 
-## Phase 0 — source audit and implementation plan
+```text
+center_j = median(baseline reward_j)
+scale_j  = 1.4826 * MAD(baseline reward_j)
+z_j(r)   = (r - center_j) / scale_j
+```
+
+Population standard deviation is used only when MAD is degenerate. A component
+that is constant under both estimators fails calibration unless the operator
+provides an explicit audited fallback scale.
+
+The existing RVM update remains:
+
+```text
+calibrated weighted reward
+  -> subtract the K-sample prompt-group mean
+  -> divide by one rollout-global population standard deviation
+  -> multiply by 0.1 and clip
+  -> continuous-time velocity matching on epsilon - x0
+```
+
+## Pinned references
+
+### RVM
+
+- Paper: `Scaling Reinforcement Learning for Diffusion Models via Velocity
+  Matching`, arXiv:2608.23664.
+- FastVideo source of truth: `fastvideo/train/methods/rl/rvm_faithful.py`.
+- Preserved behavior:
+  - four-step FastH3 VSA endpoint sampling;
+  - prompt-relative centering and rollout-global reward scale;
+  - `t ~ Uniform(0,1)` analytic RVM regression state;
+  - signed coefficient scale `0.1` and clipping;
+  - detached-target surrogate with native target `epsilon - x0`.
+
+### MJ-VIDEO
+
+- Paper: `MJ-VIDEO: Fine-Grained Benchmarking and Rewarding Video Preferences
+  in Video Generation`, arXiv:2502.01719, NeurIPS 2025 Spotlight.
+- Official source: `aiming-lab/MJ-Video`.
+- Source revision: `cc1d2c9587a620e9ebd3599ae4cdd21b5fd7c87a`.
+- Reward checkpoint: `MJ-Bench/MJ-VIDEO-2B`.
+- Checkpoint revision: `5d32c2416bf5ffb9331a175890744e73defb54c4`.
+- Base model: `OpenGVLab/InternVL2-2B` revision `e4f6747`.
+- Official files used as implementation references:
+  - `scripts/model/moe_reward.py`;
+  - `scripts/model/internvl2/`;
+  - `scripts/data_processor/data.py`;
+  - `scripts/eval/eval_genai_mjvideo.py`.
+
+Source-derived settings preserved:
+
+```text
+28 criteria / 5 aspects
+Fineness aspect index: 2
+Coherence & Consistency aspect index: 3
+8 endpoint-exclusive uniformly sampled frames
+448x448 bicubic inputs
+1 image tile per frame
+ImageNet normalization
+BF16 inference
+MoE gating temperature 1.0
+MoE hidden dimension 1024
+3 hidden gating layers
+strict safetensors loading
+```
+
+## Phase 0 — plan and source audit
 
 **Status:** complete.
 
 **Commit:** `55d60aec720be847daea4966bc0e98e57eda7abf`
 
-### Current FastVideo implementation inspected
+Added:
 
-- `fastvideo/train/methods/rl/rvm_faithful.py`
-  - current paper-faithful endpoint RVM;
-  - per-prompt reward centering;
-  - rollout-global standard deviation;
-  - continuous `t ~ Uniform(0,1)` analytic regression state;
-  - signed detached-target velocity update.
-- `fastvideo/train/methods/rl/rewards/__init__.py`
-  - reward construction and per-reward options.
-- `fastvideo/train/methods/rl/rewards/media.py`
-  - weighted scalar aggregation and diagnostic propagation.
-- `fastvideo/train/methods/rl/rewards/{videoalign,dynamic_tracking}.py`
-  - existing source-aligned VideoAlign and RAFT implementations.
-- H3 reward configs, model download scripts, portable smoke runner, validation
-  persistence, and focused RVM tests.
+- `MJ_VIDEO_REWARD_IMPLEMENTATION_PLAN.md`;
+- this progress report;
+- exact source/checkpoint inventory;
+- non-goals, phase ordering, acceptance criteria, and GPU validation boundary.
 
-### MJ-VIDEO sources inspected
-
-- Paper: arXiv:2502.01719.
-- Official repository: `aiming-lab/MJ-Video` at
-  `cc1d2c9587a620e9ebd3599ae4cdd21b5fd7c87a`.
-- Official checkpoint: `MJ-Bench/MJ-VIDEO-2B` at
-  `5d32c2416bf5ffb9331a175890744e73defb54c4`.
-- `scripts/model/moe_reward.py` for criteria/aspect/overall outputs and MoE
-  gating.
-- `scripts/model/internvl2/` for the exact InternVL input/model path.
-- `scripts/data_processor/data.py` for uniform eight-frame sampling, 448 input,
-  one tile per frame, and ImageNet normalization.
-- `scripts/eval/eval_genai_mjvideo.py` for the exact 28-criterion, five-aspect
-  mapping and inference defaults.
-
-### Exact source-derived decisions
-
-- Use aspect index `2` for Fineness.
-- Use aspect index `3` for Coherence & Consistency.
-- Sample eight evenly spaced frames with the upstream endpoint-exclusive index
-  rule.
-- Use BF16 and the official InternVL2-2B reward checkpoint.
-- Share one MJ-VIDEO forward between both requested aspect scorers.
-- Pin and verify both source code and model revisions.
-- Use fixed robust baseline calibration rather than online scale adaptation.
-- Fail loudly on runtime/checkpoint incompatibility.
-
-### Risks identified before coding
-
-1. MJ-VIDEO's official implementation targets an older Transformers stack,
-   while FastVideo currently uses Transformers 5. A real GPU load/forward test
-   is mandatory; the adapter must not silently substitute another model.
-2. The official repository does not currently expose the requirements files
-   referenced by its README. The integration should rely on FastVideo's existing
-   dependencies plus explicit minimal additions, not install an unknown legacy
-   environment wholesale.
-3. Two separately constructed MJ aspect scorers would otherwise load/execute the
-   same 2B model twice. A shared runtime and result cache are required.
-4. Raw reward units are not comparable. Fixed calibration artifacts must be
-   generated from baseline FastH3 outputs and versioned with source provenance.
-5. Distributed RVM must know every raw/diagnostic output key before tensor
-   broadcasts. The scorer now declares this contract explicitly.
+The plan was committed before implementation began.
 
 ## Phase 1 — fixed calibration and reward-output contracts
 
-**Status:** implementation complete; GPU-independent tests authored.
+**Status:** complete.
 
 **Implementation commit:** `9848405f27400781fa9ba8b8478ec975034fa97b`
 
-### Implemented
+Implemented:
 
-- Added `fastvideo/train/methods/rl/rewards/calibration.py`.
-- Added versioned calibration schema `1` with strict validation of finite
-  centers, positive scales, optional sample counts, required component coverage,
-  and optional symmetric clipping.
-- Added `CalibratedRewardScorer`:
-  - applies only a fixed affine transform `(raw - center) / scale`;
-  - preserves each raw score as `<reward>_unnormalized`;
-  - preserves diagnostics from the wrapped scorer;
-  - does not modify the wrapped reward implementation.
-- Extended `build_multi_reward_scorer` with an optional
-  `reward_fn.calibration` block using either a versioned JSON artifact or inline
-  entries for tests.
-- Preserved existing behavior when no calibration is configured: the same raw
-  component scores and weighted sum are used.
-- Added an explicit `MultiRewardScorer.output_keys` contract. It validates that
-  runtime diagnostics exactly match names declared by each scorer.
-- Added `RVMRewardProfileMethod`, a thin subclass of the existing
-  `RVMWithLocalMetricsMethod`. It synchronizes the scorer-declared key tuple over
-  each SP group's CPU process group. It does not override the RVM rollout,
-  advantage, velocity loss, optimizer, or validation equations.
-- Declared the existing Dynamic Tracking `raw` and `saturation` diagnostics in
-  the reward builder so the general output contract includes them.
+- versioned calibration schema in
+  `fastvideo/train/methods/rl/rewards/calibration.py`;
+- strict finite center and positive-scale checks;
+- required component coverage and optional symmetric z clipping;
+- `CalibratedRewardScorer`, which preserves raw values as diagnostics;
+- `MultiRewardScorer.output_keys`, with exact runtime diagnostic validation;
+- `RVMRewardProfileMethod`, which inherits the existing RVM method and only
+  synchronizes scorer-declared output keys across each SP group;
+- unchanged aggregate behavior when calibration is absent.
 
-### Tests added
+Tests cover affine calibration, raw diagnostic propagation, invalid scales,
+missing components, JSON metadata, deterministic output ordering, and unchanged
+uncalibrated weighted sums.
 
-`fastvideo/tests/train/methods/test_reward_calibration.py` covers:
+## Phase 2 — source-aligned MJ-VIDEO adapter
 
-- exact affine calibration and clipping;
-- raw/nested diagnostic propagation;
-- required-component failures;
-- JSON metadata parsing;
-- invalid zero, negative, NaN, and infinite scales;
-- deterministic output-key ordering;
-- unchanged uncalibrated weighted sums;
-- calibrated weighted sums and raw-score logging.
-
-### Why this is separate from RVM normalization
-
-The fixed component calibration makes unrelated reward units comparable:
-
-```text
-raw reward -> fixed baseline z-score -> configured weighted sum
-```
-
-The existing RVM code then computes the policy update:
-
-```text
-weighted sum -> per-prompt centering -> rollout-global std -> signed coefficient
-```
-
-The second stage is unchanged. Calibration never estimates live-policy moments,
-so the reward target does not drift during training.
-
-## Phase 2 — source-aligned MJ-VIDEO aspect adapter
-
-**Status:** implementation complete; real-checkpoint GPU preflight still pending.
+**Status:** implementation complete; real model forward remains a GPU gate.
 
 **Implementation commit:** `c3445e3211764dfe3281d87d661c2c4a0eada2a8`
 
-### Implemented
+Implemented:
 
-- Added `fastvideo/train/methods/rl/rewards/mj_video.py`.
-- Pinned the official source revision and checkpoint revision in code.
-- Added strict source/model/base-model revision verification. Model downloads
-  must contain `.fastvideo_revision` markers written by the setup script; local
-  overrides require an explicit `verify_revision=false` choice.
-- Dynamically import the official `moe_reward.py` and InternVL2 implementation
-  from a configured MJ-VIDEO checkout rather than copying or silently changing
-  upstream model semantics.
-- Reproduce the source inference configuration:
-  - `OpenGVLab/InternVL2-2B` base architecture;
-  - 28 criteria and five aspects;
-  - exact aspect-to-criterion mapping;
-  - gating temperature `1.0`;
-  - hidden dimension `1024`;
-  - three hidden gating layers;
-  - strict safetensors load;
-  - BF16 evaluation.
-- Reproduce source video preprocessing in memory:
-  - eight uniformly sampled, endpoint-exclusive frames;
-  - 448x448 bicubic resize;
-  - one tile per frame;
-  - ImageNet mean/std;
-  - official `FrameN: <image>` prompt construction.
-- Added `mjvideo_fineness` from aspect index `2` and `mjvideo_cc` from aspect
-  index `3` to the existing reward builder.
-- Added one shared process-local runtime cache. When both aspect scorers receive
-  the same media object and prompt tuple, only one MJ-VIDEO forward is executed.
-- Added configurable bounded batch size, with source-faithful batch size one as
-  the default.
-- Added an isolated one-process Gloo initialization only when a standalone
-  preflight has no distributed process group; the official InternVL code calls
-  `torch.distributed.get_rank()` during forward.
-- All load/import/shape/non-finite failures are explicit. There is no fallback to
-  HPSv3, VideoAlign, or another reward.
+- `fastvideo/train/methods/rl/rewards/mj_video.py`;
+- exact source/model/base revision verification;
+- dynamic import of the pinned official model code instead of copied model
+  semantics;
+- exact 28-criterion/five-aspect configuration;
+- exact eight-frame, 448-pixel, one-tile preprocessing;
+- `mjvideo_fineness` from aspect index `2`;
+- `mjvideo_cc` from aspect index `3`;
+- one process-local MJ runtime shared by both aspect scorers;
+- one forward result reused by both scorers for the same media/prompt batch;
+- bounded batch size, finite checks, strict checkpoint loading, and no fallback
+  reward.
 
-### Tests added
+A narrow compatibility module restores the removed, unused
+`LLAMA_INPUTS_DOCSTRING` imported by the pinned official source under
+Transformers 5. This changes no model weights or forward math; functional
+incompatibilities still fail the real-checkpoint preflight.
 
-`fastvideo/tests/train/methods/test_mj_video_reward.py` covers:
+Tests cover exact aspect/criterion mapping, official frame indices, shared
+forward caching, cache invalidation, and rejection of source-drift settings.
 
-- exact five-aspect mapping;
-- exact criteria groups;
-- official frame indices for 124-frame and short videos;
-- aspect indices `2` and `3`;
-- one shared forward for C&C and Fineness;
-- cache invalidation for a new media object;
-- rejection of non-source values for frame count, input size, tiling, and dtype.
+## Phase 3 — assets and fixed baseline calibration
 
-### Important unresolved compatibility gate
-
-The official MJ-VIDEO code was authored against an older Transformers API,
-whereas FastVideo currently pins Transformers 5. The adapter intentionally
-raises a detailed error if that import or strict model load fails. Any required
-compatibility change must be committed and tested; it must not be applied as an
-untracked cloud-launcher patch.
-
-## Phase 3 — pinned assets and baseline calibration workflow
-
-**Status:** implementation complete; real asset/preflight/calibration execution
-pending.
+**Status:** implementation complete; asset download and GPU calibration pending.
 
 **Implementation commit:** `1d2a3077eedc216c5a790b1f94757f3d895bd671`
 
-### Implemented
+Follow-up robustness commits:
 
-- Extended `common.sh` with provider-independent paths for the official
-  MJ-VIDEO source, MJ-VIDEO-2B checkpoint, InternVL2-2B base model, and fixed
-  calibration artifact.
-- Added `01_download_mj_video.sh`, pinned to the exact source/model/base
-  revisions and writing revision markers consumed by the runtime adapter.
-- Added `h3_rvm_calibration_bank.yaml` to generate up to 100 fixed released
-  FastH3 videos at full geometry and the exact four-step VSA sampler.
-- Added `calibrate_reward_profile.py`:
-  - decodes fixed baseline MP4s with PyAV;
-  - scores raw TA, MJ C&C, MJ Fineness, and DT;
-  - uses median and `1.4826 * MAD`, with population-std fallback;
-  - refuses constant components unless explicitly audited and overridden;
-  - writes a versioned JSON artifact and per-video JSONL;
-  - records Git/model/source/input provenance.
-- Added `04_calibrate_physion_mj_rewards.sh` to generate or reuse the baseline
-  bank and build/validate the artifact.
-- Added `preflight_mj_video.py` and `03_preflight_mj_video.sh` for a strict real
-  checkpoint load/forward and the focused tests.
-- Added `test_reward_calibration_cli.py`.
+- `babd41ae10587e7cafb2c34a15537808475d57db` — handle an absent calibration
+  video directory under `set -euo pipefail`;
+- `809552c972003e93bde3b44481c2ec2ebe936043` — make all MJ source/model/base
+  revisions immutable and verify their markers after download.
 
-### Deliberate separation from the original RVM setup
+Implemented:
 
-The original `01_download_models.sh` remains unchanged. MJ-VIDEO is downloaded
-only when the alternate profile is requested. All calibration and setup logic
-lives in ordinary repository scripts; no Modal-only code or runtime patching is
-involved.
+- provider-independent MJ paths in `common.sh`;
+- `01_download_mj_video.sh` for the exact source, reward checkpoint, and base
+  checkpoint revisions;
+- `h3_rvm_calibration_bank.yaml` for deterministic released-FastH3 videos at
+  full `480x832x124` geometry and the exact four-step VSA policy;
+- `calibrate_reward_profile.py` for raw component scoring, median/MAD statistics,
+  standard-deviation fallback, JSON/JSONL output, and complete provenance;
+- `04_calibrate_physion_mj_rewards.sh` for calibration-bank generation and
+  artifact validation;
+- `preflight_mj_video.py` and `03_preflight_mj_video.sh` for a strict real-model
+  load/forward gate.
 
-## Phase 4 — selectable Physion/MJ reward profile
+The original RVM setup remains independent. MJ assets are downloaded only when
+the alternate profile is requested.
 
-**Status:** implementation complete; matched GPU comparison pending.
+## Phase 4 — selectable profile and matched comparison
+
+**Status:** complete; GPU comparison pending.
 
 **Implementation commit:** `95fe9106706782802ef0e5d24ba170add6126e91`
 
-### Implemented
+Implemented:
 
-- Added `rvm_h3_8gpu_physion_mj.yaml` with exactly:
+- `rvm_h3_8gpu_physion_mj.yaml` with exactly the requested
+  `0.30/0.40/0.25/0.05` calibrated weights;
+- required fixed calibration artifact;
+- unchanged exact unanchored RVM, four-step behavior policy, continuous
+  regression time, rank-128 attention LoRA, optimizer, geometry, and VSA policy;
+- `06_run_8gpu_reward_profile_sweep.sh` for a matched original-versus-Physion
+  comparison;
+- config deep-comparison tests proving that the profiles differ only in reward
+  configuration, the diagnostic-synchronization subclass, and run/output names.
 
-  ```text
-  0.30 * z(videoalign_ta)
-  0.40 * z(mjvideo_cc)
-  0.25 * z(mjvideo_fineness)
-  0.05 * z(dynamic_tracking)
-  ```
-
-- The profile requires the versioned fixed calibration artifact and clips only
-  extreme calibrated component values at absolute z-score five.
-- It uses `RVMRewardProfileMethod`, which inherits the existing
-  `RVMWithLocalMetricsMethod`; the only added behavior is synchronization of the
-  scorer-declared diagnostic key tuple.
-- It keeps exact unanchored RVM, the four-step behavior policy, continuous
-  analytic regression time, rank-128 attention LoRA, full geometry, VSA 90%,
-  optimizer, advantage scale, clipping, validation, and custom-node topology.
-- Added `06_run_8gpu_reward_profile_sweep.sh`:
-  - compares the original published RVM reward recipe against the Physion/MJ
-    profile;
-  - holds initialization, prompt order, seeds, LR, K, prompt groups, optimizer
-    budget, topology, and held-out evaluation fixed;
-  - runs the real MJ preflight first unless explicitly skipped;
-  - requires the fixed calibration artifact;
-  - evaluates at baseline, midpoint, and final by default.
-- Extended config tests to enumerate the new config, verify exact weights and MJ
-  settings, and deep-compare it with the original exact-RVM config after removing
-  only the reward profile, method-name shim, and run/output names.
-- Updated the reward-diagnostic test to declare its deterministic output
-  contract explicitly.
-
-### How to switch
-
-Original published RVM rewards:
+Switches:
 
 ```bash
+# Published RVM reward recipe.
 RVM_SCALEUP_CONFIG=examples/train/configs/rl/minimax_h3/rvm_h3_8gpu_exact.yaml \
   bash examples/train/rvm_h3/07_run_8gpu_scaleup_pilot.sh
-```
 
-Physion/MJ rewards:
-
-```bash
+# Physion/MJ reward recipe.
 RVM_SCALEUP_CONFIG=examples/train/configs/rl/minimax_h3/rvm_h3_8gpu_physion_mj.yaml \
   bash examples/train/rvm_h3/07_run_8gpu_scaleup_pilot.sh
-```
 
-Matched comparison:
-
-```bash
+# Matched profile comparison.
 bash examples/train/rvm_h3/06_run_8gpu_reward_profile_sweep.sh
 ```
 
-### Next phase
+## Phase 5 — documentation, custom-node scale-up, and static audit
 
-Run a clean-clone static audit, fix any import/format/config defects, update the
-README/runbook/preflight and PR description, and document the exact GPU commands
-and unresolved real-checkpoint boundary.
+**Status:** repository implementation complete; GPU gates pending.
 
-## Commit log
+Key commits:
 
-| Phase | Commit | Summary | Validation |
-|---|---|---|---|
-| 0 | `55d60aec` | Plan, source inventory, and implementation contract | Source audit |
-| 1 | `9848405f` | Fixed calibration, output contracts, distributed profile method | AST parse; tests authored |
-| 2 | `c3445e32` | Official MJ-VIDEO adapter, exact preprocessing, shared aspect cache | AST parse; fake-runtime tests authored |
-| 3 | `1d2a3077` | Pinned assets, baseline bank, robust calibration, real-model preflight | AST/shell parsing pending final audit |
-| 4 | `95fe9106` | Selectable calibrated profile and matched profile sweep | Config invariants authored |
+- `a9ea0b2f90b00b6ed7f66a853bd2a94fdaf9f156` — profile guide, expanded
+  preflight, and Transformers-5 import compatibility;
+- `c22a503a808fd2370ff469a828aea4e7571ea9be` — 8/16-H100 custom-node topology,
+  pilot, and full-campaign scripts;
+- `c79e74b8b115f20d058b825540ab64ddd2ed2abc` — distinguish the compact
+  one-H100 smoke geometry from production geometry in config tests;
+- `7bb6dc9c3e92a0931c3f872ab4cc23c8738dde3d` — audit the exact pinned
+  MJ-VIDEO source import under the current FastVideo dependency family.
 
-## GPU validation boundary
+Added `PHYSION_MJ_REWARD_PROFILE.md` with setup, calibration, switching, logged
+metrics, memory guidance, matched experiment commands, and failure policy.
 
-No new GPU execution has occurred for this MJ-VIDEO extension. Existing H3 RVM
-GPU results validate the pre-existing model/rollout/reward path only. The new
-MJ-VIDEO adapter and calibrated profile must pass the committed real-checkpoint
-preflight, baseline calibration, and matched short training sweep before any
-quality claim.
+The custom-node scripts support:
+
+```text
+8 H100s:  SP4 x DP2
+16 H100s: SP4 x DP4
+```
+
+Modal remains a thin one-/four-GPU test transport and contains no data
+processing, model/reward setup, hyperparameters, or training implementation.
+
+### Completed clean CI audit
+
+Temporary audit workflow run:
+
+```text
+Git SHA: 7bb6dc9c3e92a0931c3f872ab4cc23c8738dde3d
+GitHub Actions run: 33618343022
+Result: success
+```
+
+Passed:
+
+- Python compilation of every new reward/calibration/profile entry point;
+- import of the exact pinned `aiming-lab/MJ-Video` source commit under
+  Transformers 5 with the narrow compatibility shim;
+- shell syntax for download, preflight, calibration, 8/16-GPU topology,
+  profile-sweep, pilot, and full-run scripts;
+- YAML parsing for the calibration-bank and Physion-profile configs;
+- 25 focused CPU tests covering calibration, MJ preprocessing/aspects/cache,
+  reward diagnostics, and config equivalence;
+- `git diff --check`.
+
+This validates code structure, source import, equations, and configuration
+contracts. It does not load the 4.43 GB MJ reward checkpoint or execute H3/MJ on
+a GPU.
+
+## Incremental commit log
+
+| Phase | Commit | Summary |
+|---|---|---|
+| 0 | `55d60aec` | Plan, source inventory, and acceptance criteria |
+| 1 | `9848405f` | Fixed calibration and scorer output contracts |
+| 2 | `c3445e32` | Source-aligned MJ-VIDEO aspect adapter |
+| 3 | `1d2a3077` | Pinned asset, baseline bank, calibration, and real-model preflight |
+| 4 | `95fe9106` | Selectable Physion profile and matched profile sweep |
+| 5 | `a9ea0b2f` | Profile guide and source-import compatibility |
+| 5 | `c22a503a` | 8/16-H100 custom-node execution support |
+| QA | `c79e74b8` | Compact-versus-production config test correction |
+| QA | `babd41ae` | Calibration directory robustness |
+| QA | `809552c9` | Immutable MJ asset revisions |
+| QA | `7bb6dc9c` | Exact pinned-source import audit |
+
+## Required execution order
+
+```bash
+# Existing FastH3/RVM setup.
+bash examples/train/rvm_h3/00_create_conda_env.sh
+bash examples/train/rvm_h3/01_download_models.sh
+RVM_MAX_TRAIN_PROMPTS=4096 \
+  bash examples/train/rvm_h3/02_prepare_dataset.sh
+
+# Alternate reward setup and exact-model gate.
+bash examples/train/rvm_h3/01_download_mj_video.sh
+bash examples/train/rvm_h3/03_preflight_mj_video.sh
+
+# Fixed released-FastH3 reward calibration.
+export NUM_GPUS=4
+export RVM_SP_SIZE=4
+bash examples/train/rvm_h3/04_calibrate_physion_mj_rewards.sh
+
+# Matched custom-node comparison.
+export NUM_GPUS=8
+export RVM_SP_SIZE=4
+bash examples/train/rvm_h3/06_run_8gpu_reward_profile_sweep.sh
+```
+
+For 16 H100s, set `NUM_GPUS=16` and first run
+`05_run_8gpu_topology_smoke.sh`.
+
+## Honest validation boundary
+
+No new H3 or MJ-VIDEO GPU execution has occurred for this extension in the
+current environment. Existing 1/4-H100 results validate the pre-existing H3 RVM
+runtime only. Before any quality claim, the new path must pass:
+
+1. exact pinned MJ-VIDEO checkpoint load and real forward;
+2. fixed released-FastH3 calibration-bank generation;
+3. one-/four-GPU profile integration smoke;
+4. 8-H100 SP4xDP2 topology/resume/export gate;
+5. matched original-RVM-versus-Physion profile sweep;
+6. paired held-out metrics plus full-video and audio inspection.
+
+Any runtime compatibility fix must be committed and re-tested. Do not patch the
+Modal wrapper or custom node in place, and do not replace MJ-VIDEO with another
+reward silently.
