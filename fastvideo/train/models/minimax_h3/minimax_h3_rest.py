@@ -1,18 +1,54 @@
 # SPDX-License-Identifier: Apache-2.0
-"""MiniMax H3 adapter for immutable REST/AMD teacher-trajectory caches."""
+"""MiniMax H3 adapters for REST/AMD cache generation and training."""
 
 from __future__ import annotations
 
 import math
+import os
 from collections.abc import Sequence
 from typing import Any
+
+import torch
 
 from fastvideo.dataset.h3_rest_cache import (
     H3RESTCacheDataset,
     build_h3_rest_cache_dataloader,
 )
 from fastvideo.distributed import get_sp_group
+from fastvideo.train.models.minimax_h3.minimax_h3_dmd import MiniMaxH3DMDModel
 from fastvideo.train.models.minimax_h3.minimax_h3_rvm import MiniMaxH3RVMModel
+
+
+class MiniMaxH3RESTTeacherModel(MiniMaxH3DMDModel):
+    """Frozen full-H3 adapter used only while building scored trajectory caches."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        if self._trainable:
+            raise ValueError("MiniMaxH3RESTTeacherModel must be configured trainable=false")
+
+    def noise_amounts(self, timestep: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Expose H3's paired shifted-sigma schedules to the dense sampler."""
+        return self._noise_amounts(timestep)
+
+    @torch.no_grad()
+    def decode_latents(self, packed: torch.Tensor) -> torch.Tensor:
+        """Decode packed endpoints to uint8 video media ``[B,C,T,H,W]``."""
+        default_batch = os.environ.get(
+            "FASTVIDEO_RVM_VAE_DECODE_BATCH_SIZE", str(packed.shape[0])
+        )
+        decode_batch_size = int(
+            os.environ.get("FASTVIDEO_REST_VAE_DECODE_BATCH_SIZE", default_batch)
+        )
+        if decode_batch_size <= 0:
+            raise ValueError("FASTVIDEO_REST_VAE_DECODE_BATCH_SIZE must be positive")
+        decoded = torch.cat(
+            [
+                torch.from_numpy(self.decode_vis_latents(chunk))
+                for chunk in packed.split(decode_batch_size, dim=0)
+            ]
+        )
+        return decoded.permute(0, 2, 1, 3, 4).contiguous()
 
 
 class MiniMaxH3RESTModel(MiniMaxH3RVMModel):
@@ -87,4 +123,4 @@ class MiniMaxH3RESTModel(MiniMaxH3RVMModel):
         self.start_step = 0
 
 
-__all__ = ["MiniMaxH3RESTModel"]
+__all__ = ["MiniMaxH3RESTModel", "MiniMaxH3RESTTeacherModel"]
