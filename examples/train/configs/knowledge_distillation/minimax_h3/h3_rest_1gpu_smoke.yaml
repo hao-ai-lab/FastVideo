@@ -1,0 +1,74 @@
+# One-H100 cache-only optimizer correctness gate. Requires the compact cache
+# from h3_rest_cache_4gpu_compact.yaml. This is not a quality experiment.
+models:
+  student:
+    _target_: fastvideo.train.models.minimax_h3.MiniMaxH3RESTModel
+    init_from: artifacts/rvm_h3/models/fasth3
+    trainable: true
+    enable_gradient_checkpointing_type: full
+    attention_backend: VIDEO_SPARSE_ATTN_H3
+    student_timesteps: [1000, 750, 500, 250, 0]
+    verify_cache_hashes: true
+    lora:
+      enable: true
+      rank: 1
+      alpha: 1
+      target_modules: [to_q, to_k, to_v, to_out]
+
+method:
+  _target_: fastvideo.train.methods.knowledge_distillation.H3RESTMethod
+  attn_kind: vsa
+  amd_scale: 1.0
+  amd_bias: 0.5
+  amd_coefficient_clip: null
+  audio_loss_weight: 1.0
+  ema_regularization_weight: 0.2
+  ema_decay: 0.9
+
+training:
+  distributed:
+    num_gpus: 1
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 1
+  data:
+    data_path: artifacts/rvm_h3/rest_cache/compact
+    preprocessed_data_type: text_only
+    dataloader_num_workers: 0
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    seed: 42
+    num_latent_t: 12
+    num_height: 320
+    num_width: 576
+    num_frames: 39
+  optimizer:
+    learning_rate: 5.0e-6
+    betas: [0.9, 0.999]
+    weight_decay: 1.0e-4
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+  loop:
+    max_train_steps: 1
+    gradient_accumulation_steps: 1
+  checkpoint:
+    output_dir: outputs/h3_rest/1gpu_smoke
+    training_state_checkpointing_steps: 1
+    checkpoints_total_limit: 2
+  tracker:
+    project_name: fasth3-rest
+    run_name: h3-rest-1gpu-smoke
+  model:
+    precondition_outputs: false
+    enable_gradient_checkpointing_type: full
+  vsa_sparsity: 0.9
+  vsa_cache_tile_buf: false
+  model_path: artifacts/rvm_h3/models/fasth3
+  dit_precision: bf16
+
+callbacks:
+  grad_clip:
+    _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
+    max_grad_norm: 1.0
+pipeline: {}
