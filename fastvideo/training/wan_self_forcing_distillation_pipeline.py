@@ -66,12 +66,11 @@ def main(args) -> None:
 
 
 if __name__ == "__main__":
-    logger.warning(
-        "\n"
-        "================================================================================\n"
-        "[DEPRECATED]: Direct execution of this pipeline is deprecated!\n"
-        "Please use `fastvideo/training/runner.py` or the `fastvideo.training.runner.Runner` class instead.\n"
-        "================================================================================")
+    logger.warning("\n"
+                   "================================================================================\n"
+                   "[DEPRECATED]: Direct execution of this pipeline is deprecated!\n"
+                   "Please use `fastvideo/training/runner.py` instead.\n"
+                   "================================================================================")
     argv = sys.argv
     from fastvideo.fastvideo_args import TrainingArgs
     from fastvideo.utils import FlexibleArgumentParser

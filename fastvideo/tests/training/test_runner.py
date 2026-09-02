@@ -1,6 +1,7 @@
 from unittest.mock import patch, MagicMock
 from fastvideo.training.runner import main
 import argparse
+from fastvideo.utils import build_parser
 
 def test_runner_invokes_correct_class():
     with patch('fastvideo.training.runner.importlib.import_module') as mock_import_module:
@@ -27,20 +28,6 @@ def test_runner_invokes_correct_class():
 
 
 def test_runner_cli_argument_parsing():
-    from fastvideo.training.runner import FlexibleArgumentParser
-    from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
-
-    def build_parser():
-        parser = FlexibleArgumentParser()
-        parser.add_argument("--pipeline-class",
-                            type=str,
-                            required=True)
-        parser.add_argument("--pipeline-module",
-                            type=str,
-                            required=True)
-        parser = TrainingArgs.add_cli_args(parser)
-        parser = FastVideoArgs.add_cli_args(parser)
-        return parser
 
     base_required_args = [
         "--data_path", "test_path",

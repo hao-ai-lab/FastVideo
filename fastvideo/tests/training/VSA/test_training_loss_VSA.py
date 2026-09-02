@@ -17,6 +17,7 @@ sys.path.append(str(Path(__file__).parent.parent.parent.parent.parent))
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.utils import FlexibleArgumentParser
 from fastvideo.training.runner import main
+from fastvideo.utils import build_parser
 
 wandb_name = "test_training_loss_VSA"
 reference_wandb_summary_file = "fastvideo/tests/training/VSA/h100_reference_wandb_summary_VSA.json"
@@ -28,12 +29,12 @@ NUM_GPUS_PER_NODE = "2"
 def run_worker():
     """Worker function that will be run on each GPU"""
     # Create and populate args
-    parser = FlexibleArgumentParser()
-    parser = TrainingArgs.add_cli_args(parser)
-    parser = FastVideoArgs.add_cli_args(parser)
+    parser = build_parser()
 
     # Set the arguments as they are in finetune_v1_test.sh
     args = parser.parse_args([
+        "--pipeline_class", "WanTrainingPipeline",
+        "--pipeline_module", "fastvideo.training.wan_training_pipeline",
         "--model_path", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers", "--inference_mode", "False",
         "--pretrained_model_name_or_path", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers", "--data_path",
         "data/mini_dataset_i2v_VSA/combined_parquet_dataset", "--validation_dataset_file",
@@ -50,9 +51,6 @@ def run_worker():
         "--dit_precision", "fp32", "--max_grad_norm", "1.0", "--VSA_decay_rate", "0.01", "--VSA_decay_interval_steps",
         "1", "--VSA_sparsity", "0.9"
     ])
-
-    args.pipeline_class = "WanTrainingPipeline"
-    args.pipeline_module = "fastvideo.training.wan_training_pipeline"
     
     # Call the main training function
     main(args)

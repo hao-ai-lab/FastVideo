@@ -14,7 +14,9 @@ sys.path.append(str(Path(__file__).parent.parent.parent.parent.parent))
 
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.utils import FlexibleArgumentParser
+from fastvideo.utils import FlexibleArgumentParser
 from fastvideo.training.runner import main
+from fastvideo.utils import build_parser
 
 wandb_name = "test_distill_dmd"
 
@@ -25,12 +27,12 @@ NUM_GPUS_PER_NODE = "2"
 def run_worker():
     """Worker function that will be run on each GPU"""
     # Create and populate args
-    parser = FlexibleArgumentParser()
-    parser = TrainingArgs.add_cli_args(parser)
-    parser = FastVideoArgs.add_cli_args(parser)
+    parser = build_parser()
 
     # Set the arguments as they are in finetune_v1_test.sh
     args = parser.parse_args([
+        "--pipeline_class", "WanDistillationPipeline",
+        "--pipeline_module", "fastvideo.training.wan_distillation_pipeline",
         "--model_path", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers", "--inference_mode", "False",
         "--pretrained_model_name_or_path", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers", "--real_score_model_path",
         "Wan-AI/Wan2.1-T2V-1.3B-Diffusers", "--fake_score_model_path", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
@@ -48,9 +50,6 @@ def run_worker():
         "--min_timestep_ratio", "0.02", "--max_timestep_ratio", "0.98", "--real_score_guidance_scale", "3.5",
         "--enable_gradient_checkpointing_type", "full"
     ])
-    # Call the main training function
-    args.pipeline_class = "WanDistillationPipeline"
-    args.pipeline_module = "fastvideo.training.wan_distillation_pipeline"
     
     # Call the main training function
     main(args)
