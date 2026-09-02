@@ -6,16 +6,37 @@ activate_rvm_env
 require_path "${RVM_TRAIN_DATA}"
 require_path "${RVM_EVAL_DATA}"
 
-export NUM_GPUS=8
-export RVM_SP_SIZE=4
+export NUM_GPUS="${NUM_GPUS:-8}"
+export RVM_SP_SIZE="${RVM_SP_SIZE:-4}"
+if [[ "${NUM_GPUS}" != "8" && "${NUM_GPUS}" != "16" ]]; then
+    echo "Scale-up pilot supports NUM_GPUS=8 or 16 on the custom node." >&2
+    exit 2
+fi
+if [[ "${RVM_SP_SIZE}" != "4" ]] || (( NUM_GPUS % RVM_SP_SIZE != 0 )); then
+    echo "Use RVM_SP_SIZE=4 for the 8/16-H100 scale-up pilot." >&2
+    exit 2
+fi
+
 CONFIG="${RVM_SCALEUP_CONFIG:-examples/train/configs/rl/minimax_h3/rvm_h3_8gpu_exact.yaml}"
 STEPS="${RVM_SCALEUP_STEPS:-50}"
 PROMPT_GROUPS="${RVM_SCALEUP_PROMPT_GROUPS:-8}"
 EVAL_PROMPTS="${RVM_SCALEUP_EVAL_PROMPTS:-32}"
 SELECTED_LR="${RVM_SELECTED_LR:-1e-5}"
 MIN_TRAIN_PROMPTS="${RVM_SCALEUP_MIN_TRAIN_PROMPTS:-4096}"
-OUTPUT="${RVM_SCALEUP_OUTPUT:-outputs/rvm_h3/8gpu_scaleup_pilot}"
-RUN_NAME="${RVM_SCALEUP_RUN_NAME:-rvm-h3-faithful-8gpu-scaleup-pilot}"
+OUTPUT="${RVM_SCALEUP_OUTPUT:-outputs/rvm_h3/${NUM_GPUS}gpu_scaleup_pilot}"
+RUN_NAME="${RVM_SCALEUP_RUN_NAME:-rvm-h3-faithful-${NUM_GPUS}gpu-scaleup-pilot}"
+DP_REPLICAS=$((NUM_GPUS / RVM_SP_SIZE))
+
+if (( PROMPT_GROUPS % DP_REPLICAS != 0 )); then
+    echo "RVM_SCALEUP_PROMPT_GROUPS=${PROMPT_GROUPS} must be divisible by DP replicas=${DP_REPLICAS}." >&2
+    exit 2
+fi
+if grep -q 'mjvideo_' "${CONFIG}"; then
+    require_path "${MJ_VIDEO_RUNTIME_PATH}"
+    require_path "${MJ_VIDEO_MODEL_PATH}"
+    require_path "${MJ_VIDEO_BASE_MODEL_PATH}"
+    require_path "${MJ_VIDEO_CALIBRATION_PATH}"
+fi
 
 python - "${RVM_TRAIN_DATA}" "${MIN_TRAIN_PROMPTS}" <<'PY'
 from pathlib import Path
@@ -51,6 +72,7 @@ run_rvm_training \
 
 cat <<EOF
 Scale-up pilot completed:
+  GPUs/topology: ${NUM_GPUS} H100s, SP4 x DP${DP_REPLICAS}
   config: ${CONFIG}
   LR: ${SELECTED_LR}
   optimizer steps: ${STEPS}
@@ -58,7 +80,8 @@ Scale-up pilot completed:
   K: 8
   held-out prompts per 5%-interval evaluation: ${EVAL_PROMPTS}
   output: ${OUTPUT}
-Select a checkpoint from held-out rewards and media; do not automatically use
-the last checkpoint. Require non-decreasing VideoAlign TA/MQ, useful global
-reward variance, low clipping frequency, and understood DT saturation.
+Select a checkpoint from paired held-out rewards and inspected media; do not
+automatically use the last checkpoint. For the original profile require stable
+TA/MQ and understood DT saturation. For the Physion profile inspect raw and
+calibrated TA, MJ C&C, MJ Fineness, DT, full-video integrity, and audio.
 EOF
