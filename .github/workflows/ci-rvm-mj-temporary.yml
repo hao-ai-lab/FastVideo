@@ -28,8 +28,10 @@ jobs:
             --index-url https://download.pytorch.org/whl/cpu \
             torch torchvision
           python -m pip install \
-            transformers safetensors timm diffusers accelerate \
-            omegaconf einops loguru imageio imageio-ffmpeg pyarrow peft
+            transformers safetensors timm diffusers accelerate peft \
+            omegaconf einops loguru imageio imageio-ffmpeg pyarrow \
+            cloudpickle scipy six h5py requests sentencepiece protobuf \
+            tqdm datasets torchdata ftfy aiohttp aiofiles fastapi
           python -m pip install --no-deps -e .
 
       - name: Compile changed Python entry points
