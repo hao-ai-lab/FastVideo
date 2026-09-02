@@ -1,0 +1,94 @@
+# Generate fixed released-FastH3 videos for reward calibration.
+models:
+  student:
+    _target_: fastvideo.train.models.minimax_h3.MiniMaxH3RVMModel
+    init_from: artifacts/rvm_h3/models/fasth3
+    trainable: true
+    enable_gradient_checkpointing_type: full
+    attention_backend: VIDEO_SPARSE_ATTN_H3
+    lora:
+      enable: true
+      rank: 1
+      alpha: 1
+      target_modules: [to_q, to_k, to_v, to_out]
+
+method:
+  _target_: fastvideo.train.methods.rl.RVMWithLocalMetricsMethod
+  samples_per_prompt: 2
+  prompt_groups_per_rollout: 1
+  optimizer_updates_per_rollout: 1
+  advantage_scale: 0.1
+  advantage_eps: 1.0e-4
+  advantage_clip: 5.0
+  positive_only_steps: 0
+  video_anchor_beta: 0.0
+  audio_anchor_beta: 0.0
+  audio_loss_weight: 1.0
+  max_grad_norm: 1.0
+  reward_device: cuda
+  sampling:
+    denoising_steps: [1000, 750, 500, 250]
+    attn_kind: vsa
+  training_timestep:
+    mode: continuous_uniform
+    min: 0.0
+    max: 1.0
+  reward_fn:
+    rewards:
+      mean_luminance: 1.0
+  validation:
+    # Run only at step zero; the one near-zero-LR optimizer step is a launcher
+    # compatibility detail and does not affect the calibration videos.
+    every_steps: 999
+    num_prompts: 100
+    data_path: artifacts/rvm_h3/data/eval
+    seed: 4242
+    run_at_start: true
+    log_samples: false
+    log_sample_limit: 0
+    save_videos: true
+
+training:
+  distributed:
+    num_gpus: 4
+    sp_size: 4
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 4
+  data:
+    data_path: artifacts/rvm_h3/data/train
+    preprocessed_data_type: text_only
+    dataloader_num_workers: 0
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    seed: 42
+    num_latent_t: 37
+    num_height: 480
+    num_width: 832
+    num_frames: 124
+  optimizer:
+    learning_rate: 1.0e-12
+    betas: [0.9, 0.999]
+    weight_decay: 1.0e-4
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+  loop:
+    max_train_steps: 1
+    gradient_accumulation_steps: 1
+  checkpoint:
+    output_dir: outputs/rvm_h3/calibration_bank
+    training_state_checkpointing_steps: 1
+    checkpoints_total_limit: 1
+  tracker:
+    project_name: fasth3-rvm
+    run_name: rvm-h3-calibration-bank
+  model:
+    precondition_outputs: false
+    enable_gradient_checkpointing_type: full
+  vsa_sparsity: 0.9
+  vsa_cache_tile_buf: false
+  model_path: artifacts/rvm_h3/models/fasth3
+  dit_precision: bf16
+
+callbacks: {}
+pipeline: {}
