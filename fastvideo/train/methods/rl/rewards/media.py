@@ -138,6 +138,41 @@ class MultiRewardScorer:
                 f"Unsupported reward(s): {unsupported}. "
                 f"Available rewards: {sorted(self.scorers)}"
             )
+        self.output_keys = self._build_output_keys()
+
+    def _build_output_keys(self) -> tuple[str, ...]:
+        keys: list[str] = []
+        for name in self.reward_weights:
+            keys.append(name)
+            scorer = self.scorers[name]
+            declared: set[str] = set()
+            for raw_diagnostic in getattr(
+                scorer,
+                "diagnostic_names",
+                (),
+            ):
+                diagnostic = (
+                    str(raw_diagnostic)
+                    .strip()
+                    .lower()
+                )
+                if not diagnostic:
+                    raise ValueError(
+                        f"Reward {name!r} declares an empty diagnostic name"
+                    )
+                if diagnostic in declared:
+                    raise ValueError(
+                        f"Reward {name!r} declares duplicate diagnostic "
+                        f"{diagnostic!r}"
+                    )
+                declared.add(diagnostic)
+                keys.append(f"{name}_{diagnostic}")
+        keys.append("avg")
+        if len(keys) != len(set(keys)):
+            raise ValueError(
+                f"Reward output keys collide: {keys}"
+            )
+        return tuple(keys)
 
     @torch.no_grad()
     def __call__(
@@ -177,7 +212,26 @@ class MultiRewardScorer:
                 "last_diagnostics",
                 None,
             )
+            declared = {
+                str(value).strip().lower()
+                for value in getattr(
+                    scorer,
+                    "diagnostic_names",
+                    (),
+                )
+            }
             if isinstance(diagnostics, Mapping):
+                observed = {
+                    str(value).strip().lower()
+                    for value in diagnostics
+                }
+                undeclared = sorted(observed - declared)
+                missing = sorted(declared - observed)
+                if undeclared or missing:
+                    raise RuntimeError(
+                        f"Reward {name!r} diagnostic contract mismatch: "
+                        f"undeclared={undeclared}, missing={missing}"
+                    )
                 for diagnostic_name, values in diagnostics.items():
                     key = (
                         f"{name}_"
@@ -198,9 +252,19 @@ class MultiRewardScorer:
                             f"Duplicate reward diagnostic key: {key}"
                         )
                     details[key] = diagnostic
+            elif declared:
+                raise RuntimeError(
+                    f"Reward {name!r} declares diagnostics "
+                    "but did not populate last_diagnostics"
+                )
 
         assert total is not None
         details["avg"] = total
+        if tuple(details) != self.output_keys:
+            raise RuntimeError(
+                "Reward output order changed at runtime: "
+                f"expected={self.output_keys}, observed={tuple(details)}"
+            )
         return details
 
     @staticmethod
