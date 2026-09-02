@@ -1,36 +1,67 @@
 # SPDX-License-Identifier: Apache-2.0
+"""Smoke, registry, preset, and stage-contract tests for Cosmos Predict pipeline."""
+
+import json
+from pathlib import Path
 import pytest
 import torch
 from unittest.mock import MagicMock
 
-from fastvideo.api.sampling_param import SamplingParam
-from fastvideo.fastvideo_args import FastVideoArgs
-from fastvideo.registry import get_model_family, get_default_preset
+from fastvideo.api.presets import get_preset
+from fastvideo.configs.pipelines.cosmos_predict import CosmosPredictConfig, CosmosPredict14BConfig
+from fastvideo.fastvideo_args import FastVideoArgs, WorkloadType
+from fastvideo.registry import get_model_info, get_preset_selection
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.basic.cosmos_predict.pipeline_cosmos_predict import (
     CosmosPredictPipeline,
     CosmosPredictLatentPreparationStage,
+    EntryClass,
 )
 
 
-def test_cosmos_predict_registry_and_preset_resolution():
-    """Verify that presets are properly registered and resolvable via SamplingParam."""
-    # 7B model check
-    param_7b = SamplingParam.from_pretrained("nvidia/Cosmos-1.0-Prompt2World-7B-Video")
-    assert param_7b.height == 704
-    assert param_7b.width == 1280
-    assert param_7b.num_frames == 93
-    assert param_7b.num_inference_steps == 35
-    assert get_model_family("nvidia/Cosmos-1.0-Prompt2World-7B-Video") == "cosmos_predict"
-    assert get_default_preset("nvidia/Cosmos-1.0-Prompt2World-7B-Video") == "cosmos_predict_preset"
+def test_cosmos_predict_registry_and_preset_resolution(tmp_path: Path):
+    """Verify exact class resolution, required modules, configs, and official preset defaults."""
+    assert EntryClass is CosmosPredictPipeline
+    assert CosmosPredictPipeline._required_config_modules == [
+        "text_encoder", "tokenizer", "vae", "transformer", "scheduler"
+    ]
 
-    # 14B model check
-    param_14b = SamplingParam.from_pretrained("nvidia/Cosmos-1.0-Prompt2World-14B-Video")
-    assert param_14b.height == 704
-    assert param_14b.width == 1280
-    assert param_14b.num_frames == 93
-    assert get_model_family("nvidia/Cosmos-1.0-Prompt2World-14B-Video") == "cosmos_predict"
-    assert get_default_preset("nvidia/Cosmos-1.0-Prompt2World-14B-Video") == "cosmos_predict_14b_preset"
+    # 7B model preset check
+    preset_name_7b, family_7b = get_preset_selection("nvidia/Cosmos-1.0-Prompt2World-7B-Video")
+    assert (preset_name_7b, family_7b) == ("cosmos_predict_preset", "cosmos_predict")
+    preset_7b = get_preset(preset_name_7b, family_7b)
+    assert preset_7b.defaults["height"] == 704
+    assert preset_7b.defaults["width"] == 1280
+    assert preset_7b.defaults["num_frames"] == 93
+    assert preset_7b.defaults["fps"] == 24
+    assert preset_7b.defaults["guidance_scale"] == 7.0
+    assert preset_7b.defaults["num_inference_steps"] == 35
+
+    # 14B model preset check
+    preset_name_14b, family_14b = get_preset_selection("nvidia/Cosmos-1.0-Prompt2World-14B-Video")
+    assert (preset_name_14b, family_14b) == ("cosmos_predict_14b_preset", "cosmos_predict")
+    preset_14b = get_preset(preset_name_14b, family_14b)
+    assert preset_14b.defaults["num_frames"] == 93
+
+    # Local layout model info resolution check
+    model_dir = tmp_path / "Cosmos-1.0-Prompt2World-7B-Video"
+    model_dir.mkdir()
+    model_index = {
+        "_class_name": "CosmosPredictPipeline",
+        "_diffusers_version": "0.32.0",
+        "scheduler": ["diffusers", "EDMEulerScheduler"],
+        "text_encoder": ["transformers", "Qwen2_5_VLForConditionalGeneration"],
+        "tokenizer": ["transformers", "AutoTokenizer"],
+        "transformer": ["diffusers", "CosmosTransformer3DModel"],
+        "vae": ["diffusers", "AutoencoderKLCosmos"],
+    }
+    for component in CosmosPredictPipeline._required_config_modules:
+        (model_dir / component).mkdir()
+    (model_dir / "model_index.json").write_text(json.dumps(model_index), encoding="utf-8")
+
+    info_7b = get_model_info(str(model_dir), workload_type=WorkloadType.T2V)
+    assert info_7b.pipeline_cls is CosmosPredictPipeline
+    assert info_7b.pipeline_config_cls is CosmosPredictConfig
 
 
 def test_cosmos_predict_latent_preparation_temporal_downsampling():

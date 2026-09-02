@@ -882,20 +882,6 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=None,
         pipeline_config_cls=CosmosConfig,
-        workload_types=(WorkloadType.T2V, WorkloadType.I2V),
-        hf_model_paths=[
-            "nvidia/Cosmos-1.0-Autoregression-7B-Video",
-        ],
-        model_detectors=[
-            lambda path: "cosmos" in path.lower() and "autoregression" in path.lower(),
-        ],
-        model_family="cosmos",
-        default_preset="cosmos_ar_7b",
-    )
-    
-    register_configs(
-        sampling_param_cls=None,
-        pipeline_config_cls=CosmosConfig,
         workload_types=(WorkloadType.T2V, ),
         hf_model_paths=[
             "nvidia/Cosmos-Predict2-2B-Video2World",
