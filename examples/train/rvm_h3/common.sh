@@ -8,6 +8,12 @@ cd "${REPO_ROOT}"
 export RVM_ENV_NAME="${RVM_ENV_NAME:-fasth3-rvm}"
 export RVM_ARTIFACT_ROOT="${RVM_ARTIFACT_ROOT:-${REPO_ROOT}/artifacts/rvm_h3}"
 export FASTH3_MODEL_DIR="${FASTH3_MODEL_DIR:-${RVM_ARTIFACT_ROOT}/models/fasth3}"
+export H3_TEACHER_REPO="${H3_TEACHER_REPO:-MiniMaxAI/MiniMax-H3}"
+export H3_TEACHER_REVISION="${H3_TEACHER_REVISION:-bfc8ed0353f5a9733be73e6b2c98ec0948195b86}"
+export H3_TEACHER_MODEL_DIR="${H3_TEACHER_MODEL_DIR:-${RVM_ARTIFACT_ROOT}/models/minimax-h3-teacher}"
+export H3_REST_CACHE_ROOT="${H3_REST_CACHE_ROOT:-${RVM_ARTIFACT_ROOT}/rest_cache}"
+export H3_REST_COMPACT_CACHE="${H3_REST_COMPACT_CACHE:-${H3_REST_CACHE_ROOT}/compact}"
+export H3_REST_FULL_CACHE="${H3_REST_FULL_CACHE:-${H3_REST_CACHE_ROOT}/full}"
 export RVM_PROMPT_DIR="${RVM_PROMPT_DIR:-${RVM_ARTIFACT_ROOT}/prompts}"
 export RVM_TRAIN_DATA="${RVM_TRAIN_DATA:-${RVM_ARTIFACT_ROOT}/data/train}"
 export RVM_EVAL_DATA="${RVM_EVAL_DATA:-${RVM_ARTIFACT_ROOT}/data/eval}"
@@ -29,9 +35,10 @@ export FASTVIDEO_VSA_SM100A="${FASTVIDEO_VSA_SM100A:-0}"
 export FASTVIDEO_VSA_CUTEDSL="${FASTVIDEO_VSA_CUTEDSL:-0}"
 export FASTVIDEO_MINIMAX_H3_FUSIONS="${FASTVIDEO_MINIMAX_H3_FUSIONS:-0}"
 export FASTVIDEO_RVM_VAE_DECODE_BATCH_SIZE="${FASTVIDEO_RVM_VAE_DECODE_BATCH_SIZE:-1}"
+export FASTVIDEO_REST_VAE_DECODE_BATCH_SIZE="${FASTVIDEO_REST_VAE_DECODE_BATCH_SIZE:-1}"
 export PYTHONPATH="${REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 
-mkdir -p "${RVM_ARTIFACT_ROOT}" "${HF_HOME}"
+mkdir -p "${RVM_ARTIFACT_ROOT}" "${H3_REST_CACHE_ROOT}" "${HF_HOME}"
 
 activate_rvm_env() {
     # Modal/Docker images already own the Python environment. Explicitly opt
@@ -87,4 +94,8 @@ run_rvm_training() {
     while IFS= read -r line; do topology+=("${line}"); done < <(rvm_topology_args)
     python examples/train/rvm_h3/verify_clean_source.py
     NUM_GPUS="${NUM_GPUS:-8}" bash examples/train/run.sh "${config}" "${topology[@]}" "$@"
+}
+
+run_h3_rest_training() {
+    run_rvm_training "$@"
 }
