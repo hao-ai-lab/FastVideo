@@ -150,12 +150,79 @@ weighted sum -> per-prompt centering -> rollout-global std -> signed coefficient
 The second stage is unchanged. Calibration never estimates live-policy moments,
 so the reward target does not drift during training.
 
+## Phase 2 — source-aligned MJ-VIDEO aspect adapter
+
+**Status:** implementation complete; real-checkpoint GPU preflight still pending.
+
+**Implementation commit:** `c3445e3211764dfe3281d87d661c2c4a0eada2a8`
+
+### Implemented
+
+- Added `fastvideo/train/methods/rl/rewards/mj_video.py`.
+- Pinned the official source revision and checkpoint revision in code.
+- Added strict source/model/base-model revision verification. Model downloads
+  must contain `.fastvideo_revision` markers written by the setup script; local
+  overrides require an explicit `verify_revision=false` choice.
+- Dynamically import the official `moe_reward.py` and InternVL2 implementation
+  from a configured MJ-VIDEO checkout rather than copying or silently changing
+  upstream model semantics.
+- Reproduce the source inference configuration:
+  - `OpenGVLab/InternVL2-2B` base architecture;
+  - 28 criteria and five aspects;
+  - exact aspect-to-criterion mapping;
+  - gating temperature `1.0`;
+  - hidden dimension `1024`;
+  - three hidden gating layers;
+  - strict safetensors load;
+  - BF16 evaluation.
+- Reproduce source video preprocessing in memory:
+  - eight uniformly sampled, endpoint-exclusive frames;
+  - 448x448 bicubic resize;
+  - one tile per frame;
+  - ImageNet mean/std;
+  - official `FrameN: <image>` prompt construction.
+- Added `mjvideo_fineness` from aspect index `2` and `mjvideo_cc` from aspect
+  index `3` to the existing reward builder.
+- Added one shared process-local runtime cache. When both aspect scorers receive
+  the same media object and prompt tuple, only one MJ-VIDEO forward is executed.
+- Added configurable bounded batch size, with source-faithful batch size one as
+  the default.
+- Added an isolated one-process Gloo initialization only when a standalone
+  preflight has no distributed process group; the official InternVL code calls
+  `torch.distributed.get_rank()` during forward.
+- All load/import/shape/non-finite failures are explicit. There is no fallback to
+  HPSv3, VideoAlign, or another reward.
+
+### Tests added
+
+`fastvideo/tests/train/methods/test_mj_video_reward.py` covers:
+
+- exact five-aspect mapping;
+- exact criteria groups;
+- official frame indices for 124-frame and short videos;
+- aspect indices `2` and `3`;
+- one shared forward for C&C and Fineness;
+- cache invalidation for a new media object;
+- rejection of non-source values for frame count, input size, tiling, and dtype.
+
+The adapter and test file were parsed with Python's AST before commit. The tests
+use a fake InternVL runtime to validate batching, prompt construction, aspect
+selection, and caching without downloading the 4.43 GB checkpoint.
+
+### Important unresolved compatibility gate
+
+The official MJ-VIDEO code was authored against an older Transformers API,
+whereas FastVideo currently pins Transformers 5. The adapter intentionally
+raises a detailed error if that import or strict model load fails. Phase 3 adds
+the exact pinned asset downloader and a real-checkpoint preflight. Any required
+compatibility change must be committed and tested; it must not be applied as an
+untracked cloud-launcher patch.
+
 ### Next phase
 
-Implement the pinned MJ-VIDEO runtime adapter, exact eight-frame preprocessing,
-aspect extraction, one-model/two-scorer shared cache, and fake-runtime tests.
-Then add a real-checkpoint GPU preflight; no compatibility claim will be made
-until that forward succeeds.
+Add provider-independent asset download paths, revision markers, baseline
+validation manifests, the fixed calibration CLI, and a dedicated real MJ-VIDEO
+preflight/calibration script.
 
 ## Commit log
 
@@ -163,6 +230,7 @@ until that forward succeeds.
 |---|---|---|---|
 | 0 | `55d60aec` | Plan, source inventory, and implementation contract | Source audit |
 | 1 | `9848405f` | Fixed calibration, output contracts, distributed profile method | AST parse; tests authored |
+| 2 | `c3445e32` | Official MJ-VIDEO adapter, exact preprocessing, shared aspect cache | AST parse; fake-runtime tests authored |
 
 ## GPU validation boundary
 
