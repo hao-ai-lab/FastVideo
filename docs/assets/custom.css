@@ -564,7 +564,7 @@ img {
 }
 
 .cookbook-option-grid--hardware {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(6.4rem, 1fr));
 }
 
 .cookbook-option-grid button {
@@ -1251,7 +1251,7 @@ img {
 }
 
 .cookbook-option-grid--hardware {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(6.4rem, 1fr));
 }
 
 .cookbook-option-grid button {
