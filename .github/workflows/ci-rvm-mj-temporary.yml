@@ -46,6 +46,30 @@ jobs:
             examples/train/rvm_h3/preflight_mj_video.py \
             examples/train/rvm_h3/calibrate_reward_profile.py
 
+      - name: Import the exact pinned MJ-VIDEO source
+        run: |
+          git clone --filter=blob:none https://github.com/aiming-lab/MJ-Video.git /tmp/MJ-Video
+          git -C /tmp/MJ-Video checkout --detach cc1d2c9587a620e9ebd3599ae4cdd21b5fd7c87a
+          python - <<'PY'
+          from pathlib import Path
+
+          from fastvideo.train.methods.rl.rewards.mj_video_compat import (
+              install_mj_video_transformers_compat,
+          )
+          from fastvideo.train.methods.rl.rewards.mj_video import (
+              _import_official_mj_video,
+          )
+
+          install_mj_video_transformers_compat()
+          model_cls, config_cls, prepare_chat_input = _import_official_mj_video(
+              Path("/tmp/MJ-Video")
+          )
+          assert model_cls.__name__ == "InternVLChatRewardModeling"
+          assert config_cls.__name__ == "InternVLChatRewardModelingConfig"
+          assert callable(prepare_chat_input)
+          print(model_cls, config_cls, prepare_chat_input)
+          PY
+
       - name: Parse shell and YAML artifacts
         run: |
           bash -n \
