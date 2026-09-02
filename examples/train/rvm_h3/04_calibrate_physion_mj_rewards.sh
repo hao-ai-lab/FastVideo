@@ -28,8 +28,12 @@ if ! [[ "${CALIBRATION_VIDEOS}" =~ ^[0-9]+$ ]] ||
 fi
 
 video_count() {
+    if [[ ! -d "${CALIBRATION_VIDEO_DIR}" ]]; then
+        echo 0
+        return
+    fi
     find "${CALIBRATION_VIDEO_DIR}" \
-        -maxdepth 1 -type f -name 'prompt-*.mp4' 2>/dev/null \
+        -maxdepth 1 -type f -name 'prompt-*.mp4' \
         | wc -l
 }
 
