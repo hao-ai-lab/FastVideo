@@ -31,7 +31,8 @@ jobs:
             transformers safetensors timm diffusers accelerate peft \
             omegaconf einops loguru imageio imageio-ffmpeg pyarrow \
             cloudpickle scipy six h5py requests sentencepiece protobuf \
-            tqdm datasets torchdata ftfy aiohttp aiofiles fastapi
+            tqdm datasets torchdata ftfy aiohttp aiofiles fastapi \
+            remote-pdb gpustat
           python -m pip install --no-deps -e .
 
       - name: Compile changed Python entry points
