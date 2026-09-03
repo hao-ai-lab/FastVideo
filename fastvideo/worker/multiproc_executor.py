@@ -522,6 +522,7 @@ class WorkerMultiprocProc:
         self.streaming_input_queue = streaming_input_queue
         self.streaming_output_queue = streaming_output_queue
         self._initial_log_handler = _initial_log_handler
+        self._shutdown_started = False
         self._shutdown_complete = False
         self._shutdown_response: dict[str, Any] | None = None
         wrapper = WorkerWrapperBase(fastvideo_args=fastvideo_args, rpc_rank=rank)
@@ -719,10 +720,26 @@ class WorkerMultiprocProc:
             assert self._shutdown_response is not None
             return self._shutdown_response
 
-        response = self.worker.shutdown()
-        _shutdown_torch_compile_workers()
-        self._shutdown_response = response
-        self._shutdown_complete = True
+        if getattr(self, "_shutdown_started", False):
+            if self._shutdown_response is None:
+                self._shutdown_response = {"status": "shutdown"}
+            return self._shutdown_response
+
+        self._shutdown_started = True
+        response = {"status": "shutdown"}
+        shutdown_succeeded = False
+
+        try:
+            response = self.worker.shutdown()
+            shutdown_succeeded = True
+        except Exception:
+            logger.exception("Worker %d failed to shut down", self.rank)
+        finally:
+            _shutdown_torch_compile_workers()
+            if shutdown_succeeded:
+                self._shutdown_complete = True
+            self._shutdown_response = response
+
         return response
 
     def worker_busy_loop(self) -> None:

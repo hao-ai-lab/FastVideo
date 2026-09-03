@@ -55,6 +55,16 @@ class _CountingWorker:
         return {"status": "shutdown"}
 
 
+class _FailingWorker:
+
+    def __init__(self):
+        self.shutdown_calls = 0
+
+    def shutdown(self):
+        self.shutdown_calls += 1
+        raise RuntimeError("interrupted shutdown")
+
+
 class _GracefulProcess:
 
     def __init__(self, required_timeout: float):
@@ -145,6 +155,29 @@ def test_worker_shutdown_closes_worker_and_compile_pool_once(monkeypatch) -> Non
 
     assert first == {"status": "shutdown"}
     assert second == first
+    assert worker.shutdown_calls == 1
+    assert compile_shutdowns == [True]
+
+
+def test_worker_shutdown_still_idempotent_after_failure(monkeypatch) -> None:
+    worker = _FailingWorker()
+    compile_shutdowns = []
+    proc = WorkerMultiprocProc.__new__(WorkerMultiprocProc)
+    proc.rank = 0
+    proc.worker = worker
+    proc._shutdown_started = False
+    proc._shutdown_complete = False
+    proc._shutdown_response = None
+    monkeypatch.setattr(
+        "fastvideo.worker.multiproc_executor._shutdown_torch_compile_workers",
+        lambda: compile_shutdowns.append(True),
+    )
+
+    first = proc.shutdown()
+    second = proc.shutdown()
+
+    assert first == {"status": "shutdown"}
+    assert second == {"status": "shutdown"}
     assert worker.shutdown_calls == 1
     assert compile_shutdowns == [True]
 
