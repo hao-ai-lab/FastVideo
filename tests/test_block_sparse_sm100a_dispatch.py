@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Routing tests for the opt-in sm_100a dispatch in ``block_sparse_attn_from_indices``.
+"""Routing tests for the opt-in sm_100a/sm_103a dispatch in ``block_sparse_attn_from_indices``.
 
 ``FASTVIDEO_VSA_SM100A=1`` routes the forward to the sm_100a extension when
 ``block_sparse_attn_sm100a.is_supported`` passes, pairing it with the Triton
@@ -20,9 +20,9 @@ HEAD_DIM = 128
 ENV = "FASTVIDEO_VSA_SM100A"
 
 pytestmark = pytest.mark.skipif(
-    not torch.cuda.is_available() or torch.cuda.get_device_capability() != (10, 0)
+    not torch.cuda.is_available() or torch.cuda.get_device_capability() not in {(10, 0), (10, 3)}
     or not vsa._HAS_VSA_SM100A,
-    reason="requires Blackwell (sm_100a) and a built fastvideo_kernel extension",
+    reason="requires data-center Blackwell (sm_100a/sm_103a) and a built fastvideo_kernel extension",
 )
 
 

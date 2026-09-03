@@ -31,11 +31,11 @@ already at the kernels' native 64-token granularity, so both forward and
 backward run the Triton block-sparse kernels directly (no expansion,
 ``FASTVIDEO_VSA_CUTEDSL`` does not apply). A third, opt-in route exists
 for the tile-64 FORWARD only: ``FASTVIDEO_VSA_SM100A=1`` sends no-grad
-forwards through the sm_100a CUDA block-sparse kernel
+forwards through the data-center Blackwell CUDA block-sparse kernel
 (``fastvideo_kernel.block_sparse_attn_sm100a``, upstream PR #1719 plus
 our per-q-tile ``q2k_num`` fix) when the extension is built, the device
-is sm_100, and the geometry qualifies. The CUDA kernel assigns adjacent
-pairs of query tiles to CTAs, so an odd logical tile count receives one
+is sm_100 or sm_103, and the geometry qualifies. The CUDA kernel assigns
+adjacent pairs of query tiles to CTAs, so an odd logical tile count receives one
 internal, zero-valid partner tile for the no-grad call only. Score search,
 the trained mask, gate-compress, and the returned packed sequence remain on
 the original logical tiles. Grad-tracking forwards and every backward stay
@@ -61,8 +61,8 @@ except ImportError:
     map_to_index = None
 
 try:
-    # Optional: only present in fastvideo_kernel builds that carry the sm_100a
-    # CUDA block-sparse forward (upstream PR #1719). The module itself imports
+    # Optional: only present in fastvideo_kernel builds that carry the
+    # sm_100a/sm_103a CUDA block-sparse forward (upstream PR #1719). The module itself imports
     # fine without the compiled symbols (`_HAS_VSA_SM100A` is then False and
     # `is_supported` says no), so this only guards *module* availability.
     from fastvideo_kernel import block_sparse_attn_sm100a as _sm100a
@@ -79,7 +79,7 @@ from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 
-# Opt-in switch for the sm_100a CUDA forward on the tile-64 no-grad path.
+# Opt-in switch for the data-center Blackwell CUDA forward on the tile-64 no-grad path.
 VSA_SM100A_ENV = "FASTVIDEO_VSA_SM100A"
 
 VSA_H3_TILE_SIZE = (4, 8, 8)  # 256 elements -> FA4 CuTe fastpath on sm10.x (default)
@@ -411,7 +411,7 @@ def _build_block_mask(
 
 def _sm100a_unavailable_reason(sm100a_mod: Any, query_bhsd: torch.Tensor, variable_block_sizes: torch.Tensor,
                                grad_mode: bool) -> str | None:
-    """Why the opt-in sm_100a forward route cannot run here, or None if it can.
+    """Why the opt-in data-center Blackwell route cannot run here, or None if it can.
 
     Pure decision logic, split out so the routing is unit-testable without a
     GPU or the compiled extension (tests substitute ``sm100a_mod``). Order
@@ -420,9 +420,9 @@ def _sm100a_unavailable_reason(sm100a_mod: Any, query_bhsd: torch.Tensor, variab
     if sm100a_mod is None:
         return "fastvideo_kernel.block_sparse_attn_sm100a is not installed"
     if grad_mode:
-        return "inputs require grad and the sm_100a kernel is forward-only; grad paths keep Triton"
+        return "inputs require grad and the sm_100a/sm_103a kernel is forward-only; grad paths keep Triton"
     if not sm100a_mod.is_supported(query_bhsd, variable_block_sizes):
-        return ("block_sparse_attn_sm100a.is_supported returned False (needs an sm_100 device, a built "
+        return ("block_sparse_attn_sm100a.is_supported returned False (needs an sm_100 or sm_103 device, a built "
                 "extension, bf16, head_dim 128, an even tile count, and integer tile sizes)")
     return None
 
@@ -703,7 +703,7 @@ class MiniMaxH3VSAImpl(AttentionImpl):
                 # capture. Logging from this branch would itself break a
                 # ``fullgraph=True`` forward.
                 if not compiling:
-                    logger.info_once("MiniMax-H3 VSA tile-64 forward: using the sm100a CUDA block-sparse kernel")
+                    logger.info_once("MiniMax-H3 VSA tile-64 forward: using the sm100a/sm103a CUDA block-sparse kernel")
                 if regional_compiling:
                     # The compile-safe wrapper keeps both Triton mask
                     # compaction and the raw pybind launch behind one
