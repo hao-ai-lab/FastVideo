@@ -116,8 +116,10 @@ def video_sparse_attn(
     scores = torch.matmul(q_c, k_c.transpose(-2, -1)) / (dim**0.5)
     attn = torch.softmax(scores, dim=-1)
     out_c = torch.matmul(attn, v_c)
+    # Kept at block resolution: [B, H, q_num_blocks, 1, D]. The coarse result is
+    # constant within a block, so it can broadcast over the intra-block axis in
+    # the combine below instead of being materialized across the full sequence.
     out_c = out_c.view(batch, heads, q_num_blocks, 1, dim)
-    out_c = out_c.repeat(1, 1, 1, block_elements, 1).view(batch, heads, q_seq_len, dim)
 
     # Sparse branch (fused Triton topk mask)
     mask = fused_topk_mask(scores, topk)
@@ -128,9 +130,64 @@ def video_sparse_attn(
     else:
         out_s = block_sparse_attn(q, k, v, mask, variable_block_sizes)[0]
 
+    return _combine_coarse_sparse(out_c, out_s, compress_attn_weight, batch, heads, q_num_blocks,
+                                  block_elements, dim, q_seq_len)
+
+
+def _combine_coarse_sparse(
+    out_c: torch.Tensor,
+    out_s: torch.Tensor,
+    compress_attn_weight: torch.Tensor | None,
+    batch: int,
+    heads: int,
+    q_num_blocks: int,
+    block_elements: int,
+    dim: int,
+    q_seq_len: int,
+) -> torch.Tensor:
+    """Combine the block-resolution coarse output with the sparse output.
+
+    ``out_c`` is [B, H, q_num_blocks, 1, D] and broadcasts over the intra-block
+    axis, so the coarse branch is never expanded to [B, H, S, D]. This mirrors
+    the BSHD 128/256 combine, which already broadcasts ``out_c_blk.unsqueeze(2)``
+    instead of repeating.
+
+    That path notes it must stay out-of-place because the sparse output is saved
+    by FA4's autograd node for backward. The same applies whenever grad is
+    enabled, so the autograd branch below is out-of-place too. Under
+    ``no_grad``/``inference_mode`` no autograd node is attached to ``out_s`` and
+    nothing outside this function aliases it, so accumulating into it is safe and
+    removes the last two full-sequence temporaries.
+
+    Ungated this is bit-exact with the previous ``out_c.repeat(...) + out_s``.
+    Gated, ``addcmul_`` fuses the multiply-add rather than rounding the
+    intermediate product to bf16, so the rounding differs from the old path. In
+    the added tests the fused result is the more accurate of the two when both
+    are compared against fp32. See ``tests/test_vsa_combine.py``.
+    """
+    blocked = (batch, heads, q_num_blocks, block_elements, dim)
+
+    def as_blocked(t: torch.Tensor) -> torch.Tensor:
+        return t.view(*blocked) if t.is_contiguous() else t.reshape(*blocked)
+
+    if torch.is_grad_enabled():
+        out_s_b = as_blocked(out_s)
+        if compress_attn_weight is not None:
+            combined = out_c * as_blocked(compress_attn_weight) + out_s_b
+        else:
+            combined = out_c + out_s_b
+        return combined.view(batch, heads, q_seq_len, dim)
+
+    # Inference: accumulate in place so neither the broadcast product nor the sum
+    # allocates another full-sequence tensor. Requires a real view of out_s.
+    if not out_s.is_contiguous():
+        out_s = out_s.contiguous()
+    out_s_b = out_s.view(*blocked)
     if compress_attn_weight is not None:
-        return out_c * compress_attn_weight + out_s
-    return out_c + out_s
+        out_s_b.addcmul_(out_c, as_blocked(compress_attn_weight))
+    else:
+        out_s_b.add_(out_c)
+    return out_s
 
 
 def video_sparse_attn_bshd(
