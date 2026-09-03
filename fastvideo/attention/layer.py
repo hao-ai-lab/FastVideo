@@ -6,12 +6,11 @@ from functools import wraps
 import torch
 import torch.nn as nn
 
-from fastvideo.attention.ring import ring_flash_attn_func
+from fastvideo.attention.ring_attention import RingAttention
 from fastvideo.attention.selector import backend_name_to_enum, get_attn_backend
 from fastvideo.distributed.communication_op import (sequence_model_parallel_all_gather,
-                                                    sequence_model_parallel_all_to_all_4D, ulysses_all_to_all_4D)
-from fastvideo.distributed.parallel_state import (get_ring_group, get_ring_rank, get_ring_size, get_sp_parallel_rank,
-                                                  get_sp_world_size, get_ulysses_group)
+                                                    sequence_model_parallel_all_to_all_4D)
+from fastvideo.distributed.parallel_state import get_ring_size, get_sp_parallel_rank, get_sp_world_size
 from fastvideo.forward_context import ForwardContext, get_forward_context
 from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.utils import get_compute_dtype
@@ -104,40 +103,25 @@ class DistributedAttention(nn.Module):
         self.causal = causal
 
         # Ring Attention (and its USP hybrid with Ulysses) is a process-wide
-        # parallelism setting (like SP itself), so it is read from the
-        # distributed runtime rather than threaded through every model's
-        # constructor.
-        self.ring_size = get_ring_size()
-        self.use_ring_attention = self.ring_size > 1
-        if self.use_ring_attention:
-            sp_world_size = get_sp_world_size()
-            if sp_world_size % self.ring_size != 0:
-                raise RuntimeError("Ring Attention requires ring_size to evenly divide the SP world size. "
-                                   f"Got ring_size={self.ring_size}, sp_world_size={sp_world_size}.")
-            if self.backend != AttentionBackendEnum.FLASH_ATTN:
-                raise NotImplementedError("The initial Ring Attention implementation only supports the "
-                                          f"FlashAttention backend, got backend={self.backend}.")
-            if num_heads != num_kv_heads:
-                raise NotImplementedError("The initial Ring Attention implementation does not support GQA. "
-                                          f"num_heads={num_heads}, num_kv_heads={num_kv_heads}.")
-            ulysses_size = sp_world_size // self.ring_size
-            if ulysses_size > 1 and num_heads % ulysses_size != 0:
-                raise NotImplementedError(
-                    "The Ring+Ulysses (USP) hybrid requires num_heads to be divisible by the Ulysses "
-                    f"subgroup size. Got num_heads={num_heads}, ulysses_size={ulysses_size} "
-                    f"(sp_world_size={sp_world_size} // ring_size={self.ring_size}).")
-            # Ring Attention is only dispatched from DistributedAttention.forward
-            # itself (see below). A subclass that overrides forward() wholesale
-            # (e.g. LTXDistributedAttention, DistributedAttention_VSA) would
-            # otherwise never check self.use_ring_attention and silently keep
-            # running plain Ulysses SP -- fail loudly here instead of letting
-            # that divergence pass unnoticed.
-            if type(self).forward is not DistributedAttention.forward:
-                raise NotImplementedError(
-                    f"Ring Attention is not implemented for {type(self).__name__}, which overrides "
-                    "DistributedAttention.forward() directly instead of using the base dispatch. "
-                    "Disable Ring Attention (ring_size=1) for this model, or wire Ring Attention "
-                    "dispatch into its forward().")
+        # parallelism setting (like SP itself), so RingAttention itself reads
+        # it from the distributed runtime rather than it being threaded
+        # through every model's constructor. The one thing only this class
+        # can decide is the guard below: a subclass that overrides forward()
+        # wholesale (e.g. LTXDistributedAttention, DistributedAttention_VSA)
+        # would otherwise never reach the Ring dispatch in forward() below
+        # and silently keep running plain Ulysses SP -- fail loudly here
+        # instead of letting that divergence pass unnoticed.
+        if get_ring_size() > 1 and type(self).forward is not DistributedAttention.forward:
+            raise NotImplementedError(f"Ring Attention is not implemented for {type(self).__name__}, which overrides "
+                                      "DistributedAttention.forward() directly instead of using the base dispatch. "
+                                      "Disable Ring Attention (ring_size=1) for this model, or wire Ring Attention "
+                                      "dispatch into its forward().")
+        self._ring_attention = RingAttention.create_if_enabled(num_heads=num_heads,
+                                                               num_kv_heads=num_kv_heads,
+                                                               softmax_scale=self.softmax_scale,
+                                                               causal=causal,
+                                                               backend=self.backend)
+        self.use_ring_attention = self._ring_attention is not None
         # Preserve the historical compiler-disabled default. The regional
         # inference loader may enable this one instance after validating the
         # transformer's resolved backend; no process-global default changes.
@@ -177,11 +161,12 @@ class DistributedAttention(nn.Module):
         # Check input shapes
         assert q.dim() == 4 and k.dim() == 4 and v.dim() == 4, "Expected 4D tensors"
 
-        if self.use_ring_attention:
-            return self._forward_ring_attention(
-                q=q,
-                k=k,
-                v=v,
+        if self._ring_attention is not None:
+            return self._ring_attention.forward(
+                q,
+                k,
+                v,
+                training=self.training,
                 original_seq_len=original_seq_len,
                 replicated_q=replicated_q,
                 replicated_k=replicated_k,
@@ -265,161 +250,6 @@ class DistributedAttention(nn.Module):
         output = sequence_model_parallel_all_to_all_4D(output, scatter_dim=1, gather_dim=2)
 
         return output, replicated_output
-
-    def _validate_ring_inputs(
-        self,
-        q: torch.Tensor,
-        original_seq_len: int | None,
-        replicated_q: torch.Tensor | None,
-        replicated_k: torch.Tensor | None,
-        replicated_v: torch.Tensor | None,
-    ) -> None:
-        if self.training:
-            raise NotImplementedError("Ring Attention training/backward is not supported in the initial "
-                                      "FastVideo integration.")
-
-        if replicated_q is not None or replicated_k is not None or replicated_v is not None:
-            raise NotImplementedError("Ring Attention does not yet support replicated Q/K/V tokens "
-                                      "(e.g. text tokens concatenated onto the visual sequence).")
-
-        if self.causal:
-            raise NotImplementedError("The initial Ring Attention integration only supports non-causal "
-                                      "self-attention.")
-
-        if original_seq_len is not None:
-            local_seq_len = q.shape[1]
-            global_seq_len = local_seq_len * get_sp_world_size()
-            if original_seq_len != global_seq_len:
-                raise NotImplementedError(
-                    "Ring Attention does not yet support sequence-parallel padding or uneven shards. "
-                    f"original_seq_len={original_seq_len}, local_seq_len={local_seq_len}, "
-                    f"sp_world_size={get_sp_world_size()} (expected original_seq_len == "
-                    f"local_seq_len * sp_world_size == {global_seq_len}).")
-
-        if q.dtype not in (torch.float16, torch.bfloat16):
-            raise NotImplementedError(
-                f"Ring Attention requires fp16/bf16 inputs (the underlying FlashAttention kernel does not "
-                f"support fp32), got {q.dtype}. Cast Q/K/V before calling this layer instead of relying on "
-                f"a silent cast here.")
-
-    @staticmethod
-    def _slice_local_rope(
-        freqs_cis: tuple[torch.Tensor, torch.Tensor],
-        local_seq_len: int,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Slice global RoPE tables down to this rank's contiguous token range.
-
-        ``freqs_cis`` (as produced by ``get_rotary_pos_embed``) covers the full,
-        unsharded global sequence with shape ``[global_seq_len, head_size]``.
-        Ulysses can apply it unsliced because the all-to-all gathers the full
-        sequence before RoPE is applied. Ring Attention (pure, or the Ring
-        side of the Ring+Ulysses/USP hybrid) never gathers the sequence, so
-        each rank must rotate only its own contiguous chunk.
-
-        ``local_seq_len`` here is the length of that Ring chunk (equal to the
-        SP shard length in pure Ring, since ring rank == SP rank there; equal
-        to ``sp_shard_len * ulysses_size`` in the hybrid, since each Ring
-        chunk is first assembled from ``ulysses_size`` contiguous SP shards
-        by the pre-Ring Ulysses all-to-all). ``get_ring_rank()`` indexes that
-        chunk directly, so it is used regardless of which case is active
-        (it degenerates to the SP rank in pure Ring, and to 0 when Ring is
-        disabled entirely).
-        """
-        rank = get_ring_rank()
-        start = rank * local_seq_len
-        end = start + local_seq_len
-
-        cos, sin = freqs_cis
-        if cos.shape[0] < end or sin.shape[0] < end:
-            raise ValueError("RoPE tables are shorter than the required global token range. "
-                             f"rank={rank}, local_seq_len={local_seq_len}, required_end={end}, "
-                             f"cos_shape={tuple(cos.shape)}, sin_shape={tuple(sin.shape)}.")
-
-        return cos[start:end], sin[start:end]
-
-    def _forward_ring_attention(
-        self,
-        q: torch.Tensor,
-        k: torch.Tensor,
-        v: torch.Tensor,
-        original_seq_len: int | None,
-        replicated_q: torch.Tensor | None,
-        replicated_k: torch.Tensor | None,
-        replicated_v: torch.Tensor | None,
-        freqs_cis: tuple[torch.Tensor, torch.Tensor] | None,
-    ) -> tuple[torch.Tensor, None]:
-        """Ring Attention, optionally combined with Ulysses (USP hybrid).
-
-        When ``ulysses_size == 1`` (``ring_size == sp_world_size``) this is
-        pure Ring Attention: every SP rank is a Ring rank, and the Ulysses
-        all-to-all below is a no-op. When ``ulysses_size > 1``, each SP
-        replica is arranged as a ``ring_size x ulysses_size`` mesh: the
-        Ulysses all-to-all first redistributes heads -> sequence *within*
-        this rank's Ulysses subgroup, assembling one full contiguous "Ring
-        chunk" (``ulysses_size`` SP shards' worth of tokens) held on a
-        reduced number of heads. Ring Attention then runs across the
-        ``ring_size`` Ring ranks that each hold a different chunk but the
-        same head subset, and a final Ulysses all-to-all redistributes
-        sequence -> heads back to the original per-rank shard shape.
-        """
-        self._validate_ring_inputs(
-            q=q,
-            original_seq_len=original_seq_len,
-            replicated_q=replicated_q,
-            replicated_k=replicated_k,
-            replicated_v=replicated_v,
-        )
-
-        batch_size, local_seq_len, _, _ = q.shape
-
-        # Ulysses step (skipped entirely when ulysses_size == 1, i.e. pure
-        # Ring): redistribute heads -> sequence within this rank's Ulysses
-        # subgroup so that each Ring rank holds one full, contiguous Ring
-        # chunk. The stack-into-one-all-to-all-then-chunk below costs a real
-        # copy of Q/K/V, so only pay it when there is an actual Ulysses
-        # subgroup to redistribute within.
-        if get_ulysses_group() is not None:
-            qkv = torch.cat([q, k, v], dim=0)
-            qkv = ulysses_all_to_all_4D(qkv, scatter_dim=2, gather_dim=1)
-            q, k, v = qkv.chunk(3, dim=0)
-
-        ring_local_seq_len = q.shape[1]
-
-        if freqs_cis is not None:
-            local_cos, local_sin = self._slice_local_rope(freqs_cis, ring_local_seq_len)
-            q = _apply_rotary_emb(q, local_cos, local_sin, is_neox_style=False)
-            k = _apply_rotary_emb(k, local_cos, local_sin, is_neox_style=False)
-
-        # Ring Attention calls the distributed ring kernel directly rather than
-        # ``self.attn_impl.forward``: the latter runs plain (non-distributed)
-        # FlashAttention over whatever it is given, which would silently
-        # compute attention within the local shard only. ``preprocess_qkv`` /
-        # ``postprocess_output`` are identity for the FlashAttention backend
-        # (the only backend Ring supports, enforced in ``__init__``), so
-        # skipping them here does not diverge from the Ulysses path.
-        ring_group = get_ring_group()
-        if ring_group is None:
-            raise RuntimeError("Ring Attention is enabled, but the Ring process group is not initialized.")
-
-        output = ring_flash_attn_func(
-            q,
-            k,
-            v,
-            dropout_p=0.0,
-            softmax_scale=self.softmax_scale,
-            causal=False,
-            group=ring_group.device_group,
-        )
-
-        # Ulysses step back (no-op when ulysses_size == 1): redistribute
-        # sequence -> heads to restore the original per-rank shard shape.
-        output = ulysses_all_to_all_4D(output, scatter_dim=1, gather_dim=2)
-
-        if output.shape[:2] != (batch_size, local_seq_len):
-            raise RuntimeError("Ring Attention must preserve the local sequence shard. Expected output "
-                               f"prefix {(batch_size, local_seq_len)}, got {tuple(output.shape)}.")
-
-        return output, None
 
 
 class DistributedAttention_VSA(DistributedAttention):
