@@ -30,9 +30,12 @@ def test_fasth3_extra_and_root_kernel_pin_match_source_release():
     } in kernel_sources
 
 
-def test_kernel_release_matrix_can_publish_sm100a_wheels():
+def test_kernel_release_matrix_can_publish_data_center_blackwell_wheels():
     workflow = (REPO_ROOT / ".github" / "workflows" / "publish-kernel.yml").read_text(encoding="utf-8")
+    cmake = (REPO_ROOT / "fastvideo-kernel" / "CMakeLists.txt").read_text(encoding="utf-8")
 
     assert 'TORCH_CUDA_ARCH_LIST="9.0a;10.0a;12.0a"' in workflow
     assert 'TORCH_CUDA_ARCH_LIST="10.0a;12.0a"' in workflow
+    assert "arch=compute_100a,code=sm_100a" in cmake
+    assert "arch=compute_103a,code=sm_103a" in cmake
     assert "patchelf==0.17.2.4" in workflow

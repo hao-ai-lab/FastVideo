@@ -63,7 +63,7 @@ jobs:
               torch-cuda-short: 'cu130'
           platform:
             # x86_64 builds the full cu126 + cu130 set. cu130 ships the
-            # data-center Blackwell sm_100a VSA and consumer sm_120a FP4
+            # data-center Blackwell sm_100a/sm_103a VSA and consumer sm_120a FP4
             # kernels.
             - os: ubuntu-22.04
               arch: x86_64
@@ -169,7 +169,7 @@ jobs:
           #     covers sm_120a; turbodiffusion covers sm_100a+sm_120a. The sm_100 FP4
           #     forward is the FA4 CuTe DSL path in the fastvideo package (PR #1221),
           #     JIT-compiled at runtime — not built into this wheel.
-          #   * x86_64 cu130 = Hopper TK + data-center Blackwell sm_100a VSA
+          #   * x86_64 cu130 = Hopper TK + data-center Blackwell sm_100a/sm_103a VSA
           #     + consumer Blackwell sm_120a FP4.
           #   * x86_64 cu126 = Hopper TK only (older drivers; CUDA < 12.8 has no FP4).
           # The per-arch split in CMakeLists pins the FP4 targets to sm_120a and builds

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Correctness tests for the sm_100a CUDA block-sparse VSA forward.
+"""Correctness tests for the sm_100a/sm_103a CUDA block-sparse VSA forward.
 
 Compared against an explicit PyTorch reference rather than the Triton kernel: Triton's
 block-sparse forward is hardcoded to 64-token blocks (BLOCK_M = BLOCK_N = 64) while this
@@ -24,9 +24,9 @@ HEAD_DIM = 128
 BLOCK_SIZES = [64, 128]
 
 pytestmark = pytest.mark.skipif(
-    not torch.cuda.is_available() or torch.cuda.get_device_capability() != (10, 0)
+    not torch.cuda.is_available() or torch.cuda.get_device_capability() not in {(10, 0), (10, 3)}
     or not vsa._HAS_VSA_SM100A,
-    reason="requires Blackwell (sm_100a) and a built fastvideo_kernel extension",
+    reason="requires data-center Blackwell (sm_100a/sm_103a) and a built fastvideo_kernel extension",
 )
 
 

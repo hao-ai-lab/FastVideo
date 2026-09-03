@@ -1,5 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-"""sm_100a (Blackwell) CUDA block-sparse VSA forward.
+"""Data-center Blackwell CUDA block-sparse VSA forward.
+
+The historical ``sm100a`` module and symbol names are retained for compatibility, but the
+extension carries native sm_100a and sm_103a images and supports both device generations.
 
 A third backend behind the same VSA op as the Triton and CuTe-DSL paths. Forward only: it
 returns ``(out, lse)`` with ``lse`` in exactly the form ``triton_block_sparse_attn_forward``
@@ -31,7 +34,7 @@ except ImportError:  # pragma: no cover - extension not built
     _FWD_BY_BLOCK = {}
     _HAS_VSA_SM100A = False
 
-_SM100 = (10, 0)
+_SUPPORTED_COMPUTE_CAPABILITIES = {(10, 0), (10, 3)}
 HEAD_DIM = 128
 # Must match the -DVSA_BHSD the extension was compiled with (see CMakeLists).
 BHSD = True
@@ -52,7 +55,7 @@ def is_supported(q: torch.Tensor, variable_block_sizes: torch.Tensor) -> bool:
     enough to sit on a per-layer dispatch path.
 
     What the kernel accepts (and is tested to handle):
-      * q/k/v: contiguous 4-D bf16 CUDA tensors on an sm_100 device, head_dim 128, laid out
+      * q/k/v: contiguous 4-D bf16 CUDA tensors on an sm_100/sm_103 device, head_dim 128, laid out
         as compiled (BHSD here); seqlen == num_blocks * block with an EVEN num_blocks (a CTA
         owns an adjacent pair of query blocks) and a 64- or 128-token build present.
       * q2k_num: any per-row counts in [0, max_kv], NON-uniform across rows included. Rows
@@ -67,7 +70,7 @@ def is_supported(q: torch.Tensor, variable_block_sizes: torch.Tensor) -> bool:
     """
     if not _HAS_VSA_SM100A or not q.is_cuda:
         return False
-    if torch.cuda.get_device_capability(q.device) != _SM100:
+    if torch.cuda.get_device_capability(q.device) not in _SUPPORTED_COMPUTE_CAPABILITIES:
         return False
     if q.dtype != torch.bfloat16 or q.dim() != 4 or q.shape[-1] != HEAD_DIM:
         return False
@@ -97,7 +100,7 @@ def _block_sparse_attn_sm100a_inference(
     q2k_num: torch.Tensor,
     variable_block_sizes: torch.Tensor,
 ) -> torch.Tensor:
-    """Opaque no-LSE launch used by the inference-only sm_100a route.
+    """Opaque no-LSE launch used by the inference-only sm_100a/sm_103a route.
 
     The extension is exposed as a raw pybind function rather than a dispatcher
     op. Calling it directly makes Dynamo descend through a Python/C++ boundary
@@ -136,7 +139,7 @@ def _block_sparse_attn_sm100a_from_mask_inference(
     block_map: torch.Tensor,
     variable_block_sizes: torch.Tensor,
 ) -> torch.Tensor:
-    """Opaque mask compaction plus no-LSE sm_100a launch for inference.
+    """Opaque mask compaction plus no-LSE sm_100a/sm_103a launch for inference.
 
     H3 naturally produces a bool block map. Its Triton ``map_to_index`` call
     must live behind the same opaque boundary as the raw pybind launch;
