@@ -16,7 +16,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 from fastvideo.forward_context import set_forward_context
-from fastvideo.utils.distributed import initialize_model_parallel
+from fastvideo.distributed import initialize_model_parallel
 os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
 
 
@@ -36,7 +36,6 @@ def _run_fastvideo_pipeline(request_kwargs: dict[str, Any]) -> torch.Tensor:
 
     fastvideo_args = FastVideoArgs(
         model_path="nvidia/Cosmos-1.0-Prompt2World-7B-Video",
-        dtype="bfloat16",
     )
     
     sampling_param = SamplingParam.from_pretrained(fastvideo_args.model_path)
@@ -44,14 +43,12 @@ def _run_fastvideo_pipeline(request_kwargs: dict[str, Any]) -> torch.Tensor:
     sampling_param.prompt = request_kwargs["prompt"]
 
     batch = ForwardBatch(
-        data_type="video",
         **shallow_asdict(sampling_param),
         eta=0.0,
         n_tokens=sampling_param.num_frames * (sampling_param.height // 8) * (sampling_param.width // 8),
     )
     
-    # Instantiate the pipeline
-    pipeline = CosmosPredictPipeline()
+    pipeline = CosmosPredictPipeline(fastvideo_args.model_path, fastvideo_args)
     pipeline.create_pipeline_stages(fastvideo_args)
 
     with set_forward_context(current_timestep=0, attn_metadata=None):
