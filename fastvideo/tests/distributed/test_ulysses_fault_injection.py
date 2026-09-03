@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import os
 import re
-import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -154,12 +153,6 @@ def _worker() -> None:
         cleanup_dist_env_and_memory()
 
 
-def _free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return int(sock.getsockname()[1])
-
-
 @pytest.mark.parametrize("world,fault_rank,fault_stage", FAULT_CASES)
 def test_rank_local_setup_failure_falls_back_group_wide(world: int, fault_rank: int,
                                                         fault_stage: str) -> None:
@@ -177,8 +170,9 @@ def test_rank_local_setup_failure_falls_back_group_wide(world: int, fault_rank: 
                 sys.executable,
                 "-m",
                 "torch.distributed.run",
+                "--standalone",
+                "--nnodes=1",
                 f"--nproc_per_node={world}",
-                f"--master_port={_free_port()}",
                 str(Path(__file__).resolve()),
                 "--worker",
             ],
