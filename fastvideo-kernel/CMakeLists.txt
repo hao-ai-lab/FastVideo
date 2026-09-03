@@ -72,7 +72,7 @@ if(NOT GPU_BACKEND STREQUAL "ROCM")
         else()
             # Best-effort probe of the visible GPU (mirrors build.sh detect_with_torch).
             execute_process(
-                COMMAND "${Python_EXECUTABLE}" -c "import torch; assert torch.cuda.is_available(); mj, mn = torch.cuda.get_device_capability(0); print(f'{mj}.{mn}a' if (mj, mn) in ((9, 0), (12, 0)) else f'{mj}.{mn}')"
+                COMMAND "${Python_EXECUTABLE}" -c "import torch; assert torch.cuda.is_available(); mj, mn = torch.cuda.get_device_capability(0); print(f'{mj}.{mn}a' if (mj, mn) in ((9, 0), (10, 0), (10, 3), (12, 0)) else f'{mj}.{mn}')"
                 OUTPUT_VARIABLE _FV_ARCH_LIST
                 OUTPUT_STRIP_TRAILING_WHITESPACE
                 RESULT_VARIABLE _fv_detect_rc
@@ -382,11 +382,11 @@ if(BUILD_CXX_KERNELS)
     # Combined FastVideo Extension
     # Using name 'fastvideo_kernel_ops' to distinguish from the python package namespace
     # ---------------------------------------------------------------------------
-    # VSA block-sparse attention forward, Blackwell (sm_100a) only.
+    # VSA block-sparse attention forward, data-center Blackwell (sm_100a/sm_103a).
     #
-    # NOTE the "a" suffix: -arch=sm_100a is NOT enough -- it emits a plain sm_100 target and
-    # ptxas rejects every tcgen05 / setmaxnreg instruction. The explicit gencode spelling
-    # below is required, and matches the 10.0a entry in TORCH_CUDA_ARCH_LIST.
+    # NOTE the "a" suffix: these kernels use architecture-conditional tcgen05 / setmaxnreg
+    # instructions. Explicit gencode entries are required for both the GB200 (sm_100a) and
+    # B300/GB300 (sm_103a) images. The source body is shared; ptxas specializes each image.
     #
     # Built for 64-token sparse blocks -- FastVideo's default (4,4,4) tiling, so no
     # tile-size change and no top-k granularity change is needed. VSA_BHSD
@@ -396,21 +396,21 @@ if(BUILD_CXX_KERNELS)
     # exported (build.sh, and `pip install` with it set) the branch above only prints it --
     # the cmake variable stays empty, so testing that alone silently skips the kernel and
     # leaves a build that succeeds with the op missing.
-    set(ENABLE_VSA_SM100A OFF)
+    set(ENABLE_VSA_SM100_FAMILY OFF)
     set(_VSA_ARCH_LIST "${TORCH_CUDA_ARCH_LIST}")
     if(NOT _VSA_ARCH_LIST AND DEFINED ENV{TORCH_CUDA_ARCH_LIST})
         set(_VSA_ARCH_LIST "$ENV{TORCH_CUDA_ARCH_LIST}")
     endif()
-    if(_VSA_ARCH_LIST MATCHES "(^|[; ,])(10\\.0a|100a|sm_100a)([; ,]|$)")
-        set(ENABLE_VSA_SM100A ON)
+    if(_VSA_ARCH_LIST MATCHES "(^|[; ,])(10\\.(0|3)a|10(0|3)a|sm_10(0|3)a)([; ,]|$)")
+        set(ENABLE_VSA_SM100_FAMILY ON)
     endif()
-    if(ENABLE_VSA_SM100A)
-        message(STATUS "fastvideo-kernel: building block_sparse_sm100a (Blackwell, 64- and 128-token blocks)")
+    if(ENABLE_VSA_SM100_FAMILY)
+        message(STATUS "fastvideo-kernel: building block_sparse_sm100a (sm_100a/sm_103a, 64- and 128-token blocks)")
         list(APPEND EXTENSION_SOURCES csrc/attention/block_sparse_sm100a.cu
                                       csrc/attention/block_sparse_blk128_sm100a.cu)
         set_source_files_properties(csrc/attention/block_sparse_sm100a.cu
                                     csrc/attention/block_sparse_blk128_sm100a.cu PROPERTIES
-            COMPILE_OPTIONS "-gencode;arch=compute_100a,code=sm_100a;-DVSA_BHSD=true")
+            COMPILE_OPTIONS "-gencode;arch=compute_100a,code=sm_100a;-gencode;arch=compute_103a,code=sm_103a;-DVSA_BHSD=true")
     endif()
 
     Python_add_library(fastvideo_kernel_ops MODULE USE_SABI ${SKBUILD_SABI_VERSION} WITH_SOABI
@@ -428,7 +428,7 @@ if(BUILD_CXX_KERNELS)
 
     # Build compile definitions list
     set(COMPILE_DEFS TORCH_EXTENSION_NAME=fastvideo_kernel_ops)
-    if(ENABLE_VSA_SM100A)
+    if(ENABLE_VSA_SM100_FAMILY)
         list(APPEND COMPILE_DEFS TK_COMPILE_BLOCK_SPARSE_VSA_SM100A)
     endif()
     if(ENABLE_TK_KERNELS)

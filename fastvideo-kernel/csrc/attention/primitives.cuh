@@ -1,4 +1,4 @@
-// primitives.cuh -- device primitives for the sm_100a VSA block-sparse attention
+// primitives.cuh -- device primitives for the sm_100a/sm_103a VSA block-sparse attention
 // forward: tcgen05 (alloc / mma / ld / st / commit / wait / fence), TMA load / store /
 // tensormap, mbarrier, cluster launch control, setmaxnreg, fast math, and the FMHA helpers.
 //
@@ -874,4 +874,3 @@ __device__ __forceinline__
 void sts_f32(uint32_t smem_addr, float val) {
   asm volatile("st.shared.f32 [%0], %1;" :: "r"(smem_addr), "f"(val) : "memory");
 }
-
