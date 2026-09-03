@@ -9,7 +9,7 @@ for the distributed correctness test of the Ring kernel itself.
 
 from __future__ import annotations
 
-from fastvideo.distributed.parallel_state import _build_usp_subgroup_ranks
+from fastvideo.distributed.usp_topology import _build_usp_subgroup_ranks
 
 
 def test_single_replica_hybrid_layout() -> None:
