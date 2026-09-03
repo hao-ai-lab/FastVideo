@@ -6,7 +6,7 @@ the SP all-to-all gathers the complete sequence before RoPE runs. Ring
 Attention never gathers the sequence — each Ring rank only ever holds its own
 contiguous chunk (in the USP hybrid, that chunk is first assembled from
 several SP shards by the pre-Ring Ulysses all-to-all) — so
-``DistributedAttention._slice_local_rope`` slices the global RoPE table down
+``RingAttention._slice_local_rope`` slices the global RoPE table down
 to the Ring rank's token range *before* rotating.
 """
 
@@ -19,7 +19,7 @@ os.environ.setdefault("MASTER_PORT", "29511")
 
 import torch
 
-from fastvideo.attention.layer import DistributedAttention
+from fastvideo.attention.ring_attention import RingAttention
 from fastvideo.layers.rotary_embedding import _apply_rotary_emb
 
 
@@ -69,7 +69,7 @@ def test_slice_local_rope_delegates_to_ring_rank(distributed_setup) -> None:
     global_seq_len, head_size, local_seq_len = 16, 8, 16
     cos, sin = _random_rope_tables(global_seq_len, head_size)
 
-    local_cos, local_sin = DistributedAttention._slice_local_rope((cos, sin), local_seq_len)
+    local_cos, local_sin = RingAttention._slice_local_rope((cos, sin), local_seq_len)
 
     torch.testing.assert_close(local_cos, cos[:local_seq_len])
     torch.testing.assert_close(local_sin, sin[:local_seq_len])
@@ -80,7 +80,7 @@ def test_slice_local_rope_rejects_out_of_range(distributed_setup) -> None:
     cos, sin = _random_rope_tables(global_seq_len, head_size)
 
     try:
-        DistributedAttention._slice_local_rope((cos, sin), local_seq_len=global_seq_len + 1)
+        RingAttention._slice_local_rope((cos, sin), local_seq_len=global_seq_len + 1)
     except ValueError as exc:
         assert "shorter than the required" in str(exc)
     else:
