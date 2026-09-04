@@ -39,3 +39,18 @@ def test_kernel_release_matrix_can_publish_data_center_blackwell_wheels():
     assert "arch=compute_100a,code=sm_100a" in cmake
     assert "arch=compute_103a,code=sm_103a" in cmake
     assert "patchelf==0.17.2.4" in workflow
+
+
+def test_sm103a_gencode_requires_cuda_12_9():
+    cmake = (REPO_ROOT / "fastvideo-kernel" / "CMakeLists.txt").read_text(encoding="utf-8")
+    extension = (REPO_ROOT / "fastvideo-kernel" / "csrc" / "common_extension.cpp").read_text(encoding="utf-8")
+    backend = (REPO_ROOT / "fastvideo-kernel" / "python" / "fastvideo_kernel" /
+               "block_sparse_attn_sm100a.py").read_text(encoding="utf-8")
+    vsa_options = cmake.index("set(_VSA_COMPILE_OPTIONS")
+    sm103_guard = cmake.index("if(NOT CUDAToolkit_VERSION VERSION_LESS 12.9)", vsa_options)
+    sm103_gencode = cmake.index("arch=compute_103a,code=sm_103a", sm103_guard)
+
+    assert sm103_guard < sm103_gencode < cmake.index("endif()", sm103_guard)
+    assert "list(APPEND COMPILE_DEFS TK_COMPILE_BLOCK_SPARSE_VSA_SM103A)" in cmake
+    assert 'm.attr("_has_vsa_sm103a") = true' in extension
+    assert 'getattr(_C, "_has_vsa_sm103a", False)' in backend

@@ -397,6 +397,7 @@ if(BUILD_CXX_KERNELS)
     # the cmake variable stays empty, so testing that alone silently skips the kernel and
     # leaves a build that succeeds with the op missing.
     set(ENABLE_VSA_SM100_FAMILY OFF)
+    set(ENABLE_VSA_SM103A OFF)
     set(_VSA_ARCH_LIST "${TORCH_CUDA_ARCH_LIST}")
     if(NOT _VSA_ARCH_LIST AND DEFINED ENV{TORCH_CUDA_ARCH_LIST})
         set(_VSA_ARCH_LIST "$ENV{TORCH_CUDA_ARCH_LIST}")
@@ -405,12 +406,32 @@ if(BUILD_CXX_KERNELS)
         set(ENABLE_VSA_SM100_FAMILY ON)
     endif()
     if(ENABLE_VSA_SM100_FAMILY)
-        message(STATUS "fastvideo-kernel: building block_sparse_sm100a (sm_100a/sm_103a, 64- and 128-token blocks)")
+        set(_VSA_COMPILE_OPTIONS
+            "-gencode"
+            "arch=compute_100a,code=sm_100a"
+        )
+        set(_VSA_NATIVE_ARCHS "sm_100a")
+        # CUDA 12.9 introduced the SM103 compiler target. Keep CUDA 12.8
+        # GB200 builds working instead of passing nvcc an unknown compute_103a.
+        if(NOT CUDAToolkit_VERSION VERSION_LESS 12.9)
+            list(APPEND _VSA_COMPILE_OPTIONS
+                "-gencode"
+                "arch=compute_103a,code=sm_103a"
+            )
+            list(APPEND _VSA_NATIVE_ARCHS "sm_103a")
+            set(ENABLE_VSA_SM103A ON)
+        endif()
+        list(APPEND _VSA_COMPILE_OPTIONS "-DVSA_BHSD=true")
+        string(JOIN "/" _VSA_NATIVE_ARCHS_DISPLAY ${_VSA_NATIVE_ARCHS})
+        message(STATUS
+            "fastvideo-kernel: building block_sparse_sm100a "
+            "(${_VSA_NATIVE_ARCHS_DISPLAY}, 64- and 128-token blocks)"
+        )
         list(APPEND EXTENSION_SOURCES csrc/attention/block_sparse_sm100a.cu
                                       csrc/attention/block_sparse_blk128_sm100a.cu)
         set_source_files_properties(csrc/attention/block_sparse_sm100a.cu
                                     csrc/attention/block_sparse_blk128_sm100a.cu PROPERTIES
-            COMPILE_OPTIONS "-gencode;arch=compute_100a,code=sm_100a;-gencode;arch=compute_103a,code=sm_103a;-DVSA_BHSD=true")
+            COMPILE_OPTIONS "${_VSA_COMPILE_OPTIONS}")
     endif()
 
     Python_add_library(fastvideo_kernel_ops MODULE USE_SABI ${SKBUILD_SABI_VERSION} WITH_SOABI
@@ -430,6 +451,9 @@ if(BUILD_CXX_KERNELS)
     set(COMPILE_DEFS TORCH_EXTENSION_NAME=fastvideo_kernel_ops)
     if(ENABLE_VSA_SM100_FAMILY)
         list(APPEND COMPILE_DEFS TK_COMPILE_BLOCK_SPARSE_VSA_SM100A)
+    endif()
+    if(ENABLE_VSA_SM103A)
+        list(APPEND COMPILE_DEFS TK_COMPILE_BLOCK_SPARSE_VSA_SM103A)
     endif()
     if(ENABLE_TK_KERNELS)
         list(APPEND COMPILE_DEFS TK_COMPILE_ST_ATTN TK_COMPILE_BLOCK_SPARSE)
