@@ -188,6 +188,7 @@ dev = [ "fastvideo[lint]", "fastvideo[test]", ]
 fasth3 = [
     "flash-attn-4",
     "fastvideo-kernel==0.3.5; sys_platform == 'linux'",
+    "quack-kernels==0.5.3",
 ]
 
 prompt-safety = [
