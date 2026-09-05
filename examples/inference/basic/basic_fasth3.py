@@ -383,6 +383,9 @@ def run(args: argparse.Namespace) -> list[float]:
             generation_time = getattr(result, "generation_time", None)
             if generation_time is not None:
                 print(f"Generation time: {float(generation_time):.3f}s")
+            peak_memory_mb = getattr(result, "peak_memory_mb", None)
+            if peak_memory_mb is not None:
+                print(f"Peak memory: {float(peak_memory_mb):.1f} MB")
             denoise_time = _denoise_seconds(result)
             if denoise_time is not None:
                 measured_denoise_times.append(denoise_time)
