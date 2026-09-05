@@ -32,6 +32,43 @@ from fastvideo.utils import maybe_download_lora
 logger = init_logger(__name__)
 
 
+def _has_quantized_mxfp8_weights(transformer_modules: dict[str, nn.Module]) -> bool:
+    """Return whether any transformer contains an initialized MXFP8 weight."""
+    from fastvideo.layers.quantization.mxfp8_config import MXFP8QuantizeMethod
+
+    return any(
+        isinstance(getattr(module, "quant_method", None), MXFP8QuantizeMethod)
+        and getattr(module, "_mxfp8_weight", None) is not None
+        for transformer in transformer_modules.values()
+        for module in transformer.modules()
+    )
+
+
+def _has_nvfp4_weights_without_bf16(transformer_modules: dict[str, nn.Module]) -> bool:
+    """Return whether NVFP4 quantization removed any transformer's BF16 weight."""
+    from fastvideo.layers.quantization.nvfp4_config import NVFP4QuantizeMethod
+
+    return any(
+        isinstance(getattr(module, "quant_method", None), NVFP4QuantizeMethod)
+        and getattr(module, "_nvfp4_weight", None) is not None
+        and getattr(module, "weight", None) is None
+        for transformer in transformer_modules.values()
+        for module in transformer.modules()
+    )
+
+
+def _has_quantized_nvfp4_weights(transformer_modules: dict[str, nn.Module]) -> bool:
+    """Return whether any transformer contains an initialized NVFP4 weight."""
+    from fastvideo.layers.quantization.nvfp4_config import NVFP4QuantizeMethod
+
+    return any(
+        isinstance(getattr(module, "quant_method", None), NVFP4QuantizeMethod)
+        and getattr(module, "_nvfp4_weight", None) is not None
+        for transformer in transformer_modules.values()
+        for module in transformer.modules()
+    )
+
+
 def _get_hook_ctx(module: nn.Module | None):
     if module is None:
         return nullcontext()
@@ -407,6 +444,15 @@ class LoRAPipeline(ComposedPipelineBase):
         if exact_current_adapter:
             return
 
+        if not self._setting_constructor_adapter and _has_nvfp4_weights_without_bf16(
+            self.trainable_transformer_modules
+        ):
+            # TODO(David): Restore the BF16 weights and requantize them after an NVFP4 LoRA adapter change.
+            raise RuntimeError(
+                "Runtime LoRA adapter changes are unsupported after NVFP4 quantization removed the BF16 weights. "
+                "Create a new VideoGenerator with the desired LoRA adapter."
+            )
+
         if not self._setting_constructor_adapter:
             if self._constructor_dense_lora_path is not None:
                 raise RuntimeError(
@@ -566,6 +612,19 @@ class LoRAPipeline(ComposedPipelineBase):
                         layer.merge_lora_weights()
 
     def unmerge_lora_weights(self) -> None:
+        """Unmerge LoRA weights when the transformer's quantized weights remain valid."""
+        if _has_quantized_mxfp8_weights(self.trainable_transformer_modules):
+            # TODO(David): Requantize MXFP8 weights after LoRA unmerge before enabling this operation.
+            raise RuntimeError(
+                "LoRA unmerge is unsupported after MXFP8 weight quantization because the quantized weights still "
+                "contain the merged LoRA adapter."
+            )
+        if _has_quantized_nvfp4_weights(self.trainable_transformer_modules):
+            # TODO(David): Preserve BF16 weights and requantize NVFP4 weights after LoRA unmerge.
+            raise RuntimeError(
+                "LoRA unmerge is unsupported after NVFP4 weight quantization because the quantized weights would "
+                "not reflect the unmerged LoRA adapter."
+            )
         for (
                 transformer_name,
                 transformer_lora_layers,
