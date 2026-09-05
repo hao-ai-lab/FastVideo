@@ -167,6 +167,8 @@ def maybe_load_fsdp_model(
     inference_vsa_tile_size: int | None = None,
     lora_path: str | None = None,
     lora_strength: float = 1.0,
+    pre_fsdp_transform: Callable[[nn.Module], nn.Module] | None = None,
+    regional_compile: bool = False,
 ) -> torch.nn.Module:
     """
     Load the model with FSDP if is training, else load the model without FSDP.
@@ -193,9 +195,13 @@ def maybe_load_fsdp_model(
     with set_default_dtype(default_dtype), torch.device("meta"):
         model = model_cls(**init_params)
 
+    if pre_fsdp_transform is not None:
+        model = pre_fsdp_transform(model)
+
     dtype_selector = getattr(model, "_get_parameter_dtype", None)
     has_mixed_parameter_dtypes = callable(dtype_selector) and any(
-        dtype_selector(name, param_dtype) != param_dtype for name, _ in model.named_parameters())
+        dtype_selector(_strip_checkpoint_wrapper_prefix(name), param_dtype) != param_dtype
+        for name, _ in model.named_parameters())
     if training_mode and has_mixed_parameter_dtypes:
         raise NotImplementedError("FSDP training with model-selected mixed parameter dtypes requires "
                                   "separate gradient synchronization for replicated parameters.")
@@ -254,7 +260,10 @@ def maybe_load_fsdp_model(
         # H3's compression gate is created only by the VSA attention backend. Loading a
         # VSA student under dense attention would otherwise warn about 50 unmatched
         # replacements and continue with a silently incomplete model.
-        model_parameter_names = {name for name, _ in model.named_parameters()}
+        model_parameter_names = {
+            _strip_checkpoint_wrapper_prefix(name)
+            for name, _ in model.named_parameters()
+        }
         missing_vsa_gates = sorted(name for name in dense_lora_patch.replacement_parameters
                                    if "gate_compress" in name and name not in model_parameter_names)
         if missing_vsa_gates:
@@ -289,22 +298,41 @@ def maybe_load_fsdp_model(
     # are present (lazy imports inside the helper).
     _maybe_quantize_model(model)
 
-    compile_in_loader = enable_torch_compile and training_mode
-    if compile_in_loader:
-        unsupported = _prepare_model_for_compile(model, regional=False)
-        if unsupported is not None:
-            logger.warning("Training torch.compile requested but disabled: %s. Model stays eager.", unsupported)
+    if enable_torch_compile and training_mode:
+        if not regional_compile:
+            # Legacy training stack (--enable-torch-compile): preserve the
+            # whole-model compile behavior and pass kwargs through unchanged.
+            unsupported = _prepare_model_for_compile(model, regional=False)
+            if unsupported is not None:
+                logger.warning("Training torch.compile requested but disabled: %s. Model stays eager.", unsupported)
+            else:
+                compile_kwargs = torch_compile_kwargs or {}
+                logger.info("Enabling whole-model torch.compile with kwargs=%s", compile_kwargs)
+                model = torch.compile(model, **compile_kwargs)
         else:
-            compile_kwargs = torch_compile_kwargs or {}
-            logger.info("Enabling torch.compile for FSDP training module with kwargs=%s", compile_kwargs)
-            model = torch.compile(model, **compile_kwargs)
-            logger.info("torch.compile enabled for %s", type(model).__name__)
+            unsupported = _regional_compile_unsupported_reason(
+                init_params,
+                model=model,
+                training=True,
+                vsa_tile_size=inference_vsa_tile_size,
+            )
+            if unsupported is None:
+                unsupported = _prepare_model_for_compile(model, regional=False)
+            if unsupported is not None:
+                logger.warning(
+                    "enable_torch_compile requested but disabled: %s. "
+                    "Training continues in eager mode.", unsupported)
+            else:
+                attention_count = _enable_regional_attention_compile(model)
+                logger.info("Enabled attention tracing for %d modules in %s", attention_count, type(model).__name__)
+                _compile_model_regions(model, torch_compile_kwargs or {})
     elif inference_regional_compile and not training_mode:
         # Inference-side counterpart of the #1718 training regional compile:
         # per-block fullgraph compile right after the transformer loads, no
         # user kwargs needed (fullgraph + emulate_precision_casts injected).
         unsupported = _regional_compile_unsupported_reason(
             init_params,
+            model=model,
             vsa_tile_size=inference_vsa_tile_size,
         )
         if unsupported is None:
@@ -320,16 +348,30 @@ def maybe_load_fsdp_model(
     return model
 
 
+def _strip_checkpoint_wrapper_prefix(name: str) -> str:
+    """Canonicalize an FQN produced after activation-checkpoint wrapping.
+
+    ``checkpoint_wrapper`` strips its ``_checkpoint_wrapped_module.`` prefix
+    from ``state_dict()`` keys via hooks, but plain ``named_parameters()`` /
+    ``named_buffers()`` recursion still yields prefixed names. Checkpoint
+    keys are always clean, so every name-keyed lookup against loaded weights
+    must compare clean names.
+    """
+    return name.replace("._checkpoint_wrapped_module.", ".").removeprefix("_checkpoint_wrapped_module.")
+
+
 def _regional_compile_unsupported_reason(
     init_params: dict[str, Any],
     *,
+    model: nn.Module | None = None,
+    training: bool = False,
     vsa_tile_size: int | None = None,
 ) -> str | None:
     """Return why regional fullgraph compile cannot run, or None if it can.
 
-    Dense FA2, FA3, and FA4 inference all route through compile-visible
-    custom-op boundaries. FA3's raw autograd.Function carve-out applies only
-    to grad-enabled calls, outside this inference-only loader path.
+    Dense FA2 and FA4 route through compile-visible custom-op boundaries.
+    FA3 is safe for inference but its grad-enabled path graph-breaks, so it is
+    rejected for regional training compile.
 
     The legacy VSA backend remains outside the fullgraph support envelope.
     MiniMax H3's VSA backend is supported only through the inference-only
@@ -351,10 +393,44 @@ def _regional_compile_unsupported_reason(
                     "forwards out of compiled graphs via torch.compiler."
                     "disable, which fullgraph regional compile cannot trace; "
                     "this model stays eager")
-    config = init_params.get("config")
-    resolved = getattr(config, "_resolved_attention_backend", None)
-    resolved_name = getattr(resolved, "name", "")
-    if resolved_name == "VIDEO_SPARSE_ATTN_H3":
+    backend_names: set[str] = set()
+    if model is not None:
+        from fastvideo.attention.layer import DistributedAttention, LocalAttention
+
+        for submodule in model.modules():
+            if not isinstance(submodule, (DistributedAttention, LocalAttention)):
+                continue
+            backend = getattr(submodule, "backend", None)
+            backend_name = getattr(backend, "name", "")
+            if backend_name:
+                backend_names.add(backend_name)
+
+    # The component config stores the requested backend. ``None`` means
+    # platform automatic selection, so once a constructed model is available
+    # its attention instances are the source of truth. Keep the config fallback
+    # for callers that validate policy before or without model construction.
+    if not backend_names:
+        config = init_params.get("config")
+        resolved = getattr(config, "_resolved_attention_backend", None)
+        resolved_name = getattr(resolved, "name", "")
+        if resolved_name:
+            backend_names.add(resolved_name)
+
+    if training and "FLASH_ATTN" in backend_names:
+        try:
+            from fastvideo.attention.utils.flash_attn_default import fa_version
+        except Exception:  # pragma: no cover - flash-attn stack not importable
+            pass
+        else:
+            if fa_version == "3":
+                return ("model uses FLASH_ATTN with flash-attn 3, "
+                        "whose grad-enabled path graph-breaks (incompatible with "
+                        "fullgraph regional compile); use FA2, FA4 (FASTVIDEO_FA4=1), "
+                        "or TORCH_SDPA for compiled training")
+    if "VIDEO_SPARSE_ATTN_H3" in backend_names:
+        if training:
+            return ("VIDEO_SPARSE_ATTN_H3 regional compile is supported only for inference; "
+                    "compiled training stays eager")
         if os.environ.get("FASTVIDEO_H3_VSA_PROBE"):
             return ("FASTVIDEO_H3_VSA_PROBE records tensors and files from the VSA-H3 attention body, which "
                     "regional fullgraph compile cannot capture; this model stays eager")
@@ -364,8 +440,8 @@ def _regional_compile_unsupported_reason(
         if vsa_tile_size != 64:
             return ("VIDEO_SPARSE_ATTN_H3 regional compile requires VSA_tile_size=64; "
                     f"got {vsa_tile_size!r}, so tile-256/CuTe VSA stays eager")
-    if resolved_name == "VIDEO_SPARSE_ATTN":
-        return (f"attention backend resolved to {resolved_name}, whose Triton "
+    if "VIDEO_SPARSE_ATTN" in backend_names:
+        return ("attention backend resolved to VIDEO_SPARSE_ATTN, whose Triton "
                 "kernels, sequence-parallel collectives, and sync metadata "
                 "guard graph-break (incompatible with fullgraph regional "
                 "compile); this model stays eager")
@@ -385,11 +461,11 @@ def _enable_regional_attention_compile(model: nn.Module) -> int:
 
 
 def _compile_model_regions(model: nn.Module, compile_kwargs: dict[str, Any]) -> int:
-    """Compile repeated mathematical regions of a loaded model.
+    """Compile repeated mathematical regions after FSDP setup.
 
     Only the selected module ``forward`` is replaced. This keeps activation
-    checkpoint wrappers structurally transparent while any module-level hooks
-    (FSDP pre/post, layerwise offload) execute outside the compiled region.
+    checkpoint wrappers structurally transparent while FSDP pre/post hooks
+    execute outside the compiled region.
     """
     compile_conditions = getattr(model, "_compile_conditions", None)
     if not compile_conditions:
@@ -400,9 +476,9 @@ def _compile_model_regions(model: nn.Module, compile_kwargs: dict[str, Any]) -> 
     if "mode" in compile_kwargs:
         # torch.compile forbids passing both `mode` and `options`, and
         # regional compile always injects options (emulate_precision_casts)
-        # to match the training-side regional-compile configuration. Fail here
-        # with an actionable message instead of letting torch raise a
-        # mode/options conflict about an `options` key the user never wrote.
+        # for bf16 numerics parity. Fail here with an actionable message
+        # instead of letting torch raise a mode/options conflict about an
+        # `options` key the user never wrote.
         raise ValueError("Regional compile sets inductor options "
                          "(emulate_precision_casts) and cannot be combined "
                          "with torch_compile_kwargs['mode']. Remove 'mode' or "
@@ -426,7 +502,7 @@ def _compile_model_regions(model: nn.Module, compile_kwargs: dict[str, Any]) -> 
     if compiled_count == 0:
         raise ValueError(f"No submodules in {type(model).__name__} matched _compile_conditions")
     logger.info(
-        "Enabled regional torch.compile for %d submodules in %s with kwargs=%s",
+        "Enabled regional torch.compile for %d submodules in %s after FSDP setup with kwargs=%s",
         compiled_count,
         type(model).__name__,
         kwargs,
@@ -484,7 +560,7 @@ def shard_model(
         ignored_params = {
             parameter
             for name, parameter in model.named_parameters()
-            if dtype_selector(name, default_param_dtype) != default_param_dtype
+            if dtype_selector(_strip_checkpoint_wrapper_prefix(name), default_param_dtype) != default_param_dtype
         }
     named_modules = list(model.named_modules())
     ignored_params_by_module = {
@@ -585,8 +661,14 @@ def load_model_from_full_model_state_dict(
         NotImplementedError: If got FSDP with more than 1D.
     """
     meta_sd = model.state_dict()
-    named_parameters = dict(model.named_parameters())
-    named_buffers = dict(model.named_buffers())
+    # state_dict() keys are clean (checkpoint-wrapper hooks strip the AC
+    # prefix) but named_parameters()/named_buffers() are not; checkpoint keys
+    # are clean, so canonicalize before any name-keyed lookup. Without this,
+    # a loaded buffer inside an AC-wrapped block misses the named_buffers
+    # membership test below and is silently converted into a trainable
+    # nn.Parameter by load_state_dict(assign=True).
+    named_parameters = {_strip_checkpoint_wrapper_prefix(k): v for k, v in model.named_parameters()}
+    named_buffers = {_strip_checkpoint_wrapper_prefix(k): v for k, v in model.named_buffers()}
     sharded_sd = {}
     custom_param_sd, reverse_param_names_mapping = hf_to_custom_state_dict(full_sd_iterator,
                                                                            param_names_mapping)  # type: ignore

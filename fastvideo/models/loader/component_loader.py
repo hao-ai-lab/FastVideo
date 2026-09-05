@@ -1147,6 +1147,8 @@ class TransformerLoader(ComponentLoader):
                 # once the module tree exists.
                 lora_path=getattr(fastvideo_args, "lora_path", None),
                 lora_strength=getattr(fastvideo_args, "lora_strength", 1.0),
+                regional_compile=getattr(fastvideo_args, "regional_compile", False),
+                pre_fsdp_transform=getattr(fastvideo_args, "_pre_fsdp_transform", None),
             )
 
         total_params = sum(p.numel() for p in model.parameters())

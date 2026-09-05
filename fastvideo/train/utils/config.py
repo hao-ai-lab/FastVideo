@@ -439,6 +439,8 @@ def _build_training_config(
             precondition_outputs=bool(m.get("precondition_outputs", False)),
             moba_config=dict(m.get("moba_config", {}) or {}),
             enable_gradient_checkpointing_type=(m.get("enable_gradient_checkpointing_type")),
+            enable_torch_compile=bool(m.get("enable_torch_compile", False)),
+            torch_compile_kwargs=dict(m.get("torch_compile_kwargs", {}) or {}),
         ),
         pipeline_config=pipeline_config,
         model_path=model_path,

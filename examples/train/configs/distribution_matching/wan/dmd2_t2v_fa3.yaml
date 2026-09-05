@@ -1,4 +1,6 @@
 # DMD2 distillation: Wan 2.1 T2V 1.3B (teacher 50-step -> student 4-step).
+# Variant for flash-attn 3 (Hopper) machines: identical to dmd2_t2v.yaml
+# except torch.compile is off (FA3 training path is not fullgraph-safe).
 #
 # - Teacher: frozen pretrained Wan 2.1 T2V 1.3B
 # - Student: trainable, initialized from the same pretrained weights
@@ -74,11 +76,11 @@ training:
 
   model:
     enable_gradient_checkpointing_type: full
-    # Regional fullgraph compile. Requires a compile-safe attention path
-    # (FA2, FA4 via FASTVIDEO_FA4=1, or TORCH_SDPA). On flash-attn 3
-    # machines the loader auto-disables this with a warning — or use
-    # dmd2_t2v_fa3.yaml, which turns it off explicitly.
-    enable_torch_compile: true
+    # flash-attn 3 hosts: FA3's grad-enabled attention path takes a dynamo
+    # graph break, which regional fullgraph compile turns into a hard error
+    # at step 1 — so compile stays off in this variant. Switch to
+    # dmd2_t2v.yaml with FA2/FA4/TORCH_SDPA to get compiled training.
+    enable_torch_compile: false
 
 callbacks:
   grad_clip:
@@ -90,10 +92,10 @@ callbacks:
     sampling_steps: [4]
     sampling_timesteps: [1000, 750, 500, 250]
     guidance_scale: 6.0
-  ema:                                                                                                                     
-    _target_: fastvideo.train.callbacks.ema.EMACallback                                                                    
-    decay: 0.98                                                                                                          
-    start_iter: 0        # delay EMA updates until this iteration 
+  ema:
+    _target_: fastvideo.train.callbacks.ema.EMACallback
+    decay: 0.98
+    start_iter: 0        # delay EMA updates until this iteration
 
 pipeline:
   flow_shift: 8
