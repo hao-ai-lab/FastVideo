@@ -26,6 +26,7 @@ class LTX2VAEArchConfig(VAEArchConfig):
     decoder_spatial_padding_mode: str = "reflect"
     causal_decoder: bool = False
     timestep_conditioning: bool = True
+    decoder_base_channels: int = 128
     use_quant_conv: bool = False
     scaling_factor: float = 1.0
     normalize_latent_channels: bool = False
