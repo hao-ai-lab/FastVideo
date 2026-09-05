@@ -32,6 +32,7 @@ from fastvideo.configs.pipelines.kandinsky5 import Kandinsky5I2VConfig, Kandinsk
 from fastvideo.configs.pipelines.lingbot_video import LingBotVideoT2VConfig
 from fastvideo.configs.pipelines.lingbotworld import LingBotWorldI2V480PConfig
 from fastvideo.configs.pipelines.lingbotworld2 import LingBotWorld2CausalFastI2V480PConfig
+from fastvideo.configs.pipelines.lingbotworld_fast import LingBotWorldFastI2V480PConfig
 from fastvideo.configs.pipelines.longcat import LongCatT2V480PConfig
 from fastvideo.pipelines.basic.ltx2.pipeline_configs import LTX2T2VConfig
 from fastvideo.configs.pipelines.flux_2 import (
@@ -526,6 +527,27 @@ def _register_configs() -> None:
         default_preset="lingbotworld2_causal_fast_i2v",
     )
 
+    # LingBotWorld-Fast — registered BEFORE the LingBotWorld base entry so its
+    # detector wins when both fire. The base detector only excludes the
+    # "causal-fast" spelling, so it also matches this checkpoint's path and its
+    # `lingbotworldcausaldmdpipeline` model_index name; the detector loop keeps
+    # the first match, which must be this more specific entry.
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=LingBotWorldFastI2V480PConfig,
+        workload_types=(WorkloadType.I2V, ),
+        hf_model_paths=[
+            "FastVideo/LingBot-World-Fast-Diffusers",
+        ],
+        model_detectors=[
+            lambda path: ("lingbot-world-fast" in path.lower() or "lingbotworldfast" in path.lower() or
+                          "lingbotworldcausaldmdpipeline" in path.lower())
+        ],
+        model_family="lingbotworld_fast",
+        default_preset="lingbotworld_fast_i2v",
+        pipeline_cls_name="LingBotWorldFastPipeline",
+    )
+
     # LingBotWorld
     register_configs(
         sampling_param_cls=None,
@@ -535,8 +557,9 @@ def _register_configs() -> None:
             "FastVideo/LingBot-World-Base-Cam-Diffusers",
         ],
         model_detectors=[
-            lambda path: (("lingbotworld" in path.lower() or "lingbot-world" in path.lower()) and "causal-fast" not in
-                          path.lower() and "causalfast" not in path.lower())
+            lambda path:
+            (("lingbotworld" in path.lower() or "lingbot-world" in path.lower()) and "causal-fast" not in path.lower()
+             and "causalfast" not in path.lower() and "-fast" not in path.lower() and "causaldmd" not in path.lower())
         ],
         model_family="lingbotworld",
         default_preset="lingbotworld_i2v",
@@ -1314,6 +1337,8 @@ def _register_presets() -> None:
         ALL_PRESETS as LINGBOTWORLD_PRESETS, )
     from fastvideo.pipelines.basic.lingbotworld2.presets import (
         ALL_PRESETS as LINGBOTWORLD2_PRESETS, )
+    from fastvideo.pipelines.basic.lingbotworld_fast.presets import (
+        ALL_PRESETS as LINGBOTWORLD_FAST_PRESETS, )
     from fastvideo.pipelines.basic.lingbot_video.presets import (
         ALL_PRESETS as LINGBOT_VIDEO_PRESETS, )
     from fastvideo.pipelines.basic.longcat.presets import (
@@ -1354,6 +1379,7 @@ def _register_presets() -> None:
         LINGBOT_VIDEO_PRESETS,
         LINGBOTWORLD_PRESETS,
         LINGBOTWORLD2_PRESETS,
+        LINGBOTWORLD_FAST_PRESETS,
         LONGCAT_PRESETS,
         LTX2_PRESETS,
         MATRIXGAME2_PRESETS,

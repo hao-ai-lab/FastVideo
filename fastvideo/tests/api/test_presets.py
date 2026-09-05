@@ -630,6 +630,48 @@ class TestLingBotVideoPresets:
 
 
 # -------------------------------------------------------------------
+# LingBot-World-Fast preset integration
+# -------------------------------------------------------------------
+
+
+class TestLingBotWorldFastPresets:
+
+    def test_registered_defaults_are_fixed(self) -> None:
+        import fastvideo.registry  # noqa: F401
+        from fastvideo.registry import get_preset_selection
+
+        model_path = "FastVideo/LingBot-World-Fast-Diffusers"
+        assert get_preset_selection(model_path) == ("lingbotworld_fast_i2v", "lingbotworld_fast")
+
+        preset = get_preset("lingbotworld_fast_i2v", "lingbotworld_fast")
+        assert preset.defaults["num_inference_steps"] == 4
+        assert preset.defaults["guidance_scale"] == 1.0
+        assert preset.stage_schemas[0].allowed_overrides == frozenset()
+        with pytest.raises(ConfigValidationError, match="does not accept overrides"):
+            validate_stage_overrides(preset, {"denoise": {"num_inference_steps": 8}})
+
+    def test_local_checkpoint_resolves_fast_pipeline(self, tmp_path) -> None:
+        from fastvideo.configs.pipelines.lingbotworld_fast import LingBotWorldFastI2V480PConfig
+        from fastvideo.fastvideo_args import WorkloadType
+        from fastvideo.pipelines.basic.lingbotworld_fast import LingBotWorldFastPipeline
+        from fastvideo.registry import get_model_info
+
+        model_dir = tmp_path / "lingbot-world-fast"
+        (model_dir / "transformer").mkdir(parents=True)
+        (model_dir / "model_index.json").write_text(
+            json.dumps({
+                "_class_name": "LingBotWorldCausalDMDPipeline",
+                "_diffusers_version": "0.36.0",
+            }),
+            encoding="utf-8",
+        )
+
+        info = get_model_info(str(model_dir), workload_type=WorkloadType.I2V)
+        assert info.pipeline_cls is LingBotWorldFastPipeline
+        assert info.pipeline_config_cls is LingBotWorldFastI2V480PConfig
+
+
+# -------------------------------------------------------------------
 # LingBotWorld preset integration (dual guidance)
 # -------------------------------------------------------------------
 
