@@ -43,6 +43,24 @@ def _get_hook_ctx(module: nn.Module | None):
     return nullcontext()
 
 
+def _convert_quantized_weights_after_lora_merge(transformer_modules: dict[str, nn.Module]) -> None:
+    """Pack deferred NVFP4 or MXFP8 weights after all LoRA layers are merged."""
+    from fastvideo.layers.quantization.mxfp8_config import MXFP8QuantizeMethod
+    from fastvideo.layers.quantization.mxfp8_config import convert_model_to_mxfp8
+    from fastvideo.layers.quantization.nvfp4_config import NVFP4QuantizeMethod
+    from fastvideo.layers.quantization.nvfp4_config import convert_model_to_nvfp4
+
+    for transformer_module in transformer_modules.values():
+        for module in transformer_module.modules():
+            quant_method = getattr(module, "quant_method", None)
+            if isinstance(quant_method, NVFP4QuantizeMethod):
+                convert_model_to_nvfp4(transformer_module)
+                break
+            if isinstance(quant_method, MXFP8QuantizeMethod):
+                convert_model_to_mxfp8(transformer_module)
+                break
+
+
 def _named_module_by_prefix(module: nn.Module,
                             prefixes: list[str]) -> list[tuple[str | None, list[tuple[str, nn.Module]]]]:
     none_list: list[tuple[str, nn.Module]] = []
@@ -532,6 +550,7 @@ class LoRAPipeline(ComposedPipelineBase):
                                lora_path)
             if unmatched:
                 logger.warning("LoRA adapter %s: %d weights did not reach a layer", lora_path, len(unmatched))
+        _convert_quantized_weights_after_lora_merge(self.trainable_transformer_modules)
 
     def merge_lora_weights(self) -> None:
         for (

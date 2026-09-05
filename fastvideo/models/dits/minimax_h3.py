@@ -21,6 +21,7 @@ from fastvideo.distributed.communication_op import (
 )
 from fastvideo.distributed.parallel_state import get_sp_world_size, model_parallel_is_initialized
 from fastvideo.layers.linear import ReplicatedLinear
+from fastvideo.layers.quantization.mxfp8_config import MXFP8QuantizeMethod
 from fastvideo.layers.mlp import MLP
 from fastvideo.layers.quantization import QuantizationConfig
 from fastvideo.layers.visual_embedding import Timesteps
@@ -119,8 +120,14 @@ class MiniMaxH3FeedForward(nn.Module):
             prefix=f"{prefix}.fc_out",
         )
         self.fuse_swiglu = fuse_swiglu
+        self.use_mxfp8 = isinstance(self.fc_in.quant_method, MXFP8QuantizeMethod) and isinstance(
+            self.fc_out.quant_method, MXFP8QuantizeMethod)
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        if self.use_mxfp8:
+            from fastvideo.layers.mxfp8linear import mxfp8_swiglu_feed_forward
+
+            return mxfp8_swiglu_feed_forward(hidden_states, self.fc_in, self.fc_out)
         hidden_states, _ = self.fc_in(hidden_states)
         if self.fuse_swiglu and _can_run_minimax_h3_fusion(hidden_states):
             hidden_states = minimax_h3_swiglu(hidden_states)
@@ -514,41 +521,48 @@ class MiniMaxH3TransformerBlock(nn.Module):
         rotary_emb: tuple[torch.Tensor, torch.Tensor],
         original_seq_len: int,
     ) -> torch.Tensor:
-        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (
-            t.to(hidden_states.dtype) for t in self.adaln_proj(temb))
+        with nvtx_range("minimax_h3.transformer_block.adaln_projection"):
+            shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (
+                t.to(hidden_states.dtype) for t in self.adaln_proj(temb))
 
         use_modulate_fusion = self.fuse_modulate and _can_run_minimax_h3_fusion(hidden_states)
         if use_modulate_fusion:
-            norm_hidden_states = fused_rmsnorm_modulate(
-                hidden_states,
-                self.norm1.weight,
-                scale_msa,
-                shift_msa,
-                adaln_indices,
-                self.norm1.eps,
-            )
+            with nvtx_range("minimax_h3.transformer_block.modulate_fusion"):
+                norm_hidden_states = fused_rmsnorm_modulate(
+                    hidden_states,
+                    self.norm1.weight,
+                    scale_msa,
+                    shift_msa,
+                    adaln_indices,
+                    self.norm1.eps,
+                )
         else:
-            norm_hidden_states = self.norm1(hidden_states)
-            norm_hidden_states = norm_hidden_states * (
-                1.0 + scale_msa.index_select(0, adaln_indices)) + shift_msa.index_select(0, adaln_indices)
-        attention_output = self.attn(norm_hidden_states, rotary_emb, original_seq_len)
+            with nvtx_range("minimax_h3.transformer_block.no_modulate_fusion"):
+                norm_hidden_states = self.norm1(hidden_states)
+                norm_hidden_states = norm_hidden_states * (
+                    1.0 + scale_msa.index_select(0, adaln_indices)) + shift_msa.index_select(0, adaln_indices)
+        with nvtx_range("minimax_h3.transformer_block.self_attention"):
+            attention_output = self.attn(norm_hidden_states, rotary_emb, original_seq_len)
         if use_modulate_fusion:
-            hidden_states, norm_hidden_states = fused_residual_gate_rmsnorm_modulate(
-                hidden_states,
-                attention_output,
-                gate_msa,
-                self.norm2.weight,
-                scale_mlp,
-                shift_mlp,
-                adaln_indices,
-                self.norm2.eps,
-            )
+            with nvtx_range("minimax_h3.transformer_block.modulate_fusion"):
+                hidden_states, norm_hidden_states = fused_residual_gate_rmsnorm_modulate(
+                    hidden_states,
+                    attention_output,
+                    gate_msa,
+                    self.norm2.weight,
+                    scale_mlp,
+                    shift_mlp,
+                    adaln_indices,
+                    self.norm2.eps,
+                )
         else:
-            hidden_states = hidden_states + gate_msa.index_select(0, adaln_indices) * attention_output
-            norm_hidden_states = self.norm2(hidden_states)
-            norm_hidden_states = norm_hidden_states * (
-                1.0 + scale_mlp.index_select(0, adaln_indices)) + shift_mlp.index_select(0, adaln_indices)
-        feed_forward_output = self.ff(norm_hidden_states)
+            with nvtx_range("minimax_h3.transformer_block.no_modulate_fusion"):
+                hidden_states = hidden_states + gate_msa.index_select(0, adaln_indices) * attention_output
+                norm_hidden_states = self.norm2(hidden_states)
+                norm_hidden_states = norm_hidden_states * (
+                    1.0 + scale_mlp.index_select(0, adaln_indices)) + shift_mlp.index_select(0, adaln_indices)
+        with nvtx_range("minimax_h3.transformer_block.feed_forward"):
+            feed_forward_output = self.ff(norm_hidden_states)
         return hidden_states + gate_mlp.index_select(0, adaln_indices) * feed_forward_output
 
 
