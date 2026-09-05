@@ -193,7 +193,8 @@ The Buildkite agent and Slurm have deliberately separate responsibilities:
 
 ```text
 /merge PR comment
-  -> GitHub verifies write permission and refreshes the `ready` label
+  -> GitHub verifies write permission, adds the `ready` label, and directly
+     calls the trusted base-branch merge-gate workflow
   -> base-branch `ci-trigger-full-suite` workflow fetches the PR file list,
      computes MERGE_TEST_PLAN plus focused golden/SSIM basenames, and gates on
      cheap checks
