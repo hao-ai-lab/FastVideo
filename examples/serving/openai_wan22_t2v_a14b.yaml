@@ -1,0 +1,26 @@
+# OpenAI-compatible server for Wan2.2 T2V A14B (mixture-of-experts DiT).
+#   fastvideo serve --config examples/serving/openai_wan22_t2v_a14b.yaml
+generator:
+  model_path: Wan-AI/Wan2.2-T2V-A14B-Diffusers
+  engine:
+    num_gpus: 2
+    use_fsdp_inference: false
+    offload:
+      dit: true
+      vae: false
+      text_encoder: true
+      pin_cpu_memory: true
+
+server:
+  host: 0.0.0.0
+  port: 8000
+  output_dir: outputs/openai_wan22_t2v_a14b
+  served_model_name: wan22-t2v-a14b
+
+default_request:
+  sampling:
+    num_frames: 81
+    height: 720
+    width: 1280
+  output:
+    return_frames: false
