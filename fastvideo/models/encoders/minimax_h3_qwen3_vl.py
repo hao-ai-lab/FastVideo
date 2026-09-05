@@ -18,9 +18,80 @@ from fastvideo.models.encoders.minimax_h3_checkpoint_fp8 import MiniMaxH3Seriali
 from fastvideo.models.loader.weight_utils import default_weight_loader
 
 
+_VISION_INTERPOLATION_WORKSPACE_BYTES = 64 * 1024 * 1024
+
+
 def _rotate_half(tensor: torch.Tensor) -> torch.Tensor:
     first, second = tensor.chunk(2, dim=-1)
     return torch.cat((-second, first), dim=-1)
+
+
+def _vision_interpolation_indices_and_weights(
+    grid_thw: torch.Tensor,
+    num_grid_per_side: int,
+    spatial_merge_size: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Build Qwen3-VL's bilinear position-table gather in merge-block order."""
+    side = num_grid_per_side
+    merge = spatial_merge_size
+
+    counts = grid_thw[:, 0] * grid_thw[:, 1] * grid_thw[:, 2]
+    heights = torch.repeat_interleave(grid_thw[:, 1], counts)
+    widths = torch.repeat_interleave(grid_thw[:, 2], counts)
+    starts = torch.repeat_interleave(F.pad(counts.cumsum(0)[:-1], (1, 0)), counts)
+    within = (torch.arange(counts.sum(), device=grid_thw.device) - starts) % (heights * widths)
+
+    blocks_wide = widths // merge
+    within_col = within % merge
+    within_row = (within // merge) % merge
+    block_col = (within // (merge * merge)) % blocks_wide
+    block_row = within // (merge * merge * blocks_wide)
+    rows = block_row * merge + within_row
+    cols = block_col * merge + within_col
+
+    def axis_taps_and_weights(
+        indices: torch.Tensor,
+        sizes: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        positions = indices.to(torch.float32) * (side - 1) / torch.clamp(sizes - 1, min=1)
+        floors = torch.floor(positions)
+        offsets = torch.arange(2, device=grid_thw.device)
+        taps = (floors.long()[:, None] + offsets).clamp(0, side - 1)
+        distances = (positions[:, None] - floors[:, None] - offsets).abs()
+        return taps, (1 - distances).clamp(min=0)
+
+    row_taps, row_weights = axis_taps_and_weights(rows, heights)
+    col_taps, col_weights = axis_taps_and_weights(cols, widths)
+    indices = (row_taps[:, :, None] * side + col_taps[:, None, :]).reshape(-1, 4)
+    weights = (row_weights[:, :, None] * col_weights[:, None, :]).reshape(-1, 4)
+    return indices, weights
+
+
+def _interpolate_vision_position_embeddings(
+    position_embedding: torch.Tensor,
+    grid_thw: torch.Tensor,
+    num_grid_per_side: int,
+    spatial_merge_size: int,
+) -> torch.Tensor:
+    """Keep interpolation weights and accumulation in float32 until the vision residual add."""
+    grid_thw = grid_thw.to(position_embedding.device)
+    indices, weights = _vision_interpolation_indices_and_weights(grid_thw, num_grid_per_side, spatial_merge_size)
+    output_dtype = torch.promote_types(position_embedding.dtype, weights.dtype)
+    output = torch.empty(
+        (indices.shape[0], position_embedding.shape[1]),
+        dtype=output_dtype,
+        device=position_embedding.device,
+    )
+
+    # Packed reference videos can otherwise promote a multi-GiB four-tap gather at once.
+    bytes_per_patch = indices.shape[1] * position_embedding.shape[1] * (
+        position_embedding.element_size() + torch.empty((), dtype=output_dtype).element_size())
+    chunk_size = max(1, _VISION_INTERPOLATION_WORKSPACE_BYTES // bytes_per_patch)
+    for start in range(0, indices.shape[0], chunk_size):
+        stop = min(start + chunk_size, indices.shape[0])
+        output[start:stop] = (F.embedding(indices[start:stop], position_embedding) *
+                              weights[start:stop, :, None]).sum(1)
+    return output
 
 
 class MiniMaxH3Qwen3VLTextRotaryEmbedding(nn.Module):
@@ -433,57 +504,16 @@ class MiniMaxH3Qwen3VLVisionModel(nn.Module):
         return frequency_table[position_ids].flatten(1)
 
     def _interpolate_position_embeddings(self, grid_thw: torch.Tensor) -> torch.Tensor:
-        index_lists: list[list[int]] = [[] for _ in range(4)]
-        weight_lists: list[list[float]] = [[] for _ in range(4)]
-        merge = self.spatial_merge_size
-        patch_counts: list[int] = []
-        grids: list[tuple[int, int, int]] = []
-        for frames_tensor, height_tensor, width_tensor in grid_thw:
-            frames, height, width = int(frames_tensor), int(height_tensor), int(width_tensor)
-            grids.append((frames, height, width))
-            patch_counts.append(height * width)
-            height_positions = torch.linspace(0, self.num_grid_per_side - 1, height)
-            width_positions = torch.linspace(0, self.num_grid_per_side - 1, width)
-            height_floor = height_positions.int()
-            width_floor = width_positions.int()
-            height_ceil = (height_floor + 1).clip(max=self.num_grid_per_side - 1)
-            width_ceil = (width_floor + 1).clip(max=self.num_grid_per_side - 1)
-            delta_height = height_positions - height_floor
-            delta_width = width_positions - width_floor
-            base_height = height_floor * self.num_grid_per_side
-            base_height_ceil = height_ceil * self.num_grid_per_side
-            indices = (
-                (base_height[:, None] + width_floor[None]).flatten(),
-                (base_height[:, None] + width_ceil[None]).flatten(),
-                (base_height_ceil[:, None] + width_floor[None]).flatten(),
-                (base_height_ceil[:, None] + width_ceil[None]).flatten(),
-            )
-            weights = (
-                ((1 - delta_height)[:, None] * (1 - delta_width)[None]).flatten(),
-                ((1 - delta_height)[:, None] * delta_width[None]).flatten(),
-                (delta_height[:, None] * (1 - delta_width)[None]).flatten(),
-                (delta_height[:, None] * delta_width[None]).flatten(),
-            )
-            for index in range(4):
-                index_lists[index].extend(indices[index].tolist())
-                weight_lists[index].extend(weights[index].tolist())
-
-        index_tensor = torch.tensor(index_lists, dtype=torch.long, device=self.pos_embed.weight.device)
-        weight_tensor = torch.tensor(weight_lists,
-                                     dtype=self.pos_embed.weight.dtype,
-                                     device=self.pos_embed.weight.device)
-        embeddings = self.pos_embed(index_tensor) * weight_tensor[:, :, None]
-        embeddings = (embeddings[0] + embeddings[1] + embeddings[2] + embeddings[3]).split(patch_counts)
-        permuted = []
-        for embedding, (frames, height, width) in zip(embeddings, grids, strict=True):
-            embedding = embedding.repeat(frames, 1)
-            embedding = embedding.view(frames, height // merge, merge, width // merge, merge, -1)
-            permuted.append(embedding.permute(0, 1, 3, 2, 4, 5).flatten(0, 4))
-        return torch.cat(permuted)
+        return _interpolate_vision_position_embeddings(
+            self.pos_embed.weight,
+            grid_thw,
+            self.num_grid_per_side,
+            self.spatial_merge_size,
+        )
 
     def forward(self, pixels: torch.Tensor, grid_thw: torch.Tensor) -> tuple[torch.Tensor, list[torch.Tensor]]:
         hidden_states = self.patch_embed(pixels)
-        hidden_states = hidden_states + self._interpolate_position_embeddings(grid_thw)
+        hidden_states = hidden_states + self._interpolate_position_embeddings(grid_thw).to(hidden_states.dtype)
         rotary = self._rotary_positions(grid_thw).reshape(hidden_states.shape[0], -1)
         embedding = torch.cat((rotary, rotary), dim=-1)
         position_embeddings = (embedding.cos(), embedding.sin())
