@@ -158,6 +158,26 @@ def _prepare_model_for_compile(model: nn.Module, *, regional: bool) -> str | Non
     return unsupported if isinstance(unsupported, str) and unsupported else None
 
 
+def _validate_fsdp_inference_quantization(init_params: dict[str, Any], fsdp_inference: bool) -> None:
+    """Enforce the transformer-quantization allowlist for FSDP inference."""
+    transformer_config = init_params.get("config")
+    quant_config = getattr(transformer_config, "quant_config", None)
+    if not fsdp_inference or quant_config is None:
+        return
+
+    from fastvideo.layers.quantization.nvfp4_qat_train_config import (
+        NVFP4QATTrainConfig, )
+
+    if isinstance(quant_config, NVFP4QATTrainConfig):
+        return
+
+    # TODO: (David) Currently reject every FSDP inference quantization config except NVFP4QATTrainConfig.
+    # Support FSDP inference with precomputed quantized weights.
+    raise NotImplementedError(
+        "FSDP inference supports unquantized transformers and NVFP4QATTrainConfig only; "
+        f"got {type(quant_config).__name__}.")
+
+
 # Supports optional torch.compile for FSDP-wrapped models during training
 def maybe_load_fsdp_model(
     model_cls: type[nn.Module],
@@ -192,6 +212,8 @@ def maybe_load_fsdp_model(
     base checkpoint does not contain, which has to happen while the tensor is still
     unsharded.
     """
+    _validate_fsdp_inference_quantization(init_params, fsdp_inference)
+
     # NOTE(will): cast_forward_inputs=True shouldn't be needed as we are
     # manually casting the inputs to the model
     mp_policy = MixedPrecisionPolicy(param_dtype, reduce_dtype, output_dtype, cast_forward_inputs=False)
