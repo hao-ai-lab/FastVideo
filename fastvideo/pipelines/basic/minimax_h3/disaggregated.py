@@ -8,7 +8,6 @@ from uuid import uuid4
 
 import torch
 
-from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.pipelines.basic.minimax_h3.minimax_h3_pipeline import (
     MiniMaxH3BasePipeline,
@@ -28,23 +27,23 @@ from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, PipelineLoggin
 MINIMAX_H3_WIRE_SCHEMA_VERSION = 1
 
 
-def _cpu_tensor(value: torch.Tensor, name: str, dimensions: int) -> torch.Tensor:
+def _cuda_tensor(value: torch.Tensor, name: str, dimensions: int) -> torch.Tensor:
     if not isinstance(value, torch.Tensor) or value.ndim != dimensions:
         shape = None if not isinstance(value, torch.Tensor) else tuple(value.shape)
         raise ValueError(f"MiniMax-H3 wire field {name!r} must be a {dimensions}D tensor, got {shape}.")
-    return value.detach().to(device="cpu").contiguous()
+    return value.detach().to(device="cuda", non_blocking=True).contiguous()
 
 
-def _cpu_layout(layout: MiniMaxH3PackedLayout) -> MiniMaxH3PackedLayout:
+def _cuda_layout(layout: MiniMaxH3PackedLayout) -> MiniMaxH3PackedLayout:
     if not isinstance(layout, MiniMaxH3PackedLayout):
         raise TypeError("MiniMax-H3 encode output is missing its packed layout.")
     return replace(
         layout,
-        position_ids=_cpu_tensor(layout.position_ids, "layout.position_ids", 2),
-        token_tags=_cpu_tensor(layout.token_tags, "layout.token_tags", 1),
-        video_indices=_cpu_tensor(layout.video_indices, "layout.video_indices", 1),
-        audio_indices=_cpu_tensor(layout.audio_indices, "layout.audio_indices", 1),
-        text_indices=_cpu_tensor(layout.text_indices, "layout.text_indices", 1),
+        position_ids=_cuda_tensor(layout.position_ids, "layout.position_ids", 2),
+        token_tags=_cuda_tensor(layout.token_tags, "layout.token_tags", 1),
+        video_indices=_cuda_tensor(layout.video_indices, "layout.video_indices", 1),
+        audio_indices=_cuda_tensor(layout.audio_indices, "layout.audio_indices", 1),
+        text_indices=_cuda_tensor(layout.text_indices, "layout.text_indices", 1),
     )
 
 
@@ -61,7 +60,7 @@ def _raw_latent_shape(batch: ForwardBatch, stage: str) -> tuple[int, int, int, i
     return (int(shape[0]), int(shape[1]), int(shape[2]), int(shape[3]), int(shape[4]))
 
 
-def _validate_cpu_layout(layout: MiniMaxH3PackedLayout) -> None:
+def _validate_cuda_layout(layout: MiniMaxH3PackedLayout) -> None:
     if not isinstance(layout, MiniMaxH3PackedLayout):
         raise TypeError("MiniMax-H3 wire payload requires a packed layout.")
     expected_shapes = {
@@ -75,8 +74,8 @@ def _validate_cpu_layout(layout: MiniMaxH3PackedLayout) -> None:
         ("audio_indices", layout.audio_indices),
         ("text_indices", layout.text_indices),
     ):
-        if tensor.device.type != "cpu" or not tensor.is_contiguous():
-            raise ValueError(f"MiniMax-H3 wire field layout.{name} must be a contiguous CPU tensor.")
+        if not tensor.is_cuda or not tensor.is_contiguous():
+            raise ValueError(f"MiniMax-H3 wire field layout.{name} must be a contiguous CUDA tensor.")
         expected = expected_shapes.get(name)
         if expected is not None and tuple(tensor.shape) != expected:
             raise ValueError(
@@ -87,7 +86,7 @@ def _validate_cpu_layout(layout: MiniMaxH3PackedLayout) -> None:
 
 @dataclass(frozen=True)
 class MiniMaxH3EncodedState:
-    """Minimal CPU payload sent from the encoder/VAE node to the DiT node."""
+    """Minimal CUDA payload sent from the encoder/VAE node to the DiT node."""
 
     request_id: str
     prompt_embeds: torch.Tensor
@@ -118,9 +117,9 @@ class MiniMaxH3EncodedState:
             ("video_latents", self.video_latents, 2),
             ("audio_latents", self.audio_latents, 2),
         ):
-            if tensor.device.type != "cpu" or not tensor.is_contiguous() or tensor.ndim != dimensions:
-                raise ValueError(f"MiniMax-H3 wire field {name!r} must be a contiguous CPU {dimensions}D tensor.")
-        _validate_cpu_layout(self.layout)
+            if not tensor.is_cuda or not tensor.is_contiguous() or tensor.ndim != dimensions:
+                raise ValueError(f"MiniMax-H3 wire field {name!r} must be a contiguous CUDA {dimensions}D tensor.")
+        _validate_cuda_layout(self.layout)
         if self.video_latents.shape[0] != self.layout.video_indices.numel():
             raise ValueError("MiniMax-H3 video latent rows do not match layout.video_indices.")
         if self.audio_latents.shape[0] != self.layout.audio_indices.numel():
@@ -135,10 +134,10 @@ class MiniMaxH3EncodedState:
         layout = batch.extra.get(MINIMAX_H3_LAYOUT_KEY)
         return cls(
             request_id=request_id if request_id is not None else uuid4().hex,
-            prompt_embeds=_cpu_tensor(batch.prompt_embeds[0], "prompt_embeds", 3),
-            video_latents=_cpu_tensor(batch.latents, "video_latents", 2),
-            audio_latents=_cpu_tensor(batch.audio_latents, "audio_latents", 2),
-            layout=_cpu_layout(layout),
+            prompt_embeds=_cuda_tensor(batch.prompt_embeds[0], "prompt_embeds", 3),
+            video_latents=_cuda_tensor(batch.latents, "video_latents", 2),
+            audio_latents=_cuda_tensor(batch.audio_latents, "audio_latents", 2),
+            layout=_cuda_layout(layout),
             raw_latent_shape=_raw_latent_shape(batch, "encode"),
             num_inference_steps=int(batch.num_inference_steps),
             vsa_sparsity=float(batch.VSA_sparsity),
@@ -148,16 +147,15 @@ class MiniMaxH3EncodedState:
             logging_info=batch.logging_info,
         )
 
-    def to_batch(self, *, device: torch.device | str | None = None) -> ForwardBatch:
+    def to_batch(self) -> ForwardBatch:
         # Pickle/Ray reconstruction does not invoke dataclass __post_init__.
-        # Revalidate the schema and tensor contract at the receiving boundary.
+        # Revalidate the schema and CUDA tensor contract at the receiving boundary.
         self.__post_init__()
-        target = get_local_torch_device() if device is None else torch.device(device)
         return ForwardBatch(
             data_type="video",
-            prompt_embeds=[self.prompt_embeds.to(target)],
-            latents=self.video_latents.to(target),
-            audio_latents=self.audio_latents.to(target),
+            prompt_embeds=[self.prompt_embeds],
+            latents=self.video_latents,
+            audio_latents=self.audio_latents,
             raw_latent_shape=self.raw_latent_shape,
             num_inference_steps=self.num_inference_steps,
             VSA_sparsity=self.vsa_sparsity,
@@ -174,7 +172,7 @@ class MiniMaxH3EncodedState:
 
 @dataclass(frozen=True)
 class MiniMaxH3DenoisedState:
-    """Minimal CPU payload returned by the DiT node for VAE decoding."""
+    """Minimal CUDA payload returned by the DiT node for VAE decoding."""
 
     request_id: str
     video_latents: torch.Tensor
@@ -191,9 +189,9 @@ class MiniMaxH3DenoisedState:
         if len(self.raw_latent_shape) != 5 or min(self.raw_latent_shape) <= 0:
             raise ValueError(f"Invalid MiniMax-H3 raw latent shape: {self.raw_latent_shape}.")
         for name, tensor in (("video_latents", self.video_latents), ("audio_latents", self.audio_latents)):
-            if tensor.device.type != "cpu" or not tensor.is_contiguous() or tensor.ndim != 2:
-                raise ValueError(f"MiniMax-H3 wire field {name!r} must be a contiguous CPU 2D tensor.")
-        _validate_cpu_layout(self.layout)
+            if not tensor.is_cuda or not tensor.is_contiguous() or tensor.ndim != 2:
+                raise ValueError(f"MiniMax-H3 wire field {name!r} must be a contiguous CUDA 2D tensor.")
+        _validate_cuda_layout(self.layout)
         if self.video_latents.shape[0] != self.layout.video_indices.numel():
             raise ValueError("MiniMax-H3 video latent rows do not match layout.video_indices.")
         if self.audio_latents.shape[0] != self.layout.audio_indices.numel():
@@ -205,9 +203,9 @@ class MiniMaxH3DenoisedState:
             raise ValueError("MiniMax-H3 denoise must return both latent streams.")
         return cls(
             request_id=request_id,
-            video_latents=_cpu_tensor(batch.latents, "video_latents", 2),
-            audio_latents=_cpu_tensor(batch.audio_latents, "audio_latents", 2),
-            layout=_cpu_layout(batch.extra.get(MINIMAX_H3_LAYOUT_KEY)),
+            video_latents=_cuda_tensor(batch.latents, "video_latents", 2),
+            audio_latents=_cuda_tensor(batch.audio_latents, "audio_latents", 2),
+            layout=_cuda_layout(batch.extra.get(MINIMAX_H3_LAYOUT_KEY)),
             raw_latent_shape=_raw_latent_shape(batch, "denoise"),
             logging_info=batch.logging_info,
         )
