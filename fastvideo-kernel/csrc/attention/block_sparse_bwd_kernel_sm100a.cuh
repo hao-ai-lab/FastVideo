@@ -68,10 +68,12 @@ constexpr int SMEM_TOTAL = 2 * KV_TILE_BYTES + NUM_Q_STAGES * Q_RING_SLOT_BYTES 
                            DQConfig<>::DQ_STAGE_BUFFERS * DQConfig<>::DQ_STAGE_BYTES +
                            2 * Q_QUAD * (int)sizeof(float) + NUM_BARS * 8 + CLC_STAGES * 16 + 48;
 
-constexpr int ST_COLS    = Q_QUAD / 2;
-constexpr int DV_COLS    = HEAD_DIM;
-constexpr int DK_COLS    = HEAD_DIM;
-constexpr int TMEM_TOTAL = ST_COLS + DV_COLS + ST_COLS + DK_COLS;
+constexpr int ST_COLS        = Q_QUAD / 2;
+constexpr int ST_QBLOCK_COLS = BLOCK;
+constexpr int DV_COLS        = HEAD_DIM;
+constexpr int DK_COLS        = HEAD_DIM;
+constexpr int TMEM_TOTAL     = ST_COLS + DV_COLS + ST_COLS + DK_COLS;
+static_assert(ST_COLS == 2 * ST_QBLOCK_COLS, "two q blocks per lane-half");
 static_assert(TMEM_TOTAL == 512, "TMEM map must fill exactly 512 columns");
 
 extern __shared__ __align__(1024) uint8_t bwd_smem[];
@@ -395,8 +397,9 @@ __global__ void __cluster_dims__(1, 1, 1) __launch_bounds__(N_WARPS * 32, 1) vsa
         const uint64_t db = desc_ring + (uint64_t)slot * RING_DELTA;
         #pragma unroll
         for (int ki = 0; ki < K_ATOMS_PER_QBLOCK; ++ki) {
-          const int a           = p * K_ATOMS_PER_QBLOCK + ki;
-          const uint32_t tmem_a = tmem_a_base + (uint32_t)(a * BF16X2_COLS_PER_K16);
+          const int a = p * K_ATOMS_PER_QBLOCK + ki;
+          const uint32_t tmem_a =
+              tmem_a_base + (uint32_t)(p * ST_QBLOCK_COLS + ki * BF16X2_COLS_PER_K16);
           const bool accumulate = (!first) || (a != 0);
           tcgen05_mma_ws_f16_ts_1sm_predicated(lead, tmem_acc, tmem_a, db + ki * K16_COLS_DELTA,
                                                idesc_dv_dk, accumulate);
@@ -529,8 +532,8 @@ __global__ void __cluster_dims__(1, 1, 1) __launch_bounds__(N_WARPS * 32, 1) vsa
     const int qblock_in_quad  = 2 * col_half + q_half;
 
     const uint32_t tmem_lane_base     = (uint32_t)(lane_group * 32) << 16;
-    const uint32_t tmem_f32_offset    = tmem_lane_base + (uint32_t)(col_half * HALF_COLS);
-    const uint32_t tmem_bf16x2_offset = tmem_lane_base + (uint32_t)(col_half * HALF_COLS / 2);
+    const uint32_t tmem_f32_offset    = tmem_lane_base + (uint32_t)(col_half * ST_QBLOCK_COLS);
+    const uint32_t tmem_bf16x2_offset = tmem_f32_offset;
 
     const float2* lse2   = reinterpret_cast<const float2*>(sLSE + qblock_in_quad * BLOCK);
     const float2* delta2 = reinterpret_cast<const float2*>(sDelta + qblock_in_quad * BLOCK);
