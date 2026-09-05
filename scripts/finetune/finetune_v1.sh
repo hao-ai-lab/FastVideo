@@ -10,13 +10,15 @@ NUM_GPUS=4
 # IP=[MASTER NODE IP]
 
 # Make sure that num_latent_t is a multiple of sp_size
-torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
-    fastvideo/training/wan_training_pipeline.py\
+torchrun --nnodes 1 --nproc_per_node $NUM_GPUS \
+    fastvideo/training/runner.py \
+    --pipeline-class WanTrainingPipeline \
+    --pipeline-module fastvideo.training.wan_training_pipeline \
     --model_path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
-    --inference_mode False\
+    --inference_mode False \
     --pretrained_model_name_or_path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
-    --data_path "$DATA_DIR"\
-    --validation_dataset_file "$VALIDATION_DATASET_FILE"\
+    --data_path "$DATA_DIR" \
+    --validation_dataset_file "$VALIDATION_DATASET_FILE" \
     --train_batch_size=4 \
     --num_latent_t 20 \
     --sp_size 4 \

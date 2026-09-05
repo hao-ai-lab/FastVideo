@@ -1306,3 +1306,20 @@ def _cached_pin_memory_available(pid: int) -> bool:
 
 def is_pin_memory_available() -> bool:
     return _cached_pin_memory_available(os.getpid())
+
+
+def build_parser() -> FlexibleArgumentParser:
+    from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
+
+    parser = FlexibleArgumentParser()
+    parser.add_argument("--pipeline-class",
+                        type=str,
+                        required=True,
+                        help="Name of the pipeline class to run, e.g., WanTrainingPipeline")
+    parser.add_argument("--pipeline-module",
+                        type=str,
+                        required=True,
+                        help="Module containing the pipeline class, e.g., fastvideo.training.wan_training_pipeline")
+    parser = TrainingArgs.add_cli_args(parser)
+    parser = FastVideoArgs.add_cli_args(parser)
+    return parser
