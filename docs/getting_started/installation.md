@@ -9,6 +9,12 @@ FastVideo supports the following hardware platforms:
   [pair two Sparks](installation/spark_pair.md)
 - [Apple silicon](installation/mps.md)
 
+!!! note "Using NVIDIA DGX Spark?"
+    Follow the [DGX Spark guide](installation/spark.md) instead of the generic
+    NVIDIA CUDA guide. Spark uses ARM64 (`aarch64`), CUDA 13, and a GB10
+    (`sm_121`) GPU, so FastVideo builds its CUDA kernel from source rather than
+    installing the standard prebuilt kernel wheel.
+
 ## Quick Installation
 
 ### Using uv (recommended)
