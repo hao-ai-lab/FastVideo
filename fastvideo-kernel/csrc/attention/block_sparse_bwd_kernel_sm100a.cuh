@@ -91,7 +91,7 @@ __device__ __forceinline__ WorkItem decode_workitem(
     int workitem_id, const int* __restrict__ workitem_remap, const int* __restrict__ k2q_idx,
     const int* __restrict__ k2q_num, int max_q_blocks, int num_heads, int num_kv_blocks_per_seq) {
   WorkItem it;
-  const int real_item_id = workitem_remap[workitem_id];
+  const int real_item_id = workitem_remap ? workitem_remap[workitem_id] : workitem_id;
   const int batch_head   = real_item_id / num_kv_blocks_per_seq;
   it.batch               = batch_head / num_heads;
   it.head                = batch_head % num_heads;

@@ -50,9 +50,10 @@ struct BlockSparseVsaBwdArgs {
   const int* variable_block_sizes;
 
   // Work order: which (batch, head, kv block) item each CTA processes.
-  // [B*H*nb] int32 work id -> item ((b*H + h)*nb + kv); nullptr = the launch computes the order.
+  // [B*H*nb] int32 work id -> item ((b*H + h)*nb + kv). nullptr: identity order below
+  // ORDER_MIN_KV_BLOCKS, else the launch computes the length-binned order into order_workspace.
   const int* workitem_remap;
-  // [B*H*nb] int32; required when workitem_remap is nullptr.
+  // [B*H*nb] int32; required when workitem_remap is nullptr and nb >= ORDER_MIN_KV_BLOCKS.
   int* order_workspace;
 
   // Outputs, inputs' layout; dk/dv rows of unselected kv blocks are zeroed by the preprocess.
@@ -98,6 +99,12 @@ __host__ inline size_t block_sparse_bwd_delta_bytes(int batch, int num_heads, in
   return (size_t)batch * num_heads * seqlen * sizeof(float);
 }
 
+// Below this many kv blocks per sequence (S < 65536) the identity order is as fast as the
+// length-binned one and the order kernel's own time is not (fv_perf_log.md 2026-09-04: -9% at
+// 4k, -2.8% at 16k), so the main kernel runs the identity order there (workitem_remap == nullptr)
+// and the order kernel is left to the larger shapes.
+constexpr int ORDER_MIN_KV_BLOCKS = 1024;
+
 __host__ inline cudaError_t block_sparse_bwd_supported(const BlockSparseVsaBwdArgs& args) {
   if (args.head_dim != HEAD_DIM) {
     return cudaErrorInvalidValue;
@@ -126,8 +133,9 @@ __host__ inline cudaError_t block_sparse_bwd_supported(const BlockSparseVsaBwdAr
   if (!args.dqaccum || !args.qt || !args.dot || !args.delta) {
     return cudaErrorInvalidValue;
   }
-  // No explicit order: the order kernel needs the workspace and two ints of SMEM per kv block.
-  if (!args.workitem_remap &&
+  // No explicit order and large enough for the order kernel: it needs the workspace and two ints
+  // of SMEM per kv block.
+  if (!args.workitem_remap && args.num_kv_blocks_per_seq >= ORDER_MIN_KV_BLOCKS &&
       (!args.order_workspace || args.num_kv_blocks_per_seq > ORDER_MAX_BLOCKS)) {
     return cudaErrorInvalidValue;
   }
@@ -166,12 +174,6 @@ __host__ inline cudaError_t make_tma_kv_units(CUtensorMap* map, const __nv_bfloa
 // subset of the repeatedly reduced dQ lines resident pays (~0.6% at 524K/1M tokens); below it the
 // policy register costs more than it saves. Threshold scales with accumulator BYTES.
 constexpr int CACHE_WAVE_MIN_SEQ_LEN = 524288;
-
-// Below this many kv blocks per sequence (S < 65536) the identity order is as fast as the
-// length-binned one and the order kernel's own time is not (fv_perf_log.md 2026-09-04: -9% at
-// 4k, -2.8% at 16k), so callers pass a cached identity array as workitem_remap there and leave
-// the order kernel to the larger shapes.
-constexpr int ORDER_MIN_KV_BLOCKS = 1024;
 
 template <bool DQ_L2_KEEP, bool USE_CLC, bool BHSD>
 __host__ inline cudaError_t launch_main(const BlockSparseVsaBwdArgs& args, const int* work_remap,
@@ -280,11 +282,11 @@ __host__ inline cudaError_t launch_block_sparse_bwd_sm100a(const BlockSparseVsaB
 
   const bool keep_dq_l2 = (size_t)S * sizeof(dq_accum_t) >= (size_t)CACHE_WAVE_MIN_SEQ_LEN * 2;
 
-  // Work-item order: explicit (the binding passes its cached identity array below
-  // ORDER_MIN_KV_BLOCKS), else computed on device into order_workspace (length bins; the same L2
+  // Work-item order: explicit if the caller passed one; else identity (nullptr) below
+  // ORDER_MIN_KV_BLOCKS, else computed on device into order_workspace (length bins; the same L2
   // transition that selects DQ_L2_KEEP selects the wider bins plus the midpoint snake).
   const int* work_remap = args.workitem_remap;
-  if (work_remap == nullptr) {
+  if (work_remap == nullptr && args.num_kv_blocks_per_seq >= ORDER_MIN_KV_BLOCKS) {
     const int order_smem = 2 * args.num_kv_blocks_per_seq * (int)sizeof(int);
     if (order_smem > 48 * 1024) {
       e = cudaFuncSetAttribute(vsa_bwd_order_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize,

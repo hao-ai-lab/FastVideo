@@ -21,18 +21,6 @@
 
 namespace {
 
-// Identity work-item order [0, 1, ..., items) for the shapes below ORDER_MIN_KV_BLOCKS, where the
-// order kernel costs more than the length-binned order saves. Built once per device with
-// torch::arange, grown on demand, read-only afterwards; the launch reads it on the current stream.
-const int* identity_remap(int64_t items, const torch::Device& device) {
-  static std::vector<torch::Tensor> cache(64);
-  torch::Tensor& t = cache.at(device.index() < 0 ? 0 : (size_t)device.index());
-  if (!t.defined() || t.numel() < items) {
-    t = torch::arange(items, torch::dtype(torch::kInt32).device(device));
-  }
-  return t.data_ptr<int>();
-}
-
 void check_activation(const torch::Tensor& t, const char* name, int64_t B, int64_t H, int64_t S,
                       int64_t D) {
   TORCH_CHECK(t.is_cuda(), name, " must be a CUDA tensor");
@@ -126,7 +114,7 @@ std::vector<torch::Tensor> block_sparse_sm100a_bwd(torch::Tensor grad_o, torch::
   auto dot     = torch::empty({(int64_t)block_sparse_bwd_transposed_bytes(b, h, s)}, bytes);
   auto delta   = torch::empty({(int64_t)block_sparse_bwd_delta_bytes(b, h, s)}, bytes);
   // Work-item order: from ORDER_MIN_KV_BLOCKS on, the launch computes the length-binned order
-  // into this workspace; below, the cached identity array is passed as the explicit remap.
+  // into this workspace; below, the main kernel runs the identity order (no array).
   torch::Tensor order;
   const bool device_order = num_kv_blocks_per_seq >= ORDER_MIN_KV_BLOCKS;
   if (device_order) {
@@ -147,7 +135,7 @@ std::vector<torch::Tensor> block_sparse_sm100a_bwd(torch::Tensor grad_o, torch::
   a.k2q_idx               = k2q_idx.data_ptr<int>();
   a.k2q_num               = k2q_num.data_ptr<int>();
   a.variable_block_sizes  = variable_block_sizes.data_ptr<int>();
-  a.workitem_remap        = device_order ? nullptr : identity_remap(num_items, q.device());
+  a.workitem_remap        = nullptr;
   a.order_workspace       = device_order ? reinterpret_cast<int*>(order.data_ptr()) : nullptr;
   a.dqaccum               = reinterpret_cast<dq_accum_t*>(dqaccum.data_ptr());
   a.qt                    = bf16_ptr(qt);
