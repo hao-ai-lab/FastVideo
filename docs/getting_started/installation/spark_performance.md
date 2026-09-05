@@ -181,6 +181,9 @@ is power-cycled. To avoid it:
   and frame counts are valid. Weights stay replicated, so lazy module load
   (auto on GB10) is still required on each box. Bring-up and knobs:
   [Pair two NVIDIA DGX Sparks](spark_pair.md).
+- A worker's SIGTERM log and traceback show where it was interrupted, not why it
+  was selected; confirm the cause in the `earlyoom` service or system logs. A
+  later SIGKILL or kernel OOM kill cannot be caught and reported by Python.
 
 ## Gotchas specific to the GB10
 
