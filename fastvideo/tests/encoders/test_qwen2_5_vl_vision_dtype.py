@@ -95,3 +95,19 @@ def test_conditional_generation_passes_parent_dtype_to_visual_tower():
     model = Qwen2_5_VLForConditionalGenerationSimple(_full_config("torch.bfloat16"))
 
     assert model.visual.dtype == torch.bfloat16
+
+
+def test_sliding_window_cache_check_survives_transformers_5():
+    """transformers 5 removed `cache_utils.SlidingWindowCache`.
+
+    The import here was unguarded and at module scope, so the whole encoder became
+    unimportable on the versions this repo asks for (`transformers>=5.0.0`), taking
+    `Reason1TextEncoder` -- and with it the Cosmos 2.5 and Kandinsky 5 pipelines -- with it.
+    A sliding window is a property of the cache's layers now, so nothing is an instance of
+    the old class and the check has to answer False rather than blow up.
+    """
+    from transformers.cache_utils import DynamicCache
+
+    from fastvideo.models.encoders import qwen2_5_vl_custom
+
+    assert isinstance(DynamicCache(), qwen2_5_vl_custom.SlidingWindowCache) is False
