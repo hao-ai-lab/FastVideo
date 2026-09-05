@@ -1,6 +1,6 @@
 # LoRA Extraction and Merging
 
-Tools for extracting and merging LoRA adapters for FastVideo models.
+Generic runtime adapter extraction plus the existing legacy merge utilities for FastVideo models.
 
 ## Extract LoRA Adapter
 
@@ -9,30 +9,75 @@ python scripts/lora_extraction/extract_lora.py \
   --base Wan-AI/Wan2.2-TI2V-5B-Diffusers \
   --ft FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers \
   --out adapter_r32.safetensors \
-  --rank 32
+  --rank 32 \
+  --exact-tensor-pattern '^condition_embedder\.' \
+  --exact-tensor-pattern '^proj_out\.weight$'
 ```
 
-**Options:**
+The extractor is runtime-agnostic and cannot determine from checkpoint tensors whether the target runtime
+wraps a given matrix as a LoRA layer. Use `--exact-tensor-pattern` for changed matrices that the runtime does not wrap;
+the extractor preserves them as exact `.diff` tensors instead of emitting factors that the runtime cannot apply. The
+Wan patterns above cover its excluded condition embedders and its unwrapped output projection.
 
-- `--base`: Base model (HuggingFace ID or local path)
-- `--ft`: Fine-tuned model (HuggingFace ID or local path)
-- `--out`: Output adapter file
-- `--rank`: LoRA rank (16, 32, 64, 128)
-- `--full-rank`: Extract full-rank adapter (optional)
+Exact CPU SVD remains the default. For a large transformer, stream its indexed safetensors and factorize on a GPU:
 
-## Merge Adapter
+```bash
+python scripts/lora_extraction/extract_lora.py \
+  --base <base-model-or-path> \
+  --ft <finetuned-model-or-path> \
+  --out adapter_r64.safetensors \
+  --rank 64 \
+  --load-mode indexed \
+  --device cuda:0 \
+  --svd-method randomized \
+  --randomized-q 320 \
+  --niter 4 \
+  --factor-dtype float16 \
+  --dense-dtype float32 \
+  --replacement-dtype source
+```
+
+`--load-mode indexed` downloads only `transformer/*` for a Hugging Face model and reads one base/fine-tuned tensor pair at a time. The default `auto` mode tries indexed loading first and falls back to the legacy FastVideo pipeline loader; `pipeline` selects the legacy loader directly.
+
+Important options:
+
+- `--base`, `--ft`: Hugging Face model IDs or local paths.
+- `--rank`, `--full-rank`: truncated or full factorization rank.
+- `--min-delta`: omit tensors whose maximum absolute FP32 delta is at or below this threshold (default: `1e-8`).
+- `--device`: factorization device, such as `cpu` or `cuda:0`.
+- `--svd-method`: `exact` or `randomized`.
+- `--randomized-q`, `--niter`, `--seed`: randomized SVD accuracy and reproducibility.
+- `--factor-dtype`, `--dense-dtype`, `--replacement-dtype`: adapter storage precision. Exact dense deltas default to `float32`.
+- `--exact-tensor-pattern`: repeatable regex for a matrix that should remain an exact dense delta.
+- `--base-revision`, `--ft-revision`: pin Hugging Face inputs in indexed mode; revisions are rejected for local paths and pipeline loading.
+- `--work-dir`, `--resume`: resume an interrupted streaming extraction. Scratch is written to an
+  output-specific namespace under `fastvideo-lora-extract/`, and only that namespace is cleaned up. Resume requires indexed
+  safetensors and validates both checkpoints' index/shard fingerprints before reusing partial results.
+
+The adapter retains changes that do not fit a low-rank product: `.diff` and `.diff_b` hold exact additive weight/bias deltas, `.diff_param` handles standalone parameters such as `scale_shift_table`, and `.set_weight`/`.set_param` hold parameters absent from the base checkpoint. Bit-identical parameters are omitted. The extractor writes an adjacent `*.report.json` with tensor counts, settings, and reconstruction residuals.
+
+For the validated MiniMax-H3 rank-64 command, including its exact-boundary patterns, see [`scripts/lora_extraction/README.md`](https://github.com/hao-ai-lab/FastVideo/blob/main/scripts/lora_extraction/README.md).
+
+Mixed low-rank/dense adapters produced by the generic extractor must be supplied when constructing FastVideo through
+`ComponentConfig(lora_path=...)`; their dense payload cannot be swapped later with `set_lora_adapter`. The legacy
+offline merger below retains its existing scope and is not part of this extraction workflow.
+
+## Legacy Merge Adapter
+
+The command below documents the pre-existing merger for adapters it already supports. Do not pass a mixed adapter from
+the generic extractor to it: the legacy merger does not apply the adapter's exact dense or replacement payloads.
 
 ```bash
 python scripts/lora_extraction/merge_lora.py \
   --base Wan-AI/Wan2.2-TI2V-5B-Diffusers \
-  --adapter adapter_r32.safetensors \
+  --adapter legacy_factor_only_adapter.safetensors \
   --ft FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers \
   --output merged_model
 ```
 
 **Options:**
 
-- `--base`: Base model (HuggingFace ID or local path)
+- `--base`: Base model (Hugging Face ID or local path)
 - `--adapter`: LoRA adapter file (.safetensors)
 - `--ft`: Fine-tuned model (for configuration)
 - `--output`: Output directory

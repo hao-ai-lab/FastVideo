@@ -392,12 +392,12 @@ class LoRAPipeline(ComposedPipelineBase):
         if not self._setting_constructor_adapter:
             if self._constructor_dense_lora_path is not None:
                 raise RuntimeError(
-                    "The active LoRA contains constructor-time .diff/.set_weight payload. "
+                    "The active LoRA contains a constructor-time dense additive/replacement payload. "
                     "Changing its adapter or strength at runtime would leave that dense payload stale; "
                     "create a new VideoGenerator with ComponentConfig(lora_path=..., lora_strength=...).")
             if requested_path is not None and DenseLoRAPatch.from_adapter(requested_path) is not None:
                 raise RuntimeError(
-                    "Adapters containing .diff/.set_weight payload must be supplied when VideoGenerator is "
+                    "Adapters containing dense additive/replacement payloads must be supplied when VideoGenerator is "
                     "constructed with ComponentConfig(lora_path=..., lora_strength=...).")
 
         if lora_nickname not in self.lora_adapters and lora_path is None:
