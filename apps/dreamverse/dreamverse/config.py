@@ -55,23 +55,58 @@ FRONTEND_STATIC_DIR_CANDIDATES = _resolve_frontend_static_dir_candidates()
 MODEL_REGISTRY = {
     "fast-ltx2": {
         "name": "FastLTX2",
+        "family": "ltx2",
         "model_path": "FastVideo/LTX2-Distilled-Diffusers",
         "config_model_path": "FastVideo/LTX2-Distilled-Diffusers",
         "lora_repo": "FastVideo/LTX2-OmniNFT-LoRA",
+        "attention_backend": "FLASH_ATTN",
+        "supports_audio": True,
+        "supports_continuation": True,
+        "supports_lora": True,
+        "uses_refine": True,
+        "transformer_quant": "NVFP4",
+        "compile": True,
     },
     "fast-ltx23": {
         "name": "FastLTX23",
+        "family": "ltx2",
         "model_path": "FastVideo/LTX-2.3-Distilled-Diffusers",
         "config_model_path": "FastVideo/LTX-2.3-Distilled-Diffusers",
         "lora_repo": "FastVideo/LTX-2.3-OmniNFT-LoRA",
+        "attention_backend": "FLASH_ATTN",
+        "supports_audio": True,
+        "supports_continuation": True,
+        "supports_lora": True,
+        "uses_refine": True,
+        "transformer_quant": "NVFP4",
+        "compile": True,
+    },
+    "cosmos25-distilled": {
+        "name": "Cosmos Predict2.5 Distilled",
+        "family": "cosmos25_distilled",
+        "model_path": "FastVideo/Cosmos-Predict2.5-2B-Distilled-TrigFlow",
+        "config_model_path": "FastVideo/Cosmos-Predict2.5-2B-Distilled-TrigFlow",
+        "attention_backend": "TORCH_SDPA",
+        "supports_audio": False,
+        "supports_continuation": False,
+        "supports_lora": False,
+        "uses_refine": False,
+        "transformer_quant": None,
+        "compile": False,
+        "height": 704,
+        "width": 1280,
+        "num_frames": 77,
+        "fps": 16,
+        "num_inference_steps": 4,
+        "seed": 42,
     },
 }
 
-DEFAULT_MODEL_ID = "fast-ltx2"
-
-ACTIVE_MODEL_ID = (os.getenv("DREAMVERSE_MODEL_ID", "").strip() or DEFAULT_MODEL_ID)
+BUILTIN_DEFAULT_MODEL_ID = "fast-ltx2"
+ACTIVE_MODEL_ID = (os.getenv("DREAMVERSE_MODEL_ID", "").strip() or BUILTIN_DEFAULT_MODEL_ID)
 if ACTIVE_MODEL_ID not in MODEL_REGISTRY:
-    ACTIVE_MODEL_ID = DEFAULT_MODEL_ID
+    ACTIVE_MODEL_ID = BUILTIN_DEFAULT_MODEL_ID
+DEFAULT_MODEL_ID = ACTIVE_MODEL_ID
 
 # Active model configuration
 MODEL_CONFIG = MODEL_REGISTRY[ACTIVE_MODEL_ID]

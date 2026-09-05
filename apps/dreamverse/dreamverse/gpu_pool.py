@@ -162,8 +162,6 @@ def gpu_worker_process(
     generation to VideoGenerationWorker; AV muxing to av_streaming.
     """
     os.environ["CUDA_VISIBLE_DEVICES"] = cuda_device
-    os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "FLASH_ATTN"
-
     from dreamverse.video_generation import VideoGenerationWorker
 
     worker = VideoGenerationWorker(gpu_id)
@@ -212,6 +210,7 @@ def gpu_worker_process(
                         frames=step_result.frames,
                         audio=step_result.audio,
                         audio_sample_rate=step_result.audio_sample_rate,
+                        fps=step_result.fps,
                         stream_id=stream_id,
                         timings=step_result.timings,
                         head_trim_frames=head_trim_frames,

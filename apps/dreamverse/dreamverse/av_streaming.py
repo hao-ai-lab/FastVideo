@@ -130,6 +130,7 @@ def stream_fmp4(
     frames: list[np.ndarray],
     audio: object,
     audio_sample_rate: int | None,
+    fps: int = TARGET_FPS,
     stream_id: str,
     timings: dict,
     head_trim_frames: int = 0,
@@ -145,6 +146,7 @@ def stream_fmp4(
         frames: RGB24 video frames as HxWx3 uint8 arrays.
         audio: 1D/2D tensor or ndarray, float values in [-1, 1].
         audio_sample_rate: sample rate of ``audio``.
+        fps: video frame rate used for overlap trimming and muxing.
         stream_id: caller-supplied identifier carried on every event.
         timings: dict mutated in place with ffmpeg/stream timing metrics.
         head_trim_frames: video frames to drop from the start
@@ -172,6 +174,8 @@ def stream_fmp4(
         return False, "audio_sample_rate is None"
     if FFMPEG_BIN is None:
         return False, "ffmpeg not found"
+    if fps <= 0:
+        return False, f"fps must be positive, got {fps}"
 
     if head_trim_audio_frames is None:
         head_trim_audio_frames = head_trim_frames
@@ -192,12 +196,12 @@ def stream_fmp4(
     out_frames = (frames[head_trim_frames:] if head_trim_frames > 0 else frames)
     sample_rate = int(audio_sample_rate)
     if head_trim_audio_frames > 0:
-        trim_start_samples = int(round((head_trim_audio_frames / float(TARGET_FPS)) * sample_rate))
+        trim_start_samples = int(round((head_trim_audio_frames / float(fps)) * sample_rate))
         if trim_start_samples >= audio_int16.shape[0]:
             return False, ("audio too short after overlap trim: "
                            f"trim_start_samples={trim_start_samples}"
                            f", audio_samples={audio_int16.shape[0]}")
-        keep_samples = int(round((len(out_frames) / float(TARGET_FPS)) * sample_rate))
+        keep_samples = int(round((len(out_frames) / float(fps)) * sample_rate))
         trim_end_samples = min(
             audio_int16.shape[0],
             trim_start_samples + keep_samples,
@@ -228,7 +232,7 @@ def stream_fmp4(
         "-s:v",
         f"{width}x{height}",
         "-r",
-        str(TARGET_FPS),
+        str(fps),
         "-i",
         "pipe:0",
         "-i",
