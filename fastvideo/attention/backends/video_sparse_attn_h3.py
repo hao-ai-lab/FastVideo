@@ -763,11 +763,18 @@ class MiniMaxH3VSAImpl(AttentionImpl):
             out_c = torch.matmul(torch.softmax(scores, dim=-1), v_pooled)  # [B, H, n_tiles, D]
             out_c = out_c.permute(0, 2, 1, 3).to(out.dtype)  # [B, n_tiles, H, D]
             batch, seq_len, heads, dim = out.shape
-            # Out-of-place: on the CuTe backend ``out`` is the tensor FA4's
-            # autograd node saved for its backward, so an in-place add here
-            # bumps its version counter and backward dies with "one of the
-            # variables needed for gradient computation has been modified".
             out_tiled = out.view(batch, n_tiles, tile_elems, heads, dim)
             gate_tiled = logical_gate.view(batch, n_tiles, tile_elems, heads, dim)
-            out = (out_tiled + out_c.unsqueeze(2) * gate_tiled).view(batch, seq_len, heads, dim)
+            out_c = out_c.unsqueeze(2)
+            if out.requires_grad or gate_tiled.dtype != out.dtype:
+                # Out-of-place: ``out`` is the tensor the attention kernel's
+                # autograd node saved for its backward, so an in-place add here
+                # bumps its version counter and backward dies with "one of the
+                # variables needed for gradient computation has been modified".
+                # Fused addcmul keeps one full-sequence temporary instead of two.
+                out = torch.addcmul(out_tiled, out_c, gate_tiled).view(batch, seq_len, heads, dim)
+            else:
+                # Inference: ``out`` is a fresh kernel output nobody else holds,
+                # so accumulate into it and allocate nothing.
+                out_tiled.addcmul_(out_c, gate_tiled)
         return out
