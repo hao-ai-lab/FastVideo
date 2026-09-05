@@ -20,6 +20,10 @@ from fastvideo.configs.pipelines.cosmos2_5 import (
     Cosmos25Config,
     Cosmos25_14BConfig,
 )
+from fastvideo.configs.pipelines.cosmos_predict import (
+    CosmosPredictConfig,
+    CosmosPredict14BConfig,
+)
 from fastvideo.configs.pipelines.dreamx_world import DreamXWorld5BARPipelineConfig, DreamXWorld5BCamPipelineConfig
 from fastvideo.configs.pipelines.hunyuan import FastHunyuanConfig, HunyuanConfig
 from fastvideo.configs.pipelines.hunyuangamecraft import HunyuanGameCraftPipelineConfig
@@ -890,6 +894,35 @@ def _register_configs() -> None:
         default_preset="cosmos_predict2_2b",
     )
 
+    # Cosmos Predict (Prompt2World)
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=CosmosPredictConfig,
+        workload_types=(WorkloadType.T2V, WorkloadType.I2V),
+        hf_model_paths=[
+            "nvidia/Cosmos-1.0-Prompt2World-7B-Video",
+        ],
+        model_detectors=[
+            lambda path: "cosmos" in path.lower() and "prompt2world-7b" in path.lower(),
+        ],
+        model_family="cosmos_predict",
+        default_preset="cosmos_predict_preset",
+    )
+
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=CosmosPredict14BConfig,
+        workload_types=(WorkloadType.T2V, WorkloadType.I2V),
+        hf_model_paths=[
+            "nvidia/Cosmos-1.0-Prompt2World-14B-Video",
+        ],
+        model_detectors=[
+            lambda path: "cosmos" in path.lower() and "prompt2world-14b" in path.lower(),
+        ],
+        model_family="cosmos_predict",
+        default_preset="cosmos_predict_14b_preset",
+    )
+
     # TurboDiffusion
     register_configs(
         sampling_param_cls=None,
@@ -1296,6 +1329,8 @@ def _register_presets() -> None:
     from fastvideo.api.presets import register_preset
     from fastvideo.pipelines.basic.cosmos.presets import (
         ALL_PRESETS as COSMOS_PRESETS, )
+    from fastvideo.pipelines.basic.cosmos_predict.presets import (
+        ALL_PRESETS as COSMOS_PREDICT_PRESETS, )
     from fastvideo.pipelines.basic.dreamx_world.presets import (
         ALL_PRESETS as DREAMX_WORLD_PRESETS, )
     from fastvideo.pipelines.basic.gamecraft.presets import (
@@ -1343,6 +1378,7 @@ def _register_presets() -> None:
 
     all_preset_groups = (
         COSMOS_PRESETS,
+        COSMOS_PREDICT_PRESETS,
         DREAMX_WORLD_PRESETS,
         FLUX2_PRESETS,
         GAMECRAFT_PRESETS,
