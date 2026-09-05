@@ -14,6 +14,11 @@ _T = TypeVar("_T")
 
 
 class ServingGenerator(Protocol):
+    """The minimal shape OpenAIServingEngine needs from a generator.
+
+    VideoGenerator (CUDA/mp/ray) satisfies this structurally already; an MLX
+    generator (e.g. MLXWanGenerator) implements just these two methods.
+    """
 
     def generate(self, request: GenerationRequest) -> Any:
         ...
@@ -47,6 +52,7 @@ class OpenAIServingEngine:
         return self._generator
 
     def validate_video_request(self, request: VideoGenerationRequest) -> None:
+        """Runtime-specific request checks (e.g. MLX's supported-field allowlist)."""
         if self._video_request_validator is not None:
             self._video_request_validator(request)
 
@@ -143,4 +149,4 @@ class OpenAIServingEngine:
             await asyncio.to_thread(self._generator.shutdown)
 
 
-__all__ = ["OpenAIServingEngine"]
+__all__ = ["OpenAIServingEngine", "ServingGenerator"]

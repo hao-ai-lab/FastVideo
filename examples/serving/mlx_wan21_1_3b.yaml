@@ -1,0 +1,23 @@
+# Native MLX FastMetal 1.3B server. Run from the repository root after
+# downloading FastVideo/FastMetal-1.3B-QAD (it ships a pre-packed MLX DiT,
+# so model_root and mlx_checkpoint are the same directory).
+#   python -m fastvideo.entrypoints.openai.mlx_wan_server --config examples/serving/mlx_wan21_1_3b.yaml
+runtime: mlx
+generator:
+  model_path: FastVideo/FastMetal-1.3B-QAD
+  model_root: ./FastMetal-1.3B-QAD
+  mlx_checkpoint: ./FastMetal-1.3B-QAD
+server:
+  host: 127.0.0.1
+  port: 8000
+  served_model_name: fastwan21-1.3b-mlx
+  output_dir: outputs/mlx_wan21_1_3b
+default_request:
+  sampling:
+    height: 480
+    width: 832
+    num_frames: 81
+    fps: 16
+    num_inference_steps: 3
+    guidance_scale: 1.0
+    seed: 1024
