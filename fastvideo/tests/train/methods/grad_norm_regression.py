@@ -83,7 +83,7 @@ def resolve_device_key(device_name: str | None = None) -> str | None:
 # Transformer block-list attribute names across model families. Wan / causal
 # Wan / Matrix-Game expose ``.blocks``; Cosmos (diffusers-derived) exposes
 # ``.transformer_blocks``. First non-empty match wins.
-_BLOCK_LIST_ATTRS: tuple[str, ...] = ("blocks", "transformer_blocks")
+_BLOCK_LIST_ATTRS: tuple[str, ...] = ("blocks", "transformer_blocks", "double_blocks")
 
 
 def resolve_blocks(transformer):
