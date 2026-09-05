@@ -39,10 +39,10 @@ from fastvideo.logger import init_logger
 from fastvideo.models.dits.ltx2 import VideoLatentShape
 from fastvideo.pipelines import ForwardBatch, TrainingBatch
 from fastvideo.platforms import AttentionBackendEnum
-from fastvideo.training.activation_checkpoint import (
-    apply_activation_checkpointing, )
 
 from fastvideo.train.models.wan.wan import WanModel
+from fastvideo.train.utils.activation_checkpoint import (
+    apply_activation_checkpointing, )
 from fastvideo.train.utils.module_state import (
     apply_trainable, )
 from fastvideo.train.utils.moduleloader import (
