@@ -20,8 +20,7 @@ def _validate_mxfp8_matrix(matrix: torch.Tensor) -> None:
     if matrix.dtype not in (torch.bfloat16, torch.float32):
         raise TypeError(f"MXFP8 quantization requires BF16 or FP32 input, got {matrix.dtype}.")
     if matrix.shape[1] % MXFP8_BLOCK_SIZE:
-        raise ValueError(
-            f"MXFP8 reduction dimension must be divisible by {MXFP8_BLOCK_SIZE}, got {matrix.shape[1]}.")
+        raise ValueError(f"MXFP8 reduction dimension must be divisible by {MXFP8_BLOCK_SIZE}, got {matrix.shape[1]}.")
 
 
 @torch.compile(dynamic=True, fullgraph=True)
@@ -75,12 +74,8 @@ def _store_mxfp8_blocks(
     row_in_block = row % 128
     column_block = blocks // 4
     column_in_block = blocks % 4
-    scale_offset = (
-        (row_block * (scale_column_count // 4) + column_block) * 512
-        + (row_in_block % 32) * 16
-        + (row_in_block // 32) * 4
-        + column_in_block
-    )
+    scale_offset = ((row_block * (scale_column_count // 4) + column_block) * 512 + (row_in_block % 32) * 16 +
+                    (row_in_block // 32) * 4 + column_in_block)
     tl.store(scale_ptr + scale_offset, scale_biased.to(tl.uint8), mask=blocks < scale_column_count)
 
 
@@ -195,9 +190,8 @@ def swiglu_quantize_mxfp8_blockwise(preactivation: torch.Tensor) -> tuple[torch.
     if preactivation.dtype != torch.bfloat16:
         raise TypeError(f"MXFP8 SwiGLU requires BF16 input, got {preactivation.dtype}.")
     if preactivation.shape[1] % (2 * MXFP8_BLOCK_SIZE):
-        raise ValueError(
-            "MXFP8 SwiGLU requires each packed half to be divisible by "
-            f"{MXFP8_BLOCK_SIZE}, got packed width {preactivation.shape[1]}.")
+        raise ValueError("MXFP8 SwiGLU requires each packed half to be divisible by "
+                         f"{MXFP8_BLOCK_SIZE}, got packed width {preactivation.shape[1]}.")
     preactivation = preactivation.contiguous()
     row_count = preactivation.shape[0]
     column_count = preactivation.shape[1] // 2

@@ -129,10 +129,8 @@ def convert_model_to_mxfp8(model: torch.nn.Module) -> int:
             quant_method = getattr(module, "quant_method", None)
             if not isinstance(quant_method, MXFP8QuantizeMethod):
                 continue
-            if converted_count == 0:
-                if not torch.cuda.is_available() or torch.cuda.get_device_capability()[0] < 10:
-                    raise RuntimeError(
-                        "MXFP8 inference requires an NVIDIA Blackwell GPU with compute capability 10.0+.")
+            if converted_count == 0 and (not torch.cuda.is_available() or torch.cuda.get_device_capability()[0] < 10):
+                raise RuntimeError("MXFP8 inference requires an NVIDIA Blackwell GPU with compute capability 10.0+.")
             quant_method.process_weights_after_loading(module)
             converted_count += 1
 
