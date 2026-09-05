@@ -133,6 +133,7 @@ class InputConfig:
     prompt_path: str | None = None
     image_path: str | list[str] | None = None
     video_path: str | list[str] | None = None
+    audio_path: str | list[str] | None = None
     pil_image: Any | None = None
     last_image: Any | None = None
     references: list[Any] | None = None
