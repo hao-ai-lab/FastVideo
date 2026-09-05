@@ -19,6 +19,7 @@ from fastvideo.tests.ssim.reference_utils import (
 logger = init_logger(__name__)
 
 REQUIRED_GPUS = 1
+pytestmark = pytest.mark.skip(reason="Disabled pending removal of Z-Image support.")
 ZIMAGE_MIN_SSIM = 0.98
 
 ZIMAGE_MODEL_PATH = os.getenv(

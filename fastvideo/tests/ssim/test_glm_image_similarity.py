@@ -19,6 +19,7 @@ from fastvideo.tests.ssim.reference_utils import (
 logger = init_logger(__name__)
 
 REQUIRED_GPUS = 1
+pytestmark = pytest.mark.skip(reason="Disabled pending removal of GLM-Image support.")
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 LOCAL_WEIGHTS_DIR = Path(os.getenv("GLM_IMAGE_LOCAL_WEIGHTS_DIR", REPO_ROOT / "official_weights" / "glm_image"))
