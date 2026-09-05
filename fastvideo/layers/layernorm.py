@@ -144,8 +144,15 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
         dtype: torch.dtype = torch.float32,
         compute_dtype: torch.dtype | None = None,
         prefix: str = "",
+        fuse_inference: bool = False,
     ):
         super().__init__()
+        # Opt-in Triton fusion for the no-grad path. Off by default: the fused
+        # kernel returns both outputs in the *stream* dtype (so caller-side
+        # .to(orig_dtype) casts become no-ops), which changes the return dtype
+        # contract relative to eager type promotion. Only callers that follow
+        # every call with a cast to the stream dtype (e.g. Wan) should enable.
+        self.fuse_inference = fuse_inference
         if norm_type == "rms":
             self.norm = RMSNorm(hidden_size, has_weight=elementwise_affine, eps=eps, dtype=dtype)
         elif norm_type == "layer":
@@ -160,19 +167,32 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
                 residual: torch.Tensor,
                 x: torch.Tensor,
                 gate: torch.Tensor | int,
-                shift: torch.Tensor,
-                scale: torch.Tensor,
+                shift: torch.Tensor | None,
+                scale: torch.Tensor | None,
                 convert_modulation_dtype: bool = False) -> tuple[torch.Tensor, torch.Tensor]:
         """
-        Apply gated residual connection, followed by layernorm and 
+        Apply gated residual connection, followed by layernorm and
         scale/shift in a single fused operation.
-        
+
+        Pass ``shift=None, scale=None`` (both, not just one) to skip the
+        modulation entirely and return the normalized tensor as-is. Callers
+        that need norm-only behavior (e.g. Wan's post-self-attn site) would
+        otherwise pay two full-tensor elementwise passes computing
+        ``normalized * (1.0 + 0) + 0``.
+
         Returns:
             Tuple containing:
             - normalized and modulated output
-            - residual value (value after residual connection 
+            - residual value (value after residual connection
               but before normalization)
         """
+        if (shift is None) != (scale is None):
+            raise ValueError("shift and scale must be None together or both be tensors")
+
+        if self.fuse_inference:
+            from fastvideo.layers.triton_fused_norm import (fused_path_supported, fused_residual_norm_mod)
+            if fused_path_supported(residual, x, gate, shift, scale, self.norm):
+                return fused_residual_norm_mod(residual, x, gate, shift, scale, self.norm)
         # x.shape: [batch_size, seq_len, inner_dim]
         # Apply residual connection with gating
         if isinstance(gate, int):
@@ -195,6 +215,10 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
 
         # Apply normalization
         normalized = self.norm(residual_output)
+
+        # Identity modulation: skip the scale/shift passes entirely.
+        if shift is None or scale is None:
+            return normalized, residual_output
 
         if convert_modulation_dtype:
             scale = scale.to(normalized.dtype)
