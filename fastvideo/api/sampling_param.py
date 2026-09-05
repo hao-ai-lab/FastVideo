@@ -31,6 +31,17 @@ class SamplingParam:
     # Video inputs
     video_path: str | None = None
 
+    # Wan-Animate driving inputs: paths to the *preprocessed* artifacts the
+    # official preprocessing pipeline produces (src_pose.mp4, src_face.mp4;
+    # replace mode adds src_bg.mp4 + src_mask.mp4). `animate_mode` selects
+    # animation (character on the reference image's background) vs replace
+    # (character composited into the background video).
+    pose_video_path: str | None = None
+    face_video_path: str | None = None
+    background_video_path: str | None = None
+    mask_video_path: str | None = None
+    animate_mode: str | None = None
+
     # Optional pre-generated diffusion latents. Used by parity/debug harnesses
     # and advanced callers that need deterministic latent reuse.
     latents: Any | None = None

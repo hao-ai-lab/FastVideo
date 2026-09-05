@@ -6,6 +6,7 @@ import torch
 
 from fastvideo.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.configs.models.dits import WanVideoConfig
+from fastvideo.configs.models.dits.wan_animate import WanAnimateConfig as WanAnimateDiTConfig
 from fastvideo.configs.models.dits.wanvideo import WanVideoArchConfig
 from fastvideo.configs.models.encoders import (BaseEncoderOutput, CLIPVisionConfig, T5Config,
                                                WAN2_1ControlCLIPVisionConfig)
@@ -323,3 +324,24 @@ class SelfForcingWan2_2_T2V480PConfig(Wan2_2_T2V_A14B_Config):
     def __post_init__(self) -> None:
         self.vae_config.load_encoder = True
         self.vae_config.load_decoder = True
+
+
+# =============================================
+# ========== Wan2.2 Animate (14B) =============
+# =============================================
+@dataclass
+class WanAnimate14BConfig(WanI2V720PConfig):
+    """Configuration for Wan2.2-Animate-14B character animation / replacement.
+
+    Despite the Wan2.2 branding this is a *dense* 14B DiT on the Wan2.1-I2V
+    skeleton (single expert, Wan2.1 16-channel VAE, CLIP image branch), so it
+    subclasses the I2V config -- not the A14B MoE one. The inherited pieces
+    are all correct as-is: CLIPVisionConfig matches the checkpoint's ViT-H
+    image encoder (image_dim 1280), the I2V ``__post_init__`` loads the VAE
+    encoder (needed for the reference image, the pose video and the previous
+    segment's guidance frames), and flow_shift 5.0 matches the official
+    runner (``wan_animate_14B.py``: sample_shift 5.0, 20 steps, CFG 1.0 --
+    steps and guidance land in the preset, not here).
+    """
+
+    dit_config: DiTConfig = field(default_factory=WanAnimateDiTConfig)

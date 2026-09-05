@@ -286,6 +286,27 @@ LUCY_EDIT_DEV = InferencePreset(
     },
 )
 
+WAN_ANIMATE_14B = InferencePreset(
+    name="wan_animate_14b",
+    version=1,
+    model_family="wan",
+    description="Wan 2.2 Animate 14B character animation/replacement at 720P",
+    workload_type="i2v",
+    stage_schemas=(_DENOISE_STAGE, ),
+    defaults={
+        # Official wan_animate_14B.py runtime: 720p-area, 77-frame segments at
+        # 30 fps, 20 UniPC steps, guidance 1.0 (CFG off; the prompt is non-core).
+        "height": 720,
+        "width": 1280,
+        "num_frames": 77,
+        "fps": 30,
+        "guidance_scale": 1.0,
+        "num_inference_steps": 20,
+        # Inert at guidance 1.0; live if a caller overrides guidance_scale.
+        "negative_prompt": _NEGATIVE_PROMPT_CN,
+    },
+)
+
 # -------------------------------------------------------------------
 # Self-Forcing (causal) presets
 # -------------------------------------------------------------------
@@ -360,6 +381,7 @@ ALL_PRESETS = (
     WAN_2_2_TI2V_5B,
     FAST_WAN_2_2_TI2V_5B,
     LUCY_EDIT_DEV,
+    WAN_ANIMATE_14B,
     SF_WAN_T2V_1_3B,
     SF_WAN_2_2_T2V_A14B,
     SF_WAN_2_2_I2V_A14B,
