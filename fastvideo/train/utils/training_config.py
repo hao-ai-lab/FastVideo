@@ -44,6 +44,17 @@ class OptimizerConfig:
     lr_num_cycles: int = 0
     lr_power: float = 0.0
     min_lr_ratio: float = 0.5
+    # "adamw" (default) or "muon". With "muon", 2-D hidden weight matrices use
+    # Muon (Newton-Schulz orthogonalized momentum) while embeddings, the output
+    # head, and 1-D params fall back to an auxiliary AdamW group.
+    optimizer_type: str = "adamw"
+    # Muon hyper-params (ignored when optimizer_type == "adamw"). ``muon_lr``
+    # defaults to ``learning_rate`` when <= 0; the aux-AdamW group always uses
+    # ``learning_rate`` / ``betas`` / ``weight_decay``.
+    muon_lr: float = 0.0
+    muon_momentum: float = 0.95
+    muon_weight_decay: float = 0.0
+    muon_ns_steps: int = 5
 
 
 @dataclass(slots=True)
