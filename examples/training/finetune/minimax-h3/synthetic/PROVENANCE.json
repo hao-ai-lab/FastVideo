@@ -1,0 +1,37 @@
+{
+  "copyright": "FastVideo contributors",
+  "description": "Deterministic geometric animation and mathematically synthesized tones.",
+  "generation_environment": {
+    "audio_encoder": "aac",
+    "libav": {
+      "libavcodec": "62.28.102",
+      "libavdevice": "62.3.102",
+      "libavfilter": "11.14.102",
+      "libavformat": "62.12.102",
+      "libavutil": "60.26.102",
+      "libswresample": "6.3.102",
+      "libswscale": "9.5.102"
+    },
+    "numpy": "2.5.2",
+    "pillow": "11.3.0",
+    "pyav": "18.1.0",
+    "video_encoder": "libx264"
+  },
+  "generator": "generate_fixture.py",
+  "human_subjects": false,
+  "license": "Apache-2.0",
+  "parameters": {
+    "fps": 24,
+    "height": 128,
+    "num_frames": 124,
+    "sample_rate": 32000,
+    "width": 224
+  },
+  "schema_version": "fastvideo_synthetic_fixture_v1",
+  "sha256": {
+    "refs/audios/synthetic_tones.wav": "20478230383ea1dc09cb06f84a737d04afc797e93e094d4909427b557e9579f5",
+    "refs/images/geometric_reference.png": "3e5a5783e3673c03e9fd14fa6e8b97c7364c5385ae3da3a87fe60a27f8fb04db",
+    "targets/geometric_motion.mp4": "058d8a11d151c0959c6ba56c4e56e82aa7a77952f7be35589c5d96458bcf4f71"
+  },
+  "third_party_content": false
+}
