@@ -6,6 +6,8 @@ load-store accessible NVLink mesh: same layout, byte-identical results, fewer
 passes over local memory. Anything else falls back to the NCCL path.
 """
 
+import socket
+
 import torch
 import torch.distributed as dist
 from torch.distributed import ProcessGroup
@@ -76,6 +78,9 @@ class UlyssesA2AHelper:
         self.pynccl_comm = pynccl_comm
 
         self._handle: int | None = None
+        # One signature per (shape, dtype, mode), so the control collective
+        # runs twice per generation instead of once per call.
+        self._verdicts: dict[tuple[int, ...], tuple[bool, bool, bool]] = {}
         self._nbytes = 0
         self._disabled_reason: str | None = None
 
@@ -95,15 +100,37 @@ class UlyssesA2AHelper:
         return int(getattr(comm, "value", comm))
 
     def _can_attempt(self) -> tuple[bool, str]:
-        """Whether this rank could use the fused path, without allocating anything."""
+        """Whether this rank could use the fused path, without allocating anything.
+
+        The exchange is unconditional: a collective behind a rank-local early
+        return hangs the group exactly when ranks disagree.
+        """
+        # LSA means addressable, not fast: NCCL 2.29 spans trays on a GB200
+        # rack, where the kernel's 16B remote stores lose to NCCL.
+        local_ok = True
+        local_reason = ""
         try:
             from fastvideo_kernel import comm_ops
             if not comm_ops.is_available():
-                return False, "fastvideo-kernel was built without the Ulysses a2a kernel"
-            if not comm_ops.lsa_covers_group(self._comm_ptr(), self.world_size):
-                return False, "the group is not a load-store-accessible (NVLink) mesh"
+                local_ok, local_reason = False, "fastvideo-kernel was built without the Ulysses a2a kernel"
+            elif not comm_ops.lsa_covers_group(self._comm_ptr(), self.world_size):
+                local_ok, local_reason = False, "the group is not a load-store-accessible (NVLink) mesh"
         except Exception as e:  # noqa: BLE001
-            return False, f"backend unavailable ({type(e).__name__}: {e})"
+            local_ok, local_reason = False, f"backend unavailable ({type(e).__name__}: {e})"
+
+        try:
+            gathered: list[tuple[str, bool]] = [("", False)] * self.world_size
+            dist.all_gather_object(gathered, (socket.gethostname(), local_ok), group=self.cpu_group)
+        except Exception as e:  # noqa: BLE001
+            return False, f"topology exchange failed ({type(e).__name__}: {e})"
+
+        hostnames = {host for host, _ in gathered}
+        if len(hostnames) > 1:
+            return False, f"ranks span multiple hosts: {sorted(hostnames)}"
+        if not local_ok:
+            return False, local_reason
+        if not all(ok for _, ok in gathered):
+            return False, "a peer rank cannot use the fused path"
         return True, ""
 
     def _agree(self, ok: bool) -> bool:
@@ -286,6 +313,7 @@ class UlyssesA2AHelper:
         state is leaked until process exit and permanently disabled instead of
         risking a distributed deadlock.
         """
+        self._verdicts.clear()
         handle = self._handle
         all_armed = self._agree(handle is not None)
         all_unarmed = self._agree(handle is None)
@@ -355,7 +383,12 @@ class UlyssesA2AHelper:
             return None
 
         signature, reason = self._call_signature(x, scatter_dim, gather_dim)
-        use_fused, permanently_unavailable, lifecycle_consistent = self._agree_call(signature)
+        cached = self._verdicts.get(signature)
+        if cached is not None:
+            use_fused, permanently_unavailable, lifecycle_consistent = cached
+        else:
+            use_fused, permanently_unavailable, lifecycle_consistent = self._agree_call(signature)
+            self._verdicts[signature] = (use_fused, permanently_unavailable, lifecycle_consistent)
         if not use_fused:
             if not lifecycle_consistent:
                 self.close()
