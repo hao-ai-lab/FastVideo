@@ -36,6 +36,24 @@ def _summarize_param_names(names: set[str]) -> str:
     return ", ".join(f"{family} x{count}" if count > 1 else family for family, count in sorted(families.items()))
 
 
+def _has_fp8_convertible_layers(model: nn.Module) -> bool:
+    """True when ``convert_model_to_fp8`` would convert at least one layer.
+
+    Mirrors the dispatch in :func:`_maybe_quantize_model`: the converter acts
+    on ``FP8QuantizeMethod``, which ``FP8Config.get_quant_method`` attaches
+    only to layers whose prefix matched a suffix entry. A model carrying an
+    ``FP8Config`` that matched nothing converts nothing, so it is unaffected
+    and must not be rejected.
+
+    Deliberately narrow. ``AbsMaxFP8Config``, ``FP8QATTrainConfig`` and
+    ``NVFP4QATConfig`` are separate schemes with their own weight handling and
+    are not what this guard is about.
+    """
+    from fastvideo.layers.quantization.fp8_config import FP8QuantizeMethod
+
+    return any(isinstance(getattr(mod, "quant_method", None), FP8QuantizeMethod) for mod in model.modules())
+
+
 def _maybe_quantize_model(model: nn.Module) -> None:
     """Quantize NVFP4- or FP8-tagged linear layers in-place after weights are loaded.
 
@@ -67,13 +85,20 @@ def _maybe_quantize_model(model: nn.Module) -> None:
     from fastvideo.layers.quantization.nvfp4_qat_train_config import (
         NVFP4QATTrainQuantizeMethod, )
     from fastvideo.layers.quantization.fp8_config import (
+        FP8Config,
         FP8QuantizeMethod,
         convert_model_to_fp8,
     )
 
     qat_train_attached = 0
     qat_train_skipped = 0
-    for mod in model.modules():
+    # Reaching the end of this loop means no conversion ran. If FP8 was
+    # requested and nothing matched, that is 0% coverage, which the converter
+    # cannot report because it is never called. Silence there is exactly the
+    # failure that hid MiniMax H3's unquantized feed-forward.
+    fp8_requested = 0
+    fp8_unmatched_names: set[str] = set()
+    for name, mod in model.named_modules():
         qm = getattr(mod, "quant_method", None)
         if isinstance(qm, NVFP4QuantizeMethod):
             logger.info("Converting loaded model weights for NVFP4 linear layers")
@@ -94,6 +119,14 @@ def _maybe_quantize_model(model: nn.Module) -> None:
             qat_train_attached += 1
         elif isinstance(mod, LinearBase):
             qat_train_skipped += 1
+            if isinstance(getattr(mod, "quant_config", None), FP8Config):
+                fp8_requested += 1
+                fp8_unmatched_names.add(".".join(name.split(".")[-2:]))
+    if fp8_requested:
+        logger.warning(
+            "FP8 was requested for %d linear layers but none of them matched a "
+            "_FP8_SUFFIXES entry, so the model is running unquantized. Names "
+            "seen: %s", fp8_requested, ", ".join(sorted(fp8_unmatched_names)))
     if qat_train_attached:
         logger.info("NVFP4 QAT: attached %d linears (%d skipped by prefix filter)", qat_train_attached,
                     qat_train_skipped)
@@ -210,6 +243,21 @@ def maybe_load_fsdp_model(
         logger.info("Disabling FSDP for MPS platform as it's not compatible")
 
     if use_fsdp:
+        # `_maybe_quantize_model` runs after `shard_model` below, so by then
+        # every weight is a sharded DTensor. `convert_model_to_fp8` reads
+        # `weight.to_local()`, registers that shard as a plain `_fp8_weight`
+        # buffer and removes the FSDP-managed parameter, so
+        # `FP8QuantizeMethod.apply` reads the local shard and no all-gather
+        # ever happens. The forward then multiplies mismatched shapes. Refuse
+        # rather than return wrong numbers; single-shard FSDP is unaffected
+        # because `to_local()` is then the whole weight.
+        if hsdp_shard_dim > 1 and _has_fp8_convertible_layers(model):
+            raise NotImplementedError(
+                f"FP8 quantization does not support FSDP sharding "
+                f"(hsdp_shard_dim={hsdp_shard_dim}). The post-load converter "
+                f"replaces each FSDP-managed parameter with its local shard, so "
+                f"the forward would multiply mismatched shapes. Set "
+                f"hsdp_shard_dim=1, or load this model without FP8.")
         pin_cpu_memory = pin_cpu_memory and is_pin_memory_available()
         world_size = hsdp_replicate_dim * hsdp_shard_dim
         if not training_mode and not fsdp_inference:
