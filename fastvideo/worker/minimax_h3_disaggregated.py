@@ -33,6 +33,55 @@ from fastvideo.worker.ray_utils import assert_ray_available, ray
 
 logger = init_logger(__name__)
 
+def _log_h3_state(name: str, state: Any) -> None:
+    total_bytes = 0
+
+    for field_name in (
+        "prompt_embeds",
+        "video_latents",
+        "audio_latents",
+    ):
+        tensor = getattr(state, field_name, None)
+        if tensor is not None:
+            size = tensor.numel() * tensor.element_size()
+            total_bytes += size
+            logger.info(
+                "[RAY_PAYLOAD] %s.%s: %.2f MB shape=%s dtype=%s device=%s",
+                name,
+                field_name,
+                size / 1e6,
+                tuple(tensor.shape),
+                tensor.dtype,
+                tensor.device,
+            )
+
+    # layout contains tensors too.
+    layout = getattr(state, "layout", None)
+    if layout is not None:
+        for field_name in (
+            "text_indices",
+            "video_indices",
+            "audio_indices",
+        ):
+            tensor = getattr(layout, field_name, None)
+            if tensor is not None:
+                size = tensor.numel() * tensor.element_size()
+                total_bytes += size
+                logger.info(
+                    "[RAY_PAYLOAD] %s.layout.%s: %.2f MB shape=%s dtype=%s device=%s",
+                    name,
+                    field_name,
+                    size / 1e6,
+                    tuple(tensor.shape),
+                    tensor.dtype,
+                    tensor.device,
+                )
+
+    logger.info(
+        "[RAY_PAYLOAD] %s TOTAL: %.2f MB",
+        name,
+        total_bytes / 1e6,
+    )
 
 def _node_resource(node_ip: str) -> str:
     return f"node:{node_ip}"
@@ -146,22 +195,6 @@ class _MiniMaxH3DiTActor:
         self.pipeline = pipeline_cls(args.model_path, args)
         self.pipeline.post_init()
 
-    def denoise(self, state: MiniMaxH3EncodedState) -> MiniMaxH3DenoisedState:
-        return self.pipeline.denoise(state)
-
-    def set_lora_adapter(self, lora_nickname: str, lora_path: str | None, strength: float,
-                         accumulate: bool) -> dict[str, str]:
-        self.pipeline.set_lora_adapter(lora_nickname, lora_path, strength=strength, accumulate=accumulate)
-        return {"status": "lora_adapter_set"}
-
-    def unmerge_lora_weights(self) -> dict[str, str]:
-        self.pipeline.unmerge_lora_weights()
-        return {"status": "lora_adapter_unmerged"}
-
-    def merge_lora_weights(self) -> dict[str, str]:
-        self.pipeline.merge_lora_weights()
-        return {"status": "lora_adapter_merged"}
-
     def health(self) -> dict[str, Any]:
         modules = tuple(sorted(self.pipeline.modules))
         return {
@@ -172,12 +205,11 @@ class _MiniMaxH3DiTActor:
             "all_resident": all(not is_lazy_module(module) for module in self.pipeline.modules.values()),
         }
 
-    def shutdown(self) -> dict[str, str]:
-        self.pipeline = None
-        cleanup_dist_env_and_memory(shutdown_ray=False)
-        return {"status": "shutdown_complete"}
-
-
+    def denoise(self, state: MiniMaxH3EncodedState) -> MiniMaxH3DenoisedState:
+        _log_h3_state("A_TO_B encoded", state)
+        result = self.pipeline.denoise(state)
+        _log_h3_state("B_TO_A denoised", result)
+        return result
 class RayMiniMaxH3DisaggregatedRuntime:
     """Own one persistent encoder/decoder actor and one persistent DiT actor."""
 

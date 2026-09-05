@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""CPU contracts for the two-node MiniMax-H3 component pipeline."""
+"""CUDA contracts for the two-node MiniMax-H3 component pipeline."""
 
 from __future__ import annotations
 
@@ -38,16 +38,23 @@ from fastvideo.worker.executor import Executor
 
 
 def _layout(*, noncontiguous: bool = False) -> MiniMaxH3PackedLayout:
-    position_ids = torch.arange(27, dtype=torch.float64).reshape(3, 9).transpose(0, 1)
+    position_ids = (
+        torch.arange(27, dtype=torch.float64, device="cuda")
+        .reshape(3, 9)
+        .transpose(0, 1)
+    )
     if not noncontiguous:
         position_ids = position_ids.contiguous()
     return MiniMaxH3PackedLayout(
         sequence_length=9,
         position_ids=position_ids,
-        token_tags=torch.tensor([1, 1, 1, 2, 2, 0, 0, 0, 0]),
-        video_indices=torch.tensor([5, 6, 7, 8]),
-        audio_indices=torch.tensor([3, 4]),
-        text_indices=torch.tensor([0, 1, 2]),
+        token_tags=torch.tensor(
+            [1, 1, 1, 2, 2, 0, 0, 0, 0],
+            device="cuda",
+        ),
+        video_indices=torch.tensor([5, 6, 7, 8], device="cuda"),
+        audio_indices=torch.tensor([3, 4], device="cuda"),
+        text_indices=torch.tensor([0, 1, 2], device="cuda"),
         num_condition_video_rows=0,
         num_condition_audio_rows=0,
         num_video_latent_frames=2,
@@ -58,9 +65,21 @@ def _layout(*, noncontiguous: bool = False) -> MiniMaxH3PackedLayout:
 
 
 def _encoded_batch(*, request_id: str | None = None) -> ForwardBatch:
-    prompt_embeds = torch.arange(12, dtype=torch.float32).reshape(1, 4, 3).transpose(1, 2)
-    video_latents = torch.arange(20, dtype=torch.float32).reshape(5, 4).transpose(0, 1)
-    audio_latents = torch.arange(12, dtype=torch.float32).reshape(6, 2).transpose(0, 1)
+    prompt_embeds = (
+        torch.arange(12, dtype=torch.float32, device="cuda")
+        .reshape(1, 4, 3)
+        .transpose(1, 2)
+    )
+    video_latents = (
+        torch.arange(20, dtype=torch.float32, device="cuda")
+        .reshape(5, 4)
+        .transpose(0, 1)
+    )
+    audio_latents = (
+        torch.arange(12, dtype=torch.float32, device="cuda")
+        .reshape(6, 2)
+        .transpose(0, 1)
+    )
     extra: dict[str, Any] = {
         MINIMAX_H3_LAYOUT_KEY: _layout(noncontiguous=True),
         "vsa_mode": "compete",
@@ -82,7 +101,7 @@ def _encoded_batch(*, request_id: str | None = None) -> ForwardBatch:
     )
 
 
-def test_encoded_wire_state_is_minimal_cpu_contiguous_and_pickleable() -> None:
+def test_encoded_wire_state_is_minimal_cuda_contiguous_and_pickleable() -> None:
     batch = _encoded_batch()
     assert not batch.prompt_embeds[0].is_contiguous()
     assert not batch.latents.is_contiguous()
@@ -119,10 +138,10 @@ def test_encoded_wire_state_is_minimal_cpu_contiguous_and_pickleable() -> None:
         restored.layout.audio_indices,
         restored.layout.text_indices,
     ):
-        assert tensor.device.type == "cpu"
+        assert tensor.device.type == "cuda"
         assert tensor.is_contiguous()
 
-    roundtrip = restored.to_batch(device="cpu")
+    roundtrip = restored.to_batch()
     assert torch.equal(roundtrip.prompt_embeds[0], batch.prompt_embeds[0])
     assert torch.equal(roundtrip.latents, batch.latents)
     assert torch.equal(roundtrip.audio_latents, batch.audio_latents)
@@ -136,7 +155,7 @@ def test_encoded_wire_state_is_minimal_cpu_contiguous_and_pickleable() -> None:
 
 def test_denoised_wire_state_roundtrips_only_decode_inputs() -> None:
     encoded = MiniMaxH3EncodedState.from_batch(_encoded_batch(), request_id="request-8")
-    denoised_batch = encoded.to_batch(device="cpu")
+    denoised_batch = encoded.to_batch()
     denoised_batch.latents = denoised_batch.latents + 1
     denoised_batch.audio_latents = denoised_batch.audio_latents - 1
 
@@ -168,9 +187,9 @@ def test_denoised_wire_state_roundtrips_only_decode_inputs() -> None:
         ({"raw_latent_shape": (1, 16, 0, 2, 2)}, "raw latent shape"),
         ({"num_inference_steps": 0}, "at least one denoising step"),
         ({"vsa_mode": "unknown"}, "vsa_mode"),
-        ({"video_latents": torch.zeros(3, 5)}, "video latent rows"),
-        ({"audio_latents": torch.zeros(1, 6)}, "audio latent rows"),
-        ({"prompt_embeds": torch.zeros(1, 2, 4)}, "prompt embedding rows"),
+        ({"video_latents": torch.zeros(3, 5, device="cuda")}, "video latent rows"),
+        ({"audio_latents": torch.zeros(1, 6, device="cuda")}, "audio latent rows"),
+        ({"prompt_embeds": torch.zeros(1, 2, 4, device="cuda")}, "prompt embedding rows"),
     ],
 )
 def test_encoded_wire_state_rejects_incompatible_payloads(mutation: dict[str, Any], message: str) -> None:
@@ -181,10 +200,10 @@ def test_encoded_wire_state_rejects_incompatible_payloads(mutation: dict[str, An
 
 def test_wire_state_rejects_noncontiguous_or_malformed_layout() -> None:
     state = MiniMaxH3EncodedState.from_batch(_encoded_batch(), request_id="valid")
-    with pytest.raises(ValueError, match="layout.position_ids must be a contiguous CPU tensor"):
+    with pytest.raises(ValueError, match="layout.position_ids must be a contiguous CUDA tensor"):
         replace(state, layout=_layout(noncontiguous=True))
 
-    malformed = replace(_layout(), token_tags=torch.zeros(8, dtype=torch.long))
+    malformed = replace(_layout(), token_tags=torch.zeros(8, dtype=torch.long, device="cuda"))
     with pytest.raises(ValueError, match=r"layout.token_tags.*expected \(9,\)"):
         replace(state, layout=malformed)
 
