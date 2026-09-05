@@ -42,6 +42,10 @@ extern std::vector<torch::Tensor> block_sparse_sm100a_blk128_fwd(
     torch::Tensor q, torch::Tensor k, torch::Tensor v, c10::optional<torch::Tensor> v_t,
     torch::Tensor q2k_idx, torch::Tensor q2k_num, torch::Tensor variable_block_sizes,
     double sm_scale, bool need_lse);
+extern std::vector<torch::Tensor> block_sparse_sm100a_bwd(
+    torch::Tensor grad_o, torch::Tensor q, torch::Tensor k, torch::Tensor v, torch::Tensor o,
+    torch::Tensor lse, torch::Tensor k2q_idx, torch::Tensor k2q_num,
+    torch::Tensor variable_block_sizes, double sm_scale);
 #endif
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
@@ -54,6 +58,9 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("block_sparse_sm100a_blk128_fwd",
           torch::wrap_pybind_function(block_sparse_sm100a_blk128_fwd),
           "VSA block-sparse attention forward, 128-token blocks (Blackwell sm100a/sm103a)");
+    m.def("block_sparse_sm100a_bwd",
+          torch::wrap_pybind_function(block_sparse_sm100a_bwd),
+          "VSA block-sparse attention backward, 64-token blocks (Blackwell sm100a)");
 #endif
 
 #ifdef TK_COMPILE_ST_ATTN
