@@ -32,10 +32,16 @@ def main():
     parser.add_argument('--sparse-probe-dir', type=Path)
     parser.add_argument('--models', nargs='+', default=['small', 'Wan', 'H3'])
     parser.add_argument('--paired', action='store_true')
+    parser.add_argument('--h3-lengths', nargs='+', type=int)
+    parser.add_argument('--probe-window-gib', type=int, default=1)
+    parser.add_argument('--routes', nargs='+')
+    parser.add_argument('--chunked', action='store_true')
+    parser.add_argument('--packed-count', type=int, default=3)
     args = parser.parse_args()
     from fastvideo.distributed import cleanup_dist_env_and_memory, maybe_init_distributed_environment_and_model_parallel
     from fastvideo.distributed.device_communicators.base_device_communicator import DeviceCommunicatorBase
     from fastvideo.distributed.device_communicators.ulysses_a2a import _FusedUlyssesA2A, UlyssesA2AHelper
+    import fastvideo.distributed.device_communicators.ulysses_a2a as ulysses_module
     from fastvideo.distributed.parallel_state import get_sp_group
 
     rank = int(os.environ['RANK'])
@@ -48,6 +54,7 @@ def main():
     helper = comm.ulysses_a2a
     assert helper is not None
     records = []
+    engagement = {}
     probe_helpers = {}
     if args.probe_dir:
         import sys
@@ -55,6 +62,15 @@ def main():
         import ulysses_launch_probe as probe_ops
 
         class ProbeHelper(UlyssesA2AHelper):
+            def _call_signature(self, x, scatter_dim, gather_dim):
+                # Experimental per-helper cap; this script has one host thread.
+                original = ulysses_module.MAX_WINDOW_BYTES
+                ulysses_module.MAX_WINDOW_BYTES = args.probe_window_gib * 1024**3
+                try:
+                    return super()._call_signature(x, scatter_dim, gather_dim)
+                finally:
+                    ulysses_module.MAX_WINDOW_BYTES = original
+
             def _allocate(self, nbytes):
                 return probe_ops.allocate_ulysses_a2a(nbytes, rank, world, torch.cuda.current_device())
 
@@ -82,9 +98,20 @@ def main():
             candidate = ProbeHelper(helper.cpu_group, helper.device_group, world, helper.device, helper.pynccl_comm)
             candidate.probe_blocks = blocks
             probe_helpers[f'probe{blocks}'] = candidate
+        if args.chunked:
+            candidate = ProbeHelper(helper.cpu_group, helper.device_group, world, helper.device, helper.pynccl_comm)
+            candidate.probe_blocks = 144
+            probe_helpers['chunk144'] = candidate
     routes = ['nccl', 'safe', 'prepared', *probe_helpers]
+    if args.routes:
+        assert set(args.routes) <= set(routes)
+        routes = args.routes
+    if args.h3_lengths:
+        assert 'prepared' not in routes, 'legacy prepared control cannot cover the 1 GiB cap transition'
 
     def emit(record):
+        record.update(sequence=sequence, heads=heads, packed_count=args.packed_count,
+                      probe_window_gib=args.probe_window_gib)
         records.append(record)
         if rank == 0:
             args.output.write_text(json.dumps(records, indent=2) + '\n')
@@ -97,6 +124,8 @@ def main():
         torch.cuda.synchronize()
         for repeat in (range(args.rounds) if round_index is None else [round_index]):
             wall, gpu = [], []
+            before = dict(engagement)
+            torch.cuda.reset_peak_memory_stats()
             for _ in range(count):
                 dist.barrier(group=group.cpu_group)
                 start, end = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
@@ -113,16 +142,42 @@ def main():
             wall, gpu = values.cpu().tolist()
             emit(dict(**metadata, round=repeat, repeats=repeats, world=world,
                       wall_p50_us=statistics.median(wall), gpu_p50_us=statistics.median(gpu),
+                      forward_engagement={k: v - before.get(k, 0) for k, v in engagement.items() if v > before.get(k, 0)},
+                      torch_peak_allocated_gib=torch.cuda.max_memory_allocated() / 1024**3,
+                      registered_windows_gib=sum(h._nbytes for h in [helper, *probe_helpers.values()]) / 1024**3,
                       wall_rank_max_samples_us=wall, gpu_rank_max_samples_us=gpu))
 
     def a2a(x, mode, route):
         dims = (2, 1) if mode == 0 else (1, 2)
         if route == 'nccl':
+            key = f'{route}:{mode}:nccl'
+            engagement[key] = engagement.get(key, 0) + 1
             return DeviceCommunicatorBase.all_to_all_4D(comm, x, *dims)
         if route == 'safe':
-            return comm.all_to_all_4D(x, *dims)
+            result = helper.try_all_to_all_4D(x, *dims)
+            key = f'{route}:{mode}:{"fused" if result is not None else "nccl"}'
+            engagement[key] = engagement.get(key, 0) + 1
+            return result if result is not None else DeviceCommunicatorBase.all_to_all_4D(comm, x, *dims)
+        if route == 'chunk144':
+            candidate = probe_helpers[route]
+            # Agree the whole contract before ranks enter a variable number of chunks.
+            signature, _ = candidate._call_signature(x, *dims)
+            if not candidate._agree_call(signature)[0]:
+                return DeviceCommunicatorBase.all_to_all_4D(comm, x, *dims)
+            results = []
+            for chunk in x.split(1, dim=0):
+                assert chunk.numel() * chunk.element_size() <= 1024**3
+                result = candidate.try_all_to_all_4D(chunk, *dims)
+                key = f'{route}:{mode}:{"fused" if result is not None else "nccl"}'
+                engagement[key] = engagement.get(key, 0) + 1
+                results.append(result if result is not None else DeviceCommunicatorBase.all_to_all_4D(comm, chunk, *dims))
+            return results[0] if len(results) == 1 else torch.cat(results, dim=0)
         if route in probe_helpers:
-            return probe_helpers[route].try_all_to_all_4D(x, *dims)
+            result = probe_helpers[route].try_all_to_all_4D(x, *dims)
+            assert result is not None, f'{route} unexpectedly declined'
+            key = f'{route}:{mode}:fused'
+            engagement[key] = engagement.get(key, 0) + 1
+            return result
         assert route == 'prepared'
         return _FusedUlyssesA2A.apply(helper, x, mode)
 
@@ -132,28 +187,31 @@ def main():
             actual = a2a(x, mode, 'safe')
             expected = a2a(x, mode, 'nccl')
             assert torch.equal(actual, expected)
-            for route in probe_helpers:
+            for route in [r for r in routes if r in probe_helpers]:
                 assert torch.equal(a2a(x, mode, route), expected)
-        assert helper._handle is not None
+        if 'prepared' in routes:
+            assert helper._handle is not None
         torch.cuda.synchronize()
 
     try:
         workloads = [('small', 8192, 40), ('Wan', 75600, 40), ('H3', 37296, 56)]
         workloads = [w for w in workloads if w[0] in args.models]
+        if args.h3_lengths:
+            workloads = [(f'H3-{length}', length, 56) for length in args.h3_lengths]
         if args.section == 'collectives':
             for model, sequence, heads in workloads:
-                x = torch.randn(3, sequence // world, heads, 128, device='cuda', dtype=torch.bfloat16)
+                x = torch.randn(args.packed_count, sequence // world, heads, 128, device='cuda', dtype=torch.bfloat16)
                 y = torch.randn(1, sequence, heads // world, 128, device='cuda', dtype=torch.bfloat16)
                 prepare([(x, 0), (y, 1)])
                 signature, _ = helper._call_signature(x, 2, 1)
                 measure(lambda: helper._agree_call(signature), dict(model=model, operation='agreement', route='safe'))
                 for mode, operand in [(0, x), (1, y)]:
                     operation = 'scatter' if mode == 0 else 'gather'
-                    for route in ('nccl', 'safe', 'prepared'):
+                    for route in routes:
                         measure(lambda: a2a(operand, mode, route), dict(model=model, operation=operation, route=route))
                     dst = torch.empty_like(operand)
                     measure(lambda: dst.copy_(operand), dict(model=model, operation=operation + '_copy', route='copy'))
-                for route in ('nccl', 'safe', 'prepared'):
+                for route in routes:
                     def pair():
                         a2a(x, 0, route)
                         a2a(y, 1, route)
@@ -161,17 +219,28 @@ def main():
                             iterations=max(3, args.iters // 4), repeats=20)
                     x.requires_grad_(True)
                     y.requires_grad_(True)
-                    dx = torch.randn(3, sequence, heads // world, 128, device='cuda', dtype=torch.bfloat16)
+                    dx = torch.randn(args.packed_count, sequence, heads // world, 128, device='cuda', dtype=torch.bfloat16)
                     dy = torch.randn(1, sequence // world, heads, 128, device='cuda', dtype=torch.bfloat16)
                     def training_pair():
                         ox = a2a(x, 0, route)
                         oy = a2a(y, 1, route)
-                        torch.autograd.grad((ox, oy), (x, y), (dx, dy))
+                        return torch.autograd.grad((ox, oy), (x, y), (dx, dy))
+                    if args.h3_lengths:
+                        expected_grads = torch.autograd.grad((a2a(x, 0, 'nccl'), a2a(y, 1, 'nccl')),
+                                                             (x, y), (dx, dy))
+                        actual_grads = training_pair()
+                        assert all(torch.equal(a, b) for a, b in zip(actual_grads, expected_grads))
+                        del expected_grads, actual_grads
                     measure(training_pair, dict(model=model, operation='pair_fwd_bwd', route=route),
                             iterations=max(3, args.iters // 4), repeats=5)
                     x.requires_grad_(False)
                     y.requires_grad_(False)
                     del dx, dy
+                if 'prepared' not in routes:
+                    del x, y, dst
+                    gc.collect()
+                    torch.cuda.empty_cache()
+                    continue
                 # All ranks collectively capture the same already-prepared calls.
                 capture_stream = torch.cuda.Stream()
                 capture_stream.wait_stream(torch.cuda.current_stream())
@@ -202,13 +271,15 @@ def main():
         else:
             from fastvideo.attention.utils.flash_attn_default import fa_version, flash_attn_func_compilable
             for model, sequence, heads in workloads:
-                hidden = heads * 128
+                inner = heads * 128
+                hidden = 5376 if args.h3_lengths else inner
+                ffn = 14336 if args.h3_lengths else 4 * hidden
                 x = torch.randn(1, sequence // world, hidden, device='cuda', dtype=torch.bfloat16,
                                 requires_grad=True)
                 weights = [torch.nn.Parameter(torch.randn(out_dim, in_dim, device='cuda', dtype=torch.bfloat16)
                                               * in_dim**-0.5)
-                           for in_dim, out_dim in [(hidden, 3 * hidden), (hidden, hidden),
-                                                   (hidden, 4 * hidden), (4 * hidden, hidden)]]
+                           for in_dim, out_dim in [(hidden, 3 * inner), (inner, hidden),
+                                                   (hidden, 2 * ffn if args.h3_lengths else ffn), (ffn, hidden)]]
                 dy = torch.randn_like(x)
                 probe = torch.empty(3, sequence // world, heads, 128, device='cuda', dtype=torch.bfloat16)
                 # Initialize before parity; otherwise uninitialized NaNs can fail equality.
@@ -245,12 +316,18 @@ def main():
                         attended = flash_attn_func_compilable(q, k, v, causal=False)
                     local = a2a(attended.contiguous(), 1, route).flatten(2)
                     residual = x + F.linear(local, weights[1])
-                    return residual + F.linear(F.gelu(F.linear(residual, weights[2]), approximate='tanh'), weights[3])
+                    activated = F.linear(residual, weights[2])
+                    if args.h3_lengths:
+                        value, gate = activated.chunk(2, dim=-1)
+                        activated = value * F.silu(gate)
+                    else:
+                        activated = F.gelu(activated, approximate='tanh')
+                    return residual + F.linear(activated, weights[3])
 
                 # Compare outputs and all input/weight gradients under the identical compute recipe.
                 reference = block('nccl')
                 reference_grads = torch.autograd.grad(reference, [x, *weights], dy)
-                for route in routes[1:]:
+                for route in [r for r in routes if r != 'nccl']:
                     result = block(route)
                     gradients = torch.autograd.grad(result, [x, *weights], dy)
                     torch.testing.assert_close(result, reference, rtol=0, atol=0)
