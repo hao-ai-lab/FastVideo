@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Data-center Blackwell CUDA block-sparse VSA forward.
 
-The historical ``sm100a`` module and symbol names are retained for compatibility, but the
-extension carries native sm_100a and sm_103a images and supports both device generations.
+The historical ``sm100a`` module and symbol names are retained for compatibility. The
+extension always carries a native sm_100a image and also carries sm_103a when built with
+CUDA 12.9 or newer.
 
 A third backend behind the same VSA op as the Triton and CuTe-DSL paths. Forward only: it
 returns ``(out, lse)`` with ``lse`` in exactly the form ``triton_block_sparse_attn_forward``
@@ -29,12 +30,16 @@ try:
         128: getattr(_C, "block_sparse_sm100a_blk128_fwd", None),
     }
     _HAS_VSA_SM100A = any(_FWD_BY_BLOCK.values())
+    _HAS_VSA_SM103A = bool(getattr(_C, "_has_vsa_sm103a", False))
 except ImportError:  # pragma: no cover - extension not built
     _C = None
     _FWD_BY_BLOCK = {}
     _HAS_VSA_SM100A = False
+    _HAS_VSA_SM103A = False
 
-_SUPPORTED_COMPUTE_CAPABILITIES = {(10, 0), (10, 3)}
+_SUPPORTED_COMPUTE_CAPABILITIES = {(10, 0)}
+if _HAS_VSA_SM103A:
+    _SUPPORTED_COMPUTE_CAPABILITIES.add((10, 3))
 HEAD_DIM = 128
 # Must match the -DVSA_BHSD the extension was compiled with (see CMakeLists).
 BHSD = True

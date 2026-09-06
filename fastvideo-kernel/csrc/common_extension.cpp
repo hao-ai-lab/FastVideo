@@ -54,6 +54,11 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("block_sparse_sm100a_blk128_fwd",
           torch::wrap_pybind_function(block_sparse_sm100a_blk128_fwd),
           "VSA block-sparse attention forward, 128-token blocks (Blackwell sm100a/sm103a)");
+#ifdef TK_COMPILE_BLOCK_SPARSE_VSA_SM103A
+    m.attr("_has_vsa_sm103a") = true;
+#else
+    m.attr("_has_vsa_sm103a") = false;
+#endif
 #endif
 
 #ifdef TK_COMPILE_ST_ATTN
