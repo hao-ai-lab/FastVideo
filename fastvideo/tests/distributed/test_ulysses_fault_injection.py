@@ -43,7 +43,7 @@ FAULT_CASES += [(world, fault_rank, stage)
                for world, fault_rank in [(2, 1), (4, 0)]
                for stage in ("constructor", "backend", "pynccl", "hostname", "late_layout", "late_capture",
                              "late_configuration", "late_capacity", "late_lifecycle", "cached_shape", "cached_mode",
-                             "decline_then_recover")]
+                             "decline_then_recover", "late_real_capture", "late_mixed_capture")]
 
 
 def _check_after_warmup(helper, rank: int, fault_rank: int, stage: str, device: torch.device) -> None:
@@ -52,6 +52,11 @@ def _check_after_warmup(helper, rank: int, fault_rank: int, stage: str, device: 
 
     assert helper is not None, "this regression must exercise an available fused helper"
     x = torch.randn(3, 64, 8, 64, device=device, dtype=torch.bfloat16)
+    if stage == "decline_then_recover":
+        # Populate a declined contract before any window or successful call.
+        operand = torch.stack((x, x), dim=-1)[..., 0] if rank == fault_rank else x
+        assert helper.try_all_to_all_4D(operand, 2, 1) is None
+        assert helper._handle is None
     for _ in range(3):
         y = helper.try_all_to_all_4D(x, 2, 1)
         assert y is not None
@@ -59,6 +64,28 @@ def _check_after_warmup(helper, rank: int, fault_rank: int, stage: str, device: 
     alt = x.reshape(3, 32, 16, 64)
     for _ in range(2):
         assert helper.try_all_to_all_4D(alt, 2, 1) is not None
+
+    if stage in ("late_real_capture", "late_mixed_capture"):
+        capture_stream = torch.cuda.Stream(device=device)
+        graph = torch.cuda.CUDAGraph()
+        # Synchronize warmup before starting the real, default-global capture.
+        torch.cuda.synchronize(device)
+        if stage == "late_real_capture" or rank == fault_rank:
+            with torch.cuda.graph(graph, stream=capture_stream):
+                graph_output = x + 1
+                assert helper.try_all_to_all_4D(x, 2, 1) is None
+            graph.replay()
+            torch.cuda.synchronize(device)
+            assert torch.equal(graph_output, x + 1)
+        else:
+            assert helper.try_all_to_all_4D(x, 2, 1) is None
+        recovered = helper.try_all_to_all_4D(x, 2, 1)
+        assert recovered is not None
+        assert torch.equal(helper.try_all_to_all_4D(recovered, 1, 2), x)
+        print(f"RANK_DONE rank={rank} recovered=True", flush=True)
+        if rank == 0:
+            print(f"ALL_RANKS_COMPLETED world={helper.world_size} stage={stage}", flush=True)
+        return
 
     dims = (2, 1)
     operand = x
