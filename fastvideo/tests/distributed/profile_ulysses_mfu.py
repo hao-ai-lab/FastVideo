@@ -29,6 +29,7 @@ def main():
     parser.add_argument('--warmup', type=int, default=5)
     parser.add_argument('--probe-dir', type=Path)
     parser.add_argument('--sparse', action='store_true')
+    parser.add_argument('--sparse-probe-dir', type=Path)
     parser.add_argument('--models', nargs='+', default=['small', 'Wan', 'H3'])
     parser.add_argument('--paired', action='store_true')
     args = parser.parse_args()
@@ -216,6 +217,12 @@ def main():
                 del probe
                 if args.sparse:
                     from fastvideo_kernel.block_sparse_attn import block_sparse_attn_sm100a_op
+                    if args.sparse_probe_dir:
+                        import sys
+                        sys.path.insert(0, str(args.sparse_probe_dir))
+                        import ulysses_sparse_probe
+                        import fastvideo_kernel.block_sparse_attn_sm100a as sparse_module
+                        sparse_module._FWD_BY_BLOCK[64] = ulysses_sparse_probe.block_sparse_sm100a_fwd
                     padded_sequence = ((sequence + 127) // 128) * 128
                     block_count = padded_sequence // 64
                     topk = max(1, block_count // 10)

@@ -51,9 +51,27 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--build-dir', type=Path, required=True)
     parser.add_argument('--build-only', action='store_true')
+    parser.add_argument('--sparse-build-only', action='store_true')
     parser.add_argument('--output', type=Path)
     args = parser.parse_args()
     args.build_dir.mkdir(parents=True, exist_ok=True)
+    if args.sparse_build_only:
+        from torch.utils.cpp_extension import load
+        repo = Path(__file__).resolve().parents[3]
+        source_dir = repo / 'fastvideo-kernel/csrc/attention'
+        source = (source_dir / 'block_sparse_sm100a.cu').read_text()
+        source += ('\nPYBIND11_MODULE(TORCH_EXTENSION_NAME, m) { '
+                   'm.def("block_sparse_sm100a_fwd", &block_sparse_sm100a_fwd); }\n')
+        generated = args.build_dir / 'sparse.cu'
+        generated.write_text(source)
+        os.environ['TORCH_CUDA_ARCH_LIST'] = '10.0a'
+        os.environ['MAX_JOBS'] = '2'
+        load(name='ulysses_sparse_probe', sources=[str(generated)],
+             extra_include_paths=[str(source_dir)],
+             extra_cuda_cflags=['-O3', '-std=c++17', '-DVSA_BHSD=true'],
+             extra_ldflags=['-L/usr/local/cuda/lib64/stubs', '-lcuda'],
+             build_directory=str(args.build_dir), verbose=True)
+        return
     if args.build_only:
         build(args.build_dir)
         return
