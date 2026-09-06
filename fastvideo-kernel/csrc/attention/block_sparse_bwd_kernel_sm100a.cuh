@@ -552,6 +552,7 @@ __global__ void __cluster_dims__(1, 1, 1) __launch_bounds__(N_WARPS * 32, 1) vsa
           stage_tile + (size_t)col_half * (KV_TILE * SUB_COLS_BF16) + kv_row * SUB_COLS_BF16;
       uint32_t acc_regs[HALF_COLS];
       tcgen05_ld_32x32b_x64(tmem_acc + tmem_f32_offset, acc_regs);
+      tcgen05_wait_ld();
       tcgen05_fence_before_thread_sync();
       const float2* acc2  = reinterpret_cast<const float2*>(acc_regs);
       const float2 scale2 = f32x2_splat(sm_scale);
@@ -637,6 +638,7 @@ __global__ void __cluster_dims__(1, 1, 1) __launch_bounds__(N_WARPS * 32, 1) vsa
 
           uint32_t st_regs[HALF_COLS];
           tcgen05_ld_32x32b_x64(tmem_st + tmem_f32_offset, st_regs);
+          tcgen05_wait_ld();
           tcgen05_fence_before_thread_sync();
 
           float2* pt_fp32 = reinterpret_cast<float2*>(st_regs);
@@ -666,6 +668,7 @@ __global__ void __cluster_dims__(1, 1, 1) __launch_bounds__(N_WARPS * 32, 1) vsa
 
           uint32_t dpt_regs[HALF_COLS];
           tcgen05_ld_32x32b_x64(tmem_dpt + tmem_f32_offset, dpt_regs);
+          tcgen05_wait_ld();
           tcgen05_fence_before_thread_sync();
 
           const float2* dpt2 = reinterpret_cast<const float2*>(dpt_regs);
@@ -784,6 +787,10 @@ __global__ void __cluster_dims__(1, 1, 1) __launch_bounds__(N_WARPS * 32, 1) vsa
               tcgen05_ld_32x32b_x64(tmem_dq + tmem_lane_base + (uint32_t)(c * 64),
                                     reinterpret_cast<uint32_t (&)[64]>(dq_regs[c * 64]));
             }
+            // The loads are asynchronous; the arrive below hands tmem_dq back to the MMA warp,
+            // so it must sit behind their completion (the register consumers alone are
+            // scoreboarded, the arrive is not).
+            tcgen05_wait_ld();
             tcgen05_fence_before_thread_sync();
             if (elect_one_sync()) {
               mbarrier_arrive(smem_ptr_u32(empty_bar_dq));
