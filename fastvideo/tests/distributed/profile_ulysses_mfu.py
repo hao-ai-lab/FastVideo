@@ -102,6 +102,50 @@ def main():
             candidate = ProbeHelper(helper.cpu_group, helper.device_group, world, helper.device, helper.pynccl_comm)
             candidate.probe_blocks = 144
             probe_helpers['chunk144'] = candidate
+
+            class ChunkIntoHelper(ProbeHelper):
+                """Benchmark-only chunked protocol with one owned final output.
+
+                Full-call agreement fixes the chunk count/order on all ranks;
+                inherited setup votes protect allocation/registration. The real
+                registered capacity is one batch plane and is advertised as such.
+                """
+
+                def try_all_to_all_4D(self, x, scatter_dim, gather_dim):
+                    if self._disabled_reason is not None or torch.compiler.is_compiling():
+                        return None
+                    signature, reason = self._call_signature(x, scatter_dim, gather_dim)
+                    fused, permanent, lifecycle = self._agree_call(signature)
+                    if not fused:
+                        if not lifecycle:
+                            self.close()
+                            self._disable('inconsistent chunk-window lifecycle')
+                        if permanent:
+                            self._disable(reason or 'peer declined chunked operation')
+                        return None
+                    slot_bytes = signature[-2] // x.shape[0]
+                    assert slot_bytes <= 1024**3, 'one batch plane must fit the bounded window'
+                    if self._handle is None:
+                        if not self._build(slot_bytes):
+                            return None
+                    elif slot_bytes > self._nbytes:
+                        if not self.close() or not self._build(slot_bytes):
+                            return None
+                    return _FusedUlyssesA2A.apply(self, x, signature[2])
+
+                def run_armed(self, x, mode):
+                    b, s, h, d = x.shape
+                    local_s, global_h = (s, h) if mode == 0 else (s // world, h * world)
+                    shape = (b, s * world, h // world, d) if mode == 0 else (b, s // world, h * world, d)
+                    out = torch.empty(shape, device=x.device, dtype=x.dtype)
+                    for plane in range(b):
+                        probe_ops.ulysses_a2a(self._handle, x[plane:plane + 1], out[plane:plane + 1],
+                                              1, local_s, global_h, d, mode, 144, 512, True)
+                    return out
+
+            candidate = ChunkIntoHelper(helper.cpu_group, helper.device_group, world, helper.device, helper.pynccl_comm)
+            candidate.probe_blocks = 144
+            probe_helpers['chunk_into144'] = candidate
     routes = ['nccl', 'safe', 'prepared', *probe_helpers]
     if args.routes:
         assert set(args.routes) <= set(routes)
