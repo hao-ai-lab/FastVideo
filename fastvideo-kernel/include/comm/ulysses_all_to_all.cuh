@@ -50,7 +50,8 @@ namespace ulysses {
 constexpr int kUlyssesThreads = 512;
 // Deliberately modest: this is link-bandwidth bound, so a small grid leaves the
 // rest of the GPU free without costing throughput.
-constexpr int kMaxBlocks = 36;
+// One distinct NCCL barrier slot per CTA, including the tuned GB200 launch.
+constexpr int kMaxBlocks = 144;
 
 // Shared movement body for the fused-transpose all-to-all (no barriers).
 //

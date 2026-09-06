@@ -30,6 +30,8 @@ _DTYPE_CODES = {
 # Bound persistent registered memory per rank. Larger operands use NCCL instead
 # of growing the window without limit.
 MAX_WINDOW_BYTES = 1024**3
+H3_TRAINING_PLANE_LIMIT_BYTES = 512 * 1024**2
+_CONTRACT_SIZE = 12
 
 # (scatter_dim, gather_dim) -> kernel mode.
 #   0: [B, S_local, H, D]        -> [B, S_global, H_local, D]
@@ -50,17 +52,22 @@ class _FusedUlyssesA2A(torch.autograd.Function):
     """
 
     @staticmethod
-    def forward(ctx, helper: "UlyssesA2AHelper", x: torch.Tensor, mode: int) -> torch.Tensor:  # type: ignore[override]
+    def forward(ctx, helper: "UlyssesA2AHelper", x: torch.Tensor, mode: int, chunked: bool,
+                blocks: int) -> torch.Tensor:  # type: ignore[override]
         ctx.helper = helper
         ctx.mode = mode
-        return helper.run_armed(x, mode)
+        ctx.chunked = chunked
+        ctx.blocks = blocks
+        return helper.run_armed(x, mode, chunked, blocks)
 
     @staticmethod
     def backward(ctx, grad_output: torch.Tensor):  # type: ignore[override]
         # Same numel and dtype as the forward output, so the window is already
         # sized for it; only contiguity needs restoring.
-        grad_input = ctx.helper.run_armed(grad_output.contiguous(), 1 - ctx.mode)
-        return None, grad_input, None
+        # Reuse the forward plan, even if later calls chose another plan or
+        # backward executes with grad tracking disabled.
+        grad_input = ctx.helper.run_armed(grad_output.contiguous(), 1 - ctx.mode, ctx.chunked, ctx.blocks)
+        return None, grad_input, None, None, None
 
 
 class UlyssesA2AHelper:
@@ -81,11 +88,12 @@ class UlyssesA2AHelper:
         self._handle: int | None = None
         # Reuse storage, but exchange the current contract on every call. A
         # rank-local cache hit cannot establish what peers are doing now.
-        self._local_contract = array("q", [0] * 10)
+        self._local_contract = array("q", [0] * _CONTRACT_SIZE)
         self._local_tensor = torch.frombuffer(self._local_contract, dtype=torch.int64)
-        self._gathered_tensor = torch.empty(world_size * 10, dtype=torch.int64, device="cpu")
+        self._gathered_tensor = torch.empty(world_size * _CONTRACT_SIZE, dtype=torch.int64, device="cpu")
         self._nbytes = 0
         self._disabled_reason: str | None = None
+        self._h3_tuning_available: bool | None = None
 
         if world_size not in SUPPORTED_WORLD_SIZES:
             self._disabled_reason = (f"world size {world_size} is not one of "
@@ -166,6 +174,20 @@ class UlyssesA2AHelper:
                 logger.warning("Ulysses partial-context cleanup failed", exc_info=True)
         return self._agree(cleanup_ok)
 
+    def _execution_plan(self, x: torch.Tensor, mode: int) -> tuple[bool, int]:
+        """Use the measured GB200/SP4 launch only for H3's bf16 head geometry."""
+        global_heads = x.shape[2] if mode == 0 else x.shape[2] * self.world_size
+        if self.world_size != 4 or x.dtype != torch.bfloat16 or global_heads != 56 or x.shape[3] != 128:
+            return False, 36
+        if self._h3_tuning_available is None:
+            from fastvideo_kernel import comm_ops
+
+            props = torch.cuda.get_device_properties(self.device)
+            self._h3_tuning_available = ("GB200" in props.name and props.major == 10 and props.minor == 0
+                                         and props.multi_processor_count >= 144
+                                         and getattr(comm_ops, "supports_tuned_launch", lambda: False)())
+        return (True, 144) if self._h3_tuning_available else (False, 36)
+
     def _call_signature(self, x: torch.Tensor, scatter_dim: int, gather_dim: int) -> tuple[tuple[int, ...], str]:
         """Return a rank-comparable call contract and any local decline reason."""
         mode = _MODE_FROM_DIMS.get((scatter_dim, gather_dim))
@@ -196,17 +218,26 @@ class UlyssesA2AHelper:
             status, reason = 0, "sequence length is not divisible by the group"
 
         nbytes = int(x.numel() * x.element_size())
+        chunked, blocks = False, 36
+        if status == 1 and nbytes:
+            assert mode is not None
+            chunked, blocks = self._execution_plan(x, mode)
+        window_bytes = nbytes // shape[0] if chunked else nbytes
         if status == 1 and nbytes == 0:
             status, reason = 0, "input is empty"
-        elif status == 1 and nbytes > MAX_WINDOW_BYTES:
-            status, reason = 0, f"operand exceeds the {MAX_WINDOW_BYTES}-byte window cap"
+        elif status == 1 and window_bytes > MAX_WINDOW_BYTES:
+            status, reason = 0, f"operand window exceeds the {MAX_WINDOW_BYTES}-byte cap"
+        elif (status == 1 and chunked and shape[0] > 1 and torch.is_grad_enabled() and x.requires_grad
+              and window_bytes > H3_TRAINING_PLANE_LIMIT_BYTES):
+            status, reason = 0, "large packed H3 training transfer uses NCCL"
 
-        # status, armed, mode, dtype, B, S, H, D, bytes, capacity. Comparing the
+        # status, armed, mode, dtype, B, S, H, D, window bytes, capacity,
+        # chunked, blocks. Comparing the
         # whole vector prevents equal-size but differently-shaped ranks from
         # entering the fused kernel with incompatible address math. CUDA device
         # ordinals are deliberately absent: rank-local ordinals normally differ.
-        signature = (status, int(self._handle is not None), -1 if mode is None else mode, dtype_code, *shape, nbytes,
-                     self._nbytes)
+        signature = (status, int(self._handle is not None), -1 if mode is None else mode, dtype_code, *shape,
+                     window_bytes, self._nbytes, int(chunked), blocks)
         return signature, reason
 
     def _agree_call(self, signature: tuple[int, ...]) -> tuple[bool, bool, bool]:
@@ -221,11 +252,11 @@ class UlyssesA2AHelper:
         self._local_contract[:] = array("q", signature)
         dist.all_gather_into_tensor(self._gathered_tensor, self._local_tensor, group=self.cpu_group)
         values = self._gathered_tensor.tolist()
-        contracts = [values[start:start + 10] for start in range(0, len(values), 10)]
+        contracts = [values[start:start + _CONTRACT_SIZE] for start in range(0, len(values), _CONTRACT_SIZE)]
         first = contracts[0]
         use_fused = first[0] == 1 and all(contract == first for contract in contracts)
         permanently_unavailable = any(contract[0] < 0 for contract in contracts)
-        lifecycle_consistent = all(contract[1] == first[1] and contract[-1] == first[-1] for contract in contracts)
+        lifecycle_consistent = all(contract[1] == first[1] and contract[9] == first[9] for contract in contracts)
         return use_fused, permanently_unavailable, lifecycle_consistent
 
     def _build(self, nbytes: int) -> bool:
@@ -333,7 +364,7 @@ class UlyssesA2AHelper:
 
     # -- collective ----------------------------------------------------------
 
-    def run_armed(self, x: torch.Tensor, mode: int) -> torch.Tensor:
+    def run_armed(self, x: torch.Tensor, mode: int, chunked: bool, blocks: int) -> torch.Tensor:
         """Run one collective on an already-armed context."""
         assert self._handle is not None, "run_armed called on an unarmed helper"
         from fastvideo_kernel import comm_ops
@@ -346,7 +377,22 @@ class UlyssesA2AHelper:
             B, S_global, H_local, D = x.shape
             S_local, H = S_global // w, H_local * w
             out = torch.empty(B, S_local, H, D, dtype=x.dtype, device=x.device)
-        comm_ops.all_to_all(self._handle, x, out, B, S_local, H, D, mode)
+        if chunked:
+            # Each copy completes on this stream before the next plane reuses
+            # the registered window. The full result owns its storage; saved
+            # activations never alias the reusable window.
+            for plane in range(B):
+                comm_ops.all_to_all(self._handle,
+                                    x[plane:plane + 1],
+                                    out[plane:plane + 1],
+                                    1,
+                                    S_local,
+                                    H,
+                                    D,
+                                    mode,
+                                    blocks=blocks)
+        else:
+            comm_ops.all_to_all(self._handle, x, out, B, S_local, H, D, mode)
         return out
 
     def try_all_to_all_4D(self, x: torch.Tensor, scatter_dim: int, gather_dim: int) -> torch.Tensor | None:
@@ -371,7 +417,7 @@ class UlyssesA2AHelper:
             return None
 
         mode = signature[2]
-        nbytes = signature[-2]
+        nbytes = signature[8]
         if self._handle is None:
             if not self._build(nbytes):
                 return None
@@ -382,7 +428,7 @@ class UlyssesA2AHelper:
             if not self._build(nbytes):
                 return None
 
-        return _FusedUlyssesA2A.apply(self, x, mode)
+        return _FusedUlyssesA2A.apply(self, x, mode, bool(signature[10]), signature[11])
 
 
 def maybe_create_helper(cpu_group: ProcessGroup | None, device_group: ProcessGroup | None, world_size: int,
