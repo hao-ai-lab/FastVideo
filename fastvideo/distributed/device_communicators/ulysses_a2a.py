@@ -7,6 +7,7 @@ passes over local memory. Anything else falls back to the NCCL path.
 """
 
 import socket
+from array import array
 
 import torch
 import torch.distributed as dist
@@ -78,9 +79,11 @@ class UlyssesA2AHelper:
         self.pynccl_comm = pynccl_comm
 
         self._handle: int | None = None
-        # One signature per (shape, dtype, mode), so the control collective
-        # runs twice per generation instead of once per call.
-        self._verdicts: dict[tuple[int, ...], tuple[bool, bool, bool]] = {}
+        # Reuse storage, but exchange the current contract on every call. A
+        # rank-local cache hit cannot establish what peers are doing now.
+        self._local_contract = array("q", [0] * 10)
+        self._local_tensor = torch.frombuffer(self._local_contract, dtype=torch.int64)
+        self._gathered_tensor = torch.empty(world_size * 10, dtype=torch.int64, device="cpu")
         self._nbytes = 0
         self._disabled_reason: str | None = None
 
@@ -100,42 +103,20 @@ class UlyssesA2AHelper:
         return int(getattr(comm, "value", comm))
 
     def _can_attempt(self) -> tuple[bool, str]:
-        """Whether this rank could use the fused path, without allocating anything.
-
-        The exchange is unconditional: a collective behind a rank-local early
-        return hangs the group exactly when ranks disagree.
-        """
-        # LSA means addressable, not fast: NCCL 2.29 spans trays on a GB200
-        # rack, where the kernel's 16B remote stores lose to NCCL.
-        local_ok = True
-        local_reason = ""
+        """Check local capability only; the caller exchanges every rank's result."""
         try:
             from fastvideo_kernel import comm_ops
             if not comm_ops.is_available():
-                local_ok, local_reason = False, "fastvideo-kernel was built without the Ulysses a2a kernel"
+                return False, "fastvideo-kernel was built without the Ulysses a2a kernel"
             elif not comm_ops.lsa_covers_group(self._comm_ptr(), self.world_size):
-                local_ok, local_reason = False, "the group is not a load-store-accessible (NVLink) mesh"
+                return False, "the group is not a load-store-accessible (NVLink) mesh"
         except Exception as e:  # noqa: BLE001
-            local_ok, local_reason = False, f"backend unavailable ({type(e).__name__}: {e})"
-
-        try:
-            gathered: list[tuple[str, bool]] = [("", False)] * self.world_size
-            dist.all_gather_object(gathered, (socket.gethostname(), local_ok), group=self.cpu_group)
-        except Exception as e:  # noqa: BLE001
-            return False, f"topology exchange failed ({type(e).__name__}: {e})"
-
-        hostnames = {host for host, _ in gathered}
-        if len(hostnames) > 1:
-            return False, f"ranks span multiple hosts: {sorted(hostnames)}"
-        if not local_ok:
-            return False, local_reason
-        if not all(ok for _, ok in gathered):
-            return False, "a peer rank cannot use the fused path"
+            return False, f"backend unavailable ({type(e).__name__}: {e})"
         return True, ""
 
     def _agree(self, ok: bool) -> bool:
         """Reduce a local yes/no to a group-wide verdict: True only if all agree."""
-        vote = torch.tensor([1 if ok else 0], dtype=torch.int32)
+        vote = torch.tensor([1 if ok else 0], dtype=torch.int32, device="cpu")
         dist.all_reduce(vote, op=dist.ReduceOp.MIN, group=self.cpu_group)
         return bool(vote.item())
 
@@ -237,16 +218,14 @@ class UlyssesA2AHelper:
         """
         # Host-side Gloo control keeps this agreement outside CUDA graph capture
         # and avoids inserting a second NCCL collective ahead of the data path.
-        local = torch.tensor(signature, dtype=torch.int64)
-        gathered = torch.empty(self.world_size * local.numel(), dtype=local.dtype)
-        dist.all_gather_into_tensor(gathered, local, group=self.cpu_group)
-        contracts = gathered.view(self.world_size, local.numel())
-        identical = bool(torch.all(contracts == contracts[0]).item())
-        statuses = contracts[:, 0]
-        use_fused = identical and bool(torch.all(statuses == 1).item())
-        permanently_unavailable = bool(torch.any(statuses < 0).item())
-        lifecycle_consistent = (bool(torch.all(contracts[:, 1] == contracts[0, 1]).item())
-                                and bool(torch.all(contracts[:, -1] == contracts[0, -1]).item()))
+        self._local_contract[:] = array("q", signature)
+        dist.all_gather_into_tensor(self._gathered_tensor, self._local_tensor, group=self.cpu_group)
+        values = self._gathered_tensor.tolist()
+        contracts = [values[start:start + 10] for start in range(0, len(values), 10)]
+        first = contracts[0]
+        use_fused = first[0] == 1 and all(contract == first for contract in contracts)
+        permanently_unavailable = any(contract[0] < 0 for contract in contracts)
+        lifecycle_consistent = all(contract[1] == first[1] and contract[-1] == first[-1] for contract in contracts)
         return use_fused, permanently_unavailable, lifecycle_consistent
 
     def _build(self, nbytes: int) -> bool:
@@ -313,7 +292,6 @@ class UlyssesA2AHelper:
         state is leaked until process exit and permanently disabled instead of
         risking a distributed deadlock.
         """
-        self._verdicts.clear()
         handle = self._handle
         all_armed = self._agree(handle is not None)
         all_unarmed = self._agree(handle is None)
@@ -383,12 +361,7 @@ class UlyssesA2AHelper:
             return None
 
         signature, reason = self._call_signature(x, scatter_dim, gather_dim)
-        cached = self._verdicts.get(signature)
-        if cached is not None:
-            use_fused, permanently_unavailable, lifecycle_consistent = cached
-        else:
-            use_fused, permanently_unavailable, lifecycle_consistent = self._agree_call(signature)
-            self._verdicts[signature] = (use_fused, permanently_unavailable, lifecycle_consistent)
+        use_fused, permanently_unavailable, lifecycle_consistent = self._agree_call(signature)
         if not use_fused:
             if not lifecycle_consistent:
                 self.close()
@@ -437,9 +410,14 @@ def maybe_create_helper(cpu_group: ProcessGroup | None, device_group: ProcessGro
         except Exception as e:  # noqa: BLE001 - converted to a group verdict below
             reason = f"helper construction failed ({type(e).__name__}: {e})"
 
-    vote = torch.tensor([int(helper is not None)], dtype=torch.int32)
-    dist.all_reduce(vote, op=dist.ReduceOp.MIN, group=cpu_group)
-    if not bool(vote.item()):
+    # Every rank reaches the same exchange, including configuration, constructor,
+    # and backend failures. LSA covers addressability, not single-host locality.
+    gathered: list[tuple[str, bool]] = [("", False)] * world_size
+    dist.all_gather_object(gathered, (socket.gethostname(), helper is not None), group=cpu_group)
+    hostnames = {hostname for hostname, _ in gathered}
+    if len(hostnames) != 1:
+        reason = f"ranks span multiple hosts: {sorted(hostnames)}"
+    if len(hostnames) != 1 or not all(ok for _, ok in gathered):
         if dist.get_rank(cpu_group) == 0:
             logger.info("Ulysses fused all-to-all unavailable: %s", reason or "a peer rank declined")
         return None
