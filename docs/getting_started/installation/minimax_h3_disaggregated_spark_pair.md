@@ -4,7 +4,7 @@ This runbook tests the component-disaggregated MiniMax H3 inference path:
 
 - Spark A: text/multimodal encoder, video VAE, audio VAE, and the driver.
 - Spark B: DiT denoising only.
-- Ray transports CPU-contiguous conditioning and latent tensors between the two roles.
+- Ray transports CUDA-contiguous conditioning and latent tensors between the two roles.
 - Each role uses one GPU with tensor parallelism and sequence parallelism disabled.
 - All role components remain resident until the generator shuts down.
 
@@ -509,6 +509,60 @@ For one generator lifetime:
 - Each actor should initialize its pipeline once.
 - No request should release or reload the text encoder, DiT, or VAEs.
 - Spark B should continue denoising without waiting for Spark A's VAE decode.
+
+### Measure the two payload handoffs
+
+Enable transfer profiling on the **driver before creating the generator**:
+
+~~~bash
+FASTVIDEO_H3_PROFILE_TRANSFERS=1 \
+  fastvideo generate --config /tmp/h3-disaggregated-smoke.yaml
+~~~
+
+The driver passes this setting to both actors, including when connecting to an
+existing Ray cluster. It also applies to `iter_forward` and its async wrapper.
+Look for `[RAY_TRANSFER]`, `[RAY_STAGE]`, and `[RAY_PAYLOAD]` in the worker logs.
+Every line includes a `request_id` to correlate concurrent requests.
+
+Each request logs an `A_TO_B` encoded-payload receipt on the DiT worker and a
+`B_TO_A` denoised-payload receipt on the encoder/decoder worker:
+
+| Field | What it measures |
+|---|---|
+| `source_wait_s` | Receiver wait until the producer's result is available somewhere in Ray. Includes any remaining producer work, serialization, and readiness notification. |
+| `object_fetch_s` | Wait to make that ready object available in the receiver's local object store. Includes Ray transfer/control overhead and any object-store restore; a cached object can be nearly immediate. |
+| `materialize_s` | Local `ray.get` deserialization and tensor reconstruction, including waiting for CUDA copies to complete. |
+| `receive_s` | `object_fetch_s + materialize_s`, excluding the upstream wait. |
+| `tensor_bytes` | Logical bytes in the conditioning/latent tensors and all five layout tensors. Excludes serialization metadata, backing-storage overhead, and network protocol bytes. |
+| `object_fetch_mb_s` | Logical tensor MB divided by `object_fetch_s`; an effective payload rate, not measured NIC bandwidth. |
+
+`[RAY_STAGE]` separately reports synchronized `elapsed_s` for `encode`,
+`denoise`, and `decode`. Large `object_fetch_s` points toward the Ray data path;
+large `materialize_s` points toward reconstruction/device-copy cost. Large
+`source_wait_s` alone does not imply a slow network: compare it with the
+producer's stage time. Actor queueing before a receiving method starts is not
+part of these receiver timers. Sender serialization occurs after the producer's
+stage timer ends and may overlap other work.
+
+The timers use a monotonic clock on the receiving Spark, so they do not require
+synchronized clocks between machines. Profiling passes a nested ObjectRef and
+uses `ray.wait(fetch_local=False)`, then `ray.wait(fetch_local=True)`, then
+`ray.get` to separate the three phases. See Ray's
+[object-reference behavior](https://docs.ray.io/en/latest/ray-core/objects.html#passing-object-arguments)
+and [wait semantics](https://docs.ray.io/en/latest/ray-core/api/doc/ray.wait.html).
+
+This is an opt-in diagnostic: deferring the fetch until receiver entry changes
+prefetch overlap, and CUDA synchronization adds overhead. Compare a short warmed
+run with profiling disabled before drawing throughput conclusions. The default
+execution keeps Ray's automatic argument fetching. These application timings do
+not isolate pure time on the wire, and CUDA payloads alone do not establish that
+the transport uses RDMA or GPU-direct transfers.
+
+For an external CUDA trace, set `FASTVIDEO_NVTX_PROFILE=1` in the Ray worker
+environment before starting Ray. With transfer profiling enabled, NVTX ranges
+include `h3.A_TO_B.source_wait`, `h3.A_TO_B.object_fetch`,
+`h3.A_TO_B.materialize` (and the corresponding `B_TO_A` ranges), plus
+`h3.encode`, `h3.denoise`, and `h3.decode`.
 
 ## 9. Optional FastH3/VSA test after correctness passes
 

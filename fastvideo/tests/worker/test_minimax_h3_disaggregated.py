@@ -481,6 +481,7 @@ def _fake_runtime(monkeypatch):
     monkeypatch.setattr(disaggregated_runtime, "ray", fake_ray)
     runtime = RayMiniMaxH3DisaggregatedRuntime.__new__(RayMiniMaxH3DisaggregatedRuntime)
     runtime._closed = False
+    runtime._profile_transfers = False
     runtime.encoder_decoder = _FakeEncoderActor(events)
     runtime.dit = _FakeDiTActor(events)
     return runtime, fake_ray, events

@@ -5,15 +5,18 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Iterable, Iterator
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from copy import deepcopy
+from dataclasses import dataclass
 import os
 from queue import Queue
+import time
 from typing import Any, cast
 from uuid import uuid4
 
 import torch
 
+import fastvideo.envs as envs
 from fastvideo.distributed import cleanup_dist_env_and_memory
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
@@ -27,61 +30,118 @@ from fastvideo.pipelines.basic.minimax_h3.disaggregated import (
 )
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.lazy_module import is_lazy_module
+from fastvideo.profiler import nvtx_range
 from fastvideo.utils import get_ip, get_open_port
 from fastvideo.worker.executor import Executor
 from fastvideo.worker.ray_utils import assert_ray_available, ray
 
 logger = init_logger(__name__)
 
-def _log_h3_state(name: str, state: Any) -> None:
-    total_bytes = 0
 
-    for field_name in (
-        "prompt_embeds",
-        "video_latents",
-        "audio_latents",
-    ):
+def _h3_state_tensors(state: Any) -> Iterator[tuple[str, torch.Tensor]]:
+    for field_name in ("prompt_embeds", "video_latents", "audio_latents"):
         tensor = getattr(state, field_name, None)
         if tensor is not None:
-            size = tensor.numel() * tensor.element_size()
-            total_bytes += size
-            logger.info(
-                "[RAY_PAYLOAD] %s.%s: %.2f MB shape=%s dtype=%s device=%s",
-                name,
-                field_name,
-                size / 1e6,
-                tuple(tensor.shape),
-                tensor.dtype,
-                tensor.device,
-            )
+            yield field_name, tensor
 
-    # layout contains tensors too.
     layout = getattr(state, "layout", None)
     if layout is not None:
-        for field_name in (
-            "text_indices",
-            "video_indices",
-            "audio_indices",
-        ):
+        for field_name in ("position_ids", "token_tags", "text_indices", "video_indices", "audio_indices"):
             tensor = getattr(layout, field_name, None)
             if tensor is not None:
-                size = tensor.numel() * tensor.element_size()
-                total_bytes += size
-                logger.info(
-                    "[RAY_PAYLOAD] %s.layout.%s: %.2f MB shape=%s dtype=%s device=%s",
-                    name,
-                    field_name,
-                    size / 1e6,
-                    tuple(tensor.shape),
-                    tensor.dtype,
-                    tensor.device,
-                )
+                yield f"layout.{field_name}", tensor
+
+
+def _log_h3_state(name: str, state: Any) -> int:
+    total_bytes = 0
+    for field_name, tensor in _h3_state_tensors(state):
+        size = tensor.numel() * tensor.element_size()
+        total_bytes += size
+        logger.info(
+            "[RAY_PAYLOAD] %s.%s: %.2f MB shape=%s dtype=%s device=%s request_id=%s",
+            name,
+            field_name,
+            size / 1e6,
+            tuple(tensor.shape),
+            tensor.dtype,
+            tensor.device,
+            state.request_id,
+        )
 
     logger.info(
-        "[RAY_PAYLOAD] %s TOTAL: %.2f MB",
+        "[RAY_PAYLOAD] %s TOTAL: %.2f MB request_id=%s (logical tensor bytes)",
         name,
         total_bytes / 1e6,
+        state.request_id,
     )
+    return total_bytes
+
+
+@dataclass(frozen=True)
+class _H3TransferRef:
+    """Keep the ref nested so Ray does not fetch it before actor entry."""
+
+    ref: Any
+    request_id: str
+
+
+def _synchronize_h3_device() -> None:
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+
+
+def _receive_h3_state(state: Any, direction: str) -> Any:
+    if not isinstance(state, _H3TransferRef):
+        return state
+
+    # A receiver-local clock avoids clock skew between the two Sparks. Drain
+    # earlier device work before timing, then wait for production WITHOUT
+    # fetching locally so producer compute is not counted as object fetch.
+    _synchronize_h3_device()
+    started = time.perf_counter()
+    with nvtx_range(f"h3.{direction}.source_wait"):
+        ray.wait([state.ref], num_returns=1, fetch_local=False)
+    source_ready = time.perf_counter()
+    with nvtx_range(f"h3.{direction}.object_fetch"):
+        ray.wait([state.ref], num_returns=1, fetch_local=True)
+    fetched = time.perf_counter()
+    with nvtx_range(f"h3.{direction}.materialize"):
+        result = ray.get(state.ref)
+        _synchronize_h3_device()
+    materialized = time.perf_counter()
+
+    tensor_bytes = sum(tensor.numel() * tensor.element_size() for _, tensor in _h3_state_tensors(result))
+    object_fetch_s = fetched - source_ready
+    # This is an effective logical-payload rate, not measured NIC bandwidth.
+    rate = f"{tensor_bytes / 1e6 / object_fetch_s:.2f}" if object_fetch_s > 0 else "n/a"
+    logger.info(
+        "[RAY_TRANSFER] request_id=%s direction=%s tensor_bytes=%d "
+        "source_wait_s=%.6f object_fetch_s=%.6f materialize_s=%.6f "
+        "receive_s=%.6f object_fetch_mb_s=%s",
+        state.request_id,
+        direction,
+        tensor_bytes,
+        source_ready - started,
+        object_fetch_s,
+        materialized - fetched,
+        materialized - source_ready,
+        rate,
+    )
+    return result
+
+
+@contextmanager
+def _h3_stage_timer(stage: str, request_id: str, enabled: bool) -> Iterator[None]:
+    if not enabled:
+        yield
+        return
+    _synchronize_h3_device()
+    started = time.perf_counter()
+    with nvtx_range(f"h3.{stage}"):
+        yield
+        _synchronize_h3_device()
+    logger.info("[RAY_STAGE] request_id=%s stage=%s elapsed_s=%.6f", request_id, stage, time.perf_counter() - started)
+
 
 def _node_resource(node_ip: str) -> str:
     return f"node:{node_ip}"
@@ -157,7 +217,8 @@ def _next_or_sentinel(iterator: Iterator[ForwardBatch], sentinel: object) -> For
 
 class _MiniMaxH3EncoderDecoderActor:
 
-    def __init__(self, fastvideo_args: FastVideoArgs) -> None:
+    def __init__(self, fastvideo_args: FastVideoArgs, profile_transfers: bool = False) -> None:
+        self._profile_transfers = profile_transfers
         _bind_single_gpu_process()
         args = _resident_role_args(fastvideo_args, role="encoder_decoder")
         pipeline_cls = MiniMaxH3RefEncoderDecoderPipeline if _is_ref2va(args) else MiniMaxH3EncoderDecoderPipeline
@@ -165,10 +226,13 @@ class _MiniMaxH3EncoderDecoderActor:
         self.pipeline.post_init()
 
     def encode(self, batch: ForwardBatch, request_id: str) -> MiniMaxH3EncodedState:
-        return self.pipeline.encode(batch, request_id=request_id)
+        with _h3_stage_timer("encode", request_id, self._profile_transfers):
+            return self.pipeline.encode(batch, request_id=request_id)
 
-    def decode(self, state: MiniMaxH3DenoisedState) -> ForwardBatch:
-        return self.pipeline.decode(state)
+    def decode(self, state: MiniMaxH3DenoisedState | _H3TransferRef) -> ForwardBatch:
+        state = _receive_h3_state(state, "B_TO_A")
+        with _h3_stage_timer("decode", state.request_id, self._profile_transfers):
+            return self.pipeline.decode(state)
 
     def health(self) -> dict[str, Any]:
         modules = tuple(sorted(self.pipeline.modules))
@@ -188,7 +252,8 @@ class _MiniMaxH3EncoderDecoderActor:
 
 class _MiniMaxH3DiTActor:
 
-    def __init__(self, fastvideo_args: FastVideoArgs) -> None:
+    def __init__(self, fastvideo_args: FastVideoArgs, profile_transfers: bool = False) -> None:
+        self._profile_transfers = profile_transfers
         _bind_single_gpu_process()
         args = _resident_role_args(fastvideo_args, role="dit")
         pipeline_cls = MiniMaxH3RefDiTPipeline if _is_ref2va(args) else MiniMaxH3DiTPipeline
@@ -205,11 +270,15 @@ class _MiniMaxH3DiTActor:
             "all_resident": all(not is_lazy_module(module) for module in self.pipeline.modules.values()),
         }
 
-    def denoise(self, state: MiniMaxH3EncodedState) -> MiniMaxH3DenoisedState:
+    def denoise(self, state: MiniMaxH3EncodedState | _H3TransferRef) -> MiniMaxH3DenoisedState:
+        state = _receive_h3_state(state, "A_TO_B")
         _log_h3_state("A_TO_B encoded", state)
-        result = self.pipeline.denoise(state)
+        with _h3_stage_timer("denoise", state.request_id, self._profile_transfers):
+            result = self.pipeline.denoise(state)
         _log_h3_state("B_TO_A denoised", result)
         return result
+
+
 class RayMiniMaxH3DisaggregatedRuntime:
     """Own one persistent encoder/decoder actor and one persistent DiT actor."""
 
@@ -227,6 +296,7 @@ class RayMiniMaxH3DisaggregatedRuntime:
             ray.init(address=address, runtime_env=fastvideo_args.ray_runtime_env)
         _validate_topology(encoder_node_ip, dit_node_ip, ray.cluster_resources())
 
+        self._profile_transfers = envs.FASTVIDEO_H3_PROFILE_TRANSFERS
         actor_args = deepcopy(fastvideo_args)
         actor_args.ray_placement_group = None
         actor_args.ray_runtime_env = None
@@ -242,13 +312,13 @@ class RayMiniMaxH3DisaggregatedRuntime:
                 resources={
                     _node_resource(encoder_node_ip): 0.001
                 },
-            ).remote(actor_args)
+            ).remote(actor_args, self._profile_transfers)
             self.dit = ray.remote(_MiniMaxH3DiTActor).options(
                 **common_options,
                 resources={
                     _node_resource(dit_node_ip): 0.001
                 },
-            ).remote(actor_args)
+            ).remote(actor_args, self._profile_transfers)
             self._validate_workers()
         except Exception:
             for actor in (self.encoder_decoder, self.dit):
@@ -279,6 +349,9 @@ class RayMiniMaxH3DisaggregatedRuntime:
             raise RuntimeError("MiniMax-H3 disaggregated workers have not been created.")
         return ray.get([self.encoder_decoder.health.remote(), self.dit.health.remote()])
 
+    def _transfer_arg(self, ref: Any, request_id: str) -> Any:
+        return _H3TransferRef(ref, request_id) if self._profile_transfers else ref
+
     def submit(self, batch: ForwardBatch, *, request_id: str | None = None):
         """Build a direct actor-to-actor DAG without materializing intermediates on the driver."""
         if self._closed:
@@ -287,8 +360,8 @@ class RayMiniMaxH3DisaggregatedRuntime:
             raise RuntimeError("MiniMax-H3 disaggregated workers have not been created.")
         resolved_request_id = request_id if request_id is not None else _request_id(batch)
         encoded_ref = self.encoder_decoder.encode.remote(batch, resolved_request_id)
-        denoised_ref = self.dit.denoise.remote(encoded_ref)
-        return self.encoder_decoder.decode.remote(denoised_ref)
+        denoised_ref = self.dit.denoise.remote(self._transfer_arg(encoded_ref, resolved_request_id))
+        return self.encoder_decoder.decode.remote(self._transfer_arg(denoised_ref, resolved_request_id))
 
     def execute_forward(self, batch: ForwardBatch, *, request_id: str | None = None) -> ForwardBatch:
         return ray.get(self.submit(batch, request_id=request_id))
@@ -312,16 +385,19 @@ class RayMiniMaxH3DisaggregatedRuntime:
 
         if self.encoder_decoder is None or self.dit is None:
             raise RuntimeError("MiniMax-H3 disaggregated workers have not been created.")
-        encoded_ref = self.encoder_decoder.encode.remote(first, _request_id(first))
-        denoised_ref = self.dit.denoise.remote(encoded_ref)
+        request_id = _request_id(first)
+        encoded_ref = self.encoder_decoder.encode.remote(first, request_id)
+        denoised_ref = self.dit.denoise.remote(self._transfer_arg(encoded_ref, request_id))
         for next_batch in iterator:
-            next_encoded_ref = self.encoder_decoder.encode.remote(next_batch, _request_id(next_batch))
+            next_request_id = _request_id(next_batch)
+            next_encoded_ref = self.encoder_decoder.encode.remote(next_batch, next_request_id)
             ray.wait([denoised_ref], num_returns=1, fetch_local=False)
-            decoded_ref = self.encoder_decoder.decode.remote(denoised_ref)
-            next_denoised_ref = self.dit.denoise.remote(next_encoded_ref)
+            decoded_ref = self.encoder_decoder.decode.remote(self._transfer_arg(denoised_ref, request_id))
+            next_denoised_ref = self.dit.denoise.remote(self._transfer_arg(next_encoded_ref, next_request_id))
             yield ray.get(decoded_ref)
             denoised_ref = next_denoised_ref
-        yield ray.get(self.encoder_decoder.decode.remote(denoised_ref))
+            request_id = next_request_id
+        yield ray.get(self.encoder_decoder.decode.remote(self._transfer_arg(denoised_ref, request_id)))
 
     async def iter_forward_async(self, batches: Iterable[ForwardBatch]) -> AsyncIterator[ForwardBatch]:
         """Asynchronously consume the bounded actor pipeline without blocking the event loop."""
