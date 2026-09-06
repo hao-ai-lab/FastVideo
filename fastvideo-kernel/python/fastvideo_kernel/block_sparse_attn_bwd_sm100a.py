@@ -33,8 +33,9 @@ BHSD = True
 def set_extension(module) -> None:
     """Use an already-loaded extension module exposing ``block_sparse_sm100a_bwd``.
 
-    The in-repo tests build the binding standalone (tests/jit_ext.py) and inject it here, so
-    the backend can be exercised without a fastvideo_kernel install.
+    A standalone build of ``block_sparse_bwd_sm100a.cu`` (for example through
+    ``torch.utils.cpp_extension.load`` with a ten-line pybind wrapper) can be injected here, so
+    the backend can be exercised without rebuilding the fastvideo_kernel wheel.
     """
     global _C, _BWD, _HAS_VSA_BWD_SM100A
     _C = module

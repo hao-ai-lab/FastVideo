@@ -174,6 +174,13 @@ __host__ inline cudaError_t make_tma_kv_units(CUtensorMap* map, const __nv_bfloa
 // subset of the repeatedly reduced dQ lines resident pays (~0.6% at 524K/1M tokens); below it the
 // policy register costs more than it saves. Threshold scales with accumulator BYTES.
 constexpr int CACHE_WAVE_MIN_SEQ_LEN = 524288;
+// The in-kernel identity order (workitem_remap == nullptr below ORDER_MIN_KV_BLOCKS) has no
+// sub-array to offset a chunk into, so the chunked launches that DQ_L2_KEEP enables must only
+// ever run with a device-computed order: the L2 transition has to sit at or above the
+// order-kernel threshold. keep_dq_l2 <=> S * sizeof(dq_accum_t) >= 2 * CACHE_WAVE_MIN_SEQ_LEN.
+static_assert((size_t)CACHE_WAVE_MIN_SEQ_LEN * 2 / sizeof(dq_accum_t) >=
+                  (size_t)ORDER_MIN_KV_BLOCKS * BLOCK,
+              "DQ_L2_KEEP chunked launches need the device-computed work order");
 
 template <bool DQ_L2_KEEP, bool USE_CLC, bool BHSD>
 __host__ inline cudaError_t launch_main(const BlockSparseVsaBwdArgs& args, const int* work_remap,
@@ -205,12 +212,18 @@ __host__ inline cudaError_t launch_main(const BlockSparseVsaBwdArgs& args, const
     at[0].val.clusterDim.z = 1;
     cfg.attrs              = at;
     cfg.numAttrs           = 1;
+    // Guarded by the static_assert above; kept as a runtime check for other callers of the
+    // launch API that pass their own thresholds.
+    if (work_remap == nullptr && chunk != total) {
+      return cudaErrorInvalidValue;
+    }
     for (int base = 0; base < total; base += chunk) {
       const int count = std::min(chunk, total - base);
       cfg.gridDim     = dim3((unsigned)count, 1, 1);
       // A chunk starts at work id `base`: it gets the order's sub-array.
       e = cudaLaunchKernelEx(&cfg, kernel, tk, tv, tqt, tdot, tdk, tdv, args.dqaccum, args.lse,
-                             args.delta, args.k2q_idx, args.k2q_num, work_remap + base,
+                             args.delta, args.k2q_idx, args.k2q_num,
+                             work_remap ? work_remap + base : nullptr,
                              args.variable_block_sizes, args.max_q_blocks, B, H, S, scale_log2,
                              args.sm_scale);
       if (e != cudaSuccess) {
