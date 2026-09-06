@@ -223,13 +223,20 @@ class UlyssesA2AHelper:
             assert mode is not None
             chunked, blocks = self._execution_plan(x, mode)
         window_bytes = nbytes // shape[0] if chunked else nbytes
+        if (status == 1 and chunked and torch.is_grad_enabled() and x.requires_grad
+                and window_bytes > H3_TRAINING_PLANE_LIMIT_BYTES):
+            policy = getattr(envs, "FASTVIDEO_ULYSSES_A2A_LONG_TRAINING", "auto")
+            if policy == "auto":
+                # Preserve the complete original long-training path, including
+                # its gather launch. Faster gathers alone did not avoid the
+                # allocation-pressure regression in the measured FSDP4 recipe.
+                chunked, blocks, window_bytes = False, 36, nbytes
+            elif policy != "chunked":
+                status, reason = 0, "unsupported FASTVIDEO_ULYSSES_A2A_LONG_TRAINING policy"
         if status == 1 and nbytes == 0:
             status, reason = 0, "input is empty"
         elif status == 1 and window_bytes > MAX_WINDOW_BYTES:
             status, reason = 0, f"operand window exceeds the {MAX_WINDOW_BYTES}-byte cap"
-        elif (status == 1 and chunked and shape[0] > 1 and torch.is_grad_enabled() and x.requires_grad
-              and window_bytes > H3_TRAINING_PLANE_LIMIT_BYTES):
-            status, reason = 0, "large packed H3 training transfer uses NCCL"
 
         # status, armed, mode, dtype, B, S, H, D, window bytes, capacity,
         # chunked, blocks. Comparing the

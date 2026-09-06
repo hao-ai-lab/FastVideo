@@ -36,7 +36,21 @@ def test_h3_policy_caps_each_plane_and_retains_fast_gathers(sequence, large_pack
         signature, _ = helper._call_signature(x, *((2, 1) if mode == 0 else (1, 2)))
     declined = training and planes > 1 and large_pack
     assert signature[0] == (0 if declined else 1)
-    assert signature[8] == sequence * 14 * 128 * 2
+    original_plan = training and large_pack
+    assert signature[8] == sequence * 14 * 128 * 2 * (planes if original_plan else 1)
+    assert signature[10:] == ((0, 36) if original_plan else (1, 144))
+
+
+def test_long_training_chunk_opt_in_keeps_a_bounded_window():
+    helper = _helper()
+    x = _operand(4, 250000, 0, True)
+    with patch.object(helper, '_execution_plan', return_value=(True, 144)), \
+            patch.object(ulysses, 'is_enabled', return_value=True), \
+            patch.object(ulysses.envs, 'FASTVIDEO_ULYSSES_A2A_LONG_TRAINING', 'chunked', create=True), \
+            patch('torch.cuda.is_current_stream_capturing', return_value=False), torch.enable_grad():
+        signature, _ = helper._call_signature(x, 2, 1)
+    assert signature[0] == 1
+    assert signature[8] == 896000000
     assert signature[8] <= ulysses.MAX_WINDOW_BYTES
     assert signature[10:] == (1, 144)
 

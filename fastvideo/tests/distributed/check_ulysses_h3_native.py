@@ -5,6 +5,7 @@ import os
 import torch
 import torch.distributed as dist
 
+from fastvideo import envs
 from fastvideo.distributed import cleanup_dist_env_and_memory, maybe_init_distributed_environment_and_model_parallel
 from fastvideo.distributed.device_communicators.base_device_communicator import DeviceCommunicatorBase
 from fastvideo.distributed.parallel_state import get_sp_group
@@ -26,6 +27,9 @@ def main():
     for sequence in [32000, 128000, 250000]:
         _check_shape(4, sequence // 4, 56, 128, torch.bfloat16, 4, device)
         assert helper._nbytes <= 1024**3
+    envs.FASTVIDEO_ULYSSES_A2A_LONG_TRAINING = 'chunked'
+    _check_shape(4, 250000 // 4, 56, 128, torch.bfloat16, 4, device)
+    envs.FASTVIDEO_ULYSSES_A2A_LONG_TRAINING = 'auto'
     x = torch.randn(3, 8000, 56, 128, dtype=torch.bfloat16, device=device, requires_grad=True)
     first = comm.all_to_all_4D(x, 2, 1)
     saved = first.detach().clone()
