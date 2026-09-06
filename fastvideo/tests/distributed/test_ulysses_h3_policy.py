@@ -27,7 +27,7 @@ def _operand(planes, global_sequence, mode, requires_grad):
 @pytest.mark.parametrize('sequence,large_pack', [(32000, False), (64000, False), (128000, False),
                                                (149796, False), (149800, True), (250000, True)])
 @pytest.mark.parametrize('planes,mode,training', [(3, 0, False), (4, 0, True), (1, 1, True), (4, 1, True)])
-def test_h3_policy_caps_each_plane_and_retains_fast_gathers(sequence, large_pack, planes, mode, training):
+def test_h3_policy_caps_planes_and_preserves_long_training_default(sequence, large_pack, planes, mode, training):
     helper = _helper()
     x = _operand(planes, sequence, mode, training)
     with patch.object(helper, '_execution_plan', return_value=(True, 144)), \

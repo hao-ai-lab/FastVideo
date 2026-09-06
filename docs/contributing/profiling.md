@@ -1,5 +1,8 @@
 # Profiling FastVideo
 
+For GB200 sequence-parallel transport tuning and its long-training memory
+policy, see [Ulysses performance](ulysses_performance.md).
+
 !!! warning
     Profiling is only intended for FastVideo developers and maintainers to understand the proportion of time spent in different parts of the codebase. **FastVideo end-users should never turn on profiling** as it will significantly slow down inference.
 
