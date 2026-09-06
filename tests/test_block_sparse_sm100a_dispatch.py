@@ -181,6 +181,53 @@ def test_backward_uses_sm100a_kernel_when_built(monkeypatch):
     assert sm100a_backward
 
 
+def test_backward_large_seq_matches_triton_and_is_deterministic(monkeypatch):
+    """65536 tokens (1024 kv blocks, 12.5% density): the device-computed work order (nb >= 1024)
+    and the sequence regime where a TMEM ordering bug corrupted dk/dv while every <= 16-block
+    test stayed green. sm_100a route vs all-Triton, and two sm_100a runs must agree to within
+    summation-order noise: invert_indices compacts each kv row's q list with atomics, so the
+    kernel sums quads in a different order per call (measured run-to-run delta on GB200:
+    rel_max 5e-3, mean|diff| 7e-6). The TMEM race this guards against gave rel_max 0.6-1.0
+    and mean|diff| 4e-2, an order of magnitude past the bounds below on both metrics."""
+    from fastvideo_kernel import block_sparse_attn_bwd_sm100a as vsa_bwd
+
+    torch.manual_seed(0)
+    block, num_blocks, heads, topk = 64, 1024, 4, 128
+    S = num_blocks * block
+    shape = (1, heads, S, HEAD_DIM) if vsa.BHSD else (1, S, heads, HEAD_DIM)
+    q, k, v = (torch.randn(shape, device="cuda", dtype=torch.bfloat16) for _ in range(3))
+    scores = torch.rand(1, heads, num_blocks, num_blocks, device="cuda")
+    idx = scores.topk(topk, dim=-1).indices.sort(dim=-1).values.to(torch.int32)
+    del scores
+    num = torch.full((1, heads, num_blocks), topk, dtype=torch.int32, device="cuda")
+    vbs = torch.full((num_blocks, ), block, dtype=torch.int32, device="cuda")
+    if not vsa_bwd.is_supported(q, vbs):
+        pytest.skip("sm_100a backward not built for this device")
+
+    def grads(route):
+        qq, kk, vv = (t.clone().requires_grad_(True) for t in (q, k, v))
+        if route == "triton":
+            monkeypatch.setenv("FASTVIDEO_VSA_TRITON", "1")
+        else:
+            monkeypatch.delenv("FASTVIDEO_VSA_TRITON", raising=False)
+            monkeypatch.setenv(ENV, "1")
+        out, _ = block_sparse_attn_from_indices(qq, kk, vv, idx, num, vbs)
+        out.float().square().sum().backward()
+        return [t.grad.float() for t in (qq, kk, vv)]
+
+    ref = grads("triton")
+    got = grads("sm100a")
+    again = grads("sm100a")
+    _assert_grads_close(got, ref)
+    for g1, g2, name in zip(got, again, "qkv"):
+        diff = (g1 - g2).abs()
+        rel_max = diff.max().item() / max(g1.abs().max().item(), 1e-6)
+        mean_abs = diff.mean().item()
+        assert rel_max <= 2e-2 and mean_abs <= 1e-4, \
+            f"d{name}: two sm_100a runs differ beyond summation-order noise: " \
+            f"max|diff|/max|ref|={rel_max:.3e} mean|diff|={mean_abs:.3e}"
+
+
 def test_blk128_backward_raises(monkeypatch):
     """128-token blocks: forward runs, backward refuses (both backwards are 64-block only)."""
     monkeypatch.setenv(ENV, "1")
