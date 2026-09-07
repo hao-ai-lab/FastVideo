@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from pathlib import Path
 import platform
 import shutil
@@ -24,6 +25,14 @@ from fastvideo.entrypoints.openai.protocol import VideoGenerationRequest
 # The DMD-distilled step ladder the validated recipes use (fixed count, same
 # reason H3 MLX serving pins num_inference_steps to its own ladder size).
 _DMD_STEP_COUNT = 3
+
+# Wan's VAE compresses this many input frames into one latent frame, so a legal
+# frame count is 1 modulo the stride; plan_refine_resolutions enforces it.
+_VAE_TEMPORAL_COMPRESSION = 4
+
+# The adapter's own fps fallback, used when a caller validates a request outside
+# a configured server (create_mlx_wan_app binds the served fps instead).
+_FALLBACK_FPS = 24
 
 # Maps a served model id to the pipeline class that generates it: 1.3B/14B
 # share Wan2.1's architecture (MLXWanPipeline), 5B is Wan2.2-TI2V instead
@@ -66,8 +75,50 @@ class MLXWanServeConfig(BaseModel):
     default_request: dict[str, Any]
 
 
-def validate_wan_video_request(request: VideoGenerationRequest) -> None:
-    """Reject unsupported inputs before fetching media or creating a job."""
+def _aligned_num_frames(num_frames: int) -> int:
+    """Round up to the next frame count Wan accepts (1 modulo the VAE temporal stride)."""
+    remainder = (num_frames - 1) % _VAE_TEMPORAL_COMPRESSION
+    if remainder == 0:
+        return num_frames
+    return num_frames + (_VAE_TEMPORAL_COMPRESSION - remainder)
+
+
+def _align_seconds_to_frame_grid(request: VideoGenerationRequest, *, default_fps: int) -> None:
+    """Resolve an explicit ``seconds`` into a Wan-legal ``num_frames`` before admission.
+
+    ``build_generation_request`` turns ``seconds`` into ``seconds * fps``, which lands on
+    0 modulo the VAE temporal stride at every fps, while ``plan_refine_resolutions``
+    requires 1. Left alone the job is admitted and only fails inside generation, so
+    resolve it synchronously here; the adapter prefers an explicit ``num_frames`` over
+    ``seconds``, and assigning one records it in ``model_fields_set``.
+
+    Mirrors the adapter's explicit-field precedence, including the nested
+    ``video_params`` spelling, so a request using either form is aligned.
+    """
+    body_set = request.model_fields_set
+    nested_set = request.video_params.model_fields_set if request.video_params is not None else set()
+    if "seconds" not in body_set or request.seconds is None:
+        return
+    frames_explicit = ("num_frames" in body_set
+                       and request.num_frames is not None) or ("video_params" in body_set and "num_frames" in nested_set
+                                                               and request.video_params.num_frames is not None)
+    if frames_explicit:
+        return
+    fps = default_fps
+    if "fps" in body_set and request.fps is not None:
+        fps = request.fps
+    elif "video_params" in body_set and "fps" in nested_set and request.video_params.fps is not None:
+        fps = request.video_params.fps
+    request.num_frames = _aligned_num_frames(int(request.seconds) * int(fps))
+
+
+def validate_wan_video_request(request: VideoGenerationRequest, *, default_fps: int = _FALLBACK_FPS) -> None:
+    """Reject unsupported inputs before fetching media or creating a job.
+
+    Also normalizes the two request shapes the shared adapter would otherwise
+    reject after the job is already admitted: an explicit ``task`` and a
+    ``seconds`` duration that does not land on Wan's frame grid.
+    """
     allowed = {
         "model",
         "prompt",
@@ -88,6 +139,9 @@ def validate_wan_video_request(request: VideoGenerationRequest) -> None:
         raise ValueError("Wan MLX serving does not support: " + ", ".join(sorted(unsupported)))
     if request.task not in (None, "t2v"):
         raise ValueError("Wan MLX serving supports task=t2v only.")
+    if request.task is not None:
+        request.task = None
+        request.model_fields_set.discard("task")
     if request.guidance_scale not in (None, 1.0):
         raise ValueError("FastMetal MLX is DMD-distilled and requires guidance_scale=1.")
     if request.num_inference_steps not in (None, _DMD_STEP_COUNT):
@@ -95,6 +149,7 @@ def validate_wan_video_request(request: VideoGenerationRequest) -> None:
                          f"num_inference_steps must be {_DMD_STEP_COUNT}.")
     if request.seed is not None and not 0 <= request.seed <= 2**32 - 1:
         raise ValueError("Wan MLX seed must be between 0 and 4294967295.")
+    _align_seconds_to_frame_grid(request, default_fps=default_fps)
 
 
 class MLXWanGenerator:
@@ -194,7 +249,7 @@ def create_mlx_wan_app(config: MLXWanServeConfig):
         request,
         config.server.served_model_name,
         generator_factory=lambda: MLXWanGenerator(config.generator),
-        video_request_validator=validate_wan_video_request,
+        video_request_validator=partial(validate_wan_video_request, default_fps=request.sampling.fps),
         runtime="mlx",
     )
 

@@ -74,16 +74,38 @@ def _resolve_wan_torch_device(device_arg: str):
     return torch.device(device_arg)
 
 
-def _encode_wan_prompt(*, model_root: Path, prompt: str, max_sequence_length: int):
-    """Encode a prompt with UMT5, padded/truncated to max_sequence_length."""
+def _resolve_wan_torch_dtype(dtype_arg: str):
+    """Map a recipe dtype name to its torch dtype (mirrors the reference scripts)."""
+    import torch
+
+    dtypes = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}
+    if dtype_arg not in dtypes:
+        raise ValueError(f"Unsupported text-encoder dtype {dtype_arg!r}; expected one of {sorted(dtypes)}.")
+    return dtypes[dtype_arg]
+
+
+def _encode_wan_prompt(*,
+                       model_root: Path,
+                       prompt: str,
+                       max_sequence_length: int,
+                       device_arg: str = "auto",
+                       dtype_arg: str = "bf16"):
+    """Encode a prompt with UMT5, padded/truncated to max_sequence_length.
+
+    The dtype/device pair is a per-family recipe invariant, not a performance knob:
+    each pipeline passes the values its validated reference script uses. The
+    defaults are Wan2.1's (bf16 on MPS, matching mlx_wan_prompt_to_video.py);
+    Wan2.2-TI2V overrides them -- see MLXWan22Pipeline.generate.
+    """
     import torch
     from transformers import AutoTokenizer, UMT5EncoderModel
 
-    device = _resolve_wan_torch_device("auto")
+    dtype = _resolve_wan_torch_dtype(dtype_arg)
+    device = _resolve_wan_torch_device(device_arg)
     tokenizer = AutoTokenizer.from_pretrained(model_root / "tokenizer", local_files_only=True)
     text_encoder = UMT5EncoderModel.from_pretrained(
         model_root / "text_encoder",
-        torch_dtype=torch.bfloat16,
+        torch_dtype=dtype,
         low_cpu_mem_usage=True,
         local_files_only=True,
     ).to(device)
@@ -104,14 +126,15 @@ def _encode_wan_prompt(*, model_root: Path, prompt: str, max_sequence_length: in
 
     with torch.no_grad():
         hidden_states = text_encoder(input_ids, attention_mask).last_hidden_state
-    hidden_states = hidden_states.to(dtype=torch.bfloat16)
+    hidden_states = hidden_states.to(dtype=dtype)
     trimmed = [row[:length] for row, length in zip(hidden_states, valid_lengths, strict=False)]
     padded = torch.stack(
         [torch.cat([row, row.new_zeros(max_sequence_length - row.size(0), row.size(1))]) for row in trimmed],
         dim=0,
     )
-    # bfloat16 has no NumPy dtype; fp32 is exact for every bf16 value.
-    padded = padded.float().cpu().contiguous()
+    if padded.dtype == torch.bfloat16:
+        padded = padded.float()
+    padded = padded.cpu().contiguous()
     del text_encoder, tokenizer, text_inputs, input_ids, attention_mask, valid_lengths
     cleanup_torch_mps()
     return padded
@@ -157,9 +180,18 @@ def _packed_dit_channels(mlx_checkpoint: Path) -> int | None:
         manifest = json.loads(manifest_path.read_text())
     except (json.JSONDecodeError, OSError):
         return None
+    if not isinstance(manifest, dict):
+        return None
     config = manifest.get("config", manifest)
+    if not isinstance(config, dict):
+        return None
     channels = config.get("in_channels")
-    return int(channels) if channels is not None else None
+    if channels is None:
+        return None
+    try:
+        return int(channels)
+    except (TypeError, ValueError):
+        return None
 
 
 class MLXWanPipeline:
@@ -347,7 +379,9 @@ class MLXWan22Pipeline:
         started = time.perf_counter()
         prompt_embeds = _encode_wan_prompt(model_root=self.model_root,
                                            prompt=prompt,
-                                           max_sequence_length=max_sequence_length)
+                                           max_sequence_length=max_sequence_length,
+                                           device_arg="cpu",
+                                           dtype_arg="fp16")
         timings["encode_s"] = time.perf_counter() - started
 
         plan = plan_refine_resolutions(

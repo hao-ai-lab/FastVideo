@@ -116,6 +116,68 @@ def test_validate_accepts_explicit_task_t2v() -> None:
     validate_wan_video_request(VideoGenerationRequest(prompt="a cat", task="t2v"))
 
 
+def test_validate_normalizes_task_t2v_to_none() -> None:
+    """build_generation_request rejects every non-None task outside MiniMax-H3, so an
+    accepted t2v must not survive into the adapter -- t2v is all this runtime does."""
+    request = VideoGenerationRequest(prompt="a cat", task="t2v")
+    validate_wan_video_request(request)
+    assert request.task is None
+    assert "task" not in request.model_fields_set
+
+
+@pytest.mark.parametrize("seconds,fps,expected", [
+    (3, 16, 49),
+    (2, 16, 33),
+    (1, 24, 25),
+    (3, 24, 73),
+])
+def test_validate_aligns_seconds_to_the_wan_frame_grid(seconds, fps, expected) -> None:
+    """seconds * fps lands on 0 modulo 4 at every fps, but Wan requires 1 -- without
+    alignment the job is admitted and only fails inside plan_refine_resolutions."""
+    request = VideoGenerationRequest(prompt="a cat", seconds=seconds, fps=fps)
+    validate_wan_video_request(request)
+    assert request.num_frames == expected
+    assert (request.num_frames - 1) % 4 == 0
+
+
+def test_validate_aligns_seconds_against_the_served_fps() -> None:
+    """A request that omits fps must align against the server's configured fps."""
+    request = VideoGenerationRequest(prompt="a cat", seconds=3)
+    validate_wan_video_request(request, default_fps=16)
+    assert request.num_frames == 49
+
+
+def test_validate_aligns_seconds_from_the_nested_video_params_spelling() -> None:
+    """The adapter honours video_params.fps, so alignment must read it too."""
+    request = VideoGenerationRequest(prompt="a cat", seconds=3, video_params={"fps": 16})
+    validate_wan_video_request(request)
+    assert request.num_frames == 49
+
+
+def test_validate_leaves_an_explicit_num_frames_alone() -> None:
+    """num_frames already wins over seconds in the adapter; don't second-guess it."""
+    request = VideoGenerationRequest(prompt="a cat", seconds=3, fps=16, num_frames=81)
+    validate_wan_video_request(request)
+    assert request.num_frames == 81
+
+
+def test_validate_leaves_a_request_without_seconds_untouched() -> None:
+    request = VideoGenerationRequest(prompt="a cat", fps=16)
+    validate_wan_video_request(request)
+    assert request.num_frames is None
+    assert "num_frames" not in request.model_fields_set
+
+
+def test_create_app_binds_the_served_fps_to_the_request_validator() -> None:
+    """Regression guard: a seconds-only request must align against the config's fps
+    (16 for 1.3B), not the adapter's generic 24 fallback."""
+    config = load_config(str(CONFIG_PATH))
+    app = create_mlx_wan_app(config)
+    request = VideoGenerationRequest(prompt="a cat", seconds=3)
+    app.state.video_request_validator(request)
+    assert request.num_frames == 49
+
+
 @pytest.mark.parametrize("seed", [0, 2**32 - 1])
 def test_validate_accepts_seed_boundary_values(seed) -> None:
     validate_wan_video_request(VideoGenerationRequest(prompt="a cat", seed=seed))
