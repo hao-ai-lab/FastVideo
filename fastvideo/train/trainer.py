@@ -13,6 +13,10 @@ from tqdm.auto import tqdm
 from fastvideo.distributed import get_sp_group, get_world_group
 from fastvideo.train.callbacks.callback import CallbackDict
 from fastvideo.train.methods.base import LogScalar, TrainingMethod
+from fastvideo.train.utils.performance import (
+    TrainingPerformanceMonitor,
+    infer_peak_bf16_tflops,
+)
 from fastvideo.train.utils.tracking import build_tracker
 
 if TYPE_CHECKING:
@@ -72,6 +76,7 @@ class Trainer:
             callback_configs or {},
             training_config,
         )
+        self.performance_monitor = TrainingPerformanceMonitor()
 
     def _iter_dataloader(self, dataloader: Any) -> Iterator[dict[str, Any]]:
         data_iter = iter(dataloader)
@@ -113,6 +118,13 @@ class Trainer:
             int(tc.loop.gradient_accumulation_steps or 1),
         )
 
+        performance_enabled = bool(tc.performance.enabled)
+        peak_tflops = tc.performance.peak_tflops_per_gpu
+        if peak_tflops is None and torch.cuda.is_available():
+            peak_tflops = infer_peak_bf16_tflops(torch.cuda.get_device_name(torch.cuda.current_device()), )
+        if performance_enabled:
+            self.performance_monitor.attach(getattr(method, "_role_models", {}), )
+
         method.set_tracker(self.tracker)
         method.on_train_start()
         self.callbacks.on_train_start(
@@ -151,6 +163,8 @@ class Trainer:
         method_manages_optimization = bool(method.manages_optimization())
         for step in progress:
             t0 = time.perf_counter()
+            if performance_enabled:
+                self.performance_monitor.reset()
 
             # Accumulate on GPU during grad-accum; materialise
             # to CPU once per step right before logging.
@@ -219,8 +233,27 @@ class Trainer:
             divisor = 1 if method_manages_optimization else grad_accum
             metrics = {k: float(v) / divisor for k, v in loss_sums.items()}
             metrics.update({k: float(v) / divisor for k, v in metric_sums.items()})
-            metrics["step_time_sec"] = (time.perf_counter() - t0)
+            step_time_sec = time.perf_counter() - t0
+            metrics["step_time_sec"] = step_time_sec
             metrics["vsa_sparsity"] = float(tc.vsa_sparsity)
+            if performance_enabled:
+                metrics.update(
+                    self.performance_monitor.metrics(
+                        step_time_sec=step_time_sec,
+                        local_batch_size=tc.data.train_batch_size,
+                        grad_accum=(1 if method_manages_optimization else grad_accum),
+                        world_size=getattr(
+                            self.world_group,
+                            "world_size",
+                            tc.distributed.num_gpus,
+                        ),
+                        sp_size=getattr(
+                            self.sp_group,
+                            "world_size",
+                            tc.distributed.sp_size,
+                        ),
+                        peak_tflops_per_gpu=peak_tflops,
+                    ))
             if self.global_rank == 0 and metrics:
                 self.tracker.log(metrics, step)
 
@@ -251,4 +284,5 @@ class Trainer:
         if checkpoint_manager is not None:
             checkpoint_manager.save_final(max_steps)
 
+        self.performance_monitor.close()
         self.tracker.finish()

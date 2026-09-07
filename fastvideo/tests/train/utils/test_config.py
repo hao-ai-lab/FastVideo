@@ -81,6 +81,9 @@ def test_minimal_yaml_applies_all_defaults(tmp_path: Path) -> None:
     assert t.tracker.project_name == "fastvideo"
     assert t.tracker.run_name == ""
 
+    assert t.performance.enabled is True
+    assert t.performance.peak_tflops_per_gpu is None
+
     assert t.model.weighting_scheme == "uniform"
     assert t.model.precondition_outputs is False
     assert t.model.moba_config == {}
@@ -134,6 +137,10 @@ def test_full_yaml_populates_all_training_fields(tmp_path: Path) -> None:
             "project_name": "myproj",
             "run_name": "myrun",
         },
+        "performance": {
+            "enabled": True,
+            "peak_tflops_per_gpu": 989.5,
+        },
         "vsa": {
             "sparsity": 0.5
         },
@@ -171,6 +178,9 @@ def test_full_yaml_populates_all_training_fields(tmp_path: Path) -> None:
 
     assert t.tracker.trackers == ["wandb"]
     assert t.tracker.project_name == "myproj"
+
+    assert t.performance.enabled is True
+    assert t.performance.peak_tflops_per_gpu == pytest.approx(989.5)
 
     assert t.vsa_sparsity == pytest.approx(0.5)
     assert t.model.weighting_scheme == "logit_normal"
@@ -221,6 +231,13 @@ def test_method_without_target_raises(tmp_path: Path) -> None:
 def test_missing_config_file_raises(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
         load_run_config(str(tmp_path / "does_not_exist.yaml"))
+
+
+def test_non_positive_peak_tflops_raises(tmp_path: Path) -> None:
+    data = _minimal_yaml()
+    data["training"] = {"performance": {"peak_tflops_per_gpu": 0}}
+    with pytest.raises(ValueError, match="peak_tflops_per_gpu"):
+        load_run_config(_write_yaml(tmp_path, data))
 
 
 # ---------------------------------------------------------------------------

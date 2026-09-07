@@ -130,6 +130,13 @@ training:
     project_name: my_project          # default: "fastvideo"
     run_name: my_run                  # default: ""
 
+  # --- training.performance [TYPED] -> PerformanceConfig ---
+  performance:
+    enabled: true                     # default: true
+    # Optional dense BF16 peak for one GPU. Known NVIDIA device names are
+    # inferred automatically; set this for non-standard clocks/form factors.
+    peak_tflops_per_gpu: null         # e.g. 989.5 for H100 SXM
+
   # --- training.vsa [TYPED] -> VSAConfig ---
   vsa:
     sparsity: 0.0                     # default: 0.0 (0.0 = disabled)
