@@ -50,10 +50,10 @@ struct BlockSparseVsaBwdArgs {
   const int* variable_block_sizes;
 
   // Work order: which (batch, head, kv block) item each CTA processes.
-  // [B*H*nb] int32 work id -> item ((b*H + h)*nb + kv); nullptr = identity order, or the launch
-  // computes the length-binned order into order_workspace when the order kernel runs.
+  // [B*H*nb] int32 work id -> item ((b*H + h)*nb + kv). nullptr: identity order below
+  // ORDER_MIN_KV_BLOCKS, else the launch computes the length-binned order into order_workspace.
   const int* workitem_remap;
-  // [B*H*nb] int32; required when workitem_remap is nullptr and the order kernel runs.
+  // [B*H*nb] int32; required when workitem_remap is nullptr and nb >= ORDER_MIN_KV_BLOCKS.
   int* order_workspace;
 
   // Outputs, inputs' layout; dk/dv rows of unselected kv blocks are zeroed by the preprocess.
@@ -99,14 +99,10 @@ __host__ inline size_t block_sparse_bwd_delta_bytes(int batch, int num_heads, in
   return (size_t)batch * num_heads * seqlen * sizeof(float);
 }
 
-// Below this many kv blocks per sequence (S < 65536) the identity order is as fast as the
-// length-binned one and the order kernel's own time is not (fv_perf_log.md 2026-09-04: -9% at
-// 4k, -2.8% at 16k), so the main kernel runs the identity order there (workitem_remap == nullptr)
-// and the order kernel is left to the larger shapes.
+// Below this many kv blocks the identity order is as fast and the order kernel is not free.
 constexpr int ORDER_MIN_KV_BLOCKS = 1024;
 
-// One head's dQ accumulator (S x HEAD_DIM x sizeof) from which SM-sized chunked launches and the
-// DQ_L2_KEEP hint pay: measured at 128 MiB, about the GB200 L2 (f16: S = 524288, fp32: 262144).
+// One head's dQ accumulator (S x HEAD_DIM x sizeof) beyond which chunked DQ_L2_KEEP launches pay.
 constexpr size_t L2_RESIDENT_DQ_ACCUM_BYTES_PER_HEAD = size_t{128} << 20;
 
 // Safety guard: chunked launches index the order's sub-array, so the order kernel must run there.
@@ -142,11 +138,7 @@ __host__ inline cudaError_t block_sparse_bwd_supported(const BlockSparseVsaBwdAr
   if (!args.dqaccum || !args.qt || !args.dot || !args.delta) {
     return cudaErrorInvalidValue;
   }
-  // No explicit order and the order kernel will run: it needs the workspace and two ints of SMEM
-  // per kv block.
-  const bool keep_dq_l2 = (size_t)args.seqlen * HEAD_DIM * sizeof(dq_accum_t) >=
-                          L2_RESIDENT_DQ_ACCUM_BYTES_PER_HEAD;
-  if (!args.workitem_remap && (args.num_kv_blocks_per_seq >= ORDER_MIN_KV_BLOCKS || keep_dq_l2) &&
+  if (!args.workitem_remap && args.num_kv_blocks_per_seq >= ORDER_MIN_KV_BLOCKS &&
       (!args.order_workspace || args.num_kv_blocks_per_seq > ORDER_MAX_BLOCKS)) {
     return cudaErrorInvalidValue;
   }
@@ -211,8 +203,6 @@ __host__ inline cudaError_t launch_main(const BlockSparseVsaBwdArgs& args, const
     at[0].val.clusterDim.z = 1;
     cfg.attrs              = at;
     cfg.numAttrs           = 1;
-    // Unreachable from launch_block_sparse_bwd_sm100a (the order kernel runs whenever the launch
-    // is chunked); kept as a runtime check for callers passing their own order.
     if (work_remap == nullptr && chunk != total) {
       return cudaErrorInvalidValue;
     }
@@ -295,11 +285,9 @@ __host__ inline cudaError_t launch_block_sparse_bwd_sm100a(const BlockSparseVsaB
   const bool keep_dq_l2 =
       (size_t)S * HEAD_DIM * sizeof(dq_accum_t) >= L2_RESIDENT_DQ_ACCUM_BYTES_PER_HEAD;
 
-  // Work-item order: the caller's, else identity, else the device order kernel (from
-  // ORDER_MIN_KV_BLOCKS on, and whenever the launch is chunked: chunks index its sub-arrays).
+  // Work-item order: the caller's, else identity below ORDER_MIN_KV_BLOCKS, else the device order.
   const int* work_remap = args.workitem_remap;
-  if (work_remap == nullptr &&
-      (args.num_kv_blocks_per_seq >= ORDER_MIN_KV_BLOCKS || keep_dq_l2)) {
+  if (work_remap == nullptr && args.num_kv_blocks_per_seq >= ORDER_MIN_KV_BLOCKS) {
     const int order_smem = 2 * args.num_kv_blocks_per_seq * (int)sizeof(int);
     if (order_smem > 48 * 1024) {
       e = cudaFuncSetAttribute(vsa_bwd_order_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize,

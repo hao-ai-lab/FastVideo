@@ -113,11 +113,8 @@ std::vector<torch::Tensor> block_sparse_sm100a_bwd(torch::Tensor grad_o, torch::
   auto qt      = torch::empty({(int64_t)block_sparse_bwd_transposed_bytes(b, h, s)}, bytes);
   auto dot     = torch::empty({(int64_t)block_sparse_bwd_transposed_bytes(b, h, s)}, bytes);
   auto delta   = torch::empty({(int64_t)block_sparse_bwd_delta_bytes(b, h, s)}, bytes);
-  // Order workspace when the order kernel runs (same predicate as the launch header).
   torch::Tensor order;
-  const bool keep_dq_l2 =
-      (size_t)s * HEAD_DIM * sizeof(dq_accum_t) >= L2_RESIDENT_DQ_ACCUM_BYTES_PER_HEAD;
-  const bool device_order = num_kv_blocks_per_seq >= ORDER_MIN_KV_BLOCKS || keep_dq_l2;
+  const bool device_order = num_kv_blocks_per_seq >= ORDER_MIN_KV_BLOCKS;
   if (device_order) {
     order = torch::empty({(int64_t)block_sparse_bwd_order_bytes(b, h, (int)num_kv_blocks_per_seq)},
                          bytes);
