@@ -18,6 +18,7 @@ def test_padding_mask_is_front_padded_and_expanded() -> None:
 
 
 def test_forward_preserves_bshd_contract_and_arguments(monkeypatch) -> None:
+    monkeypatch.setenv("FASTVIDEO_FLASHINFER_PREFILL_BACKEND", "single")
     calls = []
 
     def fake_kernel(q, k, v, **kwargs):
@@ -49,6 +50,49 @@ def test_forward_preserves_bshd_contract_and_arguments(monkeypatch) -> None:
     assert calls[0][3]["sm_scale"] == 0.125
 
 
+def test_cudnn_forward_flattens_batch_and_passes_token_offsets(monkeypatch) -> None:
+    monkeypatch.setenv("FASTVIDEO_FLASHINFER_PREFILL_BACKEND", "cudnn")
+    FlashInferImpl._cudnn_workspaces.clear()
+    calls = []
+
+    def fake_cudnn(q, k, v, scale, workspace, **kwargs):
+        calls.append((q.shape, k.shape, v.shape, scale, workspace.shape, kwargs))
+        return q + 1, None
+
+    prefill = types.ModuleType("flashinfer.prefill")
+    prefill.cudnn_batch_prefill_with_kv_cache = fake_cudnn
+    flashinfer = types.ModuleType("flashinfer")
+    flashinfer.prefill = prefill
+    monkeypatch.setitem(sys.modules, "flashinfer", flashinfer)
+    monkeypatch.setitem(sys.modules, "flashinfer.prefill", prefill)
+    monkeypatch.setattr(torch, "empty", lambda size, **kwargs: torch.zeros(size, dtype=kwargs["dtype"]))
+
+    impl = FlashInferImpl(num_heads=4, head_size=128, causal=False, softmax_scale=0.125)
+    query = torch.randn(2, 3, 4, 128, dtype=torch.bfloat16)
+    key = torch.randn(2, 5, 2, 128, dtype=torch.bfloat16)
+    value = torch.randn_like(key)
+    output = impl.forward(query, key, value, FlashInferMetadata(current_timestep=0))
+
+    assert output.shape == query.shape
+    assert calls[0][0] == (6, 4, 128)
+    assert calls[0][1] == (10, 2, 128)
+    assert calls[0][5]["batch_offsets_units"] == "tokens"
+    torch.testing.assert_close(calls[0][5]["batch_offsets_q"], torch.tensor([0, 3, 6], dtype=torch.int32))
+    torch.testing.assert_close(calls[0][5]["batch_offsets_k"], torch.tensor([0, 5, 10], dtype=torch.int32))
+
+
+def test_cudnn_rejects_custom_mask_and_unsupported_head_size(monkeypatch) -> None:
+    monkeypatch.setenv("FASTVIDEO_FLASHINFER_PREFILL_BACKEND", "cudnn")
+    with pytest.raises(ValueError, match="head size 128"):
+        FlashInferImpl(num_heads=4, head_size=64, causal=False, softmax_scale=0.125)
+
+    impl = FlashInferImpl(num_heads=4, head_size=128, causal=False, softmax_scale=0.125)
+    query = torch.randn(1, 3, 4, 128, dtype=torch.bfloat16)
+    with pytest.raises(ValueError, match="arbitrary attention masks"):
+        impl.forward(query, query, query,
+                     FlashInferMetadata(current_timestep=0, attn_mask=torch.ones(1, 3, dtype=torch.bool)))
+
+
 def _require_flashinfer_cuda() -> None:
     if not torch.cuda.is_available():
         pytest.skip("requires one NVIDIA CUDA GPU")
@@ -77,8 +121,9 @@ def _sdpa_reference(query: torch.Tensor,
 
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
 @pytest.mark.parametrize("head_size", [64, 128, 256])
-def test_flashinfer_real_cuda_kernel_matches_sdpa(dtype: torch.dtype, head_size: int) -> None:
+def test_flashinfer_real_cuda_kernel_matches_sdpa(monkeypatch, dtype: torch.dtype, head_size: int) -> None:
     """Launch the real single-GPU FlashInfer kernel for every supported head size."""
+    monkeypatch.setenv("FASTVIDEO_FLASHINFER_PREFILL_BACKEND", "single")
     _require_flashinfer_cuda()
     torch.manual_seed(0)
     device = torch.device("cuda", torch.cuda.current_device())
@@ -97,8 +142,9 @@ def test_flashinfer_real_cuda_kernel_matches_sdpa(dtype: torch.dtype, head_size:
 
 
 @pytest.mark.parametrize("mode", ["causal", "cross_gqa", "causal_padding"])
-def test_flashinfer_real_cuda_kernel_attention_modes(mode: str) -> None:
+def test_flashinfer_real_cuda_kernel_attention_modes(monkeypatch, mode: str) -> None:
     """Exercise native causal, GQA/cross-attention, and combined custom masks."""
+    monkeypatch.setenv("FASTVIDEO_FLASHINFER_PREFILL_BACKEND", "single")
     _require_flashinfer_cuda()
     torch.manual_seed(1)
     device = torch.device("cuda", torch.cuda.current_device())
@@ -135,6 +181,27 @@ def test_flashinfer_real_cuda_kernel_attention_modes(mode: str) -> None:
                                                   scale=scale).transpose(1, 2)
     else:
         expected = _sdpa_reference(query, key, value, scale=scale, causal=causal, key_mask=key_mask)
+
+    torch.cuda.synchronize(device)
+    torch.testing.assert_close(actual, expected, atol=3e-2, rtol=3e-2)
+
+
+@pytest.mark.parametrize("batch_size", [1, 2])
+def test_flashinfer_real_cudnn_kernel_matches_sdpa(monkeypatch, batch_size: int) -> None:
+    """Launch FlashInfer's dedicated batched cuDNN SDPA entry point."""
+    _require_flashinfer_cuda()
+    pytest.importorskip("flashinfer.prefill").cudnn_batch_prefill_with_kv_cache
+    monkeypatch.setenv("FASTVIDEO_FLASHINFER_PREFILL_BACKEND", "cudnn")
+    torch.manual_seed(2)
+    device = torch.device("cuda", torch.cuda.current_device())
+    query = torch.randn(batch_size, 128, 4, 128, device=device, dtype=torch.bfloat16)
+    key = torch.randn(batch_size, 192, 2, 128, device=device, dtype=torch.bfloat16)
+    value = torch.randn_like(key)
+    scale = 128**-0.5
+    impl = FlashInferImpl(num_heads=4, num_kv_heads=2, head_size=128, causal=False, softmax_scale=scale)
+
+    actual = impl.forward(query, key, value, FlashInferMetadata(current_timestep=0))
+    expected = _sdpa_reference(query, key, value, scale=scale)
 
     torch.cuda.synchronize(device)
     torch.testing.assert_close(actual, expected, atol=3e-2, rtol=3e-2)
