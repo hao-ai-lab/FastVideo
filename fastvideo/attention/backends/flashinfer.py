@@ -116,13 +116,14 @@ class FlashInferImpl(AttentionImpl):
         self.causal = causal
         self.softmax_scale = softmax_scale
         self.head_size = head_size
-        self.prefill_backend = envs.FASTVIDEO_FLASHINFER_PREFILL_BACKEND
+        self.prefill_backend = envs.FASTVIDEO_FLASHINFER_PREFILL_BACKEND.get()
         if self.prefill_backend not in ("single", "cudnn"):
             raise ValueError("FASTVIDEO_FLASHINFER_PREFILL_BACKEND must be 'single' or 'cudnn'; "
                              f"got {self.prefill_backend!r}")
         if self.prefill_backend == "cudnn" and head_size != 128:
             raise ValueError("FlashInfer cuDNN prefill requires head size 128 in FastVideo; "
                              f"got {head_size}. Use FASTVIDEO_FLASHINFER_PREFILL_BACKEND=single instead.")
+
     def _forward_cudnn(self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, causal: bool) -> torch.Tensor:
         from flashinfer.prefill import cudnn_batch_prefill_with_kv_cache
 
