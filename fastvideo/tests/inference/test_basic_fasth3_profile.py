@@ -188,6 +188,43 @@ def test_opt_outs_override_inherited_environment(monkeypatch):
     assert config.engine.offload.pin_cpu_memory is False
 
 
+def test_hopper_route_selects_tk_kernel_and_resident_fp8_text_encoder():
+    args = _args(
+        "--num-gpus",
+        "4",
+        "--no-replicated-dit",
+        "--vsa-kernel",
+        "tk",
+        "--no-fa4",
+        "--text-encoder-weights",
+        "./FastH3-TextEncoder-FP8",
+        "--no-offload-text-encoder",
+        "--no-offload-vae",
+    )
+    environment = fasth3.profile_environment(args)
+    config = fasth3.build_generator_config(args)
+
+    assert environment["FASTVIDEO_VSA_TK"] == "1"
+    assert environment["FASTVIDEO_VSA_SM100A"] == "0"
+    assert environment["FASTVIDEO_FA4"] == "0"
+    assert config.engine.use_fsdp_inference is True
+    assert config.engine.offload.text_encoder is False
+    assert config.engine.offload.vae is False
+    assert config.pipeline.components.text_encoder_weights == "./FastH3-TextEncoder-FP8"
+
+    default_environment = fasth3.profile_environment(_args())
+    assert default_environment["FASTVIDEO_VSA_TK"] == "0"
+
+
+def test_tk_profile_requires_the_sm90_extension(monkeypatch):
+    monkeypatch.setattr(fasth3, "_sm90_kernel_is_installed", lambda: False)
+    with pytest.raises(RuntimeError, match="ThunderKittens"):
+        fasth3.validate_profile_dependencies(_args("--no-fa4", "--vsa-kernel", "tk"))
+
+    monkeypatch.setattr(fasth3, "_sm90_kernel_is_installed", lambda: True)
+    fasth3.validate_profile_dependencies(_args("--no-fa4", "--vsa-kernel", "tk"))
+
+
 def test_selected_fast_profile_requires_its_optional_routes(monkeypatch):
     monkeypatch.setattr(fasth3, "_fa4_is_installed", lambda: False)
     monkeypatch.setattr(fasth3, "_sm100a_kernel_is_installed", lambda: False)

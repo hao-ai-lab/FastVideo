@@ -43,7 +43,10 @@ class MiniMaxH3SerializedFP8Config(QuantizationConfig):
 
     @classmethod
     def get_min_capability(cls) -> int:
-        return 100
+        # Hopper (sm_90) is served by the dequantize-then-BF16 matmul in
+        # ``MiniMaxH3SerializedFP8LinearMethod.apply``; Blackwell keeps the
+        # FlashInfer groupwise FP8 GEMM.
+        return 90
 
     @staticmethod
     def get_config_filenames() -> list[str]:
@@ -85,6 +88,11 @@ class MiniMaxH3SerializedFP8Config(QuantizationConfig):
         if capability_number < self.get_min_capability():
             raise RuntimeError("MiniMax-H3 serialized blockwise FP8 requires GPU capability "
                                f"sm{self.get_min_capability()} or newer, got sm{capability_number}")
+        if capability[0] == 9:
+            # Hopper: weights stay FP8-resident and every linear dequantizes its
+            # block-scaled weight to BF16 right before a plain matmul, so neither
+            # the Triton activation quantizer nor the FlashInfer GEMM is needed.
+            return
         if capability[0] not in (10, 12):
             raise RuntimeError("MiniMax-H3 serialized blockwise FP8 currently adapts SGLang's Blackwell "
                                f"FlashInfer path; got unsupported sm{capability_number}")
@@ -455,6 +463,16 @@ class MiniMaxH3SerializedFP8LinearMethod(LinearMethodBase):
 
         if not x.is_contiguous():
             x = x.contiguous()
+        if capability[0] == 9:
+            # Hopper has no groupwise FP8 GEMM here. FP8 buys residency (the
+            # 66.7 GB BF16 Qwen3-VL encoder halves and fits beside an
+            # FSDP-sharded DiT on 80 GB), not speed: the encoder runs once per
+            # request, and dequantizing one layer at a time costs ~0.1 ms per
+            # linear while the weights stay FP8. This is the dequantization
+            # the FlashInfer path performs internally, so it is an
+            # exact-arithmetic substitution rather than a second approximation.
+            weight = _dequantize_block_fp8_weight(layer.weight, layer.weight_scale_inv, self.weight_block_size, x.dtype)
+            return torch.nn.functional.linear(x, weight, bias)
         return _flashinfer_gemm_w8a8_block_fp8_linear_with_fallback(
             x,
             layer.weight,
@@ -462,6 +480,26 @@ class MiniMaxH3SerializedFP8LinearMethod(LinearMethodBase):
             layer.weight_scale_inv,
             bias,
         )
+
+
+def _dequantize_block_fp8_weight(
+    weight: torch.Tensor,
+    block_scales: torch.Tensor,
+    weight_block_size: tuple[int, int],
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    """Expand a ``[N, K]`` E4M3 weight with ``[N/bn, K/bk]`` block scales to ``dtype``."""
+    block_n, block_k = weight_block_size
+    rows, columns = weight.shape
+    pad_rows = (block_n - rows % block_n) % block_n
+    pad_columns = (block_k - columns % block_k) % block_k
+    restored = weight.to(dtype)
+    if pad_rows or pad_columns:
+        restored = torch.nn.functional.pad(restored, (0, pad_columns, 0, pad_rows))
+    padded_rows, padded_columns = restored.shape
+    restored = restored.view(padded_rows // block_n, block_n, padded_columns // block_k, block_k)
+    restored = restored * block_scales.to(dtype)[:, None, :, None]
+    return restored.view(padded_rows, padded_columns)[:rows, :columns]
 
 
 __all__ = [
