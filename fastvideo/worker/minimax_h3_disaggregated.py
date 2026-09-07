@@ -10,6 +10,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 import os
 from queue import Queue
+import sys
 import time
 from typing import Any, cast
 from uuid import uuid4
@@ -33,6 +34,7 @@ from fastvideo.pipelines.lazy_module import is_lazy_module
 from fastvideo.profiler import nvtx_range
 from fastvideo.utils import get_ip, get_open_port
 from fastvideo.worker.executor import Executor
+from fastvideo.worker.ray_env import RAY_NON_CARRY_OVER_ENV_VARS
 from fastvideo.worker.ray_utils import assert_ray_available, ray
 
 logger = init_logger(__name__)
@@ -215,11 +217,40 @@ def _next_or_sentinel(iterator: Iterator[ForwardBatch], sentinel: object) -> For
     return next(iterator, sentinel)
 
 
+def _h3_actor_runtime_env(fastvideo_args: FastVideoArgs) -> dict[str, Any]:
+    """Apply the driver's explicit FA4 choice before actors import backends.
+
+    Existing Ray services do not inherit later driver-shell exports. Use an
+    actor runtime_env rather than changing os.environ inside the constructor:
+    attention modules can already have resolved their implementation by then.
+    An explicit ray_runtime_env value takes precedence over the driver shell.
+    Other fields inherit from the Ray job: local working_dir/py_modules paths
+    must be uploaded by ray.init and cannot be passed directly to actors.
+    """
+    configured = fastvideo_args.ray_runtime_env or {}
+    env_vars = dict(configured.get("env_vars", {}))
+    fa4 = os.environ.get("FASTVIDEO_FA4")
+    if fa4 is not None and "FASTVIDEO_FA4" not in RAY_NON_CARRY_OVER_ENV_VARS:
+        env_vars.setdefault("FASTVIDEO_FA4", fa4)
+    return {"env_vars": env_vars} if env_vars else {}
+
+
+def _log_h3_worker_environment(role: str) -> None:
+    logger.info(
+        "[H3_WORKER] role=%s node_ip=%s python=%s FASTVIDEO_FA4=%d",
+        role,
+        get_ip(),
+        sys.executable,
+        int(envs.FASTVIDEO_FA4),
+    )
+
+
 class _MiniMaxH3EncoderDecoderActor:
 
     def __init__(self, fastvideo_args: FastVideoArgs, profile_transfers: bool = False) -> None:
         self._profile_transfers = profile_transfers
         _bind_single_gpu_process()
+        _log_h3_worker_environment("encoder_decoder")
         args = _resident_role_args(fastvideo_args, role="encoder_decoder")
         pipeline_cls = MiniMaxH3RefEncoderDecoderPipeline if _is_ref2va(args) else MiniMaxH3EncoderDecoderPipeline
         self.pipeline = pipeline_cls(args.model_path, args)
@@ -255,6 +286,7 @@ class _MiniMaxH3DiTActor:
     def __init__(self, fastvideo_args: FastVideoArgs, profile_transfers: bool = False) -> None:
         self._profile_transfers = profile_transfers
         _bind_single_gpu_process()
+        _log_h3_worker_environment("dit")
         args = _resident_role_args(fastvideo_args, role="dit")
         pipeline_cls = MiniMaxH3RefDiTPipeline if _is_ref2va(args) else MiniMaxH3DiTPipeline
         self.pipeline = pipeline_cls(args.model_path, args)
@@ -300,7 +332,12 @@ class RayMiniMaxH3DisaggregatedRuntime:
         actor_args = deepcopy(fastvideo_args)
         actor_args.ray_placement_group = None
         actor_args.ray_runtime_env = None
-        common_options = {"num_cpus": 0, "num_gpus": 1, "max_restarts": 0}
+        common_options = {
+            "num_cpus": 0,
+            "num_gpus": 1,
+            "max_restarts": 0,
+            "runtime_env": _h3_actor_runtime_env(fastvideo_args),
+        }
         self.encoder_node_ip = encoder_node_ip
         self.dit_node_ip = dit_node_ip
         self._closed = False

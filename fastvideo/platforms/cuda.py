@@ -306,33 +306,36 @@ class CudaPlatformBase(Platform):
 
         target_backend = AttentionBackendEnum.FLASH_ATTN
         if not cls.has_device_capability(80):
-            logger.info("Cannot use FlashAttention-2 backend for Volta and Turing "
+            logger.info("Cannot use FlashAttention backend for Volta and Turing "
                         "GPUs.")
             target_backend = AttentionBackendEnum.TORCH_SDPA
         elif dtype not in (torch.float16, torch.bfloat16):
-            logger.info("Cannot use FlashAttention-2 backend for dtype other than "
+            logger.info("Cannot use FlashAttention backend for dtype other than "
                         "torch.float16 or torch.bfloat16.")
             target_backend = AttentionBackendEnum.TORCH_SDPA
 
-        # FlashAttn is valid for the model, checking if the package is
-        # installed.
+        # Import the actual backend so its FA4/FA3/FA2 selection determines
+        # availability; a separate FA2 package probe can reject valid installs.
         if target_backend == AttentionBackendEnum.FLASH_ATTN:
             try:
-                import flash_attn  # noqa: F401
-
                 from fastvideo.attention.backends.flash_attn import (  # noqa: F401
                     FlashAttentionBackend)
 
                 supported_sizes = \
                     FlashAttentionBackend.get_supported_head_sizes()
                 if head_size not in supported_sizes:
-                    logger.info("Cannot use FlashAttention-2 backend for head size %d.", head_size)
+                    logger.info("Cannot use FlashAttention backend for head size %d.", head_size)
                     target_backend = AttentionBackendEnum.TORCH_SDPA
-            except ImportError:
-                logger.info("Cannot use FlashAttention-2 backend because the "
-                            "flash_attn package is not found. "
-                            "Make sure that flash_attn was built and installed "
-                            "(on by default).")
+            except ImportError as e:
+                if envs.FASTVIDEO_FA4:
+                    raise RuntimeError(
+                        f"FASTVIDEO_FA4=1 but the FlashAttention backend failed to import ({type(e).__name__}: {e}). "
+                        "Verify the FA4 install and its dependencies in this worker's Python environment, "
+                        "or unset FASTVIDEO_FA4 to allow automatic fallback.") from e
+                logger.info(
+                    "Cannot import FlashAttention backend (FASTVIDEO_FA4=0): %s: %s. "
+                    "Falling back to Torch SDPA.",
+                    type(e).__name__, str(e))
                 target_backend = AttentionBackendEnum.TORCH_SDPA
 
         if target_backend == AttentionBackendEnum.TORCH_SDPA:

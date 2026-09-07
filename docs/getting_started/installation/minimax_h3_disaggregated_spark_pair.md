@@ -591,6 +591,34 @@ request:
 On GB10, do not enable the sm_100a FA4 path. Keep compilation disabled until
 the basic distributed path is known to work.
 
+### Use FA4 for supported dense attention layers
+
+The main FastH3 blocks keep `VIDEO_SPARSE_ATTN_H3`. The text refiner and video
+VAE use dense attention and can select ordinary BF16 FA4 with a compatible
+CuTe installation that supports GB10. This is separate from the sm_100a
+FP4/block-sparse kernels above. Installing FA4 alone does not enable it.
+
+After a small FA4 forward test passes in the environment on each Spark, set
+the flag on the driver before creating a new generator:
+
+~~~bash
+FASTVIDEO_FA4=1 python /tmp/fasth3_req_video.py
+~~~
+
+The H3 executor forwards an explicitly set driver `FASTVIDEO_FA4` through both
+actors' `runtime_env`, before backend imports, including when Ray is already
+running. A value in `ray_runtime_env.env_vars` takes precedence over the driver
+shell. The `ray_non_carry_over_env_vars.json` exclusion policy can disable
+automatic forwarding. Recreate the generator and actors to apply changes.
+
+Each actor logs `[H3_WORKER]` with its role, node IP, Python executable, and
+effective `FASTVIDEO_FA4` value before model loading. Check that both show
+`FASTVIDEO_FA4=1` and the expected Python environment. Dense backend selection
+then logs `Using FlashAttention-4 backend`; the main transformer also logs its
+VSA backend. An explicitly requested FA4 backend that cannot import now raises
+the original import cause instead of silently selecting SDPA. Other layer
+constraints, such as unsupported head dimensions, can still select SDPA.
+
 ## 10. Troubleshooting
 
 ### Both Sparks share one public IP
