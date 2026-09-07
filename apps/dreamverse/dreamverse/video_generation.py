@@ -308,7 +308,13 @@ class VideoGenerationWorker:
                     dynamic=False,
                 ),
                 use_fsdp_inference=False,
-                quantization=QuantizationConfig(transformer_quant="NVFP4"),
+                # The bundled LTX2 model enables a refinement LoRA during the
+                # first request. NVFP4 otherwise purges the dense weights that
+                # FastVideo's LoRA merge path requires.
+                quantization=QuantizationConfig(
+                    transformer_quant="NVFP4",
+                    transformer_retain_original_weights=True,
+                ),
             ),
             pipeline=PipelineSelection(
                 components=components,

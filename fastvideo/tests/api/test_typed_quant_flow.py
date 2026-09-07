@@ -58,6 +58,34 @@ def test_typed_transformer_quant_resolves_to_nvfp4_instance(captured_kwargs) -> 
                                      f"{type(captured_kwargs['transformer_quant']).__name__}")
 
 
+def test_typed_nvfp4_quant_can_retain_original_weights(captured_kwargs) -> None:
+    cfg = GeneratorConfig(
+        model_path="FastVideo/LTX2-Distilled-Diffusers",
+        engine=EngineConfig(
+            quantization=QuantizationConfig(
+                transformer_quant="NVFP4",
+                transformer_retain_original_weights=True,
+            ), ),
+    )
+    generator_config_to_fastvideo_args(cfg)
+    quant_config = captured_kwargs["transformer_quant"]
+    assert isinstance(quant_config, NVFP4Config)
+    assert quant_config.retain_original_weights is True
+
+
+def test_retain_original_weights_rejects_non_nvfp4_quant(captured_kwargs) -> None:
+    cfg = GeneratorConfig(
+        model_path="model",
+        engine=EngineConfig(
+            quantization=QuantizationConfig(
+                transformer_quant="FP8",
+                transformer_retain_original_weights=True,
+            ), ),
+    )
+    with pytest.raises(ValueError, match="only supported with transformer_quant='NVFP4'"):
+        generator_config_to_fastvideo_args(cfg)
+
+
 def test_no_typed_quant_omits_transformer_quant_kwarg(captured_kwargs) -> None:
     """Default GeneratorConfig has ``quantization=None`` — the carrier
     must not be set, so the existing legacy path
