@@ -153,6 +153,13 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
                     decode_to_pixels_parallel(self.vae, latents, output, sp_group, strategy=strategy)
                 else:
                     self.vae.decode_to_pixels(latents, output)
+            if is_output_rank and output is not None and output.dtype == torch.float32:
+                # Quantize to uint8 here, before the frames cross the
+                # multiprocess-executor boundary. A 345-frame 1344x768 clip is
+                # 4.27 GB as fp32 and 1.07 GB as uint8, and the main process
+                # cast it to uint8 immediately anyway; the clamp matches the
+                # post-decode handling of VAE output slightly outside [0, 1].
+                output = output.mul_(255).clamp_(0, 255).to(torch.uint8)
             batch.output = output if is_output_rank else placeholder
             return batch
         finally:

@@ -847,11 +847,17 @@ class VideoGenerator:
             samples = output_batch.output.cpu()
         elif output_batch.output.shape == samples.shape:
             samples.copy_(output_batch.output)
+            if output_batch.output.dtype == torch.uint8:
+                # A worker may hand back uint8 pixels (the MiniMax-H3 decode
+                # stage does); keep ``samples`` on its [0, 1] float contract.
+                samples.div_(255)
         else:
             if not skip_pixel_prealloc:
                 logger.warning("Output shape %s does not match expected shape %s; use slow path",
                                output_batch.output.shape, samples.shape)
             samples = output_batch.output.cpu()
+            if samples.dtype == torch.uint8:
+                samples = samples.float().div_(255)
         logging_info = output_batch.logging_info
 
         gen_time = time.perf_counter() - start_time
@@ -904,7 +910,9 @@ class VideoGenerator:
             # (Equivalence is SSIM-gated, not bit-exact: float->uint8
             # differs <=1 LSB CPU vs GPU.)
             src = output_batch.output
-            vid_u8 = (src * 255).clamp_(0, 255).to(torch.uint8)
+            # uint8 input is already quantized by the worker (MiniMax-H3
+            # decode stage) and passes through untouched.
+            vid_u8 = src if src.dtype == torch.uint8 else (src * 255).clamp_(0, 255).to(torch.uint8)
             vid_u8 = rearrange(vid_u8, "b c t h w -> t b c h w").cpu()
             frames = [
                 torchvision.utils.make_grid(x, nrow=6).permute(1, 2, 0).squeeze(-1).contiguous().numpy() for x in vid_u8
