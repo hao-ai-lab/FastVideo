@@ -200,9 +200,9 @@ def test_topk_not_a_multiple_of_the_quad(topk):
     run_and_compare(ragged=True, num_blocks=8, topk=topk)
 
 
-@pytest.mark.parametrize("num_blocks", [4, 8, 16])
+@pytest.mark.parametrize("num_blocks", [2, 4, 8, 16])
 def test_sequence_lengths(num_blocks):
-    run_and_compare(ragged=True, num_blocks=num_blocks, topk=3)
+    run_and_compare(ragged=True, num_blocks=num_blocks, topk=min(3, num_blocks))
 
 
 def test_zero_count_kv_blocks():
