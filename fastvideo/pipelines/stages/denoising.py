@@ -27,6 +27,7 @@ from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 from fastvideo.platforms import AttentionBackendEnum
+from fastvideo.profiler import profiler_region
 from fastvideo.utils import dict_to_3d_list, masks_like
 
 try:
@@ -368,7 +369,7 @@ class DenoisingStage(PipelineStage):
         _cfg_gate_invalidations = 0
 
         # Run denoising loop
-        with self.progress_bar(total=num_inference_steps) as progress_bar:
+        with profiler_region("inference_denoising"), self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 # Skip if interrupted
                 if hasattr(self, 'interrupt') and self.interrupt:
@@ -1320,7 +1321,7 @@ class DmdDenoisingStage(DenoisingStage):
                                  device=get_local_torch_device())
 
         # Run denoising loop
-        with self.progress_bar(total=len(timesteps)) as progress_bar:
+        with profiler_region("inference_denoising"), self.progress_bar(total=len(timesteps)) as progress_bar:
             for i, t in enumerate(timesteps):
                 # Skip if interrupted
                 if hasattr(self, 'interrupt') and self.interrupt:
