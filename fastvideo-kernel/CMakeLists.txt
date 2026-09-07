@@ -411,6 +411,12 @@ if(BUILD_CXX_KERNELS)
         set_source_files_properties(csrc/attention/block_sparse_sm100a.cu
                                     csrc/attention/block_sparse_blk128_sm100a.cu PROPERTIES
             COMPILE_OPTIONS "-gencode;arch=compute_100a,code=sm_100a;-gencode;arch=compute_103a,code=sm_103a;-DVSA_BHSD=true")
+        # VSA block-sparse attention BACKWARD, 64-token blocks. sm_100a only for now: validated
+        # on GB200, not yet on B300/GB300, so no sm_103a image is built and the Python side keeps
+        # the Triton backward for sm_103a devices.
+        list(APPEND EXTENSION_SOURCES csrc/attention/block_sparse_bwd_sm100a.cu)
+        set_source_files_properties(csrc/attention/block_sparse_bwd_sm100a.cu PROPERTIES
+            COMPILE_OPTIONS "-gencode;arch=compute_100a,code=sm_100a;-DVSA_BHSD=true")
     endif()
 
     Python_add_library(fastvideo_kernel_ops MODULE USE_SABI ${SKBUILD_SABI_VERSION} WITH_SOABI

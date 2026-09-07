@@ -4,10 +4,12 @@
 The historical ``sm100a`` module and symbol names are retained for compatibility, but the
 extension carries native sm_100a and sm_103a images and supports both device generations.
 
-A third backend behind the same VSA op as the Triton and CuTe-DSL paths. Forward only: it
-returns ``(out, lse)`` with ``lse`` in exactly the form ``triton_block_sparse_attn_forward``
-writes -- ``max(qk * qk_scale) + log2(l)``, ``[B, H, S]`` fp32 -- so
-``block_sparse_attn_backward_triton`` runs against it unchanged.
+A third backend behind the same VSA op as the Triton and CuTe-DSL paths. This module is the
+forward: it returns ``(out, lse)`` with ``lse`` in exactly the form
+``triton_block_sparse_attn_forward`` writes -- ``max(qk * qk_scale) + log2(l)``, ``[B, H, S]``
+fp32 -- so both ``block_sparse_attn_backward_triton`` and the sm_100a CUDA backward
+(``block_sparse_attn_bwd_sm100a``, 64-token blocks, sm_100a devices only) run against it
+unchanged.
 
 The extension carries TWO instantiations of the kernel, for 64- and 128-token sparse blocks
 (tile volumes 64 and 128 in ``build_vsa_metadata``); the block size is inferred from the

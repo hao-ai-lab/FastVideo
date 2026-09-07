@@ -874,3 +874,114 @@ __device__ __forceinline__
 void sts_f32(uint32_t smem_addr, float val) {
   asm volatile("st.shared.f32 [%0], %1;" :: "r"(smem_addr), "f"(val) : "memory");
 }
+
+__device__ __forceinline__ void tcgen05_mma_ws_f16_ss_1sm_predicated(
+    uint32_t issue, uint32_t tmem_d, uint64_t desc_a, uint64_t desc_b,
+    uint32_t idesc, bool enable_input_d) {
+  asm volatile(
+      "{\n\t"
+      ".reg .pred p, q;\n\t"
+      "setp.ne.b32 q, %0, 0;\n\t"
+      "setp.ne.b32 p, %5, 0;\n\t"
+      "@q tcgen05.mma.ws.cta_group::1.kind::f16 "
+      "[%1], %2, %3, %4, p, 0;\n\t"
+      "}\n"
+      :: "r"(issue), "r"(tmem_d), "l"(desc_a), "l"(desc_b),
+         "r"(idesc), "r"(enable_input_d ? 1u : 0u));
+}
+
+__device__ __forceinline__ void tcgen05_mma_ws_f16_ts_1sm_predicated(
+    uint32_t issue, uint32_t tmem_d, uint32_t tmem_a, uint64_t desc_b,
+    uint32_t idesc, bool enable_input_d) {
+  asm volatile(
+      "{\n\t"
+      ".reg .pred p, q;\n\t"
+      "setp.ne.b32 q, %0, 0;\n\t"
+      "setp.ne.b32 p, %5, 0;\n\t"
+      "@q tcgen05.mma.ws.cta_group::1.kind::f16 "
+      "[%1], [%2], %3, %4, p, 0;\n\t"
+      "}\n"
+      :: "r"(issue), "r"(tmem_d), "r"(tmem_a), "l"(desc_b),
+         "r"(idesc), "r"(enable_input_d ? 1u : 0u));
+}
+
+__device__ __forceinline__ void tcgen05_wait_ld() {
+  asm volatile("tcgen05.wait::ld.sync.aligned;\n" ::: "memory");
+}
+
+__device__ __forceinline__
+void cpasync_bulk_load_mbarrier(uint32_t smem_dst, const void* gmem_src,
+                                uint32_t bytes, uint32_t mbar_smem) {
+  asm volatile(
+      "cp.async.bulk.shared::cluster.global.mbarrier::complete_tx::bytes"
+      " [%0], [%1], %2, [%3];\n"
+      :: "r"(smem_dst), "l"(gmem_src), "r"(bytes), "r"(mbar_smem)
+      : "memory");
+}
+
+__device__ __forceinline__
+void cpasync_reduce_bulk_add_f32(float* global_dst, uint32_t smem_src,
+                                uint32_t bytes) {
+  asm volatile(
+      "cp.reduce.async.bulk.global.shared::cta.bulk_group.add.f32"
+      " [%0], [%1], %2;\n"
+      :: "l"(global_dst), "r"(smem_src), "r"(bytes)
+      : "memory");
+}
+
+__device__ __forceinline__
+void cpasync_reduce_bulk_add_f16(uint16_t* global_dst, uint32_t smem_src,
+                                uint32_t bytes) {
+  asm volatile(
+      "cp.reduce.async.bulk.global.shared::cta.bulk_group.add.noftz.f16"
+      " [%0], [%1], %2;\n"
+      :: "l"(global_dst), "r"(smem_src), "r"(bytes)
+      : "memory");
+}
+
+__device__ __forceinline__
+void cpasync_reduce_bulk_add_f32_l2hint(float* global_dst, uint32_t smem_src,
+                                       uint32_t bytes, uint64_t cache_policy) {
+  asm volatile(
+      "cp.reduce.async.bulk.global.shared::cta.bulk_group.L2::cache_hint.add.f32"
+      " [%0], [%1], %2, %3;\n"
+      :: "l"(global_dst), "r"(smem_src), "r"(bytes), "l"(cache_policy)
+      : "memory");
+}
+
+__device__ __forceinline__
+void cpasync_reduce_bulk_add_f16_l2hint(uint16_t* global_dst, uint32_t smem_src,
+                                       uint32_t bytes, uint64_t cache_policy) {
+  asm volatile(
+      "cp.reduce.async.bulk.global.shared::cta.bulk_group.L2::cache_hint.add.noftz.f16"
+      " [%0], [%1], %2, %3;\n"
+      :: "l"(global_dst), "r"(smem_src), "r"(bytes), "l"(cache_policy)
+      : "memory");
+}
+
+__device__ __forceinline__ void smem_desc_add_lo(uint64_t& d, uint32_t inc) {
+  asm volatile("{\n\t"
+      ".reg .b32 lo, hi;\n\t"
+      "mov.b64 {lo, hi}, %0;\n\t"
+      "add.u32 lo, lo, %1;\n\t"
+      "mov.b64 %0, {lo, hi};\n\t"
+      "}" : "+l"(d) : "r"(inc));
+}
+
+__device__ __forceinline__
+uint32_t cvt_f32x2_to_f16x2(float a, float b) {
+  uint32_t r;
+  asm volatile("cvt.rn.f16x2.f32 %0, %2, %1;\n"
+               : "=r"(r) : "f"(a), "f"(b));
+  return r;
+}
+
+__device__ __forceinline__
+uint64_t make_l2cache_policy_fractional_evict_last_unchanged(float fraction_f32) {
+  uint64_t policy;
+  asm("createpolicy.fractional.L2::evict_last.L2::evict_unchanged.b64"
+      " %0, %1;\n"
+      : "=l"(policy)
+      : "f"(fraction_f32));
+  return policy;
+}
