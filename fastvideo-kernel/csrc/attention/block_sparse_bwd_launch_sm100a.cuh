@@ -50,10 +50,10 @@ struct BlockSparseVsaBwdArgs {
   const int* variable_block_sizes;
 
   // Work order: which (batch, head, kv block) item each CTA processes.
-  // [B*H*nb] int32 work id -> item ((b*H + h)*nb + kv). nullptr: identity order below
-  // ORDER_MIN_KV_BLOCKS, else the launch computes the length-binned order into order_workspace.
+  // [B*H*nb] int32 work id -> item ((b*H + h)*nb + kv); nullptr = identity order, or the launch
+  // computes the length-binned order into order_workspace when the order kernel runs.
   const int* workitem_remap;
-  // [B*H*nb] int32; required when workitem_remap is nullptr and nb >= ORDER_MIN_KV_BLOCKS.
+  // [B*H*nb] int32; required when workitem_remap is nullptr and the order kernel runs.
   int* order_workspace;
 
   // Outputs, inputs' layout; dk/dv rows of unselected kv blocks are zeroed by the preprocess.
@@ -105,6 +105,15 @@ __host__ inline size_t block_sparse_bwd_delta_bytes(int batch, int num_heads, in
 // and the order kernel is left to the larger shapes.
 constexpr int ORDER_MIN_KV_BLOCKS = 1024;
 
+// One head's dQ accumulator (S x HEAD_DIM x sizeof) from which SM-sized chunked launches and the
+// DQ_L2_KEEP hint pay: measured at 128 MiB, about the GB200 L2 (f16: S = 524288, fp32: 262144).
+constexpr size_t L2_RESIDENT_DQ_ACCUM_BYTES_PER_HEAD = size_t{128} << 20;
+
+// Safety guard: chunked launches index the order's sub-array, so the order kernel must run there.
+static_assert(L2_RESIDENT_DQ_ACCUM_BYTES_PER_HEAD / (HEAD_DIM * sizeof(dq_accum_t)) >=
+                  (size_t)ORDER_MIN_KV_BLOCKS * BLOCK,
+              "the L2 transition (chunked launches) must not sit below the order-kernel threshold");
+
 __host__ inline cudaError_t block_sparse_bwd_supported(const BlockSparseVsaBwdArgs& args) {
   if (args.head_dim != HEAD_DIM) {
     return cudaErrorInvalidValue;
@@ -133,9 +142,11 @@ __host__ inline cudaError_t block_sparse_bwd_supported(const BlockSparseVsaBwdAr
   if (!args.dqaccum || !args.qt || !args.dot || !args.delta) {
     return cudaErrorInvalidValue;
   }
-  // No explicit order and large enough for the order kernel: it needs the workspace and two ints
-  // of SMEM per kv block.
-  if (!args.workitem_remap && args.num_kv_blocks_per_seq >= ORDER_MIN_KV_BLOCKS &&
+  // No explicit order and the order kernel will run: it needs the workspace and two ints of SMEM
+  // per kv block.
+  const bool keep_dq_l2 = (size_t)args.seqlen * HEAD_DIM * sizeof(dq_accum_t) >=
+                          L2_RESIDENT_DQ_ACCUM_BYTES_PER_HEAD;
+  if (!args.workitem_remap && (args.num_kv_blocks_per_seq >= ORDER_MIN_KV_BLOCKS || keep_dq_l2) &&
       (!args.order_workspace || args.num_kv_blocks_per_seq > ORDER_MAX_BLOCKS)) {
     return cudaErrorInvalidValue;
   }
@@ -170,18 +181,6 @@ __host__ inline cudaError_t make_tma_kv_units(CUtensorMap* map, const __nv_bfloa
   return (r == CUDA_SUCCESS) ? cudaSuccess : cudaErrorInvalidValue;
 }
 
-// Above the L2-capacity transition the main kernel is DRAM-bound and keeping a fractional
-// subset of the repeatedly reduced dQ lines resident pays (~0.6% at 524K/1M tokens); below it the
-// policy register costs more than it saves. Threshold scales with accumulator BYTES.
-constexpr int CACHE_WAVE_MIN_SEQ_LEN = 524288;
-// The in-kernel identity order (workitem_remap == nullptr below ORDER_MIN_KV_BLOCKS) has no
-// sub-array to offset a chunk into, so the chunked launches that DQ_L2_KEEP enables must only
-// ever run with a device-computed order: the L2 transition has to sit at or above the
-// order-kernel threshold. keep_dq_l2 <=> S * sizeof(dq_accum_t) >= 2 * CACHE_WAVE_MIN_SEQ_LEN.
-static_assert((size_t)CACHE_WAVE_MIN_SEQ_LEN * 2 / sizeof(dq_accum_t) >=
-                  (size_t)ORDER_MIN_KV_BLOCKS * BLOCK,
-              "DQ_L2_KEEP chunked launches need the device-computed work order");
-
 template <bool DQ_L2_KEEP, bool USE_CLC, bool BHSD>
 __host__ inline cudaError_t launch_main(const BlockSparseVsaBwdArgs& args, const int* work_remap,
                                         const CUtensorMap& tk, const CUtensorMap& tv,
@@ -212,8 +211,8 @@ __host__ inline cudaError_t launch_main(const BlockSparseVsaBwdArgs& args, const
     at[0].val.clusterDim.z = 1;
     cfg.attrs              = at;
     cfg.numAttrs           = 1;
-    // Guarded by the static_assert above; kept as a runtime check for other callers of the
-    // launch API that pass their own thresholds.
+    // Unreachable from launch_block_sparse_bwd_sm100a (the order kernel runs whenever the launch
+    // is chunked); kept as a runtime check for callers passing their own order.
     if (work_remap == nullptr && chunk != total) {
       return cudaErrorInvalidValue;
     }
@@ -293,13 +292,14 @@ __host__ inline cudaError_t launch_block_sparse_bwd_sm100a(const BlockSparseVsaB
     return e;
   }
 
-  const bool keep_dq_l2 = (size_t)S * sizeof(dq_accum_t) >= (size_t)CACHE_WAVE_MIN_SEQ_LEN * 2;
+  const bool keep_dq_l2 =
+      (size_t)S * HEAD_DIM * sizeof(dq_accum_t) >= L2_RESIDENT_DQ_ACCUM_BYTES_PER_HEAD;
 
-  // Work-item order: explicit if the caller passed one; else identity (nullptr) below
-  // ORDER_MIN_KV_BLOCKS, else computed on device into order_workspace (length bins; the same L2
-  // transition that selects DQ_L2_KEEP selects the wider bins plus the midpoint snake).
+  // Work-item order: the caller's, else identity, else the device order kernel (from
+  // ORDER_MIN_KV_BLOCKS on, and whenever the launch is chunked: chunks index its sub-arrays).
   const int* work_remap = args.workitem_remap;
-  if (work_remap == nullptr && args.num_kv_blocks_per_seq >= ORDER_MIN_KV_BLOCKS) {
+  if (work_remap == nullptr &&
+      (args.num_kv_blocks_per_seq >= ORDER_MIN_KV_BLOCKS || keep_dq_l2)) {
     const int order_smem = 2 * args.num_kv_blocks_per_seq * (int)sizeof(int);
     if (order_smem > 48 * 1024) {
       e = cudaFuncSetAttribute(vsa_bwd_order_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize,
