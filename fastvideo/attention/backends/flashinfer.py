@@ -1,9 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """FlashInfer dense prefill attention backend.
 
-This backend uses FlashInfer's single-request NHD kernel once per batch item.
-That path preserves FastVideo's BSHD/SP contract and supports self-attention,
-cross-attention, GQA, causal attention, and tokenizer-style padding masks.
+This backend uses either FlashInfer's single-request NHD kernel once per batch
+item or its batched cuDNN SDPA kernel. Select the implementation with
+``FASTVIDEO_FLASHINFER_PREFILL_BACKEND=single|cudnn`` (default: ``single``).
+Both paths preserve FastVideo's BSHD/SP contract and support self-attention,
+cross-attention, GQA, and causal attention. Arbitrary masks remain on the
+single-request path because FlashInfer's cuDNN entry point has no custom-mask
+argument.
 FlashInfer's prefill API is inference-only here; training must use FLASH_ATTN or
 TORCH_SDPA.
 
@@ -23,6 +27,7 @@ from dataclasses import dataclass
 
 import torch
 
+import fastvideo.envs as envs
 from fastvideo.attention.backends.abstract import (AttentionBackend, AttentionImpl, AttentionMetadata,
                                                    AttentionMetadataBuilder)
 
@@ -94,6 +99,11 @@ def _mask_for_sample(attn_mask: torch.Tensor, sample: int, query_len: int, key_l
 
 class FlashInferImpl(AttentionImpl):
 
+    _CUDNN_WORKSPACE_BYTES = 128 * 1024 * 1024
+    # FlashInfer documents 128 MiB as sufficient for typical prefill. Share one
+    # allocation per device instead of reserving it once per transformer layer.
+    _cudnn_workspaces: dict[torch.device, torch.Tensor] = {}
+
     def __init__(self,
                  num_heads: int,
                  head_size: int,
@@ -102,16 +112,51 @@ class FlashInferImpl(AttentionImpl):
                  num_kv_heads: int | None = None,
                  prefix: str = "",
                  **extra_impl_args) -> None:
-        del num_heads, head_size, num_kv_heads, prefix, extra_impl_args
+        del num_heads, num_kv_heads, prefix, extra_impl_args
         self.causal = causal
         self.softmax_scale = softmax_scale
+        self.head_size = head_size
+        self.prefill_backend = envs.FASTVIDEO_FLASHINFER_PREFILL_BACKEND
+        if self.prefill_backend not in ("single", "cudnn"):
+            raise ValueError("FASTVIDEO_FLASHINFER_PREFILL_BACKEND must be 'single' or 'cudnn'; "
+                             f"got {self.prefill_backend!r}")
+        if self.prefill_backend == "cudnn" and head_size != 128:
+            raise ValueError("FlashInfer cuDNN prefill requires head size 128 in FastVideo; "
+                             f"got {head_size}. Use FASTVIDEO_FLASHINFER_PREFILL_BACKEND=single instead.")
+    def _forward_cudnn(self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, causal: bool) -> torch.Tensor:
+        from flashinfer.prefill import cudnn_batch_prefill_with_kv_cache
+
+        batch_size, query_len = query.shape[:2]
+        key_len = key.shape[1]
+        workspace = self._cudnn_workspaces.get(query.device)
+        if workspace is None:
+            workspace = torch.empty(self._CUDNN_WORKSPACE_BYTES, dtype=torch.uint8, device=query.device)
+            self._cudnn_workspaces[query.device] = workspace
+
+        query_offsets = torch.arange(batch_size + 1, dtype=torch.int32, device=query.device) * query_len
+        key_offsets = torch.arange(batch_size + 1, dtype=torch.int32, device=query.device) * key_len
+        output, _ = cudnn_batch_prefill_with_kv_cache(
+            query.flatten(0, 1),
+            key.flatten(0, 1),
+            value.flatten(0, 1),
+            self.softmax_scale,
+            workspace,
+            max_token_per_sequence=query_len,
+            max_sequence_kv=key_len,
+            batch_offsets_q=query_offsets,
+            batch_offsets_o=query_offsets,
+            batch_offsets_k=key_offsets,
+            batch_offsets_v=key_offsets,
+            batch_offsets_units="tokens",
+            causal=causal,
+            return_lse=False,
+        )
+        return output.view_as(query)
 
     def forward(self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor,
                 attn_metadata: FlashInferMetadata | None) -> torch.Tensor:
         if torch.is_grad_enabled() and (query.requires_grad or key.requires_grad or value.requires_grad):
             raise RuntimeError("FLASHINFER backend is inference-only; use FLASH_ATTN or TORCH_SDPA for training.")
-
-        from flashinfer.prefill import single_prefill_with_kv_cache
 
         original_dtype = query.dtype
         if original_dtype not in (torch.float16, torch.bfloat16):
@@ -121,6 +166,15 @@ class FlashInferImpl(AttentionImpl):
 
         mask = attn_metadata.attn_mask if attn_metadata is not None else None
         causal = self.causal or bool(attn_metadata is not None and getattr(attn_metadata, "is_causal", False))
+        if self.prefill_backend == "cudnn":
+            if mask is not None:
+                raise ValueError("FlashInfer cuDNN prefill does not support arbitrary attention masks; "
+                                 "use FASTVIDEO_FLASHINFER_PREFILL_BACKEND=single instead.")
+            output = self._forward_cudnn(query, key, value, causal)
+            return output.to(original_dtype) if output.dtype != original_dtype else output
+
+        from flashinfer.prefill import single_prefill_with_kv_cache
+
         outputs = []
         for sample in range(query.shape[0]):
             custom_mask = None
