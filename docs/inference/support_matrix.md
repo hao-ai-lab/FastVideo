@@ -78,6 +78,7 @@ column links a runnable script in `examples/inference/basic/` where one exists.
 | wan | `Wan-AI/Wan2.1-T2V-14B-Diffusers`<br>`FastVideo/Wan2.1-VSA-T2V-14B-720P-Diffusers` | T2V | — |
 | wan | `Wan-AI/Wan2.1-I2V-14B-480P-Diffusers` | I2V | — |
 | wan | `Wan-AI/Wan2.1-I2V-14B-720P-Diffusers` | I2V | — |
+| wan | `Wan-AI/Wan2.2-Animate-14B-Diffusers` | I2V | [basic_wan_animate.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_wan_animate.py) |
 | wan | `weizhou03/Wan2.1-Fun-1.3B-InP-Diffusers` | I2V | — |
 | wan | `IRMChen/Wan2.1-Fun-1.3B-Control-Diffusers` | — | [basic_wan2_2_Fun.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_wan2_2_Fun.py) |
 | wan | `FastVideo/FastWan2.1-T2V-1.3B-Diffusers`<br>`FastVideo/FastWan2.1-T2V-14B-480P-Diffusers` | T2V | [basic_dmd.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_dmd.py) |
@@ -162,6 +163,7 @@ optimizations: absence means **untested**, not incompatible.
 | Lucy Edit Dev 5B*** | `decart-ai/Lucy-Edit-Dev` | 480P | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
 | Wan2.2 T2V A14B | `Wan-AI/Wan2.2-T2V-A14B-Diffusers` | 480P<br>720P | ❌ | ❌ | ✅ | ⭕ | ⭕ |
 | Wan2.2 I2V A14B | `Wan-AI/Wan2.2-I2V-A14B-Diffusers` | 480P<br>720P | ❌ | ❌ | ✅ | ⭕ | ⭕ |
+| Wan2.2 Animate 14B | `Wan-AI/Wan2.2-Animate-14B-Diffusers` | 720P | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
 | HunyuanVideo | `hunyuanvideo-community/HunyuanVideo` | 720px1280p<br>544px960p | ❌ | ✅ | ✅ | ⭕ | ⭕ |
 | FastHunyuan | `FastVideo/FastHunyuan-diffusers` | 720px1280p<br>544px960p | ❌ | ✅ | ✅ | ⭕ | ⭕ |
 | Wan2.1 T2V 1.3B | `Wan-AI/Wan2.1-T2V-1.3B-Diffusers` | 480P | ✅ | ✅ | ✅ | ⭕ | ⭕ |

@@ -57,6 +57,7 @@ from fastvideo.configs.pipelines.wan import (
     Wan2_2_I2V_A14B_Config,
     Wan2_2_T2V_A14B_Config,
     Wan2_2_TI2V_5B_Config,
+    WanAnimate14BConfig,
     WanI2V480PConfig,
     WanI2V720PConfig,
     WanT2V480PConfig,
@@ -966,6 +967,17 @@ def _register_configs() -> None:
         ],
         model_family="wan",
         default_preset="wan_i2v_14b_720p",
+    )
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=WanAnimate14BConfig,
+        workload_types=(WorkloadType.I2V, ),
+        hf_model_paths=[
+            "Wan-AI/Wan2.2-Animate-14B-Diffusers",
+        ],
+        model_detectors=[lambda path: "animate" in path.lower()],
+        model_family="wan",
+        default_preset="wan_animate_14b",
     )
     register_configs(
         sampling_param_cls=None,
