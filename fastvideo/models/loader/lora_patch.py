@@ -6,16 +6,17 @@ base checkpoint must already contain the parameter, and the delta must actually 
 rank. Distilled video checkpoints break both often enough that dropping whatever does
 not fit silently loses real signal.
 
-Two payload kinds cover the gap, named after the convention ComfyUI's loader already
-reads so one file works in both places:
+Two payload kinds cover the gap. The weight/bias spellings follow conventions used by
+ComfyUI; the ``*_param`` spellings extend them to standalone FastVideo parameters:
 
-``<module>.diff`` / ``<module>.diff_b``
+``<module>.diff`` / ``<module>.diff_b`` / ``<parameter>.diff_param``
     An exact additive delta for a parameter the base model has. Used where a rank-``r``
     factorization buys nothing or cannot be formed at all -- RMSNorm vectors, biases,
-    and matrices whose smaller dimension is already at or below the rank that would be
-    chosen. Factoring a length-``n`` vector into rank ``r`` costs ``r(1 + n) > n``.
+    standalone parameters such as ``scale_shift_table``, and matrices whose smaller
+    dimension is already at or below the rank that would be chosen. Factoring a
+    length-``n`` vector into rank ``r`` costs ``r(1 + n) > n``.
 
-``<module>.set_weight``
+``<module>.set_weight`` / ``<parameter>.set_param``
     A whole parameter the base model does not carry, so no delta is expressible. MiniMax
     H3's VSA ``to_gate_compress`` is the case that motivated this: it exists only under
     the sparse-attention backend, and :func:`load_model_from_full_model_state_dict`
@@ -49,17 +50,11 @@ from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 
-# Suffix -> the parameter suffix it targets. ``.diff``/``.diff_b`` are additive,
-# ``.set_weight`` replaces. Ordered longest-first so ``.diff_b`` is tested before
-# ``.diff`` would match a truncated key.
-ADDITIVE_SUFFIXES: dict[str, str] = {".diff_b": ".bias", ".diff": ".weight"}
-REPLACEMENT_SUFFIXES: dict[str, str] = {".set_weight": ".weight"}
-
-# Recognized elsewhere in an adapter and deliberately not our business: the low-rank
-# half, which ``LoRAPipeline`` merges through the wrapped-module path.
-_LOW_RANK_MARKERS = (".lora_A", ".lora_B", ".lora_up", ".lora_down", ".lora_alpha", ".lora_rank", ".alpha",
-                     ".dora_scale")
-
+# Suffix -> the parameter suffix it targets. An empty target suffix preserves the
+# full parameter name for standalone nn.Parameters. Ordered longest-first so the
+# generic spellings are tested before the shorter weight/bias spellings.
+ADDITIVE_SUFFIXES: dict[str, str] = {".diff_param": "", ".diff_b": ".bias", ".diff": ".weight"}
+REPLACEMENT_SUFFIXES: dict[str, str] = {".set_weight": ".weight", ".set_param": ""}
 
 # One low-rank pair has many spellings. PEFT writes ``.lora_A.weight``, and interposes
 # the adapter's name when it is not the default (``.lora_A.default.weight``); kohya and
@@ -126,14 +121,14 @@ class DenseLoRAPatch:
         lora_path: str | None,
         param_names_mapping: Callable[[str], tuple[str, Any, Any]] | None = None,
         *,
+        lora_param_names_mapping: Callable[[str], tuple[str, Any, Any]] | None = None,
         strength: float = 1.0,
     ) -> DenseLoRAPatch | None:
         """Build a patch from an adapter, or ``None`` when it carries no dense payload.
 
-        ``param_names_mapping`` is the same callable the checkpoint loader uses, so
-        adapter keys are resolved into the model's own parameter names by the identical
-        rules -- an adapter written against the published checkpoint layout needs no
-        separate conversion table.
+        ``lora_param_names_mapping`` first translates adapter-specific official names
+        into the published checkpoint layout. ``param_names_mapping`` then resolves that
+        layout into the model's parameter names, matching the low-rank loader's order.
         """
         if not lora_path:
             return None
@@ -150,7 +145,7 @@ class DenseLoRAPatch:
         for path in files:
             with safe_open(path, framework="pt") as handle:
                 for key in handle.keys():
-                    resolved = _resolve(key, param_names_mapping)
+                    resolved = _resolve(key, lora_param_names_mapping, param_names_mapping)
                     if resolved is None:
                         continue
                     target, kind = resolved
@@ -163,7 +158,7 @@ class DenseLoRAPatch:
         if not additive and not replacement:
             return None
         logger.info(
-            "LoRA adapter %s carries a dense payload: %d additive (.diff/.diff_b), %d replacement (.set_weight)",
+            "LoRA adapter %s carries a dense payload: %d additive, %d replacement parameters",
             lora_path, len(additive), len(replacement))
         return cls(files, additive, replacement, strength)
 
@@ -234,6 +229,7 @@ class DenseLoRAPatch:
 
 def _resolve(
     key: str,
+    lora_param_names_mapping: Callable[[str], tuple[str, Any, Any]] | None,
     param_names_mapping: Callable[[str], tuple[str, Any, Any]] | None,
 ) -> tuple[str, str] | None:
     """Map an adapter key to ``(model parameter name, "add" | "set")``.
@@ -241,24 +237,41 @@ def _resolve(
     Returns ``None`` for anything that is not a dense payload key, which includes every
     low-rank factor -- those belong to ``LoRAPipeline``, not here.
     """
-    if any(marker in key for marker in _LOW_RANK_MARKERS):
-        return None
+    # A terminal dense suffix is authoritative even when an ordinary module name
+    # contains text such as ``.alpha`` or ``.lora_A``.
     for suffix, param_suffix in ADDITIVE_SUFFIXES.items():
         if key.endswith(suffix):
-            return _map_name(key[:-len(suffix)] + param_suffix, param_names_mapping, key), "add"
+            return _map_name(
+                key[:-len(suffix)] + param_suffix,
+                lora_param_names_mapping,
+                param_names_mapping,
+                key,
+            ), "add"
     for suffix, param_suffix in REPLACEMENT_SUFFIXES.items():
         if key.endswith(suffix):
-            return _map_name(key[:-len(suffix)] + param_suffix, param_names_mapping, key), "set"
+            return _map_name(
+                key[:-len(suffix)] + param_suffix,
+                lora_param_names_mapping,
+                param_names_mapping,
+                key,
+            ), "set"
     return None
 
 
 def _map_name(
     param_name: str,
+    lora_param_names_mapping: Callable[[str], tuple[str, Any, Any]] | None,
     param_names_mapping: Callable[[str], tuple[str, Any, Any]] | None,
     source_key: str,
 ) -> str:
-    """Run the checkpoint loader's own renaming rules over a resolved parameter name."""
+    """Run the low-rank loader's two-stage renaming rules over a dense parameter."""
     param_name = param_name.replace("diffusion_model.", "")
+    if lora_param_names_mapping is not None:
+        param_name, merge_index, _ = lora_param_names_mapping(param_name)
+        if merge_index is not None:
+            raise NotImplementedError(f"LoRA dense key {source_key} resolves to a fused parameter during the "
+                                      "adapter-specific mapping; whole-tensor payloads for fused parameters "
+                                      "are not supported")
     if param_names_mapping is None:
         return param_name
     mapped, merge_index, _ = param_names_mapping(param_name)

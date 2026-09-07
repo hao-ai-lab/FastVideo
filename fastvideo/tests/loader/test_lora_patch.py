@@ -9,8 +9,10 @@ import pytest
 import torch
 from safetensors.torch import save_file
 
+from fastvideo.configs.models.dits.wanvideo import WanVideoConfig
+from fastvideo.models.loader import fsdp_load
 from fastvideo.models.loader.lora_patch import DenseLoRAPatch, normalize_lora_key
-
+from fastvideo.models.loader.utils import get_param_names_mapping
 
 
 def write_adapter(tmp_path, tensors, name="adapter_model.safetensors"):
@@ -48,6 +50,8 @@ def test_normalize_lora_key_accepts_every_published_spelling(raw, expected):
     "blocks.0.norm1.diff",
     "blocks.0.attn.to_q.diff_b",
     "blocks.0.attn.to_gate_compress.set_weight",
+    "blocks.0.scale_shift_table.diff_param",
+    "blocks.0.extra_table.set_param",
     "blocks.0.attn.to_q.dora_scale",
 ])
 def test_normalize_lora_key_disclaims_non_low_rank_keys(raw):
@@ -82,13 +86,29 @@ def test_from_adapter_splits_additive_from_replacement(tmp_path):
             "blocks.0.attn.to_q.lora_A.weight": torch.zeros(4, 8),
             "blocks.0.norm1.diff": torch.zeros(8),
             "blocks.0.attn.to_q.diff_b": torch.zeros(8),
+            "blocks.0.scale_shift_table.diff_param": torch.zeros(8),
             "blocks.0.attn.to_gate_compress.set_weight": torch.zeros(8, 8),
+            "blocks.0.extra_table.set_param": torch.zeros(8),
         })
     patch = DenseLoRAPatch.from_adapter(path)
     assert patch is not None
-    # `.diff` targets `.weight`; `.diff_b` targets `.bias`; `.set_weight` targets `.weight`.
-    assert set(patch._additive) == {"blocks.0.norm1.weight", "blocks.0.attn.to_q.bias"}
-    assert set(patch._replacement) == {"blocks.0.attn.to_gate_compress.weight"}
+    # Weight/bias suffixes restore their parameter suffix; generic parameter
+    # payloads preserve the complete name.
+    assert set(patch._additive) == {
+        "blocks.0.norm1.weight",
+        "blocks.0.attn.to_q.bias",
+        "blocks.0.scale_shift_table",
+    }
+    assert set(patch._replacement) == {
+        "blocks.0.attn.to_gate_compress.weight",
+        "blocks.0.extra_table",
+    }
+
+
+def test_dense_suffix_is_not_hidden_by_an_alpha_like_parameter_name(tmp_path):
+    path = write_adapter(tmp_path, {"blocks.0.alpha.diff_param": torch.zeros(4)})
+    patch = DenseLoRAPatch.from_adapter(path)
+    assert set(patch._additive) == {"blocks.0.alpha"}
 
 
 def test_param_names_mapping_is_applied_to_dense_keys(tmp_path):
@@ -100,6 +120,126 @@ def test_param_names_mapping_is_applied_to_dense_keys(tmp_path):
 
     patch = DenseLoRAPatch.from_adapter(path, mapping)
     assert set(patch._additive) == {"blocks.0.ff.fc_in.weight"}
+
+
+def test_official_wan_mixed_adapter_maps_dense_key_like_factors(tmp_path):
+    path = write_adapter(
+        tmp_path, {
+            "blocks.0.self_attn.q.lora_A.weight": torch.zeros(2, 4),
+            "blocks.0.self_attn.q.lora_B.weight": torch.zeros(4, 2),
+            "blocks.0.self_attn.k.diff": torch.zeros(4),
+        })
+    config = WanVideoConfig()
+    patch = DenseLoRAPatch.from_adapter(
+        path,
+        get_param_names_mapping(config.param_names_mapping),
+        lora_param_names_mapping=get_param_names_mapping(config.lora_param_names_mapping),
+    )
+    assert set(patch._additive) == {"blocks.0.to_k.weight"}
+
+
+def _stub_fsdp_loading(monkeypatch):
+    monkeypatch.setattr(fsdp_load, "set_mixed_precision_policy", lambda **_: None)
+    monkeypatch.setattr(fsdp_load, "safetensors_weights_iterator", lambda *_args, **_kwargs: iter(()))
+    monkeypatch.setattr(fsdp_load, "load_model_from_full_model_state_dict", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(fsdp_load, "_maybe_quantize_model", lambda _model: None)
+
+
+def _load_tiny_model(model_cls, *, lora_path=None, lora_strength=1.0):
+    return fsdp_load.maybe_load_fsdp_model(
+        model_cls=model_cls,
+        init_params={},
+        weight_dir_list=[],
+        device=torch.device("cpu"),
+        hsdp_replicate_dim=1,
+        hsdp_shard_dim=1,
+        default_dtype=torch.float32,
+        param_dtype=torch.float32,
+        reduce_dtype=torch.float32,
+        training_mode=False,
+        pin_cpu_memory=False,
+        lora_path=lora_path,
+        lora_strength=lora_strength,
+    )
+
+
+def test_fsdp_loader_forwards_lora_specific_mapping(monkeypatch):
+    captured = {}
+
+    class TinyModel(torch.nn.Module):
+        param_names_mapping = {r"^hf\.(.*)$": r"custom.\1"}
+        lora_param_names_mapping = {r"^official\.(.*)$": r"hf.\1"}
+
+    def capture_patch(cls,
+                      lora_path,
+                      param_names_mapping,
+                      *,
+                      lora_param_names_mapping=None,
+                      strength=1.0):
+        captured["path"] = lora_path
+        captured["regular"] = param_names_mapping("hf.weight")[0]
+        captured["lora"] = lora_param_names_mapping("official.weight")[0]
+        captured["strength"] = strength
+        return None
+
+    monkeypatch.setattr(DenseLoRAPatch, "from_adapter", classmethod(capture_patch))
+    _stub_fsdp_loading(monkeypatch)
+
+    _load_tiny_model(TinyModel, lora_path="adapter.safetensors", lora_strength=0.75)
+
+    assert captured == {
+        "path": "adapter.safetensors",
+        "regular": "custom.weight",
+        "lora": "hf.weight",
+        "strength": 0.75,
+    }
+
+
+def test_fsdp_loader_does_not_consult_lora_mapping_without_adapter(monkeypatch):
+    class TinyModel(torch.nn.Module):
+        param_names_mapping = {r"^hf\.(.*)$": r"custom.\1"}
+
+    def unexpected_patch(*_args, **_kwargs):
+        pytest.fail("the no-LoRA load path must not inspect an adapter")
+
+    monkeypatch.setattr(DenseLoRAPatch, "from_adapter", classmethod(unexpected_patch))
+    _stub_fsdp_loading(monkeypatch)
+
+    model = _load_tiny_model(TinyModel)
+
+    assert isinstance(model, TinyModel)
+    assert not hasattr(model, "lora_param_names_mapping")
+
+
+def test_fsdp_loader_allows_adapter_without_lora_specific_mapping(monkeypatch):
+    captured = {}
+
+    class TinyModel(torch.nn.Module):
+        param_names_mapping = {r"^hf\.(.*)$": r"custom.\1"}
+
+    def capture_patch(cls,
+                      lora_path,
+                      param_names_mapping,
+                      *,
+                      lora_param_names_mapping=None,
+                      strength=1.0):
+        captured["path"] = lora_path
+        captured["regular"] = param_names_mapping("hf.weight")[0]
+        captured["lora"] = lora_param_names_mapping
+        captured["strength"] = strength
+        return None
+
+    monkeypatch.setattr(DenseLoRAPatch, "from_adapter", classmethod(capture_patch))
+    _stub_fsdp_loading(monkeypatch)
+
+    _load_tiny_model(TinyModel, lora_path="adapter.safetensors")
+
+    assert captured == {
+        "path": "adapter.safetensors",
+        "regular": "custom.weight",
+        "lora": None,
+        "strength": 1.0,
+    }
 
 
 def test_fused_target_is_refused_rather_than_guessed(tmp_path):
@@ -131,6 +271,13 @@ def test_apply_to_adds_the_delta(tmp_path):
     path = write_adapter(tmp_path, {"blocks.0.norm1.diff": torch.full((4, ), 0.25)})
     patch = DenseLoRAPatch.from_adapter(path)
     out = patch.apply_to("blocks.0.norm1.weight", torch.ones(4))
+    assert torch.allclose(out, torch.full((4, ), 1.25))
+
+
+def test_apply_to_supports_standalone_parameters(tmp_path):
+    path = write_adapter(tmp_path, {"blocks.0.scale_shift_table.diff_param": torch.full((4, ), 0.25)})
+    patch = DenseLoRAPatch.from_adapter(path)
+    out = patch.apply_to("blocks.0.scale_shift_table", torch.ones(4))
     assert torch.allclose(out, torch.full((4, ), 1.25))
 
 
@@ -166,6 +313,13 @@ def test_apply_to_rejects_a_shape_mismatch(tmp_path):
     patch = DenseLoRAPatch.from_adapter(path)
     with pytest.raises(ValueError, match="shape"):
         patch.apply_to("blocks.0.norm1.weight", torch.zeros(4))
+
+
+def test_replacement_for_supports_standalone_parameters(tmp_path):
+    table = torch.randn(6, 4)
+    path = write_adapter(tmp_path, {"blocks.0.extra_table.set_param": table})
+    patch = DenseLoRAPatch.from_adapter(path)
+    assert torch.equal(patch.replacement_for("blocks.0.extra_table"), table)
 
 
 def test_replacement_for_returns_the_whole_tensor(tmp_path):
