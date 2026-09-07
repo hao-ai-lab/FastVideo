@@ -483,8 +483,9 @@ FastVideo integration.
 3. Pipeline wiring.
    - Pipeline: `fastvideo/pipelines/basic/wan/wan_pipeline.py`
    - Denoising and first-frame preparation: `fastvideo/pipelines/basic/wan/stages/`
-   - Pipeline config: `fastvideo/configs/pipelines/wan.py`
-   - Sampling defaults: `fastvideo/pipelines/basic/wan/profiles.py`
+   - Variant definitions: `fastvideo/models/wan/definition.py`
+   - Pipeline config: `fastvideo/models/wan/pipeline_config.py`
+   - Sampling defaults: `fastvideo/pipelines/basic/wan/presets.py`
 
 4. Minimal example.
    - Script: `examples/inference/basic/basic.py`

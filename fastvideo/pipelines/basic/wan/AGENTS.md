@@ -1,7 +1,9 @@
 # Wan pipelines
 
-Pipeline files assemble existing stages. Sampling defaults stay in `profiles.py`
-and pipeline configs in `fastvideo/configs/pipelines/wan.py`. Shared text/image
+Pipeline files assemble existing stages. Sampling defaults stay in `presets.py`.
+Pipeline configs and variant definitions live in `fastvideo/models/wan/` as
+`pipeline_config.py` and `definition.py`. The shared registry consumes these
+definitions; old pipeline config imports remain compatibility aliases. Shared text/image
 encoders stay shared; the Wan VAE video encoder and decoder live together in
 `fastvideo/models/wan/vae.py`.
 
@@ -14,7 +16,8 @@ encoders stay shared; the Wan VAE video encoder and decoder live together in
   Lucy timesteps, and TI2V first-frame preservation around the shared loop.
   Request state belongs in `WanDenoisingState`, never on a reusable stage.
 - `stages/dmd.py`: dense DMD sampling. The caller passes a full training-noise
-  `FlowMatchEulerDiscreteScheduler(shift=8.0)`. Do not share the scheduler
+  `FlowMatchEulerDiscreteScheduler` with `DMD_TRAINING_NOISE_SHIFT` from the
+  family definition (8.0). Do not share the scheduler
   mutated by `TimestepPreparationStage`: DMD indexes the full timestep/sigma
   table when converting noise to video and adding noise.
 - `stages/causal_denoising.py`: standard and DMD causal samplers share cache

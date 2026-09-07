@@ -15,7 +15,7 @@ __all__ = ["distributed_runtime"]
 
 
 def denoising_outputs(device):
-    from fastvideo.configs.pipelines.wan import WanT2V480PConfig
+    from fastvideo.models.wan.pipeline_config import WanT2V480PConfig
     from fastvideo.fastvideo_args import FastVideoArgs
     from fastvideo.models.loader.component_loader import TransformerLoader
     from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import FlowUniPCMultistepScheduler

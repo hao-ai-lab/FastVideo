@@ -4,14 +4,24 @@ This package owns the dense and causal Wan transformers (`transformer.py`,
 `causal_transformer.py`), their architecture,
 FSDP predicates, and checkpoint/LoRA mappings (`config.py`), and the Wan VAE
 (`vae.py`) with its config (`vae_config.py`). The VAE includes both the video
-encoder and decoder. Shared text/image encoders, VAE utilities, pipelines,
-pipeline configs, and training adapters remain in their existing directories.
+encoder and decoder. `pipeline_config.py` owns component and pipeline defaults;
+`definition.py` links supported variants to those configs and existing sampling
+presets. Shared text/image encoders, VAE utilities, pipelines, sampling presets,
+and training adapters remain in their existing directories.
 Other families reuse these classes through canonical imports. Old paths remain
 explicit compatibility exports.
 
 ## Invariants
 
 - Keep `__init__.py` lightweight: no eager model or pipeline imports.
+- Keep `definition.py` data-only. Config and preset names reference their
+  existing owners; do not copy defaults into the catalog. Its registration
+  groups preserve first-match detector ordering around DreamX. Checkpoint
+  manifests and explicit pipeline overrides still choose the executable
+  pipeline; a definition must not silently pin that choice.
+- Keep `configs.pipelines.wan` as explicit compatibility aliases, including
+  `t5_postprocess_text` for old serialized configs. Shared encoder classes
+  remain in `configs.models.encoders` and `models.encoders`.
 - Import configs directly from `fastvideo.models.wan.config` or
   `fastvideo.models.wan.vae_config` in the matching component.
 - Preserve the old `models.dits.wanvideo` and `configs.models.dits.wanvideo`
@@ -28,7 +38,8 @@ explicit compatibility exports.
   normalization, first-frame handling, cache reset, streaming, tiling, and
   encoder/decoder compile conditions. Do not merge the separate Cosmos25,
   Gen3C, or LingBotWorld2 VAE adapters into this implementation.
-- `config.py`, `vae_config.py`, and `__init__.py` are pre-commit checked;
+- `config.py`, `vae_config.py`, `pipeline_config.py`, `definition.py`, and
+  `__init__.py` are pre-commit checked;
   `transformer.py` and `vae.py` retain the existing model-code exclusion.
   Avoid unrelated reformatting.
 
@@ -40,6 +51,7 @@ component, before default or full-quality renders. Imports may require GPU
 dependencies even when a check needs no weights.
 
 ```bash
+pytest fastvideo/tests/api/test_wan_definitions.py -q
 pytest fastvideo/tests/loader/test_wan_family_imports.py -q
 pytest fastvideo/tests/contract/test_merge_ci_plan.py -q
 pytest fastvideo/tests/vaes/test_wan_vae_compile.py -q

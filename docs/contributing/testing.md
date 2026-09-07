@@ -58,6 +58,12 @@ See [CI/CD Architecture](ci_architecture.md) for direct-rerun and skip semantics
 
 For Wan, one command enforces the local ordering and stops on failure:
 
+The initial contracts include `tests/api/test_wan_definitions.py`: all registered
+Wan aliases, local-manifest detector precedence, sampling/precision defaults,
+config isolation, and legacy serialized-config compatibility. These require no
+weights or Hub access; the current package import still needs its prepared
+runtime environment.
+
 ```bash
 bash scripts/validate_wan.sh vae           # contracts, then the VAE golden
 bash scripts/validate_wan.sh dense parity  # contracts, goldens, Diffusers parity

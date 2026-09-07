@@ -2,7 +2,7 @@
 
 **Generated:** 2026-05-02
 
-DiT / VAE / encoder / scheduler / upsampler / audio model classes. **Pre-commit excludes this directory**, except `wan/config.py`, `wan/vae_config.py`, and `wan/__init__.py`. Match neighboring file style manually for excluded files.
+DiT / VAE / encoder / scheduler / upsampler / audio model classes. **Pre-commit excludes this directory**, except Wan's configs, definition, and `__init__.py`. Match neighboring file style manually for excluded files.
 
 ## Layout
 
@@ -32,7 +32,10 @@ Wan is the first family-local package: edit `wan/transformer.py` with
 `wan/vae_config.py`. The old `dits/wanvideo.py`, `dits/causal_wanvideo.py`,
 `vaes/wanvae.py`, and matching `configs/models/` paths remain
 compatibility re-exports. Shared encoders and VAE utilities stay in their current
-locations. See `wan/AGENTS.md`; do not migrate other components as part of a Wan edit.
+locations. Wan pipeline defaults and variant metadata live in
+`wan/pipeline_config.py` and `wan/definition.py`; old pipeline config imports
+remain aliases. See `wan/AGENTS.md`; do not migrate other components as part of
+a Wan edit.
 
 ## Adding a Model Component (DiT / VAE / Encoder)
 

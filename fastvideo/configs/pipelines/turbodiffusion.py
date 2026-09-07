@@ -12,7 +12,7 @@ from fastvideo.configs.models.dits import WanVideoConfig
 from fastvideo.configs.models.encoders import CLIPVisionConfig
 from fastvideo.configs.models.vaes import WanVAEConfig
 from fastvideo.configs.pipelines.base import PipelineConfig
-from fastvideo.configs.pipelines.wan import t5_postprocess_text, T5Config, BaseEncoderOutput
+from fastvideo.models.wan.pipeline_config import t5_postprocess_text, T5Config, BaseEncoderOutput
 
 import torch
 from collections.abc import Callable

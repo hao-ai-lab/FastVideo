@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 
 from fastvideo.configs.models import DiTConfig
 from fastvideo.configs.models.dits.matrixgame3 import MatrixGame3WanVideoConfig
-from fastvideo.configs.pipelines.wan import WanT2V480PConfig
+from fastvideo.models.wan.pipeline_config import WanT2V480PConfig
 
 
 @dataclass

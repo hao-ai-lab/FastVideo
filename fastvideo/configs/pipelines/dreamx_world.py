@@ -13,7 +13,7 @@ from fastvideo.configs.models.encoders import BaseEncoderOutput, T5Config
 from fastvideo.configs.models.encoders.t5 import T5ArchConfig
 from fastvideo.configs.models.vaes import WanVAEConfig
 from fastvideo.configs.pipelines.base import PipelineConfig
-from fastvideo.configs.pipelines.wan import LucyEditDevConfig, t5_postprocess_text
+from fastvideo.models.wan.pipeline_config import LucyEditDevConfig, t5_postprocess_text
 
 
 def make_dreamx_world_5b_cam_dit_config() -> DreamXWorldConfig:

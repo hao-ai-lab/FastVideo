@@ -9,6 +9,7 @@ using the modular pipeline architecture.
 from fastvideo.pipelines.basic.wan.stages.dmd import DmdDenoisingStage
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
+from fastvideo.models.wan.definition import DMD_TRAINING_NOISE_SHIFT
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (FlowMatchEulerDiscreteScheduler)
 from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
 
@@ -55,8 +56,9 @@ class WanDMDPipeline(LoRAPipeline, ComposedPipelineBase):
         # DMD needs the complete training-noise table, separate from the
         # inference scheduler mutated by TimestepPreparationStage.
         self.add_stage(stage_name="denoising_stage",
-                       stage=DmdDenoisingStage(transformer=self.get_module("transformer"),
-                                               scheduler=FlowMatchEulerDiscreteScheduler(shift=8.0)))
+                       stage=DmdDenoisingStage(
+                           transformer=self.get_module("transformer"),
+                           scheduler=FlowMatchEulerDiscreteScheduler(shift=DMD_TRAINING_NOISE_SHIFT)))
 
         self.add_stage(stage_name="decoding_stage", stage=DecodingStage(vae=self.get_module("vae")))
 

@@ -9,7 +9,7 @@ from fastvideo.configs.models import DiTConfig
 from fastvideo.configs.models.dits.lingbotworld2 import LingBotWorld2CausalFastVideoConfig
 from fastvideo.configs.models.encoders import BaseEncoderOutput, LingBotWorld2UMT5Config
 from fastvideo.configs.models.vaes import WanVAEConfig
-from fastvideo.configs.pipelines.wan import Wan2_2_I2V_A14B_Config
+from fastvideo.models.wan.pipeline_config import Wan2_2_I2V_A14B_Config
 
 
 def lingbotworld2_whitespace_preprocess(prompt: str) -> str:
