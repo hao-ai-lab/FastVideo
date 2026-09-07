@@ -13,7 +13,7 @@ if [ -z "$selected" ]; then
   selected=all
 fi
 if [ "$selected" = all ]; then
-  exec pytest "$golden_root" -vs
+  exec pytest "$golden_root" -xvs
 fi
 
 [[ $selected =~ ^test_[a-z0-9_]+\.py(,test_[a-z0-9_]+\.py)*$ ]] || {
@@ -32,4 +32,4 @@ for golden_file in "${golden_files[@]}"; do
   golden_paths+=("$golden_path")
 done
 
-exec pytest "${golden_paths[@]}" -vs
+exec pytest "${golden_paths[@]}" -xvs

@@ -11,7 +11,7 @@ FastVideo maps a Diffusers-style repo into a pipeline like this:
 - `fastvideo/models/*`: model implementations (DiT, VAE, encoders, upsamplers).
 - `fastvideo/configs/models/*`: arch configs and `param_names_mapping` for
   weight name translation.
-- `fastvideo/models/wan/`: Wan's dense transformer, VAE, and component configs
+- `fastvideo/models/wan/`: Wan's transformers, VAE, configs, and variant definitions
   together; the old Wan component/config modules remain compatibility imports.
 - `fastvideo/configs/pipelines/*`: pipeline wiring (component classes + names).
 - `fastvideo/api/sampling_param.py`: runtime sampling parameters.
@@ -54,13 +54,25 @@ runtime parameters consistent:
   co-located with `transformer.py`.
 - `fastvideo/models/wan/vae_config.py`: Wan's VAE architecture and runtime
   settings, co-located with `vae.py`.
+- `fastvideo/models/wan/pipeline_config.py`: Wan component and pipeline defaults;
+  `configs/pipelines/wan.py` remains a compatibility import.
+- `fastvideo/models/wan/definition.py`: data-only Wan variants linking HF aliases,
+  config classes, presets, workload metadata, and default sampling algorithms.
 - `fastvideo/configs/pipelines/`: pipeline wiring and required components.
 - `fastvideo/api/sampling_param.py`: sampling parameters (steps, frames,
-  guidance scale, resolution, fps). Defaults come from profiles in
-  `fastvideo/pipelines/basic/<family>/profiles.py`.
+  guidance scale, resolution, fps). Defaults come from presets in
+  `fastvideo/pipelines/basic/<family>/presets.py`.
 - `fastvideo/registry.py`: unified registry for pipeline config + sampling
-  defaults and model metadata resolution, defined via explicit
-  `register_configs(...)` blocks (no separate dict registries).
+  defaults and model metadata resolution. Wan registrations consume its
+  family-local definitions; other families use `register_configs(...)` blocks.
+
+Wan definitions reference existing defaults rather than copying them. Dense
+UniPC, dense DMD, and causal DMD remain separate sampling algorithms. Dense
+DMD uses a full training-noise scheduler with shift 8.0, separate from the
+configurable scheduler mutated during timestep preparation. The catalog does
+not override checkpoint manifests, user pipeline overrides, or component
+precision settings. HF IDs, local checkpoints, and old config imports retain
+their existing resolution behavior, including first-match detector ordering.
 
 `FastVideoArgs` (in `fastvideo/fastvideo_args.py`) provides runtime settings and
 is passed into pipeline construction and stages.
@@ -151,8 +163,9 @@ How this maps to FastVideo:
 - `UMT5EncoderModel` -> `fastvideo/models/encoders/t5.py`
 - `T5TokenizerFast` -> loaded via HF in `fastvideo/models/loader/`
 - `UniPCMultistepScheduler` -> loaded via Diffusers scheduler utilities
-- Pipeline defaults -> `fastvideo/configs/pipelines/wan.py`
-- Sampling defaults -> `fastvideo/pipelines/basic/wan/profiles.py`
+- Variant definitions -> `fastvideo/models/wan/definition.py`
+- Pipeline defaults -> `fastvideo/models/wan/pipeline_config.py`
+- Sampling defaults -> `fastvideo/pipelines/basic/wan/presets.py`
 
 ## Pipeline system
 

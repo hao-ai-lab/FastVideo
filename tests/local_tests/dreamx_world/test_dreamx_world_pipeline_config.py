@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import json
 
 import numpy as np
+import pytest
 import torch
 
 from fastvideo.api.presets import get_preset
@@ -27,6 +28,21 @@ from fastvideo.pipelines.basic.dreamx_world.stages import (
 )
 from fastvideo.pipelines.stages.denoising import DenoisingStage
 from fastvideo.registry import get_default_preset, get_model_info, get_pipeline_config_cls_from_name
+
+
+@pytest.fixture
+def dreamx_model_manifests(monkeypatch):
+    """Registry/config checks do not need network access or model weights."""
+    names = {
+        "GD-ML/DreamX-World-5B-Cam": "DreamXWorldPipeline",
+        "GD-ML/DreamX-World-5B": "DreamXWorldARPipeline",
+    }
+
+    def manifest(model_path, revision=None):
+        name = names[model_path]
+        return {"_class_name": name, "pipeline_name": name, "_diffusers_version": "0.31.0"}
+
+    monkeypatch.setattr("fastvideo.registry.maybe_download_model_index", manifest)
 
 
 def test_dreamx_world_5b_cam_pipeline_config_wires_first_scope_components():
@@ -82,11 +98,11 @@ def test_dreamx_world_local_model_index_resolves_model_info(tmp_path):
     assert info.pipeline_config_cls is DreamXWorld5BCamPipelineConfig
 
 
-def test_dreamx_world_model_path_resolves_pipeline_config():
+def test_dreamx_world_model_path_resolves_pipeline_config(dreamx_model_manifests):
     assert get_pipeline_config_cls_from_name("GD-ML/DreamX-World-5B-Cam") is DreamXWorld5BCamPipelineConfig
 
 
-def test_dreamx_world_default_preset_is_registered():
+def test_dreamx_world_default_preset_is_registered(dreamx_model_manifests):
     preset_name = get_default_preset("GD-ML/DreamX-World-5B-Cam")
     preset = get_preset(preset_name, "dreamx_world")
 
@@ -168,7 +184,7 @@ def test_dreamx_world_ar_pipeline_config_wires_components():
     assert config.dit_config.arch_config.attn_compress == 4
 
 
-def test_dreamx_world_ar_pipeline_registry_and_preset():
+def test_dreamx_world_ar_pipeline_registry_and_preset(dreamx_model_manifests):
     from fastvideo.api.presets import get_preset
     from fastvideo.registry import get_pipeline_config_cls_from_name, get_preset_selection
 

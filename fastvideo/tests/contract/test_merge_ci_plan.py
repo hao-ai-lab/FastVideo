@@ -30,22 +30,38 @@ def test_docs_only_merge_adds_no_gpu_lanes():
     assert plan.encoded_ssim_tests() == "none"
 
 
-@pytest.mark.parametrize("path", [
-    "fastvideo/models/dits/wanvideo.py",
-    "fastvideo/configs/models/dits/wanvideo.py",
-    "fastvideo/models/wan/__init__.py",
-    "fastvideo/models/wan/config.py",
-    "fastvideo/models/wan/transformer.py",
-    "fastvideo/models/wan/vae.py",
-    "fastvideo/models/wan/vae_config.py",
+@pytest.mark.parametrize("path, goldens", [
+    ("fastvideo/models/dits/wanvideo.py", "test_wan_denoising.py,test_wan_t2v.py"),
+    ("fastvideo/models/wan/transformer.py", "test_wan_denoising.py,test_wan_t2v.py"),
+    ("fastvideo/models/wan/vae.py", "test_wan_vae.py"),
+    ("fastvideo/models/wan/vae_config.py", "test_wan_vae.py"),
+    ("fastvideo/models/vaes/wanvae.py", "test_wan_vae.py"),
+    ("fastvideo/configs/models/vaes/wanvae.py", "test_wan_vae.py"),
+    ("fastvideo/models/wan/causal_transformer.py", "test_wan_causal.py"),
+    ("fastvideo/models/dits/causal_wanvideo.py", "test_wan_causal.py"),
+    ("fastvideo/pipelines/basic/wan/stages/conditioning.py", "test_wan_vae.py"),
+    ("fastvideo/pipelines/basic/wan/stages/causal_denoising.py", "test_wan_causal.py"),
+    ("fastvideo/pipelines/basic/wan/stages/denoising.py", "test_wan_denoising.py,test_wan_t2v.py"),
+    ("fastvideo/pipelines/basic/wan/stages/dmd.py", "test_wan_denoising.py,test_wan_t2v.py"),
 ])
-def test_model_family_change_selects_focused_golden_and_ssim(path):
+def test_model_family_change_selects_focused_golden_and_ssim(path, goldens):
     plan = PLAN_MERGE_CI.classify_paths([path])
 
     assert plan.encoded_lanes() == ",golden-gate,ssim,"
-    assert plan.encoded_golden_tests() == "test_wan_t2v.py"
+    assert plan.encoded_golden_tests() == goldens
     assert plan.encoded_ssim_tests() == (
         "test_causal_similarity.py,test_wan_i2v_similarity.py,test_wan_t2v_similarity.py")
+
+
+@pytest.mark.parametrize("path", [
+    "fastvideo/configs/models/dits/wanvideo.py",
+    "fastvideo/models/wan/config.py",
+    "fastvideo/models/wan/__init__.py",
+    "fastvideo/pipelines/basic/wan/wan_pipeline.py",
+])
+def test_wan_shared_config_and_wiring_select_all_wan_gates(path):
+    plan = PLAN_MERGE_CI.classify_paths([path])
+    assert plan.encoded_golden_tests() == "test_wan_causal.py,test_wan_denoising.py,test_wan_t2v.py,test_wan_vae.py"
 
 
 def test_wan_family_relocation_keeps_shared_registry_coverage():
@@ -138,8 +154,8 @@ def test_performance_implementation_selects_only_performance_lane():
 
 @pytest.mark.parametrize("path", [
     "fastvideo/registry.py",
-    "fastvideo/models/vaes/wanvae.py",
-    "fastvideo/configs/models/vaes/wanvae.py",
+    "fastvideo/pipelines/stages/denoising.py",
+    "fastvideo/pipelines/stages/causal_denoising.py",
 ])
 def test_shared_runtime_change_gets_focused_quality_smoke_not_every_lane(path):
     plan = PLAN_MERGE_CI.classify_paths([path])

@@ -17,7 +17,7 @@ os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
 os.environ.setdefault("MASTER_ADDR", "localhost")
 os.environ.setdefault("MASTER_PORT", "29513")
 
-from fastvideo.configs.models.dits.wanvideo import (  # noqa: E402
+from fastvideo.models.wan.config import (  # noqa: E402
     WanVideoArchConfig,
     WanVideoConfig,
 )
@@ -30,7 +30,7 @@ from fastvideo.mlx_runtime.fastwan import (  # noqa: E402
     mlx_block_weights_from_torch,
     quantize_matrix,
 )
-from fastvideo.models.dits.wanvideo import WanTransformer3DModel  # noqa: E402
+from fastvideo.models.wan.transformer import WanTransformer3DModel  # noqa: E402
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch  # noqa: E402
 
 SEED = 2026

@@ -67,7 +67,7 @@ def _make_embedder(
     deltatime_type: str = "r",
     init_seed: int = 0,
 ):
-    from fastvideo.models.dits.wanvideo import WanTimeTextImageEmbedding
+    from fastvideo.models.wan.transformer import WanTimeTextImageEmbedding
 
     emb = WanTimeTextImageEmbedding(
         dim=32,
@@ -184,7 +184,7 @@ def test_wan_transformer_forward_signature_has_r_timestep() -> None:
     swallowed by **kwargs) so callers and type checkers can see it."""
     import inspect
 
-    from fastvideo.models.dits.wanvideo import WanTransformer3DModel
+    from fastvideo.models.wan.transformer import WanTransformer3DModel
 
     sig = inspect.signature(WanTransformer3DModel.forward)
     assert "r_timestep" in sig.parameters
@@ -202,7 +202,7 @@ def test_wan_transformer_init_propagates_r_embedder_config() -> None:
     """
     import inspect
 
-    from fastvideo.models.dits.wanvideo import WanTransformer3DModel
+    from fastvideo.models.wan.transformer import WanTransformer3DModel
 
     src = inspect.getsource(WanTransformer3DModel.__init__)
     # All four arch config fields must be passed to WanTimeTextImageEmbedding.
@@ -217,7 +217,7 @@ def test_wan_transformer_forward_threads_r_timestep_to_embedder() -> None:
     source inspection to avoid heavyweight distributed bring-up)."""
     import inspect
 
-    from fastvideo.models.dits.wanvideo import WanTransformer3DModel
+    from fastvideo.models.wan.transformer import WanTransformer3DModel
 
     src = inspect.getsource(WanTransformer3DModel.forward)
     assert "r_timestep=r_timestep" in src, ("WanTransformer3DModel.forward must forward r_timestep into "

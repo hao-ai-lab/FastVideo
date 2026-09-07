@@ -13,7 +13,7 @@ from fastvideo.configs.models.dits.magi_human import MagiHumanVideoConfig
 from fastvideo.configs.models.dits.minimax_h3 import MiniMaxH3Config
 from fastvideo.configs.models.dits.mmaudio import MMAudioArchConfig, MMAudioTransformerConfig
 from fastvideo.configs.models.dits.stable_audio import StableAudioConfig
-from fastvideo.configs.models.dits.wanvideo import WanVideoConfig
+from fastvideo.models.wan.config import WanVideoConfig
 from fastvideo.configs.models.dits.zimage import ZImageDiTConfig
 from fastvideo.configs.models.dits.hyworld import HYWorldConfig
 from fastvideo.configs.models.dits.kandinsky5 import Kandinsky5VideoConfig

@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
+"""Weight-free fixtures for shared and Wan denoising contract tests."""
 
 from contextlib import nullcontext
 from types import SimpleNamespace
 
-import pytest
 import torch
 
 
@@ -77,6 +77,7 @@ def _tiny_args():
         pipeline_config=SimpleNamespace(
             embedded_cfg_scale=None,
             ti2v_task=False,
+            lucy_edit_task=False,
             dit_config=SimpleNamespace(boundary_ratio=None, patch_size=(1, 1, 1)),
         ),
     )
@@ -110,6 +111,7 @@ def _patch_denoising_module(monkeypatch, cfg_gate_step):
         expected_gate_step = float(cfg_gate_step)
 
     import fastvideo.pipelines.stages.denoising as denoising
+    from fastvideo.pipelines.stages.base import PipelineStage
 
     # envs.py evaluates FASTVIDEO_CFG_GATE_STEP lazily via __getattr__, so the
     # stage sees monkeypatched values without reloading the module.
@@ -121,54 +123,56 @@ def _patch_denoising_module(monkeypatch, cfg_gate_step):
     monkeypatch.setattr(denoising, "get_world_group", lambda: SimpleNamespace(local_rank=0))
     monkeypatch.setattr(denoising, "get_attn_backend", lambda **kwargs: object())
     monkeypatch.setattr(denoising, "set_forward_context", lambda **kwargs: nullcontext())
+    monkeypatch.setattr(PipelineStage, "device", property(lambda self: torch.device("cpu")))
     return denoising, logger
 
 
-def _run_stage(monkeypatch, cfg_gate_step):
-    denoising, logger = _patch_denoising_module(monkeypatch, cfg_gate_step)
-    model = TinyDenoiser()
-    stage = denoising.DenoisingStage(model, TinyScheduler())
-    stage.progress_bar = lambda iterable=None, total=None: NullProgressBar()
+class RecordingDenoiser(TinyDenoiser):
 
-    result = stage.forward(_tiny_batch(), _tiny_args())
-    return result.latents, model, logger
+    def __init__(self, offset=0.0):
+        super().__init__()
+        self.offset = offset
+        self.inputs = []
+
+    def forward(self, hidden_states, prompt_embeds, timestep, guidance=None, encoder_hidden_states_image=None):
+        self.inputs.append((hidden_states.clone(), timestep.clone()))
+        prompt = prompt_embeds[0].float().mean()
+        self.calls.append("uncond" if prompt < 0 else "cond")
+        time = timestep.float().reshape(hidden_states.shape[0], -1).mean(dim=1).reshape(-1, 1, 1, 1, 1)
+        return hidden_states[:, :2].float() * 0.125 + prompt * 0.25 + time * 0.0001 + self.offset
 
 
-def _run_legacy_two_pass():
+class TinyVAE(torch.nn.Module):
+
+    def __init__(self):
+        super().__init__()
+        self.weight = torch.nn.Parameter(torch.zeros(()))
+        self.shift_factor = torch.tensor([0.25, -0.25]).reshape(1, 2, 1, 1, 1)
+        self.scaling_factor = torch.tensor([2.0, 0.5]).reshape(1, 2, 1, 1, 1)
+        self.encode_calls = 0
+
+    def encode(self, image):
+        self.encode_calls += 1
+        return SimpleNamespace(mean=torch.full((1, 2, 1, 2, 4), 0.5, dtype=torch.float32))
+
+
+def _batch(steps=4, cfg=True):
     batch = _tiny_batch()
-    model = TinyDenoiser()
-    scheduler = TinyScheduler()
-    assert batch.latents is not None
-    assert batch.timesteps is not None
-    latents = batch.latents.clone()
-
-    for timestep in batch.timesteps:
-        latent_model_input = scheduler.scale_model_input(latents.to(torch.bfloat16), timestep)
-        timestep_expand = timestep.repeat(latent_model_input.shape[0])
-        noise_pred_text = model(latent_model_input, batch.prompt_embeds, timestep_expand)
-        noise_pred_uncond = model(latent_model_input, batch.negative_prompt_embeds, timestep_expand)
-        noise_pred = noise_pred_uncond + batch.guidance_scale * (noise_pred_text - noise_pred_uncond)
-        latents = scheduler.step(noise_pred, timestep, latents, return_dict=False)[0]
-
-    return latents
+    batch.latents = torch.linspace(-0.5, 0.5, 48).reshape(1, 2, 3, 2, 4)
+    batch.num_inference_steps = steps
+    batch.timesteps = torch.linspace(1000, 1, steps)
+    batch.do_classifier_free_guidance = cfg
+    batch.num_frames, batch.height, batch.width = 9, 16, 32
+    batch.raw_latent_shape = tuple(batch.latents.shape)
+    batch.return_trajectory_latents = True
+    return batch
 
 
-@pytest.mark.parametrize("cfg_gate_step", [None, "1.0"])
-def test_cfg_gating_default_off_matches_legacy_two_pass(monkeypatch, cfg_gate_step):
-    out, model, logger = _run_stage(monkeypatch, cfg_gate_step)
-    legacy_out = _run_legacy_two_pass()
-
-    assert torch.equal(out, legacy_out)
-    assert model.calls == ["cond", "uncond"] * 4
-    assert not any("CFG gating enabled" in msg for msg in logger.infos)
-    assert any("gate_step=-1/4" in msg and "reused=0" in msg for msg in logger.infos)
-
-
-def test_cfg_gating_reuses_cached_delta_after_gate(monkeypatch):
-    out, model, logger = _run_stage(monkeypatch, "0.5")
-    legacy_out = _run_legacy_two_pass()
-
-    assert model.calls == ["cond", "uncond", "cond", "uncond", "cond", "cond"]
-    assert any("CFG gating enabled: fraction=0.500, gate_step=2/4" in msg for msg in logger.infos)
-    assert any("fresh_uncond=2 reused=2 invalidations=0" in msg for msg in logger.infos)
-    assert torch.allclose(out, legacy_out, atol=1e-3, rtol=0.0)
+def _args():
+    args = _tiny_args()
+    args.vae_cpu_offload = True
+    arch = SimpleNamespace(patch_size=(1, 2, 2))
+    args.pipeline_config.dit_config.arch_config = arch
+    args.pipeline_config.vae_config = SimpleNamespace(
+        arch_config=SimpleNamespace(scale_factor_temporal=4, scale_factor_spatial=8))
+    return args

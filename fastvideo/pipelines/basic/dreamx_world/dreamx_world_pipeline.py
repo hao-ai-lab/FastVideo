@@ -2,6 +2,8 @@
 """DreamX-World video pipeline entrypoint."""
 
 from fastvideo.api.sampling_param import SamplingParam
+from fastvideo.pipelines.basic.wan.stages.conditioning import WanFirstFrameEncodingStage
+from fastvideo.pipelines.basic.wan.stages.denoising import WanDenoisingStage
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler
@@ -11,7 +13,6 @@ from fastvideo.pipelines.basic.dreamx_world.stages import DreamXWorldCameraCondi
 from fastvideo.pipelines.stages import (
     ConditioningStage,
     DecodingStage,
-    DenoisingStage,
     InputValidationStage,
     LatentPreparationStage,
     TextEncodingStage,
@@ -59,13 +60,15 @@ class DreamXWorldPipeline(LoRAPipeline, ComposedPipelineBase):
 
         self.add_stage(stage_name="dreamx_camera_conditioning_stage", stage=DreamXWorldCameraConditioningStage())
 
+        self.add_stage(stage_name="first_frame_encoding_stage",
+                       stage=WanFirstFrameEncodingStage(vae=self.get_module("vae")))
+
         self.add_stage(
             stage_name="denoising_stage",
-            stage=DenoisingStage(
+            stage=WanDenoisingStage(
                 transformer=self.get_module("transformer"),
                 transformer_2=self.get_module("transformer_2", None),
                 scheduler=self.get_module("scheduler"),
-                vae=self.get_module("vae"),
                 pipeline=self,
             ),
         )

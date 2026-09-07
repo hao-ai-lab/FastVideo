@@ -48,6 +48,7 @@ fastvideo/
 | Add a new model component | `models/<role>/<model>.py` + `configs/models/<role>/<model>.py` |
 | Edit Wan's dense transformer or arch config | `models/wan/transformer.py` + `models/wan/config.py`; old paths are compatibility shims |
 | Edit Wan's VAE or its config | `models/wan/vae.py` + `models/wan/vae_config.py`; old paths are compatibility shims |
+| Edit a Wan variant or pipeline defaults | `models/wan/definition.py` + `models/wan/pipeline_config.py`; sampling presets remain pipeline-local |
 | Wire an existing model into a new pipeline | `pipelines/basic/<model>/presets.py` + reuse stages from `pipelines/stages/` |
 | Add a converter | `scripts/checkpoint_conversion/<model>_to_*.py` (separate dir, separate AGENTS.md) |
 | Add an attention backend | `attention/backends/<name>.py` + register in selector |
@@ -68,6 +69,7 @@ These dirs are listed in `.pre-commit-config.yaml` `exclude`:
 
 Editing files there will NOT trigger yapf/ruff/mypy/codespell. Format manually if a sibling file shows clear style; do not introduce new violations.
 
-Exception: `models/wan/config.py`, `models/wan/vae_config.py`, and
-`models/wan/__init__.py` are checked, so the family-local configs retain their
-prior lint coverage.
+Exception: `models/wan/config.py`, `models/wan/vae_config.py`,
+`models/wan/pipeline_config.py`, `models/wan/definition.py`, and
+`models/wan/__init__.py` are checked, so family-local configs retain lint
+coverage.

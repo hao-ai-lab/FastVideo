@@ -148,7 +148,7 @@ def encode_prompts():
 def load_transformer():
     banner("(2) Build FastVideo Wan-14B + load AnyFlow weights")
     from fastvideo.configs.models.dits import WanVideoConfig
-    from fastvideo.models.dits.wanvideo import WanTransformer3DModel
+    from fastvideo.models.wan.transformer import WanTransformer3DModel
 
     cfg = WanVideoConfig()
     arch = cfg.arch_config

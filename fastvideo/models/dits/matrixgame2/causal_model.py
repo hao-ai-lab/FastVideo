@@ -36,7 +36,7 @@ from fastvideo.layers.visual_embedding import (
 from fastvideo.logger import init_logger
 from fastvideo.models.dits._relative_rope import relativistic_window_offsets
 from fastvideo.models.dits.base import BaseDiT
-from fastvideo.models.dits.wanvideo import (
+from fastvideo.models.wan.transformer import (
     WanT2VCrossAttention,
     WanImageEmbedding,
 )

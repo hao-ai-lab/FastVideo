@@ -31,7 +31,7 @@ _TEXT_TO_VIDEO_DIT_MODELS = {
     "WanTransformer3DModel": ("wan", "transformer", "WanTransformer3DModel"),
     "DreamXWorldTransformer3DModel": ("dits", "dreamx_world", "DreamXWorldTransformer3DModel"),
     "DreamXWorldARTransformer3DModel": ("dits", "dreamx_world_ar", "DreamXWorldARTransformer3DModel"),
-    "CausalWanTransformer3DModel": ("dits", "causal_wanvideo", "CausalWanTransformer3DModel"),
+    "CausalWanTransformer3DModel": ("wan", "causal_transformer", "CausalWanTransformer3DModel"),
     "CosmosTransformer3DModel": ("dits", "cosmos", "CosmosTransformer3DModel"),
     "Cosmos25Transformer3DModel": ("dits", "cosmos2_5", "Cosmos25Transformer3DModel"),
     "LongCatVideoTransformer3DModel":
@@ -55,7 +55,7 @@ _IMAGE_TO_VIDEO_DIT_MODELS = {
     "WanTransformer3DModel": ("wan", "transformer", "WanTransformer3DModel"),
     "DreamXWorldTransformer3DModel": ("dits", "dreamx_world", "DreamXWorldTransformer3DModel"),
     "DreamXWorldARTransformer3DModel": ("dits", "dreamx_world_ar", "DreamXWorldARTransformer3DModel"),
-    "CausalWanTransformer3DModel": ("dits", "causal_wanvideo", "CausalWanTransformer3DModel"),
+    "CausalWanTransformer3DModel": ("wan", "causal_transformer", "CausalWanTransformer3DModel"),
     "LingBotWorld2CausalFastTransformer3DModel": (
         "dits",
         "lingbotworld2",

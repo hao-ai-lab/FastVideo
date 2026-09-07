@@ -6,15 +6,17 @@ This module contains an implementation of the Wan video diffusion pipeline
 using the modular pipeline architecture.
 """
 
+from fastvideo.pipelines.basic.wan.stages.dmd import DmdDenoisingStage
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
+from fastvideo.models.wan.definition import DMD_TRAINING_NOISE_SHIFT
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.lora_pipeline import LoRAPipeline
 
 # isort: off
-from fastvideo.pipelines.stages import (ImageEncodingStage, ConditioningStage, DecodingStage, DmdDenoisingStage,
-                                        ImageVAEEncodingStage, InputValidationStage, LatentPreparationStage,
-                                        TextEncodingStage, TimestepPreparationStage)
+from fastvideo.pipelines.stages import (ImageEncodingStage, ConditioningStage, DecodingStage, ImageVAEEncodingStage,
+                                        InputValidationStage, LatentPreparationStage, TextEncodingStage,
+                                        TimestepPreparationStage)
 # isort: on
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (FlowMatchEulerDiscreteScheduler)
 
@@ -61,9 +63,12 @@ class WanImageToVideoDmdPipeline(LoRAPipeline, ComposedPipelineBase):
         self.add_stage(stage_name="image_latent_preparation_stage",
                        stage=ImageVAEEncodingStage(vae=self.get_module("vae")))
 
+        # DMD needs the complete training-noise table, separate from the
+        # inference scheduler mutated by TimestepPreparationStage.
         self.add_stage(stage_name="denoising_stage",
-                       stage=DmdDenoisingStage(transformer=self.get_module("transformer"),
-                                               scheduler=self.get_module("scheduler")))
+                       stage=DmdDenoisingStage(
+                           transformer=self.get_module("transformer"),
+                           scheduler=FlowMatchEulerDiscreteScheduler(shift=DMD_TRAINING_NOISE_SHIFT)))
 
         self.add_stage(stage_name="decoding_stage", stage=DecodingStage(vae=self.get_module("vae")))
 

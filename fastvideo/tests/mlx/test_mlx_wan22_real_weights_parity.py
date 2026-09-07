@@ -95,8 +95,8 @@ def _load_torch_wan22_from_diffusers(checkpoint: Path, config_path: Path, *, dty
     import torch
     from safetensors.torch import load_file
 
-    from fastvideo.configs.models.dits.wanvideo import WanVideoArchConfig, WanVideoConfig
-    from fastvideo.models.dits.wanvideo import WanTransformer3DModel
+    from fastvideo.models.wan.config import WanVideoArchConfig, WanVideoConfig
+    from fastvideo.models.wan.transformer import WanTransformer3DModel
     from fastvideo.models.loader.utils import get_param_names_mapping, hf_to_custom_state_dict
 
     hf_config = json.loads(config_path.read_text())

@@ -20,7 +20,7 @@ from fastvideo.layers.rotary_embedding import get_rotary_pos_embed
 from fastvideo.layers.visual_embedding import (PatchEmbed, WanCamControlPatchEmbedding)
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.base import BaseDiT
-from fastvideo.models.dits.wanvideo import (
+from fastvideo.models.wan.transformer import (
     WanI2VCrossAttention,
     WanT2VCrossAttention,
     WanTimeTextImageEmbedding,

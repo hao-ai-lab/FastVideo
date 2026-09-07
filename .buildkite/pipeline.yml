@@ -185,6 +185,7 @@ steps:
 
   - label: ":bar_chart: SSIM Tests"
     key: "ssim"
+    depends_on: "golden-gate"
     if: |
       build.env("TEST_SCOPE") == "full" ||
       build.env("TEST_SCOPE") == "scheduled" ||
@@ -211,6 +212,7 @@ steps:
 
   - label: ":test_tube: LoRA Inference Tests"
     key: "lora-inference"
+    depends_on: "golden-gate"
     if: |
       build.env("TEST_SCOPE") == "full" ||
       (build.env("TEST_SCOPE") == "merge" &&
@@ -232,6 +234,7 @@ steps:
 
   - label: ":test_tube: LoRA Extraction Tests"
     key: "lora-extraction"
+    depends_on: "golden-gate"
     if: |
       build.env("TEST_SCOPE") == "full" ||
       (build.env("TEST_SCOPE") == "merge" &&
@@ -253,6 +256,7 @@ steps:
 
   - label: ":test_tube: Training Tests"
     key: "training"
+    depends_on: "golden-gate"
     if: |
       build.env("TEST_SCOPE") == "full" ||
       (build.env("TEST_SCOPE") == "merge" &&
@@ -276,6 +280,7 @@ steps:
 
   - label: ":test_tube: Distillation DMD Tests"
     key: "distillation"
+    depends_on: "golden-gate"
     if: |
       build.env("TEST_SCOPE") == "full" ||
       (build.env("TEST_SCOPE") == "merge" &&
@@ -297,6 +302,7 @@ steps:
 
   - label: ":test_tube: Self-Forcing Tests"
     key: "self-forcing"
+    depends_on: "golden-gate"
     if: |
       build.env("TEST_SCOPE") == "full" ||
       (build.env("TEST_SCOPE") == "merge" &&
@@ -318,6 +324,7 @@ steps:
 
   - label: ":test_tube: LoRA Training Tests"
     key: "lora-training"
+    depends_on: "golden-gate"
     if: |
       build.env("TEST_SCOPE") == "full" ||
       (build.env("TEST_SCOPE") == "merge" &&
@@ -341,6 +348,7 @@ steps:
 
   - label: ":test_tube: Training Tests VSA"
     key: "training-vsa"
+    depends_on: "golden-gate"
     if: |
       build.env("TEST_SCOPE") == "full" ||
       (build.env("TEST_SCOPE") == "merge" &&
@@ -364,6 +372,7 @@ steps:
 
   - label: ":test_tube: Inference Tests VMoBA"
     key: "inference-vmoba"
+    depends_on: "golden-gate"
     if: |
       build.env("TEST_SCOPE") == "full" ||
       (build.env("TEST_SCOPE") == "merge" &&
@@ -385,6 +394,7 @@ steps:
 
   - label: ":test_tube: Performance Tests"
     key: "performance"
+    depends_on: "golden-gate"
     if: |
       build.env("TEST_SCOPE") == "full" ||
       (build.env("TEST_SCOPE") == "merge" &&
@@ -406,6 +416,7 @@ steps:
 
   - label: ":test_tube: API Server Tests"
     key: "api-server"
+    depends_on: "golden-gate"
     if: |
       build.env("TEST_SCOPE") == "full" ||
       (build.env("TEST_SCOPE") == "merge" &&
@@ -427,6 +438,7 @@ steps:
 
   - label: ":test_tube: Train Framework Tests"
     key: "train-framework"
+    depends_on: "golden-gate"
     if: |
       build.env("TEST_SCOPE") == "full" ||
       (build.env("TEST_SCOPE") == "merge" &&
@@ -448,6 +460,7 @@ steps:
 
   - label: ":test_tube: Eval Metrics Tests"
     key: "eval"
+    depends_on: "golden-gate"
     if: |
       build.env("TEST_SCOPE") == "full" ||
       (build.env("TEST_SCOPE") == "merge" &&

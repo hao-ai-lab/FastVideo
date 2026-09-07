@@ -12,13 +12,13 @@ Key differences from T2V:
 - Mask conditioning with encoded first frame
 """
 
+from fastvideo.pipelines.basic.wan.stages.denoising import WanDenoisingStage
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_rcm import RCMScheduler
 from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
-from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage, DenoisingStage, ImageVAEEncodingStage,
-                                        InputValidationStage, LatentPreparationStage, TextEncodingStage,
-                                        TimestepPreparationStage)
+from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage, ImageVAEEncodingStage, InputValidationStage,
+                                        LatentPreparationStage, TextEncodingStage, TimestepPreparationStage)
 
 logger = init_logger(__name__)
 
@@ -63,11 +63,10 @@ class TurboDiffusionI2VPipeline(LoRAPipeline, ComposedPipelineBase):
                        stage=ImageVAEEncodingStage(vae=self.get_module("vae")))
 
         self.add_stage(stage_name="denoising_stage",
-                       stage=DenoisingStage(transformer=self.get_module("transformer"),
-                                            transformer_2=self.get_module("transformer_2", None),
-                                            scheduler=self.get_module("scheduler"),
-                                            vae=self.get_module("vae"),
-                                            pipeline=self))
+                       stage=WanDenoisingStage(transformer=self.get_module("transformer"),
+                                               transformer_2=self.get_module("transformer_2", None),
+                                               scheduler=self.get_module("scheduler"),
+                                               pipeline=self))
 
         self.add_stage(stage_name="decoding_stage", stage=DecodingStage(vae=self.get_module("vae"), pipeline=self))
 

@@ -107,7 +107,7 @@ def translate_keys(
 def build_fastvideo_transformer():
     banner("(1) Build FastVideo WanTransformer3DModel + load AnyFlow weights")
     from fastvideo.configs.models.dits import WanVideoConfig
-    from fastvideo.models.dits.wanvideo import WanTransformer3DModel
+    from fastvideo.models.wan.transformer import WanTransformer3DModel
 
     cfg = WanVideoConfig()
     arch = cfg.arch_config

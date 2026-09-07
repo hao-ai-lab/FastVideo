@@ -64,6 +64,12 @@ Reuse `stages/text_encoding.py` if your model takes text → embeddings via a st
 
 When forking, keep the file name model-prefixed (`longcat_*`, `gamecraft_*`) so the registry stays grep-able.
 
+Wan's family-specific stages live in `basic/wan/stages/`; see
+`basic/wan/AGENTS.md`. Shared dense scheduling/CFG stays in `stages/denoising.py`.
+Do not put Wan expert selection, first-frame VAE execution, or DMD/causal
+sampling recipes back into that shared loop. Legacy sampler imports remain
+lazy aliases to avoid family/shared import cycles.
+
 ## Per-Package `AGENTS.md` and `JOURNAL.md` (optional)
 
 Pipelines with non-trivial parity invariants, lazy-loaded shared components,

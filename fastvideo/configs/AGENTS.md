@@ -7,8 +7,10 @@ Two layers of dataclass configs feed every pipeline: **arch configs** (what the 
 Wan's transformer config is co-located in `fastvideo/models/wan/config.py`, and
 its VAE config in `fastvideo/models/wan/vae_config.py`. `models/dits/wanvideo.py`
 and `models/vaes/wanvae.py` under this directory are compatibility re-exports;
-pipeline configs remain in `pipelines/wan.py`. Other model families retain the
-layout below.
+pipeline configs now live in `fastvideo/models/wan/pipeline_config.py`, with
+`pipelines/wan.py` retaining compatibility exports. Wan variant registration
+comes from `fastvideo/models/wan/definition.py`; other model families retain
+the layout below.
 
 ## Layout
 

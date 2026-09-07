@@ -12,19 +12,16 @@ from fastvideo.configs.pipelines import PipelineConfig
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.models.loader.component_loader import VAELoader
 from fastvideo.models.wan.vae_config import WanVAEConfig
-from fastvideo.utils import maybe_download_model
+from fastvideo.tests.golden_gate._wan_checkpoint import component_path
 
 os.environ.setdefault("MASTER_ADDR", "localhost")
 os.environ.setdefault("MASTER_PORT", "29503")
-
-BASE_MODEL_PATH = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="Wan VAE parity requires one CUDA GPU")
 @pytest.mark.usefixtures("distributed_setup")
 def test_wan_vae():
-    model_path = maybe_download_model(BASE_MODEL_PATH, local_dir=os.path.join("data", BASE_MODEL_PATH))
-    vae_path = os.path.join(model_path, "vae")
+    vae_path = str(component_path("vae"))
     device = torch.device("cuda:0")
     precision = torch.float32
     args = FastVideoArgs(model_path=vae_path,

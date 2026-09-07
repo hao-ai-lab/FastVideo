@@ -57,25 +57,37 @@ class GateSpec:
     postprocess: Callable[[Any], torch.Tensor] = field(default=lambda out: out)
     model_root_env: str | None = None  # env var naming a local checkpoint root
     weight_file: str = "diffusion_pytorch_model.safetensors"  # single-file fallback
+    revision: str | None = None  # Immutable checkpoint revision for pinned gates.
 
 
-def env_fingerprint(spec: GateSpec) -> dict[str, str]:
+def env_fingerprint(spec: GateSpec | str | None) -> dict[str, str]:
     try:
         import flash_attn
         fa_version = str(getattr(flash_attn, "__version__", "?"))
     except ImportError:
         fa_version = "<not installed>"
-    return {
+    backend = spec.attention_backend if isinstance(spec, GateSpec) else spec
+    result = {
         "torch": str(torch.__version__),
         "cuda": str(torch.version.cuda),
         "cudnn": str(torch.backends.cudnn.version()),
         "flash_attn": fa_version,
         "device_name": torch.cuda.get_device_name(0),
-        "attention_backend": spec.attention_backend,
+        "attention_backend": backend or "NONE",
         "fastvideo_fa4": os.environ.get("FASTVIDEO_FA4", "<unset>"),
         "tf32_matmul": str(torch.backends.cuda.matmul.allow_tf32),
         "tf32_cudnn": str(torch.backends.cudnn.allow_tf32),
     }
+    if backend is None:
+        # Codec gates do not execute FlashAttention; its version/selection is not
+        # part of the codec compute path. Keep torch/CUDA/cuDNN/device/TF32 pins.
+        result.pop("flash_attn")
+        result.pop("fastvideo_fa4")
+    elif not isinstance(spec, GateSpec):
+        # New tensor gates record the effective switch. Unset and "0" both
+        # select FA2; retain the old block-gate metadata contract unchanged.
+        result["fastvideo_fa4"] = str(int(os.environ.get("FASTVIDEO_FA4", "0") != "0"))
+    return result
 
 
 def _component_dir(spec: GateSpec) -> Path:
@@ -92,16 +104,16 @@ def _component_dir(spec: GateSpec) -> Path:
     index_name = f"{spec.subfolder}/{spec.weight_file}.index.json"
     prefix = spec.prefix_template.format(N=spec.layer)
     try:
-        index_path = Path(hf_hub_download(spec.repo_id, index_name))
+        index_path = Path(hf_hub_download(spec.repo_id, index_name, revision=spec.revision))
     except EntryNotFoundError:
-        single = Path(hf_hub_download(spec.repo_id, f"{spec.subfolder}/{spec.weight_file}"))
+        single = Path(hf_hub_download(spec.repo_id, f"{spec.subfolder}/{spec.weight_file}", revision=spec.revision))
         return single.parent
     weight_map = json.loads(index_path.read_text())["weight_map"]
     shards = sorted({shard for name, shard in weight_map.items() if name.startswith(prefix)})
     if not shards:
         pytest.fail(f"no shards found for prefix {prefix} in {spec.repo_id}", pytrace=False)
     for shard in shards:
-        hf_hub_download(spec.repo_id, f"{spec.subfolder}/{shard}")
+        hf_hub_download(spec.repo_id, f"{spec.subfolder}/{shard}", revision=spec.revision)
     return index_path.parent
 
 
@@ -133,19 +145,26 @@ def load_layer_state(spec: GateSpec, component_dir: Path) -> dict[str, torch.Ten
     return state
 
 
+def device_folder() -> str:
+    return re.sub(r"[^A-Za-z0-9]+", "_", torch.cuda.get_device_name(0)).strip("_")
+
+
 def _golden_relpath(spec: GateSpec) -> str:
-    device_slug = re.sub(r"[^A-Za-z0-9]+", "_", torch.cuda.get_device_name(0)).strip("_")
-    return f"{device_slug}/{spec.name}_layer{spec.layer}_{spec.attention_backend}_seed{spec.seed}.pt"
+    return f"{device_folder()}/{spec.name}_layer{spec.layer}_{spec.attention_backend}_seed{spec.seed}.pt"
 
 
 def _resolve_golden(spec: GateSpec) -> tuple[Path, bool]:
-    local = GOLDEN_ROOT / _golden_relpath(spec)
+    return resolve_golden_path(_golden_relpath(spec))
+
+
+def resolve_golden_path(relative_path: str) -> tuple[Path, bool]:
+    local = GOLDEN_ROOT / relative_path
     if local.exists():
         return local, True
     from huggingface_hub import hf_hub_download
     from huggingface_hub.errors import EntryNotFoundError
     try:
-        remote = hf_hub_download(GOLDEN_REPO_ID, f"golden_gates/{_golden_relpath(spec)}", repo_type="dataset")
+        remote = hf_hub_download(GOLDEN_REPO_ID, f"golden_gates/{relative_path}", repo_type="dataset")
         return Path(remote), True
     except EntryNotFoundError:
         return local, False
