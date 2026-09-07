@@ -129,7 +129,7 @@ def test_serialized_fp8_cpu_execution_fails_closed(distributed_setup) -> None:
 def test_runtime_preflight_reports_capability_and_missing_dependencies(monkeypatch) -> None:
     config = MiniMaxH3SerializedFP8Config.from_config(_checkpoint_quantization_config())
     monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device: (8, 0))
-    with pytest.raises(RuntimeError, match="sm100 or newer"):
+    with pytest.raises(RuntimeError, match="sm90 or newer"):
         config.validate_runtime(torch.device("cuda"))
 
     monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device: (10, 0))
@@ -149,6 +149,39 @@ def test_runtime_preflight_reports_capability_and_missing_dependencies(monkeypat
     monkeypatch.setattr(h3_fp8, "_get_flashinfer_groupwise_fp8_gemm", missing_flashinfer)
     with pytest.raises(RuntimeError, match="FlashInfer groupwise GEMM is missing"):
         config.validate_runtime(torch.device("cuda"))
+
+
+def test_runtime_preflight_accepts_hopper_without_blackwell_dependencies(monkeypatch) -> None:
+    """sm_90 runs the dequantize-then-BF16 linear, so neither the Triton
+    activation quantizer nor the FlashInfer groupwise GEMM may be required."""
+    config = MiniMaxH3SerializedFP8Config.from_config(_checkpoint_quantization_config())
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device: (9, 0))
+
+    def blackwell_only_dependency() -> None:
+        raise RuntimeError("Blackwell-only dependency must not be required on sm90")
+
+    monkeypatch.setattr(h3_fp8, "_require_sglang_per_token_group_fp8_quantization", blackwell_only_dependency)
+    monkeypatch.setattr(h3_fp8, "_get_flashinfer_groupwise_fp8_gemm", blackwell_only_dependency)
+    config.validate_runtime(torch.device("cuda"))
+
+
+def test_hopper_dequantizes_block_scaled_fp8_weights_exactly() -> None:
+    """The sm_90 linear expands E4M3 weights with 128x128 block scales in the
+    activation dtype; the expansion must be bit-exact against the reference
+    broadcast and the round trip must stay within E4M3 precision. CPU-only."""
+    torch.manual_seed(0)
+    reference = torch.randn(256, 384, dtype=torch.float32)
+    blocks = reference.view(2, 128, 3, 128)
+    scales = blocks.abs().amax(dim=(1, 3)) / torch.finfo(torch.float8_e4m3fn).max
+    weight = (blocks / scales[:, None, :, None]).view(256, 384).to(torch.float8_e4m3fn)
+
+    restored = h3_fp8._dequantize_block_fp8_weight(weight, scales, (128, 128), torch.bfloat16)
+
+    expected = (weight.to(torch.bfloat16).view(2, 128, 3, 128) * scales.to(torch.bfloat16)[:, None, :, None])
+    assert restored.dtype == torch.bfloat16
+    assert restored.shape == reference.shape
+    torch.testing.assert_close(restored, expected.view(256, 384), rtol=0, atol=0)
+    torch.testing.assert_close(restored.float(), reference, rtol=0.07, atol=0.02)
 
 
 def test_loader_detects_and_capability_gates_checkpoint_metadata(tmp_path) -> None:
