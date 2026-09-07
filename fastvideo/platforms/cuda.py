@@ -181,6 +181,9 @@ class CudaPlatformBase(Platform):
             try:
                 from flashinfer.prefill import single_prefill_with_kv_cache  # noqa: F401
 
+                if envs.FASTVIDEO_FLASHINFER_PREFILL_BACKEND == "cudnn":
+                    from flashinfer.prefill import cudnn_batch_prefill_with_kv_cache  # noqa: F401
+
                 from fastvideo.attention.backends.flashinfer import (  # noqa: F401
                     FlashInferBackend)
             except ImportError as e:
