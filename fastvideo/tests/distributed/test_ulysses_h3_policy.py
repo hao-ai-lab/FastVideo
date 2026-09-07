@@ -9,6 +9,12 @@ import torch
 from fastvideo.distributed.device_communicators import ulysses_a2a as ulysses
 
 
+@pytest.fixture(autouse=True)
+def _default_long_training_policy(monkeypatch):
+    # A caller may run these tests from a shell configured for long training.
+    monkeypatch.setattr(ulysses.envs, 'FASTVIDEO_ULYSSES_A2A_LONG_TRAINING', 'auto')
+
+
 def _helper():
     return ulysses.UlyssesA2AHelper(object(), object(), 4, torch.device('cuda:0'), object())
 
