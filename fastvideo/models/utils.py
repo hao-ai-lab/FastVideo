@@ -135,7 +135,38 @@ def modulate(x: torch.Tensor, shift: torch.Tensor | None = None, scale: torch.Te
         return x * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)  # type: ignore[union-attr]
 
 
-def pred_noise_to_pred_video(pred_noise: torch.Tensor, noise_input_latent: torch.Tensor, timestep: torch.Tensor,
+_FLOAT64_SCHEDULE_ATTR = "_fastvideo_float64_schedule"
+
+
+def get_float64_schedule(scheduler: Any,
+                         device: torch.device) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Return the scheduler's sigma and timestep tables as float64 on ``device``.
+
+    The result is memoized on the scheduler and reused until it swaps the
+    tables out, which ``set_timesteps`` does. Callers run once per denoising
+    step, so converting on every call would recast and re-upload the whole
+    schedule for values that do not change within a schedule.
+    """
+    sigmas = scheduler.sigmas
+    timesteps = scheduler.timesteps
+    cached = getattr(scheduler, _FLOAT64_SCHEDULE_ATTR, None)
+    if cached is not None:
+        cached_sigmas, cached_timesteps, sigmas_f64, timesteps_f64 = cached
+        if (cached_sigmas is sigmas and cached_timesteps is timesteps
+                and sigmas_f64.device == device):
+            return sigmas_f64, timesteps_f64
+
+    sigmas_f64 = sigmas.to(device=device, dtype=torch.float64)
+    timesteps_f64 = timesteps.to(device=device, dtype=torch.float64)
+    setattr(scheduler, _FLOAT64_SCHEDULE_ATTR,
+            (sigmas, timesteps, sigmas_f64, timesteps_f64))
+    return sigmas_f64, timesteps_f64
+
+
+def pred_noise_to_pred_video(pred_noise: torch.Tensor,
+                             noise_input_latent: torch.Tensor,
+                             timestep: torch.Tensor,
                              scheduler: Any) -> torch.Tensor:
     """
     Convert predicted noise to clean latent.
@@ -167,8 +198,7 @@ def pred_noise_to_pred_video(pred_noise: torch.Tensor, noise_input_latent: torch
     device = pred_noise.device
     pred_noise = pred_noise.double().to(device)
     noise_input_latent = noise_input_latent.double().to(device)
-    sigmas = scheduler.sigmas.double().to(device)
-    timesteps = scheduler.timesteps.double().to(device)
+    sigmas, timesteps = get_float64_schedule(scheduler, device)
     timestep_id = torch.argmin((timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
     sigma_t = sigmas[timestep_id].reshape(-1, 1, 1, 1)
     pred_video = noise_input_latent - sigma_t * pred_noise
@@ -208,8 +238,7 @@ def pred_noise_to_x_bound(pred_noise: torch.Tensor, noise_input_latent: torch.Te
     device = pred_noise.device
     pred_noise = pred_noise.double().to(device)
     noise_input_latent = noise_input_latent.double().to(device)
-    sigmas = scheduler.sigmas.double().to(device)
-    timesteps = scheduler.timesteps.double().to(device)
+    sigmas, timesteps = get_float64_schedule(scheduler, device)
     timestep_id = torch.argmin((timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
     sigma_t = sigmas[timestep_id].reshape(-1, 1, 1, 1)
 
