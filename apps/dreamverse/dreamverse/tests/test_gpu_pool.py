@@ -63,12 +63,37 @@ def test_get_available_gpus_defaults_to_first_visible_device(monkeypatch):
     assert gpu_pool.get_available_gpus() == [3]
 
 
+def test_get_available_gpus_defaults_to_active_model_sequence_parallel_size(monkeypatch):
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "0,1,2,3,4")
+    monkeypatch.delenv("FASTVIDEO_GPU_COUNT", raising=False)
+    monkeypatch.setattr(gpu_pool, "DREAMVERSE_SP_SIZE", 4)
+
+    assert gpu_pool.get_available_gpus() == [0, 1, 2, 3]
+
+
 def test_get_available_gpus_rejects_invalid_gpu_count(monkeypatch):
     monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
     monkeypatch.setenv("FASTVIDEO_GPU_COUNT", "zero")
 
     with pytest.raises(RuntimeError, match="Invalid FASTVIDEO_GPU_COUNT"):
         gpu_pool.get_available_gpus()
+
+
+def test_join_user_failed_reload_marks_model_uninitialized(monkeypatch):
+    """A failed model reload forces the next join to reload a model."""
+    slot = gpu_pool.GPUSlot(gpu_id=0, cuda_device="0")
+    slot.current_model_id = "fast-ltx2"
+
+    async def fake_send_command(command, timeout):
+        del command, timeout
+        return gpu_pool.WorkerError(user_id="__reload__", message="load failed")
+
+    monkeypatch.setattr(slot, "_send_command", fake_send_command)
+
+    with pytest.raises(RuntimeError, match="Model reload failed"):
+        asyncio.run(slot.join_user("client-id", model_id="fast-h3"))
+
+    assert slot.current_model_id is None
 
 
 def test_send_command_raises_on_worker_death():
@@ -92,9 +117,9 @@ def test_send_command_raises_on_worker_death():
     ready = resp_q.get(timeout=30.0)
     assert ready == "READY"
 
-    async def runner():
+    async def runner() -> None:
         slot = gpu_pool.GPUSlot(gpu_id=0, cuda_device="0")
-        slot.process = proc
+        slot.process = proc  # type: ignore[assignment]
         slot.command_queue = cmd_q
         slot.response_queue = resp_q
 

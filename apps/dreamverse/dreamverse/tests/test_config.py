@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
 SERVER_DIR = Path(__file__).resolve().parents[1]
 
 
-def _load_config_module():
+def _load_config_module() -> ModuleType:
     spec = importlib.util.spec_from_file_location(
         "server_config_test_module",
         SERVER_DIR / "config.py",
@@ -20,7 +21,7 @@ def _load_config_module():
     return module
 
 
-def _set_required_prompt_keys(monkeypatch):
+def _set_required_prompt_keys(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CEREBRAS_API_KEY", "cerebras-key")
     monkeypatch.setenv("GROQ_API_KEY", "groq-key")
 
@@ -150,3 +151,38 @@ def test_config_rejects_invalid_prompt_provider(monkeypatch):
 
     with pytest.raises(RuntimeError, match="Invalid FASTVIDEO_PROMPT_PROVIDER"):
         _load_config_module()
+
+
+def test_config_registers_vsa_datafree_fasth3_profile(monkeypatch):
+    """The FastH3 registry entry owns the complete fixed Preview recipe."""
+    _set_required_prompt_keys(monkeypatch)
+
+    module = _load_config_module()
+
+    assert module.MODEL_REGISTRY["fast-h3"] == {
+        "name": "FastH3",
+        "generation_backend": "minimax_h3",
+        "default_sp_size": 4,
+        "model_path": "MiniMaxAI/MiniMax-H3",
+        "adapter_repo": "FastVideo/FastVideo-FastH3-4-step-Preview-v1-LoRA",
+        "adapter_filename": "vsa-datafree/adapter_model.safetensors",
+        "attention_backend": "VIDEO_SPARSE_ATTN_H3",
+        "height": 768,
+        "width": 1344,
+        "num_frames": 124,
+        "num_inference_steps": 5,
+        "seed": 1000,
+    }
+
+
+def test_config_uses_fasth3_sequence_parallel_default(monkeypatch):
+    """Selecting FastH3 defaults DreamVerse to its four-GPU topology."""
+    _set_required_prompt_keys(monkeypatch)
+    monkeypatch.setenv("DREAMVERSE_MODEL_ID", "fast-h3")
+    monkeypatch.delenv("DREAMVERSE_SP_SIZE", raising=False)
+
+    module = _load_config_module()
+
+    assert module.ACTIVE_MODEL_ID == "fast-h3"
+    assert module.MODEL_CONFIG["generation_backend"] == "minimax_h3"
+    assert module.DREAMVERSE_SP_SIZE == 4

@@ -17,11 +17,11 @@ FORBIDDEN_PREFIXES = (
 )
 ALLOWED_INTERNAL_IMPORTS = {
     (
-        "video_generation.py",
+        "ltx2_generation.py",
         "fastvideo.models.audio.ltx2_audio_processing",
     ),
     (
-        "video_generation.py",
+        "ltx2_generation.py",
         "fastvideo.models.loader.component_loader",
     ),
 }

@@ -1,9 +1,9 @@
-"""LTX2 model lifecycle and continuation conditioning.
+"""LTX-2 model lifecycle and continuation conditioning.
 
 Runs inside a GPU worker subprocess.  Owns the model, the audio
 encoder, and the per-session continuation state carried across
 segments.  Callers must set ``os.environ["CUDA_VISIBLE_DEVICES"]``
-before constructing ``VideoGenerationWorker`` — all ``fastvideo.*``
+before constructing ``LTX2GenerationBackend`` — all ``fastvideo.*``
 imports are deferred to method bodies so nothing touches CUDA at
 module import time.
 """
@@ -14,9 +14,6 @@ import gc
 import os
 import re
 import time
-from dataclasses import dataclass
-from typing import Any
-
 import numpy as np
 import torch
 
@@ -35,6 +32,7 @@ from dreamverse.config import (
     DREAMVERSE_LORA_STACK,
     _resolve_lora_spec,
 )
+from dreamverse.generation_contracts import StepResult
 
 # Multi-frame decoded continuation defaults from
 # examples/inference/basic/basic_ltx2_distilled_video_continuation.py.
@@ -78,22 +76,6 @@ def _reset_lora_registry(worker) -> dict:
     pipeline.cur_adapter_name = ""
     pipeline.cur_adapter_strength = 1.0
     return {"status": "lora_registry_reset"}
-
-
-@dataclass
-class StepResult:
-    """Output of one generation step.
-
-    ``head_trim_frames`` / ``head_trim_audio_frames`` are derived here
-    so downstream AV streaming never needs to import conditioning
-    constants.
-    """
-    frames: list
-    audio: Any
-    audio_sample_rate: int | None
-    timings: dict
-    head_trim_frames: int
-    head_trim_audio_frames: int
 
 
 class ContinuationState:
@@ -202,7 +184,7 @@ class ContinuationState:
         self.audio_latents = latents.detach().clone().cpu()
 
 
-class VideoGenerationWorker:
+class LTX2GenerationBackend:
     """Single-GPU LTX2 generator with continuation state.
 
     Caller must set ``os.environ["CUDA_VISIBLE_DEVICES"]`` before

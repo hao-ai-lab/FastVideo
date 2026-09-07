@@ -139,7 +139,18 @@ session.
 - startup warmup
 - user join/leave commands
 - `USER_STEP` execution for each segment
-- continuation state between segments
+- generation-command routing and stream-result delivery
+
+Model generation has a separate ownership boundary inside each GPU process:
+
+- `apps/dreamverse/dreamverse/generation_worker.py` selects the backend that the active model profile declares and owns
+  the backend lifecycle.
+- `apps/dreamverse/dreamverse/ltx2_generation.py` owns LTX-2 generator configuration, video and audio continuation, and
+  runtime LoRA application.
+- `apps/dreamverse/dreamverse/minimax_h3_generation.py` owns the VSA data-free FastH3 adapter, FastH3 generator and
+  request configuration, and last-frame continuation through MiniMax H3 first-frame conditioning.
+- `apps/dreamverse/dreamverse/generation_contracts.py` defines the decoded media and stream-trimming result that both
+  model backends return to `apps/dreamverse/dreamverse/gpu_pool.py`.
 
 `apps/dreamverse/dreamverse/prompt_enhancer.py` manages:
 
