@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     FASTVIDEO_LOGGING_CONFIG_PATH: str | None = None
     FASTVIDEO_TRACE_FUNCTION: int = 0
     FASTVIDEO_ATTENTION_BACKEND: str | None = None
+    FASTVIDEO_FLASHINFER_PREFILL_BACKEND: str = "single"
     FASTVIDEO_FA4: bool = False
     FASTVIDEO_MINIMAX_H3_FA4_PACKED_VARLEN: bool = False
     FASTVIDEO_INFERENCE_TORCH_COMPILE: bool = False
@@ -217,6 +218,12 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # FASTVIDEO_FA4=1 as well (see below).
     "FASTVIDEO_ATTENTION_BACKEND":
     lambda: os.getenv("FASTVIDEO_ATTENTION_BACKEND", None),
+
+    # Select the concrete FlashInfer prefill implementation. ``single`` uses
+    # single_prefill_with_kv_cache once per sample; ``cudnn`` uses FlashInfer's
+    # batched cuDNN SDPA entry point.
+    "FASTVIDEO_FLASHINFER_PREFILL_BACKEND":
+    lambda: os.getenv("FASTVIDEO_FLASHINFER_PREFILL_BACKEND", "single").strip().lower(),
 
     # If set (=1), the FLASH_ATTN backend uses FlashAttention-4
     # (flash_attn.cute). FA4 is opt-in and never auto-selected just because it
