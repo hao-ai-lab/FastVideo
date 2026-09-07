@@ -14,7 +14,11 @@ from pathlib import Path
 
 import pytest
 
-from fastvideo.mlx_runtime.wan_pipeline import MLXWan22Pipeline, MLXWanPipeline
+from fastvideo.mlx_runtime.wan_pipeline import (
+    MLXWan22Pipeline,
+    MLXWanPipeline,
+    _resolve_wan_torch_dtype,
+)
 
 
 def _make_model_root(tmp_path: Path) -> Path:
@@ -101,6 +105,58 @@ def test_init_accepts_a_checkpoint_with_declared_16_channels(tmp_path) -> None:
     model_root = _make_model_root(tmp_path)
     checkpoint = _make_packed_checkpoint(tmp_path, in_channels=16)
     MLXWanPipeline(model_root=model_root, mlx_checkpoint=checkpoint)
+
+
+def _write_manifest(tmp_path: Path, body: str) -> Path:
+    """A packed-checkpoint directory whose mlx_dit.json holds arbitrary JSON."""
+    checkpoint = tmp_path / "FastMetal-1.3B-QAD-mlx"
+    checkpoint.mkdir(parents=True)
+    (checkpoint / "mlx_dit.json").write_text(body)
+    (checkpoint / "mlx_dit.safetensors").write_bytes(b"")
+    return checkpoint
+
+
+@pytest.mark.parametrize("body", ["[]", '"nope"', "42", "null"])
+def test_init_tolerates_a_manifest_that_is_not_an_object(tmp_path, body) -> None:
+    """The channel probe is documented as best-effort: a readable but wrongly shaped
+    manifest must fall through to the weight load, not raise out of __init__."""
+    model_root = _make_model_root(tmp_path)
+    MLXWanPipeline(model_root=model_root, mlx_checkpoint=_write_manifest(tmp_path, body))
+
+
+def test_init_tolerates_a_manifest_whose_config_is_not_an_object(tmp_path) -> None:
+    model_root = _make_model_root(tmp_path)
+    checkpoint = _write_manifest(tmp_path, json.dumps({"config": ["in_channels"]}))
+    MLXWanPipeline(model_root=model_root, mlx_checkpoint=checkpoint)
+
+
+@pytest.mark.parametrize("channels", ["sixteen", [16], {"value": 16}])
+def test_init_tolerates_a_non_numeric_in_channels(tmp_path, channels) -> None:
+    model_root = _make_model_root(tmp_path)
+    checkpoint = _write_manifest(tmp_path, json.dumps({"config": {"in_channels": channels}}))
+    MLXWanPipeline(model_root=model_root, mlx_checkpoint=checkpoint)
+
+
+def test_init_still_reads_a_numeric_string_in_channels(tmp_path) -> None:
+    """Tolerating junk must not stop the probe recognising a real Wan2.2 checkpoint."""
+    model_root = _make_model_root(tmp_path)
+    checkpoint = _write_manifest(tmp_path, json.dumps({"config": {"in_channels": "48"}}))
+    with pytest.raises(ValueError, match="Wan2.2-TI2V"):
+        MLXWanPipeline(model_root=model_root, mlx_checkpoint=checkpoint)
+
+
+def test_resolve_torch_dtype_maps_the_recipe_names() -> None:
+    """Wan2.1 and Wan2.2-TI2V pass different names; both must resolve exactly."""
+    torch = pytest.importorskip("torch")
+    assert _resolve_wan_torch_dtype("bf16") is torch.bfloat16
+    assert _resolve_wan_torch_dtype("fp16") is torch.float16
+    assert _resolve_wan_torch_dtype("fp32") is torch.float32
+
+
+def test_resolve_torch_dtype_rejects_an_unknown_name() -> None:
+    pytest.importorskip("torch")
+    with pytest.raises(ValueError, match="Unsupported text-encoder dtype"):
+        _resolve_wan_torch_dtype("float8")
 
 
 class TestMLXWan22Pipeline:
