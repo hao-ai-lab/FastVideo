@@ -1,8 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """Convert a DCP training checkpoint to a diffusers-style model directory.
 
-Works on a single GPU regardless of how many GPUs were used for training
-(DCP handles resharding automatically).
+The converter can reshard a distributed checkpoint onto one GPU, but exporting
+a full model is a high-memory operation: rank 0 temporarily owns both the live
+model and its gathered CPU state.  Use a machine with enough CPU or unified
+memory for both copies plus runtime overhead.
 
 Usage (no torchrun needed)::
 
@@ -24,11 +26,18 @@ YAML.
 Pass ``--verify`` to strictly reload the exported transformer immediately
 after writing it, so a key-mapping bug fails here instead of deep inside a
 later training/inference launch that loads the exported directory.
+
+Model plugins select the physical component name (for example H3 Ref2VA uses
+``transformer_ref``). Training LoRA wrappers are exported as merged native
+weights because the public inference pipeline cannot consume those wrappers or
+a standalone H3 adapter.
 """
 
 from __future__ import annotations
 
 import argparse
+import gc
+import json
 import os
 import sys
 from typing import Any
@@ -36,6 +45,154 @@ from typing import Any
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
+
+_CHECKPOINT_WRAPPER_SEGMENT = "_checkpoint_wrapped_module"
+_EXPORT_MAX_SHARD_SIZE = "5GB"
+
+
+def _canonical_state_prefix(module_name: str) -> str:
+    """Map a module traversal name to its checkpoint state-dict prefix.
+
+    PyTorch's ``CheckpointWrapper`` intentionally hides its
+    ``_checkpoint_wrapped_module`` implementation detail from state-dict keys,
+    while ``named_modules()`` still exposes it.  LoRA discovery uses module
+    traversal, so remove only that exact path segment before looking up state.
+    """
+    return ".".join(segment for segment in module_name.split(".") if segment != _CHECKPOINT_WRAPPER_SEGMENT)
+
+
+def _transformer_component_name(model: Any) -> str:
+    """Return the physical Diffusers component owned by a training model."""
+    component_name = str(getattr(model, "transformer_module_type", "transformer"))
+    if not component_name or component_name in {".", ".."} or os.path.basename(component_name) != component_name:
+        raise ValueError(f"Invalid transformer component name: {component_name!r}")
+    return component_name
+
+
+def _native_export_state_dict(
+    module: Any,
+    state_dict: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, str], bool]:
+    """Merge training LoRA wrappers into the native transformer key surface.
+
+    H3 inference does not expose a public adapter-loading API.  Its supported
+    training handoff is therefore a normal Diffusers-style component with each
+    adapter merged into ``weight`` and every ``base_layer``/``lora_*`` key
+    removed.  The returned alias map lets reverse HF-name mapping still consult
+    the checkpoint mapping recorded for ``base_layer.weight``.
+    """
+    import torch
+
+    from fastvideo.layers.lora.linear import BaseLayerWithLoRA
+
+    # Consume the gathered state in place. H3's target projections account for
+    # tens of GiB; keeping the original base tensors alive in a second mapping
+    # while materializing every merged tensor would nearly duplicate them.
+    exported = state_dict
+    reverse_lookup_aliases: dict[str, str] = {}
+    wrappers: dict[str, BaseLayerWithLoRA] = {}
+    for module_name, child in module.named_modules():
+        if not module_name or not isinstance(child, BaseLayerWithLoRA):
+            continue
+        prefix = _canonical_state_prefix(module_name)
+        if not prefix:
+            raise ValueError(f"LoRA module {module_name!r} has an empty canonical state prefix")
+        if prefix in wrappers:
+            raise ValueError(f"LoRA modules collide at canonical state prefix {prefix!r}")
+        wrappers[prefix] = child
+
+    for prefix, wrapper in wrappers.items():
+        lora_a_key = f"{prefix}.lora_A"
+        lora_b_key = f"{prefix}.lora_B"
+        base_weight_key = f"{prefix}.base_layer.weight"
+        native_weight_key = f"{prefix}.weight"
+        missing = [key for key in (lora_a_key, lora_b_key, base_weight_key) if key not in exported]
+        if missing:
+            raise KeyError(f"LoRA export is missing state for {prefix!r}: {missing}")
+
+        lora_a = exported.pop(lora_a_key)
+        lora_b = exported.pop(lora_b_key)
+        base_weight = exported.pop(base_weight_key)
+        if not all(isinstance(value, torch.Tensor) for value in (lora_a, lora_b, base_weight)):
+            raise TypeError(f"LoRA export expected tensor state for {prefix!r}")
+        if wrapper.lora_rank is None or wrapper.lora_rank <= 0:
+            raise ValueError(f"LoRA export has invalid rank for {prefix!r}: {wrapper.lora_rank!r}")
+        alpha = wrapper.lora_alpha if wrapper.lora_alpha is not None else wrapper.lora_rank
+        scale = (float(alpha) / float(wrapper.lora_rank)) * float(wrapper.lora_strength)
+        exported[native_weight_key] = torch.addmm(
+            base_weight,
+            wrapper.slice_lora_b_weights(lora_b.to(base_weight)),
+            wrapper.slice_lora_a_weights(lora_a.to(base_weight)),
+            alpha=scale,
+        )
+        reverse_lookup_aliases[native_weight_key] = base_weight_key
+
+        base_prefix = f"{prefix}.base_layer."
+        for key in [name for name in exported if name.startswith(base_prefix)]:
+            native_key = f"{prefix}.{key[len(base_prefix):]}"
+            if native_key in exported:
+                raise ValueError(f"LoRA export key collision at {native_key!r}")
+            exported[native_key] = exported.pop(key)
+            reverse_lookup_aliases[native_key] = key
+
+    unexpected_wrapper_keys = [
+        name for name in exported if ".base_layer." in name or name.endswith((".lora_A", ".lora_B"))
+    ]
+    if unexpected_wrapper_keys:
+        raise ValueError(f"LoRA export left wrapper-only keys: {unexpected_wrapper_keys[:10]}")
+    return exported, reverse_lookup_aliases, bool(wrappers)
+
+
+def _save_diffusers_safetensors(
+    tensor_state: dict[str, Any],
+    module_dir: Any,
+    *,
+    max_shard_size: int | str = _EXPORT_MAX_SHARD_SIZE,
+) -> list[str]:
+    """Write a canonical Diffusers safetensors component, releasing each shard.
+
+    Small components use ``diffusion_pytorch_model.safetensors``. Large ones
+    use the conventional numbered shards plus
+    ``diffusion_pytorch_model.safetensors.index.json``.
+    """
+    from pathlib import Path
+
+    import torch
+    from diffusers.utils import SAFE_WEIGHTS_INDEX_NAME, SAFETENSORS_WEIGHTS_NAME
+    from huggingface_hub import split_torch_state_dict_into_shards
+    from safetensors.torch import save_file
+
+    destination = Path(module_dir)
+    split = split_torch_state_dict_into_shards(
+        tensor_state,
+        filename_pattern=SAFETENSORS_WEIGHTS_NAME.replace(".safetensors", "{suffix}.safetensors"),
+        max_shard_size=max_shard_size,
+    )
+    written: list[str] = []
+    for filename, tensor_names in split.filename_to_tensors.items():
+        shard: dict[str, torch.Tensor] = {}
+        for name in tensor_names:
+            value = tensor_state.pop(name)
+            if not isinstance(value, torch.Tensor):
+                raise TypeError(f"Expected tensor for {name!r}, got {type(value).__name__}")
+            shard[name] = value
+        save_file(shard, str(destination / filename))
+        written.append(filename)
+        del shard
+
+    if tensor_state:
+        raise RuntimeError(f"Safetensors shard plan left unsaved keys: {list(tensor_state)[:10]}")
+    if split.is_sharded:
+        index = {
+            "metadata": split.metadata,
+            "weight_map": split.tensor_to_filename,
+        }
+        (destination / SAFE_WEIGHTS_INDEX_NAME).write_text(
+            json.dumps(index, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        written.append(SAFE_WEIGHTS_INDEX_NAME)
+    return written
 
 
 def _ensure_distributed() -> None:
@@ -130,9 +287,11 @@ def _save_role_pretrained(
 
     _barrier()
 
+    transformer_component = _transformer_component_name(model)
+    use_diffusers_weight_layout = bool(getattr(model, "export_diffusers_weight_layout", False))
     modules: dict[str, torch.nn.Module] = {}
     if model.transformer is not None:
-        modules["transformer"] = model.transformer
+        modules[transformer_component] = model.transformer
 
     if module_names is None:
         module_names = sorted(modules.keys())
@@ -158,8 +317,14 @@ def _save_role_pretrained(
         )
 
         if _rank() == 0:
-            for path in module_dir.glob("*.safetensors"):
-                path.unlink(missing_ok=True)
+            for pattern in (
+                    "*.safetensors",
+                    "*.safetensors.index.json",
+                    "diffusion_pytorch_model*.bin",
+                    "diffusion_pytorch_model.bin.index.json",
+            ):
+                for path in module_dir.glob(pattern):
+                    path.unlink(missing_ok=True)
 
             # Convert internal parameter names back to HF format.
             # load_model_from_full_model_state_dict builds reverse_param_names_mapping
@@ -169,14 +334,19 @@ def _save_role_pretrained(
             # (e.g. → "patch_embedding.proj.proj.bias").
             reverse_mapping: dict = getattr(modules[module_name], "reverse_param_names_mapping", {})
 
+            native_state, reverse_lookup_aliases, merged_lora = _native_export_state_dict(
+                modules[module_name],
+                state_dict,
+            )
             tensor_state: dict[str, torch.Tensor] = {}
-            for key, value in state_dict.items():
+            for key, value in native_state.items():
                 if not isinstance(value, torch.Tensor):
                     raise TypeError(f"Expected tensor in state_dict "
                                     f"for {module_name}.{key}, "
                                     f"got {type(value).__name__}")
-                if key in reverse_mapping:
-                    hf_key, merge_index, _ = reverse_mapping[key]
+                reverse_key = reverse_lookup_aliases.get(key, key)
+                if reverse_key in reverse_mapping:
+                    hf_key, merge_index, _ = reverse_mapping[reverse_key]
                     if merge_index is not None:
                         logger.warning(
                             "Skipping reverse-mapping for merged param %s "
@@ -188,23 +358,58 @@ def _save_role_pretrained(
                     key = hf_key
                 tensor_state[key] = value.detach().cpu()
 
-            from safetensors.torch import save_file
-
-            out_path = module_dir / "model.safetensors"
             logger.info(
-                "Saving %s weights to %s (%s tensors)",
+                "Saving %s weights to %s (%s tensors, max shard %s)",
                 module_name,
-                out_path,
+                module_dir,
                 len(tensor_state),
+                _EXPORT_MAX_SHARD_SIZE,
             )
-            save_file(tensor_state, str(out_path))
+            # ``native_state`` aliases the gathered DCP mapping. Clear that
+            # mapping before writing so it does not retain the CPU snapshot.
+            native_state.clear()
+            if use_diffusers_weight_layout:
+                # H3 publishes native Diffusers component folders and opts in
+                # to the conventional filename/shard contract. The shard
+                # writer pops each completed shard to reduce post-save memory.
+                written_weights = _save_diffusers_safetensors(tensor_state, module_dir)
+            else:
+                # Preserve the global converter's established contract for
+                # QAT/KD and other model plugins whose scripts consume this
+                # exact path as a transformer override.
+                from safetensors.torch import save_file
+                legacy_name = "model.safetensors"
+                save_file(tensor_state, str(module_dir / legacy_name))
+                tensor_state.clear()
+                written_weights = [legacy_name]
+            logger.info("Saved %s weight artifacts: %s", module_name, written_weights)
+
+            metadata_path = dst / "fastvideo_training_export.json"
+            metadata_path.write_text(
+                json.dumps(
+                    {
+                        "format_version": 1,
+                        "role": role,
+                        "transformer_component": transformer_component,
+                        "lora": "merged" if merged_lora else "none",
+                    },
+                    indent=2,
+                    sort_keys=True,
+                ) + "\n",
+                encoding="utf-8",
+            )
 
         _barrier()
 
     return str(dst)
 
 
-def _strict_reload_verify(*, output_dir: str, training_config: Any) -> None:
+def _strict_reload_verify(
+    *,
+    output_dir: str,
+    training_config: Any,
+    module_type: str,
+) -> None:
     """Reload the just-exported transformer from disk and fail loudly on
     any key mismatch.
 
@@ -216,10 +421,10 @@ def _strict_reload_verify(*, output_dir: str, training_config: Any) -> None:
     """
     from fastvideo.train.utils.moduleloader import load_module_from_path
 
-    logger.info("Verifying export: strictly reloading transformer from %s", output_dir)
+    logger.info("Verifying export: strictly reloading %s from %s", module_type, output_dir)
     load_module_from_path(
         model_path=output_dir,
-        module_type="transformer",
+        module_type=module_type,
         training_config=training_config,
     )
     logger.info("Strict reload verification passed.")
@@ -278,7 +483,8 @@ def convert(
 
     tc = cfg.training
 
-    # -- Init distributed (1 GPU is enough; DCP reshards) --
+    # -- Init distributed for the one-rank export process. DCP can reshard the
+    # checkpoint, but full-state gathering still requires substantial memory.
     maybe_init_distributed_environment_and_model_parallel(
         tp_size=1,
         sp_size=1,
@@ -316,6 +522,7 @@ def convert(
         output_dir,
         base_model_path,
     )
+    transformer_component = _transformer_component_name(model)
     result = _save_role_pretrained(
         role=role,
         base_model_path=base_model_path,
@@ -326,7 +533,18 @@ def convert(
     logger.info("Export complete: %s", result)
 
     if verify:
-        _strict_reload_verify(output_dir=result, training_config=tc)
+        # Do not keep the live FSDP training graph and DCP state mapping alive
+        # while loading a second full transformer for strict verification.
+        del states, model, method
+        gc.collect()
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        _strict_reload_verify(
+            output_dir=result,
+            training_config=tc,
+            module_type=transformer_component,
+        )
 
     return result
 
@@ -401,9 +619,10 @@ def _run_config_from_raw(raw: dict[str, Any], ) -> Any:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=("Convert a DCP training checkpoint to a "
-                                                  "diffusers-style model directory. "
-                                                  "Only 1 GPU needed (DCP reshards "
-                                                  "automatically)."), )
+                                                  "diffusers-style model directory. DCP can "
+                                                  "reshard onto one GPU, but full-model export "
+                                                  "requires memory for the live model and a "
+                                                  "gathered CPU state."), )
     parser.add_argument(
         "--checkpoint",
         type=str,
