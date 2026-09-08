@@ -29,6 +29,11 @@ def is_available() -> bool:
     return _ops is not None and all(hasattr(_ops, name) for name in _REQUIRED_OPS)
 
 
+def supports_tuned_launch() -> bool:
+    """Whether this build has the expanded barrier capacity and tuned entrypoint."""
+    return is_available() and hasattr(_ops, "ulysses_a2a_tuned")
+
+
 def _require() -> None:
     if not is_available():
         raise RuntimeError(
@@ -73,7 +78,7 @@ def dispose(handle: int) -> None:
 
 
 def all_to_all(handle: int, inp: torch.Tensor, out: torch.Tensor, B: int, S_local: int, H: int,
-               D: int, mode: int) -> None:
+               D: int, mode: int, *, blocks: int = 36) -> None:
     """Run one fused all-to-all on the current stream, writing into ``out``.
 
     ``mode == 0``: ``[B, S_local, H, D] -> [B, S_global, H_local, D]``
@@ -83,4 +88,9 @@ def all_to_all(handle: int, inp: torch.Tensor, out: torch.Tensor, B: int, S_loca
     geometry in the same order.
     """
     _require()
-    _ops.ulysses_a2a(int(handle), inp, out, int(B), int(S_local), int(H), int(D), int(mode))
+    if blocks == 36:
+        _ops.ulysses_a2a(int(handle), inp, out, int(B), int(S_local), int(H), int(D), int(mode))
+    elif blocks == 144 and supports_tuned_launch():
+        _ops.ulysses_a2a_tuned(int(handle), inp, out, int(B), int(S_local), int(H), int(D), int(mode), int(blocks))
+    else:
+        raise ValueError(f"unsupported Ulysses launch: blocks={blocks}; rebuild the kernel for tuned launches")
