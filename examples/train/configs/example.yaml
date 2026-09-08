@@ -147,7 +147,11 @@ training:
     mode_scale: 1.0                   # default: 1.0
     precondition_outputs: false       # default: false
     moba_config: {}                   # default: {}
-    enable_gradient_checkpointing_type: full  # default: null ("full" or null)
+    # default: null ("full", "ops", or null). "full" minimizes activation
+    # memory. "ops" retains supported dispatcher-visible attention outputs to
+    # reduce recompute time when memory headroom exists. Math SDPA, VMoBA, FA3,
+    # and ATTN_QAT_TRAIN still fully recompute attention under "ops".
+    enable_gradient_checkpointing_type: full
 
   # --- training top-level [TYPED] ---
   dit_precision: fp32                 # default: "fp32" (master weight precision)

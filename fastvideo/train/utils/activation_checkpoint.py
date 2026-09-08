@@ -5,9 +5,7 @@ The modular trainer owns these policies under ``fastvideo.train``, which keeps
 model plugins within one training package.
 """
 
-import collections
 from enum import Enum
-from typing import Any
 
 import torch
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import checkpoint_wrapper
@@ -35,12 +33,39 @@ class CheckpointType(str, Enum):
     BLOCK_SKIP = "block_skip"
 
 
-_SELECTIVE_ACTIVATION_CHECKPOINTING_OPS = {
-    torch.ops.aten.mm.default,
-    torch.ops.aten._scaled_dot_product_efficient_attention.default,
-    torch.ops.aten._scaled_dot_product_flash_attention.default,
-    torch.ops._c10d_functional.reduce_scatter_tensor.default,
+# Names rather than the op objects: the fastvideo ops register only when their
+# backend module is imported, so torch.ops.fastvideo... would raise here on any
+# build that has not loaded that backend.
+_SELECTIVE_ACTIVATION_CHECKPOINTING_OP_NAMES = {
+    "aten::_scaled_dot_product_flash_attention",
+    "aten::_scaled_dot_product_efficient_attention",
+    "aten::_scaled_dot_product_cudnn_attention",
+    "fastvideo::_flash_attn_default_forward",
+    "fastvideo::_flash_attn_cute_forward",
+    "fastvideo::_flash_attn_cute_varlen_forward",
+    "fastvideo::_flash_attn_cute_fp4_forward",
+    "fastvideo::_flash_attn_no_pad_forward",
+    "fastvideo::_flash_attn_varlen_qk_no_pad_forward",
+    # VSA dispatches block_sparse_attn; video_sparse_attn is its Python entry
+    # point, not an op, and naming that here would match nothing.
+    "fastvideo_kernel::block_sparse_attn_sm90",
+    "fastvideo_kernel::block_sparse_attn_sm100a",
+    "fastvideo_kernel::block_sparse_attn_triton",
 }
+
+# No collective is listed. The replaced set named
+# _c10d_functional::reduce_scatter_tensor, which is correct in torchtitan, where
+# Megatron-style sequence parallelism reduce-scatters inside the forward. Ulysses
+# redistributes with all-to-all instead, so FastVideo has no forward
+# reduce-scatter to retain; FSDP2's runs in the post-backward hook, outside the
+# region. The one collective that does appear inside a block is the parameter
+# all-gather, and retaining that would keep every checkpointed block's unsharded
+# weights resident at once, which is what FSDP exists to avoid.
+
+# Math SDPA is decomposed before this policy sees it. VMoBA, the FA3 training
+# path, and ATTN_QAT_TRAIN go through torch.autograd.Function rather than the
+# dispatcher. No policy entry can retain those attention outputs, so they get
+# full recomputation.
 
 
 def apply_activation_checkpointing(
@@ -52,10 +77,7 @@ def apply_activation_checkpointing(
     if checkpointing_type == CheckpointType.FULL:
         module = _apply_activation_checkpointing_blocks(module)
     elif checkpointing_type == CheckpointType.OPS:
-        module = _apply_activation_checkpointing_ops(
-            module,
-            _SELECTIVE_ACTIVATION_CHECKPOINTING_OPS,
-        )
+        module = _apply_activation_checkpointing_ops(module)
     elif checkpointing_type == CheckpointType.BLOCK_SKIP:
         module = _apply_activation_checkpointing_blocks(module, n_layer)
     else:
@@ -86,37 +108,33 @@ def _apply_activation_checkpointing_blocks(
     return module
 
 
-def _apply_activation_checkpointing_ops(
-    module: torch.nn.Module,
-    ops: set[Any],
-) -> torch.nn.Module:
-    """Checkpoint a module while retaining selected operation outputs."""
+def _apply_activation_checkpointing_ops(module: torch.nn.Module) -> torch.nn.Module:
+    """Checkpoint every block while retaining selected operation outputs."""
     from torch.utils.checkpoint import CheckpointPolicy, create_selective_checkpoint_contexts
 
-    def _get_custom_policy(meta: dict[str, int]):
-        """Build a policy that alternates matrix-multiply output retention."""
+    def selective_checkpointing_context_fn():
+        """Retain selected expensive operations during recomputation."""
 
         def _custom_policy(ctx, func, *args, **kwargs):
-            """Retain selected expensive operations during recomputation."""
-            mode = "recompute" if ctx.is_recompute else "forward"
-            mm_count_key = f"{mode}_mm_count"
-            if func == torch.ops.aten.mm.default:
-                meta[mm_count_key] += 1
-            # Retain compute outputs except every second matrix multiplication.
-            to_save = func in ops and not (func == torch.ops.aten.mm.default and meta[mm_count_key] % 2 == 0)
+            # OpOverload.name() is e.g. "aten::_scaled_dot_product_flash_attention".
+            to_save = func.name() in _SELECTIVE_ACTIVATION_CHECKPOINTING_OP_NAMES
             return CheckpointPolicy.MUST_SAVE if to_save else CheckpointPolicy.PREFER_RECOMPUTE
 
-        return _custom_policy
+        return create_selective_checkpoint_contexts(_custom_policy)
 
-    def selective_checkpointing_context_fn():
-        """Create independent operation counters for one checkpointed call."""
-        meta: dict[str, int] = collections.defaultdict(int)
-        return create_selective_checkpoint_contexts(_get_custom_policy(meta))
-
-    # Selective checkpointing wraps modules without stochastic masks that must
-    # replay during recomputation.
-    return checkpoint_wrapper(
-        module,
-        context_fn=selective_checkpointing_context_fn,
-        preserve_rng_state=False,
-    )
+    applied = False
+    for transformer_block_name in _TRANSFORMER_BLOCK_NAMES:
+        blocks: torch.nn.Module | None = getattr(module, transformer_block_name, None)
+        if blocks is None:
+            continue
+        for layer_id, block in blocks.named_children():
+            # Selective checkpointing wraps modules without stochastic masks that
+            # must replay during recomputation.
+            checkpointed_block = checkpoint_wrapper(block,
+                                                    context_fn=selective_checkpointing_context_fn,
+                                                    preserve_rng_state=False)
+            blocks.register_module(layer_id, checkpointed_block)
+        applied = True
+    if not applied:
+        raise ValueError("Activation checkpointing is not applied successfully")
+    return module

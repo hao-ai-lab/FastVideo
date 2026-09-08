@@ -51,7 +51,7 @@ torchrun --nproc_per_node=8 \
 ## Config Format
 
 Every run is defined by a single YAML file with five top-level sections.
-See `examples/train/example.yaml` for a fully-commented reference.
+See `examples/train/configs/example.yaml` for a fully-commented reference.
 
 ### `models` — Role-based model instances
 
@@ -80,8 +80,16 @@ Common model parameters:
 | `trainable` | `true` | Whether the model's parameters require gradients |
 | `disable_custom_init_weights` | `false` | Skip custom weight initialization (use for teacher/critic) |
 | `flow_shift` | `3.0` | Timestep shifting factor |
-| `enable_gradient_checkpointing_type` | `null` | Gradient checkpointing (`"full"` or `null`) |
+| `enable_gradient_checkpointing_type` | `null` | Gradient checkpointing (`"full"`, `"ops"`, or `null`) |
 | `attention_backend` | `null` | Optional role-local backend for Wan models (for example `ATTN_QAT_TRAIN`); overrides the process default only while this role's transformer is built |
+
+`full` recomputes every transformer-block operation and is the
+memory-conservative choice. `ops` retains outputs from supported,
+dispatcher-visible fused attention operations. It can reduce recompute time at
+the cost of higher activation memory, so use it only when the training shape has
+verified memory headroom. Math SDPA, VMoBA, FA3, and `ATTN_QAT_TRAIN` do not
+expose a retainable dispatcher boundary and therefore still use full attention
+recomputation under `ops`.
 
 Which roles are needed depends on the training method:
 
