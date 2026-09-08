@@ -396,27 +396,42 @@ if(BUILD_CXX_KERNELS)
     # exported (build.sh, and `pip install` with it set) the branch above only prints it --
     # the cmake variable stays empty, so testing that alone silently skips the kernel and
     # leaves a build that succeeds with the op missing.
-    set(ENABLE_VSA_SM100_FAMILY OFF)
+    # One architecture-specific image per data-center Blackwell entry in the arch list.
+    set(ENABLE_VSA_SM100A OFF)
+    set(ENABLE_VSA_SM103A OFF)
     set(_VSA_ARCH_LIST "${TORCH_CUDA_ARCH_LIST}")
     if(NOT _VSA_ARCH_LIST AND DEFINED ENV{TORCH_CUDA_ARCH_LIST})
         set(_VSA_ARCH_LIST "$ENV{TORCH_CUDA_ARCH_LIST}")
     endif()
-    if(_VSA_ARCH_LIST MATCHES "(^|[; ,])(10\\.(0|3)a|10(0|3)a|sm_10(0|3)a)([; ,]|$)")
-        set(ENABLE_VSA_SM100_FAMILY ON)
+    if(_VSA_ARCH_LIST MATCHES "(^|[; ,])(10\\.0a|100a|sm_100a)([; ,]|$)")
+        set(ENABLE_VSA_SM100A ON)
     endif()
-    if(ENABLE_VSA_SM100_FAMILY)
-        message(STATUS "fastvideo-kernel: building block_sparse_sm100a (sm_100a/sm_103a, 64- and 128-token blocks)")
+    if(_VSA_ARCH_LIST MATCHES "(^|[; ,])(10\\.3a|103a|sm_103a)([; ,]|$)")
+        set(ENABLE_VSA_SM103A ON)
+    endif()
+    set(_VSA_FWD_GENCODE "")
+    set(_VSA_FWD_ARCHS "")
+    if(ENABLE_VSA_SM100A)
+        list(APPEND _VSA_FWD_GENCODE "-gencode;arch=compute_100a,code=sm_100a")
+        list(APPEND _VSA_FWD_ARCHS "sm_100a")
+    endif()
+    if(ENABLE_VSA_SM103A)
+        list(APPEND _VSA_FWD_GENCODE "-gencode;arch=compute_103a,code=sm_103a")
+        list(APPEND _VSA_FWD_ARCHS "sm_103a")
+    endif()
+    if(_VSA_FWD_GENCODE)
+        message(STATUS "fastvideo-kernel: building block_sparse_sm100a (${_VSA_FWD_ARCHS}; 64- and 128-token blocks)")
         list(APPEND EXTENSION_SOURCES csrc/attention/block_sparse_sm100a.cu
                                       csrc/attention/block_sparse_blk128_sm100a.cu)
         set_source_files_properties(csrc/attention/block_sparse_sm100a.cu
                                     csrc/attention/block_sparse_blk128_sm100a.cu PROPERTIES
-            COMPILE_OPTIONS "-gencode;arch=compute_100a,code=sm_100a;-gencode;arch=compute_103a,code=sm_103a;-DVSA_BHSD=true")
-        # VSA block-sparse attention BACKWARD, 64-token blocks. sm_100a only for now: validated
-        # on GB200, not yet on B300/GB300, so no sm_103a image is built and the Python side keeps
-        # the Triton backward for sm_103a devices.
+            COMPILE_OPTIONS "${_VSA_FWD_GENCODE};-DVSA_BHSD=true")
+    endif()
+    # VSA block-sparse attention BACKWARD, 64-token blocks: the same images as the forward.
+    if(_VSA_FWD_GENCODE)
         list(APPEND EXTENSION_SOURCES csrc/attention/block_sparse_bwd_sm100a.cu)
         set_source_files_properties(csrc/attention/block_sparse_bwd_sm100a.cu PROPERTIES
-            COMPILE_OPTIONS "-gencode;arch=compute_100a,code=sm_100a;-DVSA_BHSD=true")
+            COMPILE_OPTIONS "${_VSA_FWD_GENCODE};-DVSA_BHSD=true")
     endif()
 
     Python_add_library(fastvideo_kernel_ops MODULE USE_SABI ${SKBUILD_SABI_VERSION} WITH_SOABI
@@ -434,7 +449,7 @@ if(BUILD_CXX_KERNELS)
 
     # Build compile definitions list
     set(COMPILE_DEFS TORCH_EXTENSION_NAME=fastvideo_kernel_ops)
-    if(ENABLE_VSA_SM100_FAMILY)
+    if(ENABLE_VSA_SM100A OR ENABLE_VSA_SM103A)
         list(APPEND COMPILE_DEFS TK_COMPILE_BLOCK_SPARSE_VSA_SM100A)
     endif()
     if(ENABLE_TK_KERNELS)

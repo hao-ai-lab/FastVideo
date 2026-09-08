@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""sm_100a (Blackwell) CUDA block-sparse VSA backward.
+"""sm_100a/sm_103a (data-center Blackwell) CUDA block-sparse VSA backward.
 
 Companion of ``block_sparse_attn_sm100a`` (the forward): consumes the forward's ``lse`` in the
 Triton "M format" (``max(qk * sm_scale * log2e) + log2(l)``, ``[B, H, S]`` fp32) unchanged and
@@ -23,7 +23,7 @@ except ImportError:  # pragma: no cover - extension not built
     _BWD = None
     _HAS_VSA_BWD_SM100A = False
 
-_SM100 = (10, 0)
+_SUPPORTED_COMPUTE_CAPABILITIES = {(10, 0), (10, 3)}
 HEAD_DIM = 128
 BLOCK = 64
 # Must match the -DVSA_BHSD the extension was compiled with (FastVideo builds with true).
@@ -58,7 +58,7 @@ def is_supported(q: torch.Tensor, variable_block_sizes: torch.Tensor) -> bool:
     """
     if not _HAS_VSA_BWD_SM100A or not q.is_cuda:
         return False
-    if torch.cuda.get_device_capability(q.device) != _SM100:
+    if torch.cuda.get_device_capability(q.device) not in _SUPPORTED_COMPUTE_CAPABILITIES:
         return False
     if q.dtype != torch.bfloat16 or q.dim() != 4 or q.shape[-1] != HEAD_DIM:
         return False

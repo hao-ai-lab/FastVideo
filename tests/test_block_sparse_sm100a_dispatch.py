@@ -175,8 +175,9 @@ def test_backward_uses_sm100a_kernel_when_built(monkeypatch):
     """Guards against a silent Triton fallback: with the op built on an sm_100a device the
     CUDA backward must be the one that runs."""
     from fastvideo_kernel import block_sparse_attn_bwd_sm100a as vsa_bwd
-    if not vsa_bwd._HAS_VSA_BWD_SM100A or torch.cuda.get_device_capability() != (10, 0):
-        pytest.skip("sm_100a backward not built for this device")
+    if (not vsa_bwd._HAS_VSA_BWD_SM100A
+            or torch.cuda.get_device_capability() not in {(10, 0), (10, 3)}):
+        pytest.skip("sm_100a/sm_103a backward not built for this device")
     _, _, sm100a_backward = _grads_sm100a_route_vs_triton(monkeypatch)
     assert sm100a_backward
 
