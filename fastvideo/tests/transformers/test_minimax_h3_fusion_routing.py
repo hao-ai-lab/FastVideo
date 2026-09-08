@@ -9,6 +9,15 @@ import torch
 from fastvideo.platforms import AttentionBackendEnum
 
 
+def test_minimax_h3_declares_flashinfer_support() -> None:
+    """H3 dense attention can be selected through the shared backend router."""
+    from fastvideo.configs.models.dits.minimax_h3 import MiniMaxH3ArchConfig
+
+    config = MiniMaxH3ArchConfig()
+
+    assert AttentionBackendEnum.FLASHINFER in config._supported_attention_backends
+
+
 @pytest.mark.parametrize("enabled", [False, True])
 def test_only_opted_in_packed_minimax_h3_blocks_enable_fa4_varlen(
     monkeypatch: pytest.MonkeyPatch,
