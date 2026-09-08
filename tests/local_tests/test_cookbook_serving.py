@@ -6,6 +6,7 @@ from pathlib import Path
 from html.parser import HTMLParser
 
 import pytest
+import yaml
 
 from docs.generate_examples import COOKBOOK_DATA, Example, cookbook_serving_profile, validate_cookbook
 
@@ -29,6 +30,22 @@ def test_cookbook_serving_does_not_inherit_local_benchmark():
     for client in profile["clients"].values():
         assert client["code"] == (ROOT / client["source"]).read_text()
     validate_cookbook()
+
+
+@pytest.mark.parametrize(
+    "config_path",
+    [
+        "examples/inference/basic/basic_fasth3_spark.yaml",
+        "examples/inference/basic/basic_fasth3_spark_pair.yaml",
+        "examples/serving/openai_fasth3_spark.yaml",
+    ],
+)
+def test_spark_configs_use_lazy_load_not_sequential(config_path):
+    cfg = yaml.safe_load((ROOT / config_path).read_text())
+    offload = cfg["generator"]["engine"]["offload"]
+    assert offload["lazy_module_load"] is True
+    experimental = cfg["generator"]["pipeline"]["experimental"]
+    assert "h3_sequential_load" not in experimental
 
 
 def test_spark_preview_is_a_runtime_with_one_or_two_devices():
