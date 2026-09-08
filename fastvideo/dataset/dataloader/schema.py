@@ -66,6 +66,14 @@ pyarrow_schema_t2v = pa.schema([
     pa.field("text_embedding_shape", pa.list_(pa.int64())),
     # e.g., 'bfloat16' or 'float32'
     pa.field("text_embedding_dtype", pa.string()),
+    # Secondary text embedding: ByT5, nullable=True preserves compatibility at the Arrow schema level.
+    pa.field("text_embedding_2_bytes", pa.binary(), nullable=True),
+    pa.field(
+        "text_embedding_2_shape",
+        pa.list_(pa.int64()),
+        nullable=True,
+    ),
+    pa.field("text_embedding_2_dtype", pa.string(), nullable=True),
     # --- Metadata ---
     pa.field("file_name", pa.string()),
     pa.field("caption", pa.string()),
