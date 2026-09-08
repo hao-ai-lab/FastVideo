@@ -1,0 +1,44 @@
+# OpenAI-compatible server for FastWan2.1 T2V 1.3B (DMD-distilled, VSA sparse attention).
+# Requires: FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN
+#   FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN fastvideo serve --config examples/serving/openai_fastwan21_1_3b.yaml
+generator:
+  model_path: FastVideo/FastWan2.1-T2V-1.3B-Diffusers
+  engine:
+    num_gpus: 1
+    parallelism:
+      tp_size: 1
+      sp_size: 1
+    offload:
+      dit: false
+      vae: false
+      pin_cpu_memory: false
+    compile:
+      enabled: true
+  pipeline:
+    experimental:
+      VSA_sparsity: 0.8
+      dmd_denoising_steps: [1000, 757, 522]
+
+server:
+  host: 0.0.0.0
+  port: 8000
+  output_dir: outputs/openai_fastwan21_1_3b
+  served_model_name: fastwan21-1.3b
+
+default_request:
+  negative_prompt: >-
+    Bright tones, overexposed, static, blurred details, subtitles, style,
+    works, paintings, images, static, overall gray, worst quality, low
+    quality, JPEG compression residue, ugly, incomplete, extra fingers,
+    poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen
+    limbs, fused fingers, still picture, messy background, three legs, many
+    people in the background, walking backwards
+  sampling:
+    seed: 1024
+    num_frames: 81
+    height: 480
+    width: 832
+    fps: 16
+    num_inference_steps: 3
+  output:
+    return_frames: false
