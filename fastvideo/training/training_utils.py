@@ -797,6 +797,10 @@ def load_distillation_checkpoint(
 def normalize_dit_input(model_type, latents, vae) -> torch.Tensor:
     if model_type == "hunyuan_hf" or model_type == "hunyuan":
         return latents * vae.config.scaling_factor
+    elif model_type == "hunyuan15":
+        # Parquet latents are raw latent_dist.mode() outputs; inference
+        # divides by scaling_factor before decode, so training multiplies.
+        return latents * vae.scaling_factor
     elif model_type == "wan":
         latents_mean = torch.tensor(vae.latents_mean)
         latents_std = 1.0 / torch.tensor(vae.latents_std)
