@@ -38,7 +38,6 @@ generator:
       inference_torch_compile: true
       vae_parallel_decode: true
       vae_parallel_decode_strategy: gather
-      h3_sequential_load: true
 request:
   prompt: >-
     A wide cinematic shot of an alpine meadow at sunrise, pale pink mountain

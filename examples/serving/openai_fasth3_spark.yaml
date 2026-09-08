@@ -35,7 +35,6 @@ generator:
       inference_torch_compile: false
       vae_parallel_decode: true
       vae_parallel_decode_strategy: gather
-      h3_sequential_load: true
 
 server:
   host: 0.0.0.0

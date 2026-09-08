@@ -8,6 +8,7 @@ from html.parser import HTMLParser
 import pytest
 
 from docs.generate_examples import COOKBOOK_DATA, Example, cookbook_serving_profile, validate_cookbook
+from fastvideo.api import load_run_config, load_serve_config
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -29,6 +30,22 @@ def test_cookbook_serving_does_not_inherit_local_benchmark():
     for client in profile["clients"].values():
         assert client["code"] == (ROOT / client["source"]).read_text()
     validate_cookbook()
+
+
+@pytest.mark.parametrize(
+    "config_path,loader",
+    [
+        ("examples/inference/basic/basic_fasth3_spark.yaml", load_run_config),
+        ("examples/inference/basic/basic_fasth3_spark_pair.yaml", load_run_config),
+        ("examples/serving/openai_fasth3_spark.yaml", load_serve_config),
+    ],
+)
+def test_spark_configs_use_lazy_load_not_sequential(config_path, loader):
+    cfg = loader(str(ROOT / config_path))
+    offload = cfg.generator.engine.offload
+    assert offload.lazy_module_load is True
+    experimental = cfg.generator.pipeline.experimental
+    assert "h3_sequential_load" not in experimental
 
 
 def test_spark_preview_is_a_runtime_with_one_or_two_devices():
