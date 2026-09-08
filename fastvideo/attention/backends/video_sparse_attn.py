@@ -327,11 +327,14 @@ class VideoSparseAttentionImpl(AttentionImpl):
 
         if video_sparse_attn is None:
             raise NotImplementedError("video_sparse_attn is not installed")
-        # Default 64-element-tile path (unchanged): BHSD round-trip.
+        # Default 64-element-tile path (unchanged): BHSD round-trip. The gate is
+        # only read elementwise by the coarse/sparse combine, which views it at
+        # block resolution without requiring contiguity, so the transposed view
+        # is handed over as is (no full-sequence copy).
         query = query.transpose(1, 2).contiguous()
         key = key.transpose(1, 2).contiguous()
         value = value.transpose(1, 2).contiguous()
-        gate_compress = gate_compress.transpose(1, 2).contiguous()
+        gate_compress = gate_compress.transpose(1, 2)
         return video_sparse_attn(query,
                                  key,
                                  value,
