@@ -26,23 +26,54 @@ def build_optimizer_and_scheduler(
     learning_rate: float,
     betas: tuple[float, float],
     scheduler_name: str,
+    module: torch.nn.Module | None = None,
 ) -> tuple[torch.optim.Optimizer, object]:
-    """Build an AdamW optimizer and LR scheduler.
+    """Build the optimizer (AdamW or Muon) and LR scheduler.
 
-    Returns ``(optimizer, lr_scheduler)`` so the caller can store them
-    as method-level attributes.
+    ``optimizer_config.optimizer_type`` selects the optimizer. For ``"muon"``,
+    ``module`` must be provided so the 2-D hidden weight matrices can be split
+    from embeddings / output head / 1-D params by name (the latter fall back to
+    an auxiliary AdamW group). Returns ``(optimizer, lr_scheduler)``.
     """
     if not params:
         raise ValueError("No trainable parameters passed to "
                          "build_optimizer_and_scheduler")
 
-    optimizer = torch.optim.AdamW(
-        params,
-        lr=float(learning_rate),
-        betas=betas,
-        weight_decay=float(optimizer_config.weight_decay),
-        eps=1e-8,
-    )
+    opt_type = str(getattr(optimizer_config, "optimizer_type", "adamw")).lower()
+    if opt_type == "muon":
+        if module is None:
+            raise ValueError("optimizer_type='muon' requires the `module` argument so Muon "
+                             "can classify 2-D weights vs embeddings/head/1-D params")
+        from fastvideo.train.utils.muon import (
+            MuonWithAuxAdam,
+            split_params_for_muon,
+        )
+        muon_params, aux_params = split_params_for_muon([(n, p) for n, p in module.named_parameters()
+                                                         if p.requires_grad])
+        muon_lr = float(optimizer_config.muon_lr) or float(learning_rate)
+        optimizer: torch.optim.Optimizer = MuonWithAuxAdam(
+            muon_params,
+            aux_params,
+            lr=muon_lr,
+            momentum=float(optimizer_config.muon_momentum),
+            weight_decay=float(optimizer_config.muon_weight_decay),
+            ns_steps=int(optimizer_config.muon_ns_steps),
+            aux_lr=float(learning_rate),
+            aux_betas=betas,
+            aux_eps=1e-8,
+            aux_weight_decay=float(optimizer_config.weight_decay),
+        )
+    elif opt_type == "adamw":
+        optimizer = torch.optim.AdamW(
+            params,
+            lr=float(learning_rate),
+            betas=betas,
+            weight_decay=float(optimizer_config.weight_decay),
+            eps=1e-8,
+        )
+    else:
+        raise ValueError(f"Unknown training.optimizer.optimizer_type={opt_type!r} "
+                         "(expected 'adamw' or 'muon')")
 
     scheduler = get_scheduler(
         str(scheduler_name),
