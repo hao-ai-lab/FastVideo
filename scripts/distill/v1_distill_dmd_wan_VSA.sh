@@ -11,11 +11,13 @@ export TOKENIZERS_PARALLELISM=false
 # Train generator with VSA
 # Make sure that num_latent_t is a multiple of sp_size
 torchrun --nnodes 1 --nproc_per_node $NUM_GPUS \
-    fastvideo/training/wan_distillation_pipeline.py \
+    fastvideo/training/runner.py \
+    --pipeline-class WanDistillationPipeline \
+    --pipeline-module fastvideo.training.wan_distillation_pipeline \
     --model_path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
     --real_score_model_path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
     --fake_score_model_path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
-    --inference_mode False\
+    --inference_mode False \
     --pretrained_model_name_or_path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
     --cache_dir "/home/ray/.cache" \
     --data_path "$DATA_DIR" \
