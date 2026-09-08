@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 import torch
-import fp4quant
+import fp4quant_cuda as fp4quant
 from triton.tools.mxfp import MXFP4Tensor
 
 from bench_utils import bench_kineto
