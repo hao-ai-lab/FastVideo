@@ -331,11 +331,11 @@ def test_rewrite_prompt_sequence_accepts_numbered_prose_output():
     ]
 
 
-def test_enhance_prompt_prefers_cerebras_before_groq_fallback():
+def test_enhance_prompt_uses_groq_when_it_returns_first():
     enhancer = _build_staged_enhancer(
         cerebras_payload=_chat_payload_with_content('{"prompt":"Cerebras prompt"}'),
         groq_payload=_chat_payload_with_content('{"prompt":"Groq prompt"}'),
-        cerebras_delay_s=0.01,
+        cerebras_delay_s=0.08,
         groq_delay_s=0.01,
     )
 
@@ -346,12 +346,12 @@ def test_enhance_prompt_prefers_cerebras_before_groq_fallback():
 
     assert result.fallback_used is False
     assert result.error is None
-    assert result.provider == "cerebras"
+    assert result.provider == "groq"
     assert result.model == "gpt-test"
-    assert result.prompt == "Cerebras prompt"
+    assert result.prompt == "Groq prompt"
     assert enhancer.get_provider_success_counts() == {
-        "cerebras": 1,
-        "groq": 0,
+        "cerebras": 0,
+        "groq": 1,
     }
 
 
