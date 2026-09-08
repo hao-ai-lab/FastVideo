@@ -62,6 +62,8 @@ column links a runnable script in `examples/inference/basic/` where one exists.
 | longcat | `FastVideo/LongCat-Video-I2V-Diffusers` | I2V | [basic_longcat_i2v.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_longcat_i2v.py) |
 | longcat | `FastVideo/LongCat-Video-VC-Diffusers` | — | [basic_longcat_vc.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_longcat_vc.py) |
 | ltx2 | `FastVideo/LTX2-Distilled-Diffusers`<br>`FastVideo/LTX2.3-Distilled-Diffusers`<br>`FastVideo/LTX-2.3-Distilled-Diffusers` | T2V | [basic_ltx2_distilled.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_ltx2_distilled.py) |
+| ltx2 | `FastVideo/LTX-2.5-Distilled-Diffusers` | T2V, I2V | [T2AV](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_ltx2_5_t2av.py)<br>[I2AV](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_ltx2_5_i2av.py) |
+| ltx2 | `FastVideo/LTX-2.5-Dev-Diffusers` | T2V, I2V | [T2AV](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_ltx2_5_t2av.py)<br>[I2AV](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_ltx2_5_i2av.py) |
 | ltx2 | `Lightricks/LTX-2.3`<br>`FastVideo/LTX2.3-base`<br>`FastVideo/LTX2.3-Diffusers` | T2V | [basic_ltx2.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_ltx2.py) |
 | ltx2 | `Lightricks/LTX-2`<br>`FastVideo/LTX2-base`<br>`FastVideo/LTX2-Diffusers` | T2V | [basic_ltx2.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_ltx2.py) |
 | mmaudio | `FastVideo/MMAudio-large-44k-v2-Diffusers` | V2A, T2A | [basic_mmaudio.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_mmaudio.py) |
@@ -102,6 +104,11 @@ to convert the official weights locally and set `MMAUDIO_MODEL_PATH`.
 **Note (MiniMax H3)**: T2VA, FL2VA, and Ref2VA all generate video with stereo
 audio. Use the Ref2VA example when passing ordered image, video, or audio
 references.
+
+**Note (LTX-2.5)**: T2V and I2V produce synchronized video and audio. The
+official `Lightricks/LTX-2.5` repository uses gated, split component files, so
+it must first be converted to FastVideo's component layout. See the
+[LTX-2.5 inference guide](ltx2_5.md).
 
 **Note (Wan-VACE)**: not currently supported — no VACE pipeline or registered
 model ID exists on `main`

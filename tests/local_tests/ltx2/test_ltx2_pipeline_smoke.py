@@ -316,9 +316,17 @@ def test_ltx2_typed_surface_preflight() -> None:
         LTX2AudioDecodingStage, LTX2DenoisingStage, LTX2LatentPreparationStage, LTX2TextEncodingStage,
     )
 
-    # All three LTX-2 presets registered.
+    # All LTX-2/2.3/2.5 presets registered.
     names = {p.name for p in get_presets_for_family("ltx2")}
-    assert names == {"ltx2_base", "ltx2_distilled", "ltx2_two_stage"}
+    assert names == {
+        "ltx2_base",
+        "ltx2_3_base",
+        "ltx2_distilled",
+        "ltx2_two_stage",
+        "ltx2_5_dev",
+        "ltx2_5_distilled",
+        "ltx2_5_distilled_two_stage",
+    }
 
     # Two-stage preset has the denoise + refine topology and pulls its
     # refine allowed_overrides from the typed dataclass.

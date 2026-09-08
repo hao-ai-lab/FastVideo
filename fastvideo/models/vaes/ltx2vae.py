@@ -1332,6 +1332,7 @@ class VideoDecoder(nn.Module):
         causal: bool = False,
         timestep_conditioning: bool = False,
         decoder_spatial_padding_mode: PaddingModeType = PaddingModeType.REFLECT,
+        base_channels: int = 128,
     ):
         super().__init__()
 
@@ -1346,7 +1347,7 @@ class VideoDecoder(nn.Module):
         self.decode_noise_scale = 0.025
         self.decode_timestep = 0.05
 
-        feature_channels = in_channels
+        feature_channels = base_channels
         for block_name, block_params in list(reversed(decoder_blocks)):
             block_config = block_params if isinstance(block_params, dict) else {}
             if block_name == "res_x_y":
@@ -1526,6 +1527,7 @@ class VideoDecoderConfigurator:
         norm_layer_str = config.get("norm_layer", "pixel_norm")
         causal = config.get("causal_decoder", False)
         timestep_conditioning = config.get("timestep_conditioning", True)
+        base_channels = config.get("decoder_base_channels", 128)
 
         return VideoDecoder(
             convolution_dimensions=convolution_dimensions,
@@ -1537,6 +1539,7 @@ class VideoDecoderConfigurator:
             causal=causal,
             timestep_conditioning=timestep_conditioning,
             decoder_spatial_padding_mode=decoder_spatial_padding_mode,
+            base_channels=base_channels,
         )
 
 

@@ -55,6 +55,13 @@ class LTX2VideoArchConfig(DiTArchConfig):
     # LTX-2.3 gated extensions. All default OFF == LTX-2.0 behavior.
     cross_attention_adaln: bool = False
     caption_proj_before_connector: bool = False
+    # LTX-2.5 architecture gates. Defaults preserve all pre-2.5 checkpoints:
+    # prompt cross-attention remains timestep-dependent, FFNs retain their
+    # biases, and no keyframe-only parameter is added to the state dict.
+    use_prompt_adaln_single: bool = True
+    ff_bias: bool = True
+    audio_ff_bias: bool = True
+    use_keyframes_abs_pos_embedding: bool = False
 
     positional_embedding_theta: float = 10000.0
     positional_embedding_max_pos: list[int] = field(default_factory=lambda: [20, 2048, 2048])
