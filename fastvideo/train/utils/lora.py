@@ -125,13 +125,71 @@ def _is_excluded_layer(
     return any(excluded in module_name for excluded in excluded_modules)
 
 
+def _register_replicated_gradient_sync(parameter: nn.Parameter, ) -> None:
+    """Average an unmanaged replicated parameter's gradient over its mesh.
+
+    LoRA parameters are attached after ``fully_shard``, so FSDP does not
+    register gradient-reduction hooks for them. ``DTensor.to_local()`` keeps
+    autograd connectivity but preserves the parameter's ``Replicate``
+    placement without inserting a collective. Average the rank-local
+    gradients over every replicated mesh dimension before gradient clipping
+    and the optimizer step.
+    """
+
+    if not isinstance(parameter, DTensor):
+        return
+
+    replicated_dims = [
+        mesh_dim for mesh_dim, placement in enumerate(parameter.placements)
+        if isinstance(placement, Replicate) and parameter.device_mesh.size(mesh_dim) > 1
+    ]
+    if not replicated_dims:
+        return
+
+    def sync_gradient(param: torch.Tensor) -> None:
+        grad = param.grad
+        if grad is None:
+            return
+        local_grad = grad.to_local() if isinstance(grad, DTensor) else grad
+        for mesh_dim in replicated_dims:
+            dist.all_reduce(
+                local_grad,
+                group=parameter.device_mesh.get_group(mesh_dim),
+            )
+            local_grad.div_(parameter.device_mesh.size(mesh_dim))
+
+    parameter.register_post_accumulate_grad_hook(sync_gradient)
+
+
+def _make_replicated_lora_parameter(
+    parameter: nn.Parameter,
+    mesh: DeviceMesh,
+) -> nn.Parameter:
+    """Create a synchronized replicated DTensor for a late-added LoRA weight."""
+
+    placements = [Replicate()] * mesh.ndim
+    replicated = DTensor.from_local(
+        parameter.detach(),
+        device_mesh=mesh,
+        placements=placements,
+        run_check=True,
+    )
+    replicated_parameter = nn.Parameter(
+        replicated,
+        requires_grad=parameter.requires_grad,
+    )
+    _register_replicated_gradient_sync(replicated_parameter)
+    return replicated_parameter
+
+
 def _replicate_lora_parameters(transformer: torch.nn.Module, ) -> None:
     """Wrap LoRA params in replicated DTensors when distributed is active.
 
     The training loaders shard the base transformer with FSDP/HSDP before the
     model plugin sees it. Newly-added LoRA parameters therefore need to be
     explicit replicated DTensors so optimizers/checkpointing can treat them the
-    same way across ranks.
+    same way across ranks. Replicated values are broadcast during creation,
+    and their rank-local gradients are averaged before the optimizer step.
 
     The mesh is reused from the FSDP-wrapped base_layer parameters rather than
     rebuilt via ``init_device_mesh`` — building a parallel mesh with a different
@@ -166,8 +224,6 @@ def _replicate_lora_parameters(transformer: torch.nn.Module, ) -> None:
     if mesh is None:
         return
 
-    placements = [Replicate()] * mesh.ndim
-
     for module in transformer.modules():
         if not isinstance(module, BaseLayerWithLoRA):
             continue
@@ -181,12 +237,11 @@ def _replicate_lora_parameters(transformer: torch.nn.Module, ) -> None:
             param.requires_grad_(True)
             if isinstance(param, DTensor):
                 continue
-            replicated = DTensor.from_local(
-                param.detach(),
-                device_mesh=mesh,
-                placements=placements,
+            setattr(
+                module,
+                attr_name,
+                _make_replicated_lora_parameter(param, mesh),
             )
-            setattr(module, attr_name, nn.Parameter(replicated))
 
 
 def enable_lora_training(
