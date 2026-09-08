@@ -63,7 +63,7 @@ class SceneMetric(BaseMetric):
         self._model = Qwen2_5OmniForConditionalGeneration.from_pretrained(
             self._model_path,
             torch_dtype=torch.bfloat16,
-            device_map=str(self.device) if self.device.type == "cuda" else None,
+            device_map=str(self.device) if self.device.type != "cpu" else None,
         )
         self._model.disable_talker()
         self._model.eval()
