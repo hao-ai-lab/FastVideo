@@ -74,11 +74,16 @@ def _install_hint(metric_name: str, dep: str) -> str:
         return ("uv pip install 'fastvideo[eval-vbench]' && "
                 "uv pip install --no-build-isolation "
                 "'git+https://github.com/facebookresearch/detectron2.git'")
+    if dep == "vqeval":
+        return ("git submodule update --init fastvideo/third_party/eval/vqeval && "
+                "uv pip install -e '.[eval-vqeval]'")
     return f"uv pip install -e '.[{_extra_for(metric_name)}]'"
 
 
 def _extra_for(metric_name: str) -> str:
     """Map a metric name to the smallest extra that satisfies its deps."""
+    if metric_name.startswith("vqeval."):
+        return "eval-vqeval"
     if metric_name.startswith("vbench."):
         return "eval-vbench"
     if metric_name.startswith("physics_iq"):
