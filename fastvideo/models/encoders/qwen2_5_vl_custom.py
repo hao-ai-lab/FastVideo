@@ -26,10 +26,19 @@ from torch.distributed._tensor import DTensor
 from torch.distributed.device_mesh import DeviceMesh
 from torch.nn import CrossEntropyLoss
 from transformers.activations import ACT2FN
-from transformers.cache_utils import Cache, DynamicCache, SlidingWindowCache, StaticCache
+from transformers.cache_utils import Cache, DynamicCache, StaticCache
 from transformers.modeling_attn_mask_utils import AttentionMaskConverter
 from transformers.modeling_outputs import BaseModelOutputWithPast, ModelOutput
 from transformers.modeling_rope_utils import ROPE_INIT_FUNCTIONS
+
+try:
+    from transformers.cache_utils import SlidingWindowCache
+except ImportError:
+    # transformers 5 dropped the cache-level class; a sliding window is now a property of the
+    # cache's layers (DynamicSlidingWindowLayer / StaticSlidingWindowLayer), so no cache object
+    # can be an instance of it. isinstance() against an empty tuple is always False, which is
+    # the right answer there.
+    SlidingWindowCache = ()  # type: ignore[assignment,misc]
 
 try:
     from torch.distributed.tensor import Shard
