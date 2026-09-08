@@ -18,7 +18,8 @@ from fastvideo.pipelines.stages.denoising import DenoisingStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 from fastvideo.utils import dict_to_3d_list
-from fastvideo.models.dits.hyworld.retrieval_context import (generate_points_in_sphere, select_aligned_memory_frames)
+from fastvideo.models.dits.hyworld.retrieval_context import (generate_points_in_sphere, make_retrieval_generator,
+                                                             select_aligned_memory_frames)
 from fastvideo.models.dits.hyworld.pose import pose_to_input, compute_latent_num
 
 logger = init_logger(__name__)
@@ -156,7 +157,8 @@ class HYWorldDenoisingStage(DenoisingStage):
 
         # Generate local points if not provided
         if points_local is None:
-            points_local = generate_points_in_sphere(50000, 8.0).to(device)
+            retrieval_generator = make_retrieval_generator(batch.generator, batch.seed)
+            points_local = generate_points_in_sphere(50000, 8.0, generator=retrieval_generator).to(device)
         else:
             points_local = points_local.to(device)
 
