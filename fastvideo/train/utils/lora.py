@@ -3,7 +3,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import contextlib
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -252,3 +253,22 @@ def enable_lora_training(
         len(replacements),
     )
     return len(replacements)
+
+
+@contextlib.contextmanager
+def lora_disabled(module: torch.nn.Module) -> Iterator[None]:
+    """Temporarily disable every LoRA layer under *module*.
+
+    The adapter-disabled model acts as the frozen reference policy (used
+    by PromptRL's KL terms) without keeping a duplicate base-model copy.
+    The flag is restored on exit, including on exceptions.
+    """
+    layers = [m for m in module.modules() if isinstance(m, BaseLayerWithLoRA)]
+    previous = [m.disable_lora for m in layers]
+    try:
+        for layer in layers:
+            layer.disable_lora = True
+        yield
+    finally:
+        for layer, flag in zip(layers, previous, strict=False):
+            layer.disable_lora = flag

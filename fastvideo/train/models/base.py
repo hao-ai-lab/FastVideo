@@ -11,6 +11,7 @@ from fastvideo.attention.selector import coerce_attn_backend
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.models.utils import pred_noise_to_pred_video
 from fastvideo.platforms import AttentionBackendEnum
+from fastvideo.train.roles.base import TrainRoleBase
 
 if TYPE_CHECKING:
     from fastvideo.train.utils.training_config import (
@@ -23,7 +24,7 @@ if TYPE_CHECKING:
 NoisePrediction: TypeAlias = torch.Tensor | tuple[torch.Tensor, torch.Tensor]
 
 
-class ModelBase(ABC):
+class ModelBase(TrainRoleBase, ABC):
     """Per-role model instance.
 
     Every role (student, teacher, critic, …) gets its own ``ModelBase``
@@ -62,6 +63,24 @@ class ModelBase(ABC):
     def device(self) -> torch.device:
         """The local CUDA device for this rank."""
         return get_local_torch_device()
+
+    # ------------------------------------------------------------------
+    # TrainRoleBase plumbing
+    # ------------------------------------------------------------------
+
+    def checkpoint_modules(self) -> dict[str, torch.nn.Module]:
+        """Expose the role transformer for DCP checkpointing/FSDP."""
+        transformer = getattr(self, "transformer", None)
+        if isinstance(transformer, torch.nn.Module):
+            return {"transformer": transformer}
+        return {}
+
+    def trainable_parameters(self) -> list[torch.nn.Parameter]:
+        """Transformer parameters that require gradients."""
+        return [
+            p for module in self.checkpoint_modules().values()
+            for p in module.parameters() if p.requires_grad
+        ]
 
     def _enable_lora_if_configured(
         self,
