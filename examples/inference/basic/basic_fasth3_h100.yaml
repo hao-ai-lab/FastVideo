@@ -1,0 +1,68 @@
+# FastH3 Preview on four H100 80 GB GPUs (sm_90).
+#
+# Hopper has no FA4 and no sm_100a VSA kernel. This profile keeps the checkpoint,
+# the four forwards and the 90% VSA sparsity of the GB200 profile and changes
+# three things: the 64-token VSA path runs on the ThunderKittens sm_90a kernel
+# (build fastvideo-kernel with CMAKE_ARGS='-DFASTVIDEO_KERNEL_BUILD_TK=ON'), the
+# DiT is FSDP-sharded across the four GPUs instead of replicated, and the text
+# encoder stays resident as block-FP8 (35.5 GB instead of 66.7 GB; produce it
+# with scripts/checkpoint_conversion/quantize_minimax_h3_text_encoder_fp8.py),
+# so nothing is offloaded between requests. Keep the env prefix below, or pass
+# the equivalent CLI flags on examples/inference/basic/basic_fasth3.py
+# (`--num-gpus 4 --no-replicated-dit --vsa-kernel tk --no-fa4
+# --text-encoder-weights ./FastH3-TextEncoder-FP8 --no-offload-text-encoder
+# --no-offload-vae`).
+#
+# request.sampling below is the measured 4xH100 shape (960x544, 345 frames =
+# 14.375 s at 24 FPS). Legal H3 frame counts are 17n+5, max 345.
+#
+#   FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 FASTVIDEO_VSA_TK=1 \
+#     FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 FASTVIDEO_STAGE_LOGGING=1 \
+#     fastvideo generate --config examples/inference/basic/basic_fasth3_h100.yaml
+generator:
+  model_path: FastVideo/FastVideo-FastH3-4-step-Preview-v1-VSA-DataFree
+  pipeline:
+    components:
+      text_encoder_weights: ./FastH3-TextEncoder-FP8
+    experimental:
+      attention_backend: VIDEO_SPARSE_ATTN_H3
+      VSA_sparsity: 0.9
+      VSA_tile_size: 64
+      inference_torch_compile: true
+      vae_parallel_decode: true
+      vae_parallel_decode_strategy: gather
+      h3_sequential_load: true
+  engine:
+    num_gpus: 4
+    use_fsdp_inference: true
+    parallelism:
+      tp_size: 1
+      sp_size: 4
+    offload:
+      dit: false
+      dit_layerwise: false
+      text_encoder: false
+      vae: false
+      pin_cpu_memory: true
+      lazy_module_load: true
+    compile:
+      enabled: false
+      vae_enabled: true
+request:
+  prompt: >-
+    A wide cinematic shot of an alpine meadow at sunrise, pale pink mountain
+    peaks above a blue valley filled with thin morning mist.
+  negative_prompt: ""
+  sampling:
+    seed: 1000
+    height: 544
+    width: 960
+    num_frames: 345
+    fps: 24
+    num_inference_steps: 5
+    guidance_scale: 1.0
+    batch_cfg: false
+  output:
+    output_path: outputs/fasth3_h100/
+    save_video: true
+    return_frames: false
