@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """CPU unit tests for CudaPlatformBase.get_attn_backend_cls's FLASHINFER branch.
 
-Covers the three ways FLASHINFER resolution can fail before ever touching a
-GPU kernel: missing sm80 capability, a head size outside FlashInfer's safe
-list, and flashinfer-python not being importable. All device/import probes
-are monkeypatched, so this runs without a real GPU or the flashinfer wheel.
+Covers the ways FLASHINFER resolution can fail before ever touching a GPU
+kernel: missing sm80 capability, a head size outside FlashInfer's safe list,
+a head size the cuDNN prefill arm specifically can't handle, and
+flashinfer-python not being importable. All device/import probes are
+monkeypatched, so this runs without a real GPU or the flashinfer wheel.
 """
 from __future__ import annotations
 
@@ -26,6 +27,16 @@ def _patch_capability(monkeypatch, *, supported: bool) -> None:
 def _install_fake_flashinfer(monkeypatch) -> None:
     prefill = types.ModuleType("flashinfer.prefill")
     prefill.single_prefill_with_kv_cache = lambda *a, **k: None
+    flashinfer = types.ModuleType("flashinfer")
+    flashinfer.prefill = prefill
+    monkeypatch.setitem(sys.modules, "flashinfer", flashinfer)
+    monkeypatch.setitem(sys.modules, "flashinfer.prefill", prefill)
+
+
+def _install_fake_flashinfer_with_cudnn(monkeypatch) -> None:
+    prefill = types.ModuleType("flashinfer.prefill")
+    prefill.single_prefill_with_kv_cache = lambda *a, **k: None
+    prefill.cudnn_batch_prefill_with_kv_cache = lambda *a, **k: None
     flashinfer = types.ModuleType("flashinfer")
     flashinfer.prefill = prefill
     monkeypatch.setitem(sys.modules, "flashinfer", flashinfer)
@@ -73,3 +84,24 @@ def test_flashinfer_warns_on_dtype_cast(monkeypatch, caplog) -> None:
     with caplog.at_level("WARNING"):
         CudaPlatformBase.get_attn_backend_cls(AttentionBackendEnum.FLASHINFER, 128, torch.float32)
     assert any("cast" in record.message for record in caplog.records)
+
+
+@pytest.mark.parametrize("head_size", [64, 256])
+def test_flashinfer_cudnn_rejects_non_128_head_size_at_dispatch(monkeypatch, head_size: int) -> None:
+    # FlashInferBackend.get_supported_head_sizes() allows 64/128/256 generally,
+    # but the cudnn prefill arm narrows that to 128 only (FlashInferImpl.__init__).
+    # This must fail here, at backend selection, not later per-layer during
+    # model construction.
+    monkeypatch.setenv("FASTVIDEO_FLASHINFER_PREFILL_BACKEND", "cudnn")
+    _patch_capability(monkeypatch, supported=True)
+    _install_fake_flashinfer_with_cudnn(monkeypatch)
+    with pytest.raises(ValueError, match="cuDNN prefill requires head size 128"):
+        CudaPlatformBase.get_attn_backend_cls(AttentionBackendEnum.FLASHINFER, head_size, torch.bfloat16)
+
+
+def test_flashinfer_cudnn_resolves_for_head_size_128(monkeypatch) -> None:
+    monkeypatch.setenv("FASTVIDEO_FLASHINFER_PREFILL_BACKEND", "cudnn")
+    _patch_capability(monkeypatch, supported=True)
+    _install_fake_flashinfer_with_cudnn(monkeypatch)
+    backend_cls = CudaPlatformBase.get_attn_backend_cls(AttentionBackendEnum.FLASHINFER, 128, torch.bfloat16)
+    assert backend_cls == "fastvideo.attention.backends.flashinfer.FlashInferBackend"
