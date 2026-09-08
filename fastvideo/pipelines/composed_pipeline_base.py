@@ -150,7 +150,9 @@ class ComposedPipelineBase(ABC):
         if self._required_config_modules is None:
             raise NotImplementedError("Subclass must set _required_config_modules")
 
-        maybe_init_distributed_environment_and_model_parallel(fastvideo_args.tp_size, fastvideo_args.sp_size)
+        maybe_init_distributed_environment_and_model_parallel(fastvideo_args.tp_size,
+                                                              fastvideo_args.sp_size,
+                                                              ring_size=fastvideo_args.ring_size)
 
         # VideoGenerator applies this in each Worker before building the
         # pipeline. Keep direct from_pretrained/build_pipeline callers aligned,
