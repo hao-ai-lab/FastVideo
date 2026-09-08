@@ -331,6 +331,8 @@ async def _parse_video_request(raw_request: Request) -> VideoGenerationRequest:
 
 async def _adapt_request(request_id: str, request: VideoGenerationRequest) -> GenerationRequest:
     try:
+        # Runtime-specific checks (e.g. MLX's supported-field allowlist) run
+        # before the CUDA-oriented model/LoRA validation below.
         get_serving_engine().validate_video_request(request)
         validate_model_and_lora(request, get_server_args(), get_served_model_name())
         await prepare_reference_media(request_id, request, get_output_dir())

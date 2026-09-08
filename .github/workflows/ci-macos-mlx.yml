@@ -94,6 +94,7 @@ jobs:
             fastvideo/tests/mlx/test_mlx_refine.py \
             fastvideo/tests/mlx/test_mlx_prompt_to_video_decode.py \
             fastvideo/tests/mlx/test_mlx_wan22_prompt_cache_fingerprint.py \
+            fastvideo/tests/mlx/test_mlx_wan_pipeline.py \
             fastvideo/tests/mlx/test_wan22_sample.py \
             fastvideo/tests/mlx/test_windowed_attention.py \
             fastvideo/tests/mlx/test_mlx_rife_interpolation.py::test_rife_download_unavailable_has_specific_error \
@@ -158,6 +159,7 @@ jobs:
             fastvideo/tests/mlx/test_mlx_refine.py \
             fastvideo/tests/mlx/test_mlx_prompt_to_video_decode.py \
             fastvideo/tests/mlx/test_mlx_wan22_prompt_cache_fingerprint.py \
+            fastvideo/tests/mlx/test_mlx_wan_pipeline.py \
             fastvideo/tests/mlx/test_wan22_sample.py \
             fastvideo/tests/mlx/test_windowed_attention.py \
             fastvideo/tests/mlx/test_mlx_rife_interpolation.py::test_rife_download_unavailable_has_specific_error \
