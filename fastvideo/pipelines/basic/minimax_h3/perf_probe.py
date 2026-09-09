@@ -22,9 +22,14 @@ except ImportError:  # pragma: no cover - probe is only installed for the campai
 
 _request = -1
 
-# Default relative tolerance; `probe derive` on three unmodified launches
-# decides the real one, and compare uses the baseline file's tolerance anyway.
-_RTOL = 2e-2
+# Tolerances. `probe derive` over three unmodified launches (base 5d8c9911)
+# found the DiT path bit-identical across processes and the compiled VAE decode
+# drifting by ~1e-7 relative, so these bands are ~100x the noise: wide enough
+# for floating-point reordering by a fused or re-tiled kernel, far too narrow
+# for a semantic change (a dropped block, a wrong frame, a shifted schedule).
+_RTOL = 1e-3          # absmean / std / per-frame std
+_RTOL_MAX = 5e-3      # absmax: one element decides it
+_ATOL_MEAN = 5e-4     # per-frame / per-cell pixel means (0.13 of a uint8 step)
 
 
 def enabled() -> bool:
@@ -59,7 +64,7 @@ def tensor(name: str, t: torch.Tensor | None, *, rtol: float = _RTOL, exact: boo
     _probe.record(_tag(f"{name}.finite"), torch.isfinite(x).all())
     _probe.record(_tag(f"{name}.absmean"), x.abs().mean(), rtol=r)
     _probe.record(_tag(f"{name}.std"), x.std(), rtol=r)
-    _probe.record(_tag(f"{name}.absmax"), x.abs().max(), rtol=r)
+    _probe.record(_tag(f"{name}.absmax"), x.abs().max(), rtol=0.0 if exact else max(rtol, _RTOL_MAX))
 
 
 def video(name: str, t: torch.Tensor | None, *, rtol: float = _RTOL) -> None:
@@ -73,13 +78,13 @@ def video(name: str, t: torch.Tensor | None, *, rtol: float = _RTOL) -> None:
     frame_mean = x.mean(dim=(0, 1, 3, 4))  # [T]
     frame_std = x.std(dim=(1, 3, 4)).mean(dim=0)  # [T]
     for i in range(int(frame_mean.shape[0])):
-        _probe.record(_tag(f"{name}.frame{i:03d}.mean"), frame_mean[i], rtol=rtol, atol=2e-3)
+        _probe.record(_tag(f"{name}.frame{i:03d}.mean"), frame_mean[i], rtol=rtol, atol=_ATOL_MEAN)
         _probe.record(_tag(f"{name}.frame{i:03d}.std"), frame_std[i], rtol=rtol)
     h, w = x.shape[-2], x.shape[-1]
     for gy in range(4):
         for gx in range(4):
             cell = x[..., gy * h // 4:(gy + 1) * h // 4, gx * w // 4:(gx + 1) * w // 4]
-            _probe.record(_tag(f"{name}.cell{gy}{gx}.mean"), cell.mean(), rtol=rtol, atol=2e-3)
+            _probe.record(_tag(f"{name}.cell{gy}{gx}.mean"), cell.mean(), rtol=rtol, atol=_ATOL_MEAN)
 
 
 def scalar(name: str, value, *, rtol: float = 0.0) -> None:
