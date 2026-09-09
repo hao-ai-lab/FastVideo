@@ -7,6 +7,7 @@ This module intentionally uses only PyTorch and FastVideo configuration types.
 """
 
 import math
+import os
 from collections.abc import Iterator
 from dataclasses import dataclass
 
@@ -824,6 +825,29 @@ class AutoencoderKLMiniMaxH3(nn.Module):
             # The eager tile driver owns NVTX so each marker remains outside
             # the compiled decoder graph.
             with nvtx_range("minimax_h3.vae.decode_clip.decode_tiles"):
+                batch_rows = int(os.environ.get("FASTVIDEO_H3_VAE_TILE_BATCH_ROWS", "0") or 0)
+                if batch_rows > 0 and z.shape[0] == 1 and len(set(y_lengths)) == 1 and len(set(x_lengths)) == 1:
+                    # Decode `batch_rows` tile rows per forward: every tile of
+                    # this grid has the same geometry and the tiles are
+                    # independent, so stacking them on the batch dimension
+                    # feeds the compiled decoder ~1.8k x N tokens instead of
+                    # 28 launches of a forward too small to fill the GPU.
+                    num_columns = len(x_indices)
+                    for row_start in range(0, len(y_indices), batch_rows):
+                        row_slice = list(zip(y_indices, y_lengths))[row_start:row_start + batch_rows]
+                        tiles = torch.cat([
+                            z[..., y_position // ratio:y_position // ratio + y_length // ratio,
+                              x_position // ratio:x_position // ratio + x_length // ratio]
+                            for y_position, y_length in row_slice
+                            for x_position, x_length in zip(x_indices, x_lengths)
+                        ])
+                        with nvtx_range("minimax_h3.vae.decode_clip.tile.decoder_forward_batched"):
+                            decoded = self.decoder(self.post_quant_conv(tiles))
+                        for local_row in range(len(row_slice)):
+                            rows.append([decoded[index:index + 1]
+                                         for index in range(local_row * num_columns, (local_row + 1) * num_columns)])
+                        del tiles
+                    y_indices = []  # the per-tile loop below is skipped
                 for row_index, (y_position, y_length) in enumerate(zip(y_indices, y_lengths)):
                     row = []
                     for column_index, (x_position, x_length) in enumerate(zip(x_indices, x_lengths)):
