@@ -904,7 +904,11 @@ class VideoGenerator:
             # (Equivalence is SSIM-gated, not bit-exact: float->uint8
             # differs <=1 LSB CPU vs GPU.)
             src = output_batch.output
-            vid_u8 = (src * 255).clamp_(0, 255).to(torch.uint8)
+            if src.dtype == torch.uint8:
+                # The decoding stage already quantized on its device.
+                vid_u8 = src
+            else:
+                vid_u8 = (src * 255).clamp_(0, 255).to(torch.uint8)
             vid_u8 = rearrange(vid_u8, "b c t h w -> t b c h w").cpu()
             frames = [
                 torchvision.utils.make_grid(x, nrow=6).permute(1, 2, 0).squeeze(-1).contiguous().numpy() for x in vid_u8
