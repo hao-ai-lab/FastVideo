@@ -503,6 +503,11 @@ class MiniMaxH3Qwen3VLConditioner(TextEncoder[torch.Tensor]):
     """H3 conditioner returning the unnormalized layer-50 hidden tensor."""
 
     supports_hf_from_pretrained = False
+    # Every sequence-parallel rank encodes the same prompt in lockstep, so the
+    # CPU-offloaded FSDP shards can be spread over the SP group: each rank
+    # streams 1/sp of the weights from pinned host memory and all-gathers the
+    # rest over NVLink instead of every rank streaming the full ~50 GB.
+    fsdp_shard_across_sp = True
     supported_checkpoint_quantization_methods = frozenset({"fp8"})
 
     @classmethod
