@@ -35,6 +35,7 @@ try:
         resolve_metric_policies,
         serialize_metric_thresholds,
     )
+    from fastvideo.tests.performance.worker_log_capture import format_worker_log_tail
 except ImportError:
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
     if repo_root not in sys.path:
@@ -52,6 +53,7 @@ except ImportError:
         resolve_metric_policies,
         serialize_metric_thresholds,
     )
+    from fastvideo.tests.performance.worker_log_capture import format_worker_log_tail
 
 RESULTS_DIR = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
@@ -693,6 +695,12 @@ def main() -> int:
         print("Performance regression check failed:")
         for item in all_failures:
             print(f"  - {item}")
+        for raw, fixed in zip(current_results, static_threshold_failures, strict=True):
+            if fixed:
+                print(format_worker_log_tail(
+                    raw.get("benchmark_id", "unknown"),
+                    raw.get("worker_log_path"),
+                ))
         return 1
 
     print("Performance baseline comparison passed")
