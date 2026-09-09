@@ -396,7 +396,6 @@ if(BUILD_CXX_KERNELS)
     # exported (build.sh, and `pip install` with it set) the branch above only prints it --
     # the cmake variable stays empty, so testing that alone silently skips the kernel and
     # leaves a build that succeeds with the op missing.
-    # One architecture-specific image per data-center Blackwell entry in the arch list.
     set(ENABLE_VSA_SM100A OFF)
     set(ENABLE_VSA_SM103A OFF)
     set(_VSA_ARCH_LIST "${TORCH_CUDA_ARCH_LIST}")
