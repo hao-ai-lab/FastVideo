@@ -825,7 +825,10 @@ class AutoencoderKLMiniMaxH3(nn.Module):
             # The eager tile driver owns NVTX so each marker remains outside
             # the compiled decoder graph.
             with nvtx_range("minimax_h3.vae.decode_clip.decode_tiles"):
-                batch_rows = int(os.environ.get("FASTVIDEO_H3_VAE_TILE_BATCH_ROWS", "0") or 0)
+                # Default: every row at once (28 tiles per forward at 768x1344).
+                # Measured on 8 x B200: 415 ms per chunk tile by tile, 295 ms
+                # one row per forward, 275 ms all rows per forward.
+                batch_rows = int(os.environ.get("FASTVIDEO_H3_VAE_TILE_BATCH_ROWS", str(len(y_indices))) or 0)
                 if batch_rows > 0 and z.shape[0] == 1 and len(set(y_lengths)) == 1 and len(set(x_lengths)) == 1:
                     # Decode `batch_rows` tile rows per forward: every tile of
                     # this grid has the same geometry and the tiles are
