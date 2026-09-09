@@ -67,8 +67,10 @@ def stage_scope(stage_name: str, active: bool):
 def mem_line(stage_name: str) -> None:
     if not _MEM or not torch.cuda.is_available():
         return
-    logger.info("[perfmem] req=%d stage=%s alloc=%.2fGB reserved=%.2fGB peak=%.2fGB rss_max=%.2fGB t=%.3f",
-                _request, stage_name, torch.cuda.memory_allocated() / 1e9, torch.cuda.memory_reserved() / 1e9,
+    logger.info("[perfmem] req=%d stage=%s alloc=%.2fGB reserved=%.2fGB peak=%.2fGB rss_max=%.2fGB t=%.3f", _request,
+                stage_name,
+                torch.cuda.memory_allocated() / 1e9,
+                torch.cuda.memory_reserved() / 1e9,
                 torch.cuda.max_memory_allocated() / 1e9, _rss_gb(), time.perf_counter())
 
 

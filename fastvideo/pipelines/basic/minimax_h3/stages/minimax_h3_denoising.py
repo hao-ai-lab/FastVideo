@@ -66,10 +66,7 @@ class MiniMaxH3DenoisingStage(PipelineStage):
 
     performance_component_metric = "dit_time_s"
 
-    def __init__(self,
-                 transformer: Any,
-                 scheduler: Any,
-                 audio_scheduler: Any,
+    def __init__(self, transformer: Any, scheduler: Any, audio_scheduler: Any,
                  prefetch_modules: tuple[Any, ...] = ()) -> None:
         super().__init__()
         self.transformer = transformer

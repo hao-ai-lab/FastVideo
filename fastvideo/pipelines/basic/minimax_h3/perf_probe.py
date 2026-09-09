@@ -27,9 +27,9 @@ _request = -1
 # drifting by ~1e-7 relative, so these bands are ~100x the noise: wide enough
 # for floating-point reordering by a fused or re-tiled kernel, far too narrow
 # for a semantic change (a dropped block, a wrong frame, a shifted schedule).
-_RTOL = 1e-3          # absmean / std / per-frame std
-_RTOL_MAX = 5e-3      # absmax: one element decides it
-_ATOL_MEAN = 5e-4     # per-frame / per-cell pixel means (0.13 of a uint8 step)
+_RTOL = 1e-3  # absmean / std / per-frame std
+_RTOL_MAX = 5e-3  # absmax: one element decides it
+_ATOL_MEAN = 5e-4  # per-frame / per-cell pixel means (0.13 of a uint8 step)
 
 
 def enabled() -> bool:

@@ -28,7 +28,6 @@ from fastvideo.pipelines.basic.minimax_h3 import perf_probe
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
-from fastvideo.utils import is_pin_memory_available
 
 logger = init_logger(__name__)
 
@@ -203,7 +202,8 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
                         batch.extra["frames_yuv420p"] = host_yuv
                         batch.output = torch.zeros((), device="cpu", dtype=torch.uint8).expand(*frames_u8.shape)
                         del yuv, frames_u8
-                        logger.info("MiniMax-H3 video decode: yuv420p + copy-out %.0f ms", (time.perf_counter() - t_q) * 1000)
+                        logger.info("MiniMax-H3 video decode: yuv420p + copy-out %.0f ms",
+                                    (time.perf_counter() - t_q) * 1000)
                         return batch
                     # A fresh shared-memory buffer per request: the worker pipe
                     # pickles CPU tensors by handing over their storage, so a
@@ -213,7 +213,8 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
                     host_u8 = torch.empty(frames_u8.shape, device="cpu", dtype=torch.uint8).share_memory_()
                     host_u8.copy_(frames_u8)
                     del frames_u8
-                    logger.info("MiniMax-H3 video decode: quantize + copy-out %.0f ms", (time.perf_counter() - t_q) * 1000)
+                    logger.info("MiniMax-H3 video decode: quantize + copy-out %.0f ms",
+                                (time.perf_counter() - t_q) * 1000)
                 batch.output = host_u8
             else:
                 perf_probe.video("video_decode.output", placeholder)
