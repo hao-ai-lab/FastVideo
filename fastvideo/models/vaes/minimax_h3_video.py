@@ -535,6 +535,10 @@ class AutoencoderKLMiniMaxH3(nn.Module):
     _repeated_blocks = ["MiniMaxH3VideoTransformerBlock"]
     _keep_in_fp32_modules = ["encoder", "decoder", "quant_conv", "post_quant_conv"]
     _compile_conditions = [_is_minimax_h3_video_vae_decoder]
+    # ``_project_decoder_tile`` is CUDA-graph captured (prepare_for_compile);
+    # its static inputs are post_quant_conv's weight and bias, so those stay
+    # on the device across CPU offload round trips (see pinned_offload).
+    _offload_keep_resident = ("post_quant_conv", )
     # ``prepare_for_compile`` flips this per instance when the pipeline opts
     # into ``enable_torch_compile_vae``; default instances stay fully eager.
     _tile_helpers_compiled = False
