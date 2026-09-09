@@ -255,6 +255,7 @@ class DenoisingStage(PipelineStage):
 
         state = self.prepare_denoising(batch, fastvideo_args, target_dtype)
         latents = state.latents
+        model_kwargs, model_kwargs_uncond = self.prepare_model_kwargs(batch, fastvideo_args)
 
         # Initialize lists for ODE trajectory
         trajectory_timesteps: list[torch.Tensor] = []
@@ -423,6 +424,7 @@ class DenoisingStage(PipelineStage):
                             **dreamx_camera_kwargs,
                             **timesteps_r_kwarg,
                             **flux2_id_kwargs,
+                            **model_kwargs,
                         )
 
                     if batch.do_classifier_free_guidance:
@@ -467,6 +469,7 @@ class DenoisingStage(PipelineStage):
                                     **dreamx_camera_kwargs,
                                     **timesteps_r_kwarg,
                                     **flux2_id_kwargs,
+                                    **model_kwargs_uncond,
                                 )
                             _cfg_gate_fresh_uncond += 1
 
@@ -568,6 +571,14 @@ class DenoisingStage(PipelineStage):
             latents=latents,
             video_padding=torch.zeros_like(latents) if batch.video_latent is not None else None,
         )
+
+    def prepare_model_kwargs(self, batch, fastvideo_args) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Step-invariant transformer kwargs as (conditional, unconditional).
+
+        Family stages add named conditioning here (Wan-S2V's audio, reference
+        and motion latents) without the shared loop learning about it.
+        """
+        return {}, {}
 
     def activate_transformer(self, model, inactive_model, fastvideo_args) -> None:
         """Keep CPU/layerwise/FSDP offload decisions independent of the sampling recipe."""
