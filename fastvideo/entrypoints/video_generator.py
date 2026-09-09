@@ -144,6 +144,12 @@ def _validate_request_stage_overrides(model_path: str, request: GenerationReques
     )
 
 
+def _yuv420p_frames_to_rgb(frames: list[np.ndarray]) -> list[np.ndarray]:
+    """Planar yuv420p [H*3/2, W] uint8 frames -> [H, W, 3] uint8 RGB, for the imageio fallback."""
+    import av
+    return [av.VideoFrame.from_ndarray(np.ascontiguousarray(f), format="yuv420p").to_ndarray(format="rgb24") for f in frames]
+
+
 class VideoGenerator:
     """
     A unified class for generating videos using diffusion models.
@@ -884,10 +890,17 @@ class VideoGenerator:
 
         postprocess_start = time.perf_counter()
         frames: list[np.ndarray] | None
+        frames_pix_fmt = "rgb24"
+        yuv_frames = output_batch.extra.get("frames_yuv420p") if not batch.return_frames else None
         if is_latent_output or audio_only:
             frames = [] if audio_only and batch.return_frames else None
         elif not needs_frame_output:
             frames = None
+        elif yuv_frames is not None:
+            # The decoding stage already produced planar yuv420p frames on
+            # its device ([T, H*3/2, W] uint8); the encoder takes them as is.
+            frames = [frame.numpy() for frame in yuv_frames]
+            frames_pix_fmt = "yuv420p"
         else:
             # Quantize on the source device (typically CUDA) BEFORE the
             # device->host copy. `samples` above is just the pinned-CPU
@@ -957,6 +970,7 @@ class VideoGenerator:
                         fps=batch.fps,
                         audio=audio,
                         sample_rate=int(audio_sample_rate),
+                        pix_fmt=frames_pix_fmt,
                     )
                     if not save_ok:
                         logger.warning("ffmpeg pipe save failed; trying PyAV single-pass save.")
@@ -966,7 +980,11 @@ class VideoGenerator:
                             fps=batch.fps,
                             audio=audio,
                             sample_rate=int(audio_sample_rate),
+                            pix_fmt=frames_pix_fmt,
                         )
+                    if not save_ok and frames_pix_fmt != "rgb24":
+                        frames = _yuv420p_frames_to_rgb(frames)
+                        frames_pix_fmt = "rgb24"
                     save_video_time = time.perf_counter() - save_start
                     if save_ok:
                         audio_mux_time = 0.0
@@ -1089,6 +1107,7 @@ class VideoGenerator:
         fps: int,
         audio: torch.Tensor | np.ndarray,
         sample_rate: int,
+        pix_fmt: str = "rgb24",
     ) -> bool:
         """Encode video+audio into MP4 in one pass using PyAV."""
         try:
@@ -1107,7 +1126,7 @@ class VideoGenerator:
             output = av.open(output_path, mode="w")
             video_stream = output.add_stream("libx264", rate=fps)
             video_stream.width = int(frames[0].shape[1])
-            video_stream.height = int(frames[0].shape[0])
+            video_stream.height = int(frames[0].shape[0]) * 2 // 3 if pix_fmt == "yuv420p" else int(frames[0].shape[0])
             video_stream.pix_fmt = "yuv420p"
             video_stream.options = {
                 "preset": "ultrafast",
@@ -1123,7 +1142,7 @@ class VideoGenerator:
             audio_stream = output.add_stream("aac", rate=sample_rate, layout=layout)
 
             for frame_np in frames:
-                vframe = av.VideoFrame.from_ndarray(np.ascontiguousarray(frame_np), format="rgb24")
+                vframe = av.VideoFrame.from_ndarray(np.ascontiguousarray(frame_np), format=pix_fmt)
                 for packet in video_stream.encode(vframe):
                     output.mux(packet)
             for packet in video_stream.encode():
@@ -1193,6 +1212,7 @@ class VideoGenerator:
         fps: int,
         audio: torch.Tensor | np.ndarray,
         sample_rate: int,
+        pix_fmt: str = "rgb24",
     ) -> bool:
         """Encode video+audio using ffmpeg via rawvideo stdin + WAV input."""
         ffmpeg_bin = shutil.which(os.getenv("FASTVIDEO_FFMPEG_BIN", "ffmpeg"))
@@ -1205,6 +1225,8 @@ class VideoGenerator:
 
         height = int(frames[0].shape[0])
         width = int(frames[0].shape[1])
+        if pix_fmt == "yuv420p":
+            height = height * 2 // 3  # planar frame rows = H * 3/2
         codec = os.getenv("FASTVIDEO_VIDEO_CODEC", "libx264")
 
         try:
@@ -1225,7 +1247,7 @@ class VideoGenerator:
                     "-f",
                     "rawvideo",
                     "-pix_fmt",
-                    "rgb24",
+                    pix_fmt,
                     "-s:v",
                     f"{width}x{height}",
                     "-r",
