@@ -17,6 +17,7 @@ import { resolveDevtoolsMode } from "@/lib/devtoolsMode";
 import { createAvPipeline, DEFAULT_AV_MIME } from "@/lib/media/avPipeline";
 import { remuxArchivedFmp4Segments } from "@/lib/media/fmp4Remux";
 import { DEFAULT_CUSTOM_PRESET_ID, parseStoryPresets, sanitizePresetId } from "@/lib/presets";
+import { DEFAULT_GENERATION_MODE, type GenerationMode } from "@/lib/generationMode";
 import {
 	buildRewritePromptWindowSnapshot,
 	buildRewritePromptWindowSnapshotFromPrompts,
@@ -341,6 +342,7 @@ export default function Page() {
 	const [isMobileShareCapable, setIsMobileShareCapable] = useState(false);
 	const [videoMuted, setVideoMuted] = useState(true);
 	const [timeoutModalOpen, setTimeoutModalOpen] = useState(false);
+	const [generationMode, setGenerationMode] = useState<GenerationMode>(DEFAULT_GENERATION_MODE);
 	useEffect(() => {
 		setIsMobileShareCapable(typeof navigator.canShare === "function" && window.matchMedia("(pointer: coarse)").matches);
 	}, []);
@@ -1736,6 +1738,7 @@ export default function Page() {
 
 	function resetToProjectLobbyState() {
 		setVideoMuted(true);
+		setGenerationMode(DEFAULT_GENERATION_MODE);
 		pendingInitialPromptRef.current = "";
 		sessionStore.patch({
 			sessionStarted: false,
@@ -1764,6 +1767,7 @@ export default function Page() {
 		setSeedPrompts(segmentPrompts);
 		return {
 			type,
+			generation_mode: generationMode,
 			preset_id: getInitialPresetId(),
 			preset_label: getInitialPresetLabel(),
 			curated_prompts: segmentPrompts,
@@ -2785,6 +2789,7 @@ export default function Page() {
 							sessionExpired={sessionExpired as boolean}
 							sessionNotice={sessionNotice as string}
 							projectResetPending={projectResetPending as boolean}
+							generationMode={generationMode}
 							onPresetGenerate={handlePresetGenerate}
 							onContinuationInput={handleLivePromptInput}
 							onContinuationKeydown={handleLivePromptKeydown}
@@ -2792,6 +2797,7 @@ export default function Page() {
 							onSubmitContinuation={submitLivePrompt}
 							onLeave={leaveSession}
 							onStartNewProject={handleStartNewProject}
+							onGenerationModeChange={setGenerationMode}
 							onSpeechTranscript={handleLivePromptSpeechTranscript}
 							onSpeechInterimChange={handleLivePromptSpeechInterim}
 						/>

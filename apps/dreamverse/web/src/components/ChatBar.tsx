@@ -4,8 +4,16 @@ import React, { useRef, useState, useCallback, useEffect } from "react";
 import Image from "next/image";
 import { Film, ArrowUp, X, Loader2, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { NativeSelect } from "@/components/ui/native-select";
 import LeaveSessionModal, { shouldShowLeaveWarning } from "@/components/LeaveSessionModal";
 import SpeechToTextButton from "@/components/SpeechToTextButton";
+import {
+	DEFAULT_GENERATION_MODE,
+	GENERATION_MODES,
+	getGenerationMode,
+	isGenerationMode,
+	type GenerationMode,
+} from "@/lib/generationMode";
 import { cn } from "@/lib/utils";
 
 const PROMPT_MAX_LENGTH = 500;
@@ -22,6 +30,7 @@ interface Props {
 	sessionNotice?: string;
 	projectResetPending?: boolean;
 	viewingReadOnly?: boolean;
+	generationMode?: GenerationMode;
 	onPresetGenerate?: (presetId: string) => void;
 	onContinuationInput?: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
 	onContinuationKeydown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
@@ -30,6 +39,7 @@ interface Props {
 	onLeave?: () => void;
 	onStartNewProject?: () => void;
 	onBackFromViewing?: () => void;
+	onGenerationModeChange?: (mode: GenerationMode) => void;
 	onSpeechTranscript?: (text: string) => void;
 	onSpeechInterimChange?: (text: string) => void;
 }
@@ -46,6 +56,7 @@ export default function ChatBar({
 	sessionNotice = "",
 	projectResetPending = false,
 	viewingReadOnly = false,
+	generationMode = DEFAULT_GENERATION_MODE,
 	onPresetGenerate = () => {},
 	onContinuationInput = () => {},
 	onContinuationKeydown = () => {},
@@ -54,6 +65,7 @@ export default function ChatBar({
 	onLeave = () => {},
 	onStartNewProject = () => {},
 	onBackFromViewing = () => {},
+	onGenerationModeChange = () => {},
 	onSpeechTranscript,
 	onSpeechInterimChange,
 }: Props) {
@@ -69,6 +81,7 @@ export default function ChatBar({
 				? "What video are you imagining?"
 				: "What do you want to edit?";
 	const actionLabel = !sessionStarted ? "Generate" : "Rewrite rollout";
+	const selectedGenerationMode = getGenerationMode(generationMode);
 
 	const inputRef = useRef<HTMLTextAreaElement>(null);
 	const scrollRef = useRef<HTMLDivElement>(null);
@@ -343,6 +356,37 @@ export default function ChatBar({
 			{projectResetPending && sessionStarted && (
 				<div className="rounded-xl border border-sky-500/20 bg-sky-500/10 px-4 py-2.5 text-center text-xs text-sky-700 dark:text-sky-300">
 					Starting a new project after the current shot finishes. Your GPU session stays active.
+				</div>
+			)}
+
+			{!sessionStarted && (
+				<div className="flex flex-col gap-2 rounded-2xl border border-input bg-card/65 px-4 py-3 shadow-sm backdrop-blur-sm sm:flex-row sm:items-center sm:gap-4">
+					<label htmlFor="generation-mode" className="shrink-0 text-xs font-semibold text-foreground">
+						Generation mode
+					</label>
+					<div className="min-w-0 flex-1">
+						<NativeSelect
+							id="generation-mode"
+							aria-label="Generation mode"
+							value={generationMode}
+							disabled={isBusy || sttBusy}
+							onChange={(event) => {
+								if (isGenerationMode(event.target.value)) {
+									onGenerationModeChange(event.target.value);
+								}
+							}}
+							className="h-9"
+						>
+							{GENERATION_MODES.map((mode) => (
+								<option key={mode.id} value={mode.id}>
+									{mode.label} — {mode.name}
+								</option>
+							))}
+						</NativeSelect>
+						<p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
+							{selectedGenerationMode.description}
+						</p>
+					</div>
 				</div>
 			)}
 

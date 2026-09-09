@@ -589,12 +589,46 @@ describe.skip('App websocket integration', () => {
     });
 
     const initMessage = outbound.find((message) => message.type === 'session_init_v2');
+    expect(initMessage.generation_mode).toBe('t2va');
     expect(initMessage.preset_id).toBe('test_preset');
     expect(initMessage.curated_prompts).toEqual(['segment one', 'segment two']);
     expect(initMessage.enhancement_enabled).toBe(true);
     expect(initMessage.auto_extension_enabled).toBe(false);
     expect(initMessage.loop_generation_enabled).toBe(false);
     expect(initMessage.initial_rollout_prompt).toBe('');
+  });
+
+  it('sends the selected generation mode and locks it after session start', async () => {
+    const outbound: any[] = [];
+    server.on('connection', (socket) => {
+      socket.on('message', (rawMessage) => {
+        outbound.push(JSON.parse(rawMessage as string));
+      });
+    });
+
+    const user = userEvent.setup();
+    render(<Page />);
+
+    const modeSelect = await screen.findByRole('combobox', { name: 'Generation mode' });
+    expect(modeSelect).toHaveValue('t2va');
+
+    await user.selectOptions(modeSelect, 'fl2va');
+    expect(screen.getByText(
+      'Provide first and last frame images to control the transition.',
+    )).toBeInTheDocument();
+
+    const generateButton = await screen.findByRole('button', { name: 'Generate' });
+    await waitFor(() => expect(generateButton).toBeEnabled());
+    await user.click(generateButton);
+
+    await waitFor(() => {
+      expect(outbound.some((message) => message.type === 'session_init_v2')).toBe(true);
+    });
+
+    const initMessage = outbound.find((message) => message.type === 'session_init_v2');
+    expect(initMessage.generation_mode).toBe('fl2va');
+    expect(screen.queryByRole('combobox', { name: 'Generation mode' }))
+      .not.toBeInTheDocument();
   });
 
   it('starts a streaming session from a custom initial prompt without using curated prompts', async () => {
