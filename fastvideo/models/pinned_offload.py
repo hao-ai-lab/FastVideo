@@ -82,10 +82,23 @@ def prefetch(module: nn.Module, device: torch.device, pin: bool = True) -> None:
     if device.type != "cuda" or getattr(module, _PREFETCH_ATTR, None) is not None:
         return
     pin = pin and is_pin_memory_available()
+    host = _host_copies(module, pin)
+    # Allocate on the current stream (its cached pool already holds blocks of
+    # exactly these sizes from the previous request); only the copies go to
+    # the side stream, so no second pool and no fresh cudaMalloc segments.
+    pending = []
+    for name, t in _tensors(module):
+        if t.data.device == device:
+            continue
+        src = host[name]
+        dst = torch.empty_like(src, device=device)
+        pending.append((t, src, dst))
     stream = torch.cuda.Stream(device)
     stream.wait_stream(torch.cuda.current_stream(device))
     with torch.cuda.stream(stream):
-        _copy_in(module, device, pin)
+        for t, src, dst in pending:
+            dst.copy_(src, non_blocking=src.is_pinned())
+            t.data = dst
     event = torch.cuda.Event()
     event.record(stream)
     setattr(module, _PREFETCH_ATTR, (stream, event))
