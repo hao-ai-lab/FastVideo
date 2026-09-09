@@ -308,7 +308,7 @@ def _decode_single_parallel(
             t4 = time.perf_counter()
             logger.info("[vae-parallel] rank %d chunks=%d decode0=%.0fms meta_bcast=%.0fms gather+push=%.0fms "
                         "finalize=%.0fms total=%.0fms", rank, num_chunks, (t1 - t0) * 1e3, (t2 - t1) * 1e3,
-                        (t3 - t2) * 1e3, (t4 - t3) * 1e3, (t4 - t0) * 1e3)
+                        (t3 - t2) * 1e3, (t4 - t3) * 1e3, (t4 - t0) * 1e3, local_main_process_only=False)
 
 
 def _encode_clip_moments(vae: AutoencoderKLMiniMaxH3, pixels: torch.Tensor, clip_index: int) -> torch.Tensor:

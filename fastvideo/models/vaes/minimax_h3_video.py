@@ -836,6 +836,11 @@ class AutoencoderKLMiniMaxH3(nn.Module):
                             projected_tile = self._project_decoder_tile(tile)
                             with nvtx_range("minimax_h3.vae.decode_clip.tile.decoder_forward"):
                                 decoded_tile = self.decoder(projected_tile)
+                            # Release the CUDA-graph output before the next
+                            # replay: a live output makes cudagraph trees
+                            # record a fresh node per tile (28 recordings of
+                            # 20-36 ms each on the first measured request).
+                            del projected_tile
                             row.append(decoded_tile)
                     rows.append(row)
 
