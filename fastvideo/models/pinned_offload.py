@@ -56,11 +56,10 @@ def _host_copies(module: nn.Module, pin: bool) -> dict[str, torch.Tensor]:
     return host
 
 
-def load(module: nn.Module, device: torch.device, pin: bool = True) -> nn.Module:
-    """Put ``module`` on ``device``, copying from the pinned host copies."""
-    if device.type != "cuda":
-        return module.to(device)
-    pin = pin and is_pin_memory_available()
+_PREFETCH_ATTR = "_pinned_offload_prefetch"
+
+
+def _copy_in(module: nn.Module, device: torch.device, pin: bool) -> None:
     host = _host_copies(module, pin)
     for name, t in _tensors(module):
         if t.data.device == device:
@@ -69,6 +68,40 @@ def load(module: nn.Module, device: torch.device, pin: bool = True) -> nn.Module
         dst = torch.empty_like(src, device=device)
         dst.copy_(src, non_blocking=src.is_pinned())
         t.data = dst
+
+
+def prefetch(module: nn.Module, device: torch.device, pin: bool = True) -> None:
+    """Start copying ``module`` to ``device`` on a side stream.
+
+    Meant to be called while something else keeps the GPU busy (the DiT
+    forwards), so the host-to-device traffic of the frozen weights overlaps
+    compute instead of sitting at the head of the decode stage. ``load``
+    then only waits for the copies. The device tensors are allocated on the
+    current stream, so their lifetime is stream-ordered with the consumer.
+    """
+    if device.type != "cuda" or getattr(module, _PREFETCH_ATTR, None) is not None:
+        return
+    pin = pin and is_pin_memory_available()
+    stream = torch.cuda.Stream(device)
+    stream.wait_stream(torch.cuda.current_stream(device))
+    with torch.cuda.stream(stream):
+        _copy_in(module, device, pin)
+    event = torch.cuda.Event()
+    event.record(stream)
+    setattr(module, _PREFETCH_ATTR, (stream, event))
+
+
+def load(module: nn.Module, device: torch.device, pin: bool = True) -> nn.Module:
+    """Put ``module`` on ``device``, copying from the pinned host copies (or
+    waiting for a ``prefetch`` that already did)."""
+    if device.type != "cuda":
+        return module.to(device)
+    pending = getattr(module, _PREFETCH_ATTR, None)
+    if pending is not None:
+        _stream, event = pending
+        torch.cuda.current_stream(device).wait_event(event)
+        setattr(module, _PREFETCH_ATTR, None)
+    _copy_in(module, device, pin and is_pin_memory_available())
     return module
 
 

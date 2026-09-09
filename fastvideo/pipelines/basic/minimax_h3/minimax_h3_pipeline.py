@@ -348,6 +348,7 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
                 transformer=transformer,
                 scheduler=scheduler,
                 audio_scheduler=audio_scheduler,
+                prefetch_modules=(None if use_taeh3 else vae, audio_vae),
             ),
         )
         self.add_stage("video_decoding_stage", MiniMaxH3VideoDecodingStage(vae=None if use_taeh3 else vae))

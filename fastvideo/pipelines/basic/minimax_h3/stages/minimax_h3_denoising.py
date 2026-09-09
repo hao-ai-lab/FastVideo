@@ -11,6 +11,7 @@ from fastvideo.attention.selector import component_attention_backend, get_attn_b
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
+from fastvideo.models import pinned_offload
 from fastvideo.hooks.activation_trace import trace_step
 from fastvideo.profiler import nvtx_range, profiler_region
 from fastvideo.pipelines.basic.minimax_h3.packing import (
@@ -65,11 +66,18 @@ class MiniMaxH3DenoisingStage(PipelineStage):
 
     performance_component_metric = "dit_time_s"
 
-    def __init__(self, transformer: Any, scheduler: Any, audio_scheduler: Any) -> None:
+    def __init__(self,
+                 transformer: Any,
+                 scheduler: Any,
+                 audio_scheduler: Any,
+                 prefetch_modules: tuple[Any, ...] = ()) -> None:
         super().__init__()
         self.transformer = transformer
         self.scheduler = scheduler
         self.audio_scheduler = audio_scheduler
+        # CPU-offloaded modules the decode stages need next; their weights are
+        # copied in on a side stream while the DiT runs (see pinned_offload).
+        self.prefetch_modules = tuple(m for m in prefetch_modules if m is not None)
 
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         result = VerificationResult()
@@ -151,6 +159,10 @@ class MiniMaxH3DenoisingStage(PipelineStage):
             # plumbed like the run-level sparsity; the builder validates the
             # value against VSA_H3_TILE_SHAPES.
             vsa_tile_size = int(fastvideo_args.VSA_tile_size)
+
+        if fastvideo_args.vae_cpu_offload and device.type == "cuda":
+            for module in self.prefetch_modules:
+                pinned_offload.prefetch(module, device, pin=fastvideo_args.pin_cpu_memory)
 
         try:
             # The stage range groups the complete denoising loop while the
