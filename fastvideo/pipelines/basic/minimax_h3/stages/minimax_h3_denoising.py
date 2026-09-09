@@ -20,6 +20,7 @@ from fastvideo.pipelines.basic.minimax_h3.packing import (
 )
 from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_latent_preparation import MINIMAX_H3_LAYOUT_KEY
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.pipelines.basic.minimax_h3 import perf_probe
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
@@ -200,6 +201,8 @@ class MiniMaxH3DenoisingStage(PipelineStage):
                             text_indices=text_indices,
                         )
 
+                    perf_probe.tensor(f"denoise.step{index}.video_velocity", video_velocity)
+                    perf_probe.tensor(f"denoise.step{index}.audio_velocity", audio_velocity)
                     video_start = layout.num_condition_video_rows
                     audio_start = layout.num_condition_audio_rows
                     batch.latents[video_start:] = self.scheduler.step(
@@ -216,6 +219,8 @@ class MiniMaxH3DenoisingStage(PipelineStage):
                     )[0]
                     batch.step_index = index
                     batch.timestep = video_timestep
+                perf_probe.tensor("denoise.final.latents", batch.latents)
+                perf_probe.tensor("denoise.final.audio_latents", batch.audio_latents)
         finally:
             if bool(getattr(fastvideo_args, "dit_layerwise_offload", False)):
                 manager = getattr(self.transformer, "_layerwise_offload_manager", None)

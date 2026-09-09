@@ -26,6 +26,7 @@ from fastvideo.pipelines.basic.minimax_h3.reference import (
     validate_references,
 )
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.pipelines.basic.minimax_h3 import perf_probe
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
@@ -208,6 +209,7 @@ class MiniMaxH3InputPreparationStage(PipelineStage):
     @torch.no_grad()
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         del fastvideo_args
+        perf_probe.begin_request()
         prepare_common_request(batch)
         if self.ref2va:
             self._prepare_ref2va(batch)

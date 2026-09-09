@@ -22,6 +22,7 @@ from fastvideo.pipelines.basic.minimax_h3.packing import (
 )
 from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_latent_preparation import MINIMAX_H3_LAYOUT_KEY
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.pipelines.basic.minimax_h3 import perf_probe
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
@@ -154,6 +155,7 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
                 else:
                     self.vae.decode_to_pixels(latents, output)
             batch.output = output if is_output_rank else placeholder
+            perf_probe.video("video_decode.output", batch.output)
             return batch
         finally:
             if fastvideo_args.vae_cpu_offload:
@@ -218,6 +220,9 @@ class MiniMaxH3AudioDecodingStage(PipelineStage):
                                  f"got {tuple(decoded.shape)}.")
             batch.extra["audio"] = decoded[:, 0].transpose(0, 1).contiguous().cpu()
             batch.extra["audio_sample_rate"] = self.audio_vae.sampling_rate
+            perf_probe.tensor("audio_decode.waveform", batch.extra["audio"])
+            perf_probe.scalar("audio_decode.sample_rate", int(self.audio_vae.sampling_rate))
+            perf_probe.flush()
             self._clear_runtime(batch)
             return batch
         finally:

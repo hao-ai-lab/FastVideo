@@ -36,6 +36,7 @@ from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_input_preparation im
     MINIMAX_H3_KEYFRAMES_KEY,
 )
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.pipelines.basic.minimax_h3 import perf_probe
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
@@ -359,6 +360,10 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
         batch.latents = video_rows
         batch.audio_latents = audio_rows
         batch.extra[MINIMAX_H3_LAYOUT_KEY] = layout
+        perf_probe.tensor("latent_prep.latents", video_rows, exact=True)
+        perf_probe.tensor("latent_prep.audio_latents", audio_rows, exact=True)
+        perf_probe.scalar("latent_prep.sequence_length", int(layout.sequence_length))
+        perf_probe.scalar("latent_prep.num_video_latent_frames", int(layout.num_video_latent_frames))
         batch.extra.pop(MINIMAX_H3_TEXT_TOKEN_TAGS_KEY, None)
         batch.extra.pop(MINIMAX_H3_KEYFRAMES_KEY, None)
         batch.extra.pop(MINIMAX_H3_KEYFRAME_ANCHORS_KEY, None)
