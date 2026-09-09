@@ -205,8 +205,11 @@ focused on inference integration for video editing workflows.
 track and animates the subject in sync with it. The official checkpoint ships
 in native Wan format; `scripts/checkpoint_conversion/wan_s2v_to_diffusers.py`
 repackages it into the Diffusers layout this repo id refers to (bundling the
-`wav2vec2-large-xlsr-53-english` audio encoder). Sequence parallelism is not
-yet wired up for this pipeline.
+`wav2vec2-large-xlsr-53-english` audio encoder). `num_frames` follows the
+usual `4k+1` contract (default 81): one clip generates 84 frames and shows
+81, and longer requests chain clips that carry the previous 73 frames forward
+as motion context, as the official runner does. The source audio is muxed into
+the saved MP4. Sequence parallelism is not yet wired up for this pipeline.
 
 `Sliding Tile Attn (Legacy Branch)` entries refer to the archived
 `sta_do_not_delete` branch workflow, not active `main` inference wiring.

@@ -21,6 +21,11 @@ def main():
         pin_cpu_memory=True,
     )
 
+    # num_frames follows FastVideo's 4k+1 contract. 81 frames is one clip; a
+    # longer count (e.g. 165 = 81 + 84) chains clips, each continuing from the
+    # last 73 frames of the previous one, until the request is covered. Audio
+    # past the end of the video is dropped; video past the end of the audio
+    # plays over silence.
     prompt = ("A woman in a recording studio singing into a condenser microphone, "
               "warm key light from the left, shallow depth of field, medium close-up, "
               "subtle head movement in time with the music.")
@@ -33,7 +38,7 @@ def main():
         save_video=True,
         height=480,
         width=832,
-        num_frames=80,
+        num_frames=81,
         fps=16,
         guidance_scale=5.0,
         num_inference_steps=40,

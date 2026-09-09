@@ -356,7 +356,7 @@ WAN_S2V_14B = InferencePreset(
     defaults={
         "height": 480,
         "width": 832,
-        "num_frames": 80,
+        "num_frames": 81,
         "fps": 16,
         "guidance_scale": 5.0,
         "num_inference_steps": 40,

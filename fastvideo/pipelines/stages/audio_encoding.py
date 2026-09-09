@@ -10,6 +10,10 @@ the feature stream to the video frame rate -> bucket into a per-frame window.
 The resampling is the load-bearing part. If the audio feature stream and the
 video latents disagree on frame count, nothing crashes -- the lips just drift
 out of sync. ``verify_output`` pins the frame count for that reason.
+
+The waveform itself is also kept on ``batch.extra["audio"]`` so the saved MP4
+carries the speech track, the same convention the LTX-2 and MagiHuman audio
+stages use.
 """
 import os
 import tempfile
@@ -32,6 +36,9 @@ logger = init_logger(__name__)
 WAV2VEC_SAMPLE_RATE = 16000
 WAV2VEC_FEATURE_RATE = 50  # wav2vec2 emits one frame per 20ms
 REFERENCE_VIDEO_RATE = 30  # the rate Wan-S2V's audio features are aligned to
+# ``batch.extra`` key: how many video frames' worth of audio to bucket. A
+# multi-clip pipeline sets it to cover every clip; absent, it is ``num_frames``.
+EXTRA_AUDIO_FRAMES = "s2v_audio_frames"
 
 
 def _resample_features(features: torch.Tensor,
@@ -58,7 +65,12 @@ class AudioEncodingStage(PipelineStage):
         self.audio_encoder = audio_encoder
         self.audio_processor = audio_processor
 
-    def _load_waveform(self, audio_path: str) -> np.ndarray:
+    def _load_waveform(self, audio_path: str) -> tuple[np.ndarray, np.ndarray, int]:
+        """Returns (mono 16kHz waveform for wav2vec2, native waveform, native sample rate).
+
+        The native track is what gets muxed into the output video; the 16kHz
+        mono copy is only the encoder's input format.
+        """
         try:
             import librosa
         except ImportError as exc:  # pragma: no cover - environment dependent
@@ -67,20 +79,21 @@ class AudioEncodingStage(PipelineStage):
 
         # librosa reads local files only, but image_path already accepts URLs
         # (load_image in input_validation), so audio should behave the same way.
+        local_path, cleanup = audio_path, False
         if urlparse(audio_path).scheme in ("http", "https"):
             suffix = Path(urlparse(audio_path).path).suffix or ".wav"
             with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
                 with urllib.request.urlopen(audio_path) as response:
                     tmp.write(response.read())
-                local_path = tmp.name
-            try:
-                waveform, _ = librosa.load(local_path, sr=WAV2VEC_SAMPLE_RATE)
-            finally:
+                local_path, cleanup = tmp.name, True
+        try:
+            native, native_rate = librosa.load(local_path, sr=None, mono=False)
+        finally:
+            if cleanup:
                 os.unlink(local_path)
-            return waveform
-
-        waveform, _ = librosa.load(audio_path, sr=WAV2VEC_SAMPLE_RATE)
-        return waveform
+        mono = librosa.to_mono(native) if native.ndim > 1 else native
+        encoder_input = librosa.resample(mono, orig_sr=native_rate, target_sr=WAV2VEC_SAMPLE_RATE)
+        return encoder_input, native, int(native_rate)
 
     def _bucket_to_frames(self, features: torch.Tensor, num_frames: int, fps: int, window: int = 0) -> torch.Tensor:
         """Pick the audio feature window belonging to each video frame.
@@ -95,17 +108,27 @@ class AudioEncodingStage(PipelineStage):
         # -> 1) makes a 5s video read only 2.6s of audio: the video finishes while
         # the speech is half-done, and nothing errors -- the lips just drift.
         step = REFERENCE_VIDEO_RATE / float(fps)
+        span = max(1, int(round(step)))
+        silence = features.new_zeros(num_layers, dim * (2 * window + 1))
         out = []
         for i in range(num_frames):
-            centre = min(int(round(i * step)), max(total - 1, 0))
-            span = max(1, int(round(step)))
+            centre = int(round(i * step))
+            if centre >= total:
+                # Past the end of the track: silence, so a video longer than its
+                # audio finishes still rather than looping the last sound.
+                out.append(silence)
+                continue
             idx = [min(max(centre + offset * span, 0), total - 1) for offset in range(-window, window + 1)]
             out.append(features[:, idx].flatten(start_dim=-2))
         return torch.stack(out, dim=0).permute(1, 2, 0)  # [num_layers, C, num_frames]
 
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         device = self.audio_encoder.device
-        waveform = self._load_waveform(batch.audio_path)
+        waveform, native, native_rate = self._load_waveform(batch.audio_path)
+        # Keep the original track for the saved video. The pipeline trims it to
+        # the generated span once the final frame count is known.
+        batch.extra["audio"] = native
+        batch.extra["audio_sample_rate"] = native_rate
         inputs = self.audio_processor(waveform, sampling_rate=WAV2VEC_SAMPLE_RATE, return_tensors="pt")
 
         with torch.no_grad():
@@ -114,7 +137,10 @@ class AudioEncodingStage(PipelineStage):
         features = _resample_features(features, WAV2VEC_FEATURE_RATE, REFERENCE_VIDEO_RATE)
 
         assert batch.num_frames is not None and batch.fps is not None
-        batch.audio_embeds = self._bucket_to_frames(features, batch.num_frames, batch.fps).unsqueeze(0)
+        # The pipeline may generate several clips to cover the track; it says
+        # how many frames' worth of audio it wants. Alone, one clip = num_frames.
+        audio_frames = batch.extra.get(EXTRA_AUDIO_FRAMES, batch.num_frames)
+        batch.audio_embeds = self._bucket_to_frames(features, audio_frames, batch.fps).unsqueeze(0)
         logger.info("Encoded %s -> audio embeds %s", batch.audio_path, tuple(batch.audio_embeds.shape))
         return batch
 
@@ -129,6 +155,7 @@ class AudioEncodingStage(PipelineStage):
         result = VerificationResult()
         # Frame count must match what was requested, or audio and video drift
         # apart with no error anywhere downstream.
-        result.add_check("audio_embeds", batch.audio_embeds,
-                         lambda v: v is not None and v.shape[-1] == batch.num_frames)
+        expected = batch.extra.get(EXTRA_AUDIO_FRAMES, batch.num_frames)
+        result.add_check("audio_embeds", batch.audio_embeds, lambda v: v is not None and v.shape[-1] == expected)
+        result.add_check("audio", batch.extra.get("audio"), lambda v: v is not None)
         return result

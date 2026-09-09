@@ -271,7 +271,7 @@ def test_model_path_resolves_to_the_s2v_config_and_preset() -> None:
     assert get_default_preset(path) == "wan_s2v_14b"
     preset = get_preset("wan_s2v_14b", "wan")
     assert preset.workload_type == "i2v"
-    assert preset.defaults["num_frames"] % 4 == 0  # must divide into VAE latent frames
+    assert preset.defaults["num_frames"] % 4 == 1  # FastVideo frame contract: 4k+1
 
 
 def test_dit_input_channels_match_the_vae_latent_depth() -> None:
@@ -428,15 +428,18 @@ def test_audio_bucketing_emits_one_window_per_video_frame() -> None:
     assert out.shape == (25, 32, 16)  # [num_layers, C, num_frames]
 
 
-def test_audio_bucketing_clamps_at_track_end() -> None:
-    """A short audio track must not index past its end -- it repeats the last
-    window instead, which is what upstream does."""
+def test_audio_bucketing_pads_silence_past_track_end() -> None:
+    """Frames past the end of a short track get zeros (upstream
+    ``get_audio_embed_bucket_fps``), so a video longer than its audio finishes
+    still instead of looping the last sound; frames inside the track never
+    index past its end."""
     from fastvideo.pipelines.stages.audio_encoding import AudioEncodingStage
     stage = AudioEncodingStage(audio_encoder=None, audio_processor=None)
-    features = torch.randn(2, 4, 8)  # only 4 audio frames available
+    features = torch.randn(2, 4, 8) + 10  # only 4 audio frames available, all far from zero
     out = stage._bucket_to_frames(features, num_frames=32, fps=16, window=0)
     assert out.shape == (2, 8, 32)
-    assert torch.isfinite(out).all()
+    assert torch.all(out[..., :2] != 0)  # frames 0,1 -> audio frames 0,2 (30/16 ratio)
+    assert torch.all(out[..., 3:] == 0)  # frame 3 -> audio frame 6: past the end
 
 
 def test_feature_resampling_hits_the_target_rate() -> None:
@@ -584,3 +587,88 @@ def test_transformer_loads_and_runs_a_forward_pass() -> None:
         )
     assert out[0].shape == (channels, frames, size, size)
     assert torch.isfinite(out[0]).all()
+
+
+# --------------------------------------------------------------------------
+# Clip plan, decode trim, motion history, audio alignment
+# --------------------------------------------------------------------------
+
+
+def test_default_request_is_one_clip_showing_exactly_num_frames() -> None:
+    from fastvideo.pipelines.basic.wan.s2v_stages import plan_clips
+    plan = plan_clips(num_frames=81, clip_frames=84)
+    assert (plan.num_clips, plan.infer_frames, plan.visible_frames(0)) == (1, 84, 81)
+    assert plan.audio_frames == 84  # audio covers what the DiT generates, warm-up included
+
+
+@pytest.mark.parametrize("num_frames,expected_clips", [(165, 2), (161, 2), (169, 3), (249, 3)])
+def test_long_requests_chain_clips_until_covered(num_frames: int, expected_clips: int) -> None:
+    from fastvideo.pipelines.basic.wan.s2v_stages import plan_clips
+    plan = plan_clips(num_frames=num_frames, clip_frames=84)
+    assert plan.num_clips == expected_clips
+    visible = sum(plan.visible_frames(i) for i in range(plan.num_clips))
+    assert visible >= num_frames > visible - plan.infer_frames  # covered, with no spare clip
+
+
+def test_short_requests_shrink_the_clip_instead_of_wasting_frames() -> None:
+    from fastvideo.pipelines.basic.wan.s2v_stages import plan_clips
+    plan = plan_clips(num_frames=33, clip_frames=84)
+    assert (plan.num_clips, plan.infer_frames, plan.visible_frames(0)) == (1, 36, 33)
+
+
+@pytest.mark.parametrize("num_frames", [80, 0, 82])
+def test_frame_contract_is_enforced(num_frames: int) -> None:
+    from fastvideo.pipelines.basic.wan.s2v_stages import plan_clips
+    with pytest.raises(ValueError, match="4k\\+1"):
+        plan_clips(num_frames=num_frames, clip_frames=84)
+
+
+def test_clip_visible_frames_match_latent_preparation() -> None:
+    """The loop sets num_frames to the first clip's visible count so the shared
+    LatentPreparationStage allocates exactly infer_frames // 4 latent frames --
+    the count the DiT's audio alignment (motion pad, then trim) expects."""
+    from fastvideo.pipelines.basic.wan.s2v_stages import WARMUP_FRAMES, plan_clips
+    for num_frames in (81, 165, 33):
+        plan = plan_clips(num_frames, clip_frames=84)
+        per_clip = plan.infer_frames - WARMUP_FRAMES
+        assert (per_clip - 1) // 4 + 1 == plan.infer_frames // 4
+
+
+def test_decode_trim_keeps_generated_span_and_drops_first_clip_warmup() -> None:
+    from fastvideo.pipelines.basic.wan.s2v_stages import S2VDecodingStage
+    decoded = torch.arange(85.0).view(1, 1, 85, 1, 1)  # [ref | 21 latents] -> 1 + 21*4 frames
+    first = S2VDecodingStage.trim(decoded, infer_frames=84, first_clip=True)
+    assert first.shape[2] == 81 and first[0, 0, 0].item() == 4.0  # frames 1..3 are warm-up
+    decoded = torch.arange(157.0).view(1, 1, 157, 1, 1)  # [19 motion | 21 latents]
+    later = S2VDecodingStage.trim(decoded, infer_frames=84, first_clip=False)
+    assert later.shape[2] == 84 and later[0, 0, 0].item() == 157.0 - 84
+
+
+def test_motion_history_rolls_newest_frames_in() -> None:
+    from fastvideo.pipelines.basic.wan.wan_s2v_pipeline import roll_motion_history
+    clip = torch.arange(1.0, 82.0).view(1, 1, 81, 1, 1).expand(1, 3, 81, 4, 4)
+    history = roll_motion_history(None, clip, motion_frames=73)
+    assert history.shape[2] == 73 and history[0, 0, 0, 0, 0].item() == 9.0  # last 73 of 81
+    short = torch.full((1, 3, 5, 4, 4), 100.0)
+    history = roll_motion_history(history, short, motion_frames=73)
+    assert history.shape[2] == 73
+    assert history[0, 0, -5:, 0, 0].tolist() == [100.0] * 5 and history[0, 0, -6, 0, 0].item() == 81.0
+
+
+def test_audio_is_cut_to_the_generated_span() -> None:
+    """Output frame j was generated for audio frame j + 3 (the first clip's
+    warm-up frames are dropped but its audio window starts at 0), so the muxed
+    track starts 3/fps s in and lasts num_frames/fps s."""
+    from fastvideo.pipelines.basic.wan.wan_s2v_pipeline import align_audio
+    sr, fps = 16000, 16
+    track = torch.arange(sr * 10).numpy()  # 10 s
+    cut = align_audio(track, sr, fps, num_frames=81)
+    assert cut[0] == 3000 and len(cut) == 81000  # 3 frames = 0.1875 s; 81 frames = 5.0625 s
+    stereo = torch.arange(2 * sr * 10).view(2, -1).numpy()
+    assert align_audio(stereo, sr, fps, num_frames=81).shape == (2, 81000)
+
+
+def test_pipeline_splits_once_before_the_per_clip_stages() -> None:
+    from fastvideo.pipelines.basic.wan.wan_s2v_pipeline import _PER_CLIP_STAGES
+    assert _PER_CLIP_STAGES == ("timestep_preparation_stage", "latent_preparation_stage", "denoising_stage",
+                                "decoding_stage")

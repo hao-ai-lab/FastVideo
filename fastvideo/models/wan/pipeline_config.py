@@ -349,6 +349,11 @@ class WanS2V14BConfig(WanT2V480PConfig):
     # signature is a stale default. The first number pads the audio before
     # downsampling, the second trims it after, re-aligning audio with video.
     motion_frames: tuple[int, int] = (73, 19)
+    # Frames the transformer generates per clip (the official runner's
+    # ``infer_frames``; must be 4n). The first clip loses 3 warm-up frames on
+    # decode, so 84 makes a single clip show exactly the 81-frame default that
+    # FastVideo's 4k+1 frame contract expects. Longer requests chain clips.
+    clip_frames: int = 84
 
     def __post_init__(self) -> None:
         self.vae_config.load_encoder = True
