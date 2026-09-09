@@ -147,7 +147,9 @@ def _validate_request_stage_overrides(model_path: str, request: GenerationReques
 def _yuv420p_frames_to_rgb(frames: list[np.ndarray]) -> list[np.ndarray]:
     """Planar yuv420p [H*3/2, W] uint8 frames -> [H, W, 3] uint8 RGB, for the imageio fallback."""
     import av
-    return [av.VideoFrame.from_ndarray(np.ascontiguousarray(f), format="yuv420p").to_ndarray(format="rgb24") for f in frames]
+    return [
+        av.VideoFrame.from_ndarray(np.ascontiguousarray(f), format="yuv420p").to_ndarray(format="rgb24") for f in frames
+    ]
 
 
 class VideoGenerator:
@@ -917,11 +919,8 @@ class VideoGenerator:
             # (Equivalence is SSIM-gated, not bit-exact: float->uint8
             # differs <=1 LSB CPU vs GPU.)
             src = output_batch.output
-            if src.dtype == torch.uint8:
-                # The decoding stage already quantized on its device.
-                vid_u8 = src
-            else:
-                vid_u8 = (src * 255).clamp_(0, 255).to(torch.uint8)
+            # uint8 means the decoding stage already quantized on its device.
+            vid_u8 = src if src.dtype == torch.uint8 else (src * 255).clamp_(0, 255).to(torch.uint8)
             vid_u8 = rearrange(vid_u8, "b c t h w -> t b c h w").cpu()
             frames = [
                 torchvision.utils.make_grid(x, nrow=6).permute(1, 2, 0).squeeze(-1).contiguous().numpy() for x in vid_u8
