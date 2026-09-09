@@ -127,7 +127,10 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
 
         if self.vae is None:
             raise RuntimeError("MiniMax-H3 full VAE decode requires a loaded video VAE.")
+        t_load = time.perf_counter()
         pinned_offload.load(self.vae, device, pin=fastvideo_args.pin_cpu_memory)
+        torch.cuda.synchronize(device)
+        logger.info("MiniMax-H3 video decode: VAE weights to device %.0f ms", (time.perf_counter() - t_load) * 1000)
         try:
             latents = self.vae.denormalize_latents(latents.to(device=device, dtype=torch.float32))
             if fastvideo_args.output_type == "latent":
