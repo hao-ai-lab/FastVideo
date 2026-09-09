@@ -1088,7 +1088,8 @@ class AutoencoderKLMiniMaxH3(nn.Module):
     def decode_to_pixels(self, z: torch.Tensor, output: torch.Tensor) -> torch.Tensor:
         """Stream decoded ``[0, 1]`` FP32 pixels into a caller-owned CPU buffer."""
         expected_shape = self.decoded_pixel_shape(z.shape)
-        if output.device.type != "cpu" or output.dtype != torch.float32 or tuple(output.shape) != expected_shape:
+        if (output.device.type != "cpu" and output.device != z.device) or output.dtype != torch.float32 \
+                or tuple(output.shape) != expected_shape:
             raise ValueError(
                 "`output` must be a CPU float32 tensor with shape "
                 f"{expected_shape}, got device={output.device}, dtype={output.dtype}, shape={tuple(output.shape)}.")

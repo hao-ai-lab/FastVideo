@@ -136,11 +136,13 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
 
             output = None
             if is_output_rank:
+                # Assemble on the device: the driver only ever consumes uint8
+                # frames, so quantize here and ship 1/4 of the bytes through
+                # the worker pipe instead of a 1.5 GB fp32 pinned buffer.
                 output = torch.empty(
                     self.vae.decoded_pixel_shape(latents.shape),
-                    device="cpu",
+                    device=device,
                     dtype=torch.float32,
-                    pin_memory=fastvideo_args.pin_cpu_memory and is_pin_memory_available(),
                 )
             # Attribute the streamed decoder computation while retaining
             # per-chunk device-to-host transfer and pinned-buffer reuse.
@@ -155,8 +157,22 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
                     decode_to_pixels_parallel(self.vae, latents, output, sp_group, strategy=strategy)
                 else:
                     self.vae.decode_to_pixels(latents, output)
-            batch.output = output if is_output_rank else placeholder
-            perf_probe.video("video_decode.output", batch.output)
+            if is_output_rank:
+                perf_probe.video("video_decode.output", output)
+                with nvtx_range("minimax_h3.vae.quantize_u8"):
+                    frames_u8 = (output * 255).clamp_(0, 255).to(torch.uint8)
+                    del output
+                    host_u8 = torch.empty(
+                        frames_u8.shape,
+                        device="cpu",
+                        dtype=torch.uint8,
+                        pin_memory=fastvideo_args.pin_cpu_memory and is_pin_memory_available(),
+                    )
+                    host_u8.copy_(frames_u8)
+                batch.output = host_u8
+            else:
+                perf_probe.video("video_decode.output", placeholder)
+                batch.output = placeholder
             return batch
         finally:
             if fastvideo_args.vae_cpu_offload:
