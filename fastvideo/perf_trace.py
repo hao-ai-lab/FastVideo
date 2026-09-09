@@ -42,6 +42,21 @@ def _rss_gb() -> float:
     return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1e6
 
 
+def _probe_flush() -> None:
+    """Write the probe snapshot on every rank at the end of every request.
+
+    Only the output rank reaches the pipeline's own flush call (the audio stage
+    returns early elsewhere), and the atexit flush is lost when a worker is torn
+    down before Python exits cleanly (rank 1 of one run had no record file).
+    """
+    try:
+        import probe
+    except ImportError:
+        return
+    if probe.enabled():
+        probe.flush()
+
+
 def stage_scope(stage_name: str, active: bool):
     """A record_function span per stage, only while a capture is active."""
     if not active:
@@ -67,7 +82,10 @@ def request_scope():
         torch.cuda.reset_peak_memory_stats()
         mem_line("request_start")
     if _TRACE_DIR is None or n not in _TRACE_REQUESTS:
-        yield False
+        try:
+            yield False
+        finally:
+            _probe_flush()
         return
     rank = _rank()
     out = Path(_TRACE_DIR)
@@ -84,6 +102,7 @@ def request_scope():
         with torch.profiler.record_function(f"ProfilerStep#{n}"):
             yield True
     finally:
+        _probe_flush()
         torch.cuda.synchronize()
         prof.stop()
         path = out / f"rank{rank}.json"

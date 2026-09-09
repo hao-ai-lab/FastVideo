@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import torch
@@ -64,6 +65,7 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
     def __init__(self, vae: AutoencoderKLMiniMaxH3 | None) -> None:
         super().__init__()
         self.vae = vae
+        self._pixel_buffer: torch.Tensor | None = None
 
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         result = VerificationResult()
@@ -138,12 +140,14 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
             if is_output_rank:
                 # Assemble on the device: the driver only ever consumes uint8
                 # frames, so quantize here and ship 1/4 of the bytes through
-                # the worker pipe instead of a 1.5 GB fp32 pinned buffer.
-                output = torch.empty(
-                    self.vae.decoded_pixel_shape(latents.shape),
-                    device=device,
-                    dtype=torch.float32,
-                )
+                # the worker pipe instead of a 1.5 GB fp32 pinned buffer. The
+                # device buffer is kept across requests (1.5 GB at 124f/768p)
+                # so the allocator never has to map a fresh segment for it.
+                pixel_shape = self.vae.decoded_pixel_shape(latents.shape)
+                output = self._pixel_buffer
+                if output is None or tuple(output.shape) != pixel_shape or output.device != device:
+                    output = torch.empty(pixel_shape, device=device, dtype=torch.float32)
+                    self._pixel_buffer = output
             # Attribute the streamed decoder computation while retaining
             # per-chunk device-to-host transfer and pinned-buffer reuse.
             with (
@@ -160,15 +164,17 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
             if is_output_rank:
                 perf_probe.video("video_decode.output", output)
                 with nvtx_range("minimax_h3.vae.quantize_u8"):
+                    t_q = time.perf_counter()
                     frames_u8 = (output * 255).clamp_(0, 255).to(torch.uint8)
-                    del output
-                    host_u8 = torch.empty(
-                        frames_u8.shape,
-                        device="cpu",
-                        dtype=torch.uint8,
-                        pin_memory=fastvideo_args.pin_cpu_memory and is_pin_memory_available(),
-                    )
+                    # A fresh shared-memory buffer per request: the worker pipe
+                    # pickles CPU tensors by handing over their storage, so a
+                    # storage that is already shared crosses with no copy, and
+                    # a per-request pinned allocation (cudaHostAlloc, 100+ ms
+                    # and erratic) is avoided.
+                    host_u8 = torch.empty(frames_u8.shape, device="cpu", dtype=torch.uint8).share_memory_()
                     host_u8.copy_(frames_u8)
+                    del frames_u8
+                    logger.info("MiniMax-H3 video decode: quantize + copy-out %.0f ms", (time.perf_counter() - t_q) * 1000)
                 batch.output = host_u8
             else:
                 perf_probe.video("video_decode.output", placeholder)
