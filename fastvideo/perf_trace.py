@@ -105,6 +105,6 @@ def request_scope():
         _probe_flush()
         torch.cuda.synchronize()
         prof.stop()
-        path = out / f"rank{rank}.json"
+        path = out / (f"rank{rank}.json" if len(_TRACE_REQUESTS) == 1 else f"rank{rank}_req{n}.json")
         prof.export_chrome_trace(str(path))
         logger.info("[perftrace] wrote %s", path)

@@ -27,6 +27,12 @@ from fastvideo.utils import is_pin_memory_available
 logger = init_logger(__name__)
 
 _HOST_ATTR = "_pinned_offload_host"
+# A module may name submodules whose tensors stay on the device once loaded:
+# ``_offload_keep_resident = ("post_quant_conv",)``. Meant for the handful of
+# parameters that a CUDA-graph-captured helper treats as static inputs; a new
+# address on every request forces a re-record (250 ms and an allocator churn
+# in the H3 VAE decode), while the tensors themselves are a few kilobytes.
+_KEEP_ATTR = "_offload_keep_resident"
 
 
 def _tensors(module: nn.Module):
@@ -34,6 +40,12 @@ def _tensors(module: nn.Module):
         yield name, p
     for name, b in module.named_buffers(recurse=True):
         yield "buffer:" + name, b
+
+
+def _keep_resident(module: nn.Module, name: str) -> bool:
+    prefixes = getattr(module, _KEEP_ATTR, ())
+    bare = name[len("buffer:"):] if name.startswith("buffer:") else name
+    return any(bare == prefix or bare.startswith(prefix + ".") for prefix in prefixes)
 
 
 def _host_copies(module: nn.Module, pin: bool) -> dict[str, torch.Tensor]:
@@ -124,7 +136,7 @@ def unload(module: nn.Module) -> nn.Module:
     if host is None:
         return module.to("cpu")
     for name, t in _tensors(module):
-        if t.data.device.type == "cpu":
+        if t.data.device.type == "cpu" or _keep_resident(module, name):
             continue
         t.data = host[name]
     return module
