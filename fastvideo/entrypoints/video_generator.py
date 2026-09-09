@@ -1113,6 +1113,12 @@ class VideoGenerator:
                 "preset": "ultrafast",
                 "tune": "zerolatency",
             }
+            # PyAV leaves the encoder single-threaded; give libx264 frame and
+            # slice threads (the ffmpeg-binary route lets x264 pick its own).
+            # 124 frames of 1344x768 took 0.42 s single-threaded on a
+            # 128-core node and 0.25 s with 16 threads.
+            video_stream.thread_type = "AUTO"
+            video_stream.thread_count = max(1, min(16, os.cpu_count() or 1))
 
             audio_stream = output.add_stream("aac", rate=sample_rate, layout=layout)
 
