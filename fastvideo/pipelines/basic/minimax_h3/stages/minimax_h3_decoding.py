@@ -57,6 +57,27 @@ def _decode_participation(fastvideo_args: FastVideoArgs, want_parallel: bool) ->
     return sp_group, get_world_group().is_first_rank, False
 
 
+def _rgb_u8_to_yuv420p(rgb: torch.Tensor) -> torch.Tensor:
+    """[3, T, H, W] uint8 RGB -> [T, H*3/2, W] uint8 planar yuv420p (BT.601, limited range).
+
+    The integer coefficients are the usual 8-bit BT.601 approximation; the
+    chroma planes are the rounded mean of each 2x2 block.
+    """
+    r, g, b = (rgb[i].to(torch.int32) for i in range(3))
+    y = ((66 * r + 129 * g + 25 * b + 128) >> 8) + 16
+    cb = ((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128
+    cr = ((112 * r - 94 * g - 18 * b + 128) >> 8) + 128
+    t, h, w = y.shape
+    cb = (cb.view(t, h // 2, 2, w // 2, 2).sum(dim=(2, 4)) + 2) >> 2
+    cr = (cr.view(t, h // 2, 2, w // 2, 2).sum(dim=(2, 4)) + 2) >> 2
+    out = torch.empty((t, h * 3 // 2, w), device=rgb.device, dtype=torch.uint8)
+    out[:, :h] = y.clamp_(0, 255).to(torch.uint8)
+    chroma = out[:, h:].view(t, 2, h // 4, w)  # each chroma plane is (h/2, w/2) = (h/4 rows of w)
+    chroma[:, 0] = cb.clamp_(0, 255).to(torch.uint8).reshape(t, h // 4, w)
+    chroma[:, 1] = cr.clamp_(0, 255).to(torch.uint8).reshape(t, h // 4, w)
+    return out
+
+
 class MiniMaxH3VideoDecodingStage(PipelineStage):
     """Drop visual condition rows, unpatchify, and decode the target video."""
 
@@ -169,6 +190,21 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
                 with nvtx_range("minimax_h3.vae.quantize_u8"):
                     t_q = time.perf_counter()
                     frames_u8 = (output * 255).clamp_(0, 255).to(torch.uint8)
+                    if bool(getattr(batch, "save_video", False)) and not bool(getattr(batch, "return_frames", False)):
+                        # The driver only encodes an mp4 from these frames, and
+                        # its encoder wants yuv420p: convert here on the GPU
+                        # (the CPU swscale pass was ~0.2 s of the 0.39 s save)
+                        # and ship 1.5 bytes per pixel instead of 3. A
+                        # shape-only stand-in keeps batch.output's geometry
+                        # for the driver's result metadata.
+                        yuv = _rgb_u8_to_yuv420p(frames_u8[0])
+                        host_yuv = torch.empty(yuv.shape, device="cpu", dtype=torch.uint8).share_memory_()
+                        host_yuv.copy_(yuv)
+                        batch.extra["frames_yuv420p"] = host_yuv
+                        batch.output = torch.zeros((), device="cpu", dtype=torch.uint8).expand(*frames_u8.shape)
+                        del yuv, frames_u8
+                        logger.info("MiniMax-H3 video decode: yuv420p + copy-out %.0f ms", (time.perf_counter() - t_q) * 1000)
+                        return batch
                     # A fresh shared-memory buffer per request: the worker pipe
                     # pickles CPU tensors by handing over their storage, so a
                     # storage that is already shared crosses with no copy, and
