@@ -10,6 +10,7 @@ import torch
 from fastvideo.distributed import get_local_torch_device, get_sp_group, get_world_group, model_parallel_is_initialized
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
+from fastvideo.models import pinned_offload
 from fastvideo.models.vaes.minimax_h3_audio import MiniMaxH3AudioVAE
 from fastvideo.models.vaes.minimax_h3_parallel import DEFAULT_DECODE_GATHER_STRATEGY, decode_to_pixels_parallel
 from fastvideo.models.vaes.minimax_h3_video import AutoencoderKLMiniMaxH3
@@ -124,7 +125,7 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
 
         if self.vae is None:
             raise RuntimeError("MiniMax-H3 full VAE decode requires a loaded video VAE.")
-        self.vae.to(device)
+        pinned_offload.load(self.vae, device, pin=fastvideo_args.pin_cpu_memory)
         try:
             latents = self.vae.denormalize_latents(latents.to(device=device, dtype=torch.float32))
             if fastvideo_args.output_type == "latent":
@@ -159,7 +160,7 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
             return batch
         finally:
             if fastvideo_args.vae_cpu_offload:
-                self.vae.to("cpu")
+                pinned_offload.unload(self.vae)
 
 
 class MiniMaxH3AudioDecodingStage(PipelineStage):
@@ -202,7 +203,7 @@ class MiniMaxH3AudioDecodingStage(PipelineStage):
             layout.num_audio_latents,
         )
         device = get_local_torch_device()
-        self.audio_vae.to(device)
+        pinned_offload.load(self.audio_vae, device, pin=fastvideo_args.pin_cpu_memory)
         try:
             latents = self.audio_vae.denormalize_latents(latents.to(device=device, dtype=torch.float32))
             if fastvideo_args.output_type == "latent":
@@ -227,7 +228,7 @@ class MiniMaxH3AudioDecodingStage(PipelineStage):
             return batch
         finally:
             if fastvideo_args.vae_cpu_offload:
-                self.audio_vae.to("cpu")
+                pinned_offload.unload(self.audio_vae)
 
     @staticmethod
     def _clear_runtime(batch: ForwardBatch) -> None:
