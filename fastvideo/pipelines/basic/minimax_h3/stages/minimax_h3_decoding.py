@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import time
 from typing import Any
 
 import torch
@@ -147,10 +146,7 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
 
         if self.vae is None:
             raise RuntimeError("MiniMax-H3 full VAE decode requires a loaded video VAE.")
-        t_load = time.perf_counter()
         pinned_offload.load(self.vae, device, pin=fastvideo_args.pin_cpu_memory)
-        torch.cuda.synchronize(device)
-        logger.info("MiniMax-H3 video decode: VAE weights to device %.0f ms", (time.perf_counter() - t_load) * 1000)
         try:
             latents = self.vae.denormalize_latents(latents.to(device=device, dtype=torch.float32))
             if fastvideo_args.output_type == "latent":
@@ -187,7 +183,6 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
             if is_output_rank:
                 perf_probe.video("video_decode.output", output)
                 with nvtx_range("minimax_h3.vae.quantize_u8"):
-                    t_q = time.perf_counter()
                     frames_u8 = (output * 255).clamp_(0, 255).to(torch.uint8)
                     if bool(getattr(batch, "save_video", False)) and not bool(getattr(batch, "return_frames", False)):
                         # The driver only encodes an mp4 from these frames, and
@@ -202,8 +197,6 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
                         batch.extra["frames_yuv420p"] = host_yuv
                         batch.output = torch.zeros((), device="cpu", dtype=torch.uint8).expand(*frames_u8.shape)
                         del yuv, frames_u8
-                        logger.info("MiniMax-H3 video decode: yuv420p + copy-out %.0f ms",
-                                    (time.perf_counter() - t_q) * 1000)
                         return batch
                     # A fresh shared-memory buffer per request: the worker pipe
                     # pickles CPU tensors by handing over their storage, so a
@@ -213,8 +206,6 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
                     host_u8 = torch.empty(frames_u8.shape, device="cpu", dtype=torch.uint8).share_memory_()
                     host_u8.copy_(frames_u8)
                     del frames_u8
-                    logger.info("MiniMax-H3 video decode: quantize + copy-out %.0f ms",
-                                (time.perf_counter() - t_q) * 1000)
                 batch.output = host_u8
             else:
                 perf_probe.video("video_decode.output", placeholder)
@@ -254,6 +245,7 @@ class MiniMaxH3AudioDecodingStage(PipelineStage):
         if model_parallel_is_initialized() and not get_world_group().is_first_rank:
             batch.extra["audio"] = torch.empty((0, 2), device="cpu", dtype=torch.float32)
             batch.extra["audio_sample_rate"] = self.audio_vae.sampling_rate
+            perf_probe.flush()  # every rank writes its checkpoint snapshot at the end of the request
             self._clear_runtime(batch)
             return batch
 

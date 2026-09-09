@@ -25,7 +25,6 @@ from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.hooks.activation_trace import attach_activation_trace, detach_activation_trace
 from fastvideo.logger import init_logger
 from fastvideo.profiler import get_or_create_profiler
-from fastvideo import perf_trace
 from fastvideo.models.loader.component_loader import PipelineComponentLoader
 from fastvideo.pipelines.lazy_module import LazyModule, is_lazy_module
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
@@ -759,11 +758,8 @@ class ComposedPipelineBase(ABC):
         logger.info("Running pipeline stages: %s", self._stage_name_mapping.keys())
         # logger.info("Batch: %s", batch)
         try:
-            with perf_trace.request_scope() as capturing:
-                for stage in self.stages:
-                    with perf_trace.stage_scope(type(stage).__name__, capturing):
-                        batch = stage(batch, fastvideo_args)
-                    perf_trace.mem_line(type(stage).__name__)
+            for stage in self.stages:
+                batch = stage(batch, fastvideo_args)
         except BaseException:
             # A stage's own hook frees only what that stage was the last user
             # of. When the run aborts earlier, everything already materialized

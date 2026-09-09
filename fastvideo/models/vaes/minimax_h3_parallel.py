@@ -43,8 +43,6 @@ output is bitwise equal to serial ``decode_to_pixels``.
 
 from __future__ import annotations
 
-import os
-import time
 from typing import TYPE_CHECKING
 
 import torch
@@ -54,13 +52,7 @@ from fastvideo.models.vaes.minimax_h3_video import (
     AutoencoderKLOutput,
     DiagonalGaussianDistribution,
 )
-from fastvideo.logger import init_logger
 from fastvideo.profiler import nvtx_range
-
-logger = init_logger(__name__)
-# Per-phase timing of the parallel decode, one log line per rank per request;
-# the syncs it adds are only taken when the stage logging is on.
-_PHASE_LOG = os.environ.get("FASTVIDEO_STAGE_LOGGING", "0") != "0"
 
 if TYPE_CHECKING:
     from fastvideo.distributed.parallel_state import GroupCoordinator
@@ -260,13 +252,8 @@ def _decode_single_parallel(
     # first would idle a full chunk-decode behind the leader). The leader
     # owns chunk 0 under round-robin assignment, so its segment supplies real
     # dtype/shape for placeholder rounds instead of guessing autocast state.
-    t0 = time.perf_counter()
     first_segment = _decode_segment(vae, z, rank) if rank < num_chunks else None
-    if _PHASE_LOG:
-        torch.cuda.synchronize(z.device)
-    t1 = time.perf_counter()
     segment_dtype, segment_shape = _broadcast_segment_meta(group, first_segment if rank == 0 else None)
-    t2 = time.perf_counter()
 
     assembler = None
     if output is not None:
@@ -294,7 +281,6 @@ def _decode_single_parallel(
                 if round_index * world_size + slot >= num_chunks:
                     break
                 assembler.push(gathered.narrow(2, slot * segment_frames, segment_frames))
-        t3 = time.perf_counter()
         if assembler is not None:
             assembler.finalize()
     finally:
@@ -303,12 +289,6 @@ def _decode_single_parallel(
         # caller may release.
         if assembler is not None:
             assembler.synchronize()
-        if _PHASE_LOG:
-            torch.cuda.synchronize(z.device)
-            t4 = time.perf_counter()
-            logger.info("[vae-parallel] rank %d chunks=%d decode0=%.0fms meta_bcast=%.0fms gather+push=%.0fms "
-                        "finalize=%.0fms total=%.0fms", rank, num_chunks, (t1 - t0) * 1e3, (t2 - t1) * 1e3,
-                        (t3 - t2) * 1e3, (t4 - t3) * 1e3, (t4 - t0) * 1e3, local_main_process_only=False)
 
 
 def _encode_clip_moments(vae: AutoencoderKLMiniMaxH3, pixels: torch.Tensor, clip_index: int) -> torch.Tensor:
