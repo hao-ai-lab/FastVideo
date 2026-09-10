@@ -29,6 +29,7 @@ from fastvideo.train.callbacks.validation import (
     SYNTHETIC_OPTICAL_FLOW_METRIC,
     ValidationCallback,
     _ValidationMetricStats,
+    _ValidationStepResult,
 )
 
 # ---------------------------------------------------------------------------
@@ -387,6 +388,83 @@ class TestH3ValidationContract:
         for prompt_index, waveform in enumerate(result.audio_waveforms):
             assert torch.is_tensor(waveform)
             torch.testing.assert_close(waveform, torch.full((32, 2), float(prompt_index)))
+
+    def _run_validation_for_steps_with_output(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        output: torch.Tensor,
+    ) -> _ValidationStepResult:
+        """Run one validation prompt through a pipeline returning ``output``."""
+
+        class FakeH3Pipeline:
+            """Return the given decoded pixels for every prompt."""
+
+            fastvideo_args = SimpleNamespace(pipeline_config=SimpleNamespace())
+
+            def forward(self, batch, inference_args):
+                return SimpleNamespace(output=output, extra={})
+
+        cb = _make_callback()
+        cb.training_config = SimpleNamespace(
+            model_path="unused",
+            pipeline_config=SimpleNamespace(),
+        )
+        cb.rank_in_sp_group = 0
+        pipeline = FakeH3Pipeline()
+        monkeypatch.setattr(
+            "fastvideo.train.callbacks.validation.ValidationDataset",
+            lambda filename: [{"caption": "prompt-0"}],
+        )
+        monkeypatch.setattr(
+            "fastvideo.train.callbacks.validation.make_inference_args",
+            lambda *args, **kwargs: SimpleNamespace(
+                pipeline_config=SimpleNamespace(dmd_denoising_steps=None),
+                dit_cpu_offload=True,
+            ),
+        )
+        monkeypatch.setattr(cb, "_get_pipeline", lambda *, transformer: pipeline)
+        monkeypatch.setattr(cb, "_get_sampling_param", SamplingParam)
+        monkeypatch.setattr(
+            cb,
+            "_prepare_validation_batch",
+            lambda sampling_param, validation_batch, num_inference_steps: SimpleNamespace(prompt=validation_batch[
+                "caption"], ),
+        )
+        return cb._run_validation_for_steps(50, transformer=torch.nn.Identity())
+
+    def test_run_validation_for_steps_passes_uint8_frames_through(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Verify worker-quantized uint8 pixels reach the frames byte for byte.
+
+        The MiniMax-H3 decode stage returns uint8; scaling it by 255 again
+        would wrap modulo 256 (63 -> 193, 127 -> 129, 191 -> 65, 255 -> 1).
+        """
+        pixels = torch.tensor([63, 127, 191, 255], dtype=torch.uint8).view(1, 1, 1, 2, 2).expand(1, 3, 2, 2, 2)
+
+        result = self._run_validation_for_steps_with_output(monkeypatch, pixels.contiguous())
+
+        assert len(result.videos) == 1
+        assert len(result.videos[0]) == 2
+        for frame in result.videos[0]:
+            assert frame.dtype == np.uint8
+            np.testing.assert_array_equal(frame, pixels[0, :, 0].permute(1, 2, 0).numpy())
+
+    def test_run_validation_for_steps_quantizes_float_frames(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Verify normalized float pixels still produce the same bytes."""
+        pixels = torch.tensor([0.25, 0.5, 0.75, 1.0]).view(1, 1, 1, 2, 2).expand(1, 3, 2, 2, 2)
+
+        result = self._run_validation_for_steps_with_output(monkeypatch, pixels.contiguous())
+
+        expected = torch.tensor([63, 127, 191, 255], dtype=torch.uint8).view(2, 2, 1).expand(2, 2, 3).numpy()
+        assert len(result.videos[0]) == 2
+        for frame in result.videos[0]:
+            assert frame.dtype == np.uint8
+            np.testing.assert_array_equal(frame, expected)
 
     def test_log_validation_video_artifacts_emits_eight_wandb_videos(self) -> None:
         """Verify a MiniMax H3 event contains eight media objects and scalar evidence."""
