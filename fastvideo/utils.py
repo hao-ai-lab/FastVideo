@@ -1021,6 +1021,20 @@ def best_output_size(w, h, dw, dh, expected_area):
         return ow2, oh2
 
 
+def pixels_to_uint8(pixels: torch.Tensor) -> torch.Tensor:
+    """Return decoded pixels as uint8 bytes.
+
+    Decode stages hand back either normalized float pixels in [0, 1] or uint8
+    that a worker already quantized before the executor boundary (the
+    MiniMax-H3 video decode stage does). uint8 passes through untouched;
+    scaling it by 255 again would wrap modulo 256. Float pixels are clamped so
+    VAE output slightly outside [0, 1] saturates instead of wrapping.
+    """
+    if pixels.dtype == torch.uint8:
+        return pixels
+    return (pixels * 255).clamp_(0, 255).to(torch.uint8)
+
+
 def save_decoded_latents_as_video(decoded_latents: list[torch.Tensor], output_path: str, fps: int):
     # Process outputs
     videos = rearrange(decoded_latents, "b c t h w -> t b c h w")
