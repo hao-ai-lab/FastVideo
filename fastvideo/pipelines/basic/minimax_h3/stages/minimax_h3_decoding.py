@@ -180,6 +180,9 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
                 else:
                     self.vae.decode_to_pixels(latents, output)
             if is_output_rank:
+                # The output rank allocated (or reused) the device buffer
+                # above; only non-output ranks leave it as None.
+                assert output is not None
                 with nvtx_range("minimax_h3.vae.quantize_u8"):
                     frames_u8 = (output * 255).clamp_(0, 255).to(torch.uint8)
                     if bool(getattr(batch, "save_video", False)) and not bool(getattr(batch, "return_frames", False)):
