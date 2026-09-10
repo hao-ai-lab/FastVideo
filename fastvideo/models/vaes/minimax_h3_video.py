@@ -837,18 +837,35 @@ class AutoencoderKLMiniMaxH3(nn.Module):
                     num_columns = len(x_indices)
                     for row_start in range(0, len(y_indices), batch_rows):
                         row_slice = list(zip(y_indices, y_lengths))[row_start:row_start + batch_rows]
-                        tiles = torch.cat([
-                            z[..., y_position // ratio:y_position // ratio + y_length // ratio,
-                              x_position // ratio:x_position // ratio + x_length // ratio]
-                            for y_position, y_length in row_slice
-                            for x_position, x_length in zip(x_indices, x_lengths)
-                        ])
-                        with nvtx_range("minimax_h3.vae.decode_clip.tile.decoder_forward_batched"):
-                            decoded = self.decoder(self.post_quant_conv(tiles))
+                        # Same ``tile.<row>.<column>`` markers as the per-tile
+                        # loop below so a profile still enumerates the grid;
+                        # here each one only covers the tile's gather, and the
+                        # single ``tile.decoder_forward`` range that follows
+                        # covers every tile of the batch.
+                        tile_views = []
+                        for local_row, (y_position, y_length) in enumerate(row_slice):
+                            row_index = row_start + local_row
+                            for column_index, (x_position, x_length) in enumerate(zip(x_indices, x_lengths)):
+                                with nvtx_range(f"minimax_h3.vae.decode_clip.tile.{row_index}.{column_index}"):
+                                    tile_views.append(z[
+                                        ...,
+                                        y_position // ratio:y_position // ratio + y_length // ratio,
+                                        x_position // ratio:x_position // ratio + x_length // ratio,
+                                    ])
+                        tiles = torch.cat(tile_views)
+                        del tile_views
+                        # One projection for the whole batch: under the compile
+                        # opt-in this is the CUDA-graph captured helper, with
+                        # the stacked tiles as its one fixed geometry.
+                        projected_tiles = self._project_decoder_tile(tiles)
+                        with nvtx_range("minimax_h3.vae.decode_clip.tile.decoder_forward"):
+                            decoded = self.decoder(projected_tiles)
+                        # Release the CUDA-graph output before the next replay
+                        # (see the per-tile loop below).
+                        del projected_tiles, tiles
                         for local_row in range(len(row_slice)):
                             rows.append([decoded[index:index + 1]
                                          for index in range(local_row * num_columns, (local_row + 1) * num_columns)])
-                        del tiles
                     y_indices = []  # the per-tile loop below is skipped
                 for row_index, (y_position, y_length) in enumerate(zip(y_indices, y_lengths)):
                     row = []

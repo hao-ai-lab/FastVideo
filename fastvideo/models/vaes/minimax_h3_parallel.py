@@ -212,7 +212,7 @@ def decode_to_pixels_parallel(
         if (output.device.type != "cpu" and output.device != z.device) or output.dtype != torch.float32 \
                 or tuple(output.shape) != expected_shape:
             raise ValueError(
-                "`output` must be a float32 tensor on the CPU or on the latents' device with shape "
+                "`output` must be a CPU float32 tensor (or one on the latents' device) with shape "
                 f"{expected_shape}, got device={output.device}, dtype={output.dtype}, shape={tuple(output.shape)}.")
     elif output is not None:
         raise ValueError("Only the first sequence-parallel rank may provide an output buffer.")
