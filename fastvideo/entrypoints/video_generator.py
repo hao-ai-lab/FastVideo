@@ -55,7 +55,7 @@ from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.fastvideo_args import FastVideoArgs, WorkloadType
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import ForwardBatch
-from fastvideo.utils import align_to, shallow_asdict
+from fastvideo.utils import align_to, pixels_to_uint8, shallow_asdict
 from fastvideo.worker.executor import Executor
 
 fcntl: types.ModuleType | None
@@ -909,10 +909,9 @@ class VideoGenerator:
             # [0, 1] wrapped mod 256 in the old unclamped cast.
             # (Equivalence is SSIM-gated, not bit-exact: float->uint8
             # differs <=1 LSB CPU vs GPU.)
-            src = output_batch.output
             # uint8 input is already quantized by the worker (MiniMax-H3
             # decode stage) and passes through untouched.
-            vid_u8 = src if src.dtype == torch.uint8 else (src * 255).clamp_(0, 255).to(torch.uint8)
+            vid_u8 = pixels_to_uint8(output_batch.output)
             vid_u8 = rearrange(vid_u8, "b c t h w -> t b c h w").cpu()
             frames = [
                 torchvision.utils.make_grid(x, nrow=6).permute(1, 2, 0).squeeze(-1).contiguous().numpy() for x in vid_u8

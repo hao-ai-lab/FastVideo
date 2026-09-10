@@ -34,7 +34,8 @@ from fastvideo.training.training_pipeline import TrainingPipeline
 from fastvideo.training.training_utils import (EMA_FSDP, clip_grad_norm_while_handling_failing_dtensor_cases,
                                                get_scheduler, load_distillation_checkpoint,
                                                save_distillation_checkpoint, shift_timestep)
-from fastvideo.utils import (is_vsa_available, maybe_download_model, set_random_seed, verify_model_config_and_directory)
+from fastvideo.utils import (is_vsa_available, maybe_download_model, pixels_to_uint8, set_random_seed,
+                             verify_model_config_and_directory)
 
 try:
     vsa_available = is_vsa_available()
@@ -1114,7 +1115,7 @@ class DistillationPipeline(TrainingPipeline):
                     for x in video:
                         x = torchvision.utils.make_grid(x, nrow=6)
                         x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
-                        frames.append((x * 255).numpy().astype(np.uint8))
+                        frames.append(pixels_to_uint8(x).numpy())
                     videos.append(frames)
                     audios.append(output_batch.extra.get("audio"))
                     audio_sample_rates.append(output_batch.extra.get("audio_sample_rate"))

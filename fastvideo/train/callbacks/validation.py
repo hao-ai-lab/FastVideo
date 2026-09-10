@@ -38,7 +38,7 @@ from fastvideo.train.utils.moduleloader import (
     make_inference_args, )
 from fastvideo.train.utils.validation_media import write_validation_mp4
 from fastvideo.training.trackers import DummyTracker
-from fastvideo.utils import shallow_asdict
+from fastvideo.utils import pixels_to_uint8, shallow_asdict
 
 if TYPE_CHECKING:
     from fastvideo.train.methods.base import TrainingMethod
@@ -1565,7 +1565,7 @@ class ValidationCallback(Callback):
                     nrow=6,
                 )
                 x = (x.transpose(0, 1).transpose(1, 2).squeeze(-1))
-                frames.append((x * 255).numpy().astype(np.uint8))
+                frames.append(pixels_to_uint8(x).numpy())
             videos.append(frames)
             captions.append(batch.prompt)
             audio_waveforms.append(output_audio)

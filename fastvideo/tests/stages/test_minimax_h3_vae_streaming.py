@@ -95,6 +95,10 @@ def test_decode_stage_uses_cpu_output_buffer(monkeypatch) -> None:
             observed["latents"] = decoded_latents
             observed["output"] = output
             output.fill_(0.25)
+            # One pixel per quantization case: an interior value, the exact
+            # top of the range, and the VAE overshoot on either side that the
+            # clamp must saturate instead of wrapping.
+            output[0, 0, 0, 0, :4] = torch.tensor([0.5, 1.0, 1.25, -0.25])
 
     monkeypatch.setattr(minimax_h3_decoding, "get_local_torch_device", lambda: torch.device("cpu"))
     result = MiniMaxH3VideoDecodingStage(VAE()).forward(
@@ -109,9 +113,16 @@ def test_decode_stage_uses_cpu_output_buffer(monkeypatch) -> None:
     )
 
     torch.testing.assert_close(observed["latents"], latents)
-    assert observed["output"] is result.output
+    # The VAE still streams into the float32 CPU buffer the stage allocates;
+    # the batch then carries that buffer's uint8 quantization so the
+    # executor boundary moves bytes, not fp32.
+    assert observed["output"].device.type == "cpu"
+    assert observed["output"].dtype == torch.float32
     assert result.output.device.type == "cpu"
-    assert torch.all(result.output == 0.25)
+    assert result.output.dtype == torch.uint8
+    expected = torch.full((1, 3, 5, 16, 16), 63, dtype=torch.uint8)
+    expected[0, 0, 0, 0, :4] = torch.tensor([127, 255, 255, 0], dtype=torch.uint8)
+    assert torch.equal(result.output, expected)
 
 
 def test_decode_stages_skip_vae_on_non_output_rank(monkeypatch) -> None:
@@ -189,7 +200,9 @@ def test_parallel_decode_runs_on_every_rank(monkeypatch) -> None:
         result = MiniMaxH3VideoDecodingStage(VAE()).forward(batch, args)
         if is_first:
             assert result.output.shape == (1, 3, 5, 16, 16)
-            assert torch.all(result.output == 0.5)
+            assert result.output.device.type == "cpu"
+            assert result.output.dtype == torch.uint8
+            assert torch.all(result.output == 127)
         else:
             assert result.output.shape == (0, 3, 0, 0, 0)
 
