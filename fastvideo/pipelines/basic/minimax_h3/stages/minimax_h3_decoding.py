@@ -10,6 +10,7 @@ import torch
 from fastvideo.distributed import get_local_torch_device, get_sp_group, get_world_group, model_parallel_is_initialized
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
+from fastvideo.models import pinned_offload
 from fastvideo.models.vaes.minimax_h3_audio import MiniMaxH3AudioVAE
 from fastvideo.models.vaes.minimax_h3_parallel import DEFAULT_DECODE_GATHER_STRATEGY, decode_to_pixels_parallel
 from fastvideo.models.vaes.minimax_h3_video import AutoencoderKLMiniMaxH3
@@ -25,7 +26,6 @@ from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
-from fastvideo.utils import is_pin_memory_available
 
 logger = init_logger(__name__)
 
@@ -54,6 +54,27 @@ def _decode_participation(fastvideo_args: FastVideoArgs, want_parallel: bool) ->
     return sp_group, get_world_group().is_first_rank, False
 
 
+def _rgb_u8_to_yuv420p(rgb: torch.Tensor) -> torch.Tensor:
+    """[3, T, H, W] uint8 RGB -> [T, H*3/2, W] uint8 planar yuv420p (BT.601, limited range).
+
+    The integer coefficients are the usual 8-bit BT.601 approximation; the
+    chroma planes are the rounded mean of each 2x2 block.
+    """
+    r, g, b = (rgb[i].to(torch.int32) for i in range(3))
+    y = ((66 * r + 129 * g + 25 * b + 128) >> 8) + 16
+    cb = ((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128
+    cr = ((112 * r - 94 * g - 18 * b + 128) >> 8) + 128
+    t, h, w = y.shape
+    cb = (cb.view(t, h // 2, 2, w // 2, 2).sum(dim=(2, 4)) + 2) >> 2
+    cr = (cr.view(t, h // 2, 2, w // 2, 2).sum(dim=(2, 4)) + 2) >> 2
+    out = torch.empty((t, h * 3 // 2, w), device=rgb.device, dtype=torch.uint8)
+    out[:, :h] = y.clamp_(0, 255).to(torch.uint8)
+    chroma = out[:, h:].view(t, 2, h // 4, w)  # each chroma plane is (h/2, w/2) = (h/4 rows of w)
+    chroma[:, 0] = cb.clamp_(0, 255).to(torch.uint8).reshape(t, h // 4, w)
+    chroma[:, 1] = cr.clamp_(0, 255).to(torch.uint8).reshape(t, h // 4, w)
+    return out
+
+
 class MiniMaxH3VideoDecodingStage(PipelineStage):
     """Drop visual condition rows, unpatchify, and decode the target video."""
 
@@ -62,6 +83,7 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
     def __init__(self, vae: AutoencoderKLMiniMaxH3 | None) -> None:
         super().__init__()
         self.vae = vae
+        self._pixel_buffer: torch.Tensor | None = None
 
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         result = VerificationResult()
@@ -123,7 +145,7 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
 
         if self.vae is None:
             raise RuntimeError("MiniMax-H3 full VAE decode requires a loaded video VAE.")
-        self.vae.to(device)
+        pinned_offload.load(self.vae, device, pin=fastvideo_args.pin_cpu_memory)
         try:
             latents = self.vae.denormalize_latents(latents.to(device=device, dtype=torch.float32))
             if fastvideo_args.output_type == "latent":
@@ -134,12 +156,16 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
 
             output = None
             if is_output_rank:
-                output = torch.empty(
-                    self.vae.decoded_pixel_shape(latents.shape),
-                    device="cpu",
-                    dtype=torch.float32,
-                    pin_memory=fastvideo_args.pin_cpu_memory and is_pin_memory_available(),
-                )
+                # Assemble on the device: the driver only ever consumes uint8
+                # frames, so quantize here and ship 1/4 of the bytes through
+                # the worker pipe instead of a 1.5 GB fp32 pinned buffer. The
+                # device buffer is kept across requests (1.5 GB at 124f/768p)
+                # so the allocator never has to map a fresh segment for it.
+                pixel_shape = self.vae.decoded_pixel_shape(latents.shape)
+                output = self._pixel_buffer
+                if output is None or tuple(output.shape) != pixel_shape or output.device != device:
+                    output = torch.empty(pixel_shape, device=device, dtype=torch.float32)
+                    self._pixel_buffer = output
             # Attribute the streamed decoder computation while retaining
             # per-chunk device-to-host transfer and pinned-buffer reuse.
             with (
@@ -153,11 +179,41 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
                     decode_to_pixels_parallel(self.vae, latents, output, sp_group, strategy=strategy)
                 else:
                     self.vae.decode_to_pixels(latents, output)
-            batch.output = output if is_output_rank else placeholder
+            if is_output_rank:
+                # The output rank allocated (or reused) the device buffer
+                # above; only non-output ranks leave it as None.
+                assert output is not None
+                with nvtx_range("minimax_h3.vae.quantize_u8"):
+                    frames_u8 = (output * 255).clamp_(0, 255).to(torch.uint8)
+                    if bool(getattr(batch, "save_video", False)) and not bool(getattr(batch, "return_frames", False)):
+                        # The driver only encodes an mp4 from these frames, and
+                        # its encoder wants yuv420p: convert here on the GPU
+                        # (the CPU swscale pass was ~0.2 s of the 0.39 s save)
+                        # and ship 1.5 bytes per pixel instead of 3. A
+                        # shape-only stand-in keeps batch.output's geometry
+                        # for the driver's result metadata.
+                        yuv = _rgb_u8_to_yuv420p(frames_u8[0])
+                        host_yuv = torch.empty(yuv.shape, device="cpu", dtype=torch.uint8).share_memory_()
+                        host_yuv.copy_(yuv)
+                        batch.extra["frames_yuv420p"] = host_yuv
+                        batch.output = torch.zeros((), device="cpu", dtype=torch.uint8).expand(*frames_u8.shape)
+                        del yuv, frames_u8
+                        return batch
+                    # A fresh shared-memory buffer per request: the worker pipe
+                    # pickles CPU tensors by handing over their storage, so a
+                    # storage that is already shared crosses with no copy, and
+                    # a per-request pinned allocation (cudaHostAlloc, 100+ ms
+                    # and erratic) is avoided.
+                    host_u8 = torch.empty(frames_u8.shape, device="cpu", dtype=torch.uint8).share_memory_()
+                    host_u8.copy_(frames_u8)
+                    del frames_u8
+                batch.output = host_u8
+            else:
+                batch.output = placeholder
             return batch
         finally:
             if fastvideo_args.vae_cpu_offload:
-                self.vae.to("cpu")
+                pinned_offload.unload(self.vae)
 
 
 class MiniMaxH3AudioDecodingStage(PipelineStage):
@@ -200,7 +256,7 @@ class MiniMaxH3AudioDecodingStage(PipelineStage):
             layout.num_audio_latents,
         )
         device = get_local_torch_device()
-        self.audio_vae.to(device)
+        pinned_offload.load(self.audio_vae, device, pin=fastvideo_args.pin_cpu_memory)
         try:
             latents = self.audio_vae.denormalize_latents(latents.to(device=device, dtype=torch.float32))
             if fastvideo_args.output_type == "latent":
@@ -222,7 +278,7 @@ class MiniMaxH3AudioDecodingStage(PipelineStage):
             return batch
         finally:
             if fastvideo_args.vae_cpu_offload:
-                self.audio_vae.to("cpu")
+                pinned_offload.unload(self.audio_vae)
 
     @staticmethod
     def _clear_runtime(batch: ForwardBatch) -> None:

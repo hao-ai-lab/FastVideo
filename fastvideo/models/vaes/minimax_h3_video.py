@@ -535,6 +535,10 @@ class AutoencoderKLMiniMaxH3(nn.Module):
     _repeated_blocks = ["MiniMaxH3VideoTransformerBlock"]
     _keep_in_fp32_modules = ["encoder", "decoder", "quant_conv", "post_quant_conv"]
     _compile_conditions = [_is_minimax_h3_video_vae_decoder]
+    # ``_project_decoder_tile`` is CUDA-graph captured (prepare_for_compile);
+    # its static inputs are post_quant_conv's weight and bias, so those stay
+    # on the device across CPU offload round trips (see pinned_offload).
+    _offload_keep_resident = ("post_quant_conv", )
     # ``prepare_for_compile`` flips this per instance when the pipeline opts
     # into ``enable_torch_compile_vae``; default instances stay fully eager.
     _tile_helpers_compiled = False
@@ -820,6 +824,49 @@ class AutoencoderKLMiniMaxH3(nn.Module):
             # The eager tile driver owns NVTX so each marker remains outside
             # the compiled decoder graph.
             with nvtx_range("minimax_h3.vae.decode_clip.decode_tiles"):
+                # Default: every row at once (28 tiles per forward at 768x1344).
+                # Measured on 8 x B200: 415 ms per chunk tile by tile, 295 ms
+                # one row per forward, 275 ms all rows per forward.
+                batch_rows = len(y_indices)
+                if batch_rows > 0 and z.shape[0] == 1 and len(set(y_lengths)) == 1 and len(set(x_lengths)) == 1:
+                    # Decode `batch_rows` tile rows per forward: every tile of
+                    # this grid has the same geometry and the tiles are
+                    # independent, so stacking them on the batch dimension
+                    # feeds the compiled decoder ~1.8k x N tokens instead of
+                    # 28 launches of a forward too small to fill the GPU.
+                    num_columns = len(x_indices)
+                    for row_start in range(0, len(y_indices), batch_rows):
+                        row_slice = list(zip(y_indices, y_lengths))[row_start:row_start + batch_rows]
+                        # Same ``tile.<row>.<column>`` markers as the per-tile
+                        # loop below so a profile still enumerates the grid;
+                        # here each one only covers the tile's gather, and the
+                        # single ``tile.decoder_forward`` range that follows
+                        # covers every tile of the batch.
+                        tile_views = []
+                        for local_row, (y_position, y_length) in enumerate(row_slice):
+                            row_index = row_start + local_row
+                            for column_index, (x_position, x_length) in enumerate(zip(x_indices, x_lengths)):
+                                with nvtx_range(f"minimax_h3.vae.decode_clip.tile.{row_index}.{column_index}"):
+                                    tile_views.append(z[
+                                        ...,
+                                        y_position // ratio:y_position // ratio + y_length // ratio,
+                                        x_position // ratio:x_position // ratio + x_length // ratio,
+                                    ])
+                        tiles = torch.cat(tile_views)
+                        del tile_views
+                        # One projection for the whole batch: under the compile
+                        # opt-in this is the CUDA-graph captured helper, with
+                        # the stacked tiles as its one fixed geometry.
+                        projected_tiles = self._project_decoder_tile(tiles)
+                        with nvtx_range("minimax_h3.vae.decode_clip.tile.decoder_forward"):
+                            decoded = self.decoder(projected_tiles)
+                        # Release the CUDA-graph output before the next replay
+                        # (see the per-tile loop below).
+                        del projected_tiles, tiles
+                        for local_row in range(len(row_slice)):
+                            rows.append([decoded[index:index + 1]
+                                         for index in range(local_row * num_columns, (local_row + 1) * num_columns)])
+                    y_indices = []  # the per-tile loop below is skipped
                 for row_index, (y_position, y_length) in enumerate(zip(y_indices, y_lengths)):
                     row = []
                     for column_index, (x_position, x_length) in enumerate(zip(x_indices, x_lengths)):
@@ -832,6 +879,11 @@ class AutoencoderKLMiniMaxH3(nn.Module):
                             projected_tile = self._project_decoder_tile(tile)
                             with nvtx_range("minimax_h3.vae.decode_clip.tile.decoder_forward"):
                                 decoded_tile = self.decoder(projected_tile)
+                            # Release the CUDA-graph output before the next
+                            # replay: a live output makes cudagraph trees
+                            # record a fresh node per tile (28 recordings of
+                            # 20-36 ms each on the first measured request).
+                            del projected_tile
                             row.append(decoded_tile)
                     rows.append(row)
 
@@ -1088,7 +1140,8 @@ class AutoencoderKLMiniMaxH3(nn.Module):
     def decode_to_pixels(self, z: torch.Tensor, output: torch.Tensor) -> torch.Tensor:
         """Stream decoded ``[0, 1]`` FP32 pixels into a caller-owned CPU buffer."""
         expected_shape = self.decoded_pixel_shape(z.shape)
-        if output.device.type != "cpu" or output.dtype != torch.float32 or tuple(output.shape) != expected_shape:
+        if (output.device.type != "cpu" and output.device != z.device) or output.dtype != torch.float32 \
+                or tuple(output.shape) != expected_shape:
             raise ValueError(
                 "`output` must be a CPU float32 tensor with shape "
                 f"{expected_shape}, got device={output.device}, dtype={output.dtype}, shape={tuple(output.shape)}.")
