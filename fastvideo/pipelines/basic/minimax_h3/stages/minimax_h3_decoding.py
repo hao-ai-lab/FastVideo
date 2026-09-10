@@ -23,7 +23,6 @@ from fastvideo.pipelines.basic.minimax_h3.packing import (
 )
 from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_latent_preparation import MINIMAX_H3_LAYOUT_KEY
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
-from fastvideo.pipelines.basic.minimax_h3 import perf_probe
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
@@ -181,7 +180,6 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
                 else:
                     self.vae.decode_to_pixels(latents, output)
             if is_output_rank:
-                perf_probe.video("video_decode.output", output)
                 with nvtx_range("minimax_h3.vae.quantize_u8"):
                     frames_u8 = (output * 255).clamp_(0, 255).to(torch.uint8)
                     if bool(getattr(batch, "save_video", False)) and not bool(getattr(batch, "return_frames", False)):
@@ -208,7 +206,6 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
                     del frames_u8
                 batch.output = host_u8
             else:
-                perf_probe.video("video_decode.output", placeholder)
                 batch.output = placeholder
             return batch
         finally:
@@ -245,7 +242,6 @@ class MiniMaxH3AudioDecodingStage(PipelineStage):
         if model_parallel_is_initialized() and not get_world_group().is_first_rank:
             batch.extra["audio"] = torch.empty((0, 2), device="cpu", dtype=torch.float32)
             batch.extra["audio_sample_rate"] = self.audio_vae.sampling_rate
-            perf_probe.flush()  # every rank writes its checkpoint snapshot at the end of the request
             self._clear_runtime(batch)
             return batch
 
@@ -275,9 +271,6 @@ class MiniMaxH3AudioDecodingStage(PipelineStage):
                                  f"got {tuple(decoded.shape)}.")
             batch.extra["audio"] = decoded[:, 0].transpose(0, 1).contiguous().cpu()
             batch.extra["audio_sample_rate"] = self.audio_vae.sampling_rate
-            perf_probe.tensor("audio_decode.waveform", batch.extra["audio"])
-            perf_probe.scalar("audio_decode.sample_rate", int(self.audio_vae.sampling_rate))
-            perf_probe.flush()
             self._clear_runtime(batch)
             return batch
         finally:

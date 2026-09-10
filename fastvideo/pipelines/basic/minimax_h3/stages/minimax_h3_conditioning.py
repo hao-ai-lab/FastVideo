@@ -24,7 +24,6 @@ from fastvideo.pipelines.basic.minimax_h3.packing import (
 from fastvideo.pipelines.basic.minimax_h3.reference import MiniMaxH3PreparedReference, sample_reference_video_frames
 from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_input_preparation import MINIMAX_H3_KEYFRAMES_KEY
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
-from fastvideo.pipelines.basic.minimax_h3 import perf_probe
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
@@ -278,7 +277,6 @@ class MiniMaxH3ConditioningStage(PipelineStage):
                 self.conditioner.to("cpu")
         batch.prompt_embeds = [prompt_embeds]
         batch.extra[MINIMAX_H3_TEXT_TOKEN_TAGS_KEY] = text_token_tags
-        perf_probe.tensor("cond.prompt_embeds", prompt_embeds)
         return batch
 
 
