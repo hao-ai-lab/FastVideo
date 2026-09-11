@@ -11,8 +11,8 @@ from fastvideo.pipelines.stages.conditioning import ConditioningStage
 from fastvideo.pipelines.stages.decoding import DecodingStage
 from fastvideo.pipelines.stages.denoising import (Cosmos25AutoDenoisingStage, Cosmos25DenoisingStage,
                                                   Cosmos25DFDV2WDenoisingStage, Cosmos25DistilledT2WDenoisingStage,
-                                                  Cosmos25V2WDenoisingStage,
-                                                  Cosmos25T2WDenoisingStage, CosmosDenoisingStage, DenoisingStage)
+                                                  Cosmos25V2WDenoisingStage, Cosmos25T2WDenoisingStage,
+                                                  CosmosDenoisingStage, DenoisingStage)
 from fastvideo.pipelines.stages.sr_denoising import SRDenoisingStage
 from fastvideo.pipelines.stages.encoding import EncodingStage
 from fastvideo.pipelines.stages.image_encoding import (ImageEncodingStage, MatrixGame2ImageEncodingStage,
