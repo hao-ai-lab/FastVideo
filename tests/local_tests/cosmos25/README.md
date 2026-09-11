@@ -113,8 +113,7 @@ pytest tests/local_tests/cosmos25/test_cosmos25_dfd_conversion.py -q
 
 The DFD converter materializes the PyTorch DCP state, keeps only inference
 transformer tensors, enables FPS-modulated RoPE, and writes the fixed DFD
-scheduler metadata. A strict load of the real converted package is still a
-required validation gate.
+scheduler metadata. The real converted package strict-loaded successfully.
 
 Run the isolated DFD pipeline contracts and full real-weight four-step rollout
 parity after conversion/component tests:
@@ -218,5 +217,9 @@ The real DCP package subsequently converted to 569 inference tensors
 (2,059,174,912 parameters), strict-loaded through the production FastVideo
 loader, and completed the native 704x1280x81 four-step I2W example. Generation
 took 145.20 seconds and the saved-video end-to-end path took 147.66 seconds on
-the validation host. Visual boundary and prompt-response inspection remains the
-final quality gate.
+the validation host. The input-to-frame-0 MAE was `2.845237`, compared with an
+input-to-final-frame control of `52.130680`. Visual inspection accepted the
+seamless conditioning boundary and correct requested right pan. Motion was
+slightly slow but acceptable, with no blocking artifacts. This completes the
+native model-port quality gate; continuation consumers must still remove the
+first decoded frame because it repeats the conditioning image by design.

@@ -11,8 +11,8 @@
 - local_tests_readme: `tests/local_tests/cosmos25/README.md`
 
 ## Current Phase
-- phase: DFD Phase 3 native pipeline integration
-- status: in_progress
+- phase: DFD Phase 4 production validation
+- status: complete
 - owner: orchestrator
 - last_updated: 2026-09-11
 
@@ -25,10 +25,10 @@
 | tokenizer VAE | VAE | reuse | Predict2.5 tokenizer | distilled inference CLI | existing Cosmos25 VAE | existing | packaged passthrough | production loader pass | none |
 | T2W pipeline | pipeline | isolated scheduler-selected route | `generate_samples_from_batch` | distilled inference CLI | Cosmos2_5 staged pipeline | complete | complete | full-resolution video and eye gate pass | none |
 | DFD ODE sampler | scheduler | port | `fastgen/methods/model.py::_student_sample_loop`; `fastgen/networks/noise_schedule.py::RFNoiseSchedule` | `config_dmd2.py` fixed `t_list` | `Cosmos25DFDScheduler` | complete | n/a | non-skip pass | none |
-| DFD student DiT | transformer | reuse Cosmos25 architecture with DFD weights and FPS-modulated RoPE | `fastgen/networks/cosmos_predict2/network.py::CosmosPredict2` | `config_dmd2_v2w.py` | `Cosmos25Transformer3DModel` | reuse complete | converter complete | real-weight BF16 pass | converted-package strict load pending |
+| DFD student DiT | transformer | reuse Cosmos25 architecture with DFD weights and FPS-modulated RoPE | `fastgen/networks/cosmos_predict2/network.py::CosmosPredict2` | `config_dmd2_v2w.py` | `Cosmos25Transformer3DModel` | reuse complete | converter complete | real-weight BF16 and converted-package strict-load pass | none |
 | DFD VAE | VAE | reuse | `CosmosPredict2.init_vae` / `WanVideoEncoder` | `prepare_i2v_condition` | existing Cosmos25 VAE | complete | packaged passthrough | isolated contract pass | encode only the single conditioning frame |
 | DFD Reason1 encoder | text encoder | reuse | `CosmosPredict2.init_text_encoder` | VBench I2V inference | existing Cosmos25 encoder | complete | packaged passthrough | component production pass | none |
-| DFD V2W pipeline | pipeline | scheduler-selected one-frame route | `video_model_inference_vbench.py` | four-step student sampling | Cosmos2_5 staged pipeline | complete | complete | four-step parity and production smoke pass | visual gate pending; first decoded frame repeats conditioning frame by design |
+| DFD V2W pipeline | pipeline | scheduler-selected one-frame route | `video_model_inference_vbench.py` | four-step student sampling | Cosmos2_5 staged pipeline | complete | complete | four-step parity, production smoke, and visual gate pass | first decoded frame repeats conditioning frame by design; consumers should trim it at continuation boundaries |
 
 ## Conversion State
 - conversion_script: `scripts/checkpoint_conversion/cosmos25_distilled_to_diffusers.py`
@@ -79,7 +79,7 @@ DFD conversion target:
 | I002 | conversion | packaged model | high | Released official checkpoint is not yet isolated in a FastVideo-loadable component layout | Converted package and strict production load | conversion | closed | 685 clean student tensors; load pass |
 | I003 | pipeline | T2W | high | End-to-end distilled generation is not yet validated | small and full-resolution Spark runs plus visual inspection | pipeline | closed | full T2W quality gate passed |
 | I004 | prep | DFD checkpoint | medium | Public release has no `model_index.json` and stores the student as zipped PyTorch DCP shards | HF metadata inspection; seven-file custom layout | conversion | closed | real DCP converted to 569-tensor, 2.059B-parameter package and strict-loaded successfully |
-| I005 | pipeline | DFD V2W | high | Converted-package visual quality has not yet been accepted | production 704x1280x81 generation and save pass | parity | open | inspect condition boundary, motion, prompt response, and artifacts in native output |
+| I005 | pipeline | DFD V2W | high | Converted-package visual quality has not yet been accepted | production 704x1280x81 generation, numerical boundary check, and visual inspection | parity | closed | condition boundary is seamless, the requested right pan occurs correctly, motion is slightly slow but acceptable, and no blocking artifacts were observed |
 
 ## Escape Hatches
 | ID | Phase | Decision Type | Question | Recommended Option | Status | Resolution |
@@ -108,6 +108,7 @@ DFD conversion target:
 | 2026-09-11 | Use a dedicated scheduler-selected DFD V2W route | The DFD checkpoint has fixed geometry, FPS, timestep, mask, and first-frame semantics distinct from both base Cosmos and TrigFlow T2W | Existing Cosmos paths remain unchanged; DFD validates 704x1280x81 at 24 FPS and four steps |
 | 2026-09-11 | Accept native DFD four-step rollout parity | The real-weight FastVideo rollout passed against upstream with identical initial state and conditioning tensors | Clears the native pipeline gate; converted-package loading and decoded-video quality remain |
 | 2026-09-11 | Accept real DFD conversion and production runtime smoke | The inference-only package contains 569 student tensors/2.059B parameters and completed 704x1280x81 generation | Clears conversion, strict-load, execution, decode, and save gates; visual acceptance remains |
+| 2026-09-11 | Accept the native DFD visual quality gate | The conditioning boundary was seamless, the requested right pan occurred correctly, and the slightly slow motion remained acceptable without blocking artifacts | Completes the model-port validation; DreamVerse still owns removal of the repeated continuation frame |
 
 ## Handoff Notes
 - Existing T2W tests and all DFD scheduler, transformer, isolated pipeline, and full-rollout parity gates pass on the Spark validation host.
@@ -116,6 +117,7 @@ DFD conversion target:
 - The `save_video=False`, `return_frames=True` result contract passes on Spark.
 - A public converted package ID remains open; until then, use the documented local conversion flow.
 - The real DFD DCP converted to `/home/raghav/models/Cosmos-Predict2.5-2B-DFD-FastVideo`, strict-loaded at 2.06B parameters, and completed the production four-step I2W smoke in 147.66 seconds end to end.
+- The native DFD video's conditioning-to-frame-0 MAE was 2.845 versus a 52.131 conditioning-to-final-frame control. Visual inspection accepted the seamless boundary and correct right pan; motion was slightly slow but acceptable.
 - Do not use the prior FlowUniPC/Karras Spark run as distilled parity evidence.
 - DFD reference commit is staged under ignored `DFDReference/`; no weights or dependencies were downloaded locally.
 - Public DFD reference inference passed one T2W-to-DFD and one DFD-to-DFD continuation with boundary MAE 2.694 and 2.459; the unrelated control was 39.142.
