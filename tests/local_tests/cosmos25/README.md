@@ -213,3 +213,10 @@ pytest tests/local_tests/cosmos25/test_cosmos25_dfd_transformer_parity.py -v -s
 
 The non-skip DFD DiT gate passed with maximum absolute error `0.15625`,
 mean absolute error `0.01315392`, and relative mean error `0.01986194`.
+
+The real DCP package subsequently converted to 569 inference tensors
+(2,059,174,912 parameters), strict-loaded through the production FastVideo
+loader, and completed the native 704x1280x81 four-step I2W example. Generation
+took 145.20 seconds and the saved-video end-to-end path took 147.66 seconds on
+the validation host. Visual boundary and prompt-response inspection remains the
+final quality gate.
