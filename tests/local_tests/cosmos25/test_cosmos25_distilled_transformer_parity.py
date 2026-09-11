@@ -176,7 +176,7 @@ def _official_model_class() -> type[torch.nn.Module]:
     return MinimalV1LVGDiT
 
 
-def _arch_config() -> Cosmos25ArchConfig:
+def _arch_config(*, rope_enable_fps_modulation: bool = False) -> Cosmos25ArchConfig:
     return Cosmos25ArchConfig(
         num_attention_heads=16,
         attention_head_dim=128,
@@ -194,7 +194,7 @@ def _arch_config() -> Cosmos25ArchConfig:
         extra_pos_embed_type=None,
         use_crossattn_projection=True,
         crossattn_proj_in_channels=100352,
-        rope_enable_fps_modulation=False,
+        rope_enable_fps_modulation=rope_enable_fps_modulation,
         qk_norm="rms_norm",
     )
 
@@ -253,10 +253,7 @@ def _print_capture_drift(
             function(reference_angles),
             fastvideo_captures[f"rope.{index}"],
         )
-        print(
-            f"  rope.{index:>4}: mean_abs={mean_abs:.8f} "
-            f"max_abs={max_abs:.8f} relative_mean={relative_mean:.8f}"
-        )
+        print(f"  rope.{index:>4}: mean_abs={mean_abs:.8f} max_abs={max_abs:.8f} relative_mean={relative_mean:.8f}")
 
 
 def _load_official_model(student: Mapping[str, torch.Tensor], device: torch.device):
@@ -306,17 +303,20 @@ def _load_official_model(student: Mapping[str, torch.Tensor], device: torch.devi
 
     missing, unexpected = model.load_state_dict(official_state, strict=False)
     important_missing = [
-        key
-        for key in missing
-        if not key.endswith("._extra_state") and key not in REFERENCE_TRAINING_COUNTERS
+        key for key in missing if not key.endswith("._extra_state") and key not in REFERENCE_TRAINING_COUNTERS
     ]
     assert not important_missing, f"Official model missing inference keys: {important_missing[:20]}"
     assert not unexpected, f"Official model received unexpected keys: {unexpected[:20]}"
     return model.to(device=device, dtype=torch.bfloat16).eval()
 
 
-def _load_fastvideo_model(student: Mapping[str, torch.Tensor], device: torch.device):
-    arch = _arch_config()
+def _load_fastvideo_model(
+    student: Mapping[str, torch.Tensor],
+    device: torch.device,
+    *,
+    rope_enable_fps_modulation: bool = False,
+):
+    arch = _arch_config(rope_enable_fps_modulation=rope_enable_fps_modulation)
     config = Cosmos25VideoConfig(arch_config=arch)
     hf_config: dict[str, Any] = {
         "in_channels": arch.in_channels,

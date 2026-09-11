@@ -1,8 +1,14 @@
 # Cosmos Predict2.5 distilled validation
 
-This port targets NVIDIA's released 2B distilled **Text2World** checkpoint. It
-does not claim distilled Video2World, rolling generation, or real-time DreamVerse
-support.
+This port targets two complementary Cosmos Predict2.5 2B students:
+
+- NVIDIA's released distilled **Text2World** checkpoint for the first segment.
+- The Data-Forcing Distillation (DFD) **Video2World** checkpoint for one-frame
+  continuation segments.
+
+The DreamVerse consumer uses the T2W student once, then passes each decoded
+terminal frame to the DFD student. DFD is not treated as a causal or native
+rolling model; each continuation is a fresh one-frame-conditioned sample.
 
 ## Reference
 
@@ -10,6 +16,15 @@ support.
   `a2c298b0a3df3778b973fe65e9e58877b292d8a7`
 - Checkpoint: `nvidia/Cosmos-Predict2.5-2B`, `base/distilled`
 - Override the source checkout with `COSMOS25_OFFICIAL_REF_DIR`.
+
+DFD reference:
+
+- Source: `csy2077/data-forcing-distillation` at commit
+  `de6416cac1e06562d29aaf96a13bb0ab99099cdf`
+- Checkpoint: `csusupergear/cosmos_i2v_checkpoints`,
+  `cosmos_dfd_checkpoints/0000040.net_model.zip`
+- Override the checkout with `COSMOS25_DFD_REF_DIR` and the extracted DCP
+  directory with `COSMOS25_DFD_CHECKPOINT_DIR`.
 
 Clone the reference next to FastVideo, or point the environment variable at an
 existing checkout:
@@ -19,6 +34,31 @@ git clone https://github.com/NVIDIA/Cosmos-Predict2.5.git cosmos-predict2.5
 export COSMOS25_OFFICIAL_REF_DIR="$PWD/cosmos-predict2.5"
 ```
 
+The local DFD checkout is staged through the repository add-model workflow:
+
+```bash
+git clone https://github.com/csy2077/data-forcing-distillation.git DFDReference
+export COSMOS25_DFD_REF_DIR="$PWD/DFDReference"
+```
+
+No DFD weights are kept in the repository. The Hugging Face layout is a custom
+PyTorch distributed checkpoint with no root `model_index.json`, so it requires
+conversion before FastVideo can load it.
+
+## DFD reference contract
+
+The published I2V configuration uses BF16, one conditioning latent frame,
+1280x704 output, 81 decoded frames, 24 FPS temporal encoding, and four ODE
+student steps at normalized rectified-flow times:
+
+```text
+[0.999, 0.937, 0.833, 0.624, 0.0]
+```
+
+The inference-only path must load the student transformer directly. The
+teacher, fake-score network, discriminator, optimizers, and training counters
+are not FastVideo runtime components.
+
 ## CPU sampler tests
 
 ```bash
@@ -26,6 +66,11 @@ pytest fastvideo/tests/schedulers/test_cosmos25_distilled_scheduler.py -q
 
 COSMOS25_OFFICIAL_REF_DIR=/path/to/Cosmos-Predict2.5 \
 pytest tests/local_tests/cosmos25/test_cosmos25_distilled_scheduler_parity.py -v -s
+
+pytest fastvideo/tests/schedulers/test_cosmos25_dfd_scheduler.py -q
+
+COSMOS25_DFD_REF_DIR=/path/to/data-forcing-distillation \
+pytest tests/local_tests/cosmos25/test_cosmos25_dfd_scheduler_parity.py -v -s
 ```
 
 The parity test pins NVIDIA's scaling source and compares the full four-step
@@ -53,6 +98,23 @@ pytest tests/local_tests/cosmos25/test_cosmos25_distilled_conversion.py -q
 
 The released checkpoint conversion and production FastVideo strict load passed
 on the Spark validation host: 685 student tensors and no training counters.
+
+Convert the extracted DFD distributed checkpoint without constructing the
+teacher, fake-score network, or discriminator:
+
+```bash
+python scripts/checkpoint_conversion/cosmos25_dfd_to_diffusers.py \
+  --src-dcp /path/to/0000040.net_model \
+  --base-model /path/to/Cosmos-Predict2.5-2B-Diffusers \
+  --dst converted_weights/cosmos25-dfd-v2w
+
+pytest tests/local_tests/cosmos25/test_cosmos25_dfd_conversion.py -q
+```
+
+The DFD converter materializes the PyTorch DCP state, keeps only inference
+transformer tensors, enables FPS-modulated RoPE, and writes the fixed DFD
+scheduler metadata. A strict load of the real converted package is still a
+required validation gate.
 
 ## Validated GPU gates
 
@@ -108,3 +170,16 @@ pytest tests/local_tests/cosmos25/test_cosmos25_distilled_transformer_parity.py 
 
 The Spark gate passed with first-block relative mean error `0.000655` and final
 relative mean error `0.038397`, with smooth BF16 drift and no discontinuity.
+
+The corresponding DFD gate exercises the released V2W wrapper semantics: it
+replaces the first noisy latent with the clean image latent, sets that frame's
+timestep to zero, includes the condition-mask channel, and enables 24 FPS RoPE
+modulation in both implementations.
+
+```bash
+export COSMOS25_DFD_REF_DIR=/path/to/data-forcing-distillation
+export COSMOS25_DFD_CHECKPOINT_DIR=/path/to/0000040.net_model
+
+FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA \
+pytest tests/local_tests/cosmos25/test_cosmos25_dfd_transformer_parity.py -v -s
+```

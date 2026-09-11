@@ -146,6 +146,11 @@ _SCHEDULERS = {
         "scheduling_cosmos25_distilled",
         "Cosmos25DistilledScheduler",
     ),
+    "Cosmos25DFDScheduler": (
+        "schedulers",
+        "scheduling_cosmos25_dfd",
+        "Cosmos25DFDScheduler",
+    ),
 }
 
 _UPSAMPLERS = {
