@@ -181,6 +181,11 @@ the repeated conditioning frame before streaming, leaving 80 new frames. An
 initial user image selects DFD immediately without treating that first frame as
 a cross-segment overlap.
 
+The profile uses a 30-minute session lease because sequential generation on
+GB10-class hardware can exceed Dreamverse's five-minute default while the GPU
+is still making progress. Deployments can override the lease with
+`FASTVIDEO_SESSION_TIMEOUT_SECONDS`.
+
 Cosmos does not produce audio, so the backend supplies duration-matched silent
 24 kHz audio for the existing browser streaming contract and trims 1,000 audio
 samples with each repeated DFD boundary frame. Runtime LoRA changes are not

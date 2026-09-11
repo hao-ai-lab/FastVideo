@@ -139,10 +139,32 @@ def test_config_enables_prompt_safety_when_requested(monkeypatch):
 
 def test_config_uses_five_minute_session_timeout(monkeypatch):
     _set_required_prompt_keys(monkeypatch)
+    monkeypatch.delenv("DREAMVERSE_MODEL_ID", raising=False)
+    monkeypatch.delenv("FASTVIDEO_SESSION_TIMEOUT_SECONDS", raising=False)
 
     module = _load_config_module()
 
     assert module.SESSION_TIMEOUT_SECONDS == 300
+
+
+def test_config_uses_thirty_minute_cosmos25_session_timeout(monkeypatch):
+    _set_required_prompt_keys(monkeypatch)
+    monkeypatch.setenv("DREAMVERSE_MODEL_ID", "cosmos25-dfd")
+    monkeypatch.delenv("FASTVIDEO_SESSION_TIMEOUT_SECONDS", raising=False)
+
+    module = _load_config_module()
+
+    assert module.SESSION_TIMEOUT_SECONDS == 1800
+
+
+def test_config_allows_session_timeout_override(monkeypatch):
+    _set_required_prompt_keys(monkeypatch)
+    monkeypatch.setenv("DREAMVERSE_MODEL_ID", "cosmos25-dfd")
+    monkeypatch.setenv("FASTVIDEO_SESSION_TIMEOUT_SECONDS", "900")
+
+    module = _load_config_module()
+
+    assert module.SESSION_TIMEOUT_SECONDS == 900
 
 
 def test_config_rejects_invalid_prompt_provider(monkeypatch):
@@ -207,6 +229,7 @@ def test_config_registers_cosmos25_dfd_profile(monkeypatch):
         "fps": 24,
         "num_inference_steps": 4,
         "seed": 42,
+        "session_timeout_seconds": 1800,
     }
 
 
