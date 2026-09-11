@@ -384,6 +384,7 @@ export default function ChatBar({
 						<NativeSelect
 							id="generation-mode"
 							aria-label="Generation mode"
+							title={`${selectedGenerationMode.name}. ${selectedGenerationMode.description}`}
 							value={generationMode}
 							disabled={isBusy || sttBusy}
 							onChange={(event) => {
@@ -394,14 +395,16 @@ export default function ChatBar({
 							className="h-9"
 						>
 							{GENERATION_MODES.map((mode) => (
-								<option key={mode.id} value={mode.id} disabled={!supportedGenerationModes.includes(mode.id)}>
-									{mode.label} — {mode.name}{supportedGenerationModes.includes(mode.id) ? "" : " (unavailable on this runtime)"}
+								<option
+									key={mode.id}
+									value={mode.id}
+									disabled={!supportedGenerationModes.includes(mode.id)}
+									title={supportedGenerationModes.includes(mode.id) ? mode.name : `${mode.name} (unavailable on this runtime)`}
+								>
+									{mode.label}
 								</option>
 							))}
 						</NativeSelect>
-						<p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
-							{selectedGenerationMode.description}
-						</p>
 						{capabilityNotice && <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">{capabilityNotice}</p>}
 					</div>
 				</div>
