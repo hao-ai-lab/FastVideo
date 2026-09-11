@@ -1,4 +1,4 @@
-"""FastH3 model lifecycle and first-frame continuation for DreamVerse."""
+"""Full/Preview H3 lifecycle, conditioning and per-project pipeline selection."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ import torch
 
 from dreamverse.config import DREAMVERSE_SP_SIZE
 from dreamverse.generation_contracts import StepResult
+from dreamverse.generation_inputs import GenerationInputs
 
 if TYPE_CHECKING:
     from PIL.Image import Image
@@ -26,13 +27,14 @@ def _required_config_str(model_config: dict, field_name: str) -> str:
 
 
 class MiniMaxH3GenerationBackend:
-    """Run the VSA data-free FastH3 adapter and retain one continuation frame."""
+    """Own one H3 pipeline at a time and retain base-pipeline continuation."""
 
     def __init__(self, gpu_id: int):
         self.gpu_id = gpu_id
         self.generator: Any | None = None
         self.model_config: dict = {}
         self.continuation_image: Image | None = None
+        self.pipeline_mode = "base"
 
     def _gpu_mem(self) -> str:
         allocated_gib = torch.cuda.memory_allocated() / 1024**3
@@ -51,31 +53,35 @@ class MiniMaxH3GenerationBackend:
         os.environ.pop("FASTVIDEO_INFERENCE_TORCH_COMPILE", None)
 
     def initialize(self, model_config: dict | None = None) -> None:
-        """Download the fixed Preview adapter and load the FastH3 generator.
-
-        The model profile owns the base checkpoint, adapter file, attention
-        backend, and generation geometry. The backend translates that profile
-        into FastVideo's typed generator configuration.
-        """
+        """Load the profile's base pipeline; Ref2VA is loaded on first use."""
         if model_config is not None:
             self.model_config = dict(model_config)
         if not self.model_config:
             raise ValueError("FastH3 initialization requires a model configuration.")
+        self._load_pipeline("base")
 
+    def _load_pipeline(self, pipeline_mode: str) -> None:
+        """Unload the old executor before loading a base or reference transformer.
+
+        GPU worker commands are serialized, so a project boundary never swaps
+        weights while another request is using them. Keeping one executor also
+        avoids simultaneously retaining two large H3 transformers in VRAM.
+        """
+        full_checkpoint = bool(self.model_config.get("full_checkpoint", False))
+        if pipeline_mode == "ref2va" and not full_checkpoint:
+            raise ValueError("Ref2VA requires the full-h3 model profile.")
         if self.generator is not None:
-            self.generator.shutdown()
+            previous_generator = self.generator
             self.generator = None
+            previous_generator.shutdown()
+            del previous_generator
             gc.collect()
             torch.cuda.empty_cache()
 
         self.clear_conditioning()
         model_path = _required_config_str(self.model_config, "model_path")
-        adapter_repo = _required_config_str(self.model_config, "adapter_repo")
-        adapter_filename = _required_config_str(self.model_config, "adapter_filename")
         attention_backend = _required_config_str(self.model_config, "attention_backend")
         self._configure_environment(attention_backend)
-
-        from huggingface_hub import hf_hub_download
 
         from fastvideo import VideoGenerator
         from fastvideo.api import (
@@ -88,10 +94,20 @@ class MiniMaxH3GenerationBackend:
             PipelineSelection,
         )
 
-        adapter_path = hf_hub_download(repo_id=adapter_repo, filename=adapter_filename)
+        components = ComponentConfig()
+        if not full_checkpoint:
+            from huggingface_hub import hf_hub_download
+
+            adapter_repo = _required_config_str(self.model_config, "adapter_repo")
+            adapter_filename = _required_config_str(self.model_config, "adapter_filename")
+            components.lora_path = hf_hub_download(repo_id=adapter_repo, filename=adapter_filename)
+            components.lora_strength = 1.0
+            print(f"[GPU {self.gpu_id}] FastH3 adapter: {adapter_repo}/{adapter_filename}")
+        if pipeline_mode == "ref2va":
+            components.override_pipeline_cls_name = "MiniMaxH3Ref2VAModularPipeline"
         experimental = {
             "attention_backend": attention_backend,
-            "inference_torch_compile": attention_backend == "FLASH_ATTN",
+            "inference_torch_compile": not full_checkpoint and attention_backend == "FLASH_ATTN",
             "vae_parallel_decode": True,
             "vae_parallel_decode_strategy": "gather",
         }
@@ -103,7 +119,8 @@ class MiniMaxH3GenerationBackend:
         generator_config = GeneratorConfig(
             model_path=model_path,
             pipeline=PipelineSelection(
-                components=ComponentConfig(lora_path=adapter_path, lora_strength=1.0),
+                workload_type="i2v" if pipeline_mode == "ref2va" else None,
+                components=components,
                 experimental=experimental,
             ),
             engine=EngineConfig(
@@ -115,17 +132,17 @@ class MiniMaxH3GenerationBackend:
                     text_encoder=True,
                     image_encoder=True,
                     vae=True,
-                    pin_cpu_memory=True,
+                    pin_cpu_memory=not full_checkpoint,
                 ),
                 compile=CompileConfig(enabled=False, vae_enabled=True),
-                use_fsdp_inference=False,
+                use_fsdp_inference=full_checkpoint and DREAMVERSE_SP_SIZE > 1,
             ),
         )
 
-        print(f"[GPU {self.gpu_id}] Loading FastH3 model: {model_path}")
-        print(f"[GPU {self.gpu_id}] FastH3 adapter: {adapter_repo}/{adapter_filename}")
+        print(f"[GPU {self.gpu_id}] Loading H3 model: {model_path} ({pipeline_mode})")
         print(f"[GPU {self.gpu_id}] Before model load: {self._gpu_mem()}")
         self.generator = VideoGenerator.from_config(generator_config)
+        self.pipeline_mode = pipeline_mode
         print(f"[GPU {self.gpu_id}] FastH3 loaded: {self._gpu_mem()} (warmup pending)")
 
     def shutdown(self) -> None:
@@ -166,14 +183,28 @@ class MiniMaxH3GenerationBackend:
             return self._load_rgb_image(image_path), False
         return None, False
 
-    def _build_request(self, prompt: str, conditioning_image: Image | None):
+    def _build_request(
+        self,
+        prompt: str,
+        conditioning_image: Image | None,
+        last_image: Image | None = None,
+        generation_inputs: GenerationInputs | None = None,
+    ):
         """Build the typed FastVideo request owned by the FastH3 profile."""
         from fastvideo.api import GenerationRequest, InputConfig, OutputConfig, SamplingConfig
 
+        references = None
+        if generation_inputs is not None and generation_inputs.mode == "ref2va":
+            from fastvideo.api import MiniMaxH3Reference
+
+            references = [
+                MiniMaxH3Reference(source=str(asset.path), media_type=asset.kind)
+                for asset in generation_inputs.references
+            ]
         return GenerationRequest(
             prompt=prompt,
             negative_prompt="",
-            inputs=InputConfig(pil_image=conditioning_image),
+            inputs=InputConfig(pil_image=conditioning_image, last_image=last_image, references=references),
             sampling=SamplingConfig(
                 height=int(self.model_config["height"]),
                 width=int(self.model_config["width"]),
@@ -200,6 +231,7 @@ class MiniMaxH3GenerationBackend:
         segment_idx: int,
         image_path: str | None,
         reset_conditioning: bool,
+        generation_inputs: GenerationInputs | None = None,
     ) -> StepResult:
         """Generate one synchronized FastH3 segment and retain its last frame.
 
@@ -209,18 +241,44 @@ class MiniMaxH3GenerationBackend:
         """
         if self.generator is None:
             raise RuntimeError("FastH3 generator is not initialized.")
-        conditioning_image, uses_continuation = self._select_conditioning_image(
-            segment_idx,
-            image_path,
-            reset_conditioning,
-        )
-        request = self._build_request(prompt, conditioning_image)
+        mode = generation_inputs.mode if generation_inputs is not None else None
+        if mode not in (None, "t2va", "fl2va", "ref2va"):
+            raise ValueError(f"Unsupported H3 generation mode: {mode!r}.")
+        if mode in ("fl2va", "ref2va") and not self.model_config.get("full_checkpoint", False):
+            raise ValueError(f"{mode.upper()} requires the full-h3 model profile.")
+        pipeline_mode = "ref2va" if mode == "ref2va" else "base"
+        if self.pipeline_mode != pipeline_mode:
+            if segment_idx > 1 and not reset_conditioning:
+                raise ValueError("Generation mode cannot change in the middle of a project.")
+            self._load_pipeline(pipeline_mode)
+
+        conditioning_image = None
+        last_image = None
+        uses_continuation = False
+        if mode == "ref2va":
+            # The reference pipeline rejects first/last-frame inputs. Preserve
+            # all original references for every clip and do not trim overlap.
+            self.clear_conditioning()
+        else:
+            if mode == "fl2va" and generation_inputs is not None:
+                image_path = generation_inputs.first_frame_path
+            conditioning_image, uses_continuation = self._select_conditioning_image(
+                segment_idx,
+                image_path,
+                reset_conditioning,
+            )
         started = time.perf_counter()
         try:
+            if (mode == "fl2va" and segment_idx == 1 and generation_inputs is not None
+                    and generation_inputs.last_frame_path):
+                last_image = self._load_rgb_image(generation_inputs.last_frame_path)
+            request = self._build_request(prompt, conditioning_image, last_image, generation_inputs)
             result = self.generator.generate(request)
         finally:
             if conditioning_image is not None:
                 conditioning_image.close()
+            if last_image is not None:
+                last_image.close()
         torch.cuda.synchronize()
         generation_ms = (time.perf_counter() - started) * 1000.0
 
@@ -235,7 +293,8 @@ class MiniMaxH3GenerationBackend:
             raise RuntimeError("FastH3 returned audio without an audio sample rate.")
 
         save_started = time.perf_counter()
-        self._save_continuation_frame(frames)
+        if mode != "ref2va":
+            self._save_continuation_frame(frames)
         save_conditioning_ms = (time.perf_counter() - save_started) * 1000.0
         timings = {
             "generation_ms": generation_ms,

@@ -31,4 +31,11 @@ describe("ChatBar generation mode selection", () => {
 		expect(screen.queryByRole("combobox", { name: "Generation mode" }))
 			.not.toBeInTheDocument();
 	});
+
+	it("disables unsupported modes and labels mock playback", () => {
+		render(<ChatBar supportedGenerationModes={["t2va"]} mockRuntime />);
+		expect(screen.getByRole("option", { name: /FL2VA/ })).toBeDisabled();
+		expect(screen.getByRole("option", { name: /Ref2VA/ })).toBeDisabled();
+		expect(screen.getByText(/No AI model is generating/)).toBeInTheDocument();
+	});
 });

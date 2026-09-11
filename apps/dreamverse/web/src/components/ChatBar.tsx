@@ -31,6 +31,11 @@ interface Props {
 	projectResetPending?: boolean;
 	viewingReadOnly?: boolean;
 	generationMode?: GenerationMode;
+	supportedGenerationModes?: readonly GenerationMode[];
+	generationInputsValid?: boolean;
+	capabilityNotice?: string;
+	mockRuntime?: boolean;
+	conditioningPanel?: React.ReactNode;
 	onPresetGenerate?: (presetId: string) => void;
 	onContinuationInput?: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
 	onContinuationKeydown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
@@ -57,6 +62,11 @@ export default function ChatBar({
 	projectResetPending = false,
 	viewingReadOnly = false,
 	generationMode = DEFAULT_GENERATION_MODE,
+	supportedGenerationModes = GENERATION_MODES.map((mode) => mode.id),
+	generationInputsValid = true,
+	capabilityNotice = "",
+	mockRuntime = false,
+	conditioningPanel,
 	onPresetGenerate = () => {},
 	onContinuationInput = () => {},
 	onContinuationKeydown = () => {},
@@ -252,7 +262,7 @@ export default function ChatBar({
 				<div className="flex flex-col items-center gap-3 rounded-2xl border border-border bg-card/80 px-6 py-4 text-center shadow-md backdrop-blur-sm">
 					<div className="flex flex-col gap-1">
 						<p className="text-sm font-semibold text-foreground">View-only project</p>
-						<p className="max-w-md text-xs text-muted-foreground">Project sessions are currently limited to 5 minutes. Start a new project to create more videos.</p>
+						<p className="max-w-md text-xs text-muted-foreground">This saved project is available for playback. Start a new project to create more videos.</p>
 					</div>
 					<div className="mt-1 flex items-center gap-2">
 						<Button onClick={onBackFromViewing} variant="outline" size="sm" className="gap-1.5 rounded-full px-4">
@@ -274,7 +284,7 @@ export default function ChatBar({
 				<div className="flex flex-col items-center gap-3 rounded-2xl border border-border bg-card/80 px-8 py-5 text-center shadow-md backdrop-blur-sm">
 					<div className="flex flex-col gap-1">
 						<p className="text-sm font-semibold text-foreground">Session ended</p>
-						<p className="max-w-xs text-xs text-muted-foreground">Each project currently has a 5-minute session. Start a new project to continue creating videos.</p>
+						<p className="max-w-xs text-xs text-muted-foreground">The runtime session has ended. Your saved videos remain available. Start a new project to continue creating.</p>
 					</div>
 					<div className="mt-1 flex items-center gap-2">
 						<Button onClick={onStartNewProject} size="sm" className="rounded-full px-5">
@@ -293,7 +303,7 @@ export default function ChatBar({
 
 	return (
 		<section className="mx-auto flex w-full max-w-2xl shrink-0 flex-col gap-4">
-			{storyPresets.length > 0 && !sessionStarted && (
+			{storyPresets.length > 0 && !sessionStarted && generationMode === "t2va" && (
 				<div className={cn("relative transition-opacity duration-200", isGenerating && "pointer-events-none opacity-40")}>
 					<div
 						ref={scrollRef}
@@ -314,7 +324,7 @@ export default function ChatBar({
 							<button
 								key={preset.id}
 								type="button"
-								disabled={isGenerating}
+								disabled={isBusy || !generationInputsValid}
 								onClick={() => onPresetGenerate(preset.id)}
 								className="flex flex-col sm:flex-row items-start gap-1.5 shrink-0 rounded-xl border p-2.5 text-left backdrop-blur-sm transition-colors max-w-42 sm:max-w-[215px] border-input bg-card/80 text-muted-foreground hover:bg-slate-200/60 hover:border-slate-400 hover:text-slate-700 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:bg-slate-700/50 dark:hover:border-slate-500 dark:hover:text-slate-200"
 							>
@@ -338,6 +348,12 @@ export default function ChatBar({
 						aria-hidden="true"
 					/>
 				</div>
+			)}
+
+			{mockRuntime && (
+				<p role="status" className="rounded-xl border border-violet-500/25 bg-violet-500/10 px-4 py-2 text-center text-xs text-violet-700 dark:text-violet-300">
+					Demo runtime · Sample playback only. No AI model is generating this video.
+				</p>
 			)}
 
 			{sessionNotice && (
@@ -378,17 +394,20 @@ export default function ChatBar({
 							className="h-9"
 						>
 							{GENERATION_MODES.map((mode) => (
-								<option key={mode.id} value={mode.id}>
-									{mode.label} — {mode.name}
+								<option key={mode.id} value={mode.id} disabled={!supportedGenerationModes.includes(mode.id)}>
+									{mode.label} — {mode.name}{supportedGenerationModes.includes(mode.id) ? "" : " (unavailable on this runtime)"}
 								</option>
 							))}
 						</NativeSelect>
 						<p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
 							{selectedGenerationMode.description}
 						</p>
+						{capabilityNotice && <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">{capabilityNotice}</p>}
 					</div>
 				</div>
 			)}
+			{sessionStarted && <p className="px-2 text-center text-[11px] text-muted-foreground">{selectedGenerationMode.label} · Mode and reference inputs are locked for this project.</p>}
+			{conditioningPanel}
 
 			<div
 				className={cn(

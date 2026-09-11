@@ -15,6 +15,7 @@ from dreamverse.gpu_pool import GPUPool, get_available_gpus
 from dreamverse.session_logger import SessionEventLogger
 
 from dreamverse.config import (
+    ACTIVE_MODEL_ID,
     AVAILABLE_LORAS,
     DEVTOOLS_ENABLED,
     FRONTEND_STATIC_DIR_CANDIDATES,
@@ -34,6 +35,8 @@ from dreamverse.routes.presets import (
     curated_presets_router,
 )
 from dreamverse.session.controller import SessionController
+from dreamverse.generation_inputs import supported_generation_modes
+from dreamverse.routes.assets import router as asset_router
 
 
 class _HeartbeatAccessLogFilter(logging.Filter):
@@ -92,8 +95,14 @@ app.add_middleware(
 app.include_router(build_health_router(lambda: runtime.gpu_pool))
 app.include_router(internal_monitor_router)
 app.include_router(prompt_config_router)
+app.include_router(asset_router)
 if DEVTOOLS_ENABLED:
     app.include_router(curated_presets_router)
+
+
+@app.get("/generation-capabilities")
+async def generation_capabilities() -> dict:
+    return {"model_id": ACTIVE_MODEL_ID, "modes": supported_generation_modes(ACTIVE_MODEL_ID), "mock": False}
 
 
 @app.websocket("/ws")
