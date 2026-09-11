@@ -487,7 +487,9 @@ class TestCosmosPresets:
 
         model_dir = tmp_path / "Cosmos-Predict2.5-2B-DFD"
         model_dir.mkdir()
-        (model_dir / "model_index.json").write_text('{"_class_name": "Cosmos2_5Pipeline"}')
+        (model_dir / "model_index.json").write_text(
+            '{"_class_name": "Cosmos2_5Pipeline", "_diffusers_version": "0.37.0"}'
+        )
         sp = SamplingParam.from_pretrained(str(model_dir))
         assert sp.guidance_scale == 1.0
         assert sp.num_inference_steps == 4
