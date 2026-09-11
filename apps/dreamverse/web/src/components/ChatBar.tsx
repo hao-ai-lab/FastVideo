@@ -424,7 +424,7 @@ export default function ChatBar({
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent
-									side="top"
+									side="bottom"
 									align="start"
 									sideOffset={6}
 									className="min-w-36 rounded-2xl border-input/70 bg-card/95 shadow-xl backdrop-blur-xl"
