@@ -37,16 +37,24 @@ class _TensorLatentDist:
     """Minimal distribution-like wrapper used by pipeline stages."""
 
     mean: torch.Tensor
+    stddev: torch.Tensor | None = None
 
     def mode(self) -> torch.Tensor:
         return self.mean
 
     def sample(self, generator: Any | None = None) -> torch.Tensor:  # generator for API compatibility
-        # The official interface encodes deterministically; for compatibility we
-        # return the mean. (Stochastic posterior sampling isn't required for
-        # Cosmos2.5 inference.)
-        _ = generator
-        return self.mean
+        if self.stddev is None:
+            return self.mean
+        noise_device = self.mean.device
+        if isinstance(generator, torch.Generator):
+            noise_device = generator.device
+        noise = torch.randn(
+            self.mean.shape,
+            generator=generator,
+            device=noise_device,
+            dtype=self.mean.dtype,
+        ).to(self.mean.device)
+        return self.mean + self.stddev * noise
 
 
 class Cosmos25WanVAEAdapter(nn.Module):
@@ -669,11 +677,12 @@ class Cosmos25WanVAE(nn.Module):
             )
             out = torch.cat([out, out_], 2)
 
-        mu, _log_var = self.conv1(out).chunk(2, dim=1)
+        mu, log_var = self.conv1(out).chunk(2, dim=1)
         mean, inv_std = self._scale(mu)
         z_norm = (mu - mean) * inv_std
+        posterior_std = torch.exp(0.5 * log_var.clamp(-30.0, 20.0)) * inv_std
         self.clear_cache()
-        return _TensorLatentDist(z_norm)
+        return _TensorLatentDist(z_norm, posterior_std)
 
     def decode(self, latent: torch.Tensor) -> torch.Tensor:
         """
