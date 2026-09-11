@@ -128,6 +128,10 @@ FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA \
 pytest tests/local_tests/cosmos25/test_cosmos25_dfd_pipeline_parity.py -v -s
 ```
 
+Both gates pass on the validation host, including the non-skip real-weight
+four-step rollout comparison. This clears native latent-pipeline parity; it does
+not replace the converted-package decode and visual-quality gate below.
+
 Then run the converted package at its production contract:
 
 ```bash
