@@ -98,6 +98,9 @@ MODEL_REGISTRY = {
         "fps": 24,
         "num_inference_steps": 4,
         "seed": 42,
+        # Six sequential GB10 segments can exceed the legacy five-minute
+        # DreamVerse lease even though the GPU is making progress.
+        "session_timeout_seconds": 1800,
     },
 }
 
@@ -109,9 +112,6 @@ if ACTIVE_MODEL_ID not in MODEL_REGISTRY:
 
 # Active model configuration
 MODEL_CONFIG = MODEL_REGISTRY[ACTIVE_MODEL_ID]
-
-# Generation limits
-SESSION_TIMEOUT_SECONDS = 300
 
 # Frame settings
 NUM_FRAMES = 121
@@ -221,6 +221,16 @@ if DREAMVERSE_COSMOS25_DFD_MODEL_PATH and MODEL_CONFIG.get("generation_backend")
         **MODEL_CONFIG,
         "continuation_model_path": DREAMVERSE_COSMOS25_DFD_MODEL_PATH,
     }
+
+# Generation limits. Slower backends may own a longer default lease, while an
+# explicit environment override remains available for deployment policy.
+SESSION_TIMEOUT_SECONDS = max(
+    1,
+    _env_int(
+        "FASTVIDEO_SESSION_TIMEOUT_SECONDS",
+        cast(int, MODEL_CONFIG.get("session_timeout_seconds", 300)),
+    ),
+)
 
 AVAILABLE_LORAS = {
     "pixar": {
