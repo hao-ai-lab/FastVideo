@@ -33,7 +33,10 @@ test.describe("generation modes through the mock runtime", () => {
 			await page.goto("/");
 			await expect(page.getByText(/Demo runtime · Sample playback only/)).toBeVisible();
 			const modeSelect = page.getByRole("combobox", { name: "Generation mode" });
-			await modeSelect.selectOption(mode);
+			const modeLabel = mode === "ref2va" ? "Ref2VA" : mode.toUpperCase();
+			await modeSelect.click();
+			await page.getByRole("option", { name: modeLabel, exact: true }).click();
+			await expect(modeSelect).toHaveText(modeLabel);
 			await page.getByLabel("Continuation prompt").fill(framePrompt);
 			const uploadedIds: string[] = [];
 			page.on("response", async (uploadResponse) => {
@@ -85,8 +88,10 @@ test.describe("generation modes through the mock runtime", () => {
 				if (mode === "ref2va") {
 					await page.getByRole("button", { name: "Toggle sidebar" }).click();
 					await page.getByRole("button", { name: "New project", exact: true }).click();
-					await expect(modeSelect).toHaveValue("t2va");
-					await modeSelect.selectOption("fl2va");
+					await expect(modeSelect).toHaveText("T2VA");
+					await modeSelect.click();
+					await page.getByRole("option", { name: "FL2VA", exact: true }).click();
+					await expect(modeSelect).toHaveText("FL2VA");
 					await page.getByRole("combobox", { name: "First frame", exact: true }).selectOption({ label: "subject.png" });
 					await expect(page.getByRole("combobox", { name: "Last frame", exact: true })).toHaveValue("");
 					await page.getByLabel("Continuation prompt").fill("The paper fox explores a new scene.");

@@ -2,9 +2,9 @@
 
 import React, { useRef, useState, useCallback, useEffect } from "react";
 import Image from "next/image";
-import { Film, ArrowUp, X, Loader2, ArrowLeft, ChevronDown } from "lucide-react";
+import { Film, ArrowUp, X, Loader2, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { NativeSelect } from "@/components/ui/native-select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import LeaveSessionModal, { shouldShowLeaveWarning } from "@/components/LeaveSessionModal";
 import SpeechToTextButton from "@/components/SpeechToTextButton";
 import {
@@ -408,33 +408,40 @@ export default function ChatBar({
 							<label htmlFor="generation-mode" className="cursor-pointer text-xs font-medium text-muted-foreground">
 								Mode
 							</label>
-							<div className="relative">
-								<NativeSelect
+							<Select
+								value={generationMode}
+								disabled={isBusy || sttBusy}
+								onValueChange={(value) => {
+									if (isGenerationMode(value)) onGenerationModeChange(value);
+								}}
+							>
+								<SelectTrigger
 									id="generation-mode"
 									aria-label="Generation mode"
 									title={`${selectedGenerationMode.name}. ${selectedGenerationMode.description}`}
-									value={generationMode}
-									disabled={isBusy || sttBusy}
-									onChange={(event) => {
-										if (isGenerationMode(event.target.value)) {
-											onGenerationModeChange(event.target.value);
-										}
-									}}
-									className="h-8 w-24 cursor-pointer rounded-lg border-0 bg-transparent py-1 pl-2 pr-6 text-xs font-medium shadow-none hover:bg-muted/60"
+									className="h-8 w-24 cursor-pointer rounded-lg border-0 bg-transparent px-2 py-1 text-xs font-medium shadow-none hover:bg-muted/60 data-[state=open]:bg-muted/80 [&>svg]:size-3 [&>svg]:transition-transform [&[data-state=open]>svg]:rotate-180"
+								>
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent
+									side="top"
+									align="start"
+									sideOffset={6}
+									className="min-w-36 rounded-2xl border-input/70 bg-card/95 shadow-xl backdrop-blur-xl"
 								>
 									{GENERATION_MODES.map((mode) => (
-										<option
+										<SelectItem
 											key={mode.id}
 											value={mode.id}
 											disabled={!supportedGenerationModes.includes(mode.id)}
 											title={supportedGenerationModes.includes(mode.id) ? mode.name : `${mode.name} (unavailable on this runtime)`}
+											className="cursor-pointer rounded-xl text-xs transition-colors data-[state=checked]:bg-muted/80 data-[state=checked]:font-semibold [&_svg]:size-3.5 [&_svg]:text-foreground"
 										>
 											{mode.label}
-										</option>
+										</SelectItem>
 									))}
-								</NativeSelect>
-								<ChevronDown aria-hidden="true" className="pointer-events-none absolute right-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
-							</div>
+								</SelectContent>
+							</Select>
 						</div>
 					)}
 					<div className="flex-1" />

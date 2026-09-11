@@ -610,12 +610,15 @@ describe.skip('App websocket integration', () => {
     render(<Page />);
 
     const modeSelect = await screen.findByRole('combobox', { name: 'Generation mode' });
-    expect(modeSelect).toHaveValue('t2va');
+    expect(modeSelect).toHaveTextContent('T2VA');
 
-    await user.selectOptions(modeSelect, 'fl2va');
-    expect(screen.getByText(
-      'Provide first and last frame images to control the transition.',
-    )).toBeInTheDocument();
+    await user.click(modeSelect);
+    await user.click(await screen.findByRole('option', { name: 'FL2VA' }));
+    expect(modeSelect).toHaveTextContent('FL2VA');
+    expect(modeSelect).toHaveAttribute(
+      'title',
+      'First/last frames to video + audio. Start from a first frame image. Add an optional last frame to guide the ending.',
+    );
 
     const generateButton = await screen.findByRole('button', { name: 'Generate' });
     await waitFor(() => expect(generateButton).toBeEnabled());
