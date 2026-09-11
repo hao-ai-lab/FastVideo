@@ -116,6 +116,29 @@ transformer tensors, enables FPS-modulated RoPE, and writes the fixed DFD
 scheduler metadata. A strict load of the real converted package is still a
 required validation gate.
 
+Run the isolated DFD pipeline contracts and full real-weight four-step rollout
+parity after conversion/component tests:
+
+```bash
+pytest tests/local_tests/cosmos25/test_cosmos25_dfd_pipeline.py -q
+
+COSMOS25_DFD_REF_DIR=/path/to/data-forcing-distillation \
+COSMOS25_DFD_CHECKPOINT_DIR=/path/to/0000040.net_model \
+FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA \
+pytest tests/local_tests/cosmos25/test_cosmos25_dfd_pipeline_parity.py -v -s
+```
+
+Then run the converted package at its production contract:
+
+```bash
+FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA \
+python examples/inference/basic/basic_cosmos2_5_dfd_i2w.py \
+  --model /path/to/converted_weights/cosmos25-dfd-v2w \
+  --image /path/to/conditioning.png \
+  --prompt "The camera pivots smoothly to the right while the scene continues." \
+  --output outputs_video/cosmos25_dfd_i2w.mp4
+```
+
 ## Validated GPU gates
 
 Conversion, strict load, the real-weight DiT comparison, end-to-end T2W
@@ -183,3 +206,6 @@ export COSMOS25_DFD_CHECKPOINT_DIR=/path/to/0000040.net_model
 FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA \
 pytest tests/local_tests/cosmos25/test_cosmos25_dfd_transformer_parity.py -v -s
 ```
+
+The non-skip DFD DiT gate passed with maximum absolute error `0.15625`,
+mean absolute error `0.01315392`, and relative mean error `0.01986194`.

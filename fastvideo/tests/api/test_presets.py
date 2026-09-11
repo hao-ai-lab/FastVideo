@@ -458,8 +458,10 @@ class TestCosmosPresets:
     def test_cosmos25_separate_family(self) -> None:
         import fastvideo.registry  # noqa: F401
         presets = get_presets_for_family("cosmos25")
-        assert len(presets) == 1
-        assert presets[0].name == "cosmos25_predict2_2b"
+        assert {preset.name for preset in presets} == {
+            "cosmos25_predict2_2b",
+            "cosmos25_dfd_v2w_2b",
+        }
 
     def test_cosmos25_2b_path_resolves_to_preset(self) -> None:
         """Regression: the Cosmos-Predict2.5 2B model path must select the
@@ -478,6 +480,19 @@ class TestCosmosPresets:
         c25 = get_preset("cosmos25_predict2_2b", "cosmos25")
         assert c.defaults["fps"] == 16
         assert c25.defaults["fps"] == 24
+
+    def test_cosmos25_dfd_path_resolves_to_four_step_i2v_preset(self, tmp_path) -> None:
+        import fastvideo.registry  # noqa: F401
+        from fastvideo.api.sampling_param import SamplingParam
+
+        model_dir = tmp_path / "Cosmos-Predict2.5-2B-DFD"
+        model_dir.mkdir()
+        (model_dir / "model_index.json").write_text('{"_class_name": "Cosmos2_5Pipeline"}')
+        sp = SamplingParam.from_pretrained(str(model_dir))
+        assert sp.guidance_scale == 1.0
+        assert sp.num_inference_steps == 4
+        assert sp.num_frames == 81
+        assert sp.fps == 24
 
 
 # -------------------------------------------------------------------

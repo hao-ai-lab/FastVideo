@@ -11,10 +11,10 @@
 - local_tests_readme: `tests/local_tests/cosmos25/README.md`
 
 ## Current Phase
-- phase: DFD Phase 2 parity scaffolding and component prototype
+- phase: DFD Phase 3 native pipeline integration
 - status: in_progress
 - owner: orchestrator
-- last_updated: 2026-09-10
+- last_updated: 2026-09-11
 
 ## Component Matrix
 | Component | Type | Reuse/Port | Official Definition | Official Instantiation | FastVideo Target | Prototype | Conversion | Parity | Open Issues |
@@ -24,11 +24,11 @@
 | Reason1 encoder | text encoder | reuse | Predict2.5 Video2World config | distilled inference CLI | existing Cosmos25 encoder | existing | packaged passthrough | production loader pass | none |
 | tokenizer VAE | VAE | reuse | Predict2.5 tokenizer | distilled inference CLI | existing Cosmos25 VAE | existing | packaged passthrough | production loader pass | none |
 | T2W pipeline | pipeline | isolated scheduler-selected route | `generate_samples_from_batch` | distilled inference CLI | Cosmos2_5 staged pipeline | complete | complete | full-resolution video and eye gate pass | none |
-| DFD ODE sampler | scheduler | port | `fastgen/methods/model.py::_student_sample_loop`; `fastgen/networks/noise_schedule.py::RFNoiseSchedule` | `config_dmd2.py` fixed `t_list` | `Cosmos25DFDScheduler` | complete | n/a | scaffold pending non-skip run | none |
-| DFD student DiT | transformer | reuse Cosmos25 architecture with DFD weights and FPS-modulated RoPE | `fastgen/networks/cosmos_predict2/network.py::CosmosPredict2` | `config_dmd2_v2w.py` | `Cosmos25Transformer3DModel` | reuse complete | converter complete | real-weight scaffold pending non-skip run | strict load and BF16 comparison pending |
-| DFD VAE | VAE | reuse | `CosmosPredict2.init_vae` / `WanVideoEncoder` | `prepare_i2v_condition` | existing Cosmos25 VAE | reuse pending | packaged passthrough | pipeline parity pending | encode only the single conditioning frame |
-| DFD Reason1 encoder | text encoder | reuse | `CosmosPredict2.init_text_encoder` | VBench I2V inference | existing Cosmos25 encoder | reuse pending | packaged passthrough | pipeline parity pending | none |
-| DFD V2W pipeline | pipeline | scheduler-selected one-frame route | `video_model_inference_vbench.py` | four-step student sampling | Cosmos2_5 staged pipeline | pending | pending | pipeline parity pending | first decoded frame repeats conditioning frame |
+| DFD ODE sampler | scheduler | port | `fastgen/methods/model.py::_student_sample_loop`; `fastgen/networks/noise_schedule.py::RFNoiseSchedule` | `config_dmd2.py` fixed `t_list` | `Cosmos25DFDScheduler` | complete | n/a | non-skip pass | none |
+| DFD student DiT | transformer | reuse Cosmos25 architecture with DFD weights and FPS-modulated RoPE | `fastgen/networks/cosmos_predict2/network.py::CosmosPredict2` | `config_dmd2_v2w.py` | `Cosmos25Transformer3DModel` | reuse complete | converter complete | real-weight BF16 pass | converted-package strict load pending |
+| DFD VAE | VAE | reuse | `CosmosPredict2.init_vae` / `WanVideoEncoder` | `prepare_i2v_condition` | existing Cosmos25 VAE | complete | packaged passthrough | isolated contract authored | encode only the single conditioning frame |
+| DFD Reason1 encoder | text encoder | reuse | `CosmosPredict2.init_text_encoder` | VBench I2V inference | existing Cosmos25 encoder | complete | packaged passthrough | component production pass | none |
+| DFD V2W pipeline | pipeline | scheduler-selected one-frame route | `video_model_inference_vbench.py` | four-step student sampling | Cosmos2_5 staged pipeline | complete | complete | four-step parity pending non-skip run | first decoded frame repeats conditioning frame by design |
 
 ## Conversion State
 - conversion_script: `scripts/checkpoint_conversion/cosmos25_distilled_to_diffusers.py`
@@ -57,10 +57,11 @@ DFD conversion target:
 | pipeline smoke | `python examples/inference/basic/basic_cosmos2_5_distilled_t2w.py --model /path/to/converted-model --steps 1 --frames 9 --height 256 --width 448` | passed | 2.19 s end-to-end after load; 2026-08-27 |
 | full T2W quality | `python examples/inference/basic/basic_cosmos2_5_distilled_t2w.py --model /path/to/converted-model` | passed + eye gate | 704x1280x77, 4 steps; 143.53 s end-to-end after load; visually coherent |
 | DreamVerse frames | example command with `--return-frames` | passed | 9 RGB frames; first shape `(256, 448, 3)`; 2026-08-27 |
-| DFD scheduler parity | `COSMOS25_DFD_REF_DIR=$PWD/DFDReference pytest tests/local_tests/cosmos25/test_cosmos25_dfd_scheduler_parity.py -v -s` | not run | Must compare fixed timesteps and all four ODE transitions against upstream RF operations |
-| DFD conversion contracts | `pytest tests/local_tests/cosmos25/test_cosmos25_dfd_conversion.py -q` | not run | Synthetic DCP-normalized state dictionaries and package metadata |
-| DFD student DiT | `COSMOS25_DFD_REF_DIR=/path/to/data-forcing-distillation COSMOS25_DFD_CHECKPOINT_DIR=/path/to/0000040.net_model pytest tests/local_tests/cosmos25/test_cosmos25_dfd_transformer_parity.py -v -s` | not run | Real-weight BF16 parity required before pipeline wiring is considered complete |
-| DFD pipeline parity | `COSMOS25_DFD_REF_DIR=/path/to/data-forcing-distillation COSMOS25_DFD_MODEL=/path/to/converted-model pytest tests/local_tests/cosmos25/test_cosmos25_dfd_pipeline_parity.py -v -s` | not run | Compare denoised latents with identical image latent, text embeddings, and noise |
+| DFD scheduler parity | `COSMOS25_DFD_REF_DIR=$PWD/DFDReference pytest tests/local_tests/cosmos25/test_cosmos25_dfd_scheduler_parity.py -v -s` | 1 passed, non-skip | Exact fixed timesteps, initial-noise scaling, and four RF transitions; 2026-09-10 |
+| DFD conversion contracts | `pytest tests/local_tests/cosmos25/test_cosmos25_dfd_conversion.py -q` | 4 passed | Synthetic DCP-normalized state dictionaries and package metadata; 2026-09-10 |
+| DFD student DiT | `COSMOS25_DFD_REF_DIR=/path/to/data-forcing-distillation COSMOS25_DFD_CHECKPOINT_DIR=/path/to/0000040.net_model pytest tests/local_tests/cosmos25/test_cosmos25_dfd_transformer_parity.py -v -s` | 1 passed, non-skip | max 0.15625, mean 0.01315392, relative mean 0.01986194; 2026-09-11 |
+| DFD pipeline contracts | `pytest tests/local_tests/cosmos25/test_cosmos25_dfd_pipeline.py -q` | not run | CPU-isolated image encode, mask, timestep, preservation, and validation contracts |
+| DFD pipeline parity | `COSMOS25_DFD_REF_DIR=/path/to/data-forcing-distillation COSMOS25_DFD_CHECKPOINT_DIR=/path/to/0000040.net_model pytest tests/local_tests/cosmos25/test_cosmos25_dfd_pipeline_parity.py -v -s` | not run | Compare the complete four-step latent rollout with identical image latent, text embeddings, and noise |
 
 ## Open Questions
 | ID | Question | Owner | Needed By Phase | Status | Resolution |
@@ -76,8 +77,8 @@ DFD conversion target:
 | I001 | parity | student DiT | high | No non-skip real-weight distilled forward comparison yet | Spark official-vs-FastVideo BF16 comparison | parity | closed | passed at final relative mean 0.038397 |
 | I002 | conversion | packaged model | high | Released official checkpoint is not yet isolated in a FastVideo-loadable component layout | Converted package and strict production load | conversion | closed | 685 clean student tensors; load pass |
 | I003 | pipeline | T2W | high | End-to-end distilled generation is not yet validated | small and full-resolution Spark runs plus visual inspection | pipeline | closed | full T2W quality gate passed |
-| I004 | prep | DFD checkpoint | medium | Public release has no `model_index.json` and stores the student as zipped PyTorch DCP shards | HF metadata inspection; seven-file custom layout | conversion | open | add explicit DCP converter and strict-load validation |
-| I005 | pipeline | DFD V2W | high | Native FastVideo parity has not yet been established | reference-only hybrid generation passed, but no native DFD path exists | parity | open | scheduler, DiT, and pipeline parity required |
+| I004 | prep | DFD checkpoint | medium | Public release has no `model_index.json` and stores the student as zipped PyTorch DCP shards | HF metadata inspection; seven-file custom layout | conversion | open | converter is complete; real converted-package strict load remains |
+| I005 | pipeline | DFD V2W | high | Native four-step rollout parity has not yet been established | scheduler and DiT parity pass; dedicated pipeline route is authored | parity | open | run isolated contracts, full rollout parity, then converted-package smoke |
 
 ## Escape Hatches
 | ID | Phase | Decision Type | Question | Recommended Option | Status | Resolution |
@@ -102,6 +103,8 @@ DFD conversion target:
 | 2026-09-10 | Rebuild PR 1768 as a dedicated `GenerationBackend` | Merged FastH3 established the model-owned lifecycle and continuation boundary | Cosmos will not add conditionals to the LTX2 backend or revive the removed shared generation implementation |
 | 2026-09-10 | Keep two explicit Cosmos package roles in the backend | The public DFD model cannot create an unconditioned first segment, while the released TrigFlow student cannot continue a frame | Segment 1 uses the bootstrap package unless the user supplies an initial image; all conditioned segments use the DFD package |
 | 2026-09-10 | Synthesize silent 24 kHz audio in the Cosmos backend | DreamVerse's fMP4 streamer currently requires an audio track | Video-only Cosmos output remains streamable without changing the shared AV contract |
+| 2026-09-11 | Accept DFD real-weight DiT parity and begin pipeline wiring | Exact preprocessing and bounded 1.986% aggregate BF16 drift show the reused transformer implements the DFD student | Clears the add-model component gate; does not yet clear the four-step pipeline gate |
+| 2026-09-11 | Use a dedicated scheduler-selected DFD V2W route | The DFD checkpoint has fixed geometry, FPS, timestep, mask, and first-frame semantics distinct from both base Cosmos and TrigFlow T2W | Existing Cosmos paths remain unchanged; DFD validates 704x1280x81 at 24 FPS and four steps |
 
 ## Handoff Notes
 - Existing T2W CPU scheduler unit and pinned-reference parity tests pass without skips; the new DFD tests are authored but not executable in this local environment because its optional FastVideo/DFD dependencies are absent.

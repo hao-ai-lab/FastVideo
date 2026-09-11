@@ -835,6 +835,25 @@ def _register_configs() -> None:
         default_preset="gen3c_cosmos_7b",
     )
 
+    # Cosmos 2.5 DFD V2W (2B). Register before the generic Cosmos 2.5
+    # detector so converted directories whose names contain DFD select the
+    # fixed four-step I2V preset.
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=Cosmos25Config,
+        workload_types=(WorkloadType.I2V, ),
+        model_detectors=[
+            lambda path: "dfd" in path.lower() and any(token in path.lower() for token in (
+                "cosmos25",
+                "cosmos2_5",
+                "cosmos2.5",
+                "cosmos-predict2.5",
+            )),
+        ],
+        model_family="cosmos25",
+        default_preset="cosmos25_dfd_v2w_2b",
+    )
+
     # Cosmos 2.5 (2B)
     register_configs(
         sampling_param_cls=None,

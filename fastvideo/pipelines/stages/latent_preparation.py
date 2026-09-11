@@ -719,6 +719,137 @@ class Cosmos25DistilledT2WLatentPreparationStage(Cosmos25T2WLatentPreparationSta
         return batch
 
 
+class Cosmos25DFDV2WLatentPreparationStage(PipelineStage):
+    """Prepare the single-frame condition and BF16 noise used by DFD V2W."""
+
+    def __init__(self, scheduler, transformer, vae) -> None:
+        super().__init__()
+        self.scheduler = scheduler
+        self.transformer = transformer
+        self.vae = vae
+
+    @staticmethod
+    def _batch_size(batch: ForwardBatch) -> int:
+        if isinstance(batch.prompt, list):
+            batch_size = len(batch.prompt)
+        elif batch.prompt is not None:
+            batch_size = 1
+        else:
+            batch_size = batch.prompt_embeds[0].shape[0]
+        return batch_size * batch.num_videos_per_prompt
+
+    def forward(
+        self,
+        batch: ForwardBatch,
+        fastvideo_args: FastVideoArgs,
+    ) -> ForwardBatch:
+        batch_size = self._batch_size(batch)
+        height = batch.height
+        width = batch.width
+        if height is None or width is None:
+            raise ValueError("Height and width must be provided")
+        if batch.pil_image is None and batch.preprocessed_image is None:
+            raise ValueError("Cosmos Predict2.5 DFD requires one conditioning image")
+
+        device = get_local_torch_device()
+        latent_frames = (batch.num_frames - 1) // 4 + 1
+        shape = (
+            batch_size,
+            self.transformer.config.in_channels,
+            latent_frames,
+            height // 8,
+            width // 8,
+        )
+
+        # FastGen creates BF16 noise directly on the execution device before
+        # encoding the conditioning image. Keep that RNG and cast boundary.
+        if batch.latents is None:
+            seeds = batch.seeds or [int(batch.seed if batch.seed is not None else 0) + i for i in range(batch_size)]
+            if len(seeds) != batch_size:
+                seeds = [int(batch.seed if batch.seed is not None else 0) + i for i in range(batch_size)]
+            noise = torch.stack([
+                torch.randn(
+                    shape[1:],
+                    generator=torch.Generator(device=device).manual_seed(seed),
+                    device=device,
+                    dtype=torch.bfloat16,
+                ) for seed in seeds
+            ])
+            latents = self.scheduler.scale_noise(torch.zeros_like(noise), noise=noise)
+        else:
+            latents = batch.latents.to(device=device, dtype=torch.bfloat16)
+
+        if batch.preprocessed_image is not None:
+            image = batch.preprocessed_image
+            if image.ndim == 4:
+                image = image.unsqueeze(2)
+            elif image.ndim != 5:
+                raise ValueError(f"preprocessed_image must be 4D or 5D, got {image.ndim}D")
+            image = image[:, :, :1]
+        else:
+            image_processor = ImageProcessor(vae_scale_factor=8)
+            image = image_processor._preprocess_cosmos25(batch.pil_image, height, width).unsqueeze(2)
+
+        if image.shape[0] == 1 and batch_size > 1:
+            image = image.repeat(batch_size, 1, 1, 1, 1)
+        if image.shape[0] != batch_size:
+            raise ValueError(f"conditioning image batch is {image.shape[0]}, expected {batch_size}")
+        image = image.to(device=device, dtype=torch.float16).contiguous()
+
+        self.vae = self.vae.to(device=device, dtype=image.dtype)
+        encoded = self.vae.encode(image)
+        if hasattr(encoded, "latent_dist"):
+            encoded = encoded.latent_dist
+        if hasattr(encoded, "sample"):
+            generators = batch.generator if isinstance(batch.generator, list) else None
+            samples = []
+            for index in range(batch_size):
+                generator = generators[index] if generators and index < len(generators) else None
+                sample = encoded.sample(generator) if batch_size == 1 else self.vae.encode(image[index:index + 1]).sample(generator)
+                samples.append(sample if batch_size == 1 else sample)
+                if batch_size == 1:
+                    break
+            conditioning_latents = torch.cat(samples, dim=0)
+        elif hasattr(encoded, "latents"):
+            conditioning_latents = encoded.latents
+        elif torch.is_tensor(encoded):
+            conditioning_latents = encoded
+        else:
+            raise TypeError(f"Unsupported Cosmos25 VAE encoder output: {type(encoded)}")
+
+        cfg = getattr(self.vae, "config", None)
+        if (not bool(getattr(self.vae, "handles_latent_norm", False)) and cfg is not None
+                and getattr(cfg, "latents_mean", None) is not None and getattr(cfg, "latents_std", None) is not None):
+            mean = torch.tensor(cfg.latents_mean, device=device, dtype=conditioning_latents.dtype).view(1, -1, 1, 1, 1)
+            std = torch.tensor(cfg.latents_std, device=device, dtype=conditioning_latents.dtype).view(1, -1, 1, 1, 1)
+            conditioning_latents = (conditioning_latents - mean) / std
+        conditioning_latents = conditioning_latents[:, :, :1].to(torch.bfloat16)
+        self.vae.to("cpu")
+
+        cond_indicator = latents.new_zeros(batch_size, 1, latent_frames, 1, 1)
+        cond_indicator[:, :, :1] = 1
+        cond_mask = cond_indicator.expand(-1, 1, -1, shape[-2], shape[-1]).contiguous()
+
+        batch.latents = latents
+        batch.raw_latent_shape = latents.shape
+        batch.conditioning_latents = conditioning_latents
+        batch.cond_indicator = cond_indicator
+        batch.cond_mask = cond_mask
+        batch.uncond_indicator = None
+        batch.uncond_mask = None
+        batch.padding_mask = latents.new_zeros(batch_size, 1, shape[-2], shape[-1])
+        return batch
+
+    def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+        return Cosmos25LatentPreparationStage.verify_input(self, batch, fastvideo_args)  # type: ignore[misc]
+
+    def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+        result = Cosmos25LatentPreparationStage.verify_output(self, batch, fastvideo_args)  # type: ignore[misc]
+        result.add_check("conditioning_latents", batch.conditioning_latents, [V.is_tensor, V.with_dims(5)])
+        result.add_check("cond_mask", batch.cond_mask, [V.is_tensor, V.with_dims(5)])
+        return result
+
+
 class Cosmos25V2WLatentPreparationStage(Cosmos25LatentPreparationStage):
     """Cosmos 2.5 V2W/I2W latent preparation stage (conditioning-aware)."""
 

@@ -81,4 +81,23 @@ COSMOS25_PREDICT2_2B = InferencePreset(
     },
 )
 
-ALL_PRESETS = (COSMOS_PREDICT2_2B, COSMOS25_PREDICT2_2B)
+COSMOS25_DFD_V2W_2B = InferencePreset(
+    name="cosmos25_dfd_v2w_2b",
+    version=1,
+    model_family="cosmos25",
+    description="Cosmos Predict2.5 2B DFD four-step Video2World",
+    workload_type="i2v",
+    stage_schemas=(_DENOISE_STAGE, ),
+    defaults={
+        "seed": 42,
+        "height": 704,
+        "width": 1280,
+        "num_frames": 81,
+        "fps": 24,
+        "guidance_scale": 1.0,
+        "num_inference_steps": 4,
+        "negative_prompt": "",
+    },
+)
+
+ALL_PRESETS = (COSMOS_PREDICT2_2B, COSMOS25_PREDICT2_2B, COSMOS25_DFD_V2W_2B)

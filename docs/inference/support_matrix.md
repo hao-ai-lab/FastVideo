@@ -105,6 +105,11 @@ is registered yet. Follow the validation guide in
 `tests/local_tests/cosmos25/README.md`, then pass the converted directory to
 `basic_cosmos2_5_distilled_t2w.py --model`.
 
+The public DFD Video2World student is also supported through local DCP
+conversion. It uses exactly one conditioning image, 4 steps, 81 frames at
+704x1280 and 24 FPS. Use `basic_cosmos2_5_dfd_i2w.py`; a public converted model
+ID is not registered yet.
+
 **Note (MiniMax H3)**: T2VA, FL2VA, and Ref2VA all generate video with stereo
 audio. Use the Ref2VA example when passing ordered image, video, or audio
 references.
