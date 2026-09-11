@@ -32,6 +32,14 @@ from fastapi.staticfiles import StaticFiles
 from dreamverse._deps import require_dreamverse_runtime_deps
 from dreamverse.config import FRONTEND_STATIC_DIR_CANDIDATES, GENERATION_SEGMENT_CAP
 from dreamverse.session_init_image import cleanup_session_init_image, persist_session_init_image
+from dreamverse.generation_inputs import (
+    GenerationInputs,
+    pin_generation_inputs,
+    release_generation_inputs,
+    resolve_generation_inputs,
+    supported_generation_modes,
+)
+from dreamverse.routes.assets import router as asset_router
 
 LATENCY_MS = 200
 SESSION_TIMEOUT_SECONDS = 300
@@ -170,6 +178,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(asset_router)
+
+
+@app.get("/generation-capabilities")
+async def generation_capabilities():
+    return {"model_id": "mock", "modes": supported_generation_modes("mock"), "mock": True}
 
 
 @app.get("/healthz")
@@ -290,6 +304,7 @@ async def websocket_endpoint(websocket: WebSocket):
     send_lock = asyncio.Lock()
     stop_event = asyncio.Event()
     session_init_image = None
+    generation_inputs = GenerationInputs()
 
     async def ws_send_json(payload: dict) -> None:
         async with send_lock:
@@ -347,10 +362,13 @@ async def websocket_endpoint(websocket: WebSocket):
         generation_paused = bool(initial_rollout_prompt and not single_clip_mode and len(curated_prompts) == 0)
 
         try:
+            generation_inputs = resolve_generation_inputs(init_data, "mock")
+            pin_generation_inputs(generation_inputs)
             session_init_image = persist_session_init_image(init_data.get("initial_image"))
         except ValueError as exc:
             await ws_send_json({
                 "type": "error",
+                "error_code": "invalid_generation_input",
                 "message": str(exc),
             })
             await websocket.close(code=1003, reason="Invalid initial image")
@@ -362,6 +380,8 @@ async def websocket_endpoint(websocket: WebSocket):
             "type": "gpu_assigned",
             "gpu_id": 0,
             "session_timeout": SESSION_TIMEOUT_SECONDS,
+            "generation_mode": generation_inputs.mode,
+            "mock": True,
         })
 
         raw_prompt_queue: asyncio.Queue[PromptSubmission] = asyncio.Queue()
@@ -486,6 +506,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 })
 
         async def apply_project_init_payload(payload: dict[str, object], ) -> bool:
+            nonlocal generation_inputs
             nonlocal preset_id
             nonlocal preset_label
             nonlocal initial_rollout_prompt
@@ -519,10 +540,19 @@ async def websocket_endpoint(websocket: WebSocket):
             ]
 
             try:
-                replace_session_image(payload.get("initial_image"))
+                next_inputs = resolve_generation_inputs(payload, "mock")
+                pin_generation_inputs(next_inputs)
+                try:
+                    replace_session_image(payload.get("initial_image"))
+                except ValueError:
+                    release_generation_inputs(next_inputs)
+                    raise
+                release_generation_inputs(generation_inputs)
+                generation_inputs = next_inputs
             except ValueError as exc:
                 await ws_send_json({
                     "type": "error",
+                    "error_code": "invalid_generation_input",
                     "message": str(exc),
                 })
                 return False
@@ -568,6 +598,7 @@ async def websocket_endpoint(websocket: WebSocket):
             return drained
 
         async def enter_project_idle() -> None:
+            nonlocal generation_inputs
             nonlocal seed_prompt_memory
             nonlocal curated_prompts
             nonlocal curated_idx
@@ -587,6 +618,8 @@ async def websocket_endpoint(websocket: WebSocket):
 
             dropped_raw = drain_queue_nowait(raw_prompt_queue)
             dropped_ready = drain_queue_nowait(ready_prompt_queue)
+            release_generation_inputs(generation_inputs)
+            generation_inputs = GenerationInputs()
             seed_prompt_memory = []
             curated_prompts = []
             curated_idx = 0
@@ -767,6 +800,13 @@ async def websocket_endpoint(websocket: WebSocket):
                         continue
 
                     try:
+                        if generation_inputs.mode is not None and data.get("initial_image") is not None:
+                            raise ValueError("Choose conditioning assets when starting a project; legacy initial_image "
+                                             "cannot replace generation mode inputs.")
+                        if "generation_mode" in data or "conditioning_assets" in data:
+                            raise ValueError(
+                                "Generation mode and assets are locked for this project. Start a new project "
+                                "to change them.")
                         replace_session_image(data.get("initial_image"))
                     except ValueError as exc:
                         await ws_send_json({
@@ -1182,6 +1222,7 @@ async def websocket_endpoint(websocket: WebSocket):
     finally:
         stop_event.set()
         cleanup_session_init_image(session_init_image)
+        release_generation_inputs(generation_inputs)
 
 
 for static_dir in FRONTEND_STATIC_DIR_CANDIDATES:
