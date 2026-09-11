@@ -112,12 +112,22 @@ class Cosmos25DFDScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         sample_f64 = sample.to(torch.float64)
         model_output_f64 = model_output.to(torch.float64)
 
-        pred_original_sample = sample_f64 - sigma * model_output_f64
-        prev_sample = sample_f64 + (sigma_next - sigma) * model_output_f64
+        # Match RFNoiseSchedule's precision boundaries instead of collapsing
+        # the update algebraically to one Euler expression. Upstream casts x0
+        # and inferred epsilon back to the evolving sample dtype between its
+        # flow_to_x0, x0_to_eps, and forward_process calls.
+        sigma_coeff = torch.reciprocal(sigma)
+        alpha = 1.0 - sigma
+        x0_coeff = sigma_coeff * alpha + 1.0
+        pred_original_sample = ((sample_f64 * sigma_coeff - model_output_f64) / x0_coeff).to(sample.dtype)
+        if float(sigma_next) > 0.0:
+            x0_f64 = pred_original_sample.to(torch.float64)
+            inferred_noise = ((sample_f64 - alpha * x0_f64) / sigma).to(sample.dtype)
+            prev_sample = ((1.0 - sigma_next) * x0_f64 + sigma_next * inferred_noise.to(torch.float64)).to(sample.dtype)
+        else:
+            prev_sample = pred_original_sample
 
         self._step_index += 1
-        prev_sample = prev_sample.to(sample.dtype)
-        pred_original_sample = pred_original_sample.to(sample.dtype)
         if not return_dict:
             return (prev_sample,)
         return Cosmos25DFDSchedulerOutput(
@@ -134,7 +144,7 @@ class Cosmos25DFDScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         del sample, timestep
         if noise is None:
             raise ValueError("noise must be provided")
-        return self.init_noise_sigma * noise
+        return (noise.to(torch.float64) * self.init_noise_sigma).to(noise.dtype)
 
     def add_noise(
         self,
@@ -142,10 +152,13 @@ class Cosmos25DFDScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         noise: torch.Tensor,
         timesteps: torch.Tensor,
     ) -> torch.Tensor:
-        timesteps = timesteps.to(device=original_samples.device, dtype=original_samples.dtype)
+        output_dtype = original_samples.dtype
+        original_samples = original_samples.to(torch.float64)
+        noise = noise.to(device=original_samples.device, dtype=torch.float64)
+        timesteps = timesteps.to(device=original_samples.device, dtype=torch.float64)
         while timesteps.ndim < original_samples.ndim:
             timesteps = timesteps.unsqueeze(-1)
-        return (1.0 - timesteps) * original_samples + timesteps * noise
+        return ((1.0 - timesteps) * original_samples + timesteps * noise).to(output_dtype)
 
     def __len__(self) -> int:
         return self.config.num_train_timesteps

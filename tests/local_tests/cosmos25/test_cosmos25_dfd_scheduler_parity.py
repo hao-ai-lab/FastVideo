@@ -65,7 +65,7 @@ def test_dfd_scheduler_matches_upstream_four_step_ode():
     generator = torch.Generator(device="cpu").manual_seed(123)
     noise = torch.randn((2, 3, 4, 5), generator=generator, dtype=torch.float32)
     expected = official.latents(noise, torch.tensor(DFD_TIMESTEPS[0], dtype=torch.float64))
-    actual = noise * actual_scheduler.init_noise_sigma
+    actual = actual_scheduler.scale_noise(torch.zeros_like(noise), noise=noise)
     assert_close(actual, expected, rtol=0, atol=0)
 
     for index, (timestep, next_timestep) in enumerate(zip(DFD_TIMESTEPS[:-1], DFD_TIMESTEPS[1:], strict=True)):
