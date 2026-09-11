@@ -74,6 +74,27 @@ if not is_flash_attn_2_available():
 
 logger = logging.get_logger(__name__)
 
+_SUPPORTED_ATTENTION_IMPLEMENTATIONS = {"flash_attention_2", "sdpa"}
+
+
+def _normalize_attention_implementation(config):
+    """Map HF attention defaults unsupported by this compact model to SDPA.
+
+    Recent Transformers releases may resolve the nested Qwen vision config to
+    ``eager`` even when the parent model explicitly requests FlashAttention 2.
+    This implementation intentionally provides only FlashAttention 2 and SDPA;
+    SDPA is the correct portable fallback for any other resolved value.
+    """
+    implementation = getattr(config, "_attn_implementation", None)
+    if implementation not in _SUPPORTED_ATTENTION_IMPLEMENTATIONS:
+        logger.warning_once(
+            "Qwen2.5-VL attention implementation %r is unsupported by the FastVideo "
+            "Reason1 encoder; using SDPA.",
+            implementation,
+        )
+        config._attn_implementation = "sdpa"
+    return config
+
 
 def _resolve_torch_dtype(dtype, default: torch.dtype = torch.float32) -> torch.dtype:
     if isinstance(dtype, torch.dtype):
@@ -329,6 +350,7 @@ class Qwen2_5_VisionTransformerPretrainedModel(nn.Module):
 
     def __init__(self, config, parent_torch_dtype=None) -> None:
         super().__init__()
+        config = _normalize_attention_implementation(config)
 
         config_torch_dtype = getattr(config, "torch_dtype", None)
         self.dtype = _resolve_torch_dtype(config_torch_dtype if config_torch_dtype is not None else parent_torch_dtype)
@@ -1453,6 +1475,8 @@ class Qwen2_5_VLForConditionalGenerationSimple(nn.Module):
     def __init__(self, config):
         super().__init__()
         config = _flatten_text_config(config)
+        config = _normalize_attention_implementation(config)
+        config.vision_config = _normalize_attention_implementation(config.vision_config)
         self.config = config
         self.visual = Qwen2_5_VisionTransformerPretrainedModel(
             config.vision_config,

@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import torch
 
 from fastvideo.models.encoders.qwen2_5_vl_custom import (
+    Qwen2_5_VLVisionSdpaAttention,
     Qwen2_5_VisionTransformerPretrainedModel,
     Qwen2_5_VLForConditionalGenerationSimple,
 )
@@ -95,3 +96,14 @@ def test_conditional_generation_passes_parent_dtype_to_visual_tower():
     model = Qwen2_5_VLForConditionalGenerationSimple(_full_config("torch.bfloat16"))
 
     assert model.visual.dtype == torch.bfloat16
+
+
+def test_vision_eager_attention_resolves_to_sdpa():
+    config = _vision_config()
+    config.depth = 1
+    config._attn_implementation = "eager"
+
+    model = Qwen2_5_VisionTransformerPretrainedModel(config)
+
+    assert config._attn_implementation == "sdpa"
+    assert isinstance(model.blocks[0].attn, Qwen2_5_VLVisionSdpaAttention)
