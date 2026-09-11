@@ -2,7 +2,7 @@
 
 import React, { useRef, useState, useCallback, useEffect } from "react";
 import Image from "next/image";
-import { Film, ArrowUp, X, Loader2, ArrowLeft } from "lucide-react";
+import { Film, ArrowUp, X, Loader2, ArrowLeft, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/ui/native-select";
 import LeaveSessionModal, { shouldShowLeaveWarning } from "@/components/LeaveSessionModal";
@@ -375,46 +375,14 @@ export default function ChatBar({
 				</div>
 			)}
 
-			{!sessionStarted && (
-				<div className="flex flex-col gap-2 rounded-2xl border border-input bg-card/65 px-4 py-3 shadow-sm backdrop-blur-sm sm:flex-row sm:items-center sm:gap-4">
-					<label htmlFor="generation-mode" className="shrink-0 text-xs font-semibold text-foreground">
-						Generation mode
-					</label>
-					<div className="min-w-0 flex-1">
-						<NativeSelect
-							id="generation-mode"
-							aria-label="Generation mode"
-							title={`${selectedGenerationMode.name}. ${selectedGenerationMode.description}`}
-							value={generationMode}
-							disabled={isBusy || sttBusy}
-							onChange={(event) => {
-								if (isGenerationMode(event.target.value)) {
-									onGenerationModeChange(event.target.value);
-								}
-							}}
-							className="h-9"
-						>
-							{GENERATION_MODES.map((mode) => (
-								<option
-									key={mode.id}
-									value={mode.id}
-									disabled={!supportedGenerationModes.includes(mode.id)}
-									title={supportedGenerationModes.includes(mode.id) ? mode.name : `${mode.name} (unavailable on this runtime)`}
-								>
-									{mode.label}
-								</option>
-							))}
-						</NativeSelect>
-						{capabilityNotice && <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">{capabilityNotice}</p>}
-					</div>
-				</div>
-			)}
 			{sessionStarted && <p className="px-2 text-center text-[11px] text-muted-foreground">{selectedGenerationMode.label} · Mode and reference inputs are locked for this project.</p>}
 			{conditioningPanel}
 
 			<div
+				role="group"
+				aria-label="Prompt composer"
 				className={cn(
-					"flex min-w-0 items-center gap-1.5 rounded-4xl border py-2.5 pl-5 pr-2.5 shadow-md backdrop-blur-sm transition-all duration-200",
+					"flex min-w-0 flex-col gap-2 rounded-3xl border p-2.5 shadow-md backdrop-blur-sm transition-all duration-200",
 					isBusy ? "border-input/60 bg-card/40" : "border-input bg-card/65",
 				)}
 			>
@@ -430,40 +398,78 @@ export default function ChatBar({
 					disabled={isBusy || sttBusy}
 					rows={1}
 					className={cn(
-						"min-w-0 flex-1 resize-none bg-transparent text-foreground outline-none placeholder:text-muted-foreground transition-opacity duration-200 scrollbar-thin leading-snug",
+						"w-full min-w-0 resize-none bg-transparent px-2 py-1 text-foreground outline-none placeholder:text-muted-foreground transition-opacity duration-200 scrollbar-thin leading-snug",
 						(isBusy || sttBusy) && "cursor-not-allowed opacity-50",
 					)}
 				/>
-				{onSpeechTranscript && <SpeechToTextButton disabled={isBusy} onTranscript={onSpeechTranscript} onInterimChange={onSpeechInterimChange} onBusyChange={setSttBusy} />}
-				{!sessionStarted ? (
-					<Button
-						aria-label={actionLabel}
-						title={actionLabel}
-						onClick={onGenerate}
-						disabled={!canJoinSession || isGenerating || !continuationDraft.trim()}
-						size="icon-sm"
-						className="shrink-0 rounded-full"
-					>
-						{showSpinner ? <Loader2 className="size-5 animate-spin" /> : <ArrowUp className="size-5" />}
-					</Button>
-				) : (
-					<>
+				<div className="flex min-w-0 items-center gap-1.5">
+					{!sessionStarted && (
+						<div className="flex shrink-0 items-center gap-1 pl-2">
+							<label htmlFor="generation-mode" className="cursor-pointer text-xs font-medium text-muted-foreground">
+								Mode
+							</label>
+							<div className="relative">
+								<NativeSelect
+									id="generation-mode"
+									aria-label="Generation mode"
+									title={`${selectedGenerationMode.name}. ${selectedGenerationMode.description}`}
+									value={generationMode}
+									disabled={isBusy || sttBusy}
+									onChange={(event) => {
+										if (isGenerationMode(event.target.value)) {
+											onGenerationModeChange(event.target.value);
+										}
+									}}
+									className="h-8 w-24 cursor-pointer rounded-lg border-0 bg-transparent py-1 pl-2 pr-6 text-xs font-medium shadow-none hover:bg-muted/60"
+								>
+									{GENERATION_MODES.map((mode) => (
+										<option
+											key={mode.id}
+											value={mode.id}
+											disabled={!supportedGenerationModes.includes(mode.id)}
+											title={supportedGenerationModes.includes(mode.id) ? mode.name : `${mode.name} (unavailable on this runtime)`}
+										>
+											{mode.label}
+										</option>
+									))}
+								</NativeSelect>
+								<ChevronDown aria-hidden="true" className="pointer-events-none absolute right-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
+							</div>
+						</div>
+					)}
+					<div className="flex-1" />
+					{onSpeechTranscript && <SpeechToTextButton disabled={isBusy} onTranscript={onSpeechTranscript} onInterimChange={onSpeechInterimChange} onBusyChange={setSttBusy} />}
+					{!sessionStarted ? (
 						<Button
 							aria-label={actionLabel}
 							title={actionLabel}
-							onClick={onSubmitContinuation}
-							disabled={!canSubmitContinuation || showSpinner || projectResetPending || !continuationDraft.trim()}
+							onClick={onGenerate}
+							disabled={!canJoinSession || isGenerating || !continuationDraft.trim()}
 							size="icon-sm"
 							className="shrink-0 rounded-full"
 						>
 							{showSpinner ? <Loader2 className="size-5 animate-spin" /> : <ArrowUp className="size-5" />}
 						</Button>
-						<Button variant="outline" aria-label="Leave" title="Leave" onClick={() => { if (shouldShowLeaveWarning()) setLeaveModalOpen(true); else onLeave(); }} disabled={isGenerating || projectResetPending} size="icon-sm" className="shrink-0 rounded-full">
-							<X className="size-5" />
-						</Button>
-					</>
-				)}
+					) : (
+						<>
+							<Button
+								aria-label={actionLabel}
+								title={actionLabel}
+								onClick={onSubmitContinuation}
+								disabled={!canSubmitContinuation || showSpinner || projectResetPending || !continuationDraft.trim()}
+								size="icon-sm"
+								className="shrink-0 rounded-full"
+							>
+								{showSpinner ? <Loader2 className="size-5 animate-spin" /> : <ArrowUp className="size-5" />}
+							</Button>
+							<Button variant="outline" aria-label="Leave" title="Leave" onClick={() => { if (shouldShowLeaveWarning()) setLeaveModalOpen(true); else onLeave(); }} disabled={isGenerating || projectResetPending} size="icon-sm" className="shrink-0 rounded-full">
+								<X className="size-5" />
+							</Button>
+						</>
+					)}
+				</div>
 			</div>
+			{!sessionStarted && capabilityNotice && <p className="px-2 text-[11px] text-amber-700 dark:text-amber-300">{capabilityNotice}</p>}
 			<p className="px-2 text-center text-[11px] text-muted-foreground">
 				LLM powered by{" "}
 				<a
