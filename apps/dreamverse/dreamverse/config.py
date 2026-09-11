@@ -84,6 +84,21 @@ MODEL_REGISTRY = {
         "num_inference_steps": 5,
         "seed": 1000,
     },
+    "cosmos25-dfd": {
+        "name": "Cosmos Predict2.5 DFD",
+        "generation_backend": "cosmos25_dfd",
+        "default_sp_size": 1,
+        "model_path": "FastVideo/Cosmos-Predict2.5-2B-Distilled-TrigFlow",
+        "continuation_model_path": "FastVideo/Cosmos-Predict2.5-2B-DFD",
+        "attention_backend": "TORCH_SDPA",
+        "height": 704,
+        "width": 1280,
+        "bootstrap_num_frames": 77,
+        "continuation_num_frames": 81,
+        "fps": 24,
+        "num_inference_steps": 4,
+        "seed": 42,
+    },
 }
 
 DEFAULT_MODEL_ID = "fast-ltx2"
@@ -198,6 +213,13 @@ if DREAMVERSE_MODEL_PATH:
         **MODEL_CONFIG,
         "model_path": DREAMVERSE_MODEL_PATH,
         "config_model_path": DREAMVERSE_MODEL_PATH,
+    }
+
+DREAMVERSE_COSMOS25_DFD_MODEL_PATH = (os.getenv("DREAMVERSE_COSMOS25_DFD_MODEL_PATH", "").strip() or None)
+if DREAMVERSE_COSMOS25_DFD_MODEL_PATH and MODEL_CONFIG.get("generation_backend") == "cosmos25_dfd":
+    MODEL_CONFIG = {
+        **MODEL_CONFIG,
+        "continuation_model_path": DREAMVERSE_COSMOS25_DFD_MODEL_PATH,
     }
 
 AVAILABLE_LORAS = {
