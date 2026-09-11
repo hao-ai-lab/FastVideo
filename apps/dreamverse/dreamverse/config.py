@@ -84,6 +84,24 @@ MODEL_REGISTRY = {
         "num_inference_steps": 5,
         "seed": 1000,
     },
+    "cosmos25-dfd": {
+        "name": "Cosmos Predict2.5 DFD",
+        "generation_backend": "cosmos25_dfd",
+        "default_sp_size": 1,
+        "model_path": "FastVideo/Cosmos-Predict2.5-2B-Distilled-TrigFlow",
+        "continuation_model_path": "FastVideo/Cosmos-Predict2.5-2B-DFD",
+        "attention_backend": "TORCH_SDPA",
+        "height": 704,
+        "width": 1280,
+        "bootstrap_num_frames": 77,
+        "continuation_num_frames": 81,
+        "fps": 24,
+        "num_inference_steps": 4,
+        "seed": 42,
+        # Six sequential GB10 segments can exceed the legacy five-minute
+        # DreamVerse lease even though the GPU is making progress.
+        "session_timeout_seconds": 1800,
+    },
 }
 
 DEFAULT_MODEL_ID = "fast-ltx2"
@@ -94,9 +112,6 @@ if ACTIVE_MODEL_ID not in MODEL_REGISTRY:
 
 # Active model configuration
 MODEL_CONFIG = MODEL_REGISTRY[ACTIVE_MODEL_ID]
-
-# Generation limits
-SESSION_TIMEOUT_SECONDS = 300
 
 # Frame settings
 NUM_FRAMES = 121
@@ -199,6 +214,23 @@ if DREAMVERSE_MODEL_PATH:
         "model_path": DREAMVERSE_MODEL_PATH,
         "config_model_path": DREAMVERSE_MODEL_PATH,
     }
+
+DREAMVERSE_COSMOS25_DFD_MODEL_PATH = (os.getenv("DREAMVERSE_COSMOS25_DFD_MODEL_PATH", "").strip() or None)
+if DREAMVERSE_COSMOS25_DFD_MODEL_PATH and MODEL_CONFIG.get("generation_backend") == "cosmos25_dfd":
+    MODEL_CONFIG = {
+        **MODEL_CONFIG,
+        "continuation_model_path": DREAMVERSE_COSMOS25_DFD_MODEL_PATH,
+    }
+
+# Generation limits. Slower backends may own a longer default lease, while an
+# explicit environment override remains available for deployment policy.
+SESSION_TIMEOUT_SECONDS = max(
+    1,
+    _env_int(
+        "FASTVIDEO_SESSION_TIMEOUT_SECONDS",
+        cast(int, MODEL_CONFIG.get("session_timeout_seconds", 300)),
+    ),
+)
 
 AVAILABLE_LORAS = {
     "pixar": {

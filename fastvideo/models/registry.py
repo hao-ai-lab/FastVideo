@@ -141,6 +141,16 @@ _SCHEDULERS = {
     "SelfForcingFlowMatchScheduler":
     ("schedulers", "scheduling_self_forcing_flow_match", "SelfForcingFlowMatchScheduler"),
     "RCMScheduler": ("schedulers", "scheduling_rcm", "RCMScheduler"),
+    "Cosmos25DistilledScheduler": (
+        "schedulers",
+        "scheduling_cosmos25_distilled",
+        "Cosmos25DistilledScheduler",
+    ),
+    "Cosmos25DFDScheduler": (
+        "schedulers",
+        "scheduling_cosmos25_dfd",
+        "Cosmos25DFDScheduler",
+    ),
 }
 
 _UPSAMPLERS = {

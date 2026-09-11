@@ -99,6 +99,17 @@ under the generic T2V workload option in the registry.
 yet public. Follow the [MMAudio inference guide](https://github.com/hao-ai-lab/FastVideo/blob/main/fastvideo/pipelines/basic/mmaudio/README.md)
 to convert the official weights locally and set `MMAUDIO_MODEL_PATH`.
 
+**Note (Cosmos Predict2.5 distilled)**: the released 2B Text2World student is
+supported through local checkpoint conversion, but no public converted model ID
+is registered yet. Follow the validation guide in
+`tests/local_tests/cosmos25/README.md`, then pass the converted directory to
+`basic_cosmos2_5_distilled_t2w.py --model`.
+
+The public DFD Video2World student is also supported through local DCP
+conversion. It uses exactly one conditioning image, 4 steps, 81 frames at
+704x1280 and 24 FPS. Use `basic_cosmos2_5_dfd_i2w.py`; a public converted model
+ID is not registered yet.
+
 **Note (MiniMax H3)**: T2VA, FL2VA, and Ref2VA all generate video with stereo
 audio. Use the Ref2VA example when passing ordered image, video, or audio
 references.
