@@ -17,6 +17,8 @@ import torch
 from torch.testing import assert_close
 
 os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
+os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
+os.environ.setdefault("MASTER_PORT", "29625")
 
 from fastvideo.configs.models.dits.cosmos2_5 import (  # noqa: E402
     Cosmos25ArchConfig,
