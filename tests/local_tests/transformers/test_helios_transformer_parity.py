@@ -59,6 +59,24 @@ def _native_types():
     return HeliosArchConfig, HeliosConfig, HeliosTransformer3DModel
 
 
+@pytest.mark.parametrize(
+    ("module_name", "expected"),
+    [
+        ("blocks.0", True),
+        ("blocks.39", True),
+        ("blocks.0.attn1.to_out.0", False),
+        ("blocks.0.ff.net.0", False),
+        ("prefix.blocks.0", False),
+        ("blocks.not_an_index", False),
+    ],
+)
+def test_helios_fsdp_shard_condition_matches_only_top_level_blocks(module_name: str, expected: bool):
+    """Nested indexed modules must not receive their own FSDP wrappers."""
+    from fastvideo.configs.models.dits.helios import _is_transformer_block
+
+    assert _is_transformer_block(module_name, object()) is expected
+
+
 def _tiny_kwargs() -> dict:
     return {
         "patch_size": (1, 2, 2),
@@ -196,7 +214,7 @@ def _load_fastvideo_production():
 
     args = FastVideoArgs(
         model_path=str(TRANSFORMER_DIR),
-        dit_cpu_offload=False,
+        dit_cpu_offload=True,
         dit_layerwise_offload=False,
         use_fsdp_inference=False,
         pipeline_config=PipelineConfig(

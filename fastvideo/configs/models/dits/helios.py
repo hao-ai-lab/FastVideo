@@ -5,9 +5,11 @@ from fastvideo.configs.models.dits.base import DiTArchConfig, DiTConfig
 from fastvideo.platforms import AttentionBackendEnum
 
 
-def _is_transformer_block(name: str, module) -> bool:
+def _is_transformer_block(name: str, module: object) -> bool:
+    """Select only top-level transformer blocks for FSDP and compilation."""
     del module
-    return name.startswith("blocks.") and name.split(".")[-1].isdigit()
+    parts = name.split(".")
+    return len(parts) == 2 and parts[0] == "blocks" and parts[1].isdigit()
 
 
 @dataclass

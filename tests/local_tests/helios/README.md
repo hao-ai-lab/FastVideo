@@ -58,7 +58,7 @@ needed. Never put a token value in this file or a command log.
 
 | Component | FastVideo target | Test | Current author result |
 | --- | --- | --- | --- |
-| Transformer | `fastvideo/models/dits/helios.py` | `tests/local_tests/transformers/test_helios_transformer_parity.py` | Non-skip PASS: 1101/1101 strict load, tiny exact normal/pyramid, full BF16 normal/pyramid, SP=2, FlashAttention-vs-SDPA |
+| Transformer | `fastvideo/models/dits/helios.py` | `tests/local_tests/transformers/test_helios_transformer_parity.py` | 30 passed: 1101/1101 strict load, tiny exact normal/pyramid, full BF16 normal/pyramid, SP=2, FlashAttention-vs-SDPA, top-level-only FSDP wrapping |
 | Scheduler | `fastvideo/models/schedulers/scheduling_helios_dmd.py` | `tests/local_tests/schedulers/test_helios_dmd_scheduler_parity.py` | 10 passed: registry resolution plus bit-exact three-stage/amplify/step parity |
 | VAE | Existing native Wan VAE | `tests/local_tests/vaes/test_helios_vae_parity.py` | Non-skip PASS; decode max/mean diff `0/0` |
 | UMT5 | Existing native UMT5 | `tests/local_tests/encoders/test_helios_umt5_parity.py` | FP32 max/mean `1.25e-6/1.0e-7`; BF16 `0.0234375/0.00160135` |
@@ -89,6 +89,40 @@ PYTHONPATH="$PWD" .venv/bin/pytest \
 
 DISABLE_SP=1 PYTHONPATH="$PWD" .venv/bin/pytest \
   tests/local_tests/pipelines/test_helios_pipeline_parity.py -v -s
+```
+
+## FSDP + SP=2 Inference Regression
+
+The distributed regression uses the production multiprocess `VideoGenerator`
+path with both parallel modes active at once:
+
+```python
+generator = VideoGenerator.from_pretrained(
+    "official_weights/helios",
+    num_gpus=2,
+    sp_size=2,
+    use_fsdp_inference=True,
+    dit_cpu_offload=False,
+    dit_layerwise_offload=False,
+    text_encoder_cpu_offload=True,
+    vae_cpu_offload=True,
+)
+```
+
+The managed 2026-09-12 run used two RTX 6000 Ada 48 GB GPUs, BF16 weights,
+FlashAttention, 384×640, 33 frames, and pyramid steps `[2,2,2]`. It loaded the
+14.31B transformer with CPU checkpoint staging and GPU-resident FSDP shards,
+completed SP=2 communication warmup and all pipeline stages, then shut down
+both workers normally.
+
+```text
+generation                  23.17 s
+returned tensor             [1, 3, 33, 384, 640]
+codec / fps / frames        H.264 / 24 / 33
+duration                    1.375 s
+SHA-256                     aa10e41b17c79b6133ea41169cafcebcc510086e1375b2bd27d0a8307c750d3e
+process result              normal_exit, exit code 0
+full ffmpeg decode          pass
 ```
 
 ## End-To-End Latent Parity
@@ -170,6 +204,9 @@ publication requires separate upload approval, which this PR does not have.
 
 ## Latest-Main Unit-Lane Baseline
 
-The branch is rebased onto `a159b63c`. The current
-`.buildkite/scripts/unit_test.sh` completes with `1047 passed` and 21 warnings
-in 28.70 seconds. `pre-commit run --all-files` also passes completely.
+The branch is rebased onto `a943220c`. In the current shared environment,
+`.buildkite/scripts/unit_test.sh` reports `1315 passed, 9 skipped, 5 failed`.
+The same five order-sensitive NVFP4/LoRA wiring failures reproduce on an
+untouched `upstream/main@a943220c`; that test file passes independently with
+`15 passed, 1 skipped` on both trees. Helios-specific gates and repository-wide
+pre-commit pass.

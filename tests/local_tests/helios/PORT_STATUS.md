@@ -16,7 +16,7 @@
 - phase: `final_verification`
 - status: `complete`
 - owner: `orchestrator`
-- last_updated: `2026-08-26`
+- last_updated: `2026-09-12`
 
 ## Component Matrix
 
@@ -42,7 +42,7 @@
 
 | Scope | Command | Last Result | Notes |
 | --- | --- | --- | --- |
-| transformer | `pytest tests/local_tests/transformers/test_helios_transformer_parity.py -v -s` | current PR component evidence: non-skip PASS | strict load, tiny/full, SP=2, FA2/SDPA |
+| transformer | `pytest tests/local_tests/transformers/test_helios_transformer_parity.py -v -s` | 30 passed | strict load, tiny/full, SP=2, FA2/SDPA, top-level-only FSDP matcher |
 | scheduler | `pytest tests/local_tests/schedulers/test_helios_dmd_scheduler_parity.py -v -s` | 10 passed | registry plus bit-exact schedules/steps |
 | VAE | `pytest tests/local_tests/vaes/test_helios_vae_parity.py -v -s` | 2 passed | decode diff max/mean 0/0 |
 | UMT5/tokenizer | `pytest tests/local_tests/encoders/test_helios_umt5_parity.py -v -s` | 5 passed | exact tokenizer; FP32/BF16 encoder parity |
@@ -51,6 +51,7 @@
 | typed API regression | smoke + parser/compat/config tests | 42 passed | registry, preset, class resolution, typed/CLI fields |
 | typed example | `python examples/inference/basic/basic_helios_distilled_t2v.py` | PASS, generation 29.43 s | H.264 640×384, 33 frames, full decode |
 | quality/container | `HELIOS_QUALITY_CANDIDATE=... pytest test_helios_quality_regression.py` | 1 passed, 1 skipped | reference comparison deferred pending upload approval |
+| distributed FSDP+SP | production `VideoGenerator`, `num_gpus=2`, `sp_size=2`, `use_fsdp_inference=true`, no DiT CPU/layerwise offload | PASS in 23.17 s | 14.31B model, 384×640×33, `[2,2,2]`, normal worker shutdown, valid H.264 |
 
 ## Open Questions
 
@@ -77,9 +78,11 @@
 | I010 | tests | repository package root | low | A root `__init__.py` makes invalid worktree basenames fail mypy. | `helios-pr... is not a valid Python package name` | orchestrator | resolved | Worktree basename changed to `helios_pr1670_full_pipeline`. |
 | I011 | registry | variant safety | high | Broad Helios detection would route Base/Mid to Distilled. | negative metadata probes | orchestrator | resolved | Require pipeline class, `is_distilled=true`, and Helios DMD scheduler. |
 | I012 | quality | tiny smoke | medium | 128×192 is not a visual-quality target. | poor-detail local smoke | orchestrator | resolved_as_scope | Public example and integrity gate use 384×640. |
-| I013 | distributed | nightly coverage | medium | SP/FSDP/repeated-run coverage is not a committed CI lane. | earlier local SP/FSDP smoke passed | orchestrator | open_nightly | Keep as follow-up; no absent runner is referenced by this PR. |
+| I013 | distributed | nightly coverage | medium | FSDP+SP and repeated-run coverage are not a committed CI lane. | Real 2-GPU FSDP+SP=2 production inference passed on 2026-09-12; no scheduled lane exists. | orchestrator | open_nightly | Current review regression is resolved; scheduled repeated-run coverage remains follow-up. |
 | I014 | production_validation | multiprocessing output | high | Returning GPU output through CUDA IPC OOMed while the 14.31B DiT remained resident. | v1 completed stages then failed in `_new_shared_cuda` | pipeline | resolved | Decode/latent outputs move to CPU inside worker; regression is GREEN and typed example v2 passes. |
 | I015 | final_verification | upstream main | high | Integration base `6388db81` had eight unrelated unit-lane failures. | 909 passed and 8 failed before upstream CI/schema fixes. | upstream | resolved | Rebased through `b2062556` onto `a159b63c`; the current shared unit script passes all 1047 tests. |
+| I016 | final_verification | upstream main | medium | The current full unit lane has five order-sensitive NVFP4/LoRA wiring failures. | Both this branch and untouched `main@a943220c` report the same 5 failures; the file passes alone with 15 passed, 1 skipped. | upstream | baseline_reproduced | Not caused by Helios; targeted Helios and loader gates pass. |
+| I017 | distributed | transformer loader | high | GPU-direct checkpoint staging peaked near 47.3 GiB per rank while FSDP shards materialized on discrete 48 GB GPUs. | Both ranks reached the sixth checkpoint shard and OOMed before forward. | loader | resolved | Discrete FSDP stages full source weights on CPU; unified-memory GPUs retain GPU-direct loading. Full FSDP+SP=2 inference passes without runtime DiT CPU offload. |
 
 ## Escape Hatches
 
@@ -98,13 +101,17 @@ local pipeline parity.
 | 2026-08-25 | Use a dedicated Helios pyramid stage inside `ComposedPipelineBase`. | Generic denoising cannot express AR history, three spatial levels and stage-local DMD. | One FastVideo architecture, model-specific stages only where required. |
 | 2026-08-25 | Keep zero-init call fields but do not apply zero-star math for the pinned Distilled checkpoint. | Its model index declares `is_cfg_zero_star=false`; Diffusers also takes the standard CFG branch. | Signature stays compatible without claiming an inactive feature changes output. |
 | 2026-08-25 | Move worker output to CPU before multiprocessing return. | Prevent CUDA IPC allocation after high-memory inference. | Public typed example is robust on 48 GB cards. |
+| 2026-09-12 | Stage full checkpoint tensors on CPU for discrete-GPU FSDP loads. | GPU-direct source tensors and materialized FSDP shards otherwise peak together and exhaust 48 GB cards. | Runtime shards remain on GPU; unified-memory devices keep GPU-direct loading. |
 
 ## Handoff Notes
 
 - Required components and pipeline parity are green on the integration branch.
 - `quality_regression=deferred_with_reason`: local real-video integrity passes;
   publishing a CI reference needs separate approval.
-- Repository-wide pre-commit is green. The current shared unit script passes
-  all 1047 collected tests; `I015` remains resolved on `a159b63c`.
+- Repository-wide pre-commit and all Helios-specific gates are green. The
+  current shared unit script has the five base-identical order-sensitive
+  failures recorded in `I016`.
+- Real 2-GPU FSDP+SP=2 inference passes with runtime DiT CPU offload disabled;
+  the output is a valid 384×640, 33-frame H.264 video.
 - No weights, generated media, reference clone, private report, token, push, or
   PR mutation is part of this state file.
