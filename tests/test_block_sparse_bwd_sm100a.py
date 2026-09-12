@@ -31,9 +31,9 @@ REL_MAX_TOL = 1e-2    # max|got - ref| / max|ref|
 MEAN_ABS_TOL = 1e-3   # mean|got - ref|
 
 pytestmark = pytest.mark.skipif(
-    not torch.cuda.is_available() or torch.cuda.get_device_capability() != (10, 0)
+    not torch.cuda.is_available() or torch.cuda.get_device_capability() not in {(10, 0), (10, 3)}
     or not bwd._HAS_VSA_BWD_SM100A,
-    reason="requires a compute-capability (10, 0) GPU (sm_100a) and a fastvideo_kernel "
+    reason="requires a data-center Blackwell GPU (sm_100a/sm_103a) and a fastvideo_kernel "
     "extension built with block_sparse_sm100a_bwd",
 )
 

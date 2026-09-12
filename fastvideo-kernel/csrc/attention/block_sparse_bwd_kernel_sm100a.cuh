@@ -123,7 +123,9 @@ __global__ void __cluster_dims__(1, 1, 1) __launch_bounds__(N_WARPS * 32, 1) vsa
     const int* __restrict__ k2q_num, const int* __restrict__ workitem_remap,
     const int* __restrict__ variable_block_sizes, int max_q_blocks, int num_samples, int num_heads,
     int seqlen, float scale_log2, float sm_scale) {
-#if !defined(__CUDA_ARCH__) || (__CUDA_ARCH__ == 1000 && defined(__CUDA_ARCH_FEAT_SM100_ALL))
+#if !defined(__CUDA_ARCH__) || \
+    ((__CUDA_ARCH__ == 1000 && defined(__CUDA_ARCH_FEAT_SM100_ALL)) || \
+     (__CUDA_ARCH__ == 1030 && defined(__CUDA_ARCH_FEAT_SM103_ALL)))
   using DQ                        = DQConfig<DQ_DTYPE>;
   const int num_kv_blocks_per_seq = seqlen / BLOCK;
 
@@ -863,7 +865,9 @@ __global__ void __launch_bounds__(ORDER_THREADS, 1)
     vsa_bwd_order_kernel(const int* __restrict__ k2q_idx, const int* __restrict__ k2q_num,
                          int max_q_blocks, int num_kv_blocks_per_seq, int order_bin, bool snake,
                          int* __restrict__ order_out) {
-#if !defined(__CUDA_ARCH__) || (__CUDA_ARCH__ == 1000 && defined(__CUDA_ARCH_FEAT_SM100_ALL))
+#if !defined(__CUDA_ARCH__) || \
+    ((__CUDA_ARCH__ == 1000 && defined(__CUDA_ARCH_FEAT_SM100_ALL)) || \
+     (__CUDA_ARCH__ == 1030 && defined(__CUDA_ARCH_FEAT_SM103_ALL)))
   extern __shared__ int order_smem[];
   int* sbin      = order_smem;
   int* smid      = order_smem + num_kv_blocks_per_seq;
@@ -908,7 +912,9 @@ __global__ void __launch_bounds__(256, 1)
                               __nv_bfloat16* __restrict__ dk, __nv_bfloat16* __restrict__ dv,
                               const int* __restrict__ k2q_num, int num_samples, int num_heads,
                               int seqlen) {
-#if !defined(__CUDA_ARCH__) || (__CUDA_ARCH__ == 1000 && defined(__CUDA_ARCH_FEAT_SM100_ALL))
+#if !defined(__CUDA_ARCH__) || \
+    ((__CUDA_ARCH__ == 1000 && defined(__CUDA_ARCH_FEAT_SM100_ALL)) || \
+     (__CUDA_ARCH__ == 1030 && defined(__CUDA_ARCH_FEAT_SM103_ALL)))
   __shared__ __align__(128) __nv_bfloat16 tile[PRE_TOKENS][SUB_COLS_BF16 + 4];
   const int num_kv_blocks_per_seq = seqlen / BLOCK;
   const int token_block_id        = (int)blockIdx.x;
@@ -1038,7 +1044,9 @@ template <bool BHSD = false, typename DQ_DTYPE = float>
 __global__ void __launch_bounds__(128, 1)
     vsa_bwd_postprocess_kernel(const DQ_DTYPE* __restrict__ dqaccum, __nv_bfloat16* __restrict__ dq,
                                int num_heads, int seqlen, float sm_scale) {
-#if !defined(__CUDA_ARCH__) || (__CUDA_ARCH__ == 1000 && defined(__CUDA_ARCH_FEAT_SM100_ALL))
+#if !defined(__CUDA_ARCH__) || \
+    ((__CUDA_ARCH__ == 1000 && defined(__CUDA_ARCH_FEAT_SM100_ALL)) || \
+     (__CUDA_ARCH__ == 1030 && defined(__CUDA_ARCH_FEAT_SM103_ALL)))
   const int q_block_id = (int)blockIdx.x;
   const int batch_head = (int)blockIdx.y;
   const int batch = batch_head / num_heads, head = batch_head % num_heads;
