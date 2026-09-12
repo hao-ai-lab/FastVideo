@@ -71,47 +71,100 @@ def test_reference_video_encode_keeps_pixels_on_cpu() -> None:
     assert rows[0].shape == (7 * 4 * 4, 4)
 
 
-def test_decode_stage_uses_cpu_output_buffer(monkeypatch) -> None:
+def _decode_args(**overrides):
+    args = dict(
+        output_type="pil",
+        pin_cpu_memory=False,
+        vae_cpu_offload=False,
+        vae_parallel_decode=False,
+        pipeline_config=SimpleNamespace(dit_config=SimpleNamespace(patch_size=(1, 1, 1))),
+    )
+    args.update(overrides)
+    return SimpleNamespace(**args)
+
+
+class _FillingVAE:
+    """Stands in for the video VAE: records its inputs and fills the pixel buffer."""
+
+    def __init__(self, latent_shape: tuple[int, ...], pixel_shape: tuple[int, ...], fill: float) -> None:
+        self.latent_shape = latent_shape
+        self.pixel_shape = pixel_shape
+        self.fill = fill
+        self.observed: dict[str, torch.Tensor] = {}
+
+    def to(self, device):
+        return self
+
+    def denormalize_latents(self, decoded_latents):
+        return decoded_latents
+
+    def decoded_pixel_shape(self, shape):
+        assert tuple(shape) == self.latent_shape
+        return self.pixel_shape
+
+    def decode_to_pixels(self, decoded_latents, output):
+        self.observed["latents"] = decoded_latents
+        self.observed["output"] = output
+        output.fill_(self.fill)
+
+
+def _video_batch(rows: torch.Tensor, latent_shape: tuple[int, ...], **fields) -> ForwardBatch:
+    batch = ForwardBatch(data_type="video", latents=rows, raw_latent_shape=latent_shape, **fields)
+    batch.extra[MINIMAX_H3_LAYOUT_KEY] = _layout(rows.shape[0], latent_shape)
+    return batch
+
+
+def test_decode_stage_returns_uint8_frames_from_reused_pixel_buffer(monkeypatch) -> None:
+    """The VAE streams fp32 pixels into a stage-owned buffer that is reused
+    across requests; the caller receives quantized uint8 frames in a fresh
+    shared-memory tensor (``save_video=False`` keeps the RGB frames)."""
     latent_shape = (1, 4, 2, 4, 4)
+    pixel_shape = (1, 3, 5, 16, 16)
     latents = torch.randn(latent_shape)
     rows = patchify_video_latents(latents, (1, 1, 1))
-    batch = ForwardBatch(data_type="video", latents=rows, raw_latent_shape=latent_shape)
-    batch.extra[MINIMAX_H3_LAYOUT_KEY] = _layout(rows.shape[0], latent_shape)
-    observed = {}
-
-    class VAE:
-
-        def to(self, device):
-            return self
-
-        def denormalize_latents(self, decoded_latents):
-            return decoded_latents
-
-        def decoded_pixel_shape(self, shape):
-            assert tuple(shape) == latent_shape
-            return (1, 3, 5, 16, 16)
-
-        def decode_to_pixels(self, decoded_latents, output):
-            observed["latents"] = decoded_latents
-            observed["output"] = output
-            output.fill_(0.25)
-
+    vae = _FillingVAE(latent_shape, pixel_shape, fill=0.2)  # 0.2 * 255 = 51
+    stage = MiniMaxH3VideoDecodingStage(vae)
     monkeypatch.setattr(minimax_h3_decoding, "get_local_torch_device", lambda: torch.device("cpu"))
-    result = MiniMaxH3VideoDecodingStage(VAE()).forward(
-        batch,
-        SimpleNamespace(
-            output_type="pil",
-            pin_cpu_memory=False,
-            vae_cpu_offload=False,
-            vae_parallel_decode=False,
-            pipeline_config=SimpleNamespace(dit_config=SimpleNamespace(patch_size=(1, 1, 1))),
-        ),
-    )
 
-    torch.testing.assert_close(observed["latents"], latents)
-    assert observed["output"] is result.output
+    result = stage.forward(_video_batch(rows, latent_shape, save_video=False), _decode_args())
+
+    torch.testing.assert_close(vae.observed["latents"], latents)
+    pixel_buffer = vae.observed["output"]
+    assert pixel_buffer.dtype == torch.float32
+    assert tuple(pixel_buffer.shape) == pixel_shape
+    assert stage._pixel_buffer is pixel_buffer
+    assert result.output.dtype == torch.uint8
     assert result.output.device.type == "cpu"
-    assert torch.all(result.output == 0.25)
+    assert tuple(result.output.shape) == pixel_shape
+    assert result.output.is_shared()
+    assert torch.all(result.output == 51)
+    assert "frames_yuv420p" not in result.extra
+
+    # A second request of the same geometry decodes into the same buffer.
+    stage.forward(_video_batch(rows.clone(), latent_shape, save_video=False), _decode_args())
+    assert vae.observed["output"] is pixel_buffer
+
+
+def test_decode_stage_ships_yuv420p_frames_for_video_saving(monkeypatch) -> None:
+    """With the default ``save_video`` the stage hands the driver planar
+    yuv420p frames and only a shape-only stand-in for ``output``."""
+    latent_shape = (1, 4, 2, 4, 4)
+    pixel_shape = (1, 3, 5, 16, 16)
+    rows = patchify_video_latents(torch.randn(latent_shape), (1, 1, 1))
+    vae = _FillingVAE(latent_shape, pixel_shape, fill=0.2)
+    monkeypatch.setattr(minimax_h3_decoding, "get_local_torch_device", lambda: torch.device("cpu"))
+
+    result = MiniMaxH3VideoDecodingStage(vae).forward(_video_batch(rows, latent_shape), _decode_args())
+
+    assert result.output.dtype == torch.uint8
+    assert tuple(result.output.shape) == pixel_shape
+    frames_yuv = result.extra["frames_yuv420p"]
+    assert frames_yuv.dtype == torch.uint8
+    assert frames_yuv.device.type == "cpu"
+    assert frames_yuv.is_shared()
+    assert tuple(frames_yuv.shape) == (5, 16 * 3 // 2, 16)
+    expected = minimax_h3_decoding._rgb_u8_to_yuv420p(torch.full(pixel_shape[1:], 51, dtype=torch.uint8))
+    assert torch.equal(frames_yuv, expected)
 
 
 def test_decode_stages_skip_vae_on_non_output_rank(monkeypatch) -> None:
@@ -163,7 +216,7 @@ def test_parallel_decode_runs_on_every_rank(monkeypatch) -> None:
     def fake_parallel(vae, latents, output, group, strategy):
         calls.append((group.rank_in_group, output, strategy))
         if output is not None:
-            output.fill_(0.5)
+            output.fill_(0.4)  # 0.4 * 255 = 102 once quantized to uint8
         return output
 
     monkeypatch.setattr(minimax_h3_decoding, "get_local_torch_device", lambda: torch.device("cpu"))
@@ -184,12 +237,12 @@ def test_parallel_decode_runs_on_every_rank(monkeypatch) -> None:
             lambda rank=rank, is_first=is_first: SimpleNamespace(is_first_rank=is_first,
                                                                  world_size=4,
                                                                  rank_in_group=rank))
-        batch = ForwardBatch(data_type="video", latents=rows.clone(), raw_latent_shape=latent_shape)
-        batch.extra[MINIMAX_H3_LAYOUT_KEY] = _layout(rows.shape[0], latent_shape)
+        batch = _video_batch(rows.clone(), latent_shape, save_video=False)
         result = MiniMaxH3VideoDecodingStage(VAE()).forward(batch, args)
         if is_first:
+            assert result.output.dtype == torch.uint8
             assert result.output.shape == (1, 3, 5, 16, 16)
-            assert torch.all(result.output == 0.5)
+            assert torch.all(result.output == 102)
         else:
             assert result.output.shape == (0, 3, 0, 0, 0)
 

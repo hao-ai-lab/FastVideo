@@ -350,8 +350,7 @@ def test_decode_clip_no_spatial_tiling_stage_ranges() -> None:
     ]
 
 
-def test_decode_clip_emits_tiled_stage_ranges() -> None:
-    """Nest indexed decoder tiles between tile-splitting and stitching ranges."""
+def _mock_tiled_decoder_vae(stitched_clip: torch.Tensor, split_tiles: list) -> nn.Module:
     vae = _empty_typed_module(AutoencoderKLMiniMaxH3)
     vae.use_tiling = True
     vae.spatial_compression_ratio = 1
@@ -359,15 +358,15 @@ def test_decode_clip_emits_tiled_stage_ranges() -> None:
     vae.tile_sample_min_width = 1
     vae.tile_sample_min_overlap_height = 0
     vae.tile_sample_min_overlap_width = 0
-    vae._split_tiles = Mock(side_effect=[
-        ([0, 1], [1, 1], [0]),
-        ([0, 1], [1, 1], [0]),
-    ])
+    vae._split_tiles = Mock(side_effect=split_tiles)
     vae.post_quant_conv = nn.Identity()
     vae._project_decoder_tile = Mock(side_effect=vae.post_quant_conv)
     vae.decoder = nn.Identity()
-    stitched_clip = torch.zeros((1, 1, 1, 2, 2))
     vae._stitch_tiles = Mock(return_value=stitched_clip)
+    return vae
+
+
+def _recorded_decode_clip(vae: nn.Module, latent_clip: torch.Tensor) -> tuple[torch.Tensor, list]:
     range_events = []
 
     @contextmanager
@@ -379,15 +378,79 @@ def test_decode_clip_emits_tiled_stage_ranges() -> None:
             range_events.append(("exit", name))
 
     with patch("fastvideo.models.vaes.minimax_h3_video.nvtx_range", record_range):
-        decoded_clip = vae._decode_clip(torch.zeros((1, 1, 1, 2, 2)))
+        decoded_clip = vae._decode_clip(latent_clip)
+    return decoded_clip, range_events
+
+
+def test_decode_clip_emits_tiled_stage_ranges() -> None:
+    """Enumerate the batched decoder tiles between tile-splitting and stitching ranges.
+
+    A uniform tile grid is decoded in one batched forward: every tile still
+    gets its indexed ``tile.<row>.<column>`` range (covering only its gather),
+    the stacked tiles go through ``_project_decoder_tile`` once, and a single
+    ``tile.decoder_forward`` range covers the whole batch.
+    """
+    stitched_clip = torch.zeros((1, 1, 1, 2, 2))
+    vae = _mock_tiled_decoder_vae(stitched_clip, [
+        ([0, 1], [1, 1], [0]),
+        ([0, 1], [1, 1], [0]),
+    ])
+
+    decoded_clip, range_events = _recorded_decode_clip(vae, torch.zeros((1, 1, 1, 2, 2)))
 
     # Default (eager) instances return the stitched canvas by identity; the
     # caller-owned copy under the compile opt-in is pinned by
     # test_tile_drivers_return_caller_owned_tensors_when_compiled.
     assert decoded_clip is stitched_clip
     assert vae._split_tiles.call_count == 2
+    assert vae._project_decoder_tile.call_count == 1
+    assert tuple(vae._project_decoder_tile.call_args.args[0].shape) == (4, 1, 1, 1, 1)
+    assert vae._stitch_tiles.call_count == 1
+    (rows, _, _), _ = vae._stitch_tiles.call_args
+    assert [[tuple(tile.shape) for tile in row] for row in rows] == [[(1, 1, 1, 1, 1)] * 2] * 2
+    assert range_events == [
+        ("enter", "minimax_h3.vae.decode_clip"),
+        ("enter", "minimax_h3.vae.decode_clip.split_tiles"),
+        ("exit", "minimax_h3.vae.decode_clip.split_tiles"),
+        ("enter", "minimax_h3.vae.decode_clip.decode_tiles"),
+        ("enter", "minimax_h3.vae.decode_clip.tile.0.0"),
+        ("exit", "minimax_h3.vae.decode_clip.tile.0.0"),
+        ("enter", "minimax_h3.vae.decode_clip.tile.0.1"),
+        ("exit", "minimax_h3.vae.decode_clip.tile.0.1"),
+        ("enter", "minimax_h3.vae.decode_clip.tile.1.0"),
+        ("exit", "minimax_h3.vae.decode_clip.tile.1.0"),
+        ("enter", "minimax_h3.vae.decode_clip.tile.1.1"),
+        ("exit", "minimax_h3.vae.decode_clip.tile.1.1"),
+        ("enter", "minimax_h3.vae.decode_clip.tile.decoder_forward"),
+        ("exit", "minimax_h3.vae.decode_clip.tile.decoder_forward"),
+        ("exit", "minimax_h3.vae.decode_clip.decode_tiles"),
+        ("enter", "minimax_h3.vae.decode_clip.stitch_tiles"),
+        ("exit", "minimax_h3.vae.decode_clip.stitch_tiles"),
+        ("exit", "minimax_h3.vae.decode_clip"),
+    ]
+
+
+def test_decode_clip_emits_per_tile_stage_ranges_for_ragged_grids() -> None:
+    """Nest a decoder-forward range in each indexed tile range when tiles are not batched.
+
+    Tiles of unequal geometry cannot be stacked, so the grid falls back to the
+    per-tile loop: each tile is projected and decoded on its own inside its
+    ``tile.<row>.<column>`` range.
+    """
+    stitched_clip = torch.zeros((1, 1, 1, 2, 3))
+    vae = _mock_tiled_decoder_vae(stitched_clip, [
+        ([0, 1], [1, 1], [0]),
+        ([0, 1], [1, 2], [0]),
+    ])
+
+    decoded_clip, range_events = _recorded_decode_clip(vae, torch.zeros((1, 1, 1, 2, 3)))
+
+    assert decoded_clip is stitched_clip
+    assert vae._split_tiles.call_count == 2
     assert vae._project_decoder_tile.call_count == 4
     assert vae._stitch_tiles.call_count == 1
+    (rows, _, _), _ = vae._stitch_tiles.call_args
+    assert [[tuple(tile.shape) for tile in row] for row in rows] == [[(1, 1, 1, 1, 1), (1, 1, 1, 1, 2)]] * 2
     assert range_events == [
         ("enter", "minimax_h3.vae.decode_clip"),
         ("enter", "minimax_h3.vae.decode_clip.split_tiles"),

@@ -26,7 +26,7 @@ from fastvideo.attention.selector import (
     record_resolved_attention_backend,
 )
 from fastvideo.configs.models import EncoderConfig
-from fastvideo.distributed import get_local_torch_device
+from fastvideo.distributed import get_local_torch_device, get_sp_group, model_parallel_is_initialized
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.layers.quantization import get_quantization_config
 from fastvideo.logger import init_logger
@@ -484,11 +484,22 @@ class TextEncoderLoader(ComponentLoader):
                         mesh_shape=(1, dist.get_world_size()),
                         mesh_dim_names=("offload", "replicate"),
                     )
+                    shard_mesh = mesh["offload"]
+                    if getattr(model, "fsdp_shard_across_sp", False) and model_parallel_is_initialized() \
+                            and get_sp_group().world_size > 1:
+                        # Opt-in per model: shard the offloaded weights over the
+                        # sequence-parallel group (uniform participation is the
+                        # model's promise), so each rank streams 1/sp of the
+                        # bytes host-to-device and NCCL gathers the rest.
+                        from torch.distributed.device_mesh import DeviceMesh
+                        shard_mesh = DeviceMesh.from_group(get_sp_group().device_group, "cuda", mesh_dim_names=("sp", ))
+                        logger.info("Sharding CPU-offloaded %s over the %d-rank sequence-parallel group",
+                                    type(model).__name__, get_sp_group().world_size)
                     shard_model(
                         model,
                         cpu_offload=True,
                         reshard_after_forward=True,
-                        mesh=mesh["offload"],
+                        mesh=shard_mesh,
                         fsdp_shard_conditions=model._fsdp_shard_conditions,
                         pin_cpu_memory=pin_cpu_memory,
                     )

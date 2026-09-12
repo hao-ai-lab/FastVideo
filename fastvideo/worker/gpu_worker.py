@@ -72,6 +72,19 @@ class Worker:
         # Set the CUDA device BEFORE any CUDA calls
         if current_platform.is_cuda_alike():
             torch.cuda.set_device(self.device)
+
+        # Every worker inherits torch's default intra-op thread count, which
+        # is the whole node's core count, so N workers run N x cores OpenMP
+        # threads and every small CPU op (torch.unique / full / arange in the
+        # H3 timestep packing, the layout build, tokenisation) crawls under
+        # the contention: 150 ms for a unique over 37k floats in the baseline
+        # profile. Give each worker its share unless the user pinned a count.
+        if "OMP_NUM_THREADS" not in os.environ:
+            cpu_count = os.cpu_count() or 1
+            share = max(1, cpu_count // max(1, self.fastvideo_args.num_gpus))
+            torch.set_num_threads(share)
+            logger.info("Worker %d intra-op threads: %d (%d cores / %d workers)", self.rank, share, cpu_count,
+                        self.fastvideo_args.num_gpus)
             self.init_gpu_memory = torch.cuda.mem_get_info(self.device)[0]
             if current_platform.is_cuda():
                 _log_cuda_device_uuid(self.rank, self.device)
