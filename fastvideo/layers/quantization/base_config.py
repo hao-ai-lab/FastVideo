@@ -139,5 +139,14 @@ class QuantizationConfig(ABC):
         """
         raise NotImplementedError
 
+    def validate_runtime(self, device: torch.device) -> None:
+        """Fail fast on a device the scheme cannot execute on.
+
+        Called once by loaders that select a serialized checkpoint scheme,
+        before any weight is read. The default accepts every device; schemes
+        with kernel or capability requirements override it.
+        """
+        return None
+
     def get_cache_scale(self, name: str) -> str | None:
         return None
