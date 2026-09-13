@@ -1,0 +1,57 @@
+name: Publish FastVideo Kernel to Hugging Face Hub
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/publish-fastvideo-kernel-hub.yml"
+      - "fastvideo-kernel/build.toml"
+      - "fastvideo-kernel/flake.nix"
+      - "fastvideo-kernel/CARD.md"
+      - "fastvideo-kernel/example.py"
+      - "fastvideo-kernel/torch-ext/**"
+      - "fastvideo-kernel/csrc/**"
+      - "fastvideo-kernel/include/**"
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Hub branch to upload the build"
+        default: ""
+        required: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build kernel via HF Jobs and upload to hao-ai-lab/fastvideo-kernel
+        uses: huggingface/kernel-builder-job@main
+        with:
+          token: ${{ secrets.HF_TOKEN }}
+          namespace: hao-ai-lab
+          flavor: cpu-xl
+          timeout: "21600"
+          script: |
+            set +x
+            export HF_TOKEN="${{ secrets.HF_TOKEN }}"
+            export GIT_LFS_SKIP_SMUDGE=1
+
+            git clone "${{ github.server_url }}/${{ github.repository }}" FastVideo
+            cd FastVideo
+            git checkout "${{ github.sha }}"
+            git submodule update --init --recursive fastvideo-kernel/include/cutlass fastvideo-kernel/include/tk
+            cd fastvideo-kernel
+
+            UPLOAD_BRANCH="${{ github.event.inputs.branch }}"
+            BRANCH_ARGS=()
+            if [ -n "${UPLOAD_BRANCH}" ]; then
+              BRANCH_ARGS=(--branch "${UPLOAD_BRANCH}")
+            fi
+
+            nix run github:huggingface/kernels#kernel-builder -- build-and-upload \
+              --max-jobs 4 \
+              --cores 8 \
+              --repo-id hao-ai-lab/fastvideo-kernel \
+              "${BRANCH_ARGS[@]}"

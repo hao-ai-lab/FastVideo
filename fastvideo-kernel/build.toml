@@ -1,0 +1,50 @@
+[general]
+name = "fastvideo_kernel"
+version = 1
+license = "Apache-2.0"
+backends = ["cuda"]
+upstream = "https://github.com/hao-ai-lab/FastVideo.git"
+source = "https://github.com/hao-ai-lab/FastVideo.git"
+
+[general.hub]
+repo-id = "hao-ai-lab/fastvideo-kernel"
+
+[torch]
+src = [
+  "torch-ext/torch_binding.cpp",
+  "torch-ext/torch_binding.h",
+]
+
+[kernel.fastvideo_kernel]
+backend = "cuda"
+depends = ["torch"]
+include = [
+  "csrc",
+  "csrc/turbodiffusion",
+  "include/cutlass/include",
+  "include/tk/include",
+  "include/tk/prototype",
+]
+src = [
+  "csrc/attention/st_attn_h100.cu",
+  "csrc/attention/block_sparse_h100.cu",
+  "csrc/turbodiffusion/gemm/gemm.cu",
+  "csrc/turbodiffusion/norm/rmsnorm.cu",
+  "csrc/turbodiffusion/norm/layernorm.cu",
+  "csrc/turbodiffusion/quant/quant.cu",
+]
+cuda-capabilities = ["9.0a"]
+cuda-flags = [
+  "-DNDEBUG",
+  "-O3",
+  "-std=c++20",
+  "--use_fast_math",
+  "--expt-extended-lambda",
+  "--expt-relaxed-constexpr",
+  "-Xcompiler=-fno-strict-aliasing",
+  "-Xcompiler=-fPIC",
+  "-DTORCH_COMPILE",
+  "-DKITTENS_HOPPER",
+  "-DFASTVIDEO_KERNEL_DISABLE_PYBIND_REGISTRATION",
+  "-Xptxas=--warn-on-spills",
+]
