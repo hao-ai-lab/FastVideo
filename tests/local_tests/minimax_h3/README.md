@@ -46,6 +46,10 @@ PYTHONPATH="$MINIMAX_H3_OFFICIAL_REF_DIR/src:$PWD" \
 MINIMAX_H3_RUN_ENCODER_PARITY=1 \
 pytest tests/local_tests/encoders/test_minimax_h3_qwen3_vl_parity.py -v -s
 
+MINIMAX_H3_RUN_NVFP4_PARITY=1 MINIMAX_H3_MODEL_ROOT=/path/to/FastH3 \
+MINIMAX_H3_NVFP4_TEXT_ENCODER=/path/to/FastH3-text-encoder-nvfp4 \
+pytest tests/local_tests/minimax_h3/test_minimax_h3_text_encoder_nvfp4_parity.py -s
+
 PYTHONPATH="$MINIMAX_H3_OFFICIAL_REF_DIR/src:$PWD" \
 MINIMAX_H3_RUN_DIT_PARITY=1 \
 MINIMAX_H3_RUN_VIDEO_VAE_PARITY=1 \
