@@ -37,7 +37,8 @@ from collections.abc import Sequence
 from pathlib import Path
 
 # MiniMax-H3 generates 5-15 s at 24 fps, on a latent grid that only admits frame counts
-# of the form 17n + 5. 124 is the 5-second point the FastH3 profile is measured at.
+# of the form 17n + 5. 124 is the 5-second point the FastH3 profile is measured at;
+# the 15-second cap pads to 362 frames.
 FRAMES_PER_CHUNK = 17
 LATENTS_PER_CHUNK = 5
 FPS = 24
@@ -50,6 +51,10 @@ def align_num_frames(num_frames: int) -> int:
         return LATENTS_PER_CHUNK
     chunks = -(-(num_frames - LATENTS_PER_CHUNK) // FRAMES_PER_CHUNK)
     return LATENTS_PER_CHUNK + chunks * FRAMES_PER_CHUNK
+
+
+MIN_ALIGNED_FRAMES = align_num_frames(int(MIN_DURATION * FPS))
+MAX_ALIGNED_FRAMES = align_num_frames(int(MAX_DURATION * FPS))
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -86,9 +91,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     # community adapters built against the ComfyUI layout carry no gate. Checked in
     # main(), once the path has been resolved.
     aligned = align_num_frames(args.num_frames)
-    if not MIN_DURATION <= aligned / FPS <= MAX_DURATION:
-        parser.error(f"MiniMax-H3 generates {MIN_DURATION}-{MAX_DURATION}s at {FPS} fps; "
-                     f"aligned num_frames={aligned} is {aligned / FPS:.1f}s")
+    if not MIN_ALIGNED_FRAMES <= aligned <= MAX_ALIGNED_FRAMES:
+        parser.error(f"MiniMax-H3 generates {MIN_DURATION:g}-{MAX_DURATION:g}s at {FPS} fps; "
+                     f"aligned num_frames={aligned} is {aligned / FPS:.1f}s, outside the accepted "
+                     f"{MIN_ALIGNED_FRAMES}-{MAX_ALIGNED_FRAMES} frame range")
     args.num_frames = aligned
     if not math.isfinite(args.lora_strength):
         parser.error("--lora-strength must be finite")

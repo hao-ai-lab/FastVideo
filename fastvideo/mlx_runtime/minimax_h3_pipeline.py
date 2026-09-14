@@ -43,6 +43,10 @@ from fastvideo.mlx_runtime.minimax_h3 import (
     MINIMAX_H3_AUDIO_SHIFT,
     MINIMAX_H3_FPS,
     MINIMAX_H3_KEYFRAME_NOISE_AUG,
+    MINIMAX_H3_MAX_ALIGNED_FRAMES,
+    MINIMAX_H3_MAX_DURATION,
+    MINIMAX_H3_MIN_ALIGNED_FRAMES,
+    MINIMAX_H3_MIN_DURATION,
     MINIMAX_H3_VIDEO_SHIFT,
     MiniMaxH3SchedulerState,
     align_num_frames,
@@ -380,9 +384,10 @@ class MiniMaxH3MLXPipeline:
         aligned_frames = align_num_frames(num_frames)
         latent_frames = video_latent_num_frames(aligned_frames)
         duration = aligned_frames / MINIMAX_H3_FPS
-        if enforce_duration and not 5.0 <= duration <= 15.0:
-            raise ValueError(f"H3 generates 5-15 s at {MINIMAX_H3_FPS} fps; {aligned_frames} frames "
-                             f"is {duration:.2f} s.")
+        if enforce_duration and not MINIMAX_H3_MIN_ALIGNED_FRAMES <= aligned_frames <= MINIMAX_H3_MAX_ALIGNED_FRAMES:
+            raise ValueError(f"H3 generates {MINIMAX_H3_MIN_DURATION:g}-{MINIMAX_H3_MAX_DURATION:g} s at "
+                             f"{MINIMAX_H3_FPS} fps; {aligned_frames} frames is {duration:.2f} s, outside the "
+                             f"accepted {MINIMAX_H3_MIN_ALIGNED_FRAMES}-{MINIMAX_H3_MAX_ALIGNED_FRAMES} frame range.")
         return {
             "height": height,
             "width": width,

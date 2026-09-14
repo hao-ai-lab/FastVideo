@@ -118,6 +118,13 @@ def align_num_frames(num_frames: int) -> int:
     return num_frames
 
 
+# Duration limits are seconds; requests are validated against the aligned buckets
+# they map to. The 15-second target (360 frames) pads to 362 on the causal-VAE
+# grid, so 362 is the largest accepted bucket.
+MINIMAX_H3_MIN_ALIGNED_FRAMES = align_num_frames(int(MINIMAX_H3_MIN_DURATION * MINIMAX_H3_FPS))
+MINIMAX_H3_MAX_ALIGNED_FRAMES = align_num_frames(int(MINIMAX_H3_MAX_DURATION * MINIMAX_H3_FPS))
+
+
 def video_latent_num_frames(num_frames: int) -> int:
     if num_frames % MINIMAX_H3_FRAMES_PER_CHUNK != MINIMAX_H3_LATENTS_PER_CHUNK:
         raise ValueError(f"`num_frames` must be of the form 17 * n + 5, got {num_frames}.")

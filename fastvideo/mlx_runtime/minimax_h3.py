@@ -97,6 +97,8 @@ MINIMAX_H3_AUDIO_TAG = 2
 MINIMAX_H3_MODALITY_NUM = 3
 
 MINIMAX_H3_FPS = 24
+MINIMAX_H3_MIN_DURATION = 5.0
+MINIMAX_H3_MAX_DURATION = 15.0
 MINIMAX_H3_FRAMES_PER_CHUNK = 17
 MINIMAX_H3_LATENTS_PER_CHUNK = 5
 MINIMAX_H3_AUDIO_LATENTS_PER_SECOND = 40
@@ -159,6 +161,13 @@ def align_num_frames(num_frames: int) -> int:
     while num_frames % MINIMAX_H3_FRAMES_PER_CHUNK != MINIMAX_H3_LATENTS_PER_CHUNK:
         num_frames += 1
     return num_frames
+
+
+# Mirrors fastvideo/pipelines/basic/minimax_h3/packing.py: duration limits are
+# seconds, validated against the aligned buckets they map to. The 15-second
+# target (360 frames) pads to 362 on the causal-VAE grid.
+MINIMAX_H3_MIN_ALIGNED_FRAMES = align_num_frames(int(MINIMAX_H3_MIN_DURATION * MINIMAX_H3_FPS))
+MINIMAX_H3_MAX_ALIGNED_FRAMES = align_num_frames(int(MINIMAX_H3_MAX_DURATION * MINIMAX_H3_FPS))
 
 
 def video_latent_num_frames(num_frames: int) -> int:

@@ -13,7 +13,9 @@ from fastvideo.models.vision_utils import load_image
 from fastvideo.pipelines.basic.minimax_h3.packing import (
     MINIMAX_H3_CANVAS_MULTIPLE,
     MINIMAX_H3_FPS,
+    MINIMAX_H3_MAX_ALIGNED_FRAMES,
     MINIMAX_H3_MAX_DURATION,
+    MINIMAX_H3_MIN_ALIGNED_FRAMES,
     MINIMAX_H3_MIN_DURATION,
     align_num_frames,
     prepare_keyframe_image,
@@ -94,12 +96,10 @@ def resolve_target_num_frames(num_frames: object) -> int:
     if not isinstance(num_frames, int):
         raise TypeError("MiniMax-H3 `num_frames` must be an integer.")
     aligned = align_num_frames(num_frames)
-    # The 15-second target (360 frames) needs padding to 362 on the VAE grid.
-    # Accept this final bucket, including already-aligned requests.
-    max_frames = align_num_frames(int(MINIMAX_H3_MAX_DURATION * MINIMAX_H3_FPS))
-    if not MINIMAX_H3_MIN_DURATION * MINIMAX_H3_FPS <= aligned <= max_frames:
+    if not MINIMAX_H3_MIN_ALIGNED_FRAMES <= aligned <= MINIMAX_H3_MAX_ALIGNED_FRAMES:
         raise ValueError(f"MiniMax-H3 generates {MINIMAX_H3_MIN_DURATION:g}-{MINIMAX_H3_MAX_DURATION:g} seconds at "
-                         f"{MINIMAX_H3_FPS} fps; aligned num_frames={aligned}.")
+                         f"{MINIMAX_H3_FPS} fps; aligned num_frames={aligned} is outside the accepted "
+                         f"{MINIMAX_H3_MIN_ALIGNED_FRAMES}-{MINIMAX_H3_MAX_ALIGNED_FRAMES} frame range.")
     return aligned
 
 
