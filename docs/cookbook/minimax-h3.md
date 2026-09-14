@@ -5,6 +5,10 @@ hide:
 
 # MiniMax H3 recipes
 
+For the opt-in shift-10, eight-forward T2AV checkpoint, see
+[FastH3 distilled checkpoint schedules](../inference/fasth3-distilled.md).
+The default four-forward preview recipe below is unchanged.
+
 <div class="cookbook-shell cookbook-family-page" data-cookbook data-family="minimax_h3" data-default-recipe="fasth3-preview-cuda" data-recipes="../../assets/cookbook-recipes.json?v=8">
   <header class="cookbook-family-header">
     <a class="cookbook-back-link" href="../"><span aria-hidden="true">←</span> All model families</a>

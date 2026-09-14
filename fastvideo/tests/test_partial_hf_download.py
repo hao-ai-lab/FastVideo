@@ -140,6 +140,7 @@ def test_minimax_patterns_filter_unused_repo_partitions(
 ) -> None:
     repo_files = [
         "model_index.json",
+        "fastvideo_inference.json",
         "scheduler/scheduler_config.json",
         "transformer/model.safetensors",
         "transformer_ref/model.safetensors",
@@ -153,6 +154,7 @@ def test_minimax_patterns_filter_unused_repo_partitions(
     ))
 
     assert "model_index.json" in selected
+    assert "fastvideo_inference.json" in selected
     assert "scheduler/scheduler_config.json" in selected
     assert selected_transformer in selected
     assert excluded_transformer not in selected
