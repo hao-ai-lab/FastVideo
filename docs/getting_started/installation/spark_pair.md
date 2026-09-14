@@ -109,7 +109,7 @@ Run the driver on the **head**, same venv, same QSFP IP.
 `basic_fasth3.py` defaults target a four-GPU GB200 profile: 768×1344, `sm100a`
 VSA, FA4, four GPUs. On Sparks you must override the kernel flags. Height,
 width, frames, steps, seed, and prompt are yours. Change them. Legal
-`num_frames` values are `17n+5`, capped at 345.
+`num_frames` values are `17n+5`, capped at 362.
 
 GB10 has no FA4 / sm_100a VSA kernel, so `--vsa-kernel triton --no-fa4` stays
 required on this box. `--execution-backend ray` is optional when `RAY_ADDRESS`
@@ -152,8 +152,8 @@ Stop the cluster when you are done: `ray stop` on both nodes.
 ## FastH3 frame counts
 
 H3 is 24 fps. Legal `num_frames` values are `17n+5`. The pipeline rejects
-clips longer than **15 s**. The longest legal length is **345 frames**
-(14.375 s). 360 frames aligns to 362 and fails the duration check.
+clips longer than **15 s**. The longest legal length is **362 frames**
+(15.083 s). 360 frames aligns to 362 and is accepted.
 
 ## Measured on two GB10s (2026-08-31)
 
@@ -179,7 +179,7 @@ VAE, same 4-step schedule:
 | Two Sparks, SP=2 | 2 | 124 | **215.2 s** | 72.4 s |
 
 Those medians used `--height` / `--width` / `--num-frames` as CLI flags. Swap
-them. Native 480p on this model is 480×832, 124 frames. The 15 s cap is 345
+them. Native 480p on this model is 480×832, 124 frames. The 15 s cap is 362
 frames.
 
 The first VAE decode still pays `torch.compile`. Later `generate()` calls in
