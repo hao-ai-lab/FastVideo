@@ -1,6 +1,6 @@
 # `fastvideo/models/` — Model Implementations
 
-**Generated:** 2026-05-02
+**Generated:** 2026-09-14
 
 DiT / VAE / encoder / scheduler / upsampler / audio model classes. **Pre-commit excludes this directory**, except Wan's configs, definition, and `__init__.py`. Match neighboring file style manually for excluded files.
 
@@ -13,7 +13,9 @@ models/
 │   ├── <model>.py              # Single-file DiT (ltx2, hunyuanvideo, cosmos, ...); wanvideo is a shim
 │   ├── hyworld/                # Multi-file DiT family
 │   ├── lingbotworld/           # ditto
-│   └── matrixgame2/            # ditto
+│   ├── lingbotworld2/          # ditto
+│   ├── matrixgame2/            # ditto
+│   └── minimax_h3_fusions/     # Fused H3 modulation / QK-norm-RoPE / SwiGLU kernels
 ├── vaes/                       # AutoencoderKL variants + shared utilities; wanvae is a shim
 ├── encoders/                   # T5, CLIP, Llama, Qwen2.5, Gemma, SigLIP, Reason1, audio conditioner
 ├── schedulers/                 # FlowMatch / EulerDiscrete / DPM custom schedulers
