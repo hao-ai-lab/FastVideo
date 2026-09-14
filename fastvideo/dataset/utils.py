@@ -1,34 +1,45 @@
+import functools
+import math
 import random
 from typing import Any, cast
 
 import numpy as np
 import torch
 
+_DTYPE_ALIASES = {
+    "float": "float32",
+    "double": "float64",
+    "half": "float16",
+    "long": "int64",
+    "int": "int32",
+}
 
+
+@functools.lru_cache(maxsize=None)
 def _normalize_tensor_dtype(dtype_value: Any) -> str:
     """Normalize dtype strings written by NumPy or PyTorch record creators."""
     dtype_name = str(dtype_value).strip().lower()
     for prefix in ("torch.", "numpy.", "np."):
         if dtype_name.startswith(prefix):
-            dtype_name = dtype_name[len(prefix):]
-    aliases = {
-        "float": "float32",
-        "double": "float64",
-        "half": "float16",
-        "long": "int64",
-        "int": "int32",
-    }
-    return aliases.get(dtype_name, dtype_name)
+            dtype_name = dtype_name.removeprefix(prefix)
+    return _DTYPE_ALIASES.get(dtype_name, dtype_name)
 
 
 def _decode_tensor_bytes(
     bytes_data: bytes,
     shape: list[int] | tuple[int, ...],
     dtype_value: Any,
+    *,
+    zero: bool = False,
 ) -> torch.Tensor:
-    """Decode one tensor using the dtype persisted beside its byte buffer."""
+    """Decode one tensor using the dtype persisted beside its byte buffer.
+
+    ``zero=True`` still validates the byte length but returns a correctly typed
+    zero tensor instead of copying the payload, for CFG-dropped embeddings.
+    """
     dtype_name = _normalize_tensor_dtype(dtype_value)
-    if dtype_name == "bfloat16":
+    is_bfloat16 = dtype_name == "bfloat16"
+    if is_bfloat16:
         # NumPy has no portable bfloat16 dtype. Read the raw 16-bit storage,
         # then reinterpret it as torch.bfloat16 without changing the bits.
         numpy_dtype = np.dtype(np.uint16)
@@ -38,15 +49,18 @@ def _decode_tensor_bytes(
         except (TypeError, ValueError) as exc:
             raise ValueError(f"Unsupported serialized tensor dtype: {dtype_value!r}") from exc
 
-    expected_nbytes = int(np.prod(shape, dtype=np.int64)) * numpy_dtype.itemsize
+    expected_nbytes = math.prod(shape) * numpy_dtype.itemsize
     if len(bytes_data) != expected_nbytes:
         raise ValueError(
             "Serialized tensor byte length does not match its shape and dtype: "
             f"shape={tuple(shape)}, dtype={dtype_name}, expected={expected_nbytes}, actual={len(bytes_data)}")
 
-    array = np.frombuffer(bytes_data, dtype=numpy_dtype).reshape(shape).copy()
-    tensor = torch.from_numpy(array)
-    if dtype_name == "bfloat16":
+    if zero:
+        tensor = torch.from_numpy(np.zeros(shape, dtype=numpy_dtype))
+    else:
+        array = np.frombuffer(bytes_data, dtype=numpy_dtype).reshape(shape).copy()
+        tensor = torch.from_numpy(array)
+    if is_bfloat16:
         tensor = tensor.view(torch.bfloat16)
     return tensor
 
@@ -72,25 +86,23 @@ def get_torch_tensors_from_row_dict(row_dict, keys, cfg_rate, rng=None) -> dict[
     """
     return_dict = {}
     for key in keys:
-        serialized_key = key
         if isinstance(key, tuple):
+            output_key = key[0]
             serialized_key = None
             for k in key:
                 if f"{k}_shape" in row_dict and f"{k}_bytes" in row_dict:
                     serialized_key = k
-            output_key = key[0]
             if serialized_key is None:
                 raise ValueError(f"Key {output_key} not found in row_dict")
         else:
-            output_key = key
+            output_key = serialized_key = key
 
         shape = row_dict[f"{serialized_key}_shape"]
         bytes_data = row_dict[f"{serialized_key}_bytes"]
         dtype_value = row_dict.get(f"{serialized_key}_dtype", "float32")
-        data = _decode_tensor_bytes(bytes_data, shape, dtype_value)
+        drop = output_key == 'text_embedding' and (rng.random() if rng else random.random()) < cfg_rate
+        data = _decode_tensor_bytes(bytes_data, shape, dtype_value, zero=drop)
 
-        if output_key == 'text_embedding' and (rng.random() if rng else random.random()) < cfg_rate:
-            data = torch.zeros_like(data)
         if len(data.shape) == 3:
             B, L, D = data.shape
             assert B == 1, "Batch size must be 1"
@@ -175,13 +187,12 @@ def collate_rows_from_parquet_schema(rows,
     # Process each tensor field
     for tensor_name in tensor_fields:
         tensor_list = []
+        shape_key = f"{tensor_name}_shape"
+        bytes_key = f"{tensor_name}_bytes"
+        dtype_key = f"{tensor_name}_dtype"
 
         for row in rows:
             # Get tensor data from row using the existing helper function pattern
-            shape_key = f"{tensor_name}_shape"
-            bytes_key = f"{tensor_name}_bytes"
-            dtype_key = f"{tensor_name}_dtype"
-
             if shape_key in row and bytes_key in row:
                 shape = row[shape_key]
                 bytes_data = row[bytes_key]
@@ -202,9 +213,8 @@ def collate_rows_from_parquet_schema(rows,
                         bytes_data,
                         shape,
                         row.get(dtype_key, "float32"),
+                        zero=drop,
                     )
-                    if drop:
-                        tensor = torch.zeros_like(tensor)
                     # if len(data.shape) == 3:
                     #     B, L, D = tensor.shape
                     #     assert B == 1, "Batch size must be 1"

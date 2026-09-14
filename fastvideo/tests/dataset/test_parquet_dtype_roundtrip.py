@@ -73,6 +73,33 @@ def test_decode_tensor_bytes_accepts_torch_bfloat16_dtype() -> None:
     torch.testing.assert_close(actual, expected)
 
 
+def test_decode_tensor_bytes_zero_returns_typed_zeros() -> None:
+    expected = torch.tensor([[1.0, -2.5], [3.25, 0.0]], dtype=torch.bfloat16)
+    storage = expected.view(torch.uint16).numpy()
+
+    actual = _decode_tensor_bytes(storage.tobytes(), list(expected.shape), "torch.bfloat16", zero=True)
+
+    assert actual.dtype == torch.bfloat16
+    assert actual.shape == expected.shape
+    assert actual.count_nonzero() == 0
+
+
+def test_collate_cfg_drop_zeros_text_embedding_with_serialized_dtype() -> None:
+    text_embedding = np.arange(3 * 4, dtype=np.float16).reshape(3, 4)
+    row = _serialized_fields("text_embedding", text_embedding)
+    row["caption"] = "sample caption"
+
+    batch = collate_rows_from_parquet_schema(
+        [row],
+        pyarrow_schema_i2v,
+        text_padding_length=4,
+        cfg_rate=1.0,
+    )
+
+    assert batch["text_embedding"].dtype == torch.float16
+    assert batch["text_embedding"].count_nonzero() == 0
+
+
 def test_decode_tensor_bytes_rejects_mismatched_byte_length() -> None:
     with pytest.raises(ValueError, match="byte length"):
         _decode_tensor_bytes(b"\x00\x01", [2], "float32")
