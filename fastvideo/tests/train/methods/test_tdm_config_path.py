@@ -21,6 +21,7 @@ from fastvideo.train.utils.config import load_run_config
 
 
 _TDM_CONFIG = "examples/train/configs/distribution_matching/wan/tdm_t2v_lora.yaml"
+_TDM_OVERFIT_CONFIG = "examples/train/configs/distribution_matching/wan/tdm_t2v_lora_overfit.yaml"
 _WAN_DMD_PIPELINE = "fastvideo.pipelines.basic.wan.wan_dmd_pipeline.WanDMDPipeline"
 
 
@@ -75,6 +76,27 @@ def test_wan_tdm_example_builds_method_with_pipeline_scheduler_shift(monkeypatch
         8.0 * 0.25 / (1.0 + 7.0 * 0.25),
     ])
     assert_close(sigmas, expected)
+
+
+def test_wan_tdm_overfit_example_uses_four_gpu_text_only_diagnostic() -> None:
+    cfg = load_run_config(_TDM_OVERFIT_CONFIG)
+
+    assert cfg.training.distributed.num_gpus == 4
+    assert cfg.training.distributed.hsdp_shard_dim == 4
+    assert cfg.training.data.preprocessed_data_type == "text_only"
+    assert cfg.training.data.train_batch_size == 1
+    assert cfg.training.loop.max_train_steps == 100
+    assert cfg.training.checkpoint.training_state_checkpointing_steps == 25
+    assert cfg.training.tracker.trackers == ["jsonl"]
+    assert cfg.method["generator_update_interval"] == 1
+    assert cfg.method["noise_interval_mode"] == "next_step"
+    assert cfg.method["use_randmid"] is False
+    assert cfg.method["cfg_uncond"] == {
+        "text": "zero",
+        "on_missing": "ignore",
+    }
+    assert cfg.callbacks["validation"]["every_steps"] == 0
+    assert "ema" not in cfg.callbacks
 
 
 def test_wan_tdm_training_and_validation_use_same_shifted_model_labels(monkeypatch) -> None:
