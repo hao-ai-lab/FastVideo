@@ -143,7 +143,11 @@ class _FakeWanDMDPipeline:
             "model_path": model_path,
             **kwargs,
         }
-        return cls()
+        pipeline = cls()
+        pipeline.fastvideo_args = SimpleNamespace(
+            pipeline_config=SimpleNamespace(text_encoder_configs=None),
+        )
+        return pipeline
 
     def get_module(
         self,
@@ -189,6 +193,7 @@ def test_wan_tdm_validation_propagates_sampling_timesteps_to_dmd_pipeline(monkey
     assert callback.offload_training_state is True
     assert callback.unload_pipeline_after_validation is True
     callback.training_config = cfg.training
+    callback.method = SimpleNamespace(_sf_scheduler=None)
     callback.rank_in_sp_group = 0
     callback.validation_random_generator = torch.Generator(device="cpu").manual_seed(0)
 
