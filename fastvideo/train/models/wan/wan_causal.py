@@ -44,7 +44,7 @@ class WanCausalModel(WanModel, CausalModelBase):
         training_config: TrainingConfig,
         trainable: bool = True,
         disable_custom_init_weights: bool = False,
-        flow_shift: float = 3.0,
+        flow_shift: float | None = None,
         enable_gradient_checkpointing_type: str
         | None = None,
         transformer_override_safetensor: str

@@ -9,6 +9,7 @@ from fastvideo.tests.ssim.inference_similarity_utils import (
     resolve_inference_device_reference_folder,
     run_text_to_video_similarity_test,
 )
+from fastvideo.tests.ssim.reference_utils import use_full_quality_configs
 
 logger = init_logger(__name__)
 
@@ -80,6 +81,24 @@ FULL_QUALITY_WAN_T2V_MODEL_TO_PARAMS = {
     "Wan2.1-T2V-1.3B-Diffusers": WAN_T2V_FULL_QUALITY_PARAMS,
 }
 
+FASTWAN_T2V_PARAMS = {
+    "num_gpus": 2,
+    "model_path": "FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
+    "height": 448,
+    "width": 832,
+    "num_frames": 45,
+    "num_inference_steps": 3,
+    "guidance_scale": 3.0,
+    "seed": 1024,
+    "sp_size": 2,
+    "tp_size": 1,
+    "vae_sp": True,
+    "fps": 16,
+}
+FASTWAN_T2V_MODEL_TO_PARAMS = {
+    "FastWan2.1-T2V-1.3B-Diffusers": FASTWAN_T2V_PARAMS,
+}
+
 WAN_T2V_TEST_PROMPTS = [
     "Will Smith casually eats noodles, his relaxed demeanor contrasting with the energetic background of a bustling street food market. The scene captures a mix of humor and authenticity. Mid-shot framing, vibrant lighting.",
 ]
@@ -103,4 +122,27 @@ def test_wan_t2v_inference_similarity(
         default_params_map=WAN_T2V_MODEL_TO_PARAMS,
         full_quality_params_map=FULL_QUALITY_WAN_T2V_MODEL_TO_PARAMS,
         min_acceptable_ssim=0.93,
+    )
+
+
+@pytest.mark.parametrize("prompt", WAN_T2V_TEST_PROMPTS)
+@pytest.mark.parametrize("attention_backend_name", ["VIDEO_SPARSE_ATTN"])
+@pytest.mark.parametrize("model_id", list(FASTWAN_T2V_MODEL_TO_PARAMS.keys()))
+def test_fastwan_t2v_inference_similarity(
+    prompt: str,
+    attention_backend_name: str,
+    model_id: str,
+) -> None:
+    if use_full_quality_configs():
+        pytest.skip("FastWan T2V has default-tier reference coverage only")
+    run_text_to_video_similarity_test(
+        logger=logger,
+        script_dir=os.path.dirname(os.path.abspath(__file__)),
+        device_reference_folder=device_reference_folder,
+        prompt=prompt,
+        attention_backend_name=attention_backend_name,
+        model_id=model_id,
+        default_params_map=FASTWAN_T2V_MODEL_TO_PARAMS,
+        full_quality_params_map=FASTWAN_T2V_MODEL_TO_PARAMS,
+        min_acceptable_ssim=0.95,
     )

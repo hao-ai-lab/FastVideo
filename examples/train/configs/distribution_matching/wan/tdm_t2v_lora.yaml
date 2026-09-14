@@ -1,0 +1,146 @@
+# TDM distillation: Wan 2.1 T2V 1.3B LoRA adaptation.
+#
+# This ports the Trajectory Distribution Matching objective from the
+# CogVideoX/diffusion reference to Wan's flow-matching noising family.
+#
+# - Teacher: frozen pretrained Wan 2.1 T2V 1.3B
+# - Student: trainable LoRA, initialized from the same pretrained weights
+# - Critic:  trainable fake-score LoRA, initialized from the same weights
+# - Validation: 4-step Wan DMD pipeline sampling
+
+models:
+  student:
+    _target_: fastvideo.train.models.wan.WanModel
+    init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    trainable: true
+    lora:
+      enable: true
+      rank: 16
+      alpha: 32
+      target_modules:
+        - to_q
+        - to_k
+        - to_v
+        - to_out
+  teacher:
+    _target_: fastvideo.train.models.wan.WanModel
+    init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    trainable: false
+    disable_custom_init_weights: true
+  critic:
+    _target_: fastvideo.train.models.wan.WanModel
+    init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    trainable: true
+    disable_custom_init_weights: true
+    lora:
+      enable: true
+      rank: 16
+      alpha: 32
+      target_modules:
+        - to_q
+        - to_k
+        - to_v
+        - to_out
+
+method:
+  _target_: fastvideo.train.methods.distribution_matching.tdm.TDMMethod
+  rollout_mode: simulate
+  generator_update_interval: 5
+  real_score_guidance_scale: 4.5
+  # Must map to scheduler sigmas that start at terminal noise and strictly
+  # decrease toward cleaner trajectory points.
+  tdm_denoising_steps: [1000, 750, 500, 250]
+  warp_denoising_step: false
+
+  # Student rollout. "sde" re-noises each predicted x0; "ode" carries the
+  # effective Wan flow noise across denoising steps. Like the reference TDM
+  # implementation, rollout history is generated without backpropagation; the
+  # generator loss samples a trajectory point and recomputes that student
+  # prediction with gradients.
+  student_sample_type: ode
+
+  # Fake-score noising bridge. The source is always sampled from the generated
+  # trajectory. use_randmid randomizes its cleaner intermediate point. The
+  # target bounds are intermediate <= target < source for "separate" and
+  # intermediate <= target < terminal for "to_terminal".
+  noise_interval_mode: separate
+  use_randmid: true
+  snr_clip: 5.0
+  importance_weight_clip: 10.0
+
+  # Generator target controls.
+  # Generator score timesteps are sampled from the fake-score target support
+  # derived from tdm_denoising_steps. With separate noising, terminal and
+  # lowest-sigma endpoints are excluded from the generator score target.
+  normalize_generator_delta: true
+  use_huber: false
+  huber_c: 0.001
+
+  # Critic optimizer.
+  fake_score_learning_rate: 8.0e-6
+  fake_score_betas: [0.0, 0.999]
+  fake_score_lr_scheduler: constant
+
+training:
+  distributed:
+    num_gpus: 4
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 4
+
+  data:
+    data_path: data/Wan-Syn_77x448x832_600k
+    dataloader_num_workers: 4
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    seed: 1000
+    num_latent_t: 20
+    num_height: 448
+    num_width: 832
+    num_frames: 77
+
+  optimizer:
+    learning_rate: 2.0e-6
+    betas: [0.0, 0.999]
+    weight_decay: 0.01
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 4000
+    gradient_accumulation_steps: 1
+
+  checkpoint:
+    output_dir: outputs/wan2.1_tdm_lora_4steps
+    training_state_checkpointing_steps: 20
+    checkpoints_total_limit: 3
+
+  tracker:
+    trackers: [wandb, jsonl]
+    project_name: distillation_wan
+    run_name: wan2.1_tdm_lora_4steps
+
+  model:
+    enable_gradient_checkpointing_type: full
+
+callbacks:
+  grad_clip:
+    max_grad_norm: 1.0
+  validation:
+    pipeline_target: fastvideo.pipelines.basic.wan.wan_dmd_pipeline.WanDMDPipeline
+    offload_training_state: true
+    unload_pipeline_after_validation: true
+    dataset_file: examples/training/finetune/Wan2.1-VSA/Wan-Syn-Data/validation_4.json
+    every_steps: 50
+    sampling_steps: [4]
+    sampling_timesteps: [1000, 750, 500, 250]
+    guidance_scale: 6.0
+  ema:
+    _target_: fastvideo.train.callbacks.ema.EMACallback
+    decay: 0.98
+    start_iter: 0
+
+pipeline:
+  flow_shift: 8
+  dmd_sample_type: ode

@@ -122,6 +122,7 @@ class FastWan2_1_T2V_480P_Config(WanT2V480PConfig):
     # Denoising stage
     flow_shift: float | None = 8.0
     dmd_denoising_steps: list[int] | None = field(default_factory=lambda: [1000, 757, 522])
+    dmd_denoising_steps_are_scheduler_space: bool = True
 
 
 @dataclass
@@ -276,6 +277,7 @@ class LucyEditDevConfig(Wan2_2_TI2V_5B_Config):
 class FastWan2_2_TI2V_5B_Config(Wan2_2_TI2V_5B_Config):
     flow_shift: float | None = 5.0
     dmd_denoising_steps: list[int] | None = field(default_factory=lambda: [1000, 757, 522])
+    dmd_denoising_steps_are_scheduler_space: bool = True
 
 
 @dataclass
