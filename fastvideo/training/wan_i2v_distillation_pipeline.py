@@ -128,9 +128,11 @@ class WanI2VDistillationPipeline(DistillationPipeline):
 
         assert isinstance(training_batch.image_latents, torch.Tensor)
         image_latents = training_batch.image_latents.to(get_local_torch_device(), dtype=torch.bfloat16)
+        vae_config = self.training_args.pipeline_config.vae_config.arch_config
         training_batch.image_latents = self._build_image_conditioning(
             image_latents,
             num_latent_t=self.training_args.num_latent_t,
+            temporal_compression_ratio=vae_config.temporal_compression_ratio,
         )
 
         return training_batch
@@ -148,28 +150,24 @@ class WanI2VDistillationPipeline(DistillationPipeline):
         embedding. Pre-sharding only the image conditioning here would make its
         temporal length differ from the full noise input before concatenation.
         """
-        num_frames = (num_latent_t - 1) * temporal_compression_ratio + 1
         batch_size, _, latent_t, latent_height, latent_width = image_latents.shape
         if latent_t != num_latent_t:
             raise ValueError("Wan I2V image conditioning temporal length must match num_latent_t: "
                              f"got image_latents.shape[2]={latent_t}, num_latent_t={num_latent_t}")
 
-        mask_lat_size = torch.ones(
+        # The Wan I2V conditioning mask is one on the first latent frame and zero
+        # elsewhere across the temporal-compression channels; the repeat/view/
+        # transpose form used by the inference path reduces to this.
+        mask_lat_size = torch.zeros(
             batch_size,
-            1,
-            num_frames,
+            temporal_compression_ratio,
+            num_latent_t,
             latent_height,
             latent_width,
             device=image_latents.device,
             dtype=image_latents.dtype,
         )
-        mask_lat_size[:, :, 1:] = 0
-
-        first_frame_mask = mask_lat_size[:, :, :1]
-        first_frame_mask = torch.repeat_interleave(first_frame_mask, dim=2, repeats=temporal_compression_ratio)
-        mask_lat_size = torch.cat([first_frame_mask, mask_lat_size[:, :, 1:]], dim=2)
-        mask_lat_size = mask_lat_size.view(batch_size, -1, temporal_compression_ratio, latent_height, latent_width)
-        mask_lat_size = mask_lat_size.transpose(1, 2)
+        mask_lat_size[:, :, 0] = 1
 
         return torch.cat([mask_lat_size, image_latents], dim=1)
 
@@ -180,17 +178,21 @@ class WanI2VDistillationPipeline(DistillationPipeline):
         assert torch.isnan(image_embeds).sum() == 0
         image_embeds = image_embeds.to(get_local_torch_device(), dtype=torch.bfloat16)
 
-        image_conditioning = training_batch.image_latents.permute(0, 2, 1, 3, 4)
-        matching_batch_and_time = noise_input.shape[:2] == image_conditioning.shape[:2]
-        matching_spatial_shape = noise_input.shape[3:] == image_conditioning.shape[3:]
+        image_conditioning = training_batch.image_latents  # bs, c, t, h, w
+        noise_latents = noise_input.permute(0, 2, 1, 3, 4)  # bs, c, t, h, w
+        matching_batch_and_time = (noise_latents.shape[0] == image_conditioning.shape[0]
+                                   and noise_latents.shape[2] == image_conditioning.shape[2])
+        matching_spatial_shape = noise_latents.shape[3:] == image_conditioning.shape[3:]
         if not matching_batch_and_time or not matching_spatial_shape:
             raise ValueError("Wan I2V noise and image conditioning must have matching batch, temporal, and spatial "
-                             f"dimensions, got noise={tuple(noise_input.shape)} and "
+                             f"dimensions, got noise={tuple(noise_latents.shape)} and "
                              f"conditioning={tuple(image_conditioning.shape)}")
-        noisy_model_input = torch.cat([noise_input, image_conditioning], dim=2)
+        # Concatenate in the transformer's (bs, c, t, h, w) layout so the patch
+        # embedding receives a contiguous tensor.
+        hidden_states = torch.cat([noise_latents, image_conditioning], dim=1)
 
         training_batch.input_kwargs = {
-            "hidden_states": noisy_model_input.permute(0, 2, 1, 3, 4),  # bs, c, t, h, w
+            "hidden_states": hidden_states,
             "encoder_hidden_states": text_dict["encoder_hidden_states"],
             "encoder_attention_mask": text_dict["encoder_attention_mask"],
             "timestep": timestep,
