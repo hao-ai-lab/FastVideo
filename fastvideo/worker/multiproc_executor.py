@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import atexit
 import contextlib
+import copy
 from dataclasses import dataclass
 from enum import Enum
 import faulthandler
@@ -27,7 +28,7 @@ from fastvideo.distributed.parallel_state import get_dp_group, get_tp_group
 import fastvideo.envs as envs
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
-from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, PipelineLoggingInfo
 from fastvideo.utils import (decorate_logs, get_distributed_init_method, get_exception_traceback, get_loopback_ip,
                              get_mp_context, get_open_port, kill_itself_when_parent_died, force_spawn)
 from fastvideo.worker.executor import Executor
@@ -35,6 +36,28 @@ from fastvideo.worker.worker_base import WorkerWrapperBase
 
 logger = init_logger(__name__)
 _RPC_ERROR_KEY = "__fastvideo_rpc_error__"
+
+
+def _copy_mps_tensors_to_cpu(value: Any) -> Any:
+    """Prepare inference response containers for IPC without changing CUDA sharing."""
+    if isinstance(value, torch.Tensor):
+        # PyTorch cannot share Metal storage between processes. Detach inference
+        # results and materialize CPU storage before multiprocessing serializes it.
+        return value.detach().cpu() if value.device.type == "mps" else value
+    if isinstance(value, PipelineLoggingInfo):
+        logging_info = copy.copy(value)
+        logging_info.stages = _copy_mps_tensors_to_cpu(value.stages)
+        return logging_info
+    if isinstance(value, dict):
+        mapping = value.copy()
+        mapping.update((key, _copy_mps_tensors_to_cpu(item)) for key, item in value.items())
+        return mapping
+    if isinstance(value, list):
+        return [_copy_mps_tensors_to_cpu(item) for item in value]
+    if isinstance(value, tuple):
+        items = tuple(_copy_mps_tensors_to_cpu(item) for item in value)
+        return type(value)(*items) if hasattr(value, "_fields") else items
+    return value
 
 
 def _raise_for_rpc_errors(method: str | Callable, responses: list[Any]) -> None:
@@ -706,17 +729,18 @@ class WorkerMultiprocProc:
                         logging_info = None
                         if envs.FASTVIDEO_STAGE_LOGGING:
                             logging_info = output_batch.logging_info
-                        # result tensor shared by CUDA IPC to avoid serialization overhead
                         result = output_batch.output
                         extra = output_batch.extra or {}
                         extra["peak_memory_mb"] = (torch.cuda.max_memory_allocated() / (1024 * 1024))
-                        self.pipe.send({
+                        response = {
                             "output_batch": result,
                             "logging_info": logging_info,
                             "extra": extra,
                             "trajectory_latents": output_batch.trajectory_latents,
                             "trajectory_timesteps": output_batch.trajectory_timesteps,
-                        })
+                        }
+                        # CUDA tensors retain CUDA IPC; MPS tensors need CPU storage.
+                        self.pipe.send(_copy_mps_tensors_to_cpu(response))
                     else:
                         result = self.worker.execute_method(method, *args, **kwargs)
                         self.pipe.send(result)
