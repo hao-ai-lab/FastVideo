@@ -128,31 +128,52 @@ def collate_rows_from_parquet_schema(rows,
             # Only add actual metadata fields, not the shape/dtype helper fields
             metadata_fields.append(field)
 
+    # Precompute one CFG dropout decision per row (not per tensor field) so
+    # that text_embedding (Qwen) and text_embedding_2 (ByT5) always drop
+    # together for the same sample.
+    cfg_drop_flags = []
+    for row in rows:
+        drop = False
+        if cfg_rate > 0:
+            sample_idx = row.get("_sample_index")
+            if sample_idx is not None:
+                # Deterministic per-sample CFG dropout using sample index
+                # (resume-safe).
+                drop = random.Random(seed ^ int(sample_idx)).random() < cfg_rate
+            else:
+                drop = (rng.random() if rng else random.random()) < cfg_rate
+        cfg_drop_flags.append(drop)
+
     # Process each tensor field
     for tensor_name in tensor_fields:
         tensor_list = []
 
-        for row in rows:
+        for row_idx, row in enumerate(rows):
             # Get tensor data from row using the existing helper function pattern
             shape_key = f"{tensor_name}_shape"
             bytes_key = f"{tensor_name}_bytes"
 
-            if shape_key in row and bytes_key in row:
+            if (
+                shape_key in row
+                and bytes_key in row
+                and row[shape_key] is not None
+                and row[bytes_key] is not None
+            ):
                 shape = row[shape_key]
                 bytes_data = row[bytes_key]
 
                 if len(bytes_data) == 0:
-                    tensor = torch.zeros(0, dtype=torch.bfloat16)
+                    # Preserve the full shape (e.g. [0, D]) so downstream
+                    # padding knows the embedding dimension even when there
+                    # are zero tokens (e.g. ByT5 embedding with no glyph text).
+                    # zeros, not empty: a truncated row can declare a non-empty
+                    # shape with no payload, and uninitialized memory would be
+                    # stacked silently instead of failing.
+                    tensor = torch.zeros(tuple(shape), dtype=torch.float32)
                 else:
-                    # Deterministic per-sample CFG dropout
-                    # using sample index (resume-safe).
-                    drop = False
-                    if (tensor_name == 'text_embedding' and cfg_rate > 0):
-                        sample_idx = row.get("_sample_index")
-                        if sample_idx is not None:
-                            drop = (random.Random(seed ^ sample_idx).random() < cfg_rate)
-                        else:
-                            drop = ((rng.random() if rng else random.random()) < cfg_rate)
+                    drop = (
+                        tensor_name in ("text_embedding", "text_embedding_2")
+                        and cfg_drop_flags[row_idx])
                     if drop:
                         data = np.zeros(shape, dtype=np.float32)
                     else:
@@ -169,37 +190,100 @@ def collate_rows_from_parquet_schema(rows,
                 tensor_list.append(tensor)
             else:
                 # Handle missing tensor data
-                tensor_list.append(torch.zeros(0, dtype=torch.bfloat16))
+                if tensor_name == "text_embedding_2":
+                    tensor_list.append(None)
+                else:
+                    tensor_list.append(torch.zeros(0, dtype=torch.bfloat16))
 
         # Stack tensors with special handling for text embeddings
-        if tensor_name == 'text_embedding':
+        if tensor_name in (
+            "text_embedding",
+            "text_embedding_2",
+        ):
             # Handle text embeddings with padding
+
+            valid_tensors = [t for t in tensor_list if t is not None]
+
+            if len(valid_tensors) == 0:
+                if tensor_name == "text_embedding_2":
+                    # Legacy Wan/Cosmos data does not contain the secondary
+                    # (ByT5) text embedding at all - skip this field entirely.
+                    continue
+                raise ValueError("text_embedding is missing from all rows.")
+
+            reference_tensor = valid_tensors[0]
+            if reference_tensor.ndim == 3:
+                if reference_tensor.shape[0] != 1:
+                    raise ValueError(
+                        f"Expected '{tensor_name}' batch dimension "
+                        f"to be 1, got {tuple(reference_tensor.shape)}"
+                    )
+                reference_tensor = reference_tensor.squeeze(0)
+            if reference_tensor.ndim != 2:
+                raise ValueError(
+                    f"Expected '{tensor_name}' shape [L, D], "
+                    f"got {tuple(reference_tensor.shape)}"
+                )
+            embedding_dim = reference_tensor.shape[-1]
+            embedding_dtype = reference_tensor.dtype
+
             padded_tensors = []
             attention_masks = []
-
             for tensor in tensor_list:
-                if tensor.numel() > 0:
-                    padded_tensor, mask = pad(tensor, text_padding_length)
-                    padded_tensors.append(padded_tensor)
-                    attention_masks.append(mask)
-                else:
-                    # Handle empty embeddings - assume default embedding dimension
-                    padded_tensors.append(torch.zeros(text_padding_length, 768, dtype=torch.bfloat16))
-                    attention_masks.append(torch.zeros(text_padding_length))
+                if tensor is None:
+                    if tensor_name == "text_embedding":
+                        raise ValueError(
+                            "text_embedding is missing from one or more rows.")
+                    # No ByT5 embedding field for this row (legacy row mixed
+                    # into a Hunyuan batch) - treat as zero tokens.
+                    tensor = torch.empty((0, embedding_dim), dtype=embedding_dtype)
+
+                if tensor.ndim == 3:
+                    if tensor.shape[0] != 1:
+                        raise ValueError(
+                            f"Expected '{tensor_name}' batch dimension "
+                            f"to be 1, got {tuple(tensor.shape)}"
+                        )
+                    tensor = tensor.squeeze(0)
+
+                if tensor.ndim != 2:
+                    raise ValueError(
+                        f"Expected '{tensor_name}' shape [L, D], "
+                        f"got {tuple(tensor.shape)}"
+                    )
+
+                if tensor.shape[-1] != embedding_dim:
+                    raise ValueError(
+                        f"Inconsistent hidden dimension for "
+                        f"'{tensor_name}': expected {embedding_dim}, "
+                        f"got {tensor.shape[-1]}"
+                    )
+
+                padded_tensor, mask = pad(tensor, text_padding_length)
+                padded_tensors.append(padded_tensor)
+                attention_masks.append(mask)
 
             batch_data[tensor_name] = torch.stack(padded_tensors)
-            batch_data['text_attention_mask'] = torch.stack(attention_masks)
+            if tensor_name == "text_embedding":
+                batch_data["text_attention_mask"] = torch.stack(attention_masks)
+            else:
+                batch_data["text_attention_mask_2"] = torch.stack(attention_masks)
         else:
             # Stack all tensors to preserve batch consistency
             # Don't filter out None or empty tensors as this breaks batch sizing
             try:
                 batch_data[tensor_name] = torch.stack(tensor_list)
-            except ValueError as e:
-                shapes = [t.shape if t is not None and hasattr(t, 'shape') else 'None/Invalid' for t in tensor_list]
-                raise ValueError(f"Failed to stack tensors for field '{tensor_name}'. "
-                                 f"Tensor shapes: {shapes}. "
-                                 f"All tensors in a batch must have compatible shapes. "
-                                 f"Original error: {e}") from e
+            except (ValueError, RuntimeError) as e:
+                shapes = [
+                    t.shape
+                    if t is not None and hasattr(t, 'shape') else 'None/Invalid'
+                    for t in tensor_list
+                ]
+                raise ValueError(
+                    f"Failed to stack tensors for field '{tensor_name}'. "
+                    f"Tensor shapes: {shapes}. "
+                    f"All tensors in a batch must have compatible shapes. "
+                    f"Original error: {e}") from e
 
     # Process metadata fields into info_list
     info_list = []

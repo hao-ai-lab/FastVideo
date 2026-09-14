@@ -28,11 +28,11 @@ from typing import Any
 
 import av
 import numpy as np
-import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
 
 from fastvideo.dataset.dataloader.schema import pyarrow_schema_t2v
+from fastvideo.dataset.dataloader.parquet_io import records_to_table
 from fastvideo.utils import maybe_download_model, verify_model_config_and_directory
 
 # --- Config ---
@@ -230,11 +230,7 @@ def main() -> None:
             row = dict(r)
             row["id"] = f"{r['id']}_copy{copy_idx}"
             replicated.append(row)
-    table = pa.table(
-        {k: [r[k] for r in replicated]
-         for k in replicated[0]},
-        schema=pyarrow_schema_t2v,
-    )
+    table = records_to_table(replicated, pyarrow_schema_t2v)
     output_path = os.path.join(OUTPUT_DIR, "data_00000.parquet")
     pq.write_table(table, output_path)
     print(f"\nWrote {len(replicated)} records "
