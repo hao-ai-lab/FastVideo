@@ -41,6 +41,15 @@ def test_fast_plan_keeps_full_audio_and_reduces_only_video() -> None:
     assert plan.video_temporal_scale > 1.0
 
 
+def test_resolve_geometry_accepts_the_aligned_duration_limit() -> None:
+    geometry = MiniMaxH3MLXPipeline.resolve_geometry(768, 1344, 360)
+
+    assert geometry["num_frames"] == 362
+    assert geometry["latent_frame_count"] == 107
+    with pytest.raises(ValueError, match="H3 generates"):
+        MiniMaxH3MLXPipeline.resolve_geometry(768, 1344, 363)
+
+
 def test_fast_layout_stretches_video_positions_without_changing_audio() -> None:
     baseline = build_packed_layout(8, 22, 46, 80, 207)
     fast = build_packed_layout(8, 22, 46, 80, 207, video_temporal_scale=1.7)

@@ -58,7 +58,7 @@ FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_
 The configuration loads `FastVideo/FastVideo-FastH3-4-step-Preview-v1-VSA-DataFree`
 on one GB10 and advertises it as `fasth3`. Lazy module load still reloads
 Qwen3-VL and the DiT between phases of each request. Legal `num_frames` values
-are `17n+5`, capped at 345 (15 s); a 345-frame request on one Spark can OOM.
+are `17n+5`, capped at 362 (15.08 s); a 345-frame request on one Spark can OOM.
 There is no cookbook server for two Sparks; use the generate YAML after
 [pairing two Sparks](../getting_started/installation/spark_pair.md).
 

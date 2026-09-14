@@ -269,7 +269,7 @@ cd FastVideo</code></pre>
         <li>The MLX source runtime supports T2VA, optional temporal <code>--fast</code>, optional spatial <code>--fast-spatial</code>, and opt-in VSA on <code>--include-vsa</code> checkpoints. FL2VA, Ref2VA, and two-pass refinement are not wired.</li>
         <li>GPU count and VAE decode backend are configurable in the builder above for FastH3 CUDA recipes. Only the value shown by default has a recorded run; other supported values are unmeasured here.</li>
         <li>DGX Spark is a runtime on FastH3 Preview, not a separate family card. Select NVIDIA DGX Spark, then 1 Spark or 2 Sparks. The CUDA GPU-count knob does not apply to Spark.</li>
-        <li>GB10 has no FA4 / sm_100a VSA kernel. Keep <code>FASTVIDEO_FA4=0</code> and <code>FASTVIDEO_VSA_SM100A=0</code>. Legal <code>num_frames</code> values are <code>17n+5</code>, capped at 345 (15 s). A 345-frame request on one Spark can OOM.</li>
+        <li>GB10 has no FA4 / sm_100a VSA kernel. Keep <code>FASTVIDEO_FA4=0</code> and <code>FASTVIDEO_VSA_SM100A=0</code>. Legal <code>num_frames</code> values are <code>17n+5</code>, capped at 362 (15.08 s). A 345-frame request on one Spark can OOM.</li>
         <li>Gated or missing checkpoints: run <code>huggingface-cli login</code> and confirm you accepted the model's license on Hugging Face.</li>
       </ul>
   </div>

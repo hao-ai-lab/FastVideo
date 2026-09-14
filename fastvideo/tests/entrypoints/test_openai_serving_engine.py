@@ -253,8 +253,9 @@ def test_fasth3_invalid_geometry_fails_at_admission(tmp_path: Path, overrides, m
         )
 
 
-def test_fasth3_seconds_align_to_causal_vae_grid(tmp_path: Path) -> None:
-    request = VideoGenerationRequest(prompt="a fox", aspect_ratio="16:9", seconds="5")
+@pytest.mark.parametrize(("seconds", "expected_frames"), [("5", 124), ("15", 362)])
+def test_fasth3_seconds_align_to_causal_vae_grid(tmp_path: Path, seconds: str, expected_frames: int) -> None:
+    request = VideoGenerationRequest(prompt="a fox", aspect_ratio="16:9", seconds=seconds)
     adapted = build_generation_request(
         "video_gen_test",
         request,
@@ -262,7 +263,7 @@ def test_fasth3_seconds_align_to_causal_vae_grid(tmp_path: Path) -> None:
         served_model_name="fasth3",
         output_dir=str(tmp_path),
     )
-    assert adapted.sampling.num_frames == 124
+    assert adapted.sampling.num_frames == expected_frames
 
 
 def test_fasth3_ref2va_limits_references_at_admission(tmp_path: Path) -> None:
