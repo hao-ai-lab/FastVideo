@@ -90,6 +90,7 @@ Which roles are needed depends on the training method:
 | Fine-tune (SFT) | `student` |
 | Diffusion-Forcing SFT | `student` |
 | DMD2 | `student`, `teacher`, `critic` |
+| TDM | `student`, `teacher`, `critic` |
 | Self-Forcing | `student` (causal), `teacher`, `critic` |
 
 ### `method` — Training algorithm
@@ -148,6 +149,7 @@ training:
     checkpoints_total_limit: 3                # 0 = keep all
 
   tracker:
+    trackers: []  # options: none, wandb, swanlab, jsonl
     project_name: my_project
     run_name: my_run
 
@@ -328,6 +330,99 @@ method:
 | `fake_score_betas` | *(required)* | Critic optimizer Adam betas |
 | `fake_score_lr_scheduler` | *(required)* | Critic LR scheduler type |
 
+### TDM (Trajectory Distribution Matching)
+
+Ports Trajectory Distribution Matching to FastVideo's modular trainer. The
+original TDM paper and demo target CogVideoX-2B with diffusion notation; the
+FastVideo implementation adapts the objective to Wan flow matching. Production
+code uses Wan's forward process:
+
+```text
+x_sigma = (1 - sigma) * x0 + sigma * eps
+x0_hat = x_sigma - sigma * model_output
+```
+
+It keeps the TDM role structure: a few-step trainable student generates a
+trajectory, a trainable fake-score critic learns from generated trajectory
+points, and a frozen teacher supplies real-score guidance for the generator
+target.
+
+```yaml
+models:
+  student:
+    _target_: fastvideo.train.models.wan.WanModel
+    init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    trainable: true
+    lora:
+      enable: true
+      rank: 16
+      alpha: 32
+  teacher:
+    _target_: fastvideo.train.models.wan.WanModel
+    init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    trainable: false
+    disable_custom_init_weights: true
+  critic:
+    _target_: fastvideo.train.models.wan.WanModel
+    init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    trainable: true
+    disable_custom_init_weights: true
+    lora:
+      enable: true
+      rank: 16
+      alpha: 32
+
+method:
+  _target_: fastvideo.train.methods.distribution_matching.tdm.TDMMethod
+  rollout_mode: simulate
+  tdm_denoising_steps: [1000, 750, 500, 250]
+  generator_update_interval: 5
+  real_score_guidance_scale: 4.5
+  student_sample_type: sde
+  noise_interval_mode: separate
+
+  fake_score_learning_rate: 8.0e-6
+  fake_score_betas: [0.0, 0.999]
+  fake_score_lr_scheduler: constant
+```
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `rollout_mode` | *(required)* | Currently must be `"simulate"` |
+| `tdm_denoising_steps` | *(required)* | Few-step student trajectory schedule; mapped sigmas must start at scheduler terminal noise and strictly decrease |
+| `student_sample_type` | `"sde"` | `"sde"` re-noises each predicted x0; `"ode"` carries effective flow noise |
+| `noise_interval_mode` | `"separate"` | Fake-score noising target selection mode; see note below |
+| `use_randmid` | `true` | Randomly sample the intermediate sigma between the source point and the next trajectory sigma; source points are randomly sampled except in deterministic `next_step` mode |
+| `snr_clip` | `5.0` | Clip the flow-SNR fake-score weight |
+| `importance_weight_clip` | `10.0` | Clip mixed-noise importance weights |
+| `normalize_generator_delta` | `true` | Divide each sample's generator loss by its teacher-guidance magnitude |
+| `use_huber` | `false` | Use the reference pseudo-Huber expression for the generator loss; fake-score training remains MSE |
+| `huber_c` | `0.001` | Huber delta when `use_huber=true` |
+
+See `examples/train/configs/distribution_matching/wan/tdm_t2v_lora.yaml` for a
+complete Wan LoRA config. Treat this as a Wan adaptation of TDM, not exact
+CogVideoX reference parity. TDM follows the reference implementation's rollout
+gradient behavior: generated rollout history is not backpropagated through, and
+only the student prediction used by the generator loss carries gradients.
+
+Fake-score training samples a source point from the generated trajectory. In
+`separate` and `to_terminal` modes, source points are sampled randomly per
+batch element. In `next_step` mode, source points use deterministic
+rank-stratified trajectory indices and cycle by training iteration, so small
+rank/batch configurations eventually cover adjacent transitions without random
+gaps. With `use_randmid: true`, TDM then samples an
+intermediate sigma in
+`[sigma_next, sigma_source)`; otherwise the intermediate sigma is
+`sigma_next`. For `noise_interval_mode: separate`, the target is sampled in
+`[sigma_intermediate, sigma_source)`. For `noise_interval_mode: to_terminal`,
+the target is sampled in `[sigma_intermediate, sigma_terminal)`, so it may be
+any scheduler point in that interval. The exact terminal `sigma=1.0` endpoint
+is excluded because flow-SNR weighting gives it zero fake-score weight. For
+`noise_interval_mode: next_step`, set `use_randmid: false`; each source point
+uses the adjacent trajectory boundary as its target, and the final clean
+transition uses the lowest positive scheduler sigma because training schedulers
+do not expose an exact `sigma=0` model timestep.
+
 ### Self-Forcing (Causal DMD)
 
 Extends DMD2 for **streaming / causal video generation**. The student processes
@@ -436,7 +531,9 @@ are saved and restored automatically on resume.
 ### ValidationCallback
 
 Runs inference with the trained model at regular intervals, saving generated
-videos and logging them to the tracker (W&B).
+videos and logging them to the configured tracker. With `jsonl`, metrics are
+written to `output_dir/tracker/metrics.jsonl` and artifact metadata to
+`output_dir/tracker/artifacts.jsonl`.
 
 ```yaml
 callbacks:
@@ -639,6 +736,7 @@ fastvideo/train/
     base.py                   # TrainingMethod ABC
     distribution_matching/
       dmd2.py                 # DMD2 distillation
+      tdm.py                  # Trajectory Distribution Matching
       self_forcing.py         # Self-Forcing (causal DMD)
     fine_tuning/
       finetune.py             # Supervised fine-tuning
@@ -655,7 +753,7 @@ fastvideo/train/
     optimizer.py              # Optimizer/scheduler construction
     checkpoint.py             # DCP save/resume
     dataloader.py             # Dataset/dataloader construction
-    tracking.py               # W&B tracker
+    tracking.py               # W&B / SwanLab / JSONL trackers
 ```
 
 ---

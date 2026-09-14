@@ -27,6 +27,7 @@ from fastvideo.logger import init_logger
 logger = init_logger(__name__)
 
 _CHECKPOINT_DIR_RE = re.compile(r"^checkpoint-(\d+)$")
+_CHECKPOINT_COMPLETE_MARKER = ".complete"
 
 
 def _is_stateful(obj: Any) -> bool:
@@ -52,6 +53,25 @@ def _parse_step_from_dir(checkpoint_dir: Path) -> int:
     return int(match.group(1))
 
 
+def _is_checkpoint_complete(checkpoint_dir: Path) -> bool:
+    marker_path = checkpoint_dir / _CHECKPOINT_COMPLETE_MARKER
+    if marker_path.is_file():
+        return True
+
+    metadata_path = checkpoint_dir / "metadata.json"
+    if metadata_path.is_file():
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return False
+        if metadata.get("completion_marker") == _CHECKPOINT_COMPLETE_MARKER:
+            return False
+
+    # Checkpoints written before completion markers were introduced are
+    # complete once DCP has published its own metadata file.
+    return (checkpoint_dir / "dcp" / ".metadata").is_file()
+
+
 def _find_latest_checkpoint(output_dir: Path) -> Path | None:
     if not output_dir.exists():
         return None
@@ -62,7 +82,7 @@ def _find_latest_checkpoint(output_dir: Path) -> Path | None:
             continue
         if not _CHECKPOINT_DIR_RE.match(child.name):
             continue
-        if not (child / "dcp").is_dir():
+        if not (child / "dcp").is_dir() or not _is_checkpoint_complete(child):
             continue
         try:
             step = _parse_step_from_dir(child)
@@ -110,6 +130,8 @@ def _resolve_resume_checkpoint(resume_from_checkpoint: str, *, output_dir: str) 
     if path.is_dir() and _CHECKPOINT_DIR_RE.match(path.name):
         if not (path / "dcp").is_dir():
             raise FileNotFoundError(f"Missing dcp dir under checkpoint: {path / 'dcp'}")
+        if not _is_checkpoint_complete(path):
+            raise FileNotFoundError(f"Checkpoint save did not complete: {path}")
         return path
 
     # Treat as output_dir -> pick latest.
@@ -244,6 +266,8 @@ class CheckpointManager:
         save_steps = int(self.config.save_steps or 0)
         if save_steps <= 0:
             return
+        if self._last_saved_step == step:
+            return
         self.save(step)
 
     def save(self, step: int) -> None:
@@ -257,7 +281,9 @@ class CheckpointManager:
                 "Saving checkpoint to %s",
                 checkpoint_dir,
             )
+            (checkpoint_dir / _CHECKPOINT_COMPLETE_MARKER).unlink(missing_ok=True)
             self._write_metadata(checkpoint_dir, step)
+        _barrier()
         dcp.save(states, checkpoint_id=str(dcp_dir))
         _barrier()
 
@@ -269,6 +295,13 @@ class CheckpointManager:
         self._save_rng_snapshot(checkpoint_dir)
         _barrier()
 
+        if _rank() == 0:
+            marker_path = checkpoint_dir / _CHECKPOINT_COMPLETE_MARKER
+            marker_tmp_path = marker_path.with_suffix(".tmp")
+            marker_tmp_path.write_text("complete\n", encoding="utf-8")
+            os.replace(marker_tmp_path, marker_path)
+        _barrier()
+
         self._last_saved_step = step
 
         self._cleanup_old_checkpoints()
@@ -278,7 +311,10 @@ class CheckpointManager:
         checkpoint_dir: Path,
         step: int,
     ) -> None:
-        metadata: dict[str, Any] = {"step": step}
+        metadata: dict[str, Any] = {
+            "step": step,
+            "completion_marker": _CHECKPOINT_COMPLETE_MARKER,
+        }
         if self._raw_config is not None:
             metadata["config"] = self._raw_config
         meta_path = checkpoint_dir / "metadata.json"
@@ -379,6 +415,7 @@ class CheckpointManager:
         logger.info("Loading Phase 2 checkpoint from %s", resolved)
         dcp.load(states, checkpoint_id=str(resolved / "dcp"))
         _barrier()
+        self._last_saved_step = step
         logger.info("Checkpoint loaded; resuming from step=%s", step)
         return step
 

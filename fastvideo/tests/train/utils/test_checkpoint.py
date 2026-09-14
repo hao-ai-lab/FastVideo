@@ -15,6 +15,7 @@ from typing import Any
 
 import pytest
 
+from fastvideo.train.utils import checkpoint as checkpoint_utils
 from fastvideo.train.utils.checkpoint import (
     CheckpointConfig,
     CheckpointManager,
@@ -34,12 +35,15 @@ def _make_checkpoint_dir(
     step: int,
     *,
     with_dcp: bool = True,
+    complete: bool = True,
 ) -> Path:
     """Create a fake ``checkpoint-<step>/dcp`` directory tree."""
     ckpt_dir = output_dir / f"checkpoint-{step}"
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     if with_dcp:
         (ckpt_dir / "dcp").mkdir(exist_ok=True)
+    if complete:
+        (ckpt_dir / ".complete").write_text("complete\n")
     return ckpt_dir
 
 
@@ -147,6 +151,40 @@ def test_find_latest_skips_dirs_without_dcp_subdir(tmp_path: Path) -> None:
     assert latest.name == "checkpoint-5"
 
 
+def test_find_latest_falls_back_from_incomplete_new_checkpoint(
+        tmp_path: Path) -> None:
+    _make_checkpoint_dir(tmp_path, 100)
+    incomplete = _make_checkpoint_dir(tmp_path, 200, complete=False)
+    (incomplete / "dcp" / ".metadata").write_text("dcp metadata")
+    (incomplete / "metadata.json").write_text(
+        '{"step": 200, "completion_marker": ".complete"}')
+
+    latest = _find_latest_checkpoint(tmp_path)
+
+    assert latest is not None
+    assert latest.name == "checkpoint-100"
+
+
+def test_find_latest_accepts_legacy_dcp_metadata(tmp_path: Path) -> None:
+    legacy = _make_checkpoint_dir(tmp_path, 75, complete=False)
+    (legacy / "dcp" / ".metadata").write_text("dcp metadata")
+
+    latest = _find_latest_checkpoint(tmp_path)
+
+    assert latest == legacy
+
+
+def test_resolve_explicit_incomplete_new_checkpoint_raises(
+        tmp_path: Path) -> None:
+    incomplete = _make_checkpoint_dir(tmp_path, 200, complete=False)
+    (incomplete / "dcp" / ".metadata").write_text("dcp metadata")
+    (incomplete / "metadata.json").write_text(
+        '{"step": 200, "completion_marker": ".complete"}')
+
+    with pytest.raises(FileNotFoundError, match="did not complete"):
+        _resolve_resume_checkpoint(str(incomplete), output_dir=str(tmp_path))
+
+
 def test_find_latest_skips_non_checkpoint_dirs(tmp_path: Path) -> None:
     (tmp_path / "logs").mkdir()
     (tmp_path / "wandb").mkdir()
@@ -230,7 +268,7 @@ def test_write_metadata_roundtrip_with_step(tmp_path: Path) -> None:
     ckpt_dir = _make_checkpoint_dir(tmp_path, 7)
     mgr._write_metadata(ckpt_dir, step=7)
     loaded = CheckpointManager.load_metadata(ckpt_dir)
-    assert loaded == {"step": 7}
+    assert loaded == {"step": 7, "completion_marker": ".complete"}
 
 
 def test_write_metadata_includes_raw_config(tmp_path: Path) -> None:
@@ -259,6 +297,48 @@ def test_load_metadata_raises_on_missing_file(tmp_path: Path) -> None:
     # No metadata.json written.
     with pytest.raises(FileNotFoundError, match="metadata"):
         CheckpointManager.load_metadata(ckpt_dir)
+
+
+def test_save_marks_complete_after_dcp_and_rng_barriers(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    class _Method:
+
+        @staticmethod
+        def checkpoint_state() -> dict[str, Any]:
+            return {}
+
+    manager = CheckpointManager(
+        method=_Method(),
+        dataloader=None,
+        output_dir=str(tmp_path),
+        config=CheckpointConfig(save_steps=100, keep_last=0),
+    )
+    events = []
+    monkeypatch.setattr(checkpoint_utils, "_barrier", lambda: events.append("barrier"))
+    monkeypatch.setattr(checkpoint_utils.dcp, "save", lambda *args, **kwargs: events.append("dcp"))
+    monkeypatch.setattr(manager, "_save_rng_snapshot", lambda checkpoint: events.append("rng"))
+    monkeypatch.setattr(manager, "_cleanup_old_checkpoints", lambda: events.append("cleanup"))
+    original_replace = checkpoint_utils.os.replace
+
+    def record_replace(source: Path, destination: Path) -> None:
+        events.append("marker")
+        original_replace(source, destination)
+
+    monkeypatch.setattr(checkpoint_utils.os, "replace", record_replace)
+
+    manager.save(100)
+
+    assert events == [
+        "barrier",
+        "dcp",
+        "barrier",
+        "rng",
+        "barrier",
+        "marker",
+        "barrier",
+        "cleanup",
+    ]
+    assert (tmp_path / "checkpoint-100" / ".complete").is_file()
 
 
 # ---------------------------------------------------------------------------
@@ -353,3 +433,28 @@ def test_maybe_save_triggers_on_each_interval(tmp_path: Path) -> None:
     for step in range(1, 41):
         mgr.maybe_save(step=step)
     assert calls == [10, 20, 30, 40]
+
+
+def test_save_final_dedupes_step_saved_on_interval(tmp_path: Path) -> None:
+    mgr = _make_manager(tmp_path, save_steps=100)
+    calls = _record_save_calls(mgr)
+
+    mgr.maybe_save(step=500)
+    mgr.save_final(step=500)
+
+    assert calls == [500]
+
+
+def test_save_final_dedupes_terminal_resumed_step(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _make_checkpoint_dir(tmp_path, 500)
+    mgr = _make_manager(tmp_path, save_steps=100)
+    monkeypatch.setattr(mgr, "_build_states", lambda: {})
+    monkeypatch.setattr(checkpoint_utils.dcp, "load", lambda *args, **kwargs: None)
+    monkeypatch.setattr(checkpoint_utils, "_barrier", lambda: None)
+
+    assert mgr.maybe_resume(resume_from_checkpoint=str(tmp_path / "checkpoint-500")) == 500
+    calls = _record_save_calls(mgr)
+    mgr.save_final(step=500)
+
+    assert calls == []
