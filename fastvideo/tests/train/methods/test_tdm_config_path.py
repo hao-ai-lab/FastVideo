@@ -163,7 +163,7 @@ class _FakeWanDMDPipeline:
     ) -> SimpleNamespace:
         type(self).last_batch = batch
         type(self).last_inference_args = inference_args
-        return SimpleNamespace(output=torch.zeros(1, 3, 1, 2, 2))
+        return SimpleNamespace(output=torch.zeros(1, 3, 1, 2, 2), extra={})
 
 
 def test_wan_tdm_validation_propagates_sampling_timesteps_to_dmd_pipeline(monkeypatch) -> None:
