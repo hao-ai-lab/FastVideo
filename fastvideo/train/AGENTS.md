@@ -8,6 +8,7 @@ YAML-driven trainer composed from interchangeable **methods × models × callbac
 train/
 ├── trainer.py              # Core training loop coordinator
 ├── README.md               # User-facing overview (legacy → new diff)
+├── attn_qat/               # Attn-QAT integration notes (see docs/training/attn_qat.md)
 ├── entrypoint/             # train.py + dcp_to_diffusers.py CLI entrypoints
 ├── methods/
 │   ├── base.py                  #   TrainingMethod ABC
@@ -18,15 +19,23 @@ train/
 │   └── rl/                      #   RL methods, sampling helpers, rewards
 ├── models/
 │   ├── base.py             #   ModelBase / CausalModelBase wrappers
-│   ├── wan/, hunyuan/, cosmos/  # Per-family training wrappers
+│   ├── wan/, hunyuan/, cosmos/, kandinsky5/, longcat/, ltx2/, matrixgame2/, minimax_h3/  # Per-family wrappers
 ├── callbacks/              # callback.py base + ema, grad_clip, validation
 └── utils/
     ├── training_config.py  #   Hierarchical YAML config dataclasses
+    ├── config.py           #   _target_-based run config
     ├── builder.py          #   Build trainer from config
+    ├── instantiate.py      #   _target_-based instantiation utilities
     ├── checkpoint.py       #   DCP save/load
+    ├── activation_checkpoint.py  # Activation checkpointing policies
     ├── optimizer.py        #   AdamW / fused optimizer factory
     ├── tracking.py         #   build_tracker (W&B / TensorBoard)
-    └── dataloader.py       #   StatefulDataLoader wiring
+    ├── dataloader.py       #   StatefulDataLoader wiring
+    ├── lora.py             #   Training-side LoRA utilities
+    ├── module_state.py     #   Train/eval + requires_grad role helpers
+    ├── moduleloader.py     #   Module loading helpers
+    ├── negative_prompt.py  #   Per-rank negative-prompt encoding
+    └── validation_media.py #   Validation frame/audio encoding
 ```
 
 ## Composition Model
