@@ -4,7 +4,6 @@ from copy import deepcopy
 from typing import Any
 
 import torch
-from einops import rearrange
 
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.dataset.dataloader.schema import pyarrow_schema_i2v
@@ -129,11 +128,41 @@ class WanI2VDistillationPipeline(DistillationPipeline):
 
         assert isinstance(training_batch.image_latents, torch.Tensor)
         image_latents = training_batch.image_latents.to(get_local_torch_device(), dtype=torch.bfloat16)
+        training_batch.image_latents = self._build_image_conditioning(
+            image_latents,
+            num_latent_t=self.training_args.num_latent_t,
+        )
 
-        temporal_compression_ratio = 4
-        num_frames = (self.training_args.num_latent_t - 1) * temporal_compression_ratio + 1
-        batch_size, num_channels, _, latent_height, latent_width = image_latents.shape
-        mask_lat_size = torch.ones(batch_size, 1, num_frames, latent_height, latent_width)
+        return training_batch
+
+    @staticmethod
+    def _build_image_conditioning(
+        image_latents: torch.Tensor,
+        *,
+        num_latent_t: int,
+        temporal_compression_ratio: int = 4,
+    ) -> torch.Tensor:
+        """Build full-length Wan I2V mask and latent conditioning.
+
+        WanTransformer3DModel applies sequence-parallel sharding after patch
+        embedding. Pre-sharding only the image conditioning here would make its
+        temporal length differ from the full noise input before concatenation.
+        """
+        num_frames = (num_latent_t - 1) * temporal_compression_ratio + 1
+        batch_size, _, latent_t, latent_height, latent_width = image_latents.shape
+        if latent_t != num_latent_t:
+            raise ValueError("Wan I2V image conditioning temporal length must match num_latent_t: "
+                             f"got image_latents.shape[2]={latent_t}, num_latent_t={num_latent_t}")
+
+        mask_lat_size = torch.ones(
+            batch_size,
+            1,
+            num_frames,
+            latent_height,
+            latent_width,
+            device=image_latents.device,
+            dtype=image_latents.dtype,
+        )
         mask_lat_size[:, :, 1:] = 0
 
         first_frame_mask = mask_lat_size[:, :, :1]
@@ -141,17 +170,8 @@ class WanI2VDistillationPipeline(DistillationPipeline):
         mask_lat_size = torch.cat([first_frame_mask, mask_lat_size[:, :, 1:]], dim=2)
         mask_lat_size = mask_lat_size.view(batch_size, -1, temporal_compression_ratio, latent_height, latent_width)
         mask_lat_size = mask_lat_size.transpose(1, 2)
-        mask_lat_size = mask_lat_size.to(image_latents.device).to(dtype=torch.bfloat16)
 
-        image_latents = torch.cat([mask_lat_size, image_latents], dim=1)
-        training_batch.image_latents = image_latents
-
-        if self.sp_world_size > 1:
-            image_latents = rearrange(image_latents, "b c (n t) h w -> b c n t h w", n=self.sp_world_size).contiguous()
-            image_latents = image_latents[:, :, self.rank_in_sp_group, :, :, :]
-            training_batch.image_latents = image_latents
-
-        return training_batch
+        return torch.cat([mask_lat_size, image_latents], dim=1)
 
     def _build_distill_input_kwargs(self, noise_input: torch.Tensor, timestep: torch.Tensor,
                                     text_dict: dict[str, torch.Tensor], training_batch: TrainingBatch) -> TrainingBatch:
@@ -160,7 +180,14 @@ class WanI2VDistillationPipeline(DistillationPipeline):
         assert torch.isnan(image_embeds).sum() == 0
         image_embeds = image_embeds.to(get_local_torch_device(), dtype=torch.bfloat16)
 
-        noisy_model_input = torch.cat([noise_input, training_batch.image_latents.permute(0, 2, 1, 3, 4)], dim=2)
+        image_conditioning = training_batch.image_latents.permute(0, 2, 1, 3, 4)
+        matching_batch_and_time = noise_input.shape[:2] == image_conditioning.shape[:2]
+        matching_spatial_shape = noise_input.shape[3:] == image_conditioning.shape[3:]
+        if not matching_batch_and_time or not matching_spatial_shape:
+            raise ValueError("Wan I2V noise and image conditioning must have matching batch, temporal, and spatial "
+                             f"dimensions, got noise={tuple(noise_input.shape)} and "
+                             f"conditioning={tuple(image_conditioning.shape)}")
+        noisy_model_input = torch.cat([noise_input, image_conditioning], dim=2)
 
         training_batch.input_kwargs = {
             "hidden_states": noisy_model_input.permute(0, 2, 1, 3, 4),  # bs, c, t, h, w
