@@ -85,6 +85,7 @@ def _build_generation_kwargs(
     return kwargs
 
 
+@router.post("/generations", response_model=ImageResponse)
 @router.post("", response_model=ImageResponse)
 async def generations(request: ImageGenerationsRequest):
     request_id = generate_request_id()
