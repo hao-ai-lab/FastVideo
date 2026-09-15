@@ -4,7 +4,8 @@ In-process evaluation suite for video generations. Includes pixel
 metrics (SSIM, PSNR, LPIPS), Fréchet Video Distance (FVD), optical-flow
 comparisons, the full VBench suite, Physics-IQ, audio metrics, an
 absolute VLM scorer (`videoscore2`), and a pairwise VLM judge
-(`judge.third_person_separation`) — all behind a single registry-driven API.
+(`judge.third_person_separation`), plus VQeval long-video failure scoring —
+all behind a single registry-driven API.
 
 ## Install
 
@@ -12,9 +13,10 @@ absolute VLM scorer (`videoscore2`), and a pairwise VLM judge
 |---|---|
 | Default (common, optical_flow, vbench, physics_iq, videoscore2) | `uv pip install -e .[eval]` |
 | Just VBench (11 of 16 by default; +4 with detectron2) | `uv pip install -e .[eval-vbench]` |
+| VQeval long-video composite | `uv pip install -e .[eval-vqeval]` |
 | Just Physics-IQ (covered by `[eval]`) | `uv pip install -e .[eval-physics-iq]` |
 | Audio metrics (CLAP, FAD, KL, WER, AudioBox, DeSync, ImageBind) | `uv pip install -e .[eval-audio]` |
-| Everything: `[eval]` + `[eval-audio]` + `vbench.scene` (AVoCaDO) | `uv pip install -e .[eval-full]` |
+| Everything: `[eval]` + `[eval-audio]` + `[eval-vqeval]` + `vbench.scene` | `uv pip install -e .[eval-full]` |
 | Optional faster video decode (x86_64 only; opt-in) | `uv pip install -e .[eval-fast-decode]` |
 
 `[eval-audio]` covers every `audio.*` metric. ImageBind
@@ -80,6 +82,38 @@ The submodule is a clean upstream pin. Compat with current
 transformers/numpy/timm versions is applied at import time in
 `fastvideo/eval/metrics/vbench/__init__.py` via attribute-level
 monkey-patches; the submodule files are unchanged.
+
+### VQeval long-video scoring
+
+`vqeval.composite` wraps the six VQeval dimensions behind one metric so
+CLIP, DINOv2, pyiqa, and optical-flow state are shared. The composite score is
+0–100 (higher is better); individual dimension scores and raw metrics are
+returned under `MetricResult.details["dimensions"]`.
+
+Pull the pinned source and install the optional dependencies:
+
+```bash
+git submodule update --init fastvideo/third_party/eval/vqeval
+uv pip install -e '.[eval-vqeval]'
+```
+
+Frame rate is required because VQeval scores every frame through five seconds
+and samples longer videos at approximately 2 fps. Text alignment is included
+only when `--text-prompt` is provided.
+
+```bash
+fastvideo eval run \
+    --videos outputs/*.mp4 \
+    --metrics vqeval.composite \
+    --fps 16 \
+    --text-prompt "A dog running through a forest" \
+    --output vqeval.json
+```
+
+The upstream source is pinned as a submodule rather than copied into FastVideo.
+The LVSA root license and VQeval package metadata say Apache-2.0, while the
+VQeval README says MIT; keeping an unmodified gitlink preserves the exact
+upstream provenance while that documentation inconsistency remains.
 
 ## Public API
 
@@ -197,12 +231,14 @@ fastvideo/
 │       ├── videoscore2/           # VideoScore-2 (Qwen2.5-VL)
 │       ├── judge/                 # pairwise VLM judges (third_person_separation)
 │       ├── physics_iq/            # PhysicsIQ + sub-metrics
-│       └── vbench/                # adapter: sys.path bootstrap + shims
-│           ├── __init__.py
-│           └── <16 sub-metric pkgs>
+│       ├── vbench/                # adapter: sys.path bootstrap + shims
+│       │   ├── __init__.py
+│       │   └── <16 sub-metric pkgs>
+│       └── vqeval/                 # shared six-dimension composite adapter
 └── third_party/
     └── eval/
         ├── vbench/                # git submodule (Vchitect/VBench)
+        ├── vqeval/                 # git submodule (JiusiServe/LVSA)
         ├── synchformer/           # vendored (MIT), used by audio.desync
         └── glmasr/                # vendored (Apache-2.0), used by audio.wer (glm_asr)
 ```
