@@ -7,7 +7,7 @@ from typing import Any, Iterable
 
 import torch
 from torch import nn
-from transformers import AutoTokenizer, Gemma3ForConditionalGeneration
+from transformers import AutoModelForImageTextToText, AutoTokenizer, PreTrainedModel
 
 from fastvideo.configs.models.encoders import BaseEncoderOutput, TextEncoderConfig
 from fastvideo.models.encoders.base import TextEncoder
@@ -61,6 +61,7 @@ class GemmaConnectorConfig:
     num_learnable_registers: int | None
     # LTX-2.3 connector gated attention (default False == LTX-2.0 behavior).
     apply_gated_attention: bool = False
+    ff_bias: bool = True
 
 
 class GemmaFeaturesExtractorProjLinear(nn.Module):
@@ -104,6 +105,7 @@ class _BasicTransformerBlock1D(nn.Module):
         dim_head: int,
         rope_type: LTXRopeType,
         apply_gated_attention: bool = False,
+        ff_bias: bool = True,
         norm_eps: float = 1e-6,
     ) -> None:
         super().__init__()
@@ -116,7 +118,7 @@ class _BasicTransformerBlock1D(nn.Module):
             rope_type=rope_type,
             apply_gated_attention=apply_gated_attention,
         )
-        self.ff = FeedForward(dim, dim_out=dim)
+        self.ff = FeedForward(dim, dim_out=dim, bias=ff_bias)
         self.norm_eps = norm_eps
 
     def forward(
@@ -248,6 +250,7 @@ class Embeddings1DConnector(nn.Module):
                 dim_head=config.attention_head_dim,
                 rope_type=config.rope_type,
                 apply_gated_attention=config.apply_gated_attention,
+                ff_bias=config.ff_bias,
             ) for _ in range(config.num_layers)
         ])
         self.num_learnable_registers = config.num_learnable_registers
@@ -368,6 +371,7 @@ class LTX2GemmaTextEncoderModel(TextEncoder):
             )
 
         connector_apply_gated_attention = bool(getattr(arch, "connector_apply_gated_attention", False))
+        connector_ff_bias = bool(getattr(arch, "connector_ff_bias", True))
         video_connector_config = GemmaConnectorConfig(
             num_attention_heads=arch.connector_num_attention_heads,
             attention_head_dim=arch.connector_attention_head_dim,
@@ -378,6 +382,7 @@ class LTX2GemmaTextEncoderModel(TextEncoder):
             double_precision_rope=arch.connector_double_precision_rope,
             num_learnable_registers=arch.connector_num_learnable_registers,
             apply_gated_attention=connector_apply_gated_attention,
+            ff_bias=connector_ff_bias,
         )
         audio_connector_config = GemmaConnectorConfig(
             num_attention_heads=getattr(arch, "audio_connector_num_attention_heads", None)
@@ -391,6 +396,7 @@ class LTX2GemmaTextEncoderModel(TextEncoder):
             double_precision_rope=arch.connector_double_precision_rope,
             num_learnable_registers=arch.connector_num_learnable_registers,
             apply_gated_attention=connector_apply_gated_attention,
+            ff_bias=connector_ff_bias,
         )
         self.embeddings_connector = Embeddings1DConnector(video_connector_config)
         self.audio_embeddings_connector = Embeddings1DConnector(audio_connector_config)
@@ -398,11 +404,11 @@ class LTX2GemmaTextEncoderModel(TextEncoder):
         self.gemma_model_path = arch.gemma_model_path
         self.gemma_dtype = arch.gemma_dtype
         self.padding_side = arch.padding_side
-        self._gemma_model: Gemma3ForConditionalGeneration | None = None
+        self._gemma_model: PreTrainedModel | None = None
 
     def named_parameters(self, prefix: str = "", recurse: bool = True):
         for name, param in super().named_parameters(prefix=prefix, recurse=recurse):
-            if name.startswith("gemma_model."):
+            if name.startswith("_gemma_model."):
                 continue
             yield name, param
 
@@ -436,13 +442,13 @@ class LTX2GemmaTextEncoderModel(TextEncoder):
             )
 
     @property
-    def gemma_model(self) -> Gemma3ForConditionalGeneration:
+    def gemma_model(self) -> PreTrainedModel:
         if self._gemma_model is None:
             gemma_path = self.gemma_model_path
             if not gemma_path:
                 raise ValueError("gemma_model_path must be set (expected text_encoder/gemma).")
             dtype = getattr(torch, self.gemma_dtype, torch.bfloat16)
-            self._gemma_model = Gemma3ForConditionalGeneration.from_pretrained(
+            self._gemma_model = AutoModelForImageTextToText.from_pretrained(
                 gemma_path,
                 local_files_only=True,
                 torch_dtype=dtype,
@@ -565,6 +571,11 @@ class LTX2GemmaTextEncoderModel(TextEncoder):
 
         input_ids = text_inputs["input_ids"].to(device=model.device)
         attention_mask = text_inputs["attention_mask"].to(device=model.device)
+        input_ids, attention_mask = _ensure_leading_bos(
+            input_ids,
+            attention_mask,
+            bos_token_id=_get_bos_token_id(model.config),
+        )
         outputs = model(
             input_ids=input_ids,
             attention_mask=attention_mask,
@@ -601,6 +612,11 @@ class LTX2GemmaTextEncoderModel(TextEncoder):
             attention_mask = torch.ones_like(input_ids)
 
         model = self.gemma_model
+        input_ids, attention_mask = _ensure_leading_bos(
+            input_ids,
+            attention_mask,
+            bos_token_id=_get_bos_token_id(model.config),
+        )
         target_device = get_local_torch_device()
         # Do not invoke model.to() inside the compiled forward path.
         # _parse_to returns a non-Tensor torch.device, which Dynamo cannot
@@ -715,6 +731,65 @@ def _norm_and_concat_padded_batch(
     mask_flattened = mask.reshape(b, t, 1).expand(-1, -1, d * l)
     normed = normed.masked_fill(~mask_flattened, 0.0)
     return normed
+
+
+def _get_bos_token_id(config: Any) -> int | None:
+    bos_token_id = getattr(config, "bos_token_id", None)
+    if bos_token_id is None:
+        bos_token_id = getattr(getattr(config, "text_config", None), "bos_token_id", None)
+    return int(bos_token_id) if bos_token_id is not None else None
+
+
+def _ensure_leading_bos(
+    input_ids: torch.Tensor,
+    attention_mask: torch.Tensor,
+    *,
+    bos_token_id: int | None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Ensure each left-padded Gemma sequence starts with a valid BOS token.
+
+    Gemma 3 tokenizers generally add BOS themselves, while the packed Gemma 4
+    tokenizer used by LTX-2.5 does not. This keeps the legacy path unchanged
+    and adds BOS only to rows that need it, matching the official LTX wrapper.
+    """
+    if bos_token_id is None:
+        raise ValueError("LTX-2 Gemma tokenizer/config must define bos_token_id.")
+    if input_ids.ndim != 2 or attention_mask.shape != input_ids.shape:
+        raise ValueError("LTX-2 Gemma input_ids and attention_mask must have matching rank-2 shapes.")
+
+    valid = attention_mask.bool()
+    has_valid = valid.any(dim=1)
+    first_valid = valid.to(torch.int64).argmax(dim=1)
+    first_tokens = input_ids.gather(1, first_valid.unsqueeze(1)).squeeze(1)
+    needs_bos = ~has_valid | first_tokens.ne(bos_token_id)
+
+    adjusted_ids = input_ids.clone()
+    adjusted_mask = attention_mask.clone()
+
+    # Rows with left padding can consume one padding slot without moving any
+    # text tokens. Empty rows place BOS in the final slot.
+    target_positions = torch.where(has_valid, first_valid - 1, torch.full_like(first_valid, input_ids.shape[1] - 1))
+    consume_padding = needs_bos & (~has_valid | first_valid.gt(0))
+    safe_targets = target_positions.clamp(min=0)
+    adjusted_ids.scatter_(1, safe_targets.unsqueeze(1), torch.where(
+        consume_padding,
+        torch.full_like(safe_targets, bos_token_id),
+        adjusted_ids.gather(1, safe_targets.unsqueeze(1)).squeeze(1),
+    ).unsqueeze(1))
+    adjusted_mask.scatter_(1, safe_targets.unsqueeze(1), torch.where(
+        consume_padding,
+        torch.ones_like(safe_targets, dtype=adjusted_mask.dtype),
+        adjusted_mask.gather(1, safe_targets.unsqueeze(1)).squeeze(1),
+    ).unsqueeze(1))
+
+    # A completely full row has no padding slot; prepend BOS and truncate its
+    # last token exactly as the official max-length tokenizer wrapper does.
+    shift_rows = needs_bos & has_valid & first_valid.eq(0)
+    shifted_ids = torch.cat((torch.full_like(input_ids[:, :1], bos_token_id), input_ids[:, :-1]), dim=1)
+    shifted_mask = torch.cat((torch.ones_like(attention_mask[:, :1]), attention_mask[:, :-1]), dim=1)
+    adjusted_ids = torch.where(shift_rows.unsqueeze(1), shifted_ids, adjusted_ids)
+    adjusted_mask = torch.where(shift_rows.unsqueeze(1), shifted_mask, adjusted_mask)
+    return adjusted_ids, adjusted_mask
 
 
 # Entry point for model registry
