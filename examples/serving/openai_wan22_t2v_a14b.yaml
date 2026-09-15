@@ -5,6 +5,9 @@ generator:
   engine:
     num_gpus: 2
     use_fsdp_inference: false
+    parallelism:
+      tp_size: 1
+      sp_size: 2
     offload:
       dit: true
       vae: false

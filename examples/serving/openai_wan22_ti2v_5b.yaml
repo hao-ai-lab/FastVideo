@@ -1,11 +1,15 @@
 # OpenAI-compatible server for Wan2.2 TI2V 5B. Supports both text-to-video
-# (omit inputs.image_path) and image-to-video (set it) from the same model.
+# (omit the image reference) and image-to-video (set input_reference or
+# image_reference) from the same model.
 #   fastvideo serve --config examples/serving/openai_wan22_ti2v_5b.yaml
 generator:
   model_path: Wan-AI/Wan2.2-TI2V-5B-Diffusers
   engine:
     num_gpus: 1
     use_fsdp_inference: false
+    parallelism:
+      tp_size: 1
+      sp_size: 1
     offload:
       dit: true
       vae: false

@@ -1,5 +1,8 @@
 # OpenAI-compatible server for Wan2.1 I2V 14B 480P. Each request must supply
-# its own source image (POST inputs.image_path); there is no default image.
+# its own source image through the OpenAI-compatible reference fields, e.g.
+# {"input_reference": "/path/to/first-frame.png"} or
+# {"image_reference": [{"image_url": "https://example.com/first-frame.png"}]};
+# there is no default image.
 #   fastvideo serve --config examples/serving/openai_wan21_i2v_14b.yaml
 generator:
   model_path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers
