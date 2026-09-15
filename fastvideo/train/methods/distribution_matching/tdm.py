@@ -3,21 +3,22 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any, Literal, TYPE_CHECKING
 
 import torch
-import torch.distributed as dist
 
 from fastvideo.train.methods.base import LogScalar
 from fastvideo.train.methods.distribution_matching.dmd2 import DMD2Method
 from fastvideo.train.models.base import ModelBase
 from fastvideo.train.utils.config import (
     get_optional_float,
-    get_optional_int,
     require_bool,
     require_choice,
 )
+from fastvideo.train.utils.lora import synchronize_lora_gradients
+from fastvideo.train.utils.optimizer import clip_grad_norm_if_needed
 
 if TYPE_CHECKING:
     from fastvideo.pipelines import TrainingBatch
@@ -197,21 +198,19 @@ class TDMMethod(DMD2Method):
             default="sde",
             where="method.student_sample_type",
         )  # type: ignore[assignment]
-        self._noise_interval_mode: Literal["separate", "to_terminal", "next_step"] = require_choice(
+        self._noise_interval_mode: Literal["separate", "to_terminal"] = require_choice(
             mcfg,
             "noise_interval_mode",
-            {"separate", "to_terminal", "next_step"},
+            {"separate", "to_terminal"},
             default="separate",
             where="method.noise_interval_mode",
         )  # type: ignore[assignment]
         self._use_randmid = require_bool(
             mcfg,
             "use_randmid",
-            default=True,
+            default=False,
             where="method.use_randmid",
         )
-        if self._noise_interval_mode == "next_step" and self._use_randmid:
-            raise ValueError("method.use_randmid must be false when method.noise_interval_mode='next_step'")
 
         self._use_huber = require_bool(
             mcfg,
@@ -259,9 +258,21 @@ class TDMMethod(DMD2Method):
             default=True,
             where="method.normalize_generator_delta",
         )
+        max_grad_norm = get_optional_float(
+            mcfg,
+            "max_grad_norm",
+            where="method.max_grad_norm",
+        )
+        if max_grad_norm is None:
+            max_grad_norm = 1.0
+        if max_grad_norm < 0.0:
+            raise ValueError("method.max_grad_norm must be non-negative")
+        self._max_grad_norm = float(max_grad_norm)
         self._sigma_eps = 1e-8
 
-    # TrainingMethod override: single_train_step
+    def manages_optimization(self) -> bool:
+        return True
+
     def single_train_step(
         self,
         batch: dict[str, Any],
@@ -271,56 +282,123 @@ class TDMMethod(DMD2Method):
             dict[str, Any],
             dict[str, LogScalar],
     ]:
-        training_batch = self.student.prepare_batch(
-            batch,
-            generator=self.cuda_generator,
-            latents_source="zeros",
+        del batch, iteration
+        raise RuntimeError("TDMMethod uses managed_train_step() to preserve fake-score-before-generator ordering")
+
+    def managed_train_step(
+        self,
+        data_stream: Iterator[dict[str, Any]],
+        iteration: int,
+    ) -> tuple[dict[str, torch.Tensor], dict[str, Any], dict[str, LogScalar]]:
+        grad_accum = max(1, int(self.training_config.loop.gradient_accumulation_steps or 1))
+        raw_batches = [next(data_stream) for _ in range(grad_accum)]
+
+        fake_score_losses: list[torch.Tensor] = []
+        fake_score_metric_maps: list[dict[str, LogScalar]] = []
+        for raw_batch in raw_batches:
+            training_batch = self.student.prepare_batch(
+                raw_batch,
+                generator=self.cuda_generator,
+                latents_source="zeros",
+            )
+            if training_batch.latents is None:
+                raise RuntimeError("TDM requires student.prepare_batch to populate latents")
+            fake_score_loss, critic_ctx, _, fake_score_metrics = self._tdm_fake_score_loss(training_batch)
+            self.critic.backward(
+                fake_score_loss,
+                critic_ctx,
+                grad_accum_rounds=grad_accum,
+            )
+            fake_score_losses.append(fake_score_loss.detach())
+            fake_score_metric_maps.append(fake_score_metrics)
+
+        critic_grad_norm = self._finish_role_update(
+            model=self.critic,
+            optimizer=self._critic_optimizer,
+            lr_scheduler=self._critic_lr_scheduler,
         )
-        if training_batch.latents is None:
-            raise RuntimeError("TDM requires student.prepare_batch to populate latents")
 
         update_student = self._should_update_student(iteration)
-
-        generator_loss = torch.zeros(
-            (),
-            device=training_batch.latents.device,
-            dtype=training_batch.latents.dtype,
-        )
-        student_ctx = None
-        generator_metrics: dict[str, LogScalar] = {}
+        generator_losses: list[torch.Tensor] = []
+        generator_metric_maps: list[dict[str, LogScalar]] = []
         if update_student:
-            with torch.no_grad():
-                trajectory = self._student_trajectory(training_batch)
-            generator_loss, generator_metrics, student_ctx = self._tdm_generator_loss(
-                trajectory,
-                training_batch,
-                iteration=self._generator_update_iteration(iteration),
+            for raw_batch in raw_batches:
+                training_batch = self.student.prepare_batch(
+                    raw_batch,
+                    generator=self.cuda_generator,
+                    latents_source="zeros",
+                )
+                if training_batch.latents is None:
+                    raise RuntimeError("TDM requires student.prepare_batch to populate latents")
+                with torch.no_grad():
+                    trajectory = self._student_trajectory(training_batch)
+                generator_loss, generator_metrics, student_ctx = self._tdm_generator_loss(
+                    trajectory,
+                    training_batch,
+                )
+                self.student.backward(
+                    generator_loss,
+                    student_ctx,
+                    grad_accum_rounds=grad_accum,
+                )
+                generator_losses.append(generator_loss.detach())
+                generator_metric_maps.append(generator_metrics)
+            student_grad_norm = self._finish_role_update(
+                model=self.student,
+                optimizer=self._student_optimizer,
+                lr_scheduler=self._student_lr_scheduler,
             )
+        else:
+            student_grad_norm = 0.0
 
-        (
-            fake_score_loss,
-            critic_ctx,
-            critic_outputs,
-            fake_score_metrics,
-        ) = self._tdm_fake_score_loss(training_batch, iteration=iteration)
-
-        total_loss = generator_loss + fake_score_loss
+        fake_score_loss = torch.stack(fake_score_losses).mean()
+        generator_loss = (torch.stack(generator_losses).mean()
+                          if generator_losses else torch.zeros_like(fake_score_loss))
         loss_map = {
-            "total_loss": total_loss,
+            "total_loss": generator_loss + fake_score_loss,
             "generator_loss": generator_loss,
             "fake_score_loss": fake_score_loss,
         }
-
-        outputs: dict[str, Any] = dict(critic_outputs)
-        outputs["_fv_backward"] = {
-            "update_student": update_student,
-            "student_ctx": student_ctx,
-            "critic_ctx": critic_ctx,
+        metrics: dict[str, LogScalar] = {
+            "update_student": float(update_student),
+            "grad_norm/critic": critic_grad_norm,
         }
-        metrics: dict[str, LogScalar] = {"update_student": float(update_student)}
-        metrics.update(generator_metrics)
-        metrics.update(fake_score_metrics)
-        return loss_map, outputs, metrics
+        if update_student:
+            metrics["grad_norm/student"] = student_grad_norm
+        metrics.update(self._mean_metric_maps(fake_score_metric_maps))
+        metrics.update(self._mean_metric_maps(generator_metric_maps))
+        return loss_map, {}, metrics
+
+    def _finish_role_update(
+        self,
+        *,
+        model: ModelBase,
+        optimizer: torch.optim.Optimizer,
+        lr_scheduler: Any,
+    ) -> float:
+        synchronize_lora_gradients(model.transformer)
+        grad_norm = clip_grad_norm_if_needed(model.transformer, self._max_grad_norm)
+        optimizer.step()
+        lr_scheduler.step()
+        optimizer.zero_grad(set_to_none=True)
+        return grad_norm
+
+    @staticmethod
+    def _mean_metric_maps(metric_maps: list[dict[str, LogScalar]]) -> dict[str, LogScalar]:
+        if not metric_maps:
+            return {}
+        averaged: dict[str, LogScalar] = {}
+        for key in metric_maps[0]:
+            values = [metrics[key] for metrics in metric_maps]
+            first = values[0]
+            if isinstance(first, torch.Tensor):
+                averaged[key] = torch.stack([
+                    value.detach() if isinstance(value, torch.Tensor) else torch.as_tensor(value, device=first.device)
+                    for value in values
+                ]).mean()
+            else:
+                averaged[key] = sum(float(value) for value in values) / len(values)
+        return averaged
 
     def _get_denoising_step_list(
         self,
@@ -526,67 +604,22 @@ class TDMMethod(DMD2Method):
             sigmas=sigma_tensor,
         )
 
-    def _generator_update_iteration(
-        self,
-        iteration: int,
-    ) -> int:
-        interval = get_optional_int(
-            self.method_config,
-            "generator_update_interval",
-            where="method.generator_update_interval",
-        )
-        if interval is None or interval <= 0:
-            return max(0, int(iteration))
-        return max(0, int(iteration)) // interval
-
-    def _transition_aligned_trajectory_indices(
-        self,
-        *,
-        batch_size: int,
-        num_trajectory_points: int,
-        iteration: int = 0,
-        device: torch.device,
-    ) -> torch.Tensor:
-        rank = 0
-        world_size = 1
-        if dist.is_available() and dist.is_initialized():
-            rank = int(dist.get_rank())
-            world_size = int(dist.get_world_size())
-
-        distributed_cfg = getattr(self.training_config, "distributed", None)
-        sp_size = max(1, int(getattr(distributed_cfg, "sp_size", 1) or 1))
-        sample_group_count = max(1, world_size // sp_size)
-        sample_group_rank = rank // sp_size
-        iteration_offset = max(0, int(iteration)) * sample_group_count * batch_size
-        start = iteration_offset + sample_group_rank * batch_size
-        return (torch.arange(batch_size, device=device, dtype=torch.long) + start) % num_trajectory_points
-
     def _sample_tdm_context(
         self,
         trajectory: TDMTrajectory,
-        *,
-        iteration: int = 0,
     ) -> TDMSampleContext:
         device = trajectory.sigmas.device
         interval_eps = 1e-6
         batch_size = trajectory.noisy_latents[0].shape[0]
         batch_indices = torch.arange(batch_size, device=device)
-        if self._noise_interval_mode == "next_step":
-            trajectory_indices = self._transition_aligned_trajectory_indices(
-                batch_size=batch_size,
-                num_trajectory_points=len(trajectory.sigmas),
-                iteration=iteration,
-                device=device,
-            )
-        else:
-            trajectory_indices = torch.randint(
-                0,
-                len(trajectory.sigmas),
-                [batch_size],
-                device=device,
-                dtype=torch.long,
-                generator=self.cuda_generator,
-            )
+        trajectory_indices = torch.randint(
+            0,
+            len(trajectory.sigmas),
+            [batch_size],
+            device=device,
+            dtype=torch.long,
+            generator=self.cuda_generator,
+        )
         clean_latents = torch.stack(trajectory.clean_latents)[trajectory_indices, batch_indices].detach()
         noisy_source = torch.stack(trajectory.noisy_latents)[trajectory_indices, batch_indices].detach()
         sigma_source = trajectory.sigmas[trajectory_indices]
@@ -626,25 +659,10 @@ class TDMMethod(DMD2Method):
         if self._use_randmid:
             sigma_intermediate, _ = sample_scheduler_point(sigma_intermediate, sigma_source)
 
-        if self._noise_interval_mode == "next_step":
-            sigma_target = sigma_intermediate
-            terminal_mask = sigma_target <= self._sigma_eps
-            if bool(torch.any(terminal_mask).item()):
-                positive_sigmas = scheduler_sigmas[scheduler_sigmas > self._sigma_eps]
-                if positive_sigmas.numel() == 0:
-                    raise ValueError("TDM next_step mode requires at least one positive scheduler sigma")
-                lowest_positive_sigma = positive_sigmas.min()
-                sigma_target = torch.where(
-                    terminal_mask,
-                    lowest_positive_sigma.expand_as(sigma_target),
-                    sigma_target,
-                )
-            timestep_target = self._model_timestep_for_sigma(sigma_target, self.student)
-        else:
-            target_upper = sigma_source
-            if self._noise_interval_mode == "to_terminal":
-                target_upper = torch.full_like(sigma_source, trajectory.sigmas.max())
-            sigma_target, timestep_target = sample_scheduler_point(sigma_intermediate, target_upper)
+        target_upper = sigma_source
+        if self._noise_interval_mode == "to_terminal":
+            target_upper = torch.full_like(sigma_source, trajectory.sigmas.max())
+        sigma_target, timestep_target = sample_scheduler_point(sigma_intermediate, target_upper)
 
         eps_source = flow_effective_noise(
             noisy_source,
@@ -690,15 +708,10 @@ class TDMMethod(DMD2Method):
     def _tdm_fake_score_loss(
         self,
         batch: TrainingBatch,
-        *,
-        iteration: int | None = None,
     ) -> tuple[torch.Tensor, Any, dict[str, Any], dict[str, LogScalar]]:
         with torch.no_grad():
             trajectory = self._student_trajectory(batch)
-            if iteration is None:
-                context = self._sample_tdm_context(trajectory)
-            else:
-                context = self._sample_tdm_context(trajectory, iteration=iteration)
+            context = self._sample_tdm_context(trajectory)
 
         critic_timestep = self._model_timestep_for_sigma(context.sigma_target, self.critic)
         batch.timesteps = critic_timestep
@@ -812,8 +825,6 @@ class TDMMethod(DMD2Method):
         self,
         trajectory: TDMTrajectory,
         batch: TrainingBatch,
-        *,
-        iteration: int | None = None,
     ) -> tuple[torch.Tensor, dict[str, LogScalar], tuple[torch.Tensor, Any]]:
         guidance_scale = get_optional_float(
             self.method_config,
@@ -823,10 +834,7 @@ class TDMMethod(DMD2Method):
         if guidance_scale is None:
             guidance_scale = 1.0
 
-        if iteration is None:
-            context = self._sample_tdm_context(trajectory)
-        else:
-            context = self._sample_tdm_context(trajectory, iteration=iteration)
+        context = self._sample_tdm_context(trajectory)
         source_timestep = context.timestep_source
         target_timestep = context.timestep_target
 

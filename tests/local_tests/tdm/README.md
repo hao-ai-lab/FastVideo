@@ -38,6 +38,11 @@ values into this file.
 | fake-score update | `TDMMethod._tdm_fake_score_loss(...)` |
 | generator update | `TDMMethod._tdm_generator_loss(...)` |
 
+Each managed training step applies the fake-score optimizer update first. It
+then generates a fresh student trajectory and evaluates the generator loss with
+the updated critic. The shipped Wan configs encode the model's negative prompt
+for the teacher's unconditional classifier-free-guidance branch.
+
 Wan uses:
 
 ```text
@@ -74,7 +79,7 @@ pytest tests/local_tests/tdm/ -v -s
 |---|---|---|
 | Config smoke | `test_tdm_config_smoke.py` | Example YAML parses, resolves `TDMMethod`, and declares expected roles/LoRA knobs without loading weights |
 | Flow bridge | `test_tdm_scheduler_math.py` | Mixed-noise transition reconstructs Wan flow noising; invalid direction raises |
-| Method wiring | `test_tdm_method_unit.py` | Fake models exercise loss keys, timestep support, fake-score weights, and student/critic backward routing |
+| Method wiring | `test_tdm_method_unit.py` | Fake models exercise loss keys, faithful interval support, fake-score-before-generator optimizer ordering, and student/critic updates |
 
 ## Modal Validation
 
