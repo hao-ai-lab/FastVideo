@@ -34,10 +34,11 @@ from transformers.modeling_rope_utils import ROPE_INIT_FUNCTIONS
 try:
     from transformers.cache_utils import SlidingWindowCache
 except ImportError:
-    # transformers 5 dropped the cache-level class; a sliding window is now a property of the
-    # cache's layers (DynamicSlidingWindowLayer / StaticSlidingWindowLayer), so no cache object
-    # can be an instance of it. isinstance() against an empty tuple is always False, which is
-    # the right answer there.
+    # transformers 5.0-5.5 dropped the cache-level class (5.6 restored the name as an alias for
+    # StaticCache); there a sliding window is a property of the cache's layers
+    # (DynamicSlidingWindowLayer / StaticSlidingWindowLayer), so no cache object can be an
+    # instance of it. isinstance() against an empty tuple is always False, which is the right
+    # answer there.
     SlidingWindowCache = ()  # type: ignore[assignment,misc]
 
 try:
