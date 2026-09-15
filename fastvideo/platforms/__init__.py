@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/platforms/__init__.py
 
+import os
 import traceback
 from typing import TYPE_CHECKING
 
@@ -90,6 +91,15 @@ def cpu_platform_plugin() -> str | None:
     return "fastvideo.platforms.cpu.CpuPlatform"
 
 
+def _rocm_device_node_accessible() -> bool:
+    """True when this process can open the AMD kernel driver's compute device node.
+
+    Looking at the node rather than querying the GPU runtime keeps platform
+    detection from initializing ROCm when fastvideo is imported.
+    """
+    return os.access("/dev/kfd", os.R_OK | os.W_OK)
+
+
 def rocm_platform_plugin() -> str | None:
     is_rocm = False
 
@@ -104,6 +114,20 @@ def rocm_platform_plugin() -> str | None:
             amdsmi.amdsmi_shut_down()
     except Exception as e:
         logger.debug("ROCm platform is unavailable: %s", e)
+
+    if not is_rocm:
+        # Images built on rocm/pytorch ship a ROCm (HIP) torch but no amdsmi
+        # Python package, and the PyPI amdsmi wheel cannot load its library
+        # there, so the check above always fails and the CPU platform wins.
+        # A HIP torch build plus the AMD compute device node is a ROCm GPU.
+        try:
+            import torch
+            hip_version = getattr(torch.version, "hip", None)
+            if hip_version and _rocm_device_node_accessible():
+                is_rocm = True
+                logger.info("ROCm platform is available (torch HIP %s; detected without amdsmi)", hip_version)
+        except Exception as e:
+            logger.debug("ROCm platform is unavailable via torch: %s", e)
 
     return "fastvideo.platforms.rocm.RocmPlatform" if is_rocm else None
 
