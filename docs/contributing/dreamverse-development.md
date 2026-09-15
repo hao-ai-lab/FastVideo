@@ -4,6 +4,14 @@ Dreamverse lives under `apps/dreamverse/` as a product app inside the
 FastVideo monorepo. Backend code uses the local FastVideo workspace package;
 frontend tooling remains standalone under `apps/dreamverse/web/`.
 
+## H3 prompt definition proposal
+
+The [H3 system prompt definitions](../design/dreamverse-h3-system-prompt-v1.md)
+describe proposed shared rules, T2VA/FL2VA/Ref2VA formats, and operation-specific
+JSON contracts. The [research notes](../design/dreamverse-h3-prompt-research.md)
+record their sources and evaluation plan. These are design documents, not active
+runtime configuration; integration and prompt-quality validation are separate work.
+
 ## Backend tests
 
 Run backend tests excluding GPU-marked cases from the FastVideo repository
