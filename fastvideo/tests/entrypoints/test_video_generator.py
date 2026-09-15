@@ -8,6 +8,7 @@ import torch
 from einops import rearrange
 
 import fastvideo.entrypoints.video_generator as video_generator_module
+import fastvideo.utils as fastvideo_utils
 from fastvideo.api import (
     ConfigValidationError,
     GenerationRequest,
@@ -271,6 +272,39 @@ def test_generate_single_video_return_frames_still_materializes_output(tmp_path)
     torch.testing.assert_close(result["samples"], output)
     assert len(result["frames"]) == 2
     assert result["video_path"] is None
+
+
+def test_generate_single_video_retries_pageable_output_when_pinned_allocation_fails(monkeypatch, tmp_path):
+    output = torch.ones((1, 3, 2, 16, 16), dtype=torch.float32) * 0.5
+    output_batch = _single_video_output_batch(output)
+    fastvideo_args = _single_video_args()
+    fastvideo_args.pin_cpu_memory = True
+    generator = _single_video_generator(output_batch, fastvideo_args)
+    real_empty = torch.empty
+    allocation_attempts = []
+    warnings = []
+
+    def fake_empty(size, **kwargs):
+        allocation_attempts.append(kwargs.get("pin_memory", False))
+        if kwargs.get("pin_memory"):
+            raise RuntimeError("CUDA error: out of memory")
+        return real_empty(size, **kwargs)
+
+    monkeypatch.setattr(fastvideo_utils, "is_pin_memory_available", lambda: True)
+    monkeypatch.setattr(fastvideo_utils.torch, "empty", fake_empty)
+    monkeypatch.setattr(fastvideo_utils.logger, "warning", lambda message, *args: warnings.append(message % args))
+
+    result = generator._generate_single_video(
+        prompt="pinned allocation fallback",
+        sampling_param=_small_sampling_param(save_video=False, return_frames=True),
+        fastvideo_args=fastvideo_args,
+        output_path=str(tmp_path / "unused.mp4"),
+    )
+
+    torch.testing.assert_close(result["samples"], output)
+    assert allocation_attempts[:2] == [True, False]
+    assert len(warnings) == 1
+    assert "retrying with pageable memory" in warnings[0]
 
 
 def test_generate_single_video_frames_match_legacy_cpu_loop(tmp_path):
