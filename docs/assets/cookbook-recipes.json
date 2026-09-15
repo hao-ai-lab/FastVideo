@@ -1,5 +1,5 @@
 {
-  "version": 8,
+  "version": 9,
   "recipes": [
     {
       "id": "fastwan21-t2v",
@@ -576,6 +576,40 @@
       "limitations": [
         "Requires a two-node Ray cluster on the QSFP interconnect. There is no cookbook server for this path; use Python / generate.",
         "Height, width, frames, and steps in the YAML are examples. Edit them or pass CLI flags. See docs/getting_started/installation/spark_pair.md."
+      ]
+    },
+    {
+      "id": "fasth3-8step-v2-cuda",
+      "group": "fasth3-8step-v2",
+      "group_label": "FastH3 8-Step V2",
+      "group_task": "8-step text to video + audio",
+      "family": "minimax_h3",
+      "stage": "inference",
+      "task": "Few-step text to video (with audio)",
+      "label": "FastH3 8-Step V2 on CUDA",
+      "summary": "Run the eight-forward FastH3 8-Step V2 checkpoint (video/audio shifts 10/3, VSA 0.8, 64-token tiles) with the trained DMD ladder loaded from the checkpoint's fastvideo_inference.json.",
+      "model": "FastVideo/FastVideo-FastH3-8-Step-V2",
+      "source": "examples/inference/basic/basic_fasth3_8step.py",
+      "command": "UV_TORCH_BACKEND=cu130 uv pip install -e \".[fasth3]\"\npython examples/inference/basic/basic_fasth3_8step.py --prompt \"(S1) A presenter says <d>[English] FastVideo runs FastH3.</d>\" --profile strict --no-inference-torch-compile --no-compile-vae",
+      "gpu_types": ["NVIDIA"],
+      "hardware": {
+        "platform": "cuda",
+        "gpu_count": 4,
+        "accelerator": "NVIDIA GB200",
+        "evidence": "validated",
+        "evidence_url": "https://github.com/hao-ai-lab/FastVideo/pull/1852"
+      },
+      "evidence": "Verified",
+      "expected_artifact": "Warmup and measured MP4 files under outputs/fasth3_8step/",
+      "modes": ["T2VA", "8-step FastH3"],
+      "knobs": [
+        {"key": "num_gpus", "label": "GPUs", "hint": "Sequence-parallel degree", "flag": "--num-gpus", "options": [1, 2, 4, 8], "default": 4},
+        {"key": "video_decode_backend", "label": "VAE decode", "hint": "Fidelity vs. speed", "flag": "--video-decode-backend", "options": [{"value": "h3-vae", "label": "Full H3 VAE"}, {"value": "taeh3", "label": "TAEH3 preview"}], "default": "h3-vae"}
+      ],
+      "limitations": [
+        "Nine sigma-grid points (eight transformer forwards) are fixed by the checkpoint's trained ladder; the example rejects any other --steps.",
+        "Validated with the eager strict route (--profile strict --no-inference-torch-compile --no-compile-vae). The compiled all profile has not been measured for this checkpoint.",
+        "T2AV only; no FL2VA/Ref2VA distillation and no matching LoRA. Quality and latency were not compared against the four-step preview in this PR."
       ]
     },
     {

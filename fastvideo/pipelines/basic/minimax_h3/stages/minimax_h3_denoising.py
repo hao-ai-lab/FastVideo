@@ -70,6 +70,22 @@ class MiniMaxH3DenoisingStage(PipelineStage):
         self.scheduler = scheduler
         self.audio_scheduler = audio_scheduler
 
+    def _set_dmd_schedule(self, steps: list[int], grid_points: int, device: torch.device) -> None:
+        """Run the trained rungs, shifting the shared noise clock once per modality."""
+        if (not steps or any(type(step) is not int or not 0 < step <= 1000 for step in steps)
+                or any(left <= right for left, right in zip(steps, steps[1:], strict=False))):
+            raise ValueError("MiniMax-H3 DMD rungs must be strictly decreasing integers in (0, 1000].")
+        if grid_points != len(steps) + 1:
+            raise ValueError("MiniMax-H3 num_inference_steps counts sigma-grid points: "
+                             f"{len(steps)} DMD forwards require {len(steps) + 1} grid points, got {grid_points}.")
+        base = torch.tensor([step / 1000.0 for step in steps] + [0.0], dtype=torch.float32)
+        for scheduler in (self.scheduler, self.audio_scheduler):
+            shift = float(scheduler.shift)
+            sigmas = shift * base / (1 + (shift - 1) * base)
+            # Explicit sigmas are already shifted. Scheduler timesteps are H3
+            # clean time (1 - sigma); passing integer rungs to step() is wrong.
+            scheduler.set_timesteps(sigmas=sigmas, device=device)
+
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         result = VerificationResult()
         result.add_check("layout", batch.extra.get(MINIMAX_H3_LAYOUT_KEY), V.not_none)
@@ -99,13 +115,13 @@ class MiniMaxH3DenoisingStage(PipelineStage):
         full_cpu_offload = (fastvideo_args.dit_cpu_offload and not fastvideo_args.dit_layerwise_offload
                             and not fastvideo_args.use_fsdp_inference)
         device = get_local_torch_device()
-        if full_cpu_offload:
-            self.transformer.to(device)
-            batch.latents = batch.latents.to(device)
-            batch.audio_latents = batch.audio_latents.to(device)
 
-        self.scheduler.set_timesteps(batch.num_inference_steps, device=device)
-        self.audio_scheduler.set_timesteps(batch.num_inference_steps, device=device)
+        dmd_steps = fastvideo_args.pipeline_config.dmd_denoising_steps
+        if dmd_steps is None:
+            self.scheduler.set_timesteps(batch.num_inference_steps, device=device)
+            self.audio_scheduler.set_timesteps(batch.num_inference_steps, device=device)
+        else:
+            self._set_dmd_schedule(dmd_steps, batch.num_inference_steps, device)
         video_timesteps = self.scheduler.timesteps
         audio_timesteps = self.audio_scheduler.timesteps
         if video_timesteps is None or audio_timesteps is None:
@@ -152,6 +168,11 @@ class MiniMaxH3DenoisingStage(PipelineStage):
             vsa_tile_size = int(fastvideo_args.VSA_tile_size)
 
         try:
+            if full_cpu_offload:
+                self.transformer.to(device)
+                batch.latents = batch.latents.to(device)
+                batch.audio_latents = batch.audio_latents.to(device)
+
             # The stage range groups the complete denoising loop while the
             # indexed model ranges retain timing detail for every H3 block.
             with profiler_region("inference_denoising"), nvtx_range("minimax_h3.dit"):

@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import gc
+import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -140,15 +142,60 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
     def get_hf_download_component_dirs(cls) -> tuple[str, ...]:
         return tuple(sorted(cls._extra_config_module_map.get(name, name) for name in cls._required_config_modules))
 
+    @classmethod
+    def get_hf_download_allow_patterns(cls) -> list[str]:
+        patterns = super().get_hf_download_allow_patterns()
+        assert patterns is not None
+        # Keep the optional distilled schedule even when downloading only the
+        # selected transformer partition. Otherwise Hub and local loads differ.
+        return [*patterns, "fastvideo_inference.json"]
+
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs) -> None:
         _apply_h3_checkpoint_arch_configs(self.model_path, fastvideo_args, self._extra_config_module_map)
-        for module_name, modality, expected_shift in (
-            ("scheduler", "video", 12.0),
-            ("audio_scheduler", "audio", 3.0),
-        ):
+        # Each modality's scheduler_config.json owns its shift. Base H3 keeps
+        # 12/3; a distilled checkpoint can serialize a different trained pair
+        # (for example 10/3) without being silently rewritten to base defaults.
+        for module_name, modality in (("scheduler", "video"), ("audio_scheduler", "audio")):
             shift = getattr(self.get_module(module_name), "shift", None)
-            if shift is None or float(shift) != expected_shift:
-                raise ValueError(f"MiniMax-H3 {modality} scheduler must expose shift={expected_shift:g}, got {shift}.")
+            if shift is None or not math.isfinite(float(shift)) or float(shift) <= 0:
+                raise ValueError(f"MiniMax-H3 {modality} scheduler must expose a positive finite shift, got {shift}.")
+        self._load_checkpoint_schedule(fastvideo_args)
+
+    def _load_checkpoint_schedule(self, fastvideo_args: FastVideoArgs) -> None:
+        """A distilled export's schedule is explicit; never silently use a uniform grid."""
+        path = Path(self.model_path) / "fastvideo_inference.json"
+        if not path.is_file():
+            return
+        contract = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(contract, dict) or contract.get("schema_version") != "fasth3-inference-contract-v1":
+            raise ValueError("Unsupported FastH3 fastvideo_inference.json schema.")
+        steps = contract.get("dmd_denoising_steps")
+        if (not isinstance(steps, list) or not steps
+                or any(type(step) is not int or not 0 < step <= 1000 for step in steps)
+                or any(left <= right for left, right in zip(steps, steps[1:], strict=False))):
+            raise ValueError("FastH3 checkpoint DMD rungs must be strictly decreasing integers in (0, 1000].")
+        if (type(contract.get("num_inference_steps")) is not int or contract["num_inference_steps"] != len(steps) + 1
+                or type(contract.get("transformer_forwards")) is not int
+                or contract["transformer_forwards"] != len(steps)):
+            raise ValueError(
+                "FastH3 checkpoint DMD rung count must match transformer_forwards and num_inference_steps - 1.")
+        for name, key in (("scheduler", "video_scheduler_shift"), ("audio_scheduler", "audio_scheduler_shift")):
+            if key not in contract:
+                # Earlier exports (the four-step Preview v1 checkpoints) carry only the ladder; the
+                # scheduler configs are the sole source of the shifts for them.
+                continue
+            declared = contract[key]
+            if (isinstance(declared, bool) or not isinstance(declared, int | float) or not math.isfinite(declared)
+                    or declared <= 0 or float(self.get_module(name).shift) != float(declared)):
+                raise ValueError(f"FastH3 checkpoint {key}={declared!r} disagrees with {name}/scheduler_config.json.")
+        config = fastvideo_args.pipeline_config
+        if config.dmd_denoising_steps is not None and config.dmd_denoising_steps != steps:
+            raise ValueError("Explicit DMD schedule disagrees with the checkpoint's trained DMD rungs.")
+        config.dmd_denoising_steps = list(steps)
+        logger.info("FastH3 checkpoint schedule: %d transformer forwards, DMD rungs=%s, video/audio shifts=%s/%s",
+                    len(steps), steps,
+                    self.get_module("scheduler").shift,
+                    self.get_module("audio_scheduler").shift)
 
     def _defer_denoise_modules(self, fastvideo_args: FastVideoArgs) -> bool:
         if not fastvideo_args.inference_mode or bool(getattr(fastvideo_args, "training_mode", False)):
