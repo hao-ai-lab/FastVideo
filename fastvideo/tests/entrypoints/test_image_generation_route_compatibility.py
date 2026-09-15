@@ -14,8 +14,14 @@ from fastvideo.entrypoints.openai import image_api
 from fastvideo.entrypoints.openai.stores import AsyncDictStore
 
 
-@pytest.mark.parametrize("path", ["/v1/images/generations", "/v1/images"])
-@pytest.mark.parametrize("response_format", ["b64_json", "url"])
+@pytest.mark.parametrize("path", [
+    pytest.param("/v1/images/generations", id="openai-route"),
+    pytest.param("/v1/images", id="legacy-route"),
+])
+@pytest.mark.parametrize("response_format", [
+    pytest.param("b64_json", id="b64-json"),
+    pytest.param("url", id="url"),
+])
 def test_image_generation_routes(path, response_format, monkeypatch, tmp_path):
     image_bytes = b"test-image-content"
     generate = Mock(side_effect=lambda **kwargs: Path(kwargs["output_path"]).write_bytes(image_bytes))
