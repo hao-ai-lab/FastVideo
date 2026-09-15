@@ -756,6 +756,7 @@ class KDMethod(TrainingMethod):
             self._student_lr_scheduler,
         ) = build_optimizer_and_scheduler(
             params=student_params,
+            module=self.student.transformer,
             optimizer_config=tc.optimizer,
             loop_config=tc.loop,
             learning_rate=student_lr,
