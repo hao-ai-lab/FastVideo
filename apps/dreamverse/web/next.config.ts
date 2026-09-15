@@ -9,6 +9,7 @@ const configDir = path.dirname(fileURLToPath(import.meta.url));
 const staticExport = process.env.NEXT_OUTPUT_EXPORT === '1';
 
 const nextConfig: NextConfig = {
+  experimental: { middlewareClientMaxBodySize: 100 * 1024 * 1024 },
   ...(staticExport ? { output: 'export' as const } : {}),
   ...(staticExport ? { images: { unoptimized: true } } : {}),
   outputFileTracingRoot: path.join(configDir, '..', '..', '..'),
@@ -37,6 +38,18 @@ const nextConfig: NextConfig = {
       { 
         source: '/router/:path*', 
         destination: `${backendUrl}/router/:path*` 
+      },
+      {
+        source: '/generation-capabilities',
+        destination: `${backendUrl}/generation-capabilities`,
+      },
+      {
+        source: '/assets',
+        destination: `${backendUrl}/assets`,
+      },
+      {
+        source: '/assets/:path*',
+        destination: `${backendUrl}/assets/:path*`,
       },
       {
         source: '/prompt-system-config',

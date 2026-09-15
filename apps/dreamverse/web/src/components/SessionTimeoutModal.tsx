@@ -33,7 +33,7 @@ export default function SessionTimeoutModal({
 							Session ended
 						</h2>
 						<p className="text-sm text-muted-foreground">
-							This project hit the current 5-minute session limit. Your latest video stays on screen, and the project is being kept in the archive so you can come back to it.
+							This project reached the runtime session limit. Your latest video stays on screen, and the project is being kept in the archive so you can come back to it.
 						</p>
 					</div>
 					<p className="text-sm text-muted-foreground">

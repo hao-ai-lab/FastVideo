@@ -186,3 +186,15 @@ def test_config_uses_fasth3_sequence_parallel_default(monkeypatch):
     assert module.ACTIVE_MODEL_ID == "fast-h3"
     assert module.MODEL_CONFIG["generation_backend"] == "minimax_h3"
     assert module.DREAMVERSE_SP_SIZE == 4
+
+
+def test_full_h3_profile_has_no_preview_adapter_and_longer_session(monkeypatch):
+    monkeypatch.setenv("DREAMVERSE_MODEL_ID", "full-h3")
+    monkeypatch.delenv("DREAMVERSE_SP_SIZE", raising=False)
+    monkeypatch.delenv("DREAMVERSE_SESSION_TIMEOUT_SECONDS", raising=False)
+    module = _load_config_module()
+    assert module.MODEL_CONFIG["full_checkpoint"] is True
+    assert "adapter_repo" not in module.MODEL_CONFIG
+    assert module.MODEL_CONFIG["num_inference_steps"] == 50
+    assert module.DREAMVERSE_SP_SIZE == 4
+    assert module.SESSION_TIMEOUT_SECONDS == 7200

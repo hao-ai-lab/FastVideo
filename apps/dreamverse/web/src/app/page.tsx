@@ -5,6 +5,7 @@ import { Download, Share2 } from "lucide-react";
 import DevtoolsShell from "@/components/devtools/DevtoolsShell";
 import MonitorPage from "@/components/MonitorPage";
 import ChatBar from "@/components/ChatBar";
+import AssetList from "@/components/AssetList";
 import SessionTimeoutModal from "@/components/SessionTimeoutModal";
 import Sidebar from "@/components/Sidebar";
 import Header from "@/components/Header";
@@ -13,10 +14,13 @@ import Workspace from "@/components/Workspace";
 import { saveProject, saveProjectMetadata, listProjects, loadProjectClips, deleteProject, pruneOldProjects, type StoredProject, type StoredClip } from "@/lib/projectStorage";
 import { isInfrastructureError } from "@/lib/ws/reducer";
 import { useStore } from "@/hooks/useStore";
+import { useAssetLibrary } from "@/hooks/useAssetLibrary";
+import { useGenerationCapabilities } from "@/hooks/useGenerationCapabilities";
 import { resolveDevtoolsMode } from "@/lib/devtoolsMode";
 import { createAvPipeline, DEFAULT_AV_MIME } from "@/lib/media/avPipeline";
 import { remuxArchivedFmp4Segments } from "@/lib/media/fmp4Remux";
 import { DEFAULT_CUSTOM_PRESET_ID, parseStoryPresets, sanitizePresetId } from "@/lib/presets";
+import { DEFAULT_GENERATION_MODE, buildGenerationInitFields, validateGenerationInputs, type GenerationMode, type GenerationInitFields, type GenerationAsset } from "@/lib/generationMode";
 import {
 	buildRewritePromptWindowSnapshot,
 	buildRewritePromptWindowSnapshotFromPrompts,
@@ -341,6 +345,19 @@ export default function Page() {
 	const [isMobileShareCapable, setIsMobileShareCapable] = useState(false);
 	const [videoMuted, setVideoMuted] = useState(true);
 	const [timeoutModalOpen, setTimeoutModalOpen] = useState(false);
+	const [generationMode, setGenerationMode] = useState<GenerationMode>(DEFAULT_GENERATION_MODE);
+	const assetLibrary = useAssetLibrary();
+	const { capabilities, capabilityNotice, refreshCapabilities } = useGenerationCapabilities();
+	const joiningRef = useRef(false);
+	const activeGenerationRef = useRef<{ fields: GenerationInitFields; assets: GenerationAsset[]; mock: boolean } | null>(null);
+	const generationInputError = validateGenerationInputs(generationMode, assetLibrary.conditioningAssets, assetLibrary.assets);
+	const generationSupported = capabilities.modes.includes(generationMode);
+	const generationInputsValid = !generationInputError && generationSupported && !assetLibrary.uploading;
+	function changeGenerationMode(mode: GenerationMode) {
+		if (sessionStore.get().sessionStarted || joiningRef.current || !capabilities.modes.includes(mode)) return;
+		setGenerationMode(mode);
+		assetLibrary.clearConditioning();
+	}
 	useEffect(() => {
 		setIsMobileShareCapable(typeof navigator.canShare === "function" && window.matchMedia("(pointer: coarse)").matches);
 	}, []);
@@ -391,7 +408,7 @@ export default function Page() {
 
 	// --- Derived values ---
 
-	const canStartSession = !projectResetPending && (canJoinSession || Boolean(normalizeInitialPrompt(livePromptDraft as string)));
+	const canStartSession = generationInputsValid && !projectResetPending && (canJoinSession || Boolean(normalizeInitialPrompt(livePromptDraft as string)));
 
 	const currentClipLabel = useMemo(() => {
 		if ((activeClip as Record<string, any>)?.label) return (activeClip as Record<string, any>).label;
@@ -747,7 +764,11 @@ export default function Page() {
 
 	function recoverFailedSessionStart(notice: string) {
 		const restoredDraft = normalizeInitialPrompt(pendingInitialPromptRef.current);
-		resetToLobbyState();
+		if (wsRef.current) {
+			detachAndCloseWebSocket(wsRef.current);
+			wsRef.current = null;
+		}
+		resetToLobbyState({ preserveSessionNotice: true });
 		clearPendingProjectPointers();
 		pendingInitialPromptRef.current = "";
 		sessionStore.patch({
@@ -1702,6 +1723,10 @@ export default function Page() {
 
 	function resetToLobbyState({ preserveSessionNotice = false, preservePlayback = false } = {}) {
 		setVideoMuted(true);
+		if (!preserveSessionNotice) {
+			setGenerationMode(DEFAULT_GENERATION_MODE);
+			assetLibrary.clearConditioning();
+		}
 		clearCountdownInterval();
 		pendingInitialPromptRef.current = "";
 		sessionStore.patch({
@@ -1736,6 +1761,8 @@ export default function Page() {
 
 	function resetToProjectLobbyState() {
 		setVideoMuted(true);
+		setGenerationMode(DEFAULT_GENERATION_MODE);
+		assetLibrary.clearConditioning();
 		pendingInitialPromptRef.current = "";
 		sessionStore.patch({
 			sessionStarted: false,
@@ -1764,6 +1791,7 @@ export default function Page() {
 		setSeedPrompts(segmentPrompts);
 		return {
 			type,
+			...(activeGenerationRef.current?.fields || buildGenerationInitFields(generationMode, assetLibrary.conditioningAssets, assetLibrary.assets)),
 			preset_id: getInitialPresetId(),
 			preset_label: getInitialPresetLabel(),
 			curated_prompts: segmentPrompts,
@@ -1812,6 +1840,12 @@ export default function Page() {
 			return;
 		}
 		if (decoded.kind !== "json") return;
+		if (decoded.data?.type === "error" && sessionStore.get().sessionStarted
+			&& (!sessionStore.get().gpuAssigned || decoded.data.error_code === "invalid_generation_input")) {
+			const message = typeof decoded.data.message === "string" ? decoded.data.message : "The generation inputs were rejected. Check the mode and selected assets.";
+			recoverFailedSessionStart(message);
+			return;
+		}
 		if (decoded.data?.type === "error" && isInfrastructureError(decoded.data)) {
 			const message = typeof decoded.data?.message === "string" && decoded.data.message.trim()
 				? decoded.data.message.trim()
@@ -1937,9 +1971,15 @@ export default function Page() {
 		}
 	}
 
-	function beginProjectLocally({ force = false } = {}) {
+	function beginProjectLocally({ force = false, mockRuntime = capabilities.mock === true } = {}) {
 		if (!force && !canStartSession) return;
+		if (!generationInputsValid) return false;
 		if (sessionStore.get().sessionStarted || sessionStore.get().projectResetPending) return false;
+		activeGenerationRef.current = {
+			fields: buildGenerationInitFields(generationMode, assetLibrary.conditioningAssets, assetLibrary.assets),
+			assets: assetLibrary.assets.filter((asset) => assetLibrary.conditioningAssets.some((item) => item.asset_id === asset.asset_id)),
+			mock: mockRuntime,
+		};
 		setTimeoutModalOpen(false);
 		// Unmute during the user gesture so iOS Safari permits audio playback.
 		setVideoMuted(false);
@@ -1999,12 +2039,43 @@ export default function Page() {
 	}
 
 	async function joinSession({ force = false } = {}) {
+		if (joiningRef.current || sessionStore.get().sessionStarted) return;
+		if (generationInputError || assetLibrary.uploading) {
+			showPreSessionNotice(generationInputError || "Wait for the asset upload to finish.");
+			return;
+		}
+		joiningRef.current = true;
+		try {
+			await startGenerationSession({ force });
+		} finally {
+			joiningRef.current = false;
+		}
+	}
+
+	async function startGenerationSession({ force = false } = {}) {
+		sessionStore.patch({ sessionNotice: "" });
+		streamStore.patch({ loadingAnimation: true });
+		const currentCapabilities = await refreshCapabilities();
+		if (!currentCapabilities.modes.includes(generationMode)) {
+			streamStore.patch({ loadingAnimation: false });
+			showPreSessionNotice(`${generationMode.toUpperCase()} is unavailable on this runtime. Connect a full H3 runtime or choose a supported mode.`);
+			return;
+		}
+		const assetProblem = await assetLibrary.verifySelectedAssets();
+		if (assetProblem) {
+			streamStore.patch({ loadingAnimation: false });
+			showPreSessionNotice(assetProblem);
+			return;
+		}
 		if (
 			wsRef.current
 			&& wsRef.current.readyState === WebSocket.OPEN
 			&& sessionStore.get().connected
 		) {
-			if (!beginProjectLocally({ force })) return;
+			if (!beginProjectLocally({ force, mockRuntime: currentCapabilities.mock === true })) {
+				streamStore.patch({ loadingAnimation: false });
+				return;
+			}
 			sendProjectInitMessage();
 			return;
 		}
@@ -2017,7 +2088,7 @@ export default function Page() {
 			showPreSessionNotice(probe.notice);
 			return;
 		}
-		if (!beginProjectLocally({ force })) {
+		if (!beginProjectLocally({ force, mockRuntime: currentCapabilities.mock === true })) {
 			streamStore.patch({ loadingAnimation: false });
 			sessionStore.patch({ connecting: false });
 			return;
@@ -2044,6 +2115,10 @@ export default function Page() {
 			createdAt: currentProjectCreatedAtRef.current || Date.now(),
 			lastThumbnail: currentThumbnail,
 			promptEvents: [...(rewriteStore.get().promptEvents as Record<string, unknown>[])],
+			generationMode: activeGenerationRef.current?.fields.generation_mode || DEFAULT_GENERATION_MODE,
+			conditioningAssets: activeGenerationRef.current?.fields.conditioning_assets || [],
+			assets: activeGenerationRef.current?.assets || [],
+			mock: activeGenerationRef.current?.mock === true,
 		};
 		const clips: StoredClip[] = (streamStore.get().completedClips as any[])
 			.filter((clip: any) => clip?.blob instanceof Blob)
@@ -2641,7 +2716,12 @@ export default function Page() {
 			/>
 			<Header timeLeft={headerTimeLeft} formatTime={formatTime} onToggleSidebar={() => setSidebarOpen((prev) => !prev)} />
 
-			<div className="relative flex flex-1 min-h-0 flex-col justify-center px-4 pb-2 sm:px-6 sm:pb-12">
+			<div className={cn(
+				"relative flex flex-1 min-h-0 flex-col px-4 pb-2 sm:px-6 sm:pb-12",
+				!isViewingMode && !showActiveProject && generationMode !== "t2va"
+					? "justify-start overflow-y-auto pt-4"
+					: "justify-center",
+			)}>
 				{isViewingMode && (
 					<>
 						{viewingSelectedClip && (
@@ -2680,6 +2760,8 @@ export default function Page() {
 							/>
 						</section>
 						<motion.div layout="position" className="mx-auto w-full max-w-2xl shrink-0" transition={{ type: "spring", stiffness: 200, damping: 25 }}>
+							{viewingProject?.project.mock && <p className="mb-2 text-center text-xs text-violet-600 dark:text-violet-300">Demo sample · This saved clip was not generated by an AI model.</p>}
+							{viewingProject?.project.generationMode && <p className="mb-3 text-center text-xs text-muted-foreground">{viewingProject.project.generationMode.toUpperCase()} · {viewingProject.project.conditioningAssets?.length || 0} saved references. Uploaded originals may expire; your saved video remains available.</p>}
 							<ChatBar sessionStarted={false} viewingReadOnly={true} onStartNewProject={handleStartNewProject} onBackFromViewing={closeViewingProject} />
 						</motion.div>
 					</>
@@ -2759,7 +2841,7 @@ export default function Page() {
 					</section>
 
 					<AnimatePresence>
-						{!showActiveProject && (
+						{!showActiveProject && generationMode === "t2va" && (
 							<motion.div
 								key="hero-tagline"
 								initial={{ opacity: 0 }}
@@ -2785,6 +2867,28 @@ export default function Page() {
 							sessionExpired={sessionExpired as boolean}
 							sessionNotice={sessionNotice as string}
 							projectResetPending={projectResetPending as boolean}
+							generationMode={generationMode}
+							supportedGenerationModes={capabilities.modes}
+							generationInputsValid={generationInputsValid}
+							capabilityNotice={!generationSupported ? `${generationMode.toUpperCase()} is unavailable on this runtime.` : capabilityNotice}
+							mockRuntime={capabilities.mock}
+							conditioningPanel={generationMode !== "t2va" && !sessionStarted && !sessionExpired ? (
+								<AssetList
+									mode={generationMode}
+									assets={assetLibrary.assets}
+									conditioning={assetLibrary.conditioningAssets}
+									locked={Boolean(loadingAnimation || projectResetPending)}
+									uploading={assetLibrary.uploading}
+									error={assetLibrary.assetError}
+									validationNotice={generationInputError}
+									onUpload={assetLibrary.uploadAssets}
+									onAssign={assetLibrary.assignAsset}
+									onRemove={assetLibrary.removeAsset}
+									onUnselect={assetLibrary.removeConditioning}
+									onMove={assetLibrary.moveConditioning}
+									onMissing={assetLibrary.checkAssetAvailability}
+								/>
+							) : null}
 							onPresetGenerate={handlePresetGenerate}
 							onContinuationInput={handleLivePromptInput}
 							onContinuationKeydown={handleLivePromptKeydown}
@@ -2792,6 +2896,7 @@ export default function Page() {
 							onSubmitContinuation={submitLivePrompt}
 							onLeave={leaveSession}
 							onStartNewProject={handleStartNewProject}
+							onGenerationModeChange={changeGenerationMode}
 							onSpeechTranscript={handleLivePromptSpeechTranscript}
 							onSpeechInterimChange={handleLivePromptSpeechInterim}
 						/>
