@@ -145,23 +145,88 @@ def test_all_gpu_ci_routes_use_the_trusted_slurm_dispatcher():
 
 def test_merge_comment_has_one_change_aware_trigger_path():
     slash_commands = (REPO_ROOT / ".github/workflows/ci-slash-commands.yml").read_text()
-    merge_job = slash_commands.split("  parse-command:", maxsplit=1)[0]
+    merge_jobs = slash_commands.split("  parse-command:", maxsplit=1)[0]
     ready_workflow = (REPO_ROOT / ".github/workflows/ci-trigger-full-suite.yml").read_text()
 
-    assert "labels: ['ready']" in merge_job
-    assert "api.buildkite.com" not in merge_job
-    assert "BUILDKITE_API_TOKEN" not in merge_job
+    assert "labels: ['ready']" in merge_jobs
+    assert "removeLabel" not in merge_jobs
+    assert "continue-on-error: true" in merge_jobs
+    assert "needs: handle-merge" in merge_jobs
+    assert "if: needs.handle-merge.result == 'success'" in merge_jobs
+    assert "uses: ./.github/workflows/ci-trigger-full-suite.yml" in merge_jobs
+    assert "pr_number: ${{ github.event.issue.number }}" in merge_jobs
+    assert "BUILDKITE_API_TOKEN: ${{ secrets.BUILDKITE_API_TOKEN }}" in merge_jobs
+    assert "actions: write" not in merge_jobs
+    assert "api.buildkite.com" not in merge_jobs
+    assert "workflow_call:" in ready_workflow
+    assert "BUILDKITE_API_TOKEN:\n        required: true" in ready_workflow
+    assert "CALLED_PR_NUMBER: ${{ inputs.pr_number }}" in ready_workflow
+    assert "Number.isSafeInteger(prNumber)" in ready_workflow
+    assert "pull_number: prNumber" in ready_workflow
+    assert "pr.state !== 'open'" in ready_workflow
+    assert "pr.base.repo.full_name !== context.payload.repository.full_name" in ready_workflow
+    assert "pr.base.ref !== context.payload.repository.default_branch" in ready_workflow
+    assert "core.setOutput('head_sha', pr.head.sha)" in ready_workflow
+    assert "core.setOutput('base_sha', pr.base.sha)" in ready_workflow
     assert "api.buildkite.com" in ready_workflow
     assert 'jq -r --arg pr_number "$PR_NUMBER"' in ready_workflow
     assert '.env.PR_NUMBER? == $pr_number' in ready_workflow
     assert 'TEST_SCOPE: "merge"' in ready_workflow
     assert 'FULL_SUITE: "true"' in ready_workflow
     assert "plan_merge_ci.py" in ready_workflow
-    assert "github.event.pull_request.base.sha" in ready_workflow
+    assert "ref: ${{ steps.check.outputs.base_sha }}" in ready_workflow
+    assert "PR_SHA: ${{ steps.check.outputs.head_sha }}" in ready_workflow
+    assert "PR_NUMBER: ${{ steps.check.outputs.pr_number }}" in ready_workflow
     assert "MERGE_TEST_PLAN" in ready_workflow
     assert "MERGE_GOLDEN_TESTS" in ready_workflow
     assert "MERGE_SSIM_TESTS" in ready_workflow
     assert "__FASTVIDEO_CI_PLAN_ALL__" in ready_workflow
+    downstream_steps = ready_workflow.split("      - name: Cancel previous Buildkite builds", maxsplit=1)[1]
+    assert "github.event.pull_request" not in downstream_steps
+
+
+def test_merge_gate_buildkite_cancellation_is_best_effort_and_strict():
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/ci-trigger-full-suite.yml").read_text())
+    steps = workflow["jobs"]["trigger"]["steps"]
+    cancel_step = next(step for step in steps if step.get("name") == "Cancel previous Buildkite builds")
+    trigger_step = next(step for step in steps if step.get("name") == "Trigger Buildkite merge gate")
+    cancel_script = cancel_step["run"]
+
+    # Stale-build cleanup is best effort; creating the replacement gate remains
+    # a hard failure so merge protection can never pass without a test build.
+    assert cancel_step["continue-on-error"] is True
+    assert cancel_step["timeout-minutes"] == 3
+    assert trigger_step.get("continue-on-error") is not True
+    assert "curl -sS --fail-with-body -X POST" in trigger_step["run"]
+
+    assert cancel_script.splitlines()[0] == "set -euo pipefail"
+    assert cancel_script.count("--connect-timeout 5") == 2
+    assert cancel_script.count("--max-time 20") == 2
+    assert "curl -sS --fail-with-body --connect-timeout 5 --max-time 20 --get" in cancel_script
+    assert cancel_script.count('--data-urlencode "state[]=running"') == 1
+    assert cancel_script.count('--data-urlencode "state[]=scheduled"') == 1
+    assert cancel_script.count('--data-urlencode "state[]=failing"') == 1
+    assert cancel_script.count('--data-urlencode "exclude_jobs=true"') == 1
+    assert cancel_script.count('--data-urlencode "exclude_pipeline=true"') == 1
+    assert 'state=running,scheduled' not in cancel_script
+
+    # Only a validated array of build records can reach the URL construction.
+    assert 'if type != "array" then false' in cancel_script
+    assert 'if type != "object" then false' in cancel_script
+    assert 'if type == "number" then . > 0 and floor == .' in cancel_script
+    assert 'if ($env | type) != "object" then false' in cancel_script
+    assert '$env.TEST_SCOPE?' in cancel_script
+    assert '$env.PR_NUMBER?' in cancel_script
+
+    # API bodies are kept out of annotations, every cancellation is checked,
+    # and one failure does not stop attempts for the remaining build numbers.
+    assert '--output "$response_file"' in cancel_script
+    assert 'cat "$response_file"' not in cancel_script
+    assert ("if ! curl -sS --fail-with-body --connect-timeout 5 --max-time 20 "
+            "-o /dev/null -X PUT") in cancel_script
+    assert "cancellation_failed=1" in cancel_script
+    assert cancel_script.index("cancellation_failed=1") < cancel_script.index('done < "$builds_file"')
+    assert cancel_script.index('done < "$builds_file"') < cancel_script.index("if (( cancellation_failed != 0 ))")
 
 
 def test_full_ssim_has_a_weekly_slurm_schedule():
