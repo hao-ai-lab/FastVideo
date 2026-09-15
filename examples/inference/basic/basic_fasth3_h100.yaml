@@ -7,7 +7,10 @@
 # DiT is FSDP-sharded across the four GPUs instead of replicated, and the text
 # encoder stays resident as block-FP8 (35.5 GB instead of 66.7 GB; produce it
 # with scripts/checkpoint_conversion/quantize_minimax_h3_text_encoder_fp8.py),
-# so nothing is offloaded between requests. Keep the env prefix below, or pass
+# so nothing is offloaded between requests. Both deferral flags below
+# (`lazy_module_load`, `h3_sequential_load`) are explicitly off for that reason:
+# with either one on, the pipeline frees the text encoder after conditioning and
+# reloads it on the next request. Keep the env prefix below, or pass
 # the equivalent CLI flags on examples/inference/basic/basic_fasth3.py
 # (`--num-gpus 4 --no-replicated-dit --vsa-kernel tk --no-fa4
 # --text-encoder-weights ./FastH3-TextEncoder-FP8 --no-offload-text-encoder
@@ -31,7 +34,7 @@ generator:
       inference_torch_compile: true
       vae_parallel_decode: true
       vae_parallel_decode_strategy: gather
-      h3_sequential_load: true
+      h3_sequential_load: false
   engine:
     num_gpus: 4
     use_fsdp_inference: true
@@ -44,7 +47,7 @@ generator:
       text_encoder: false
       vae: false
       pin_cpu_memory: true
-      lazy_module_load: true
+      lazy_module_load: false
     compile:
       enabled: false
       vae_enabled: true

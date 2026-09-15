@@ -1,8 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
+from pathlib import Path
 
 import pytest
 import torch
@@ -25,6 +27,20 @@ from fastvideo.models.loader.text_encoder_quantization import (
     _process_quantized_text_encoder_weights,
     _read_text_encoder_checkpoint_quantization_config,
 )
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+CONVERTER_PATH = REPO_ROOT / "scripts" / "checkpoint_conversion" / "quantize_minimax_h3_text_encoder_fp8.py"
+
+
+def _load_converter():
+    spec = importlib.util.spec_from_file_location("quantize_minimax_h3_text_encoder_fp8", CONVERTER_PATH)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+h3_fp8_converter = _load_converter()
 
 
 def _checkpoint_quantization_config(**overrides) -> dict:
@@ -182,6 +198,55 @@ def test_hopper_dequantizes_block_scaled_fp8_weights_exactly() -> None:
     assert restored.shape == reference.shape
     torch.testing.assert_close(restored, expected.view(256, 384), rtol=0, atol=0)
     torch.testing.assert_close(restored.float(), reference, rtol=0.07, atol=0.02)
+
+
+def test_converter_writes_the_block_layout_the_loader_dequantizes() -> None:
+    """The converter's writer and the loader's dequantizer must agree: a
+    quantized linear has to expand back to its source shape and stay within
+    E4M3 precision. CPU-only."""
+    torch.manual_seed(0)
+    reference = torch.randn(256, 384, dtype=torch.float32)
+
+    weight, scales = h3_fp8_converter._blockwise_fp8(reference)
+    restored = h3_fp8._dequantize_block_fp8_weight(weight, scales, (128, 128), torch.bfloat16)
+
+    assert weight.dtype == torch.float8_e4m3fn
+    assert scales.shape == (2, 3)
+    assert restored.shape == reference.shape
+    torch.testing.assert_close(restored.float(), reference, rtol=0.07, atol=0.02)
+
+
+def test_converter_rejects_non_divisible_linears() -> None:
+    """The loader rejects weights whose dimensions are not multiples of 128, so
+    the converter must fail at conversion time instead of writing a shard the
+    loader cannot read."""
+    with pytest.raises(ValueError, match="128-divisible"):
+        h3_fp8_converter._blockwise_fp8(torch.randn(100, 384))
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="the sm_90 branch needs a CUDA tensor")
+def test_hopper_apply_dequantizes_instead_of_calling_flashinfer(monkeypatch) -> None:
+    """On sm_90 the linear must expand its block-scaled weight and run a plain
+    matmul; the Blackwell FlashInfer GEMM must not be reached."""
+    if torch.cuda.get_device_capability()[0] < 9:
+        pytest.skip("the sm_90 branch needs an fp8-capable CUDA tensor")
+    method = MiniMaxH3SerializedFP8LinearMethod((128, 128))
+    layer = torch.nn.Module()
+    layer.weight = torch.nn.Parameter(torch.zeros(128, 128, dtype=torch.float8_e4m3fn, device="cuda"),
+                                      requires_grad=False)
+    layer.weight_scale_inv = torch.nn.Parameter(torch.ones(1, 1, dtype=torch.float32, device="cuda"),
+                                                requires_grad=False)
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device: (9, 0))
+
+    def flashinfer_must_not_run(*args, **kwargs):
+        raise AssertionError("the sm_90 path must not call the FlashInfer groupwise GEMM")
+
+    monkeypatch.setattr(h3_fp8, "_flashinfer_gemm_w8a8_block_fp8_linear_with_fallback", flashinfer_must_not_run)
+
+    output = method.apply(layer, torch.randn(4, 128, dtype=torch.bfloat16, device="cuda"))
+
+    assert output.shape == (4, 128)
+    assert output.dtype == torch.bfloat16
 
 
 def test_loader_detects_and_capability_gates_checkpoint_metadata(tmp_path) -> None:
