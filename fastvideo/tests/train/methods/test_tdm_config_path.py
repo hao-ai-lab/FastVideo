@@ -65,6 +65,14 @@ def test_wan_tdm_example_builds_method_with_pipeline_scheduler_shift(monkeypatch
     assert training_config.pipeline_config.dmd_sample_type == "ode"
     assert method.method_config["tdm_denoising_steps"] == [1000, 750, 500, 250]
     assert method._rollout_sample_type == "ode"
+    assert method._use_randmid is False
+    assert method._max_grad_norm == 1.0
+    assert method._cfg_uncond == {
+        "text": "negative_prompt",
+        "on_missing": "error",
+    }
+    assert method.student._requires_negative_conditioning is True
+    assert method.manages_optimization() is True
     assert method.student.noise_scheduler.shift == 8.0
     assert method.critic.noise_scheduler.shift == 8.0
 
@@ -89,13 +97,15 @@ def test_wan_tdm_overfit_example_uses_four_gpu_text_only_diagnostic() -> None:
     assert cfg.training.checkpoint.training_state_checkpointing_steps == 25
     assert cfg.training.tracker.trackers == ["jsonl"]
     assert cfg.method["generator_update_interval"] == 1
-    assert cfg.method["noise_interval_mode"] == "next_step"
+    assert cfg.method["noise_interval_mode"] == "separate"
     assert cfg.method["use_randmid"] is False
+    assert cfg.method["max_grad_norm"] == 1.0
     assert cfg.method["cfg_uncond"] == {
-        "text": "zero",
-        "on_missing": "ignore",
+        "text": "negative_prompt",
+        "on_missing": "error",
     }
     assert cfg.callbacks["validation"]["every_steps"] == 0
+    assert "grad_clip" not in cfg.callbacks
     assert "ema" not in cfg.callbacks
 
 
