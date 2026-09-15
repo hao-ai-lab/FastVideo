@@ -207,10 +207,19 @@ The common metrics are:
 | `perf/attention_density` | Effective self-attention pairs divided by dense attention pairs |
 | `perf/estimated_tflops_per_gpu` | Estimated useful model FLOP/s per GPU |
 | `perf/estimated_mfu` | Estimated useful FLOP/s divided by the dense BF16 peak (ratio, not percent) |
-| `perf/role/<role>/*` | Forward count, grad-carrying forward count, and estimated TFLOP/s for one role |
+| `perf/peak_tflops_per_gpu` | Dense BF16 peak used for the MFU ratio (configured or inferred) |
+| `perf/role/<role>/*` | Forward count, grad-carrying forward count, causal chunks, and estimated TFLOP/s for one role |
 
 For DMD2, combine these metrics with the existing `update_student` metric to
 separate the expensive generator-update steps from critic-only steps.
+
+`perf/samples_per_sec` uses the configured `train_batch_size`, gradient
+accumulation, and data-parallel replica count. Methods that manage their own
+optimization (for example DiffusionNFT, whose outer step consumes
+`num_batches_per_epoch` dataloader batches) report the throughput of a single
+batch in the denominator, so use the method's own sample counter
+(`nft/num_sampled`) for those runs. The FLOP-derived metrics still aggregate
+every forward the method performs.
 
 MFU is an analytic Transformer-core estimate. Each no-grad forward contributes
 `1F`; a forward whose result carries autograd contributes `3F` (forward plus an
@@ -218,9 +227,17 @@ approximately `2F` backward). Activation-checkpoint recomputation is excluded,
 as expected for model FLOPs utilization. Wan VSA uses the kernel's clamped
 tile-top-k density and includes its gate projection and pooled-attention
 overhead. Causal Wan uses the configured chunk size, local window, and actual
-streaming cache position. Embedding, normalization, optimizer, communication,
-MatrixGame action modules, and other non-core work are not included, so MFU is
-an estimate rather than a hardware-profiler measurement.
+streaming cache position; MatrixGame2's 15-frame compatibility window is not
+modeled, so its attention density is an upper bound. Embedding, normalization,
+optimizer, communication, MatrixGame action modules, and other non-core work
+are not included, so MFU is an estimate rather than a hardware-profiler
+measurement.
+
+`perf/estimated_tflops_per_gpu` and `perf/estimated_mfu` aggregate every role
+(student, teacher, critic, EMA) that ran during the step, so they are not
+directly comparable to a single-model MFU number. Replica scaling assumes
+`world_size = data_parallel x sp_size`; `tp_size > 1` is not modeled and would
+inflate the per-GPU estimates.
 
 Forward counts and wall-clock throughput work for every modular model. The
 FLOP-derived metrics currently require a Wan-style architecture exposing

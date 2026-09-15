@@ -120,9 +120,9 @@ class Trainer:
 
         performance_enabled = bool(tc.performance.enabled)
         peak_tflops = tc.performance.peak_tflops_per_gpu
-        if peak_tflops is None and torch.cuda.is_available():
-            peak_tflops = infer_peak_bf16_tflops(torch.cuda.get_device_name(torch.cuda.current_device()), )
         if performance_enabled:
+            if peak_tflops is None and torch.cuda.is_available():
+                peak_tflops = infer_peak_bf16_tflops(torch.cuda.get_device_name(torch.cuda.current_device()))
             self.performance_monitor.attach(getattr(method, "_role_models", {}), )
 
         method.set_tracker(self.tracker)
@@ -153,6 +153,11 @@ class Trainer:
         # have advanced the RNG as a side-effect.
         if (checkpoint_manager is not None and resume_from_checkpoint):
             checkpoint_manager.load_rng_snapshot(resume_from_checkpoint, )
+        # Pre-loop forwards (teacher cache generation, step-0 validation) are
+        # not part of a training step; drop them so a long cache build cannot
+        # accumulate per-forward records.
+        if performance_enabled:
+            self.performance_monitor.reset()
         progress = tqdm(
             range(start_step + 1, max_steps + 1),
             initial=start_step,

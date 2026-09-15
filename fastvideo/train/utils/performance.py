@@ -17,6 +17,7 @@ from typing import Any
 
 import torch
 
+from fastvideo.attention.backends.video_sparse_attn import compute_topk
 from fastvideo.forward_context import get_forward_context
 
 _FLOPS_PER_TFLOP = 1.0e12
@@ -32,7 +33,6 @@ class _ForwardWork:
     query_tokens: int
     attention_pairs: float
     dense_attention_pairs: float
-    backward_expected: bool
 
 
 def infer_peak_bf16_tflops(device_name: str) -> float | None:
@@ -98,14 +98,12 @@ def _teacher_forcing_frame_pairs(
     num_frames: int,
     frames_per_block: int,
 ) -> int:
-    """Pairs for causal Wan's concatenated ``[clean | noisy]`` mask."""
-    total = 0
-    block = max(1, frames_per_block)
-    for start in range(0, num_frames, block):
-        end = min(start + block, num_frames)
-        # Clean and noisy query blocks each attend ``end`` frames.
-        total += 2 * (end - start) * end
-    return total
+    """Pairs for causal Wan's concatenated ``[clean | noisy]`` mask.
+
+    Clean and noisy query blocks each attend every frame, which is the same
+    count as a full block-causal mask with no local window.
+    """
+    return 2 * _blockwise_causal_frame_pairs(num_frames, frames_per_block, -1)
 
 
 def _vsa_attention_pairs(
@@ -114,18 +112,15 @@ def _vsa_attention_pairs(
 ) -> tuple[float, int]:
     """Return nominal sparse token pairs and tile count.
 
-    Selected key tiles are data-dependent. Their mean valid size gives the
-    expected token-pair count while retaining the kernel's ceil-and-clamp top-k
-    behavior.
+    The kernel keeps a clamped top-k of key tiles per query tile; the nominal
+    pair count scales the dense count by that tile fraction.
     """
     block_sizes = getattr(metadata, "variable_block_sizes", None)
-    if block_sizes is None:
-        return float(seq_len * seq_len), 0
-    num_blocks = int(block_sizes.numel())
+    num_blocks = int(block_sizes.numel()) if block_sizes is not None else 0
     if num_blocks <= 0:
         return float(seq_len * seq_len), 0
     sparsity = float(getattr(metadata, "VSA_sparsity", 0.0))
-    topk = max(1, min(math.ceil((1.0 - sparsity) * num_blocks), num_blocks))
+    topk = compute_topk(sparsity, num_blocks)
     return float(seq_len * seq_len) * topk / num_blocks, num_blocks
 
 
@@ -191,7 +186,13 @@ def estimate_transformer_forward(
         kv_cache = kwargs.get("kv_cache")
         if kv_cache is not None:
             current_start = int(kwargs.get("current_start", 0))
-            max_frames = local_attn_size if local_attn_size >= 0 else 21
+            if local_attn_size >= 0:
+                max_frames = local_attn_size
+            else:
+                # Causal Wan keeps GLOBAL_ATTN_COMPAT_MAX_LATENT_FRAMES (21)
+                # frames of KV when local_attn_size is unset. MatrixGame2's
+                # 15-frame compatibility window is not modeled here.
+                max_frames = 21
             key_tokens = min(current_start + seq_len, max_frames * spatial_tokens)
             attention_pairs = float(seq_len * key_tokens)
             dense_pairs = float(seq_len * (current_start + seq_len))
@@ -238,7 +239,6 @@ def estimate_transformer_forward(
         query_tokens=b * query_tokens,
         attention_pairs=b * attention_pairs,
         dense_attention_pairs=b * dense_pairs,
-        backward_expected=backward_expected,
     )
 
 
@@ -290,14 +290,18 @@ class TrainingPerformanceMonitor:
                     metadata = get_forward_context().attn_metadata
                 except AssertionError:
                     metadata = None
-                work = estimate_transformer_forward(
-                    module,
-                    kwargs,
-                    output,
-                    role=role_name,
-                    attention_metadata=metadata,
-                    cross_attention_cached=(cache_state.pop() if cache_state else False),
-                )
+                try:
+                    work = estimate_transformer_forward(
+                        module,
+                        kwargs,
+                        output,
+                        role=role_name,
+                        attention_metadata=metadata,
+                        cross_attention_cached=(cache_state.pop() if cache_state else False),
+                    )
+                except Exception:
+                    # Metrics must never abort a training run.
+                    work = None
                 if work is not None:
                     self._work.append(work)
 
