@@ -213,3 +213,24 @@ def test_checkpoint_shifts_must_be_positive_and_finite(tmp_path, module_name, sh
     pipeline.modules[module_name] = SimpleNamespace(shift=shift)
     with pytest.raises(ValueError, match="positive finite shift"):
         pipeline.initialize_pipeline(SimpleNamespace(pipeline_config=MiniMaxH3PipelineConfig()))
+
+
+def test_sidecar_without_shift_fields_uses_the_checkpoint_schedulers(tmp_path):
+    """The published four-step checkpoints predate the shift fields in fasth3_inference_contract_v1
+    (they carry only the ladder). Absent keys must fall back to scheduler/*_config.json; a present but
+    conflicting key is still an error."""
+    four_step = {**CONTRACT, "dmd_denoising_steps": [999, 749, 500, 250], "num_inference_steps": 5,
+                 "transformer_forwards": 4}
+    four_step.pop("video_scheduler_shift")
+    four_step.pop("audio_scheduler_shift")
+    (tmp_path / "fastvideo_inference.json").write_text(json.dumps(four_step))
+    pipeline = _pipeline(tmp_path, video_shift=12.0)
+    config = MiniMaxH3PipelineConfig()
+    pipeline.initialize_pipeline(SimpleNamespace(pipeline_config=config))
+    assert config.dmd_denoising_steps == [999, 749, 500, 250]
+    assert pipeline.modules["scheduler"].shift == 12.0
+    assert pipeline.modules["audio_scheduler"].shift == 3.0
+    # Explicit disagreement is still rejected.
+    (tmp_path / "fastvideo_inference.json").write_text(json.dumps({**four_step, "video_scheduler_shift": 10.0}))
+    with pytest.raises(ValueError, match="disagrees"):
+        _pipeline(tmp_path, video_shift=12.0).initialize_pipeline(SimpleNamespace(pipeline_config=MiniMaxH3PipelineConfig()))

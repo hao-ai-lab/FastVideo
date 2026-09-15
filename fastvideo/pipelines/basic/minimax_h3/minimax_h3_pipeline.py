@@ -180,7 +180,11 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
             raise ValueError(
                 "FastH3 checkpoint DMD rung count must match transformer_forwards and num_inference_steps - 1.")
         for name, key in (("scheduler", "video_scheduler_shift"), ("audio_scheduler", "audio_scheduler_shift")):
-            declared = contract.get(key)
+            if key not in contract:
+                # Earlier exports (the four-step Preview v1 checkpoints) carry only the ladder; the
+                # scheduler configs are the sole source of the shifts for them.
+                continue
+            declared = contract[key]
             if (isinstance(declared, bool) or not isinstance(declared, int | float) or not math.isfinite(declared)
                     or declared <= 0 or float(self.get_module(name).shift) != float(declared)):
                 raise ValueError(f"FastH3 checkpoint {key}={declared!r} disagrees with {name}/scheduler_config.json.")
@@ -189,7 +193,9 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
             raise ValueError("Explicit DMD schedule disagrees with the checkpoint's trained DMD rungs.")
         config.dmd_denoising_steps = list(steps)
         logger.info("FastH3 checkpoint schedule: %d transformer forwards, DMD rungs=%s, video/audio shifts=%s/%s",
-                    len(steps), steps, contract["video_scheduler_shift"], contract["audio_scheduler_shift"])
+                    len(steps), steps,
+                    self.get_module("scheduler").shift,
+                    self.get_module("audio_scheduler").shift)
 
     def _defer_denoise_modules(self, fastvideo_args: FastVideoArgs) -> bool:
         if not fastvideo_args.inference_mode or bool(getattr(fastvideo_args, "training_mode", False)):
