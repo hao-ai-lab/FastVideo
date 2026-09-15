@@ -207,6 +207,7 @@ class Trainer:
                         ))
 
             if not method_manages_optimization:
+                method.synchronize_gradients(step)
                 self.callbacks.on_before_optimizer_step(
                     method,
                     iteration=step,
