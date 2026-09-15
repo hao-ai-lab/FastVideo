@@ -47,7 +47,14 @@ def test_tdm_wan_lora_config_resolves_without_loading_weights() -> None:
     assert cfg.method["tdm_denoising_steps"] == [1000, 750, 500, 250]
     assert cfg.method["noise_interval_mode"] == "separate"
     assert cfg.method["student_sample_type"] == "ode"
+    assert cfg.method["use_randmid"] is False
+    assert cfg.method["max_grad_norm"] == 1.0
+    assert cfg.method["cfg_uncond"] == {
+        "text": "negative_prompt",
+        "on_missing": "error",
+    }
     assert "enable_gradient_in_rollout" not in cfg.method
+    assert "grad_clip" not in cfg.callbacks
     assert cfg.training.pipeline_config is not None
     assert getattr(cfg.training.pipeline_config, "flow_shift") == 8
     assert getattr(cfg.training.pipeline_config, "dmd_sample_type") == "ode"

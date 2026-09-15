@@ -64,7 +64,7 @@ method:
   # target bounds are intermediate <= target < source for "separate" and
   # intermediate <= target < terminal for "to_terminal".
   noise_interval_mode: separate
-  use_randmid: true
+  use_randmid: false
   snr_clip: 5.0
   importance_weight_clip: 10.0
 
@@ -75,11 +75,15 @@ method:
   normalize_generator_delta: true
   use_huber: false
   huber_c: 0.001
+  max_grad_norm: 1.0
 
   # Critic optimizer.
   fake_score_learning_rate: 8.0e-6
   fake_score_betas: [0.0, 0.999]
   fake_score_lr_scheduler: constant
+  cfg_uncond:
+    text: negative_prompt
+    on_missing: error
 
 training:
   distributed:
@@ -125,8 +129,6 @@ training:
     enable_gradient_checkpointing_type: full
 
 callbacks:
-  grad_clip:
-    max_grad_norm: 1.0
   validation:
     pipeline_target: fastvideo.pipelines.basic.wan.wan_dmd_pipeline.WanDMDPipeline
     offload_training_state: true

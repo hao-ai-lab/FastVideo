@@ -380,6 +380,11 @@ method:
   real_score_guidance_scale: 4.5
   student_sample_type: sde
   noise_interval_mode: separate
+  use_randmid: false
+  max_grad_norm: 1.0
+  cfg_uncond:
+    text: negative_prompt
+    on_missing: error
 
   fake_score_learning_rate: 8.0e-6
   fake_score_betas: [0.0, 0.999]
@@ -392,36 +397,37 @@ method:
 | `tdm_denoising_steps` | *(required)* | Few-step student trajectory schedule; mapped sigmas must start at scheduler terminal noise and strictly decrease |
 | `student_sample_type` | `"sde"` | `"sde"` re-noises each predicted x0; `"ode"` carries effective flow noise |
 | `noise_interval_mode` | `"separate"` | Fake-score noising target selection mode; see note below |
-| `use_randmid` | `true` | Randomly sample the intermediate sigma between the source point and the next trajectory sigma; source points are randomly sampled except in deterministic `next_step` mode |
+| `use_randmid` | `false` | Randomly sample the intermediate sigma between the source point and the next trajectory sigma when enabled |
 | `snr_clip` | `5.0` | Clip the flow-SNR fake-score weight |
 | `importance_weight_clip` | `10.0` | Clip mixed-noise importance weights |
 | `normalize_generator_delta` | `true` | Divide each sample's generator loss by its teacher-guidance magnitude |
 | `use_huber` | `false` | Use the reference pseudo-Huber expression for the generator loss; fake-score training remains MSE |
 | `huber_c` | `0.001` | Huber delta when `use_huber=true` |
+| `max_grad_norm` | `1.0` | Clip student and critic gradients inside TDM's ordered optimizer phases; set to zero to disable |
 
 See `examples/train/configs/distribution_matching/wan/tdm_t2v_lora.yaml` for a
 complete Wan LoRA config. Treat this as a Wan adaptation of TDM, not exact
 CogVideoX reference parity. TDM follows the reference implementation's rollout
 gradient behavior: generated rollout history is not backpropagated through, and
-only the student prediction used by the generator loss carries gradients.
+only the student prediction used by the generator loss carries gradients. Each
+training step first backpropagates and applies the fake-score critic update,
+then generates a fresh trajectory and recomputes the generator loss against the
+updated critic before applying the student update.
 
 Fake-score training samples a source point from the generated trajectory. In
-`separate` and `to_terminal` modes, source points are sampled randomly per
-batch element. In `next_step` mode, source points use deterministic
-rank-stratified trajectory indices and cycle by training iteration, so small
-rank/batch configurations eventually cover adjacent transitions without random
-gaps. With `use_randmid: true`, TDM then samples an
+`separate` and `to_terminal` modes, source points are sampled randomly and
+independently per batch element. With `use_randmid: true`, TDM then samples an
 intermediate sigma in
 `[sigma_next, sigma_source)`; otherwise the intermediate sigma is
 `sigma_next`. For `noise_interval_mode: separate`, the target is sampled in
 `[sigma_intermediate, sigma_source)`. For `noise_interval_mode: to_terminal`,
 the target is sampled in `[sigma_intermediate, sigma_terminal)`, so it may be
 any scheduler point in that interval. The exact terminal `sigma=1.0` endpoint
-is excluded because flow-SNR weighting gives it zero fake-score weight. For
-`noise_interval_mode: next_step`, set `use_randmid: false`; each source point
-uses the adjacent trajectory boundary as its target, and the final clean
-transition uses the lowest positive scheduler sigma because training schedulers
-do not expose an exact `sigma=0` model timestep.
+is excluded because flow-SNR weighting gives it zero fake-score weight.
+
+For classifier-free teacher guidance, the shipped Wan recipes encode the
+model's negative prompt and require it to be present. Zero text embeddings are
+not an equivalent unconditional condition.
 
 ### Self-Forcing (Causal DMD)
 
