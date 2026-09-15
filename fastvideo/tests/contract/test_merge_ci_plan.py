@@ -50,7 +50,8 @@ def test_model_family_change_selects_focused_golden_and_ssim(path, goldens):
     assert plan.encoded_lanes() == ",golden-gate,ssim,"
     assert plan.encoded_golden_tests() == goldens
     assert plan.encoded_ssim_tests() == (
-        "test_causal_similarity.py,test_wan_i2v_similarity.py,test_wan_t2v_similarity.py")
+        "test_causal_similarity.py,test_wan_i2v_similarity.py,test_wan_t2v_similarity.py,"
+        "test_wan_ti2v_similarity.py")
 
 
 @pytest.mark.parametrize("path", [

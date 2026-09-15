@@ -217,6 +217,7 @@ FAMILY_COVERAGE = (
             "test_causal_similarity.py",
             "test_wan_i2v_similarity.py",
             "test_wan_t2v_similarity.py",
+            "test_wan_ti2v_similarity.py",
         ),
     ),
     FamilyCoverage(
