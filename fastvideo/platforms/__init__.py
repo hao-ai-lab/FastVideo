@@ -36,8 +36,6 @@ def cuda_platform_plugin() -> str | None:
             raise e
 
         # CUDA is supported on Jetson, but NVML may not be.
-        import os
-
         def cuda_is_jetson() -> bool:
             return os.path.isfile("/etc/nv_tegra_release") \
                 or os.path.exists("/sys/class/tegra-firmware")
@@ -92,10 +90,11 @@ def cpu_platform_plugin() -> str | None:
 
 
 def _rocm_device_node_accessible() -> bool:
-    """True when this process can open the AMD kernel driver's compute device node.
+    """True when this process has read/write permission on the AMD compute device node.
 
     Looking at the node rather than querying the GPU runtime keeps platform
-    detection from initializing ROCm when fastvideo is imported.
+    detection from initializing ROCm when fastvideo is imported. Permission
+    bits are not proof that an open() succeeds, so this stays a heuristic.
     """
     return os.access("/dev/kfd", os.R_OK | os.W_OK)
 
@@ -118,8 +117,9 @@ def rocm_platform_plugin() -> str | None:
     if not is_rocm:
         # Images built on rocm/pytorch ship a ROCm (HIP) torch but no amdsmi
         # Python package, and the PyPI amdsmi wheel cannot load its library
-        # there, so the check above always fails and the CPU platform wins.
-        # A HIP torch build plus the AMD compute device node is a ROCm GPU.
+        # there, so the amdsmi check above finds no device and the CPU
+        # platform wins. A HIP torch build plus the AMD compute device node
+        # is a ROCm GPU.
         try:
             import torch
             hip_version = getattr(torch.version, "hip", None)
