@@ -5,11 +5,13 @@ hide:
 
 # MiniMax H3 recipes
 
-For the opt-in shift-10, eight-forward T2AV checkpoint, see
+The **FastH3 8-Step V2** recipe below runs the eight-forward
+[`FastVideo/FastVideo-FastH3-8-Step-V2`](https://huggingface.co/FastVideo/FastVideo-FastH3-8-Step-V2)
+checkpoint; its schedule contract is documented in
 [FastH3 distilled checkpoint schedules](../inference/fasth3-distilled.md).
-The default four-forward preview recipe below is unchanged.
+The four-forward FastH3 Preview recipes are unchanged.
 
-<div class="cookbook-shell cookbook-family-page" data-cookbook data-family="minimax_h3" data-default-recipe="fasth3-preview-cuda" data-recipes="../../assets/cookbook-recipes.json?v=8">
+<div class="cookbook-shell cookbook-family-page" data-cookbook data-family="minimax_h3" data-default-recipe="fasth3-preview-cuda" data-recipes="../../assets/cookbook-recipes.json?v=9">
   <header class="cookbook-family-header">
     <a class="cookbook-back-link" href="../"><span aria-hidden="true">←</span> All model families</a>
     <div class="cookbook-family-header__body">
