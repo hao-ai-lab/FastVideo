@@ -31,13 +31,13 @@ def no_kernel(monkeypatch):
 
 
 def test_rocm_routes_video_sparse_attention(kernel_stubs):
-    assert RocmPlatform.get_attn_backend_cls(AttentionBackendEnum.VIDEO_SPARSE_ATTN, 128,
-                                             torch.bfloat16).endswith("VideoSparseAttentionBackend")
+    cls_str = RocmPlatform.get_attn_backend_cls(AttentionBackendEnum.VIDEO_SPARSE_ATTN, 128, torch.bfloat16)
+    assert cls_str == "fastvideo.attention.backends.video_sparse_attn.VideoSparseAttentionBackend"
 
 
 def test_rocm_routes_h3_video_sparse_attention(kernel_stubs):
-    assert RocmPlatform.get_attn_backend_cls(AttentionBackendEnum.VIDEO_SPARSE_ATTN_H3, 128,
-                                             torch.bfloat16).endswith("MiniMaxH3VSABackend")
+    cls_str = RocmPlatform.get_attn_backend_cls(AttentionBackendEnum.VIDEO_SPARSE_ATTN_H3, 128, torch.bfloat16)
+    assert cls_str == "fastvideo.attention.backends.video_sparse_attn_h3.MiniMaxH3VSABackend"
 
 
 @pytest.mark.parametrize("backend", [AttentionBackendEnum.VIDEO_SPARSE_ATTN, AttentionBackendEnum.VIDEO_SPARSE_ATTN_H3])
@@ -58,5 +58,5 @@ def test_rocm_rejects_other_backends_with_value_error():
 
 
 def test_rocm_still_resolves_sdpa():
-    assert RocmPlatform.get_attn_backend_cls(AttentionBackendEnum.TORCH_SDPA, 128,
-                                             torch.bfloat16).endswith("SDPABackend")
+    cls_str = RocmPlatform.get_attn_backend_cls(AttentionBackendEnum.TORCH_SDPA, 128, torch.bfloat16)
+    assert cls_str == "fastvideo.attention.backends.sdpa.SDPABackend"
