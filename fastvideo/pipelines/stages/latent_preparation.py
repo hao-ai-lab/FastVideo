@@ -801,15 +801,16 @@ class Cosmos25DFDV2WLatentPreparationStage(PipelineStage):
         if hasattr(encoded, "latent_dist"):
             encoded = encoded.latent_dist
         if hasattr(encoded, "sample"):
+            # FastGen builds this condition deterministically (``mode="argmax"``);
+            # ``Cosmos25WanVAE`` therefore returns the posterior mean from ``sample``.
             generators = batch.generator if isinstance(batch.generator, list) else None
             samples = []
             for index in range(batch_size):
                 generator = generators[index] if generators and index < len(generators) else None
-                sample = encoded.sample(generator) if batch_size == 1 else self.vae.encode(image[index:index +
-                                                                                                 1]).sample(generator)
-                samples.append(sample if batch_size == 1 else sample)
                 if batch_size == 1:
-                    break
+                    samples.append(encoded.sample(generator))
+                else:
+                    samples.append(self.vae.encode(image[index:index + 1]).sample(generator))
             conditioning_latents = torch.cat(samples, dim=0)
         elif hasattr(encoded, "latents"):
             conditioning_latents = encoded.latents

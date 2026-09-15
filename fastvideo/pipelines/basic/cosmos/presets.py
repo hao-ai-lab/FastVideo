@@ -52,6 +52,11 @@ COSMOS_PREDICT2_2B = InferencePreset(
 # Cosmos Predict2.5
 # -------------------------------------------------------------------
 
+# The DFD checkpoint is a fixed four-step, guidance-free student: the DFD
+# input-validation stage rejects any other step count or guidance scale, so the
+# preset must not advertise those overrides.
+_DFD_DENOISE_STAGE = PresetStageSpec(name="denoise", kind="denoising", description="Fixed four-step DFD denoising")
+
 _COSMOS25_NEGATIVE_PROMPT = ("The video captures a series of frames showing ugly scenes, "
                              "static with no motion, motion blur, over-saturation, shaky "
                              "footage, low resolution, grainy texture, pixelated images, "
@@ -87,7 +92,7 @@ COSMOS25_DFD_V2W_2B = InferencePreset(
     model_family="cosmos25",
     description="Cosmos Predict2.5 2B DFD four-step Video2World",
     workload_type="i2v",
-    stage_schemas=(_DENOISE_STAGE, ),
+    stage_schemas=(_DFD_DENOISE_STAGE, ),
     defaults={
         "seed": 42,
         "height": 704,
