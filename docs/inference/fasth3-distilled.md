@@ -8,25 +8,28 @@ it does not change either default or enable NVFP4.
 
 ## Eight-forward T2AV recipe
 
-Use the full exported model directory, not just its `transformer` subdirectory.
-For a checkpoint trained with video/audio shifts 10/3, VSA sparsity 0.8,
-64-token tiles, and the DMD rungs
-`[999, 874, 749, 624, 500, 375, 250, 125]`:
+The public checkpoint is
+[`FastVideo/FastVideo-FastH3-8-Step-V2`](https://huggingface.co/FastVideo/FastVideo-FastH3-8-Step-V2)
+(MiniMax H3 Community License), trained with video/audio shifts 10/3, VSA
+sparsity 0.8, 64-token tiles, and the DMD rungs
+`[999, 874, 749, 624, 500, 375, 250, 125]`. `basic_fasth3_8step.py` pins that
+checkpoint and recipe as defaults; it shares the preview example's CLI, so every
+other flag works unchanged:
 
 ```bash
-python examples/inference/basic/basic_fasth3.py \
-  --model-path /path/to/FastH3-8step \
+python examples/inference/basic/basic_fasth3_8step.py \
   --prompt 'A slow cinematic drone shot glides over a coastal town; gulls call over the harbor.' \
-  --steps 9 --num-gpus 4 \
-  --vsa-sparsity 0.8 --vsa-tile-size 64 --vsa-kernel sm100a \
+  --num-gpus 4 --vsa-kernel sm100a \
   --profile strict --no-inference-torch-compile --no-compile-vae \
   --height 768 --width 1344 --num-frames 124 \
   --output outputs/fasth3-8step
 ```
 
-`--steps` is the number of sigma-grid points, including the terminal zero.
-Nine points run exactly eight transformer forwards. `--steps 8` is not the
-same recipe. The rungs are unshifted noise levels on the 1000-step training
+Pass `--model-path` to use a local snapshot of the full export (not just its
+`transformer` subdirectory). `--steps` is the number of sigma-grid points,
+including the terminal zero; nine points run exactly eight transformer
+forwards, and the script rejects any other value because the checkpoint's
+ladder has eight rungs. The rungs are unshifted noise levels on the 1000-step training
 clock; each scheduler applies its own shift once, and the transformer receives
 H3 clean-time values (`1 - sigma`). A uniform nine-point grid is not a substitute
 for those rungs.
@@ -67,6 +70,6 @@ For exports without this sidecar, an explicit ladder is supported via
 still come from the checkpoint scheduler configs. Keep generic `flow_shift`
 unset: H3 has separate video and audio shifts, not one shared shift.
 
-This documents execution support, not checkpoint publication or quality approval.
-Release requires verification of the final checkpoint revision, video/audio
-comparison against the baseline, and an explicit release decision.
+This documents execution support for the published checkpoint. It is not a
+quality claim: compare video/audio output against base MiniMax-H3 on your own
+prompts before adopting it.
