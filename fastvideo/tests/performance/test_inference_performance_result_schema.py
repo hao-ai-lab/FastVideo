@@ -107,9 +107,11 @@ def test_build_result_record_emits_v2_wan_shape(monkeypatch):
         },
         device_name="NVIDIA L40S",
         timestamp="2026-07-05T00:00:00+00:00",
+        worker_log_path="/tmp/worker_logs/worker_wan-t2v-1.3b-2gpu.log",
     )
 
     assert record["result_schema_version"] == perf_test.RESULT_SCHEMA_VERSION
+    assert record["worker_log_path"] == "/tmp/worker_logs/worker_wan-t2v-1.3b-2gpu.log"
     assert record["benchmark_id"] == "wan-t2v-1.3b-2gpu"
     assert record["workload_id"] == "wan-t2v"
     assert record["variant_id"] == "1.3b-sp2"
@@ -134,6 +136,28 @@ def test_build_result_record_emits_v2_wan_shape(monkeypatch):
     assert record["text_encoder_time_s"] == 1.1
     assert record["dit_time_s"] == 8.2
     assert record["vae_decode_time_s"] == 3.2
+
+
+def test_build_result_record_defaults_worker_log_path_to_none(monkeypatch):
+    monkeypatch.setenv("PERF_RUN_SOURCE", "scheduled_main")
+    record = perf_test._build_result_record(
+        cfg={"benchmark_id": "wan-t2v-1.3b-2gpu"},
+        model_info={},
+        init_kwargs={},
+        gen_kwargs={},
+        num_warmup=1,
+        num_measure=1,
+        thresholds={},
+        times=[10.0],
+        peak_memories=[10000.0],
+        all_component_times=[],
+        prompt="A cinematic video.",
+        runtime_identity={},
+        device_name="NVIDIA L40S",
+        timestamp="2026-07-05T00:00:00+00:00",
+    )
+
+    assert record["worker_log_path"] is None
 
 
 def test_validate_run_counts_rejects_zero_measurement_runs():
