@@ -1,0 +1,1 @@
+{"schema_version":"minimax_h3_ref2va_raw_v1","id":"synthetic_geometric_train","target":{"video":"targets/geometric_motion.mp4"},"caption":"A blue circle moves across a colorful geometric grid while synthetic tones sweep gently in pitch.","references":[{"type":"image","image":"refs/images/geometric_reference.png"},{"type":"audio","audio":"refs/audios/synthetic_tones.wav"}]}
