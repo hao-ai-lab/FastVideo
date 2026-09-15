@@ -115,9 +115,10 @@ def video_sparse_attn(
 
     scores = torch.matmul(q_c, k_c.transpose(-2, -1)) / (dim**0.5)
     attn = torch.softmax(scores, dim=-1)
+    # Kept at block resolution, [B, H, q_num_blocks, D]: the coarse result is
+    # constant within a block, so the combine broadcasts it over the intra-block
+    # axis instead of materializing it across the full sequence.
     out_c = torch.matmul(attn, v_c)
-    out_c = out_c.view(batch, heads, q_num_blocks, 1, dim)
-    out_c = out_c.repeat(1, 1, 1, block_elements, 1).view(batch, heads, q_seq_len, dim)
 
     # Sparse branch (fused Triton topk mask)
     mask = fused_topk_mask(scores, topk)
@@ -128,9 +129,74 @@ def video_sparse_attn(
     else:
         out_s = block_sparse_attn(q, k, v, mask, variable_block_sizes)[0]
 
-    if compress_attn_weight is not None:
-        return out_c * compress_attn_weight + out_s
-    return out_c + out_s
+    return _combine_coarse_sparse(out_c, out_s, compress_attn_weight, block_elements, seq_dim=2)
+
+
+def _combine_coarse_sparse(
+    out_c: torch.Tensor,
+    out_s: torch.Tensor,
+    compress_attn_weight: torch.Tensor | None,
+    block_elements: int,
+    seq_dim: int,
+) -> torch.Tensor:
+    """Combine the block-resolution coarse output with the sparse output.
+
+    ``out_s`` and the optional gate are full-sequence tensors whose sequence axis
+    is ``seq_dim`` (2 for [B, H, S, D], 1 for [B, S, H, D]); ``out_c`` has the
+    same layout with ``S // block_elements`` blocks on that axis. The coarse
+    result is constant within a block, so it broadcasts over the intra-block
+    axis of a view that splits the sequence axis into (blocks, block_elements)
+    and is never expanded to the full sequence. Splitting one dimension is
+    always expressible as a view, so no copy is made whatever the strides of
+    ``out_s`` or the gate (the BHSD caller may pass a transposed BSHD gate
+    directly).
+
+    Numerics: ungated this is a plain broadcast add and bit-exact with the
+    previous ``out_c.repeat(...) + out_s``. Gated, both branches use
+    ``addcmul``, which multiplies and accumulates in fp32 and rounds once, so
+    the result is identical whether or not it runs in place, and it is at least
+    as accurate as the old two-rounding ``out_c * w + out_s`` (see
+    ``tests/test_vsa_combine.py``).
+
+    In-place contract: when ``out_s`` does not require grad no autograd node has
+    saved it (every sparse kernel's node saves its output for backward, so a
+    grad-tracking ``out_s`` is never mutated), and within ``video_sparse_attn``
+    nothing else aliases it. The combine then accumulates into ``out_s`` and
+    returns it, allocating nothing. The in-place path is skipped when the result
+    dtype would be promoted, since in place would silently downcast. Callers
+    must run the combine in the mode that produced ``out_s``: an inference
+    tensor combined outside ``inference_mode`` raises in the in-place update.
+    That is not guarded here because ``Tensor.is_inference`` is not traceable by
+    ``torch.compile`` and would split the graph.
+    """
+    full = tuple(out_s.shape)
+    q_num_blocks, remainder = divmod(full[seq_dim], block_elements)
+    coarse = full[:seq_dim] + (q_num_blocks, ) + full[seq_dim + 1:]
+    if remainder != 0 or tuple(out_c.shape) != coarse:
+        raise ValueError(f"expected out_c {list(coarse)} for out_s {list(full)} with block_elements="
+                         f"{block_elements} on dim {seq_dim}, got out_c {list(out_c.shape)}")
+    if compress_attn_weight is not None and tuple(compress_attn_weight.shape) != full:
+        raise ValueError(f"compress_attn_weight must match out_s {list(full)}, got "
+                         f"{list(compress_attn_weight.shape)}")
+
+    blocked = full[:seq_dim] + (q_num_blocks, block_elements) + full[seq_dim + 1:]
+    out_c = out_c.unsqueeze(seq_dim + 1)
+    out_s_b = out_s.view(*blocked)
+    gate_b = None if compress_attn_weight is None else compress_attn_weight.view(*blocked)
+
+    same_dtype = out_c.dtype == out_s.dtype and (gate_b is None or gate_b.dtype == out_s.dtype)
+    if not out_s.requires_grad and same_dtype:
+        if gate_b is not None:
+            out_s_b.addcmul_(out_c, gate_b)
+        else:
+            out_s_b.add_(out_c)
+        return out_s
+
+    if gate_b is not None:
+        combined = torch.addcmul(out_s_b, out_c, gate_b)
+    else:
+        combined = out_s_b + out_c
+    return combined.view(*full)
 
 
 def video_sparse_attn_bshd(
@@ -191,19 +257,13 @@ def video_sparse_attn_bshd(
     scores = torch.matmul(q_ch, k_ch.transpose(-2, -1)) / (dim**0.5)
     attn = torch.softmax(scores, dim=-1)
     out_c_ch = torch.matmul(attn, v_ch)
-    out_c_blk = out_c_ch.permute(0, 2, 1, 3).contiguous()
+    out_c_blk = out_c_ch.permute(0, 2, 1, 3).contiguous()  # [B, q_num_blocks, H, D]
 
     # Sparse branch (fused Triton topk mask + CuTe BSHD).
     mask = fused_topk_mask(scores, topk)
     attention = block_sparse_attn_128_bshd if block_elements == 128 else block_sparse_attn_256_bshd
     out_s, _ = attention(q, k, v, mask, variable_block_sizes)
 
-    # Out-of-place: ``out_s`` is the tensor FA4's autograd node saved for its
-    # backward, so mutating it in place invalidates the graph.
-    out_view = out_s.view(batch, q_num_blocks, block_elements, heads, dim)
-    if compress_attn_weight is not None:
-        gate_view = compress_attn_weight.view(batch, q_num_blocks, block_elements, heads, dim)
-        out = out_view + out_c_blk.unsqueeze(2) * gate_view
-    else:
-        out = out_view + out_c_blk.unsqueeze(2)
-    return out.view(batch, q_seq_len, heads, dim)
+    # Shared combine: out of place when ``out_s`` is saved by the kernel's
+    # autograd node (grad), in place otherwise.
+    return _combine_coarse_sparse(out_c_blk, out_s, compress_attn_weight, block_elements, seq_dim=1)
