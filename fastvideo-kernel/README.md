@@ -145,8 +145,11 @@ python benchmarks/benchmark_attn_qat_train.py
 ```
 
 The benchmark reports both conventional attention FLOPs and the extra matrix
-multiplications executed by the QAT straight-through path. Override
-`--peak-tflops` when running on a GPU other than RTX 5090.
+multiplications executed by the QAT straight-through path. It resolves dense
+BF16 peak throughput for the full-GPU variants listed in
+`benchmarks/device_specs.py`. Unknown or partitioned devices still report
+timing and achieved TFLOPS, with MFU shown as `N/A`; pass a positive, finite
+`--peak-tflops` value to report MFU for those devices.
 
 The QAT kernel is entirely Triton and routes by architecture at runtime. SM100
 uses a large-tile forward and split 64x64 backward for the production
