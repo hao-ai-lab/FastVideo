@@ -383,6 +383,8 @@ def run(args: argparse.Namespace) -> list[float]:
             generation_time = getattr(result, "generation_time", None)
             if generation_time is not None:
                 print(f"Generation time: {float(generation_time):.3f}s")
+            # Worker-lifetime allocator high-water mark: torch never resets it
+            # between generations, so it includes model load and every prior run.
             peak_memory_mb = getattr(result, "peak_memory_mb", None)
             if peak_memory_mb is not None:
                 print(f"Peak memory: {float(peak_memory_mb):.1f} MB")
