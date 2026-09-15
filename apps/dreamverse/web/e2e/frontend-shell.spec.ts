@@ -17,25 +17,17 @@ test.describe('frontend shell', () => {
     });
   });
 
-  test('composer hydrates with curated preset cards', async ({ page }) => {
+  test('composer hydrates with creation studio controls', async ({ page }) => {
     await page.goto('/');
 
-    // The Continuation prompt textarea + Generate button render once
-    // the FE has hydrated against the public-FastVideo-backed
-    // dreamverse-server. Their presence proves the integration handshake
-    // (CORS, /curated-presets, /prompt-system-config) completed.
     const continuation = page.getByLabel('Continuation prompt');
     await expect(continuation).toBeVisible({ timeout: 30_000 });
 
     const generate = page.getByRole('button', { name: /^generate$/i });
     await expect(generate).toBeVisible({ timeout: 30_000 });
 
-    // Curated presets render as buttons; verify at least one is
-    // available — that's the only way the user can populate the
-    // Continuation textarea in the default composer.
-    const presetCard = page.getByRole('button', {
-      name: /LEGO Stormtroopers|Clay Stop-Motion|Boy & Dog|School Prank|Gamer Gets Banned|Small Town Oil Strike|Grandpa's Wing Costume/i,
-    }).first();
-    await expect(presetCard).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText('Direct scenes in seconds')).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole('button', { name: /FastLTX/i }).first()).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText('Describe your video or mention elements')).toBeVisible({ timeout: 30_000 });
   });
 });

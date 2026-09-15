@@ -1,10 +1,20 @@
 "use client";
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Download, Share2 } from "lucide-react";
 import DevtoolsShell from "@/components/devtools/DevtoolsShell";
 import MonitorPage from "@/components/MonitorPage";
 import ChatBar from "@/components/ChatBar";
+import CreationStudio from "@/components/creation/CreationStudio";
+import {
+	buildMentionOptions,
+	type AspectRatioId,
+	type CreationModeId,
+	type CreationModelId,
+	type ResolutionId,
+} from "@/lib/creationConfig";
+import { toGenerationMode } from "@/lib/generationMode";
+import type { SessionCreationConfig } from "@/components/creation/SessionCreationConfigPills";
 import SessionTimeoutModal from "@/components/SessionTimeoutModal";
 import Sidebar from "@/components/Sidebar";
 import Header from "@/components/Header";
@@ -76,98 +86,6 @@ interface BackendReadinessProbe {
 
 function yieldToEventLoop(): Promise<void> {
 	return new Promise((r) => setTimeout(r, 0));
-}
-
-const HERO_WAVE_LIGHT = ["#2A4A98", "#4878E5", "#6FA0F2", "#B0BCC8", "#E8D99E", "#D8C844", "#C2A620"];
-const HERO_WAVE_DARK = ["#143468", "#1E58B8", "#3892F0", "#80B8E8", "#B8D0EA", "#E2D498", "#DABB50"];
-const HERO_TEXT = "Direct scenes in seconds";
-
-function HeroTagline() {
-	const ref = useRef<HTMLHeadingElement>(null);
-
-	useEffect(() => {
-		const el = ref.current;
-		if (!el) return;
-
-		let rafId = 0;
-
-		function play() {
-			const chars = el!.querySelectorAll<HTMLSpanElement>("[data-char]");
-			if (!chars.length) return;
-			cancelAnimationFrame(rafId);
-
-			const isDark = document.documentElement.classList.contains("dark");
-			const colors = isDark ? HERO_WAVE_DARK : HERO_WAVE_LIGHT;
-			const waveLen = 10;
-			const total = chars.length + waveLen;
-			const duration = 1200;
-			const maxBlur = 3.5;
-			const start = performance.now();
-
-			function tick() {
-				const t = Math.min((performance.now() - start) / duration, 1);
-				const pos = t * total;
-				chars.forEach((ch, i) => {
-					const rel = pos - i;
-					if (rel >= 0 && rel < waveLen) {
-						const norm = rel / waveLen;
-						const ci = Math.floor(norm * colors.length);
-						ch.style.color = colors[Math.min(colors.length - 1, ci)];
-
-						let blur = 0;
-						if (norm < 0.25) {
-							blur = maxBlur * (1 - norm / 0.25);
-						} else if (norm > 0.75) {
-							blur = maxBlur * ((norm - 0.75) / 0.25);
-						}
-						ch.style.filter = blur > 0.1 ? `blur(${blur.toFixed(1)}px)` : "";
-					} else {
-						ch.style.color = "";
-						ch.style.filter = "";
-					}
-				});
-				if (t < 1) {
-					rafId = requestAnimationFrame(tick);
-				} else {
-					chars.forEach((ch) => {
-						ch.style.color = "";
-						ch.style.filter = "";
-					});
-				}
-			}
-
-			rafId = requestAnimationFrame(tick);
-		}
-
-		const initialDelay = setTimeout(play, 400);
-		const interval = setInterval(play, 5000);
-		return () => {
-			clearTimeout(initialDelay);
-			clearInterval(interval);
-			cancelAnimationFrame(rafId);
-		};
-	}, []);
-
-	return (
-		<h1 ref={ref} className="text-center text-3xl font-medium text-[#343537] dark:text-[#FAFAFB] sm:text-4xl">
-			{HERO_TEXT.split(" ").map((word, wi) => (
-				<Fragment key={wi}>
-					{wi > 0 && (
-						<span data-char className="transition-[color,filter] duration-150">
-							{" "}
-						</span>
-					)}
-					<span className="inline-flex">
-						{word.split("").map((char, ci) => (
-							<span key={ci} data-char className="inline-block transition-[color,filter] duration-150">
-								{char}
-							</span>
-						))}
-					</span>
-				</Fragment>
-			))}
-		</h1>
-	);
 }
 
 export default function Page() {
@@ -325,6 +243,21 @@ export default function Page() {
 	const pendingInitialPromptRef = useRef("");
 	const lastArchivedReplayKeyRef = useRef("");
 	const [sidebarOpen, setSidebarOpen] = useState(false);
+	const [creationModelId, setCreationModelId] = useState<CreationModelId>("fast-ltx23");
+	const [creationModeId, setCreationModeId] = useState<CreationModeId>("t2v");
+	const [creationAspectRatio, setCreationAspectRatio] = useState<AspectRatioId>("16:9");
+	const [creationResolution, setCreationResolution] = useState<ResolutionId>("720p");
+	const [creationDurationSec, setCreationDurationSec] = useState(5);
+	const [sessionCreationConfig, setSessionCreationConfig] = useState<SessionCreationConfig>({
+		modelId: "fast-ltx23",
+		modeId: "t2v",
+		aspectRatio: "16:9",
+		resolution: "720p",
+		durationSec: 5,
+	});
+	const [referencePreviewUrl, setReferencePreviewUrl] = useState<string | null>(null);
+	const [firstFramePreviewUrl, setFirstFramePreviewUrl] = useState<string | null>(null);
+	const [lastFramePreviewUrl, setLastFramePreviewUrl] = useState<string | null>(null);
 	const [currentThumbnail, setCurrentThumbnail] = useState<string | null>(null);
 	const currentProjectIdRef = useRef("");
 	const currentProjectCreatedAtRef = useRef(0);
@@ -344,6 +277,54 @@ export default function Page() {
 	useEffect(() => {
 		setIsMobileShareCapable(typeof navigator.canShare === "function" && window.matchMedia("(pointer: coarse)").matches);
 	}, []);
+
+	useEffect(() => {
+		return () => {
+			if (referencePreviewUrl) {
+				URL.revokeObjectURL(referencePreviewUrl);
+			}
+			if (firstFramePreviewUrl) {
+				URL.revokeObjectURL(firstFramePreviewUrl);
+			}
+			if (lastFramePreviewUrl) {
+				URL.revokeObjectURL(lastFramePreviewUrl);
+			}
+		};
+	}, [referencePreviewUrl, firstFramePreviewUrl, lastFramePreviewUrl]);
+
+	function setPreviewUrl(setter: Dispatch<SetStateAction<string | null>>, file: File | null) {
+		setter((current) => {
+			if (current) URL.revokeObjectURL(current);
+			return file ? URL.createObjectURL(file) : null;
+		});
+	}
+
+	function handleReferenceSelect(file: File | null) {
+		setPreviewUrl(setReferencePreviewUrl, file);
+	}
+
+	function handleFirstFrameSelect(file: File | null) {
+		setPreviewUrl(setFirstFramePreviewUrl, file);
+	}
+
+	function handleLastFrameSelect(file: File | null) {
+		setPreviewUrl(setLastFramePreviewUrl, file);
+	}
+
+	const mentionOptions = useMemo(() => buildMentionOptions(storyPresets as Array<{ id?: string; label?: string; description?: string }>), [storyPresets]);
+
+	const lobbyStoryPresets = useMemo(
+		() =>
+			(storyPresets as Array<{ id?: string; label?: string; description?: string; segment_prompts?: unknown }>)
+				.filter((preset) => typeof preset.id === "string" && typeof preset.label === "string")
+				.map((preset) => ({
+					id: String(preset.id),
+					label: String(preset.label),
+					description: typeof preset.description === "string" ? preset.description : undefined,
+					segmentCount: Array.isArray(preset.segment_prompts) ? preset.segment_prompts.length : undefined,
+				})),
+		[storyPresets],
+	);
 
 	const videoElRef = useRef<HTMLVideoElement | null>(null);
 	const archivedPlaybackElRef = useRef<HTMLVideoElement | null>(null);
@@ -1764,6 +1745,7 @@ export default function Page() {
 		setSeedPrompts(segmentPrompts);
 		return {
 			type,
+			generation_mode: toGenerationMode(creationModeId),
 			preset_id: getInitialPresetId(),
 			preset_label: getInitialPresetLabel(),
 			curated_prompts: segmentPrompts,
@@ -1937,10 +1919,21 @@ export default function Page() {
 		}
 	}
 
+	function syncSessionCreationConfigFromLobby() {
+		setSessionCreationConfig({
+			modelId: creationModelId,
+			modeId: creationModeId,
+			aspectRatio: creationAspectRatio,
+			resolution: creationResolution,
+			durationSec: creationDurationSec,
+		});
+	}
+
 	function beginProjectLocally({ force = false } = {}) {
 		if (!force && !canStartSession) return;
 		if (sessionStore.get().sessionStarted || sessionStore.get().projectResetPending) return false;
 		setTimeoutModalOpen(false);
+		syncSessionCreationConfigFromLobby();
 		// Unmute during the user gesture so iOS Safari permits audio playback.
 		setVideoMuted(false);
 		if (viewingProject) closeViewingProject();
@@ -2641,7 +2634,7 @@ export default function Page() {
 			/>
 			<Header timeLeft={headerTimeLeft} formatTime={formatTime} onToggleSidebar={() => setSidebarOpen((prev) => !prev)} />
 
-			<div className="relative flex flex-1 min-h-0 flex-col justify-center px-4 pb-2 sm:px-6 sm:pb-12">
+			<div className={cn("relative flex flex-1 min-h-0 flex-col", showActiveProject || isViewingMode ? "justify-center px-4 pb-2 sm:px-6 sm:pb-12" : "overflow-hidden")}>
 				{isViewingMode && (
 					<>
 						{viewingSelectedClip && (
@@ -2758,44 +2751,77 @@ export default function Page() {
 						/>
 					</section>
 
-					<AnimatePresence>
-						{!showActiveProject && (
-							<motion.div
-								key="hero-tagline"
-								initial={{ opacity: 0 }}
-								animate={{ opacity: 1 }}
-								exit={{ opacity: 0, transition: { duration: 0.2, ease: "easeIn" } }}
-								transition={{ duration: 0.5, ease: "easeOut" }}
-								className="pointer-events-none absolute inset-x-0 top-0 bottom-1/2 z-10 flex items-center justify-center px-4"
-							>
-								<HeroTagline />
-							</motion.div>
-						)}
-					</AnimatePresence>
-
-					<motion.div layout="position" className="mx-auto w-full max-w-2xl shrink-0" transition={{ type: "spring", stiffness: 200, damping: 25 }}>
-						<ChatBar
-							sessionStarted={sessionStarted as boolean}
-							rewritingSeedPrompts={rewritingSeedPrompts as boolean}
+					{!showActiveProject ? (
+						<CreationStudio
+							value={livePromptDraft as string}
+							disabled={projectResetPending as boolean}
 							isGenerating={loadingAnimation as boolean}
-							storyPresets={storyPresets as any[]}
-							continuationDraft={livePromptDraft as string}
-							canJoinSession={canStartSession}
-							canSubmitContinuation={canSubmitContinuation}
-							sessionExpired={sessionExpired as boolean}
-							sessionNotice={sessionNotice as string}
-							projectResetPending={projectResetPending as boolean}
+							canSubmit={canStartSession}
+							modelId={creationModelId}
+							modeId={creationModeId}
+							aspectRatio={creationAspectRatio}
+							resolution={creationResolution}
+							durationSec={creationDurationSec}
+							referencePreviewUrl={referencePreviewUrl}
+							firstFramePreviewUrl={firstFramePreviewUrl}
+							lastFramePreviewUrl={lastFramePreviewUrl}
+							mentionOptions={mentionOptions}
+							storyPresets={lobbyStoryPresets}
+							onValueChange={(value) => sessionStore.patch({ livePromptDraft: value })}
+							onSubmit={() => void joinSession()}
+							onKeyDown={handleLivePromptKeydown}
+							onModelChange={setCreationModelId}
+							onModeChange={setCreationModeId}
+							onAspectRatioChange={setCreationAspectRatio}
+							onResolutionChange={setCreationResolution}
+							onDurationChange={setCreationDurationSec}
+							onReferenceSelect={handleReferenceSelect}
+							onFirstFrameSelect={handleFirstFrameSelect}
+							onLastFrameSelect={handleLastFrameSelect}
 							onPresetGenerate={handlePresetGenerate}
-							onContinuationInput={handleLivePromptInput}
-							onContinuationKeydown={handleLivePromptKeydown}
-							onGenerate={joinSession}
-							onSubmitContinuation={submitLivePrompt}
-							onLeave={leaveSession}
-							onStartNewProject={handleStartNewProject}
 							onSpeechTranscript={handleLivePromptSpeechTranscript}
 							onSpeechInterimChange={handleLivePromptSpeechInterim}
+							onOpenProjects={() => setSidebarOpen(true)}
 						/>
-					</motion.div>
+					) : (
+						<motion.div layout="position" className="mx-auto w-full max-w-2xl shrink-0" transition={{ type: "spring", stiffness: 200, damping: 25 }}>
+							<ChatBar
+								sessionStarted={sessionStarted as boolean}
+								rewritingSeedPrompts={rewritingSeedPrompts as boolean}
+								isGenerating={loadingAnimation as boolean}
+								storyPresets={storyPresets as any[]}
+								continuationDraft={livePromptDraft as string}
+								canJoinSession={canStartSession}
+								canSubmitContinuation={canSubmitContinuation}
+								sessionExpired={sessionExpired as boolean}
+								sessionNotice={sessionNotice as string}
+								projectResetPending={projectResetPending as boolean}
+								sessionCreationConfig={sessionCreationConfig}
+								onSessionModelChange={(modelId) => setSessionCreationConfig((current) => ({ ...current, modelId }))}
+								onSessionModeChange={(modeId) => setSessionCreationConfig((current) => ({ ...current, modeId }))}
+								onSessionAspectRatioChange={(aspectRatio) => setSessionCreationConfig((current) => ({ ...current, aspectRatio }))}
+								onSessionResolutionChange={(resolution) => setSessionCreationConfig((current) => ({ ...current, resolution }))}
+								onSessionDurationChange={(durationSec) => setSessionCreationConfig((current) => ({ ...current, durationSec }))}
+								onPresetGenerate={handlePresetGenerate}
+								onContinuationInput={handleLivePromptInput}
+								onContinuationKeydown={handleLivePromptKeydown}
+								onGenerate={joinSession}
+								onSubmitContinuation={submitLivePrompt}
+								onLeave={leaveSession}
+								onStartNewProject={handleStartNewProject}
+								onSpeechTranscript={handleLivePromptSpeechTranscript}
+								onSpeechInterimChange={handleLivePromptSpeechInterim}
+							/>
+						</motion.div>
+					)}
+
+					{sessionNotice && !showActiveProject && (
+						<div className="mx-auto mt-2 w-full max-w-3xl px-4">
+							<div className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-2.5 text-center text-xs text-rose-700 dark:text-rose-300">
+								{sessionNotice}
+							</div>
+						</div>
+					)}
 				</div>
 			</div>
 		</main>

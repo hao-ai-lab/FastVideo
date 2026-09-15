@@ -2,6 +2,7 @@
 @import "tailwindcss";
 
 @custom-variant dark (&:is(.dark *));
+@custom-variant hover-capable (@media (hover: hover) and (pointer: fine));
 
 :root {
 	color-scheme: light;
@@ -201,7 +202,7 @@ summary::-webkit-details-marker {
 		@apply border-border;
 	}
 	body {
-		@apply bg-background text-foreground;
+		@apply bg-background text-foreground antialiased;
 	}
 }
 
@@ -219,6 +220,14 @@ summary::-webkit-details-marker {
 
 	.stroke-dash-anim {
 		animation: stroke-dash-animation 2s linear infinite;
+	}
+
+	.text-pretty {
+		text-wrap: pretty;
+	}
+
+	.text-balance {
+		text-wrap: balance;
 	}
 }
 
@@ -287,6 +296,22 @@ html.theme-transition *::after {
 /* —————————————— CUSTOM TAILWIND —————————————— */
 
 @layer components {
+	.studio-control {
+		@apply transition-[border-color,background-color,box-shadow,color,transform] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue/40;
+	}
+
+	.studio-control-press {
+		@apply active:scale-[0.96] motion-reduce:active:scale-100;
+	}
+
+	.studio-hover-surface {
+		@apply hover-capable:hover:border-border hover-capable:hover:bg-accent/50;
+	}
+
+	.studio-media-outline {
+		@apply outline outline-1 -outline-offset-1 outline-black/10 dark:outline-white/10;
+	}
+
 	.debug {
 		@apply border border-rose-500;
 	}
