@@ -16,6 +16,9 @@ Every call collectively agrees on geometry, window capacity, chunking and CTA
 count before entering the kernel. Outputs own their storage, and backward uses
 the plan saved by its forward. Contiguity alone does not replace these checks.
 Existing unsupported-layout, capture, topology and lifecycle fallbacks remain.
+The fused path also requires every rank to be on one host: LSA covers
+addressability, not locality, so a multi-node NVLink mesh declines the fused
+path and keeps the NCCL fallback.
 
 ## Long training sequences
 
@@ -57,3 +60,8 @@ The gate covers exact transport gradients at 32k, 128k and 250k, the long
 training opt-in, retained-output ownership, and recovery after rank capability
 disagreement. Full-model throughput and absolute model FLOP utilization (MFU)
 are separate measurements; this transport gate reports neither.
+
+`benchmark_ulysses_a2a.py` compares revisions with identical argv and reports
+host-to-completion latency including agreement; set `FASTVIDEO_ULYSSES_A2A=off`
+for the NCCL baseline. `ulysses_native_test_support.py` loads a separately built
+communication extension for development validation.

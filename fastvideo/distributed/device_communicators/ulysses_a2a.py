@@ -254,8 +254,11 @@ class UlyssesA2AHelper:
         collective is intentionally eager-only; compiled regions use the NCCL
         implementation before reaching here.
         """
-        # Host-side Gloo control keeps this agreement outside CUDA graph capture
-        # and avoids inserting a second NCCL collective ahead of the data path.
+        # Host-side Gloo control avoids inserting a second NCCL collective ahead
+        # of the data path. It is CPU-only and allocation-free, so it also stays
+        # valid when the caller is inside a CUDA graph capture.
+        if len(signature) != _CONTRACT_SIZE:
+            raise RuntimeError(f"Ulysses call contract has {len(signature)} fields, expected {_CONTRACT_SIZE}")
         self._local_contract[:] = array("q", signature)
         dist.all_gather_into_tensor(self._gathered_tensor, self._local_tensor, group=self.cpu_group)
         values = self._gathered_tensor.tolist()
@@ -372,7 +375,7 @@ class UlyssesA2AHelper:
     # -- collective ----------------------------------------------------------
 
     def run_armed(self, x: torch.Tensor, mode: int, chunked: bool, blocks: int) -> torch.Tensor:
-        """Run one collective on an already-armed context."""
+        """Run one call's collective(s) on an already-armed context."""
         assert self._handle is not None, "run_armed called on an unarmed helper"
         from fastvideo_kernel import comm_ops
 
@@ -399,7 +402,7 @@ class UlyssesA2AHelper:
                                     mode,
                                     blocks=blocks)
         else:
-            comm_ops.all_to_all(self._handle, x, out, B, S_local, H, D, mode)
+            comm_ops.all_to_all(self._handle, x, out, B, S_local, H, D, mode, blocks=blocks)
         return out
 
     def try_all_to_all_4D(self, x: torch.Tensor, scatter_dim: int, gather_dim: int) -> torch.Tensor | None:
