@@ -632,6 +632,76 @@ def test_tdm_generator_delta_normalization_is_per_sample(monkeypatch: pytest.Mon
     )
 
 
+@pytest.mark.parametrize("generator_mean_value", [-1.25, 0.75, 2.25])
+def test_tdm_generator_gradient_matches_analytic_gaussian_reverse_kl(
+    monkeypatch: pytest.MonkeyPatch,
+    generator_mean_value: float,
+) -> None:
+    """Check the production surrogate against a closed-form Gaussian oracle."""
+    method, student, critic = _build_method(method_overrides={
+        "real_score_guidance_scale": 1.0,
+        "normalize_generator_delta": False,
+        "use_huber": False,
+    })
+    teacher = method.teacher
+    batch = student.prepare_batch({}, generator=method.cuda_generator, latents_source="zeros")
+
+    real_mean = 0.75
+    generator_mean = torch.tensor(generator_mean_value, requires_grad=True)
+    base_samples = torch.tensor([-1.5, -0.5, 0.5, 1.5]).reshape(4, 1, 1, 1, 1)
+    source_noise = torch.tensor([-0.75, 0.25, 1.0, -1.25]).reshape_as(base_samples)
+    proposal_noise = torch.tensor([0.5, -0.25, 0.75, -1.0]).reshape_as(base_samples)
+    generator_samples = generator_mean + base_samples
+
+    sigma_source = torch.full((4, ), 0.75)
+    sigma_intermediate = torch.full((4, ), 0.25)
+    sigma_target = torch.full((4, ), 0.5)
+    sigma_source_b = sigma_source.reshape(4, 1, 1, 1, 1)
+    noisy_source = ((1.0 - sigma_source_b) * generator_samples.detach() + sigma_source_b * source_noise)
+    context = SimpleNamespace(
+        noisy_source=noisy_source,
+        timestep_source=torch.full((4, ), 750.0),
+        timestep_target=torch.full((4, ), 500.0),
+        sigma_source=sigma_source,
+        sigma_intermediate=sigma_intermediate,
+        sigma_target=sigma_target,
+        proposal_noise=proposal_noise,
+        trajectory_indices=torch.arange(4),
+    )
+
+    # For x ~ N(mu, 1) and y = 0.5*x + 0.5*eps, the exact posterior
+    # mean is E[x | y] = y + 0.5*mu. Thus the real-minus-fake
+    # posterior means equal 0.5*(real_mean - generator_mean), independent
+    # of y. The squared TDM surrogate then has gradient
+    # generator_mean - real_mean, exactly matching d KL(q || p) / d mu
+    # for q=N(generator_mean, 1), p=N(real_mean, 1).
+    def gaussian_posterior_mean(noisy_latents: torch.Tensor, prior_mean: torch.Tensor) -> torch.Tensor:
+        return noisy_latents + 0.5 * prior_mean
+
+    monkeypatch.setattr(method, "_sample_tdm_context", lambda trajectory: context)
+    monkeypatch.setattr(student, "predict_x0", lambda *args, **kwargs: generator_samples)
+    monkeypatch.setattr(
+        critic,
+        "predict_x0",
+        lambda noisy_latents, *args, **kwargs: gaussian_posterior_mean(noisy_latents, generator_mean.detach()),
+    )
+    monkeypatch.setattr(
+        teacher,
+        "predict_x0",
+        lambda noisy_latents, *args, **kwargs: gaussian_posterior_mean(
+            noisy_latents,
+            torch.as_tensor(real_mean),
+        ),
+    )
+
+    loss, _, _ = method._tdm_generator_loss(SimpleNamespace(), batch)
+    loss.backward()
+
+    expected_reverse_kl_gradient = generator_mean.detach() - real_mean
+    assert generator_mean.grad is not None
+    assert_close(generator_mean.grad, expected_reverse_kl_gradient)
+
+
 def test_tdm_pseudo_huber_applies_per_sample_normalization_after_loss(monkeypatch: pytest.MonkeyPatch) -> None:
     huber_c = 0.25
     method, student, critic = _build_method(method_overrides={
