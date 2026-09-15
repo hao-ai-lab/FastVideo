@@ -43,19 +43,20 @@ KEEP_PRECISION = {
 
 
 def _blockwise_fp8(weight: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-    """Return ``(E4M3 weight, per-128x128-block inverse scales)``."""
+    """Return ``(E4M3 weight, per-128x128-block inverse scales)``.
+
+    The loader rejects weights whose dimensions are not multiples of 128
+    (``MiniMaxH3SerializedFP8LinearMethod.process_weights_after_loading``), so
+    reject them here rather than write a shard that cannot be read back.
+    """
     rows, columns = weight.shape
-    pad_rows = (BLOCK_SIZE - rows % BLOCK_SIZE) % BLOCK_SIZE
-    pad_columns = (BLOCK_SIZE - columns % BLOCK_SIZE) % BLOCK_SIZE
-    padded = weight
-    if pad_rows or pad_columns:
-        padded = torch.nn.functional.pad(weight, (0, pad_columns, 0, pad_rows))
-    padded_rows, padded_columns = padded.shape
-    blocks = padded.view(padded_rows // BLOCK_SIZE, BLOCK_SIZE, padded_columns // BLOCK_SIZE, BLOCK_SIZE)
+    if rows % BLOCK_SIZE or columns % BLOCK_SIZE:
+        raise ValueError(f"MiniMax-H3 serialized FP8 requires 128-divisible linear dimensions; "
+                         f"got {tuple(weight.shape)}")
+    blocks = weight.view(rows // BLOCK_SIZE, BLOCK_SIZE, columns // BLOCK_SIZE, BLOCK_SIZE)
     scale = blocks.abs().amax(dim=(1, 3)).clamp_(min=1e-12).float() / E4M3_MAX
     quantized = (blocks.float() / scale[:, None, :, None]).clamp_(-E4M3_MAX, E4M3_MAX)
-    quantized = quantized.view(padded_rows, padded_columns)[:rows, :columns]
-    return quantized.to(torch.float8_e4m3fn).contiguous(), scale.contiguous()
+    return quantized.view(rows, columns).to(torch.float8_e4m3fn).contiguous(), scale.contiguous()
 
 
 def _is_language_linear(key: str, tensor: torch.Tensor) -> bool:

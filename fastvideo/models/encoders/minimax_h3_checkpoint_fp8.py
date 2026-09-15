@@ -467,10 +467,11 @@ class MiniMaxH3SerializedFP8LinearMethod(LinearMethodBase):
             # Hopper has no groupwise FP8 GEMM here. FP8 buys residency (the
             # 66.7 GB BF16 Qwen3-VL encoder halves and fits beside an
             # FSDP-sharded DiT on 80 GB), not speed: the encoder runs once per
-            # request, and dequantizing one layer at a time costs ~0.1 ms per
-            # linear while the weights stay FP8. This is the dequantization
-            # the FlashInfer path performs internally, so it is an
-            # exact-arithmetic substitution rather than a second approximation.
+            # request, and the weights stay FP8 while one layer at a time is
+            # expanded for its matmul. This is not the Blackwell arithmetic --
+            # that path also quantizes activations per token group and runs an
+            # FP8 GEMM -- but it is the same block-scaled weight contract and
+            # is strictly more accurate than the FP8 GEMM.
             weight = _dequantize_block_fp8_weight(layer.weight, layer.weight_scale_inv, self.weight_block_size, x.dtype)
             return torch.nn.functional.linear(x, weight, bias)
         return _flashinfer_gemm_w8a8_block_fp8_linear_with_fallback(
@@ -488,18 +489,17 @@ def _dequantize_block_fp8_weight(
     weight_block_size: tuple[int, int],
     dtype: torch.dtype,
 ) -> torch.Tensor:
-    """Expand a ``[N, K]`` E4M3 weight with ``[N/bn, K/bk]`` block scales to ``dtype``."""
+    """Expand a ``[N, K]`` E4M3 weight with ``[N/bn, K/bk]`` block scales to ``dtype``.
+
+    ``process_weights_after_loading`` rejects weights whose dimensions are not
+    multiples of the block size, so the block view is always exact.
+    """
     block_n, block_k = weight_block_size
     rows, columns = weight.shape
-    pad_rows = (block_n - rows % block_n) % block_n
-    pad_columns = (block_k - columns % block_k) % block_k
     restored = weight.to(dtype)
-    if pad_rows or pad_columns:
-        restored = torch.nn.functional.pad(restored, (0, pad_columns, 0, pad_rows))
-    padded_rows, padded_columns = restored.shape
-    restored = restored.view(padded_rows // block_n, block_n, padded_columns // block_k, block_k)
-    restored = restored * block_scales.to(dtype)[:, None, :, None]
-    return restored.view(padded_rows, padded_columns)[:rows, :columns]
+    blocks = restored.view(rows // block_n, block_n, columns // block_k, block_k)
+    blocks.mul_(block_scales.to(dtype)[:, None, :, None])
+    return restored
 
 
 __all__ = [
