@@ -12,6 +12,7 @@ import multiprocessing as mp
 import queue
 import threading
 import time
+from concurrent.futures import Future
 from dataclasses import dataclass
 from typing import Any
 
@@ -28,6 +29,7 @@ from fastvideo.entrypoints.streaming.gpu_pool import (
     InProcessGpuPool,
     PoolAcquireTimeout,
     SubprocessGpuPool,
+    _PendingJob,
     _WorkerHandle,
 )
 
@@ -465,10 +467,7 @@ class TestSubprocessGpuPoolFailureModes:
 
     @pytest.mark.parametrize("worker_raises", [False, True])
     def test_reader_ignores_cancelled_future_before_request_cleanup(self, pool_factory, worker_raises):
-        """The wrap_future cancellation callback can run before run's finally."""
-        from concurrent.futures import Future
-
-        from fastvideo.entrypoints.streaming.gpu_pool import _PendingJob
+        """A cancelled future still in ``_pending`` must not kill the reader."""
 
         async def run():
             pool = await pool_factory(num_workers=1)

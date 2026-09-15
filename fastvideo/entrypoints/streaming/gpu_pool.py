@@ -419,8 +419,11 @@ class SubprocessGpuPool(GpuPool):
                     continue
                 pending = self._pending.pop(job_id, None)
                 # wrap_future can cancel the source future before run()'s
-                # finally block gets its turn on the event loop.
+                # finally block gets its turn on the event loop, and an
+                # abandoned job's late reply can arrive after run() already
+                # popped its entry. Either way there is no live waiter.
                 if pending is None or pending.future.done():
+                    logger.debug("pool: worker %s dropping reply for job %s", handle.worker_id, job_id)
                     continue
                 if msg.get("kind") == "error":
                     pending.future.set_exception(RuntimeError(msg["error"]))
