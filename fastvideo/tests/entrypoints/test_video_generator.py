@@ -337,6 +337,33 @@ def test_generate_single_video_frames_clamp_out_of_range_pixels(tmp_path):
     assert (frames[1] == 0).all()
 
 
+def test_generate_single_video_accepts_uint8_worker_output(tmp_path):
+    """A worker may quantize decoded pixels to uint8 before they cross the
+    executor boundary (the MiniMax-H3 decode stage does, cutting the IPC
+    payload 4x). Post-decode must pass those frames through untouched and
+    ``samples`` must stay on its [0, 1] float contract. CPU-only."""
+    torch.manual_seed(0)
+    pixels = torch.rand((1, 3, 2, 16, 16), dtype=torch.float32)
+    output_u8 = (pixels * 255).clamp_(0, 255).to(torch.uint8)
+    output_batch = _single_video_output_batch(output_u8)
+    fastvideo_args = _single_video_args()
+    generator = _single_video_generator(output_batch, fastvideo_args)
+
+    result = generator._generate_single_video(
+        prompt="uint8 worker output",
+        sampling_param=_small_sampling_param(save_video=False, return_frames=True),
+        fastvideo_args=fastvideo_args,
+        output_path=str(tmp_path / "unused.mp4"),
+    )
+
+    torch.testing.assert_close(result["samples"], output_u8.float() / 255)
+    frames = result["frames"]
+    assert len(frames) == 2
+    for index, frame in enumerate(frames):
+        assert frame.dtype == np.uint8
+        np.testing.assert_array_equal(frame, output_u8[0, :, index].permute(1, 2, 0).numpy())
+
+
 def test_generate_single_video_save_video_still_builds_frames(monkeypatch, tmp_path):
     output = torch.ones((1, 3, 2, 16, 16), dtype=torch.float32) * 0.5
     output_batch = _single_video_output_batch(output)
