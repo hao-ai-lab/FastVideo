@@ -74,8 +74,8 @@ class RocmPlatform(Platform):
 
         elif selected_backend == AttentionBackendEnum.VIDEO_SPARSE_ATTN:
             # fastvideo_kernel's block-sparse attention dispatcher takes its
-            # Triton route here: the ThunderKittens and sm_100a kernels are
-            # CUDA-only and are never selected on a ROCm device.
+            # Triton route here: the ThunderKittens kernels are CUDA-only and
+            # the CuTe fastpath (FASTVIDEO_VSA_CUTEDSL) is not available on ROCm.
             try:
                 from fastvideo_kernel import video_sparse_attn  # noqa: F401
             except ImportError as e:
