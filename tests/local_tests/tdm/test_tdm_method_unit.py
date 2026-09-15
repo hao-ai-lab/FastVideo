@@ -12,7 +12,6 @@ from torch.testing import assert_close
 
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler
 from fastvideo.pipelines.pipeline_batch_info import TrainingBatch
-from fastvideo.train.methods.distribution_matching import tdm as tdm_module
 from fastvideo.train.methods.distribution_matching.tdm import (
     TDMMethod,
     flow_effective_noise,
@@ -192,7 +191,8 @@ def _build_method(
         "tdm_denoising_steps": [1000, 750, 500, 250],
         "student_sample_type": "sde",
         "noise_interval_mode": "separate",
-        "use_randmid": True,
+        "use_randmid": False,
+        "max_grad_norm": 1.0,
         "fake_score_learning_rate": 1.0e-3,
         "fake_score_betas": [0.0, 0.999],
         "fake_score_lr_scheduler": "constant",
@@ -219,10 +219,10 @@ def _build_method(
     return method, student, critic
 
 
-def test_tdm_single_train_step_reports_losses_and_routes_backward() -> None:
+def test_tdm_managed_train_step_reports_losses_and_updates_both_roles() -> None:
     method, student, critic = _build_method(generator_update_interval=1)
 
-    loss_map, outputs, metrics = method.single_train_step({}, iteration=0)
+    loss_map, outputs, metrics = method.managed_train_step(iter([{}]), iteration=0)
 
     assert set(loss_map) == {"total_loss", "generator_loss", "fake_score_loss"}
     assert bool(loss_map["total_loss"].isfinite().item())
@@ -250,12 +250,9 @@ def test_tdm_single_train_step_reports_losses_and_routes_backward() -> None:
     assert "tdm/fake_score/importance_mean" in metrics
     assert "tdm/fake_score/per_sample_loss_mean" in metrics
     assert "tdm/fake_score/source_trajectory_index" in metrics
-    assert outputs["_fv_backward"]["update_student"] is True
-    assert outputs["_fv_backward"]["student_ctx"][0].shape == (2, )
-    assert outputs["_fv_backward"]["critic_ctx"][0].shape == (2, )
-
-    method.backward(loss_map, outputs)
-
+    assert "grad_norm/student" in metrics
+    assert "grad_norm/critic" in metrics
+    assert outputs == {}
     assert student.backward_calls == 1
     assert critic.backward_calls == 1
 
@@ -265,6 +262,53 @@ def test_tdm_single_train_step_reports_losses_and_routes_backward() -> None:
     ]
     assert len(grad_student_calls) == 1
     assert 0.0 < grad_student_calls[0][2] <= 1000.0
+
+
+def test_tdm_updates_critic_before_generator_recomputes_loss(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    method, _, critic = _build_method(generator_update_interval=1)
+    events: list[str] = []
+    critic_forward_weights: list[torch.Tensor] = []
+    original_predict_x0 = critic.predict_x0
+    original_finish_role_update = method._finish_role_update
+
+    def recording_predict_x0(*args: Any, **kwargs: Any) -> torch.Tensor:
+        events.append("critic_forward")
+        critic_forward_weights.append(critic.transformer.weight.detach().clone())
+        return original_predict_x0(*args, **kwargs)
+
+    def recording_finish_role_update(
+        *,
+        model: ModelBase,
+        optimizer: torch.optim.Optimizer,
+        lr_scheduler: Any,
+    ) -> float:
+        grad_norm = original_finish_role_update(
+            model=model,
+            optimizer=optimizer,
+            lr_scheduler=lr_scheduler,
+        )
+        if model is critic:
+            events.append("critic_step")
+        return grad_norm
+
+    monkeypatch.setattr(critic, "predict_x0", recording_predict_x0)
+    monkeypatch.setattr(method, "_finish_role_update", recording_finish_role_update)
+
+    method.managed_train_step(iter([{}]), iteration=0)
+
+    assert events == ["critic_forward", "critic_step", "critic_forward"]
+    assert len(critic_forward_weights) == 2
+    assert not torch.equal(critic_forward_weights[0], critic_forward_weights[1])
+    assert_close(critic_forward_weights[1], critic.transformer.weight.detach())
+
+
+def test_tdm_rejects_default_single_step_optimizer_path() -> None:
+    method, _, _ = _build_method()
+
+    with pytest.raises(RuntimeError, match="managed_train_step"):
+        method.single_train_step({}, iteration=0)
 
 
 def test_tdm_generator_reconstructs_intermediate_before_scoring_target(
@@ -423,14 +467,13 @@ def test_tdm_rejects_invalid_denoising_step_schedules(
 def test_tdm_respects_generator_update_interval() -> None:
     method, student, critic = _build_method(generator_update_interval=2)
 
-    loss_map, outputs, metrics = method.single_train_step({}, iteration=1)
+    loss_map, outputs, metrics = method.managed_train_step(iter([{}]), iteration=1)
 
     assert metrics["update_student"] == 0.0
     assert "tdm/generator/source_timestep" not in metrics
-    assert outputs["_fv_backward"]["update_student"] is False
-
-    method.backward(loss_map, outputs)
-
+    assert "grad_norm/student" not in metrics
+    assert outputs == {}
+    assert_close(loss_map["generator_loss"], torch.zeros_like(loss_map["generator_loss"]))
     assert student.backward_calls == 0
     assert critic.backward_calls == 1
 
@@ -486,72 +529,10 @@ def test_tdm_fake_score_uses_clipped_flow_snr_directly(
     )
 
 
-def test_tdm_next_step_noise_interval_uses_rank_stratified_adjacent_boundaries(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    method, _, _ = _build_method(method_overrides={
-        "noise_interval_mode": "next_step",
-        "use_randmid": False,
-    })
-    monkeypatch.setattr(tdm_module.dist, "is_available", lambda: True)
-    monkeypatch.setattr(tdm_module.dist, "is_initialized", lambda: True)
-    monkeypatch.setattr(tdm_module.dist, "get_rank", lambda: 3)
-    monkeypatch.setattr(tdm_module.dist, "get_world_size", lambda: 4)
-    batch = method.student.prepare_batch({}, generator=method.cuda_generator, latents_source="zeros")
-    trajectory = method._student_trajectory(batch)
-
-    context = method._sample_tdm_context(trajectory)
-
-    assert context.trajectory_indices.tolist() == [2, 3]
-    assert_close(context.sigma_source, torch.tensor([0.5, 0.25]))
-    assert_close(context.sigma_intermediate, torch.tensor([0.25, 0.0]))
-    assert_close(context.sigma_target, torch.tensor([0.25, 0.001]))
-    assert bool(torch.all(context.sigma_target >= context.sigma_intermediate).item())
-    assert bool((method._tdm_fake_score_weights(context) > 0).all().item())
-
-
-def test_tdm_next_step_noise_interval_cycles_undercovered_slots(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    method, _, _ = _build_method(method_overrides={
-        "noise_interval_mode": "next_step",
-        "use_randmid": False,
-    })
-    monkeypatch.setattr(tdm_module.dist, "is_available", lambda: True)
-    monkeypatch.setattr(tdm_module.dist, "is_initialized", lambda: True)
-    monkeypatch.setattr(tdm_module.dist, "get_rank", lambda: 0)
-    monkeypatch.setattr(tdm_module.dist, "get_world_size", lambda: 1)
-    batch = method.student.prepare_batch({}, generator=method.cuda_generator, latents_source="zeros")
-    trajectory = method._student_trajectory(batch)
-
-    first_context = method._sample_tdm_context(trajectory, iteration=0)
-    second_context = method._sample_tdm_context(trajectory, iteration=1)
-
-    assert first_context.trajectory_indices.tolist() == [0, 1]
-    assert second_context.trajectory_indices.tolist() == [2, 3]
-    assert_close(first_context.sigma_source, torch.tensor([1.0, 0.75]))
-    assert_close(second_context.sigma_source, torch.tensor([0.5, 0.25]))
-
-
-def test_tdm_next_step_generator_update_iteration_respects_update_interval() -> None:
-    method, _, _ = _build_method(
-        generator_update_interval=2,
-        method_overrides={
-            "noise_interval_mode": "next_step",
-            "use_randmid": False,
-        },
-    )
-
-    assert method._generator_update_iteration(0) == 0
-    assert method._generator_update_iteration(2) == 1
-    assert method._generator_update_iteration(4) == 2
-
-
-def test_tdm_next_step_noise_interval_requires_fixed_intermediate() -> None:
-    with pytest.raises(ValueError, match="use_randmid"):
+def test_tdm_rejects_non_reference_next_step_interval_mode() -> None:
+    with pytest.raises(ValueError, match="noise_interval_mode"):
         _build_method(method_overrides={
             "noise_interval_mode": "next_step",
-            "use_randmid": True,
         })
 
 
@@ -579,17 +560,14 @@ def test_tdm_to_terminal_fake_score_loss_trains_critic() -> None:
             "use_randmid": False,
         },
     )
+    critic_weight_before = critic.transformer.weight.detach().clone()
 
-    loss_map, outputs, metrics = method.single_train_step({}, iteration=1)
+    loss_map, _, metrics = method.managed_train_step(iter([{}]), iteration=1)
 
     assert float(loss_map["fake_score_loss"].item()) > 0.0
     assert float(torch.as_tensor(metrics["tdm/fake_score/weight_mean"]).item()) > 0.0
-
-    method.backward(loss_map, outputs)
-
-    grad = critic.transformer.weight.grad
-    assert grad is not None
-    assert float(grad.abs().item()) > 0.0
+    assert critic.backward_calls == 1
+    assert not torch.equal(critic_weight_before, critic.transformer.weight.detach())
 
 
 def test_tdm_generator_delta_normalization_is_per_sample(monkeypatch: pytest.MonkeyPatch) -> None:
