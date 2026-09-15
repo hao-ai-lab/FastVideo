@@ -95,6 +95,7 @@ def _build_generation_kwargs(
     return kwargs
 
 
+@router.post("/generations", response_model=ImageResponse)
 @router.post("", response_model=ImageResponse)
 async def generations(request: ImageGenerationsRequest):
     resp_format = _normalize_response_format(request.response_format)
