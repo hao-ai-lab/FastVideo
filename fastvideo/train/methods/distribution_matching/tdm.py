@@ -305,6 +305,7 @@ class TDMMethod(DMD2Method):
 
         fake_score_losses: list[torch.Tensor] = []
         fake_score_metric_maps: list[dict[str, LogScalar]] = []
+        prepared_trajectories: list[tuple[TrainingBatch, TDMTrajectory]] = []
         for raw_batch in raw_batches:
             training_batch = self.student.prepare_batch(
                 raw_batch,
@@ -313,7 +314,13 @@ class TDMMethod(DMD2Method):
             )
             if training_batch.latents is None:
                 raise RuntimeError("TDM requires student.prepare_batch to populate latents")
-            fake_score_loss, critic_ctx, _, fake_score_metrics = self._tdm_fake_score_loss(training_batch)
+            with torch.no_grad():
+                trajectory = self._student_trajectory(training_batch)
+            prepared_trajectories.append((training_batch, trajectory))
+            fake_score_loss, critic_ctx, _, fake_score_metrics = self._tdm_fake_score_loss(
+                trajectory,
+                training_batch,
+            )
             self.critic.backward(
                 fake_score_loss,
                 critic_ctx,
@@ -332,16 +339,7 @@ class TDMMethod(DMD2Method):
         generator_losses: list[torch.Tensor] = []
         generator_metric_maps: list[dict[str, LogScalar]] = []
         if update_student:
-            for raw_batch in raw_batches:
-                training_batch = self.student.prepare_batch(
-                    raw_batch,
-                    generator=self.cuda_generator,
-                    latents_source="zeros",
-                )
-                if training_batch.latents is None:
-                    raise RuntimeError("TDM requires student.prepare_batch to populate latents")
-                with torch.no_grad():
-                    trajectory = self._student_trajectory(training_batch)
+            for training_batch, trajectory in prepared_trajectories:
                 generator_loss, generator_metrics, student_ctx = self._tdm_generator_loss(
                     trajectory,
                     training_batch,
@@ -646,7 +644,7 @@ class TDMMethod(DMD2Method):
             sampled_timesteps: list[torch.Tensor] = []
             for lower_i, upper_i in zip(lower, upper, strict=False):
                 candidates = torch.nonzero(
-                    (scheduler_sigmas >= lower_i - interval_eps)
+                    (scheduler_sigmas >= lower_i)
                     & (scheduler_sigmas < upper_i - interval_eps)
                     & (scheduler_sigmas > self._sigma_eps),
                     as_tuple=False,
@@ -717,10 +715,10 @@ class TDMMethod(DMD2Method):
 
     def _tdm_fake_score_loss(
         self,
+        trajectory: TDMTrajectory,
         batch: TrainingBatch,
     ) -> tuple[torch.Tensor, Any, dict[str, Any], dict[str, LogScalar]]:
         with torch.no_grad():
-            trajectory = self._student_trajectory(batch)
             context = self._sample_tdm_context(trajectory)
 
         critic_timestep = self._model_timestep_for_sigma(context.sigma_target, self.critic)
