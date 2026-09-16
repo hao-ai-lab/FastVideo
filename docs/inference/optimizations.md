@@ -294,6 +294,9 @@ automatically.
 ### Requirements
 
 - **GPU**: sm89+ (H100, L40S, RTX 4090, or newer) for hardware FP8 compute
+- **ROCm**: CDNA4 (MI350X / MI355X, gfx950) runs the FP8 `_scaled_mm` path through
+  hipBLASLt (OCP e4m3fn). MI300X (gfx942) only exposes the `fnuz` FP8 formats and
+  takes the bf16 dequant fallback like a pre-sm89 GPU.
 - No additional packages required beyond the base FastVideo install
 
 ### Usage
