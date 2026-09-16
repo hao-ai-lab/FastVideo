@@ -412,8 +412,9 @@ CogVideoX reference parity. TDM follows the reference implementation's rollout
 gradient behavior: generated rollout history is not backpropagated through, and
 only the student prediction used by the generator loss carries gradients. Each
 training step first backpropagates and applies the fake-score critic update,
-then generates a fresh trajectory and recomputes the generator loss against the
-updated critic before applying the student update.
+then resamples the trajectory point and proposal noise from the same detached
+student trajectory and recomputes the generator loss against the updated critic
+before applying the student update.
 
 Fake-score training samples a source point from the generated trajectory. In
 `separate` and `to_terminal` modes, source points are sampled randomly and
