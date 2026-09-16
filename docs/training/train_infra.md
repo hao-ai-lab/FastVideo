@@ -403,6 +403,7 @@ method:
 | `normalize_generator_delta` | `true` | Divide each sample's generator loss by its teacher-guidance magnitude |
 | `use_huber` | `false` | Use the reference pseudo-Huber expression for the generator loss; fake-score training remains MSE |
 | `huber_c` | `0.001` | Huber delta when `use_huber=true` |
+| `use_pseudo_huber` | `false` | Use the paper Eq. 11 pseudo-Huber surrogate (`sqrt(||pred - target||_2^2 + c^2) - c`, `c = 0.00054*sqrt(d)` with `d` the flattened per-sample latent size); skips DMD delta normalization; mutually exclusive with `use_huber` |
 | `max_grad_norm` | `1.0` | Clip student and critic gradients inside TDM's ordered optimizer phases; set to zero to disable |
 
 See `examples/train/configs/distribution_matching/wan/tdm_t2v_lora.yaml` for a

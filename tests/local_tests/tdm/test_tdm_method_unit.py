@@ -747,6 +747,70 @@ def test_tdm_use_huber_is_generator_only_and_matches_reference_pseudo_huber() ->
     assert_close(huber_loss, mse_loss)
 
 
+def test_tdm_paper_pseudo_huber_uses_per_sample_vector_norm() -> None:
+    method, _, _ = _build_method(method_overrides={"use_pseudo_huber": True})
+    pred = torch.tensor([[0.0, 0.0], [0.0, 3.0]])
+    target = torch.tensor([[3.0, 4.0], [0.0, 0.0]])
+
+    per_sample_dim = 2
+    huber_c = 0.00054 * (per_sample_dim**0.5)
+    expected_norm_sq = torch.tensor([25.0, 9.0])
+    expected = torch.sqrt(expected_norm_sq + huber_c**2) - huber_c
+
+    assert_close(method._generator_pseudo_huber_loss(pred, target), expected)
+
+
+def test_tdm_paper_pseudo_huber_skips_dmd_delta_normalization(monkeypatch: pytest.MonkeyPatch) -> None:
+    method, student, critic = _build_method(method_overrides={
+        "real_score_guidance_scale": 1.0,
+        "use_pseudo_huber": True,
+    })
+    teacher = method.teacher
+    batch = student.prepare_batch({}, generator=method.cuda_generator, latents_source="zeros")
+    pred = torch.zeros((2, 1, 1, 1, 1), requires_grad=True)
+    real_x0 = torch.tensor([1.0, 100.0]).reshape_as(pred)
+    fake_x0 = torch.zeros_like(real_x0)
+    context = SimpleNamespace(
+        noisy_source=torch.zeros_like(pred),
+        timestep_source=torch.tensor([500.0, 500.0]),
+        timestep_target=torch.tensor([400.0, 400.0]),
+        sigma_source=torch.tensor([0.5, 0.5]),
+        sigma_intermediate=torch.tensor([0.25, 0.25]),
+        sigma_target=torch.tensor([0.4, 0.4]),
+        proposal_noise=torch.zeros_like(pred),
+        trajectory_indices=torch.tensor([2, 2]),
+    )
+
+    monkeypatch.setattr(method, "_sample_tdm_context", lambda trajectory: context)
+    monkeypatch.setattr(student, "predict_x0", lambda *args, **kwargs: pred)
+    monkeypatch.setattr(critic, "predict_x0", lambda *args, **kwargs: fake_x0)
+    monkeypatch.setattr(
+        teacher,
+        "predict_x0",
+        lambda *args, conditional, **kwargs: real_x0 if conditional else torch.zeros_like(real_x0),
+    )
+
+    loss, metrics, _ = method._tdm_generator_loss(SimpleNamespace(), batch)
+    loss.backward()
+
+    per_sample_dim = pred[0].numel()
+    huber_c = 0.00054 * (per_sample_dim**0.5)
+    reference_pred = torch.zeros_like(pred, requires_grad=True)
+    reference_error = reference_pred - real_x0
+    reference_norm = reference_error.flatten(1).norm(dim=1)
+    reference_loss = (torch.sqrt(reference_norm.square() + huber_c**2) - huber_c).mean()
+    reference_loss.backward()
+
+    assert_close(loss, reference_loss.detach())
+    assert_close(pred.grad, reference_pred.grad)
+    assert metrics["tdm/generator/use_pseudo_huber"] == 1.0
+
+
+def test_tdm_rejects_mutually_exclusive_huber_modes() -> None:
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        _build_method(method_overrides={"use_huber": True, "use_pseudo_huber": True})
+
+
 def test_tdm_fake_score_weights_each_batch_element_at_its_target_sigma() -> None:
     method, _, _ = _build_method()
     context = SimpleNamespace(

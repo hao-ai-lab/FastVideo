@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any, Literal, TYPE_CHECKING
@@ -229,6 +230,15 @@ class TDMMethod(DMD2Method):
         if huber_c <= 0:
             raise ValueError("method.huber_c must be positive")
         self._huber_c = float(huber_c)
+
+        self._use_pseudo_huber = require_bool(
+            mcfg,
+            "use_pseudo_huber",
+            default=False,
+            where="method.use_pseudo_huber",
+        )
+        if self._use_pseudo_huber and self._use_huber:
+            raise ValueError("method.use_huber and method.use_pseudo_huber are mutually exclusive")
 
         snr_clip = get_optional_float(
             mcfg,
@@ -909,9 +919,12 @@ class TDMMethod(DMD2Method):
             target_delta = torch.nan_to_num(delta)
             target = generator_pred_x0.detach() + target_delta
 
-        loss = self._generator_elementwise_loss(generator_pred_x0, target)
-        if self._normalize_generator_delta:
-            loss = loss / denom.clamp_min(self._sigma_eps)
+        if self._use_pseudo_huber:
+            loss = self._generator_pseudo_huber_loss(generator_pred_x0, target)
+        else:
+            loss = self._generator_elementwise_loss(generator_pred_x0, target)
+            if self._normalize_generator_delta:
+                loss = loss / denom.clamp_min(self._sigma_eps)
         batch.dmd_latent_vis_dict.update({
             "dmd_timestep": target_timestep.float().detach(),
             "generator_timestep": source_timestep.float().detach(),
@@ -928,8 +941,26 @@ class TDMMethod(DMD2Method):
             "tdm/generator/target_delta_abs_mean": target_delta.detach().float().abs().mean(),
             "tdm/generator/normalization_denom": denom.detach().float().mean(),
             "tdm/generator/normalize_delta": float(self._normalize_generator_delta),
+            "tdm/generator/use_pseudo_huber": float(self._use_pseudo_huber),
         }
         return loss.mean(), metrics, (source_timestep, batch.attn_metadata_vsa)
+
+    def _generator_pseudo_huber_loss(
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+    ) -> torch.Tensor:
+        """Paper Eq. 11 surrogate: per-sample vector-norm pseudo-Huber.
+
+        ``sqrt(||pred - target||_2^2 + c^2) - c`` with ``c = 0.00054 * sqrt(d)``
+        and ``d`` the flattened per-sample latent size. No DMD delta
+        normalization is applied.
+        """
+        error = pred.float() - target.float()
+        per_sample_dim = error[0].numel()
+        huber_c = 0.00054 * math.sqrt(float(per_sample_dim))
+        error_norm = error.flatten(1).norm(dim=1)
+        return torch.sqrt(error_norm.square() + huber_c**2) - huber_c
 
     def _generator_elementwise_loss(
         self,
