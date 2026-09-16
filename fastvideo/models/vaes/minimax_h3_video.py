@@ -837,7 +837,7 @@ class AutoencoderKLMiniMaxH3(nn.Module):
                     # 28 launches of a forward too small to fill the GPU.
                     num_columns = len(x_indices)
                     for row_start in range(0, len(y_indices), batch_rows):
-                        row_slice = list(zip(y_indices, y_lengths))[row_start:row_start + batch_rows]
+                        row_slice = list(zip(y_indices, y_lengths, strict=True))[row_start:row_start + batch_rows]
                         # Same ``tile.<row>.<column>`` markers as the per-tile
                         # loop below so a profile still enumerates the grid;
                         # here each one only covers the tile's gather, and the
@@ -846,7 +846,8 @@ class AutoencoderKLMiniMaxH3(nn.Module):
                         tile_views = []
                         for local_row, (y_position, y_length) in enumerate(row_slice):
                             row_index = row_start + local_row
-                            for column_index, (x_position, x_length) in enumerate(zip(x_indices, x_lengths)):
+                            for column_index, (x_position, x_length) in enumerate(zip(x_indices, x_lengths,
+                                                                                      strict=True)):
                                 with nvtx_range(f"minimax_h3.vae.decode_clip.tile.{row_index}.{column_index}"):
                                     tile_views.append(z[
                                         ...,
@@ -865,8 +866,10 @@ class AutoencoderKLMiniMaxH3(nn.Module):
                         # (see the per-tile loop below).
                         del projected_tiles, tiles
                         for local_row in range(len(row_slice)):
-                            rows.append([decoded[index:index + 1]
-                                         for index in range(local_row * num_columns, (local_row + 1) * num_columns)])
+                            rows.append([
+                                decoded[index:index + 1]
+                                for index in range(local_row * num_columns, (local_row + 1) * num_columns)
+                            ])
                     y_indices = []  # the per-tile loop below is skipped
                 for row_index, (y_position, y_length) in enumerate(zip(y_indices, y_lengths)):
                     row = []
