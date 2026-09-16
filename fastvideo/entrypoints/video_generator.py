@@ -1247,7 +1247,14 @@ class VideoGenerator:
                     "aac",
                     "-pix_fmt",
                     os.getenv("FASTVIDEO_OUTPUT_PIX_FMT", "yuv420p"),
-                    "-shortest",
+                    # Audio and video decoders may produce different durations.
+                    # Preserve every video frame and pad/trim audio to match.
+                    "-af",
+                    "apad",
+                    "-frames:v",
+                    str(len(frames)),
+                    "-t",
+                    str(len(frames) / fps),
                     "-movflags",
                     "+faststart",
                     output_path,

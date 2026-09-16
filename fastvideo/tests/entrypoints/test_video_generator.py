@@ -1,3 +1,6 @@
+import json
+import shutil
+import subprocess
 import os
 from types import SimpleNamespace
 import warnings
@@ -958,3 +961,29 @@ def test_generate_batched_request_rejects_mismatched_media_inputs(monkeypatch):
                 prompt=["first prompt", "second prompt"],
                 inputs=InputConfig(image_path=["first.png"]),
             ))
+
+
+@pytest.mark.parametrize("audio_seconds", [1, 2, 3])
+def test_ffmpeg_pipe_preserves_video_duration(tmp_path, monkeypatch, audio_seconds):
+    ffmpeg = shutil.which("ffmpeg")
+    ffprobe = shutil.which("ffprobe")
+    if ffmpeg is None or ffprobe is None:
+        pytest.skip("ffmpeg and ffprobe are required")
+    monkeypatch.setenv("FASTVIDEO_FFMPEG_BIN", ffmpeg)
+    monkeypatch.setenv("FASTVIDEO_VIDEO_CODEC", "libx264")
+    monkeypatch.setenv("FASTVIDEO_OUTPUT_PIX_FMT", "yuv420p")
+    fps, frame_count, sample_rate = 24, 48, 32000
+    frames = [np.full((64, 64, 3), index * 4, dtype=np.uint8) for index in range(frame_count)]
+    audio = np.zeros((2, audio_seconds * sample_rate), dtype=np.float32)
+    output = tmp_path / "video.mp4"
+
+    assert VideoGenerator._save_video_with_audio_ffmpeg_pipe(str(output), frames, fps, audio, sample_rate)
+    probe = json.loads(subprocess.check_output([
+        ffprobe, "-v", "error", "-count_frames", "-show_entries",
+        "stream=codec_type,nb_read_frames,duration", "-of", "json", str(output),
+    ], text=True))
+    video = next(stream for stream in probe["streams"] if stream["codec_type"] == "video")
+    sound = next(stream for stream in probe["streams"] if stream["codec_type"] == "audio")
+    assert int(video["nb_read_frames"]) == frame_count
+    assert float(video["duration"]) == pytest.approx(frame_count / fps, abs=1 / fps)
+    assert float(sound["duration"]) == pytest.approx(frame_count / fps, abs=1 / fps)
