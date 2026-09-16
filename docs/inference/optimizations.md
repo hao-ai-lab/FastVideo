@@ -384,6 +384,21 @@ inductor options, and torch.compile forbids mode+options); it is
 independent of `enable_torch_compile`, and when both are set the regional
 compile wins for the DiT.
 
+### MiniMax-H3 VAE tile batching
+
+The H3 video VAE decodes a 768x1344 clip as a grid of 28 tiles. Each tile on
+its own is too small to fill a B200, so the decode stage stacks whole tile
+rows on the batch dimension and hands the compiled decoder one larger forward
+instead of many small ones. Measured on 8 x B200, one chunk takes 415 ms tile
+by tile, 295 ms one row per forward, and 275 ms with every row in one forward,
+which is the default.
+
+`FASTVIDEO_H3_VAE_TILE_BATCH_ROWS` sets how many tile rows go into one
+forward. Leave it unset for all of them; set it to a smaller number when the
+batched decode does not fit in memory, or to `0` to decode tile by tile as
+before. Batching applies only when every tile of the grid has the same
+geometry; a ragged grid falls back to the per-tile loop on its own.
+
 ### What to expect from generic compile
 
 The Wan result below measures the existing generic
