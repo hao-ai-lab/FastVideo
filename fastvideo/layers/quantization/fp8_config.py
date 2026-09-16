@@ -18,6 +18,11 @@ from fastvideo.layers.quantization.base_config import (
     QuantizationConfig,
     QuantizeMethodBase,
 )
+from fastvideo.layers.quantization.fp8_quant_kernels import (
+    quantize_rowwise_fused,
+    quantize_tensorwise_fused,
+    triton_quant_available,
+)
 from fastvideo.models.utils import set_weight_attrs
 
 logger = logging.getLogger(__name__)
@@ -68,6 +73,8 @@ def _supports_fp8_compute() -> bool:
 
 def _quantize_tensorwise(x_2d: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """Returns ``(x_fp8 [M, K], x_scale [1] float32)``."""
+    if triton_quant_available(x_2d):
+        return quantize_tensorwise_fused(x_2d)
     x_absmax = x_2d.abs().amax().float()
     x_scale = (x_absmax / FP8_MAX).clamp(min=FP8_MIN_SCALE)
     x_fp8 = (x_2d / x_scale.to(x_2d.dtype)).clamp(-FP8_MAX, FP8_MAX).to(FP8_DTYPE)
@@ -76,6 +83,8 @@ def _quantize_tensorwise(x_2d: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor
 
 def _quantize_rowwise(x_2d: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """Returns ``(x_fp8 [M, K], x_scale [M, 1] float32)``."""
+    if triton_quant_available(x_2d):
+        return quantize_rowwise_fused(x_2d)
     x_absmax = x_2d.abs().amax(dim=-1, keepdim=True).float()
     x_scale = (x_absmax / FP8_MAX).clamp(min=FP8_MIN_SCALE)
     x_fp8 = (x_2d / x_scale.to(x_2d.dtype)).clamp(-FP8_MAX, FP8_MAX).to(FP8_DTYPE)
