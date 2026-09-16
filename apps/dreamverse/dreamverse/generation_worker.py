@@ -80,6 +80,10 @@ class VideoGenerationWorker:
         segment_idx: int,
         image_path: str | None,
         reset_conditioning: bool,
+        *,
+        frame_width: int | None = None,
+        frame_height: int | None = None,
+        num_frames: int | None = None,
     ) -> StepResult:
         """Generate one segment through the selected model backend."""
         return self._require_backend().generate_step(
@@ -87,6 +91,9 @@ class VideoGenerationWorker:
             segment_idx,
             image_path,
             reset_conditioning,
+            frame_width=frame_width,
+            frame_height=frame_height,
+            num_frames=num_frames,
         )
 
     def warmup(self, prompt: str) -> dict[str, float]:

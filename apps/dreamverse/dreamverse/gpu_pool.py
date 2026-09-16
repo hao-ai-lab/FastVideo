@@ -189,6 +189,9 @@ def gpu_worker_process(
                         segment_idx,
                         image_path=payload.image_path,
                         reset_conditioning=payload.reset_conditioning,
+                        frame_width=payload.frame_width,
+                        frame_height=payload.frame_height,
+                        num_frames=payload.num_frames,
                     )
                     head_trim_frames = step_result.head_trim_frames
                     head_trim_audio_frames = step_result.head_trim_audio_frames
@@ -753,6 +756,10 @@ class GPUSlot:
         segment_idx: int = 1,
         image_path: str | None = None,
         reset_conditioning: bool = False,
+        *,
+        frame_width: int | None = None,
+        frame_height: int | None = None,
+        num_frames: int | None = None,
     ) -> dict[str, float]:
         """Execute a generation step for a specific user.
 
@@ -766,6 +773,9 @@ class GPUSlot:
             segment_idx=segment_idx,
             image_path=image_path,
             reset_conditioning=bool(reset_conditioning),
+            frame_width=frame_width,
+            frame_height=frame_height,
+            num_frames=num_frames,
         )
         response = await self._send_command_tagged(Command(CommandType.USER_STEP, payload=payload, user_id=user_id),
                                                    timeout=1800.0)

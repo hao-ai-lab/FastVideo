@@ -200,6 +200,10 @@ class MiniMaxH3GenerationBackend:
         segment_idx: int,
         image_path: str | None,
         reset_conditioning: bool,
+        *,
+        frame_width: int | None = None,
+        frame_height: int | None = None,
+        num_frames: int | None = None,
     ) -> StepResult:
         """Generate one synchronized FastH3 segment and retain its last frame.
 
@@ -207,6 +211,7 @@ class MiniMaxH3GenerationBackend:
         conditioned frame and its matching audio duration are trimmed before
         streaming so adjacent segments do not duplicate media.
         """
+        del frame_width, frame_height, num_frames
         if self.generator is None:
             raise RuntimeError("FastH3 generator is not initialized.")
         conditioning_image, uses_continuation = self._select_conditioning_image(

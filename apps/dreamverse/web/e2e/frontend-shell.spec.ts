@@ -28,6 +28,6 @@ test.describe('frontend shell', () => {
 
     await expect(page.getByText('Direct scenes in seconds')).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole('button', { name: /FastLTX/i }).first()).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByText('Describe your video or mention elements')).toBeVisible({ timeout: 30_000 });
+    await expect(continuation).toHaveAttribute('placeholder', /Describe your video or mention elements/i);
   });
 });
