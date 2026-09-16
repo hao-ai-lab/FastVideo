@@ -189,7 +189,9 @@ def scatter_into_tile_buf(
     fragment it was written from — VSA-H3's is owned by the metadata builder,
     which serves the whole training run — then anchors that fragment, and the
     activations its backward saved, for the rest of training. A caller inside a
-    grad-tracking forward must therefore pass ``buf=None``.
+    grad-tracking forward should therefore pass ``buf=None`` unless the buffer
+    is scoped to that forward: VSA-H3 does so unconditionally, and Wan VSA
+    exposes the choice through ``cache_tile_buf`` (training defaults it off).
     """
     if (buf is None or buf.shape != target_shape or buf.dtype != x.dtype or buf.device != x.device):
         buf = torch.zeros(target_shape, device=x.device, dtype=x.dtype)

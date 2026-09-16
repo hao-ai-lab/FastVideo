@@ -507,11 +507,13 @@ class MiniMaxH3VSAImpl(AttentionImpl):
     def tile(self, x: torch.Tensor, attn_metadata: MiniMaxH3VSAMetadata) -> torch.Tensor:
         """Scatter rows into the padded tile buffer (pad positions stay zero).
 
-        The returned tensor aliases the builder-owned buffer; callers must
-        consume it before the next ``tile()`` (both call sites in
-        ``forward()`` read it immediately). Odd tile-64 no-grad sm100a
-        requests carry one additional all-zero tile internally; metadata and
-        all observable outputs retain the logical geometry.
+        Without grad tracking the returned tensor aliases the builder-owned
+        buffer; callers must consume it before the next ``tile()`` (both call
+        sites in ``forward()`` read it immediately). A grad-tracking forward
+        instead receives a fresh buffer and leaves the holder untouched, so
+        the builder never retains autograd state across steps. Odd tile-64
+        no-grad sm100a requests carry one additional all-zero tile internally;
+        metadata and all observable outputs retain the logical geometry.
         """
         if x.shape[1] != attn_metadata.total_seq_length:
             raise ValueError(f"VSA-H3 metadata was built for sequence length {attn_metadata.total_seq_length}, "
