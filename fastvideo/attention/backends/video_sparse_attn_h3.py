@@ -532,6 +532,17 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         kernel_tiles = n_tiles + int(needs_sm100a_pair)
         target_shape = (x.shape[0], kernel_tiles * attn_metadata.tile_elems, x.shape[-2], x.shape[-1])
 
+        # A grad-tracking forward must not reuse the builder-owned buffer. The
+        # holder outlives the training step -- one builder serves the whole run,
+        # and every step's metadata references the same holder -- while every
+        # VSA layer writes this one buffer in place. A graph-tracked tiled
+        # tensor left on the holder therefore anchors the step's in-place
+        # autograd edges, and through them the activations they saved, for the
+        # rest of training. This is the VSA-H3 counterpart of the Wan tile-cache
+        # OOM (#1423), which training fixed with ``vsa_cache_tile_buf=False``.
+        if grad_mode:
+            return scatter_into_tile_buf(x, target_shape, attn_metadata.untile_combined_index, None)
+
         # ``untile_combined_index`` maps each packed row to a logical tile
         # slot. Different geometries can share one transport shape; clear a
         # reused allocation once when the mapping identity changes so no old

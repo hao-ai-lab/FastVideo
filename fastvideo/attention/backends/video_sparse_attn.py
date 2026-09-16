@@ -182,6 +182,14 @@ def scatter_into_tile_buf(
     buffer's lifetime (per-metadata for Wan VSA, per-builder for VSA-H3) and
     its aliasing contract: the result is only valid until the next call with
     the same buffer.
+
+    Callers that pass ``buf`` also own its *graph* contract: ``buf[:, dst] = x``
+    is an autograd-tracked in-place write, so a non-grad destination becomes a
+    graph node as soon as ``x`` tracks gradients. A buffer that outlives the
+    fragment it was written from — VSA-H3's is owned by the metadata builder,
+    which serves the whole training run — then anchors that fragment, and the
+    activations its backward saved, for the rest of training. A caller inside a
+    grad-tracking forward must therefore pass ``buf=None``.
     """
     if (buf is None or buf.shape != target_shape or buf.dtype != x.dtype or buf.device != x.device):
         buf = torch.zeros(target_shape, device=x.device, dtype=x.dtype)
