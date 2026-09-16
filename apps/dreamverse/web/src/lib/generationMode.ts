@@ -39,6 +39,16 @@ export function getGenerationMode(value: GenerationMode) {
 	return GENERATION_MODES.find((mode) => mode.id === value) ?? GENERATION_MODES[0];
 }
 
+const GENERATION_MODE_TO_CREATION_MODE: Record<GenerationMode, CreationModeId> = {
+	t2va: "t2v",
+	fl2va: "fl2av",
+	ref2va: "ref2av",
+};
+
+export function fromGenerationMode(mode: GenerationMode): CreationModeId {
+	return GENERATION_MODE_TO_CREATION_MODE[mode];
+}
+
 export function toGenerationMode(modeId: CreationModeId): GenerationMode {
 	return CREATION_MODE_TO_GENERATION_MODE[modeId];
 }

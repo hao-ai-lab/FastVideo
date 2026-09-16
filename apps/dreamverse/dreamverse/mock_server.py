@@ -31,6 +31,8 @@ from fastapi.staticfiles import StaticFiles
 
 from dreamverse._deps import require_dreamverse_runtime_deps
 from dreamverse.config import FRONTEND_STATIC_DIR_CANDIDATES, GENERATION_SEGMENT_CAP
+from dreamverse.creation_capabilities import lobby_capabilities_as_dict
+from dreamverse.session_creation_config import parse_session_creation_config, validate_generation_mode_assets
 from dreamverse.session_init_image import cleanup_session_init_image, persist_session_init_image
 
 LATENCY_MS = 200
@@ -225,6 +227,11 @@ async def prompt_system_config():
     }
 
 
+@app.get("/creation-capabilities")
+async def creation_capabilities():
+    return lobby_capabilities_as_dict()
+
+
 @app.get("/curated-presets")
 async def curated_presets():
     presets = [
@@ -290,6 +297,8 @@ async def websocket_endpoint(websocket: WebSocket):
     send_lock = asyncio.Lock()
     stop_event = asyncio.Event()
     session_init_image = None
+    session_last_frame_image = None
+    session_creation_config = None
 
     async def ws_send_json(payload: dict) -> None:
         async with send_lock:
@@ -348,6 +357,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
         try:
             session_init_image = persist_session_init_image(init_data.get("initial_image"))
+            session_last_frame_image = persist_session_init_image(init_data.get("last_frame_image"))
         except ValueError as exc:
             await ws_send_json({
                 "type": "error",
@@ -356,13 +366,31 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.close(code=1003, reason="Invalid initial image")
             return
 
+        try:
+            session_creation_config = parse_session_creation_config(init_data)
+            validate_generation_mode_assets(
+                session_creation_config.generation_mode,
+                has_initial_image=session_init_image is not None,
+                has_last_frame_image=session_last_frame_image is not None,
+            )
+        except ValueError as exc:
+            await ws_send_json({
+                "type": "error",
+                "message": str(exc),
+            })
+            await websocket.close(code=1003, reason="Invalid creation config")
+            return
+
         timeout_task = asyncio.create_task(session_timeout())
 
-        await ws_send_json({
+        gpu_assigned_payload: dict[str, object] = {
             "type": "gpu_assigned",
             "gpu_id": 0,
             "session_timeout": SESSION_TIMEOUT_SECONDS,
-        })
+        }
+        if session_creation_config is not None:
+            gpu_assigned_payload["creation_config"] = session_creation_config.as_dict()
+        await ws_send_json(gpu_assigned_payload)
 
         raw_prompt_queue: asyncio.Queue[PromptSubmission] = asyncio.Queue()
         ready_prompt_queue: asyncio.Queue[ReadyPrompt] = asyncio.Queue()
@@ -391,8 +419,16 @@ async def websocket_endpoint(websocket: WebSocket):
             if previous_session_image is not None:
                 cleanup_session_init_image(previous_session_image)
 
+        def replace_last_frame_image(last_frame_payload: object) -> None:
+            nonlocal session_last_frame_image
+            next_last_frame_image = persist_session_init_image(last_frame_payload)
+            previous_last_frame_image = session_last_frame_image
+            session_last_frame_image = next_last_frame_image
+            if previous_last_frame_image is not None:
+                cleanup_session_init_image(previous_last_frame_image)
+
         async def send_stream_start(seed_reason: str) -> None:
-            await ws_send_json({
+            stream_start_payload: dict[str, object] = {
                 "type": "ltx2_stream_start",
                 "total_segments": len(curated_prompts),
                 "preset_id": preset_id,
@@ -400,8 +436,15 @@ async def websocket_endpoint(websocket: WebSocket):
                 "live_mode": True,
                 "loop_generation_enabled": loop_generation_enabled,
                 "loop_iteration": loop_iteration,
-                "generation_segment_cap": 0,
-            })
+                "generation_segment_cap": (
+                    session_creation_config.generation_segment_cap
+                    if session_creation_config is not None
+                    else GENERATION_SEGMENT_CAP
+                ),
+            }
+            if session_creation_config is not None:
+                stream_start_payload["creation_config"] = session_creation_config.as_dict()
+            await ws_send_json(stream_start_payload)
             if seed_reason == "init":
                 await ws_send_json({
                     "type": "seed_prompts_updated",
@@ -509,6 +552,7 @@ async def websocket_endpoint(websocket: WebSocket):
             nonlocal project_active
             nonlocal project_stream_started
             nonlocal pending_project_end
+            nonlocal session_creation_config
 
             next_initial_rollout_prompt = str(payload.get("initial_rollout_prompt") or "").strip()
             next_preset_id = str(payload.get("preset_id") or "").strip()
@@ -520,6 +564,21 @@ async def websocket_endpoint(websocket: WebSocket):
 
             try:
                 replace_session_image(payload.get("initial_image"))
+                replace_last_frame_image(payload.get("last_frame_image"))
+            except ValueError as exc:
+                await ws_send_json({
+                    "type": "error",
+                    "message": str(exc),
+                })
+                return False
+
+            try:
+                session_creation_config = parse_session_creation_config(payload)
+                validate_generation_mode_assets(
+                    session_creation_config.generation_mode,
+                    has_initial_image=session_init_image is not None,
+                    has_last_frame_image=session_last_frame_image is not None,
+                )
             except ValueError as exc:
                 await ws_send_json({
                     "type": "error",
@@ -1182,6 +1241,7 @@ async def websocket_endpoint(websocket: WebSocket):
     finally:
         stop_event.set()
         cleanup_session_init_image(session_init_image)
+        cleanup_session_init_image(session_last_frame_image)
 
 
 for static_dir in FRONTEND_STATIC_DIR_CANDIDATES:

@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 from fastapi import WebSocket, WebSocketDisconnect
 from dreamverse.gpu_pool import GPUSlot
 from dreamverse.session_init_image import cleanup_session_init_image, persist_session_init_image
+from dreamverse.session_creation_config import parse_session_creation_config, validate_generation_mode_assets
 from dreamverse.worker_ipc import MediaChunk, MediaComplete, MediaInit
 
 from dreamverse.config import (
@@ -156,6 +157,9 @@ class SessionController:
         prompt_worker_task: asyncio.Task | None = None
         rewrite_seed_prompts_task: asyncio.Task | None = None
         session_init_image = None
+        session_last_frame_image = None
+        session_creation_config = None
+        session_generation_segment_cap = GENERATION_SEGMENT_CAP
 
         async def session_timeout():
             """Close the session after timeout."""
@@ -237,12 +241,29 @@ class SessionController:
 
             try:
                 session_init_image = persist_session_init_image(init_data.get("initial_image"))
+                session_last_frame_image = persist_session_init_image(init_data.get("last_frame_image"))
             except ValueError as exc:
                 await ws_send_json({
                     "type": "error",
                     "message": str(exc),
                 })
                 await websocket.close(code=1003, reason="Invalid initial image")
+                return
+
+            try:
+                session_creation_config = parse_session_creation_config(init_data)
+                session_generation_segment_cap = session_creation_config.generation_segment_cap
+                validate_generation_mode_assets(
+                    session_creation_config.generation_mode,
+                    has_initial_image=session_init_image is not None,
+                    has_last_frame_image=session_last_frame_image is not None,
+                )
+            except ValueError as exc:
+                await ws_send_json({
+                    "type": "error",
+                    "message": str(exc),
+                })
+                await websocket.close(code=1003, reason="Invalid creation config")
                 return
 
             if preset_id:
@@ -256,6 +277,16 @@ class SessionController:
             if session_init_image is not None:
                 print(f"Client {client_id[:8]} uploaded initial image: "
                       f"{session_init_image.display_name}")
+            if session_last_frame_image is not None:
+                print(f"Client {client_id[:8]} uploaded last frame image: "
+                      f"{session_last_frame_image.display_name}")
+            if session_creation_config is not None:
+                print(f"Client {client_id[:8]} creation config: "
+                      f"model={session_creation_config.model_id}, "
+                      f"mode={session_creation_config.generation_mode}, "
+                      f"size={session_creation_config.frame_width}x{session_creation_config.frame_height}, "
+                      f"duration={session_creation_config.duration_sec}s, "
+                      f"segment_cap={session_creation_config.generation_segment_cap}")
 
             # Acquire a GPU slot.
             gpu_id, slot = await self.gpu_pool.acquire(client_id, websocket)
@@ -264,14 +295,20 @@ class SessionController:
             timeout_task = asyncio.create_task(session_timeout())
 
             # Join the engine on this GPU.
-            await slot.join_user(client_id, model_id=ACTIVE_MODEL_ID)
+            await slot.join_user(
+                client_id,
+                model_id=session_creation_config.model_id if session_creation_config is not None else ACTIVE_MODEL_ID,
+            )
 
             # Notify client they're connected to a GPU.
-            await ws_send_json({
+            gpu_assigned_payload: dict[str, object] = {
                 "type": "gpu_assigned",
                 "gpu_id": gpu_id,
                 "session_timeout": SESSION_TIMEOUT_SECONDS,
-            })
+            }
+            if session_creation_config is not None:
+                gpu_assigned_payload["creation_config"] = session_creation_config.as_dict()
+            await ws_send_json(gpu_assigned_payload)
             await log_event(
                 "gpu_assigned",
                 {
@@ -314,6 +351,14 @@ class SessionController:
                 session_init_image = next_session_init_image
                 if previous_session_init_image is not None:
                     cleanup_session_init_image(previous_session_init_image)
+
+            def replace_last_frame_image(last_frame_payload: object) -> None:
+                nonlocal session_last_frame_image
+                next_last_frame_image = persist_session_init_image(last_frame_payload)
+                previous_last_frame_image = session_last_frame_image
+                session_last_frame_image = next_last_frame_image
+                if previous_last_frame_image is not None:
+                    cleanup_session_init_image(previous_last_frame_image)
 
             async def schedule_simple_generate_request(payload: dict[str, object]) -> None:
                 nonlocal preset_id
@@ -452,6 +497,8 @@ class SessionController:
                 nonlocal project_active
                 nonlocal project_stream_started
                 nonlocal pending_project_end
+                nonlocal session_creation_config
+                nonlocal session_generation_segment_cap
 
                 next_initial_rollout_prompt = str(payload.get("initial_rollout_prompt") or "").strip()
                 next_enhancement_enabled = bool(payload.get("enhancement_enabled", True))
@@ -498,6 +545,22 @@ class SessionController:
 
                 try:
                     replace_session_init_image(payload.get("initial_image"))
+                    replace_last_frame_image(payload.get("last_frame_image"))
+                except ValueError as exc:
+                    await ws_send_json({
+                        "type": "error",
+                        "message": str(exc),
+                    })
+                    return False
+
+                try:
+                    session_creation_config = parse_session_creation_config(payload)
+                    session_generation_segment_cap = session_creation_config.generation_segment_cap
+                    validate_generation_mode_assets(
+                        session_creation_config.generation_mode,
+                        has_initial_image=session_init_image is not None,
+                        has_last_frame_image=session_last_frame_image is not None,
+                    )
                 except ValueError as exc:
                     await ws_send_json({
                         "type": "error",
@@ -941,7 +1004,7 @@ class SessionController:
                             "segment_cap":
                             _resolve_generation_segment_cap(
                                 single_clip_mode=single_clip_mode,
-                                cap=GENERATION_SEGMENT_CAP,
+                                cap=session_generation_segment_cap,
                             ),
                         })
                         continue
@@ -1281,27 +1344,22 @@ class SessionController:
                     ))
             else:
                 project_stream_started = True
-                await ws_send_json({
-                    "type":
-                    "ltx2_stream_start",
-                    "total_segments":
-                    len(curated_prompts),
-                    "preset_id":
-                    preset_id,
-                    "stream_mode":
-                    "av_fmp4",
-                    "live_mode":
-                    True,
-                    "loop_generation_enabled":
-                    loop_generation_enabled,
-                    "loop_iteration":
-                    loop_iteration,
-                    "generation_segment_cap":
-                    _resolve_generation_segment_cap(
+                stream_start_payload: dict[str, object] = {
+                    "type": "ltx2_stream_start",
+                    "total_segments": len(curated_prompts),
+                    "preset_id": preset_id,
+                    "stream_mode": "av_fmp4",
+                    "live_mode": True,
+                    "loop_generation_enabled": loop_generation_enabled,
+                    "loop_iteration": loop_iteration,
+                    "generation_segment_cap": _resolve_generation_segment_cap(
                         single_clip_mode=single_clip_mode,
-                        cap=GENERATION_SEGMENT_CAP,
+                        cap=session_generation_segment_cap,
                     ),
-                })
+                }
+                if session_creation_config is not None:
+                    stream_start_payload["creation_config"] = session_creation_config.as_dict()
+                await ws_send_json(stream_start_payload)
                 await ws_send_json({
                     "type": "seed_prompts_updated",
                     "prompts": seed_prompt_memory,
@@ -1340,27 +1398,22 @@ class SessionController:
 
                     loop_iteration += 1
                     project_stream_started = True
-                    await ws_send_json({
-                        "type":
-                        "ltx2_stream_start",
-                        "total_segments":
-                        len(curated_prompts),
-                        "preset_id":
-                        preset_id,
-                        "stream_mode":
-                        "av_fmp4",
-                        "live_mode":
-                        True,
-                        "loop_generation_enabled":
-                        loop_generation_enabled,
-                        "loop_iteration":
-                        loop_iteration,
-                        "generation_segment_cap":
-                        _resolve_generation_segment_cap(
+                    restart_stream_payload: dict[str, object] = {
+                        "type": "ltx2_stream_start",
+                        "total_segments": len(curated_prompts),
+                        "preset_id": preset_id,
+                        "stream_mode": "av_fmp4",
+                        "live_mode": True,
+                        "loop_generation_enabled": loop_generation_enabled,
+                        "loop_iteration": loop_iteration,
+                        "generation_segment_cap": _resolve_generation_segment_cap(
                             single_clip_mode=single_clip_mode,
-                            cap=GENERATION_SEGMENT_CAP,
+                            cap=session_generation_segment_cap,
                         ),
-                    })
+                    }
+                    if session_creation_config is not None:
+                        restart_stream_payload["creation_config"] = session_creation_config.as_dict()
+                    await ws_send_json(restart_stream_payload)
                     if nonlocal_reason == "loop_restart":
                         await ws_send_json({
                             "type": "loop_restarted",
@@ -1389,13 +1442,14 @@ class SessionController:
                     pending_simple_prompt_submission = None
 
                 if (not single_clip_mode and not generation_cap_blocked and not rollout_waiting_for_rewrite
-                        and GENERATION_SEGMENT_CAP > 0 and generated_segment_count >= GENERATION_SEGMENT_CAP):
+                        and session_generation_segment_cap > 0
+                        and generated_segment_count >= session_generation_segment_cap):
                     loop_generation_enabled = False
                     rollout_waiting_for_rewrite = True
                     _main_print(
                         "INFO",
                         f"Segment cap reached for client {client_id[:8]} "
-                        f"(cap_segments={GENERATION_SEGMENT_CAP}, "
+                        f"(cap_segments={session_generation_segment_cap}, "
                         f"generated_segments={generated_segment_count}); "
                         "waiting for rollout rewrite",
                     )
@@ -1620,6 +1674,9 @@ class SessionController:
                 pending_reset_conditioning = False
                 step_image_path = (str(session_init_image.file_path)
                                    if segment_idx == 1 and session_init_image is not None else None)
+                step_frame_width = session_creation_config.frame_width if session_creation_config is not None else None
+                step_frame_height = session_creation_config.frame_height if session_creation_config is not None else None
+                step_num_frames = session_creation_config.num_frames if session_creation_config is not None else None
                 step_task = asyncio.create_task(
                     slot.user_step(
                         client_id,
@@ -1627,6 +1684,9 @@ class SessionController:
                         segment_idx=segment_idx,
                         image_path=step_image_path,
                         reset_conditioning=step_reset_conditioning,
+                        frame_width=step_frame_width,
+                        frame_height=step_frame_height,
+                        num_frames=step_num_frames,
                     ))
                 segment_generation_active = True
                 try:
@@ -1808,3 +1868,4 @@ class SessionController:
                     await self.gpu_pool.release(client_id)
             finally:
                 cleanup_session_init_image(session_init_image)
+                cleanup_session_init_image(session_last_frame_image)

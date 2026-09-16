@@ -23,6 +23,8 @@ import {
 	CREATION_MODELS,
 	CREATION_MODES,
 	RESOLUTIONS,
+	UNSUPPORTED_CREATION_MODES,
+	UNSUPPORTED_RESOLUTIONS,
 	modeRequiresReference,
 	modeUsesDualFrames,
 	type AspectRatioId,
@@ -33,6 +35,14 @@ import {
 	formatDurationLabel,
 	formatResolutionLabel,
 } from "@/lib/creationConfig";
+import {
+	DEFAULT_LOBBY_CAPABILITIES_BUNDLE,
+	isSupportedCreationMode,
+	isSupportedResolution,
+	resolveModelCapabilities,
+	unsupportedModeNotice,
+	type LobbyCreationCapabilities,
+} from "@/lib/creationCapabilities";
 import { cn } from "@/lib/utils";
 
 const PROMPT_MAX_LENGTH = 500;
@@ -64,6 +74,7 @@ interface CreationComposerProps {
 	onLastFrameSelect?: (file: File | null) => void;
 	onSpeechTranscript?: (text: string) => void;
 	onSpeechInterimChange?: (text: string) => void;
+	capabilities?: LobbyCreationCapabilities;
 }
 
 export default function CreationComposer({
@@ -93,6 +104,7 @@ export default function CreationComposer({
 	onLastFrameSelect,
 	onSpeechTranscript,
 	onSpeechInterimChange,
+	capabilities = resolveModelCapabilities(DEFAULT_LOBBY_CAPABILITIES_BUNDLE, modelId),
 }: CreationComposerProps) {
 	const inputRef = useRef<HTMLTextAreaElement>(null);
 	const [sttBusy, setSttBusy] = useState(false);
@@ -100,8 +112,38 @@ export default function CreationComposer({
 	const [mentionOpen, setMentionOpen] = useState(false);
 	const [mentionStart, setMentionStart] = useState<number | null>(null);
 
-	const selectedModel = CREATION_MODELS.find((model) => model.id === modelId) ?? CREATION_MODELS[0];
-	const selectedMode = CREATION_MODES.find((mode) => mode.id === modeId) ?? CREATION_MODES[0];
+	const availableModels = useMemo(
+		() => CREATION_MODELS.filter((model) => capabilities.model_ids.includes(model.id)),
+		[capabilities.model_ids],
+	);
+	const availableModes = useMemo(
+		() => CREATION_MODES.filter((mode) => isSupportedCreationMode(mode.id, capabilities)),
+		[capabilities],
+	);
+	const unavailableModes = useMemo(
+		() =>
+			UNSUPPORTED_CREATION_MODES.filter(
+				(mode) => unsupportedModeNotice(mode.id, capabilities) !== null,
+			),
+		[capabilities],
+	);
+	const availableAspectRatios = useMemo(
+		() => ASPECT_RATIOS.filter((ratio) => capabilities.aspect_ratios.includes(ratio)),
+		[capabilities.aspect_ratios],
+	);
+	const availableResolutions = useMemo(
+		() => RESOLUTIONS.filter((item) => isSupportedResolution(item, capabilities)),
+		[capabilities],
+	);
+	const unavailableResolutions = useMemo(
+		() => UNSUPPORTED_RESOLUTIONS.filter((item) => !isSupportedResolution(item, capabilities)),
+		[capabilities],
+	);
+	const durationMin = capabilities.duration_sec[0] ?? 5;
+	const durationMax = capabilities.duration_sec[capabilities.duration_sec.length - 1] ?? 15;
+
+	const selectedModel = availableModels.find((model) => model.id === modelId) ?? availableModels[0];
+	const selectedMode = availableModes.find((mode) => mode.id === modeId) ?? availableModes[0];
 	const usesDualFrames = modeUsesDualFrames(modeId);
 	const requiresReference = modeRequiresReference(modeId);
 	const referenceMissing = requiresReference && !referencePreviewUrl;
@@ -278,7 +320,7 @@ export default function CreationComposer({
 						<DropdownMenuContent align="start" className="w-72">
 							<DropdownMenuLabel>Model</DropdownMenuLabel>
 							<DropdownMenuSeparator />
-							{CREATION_MODELS.map((model) => (
+							{availableModels.map((model) => (
 								<DropdownMenuItem key={model.id} onClick={() => onModelChange(model.id)} className="flex-col items-start gap-1 py-2.5">
 									<span className="flex items-center gap-2 text-sm font-medium">
 										{model.label}
@@ -301,10 +343,19 @@ export default function CreationComposer({
 						<DropdownMenuContent align="start" className="w-64">
 							<DropdownMenuLabel>Mode</DropdownMenuLabel>
 							<DropdownMenuSeparator />
-							{CREATION_MODES.map((mode) => (
+							{availableModes.map((mode) => (
 								<DropdownMenuItem key={mode.id} onClick={() => onModeChange(mode.id)} className="flex-col items-start gap-1 py-2.5">
 									<span className="text-sm font-medium">{mode.label}</span>
 									<span className="text-xs text-muted-foreground">{mode.description}</span>
+								</DropdownMenuItem>
+							))}
+							{unavailableModes.length > 0 && <DropdownMenuSeparator />}
+							{unavailableModes.map((mode) => (
+								<DropdownMenuItem key={mode.id} disabled className="flex-col items-start gap-1 py-2.5 opacity-60">
+									<span className="text-sm font-medium">{mode.label}</span>
+									<span className="text-xs text-muted-foreground">
+										{unsupportedModeNotice(mode.id, capabilities) ?? mode.description}
+									</span>
 								</DropdownMenuItem>
 							))}
 						</DropdownMenuContent>
@@ -320,7 +371,7 @@ export default function CreationComposer({
 						<PopoverContent align="start" className="w-80">
 							<p className="mb-3 text-xs font-medium text-muted-foreground">Aspect ratio</p>
 							<div className="grid grid-cols-3 gap-2">
-								{ASPECT_RATIOS.map((ratio) => (
+								{availableAspectRatios.map((ratio) => (
 									<button
 										key={ratio}
 										type="button"
@@ -337,7 +388,7 @@ export default function CreationComposer({
 							</div>
 							<p className="mb-2 mt-4 text-xs font-medium text-muted-foreground">Resolution</p>
 							<div className="flex flex-wrap gap-2">
-								{RESOLUTIONS.map((item) => (
+								{availableResolutions.map((item) => (
 									<button
 										key={item}
 										type="button"
@@ -346,6 +397,17 @@ export default function CreationComposer({
 											"studio-control studio-control-press studio-hover-surface rounded-full border px-3 py-1.5 text-xs font-medium",
 											resolution === item ? "border-accent-blue bg-accent-blue/10 text-foreground" : "border-border",
 										)}
+									>
+										{formatResolutionLabel(item)}
+									</button>
+								))}
+								{unavailableResolutions.map((item) => (
+									<button
+										key={item}
+										type="button"
+										disabled
+										className="studio-control rounded-full border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground opacity-50"
+										title="Not supported on FastLTX models yet"
 									>
 										{formatResolutionLabel(item)}
 									</button>
@@ -363,11 +425,11 @@ export default function CreationComposer({
 						</PopoverTrigger>
 						<PopoverContent align="start" className="w-72">
 							<p className="mb-3 text-xs font-medium text-muted-foreground">Total duration</p>
-							<Slider min={5} max={15} step={5} value={[durationSec]} onValueChange={(values) => onDurationChange(values[0] ?? 5)} />
+							<Slider min={durationMin} max={durationMax} step={5} value={[durationSec]} onValueChange={(values) => onDurationChange(values[0] ?? durationMin)} />
 							<div className="mt-3 flex items-center justify-between text-[11px] text-muted-foreground">
-								<span>5s</span>
+								<span>{formatDurationLabel(durationMin)}</span>
 								<span className="rounded-md border border-border px-2 py-1 text-xs font-medium text-foreground">{formatDurationLabel(durationSec)}</span>
-								<span>15s</span>
+								<span>{formatDurationLabel(durationMax)}</span>
 							</div>
 						</PopoverContent>
 					</Popover>

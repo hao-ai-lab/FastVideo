@@ -454,6 +454,10 @@ class LTX2GenerationBackend:
         segment_idx: int,
         image_path: str | None,
         reset_conditioning: bool,
+        *,
+        frame_width: int | None = None,
+        frame_height: int | None = None,
+        num_frames: int | None = None,
     ) -> StepResult:
         """Execute one generation step; snapshot state for the next segment."""
         timings: dict = {}
@@ -464,9 +468,9 @@ class LTX2GenerationBackend:
             prompt=prompt,
             negative_prompt="",
             save_video=False,
-            height=FRAME_HEIGHT,
-            width=FRAME_WIDTH,
-            num_frames=NUM_FRAMES,
+            height=frame_height or FRAME_HEIGHT,
+            width=frame_width or FRAME_WIDTH,
+            num_frames=num_frames or NUM_FRAMES,
             fps=24,
             num_inference_steps=NUM_INFERENCE_STEPS,
             guidance_scale=1.0,

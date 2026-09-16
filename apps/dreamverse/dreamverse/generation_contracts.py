@@ -36,6 +36,10 @@ class GenerationBackend(Protocol):
         segment_idx: int,
         image_path: str | None,
         reset_conditioning: bool,
+        *,
+        frame_width: int | None = None,
+        frame_height: int | None = None,
+        num_frames: int | None = None,
     ) -> StepResult:
         ...
 

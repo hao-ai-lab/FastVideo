@@ -33,6 +33,7 @@ from dreamverse.routes.presets import (
     prompt_config_router,
     curated_presets_router,
 )
+from dreamverse.routes.creation import creation_router
 from dreamverse.session.controller import SessionController
 
 
@@ -92,6 +93,7 @@ app.add_middleware(
 app.include_router(build_health_router(lambda: runtime.gpu_pool))
 app.include_router(internal_monitor_router)
 app.include_router(prompt_config_router)
+app.include_router(creation_router)
 if DEVTOOLS_ENABLED:
     app.include_router(curated_presets_router)
 

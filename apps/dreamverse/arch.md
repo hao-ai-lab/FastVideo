@@ -299,17 +299,46 @@ There are three related prompt paths in the current system:
 
 ## Initial Image And Segment Handling
 
-The frontend currently sends `initial_image` as part of session init or
+The frontend sends `initial_image` and, for first/last frame mode,
+`last_frame_image` as part of `session_init_v2`, `project_init_v1`, or
 `simple_generate`.
 
 The server:
 
-- validates and persists the image
-- uses it only for segment 1 when present
+- validates and persists the images
+- uses `initial_image` only for segment 1 when present
 - keeps continuation state for later segments in the GPU worker
 
 This means the runtime, not the frontend, decides how segment 1 image
 conditioning and later continuation conditioning are applied.
+
+## Creation Studio Config
+
+The lobby creation studio sends model, mode, aspect ratio, resolution, and
+duration with session init. The server parses these fields into a per-session
+creation config and echoes the resolved values back on `gpu_assigned` and
+`ltx2_stream_start` as `creation_config`.
+
+Incoming fields on `session_init_v2` and `project_init_v1`:
+
+- `generation_mode`: `t2va`, `fl2va`, or `ref2va` (canonical upstream IDs from #1834)
+- `model_id`: `fast-ltx2`, `fast-ltx23`, or `fast-h3`
+- `aspect_ratio`: one of `21:9`, `16:9`, `4:3`, `1:1`, `3:4`, `9:16`
+- `resolution`: one of `480p`, `720p`, `1080p`, `4k`
+- `duration_sec`: `5`, `10`, or `15`
+- `initial_image`: optional image payload for reference / first-frame modes
+- `last_frame_image`: optional image payload for first/last frame mode
+
+Echoed `creation_config` includes the resolved frame size,
+`num_frames`, and `generation_segment_cap` derived from `duration_sec`.
+
+Mode validation:
+
+- `ref2va` requires `initial_image`
+- `fl2va` requires both `initial_image` and `last_frame_image`
+
+Per-step generation uses the resolved `frame_width`, `frame_height`, and
+`num_frames` from the session creation config.
 
 ## Websocket Contract
 

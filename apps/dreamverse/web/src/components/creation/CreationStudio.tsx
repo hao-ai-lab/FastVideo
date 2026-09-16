@@ -12,6 +12,7 @@ import {
 	type MentionOption,
 	type ResolutionId,
 } from "@/lib/creationConfig";
+import type { LobbyCreationCapabilities } from "@/lib/creationCapabilities";
 
 interface CreationStudioProps {
 	value: string;
@@ -44,6 +45,7 @@ interface CreationStudioProps {
 	onSpeechTranscript?: (text: string) => void;
 	onSpeechInterimChange?: (text: string) => void;
 	onOpenProjects?: () => void;
+	capabilities?: LobbyCreationCapabilities;
 }
 
 export default function CreationStudio({
@@ -52,6 +54,7 @@ export default function CreationStudio({
 	storyPresets = [],
 	onPresetGenerate,
 	isGenerating = false,
+	capabilities,
 	...composerProps
 }: CreationStudioProps) {
 	return (
@@ -59,7 +62,7 @@ export default function CreationStudio({
 			<AppNavRail activeSection={activeSection} onOpenProjects={onOpenProjects} />
 			<div className="min-w-0 flex-1 overflow-y-auto">
 				<div className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-4 py-7 sm:px-6 sm:py-8">
-					<CreationComposer {...composerProps} isGenerating={isGenerating} />
+					<CreationComposer {...composerProps} isGenerating={isGenerating} capabilities={capabilities} />
 					{storyPresets.length > 0 && onPresetGenerate && (
 						<PresetQuickLaunchRail storyPresets={storyPresets} disabled={isGenerating} onPresetGenerate={onPresetGenerate} />
 					)}

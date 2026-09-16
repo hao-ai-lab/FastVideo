@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
 	DEFAULT_GENERATION_MODE,
 	GENERATION_MODES,
+	fromGenerationMode,
 	getGenerationMode,
 	isGenerationMode,
 	toGenerationMode,
@@ -28,5 +29,11 @@ describe("generation modes", () => {
 		expect(toGenerationMode("t2v")).toBe("t2va");
 		expect(toGenerationMode("fl2av")).toBe("fl2va");
 		expect(toGenerationMode("ref2av")).toBe("ref2va");
+	});
+
+	it("maps upstream wire values back to creation studio mode IDs", () => {
+		expect(fromGenerationMode("t2va")).toBe("t2v");
+		expect(fromGenerationMode("fl2va")).toBe("fl2av");
+		expect(fromGenerationMode("ref2va")).toBe("ref2av");
 	});
 });

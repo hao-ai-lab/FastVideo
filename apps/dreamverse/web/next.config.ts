@@ -43,6 +43,10 @@ const nextConfig: NextConfig = {
         destination: `${backendUrl}/prompt-system-config`,
       },
       {
+        source: '/creation-capabilities',
+        destination: `${backendUrl}/creation-capabilities`,
+      },
+      {
         source: '/curated-presets',
         destination: `${backendUrl}/curated-presets`,
       },
