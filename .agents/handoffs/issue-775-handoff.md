@@ -385,3 +385,9 @@
 
 - GPG-signed and pushed the preparation handoff as `88a8da973`. Created ConfigMap `tdm-norm-matched-weight-6676ef6-r1-assets`, sealed it immutable at resource version `396744484`, and submitted pod `vllm/tdm-norm-matched-weight-6676ef6-r1`.
 - The scheduler placed the unchanged request=limit four-GB200 pod intact on node `10.0.140.245`. The container is still pulling the development image; no harness result exists yet. Continue monitoring startup, on-cluster AST/GPU/checkpoint gates, replica completion, and `.run_done`.
+
+### 2026-09-16 norm-matched r1 shallow-clone failure
+
+- r1 exposed exactly four GB200 GPUs and the expected Torch/CUDA stack, then stopped before checkout, on-cluster AST parsing, model/checkpoint loading, context generation, or optimizer work. The branch had advanced by two handoff-only commits after the runner was rendered, so `git clone --depth 1` did not contain exact production-code commit `6676ef6b1`; detached checkout failed with `fatal: reference is not a tree`. No scientific result exists.
+- Retain r1's PVC `status` and orchestrator log. Prepared isolated r2 changing only clone depth from 1 to 8 so exact `6676ef6b1` is available; the harness, reference report, experimental seeds, metrics, and predeclared gate are unchanged. r2 server dry run passed with the same exact-four-GB200 request. SHA-256: harness `bec5204534485584131c3cea017db50d58df42cf751cf02dcadd4aa08e74aff0`; runner `a844c4b5f9bb3d68e19056eac4f94074ce6d7327c50827fbc12a64673f491f82`; manifest `3a5b583289f4e68b219aafacc0d3dd00ff9c044f6df0bfc414f59db4d8cd5ea0`; reference `eb3d231b8bb9afda1d6fa14184cfb1d2c588d35d0ee7be1497aab836d5ffcf55`.
+- Commit and push this state, create/seal `tdm-norm-matched-weight-6676ef6-r2-assets`, submit r2, preserve both r1 and r2 evidence, and delete failed r1 only after local/PVC verification.
