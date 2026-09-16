@@ -304,6 +304,60 @@ def test_tdm_updates_critic_before_generator_recomputes_loss(
     assert_close(critic_forward_weights[1], critic.transformer.weight.detach())
 
 
+def test_tdm_managed_step_reuses_trajectory_and_resamples_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    method, student, _ = _build_method(
+        generator_update_interval=1,
+        method_overrides={
+            "use_pseudo_huber": True,
+            "normalize_generator_delta": False,
+        },
+    )
+    prepare_calls = 0
+    trajectories: list[Any] = []
+    sampled_trajectories: list[Any] = []
+    sampled_contexts: list[Any] = []
+    original_prepare_batch = student.prepare_batch
+    original_student_trajectory = method._student_trajectory
+    original_sample_tdm_context = method._sample_tdm_context
+
+    def recording_prepare_batch(*args: Any, **kwargs: Any) -> TrainingBatch:
+        nonlocal prepare_calls
+        prepare_calls += 1
+        return original_prepare_batch(*args, **kwargs)
+
+    def recording_student_trajectory(batch: TrainingBatch) -> Any:
+        trajectory = original_student_trajectory(batch)
+        trajectories.append(trajectory)
+        return trajectory
+
+    def recording_sample_tdm_context(trajectory: Any) -> Any:
+        sampled_trajectories.append(trajectory)
+        context = original_sample_tdm_context(trajectory)
+        sampled_contexts.append(context)
+        return context
+
+    monkeypatch.setattr(student, "prepare_batch", recording_prepare_batch)
+    monkeypatch.setattr(method, "_student_trajectory", recording_student_trajectory)
+    monkeypatch.setattr(method, "_sample_tdm_context", recording_sample_tdm_context)
+
+    _, _, metrics = method.managed_train_step(iter([{}]), iteration=0)
+
+    assert prepare_calls == 1
+    assert len(trajectories) == 1
+    assert len(sampled_trajectories) == 2
+    assert sampled_trajectories[0] is trajectories[0]
+    assert sampled_trajectories[1] is trajectories[0]
+    assert len(sampled_contexts) == 2
+    assert sampled_contexts[0] is not sampled_contexts[1]
+    assert not torch.equal(
+        sampled_contexts[0].proposal_noise,
+        sampled_contexts[1].proposal_noise,
+    )
+    assert metrics["tdm/generator/use_pseudo_huber"] == 1.0
+
+
 def test_tdm_rejects_default_single_step_optimizer_path() -> None:
     method, _, _ = _build_method()
 
@@ -495,6 +549,49 @@ def test_tdm_separate_noise_interval_samples_each_batch_element() -> None:
     expected_intermediate = ((1.0 - sigma_mid) * context.clean_latents
                              + sigma_mid * context.eps_source)
     assert_close(context.noisy_intermediate, expected_intermediate)
+
+
+def test_tdm_scheduler_sampling_excludes_roundoff_below_interval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    method, student, _ = _build_method(method_overrides={"use_randmid": False})
+    student.noise_scheduler = _ShiftedFlowScheduler()
+    scheduler_sigmas = student.noise_scheduler.sigmas
+    boundary = scheduler_sigmas[torch.argmin((scheduler_sigmas - 0.25).abs())]
+    lower = torch.nextafter(boundary, torch.tensor(float("inf")))
+    source = scheduler_sigmas[torch.argmin((scheduler_sigmas - 0.5).abs())]
+    latent = torch.zeros(1, 1, 1, 1, 1)
+    trajectory = SimpleNamespace(
+        clean_latents=[latent, latent],
+        noisy_latents=[latent, latent],
+        sigmas=torch.stack((source, lower)),
+    )
+    randint_calls = 0
+
+    def select_last_candidate(
+        low: int,
+        high: int,
+        size: list[int],
+        *,
+        device: torch.device,
+        dtype: torch.dtype,
+        generator: torch.Generator,
+    ) -> torch.Tensor:
+        nonlocal randint_calls
+        del low, generator
+        randint_calls += 1
+        value = 0 if randint_calls == 1 else high - 1
+        return torch.full(size, value, device=device, dtype=dtype)
+
+    monkeypatch.setattr(torch, "randint", select_last_candidate)
+
+    context = method._sample_tdm_context(trajectory)
+
+    assert randint_calls == 2
+    assert bool((boundary < lower).item())
+    assert bool((context.sigma_target >= context.sigma_intermediate).item())
+    assert bool((context.sigma_target > boundary).item())
+    assert bool((context.sigma_target < context.sigma_source).item())
 
 
 @pytest.mark.parametrize(
@@ -742,8 +839,10 @@ def test_tdm_use_huber_is_generator_only_and_matches_reference_pseudo_huber() ->
     huber_batch = huber_method.student.prepare_batch({}, generator=huber_method.cuda_generator, latents_source="zeros")
     mse_method.cuda_generator.manual_seed(654)
     huber_method.cuda_generator.manual_seed(654)
-    mse_loss, _, _, _ = mse_method._tdm_fake_score_loss(mse_batch)
-    huber_loss, _, _, _ = huber_method._tdm_fake_score_loss(huber_batch)
+    mse_trajectory = mse_method._student_trajectory(mse_batch)
+    huber_trajectory = huber_method._student_trajectory(huber_batch)
+    mse_loss, _, _, _ = mse_method._tdm_fake_score_loss(mse_trajectory, mse_batch)
+    huber_loss, _, _, _ = huber_method._tdm_fake_score_loss(huber_trajectory, huber_batch)
     assert_close(huber_loss, mse_loss)
 
 
