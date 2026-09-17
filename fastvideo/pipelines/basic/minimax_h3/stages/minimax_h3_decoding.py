@@ -124,7 +124,7 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
 
         if self.vae is None:
             raise RuntimeError("MiniMax-H3 full VAE decode requires a loaded video VAE.")
-        pinned_offload.load(self.vae, device)
+        pinned_offload.load(self.vae, device, pin=fastvideo_args.pin_cpu_memory)
         try:
             latents = self.vae.denormalize_latents(latents.to(device=device, dtype=torch.float32))
             if fastvideo_args.output_type == "latent":
@@ -201,7 +201,7 @@ class MiniMaxH3AudioDecodingStage(PipelineStage):
             layout.num_audio_latents,
         )
         device = get_local_torch_device()
-        pinned_offload.load(self.audio_vae, device)
+        pinned_offload.load(self.audio_vae, device, pin=fastvideo_args.pin_cpu_memory)
         try:
             latents = self.audio_vae.denormalize_latents(latents.to(device=device, dtype=torch.float32))
             if fastvideo_args.output_type == "latent":
