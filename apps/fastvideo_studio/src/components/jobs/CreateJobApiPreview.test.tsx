@@ -27,6 +27,39 @@ beforeEach(() => {
 });
 
 describe('CreateJobModal API integration', () => {
+  it('offers copy in read-only mode and collapses the example when the configuration reopens', async () => {
+    const user = userEvent.setup();
+    const clipboard = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
+    const props = {
+      isOpen: true,
+      onClose: vi.fn(),
+      onSuccess: vi.fn(),
+      jobType: 'inference' as const,
+      workloadType: 't2v',
+      readOnly: true,
+      editingJob: { id: 'completed-job', model_id: 'wan/test', prompt: 'saved prompt' },
+    };
+    const { rerender } = render(<CreateJobModal {...props} />);
+    await screen.findByRole('option', { name: 'Wan (wan/test)' });
+    expect(screen.getByRole('button', { name: 'API example' })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByLabelText('cURL command')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'API example' }));
+    expect(screen.getByLabelText('Prompt')).toBeDisabled();
+    expect(screen.getByLabelText('cURL command')).toHaveTextContent('--request POST');
+    const copy = screen.getByRole('button', { name: 'Copy cURL' });
+    expect(copy).toHaveAttribute('title', 'Copy cURL');
+    expect(copy.textContent).toBe('');
+    await user.click(copy);
+    await waitFor(() => expect(clipboard).toHaveBeenCalledTimes(1));
+
+    rerender(<CreateJobModal {...props} isOpen={false} />);
+    rerender(<CreateJobModal {...props} />);
+    expect(screen.getByRole('button', { name: 'API example' })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByLabelText('cURL command')).not.toBeInTheDocument();
+    expect(createJob).not.toHaveBeenCalled();
+    expect(updateJob).not.toHaveBeenCalled();
+  });
+
   it.each([false, true])('exports exactly the submitted payload (edit=%s)', async (editing) => {
     const user = userEvent.setup();
     render(<CreateJobModal
@@ -38,7 +71,7 @@ describe('CreateJobModal API integration', () => {
       editingJob={editing ? { id: 'pending-job', model_id: 'wan/test', prompt: 'old prompt' } : undefined}
     />);
     await screen.findByRole('option', { name: 'Wan (wan/test)' });
-    await user.click(screen.getByRole('button', { name: 'Show cURL' }));
+    await user.click(screen.getByRole('button', { name: 'API example' }));
     await user.clear(screen.getByLabelText('Prompt'));
     await user.type(screen.getByLabelText('Prompt'), 'revised prompt');
     await user.click(screen.getByRole('button', { name: 'Refresh' }));

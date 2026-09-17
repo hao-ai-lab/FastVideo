@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { Code2 } from 'lucide-react';
 
 import {
   FieldRow,
@@ -183,6 +184,8 @@ export default function CreateJobModal({
   const [realScoreModelPath, setRealScoreModelPath] = React.useState('');
   const [fakeScoreModelPath, setFakeScoreModelPath] = React.useState('');
   const [isSubmitting, setIsSubmitting] = React.useState(false);
+  const [showApiPreview, setShowApiPreview] = React.useState(false);
+  const apiPreviewId = React.useId();
   const [isLoadingModels, setIsLoadingModels] = React.useState(false);
   const [isLoadingDatasets, setIsLoadingDatasets] = React.useState(false);
   const [modelLoadError, setModelLoadError] = React.useState<string | null>(
@@ -207,6 +210,7 @@ export default function CreateJobModal({
     const justOpened = isOpen && !justOpenedRef.current;
     justOpenedRef.current = isOpen;
     if (!justOpened) return;
+    setShowApiPreview(false);
     if (editingJob) {
       // Must not fall through to the defaults below: a partially-seeded
       // form silently edits values the user never saw.
@@ -658,9 +662,32 @@ export default function CreateJobModal({
           if (isSubmitting) e.preventDefault();
         }}
       >
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
+        <DialogHeader className="flex-row items-start justify-between gap-3 pr-10">
+          <DialogTitle className="min-w-0 pt-2.5 leading-snug">{title}</DialogTitle>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="shrink-0"
+            aria-label="API example"
+            title="API example"
+            aria-expanded={showApiPreview}
+            aria-controls={apiPreviewId}
+            onClick={() => setShowApiPreview((visible) => !visible)}
+          >
+            <Code2 aria-hidden="true" className="size-4" />
+            <span className="hidden min-[420px]:inline">API example</span>
+          </Button>
         </DialogHeader>
+
+        {showApiPreview && (
+          <ApiRequestPreview
+            id={apiPreviewId}
+            request={editingJob && !readOnly
+              ? updateJobRequest(editingJob.id, buildJobPayload() as unknown as Record<string, unknown>)
+              : createJobRequest(buildJobPayload())}
+          />
+        )}
 
         <form
           onSubmit={handleSubmit}
@@ -1383,12 +1410,6 @@ export default function CreateJobModal({
           )}
 
           </fieldset>
-
-          <ApiRequestPreview
-            request={editingJob && !readOnly
-              ? updateJobRequest(editingJob.id, buildJobPayload() as unknown as Record<string, unknown>)
-              : createJobRequest(buildJobPayload())}
-          />
 
           <div className="flex flex-col items-start gap-2">
             {submitError && (

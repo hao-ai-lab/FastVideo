@@ -20,7 +20,6 @@ describe('ApiRequestPreview', () => {
     const initial = createJobRequest({ model_id: 'wan/test', prompt: 'first prompt', num_frames: 81 });
     const { rerender } = render(<ApiRequestPreview request={initial} />);
 
-    await user.click(screen.getByRole('button', { name: 'Show cURL' }));
     expect(screen.getByLabelText('cURL command')).toHaveTextContent('first prompt');
     const next = createJobRequest({ model_id: 'wan/test', prompt: 'edited prompt', num_frames: 60 });
     rerender(<ApiRequestPreview request={next} />);
@@ -34,7 +33,7 @@ describe('ApiRequestPreview', () => {
     expect(screen.getByLabelText('cURL command')).toHaveTextContent('https://new-backend.test/api');
     await user.click(screen.getByRole('button', { name: 'Copy cURL' }));
     await waitFor(() => expect(clipboard).toHaveBeenCalledWith(screen.getByLabelText('cURL command').textContent));
-    expect(screen.getByRole('button', { name: 'Copied' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copied cURL' })).toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -42,7 +41,6 @@ describe('ApiRequestPreview', () => {
     const user = userEvent.setup();
     vi.spyOn(navigator.clipboard, 'writeText').mockRejectedValue(new Error('denied'));
     render(<ApiRequestPreview request={createJobRequest({ model_id: 'wan/test', prompt: 'test' })} />);
-    await user.click(screen.getByRole('button', { name: 'Show cURL' }));
     await user.click(screen.getByRole('button', { name: 'Copy cURL' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('copy it manually');
   });
