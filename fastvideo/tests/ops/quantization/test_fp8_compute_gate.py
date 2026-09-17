@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+from fastvideo.layers import fp8linear
 from fastvideo.layers.quantization import fp8_config
 
 
@@ -49,3 +50,10 @@ def test_cuda_gate_is_sm89(monkeypatch: pytest.MonkeyPatch, cap: tuple[int, int]
 def test_gate_is_false_without_an_accelerator(monkeypatch: pytest.MonkeyPatch) -> None:
     _fake_device(monkeypatch, hip="7.14.60850", arch="gfx950", available=False)
     assert fp8_config._supports_fp8_compute() is False
+
+
+def test_fp8linear_reuses_the_same_gate_and_constants() -> None:
+    """The QAT linear path must not re-implement the gate or the FP8 constants."""
+    assert fp8linear._supports_fp8_compute is fp8_config._supports_fp8_compute
+    assert fp8linear.FP8_MAX == fp8_config.FP8_MAX
+    assert fp8linear.FP8_MIN_SCALE == fp8_config.FP8_MIN_SCALE
