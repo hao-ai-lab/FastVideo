@@ -87,19 +87,26 @@ def test_invalid_scale_contract_fails_before_writing(converter) -> None:
 def test_source_inspection_requires_the_complete_50_layer_contract(converter) -> None:
     nvfp4 = torch.tensor(list(b'{"format":"nvfp4"}'), dtype=torch.uint8)
     int8 = torch.tensor(list(b'{"format":"int8_tensorwise"}'), dtype=torch.uint8)
+    class TensorSpec:
+        def __init__(self, shape, dtype):
+            self.shape = shape
+            self.dtype = dtype
+
     tensors = {
         "model.embed_tokens.comfy_quant": int8,
-        "model.embed_tokens.weight": torch.ones(2, 2, dtype=torch.int8),
-        "model.embed_tokens.weight_scale": torch.ones(2, 1),
+        "model.embed_tokens.weight": TensorSpec((converter.ARCH.vocab_size, converter.ARCH.hidden_size), torch.int8),
+        "model.embed_tokens.weight_scale": TensorSpec((converter.ARCH.vocab_size, 1), torch.float32),
     }
     for layer in range(converter.EXPECTED_LAYERS):
         for projection in converter.LANGUAGE_PROJECTIONS:
             prefix = f"model.layers.{layer}.{projection}"
             tensors[prefix + ".comfy_quant"] = nvfp4
-            tensors[prefix + ".weight"] = torch.ones(1, 1, dtype=torch.uint8)
-            tensors[prefix + ".weight_scale"] = torch.ones(1, 1, dtype=torch.float8_e4m3fn)
-            tensors[prefix + ".weight_scale_2"] = torch.ones(())
-    tensors["model.layers.0.self_attn.o_proj.pre_quant_scale"] = torch.ones(2, dtype=torch.bfloat16)
+            output_size, input_size = converter.PROJECTION_SHAPES[projection]
+            tensors[prefix + ".weight"] = TensorSpec((output_size, input_size // 2), torch.uint8)
+            tensors[prefix + ".weight_scale"] = TensorSpec((output_size, input_size // 16), torch.float8_e4m3fn)
+            tensors[prefix + ".weight_scale_2"] = TensorSpec((), torch.float32)
+    tensors["model.layers.0.self_attn.o_proj.pre_quant_scale"] = \
+        TensorSpec((converter.ARCH.hidden_size, ), torch.bfloat16)
 
     class Handle:
         def keys(self):
@@ -112,6 +119,21 @@ def test_source_inspection_requires_the_complete_50_layer_contract(converter) ->
     assert len(quantized) == 350
     assert pre_scaled == {"model.layers.0.self_attn.o_proj"}
 
+    q_weight = tensors["model.layers.0.self_attn.q_proj.weight"]
+    tensors["model.layers.0.self_attn.q_proj.weight"] = TensorSpec((1, 1), torch.uint8)
+    with pytest.raises(ValueError, match="Unexpected model.layers.0.self_attn.q_proj.weight shape or dtype"):
+        converter.inspect_source(Handle())
+    tensors["model.layers.0.self_attn.q_proj.weight"] = q_weight
+
     del tensors["model.layers.49.mlp.down_proj.comfy_quant"]
     with pytest.raises(ValueError, match="Expected 350 H3 language linears"):
         converter.inspect_source(Handle())
+
+
+def test_staging_destination_rejects_nonempty_output(converter, tmp_path) -> None:
+    output = tmp_path / "text_encoder"
+    output.mkdir()
+    (output / "unrelated.txt").write_text("keep")
+    with pytest.raises(SystemExit, match="not an empty directory"):
+        converter.staging_destination(output)
+    assert (output / "unrelated.txt").read_text() == "keep"

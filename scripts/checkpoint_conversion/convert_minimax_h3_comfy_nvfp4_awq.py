@@ -29,18 +29,23 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import shutil
+import tempfile
 from pathlib import Path
 
 import torch
 from safetensors import safe_open
 
 from convert_minimax_h3_text_encoder_nvfp4 import ShardWriter
+from fastvideo.configs.models.encoders.minimax_h3_qwen3_vl import MiniMaxH3Qwen3VLArchConfig
 from fastvideo.models.encoders.minimax_h3_checkpoint_nvfp4 import (
     LANGUAGE_PROJECTIONS,
+    nvfp4_packed_weight_shape,
+    nvfp4_scale_shape,
     serialized_nvfp4_quantization_config,
 )
-from fastvideo.models.loader.weight_utils import SAFE_WEIGHTS_INDEX_NAME
 
 LANGUAGE_PREFIX = re.compile(
     r"^model\.layers\.(?P<layer>\d+)\.(?P<proj>" +
@@ -48,6 +53,17 @@ LANGUAGE_PREFIX = re.compile(
 COMFY_QUANT_SUFFIX = ".comfy_quant"
 WEIGHT_SUFFIXES = (".weight", ".weight_scale", ".weight_scale_2")
 EXPECTED_LAYERS = 50
+ARCH = MiniMaxH3Qwen3VLArchConfig()
+KV_SIZE = ARCH.num_key_value_heads * ARCH.head_dim
+PROJECTION_SHAPES = {
+    "self_attn.q_proj": (ARCH.hidden_size, ARCH.hidden_size),
+    "self_attn.k_proj": (KV_SIZE, ARCH.hidden_size),
+    "self_attn.v_proj": (KV_SIZE, ARCH.hidden_size),
+    "self_attn.o_proj": (ARCH.hidden_size, ARCH.hidden_size),
+    "mlp.gate_proj": (ARCH.intermediate_size, ARCH.hidden_size),
+    "mlp.up_proj": (ARCH.intermediate_size, ARCH.hidden_size),
+    "mlp.down_proj": (ARCH.hidden_size, ARCH.intermediate_size),
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -110,14 +126,57 @@ def inspect_source(handle) -> tuple[set[str], set[str]]:
         absent = [suffix for suffix in WEIGHT_SUFFIXES if prefix + suffix not in keys]
         if absent:
             raise ValueError(f"Quantized linear {prefix} is missing {absent}")
+        projection = LANGUAGE_PREFIX.fullmatch(prefix)["proj"]
+        output_size, input_size = PROJECTION_SHAPES[projection]
+        expected_shapes = {
+            ".weight": nvfp4_packed_weight_shape(output_size, input_size),
+            ".weight_scale": nvfp4_scale_shape(output_size, input_size),
+            ".weight_scale_2": (),
+        }
+        expected_dtypes = {
+            ".weight": torch.uint8,
+            ".weight_scale": torch.float8_e4m3fn,
+            ".weight_scale_2": torch.float32,
+        }
+        for suffix in WEIGHT_SUFFIXES:
+            tensor = handle.get_tensor(prefix + suffix)
+            if tuple(tensor.shape) != expected_shapes[suffix] or tensor.dtype != expected_dtypes[suffix]:
+                raise ValueError(
+                    f"Unexpected {prefix + suffix} shape or dtype: got {tuple(tensor.shape)} {tensor.dtype}, "
+                    f"expected {expected_shapes[suffix]} {expected_dtypes[suffix]}"
+                )
     for name in ("model.embed_tokens.weight", "model.embed_tokens.weight_scale"):
         if name not in keys:
             raise ValueError(f"Comfy checkpoint is missing {name}")
+    embedding = handle.get_tensor("model.embed_tokens.weight")
+    embedding_scale = handle.get_tensor("model.embed_tokens.weight_scale")
+    if embedding.shape != (ARCH.vocab_size, ARCH.hidden_size) or embedding.dtype != torch.int8:
+        raise ValueError(f"Unexpected token embedding shape or dtype: {tuple(embedding.shape)} {embedding.dtype}")
+    if embedding_scale.shape != (ARCH.vocab_size, 1) or embedding_scale.dtype != torch.float32:
+        raise ValueError(
+            f"Unexpected token embedding scale shape or dtype: {tuple(embedding_scale.shape)} {embedding_scale.dtype}"
+        )
     pre_scaled = {name[:-len(".pre_quant_scale")] for name in keys if name.endswith(".pre_quant_scale")}
     unknown_pre_scales = sorted(pre_scaled - quantized)
     if unknown_pre_scales:
         raise ValueError(f"pre_quant_scale found on unquantized tensors {unknown_pre_scales[:2]}")
+    for prefix in pre_scaled:
+        projection = LANGUAGE_PREFIX.fullmatch(prefix)["proj"]
+        pre_scale = handle.get_tensor(prefix + ".pre_quant_scale")
+        input_size = PROJECTION_SHAPES[projection][1]
+        if pre_scale.shape != (input_size, ) or pre_scale.dtype != torch.bfloat16:
+            raise ValueError(f"Unexpected {prefix}.pre_quant_scale shape or dtype")
     return quantized, pre_scaled
+
+
+def staging_destination(dst: Path) -> Path:
+    """Reserve a sibling directory so only a complete checkpoint becomes visible at ``dst``."""
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if dst.exists():
+        if not dst.is_dir() or any(dst.iterdir()):
+            raise SystemExit(f"{dst} already exists and is not an empty directory; refusing to overwrite it")
+        dst.rmdir()
+    return Path(tempfile.mkdtemp(prefix=f".{dst.name}.partial-", dir=dst.parent))
 
 
 def dequantize_embedding(weight: torch.Tensor, scale: torch.Tensor, rows: int = 4096) -> torch.Tensor:
@@ -155,13 +214,9 @@ def main() -> None:
     args = parse_args()
     if not args.src.is_file():
         raise SystemExit(f"Source safetensors file does not exist: {args.src}")
-    args.dst.mkdir(parents=True, exist_ok=True)
-    existing = sorted(path.name for path in args.dst.glob("*.safetensors")) + \
-        [name for name in ("config.json", SAFE_WEIGHTS_INDEX_NAME) if (args.dst / name).exists()]
-    if existing:
-        raise SystemExit(f"{args.dst} already holds {existing[:4]}; refusing to mix or overwrite outputs")
 
-    writer = ShardWriter(args.dst, int(args.shard_size_gb * (1 << 30)))
+    staging = staging_destination(args.dst)
+    writer = ShardWriter(staging, int(args.shard_size_gb * (1 << 30)))
     quantized_count = 0
     copied_count = 0
     try:
@@ -201,27 +256,29 @@ def main() -> None:
                     continue
                 writer.add(target, torch.ones(input_sizes[prefix], dtype=torch.bfloat16))
             writer.finish()
+
+        producer = {
+            "converter": Path(__file__).name,
+            "source": str(args.src),
+            "source_format": "comfy_nvfp4_awq",
+            "awq_pre_quant_linears": len(pre_scaled),
+        }
+        if args.source_revision:
+            producer["source_revision"] = args.source_revision
+        config = {
+            "architectures": ["Qwen3VLForConditionalGeneration"],
+            "num_hidden_layers_override": EXPECTED_LAYERS,
+            "quantization_config": serialized_nvfp4_quantization_config(
+                pre_quant_scale=True,
+                producer=producer,
+            ),
+        }
+        (staging / "config.json").write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+        os.replace(staging, args.dst)
     except BaseException:
         writer.abort()
+        shutil.rmtree(staging, ignore_errors=True)
         raise
-
-    producer = {
-        "converter": Path(__file__).name,
-        "source": str(args.src),
-        "source_format": "comfy_nvfp4_awq",
-        "awq_pre_quant_linears": len(pre_scaled),
-    }
-    if args.source_revision:
-        producer["source_revision"] = args.source_revision
-    config = {
-        "architectures": ["Qwen3VLForConditionalGeneration"],
-        "num_hidden_layers_override": EXPECTED_LAYERS,
-        "quantization_config": serialized_nvfp4_quantization_config(
-            pre_quant_scale=True,
-            producer=producer,
-        ),
-    }
-    (args.dst / "config.json").write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({
         "source": str(args.src),
         "destination": str(args.dst),
