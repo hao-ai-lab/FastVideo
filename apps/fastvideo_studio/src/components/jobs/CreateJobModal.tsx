@@ -59,6 +59,9 @@ import ApiRequestPreview from './ApiRequestPreview';
 export interface CreateJobModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onCloseAutoFocus?: React.ComponentProps<
+    typeof DialogContent
+  >['onCloseAutoFocus'];
   onSuccess: () => void;
   jobType: JobType;
   workloadType: string;
@@ -71,6 +74,7 @@ export interface CreateJobModalProps {
 export default function CreateJobModal({
   isOpen,
   onClose,
+  onCloseAutoFocus,
   onSuccess,
   jobType,
   workloadType,
@@ -655,6 +659,7 @@ export default function CreateJobModal({
     >
       <DialogContent
         className="max-h-[90vh] w-[90vw] max-w-[850px] overflow-y-auto"
+        onCloseAutoFocus={onCloseAutoFocus}
         onEscapeKeyDown={(e) => {
           if (isSubmitting) e.preventDefault();
         }}
