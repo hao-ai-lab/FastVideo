@@ -321,6 +321,23 @@ def get_job(job_id: str) -> dict[str, Any]:
     return job.to_dict()
 
 
+def _resolve_training_dataset_paths(config: dict[str, Any], job_type: str) -> dict[str, Any]:
+    """Resolve supplied dataset IDs consistently for creation and partial edits.
+
+    Existing filesystem paths, empty optional values, and unknown IDs retain
+    their current behavior. Omitted fields must stay omitted during PATCH.
+    """
+    resolved = dict(config)
+    if job_type != "inference":
+        for field in ("data_path", "validation_dataset_file"):
+            value = resolved.get(field)
+            if isinstance(value, str) and value:
+                media_dir = _dataset_media_dir(value)
+                if os.path.isdir(media_dir):
+                    resolved[field] = media_dir
+    return resolved
+
+
 @app.post("/api/jobs", status_code=201)
 def create_job(req: CreateJobRequest) -> dict[str, Any]:
     """Create a new job (does **not** start it automatically)."""
@@ -334,18 +351,11 @@ def create_job(req: CreateJobRequest) -> dict[str, Any]:
                         f"Valid options: {sorted(valid_ids)}"),
             )
 
-    # Training jobs reference a dataset by id; resolve it to the on-disk media
-    # directory the trainer reads (the UI has no free-text path field). Falls
-    # through unchanged for inference and for anything already a real path.
-    def _resolve_dataset_path(value: str) -> str:
-        media_dir = _dataset_media_dir(value) if value else ""
-        return media_dir if media_dir and os.path.isdir(media_dir) else value
-
-    data_path = req.data_path or ""
-    validation_dataset_file = req.validation_dataset_file or ""
-    if job_type != "inference":
-        data_path = _resolve_dataset_path(data_path)
-        validation_dataset_file = _resolve_dataset_path(validation_dataset_file)
+    dataset_paths = _resolve_training_dataset_paths(
+        {
+            "data_path": req.data_path or "",
+            "validation_dataset_file": req.validation_dataset_file or "",
+        }, job_type)
 
     job = job_runner.create_job(
         job_id=str(uuid.uuid4()),
@@ -357,12 +367,12 @@ def create_job(req: CreateJobRequest) -> dict[str, Any]:
         image_path=req.image_path or "",
         last_image_path=req.last_image_path or "",
         references=req.references or [],
-        data_path=data_path,
+        data_path=dataset_paths["data_path"],
         max_train_steps=req.max_train_steps,
         train_batch_size=req.train_batch_size,
         learning_rate=req.learning_rate,
         num_latent_t=req.num_latent_t,
-        validation_dataset_file=validation_dataset_file,
+        validation_dataset_file=dataset_paths["validation_dataset_file"],
         lora_rank=req.lora_rank,
         negative_prompt=req.negative_prompt,
         num_inference_steps=req.num_inference_steps,
@@ -422,7 +432,11 @@ def duplicate_job(job_id: str) -> dict[str, Any]:
 def update_job(job_id: str, updates: dict[str, Any]) -> dict[str, Any]:
     """Edit a pending job's configuration. Started jobs cannot be edited."""
     try:
-        job = job_runner.update_job_config(job_id, updates)
+        existing = job_runner.get_job(job_id)
+        if existing is None:
+            raise ValueError(f"Job {job_id} not found")
+        job_type = updates.get("job_type", existing.job_type)
+        job = job_runner.update_job_config(job_id, _resolve_training_dataset_paths(updates, job_type))
     except ValueError as e:
         detail = str(e)
         status = 404 if "not found" in detail else 400

@@ -36,6 +36,20 @@ export interface JobLike {
 	vsa_sparsity?: number;
 	tp_size?: number;
 	sp_size?: number;
+	data_path?: string;
+	validation_dataset_file?: string;
+	max_train_steps?: number;
+	train_batch_size?: number;
+	learning_rate?: number;
+	num_latent_t?: number;
+	lora_rank?: number;
+	dmd_use_vsa?: boolean;
+	dmd_vsa_sparsity?: number;
+	dmd_denoising_steps?: string;
+	real_score_guidance_scale?: number;
+	generator_update_interval?: number;
+	real_score_model_path?: string;
+	fake_score_model_path?: string;
 }
 
 export interface JobFormFields {
@@ -68,6 +82,20 @@ export interface JobFormFields {
 	vsaSparsity: number;
 	tpSize: number;
 	spSize: number;
+	dataPath: string;
+	validationDatasetFile: string;
+	maxTrainSteps: number;
+	trainBatchSize: number;
+	learningRate: number;
+	numLatentT: number;
+	loraRank: number;
+	dmdUseVsa: boolean;
+	dmdVsaSparsity: number;
+	dmdDenoisingSteps: string;
+	realScoreGuidanceScale: number;
+	generatorUpdateInterval: number;
+	realScoreModelPath: string;
+	fakeScoreModelPath: string;
 }
 
 /** Uploads keep their original basename, so this is the display name. */
@@ -115,5 +143,19 @@ export function jobToFormFields(job: JobLike): JobFormFields {
 		vsaSparsity: job.vsa_sparsity ?? 0,
 		tpSize: job.tp_size ?? -1,
 		spSize: job.sp_size ?? -1,
+		dataPath: job.data_path ?? "",
+		validationDatasetFile: job.validation_dataset_file ?? "",
+		maxTrainSteps: job.max_train_steps ?? 1000,
+		trainBatchSize: job.train_batch_size ?? 1,
+		learningRate: job.learning_rate ?? 5e-5,
+		numLatentT: job.num_latent_t ?? 20,
+		loraRank: job.lora_rank ?? 32,
+		dmdUseVsa: job.dmd_use_vsa ?? false,
+		dmdVsaSparsity: job.dmd_vsa_sparsity ?? 0.8,
+		dmdDenoisingSteps: job.dmd_denoising_steps ?? "1000,757,522",
+		realScoreGuidanceScale: job.real_score_guidance_scale ?? 3.5,
+		generatorUpdateInterval: job.generator_update_interval ?? 5,
+		realScoreModelPath: job.real_score_model_path ?? "",
+		fakeScoreModelPath: job.fake_score_model_path ?? "",
 	};
 }

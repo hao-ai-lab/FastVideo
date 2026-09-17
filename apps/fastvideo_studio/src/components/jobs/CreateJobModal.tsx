@@ -249,6 +249,20 @@ export default function CreateJobModal({
       setVsaSparsity(f.vsaSparsity);
       setTpSize(f.tpSize);
       setSpSize(f.spSize);
+      setSelectedDatasetId(f.dataPath);
+      setSelectedValidationDatasetId(f.validationDatasetFile);
+      setMaxTrainSteps(f.maxTrainSteps);
+      setTrainBatchSize(f.trainBatchSize);
+      setLearningRate(f.learningRate);
+      setNumLatentT(f.numLatentT);
+      setLoraRank(f.loraRank);
+      setDmdUseVsa(f.dmdUseVsa);
+      setDmdVsaSparsity(f.dmdVsaSparsity);
+      setDmdDenoisingSteps(f.dmdDenoisingSteps);
+      setRealScoreGuidanceScale(f.realScoreGuidanceScale);
+      setGeneratorUpdateInterval(f.generatorUpdateInterval);
+      setRealScoreModelPath(f.realScoreModelPath);
+      setFakeScoreModelPath(f.fakeScoreModelPath);
       setReferenceError(null);
       setModelLoadError(null);
       setImageUploadError(null);
@@ -294,6 +308,11 @@ export default function CreateJobModal({
     setUseGuidedPrompt(true);
     setSelectedDatasetId('');
     setSelectedValidationDatasetId('');
+    setMaxTrainSteps(1000);
+    setTrainBatchSize(1);
+    setLearningRate(5e-5);
+    setNumLatentT(20);
+    setLoraRank(32);
     setModelLoadError(null);
     setDatasetLoadError(null);
     setImageUploadError(null);
@@ -332,13 +351,13 @@ export default function CreateJobModal({
         // would silently swap the model out from under the user.
         const editedId = editingJobModelId;
         const chosen =
-          editedId && ids.includes(editedId)
+          editedId && (!isInference || ids.includes(editedId))
             ? editedId
             : ids.includes(defaultId)
               ? defaultId
               : (list[0]?.id ?? '');
         setModelId(chosen);
-        if (workloadType === 'dmd_t2v') {
+        if (workloadType === 'dmd_t2v' && !editingJobId) {
           setRealScoreModelPath(chosen);
           setFakeScoreModelPath(chosen);
         }
@@ -358,7 +377,14 @@ export default function CreateJobModal({
     return () => {
       stale = true;
     };
-  }, [isOpen, inferenceWorkload, workloadType, editingJobModelId]);
+  }, [
+    isOpen,
+    isInference,
+    inferenceWorkload,
+    workloadType,
+    editingJobId,
+    editingJobModelId,
+  ]);
 
   // Training jobs need a dataset; load the ready datasets when relevant.
   React.useEffect(() => {
@@ -518,7 +544,8 @@ export default function CreateJobModal({
   }
 
   function buildJobPayload(): CreateJobRequest {
-    // Send the dataset id; the backend resolves it to the on-disk media dir.
+    // New selections use an ID; unchanged edits preserve the saved path.
+    // The backend accepts either representation for both create and update.
     const effectiveDataPath = selectedDatasetId ?? '';
     // `lora_t2v` jobs are persisted with a dedicated backend job_type that the
     // front-end JobType enum does not model; cast to keep payload parity.
@@ -578,12 +605,12 @@ export default function CreateJobModal({
             sp_size: spSize,
           }
         : {
-            data_path: effectiveDataPath.trim(),
+            data_path: effectiveDataPath,
             max_train_steps: maxTrainSteps,
             train_batch_size: trainBatchSize,
             learning_rate: learningRate,
             num_latent_t: numLatentT,
-            validation_dataset_file: selectedValidationDatasetId || undefined,
+            validation_dataset_file: selectedValidationDatasetId,
             lora_rank: loraRank,
             ...(workloadType === 'dmd_t2v'
               ? {
@@ -592,8 +619,8 @@ export default function CreateJobModal({
                   dmd_denoising_steps: dmdDenoisingSteps,
                   real_score_guidance_scale: realScoreGuidanceScale,
                   generator_update_interval: generatorUpdateInterval,
-                  real_score_model_path: realScoreModelPath || modelId,
-                  fake_score_model_path: fakeScoreModelPath || modelId,
+                  real_score_model_path: realScoreModelPath,
+                  fake_score_model_path: fakeScoreModelPath,
                 }
               : {}),
           }),
@@ -735,6 +762,10 @@ export default function CreateJobModal({
                     ? 'No models available for this workload'
                     : 'Select a model…'}
               </option>
+              {!isInference && modelId &&
+                !models.some((model) => model.id === modelId) && (
+                  <option value={modelId}>{modelId}</option>
+                )}
               {models.map((model) => (
                 <option key={model.id} value={model.id}>
                   {model.label} ({model.id})
@@ -999,6 +1030,12 @@ export default function CreateJobModal({
                             ? 'No datasets (add in Datasets tab)'
                             : 'Select a dataset…'}
                     </option>
+                    {selectedDatasetId &&
+                      !readyDatasets.some((d) => d.id === selectedDatasetId) && (
+                        <option value={selectedDatasetId}>
+                          Current dataset: {selectedDatasetId}
+                        </option>
+                      )}
                     {readyDatasets.map((d) => (
                       <option key={d.id} value={d.id}>
                         {d.name}
@@ -1031,6 +1068,12 @@ export default function CreateJobModal({
                     }
                   >
                     <option value="">None</option>
+                    {selectedValidationDatasetId &&
+                      !readyDatasets.some((d) => d.id === selectedValidationDatasetId) && (
+                        <option value={selectedValidationDatasetId}>
+                          Current dataset: {selectedValidationDatasetId}
+                        </option>
+                      )}
                     {readyDatasets.map((d) => (
                       <option key={d.id} value={d.id}>
                         {d.name}
@@ -1184,6 +1227,10 @@ export default function CreateJobModal({
                             disabled={isSubmitting || isLoadingModels}
                           >
                             <option value="">Same as main model</option>
+                            {select.value &&
+                              !models.some((model) => model.id === select.value) && (
+                                <option value={select.value}>{select.value}</option>
+                              )}
                             {models.map((model) => (
                               <option key={model.id} value={model.id}>
                                 {model.label} ({model.id})
