@@ -1,16 +1,9 @@
 'use client';
 
-import { Download, ImageOff, Loader2, Play } from 'lucide-react';
-import { useState } from 'react';
+import { Download, ImageOff, Loader2 } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { downloadJobVideo, getJobVideoUrl } from '@/lib/api';
 import { getJobThumbnailUrl, isJobImage } from '@/lib/jobResults';
 import type { Job } from '@/lib/types';
@@ -63,7 +56,46 @@ function ResultDownloadButton({
   );
 }
 
-/** Posters are lazy images; the full media element exists only while opened. */
+function NativeResultVideo({ job, onError }: { job: Job; onError: () => void }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const source = getJobVideoUrl(job.id);
+  useEffect(() => {
+    const video = videoRef.current;
+    // Restore the source after React's development StrictMode cleanup/replay.
+    if (video && video.getAttribute('src') !== source) video.setAttribute('src', source);
+    return () => {
+      // Stop playback and cancel buffered media when a result leaves the viewport.
+      if (video) {
+        video.pause();
+        video.removeAttribute('src');
+        video.load();
+      }
+    };
+  }, [source]);
+
+  return (
+    <video
+      ref={videoRef}
+      src={source}
+      poster={getJobThumbnailUrl(job.id)}
+      aria-label={job.prompt ? `Generated video: ${job.prompt}` : 'Generated video'}
+      data-studio-result-video
+      className="h-full w-full object-contain"
+      controls
+      playsInline
+      preload="none"
+      onError={onError}
+      onPlay={(event) => {
+        const playing = event.currentTarget;
+        document.querySelectorAll<HTMLVideoElement>('video[data-studio-result-video]').forEach((video) => {
+          if (video !== playing) video.pause();
+        });
+      }}
+    />
+  );
+}
+
+/** Native players mount near the viewport; leaving it releases their media buffers. */
 export default function JobResultPreview({
   job,
   thumbnailEnabled = true,
@@ -73,13 +105,28 @@ export default function JobResultPreview({
   thumbnailEnabled?: boolean;
   className?: string;
 }) {
-  const [open, setOpen] = useState(false);
-  const [thumbnailFailed, setThumbnailFailed] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [nearViewport, setNearViewport] = useState(false);
   const [mediaFailed, setMediaFailed] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const isImage = isJobImage(job);
-  const label = job.name?.trim() || job.model_id;
+
+  useEffect(() => {
+    if (!thumbnailEnabled || isImage) return;
+    if (typeof IntersectionObserver === 'undefined') {
+      setNearViewport(true);
+      return;
+    }
+    const element = containerRef.current;
+    if (!element) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => setNearViewport(entry.isIntersecting),
+      { rootMargin: '200px' },
+    );
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [thumbnailEnabled, isImage]);
 
   async function download() {
     if (downloading) return;
@@ -96,108 +143,58 @@ export default function JobResultPreview({
     }
   }
 
-  function changeOpen(value: boolean) {
-    setOpen(value);
-    if (value) {
-      setMediaFailed(false);
-      setDownloadError(null);
-    }
-  }
-
   return (
-    <>
-      <div className={cn('rounded-md', className)} onClick={(event) => event.stopPropagation()}>
-        <div className="relative overflow-hidden rounded-[inherit]">
-          <button
-            type="button"
-            aria-label={`Preview result: ${label}`}
-            onClick={(event) => {
-              event.stopPropagation();
-              changeOpen(true);
-            }}
-            className="group relative flex aspect-video w-full items-center justify-center overflow-hidden rounded-[inherit] bg-muted text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-          >
-            {thumbnailEnabled && !thumbnailFailed ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={getJobThumbnailUrl(job.id)}
-                alt=""
-                loading="lazy"
-                decoding="async"
-                width={320}
-                height={180}
-                onError={() => setThumbnailFailed(true)}
-                className="absolute inset-0 h-full w-full object-cover"
-              />
-            ) : (
-              <span className="flex flex-col items-center gap-1.5 text-xs">
-                <ImageOff className="size-5" aria-hidden />
-                {thumbnailFailed ? 'Thumbnail unavailable' : 'Open result'}
-              </span>
+    <div ref={containerRef} className={cn('rounded-md', className)} onClick={(event) => event.stopPropagation()}>
+      <div className="relative flex aspect-video items-center justify-center overflow-hidden rounded-[inherit] bg-black">
+        {!thumbnailEnabled || mediaFailed ? (
+          <div className="flex flex-col items-center gap-2 px-4 py-6 text-center text-sm text-slate-300">
+            {mediaFailed && <ImageOff className="size-5" aria-hidden />}
+            <span role="status">{mediaFailed ? 'Preview unavailable' : 'Result available'}</span>
+            <a
+              href={getJobVideoUrl(job.id)}
+              target="_blank"
+              rel="noreferrer"
+              className="underline underline-offset-4 hover:text-white"
+            >
+              Open original
+            </a>
+            {mediaFailed && (
+              <Button type="button" variant="secondary" size="sm" onClick={() => setMediaFailed(false)}>
+                Retry preview
+              </Button>
             )}
-            <span className="absolute bottom-2 left-2 inline-flex items-center gap-1.5 rounded-full bg-black/70 px-2.5 py-1 text-[11px] font-medium text-white transition-colors group-hover:bg-accent-blue">
-              <Play className="size-3 fill-current" aria-hidden />
-              {isImage ? 'View image' : 'Watch video'}
-            </span>
-          </button>
-          <ResultDownloadButton
-            isImage={isImage}
-            downloading={downloading}
-            onDownload={download}
-            className="bottom-1 right-1"
-          />
-        </div>
-        {!open && downloadError && <p role="alert" className="mt-2 text-xs text-destructive">{downloadError}</p>}
+          </div>
+        ) : isImage ? (
+          <a
+            href={getJobVideoUrl(job.id)}
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Open original image"
+            className="flex h-full w-full items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={getJobThumbnailUrl(job.id)}
+              alt={job.prompt || 'Generated image'}
+              loading="lazy"
+              decoding="async"
+              width={320}
+              height={180}
+              className="h-full w-full object-contain"
+              onError={() => setMediaFailed(true)}
+            />
+          </a>
+        ) : nearViewport ? (
+          <NativeResultVideo job={job} onError={() => setMediaFailed(true)} />
+        ) : null}
+        <ResultDownloadButton
+          isImage={isImage}
+          downloading={downloading}
+          onDownload={download}
+          className="right-2 top-2"
+        />
       </div>
-      <Dialog open={open} onOpenChange={changeOpen}>
-        {open && (
-          <DialogContent className="max-h-[90vh] max-w-4xl overflow-y-auto" onClick={(event) => event.stopPropagation()}>
-            <DialogHeader className="pr-10">
-              <DialogTitle>{label}</DialogTitle>
-              <DialogDescription className="break-all">{job.model_id}</DialogDescription>
-            </DialogHeader>
-            <div className="relative flex min-h-48 items-center justify-center overflow-hidden rounded-lg bg-black">
-              {mediaFailed ? (
-                <div role="status" className="flex flex-col items-center gap-2 px-4 py-12 text-center text-slate-300">
-                  <ImageOff className="size-7" aria-hidden />
-                  <span className="text-sm font-medium">Preview unavailable</span>
-                  <span className="text-xs">The generated file could not be loaded.</span>
-                </div>
-              ) : isImage ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={getJobVideoUrl(job.id)}
-                  alt={job.prompt || 'Generated image'}
-                  className="max-h-[55vh] w-full object-contain"
-                  onError={() => setMediaFailed(true)}
-                />
-              ) : (
-                <video
-                  src={getJobVideoUrl(job.id)}
-                  aria-label={job.prompt ? `Generated video: ${job.prompt}` : 'Generated video'}
-                  className="max-h-[55vh] w-full"
-                  controls
-                  playsInline
-                  preload="metadata"
-                  onError={() => setMediaFailed(true)}
-                />
-              )}
-              <ResultDownloadButton
-                isImage={isImage}
-                downloading={downloading}
-                onDownload={download}
-                className="right-2 top-2"
-              />
-            </div>
-            <p className="text-sm text-foreground">{job.prompt || 'No prompt recorded.'}</p>
-            <JobResultMetadata job={job} />
-            <div className="border-t border-border pt-4">
-              <span className="font-mono text-xs text-muted-foreground" title={job.id}>Job {job.id.slice(0, 8)}</span>
-            </div>
-            {downloadError && <p role="alert" className="text-sm text-destructive">{downloadError}</p>}
-          </DialogContent>
-        )}
-      </Dialog>
-    </>
+      {downloadError && <p role="alert" className="mt-2 text-xs text-destructive">{downloadError}</p>}
+    </div>
   );
 }
