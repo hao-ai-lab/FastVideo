@@ -61,10 +61,15 @@ def load(module: nn.Module, device: torch.device, pin: bool = True) -> nn.Module
     """Put a frozen ``module`` on ``device``, copying from its host copies."""
     if device.type != "cuda":
         return module.to(device)
+    missing = [(name, t) for name, t in _tensors(module) if t.data.device != device]
+    if not missing:
+        # Already resident, which is what ``vae_cpu_offload=False`` leaves. Taking
+        # host copies here would pull the whole module back over PCIe once and keep
+        # a pinned mirror of it for the life of the process, for a module that never
+        # leaves the device.
+        return module
     host = _host_copies(module, pin and is_pin_memory_available())
-    for name, t in _tensors(module):
-        if t.data.device == device:
-            continue
+    for name, t in missing:
         src = host[name]
         dst = torch.empty_like(src, device=device)
         dst.copy_(src, non_blocking=src.is_pinned())
