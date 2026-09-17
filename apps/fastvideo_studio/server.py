@@ -35,6 +35,7 @@ from fastvideo.registry import (get_registered_model_paths, get_registered_model
 from fastvideo_studio.database import Database, _get_db_path
 from fastvideo_studio.gpu import get_gpu_snapshot
 from fastvideo_studio.job_runner import JobRunner, JobStatus
+from fastvideo_studio.thumbnails import get_thumbnail
 from fastvideo_studio.models import (CreateDatasetRequest, CreateJobRequest, SettingsUpdate, UpdateCaptionRequest,
                                      model_label)
 
@@ -650,9 +651,8 @@ def get_job_logs(job_id: str, after: int = 0) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=str(e)) from e
 
 
-@app.get("/api/jobs/{job_id}/video")
-def get_video(job_id: str) -> FileResponse:
-    """Stream the generated video/image for a completed job."""
+def _completed_output(job_id: str) -> Path:
+    """Resolve media using the job record, never a user-supplied file path."""
     job = job_runner.get_job(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -661,8 +661,26 @@ def get_video(job_id: str) -> FileResponse:
     if not os.path.isfile(job.output_path):
         raise HTTPException(status_code=404, detail="Output file not found on disk")
 
-    media_type = ("video/mp4" if job.output_path.endswith(".mp4") else "image/png")
-    return FileResponse(job.output_path, media_type=media_type)
+    return Path(job.output_path)
+
+
+@app.get("/api/jobs/{job_id}/thumbnail")
+def get_job_thumbnail(job_id: str) -> FileResponse:
+    source = _completed_output(job_id)
+    try:
+        poster = get_thumbnail(source, Path(job_runner.output_dir) / ".thumbnails")
+    except Exception as exc:
+        logger.warning("Poster unavailable for job %s: %s", job_id, exc)
+        raise HTTPException(status_code=503, detail="Preview unavailable; open the original output") from exc
+    return FileResponse(poster, media_type="image/jpeg")
+
+
+@app.get("/api/jobs/{job_id}/video")
+def get_video(job_id: str, download: bool = False) -> FileResponse:
+    """Stream a completed output, or send an attachment for cross-origin downloads."""
+    source = _completed_output(job_id)
+    media_type = "video/mp4" if source.suffix.lower() == ".mp4" else "image/png"
+    return FileResponse(source, media_type=media_type, filename=source.name if download else None)
 
 
 @app.get("/api/jobs/{job_id}/download_log")
