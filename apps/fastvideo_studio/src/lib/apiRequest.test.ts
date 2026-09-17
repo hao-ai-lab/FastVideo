@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createJob, updateJob } from './api';
@@ -15,6 +15,8 @@ function curlArguments(command: string): string[] {
   const stdout = execFileSync('/bin/sh', ['-c', `curl() { printf '%s\\000' "$@"; }\n${command}`]);
   return stdout.toString().split('\0').slice(0, -1);
 }
+
+const hasJq = spawnSync('jq', ['--version']).status === 0;
 
 describe('requestToCurl', () => {
   it('keeps shell syntax in prompts, headers, and URLs literal', () => {
@@ -64,5 +66,62 @@ describe('requestToCurl', () => {
       expect(JSON.parse(init.body)).toEqual(JSON.parse(args.at(-1)!));
     }
     expect(fetchMock.mock.calls[1][0]).toBe(`${baseUrl}/jobs/job%2F1`);
+  });
+
+  it.skipIf(!hasJq)('round-trips exported path variables with hostile shell and JSON characters', () => {
+    const hostile = "/uploads/person's \"clip\" $(printf injected) `printf bad` $HOME\\name\nlast line\n";
+    const payload = {
+      model_id: 'wan/test',
+      prompt: 'Keep \\(literal jq interpolation) and <img src=x> as plain text',
+      image_path: hostile,
+      last_image_path: `${hostile}last.png`,
+      data_path: ` ${hostile} `,
+      validation_dataset_file: '',
+      references: [{ source: hostile, media_type: 'image' }, { source: 'https://example.test/a?q="x"', media_type: 'video' }],
+      num_frames: 60,
+      guidance_scale: 5.25,
+      optional: null,
+      enabled: false,
+    };
+    const request = Object.freeze(jsonApiRequest('POST', '/jobs', payload));
+    const originalBody = request.body;
+    const command = requestToCurl('https://configured.test/api', request);
+    for (const name of ['IMAGE_PATH', 'LAST_IMAGE_PATH', 'DATA_PATH', 'VALIDATION_DATASET_PATH', 'REFERENCE_1_PATH', 'REFERENCE_2_PATH']) {
+      expect(command).toContain(`export ${name}=`);
+      expect(command).toContain(`--arg ${name} "$${name}"`);
+    }
+    expect(command).toContain("export VALIDATION_DATASET_PATH=''");
+    expect(command).toContain('"image_path": $IMAGE_PATH');
+    const args = curlArguments(command);
+    expect(args[0]).toBe('--request');
+    expect(JSON.parse(args.at(-1)!)).toEqual(payload);
+    expect(request.body).toBe(originalBody);
+  });
+
+  it.skipIf(!hasJq)('applies edits to exported paths without changing other request fields', () => {
+    const payload = { model_id: 'wan/test', prompt: '$IMAGE_PATH stays literal', image_path: '/uploads/original.png' };
+    const command = requestToCurl('https://configured.test/api', createJobRequest(payload));
+    const replacement = '/edited/"quoted"\n$(printf injected)`printf bad`\\image.png';
+    const edited = command.replace('\n\n', '\nIMAGE_PATH="$OVERRIDE_IMAGE_PATH"\n\n');
+    const stdout = execFileSync('/bin/sh', ['-c', `curl() { printf '%s\\000' "$@"; }\n${edited}`], {
+      env: { ...process.env, OVERRIDE_IMAGE_PATH: replacement },
+    });
+    const args = stdout.toString().split('\0').slice(0, -1);
+    expect(JSON.parse(args.at(-1)!)).toEqual({ ...payload, image_path: replacement });
+  });
+
+  it('does not add jq or path exports when path fields are omitted or null', () => {
+    const request = jsonApiRequest('PATCH', '/jobs/job-1', { image_path: null, references: [], validation_dataset_file: undefined });
+    const command = requestToCurl('https://configured.test/api', request);
+    expect(command).not.toContain('jq');
+    expect(command).not.toContain('export IMAGE_PATH=');
+    expect(JSON.parse(curlArguments(command).at(-1)!)).toEqual({ image_path: null, references: [] });
+  });
+
+  it('does not invoke curl when the required jq command fails', () => {
+    const command = requestToCurl('https://configured.test/api', jsonApiRequest('POST', '/jobs', { image_path: 'file.png' }));
+    const result = spawnSync('/bin/sh', ['-c', `jq() { return 127; }\ncurl() { printf 'CURL WAS CALLED'; }\n${command}`]);
+    expect(result.status).toBe(127);
+    expect(result.stdout.toString()).toBe('');
   });
 });

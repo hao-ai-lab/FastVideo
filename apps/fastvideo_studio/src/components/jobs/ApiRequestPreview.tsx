@@ -5,7 +5,8 @@ import { Check, Code2, Copy, RefreshCw } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { getApiBaseUrl } from '@/lib/api';
-import { requestToCurl, type ApiRequest } from '@/lib/apiRequest';
+import { getRequestPathVariables, requestToCurl, type ApiRequest } from '@/lib/apiRequest';
+import CurlCode from './CurlCode';
 
 interface ApiRequestPreviewProps {
   id?: string;
@@ -16,13 +17,18 @@ export default function ApiRequestPreview({ id, request }: ApiRequestPreviewProp
   const [snapshot, setSnapshot] = React.useState(() => ({
     key: JSON.stringify(request),
     command: requestToCurl(getApiBaseUrl(), request),
+    usesPathVariables: getRequestPathVariables(request).length > 0,
   }));
   const [copyState, setCopyState] = React.useState<'idle' | 'copied' | 'error'>('idle');
   const requestKey = JSON.stringify(request);
   const isStale = snapshot.key !== requestKey;
 
   function refresh() {
-    setSnapshot({ key: requestKey, command: requestToCurl(getApiBaseUrl(), request) });
+    setSnapshot({
+      key: requestKey,
+      command: requestToCurl(getApiBaseUrl(), request),
+      usesPathVariables: getRequestPathVariables(request).length > 0,
+    });
     setCopyState('idle');
   }
 
@@ -69,10 +75,11 @@ export default function ApiRequestPreview({ id, request }: ApiRequestPreviewProp
         {isStale ? 'Settings changed. Refresh to include your edits.' : 'Matches the form when last refreshed.'}
       </p>
       <pre aria-label="cURL command" tabIndex={0} className="max-h-72 min-w-0 max-w-full overflow-auto rounded-lg border border-border bg-background p-3 font-mono text-xs leading-relaxed">
-        <code>{snapshot.command}</code>
+        <CurlCode command={snapshot.command} />
       </pre>
       <p className="text-xs text-muted-foreground">
         Uses the API URL from Settings. Uploaded media and dataset paths refer to files already on that backend.
+        {snapshot.usesPathVariables && ' Edit the path exports above to change inputs. This example requires jq to encode paths safely as JSON. DATA_PATH and VALIDATION_DATASET_PATH may also contain a saved dataset ID.'}
       </p>
       {copyState === 'error' && (
         <p role="alert" className="text-xs text-destructive">Clipboard unavailable. Select the command above and copy it manually.</p>
