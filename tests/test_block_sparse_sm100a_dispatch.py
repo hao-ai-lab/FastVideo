@@ -266,6 +266,9 @@ def test_blk128_backward(monkeypatch):
             out.float().sum().backward()
         return
 
+    # The Triton reference first: the guard below disables the Triton backward for the route.
+    ref = _blk128_triton_reference_grads(q, k, v, idx, num, vbs, monkeypatch)
+
     def no_triton_backward(*args, **kwargs):
         raise AssertionError("Triton backward entered on a supported 128-token input")
 
@@ -273,5 +276,4 @@ def test_blk128_backward(monkeypatch):
     out, _ = block_sparse_attn_from_indices(q, k, v, idx, num, vbs)
     out.float().square().sum().backward()
     got = [t.grad.float() for t in (q, k, v)]
-    ref = _blk128_triton_reference_grads(q, k, v, idx, num, vbs, monkeypatch)
     _assert_grads_close(got, ref)
