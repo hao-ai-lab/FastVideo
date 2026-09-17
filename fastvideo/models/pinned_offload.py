@@ -71,11 +71,23 @@ def _host_copies(module: nn.Module, pin: bool) -> dict[str, torch.Tensor]:
 _PREFETCH_ATTR = "_pinned_offload_prefetch"
 
 
+def _absent_from(module: nn.Module, device: torch.device) -> list[tuple[str, torch.Tensor]]:
+    """The module's tensors that are not already on ``device``.
+
+    Checked before any host copy is taken: a module that never leaves the
+    device (``vae_cpu_offload=False``) would otherwise be pulled back over
+    PCIe once and keep a pinned host mirror of every parameter for the life
+    of the process, about 10 GB for the fp32 video VAE.
+    """
+    return [(name, t) for name, t in _tensors(module) if t.data.device != device]
+
+
 def _copy_in(module: nn.Module, device: torch.device, pin: bool) -> None:
+    missing = _absent_from(module, device)
+    if not missing:
+        return
     host = _host_copies(module, pin)
-    for name, t in _tensors(module):
-        if t.data.device == device:
-            continue
+    for name, t in missing:
         src = host[name]
         dst = torch.empty_like(src, device=device)
         dst.copy_(src, non_blocking=src.is_pinned())
@@ -93,15 +105,16 @@ def prefetch(module: nn.Module, device: torch.device, pin: bool = True) -> None:
     """
     if device.type != "cuda" or getattr(module, _PREFETCH_ATTR, None) is not None:
         return
+    missing = _absent_from(module, device)
+    if not missing:
+        return
     pin = pin and is_pin_memory_available()
     host = _host_copies(module, pin)
     # Allocate on the current stream (its cached pool already holds blocks of
     # exactly these sizes from the previous request); only the copies go to
     # the side stream, so no second pool and no fresh cudaMalloc segments.
     pending = []
-    for name, t in _tensors(module):
-        if t.data.device == device:
-            continue
+    for name, t in missing:
         src = host[name]
         dst = torch.empty_like(src, device=device)
         pending.append((t, src, dst))
