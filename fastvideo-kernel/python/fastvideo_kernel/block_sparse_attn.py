@@ -373,11 +373,12 @@ block_sparse_attn_sm90.register_autograd(_backward_sm90, setup_context=_setup_co
 # Data-center Blackwell backend custom op (index-native; legacy sm100a API name)
 #
 # Forward runs the sm_100a/sm_103a CUDA extension. Backward runs the sm_100a CUDA
-# backward when block_sparse_attn_bwd_sm100a.is_supported passes (64-token blocks,
-# sm_100a device, extension built with the op) and the Triton kernels otherwise.
-# The native forward emits lse in exactly Triton's M format (max*log2e +
-# log2(l)), so either pairing needs no conversion. Both backwards are
-# hardcoded to 64-token blocks, hence the block-size assert below.
+# backward when block_sparse_attn_bwd_sm100a.is_supported passes (64- or 128-token
+# blocks, data-center Blackwell device, extension built with that block's op) and
+# the Triton kernels otherwise. The native forward emits lse in exactly Triton's M
+# format (max*log2e + log2(l)), so either pairing needs no conversion. The Triton
+# backward is hardcoded to 64-token blocks, so unsupported 128-token metadata
+# raises instead of falling back.
 # ---------------------------------------------------------------------------
 
 
@@ -477,16 +478,17 @@ def _setup_context_sm100a(ctx, inputs, output):
 
 def _backward_sm100a(ctx, grad_o, grad_M):
     q, k, v, o, M, q2k_idx, q2k_num, variable_block_sizes = ctx.saved_tensors
-    block = q.shape[2] // variable_block_sizes.numel()
-    if block != 64:
-        raise RuntimeError(
-            "block_sparse_attn_sm100a backward pairs the sm_100a/sm_103a forward with a "
-            f"backward that is hardcoded to 64-token blocks; got {block}. "
-            "Run 128-token-block metadata without grad, or use the Triton forward.")
     if _sm100a_backward_is_supported(q, variable_block_sizes):
         dq, dk, dv = block_sparse_attn_backward_sm100a(grad_o, q, k, v, o, M, q2k_idx,
                                                        q2k_num, variable_block_sizes)
     else:
+        block = q.shape[2] // variable_block_sizes.numel()
+        if block != 64:
+            raise RuntimeError(
+                "block_sparse_attn_sm100a backward: no sm_100a/sm_103a backward for "
+                f"{block}-token blocks on this build/device, and the Triton backward is "
+                "hardcoded to 64-token blocks. Run this metadata without grad, or build "
+                "the extension with block_sparse_sm100a_blk128_bwd.")
         dq, dk, dv = block_sparse_attn_backward_triton(grad_o, q, k, v, o, M, q2k_idx,
                                                        q2k_num, variable_block_sizes)
     return dq, dk, dv, None, None, None

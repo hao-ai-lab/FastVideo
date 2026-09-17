@@ -426,10 +426,12 @@ if(BUILD_CXX_KERNELS)
                                     csrc/attention/block_sparse_blk128_sm100a.cu PROPERTIES
             COMPILE_OPTIONS "${_VSA_FWD_GENCODE};-DVSA_BHSD=true")
     endif()
-    # VSA block-sparse attention BACKWARD, 64-token blocks: the same images as the forward.
+    # VSA block-sparse attention BACKWARD, 64- and 128-token blocks: the same images as the forward.
     if(_VSA_FWD_GENCODE)
-        list(APPEND EXTENSION_SOURCES csrc/attention/block_sparse_bwd_sm100a.cu)
-        set_source_files_properties(csrc/attention/block_sparse_bwd_sm100a.cu PROPERTIES
+        list(APPEND EXTENSION_SOURCES csrc/attention/block_sparse_bwd_sm100a.cu
+                                      csrc/attention/block_sparse_bwd_blk128_sm100a.cu)
+        set_source_files_properties(csrc/attention/block_sparse_bwd_sm100a.cu
+                                    csrc/attention/block_sparse_bwd_blk128_sm100a.cu PROPERTIES
             COMPILE_OPTIONS "${_VSA_FWD_GENCODE};-DVSA_BHSD=true")
     endif()
 
