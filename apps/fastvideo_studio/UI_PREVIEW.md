@@ -6,8 +6,9 @@ new media or starting a remote GPU.
 
 ## What to try
 
-1. Open Inference and filter by status, a model-name fragment, or words in a
-   prompt. Filters combine; Clear resets them together.
+1. Open Inference and choose a status or model from the dropdowns, or search
+   words in a prompt. Filters combine; Clear resets them together. The model
+   list shares Create Job's catalog and retains models in recorded jobs.
 2. Click a completed job's poster to play its video or inspect its image,
    review the model/settings, and download the result.
    Click the job card to view its configuration; use Details & logs for the
@@ -20,10 +21,15 @@ new media or starting a remote GPU.
    change a form field, and Refresh.
    The export uses the same JSON request descriptor as the UI submission.
 
-The API panel currently covers job creation and editing. Refresh does not
-send the request. Creating a job queues it; starting it is a separate API
-operation. Uploaded inputs are referenced by their existing backend paths.
-The configured API base URL includes `/api` and becomes `BACKEND_URL`.
+The highlighted API panel currently covers job creation and editing. Refresh
+does not send the request. Creating a job queues it; starting it is a separate
+API operation. The configured API base URL includes `/api` and becomes
+`BACKEND_URL`. Existing input paths appear as editable exports such as
+`IMAGE_PATH` and `DATA_PATH`; dataset fields can also contain a saved dataset
+ID. These variables reference backend inputs and do not upload local files.
+Path-bearing examples require `jq` to encode variable values safely as JSON;
+the cURL request runs only if that encoding succeeds. Examples without input
+path fields remain plain cURL.
 
 Gallery is a completed-results view over the same jobs. It shares the media
 preview component, download handler, original output files, and cached posters
