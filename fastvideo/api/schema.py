@@ -30,6 +30,11 @@ class OffloadConfig:
     image_encoder: bool = True
     vae: bool = True
     pin_cpu_memory: bool = True
+    # Opt-in: with ``vae`` offload, start the host-to-device copies when
+    # denoising begins so they overlap the DiT forwards, instead of at the head
+    # of the decode stage. It holds the VAE on the device across the denoising
+    # peak, so a run that offloads the VAE to survive that peak must leave it off.
+    vae_prefetch: bool = False
     # Not a CPU offload: loads each heavy component on first use and frees it
     # after the last stage that needs it, so peak memory is the largest
     # overlapping set rather than the sum. Grouped here because it is the same

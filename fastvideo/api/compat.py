@@ -124,6 +124,8 @@ def legacy_from_pretrained_to_config(
             offload["image_encoder"] = value
         elif key == "vae_cpu_offload":
             offload["vae"] = value
+        elif key == "vae_prefetch_during_denoising":
+            offload["vae_prefetch"] = value
         elif key == "pin_cpu_memory":
             offload["pin_cpu_memory"] = value
         elif key == "lazy_module_load":
@@ -254,6 +256,7 @@ def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, An
         "text_encoder_cpu_offload": engine.offload.text_encoder,
         "image_encoder_cpu_offload": engine.offload.image_encoder,
         "vae_cpu_offload": engine.offload.vae,
+        "vae_prefetch_during_denoising": engine.offload.vae_prefetch,
         "pin_cpu_memory": engine.offload.pin_cpu_memory,
         "lazy_module_load": engine.offload.lazy_module_load,
         "enable_torch_compile": engine.compile.enabled,

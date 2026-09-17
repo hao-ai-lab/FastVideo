@@ -132,6 +132,10 @@ def build_parser(description: str | None = None) -> argparse.ArgumentParser:
                         action=argparse.BooleanOptionalAction,
                         default=True,
                         help="pin CPU-offloaded text-encoder and VAE weights")
+    parser.add_argument("--vae-prefetch",
+                        action=argparse.BooleanOptionalAction,
+                        default=True,
+                        help="copy the offloaded VAE to the GPU during denoising instead of at decode")
     parser.add_argument("--torch-compile",
                         action=argparse.BooleanOptionalAction,
                         default=False,
@@ -290,6 +294,10 @@ def build_generator_config(args: argparse.Namespace) -> GeneratorConfig:
                 dit_layerwise=False,
                 text_encoder=True,
                 vae=True,
+                # This recipe is the case the prefetch is for: a PCIe-attached
+                # node whose 10 GB fp32 VAE is offloaded for transfer cost, not
+                # because the denoising peak needs the room.
+                vae_prefetch=args.vae_prefetch,
                 pin_cpu_memory=args.pin_cpu_memory,
                 lazy_module_load=args.lazy_module_load,
             ),
