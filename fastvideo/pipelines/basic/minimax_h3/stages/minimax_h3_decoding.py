@@ -156,11 +156,12 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
 
             output = None
             if is_output_rank:
-                # Assemble on the device: the driver only ever consumes uint8
-                # frames, so quantize here and ship 1/4 of the bytes through
-                # the worker pipe instead of a 1.5 GB fp32 pinned buffer. The
-                # device buffer is kept across requests (1.5 GB at 124f/768p)
-                # so the allocator never has to map a fresh segment for it.
+                # Assemble on the device: when the driver only encodes an mp4
+                # it consumes uint8 frames, so quantize here and ship 1/4 of
+                # the bytes through the worker pipe instead of a 1.5 GB fp32
+                # pinned buffer (`return_frames` keeps the fp32 contract, see
+                # below). The device buffer is kept across requests (1.5 GB at
+                # 124f/768p) so the allocator never has to map a fresh segment.
                 pixel_shape = self.vae.decoded_pixel_shape(latents.shape)
                 output = self._pixel_buffer
                 if output is None or tuple(output.shape) != pixel_shape or output.device != device:
@@ -183,9 +184,19 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
                 # The output rank allocated (or reused) the device buffer
                 # above; only non-output ranks leave it as None.
                 assert output is not None
+                if bool(getattr(batch, "return_frames", False)):
+                    # A caller asking for the frames themselves gets the
+                    # normalized fp32 pixels every other decode path returns.
+                    # Quantizing here would land 0..255 in the driver's fp32
+                    # ``samples`` buffer, which copies dtypes but does not
+                    # rescale, so the values would come back 255x too large.
+                    host_f32 = torch.empty(output.shape, device="cpu", dtype=torch.float32).share_memory_()
+                    host_f32.copy_(output)
+                    batch.output = host_f32
+                    return batch
                 with nvtx_range("minimax_h3.vae.quantize_u8"):
                     frames_u8 = (output * 255).clamp_(0, 255).to(torch.uint8)
-                    if bool(getattr(batch, "save_video", False)) and not bool(getattr(batch, "return_frames", False)):
+                    if bool(getattr(batch, "save_video", False)):
                         # The driver only encodes an mp4 from these frames, and
                         # its encoder wants yuv420p: convert here on the GPU
                         # (the CPU swscale pass was ~0.2 s of the 0.39 s save)

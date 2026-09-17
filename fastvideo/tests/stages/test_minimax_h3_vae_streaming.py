@@ -145,6 +145,27 @@ def test_decode_stage_returns_uint8_frames_from_reused_pixel_buffer(monkeypatch)
     assert vae.observed["output"] is pixel_buffer
 
 
+def test_decode_stage_returns_normalized_fp32_when_frames_are_requested(monkeypatch) -> None:
+    """``return_frames`` asks for the pixels themselves, so they keep the
+    normalized fp32 contract every other decode path returns. Quantizing here
+    would put 0..255 into the driver's fp32 ``samples``, which copies dtypes
+    without rescaling."""
+    latent_shape = (1, 4, 2, 4, 4)
+    pixel_shape = (1, 3, 5, 16, 16)
+    rows = patchify_video_latents(torch.randn(latent_shape), (1, 1, 1))
+    vae = _FillingVAE(latent_shape, pixel_shape, fill=0.2)
+    stage = MiniMaxH3VideoDecodingStage(vae)
+    monkeypatch.setattr(minimax_h3_decoding, "get_local_torch_device", lambda: torch.device("cpu"))
+
+    result = stage.forward(_video_batch(rows, latent_shape, save_video=True, return_frames=True), _decode_args())
+
+    assert result.output.dtype == torch.float32
+    assert tuple(result.output.shape) == pixel_shape
+    assert result.output.is_shared()
+    torch.testing.assert_close(result.output, torch.full(pixel_shape, 0.2))
+    assert "frames_yuv420p" not in result.extra
+
+
 def test_decode_stage_ships_yuv420p_frames_for_video_saving(monkeypatch) -> None:
     """With the default ``save_video`` the stage hands the driver planar
     yuv420p frames and only a shape-only stand-in for ``output``."""
