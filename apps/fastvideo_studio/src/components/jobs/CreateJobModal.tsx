@@ -51,6 +51,8 @@ import {
   type H3PromptFields,
 } from '@/lib/h3Prompt';
 import { jobToFormFields, type JobLike } from '@/lib/jobToFields';
+import { createJobRequest, updateJobRequest } from '@/lib/apiRequest';
+import ApiRequestPreview from './ApiRequestPreview';
 
 export interface CreateJobModalProps {
   isOpen: boolean;
@@ -506,6 +508,89 @@ export default function CreateJobModal({
     if (imageInputRef.current) imageInputRef.current.value = '';
   }
 
+  function buildJobPayload(): CreateJobRequest {
+    // Send the dataset id; the backend resolves it to the on-disk media dir.
+    const effectiveDataPath = selectedDatasetId ?? '';
+    // `lora_t2v` jobs are persisted with a dedicated backend job_type that the
+    // front-end JobType enum does not model; cast to keep payload parity.
+    const effectiveJobType = (
+      workloadType === 'lora_t2v' ? 'lora' : jobType
+    ) as JobType;
+    return {
+      model_id: modelId,
+      name: name.trim(),
+      prompt:
+        usingReferences && useGuidedPrompt && !isEmptyPromptFields(promptFields)
+          ? serializeH3Prompt(promptFields)
+          : prompt,
+      workload_type: workloadType,
+      job_type: effectiveJobType,
+      ...(isInference
+        ? {
+            // Ref2VA and the FL2VA keyframes are mutually exclusive:
+            // _prepare_ref2va rejects image_path/last_image_path outright
+            // when references are present.
+            ...(workloadType === 'i2v' && !usingReferences && imagePath
+              ? { image_path: imagePath }
+              : {}),
+            ...(workloadType === 'i2v' &&
+            supportsLastImage &&
+            !usingReferences &&
+            lastImagePath
+              ? { last_image_path: lastImagePath }
+              : {}),
+            ...(workloadType === 'i2v' && supportsLastImage && references.length
+              ? {
+                  references: references.map((r) => ({
+                    source: r.source,
+                    media_type: r.media_type,
+                  })),
+                }
+              : {}),
+            negative_prompt: negativePrompt,
+            num_inference_steps: numInferenceSteps,
+            num_frames: numFrames,
+            height,
+            width,
+            guidance_scale: guidanceScale,
+            guidance_rescale: guidanceRescale,
+            fps,
+            seed,
+            num_gpus: numGpus,
+            dit_cpu_offload: ditCpuOffload,
+            dit_layerwise_offload: ditLayerwiseOffload,
+            text_encoder_cpu_offload: textEncoderCpuOffload,
+            vae_cpu_offload: vaeCpuOffload,
+            image_encoder_cpu_offload: imageEncoderCpuOffload,
+            use_fsdp_inference: useFsdpInference,
+            enable_torch_compile: enableTorchCompile,
+            vsa_sparsity: vsaSparsity,
+            tp_size: tpSize,
+            sp_size: spSize,
+          }
+        : {
+            data_path: effectiveDataPath.trim(),
+            max_train_steps: maxTrainSteps,
+            train_batch_size: trainBatchSize,
+            learning_rate: learningRate,
+            num_latent_t: numLatentT,
+            validation_dataset_file: selectedValidationDatasetId || undefined,
+            lora_rank: loraRank,
+            ...(workloadType === 'dmd_t2v'
+              ? {
+                  dmd_use_vsa: dmdUseVsa,
+                  dmd_vsa_sparsity: dmdVsaSparsity,
+                  dmd_denoising_steps: dmdDenoisingSteps,
+                  real_score_guidance_scale: realScoreGuidanceScale,
+                  generator_update_interval: generatorUpdateInterval,
+                  real_score_model_path: realScoreModelPath || modelId,
+                  fake_score_model_path: fakeScoreModelPath || modelId,
+                }
+              : {}),
+          }),
+    };
+  }
+
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (isInference && workloadType === 'i2v' && !imagePath && !usingReferences)
@@ -518,90 +603,11 @@ export default function CreateJobModal({
       !prompt.trim()
     )
       return;
-    // Send the dataset id; the backend resolves it to the on-disk media dir.
-    const effectiveDataPath = selectedDatasetId ?? '';
     if (!isInference && !selectedDatasetId) return;
-    // `lora_t2v` jobs are persisted with a dedicated backend job_type that the
-    // front-end JobType enum does not model; cast to keep payload parity.
-    const effectiveJobType = (
-      workloadType === 'lora_t2v' ? 'lora' : jobType
-    ) as JobType;
     setIsSubmitting(true);
     setSubmitError(null);
     try {
-      const payload: CreateJobRequest = {
-        model_id: modelId,
-        name: name.trim(),
-        prompt:
-          usingReferences && useGuidedPrompt && !isEmptyPromptFields(promptFields)
-            ? serializeH3Prompt(promptFields)
-            : prompt,
-        workload_type: workloadType,
-        job_type: effectiveJobType,
-        ...(isInference
-          ? {
-              // Ref2VA and the FL2VA keyframes are mutually exclusive:
-              // _prepare_ref2va rejects image_path/last_image_path outright
-              // when references are present.
-              ...(workloadType === 'i2v' && !usingReferences && imagePath
-                ? { image_path: imagePath }
-                : {}),
-              ...(workloadType === 'i2v' &&
-              supportsLastImage &&
-              !usingReferences &&
-              lastImagePath
-                ? { last_image_path: lastImagePath }
-                : {}),
-              ...(workloadType === 'i2v' && supportsLastImage && references.length
-                ? {
-                    references: references.map((r) => ({
-                      source: r.source,
-                      media_type: r.media_type,
-                    })),
-                  }
-                : {}),
-              negative_prompt: negativePrompt,
-              num_inference_steps: numInferenceSteps,
-              num_frames: numFrames,
-              height,
-              width,
-              guidance_scale: guidanceScale,
-              guidance_rescale: guidanceRescale,
-              fps,
-              seed,
-              num_gpus: numGpus,
-              dit_cpu_offload: ditCpuOffload,
-              dit_layerwise_offload: ditLayerwiseOffload,
-              text_encoder_cpu_offload: textEncoderCpuOffload,
-              vae_cpu_offload: vaeCpuOffload,
-              image_encoder_cpu_offload: imageEncoderCpuOffload,
-              use_fsdp_inference: useFsdpInference,
-              enable_torch_compile: enableTorchCompile,
-              vsa_sparsity: vsaSparsity,
-              tp_size: tpSize,
-              sp_size: spSize,
-            }
-          : {
-              data_path: effectiveDataPath.trim(),
-              max_train_steps: maxTrainSteps,
-              train_batch_size: trainBatchSize,
-              learning_rate: learningRate,
-              num_latent_t: numLatentT,
-              validation_dataset_file: selectedValidationDatasetId || undefined,
-              lora_rank: loraRank,
-              ...(workloadType === 'dmd_t2v'
-                ? {
-                    dmd_use_vsa: dmdUseVsa,
-                    dmd_vsa_sparsity: dmdVsaSparsity,
-                    dmd_denoising_steps: dmdDenoisingSteps,
-                    real_score_guidance_scale: realScoreGuidanceScale,
-                    generator_update_interval: generatorUpdateInterval,
-                    real_score_model_path: realScoreModelPath || modelId,
-                    fake_score_model_path: fakeScoreModelPath || modelId,
-                  }
-                : {}),
-            }),
-      };
+      const payload = buildJobPayload();
       if (editingJob) {
         await updateJob(
           editingJob.id,
@@ -1351,6 +1357,12 @@ export default function CreateJobModal({
           )}
 
           </fieldset>
+
+          <ApiRequestPreview
+            request={editingJob && !readOnly
+              ? updateJobRequest(editingJob.id, buildJobPayload() as unknown as Record<string, unknown>)
+              : createJobRequest(buildJobPayload())}
+          />
 
           <div className="flex flex-col items-start gap-2">
             {submitError && (
