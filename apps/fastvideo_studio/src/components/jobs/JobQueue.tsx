@@ -4,9 +4,11 @@ import * as React from 'react';
 import { AlertTriangle } from 'lucide-react';
 
 import JobCard from '@/components/jobs/JobCard';
+import JobFilters from '@/components/jobs/JobFilters';
 import { Button } from '@/components/ui/button';
 import { useStore } from '@/hooks/useStore';
 import { getJobsList } from '@/lib/api';
+import { filterJobs, hasJobResult, MAX_RESULT_PREVIEWS } from '@/lib/jobResults';
 import type { Job, JobType } from '@/lib/types';
 import {
   activeJobStore,
@@ -36,6 +38,8 @@ export default function JobQueue({ jobType, jobTypesForList }: JobQueueProps) {
   const [jobs, setJobs] = React.useState<Job[]>([]);
   const [isInitialLoading, setIsInitialLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
+  const [modelFilter, setModelFilter] = React.useState('');
+  const [promptFilter, setPromptFilter] = React.useState('');
   const { nonce } = useStore(jobsRefreshStore);
   const { activeJobId } = useStore(activeJobStore);
 
@@ -135,6 +139,10 @@ export default function JobQueue({ jobType, jobTypesForList }: JobQueueProps) {
   }, [activeJobId, jobs]);
 
   const multiType = typesToFetch.length > 1;
+  const filteredJobs = filterJobs(jobs, modelFilter, promptFilter);
+  const thumbnailJobIds = new Set(
+    filteredJobs.filter(hasJobResult).slice(0, MAX_RESULT_PREVIEWS).map((job) => job.id),
+  );
 
   return (
     <div className="mx-auto flex w-full max-w-[850px] flex-col gap-6 px-4 pb-12">
@@ -178,13 +186,35 @@ export default function JobQueue({ jobType, jobTypesForList }: JobQueueProps) {
                 </p>
               )}
               {jobs.length === 0 ? (
-            <p className="py-8 text-center text-muted-foreground">
-              No {multiType ? 'jobs' : `${jobType} jobs`} yet. Create one above.
-            </p>
+                <p className="py-8 text-center text-muted-foreground">
+                  No {multiType ? 'jobs' : `${jobType} jobs`} yet. Create one above.
+                </p>
               ) : (
-                jobs.map((job) => (
-                  <JobCard key={job.id} job={job} onJobUpdated={fetchJobs} />
-                ))
+                <>
+                  <JobFilters
+                    model={modelFilter}
+                    prompt={promptFilter}
+                    onModelChange={setModelFilter}
+                    onPromptChange={setPromptFilter}
+                    count={filteredJobs.length}
+                    total={jobs.length}
+                  />
+                  {filteredJobs.length === 0 ? (
+                    <p className="py-8 text-center text-muted-foreground">No jobs match these filters.</p>
+                  ) : filteredJobs.map((job) => (
+                    <JobCard
+                      key={job.id}
+                      job={job}
+                      onJobUpdated={fetchJobs}
+                      thumbnailEnabled={thumbnailJobIds.has(job.id)}
+                    />
+                  ))}
+                  {filteredJobs.filter(hasJobResult).length > MAX_RESULT_PREVIEWS && (
+                    <p className="mt-4 text-xs text-muted-foreground">
+                      Thumbnails shown for the first {MAX_RESULT_PREVIEWS} results. Every result can still be opened.
+                    </p>
+                  )}
+                </>
               )}
             </>
           )}

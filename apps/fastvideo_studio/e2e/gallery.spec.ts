@@ -3,8 +3,7 @@ import { expect, test } from '@playwright/test';
 import { API_BASE, skipWithoutMock } from './helpers';
 
 /**
- * Gallery page: the seeded completed inference job surfaces as a media tile
- * with playback controls or an explicit media-error fallback.
+ * Gallery page: the seeded result loads a poster first and a player on click.
  */
 test.describe('gallery', () => {
   skipWithoutMock();
@@ -32,13 +31,20 @@ test.describe('gallery', () => {
 
     const tile = page.locator('article').filter({ hasText: completed!.prompt });
     await expect(tile).toBeVisible();
-    await expect(
-      tile.locator('video').or(tile.getByText('Preview unavailable')),
-    ).toBeVisible();
+    await expect(tile.locator('video')).toHaveCount(0);
+    await tile.getByRole('button', { name: /Preview result:/ }).click();
 
-    const video = tile.locator('video');
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    await expect(
+      dialog.locator('video').or(dialog.getByText('Preview unavailable')),
+    ).toBeVisible();
+    const video = dialog.locator('video');
     if (await video.isVisible()) {
       await expect(video).toHaveAttribute('controls', '');
     }
+    await expect(dialog.getByRole('button', { name: 'Download video' })).toBeVisible();
+    await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+    await expect(page.locator('video')).toHaveCount(0);
   });
 });

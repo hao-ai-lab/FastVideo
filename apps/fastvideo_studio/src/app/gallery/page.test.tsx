@@ -9,7 +9,9 @@ import { makeJob as makeBaseJob } from '@/test/factories';
 
 vi.mock('@/lib/api', () => ({
   getJobsList: vi.fn(),
+  getApiBaseUrl: () => 'http://test.local/api',
   getJobVideoUrl: (id: string) => `http://test.local/api/jobs/${id}/video`,
+  downloadJobVideo: vi.fn(),
 }));
 
 const makeJob = (overrides: Partial<Job> = {}): Job =>
@@ -43,20 +45,72 @@ describe('GalleryPage', () => {
     expect(getJobsList).toHaveBeenCalledWith('inference');
   });
 
-  it('provides video controls and a visible fallback when media fails', async () => {
+  it('loads only a lazy thumbnail until clicked and unmounts the player on close', async () => {
     vi.mocked(getJobsList).mockResolvedValue([makeJob()]);
-    renderGallery();
+    const { container } = renderGallery();
+
+    const preview = await screen.findByRole('button', { name: 'Preview result: wan' });
+    expect(container.querySelector('video')).toBeNull();
+    expect(preview.querySelector('img')).toHaveAttribute('loading', 'lazy');
+    expect(preview.querySelector('img')).toHaveAttribute('src', 'http://test.local/api/jobs/job-1/thumbnail');
+    fireEvent.click(preview);
 
     const video = await screen.findByLabelText(
       'Generated video: a cat surfing a wave',
     );
     expect(video).toHaveAttribute('controls');
+    expect(video).not.toHaveAttribute('autoplay');
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.queryByLabelText('Generated video: a cat surfing a wave')).not.toBeInTheDocument();
+  });
+
+  it('keeps failed thumbnails clickable and shows a fallback if the full media also fails', async () => {
+    vi.mocked(getJobsList).mockResolvedValue([makeJob()]);
+    renderGallery();
+    const preview = await screen.findByRole('button', { name: 'Preview result: wan' });
+    fireEvent.error(preview.querySelector('img')!);
+    expect(screen.getByText('Thumbnail unavailable')).toBeInTheDocument();
+    fireEvent.click(preview);
+    const video = screen.getByLabelText('Generated video: a cat surfing a wave');
 
     fireEvent.error(video);
     expect(screen.getByText('Preview unavailable')).toBeInTheDocument();
     expect(
       screen.getByText('The generated file could not be loaded.'),
     ).toBeInTheDocument();
+  });
+
+  it('shows model/configuration and combines model and prompt substring filters', async () => {
+    vi.mocked(getJobsList).mockResolvedValue([
+      makeJob({ id: 'one', name: 'Sunset clip', model_id: 'Wan2.1', prompt: 'A cat surfing', num_inference_steps: 30, seed: 123 }),
+      makeJob({ id: 'two', model_id: 'Wan2.1', prompt: 'A dog surfing' }),
+      makeJob({ id: 'three', model_id: 'OtherModel', prompt: 'A cat sleeping' }),
+    ]);
+    renderGallery();
+    expect(await screen.findByText('Sunset clip')).toBeInTheDocument();
+    expect(screen.getByText('30 steps')).toBeInTheDocument();
+    expect(screen.getByText('Seed 123')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Model name'), { target: { value: 'WAN' } });
+    fireEvent.change(screen.getByLabelText('Prompt contains'), { target: { value: ' CAT ' } });
+    expect(screen.getByText('1 of 3 jobs')).toBeInTheDocument();
+    expect(screen.getByText('Sunset clip')).toBeInTheDocument();
+    expect(screen.queryByText('A dog surfing')).not.toBeInTheDocument();
+    expect(screen.queryByText('A cat sleeping')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+    expect(screen.getByText('3 jobs')).toBeInTheDocument();
+  });
+
+  it('caps lazy posters to 50 and makes older results accessible on the next page', async () => {
+    vi.mocked(getJobsList).mockResolvedValue(
+      Array.from({ length: 51 }, (_, index) => makeJob({ id: `job-${index}`, name: `Result ${index}` })),
+    );
+    const { container } = renderGallery();
+    expect(await screen.findByText('Page 1 of 2 · Up to 50 previews per page')).toBeInTheDocument();
+    expect(container.querySelectorAll('img')).toHaveLength(50);
+    expect(container.querySelectorAll('video')).toHaveLength(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    expect(container.querySelectorAll('img')).toHaveLength(1);
+    expect(screen.getByText('Result 50')).toBeInTheDocument();
   });
 
   it('shows the empty state when no completed videos exist', async () => {

@@ -9,6 +9,8 @@ import { triggerRefresh } from '@/stores/jobsRefresh';
 import { makeJob as makeBaseJob } from '@/test/factories';
 
 vi.mock('@/lib/api', () => ({
+  getApiBaseUrl: () => 'http://test.local/api',
+  getJobVideoUrl: (id: string) => `http://test.local/api/jobs/${id}/video`,
   getJobsList: vi.fn(),
   startJob: vi.fn(),
   stopJob: vi.fn(),
@@ -118,5 +120,32 @@ describe('JobQueue', () => {
     await waitFor(() => expect(getJobsList).toHaveBeenCalledTimes(1));
     act(() => triggerRefresh());
     await waitFor(() => expect(getJobsList).toHaveBeenCalledTimes(2));
+  });
+
+  it('caps thumbnails at 50 while keeping every completed result available', async () => {
+    vi.mocked(getJobsList).mockResolvedValue(
+      Array.from({ length: 51 }, (_, index) => makeJob({ id: `job-${index}`, name: `Result ${index}`, output_path: '/out/clip.mp4' })),
+    );
+    const { container } = render(<JobQueue jobType="inference" />);
+    expect(await screen.findByText('51 jobs')).toBeInTheDocument();
+    expect(container.querySelectorAll('img')).toHaveLength(50);
+    expect(screen.getAllByRole('button', { name: /Preview result:/ })).toHaveLength(51);
+    expect(container.querySelectorAll('video')).toHaveLength(0);
+  });
+
+  it('filters by model and prompt together without issuing a new API request', async () => {
+    vi.mocked(getJobsList).mockResolvedValue([
+      makeJob({ id: 'one', model_id: 'Wan2.1', prompt: 'A surfing cat' }),
+      makeJob({ id: 'two', model_id: 'Other', prompt: 'A surfing cat' }),
+      makeJob({ id: 'three', model_id: 'Wan2.1', prompt: 'A dog swimming' }),
+    ]);
+    render(<JobQueue jobType="inference" />);
+    await screen.findByText('3 jobs');
+    fireEvent.change(screen.getByLabelText('Model name'), { target: { value: 'wan' } });
+    fireEvent.change(screen.getByLabelText('Prompt contains'), { target: { value: 'CAT' } });
+    expect(screen.getByText('1 of 3 jobs')).toBeInTheDocument();
+    expect(screen.getByText('A surfing cat')).toBeInTheDocument();
+    expect(screen.queryByText('Other')).not.toBeInTheDocument();
+    expect(getJobsList).toHaveBeenCalledTimes(1);
   });
 });

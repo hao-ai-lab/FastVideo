@@ -14,6 +14,8 @@ import { activeJobStore, setActiveJobId } from '@/stores/activeJob';
 import { makeJob as makeBaseJob } from '@/test/factories';
 
 vi.mock('@/lib/api', () => ({
+  getApiBaseUrl: () => 'http://test.local/api',
+  getJobVideoUrl: (id: string) => `http://test.local/api/jobs/${id}/video`,
   startJob: vi.fn(),
   stopJob: vi.fn(),
   deleteJob: vi.fn(),
@@ -70,7 +72,7 @@ describe('JobCard', () => {
     expect(screen.getByText('a cat surfing a wave')).toBeInTheDocument();
     expect(screen.getByText('pending')).toBeInTheDocument();
     expect(screen.getByText('81 frames')).toBeInTheDocument();
-    expect(screen.getByText('480×832')).toBeInTheDocument();
+    expect(screen.getByText('832×480')).toBeInTheDocument();
   });
 
   it('shows the workload type (not frames) for non-inference jobs', () => {
