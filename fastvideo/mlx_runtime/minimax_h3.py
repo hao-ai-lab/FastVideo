@@ -433,6 +433,14 @@ class MiniMaxH3SchedulerState:
         sigmas = minimax_h3_sigmas(shift, num_denoise_steps)
         return cls(shift=shift, sigmas=sigmas, timesteps=(1.0 - sigmas[:-1]).astype(np.float32))
 
+    @classmethod
+    def from_dmd_steps(cls, shift: float, dmd_steps) -> MiniMaxH3SchedulerState:
+        if shift <= 0:
+            raise ValueError(f"shift must be positive, got {shift}.")
+        base = np.array([float(r) / 1000.0 for r in dmd_steps] + [0.0], dtype=np.float64)
+        sigmas = shift * base / (1.0 + (shift - 1.0) * base)
+        return cls(shift=shift, sigmas=sigmas, timesteps=(1.0 - sigmas[:-1]).astype(np.float32))
+
     @property
     def num_steps(self) -> int:
         return int(self.timesteps.shape[0])

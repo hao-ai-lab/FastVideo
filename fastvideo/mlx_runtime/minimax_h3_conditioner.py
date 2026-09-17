@@ -89,9 +89,10 @@ class _ShardIndex:
                 (header_len, ) = struct.unpack("<Q", handle.read(8))
                 header = json.loads(handle.read(header_len))
             self.key_to_shard = {k: str(single) for k in header if k != "__metadata__"}
-        # Pre-cache all shard headers
+        # Pre-cache only existing shard headers
         for shard_path in set(self.key_to_shard.values()):
-            self._cache_header(shard_path)
+            if Path(shard_path).exists():
+                self._cache_header(shard_path)
 
     def _cache_header(self, path: str) -> tuple[dict, int]:
         """Parse and cache a shard's header, returning (header_dict, data_start_offset)."""

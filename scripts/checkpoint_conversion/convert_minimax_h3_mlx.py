@@ -54,7 +54,29 @@ SUPPORTED_FORMATS = ("int8", "int6", "int4")
 DEFAULT_FORMATS = " ".join(SUPPORTED_FORMATS)
 
 
-def _adaln_cache_timesteps() -> np.ndarray:
+def _adaln_cache_timesteps(model_root: str | Path | None = None) -> np.ndarray:
+    import json
+    if model_root is not None:
+        p = Path(model_root)
+        contract_path = p / "fastvideo_inference.json"
+        if not contract_path.exists() and p.parent:
+            contract_path = p.parent / "fastvideo_inference.json"
+        if contract_path.exists():
+            try:
+                contract = json.loads(contract_path.read_text(encoding="utf-8"))
+                dmd_steps = contract.get("dmd_denoising_steps")
+                v_shift = float(contract.get("video_scheduler_shift", 10.0))
+                a_shift = float(contract.get("audio_scheduler_shift", 3.0))
+                if dmd_steps:
+                    base = np.array([float(r) / 1000.0 for r in dmd_steps] + [0.0], dtype=np.float64)
+                    v_sigmas = v_shift * base / (1.0 + (v_shift - 1.0) * base)
+                    a_sigmas = a_shift * base / (1.0 + (a_shift - 1.0) * base)
+                    v_t = (1.0 - v_sigmas[:-1]).astype(np.float32)
+                    a_t = (1.0 - a_sigmas[:-1]).astype(np.float32)
+                    logger.info("FastH3 checkpoint schedule contract found at %s (%d DMD forwards, video/audio shift=%g/%g)", contract_path, len(dmd_steps), v_shift, a_shift)
+                    return np.unique(np.concatenate([v_t, a_t, [1.0]])).astype(np.float32)
+            except Exception as exc:
+                logger.warning("Could not parse %s: %s", contract_path, exc)
     video = 1.0 - minimax_h3_sigmas(MINIMAX_H3_VIDEO_SHIFT, 4)[:-1]
     audio = 1.0 - minimax_h3_sigmas(MINIMAX_H3_AUDIO_SHIFT, 4)[:-1]
     return np.unique(np.concatenate([video, audio, [1.0]])).astype(np.float32)
@@ -84,7 +106,7 @@ def main() -> None:
         raise ValueError(f"Unsupported H3 MLX formats: {unsupported}. Choose from {SUPPORTED_FORMATS}.")
     out_base = Path(args.out)
     out_base.mkdir(parents=True, exist_ok=True)
-    cache_timesteps = _adaln_cache_timesteps()
+    cache_timesteps = _adaln_cache_timesteps(args.model_root)
 
     for fmt in formats:
         spec = MLXQuantizationSpec.from_name(fmt)
