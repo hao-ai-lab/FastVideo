@@ -14,6 +14,18 @@ Example usage:
         --pipeline-class-name "LTX2Pipeline" \\
         --diffusers-version "0.33.0.dev0" \\
         --gemma-path "<PATH_TO_LOCAL_REPO>/google/gemma-3-12b-it"
+
+LTX-2.5 uses separate official component files. Convert that layout with:
+
+    python scripts/checkpoint_conversion/convert_ltx2_weights.py \
+        --transformer-source diffusion_models/ltx-2.5-22b-dev-transformer-bf16.safetensors \
+        --text-encoder-source text_encoders/gemma4-12b-with-proj-ltx-2.5-bf16.safetensors \
+        --vae-source vae/ltx-2.5-video-vae-conv-bf16.safetensors \
+        --audio-vae-source vae/ltx-2.5-audio-vae-bf16.safetensors \
+        --spatial-upscaler-source latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors \
+        --distilled-lora-source loras/ltx-2.5-22b-distilled-lora-450-bf16.safetensors \
+        --variant dev \
+        --output converted_weights/ltx2-5-dev
 """
 
 from __future__ import annotations
@@ -26,6 +38,7 @@ import re
 import shutil
 from collections import OrderedDict
 from pathlib import Path
+from typing import Any
 
 import torch
 from safetensors import safe_open
@@ -46,6 +59,35 @@ COMPONENT_PREFIXES: dict[str, tuple[str, ...]] = {
     "audio_vae": ("audio_vae.", ),
     "vocoder": ("vocoder.", ),
     "text_embedding_projection": ("text_embedding_projection.", "model.text_embedding_projection."),
+}
+
+PACKED_GEMMA_CONFIG_METADATA_KEY = "gemma_config"
+PACKED_GEMMA_TOKENIZER_KEY = "tokenizer_json"
+PACKED_GEMMA_ASSET_PREFIX = "hf_asset__"
+
+SPLIT_SOURCE_ARGUMENTS = (
+    "transformer_source",
+    "text_encoder_source",
+    "vae_source",
+    "audio_vae_source",
+    "spatial_upscaler_source",
+)
+
+TEXT_PROJECTION_PREFIXES: dict[str, str] = {
+    "text_embedding_projection.aggregate_embed.": "feature_extractor_linear.aggregate_embed.",
+    "text_embedding_projection.video_aggregate_embed.": "video_feature_extractor_linear.",
+    "text_embedding_projection.audio_aggregate_embed.": "audio_feature_extractor_linear.",
+    "model.text_embedding_projection.aggregate_embed.": "feature_extractor_linear.aggregate_embed.",
+    "model.text_embedding_projection.video_aggregate_embed.": "video_feature_extractor_linear.",
+    "model.text_embedding_projection.audio_aggregate_embed.": "audio_feature_extractor_linear.",
+}
+
+TEXT_CONNECTOR_PREFIXES: dict[str, str] = {
+    "model.diffusion_model.video_embeddings_connector.": "embeddings_connector.",
+    "model.diffusion_model.audio_embeddings_connector.": "audio_embeddings_connector.",
+    "model.diffusion_model.embeddings_connector.": "embeddings_connector.",
+    "video_embeddings_connector.": "embeddings_connector.",
+    "audio_embeddings_connector.": "audio_embeddings_connector.",
 }
 
 
@@ -83,6 +125,18 @@ def _read_metadata_config(path: Path) -> dict:
     return json.loads(metadata["config"])
 
 
+def _read_safetensors_metadata(path: Path) -> dict[str, str]:
+    with safe_open(str(path), framework="pt") as f:
+        return dict(f.metadata() or {})
+
+
+def _metadata_config_for_component(metadata_config: dict, component_name: str) -> dict:
+    component_config = metadata_config.get(component_name)
+    if isinstance(component_config, dict):
+        return component_config
+    return metadata_config
+
+
 def _filter_transformer_config(config: dict) -> dict:
     transformer = config.get("transformer", {})
     allowed = {
@@ -108,6 +162,28 @@ def _filter_transformer_config(config: dict) -> dict:
         "audio_cross_attention_dim",
         "audio_positional_embedding_max_pos",
         "av_ca_timestep_scale_multiplier",
+        # LTX-2.3 architecture extensions.
+        "cross_attention_adaln",
+        "caption_proj_before_connector",
+        "apply_gated_attention",
+        "caption_projection_first_linear",
+        "caption_proj_input_norm",
+        "caption_projection_second_linear",
+        "connector_num_attention_heads",
+        "connector_attention_head_dim",
+        "connector_num_layers",
+        "audio_connector_num_attention_heads",
+        "audio_connector_attention_head_dim",
+        "audio_connector_num_layers",
+        "connector_positional_embedding_max_pos",
+        "connector_apply_gated_attention",
+        "connector_ff_bias",
+        # LTX-2.5 architecture extensions. Defaults live in the native model
+        # config, so preserving an explicit False is important.
+        "use_prompt_adaln_single",
+        "ff_bias",
+        "audio_ff_bias",
+        "use_keyframes_abs_pos_embedding",
     }
     filtered = {k: v for k, v in transformer.items() if k in allowed}
     if "frequencies_precision" in filtered:
@@ -139,6 +215,165 @@ def _build_text_embedding_projection_config(gemma_model_path: str = "", ) -> dic
         "connector_double_precision_rope": True,
         "connector_num_learnable_registers": 128,
     }
+
+
+def _gemma_text_config(gemma_config: dict) -> dict:
+    text_config = gemma_config.get("text_config")
+    if isinstance(text_config, dict):
+        return text_config
+    return gemma_config
+
+
+def _build_split_text_encoder_config(transformer_config: dict, gemma_config: dict) -> dict:
+    text_config = _gemma_text_config(gemma_config)
+    hidden_size = int(text_config.get("hidden_size", 3840))
+    num_hidden_layers = int(text_config.get("num_hidden_layers", 48))
+    video_inner_dim = int(transformer_config.get("num_attention_heads", 30)) * int(
+        transformer_config.get("attention_head_dim", 128))
+    audio_inner_dim = int(transformer_config.get("audio_num_attention_heads", 30)) * int(
+        transformer_config.get("audio_attention_head_dim", 128))
+
+    eos_token_id = gemma_config.get("eos_token_id", text_config.get("eos_token_id", 2))
+    if isinstance(eos_token_id, list):
+        eos_token_id = eos_token_id[0] if eos_token_id else 2
+    config = _build_text_embedding_projection_config(gemma_model_path="gemma")
+    config.update({
+        "hidden_size": hidden_size,
+        "num_hidden_layers": num_hidden_layers,
+        "num_attention_heads": int(text_config.get("num_attention_heads", 30)),
+        # The packed LTX tokenizer always pads/truncates to 1024 regardless of
+        # the Gemma backbone's much larger context window.
+        "text_len": 1024,
+        "pad_token_id": int(gemma_config.get("pad_token_id", text_config.get("pad_token_id", 0)) or 0),
+        "bos_token_id": int(gemma_config.get("bos_token_id", text_config.get("bos_token_id", 2)) or 2),
+        "eos_token_id": int(eos_token_id),
+        "feature_extractor_in_features": hidden_size * (num_hidden_layers + 1),
+        "feature_extractor_out_features": video_inner_dim,
+        "video_feature_extractor_out_features": video_inner_dim,
+        "audio_feature_extractor_out_features": audio_inner_dim,
+        "caption_proj_before_connector": bool(transformer_config.get("caption_proj_before_connector", False)),
+        "caption_projection_first_linear": bool(transformer_config.get("caption_projection_first_linear", True)),
+        "caption_proj_input_norm": bool(transformer_config.get("caption_proj_input_norm", True)),
+        "caption_projection_second_linear": bool(transformer_config.get("caption_projection_second_linear", True)),
+        "connector_num_attention_heads": int(transformer_config.get("connector_num_attention_heads", 30)),
+        "connector_attention_head_dim": int(transformer_config.get("connector_attention_head_dim", 128)),
+        "connector_num_layers": int(transformer_config.get("connector_num_layers", 2)),
+        "audio_connector_num_attention_heads": int(
+            transformer_config.get(
+                "audio_connector_num_attention_heads",
+                transformer_config.get("connector_num_attention_heads", 30),
+            )),
+        "audio_connector_attention_head_dim": int(
+            transformer_config.get(
+                "audio_connector_attention_head_dim",
+                transformer_config.get("connector_attention_head_dim", 128),
+            )),
+        "audio_connector_num_layers": int(
+            transformer_config.get(
+                "audio_connector_num_layers",
+                transformer_config.get("connector_num_layers", 2),
+            )),
+        "connector_positional_embedding_max_pos": transformer_config.get(
+            "connector_positional_embedding_max_pos", [4096]),
+        "connector_rope_type": transformer_config.get("rope_type", "split"),
+        "connector_apply_gated_attention": bool(transformer_config.get("connector_apply_gated_attention", False)),
+        "connector_ff_bias": bool(transformer_config.get("connector_ff_bias", True)),
+        "connector_double_precision_rope": transformer_config.get("frequencies_precision") == "float64",
+    })
+    return config
+
+
+def _tensor_to_bytes(tensor: torch.Tensor, key: str) -> bytes:
+    if tensor.dtype != torch.uint8 or tensor.ndim != 1:
+        raise ValueError(f"Packed Gemma asset {key!r} must be a 1-D uint8 tensor, got {tensor.dtype} {tensor.shape}.")
+    return bytes(tensor.cpu().tolist())
+
+
+def _map_packed_gemma_weight_key(key: str) -> str:
+    """Map the official Comfy-flat Gemma 4 pack back to HF key names.
+
+    The official packer flattens the language tower and renames vision/audio
+    components. Already-HF keys pass through unchanged so repacked checkpoints
+    are also accepted.
+    """
+    if key.startswith("model.language_model.") or key.startswith("model.vision_embedder."):
+        return key
+    if key.startswith(("model.layers.", "model.embed_tokens.", "model.norm.")):
+        return "model.language_model." + key.removeprefix("model.")
+    if key.startswith("vision_model."):
+        return "model.vision_embedder." + key.removeprefix("vision_model.")
+    if key.startswith("multi_modal_projector."):
+        return "model.embed_vision." + key.removeprefix("multi_modal_projector.")
+    if key.startswith("audio_projector."):
+        return "model.embed_audio." + key.removeprefix("audio_projector.")
+    return key
+
+
+def _route_text_projection_key(key: str) -> str | None:
+    for prefix, replacement in TEXT_PROJECTION_PREFIXES.items():
+        if key.startswith(prefix):
+            return replacement + key[len(prefix):]
+    for prefix, replacement in TEXT_CONNECTOR_PREFIXES.items():
+        if key.startswith(prefix):
+            return replacement + key[len(prefix):]
+    return None
+
+
+def _write_json(path: Path, value: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(value, f, indent=2)
+        f.write("\n")
+
+
+def _write_bytes(path: Path, value: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(value)
+
+
+def _unpack_packed_gemma(
+    source_path: Path,
+    output_dir: Path,
+) -> tuple[OrderedDict, dict]:
+    shards = _find_shards(source_path)
+    if len(shards) != 1:
+        raise ValueError("Packed LTX-2.5 text encoder must resolve to exactly one safetensors file.")
+    source_file = shards[0]
+    metadata = _read_safetensors_metadata(source_file)
+    raw_gemma_config = metadata.get(PACKED_GEMMA_CONFIG_METADATA_KEY)
+    if raw_gemma_config is None:
+        raise ValueError(
+            f"Packed text encoder {source_file} is missing {PACKED_GEMMA_CONFIG_METADATA_KEY!r} metadata.")
+    gemma_config = json.loads(raw_gemma_config)
+
+    gemma_weights: OrderedDict[str, torch.Tensor] = OrderedDict()
+    projection_weights: OrderedDict[str, torch.Tensor] = OrderedDict()
+    tokenizer_assets: dict[str, bytes] = {}
+    for key, tensor in _load_weights(shards).items():
+        projection_key = _route_text_projection_key(key)
+        if projection_key is not None:
+            projection_weights[projection_key] = tensor
+        elif key == PACKED_GEMMA_TOKENIZER_KEY:
+            tokenizer_assets["tokenizer.json"] = _tensor_to_bytes(tensor, key)
+        elif key.startswith(PACKED_GEMMA_ASSET_PREFIX):
+            asset_name = key.removeprefix(PACKED_GEMMA_ASSET_PREFIX)
+            tokenizer_assets[asset_name] = _tensor_to_bytes(tensor, key)
+        else:
+            gemma_weights[_map_packed_gemma_weight_key(key)] = tensor
+
+    if not gemma_weights:
+        raise ValueError(f"Packed text encoder {source_file} did not contain Gemma model weights.")
+    if "tokenizer.json" not in tokenizer_assets:
+        raise ValueError(f"Packed text encoder {source_file} did not contain tokenizer_json.")
+
+    gemma_dir = output_dir / "text_encoder" / "gemma"
+    gemma_dir.mkdir(parents=True, exist_ok=True)
+    save_file(gemma_weights, str(gemma_dir / "model.safetensors"))
+    _write_json(gemma_dir / "config.json", gemma_config)
+    for asset_name, asset_bytes in tokenizer_assets.items():
+        _write_bytes(gemma_dir / asset_name, asset_bytes)
+        _write_bytes(output_dir / "tokenizer" / asset_name, asset_bytes)
+    return projection_weights, gemma_config
 
 
 def _wrap_component_config(
@@ -179,6 +414,59 @@ def _split_component_weights(weights: dict[str, torch.Tensor]) -> dict[str, Orde
     return {name: weights for name, weights in components.items() if weights}
 
 
+def _strip_first_matching_prefix(key: str, prefixes: tuple[str, ...]) -> str:
+    for prefix in prefixes:
+        if key.startswith(prefix):
+            return key[len(prefix):]
+    return key
+
+
+def _split_transformer_and_connectors(
+    weights: dict[str, torch.Tensor],
+) -> tuple[OrderedDict, OrderedDict]:
+    transformer: OrderedDict[str, torch.Tensor] = OrderedDict()
+    text_encoder: OrderedDict[str, torch.Tensor] = OrderedDict()
+    for key, tensor in weights.items():
+        text_key = _route_text_projection_key(key)
+        if text_key is not None:
+            text_encoder[text_key] = tensor
+            continue
+        transformer_key = _strip_first_matching_prefix(
+            key,
+            ("model.diffusion_model.", "diffusion_model."),
+        )
+        transformer[transformer_key] = tensor
+    return transformer, text_encoder
+
+
+def _split_audio_vae_source(weights: dict[str, torch.Tensor]) -> tuple[OrderedDict, OrderedDict]:
+    audio_vae: OrderedDict[str, torch.Tensor] = OrderedDict()
+    vocoder: OrderedDict[str, torch.Tensor] = OrderedDict()
+    for key, tensor in weights.items():
+        if key.startswith("audio_vae."):
+            audio_vae[key.removeprefix("audio_vae.")] = tensor
+        elif key.startswith("vocoder."):
+            # Strip exactly one prefix. LTX-2.3+ BWE keys intentionally keep
+            # the second "vocoder." segment.
+            vocoder[key.removeprefix("vocoder.")] = tensor
+    if not audio_vae:
+        raise ValueError("Audio VAE source contains no keys with the 'audio_vae.' prefix.")
+    if not vocoder:
+        raise ValueError("Audio VAE source contains no keys with the 'vocoder.' prefix.")
+    return audio_vae, vocoder
+
+
+def _component_weights(
+    source_path: Path,
+    prefixes: tuple[str, ...],
+) -> OrderedDict:
+    shards = _find_shards(source_path)
+    if not shards:
+        raise FileNotFoundError(f"No safetensors found in {source_path}")
+    return OrderedDict(
+        (_strip_first_matching_prefix(key, prefixes), tensor) for key, tensor in _load_weights(shards).items())
+
+
 def _write_component(
     output_dir: Path,
     name: str,
@@ -216,6 +504,33 @@ def _build_model_index(
         "audio_vae": ["diffusers", "LTX2AudioDecoder"],
         "vocoder": ["diffusers", "LTX2Vocoder"],
     }
+
+
+def _build_split_model_index(
+    transformer_class_name: str,
+    pipeline_class_name: str,
+    diffusers_version: str,
+    variant: str,
+    distilled_lora: bool,
+) -> dict:
+    model_index = _build_model_index(
+        transformer_class_name=transformer_class_name,
+        vae_class_name="CausalVideoAutoencoder",
+        pipeline_class_name=pipeline_class_name,
+        diffusers_version=diffusers_version,
+    )
+    model_index.update({
+        "spatial_upsampler": ["diffusers", "LTX2LatentUpsampler"],
+        "fastvideo_ltx2_variant": f"ltx2.5-{variant}",
+        "fastvideo_refine_enabled": variant == "distilled" or distilled_lora,
+        "fastvideo_refine_upsampler_path": "spatial_upsampler",
+        "fastvideo_refine_num_inference_steps": 3,
+        "fastvideo_refine_guidance_scale": 1.0,
+        "fastvideo_refine_add_noise": True,
+    })
+    if distilled_lora:
+        model_index["fastvideo_refine_lora_path"] = "distilled_lora/model.safetensors"
+    return model_index
 
 
 def _write_model_index(output_dir: Path, model_index: dict) -> None:
@@ -309,6 +624,119 @@ def convert_components(
             vae_class_name=vae_class_name,
             pipeline_class_name=pipeline_class_name,
             diffusers_version=diffusers_version,
+        )
+        _write_model_index(output_dir, model_index)
+
+
+def _source_metadata_config(source_path: Path) -> dict:
+    shards = _find_shards(source_path)
+    if not shards:
+        raise FileNotFoundError(f"No safetensors found in {source_path}")
+    return _read_metadata_config(shards[0])
+
+
+def convert_split_components(
+    *,
+    transformer_source: Path,
+    text_encoder_source: Path,
+    vae_source: Path,
+    audio_vae_source: Path,
+    spatial_upscaler_source: Path,
+    output_dir: Path,
+    transformer_class_name: str,
+    variant: str,
+    distilled_lora_source: Path | None = None,
+    emit_diffusers_repo: bool = True,
+    pipeline_class_name: str = "LTX2Pipeline",
+    diffusers_version: str = "0.33.0.dev0",
+) -> None:
+    """Convert the official LTX-2.5 separate-component checkpoint layout.
+
+    The public LTX-2.5 repository describes these files as independent
+    safetensors. Exact real-weight strict loading remains a post-conversion
+    verification step because the repository is gated; this function keeps all
+    routing explicit so key drift fails visibly rather than being dropped.
+    """
+    transformer_metadata = _source_metadata_config(transformer_source)
+    full_transformer_config = _metadata_config_for_component(transformer_metadata, "transformer")
+    transformer_config = _filter_transformer_config(transformer_metadata)
+    if not transformer_config:
+        raise ValueError("Transformer source is missing config.transformer metadata.")
+    transformer_config["_class_name"] = transformer_class_name
+
+    transformer_shards = _find_shards(transformer_source)
+    transformer_weights, connector_weights = _split_transformer_and_connectors(_load_weights(transformer_shards))
+    if not transformer_weights:
+        raise ValueError("Transformer source did not contain transformer weights.")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    projection_weights, gemma_config = _unpack_packed_gemma(text_encoder_source, output_dir)
+    projection_weights.update(connector_weights)
+    if not projection_weights:
+        raise ValueError("Split sources did not contain LTX text projections or connectors.")
+    text_encoder_config = _build_split_text_encoder_config(full_transformer_config, gemma_config)
+
+    vae_metadata = _source_metadata_config(vae_source)
+    vae_config = _metadata_config_for_component(vae_metadata, "vae")
+    vae_class_name = vae_config.get("_class_name", "CausalVideoAutoencoder")
+    if vae_class_name != "CausalVideoAutoencoder":
+        raise ValueError(
+            "--vae-source must be the LTX-2.5 convolutional VAE; "
+            f"metadata declares {vae_class_name!r}.")
+    vae_weights = _component_weights(vae_source, ("vae.", "model.vae."))
+
+    audio_metadata = _source_metadata_config(audio_vae_source)
+    audio_weights, vocoder_weights = _split_audio_vae_source(
+        _load_weights(_find_shards(audio_vae_source)))
+    audio_vae_config = _metadata_config_for_component(audio_metadata, "audio_vae")
+    vocoder_config = _metadata_config_for_component(audio_metadata, "vocoder")
+    if audio_vae_config is audio_metadata or vocoder_config is audio_metadata:
+        raise ValueError("Audio VAE source metadata must contain both config.audio_vae and config.vocoder.")
+
+    upscaler_metadata = _source_metadata_config(spatial_upscaler_source)
+    upscaler_config = dict(upscaler_metadata)
+    upscaler_config["_class_name"] = "LTX2LatentUpsampler"
+    upscaler_weights = _component_weights(
+        spatial_upscaler_source,
+        ("spatial_upscaler.", "spatial_upsampler.", "upsampler.", "model."),
+    )
+    upscaler_weights = OrderedDict((f"upsampler.{key}" if key.split(".", 1)[0].isdigit() else key, value)
+                                    for key, value in upscaler_weights.items())
+
+    _write_component(output_dir, "transformer", transformer_weights, transformer_config)
+    _write_component(output_dir, "text_encoder", projection_weights, text_encoder_config)
+    _write_component(
+        output_dir,
+        "vae",
+        vae_weights,
+        _wrap_component_config("vae", vae_config, class_name="CausalVideoAutoencoder"),
+    )
+    _write_component(
+        output_dir,
+        "audio_vae",
+        audio_weights,
+        _wrap_component_config("audio_vae", audio_vae_config, class_name="LTX2AudioDecoder"),
+    )
+    _write_component(
+        output_dir,
+        "vocoder",
+        vocoder_weights,
+        _wrap_component_config("vocoder", vocoder_config, class_name="LTX2Vocoder"),
+    )
+    _write_component(output_dir, "spatial_upsampler", upscaler_weights, upscaler_config)
+
+    has_distilled_lora = distilled_lora_source is not None
+    if distilled_lora_source is not None:
+        lora_weights = _component_weights(distilled_lora_source, ())
+        _write_component(output_dir, "distilled_lora", lora_weights, config=None)
+
+    if emit_diffusers_repo:
+        model_index = _build_split_model_index(
+            transformer_class_name=transformer_class_name,
+            pipeline_class_name=pipeline_class_name,
+            diffusers_version=diffusers_version,
+            variant=variant,
+            distilled_lora=has_distilled_lora,
         )
         _write_model_index(output_dir, model_index)
 
@@ -411,8 +839,83 @@ def main() -> None:
         default="",
         help="Optional local Gemma model path to copy into the output repo.",
     )
+    parser.add_argument(
+        "--transformer-source",
+        type=str,
+        help="LTX-2.5 split transformer safetensors file or sharded directory.",
+    )
+    parser.add_argument(
+        "--text-encoder-source",
+        type=str,
+        help="LTX-2.5 packed Gemma 4 text-encoder safetensors file.",
+    )
+    parser.add_argument(
+        "--vae-source",
+        type=str,
+        help="LTX-2.5 convolutional video VAE safetensors file or sharded directory.",
+    )
+    parser.add_argument(
+        "--audio-vae-source",
+        type=str,
+        help="LTX-2.5 audio VAE safetensors containing audio_vae.* and vocoder.* keys.",
+    )
+    parser.add_argument(
+        "--spatial-upscaler-source",
+        type=str,
+        help="LTX-2.5 spatial latent upscaler safetensors file or sharded directory.",
+    )
+    parser.add_argument(
+        "--distilled-lora-source",
+        type=str,
+        help="Optional LTX-2.5 distilled LoRA safetensors used for dev stage-2 refinement.",
+    )
+    parser.add_argument(
+        "--variant",
+        choices=("dev", "distilled"),
+        default="dev",
+        help="LTX-2.5 split transformer variant; controls bundled refine defaults.",
+    )
 
     args = parser.parse_args()
+
+    split_values = {name: getattr(args, name) for name in SPLIT_SOURCE_ARGUMENTS}
+    split_mode = any(value is not None for value in split_values.values())
+    if args.distilled_lora_source is not None and not split_mode:
+        raise ValueError("--distilled-lora-source is only valid with the LTX-2.5 split source arguments.")
+    if split_mode:
+        missing = [f"--{name.replace('_', '-')}" for name, value in split_values.items() if value is None]
+        if missing:
+            raise ValueError("LTX-2.5 split conversion requires: " + ", ".join(missing))
+        incompatible = []
+        if args.source:
+            incompatible.append("--source")
+        if args.download:
+            incompatible.append("--download")
+        if args.gemma_path:
+            incompatible.append("--gemma-path")
+        if args.transformer_only:
+            incompatible.append("--transformer-only")
+        if args.components:
+            incompatible.append("--components")
+        if args.update_config:
+            incompatible.append("--update-config")
+        if incompatible:
+            raise ValueError("LTX-2.5 split source arguments cannot be combined with " + ", ".join(incompatible))
+        convert_split_components(
+            transformer_source=Path(args.transformer_source),
+            text_encoder_source=Path(args.text_encoder_source),
+            vae_source=Path(args.vae_source),
+            audio_vae_source=Path(args.audio_vae_source),
+            spatial_upscaler_source=Path(args.spatial_upscaler_source),
+            distilled_lora_source=(Path(args.distilled_lora_source) if args.distilled_lora_source else None),
+            output_dir=Path(args.output),
+            transformer_class_name=args.class_name,
+            variant=args.variant,
+            emit_diffusers_repo=args.diffusers_repo,
+            pipeline_class_name=args.pipeline_class_name,
+            diffusers_version=args.diffusers_version,
+        )
+        return
 
     if args.download:
         if args.source:

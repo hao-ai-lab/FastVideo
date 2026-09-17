@@ -135,6 +135,9 @@ class SamplingParam:
     ltx2_stg_scale_audio: float = 0.0
     ltx2_stg_blocks_video: list[int] = field(default_factory=lambda: [29])
     ltx2_stg_blocks_audio: list[int] = field(default_factory=lambda: [29])
+    # LTX-2.5 distilled stage 1 uses the official variance-preserving
+    # ancestral Euler update. Older LTX generations remain deterministic.
+    ltx2_use_ancestral_sampler: bool = False
 
     # LTX-2 image / video / continuation conditioning. These flow from
     # generate_video(...) kwargs through ``sampling_param.update(kwargs)``
