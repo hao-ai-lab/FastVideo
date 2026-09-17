@@ -14,6 +14,12 @@ and no device-to-host copy at all, with the module living on the host between
 requests exactly as before. Numerics are untouched -- the device tensors are
 byte copies of the same weights -- and peak host memory can only go down,
 because one buffer is reused instead of a new one being allocated per cycle.
+
+The host copies are pinned when ``pin`` is set (``--pin-cpu-memory``, on by
+default), which is what lets the remaining host-to-device copy run at full
+PCIe speed instead of being staged through a bounce buffer. That trades the
+module's size in non-pageable host memory for the bandwidth; ``pin=False``
+keeps the copies pageable and everything else the same.
 """
 from __future__ import annotations
 
@@ -21,6 +27,7 @@ import torch
 from torch import nn
 
 from fastvideo.logger import init_logger
+from fastvideo.utils import is_pin_memory_available
 
 logger = init_logger(__name__)
 
@@ -33,31 +40,34 @@ def _tensors(module: nn.Module):
         yield "buffer:" + name, buf
 
 
-def _host_copies(module: nn.Module) -> dict[str, torch.Tensor]:
+def _host_copies(module: nn.Module, pin: bool) -> dict[str, torch.Tensor]:
     host = getattr(module, _HOST_ATTR, None)
     if host is not None:
         return host
     host, total = {}, 0
     for name, t in _tensors(module):
         src = t.data if t.data.device.type == "cpu" else t.data.to("cpu")
+        if pin and not src.is_pinned():
+            src = src.pin_memory()
         host[name] = src
         total += src.numel() * src.element_size()
     setattr(module, _HOST_ATTR, host)
-    logger.info("frozen offload: holding %.2f GB of %s on the host", total / 1e9, type(module).__name__)
+    logger.info("frozen offload: holding %.2f GB of %s on the host (%s)", total / 1e9, type(module).__name__,
+                "pinned" if pin else "pageable")
     return host
 
 
-def load(module: nn.Module, device: torch.device) -> nn.Module:
+def load(module: nn.Module, device: torch.device, pin: bool = True) -> nn.Module:
     """Put a frozen ``module`` on ``device``, copying from its host copies."""
     if device.type != "cuda":
         return module.to(device)
-    host = _host_copies(module)
+    host = _host_copies(module, pin and is_pin_memory_available())
     for name, t in _tensors(module):
         if t.data.device == device:
             continue
         src = host[name]
         dst = torch.empty_like(src, device=device)
-        dst.copy_(src)
+        dst.copy_(src, non_blocking=src.is_pinned())
         t.data = dst
     return module
 
