@@ -5,6 +5,7 @@ import * as React from 'react';
 import {
   FieldRow,
   NumberRow,
+  OptionSection,
   SliderRow,
   ToggleRow,
 } from '@/components/form-rows';
@@ -196,160 +197,186 @@ export default function SettingsPage() {
               ))}
             </SelectRow>
 
-            <SliderRow
-              id="settings-num-frames"
-              label="Frames"
-              min={1}
-              max={500}
-              step={1}
-              value={options.numFrames}
-              onChange={(v) => updateOption('numFrames', v)}
-            />
-            <SliderRow
-              id="settings-height"
-              label="Height"
-              min={64}
-              max={1080}
-              step={16}
-              value={options.height}
-              onChange={(v) => updateOption('height', v)}
-            />
-            <SliderRow
-              id="settings-width"
-              label="Width"
-              min={64}
-              max={1920}
-              step={16}
-              value={options.width}
-              onChange={(v) => updateOption('width', v)}
-            />
-            <SliderRow
-              id="settings-num-steps"
-              label="Inference Steps"
-              min={1}
-              max={200}
-              step={1}
-              value={options.numInferenceSteps}
-              onChange={(v) => updateOption('numInferenceSteps', v)}
-            />
-            <SliderRow
-              id="settings-vsa-sparsity"
-              label="VSA Sparsity"
-              title="VSA sparsity (0–1)"
-              min={0}
-              max={1}
-              step={0.05}
-              value={options.vsaSparsity}
-              onChange={(v) => updateOption('vsaSparsity', v)}
-              format={(v) => v.toFixed(2)}
-            />
-            <SliderRow
-              id="settings-guidance"
-              label="Guidance Scale"
-              min={0}
-              max={20}
-              step={0.1}
-              value={options.guidanceScale}
-              onChange={(v) => updateOption('guidanceScale', v)}
-              format={(v) => v.toFixed(1)}
-            />
-            <SliderRow
-              id="settings-guidance-rescale"
-              label="Guidance Rescale"
-              title="0 = disabled"
-              min={0}
-              max={1}
-              step={0.05}
-              value={options.guidanceRescale ?? 0}
-              onChange={(v) => updateOption('guidanceRescale', v)}
-              format={(v) => v.toFixed(2)}
-            />
-            <SliderRow
-              id="settings-tp-size"
-              label="TP Size"
-              title="-1 = auto"
-              min={-1}
-              max={8}
-              step={1}
-              value={options.tpSize}
-              onChange={(v) => updateOption('tpSize', v)}
-              format={(v) => (v === -1 ? 'Auto' : String(v))}
-            />
-            <SliderRow
-              id="settings-sp-size"
-              label="SP Size"
-              title="-1 = auto"
-              min={-1}
-              max={8}
-              step={1}
-              value={options.spSize}
-              onChange={(v) => updateOption('spSize', v)}
-              format={(v) => (v === -1 ? 'Auto' : String(v))}
-            />
-            <SliderRow
-              id="settings-fps"
-              label="FPS"
-              min={1}
-              max={60}
-              step={1}
-              value={options.fps ?? 24}
-              onChange={(v) => updateOption('fps', v)}
-            />
-
-            <ToggleRow
-              id="settings-dit-cpu-offload"
-              label="DiT CPU Offload"
-              checked={options.ditCpuOffload}
-              onChange={(v) => updateOption('ditCpuOffload', v)}
-            />
-            <ToggleRow
-              id="settings-text-encoder-cpu-offload"
-              label="Text Encoder CPU Offload"
-              checked={options.textEncoderCpuOffload}
-              onChange={(v) => updateOption('textEncoderCpuOffload', v)}
-            />
-            <ToggleRow
-              id="settings-use-fsdp-inference"
-              label="Use FSDP Inference"
-              checked={options.useFsdpInference}
-              onChange={(v) => updateOption('useFsdpInference', v)}
-            />
-            <ToggleRow
-              id="settings-vae-cpu-offload"
-              label="VAE CPU Offload"
-              checked={options.vaeCpuOffload}
-              onChange={(v) => updateOption('vaeCpuOffload', v)}
-            />
-            <ToggleRow
-              id="settings-image-encoder-cpu-offload"
-              label="Image Encoder CPU Offload"
-              checked={options.imageEncoderCpuOffload}
-              onChange={(v) => updateOption('imageEncoderCpuOffload', v)}
-            />
-            <ToggleRow
-              id="settings-enable-torch-compile"
-              label="Torch Compile"
-              checked={options.enableTorchCompile}
-              onChange={(v) => updateOption('enableTorchCompile', v)}
-            />
-
-            <SliderRow
-              id="settings-num-gpus"
-              label="GPUs"
-              min={1}
-              max={8}
-              step={1}
-              value={options.numGpus}
-              onChange={(v) => updateOption('numGpus', v)}
-            />
-
-            <NumberRow
-              id="settings-seed"
-              label="Seed"
-              min={0}
-              value={options.seed}
-              onChange={(v) => updateOption('seed', v)}
-            />
+          </div>
+          <div className="space-y-3">
+            <OptionSection
+              title="Output"
+              description="Frames, resolution, playback and seed. Drag a slider or type a value."
+              defaultOpen
+            >
+              <SliderRow
+                id="settings-num-frames"
+                label="Frames"
+                min={1}
+                max={500}
+                step={1}
+                value={options.numFrames}
+                onChange={(v) => updateOption('numFrames', v)}
+              />
+              <SliderRow
+                id="settings-height"
+                label="Height"
+                min={64}
+                max={1080}
+                step={16}
+                value={options.height}
+                onChange={(v) => updateOption('height', v)}
+              />
+              <SliderRow
+                id="settings-width"
+                label="Width"
+                min={64}
+                max={1920}
+                step={16}
+                value={options.width}
+                onChange={(v) => updateOption('width', v)}
+              />
+              <SliderRow
+                id="settings-fps"
+                label="FPS"
+                min={1}
+                max={60}
+                step={1}
+                value={options.fps ?? 24}
+                onChange={(v) => updateOption('fps', v)}
+              />
+              <NumberRow
+                id="settings-seed"
+                label="Seed"
+                min={0}
+                value={options.seed}
+                onChange={(v) => updateOption('seed', v)}
+              />
+            </OptionSection>
+            <OptionSection
+              title="Generation"
+              description="Denoising steps and prompt guidance."
+              defaultOpen
+            >
+              <SliderRow
+                id="settings-num-steps"
+                label="Inference Steps"
+                min={1}
+                max={200}
+                step={1}
+                value={options.numInferenceSteps}
+                onChange={(v) => updateOption('numInferenceSteps', v)}
+              />
+              <SliderRow
+                id="settings-guidance"
+                label="Guidance Scale"
+                min={0}
+                max={20}
+                step={0.1}
+                value={options.guidanceScale}
+                onChange={(v) => updateOption('guidanceScale', v)}
+                format={(v) => v.toFixed(1)}
+              />
+              <SliderRow
+                id="settings-guidance-rescale"
+                label="Guidance Rescale"
+                title="0 = disabled"
+                min={0}
+                max={1}
+                step={0.05}
+                value={options.guidanceRescale ?? 0}
+                onChange={(v) => updateOption('guidanceRescale', v)}
+                format={(v) => v.toFixed(2)}
+              />
+            </OptionSection>
+            <OptionSection
+              title="Acceleration"
+              description="Compilation and sparse attention."
+            >
+              <ToggleRow
+                id="settings-enable-torch-compile"
+                label="Torch Compile"
+                checked={options.enableTorchCompile}
+                onChange={(v) => updateOption('enableTorchCompile', v)}
+              />
+              <SliderRow
+                id="settings-vsa-sparsity"
+                label="VSA Sparsity"
+                title="VSA sparsity (0–1)"
+                min={0}
+                max={1}
+                step={0.05}
+                value={options.vsaSparsity}
+                onChange={(v) => updateOption('vsaSparsity', v)}
+                format={(v) => v.toFixed(2)}
+              />
+            </OptionSection>
+            <OptionSection
+              title="Memory"
+              description="Move model components to CPU to reduce GPU memory use."
+            >
+              <ToggleRow
+                id="settings-dit-cpu-offload"
+                label="DiT CPU Offload"
+                checked={options.ditCpuOffload}
+                onChange={(v) => updateOption('ditCpuOffload', v)}
+              />
+              <ToggleRow
+                id="settings-text-encoder-cpu-offload"
+                label="Text Encoder CPU Offload"
+                checked={options.textEncoderCpuOffload}
+                onChange={(v) => updateOption('textEncoderCpuOffload', v)}
+              />
+              <ToggleRow
+                id="settings-vae-cpu-offload"
+                label="VAE CPU Offload"
+                checked={options.vaeCpuOffload}
+                onChange={(v) => updateOption('vaeCpuOffload', v)}
+              />
+              <ToggleRow
+                id="settings-image-encoder-cpu-offload"
+                label="Image Encoder CPU Offload"
+                checked={options.imageEncoderCpuOffload}
+                onChange={(v) => updateOption('imageEncoderCpuOffload', v)}
+              />
+            </OptionSection>
+            <OptionSection
+              title="Distributed"
+              description="GPU count, tensor parallelism and sequence parallelism."
+            >
+              <SliderRow
+                id="settings-num-gpus"
+                label="GPUs"
+                min={1}
+                max={8}
+                step={1}
+                value={options.numGpus}
+                onChange={(v) => updateOption('numGpus', v)}
+              />
+              <ToggleRow
+                id="settings-use-fsdp-inference"
+                label="Use FSDP Inference"
+                checked={options.useFsdpInference}
+                onChange={(v) => updateOption('useFsdpInference', v)}
+              />
+              <SliderRow
+                id="settings-tp-size"
+                label="TP Size"
+                title="-1 = auto"
+                min={-1}
+                max={8}
+                step={1}
+                value={options.tpSize}
+                onChange={(v) => updateOption('tpSize', v)}
+                format={(v) => (v === -1 ? 'Auto' : String(v))}
+              />
+              <SliderRow
+                id="settings-sp-size"
+                label="SP Size"
+                title="-1 = auto"
+                min={-1}
+                max={8}
+                step={1}
+                value={options.spSize}
+                onChange={(v) => updateOption('spSize', v)}
+                format={(v) => (v === -1 ? 'Auto' : String(v))}
+              />
+            </OptionSection>
           </div>
         </CardContent>
       </Card>

@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { ChevronDown } from 'lucide-react';
 
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -41,6 +42,102 @@ export function FieldRow({
   );
 }
 
+export function OptionSection({
+  title,
+  description,
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  description: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <details
+      open={defaultOpen}
+      className="group rounded-xl border border-border bg-muted/15 px-4 py-3"
+    >
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 [&::-webkit-details-marker]:hidden">
+        <span>
+          <span className="block text-sm font-medium">{title}</span>
+          <span className="mt-0.5 block text-xs text-muted-foreground">
+            {description}
+          </span>
+        </span>
+        <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" aria-hidden />
+      </summary>
+      <div className="mt-4 grid grid-cols-[repeat(auto-fit,minmax(min(100%,220px),1fr))] gap-x-5 gap-y-4">
+        {children}
+      </div>
+    </details>
+  );
+}
+
+function NumericInput({
+  value,
+  onCommit,
+  min,
+  max,
+  step = 1,
+  ...props
+}: Omit<React.ComponentProps<typeof Input>, 'value' | 'onChange' | 'min' | 'max' | 'step'> & {
+  value: number;
+  onCommit: (value: number) => void;
+  min?: number;
+  max?: number;
+  step?: number | string;
+}) {
+  // Keep incomplete text local. Settings persist on commit, not per keystroke.
+  const [draft, setDraft] = React.useState<string | null>(null);
+  React.useEffect(() => setDraft(null), [value]);
+
+  const commit = () => {
+    if (draft !== null && draft.trim() !== '') {
+      let next = Number(draft);
+      if (Number.isFinite(next)) {
+        const lower = min ?? -Infinity;
+        const upper = max ?? Infinity;
+        next = Math.max(lower, Math.min(upper, next));
+        const increment = Number(step);
+        if (Number.isFinite(increment) && increment > 0) {
+          const base = min ?? 0;
+          const lastStep = Math.floor((upper - base) / increment);
+          const steps = Math.min(lastStep, Math.round((next - base) / increment));
+          // Remove floating-point noise from decimal step arithmetic.
+          next = Number((base + steps * increment).toPrecision(12));
+        }
+        if (next !== value) onCommit(next);
+      }
+    }
+    setDraft(null);
+  };
+
+  return (
+    <Input
+      {...props}
+      type="number"
+      min={min}
+      max={max}
+      step={step}
+      value={draft ?? value}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          event.currentTarget.blur();
+        } else if (event.key === 'Escape') {
+          event.preventDefault();
+          event.stopPropagation();
+          setDraft(null);
+        }
+      }}
+      className={cn('tabular-nums [&::-webkit-inner-spin-button]:opacity-100', props.className)}
+    />
+  );
+}
+
 export function SliderRow({
   id,
   label,
@@ -60,7 +157,7 @@ export function SliderRow({
   max: number;
   step: number;
   value: number;
-  /** Called once per gesture (pointer release / key press), not per drag tick. */
+  /** Called on slider commit or numeric blur/Enter, not per keystroke. */
   onChange: (v: number) => void;
   disabled?: boolean;
   format?: (v: number) => string;
@@ -76,7 +173,7 @@ export function SliderRow({
     <FieldRow htmlFor={id} label={label} title={title}>
       <div className="flex items-center gap-2">
         <Slider
-          id={id}
+          id={`${id}-slider`}
           min={min}
           max={max}
           step={step}
@@ -85,15 +182,25 @@ export function SliderRow({
           onValueCommit={(v) => onChange(v[0])}
           disabled={disabled}
           aria-label={label}
+          aria-describedby={Number.isNaN(Number(format(shown))) ? `${id}-hint` : undefined}
           className="min-w-0 flex-1"
         />
-        <span
-          aria-hidden="true"
-          className="min-w-10 shrink-0 text-right text-sm tabular-nums text-muted-foreground"
-        >
-          {format(shown)}
-        </span>
+        <NumericInput
+          id={id}
+          aria-label={`${label} value`}
+          title={title}
+          min={min}
+          max={max}
+          step={step}
+          value={shown}
+          onCommit={onChange}
+          disabled={disabled}
+          className="w-24 shrink-0 rounded-lg px-2"
+        />
       </div>
+      {Number.isNaN(Number(format(shown))) && (
+        <span id={`${id}-hint`} className="text-right text-xs text-muted-foreground">{format(shown)}</span>
+      )}
     </FieldRow>
   );
 }
@@ -146,27 +253,15 @@ export function NumberRow({
   onChange: (v: number) => void;
   disabled?: boolean;
 }) {
-  // Buffer the raw text so the field can be emptied while retyping; only
-  // valid numbers are committed, and blur restores the last committed value.
-  const [draft, setDraft] = React.useState<string | null>(null);
-  React.useEffect(() => {
-    setDraft(null);
-  }, [value]);
   return (
     <FieldRow htmlFor={id} label={label} title={title}>
-      <Input
+      <NumericInput
         id={id}
-        type="number"
         min={min}
         max={max}
         step={step}
-        value={draft ?? value}
-        onChange={(e) => {
-          setDraft(e.target.value);
-          const v = e.target.valueAsNumber;
-          if (!Number.isNaN(v)) onChange(v);
-        }}
-        onBlur={() => setDraft(null)}
+        value={value}
+        onCommit={onChange}
         disabled={disabled}
       />
     </FieldRow>

@@ -5,6 +5,7 @@ import * as React from 'react';
 import {
   FieldRow,
   NumberRow,
+  OptionSection,
   SliderRow,
   ToggleRow,
 } from '@/components/form-rows';
@@ -1167,11 +1168,12 @@ export default function CreateJobModal({
           )}
 
           {isInference && (
-            <details>
-              <summary className="mb-2 cursor-pointer select-none text-sm font-medium text-accent-blue">
-                Options
-              </summary>
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-x-3 gap-y-2">
+            <div className="space-y-3">
+              <OptionSection
+                title="Output"
+                description="Frames, resolution, playback and seed. Drag a slider or type a value."
+                defaultOpen
+              >
                 {workloadType !== 't2i' && (
                   <SliderRow
                     id="modal-num-frames"
@@ -1181,7 +1183,7 @@ export default function CreateJobModal({
                     step={1}
                     value={numFrames}
                     onChange={setNumFrames}
-                    disabled={isSubmitting}
+                    disabled={isSubmitting || readOnly}
                   />
                 )}
                 <SliderRow
@@ -1192,7 +1194,7 @@ export default function CreateJobModal({
                   step={16}
                   value={height}
                   onChange={setHeight}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || readOnly}
                 />
                 <SliderRow
                   id="modal-width"
@@ -1202,8 +1204,37 @@ export default function CreateJobModal({
                   step={16}
                   value={width}
                   onChange={setWidth}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || readOnly}
                 />
+                {workloadType !== 't2i' && (
+                  <SliderRow
+                    id="modal-fps"
+                    label="FPS"
+                    min={1}
+                    max={60}
+                    step={1}
+                    value={fps}
+                    onChange={setFps}
+                    disabled={isSubmitting || readOnly}
+                  />
+                )}
+                <NumberRow
+                  id="modal-seed"
+                  label="Seed"
+                  min={0}
+                  value={seed}
+                  onChange={setSeed}
+                  disabled={isSubmitting || readOnly}
+                />
+                <p className="col-span-full text-xs text-muted-foreground">
+                  Supported frame counts and resolutions depend on the model.
+                </p>
+              </OptionSection>
+              <OptionSection
+                title="Generation"
+                description="Denoising steps and prompt guidance."
+                defaultOpen
+              >
                 <SliderRow
                   id="modal-num-steps"
                   label="Inference Steps"
@@ -1212,19 +1243,7 @@ export default function CreateJobModal({
                   step={1}
                   value={numInferenceSteps}
                   onChange={setNumInferenceSteps}
-                  disabled={isSubmitting}
-                />
-                <SliderRow
-                  id="modal-vsa-sparsity"
-                  label="VSA Sparsity"
-                  title="VSA sparsity (0–1)"
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  value={vsaSparsity}
-                  onChange={setVsaSparsity}
-                  disabled={isSubmitting}
-                  format={(v) => v.toFixed(2)}
+                  disabled={isSubmitting || readOnly}
                 />
                 <SliderRow
                   id="modal-guidance"
@@ -1234,7 +1253,7 @@ export default function CreateJobModal({
                   step={0.1}
                   value={guidanceScale}
                   onChange={setGuidanceScale}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || readOnly}
                   format={(v) => v.toFixed(1)}
                 />
                 <SliderRow
@@ -1246,8 +1265,94 @@ export default function CreateJobModal({
                   step={0.05}
                   value={guidanceRescale}
                   onChange={setGuidanceRescale}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || readOnly}
                   format={(v) => v.toFixed(2)}
+                />
+              </OptionSection>
+              <OptionSection
+                title="Acceleration"
+                description="Compilation and sparse attention."
+              >
+                <ToggleRow
+                  id="modal-enable-torch-compile"
+                  label="Torch Compile"
+                  checked={enableTorchCompile}
+                  onChange={setEnableTorchCompile}
+                  disabled={isSubmitting || readOnly}
+                />
+                <SliderRow
+                  id="modal-vsa-sparsity"
+                  label="VSA Sparsity"
+                  title="VSA sparsity (0–1)"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={vsaSparsity}
+                  onChange={setVsaSparsity}
+                  disabled={isSubmitting || readOnly}
+                  format={(v) => v.toFixed(2)}
+                />
+              </OptionSection>
+              <OptionSection
+                title="Memory"
+                description="Move model components to CPU to reduce GPU memory use."
+              >
+                <ToggleRow
+                  id="modal-dit-cpu-offload"
+                  label="DiT CPU Offload"
+                  checked={ditCpuOffload}
+                  onChange={setDitCpuOffload}
+                  disabled={isSubmitting || readOnly}
+                />
+                <ToggleRow
+                  id="modal-dit-layerwise-offload"
+                  label="DiT Layerwise Offload"
+                  checked={ditLayerwiseOffload}
+                  onChange={handleDitLayerwiseOffloadChange}
+                  disabled={isSubmitting || readOnly}
+                />
+                <ToggleRow
+                  id="modal-text-encoder-cpu-offload"
+                  label="Text Encoder CPU Offload"
+                  checked={textEncoderCpuOffload}
+                  onChange={setTextEncoderCpuOffload}
+                  disabled={isSubmitting || readOnly}
+                />
+                <ToggleRow
+                  id="modal-vae-cpu-offload"
+                  label="VAE CPU Offload"
+                  checked={vaeCpuOffload}
+                  onChange={setVaeCpuOffload}
+                  disabled={isSubmitting || readOnly}
+                />
+                <ToggleRow
+                  id="modal-image-encoder-cpu-offload"
+                  label="Image Encoder CPU Offload"
+                  checked={imageEncoderCpuOffload}
+                  onChange={setImageEncoderCpuOffload}
+                  disabled={isSubmitting || readOnly}
+                />
+              </OptionSection>
+              <OptionSection
+                title="Distributed"
+                description="GPU count, tensor parallelism and sequence parallelism."
+              >
+                <SliderRow
+                  id="modal-num-gpus"
+                  label="GPUs"
+                  min={1}
+                  max={8}
+                  step={1}
+                  value={numGpus}
+                  onChange={handleNumGpusChange}
+                  disabled={isSubmitting || readOnly}
+                />
+                <ToggleRow
+                  id="modal-use-fsdp-inference"
+                  label="Use FSDP Inference"
+                  checked={useFsdpInference}
+                  onChange={handleUseFsdpInferenceChange}
+                  disabled={isSubmitting || readOnly}
                 />
                 <SliderRow
                   id="modal-tp-size"
@@ -1258,7 +1363,7 @@ export default function CreateJobModal({
                   step={1}
                   value={tpSize}
                   onChange={setTpSize}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || readOnly}
                   format={(v) => (v === -1 ? 'Auto' : String(v))}
                 />
                 <SliderRow
@@ -1270,90 +1375,11 @@ export default function CreateJobModal({
                   step={1}
                   value={spSize}
                   onChange={setSpSize}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || readOnly}
                   format={(v) => (v === -1 ? 'Auto' : String(v))}
                 />
-                {workloadType !== 't2i' && (
-                  <SliderRow
-                    id="modal-fps"
-                    label="FPS"
-                    min={1}
-                    max={60}
-                    step={1}
-                    value={fps}
-                    onChange={setFps}
-                    disabled={isSubmitting}
-                  />
-                )}
-                <ToggleRow
-                  id="modal-dit-cpu-offload"
-                  label="DiT CPU Offload"
-                  checked={ditCpuOffload}
-                  onChange={setDitCpuOffload}
-                  disabled={isSubmitting}
-                />
-                <ToggleRow
-                  id="modal-dit-layerwise-offload"
-                  label="DiT Layerwise Offload"
-                  checked={ditLayerwiseOffload}
-                  onChange={handleDitLayerwiseOffloadChange}
-                  disabled={isSubmitting}
-                />
-                <ToggleRow
-                  id="modal-text-encoder-cpu-offload"
-                  label="Text Encoder CPU Offload"
-                  checked={textEncoderCpuOffload}
-                  onChange={setTextEncoderCpuOffload}
-                  disabled={isSubmitting}
-                />
-                <ToggleRow
-                  id="modal-use-fsdp-inference"
-                  label="Use FSDP Inference"
-                  checked={useFsdpInference}
-                  onChange={handleUseFsdpInferenceChange}
-                  disabled={isSubmitting}
-                />
-                <ToggleRow
-                  id="modal-vae-cpu-offload"
-                  label="VAE CPU Offload"
-                  checked={vaeCpuOffload}
-                  onChange={setVaeCpuOffload}
-                  disabled={isSubmitting}
-                />
-                <ToggleRow
-                  id="modal-image-encoder-cpu-offload"
-                  label="Image Encoder CPU Offload"
-                  checked={imageEncoderCpuOffload}
-                  onChange={setImageEncoderCpuOffload}
-                  disabled={isSubmitting}
-                />
-                <ToggleRow
-                  id="modal-enable-torch-compile"
-                  label="Torch Compile"
-                  checked={enableTorchCompile}
-                  onChange={setEnableTorchCompile}
-                  disabled={isSubmitting}
-                />
-                <SliderRow
-                  id="modal-num-gpus"
-                  label="GPUs"
-                  min={1}
-                  max={8}
-                  step={1}
-                  value={numGpus}
-                  onChange={handleNumGpusChange}
-                  disabled={isSubmitting}
-                />
-                <NumberRow
-                  id="modal-seed"
-                  label="Seed"
-                  min={0}
-                  value={seed}
-                  onChange={setSeed}
-                  disabled={isSubmitting}
-                />
-              </div>
-            </details>
+              </OptionSection>
+            </div>
           )}
 
           </fieldset>
