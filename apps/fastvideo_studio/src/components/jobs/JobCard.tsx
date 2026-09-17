@@ -15,7 +15,7 @@ import {
   startJob,
   stopJob,
 } from '@/lib/api';
-import { hasJobResult } from '@/lib/jobResults';
+import { hasJobResult, isJobImage } from '@/lib/jobResults';
 import type { Job } from '@/lib/types';
 import { cn, downloadBlob } from '@/lib/utils';
 import { activeJobStore, setActiveJobId } from '@/stores/activeJob';
@@ -258,7 +258,7 @@ export default function JobCard({ job, onJobUpdated, thumbnailEnabled = true }: 
               disabled={isLoading}
               title="Download video"
             >
-              Download Video
+              Download {isJobImage(job) ? 'Image' : 'Video'}
             </Button>
           )}
         {!(

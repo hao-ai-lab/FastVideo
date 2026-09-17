@@ -33,7 +33,7 @@ backend validation, and model-loading boundary. The current implementation
 has these constraints:
 
 - `server.py:create_job` restricts inference to registered model IDs.
-- `job_runner.py:_get_generator` loads that ID with
+- `job_runner.py:_get_or_create_generator` loads that ID with
   `VideoGenerator.from_pretrained` and caches the resulting generator.
 - Training records the latest `checkpoint-*` directory as its output.
   The modular trainer writes distributed training state under `dcp/`, with

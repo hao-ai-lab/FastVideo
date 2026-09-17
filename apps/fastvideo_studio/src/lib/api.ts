@@ -362,7 +362,9 @@ export async function downloadJobLog(id: string): Promise<Blob> {
 
 export async function downloadJobVideo(id: string): Promise<Blob> {
 	const baseApiUrl = getApiBaseUrl();
-	const response = await fetch(`${baseApiUrl}/jobs/${id}/video`);
+	// Keep downloads distinct from an <img>/<video> cache entry fetched without
+	// an Origin header; reusing that entry can fail CORS after previewing media.
+	const response = await fetch(`${baseApiUrl}/jobs/${id}/video?download=true`);
 	if (!response.ok) {
 		throw new Error("Failed to download video");
 	}
