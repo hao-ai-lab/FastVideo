@@ -127,15 +127,19 @@ describe('JobQueue', () => {
     await waitFor(() => expect(getJobsList).toHaveBeenCalledTimes(2));
   });
 
-  it('caps thumbnails at 50 while keeping every completed result available', async () => {
+  it('caps native previews at 50 while keeping every completed result available', async () => {
     vi.mocked(getJobsList).mockResolvedValue(
       Array.from({ length: 51 }, (_, index) => makeJob({ id: `job-${index}`, name: `Result ${index}`, output_path: '/out/clip.mp4' })),
     );
     const { container } = render(<JobQueue jobType="inference" />);
     expect(await screen.findByText('51 jobs')).toBeInTheDocument();
-    expect(container.querySelectorAll('img')).toHaveLength(50);
-    expect(screen.getAllByRole('button', { name: /Preview result:/ })).toHaveLength(51);
-    expect(container.querySelectorAll('video')).toHaveLength(0);
+    await waitFor(() => expect(container.querySelectorAll('video')).toHaveLength(50));
+    expect(screen.getAllByRole('button', { name: 'Download video' })).toHaveLength(51);
+    expect(screen.getByRole('link', { name: /Open original/ })).toBeInTheDocument();
+    for (const video of container.querySelectorAll('video')) {
+      expect(video).toHaveAttribute('preload', 'none');
+      expect(video).not.toHaveAttribute('autoplay');
+    }
   });
 
   it('combines status, model, and prompt filters without issuing a new API request', async () => {

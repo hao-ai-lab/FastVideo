@@ -176,12 +176,9 @@ describe('JobCard', () => {
     expect(screen.queryByRole('dialog', { name: 'View configuration' })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Close' }));
     rerender(<JobCard job={makeJob({ status: 'completed', output_path: '/out/video.mp4' })} />);
-    await userEvent.click(screen.getByRole('button', { name: 'Preview result: Wan2.1-T2V' }));
-    expect(screen.getByRole('dialog', { name: 'Wan2.1-T2V' })).toBeInTheDocument();
-    expect(screen.queryByRole('dialog', { name: 'View configuration' })).not.toBeInTheDocument();
-    await userEvent.click(screen.getByText('Guidance 5'));
-    expect(screen.queryByRole('dialog', { name: 'View configuration' })).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Close' }));
+    const video = screen.getByLabelText('Generated video: a cat surfing a wave');
+    expect(video).toHaveAttribute('controls');
+    await userEvent.click(video);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(activeJobStore.get().activeJobId).toBeNull();
   });

@@ -68,7 +68,7 @@ export default function GalleryPage() {
       <Card className="p-6">
         <h2 className="mb-1 text-2xl font-semibold text-foreground">Gallery</h2>
         <p className="mb-6 text-sm text-muted-foreground">
-          Browse generated results with their model and settings. Click a preview to watch or download.
+          Completed videos and images, with their model and settings.
         </p>
 
         {isLoading ? (
@@ -105,7 +105,7 @@ export default function GalleryPage() {
             {filteredJobs.length === 0 ? (
               <p className="py-8 text-center text-muted-foreground">No results match these filters.</p>
             ) : (
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-5">
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,320px),1fr))] gap-5">
                 {pageJobs.map((job) => (
                   <article
                     key={job.id}

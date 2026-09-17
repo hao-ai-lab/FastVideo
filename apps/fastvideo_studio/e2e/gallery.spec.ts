@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 import { API_BASE, skipWithoutMock } from './helpers';
 
 /**
- * Gallery page: the seeded result loads a poster first and a player on click.
+ * Gallery page: native video controls display inline with a lightweight poster.
  */
 test.describe('gallery', () => {
   skipWithoutMock();
@@ -31,20 +31,12 @@ test.describe('gallery', () => {
 
     const tile = page.locator('article').filter({ hasText: completed!.prompt });
     await expect(tile).toBeVisible();
-    await expect(tile.locator('video')).toHaveCount(0);
-    await tile.getByRole('button', { name: /Preview result:/ }).click();
-
-    const dialog = page.getByRole('dialog');
-    await expect(dialog).toBeVisible();
-    await expect(
-      dialog.locator('video').or(dialog.getByText('Preview unavailable')),
-    ).toBeVisible();
-    const video = dialog.locator('video');
-    if (await video.isVisible()) {
-      await expect(video).toHaveAttribute('controls', '');
-    }
-    await expect(dialog.getByRole('button', { name: 'Download video' })).toBeVisible();
-    await dialog.getByRole('button', { name: 'Close', exact: true }).click();
-    await expect(page.locator('video')).toHaveCount(0);
+    const video = tile.locator('video');
+    await expect(video).toBeVisible();
+    await expect(video).toHaveAttribute('controls', '');
+    await expect(video).toHaveAttribute('preload', 'none');
+    await expect(tile.getByRole('button', { name: 'Download video' })).toBeVisible();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByText('Watch video', { exact: true })).toHaveCount(0);
   });
 });

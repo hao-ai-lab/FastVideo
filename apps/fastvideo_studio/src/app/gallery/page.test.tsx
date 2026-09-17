@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import GalleryPage from './page';
@@ -51,39 +51,32 @@ describe('GalleryPage', () => {
     expect(getModels).toHaveBeenCalledWith(undefined);
   });
 
-  it('loads only a lazy thumbnail until clicked and unmounts the player on close', async () => {
+  it('shows native controls directly without autoplay or a separate dialog', async () => {
     vi.mocked(getJobsList).mockResolvedValue([makeJob()]);
     const { container } = renderGallery();
-
-    const preview = await screen.findByRole('button', { name: 'Preview result: wan' });
-    expect(container.querySelector('video')).toBeNull();
-    expect(preview.querySelector('img')).toHaveAttribute('loading', 'lazy');
-    expect(preview.querySelector('img')).toHaveAttribute('src', 'http://test.local/api/jobs/job-1/thumbnail');
-    fireEvent.click(preview);
 
     const video = await screen.findByLabelText(
       'Generated video: a cat surfing a wave',
     );
     expect(video).toHaveAttribute('controls');
+    expect(video).toHaveAttribute('preload', 'none');
+    expect(video).toHaveAttribute('poster', 'http://test.local/api/jobs/job-1/thumbnail');
     expect(video).not.toHaveAttribute('autoplay');
-    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
-    expect(screen.queryByLabelText('Generated video: a cat surfing a wave')).not.toBeInTheDocument();
+    fireEvent.click(video);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(container.querySelector('video')).toBe(video);
+    expect(screen.queryByText('Watch video')).not.toBeInTheDocument();
   });
 
-  it('keeps failed thumbnails clickable and shows a fallback if the full media also fails', async () => {
+  it('keeps the original and download available when inline playback fails', async () => {
     vi.mocked(getJobsList).mockResolvedValue([makeJob()]);
     renderGallery();
-    const preview = await screen.findByRole('button', { name: 'Preview result: wan' });
-    fireEvent.error(preview.querySelector('img')!);
-    expect(screen.getByText('Thumbnail unavailable')).toBeInTheDocument();
-    fireEvent.click(preview);
-    const video = screen.getByLabelText('Generated video: a cat surfing a wave');
+    const video = await screen.findByLabelText('Generated video: a cat surfing a wave');
 
     fireEvent.error(video);
     expect(screen.getByText('Preview unavailable')).toBeInTheDocument();
-    expect(
-      screen.getByText('The generated file could not be loaded.'),
-    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Open original/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Download video' })).toBeInTheDocument();
   });
 
   it('shows model/configuration and combines the catalog dropdown with prompt text', async () => {
@@ -110,16 +103,15 @@ describe('GalleryPage', () => {
     expect(screen.getByText('3 jobs')).toBeInTheDocument();
   });
 
-  it('caps lazy posters to 50 and makes older results accessible on the next page', async () => {
+  it('caps inline previews to 50 and makes older results accessible on the next page', async () => {
     vi.mocked(getJobsList).mockResolvedValue(
       Array.from({ length: 51 }, (_, index) => makeJob({ id: `job-${index}`, name: `Result ${index}` })),
     );
     const { container } = renderGallery();
     expect(await screen.findByText('Page 1 of 2 · Up to 50 previews per page')).toBeInTheDocument();
-    expect(container.querySelectorAll('img')).toHaveLength(50);
-    expect(container.querySelectorAll('video')).toHaveLength(0);
+    await waitFor(() => expect(container.querySelectorAll('video')).toHaveLength(50));
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    expect(container.querySelectorAll('img')).toHaveLength(1);
+    await waitFor(() => expect(container.querySelectorAll('video')).toHaveLength(1));
     expect(screen.getByText('Result 50')).toBeInTheDocument();
   });
 

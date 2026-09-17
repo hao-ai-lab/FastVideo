@@ -9,8 +9,8 @@ new media or starting a remote GPU.
 1. Open Inference and choose a status or model from the dropdowns, or search
    words in a prompt. Filters combine; Clear resets them together. The model
    list shares Create Job's catalog and retains models in recorded jobs.
-2. Click a completed job's poster to play its video or inspect its image,
-   review the model/settings, and download the result.
+2. Play a completed video directly with its native controls, or view the
+   image directly in its card. Images link to their full-size originals.
    Click the job card to view its configuration; use Details & logs for the
    sidebar with progress and logs. Edit remains a separate action.
    The small download icon on the media works in both the job list and Gallery.
@@ -37,9 +37,12 @@ with the job list; opening Gallery creates no separate media library.
 
 Posters contain one frame at a maximum of 320 pixels per dimension. They are
 generated on demand using Pillow and FFmpeg (or imageio-ffmpeg), with one
-decoder at a time and a disk cache capped at 50 files. Lists use lazy images;
-the full player mounts only when a result is opened. Gallery pages contain
-at most 50 results. A missing poster still allows opening the original media.
+decoder at a time and a disk cache capped at 50 files. Lists use lazy images
+and native video players with `preload="none"`, mounted near the viewport.
+Scrolling far away unmounts a player and resets playback to release resources.
+Gallery pages contain at most 50 results; older queue results still provide
+their original-file link and download action. There is no autoplay or separate
+preview dialog.
 
 ## Custom fine-tuned and distilled models
 

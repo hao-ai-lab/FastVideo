@@ -167,7 +167,7 @@ export default function JobCard({ job, onJobUpdated, thumbnailEnabled = true }: 
           : 'border-border hover:border-muted-foreground/40',
       )}
     >
-      <div className={cn('grid gap-4', hasJobResult(job) && 'sm:grid-cols-[170px_minmax(0,1fr)]')}>
+      <div className={cn('grid gap-4', hasJobResult(job) && 'lg:grid-cols-[280px_minmax(0,1fr)]')}>
         {hasJobResult(job) && (
           <JobResultPreview job={job} thumbnailEnabled={thumbnailEnabled} className="sm:self-start" />
         )}
