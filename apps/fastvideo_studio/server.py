@@ -15,6 +15,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import asyncio
 import contextlib
 import logging
 import os
@@ -29,7 +30,8 @@ from typing import Annotated, Any
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
+from starlette.concurrency import run_in_threadpool
 
 from fastvideo.registry import (get_registered_model_paths, get_registered_models_with_workloads)
 from fastvideo_studio.database import Database, _get_db_path
@@ -57,6 +59,7 @@ database: Database | None = None
 upload_dir: str = ""
 datasets_upload_dir: str = ""
 verbose = 0
+_thumbnail_slots = asyncio.Semaphore(1)
 
 app = FastAPI(
     title="FastVideo Job Runner API",
@@ -665,14 +668,17 @@ def _completed_output(job_id: str) -> Path:
 
 
 @app.get("/api/jobs/{job_id}/thumbnail")
-def get_job_thumbnail(job_id: str) -> FileResponse:
+async def get_job_thumbnail(job_id: str) -> Response:
     source = _completed_output(job_id)
     try:
-        poster = get_thumbnail(source, Path(job_runner.output_dir) / ".thumbnails")
+        # Queue without occupying FastAPI's worker pool while another poster
+        # decodes, so list/start/stop requests can continue to run.
+        async with _thumbnail_slots:
+            poster = await run_in_threadpool(get_thumbnail, source, Path(job_runner.output_dir) / ".thumbnails")
     except Exception as exc:
         logger.warning("Poster unavailable for job %s: %s", job_id, exc)
         raise HTTPException(status_code=503, detail="Preview unavailable; open the original output") from exc
-    return FileResponse(poster, media_type="image/jpeg")
+    return Response(poster, media_type="image/jpeg")
 
 
 @app.get("/api/jobs/{job_id}/video")

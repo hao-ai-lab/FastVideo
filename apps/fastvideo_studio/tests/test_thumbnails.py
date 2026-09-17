@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
+from io import BytesIO
+
 from PIL import Image
 
 from fastvideo_studio import thumbnails
@@ -9,7 +11,7 @@ def test_image_poster_is_small_and_invalidates_after_source_change(tmp_path):
     cache = tmp_path / "posters"
     Image.new("RGB", (832, 480), "red").save(source)
     first = thumbnails.get_thumbnail(source, cache)
-    with Image.open(first) as poster:
+    with Image.open(BytesIO(first)) as poster:
         assert poster.format == "JPEG"
         assert poster.width == 320
         assert poster.height < 320
@@ -17,7 +19,7 @@ def test_image_poster_is_small_and_invalidates_after_source_change(tmp_path):
     Image.new("RGB", (480, 832), "blue").save(source)
     second = thumbnails.get_thumbnail(source, cache)
     assert second != first
-    with Image.open(second) as poster:
+    with Image.open(BytesIO(second)) as poster:
         assert poster.height == 320
 
 
@@ -29,4 +31,4 @@ def test_poster_cache_is_bounded(tmp_path, monkeypatch):
         Image.new("RGB", (10, 10)).save(source)
         latest = thumbnails.get_thumbnail(source, cache)
     assert len(list(cache.glob("*.jpg"))) == 2
-    assert latest.exists()
+    assert any(path.read_bytes() == latest for path in cache.glob("*.jpg"))

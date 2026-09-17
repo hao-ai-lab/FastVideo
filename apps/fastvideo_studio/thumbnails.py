@@ -15,7 +15,7 @@ _LOCK = threading.Lock()
 MAX_CACHED_POSTERS = 50
 
 
-def get_thumbnail(source: Path, cache_dir: Path) -> Path:
+def get_thumbnail(source: Path, cache_dir: Path) -> bytes:
     """Cache a JPEG bounded to 320px, invalidating when its source changes."""
     stat = source.stat()
     key = hashlib.sha256(f"{source.resolve()}:{stat.st_mtime_ns}:{stat.st_size}".encode()).hexdigest()
@@ -25,7 +25,7 @@ def get_thumbnail(source: Path, cache_dir: Path) -> Path:
         cache_dir.mkdir(parents=True, exist_ok=True)
         if destination.is_file():
             destination.touch()
-            return destination
+            return destination.read_bytes()
         with tempfile.TemporaryDirectory(prefix="poster-", dir=cache_dir) as temporary:
             frame = source
             if source.suffix.lower() in {".mp4", ".webm", ".mov", ".mkv"}:
@@ -54,4 +54,5 @@ def get_thumbnail(source: Path, cache_dir: Path) -> Path:
         posters = sorted(cache_dir.glob("*.jpg"), key=lambda path: path.stat().st_mtime_ns, reverse=True)
         for expired in posters[MAX_CACHED_POSTERS:]:
             expired.unlink(missing_ok=True)
-    return destination
+        # Read before releasing the lock so eviction cannot race a response.
+        return destination.read_bytes()
