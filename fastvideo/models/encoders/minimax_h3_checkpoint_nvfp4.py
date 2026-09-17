@@ -12,6 +12,11 @@ stores every ``language_model.layers.*`` linear as three tensors and no
                                                            FlashInfer 128x4 swizzled layout
     <prefix>.weight_global_scale  float32 [1]              (448 * 6) / amax(|W|)
 
+AWQ-smoothed checkpoints may additionally store a bf16
+``<prefix>.pre_quant_scale`` vector. It multiplies the activation before dynamic
+NVFP4 quantization. Checkpoints without that metadata retain the original
+three-tensor contract and do not allocate the vector.
+
 The bytes are exactly what ``flashinfer.nvfp4_quantize(W, global_scale,
 sfLayout=SfLayout.layout_128x4)`` returns, so loading them reproduces the state
 ``nvfp4_config.convert_model_to_nvfp4`` builds at runtime without ever
@@ -124,6 +129,7 @@ def nvfp4_weight_global_scale(weight: torch.Tensor) -> torch.Tensor:
 def serialized_nvfp4_quantization_config(
     *,
     keep_bf16: tuple[str, ...] | list[str] = (),
+    pre_quant_scale: bool = False,
     producer: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The ``config.json`` ``quantization_config`` the converter writes and ``from_config`` accepts.
@@ -143,6 +149,8 @@ def serialized_nvfp4_quantization_config(
         "scale_layout": NVFP4_SCALE_LAYOUT,
         "modules_to_not_convert": ["model.visual", "lm_head", *keep_bf16],
     }
+    if pre_quant_scale:
+        config["pre_quant_scale"] = True
     if producer:
         config["producer"] = dict(producer)
     return config
@@ -189,7 +197,7 @@ class MiniMaxH3SerializedNVFP4Config(QuantizationConfig):
     so the only state is which projection kinds the checkpoint kept in bf16.
     """
 
-    def __init__(self, bf16_projections: tuple[str, ...] = ()) -> None:
+    def __init__(self, bf16_projections: tuple[str, ...] = (), pre_quant_scale: bool = False) -> None:
         super().__init__()
         unknown = sorted(set(bf16_projections) - set(LANGUAGE_PROJECTIONS))
         if unknown:
@@ -198,6 +206,7 @@ class MiniMaxH3SerializedNVFP4Config(QuantizationConfig):
         # Projection kinds the checkpoint kept in bf16 in every language layer,
         # e.g. ("mlp.down_proj",). Those linears load a plain weight.
         self.bf16_projections = tuple(bf16_projections)
+        self.pre_quant_scale = pre_quant_scale
 
     @classmethod
     def get_name(cls) -> str:
@@ -260,7 +269,10 @@ class MiniMaxH3SerializedNVFP4Config(QuantizationConfig):
         if not saw_visual:
             raise ValueError("MiniMax-H3 serialized NVFP4 requires the vision stack to be listed in "
                              "modules_to_not_convert")
-        return cls(tuple(bf16_projections))
+        pre_quant_scale = config.get("pre_quant_scale", False)
+        if not isinstance(pre_quant_scale, bool):
+            raise ValueError("MiniMax-H3 serialized NVFP4 pre_quant_scale must be a boolean")
+        return cls(tuple(bf16_projections), pre_quant_scale=pre_quant_scale)
 
     def validate_runtime(self, device: torch.device) -> None:
         if device.type != "cuda":
@@ -290,7 +302,7 @@ class MiniMaxH3SerializedNVFP4Config(QuantizationConfig):
             return None
         if self.is_kept_bf16(prefix):
             return None
-        return MiniMaxH3SerializedNVFP4LinearMethod()
+        return MiniMaxH3SerializedNVFP4LinearMethod(pre_quant_scale=self.pre_quant_scale)
 
 
 def _strict_dtype_loader(base_loader):
@@ -309,6 +321,9 @@ def _strict_dtype_loader(base_loader):
 
 class MiniMaxH3SerializedNVFP4LinearMethod(LinearMethodBase):
     """Execute serialized NVFP4 weights without re-quantizing them."""
+
+    def __init__(self, pre_quant_scale: bool = False) -> None:
+        self.pre_quant_scale = pre_quant_scale
 
     def create_weights(
         self,
@@ -354,6 +369,10 @@ class MiniMaxH3SerializedNVFP4LinearMethod(LinearMethodBase):
         weight_global_scale = Parameter(torch.zeros(1, dtype=torch.float32), requires_grad=False)
         set_weight_attrs(weight_global_scale, loader_attrs)
         layer.register_parameter(global_scale_name, weight_global_scale)
+        if self.pre_quant_scale:
+            pre_scale = Parameter(torch.ones(input_size_per_partition, dtype=torch.bfloat16), requires_grad=False)
+            set_weight_attrs(pre_scale, loader_attrs)
+            layer.register_parameter("pre_quant_scale", pre_scale)
         # No bf16 weight ever exists on this layer; ``None`` keeps ``layer.weight``
         # readable for code that inspects it, matching the purged NVFP4 path.
         layer.register_parameter("weight", None)
@@ -385,6 +404,8 @@ class MiniMaxH3SerializedNVFP4LinearMethod(LinearMethodBase):
     @staticmethod
     def _apply_finalized(layer: torch.nn.Module, x: torch.Tensor, bias: torch.Tensor | None) -> torch.Tensor:
         x = _coerce_fp4_input_dtype(x)
+        if getattr(layer, "pre_quant_scale", None) is not None:
+            x = x * layer.pre_quant_scale.to(device=x.device, dtype=x.dtype)
         original_shape = x.shape
         if x.numel() == 0:
             # An empty prompt has nothing to quantize; the FP4 kernels are not defined for zero rows.
