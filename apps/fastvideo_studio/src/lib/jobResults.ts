@@ -20,11 +20,12 @@ export function getJobThumbnailUrl(jobId: string): string {
   return `${getApiBaseUrl()}/jobs/${encodeURIComponent(jobId)}/thumbnail`;
 }
 
-export function filterJobs(jobs: Job[], model: string, prompt: string): Job[] {
+export function filterJobs(jobs: Job[], model: string, prompt: string, status = ''): Job[] {
   const modelQuery = model.trim().toLowerCase();
   const promptQuery = prompt.trim().toLowerCase();
   return jobs.filter(
     (job) =>
+      (!status || job.status === status) &&
       job.model_id.toLowerCase().includes(modelQuery) &&
       (job.prompt ?? '').toLowerCase().includes(promptQuery),
   );

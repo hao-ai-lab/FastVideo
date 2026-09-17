@@ -133,19 +133,49 @@ describe('JobQueue', () => {
     expect(container.querySelectorAll('video')).toHaveLength(0);
   });
 
-  it('filters by model and prompt together without issuing a new API request', async () => {
+  it('combines status, model, and prompt filters without issuing a new API request', async () => {
     vi.mocked(getJobsList).mockResolvedValue([
       makeJob({ id: 'one', model_id: 'Wan2.1', prompt: 'A surfing cat' }),
       makeJob({ id: 'two', model_id: 'Other', prompt: 'A surfing cat' }),
       makeJob({ id: 'three', model_id: 'Wan2.1', prompt: 'A dog swimming' }),
+      makeJob({ id: 'four', model_id: 'Wan2.1', prompt: 'A surfing cat', status: 'failed' }),
     ]);
     render(<JobQueue jobType="inference" />);
-    await screen.findByText('3 jobs');
+    await screen.findByText('4 jobs');
+    expect(screen.getByRole('combobox', { name: 'Status' })).toHaveValue('');
     fireEvent.change(screen.getByLabelText('Model name'), { target: { value: 'wan' } });
     fireEvent.change(screen.getByLabelText('Prompt contains'), { target: { value: 'CAT' } });
-    expect(screen.getByText('1 of 3 jobs')).toBeInTheDocument();
+    expect(screen.getByText('2 of 4 jobs')).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('combobox', { name: 'Status' }), { target: { value: 'completed' } });
+    expect(screen.getByText('1 of 4 jobs')).toBeInTheDocument();
     expect(screen.getByText('A surfing cat')).toBeInTheDocument();
     expect(screen.queryByText('Other')).not.toBeInTheDocument();
+    expect(getJobsList).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows no matches and clears every filter back to the full queue', async () => {
+    vi.mocked(getJobsList).mockResolvedValue([
+      makeJob({ id: 'one', model_id: 'Wan2.1', prompt: 'A surfing cat' }),
+      makeJob({ id: 'two', model_id: 'Other', prompt: 'A dog swimming', status: 'failed' }),
+    ]);
+    render(<JobQueue jobType="inference" />);
+    await screen.findByText('2 jobs');
+    fireEvent.change(screen.getByRole('combobox', { name: 'Status' }), { target: { value: 'stopped' } });
+    expect(screen.getByText('0 of 2 jobs')).toBeInTheDocument();
+    expect(screen.getByText('No jobs match these filters.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Clear' })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Model name'), { target: { value: 'wan' } });
+    fireEvent.change(screen.getByLabelText('Prompt contains'), { target: { value: 'cat' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+
+    expect(screen.getByRole('combobox', { name: 'Status' })).toHaveValue('');
+    expect(screen.getByLabelText('Model name')).toHaveValue('');
+    expect(screen.getByLabelText('Prompt contains')).toHaveValue('');
+    expect(screen.getByText('2 jobs')).toBeInTheDocument();
+    expect(screen.getByText('Wan2.1')).toBeInTheDocument();
+    expect(screen.getByText('Other')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Clear' })).not.toBeInTheDocument();
     expect(getJobsList).toHaveBeenCalledTimes(1);
   });
 });

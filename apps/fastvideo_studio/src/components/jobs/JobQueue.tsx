@@ -40,6 +40,7 @@ export default function JobQueue({ jobType, jobTypesForList }: JobQueueProps) {
   const [error, setError] = React.useState<string | null>(null);
   const [modelFilter, setModelFilter] = React.useState('');
   const [promptFilter, setPromptFilter] = React.useState('');
+  const [statusFilter, setStatusFilter] = React.useState('');
   const { nonce } = useStore(jobsRefreshStore);
   const { activeJobId } = useStore(activeJobStore);
 
@@ -139,7 +140,7 @@ export default function JobQueue({ jobType, jobTypesForList }: JobQueueProps) {
   }, [activeJobId, jobs]);
 
   const multiType = typesToFetch.length > 1;
-  const filteredJobs = filterJobs(jobs, modelFilter, promptFilter);
+  const filteredJobs = filterJobs(jobs, modelFilter, promptFilter, statusFilter);
   const thumbnailJobIds = new Set(
     filteredJobs.filter(hasJobResult).slice(0, MAX_RESULT_PREVIEWS).map((job) => job.id),
   );
@@ -194,8 +195,10 @@ export default function JobQueue({ jobType, jobTypesForList }: JobQueueProps) {
                   <JobFilters
                     model={modelFilter}
                     prompt={promptFilter}
+                    status={statusFilter}
                     onModelChange={setModelFilter}
                     onPromptChange={setPromptFilter}
+                    onStatusChange={setStatusFilter}
                     count={filteredJobs.length}
                     total={jobs.length}
                   />
