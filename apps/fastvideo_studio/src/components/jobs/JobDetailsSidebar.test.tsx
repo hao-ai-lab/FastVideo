@@ -1,5 +1,5 @@
-import { act, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { act, render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import JobDetailsSidebar from './JobDetailsSidebar';
 import { getJobLogs } from '@/lib/api';
@@ -19,6 +19,145 @@ const makeJob = (overrides: Partial<Job> = {}): Job =>
   });
 
 describe('JobDetailsSidebar', () => {
+  describe('job errors', () => {
+    beforeEach(() => {
+      vi.mocked(getJobLogs).mockResolvedValue({
+        lines: [],
+        total: 0,
+        progress: 0,
+        progress_msg: '',
+        phase: '',
+      });
+    });
+
+    it('shows an early failure as plain text even when there are no logs', async () => {
+      const error =
+        'Data path "<dataset>" must be an existing directory.\nPreprocess your dataset first.';
+      render(
+        <JobDetailsSidebar
+          job={makeJob({ status: 'failed', error, log_file_path: null })}
+          onClose={vi.fn()}
+        />,
+      );
+
+      const failure = screen.getByRole('alert', { name: 'Job failure' });
+      expect(failure).toHaveTextContent('Job failed');
+      expect(failure).toHaveAttribute('tabindex', '0');
+      failure.focus();
+      expect(failure).toHaveFocus();
+      expect(screen.getByRole('alert').querySelector('p')?.textContent).toBe(
+        error,
+      );
+      expect(screen.getByRole('alert').querySelector('dataset')).toBeNull();
+      expect(screen.getByText('No logs available')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Download Log' })).toBeDisabled();
+      await waitFor(() => expect(getJobLogs).toHaveBeenCalledWith('job-1', 0));
+    });
+
+    it('keeps the failure visible alongside available console output', async () => {
+      vi.mocked(getJobLogs).mockResolvedValue({
+        lines: ['loading model weights', 'worker exited'],
+        total: 2,
+        progress: 0,
+        progress_msg: '',
+        phase: '',
+      });
+      render(
+        <JobDetailsSidebar
+          job={makeJob({ status: 'failed', error: 'Training exited with code 1' })}
+          onClose={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'Training exited with code 1',
+      );
+      expect(await screen.findByText(/loading model weights/)).toHaveTextContent(
+        'worker exited',
+      );
+      expect(screen.getByRole('button', { name: 'Download Log' })).toBeEnabled();
+    });
+
+    it.each([null, '', ' \n\t '])(
+      'omits an empty failure message (%j)',
+      async (error) => {
+        render(
+          <JobDetailsSidebar
+            job={makeJob({ status: 'failed', error })}
+            onClose={vi.fn()}
+          />,
+        );
+
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+        expect(screen.getByText('No logs available')).toBeInTheDocument();
+        await waitFor(() => expect(getJobLogs).toHaveBeenCalledWith('job-1', 0));
+      },
+    );
+
+    it.each(['pending', 'running', 'completed', 'stopped'])(
+      'does not show a stale failure for a %s job',
+      async (status) => {
+        render(
+          <JobDetailsSidebar
+            job={makeJob({ status, error: 'Previous attempt failed' })}
+            onClose={vi.fn()}
+          />,
+        );
+
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+        await waitFor(() => expect(getJobLogs).toHaveBeenCalledWith('job-1', 0));
+      },
+    );
+
+    it('shows a new failure and removes it immediately when the job is retried', async () => {
+      const onClose = vi.fn();
+      const job = makeJob();
+      const { rerender } = render(
+        <JobDetailsSidebar job={job} onClose={onClose} />,
+      );
+      await waitFor(() => expect(getJobLogs).toHaveBeenCalledTimes(1));
+
+      const failedJob = {
+        ...job,
+        status: 'failed',
+        error: 'Validation failed before training',
+      };
+      rerender(<JobDetailsSidebar job={failedJob} onClose={onClose} />);
+      expect(screen.getByRole('alert')).toHaveTextContent(failedJob.error);
+      await waitFor(() => expect(getJobLogs).toHaveBeenCalledTimes(2));
+
+      rerender(
+        <JobDetailsSidebar
+          job={{ ...failedJob, status: 'pending', error: null }}
+          onClose={onClose}
+        />,
+      );
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      await waitFor(() => expect(getJobLogs).toHaveBeenCalledTimes(3));
+    });
+
+    it('does not retain another job\'s error when the selection changes', async () => {
+      const onClose = vi.fn();
+      const { rerender } = render(
+        <JobDetailsSidebar
+          job={makeJob({ status: 'failed', error: 'First job failed' })}
+          onClose={onClose}
+        />,
+      );
+      expect(screen.getByRole('alert')).toHaveTextContent('First job failed');
+      await waitFor(() => expect(getJobLogs).toHaveBeenCalledWith('job-1', 0));
+
+      rerender(
+        <JobDetailsSidebar
+          job={makeJob({ id: 'job-2', status: 'failed', error: null })}
+          onClose={onClose}
+        />,
+      );
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      await waitFor(() => expect(getJobLogs).toHaveBeenCalledWith('job-2', 0));
+    });
+  });
+
   it('fills the mobile viewport without reserving main-content width', async () => {
     vi.mocked(getJobLogs).mockResolvedValue({
       lines: [],

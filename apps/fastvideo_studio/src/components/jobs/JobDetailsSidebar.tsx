@@ -30,6 +30,7 @@ export default function JobDetailsSidebar({
   const [isDragging, setIsDragging] = React.useState(false);
   const [isLoading, setIsLoading] = React.useState(false);
   const [logs, setLogs] = React.useState('');
+  const jobError = job.status === 'failed' ? job.error?.trim() : null;
 
   // Race-guard ref (mirrors the Svelte original): the cursor + accumulated
   // text live here so in-flight polls don't read stale React state. Do NOT
@@ -188,6 +189,21 @@ export default function JobDetailsSidebar({
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col px-5 py-4">
+        {jobError && (
+          <div
+            role="alert"
+            aria-label="Job failure"
+            tabIndex={0}
+            className="mb-4 max-h-48 shrink-0 overflow-auto rounded-lg border border-destructive/30 bg-destructive/10 p-3"
+          >
+            <h3 className="mb-1 text-sm font-semibold text-destructive">
+              Job failed
+            </h3>
+            <p className="whitespace-pre-wrap break-words font-mono text-xs text-foreground">
+              {jobError}
+            </p>
+          </div>
+        )}
         <div className="mb-2 flex items-center justify-between">
           <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             Console Output

@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import JobQueue from '@/components/jobs/JobQueue';
 import { getJobsList } from '@/lib/api';
 import type { Job, JobType } from '@/lib/types';
-import { setActiveJobId } from '@/stores/activeJob';
+import { activeJobStore, setActiveJobId } from '@/stores/activeJob';
 import { triggerRefresh } from '@/stores/jobsRefresh';
 import { makeJob as makeBaseJob } from '@/test/factories';
 
@@ -177,5 +177,39 @@ describe('JobQueue', () => {
     expect(screen.getByText('Other')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Clear' })).not.toBeInTheDocument();
     expect(getJobsList).toHaveBeenCalledTimes(1);
+  });
+
+  it('propagates a polled failure and later error updates to the selected job', async () => {
+    vi.useFakeTimers();
+    try {
+      const runningJob = makeJob({ status: 'running' });
+      const failedJob = {
+        ...runningJob,
+        status: 'failed',
+        error: 'Dataset path is not an existing directory',
+      };
+      vi.mocked(getJobsList)
+        .mockResolvedValueOnce([runningJob])
+        .mockResolvedValue([failedJob]);
+
+      render(<JobQueue jobType="finetuning" />);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      act(() => setActiveJobId(runningJob.id));
+      expect(activeJobStore.get().activeJob?.status).toBe('running');
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
+      });
+      expect(activeJobStore.get().activeJob).toEqual(failedJob);
+
+      const updatedJob = { ...failedJob, error: 'Preprocess your dataset first.' };
+      vi.mocked(getJobsList).mockResolvedValue([updatedJob]);
+      await act(async () => triggerRefresh());
+      expect(activeJobStore.get().activeJob).toEqual(updatedJob);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
