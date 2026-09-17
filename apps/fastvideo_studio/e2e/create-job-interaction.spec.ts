@@ -50,9 +50,13 @@ test.describe('create job interactions', () => {
     await expect(dialog).toBeVisible();
     await expect(dialog.getByLabel('Name (optional)')).toBeFocused();
 
-    // Shift+Tab from the first field wraps to Close, then Tab wraps back.
+    // The header API action precedes the first field in keyboard order.
+    await page.keyboard.press('Shift+Tab');
+    await expect(dialog.getByRole('button', { name: 'API example', exact: true })).toBeFocused();
     await page.keyboard.press('Shift+Tab');
     await expect(dialog.getByRole('button', { name: 'Close', exact: true })).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(dialog.getByRole('button', { name: 'API example', exact: true })).toBeFocused();
     await page.keyboard.press('Tab');
     await expect(dialog.getByLabel('Name (optional)')).toBeFocused();
     await page.keyboard.press('Escape');

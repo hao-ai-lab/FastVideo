@@ -203,6 +203,7 @@ export default function CreateJobModal({
   );
   const [submitError, setSubmitError] = React.useState<string | null>(null);
   const imageInputRef = React.useRef<HTMLInputElement>(null);
+  const nameInputRef = React.useRef<HTMLInputElement>(null);
 
   // Seed field values from the persisted default options each time the modal
   // OPENS. A naive port of the Svelte `$effect` would re-seed on every
@@ -687,6 +688,14 @@ export default function CreateJobModal({
       <DialogContent
         className="max-h-[90vh] w-[90vw] max-w-[850px] overflow-y-auto"
         onCloseAutoFocus={onCloseAutoFocus}
+        onOpenAutoFocus={(event) => {
+          // Keep typing focused on the form; the API action remains reachable
+          // with Shift+Tab. Read-only views start at the enabled API action.
+          if (!readOnly) {
+            event.preventDefault();
+            nameInputRef.current?.focus();
+          }
+        }}
         onEscapeKeyDown={(e) => {
           if (isSubmitting) e.preventDefault();
         }}
@@ -735,6 +744,7 @@ export default function CreateJobModal({
           >
           <FieldRow htmlFor="modal-name" label="Name (optional)">
             <Input
+              ref={nameInputRef}
               id="modal-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
