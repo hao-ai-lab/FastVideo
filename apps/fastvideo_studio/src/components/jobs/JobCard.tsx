@@ -11,13 +11,12 @@ import { useStore } from '@/hooks/useStore';
 import {
   deleteJob,
   duplicateJob,
-  downloadJobVideo,
   startJob,
   stopJob,
 } from '@/lib/api';
-import { hasJobResult, isJobImage } from '@/lib/jobResults';
+import { hasJobResult } from '@/lib/jobResults';
 import type { Job } from '@/lib/types';
-import { cn, downloadBlob } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 import { activeJobStore, setActiveJobId } from '@/stores/activeJob';
 
 interface JobCardProps {
@@ -158,22 +157,6 @@ export default function JobCard({ job, onJobUpdated, thumbnailEnabled = true }: 
     }
   }
 
-  async function handleDownloadVideo(e: React.MouseEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    if (isLoading || !job.output_path) return;
-    setIsLoading(true);
-    try {
-      const blob = await downloadJobVideo(job.id);
-      const ext = job.output_path.endsWith('.png') ? 'png' : 'mp4';
-      downloadBlob(blob, `job_${job.id}.${ext}`);
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to download video');
-    } finally {
-      setIsLoading(false);
-    }
-  }
-
   return (
     <article
       onClick={handleCardClick}
@@ -264,19 +247,6 @@ export default function JobCard({ job, onJobUpdated, thumbnailEnabled = true }: 
             Start
           </Button>
         ) : null}
-        {job.status === 'completed' &&
-          job.output_path &&
-          job.job_type === 'inference' && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={handleDownloadVideo}
-              disabled={isLoading}
-              title="Download video"
-            >
-              Download {isJobImage(job) ? 'Image' : 'Video'}
-            </Button>
-          )}
         <Button
           size="sm"
           variant="outline"

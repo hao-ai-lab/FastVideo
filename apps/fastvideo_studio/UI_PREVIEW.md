@@ -6,21 +6,28 @@ new media or starting a remote GPU.
 
 ## What to try
 
-1. Open Inference and filter by a model-name fragment or words in a prompt.
+1. Open Inference and filter by status, a model-name fragment, or words in a
+   prompt. Filters combine; Clear resets them together.
 2. Click a completed job's poster to play its video or inspect its image,
    review the model/settings, and download the result.
    Click the job card to view its configuration; use Details & logs for the
    sidebar with progress and logs. Edit remains a separate action.
+   The small download icon on the media works in both the job list and Gallery.
 3. Open Create Job or edit a pending job. Output and Generation options are
    shown first; advanced settings are grouped into collapsible sections.
 4. Type a precise slider value, or use its number field's up/down controls.
-5. Expand API request, copy the cURL command, change a form field, and Refresh.
+5. Open API example at the top right of the form, copy the cURL command,
+   change a form field, and Refresh.
    The export uses the same JSON request descriptor as the UI submission.
 
 The API panel currently covers job creation and editing. Refresh does not
 send the request. Creating a job queues it; starting it is a separate API
 operation. Uploaded inputs are referenced by their existing backend paths.
 The configured API base URL includes `/api` and becomes `BACKEND_URL`.
+
+Gallery is a completed-results view over the same jobs. It shares the media
+preview component, download handler, original output files, and cached posters
+with the job list; opening Gallery creates no separate media library.
 
 Posters contain one frame at a maximum of 320 pixels per dimension. They are
 generated on demand using Pillow and FFmpeg (or imageio-ffmpeg), with one

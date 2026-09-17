@@ -35,6 +35,7 @@ export default function JobFilters({
             Status
             <span className="relative">
               <NativeSelect
+                aria-label="Status"
                 value={status}
                 onChange={(event) => onStatusChange(event.target.value)}
                 className="h-10 pr-9 font-normal"

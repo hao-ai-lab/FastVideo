@@ -127,16 +127,18 @@ describe('JobCard', () => {
     expect(deleteJob).not.toHaveBeenCalled();
   });
 
-  it('downloads the video for a completed inference job', async () => {
+  it('downloads from the media icon without opening configuration or logs', async () => {
     render(
       <JobCard
         job={makeJob({ status: 'completed', output_path: '/out/video.mp4' })}
       />,
     );
     await userEvent.click(
-      screen.getByRole('button', { name: 'Download Video' }),
+      screen.getByRole('button', { name: 'Download video' }),
     );
     await waitFor(() => expect(downloadJobVideo).toHaveBeenCalledWith('job-1'));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(activeJobStore.get().activeJobId).toBeNull();
   });
 
   it.each(['pending', 'failed', 'running', 'completed'])('views a %s job without opening its logs', async (status) => {
@@ -169,7 +171,7 @@ describe('JobCard', () => {
 
   it('keeps editing and previewing separate from configuration viewing', async () => {
     const { rerender } = render(<JobCard job={makeJob()} />);
-    await userEvent.click(screen.getByRole('button', { name: 'Edit', exact: true }));
+    await userEvent.click(screen.getByRole('button', { name: 'Edit' }));
     expect(screen.getByRole('dialog', { name: 'Edit configuration' })).toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: 'View configuration' })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Close' }));
