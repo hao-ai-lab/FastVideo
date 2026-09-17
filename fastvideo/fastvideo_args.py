@@ -158,6 +158,13 @@ class FastVideoArgs:
     image_encoder_cpu_offload: bool = True
     vae_cpu_offload: bool = True
     pin_cpu_memory: bool = True
+    # Opt-in: with ``vae_cpu_offload``, start the VAE host-to-device copies on a
+    # side stream when denoising begins instead of at the head of the decode
+    # stage, so they overlap the DiT forwards. It trades the point of offload
+    # for that overlap: the VAE sits on the device across the denoising peak
+    # (about 10 GB for the fp32 H3 video VAE), so a configuration that offloads
+    # the VAE precisely to survive that peak must leave this off.
+    vae_prefetch_during_denoising: bool = False
 
     # MiniMax-H3 inference load order. ``None`` (auto) defers DiT/VAE load until
     # after the Qwen3-VL encoder is released, but only on unified-memory

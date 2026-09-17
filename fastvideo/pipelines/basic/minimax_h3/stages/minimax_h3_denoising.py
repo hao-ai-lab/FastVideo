@@ -156,7 +156,10 @@ class MiniMaxH3DenoisingStage(PipelineStage):
             # value against VSA_H3_TILE_SHAPES.
             vsa_tile_size = int(fastvideo_args.VSA_tile_size)
 
-        if fastvideo_args.vae_cpu_offload and device.type == "cuda":
+        # Off by default: prefetching here keeps the VAE on the device across
+        # the denoising peak, which a configuration that offloads the VAE to
+        # survive that peak cannot afford. See ``vae_prefetch_during_denoising``.
+        if (fastvideo_args.vae_cpu_offload and fastvideo_args.vae_prefetch_during_denoising and device.type == "cuda"):
             for module in self.prefetch_modules:
                 pinned_offload.prefetch(module, device, pin=fastvideo_args.pin_cpu_memory)
 

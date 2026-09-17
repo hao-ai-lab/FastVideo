@@ -12,6 +12,7 @@ text_encoder_cpu_offload: bool = True
 image_encoder_cpu_offload: bool = True
 vae_cpu_offload: bool = True
 pin_cpu_memory: bool = True
+vae_prefetch_during_denoising: bool = False
 lazy_module_load: bool | None = None
 ```
 
@@ -131,6 +132,27 @@ These options introduce performance overhead due to PCIe data transfer.
 #### Usage Recommendation
 
 We recommend enabling these options when OOM happens.
+
+### `vae_prefetch_during_denoising`
+
+With `vae_cpu_offload`, the VAE weights are copied to the device at the head of
+the decode stage, where the copy has nothing to overlap with. This option starts
+those copies on a side stream when denoising begins instead, so they overlap the
+DiT forwards.
+
+#### Performance Impact
+
+It removes the host-to-device transfer from the critical path between denoising
+and decoding. On a PCIe-attached node the fp32 MiniMax-H3 video VAE is about
+10 GB, so the copy is worth seconds.
+
+#### Usage Recommendation
+
+Leave it off if you enabled `vae_cpu_offload` to survive the denoising memory
+peak: prefetching puts the VAE back on the device for the whole of denoising,
+which is exactly what the offload was avoiding. Turn it on when the VAE is
+offloaded for transfer-cost reasons rather than capacity ones, and there is
+headroom for it during denoising.
 
 ### `lazy_module_load`
 
