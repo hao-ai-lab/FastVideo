@@ -37,7 +37,7 @@ export default function ApiRequestPreview({ id, request }: ApiRequestPreviewProp
   }
 
   return (
-    <section id={id} aria-label="API request example" className="space-y-3 rounded-xl border border-border bg-muted/30 p-3.5">
+    <section id={id} aria-label="API request example" className="min-w-0 space-y-3 rounded-xl border border-border bg-muted/30 p-3.5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2 text-sm font-semibold">
           <Code2 aria-hidden="true" className="size-4 text-primary" />
@@ -68,7 +68,7 @@ export default function ApiRequestPreview({ id, request }: ApiRequestPreviewProp
       <p role="status" className={`text-xs ${isStale ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}`}>
         {isStale ? 'Settings changed. Refresh to include your edits.' : 'Matches the form when last refreshed.'}
       </p>
-      <pre aria-label="cURL command" tabIndex={0} className="max-h-72 overflow-auto rounded-lg border border-border bg-background p-3 font-mono text-xs leading-relaxed">
+      <pre aria-label="cURL command" tabIndex={0} className="max-h-72 min-w-0 max-w-full overflow-auto rounded-lg border border-border bg-background p-3 font-mono text-xs leading-relaxed">
         <code>{snapshot.command}</code>
       </pre>
       <p className="text-xs text-muted-foreground">
