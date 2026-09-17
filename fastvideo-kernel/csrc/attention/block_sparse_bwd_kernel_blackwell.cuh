@@ -13,6 +13,10 @@
 #include <type_traits>
 #include "primitives.cuh"
 
+#ifndef KERNEL_PDL
+#define KERNEL_PDL true
+#endif
+
 namespace vsa_bwd_blk64 {
 
 constexpr int BLOCK                   = 64;
@@ -216,6 +220,7 @@ __global__ void __cluster_dims__(1, 1, 1) __launch_bounds__(N_WARPS * 32, 1) vsa
 
   if (warp_id == W_LOAD) {
     setmaxnreg_dec<88>();
+    if constexpr (KERNEL_PDL) griddepcontrol_wait();
 
     EmptyPhaseTracker<NUM_Q_STAGES> ring_empty_ph;
     EmptyPhaseTracker<1> lse_empty_ph, delta_empty_ph, kv_empty_ph, epi_empty_ph;
@@ -848,6 +853,9 @@ __global__ void __cluster_dims__(1, 1, 1) __launch_bounds__(N_WARPS * 32, 1) vsa
       cp_async_bulk_wait_group_read<0>();
     }
     bar_sync<11>(128);
+    if constexpr (KERNEL_PDL) {
+      if (is_leader) griddepcontrol_launch_dependents();
+    }
     bar_sync<10>(416);
     return;
   } else {
@@ -915,6 +923,7 @@ __global__ void __launch_bounds__(256, 1)
 #if !defined(__CUDA_ARCH__) || \
     ((__CUDA_ARCH__ == 1000 && defined(__CUDA_ARCH_FEAT_SM100_ALL)) || \
      (__CUDA_ARCH__ == 1030 && defined(__CUDA_ARCH_FEAT_SM103_ALL)))
+  if constexpr (KERNEL_PDL) griddepcontrol_wait();
   __shared__ __align__(128) __nv_bfloat16 tile[PRE_TOKENS][SUB_COLS_BF16 + 4];
   const int num_kv_blocks_per_seq = seqlen / BLOCK;
   const int token_block_id        = (int)blockIdx.x;
@@ -983,6 +992,8 @@ __global__ void __launch_bounds__(256, 1)
     }
     __syncthreads();
   }
+
+  if constexpr (KERNEL_PDL) griddepcontrol_launch_dependents();
 
   float delta_accumulator[8] = {0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f};
   #pragma unroll
@@ -1056,6 +1067,7 @@ __global__ void __launch_bounds__(128, 1)
   const int dimension_half      = (int)threadIdx.x >> 6;
 
   uint32_t dq_packed_bf16_pairs[32];
+  if constexpr (KERNEL_PDL) griddepcontrol_wait();
   #pragma unroll
   for (int dimension_in_half = 0; dimension_in_half < 64; dimension_in_half += 4) {
     const int dimension = dimension_half * 64 + dimension_in_half;
@@ -1079,6 +1091,7 @@ __global__ void __launch_bounds__(128, 1)
     dq_packed_bf16_pairs[dimension_in_half / 2 + 1] =
         cvt_f32x2_to_bf16x2(dq_pair_high.x * sm_scale, dq_pair_high.y * sm_scale);
   }
+  if constexpr (KERNEL_PDL) griddepcontrol_launch_dependents();
 
   const int token       = q_block_id * BLOCK + row;
   uint4* dq_destination = reinterpret_cast<uint4*>(
