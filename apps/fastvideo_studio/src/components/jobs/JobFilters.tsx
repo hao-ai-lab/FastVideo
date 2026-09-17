@@ -5,9 +5,11 @@ import { ChevronDown, Search, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { NativeSelect } from '@/components/ui/native-select';
+import type { Model } from '@/lib/api';
 
 interface JobFiltersProps {
   model: string;
+  models: Model[];
   prompt: string;
   status?: string;
   onModelChange: (value: string) => void;
@@ -19,6 +21,7 @@ interface JobFiltersProps {
 
 export default function JobFilters({
   model,
+  models,
   prompt,
   status = '',
   onModelChange,
@@ -53,12 +56,22 @@ export default function JobFilters({
         )}
         <label className="flex min-w-0 flex-1 flex-col gap-1.5 text-xs font-medium text-muted-foreground">
           Model name
-          <Input
-            value={model}
-            onChange={(event) => onModelChange(event.target.value)}
-            placeholder="Filter models…"
-            className="h-10 font-normal text-foreground"
-          />
+          <span className="relative">
+            <NativeSelect
+              aria-label="Model name"
+              value={model}
+              onChange={(event) => onModelChange(event.target.value)}
+              className="h-10 truncate pr-9 font-normal"
+            >
+              <option value="">All models</option>
+              {models.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label === option.id ? option.id : `${option.label} (${option.id})`}
+                </option>
+              ))}
+            </NativeSelect>
+            <ChevronDown className="pointer-events-none absolute right-3 top-3 size-4" aria-hidden />
+          </span>
         </label>
         <label className="flex min-w-0 flex-[1.5] flex-col gap-1.5 text-xs font-medium text-muted-foreground">
           Prompt contains

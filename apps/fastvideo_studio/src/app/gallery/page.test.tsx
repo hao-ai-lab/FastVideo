@@ -1,14 +1,15 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import GalleryPage from './page';
 import { HeaderActionsProvider } from '@/components/shell/HeaderActionsContext';
-import { getJobsList } from '@/lib/api';
+import { getJobsList, getModels } from '@/lib/api';
 import type { Job } from '@/lib/types';
 import { makeJob as makeBaseJob } from '@/test/factories';
 
 vi.mock('@/lib/api', () => ({
   getJobsList: vi.fn(),
+  getModels: vi.fn(),
   getApiBaseUrl: () => 'http://test.local/api',
   getJobVideoUrl: (id: string) => `http://test.local/api/jobs/${id}/video`,
   downloadJobVideo: vi.fn(),
@@ -33,6 +34,10 @@ function renderGallery() {
   );
 }
 
+beforeEach(() => {
+  vi.mocked(getModels).mockResolvedValue([]);
+});
+
 describe('GalleryPage', () => {
   it('renders a grid item for a completed inference job', async () => {
     vi.mocked(getJobsList).mockResolvedValue([
@@ -43,6 +48,7 @@ describe('GalleryPage', () => {
 
     expect(await screen.findByText('a cat surfing a wave')).toBeInTheDocument();
     expect(getJobsList).toHaveBeenCalledWith('inference');
+    expect(getModels).toHaveBeenCalledWith(undefined);
   });
 
   it('loads only a lazy thumbnail until clicked and unmounts the player on close', async () => {
@@ -80,7 +86,8 @@ describe('GalleryPage', () => {
     ).toBeInTheDocument();
   });
 
-  it('shows model/configuration and combines model and prompt substring filters', async () => {
+  it('shows model/configuration and combines the catalog dropdown with prompt text', async () => {
+    vi.mocked(getModels).mockResolvedValue([{ id: 'Wan2.1', label: 'Wan 2.1' }]);
     vi.mocked(getJobsList).mockResolvedValue([
       makeJob({ id: 'one', name: 'Sunset clip', model_id: 'Wan2.1', prompt: 'A cat surfing', num_inference_steps: 30, seed: 123 }),
       makeJob({ id: 'two', model_id: 'Wan2.1', prompt: 'A dog surfing' }),
@@ -90,7 +97,10 @@ describe('GalleryPage', () => {
     expect(await screen.findByText('Sunset clip')).toBeInTheDocument();
     expect(screen.getByText('30 steps')).toBeInTheDocument();
     expect(screen.getByText('Seed 123')).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('Model name'), { target: { value: 'WAN' } });
+    expect(screen.getByRole('option', { name: 'Wan 2.1 (Wan2.1)' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'OtherModel' })).toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'Status' })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole('combobox', { name: 'Model name' }), { target: { value: 'Wan2.1' } });
     fireEvent.change(screen.getByLabelText('Prompt contains'), { target: { value: ' CAT ' } });
     expect(screen.getByText('1 of 3 jobs')).toBeInTheDocument();
     expect(screen.getByText('Sunset clip')).toBeInTheDocument();

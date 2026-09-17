@@ -7,6 +7,7 @@ import JobFilters from '@/components/jobs/JobFilters';
 import JobResultPreview, { JobResultMetadata } from '@/components/jobs/JobResultPreview';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { useJobModelOptions } from '@/hooks/useJobModelOptions';
 import { getJobsList } from '@/lib/api';
 import { filterJobs, hasJobResult, MAX_RESULT_PREVIEWS } from '@/lib/jobResults';
 import type { Job } from '@/lib/types';
@@ -53,6 +54,7 @@ export default function GalleryPage() {
   }
 
   const galleryJobs = jobs.filter(hasJobResult);
+  const modelOptions = useJobModelOptions(galleryJobs);
   const filteredJobs = filterJobs(galleryJobs, modelFilter, promptFilter);
   const pageCount = Math.ceil(filteredJobs.length / MAX_RESULT_PREVIEWS);
   const currentPage = Math.min(page, Math.max(0, pageCount - 1));
@@ -93,6 +95,7 @@ export default function GalleryPage() {
           <>
             <JobFilters
               model={modelFilter}
+              models={modelOptions}
               prompt={promptFilter}
               onModelChange={(value) => { setModelFilter(value); setPage(0); }}
               onPromptChange={(value) => { setPromptFilter(value); setPage(0); }}

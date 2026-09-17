@@ -1,8 +1,8 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import JobQueue from '@/components/jobs/JobQueue';
-import { getJobsList } from '@/lib/api';
+import { getJobsList, getModels } from '@/lib/api';
 import type { Job, JobType } from '@/lib/types';
 import { activeJobStore, setActiveJobId } from '@/stores/activeJob';
 import { triggerRefresh } from '@/stores/jobsRefresh';
@@ -12,6 +12,7 @@ vi.mock('@/lib/api', () => ({
   getApiBaseUrl: () => 'http://test.local/api',
   getJobVideoUrl: (id: string) => `http://test.local/api/jobs/${id}/video`,
   getJobsList: vi.fn(),
+  getModels: vi.fn(),
   startJob: vi.fn(),
   stopJob: vi.fn(),
   deleteJob: vi.fn(),
@@ -36,6 +37,7 @@ const makeJob = (overrides: Partial<Job> = {}): Job =>
 beforeEach(() => {
   setActiveJobId(null);
   vi.mocked(getJobsList).mockResolvedValue([]);
+  vi.mocked(getModels).mockResolvedValue([]);
 });
 
 describe('JobQueue', () => {
@@ -85,6 +87,7 @@ describe('JobQueue', () => {
       await screen.findByText('No inference jobs yet. Create one above.'),
     ).toBeInTheDocument();
     expect(getJobsList).toHaveBeenCalledWith('inference');
+    expect(getModels).toHaveBeenCalledWith(undefined);
   });
 
   it('renders a JobCard for each fetched job', async () => {
@@ -92,7 +95,8 @@ describe('JobQueue', () => {
       makeJob({ id: 'a', model_id: 'Model-A' }),
     ]);
     render(<JobQueue jobType="distillation" />);
-    expect(await screen.findByText('Model-A')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'View configuration: Model-A' })).toBeInTheDocument();
+    expect(getModels).toHaveBeenCalledWith('t2v');
   });
 
   it('merges all job types when jobTypesForList is provided', async () => {
@@ -109,10 +113,11 @@ describe('JobQueue', () => {
         jobTypesForList={['finetuning', 'lora'] as JobType[]}
       />,
     );
-    expect(await screen.findByText('Lora-Model')).toBeInTheDocument();
-    expect(screen.getByText('Full-Model')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'View configuration: Lora-Model' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'View configuration: Full-Model' })).toBeInTheDocument();
     expect(getJobsList).toHaveBeenCalledWith('finetuning');
     expect(getJobsList).toHaveBeenCalledWith('lora');
+    expect(getModels).toHaveBeenCalledWith('t2v');
   });
 
   it('refetches when a refresh is triggered', async () => {
@@ -143,13 +148,13 @@ describe('JobQueue', () => {
     render(<JobQueue jobType="inference" />);
     await screen.findByText('4 jobs');
     expect(screen.getByRole('combobox', { name: 'Status' })).toHaveValue('');
-    fireEvent.change(screen.getByLabelText('Model name'), { target: { value: 'wan' } });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Model name' }), { target: { value: 'Wan2.1' } });
     fireEvent.change(screen.getByLabelText('Prompt contains'), { target: { value: 'CAT' } });
     expect(screen.getByText('2 of 4 jobs')).toBeInTheDocument();
     fireEvent.change(screen.getByRole('combobox', { name: 'Status' }), { target: { value: 'completed' } });
     expect(screen.getByText('1 of 4 jobs')).toBeInTheDocument();
     expect(screen.getByText('A surfing cat')).toBeInTheDocument();
-    expect(screen.queryByText('Other')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'View configuration: Other' })).not.toBeInTheDocument();
     expect(getJobsList).toHaveBeenCalledTimes(1);
   });
 
@@ -165,7 +170,7 @@ describe('JobQueue', () => {
     expect(screen.getByText('No jobs match these filters.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Clear' })).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText('Model name'), { target: { value: 'wan' } });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Model name' }), { target: { value: 'Wan2.1' } });
     fireEvent.change(screen.getByLabelText('Prompt contains'), { target: { value: 'cat' } });
     fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
 
@@ -173,8 +178,8 @@ describe('JobQueue', () => {
     expect(screen.getByLabelText('Model name')).toHaveValue('');
     expect(screen.getByLabelText('Prompt contains')).toHaveValue('');
     expect(screen.getByText('2 jobs')).toBeInTheDocument();
-    expect(screen.getByText('Wan2.1')).toBeInTheDocument();
-    expect(screen.getByText('Other')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'View configuration: Wan2.1' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'View configuration: Other' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Clear' })).not.toBeInTheDocument();
     expect(getJobsList).toHaveBeenCalledTimes(1);
   });
@@ -211,5 +216,47 @@ describe('JobQueue', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('merges the create-job catalog with recorded models and filters by exact ID', async () => {
+    vi.mocked(getModels).mockResolvedValue([
+      { id: 'wan', label: 'Wan 2.1' },
+      { id: 'catalog-only', label: 'Latest model' },
+    ]);
+    vi.mocked(getJobsList).mockResolvedValue([
+      makeJob({ id: 'one', model_id: 'wan' }),
+      makeJob({ id: 'two', model_id: 'wan-extra' }),
+      makeJob({ id: 'three', model_id: 'old/custom' }),
+    ]);
+    render(<JobQueue jobType="inference" />);
+    const select = await screen.findByRole('combobox', { name: 'Model name' });
+    expect(select).toHaveValue('');
+    expect(within(select).getAllByRole('option')).toHaveLength(5);
+    expect(within(select).getByRole('option', { name: 'Wan 2.1 (wan)' })).toBeInTheDocument();
+    expect(within(select).getByRole('option', { name: 'Latest model (catalog-only)' })).toBeInTheDocument();
+    expect(within(select).getByRole('option', { name: 'old/custom' })).toBeInTheDocument();
+
+    fireEvent.change(select, { target: { value: 'wan' } });
+    expect(screen.getByText('1 of 3 jobs')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'View configuration: wan' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'View configuration: wan-extra' })).not.toBeInTheDocument();
+
+    fireEvent.change(select, { target: { value: 'catalog-only' } });
+    expect(screen.getByText('No jobs match these filters.')).toBeInTheDocument();
+    expect(getModels).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps recorded models filterable when the catalog request fails', async () => {
+    vi.mocked(getModels).mockRejectedValue(new Error('catalog unavailable'));
+    vi.mocked(getJobsList).mockResolvedValue([
+      makeJob({ id: 'one', model_id: 'old/custom' }),
+      makeJob({ id: 'two', model_id: 'other' }),
+    ]);
+    render(<JobQueue jobType="inference" />);
+    const select = await screen.findByRole('combobox', { name: 'Model name' });
+    fireEvent.change(select, { target: { value: 'old/custom' } });
+    expect(screen.getByText('1 of 2 jobs')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'View configuration: old/custom' })).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });

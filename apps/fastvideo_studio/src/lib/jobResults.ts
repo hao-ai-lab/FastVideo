@@ -21,12 +21,11 @@ export function getJobThumbnailUrl(jobId: string): string {
 }
 
 export function filterJobs(jobs: Job[], model: string, prompt: string, status = ''): Job[] {
-  const modelQuery = model.trim().toLowerCase();
   const promptQuery = prompt.trim().toLowerCase();
   return jobs.filter(
     (job) =>
       (!status || job.status === status) &&
-      job.model_id.toLowerCase().includes(modelQuery) &&
+      (!model || job.model_id === model) &&
       (job.prompt ?? '').toLowerCase().includes(promptQuery),
   );
 }

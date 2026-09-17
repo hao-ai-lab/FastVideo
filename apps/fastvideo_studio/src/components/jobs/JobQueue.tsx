@@ -7,6 +7,7 @@ import JobCard from '@/components/jobs/JobCard';
 import JobFilters from '@/components/jobs/JobFilters';
 import { Button } from '@/components/ui/button';
 import { useStore } from '@/hooks/useStore';
+import { useJobModelOptions } from '@/hooks/useJobModelOptions';
 import { getJobsList } from '@/lib/api';
 import { filterJobs, hasJobResult, MAX_RESULT_PREVIEWS } from '@/lib/jobResults';
 import type { Job, JobType } from '@/lib/types';
@@ -41,6 +42,7 @@ export default function JobQueue({ jobType, jobTypesForList }: JobQueueProps) {
   const [modelFilter, setModelFilter] = React.useState('');
   const [promptFilter, setPromptFilter] = React.useState('');
   const [statusFilter, setStatusFilter] = React.useState('');
+  const modelOptions = useJobModelOptions(jobs, jobType === 'inference' ? undefined : 't2v');
   const { nonce } = useStore(jobsRefreshStore);
   const { activeJobId } = useStore(activeJobStore);
 
@@ -194,6 +196,7 @@ export default function JobQueue({ jobType, jobTypesForList }: JobQueueProps) {
                 <>
                   <JobFilters
                     model={modelFilter}
+                    models={modelOptions}
                     prompt={promptFilter}
                     status={statusFilter}
                     onModelChange={setModelFilter}
