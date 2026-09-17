@@ -9,6 +9,8 @@ new media or starting a remote GPU.
 1. Open Inference and filter by a model-name fragment or words in a prompt.
 2. Click a completed job's poster to play its video or inspect its image,
    review the model/settings, and download the result.
+   Click the job card to view its configuration; use Details & logs for the
+   sidebar with progress and logs. Edit remains a separate action.
 3. Open Create Job or edit a pending job. Output and Generation options are
    shown first; advanced settings are grouped into collapsible sections.
 4. Type a precise slider value, or use its number field's up/down controls.

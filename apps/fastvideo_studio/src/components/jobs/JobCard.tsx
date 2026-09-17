@@ -145,6 +145,19 @@ export default function JobCard({ job, onJobUpdated, thumbnailEnabled = true }: 
     setActiveJobId(isSelected ? null : job.id);
   }
 
+  function handleCardClick(event: React.MouseEvent<HTMLElement>) {
+    const target = event.target;
+    // Keep the native configuration button keyboard-accessible, and extend
+    // its click target to card whitespace. Ignore actions and portal dialogs.
+    if (
+      target instanceof Element &&
+      event.currentTarget.contains(target) &&
+      !target.closest('button, a, input, select, textarea, [role="dialog"]')
+    ) {
+      setIsViewing(true);
+    }
+  }
+
   async function handleDownloadVideo(e: React.MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
@@ -163,6 +176,7 @@ export default function JobCard({ job, onJobUpdated, thumbnailEnabled = true }: 
 
   return (
     <article
+      onClick={handleCardClick}
       className={cn(
         'mb-3 flex cursor-pointer flex-col gap-2.5 rounded-lg border bg-background p-4 transition-colors last:mb-0',
         isSelected
@@ -176,8 +190,10 @@ export default function JobCard({ job, onJobUpdated, thumbnailEnabled = true }: 
         )}
         <button
           type="button"
-          aria-pressed={isSelected}
-          onClick={handleSelectJob}
+          aria-label={`View configuration: ${job.name?.trim() || job.model_id}`}
+          aria-haspopup="dialog"
+          onClick={() => setIsViewing(true)}
+          title="View this job's configuration"
           className="flex w-full min-w-0 flex-col gap-2.5 rounded-md text-left"
         >
           <span className="flex flex-wrap items-center justify-between gap-2">
@@ -261,25 +277,18 @@ export default function JobCard({ job, onJobUpdated, thumbnailEnabled = true }: 
               Download {isJobImage(job) ? 'Image' : 'Video'}
             </Button>
           )}
-        {!(
-          job.status === 'pending' ||
-          job.status === 'failed' ||
-          job.status === 'stopped'
-        ) && (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              setIsViewing(true);
-            }}
-            disabled={isLoading}
-            title="View this job's configuration"
-          >
-            View
-          </Button>
-        )}
+        <Button
+          size="sm"
+          variant="outline"
+          aria-pressed={isSelected}
+          onClick={(e) => {
+            e.stopPropagation();
+            handleSelectJob();
+          }}
+          title="Show this job's details and logs"
+        >
+          Details &amp; logs
+        </Button>
         {(job.status === 'pending' ||
           job.status === 'failed' ||
           job.status === 'stopped') && (

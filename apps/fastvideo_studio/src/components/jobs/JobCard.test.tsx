@@ -1,8 +1,9 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import JobCard from '@/components/jobs/JobCard';
+import type { CreateJobModalProps } from '@/components/jobs/CreateJobModal';
 import {
   deleteJob,
   downloadJobVideo,
@@ -20,6 +21,14 @@ vi.mock('@/lib/api', () => ({
   stopJob: vi.fn(),
   deleteJob: vi.fn(),
   downloadJobVideo: vi.fn(),
+}));
+
+vi.mock('@/components/jobs/CreateJobModal', () => ({
+  default: ({ readOnly, onClose }: CreateJobModalProps) => (
+    <div role="dialog" aria-label={readOnly ? 'View configuration' : 'Edit configuration'}>
+      <button onClick={onClose}>Close</button>
+    </div>
+  ),
 }));
 
 vi.mock('@/lib/utils', async (importOriginal) => {
@@ -56,14 +65,15 @@ beforeEach(() => {
 });
 
 describe('JobCard', () => {
-  it('keeps selection and job action buttons as semantic siblings', () => {
+  it('keeps configuration and job action buttons as semantic siblings', () => {
     render(<JobCard job={makeJob()} />);
 
-    const selectButton = screen.getByRole('button', { pressed: false });
+    const selectButton = screen.getByRole('button', { name: 'View configuration: Wan2.1-T2V' });
     const deleteButton = screen.getByRole('button', { name: 'Delete' });
 
     expect(selectButton).toHaveTextContent('Wan2.1-T2V');
     expect(selectButton).not.toContainElement(deleteButton);
+    expect(selectButton).not.toHaveAttribute('aria-pressed');
   });
 
   it('renders the model, prompt, status and inference meta', () => {
@@ -129,9 +139,48 @@ describe('JobCard', () => {
     await waitFor(() => expect(downloadJobVideo).toHaveBeenCalledWith('job-1'));
   });
 
-  it('selects the job when the card body is clicked', async () => {
-    render(<JobCard job={makeJob()} />);
+  it.each(['pending', 'failed', 'running', 'completed'])('views a %s job without opening its logs', async (status) => {
+    render(<JobCard job={makeJob({ status })} />);
     await userEvent.click(screen.getByText('Wan2.1-T2V'));
+    expect(screen.getByRole('dialog', { name: 'View configuration' })).toBeInTheDocument();
+    expect(activeJobStore.get().activeJobId).toBeNull();
+  });
+
+  it('opens configuration with the keyboard or a click on card whitespace', async () => {
+    const { container } = render(<JobCard job={makeJob()} />);
+    screen.getByRole('button', { name: 'View configuration: Wan2.1-T2V' }).focus();
+    await userEvent.keyboard('{Enter}');
+    expect(screen.getByRole('dialog', { name: 'View configuration' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Close' }));
+    fireEvent.click(container.querySelector('article')!);
+    expect(screen.getByRole('dialog', { name: 'View configuration' })).toBeInTheDocument();
+  });
+
+  it('toggles the sidebar only with Details & logs', async () => {
+    render(<JobCard job={makeJob()} />);
+    const details = screen.getByRole('button', { name: 'Details & logs' });
+    await userEvent.click(details);
     expect(activeJobStore.get().activeJobId).toBe('job-1');
+    expect(details).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await userEvent.click(details);
+    expect(activeJobStore.get().activeJobId).toBeNull();
+  });
+
+  it('keeps editing and previewing separate from configuration viewing', async () => {
+    const { rerender } = render(<JobCard job={makeJob()} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Edit', exact: true }));
+    expect(screen.getByRole('dialog', { name: 'Edit configuration' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'View configuration' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Close' }));
+    rerender(<JobCard job={makeJob({ status: 'completed', output_path: '/out/video.mp4' })} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Preview result: Wan2.1-T2V' }));
+    expect(screen.getByRole('dialog', { name: 'Wan2.1-T2V' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'View configuration' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByText('Guidance 5'));
+    expect(screen.queryByRole('dialog', { name: 'View configuration' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(activeJobStore.get().activeJobId).toBeNull();
   });
 });

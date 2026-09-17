@@ -89,7 +89,7 @@ test.describe('app shell', () => {
     await page.goto('/inference');
 
     await page
-      .locator('article button[aria-pressed="false"]')
+      .getByRole('button', { name: 'Details & logs', exact: true })
       .first()
       .click();
     const jobDrawer = page.getByRole('dialog', { name: 'Job details' });
