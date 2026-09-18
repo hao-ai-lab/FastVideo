@@ -22,9 +22,9 @@ pytest \
 ```
 
 The Qwen3-VL vision test covers production image/video grids, packed grids, exact float32 accumulation against a
-self-contained Transformers 5.15 contract reference, and the bounded four-tap workspace. When Transformers 5.15 or
-newer is installed, a separate test checks that reference against its public helper. Older supported Transformers
-versions skip only that library cross-check; the exact contract and independent PyTorch interpolation gates still run.
+self-contained Transformers 5.15 contract reference, and the bounded four-tap workspace. A separate test checks that
+reference against Transformers' public `get_vision_interpolation_indices_and_weights` helper, which
+`transformers>=5.15` provides.
 
 ## Registry smoke
 
@@ -89,12 +89,16 @@ python tests/local_tests/encoders/benchmark_minimax_h3_qwen3_vl_interpolation_me
 ```
 
 The default `[15, 42, 74]` grid and hidden width `1152` reproduce a production video interpolation. On GB10 with
-PyTorch `2.12.0+cu130`, the unbounded float32 implementation at `fa75864b` used `1,291,986,432` incremental allocated
-bytes; the bounded implementation used `284,866,048` bytes with the same output shape, dtype, and FP32 sum. A direct
-comparison against the Transformers helper was bit-exact for all `46,620 x 1,152` output elements. Fresh CPU
-processes reduced maximum resident set size from `2,988,420` to `1,244,088` KiB for the same tensor, eliminating
-`1,744,332` KiB (`1.66` GiB) of peak retention. The mixed `[1, 128, 224] + [15, 42, 74]` packed case reduced
-incremental CUDA allocation from `2,086,086,144` to `418,362,880` bytes with the same FP32 sum.
+PyTorch `2.12.0+cu130`, an intermediate unbounded-float32 implementation of this change (not reachable from the PR
+branch) used `1,291,986,432` incremental allocated bytes; the bounded implementation used `284,866,048` bytes with
+the same output shape, dtype, and FP32 sum. A direct comparison against the Transformers helper was bit-exact for all
+`46,620 x 1,152` output elements. Fresh CPU processes reduced maximum resident set size from `2,988,420` to
+`1,244,088` KiB for the same tensor, eliminating `1,744,332` KiB (`1.66` GiB) of peak retention. The mixed
+`[1, 128, 224] + [15, 42, 74]` packed case reduced incremental CUDA allocation from `2,086,086,144` to
+`418,362,880` bytes with the same FP32 sum.
+
+The benchmark's legacy fallback path (a source tree without `_interpolate_vision_position_embeddings`) measures the
+pre-PR bf16 implementation, so its FP32 sum differs from the bounded float32 implementation.
 
 The video VAE test verifies the reference checkout at commit
 `abc5e9bf71fd38f53cd471bc3acaa84bc5ecbfdc` and compares the production CPU `uint8` `encode_pixels()` path against

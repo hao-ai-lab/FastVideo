@@ -85,7 +85,7 @@ def _installed_transformers_interpolation_reference(
 
     get_reference = getattr(vision_utils, "get_vision_interpolation_indices_and_weights", None)
     if get_reference is None:
-        pytest.skip("the public interpolation helper requires Transformers 5.15 or newer")
+        pytest.fail("transformers>=5.15 must provide get_vision_interpolation_indices_and_weights", pytrace=False)
     indices, weights = get_reference(grid_thw,
                                      num_grid_per_side=48,
                                      mode="bilinear",
@@ -109,7 +109,7 @@ def test_position_interpolation_matches_transformers_5_15_contract(grid_thw: tor
 
 @pytest.mark.parametrize("grid_thw", _GRID_CASES)
 def test_transformers_5_15_contract_matches_installed_helper(grid_thw: torch.Tensor) -> None:
-    """Cross-check the self-contained contract when the newer public helper is installed."""
+    """Cross-check the self-contained contract against the installed public helper."""
     torch.manual_seed(1733)
     position_embedding = torch.randn(48 * 48, 32, dtype=torch.bfloat16)
 
