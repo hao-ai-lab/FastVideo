@@ -49,6 +49,8 @@ logger = logging.getLogger("infinite_livestream.sink")
 
 _RESTART_COOLDOWN_S = 2.0
 _MAX_CONSECUTIVE_FAILURES = 5
+_PROCESS_EXIT_TIMEOUT_S = 2.0
+_WRITER_EXIT_TIMEOUT_S = 2.0
 
 # Writer-queue depth. Not latency -- the pacer governs the rate -- only
 # headroom for the seconds x264 spends starting up. Video gets more because a
@@ -143,13 +145,25 @@ class _PipeWriter(threading.Thread):
             if pipe is None or self.broken.is_set():
                 continue  # ffmpeg is down; discard until it is restarted
             try:
-                pipe.write(payload)
+                # Unbuffered pipes can return a short write. Every byte must
+                # reach ffmpeg or its raw frame/sample boundaries shift.
+                remaining = memoryview(payload)
+                while remaining:
+                    written = pipe.write(remaining)
+                    if not written:
+                        raise BrokenPipeError("ffmpeg input pipe stopped accepting data")
+                    remaining = remaining[written:]
             except (BrokenPipeError, OSError, ValueError):
                 # ValueError: write to a closed file during a restart race.
-                self.broken.set()
+                with self._lock:
+                    if self.pipe is pipe:
+                        self.broken.set()
 
     def close(self) -> None:
-        self.queue.put(None)
+        # No producer runs during shutdown. Discard queued media so the
+        # sentinel never waits for a writer blocked inside pipe.write().
+        self.flush()
+        self.queue.put_nowait(None)
 
 
 class HlsSink:
@@ -168,7 +182,7 @@ class HlsSink:
         self._video: VideoFormat | None = None
         self._audio: AudioFormat | None = None
         self._process: subprocess.Popen[bytes] | None = None
-        self._audio_write_fd: int | None = None
+        self._audio_pipe: IO[bytes] | None = None
         self._video_writer: _PipeWriter | None = None
         self._audio_writer: _PipeWriter | None = None
         self._stderr_tail: collections.deque[str] = collections.deque(maxlen=40)
@@ -351,6 +365,7 @@ class HlsSink:
                                              stdin=subprocess.PIPE,
                                              stdout=subprocess.DEVNULL,
                                              stderr=subprocess.PIPE,
+                                             bufsize=0,
                                              pass_fds=(audio_read_fd, ))
         except Exception:
             os.close(audio_write_fd)
@@ -358,8 +373,8 @@ class HlsSink:
         finally:
             os.close(audio_read_fd)  # the child inherited its own copy
 
-        self._audio_write_fd = audio_write_fd
         audio_pipe = os.fdopen(audio_write_fd, "wb", buffering=0)
+        self._audio_pipe = audio_pipe
         assert self._video_writer and self._audio_writer
         # Whatever each queue still held belonged to the dead ffmpeg, and the
         # two held different amounts; carrying it over starts the new one out
@@ -380,10 +395,11 @@ class HlsSink:
 
     def _drain_stderr(self, process: subprocess.Popen[bytes]) -> None:
         assert process.stderr is not None
-        for raw in process.stderr:
-            line = raw.decode(errors="replace").rstrip()
-            if line:
-                self._stderr_tail.append(line)
+        with process.stderr:
+            for raw in process.stderr:
+                line = raw.decode(errors="replace").rstrip()
+                if line:
+                    self._stderr_tail.append(line)
 
     # ----------------------------------------------------------- restarting
 
@@ -418,15 +434,29 @@ class HlsSink:
 
     def _teardown_process(self) -> None:
         process, self._process = self._process, None
+        audio_pipe, self._audio_pipe = self._audio_pipe, None
         if process is None:
             return
-        if process.stdin:
-            with contextlib.suppress(Exception):
-                process.stdin.close()
-        # The fdopen() wrapper owns the fd; just make sure it cannot leak.
-        self._audio_write_fd = None
-        with contextlib.suppress(Exception):
+        # Stop the reader before closing its inputs: a buffered close used
+        # to wait behind a blocked write while ffmpeg was still alive.
+        with contextlib.suppress(ProcessLookupError):
             process.terminate()
+        # Close the unbuffered inputs now so an encoder waiting for data can
+        # observe EOF and finish. These wrappers have no buffered-write lock;
+        # keeping them also prevents a delayed write from reusing a closed fd.
+        for pipe in (process.stdin, audio_pipe):
+            if pipe is not None:
+                with contextlib.suppress(OSError):
+                    pipe.close()
+        try:
+            process.wait(timeout=_PROCESS_EXIT_TIMEOUT_S)
+        except subprocess.TimeoutExpired:
+            with contextlib.suppress(ProcessLookupError):
+                process.kill()
+            try:
+                process.wait(timeout=_PROCESS_EXIT_TIMEOUT_S)
+            except subprocess.TimeoutExpired:
+                logger.error("[sink] ffmpeg did not exit after SIGKILL")
 
     # ------------------------------------------------------------- delivery
 
@@ -501,5 +531,10 @@ class HlsSink:
         for writer in (self._video_writer, self._audio_writer):
             if writer:
                 writer.close()
-        self._teardown_process()
+        await asyncio.to_thread(self._teardown_process)
+        for writer in (self._video_writer, self._audio_writer):
+            if writer is not None and writer.ident is not None:
+                await asyncio.to_thread(writer.join, _WRITER_EXIT_TIMEOUT_S)
+                if writer.is_alive():
+                    logger.warning("[sink] %s did not stop within the shutdown timeout", writer.name)
         logger.info("[sink] stopped after %d frames", self._frames_sent)

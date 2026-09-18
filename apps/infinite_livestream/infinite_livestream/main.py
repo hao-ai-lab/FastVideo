@@ -130,14 +130,18 @@ async def serve(config: Config) -> None:
     try:
         done, _pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         for task in done:
-            if task.exception() is not None:
-                logger.error("task %s died: %s", task.get_name(), task.exception())
+            if task.cancelled():
+                continue
+            error = task.exception()
+            if error is not None:
+                logger.error("task %s died: %s", task.get_name(), error)
+                raise error
     finally:
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
         await sink.stop()
-        logger.info("shut down cleanly")
+        logger.info("services stopped")
 
 
 def cli() -> None:

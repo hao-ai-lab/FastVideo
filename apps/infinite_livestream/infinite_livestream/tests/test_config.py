@@ -9,6 +9,9 @@ the YAML, secrets come from the environment, and neither leaks into the other.
 from __future__ import annotations
 
 import json
+from pathlib import Path
+import subprocess
+import sys
 import textwrap
 
 import pytest
@@ -139,10 +142,15 @@ def test_the_playlist_default_is_not_the_working_directory(tmp_path, monkeypatch
     monkeypatch.setenv("LIVESTREAM_WEIGHTS_PATH", str(tmp_path))
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
-    import importlib
-
-    from infinite_livestream import config as config_module
-    importlib.reload(config_module)
-    hls_dir = config_module.Config.load(["--config", str(config_file)]).hls_dir
+    # This default is read at import time. A subprocess avoids replacing the
+    # parent's config classes or leaving its default tied to this fixture.
+    result = subprocess.run(
+        [sys.executable, "-c", "from infinite_livestream.config import Config; print(Config.load().hls_dir)",
+         "--config", str(config_file)],
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    hls_dir = result.stdout.strip()
     assert hls_dir.startswith(str(tmp_path / "state")), hls_dir
-    importlib.reload(config_module)
