@@ -1,14 +1,3 @@
-# CompactH3 (42-block 20B NVFP4) on one RTX PRO 6000 Blackwell (sm_120, 96 GB).
-# Packed NVFP4 DiT + NVFP4 encoder + Comfy int8-convrot VAE. 96 GB holds the
-# encoder, DiT, and VAE resident, so sequential ping-pong stays off.
-# Enable VAE compile; leave inference_torch_compile off (custom ops).
-# Playground /v1/videos uses default_request. 832x480 124 frames is the
-# clip-queue path; 1344x768 is the quality default below. CompactH3 is dense.
-#
-# Assemble ./CompactH3 first (see the MiniMax H3 cookbook CompactH3 recipe).
-# Native 16:9 sizes include 832x480 and 1344x768. Legal H3 frame counts are
-# 17n+5, max 362 (15.08 s).
-#
 #   FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_INFER FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 \
 #     FLASHINFER_CUDA_ARCH_LIST=12.0a \
 #     fastvideo serve --config examples/serving/openai_compacth3_rtx_pro6000.yaml

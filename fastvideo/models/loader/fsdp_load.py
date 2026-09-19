@@ -225,8 +225,6 @@ def maybe_load_fsdp_model(
         load_minimax_h3_nvfp4_dit_export,
         nvfp4_linear_weight_param_names,
     )
-    # Always drop the packed export from the dense shard list so ``::`` keys are
-    # never treated as bf16 parameters. Overlay it only for the H3 DiT profile.
     packed_candidate = find_minimax_h3_nvfp4_dit_export(weight_dir_list)
     weight_dir_list = dense_transformer_safetensors(weight_dir_list)
     quant_config = getattr(init_params.get("config"), "quant_config", None)
@@ -296,11 +294,6 @@ def maybe_load_fsdp_model(
                     fsdp_shard_conditions=model._fsdp_shard_conditions,
                     pin_cpu_memory=pin_cpu_memory)
 
-    # Host offload is already disabled on unified memory (GB10). Staging the
-    # 35B FastH3 DiT on CPU and then copying to CUDA doubled that working set
-    # and took minutes. Follow cpu_offload: read onto the accelerator.
-    # Packed NVFP4H3 DiT exports still read the remaining dense shards on CPU
-    # so the 32 GB GEMMs never land on a 32 GB card before they are skipped.
     nvfp4_skip_param_names: set[str] = set()
     if packed_nvfp4_export is not None:
         nvfp4_skip_param_names = nvfp4_linear_weight_param_names(model)
@@ -321,9 +314,6 @@ def maybe_load_fsdp_model(
         strength=lora_strength,
     )
     if dense_lora_patch is not None:
-        # H3's compression gate is created only by the VSA attention backend. Loading a
-        # VSA student under dense attention would otherwise warn about 50 unmatched
-        # replacements and continue with a silently incomplete model.
         model_parameter_names = {name for name, _ in model.named_parameters()}
         missing_vsa_gates = sorted(name for name in dense_lora_patch.replacement_parameters
                                    if "gate_compress" in name and name not in model_parameter_names)
