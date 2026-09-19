@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-"""CPU tests for the packed MiniMax-H3 DiT NVFP4 export overlay."""
 
 from __future__ import annotations
 

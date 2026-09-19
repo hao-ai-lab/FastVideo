@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-"""CPU contracts for the MiniMax-H3 Comfy int8-convrot VAE overlay."""
 
 from __future__ import annotations
 

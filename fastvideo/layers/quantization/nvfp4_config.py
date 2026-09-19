@@ -96,7 +96,6 @@ def is_ltx2_nvfp4_linear_prefix(prefix: str) -> bool:
 
 
 def is_minimax_h3_nvfp4_linear_prefix(prefix: str) -> bool:
-    """Return whether *prefix* is a main MiniMax-H3 transformer-block FFN linear."""
     return _MINIMAX_H3_NVFP4_FF_PREFIX.search(prefix) is not None
 
 
@@ -630,9 +629,8 @@ def load_minimax_h3_nvfp4_dit_export(
     """Load a packed NVFP4H3 DiT export onto already-tagged NVFP4 linears.
 
     Keys are ``<module>::<buffer>`` with the four buffers
-    ``convert_model_to_nvfp4`` registers. The bf16 ``weight`` is dropped so a
-    32 GB card never materializes the dense GEMMs. Every export prefix must
-    match an NVFP4 linear, and every NVFP4 linear must appear in the export.
+    ``convert_model_to_nvfp4`` registers. Every export prefix must match an
+    NVFP4 linear, and every NVFP4 linear must appear in the export.
     """
     from safetensors import safe_open
 
