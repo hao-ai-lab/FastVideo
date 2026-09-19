@@ -1,13 +1,3 @@
-# CompactH3 (42-block 20B NVFP4) on one RTX 5090 (sm_120, 32 GB).
-# Packed ``transformer/nvfp4_weights.safetensors`` plus
-# ``engine.quantization.layer_profile: h3_dit``. Full decode uses the Comfy
-# int8-convrot VAE when ``vae/minimax_h3_video_vae_int8_convrot.safetensors``
-# sits beside the dense VAE shards.
-#
-# Assemble ./CompactH3 first (see the MiniMax H3 cookbook CompactH3 recipe).
-# Sequential load parks the encoder in pinned host RAM; do not enable
-# lazy_module_load. Legal H3 frame counts are 17n+5, max 362 (15.08 s).
-#
 #   FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_INFER FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 \
 #     FLASHINFER_CUDA_ARCH_LIST=12.0a FASTVIDEO_STAGE_LOGGING=1 \
 #     fastvideo generate --config examples/inference/basic/basic_compacth3_rtx5090.yaml
