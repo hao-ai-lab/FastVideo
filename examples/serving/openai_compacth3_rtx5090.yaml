@@ -1,13 +1,15 @@
-# OpenAI-compatible FastH3 server for one RTX 5090 (sm_120).
-# Packed NVFP4 DiT + NVFP4 encoder + Comfy int8-convrot VAE (quality decode).
-# lazy_module_load is off so DiT/VAE stay resident; sequential load keeps the
-# encoder in host RAM. TAEH3 live preview: openai_fasth3_5090_nvfp4_taeh3.yaml
+# CompactH3 (42-block 20B NVFP4) on one RTX 5090 (sm_120, 32 GB).
+# Packed NVFP4 DiT + NVFP4 encoder + Comfy int8-convrot VAE.
+# 32 GB cannot co-reside the encoder and DiT; sequential load parks the
+# encoder in pinned host RAM between phases. Do not enable lazy_module_load.
+#
+# Assemble ./CompactH3 first (see the MiniMax H3 cookbook CompactH3 recipe).
 #
 #   FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_INFER FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 \
 #     FLASHINFER_CUDA_ARCH_LIST=12.0a \
-#     fastvideo serve --config examples/serving/openai_fasth3_5090_nvfp4.yaml
+#     fastvideo serve --config examples/serving/openai_compacth3_rtx5090.yaml
 generator:
-  model_path: /workspace/models/fasth3-42-live
+  model_path: ./CompactH3
   engine:
     num_gpus: 1
     use_fsdp_inference: false
@@ -40,8 +42,8 @@ generator:
 server:
   host: 127.0.0.1
   port: 8000
-  output_dir: outputs/openai_fasth3_5090_nvfp4
-  served_model_name: fasth3
+  output_dir: outputs/openai_compacth3_rtx5090
+  served_model_name: compacth3
 
 default_request:
   negative_prompt: ""

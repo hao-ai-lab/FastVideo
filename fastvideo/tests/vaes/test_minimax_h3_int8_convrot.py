@@ -11,6 +11,7 @@ from safetensors.torch import save_file
 
 from fastvideo.models.vaes.minimax_h3_int8_convrot import (
     Int8ConvRotLinear,
+    _int8_linear_from_tensors,
     dense_vae_safetensors,
     overlay_minimax_h3_int8_convrot_decoder,
     parse_comfy_quant_marker,
@@ -42,6 +43,19 @@ def test_int8_gemm_scales_in_float32_not_fp16() -> None:
     assert torch.isinf(overflowed).all()
     assert torch.isfinite(scaled).all()
     torch.testing.assert_close(scaled, acc.float() * x_scale.float() * weight_scale.t().float())
+
+
+def test_int8_linear_rejects_incompatible_convrot_group() -> None:
+    marker = {"format": "int8_tensorwise", "convrot": True, "convrot_groupsize": 256}
+    weight = torch.ones(8, 8, dtype=torch.int8)
+    scale = torch.ones(8, 1)
+    try:
+        _int8_linear_from_tensors(weight, scale, None, marker)
+    except ValueError as error:
+        assert "group_size 256" in str(error)
+        assert "in_features 8" in str(error)
+    else:
+        raise AssertionError("incompatible ConvRot overlay must be rejected")
 
 
 def test_int8_linear_matches_dequantized_matmul() -> None:
