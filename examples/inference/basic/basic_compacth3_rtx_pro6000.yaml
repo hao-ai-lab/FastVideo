@@ -5,9 +5,12 @@
 # sits beside the dense VAE shards.
 #
 # Assemble ./CompactH3 first (see the MiniMax H3 cookbook CompactH3 recipe).
-# 96 GB keeps the encoder, DiT, and VAE resident. request.sampling is an
-# example: native 16:9 sizes include 832x480 and 1344x768. Legal H3 frame
-# counts are 17n+5, max 362 (15.08 s).
+# 96 GB keeps the encoder, DiT, and VAE resident. VAE compile is the measured
+# decode win on this card; do not wrap the DiT with inference_torch_compile
+# (FlashInfer / Sage3 custom ops). request.sampling is an example: native
+# 16:9 sizes include 832x480 (faster clip-queue) and 1344x768. Legal H3
+# frame counts are 17n+5, max 362 (15.08 s). CompactH3 is dense; do not
+# enable VIDEO_SPARSE_ATTN_H3 until a VSA-trained student exists.
 #
 #   FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_INFER FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 \
 #     FLASHINFER_CUDA_ARCH_LIST=12.0a FASTVIDEO_STAGE_LOGGING=1 \
@@ -32,7 +35,7 @@ generator:
       lazy_module_load: false
     compile:
       enabled: false
-      vae_enabled: false
+      vae_enabled: true
   pipeline:
     experimental:
       attention_backend: ATTN_QAT_INFER
