@@ -16,12 +16,52 @@ if(NOT GPU_BACKEND)
     set(GPU_BACKEND "CUDA")
 endif()
 
-if(GPU_BACKEND STREQUAL "ROCM")
-    enable_language(HIP)
+# The compiled extension (fastvideo_kernel_ops, plus fp4attn/fp4quant on Blackwell)
+# needs a CUDA or HIP toolchain. The Python modules and the Triton kernels do not,
+# and on ROCm they are the whole sparse-attention path. AUTO builds the extension
+# when the toolchain configures; on ROCm it falls back to a Python + Triton package
+# when it does not (the rocm/pytorch images install ROCm as a pip SDK that carries
+# hipcc but no hip-lang CMake package, so enable_language(HIP) cannot succeed
+# there). ON fails the configure instead of falling back; OFF never builds it.
+if(NOT DEFINED FASTVIDEO_KERNEL_BUILD_EXTENSION AND DEFINED ENV{FASTVIDEO_KERNEL_BUILD_EXTENSION})
+    set(FASTVIDEO_KERNEL_BUILD_EXTENSION "$ENV{FASTVIDEO_KERNEL_BUILD_EXTENSION}")
+endif()
+set(FASTVIDEO_KERNEL_BUILD_EXTENSION "AUTO" CACHE STRING "Build the compiled extension: AUTO/ON/OFF")
+set_property(CACHE FASTVIDEO_KERNEL_BUILD_EXTENSION PROPERTY STRINGS AUTO ON OFF)
+
+set(BUILD_CXX_KERNELS ON)
+if(FASTVIDEO_KERNEL_BUILD_EXTENSION STREQUAL "OFF")
+    set(BUILD_CXX_KERNELS OFF)
+elseif(GPU_BACKEND STREQUAL "ROCM")
+    include(CheckLanguage)
+    check_language(HIP)
+    if(CMAKE_HIP_COMPILER)
+        enable_language(HIP)
+    elseif(FASTVIDEO_KERNEL_BUILD_EXTENSION STREQUAL "ON")
+        message(FATAL_ERROR
+            "fastvideo-kernel: FASTVIDEO_KERNEL_BUILD_EXTENSION=ON, but CMake found no usable HIP "
+            "toolchain (it needs the hip-lang CMake package under ROCM_PATH or CMAKE_HIP_COMPILER). "
+            "Install the ROCm CMake packages, or build the Python + Triton package with "
+            "FASTVIDEO_KERNEL_BUILD_EXTENSION=OFF (build.sh --rocm --python-only).")
+    else()
+        message(STATUS
+            "fastvideo-kernel: no usable HIP toolchain; building the Python + Triton package "
+            "without the compiled extension (FASTVIDEO_KERNEL_BUILD_EXTENSION=AUTO)")
+        set(BUILD_CXX_KERNELS OFF)
+    endif()
 else()
     enable_language(CUDA)
     # Ensure CUDA toolkit targets (CUDA::cudart, CUDA::cuda_driver, etc.) are available.
     find_package(CUDAToolkit REQUIRED)
+endif()
+
+if(NOT BUILD_CXX_KERNELS)
+    message(STATUS "============== fastvideo-kernel build summary ==============")
+    message(STATUS "host / backend:       ${CMAKE_SYSTEM_PROCESSOR} / ${GPU_BACKEND}")
+    message(STATUS "fastvideo_kernel_ops: OFF (Python + Triton package only; FASTVIDEO_KERNEL_BUILD_EXTENSION=${FASTVIDEO_KERNEL_BUILD_EXTENSION})")
+    message(STATUS "Triton fallbacks ship in python/fastvideo_kernel/triton_kernels regardless.")
+    message(STATUS "============================================================")
+    return()
 endif()
 
 # Import common utils if needed, but we keep it simple for now
@@ -307,8 +347,7 @@ else()
     endif()
 endif()
 
-# Always try to build the extension if CUDA is available, but conditionally add sources/flags
-set(BUILD_CXX_KERNELS ON)
+# The extension is built whenever we reach this point (see FASTVIDEO_KERNEL_BUILD_EXTENSION above).
 
 # ---------------------------------------------------------------------------
 # Per-arch split for the Blackwell FP4 (attn_qat_infer) build

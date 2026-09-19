@@ -5,9 +5,11 @@ set -ex
 # Usage:
 #   ./build.sh  # local build (torch-based arch detection, TK only on SM90)
 #   ./build.sh --wheel-dir /tmp/wheels  # build + install a reusable wheel
+#   ./build.sh --rocm --python-only     # Python + Triton package, no compiled extension
 # Environment overrides (if set, they win over auto-detection):
 #   TORCH_CUDA_ARCH_LIST
-#   CMAKE_ARGS (for FASTVIDEO_KERNEL_BUILD_TK / CMAKE_CUDA_ARCHITECTURES / GPU_BACKEND)
+#   CMAKE_ARGS (for FASTVIDEO_KERNEL_BUILD_TK / CMAKE_CUDA_ARCHITECTURES / GPU_BACKEND /
+#               FASTVIDEO_KERNEL_BUILD_EXTENSION)
 
 echo "Building fastvideo-kernel..."
 
@@ -53,7 +55,9 @@ fi
 # always-built turbodiffusion sources, so it is a hard error; ThunderKittens
 # only feeds the TK-gated Hopper kernels, so a missing tree just warns (the
 # TK gate resolves later, and non-SM90/ROCm builds never touch it).
-if [ ! -d include/cutlass/include ]; then
+if [[ " $* " == *" --python-only "* ]]; then
+    : # no compiled sources are built, so the vendored headers are not needed
+elif [ ! -d include/cutlass/include ]; then
     echo "ERROR: include/cutlass/include is missing. Outside a git checkout the" >&2
     echo "       CUTLASS sources must already be present (run" >&2
     echo "       'git submodule update --init --recursive include/cutlass include/tk'" >&2
@@ -70,10 +74,18 @@ uv pip install scikit-build-core cmake ninja
 
 GPU_BACKEND=CUDA
 WHEEL_DIR=""
+PYTHON_ONLY=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --rocm)
             GPU_BACKEND=ROCM
+            shift
+            ;;
+        --python-only)
+            # Skip the compiled extension: the Python modules and Triton kernels are
+            # all the ROCm sparse-attention path needs, and images that install
+            # ROCm as a pip SDK carry no hip-lang CMake package to build against.
+            PYTHON_ONLY=1
             shift
             ;;
         --wheel-dir)
@@ -113,7 +125,11 @@ mj, mn = torch.cuda.get_device_capability(0)
 print(f'{mj}.{mn}')"
 }
 
-if [ "${GPU_BACKEND}" = "CUDA" ]; then
+if (( PYTHON_ONLY )) && ! has_cmake_arg "FASTVIDEO_KERNEL_BUILD_EXTENSION"; then
+    CMAKE_ARGS="${CMAKE_ARGS:-} -DFASTVIDEO_KERNEL_BUILD_EXTENSION=OFF"
+fi
+
+if [ "${GPU_BACKEND}" = "CUDA" ] && ! (( PYTHON_ONLY )); then
     # Compute capability drives the arch/TK defaults below. Prefer an explicit
     # TORCH_CUDA_ARCH_LIST (works on GPU-less build machines such as CI/Docker);
     # only probe a live GPU via torch when no arch was provided.
