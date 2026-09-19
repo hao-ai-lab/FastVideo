@@ -8,8 +8,9 @@ explicitly so downstream callers don't conflate it with other FP4
 variants that may land later (e.g. AMD's MX-FP4 or vendor-neutral
 e3m0).
 
-The registered config targets the curated LTX-2 deployment set and the
-main MiniMax-H3 transformer-block FFN linears.
+The registered config targets the curated LTX-2 deployment set, the
+main MiniMax-H3 transformer-block FFN linears, and the packed MiniMax-H3
+DiT export (``layer_profile="h3_dit"``) covering attention plus FFN.
 
 `flashinfer` is imported lazily inside the call paths that need it.
 This keeps ``import fastvideo`` cheap on hosts where flashinfer is
@@ -19,6 +20,7 @@ use time, with a clear error.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from typing import Any
 
@@ -76,6 +78,16 @@ _LTX2_NVFP4_LINEAR_PREFIXES = frozenset(f"ltx2.blocks.{block_idx}.{suffix}" for 
                                         for suffix in _LTX2_NVFP4_BLOCK_LINEAR_SUFFIXES) | frozenset(
                                             ("ltx2.adaln_single.linear", ))
 _MINIMAX_H3_NVFP4_FF_PREFIX = re.compile(r"(?:^|\.)transformer_blocks\.\d+\.ff\.(?:fc_in|fc_out)$")
+_MINIMAX_H3_NVFP4_DIT_PREFIX = re.compile(
+    r"(?:^|\.)transformer_blocks\.\d+\.(?:attn\.to_(?:q|k|v|out)|ff\.(?:fc_in|fc_out))$")
+H3_NVFP4_DIT_EXPORT_FILENAME = "nvfp4_weights.safetensors"
+H3_NVFP4_DIT_KEY_SEP = "::"
+H3_NVFP4_DIT_BUFFER_NAMES = (
+    "_nvfp4_weight",
+    "_nvfp4_weight_scale",
+    "_nvfp4_alpha",
+    "_weight_global_sf",
+)
 
 
 def is_ltx2_nvfp4_linear_prefix(prefix: str) -> bool:
@@ -86,6 +98,42 @@ def is_ltx2_nvfp4_linear_prefix(prefix: str) -> bool:
 def is_minimax_h3_nvfp4_linear_prefix(prefix: str) -> bool:
     """Return whether *prefix* is a main MiniMax-H3 transformer-block FFN linear."""
     return _MINIMAX_H3_NVFP4_FF_PREFIX.search(prefix) is not None
+
+
+def is_minimax_h3_nvfp4_dit_linear_prefix(prefix: str) -> bool:
+    """Return whether *prefix* is a MiniMax-H3 DiT attention or FFN linear.
+
+    This is the packed NVFP4H3 export set: ``attn.to_{q,k,v,out}`` and
+    ``ff.{fc_in,fc_out}`` in each main transformer block. Token-refiner,
+    AdaLN, and embedding linears stay dense.
+    """
+    return _MINIMAX_H3_NVFP4_DIT_PREFIX.search(prefix) is not None
+
+
+def is_minimax_h3_nvfp4_dit_export_path(path: str) -> bool:
+    """Return whether *path* is the packed MiniMax-H3 DiT NVFP4 export file."""
+    return os.path.basename(path) == H3_NVFP4_DIT_EXPORT_FILENAME
+
+
+def find_minimax_h3_nvfp4_dit_export(weight_paths: list[str]) -> str | None:
+    """Locate ``nvfp4_weights.safetensors`` next to a transformer shard list."""
+    seen: list[str] = []
+    for path in weight_paths:
+        if is_minimax_h3_nvfp4_dit_export_path(path) and os.path.isfile(path):
+            return path
+        directory = path if os.path.isdir(path) else os.path.dirname(path)
+        if directory and directory not in seen:
+            seen.append(directory)
+    for directory in seen:
+        candidate = os.path.join(directory, H3_NVFP4_DIT_EXPORT_FILENAME)
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+def dense_transformer_safetensors(weight_paths: list[str]) -> list[str]:
+    """Drop the packed NVFP4 DiT export so it is not loaded as bf16 weights."""
+    return [path for path in weight_paths if not is_minimax_h3_nvfp4_dit_export_path(path)]
 
 
 def _is_ltx2_refine_only_prefix(prefix: str) -> bool:
@@ -431,14 +479,19 @@ class NVFP4Config(QuantizationConfig):
 
     NVFP4 is NVIDIA's block-scaled FP4 (e2m1 mantissa, fp32 alpha,
     ``layout_128x4`` scale layout, group size 16). LTX-2 uses its curated
-    attention and FFN deployment set. MiniMax-H3 uses only ``fc_in`` and
-    ``fc_out`` in each main transformer-block FFN.
+    attention and FFN deployment set. MiniMax-H3's default profile uses only
+    ``fc_in`` and ``fc_out`` in each main transformer-block FFN.
+    ``layer_profile="h3_dit"`` expands that to the packed NVFP4H3 DiT set
+    (attention ``to_{q,k,v,out}`` plus those FFN linears).
     """
 
     def __init__(self, layer_profile: str = "refine", retain_original_weights: bool | None = None):
         super().__init__()
-        # ``base``: stage-1 set (no attn2.to_out, no cross-modal AV
-        # projections). ``refine``: full stage-2 set.
+        if layer_profile not in ("base", "refine", "h3_dit"):
+            raise ValueError("NVFP4Config.layer_profile must be one of 'base', 'refine', or 'h3_dit', "
+                             f"got {layer_profile!r}")
+        # ``base`` / ``refine``: LTX-2 stage-1 vs stage-2 layer sets.
+        # ``h3_dit``: packed MiniMax-H3 attention+FFN export.
         self.layer_profile = layer_profile
         # Original bf16 ``layer.weight`` retention after FP4 conversion.
         # Default (None/False): purge the purgeable originals -- every
@@ -473,10 +526,16 @@ class NVFP4Config(QuantizationConfig):
     def get_quant_method(self, layer: torch.nn.Module, prefix: str):
         from fastvideo.layers.linear import LinearBase
 
+        if not isinstance(layer, LinearBase):
+            return None
         # LTX-2 switches its active subset by stage at runtime. MiniMax-H3
-        # uses the fixed main-transformer FFN set selected by its prefix.
-        if isinstance(layer, LinearBase) and (is_ltx2_nvfp4_linear_prefix(prefix)
-                                              or is_minimax_h3_nvfp4_linear_prefix(prefix)):
+        # uses the fixed main-transformer FFN set unless ``h3_dit`` selects
+        # the packed attention+FFN export.
+        if self.layer_profile == "h3_dit":
+            tagged = is_minimax_h3_nvfp4_dit_linear_prefix(prefix)
+        else:
+            tagged = is_ltx2_nvfp4_linear_prefix(prefix) or is_minimax_h3_nvfp4_linear_prefix(prefix)
+        if tagged:
             method = NVFP4QuantizeMethod(layer_prefix=prefix)
             method._retain_original_weights = self.retain_original_weights
             return method
@@ -553,10 +612,92 @@ def convert_model_to_nvfp4(model: torch.nn.Module) -> None:
         )
 
 
+def nvfp4_linear_weight_param_names(model: torch.nn.Module) -> set[str]:
+    """State-dict names of ``weight`` on layers tagged with ``NVFP4QuantizeMethod``."""
+    names: set[str] = set()
+    for module_name, module in model.named_modules():
+        if isinstance(getattr(module, "quant_method", None), NVFP4QuantizeMethod):
+            names.add(f"{module_name}.weight" if module_name else "weight")
+    return names
+
+
+def _module_by_nvfp4_export_prefix(modules: dict[str, torch.nn.Module], prefix: str) -> torch.nn.Module | None:
+    module = modules.get(prefix)
+    if module is not None:
+        return module
+    if prefix.startswith("minimax_h3."):
+        return modules.get(prefix[len("minimax_h3."):])
+    return modules.get(f"minimax_h3.{prefix}")
+
+
+def load_minimax_h3_nvfp4_dit_export(
+    model: torch.nn.Module,
+    path: str,
+    device: torch.device | str,
+) -> int:
+    """Load a packed NVFP4H3 DiT export onto already-tagged NVFP4 linears.
+
+    Keys are ``<module>::<buffer>`` with the four buffers
+    ``convert_model_to_nvfp4`` registers. The bf16 ``weight`` is dropped so a
+    32 GB card never materializes the dense GEMMs. Every export prefix must
+    match an NVFP4 linear, and every NVFP4 linear must appear in the export.
+    """
+    from safetensors import safe_open
+
+    modules = dict(model.named_modules())
+    tagged = {
+        name
+        for name, module in modules.items() if isinstance(getattr(module, "quant_method", None), NVFP4QuantizeMethod)
+    }
+    groups: dict[str, dict[str, str]] = {}
+    with safe_open(path, framework="pt", device="cpu") as reader:
+        for key in reader.keys():  # noqa: SIM118
+            if H3_NVFP4_DIT_KEY_SEP not in key:
+                raise ValueError(f"MiniMax-H3 NVFP4 DiT export key {key!r} is missing {H3_NVFP4_DIT_KEY_SEP!r}")
+            prefix, buffer_name = key.split(H3_NVFP4_DIT_KEY_SEP, 1)
+            groups.setdefault(prefix, {})[buffer_name] = key
+
+        loaded_names: set[str] = set()
+        for prefix, buffers in groups.items():
+            missing_buffers = [name for name in H3_NVFP4_DIT_BUFFER_NAMES if name not in buffers]
+            if missing_buffers:
+                raise ValueError(f"MiniMax-H3 NVFP4 DiT export layer {prefix!r} is missing {missing_buffers}")
+            extra_buffers = sorted(set(buffers) - set(H3_NVFP4_DIT_BUFFER_NAMES))
+            if extra_buffers:
+                raise ValueError(f"MiniMax-H3 NVFP4 DiT export layer {prefix!r} has unknown buffers {extra_buffers}")
+            module = _module_by_nvfp4_export_prefix(modules, prefix)
+            if module is None:
+                raise ValueError(f"MiniMax-H3 NVFP4 DiT export layer {prefix!r} is not in the model")
+            if not isinstance(getattr(module, "quant_method", None), NVFP4QuantizeMethod):
+                raise RuntimeError("MiniMax-H3 NVFP4 DiT export layer "
+                                   f"{prefix!r} is not an NVFP4 linear; set NVFP4Config(layer_profile='h3_dit')")
+            for buffer_name in H3_NVFP4_DIT_BUFFER_NAMES:
+                tensor = reader.get_tensor(buffers[buffer_name]).to(device=device)
+                module.register_buffer(buffer_name, tensor, persistent=False)
+            module.register_parameter("weight", None)
+            loaded_names.add(next(name for name, candidate in modules.items() if candidate is module))
+
+    missing_layers = tagged - loaded_names
+    extra_layers = loaded_names - tagged
+    if missing_layers or extra_layers:
+        raise RuntimeError("MiniMax-H3 NVFP4 DiT export does not cover the tagged linear set; "
+                           f"missing={sorted(missing_layers)[:8]} extra={sorted(extra_layers)[:8]}")
+    logger.info("Loaded MiniMax-H3 NVFP4 DiT export: %d linears from %s", len(loaded_names), path)
+    return len(loaded_names)
+
+
 __all__ = [
+    "H3_NVFP4_DIT_BUFFER_NAMES",
+    "H3_NVFP4_DIT_EXPORT_FILENAME",
     "NVFP4Config",
     "NVFP4QuantizeMethod",
     "convert_model_to_nvfp4",
+    "dense_transformer_safetensors",
+    "find_minimax_h3_nvfp4_dit_export",
     "is_ltx2_nvfp4_linear_prefix",
+    "is_minimax_h3_nvfp4_dit_export_path",
+    "is_minimax_h3_nvfp4_dit_linear_prefix",
     "is_minimax_h3_nvfp4_linear_prefix",
+    "load_minimax_h3_nvfp4_dit_export",
+    "nvfp4_linear_weight_param_names",
 ]

@@ -1,0 +1,58 @@
+# OpenAI-compatible FastH3 server for one RTX 5090 (sm_120).
+# Packed NVFP4 DiT + NVFP4 encoder + Comfy int8-convrot VAE (quality decode).
+# lazy_module_load is off so DiT/VAE stay resident; sequential load keeps the
+# encoder in host RAM. TAEH3 live preview: openai_fasth3_5090_nvfp4_taeh3.yaml
+#
+#   FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_INFER FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 \
+#     FLASHINFER_CUDA_ARCH_LIST=12.0a \
+#     fastvideo serve --config examples/serving/openai_fasth3_5090_nvfp4.yaml
+generator:
+  model_path: /workspace/models/fasth3-42-live
+  engine:
+    num_gpus: 1
+    use_fsdp_inference: false
+    quantization:
+      transformer_quant: NVFP4
+      layer_profile: h3_dit
+    parallelism:
+      tp_size: 1
+      sp_size: 1
+    offload:
+      dit: false
+      dit_layerwise: false
+      text_encoder: true
+      image_encoder: true
+      vae: false
+      pin_cpu_memory: true
+      lazy_module_load: false
+    compile:
+      enabled: false
+      vae_enabled: false
+  pipeline:
+    workload_type: t2v
+    experimental:
+      attention_backend: ATTN_QAT_INFER
+      h3_sequential_load: true
+      inference_torch_compile: false
+      vae_parallel_decode: false
+      video_decode_backend: h3-vae
+
+server:
+  host: 127.0.0.1
+  port: 8000
+  output_dir: outputs/openai_fasth3_5090_nvfp4
+  served_model_name: fasth3
+
+default_request:
+  negative_prompt: ""
+  sampling:
+    height: 480
+    width: 832
+    num_frames: 124
+    fps: 24
+    num_inference_steps: 5
+    guidance_scale: 1.0
+    batch_cfg: false
+    seed: 2026
+  output:
+    return_frames: false

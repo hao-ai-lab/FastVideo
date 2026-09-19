@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import torch
+from torch.distributed.tensor import DTensor
 
 from fastvideo.configs.models.vaes.minimax_h3_audio import MiniMaxH3AudioVAEArchConfig
 from fastvideo.configs.models.vaes.minimax_h3_video import MiniMaxH3VideoVAEArchConfig
@@ -36,6 +37,15 @@ logger = init_logger(__name__)
 # then load DiT + VAEs. Keeping them resident together OOMs unified-memory
 # boxes (GB10 / Spark) even though host offload is correctly disabled there.
 _DENOISE_MODULE_NAMES = ("vae", "audio_vae", "transformer")
+
+
+def _module_has_dtensor_params(module: Any) -> bool:
+    """FSDP2 shards stay put; packed NVFP4 params are ordinary tensors and can ping-pong."""
+    parameters = getattr(module, "parameters", None)
+    if not callable(parameters):
+        return False
+    first = next(parameters(), None)
+    return first is not None and isinstance(first, DTensor)
 
 
 @dataclass(frozen=True)
@@ -278,24 +288,47 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
         finally:
             self._required_config_modules = saved
 
+    def _unified_memory_host(self) -> bool:
+        from fastvideo.pipelines import composed_pipeline_base
+        from fastvideo.platforms import current_platform
+
+        device = composed_pipeline_base.get_local_torch_device()
+        device_id = 0 if device.index is None else int(device.index)
+        return bool(current_platform.has_unified_memory(device_id))
+
     def _release_text_encoder(self) -> None:
-        stage = self._stage_name_mapping.get("conditioning_stage")
-        if stage is not None:
-            stage.conditioner = None
-        encoder = self.modules.pop("text_encoder", None)
+        encoder = self.get_module("text_encoder")
         if encoder is None:
             return
-        logger.info("Released MiniMax-H3 text encoder after conditioning")
-        del encoder
+        # Unified-memory boxes cannot keep Qwen around even on "CPU". Discrete
+        # GPUs can: pin it in host RAM and borrow the GPU only for encode.
+        if self._unified_memory_host():
+            stage = self._stage_name_mapping.get("conditioning_stage")
+            if stage is not None:
+                stage.conditioner = None
+            self.modules.pop("text_encoder", None)
+            logger.info("Released MiniMax-H3 text encoder after conditioning")
+            del encoder
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            return
+        if not self._move_module(encoder, "cpu"):
+            return
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+        logger.info("Moved MiniMax-H3 text encoder to CPU after conditioning")
 
     def _ensure_text_encoder(self, fastvideo_args: FastVideoArgs) -> None:
-        """Reload Qwen3-VL after `_release_text_encoder` so a later request can encode."""
+        """Reload or GPU-restore Qwen3-VL so a later request can encode."""
         encoder = self.get_module("text_encoder")
         stage = self._stage_name_mapping.get("conditioning_stage")
         if encoder is not None:
+            if not self._unified_memory_host():
+                from fastvideo.pipelines import composed_pipeline_base
+
+                self._move_module(encoder, composed_pipeline_base.get_local_torch_device())
             if stage is not None and getattr(stage, "conditioner", None) is None:
                 stage.conditioner = encoder
             return
@@ -312,11 +345,50 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
         if stage is not None:
             stage.conditioner = self.get_module("text_encoder")
 
+    def _move_module(self, module: Any, device: str | torch.device) -> bool:
+        # MiniMaxH3ConditioningStage already refuses .to() on DTensor; default
+        # sequential Qwen is FSDP2-sharded. Packed NVFP4 skips that wrap.
+        if _module_has_dtensor_params(module):
+            return False
+        module.to(device)
+        return True
+
+    def _park_denoise_modules(self) -> None:
+        """Free the GPU so the NVFP4 encoder can encode without sitting on the DiT."""
+        parked = False
+        for name in _DENOISE_MODULE_NAMES:
+            module = self.get_module(name)
+            if module is None:
+                continue
+            if self._move_module(module, "cpu"):
+                parked = True
+        if parked:
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            logger.info("Parked MiniMax-H3 denoise modules on CPU for text encode")
+
+    def _restore_denoise_modules(self) -> None:
+        from fastvideo.pipelines import composed_pipeline_base
+
+        device = composed_pipeline_base.get_local_torch_device()
+        restored = False
+        for name in _DENOISE_MODULE_NAMES:
+            module = self.get_module(name)
+            if module is None:
+                continue
+            if self._move_module(module, device):
+                restored = True
+        if restored:
+            logger.info("Restored MiniMax-H3 denoise modules to %s", device)
+
     def _run_condition_then_denoise(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         for name in ("input_preparation_stage", "conditioning_stage"):
             batch = self._stage_name_mapping[name](batch, fastvideo_args)
         self._release_text_encoder()
         self._load_denoise_modules(fastvideo_args)
+        if not self._unified_memory_host():
+            self._restore_denoise_modules()
         if not self._denoise_stages_ready:
             self._add_denoise_stages(ref2va=self._ref2va)
         for name in (
@@ -418,6 +490,8 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
         # when neither deferral flag was on.
         if self._defer_denoise_modules(fastvideo_args):
             try:
+                if not self._unified_memory_host():
+                    self._park_denoise_modules()
                 self._ensure_text_encoder(fastvideo_args)
                 if self._denoise_stages_ready:
                     logger.info("Running MiniMax-H3 condition stages before denoise (subsequent request)")

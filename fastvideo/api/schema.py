@@ -76,6 +76,9 @@ class CompileConfig:
 class QuantizationConfig:
     text_encoder_quant: str | None = None
     transformer_quant: str | None = None
+    # Forwarded onto ``NVFP4Config`` when ``transformer_quant`` is ``NVFP4``.
+    # ``h3_dit`` selects the packed MiniMax-H3 attention+FFN export.
+    layer_profile: str | None = None
 
 
 @dataclass

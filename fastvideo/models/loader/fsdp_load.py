@@ -80,6 +80,11 @@ def _maybe_quantize_model(model: nn.Module, *, defer_weight_conversion_until_lor
     for mod in model.modules():
         qm = getattr(mod, "quant_method", None)
         if isinstance(qm, NVFP4QuantizeMethod):
+            if any(
+                    getattr(module, "_nvfp4_weight", None) is not None for module in model.modules()
+                    if isinstance(getattr(module, "quant_method", None), NVFP4QuantizeMethod)):
+                logger.info("NVFP4 packed export already populated; skipping runtime weight conversion")
+                return
             if defer_weight_conversion_until_lora_merge:
                 logger.info("Deferring NVFP4 weight conversion until the inference LoRA merge completes")
                 return
@@ -214,6 +219,22 @@ def maybe_load_fsdp_model(
     """
     _validate_fsdp_inference_quantization(init_params, fsdp_inference)
 
+    from fastvideo.layers.quantization.nvfp4_config import (
+        dense_transformer_safetensors,
+        find_minimax_h3_nvfp4_dit_export,
+        load_minimax_h3_nvfp4_dit_export,
+        nvfp4_linear_weight_param_names,
+    )
+    # Always drop the packed export from the dense shard list so ``::`` keys are
+    # never treated as bf16 parameters. Overlay it only for the H3 DiT profile.
+    packed_candidate = find_minimax_h3_nvfp4_dit_export(weight_dir_list)
+    weight_dir_list = dense_transformer_safetensors(weight_dir_list)
+    quant_config = getattr(init_params.get("config"), "quant_config", None)
+    packed_nvfp4_export = packed_candidate if getattr(quant_config, "layer_profile", None) == "h3_dit" else None
+    if packed_nvfp4_export is not None and lora_path is not None:
+        raise ValueError("Packed MiniMax-H3 NVFP4 DiT export cannot be combined with lora_path; "
+                         "merge the adapter before exporting, or load without the packed file.")
+
     # NOTE(will): cast_forward_inputs=True shouldn't be needed as we are
     # manually casting the inputs to the model
     mp_policy = MixedPrecisionPolicy(param_dtype, reduce_dtype, output_dtype, cast_forward_inputs=False)
@@ -278,8 +299,21 @@ def maybe_load_fsdp_model(
     # Host offload is already disabled on unified memory (GB10). Staging the
     # 35B FastH3 DiT on CPU and then copying to CUDA doubled that working set
     # and took minutes. Follow cpu_offload: read onto the accelerator.
-    weight_iterator = safetensors_weights_iterator(weight_dir_list, to_cpu=cpu_offload)
-    logger.info("Loading transformer weights with to_cpu=%s", cpu_offload)
+    # Packed NVFP4H3 DiT exports still read the remaining dense shards on CPU
+    # so the 32 GB GEMMs never land on a 32 GB card before they are skipped.
+    nvfp4_skip_param_names: set[str] = set()
+    if packed_nvfp4_export is not None:
+        nvfp4_skip_param_names = nvfp4_linear_weight_param_names(model)
+        if not nvfp4_skip_param_names:
+            logger.warning(
+                "Found %s next to the transformer shards but no NVFP4 linears; "
+                "ignoring the packed export. Set NVFP4Config(layer_profile='h3_dit').",
+                packed_nvfp4_export,
+            )
+            packed_nvfp4_export = None
+    load_weights_to_cpu = cpu_offload or packed_nvfp4_export is not None
+    weight_iterator = safetensors_weights_iterator(weight_dir_list, to_cpu=load_weights_to_cpu)
+    logger.info("Loading transformer weights with to_cpu=%s", load_weights_to_cpu)
     param_names_mapping_fn = get_param_names_mapping(model.param_names_mapping)
     dense_lora_patch = DenseLoRAPatch.from_adapter(
         lora_path,
@@ -307,7 +341,10 @@ def maybe_load_fsdp_model(
         cpu_offload=cpu_offload,
         param_names_mapping=param_names_mapping_fn,
         dense_lora_patch=dense_lora_patch,
+        skip_param_names=nvfp4_skip_param_names or None,
     )
+    if packed_nvfp4_export is not None:
+        load_minimax_h3_nvfp4_dit_export(model, packed_nvfp4_export, device=device)
     if hasattr(model, "materialize_non_persistent_buffers"):
         model.materialize_non_persistent_buffers(device=device, dtype=default_dtype)
     for n, p in chain(model.named_parameters(), model.named_buffers()):
@@ -585,6 +622,12 @@ def shard_model(
     fully_shard(model, **root_kwargs)
 
 
+def _drop_state_dict_parameter(model: nn.Module, param_name: str) -> None:
+    module_name, _, attr_name = param_name.rpartition(".")
+    module = model.get_submodule(module_name) if module_name else model
+    module.register_parameter(attr_name, None)
+
+
 # TODO(PY): device mesh for cfg parallel
 def load_model_from_full_model_state_dict(
     model: FSDPModule | torch.nn.Module,
@@ -596,6 +639,7 @@ def load_model_from_full_model_state_dict(
     param_names_mapping: Callable[[str], tuple[str, Any, Any]] | None = None,
     training_mode: bool = True,
     dense_lora_patch: DenseLoRAPatch | None = None,
+    skip_param_names: set[str] | None = None,
 ) -> _IncompatibleKeys:
     """
     Converting full state dict into a sharded state dict
@@ -634,6 +678,11 @@ def load_model_from_full_model_state_dict(
     # set.
     for target_param_name in list(custom_param_sd):
         full_tensor = custom_param_sd.pop(target_param_name)
+        if skip_param_names and target_param_name in skip_param_names:
+            continue
+        if "::" in target_param_name:
+            logger.warning("Skipping packed NVFP4 export key mixed into dense shards: %s", target_param_name)
+            continue
         meta_sharded_param = meta_sd.get(target_param_name)
         if meta_sharded_param is None:
             # Some checkpoints include extra entries that are not part of the
@@ -701,6 +750,13 @@ def load_model_from_full_model_state_dict(
 
     model.reverse_param_names_mapping = reverse_param_names_mapping
     unused_keys = set(meta_sd.keys()) - set(sharded_sd.keys())
+    skipped_unused = unused_keys & skip_param_names if skip_param_names else set()
+    for skipped_name in skipped_unused:
+        _drop_state_dict_parameter(model, skipped_name)
+    unused_keys -= skipped_unused
+    if skipped_unused:
+        logger.info("Deferred %d NVFP4 linear weights to the packed DiT export (%s)",
+                    len(skipped_unused), _summarize_param_names(skipped_unused))
     if unused_keys:
         # Say which of these the adapter is about to fill in. Reporting all of them as
         # "unloaded" was accurate when zero-init was the only outcome; with an adapter

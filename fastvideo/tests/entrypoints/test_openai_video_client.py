@@ -190,6 +190,7 @@ def test_playground_assets_and_config_do_not_generate(local_server):
         assert response.headers["X-Content-Type-Options"] == "nosniff"
         html = response.read().decode()
         assert "Generate video" in html
+        assert "Older clip" in html
         assert 'src="./playground.js"' in html
     for asset in ["playground.js", "playground.css"]:
         with urlopen(origin + "/playground/" + asset) as response:

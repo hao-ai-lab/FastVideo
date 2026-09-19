@@ -292,8 +292,18 @@ def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, An
         # typed surface accepts a string and does the wiring here so
         # downstream code can rely on a single source of truth.
         from fastvideo.layers.quantization import get_quantization_config
+        from fastvideo.layers.quantization.nvfp4_config import NVFP4Config
         _resolved_quant_cls = get_quantization_config(quantization.transformer_quant)
-        kwargs["transformer_quant"] = _resolved_quant_cls()
+        quant_instance = _resolved_quant_cls()
+        if quantization.layer_profile is not None:
+            if not isinstance(quant_instance, NVFP4Config):
+                raise ValueError("engine.quantization.layer_profile is only valid with transformer_quant NVFP4, "
+                                 f"got {type(quant_instance).__name__}")
+            quant_instance = NVFP4Config(
+                layer_profile=quantization.layer_profile,
+                retain_original_weights=quant_instance.retain_original_weights,
+            )
+        kwargs["transformer_quant"] = quant_instance
 
     components = normalized.pipeline.components
     if components.pipeline_config_path is not None:

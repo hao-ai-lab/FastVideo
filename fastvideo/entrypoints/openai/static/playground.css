@@ -81,6 +81,9 @@ pre { padding: 16px; font-size: 12px; background: var(--inset); border-radius: 8
 video { width: 100%; max-height: 420px; }
 #job-status, .error { margin-block-start: 16px; font-size: 14px; }
 .error { color: var(--error); overflow-wrap: anywhere; }
+.clip-nav { display: flex; flex-wrap: wrap; gap: 12px; margin-block-start: 16px; }
+.clip-nav[hidden] { display: none !important; }
+.clip-nav button { flex: 1 1 140px; }
 .result-actions { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; margin-block-start: 16px; font-size: 14px; }
 .job-id { color: var(--muted); font: 12px/1.5 ui-monospace, monospace; overflow-wrap: anywhere; margin-block-start: 12px; }
 .history { border-block-start: 1px solid var(--line); margin-block-start: 28px; padding-block-start: 20px; }
