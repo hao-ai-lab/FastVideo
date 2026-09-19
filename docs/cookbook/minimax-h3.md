@@ -5,7 +5,15 @@ hide:
 
 # MiniMax H3 recipes
 
-<div class="cookbook-shell cookbook-family-page" data-cookbook data-family="minimax_h3" data-default-recipe="fasth3-preview-cuda" data-recipes="../../assets/cookbook-recipes.json?v=13">
+FastH3 is two distilled MiniMax-H3 checkpoints. **V1** is the four-step
+launch. Some Hub repo names still say Preview. That name is historical. V1 is
+a full model, not a demo. **V2** is the eight-step checkpoint. More forwards
+is why V2 is the higher-quality FastH3. The V2 schedule contract is in
+[FastH3 distilled checkpoint schedules](../inference/fasth3-distilled.md).
+**CompactH3** is the 42-block 20B NVFP4 H3 checkpoint for one Blackwell GPU
+(RTX 5090 or RTX PRO 6000). The FastH3 V1 and V2 recipes are unchanged.
+
+<div class="cookbook-shell cookbook-family-page" data-cookbook data-family="minimax_h3" data-default-recipe="fasth3-preview-cuda" data-recipes="../../assets/cookbook-recipes.json?v=14">
   <header class="cookbook-family-header">
     <a class="cookbook-back-link" href="../"><span aria-hidden="true">←</span> All model families</a>
     <div class="cookbook-family-header__body">
@@ -15,8 +23,8 @@ hide:
       <div>
         <p class="cookbook-eyebrow">Primary focus · Inference</p>
         <h2>MiniMax H3 recipes</h2>
-        <p>Generate video and audio with H3. Run a server on CUDA, one DGX Spark, or Apple Silicon MLX to iterate on prompts, or call the pipeline directly from Python.</p>
-        <span class="cookbook-count" data-cookbook-count>9 maintained recipes</span>
+        <p>Generate video and audio with H3. Run a server on CUDA, one Blackwell GPU, one DGX Spark, or Apple Silicon MLX to iterate on prompts, or call the pipeline directly from Python.</p>
+        <span class="cookbook-count" data-cookbook-count>11 maintained recipes</span>
       </div>
     </div>
     <div class="cookbook-lifecycle" aria-label="Lifecycle stages">
@@ -41,7 +49,7 @@ hide:
     <h2 id="h3-modes-heading">Supported modes</h2>
     <p>
       CUDA covers T2VA, FL2VA, and Ref2VA on the full checkpoint, plus FastH3
-      V1 and FastH3 V2. FastH3 V1 also has a DGX Spark runtime with
+      V1 and FastH3 V2, plus CompactH3 NVFP4 on one Blackwell GPU. FastH3 V1 also has a DGX Spark runtime with
       a 1-Spark or 2-Spark device row. MLX is T2VA only: V1 and V2.
       Temporal <code>--fast</code>, spatial <code>--fast-spatial</code>, and opt-in VSA are flags on the same
       MLX script, not extra recipes.
@@ -58,7 +66,7 @@ hide:
         <tbody>
           <tr>
             <td>T2VA</td>
-            <td>Full H3, FastH3 V1, FastH3 LoRA, FastH3 V2</td>
+            <td>Full H3, FastH3 V1, FastH3 LoRA, FastH3 V2, CompactH3 NVFP4</td>
             <td>FastH3 V1 or FastH3 V2 after a local DiT conversion</td>
           </tr>
           <tr>
@@ -96,6 +104,11 @@ hide:
             <td>FastH3 V1 on one GB10, or two Sparks with Ray sequence parallel (<code>sp_size=2</code>) over QSFP RoCE. Select NVIDIA DGX Spark, then 1 Spark or 2 Sparks.</td>
             <td>Not wired</td>
           </tr>
+          <tr>
+            <td>CompactH3 NVFP4</td>
+            <td>42-block 20B checkpoint on one RTX 5090 (32 GB, sequential encoder offload) or one RTX PRO 6000 Blackwell (96 GB, encoder+DiT+VAE resident). SageAttention3 FP4, packed NVFP4 DiT, Comfy int8-convrot VAE.</td>
+            <td>Not wired</td>
+          </tr>
         </tbody>
       </table>
     </div>
@@ -104,7 +117,7 @@ hide:
   <section class="cookbook-builder" id="recipe-builder" aria-labelledby="builder-heading">
     <div class="cookbook-builder__intro">
       <h2 id="builder-heading">Pick an H3 recipe and runtime</h2>
-      <p>Choose the result you want, then use a maintained CUDA, DGX Spark, or MLX path.
+      <p>Choose the result you want, then use a maintained CUDA, Blackwell, DGX Spark, or MLX path.
       Device claims stay tied to checked-in sources and recorded runs.</p>
     </div>
 
@@ -269,7 +282,8 @@ cd FastVideo</code></pre>
         <li>The MLX source runtime supports T2VA, optional temporal <code>--fast</code>, optional spatial <code>--fast-spatial</code>, and opt-in VSA on <code>--include-vsa</code> checkpoints. FastH3 V2 MLX converts with <code>--include-vsa</code> and runs eight forwards. FL2VA, Ref2VA, and two-pass refinement are not wired.</li>
         <li>GPU count and VAE decode backend are configurable in the builder above for FastH3 CUDA recipes. Only the value shown by default has a recorded run; other supported values are unmeasured here.</li>
         <li>DGX Spark is a runtime on FastH3 V1, not a separate family card. Select NVIDIA DGX Spark, then 1 Spark or 2 Sparks. The CUDA GPU-count knob does not apply to Spark.</li>
-        <li>GB10 has no FA4 / sm_100a VSA kernel. Keep <code>FASTVIDEO_FA4=0</code> and <code>FASTVIDEO_VSA_SM100A=0</code>. Legal <code>num_frames</code> values are <code>17n+5</code>, capped at 362 (15.08 s). A 345-frame request on one Spark can OOM.</li>
+        <li>CompactH3 NVFP4 is one Blackwell GPU. RTX 5090 (32 GB) parks the encoder in pinned host RAM. RTX PRO 6000 Blackwell (96 GB) keeps encoder, DiT, and VAE resident. Keep <code>FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_INFER</code>, <code>FASTVIDEO_FA4=0</code>, <code>FASTVIDEO_VSA_SM100A=0</code>, and <code>FLASHINFER_CUDA_ARCH_LIST=12.0a</code>.</li>
+        <li>GB10 has no FA4 / sm_100a VSA kernel. Keep <code>FASTVIDEO_FA4=0</code> and <code>FASTVIDEO_VSA_SM100A=0</code>. Legal <code>num_frames</code> values are <code>17n+5</code>, capped at 362 (15.08 s). A 345-frame request on one Spark can OOM. Native 16:9 sizes include 832×480 and 1344×768.</li>
         <li>Gated or missing checkpoints: run <code>huggingface-cli login</code> and confirm you accepted the model's license on Hugging Face.</li>
       </ul>
   </div>
