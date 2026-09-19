@@ -160,6 +160,31 @@ def _build_vbs_mask_mod(kv_block_size: int):
     return _vbs_mask_mod
 
 
+@functools.lru_cache(maxsize=2)
+def _build_vbs_vector_mask_mod(kv_block_size: int):
+    """Pack one aligned SM100 KV128 fragment's validity into four masks."""
+    import cutlass
+    import cutlass.cute as cute
+    try:
+        from flash_attn.cute.mask import AttentionMask, r2p_bitmask_below
+    except ImportError:
+        return _build_vbs_mask_mod(kv_block_size)
+    if not hasattr(AttentionMask, "apply_mask_mod_sm100_vector"):
+        return _build_vbs_mask_mod(kv_block_size)
+
+    @cute.jit
+    def _vbs_vector_mask_mod(batch, head, m_idx, n_idx, seqlen_info, aux_tensors):
+        base = n_idx[0]
+        limit = aux_tensors[0][base // kv_block_size] - base % kv_block_size
+        packed = cute.make_rmem_tensor(4, cutlass.Uint32)
+        for word in cutlass.range_constexpr(4):
+            packed[word] = r2p_bitmask_below(limit, word)
+        return packed.load()
+
+    _vbs_vector_mask_mod.__vec_size__ = 128
+    return _vbs_vector_mask_mod
+
+
 def _build_sparse_tensors(
     block_map: torch.Tensor,
     variable_block_sizes: torch.Tensor,
@@ -322,6 +347,33 @@ def _cute_attention_q128(
     return out, lse
 
 
+
+class _CuteAttentionQ256Training(torch.autograd.Function):
+    """Use a vector forward mask while retaining FA4's scalar backward mask."""
+
+    @staticmethod
+    def forward(ctx, q, k, v, block_map, sizes):
+        from flash_attn.cute.interface import FlashAttnFunc
+
+        forward_sparse, backward_sparse = _build_sparse_tensors(
+            block_map, sizes, q_len=q.shape[1], q_block_size=256,
+            kv_block_size=256, need_backward=True,
+        )
+        result = FlashAttnFunc.forward(
+            ctx, q, k, v, mask_mod=_build_vbs_vector_mask_mod(256),
+            aux_tensors=[sizes], block_sparse_tensors=forward_sparse,
+            block_sparse_tensors_bwd=backward_sparse, return_lse=True,
+        )
+        ctx.mask_mod = _build_vbs_mask_mod(256)
+        return result
+
+    @staticmethod
+    def backward(ctx, dout, dlse):
+        from flash_attn.cute.interface import FlashAttnFunc
+
+        return (*FlashAttnFunc.backward(ctx, dout, dlse)[:3], None, None)
+
+
 def _cute_attention(
     q_bshd: torch.Tensor,
     k_bshd: torch.Tensor,
@@ -336,6 +388,11 @@ def _cute_attention(
     if q_block_size == kv_block_size == _FA4_Q_BLOCK_SIZE:
         return _cute_attention_q128(q_bshd, k_bshd, v_bshd, block_map, variable_block_sizes)
     need_backward = torch.is_grad_enabled() and any(t.requires_grad for t in (q_bshd, k_bshd, v_bshd))
+    if (need_backward and q_bshd.shape[1] == block_map.shape[2] * 256
+            and k_bshd.shape[1] == block_map.shape[3] * 256
+            and q_bshd.dtype == torch.bfloat16 and q_bshd.shape[-1] in (64, 128)
+            and torch.cuda.get_device_capability(q_bshd.device)[0] == 10):
+        return _CuteAttentionQ256Training.apply(q_bshd, k_bshd, v_bshd, block_map, variable_block_sizes)
     forward_sparse_tensors, backward_sparse_tensors = _build_sparse_tensors(
         block_map,
         variable_block_sizes,

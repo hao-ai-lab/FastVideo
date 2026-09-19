@@ -222,3 +222,76 @@ def test_vsa256_cute_lse_is_bhs() -> None:
         vbs,
     )
     assert lse_bshd.shape == (1, heads, sq), lse_bshd.shape
+
+
+@pytest.mark.parametrize("dim", [64, 128])
+def test_vsa256_vector_training_lse_and_graph(dim):
+    """Vector forward must retain scalar backward and differentiable LSE."""
+    from fastvideo_kernel import block_sparse_attn_cute_fwd as adapter
+    from flash_attn.cute.interface import flash_attn_func
+
+    if torch.cuda.get_device_capability()[0] != 10:
+        pytest.skip("SM100 vector training path")
+    if getattr(adapter._build_vbs_vector_mask_mod(256), "__vec_size__", None) != 128:
+        pytest.skip("FA4 vector masks unavailable")
+    torch.manual_seed(91 + dim)
+    q = torch.randn(1, 1024, 2, dim, device="cuda", dtype=torch.bfloat16, requires_grad=True)
+    k, v = [torch.randn(1, 1536, 2, dim, device="cuda", dtype=torch.bfloat16,
+                       requires_grad=True) for _ in range(2)]
+    sizes = torch.tensor([256, 131, 67, 0, 255, 32], device="cuda", dtype=torch.int32)
+    routes = torch.ones(1, 2, 4, 6, device="cuda", dtype=torch.bool)
+    routes[:, :, 0] = False
+    dout = torch.randn_like(q)
+    dlse = torch.randn(1, 2, 1024, device="cuda")
+    dlse[:, :, :256] = 0
+
+    def call(vector, lse_only=False):
+        if vector:
+            out, lse = adapter._cute_attention(q, k, v, routes, sizes)
+        else:
+            forward, backward = adapter._build_sparse_tensors(
+                routes, sizes, q_len=q.shape[1], q_block_size=256,
+                kv_block_size=256, need_backward=True)
+            out, lse = flash_attn_func(
+                q, k, v, mask_mod=adapter._build_vbs_mask_mod(256), aux_tensors=[sizes],
+                block_sparse_tensors=forward, block_sparse_tensors_bwd=backward, return_lse=True)
+        grads = (torch.autograd.grad(lse, (q, k, v), dlse) if lse_only else
+                 torch.autograd.grad((out, lse), (q, k, v), (dout, dlse)))
+        return out, lse, *grads
+
+    for lse_only in (False, True):
+        reference, actual = call(False, lse_only), call(True, lse_only)
+        for name, expected, got in zip(("dq", "dk", "dv"), reference[2:], actual[2:]):
+            _check(name, expected, got, _GRAD_TOL)
+    # Eager references retain AccumulateGrad nodes from the default stream.
+    # Capture uses fresh leaves and warms them on the capture stream.
+    q, k, v = (tensor.detach().requires_grad_(True) for tensor in (q, k, v))
+    stream = torch.cuda.Stream()
+    stream.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(stream):
+        for _ in range(3):
+            call(True)
+    stream.synchronize()
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph, stream=stream):
+        captured = call(True)
+    for iteration in range(12):
+        with torch.no_grad():
+            for tensor in (q, k, v, dout, dlse):
+                tensor.normal_()
+            dlse[:, :, :256] = 0
+            sizes[1] = 67 if iteration % 2 else 131
+            sizes[2] = 0 if iteration % 3 == 0 else 67
+            routes.copy_(torch.rand_like(routes, dtype=torch.float32) > .45)
+            routes[:, :, 0] = False
+            routes[:, :, 1:, 0] = True
+            for tensor in captured:
+                tensor.fill_(float("nan"))
+        reference = call(False)
+        graph.replay()
+        torch.cuda.synchronize()
+        finite = torch.isfinite(reference[1])
+        assert torch.equal(finite, torch.isfinite(captured[1]))
+        torch.testing.assert_close(reference[1][finite], captured[1][finite], atol=1e-5, rtol=1e-5)
+        for index, name in ((0, "out"), (2, "dq"), (3, "dk"), (4, "dv")):
+            _check(name, reference[index], captured[index], _GRAD_TOL)
