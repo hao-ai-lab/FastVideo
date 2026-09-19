@@ -271,13 +271,17 @@ def _cute_attention_q128_forward(
         need_backward=need_backward,
         force_q_sparse_block_size=_FA4_Q_BLOCK_SIZE,
     )
+    mask_mod = _build_vbs_mask_mod(_FA4_Q_BLOCK_SIZE)
+    if (need_backward and q_bshd.dtype == torch.bfloat16 and q_bshd.shape[-1] in (64, 128)
+            and torch.cuda.get_device_capability(q_bshd.device)[0] == 10):
+        mask_mod = _build_vbs_vector_mask_mod(_FA4_Q_BLOCK_SIZE)
     out, lse = flash_attn_fwd(
         q_bshd,
         k_bshd,
         v_bshd,
         tile_mn=(_FA4_Q_BLOCK_SIZE, _FA4_Q_BLOCK_SIZE),
         max_seqlen_q=_SingleQStageLength(q_bshd.shape[1]),
-        mask_mod=_build_vbs_mask_mod(_FA4_Q_BLOCK_SIZE),
+        mask_mod=mask_mod,
         block_sparse_tensors=forward_sparse_tensors,
         aux_tensors=[variable_block_sizes],
         causal=False,
@@ -345,7 +349,6 @@ def _cute_attention_q128(
         need_backward=False,
     )
     return out, lse
-
 
 
 class _CuteAttentionQ256Training(torch.autograd.Function):

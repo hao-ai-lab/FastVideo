@@ -37,7 +37,9 @@ def _dense_sparse_reference(q, k, v, block_map, variable_block_sizes):
     kv_valid = torch.arange(_BLOCK, device=k.device) < variable_block_sizes[:, None]
     token_mask = token_mask & kv_valid.reshape(1, 1, 1, -1)
     logits = torch.matmul(q.float(), k.float().transpose(-2, -1)) / math.sqrt(q.shape[-1])
-    probabilities = torch.softmax(logits.masked_fill(~token_mask, float("-inf")), dim=-1)
+    has_keys = token_mask.any(dim=-1, keepdim=True)
+    logits = logits.masked_fill(~token_mask, float("-inf"))
+    probabilities = torch.softmax(torch.where(has_keys, logits, 0.0), dim=-1) * has_keys
     return torch.matmul(probabilities, v.float()).to(q.dtype)
 
 
@@ -144,3 +146,58 @@ def test_vsa128_wrapper_forward_backward(backend: str, layout: str, monkeypatch)
         _check(name, reference.grad, candidate_grad, 2e-2, 0.5)
     actual_gate_grad = actual_gate.grad if layout == "bhsd" else bshd_gate.grad.transpose(1, 2)
     _check("dgate", reference_gate.grad, actual_gate_grad, 1e-3, 0.2)
+
+
+@pytest.mark.parametrize("dim", [64, 128])
+def test_vsa128_vector_training_graph(dim, monkeypatch):
+    """Changing independent routes/valid sizes cannot reuse stale mask or gradients."""
+    _select_backend(monkeypatch, "cute")
+    from fastvideo_kernel import block_sparse_attn_cute_fwd as adapter
+
+    if torch.cuda.get_device_capability()[0] != 10:
+        pytest.skip("SM100 vector training path")
+    if getattr(adapter._build_vbs_vector_mask_mod(128), "__vec_size__", None) != 128:
+        pytest.skip("FA4 vector masks unavailable")
+    torch.manual_seed(143 + dim)
+    q = torch.randn(1, 512, 2, dim, device="cuda", dtype=torch.bfloat16, requires_grad=True)
+    k, v = [torch.randn(1, 768, 2, dim, device="cuda", dtype=torch.bfloat16,
+                       requires_grad=True) for _ in range(2)]
+    sizes = torch.tensor([128, 67, 0, 128, 91, 37], device="cuda", dtype=torch.int32)
+    documents = torch.zeros(1, 2, 4, 6, device="cuda", dtype=torch.bool)
+    documents[:, :, :2, :3] = True
+    documents[:, :, 2:, 3:] = True
+    routes = documents.clone()
+    dout = torch.randn_like(q)
+
+    def call():
+        out, lse = adapter._cute_attention(q, k, v, routes, sizes)
+        assert not lse.requires_grad  # Preserve the existing Q128 auxiliary contract.
+        return out, *torch.autograd.grad(out, (q, k, v), dout)
+
+    stream = torch.cuda.Stream()
+    stream.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(stream):
+        for _ in range(3):
+            call()
+    stream.synchronize()
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph, stream=stream):
+        captured = call()
+    for iteration in range(12):
+        with torch.no_grad():
+            for tensor in (q, k, v, dout):
+                tensor.normal_()
+            sizes[1] = 67 + iteration
+            sizes[5] = 0 if iteration % 3 == 0 else 37
+            routes.copy_((torch.rand_like(routes, dtype=torch.float32) > .4) & documents)
+            routes[:, :, 0] = False
+            for tensor in captured:
+                tensor.fill_(float("nan"))
+        graph.replay()
+        torch.cuda.synchronize()
+        reference_inputs = [tensor.detach().requires_grad_(True) for tensor in (q, k, v)]
+        out = _dense_sparse_reference(*(tensor.transpose(1, 2) for tensor in reference_inputs),
+                                      routes, sizes).transpose(1, 2)
+        gradients = torch.autograd.grad(out, reference_inputs, dout)
+        for name, expected, actual in zip(("out", "dq", "dk", "dv"), (out, *gradients), captured):
+            _check(name, expected, actual, 1e-3, 0.5)
