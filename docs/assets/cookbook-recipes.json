@@ -1,5 +1,5 @@
 {
-  "version": 9,
+  "version": 10,
   "recipes": [
     {
       "id": "fastwan21-t2v",
@@ -576,6 +576,76 @@
       "limitations": [
         "Requires a two-node Ray cluster on the QSFP interconnect. There is no cookbook server for this path; use Python / generate.",
         "Height, width, frames, and steps in the YAML are examples. Edit them or pass CLI flags. See docs/getting_started/installation/spark_pair.md."
+      ]
+    },
+    {
+      "id": "compacth3-rtx5090",
+      "group": "compacth3-rtx5090",
+      "group_label": "CompactH3 on RTX 5090",
+      "group_task": "4-step 42-block text to video + audio",
+      "family": "minimax_h3",
+      "stage": "inference",
+      "task": "Few-step text to video (with audio)",
+      "label": "CompactH3 NVFP4 on RTX 5090",
+      "summary": "Run the 42-block CompactH3 NVFP4 DiT with the NVFP4 Qwen3-VL encoder, Comfy int8-convrot VAE, and SageAttention3 FP4 on one 32 GB RTX 5090. Sequential load parks the encoder in pinned host RAM.",
+      "model": "./CompactH3",
+      "source": "examples/inference/basic/basic_compacth3_rtx5090.yaml",
+      "serving": {
+        "source": "examples/serving/openai_compacth3_rtx5090.yaml",
+        "install": "UV_TORCH_BACKEND=cu128 uv pip install -e \".[fasth3]\"",
+        "prepare": "hf download FastVideo/FastVideo-FastH3-4-step-Preview-v1-VSA-DataFree --local-dir ./CompactH3 --include model_index.json --include \"tokenizer/**\" --include \"processor/**\" --include \"scheduler/**\" --include \"audio_scheduler/**\" --include \"audio_vae/**\" --include \"vae/**\"\nhf download aryan5v/FastH3-20B-42block-dmd2-ckpt1400-bf16 --local-dir ./CompactH3/transformer\nhf download aryan5v/FastH3-20B-42block-dmd2-ckpt1400-nvfp4 --local-dir ./CompactH3/transformer --include nvfp4_weights.safetensors\nhf download KyleNeverGivesUp/FastH3-text-encoder-nvfp4 --local-dir ./CompactH3/text_encoder\nhf download Comfy-Org/MiniMax-H3 --local-dir ./Comfy-MiniMax-H3 --include vae/minimax_h3_video_vae_int8_convrot.safetensors\ncp ./Comfy-MiniMax-H3/vae/minimax_h3_video_vae_int8_convrot.safetensors ./CompactH3/vae/",
+        "env": "FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_INFER FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 FLASHINFER_CUDA_ARCH_LIST=12.0a"
+      },
+      "command": "FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_INFER FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 FLASHINFER_CUDA_ARCH_LIST=12.0a FASTVIDEO_STAGE_LOGGING=1 fastvideo generate --config examples/inference/basic/basic_compacth3_rtx5090.yaml",
+      "gpu_types": ["NVIDIA"],
+      "hardware": {
+        "platform": "cuda",
+        "gpu_count": 1,
+        "evidence": "source-configured"
+      },
+      "evidence": "Source-backed",
+      "expected_artifact": "MP4 under outputs/compacth3_rtx5090/",
+      "modes": ["T2VA", "CompactH3 NVFP4", "RTX 5090"],
+      "limitations": [
+        "Assemble ./CompactH3 before running. The DiT NVFP4 export and encoder snapshot are gated; run huggingface-cli login and accept each repo license.",
+        "32 GB cannot keep the NVFP4 encoder and DiT on the GPU together. Keep h3_sequential_load on and lazy_module_load off.",
+        "Blackwell sm_120 needs ATTN_QAT_INFER, FLASHINFER_CUDA_ARCH_LIST=12.0a, and a CUDA 12.8 PyTorch wheel.",
+        "Legal num_frames values are 17n+5, capped at 362 (15.08 s). Native 16:9 sizes include 832x480 and 1344x768; 1344x768 on 32 GB is unmeasured."
+      ]
+    },
+    {
+      "id": "compacth3-rtx-pro6000",
+      "group": "compacth3-rtx-pro6000",
+      "group_label": "CompactH3 on RTX PRO 6000",
+      "group_task": "4-step 42-block text to video + audio",
+      "family": "minimax_h3",
+      "stage": "inference",
+      "task": "Few-step text to video (with audio)",
+      "label": "CompactH3 NVFP4 on RTX PRO 6000 Blackwell",
+      "summary": "Run CompactH3 NVFP4 with the encoder, DiT, and int8-convrot VAE resident on one 96 GB RTX PRO 6000 Blackwell. The checked-in example is 1344x768 and 124 frames (5.17 s).",
+      "model": "./CompactH3",
+      "source": "examples/inference/basic/basic_compacth3_rtx_pro6000.yaml",
+      "serving": {
+        "source": "examples/serving/openai_compacth3_rtx_pro6000.yaml",
+        "install": "UV_TORCH_BACKEND=cu128 uv pip install -e \".[fasth3]\"",
+        "prepare": "hf download FastVideo/FastVideo-FastH3-4-step-Preview-v1-VSA-DataFree --local-dir ./CompactH3 --include model_index.json --include \"tokenizer/**\" --include \"processor/**\" --include \"scheduler/**\" --include \"audio_scheduler/**\" --include \"audio_vae/**\" --include \"vae/**\"\nhf download aryan5v/FastH3-20B-42block-dmd2-ckpt1400-bf16 --local-dir ./CompactH3/transformer\nhf download aryan5v/FastH3-20B-42block-dmd2-ckpt1400-nvfp4 --local-dir ./CompactH3/transformer --include nvfp4_weights.safetensors\nhf download KyleNeverGivesUp/FastH3-text-encoder-nvfp4 --local-dir ./CompactH3/text_encoder\nhf download Comfy-Org/MiniMax-H3 --local-dir ./Comfy-MiniMax-H3 --include vae/minimax_h3_video_vae_int8_convrot.safetensors\ncp ./Comfy-MiniMax-H3/vae/minimax_h3_video_vae_int8_convrot.safetensors ./CompactH3/vae/",
+        "env": "FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_INFER FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 FLASHINFER_CUDA_ARCH_LIST=12.0a"
+      },
+      "command": "FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_INFER FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 FLASHINFER_CUDA_ARCH_LIST=12.0a FASTVIDEO_STAGE_LOGGING=1 fastvideo generate --config examples/inference/basic/basic_compacth3_rtx_pro6000.yaml",
+      "gpu_types": ["NVIDIA"],
+      "hardware": {
+        "platform": "cuda",
+        "gpu_count": 1,
+        "evidence": "source-configured"
+      },
+      "evidence": "Source-backed",
+      "expected_artifact": "MP4 under outputs/compacth3_rtx_pro6000/",
+      "modes": ["T2VA", "CompactH3 NVFP4", "RTX PRO 6000"],
+      "limitations": [
+        "Assemble ./CompactH3 before running. The DiT NVFP4 export and encoder snapshot are gated; run huggingface-cli login and accept each repo license.",
+        "96 GB keeps the encoder, DiT, and VAE on GPU. Do not enable h3_sequential_load or lazy_module_load on this box.",
+        "Blackwell sm_120 needs ATTN_QAT_INFER, FLASHINFER_CUDA_ARCH_LIST=12.0a, and a CUDA 12.8 PyTorch wheel.",
+        "Legal num_frames values are 17n+5, capped at 362 (15.08 s). Native 16:9 sizes include 832x480 and 1344x768."
       ]
     },
     {

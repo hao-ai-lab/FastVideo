@@ -1,17 +1,18 @@
-# FastH3 42-block NVFP4 DiT on one RTX 5090 (sm_120), 832x480 4-step.
+# CompactH3 (42-block 20B NVFP4) on one RTX 5090 (sm_120, 32 GB).
+# Packed ``transformer/nvfp4_weights.safetensors`` plus
+# ``engine.quantization.layer_profile: h3_dit``. Full decode uses the Comfy
+# int8-convrot VAE when ``vae/minimax_h3_video_vae_int8_convrot.safetensors``
+# sits beside the dense VAE shards.
 #
-# Requires the packed ``transformer/nvfp4_weights.safetensors`` export next to
-# the dense shards, and ``engine.quantization.layer_profile: h3_dit`` so the
-# loader overlays those buffers instead of materializing the 32 GB GEMMs.
-# Full decode uses the Comfy int8-convrot VAE when
-# ``vae/minimax_h3_video_vae_int8_convrot.safetensors`` sits beside the dense
-# shards. Live preview is ``video_decode_backend: taeh3`` on the serve config.
+# Assemble ./CompactH3 first (see the MiniMax H3 cookbook CompactH3 recipe).
+# Sequential load parks the encoder in pinned host RAM; do not enable
+# lazy_module_load. Legal H3 frame counts are 17n+5, max 362 (15.08 s).
 #
 #   FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_INFER FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 \
-#     FASTVIDEO_STAGE_LOGGING=1 \
-#     fastvideo generate --config examples/inference/basic/basic_fasth3_5090_nvfp4.yaml
+#     FLASHINFER_CUDA_ARCH_LIST=12.0a FASTVIDEO_STAGE_LOGGING=1 \
+#     fastvideo generate --config examples/inference/basic/basic_compacth3_rtx5090.yaml
 generator:
-  model_path: /workspace/models/fasth3-42-live
+  model_path: ./CompactH3
   engine:
     num_gpus: 1
     use_fsdp_inference: false
@@ -25,9 +26,9 @@ generator:
       dit: false
       dit_layerwise: false
       text_encoder: true
-      vae: true
+      vae: false
       pin_cpu_memory: true
-      lazy_module_load: true
+      lazy_module_load: false
     compile:
       enabled: false
       vae_enabled: false
@@ -37,6 +38,7 @@ generator:
       h3_sequential_load: true
       inference_torch_compile: false
       vae_parallel_decode: false
+      video_decode_backend: h3-vae
 request:
   prompt: >-
     A wide cinematic shot of an alpine meadow at sunrise, pale pink mountain
@@ -52,6 +54,6 @@ request:
     guidance_scale: 1.0
     batch_cfg: false
   output:
-    output_path: outputs/fasth3_5090_nvfp4/
+    output_path: outputs/compacth3_rtx5090/
     save_video: true
     return_frames: false

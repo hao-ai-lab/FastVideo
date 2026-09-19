@@ -96,6 +96,11 @@ class Int8ConvRotLinear(nn.Module):
         group_size: int,
     ) -> None:
         super().__init__()
+        if convrot and in_features % group_size != 0:
+            raise ValueError(
+                f"ConvRot weights were rotated with group_size {group_size}, "
+                f"but in_features {in_features} is not divisible by that group"
+            )
         self.in_features = in_features
         self.out_features = out_features
         self.convrot = convrot
@@ -163,7 +168,7 @@ def _int8_linear_from_tensors(
         weight.shape[1],
         weight.shape[0],
         bias=bias is not None,
-        convrot=convrot and weight.shape[1] % group_size == 0,
+        convrot=convrot,
         group_size=group_size,
     )
     layer.weight.copy_(weight)

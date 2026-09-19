@@ -207,6 +207,69 @@ def test_sequential_skips_host_offload_for_dtensor_params(monkeypatch) -> None:
     assert transformer.moved_to[-1] == torch.device("cpu")
 
 
+def test_sequential_skips_host_offload_when_dense_params_precede_dtensors(monkeypatch) -> None:
+    class _FakeDTensor:
+        pass
+
+    monkeypatch.setattr(
+        "fastvideo.pipelines.basic.minimax_h3.minimax_h3_pipeline.DTensor",
+        _FakeDTensor,
+    )
+    events: list = []
+    _patch_pipeline_construction(monkeypatch, events)
+    loads: list[list[str]] = []
+
+    def _mixed_stub(name: str) -> SimpleNamespace:
+        module = _stub_module(name)
+
+        def parameters():
+            yield torch.zeros(1)
+            yield _FakeDTensor()
+
+        module.parameters = parameters
+        return module
+
+    def fake_load(self, fastvideo_args, loaded_modules=None):
+        del fastvideo_args
+        requested = list(self.required_config_modules)
+        loads.append(requested)
+        modules = dict(loaded_modules or {})
+        for name in requested:
+            if name in modules:
+                continue
+            modules[name] = _mixed_stub(name) if name == "text_encoder" else _stub_module(name)
+        return modules
+
+    monkeypatch.setattr(ComposedPipelineBase, "load_modules", fake_load)
+    args = FastVideoArgs(
+        model_path="unused/for-this-test",
+        enable_stage_verification=False,
+        h3_sequential_load=True,
+    )
+    pipeline = MiniMaxH3Pipeline("unused/for-this-test", args)
+    pipeline.post_init()
+
+    passthrough = lambda batch, _args: batch
+    monkeypatch.setattr(pipeline._stage_name_mapping["input_preparation_stage"], "forward", passthrough)
+    monkeypatch.setattr(pipeline._stage_name_mapping["conditioning_stage"], "forward", passthrough)
+    original_add_denoise = pipeline._add_denoise_stages
+
+    def fake_add_denoise(*, ref2va: bool) -> None:
+        original_add_denoise(ref2va=ref2va)
+        for name in (
+                "latent_preparation_stage",
+                "denoising_stage",
+                "video_decoding_stage",
+                "audio_decoding_stage",
+        ):
+            monkeypatch.setattr(pipeline._stage_name_mapping[name], "forward", passthrough)
+
+    monkeypatch.setattr(pipeline, "_add_denoise_stages", fake_add_denoise)
+    encoder = pipeline.get_module("text_encoder")
+    pipeline.forward(ForwardBatch(data_type="video", prompt="alpine dancer"), args)
+    assert encoder.moved_to == []
+
+
 def test_unified_memory_sequential_deletes_encoder_and_reloads(monkeypatch) -> None:
     events: list = []
     _patch_pipeline_construction(monkeypatch, events, unified_memory=True)

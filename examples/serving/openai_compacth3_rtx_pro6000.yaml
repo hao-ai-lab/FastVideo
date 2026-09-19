@@ -1,12 +1,16 @@
-# OpenAI-compatible FastH3 server for one RTX PRO 6000 Blackwell (sm_120, 96 GB).
-# Packed NVFP4 DiT + NVFP4 encoder + Comfy int8-convrot VAE. 96 GB holds encoder,
-# DiT, and VAE together, so sequential ping-pong stays off.
+# CompactH3 (42-block 20B NVFP4) on one RTX PRO 6000 Blackwell (sm_120, 96 GB).
+# Packed NVFP4 DiT + NVFP4 encoder + Comfy int8-convrot VAE. 96 GB holds the
+# encoder, DiT, and VAE resident, so sequential ping-pong stays off.
+#
+# Assemble ./CompactH3 first (see the MiniMax H3 cookbook CompactH3 recipe).
+# default_request.sampling is an example. Native 16:9 sizes include 832x480
+# and 1344x768. Legal H3 frame counts are 17n+5, max 362 (15.08 s).
 #
 #   FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_INFER FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 \
 #     FLASHINFER_CUDA_ARCH_LIST=12.0a \
-#     fastvideo serve --config examples/serving/openai_fasth3_pro6000_nvfp4.yaml
+#     fastvideo serve --config examples/serving/openai_compacth3_rtx_pro6000.yaml
 generator:
-  model_path: /workspace/models/fasth3-42-live
+  model_path: ./CompactH3
   engine:
     num_gpus: 1
     use_fsdp_inference: false
@@ -39,14 +43,14 @@ generator:
 server:
   host: 127.0.0.1
   port: 8000
-  output_dir: outputs/openai_fasth3_pro6000_nvfp4
-  served_model_name: fasth3
+  output_dir: outputs/openai_compacth3_rtx_pro6000
+  served_model_name: compacth3
 
 default_request:
   negative_prompt: ""
   sampling:
-    height: 480
-    width: 832
+    height: 768
+    width: 1344
     num_frames: 124
     fps: 24
     num_inference_steps: 5

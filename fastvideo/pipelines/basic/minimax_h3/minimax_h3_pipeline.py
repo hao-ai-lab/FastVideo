@@ -44,8 +44,7 @@ def _module_has_dtensor_params(module: Any) -> bool:
     parameters = getattr(module, "parameters", None)
     if not callable(parameters):
         return False
-    first = next(parameters(), None)
-    return first is not None and isinstance(first, DTensor)
+    return any(isinstance(parameter, DTensor) for parameter in parameters())
 
 
 @dataclass(frozen=True)
