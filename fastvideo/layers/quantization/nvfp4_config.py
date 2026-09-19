@@ -111,12 +111,10 @@ def is_minimax_h3_nvfp4_dit_linear_prefix(prefix: str) -> bool:
 
 
 def is_minimax_h3_nvfp4_dit_export_path(path: str) -> bool:
-    """Return whether *path* is the packed MiniMax-H3 DiT NVFP4 export file."""
     return os.path.basename(path) == H3_NVFP4_DIT_EXPORT_FILENAME
 
 
 def find_minimax_h3_nvfp4_dit_export(weight_paths: list[str]) -> str | None:
-    """Locate ``nvfp4_weights.safetensors`` next to a transformer shard list."""
     seen: list[str] = []
     for path in weight_paths:
         if is_minimax_h3_nvfp4_dit_export_path(path) and os.path.isfile(path):
@@ -490,8 +488,6 @@ class NVFP4Config(QuantizationConfig):
         if layer_profile not in ("base", "refine", "h3_dit"):
             raise ValueError("NVFP4Config.layer_profile must be one of 'base', 'refine', or 'h3_dit', "
                              f"got {layer_profile!r}")
-        # ``base`` / ``refine``: LTX-2 stage-1 vs stage-2 layer sets.
-        # ``h3_dit``: packed MiniMax-H3 attention+FFN export.
         self.layer_profile = layer_profile
         # Original bf16 ``layer.weight`` retention after FP4 conversion.
         # Default (None/False): purge the purgeable originals -- every
@@ -528,9 +524,6 @@ class NVFP4Config(QuantizationConfig):
 
         if not isinstance(layer, LinearBase):
             return None
-        # LTX-2 switches its active subset by stage at runtime. MiniMax-H3
-        # uses the fixed main-transformer FFN set unless ``h3_dit`` selects
-        # the packed attention+FFN export.
         if self.layer_profile == "h3_dit":
             tagged = is_minimax_h3_nvfp4_dit_linear_prefix(prefix)
         else:
@@ -593,9 +586,8 @@ def convert_model_to_nvfp4(model: torch.nn.Module) -> None:
             if retain:
                 retained += 1
             elif isinstance(weight, DTensor):
-                # ponytail: purging FSDP-sharded originals needs per-shard
-                # resharding bookkeeping; skip until a sharded deploy needs it.
-                retained += 1
+                raise RuntimeError("NVFP4 cannot purge FSDP-sharded bf16 weights. Use a packed NVFP4 "
+                                   "export, or convert without FSDP sharding.")
             else:
                 purged_bytes += weight.numel() * weight.element_size()
                 purged += 1

@@ -320,7 +320,6 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
         logger.info("Moved MiniMax-H3 text encoder to CPU after conditioning")
 
     def _ensure_text_encoder(self, fastvideo_args: FastVideoArgs) -> None:
-        """Reload or GPU-restore Qwen3-VL so a later request can encode."""
         encoder = self.get_module("text_encoder")
         stage = self._stage_name_mapping.get("conditioning_stage")
         if encoder is not None:
