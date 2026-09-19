@@ -1,5 +1,5 @@
 {
-  "version": 10,
+  "version": 11,
   "recipes": [
     {
       "id": "fastwan21-t2v",
@@ -622,7 +622,7 @@
       "stage": "inference",
       "task": "Few-step text to video (with audio)",
       "label": "CompactH3 NVFP4 on RTX PRO 6000 Blackwell",
-      "summary": "Run CompactH3 NVFP4 with the encoder, DiT, and int8-convrot VAE resident on one 96 GB RTX PRO 6000 Blackwell. The checked-in example is 1344x768 and 124 frames (5.17 s).",
+      "summary": "Run CompactH3 NVFP4 with the encoder, DiT, and int8-convrot VAE resident on one 96 GB RTX PRO 6000 Blackwell. The checked-in example is 1344x768 and 124 frames (5.17 s) with VAE torch.compile. Use 832x480 for clip-queue playground traffic.",
       "model": "./CompactH3",
       "source": "examples/inference/basic/basic_compacth3_rtx_pro6000.yaml",
       "serving": {
@@ -644,8 +644,9 @@
       "limitations": [
         "Assemble ./CompactH3 before running. The DiT NVFP4 export and encoder snapshot are gated; run huggingface-cli login and accept each repo license.",
         "96 GB keeps the encoder, DiT, and VAE on GPU. Do not enable h3_sequential_load or lazy_module_load on this box.",
+        "Enable compile.vae_enabled. Leave inference_torch_compile off: FlashInfer and Sage3 custom ops cannot be compiled.",
         "Blackwell sm_120 needs ATTN_QAT_INFER, FLASHINFER_CUDA_ARCH_LIST=12.0a, and a CUDA 12.8 PyTorch wheel.",
-        "Legal num_frames values are 17n+5, capped at 362 (15.08 s). Native 16:9 sizes include 832x480 and 1344x768."
+        "Legal num_frames values are 17n+5, capped at 362 (15.08 s). Native 16:9 sizes include 832x480 and 1344x768. CompactH3 is dense; do not turn on VIDEO_SPARSE_ATTN_H3 until a VSA-trained student exists."
       ]
     },
     {
