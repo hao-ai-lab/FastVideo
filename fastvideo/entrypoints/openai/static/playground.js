@@ -6,11 +6,9 @@
   const active = (job) => ["queued", "in_progress"].includes(job.status);
   let model = "";
   let readyLabel = "Server ready";
-  let watching = null;
-  let jobs = [];
-  let pollTimer = 0;
+  let busy = false;
+  let currentJob = null;
   let pollVersion = 0;
-  let submitting = false;
 
   const api = async (path, options = {}) => {
     const response = await fetch(path, { ...options, signal: AbortSignal.timeout(15000) });
@@ -18,19 +16,10 @@
     if (!response.ok) throw new Error(body.error?.message || `Request failed (HTTP ${response.status}).`);
     return body;
   };
-  const jobPath = (id) => `/v1/videos/${encodeURIComponent(id)}`;
-  const syncGenerateButton = () => {
-    $("generate").disabled = !model || submitting;
-    $("generate").textContent = jobs.some(active) ? "Queue next clip ↗" : "Generate video ↗";
-  };
-  const watchingIndex = () => jobs.findIndex((job) => job.id === watching?.id);
-  const syncClipNav = () => {
-    const index = watchingIndex();
-    const show = jobs.length > 1 && index >= 0;
-    $("clip-nav").hidden = !show;
-    if (!show) return;
-    $("older-clip").disabled = index >= jobs.length - 1;
-    $("newer-clip").disabled = index <= 0;
+  const setBusy = (value) => {
+    busy = value;
+    $("generate").disabled = value || !model;
+    $("generate").textContent = value ? "Waiting for this job…" : "Generate video ↗";
   };
   const showError = (message = "") => {
     $("error").textContent = message;
@@ -47,172 +36,137 @@
     $("copy-curl").disabled = !model || !$("prompt").value.trim() || !$("seed").validity.valid;
     $("copy-status").textContent = "";
   };
-  const setVideoSource = (job) => {
-    const video = $("video");
-    const complete = job.status === "completed";
-    video.hidden = !complete;
-    $("empty-preview").hidden = complete;
-    $("download").hidden = !complete;
-    if (!complete) {
-      video.pause();
-      video.removeAttribute("src");
-      delete video.dataset.job;
-      $("empty-preview").querySelector("h3").textContent = job.status === "failed" ? "Generation failed" : "Your job is on the server";
-      $("empty-preview").querySelector("p").textContent = job.status === "failed"
-        ? "Read the error below before trying again."
-        : "Queue another prompt or open a finished clip from Recent jobs. This one keeps generating.";
-      return;
-    }
-    $("download").href = `${jobPath(job.id)}/content`;
-    $("download").download = `${job.id}.mp4`;
-    if (video.dataset.job !== job.id) {
-      video.src = `${jobPath(job.id)}/content`;
-      video.dataset.job = job.id;
-    }
-  };
-  const renderWatching = (job) => {
-    watching = job;
-    const url = new URL(location.href);
-    url.searchParams.set("job", job.id);
-    history.replaceState({}, "", url);
-    $("job-state").textContent = labels[job.status] || job.status;
-    $("job-state").dataset.status = job.status;
-    $("job-id").textContent = `Job ${job.id}`;
-    $("job-link").href = jobPath(job.id);
-    $("job-link").hidden = false;
-    setVideoSource(job);
-    if (job.status === "completed") {
-      $("job-status").textContent = "Playing this clip. Queue the next prompt without leaving it, or pick another job from Recent jobs.";
-    } else if (job.status === "queued") {
-      $("job-status").textContent = "Queued. The server runs one generation at a time. Finished clips stay playable while you wait.";
-    } else if (job.status === "failed") {
-      $("job-status").textContent = "The server could not complete this job.";
-    } else {
-      $("job-status").textContent = "Generating. Open any finished clip from Recent jobs; this job keeps running.";
-    }
-    if (job.status === "failed") showError(job.error?.message || "Check the server logs before submitting another job.");
-    syncClipNav();
-    for (const button of $("jobs").querySelectorAll("button[data-job-id]")) {
-      if (button.dataset.jobId === job.id) button.setAttribute("aria-current", "true");
-      else button.removeAttribute("aria-current");
-    }
-  };
-  const selectJob = (job) => {
-    showError();
-    renderWatching(job);
-  };
-  const renderHistory = () => {
-    $("jobs").replaceChildren();
-    jobs.forEach((job) => {
-      const item = document.createElement("li");
-      const button = document.createElement("button");
-      button.type = "button";
-      button.dataset.jobId = job.id;
-      if (job.id === watching?.id) button.setAttribute("aria-current", "true");
-      const prompt = document.createElement("span");
-      prompt.className = "job-prompt";
-      prompt.textContent = job.prompt || job.id;
-      const state = document.createElement("span");
-      state.className = "job-state";
-      state.textContent = labels[job.status] || job.status;
-      button.append(prompt, state);
-      button.addEventListener("click", () => selectJob(job));
-      item.append(button);
-      $("jobs").append(item);
-    });
-    const queued = jobs.filter((job) => job.status === "queued").length;
-    const running = jobs.some((job) => job.status === "in_progress");
-    if (!jobs.length) {
-      $("history-status").textContent = "No jobs yet. Submit a prompt to start.";
-    } else if (queued || running) {
-      $("history-status").textContent = running
-        ? `One clip generating${queued ? `, ${queued} queued` : ""}. Select any row to play or inspect it.`
-        : `${queued} clip${queued === 1 ? "" : "s"} queued. Select any row to play a finished clip.`;
-    } else {
-      $("history-status").textContent = "Select any clip to play it. The prompt box is left alone so you can queue the next one.";
-    }
-  };
-  const schedulePoll = () => {
-    clearTimeout(pollTimer);
-    if (!jobs.some(active)) return;
-    const version = ++pollVersion;
-    pollTimer = setTimeout(async () => {
-      if (version !== pollVersion) return;
-      try {
-        await refreshJobs();
-        $("connection").textContent = readyLabel;
-        $("check-status").hidden = true;
-      } catch (error) {
-        $("connection").textContent = "Job status unavailable · check the server";
-        showError(`${error.message} Select Check status to reconnect. A connection error does not cancel generation.`);
-        $("check-status").hidden = false;
-      }
-    }, 2000);
-  };
   const refreshJobs = async () => {
     $("refresh-jobs").disabled = true;
     try {
-      const result = await api("/v1/videos?limit=32&order=desc");
-      jobs = result.data;
-      const latestWatching = jobs.find((job) => job.id === watching?.id);
-      if (latestWatching) watching = latestWatching;
-      renderHistory();
-      if (latestWatching) renderWatching(latestWatching);
-      syncGenerateButton();
-      syncClipNav();
-      schedulePoll();
+      const result = await api("/v1/videos?limit=8&order=desc");
+      $("jobs").replaceChildren();
+      result.data.forEach((job) => {
+        const item = document.createElement("li");
+        const button = document.createElement("button");
+        button.type = "button";
+        button.setAttribute("aria-current", String(job.id === currentJob?.id));
+        const prompt = document.createElement("span");
+        prompt.className = "job-prompt";
+        prompt.textContent = job.prompt || job.id;
+        const state = document.createElement("span");
+        state.className = "job-state";
+        state.textContent = labels[job.status] || job.status;
+        button.append(prompt, state);
+        button.addEventListener("click", () => {
+          if (busy) {
+            showError("Wait for this job, or open another playground tab to inspect a different job.");
+            return;
+          }
+          $("prompt").value = job.prompt || "";
+          // Jobs do not report the seed; do not pair an old seed with this prompt.
+          $("seed").value = "";
+          updateCurl();
+          followJob(job.id);
+        });
+        item.append(button);
+        $("jobs").append(item);
+      });
+      $("history-status").textContent = result.data.length ? "Showing the latest jobs from this server." : "No jobs yet. Submit a prompt to start.";
     } catch (error) {
       $("history-status").textContent = `Could not load jobs. Check the server and select Refresh jobs. ${error.message}`;
-      throw error;
     } finally {
       $("refresh-jobs").disabled = false;
     }
   };
+  const renderJob = (job) => {
+    currentJob = job;
+    $("job-state").textContent = labels[job.status] || job.status;
+    $("job-state").dataset.status = job.status;
+    $("job-id").textContent = `Job ${job.id}`;
+    const path = `/v1/videos/${encodeURIComponent(job.id)}`;
+    $("job-link").href = path;
+    $("job-link").hidden = false;
+    const complete = job.status === "completed";
+    $("video").hidden = !complete;
+    $("empty-preview").hidden = complete;
+    $("download").hidden = !complete;
+    if (complete) {
+      $("video").src = `${path}/content`;
+      $("download").href = `${path}/content`;
+      $("download").download = `${job.id}.mp4`;
+      $("job-status").textContent = "Video ready. Change the prompt and generate again without restarting the server.";
+    } else {
+      $("video").pause();
+      $("video").removeAttribute("src");
+      $("empty-preview").querySelector("h3").textContent = job.status === "failed" ? "Generation failed" : "Your job is on the server";
+      $("empty-preview").querySelector("p").textContent = job.status === "failed" ? "Read the error below before trying again." : "You can keep editing the next prompt while you wait.";
+      $("job-status").textContent = job.status === "queued" ? "Queued. The server runs one generation at a time." : job.status === "failed" ? "The server could not complete this job." : "Generating video and audio. This page checks the job status automatically.";
+    }
+    if (job.status === "failed") showError(job.error?.message || "Check the server logs before submitting another job.");
+  };
+  const followJob = async (id) => {
+    const version = ++pollVersion;
+    const url = new URL(location.href);
+    url.searchParams.set("job", id);
+    history.replaceState({}, "", url);
+    showError();
+    setBusy(true);
+    $("check-status").hidden = true;
+    const deadline = Date.now() + 30 * 60 * 1000;
+    let restorePrompt = !$("prompt").value.trim();
+    try {
+      while (version === pollVersion) {
+        const job = await api(`/v1/videos/${encodeURIComponent(id)}`);
+        if (version !== pollVersion) return;
+        $("connection").textContent = readyLabel;
+        if (restorePrompt) {
+          $("prompt").value = job.prompt || "";
+          updateCurl();
+          restorePrompt = false;
+        }
+        renderJob(job);
+        if (!active(job)) break;
+        if (Date.now() >= deadline) throw new Error("Stopped checking after 30 minutes. The job may still be running.");
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+    } catch (error) {
+      if (version !== pollVersion) return;
+      $("connection").textContent = "Job status unavailable · check the server";
+      showError(`${error.message} Select Check status to reconnect. A connection error does not cancel generation. If the job is missing, the server may have restarted or the job was deleted.`);
+      $("check-status").hidden = false;
+    } finally {
+      if (version === pollVersion) {
+        setBusy(false);
+        await refreshJobs();
+      }
+    }
+  };
   $("generate-form").addEventListener("submit", async (event) => {
     event.preventDefault();
-    if (!model || submitting) return;
+    if (busy || !model) return;
     if (!$("prompt").value.trim()) {
       showError("Write a prompt before generating a video.");
       $("prompt").focus();
       return;
     }
     showError();
-    submitting = true;
-    syncGenerateButton();
-    const keepClip = watching?.status === "completed";
-    $("job-status").textContent = keepClip ? "Queuing the next clip…" : "Submitting the prompt…";
+    setBusy(true);
+    $("job-status").textContent = "Submitting the prompt…";
     try {
       const job = await api("/v1/videos", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload()),
       });
-      await refreshJobs();
-      if (keepClip) {
-        $("job-status").textContent = "Queued. This clip keeps playing while the server generates the next one.";
-      } else {
-        selectJob(job);
-      }
+      renderJob(job);
+      await followJob(job.id);
     } catch (error) {
       showError(`${error.message} Check Recent jobs before submitting again; the server may have received the prompt. Submissions are never retried automatically.`);
       $("job-status").textContent = "Could not confirm the submission.";
-      await refreshJobs().catch(() => undefined);
-    } finally {
-      submitting = false;
-      syncGenerateButton();
+      setBusy(false);
+      await refreshJobs();
     }
   });
   $("prompt").addEventListener("input", updateCurl);
   $("seed").addEventListener("input", updateCurl);
-  $("refresh-jobs").addEventListener("click", () => refreshJobs().catch(() => undefined));
-  $("older-clip").addEventListener("click", () => {
-    const index = watchingIndex();
-    if (index >= 0 && index < jobs.length - 1) selectJob(jobs[index + 1]);
-  });
-  $("newer-clip").addEventListener("click", () => {
-    const index = watchingIndex();
-    if (index > 0) selectJob(jobs[index - 1]);
-  });
+  $("refresh-jobs").addEventListener("click", refreshJobs);
   $("check-status").addEventListener("click", () => {
-    refreshJobs().catch(() => undefined);
+    const id = new URL(location.href).searchParams.get("job");
+    if (id) followJob(id);
   });
   $("video").addEventListener("error", () => {
     if (!$("video").hasAttribute("src")) return;
@@ -235,7 +189,7 @@
       $("connection").textContent = readyLabel;
       $("lifetime").textContent = config.runtime === "mlx"
         ? "MLX keeps the server and prompt cache available, but releases model components between phases to limit unified-memory use. Closing this page does not cancel a job."
-        : "The model stays loaded until you stop the server. Queue the next prompt while a clip plays; closing this page does not cancel a job.";
+        : "The model stays loaded until you stop the server. Closing this page does not cancel a job.";
       $("model").textContent = model;
       const d = config.defaults;
       const facts = [];
@@ -244,18 +198,11 @@
       if (d.fps) facts.push(`${d.fps} fps`);
       if (d.seed != null) $("seed").placeholder = String(d.seed);
       $("settings").textContent = facts.length ? `Server defaults · ${facts.join(" · ")}` : "Resolution and sampling come from the server configuration.";
-      syncGenerateButton();
+      setBusy(false);
       updateCurl();
-      await refreshJobs().catch(() => undefined);
       const id = new URL(location.href).searchParams.get("job");
-      const linked = jobs.find((job) => job.id === id);
-      if (linked) {
-        if (!$("prompt").value.trim() && linked.prompt) {
-          $("prompt").value = linked.prompt;
-          updateCurl();
-        }
-        selectJob(linked);
-      }
+      if (id) await followJob(id);
+      else await refreshJobs();
     } catch (error) {
       $("connection").textContent = "Server unavailable";
       $("history-status").textContent = "Start the H3 server, then reload this page.";
