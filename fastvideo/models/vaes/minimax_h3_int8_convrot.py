@@ -63,7 +63,6 @@ def regular_hadamard(size: int, *, device: torch.device, dtype: torch.dtype) -> 
 
 
 def rotate_activation(x: torch.Tensor, group_size: int) -> torch.Tensor:
-    """Apply the block-diagonal ConvRot Hadamard to the last dimension of ``x``."""
     features = x.shape[-1]
     if features % group_size:
         raise ValueError(f"features {features} are not divisible by convrot group_size {group_size}")
@@ -303,7 +302,6 @@ def overlay_minimax_h3_int8_convrot_decoder(vae: nn.Module, checkpoint_path: str
 
 
 def is_int8_convrot_vae_path(path: str | Path) -> bool:
-    """Return whether *path* is the Comfy int8-convrot overlay file."""
     raw = os.path.basename(str(path))
     real = os.path.basename(os.path.realpath(str(path)))
     return INT8_CONVROT_FILENAME in (raw, real) or "int8_convrot" in raw or "int8_convrot" in real
@@ -315,6 +313,5 @@ def dense_vae_safetensors(paths: list[str]) -> list[str]:
 
 
 def find_int8_convrot_vae_path(model_path: str | Path) -> Path | None:
-    """Return the ConvRot export next to a VAE directory, if present."""
     candidate = Path(model_path) / INT8_CONVROT_FILENAME
     return candidate if candidate.is_file() else None
