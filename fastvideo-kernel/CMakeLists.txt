@@ -16,13 +16,8 @@ if(NOT GPU_BACKEND)
     set(GPU_BACKEND "CUDA")
 endif()
 
-# The compiled extension (fastvideo_kernel_ops, plus fp4attn/fp4quant on Blackwell)
-# needs a CUDA or HIP toolchain. The Python modules and the Triton kernels do not,
-# and on ROCm they are the whole sparse-attention path. AUTO builds the extension
-# when the toolchain configures; on ROCm it falls back to a Python + Triton package
-# when it does not (the rocm/pytorch images install ROCm as a pip SDK that carries
-# hipcc but no hip-lang CMake package, so enable_language(HIP) cannot succeed
-# there). ON fails the configure instead of falling back; OFF never builds it.
+# Compiled extension: AUTO/ON/OFF. On ROCm, AUTO falls back to the Python + Triton
+# package when HIP cannot be configured (#1850: pip-SDK images without hip-lang).
 if(NOT DEFINED FASTVIDEO_KERNEL_BUILD_EXTENSION AND DEFINED ENV{FASTVIDEO_KERNEL_BUILD_EXTENSION})
     set(FASTVIDEO_KERNEL_BUILD_EXTENSION "$ENV{FASTVIDEO_KERNEL_BUILD_EXTENSION}")
 endif()
@@ -352,8 +347,6 @@ else()
             "(requires CUDA 12.8+ and Blackwell sm_120a)")
     endif()
 endif()
-
-# The extension is built whenever we reach this point (see FASTVIDEO_KERNEL_BUILD_EXTENSION above).
 
 # ---------------------------------------------------------------------------
 # Per-arch split for the Blackwell FP4 (attn_qat_infer) build
