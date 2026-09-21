@@ -215,12 +215,12 @@ __global__ void __cluster_dims__(1, 1, 1) __launch_bounds__(N_WARPS * 32, 1) vsa
   }
   fence_mbarrier_init_release_cluster();
   __syncthreads();
+  if constexpr (KERNEL_PDL) griddepcontrol_wait();
 
   [[maybe_unused]] const int total_workitems = num_samples * num_heads * num_kv_blocks_per_seq;
 
   if (warp_id == W_LOAD) {
     setmaxnreg_dec<88>();
-    if constexpr (KERNEL_PDL) griddepcontrol_wait();
 
     EmptyPhaseTracker<NUM_Q_STAGES> ring_empty_ph;
     EmptyPhaseTracker<1> lse_empty_ph, delta_empty_ph, kv_empty_ph, epi_empty_ph;
@@ -853,10 +853,10 @@ __global__ void __cluster_dims__(1, 1, 1) __launch_bounds__(N_WARPS * 32, 1) vsa
       cp_async_bulk_wait_group_read<0>();
     }
     bar_sync<11>(128);
+    bar_sync<10>(416);
     if constexpr (KERNEL_PDL) {
       if (is_leader) griddepcontrol_launch_dependents();
     }
-    bar_sync<10>(416);
     return;
   } else {
     setmaxnreg_dec<24>();
