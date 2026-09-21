@@ -703,122 +703,115 @@
 - Bookkeeping correction: the final held-out critic RMS ratios were `[0.474, 0.711, 0.833, 0.919, 1.005, 0.900, 0.934, 0.954]`, so intervals 0 and 1 (2/8), not only interval 0, satisfy `<=0.75`. This does not change the negative gate, which required at least 6/8 and also failed the no-regression and gradient-perturbation conditions. The coverage-bank count remains 1/8 because its interval-1 ratio was `0.756`.
 - Recommended next action remains the paper-scaled joint H3 TDM experiment where the student moves and the teacher-student gap can grow: critic LR `2e-5`, effective batch at least 32, generator update interval 1, and at least 1000 generator updates, judged with multi-prompt/seed distributional video-quality metrics rather than paired same-seed MS-SSIM. If a cheaper positive control is required first, deliberately enlarge the student-teacher gap at every interval with a partially trained or rank-limited student. No new run was authorized or launched during this reconciliation.
 
-## Joint H3 TDM plan (drafted 2026-09-21)
+## Joint H3 TDM plan (revised 2026-09-21, grounded on origin/main)
 
-The private repository now also carries this branch
-(`hao-ai-lab/FastVideo-internal:issue/775-tdm`, pushed at `847c9f4d6`).
-A sweep of the private repo located the H3 modular-training asset on
-`origin/h3-dmd-consolidated` (tip `045c95c51`):
-`MiniMaxH3DMDModel`/`MiniMaxH3LoraDMDModel` (packed joint video+audio
-latents with `modality_slices`, per-modality scheduler shifts 12/3,
-`predict_noise`/`predict_x0` with `conditional` and `attn_kind`
-dense|vsa, CFG-zero uncond policy), 60+ H3 DMD2 configs (4-step VSA90
-LoRA64, prompt-only shift-12/3, sp1/sp4/HSDP variants), the LoRA
-gradient-sync/no-sync fixes, and latent-vis/validation callbacks. Its
-`dmd2.py` is +1371/-148 against main, while `TDMMethod` on this branch
-subclasses main's `DMD2Method`.
+Per user direction the plan is built on `origin/main` (`61b91220c`,
+mirroring `hao-ai-lab/FastVideo:main`) rather than the experimental H3
+branches. What main provides today:
 
-### Where to build it
+- `MiniMaxH3Model` (`fastvideo/train/models/minimax_h3/minimax_h3.py`)
+  with joint video+audio packing, per-modality scheduler shifts 12/3,
+  per-row timesteps, `backward` restoring the forward context, and
+  `predict_noise` returning `(noise - clean)` per modality. Its gates:
+  `TORCH_SDPA` only, batch 1, cfg rate 0, `t2va` data, dense attention
+  only, no unconditional/CFG path. It has no `predict_x0` override
+  (the base raises on tuple returns), no LoRA, and its H3 scheduler
+  exposes no `num_train_timesteps`.
+- One H3 recipe: `examples/train/configs/overfit_minimax_h3_t2va.yaml`
+  (fine-tune, 64 GPUs, sp 8 / hsdp 8x8, 768x1344x124,
+  `data/crush-smol_h3_t2va_single_sample_preprocessed`) plus the two
+  launch scripts next to it.
+- Wan VSA training recipes and the H3 VSA inference backend, so VSA
+  exists on main but is not wired into H3 training.
+- `TDMMethod` on this branch already subclasses main's `DMD2Method`, so
+  no cross-branch merge is needed: everything lands on main plus this
+  branch's TDM code.
 
-Recommended: create `issue/775-tdm-h3` from
-`origin/h3-dmd-consolidated` and port `TDMMethod` plus
-`tests/local_tests/tdm/` onto that DMD2, reusing the H3 model, LoRA,
-VSA, packing, FSDP and config surfaces. The H3 model/runtime is the
-large hardened asset; TDM mostly replaces DMD2's rollout/loss code
-rather than extending it. Fallback: port the H3 model classes onto this
-branch if the Phase-0 spike shows the evolved DMD2 contract is hostile
-to TDM's lifecycle overrides.
+The experimental H3 DMD branches (`h3-dmd-*`) are consulted for lessons
+and working values only - VSA90 tile 64, LoRA rank 64, shifts 12/3,
+4-step `[999, 749, 500, 250]`, prompt-only data, LoRA
+replica/gradient-sync pitfalls. No code depends on them.
 
-### Phase 0 - port-surface spike (1-2 days, no GPU)
+### Phase 0 - adapter spike (1 day, no GPU)
 
-- Diff main's `dmd2.py`, `trainer.py`, and `models/base.py` against
-  `h3-dmd-consolidated`; inventory every API `TDMMethod` touches
-  (`predict_x0`, `backward`, `prepare_batch`, `clip_grad_norm_if_needed`,
-  `noise_scheduler`, `attn_metadata`/`attn_metadata_vsa`, per-role
-  optimizer plumbing).
-- Decide what TDM keeps (one shared student trajectory per update,
-  separate interval sampling, clipped-SNR plus importance critic loss,
-  paper pseudo-Huber generator surrogate) and what it bypasses (DMD2
-  `rollout_carry`, `score_timestep_*` sampling, `fake_score_loss_space`).
-- Deliverable: a port map and the new branch.
+- Decide the adapter shape: subclass `MiniMaxH3Model` as an
+  H3 TDM model on this branch adding
+  (a) per-modality `predict_x0` (`x0 = noisy - sigma * pred` with the
+  model's own video/audio sigmas, verified against the standalone
+  reference on `feat/tdm-standalone-h3-port`),
+  (b) `num_train_timesteps = 1000` plus a sigma/timestep mapping for
+  TDM's interval sampling (video shift 12, audio shift 3),
+  (c) LoRA enablement through main's `_enable_lora_if_configured`,
+  (d) CFG handling for a guidance-distilled model (guidance 1, no
+  unconditional branch).
+- Decide TDM's bundle interface: recommended is a modality-aware
+  trajectory (one interval draw, per-modality sigmas, per-modality
+  losses summed, as in the standalone `JointRollout`), rather than
+  forcing everything through one packed tensor.
 
-### Phase 1 - method port and bundle awareness (2-3 days, no GPU)
+### Phase 1 - method and adapter (2-3 days, no GPU)
 
-- Port `TDMMethod` onto the consolidated DMD2 base, keeping the managed
-  two-phase update (critic optimizer step before the generator
-  recomputes its loss).
-- Make the trajectory modality-aware: one interval draw, per-modality
-  sigmas (video shift 12, audio shift 3), packed-document layout from
-  `MiniMaxH3DMDPackedLatentLayout`; port the per-modality flow math
-  (`flow_effective_noise`, `flow_transition_to_noisier_sigma`,
-  `flow_snr`) from the standalone reference
-  (`feat/tdm-standalone-h3-port`: `tdm/trajectory.py`,
-  `tdm/backbones/h3.py`).
-- CFG: H3 is guidance-distilled. Keep `real_score_guidance_scale: 1.0`
-  and `cfg_uncond: {text: zero}`; TDM must skip the unconditional branch
-  when guidance is 1.
-- Attention policy: student VSA90 tile 64 (`VIDEO_SPARSE_ATTN_H3`, the
-  standalone's best configuration) and dense FA teacher/critic; TDM's
-  hardcoded student `attn_kind="vsa"` then matches the H3 DMD default.
-- Port the TDM unit tests to the new base; they must pass before any
-  GPU gate.
+- Implement the H3 TDM model adapter on this branch; wire LoRA (rank 16
+  to match the proven standalone recipe, rank 64 as the branch-lesson
+  ablation) and the LoRA gradient synchronization already added on this
+  branch (`utils/lora.py`, `synchronize_lora_gradients`).
+- Make `TDMMethod` modality-aware; port the joint-rollout semantics and
+  per-modality flow math from the standalone reference.
+- Keep dense attention for the first gate; VSA comes later (Phase 5).
+- Tests: extend `tests/local_tests/tdm/` with the H3 bundle math
+  (per-modality x0 round-trip, sigma mapping, shared interval) against a
+  CPU stub model.
 
 ### Phase 2 - config and data (1 day)
 
-- Clone the H3 DMD v17 config (prompt-only, VSA90, 4-step shifts 12/3)
-  to an H3 TDM config: 4 GPUs means `sp_size: 1`,
-  `hsdp_shard_dim: 4`; effective batch 32 via
-  `gradient_accumulation_steps: 8`; `tdm_denoising_steps
-  [999, 749, 500, 250]`; `generator_update_interval: 1`; critic LR
-  `2e-5`; student LoRA (rank 64 per the H3 DMD recipes, with the
-  standalone's rank 16 as an ablation); `max_train_steps >= 1000`.
-- Start with a small prompt set (the standalone's red-car prompt plus
-  three others) for a fast learning-signal gate, then the
-  production-shaped run if the gate passes.
+- Clone `overfit_minimax_h3_t2va.yaml`, swap the method for TDM, LoRA
+  student+critic with a frozen teacher, `tdm_denoising_steps
+  [999, 749, 500, 250]`, `generator_update_interval: 1`, critic LR
+  `2e-5`, `gradient_accumulation_steps: 8` on four GPUs (effective batch
+  32), geometry 768x1344x124, `max_train_steps >= 1000`.
+- Cheaper first gate: the standalone's 480x832x124 geometry on the
+  single-prompt overfit set before the production-shaped run.
 
 ### Phase 3 - acceptance metrics (1-2 days)
 
-- Port the teacher-cloud report from
-  `feat/tdm-standalone-h3-port` (`tdm_standalone/tdm/overfit_report.py`:
-  teacher leave-one-out nn-rel-MSE, split-MMD floor, student nn-rel-MSE,
-  MMD, paired drift) as a post-hoc script over DCP checkpoints plus
-  `MiniMaxH3Pipeline`; no callback changes needed.
+- Port the teacher-cloud report from the standalone
+  (`tdm_standalone/tdm/overfit_report.py`: teacher leave-one-out
+  nn-rel-MSE, split-MMD floor, student nn-rel-MSE, MMD, paired drift)
+  as a post-hoc script over training checkpoints plus
+  `MiniMaxH3Pipeline`.
 - Pre-register: baseline and final student clouds inside
   `nn_rel_mse < teacher loo` and `mmd < 2x split_mmd` on at least four
-  prompts x 32 seeds; paired same-seed MS-SSIM is recorded as a
-  diagnostic only.
+  prompts x 32 seeds; paired same-seed MS-SSIM as a diagnostic only.
 
 ### Phase 4 - one-node/four-GPU run (1-2 days wall clock)
 
-- Pod per the branch manifests (one node, four GB200; use
-  `/opt/venv/bin/python`, set `TRITON_CACHE_DIR`, PVC paths).
-- Preflight gates: targeted TDM tests, four-rank NCCL, LoRA
-  replica-initialization fingerprint and gradient-sync check (the known
-  failure mode), two-step smoke with finite critic and student grad
-  norms.
+- Pod per the branch manifests (one node, four GB200;
+  `/opt/venv/bin/python`, `TRITON_CACHE_DIR`, PVC paths).
+- Preflight: targeted TDM tests, four-rank NCCL, LoRA replica-init
+  fingerprint and gradient-sync check, two-step smoke with finite critic
+  and student grad norms.
 - Main run: at least 1000 generator updates, checkpoints every 100,
-  resume-safe, JSONL metrics; then the distribution report and a contact
-  sheet.
-- Evidence: metrics JSONL, loss/grad curves, distribution JSON, contact
-  sheet, checksums; delete the pod only after verification.
+  resume-safe, JSONL metrics; then the distribution report and contact
+  sheet. Evidence checksummed; delete the pod only after verification.
 
-### Phase 5 - interpretation and follow-ups
+### Phase 5 - VSA follow-up
 
-- The run answers the open question: with the student moving, does the
-  critic error shrink relative to the teacher-student gap (it was
-  1.0-2.2x on the frozen student), and does the distribution criterion
-  hold?
-- If it passes: multi-prompt scale-up, VSA ablations (tau grid,
-  student-only versus all roles), LoRA rank, then the standard PR gates
-  (SSIM/perf) with a draft PR per standing rules.
+- Wire main's H3 VSA backend into the H3 train adapter using the
+  standalone's validated recipe (tile 64 Triton, sparsity 0.5/0.9,
+  student-only versus all roles), then rerun the distribution gate.
+  Main already carries H3 VSA for inference and Wan VSA training
+  examples, so this is a training-path wiring task, not new kernels.
 
 ### Risks
 
-- The 1519-line DMD2 delta can turn the port into a merge; mitigated by
-  the Phase-0 spike and the fallback route.
+- The H3 adapter is new code (roughly 200-400 lines) rather than a
+  merge; the standalone adapter is the math reference and the
+  experimental branches are the hardware lesson.
 - Memory: full-weight student plus critic plus AdamW does not fit on
-  four GB200s (diagnostics used about 166 GB/GPU without optimizer
-  states); LoRA is mandatory.
+  four GB200s; LoRA is mandatory.
 - Queue contention for one-node/four-GPU allocations.
-- VSA training support exists on the consolidated branch; the first
-  gate can run dense to keep the backbone risk low.
+- The critic-gap question stays open until the student moves; the run is
+  designed to answer it.
+
+Effort: about one week to the pre-registered run, plus 1-2 days of
+GPU wall clock.
