@@ -20,6 +20,7 @@ from fastvideo.entrypoints.openai.request_adapter import (
     RequestAdaptationError,
     build_generation_request,
     prepare_reference_media,
+    validate_served_model_name,
 )
 from fastvideo.entrypoints.openai.serving_engine import OpenAIServingEngine
 from fastvideo.entrypoints.openai.stores import VIDEO_STORE
@@ -112,6 +113,28 @@ def test_protocol_rejects_unknown_and_client_output_fields() -> None:
         VideoGenerationRequest(prompt="a fox", prompt_path="/srv/prompts.txt")
     with pytest.raises(Exception, match="output_path"):
         VideoGenerationRequest(prompt="a fox", output_path="/srv/keep.mp4")
+
+
+def test_validate_served_model_name_accepts_omitted_or_matching_name() -> None:
+    args = _args("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
+    validate_served_model_name(None, args, "wan")
+    validate_served_model_name("wan", args, "wan")
+
+
+def test_validate_served_model_name_rejects_mismatch() -> None:
+    with pytest.raises(RequestAdaptationError, match="this server provides wan"):
+        validate_served_model_name("other-model", _args("Wan-AI/Wan2.1-T2V-1.3B-Diffusers"), "wan")
+
+
+def test_validate_served_model_name_uses_lora_nickname() -> None:
+    args = _args(
+        "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+        lora_path="/models/startup.safetensors",
+        lora_nickname="fast",
+    )
+    validate_served_model_name("fast", args, "wan")
+    with pytest.raises(RequestAdaptationError, match="this server provides fast"):
+        validate_served_model_name("wan", args, "wan")
 
 
 def test_request_adapter_restricts_extra_params(tmp_path: Path) -> None:

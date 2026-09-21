@@ -160,6 +160,20 @@ def _apply_aspect_ratio(
     kwargs["width"], kwargs["height"] = width, height
 
 
+def validate_served_model_name(
+    model: str | None,
+    args: FastVideoArgs,
+    served_model_name: str,
+) -> None:
+    """Reject a request model id that is not the one this server loaded."""
+    if model is None:
+        return
+    allowed_models = {args.lora_nickname} if args.lora_path else {served_model_name}
+    if model not in allowed_models:
+        choices = ", ".join(sorted(allowed_models))
+        raise RequestAdaptationError(f"Model mismatch: request specifies {model!r}; this server provides {choices}.")
+
+
 def validate_model_and_lora(
     request: VideoGenerationRequest,
     args: FastVideoArgs,
@@ -172,11 +186,7 @@ def validate_model_and_lora(
     loaded and cannot be swapped safely between concurrent requests. The API
     accepts vLLM's selector shape, but it must identify the startup adapter.
     """
-    allowed_models = {args.lora_nickname} if args.lora_path else {served_model_name}
-    if request.model is not None and request.model not in allowed_models:
-        choices = ", ".join(sorted(allowed_models))
-        raise RequestAdaptationError(
-            f"Model mismatch: request specifies {request.model!r}; this server provides {choices}.")
+    validate_served_model_name(request.model, args, served_model_name)
 
     if request.lora is None:
         return
@@ -423,4 +433,5 @@ __all__ = [
     "build_generation_request",
     "prepare_reference_media",
     "validate_model_and_lora",
+    "validate_served_model_name",
 ]
