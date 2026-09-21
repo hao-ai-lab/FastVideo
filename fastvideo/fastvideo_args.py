@@ -488,9 +488,10 @@ class FastVideoArgs:
         parser.add_argument(
             "--distributed-executor-backend",
             type=str,
-            choices=["mp"],
+            choices=["mp", "uni", "ray"],
             default=FastVideoArgs.distributed_executor_backend,
-            help="The distributed executor backend to use",
+            help=("Executor backend: mp (multiprocess; in-process when num_gpus=1), "
+                  "uni (always in-process, num_gpus=1), or ray."),
         )
 
         parser.add_argument(

@@ -18,7 +18,6 @@ from fastvideo.tests.ssim.reference_utils import (
     select_ssim_params,
 )
 from fastvideo.tests.utils import compute_video_ssim_torchvision, write_ssim_results
-from fastvideo.worker.multiproc_executor import MultiprocExecutor
 
 DEVICE_MAPPINGS = (
     ("A40", "A40"),
@@ -49,8 +48,7 @@ def attention_backend(backend: str) -> Iterator[None]:
 def shutdown_executor(generator: VideoGenerator | None) -> None:
     if generator is None:
         return
-    if isinstance(generator.executor, MultiprocExecutor):
-        generator.executor.shutdown()
+    generator.executor.shutdown()
 
 
 def resolve_inference_device_reference_folder(logger: Logger) -> str:
