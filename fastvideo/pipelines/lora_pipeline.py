@@ -590,6 +590,7 @@ class LoRAPipeline(ComposedPipelineBase):
         _convert_quantized_weights_after_lora_merge(self.trainable_transformer_modules)
 
     def merge_lora_weights(self) -> None:
+        """Merge LoRA weights, then refresh packed quantized buffers from the updated BF16 weights."""
         for (
                 transformer_name,
                 transformer_lora_layers,
@@ -601,6 +602,7 @@ class LoRAPipeline(ComposedPipelineBase):
                 with _get_hook_ctx(module):
                     for name, layer in layers.items():
                         layer.merge_lora_weights()
+        _convert_quantized_weights_after_lora_merge(self.trainable_transformer_modules)
 
     def unmerge_lora_weights(self) -> None:
         """Unmerge LoRA weights, then requantize MXFP8 buffers from the restored BF16 weights."""
