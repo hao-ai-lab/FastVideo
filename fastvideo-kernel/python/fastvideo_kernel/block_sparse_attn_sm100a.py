@@ -8,7 +8,7 @@ A third backend behind the same VSA op as the Triton and CuTe-DSL paths. This mo
 forward: it returns ``(out, lse)`` with ``lse`` in exactly the form
 ``triton_block_sparse_attn_forward`` writes -- ``max(qk * qk_scale) + log2(l)``, ``[B, H, S]``
 fp32 -- so both ``block_sparse_attn_backward_triton`` and the sm_100a CUDA backward
-(``block_sparse_attn_bwd_sm100a``, 64-token blocks, sm_100a devices only) run against it
+(``block_sparse_attn_bwd_sm100a``, 64- and 128-token blocks, sm_100a / sm_103a) run against it
 unchanged.
 
 The extension carries TWO instantiations of the kernel, for 64- and 128-token sparse blocks

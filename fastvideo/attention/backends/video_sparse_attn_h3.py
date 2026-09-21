@@ -420,7 +420,7 @@ def _sm100a_unavailable_reason(sm100a_mod: Any, query_bhsd: torch.Tensor, variab
     if sm100a_mod is None:
         return "fastvideo_kernel.block_sparse_attn_sm100a is not installed"
     if grad_mode:
-        return "inputs require grad and the sm_100a/sm_103a kernel is forward-only; grad paths keep Triton"
+        return "inputs require grad; this backend keeps grad paths on Triton"
     if not sm100a_mod.is_supported(query_bhsd, variable_block_sizes):
         return ("block_sparse_attn_sm100a.is_supported returned False (needs an sm_100 or sm_103 device, a built "
                 "extension, bf16, head_dim 128, an even tile count, and integer tile sizes)")

@@ -52,13 +52,13 @@ def _force_tk() -> bool:
 def _force_sm100a() -> bool:
     """True iff the data-center Blackwell forward is explicitly opted into.
 
-    Opt-in only (same legacy-named env the H3 backend honors): the extension is
-    forward-only, so this routing pairs it with the Triton backward -- its lse
-    is already in Triton's M format. Honored only when
-    ``block_sparse_attn_sm100a.is_supported`` passes. Unsupported 64-token
-    metadata falls through to the default selection; unsupported 128-token
-    metadata raises because Triton has no compatible fallback.
-    ``FASTVIDEO_VSA_TRITON`` still wins.
+    Opt-in only (same legacy-named env the H3 backend honors). Honored only when
+    ``block_sparse_attn_sm100a.is_supported`` passes; the backward then runs the
+    sm_100a/sm_103a CUDA backward when ``block_sparse_attn_bwd_sm100a.is_supported``
+    passes and Triton otherwise (the forward's lse is already in Triton's M
+    format). Unsupported 64-token metadata falls through to the default
+    selection; unsupported 128-token metadata raises because Triton has no
+    compatible fallback. ``FASTVIDEO_VSA_TRITON`` still wins.
     """
     return os.environ.get("FASTVIDEO_VSA_SM100A", "0") == "1"
 
@@ -522,8 +522,9 @@ def block_sparse_attn_from_indices(
 
     # Backend resolution:
     # - FASTVIDEO_VSA_TRITON forces Triton everywhere.
-    # - FASTVIDEO_VSA_SM100A opts into the data-center Blackwell forward
-    #   (Triton backward). The environment name is retained for compatibility.
+    # - FASTVIDEO_VSA_SM100A opts into the data-center Blackwell forward (CUDA
+    #   backward when supported, else Triton). The environment name is retained
+    #   for compatibility.
     #   Unsupported 64-token metadata falls through; unsupported 128-token
     #   metadata raises because Triton cannot consume it.
     # - FASTVIDEO_VSA_TK requests sm_90 TK; honored only when it's actually
