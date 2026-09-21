@@ -214,11 +214,10 @@ __global__ void __cluster_dims__(1, 1, 1) __launch_bounds__(N_WARPS * 32, 1)
   }
   fence_mbarrier_init_release_cluster();
   __syncthreads();
+  if constexpr (KERNEL_PDL) griddepcontrol_wait();
 
   if (warp_id == W_LOAD) {
     setmaxnreg_dec<88>();
-
-    if constexpr (KERNEL_PDL) griddepcontrol_wait();
 
     EmptyPhaseTracker<NUM_Q_STAGES> q_empty_ph, lse_empty_ph;
     EmptyPhaseTracker<1> do_empty_ph, delta_empty_ph;
@@ -870,11 +869,10 @@ __global__ void __cluster_dims__(1, 1, 1) __launch_bounds__(N_WARPS * 32, 1)
 
     if (is_leader) cp_async_bulk_wait_group_read<0>();
     bar_sync<11>(128);
-
+    bar_sync<10>(416);
     if constexpr (KERNEL_PDL) {
       if (is_leader) griddepcontrol_launch_dependents();
     }
-    bar_sync<10>(416);
     return;
   }
   else {
