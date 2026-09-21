@@ -237,6 +237,7 @@ class Config:
     # Output: the HLS playlist the page plays, written by `sink.py`.
     hls_dir: str
     video_bitrate_k: int
+    hls_retention_s: int
 
     # The watch page: video, chat and the queue on one HTTP origin, so a
     # single tunnel publishes the whole thing.
@@ -293,6 +294,7 @@ class Config:
             idle_queue_target=int(director.get("idle_queue_target", 6)),
             hls_dir=str(output.get("hls_dir") or DEFAULT_HLS_DIR),
             video_bitrate_k=int(output.get("video_bitrate_k", 4500)),
+            hls_retention_s=int(output.get("hls_retention_s", 120)),
             web_host=str(web.get("host", "0.0.0.0")),
             web_port=args.port or int(web.get("port", 8081)),
             chat_command=str(director.get("chat_command", "!prompt")).strip(),
@@ -309,6 +311,8 @@ class Config:
             raise SystemExit(
                 "Set OPENAI_API_KEY. Prompt rewriting runs for the idle filler too, so the stream does not start without it."
             )
+        if self.hls_retention_s < 6:
+            raise SystemExit("output.hls_retention_s must be at least 6 seconds.")
         if not self.chat_command.startswith("!"):
             raise SystemExit("director.chat_command should start with '!' (e.g. !prompt).")
 

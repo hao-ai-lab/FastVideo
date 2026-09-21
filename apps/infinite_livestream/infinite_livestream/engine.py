@@ -23,6 +23,7 @@ from . import clip_plan
 from .backend import ClipJob, FastH3Backend
 from .clip_queue import ClipEntry, ClipQueue, new_entry
 from .config import Config, ModelConfig, require_weights, resolve_model_path
+from .metadata import clip_view, encode_id3
 from .pacer import Pacer
 
 logger = logging.getLogger(__name__)
@@ -426,6 +427,7 @@ class Engine:
         frames_list, samples = entry.video, entry.audio
         if pacer is None or not frames_list:
             return
+        metadata = encode_id3(clip_view(entry.snapshot()))
         samples_per_frame = MODEL_SAMPLE_RATE / MODEL_FPS
         total = len(frames_list)
         clock_start: float | None = None
@@ -446,7 +448,7 @@ class Engine:
                 await asyncio.sleep(delay)
 
             for frame in frames_list[lo:hi]:
-                pacer.submit_video(np.asarray(frame))
+                pacer.submit_video(np.asarray(frame), metadata)
             if samples is not None:
                 audio_lo = round(lo * samples_per_frame)
                 audio_hi = round(hi * samples_per_frame)

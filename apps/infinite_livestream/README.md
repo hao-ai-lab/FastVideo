@@ -140,7 +140,7 @@ infinite-livestream-server --config my-config.yaml
 | `upsampler` | Prompt rewriting: model, endpoint, how many clips one prompt may become. |
 | `moderation` | Whether viewer prompts are checked, and against which endpoint. |
 | `director` | Idle filler depth, per-viewer cooldown, chat command, filler directory. |
-| `output` | Where the playlist is written (defaults under `$XDG_STATE_HOME`), and the video bitrate. |
+| `output` | Where the playlist is written (defaults under `$XDG_STATE_HOME`), the video bitrate, and retained playback history. |
 | `web` | Bind address and port. |
 
 For another OpenAI-compatible provider, set `upsampler.base_url` and
@@ -173,7 +173,7 @@ odd-length clip.
 | Route | Description |
 |---|---|
 | `GET /` | The watch page. |
-| `GET /assets/<file>` | Logo and favicon. |
+| `GET /assets/<file>` | Viewer scripts, logo, and favicon. |
 | `GET /hls/<file>` | Playlist and segments, written by `infinite_livestream/sink.py`. |
 | `GET /healthz` | `{"connected": bool}`, true once the model is loaded. |
 | `WS /state` | One JSON snapshot on connect, then one per change. |
@@ -208,19 +208,46 @@ point `director.fillers` at it. The file is read once, at startup.
 
 ## Now-playing titles
 
-Each viewer sits at a different point in the stream, so the server cannot say
-what is on screen. It publishes which clip occupies which instant, and the page
-locates itself against that.
+Titles travel inside the HLS segments as timed ID3 metadata. The page prefers
+hls.js where supported so browsers use the same metadata parser; native HLS is
+the fallback. The player parses the metadata into cues, and the page selects the
+title using the browser's presented frame timestamp, including after paused seeks
+or buffering. Each segment includes
+the active title for viewers joining halfway through a clip. A repeated final
+frame keeps its title until the next clip appears. Browsers without
+`requestVideoFrameCallback` fall back to playback-clock cue events, which can be
+less precise at seek boundaries.
 
-Where a browser reports the date of the frame it is showing, the page uses it
-directly. Most browsers report nothing, so the page falls back to the live edge
-the server publishes minus how far behind its own buffer edge it is playing.
-Append `?debug=1` to the page URL to see which source answered.
+FFmpeg encodes video and audio once; PyAV copies the compressed packets into HLS
+and adds the metadata. This does not use extra GPUs or encode a stream per viewer.
+Append `?debug=1` to see the active clip ID and playback position.
+
+`output.hls_retention_s` controls retained history (120 seconds by default),
+without increasing the player's target live latency. A viewer whose requested
+footage has expired must rejoin available footage. Paused seeks into gaps move
+to the next buffered frame. Encoder restarts retain recent segments and mark the
+new media timeline explicitly.
+
+The page stacks video and chat in portrait. Wide, short landscape screens put
+chat beside the video, with the title below the video and the queue collapsed
+initially. Rotating the page preserves playback.
+
+Playback, titles, seeking, and buffering were tested in Firefox and Chromium,
+including phone and tablet layout emulation. Safari and physical mobile devices
+remain unverified. If an embedded browser cannot decode H.264/AAC, open the page
+in an external browser.
 
 ## Tests
 
 ```bash
 pytest apps/infinite_livestream/infinite_livestream/tests -m "not gpu"
+```
+
+CPU media integration tests require FFmpeg with `libx264` and `aac`. The browser
+metadata adapter also has a dependency-free JavaScript regression test:
+
+```bash
+node --test apps/infinite_livestream/infinite_livestream/tests/test_metadata_player.cjs
 ```
 
 One test is marked `gpu`. It checks that `infinite_livestream/clip_plan.py`'s copy of

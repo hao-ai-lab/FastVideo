@@ -5,6 +5,7 @@ description = "Chat-driven FastH3 infinite livestream: prompts in, continuous br
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "av>=17,<19",
     "fastapi>=0.115,<1",
     "fastvideo>=0.2.1",
     "numpy>=1.24",

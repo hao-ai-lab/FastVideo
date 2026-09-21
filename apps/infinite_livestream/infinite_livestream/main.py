@@ -75,16 +75,8 @@ async def serve(config: Config) -> None:
     # director, because the director has to be able to tell a viewer that their
     # prompt was dropped.
     chat = WebChat(config.chat_command)
-    sink = HlsSink(config.hls_dir, video_bitrate_k=config.video_bitrate_k)
-    # The page positions the now-playing title by comparing the playlist's
-    # PROGRAM-DATE-TIME against the timeline the web app keeps, so the two have
-    # to be stamped by the same clock: the sink's.
-    web = DemoWeb(chat,
-                  config.hls_dir,
-                  host=config.web_host,
-                  port=config.web_port,
-                  stream_clock=sink.stream_time,
-                  live_edge_clock=sink.published_until)
+    sink = HlsSink(config.hls_dir, video_bitrate_k=config.video_bitrate_k, retention_s=config.hls_retention_s)
+    web = DemoWeb(chat, config.hls_dir, host=config.web_host, port=config.web_port)
     engine.add_listener(web.listener)
 
     def announce_reject(author: str, reason: str) -> None:

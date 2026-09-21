@@ -204,6 +204,7 @@ streaming = [
 ]
 
 infinite-livestream = [
+    "av>=17,<19",
     "fastapi>=0.115,<1",
     "openai>=1.40",
     "pyyaml>=6.0",

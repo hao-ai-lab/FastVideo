@@ -17,7 +17,7 @@ def cli() -> None:
             raise SystemExit("infinite-livestream-server requires FastVideo runtime deps. Install "
                              "`fastvideo[infinite-livestream]` or run `uv sync --extra infinite-livestream` "
                              "from the FastVideo checkout.") from exc
-        if exc.name in {"fastapi", "numpy", "openai", "uvicorn", "yaml"}:
+        if exc.name in {"av", "fastapi", "numpy", "openai", "uvicorn", "yaml"}:
             raise SystemExit(f"infinite-livestream-server requires the `{exc.name}` package; install "
                              "the app's dependencies: "
                              "uv pip install -e '.[infinite-livestream]'") from exc

@@ -1,9 +1,9 @@
 """The watch page: video on the left, live chat and queue on the right.
 
-Everything the panel shows is folded from the engine's own message stream --
+Queue and chat state are folded from the engine's own message stream --
 the mirror registers with `Engine.add_listener` and rebuilds itself from
 `state_update`, `queue_update` and the `clip_*` messages -- so this module
-holds no state of its own that could drift out of step.
+holds no playback clock. Now-playing titles travel with the video as timed ID3.
 
 One HTTP origin serves the page, the HLS segments, the state websocket and the
 chat endpoint, because a tunnel proxies one port: publishing the whole demo is
@@ -37,7 +37,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from .chat import WebChat
-from .group_tag import parse_group_tag
+from .metadata import clip_view
 
 logger = logging.getLogger("infinite_livestream.webapp")
 
@@ -45,42 +45,6 @@ WEB_DIR = Path(__file__).parent / "web"
 # Chat lines kept for late joiners. The panel is a live feed, not a log: enough
 # to show the room is alive, not so much that a new viewer scrolls history.
 CHAT_HISTORY = 60
-# Longest prompt text echoed into the panel. The model accepts 800 characters;
-# showing all of them would push the queue off the screen.
-PROMPT_PREVIEW = 180
-
-# How many clip transitions to keep for the playback timeline. A viewer sits a
-# few HLS segments behind live, so the page needs the recent past to work out
-# what is on *their* screen, not what the model has just started.
-TIMELINE_ENTRIES = 40
-
-
-def _clip_view(clip: dict[str, Any]) -> dict[str, Any]:
-    """One queue entry, flattened for the page.
-
-    Everything here comes from the clip's own `ClipInfo` plus the group tag the
-    director wrote into its metadata, which the model echoes untouched.
-    """
-    tag = parse_group_tag(clip.get("metadata", "")) or {}
-    # `prompt` is the upsampler's rewrite; the group tag keeps what the viewer
-    # actually typed, and that is what the panel shows -- a viewer should
-    # recognise their own words in the queue.
-    original = tag.get("raw_prompt") or clip.get("prompt") or ""
-    return {
-        "clip_id": clip.get("clip_id", ""),
-        "title": tag.get("title") or "",
-        "author": tag.get("author") or "",
-        "scene": tag.get("scene"),
-        "scenes": tag.get("scenes"),
-        "generated": bool(tag.get("generated")),
-        # The author of filler is the stream itself; surfacing "auto" as a name
-        # invites viewers to read it as another person's request.
-        "author_label": ("" if tag.get("generated") else (tag.get("author") or "")),
-        "seconds": clip.get("seconds"),
-        "ready": bool(clip.get("ready")),
-        "prompt": original[:PROMPT_PREVIEW],
-        "expanded": (clip.get("prompt") or "")[:PROMPT_PREVIEW],
-    }
 
 
 class DemoState:
@@ -89,23 +53,9 @@ class DemoState:
     def __init__(self) -> None:
         self.generation: list[dict[str, Any]] = []
         self.playout: list[dict[str, Any]] = []
-        self.now_playing: dict[str, Any] | None = None
         self.stats: dict[str, Any] = {}
         self.chat: deque[dict[str, Any]] = deque(maxlen=CHAT_HISTORY)
         self.connected = False
-        # (wall clock, what was playing). The page matches its
-        # EXT-X-PROGRAM-DATE-TIME position against this rather than the live
-        # `now_playing`, which runs a whole HLS pipeline ahead of the picture.
-        self.timeline: deque[dict[str, Any]] = deque(maxlen=TIMELINE_ENTRIES)
-        # Supplied by the web app: the PROGRAM-DATE-TIME a frame handed to the
-        # sink now will carry. The page compares the playlist's PDT against
-        # these timestamps, so they have to be the same clock; wall clock alone
-        # is a tenth of a second early.
-        self.stream_clock: Callable[[], float | None] = lambda: None
-        # The date of the newest frame a player can have. The page subtracts
-        # its own distance behind its buffer edge from this to locate itself,
-        # which works in browsers that expose no PROGRAM-DATE-TIME at all.
-        self.live_edge_clock: Callable[[], float | None] = lambda: None
 
     @property
     def generating(self) -> dict[str, Any] | None:
@@ -120,9 +70,6 @@ class DemoState:
     def snapshot(self) -> dict[str, Any]:
         return {
             "connected": self.connected,
-            "now_playing": self.now_playing,
-            "timeline": list(self.timeline),
-            "live_edge": self.live_edge_clock(),
             "generating": self.generating,
             "generation": self.generation,
             "playout": self.playout,
@@ -130,18 +77,14 @@ class DemoState:
             "chat": list(self.chat),
         }
 
-    def _now(self) -> float:
-        """When frames emitted at this moment will be stamped in the playlist."""
-        return self.stream_clock() or time.time()
-
     def note(self, kind: str, text: str, author: str = "") -> None:
         self.chat.append({"kind": kind, "author": author, "text": text, "at": time.time()})
 
     def on_message(self, kind: str, data: dict[str, Any]) -> None:
         """Fold one engine message into the mirror. Never raises."""
         if kind == "queue_update":
-            self.generation = [_clip_view(c) for c in data.get("generation", [])]
-            self.playout = [_clip_view(c) for c in data.get("playout", [])]
+            self.generation = [clip_view(c) for c in data.get("generation", [])]
+            self.playout = [clip_view(c) for c in data.get("playout", [])]
         elif kind == "state_update":
             self.connected = True
             self.stats = {
@@ -153,26 +96,16 @@ class DemoState:
                 "width": data.get("width"),
                 "height": data.get("height"),
             }
-            if not data.get("playing"):
-                self.now_playing = None
-        elif kind == "clip_started":
-            self.now_playing = _clip_view(data.get("clip", {}))
-            self.timeline.append({"at": self._now(), "clip": self.now_playing})
         elif kind == "clip_queued":
             # One line per group, not per scene. Viewer submissions are
             # already echoed by the POST handler, so only filler lands here.
-            clip = _clip_view(data.get("clip", {}))
+            clip = clip_view(data.get("clip", {}))
             scene = clip.get("scene")
             if clip["generated"] and (scene is None or scene == 1):
                 self.note("filler", clip["prompt"], author="filler")
-        elif kind in ("clip_finished", "clip_stopped"):
-            self.now_playing = None
-            # A gap is part of the timeline too, or the panel would keep naming
-            # a clip that has already ended for the viewer.
-            self.timeline.append({"at": self._now(), "clip": None})
         elif kind == "clip_failed":
             # Failures stay: a viewer whose request vanished deserves to know.
-            clip = _clip_view(data.get("clip", {}))
+            clip = clip_view(data.get("clip", {}))
             if not clip["generated"]:
                 self.note("error", f"build failed: {clip['title'] or clip['clip_id'][:8]}")
 
@@ -180,19 +113,8 @@ class DemoState:
 class DemoWeb:
     """The web server: the page, the HLS files, the state socket, the chat box."""
 
-    def __init__(self,
-                 chat: WebChat,
-                 hls_dir: Path | str,
-                 *,
-                 host: str = "0.0.0.0",
-                 port: int = 8081,
-                 stream_clock: Callable[[], float | None] | None = None,
-                 live_edge_clock: Callable[[], float | None] | None = None) -> None:
+    def __init__(self, chat: WebChat, hls_dir: Path | str, *, host: str = "0.0.0.0", port: int = 8081) -> None:
         self.state = DemoState()
-        if stream_clock is not None:
-            self.state.stream_clock = stream_clock
-        if live_edge_clock is not None:
-            self.state.live_edge_clock = live_edge_clock
         self._chat = chat
         self._hls_dir = Path(hls_dir)
         self._host, self._port = host, port
@@ -313,6 +235,11 @@ class DemoWeb:
             response = await call_next(request)
             if request.url.path.endswith(".m3u8") or request.url.path in ("/", ""):
                 response.headers["Cache-Control"] = "no-store"
+            if request.url.path.startswith("/hls/"):
+                if request.url.path.endswith(".ts"):
+                    response.headers["Content-Type"] = "video/mp2t"
+                elif request.url.path.endswith(".m3u8"):
+                    response.headers["Content-Type"] = "application/vnd.apple.mpegurl"
             return response
 
         return app

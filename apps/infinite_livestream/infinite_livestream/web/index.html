@@ -114,14 +114,28 @@
   @media (max-width:900px){
     /* >=16px stops iOS/Chrome auto-zooming the page on focus. */
     input, #text, #who, button{font-size:16px}
-    .layout{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr);
-            padding:10px;gap:10px}
+    .layout{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(200px,1fr);
+            padding:10px;gap:10px;overflow-y:auto}
     header{padding:8px 12px;gap:10px}
     header img{height:22px}
-    .brand{font-size:12.5px}
+    .brand{font-size:12.5px;min-width:0;white-space:normal}
+    .live{flex-shrink:0}
     .brand .sub{font-size:12px}
     .video-wrap{max-height:34dvh}
     .queuebar .scroll{max-height:24dvh;flex:0 1 auto}
+  }
+  @media (orientation:landscape) and (min-width:560px) and (max-height:600px){
+    input, #text, #who, button{font-size:16px}
+    .layout{grid-template-columns:minmax(0,1fr) minmax(240px,36%);
+            grid-template-rows:minmax(0,1fr);padding:10px;gap:10px;overflow:hidden}
+    .stage{gap:8px;overflow-y:auto}
+    .video-wrap{flex:1 1 0;min-height:110px;max-height:none}
+    .nowplaying{flex:0 0 auto;padding:8px 10px}
+    .nowplaying h2{font-size:14px;margin-bottom:4px}
+    .card > h3{padding:8px 10px}
+    form{display:grid;grid-template-columns:minmax(0,1fr) auto;padding:8px;gap:6px}
+    #who{grid-column:1 / -1}
+    button{padding:9px 12px}
   }
 </style>
 </head>
@@ -164,43 +178,88 @@
   </div>
 </div>
 
+<script src="/assets/metadata.js"></script>
 <script>
 // ---------------------------------------------------------------- video
-// The stream arrives as HLS written by sink.py. Safari plays a playlist
-// natively; everything else needs hls.js. A live playlist can 404 for the few
-// seconds before ffmpeg writes its first segment, and it can go stale across an
-// ffmpeg restart, so both paths simply retry rather than surfacing an error.
+// Timed title cues use the player's own playback clock on both HLS paths.
 const PLAYLIST = "/hls/stream.m3u8";
 const video = document.getElementById("video");
+let playbackClip;
+let playbackError = "";
+let buffering = true;
+let retryTimer = null;
+let stopMetadata = null;
+
+function restartPlayback() {
+  if (retryTimer !== null) return;
+  // Defer destruction until hls.js has finished dispatching the error event.
+  retryTimer = setTimeout(() => {
+    retryTimer = null;
+    if (stopMetadata) stopMetadata();
+    if (window._hls) window._hls.destroy();
+    window._hls = null;
+    video.removeAttribute("src");
+    video.load();
+    startPlayback();
+  }, 3000);
+}
 
 function startPlayback() {
-  if (video.canPlayType("application/vnd.apple.mpegurl")) {
-    video.src = PLAYLIST;
-    video.addEventListener("error", () => setTimeout(startPlayback, 3000));
+  stopMetadata = LivestreamMetadata.watch(video, clip => {
+    playbackClip = clip;
+    renderPlayback();
+  });
+  // Native HLS support does not guarantee that the browser exposes ID3 cues.
+  // Use the same metadata parser wherever Media Source playback is supported.
+  if (!window.Hls || !Hls.isSupported()) {
+    if (video.canPlayType("application/vnd.apple.mpegurl")) {
+      video.src = PLAYLIST;
+    } else {
+      playbackError = "This browser cannot play the stream. Try an external browser.";
+      renderPlayback();
+    }
     return;
   }
-  if (!window.Hls || !Hls.isSupported()) return;
   const hls = new Hls({ liveSyncDurationCount: 3, lowLatencyMode: true });
   window._hls = hls;
-  // Track the playing fragment ourselves. `hls.playingDate` computes the same
-  // thing, but it is a single getter that can come back null; deriving it from
-  // the fragment the player reports leaves a second, independent source.
-  hls.on(Hls.Events.FRAG_CHANGED, (_e, data) => {
-    const frag = data && data.frag;
-    if (frag && frag.programDateTime) {
-      fragPDT = frag.programDateTime / 1000;
-      fragStart = frag.start;
-    }
-  });
   hls.on(Hls.Events.ERROR, (_e, data) => {
     if (!data.fatal) return;
-    hls.destroy();
-    setTimeout(startPlayback, 3000);
+    if (data.details === Hls.ErrorDetails.BUFFER_ADD_CODEC_ERROR ||
+        data.details === Hls.ErrorDetails.MANIFEST_INCOMPATIBLE_CODECS_ERROR) {
+      playbackError = "This browser cannot decode the stream. Try an external browser.";
+      renderPlayback();
+      return;
+    }
+    restartPlayback();
   });
   hls.loadSource(PLAYLIST);
   hls.attachMedia(video);
 }
-startPlayback();
+video.addEventListener("error", restartPlayback);
+video.addEventListener("waiting", () => { buffering = true; renderPlayback(); });
+video.addEventListener("playing", () => { buffering = false; renderPlayback(); });
+video.addEventListener("pause", renderPlayback);
+video.addEventListener("loadeddata", renderPlayback);
+video.addEventListener("canplay", renderPlayback);
+video.addEventListener("seeked", renderPlayback);
+
+let correctedSeek = false;
+video.addEventListener("seeked", () => {
+  if (correctedSeek) { correctedSeek = false; return; }
+  if (!video.paused) return;
+  // hls.js repairs gaps while playing. A paused seek can instead finish just
+  // before a buffered segment while showing its first frame. Move the seek
+  // itself into available media so both the frame and cue clocks agree.
+  for (let i = 0; i < video.buffered.length; i++) {
+    const start = video.buffered.start(i);
+    if (video.currentTime >= start && video.currentTime < video.buffered.end(i)) return;
+    if (video.currentTime < start) {
+      correctedSeek = true;
+      video.currentTime = start + 0.000001; // Inside the boundary at browser timestamp precision.
+      return;
+    }
+  }
+});
 
 // Ask for sound; fall back to muted only if the browser refuses, and say so.
 const unmute = document.getElementById("unmute");
@@ -217,119 +276,6 @@ async function tryUnmuted() {
 }
 video.addEventListener("loadedmetadata", tryUnmuted, { once: true });
 unmute.addEventListener("click", tryUnmuted);
-
-// Which wall-clock moment is on screen.
-//
-// The server keys its timeline to EXT-X-PROGRAM-DATE-TIME, so a player that
-// reports the date of the frame it is showing answers this exactly. Not every
-// player does: measured in a real browser, all three ways of asking come back
-// empty -- `hls.playingDate`, the fragment's `programDateTime`, and
-// `getStartDate`. So the exact sources are tried first and a derived one
-// stands behind them; see the block below for how that is built and why it
-// has to be averaged.
-let fragPDT = null, fragStart = null;
-screenTime.source = "none";
-
-// --- the derived position, for browsers that expose no date at all ---------
-// The playlist is fetched here rather than taken from the state socket: the
-// socket pushes on change, so its copy of the live edge can be seconds stale,
-// and staleness in one of the two staircases is what the averaging cannot fix.
-const OFFSET_WINDOW_MS = 12000;   // must span more than one segment
-const OFFSET_SMOOTHING = 0.2;
-const OFFSET_RESET_S = 4.0;       // a jump this large means a seek or a stall
-let liveEdge = null;
-let offsetSamples = [];
-let heldOffset = null;
-
-async function pollLiveEdge() {
-  try {
-    const text = await (await fetch(PLAYLIST, { cache: "no-store" })).text();
-    let pdt = null, dur = 0;
-    for (const line of text.split("\n")) {
-      if (line.startsWith("#EXT-X-PROGRAM-DATE-TIME:")) pdt = Date.parse(line.slice(25).trim()) / 1000;
-      else if (line.startsWith("#EXTINF:")) dur = parseFloat(line.slice(8));
-    }
-    if (pdt) liveEdge = pdt + dur;
-  } catch (_) { /* a missed poll just means one fewer sample */ }
-}
-setInterval(pollLiveEdge, 2000);
-pollLiveEdge();
-
-function sampleOffset() {
-  if (liveEdge == null || !video.buffered.length || !(video.currentTime > 0)) return;
-  const value = liveEdge - video.buffered.end(video.buffered.length - 1);
-  const now = performance.now();
-  // A seek, a stall or a rebuffer moves the true offset; start over rather
-  // than average across the discontinuity.
-  if (heldOffset != null && Math.abs(value - heldOffset) > OFFSET_RESET_S) {
-    offsetSamples = [];
-    heldOffset = null;
-  }
-  offsetSamples.push({ at: now, value });
-  offsetSamples = offsetSamples.filter((x) => now - x.at <= OFFSET_WINDOW_MS);
-  if (offsetSamples.length < 8 || now - offsetSamples[0].at < OFFSET_WINDOW_MS * 0.5) return;
-  const mean = offsetSamples.reduce((a, x) => a + x.value, 0) / offsetSamples.length;
-  heldOffset = heldOffset == null ? mean : heldOffset + OFFSET_SMOOTHING * (mean - heldOffset);
-}
-
-function screenTime() {
-  const hls = window._hls;
-  if (hls && hls.playingDate) {
-    screenTime.source = "playingDate";
-    return hls.playingDate.getTime() / 1000;
-  }
-  if (fragPDT != null && video.currentTime > 0) {
-    screenTime.source = "fragment";
-    return fragPDT + (video.currentTime - fragStart);
-  }
-  // Safari plays HLS natively, without hls.js; getStartDate() is its PDT.
-  if (typeof video.getStartDate === "function" && video.currentTime > 0) {
-    const start = video.getStartDate();
-    if (start && !isNaN(start.getTime())) {
-      screenTime.source = "startDate";
-      return start.getTime() / 1000 + video.currentTime;
-    }
-  }
-  // No date from the player at all -- some browsers expose none of the three.
-  // Derived instead: the playlist says where the live edge is, the video says
-  // how far behind its own buffer edge it is playing, and the difference is
-  // the answer.
-  //
-  // Both of those are staircases that step about a segment apart in time, so
-  // their difference is a square wave of roughly a segment's amplitude. Using
-  // it directly made the title flip back and forth whenever the true position
-  // sat near a clip boundary. currentTime is smooth and advances at exactly
-  // 1 s/s, so the offset is averaged over more than a segment and carried on
-  // currentTime, which turns a square wave into a straight line.
-  if (heldOffset != null && video.currentTime > 0) {
-    screenTime.source = "buffer-edge";
-    return video.currentTime + heldOffset;
-  }
-  screenTime.source = "none";
-  return null;
-}
-
-// Used only when nothing above can say where the viewer is. Falling through to
-// the live clip would be the worst possible answer -- that is the one the
-// engine just started, a whole pipeline ahead of the picture -- so step back
-// from the newest entry by roughly the pipeline's depth instead. Expressed in
-// the timeline's own units, so it needs no client clock.
-const NOMINAL_LAG_S = 8.0;
-
-// The timeline entry covering the moment on screen.
-function playingNow(state) {
-  if (!state.timeline || !state.timeline.length) return state.now_playing;
-  let at = screenTime();
-  if (at == null) at = state.timeline[state.timeline.length - 1].at - NOMINAL_LAG_S;
-  let current = null, found = false;
-  for (const entry of state.timeline) {
-    if (entry.at <= at) { current = entry.clip; found = true; } else break;
-  }
-  // Behind everything we remember: show the oldest we know rather than the
-  // live clip, which is certainly not what is on screen.
-  if (!found) return state.timeline[0].clip;
-  return current;
-}
 
 // ---------------------------------------------------------------- state
 const el = (id) => document.getElementById(id);
@@ -404,28 +350,30 @@ function renderChat(state) {
   if (atBottom) list.scrollTop = list.scrollHeight;
 }
 
-function render(state) {
-  // Everything about playback follows the viewer's own position; the queue and
-  // "now generating" stay live, because those are about the machine, not the
-  // picture.
-  const np = playingNow(state);
-  el("dot").className = "dot" + (np ? " on" : "");
-  el("livetext").textContent = state.connected ? (np ? "on air" : "idle") : "offline";
-
-
+function renderPlayback() {
+  const np = playbackClip;
+  const hasVideo = video.readyState >= 2;
+  el("dot").className = "dot" + (hasVideo && np !== null ? " on" : "");
+  el("livetext").textContent = playbackError ? "playback error" :
+    (!hasVideo ? "loading" : np === null ? "idle" :
+      video.paused ? "paused" : buffering ? "buffering" : "on air");
   if (np) {
     const who = np.generated ? "filler" : ("requested by " + (np.author_label || "viewer"));
     el("np-title").textContent = `now playing: ${short(label(np), 72)} (${who})`;
     el("np-title").title = np.title ? (np.title + " — " + (np.expanded || "")) : (np.expanded || "");
     const bits = [];
     if (np.scene && np.scenes > 1) bits.push(`scene ${np.scene}/${np.scenes}`);
-    if (np.seconds) bits.push(np.seconds.toFixed(1) + "s");
+    if (typeof np.seconds === "number") bits.push(np.seconds.toFixed(1) + "s");
     el("np-meta").textContent = bits.join(" · ");
   } else {
-    el("np-title").textContent = "Nothing playing yet";
-    el("np-meta").textContent = "The stream holds on black between clips.";
+    el("np-title").textContent = playbackError || (np === null ? "Waiting for the first clip" :
+      hasVideo ? "Waiting for title metadata" : "Waiting for video");
+    el("np-title").title = "";
+    el("np-meta").textContent = "";
   }
+}
 
+function render(state) {
   const s = state.stats || {};
   if (s.generation_capacity != null) {
     el("queue-count").title =
@@ -446,59 +394,45 @@ function connect() {
   socket.onmessage = (e) => {
     try {
       const next = JSON.parse(e.data);
-      // A stale snapshot would rewind the timeline and move the panel back a
-      // clip; drop it rather than render it.
+      // Keep chat and queue snapshots in order; playback has its own cues.
       if (typeof next.seq === "number" && next.seq <= lastSeq) return;
       if (typeof next.seq === "number") lastSeq = next.seq;
       lastState = next; render(lastState);
     } catch (_) {}
   };
-  socket.onclose = () => { lastSeq = -1; el("livetext").textContent = "reconnecting"; setTimeout(connect, 2000); };
+  socket.onclose = () => { lastSeq = -1; setTimeout(connect, 2000); };
 }
 connect();
-// Twice a second is well under a clip length and costs nothing; it is what
-// makes the panel flip exactly when the video does. The offset is sampled on
-// the same tick, so its window fills whether or not state is arriving.
-setInterval(() => { sampleOffset(); if (lastState) render(lastState); }, 500);
+startPlayback();
 
-// ?debug=1 shows how the panel is being synced, on screen. If the title looks
-// wrong, this says which of the three position sources answered and how far
-// behind live the viewer actually is.
+// Debugging reads the cue-driven title; it never supplies a playback clock.
 const DEBUG = new URLSearchParams(location.search).has("debug");
 if (DEBUG) {
   const box = el("debug");
   box.hidden = false;
   setInterval(() => {
-    const s = lastState;
-    if (!s) { box.textContent = "no state"; return; }
-    const at = screenTime();
-    const newest = (s.timeline && s.timeline.length) ? s.timeline[s.timeline.length - 1].at : null;
-    const behind = (at != null && newest != null) ? (newest - at) : null;
-    const shown = playingNow(s);
-    const live = s.now_playing;
-    const h = window._hls;
     const buf = video.buffered.length
       ? (video.buffered.end(video.buffered.length - 1) - video.currentTime).toFixed(1) + "s"
       : "none";
-    box.innerHTML = [
-      `src <b>${screenTime.source}</b>` + (at == null ? " (NO POSITION)" : ""),
-      `behind live ${behind == null ? "?" : behind.toFixed(1) + "s"}   behind buf ${buf}`,
-      `hls ${h ? "yes" : "no"}  pd ${h && h.playingDate ? "yes" : "no"}` +
-        `  frag ${fragPDT ? "yes" : "no"}  gsd ${typeof video.getStartDate === "function" ? "yes" : "no"}`,
-      `edge ${liveEdge ? "yes" : "MISSING"}  off ${heldOffset == null ? "-" : heldOffset.toFixed(2)}` +
-        `  n ${offsetSamples.length}`,
-      `ct ${(video.currentTime || 0).toFixed(1)}  rs ${video.readyState}` +
-        `  tl ${s.timeline ? s.timeline.length : 0}`,
-      `showing: ${shown ? short(label(shown), 32) : "-"}`,
-      `live:    ${live ? short(label(live), 32) : "-"}`,
-    ].join("<br>");
+    const timing = stopMetadata?.inspect?.();
+    const tracks = timing?.tracks || [];
+    box.textContent = [
+      "title source: timed ID3",
+      `playback ${video.currentTime.toFixed(3)}s · buffer ahead ${buf}`,
+      `clip: ${playbackClip ? playbackClip.clip_id : playbackClip === null ? "black" : "pending"}`,
+      `player: ${window._hls ? "hls.js" : "native"} · ready ${video.readyState}`,
+      `presented frame: ${timing?.frameTime?.toFixed(6) ?? "none"}s`,
+      `metadata: ${tracks.length} tracks · ${tracks.map(t => `${t.count} cues (${t.start?.toFixed(3) ?? "?"}s...)`).join(", ")}`,
+    ].join("\n");
   }, 500);
 }
 
 // The queue is reference material; chat is what people use. On a narrow
 // screen it starts collapsed so the video and the chat box fit one screen.
 const queueCard = document.getElementById("queue");
-if (!window.matchMedia("(max-width: 900px)").matches) queueCard.classList.remove("collapsed");
+if (!window.matchMedia("(max-width: 900px), (orientation: landscape) and (max-height: 600px)").matches) {
+  queueCard.classList.remove("collapsed");
+}
 document.getElementById("queue-head").addEventListener("click",
   () => queueCard.classList.toggle("collapsed"));
 

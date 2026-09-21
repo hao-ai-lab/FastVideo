@@ -21,6 +21,7 @@ import time
 
 import numpy as np
 
+from .metadata import EMPTY_ID3
 from .sink import AudioFormat, HlsSink, VideoFormat
 
 logger = logging.getLogger(__name__)
@@ -46,14 +47,14 @@ class Pacer:
         self._samples_per_tick = audio.sample_rate // video.fps
 
         max_frames = int(video.fps * _BUFFER_SECONDS)
-        self._frames: collections.deque[np.ndarray] = collections.deque(maxlen=max_frames)
+        self._frames: collections.deque[tuple[np.ndarray, bytes]] = collections.deque(maxlen=max_frames)
         self._audio_chunks: collections.deque[np.ndarray] = collections.deque()
         self._audio_buffered = 0  # samples across _audio_chunks
         self._max_audio_samples = int(audio.sample_rate * _BUFFER_SECONDS)
 
         self._black = np.zeros((video.height, video.width, 3), dtype=np.uint8)
         self._silence = np.zeros(self._samples_per_tick, dtype=np.int16)
-        self._last_frame = self._black
+        self._last_frame = (self._black, EMPTY_ID3)
 
         # Counters, logged periodically and readable by anyone.
         self.ticks = 0
@@ -69,14 +70,14 @@ class Pacer:
 
     # ------------------------------------------------- model-facing intake
 
-    def submit_video(self, frame: np.ndarray) -> None:
-        """Buffer one generated frame."""
+    def submit_video(self, frame: np.ndarray, metadata: bytes = EMPTY_ID3) -> None:
+        """Buffer a frame together with its title, including through drops/repeats."""
         frame = np.asarray(frame)
         if frame.shape[:2] != (self._video.height, self._video.width):
             frame = self._fit(frame)
         if len(self._frames) == self._frames.maxlen:
             self.dropped_frames += 1
-        self._frames.append(frame)
+        self._frames.append((frame, metadata))
 
     def submit_audio(self, samples: np.ndarray) -> None:
         """Buffer model audio (int16, any chunk size; channels are flattened)."""
@@ -162,7 +163,7 @@ class Pacer:
                 self._repeat_run += 1
                 if self._audio_buffered > 0:
                     self._repeat_run_had_audio += 1
-            self._sink.send_video(self._last_frame)
+            self._sink.send_video(*self._last_frame)
             self._sink.send_audio(self._pull_audio_tick())
             self.ticks += 1
 

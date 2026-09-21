@@ -85,6 +85,8 @@ output:
   # hls_dir: /var/lib/livestream/hls
   # x264 target in kbit/s.
   video_bitrate_k: 4500
+  # Retained playback history; does not increase target live latency.
+  hls_retention_s: 120
 
 web:
   host: 0.0.0.0

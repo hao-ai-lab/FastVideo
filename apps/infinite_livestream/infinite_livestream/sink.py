@@ -39,11 +39,13 @@ import subprocess
 import threading
 import time
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import IO
 
 import numpy as np
+
+from .metadata import EMPTY_ID3
+from .muxer import SEGMENT_SECONDS, MetadataMuxer
 
 logger = logging.getLogger("infinite_livestream.sink")
 
@@ -63,12 +65,6 @@ _VIDEO_QUEUE_SECONDS = 8.0
 # pushes 24 fps of raw frames into a process that is not reading yet, and the
 # queue oversubscribes before a single frame is consumed.
 _ENCODER_SETTLE_S = 2.0
-
-# One segment is the floor on how fresh a viewer's picture can be. Six of them
-# gives ~12 s of rewind and bounds the directory, since `delete_segments`
-# removes them from disk as they roll off.
-SEGMENT_SECONDS = 2
-PLAYLIST_SEGMENTS = 6
 
 
 @dataclass(frozen=True)
@@ -93,26 +89,28 @@ class _PipeWriter(threading.Thread):
 
     def __init__(self, name: str, maxsize: int) -> None:
         super().__init__(name=f"sink-{name}", daemon=True)
-        self.queue: queue.Queue[bytes | None] = queue.Queue(maxsize=maxsize)
+        self.queue: queue.Queue[tuple[bytes, bytes | None] | None] = queue.Queue(maxsize=maxsize)
         self.pipe: IO[bytes] | None = None
+        self.metadata_queue: queue.Queue[bytes] | None = None
         self.broken = threading.Event()
         self.dropped = 0
         self._lock = threading.Lock()
 
-    def attach(self, pipe) -> None:
+    def attach(self, pipe, metadata_queue: queue.Queue[bytes] | None = None) -> None:
         with self._lock:
             self.pipe = pipe
+            self.metadata_queue = metadata_queue
             self.broken.clear()
 
-    def submit(self, payload: bytes) -> int:
+    def submit(self, payload: bytes, metadata: bytes | None = None) -> int:
         """Enqueue bytes, dropping the oldest rather than ever blocking.
 
-        Returns how many entries were shed; the caller must shed the same
-        number from the other stream or the two drift apart for good.
+        Returns how many entries were shed for A/V skew diagnostics. Metadata
+        stays with its payload; discarded frames never enter the muxer ledger.
         """
         shed = 0
         try:
-            self.queue.put_nowait(payload)
+            self.queue.put_nowait((payload, metadata))
         except queue.Full:
             try:
                 self.queue.get_nowait()
@@ -121,7 +119,7 @@ class _PipeWriter(threading.Thread):
             except queue.Empty:
                 pass
             try:
-                self.queue.put_nowait(payload)
+                self.queue.put_nowait((payload, metadata))
             except queue.Full:
                 self.dropped += 1
                 shed += 1
@@ -137,11 +135,13 @@ class _PipeWriter(threading.Thread):
 
     def run(self) -> None:
         while True:
-            payload = self.queue.get()
-            if payload is None:  # shutdown sentinel
+            item = self.queue.get()
+            if item is None:  # shutdown sentinel
                 return
+            payload, metadata = item
             with self._lock:
                 pipe = self.pipe
+                metadata_queue = self.metadata_queue
             if pipe is None or self.broken.is_set():
                 continue  # ffmpeg is down; discard until it is restarted
             try:
@@ -153,7 +153,9 @@ class _PipeWriter(threading.Thread):
                     if not written:
                         raise BrokenPipeError("ffmpeg input pipe stopped accepting data")
                     remaining = remaining[written:]
-            except (BrokenPipeError, OSError, ValueError):
+                if metadata_queue is not None and metadata is not None:
+                    metadata_queue.put_nowait(metadata)
+            except (BrokenPipeError, OSError, ValueError, queue.Full):
                 # ValueError: write to a closed file during a restart race.
                 with self._lock:
                     if self.pipe is pipe:
@@ -173,12 +175,17 @@ class HlsSink:
                  directory: str | Path,
                  video_bitrate_k: int = 4500,
                  *,
-                 playlist_name: str = "stream.m3u8") -> None:
+                 playlist_name: str = "stream.m3u8",
+                 retention_s: int = 120) -> None:
         if shutil.which("ffmpeg") is None:
             raise RuntimeError("ffmpeg not found on PATH; install it first")
         self._directory = Path(directory)
         self._playlist_name = playlist_name
         self._bitrate_k = video_bitrate_k
+        if retention_s < SEGMENT_SECONDS * 3:
+            raise ValueError("HLS retention must cover at least three segments")
+        self._retention_s = retention_s
+        self._muxer: MetadataMuxer | None = None
         self._video: VideoFormat | None = None
         self._audio: AudioFormat | None = None
         self._process: subprocess.Popen[bytes] | None = None
@@ -189,14 +196,6 @@ class HlsSink:
         self._failures = 0
         self._last_start_attempt = 0.0
         self._frames_sent = 0
-        # Wall clock ffmpeg gave output frame 0, read back from the playlist it
-        # writes, and the frames submitted since. Together they give the
-        # PROGRAM-DATE-TIME a frame entering now will carry -- see
-        # `stream_time`. Not predictable: measured at 8.8 s after the process
-        # starts and 6.8 s after its first frame, so it has to be read.
-        self._pdt_base: float | None = None
-        self._pdt_base_checked = 0.0
-        self._stream_frames = 0
         self._dead = False
         self._video_shed = 0
         self._audio_shed = 0
@@ -205,62 +204,6 @@ class HlsSink:
     def playlist_path(self) -> Path:
         """Where the web app points the player."""
         return self._directory / self._playlist_name
-
-    def stream_time(self) -> float | None:
-        """The PROGRAM-DATE-TIME a frame handed over now will carry.
-
-        The web app stamps its timeline with this, and the page compares its
-        own playback position against those stamps, so the two have to mean the
-        same instant. (Most browsers cannot report a date at all, and the page
-        falls back to `published_until` for those -- but the timeline is keyed
-        this way either way.)
-
-        Frame counting is what makes them agree: ffmpeg's output frame 0 is the
-        first frame submitted here, so a frame submitted now lands at
-        `base + n / fps`. The base is *read* from ffmpeg rather than computed,
-        because the offset between starting the process and the date it stamps
-        is not something the caller can know -- measured at 8.8 s here, against
-        a 2 s encoder settle.
-
-        None until the first segment is published, when there is no PDT to be
-        positioned against anyway.
-        """
-        if self._video is None:
-            return None
-        if self._pdt_base is None:
-            self._learn_pdt_base()
-            if self._pdt_base is None:
-                return None
-        return self._pdt_base + self._stream_frames / self._video.fps
-
-    def _learn_pdt_base(self) -> None:
-        """Read the wall clock ffmpeg gave output frame 0, from its playlist.
-
-        Segment `n` starts one nominal segment-length after segment `n-1`, so
-        the base is the first date in the playlist wound back by the media
-        sequence. Read once per ffmpeg and as early as possible: segments that
-        have already rolled off can only be accounted for at their nominal
-        length, and a live one occasionally runs long.
-        """
-        now = time.monotonic()
-        if now - self._pdt_base_checked < 1.0:
-            return
-        self._pdt_base_checked = now
-        try:
-            text = self.playlist_path.read_text()
-        except OSError:
-            return
-        sequence, first = 0, None
-        for line in text.splitlines():
-            if line.startswith("#EXT-X-MEDIA-SEQUENCE:"):
-                sequence = int(line.split(":", 1)[1])
-            elif line.startswith("#EXT-X-PROGRAM-DATE-TIME:"):
-                first = datetime.fromisoformat(line.split(":", 1)[1].strip()).timestamp()
-                break
-        if first is None:
-            return
-        self._pdt_base = first - sequence * SEGMENT_SECONDS
-        logger.info("[sink] stream clock anchored at %.3f (from segment %d)", self._pdt_base, sequence)
 
     # ------------------------------------------------------------ lifecycle
 
@@ -280,9 +223,6 @@ class HlsSink:
         video, audio = self._video, self._audio
         self._last_start_attempt = time.monotonic()
 
-        # A restart must not leave a player reading a playlist that references
-        # segments from before the gap.
-        shutil.rmtree(self._directory, ignore_errors=True)
         self._directory.mkdir(parents=True, exist_ok=True)
 
         audio_read_fd, audio_write_fd = os.pipe()
@@ -315,6 +255,13 @@ class HlsSink:
             "0:v",
             "-map",
             "1:a",
+            # Preserve input frame order/count for the metadata ledger.
+            "-fps_mode",
+            "passthrough",
+            "-bf",
+            "0",
+            "-sc_threshold",
+            "0",
             # video encode
             "-c:v",
             "libx264",
@@ -341,29 +288,19 @@ class HlsSink:
             "44100",
             "-ac",
             "2",
-            # output: a sliding-window playlist
+            # A persistent muxer adds timed metadata without re-encoding.
             "-f",
-            "hls",
-            "-hls_time",
-            str(SEGMENT_SECONDS),
-            "-hls_list_size",
-            str(PLAYLIST_SEGMENTS),
-            # delete_segments bounds the directory, independent_segments lets a
-            # player start anywhere, omit_endlist keeps it live rather than
-            # signalling a finished VOD, program_date_time is what the page
-            # uses to line the picture up with the now-playing title.
-            "-hls_flags",
-            "delete_segments+independent_segments+omit_endlist+program_date_time",
-            "-hls_segment_type",
             "mpegts",
-            "-hls_segment_filename",
-            str(self._directory / "seg_%05d.ts"),
-            str(self.playlist_path),
+            "-muxdelay",
+            "0",
+            "-flush_packets",
+            "1",
+            "pipe:1",
         ]
         try:
             self._process = subprocess.Popen(cmd,
                                              stdin=subprocess.PIPE,
-                                             stdout=subprocess.DEVNULL,
+                                             stdout=subprocess.PIPE,
                                              stderr=subprocess.PIPE,
                                              bufsize=0,
                                              pass_fds=(audio_read_fd, ))
@@ -382,14 +319,13 @@ class HlsSink:
         self._video_writer.flush()
         self._audio_writer.flush()
         self._video_shed = self._audio_shed = 0
-        self._video_writer.attach(self._process.stdin)
+        assert self._process.stdout is not None
+        self._muxer = MetadataMuxer(self._process.stdout, self.playlist_path, video.fps, self._retention_s)
+        self._video_writer.attach(self._process.stdin, self._muxer.frames)
         self._audio_writer.attach(audio_pipe)
+        self._muxer.start()
 
         threading.Thread(target=self._drain_stderr, args=(self._process, ), daemon=True, name="sink-stderr").start()
-        # The clock re-anchors from the new playlist, which this spawn wiped.
-        self._pdt_base = None
-        self._pdt_base_checked = 0.0
-        self._stream_frames = 0
         logger.info("[sink] ffmpeg started: %dx%d@%dfps -> %s", video.width, video.height, video.fps,
                     self.playlist_path)
 
@@ -410,10 +346,11 @@ class HlsSink:
         process = self._process
         writers_broken = bool((self._video_writer and self._video_writer.broken.is_set())
                               or (self._audio_writer and self._audio_writer.broken.is_set()))
-        if process is not None and process.poll() is None and not writers_broken:
+        muxer_finished = self._muxer is not None and self._muxer.finished.is_set()
+        if process is not None and process.poll() is None and not writers_broken and not muxer_finished:
             return True
 
-        if process is not None and (process.poll() is not None or writers_broken):
+        if process is not None and (process.poll() is not None or writers_broken or muxer_finished):
             tail = "\n".join(list(self._stderr_tail)[-8:])
             logger.warning("[sink] ffmpeg died (exit=%s)%s", process.poll(), f"\n{tail}" if tail else "")
             self._teardown_process()
@@ -434,6 +371,9 @@ class HlsSink:
 
     def _teardown_process(self) -> None:
         process, self._process = self._process, None
+        muxer, self._muxer = self._muxer, None
+        if muxer is not None:
+            muxer.cancelled.set()
         audio_pipe, self._audio_pipe = self._audio_pipe, None
         if process is None:
             return
@@ -458,9 +398,17 @@ class HlsSink:
             except subprocess.TimeoutExpired:
                 logger.error("[sink] ffmpeg did not exit after SIGKILL")
 
+        if muxer is not None:
+            muxer.join(timeout=_WRITER_EXIT_TIMEOUT_S)
+            if muxer.is_alive():
+                self._dead = True
+                raise RuntimeError("metadata muxer did not stop; refusing concurrent playlist writers")
+        if process.stdout is not None:
+            process.stdout.close()
+
     # ------------------------------------------------------------- delivery
 
-    def send_video(self, frame: np.ndarray) -> None:
+    def send_video(self, frame: np.ndarray, metadata: bytes = EMPTY_ID3) -> None:
         if not self._ensure_running():
             return
         video = self._video
@@ -471,53 +419,19 @@ class HlsSink:
             return
         if not frame.flags["C_CONTIGUOUS"]:
             frame = np.ascontiguousarray(frame)
-        if self._pdt_base is None:
-            # Anchor as early as the first segment allows: the base is wound
-            # back from the newest date by the media sequence at a nominal
-            # segment length, and a live segment occasionally runs long, so a
-            # long wind-back accumulates error. Self-throttled, and this stops
-            # touching the disk entirely once anchored.
-            self._learn_pdt_base()
-        self._video_shed += self._video_writer.submit(frame.tobytes())
+        self._video_shed += self._video_writer.submit(frame.tobytes(), metadata)
         self._frames_sent += 1
-        self._stream_frames += 1
         if self._frames_sent % (video.fps * 60) == 0:
             logger.info(
                 "[sink] %d frames sent (dropped: %d video / %d audio; net A/V skew %+.3fs; "
-                "queue %d; clock %+.2fs vs playlist)",
+                "queue %d)",
                 self._frames_sent,
                 self._video_writer.dropped,
                 self._audio_writer.dropped if self._audio_writer else 0,
                 # What ffmpeg's byte-counted PTS is out by. Zero is the point.
                 (self._video_shed - self._audio_shed) / video.fps,
                 self._video_writer.queue.qsize(),
-                self._clock_drift(),
             )
-
-    def published_until(self) -> float | None:
-        """The date of the newest frame a player can actually have.
-
-        A viewer's position cannot be read back from every browser -- the
-        PROGRAM-DATE-TIME APIs are inconsistent and some expose nothing -- so
-        the page needs a second way to locate itself: this, minus how far the
-        viewer is behind their own buffer edge, puts them on the same clock
-        without asking the player for a date at all.
-        """
-        try:
-            newest, span = 0.0, 0.0
-            for line in self.playlist_path.read_text().splitlines():
-                if line.startswith("#EXT-X-PROGRAM-DATE-TIME:"):
-                    newest = datetime.fromisoformat(line.split(":", 1)[1].strip()).timestamp()
-                elif line.startswith("#EXTINF:"):
-                    span = float(line.split(":", 1)[1].rstrip(","))
-            return (newest + span) if newest else None
-        except OSError:
-            return None
-
-    def _clock_drift(self) -> float:
-        """How far `stream_time` sits ahead of the published video, for the log."""
-        published, now = self.published_until(), self.stream_time()
-        return (now - published) if (now and published) else 0.0
 
     def send_audio(self, samples: np.ndarray) -> None:
         # Gated exactly like send_video: audio written while video is withheld
