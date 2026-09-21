@@ -259,6 +259,12 @@ def test_unsupported_is_rejected(block):
         # to Triton instead of tripping the binding's check.
         q448 = (q[:, :, :448] if bwd.BHSD else q[:, :448]).contiguous()
         assert not bwd.is_supported(q448, seven)
+    # batch * heads is the launch grid's y extent: 65536 (batch, head) pairs are refused.
+    wide = (1, 65536, block, q.shape[-1]) if bwd.BHSD else (1, block, 65536, q.shape[-1])
+    q_wide = torch.empty(wide, dtype=torch.bfloat16, device="cuda")
+    one = torch.full((1, ), block, dtype=torch.int32, device="cuda")
+    assert not bwd.is_supported(q_wide, one)
+    del q_wide
 
     # The binding itself refuses bad dtypes before touching the GPU.
     k2q_idx, k2q_num = invert_indices_torch(idx, num, vbs.numel())

@@ -69,8 +69,9 @@ def is_supported(q: torch.Tensor, variable_block_sizes: torch.Tensor) -> bool:
     Static facts only (shapes, dtypes, arch, layout), never tensor contents, so it is cheap
     enough for a per-layer dispatch path. Both kernels take head_dim 128 and seqlen == block *
     num_blocks; the 64-token kernel also needs an even num_blocks (its preprocess works in
-    128-token blocks). Per-row k2q counts may be anything in [0, num_q_blocks], including 0:
-    unselected kv blocks get exactly-zero dk/dv rows.
+    128-token blocks); batch * heads is the launch grid's y extent, so it must be <= 65535.
+    Per-row k2q counts may be anything in [0, num_q_blocks], including 0: unselected kv blocks
+    get exactly-zero dk/dv rows.
     """
     if not _HAS_VSA_BWD_SM100A or not q.is_cuda:
         return False
@@ -79,6 +80,8 @@ def is_supported(q: torch.Tensor, variable_block_sizes: torch.Tensor) -> bool:
     if q.dtype != torch.bfloat16 or q.dim() != 4 or q.shape[-1] != HEAD_DIM:
         return False
     if not q.is_contiguous():
+        return False
+    if q.shape[0] * (q.shape[1] if BHSD else q.shape[2]) > 65535:
         return False
     # Metadata must be integer-typed so the wrapper's int32 conversion is value-preserving.
     if not variable_block_sizes.is_cuda or variable_block_sizes.dtype not in (torch.int32,
