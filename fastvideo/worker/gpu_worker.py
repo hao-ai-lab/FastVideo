@@ -87,8 +87,22 @@ class Worker:
         self.fastvideo_args.finalize_device_offload_policy(device_id)
 
         # Initialize the distributed environment.
-        maybe_init_distributed_environment_and_model_parallel(self.fastvideo_args.tp_size, self.fastvideo_args.sp_size,
-                                                              self.distributed_init_method)
+        sp_size = self.fastvideo_args.sp_size
+        sp_group_ranks = None
+        dp_group_ranks = None
+        if getattr(self.fastvideo_args, "h3_encoder_split", False):
+            # MiniMax-H3 component-level pipeline parallel: encoder ranks get
+            # singleton SP groups and never load the DiT/VAEs; the denoise
+            # ranks form the one sequence-parallel group.
+            from fastvideo.pipelines.basic.minimax_h3.encoder_split import h3_prepare_split_worker_parallelism
+
+            sp_size, sp_group_ranks, dp_group_ranks = h3_prepare_split_worker_parallelism(
+                self.fastvideo_args, self.rank, int(os.environ["WORLD_SIZE"]))
+        maybe_init_distributed_environment_and_model_parallel(self.fastvideo_args.tp_size,
+                                                              sp_size,
+                                                              self.distributed_init_method,
+                                                              sp_group_ranks=sp_group_ranks,
+                                                              dp_group_ranks=dp_group_ranks)
 
         self.pipeline = build_pipeline(self.fastvideo_args)
 

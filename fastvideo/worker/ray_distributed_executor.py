@@ -93,6 +93,11 @@ class RayDistributedExecutor(Executor):
         "NCCL_NVLS_ENABLE",
         "NCCL_DEBUG",
         "NCCL_DEBUG_SUBSYS",
+        # MiniMax-H3 encoder split: the driver resolves these into
+        # fastvideo_args, but keep the environment aligned on the workers so
+        # code paths that consult envs directly agree with the driver.
+        "FASTVIDEO_H3_ENCODER_SPLIT",
+        "FASTVIDEO_H3_ENCODER_NODES",
     }
 
     def _init_executor(self) -> None:
@@ -191,9 +196,14 @@ class RayDistributedExecutor(Executor):
         rerank_mapping = {item.created_rank: item.adjusted_rank for item in sorted_worker_metadata}
         self._run_ray_workers("adjust_rank", rerank_mapping)
 
+        if getattr(self.fastvideo_args, "h3_encoder_split", False):
+            # The sort keeps every node's workers contiguous, so the first
+            # ``h3_encoder_nodes`` distinct IPs are exactly the encoder group.
+            # Stamped before init_worker pickles the args to every worker.
+            self._setup_h3_encoder_split([item.ip for item in sorted_worker_metadata])
+
         # Get the set of GPU IDs used on each node.
         worker_node_and_gpu_ids = self._run_ray_workers("get_node_and_gpu_ids")
-
         node_workers = defaultdict(list)  # node id -> list of worker ranks
         node_gpus = defaultdict(list)  # node id -> list of gpu ids
 
@@ -246,7 +256,8 @@ class RayDistributedExecutor(Executor):
 
         self._run_ray_workers("update_environment_variables", self._get_env_vars_to_be_updated())
 
-        if should_use_gloo_loopback(worker_ips):
+        _lb = should_use_gloo_loopback(worker_ips)
+        if _lb:
             driver_ip = get_loopback_ip()
         distributed_init_method = get_distributed_init_method(driver_ip, get_open_port())
 
@@ -281,6 +292,42 @@ class RayDistributedExecutor(Executor):
                 self.tp_driver_workers.append(worker)
             else:
                 self.non_driver_workers.append(worker)
+
+    def _setup_h3_encoder_split(self, sorted_worker_ips: list[str]) -> None:
+        """Reserve the leading encoder nodes' workers and stamp the count onto the args.
+
+        ``sorted_worker_ips`` follows the driver-then-node sort, so workers of one
+        node are contiguous; the first ``h3_encoder_nodes`` distinct IPs form the
+        encoder group (ranks ``0..n-1``). Workers must be one-per-node style
+        placements; multi-GPU nodes simply contribute all of their workers.
+        """
+        args = self.fastvideo_args
+        nodes_needed = max(1, int(args.h3_encoder_nodes or 1))
+        ordered_ips: list[str] = []
+        for ip in sorted_worker_ips:
+            if ip not in ordered_ips:
+                ordered_ips.append(ip)
+        if len(ordered_ips) < nodes_needed + 1:
+            raise RuntimeError(f"MiniMax-H3 encoder split needs at least {nodes_needed + 1} distinct nodes "
+                               f"({nodes_needed} encoder + 1 denoise), got {len(ordered_ips)}.")
+        encoder_ips = set(ordered_ips[:nodes_needed])
+        encoder_workers = sum(1 for ip in sorted_worker_ips if ip in encoder_ips)
+        if not 1 <= encoder_workers < len(sorted_worker_ips):
+            raise RuntimeError(f"MiniMax-H3 encoder split resolved {encoder_workers} encoder workers out of "
+                               f"{len(sorted_worker_ips)}; need at least one denoise worker.")
+        from fastvideo.fastvideo_args import h3_split_sp_error, probe_h3_attention_heads
+
+        denoise_workers = len(sorted_worker_ips) - encoder_workers
+        heads = probe_h3_attention_heads(args.model_path)
+        if heads and heads % denoise_workers:
+            raise RuntimeError(h3_split_sp_error(heads, denoise_workers, len(sorted_worker_ips)))
+        args.h3_encoder_nodes = nodes_needed
+        args.h3_encoder_workers = encoder_workers
+        logger.info(
+            "MiniMax-H3 encoder split: ranks 0..%d on nodes %s run the Qwen3-VL conditioner only; ranks %d..%d "
+            "run DiT/VAE with sp_size=%d", encoder_workers - 1, sorted(encoder_ips), encoder_workers,
+            len(sorted_worker_ips) - 1,
+            len(sorted_worker_ips) - encoder_workers)
 
     def execute_streaming_reset(self, forward_batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> dict[str, Any]:
         responses: list[dict[str, Any]] = self.collective_rpc(
@@ -322,19 +369,24 @@ class RayDistributedExecutor(Executor):
                 "fastvideo_args": fastvideo_args,
             },
         )
-        output = responses[0].output.cpu()
+        # Under the MiniMax-H3 encoder split the encoder ranks answer with a
+        # stub batch; the decoded output lives on the first denoise rank.
+        src = 0
+        if getattr(self.fastvideo_args, "h3_encoder_split", False):
+            src = int(self.fastvideo_args.h3_encoder_workers)
+        output = responses[src].output.cpu()
 
         logging_info = None
         if envs.FASTVIDEO_STAGE_LOGGING:
-            logging_info = responses[0].logging_info
+            logging_info = responses[src].logging_info
 
         result_batch = ForwardBatch(
             data_type=forward_batch.data_type,
             output=output,
             logging_info=logging_info,
-            extra=responses[0].extra,
-            trajectory_latents=responses[0].trajectory_latents,
-            trajectory_timesteps=responses[0].trajectory_timesteps,
+            extra=responses[src].extra,
+            trajectory_latents=responses[src].trajectory_latents,
+            trajectory_timesteps=responses[src].trajectory_timesteps,
         )
         return result_batch
 
