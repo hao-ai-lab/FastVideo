@@ -6,6 +6,7 @@ import {
 	type DefaultOptions,
 } from "./defaultOptions";
 import type { Job, JobType } from "./types";
+import { createJobRequest, fetchApiRequest, updateJobRequest } from "./apiRequest";
 
 const DEFAULT_API_BASE_URL = "http://localhost:8189/api";
 
@@ -181,12 +182,7 @@ export async function updateJob(
 	jobId: string,
 	updates: Record<string, unknown>,
 ): Promise<unknown> {
-	const baseApiUrl = getApiBaseUrl();
-	const response = await fetch(`${baseApiUrl}/jobs/${jobId}`, {
-		method: "PATCH",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify(updates),
-	});
+	const response = await fetchApiRequest(getApiBaseUrl(), updateJobRequest(jobId, updates));
 	if (!response.ok) {
 		const err = await response.json().catch(() => ({ detail: "Update failed" }));
 		throw new Error(err.detail || "Update failed");
@@ -285,14 +281,7 @@ export async function getJobsList(jobType?: JobType): Promise<Job[]> {
 }
 
 export async function createJob(job: CreateJobRequest): Promise<Job> {
-	const baseApiUrl = getApiBaseUrl();
-	const response = await fetch(`${baseApiUrl}/jobs`, {
-		method: "POST",
-		headers: {
-			"Content-Type": "application/json",
-		},
-		body: JSON.stringify(job),
-	});
+	const response = await fetchApiRequest(getApiBaseUrl(), createJobRequest(job));
 	if (!response.ok) {
 		throw new Error("Failed to create job");
 	}
@@ -373,7 +362,9 @@ export async function downloadJobLog(id: string): Promise<Blob> {
 
 export async function downloadJobVideo(id: string): Promise<Blob> {
 	const baseApiUrl = getApiBaseUrl();
-	const response = await fetch(`${baseApiUrl}/jobs/${id}/video`);
+	// Keep downloads distinct from an <img>/<video> cache entry fetched without
+	// an Origin header; reusing that entry can fail CORS after previewing media.
+	const response = await fetch(`${baseApiUrl}/jobs/${id}/video?download=true`);
 	if (!response.ok) {
 		throw new Error("Failed to download video");
 	}

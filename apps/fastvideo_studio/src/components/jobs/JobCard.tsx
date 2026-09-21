@@ -4,23 +4,25 @@ import * as React from 'react';
 import { Timer } from 'lucide-react';
 
 import CreateJobModal from '@/components/jobs/CreateJobModal';
+import JobResultPreview from '@/components/jobs/JobResultPreview';
 import { Badge, type BadgeProps } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useStore } from '@/hooks/useStore';
 import {
   deleteJob,
   duplicateJob,
-  downloadJobVideo,
   startJob,
   stopJob,
 } from '@/lib/api';
+import { hasJobResult } from '@/lib/jobResults';
 import type { Job } from '@/lib/types';
-import { cn, downloadBlob } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 import { activeJobStore, setActiveJobId } from '@/stores/activeJob';
 
 interface JobCardProps {
   job: Job;
   onJobUpdated?: () => void;
+  thumbnailEnabled?: boolean;
 }
 
 function formatDuration(seconds: number): string {
@@ -59,7 +61,7 @@ const BADGE_VARIANTS: Record<string, BadgeProps['variant']> = {
   preprocessing: 'default',
 };
 
-export default function JobCard({ job, onJobUpdated }: JobCardProps) {
+export default function JobCard({ job, onJobUpdated, thumbnailEnabled = true }: JobCardProps) {
   const { activeJobId } = useStore(activeJobStore);
   const isSelected = activeJobId === job.id;
 
@@ -142,24 +144,22 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
     setActiveJobId(isSelected ? null : job.id);
   }
 
-  async function handleDownloadVideo(e: React.MouseEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    if (isLoading || !job.output_path) return;
-    setIsLoading(true);
-    try {
-      const blob = await downloadJobVideo(job.id);
-      const ext = job.output_path.endsWith('.png') ? 'png' : 'mp4';
-      downloadBlob(blob, `job_${job.id}.${ext}`);
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to download video');
-    } finally {
-      setIsLoading(false);
+  function handleCardClick(event: React.MouseEvent<HTMLElement>) {
+    const target = event.target;
+    // Keep the native configuration button keyboard-accessible, and extend
+    // its click target to card whitespace. Ignore actions and portal dialogs.
+    if (
+      target instanceof Element &&
+      event.currentTarget.contains(target) &&
+      !target.closest('button, a, input, select, textarea, [role="dialog"]')
+    ) {
+      setIsViewing(true);
     }
   }
 
   return (
     <article
+      onClick={handleCardClick}
       className={cn(
         'mb-3 flex cursor-pointer flex-col gap-2.5 rounded-lg border bg-background p-4 transition-colors last:mb-0',
         isSelected
@@ -167,49 +167,57 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
           : 'border-border hover:border-muted-foreground/40',
       )}
     >
-      <button
-        type="button"
-        aria-pressed={isSelected}
-        onClick={handleSelectJob}
-        className="flex w-full flex-col gap-2.5 rounded-md text-left"
-      >
-        <span className="flex flex-wrap items-center justify-between gap-2">
-          <span className="text-[0.95rem] font-semibold text-foreground">
-            {job.name?.trim() || job.model_id}
-          </span>
-          <Badge variant={BADGE_VARIANTS[job.status] ?? 'secondary'}>
-            {job.status}
-          </Badge>
-        </span>
-        <span className="max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-sm text-muted-foreground">
-          {job.name?.trim() ? `${job.model_id} · ${job.prompt}` : job.prompt}
-        </span>
-        <span className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
-          {/* Short job id; logs and output dirs are keyed on the full UUID. */}
-          <span
-            className="font-mono text-muted-foreground/80"
-            title={job.id}
-          >
-            {job.id.slice(0, 8)}
-          </span>
-          {job.job_type === 'inference' ? (
-            <>
-              <span>{job.num_frames} frames</span>
-              <span>
-                {job.height}×{job.width}
-              </span>
-            </>
-          ) : (
-            <span>{job.workload_type?.replace(/_/g, ' ') ?? job.job_type}</span>
-          )}
-          {elapsedTime && (
-            <span className="inline-flex items-center gap-1">
-              <Timer className="size-3.5" aria-hidden />
-              {elapsedTime}
+      <div className={cn('grid gap-4', hasJobResult(job) && 'lg:grid-cols-[280px_minmax(0,1fr)]')}>
+        {hasJobResult(job) && (
+          <JobResultPreview job={job} thumbnailEnabled={thumbnailEnabled} className="sm:self-start" />
+        )}
+        <button
+          type="button"
+          aria-label={`View configuration: ${job.name?.trim() || job.model_id}`}
+          aria-haspopup="dialog"
+          onClick={() => setIsViewing(true)}
+          title="View this job's configuration"
+          className="flex w-full min-w-0 flex-col gap-2.5 rounded-md text-left"
+        >
+          <span className="flex flex-wrap items-center justify-between gap-2">
+            <span className="min-w-0 break-words text-[0.95rem] font-semibold text-foreground">
+              {job.name?.trim() || job.model_id}
             </span>
-          )}
-        </span>
-      </button>
+            <Badge variant={BADGE_VARIANTS[job.status] ?? 'secondary'}>
+              {job.status}
+            </Badge>
+          </span>
+          {job.name?.trim() && <span className="max-w-full truncate text-xs text-muted-foreground" title={job.model_id}>{job.model_id}</span>}
+          <span className="line-clamp-2 max-w-full text-sm text-muted-foreground" title={job.prompt}>{job.prompt}</span>
+          <span className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
+            {/* Short job id; logs and output dirs are keyed on the full UUID. */}
+            <span
+              className="font-mono text-muted-foreground/80"
+              title={job.id}
+            >
+              {job.id.slice(0, 8)}
+            </span>
+            {job.job_type === 'inference' ? (
+              <>
+                <span>{job.num_frames} frames</span>
+                <span>
+                  {job.width}×{job.height}
+                </span>
+                <span>{job.num_inference_steps} steps</span>
+                <span>Seed {job.seed}</span>
+              </>
+            ) : (
+              <span>{job.workload_type?.replace(/_/g, ' ') ?? job.job_type}</span>
+            )}
+            {elapsedTime && (
+              <span className="inline-flex items-center gap-1">
+                <Timer className="size-3.5" aria-hidden />
+                {elapsedTime}
+              </span>
+            )}
+          </span>
+        </button>
+      </div>
       <div className="flex flex-wrap items-center gap-1.5">
         {job.status === 'running' ? (
           <Button
@@ -239,38 +247,18 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
             Start
           </Button>
         ) : null}
-        {job.status === 'completed' &&
-          job.output_path &&
-          job.job_type === 'inference' && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={handleDownloadVideo}
-              disabled={isLoading}
-              title="Download video"
-            >
-              Download Video
-            </Button>
-          )}
-        {!(
-          job.status === 'pending' ||
-          job.status === 'failed' ||
-          job.status === 'stopped'
-        ) && (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              setIsViewing(true);
-            }}
-            disabled={isLoading}
-            title="View this job's configuration"
-          >
-            View
-          </Button>
-        )}
+        <Button
+          size="sm"
+          variant="outline"
+          aria-pressed={isSelected}
+          onClick={(e) => {
+            e.stopPropagation();
+            handleSelectJob();
+          }}
+          title="Show this job's details and logs"
+        >
+          Details &amp; logs
+        </Button>
         {(job.status === 'pending' ||
           job.status === 'failed' ||
           job.status === 'stopped') && (

@@ -3,8 +3,7 @@ import { expect, test } from '@playwright/test';
 import { API_BASE, skipWithoutMock } from './helpers';
 
 /**
- * Gallery page: the seeded completed inference job surfaces as a media tile
- * with playback controls or an explicit media-error fallback.
+ * Gallery page: native video controls display inline with a lightweight poster.
  */
 test.describe('gallery', () => {
   skipWithoutMock();
@@ -32,13 +31,12 @@ test.describe('gallery', () => {
 
     const tile = page.locator('article').filter({ hasText: completed!.prompt });
     await expect(tile).toBeVisible();
-    await expect(
-      tile.locator('video').or(tile.getByText('Preview unavailable')),
-    ).toBeVisible();
-
     const video = tile.locator('video');
-    if (await video.isVisible()) {
-      await expect(video).toHaveAttribute('controls', '');
-    }
+    await expect(video).toBeVisible();
+    await expect(video).toHaveAttribute('controls', '');
+    await expect(video).toHaveAttribute('preload', 'none');
+    await expect(tile.getByRole('button', { name: 'Download video' })).toBeVisible();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByText('Watch video', { exact: true })).toHaveCount(0);
   });
 });

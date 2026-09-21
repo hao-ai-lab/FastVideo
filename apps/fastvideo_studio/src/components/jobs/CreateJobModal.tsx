@@ -1,10 +1,12 @@
 'use client';
 
 import * as React from 'react';
+import { Code2 } from 'lucide-react';
 
 import {
   FieldRow,
   NumberRow,
+  OptionSection,
   SliderRow,
   ToggleRow,
 } from '@/components/form-rows';
@@ -51,10 +53,15 @@ import {
   type H3PromptFields,
 } from '@/lib/h3Prompt';
 import { jobToFormFields, type JobLike } from '@/lib/jobToFields';
+import { createJobRequest, updateJobRequest } from '@/lib/apiRequest';
+import ApiRequestPreview from './ApiRequestPreview';
 
 export interface CreateJobModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onCloseAutoFocus?: React.ComponentProps<
+    typeof DialogContent
+  >['onCloseAutoFocus'];
   onSuccess: () => void;
   jobType: JobType;
   workloadType: string;
@@ -67,6 +74,7 @@ export interface CreateJobModalProps {
 export default function CreateJobModal({
   isOpen,
   onClose,
+  onCloseAutoFocus,
   onSuccess,
   jobType,
   workloadType,
@@ -180,6 +188,8 @@ export default function CreateJobModal({
   const [realScoreModelPath, setRealScoreModelPath] = React.useState('');
   const [fakeScoreModelPath, setFakeScoreModelPath] = React.useState('');
   const [isSubmitting, setIsSubmitting] = React.useState(false);
+  const [showApiPreview, setShowApiPreview] = React.useState(false);
+  const apiPreviewId = React.useId();
   const [isLoadingModels, setIsLoadingModels] = React.useState(false);
   const [isLoadingDatasets, setIsLoadingDatasets] = React.useState(false);
   const [modelLoadError, setModelLoadError] = React.useState<string | null>(
@@ -193,6 +203,7 @@ export default function CreateJobModal({
   );
   const [submitError, setSubmitError] = React.useState<string | null>(null);
   const imageInputRef = React.useRef<HTMLInputElement>(null);
+  const nameInputRef = React.useRef<HTMLInputElement>(null);
 
   // Seed field values from the persisted default options each time the modal
   // OPENS. A naive port of the Svelte `$effect` would re-seed on every
@@ -204,6 +215,7 @@ export default function CreateJobModal({
     const justOpened = isOpen && !justOpenedRef.current;
     justOpenedRef.current = isOpen;
     if (!justOpened) return;
+    setShowApiPreview(false);
     if (editingJob) {
       // Must not fall through to the defaults below: a partially-seeded
       // form silently edits values the user never saw.
@@ -238,6 +250,20 @@ export default function CreateJobModal({
       setVsaSparsity(f.vsaSparsity);
       setTpSize(f.tpSize);
       setSpSize(f.spSize);
+      setSelectedDatasetId(f.dataPath);
+      setSelectedValidationDatasetId(f.validationDatasetFile);
+      setMaxTrainSteps(f.maxTrainSteps);
+      setTrainBatchSize(f.trainBatchSize);
+      setLearningRate(f.learningRate);
+      setNumLatentT(f.numLatentT);
+      setLoraRank(f.loraRank);
+      setDmdUseVsa(f.dmdUseVsa);
+      setDmdVsaSparsity(f.dmdVsaSparsity);
+      setDmdDenoisingSteps(f.dmdDenoisingSteps);
+      setRealScoreGuidanceScale(f.realScoreGuidanceScale);
+      setGeneratorUpdateInterval(f.generatorUpdateInterval);
+      setRealScoreModelPath(f.realScoreModelPath);
+      setFakeScoreModelPath(f.fakeScoreModelPath);
       setReferenceError(null);
       setModelLoadError(null);
       setImageUploadError(null);
@@ -283,6 +309,11 @@ export default function CreateJobModal({
     setUseGuidedPrompt(true);
     setSelectedDatasetId('');
     setSelectedValidationDatasetId('');
+    setMaxTrainSteps(1000);
+    setTrainBatchSize(1);
+    setLearningRate(5e-5);
+    setNumLatentT(20);
+    setLoraRank(32);
     setModelLoadError(null);
     setDatasetLoadError(null);
     setImageUploadError(null);
@@ -321,13 +352,13 @@ export default function CreateJobModal({
         // would silently swap the model out from under the user.
         const editedId = editingJobModelId;
         const chosen =
-          editedId && ids.includes(editedId)
+          editedId && (!isInference || ids.includes(editedId))
             ? editedId
             : ids.includes(defaultId)
               ? defaultId
               : (list[0]?.id ?? '');
         setModelId(chosen);
-        if (workloadType === 'dmd_t2v') {
+        if (workloadType === 'dmd_t2v' && !editingJobId) {
           setRealScoreModelPath(chosen);
           setFakeScoreModelPath(chosen);
         }
@@ -347,7 +378,14 @@ export default function CreateJobModal({
     return () => {
       stale = true;
     };
-  }, [isOpen, inferenceWorkload, workloadType, editingJobModelId]);
+  }, [
+    isOpen,
+    isInference,
+    inferenceWorkload,
+    workloadType,
+    editingJobId,
+    editingJobModelId,
+  ]);
 
   // Training jobs need a dataset; load the ready datasets when relevant.
   React.useEffect(() => {
@@ -506,6 +544,90 @@ export default function CreateJobModal({
     if (imageInputRef.current) imageInputRef.current.value = '';
   }
 
+  function buildJobPayload(): CreateJobRequest {
+    // New selections use an ID; unchanged edits preserve the saved path.
+    // The backend accepts either representation for both create and update.
+    const effectiveDataPath = selectedDatasetId ?? '';
+    // `lora_t2v` jobs are persisted with a dedicated backend job_type that the
+    // front-end JobType enum does not model; cast to keep payload parity.
+    const effectiveJobType = (
+      workloadType === 'lora_t2v' ? 'lora' : jobType
+    ) as JobType;
+    return {
+      model_id: modelId,
+      name: name.trim(),
+      prompt:
+        usingReferences && useGuidedPrompt && !isEmptyPromptFields(promptFields)
+          ? serializeH3Prompt(promptFields)
+          : prompt,
+      workload_type: workloadType,
+      job_type: effectiveJobType,
+      ...(isInference
+        ? {
+            // Ref2VA and the FL2VA keyframes are mutually exclusive:
+            // _prepare_ref2va rejects image_path/last_image_path outright
+            // when references are present.
+            ...(workloadType === 'i2v' && !usingReferences && imagePath
+              ? { image_path: imagePath }
+              : {}),
+            ...(workloadType === 'i2v' &&
+            supportsLastImage &&
+            !usingReferences &&
+            lastImagePath
+              ? { last_image_path: lastImagePath }
+              : {}),
+            ...(workloadType === 'i2v' && supportsLastImage && references.length
+              ? {
+                  references: references.map((r) => ({
+                    source: r.source,
+                    media_type: r.media_type,
+                  })),
+                }
+              : {}),
+            negative_prompt: negativePrompt,
+            num_inference_steps: numInferenceSteps,
+            num_frames: numFrames,
+            height,
+            width,
+            guidance_scale: guidanceScale,
+            guidance_rescale: guidanceRescale,
+            fps,
+            seed,
+            num_gpus: numGpus,
+            dit_cpu_offload: ditCpuOffload,
+            dit_layerwise_offload: ditLayerwiseOffload,
+            text_encoder_cpu_offload: textEncoderCpuOffload,
+            vae_cpu_offload: vaeCpuOffload,
+            image_encoder_cpu_offload: imageEncoderCpuOffload,
+            use_fsdp_inference: useFsdpInference,
+            enable_torch_compile: enableTorchCompile,
+            vsa_sparsity: vsaSparsity,
+            tp_size: tpSize,
+            sp_size: spSize,
+          }
+        : {
+            data_path: effectiveDataPath,
+            max_train_steps: maxTrainSteps,
+            train_batch_size: trainBatchSize,
+            learning_rate: learningRate,
+            num_latent_t: numLatentT,
+            validation_dataset_file: selectedValidationDatasetId,
+            lora_rank: loraRank,
+            ...(workloadType === 'dmd_t2v'
+              ? {
+                  dmd_use_vsa: dmdUseVsa,
+                  dmd_vsa_sparsity: dmdVsaSparsity,
+                  dmd_denoising_steps: dmdDenoisingSteps,
+                  real_score_guidance_scale: realScoreGuidanceScale,
+                  generator_update_interval: generatorUpdateInterval,
+                  real_score_model_path: realScoreModelPath,
+                  fake_score_model_path: fakeScoreModelPath,
+                }
+              : {}),
+          }),
+    };
+  }
+
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (isInference && workloadType === 'i2v' && !imagePath && !usingReferences)
@@ -518,90 +640,11 @@ export default function CreateJobModal({
       !prompt.trim()
     )
       return;
-    // Send the dataset id; the backend resolves it to the on-disk media dir.
-    const effectiveDataPath = selectedDatasetId ?? '';
     if (!isInference && !selectedDatasetId) return;
-    // `lora_t2v` jobs are persisted with a dedicated backend job_type that the
-    // front-end JobType enum does not model; cast to keep payload parity.
-    const effectiveJobType = (
-      workloadType === 'lora_t2v' ? 'lora' : jobType
-    ) as JobType;
     setIsSubmitting(true);
     setSubmitError(null);
     try {
-      const payload: CreateJobRequest = {
-        model_id: modelId,
-        name: name.trim(),
-        prompt:
-          usingReferences && useGuidedPrompt && !isEmptyPromptFields(promptFields)
-            ? serializeH3Prompt(promptFields)
-            : prompt,
-        workload_type: workloadType,
-        job_type: effectiveJobType,
-        ...(isInference
-          ? {
-              // Ref2VA and the FL2VA keyframes are mutually exclusive:
-              // _prepare_ref2va rejects image_path/last_image_path outright
-              // when references are present.
-              ...(workloadType === 'i2v' && !usingReferences && imagePath
-                ? { image_path: imagePath }
-                : {}),
-              ...(workloadType === 'i2v' &&
-              supportsLastImage &&
-              !usingReferences &&
-              lastImagePath
-                ? { last_image_path: lastImagePath }
-                : {}),
-              ...(workloadType === 'i2v' && supportsLastImage && references.length
-                ? {
-                    references: references.map((r) => ({
-                      source: r.source,
-                      media_type: r.media_type,
-                    })),
-                  }
-                : {}),
-              negative_prompt: negativePrompt,
-              num_inference_steps: numInferenceSteps,
-              num_frames: numFrames,
-              height,
-              width,
-              guidance_scale: guidanceScale,
-              guidance_rescale: guidanceRescale,
-              fps,
-              seed,
-              num_gpus: numGpus,
-              dit_cpu_offload: ditCpuOffload,
-              dit_layerwise_offload: ditLayerwiseOffload,
-              text_encoder_cpu_offload: textEncoderCpuOffload,
-              vae_cpu_offload: vaeCpuOffload,
-              image_encoder_cpu_offload: imageEncoderCpuOffload,
-              use_fsdp_inference: useFsdpInference,
-              enable_torch_compile: enableTorchCompile,
-              vsa_sparsity: vsaSparsity,
-              tp_size: tpSize,
-              sp_size: spSize,
-            }
-          : {
-              data_path: effectiveDataPath.trim(),
-              max_train_steps: maxTrainSteps,
-              train_batch_size: trainBatchSize,
-              learning_rate: learningRate,
-              num_latent_t: numLatentT,
-              validation_dataset_file: selectedValidationDatasetId || undefined,
-              lora_rank: loraRank,
-              ...(workloadType === 'dmd_t2v'
-                ? {
-                    dmd_use_vsa: dmdUseVsa,
-                    dmd_vsa_sparsity: dmdVsaSparsity,
-                    dmd_denoising_steps: dmdDenoisingSteps,
-                    real_score_guidance_scale: realScoreGuidanceScale,
-                    generator_update_interval: generatorUpdateInterval,
-                    real_score_model_path: realScoreModelPath || modelId,
-                    fake_score_model_path: fakeScoreModelPath || modelId,
-                  }
-                : {}),
-            }),
-      };
+      const payload = buildJobPayload();
       if (editingJob) {
         await updateJob(
           editingJob.id,
@@ -644,6 +687,15 @@ export default function CreateJobModal({
     >
       <DialogContent
         className="max-h-[90vh] w-[90vw] max-w-[850px] overflow-y-auto"
+        onCloseAutoFocus={onCloseAutoFocus}
+        onOpenAutoFocus={(event) => {
+          // Keep typing focused on the form; the API action remains reachable
+          // with Shift+Tab. Read-only views start at the enabled API action.
+          if (!readOnly) {
+            event.preventDefault();
+            nameInputRef.current?.focus();
+          }
+        }}
         onEscapeKeyDown={(e) => {
           if (isSubmitting) e.preventDefault();
         }}
@@ -651,9 +703,32 @@ export default function CreateJobModal({
           if (isSubmitting) e.preventDefault();
         }}
       >
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
+        <DialogHeader className="flex-row items-start justify-between gap-3 pr-10">
+          <DialogTitle className="min-w-0 pt-2.5 leading-snug">{title}</DialogTitle>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="shrink-0"
+            aria-label="API example"
+            title="API example"
+            aria-expanded={showApiPreview}
+            aria-controls={apiPreviewId}
+            onClick={() => setShowApiPreview((visible) => !visible)}
+          >
+            <Code2 aria-hidden="true" className="size-4" />
+            <span className="hidden min-[420px]:inline">API example</span>
+          </Button>
         </DialogHeader>
+
+        {showApiPreview && (
+          <ApiRequestPreview
+            id={apiPreviewId}
+            request={editingJob && !readOnly
+              ? updateJobRequest(editingJob.id, buildJobPayload() as unknown as Record<string, unknown>)
+              : createJobRequest(buildJobPayload())}
+          />
+        )}
 
         <form
           onSubmit={handleSubmit}
@@ -669,6 +744,7 @@ export default function CreateJobModal({
           >
           <FieldRow htmlFor="modal-name" label="Name (optional)">
             <Input
+              ref={nameInputRef}
               id="modal-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -696,6 +772,10 @@ export default function CreateJobModal({
                     ? 'No models available for this workload'
                     : 'Select a model…'}
               </option>
+              {!isInference && modelId &&
+                !models.some((model) => model.id === modelId) && (
+                  <option value={modelId}>{modelId}</option>
+                )}
               {models.map((model) => (
                 <option key={model.id} value={model.id}>
                   {model.label} ({model.id})
@@ -960,6 +1040,12 @@ export default function CreateJobModal({
                             ? 'No datasets (add in Datasets tab)'
                             : 'Select a dataset…'}
                     </option>
+                    {selectedDatasetId &&
+                      !readyDatasets.some((d) => d.id === selectedDatasetId) && (
+                        <option value={selectedDatasetId}>
+                          Current dataset: {selectedDatasetId}
+                        </option>
+                      )}
                     {readyDatasets.map((d) => (
                       <option key={d.id} value={d.id}>
                         {d.name}
@@ -992,6 +1078,12 @@ export default function CreateJobModal({
                     }
                   >
                     <option value="">None</option>
+                    {selectedValidationDatasetId &&
+                      !readyDatasets.some((d) => d.id === selectedValidationDatasetId) && (
+                        <option value={selectedValidationDatasetId}>
+                          Current dataset: {selectedValidationDatasetId}
+                        </option>
+                      )}
                     {readyDatasets.map((d) => (
                       <option key={d.id} value={d.id}>
                         {d.name}
@@ -1145,6 +1237,10 @@ export default function CreateJobModal({
                             disabled={isSubmitting || isLoadingModels}
                           >
                             <option value="">Same as main model</option>
+                            {select.value &&
+                              !models.some((model) => model.id === select.value) && (
+                                <option value={select.value}>{select.value}</option>
+                              )}
                             {models.map((model) => (
                               <option key={model.id} value={model.id}>
                                 {model.label} ({model.id})
@@ -1161,11 +1257,12 @@ export default function CreateJobModal({
           )}
 
           {isInference && (
-            <details>
-              <summary className="mb-2 cursor-pointer select-none text-sm font-medium text-accent-blue">
-                Options
-              </summary>
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-x-3 gap-y-2">
+            <div className="space-y-3">
+              <OptionSection
+                title="Output"
+                description="Frames, resolution, playback and seed. Drag a slider or type a value."
+                defaultOpen
+              >
                 {workloadType !== 't2i' && (
                   <SliderRow
                     id="modal-num-frames"
@@ -1175,7 +1272,7 @@ export default function CreateJobModal({
                     step={1}
                     value={numFrames}
                     onChange={setNumFrames}
-                    disabled={isSubmitting}
+                    disabled={isSubmitting || readOnly}
                   />
                 )}
                 <SliderRow
@@ -1186,7 +1283,7 @@ export default function CreateJobModal({
                   step={16}
                   value={height}
                   onChange={setHeight}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || readOnly}
                 />
                 <SliderRow
                   id="modal-width"
@@ -1196,8 +1293,37 @@ export default function CreateJobModal({
                   step={16}
                   value={width}
                   onChange={setWidth}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || readOnly}
                 />
+                {workloadType !== 't2i' && (
+                  <SliderRow
+                    id="modal-fps"
+                    label="FPS"
+                    min={1}
+                    max={60}
+                    step={1}
+                    value={fps}
+                    onChange={setFps}
+                    disabled={isSubmitting || readOnly}
+                  />
+                )}
+                <NumberRow
+                  id="modal-seed"
+                  label="Seed"
+                  min={0}
+                  value={seed}
+                  onChange={setSeed}
+                  disabled={isSubmitting || readOnly}
+                />
+                <p className="col-span-full text-xs text-muted-foreground">
+                  Supported frame counts and resolutions depend on the model.
+                </p>
+              </OptionSection>
+              <OptionSection
+                title="Generation"
+                description="Denoising steps and prompt guidance."
+                defaultOpen
+              >
                 <SliderRow
                   id="modal-num-steps"
                   label="Inference Steps"
@@ -1206,19 +1332,7 @@ export default function CreateJobModal({
                   step={1}
                   value={numInferenceSteps}
                   onChange={setNumInferenceSteps}
-                  disabled={isSubmitting}
-                />
-                <SliderRow
-                  id="modal-vsa-sparsity"
-                  label="VSA Sparsity"
-                  title="VSA sparsity (0–1)"
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  value={vsaSparsity}
-                  onChange={setVsaSparsity}
-                  disabled={isSubmitting}
-                  format={(v) => v.toFixed(2)}
+                  disabled={isSubmitting || readOnly}
                 />
                 <SliderRow
                   id="modal-guidance"
@@ -1228,7 +1342,7 @@ export default function CreateJobModal({
                   step={0.1}
                   value={guidanceScale}
                   onChange={setGuidanceScale}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || readOnly}
                   format={(v) => v.toFixed(1)}
                 />
                 <SliderRow
@@ -1240,8 +1354,94 @@ export default function CreateJobModal({
                   step={0.05}
                   value={guidanceRescale}
                   onChange={setGuidanceRescale}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || readOnly}
                   format={(v) => v.toFixed(2)}
+                />
+              </OptionSection>
+              <OptionSection
+                title="Acceleration"
+                description="Compilation and sparse attention."
+              >
+                <ToggleRow
+                  id="modal-enable-torch-compile"
+                  label="Torch Compile"
+                  checked={enableTorchCompile}
+                  onChange={setEnableTorchCompile}
+                  disabled={isSubmitting || readOnly}
+                />
+                <SliderRow
+                  id="modal-vsa-sparsity"
+                  label="VSA Sparsity"
+                  title="VSA sparsity (0–1)"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={vsaSparsity}
+                  onChange={setVsaSparsity}
+                  disabled={isSubmitting || readOnly}
+                  format={(v) => v.toFixed(2)}
+                />
+              </OptionSection>
+              <OptionSection
+                title="Memory"
+                description="Move model components to CPU to reduce GPU memory use."
+              >
+                <ToggleRow
+                  id="modal-dit-cpu-offload"
+                  label="DiT CPU Offload"
+                  checked={ditCpuOffload}
+                  onChange={setDitCpuOffload}
+                  disabled={isSubmitting || readOnly}
+                />
+                <ToggleRow
+                  id="modal-dit-layerwise-offload"
+                  label="DiT Layerwise Offload"
+                  checked={ditLayerwiseOffload}
+                  onChange={handleDitLayerwiseOffloadChange}
+                  disabled={isSubmitting || readOnly}
+                />
+                <ToggleRow
+                  id="modal-text-encoder-cpu-offload"
+                  label="Text Encoder CPU Offload"
+                  checked={textEncoderCpuOffload}
+                  onChange={setTextEncoderCpuOffload}
+                  disabled={isSubmitting || readOnly}
+                />
+                <ToggleRow
+                  id="modal-vae-cpu-offload"
+                  label="VAE CPU Offload"
+                  checked={vaeCpuOffload}
+                  onChange={setVaeCpuOffload}
+                  disabled={isSubmitting || readOnly}
+                />
+                <ToggleRow
+                  id="modal-image-encoder-cpu-offload"
+                  label="Image Encoder CPU Offload"
+                  checked={imageEncoderCpuOffload}
+                  onChange={setImageEncoderCpuOffload}
+                  disabled={isSubmitting || readOnly}
+                />
+              </OptionSection>
+              <OptionSection
+                title="Distributed"
+                description="GPU count, tensor parallelism and sequence parallelism."
+              >
+                <SliderRow
+                  id="modal-num-gpus"
+                  label="GPUs"
+                  min={1}
+                  max={8}
+                  step={1}
+                  value={numGpus}
+                  onChange={handleNumGpusChange}
+                  disabled={isSubmitting || readOnly}
+                />
+                <ToggleRow
+                  id="modal-use-fsdp-inference"
+                  label="Use FSDP Inference"
+                  checked={useFsdpInference}
+                  onChange={handleUseFsdpInferenceChange}
+                  disabled={isSubmitting || readOnly}
                 />
                 <SliderRow
                   id="modal-tp-size"
@@ -1252,7 +1452,7 @@ export default function CreateJobModal({
                   step={1}
                   value={tpSize}
                   onChange={setTpSize}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || readOnly}
                   format={(v) => (v === -1 ? 'Auto' : String(v))}
                 />
                 <SliderRow
@@ -1264,90 +1464,11 @@ export default function CreateJobModal({
                   step={1}
                   value={spSize}
                   onChange={setSpSize}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || readOnly}
                   format={(v) => (v === -1 ? 'Auto' : String(v))}
                 />
-                {workloadType !== 't2i' && (
-                  <SliderRow
-                    id="modal-fps"
-                    label="FPS"
-                    min={1}
-                    max={60}
-                    step={1}
-                    value={fps}
-                    onChange={setFps}
-                    disabled={isSubmitting}
-                  />
-                )}
-                <ToggleRow
-                  id="modal-dit-cpu-offload"
-                  label="DiT CPU Offload"
-                  checked={ditCpuOffload}
-                  onChange={setDitCpuOffload}
-                  disabled={isSubmitting}
-                />
-                <ToggleRow
-                  id="modal-dit-layerwise-offload"
-                  label="DiT Layerwise Offload"
-                  checked={ditLayerwiseOffload}
-                  onChange={handleDitLayerwiseOffloadChange}
-                  disabled={isSubmitting}
-                />
-                <ToggleRow
-                  id="modal-text-encoder-cpu-offload"
-                  label="Text Encoder CPU Offload"
-                  checked={textEncoderCpuOffload}
-                  onChange={setTextEncoderCpuOffload}
-                  disabled={isSubmitting}
-                />
-                <ToggleRow
-                  id="modal-use-fsdp-inference"
-                  label="Use FSDP Inference"
-                  checked={useFsdpInference}
-                  onChange={handleUseFsdpInferenceChange}
-                  disabled={isSubmitting}
-                />
-                <ToggleRow
-                  id="modal-vae-cpu-offload"
-                  label="VAE CPU Offload"
-                  checked={vaeCpuOffload}
-                  onChange={setVaeCpuOffload}
-                  disabled={isSubmitting}
-                />
-                <ToggleRow
-                  id="modal-image-encoder-cpu-offload"
-                  label="Image Encoder CPU Offload"
-                  checked={imageEncoderCpuOffload}
-                  onChange={setImageEncoderCpuOffload}
-                  disabled={isSubmitting}
-                />
-                <ToggleRow
-                  id="modal-enable-torch-compile"
-                  label="Torch Compile"
-                  checked={enableTorchCompile}
-                  onChange={setEnableTorchCompile}
-                  disabled={isSubmitting}
-                />
-                <SliderRow
-                  id="modal-num-gpus"
-                  label="GPUs"
-                  min={1}
-                  max={8}
-                  step={1}
-                  value={numGpus}
-                  onChange={handleNumGpusChange}
-                  disabled={isSubmitting}
-                />
-                <NumberRow
-                  id="modal-seed"
-                  label="Seed"
-                  min={0}
-                  value={seed}
-                  onChange={setSeed}
-                  disabled={isSubmitting}
-                />
-              </div>
-            </details>
+              </OptionSection>
+            </div>
           )}
 
           </fieldset>

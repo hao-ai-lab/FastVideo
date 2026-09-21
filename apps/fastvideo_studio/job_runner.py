@@ -685,9 +685,11 @@ class JobRunner:
         unknown = set(updates) - set(self.CONFIG_FIELDS)
         if unknown:
             raise ValueError(f"Not editable: {', '.join(sorted(unknown))}")
+        # Configuration edits must survive a server restart. Persist before
+        # changing the live job so a failed write cannot report a saved edit.
+        self._db.update_job_config(job_id, updates)
         for field_name, value in updates.items():
             setattr(job, field_name, value)
-        self._save_job(job)
         return job
 
     def start_job(self, job_id: str) -> Job:

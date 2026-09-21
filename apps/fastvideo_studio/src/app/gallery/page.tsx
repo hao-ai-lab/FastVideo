@@ -1,70 +1,24 @@
 'use client';
 
-import { AlertTriangle, ImageOff, Loader2 } from 'lucide-react';
+import { AlertTriangle, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
+import JobFilters from '@/components/jobs/JobFilters';
+import JobResultPreview, { JobResultMetadata } from '@/components/jobs/JobResultPreview';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { getJobVideoUrl, getJobsList } from '@/lib/api';
+import { useJobModelOptions } from '@/hooks/useJobModelOptions';
+import { getJobsList } from '@/lib/api';
+import { filterJobs, hasJobResult, MAX_RESULT_PREVIEWS } from '@/lib/jobResults';
 import type { Job } from '@/lib/types';
-
-function isImage(job: Job): boolean {
-  return job.output_path?.toLowerCase().endsWith('.png') ?? false;
-}
-
-function GalleryMedia({ job }: { job: Job }) {
-  const [failed, setFailed] = useState(false);
-
-  if (failed) {
-    return (
-      <div
-        role="status"
-        className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center text-muted-foreground"
-      >
-        <ImageOff className="size-7" aria-hidden />
-        <span className="text-sm font-medium">Preview unavailable</span>
-        <span className="text-xs">
-          The generated file could not be loaded.
-        </span>
-      </div>
-    );
-  }
-
-  if (isImage(job)) {
-    return (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        src={getJobVideoUrl(job.id)}
-        alt={job.prompt}
-        className="block h-full w-full object-contain"
-        loading="lazy"
-        onError={() => setFailed(true)}
-      />
-    );
-  }
-
-  return (
-    <video
-      src={getJobVideoUrl(job.id)}
-      aria-label={
-        job.prompt ? `Generated video: ${job.prompt}` : 'Generated video'
-      }
-      className="block h-full w-full object-contain"
-      controls
-      muted
-      loop
-      playsInline
-      preload="metadata"
-      onError={() => setFailed(true)}
-    />
-  );
-}
 
 export default function GalleryPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
+  const [modelFilter, setModelFilter] = useState('');
+  const [promptFilter, setPromptFilter] = useState('');
+  const [page, setPage] = useState(0);
   const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
@@ -99,11 +53,14 @@ export default function GalleryPage() {
     setReloadKey((k) => k + 1);
   }
 
-  const galleryJobs = jobs.filter(
-    (j) =>
-      j.status === 'completed' &&
-      j.output_path &&
-      (j.job_type === 'inference' || !j.job_type),
+  const galleryJobs = jobs.filter(hasJobResult);
+  const modelOptions = useJobModelOptions(galleryJobs);
+  const filteredJobs = filterJobs(galleryJobs, modelFilter, promptFilter);
+  const pageCount = Math.ceil(filteredJobs.length / MAX_RESULT_PREVIEWS);
+  const currentPage = Math.min(page, Math.max(0, pageCount - 1));
+  const pageJobs = filteredJobs.slice(
+    currentPage * MAX_RESULT_PREVIEWS,
+    (currentPage + 1) * MAX_RESULT_PREVIEWS,
   );
 
   return (
@@ -111,8 +68,7 @@ export default function GalleryPage() {
       <Card className="p-6">
         <h2 className="mb-1 text-2xl font-semibold text-foreground">Gallery</h2>
         <p className="mb-6 text-sm text-muted-foreground">
-          Generated videos from completed inference jobs. Captions show the
-          prompt used for each generation.
+          Completed videos and images, with their model and settings.
         </p>
 
         {isLoading ? (
@@ -136,24 +92,58 @@ export default function GalleryPage() {
             No completed videos yet
           </p>
         ) : (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-5">
-            {galleryJobs.map((job) => (
-              <article
-                key={job.id}
-                className="flex flex-col overflow-hidden rounded-lg border border-border bg-background"
-              >
-                <div className="relative aspect-video overflow-hidden bg-muted">
-                  <GalleryMedia job={job} />
-                </div>
-                <p
-                  className="line-clamp-3 border-t border-border px-4 py-3 text-sm text-muted-foreground"
-                  title={job.prompt}
-                >
-                  {job.prompt || '—'}
+          <>
+            <JobFilters
+              model={modelFilter}
+              models={modelOptions}
+              prompt={promptFilter}
+              onModelChange={(value) => { setModelFilter(value); setPage(0); }}
+              onPromptChange={(value) => { setPromptFilter(value); setPage(0); }}
+              count={filteredJobs.length}
+              total={galleryJobs.length}
+            />
+            {filteredJobs.length === 0 ? (
+              <p className="py-8 text-center text-muted-foreground">No results match these filters.</p>
+            ) : (
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,320px),1fr))] gap-5">
+                {pageJobs.map((job) => (
+                  <article
+                    key={job.id}
+                    className="flex flex-col overflow-hidden rounded-lg border border-border bg-background"
+                  >
+                    <JobResultPreview job={job} className="rounded-none" />
+                    <div className="flex flex-col gap-2.5 border-t border-border p-4">
+                      <div>
+                        <h3 className="truncate text-sm font-semibold" title={job.name?.trim() || job.model_id}>
+                          {job.name?.trim() || job.model_id}
+                        </h3>
+                        {job.name?.trim() && <p className="mt-1 truncate text-xs text-muted-foreground" title={job.model_id}>{job.model_id}</p>}
+                      </div>
+                      <p className="line-clamp-3 text-sm text-muted-foreground" title={job.prompt}>
+                        {job.prompt || '—'}
+                      </p>
+                      <JobResultMetadata job={job} />
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+            {pageCount > 1 && (
+              <nav aria-label="Gallery pages" className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
+                <p className="text-xs text-muted-foreground">
+                  Page {currentPage + 1} of {pageCount} · Up to {MAX_RESULT_PREVIEWS} previews per page
                 </p>
-              </article>
-            ))}
-          </div>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>
+                    <ChevronLeft className="mr-1 size-4" aria-hidden /> Previous
+                  </Button>
+                  <Button variant="outline" size="sm" disabled={currentPage + 1 >= pageCount} onClick={() => setPage(currentPage + 1)}>
+                    Next <ChevronRight className="ml-1 size-4" aria-hidden />
+                  </Button>
+                </div>
+              </nav>
+            )}
+          </>
         )}
       </Card>
     </div>
