@@ -79,6 +79,39 @@ Phase plan (from the 2026-09-22 plan review):
 4. H3 joint video+audio, shared adapters, then VSA.
 5. Docs and examples; PRs only after quality passes.
 
+### Phase 3.1 (2026-09-22): multi-prompt + held-out diversity follow-up
+
+User-directed follow-up before Phase 4. Phase 3 could not measure sample
+diversity because the validation set had one prompt; the standalone S10
+found diversity contraction (~21 pct) on the train prompt with partial
+held-out generalization and named multi-prompt training the standard fix.
+
+Scope (user-approved): train the fixed recipe on four prompts and validate
+on four train plus four held-out prompts with four repeated rows each, so
+the reference-free report can separate within-caption seed spread from
+cross-caption spread.
+
+- Assets: `tdm_multiprompt_train_prompts.txt` (four object-centric train
+  prompts) and `tdm_multiprompt_validation.json` (four train + four
+  held-out captions, each repeated four times; the repeat makes the
+  caption-to-filename mapping deterministic because the validation dataset
+  shards rows across SP groups and pads to that degree).
+- Tool: `tests/local_tests/tdm/tools/tdm_multiprompt_report.py` rebuilds the
+  row mapping from the caption file and reports per-caption sharpness plus
+  within-caption spread, cross-caption spread, and their ratio. Spread is
+  the mean pairwise L2 between temporal-mean pooled frame descriptors, a
+  reference-free proxy; paired metrics stay forensic.
+- Runner: `tests/local_tests/tdm/k8s/run_wan_tdm_multiprompt.sh` builds the
+  four-prompt text-only dataset on the pod (one prompt per shard), runs the
+  treatment (warmup 100) and the warmup-only control (warmup 200) with
+  `every_steps: 50`, then reports both arms.
+- Pre-registered reading: the treatment should keep within-caption spread
+  above the collapsing control while holding sharpness, cross-caption
+  spread should exceed within-caption spread for the treatment, and the
+  held-out captions should stay coherent (not far below the train
+  captions). A control within-caption spread near zero with blurred
+  sharpness is the expected conditional-mean collapse.
+
 ## Running log
 
 - 2026-09-22: Branch renamed to `tdm-port` and pushed to the internal
@@ -231,6 +264,13 @@ Phase plan (from the 2026-09-22 plan review):
     tables, tracker metrics, stage log, frames at steps 0/100/125/200).
   - Next: Phase 4 (H3 joint video+audio, shared adapters, then VSA) or a
     short Phase 3 follow-up (multi-prompt diversity) per user direction.
+- 2026-09-22: **Phase 3.1 started (multi-prompt + held-out diversity).**
+  User chose the multi-prompt-training scope with four seeds per prompt.
+  Added the four-prompt train list, the four-train/four-held-out validation
+  file (four repeats each), the reference-free multi-prompt report tool,
+  and the pod runner (preprocess four prompt shards, two arms, two
+  reports). Plan and pre-registered reading in the Phase 3.1 section.
+  Next: launch the held four-GPU pod and run.
 
 - 2026-09-14: User approved the rebase and overfitting plan. Read the `launch-experiment` and `evaluate-video-quality` skills. The skill's legacy experiment-journal requirement conflicts with current repository guidance against `.agents` experiment journals, so experiment state will be maintained in this mandatory handoff instead.
 
