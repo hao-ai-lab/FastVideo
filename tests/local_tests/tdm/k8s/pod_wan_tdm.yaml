@@ -1,0 +1,52 @@
+# Held one-node/four-GPU pod for the TDM port's modular Wan validation.
+#
+# Requests exactly four GB200 GPUs on one node and holds the allocation
+# (sleep infinity) so stage scripts can be piped in with `kubectl exec`.
+# Code is uploaded as a tarball; the internal repository is not cloned
+# inside pods.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: tdm-port-wan-r1
+  namespace: vllm
+  labels:
+    app: tdm-port
+    workload: tdm-port-wan
+spec:
+  restartPolicy: Never
+  nodeSelector:
+    nvidia.com/gpu.product: NVIDIA-GB200
+  tolerations:
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule
+  containers:
+    - name: main
+      image: ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev:py3.12-cuda13.0.0-latest
+      imagePullPolicy: IfNotPresent
+      command: ["bash", "-lc"]
+      args:
+        - sleep infinity
+      securityContext:
+        runAsUser: 0
+        runAsGroup: 0
+        runAsNonRoot: false
+        allowPrivilegeEscalation: false
+      resources:
+        requests:
+          nvidia.com/gpu: "4"
+        limits:
+          nvidia.com/gpu: "4"
+      volumeMounts:
+        - name: lustre
+          mountPath: /workspace
+        - name: dshm
+          mountPath: /dev/shm
+  volumes:
+    - name: lustre
+      persistentVolumeClaim:
+        claimName: lustre-pvc-vllm
+    - name: dshm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 16Gi
