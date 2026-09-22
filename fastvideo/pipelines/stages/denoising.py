@@ -253,6 +253,7 @@ class DenoisingStage(PipelineStage):
 
         state = self.prepare_denoising(batch, fastvideo_args, target_dtype)
         latents = state.latents
+        family_transformer_kwargs = self.prepare_family_transformer_kwargs(batch, state, target_dtype)
 
         # Initialize lists for ODE trajectory
         trajectory_timesteps: list[torch.Tensor] = []
@@ -421,6 +422,7 @@ class DenoisingStage(PipelineStage):
                             **dreamx_camera_kwargs,
                             **timesteps_r_kwarg,
                             **flux2_id_kwargs,
+                            **family_transformer_kwargs,
                         )
 
                     if batch.do_classifier_free_guidance:
@@ -465,6 +467,7 @@ class DenoisingStage(PipelineStage):
                                     **dreamx_camera_kwargs,
                                     **timesteps_r_kwarg,
                                     **flux2_id_kwargs,
+                                    **family_transformer_kwargs,
                                 )
                             _cfg_gate_fresh_uncond += 1
 
@@ -566,6 +569,10 @@ class DenoisingStage(PipelineStage):
             latents=latents,
             video_padding=torch.zeros_like(latents) if batch.video_latent is not None else None,
         )
+
+    def prepare_family_transformer_kwargs(self, batch, state: DenoisingState, target_dtype) -> dict:
+        """Optional per-family kwargs forwarded into the transformer forward."""
+        return {}
 
     def activate_transformer(self, model, inactive_model, fastvideo_args) -> None:
         """Keep CPU/layerwise/FSDP offload decisions independent of the sampling recipe."""

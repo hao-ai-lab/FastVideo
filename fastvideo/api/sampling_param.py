@@ -30,6 +30,8 @@ class SamplingParam:
 
     # Video inputs
     video_path: str | None = None
+    mask_path: str | None = None
+    conditioning_scale: float | list[float] = 1.0
 
     # Optional pre-generated diffusion latents. Used by parity/debug harnesses
     # and advanced callers that need deterministic latent reuse.
