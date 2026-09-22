@@ -1358,7 +1358,10 @@ class ValidationCallback(Callback):
         sampling_param.data_type = "video"
         if self.guidance_scale is not None:
             sampling_param.guidance_scale = float(self.guidance_scale)
-        sampling_param.seed = self.seed
+        # A record may carry its own seed so repeated captions sample
+        # different noise; otherwise every record uses the training seed.
+        row_seed = validation_batch.get("seed")
+        sampling_param.seed = (int(row_seed) if row_seed is not None else self.seed)
         # Output multiplicity belongs in SamplingParam so pipeline stages
         # allocate the same batch dimension that validation expects to log.
         sampling_param.num_videos_per_prompt = self.num_videos_per_prompt

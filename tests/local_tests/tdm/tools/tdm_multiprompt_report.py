@@ -13,8 +13,9 @@ rebuilds that mapping from the same caption file, then reports, per
 validation step and per caption:
 
 - frame statistics (brightness/contrast/gradient sharpness), and
-- a within-caption spread over the repeated seeds, plus the cross-caption
-  spread and their ratio.
+- a within-caption spread over the repeated rows (each record may carry its
+  own ``seed`` so repeated captions sample different noise), plus the
+  cross-caption spread and their ratio.
 
 Spread is the mean pairwise L2 distance between per-video descriptors: the
 temporal-mean frame pooled to ``--descriptor-size`` squared and flattened.
@@ -97,6 +98,7 @@ def main() -> None:
     parser.add_argument("--run-dir", required=True)
     parser.add_argument("--captions-json", required=True)
     parser.add_argument("--num-sp-groups", type=int, default=4)
+    parser.add_argument("--num-train-prompts", type=int, default=4)
     parser.add_argument("--descriptor-size", type=int, default=32)
     parser.add_argument("--label", default="")
     parser.add_argument("--out", default="")
@@ -138,7 +140,7 @@ def main() -> None:
         "rows_per_group": rows_per_group,
         "steps": {},
     }
-    train_captions = set(rows[:4])
+    train_captions = set(list(dict.fromkeys(rows))[:args.num_train_prompts])
     train_within: list[float] = []
     heldout_within: list[float] = []
     train_sharp: list[float] = []
