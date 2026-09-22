@@ -191,6 +191,52 @@ Sub-steps and gates:
 
 ## Running log
 
+- 2026-09-22: **Phase 4 started: design + model-side hooks done (4A), method
+  generalization parked as WIP (4B).**
+  - Recon confirmed the key facts: the modular H3 plugin already emits the
+    negated velocity pair so the base `x0 = x_t - sigma * pred_noise` is
+    H3's data-ward `x0 = x_t + sigma * v`; H3 model time is exactly
+    `1 - sigma`; the H3 grid is the same static shifted-flow closed form the
+    method already uses, with video shift 12 and audio shift 3;
+    `enable_lora_training` supports `ReplicatedLinear` and H3's
+    `to_q/to_k/to_v/to_out`, so LoRA needs no new plumbing.
+  - 4A landed on `tdm-port`: `ModelBase` gained the TDM contract
+    (`tdm_modalities`, `tdm_clean_latents`, `tdm_sigma_grid`,
+    `tdm_terminal_sigma`, `tdm_max_trajectory_label`,
+    `tdm_sigma_to_model_timestep`, `tdm_predict_x0`, `tdm_initial_noise`)
+    with defaults that reproduce today's Wan behavior; the H3 plugin takes
+    `lora` and calls `_enable_lora_if_configured`, and overrides the hooks
+    for joint video+audio (`tdm_h3_sigma_grid`, `tdm_h3_model_timestep`,
+    joint `tdm_predict_x0`). Commits `f4201de7a` (design),
+    `fe37d8cf9` (hooks + LoRA). `test_tdm_h3_joint.py` (4 cases) plus the
+    existing suites: **117 passed** on the held pod.
+  - 4B (modality-general `TDMMethod`) is implemented but parked, because
+    migrating the Wan tests is a separate, delicate pass. It lives on the
+    pushed WIP branch `tdm-port-phase4-method-wip` at `ca8c52810`, not on
+    `tdm-port`, so the main branch stays green. Summary of the WIP:
+    per-modality trajectory/context dicts keyed by modality (one key for
+    Wan), one joint forward per rollout step, label-space interval
+    sampling, per-modality sigma grids and model-time conversion, summed
+    warmup/fake-score/generator losses, and guidance-1 short-circuiting for
+    H3 (no unconditional branch).
+  - Remaining 4B work, exactly:
+    1. migrate `tests/local_tests/tdm/test_tdm_method_unit.py`,
+       `test_tdm_upstream_parity.py`, `test_tdm_warmup_and_ladder.py` to
+       the dict-keyed API. Sites that use `trajectory.sigmas` /
+       `.noisy_latents` / `.clean_latents` / `.timesteps` need
+       `trajectory["video"]`; `context = method._sample_tdm_context(...)`
+       sites need `["video"]`; monkeypatched `_sample_tdm_context` lambdas
+       must return `{"video": context}`; the warmup test's `fixed_source`
+       must return `({"video": noisy}, {"video": sigma}, indices)` because
+       `_sample_warmup_source` now returns a 3-tuple. The interval test
+       (`test_..._boundary...`, around old line 556) builds a
+       `SimpleNamespace` trajectory without `timesteps` and must be
+       re-expressed with integer labels.
+    2. run the full Wan tdm suite, then the Phase 3 fixed-recipe run on the
+       pod to confirm the one-modality numbers are unchanged.
+  - Next after 4B: 4C H3 TDM config + data (`480x832x124` first gate), 4D
+    one-node/4-GPU H3 run with the reference-free report, 4E VSA wiring.
+
 - 2026-09-22: Branch renamed to `tdm-port` and pushed to the internal
   origin; stale `fork/issue-775-tdm` ref removed. Phase 0 plan recorded
   above. Next: parity gate.
