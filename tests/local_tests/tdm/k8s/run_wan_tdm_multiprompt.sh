@@ -72,6 +72,7 @@ for shard_idx in range(4):
     print(f"shard {shard_idx}: {len(shard_prompts)} prompts")
 PY
 
+preprocess_pids=()
 for gpu in 0 1 2 3; do
     mkdir -p "$dataset_dir/shard-$gpu"
     CUDA_VISIBLE_DEVICES="$gpu" /opt/venv/bin/torchrun --nnodes=1 --nproc_per_node=1 \
@@ -92,8 +93,9 @@ for gpu in 0 1 2 3; do
         --text_max_length 512 \
         --video_length_tolerance_range 5 \
         --preprocess_task text_only > "$run_root/logs/preprocess-gpu$gpu.log" 2>&1 &
+    preprocess_pids+=("$!")
 done
-wait
+wait "${preprocess_pids[@]}"
 
 for gpu in 0 1 2 3; do
     test -f "$dataset_dir/shard-$gpu/combined_parquet_dataset/worker_0/data_chunk_0.parquet" \
