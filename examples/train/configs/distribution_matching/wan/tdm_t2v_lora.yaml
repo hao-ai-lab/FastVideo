@@ -52,6 +52,23 @@ method:
   tdm_denoising_steps: [1000, 750, 500, 250]
   warp_denoising_step: false
 
+  # Regression warmup: for the first `warmup_steps` updates the student
+  # regresses onto the guidance-combined teacher x0 at its own rollout
+  # states, with no critic updates. The standalone Wan experiments showed
+  # that TDM alone drifts out of the teacher distribution while warmup
+  # alone collapses visually; warmup followed by TDM is the validated
+  # recipe. Default: 200 for Wan-family students, 0 otherwise.
+  warmup_steps: 200
+
+  # Optional progressive step ladder: train at high step counts first and
+  # finish at the deployment count. Stage step counts must strictly
+  # decrease; only the final stage may omit until_iteration. Validation
+  # and inference follow the final stage's schedule.
+  # tdm_step_ladder:
+  #   - denoising_steps: [1000, 875, 750, 625, 500, 375, 250, 125]
+  #     until_iteration: 200
+  #   - denoising_steps: [1000, 750, 500, 250]
+
   # Student rollout. "sde" re-noises each predicted x0; "ode" carries the
   # effective Wan flow noise across denoising steps. Like the reference TDM
   # implementation, rollout history is generated without backpropagation; the

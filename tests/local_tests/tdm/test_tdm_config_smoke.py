@@ -45,6 +45,7 @@ def test_tdm_wan_lora_config_resolves_without_loading_weights() -> None:
 
     assert cfg.method["rollout_mode"] == "simulate"
     assert cfg.method["tdm_denoising_steps"] == [1000, 750, 500, 250]
+    assert cfg.method["warmup_steps"] == 200
     assert cfg.method["noise_interval_mode"] == "separate"
     assert cfg.method["student_sample_type"] == "ode"
     assert cfg.method["use_randmid"] is False
