@@ -271,6 +271,34 @@ cross-caption spread.
   and the pod runner (preprocess four prompt shards, two arms, two
   reports). Plan and pre-registered reading in the Phase 3.1 section.
   Next: launch the held four-GPU pod and run.
+- 2026-09-22: **Phase 3.1 first run exposes a fixed-seed validation flaw.**
+  Both arms completed rc=0 (`wan-tdm-multiprompt`, 16:55Z to 18:04Z) but
+  every caption's four repeated rows produced byte-identical videos, so
+  `within_spread` was exactly `0.0` and the seed-diversity axis was not
+  measured. Root cause: the Wan DMD latent stage seeds the initial noise
+  from `batch.seed` (`fastvideo/pipelines/stages/latent_preparation.py`,
+  `_arch_invariant_randn`), and the validation callback wrote the training
+  seed into every record, so each caption had exactly one noise draw.
+  Repeated rows cannot create seed diversity; `num_videos_per_prompt` also
+  reuses the fixed seed.
+  - Fix: `ValidationCallback._prepare_validation_batch` now honors an
+    optional per-record `seed` (falling back to the training seed), the
+    validation file carries four explicit seeds per caption, and
+    `test_prepare_validation_batch_uses_record_seed` pins the behavior.
+    Backwards compatible: records without a `seed` are unchanged.
+  - Sharpness results from the first run are still meaningful and
+    reported below; the rerun `wan-tdm-multiprompt-seed` repeats both arms
+    with the per-row seeds.
+  - First-run frame sharpness (train | held-out), treatment at steps
+    0/50/100/150/200: `15.0 | 35.9`, `26.5 | 25.5`, `34.6 | 47.1`,
+    `39.5 | 131.7`, `95.0 | 273.9`; control: `15.0 | 35.9`, `24.2 | 25.4`,
+    `10.2 | 27.6`, `10.4 | 44.0`, `3.0 | 17.0`. The treatment separates
+    from the collapsing control on both train and held-out prompts, so the
+    fixed recipe does generalize to unseen prompts in the coherence
+    sense; held-out sharpness runs higher because those prompts are more
+    textured.
+  - Tests on the pod after the fix: `tests/local_tests/tdm/` plus
+    `fastvideo/tests/train/callbacks/test_validation.py` = 113 passed.
 
 - 2026-09-14: User approved the rebase and overfitting plan. Read the `launch-experiment` and `evaluate-video-quality` skills. The skill's legacy experiment-journal requirement conflicts with current repository guidance against `.agents` experiment journals, so experiment state will be maintained in this mandatory handoff instead.
 

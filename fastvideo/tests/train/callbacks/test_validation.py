@@ -292,6 +292,46 @@ class TestH3ValidationContract:
 
         assert batch.num_videos_per_prompt == 3
 
+    def test_prepare_validation_batch_uses_record_seed(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A record seed overrides the training seed; absent, the training seed is used."""
+        cb = _make_callback()
+        cb.seed = 1000
+        cb.training_config = SimpleNamespace(
+            data=SimpleNamespace(
+                num_height=64,
+                num_width=96,
+                num_latent_t=2,
+            ),
+            pipeline_config=SimpleNamespace(vae_config=SimpleNamespace(
+                arch_config=SimpleNamespace(temporal_compression_ratio=4), ), ),
+            model_path="unused",
+            vsa_sparsity=0.0,
+        )
+        monkeypatch.setattr(
+            "fastvideo.train.callbacks.validation.make_inference_args",
+            lambda *args, **kwargs: SimpleNamespace(),
+        )
+
+        with_seed = cb._prepare_validation_batch(
+            SamplingParam(),
+            {
+                "prompt": "Generate synchronized media.",
+                "seed": 7,
+            },
+            num_inference_steps=5,
+        )
+        without_seed = cb._prepare_validation_batch(
+            SamplingParam(),
+            {"prompt": "Generate synchronized media."},
+            num_inference_steps=5,
+        )
+
+        assert with_seed.seed == 7
+        assert without_seed.seed == 1000
+
     def test_prepare_validation_batch_ignores_media_for_text_only_generation(
         self,
         monkeypatch: pytest.MonkeyPatch,
