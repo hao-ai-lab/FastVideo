@@ -54,7 +54,7 @@ method:
   use_huber: false
   huber_c: 0.001
   max_grad_norm: 1.0
-  fake_score_learning_rate: 8.0e-6
+  fake_score_learning_rate: 1.0e-4
   fake_score_betas: [0.0, 0.999]
   fake_score_lr_scheduler: constant
   cfg_uncond:
@@ -82,7 +82,12 @@ training:
     num_frames: 77
 
   optimizer:
-    learning_rate: 2.0e-6
+    # Use the validated TDM range (student 1e-4, fake score 1e-4 below).
+    # The DMD2-inherited 2e-6 is a no-op regime for this objective: the
+    # Phase 3 diagnostic measured ~1e-4 adapter movement over 200 steps
+    # and identical blurred outputs for the treatment and the
+    # regression-only control.
+    learning_rate: 1.0e-4
     betas: [0.0, 0.999]
     weight_decay: 0.01
     lr_scheduler: constant

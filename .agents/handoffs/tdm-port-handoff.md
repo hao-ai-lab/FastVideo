@@ -204,6 +204,33 @@ Phase plan (from the 2026-09-22 plan review):
     takes `STUDENT_LR` / `FAKE_SCORE_LR`), everything else identical.
   - Evidence: `artifacts/tdm-port/phase3/` (both video reports, status,
     frames at steps 0/100/200 for both arms).
+- 2026-09-22: **Phase 3 gate met: the modular stack reproduces S10/S11.**
+  - Rerun `wan-tdm-fixed-recipe-lr` (student `1e-4` / fake-score `1e-4`,
+    warmup 100 + 8->4 ladder; control = warmup 200 with everything else
+    identical) completed rc=0 in ~35 min per arm.
+  - Frame statistics per validation step (mean over the four rank
+    videos), treatment | control: step 0 `std 30.1 / sharpness 15.0` both;
+    step 75 `65.1 / 12.0` versus `48.5 / 3.5`; step 100 `76.1 / 40.0`
+    versus `66.3 / 8.4`; step 125 `102.1 / 188.8` versus `57.3 / 14.2`;
+    step 200 `91.5 / 117.0` versus `48.7 / 6.4`.
+  - Visuals: the treatment's step-200 sample is a sharp red sports car
+    with the circular motion trail matching the prompt; the control is a
+    structureless red smear (the conditional-mean collapse). The arms are
+    identical at step 0 and diverge materially from the TDM phase onward
+    (the step-100 validation includes the first TDM update); a ~1 pct
+    early divergence at steps 25-75 is immaterial.
+  - Shipped configs updated with the evidence: the two diagnostic TDM
+    configs now ship student `1e-4` / fake-score `1e-4`; the
+    production-shaped `tdm_t2v_lora.yaml` keeps the DMD2-inherited `2e-6`
+    with a warning comment because it has not been re-validated at the
+    higher rate. The README documents the regime and its measurement.
+  - Deferred and documented: the multi-prompt diversity run and the
+    held-out-prompt check, because the one-prompt validation dataset
+    limits this phase to the coherence and sharpness gates.
+  - Evidence: `artifacts/tdm-port/phase3/` (LR video reports, per-step
+    tables, tracker metrics, stage log, frames at steps 0/100/125/200).
+  - Next: Phase 4 (H3 joint video+audio, shared adapters, then VSA) or a
+    short Phase 3 follow-up (multi-prompt diversity) per user direction.
 
 - 2026-09-14: User approved the rebase and overfitting plan. Read the `launch-experiment` and `evaluate-video-quality` skills. The skill's legacy experiment-journal requirement conflicts with current repository guidance against `.agents` experiment journals, so experiment state will be maintained in this mandatory handoff instead.
 

@@ -122,6 +122,11 @@ training:
     num_frames: 77
 
   optimizer:
+    # NOTE: 2e-6 is inherited from the DMD2 recipes and is a no-op regime
+    # for TDM (Phase 3 measured ~1e-4 adapter movement over 200 steps and
+    # no visual change). The validated diagnostic range is student 1e-4 /
+    # fake score 1e-4; see tdm_t2v_lora_fixed_recipe.yaml. This
+    # production-shaped config has not been re-validated at that LR.
     learning_rate: 2.0e-6
     betas: [0.0, 0.999]
     weight_decay: 0.01

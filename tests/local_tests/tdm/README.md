@@ -91,6 +91,17 @@ decrease (for example 8 steps then 4), only the final stage may omit
 `until_iteration`, and validation/inference adopt the final stage's schedule
 because the loader writes `dmd_denoising_steps` from it.
 
+Learning rates matter as much as the phase split. The DMD2-inherited student
+LR of `2e-6` is a no-op regime for TDM: the Phase 3 diagnostic measured only
+about `1e-4` of adapter movement over 200 updates, and the treatment and the
+regression-only control produced visually identical blurred samples. At
+student `1e-4` with fake-score `1e-4` the warmup bakes guidance in and TDM
+then sharpens to a coherent sample while the control stays blurred, so the
+validated diagnostic configs (`tdm_t2v_lora_fixed_recipe.yaml`,
+`tdm_t2v_lora_overfit.yaml`) ship those values. The production-shaped
+`tdm_t2v_lora.yaml` keeps the DMD2 value with a warning comment because it has
+not been re-validated at the higher rate.
+
 Two measurement caveats carried over from the standalone work: paired
 same-noise metrics (latent nearest-neighbour / MMD) and paired pixel MS-SSIM
 rank blurry no-guidance samples above coherent distilled ones, so they must
