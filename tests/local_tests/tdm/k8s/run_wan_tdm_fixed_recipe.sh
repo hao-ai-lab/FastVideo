@@ -58,13 +58,24 @@ printf 'DATASET_OK %s\n' "$(date -u +%FT%TZ)"
 
 config=examples/train/configs/distribution_matching/wan/tdm_t2v_lora_fixed_recipe.yaml
 
+# The shipped overfit recipe uses student lr 2e-6 / fake-score lr 8e-6, which
+# the first Phase 3 run showed to be a no-op regime (warmup grad norms ~1 at
+# 2e-6 move the adapter by ~1e-4 over 200 steps and neither arm changes
+# visually). The standalone-validated range is 1e-4 for both roles; override
+# with STUDENT_LR / FAKE_SCORE_LR to test other regimes.
+student_lr=${STUDENT_LR:-1.0e-4}
+fake_score_lr=${FAKE_SCORE_LR:-1.0e-4}
+
 run_one() {
     local label=$1 warmup=$2
     local out="$run_root/$label/output"
-    printf 'TRAIN %s %s warmup=%s\n' "$label" "$(date -u +%FT%TZ)" "$warmup"
+    printf 'TRAIN %s %s warmup=%s student_lr=%s fake_score_lr=%s\n' \
+        "$label" "$(date -u +%FT%TZ)" "$warmup" "$student_lr" "$fake_score_lr"
     /opt/venv/bin/torchrun --standalone --nproc_per_node=4 -m fastvideo.train.entrypoint.train \
         --config "$config" \
         --training.checkpoint.output_dir "$out" \
+        --training.optimizer.learning_rate "$student_lr" \
+        --method.fake_score_learning_rate "$fake_score_lr" \
         --method.warmup_steps "$warmup" > "$run_root/logs/train-$label.log" 2>&1
     grep -q "Training completed" "$run_root/logs/train-$label.log"
     tail -3 "$run_root/logs/train-$label.log"
