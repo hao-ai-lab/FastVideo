@@ -69,6 +69,35 @@ training can disable periodic validation with
 `callbacks.validation.every_steps=0` and validate exported checkpoints in a
 separate inference job.
 
+## Warmup And Step Ladder
+
+For Wan-family students the method defaults to a **200-update regression
+warmup** (`method.warmup_steps`, set explicitly in the example config). During
+warmup the student's x0 at its own rollout states is regressed onto the
+guidance-combined teacher x0 at those same states; the critic is not updated,
+is excluded from `get_optimizers` / `get_lr_schedulers` / grad-clip targets,
+and its optimizer state stays empty. Other families default to no warmup
+(guidance-distilled bases already start inside the teacher's basin).
+
+The reason is empirical, from the standalone TDM experiments: on Wan, TDM
+alone drifts out of the teacher distribution and warmup alone collapses
+visually (blurry blobs on every seed), while warmup followed by TDM produces
+coherent, sharp 4-step samples. The warmup is what puts the student's states
+on-manifold so the critic correction stops dominating the generator signal.
+
+A **progressive step ladder** is available through `method.tdm_step_ladder`
+(commented example in the shipped config). Stage step counts must strictly
+decrease (for example 8 steps then 4), only the final stage may omit
+`until_iteration`, and validation/inference adopt the final stage's schedule
+because the loader writes `dmd_denoising_steps` from it.
+
+Two measurement caveats carried over from the standalone work: paired
+same-noise metrics (latent nearest-neighbour / MMD) and paired pixel MS-SSIM
+rank blurry no-guidance samples above coherent distilled ones, so they must
+not be used as quality gates for TDM; use reference-free signals (visual
+coherence, frame sharpness, sample diversity, cross-prompt behaviour) and keep
+the cloud metrics as diagnostics only.
+
 ## Test Scope
 
 ```bash
@@ -80,11 +109,13 @@ pytest tests/local_tests/tdm/ -v -s
 | Config smoke | `test_tdm_config_smoke.py` | Example YAML parses, resolves `TDMMethod`, and declares expected roles/LoRA knobs without loading weights |
 | Flow bridge | `test_tdm_scheduler_math.py` | Mixed-noise transition reconstructs Wan flow noising; invalid direction raises |
 | Method wiring | `test_tdm_method_unit.py` | Fake models exercise loss keys, faithful interval support, fake-score-before-generator optimizer ordering, and student/critic updates |
+| Upstream parity | `test_tdm_upstream_parity.py` | Assembled context identities plus critic/generator losses and gradients against the upstream-verified transcription |
+| Warmup and ladder | `test_tdm_warmup_and_ladder.py` | Wan-family warmup default, student-only gating, CFG teacher regression target, ladder stage resolution and validation |
 
-## Modal Validation
+## GPU Validation
 
-Run from branch `interleavethinker` using
-`fastvideo/tests/modal/launch_l40s_job.py`, applying this branch as the patch.
+Runtime validation runs on one Kubernetes node with exactly four GPUs; do not
+use Modal or multi-node jobs for this workload.
 
 Suggested local-test command:
 
@@ -102,6 +133,6 @@ python fastvideo/train/entrypoint/train.py \
 ```
 
 For the checkpoint smoke, request the GPU count expected by the config or
-override the distributed settings for a smaller smoke. Record Modal app IDs,
-command output, loss keys, and blockers in the issue handoff or PR body rather
+override the distributed settings for a smaller smoke. Record run roots,
+command output, loss keys, and blockers in the active handoff rather
 than in this durable README.

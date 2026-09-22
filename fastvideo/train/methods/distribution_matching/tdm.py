@@ -192,6 +192,9 @@ class TDMMethod(DMD2Method):
         mcfg = self.method_config
         self._denoising_step_list: torch.Tensor | None = None
         self._denoising_sigma_list: torch.Tensor | None = None
+        self._step_schedules = self._parse_step_schedules()
+        self._active_schedule_index = 0
+        self._cached_schedule_index: int | None = None
         self._rollout_sample_type: Literal["sde", "ode"] = require_choice(
             mcfg,
             "student_sample_type",
@@ -279,9 +282,45 @@ class TDMMethod(DMD2Method):
             raise ValueError("method.max_grad_norm must be non-negative")
         self._max_grad_norm = float(max_grad_norm)
         self._sigma_eps = 1e-8
+        self._warmup_steps = self._resolve_warmup_steps()
+        self.method_config["tdm_warmup_steps"] = self._warmup_steps
+        # Validation and inference diagnostics should follow the final
+        # (deployment) ladder stage, which is what the run is training for.
+        if self._step_schedules[-1][1] is not None:
+            self.method_config["dmd_denoising_steps"] = list(self._step_schedules[-1][0])
+        else:
+            self.method_config.setdefault("dmd_denoising_steps", list(self._step_schedules[-1][0]))
 
     def manages_optimization(self) -> bool:
         return True
+
+    # ------------------------------------------------------------------
+    # phase gating (warmup)
+    # ------------------------------------------------------------------
+
+    def get_optimizers(
+        self,
+        iteration: int,
+    ) -> list[torch.optim.Optimizer]:
+        if self._in_warmup(iteration):
+            return [self._student_optimizer]
+        return super().get_optimizers(iteration)
+
+    def get_lr_schedulers(
+        self,
+        iteration: int,
+    ) -> list[Any]:
+        if self._in_warmup(iteration):
+            return [self._student_lr_scheduler]
+        return super().get_lr_schedulers(iteration)
+
+    def get_grad_clip_targets(
+        self,
+        iteration: int,
+    ) -> dict[str, torch.nn.Module]:
+        if self._in_warmup(iteration):
+            return {"student": self.student.transformer}
+        return super().get_grad_clip_targets(iteration)
 
     def single_train_step(
         self,
@@ -301,6 +340,9 @@ class TDMMethod(DMD2Method):
         iteration: int,
     ) -> tuple[dict[str, torch.Tensor], dict[str, Any], dict[str, LogScalar]]:
         grad_accum = max(1, int(self.training_config.loop.gradient_accumulation_steps or 1))
+        self._select_schedule_stage(iteration)
+        if self._in_warmup(iteration):
+            return self._managed_warmup_step(data_stream, iteration, grad_accum)
         raw_batches = [next(data_stream) for _ in range(grad_accum)]
 
         fake_score_losses: list[torch.Tensor] = []
@@ -370,11 +412,138 @@ class TDMMethod(DMD2Method):
         metrics: dict[str, LogScalar] = {
             "update_student": float(update_student),
             "grad_norm/critic": critic_grad_norm,
+            "tdm/warmup": 0.0,
+            "tdm/warmup_steps": float(self._warmup_steps),
+            "tdm/step_ladder_stage": float(self._active_schedule_index),
         }
         if update_student:
             metrics["grad_norm/student"] = student_grad_norm
         metrics.update(self._mean_metric_maps(fake_score_metric_maps))
         metrics.update(self._mean_metric_maps(generator_metric_maps))
+        return loss_map, {}, metrics
+
+    def _sample_warmup_source(
+        self,
+        trajectory: TDMTrajectory,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Pick the rollout state each sample regresses at (detached)."""
+        device = trajectory.sigmas.device
+        batch_size = trajectory.noisy_latents[0].shape[0]
+        batch_indices = torch.arange(batch_size, device=device)
+        trajectory_indices = torch.randint(
+            0,
+            len(trajectory.sigmas),
+            [batch_size],
+            device=device,
+            dtype=torch.long,
+            generator=self.cuda_generator,
+        )
+        noisy_source = torch.stack(trajectory.noisy_latents)[trajectory_indices, batch_indices].detach()
+        sigma_source = trajectory.sigmas[trajectory_indices]
+        timestep_source = self._model_timestep_for_sigma(sigma_source, self.student)
+        return noisy_source, sigma_source, timestep_source, trajectory_indices
+
+    def _tdm_warmup_loss(
+        self,
+        trajectory: TDMTrajectory,
+        batch: TrainingBatch,
+    ) -> tuple[torch.Tensor, dict[str, LogScalar], tuple[torch.Tensor, Any]]:
+        """Regression warmup step toward the CFG-combined teacher x0.
+
+        The standalone-validated warmup: the student's x0 at its own
+        rollout states is regressed onto the guidance-combined teacher x0
+        at those same states, with no critic update. This bakes CFG
+        sharpness into the unguided student and puts it inside the
+        teacher's basin before the TDM correction is enabled.
+        """
+        noisy_source, sigma_source, timestep_source, trajectory_indices = self._sample_warmup_source(trajectory)
+        guidance = self._real_score_guidance()
+        batch.timesteps = timestep_source
+        pred_x0 = self.student.predict_x0(
+            noisy_source,
+            timestep_source,
+            batch,
+            conditional=True,
+            cfg_uncond=self._cfg_uncond,
+            attn_kind="vsa",
+        )
+        with torch.no_grad():
+            teacher_timestep = self._model_timestep_for_sigma(sigma_source, self.teacher)
+            batch.timesteps = teacher_timestep
+            real_cond_x0 = self.teacher.predict_x0(
+                noisy_source,
+                teacher_timestep,
+                batch,
+                conditional=True,
+                cfg_uncond=self._cfg_uncond,
+                attn_kind="dense",
+            )
+            real_uncond_x0 = self.teacher.predict_x0(
+                noisy_source,
+                teacher_timestep,
+                batch,
+                conditional=False,
+                cfg_uncond=self._cfg_uncond,
+                attn_kind="dense",
+            )
+            real_cfg_x0 = real_uncond_x0 + (real_cond_x0 - real_uncond_x0) * guidance
+        loss = (pred_x0.float() - real_cfg_x0.float()).square().mean()
+        metrics: dict[str, LogScalar] = {
+            "tdm/warmup/loss": loss.detach(),
+            "tdm/warmup/guidance": guidance,
+            "tdm/warmup/source_timestep": timestep_source.detach().float().mean(),
+            "tdm/warmup/source_sigma": sigma_source.detach().float().mean(),
+            "tdm/warmup/source_trajectory_index": trajectory_indices.detach().float().mean(),
+        }
+        return loss, metrics, (timestep_source, batch.attn_metadata_vsa)
+
+    def _managed_warmup_step(
+        self,
+        data_stream: Iterator[dict[str, Any]],
+        iteration: int,
+        grad_accum: int,
+    ) -> tuple[dict[str, torch.Tensor], dict[str, Any], dict[str, LogScalar]]:
+        del iteration
+        losses: list[torch.Tensor] = []
+        metric_maps: list[dict[str, LogScalar]] = []
+        for _ in range(grad_accum):
+            raw_batch = next(data_stream)
+            training_batch = self.student.prepare_batch(
+                raw_batch,
+                generator=self.cuda_generator,
+                latents_source="zeros",
+            )
+            if training_batch.latents is None:
+                raise RuntimeError("TDM requires student.prepare_batch to populate latents")
+            with torch.no_grad():
+                trajectory = self._student_trajectory(training_batch)
+            warmup_loss, warmup_metrics, student_ctx = self._tdm_warmup_loss(trajectory, training_batch)
+            self.student.backward(
+                warmup_loss,
+                student_ctx,
+                grad_accum_rounds=grad_accum,
+            )
+            losses.append(warmup_loss.detach())
+            metric_maps.append(warmup_metrics)
+        student_grad_norm = self._finish_role_update(
+            model=self.student,
+            optimizer=self._student_optimizer,
+            lr_scheduler=self._student_lr_scheduler,
+        )
+        warmup_loss = torch.stack(losses).mean()
+        loss_map = {
+            "total_loss": warmup_loss,
+            "generator_loss": warmup_loss,
+            "fake_score_loss": torch.zeros_like(warmup_loss),
+        }
+        metrics: dict[str, LogScalar] = {
+            "update_student": 1.0,
+            "grad_norm/student": student_grad_norm,
+            "tdm/warmup": 1.0,
+            "tdm/warmup_steps": float(self._warmup_steps),
+            "tdm/step_ladder_stage": float(self._active_schedule_index),
+        }
+        metrics.update(self._mean_metric_maps(metric_maps))
         return loss_map, {}, metrics
 
     def _finish_role_update(
@@ -408,16 +577,110 @@ class TDMMethod(DMD2Method):
                 averaged[key] = sum(float(value) for value in values) / len(values)
         return averaged
 
+    def _model_family(self) -> str:
+        """Best-effort family name of the student plugin (``wan``, ...)."""
+        module = type(self.student).__module__
+        for family in ("wan", "minimax_h3"):
+            if f".{family}" in module:
+                return family
+        return "unknown"
+
+    def _default_warmup_steps(self) -> int:
+        """Regression-warmup length defaults by family.
+
+        The standalone TDM experiments showed that TDM alone drifts out of
+        the teacher distribution on Wan while warmup alone collapses
+        visually; the working recipe is a regression warmup to the
+        CFG-combined teacher followed by TDM. Wan therefore defaults to
+        ``200`` warmup updates. Guidance-distilled bases (H3) already
+        start inside the teacher's basin, so they default to no warmup.
+        """
+        return 200 if self._model_family() == "wan" else 0
+
+    def _resolve_warmup_steps(self) -> int:
+        raw = self.method_config.get("warmup_steps", None)
+        if raw is None:
+            return self._default_warmup_steps()
+        warmup_steps = int(raw)
+        if warmup_steps < 0:
+            raise ValueError("method.warmup_steps must be non-negative")
+        return warmup_steps
+
+    def _in_warmup(self, iteration: int) -> bool:
+        return iteration < self._warmup_steps
+
+    def _real_score_guidance(self) -> float:
+        guidance = get_optional_float(
+            self.method_config,
+            "real_score_guidance_scale",
+            where="method.real_score_guidance_scale",
+        )
+        return 1.0 if guidance is None else float(guidance)
+
+    def _parse_step_schedules(self) -> list[tuple[list[int], int | None]]:
+        """Resolve the student step schedule, optionally as a ladder.
+
+        ``method.tdm_step_ladder`` is a list of stages
+        ``{denoising_steps: [...], until_iteration: int}``; the final
+        stage omits ``until_iteration``. Stage step counts must strictly
+        decrease (the curriculum direction validated by the standalone
+        experiments: high step counts first, deployment count last).
+        Without a ladder the single schedule comes from
+        ``method.tdm_denoising_steps`` (or ``dmd_denoising_steps``).
+        """
+        mcfg = self.method_config
+        ladder = mcfg.get("tdm_step_ladder", None)
+        if ladder is None:
+            raw = mcfg.get("tdm_denoising_steps", None)
+            if raw is None:
+                raw = mcfg.get("dmd_denoising_steps", None)
+            if not isinstance(raw, list) or not raw:
+                raise ValueError("method.tdm_denoising_steps must be set for TDM")
+            return [([int(s) for s in raw], None)]
+
+        if not isinstance(ladder, list) or not ladder:
+            raise ValueError("method.tdm_step_ladder must be a non-empty list of stages")
+        stages: list[tuple[list[int], int | None]] = []
+        previous_until = 0
+        previous_count: int | None = None
+        for position, stage in enumerate(ladder):
+            if not isinstance(stage, dict):
+                raise ValueError("method.tdm_step_ladder entries must be mappings")
+            steps = stage.get("denoising_steps", None)
+            if not isinstance(steps, list) or not steps:
+                raise ValueError(f"method.tdm_step_ladder[{position}].denoising_steps must be a non-empty list")
+            if previous_count is not None and len(steps) >= previous_count:
+                raise ValueError("method.tdm_step_ladder stages must strictly decrease the student step count")
+            previous_count = len(steps)
+            until = stage.get("until_iteration", None)
+            if until is None:
+                if position != len(ladder) - 1:
+                    raise ValueError("only the last method.tdm_step_ladder stage may omit until_iteration")
+                stages.append(([int(s) for s in steps], None))
+                continue
+            until = int(until)
+            if until <= previous_until:
+                raise ValueError("method.tdm_step_ladder until_iteration values must be strictly increasing")
+            previous_until = until
+            stages.append(([int(s) for s in steps], until))
+        return stages
+
+    def _select_schedule_stage(self, iteration: int) -> None:
+        for index, (_, until) in enumerate(self._step_schedules):
+            if until is None or iteration < until:
+                self._active_schedule_index = index
+                return
+        self._active_schedule_index = len(self._step_schedules) - 1
+
     def _get_denoising_step_list(
         self,
         device: torch.device,
     ) -> torch.Tensor:
-        if (self._denoising_step_list is not None and self._denoising_step_list.device == device):
+        if (self._denoising_step_list is not None and self._denoising_step_list.device == device
+                and self._cached_schedule_index == self._active_schedule_index):
             return self._denoising_step_list
 
-        raw = self.method_config.get("tdm_denoising_steps", None)
-        if raw is None:
-            raw = self.method_config.get("dmd_denoising_steps", None)
+        raw = self._step_schedules[self._active_schedule_index][0]
         if not isinstance(raw, list) or not raw:
             raise ValueError("method.tdm_denoising_steps must be set for TDM")
 
@@ -459,6 +722,7 @@ class TDMMethod(DMD2Method):
 
         self._denoising_step_list = steps
         self._denoising_sigma_list = sigmas
+        self._cached_schedule_index = self._active_schedule_index
         return steps
 
     def _timestep_to_sigma(
@@ -834,13 +1098,7 @@ class TDMMethod(DMD2Method):
         trajectory: TDMTrajectory,
         batch: TrainingBatch,
     ) -> tuple[torch.Tensor, dict[str, LogScalar], tuple[torch.Tensor, Any]]:
-        guidance_scale = get_optional_float(
-            self.method_config,
-            "real_score_guidance_scale",
-            where="method.real_score_guidance_scale",
-        )
-        if guidance_scale is None:
-            guidance_scale = 1.0
+        guidance_scale = self._real_score_guidance()
 
         context = self._sample_tdm_context(trajectory)
         source_timestep = context.timestep_source
