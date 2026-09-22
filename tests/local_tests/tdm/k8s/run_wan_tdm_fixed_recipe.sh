@@ -44,7 +44,8 @@ nvidia-smi --query-gpu=index,name,memory.total --format=csv
 printf 'CODE_SHA256 %s\n' "$(sha256sum /tmp/tdm-port.tar.gz | cut -d' ' -f1)"
 
 rm -rf /tmp/tdm-port
-tar xzf /tmp/tdm-port.tar.gz -C /tmp
+mkdir -p /tmp/tdm-port
+tar xzf /tmp/tdm-port.tar.gz -C /tmp/tdm-port
 cd /tmp/tdm-port
 
 dataset_src=/workspace/issue-775/tdm-overfit-447ebf2-r4/data/tdm_t2v_overfit_text_only
