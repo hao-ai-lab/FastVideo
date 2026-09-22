@@ -27,6 +27,7 @@ import numpy as np
 from fastvideo.train.utils.tdm_metrics import frame_statistics, paired_ms_ssim
 
 VIDEO_PATTERN = re.compile(r"prompt-(\d+)-(student|teacher)-(\d+)step\.mp4$")
+VALIDATION_PATTERN = re.compile(r"validation_step_(\d+)_inference_steps_(\d+)_rank_(\d+)_video_(\d+)\.mp4$")
 
 
 def _load_video(path: Path) -> np.ndarray:
@@ -39,15 +40,34 @@ def _load_video(path: Path) -> np.ndarray:
     return np.stack(frames)
 
 
-def _iter_videos(run_dir: Path) -> list[tuple[int, int, str, Path]]:
-    found: list[tuple[int, int, str, Path]] = []
-    for path in sorted(run_dir.glob("**/samples/step-*/*.mp4")):
-        match = VIDEO_PATTERN.search(path.name)
-        if match is None:
+def _iter_videos(run_dir: Path) -> list[dict[str, Any]]:
+    """Match both validation layouts: the standalone ``samples/step-*``
+    tree and the modular trainer's flat ``validation_step_*`` files."""
+    found: list[dict[str, Any]] = []
+    for path in sorted(run_dir.glob("**/*.mp4")):
+        name = path.name
+        match = VIDEO_PATTERN.search(name)
+        if match is not None:
+            found.append({
+                "step": int(path.parent.name.split("-")[1]),
+                "prompt": int(match.group(1)),
+                "role": match.group(2),
+                "path": path,
+                "layout": "samples",
+                "sampling_steps": int(match.group(3)),
+            })
             continue
-        prompt, role, steps = match.group(1), match.group(2), int(match.group(3))
-        step_dir = int(path.parent.name.split("-")[1])
-        found.append((step_dir, int(prompt), role, path))
+        match = VALIDATION_PATTERN.search(name)
+        if match is not None:
+            found.append({
+                "step": int(match.group(1)),
+                "prompt": int(match.group(4)),
+                "role": "student",
+                "path": path,
+                "layout": "validation",
+                "rank": int(match.group(3)),
+                "sampling_steps": int(match.group(2)),
+            })
     return found
 
 
@@ -67,20 +87,26 @@ def main() -> None:
         raise ValueError(f"no validation videos matched under {run_dir}")
 
     report: dict[str, Any] = {"run_dir": str(run_dir), "videos": {}, "paired_ms_ssim": {}}
-    for step_dir, prompt, role, path in videos:
+    for entry in videos:
+        path = entry["path"]
         stats = frame_statistics(_load_video(path))
         key = f"{path.parent.relative_to(run_dir)}/{path.name}"
-        report["videos"][key] = {
-            "step": step_dir,
-            "prompt": prompt,
-            "role": role,
+        record: dict[str, Any] = {
+            "step": entry["step"],
+            "prompt": entry["prompt"],
+            "role": entry["role"],
+            "sampling_steps": entry["sampling_steps"],
+            "layout": entry["layout"],
             "stats": stats,
         }
-        print(f"step={step_dir:06d} prompt={prompt} {role:8s} "
+        if "rank" in entry:
+            record["rank"] = entry["rank"]
+        report["videos"][key] = record
+        print(f"step={entry['step']:06d} prompt={entry['prompt']} {entry['role']:8s} "
               f"std={stats['std']:7.2f} sharpness={stats['sharpness']:8.2f} frames={int(stats['frames'])}")
 
     if args.paired_ms_ssim:
-        by_key = {(step, prompt, role): path for step, prompt, role, path in videos}
+        by_key = {(entry["step"], entry["prompt"], entry["role"]): entry["path"] for entry in videos}
         for (step, prompt, role), path in sorted(by_key.items()):
             if role != "student":
                 continue
