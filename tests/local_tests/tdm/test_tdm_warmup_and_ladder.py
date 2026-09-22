@@ -228,3 +228,23 @@ def test_step_ladder_selects_stages_and_recomputes_sigmas() -> None:
 def test_step_ladder_validation(ladder: Any, message: str) -> None:
     with pytest.raises(ValueError, match=message):
         _build_state({"tdm_step_ladder": ladder})
+
+
+def test_warmup_only_control_never_touches_the_critic() -> None:
+    """The standalone warmup-only control: no critic updates at all."""
+    method, _, _, _ = _build_state({"warmup_steps": 3})
+    data_stream = iter([{} for _ in range(6)])
+    for iteration in range(3):
+        metrics = method.managed_train_step(data_stream, iteration=iteration)[2]
+        assert metrics["tdm/warmup"] == 1.0
+    assert len(method._critic_optimizer.state) == 0
+    assert len(method._student_optimizer.state) > 0
+
+
+def test_tdm_phase_updates_both_roles() -> None:
+    method, _, _, _ = _build_state({"warmup_steps": 0})
+    data_stream = iter([{} for _ in range(6)])
+    metrics = method.managed_train_step(data_stream, iteration=0)[2]
+    assert metrics["tdm/warmup"] == 0.0
+    assert len(method._critic_optimizer.state) > 0
+    assert len(method._student_optimizer.state) > 0
