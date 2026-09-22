@@ -1,7 +1,14 @@
-# Issue 775 TDM handoff
+# TDM port handoff (branch `tdm-port`, internal)
 
-- Workload: Rebase `macthecadillac/FastVideo:issue/775-tdm` onto current upstream main, validate it, and run a one-node/four-GPU Kubernetes overfitting experiment.
-- Issue: `hao-ai-lab/FastVideo#775` (`[Feature] TDM`).
+- Workload: land and harden the modular TDM training method on this
+  branch and integrate the validated recipe and measurement findings
+  from the standalone TDM port. Internal only: no PR or draft PR until
+  there is a quality-assurance story (user direction 2026-09-22). All
+  runtime validation stays on one Kubernetes node with exactly four
+  GPUs; no Modal or multi-node jobs.
+- Issue: `hao-ai-lab/FastVideo#775` (`[Feature] TDM`) for provenance;
+  the branch is no longer issue-named (renamed from `issue/775-tdm` to
+  `tdm-port` on 2026-09-22).
 - Current production-code tip: `6676ef6b1`, signed and synchronized with `origin/issue/775-tdm` before the handoff-only durability commit. It commits faithful same-trajectory reuse and the strict scheduler-interval lower bound atop the paper Eq. 11 pseudo-Huber support. Later branch-tip commits may update only this active handoff. Pre-rebase tip was `46166b3099cbb9fc7973d6306a0cc287b63a06eb`.
 - Current stage: Distributed correctness, ordered critic-before-generator optimization, faithful `separate` intervals, negative-prompt conditioning, the 1D Gaussian reverse-KL oracle, a 1000-step two-time-scale run, paper pseudo-Huber, same-trajectory coupling, their combined 100-step control, effective critic batch 32, rank-16/rank-128/full-weight critic capacity, real-score conditioning, norm-matched critic weighting, the Wan rank-16 student reachability ceiling, the full-weight H3 critic/gradient positive control, the H3 critic weight-direction Phase-A screen, the H3 critic-convergence curve, and the H3 critic context-coverage run have all been tested. No acceptable trained checkpoint exists. A 2026-09-17 source audit against the official TDM reference (`Luo-Yihong/TDM@81b019f`) and paper found the port objective faithful; a decomposition of the retained diagnostic gradient data shows the critic-error component of the generator gradient is `1.0-2.2x` the teacher-student signal in every H3 interval and `0.42-1.34x` in Wan, so every negative generator-direction gate measured critic fit rather than the TDM objective. The H3 context-coverage run (`64` training trajectories, fresh tau/proposal-noise contexts every update, `384` updates at lr `2e-5`) showed coverage-bank fit equals held-out fit and training/coverage/held-out MSEs agree per interval, refuting the fixed-bank overfitting hypothesis: the critic plateau is a domain-independent bias floor. Intervals 0-2 (large student-teacher gap) improved substantially; intervals 3-7 are floor-limited because the released student is already close to the base teacher and the critic residual is comparable to the gap.
 - Next steps (priority order): (1) run the paper-scaled joint H3 TDM run where the student moves and the gap grows (critic `2e-5`, effective batch >=32 to absorb gradient spikes, generator update interval 1, >=1000 generator updates) and judge it on distributional quality rather than paired same-seed MS-SSIM; (2) alternatively, if a testable positive control is required first, build one with a deliberately larger student-teacher gap at all intervals (partially trained or rank-limited student) instead of another frozen released-student schedule; (3) retain multi-prompt/seed and motion/prompt-alignment metrics before accepting a branch-trained checkpoint. Do not spend more compute on frozen-student critic schedules, coverage, or capacity, do not launch another 100-update TDM control from the negative gates, and do not open a PR before quality passes.
@@ -11,7 +18,72 @@
 - Open validation gaps: no acceptable trained checkpoint; no branch-trained SSIM reference; no student-side supervised reachability ceiling has isolated rank-16 student capacity from the learned critic or the four-step compression target; and acceptance criteria still rely heavily on paired student-vs-teacher MS-SSIM. The sample-target oracle is diagnostic rather than the exact conditional expectation. The full-weight critic ceiling was function-step calibrated in BF16 and is negative under that representation, but should not be generalized to every possible full-weight precision/optimizer recipe.
 - GitHub policy: use `gh` authenticated as `macthecadillac`; do not post comments or open a PR without a later explicit request.
 
+## Phase 0 (2026-09-22): integration plan, branch rename, parity gate
+
+User decisions (2026-09-22):
+
+- Work stays internal on this branch; no PR or draft PR until there is a
+  quality-assurance story. Branch renamed `issue/775-tdm` -> `tdm-port`
+  (local ref renamed, pushed to the internal origin as `tdm-port`; the
+  stale `fork/issue-775-tdm` tracking ref was removed; no GitHub fork
+  branch with the old name exists).
+- The regression warmup becomes the default for the TDM + Wan code path
+  and must be documented.
+- A cross-implementation parity gate is a prerequisite: the modular
+  `TDMMethod` numbers must match the standalone/upstream-verified TDM
+  math on identical inputs.
+
+What the standalone port changed about this port's open problems
+(evidence: `.agents/handoffs/tdm-standalone-{wan,h3}-handoff.md` on the
+standalone branches and `artifacts/tdm-standalone-s10/`):
+
+- **Warmup is load-bearing.** Warmup alone collapses visually (blurry
+  orange blobs on every seed); TDM alone drifts out of the teacher cloud
+  (this port's earlier overfit runs and the standalone full-weight
+  S4-S8 grid); warmup + TDM yields coherent, sharp 4-step Wan samples.
+- **Warmup target must be the CFG-combined teacher x0** (the real half
+  of TDM's generator target), not the plain conditional teacher.
+- **Progressive step ladder** (16 -> 8 -> 4) with weights-only stage
+  init and fresh optimizers is what keeps each TDM stage inside its
+  local basin.
+- **Paired metrics are unusable as gates here.** Latent nearest-neighbour
+  / MMD and paired MS-SSIM all rank the blurry no-guidance student above
+  the coherent distilled one, in three independent demonstrations. Gates
+  must be reference-free (coherence, sharpness, diversity,
+  cross-prompt), with the cloud metrics recorded but not asserted.
+- The critic-error-dominance diagnosis recorded in this handoff is
+  complementary rather than contradictory: the regression warmup puts
+  the student's states on-manifold so the critic residual stops
+  dominating the generator signal. The earlier "positive control with a
+  deliberately larger student-teacher gap" is inverted by the new
+  evidence: the worked direction is to reduce the gap first, and the
+  positive control is the warmup-only arm, which fails visually
+  (artifacts/tdm-standalone-s10/warmup-ladder/).
+- **H3 payload to reuse:** one frozen base plus `student`/`critic`
+  adapters and an adapters-disabled teacher (mandatory at 33B); joint
+  video+audio rollout and loss with per-modality shifts 12/3 and model
+  time `1 - sigma`; guidance=1 specialization (no CFG branch); VSA-H3
+  tile-64 Triton training recipe with tau 0.9 and `apply_to: all`;
+  per-processor VSA state under activation checkpointing; and the fp32
+  QK-norm -> bf16 kernel cast.
+
+Phase plan (from the 2026-09-22 plan review):
+
+0. Parity gate and branch hygiene (this section).
+1. Warmup phase and step ladder inside `TDMMethod`; warmup default-on
+   for the Wan path; stage chaining without optimizer-state carryover.
+2. Reference-free measurement policy plus the standalone diagnostic
+   tools (step sweep, cloud stats, perceptual rescore, warmup-only
+   control).
+3. Wan 1.3B end-to-end in the modular stack on one 4-GPU node.
+4. H3 joint video+audio, shared adapters, then VSA.
+5. Docs and examples; PRs only after quality passes.
+
 ## Running log
+
+- 2026-09-22: Branch renamed to `tdm-port` and pushed to the internal
+  origin; stale `fork/issue-775-tdm` ref removed. Phase 0 plan recorded
+  above. Next: parity gate.
 
 - 2026-09-14: User approved the rebase and overfitting plan. Read the `launch-experiment` and `evaluate-video-quality` skills. The skill's legacy experiment-journal requirement conflicts with current repository guidance against `.agents` experiment journals, so experiment state will be maintained in this mandatory handoff instead.
 
