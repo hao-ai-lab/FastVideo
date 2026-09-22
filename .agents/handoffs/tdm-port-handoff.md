@@ -112,6 +112,83 @@ cross-caption spread.
   captions). A control within-caption spread near zero with blurred
   sharpness is the expected conditional-mean collapse.
 
+## Phase 4 (2026-09-22): H3 joint video+audio, shared adapters, then VSA
+
+Scope (user direction 2026-09-22): bring the H3 plan's Phases 0-4 into the
+modular trainer, then wire VSA. Acceptance is the reference-free policy, not
+the H3 plan's older paired-cloud preregistration, because the standalone
+work showed paired metrics rank the blurry arm above the coherent one.
+
+### Recon facts that drive the design
+
+- The modular H3 plugin (`fastvideo/train/models/minimax_h3/minimax_h3.py`)
+  already returns the ordered `(-video_velocity, -audio_velocity)` pair from
+  `predict_noise`, so the base conversion `x0 = x_t - sigma * pred_noise`
+  yields H3's data-ward `x0 = x_t + sigma * v`. The sign bridge exists.
+- `ModelBase.predict_x0` is video-only and raises on a tuple
+  (`models/base.py:193`). The H3 plugin has no LoRA and no `predict_x0`, and
+  its constructor takes no `lora` argument.
+- H3 model time is exactly `1 - sigma` (no table lookup), and the sigma grid
+  is the closed form `shift*u/(1+(shift-1)*u)` with `u = index /
+  num_train_timesteps`; video shift 12, audio shift 3. This is the same
+  static shifted-flow formula `TDMMethod._timestep_to_sigma` already has a
+  fast path for, so the method's existing math generalizes if it is keyed by
+  modality and each modality supplies its own scheduler.
+- `enable_lora_training` supports `ReplicatedLinear` and H3's attention uses
+  `to_q/to_k/to_v/to_out`, all in `DEFAULT_LORA_TARGET_MODULES`. LoRA is
+  feasible without new plumbing. The modular trainer gives each role its own
+  model instance, so student and critic each load a frozen base plus their
+  own adapters and the teacher loads a frozen base without adapters (three
+  bf16 copies, matching the standalone's proven memory profile).
+- Every math helper in `TDMMethod` (`flow_effective_noise`, `flow_snr`,
+  `flow_transition_to_noisier_sigma`, `_expand_sigma_for_latents`,
+  `_mean_except_batch`) already operates on plain tensors, so a per-modality
+  loop reuses them unchanged; only the trajectory/context containers and the
+  loss reduction need to become modality-keyed.
+
+### Design
+
+Model side (H3 plugin):
+1. Accept `lora` and call `_enable_lora_if_configured` (mirroring `WanModel`).
+2. Add `tdm_modalities()` (`("video", "audio")`), `tdm_clean_latents(batch)`,
+   `tdm_sigma_grid(index, modality)` from the closed form,
+   `tdm_model_timestep(sigma, modality)` = `1 - sigma`, and
+   `tdm_predict_x0(noisy, model_timesteps, batch, ...)` that runs one packed
+   transformer forward and converts each modality with its own sigma. A
+   `tdm_add_noise` mirror keeps the forward process per modality.
+3. Default `ModelBase` implementations of these hooks return the video-only
+   behavior so Wan is untouched.
+
+Method side (`TDMMethod`):
+4. Resolve `self._modalities` from the student and hold the per-modality
+   trajectory/context as dicts keyed by modality (a one-key dict for Wan).
+5. Loop the existing per-modality math over `self._modalities`, summing the
+   warmup, fake-score, and generator losses across modalities, exactly like
+   the standalone `_warmup_backward`/`_critic_backward`/`_generator_backward`
+   sums. `tdm_step_ladder` and `tdm_denoising_steps` stay the shared integer
+   grid; per-modality sigmas come from each modality's shift.
+6. Keep the Wan path's numbers identical: the one-modality case must reduce
+   to today's computation, and the Phase 3 tests must still pass.
+
+Config and validation:
+7. `overfit_minimax_h3_t2va_tdm.yaml` cloned from
+   `overfit_minimax_h3_t2va.yaml`: LoRA student+critic (rank 16),
+   `tdm_denoising_steps [999, 749, 500, 250]`, `generator_update_interval 1`,
+   ladder, warmup, guidance 1 (no CFG branch). First gate at the cheaper
+   `480x832x124` geometry before the production `768x1344x124`.
+8. LoRA export/validation: the modular trainer saves DCP training state, so
+   the H3 gate samples through the validation callback (now with per-record
+   seeds) and the reference-free report, not a post-hoc checkpoint load.
+
+Sub-steps and gates:
+- 4A model-side H3 hooks + LoRA + unit tests on a CPU stub (no GPU).
+- 4B method-side modality generalization; Wan tdm suite must stay green.
+- 4C H3 TDM config + data + four-rank dry-run.
+- 4D one-node/four-GPU H3 gate (480x832x124) with the reference-free report;
+  VSA stays off for the first gate.
+- 4E VSA wiring for H3 training (tile-64 Triton, tau 0.9, `apply_to: all`)
+  then rerun the gate.
+
 ## Running log
 
 - 2026-09-22: Branch renamed to `tdm-port` and pushed to the internal
