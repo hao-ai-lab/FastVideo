@@ -110,6 +110,46 @@ Phase plan (from the 2026-09-22 plan review):
     YAML paths.
   - Next: Phase 1 - warmup phase and step ladder inside `TDMMethod`,
     warmup default-on for the Wan path, documented.
+- 2026-09-22: **Phase 1 done.**
+  - `method.warmup_steps` (default `200` for Wan-family students via
+    `_model_family()`, `0` otherwise; explicit override wins, negative
+    rejected). During warmup the student regresses onto the CFG-combined
+    teacher x0 at its own rollout states; the critic takes no updates and
+    is excluded from `get_optimizers` / `get_lr_schedulers` /
+    `get_grad_clip_targets`, and its optimizer state stays empty.
+    Metrics: `tdm/warmup`, `tdm/warmup/loss`, `tdm/warmup/guidance`,
+    source timestep/sigma/trajectory-index, plus `tdm/warmup_steps` and
+    `tdm/step_ladder_stage` on every step.
+  - `method.tdm_step_ladder`: staged `denoising_steps` with
+    `until_iteration` boundaries (strictly decreasing step counts,
+    strictly increasing boundaries, only the final stage unbounded).
+    The active stage is selected per iteration and the denoising
+    assets/sigmas are recomputed per stage. Validation and inference
+    adopt the final stage because `method_config["dmd_denoising_steps"]`
+    is set from it.
+  - The shipped example config carries `warmup_steps: 200` plus a
+    commented 8 -> 4 ladder; the config smoke test pins the warmup value.
+  - Docs: `tests/local_tests/tdm/README.md` gains "Warmup And Step
+    Ladder" (standalone evidence, defaults, ladder rules, paired-metric
+    caveat); its validation section now records the one-node/four-GPU
+    constraint instead of the stale Modal instruction.
+  - Tests: `test_tdm_warmup_and_ladder.py` (11 cases): Wan default,
+    explicit override and negative rejection, student-only gating,
+    CFG-teacher regression target with gradients, ladder stage
+    resolution/sigma recomputation, and six malformed-ladder
+    rejections. Full `tests/local_tests/tdm/` suite: **60 passed** on the
+    held GB200 pod. Mutation check: replacing the warmup CFG combination
+    with the plain conditional teacher fails exactly
+    `test_warmup_loss_matches_cfg_teacher_target`.
+  - Scope note: stage chaining is implemented as an *in-run* ladder, so
+    no framework-level weights-only init was needed; the existing
+    `dcp_to_diffusers` + `transformer_override_safetensor` path remains
+    the option for cross-run chaining with fresh optimizer state (not
+    implemented). Optimizer state carries across ladder stages whereas
+    the standalone recipe reset it per stage; revisit in Phase 3 if the
+    validation run shows it matters.
+  - Next: Phase 2 - reference-free measurement policy and the standalone
+    diagnostic tools.
 
 - 2026-09-14: User approved the rebase and overfitting plan. Read the `launch-experiment` and `evaluate-video-quality` skills. The skill's legacy experiment-journal requirement conflicts with current repository guidance against `.agents` experiment journals, so experiment state will be maintained in this mandatory handoff instead.
 
