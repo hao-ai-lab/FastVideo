@@ -84,6 +84,32 @@ Phase plan (from the 2026-09-22 plan review):
 - 2026-09-22: Branch renamed to `tdm-port` and pushed to the internal
   origin; stale `fork/issue-775-tdm` ref removed. Phase 0 plan recorded
   above. Next: parity gate.
+- 2026-09-22: **Phase 0 parity gate done.**
+  `tests/local_tests/tdm/test_tdm_upstream_parity.py` added: it pins the
+  modular method against the same upstream transcription the standalone
+  port uses. Four tests cover (1) the assembled context's noise
+  identities (`eps_source`, intermediate/target states, transition beta,
+  mixed-noise reconstruction, scheduler sigma membership), (2) the
+  critic loss composition (clipped SNR 5.0, importance
+  `exp(0.5(||proposal||^2 - ||mixed||^2))` clamped at 10.0) with
+  parameter gradients, (3) the generator composition (stop-gradient
+  boundaries, CFG teacher target at 4.5, per-sample delta
+  normalization) with parameter gradients, and (4) the default
+  configuration being the upstream reference mode. The generator test
+  also asserts that the generator phase re-derives the critic context's
+  target state exactly (the trajectory-reuse invariant).
+  - Results on the held GB200 pod: 4/4 parity tests pass; full
+    `tests/local_tests/tdm/` suite 49 passed. Mutation check: replacing
+    the CFG combination with the plain conditional teacher
+    (`real_cfg_x0 = real_cond_x0`) fails exactly the generator parity
+    test, confirming the transcription is discriminating.
+  - Environment note: the suite imports the Triton driver chain
+    (`fastvideo.attention`), so it needs a GPU pod; the CPU audit pod
+    cannot collect it (`RuntimeError: 0 active drivers`). Stage the tree
+    including `examples/train` or the config-smoke tests fail on missing
+    YAML paths.
+  - Next: Phase 1 - warmup phase and step ladder inside `TDMMethod`,
+    warmup default-on for the Wan path, documented.
 
 - 2026-09-14: User approved the rebase and overfitting plan. Read the `launch-experiment` and `evaluate-video-quality` skills. The skill's legacy experiment-journal requirement conflicts with current repository guidance against `.agents` experiment journals, so experiment state will be maintained in this mandatory handoff instead.
 
