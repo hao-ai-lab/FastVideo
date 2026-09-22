@@ -7,9 +7,10 @@
 # separate within-caption seed spread from cross-caption spread.
 #
 #   train prompts       tdm_multiprompt_train_prompts.txt (4 prompts)
-#   validation prompts  tdm_multiprompt_validation.json (4 train + 4 held-out,
-#                       each repeated four times; the repeat makes the caption
-#                       to filename mapping deterministic)
+#   validation prompts  tdm_multiprompt_validation.json (4 train + 4 held-out
+#                       captions, each repeated four times with explicit
+#                       seeds; the per-row seed makes each repeat a distinct
+#                       sample and the row order fixes the caption mapping)
 #
 # Acceptance is reference-free: tdm_multiprompt_report.py reports per-caption
 # frame sharpness and within-caption spread; paired metrics stay forensic.
