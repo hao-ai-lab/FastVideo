@@ -30,6 +30,8 @@ class SamplingParam:
 
     # Video inputs
     video_path: str | None = None
+    mask_path: str | None = None
+    conditioning_scale: float | list[float] = 1.0
 
     # Wan-Animate driving inputs: paths to the *preprocessed* artifacts the
     # official preprocessing pipeline produces (src_pose.mp4, src_face.mp4;
