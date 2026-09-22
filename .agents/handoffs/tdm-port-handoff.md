@@ -150,6 +150,35 @@ Phase plan (from the 2026-09-22 plan review):
     validation run shows it matters.
   - Next: Phase 2 - reference-free measurement policy and the standalone
     diagnostic tools.
+- 2026-09-22: **Phase 2 done (measurement policy + first tools).**
+  - `fastvideo/train/utils/tdm_metrics.py`: reference-free metrics
+    (frame statistics with a gradient-sharpness blur detector, latent-cloud
+    diversity, teacher-cloud overlap and the median-squared-distance
+    bandwidth convention) plus forensic-only
+    `nearest_neighbour_relative_mse` and optional `paired_ms_ssim`.
+    `test_tdm_metrics.py` (4 cases) pins the sharpness ordering,
+    mode-tightening detection, overlap behaviour, and the documented
+    paired-metric inversion.
+  - `tests/local_tests/tdm/tools/tdm_video_report.py`: scans a run's
+    `*/samples/step-*` validation videos, emits frame statistics per
+    video plus optional forensic paired MS-SSIM, writes JSON.
+  - Phase 2 gate result: the tool reproduces the standalone warmup-ladder
+    frame stat exactly (step-400 student std `88.27` equals the standalone
+    `frame_stats.json`) and separates the arms on sharpness -
+    warmup-only `22-64`, teacher `90.5`, TDM ladder `192-401` - the exact
+    inverse of the paired-metric ranking (warmup-only `nn_rel_mse 0.606`
+    "in bounds" versus TDM `1.350` "out"). Evidence:
+    `artifacts/tdm-port/phase2/`.
+  - Warmup-phase control tests appended to
+    `test_tdm_warmup_and_ladder.py` (warmup-only never touches the critic;
+    the TDM phase updates both roles). Full TDM suite: **62 passed**.
+  - Deferred to Phase 3 and documented in the README: the step-count
+    preflight sampler and a checkpoint rescorer, because both need real
+    checkpoints/weights and the modular LoRA export path resolved. The
+    standalone equivalents already produced the S10 numbers.
+  - Commits pushed: `79eaa368f` (metrics), `f028aff75` (tool + controls).
+  - Next: Phase 3 - Wan 1.3B end-to-end in the modular stack on one
+    four-GPU Kubernetes node.
 
 - 2026-09-14: User approved the rebase and overfitting plan. Read the `launch-experiment` and `evaluate-video-quality` skills. The skill's legacy experiment-journal requirement conflicts with current repository guidance against `.agents` experiment journals, so experiment state will be maintained in this mandatory handoff instead.
 
