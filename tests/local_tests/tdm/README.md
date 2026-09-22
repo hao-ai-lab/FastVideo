@@ -98,6 +98,34 @@ not be used as quality gates for TDM; use reference-free signals (visual
 coherence, frame sharpness, sample diversity, cross-prompt behaviour) and keep
 the cloud metrics as diagnostics only.
 
+## Acceptance And Diagnostics
+
+| Signal | Implementation | Guidance |
+|---|---|---|
+| Frame sharpness (mean squared luminance gradient) | `tdm_metrics.frame_statistics` | The blur detector: a no-guidance or regression-only student falls far below the teacher; a distilled student sits in the teacher's ballpark or above |
+| Frame contrast (std) | `tdm_metrics.frame_statistics` | Within roughly 10 percent of the teacher's |
+| Latent-cloud diversity | `tdm_metrics.latent_cloud_statistics` | Student median pairwise distance within roughly 10 percent of the teacher's; mean off-diagonal cosine must not approach 1 |
+| Teacher-cloud overlap | `tdm_metrics.cloud_overlap` | Recorded only; blur inflates overlap, so it is not a gate |
+| Paired MS-SSIM / latent nearest-neighbour | `tdm_metrics.paired_ms_ssim`, `nearest_neighbour_relative_mse` | Forensic only; see the caveat above |
+
+Run the video acceptance report over a completed run:
+
+```bash
+PYTHONPATH=. python tests/local_tests/tdm/tools/tdm_video_report.py \
+    --run-dir <run root> --out /tmp/video_report.json [--paired-ms-ssim]
+```
+
+It reproduces the standalone numbers on the same videos: the warmup-only
+step-400 student reads std `88.27` (identical to the standalone
+`frame_stats.json`), and the sharpness axis separates the arms the way the
+frames do - warmup-only 22-64, teacher 90.5, TDM ladder 192-401 - which is the
+exact inverse of the paired-metric ranking (warmup-only `nn_rel_mse 0.606` "in
+bounds" versus TDM `1.350` "out").
+
+The step-count preflight sampler and a checkpoint rescorer are deferred to the
+first modular Wan validation run, because both need real checkpoints and the
+modular LoRA export path resolved.
+
 ## Test Scope
 
 ```bash
@@ -110,7 +138,8 @@ pytest tests/local_tests/tdm/ -v -s
 | Flow bridge | `test_tdm_scheduler_math.py` | Mixed-noise transition reconstructs Wan flow noising; invalid direction raises |
 | Method wiring | `test_tdm_method_unit.py` | Fake models exercise loss keys, faithful interval support, fake-score-before-generator optimizer ordering, and student/critic updates |
 | Upstream parity | `test_tdm_upstream_parity.py` | Assembled context identities plus critic/generator losses and gradients against the upstream-verified transcription |
-| Warmup and ladder | `test_tdm_warmup_and_ladder.py` | Wan-family warmup default, student-only gating, CFG teacher regression target, ladder stage resolution and validation |
+| Warmup and ladder | `test_tdm_warmup_and_ladder.py` | Wan-family warmup default, student-only gating, CFG teacher regression target, ladder stage resolution and validation, warmup-only versus TDM phase controls |
+| Metrics | `test_tdm_metrics.py` | Sharpness ordering, mode-tightening detection, overlap behaviour, and the documented paired-metric inversion |
 
 ## GPU Validation
 
