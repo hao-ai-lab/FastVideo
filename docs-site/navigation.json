@@ -62,6 +62,10 @@
         "href": "/inference/optimizations"
       },
       {
+        "label": "Wan-VACE",
+        "href": "/inference/wan_vace"
+      },
+      {
         "label": "LoRA adapters",
         "href": "/utilities/lora"
       },
