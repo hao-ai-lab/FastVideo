@@ -10,6 +10,7 @@ from fastvideo.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.configs.models.dits.wan_animate import WanAnimateConfig as WanAnimateDiTConfig
 from fastvideo.configs.models.dits.wan_s2v import WanS2VConfig as WanS2VDiTConfig
 from fastvideo.models.wan.config import WanVideoArchConfig, WanVideoConfig
+from fastvideo.models.wan.vace_config import WanVACEArchConfig, WanVACEVideoConfig
 from fastvideo.configs.models.encoders import (BaseEncoderOutput, CLIPVisionConfig, T5Config,
                                                WAN2_1ControlCLIPVisionConfig)
 from fastvideo.configs.pipelines.base import PipelineConfig
@@ -113,6 +114,44 @@ class WANV2VConfig(WanI2V480PConfig):
     image_encoder_config: EncoderConfig = field(default_factory=WAN2_1ControlCLIPVisionConfig)
     # CLIP encoder precision
     image_encoder_precision: str = 'bf16'
+
+
+@dataclass
+class WanVACE1_3B_Config(WanT2V480PConfig):
+    """Wan2.1-VACE-1.3B controllable video generation (480P)."""
+
+    dit_config: DiTConfig = field(default_factory=lambda: WanVACEVideoConfig(arch_config=WanVACEArchConfig(
+        num_attention_heads=12,
+        attention_head_dim=128,
+        ffn_dim=8960,
+        num_layers=30,
+        vace_in_channels=96,
+        vace_layers=[0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28],
+    )))
+    flow_shift: float | None = 16.0
+
+    def __post_init__(self) -> None:
+        self.vae_config.load_encoder = True
+        self.vae_config.load_decoder = True
+
+
+@dataclass
+class WanVACE14B_Config(WanT2V720PConfig):
+    """Wan2.1-VACE-14B controllable video generation (480P and 720P)."""
+
+    dit_config: DiTConfig = field(default_factory=lambda: WanVACEVideoConfig(arch_config=WanVACEArchConfig(
+        num_attention_heads=40,
+        attention_head_dim=128,
+        ffn_dim=13824,
+        num_layers=40,
+        vace_in_channels=96,
+        vace_layers=[0, 5, 10, 15, 20, 25, 30, 35],
+    )))
+    flow_shift: float | None = 16.0
+
+    def __post_init__(self) -> None:
+        self.vae_config.load_encoder = True
+        self.vae_config.load_decoder = True
 
 
 @dataclass
