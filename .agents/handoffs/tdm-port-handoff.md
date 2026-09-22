@@ -179,6 +179,31 @@ Phase plan (from the 2026-09-22 plan review):
   - Commits pushed: `79eaa368f` (metrics), `f028aff75` (tool + controls).
   - Next: Phase 3 - Wan 1.3B end-to-end in the modular stack on one
     four-GPU Kubernetes node.
+- 2026-09-22: **Phase 3 first run (shipped learning rates) is a no-op regime.**
+  - The four-GPU pod `tdm-port-wan-r1` scheduled immediately. The new
+    `tdm_t2v_lora_fixed_recipe.yaml` (warmup 100 + 8->4 ladder, 200 steps)
+    passed a four-rank dry-run, and the on-PVC one-prompt text-only
+    dataset from the earlier work
+    (`/workspace/issue-775/tdm-overfit-447ebf2-r4/data/tdm_t2v_overfit_text_only`)
+    was reused.
+  - `wan-tdm-fixed-recipe` (treatment: warmup 100 then TDM 100; control:
+    warmup 200) completed rc=0, ~34 min per arm, with validation videos
+    every 25 steps. The report tool needed a fix to accept the modular
+    `validation_step_*_rank_*_video_*.mp4` layout (committed).
+  - The recipe plumbing is correct: `tdm/warmup` is 1.0 through step 99,
+    `tdm/step_ladder_stage` switches 0 -> 1 at step 100, warmup loss
+    3.36 -> 2.38 (grad norms ~1), TDM generator loss ~0.33, critic loss
+    ~7e-4, critic grad norms ~5e-4.
+  - But **both arms are visually and metrically identical to the base**:
+    a blurred blob, frame sharpness 15.0 -> 10.1 in both, std ~30. The
+    cause is the shipped overfit recipe's learning rates - student 2e-6
+    and fake-score 8e-6, 50-100x below the standalone-validated 1e-4 -
+    which move the adapters by roughly 1e-4 over 200 steps. This is the
+    same no-op regime as standalone S9.
+  - Rerun launched with student 1e-4 / fake-score 1e-4 (the runner now
+    takes `STUDENT_LR` / `FAKE_SCORE_LR`), everything else identical.
+  - Evidence: `artifacts/tdm-port/phase3/` (both video reports, status,
+    frames at steps 0/100/200 for both arms).
 
 - 2026-09-14: User approved the rebase and overfitting plan. Read the `launch-experiment` and `evaluate-video-quality` skills. The skill's legacy experiment-journal requirement conflicts with current repository guidance against `.agents` experiment journals, so experiment state will be maintained in this mandatory handoff instead.
 
