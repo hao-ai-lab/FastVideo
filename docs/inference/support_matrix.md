@@ -87,6 +87,8 @@ column links a runnable script in `examples/inference/basic/` where one exists.
 | wan | `Wan-AI/Wan2.2-Animate-14B-Diffusers` | I2V | [basic_wan_animate.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_wan_animate.py) |
 | wan | `weizhou03/Wan2.1-Fun-1.3B-InP-Diffusers` | I2V | — |
 | wan | `IRMChen/Wan2.1-Fun-1.3B-Control-Diffusers` | — | [basic_wan2_2_Fun.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_wan2_2_Fun.py) |
+| wan | `Wan-AI/Wan2.1-VACE-1.3B-diffusers` | — | [basic_wan_vace.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_wan_vace.py) |
+| wan | `Wan-AI/Wan2.1-VACE-14B-diffusers` | — | [basic_wan_vace.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_wan_vace.py) |
 | wan | `FastVideo/FastWan2.1-T2V-1.3B-Diffusers`<br>`FastVideo/FastWan2.1-T2V-14B-480P-Diffusers` | T2V | [basic_dmd.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_dmd.py) |
 | wan | `Wan-AI/Wan2.2-TI2V-5B-Diffusers` | T2V, I2V | [basic_wan2_2_ti2v.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_wan2_2_ti2v.py) |
 | wan | `FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers`<br>`FastVideo/FastWan2.2-TI2V-5B-Diffusers` | T2V, I2V | [basic_dmd.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_dmd.py) |
@@ -124,11 +126,11 @@ official `Lightricks/LTX-2.5` repository uses gated, split component files, so
 it must first be converted to FastVideo's component layout. See the
 [LTX-2.5 inference guide](ltx2_5.md).
 
-**Note (Wan-VACE)**: not currently supported — no VACE pipeline or registered
-model ID exists on `main`
-([#1435](https://github.com/hao-ai-lab/FastVideo/issues/1435)). The closest
-supported path is the Wan2.1-Fun control pipeline
-(`IRMChen/Wan2.1-Fun-1.3B-Control-Diffusers`).
+**Note (Wan-VACE)**: `Wan-AI/Wan2.1-VACE-1.3B-diffusers` and
+`Wan-AI/Wan2.1-VACE-14B-diffusers` are supported for controllable generation.
+See the [Wan-VACE guide](wan_vace.md) for input modes, official parameters,
+and reproducibility matrix. Quick start:
+[basic_wan_vace.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_wan_vace.py).
 
 The symbols used have the following meanings:
 

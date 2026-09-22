@@ -190,6 +190,7 @@ nav:
     - LTX-2.5: inference/ltx2_5.md
     - Kandinsky 6 T2IVA: inference/kandinsky6.md
     - Kandinsky 6 Video SR: inference/kandinsky6_sr.md
+    - Wan-VACE: inference/wan_vace.md
     - CLI: inference/cli.md
     - Add Pipeline: inference/add_pipeline.md
     - Examples:
