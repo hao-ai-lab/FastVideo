@@ -299,6 +299,44 @@ cross-caption spread.
     textured.
   - Tests on the pod after the fix: `tests/local_tests/tdm/` plus
     `fastvideo/tests/train/callbacks/test_validation.py` = 113 passed.
+- 2026-09-22: **Phase 3.1 done: diversity recovery and held-out
+  generalization both hold.**
+  Rerun `wan-tdm-multiprompt-seed` (four train prompts, four seeds per
+  caption, treatment warmup 100 then TDM 100, control warmup 200)
+  completed rc=0, 18:22Z to 19:31Z.
+  - Per-step report, treatment | control. Within-caption seed spread:
+    `0.262 | 0.262` (step 0), `0.354 | 0.350` (50), `0.405 | 0.330` (100),
+    `0.466 | 0.322` (150), `0.503 | 0.303` (200). Cross-caption spread:
+    `0.342 | 0.342`, `0.572 | 0.570`, `0.627 | 0.553`, `0.678 | 0.551`,
+    `0.748 | 0.486`. The treatment nearly doubles its seed spread while
+    the control stalls and then tightens, a `1.66x` separation at step
+    200.
+  - Frame sharpness, train | held-out: treatment `18.9 | 55.5` ->
+    `15.4 | 52.8` -> `20.5 | 72.9` -> `129.9 | 190.6` -> `229.8 | 250.8`;
+    control `18.9 | 55.5` -> `16.3 | 56.1` -> `10.4 | 52.1` ->
+    `12.5 | 88.4` -> `5.1 | 42.7`.
+  - Per-caption step 200: every treatment caption is coherent
+    (`112-319` sharpness, within-caption spread `0.41-0.59`); the control's
+    four train captions collapse (`2.3-6.2`) while its four held-out
+    captions stay partly coherent (`19.7-103.2`) because it never
+    regressed those prompts.
+  - Visual check (frames under the local
+    `artifacts/tdm-port/phase3-multiprompt/frames/`): the treatment renders
+    a crisp red sports car on the white tabletop and, on an unseen prompt,
+    a sharp golden retriever puppy in tall grass; the control renders a
+    blurred smear on the train prompt and a soft base-model-like dog on
+    the held-out one.
+  - Reading: the multi-prompt fix named by the standalone S10 works. The
+    fixed recipe no longer contracts on the training prompt; it grows seed
+    diversity and generalizes to unseen prompts in the coherence sense.
+    The warmup-only collapse is prompt-specific, which is why its held-out
+    sharpness stays above its train sharpness.
+  - Evidence: `artifacts/tdm-port/phase3-multiprompt/` (both reports, stage
+    log, per-arm report logs, eight frames); run root
+    `/workspace/run/tdm-port/wan-tdm-multiprompt-seed`.
+  - Commits: `d1ddd37d5` (assets), `16ee46307` (runner wait fix),
+    `46c2e98ba` (per-record validation seed).
+  - Next: Phase 4 (H3 joint video+audio, shared adapters, then VSA).
 
 - 2026-09-14: User approved the rebase and overfitting plan. Read the `launch-experiment` and `evaluate-video-quality` skills. The skill's legacy experiment-journal requirement conflicts with current repository guidance against `.agents` experiment journals, so experiment state will be maintained in this mandatory handoff instead.
 
