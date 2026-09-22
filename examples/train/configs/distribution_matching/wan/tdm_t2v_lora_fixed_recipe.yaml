@@ -73,7 +73,7 @@ method:
   use_huber: false
   huber_c: 0.001
   max_grad_norm: 1.0
-  fake_score_learning_rate: 8.0e-6
+  fake_score_learning_rate: 1.0e-4
   fake_score_betas: [0.0, 0.999]
   fake_score_lr_scheduler: constant
   cfg_uncond:
@@ -101,7 +101,12 @@ training:
     num_frames: 77
 
   optimizer:
-    learning_rate: 2.0e-6
+    # Validated TDM range. The DMD2-inherited 2e-6 student LR is a no-op
+    # regime for this objective (Phase 3 measured ~1e-4 total adapter
+    # movement over 200 steps and no visual change in either arm); at
+    # 1e-4 the warmup bakes guidance in and TDM sharpens to a coherent
+    # sample while the regression-only control stays blurred.
+    learning_rate: 1.0e-4
     betas: [0.0, 0.999]
     weight_decay: 0.01
     lr_scheduler: constant
