@@ -190,8 +190,12 @@ class TDMMethod(DMD2Method):
             raise ValueError("TDMMethod currently requires method.rollout_mode='simulate'")
 
         mcfg = self.method_config
+        # One joint model can carry several modalities (MiniMax H3 video +
+        # audio); the same code paths loop over this tuple, and video-only
+        # models resolve to a single "video" entry.
+        self._modalities: tuple[str, ...] = tuple(self.student.tdm_modalities())
         self._denoising_step_list: torch.Tensor | None = None
-        self._denoising_sigma_list: torch.Tensor | None = None
+        self._denoising_sigma_lists: dict[str, torch.Tensor] | None = None
         self._step_schedules = self._parse_step_schedules()
         self._active_schedule_index = 0
         self._cached_schedule_index: int | None = None
@@ -424,28 +428,38 @@ class TDMMethod(DMD2Method):
 
     def _sample_warmup_source(
         self,
-        trajectory: TDMTrajectory,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Pick the rollout state each sample regresses at (detached)."""
-        device = trajectory.sigmas.device
-        batch_size = trajectory.noisy_latents[0].shape[0]
+        trajectories: dict[str, TDMTrajectory],
+    ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor], torch.Tensor]:
+        """Pick the rollout state each sample regresses at (detached).
+
+        One trajectory index drives every modality so the joint state stays
+        synchronized at the same denoising step.
+        """
+        reference = trajectories["video"].sigmas
+        device = reference.device
+        batch_size = trajectories["video"].noisy_latents[0].shape[0]
         batch_indices = torch.arange(batch_size, device=device)
         trajectory_indices = torch.randint(
             0,
-            len(trajectory.sigmas),
+            len(reference),
             [batch_size],
             device=device,
             dtype=torch.long,
             generator=self.cuda_generator,
         )
-        noisy_source = torch.stack(trajectory.noisy_latents)[trajectory_indices, batch_indices].detach()
-        sigma_source = trajectory.sigmas[trajectory_indices]
-        timestep_source = self._model_timestep_for_sigma(sigma_source, self.student)
-        return noisy_source, sigma_source, timestep_source, trajectory_indices
+        noisy_source = {
+            name: torch.stack(trajectory.noisy_latents)[trajectory_indices, batch_indices].detach()
+            for name, trajectory in trajectories.items()
+        }
+        sigma_source = {
+            name: trajectory.sigmas[trajectory_indices]
+            for name, trajectory in trajectories.items()
+        }
+        return noisy_source, sigma_source, trajectory_indices
 
     def _tdm_warmup_loss(
         self,
-        trajectory: TDMTrajectory,
+        trajectories: dict[str, TDMTrajectory],
         batch: TrainingBatch,
     ) -> tuple[torch.Tensor, dict[str, LogScalar], tuple[torch.Tensor, Any]]:
         """Regression warmup step toward the CFG-combined teacher x0.
@@ -454,48 +468,56 @@ class TDMMethod(DMD2Method):
         rollout states is regressed onto the guidance-combined teacher x0
         at those same states, with no critic update. This bakes CFG
         sharpness into the unguided student and puts it inside the
-        teacher's basin before the TDM correction is enabled.
+        teacher's basin before the TDM correction is enabled. Each
+        modality contributes its own squared error and the losses are
+        summed, matching the standalone joint warmup.
         """
-        noisy_source, sigma_source, timestep_source, trajectory_indices = self._sample_warmup_source(trajectory)
+        noisy_source, sigma_source, trajectory_indices = self._sample_warmup_source(trajectories)
         guidance = self._real_score_guidance()
-        batch.timesteps = timestep_source
-        pred_x0 = self.student.predict_x0(
+        pred_x0 = self.student.tdm_predict_x0(
             noisy_source,
-            timestep_source,
+            sigma_source,
             batch,
             conditional=True,
             cfg_uncond=self._cfg_uncond,
             attn_kind="vsa",
         )
+        student_timestep = batch.timesteps
         with torch.no_grad():
-            teacher_timestep = self._model_timestep_for_sigma(sigma_source, self.teacher)
-            batch.timesteps = teacher_timestep
-            real_cond_x0 = self.teacher.predict_x0(
+            real_cond_x0 = self.teacher.tdm_predict_x0(
                 noisy_source,
-                teacher_timestep,
+                sigma_source,
                 batch,
                 conditional=True,
                 cfg_uncond=self._cfg_uncond,
                 attn_kind="dense",
             )
-            real_uncond_x0 = self.teacher.predict_x0(
-                noisy_source,
-                teacher_timestep,
-                batch,
-                conditional=False,
-                cfg_uncond=self._cfg_uncond,
-                attn_kind="dense",
-            )
-            real_cfg_x0 = real_uncond_x0 + (real_cond_x0 - real_uncond_x0) * guidance
-        loss = (pred_x0.float() - real_cfg_x0.float()).square().mean()
+            if guidance == 1.0:
+                real_cfg_x0 = real_cond_x0
+            else:
+                real_uncond_x0 = self.teacher.tdm_predict_x0(
+                    noisy_source,
+                    sigma_source,
+                    batch,
+                    conditional=False,
+                    cfg_uncond=self._cfg_uncond,
+                    attn_kind="dense",
+                )
+                real_cfg_x0 = {
+                    name: real_uncond_x0[name] + (real_cond_x0[name] - real_uncond_x0[name]) * guidance
+                    for name in real_cond_x0
+                }
+        loss = sum(
+            (pred_x0[name].float() - real_cfg_x0[name].float()).square().mean() for name in pred_x0)
+        video_sigma = sigma_source["video"]
         metrics: dict[str, LogScalar] = {
             "tdm/warmup/loss": loss.detach(),
             "tdm/warmup/guidance": guidance,
-            "tdm/warmup/source_timestep": timestep_source.detach().float().mean(),
-            "tdm/warmup/source_sigma": sigma_source.detach().float().mean(),
+            "tdm/warmup/source_timestep": student_timestep.detach().float().mean(),
+            "tdm/warmup/source_sigma": video_sigma.detach().float().mean(),
             "tdm/warmup/source_trajectory_index": trajectory_indices.detach().float().mean(),
         }
-        return loss, metrics, (timestep_source, batch.attn_metadata_vsa)
+        return loss, metrics, (student_timestep, batch.attn_metadata_vsa)
 
     def _managed_warmup_step(
         self,
@@ -706,22 +728,29 @@ class TDMMethod(DMD2Method):
                 raise ValueError("method.tdm_denoising_steps contains values outside the scheduler training range")
             steps = timesteps[step_indices]
 
-        sigmas = self._timestep_to_sigma(steps, scheduler_space=bool(warp))
-        scheduler_sigmas = self.student.noise_scheduler.sigmas.to(device=device, dtype=torch.float32)
-        terminal_sigma = scheduler_sigmas.max()
-        if not bool(torch.isclose(
-                sigmas[0],
-                terminal_sigma,
-                rtol=0.0,
-                atol=1e-6,
-        ).item()):
-            raise ValueError("method.tdm_denoising_steps must start at the scheduler terminal sigma because "
-                             "TDM rollout starts from pure noise")
-        if not bool(torch.all(sigmas[:-1] > sigmas[1:] + 1e-6).item()):
-            raise ValueError("method.tdm_denoising_steps must map to strictly decreasing scheduler sigmas")
+        sigmas_by_modality = (
+            {
+                modality: self._timestep_to_sigma(steps, scheduler_space=True)
+                for modality in self._modalities
+            } if bool(warp) else {
+                modality: self.student.tdm_sigma_grid(steps, modality).to(device=device, dtype=torch.float32)
+                for modality in self._modalities
+            })
+        for modality, sigmas in sigmas_by_modality.items():
+            terminal_sigma = self.student.tdm_terminal_sigma(modality).to(device=device, dtype=torch.float32)
+            if not bool(torch.isclose(
+                    sigmas[0],
+                    terminal_sigma,
+                    rtol=0.0,
+                    atol=1e-6,
+            ).item()):
+                raise ValueError("method.tdm_denoising_steps must start at the scheduler terminal sigma because "
+                                 "TDM rollout starts from pure noise")
+            if not bool(torch.all(sigmas[:-1] > sigmas[1:] + 1e-6).item()):
+                raise ValueError("method.tdm_denoising_steps must map to strictly decreasing scheduler sigmas")
 
         self._denoising_step_list = steps
-        self._denoising_sigma_list = sigmas
+        self._denoising_sigma_lists = sigmas_by_modality
         self._cached_schedule_index = self._active_schedule_index
         return steps
 
@@ -779,142 +808,138 @@ class TDMMethod(DMD2Method):
         self,
         sigma: torch.Tensor,
         model: ModelBase,
+        modality: str = "video",
     ) -> torch.Tensor:
         """Resolve an authoritative flow sigma to a model scheduler label."""
-        scheduler = model.noise_scheduler
-        model_timesteps = scheduler.timesteps.to(device=sigma.device, dtype=torch.float32)
-        model_sigmas = scheduler.sigmas[:model_timesteps.numel()].to(device=sigma.device, dtype=torch.float32)
-        flat_sigma = sigma.to(dtype=torch.float32).reshape(-1)
-        indices = torch.argmin(
-            (model_sigmas.unsqueeze(0) - flat_sigma.unsqueeze(1)).abs(),
-            dim=1,
-        )
-        resolved_sigmas = model_sigmas[indices]
-        if not bool(torch.allclose(
-                resolved_sigmas,
-                flat_sigma,
-                rtol=1e-5,
-                atol=1e-6,
-        )):
-            raise ValueError("TDM role scheduler does not contain the requested trajectory sigma")
-        return model_timesteps[indices].reshape(sigma.shape)
+        return model.tdm_sigma_to_model_timestep(sigma, modality)
 
     def _student_trajectory(
         self,
         batch: TrainingBatch,
-    ) -> TDMTrajectory:
-        latents = batch.latents
-        if latents is None:
+    ) -> dict[str, TDMTrajectory]:
+        """Roll the few-step student trajectory out for every modality.
+
+        One joint forward per step produces all modalities, so video and
+        audio stay synchronized on a shared denoising schedule while each
+        modality advances with its own sigma grid.
+        """
+        if batch.latents is None:
             raise RuntimeError("TDM requires prepared batch latents")
-        device = latents.device
-        dtype = latents.dtype
+        clean = self.student.tdm_clean_latents(batch)
+        device = batch.latents.device
+        dtype = batch.latents.dtype
         step_list = self._get_denoising_step_list(device)
-        sigma_list = self._denoising_sigma_list
-        if sigma_list is None:
+        sigma_lists = self._denoising_sigma_lists
+        if sigma_lists is None:
             raise RuntimeError("TDM denoising sigmas were not initialized with the step schedule")
         if len(step_list) < 2:
             raise ValueError("TDM requires at least two denoising steps")
 
-        current_noisy = torch.randn(
-            latents.shape,
-            device=device,
-            dtype=dtype,
+        current = self.student.tdm_initial_noise(
+            clean,
             generator=self.cuda_generator,
+            dtype=dtype,
         )
-        noisy_latents: list[torch.Tensor] = []
-        clean_latents: list[torch.Tensor] = []
-        sigmas: list[torch.Tensor] = []
+        noisy_latents: dict[str, list[torch.Tensor]] = {name: [] for name in self._modalities}
+        clean_latents: dict[str, list[torch.Tensor]] = {name: [] for name in self._modalities}
+        sigmas: dict[str, list[torch.Tensor]] = {name: [] for name in self._modalities}
 
         for step_idx in range(len(step_list)):
-            sigma = sigma_list[step_idx].reshape(1)
-            model_timestep = self._model_timestep_for_sigma(sigma, self.student)
-            batch.timesteps = model_timestep
+            step_sigmas = {
+                name: sigma_lists[name][step_idx].reshape(1)
+                for name in self._modalities
+            }
             with torch.no_grad():
-                pred_x0 = self.student.predict_x0(
-                    current_noisy,
-                    model_timestep,
+                pred_x0 = self.student.tdm_predict_x0(
+                    current,
+                    step_sigmas,
                     batch,
                     conditional=True,
                     cfg_uncond=self._cfg_uncond,
                     attn_kind="vsa",
                 )
-
-            noisy_latents.append(current_noisy)
-            clean_latents.append(pred_x0)
-            sigmas.append(sigma[0])
+            for name in self._modalities:
+                noisy_latents[name].append(current[name])
+                clean_latents[name].append(pred_x0[name])
+                sigmas[name].append(step_sigmas[name][0])
 
             if step_idx + 1 >= len(step_list):
                 break
 
-            sigma_next = sigma_list[step_idx + 1].reshape(1)
-            if self._rollout_sample_type == "sde":
-                noise = torch.randn(
-                    latents.shape,
-                    device=device,
-                    dtype=dtype,
-                    generator=self.cuda_generator,
-                )
-                sigma_next_b = _expand_sigma_for_latents(sigma_next, current_noisy)
-                current_noisy = (1.0 - sigma_next_b) * pred_x0 + sigma_next_b * noise
-            else:
-                eps = flow_effective_noise(
-                    current_noisy,
-                    pred_x0,
-                    sigma,
-                    eps=self._sigma_eps,
-                )
-                sigma_next_b = _expand_sigma_for_latents(sigma_next, current_noisy)
-                current_noisy = (1.0 - sigma_next_b) * pred_x0 + sigma_next_b * eps
+            for name in self._modalities:
+                sigma = step_sigmas[name]
+                sigma_next = sigma_lists[name][step_idx + 1].reshape(1)
+                if self._rollout_sample_type == "sde":
+                    noise = torch.randn(
+                        current[name].shape,
+                        device=current[name].device,
+                        dtype=current[name].dtype,
+                        generator=self.cuda_generator,
+                    )
+                    sigma_next_b = _expand_sigma_for_latents(sigma_next, current[name])
+                    current[name] = (1.0 - sigma_next_b) * pred_x0[name] + sigma_next_b * noise
+                else:
+                    eps = flow_effective_noise(
+                        current[name],
+                        pred_x0[name],
+                        sigma,
+                        eps=self._sigma_eps,
+                    )
+                    sigma_next_b = _expand_sigma_for_latents(sigma_next, current[name])
+                    current[name] = (1.0 - sigma_next_b) * pred_x0[name] + sigma_next_b * eps
 
         timesteps = step_list.to(device=device)
-        sigma_tensor = torch.stack(sigmas).to(device=device)
         batch.dmd_latent_vis_dict["generator_timestep"] = timesteps[-1].float().detach()
-        return TDMTrajectory(
-            noisy_latents=noisy_latents,
-            clean_latents=clean_latents,
-            timesteps=timesteps,
-            sigmas=sigma_tensor,
-        )
+        return {
+            name: TDMTrajectory(
+                noisy_latents=noisy_latents[name],
+                clean_latents=clean_latents[name],
+                timesteps=timesteps,
+                sigmas=torch.stack(sigmas[name]).to(device=device),
+            )
+            for name in self._modalities
+        }
 
     def _sample_tdm_context(
         self,
-        trajectory: TDMTrajectory,
-    ) -> TDMSampleContext:
-        device = trajectory.sigmas.device
-        interval_eps = 1e-6
-        batch_size = trajectory.noisy_latents[0].shape[0]
+        trajectories: dict[str, TDMTrajectory],
+    ) -> dict[str, TDMSampleContext]:
+        """Sample one source/intermediate/target context per modality.
+
+        Video and audio share the sampled integer trajectory labels, so the
+        joint state stays synchronized; each modality maps those labels to
+        its own sigma grid and builds its own noise tensors.
+        """
+        reference = trajectories["video"]
+        device = reference.sigmas.device
+        batch_size = reference.noisy_latents[0].shape[0]
         batch_indices = torch.arange(batch_size, device=device)
         trajectory_indices = torch.randint(
             0,
-            len(trajectory.sigmas),
+            len(reference.sigmas),
             [batch_size],
             device=device,
             dtype=torch.long,
             generator=self.cuda_generator,
         )
-        clean_latents = torch.stack(trajectory.clean_latents)[trajectory_indices, batch_indices].detach()
-        noisy_source = torch.stack(trajectory.noisy_latents)[trajectory_indices, batch_indices].detach()
-        sigma_source = trajectory.sigmas[trajectory_indices]
-        timestep_source = self._model_timestep_for_sigma(sigma_source, self.student)
+        step_labels = reference.timesteps
+        max_label = int(self.student.tdm_max_trajectory_label("video"))
+        # Descending labels keep the candidate order identical to the
+        # scheduler-sigma sampling this replaces (largest sigma first).
+        all_labels = torch.arange(max_label, 0, -1, device=device)
+        label_source = step_labels[trajectory_indices]
+        next_labels = torch.cat((step_labels[1:], step_labels.new_zeros(1)))
+        label_intermediate = next_labels[trajectory_indices]
 
-        scheduled_intermediate_sigmas = torch.cat((trajectory.sigmas[1:], trajectory.sigmas.new_zeros(1)))
-        sigma_intermediate = scheduled_intermediate_sigmas[trajectory_indices]
-        scheduler = self.student.noise_scheduler
-        scheduler_timesteps = scheduler.timesteps.to(device=device, dtype=torch.float32)
-        scheduler_sigmas = scheduler.sigmas[:scheduler_timesteps.numel()].to(device=device, dtype=torch.float32)
-
-        def sample_scheduler_point(lower: torch.Tensor, upper: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-            sampled_sigmas: list[torch.Tensor] = []
-            sampled_timesteps: list[torch.Tensor] = []
+        def sample_label(lower: torch.Tensor, upper: torch.Tensor) -> torch.Tensor:
+            sampled: list[torch.Tensor] = []
             for lower_i, upper_i in zip(lower, upper, strict=False):
                 candidates = torch.nonzero(
-                    (scheduler_sigmas >= lower_i)
-                    & (scheduler_sigmas < upper_i - interval_eps)
-                    & (scheduler_sigmas > self._sigma_eps),
+                    (all_labels >= lower_i) & (all_labels < upper_i) & (all_labels > 0),
                     as_tuple=False,
                 ).flatten()
                 if candidates.numel() == 0:
-                    raise ValueError("TDM schedule has no scheduler point in the requested noise interval")
+                    raise ValueError("TDM schedule has no step in the requested noise interval")
                 position = torch.randint(
                     0,
                     candidates.numel(),
@@ -923,94 +948,117 @@ class TDMMethod(DMD2Method):
                     dtype=torch.long,
                     generator=self.cuda_generator,
                 )
-                selected = candidates[position].reshape(())
-                sampled_sigmas.append(scheduler_sigmas[selected])
-                sampled_timesteps.append(scheduler_timesteps[selected])
-            return torch.stack(sampled_sigmas), torch.stack(sampled_timesteps)
+                sampled.append(all_labels[candidates[position]].reshape(()))
+            return torch.stack(sampled).to(dtype=torch.float32)
 
         if self._use_randmid:
-            sigma_intermediate, _ = sample_scheduler_point(sigma_intermediate, sigma_source)
+            label_intermediate = sample_label(label_intermediate, label_source)
 
-        target_upper = sigma_source
+        target_upper = label_source
         if self._noise_interval_mode == "to_terminal":
-            target_upper = torch.full_like(sigma_source, trajectory.sigmas.max())
-        sigma_target, timestep_target = sample_scheduler_point(sigma_intermediate, target_upper)
+            target_upper = torch.full_like(label_source, float(max_label))
+        label_target = sample_label(label_intermediate, target_upper)
 
-        eps_source = flow_effective_noise(
-            noisy_source,
-            clean_latents,
-            sigma_source,
-            eps=self._sigma_eps,
-        )
-        sigma_intermediate_b = _expand_sigma_for_latents(sigma_intermediate, clean_latents)
-        noisy_intermediate = (1.0 - sigma_intermediate_b) * clean_latents + sigma_intermediate_b * eps_source
-        proposal_noise = torch.randn(
-            clean_latents.shape,
-            device=clean_latents.device,
-            dtype=clean_latents.dtype,
-            generator=self.cuda_generator,
-        )
-        noisy_target, mixed_noise, beta = flow_transition_to_noisier_sigma(
-            noisy_from=noisy_intermediate,
-            clean_latents=clean_latents,
-            eps_from=eps_source,
-            sigma_from=sigma_intermediate,
-            sigma_to=sigma_target,
-            proposal_noise=proposal_noise,
-            eps=self._sigma_eps,
-        )
+        contexts: dict[str, TDMSampleContext] = {}
+        for name, trajectory in trajectories.items():
+            clean_latents = torch.stack(trajectory.clean_latents)[trajectory_indices, batch_indices].detach()
+            noisy_source = torch.stack(trajectory.noisy_latents)[trajectory_indices, batch_indices].detach()
+            sigma_source = trajectory.sigmas[trajectory_indices]
+            sigma_intermediate = self.student.tdm_sigma_grid(label_intermediate, name).to(
+                device=device,
+                dtype=torch.float32,
+            )
+            sigma_target = self.student.tdm_sigma_grid(label_target, name).to(
+                device=device,
+                dtype=torch.float32,
+            )
 
-        return TDMSampleContext(
-            clean_latents=clean_latents,
-            noisy_source=noisy_source,
-            noisy_intermediate=noisy_intermediate,
-            noisy_target=noisy_target,
-            timestep_source=timestep_source,
-            timestep_target=timestep_target,
-            sigma_source=sigma_source,
-            sigma_intermediate=sigma_intermediate,
-            sigma_target=sigma_target,
-            eps_source=eps_source,
-            mixed_noise=mixed_noise,
-            proposal_noise=proposal_noise,
-            transition_beta=beta,
-            trajectory_indices=trajectory_indices,
-        )
+            eps_source = flow_effective_noise(
+                noisy_source,
+                clean_latents,
+                sigma_source,
+                eps=self._sigma_eps,
+            )
+            sigma_intermediate_b = _expand_sigma_for_latents(sigma_intermediate, clean_latents)
+            noisy_intermediate = (1.0 - sigma_intermediate_b) * clean_latents + sigma_intermediate_b * eps_source
+            proposal_noise = torch.randn(
+                clean_latents.shape,
+                device=clean_latents.device,
+                dtype=clean_latents.dtype,
+                generator=self.cuda_generator,
+            )
+            noisy_target, mixed_noise, beta = flow_transition_to_noisier_sigma(
+                noisy_from=noisy_intermediate,
+                clean_latents=clean_latents,
+                eps_from=eps_source,
+                sigma_from=sigma_intermediate,
+                sigma_to=sigma_target,
+                proposal_noise=proposal_noise,
+                eps=self._sigma_eps,
+            )
+
+            contexts[name] = TDMSampleContext(
+                clean_latents=clean_latents,
+                noisy_source=noisy_source,
+                noisy_intermediate=noisy_intermediate,
+                noisy_target=noisy_target,
+                timestep_source=self.student.tdm_sigma_to_model_timestep(sigma_source, name),
+                timestep_target=self.student.tdm_sigma_to_model_timestep(sigma_target, name),
+                sigma_source=sigma_source,
+                sigma_intermediate=sigma_intermediate,
+                sigma_target=sigma_target,
+                eps_source=eps_source,
+                mixed_noise=mixed_noise,
+                proposal_noise=proposal_noise,
+                transition_beta=beta,
+                trajectory_indices=trajectory_indices,
+            )
+        return contexts
 
     def _tdm_fake_score_loss(
         self,
-        trajectory: TDMTrajectory,
+        trajectories: dict[str, TDMTrajectory],
         batch: TrainingBatch,
     ) -> tuple[torch.Tensor, Any, dict[str, Any], dict[str, LogScalar]]:
         with torch.no_grad():
-            context = self._sample_tdm_context(trajectory)
+            contexts = self._sample_tdm_context(trajectories)
 
-        critic_timestep = self._model_timestep_for_sigma(context.sigma_target, self.critic)
-        batch.timesteps = critic_timestep
-        fake_x0 = self.critic.predict_x0(
-            context.noisy_target,
-            critic_timestep,
+        fake_x0 = self.critic.tdm_predict_x0(
+            {name: context.noisy_target
+             for name, context in contexts.items()},
+            {name: context.sigma_target
+             for name, context in contexts.items()},
             batch,
             conditional=True,
             cfg_uncond=self._cfg_uncond,
             attn_kind="dense",
         )
-        elementwise = (fake_x0.float() - context.clean_latents.float()).square()
-        per_sample = _mean_except_batch(elementwise)
-        weight_components = self._tdm_fake_score_weight_components(context)
-        weights = weight_components["weights"].to(device=per_sample.device, dtype=per_sample.dtype)
-        fake_score_loss = (per_sample * weights).mean()
+        critic_timestep = batch.timesteps
+        per_sample_by_modality: dict[str, torch.Tensor] = {}
+        weight_by_modality: dict[str, dict[str, torch.Tensor]] = {}
+        fake_score_loss: torch.Tensor | None = None
+        for name, context in contexts.items():
+            elementwise = (fake_x0[name].float() - context.clean_latents.float()).square()
+            per_sample = _mean_except_batch(elementwise)
+            weight_components = self._tdm_fake_score_weight_components(context)
+            weights = weight_components["weights"].to(device=per_sample.device, dtype=per_sample.dtype)
+            component = (per_sample * weights).mean()
+            fake_score_loss = component if fake_score_loss is None else fake_score_loss + component
+            per_sample_by_modality[name] = per_sample
+            weight_by_modality[name] = weight_components
+        assert fake_score_loss is not None
 
+        video_context = contexts["video"]
         batch.fake_score_latent_vis_dict = {
-            "generator_pred_video": context.clean_latents,
-            "fake_score_timestep": context.timestep_target.float().detach(),
-            "fake_score_source_timestep": context.timestep_source.float().detach(),
+            "generator_pred_video": video_context.clean_latents,
+            "fake_score_timestep": video_context.timestep_target.float().detach(),
+            "fake_score_source_timestep": video_context.timestep_source.float().detach(),
         }
         outputs = {"fake_score_latent_vis_dict": (batch.fake_score_latent_vis_dict)}
         metrics = self._tdm_fake_score_metrics(
-            context,
-            per_sample,
-            weight_components,
+            contexts,
+            per_sample_by_modality,
+            weight_by_modality,
         )
         return (
             fake_score_loss,
@@ -1051,6 +1099,24 @@ class TDMMethod(DMD2Method):
         return self._tdm_fake_score_weight_components(context)["weights"]
 
     def _tdm_fake_score_metrics(
+        self,
+        contexts: dict[str, TDMSampleContext],
+        per_sample_by_modality: dict[str, torch.Tensor],
+        weight_by_modality: dict[str, dict[str, torch.Tensor]],
+    ) -> dict[str, LogScalar]:
+        """Per-modality fake-score diagnostics averaged for logging."""
+        per_modality = [
+            self._tdm_fake_score_metrics_single(
+                context,
+                per_sample_by_modality[name],
+                weight_by_modality[name],
+            ) for name, context in contexts.items()
+        ]
+        if len(per_modality) == 1:
+            return per_modality[0]
+        return self._mean_metric_maps(per_modality)
+
+    def _tdm_fake_score_metrics_single(
         self,
         context: TDMSampleContext,
         per_sample_loss: torch.Tensor,
@@ -1095,111 +1161,137 @@ class TDMMethod(DMD2Method):
 
     def _tdm_generator_loss(
         self,
-        trajectory: TDMTrajectory,
+        trajectories: dict[str, TDMTrajectory],
         batch: TrainingBatch,
     ) -> tuple[torch.Tensor, dict[str, LogScalar], tuple[torch.Tensor, Any]]:
         guidance_scale = self._real_score_guidance()
 
-        context = self._sample_tdm_context(trajectory)
-        source_timestep = context.timestep_source
-        target_timestep = context.timestep_target
-
-        batch.timesteps = source_timestep
-        generator_pred_x0 = self.student.predict_x0(
-            context.noisy_source,
-            source_timestep,
+        contexts = self._sample_tdm_context(trajectories)
+        generator_pred_x0 = self.student.tdm_predict_x0(
+            {name: context.noisy_source
+             for name, context in contexts.items()},
+            {name: context.sigma_source
+             for name, context in contexts.items()},
             batch,
             conditional=True,
             cfg_uncond=self._cfg_uncond,
             attn_kind="vsa",
         )
-        device = generator_pred_x0.device
+        source_timestep = batch.timesteps
+        target_timestep = contexts["video"].timestep_target
+        device = generator_pred_x0["video"].device
 
         with torch.no_grad():
-            eps_source = flow_effective_noise(
-                context.noisy_source,
-                generator_pred_x0.detach(),
-                context.sigma_source,
-                eps=self._sigma_eps,
-            )
-            sigma_intermediate_b = _expand_sigma_for_latents(context.sigma_intermediate, generator_pred_x0)
-            noisy_intermediate = ((1.0 - sigma_intermediate_b) * generator_pred_x0.detach() +
-                                  sigma_intermediate_b * eps_source)
-            target_noisy_latents, _, _ = flow_transition_to_noisier_sigma(
-                noisy_from=noisy_intermediate,
-                clean_latents=generator_pred_x0.detach(),
-                eps_from=eps_source,
-                sigma_from=context.sigma_intermediate,
-                sigma_to=context.sigma_target,
-                proposal_noise=context.proposal_noise,
-                eps=self._sigma_eps,
-            )
-            critic_timestep = self._model_timestep_for_sigma(context.sigma_target, self.critic)
-            teacher_timestep = self._model_timestep_for_sigma(context.sigma_target, self.teacher)
-            batch.timesteps = critic_timestep
-            faker_x0 = self.critic.predict_x0(
-                target_noisy_latents,
-                critic_timestep,
-                batch,
-                conditional=True,
-                cfg_uncond=self._cfg_uncond,
-                attn_kind="dense",
-            )
-            batch.timesteps = teacher_timestep
-            real_cond_x0 = self.teacher.predict_x0(
-                target_noisy_latents,
-                teacher_timestep,
-                batch,
-                conditional=True,
-                cfg_uncond=self._cfg_uncond,
-                attn_kind="dense",
-            )
-            real_uncond_x0 = self.teacher.predict_x0(
-                target_noisy_latents,
-                teacher_timestep,
-                batch,
-                conditional=False,
-                cfg_uncond=self._cfg_uncond,
-                attn_kind="dense",
-            )
-            real_cfg_x0 = real_uncond_x0 + (real_cond_x0 - real_uncond_x0) * float(guidance_scale)
-            delta = real_cfg_x0 - faker_x0
-            raw_delta_abs_mean = delta.detach().float().abs().mean()
-            denom = torch.ones((), device=device, dtype=torch.float32)
-            if self._normalize_generator_delta:
-                reduce_dims = tuple(range(1, generator_pred_x0.ndim))
-                denom = torch.abs(generator_pred_x0.detach() - real_cfg_x0).mean(
-                    dim=reduce_dims,
-                    keepdim=True,
+            target_noisy_latents: dict[str, torch.Tensor] = {}
+            for name, context in contexts.items():
+                prediction = generator_pred_x0[name]
+                eps_source = flow_effective_noise(
+                    context.noisy_source,
+                    prediction.detach(),
+                    context.sigma_source,
+                    eps=self._sigma_eps,
                 )
-            target_delta = torch.nan_to_num(delta)
-            target = generator_pred_x0.detach() + target_delta
+                sigma_intermediate_b = _expand_sigma_for_latents(context.sigma_intermediate, prediction)
+                noisy_intermediate = ((1.0 - sigma_intermediate_b) * prediction.detach() +
+                                      sigma_intermediate_b * eps_source)
+                target_noisy_latents[name], _, _ = flow_transition_to_noisier_sigma(
+                    noisy_from=noisy_intermediate,
+                    clean_latents=prediction.detach(),
+                    eps_from=eps_source,
+                    sigma_from=context.sigma_intermediate,
+                    sigma_to=context.sigma_target,
+                    proposal_noise=context.proposal_noise,
+                    eps=self._sigma_eps,
+                )
+            target_sigmas = {name: context.sigma_target for name, context in contexts.items()}
+            faker_x0 = self.critic.tdm_predict_x0(
+                target_noisy_latents,
+                target_sigmas,
+                batch,
+                conditional=True,
+                cfg_uncond=self._cfg_uncond,
+                attn_kind="dense",
+            )
+            real_cond_x0 = self.teacher.tdm_predict_x0(
+                target_noisy_latents,
+                target_sigmas,
+                batch,
+                conditional=True,
+                cfg_uncond=self._cfg_uncond,
+                attn_kind="dense",
+            )
+            if float(guidance_scale) == 1.0:
+                real_cfg_x0 = real_cond_x0
+            else:
+                real_uncond_x0 = self.teacher.tdm_predict_x0(
+                    target_noisy_latents,
+                    target_sigmas,
+                    batch,
+                    conditional=False,
+                    cfg_uncond=self._cfg_uncond,
+                    attn_kind="dense",
+                )
+                real_cfg_x0 = {
+                    name: real_uncond_x0[name] + (real_cond_x0[name] - real_uncond_x0[name]) * float(guidance_scale)
+                    for name in real_cond_x0
+                }
+            target_by_modality: dict[str, torch.Tensor] = {}
+            denom_by_modality: dict[str, torch.Tensor] = {}
+            delta_nan_by_modality: dict[str, torch.Tensor] = {}
+            for name in real_cfg_x0:
+                prediction = generator_pred_x0[name]
+                delta = real_cfg_x0[name] - faker_x0[name]
+                delta_nan = torch.nan_to_num(delta)
+                delta_nan_by_modality[name] = delta_nan
+                denom = torch.ones((), device=device, dtype=torch.float32)
+                if self._normalize_generator_delta:
+                    reduce_dims = tuple(range(1, prediction.ndim))
+                    denom = torch.abs(prediction.detach() - real_cfg_x0[name]).mean(
+                        dim=reduce_dims,
+                        keepdim=True,
+                    )
+                denom_by_modality[name] = denom
+                target_by_modality[name] = prediction.detach() + delta_nan
+            raw_delta_abs_mean = sum(
+                (real_cfg_x0[name] - faker_x0[name]).detach().float().abs().mean() for name in real_cfg_x0) / len(
+                    real_cfg_x0)
+            target_delta_abs_mean = sum(
+                delta.detach().float().abs().mean() for delta in delta_nan_by_modality.values()) / len(
+                    delta_nan_by_modality)
+            normalization_denom = sum(denom.detach().float().mean()
+                                      for denom in denom_by_modality.values()) / len(denom_by_modality)
 
-        if self._use_pseudo_huber:
-            loss = self._generator_pseudo_huber_loss(generator_pred_x0, target)
-        else:
-            loss = self._generator_elementwise_loss(generator_pred_x0, target)
-            if self._normalize_generator_delta:
-                loss = loss / denom.clamp_min(self._sigma_eps)
+        loss: torch.Tensor | None = None
+        for name in generator_pred_x0:
+            if self._use_pseudo_huber:
+                component = self._generator_pseudo_huber_loss(generator_pred_x0[name], target_by_modality[name])
+            else:
+                component = self._generator_elementwise_loss(generator_pred_x0[name], target_by_modality[name])
+                if self._normalize_generator_delta:
+                    component = component / denom_by_modality[name].clamp_min(self._sigma_eps)
+            component = component.mean()
+            loss = component if loss is None else loss + component
+        assert loss is not None
+
         batch.dmd_latent_vis_dict.update({
             "dmd_timestep": target_timestep.float().detach(),
             "generator_timestep": source_timestep.float().detach(),
-            "generator_pred_video": generator_pred_x0.detach(),
+            "generator_pred_video": generator_pred_x0["video"].detach(),
         })
         metrics: dict[str, LogScalar] = {
-            "tdm/generator/source_trajectory_index": context.trajectory_indices.detach().float().mean(),
+            "tdm/generator/source_trajectory_index": contexts["video"].trajectory_indices.detach().float().mean(),
             "tdm/generator/source_timestep": source_timestep.detach().float().mean(),
             "tdm/generator/target_timestep": target_timestep.detach().float().mean(),
-            "tdm/generator/source_sigma": context.sigma_source.detach().float().mean(),
-            "tdm/generator/intermediate_sigma": context.sigma_intermediate.detach().float().mean(),
-            "tdm/generator/target_sigma": context.sigma_target.detach().float().mean(),
+            "tdm/generator/source_sigma": contexts["video"].sigma_source.detach().float().mean(),
+            "tdm/generator/intermediate_sigma": contexts["video"].sigma_intermediate.detach().float().mean(),
+            "tdm/generator/target_sigma": contexts["video"].sigma_target.detach().float().mean(),
             "tdm/generator/raw_delta_abs_mean": raw_delta_abs_mean,
-            "tdm/generator/target_delta_abs_mean": target_delta.detach().float().abs().mean(),
-            "tdm/generator/normalization_denom": denom.detach().float().mean(),
+            "tdm/generator/target_delta_abs_mean": target_delta_abs_mean,
+            "tdm/generator/normalization_denom": normalization_denom,
             "tdm/generator/normalize_delta": float(self._normalize_generator_delta),
             "tdm/generator/use_pseudo_huber": float(self._use_pseudo_huber),
         }
-        return loss.mean(), metrics, (source_timestep, batch.attn_metadata_vsa)
+        return loss, metrics, (source_timestep, batch.attn_metadata_vsa)
 
     def _generator_pseudo_huber_loss(
         self,
