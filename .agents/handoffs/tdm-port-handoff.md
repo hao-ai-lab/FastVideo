@@ -281,6 +281,11 @@ Sub-steps and gates:
     video with `tdm_video_report.py` and add an audio-side reference-free
     check. If a shorter window is wanted, cut `max_train_steps` and keep the
     warmup-TDM split explicit.
+  - 2026-09-23: the full 200-step gate is **running** as `h3-tdm-gate`
+    (`tests/local_tests/tdm/k8s/run_h3_tdm_gate.sh`, launched 02:49:53Z).
+    At ~96 s/step the train phase is ~5.3 h plus nine validations, so expect
+    completion around 08:30Z. Judge it with `video_report.json` and add an
+    audio-side check.
   - Then 4E VSA wiring for H3 training and a rerun of the gate.
 
 - 2026-09-22: Branch renamed to `tdm-port` and pushed to the internal
