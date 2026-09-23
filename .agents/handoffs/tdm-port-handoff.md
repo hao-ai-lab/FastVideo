@@ -354,16 +354,22 @@ Sub-steps and gates:
       trigger. Running the H3 pipeline between training steps leaves the
       autograd/CUDA stream state inconsistent for the next backward. The
       3-step smoke with validation disabled passes, so training alone is fine.
-  - 2026-09-23: **4D workaround applied and the gate relaunched.** The
-    validation-stream failure only bites when a training backward follows an
-    in-process validation forward, so the gate now validates **once at the
-    final step** (`callbacks.validation.run_at_start: false`,
-    `every_steps: 200`) with `offload_training_state: true` restored. The run
-    trains cleanly: step 15/200 at `~94` s/step, no errors, no samples yet by
-    design. Launched 05:02Z as `h3-tdm-gate`; expect the final validation and
-    report around 10:40Z. This trades the step-0/50/100/150 samples for a
-    run that survives; a trajectory would need out-of-process sampling from
-    the checkpoints (resume or `dcp_to_diffusers`) instead.
+  - 2026-09-23: **4D gate PASSED.** `h3-tdm-gate` completed `rc=0` with
+    `GATE_OK` at 11:04:59Z: 200 steps of joint video+audio TDM on four GB200s
+    with rank-16 LoRA student and critic over the frozen 33.12B base, at
+    `~95-130` s/step (about 5.9 h). The final validation produced a
+    **coherent, prompt-matching sample**: 124 frames at 768x1344 with a
+    32 kHz stereo AAC track. Reference-free frame statistics at step 200:
+    `std 58.36`, `sharpness 131.86` (for scale, the Wan treatment landed in
+    the same coherent band while the Wan warmup-only control collapsed to
+    `~5`). The frame is a lit studio scene with two red toy cars on a wooden
+    turntable under softboxes, matching the validation prompt. Evidence:
+    `artifacts/tdm-port/phase4/h3-gate-*` (report, status, frame).
+  - Minor observation for the next gate: three of four ranks logged
+    `ValueError: Validation media requires at least one video frame` and
+    wrote no mp4 (non-fatal; the callback skips them). Only rank 0's sample
+    survived, which is fine for a single-prompt overfit but should be
+    understood before a multi-prompt gate.
   - Recommended next step for a full trajectory: run validation off, then
     sample from checkpoints in a separate process (resume-based sampler or
     `fastvideo/train/entrypoint/dcp_to_diffusers.py`), or fix the stream
