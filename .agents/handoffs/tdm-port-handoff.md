@@ -316,6 +316,30 @@ Sub-steps and gates:
     attempt failed at 03:21Z on (2); both are recorded above. Do not treat
     the `h3-tdm-gate` status files as a completed gate until a run reaches
     `GATE_OK`.
+  - Drifting-workstream findings (read-only, branches `feat/direct-drifting-generators`,
+    `feat/h3-drifting-poc`, `analysis/h3-drifting-feasibility`):
+    - The drifting H3 work post-trains the same **released 33B checkpoint** and
+      its configs use `init_from: data/models/MiniMax-H3`. On the PVC that
+      resolves to `/workspace/vlm-mal004/h3-drifting-h3-model-view-42ed227e`,
+      a symlink farm whose members point at
+      `/mnt/lustre/vlm-mal004/.cache/huggingface/hub/models--MiniMaxAI--MiniMax-H3/snapshots/42ed227e...`.
+      `/mnt/lustre` is the same Lustre as `/workspace` but is **not mounted in
+      our pods**, so every member symlink of that view is broken here; the
+      underlying weights are the very snapshot 4D already uses.
+    - The view settles the missing-`transformer_ref` question: it maps
+      `transformer_ref -> transformer` (the same weights), which is what
+      satisfies the loader without a second 62 GB copy. Two pod-resolvable
+      equivalents exist and both are legitimate: (a) the overlay already in
+      the config (`h3-tdm-overlay`, `transformer_ref` from `vlm-k1kong` with
+      real ref weights), or (b) the drifting convention of aliasing
+      `transformer_ref` to `transformer`. Prefer (a) for a faithful ref
+      component, (b) if a second copy is unwanted.
+    - The drifting config also records the H3 geometry it validated:
+      `num_latent_t: 37`, `num_height: 480`, `num_width: 832`,
+      `num_frames: 124`, `sp_size: 4`, `hsdp_shard_dim: 4` on four GPUs and
+      about **131 GB/GPU** at full resolution. That is the cheaper 480x832
+      canvas the H3 plan wanted for the first gate and the source of the
+      standalone 480x832 numbers.
   - Then 4E VSA wiring for H3 training and a rerun of the gate.
 
 - 2026-09-22: Branch renamed to `tdm-port` and pushed to the internal
