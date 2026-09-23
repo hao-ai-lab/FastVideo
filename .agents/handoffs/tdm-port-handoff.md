@@ -261,13 +261,26 @@ Sub-steps and gates:
       the validation prompt is the standalone short prompt, so the gate
       checks that the joint path trains and stays coherent, not
       prompt-fidelity parity.
-  - Next (4D): run the gate on the held four-GPU pod (200 steps,
-    validation every 25) and judge with the reference-free report. Memory is
-    the open risk: dense TORCH_SDPA attention over ~37k video rows at
-    768x1344 with 4-GPU FSDP + LoRA, versus the standalone's single-GPU
-    480x832 run. If it OOMs, preprocess a 480x832 T2VA asset with the H3
-    overfit preprocessor before rerunning. Audio needs its own reference-free
-    check (the current report covers video frames only).
+  - 4D feasibility answered by a 3-step smoke (`h3-tdm-smoke`, `rc=0`,
+    no OOM): the joint H3 TDM loop trains at 768x1344 with `~96` s/step, so
+    a 200-step arm is roughly **5.3 h** of wall clock. Two things had to be
+    fixed first:
+    1. The single-row H3 asset starved three of four ranks (`drop_last=True`
+       plus rank sharding) and raised `generator raised StopIteration` from
+       `trainer._iter_dataloader`. The gate therefore uses a 4-row replica
+       at `/workspace/issue-775/h3_overfit_t2va_x4` (the same single sample
+       duplicated once per rank, mirroring the Wan prompt x4 convention),
+       which the config now points at.
+    2. `MiniMaxH3Model.num_train_timesteps` returns the 1000-label grid, as
+       above.
+    The smoke also logs `FLASH_ATTN received torch.float32 inputs; casting to
+    bfloat16`, so the H3 attention path runs a flash kernel and does not
+    materialize dense attention at ~37k rows.
+  - Next (4D proper): launch the 200-step H3 gate on the held four-GPU pod
+    (validation every 25) once a ~5.3 h GPU window is approved, then judge
+    video with `tdm_video_report.py` and add an audio-side reference-free
+    check. If a shorter window is wanted, cut `max_train_steps` and keep the
+    warmup-TDM split explicit.
   - Then 4E VSA wiring for H3 training and a rerun of the gate.
 
 - 2026-09-22: Branch renamed to `tdm-port` and pushed to the internal
