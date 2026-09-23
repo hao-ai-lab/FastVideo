@@ -352,8 +352,8 @@ def test_tdm_managed_step_reuses_trajectory_and_resamples_context(
     assert len(sampled_contexts) == 2
     assert sampled_contexts[0] is not sampled_contexts[1]
     assert not torch.equal(
-        sampled_contexts[0].proposal_noise,
-        sampled_contexts[1].proposal_noise,
+        sampled_contexts[0]["video"].proposal_noise,
+        sampled_contexts[1]["video"].proposal_noise,
     )
     assert metrics["tdm/generator/use_pseudo_huber"] == 1.0
 
@@ -372,8 +372,8 @@ def test_tdm_generator_reconstructs_intermediate_before_scoring_target(
     teacher = method.teacher
     batch = student.prepare_batch({}, generator=method.cuda_generator, latents_source="zeros")
     trajectory = method._student_trajectory(batch)
-    context = method._sample_tdm_context(trajectory)
-    monkeypatch.setattr(method, "_sample_tdm_context", lambda _: context)
+    context = method._sample_tdm_context(trajectory)["video"]
+    monkeypatch.setattr(method, "_sample_tdm_context", lambda _: {"video": context})
     student.predict_calls.clear()
     student.predict_inputs.clear()
     student.predict_timestep_shapes.clear()
@@ -445,7 +445,7 @@ def test_tdm_real_shifted_scheduler_aligns_noising_model_labels_and_x0_conversio
     method.teacher.noise_scheduler = FlowMatchEulerDiscreteScheduler(shift=8.0)
     batch = student.prepare_batch({}, generator=method.cuda_generator, latents_source="zeros")
 
-    trajectory = method._student_trajectory(batch)
+    trajectory = method._student_trajectory(batch)["video"]
 
     expected_sigmas = method._timestep_to_sigma(torch.tensor([1000, 750, 500, 250]))
     model_labels = torch.tensor([call[2] for call in student.predict_calls])
@@ -479,7 +479,7 @@ def test_tdm_warped_student_trajectory_uses_scheduler_sigmas_without_double_shif
     student.noise_scheduler = scheduler
     batch = student.prepare_batch({}, generator=method.cuda_generator, latents_source="zeros")
 
-    trajectory = method._student_trajectory(batch)
+    trajectory = method._student_trajectory(batch)["video"]
 
     step_indices = torch.tensor([0, 250, 500, 750])
     expected_steps = scheduler.timesteps[step_indices]
@@ -538,7 +538,7 @@ def test_tdm_separate_noise_interval_samples_each_batch_element() -> None:
     trajectory = method._student_trajectory(batch)
     method.cuda_generator.manual_seed(0)
 
-    context = method._sample_tdm_context(trajectory)
+    context = method._sample_tdm_context(trajectory)["video"]
 
     assert context.trajectory_indices.tolist() == [0, 3]
     assert (context.sigma_source.shape == context.sigma_intermediate.shape
@@ -556,16 +556,26 @@ def test_tdm_scheduler_sampling_excludes_roundoff_below_interval(
 ) -> None:
     method, student, _ = _build_method(method_overrides={"use_randmid": False})
     student.noise_scheduler = _ShiftedFlowScheduler()
-    scheduler_sigmas = student.noise_scheduler.sigmas
-    boundary = scheduler_sigmas[torch.argmin((scheduler_sigmas - 0.25).abs())]
-    lower = torch.nextafter(boundary, torch.tensor(float("inf")))
-    source = scheduler_sigmas[torch.argmin((scheduler_sigmas - 0.5).abs())]
     latent = torch.zeros(1, 1, 1, 1, 1)
-    trajectory = SimpleNamespace(
-        clean_latents=[latent, latent],
-        noisy_latents=[latent, latent],
-        sigmas=torch.stack((source, lower)),
-    )
+    # Integer labels whose shifted sigmas straddle 0.5 and 0.25.
+    shift = student.noise_scheduler.shift
+
+    def label_for(sigma_value: float) -> float:
+        u = sigma_value / (shift - (shift - 1.0) * sigma_value)
+        return round(u * 1000.0)
+
+    timesteps = torch.tensor([label_for(0.5), label_for(0.25)], dtype=torch.float32)
+    sigmas = student.tdm_sigma_grid(timesteps, "video")
+    boundary = sigmas[1]
+    trajectory = {
+        "video":
+        SimpleNamespace(
+            clean_latents=[latent, latent],
+            noisy_latents=[latent, latent],
+            timesteps=timesteps,
+            sigmas=sigmas,
+        )
+    }
     randint_calls = 0
 
     def select_last_candidate(
@@ -585,12 +595,11 @@ def test_tdm_scheduler_sampling_excludes_roundoff_below_interval(
 
     monkeypatch.setattr(torch, "randint", select_last_candidate)
 
-    context = method._sample_tdm_context(trajectory)
+    context = method._sample_tdm_context(trajectory)["video"]
 
     assert randint_calls == 2
-    assert bool((boundary < lower).item())
     assert bool((context.sigma_target >= context.sigma_intermediate).item())
-    assert bool((context.sigma_target > boundary).item())
+    assert bool((context.sigma_target >= boundary).item())
     assert bool((context.sigma_target < context.sigma_source).item())
 
 
@@ -641,9 +650,9 @@ def test_tdm_to_terminal_noise_interval_stays_below_terminal_sigma() -> None:
     batch = method.student.prepare_batch({}, generator=method.cuda_generator, latents_source="zeros")
     trajectory = method._student_trajectory(batch)
 
-    context = method._sample_tdm_context(trajectory)
+    context = method._sample_tdm_context(trajectory)["video"]
 
-    assert bool(torch.all(context.sigma_target < trajectory.sigmas.max()).item())
+    assert bool(torch.all(context.sigma_target < trajectory["video"].sigmas.max()).item())
     assert bool(torch.all(context.sigma_target >= context.sigma_intermediate).item())
     assert bool(torch.all(context.sigma_target > 0).item())
     assert bool((method._tdm_fake_score_weights(context) > 0).all().item())
@@ -688,7 +697,7 @@ def test_tdm_generator_delta_normalization_is_per_sample(monkeypatch: pytest.Mon
         trajectory_indices=torch.tensor([2, 2]),
     )
 
-    monkeypatch.setattr(method, "_sample_tdm_context", lambda trajectory: context)
+    monkeypatch.setattr(method, "_sample_tdm_context", lambda trajectory: {"video": context})
     monkeypatch.setattr(student, "predict_x0", lambda *args, **kwargs: pred)
     monkeypatch.setattr(critic, "predict_x0", lambda *args, **kwargs: fake_x0)
     monkeypatch.setattr(
@@ -753,7 +762,7 @@ def test_tdm_generator_gradient_matches_analytic_gaussian_reverse_kl(
     def gaussian_posterior_mean(noisy_latents: torch.Tensor, prior_mean: torch.Tensor) -> torch.Tensor:
         return noisy_latents + 0.5 * prior_mean
 
-    monkeypatch.setattr(method, "_sample_tdm_context", lambda trajectory: context)
+    monkeypatch.setattr(method, "_sample_tdm_context", lambda trajectory: {"video": context})
     monkeypatch.setattr(student, "predict_x0", lambda *args, **kwargs: generator_samples)
     monkeypatch.setattr(
         critic,
@@ -800,7 +809,7 @@ def test_tdm_pseudo_huber_applies_per_sample_normalization_after_loss(monkeypatc
         trajectory_indices=torch.tensor([2, 2]),
     )
 
-    monkeypatch.setattr(method, "_sample_tdm_context", lambda trajectory: context)
+    monkeypatch.setattr(method, "_sample_tdm_context", lambda trajectory: {"video": context})
     monkeypatch.setattr(student, "predict_x0", lambda *args, **kwargs: pred)
     monkeypatch.setattr(critic, "predict_x0", lambda *args, **kwargs: fake_x0)
     monkeypatch.setattr(
@@ -880,7 +889,7 @@ def test_tdm_paper_pseudo_huber_skips_dmd_delta_normalization(monkeypatch: pytes
         trajectory_indices=torch.tensor([2, 2]),
     )
 
-    monkeypatch.setattr(method, "_sample_tdm_context", lambda trajectory: context)
+    monkeypatch.setattr(method, "_sample_tdm_context", lambda trajectory: {"video": context})
     monkeypatch.setattr(student, "predict_x0", lambda *args, **kwargs: pred)
     monkeypatch.setattr(critic, "predict_x0", lambda *args, **kwargs: fake_x0)
     monkeypatch.setattr(

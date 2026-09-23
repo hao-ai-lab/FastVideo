@@ -42,7 +42,7 @@ def _build_state():
     trajectory = method._student_trajectory(batch)
     method.cuda_generator = torch.Generator(device="cpu").manual_seed(7)
     context = method._sample_tdm_context(trajectory)
-    return method, student, critic, batch, trajectory, context
+    return method, student, critic, batch, trajectory["video"], context["video"]
 
 
 def _grads(module: torch.nn.Module) -> dict[str, torch.Tensor]:
@@ -106,7 +106,7 @@ def test_context_satisfies_upstream_noise_identities() -> None:
 
 def test_critic_loss_matches_upstream_transcription(monkeypatch: pytest.MonkeyPatch) -> None:
     method, student, critic, batch, trajectory, context = _build_state()
-    monkeypatch.setattr(method, "_sample_tdm_context", lambda _trajectory: context)
+    monkeypatch.setattr(method, "_sample_tdm_context", lambda _trajectory: {"video": context})
     guidance_scale = float(method.method_config["real_score_guidance_scale"])
     assert guidance_scale == 4.5
 
@@ -144,7 +144,7 @@ def test_critic_loss_matches_upstream_transcription(monkeypatch: pytest.MonkeyPa
 def test_generator_loss_matches_upstream_transcription(monkeypatch: pytest.MonkeyPatch) -> None:
     method, student, critic, batch, trajectory, context = _build_state()
     teacher = method.teacher
-    monkeypatch.setattr(method, "_sample_tdm_context", lambda _trajectory: context)
+    monkeypatch.setattr(method, "_sample_tdm_context", lambda _trajectory: {"video": context})
     guidance_scale = float(method.method_config["real_score_guidance_scale"])
 
     student.transformer.zero_grad(set_to_none=True)

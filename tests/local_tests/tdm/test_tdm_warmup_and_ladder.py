@@ -98,17 +98,15 @@ def test_warmup_loss_matches_cfg_teacher_target(monkeypatch: pytest.MonkeyPatch)
         trajectory = method._student_trajectory(batch)
 
     fixed = {
-        "noisy_source": trajectory.noisy_latents[0].detach(),
-        "sigma_source": trajectory.sigmas[0].reshape(1).expand(2),
+        "noisy_source": trajectory["video"].noisy_latents[0].detach(),
+        "sigma_source": trajectory["video"].sigmas[0].reshape(1).expand(2),
         "trajectory_indices": torch.zeros(2, dtype=torch.long),
     }
 
     def fixed_source(_trajectory: Any):
-        timestep_source = method._model_timestep_for_sigma(fixed["sigma_source"], student)
         return (
-            fixed["noisy_source"],
-            fixed["sigma_source"],
-            timestep_source,
+            {"video": fixed["noisy_source"]},
+            {"video": fixed["sigma_source"]},
             fixed["trajectory_indices"],
         )
 
@@ -190,13 +188,14 @@ def test_step_ladder_selects_stages_and_recomputes_sigmas() -> None:
         assert steps.shape[0] == expected_steps
         assert torch.equal(steps, torch.tensor(LADDER_STAGES[expected_index]["denoising_steps"],
                                                dtype=torch.float32))
-        assert method._denoising_sigma_list is not None
-        assert method._denoising_sigma_list.shape[0] == expected_steps
-        assert torch.all(method._denoising_sigma_list[:-1] > method._denoising_sigma_list[1:])
+        assert method._denoising_sigma_lists is not None
+        sigmas = method._denoising_sigma_lists["video"]
+        assert sigmas.shape[0] == expected_steps
+        assert torch.all(sigmas[:-1] > sigmas[1:])
 
     method._select_schedule_stage(20)
     with torch.no_grad():
-        trajectory = method._student_trajectory(batch)
+        trajectory = method._student_trajectory(batch)["video"]
     assert trajectory.timesteps.shape[0] == 2
     assert len(trajectory.sigmas) == 2
     assert method.method_config["dmd_denoising_steps"] == LADDER_STAGES[-1]["denoising_steps"]
