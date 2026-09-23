@@ -1,0 +1,142 @@
+# MiniMax H3 T2VA joint video+audio TDM single-sample overfit (Phase 4 gate).
+#
+# The modular H3 stack trains video and audio jointly on one packed 18B
+# transformer. Full-weight TDM does not fit, so the student and critic carry
+# rank-16 LoRA adapters over a frozen base and the teacher runs the frozen
+# base without adapters (three bf16 copies, matching the standalone memory
+# profile). H3 is guidance-distilled: `real_score_guidance_scale` stays 1.0
+# and there is deliberately no `method.cfg_uncond` block, because the model
+# has no unconditional branch and TDM then uses the conditional teacher x0
+# directly.
+#
+# Data: the single-sample H3 T2VA preprocessed asset (vae_latent
+# [24, 37, 48, 84], audio_latent [2, 32, 207], 768x1344x124). The validation
+# caption is the standalone H3 overfit prompt, which does not match this
+# asset's caption; the gate checks that the joint TDM path trains and
+# produces coherent video and audio, not prompt-fidelity parity.
+#
+# The TDM learning rates follow the standalone H3 overfit recipe: critic
+# (fake score) 1e-4 and generator 2e-5 (the standalone's 1e-4 times its 0.2
+# generator_lr_scale).
+
+models:
+  student:
+    _target_: fastvideo.train.models.minimax_h3.MiniMaxH3Model
+    init_from: /workspace/vlm-jileng/models/MiniMax-H3-teacher
+    trainable: true
+    attention_backend: TORCH_SDPA
+    enable_gradient_checkpointing_type: full
+    lora:
+      enable: true
+      rank: 16
+      alpha: 16
+      target_modules: [to_q, to_k, to_v, to_out]
+  teacher:
+    _target_: fastvideo.train.models.minimax_h3.MiniMaxH3Model
+    init_from: /workspace/vlm-jileng/models/MiniMax-H3-teacher
+    trainable: false
+    disable_custom_init_weights: true
+    attention_backend: TORCH_SDPA
+  critic:
+    _target_: fastvideo.train.models.minimax_h3.MiniMaxH3Model
+    init_from: /workspace/vlm-jileng/models/MiniMax-H3-teacher
+    trainable: true
+    disable_custom_init_weights: true
+    attention_backend: TORCH_SDPA
+    lora:
+      enable: true
+      rank: 16
+      alpha: 16
+      target_modules: [to_q, to_k, to_v, to_out]
+
+method:
+  _target_: fastvideo.train.methods.distribution_matching.tdm.TDMMethod
+  rollout_mode: simulate
+  generator_update_interval: 1
+  real_score_guidance_scale: 1.0
+  warmup_steps: 50
+  tdm_step_ladder:
+    - denoising_steps: [1000, 875, 750, 625, 500, 375, 250, 125]
+      until_iteration: 100
+    - denoising_steps: [1000, 750, 500, 250]
+  tdm_denoising_steps: [1000, 750, 500, 250]
+  warp_denoising_step: false
+  student_sample_type: ode
+  noise_interval_mode: separate
+  use_randmid: false
+  snr_clip: 5.0
+  importance_weight_clip: 10.0
+  normalize_generator_delta: true
+  use_huber: false
+  huber_c: 0.001
+  max_grad_norm: 1.0
+  fake_score_learning_rate: 1.0e-4
+  fake_score_betas: [0.0, 0.999]
+  fake_score_lr_scheduler: constant
+
+training:
+  distributed:
+    num_gpus: 4
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 4
+
+  data:
+    data_path:
+      /workspace/vlm-wlsaidhi/fastvideo/data/h3_overfit_t2va_0000007: 1
+    preprocessed_data_type: t2va
+    dataloader_num_workers: 0
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    seed: 1000
+    num_latent_t: 37
+    num_height: 768
+    num_width: 1344
+    num_frames: 124
+
+  optimizer:
+    learning_rate: 2.0e-5
+    betas: [0.0, 0.999]
+    weight_decay: 0.0
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 200
+    gradient_accumulation_steps: 1
+
+  checkpoint:
+    output_dir: outputs/minimax_h3_t2va_tdm_overfit
+    training_state_checkpointing_steps: 25
+    checkpoints_total_limit: 8
+
+  tracker:
+    trackers: [jsonl]
+    project_name: distillation_h3
+    run_name: minimax_h3_t2va_tdm_overfit
+
+  model:
+    precondition_outputs: false
+    enable_gradient_checkpointing_type: full
+
+  dit_precision: bf16
+
+callbacks:
+  validation:
+    _target_: fastvideo.train.callbacks.validation.ValidationCallback
+    pipeline_target: fastvideo.pipelines.basic.minimax_h3.minimax_h3_pipeline.MiniMaxH3Pipeline
+    dataset_file: examples/train/configs/distribution_matching/tdm_h3_overfit_validation.json
+    every_steps: 25
+    run_at_start: true
+    sampling_steps: [4]
+    sampling_timesteps: [1000, 750, 500, 250]
+    guidance_scale: 1.0
+    num_frames: 124
+    num_videos_per_prompt: 1
+    use_validation_media_conditioning: false
+    offload_training_state: true
+    text_encoder_cpu_offload: true
+    vae_cpu_offload: true
+
+pipeline: {}

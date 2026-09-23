@@ -439,6 +439,15 @@ class MiniMaxH3Model(ModelBase):
     # TDM contract: one joint video+audio document
     # ------------------------------------------------------------------
 
+    @property
+    def num_train_timesteps(self) -> int:
+        """H3's trajectory grid runs over integer labels ``0..1000``.
+
+        The released scheduler exposes no training horizon, so the joint TDM
+        grid (the same range the standalone H3 recipe uses) supplies it.
+        """
+        return _H3_TRAJECTORY_TIMESTEPS
+
     def tdm_modalities(self) -> tuple[str, ...]:
         """H3 trains video and audio jointly on one packed sequence."""
         return _H3_TDM_MODALITIES
