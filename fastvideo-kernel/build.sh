@@ -5,9 +5,11 @@ set -ex
 # Usage:
 #   ./build.sh  # local build (torch-based arch detection, TK only on SM90)
 #   ./build.sh --wheel-dir /tmp/wheels  # build + install a reusable wheel
+#   ./build.sh --rocm --python-only     # Python + Triton package, no compiled extension
 # Environment overrides (if set, they win over auto-detection):
 #   TORCH_CUDA_ARCH_LIST
-#   CMAKE_ARGS (for FASTVIDEO_KERNEL_BUILD_TK / CMAKE_CUDA_ARCHITECTURES / GPU_BACKEND)
+#   CMAKE_ARGS (for FASTVIDEO_KERNEL_BUILD_TK / CMAKE_CUDA_ARCHITECTURES / GPU_BACKEND /
+#               FASTVIDEO_KERNEL_BUILD_EXTENSION)
 
 echo "Building fastvideo-kernel..."
 
@@ -40,40 +42,17 @@ if [[ -n "${CONDA_PREFIX:-}" ]]; then
     unset _need_clean _host_arch
 fi
 
-# Ensure only the kernel's required headers are initialized. A repository-wide
-# update also clones the unrelated VBench evaluation submodule. Skip outside a
-# git checkout (e.g. Docker contexts that exclude .git), where the submodule
-# contents must already be present.
-if git rev-parse --git-dir >/dev/null 2>&1; then
-    git submodule update --init --recursive include/cutlass include/tk
-fi
-# Fail fast with a clear message if the headers are still missing (e.g. a
-# Docker context that excluded .git AND the submodule contents) instead of
-# dying later in a wall of nvcc include errors. CUTLASS is consumed by the
-# always-built turbodiffusion sources, so it is a hard error; ThunderKittens
-# only feeds the TK-gated Hopper kernels, so a missing tree just warns (the
-# TK gate resolves later, and non-SM90/ROCm builds never touch it).
-if [ ! -d include/cutlass/include ]; then
-    echo "ERROR: include/cutlass/include is missing. Outside a git checkout the" >&2
-    echo "       CUTLASS sources must already be present (run" >&2
-    echo "       'git submodule update --init --recursive include/cutlass include/tk'" >&2
-    echo "       in the source checkout, or include them in the build context)." >&2
-    exit 1
-fi
-if [ ! -d include/tk/include ]; then
-    echo "WARNING: include/tk/include is missing; ThunderKittens (Hopper sm_90a)" >&2
-    echo "         kernels cannot be built. Fine for non-SM90/ROCm targets." >&2
-fi
-
-# Install build dependencies
-uv pip install scikit-build-core cmake ninja
-
 GPU_BACKEND=CUDA
 WHEEL_DIR=""
+PYTHON_ONLY=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --rocm)
             GPU_BACKEND=ROCM
+            shift
+            ;;
+        --python-only)
+            PYTHON_ONLY=1
             shift
             ;;
         --wheel-dir)
@@ -96,6 +75,55 @@ has_cmake_arg() {
     [[ "${CMAKE_ARGS:-}" =~ (^|[[:space:]])-D${key}(=|$) ]]
 }
 
+extension_mode_from_cmake_args() {
+    [[ "${CMAKE_ARGS:-}" =~ (^|[[:space:]])-DFASTVIDEO_KERNEL_BUILD_EXTENSION=([^[:space:]]*) ]] \
+        && printf '%s' "${BASH_REMATCH[2]^^}"
+}
+if (( PYTHON_ONLY )); then
+    _explicit_mode="$(extension_mode_from_cmake_args)"
+    if [[ -n "${_explicit_mode}" && "${_explicit_mode}" != "OFF" ]]; then
+        echo "ERROR: --python-only conflicts with CMAKE_ARGS -DFASTVIDEO_KERNEL_BUILD_EXTENSION=${_explicit_mode}" >&2
+        exit 2
+    fi
+    if ! has_cmake_arg "FASTVIDEO_KERNEL_BUILD_EXTENSION"; then
+        CMAKE_ARGS="${CMAKE_ARGS:-} -DFASTVIDEO_KERNEL_BUILD_EXTENSION=OFF"
+    fi
+elif [[ "$(extension_mode_from_cmake_args)" == "OFF" ]]; then
+    PYTHON_ONLY=1
+fi
+
+# The vendored headers only feed the compiled extension, so a Python-only build
+# neither initializes nor checks them.
+if ! (( PYTHON_ONLY )); then
+    # Ensure only the kernel's required headers are initialized. A repository-wide
+    # update also clones the unrelated VBench evaluation submodule. Skip outside a
+    # git checkout (e.g. Docker contexts that exclude .git), where the submodule
+    # contents must already be present.
+    if git rev-parse --git-dir >/dev/null 2>&1; then
+        git submodule update --init --recursive include/cutlass include/tk
+    fi
+    # Fail fast with a clear message if the headers are still missing (e.g. a
+    # Docker context that excluded .git AND the submodule contents) instead of
+    # dying later in a wall of nvcc include errors. CUTLASS is consumed by the
+    # always-built turbodiffusion sources, so it is a hard error; ThunderKittens
+    # only feeds the TK-gated Hopper kernels, so a missing tree just warns (the
+    # TK gate resolves later, and non-SM90/ROCm builds never touch it).
+    if [ ! -d include/cutlass/include ]; then
+        echo "ERROR: include/cutlass/include is missing. Outside a git checkout the" >&2
+        echo "       CUTLASS sources must already be present (run" >&2
+        echo "       'git submodule update --init --recursive include/cutlass include/tk'" >&2
+        echo "       in the source checkout, or include them in the build context)." >&2
+        exit 1
+    fi
+    if [ ! -d include/tk/include ]; then
+        echo "WARNING: include/tk/include is missing; ThunderKittens (Hopper sm_90a)" >&2
+        echo "         kernels cannot be built. Fine for non-SM90/ROCm targets." >&2
+    fi
+fi
+
+# Install build dependencies
+uv pip install scikit-build-core cmake ninja
+
 detect_with_torch() {
     # Prefer the active venv's python directly over `uv run --active --no-project`,
     # which on some uv versions provisions its own interpreter and misses packages
@@ -113,7 +141,7 @@ mj, mn = torch.cuda.get_device_capability(0)
 print(f'{mj}.{mn}')"
 }
 
-if [ "${GPU_BACKEND}" = "CUDA" ]; then
+if [ "${GPU_BACKEND}" = "CUDA" ] && ! (( PYTHON_ONLY )); then
     # Compute capability drives the arch/TK defaults below. Prefer an explicit
     # TORCH_CUDA_ARCH_LIST (works on GPU-less build machines such as CI/Docker);
     # only probe a live GPU via torch when no arch was provided.

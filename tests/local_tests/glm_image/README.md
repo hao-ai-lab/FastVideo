@@ -11,7 +11,7 @@ message when a prerequisite is missing.
 | | |
 |---|---|
 | Weights | `zai-org/GLM-Image` → `official_weights/glm_image` (~30 GB: AR encoder 4 shards, transformer 3 shards, vae + text_encoder) |
-| Runtime deps | `transformers>=5.0.0` (first release with the AR encoder `GlmImageForConditionalGeneration`) and `diffusers>=0.38.0` — both committed in `pyproject.toml` |
+| Runtime deps | `transformers>=5.15.0` (repo floor; the AR encoder `GlmImageForConditionalGeneration` first ships in 5.0.0) and `diffusers>=0.38.0` — both committed in `pyproject.toml` |
 | Test-only deps | the diffusers `GlmImageTransformer2DModel` / `GlmImagePipeline` reference classes need `diffusers>=0.37.0.dev0` (used **only** by the parity tests) |
 
 Download weights (from the repo root; cache via `HF_HOME` if `/` is small):

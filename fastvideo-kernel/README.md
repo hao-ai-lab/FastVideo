@@ -69,6 +69,20 @@ cd fastvideo-kernel
 ./build.sh --rocm
 ```
 
+The compiled extension needs the HIP CMake toolchain (`hip-lang`). Images that install
+ROCm as a pip SDK, such as the `rocm/pytorch` 7.14 images, ship `hipcc` but not that
+package, so `build.sh --rocm` falls back to the Python + Triton package there and says so
+in the configure summary. That package is all the video sparse attention path needs on
+ROCm. To ask for it explicitly, or to fail instead of falling back:
+
+```bash
+./build.sh --rocm --python-only                                    # Python + Triton only
+CMAKE_ARGS="-DFASTVIDEO_KERNEL_BUILD_EXTENSION=ON" ./build.sh --rocm  # error if HIP cannot be configured
+```
+
+`FASTVIDEO_KERNEL_BUILD_EXTENSION` (AUTO/ON/OFF) is also read from the environment by a
+plain `pip install --no-build-isolation .`.
+
 ### Optional: FA4 CuTe block-sparse backend (VSA-128/256 fastpath)
 
 The VSA-128/256 fastpaths (tile volume 128 or 256, on NVIDIA Blackwell / sm_100) route to the

@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import { ChevronDown } from 'lucide-react';
-import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
+import { DropdownMenu } from 'radix-ui';
 
 import CreateJobModal from '@/components/jobs/CreateJobModal';
 import { Button } from '@/components/ui/button';
@@ -16,6 +16,7 @@ interface CreateJobButtonProps {
 
 export default function CreateJobButton({ jobType }: CreateJobButtonProps) {
   const options = WORKLOAD_OPTIONS[jobType] ?? [];
+  const triggerRef = React.useRef<HTMLButtonElement>(null);
 
   const [modalOpen, setModalOpen] = React.useState(false);
   const [workloadType, setWorkloadType] = React.useState(
@@ -36,7 +37,7 @@ export default function CreateJobButton({ jobType }: CreateJobButtonProps) {
     <>
       <DropdownMenu.Root>
         <DropdownMenu.Trigger asChild>
-          <Button type="button" className="gap-1.5">
+          <Button ref={triggerRef} type="button" className="gap-1.5">
             Create Job
             <ChevronDown className="size-3.5 opacity-85" aria-hidden />
           </Button>
@@ -66,6 +67,11 @@ export default function CreateJobButton({ jobType }: CreateJobButtonProps) {
       <CreateJobModal
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
+        onCloseAutoFocus={(event) => {
+          // This dialog opens from a menu item, so it has no DialogTrigger.
+          event.preventDefault();
+          triggerRef.current?.focus();
+        }}
         onSuccess={handleSuccess}
         jobType={jobType}
         workloadType={workloadType}
