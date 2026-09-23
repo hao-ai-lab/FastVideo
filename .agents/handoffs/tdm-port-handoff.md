@@ -354,19 +354,24 @@ Sub-steps and gates:
       trigger. Running the H3 pipeline between training steps leaves the
       autograd/CUDA stream state inconsistent for the next backward. The
       3-step smoke with validation disabled passes, so training alone is fine.
-  - Recommended next step for 4D: run the gate with in-process validation
-    **off**, then sample from checkpoints in a separate process (a
-    resume-based sampler or a DCP-load + pipeline script), or fix the stream
-    handling in the validation path. The cheaper 480x832 geometry is still
-    available as a second lever: the drifting work validates H3 at 480x832
-    and the config's `num_height`/`num_width` plus a matching T2VA asset
-    would cut the video tokens about 2.6x. Note
-    `fastvideo/pipelines/preprocess/preprocess_minimax_h3_overfit.py`
-    hardcodes 768x1344 and needs `data/crush-smol` source media, so building
-    the smaller asset is a small script change plus a preprocessing run.
-  - `offload_training_state` is left `false` in the config with the reason
-    recorded inline; revert it if the validation stream issue is fixed
-    another way.
+  - 2026-09-23: **4D workaround applied and the gate relaunched.** The
+    validation-stream failure only bites when a training backward follows an
+    in-process validation forward, so the gate now validates **once at the
+    final step** (`callbacks.validation.run_at_start: false`,
+    `every_steps: 200`) with `offload_training_state: true` restored. The run
+    trains cleanly: step 15/200 at `~94` s/step, no errors, no samples yet by
+    design. Launched 05:02Z as `h3-tdm-gate`; expect the final validation and
+    report around 10:40Z. This trades the step-0/50/100/150 samples for a
+    run that survives; a trajectory would need out-of-process sampling from
+    the checkpoints (resume or `dcp_to_diffusers`) instead.
+  - Recommended next step for a full trajectory: run validation off, then
+    sample from checkpoints in a separate process (resume-based sampler or
+    `fastvideo/train/entrypoint/dcp_to_diffusers.py`), or fix the stream
+    handling in the validation path. The cheaper 480x832 geometry remains a
+    second lever: the drifting work validates H3 at 480x832, and
+    `preprocess_minimax_h3_overfit.py` hardcodes 768x1344 with `crush-smol`
+    source media, so a smaller asset is a small script change plus a
+    preprocessing run.
   - Then 4E VSA wiring for H3 training and a rerun of the gate.
 
 - 2026-09-22: Branch renamed to `tdm-port` and pushed to the internal
