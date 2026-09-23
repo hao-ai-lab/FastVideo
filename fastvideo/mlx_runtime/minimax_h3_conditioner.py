@@ -105,15 +105,20 @@ class _ShardIndex:
             self._header_cache[path] = (header, data_start)
         return self._header_cache[path]
 
-    def get(self, key: str) -> np.ndarray:
+    def _header(self, key: str) -> tuple[str, dict, int]:
         shard = self.key_to_shard[key]
-        header, data_start = self._header_cache[shard]
+        if not Path(shard).is_file():
+            raise FileNotFoundError(f"Conditioner shard listed in the index is missing: {shard}")
+        header, data_start = self._cache_header(shard)
+        return shard, header, data_start
+
+    def get(self, key: str) -> np.ndarray:
+        shard, header, data_start = self._header(key)
         return _read_safetensors_bf16(shard, key, header, data_start)
 
     def get_mlx(self, key: str) -> mx.array:
         """Read one weight in FP32 without expanding BF16 on the CPU."""
-        shard = self.key_to_shard[key]
-        header, data_start = self._header_cache[shard]
+        shard, header, data_start = self._header(key)
         if header[key]["dtype"] != "BF16":
             return mx.array(np.asarray(self.get(key), dtype=np.float32))
         raw = _read_bf16_words(shard, key, header, data_start)
@@ -124,8 +129,7 @@ class _ShardIndex:
         return weight
 
     def get_row(self, key: str, row: int) -> np.ndarray:
-        shard = self.key_to_shard[key]
-        header, data_start = self._header_cache[shard]
+        shard, header, data_start = self._header(key)
         return _read_safetensors_row(shard, key, row, header, data_start)
 
     def close(self) -> None:

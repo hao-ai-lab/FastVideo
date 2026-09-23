@@ -28,7 +28,8 @@ detail budget and reads softer than a native-resolution render, so it stays
 off by default.
 
 This entrypoint currently supports text-to-video-with-audio only. It does not
-yet wire FL2VA, Ref2VA, or two-pass refinement.
+yet wire FL2VA, Ref2VA, or two-pass refinement. The four-step preview stays
+the default. FastH3 8-Step V2 uses ``mlx_fasth3_8step.py``.
 
 VSA is off by default; existing dense MLX checkpoints remain supported.
 H3 uses fused MLX RMSNorm, which can change BF16 rounding compared with the
@@ -51,7 +52,7 @@ def _dense_layers(value: str) -> tuple[int, ...]:
     return layers
 
 
-def parse_args() -> argparse.Namespace:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--model-root", type=Path, default=Path.home() / "models/FastH3-Preview-v0.2",
@@ -164,11 +165,20 @@ def parse_args() -> argparse.Namespace:
             "(simd is opt-in)"
         ),
     )
-    return parser.parse_args()
+    parser.add_argument("--vae-tile-height", type=int, default=256,
+                        help="overlapping video-VAE tile height in pixels")
+    parser.add_argument("--vae-tile-width", type=int, default=256,
+                        help="overlapping video-VAE tile width in pixels")
+    parser.add_argument("--inter-step-cooldown-s", type=float, default=0.0,
+                        help="optional pause between denoise steps")
+    return parser
 
 
-def main() -> None:
-    args = parse_args()
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    return build_parser().parse_args(argv)
+
+
+def run(args: argparse.Namespace) -> None:
     from fastvideo.mlx_runtime.minimax_h3_pipeline import MiniMaxH3MLXPipeline
 
     pipeline = MiniMaxH3MLXPipeline(
@@ -189,6 +199,9 @@ def main() -> None:
         seed=args.seed,
         num_steps=args.steps,
         tiled_video_decode=args.tiled_video_decode,
+        vae_tile_height=args.vae_tile_height,
+        vae_tile_width=args.vae_tile_width,
+        inter_step_cooldown_s=args.inter_step_cooldown_s,
         fast=args.fast,
         fast_factor=args.fast_factor,
         fast_sharpen=args.fast_sharpen,
@@ -213,6 +226,10 @@ def main() -> None:
         "video_decode_backend": result.video_decode_backend,
         "audio_samples": int(result.waveform.shape[-1]),
     }, indent=2))
+
+
+def main() -> None:
+    run(parse_args())
 
 
 if __name__ == "__main__":

@@ -42,6 +42,9 @@ from fastvideo.mlx_runtime.minimax_h3 import (
     H3_WEIGHTS_FILENAME,
     MINIMAX_H3_AUDIO_SHIFT,
     MINIMAX_H3_VIDEO_SHIFT,
+    MiniMaxH3SchedulerState,
+    adaln_timestep_union,
+    load_fasth3_inference_contract,
     mlx_h3_checkpoint_vsa_capable,
     mlx_h3_dit_from_diffusers_safetensors,
     minimax_h3_sigmas,
@@ -55,31 +58,25 @@ DEFAULT_FORMATS = " ".join(SUPPORTED_FORMATS)
 
 
 def _adaln_cache_timesteps(model_root: str | Path | None = None) -> np.ndarray:
-    import json
-    if model_root is not None:
-        p = Path(model_root)
-        contract_path = p / "fastvideo_inference.json"
-        if not contract_path.exists() and p.parent:
-            contract_path = p.parent / "fastvideo_inference.json"
-        if contract_path.exists():
-            try:
-                contract = json.loads(contract_path.read_text(encoding="utf-8"))
-                dmd_steps = contract.get("dmd_denoising_steps")
-                v_shift = float(contract.get("video_scheduler_shift", 10.0))
-                a_shift = float(contract.get("audio_scheduler_shift", 3.0))
-                if dmd_steps:
-                    base = np.array([float(r) / 1000.0 for r in dmd_steps] + [0.0], dtype=np.float64)
-                    v_sigmas = v_shift * base / (1.0 + (v_shift - 1.0) * base)
-                    a_sigmas = a_shift * base / (1.0 + (a_shift - 1.0) * base)
-                    v_t = (1.0 - v_sigmas[:-1]).astype(np.float32)
-                    a_t = (1.0 - a_sigmas[:-1]).astype(np.float32)
-                    logger.info("FastH3 checkpoint schedule contract found at %s (%d DMD forwards, video/audio shift=%g/%g)", contract_path, len(dmd_steps), v_shift, a_shift)
-                    return np.unique(np.concatenate([v_t, a_t, [1.0]])).astype(np.float32)
-            except Exception as exc:
-                logger.warning("Could not parse %s: %s", contract_path, exc)
-    video = 1.0 - minimax_h3_sigmas(MINIMAX_H3_VIDEO_SHIFT, 4)[:-1]
-    audio = 1.0 - minimax_h3_sigmas(MINIMAX_H3_AUDIO_SHIFT, 4)[:-1]
-    return np.unique(np.concatenate([video, audio, [1.0]])).astype(np.float32)
+    """Four-step uniform grid, unless the snapshot declares its own shifts.
+
+    FastH3 8-Step V2 carries ``video_scheduler_shift`` / ``audio_scheduler_shift``.
+    Four-step sidecars do not, so those conversions keep the existing cache.
+    A shifted contract that fails to parse aborts conversion.
+    """
+    contract = load_fasth3_inference_contract(model_root)
+    if contract is None:
+        video = 1.0 - minimax_h3_sigmas(MINIMAX_H3_VIDEO_SHIFT, 4)[:-1]
+        audio = 1.0 - minimax_h3_sigmas(MINIMAX_H3_AUDIO_SHIFT, 4)[:-1]
+        return np.unique(np.concatenate([video, audio, [1.0]])).astype(np.float32)
+    video_state = MiniMaxH3SchedulerState.from_dmd_steps(contract["video_scheduler_shift"],
+                                                         contract["dmd_denoising_steps"])
+    audio_state = MiniMaxH3SchedulerState.from_dmd_steps(contract["audio_scheduler_shift"],
+                                                         contract["dmd_denoising_steps"])
+    logger.info("FastH3 shifted schedule contract: %d DMD forwards, video/audio shift=%g/%g",
+                len(contract["dmd_denoising_steps"]), contract["video_scheduler_shift"],
+                contract["audio_scheduler_shift"])
+    return adaln_timestep_union(video_state, audio_state)
 
 
 def parse_args() -> argparse.Namespace:
