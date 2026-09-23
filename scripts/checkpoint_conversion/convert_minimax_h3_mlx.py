@@ -42,6 +42,9 @@ from fastvideo.mlx_runtime.minimax_h3 import (
     H3_WEIGHTS_FILENAME,
     MINIMAX_H3_AUDIO_SHIFT,
     MINIMAX_H3_VIDEO_SHIFT,
+    MiniMaxH3SchedulerState,
+    adaln_timestep_union,
+    load_fasth3_inference_contract,
     mlx_h3_checkpoint_vsa_capable,
     mlx_h3_dit_from_diffusers_safetensors,
     minimax_h3_sigmas,
@@ -54,10 +57,26 @@ SUPPORTED_FORMATS = ("int8", "int6", "int4")
 DEFAULT_FORMATS = " ".join(SUPPORTED_FORMATS)
 
 
-def _adaln_cache_timesteps() -> np.ndarray:
-    video = 1.0 - minimax_h3_sigmas(MINIMAX_H3_VIDEO_SHIFT, 4)[:-1]
-    audio = 1.0 - minimax_h3_sigmas(MINIMAX_H3_AUDIO_SHIFT, 4)[:-1]
-    return np.unique(np.concatenate([video, audio, [1.0]])).astype(np.float32)
+def _adaln_cache_timesteps(model_root: str | Path | None = None) -> np.ndarray:
+    """Four-step uniform grid, unless the snapshot declares its own shifts.
+
+    FastH3 8-Step V2 carries ``video_scheduler_shift`` / ``audio_scheduler_shift``.
+    Four-step sidecars do not, so those conversions keep the existing cache.
+    A shifted contract that fails to parse aborts conversion.
+    """
+    contract = load_fasth3_inference_contract(model_root)
+    if contract is None:
+        video = 1.0 - minimax_h3_sigmas(MINIMAX_H3_VIDEO_SHIFT, 4)[:-1]
+        audio = 1.0 - minimax_h3_sigmas(MINIMAX_H3_AUDIO_SHIFT, 4)[:-1]
+        return np.unique(np.concatenate([video, audio, [1.0]])).astype(np.float32)
+    video_state = MiniMaxH3SchedulerState.from_dmd_steps(contract["video_scheduler_shift"],
+                                                         contract["dmd_denoising_steps"])
+    audio_state = MiniMaxH3SchedulerState.from_dmd_steps(contract["audio_scheduler_shift"],
+                                                         contract["dmd_denoising_steps"])
+    logger.info("FastH3 shifted schedule contract: %d DMD forwards, video/audio shift=%g/%g",
+                len(contract["dmd_denoising_steps"]), contract["video_scheduler_shift"],
+                contract["audio_scheduler_shift"])
+    return adaln_timestep_union(video_state, audio_state)
 
 
 def parse_args() -> argparse.Namespace:
@@ -84,7 +103,7 @@ def main() -> None:
         raise ValueError(f"Unsupported H3 MLX formats: {unsupported}. Choose from {SUPPORTED_FORMATS}.")
     out_base = Path(args.out)
     out_base.mkdir(parents=True, exist_ok=True)
-    cache_timesteps = _adaln_cache_timesteps()
+    cache_timesteps = _adaln_cache_timesteps(args.model_root)
 
     for fmt in formats:
         spec = MLXQuantizationSpec.from_name(fmt)

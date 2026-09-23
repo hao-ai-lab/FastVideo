@@ -225,6 +225,23 @@ python examples/inference/basic/mlx_fasth3.py \
   --output-path ./outputs/fasth3_int6_vsa_720p.mp4
 ```
 
+FastH3 8-Step V2 is a separate checkpoint. Keep the four-step command above
+for the preview. For the eight-forward model, convert its transformer with the
+same script (the snapshot's `fastvideo_inference.json` declares the trained
+shifts, so the AdaLN cache follows those rungs) and run:
+
+```bash
+python examples/inference/basic/mlx_fasth3_8step.py \
+  --model-root ./FastH3-8-Step-V2 \
+  --mlx-checkpoint ./FastH3-8-Step-V2-MLX/int6 \
+  --prompt "(S1) A presenter says <d>[English] Fast H3 is amazing.</d>" \
+  --height 480 --width 832 --num-frames 124 --seed 2026 \
+  --output-path ./outputs/fasth3_8step_int6.mp4
+```
+
+`--steps` may be 8 or 9. Both run the eight trained forwards. VAE, audio VAE,
+text encoder, and tokenizer can be the ones already used by the preview.
+
 `--vsa-impl auto` uses the chunked gather+SDPA **reference** path.
 `--vsa-impl simd` is an opt-in SIMD-group kernel (tile 64, head dim 128) that
 falls back to reference on unsupported shapes. It is not the default.

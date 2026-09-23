@@ -49,6 +49,7 @@ from fastvideo.mlx_runtime.minimax_h3 import (
     MINIMAX_H3_MIN_DURATION,
     MINIMAX_H3_VIDEO_SHIFT,
     MiniMaxH3SchedulerState,
+    adaln_timestep_union,
     align_num_frames,
     audio_latent_num_frames,
     build_packed_layout,
@@ -56,6 +57,7 @@ from fastvideo.mlx_runtime.minimax_h3 import (
     dense_only_vsa_error,
     load_mlx_h3_checkpoint,
     mlx_h3_checkpoint_vsa_capable,
+    resolve_h3_denoise_schedule,
     temporal_position_grid,
     unpatchify_video_tokens,
     unpack_audio_tokens,
@@ -258,24 +260,37 @@ def _audio_sample_count(num_frames: int, fps: int = MINIMAX_H3_FPS, sample_rate:
 def _adaln_schedule_union(num_steps: int) -> np.ndarray:
     video = MiniMaxH3SchedulerState.create(MINIMAX_H3_VIDEO_SHIFT, num_steps)
     audio = MiniMaxH3SchedulerState.create(MINIMAX_H3_AUDIO_SHIFT, num_steps)
-    return np.unique(np.concatenate([video.timesteps, audio.timesteps, [1.0]]).astype(np.float32))
+    return adaln_timestep_union(video, audio)
 
 
-def _validate_checkpoint_step_ladder(checkpoint_dir: str | Path, num_steps: int) -> None:
-    """Reject a schedule that a fixed, AdaLN-dropped checkpoint cannot serve."""
+def _cached_adaln_timesteps(checkpoint_dir: str | Path) -> np.ndarray | None:
     checkpoint_dir = Path(checkpoint_dir)
     manifest_path = checkpoint_dir / H3_MANIFEST_FILENAME
     if not manifest_path.is_file():
         raise FileNotFoundError(f"Missing MLX H3 checkpoint manifest: {manifest_path}")
     cache_info = json.loads(manifest_path.read_text()).get("adaln_cache")
     if cache_info is None:
-        return
-    cached = np.asarray(cache_info["timesteps"], dtype=np.float32)
-    requested = _adaln_schedule_union(num_steps)
-    if not np.array_equal(cached, requested):
-        raise ValueError(
-            f"MLX H3 checkpoint {checkpoint_dir} has a fixed AdaLN ladder that does not support --steps "
-            f"{num_steps}. Use the step count used during conversion (normally 4), or re-export the checkpoint.")
+        return None
+    return np.asarray(cache_info["timesteps"], dtype=np.float32)
+
+
+def _validate_checkpoint_step_ladder(checkpoint_dir: str | Path,
+                                     num_steps: int,
+                                     *,
+                                     model_root: str | Path | None = None) -> None:
+    """Reject a schedule that a fixed, AdaLN-dropped checkpoint cannot serve."""
+    resolve_h3_denoise_schedule(
+        model_root,
+        num_steps,
+        cached_timesteps=_cached_adaln_timesteps(checkpoint_dir),
+    )
+
+
+def _require_positive_vae_tiles(vae_tile_height: int, vae_tile_width: int) -> None:
+    if type(vae_tile_height) is not int or type(
+            vae_tile_width) is not int or vae_tile_height <= 0 or vae_tile_width <= 0:
+        raise ValueError("VAE tile dimensions must be positive integers, "
+                         f"got height={vae_tile_height!r}, width={vae_tile_width!r}.")
 
 
 def _preflight_media_dependencies(*,
@@ -455,6 +470,7 @@ class MiniMaxH3MLXPipeline:
         num_steps: int = 4,
         dit: Any | None = None,
         vsa_config: MiniMaxH3VSAConfig | None = None,
+        inter_step_cooldown_s: float = 0.0,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Denoise joint latents; returns (normalized video rows, audio rows)."""
         import mlx.core as mx
@@ -464,7 +480,7 @@ class MiniMaxH3MLXPipeline:
 
         owned_dit = dit is None
         if owned_dit:
-            _validate_checkpoint_step_ladder(self.dit_checkpoint, num_steps)
+            _validate_checkpoint_step_ladder(self.dit_checkpoint, num_steps, model_root=self.model_root)
             t0 = time.perf_counter()
             dit = load_mlx_h3_checkpoint(self.dit_checkpoint)
             logger.info("Loaded MLX H3 DiT from %s in %.1fs", self.dit_checkpoint, time.perf_counter() - t0)
@@ -486,10 +502,11 @@ class MiniMaxH3MLXPipeline:
         if getattr(dit, "vsa_config", None) is not None and dit.vsa_config.enabled:
             dit.prepare_vsa_geometry(layout)
 
-        video_scheduler = MiniMaxH3SchedulerState.create(MINIMAX_H3_VIDEO_SHIFT, num_steps)
-        audio_scheduler = MiniMaxH3SchedulerState.create(MINIMAX_H3_AUDIO_SHIFT, num_steps)
-        # The released artifacts persist the converter grid: video ∪ audio ∪ {1.0}.
-        union = _adaln_schedule_union(num_steps)
+        schedule = resolve_h3_denoise_schedule(self.model_root, num_steps)
+        video_scheduler = schedule.video
+        audio_scheduler = schedule.audio
+        union = schedule.adaln_timesteps
+        num_steps = schedule.num_steps
         # The keyframe-noise timestep (0.999) is only exercised by FL2VA/Ref2VA
         # conditioning rows; those modes recompute the ladder before denoise.
 
@@ -535,7 +552,15 @@ class MiniMaxH3MLXPipeline:
             x_v = video_scheduler.step(video_velocity, step_index, x_v)
             x_a = audio_scheduler.step(audio_velocity, step_index, x_a)
             mx.eval(x_v, x_a)
-            dit_forward_s += time.perf_counter() - step_started
+            step_s = time.perf_counter() - step_started
+            dit_forward_s += step_s
+            logger.info("H3 denoise step %d/%d (sigma_video=%.4f, sigma_audio=%.4f) in %.2fs", step_index + 1,
+                        num_steps, 1.0 - video_t, 1.0 - audio_t, step_s)
+            del video_velocity, audio_velocity
+            _cleanup_mlx()
+            if inter_step_cooldown_s > 0 and step_index < num_steps - 1:
+                logger.info("Thermal cooldown %.1fs before step %d...", inter_step_cooldown_s, step_index + 2)
+                time.sleep(inter_step_cooldown_s)
 
         self.last_dit_forward_s = dit_forward_s
         stats = getattr(dit, "last_vsa_stats", None)
@@ -573,8 +598,11 @@ class MiniMaxH3MLXPipeline:
                      height: int,
                      width: int,
                      num_frames: int,
-                     tiled: bool = True) -> np.ndarray:
+                     tiled: bool = True,
+                     vae_tile_height: int = 256,
+                     vae_tile_width: int = 256) -> np.ndarray:
         """Normalized packed rows -> (T, H, W, 3) uint8 frames."""
+        _require_positive_vae_tiles(vae_tile_height, vae_tile_width)
         import mlx.core as mx
 
         from fastvideo.mlx_runtime.minimax_h3_video_vae import mlx_h3_video_vae_from_dir
@@ -618,8 +646,8 @@ class MiniMaxH3MLXPipeline:
         z = vae.denormalize_latents(z)
         decoded = vae.decode(z,
                              tiled=tiled,
-                             tile_sample_min_height=min(geometry["height"], 256),
-                             tile_sample_min_width=min(geometry["width"], 256))
+                             tile_sample_min_height=min(geometry["height"], vae_tile_height),
+                             tile_sample_min_width=min(geometry["width"], vae_tile_width))
         pixels = np.clip(np.asarray(vae.denormalize_pixels(decoded)), 0.0, 1.0)
         del vae, decoded, z
         _cleanup_mlx()
@@ -725,39 +753,45 @@ class MiniMaxH3MLXPipeline:
     # -- end-to-end ----------------------------------------------------------
 
     def generate(
-            self,
-            prompt: str,
-            *,
-            output_path: str | Path,
-            height: int = 480,
-            width: int = 832,
-            num_frames: int = 124,
-            seed: int = 0,
-            num_steps: int = 4,
-            save_frames: bool = False,
-            tiled_video_decode: bool = True,
-            fast: bool = False,
-            fast_factor: int = 2,
-            fast_sharpen: float = 0.6,
-            rife_weights_dir: str | Path | None = None,
-            fast_spatial: bool = False,
-            fast_spatial_scale: int = 2,
-            fast_spatial_upsample_mode: str = DEFAULT_PIXEL_UPSAMPLE_MODE,
-            fast_spatial_sharpen: float = DEFAULT_FAST_SPATIAL_SHARPEN,
-            vsa: bool = False,
-            vsa_sparsity: float = 0.9,
-            vsa_tile_size: int = 64,
-            vsa_prefix_mode: str = "exempt",
-            vsa_dense_first_n_steps: int = 0,
-            vsa_dense_layers: tuple[int, ...] = (),
-            vsa_impl: str = "auto",
+        self,
+        prompt: str,
+        *,
+        output_path: str | Path,
+        height: int = 480,
+        width: int = 832,
+        num_frames: int = 124,
+        seed: int = 0,
+        num_steps: int = 4,
+        save_frames: bool = False,
+        tiled_video_decode: bool = True,
+        vae_tile_height: int = 256,
+        vae_tile_width: int = 256,
+        fast: bool = False,
+        fast_factor: int = 2,
+        fast_sharpen: float = 0.6,
+        rife_weights_dir: str | Path | None = None,
+        fast_spatial: bool = False,
+        fast_spatial_scale: int = 2,
+        fast_spatial_upsample_mode: str = DEFAULT_PIXEL_UPSAMPLE_MODE,
+        fast_spatial_sharpen: float = DEFAULT_FAST_SPATIAL_SHARPEN,
+        vsa: bool = False,
+        vsa_sparsity: float = 0.9,
+        vsa_tile_size: int = 64,
+        vsa_prefix_mode: str = "exempt",
+        vsa_dense_first_n_steps: int = 0,
+        vsa_dense_layers: tuple[int, ...] = (),
+        vsa_impl: str = "auto",
+        inter_step_cooldown_s: float = 0.0,
     ) -> GenerationResult:
         timings: dict[str, float] = {}
         peaks: dict[str, float] = {}
 
         if fast_sharpen < 0:
             raise ValueError(f"fast_sharpen must be non-negative, got {fast_sharpen}.")
-        _validate_checkpoint_step_ladder(self.dit_checkpoint, num_steps)
+        if inter_step_cooldown_s < 0:
+            raise ValueError(f"inter_step_cooldown_s must be non-negative, got {inter_step_cooldown_s}.")
+        _require_positive_vae_tiles(vae_tile_height, vae_tile_width)
+        _validate_checkpoint_step_ladder(self.dit_checkpoint, num_steps, model_root=self.model_root)
         vsa_config = MiniMaxH3VSAConfig(
             enabled=vsa,
             sparsity=vsa_sparsity,
@@ -837,6 +871,7 @@ class MiniMaxH3MLXPipeline:
             seed=seed,
             num_steps=num_steps,
             vsa_config=vsa_config,
+            inter_step_cooldown_s=inter_step_cooldown_s,
         )
         timings["denoise_s"] = time.perf_counter() - started
         timings["dit_forward_s"] = float(getattr(self, "last_dit_forward_s", 0.0))
@@ -852,6 +887,8 @@ class MiniMaxH3MLXPipeline:
             width=video_geometry["width"],
             num_frames=video_geometry["num_frames"],
             tiled=tiled_video_decode,
+            vae_tile_height=vae_tile_height,
+            vae_tile_width=vae_tile_width,
         )
         if spatial_plan is not None:
             frames = _center_crop_frames(frames, spatial_plan.stage1_height, spatial_plan.stage1_width)

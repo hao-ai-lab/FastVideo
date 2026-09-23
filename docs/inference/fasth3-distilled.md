@@ -73,3 +73,13 @@ unset: H3 has separate video and audio shifts, not one shared shift.
 This documents execution support for the published checkpoint. It is not a
 quality claim: compare video/audio output against base MiniMax-H3 on your own
 prompts before adopting it.
+
+## Apple Silicon
+
+`examples/inference/basic/mlx_fasth3.py` stays on the four-step preview and its
+uniform AdaLN cache. `mlx_fasth3_8step.py` is the eight-forward MLX recipe. It
+reads the same `fastvideo_inference.json` rungs and shifts, and it expects an
+MLX DiT whose AdaLN cache was converted from that contract. Reuse the preview
+snapshot's VAE, audio VAE, text encoder, and tokenizer; only the DiT and the
+sidecar change. Rank-reduced AdaLN checkpoints are unchanged and are not
+produced by the MLX converter.
