@@ -340,6 +340,33 @@ Sub-steps and gates:
       about **131 GB/GPU** at full resolution. That is the cheaper 480x832
       canvas the H3 plan wanted for the first gate and the source of the
       standalone 480x832 numbers.
+  - 2026-09-23: **4D blocker is the in-process H3 validation path, not the
+    TDM loop.** Three gate attempts with the overlay model dir:
+    - attempt A (as shipped): validation wrote one video then `RuntimeError:
+      CUDA driver error: invalid argument` from a torch.compile/inductor
+      Triton kernel via the LoRA linear during the validation rollout.
+    - attempt B (`TORCHDYNAMO_DISABLE=1`, writable `TRITON_CACHE_DIR`): the
+      compile error disappeared but the *training* backward then failed with
+      `RuntimeError: opt_ready_stream && opt_parent_stream INTERNAL ASSERT
+      FAILED` (autograd engine). Validation again wrote one video first.
+    - attempt C (`offload_training_state: false` as well): identical autograd
+      stream assert, so returning the training state to the device is not the
+      trigger. Running the H3 pipeline between training steps leaves the
+      autograd/CUDA stream state inconsistent for the next backward. The
+      3-step smoke with validation disabled passes, so training alone is fine.
+  - Recommended next step for 4D: run the gate with in-process validation
+    **off**, then sample from checkpoints in a separate process (a
+    resume-based sampler or a DCP-load + pipeline script), or fix the stream
+    handling in the validation path. The cheaper 480x832 geometry is still
+    available as a second lever: the drifting work validates H3 at 480x832
+    and the config's `num_height`/`num_width` plus a matching T2VA asset
+    would cut the video tokens about 2.6x. Note
+    `fastvideo/pipelines/preprocess/preprocess_minimax_h3_overfit.py`
+    hardcodes 768x1344 and needs `data/crush-smol` source media, so building
+    the smaller asset is a small script change plus a preprocessing run.
+  - `offload_training_state` is left `false` in the config with the reason
+    recorded inline; revert it if the validation stream issue is fixed
+    another way.
   - Then 4E VSA wiring for H3 training and a rerun of the gate.
 
 - 2026-09-22: Branch renamed to `tdm-port` and pushed to the internal
