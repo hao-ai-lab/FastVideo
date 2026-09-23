@@ -233,8 +233,42 @@ Sub-steps and gates:
     into `tdm-port`. The one behavior-neutral change that mattered was the
     label-space candidate order; it must stay descending to match the
     schedule-sigma sampling it replaced.
-  - Next: 4C H3 TDM config + data (`480x832x124` first gate), 4D one-node
-    /4-GPU H3 run with the reference-free report, 4E VSA wiring.
+  - 4C (H3 config + data + dry-run) is **done** at `adea8a4b8`:
+    `examples/train/configs/distribution_matching/overfit_minimax_h3_t2va_tdm.yaml`
+    (rank-16 LoRA student and critic over a frozen 33.12B base, frozen
+    teacher, `real_score_guidance_scale: 1.0` with deliberately **no**
+    `method.cfg_uncond`, warmup 50, 8->4 ladder, critic 1e-4 / generator
+    2e-5), `tdm_h3_overfit_validation.json`, and
+    `tests/local_tests/tdm/test_tdm_h3_config_smoke.py`. The H3 plugin now
+    overrides `num_train_timesteps` to the 1000-label trajectory grid
+    because the released scheduler exposes no training horizon and
+    `DMD2Method._parse_score_timestep_bounds` needs it. A four-rank
+    `--dry-run` completes `rc=0`; the tdm + validation-callback suites are
+    **118 passed**.
+  - H3 asset facts found the hard way (record these):
+    - The `vlm-mal004` snapshot
+      (`models--MiniMaxAI--MiniMax-H3/snapshots/42ed227e...`) is
+      **incomplete**: its `model_index.json` declares `transformer_ref` but
+      the subfolder is absent, so the modular loader rejects the directory.
+      Use `/workspace/vlm-jileng/models/MiniMax-H3-teacher` instead (a
+      complete dir: 62G transformer, 62G transformer_ref, 63G text encoder,
+      `model_index.json` + `modular_model_index.json`).
+    - The H3 transformer loads at **33.12B** parameters; rank-16 LoRA
+      enables on **208** layers, matching `to_q/to_k/to_v/to_out`.
+    - Training data: `/workspace/vlm-wlsaidhi/fastvideo/data/h3_overfit_t2va_0000007`
+      (single row, `vae_latent [24, 37, 48, 84]`, `audio_latent [2, 32, 207]`,
+      768x1344x124). Its caption is a long H3 multimodal description while
+      the validation prompt is the standalone short prompt, so the gate
+      checks that the joint path trains and stays coherent, not
+      prompt-fidelity parity.
+  - Next (4D): run the gate on the held four-GPU pod (200 steps,
+    validation every 25) and judge with the reference-free report. Memory is
+    the open risk: dense TORCH_SDPA attention over ~37k video rows at
+    768x1344 with 4-GPU FSDP + LoRA, versus the standalone's single-GPU
+    480x832 run. If it OOMs, preprocess a 480x832 T2VA asset with the H3
+    overfit preprocessor before rerunning. Audio needs its own reference-free
+    check (the current report covers video frames only).
+  - Then 4E VSA wiring for H3 training and a rerun of the gate.
 
 - 2026-09-22: Branch renamed to `tdm-port` and pushed to the internal
   origin; stale `fork/issue-775-tdm` ref removed. Phase 0 plan recorded
