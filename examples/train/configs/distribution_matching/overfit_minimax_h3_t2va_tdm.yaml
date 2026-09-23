@@ -84,7 +84,7 @@ training:
 
   data:
     data_path:
-      /workspace/vlm-wlsaidhi/fastvideo/data/h3_overfit_t2va_0000007: 1
+      /workspace/issue-775/h3_overfit_t2va_x4: 1
     preprocessed_data_type: t2va
     dataloader_num_workers: 0
     train_batch_size: 1
