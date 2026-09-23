@@ -105,10 +105,11 @@ class MiniMaxH3Model(ModelBase):
             lora=lora,
             attention_backend=attention_backend,
         )
-        # PyTorch scaled dot product attention (SDPA) provides dense attention
-        # without adding another attention-kernel dependency to H3 training.
-        if self.attention_backend != AttentionBackendEnum.TORCH_SDPA:
-            raise ValueError("MiniMaxH3Model requires the TORCH_SDPA attention backend")
+        # Dense PyTorch SDPA is the default. The H3 video-sparse backend is the
+        # validated training route (tile-64 Triton forward and backward), and
+        # the TDM method drives it per role through ``attn_kind``.
+        if self.attention_backend not in (AttentionBackendEnum.TORCH_SDPA, AttentionBackendEnum.VIDEO_SPARSE_ATTN_H3):
+            raise ValueError("MiniMaxH3Model requires the TORCH_SDPA or VIDEO_SPARSE_ATTN_H3 attention backend")
         if training_config.pipeline_config is None:
             raise ValueError("MiniMaxH3Model requires a resolved MiniMax H3 pipeline config")
         # Packed row indices describe one text-video-audio document without a
@@ -332,7 +333,7 @@ class MiniMaxH3Model(ModelBase):
         training_batch.audio_timesteps = 1.0 - audio_noise_amount
         training_batch.minimax_h3_layout = layout
         training_batch.attn_metadata = None
-        training_batch.attn_metadata_vsa = None
+        training_batch.attn_metadata_vsa = self._build_tdm_vsa_metadata(layout)
         return training_batch
 
     def add_noise(
@@ -346,6 +347,31 @@ class MiniMaxH3Model(ModelBase):
         while clean_time.ndim < clean_latents.ndim:
             clean_time = clean_time.unsqueeze(-1)
         return clean_time * clean_latents + (1.0 - clean_time) * noise
+
+    def _build_tdm_vsa_metadata(self, layout: MiniMaxH3PackedLayout) -> Any:
+        """Build the H3 video-sparse metadata for the TDM student.
+
+        Returns ``None`` for the dense backend, in which case ``attn_kind``
+        selects ``batch.attn_metadata`` (also ``None``) and the transformer
+        falls back to dense attention. Tile 64 is the validated Triton
+        forward/backward geometry for H3 training.
+        """
+        if self.attention_backend_name != AttentionBackendEnum.VIDEO_SPARSE_ATTN_H3.name:
+            return None
+        from fastvideo.attention.backends.video_sparse_attn_h3 import MiniMaxH3VSAMetadataBuilder
+        from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_denoising import _h3_vsa_prefix_segments
+
+        patch_size = self.transformer.patch_size
+        return MiniMaxH3VSAMetadataBuilder().build(
+            current_timestep=0,
+            raw_latent_shape=(layout.num_video_latent_frames, layout.latent_height, layout.latent_width),
+            patch_size=patch_size,
+            VSA_sparsity=float(self.training_config.vsa_sparsity),
+            prefix_segments=_h3_vsa_prefix_segments(layout, patch_size),
+            device=self.device,
+            exempt=True,
+            tile_size=64,
+        )
 
     def predict_noise(
         self,
@@ -361,8 +387,6 @@ class MiniMaxH3Model(ModelBase):
         del timestep
         if not conditional or cfg_uncond is not None:
             raise ValueError("MiniMaxH3Model predicts one conditional T2VA sample")
-        if attn_kind != "dense":
-            raise ValueError("MiniMaxH3Model supports dense attention for training")
         layout = batch.minimax_h3_layout
         if not isinstance(layout, MiniMaxH3PackedLayout):
             raise RuntimeError("prepare_batch() must set TrainingBatch.minimax_h3_layout")
@@ -391,9 +415,10 @@ class MiniMaxH3Model(ModelBase):
         unique_timesteps = unique_timesteps.to(device)
         timestep_indices = timestep_indices.to(device)
 
+        attn_metadata = batch.attn_metadata_vsa if attn_kind == "vsa" else batch.attn_metadata
         with torch.autocast(device.type, dtype=dtype), set_forward_context(
                 current_timestep=unique_timesteps,
-                attn_metadata=None,
+                attn_metadata=attn_metadata,
         ):
             video_velocity, audio_velocity = self.transformer(
                 hidden_states=video_rows[None],
@@ -498,8 +523,6 @@ class MiniMaxH3Model(ModelBase):
         """Run one packed transformer forward and convert both modalities to x0."""
         if not conditional or cfg_uncond is not None:
             raise ValueError("MiniMaxH3Model predicts one conditional T2VA sample")
-        # Dense attention until the VSA training path is wired for H3.
-        del attn_kind
         video_sigma = sigmas["video"].to(dtype=torch.float32)
         audio_sigma = sigmas["audio"].to(dtype=torch.float32)
         batch.noisy_model_input = noisy["video"]
@@ -512,7 +535,7 @@ class MiniMaxH3Model(ModelBase):
             batch,
             conditional=True,
             cfg_uncond=None,
-            attn_kind="dense",
+            attn_kind=attn_kind,
         )
         # H3's transformer emits a data-ward velocity, so
         # ``x0 = x_t - sigma * pred_noise`` with the negated prediction

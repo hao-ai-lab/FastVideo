@@ -378,7 +378,39 @@ Sub-steps and gates:
     `preprocess_minimax_h3_overfit.py` hardcodes 768x1344 with `crush-smol`
     source media, so a smaller asset is a small script change plus a
     preprocessing run.
-  - Then 4E VSA wiring for H3 training and a rerun of the gate.
+  - 2026-09-23: **4E VSA wiring implemented; smoke blocked on a Triton dtype
+    assert.** The H3 plugin now accepts `AttentionBackendEnum.VIDEO_SPARSE_ATTN_H3`
+    in addition to `TORCH_SDPA`, builds `MiniMaxH3VSAMetadataBuilder` metadata
+    (tile 64, the validated Triton fwd/bwd geometry) in `prepare_batch` via the
+    same `_h3_vsa_prefix_segments` helper the inference stage uses, and
+    `predict_noise` now selects `batch.attn_metadata_vsa` when `attn_kind ==
+    "vsa"` instead of forcing dense. `tdm_predict_x0` forwards `attn_kind`, so
+    the existing TDM call sites already give the standalone's validated
+    `apply_to: student` split (student sparse, critic and teacher dense). The
+    dense path is unchanged: the builder returns `None` unless the backend is
+    VSA-H3, and `tdm-port`'s suite is **71 passed**.
+    - Smoke command: the H3 gate config plus
+      `--models.student.attention_backend VIDEO_SPARSE_ATTN_H3 --vsa.sparsity 0.5
+      --training.loop.max_train_steps 2`. It fails during the first forward
+      inside a `fastvideo_kernel` Triton kernel with
+      `triton.compiler.errors.CompilationError ... AssertionError: Both
+      operands must be same dtype. Got bf16 and fp32`. This is the H3
+      fp32/bf16 VSA-operand hazard the standalone port also had to fix.
+    - Next things to try, in order: (1) match the inference stage's forward
+      context exactly, which also passes `forward_batch=batch` into
+      `set_forward_context` (the H3 training call passes only
+      `current_timestep` and `attn_metadata`), in case the VSA impl reads the
+      sparsity/dtype from the batch; (2) trace which operand stays fp32 (the
+      pooled tile scores, the compression gate, or a QK norm) and cast it to
+      bf16 at the boundary, as the standalone VSA port did for the fp32 QK
+      norms; (3) confirm the tile-64 Triton route is selected rather than a
+      256-tile CuTe fallback with different dtype rules.
+    - Note the standalone's validated VSA is its own port
+      (`tdm_standalone/tdm/vsa.py`), not the FastVideo
+      `video_sparse_attn_h3` backend, so the modular route is new even though
+      the recipe (tile 64, tau 0.5/0.9, `apply_to` student/all) transfers.
+  - Then: finish the 4E dtype fix, rerun the VSA smoke, then the full VSA gate
+    (about 5.9 h at 768x1344, or less at the drifting-validated 480x832).
 
 - 2026-09-22: Branch renamed to `tdm-port` and pushed to the internal
   origin; stale `fork/issue-775-tdm` ref removed. Phase 0 plan recorded
