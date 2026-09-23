@@ -139,10 +139,32 @@ def test_config_enables_prompt_safety_when_requested(monkeypatch):
 
 def test_config_uses_five_minute_session_timeout(monkeypatch):
     _set_required_prompt_keys(monkeypatch)
+    monkeypatch.delenv("DREAMVERSE_MODEL_ID", raising=False)
+    monkeypatch.delenv("FASTVIDEO_SESSION_TIMEOUT_SECONDS", raising=False)
 
     module = _load_config_module()
 
     assert module.SESSION_TIMEOUT_SECONDS == 300
+
+
+def test_config_uses_thirty_minute_cosmos25_session_timeout(monkeypatch):
+    _set_required_prompt_keys(monkeypatch)
+    monkeypatch.setenv("DREAMVERSE_MODEL_ID", "cosmos25-dfd")
+    monkeypatch.delenv("FASTVIDEO_SESSION_TIMEOUT_SECONDS", raising=False)
+
+    module = _load_config_module()
+
+    assert module.SESSION_TIMEOUT_SECONDS == 1800
+
+
+def test_config_allows_session_timeout_override(monkeypatch):
+    _set_required_prompt_keys(monkeypatch)
+    monkeypatch.setenv("DREAMVERSE_MODEL_ID", "cosmos25-dfd")
+    monkeypatch.setenv("FASTVIDEO_SESSION_TIMEOUT_SECONDS", "900")
+
+    module = _load_config_module()
+
+    assert module.SESSION_TIMEOUT_SECONDS == 900
 
 
 def test_config_rejects_invalid_prompt_provider(monkeypatch):
@@ -186,3 +208,44 @@ def test_config_uses_fasth3_sequence_parallel_default(monkeypatch):
     assert module.ACTIVE_MODEL_ID == "fast-h3"
     assert module.MODEL_CONFIG["generation_backend"] == "minimax_h3"
     assert module.DREAMVERSE_SP_SIZE == 4
+
+
+def test_config_registers_cosmos25_dfd_profile(monkeypatch):
+    _set_required_prompt_keys(monkeypatch)
+
+    module = _load_config_module()
+
+    assert module.MODEL_REGISTRY["cosmos25-dfd"] == {
+        "name": "Cosmos Predict2.5 DFD",
+        "generation_backend": "cosmos25_dfd",
+        "default_sp_size": 1,
+        "model_path": "FastVideo/Cosmos-Predict2.5-2B-Distilled-TrigFlow",
+        "continuation_model_path": "FastVideo/Cosmos-Predict2.5-2B-DFD",
+        "attention_backend": "TORCH_SDPA",
+        "height": 704,
+        "width": 1280,
+        "bootstrap_num_frames": 77,
+        "continuation_num_frames": 81,
+        "fps": 24,
+        "num_inference_steps": 4,
+        "seed": 42,
+        "session_timeout_seconds": 1800,
+    }
+
+
+def test_config_selects_cosmos25_package_roles(monkeypatch, tmp_path):
+    _set_required_prompt_keys(monkeypatch)
+    bootstrap_path = tmp_path / "cosmos25-t2w"
+    continuation_path = tmp_path / "cosmos25-dfd"
+    monkeypatch.setenv("DREAMVERSE_MODEL_ID", "cosmos25-dfd")
+    monkeypatch.setenv("DREAMVERSE_MODEL_PATH", str(bootstrap_path))
+    monkeypatch.setenv("DREAMVERSE_COSMOS25_DFD_MODEL_PATH", str(continuation_path))
+    monkeypatch.delenv("DREAMVERSE_SP_SIZE", raising=False)
+
+    module = _load_config_module()
+
+    assert module.ACTIVE_MODEL_ID == "cosmos25-dfd"
+    assert module.MODEL_CONFIG["generation_backend"] == "cosmos25_dfd"
+    assert module.MODEL_CONFIG["model_path"] == str(bootstrap_path)
+    assert module.MODEL_CONFIG["continuation_model_path"] == str(continuation_path)
+    assert module.DREAMVERSE_SP_SIZE == 1

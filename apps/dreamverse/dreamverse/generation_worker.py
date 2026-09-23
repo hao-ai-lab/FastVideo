@@ -16,6 +16,10 @@ def _create_generation_backend(backend_name: str, gpu_id: int) -> GenerationBack
         from dreamverse.minimax_h3_generation import MiniMaxH3GenerationBackend
 
         return MiniMaxH3GenerationBackend(gpu_id)
+    if backend_name == "cosmos25_dfd":
+        from dreamverse.cosmos25_dfd_generation import Cosmos25DFDGenerationBackend
+
+        return Cosmos25DFDGenerationBackend(gpu_id)
     raise ValueError(f"Unsupported DreamVerse generation backend: {backend_name!r}")
 
 
