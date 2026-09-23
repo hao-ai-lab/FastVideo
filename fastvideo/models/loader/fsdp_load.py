@@ -74,11 +74,21 @@ def _maybe_quantize_model(model: nn.Module, *, defer_weight_conversion_until_lor
         MXFP8QuantizeMethod,
         convert_model_to_mxfp8,
     )
+    from fastvideo.layers.quantization.minimax_h3_int8 import (
+        MiniMaxH3SerializedInt8LinearMethod,
+        finalize_serialized_int8_model,
+    )
 
     qat_train_attached = 0
     qat_train_skipped = 0
     for mod in model.modules():
         qm = getattr(mod, "quant_method", None)
+        if isinstance(qm, MiniMaxH3SerializedInt8LinearMethod):
+            # Serialized int8 weights arrive quantized; there is nothing to convert,
+            # only the per-layer content check the loader's name check cannot do.
+            validated = finalize_serialized_int8_model(model)
+            logger.info("Validated %d serialized int8 transformer linears", validated)
+            return
         if isinstance(qm, NVFP4QuantizeMethod):
             if defer_weight_conversion_until_lora_merge:
                 logger.info("Deferring NVFP4 weight conversion until the inference LoRA merge completes")
@@ -662,6 +672,15 @@ def load_model_from_full_model_state_dict(
         dtype_selector = getattr(model, "_get_parameter_dtype", None)
         if callable(dtype_selector):
             target_dtype = dtype_selector(target_param_name, param_dtype)
+        if meta_sharded_param.dtype == torch.int8:
+            # A serialized int8 linear registers its weight as int8. The cast below
+            # would turn a bf16 tensor into int8 values silently, which is exactly
+            # what happens when a quantization_config is pointed at unquantized
+            # shards, so refuse anything but stored int8 and keep that dtype.
+            if full_tensor.dtype != torch.int8:
+                raise ValueError(f"Parameter {target_param_name} is a serialized int8 weight but the checkpoint "
+                                 f"stores {full_tensor.dtype}; the shards and quantization_config disagree")
+            target_dtype = torch.int8
         if dense_lora_patch is not None:
             # Returns float32 when a delta was added, so the cast below is what lands
             # the parameter in its storage dtype.
@@ -697,7 +716,10 @@ def load_model_from_full_model_state_dict(
         if target_param_name in named_buffers:
             sharded_sd[target_param_name] = sharded_tensor
         else:
-            sharded_sd[target_param_name] = nn.Parameter(sharded_tensor)
+            # Integer tensors cannot carry gradients; serialized int8 weights
+            # are inference-only and load with requires_grad off.
+            sharded_sd[target_param_name] = nn.Parameter(sharded_tensor,
+                                                         requires_grad=sharded_tensor.is_floating_point())
 
     model.reverse_param_names_mapping = reverse_param_names_mapping
     unused_keys = set(meta_sd.keys()) - set(sharded_sd.keys())
@@ -761,7 +783,7 @@ def load_model_from_full_model_state_dict(
             )
             if cpu_offload:
                 sharded_tensor = sharded_tensor.cpu()
-        sharded_sd[new_param_name] = nn.Parameter(sharded_tensor)
+        sharded_sd[new_param_name] = nn.Parameter(sharded_tensor, requires_grad=sharded_tensor.is_floating_point())
 
     if dense_lora_patch is not None:
         dense_lora_patch.report_unapplied()
