@@ -426,6 +426,34 @@ Sub-steps and gates:
     `10.0.136.252`), then re-run the VSA smoke
     (`--models.student.attention_backend VIDEO_SPARSE_ATTN_H3 --vsa.sparsity 0.5
     --training.loop.max_train_steps 2`) and work the dtype fix below.
+  - 2026-09-23: **capacity sweep for the 4E smoke (all attempts failed).**
+    Method and result, so this does not have to be redone:
+    - `kubectl get node -o jsonpath='{.status.images[*].names}'` gives cached
+      images per node. Fourteen GB200 nodes cache the exact
+      `fastvideo-dev:py3.12-cuda13.0.0-latest` tag: `10.0.128.116`,
+      `10.0.128.163`, `10.0.129.187`, `10.0.129.200`, `10.0.129.27`,
+      `10.0.129.37`, `10.0.130.11`, `10.0.132.171`, `10.0.133.7`,
+      `10.0.134.247`, `10.0.135.174`, `10.0.135.41`, `10.0.140.245`,
+      `10.0.142.67`. Three more cache `py3.12-cuda13.0.0-sm100-latest`:
+      `10.0.129.27`, `10.0.131.216`, `10.0.132.126`.
+    - Pinning a 4-GPU pod to each of those sixteen nodes returned
+      `UnexpectedAdmissionError ... Requested: 4, Available: 0` on every one,
+      twice over. Re-probing all sixteen for a **single** GPU also found zero
+      availability, so there is currently no free GPU on any node that has the
+      image at all.
+    - The only node with four free GPUs is `10.0.136.252` (healthy, no
+      pressure, ~1 TB ephemeral, 593 GB of other cached images, but **no**
+      FastVideo image). Its `Pulling` event has run 44+ minutes for one
+      attempt and roughly 2.5 h cumulative across attempts with no
+      `ErrImagePull`/`ImagePullBackOff`.
+    - The main pod is left retrying on `10.0.136.252`; if that pull ever
+      completes the four-GPU pod comes up on its own.
+  - What would unblock it, in order of preference: (1) free one of the
+    fourteen cached nodes (or tell me which job may be stopped); (2) pre-pull
+    `fastvideo-dev:py3.12-cuda13.0.0-latest` onto `10.0.136.252` (or any free
+    node) from a shell with registry access; (3) wait out the pull. A
+    one-GPU node would be enough to find the 4E dtype bug with a small
+    kernel-level test, but there is no such node free either.
   - Then: finish the 4E dtype fix, rerun the VSA smoke, then the full VSA gate
     (about 5.9 h at 768x1344, or less at the drifting-validated 480x832).
 
