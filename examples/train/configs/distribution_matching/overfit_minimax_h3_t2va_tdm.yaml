@@ -22,7 +22,7 @@
 models:
   student:
     _target_: fastvideo.train.models.minimax_h3.MiniMaxH3Model
-    init_from: /workspace/vlm-jileng/models/MiniMax-H3-teacher
+    init_from: /workspace/vlm-mal004/.cache/huggingface/hub/models--MiniMaxAI--MiniMax-H3/snapshots/h3-tdm-overlay
     trainable: true
     attention_backend: TORCH_SDPA
     enable_gradient_checkpointing_type: full
@@ -33,13 +33,13 @@ models:
       target_modules: [to_q, to_k, to_v, to_out]
   teacher:
     _target_: fastvideo.train.models.minimax_h3.MiniMaxH3Model
-    init_from: /workspace/vlm-jileng/models/MiniMax-H3-teacher
+    init_from: /workspace/vlm-mal004/.cache/huggingface/hub/models--MiniMaxAI--MiniMax-H3/snapshots/h3-tdm-overlay
     trainable: false
     disable_custom_init_weights: true
     attention_backend: TORCH_SDPA
   critic:
     _target_: fastvideo.train.models.minimax_h3.MiniMaxH3Model
-    init_from: /workspace/vlm-jileng/models/MiniMax-H3-teacher
+    init_from: /workspace/vlm-mal004/.cache/huggingface/hub/models--MiniMaxAI--MiniMax-H3/snapshots/h3-tdm-overlay
     trainable: true
     disable_custom_init_weights: true
     attention_backend: TORCH_SDPA

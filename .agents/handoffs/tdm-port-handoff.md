@@ -286,6 +286,36 @@ Sub-steps and gates:
     At ~96 s/step the train phase is ~5.3 h plus nine validations, so expect
     completion around 08:30Z. Judge it with `video_report.json` and add an
     audio-side check.
+  - 2026-09-23: **4D is blocked on H3 validation, not on training.** Two
+    model-asset and one runtime problem surfaced, in order:
+    1. The `vlm-jileng/models/MiniMax-H3-teacher` dir is metadata-only for
+       several components: its `text_encoder` has
+       `model.safetensors.index.json` but no shards, and its `vae` has no
+       safetensors. Training (which uses precomputed embeddings) never
+       noticed; validation loads the pipeline and failed with
+       `Cannot find any model weights` / `No safetensors files`.
+    2. Fix: a **sibling overlay inside the mal004 cache** preserves the
+       snapshot's relative blob symlinks. Built with
+       `cp -rs <mal004 snapshot>/. <mal004 snapshots>/h3-tdm-overlay/`, then
+       `transformer_ref -> /workspace/vlm-k1kong/models/MiniMax-H3/transformer_ref`
+       (that copy has the 14 shards; vlm-jileng's does not). Verified shards:
+       transformer 15, transformer_ref 15, text_encoder 15, vae 4. The config
+       `init_from` now points at
+       `/workspace/vlm-mal004/.cache/huggingface/hub/models--MiniMaxAI--MiniMax-H3/snapshots/h3-tdm-overlay`.
+    3. Remaining blocker: with the overlay the pipeline assembles and writes
+       one validation video, then dies in
+       `RuntimeError: CUDA driver error: invalid argument` from a
+       torch.compile/inductor Triton kernel invoked through the LoRA linear
+       (`fastvideo/layers/lora/linear.py:90` -> inductor -> triton launcher)
+       during the validation rollout. Training alone does not hit it. Next
+       things to try: set a writable `TRITON_CACHE_DIR` (the standalone H3
+       gate did), disable torch.compile for validation, or run the first gate
+       with validation sampled through a path that does not compile the LoRA
+       linear.
+  - Note: the 02:49Z gate attempt failed at 02:51Z on (1) and the 03:16Z
+    attempt failed at 03:21Z on (2); both are recorded above. Do not treat
+    the `h3-tdm-gate` status files as a completed gate until a run reaches
+    `GATE_OK`.
   - Then 4E VSA wiring for H3 training and a rerun of the gate.
 
 - 2026-09-22: Branch renamed to `tdm-port` and pushed to the internal
