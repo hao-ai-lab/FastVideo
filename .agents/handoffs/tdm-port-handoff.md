@@ -210,32 +210,31 @@ Sub-steps and gates:
     joint `tdm_predict_x0`). Commits `f4201de7a` (design),
     `fe37d8cf9` (hooks + LoRA). `test_tdm_h3_joint.py` (4 cases) plus the
     existing suites: **117 passed** on the held pod.
-  - 4B (modality-general `TDMMethod`) is implemented but parked, because
-    migrating the Wan tests is a separate, delicate pass. It lives on the
-    pushed WIP branch `tdm-port-phase4-method-wip` at `ca8c52810`, not on
-    `tdm-port`, so the main branch stays green. Summary of the WIP:
-    per-modality trajectory/context dicts keyed by modality (one key for
-    Wan), one joint forward per rollout step, label-space interval
-    sampling, per-modality sigma grids and model-time conversion, summed
-    warmup/fake-score/generator losses, and guidance-1 short-circuiting for
-    H3 (no unconditional branch).
-  - Remaining 4B work, exactly:
-    1. migrate `tests/local_tests/tdm/test_tdm_method_unit.py`,
-       `test_tdm_upstream_parity.py`, `test_tdm_warmup_and_ladder.py` to
-       the dict-keyed API. Sites that use `trajectory.sigmas` /
-       `.noisy_latents` / `.clean_latents` / `.timesteps` need
-       `trajectory["video"]`; `context = method._sample_tdm_context(...)`
-       sites need `["video"]`; monkeypatched `_sample_tdm_context` lambdas
-       must return `{"video": context}`; the warmup test's `fixed_source`
-       must return `({"video": noisy}, {"video": sigma}, indices)` because
-       `_sample_warmup_source` now returns a 3-tuple. The interval test
-       (`test_..._boundary...`, around old line 556) builds a
-       `SimpleNamespace` trajectory without `timesteps` and must be
-       re-expressed with integer labels.
-    2. run the full Wan tdm suite, then the Phase 3 fixed-recipe run on the
-       pod to confirm the one-modality numbers are unchanged.
-  - Next after 4B: 4C H3 TDM config + data (`480x832x124` first gate), 4D
-    one-node/4-GPU H3 run with the reference-free report, 4E VSA wiring.
+  - 4B (modality-general `TDMMethod`) is **done** on `tdm-port` at
+    `c20c795dc`: per-modality trajectory/context dicts keyed by modality
+    (one key for Wan), one joint forward per rollout step, label-space
+    interval sampling, per-modality sigma grids and model-time conversion,
+    summed warmup/fake-score/generator losses, and guidance-1
+    short-circuiting for H3 (no unconditional branch). The Wan tests were
+    migrated to the keyed API; `tests/local_tests/tdm/` is **70 passed** and
+    the tdm + validation-callback suites are **117 passed**.
+  - Parity lesson (important): a bitwise GPU metric comparison is **not** a
+    valid parity gate on this stack. Two identical 5-step runs of the same
+    code differed by `8.4e-2` on `grad_norm/student` at step 1 and grew
+    chaotically, so the earlier "1.7e0"/"5.9e0" deltas against the archived
+    Phase 3 metrics were nondeterminism, not a regression. The deterministic
+    gate is the CPU parity suite (`test_tdm_upstream_parity.py`'s exact
+    loss/gradient transcriptions plus the unit tests), which passes. The
+    behavioral confirmation `wan-tdm-4b-confirm` (fixed recipe, treatment +
+    control, validation every 25) reproduced the Phase 3 regime: treatment
+    sharpness `15.0 -> 73 -> 114 -> 147 -> 322` over steps 0..200 while the
+    control stays in the collapsing `~5-10` band.
+  - Also removed: the parked `tdm-port-phase4-method-wip` branch, now folded
+    into `tdm-port`. The one behavior-neutral change that mattered was the
+    label-space candidate order; it must stay descending to match the
+    schedule-sigma sampling it replaced.
+  - Next: 4C H3 TDM config + data (`480x832x124` first gate), 4D one-node
+    /4-GPU H3 run with the reference-free report, 4E VSA wiring.
 
 - 2026-09-22: Branch renamed to `tdm-port` and pushed to the internal
   origin; stale `fork/issue-775-tdm` ref removed. Phase 0 plan recorded
