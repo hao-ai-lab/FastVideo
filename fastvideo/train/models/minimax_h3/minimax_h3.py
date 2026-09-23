@@ -1198,8 +1198,6 @@ class MiniMaxH3Model(ModelBase):
         """Run one packed transformer forward and convert both modalities to x0."""
         if not conditional or cfg_uncond is not None:
             raise ValueError("MiniMaxH3Model predicts one conditional T2VA sample")
-        # Dense attention until the VSA training path is wired for H3.
-        del attn_kind
         video_sigma = sigmas["video"].to(dtype=torch.float32)
         audio_sigma = sigmas["audio"].to(dtype=torch.float32)
         batch.noisy_model_input = noisy["video"]
@@ -1212,7 +1210,7 @@ class MiniMaxH3Model(ModelBase):
             batch,
             conditional=True,
             cfg_uncond=None,
-            attn_kind="dense",
+            attn_kind=attn_kind,
         )
         # H3's transformer emits a data-ward velocity, so
         # ``x0 = x_t - sigma * pred_noise`` with the negated prediction
