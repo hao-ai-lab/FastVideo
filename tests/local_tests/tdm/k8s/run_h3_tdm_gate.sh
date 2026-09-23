@@ -31,7 +31,13 @@ export HF_HUB_CACHE="$HF_HOME/hub"
 export HF_HUB_OFFLINE=1
 export WANDB_MODE=disabled
 export NCCL_DEBUG=WARN
-mkdir -p "$HOME"
+# The H3 validation rollout reached a torch.compile/inductor Triton kernel
+# through the LoRA linear and died with `CUDA driver error: invalid argument`
+# (training alone does not hit it). Disable dynamo and give Triton a writable
+# cache so validation uses the eager path.
+export TORCHDYNAMO_DISABLE=1
+export TRITON_CACHE_DIR=/tmp/triton-cache
+mkdir -p "$HOME" "$TRITON_CACHE_DIR"
 
 printf 'START %s %s\n' "$run_name" "$(date -u +%FT%TZ)"
 nvidia-smi --query-gpu=index,name,memory.total --format=csv

@@ -135,7 +135,11 @@ callbacks:
     num_frames: 124
     num_videos_per_prompt: 1
     use_validation_media_conditioning: false
-    offload_training_state: true
+    # Validation runs in-process between training steps. Offloading the
+    # training state to CPU and back left the autograd stream state
+    # inconsistent (backward raised `opt_ready_stream && opt_parent_stream`),
+    # so the gate keeps the training state resident.
+    offload_training_state: false
     text_encoder_cpu_offload: true
     vae_cpu_offload: true
 
