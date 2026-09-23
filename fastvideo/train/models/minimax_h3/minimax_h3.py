@@ -462,6 +462,11 @@ class MiniMaxH3Model(ModelBase):
         del modality
         return torch.ones((), dtype=torch.float32)
 
+    def tdm_max_trajectory_label(self, modality: str) -> int:
+        """The H3 grid runs over integer labels ``0..T``."""
+        del modality
+        return _H3_TRAJECTORY_TIMESTEPS
+
     def tdm_sigma_to_model_timestep(
         self,
         sigma: torch.Tensor,

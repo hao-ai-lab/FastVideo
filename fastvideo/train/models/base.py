@@ -279,6 +279,11 @@ class ModelBase(ABC):
             raise ValueError(f"{type(self).__name__} has no scheduler sigmas for TDM")
         return scheduler_sigmas.to(dtype=torch.float32).max()
 
+    def tdm_max_trajectory_label(self, modality: str) -> int:
+        """Largest integer label on one modality's sigma grid."""
+        del modality
+        return int(self.num_train_timesteps)
+
     def tdm_sigma_to_model_timestep(
         self,
         sigma: torch.Tensor,
@@ -311,11 +316,13 @@ class ModelBase(ABC):
         The method works in trajectory-sigma space; each model converts to its
         own timestep convention through ``tdm_sigma_to_model_timestep``.
         """
+        model_timestep = self.tdm_sigma_to_model_timestep(sigmas["video"], "video")
+        batch.timesteps = model_timestep
         return {
             "video":
             self.predict_x0(
                 noisy["video"],
-                self.tdm_sigma_to_model_timestep(sigmas["video"], "video"),
+                model_timestep,
                 batch,
                 conditional=conditional,
                 cfg_uncond=cfg_uncond,
