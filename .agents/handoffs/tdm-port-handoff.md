@@ -409,6 +409,23 @@ Sub-steps and gates:
       (`tdm_standalone/tdm/vsa.py`), not the FastVideo
       `video_sparse_attn_h3` backend, so the modular route is new even though
       the recipe (tile 64, tau 0.5/0.9, `apply_to` student/all) transfers.
+  - 2026-09-23: **blocked on GPU allocation, not on code.** The held
+    `tdm-port-wan-r1` pod was reclaimed between sessions, and the replacement
+    cannot start:
+    - Every previously-used node (`10.0.133.7`, `10.0.140.245`, which have the
+      dev image cached) reports `UnexpectedAdmissionError ... Requested: 4,
+      Available: 0` for `nvidia.com/gpu`.
+    - The scheduler keeps landing on `10.0.136.252`, which has four free GPUs
+      but no cached image; its `ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev`
+      pull has been "Pulling" for over 1.5 h of cumulative attempts with no
+      `ErrImagePull`/`ImagePullBackOff`, so it looks slow rather than broken.
+    - Worktree was also reclaimed by the sandbox reset; it was recreated from
+      the pushed branch (`f94c06961`) and is disposable, so nothing is lost.
+  - To resume 4E: get a four-GPU pod running (free a node that has the image
+    cached, pre-pull the image on a free node, or wait out the pull on
+    `10.0.136.252`), then re-run the VSA smoke
+    (`--models.student.attention_backend VIDEO_SPARSE_ATTN_H3 --vsa.sparsity 0.5
+    --training.loop.max_train_steps 2`) and work the dtype fix below.
   - Then: finish the 4E dtype fix, rerun the VSA smoke, then the full VSA gate
     (about 5.9 h at 768x1344, or less at the drifting-validated 480x832).
 
