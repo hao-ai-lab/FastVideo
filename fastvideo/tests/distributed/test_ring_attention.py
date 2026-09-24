@@ -119,8 +119,10 @@ def _log(rank: int, message: str) -> None:
     print(f"[rank {rank}] {message}", flush=True)
 
 
+@pytest.mark.parametrize("original_seq_len", [None, 253, 1])
 def test_ring_attention_world_size_one_matches_flash_attention(
     monkeypatch: pytest.MonkeyPatch,
+    original_seq_len: int | None,
 ) -> None:
     if not torch.cuda.is_available():
         pytest.skip("This test requires CUDA.")
@@ -158,9 +160,9 @@ def test_ring_attention_world_size_one_matches_flash_attention(
         softmax_scale = HEAD_SIZE**-0.5
 
         reference = flash_attn_func(
-            q,
-            k,
-            v,
+            q[:, :original_seq_len],
+            k[:, :original_seq_len],
+            v[:, :original_seq_len],
             dropout_p=0.0,
             softmax_scale=softmax_scale,
             causal=False,
@@ -174,9 +176,12 @@ def test_ring_attention_world_size_one_matches_flash_attention(
             softmax_scale=softmax_scale,
             causal=False,
             group=dist.group.WORLD,
+            original_seq_len=original_seq_len,
         )
 
-        _assert_attention_close(ring_output, reference)
+        _assert_attention_close(ring_output[:, :original_seq_len], reference)
+        if original_seq_len is not None:
+            assert torch.count_nonzero(ring_output[:, original_seq_len:]) == 0
 
     finally:
         if dist.is_available() and dist.is_initialized():
