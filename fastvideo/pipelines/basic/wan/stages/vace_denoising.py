@@ -27,7 +27,7 @@ class WanVACEDenoisingStage(WanDenoisingStage):
         num_layers = len(self.transformer.vace_layers)
         if scale is None:
             scale_tensor = torch.ones(num_layers, device=device, dtype=target_dtype)
-        elif isinstance(scale, (int, float)):
+        elif isinstance(scale, int | float):
             scale_tensor = torch.full((num_layers, ), float(scale), device=device, dtype=target_dtype)
         elif isinstance(scale, list):
             scale_tensor = torch.tensor([float(value) for value in scale], device=device, dtype=target_dtype)
@@ -58,8 +58,8 @@ class WanVACEDenoisingStage(WanDenoisingStage):
         device = state.control_hidden_states.device
         control = state.control_hidden_states.to(target_dtype)
         return {
-            "control_hidden_states": control,
-            "control_hidden_states_scale": self._format_conditioning_scale(state.control_hidden_states_scale,
-                                                                           target_dtype,
-                                                                           device),
+            "control_hidden_states":
+            control,
+            "control_hidden_states_scale":
+            self._format_conditioning_scale(state.control_hidden_states_scale, target_dtype, device),
         }
