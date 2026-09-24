@@ -1031,6 +1031,11 @@ class TransformerLoader(ComponentLoader):
 
     def load(self, model_path: str, fastvideo_args: FastVideoArgs):
         """Load the transformer based on the model path, and inference args."""
+        scope = _active_component_attention_backend_scope()
+        requested = scope.backend if scope is not None else fastvideo_args.attention_backend
+        if hasattr(fastvideo_args, "_loading_teacher_critic_model"):
+            requested = None
+        fastvideo_args.pipeline_config.validate_runtime_request(fastvideo_args.workload_type.value, requested)
         config = get_diffusers_config(model=model_path)
         hf_config = deepcopy(config)
         cls_name = config.pop("_class_name")
@@ -1114,6 +1119,12 @@ class TransformerLoader(ComponentLoader):
             # so recording here makes the decision readable from the loaded
             # transformer — and records the narrowed one for teacher/critic.
             resolved = record_resolved_attention_backend(dit_config)
+            if (model_cls.__dict__.get("_preserve_auto_attention_backend", False)
+                    and _active_component_attention_backend_scope() is None):
+                # Wan reloads also call TransformerLoader directly. Preserve
+                # the parse-once API request without consulting a changed env.
+                resolved = coerce_attn_backend(fastvideo_args.attention_backend)
+                dit_config._resolved_attention_backend = resolved
             # Every worker records its resolved backend so distributed profile
             # snapshots can prove that all ranks use the requested kernels.
             logger.info("Worker %s transformer attention backend: %s",

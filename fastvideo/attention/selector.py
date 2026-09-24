@@ -150,27 +150,34 @@ def record_resolved_attention_backend(config: object) -> AttentionBackendEnum | 
     scope = _SCOPE.get()
     resolved = scope.backend if scope is not None else None
     config._resolved_attention_backend = resolved  # type: ignore[attr-defined]
+    config._attention_backend_resolved = True  # type: ignore[attr-defined]
     return resolved
 
 
-def component_attention_backend(component: object) -> AttentionBackendEnum | _NoRequest:
-    """Read back the decision :func:`record_resolved_attention_backend` wrote.
+def component_attention_backend(component: object) -> AttentionBackendEnum | _NoRequest | None:
+    """Read back the attention backend recorded for a loaded component.
 
-    Returns ``NO_REQUEST`` unless the component recorded a *concrete* backend,
-    so a caller that passes this through only overrides the ambient fallback
-    when there is a real decision to override it with.
+    Return semantics:
+    - ``NO_REQUEST``: no concrete decision was recorded; callers should keep the
+      ambient fallback (for example ``FASTVIDEO_ATTENTION_BACKEND``).
+    - ``None``: automatic selection was recorded explicitly. Most families map
+      this back to ``NO_REQUEST`` so env overrides keep working.
+    - ``AttentionBackendEnum``: use this backend for the component.
 
-    ``NO_REQUEST`` rather than ``None`` for the no-decision case is deliberate,
-    and cannot be derived from the attribute's presence: ``ModelConfig`` declares
-    ``_resolved_attention_backend`` as a field defaulting to ``None``, so the
-    attribute always exists and a ``getattr`` default can never fire. Worse,
-    ``record_resolved_attention_backend`` writes ``None`` whenever no scope is
-    active, so "resolved to automatic selection" and "never recorded" are the
-    same stored value. Neither state should suppress the environment variable at
-    a call site that previously honoured it, and collapsing both to
-    ``NO_REQUEST`` keeps that behavior identical.
+    Wan dense transformers opt in via ``_preserve_auto_attention_backend``. They
+    preserve a recorded automatic decision and, after construction, expose the
+    self-attention layer's resolved backend so denoising metadata matches the
+    layers actually built.
     """
-    resolved = getattr(getattr(component, "config", None), "_resolved_attention_backend", None)
+    config = getattr(component, "config", None)
+    resolved = getattr(config, "_resolved_attention_backend", None)
+    # Wan threads the component request explicitly through its layers. Other
+    # families retain the historical None -> NO_REQUEST compatibility path.
+    if (getattr(component, "__dict__", {}).get("_preserve_auto_attention_backend", False)
+            and getattr(config, "_attention_backend_resolved", False)):
+        # Once built, use the self-attention layer's actual selection for
+        # metadata too (a request outside the instance support set can fall back).
+        return getattr(component, "_self_attention_backend", resolved)
     return NO_REQUEST if resolved is None else resolved
 
 

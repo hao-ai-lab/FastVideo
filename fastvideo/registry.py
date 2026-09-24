@@ -128,6 +128,7 @@ _MODEL_HF_PATH_TO_NAME: dict[str, str] = {}
 
 # Detectors to identify model families from paths or class names
 _MODEL_NAME_DETECTORS: list[tuple[str, Callable[[str], bool]]] = []
+_MODEL_INDEX_DETECTORS: list[tuple[str, Callable[[dict], bool]]] = []
 
 
 def register_configs(
@@ -139,11 +140,17 @@ def register_configs(
     model_family: str | None = None,
     default_preset: str | None = None,
     pipeline_cls_name: str | None = None,
+    model_index_detectors: list[Callable[[dict], bool]] | None = None,
 ) -> None:
     """Register config classes for a model family.
 
     workload_types declares which UI workload options this config supports.
     Use () for configs not exposed as workload options.
+
+    model_index_detectors runs after the manifest is loaded and before path/name
+    heuristics. Use it when multiple checkpoints share a pipeline class name
+    but differ in ``model_index.json`` fields (for example FastWan FullAttn vs
+    the sparse TI2V alias).
     """
     model_id = str(len(_CONFIG_REGISTRY))
 
@@ -166,6 +173,8 @@ def register_configs(
     if model_detectors:
         for detector in model_detectors:
             _MODEL_NAME_DETECTORS.append((model_id, detector))
+    for index_detector in model_index_detectors or ():
+        _MODEL_INDEX_DETECTORS.append((model_id, index_detector))
 
 
 def get_model_short_name(model_id: str) -> str:
@@ -204,6 +213,10 @@ def _get_config_info(
 
     pipeline_name = config.get("_class_name", "").lower()
 
+    for model_id, index_detector in _MODEL_INDEX_DETECTORS:
+        if index_detector(config):
+            return _CONFIG_REGISTRY[model_id]
+
     matched_model_names: list[str] = []
     for model_id, detector in _MODEL_NAME_DETECTORS:
         if detector(model_path.lower()) or detector(pipeline_name):
@@ -236,6 +249,7 @@ def _register_wan_configs(definitions: tuple[WanModelDefinition, ...]) -> None:
             model_detectors=[definition.matches] if definition.match_any else None,
             model_family="wan",
             default_preset=definition.preset,
+            model_index_detectors=[definition.matches_model_index] if definition.match_model_index else None,
         )
 
 

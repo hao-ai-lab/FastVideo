@@ -68,13 +68,15 @@ class DenoisingStage(PipelineStage):
         self.vae = vae
         self.pipeline = weakref.ref(pipeline) if pipeline else None
         attn_head_size = self.transformer.hidden_size // self.transformer.num_attention_heads
+        supported_backends = (AttentionBackendEnum.VIDEO_SPARSE_ATTN, AttentionBackendEnum.BSA_ATTN,
+                              AttentionBackendEnum.VMOBA_ATTN, AttentionBackendEnum.FLASH_ATTN,
+                              AttentionBackendEnum.TORCH_SDPA, AttentionBackendEnum.SAGE_ATTN_THREE)
+        if vars(self.transformer).get("_preserve_auto_attention_backend", False):
+            supported_backends = self.transformer.supported_attention_backends
         self.attn_backend = get_attn_backend(
             head_size=attn_head_size,
             dtype=torch.float16,  # TODO(will): hack
-            supported_attention_backends=(AttentionBackendEnum.VIDEO_SPARSE_ATTN, AttentionBackendEnum.BSA_ATTN,
-                                          AttentionBackendEnum.VMOBA_ATTN, AttentionBackendEnum.FLASH_ATTN,
-                                          AttentionBackendEnum.TORCH_SDPA,
-                                          AttentionBackendEnum.SAGE_ATTN_THREE),  # hack
+            supported_attention_backends=supported_backends,
             # Build metadata for the backend this transformer actually resolved
             # instead of re-deriving it from the environment. The two agreed
             # only when the request arrived via the env var: a request passed as

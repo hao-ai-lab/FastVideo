@@ -980,6 +980,8 @@ class FastVideoArgs:
 
         self.pipeline_config.check_pipeline_config()
 
+        self.pipeline_config.validate_runtime_request(self.workload_type.value, self.attention_backend)
+
         # Add preprocessing config validation if needed
         if self.mode == ExecutionMode.PREPROCESS:
             if self.preprocess_config is None:

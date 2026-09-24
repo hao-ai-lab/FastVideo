@@ -7,8 +7,11 @@ from typing import Any
 import torch
 import torch.nn as nn
 
-import fastvideo.envs as envs
 from fastvideo.attention import (DistributedAttention, DistributedAttention_VSA, LocalAttention)
+from fastvideo.attention.selector import (
+    NO_REQUEST, _NoRequest, _active_component_attention_backend_scope,
+    component_attention_backend, get_env_variable_attn_backend,
+)
 from fastvideo.models.wan.config import WanVideoConfig
 from fastvideo.distributed.communication_op import (sequence_model_parallel_all_gather_with_unpad,
                                                     sequence_model_parallel_shard)
@@ -146,7 +149,8 @@ class WanSelfAttention(nn.Module):
                  eps=1e-6,
                  parallel_attention=False,
                  quant_config: QuantizationConfig | None = None,
-                 prefix: str = "") -> None:
+                 prefix: str = "",
+                 requested_backend: AttentionBackendEnum | _NoRequest | None = NO_REQUEST) -> None:
         assert dim % num_heads == 0
         super().__init__()
         self.dim = dim
@@ -172,7 +176,8 @@ class WanSelfAttention(nn.Module):
                                    softmax_scale=None,
                                    causal=False,
                                    supported_attention_backends=(AttentionBackendEnum.FLASH_ATTN,
-                                                                 AttentionBackendEnum.TORCH_SDPA))
+                                                                 AttentionBackendEnum.TORCH_SDPA),
+                                   requested_backend=requested_backend)
 
     def forward(self, x: torch.Tensor, context: torch.Tensor, context_lens: int):
         r"""
@@ -235,6 +240,7 @@ class WanI2VCrossAttention(WanSelfAttention):
         | None = None,
         quant_config: QuantizationConfig | None = None,
         prefix: str = "",
+        requested_backend: AttentionBackendEnum | _NoRequest | None = NO_REQUEST,
     ) -> None:
         super().__init__(dim,
                          num_heads,
@@ -243,7 +249,8 @@ class WanI2VCrossAttention(WanSelfAttention):
                          eps,
                          supported_attention_backends,
                          quant_config=quant_config,
-                         prefix=prefix)
+                         prefix=prefix,
+                         requested_backend=requested_backend)
 
         self.add_k_proj = ReplicatedLinear(dim, dim, quant_config=quant_config, prefix=f"{prefix}.add_k_proj")
         self.add_v_proj = ReplicatedLinear(dim, dim, quant_config=quant_config, prefix=f"{prefix}.add_v_proj")
@@ -292,7 +299,14 @@ class WanTransformerBlock(nn.Module):
                  supported_attention_backends: tuple[AttentionBackendEnum, ...]
                  | None = None,
                  quant_config: QuantizationConfig | None = None,
-                 prefix: str = ""):
+                 prefix: str = "",
+                 requested_backend: AttentionBackendEnum | _NoRequest | None = NO_REQUEST):
+        """Build one Wan transformer block.
+
+        ``requested_backend`` threads the component-level attention decision from
+        :func:`component_attention_backend` into every attention layer so dense
+        Wan variants honor API requests without re-reading env vars.
+        """
         super().__init__()
 
         # 1. Self-attention
@@ -306,6 +320,7 @@ class WanTransformerBlock(nn.Module):
                                           head_size=dim // num_heads,
                                           causal=False,
                                           supported_attention_backends=supported_attention_backends,
+                                          requested_backend=requested_backend,
                                           prefix=f"{prefix}.attn1")
         self.hidden_dim = dim
         self.num_attention_heads = num_heads
@@ -336,6 +351,7 @@ class WanTransformerBlock(nn.Module):
                                               qk_norm=qk_norm,
                                               eps=eps,
                                               quant_config=quant_config,
+                                              requested_backend=requested_backend,
                                               prefix=f"{prefix}.attn2")
         else:
             # T2V
@@ -344,6 +360,7 @@ class WanTransformerBlock(nn.Module):
                                               qk_norm=qk_norm,
                                               eps=eps,
                                               quant_config=quant_config,
+                                              requested_backend=requested_backend,
                                               prefix=f"{prefix}.attn2")
         self.cross_attn_residual_norm = ScaleResidualLayerNormScaleShift(dim,
                                                                          norm_type="layer",
@@ -447,7 +464,8 @@ class WanTransformerBlock_VSA(nn.Module):
                  supported_attention_backends: tuple[AttentionBackendEnum, ...]
                  | None = None,
                  quant_config: QuantizationConfig | None = None,
-                 prefix: str = ""):
+                 prefix: str = "",
+                 requested_backend: AttentionBackendEnum | _NoRequest | None = NO_REQUEST):
         super().__init__()
 
         # 1. Self-attention
@@ -465,6 +483,7 @@ class WanTransformerBlock_VSA(nn.Module):
                                               head_size=dim // num_heads,
                                               causal=False,
                                               supported_attention_backends=supported_attention_backends,
+                                              requested_backend=requested_backend,
                                               prefix=f"{prefix}.attn1")
         self.hidden_dim = dim
         self.num_attention_heads = num_heads
@@ -495,6 +514,7 @@ class WanTransformerBlock_VSA(nn.Module):
                                               qk_norm=qk_norm,
                                               eps=eps,
                                               quant_config=quant_config,
+                                              requested_backend=requested_backend,
                                               prefix=f"{prefix}.attn2")
         else:
             # T2V
@@ -503,6 +523,7 @@ class WanTransformerBlock_VSA(nn.Module):
                                               qk_norm=qk_norm,
                                               eps=eps,
                                               quant_config=quant_config,
+                                              requested_backend=requested_backend,
                                               prefix=f"{prefix}.attn2")
         self.cross_attn_residual_norm = ScaleResidualLayerNormScaleShift(dim,
                                                                          norm_type="layer",
@@ -583,6 +604,7 @@ class WanTransformerBlock_VSA(nn.Module):
 
 
 class WanTransformer3DModel(BaseDiT):
+    _preserve_auto_attention_backend = True
     _fsdp_shard_conditions = WanVideoConfig()._fsdp_shard_conditions
     _compile_conditions = WanVideoConfig()._compile_conditions
     _supported_attention_backends = WanVideoConfig()._supported_attention_backends
@@ -592,6 +614,22 @@ class WanTransformer3DModel(BaseDiT):
 
     def __init__(self, config: WanVideoConfig, hf_config: dict[str, Any]) -> None:
         super().__init__(config=config, hf_config=hf_config)
+        # Stamp the constructor's opt-in on the instance: subclasses such as
+        # DreamX that bypass this constructor still use unported layer plumbing.
+        # An instance stamp also survives FSDP's dynamic class wrapping.
+        self._preserve_auto_attention_backend = True
+        requested = component_attention_backend(self)
+        if requested is NO_REQUEST:
+            # Compatibility for direct construction outside a component loader.
+            scope = _active_component_attention_backend_scope()
+            requested = scope.backend if scope is not None else get_env_variable_attn_backend()
+        if (requested is AttentionBackendEnum.VIDEO_SPARSE_ATTN
+                and requested not in config._supported_attention_backends):
+            raise ValueError("Wan FullAttn/dense configuration is incompatible with VIDEO_SPARSE_ATTN; "
+                             "use TORCH_SDPA, FLASH_ATTN, or automatic selection.")
+        config._resolved_attention_backend = requested
+        config._attention_backend_resolved = True
+        self._supported_attention_backends = config._supported_attention_backends
         self.quant_config = config.quant_config
 
         inner_dim = config.num_attention_heads * config.attention_head_dim
@@ -625,8 +663,8 @@ class WanTransformer3DModel(BaseDiT):
         )
 
         # 3. Transformer blocks
-        attn_backend = envs.FASTVIDEO_ATTENTION_BACKEND
-        transformer_block = WanTransformerBlock_VSA if attn_backend == "VIDEO_SPARSE_ATTN" else WanTransformerBlock
+        transformer_block = (WanTransformerBlock_VSA
+                             if requested is AttentionBackendEnum.VIDEO_SPARSE_ATTN else WanTransformerBlock)
         self.blocks = nn.ModuleList([
             transformer_block(inner_dim,
                               config.ffn_dim,
@@ -635,10 +673,13 @@ class WanTransformer3DModel(BaseDiT):
                               config.cross_attn_norm,
                               config.eps,
                               config.added_kv_proj_dim,
-                              self._supported_attention_backends,
+                              config._supported_attention_backends,
+                              requested_backend=requested,
                               quant_config=config.quant_config,
                               prefix=f"{config.prefix}.blocks.{i}") for i in range(config.num_layers)
         ])
+        if self.blocks:
+            self._self_attention_backend = self.blocks[0].attn1.backend
 
         # 4. Output norm & projection
         self.norm_out = LayerNormScaleShift(inner_dim,

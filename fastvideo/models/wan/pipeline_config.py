@@ -12,6 +12,7 @@ from fastvideo.configs.models.encoders import (BaseEncoderOutput, CLIPVisionConf
                                                WAN2_1ControlCLIPVisionConfig)
 from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.models.wan.vae_config import WanVAEArchConfig, WanVAEConfig
+from fastvideo.platforms import AttentionBackendEnum
 
 
 def t5_postprocess_text(outputs: BaseEncoderOutput) -> torch.Tensor:
@@ -276,6 +277,39 @@ class LucyEditDevConfig(Wan2_2_TI2V_5B_Config):
 class FastWan2_2_TI2V_5B_Config(Wan2_2_TI2V_5B_Config):
     flow_shift: float | None = 5.0
     dmd_denoising_steps: list[int] | None = field(default_factory=lambda: [1000, 757, 522])
+
+
+@dataclass
+class FastWan2_2_TI2V_5B_FullAttn_Config(FastWan2_2_TI2V_5B_Config):
+    """Dense, text-to-video-only FastWan 5B (including its old HF alias)."""
+
+    ti2v_task: bool = False
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.ti2v_task = False
+        self.vae_config.load_encoder = False
+        self.dit_config.arch_config._supported_attention_backends = (AttentionBackendEnum.FLASH_ATTN,
+                                                                     AttentionBackendEnum.TORCH_SDPA,
+                                                                     AttentionBackendEnum.SAGE_ATTN,
+                                                                     AttentionBackendEnum.SAGE_ATTN_THREE,
+                                                                     AttentionBackendEnum.ATTN_QAT_INFER)
+
+    def validate_runtime_request(self, workload: str, attention_backend: AttentionBackendEnum | str | None) -> None:
+        """Reject workloads and sparse backends unsupported by the dense FullAttn variant.
+
+        FullAttn keeps the FastWan 5B checkpoint but forces dense attention and
+        disables TI2V/image conditioning. The legacy HF alias
+        ``FastWan2.2-TI2V-5B-Diffusers`` is routed here via ``model_index.json``.
+        """
+        from fastvideo.attention.selector import coerce_attn_backend
+
+        if workload != "t2v":
+            raise ValueError(f"FastWan2.2-TI2V-5B-FullAttn does not support workload type {workload!r}; "
+                             "supported workload: 't2v'.")
+        if coerce_attn_backend(attention_backend) is AttentionBackendEnum.VIDEO_SPARSE_ATTN:
+            raise ValueError("FastWan2.2-TI2V-5B-FullAttn is incompatible with VIDEO_SPARSE_ATTN; "
+                             "use a dense backend such as TORCH_SDPA or FLASH_ATTN, or automatic selection.")
 
 
 @dataclass
