@@ -19,6 +19,10 @@ class DiTArchConfig(ArchConfig):
     # to bf16 before denoising); models with fp32 text encoders (Wan, Hunyuan15,
     # SD3.5) leave it False to preserve full-precision embeddings.
     cast_prompt_embeds_to_dit_dtype: bool = False
+    # When True, the denoising stage runs the DiT forward without CUDA autocast.
+    # Wan-VACE requires this so FP32 modules (time embedder, scale_shift_table,
+    # norm2) are not downcast mid-forward.
+    disable_denoising_autocast: bool = False
     _supported_attention_backends: tuple[AttentionBackendEnum,
                                          ...] = (AttentionBackendEnum.SAGE_ATTN, AttentionBackendEnum.FLASH_ATTN,
                                                  AttentionBackendEnum.TORCH_SDPA,
