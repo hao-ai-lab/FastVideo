@@ -11,6 +11,8 @@ checkpoint; its schedule contract is documented in
 [FastH3 distilled checkpoint schedules](../inference/fasth3-distilled.md).
 The four-forward FastH3 Preview recipes are unchanged.
 
+For dense multi-GPU inference, see [H3 Ring Attention and hybrid USP](../inference/h3-ring-attention.md).
+
 <div class="cookbook-shell cookbook-family-page" data-cookbook data-family="minimax_h3" data-default-recipe="fasth3-preview-cuda" data-recipes="../../assets/cookbook-recipes.json?v=9">
   <header class="cookbook-family-header">
     <a class="cookbook-back-link" href="../"><span aria-hidden="true">←</span> All model families</a>
