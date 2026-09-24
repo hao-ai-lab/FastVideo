@@ -8,7 +8,7 @@ from fastvideo.configs.models.encoders.clip import CLIPTextConfig, CLIPVisionCon
 from fastvideo.configs.models.encoders.llama import LlamaConfig
 from fastvideo.configs.models.encoders.lingbotworld2_t5 import LingBotWorld2UMT5ArchConfig, LingBotWorld2UMT5Config
 from fastvideo.configs.models.encoders.t5 import (T5Config, T5LargeConfig, T5PaddedArchConfig, T5PaddedConfig,
-                                                 clean_t5_prompt)
+                                                  clean_t5_prompt)
 from fastvideo.configs.models.encoders.qwen2_5 import Qwen2_5_VLConfig
 from fastvideo.configs.models.encoders.siglip import SiglipVisionConfig
 from fastvideo.configs.models.encoders.reason1 import Reason1ArchConfig, Reason1Config
