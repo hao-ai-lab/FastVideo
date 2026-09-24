@@ -462,6 +462,15 @@ Sub-steps and gates:
     i.e. **no GB200 node has four free GPUs at all** right now. Next resume
     should be quick once capacity appears, since at least one node now has the
     image.
+  - 2026-09-24T05:00Z: **monitoring window ended without a pod.** The
+    replacement pod sat `Pending` for 5h31m with 68 consecutive
+    `FailedScheduling: 36 Insufficient nvidia.com/gpu` events — no GB200 node
+    offered four free GPUs for the whole window. The pull is no longer a
+    factor (the image completed and is cached on `10.0.136.252`), so once
+    capacity appears the pod should schedule and start promptly. The pod is
+    left `Pending` so the scheduler keeps trying. 4E remains where it was: the
+    wiring is committed, the VSA smoke still needs to run to chase the
+    bf16/fp32 dtype assert.
   - Then: finish the 4E dtype fix, rerun the VSA smoke, then the full VSA gate
     (about 5.9 h at 768x1344, or less at the drifting-validated 480x832).
 
