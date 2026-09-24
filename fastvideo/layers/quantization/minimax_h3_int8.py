@@ -35,6 +35,7 @@ regardless of dtype, so it works on these parameters unchanged.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from typing import Any
 
 import torch
@@ -220,12 +221,12 @@ class MiniMaxH3SerializedInt8Config(QuantizationConfig):
                                    f"{self.get_min_capability() / 10:.1f}+; got {major}.{minor}")
 
 
-def _strict_dtype_loader(base_loader):
+def _strict_dtype_loader(base_loader: Callable[..., Any] | None) -> Callable[..., Any]:
     """Wrap a layer's weight loader so a checkpoint tensor must carry the parameter's exact dtype."""
     if base_loader is None:
         raise ValueError("MiniMax-H3 serialized int8 linears need the layer's weight_loader")
 
-    def load(param: torch.Tensor, loaded_weight: torch.Tensor, *args: Any, **kwargs: Any):
+    def load(param: torch.Tensor, loaded_weight: torch.Tensor, *args: Any, **kwargs: Any) -> Any:
         if loaded_weight.dtype != param.dtype:
             raise ValueError("Serialized MiniMax-H3 int8 tensors must be stored as their declared dtype; "
                              f"got {loaded_weight.dtype} for a {param.dtype} parameter of shape {tuple(param.shape)}")

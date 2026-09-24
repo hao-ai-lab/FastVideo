@@ -1074,6 +1074,9 @@ class TransformerLoader(ComponentLoader):
             if getattr(dit_config, "quant_config", None) is not None:
                 raise ValueError(f"{model_path} is a serialized {serialized_quant.get_name()} transformer; "
                                  "drop transformer_quant, the checkpoint selects its own scheme")
+            # Before the shards are read, not at the first GEMM: a card without
+            # int8 tensor cores would otherwise spend the whole load to fail.
+            serialized_quant.validate_runtime(get_local_torch_device())
             dit_config.quant_config = serialized_quant
             logger.info("Selected serialized %s transformer checkpoint execution", serialized_quant.get_name())
 
