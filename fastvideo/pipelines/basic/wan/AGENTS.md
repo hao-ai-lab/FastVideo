@@ -24,13 +24,14 @@ encoders stay shared; the Wan VAE video encoder and decoder live together in
   allocation, not a sampling-loop inheritance chain. Reset UniPC per block and
   caches per request; preserve clean-context writes and RNG ordering.
 - `stages/vace_input.py`: VACE-specific mask loading, reference-image
-  preprocessing, and zero-pixel synthesis for reference-only mode. Runs after
+  preprocessing, and zero-pixel synthesis whenever source video is absent. Runs after
   shared validation and text encoding.
 - `stages/vace_conditioning.py`: VAE-encodes video/mask/reference into 96-channel
   `control_hidden_states`. Control signal goes through `control_hidden_states`,
   not channel concat in denoising.
 - `stages/vace_latent_preparation.py`: appends reference-frame temporal padding
-  to latent shape; restores `num_frames` after preparation.
+  to latent shape; restores `num_frames` after preparation. Runs after
+  `vace_context_stage`, matching Diffusers `WanVACEPipeline` ordering.
 - `stages/vace_decoding.py`: strips reference-frame latents before VAE decode.
 
 Do not change scheduler arithmetic, autocast placement, step counts, offload,
