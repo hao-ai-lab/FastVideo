@@ -305,6 +305,14 @@ class PipelineConfig:
         """
         return sampling_param
 
+    def validate_runtime_request(self, workload: str, attention_backend: object | None = None) -> None:
+        """Optional hook for pipeline-specific workload and attention-backend rules.
+
+        Subclasses override this to reject unsupported combinations at load or
+        args-validation time. The default implementation is a no-op.
+        """
+        return
+
     def dump_to_json(self, file_path: str):
         output_dict = shallow_asdict(self)
         del_keys = []
