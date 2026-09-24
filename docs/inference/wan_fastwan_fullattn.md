@@ -14,10 +14,14 @@ the FastWan 5B checkpoint. It shares weights with the sparse TI2V alias
 ## Example
 
 ```bash
-python examples/inference/basic/basic_dmd.py \
-  --model_path FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers \
-  --attention_backend TORCH_SDPA
+FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN fastvideo generate \
+  --config scripts/inference/inference_wan_VSA_DMD_5B_720P.yaml
 ```
+
+The existing config filename includes `VSA` for historical reasons; its model
+path is FullAttn and the command above selects dense `FLASH_ATTN`. The
+`basic_dmd.py` example is a separate 1.3B recipe and does not read 5B CLI
+arguments.
 
 ## Registry routing
 
@@ -28,7 +32,8 @@ heuristics.
 
 ## Limitations
 
-- No sparse (VSA) path for this config.
+- No sparse (VSA) path for this inference config. The separate FullAttn-to-VSA
+  LoRA training recipe uses the VSA-capable 5B training config for its student.
 - No TI2V or image-to-video workload on the FullAttn config class.
 - Teacher/critic loads during DMD distillation skip workload validation because
   they are built under a narrowed dense scope.
