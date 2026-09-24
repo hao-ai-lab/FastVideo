@@ -13,11 +13,13 @@ for reference-image conditioning and video+mask control.
 
 ## Input Modes
 
-1. **Reference-only** (official `generate.py` example): pass `references` with no
+1. **Pure T2V**: omit source video, mask, and references. The pipeline supplies
+   zero-pixel video and an all-ones mask.
+2. **Reference-only** (official `generate.py` example): pass `references` with no
    `video_path`. The pipeline synthesizes zero-pixel video and an all-ones mask.
-2. **Video + mask**: pass `video_path` and optional `mask_path` for controllable
+3. **Video + mask**: pass `video_path` and optional `mask_path` for controllable
    editing.
-3. **Video + references**: combine source video with reference images for
+4. **Video + references**: combine source video with reference images for
    subject/style transfer.
 
 ## Official Parameters
@@ -66,15 +68,18 @@ Defined in:
 
 ```
 InputValidation → TextEncoding → Conditioning → VACEInput → TimestepPrep
-  → VACELatentPrep → VACEContext → Denoising → VACEDecoding
+  → VACEContext → VACELatentPrep → Denoising → VACEDecoding
 ```
 
-- **VACEInput**: loads mask video, preprocesses reference images, synthesizes
-  zero-pixel video for reference-only mode.
+- **VACEInput**: aligns mask frames, preserves reference-image aspect ratio, and
+  synthesizes zero-pixel video when no source video is supplied.
 - **VACEContext**: VAE-encodes video/mask/reference into 96-channel
   `control_hidden_states`.
 - **VACEDenoising**: passes `control_hidden_states` to the DiT (no channel concat).
 - **VACEDecoding**: strips reference-frame latents before VAE decode.
+
+VACE uses dense attention. A sparse attention request (including VSA) is
+rejected during transformer construction, before checkpoint weights load.
 
 ## Reproducibility Matrix
 
@@ -90,8 +95,10 @@ Each run produces an 81-frame MP4 with `seed=0`. Results are written to
 ## Local Tests
 
 ```bash
-# Weight-free registry/preset contracts (CI-excluded)
-pytest fastvideo/tests/api/test_wan_vace_definitions.py -q
+# Weight-free registry, input, and backend contracts (Buildkite unit lane)
+pytest fastvideo/tests/api/test_wan_vace_definitions.py \
+  fastvideo/tests/api/test_wan_vace_inputs.py \
+  fastvideo/tests/api/test_wan_vace_backend.py -q
 
 # Import/registry smoke (no GPU)
 pytest tests/local_tests/pipelines/test_wan_vace_pipeline_smoke.py -q -k preflight
@@ -100,14 +107,42 @@ pytest tests/local_tests/pipelines/test_wan_vace_pipeline_smoke.py -q -k preflig
 WAN_VACE_MODEL_DIR=/path/to/Wan2.1-VACE-1.3B-diffusers \
   pytest tests/local_tests/pipelines/test_wan_vace_pipeline_parity.py -v -s
 
+# Small pipeline-level parity against Diffusers (GPU + local 1.3B/14B weights)
+WAN_VACE_MODEL_DIR=/path/to/Wan2.1-VACE-1.3B-diffusers \
+WAN_VACE_14B_MODEL_DIR=/path/to/Wan2.1-VACE-14B-diffusers \
+  pytest tests/local_tests/pipelines/test_wan_vace_end_to_end_parity.py -v -s
+
 # End-to-end load/generate smoke (GPU + weights)
 WAN_VACE_MODEL_DIR=/path/to/Wan2.1-VACE-1.3B-diffusers \
   pytest tests/local_tests/pipelines/test_wan_vace_pipeline_smoke.py -v -s -k load_generate
 ```
 
+## Parity Evidence
+
+End-to-end gates (`test_wan_vace_end_to_end_parity.py`):
+
+| Gate | Check |
+|------|-------|
+| Conditioning inputs | bf16 bitwise vs Diffusers |
+| Step0 noise prediction | `assert_dit_parity` (atol/rtol 0.1) |
+| Final latent | abs-mean drift &lt; 5% after 2 denoise steps |
+
+Coverage: 1.3B t2v, reference, video+mask; 14B reference.
+
+14B reference step0 block hooks (aligned inputs, real reference image) show
+accumulating per-block bf16 drift while the overall noise prediction still passes
+the DiT gate. No VACE-only wiring bug or shared Wan DiT regression was observed.
+
 ## Known Gaps
 
-- No SSIM regression baseline yet (quality verified via official-case matrix runs).
+- No SSIM regression baseline yet. The matrix verifies runnable outputs and frame
+  counts, not pixel-level quality against an HF reference video.
+- End-to-end numerics use the VACE gates above. Tight `1e-2` latent parity across
+  all steps is not expected because bf16 attention drift compounds over the
+  denoising loop.
+- `WanVACETransformer3DModel.forward` still duplicates much of
+  `WanTransformer3DModel.forward`; consolidating would require shared forward
+  hooks and is deferred.
 - Sequence parallelism (`sp_size > 1`) not validated for VACE.
 - Video+mask control path not covered by the official matrix script.
 
