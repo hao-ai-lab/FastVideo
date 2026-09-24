@@ -471,8 +471,36 @@ Sub-steps and gates:
     left `Pending` so the scheduler keeps trying. 4E remains where it was: the
     wiring is committed, the VSA smoke still needs to run to chase the
     bf16/fp32 dtype assert.
-  - Then: finish the 4E dtype fix, rerun the VSA smoke, then the full VSA gate
-    (about 5.9 h at 768x1344, or less at the drifting-validated 480x832).
+  - 2026-09-24T15:30Z: **capacity arrived; the 4E dtype bug is fixed and the
+    VSA smoke now hits a memory wall instead.** Pod came up on `10.0.135.174`
+    (a cached node).
+    - Dtype root cause confirmed: the tile-64 Triton kernel
+      (`fastvideo_kernel.block_sparse_attn`, `_attn_fwd_sparse`) does
+      `tl.dot(p.to(bf16), v, acc)`, and Q/K/V arrived in **fp32** — the cast
+      warning fired four times with `casting from torch.float32`. Fix:
+      `MiniMaxH3VSAImpl.forward` casts Q/K/V to bf16 at the kernel boundary
+      (commit `03bfad2ad`), matching the flash-attn dtype lesson. With that,
+      Triton compiles and the run proceeds past the first forward.
+    - New blocker, and it is real memory, not a bug: with VSA on at
+      768x1344 the training step OOMs (`183.4 / 184.3 GiB` in use) even with
+      `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`. The dense path fits
+      at the same geometry, so VSA adds the last few GiB via its tile
+      buffers/mask/scores.
+    - `sp_size: 2` is **not** a quick lever: `--training.distributed.sp_size 2
+      --training.distributed.hsdp_shard_dim 2` dies during FSDP setup with
+      `IndexError: list index out of range` in the device-mesh
+      `get_group(replicate_mesh_dim)`. The working 4-GPU mesh for this loader
+      remains `sp_size 1 / hsdp_replicate 1 / hsdp_shard 4`.
+    - Next lever (feasible, sources checked): build a **480x832** T2VA asset
+      and rerun VSA there — the drifting-validated canvas, ~2.6x fewer video
+      tokens. `fastvideo/pipelines/preprocess/preprocess_minimax_h3_overfit.py`
+      hardcodes 768x1344, and the source media is present at
+      `/workspace/vlm-aryan/fastvideo-h3-hybrid-training/data/crush-smol`, so
+      this needs a small height/width parameterization plus pointing
+      `MODEL_PATH` at the `h3-tdm-overlay` and one preprocessing run. Then
+      replicate the row x4 for the four ranks, as with
+      `h3_overfit_t2va_x4`.
+  - Then: finish the VSA gate (480x832), then the full VSA vs dense comparison.
 
 - 2026-09-22: Branch renamed to `tdm-port` and pushed to the internal
   origin; stale `fork/issue-775-tdm` ref removed. Phase 0 plan recorded
