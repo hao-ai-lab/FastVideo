@@ -1062,6 +1062,24 @@ class TransformerLoader(ComponentLoader):
         if _qat_generator_only:
             dit_config.quant_config = None
 
+        # A MiniMax-H3 transformer written by the int8 converter declares its
+        # scheme in config.json. It replaces any runtime quantization request:
+        # the shards hold int8 values, so there is no bf16 weight to convert.
+        if cls_name == "MiniMaxH3Transformer3DModel" and config.get("quantization_config"):
+            from fastvideo.layers.quantization.minimax_h3_int8 import transformer_quantization_config_from_metadata
+            serialized_quant = transformer_quantization_config_from_metadata(config["quantization_config"])
+            if _qat_generator_only:
+                raise ValueError("A serialized int8 transformer cannot serve as a DMD teacher or critic; "
+                                 "those must load the bf16 checkpoint")
+            if getattr(dit_config, "quant_config", None) is not None:
+                raise ValueError(f"{model_path} is a serialized {serialized_quant.get_name()} transformer; "
+                                 "drop transformer_quant, the checkpoint selects its own scheme")
+            # Before the shards are read, not at the first GEMM: a card without
+            # int8 tensor cores would otherwise spend the whole load to fail.
+            serialized_quant.validate_runtime(get_local_torch_device())
+            dit_config.quant_config = serialized_quant
+            logger.info("Selected serialized %s transformer checkpoint execution", serialized_quant.get_name())
+
         model_cls, _ = ModelRegistry.resolve_model_cls(cls_name)
 
         # Find all safetensors files

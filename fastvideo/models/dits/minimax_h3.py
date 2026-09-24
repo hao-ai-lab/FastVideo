@@ -602,6 +602,10 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         if getattr(self, "adaln_rank", None) is not None and (
                 ".adaln_proj." in name or name.startswith(("norm_out.linear.", "adaln_basis."))):
             return torch.float16
+        # Serialized int8 block linears carry one float32 scale per output row;
+        # the loader would otherwise cast it to the block dtype and lose precision.
+        if name.endswith(".weight_scale"):
+            return torch.float32
         if self.config.uniform_parameter_dtype:
             return default_dtype
         return torch.float32 if name.split(".", 1)[0] in self._keep_in_fp32_modules else default_dtype
