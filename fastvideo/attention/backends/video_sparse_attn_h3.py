@@ -735,6 +735,19 @@ class MiniMaxH3VSAImpl(AttentionImpl):
                     q_bhsd = q_bhsd[:, :, :logical_seq_len].contiguous()
                     k_bhsd = k_bhsd[:, :, :logical_seq_len].contiguous()
                     v_bhsd = v_bhsd[:, :, :logical_seq_len].contiguous()
+                # The tile-64 Triton kernel downcasts ``p`` to bf16 and does
+                # ``tl.dot(p_bf16, v, acc)``, so ``v`` (and, with it, the
+                # whole qkv triple) must already be bf16. Training-side fp32
+                # Q/K/V (the historical QK-norm/precision boundary) otherwise
+                # fails Triton compilation with "Both operands must be same
+                # dtype. Got bf16 and fp32". Cast at the kernel boundary, as
+                # the flash-attn-style dtype lesson requires.
+                if q_bhsd.dtype != torch.bfloat16:
+                    logger.warning_once(f"VSA-H3 tile-64 Triton kernel requires bf16 Q/K/V; casting from "
+                                        f"{q_bhsd.dtype} at the kernel boundary.")
+                    q_bhsd = q_bhsd.to(torch.bfloat16)
+                    k_bhsd = k_bhsd.to(torch.bfloat16)
+                    v_bhsd = v_bhsd.to(torch.bfloat16)
                 out_bhsd, _ = block_sparse_attn_64_bhsd(
                     q_bhsd,
                     k_bhsd,
