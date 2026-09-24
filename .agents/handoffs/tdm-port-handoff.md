@@ -454,6 +454,14 @@ Sub-steps and gates:
     node) from a shell with registry access; (3) wait out the pull. A
     one-GPU node would be enough to find the 4E dtype bug with a small
     kernel-level test, but there is no such node free either.
+  - 2026-09-23T23:28Z update: the `10.0.136.252` pull **completed** — the
+    container reached `Started` — but the pod was then killed ~20 s later
+    (BestEffort QoS, so first to go under node pressure). So the image is now
+    cached on that node and the pull is no longer the blocker. The replacement
+    pod is `Pending` with `FailedScheduling: 36 Insufficient nvidia.com/gpu`,
+    i.e. **no GB200 node has four free GPUs at all** right now. Next resume
+    should be quick once capacity appears, since at least one node now has the
+    image.
   - Then: finish the 4E dtype fix, rerun the VSA smoke, then the full VSA gate
     (about 5.9 h at 768x1344, or less at the drifting-validated 480x832).
 
