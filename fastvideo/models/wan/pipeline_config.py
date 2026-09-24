@@ -11,8 +11,8 @@ from fastvideo.configs.models.dits.wan_animate import WanAnimateConfig as WanAni
 from fastvideo.configs.models.dits.wan_s2v import WanS2VConfig as WanS2VDiTConfig
 from fastvideo.models.wan.config import WanVideoArchConfig, WanVideoConfig
 from fastvideo.models.wan.vace_config import WanVACEArchConfig, WanVACEVideoConfig
-from fastvideo.configs.models.encoders import (BaseEncoderOutput, CLIPVisionConfig, T5Config,
-                                               WAN2_1ControlCLIPVisionConfig)
+from fastvideo.configs.models.encoders import (BaseEncoderOutput, CLIPVisionConfig, T5Config, T5PaddedConfig,
+                                               WAN2_1ControlCLIPVisionConfig, clean_t5_prompt)
 from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.models.wan.vae_config import WanVAEArchConfig, WanVAEConfig
 
@@ -129,6 +129,9 @@ class WanVACE1_3B_Config(WanT2V480PConfig):
         vace_layers=[0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28],
     )))
     flow_shift: float | None = 16.0
+    scheduler_step_in_fp32: bool = True
+    text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (T5PaddedConfig(), ))
+    preprocess_text_funcs: tuple[Callable[[str], str], ...] = field(default_factory=lambda: (clean_t5_prompt, ))
 
     def __post_init__(self) -> None:
         self.vae_config.load_encoder = True
@@ -136,7 +139,7 @@ class WanVACE1_3B_Config(WanT2V480PConfig):
 
 
 @dataclass
-class WanVACE14B_Config(WanT2V720PConfig):
+class WanVACE14B_Config(WanVACE1_3B_Config):
     """Wan2.1-VACE-14B controllable video generation (480P and 720P)."""
 
     dit_config: DiTConfig = field(default_factory=lambda: WanVACEVideoConfig(arch_config=WanVACEArchConfig(
@@ -148,10 +151,6 @@ class WanVACE14B_Config(WanT2V720PConfig):
         vace_layers=[0, 5, 10, 15, 20, 25, 30, 35],
     )))
     flow_shift: float | None = 16.0
-
-    def __post_init__(self) -> None:
-        self.vae_config.load_encoder = True
-        self.vae_config.load_decoder = True
 
 
 @dataclass

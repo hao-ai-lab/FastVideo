@@ -7,26 +7,96 @@ from typing import Any
 import torch
 import torch.nn as nn
 
-import fastvideo.envs as envs
 from fastvideo.attention import DistributedAttention
+from fastvideo.attention.selector import get_env_variable_attn_backend
 from fastvideo.distributed.communication_op import (sequence_model_parallel_all_gather_with_unpad,
                                                     sequence_model_parallel_shard)
 from fastvideo.distributed.parallel_state import get_sp_world_size
-from fastvideo.layers.layernorm import (FP32LayerNorm, LayerNormScaleShift, RMSNorm,
+from fastvideo.layers.layernorm import (FP32LayerNorm, LayerNormScaleShift,
                                         ScaleResidualLayerNormScaleShift)
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.mlp import MLP
 from fastvideo.layers.rotary_embedding import get_rotary_pos_embed
 from fastvideo.layers.visual_embedding import PatchEmbed
-from fastvideo.logger import init_logger
 from fastvideo.models.dits.base import BaseDiT
 from fastvideo.models.wan.transformer import (WanI2VCrossAttention, WanT2VCrossAttention,
-                                              WanTimeTextImageEmbedding, WanTransformerBlock,
-                                              WanTransformerBlock_VSA)
+                                              WanTimeTextImageEmbedding, WanTransformerBlock)
 from fastvideo.models.wan.vace_config import WanVACEVideoConfig
 from fastvideo.platforms import AttentionBackendEnum, current_platform
 
-logger = init_logger(__name__)
+class WanVACEMainBlock(WanTransformerBlock):
+    """Wan main block with Diffusers VACE BF16 residual boundaries.
+
+    Diffusers Wan-VACE rounds gated self-attention and FFN residuals in BF16
+    before the following norm. The base :class:`WanTransformerBlock` keeps the
+    historical fused residual helpers; this subclass overrides the three residual
+    hooks so parity matches without patching instances at runtime.
+    """
+
+    def __init__(
+        self,
+        dim: int,
+        ffn_dim: int,
+        num_heads: int,
+        qk_norm: str,
+        cross_attn_norm: bool,
+        eps: float,
+        added_kv_proj_dim: int | None,
+        supported_attention_backends: tuple[AttentionBackendEnum, ...] | None,
+        quant_config=None,
+        prefix: str = "",
+    ) -> None:
+        super().__init__(dim,
+                         ffn_dim,
+                         num_heads,
+                         qk_norm,
+                         cross_attn_norm,
+                         eps,
+                         added_kv_proj_dim,
+                         supported_attention_backends,
+                         quant_config=quant_config,
+                         prefix=prefix)
+        inner_dim = self.hidden_dim
+        self.norm_q = nn.RMSNorm(inner_dim, eps=eps)
+        self.norm_k = nn.RMSNorm(inner_dim, eps=eps)
+        self.attn2.norm_q = nn.RMSNorm(inner_dim, eps=eps)
+        self.attn2.norm_k = nn.RMSNorm(inner_dim, eps=eps)
+        if added_kv_proj_dim is not None:
+            self.attn2.norm_added_k = nn.RMSNorm(inner_dim, eps=eps)
+
+    def _self_attn_residual(
+        self,
+        hidden_states: torch.Tensor,
+        attn_output: torch.Tensor,
+        gate_msa: torch.Tensor,
+        orig_dtype: torch.dtype,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        hidden_states = (hidden_states.float() + attn_output * gate_msa).to(orig_dtype)
+        norm_hidden_states = self.self_attn_residual_norm.norm(hidden_states.float()).to(orig_dtype)
+        return hidden_states, norm_hidden_states
+
+    def _cross_attn_residual(
+        self,
+        hidden_states: torch.Tensor,
+        norm_hidden_states: torch.Tensor,
+        attn_output: torch.Tensor,
+        c_shift_msa: torch.Tensor,
+        c_scale_msa: torch.Tensor,
+        orig_dtype: torch.dtype,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        hidden_states = hidden_states + attn_output
+        norm_hidden_states = (self.cross_attn_residual_norm.norm(hidden_states.float()) * (1 + c_scale_msa)
+                              + c_shift_msa).to(orig_dtype)
+        return hidden_states, norm_hidden_states
+
+    def _ffn_residual(
+        self,
+        hidden_states: torch.Tensor,
+        ff_output: torch.Tensor,
+        c_gate_msa: torch.Tensor,
+        orig_dtype: torch.dtype,
+    ) -> torch.Tensor:
+        return (hidden_states.float() + ff_output.float() * c_gate_msa).to(orig_dtype)
 
 
 class WanVACETransformerBlock(nn.Module):
@@ -60,10 +130,9 @@ class WanVACETransformerBlock(nn.Module):
                                           supported_attention_backends=supported_attention_backends,
                                           prefix=f"{prefix}.attn1")
         self.num_attention_heads = num_heads
-        dim_head = dim // num_heads
         if qk_norm == "rms_norm_across_heads":
-            self.norm_q = RMSNorm(dim, eps=eps)
-            self.norm_k = RMSNorm(dim, eps=eps)
+            self.norm_q = nn.RMSNorm(dim, eps=eps)
+            self.norm_k = nn.RMSNorm(dim, eps=eps)
         else:
             raise ValueError(f"Unsupported qk_norm for VACE: {qk_norm!r}")
 
@@ -73,18 +142,18 @@ class WanVACETransformerBlock(nn.Module):
                                                                                 qk_norm=qk_norm,
                                                                                 eps=eps,
                                                                                 prefix=f"{prefix}.attn2"))
+        # Diffusers VACE uses torch RMSNorm in both attention branches.
+        # Keep this override local to VACE; ordinary Wan retains its existing norms.
+        self.attn2.norm_q = nn.RMSNorm(dim, eps=eps)
+        self.attn2.norm_k = nn.RMSNorm(dim, eps=eps)
+        if added_kv_proj_dim is not None:
+            self.attn2.norm_added_k = nn.RMSNorm(dim, eps=eps)
         self.self_attn_residual_norm = ScaleResidualLayerNormScaleShift(dim,
                                                                       norm_type="layer",
                                                                       eps=eps,
                                                                       elementwise_affine=True,
                                                                       dtype=torch.float32,
                                                                       compute_dtype=torch.float32)
-        self.cross_attn_residual_norm = ScaleResidualLayerNormScaleShift(dim,
-                                                                         norm_type="layer",
-                                                                         eps=eps,
-                                                                         elementwise_affine=False,
-                                                                         dtype=torch.float32,
-                                                                         compute_dtype=torch.float32)
         self.norm3 = FP32LayerNorm(dim, eps, elementwise_affine=False)
         self.ffn = MLP(dim, ffn_dim, act_type="gelu_pytorch_tanh", prefix=f"{prefix}.ffn")
         self.scale_shift_table = nn.Parameter(torch.randn(1, 6, dim) / dim**0.5)
@@ -99,6 +168,8 @@ class WanVACETransformerBlock(nn.Module):
         original_seq_len: int,
     ) -> tuple[torch.Tensor | None, torch.Tensor]:
         if self.proj_in is not None:
+            if control_hidden_states.dtype == torch.bfloat16:
+                control_hidden_states = control_hidden_states.contiguous()
             control_hidden_states, _ = self.proj_in(control_hidden_states)
             control_hidden_states = control_hidden_states + hidden_states
 
@@ -119,15 +190,12 @@ class WanVACETransformerBlock(nn.Module):
         attn_output = attn_output.flatten(2)
         attn_output, _ = self.to_out(attn_output)
         attn_output = attn_output.squeeze(1)
-        null_shift = null_scale = torch.tensor([0], device=control_hidden_states.device)
-        norm_hidden_states, control_hidden_states = self.self_attn_residual_norm(
-            control_hidden_states, attn_output, gate_msa, null_shift, null_scale)
-        control_hidden_states = control_hidden_states.to(orig_dtype)
-
+        # Match Diffusers' BF16 boundary: round the gated residual before norm2.
+        # Keep the wrapper's norm path for converted checkpoint compatibility.
+        control_hidden_states = (control_hidden_states.float() + attn_output.float() * gate_msa).to(orig_dtype)
+        norm_hidden_states = self.self_attn_residual_norm.norm(control_hidden_states.float()).to(orig_dtype)
         attn_output = self.attn2(norm_hidden_states, context=encoder_hidden_states, context_lens=None)
-        norm_hidden_states, control_hidden_states = self.cross_attn_residual_norm(
-            control_hidden_states, attn_output, 1, c_shift_msa, c_scale_msa)
-        control_hidden_states = control_hidden_states.to(orig_dtype)
+        control_hidden_states = control_hidden_states + attn_output
 
         norm_hidden_states = (self.norm3(control_hidden_states.float()) * (1 + c_scale_msa) + c_shift_msa).to(
             orig_dtype)
@@ -148,8 +216,21 @@ class WanVACETransformer3DModel(BaseDiT):
     reverse_param_names_mapping = WanVACEVideoConfig().reverse_param_names_mapping
     lora_param_names_mapping = WanVACEVideoConfig().lora_param_names_mapping
 
+    def _get_parameter_dtype(self, name: str, default_dtype: torch.dtype) -> torch.dtype:
+        # Diffusers keeps modulation tables, time embeddings, and norm2 in FP32.
+        if (name == "scale_shift_table" or name.endswith(".scale_shift_table")
+                or name.startswith("condition_embedder.time_embedder.")
+                or ".self_attn_residual_norm.norm." in name):
+            return torch.float32
+        return default_dtype
+
     def __init__(self, config: WanVACEVideoConfig, hf_config: dict[str, Any]) -> None:
         super().__init__(config=config, hf_config=hf_config)
+        supported_backends = config._supported_attention_backends
+        requested_backend = config._resolved_attention_backend or get_env_variable_attn_backend()
+        if requested_backend is not None and requested_backend not in supported_backends:
+            raise ValueError(f"Wan-VACE requires dense attention; requested {requested_backend.name}. "
+                             "Choose TORCH_SDPA, FLASH_ATTN, or another supported dense backend.")
         self.quant_config = config.quant_config
         arch = config.arch_config
 
@@ -180,21 +261,20 @@ class WanVACETransformer3DModel(BaseDiT):
             time_freq_dim=arch.freq_dim,
             text_embed_dim=arch.text_dim,
             image_embed_dim=arch.image_dim,
+            cast_temb_to_context_dtype=True,
         )
 
-        attn_backend = envs.FASTVIDEO_ATTENTION_BACKEND
-        transformer_block = (WanTransformerBlock_VSA if attn_backend == "VIDEO_SPARSE_ATTN" else WanTransformerBlock)
         self.blocks = nn.ModuleList([
-            transformer_block(inner_dim,
-                              arch.ffn_dim,
-                              arch.num_attention_heads,
-                              arch.qk_norm,
-                              arch.cross_attn_norm,
-                              arch.eps,
-                              arch.added_kv_proj_dim,
-                              self._supported_attention_backends,
-                              quant_config=config.quant_config,
-                              prefix=f"{config.prefix}.blocks.{i}") for i in range(arch.num_layers)
+            WanVACEMainBlock(inner_dim,
+                             arch.ffn_dim,
+                             arch.num_attention_heads,
+                             arch.qk_norm,
+                             arch.cross_attn_norm,
+                             arch.eps,
+                             arch.added_kv_proj_dim,
+                             supported_backends,
+                             quant_config=config.quant_config,
+                             prefix=f"{config.prefix}.blocks.{i}") for i in range(arch.num_layers)
         ])
         self.vace_blocks = nn.ModuleList([
             WanVACETransformerBlock(inner_dim,
@@ -206,7 +286,7 @@ class WanVACETransformer3DModel(BaseDiT):
                                     arch.added_kv_proj_dim,
                                     apply_input_projection=(i == 0),
                                     apply_output_projection=True,
-                                    supported_attention_backends=self._supported_attention_backends,
+                                    supported_attention_backends=supported_backends,
                                     prefix=f"{config.prefix}.vace_blocks.{i}")
             for i in range(len(arch.vace_layers))
         ])
@@ -219,7 +299,6 @@ class WanVACETransformer3DModel(BaseDiT):
                                             compute_dtype=torch.float32)
         self.proj_out = nn.Linear(inner_dim, arch.out_channels * math.prod(arch.patch_size))
         self.scale_shift_table = nn.Parameter(torch.randn(1, 2, inner_dim) / inner_dim**0.5)
-        self.gradient_checkpointing = False
         self.__post_init__()
 
     def forward(self,
@@ -272,13 +351,17 @@ class WanVACETransformer3DModel(BaseDiT):
         control_hidden_states, _ = sequence_model_parallel_shard(control_hidden_states, dim=1)
 
         if control_hidden_states_scale is None:
-            control_hidden_states_scale = [1.0] * len(self.vace_layers)
-        if isinstance(control_hidden_states_scale, (int, float)):
-            control_hidden_states_scale = [float(control_hidden_states_scale)] * len(self.vace_layers)
-        if isinstance(control_hidden_states_scale, torch.Tensor):
-            control_hidden_states_scale = control_hidden_states_scale.tolist()
-        if len(control_hidden_states_scale) != len(self.vace_layers):
-            raise ValueError(f"control_hidden_states_scale length {len(control_hidden_states_scale)} "
+            control_hidden_states_scale = torch.ones(len(self.vace_layers),
+                                                     device=hidden_states.device,
+                                                     dtype=hidden_states.dtype)
+        elif not isinstance(control_hidden_states_scale, torch.Tensor):
+            raise TypeError("control_hidden_states_scale must be a torch.Tensor; "
+                            "normalize scales in WanVACEDenoisingStage.")
+        else:
+            control_hidden_states_scale = control_hidden_states_scale.to(device=hidden_states.device,
+                                                                         dtype=hidden_states.dtype)
+        if control_hidden_states_scale.numel() != len(self.vace_layers):
+            raise ValueError(f"control_hidden_states_scale length {control_hidden_states_scale.numel()} "
                              f"!= vace_layers {len(self.vace_layers)}")
 
         temb, timestep_proj, encoder_hidden_states, encoder_hidden_states_image = self.condition_embedder(
@@ -288,7 +371,7 @@ class WanVACETransformer3DModel(BaseDiT):
             encoder_hidden_states = torch.concat([encoder_hidden_states_image, encoder_hidden_states], dim=1)
 
         control_hidden_states_list: list[tuple[torch.Tensor | None, float]] = []
-        for block, scale in zip(self.vace_blocks, control_hidden_states_scale):
+        for block, scale in zip(self.vace_blocks, control_hidden_states_scale.unbind()):
             conditioning_states, control_hidden_states = block(hidden_states,
                                                                encoder_hidden_states,
                                                                control_hidden_states,
