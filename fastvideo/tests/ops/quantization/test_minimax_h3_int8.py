@@ -21,9 +21,11 @@ from fastvideo.layers.quantization.minimax_h3_int8 import (
     MiniMaxH3SerializedInt8Config,
     MiniMaxH3SerializedInt8LinearMethod,
     finalize_serialized_int8_model,
+    has_serialized_int8_linears,
     int8_linear,
     is_minimax_h3_int8_linear_prefix,
     quantize_rows_int8,
+    reject_lora_on_serialized_int8,
     serialized_int8_quantization_config,
     transformer_quantization_config_from_metadata,
     validate_int8_geometry,
@@ -271,6 +273,20 @@ def test_production_loader_keeps_int8_and_row_scales():
     x = torch.randn(4, 64, dtype=torch.bfloat16)
     output, _ = model.q(x)
     assert torch.equal(output, int8_linear(x, weight_int8, weight_scale))
+
+
+def test_lora_is_refused_on_serialized_int8_and_allowed_elsewhere():
+    """Both merge paths assume a float base weight, so an adapter has to fail loudly."""
+    model = _TinyTransformer()
+    assert has_serialized_int8_linears(model) is True
+    with pytest.raises(NotImplementedError, match="cannot be applied to a serialized int8"):
+        reject_lora_on_serialized_int8(model, "/tmp/some-adapter")
+
+    dense = torch.nn.Module()
+    dense.refiner = ReplicatedLinear(64, 32, bias=False, quant_config=_config(),
+                                     prefix="minimax_h3.token_refiner.refiner_blocks.0.attn.to_q")
+    assert has_serialized_int8_linears(dense) is False
+    reject_lora_on_serialized_int8(dense, "/tmp/some-adapter")
 
 
 def test_production_loader_refuses_float_shards_for_int8_weights():

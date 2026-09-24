@@ -333,6 +333,11 @@ class LoRAPipeline(ComposedPipelineBase):
             self._setting_constructor_adapter = False
 
     def _convert_one_transformer(self, transformer_name: str, transformer_module: nn.Module) -> None:
+        from fastvideo.layers.quantization.minimax_h3_int8 import reject_lora_on_serialized_int8
+
+        # Wrapping a serialized int8 linear would merge a float delta into int8
+        # codes at the first merge, so refuse before any layer is replaced.
+        reject_lora_on_serialized_int8(transformer_module, self.lora_path or "runtime adapter")
         excluded_lora_layers = self._exclude_lora_layers_for(transformer_name, transformer_module)
         # Fresh instance after a lazy rematerialize must not keep the previous
         # block mapping — those modules pin the released DiT and never get freed.

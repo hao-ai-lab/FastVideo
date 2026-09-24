@@ -116,7 +116,7 @@ def test_end_to_end_conversion_on_cpu(converter, tmp_path: Path, monkeypatch: py
     assert config["num_layers"] == 2
     assert config["quantization_config"]["quant_method"] == "int8"
     assert config["quantization_config"]["linears"] == list(converter.TRANSFORMER_LINEARS)
-    assert config["quantization_config"]["producer"]["gate_compress"] is True
+    assert config["quantization_config"]["producer"]["blocks"] == 2
     assert (dst / "README.md").read_text() == "notes"
     index = json.loads((dst / "diffusion_pytorch_model.safetensors.index.json").read_text())
     tensors = {}
@@ -156,6 +156,15 @@ def test_converter_refuses_an_incomplete_block(converter, tmp_path: Path, monkey
     save_file(tensors, str(src / "diffusion_pytorch_model.safetensors"), metadata={"format": "pt"})
     monkeypatch.setattr(sys, "argv", ["convert", "--src", str(src), "--report-only", "--device", "cpu"])
     with pytest.raises(SystemExit, match="incomplete"):
+        converter.main()
+
+
+def test_converter_refuses_a_source_without_the_compression_gate(converter, tmp_path: Path,
+                                                                monkeypatch: pytest.MonkeyPatch):
+    """VSA builds the gate anyway, and a zero-initialized int8 weight has no valid row scale."""
+    src = _write_source(tmp_path, blocks=2, gate=False)
+    monkeypatch.setattr(sys, "argv", ["convert", "--src", str(src), "--report-only", "--device", "cpu"])
+    with pytest.raises(SystemExit, match="dense checkpoint"):
         converter.main()
 
 

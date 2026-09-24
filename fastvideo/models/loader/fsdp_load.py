@@ -291,6 +291,9 @@ def maybe_load_fsdp_model(
     weight_iterator = safetensors_weights_iterator(weight_dir_list, to_cpu=cpu_offload)
     logger.info("Loading transformer weights with to_cpu=%s", cpu_offload)
     param_names_mapping_fn = get_param_names_mapping(model.param_names_mapping)
+    if lora_path is not None:
+        from fastvideo.layers.quantization.minimax_h3_int8 import reject_lora_on_serialized_int8
+        reject_lora_on_serialized_int8(model, lora_path)
     dense_lora_patch = DenseLoRAPatch.from_adapter(
         lora_path,
         param_names_mapping_fn,

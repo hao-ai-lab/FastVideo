@@ -247,13 +247,18 @@ def main() -> None:
     if num_layers and blocks_seen != num_layers:
         raise SystemExit(f"{src} holds {blocks_seen} transformer blocks but config.json declares {num_layers}")
     short = {name: counts.get(name, 0) for name in TRANSFORMER_LINEARS if counts.get(name, 0) != blocks_seen}
-    # A dense checkpoint has no compression gate at all; anything else must be complete.
-    if short.get("attn.to_gate_compress") == 0:
-        short.pop("attn.to_gate_compress")
     if short:
+        detail = ""
+        if counts.get("attn.to_gate_compress", 0) == 0:
+            # The VSA attention backend builds the compression gate whether or not the
+            # checkpoint carries one, and the loader would have to zero-initialize an
+            # int8 weight next to a zero row scale, which the post-load check rejects.
+            # A dense checkpoint must therefore stay bf16 for now.
+            detail = (" A source without attn.to_gate_compress is a dense checkpoint; the VSA backend still builds "
+                      "that linear, and a zero-initialized int8 weight has no valid row scale. Convert a "
+                      "VSA-trained checkpoint.")
         raise SystemExit(f"Expected one of every block linear in each of {blocks_seen} blocks; "
-                         f"incomplete: {short}")
-    has_gate = counts.get("attn.to_gate_compress", 0) > 0
+                         f"incomplete: {short}.{detail}")
 
     device = torch.device(args.device)
     if device.type == "cuda" and not torch.cuda.is_available():
@@ -279,8 +284,7 @@ def main() -> None:
     written_linear_bytes = 0
     errors: dict[str, list[float]] = {}
     started = time.perf_counter()
-    print(f"{blocks_seen} transformer blocks, {sum(counts.values())} block linears to quantize"
-          f"{'' if has_gate else ' (dense checkpoint, no attn.to_gate_compress)'}", flush=True)
+    print(f"{blocks_seen} transformer blocks, {sum(counts.values())} block linears to quantize", flush=True)
     weight_name, scale_name = INT8_TENSOR_SUFFIXES
 
     try:
@@ -318,7 +322,6 @@ def main() -> None:
             "converter": Path(__file__).name,
             "torch": torch.__version__,
             "blocks": blocks_seen,
-            "gate_compress": has_gate,
         })
         (dst / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
         for extra in src.iterdir():

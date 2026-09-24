@@ -303,6 +303,32 @@ class MiniMaxH3SerializedInt8LinearMethod(LinearMethodBase):
         return output.view(*original_shape[:-1], layer.weight.shape[0])
 
 
+def has_serialized_int8_linears(model: nn.Module) -> bool:
+    """Whether any linear in *model* executes serialized int8 weights."""
+    return any(
+        isinstance(getattr(module, "quant_method", None), MiniMaxH3SerializedInt8LinearMethod)
+        for module in model.modules())
+
+
+def reject_lora_on_serialized_int8(model: nn.Module, lora_path: str) -> None:
+    """Refuse an adapter against serialized int8 weights.
+
+    Both merge paths assume a float base weight. The whole-parameter path adds
+    the delta to the int8 codes without dequantizing by ``weight_scale``, which
+    silently produces a wrong weight; the low-rank path casts the adapter to the
+    base dtype and then multiplies in place, which raises on an integer tensor.
+    Merging correctly means dequantize, merge, requantize, and that changes the
+    scales the checkpoint shipped, so it is refused rather than approximated.
+    """
+    if not has_serialized_int8_linears(model):
+        return
+    raise NotImplementedError(
+        f"A LoRA adapter ({lora_path}) cannot be applied to a serialized int8 MiniMax-H3 transformer: merging "
+        "into int8 codes would need a dequantize, merge and requantize round trip that rewrites the checkpoint's "
+        "row scales. Merge the adapter into the bf16 checkpoint first, then convert that with "
+        "scripts/checkpoint_conversion/convert_minimax_h3_transformer_int8.py.")
+
+
 def finalize_serialized_int8_model(model: nn.Module) -> int:
     """Run the post-load check on every serialized int8 linear; return how many were validated."""
     validated = 0
@@ -321,8 +347,10 @@ __all__ = [
     "MiniMaxH3SerializedInt8Config",
     "MiniMaxH3SerializedInt8LinearMethod",
     "finalize_serialized_int8_model",
+    "has_serialized_int8_linears",
     "int8_linear",
     "is_minimax_h3_int8_linear_prefix",
+    "reject_lora_on_serialized_int8",
     "quantize_rows_int8",
     "serialized_int8_quantization_config",
     "transformer_quantization_config_from_metadata",
