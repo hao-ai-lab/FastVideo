@@ -9,7 +9,6 @@ import torch.nn.functional as F
 from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
-from fastvideo.models.vision_utils import load_image, normalize, numpy_to_pt, pil_to_numpy, resize
 from fastvideo.models.wan.vae import AutoencoderKLWan
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
@@ -19,17 +18,35 @@ from fastvideo.utils import PRECISION_TO_TYPE
 
 
 class WanVACEContextStage(PipelineStage):
-    """Build ``control_hidden_states`` = concat(video_latents, mask_latents) for VACE."""
+    """Pack VACE control latents for the DiT ``control_hidden_states`` input.
+
+    The output has ``vace_in_channels`` (96 by default):
+    - channels 0-31: inactive + reactive video latents (16 channels each)
+    - channels 32-95: downsampled mask latents aligned to the VAE latent grid
+
+    Shape: ``[B, 96, T_latent, H_latent, W_latent]``. Values stay in VAE fp32 until
+    the denoising stage casts once to the DiT dtype.
+    """
 
     def __init__(self, vae: AutoencoderKLWan) -> None:
         super().__init__()
         self.vae = vae
 
+    @staticmethod
+    def _retrieve_latents(encoder_output: object) -> torch.Tensor:
+        mode = getattr(encoder_output, "mode", None)
+        if callable(mode):
+            return mode()
+        raise AttributeError("Could not access latents of provided encoder_output")
+
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         config = fastvideo_args.pipeline_config
         device = get_local_torch_device()
         vae_dtype = PRECISION_TO_TYPE[config.vae_precision]
+        vae_parameters = list(self.vae.parameters()) if hasattr(self.vae, "parameters") else []
+        original_device = vae_parameters[0].device if vae_parameters else device
         self.vae = self.vae.to(device)
+        offload = getattr(fastvideo_args, "vae_cpu_offload", False) and bool(vae_parameters)
 
         video = batch.video_latent.to(device=device, dtype=torch.float32)
         mask = batch.mask_video
@@ -39,27 +56,32 @@ class WanVACEContextStage(PipelineStage):
             mask = torch.clamp((mask.to(device=device, dtype=torch.float32) + 1) / 2, min=0, max=1)
 
         reference_images = batch.vace_reference_images or []
-        conditioning_latents = self._prepare_video_latents(video, mask, reference_images, batch.generator, device,
-                                                           vae_dtype)
+        conditioning_latents = self._prepare_video_latents(video, mask, reference_images, device, vae_dtype)
         mask_latents = self._prepare_masks(mask, reference_images, config)
-        batch.vace_control_latents = torch.cat([conditioning_latents, mask_latents], dim=1)
-        batch.vace_num_reference_frames = len(reference_images)
+        # Match Diffusers WanVACEPipeline: keep packed control in VAE fp32 until the
+        # denoising stage casts once to DiT dtype immediately before transformer.
+        batch.vace_control_latents = torch.cat([conditioning_latents, mask_latents], dim=1).to(device=device)
+        if offload:
+            self.vae = self.vae.to(original_device)
         return batch
 
+    def _normalize_latent(self, latent: torch.Tensor) -> torch.Tensor:
+        arch = self.vae.config.arch_config
+        shift = arch.shift_factor
+        if shift is not None:
+            latent = latent - shift.to(latent.device, latent.dtype)
+        scale = arch.scaling_factor
+        return latent * scale.to(latent.device, latent.dtype)
+
     def _encode_latent(self, pixels: torch.Tensor, vae_dtype: torch.dtype) -> torch.Tensor:
-        latents_mean = torch.tensor(self.vae.latents_mean, device=pixels.device, dtype=torch.float32).view(
-            1, self.vae.config.z_dim, 1, 1, 1)
-        latents_std = 1.0 / torch.tensor(self.vae.latents_std, device=pixels.device, dtype=torch.float32).view(
-            1, self.vae.config.z_dim, 1, 1, 1)
-        encoded = self.vae.encode(pixels.to(dtype=vae_dtype)).mode()
-        return ((encoded.float() - latents_mean) * latents_std).to(vae_dtype)
+        encoded = self._retrieve_latents(self.vae.encode(pixels.to(dtype=vae_dtype)))
+        return self._normalize_latent(encoded.float()).to(vae_dtype)
 
     def _prepare_video_latents(
         self,
         video: torch.Tensor,
         mask: torch.Tensor,
         reference_images: list[torch.Tensor],
-        generator: torch.Generator | list[torch.Generator] | None,
         device: torch.device,
         vae_dtype: torch.dtype,
     ) -> torch.Tensor:
@@ -112,30 +134,3 @@ class WanVACEContextStage(PipelineStage):
         result = VerificationResult()
         result.add_check("vace_control_latents", batch.vace_control_latents, [V.is_tensor, V.with_dims(5)])
         return result
-
-
-def preprocess_vace_reference_images(
-    references: list[str] | None,
-    image_size: tuple[int, int],
-    device: torch.device,
-    dtype: torch.dtype,
-) -> list[torch.Tensor]:
-    if not references:
-        return []
-    height, width = image_size
-    processed = []
-    for path in references:
-        image = load_image(path)
-        image = resize(image, height, width, resize_mode="default", resample="lanczos")
-        tensor = numpy_to_pt(normalize(pil_to_numpy([image]))).squeeze(0)
-        img_height, img_width = tensor.shape[-2:]
-        scale = min(height / img_height, width / img_width)
-        new_height, new_width = int(img_height * scale), int(img_width * scale)
-        resized = F.interpolate(tensor.unsqueeze(0), size=(new_height, new_width), mode="bilinear",
-                                align_corners=False).squeeze(0)
-        top = (height - new_height) // 2
-        left = (width - new_width) // 2
-        canvas = torch.ones(3, height, width, device=device, dtype=dtype)
-        canvas[:, top:top + new_height, left:left + new_width] = resized.to(device=device, dtype=dtype)
-        processed.append(canvas)
-    return processed
