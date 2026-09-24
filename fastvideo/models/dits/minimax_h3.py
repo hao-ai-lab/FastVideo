@@ -19,7 +19,8 @@ from fastvideo.distributed.communication_op import (
     sequence_model_parallel_all_gather_with_unpad,
     sequence_model_parallel_shard,
 )
-from fastvideo.distributed.parallel_state import get_sp_world_size, model_parallel_is_initialized
+from fastvideo.distributed.parallel_state import (get_ring_size, get_sp_world_size, get_ulysses_size,
+                                                  model_parallel_is_initialized)
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.quantization.mxfp8_config import MXFP8QuantizeMethod
 from fastvideo.layers.mlp import MLP
@@ -197,6 +198,9 @@ class MiniMaxH3Attention(nn.Module):
                                             get_compute_dtype(),
                                             supported_attention_backends=supported_attention_backends)
         use_vsa = resolved_backend.get_name() == "VIDEO_SPARSE_ATTN_H3"
+        if use_vsa and get_ring_size() > 1:
+            raise NotImplementedError("MiniMax H3 VSA-H3 does not support Ring Attention. "
+                                      "Use FLASH_ATTN or set ring_size=1.")
         attention_cls = DistributedAttention_VSA if use_vsa else DistributedAttention
         self.distributed_attention = attention_cls(
             num_heads=num_attention_heads,
@@ -620,10 +624,10 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
                 logger.warning(
                     "FASTVIDEO_MINIMAX_H3_FUSIONS requested %s but Triton is unavailable; "
                     "every forward stays on the eager path.", ",".join(sorted(self.enabled_fusions)))
-        sp_world_size = get_sp_world_size() if model_parallel_is_initialized() else 1
-        if arch.num_attention_heads % sp_world_size:
+        ulysses_size = get_ulysses_size() if model_parallel_is_initialized() else 1
+        if arch.num_attention_heads % ulysses_size:
             raise ValueError(f"MiniMax H3 attention heads ({arch.num_attention_heads}) must be divisible by "
-                             f"sequence parallel size ({sp_world_size}).")
+                             f"Ulysses subgroup size ({ulysses_size}).")
 
         self.hidden_size = arch.hidden_size
         self.num_attention_heads = arch.num_attention_heads
@@ -798,6 +802,8 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
 
     def prepare_for_regional_compile(self) -> str | None:
         """Resolve state used only by inference regional fullgraph compile."""
+        if get_ring_size() > 1:
+            return "MiniMax H3 Ring Attention uses eager P2P communication; regional fullgraph compile is unsupported"
         self.prepare_for_compile()
         prepared_vsa_impls = 0
         unsupported_reasons: set[str] = set()

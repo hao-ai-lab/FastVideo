@@ -112,12 +112,11 @@ class RingAttention:
         if original_seq_len is not None:
             local_seq_len = q.shape[1]
             global_seq_len = local_seq_len * get_sp_world_size()
-            if original_seq_len != global_seq_len:
-                raise NotImplementedError(
-                    "Ring Attention does not yet support sequence-parallel padding or uneven shards. "
-                    f"original_seq_len={original_seq_len}, local_seq_len={local_seq_len}, "
-                    f"sp_world_size={get_sp_world_size()} (expected original_seq_len == "
-                    f"local_seq_len * sp_world_size == {global_seq_len}).")
+            if isinstance(original_seq_len, bool) or not isinstance(original_seq_len, int):
+                raise ValueError("original_seq_len must be a positive integer.")
+            if not 0 < original_seq_len <= global_seq_len:
+                raise ValueError("original_seq_len must be within the sequence-parallel transport capacity. "
+                                 f"Got original_seq_len={original_seq_len}, capacity={global_seq_len}.")
 
         if q.dtype not in (torch.float16, torch.bfloat16):
             raise NotImplementedError(
@@ -236,6 +235,7 @@ class RingAttention:
             softmax_scale=self.softmax_scale,
             causal=False,
             group=ring_group.device_group,
+            original_seq_len=original_seq_len,
         )
 
         # Ulysses step back (no-op when ulysses_size == 1): redistribute

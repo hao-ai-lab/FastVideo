@@ -27,19 +27,25 @@ logger = init_logger(__name__)
 _FIRST_RING_LOG = True
 
 
+def ring_chunk_valid_length(original_seq_len: int, chunk_size: int, chunk_rank: int) -> int:
+    """Valid prefix of a contiguous Ring chunk; trailing chunks may be empty."""
+    return max(0, min(chunk_size, original_seq_len - chunk_rank * chunk_size))
+
+
 def ring_flash_attn_forward(
-        process_group,
-        q: torch.Tensor,
-        k: torch.Tensor,
-        v: torch.Tensor,
-        softmax_scale,
-        dropout_p=0,
-        causal=True,
-        window_size=(-1, -1),
-        softcap=0.0,
-        alibi_slopes=None,
-        deterministic=False,
-        attn_type: AttnType = AttnType.FA,
+    process_group,
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    softmax_scale,
+    dropout_p=0,
+    causal=True,
+    window_size=(-1, -1),
+    softcap=0.0,
+    alibi_slopes=None,
+    deterministic=False,
+    attn_type: AttnType = AttnType.FA,
+    original_seq_len: int | None = None,
 ):
 
     global _FIRST_RING_LOG
@@ -60,6 +66,15 @@ def ring_flash_attn_forward(
         _FIRST_RING_LOG = False
 
     comm = RingComm(process_group)
+    transport_q = q
+    chunk_size = k.shape[1]
+    if original_seq_len is not None:
+        if (isinstance(original_seq_len, bool) or not isinstance(original_seq_len, int)
+                or not 0 < original_seq_len <= chunk_size * comm.world_size):
+            raise ValueError("original_seq_len must be a positive integer within the Ring transport capacity.")
+        if causal:
+            raise NotImplementedError("Padded Ring Attention only supports non-causal attention.")
+        q = q[:, :ring_chunk_valid_length(original_seq_len, chunk_size, comm.rank)].contiguous()
 
     out = None
     lse = None
@@ -73,12 +88,17 @@ def ring_flash_attn_forward(
             next_v = comm.send_recv(v)
             comm.commit()
 
-        if not causal or step <= comm.rank:
+        # KV travels from the previous rank. Keep the full transport buffers
+        # alive for P2P, and trim only the tensors passed to FlashAttention.
+        owner = (comm.rank - step) % comm.world_size
+        valid_kv = chunk_size if original_seq_len is None else ring_chunk_valid_length(
+            original_seq_len, chunk_size, owner)
+        if q.shape[1] > 0 and valid_kv > 0 and (not causal or step <= comm.rank):
             fn = select_flash_attn_impl(attn_type, stage="fwd-only")
             block_out, block_lse = fn(
                 q,
-                k,
-                v,
+                k[:, :valid_kv].contiguous(),
+                v[:, :valid_kv].contiguous(),
                 dropout_p=dropout_p,
                 softmax_scale=softmax_scale,
                 causal=causal and step == 0,
@@ -94,8 +114,21 @@ def ring_flash_attn_forward(
             k = next_k
             v = next_v
 
+    if out is None:
+        # Empty query ranks still participate in every communication step.
+        out = torch.zeros_like(q)
+        lse = torch.empty((*q.shape[:3], 1), device=q.device, dtype=torch.float32)
     out = out.to(q.dtype)
     lse = lse.squeeze(dim=-1).transpose(1, 2)
+    if q.shape[1] != transport_q.shape[1]:
+        padded_out = torch.zeros_like(transport_q)
+        padded_out[:, :q.shape[1]] = out
+        padded_lse = torch.full((q.shape[0], q.shape[2], transport_q.shape[1]),
+                                -float("inf"),
+                                device=q.device,
+                                dtype=torch.float32)
+        padded_lse[:, :, :q.shape[1]] = lse
+        out, lse = padded_out, padded_lse
     return out, lse
 
 
@@ -202,6 +235,7 @@ class RingFlashAttnFunc(torch.autograd.Function):
         return_softmax,
         group,
         attn_type,
+        original_seq_len,
     ):
         if softmax_scale is None:
             softmax_scale = q.shape[-1]**(-0.5)
@@ -222,6 +256,7 @@ class RingFlashAttnFunc(torch.autograd.Function):
             alibi_slopes=alibi_slopes,
             deterministic=False,
             attn_type=attn_type,
+            original_seq_len=original_seq_len,
         )
         # this should be out_padded
         ctx.save_for_backward(q, k, v, out, softmax_lse)
@@ -234,10 +269,13 @@ class RingFlashAttnFunc(torch.autograd.Function):
         ctx.deterministic = deterministic
         ctx.group = group
         ctx.attn_type = attn_type
+        ctx.original_seq_len = original_seq_len
         return out if not return_softmax else (out, softmax_lse, None)
 
     @staticmethod
     def backward(ctx, dout, *args):
+        if ctx.original_seq_len is not None:
+            raise NotImplementedError("Ring Attention with original_seq_len is inference-only.")
         q, k, v, out, softmax_lse = ctx.saved_tensors
         dq, dk, dv = ring_flash_attn_backward(
             ctx.group,
@@ -256,7 +294,7 @@ class RingFlashAttnFunc(torch.autograd.Function):
             deterministic=ctx.deterministic,
             attn_type=ctx.attn_type,
         )
-        return dq, dk, dv, None, None, None, None, None, None, None, None, None, None
+        return dq, dk, dv, None, None, None, None, None, None, None, None, None, None, None
 
 
 def ring_flash_attn_func(
@@ -273,6 +311,7 @@ def ring_flash_attn_func(
     return_attn_probs=False,
     group=None,
     attn_type: AttnType = AttnType.FA,
+    original_seq_len: int | None = None,
 ):
     return RingFlashAttnFunc.apply(
         q,
@@ -288,4 +327,5 @@ def ring_flash_attn_func(
         return_attn_probs,
         group,
         attn_type,
+        original_seq_len,
     )
