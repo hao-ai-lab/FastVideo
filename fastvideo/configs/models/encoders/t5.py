@@ -1,5 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 from dataclasses import dataclass, field
+import html
+
+import ftfy
+import regex as re
 
 from fastvideo.configs.models.encoders.base import (TextEncoderArchConfig, TextEncoderConfig)
 
@@ -96,6 +100,37 @@ class T5Config(TextEncoderConfig):
     arch_config: TextEncoderArchConfig = field(default_factory=T5ArchConfig)
 
     prefix: str = "t5"
+
+
+@dataclass
+class T5PaddedArchConfig(T5ArchConfig):
+    """T5 arch that pads tokenizer output to ``max_length``.
+
+    Required when downstream stages concatenate positive/negative masks along
+    batch (CFG) or when Diffusers Wan pads UMT5 to a fixed length.
+
+    ``TextEncoderLoader.update_model_arch`` re-runs ``T5ArchConfig.__post_init__``,
+    which rebuilds ``tokenizer_kwargs``. Subclasses must re-apply padding after
+    every ``super().__post_init__()`` call so the contract survives arch refresh.
+    """
+
+    def __post_init__(self) -> None:
+        super().__post_init__()  # type: ignore[no-untyped-call]
+        self.tokenizer_kwargs["padding"] = "max_length"
+
+
+@dataclass
+class T5PaddedConfig(T5Config):
+    arch_config: TextEncoderArchConfig = field(default_factory=T5PaddedArchConfig)
+
+
+def clean_t5_prompt(prompt: str) -> str:
+    """Match Diffusers Wan/LongCat prompt cleaning (basic_clean + whitespace_clean)."""
+    text = ftfy.fix_text(prompt)
+    text = html.unescape(html.unescape(text))
+    text = text.strip()
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
 
 
 @dataclass
