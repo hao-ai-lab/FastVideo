@@ -60,10 +60,12 @@ class WanTimeTextImageEmbedding(nn.Module):
         r_embedder_fusion: str = "additive",
         r_embedder_gate_value: float = 0.25,
         r_embedder_deltatime_type: str = "r",
+        cast_temb_to_context_dtype: bool = False,
     ):
         super().__init__()
 
         self.time_embedder = TimestepEmbedder(dim, frequency_embedding_size=time_freq_dim, act_layer="silu")
+        self.cast_temb_to_context_dtype = cast_temb_to_context_dtype
         self.time_modulation = ModulateProjection(dim, factor=6, act_layer="silu")
         self.text_embedder = MLP(text_embed_dim, dim, dim, bias=True,
                                  act_type="gelu_pytorch_tanh") if text_embed_dim > 0 else None
@@ -106,6 +108,10 @@ class WanTimeTextImageEmbedding(nn.Module):
         r_timestep: torch.Tensor | None = None,
     ):
         temb = self.time_embedder(timestep, timestep_seq_len)
+        if self.cast_temb_to_context_dtype:
+            # Wan-VACE keeps time_embedder weights in FP32, then rounds temb
+            # to the context dtype before the BF16 time projection.
+            temb = temb.to(encoder_hidden_states.dtype)
 
         if self._r_embedder_enabled and r_timestep is not None:
             assert self.delta_embedder is not None
@@ -361,6 +367,42 @@ class WanTransformerBlock(nn.Module):
 
         self.scale_shift_table = nn.Parameter(torch.randn(1, 6, dim) / dim**0.5)
 
+    def _self_attn_residual(
+        self,
+        hidden_states: torch.Tensor,
+        attn_output: torch.Tensor,
+        gate_msa: torch.Tensor,
+        orig_dtype: torch.dtype,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        # Norm-only site: shift/scale=None skips the identity modulation
+        # (normalized * 1.0 + 0) that two full-tensor passes used to compute.
+        norm_hidden_states, hidden_states = self.self_attn_residual_norm(hidden_states, attn_output, gate_msa, None,
+                                                                         None)
+        return hidden_states.to(orig_dtype), norm_hidden_states.to(orig_dtype)
+
+    def _cross_attn_residual(
+        self,
+        hidden_states: torch.Tensor,
+        norm_hidden_states: torch.Tensor,
+        attn_output: torch.Tensor,
+        c_shift_msa: torch.Tensor,
+        c_scale_msa: torch.Tensor,
+        orig_dtype: torch.dtype,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        norm_hidden_states, hidden_states = self.cross_attn_residual_norm(hidden_states, attn_output, 1, c_shift_msa,
+                                                                         c_scale_msa)
+        return hidden_states.to(orig_dtype), norm_hidden_states.to(orig_dtype)
+
+    def _ffn_residual(
+        self,
+        hidden_states: torch.Tensor,
+        ff_output: torch.Tensor,
+        c_gate_msa: torch.Tensor,
+        orig_dtype: torch.dtype,
+    ) -> torch.Tensor:
+        hidden_states = self.mlp_residual(hidden_states, ff_output, c_gate_msa)
+        return hidden_states.to(orig_dtype)
+
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -418,22 +460,16 @@ class WanTransformerBlock(nn.Module):
         attn_output, _ = self.to_out(attn_output)
         attn_output = attn_output.squeeze(1)
 
-        # Norm-only site: shift/scale=None skips the identity modulation
-        # (normalized * 1.0 + 0) that two full-tensor passes used to compute.
-        norm_hidden_states, hidden_states = self.self_attn_residual_norm(hidden_states, attn_output, gate_msa, None,
-                                                                         None)
-        norm_hidden_states, hidden_states = norm_hidden_states.to(orig_dtype), hidden_states.to(orig_dtype)
+        hidden_states, norm_hidden_states = self._self_attn_residual(hidden_states, attn_output, gate_msa, orig_dtype)
 
         # 2. Cross-attention
         attn_output = self.attn2(norm_hidden_states, context=encoder_hidden_states, context_lens=None)
-        norm_hidden_states, hidden_states = self.cross_attn_residual_norm(hidden_states, attn_output, 1, c_shift_msa,
-                                                                          c_scale_msa)
-        norm_hidden_states, hidden_states = norm_hidden_states.to(orig_dtype), hidden_states.to(orig_dtype)
+        hidden_states, norm_hidden_states = self._cross_attn_residual(hidden_states, norm_hidden_states, attn_output,
+                                                                      c_shift_msa, c_scale_msa, orig_dtype)
 
         # 3. Feed-forward
         ff_output = self.ffn(norm_hidden_states)
-        hidden_states = self.mlp_residual(hidden_states, ff_output, c_gate_msa)
-        hidden_states = hidden_states.to(orig_dtype)
+        hidden_states = self._ffn_residual(hidden_states, ff_output, c_gate_msa, orig_dtype)
 
         return hidden_states
 
