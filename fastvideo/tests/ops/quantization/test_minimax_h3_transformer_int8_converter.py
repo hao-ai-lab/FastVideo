@@ -159,12 +159,35 @@ def test_converter_refuses_an_incomplete_block(converter, tmp_path: Path, monkey
         converter.main()
 
 
-def test_converter_refuses_a_source_without_the_compression_gate(converter, tmp_path: Path,
-                                                                monkeypatch: pytest.MonkeyPatch):
-    """VSA builds the gate anyway, and a zero-initialized int8 weight has no valid row scale."""
+def test_converter_writes_a_dense_source_with_six_linears(converter, tmp_path: Path,
+                                                          monkeypatch: pytest.MonkeyPatch):
+    """A source trained without VSA has no gate; it converts and declares the six linears it has."""
     src = _write_source(tmp_path, blocks=2, gate=False)
+    dst = tmp_path / "int8"
+    monkeypatch.setattr(sys, "argv", [
+        "convert", "--src", str(src), "--dst", str(dst), "--device", "cpu", "--probe-rows", "64",
+        "--shard-size-gb", "0.0001"
+    ])
+    converter.main()
+    config = json.loads((dst / "config.json").read_text())
+    assert config["quantization_config"]["linears"] == list(converter.DENSE_TRANSFORMER_LINEARS)
+    index = json.loads((dst / "diffusion_pytorch_model.safetensors.index.json").read_text())
+    assert not any("to_gate_compress" in key for key in index["weight_map"])
+    tensors = {}
+    for shard in sorted(set(index["weight_map"].values())):
+        tensors.update(load_file(str(dst / shard)))
+    assert tensors["transformer_blocks.1.attn.to_q.weight"].dtype == torch.int8
+    assert tensors["transformer_blocks.1.ff.net.2.weight_scale"].dtype == torch.float32
+
+
+def test_converter_refuses_a_gate_missing_from_some_blocks(converter, tmp_path: Path,
+                                                          monkeypatch: pytest.MonkeyPatch):
+    src = _write_source(tmp_path, blocks=2)
+    tensors = load_file(str(src / "diffusion_pytorch_model.safetensors"))
+    tensors.pop("transformer_blocks.1.attn.to_gate_compress.weight")
+    save_file(tensors, str(src / "diffusion_pytorch_model.safetensors"), metadata={"format": "pt"})
     monkeypatch.setattr(sys, "argv", ["convert", "--src", str(src), "--report-only", "--device", "cpu"])
-    with pytest.raises(SystemExit, match="dense checkpoint"):
+    with pytest.raises(SystemExit, match="incomplete"):
         converter.main()
 
 

@@ -17,6 +17,12 @@ For the rank-16 FastH3 transformer: 50 blocks x 7 linears = 350 linears holding
 21.2B values, 21.2 GB as int8 against 42.4 GB as bf16, next to about 2 GB of
 tensors left in their released dtypes.
 
+A dense source, trained without VSA, has no ``attn.to_gate_compress``. Its six
+linears per block are converted and ``quantization_config`` lists those six,
+which tells the loader to build the VSA gate unquantized and zero-filled, as it
+does for a bf16 dense checkpoint. A gate present in some blocks and missing
+from others is an incomplete source and is refused.
+
 Every quantized linear is probed: random bf16 rows go through ``int8_linear``,
 the same function the loader executes, and the relative error against the bf16
 product must stay under ``--max-probe-error``, otherwise the conversion stops
@@ -49,6 +55,8 @@ from safetensors import safe_open
 from safetensors.torch import save_file
 
 from fastvideo.layers.quantization.minimax_h3_int8 import (
+    DENSE_TRANSFORMER_LINEARS,
+    GATE_LINEAR,
     INT8_TENSOR_SUFFIXES,
     TRANSFORMER_LINEARS,
     int8_linear,
@@ -246,19 +254,15 @@ def main() -> None:
                          "this converter expects the FastVideo MiniMax-H3 transformer layout")
     if num_layers and blocks_seen != num_layers:
         raise SystemExit(f"{src} holds {blocks_seen} transformer blocks but config.json declares {num_layers}")
-    short = {name: counts.get(name, 0) for name in TRANSFORMER_LINEARS if counts.get(name, 0) != blocks_seen}
+    # A dense source has no compression gate in any block and is written with the six
+    # linears it has; the declaration below is what keeps the loader from building an
+    # int8 gate with nothing to fill it. A gate in only some blocks is incomplete.
+    has_gate = counts.get(GATE_LINEAR, 0) > 0
+    linears = TRANSFORMER_LINEARS if has_gate else DENSE_TRANSFORMER_LINEARS
+    short = {name: counts.get(name, 0) for name in linears if counts.get(name, 0) != blocks_seen}
     if short:
-        detail = ""
-        if counts.get("attn.to_gate_compress", 0) == 0:
-            # The VSA attention backend builds the compression gate whether or not the
-            # checkpoint carries one, and the loader would have to zero-initialize an
-            # int8 weight next to a zero row scale, which the post-load check rejects.
-            # A dense checkpoint must therefore stay bf16 for now.
-            detail = (" A source without attn.to_gate_compress is a dense checkpoint; the VSA backend still builds "
-                      "that linear, and a zero-initialized int8 weight has no valid row scale. Convert a "
-                      "VSA-trained checkpoint.")
         raise SystemExit(f"Expected one of every block linear in each of {blocks_seen} blocks; "
-                         f"incomplete: {short}.{detail}")
+                         f"incomplete: {short}")
 
     device = torch.device(args.device)
     if device.type == "cuda" and not torch.cuda.is_available():
@@ -284,7 +288,9 @@ def main() -> None:
     written_linear_bytes = 0
     errors: dict[str, list[float]] = {}
     started = time.perf_counter()
-    print(f"{blocks_seen} transformer blocks, {sum(counts.values())} block linears to quantize", flush=True)
+    dense_note = "" if has_gate else f", dense checkpoint without {GATE_LINEAR}"
+    print(f"{blocks_seen} transformer blocks, {sum(counts.values())} block linears to quantize{dense_note}",
+          flush=True)
     weight_name, scale_name = INT8_TENSOR_SUFFIXES
 
     try:
@@ -318,11 +324,8 @@ def main() -> None:
 
     if dst is not None:
         config = dict(source_config)
-        config["quantization_config"] = serialized_int8_quantization_config(producer={
-            "converter": Path(__file__).name,
-            "torch": torch.__version__,
-            "blocks": blocks_seen,
-        })
+        producer = {"converter": Path(__file__).name, "torch": torch.__version__, "blocks": blocks_seen}
+        config["quantization_config"] = serialized_int8_quantization_config(producer=producer, linears=linears)
         (dst / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
         for extra in src.iterdir():
             if extra.is_file() and extra.name != "config.json" and not extra.name.endswith(".safetensors") \

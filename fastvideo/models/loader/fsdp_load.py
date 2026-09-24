@@ -683,6 +683,13 @@ def load_model_from_full_model_state_dict(
             if full_tensor.dtype != torch.int8:
                 raise ValueError(f"Parameter {target_param_name} is a serialized int8 weight but the checkpoint "
                                  f"stores {full_tensor.dtype}; the shards and quantization_config disagree")
+            if dense_lora_patch is not None:
+                # maybe_load_fsdp_model refuses an adapter on these checkpoints before
+                # the patch exists. This keeps any other caller from adding a float
+                # delta to int8 codes, which drops small updates and gives large ones
+                # the wrong magnitude.
+                raise NotImplementedError(f"A LoRA dense payload cannot be loaded next to serialized int8 weights; "
+                                          f"{target_param_name} is int8")
             target_dtype = torch.int8
         if dense_lora_patch is not None:
             # Returns float32 when a delta was added, so the cast below is what lands

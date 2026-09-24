@@ -27,6 +27,11 @@ omission::
                             "linears": ["attn.to_q", "attn.to_k", "attn.to_v", "attn.to_out",
                                         "attn.to_gate_compress", "ff.fc_in", "ff.fc_out"]}
 
+A dense checkpoint, trained without VSA, has no ``attn.to_gate_compress`` and
+lists the other six. The VSA backend still builds that gate, so for such a
+checkpoint it is built unquantized and the loader zero-fills it, exactly as for
+a bf16 dense checkpoint, and the attention then skips the all-zero branch.
+
 Single GPU only: FSDP inference rejects quantized transformers before the
 weights load. The layerwise offload hook pins and streams ``param.data``
 regardless of dtype, so it works on these parameters unchanged.
@@ -49,8 +54,9 @@ from fastvideo.models.utils import set_weight_attrs
 INT8_QUANT_METHOD = "int8"
 INT8_TENSOR_SUFFIXES = ("weight", "weight_scale")
 # The seven linears of every main transformer block, in FastVideo-native names.
-# ``attn.to_gate_compress`` exists only in VSA-trained checkpoints; a checkpoint
-# without it is loaded by a dense attention backend that never builds the layer.
+# ``attn.to_gate_compress`` exists only in VSA-trained checkpoints. A dense
+# checkpoint declares the other six; the VSA backend still builds the gate,
+# which then stays unquantized and is zero-filled by the loader.
 TRANSFORMER_LINEARS = (
     "attn.to_q",
     "attn.to_k",
@@ -60,6 +66,8 @@ TRANSFORMER_LINEARS = (
     "ff.fc_in",
     "ff.fc_out",
 )
+GATE_LINEAR = "attn.to_gate_compress"
+DENSE_TRANSFORMER_LINEARS = tuple(name for name in TRANSFORMER_LINEARS if name != GATE_LINEAR)
 INT8_ROW_CHUNK = 4096
 # ``torch._int_mm`` on CUDA refuses fewer than 17 rows; pad tiny batches up to this.
 _INT8_MIN_ROWS = 32
@@ -70,7 +78,7 @@ _BLOCK_LINEAR = re.compile(r"(?:^|\.)transformer_blocks\.\d+\.(?P<name>" +
 
 
 def is_minimax_h3_int8_linear_prefix(prefix: str) -> bool:
-    """Return whether *prefix* names one of the seven quantized linears of a main block."""
+    """Return whether *prefix* names one of the seven block linears the int8 format covers."""
     return _BLOCK_LINEAR.search(prefix) is not None
 
 
@@ -81,14 +89,24 @@ def validate_int8_geometry(output_size: int, input_size: int) -> None:
             f"MiniMax-H3 serialized int8 needs out and in sizes divisible by 8, got {output_size}x{input_size}")
 
 
-def serialized_int8_quantization_config(producer: dict[str, Any] | None = None) -> dict[str, Any]:
+def _declared_linears(linears: Any) -> tuple[str, ...]:
+    """The block linears a checkpoint stores as int8: all seven, or the six of a dense checkpoint."""
+    if isinstance(linears, list | tuple) and tuple(linears) in (TRANSFORMER_LINEARS, DENSE_TRANSFORMER_LINEARS):
+        return tuple(linears)
+    raise ValueError("MiniMax-H3 serialized int8 quantizes exactly the seven block linears "
+                     f"{list(TRANSFORMER_LINEARS)}, or the six without {GATE_LINEAR} for a dense checkpoint; "
+                     f"the checkpoint declares {linears!r}")
+
+
+def serialized_int8_quantization_config(producer: dict[str, Any] | None = None,
+                                        linears: tuple[str, ...] | list[str] = TRANSFORMER_LINEARS) -> dict[str, Any]:
     """The ``quantization_config`` block the converter writes and ``from_config`` requires."""
     config: dict[str, Any] = {
         "quant_method": INT8_QUANT_METHOD,
         "activation_scheme": "dynamic",
         "weight_granularity": "row",
         "activation_granularity": "row",
-        "linears": list(TRANSFORMER_LINEARS),
+        "linears": list(_declared_linears(linears)),
     }
     if producer:
         config["producer"] = dict(producer)
@@ -168,6 +186,10 @@ def transformer_quantization_config_from_metadata(metadata: Any) -> Quantization
 class MiniMaxH3SerializedInt8Config(QuantizationConfig):
     """Serialized per-row int8 contract for the H3 transformer blocks."""
 
+    def __init__(self, linears: tuple[str, ...] | list[str] = TRANSFORMER_LINEARS) -> None:
+        super().__init__()
+        self.linears = _declared_linears(linears)
+
     @classmethod
     def get_name(cls) -> str:
         return INT8_QUANT_METHOD
@@ -202,16 +224,15 @@ class MiniMaxH3SerializedInt8Config(QuantizationConfig):
         for key, value in expected.items():
             if str(config[key]).lower() != value:
                 raise ValueError(f"MiniMax-H3 serialized int8 expects {key}={value!r}, got {config[key]!r}")
-        linears = config["linears"]
-        if not isinstance(linears, list) or tuple(linears) != TRANSFORMER_LINEARS:
-            raise ValueError("MiniMax-H3 serialized int8 quantizes exactly the seven block linears "
-                             f"{list(TRANSFORMER_LINEARS)}; the checkpoint declares {linears!r}")
-        return cls()
+        return cls(config["linears"])
 
     def get_quant_method(self, layer: nn.Module, prefix: str) -> LinearMethodBase | None:
-        if isinstance(layer, LinearBase) and is_minimax_h3_int8_linear_prefix(prefix):
-            return MiniMaxH3SerializedInt8LinearMethod()
-        return None
+        if not isinstance(layer, LinearBase):
+            return None
+        match = _BLOCK_LINEAR.search(prefix)
+        if match is None or match["name"] not in self.linears:
+            return None
+        return MiniMaxH3SerializedInt8LinearMethod()
 
     def validate_runtime(self, device: torch.device) -> None:
         if device.type == "cuda":
@@ -320,6 +341,16 @@ def reject_lora_on_serialized_int8(model: nn.Module, lora_path: str) -> None:
     base dtype and then multiplies in place, which raises on an integer tensor.
     Merging correctly means dequantize, merge, requantize, and that changes the
     scales the checkpoint shipped, so it is refused rather than approximated.
+
+    The refusal is model-wide, so it also covers an adapter that touches only
+    float parameters such as the token refiner or the norms. Telling that case
+    apart would need an analysis of which parameters an adapter targets, and
+    neither load path has one: the low-rank path wraps layers by module name
+    before it reads the adapter file. An adapter that does reach an int8 linear
+    would also need a merge into quantized weights, which does not exist. The
+    supported route is to merge the adapter into the bf16 checkpoint and convert
+    that. ``set_lora_adapter`` applies the same model-wide rule once NVFP4 has
+    dropped the bf16 weights.
     """
     if not has_serialized_int8_linears(model):
         return
@@ -342,6 +373,8 @@ def finalize_serialized_int8_model(model: nn.Module) -> int:
 
 
 __all__ = [
+    "DENSE_TRANSFORMER_LINEARS",
+    "GATE_LINEAR",
     "INT8_QUANT_METHOD",
     "INT8_TENSOR_SUFFIXES",
     "TRANSFORMER_LINEARS",

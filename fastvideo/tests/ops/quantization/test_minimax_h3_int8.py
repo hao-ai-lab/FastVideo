@@ -16,6 +16,8 @@ os.environ.setdefault("MASTER_PORT", "29516")
 
 from fastvideo.layers.linear import ReplicatedLinear, UnquantizedLinearMethod
 from fastvideo.layers.quantization.minimax_h3_int8 import (
+    DENSE_TRANSFORMER_LINEARS,
+    GATE_LINEAR,
     INT8_TENSOR_SUFFIXES,
     TRANSFORMER_LINEARS,
     MiniMaxH3SerializedInt8Config,
@@ -90,6 +92,23 @@ def test_metadata_dispatch():
         transformer_quantization_config_from_metadata({"quant_method": "nvfp4"})
     with pytest.raises(ValueError, match="mapping"):
         transformer_quantization_config_from_metadata("int8")
+
+
+def test_dense_metadata_leaves_the_gate_unquantized():
+    """A dense checkpoint lists six linears, so the gate the VSA backend adds stays a float layer."""
+    assert GATE_LINEAR in TRANSFORMER_LINEARS and GATE_LINEAR not in DENSE_TRANSFORMER_LINEARS
+    assert len(DENSE_TRANSFORMER_LINEARS) == 6
+    metadata = serialized_int8_quantization_config(linears=DENSE_TRANSFORMER_LINEARS)
+    assert metadata["linears"] == list(DENSE_TRANSFORMER_LINEARS)
+    config = MiniMaxH3SerializedInt8Config.from_config(metadata)
+    gate = ReplicatedLinear(64, 32, bias=False, quant_config=config, prefix=f"{BLOCK}.{GATE_LINEAR}")
+    assert isinstance(gate.quant_method, UnquantizedLinearMethod)
+    assert gate.weight.dtype != torch.int8
+    query = ReplicatedLinear(64, 32, bias=False, quant_config=config, prefix=f"{BLOCK}.attn.to_q")
+    assert isinstance(query.quant_method, MiniMaxH3SerializedInt8LinearMethod)
+    for declared in (["attn.to_q"], list(reversed(TRANSFORMER_LINEARS))):
+        with pytest.raises(ValueError, match="seven block linears"):
+            serialized_int8_quantization_config(linears=declared)
 
 
 @pytest.mark.parametrize("prefix, quantized", [
@@ -244,7 +263,7 @@ class _TinyTransformer(torch.nn.Module):
         return default_dtype
 
 
-def _load(model: torch.nn.Module, tensors: dict[str, torch.Tensor]):
+def _load(model: torch.nn.Module, tensors: dict[str, torch.Tensor], dense_lora_patch=None):
     from fastvideo.models.loader.fsdp_load import load_model_from_full_model_state_dict
     from fastvideo.models.loader.utils import get_param_names_mapping
     return load_model_from_full_model_state_dict(
@@ -254,6 +273,7 @@ def _load(model: torch.nn.Module, tensors: dict[str, torch.Tensor]):
         torch.bfloat16,
         strict=True,
         param_names_mapping=get_param_names_mapping({}),
+        dense_lora_patch=dense_lora_patch,
     )
 
 
@@ -275,6 +295,35 @@ def test_production_loader_keeps_int8_and_row_scales():
     assert torch.equal(output, int8_linear(x, weight_int8, weight_scale))
 
 
+def _tensors_without_gate() -> dict[str, torch.Tensor]:
+    weight_int8, weight_scale = quantize_rows_int8(torch.randn(32, 64, dtype=torch.bfloat16))
+    return {"q.weight": weight_int8, "q.weight_scale": weight_scale,
+            "refiner.weight": torch.randn(32, 64, dtype=torch.float32)}
+
+
+def test_production_loader_zero_fills_the_float_gate_of_a_dense_checkpoint():
+    """Under VSA a dense int8 checkpoint gets the same all-zero float gate a bf16 one gets."""
+    dense_config = MiniMaxH3SerializedInt8Config.from_config(
+        serialized_int8_quantization_config(linears=DENSE_TRANSFORMER_LINEARS))
+    model = _TinyTransformer()
+    model.to_gate_compress = ReplicatedLinear(64, 32, bias=False, quant_config=dense_config,
+                                              prefix=f"{BLOCK}.{GATE_LINEAR}")
+    result = _load(model, _tensors_without_gate())
+    assert not result.missing_keys and not result.unexpected_keys
+    assert model.to_gate_compress.weight.dtype == torch.bfloat16
+    assert not model.to_gate_compress.weight.any()
+    assert finalize_serialized_int8_model(model) == 1
+
+    # Declaring all seven without shipping the gate builds an int8 gate the loader
+    # cannot fill, and finalization says so instead of running with it.
+    seven = _TinyTransformer()
+    seven.to_gate_compress = ReplicatedLinear(64, 32, bias=False, quant_config=_config(),
+                                              prefix=f"{BLOCK}.{GATE_LINEAR}")
+    _load(seven, _tensors_without_gate())
+    with pytest.raises(ValueError, match="must be int8"):
+        finalize_serialized_int8_model(seven)
+
+
 def test_lora_is_refused_on_serialized_int8_and_allowed_elsewhere():
     """Both merge paths assume a float base weight, so an adapter has to fail loudly."""
     model = _TinyTransformer()
@@ -287,6 +336,13 @@ def test_lora_is_refused_on_serialized_int8_and_allowed_elsewhere():
                                      prefix="minimax_h3.token_refiner.refiner_blocks.0.attn.to_q")
     assert has_serialized_int8_linears(dense) is False
     reject_lora_on_serialized_int8(dense, "/tmp/some-adapter")
+
+
+def test_production_loader_refuses_a_dense_lora_patch_next_to_int8_weights():
+    """The loader's own check, for a caller that reaches it without the adapter refusal."""
+    from fastvideo.models.loader.lora_patch import DenseLoRAPatch
+    with pytest.raises(NotImplementedError, match="serialized int8 weights"):
+        _load(_TinyTransformer(), _tensors_without_gate(), dense_lora_patch=DenseLoRAPatch([], {}, {}))
 
 
 def test_production_loader_refuses_float_shards_for_int8_weights():
