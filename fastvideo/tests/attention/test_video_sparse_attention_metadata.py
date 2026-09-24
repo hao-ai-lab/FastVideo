@@ -2,7 +2,6 @@ import math
 
 import torch
 
-from fastvideo.attention.backends import video_sparse_attn as vsa_module
 from fastvideo.attention.backends.video_sparse_attn import (
     VSA_TILE_SIZE,
     VideoSparseAttentionImpl,
@@ -90,7 +89,12 @@ def test_vsa_forward_cur_topk_uses_padded_kv_block_count(monkeypatch):
         assert torch.equal(q_variable_block_sizes, metadata.variable_block_sizes)
         return query
 
-    monkeypatch.setattr(vsa_module, "video_sparse_attn", fake_video_sparse_attn)
+    import sys
+    import types
+
+    kernel_module = types.ModuleType("fastvideo_kernel")
+    kernel_module.video_sparse_attn = fake_video_sparse_attn
+    monkeypatch.setitem(sys.modules, "fastvideo_kernel", kernel_module)
 
     query = torch.ones(1, padded_seq_len, 1, 1)
     output = impl.forward(query, query, query, query, metadata)
