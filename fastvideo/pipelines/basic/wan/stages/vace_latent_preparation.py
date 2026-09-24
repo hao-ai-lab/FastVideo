@@ -12,8 +12,10 @@ class WanVACELatentPreparationStage(LatentPreparationStage):
         num_ref = batch.vace_num_reference_frames
         temporal_ratio = fastvideo_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
         original_num_frames = batch.num_frames
-        if num_ref > 0 and original_num_frames is not None:
-            batch.num_frames = int(original_num_frames) + num_ref * temporal_ratio
-        super().forward(batch, fastvideo_args)
-        batch.num_frames = original_num_frames
+        try:
+            if num_ref > 0 and original_num_frames is not None:
+                batch.num_frames = int(original_num_frames) + num_ref * temporal_ratio
+            super().forward(batch, fastvideo_args)
+        finally:
+            batch.num_frames = original_num_frames
         return batch
