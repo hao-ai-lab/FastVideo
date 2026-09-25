@@ -15,6 +15,7 @@ from tqdm.auto import tqdm
 
 import fastvideo.envs as envs
 from fastvideo.attention import get_attn_backend
+from fastvideo.attention.backends.vmoba import VMOBAAttentionBackend
 from fastvideo.attention.selector import component_attention_backend
 from fastvideo.distributed import (get_local_torch_device, get_world_group)
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -26,14 +27,7 @@ from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 from fastvideo.platforms import AttentionBackendEnum
-from fastvideo.utils import dict_to_3d_list
-
-try:
-    from fastvideo.attention.backends.vmoba import VMOBAAttentionBackend
-    from fastvideo.utils import is_vmoba_available
-    vmoba_attn_available = is_vmoba_available()
-except ImportError:
-    vmoba_attn_available = False
+from fastvideo.utils import dict_to_3d_list, is_vmoba_available
 
 try:
     from fastvideo.attention.backends.video_sparse_attn import (VideoSparseAttentionBackend)
@@ -381,7 +375,7 @@ class DenoisingStage(PipelineStage):
                             assert attn_metadata is not None, "attn_metadata cannot be None"
                         else:
                             attn_metadata = None
-                    elif (vmoba_attn_available and self.attn_backend == VMOBAAttentionBackend):
+                    elif (self.attn_backend == VMOBAAttentionBackend and is_vmoba_available()):
                         self.attn_metadata_builder_cls = self.attn_backend.get_builder_cls()
                         if self.attn_metadata_builder_cls is not None:
                             self.attn_metadata_builder = self.attn_metadata_builder_cls()

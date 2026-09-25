@@ -5,15 +5,6 @@ from dataclasses import dataclass
 
 import torch
 
-try:
-    from fastvideo_kernel import video_sparse_attn
-except ImportError:
-    video_sparse_attn = None
-try:
-    from fastvideo_kernel import video_sparse_attn_bshd
-except ImportError:
-    video_sparse_attn_bshd = None
-
 from typing import Any
 
 from fastvideo.attention.backends.abstract import (AttentionBackend, AttentionImpl, AttentionMetadata,
@@ -322,6 +313,18 @@ class VideoSparseAttentionImpl(AttentionImpl):
     ) -> torch.Tensor:
         block_elements = math.prod(VSA_TILE_SIZE)
         cur_topk = _compute_cur_topk(attn_metadata)
+
+        # fastvideo_kernel is optional and may require a GPU driver at import time.
+        # Defer the import until the kernel is actually needed so CPU-only hosts can
+        # still import FastVideo and select a different attention backend.
+        try:
+            from fastvideo_kernel import video_sparse_attn
+        except ImportError:
+            video_sparse_attn = None
+        try:
+            from fastvideo_kernel import video_sparse_attn_bshd
+        except ImportError:
+            video_sparse_attn_bshd = None
 
         # 256-element tiles auto-route to the FA4 CuTe BSHD fastpath, which
         # consumes [B, S, H, D] directly -- skip the transpose round-trip.

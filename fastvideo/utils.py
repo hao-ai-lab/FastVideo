@@ -5,6 +5,7 @@ import argparse
 import ctypes
 import hashlib
 import importlib
+import importlib.machinery
 import importlib.util
 import inspect
 import ipaddress
@@ -954,12 +955,21 @@ def set_random_seed(seed: int) -> None:
 
 @lru_cache(maxsize=1)
 def is_vsa_available() -> bool:
-    return importlib.util.find_spec("fastvideo_kernel.ops") is not None
+    # Looking up a dotted name with util.find_spec imports its parent package.
+    # Kernel package initialization may require a visible GPU driver.
+    package = importlib.util.find_spec("fastvideo_kernel")
+    if package is None:
+        return False
+    return importlib.machinery.PathFinder.find_spec("fastvideo_kernel.ops",
+                                                    package.submodule_search_locations) is not None
 
 
 @lru_cache(maxsize=1)
 def is_vmoba_available() -> bool:
-    if importlib.util.find_spec("fastvideo_kernel.vmoba") is None:
+    package = importlib.util.find_spec("fastvideo_kernel")
+    if package is None:
+        return False
+    if importlib.machinery.PathFinder.find_spec("fastvideo_kernel.vmoba", package.submodule_search_locations) is None:
         return False
     try:
         import flash_attn

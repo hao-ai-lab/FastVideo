@@ -15,8 +15,10 @@ exec pytest \
   ./fastvideo/tests/ops/ \
   ./fastvideo/tests/worker/ \
   ./fastvideo/tests/training/test_trackers.py \
+  ./fastvideo/tests/attention/test_kernel_optional_import.py \
   ./fastvideo/tests/attention/test_sdpa_metadata_mask_contract.py \
   ./fastvideo/tests/attention/test_vsa_h3_tile_grad_safety.py \
+  ./fastvideo/tests/attention/test_video_sparse_attention_metadata.py \
   ./fastvideo/tests/modal/test_kernel_build_cache.py \
   ./fastvideo/tests/modal/test_pr_test.py \
   ./fastvideo/tests/modal/test_ssim_test.py \
