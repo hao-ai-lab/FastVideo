@@ -524,8 +524,29 @@ Sub-steps and gates:
       HEIGHT/WIDTH/SPARSITY/MAX_STEPS/RUN_NAME env-driven). Job **11099**
       (VSA smoke, 2 steps, sparsity 0.5, 480x832) submitted 2026-09-24 and
       pending on `Resources`.
-  - Then: run the VSA smoke, then the VSA gate at 480x832, and compare with
-    the dense 4D result.
+  - 2026-09-25: **Slurm path works and the VSA smoke passed.**
+    - `sbatch` is unusable site-side: every submission (including a trivial
+      `--wrap`) is requeued and held with
+      `user_env_retrieval_failed_requeued_held`, and `--export=NONE` /
+      `--get-user-env=none` do not help. The compute nodes run a minimal OS
+      (no `/usr/bin/hostname`), so the site's env-retrieval helper cannot run
+      there. **Workaround that works: a detached `srun` step**
+      (`setsid nohup srun ... < /dev/null &`) from the login node, which is
+      what `launch_h3_tdm_vsa.sh` does.
+    - Other operational facts found the hard way: the compute-node home dir
+      does not exist (`couldn't chdir to /home/vlm-mal004`), so run outputs
+      must live on Lustre; `/workspace/run` was created by the Kubernetes
+      jobs as root and is **not writable** from Slurm, so runs now go under
+      `/workspace/vlm-mal004/tdm-port/runs/<name>`; the Pyxis/enroot image
+      import takes ~10+ min per node and caches node-locally in
+      `/tmp/enroot`.
+    - VSA smoke (`h3-tdm-vsa-smoke`, 2 steps, 480x832, sparsity 0.5):
+      **PASSED** at ~35 s/it, no dtype error and no OOM. That confirms both
+      the kernel-boundary Q/K/V bf16 cast and the geometry lever.
+    - VSA gate (`h3-tdm-vsa-gate`, 200 steps, same settings) launched and
+      queued as Slurm job 11114; at ~35 s/it plus the final-step validation
+      it is roughly 2.2 h once it starts.
+  - Then: read the VSA gate result and compare it with the dense 4D result.
 
 - 2026-09-22: Branch renamed to `tdm-port` and pushed to the internal
   origin; stale `fork/issue-775-tdm` ref removed. Phase 0 plan recorded

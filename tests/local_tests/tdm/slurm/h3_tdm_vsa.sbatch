@@ -25,14 +25,20 @@
 
 set -Eeuo pipefail
 
+# Positional parameters (passed as `sbatch --export=NONE script MODE ...`).
+# Slurm environment export fails for this account
+# (`user_env_retrieval_failed_requeued_held`), so the job takes everything it
+# needs as arguments and sets its own environment.
+MODE=${1:-smoke}
+MAX_STEPS=${2:-2}
+SPARSITY=${3:-0.5}
+HEIGHT=${4:-480}
+WIDTH=${5:-832}
+RUN_NAME=${6:-h3-tdm-vsa-${MODE}}
+EXTRA_ARGS=${7:-}
+
 IMAGE=${IMAGE:-ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev:py3.12-cuda13.0.0-latest}
 CODE=${CODE:-/workspace/vlm-mal004/tdm-port/code}
-MODE=${MODE:-smoke}
-RUN_NAME=${RUN_NAME:-h3-tdm-vsa-${MODE}}
-MAX_STEPS=${MAX_STEPS:-2}
-HEIGHT=${HEIGHT:-480}
-WIDTH=${WIDTH:-832}
-SPARSITY=${SPARSITY:-0.5}
 RUN_ROOT=/workspace/run/tdm-port/${RUN_NAME}
 
 echo "START ${RUN_NAME} $(date -u +%FT%TZ) mode=${MODE} geom=${HEIGHT}x${WIDTH} sparsity=${SPARSITY}"
