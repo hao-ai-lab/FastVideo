@@ -72,7 +72,32 @@ class RocmPlatform(Platform):
         elif selected_backend in (AttentionBackendEnum.FLASH_ATTN, None):
             pass
 
-        elif selected_backend in (AttentionBackendEnum.SAGE_ATTN):
+        elif selected_backend == AttentionBackendEnum.VIDEO_SPARSE_ATTN:
+            # fastvideo_kernel's block-sparse attention dispatcher takes its
+            # Triton route here: the ThunderKittens kernels are CUDA-only and
+            # the CuTe fastpath (FASTVIDEO_VSA_CUTEDSL) is not available on ROCm.
+            try:
+                from fastvideo_kernel import video_sparse_attn  # noqa: F401
+            except ImportError as e:
+                raise ImportError("VIDEO_SPARSE_ATTN selected but fastvideo_kernel is not importable. On ROCm it "
+                                  "runs through its Triton kernels; build it with fastvideo-kernel/build.sh --rocm "
+                                  "or pick a different FASTVIDEO_ATTENTION_BACKEND.") from e
+            logger.info("Using Video Sparse Attention backend (Triton kernels).")
+            return "fastvideo.attention.backends.video_sparse_attn.VideoSparseAttentionBackend"
+
+        elif selected_backend == AttentionBackendEnum.VIDEO_SPARSE_ATTN_H3:
+            try:
+                from fastvideo_kernel.block_sparse_attn_256 import (  # noqa: F401
+                    block_sparse_attn_256_bshd)
+            except ImportError as e:
+                raise ImportError("VIDEO_SPARSE_ATTN_H3 selected but fastvideo_kernel is not importable. On ROCm "
+                                  "its block-sparse kernels run through Triton; build it with "
+                                  "fastvideo-kernel/build.sh --rocm or pick a different "
+                                  "FASTVIDEO_ATTENTION_BACKEND.") from e
+            logger.info("Using MiniMax-H3 Video Sparse Attention backend (Triton kernels).")
+            return "fastvideo.attention.backends.video_sparse_attn_h3.MiniMaxH3VSABackend"
+
+        elif selected_backend == AttentionBackendEnum.SAGE_ATTN:
             raise ValueError(f"{selected_backend.name} is not supported on {cls.device_name}.")
         elif selected_backend:
             raise ValueError(f"Invalid attention backend for {cls.device_name}: {selected_backend}")
