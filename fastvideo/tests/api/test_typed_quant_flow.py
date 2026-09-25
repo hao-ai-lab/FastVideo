@@ -56,6 +56,21 @@ def test_typed_transformer_quant_resolves_to_nvfp4_instance(captured_kwargs) -> 
     assert isinstance(captured_kwargs["transformer_quant"],
                       NVFP4Config), (f"Expected NVFP4Config instance, got "
                                      f"{type(captured_kwargs['transformer_quant']).__name__}")
+    assert captured_kwargs["transformer_quant"].layer_profile == "refine"
+
+
+def test_typed_nvfp4_layer_profile_pins_h3_dit(captured_kwargs) -> None:
+    from fastvideo.layers.quantization.nvfp4_config import NVFP4Config as CurrentNVFP4Config
+
+    cfg = GeneratorConfig(
+        model_path="FastVideo/LTX2-Distilled-Diffusers",
+        engine=EngineConfig(quantization=QuantizationConfig(transformer_quant="NVFP4", layer_profile="h3_dit"), ),
+    )
+    generator_config_to_fastvideo_args(cfg)
+    quant = captured_kwargs["transformer_quant"]
+    assert type(quant).__name__ == "NVFP4Config"
+    assert getattr(quant, "layer_profile") == "h3_dit"
+    assert isinstance(quant, CurrentNVFP4Config)
 
 
 def test_no_typed_quant_omits_transformer_quant_kwarg(captured_kwargs) -> None:
