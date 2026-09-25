@@ -278,26 +278,25 @@ def _resolve_devtools_paths(
 PROMPT_SUPPORTED_PROVIDERS = (
     "cerebras",
     "groq",
+    "atlascloud",
 )
-if os.getenv("FASTVIDEO_PROMPT_PROVIDER") is not None:
-    _env_choice(
-        "FASTVIDEO_PROMPT_PROVIDER",
-        "cerebras",
-        PROMPT_SUPPORTED_PROVIDERS,
-    )
-PROMPT_PROVIDER = "cerebras"
-PROMPT_PROVIDER_RUNTIME_STAGES = (("cerebras", "groq"), )
-PROMPT_PROVIDER_PRIORITY = (
+_PROMPT_SELECTED_PROVIDER = _env_choice(
+    "FASTVIDEO_PROMPT_PROVIDER",
     "cerebras",
-    "groq",
+    PROMPT_SUPPORTED_PROVIDERS,
 )
+# Keep the existing Cerebras/Groq race unless Atlas Cloud is explicitly selected.
+PROMPT_PROVIDER = "atlascloud" if _PROMPT_SELECTED_PROVIDER == "atlascloud" else "cerebras"
+PROMPT_PROVIDER_PRIORITY = (("atlascloud", ) if PROMPT_PROVIDER == "atlascloud" else ("cerebras", "groq"))
+PROMPT_PROVIDER_RUNTIME_STAGES = (PROMPT_PROVIDER_PRIORITY, )
 PROMPT_PROVIDER_API_KEY_NAMES = {
     "cerebras": ("CEREBRAS_API_KEY", ),
     "groq": ("GROQ_API_KEY", ),
+    "atlascloud": ("ATLASCLOUD_API_KEY", ),
 }
 PROMPT_API_KEYS = {
     provider: _optional_env(*PROMPT_PROVIDER_API_KEY_NAMES[provider])
-    for provider in PROMPT_SUPPORTED_PROVIDERS
+    for provider in PROMPT_PROVIDER_PRIORITY
 }
 PROMPT_API_BASE_URLS = {
     "cerebras": (os.getenv("FASTVIDEO_PROMPT_CEREBRAS_API_BASE_URL", "").strip() or None),
@@ -306,9 +305,12 @@ PROMPT_API_BASE_URLS = {
         "https://api.groq.com/openai/v1",
     ).strip() or None),
 }
+if PROMPT_PROVIDER == "atlascloud":
+    PROMPT_API_BASE_URLS = {"atlascloud": "https://api.atlascloud.ai/v1"}
 PROMPT_API_KEY = PROMPT_API_KEYS[PROMPT_PROVIDER]
 PROMPT_API_BASE_URL = PROMPT_API_BASE_URLS[PROMPT_PROVIDER]
-PROMPT_MODEL = (os.getenv("FASTVIDEO_PROMPT_MODEL", "gpt-oss-120b").strip() or "gpt-oss-120b")
+_PROMPT_DEFAULT_MODEL = "openai/gpt-4.1-mini" if PROMPT_PROVIDER == "atlascloud" else "gpt-oss-120b"
+PROMPT_MODEL = (os.getenv("FASTVIDEO_PROMPT_MODEL", _PROMPT_DEFAULT_MODEL).strip() or _PROMPT_DEFAULT_MODEL)
 _PROMPT_CEREBRAS_REQUEST_MODEL = (os.getenv("FASTVIDEO_PROMPT_CEREBRAS_MODEL", PROMPT_MODEL).strip() or PROMPT_MODEL)
 PROMPT_PROVIDER_MODELS = {
     "cerebras": _PROMPT_CEREBRAS_REQUEST_MODEL,
@@ -317,6 +319,8 @@ PROMPT_PROVIDER_MODELS = {
         f"openai/{PROMPT_MODEL}",
     ).strip() or f"openai/{PROMPT_MODEL}"),
 }
+if PROMPT_PROVIDER == "atlascloud":
+    PROMPT_PROVIDER_MODELS = {"atlascloud": PROMPT_MODEL}
 PROMPT_REWRITE_MODEL = PROMPT_MODEL
 PROMPT_REWRITE_MODEL_OPTIONS = [PROMPT_REWRITE_MODEL]
 PROMPT_TIMEOUT_MS = 20000

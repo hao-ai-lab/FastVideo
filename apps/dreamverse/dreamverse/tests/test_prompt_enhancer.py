@@ -6,6 +6,8 @@ import os
 import re
 import time
 
+import pytest
+
 os.environ.setdefault("CEREBRAS_API_KEY", "dummy")
 os.environ.setdefault("GROQ_API_KEY", "dummy")
 
@@ -262,6 +264,71 @@ def test_build_client_supports_groq_provider(monkeypatch):
         "api_key": "groq-key",
         "base_url": "https://api.groq.com/openai/v1",
     }
+
+
+def test_build_client_supports_atlascloud_without_retries(monkeypatch):
+    monkeypatch.setattr(prompt_enhancer_module, "OpenAI", _FakeOpenAIClient)
+    enhancer = PromptEnhancer.__new__(PromptEnhancer)
+    enhancer.provider = "atlascloud"
+    enhancer.api_key = "atlas-test-key"
+    enhancer.api_base_url = "https://api.atlascloud.ai/v1"
+
+    client = enhancer._build_client()
+
+    assert client.kwargs == {
+        "api_key": "atlas-test-key",
+        "base_url": "https://api.atlascloud.ai/v1",
+        "max_retries": 0,
+    }
+    assert prompt_enhancer_module._resolve_provider_label("atlascloud") == "atlascloud"
+
+
+def test_atlascloud_missing_key_fails_before_building_client(monkeypatch):
+    monkeypatch.setattr(prompt_enhancer_module, "PROMPT_PROVIDER_PRIORITY", ("atlascloud", ))
+    monkeypatch.setattr(prompt_enhancer_module, "PROMPT_API_KEYS", {"atlascloud": None})
+    monkeypatch.setattr(prompt_enhancer_module, "PROMPT_API_BASE_URLS",
+                        {"atlascloud": "https://api.atlascloud.ai/v1"})
+    enhancer = PromptEnhancer.__new__(PromptEnhancer)
+    enhancer.provider_request_models = {"atlascloud": "openai/gpt-4.1-mini"}
+
+    def fail_if_called(**kwargs):
+        pytest.fail("Missing credentials must not create a client")
+
+    enhancer._build_client = fail_if_called
+    with pytest.raises(RuntimeError, match="ATLASCLOUD_API_KEY"):
+        enhancer._build_provider_runtimes()
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_atlascloud_runtime_preserves_model_and_submits_once(fails):
+    calls = []
+    client = _FakeSyncClient(_chat_payload_with_content("enhanced prompt"))
+
+    def create(**kwargs):
+        calls.append(kwargs)
+        if fails:
+            raise RuntimeError("provider request failed")
+        return _FakeResponse(_chat_payload_with_content("enhanced prompt"))
+
+    client.chat.completions.create = create
+    enhancer = _build_test_enhancer({})
+    enhancer.provider = "atlascloud"
+    enhancer.api_key = "atlas-test-key"
+    enhancer.api_base_url = "https://api.atlascloud.ai/v1"
+    enhancer.provider_request_models = {"atlascloud": "openai/gpt-4.1-mini"}
+    runtime = ProviderRuntime("atlascloud", enhancer.api_key, enhancer.api_base_url,
+                              "openai/gpt-4.1-mini", client)
+    body = {"model": "openai/gpt-4.1-mini", "messages": [{"role": "user", "content": "a sunrise"}],
+            "temperature": 0.5, "max_completion_tokens": 16}
+    call = enhancer._request_content_with_body_for_runtime(runtime=runtime, body=body, timeout_seconds=2.0)
+    if fails:
+        with pytest.raises(RuntimeError, match="provider request failed"):
+            asyncio.run(call)
+    else:
+        result, content = asyncio.run(call)
+        assert result["choices"][0]["message"]["content"] == "enhanced prompt"
+        assert content == "enhanced prompt"
+    assert calls == [body]
 
 
 def test_rewrite_prompt_sequence_accepts_segment_prompts_output():
