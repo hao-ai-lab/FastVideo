@@ -41,6 +41,7 @@ if [ "$pytest_rc" -eq 0 ] || [ "$PERF_UPLOAD_POLICY" = always ]; then
 fi
 python ./fastvideo/tests/performance/dashboard.py || true
 cp -f fastvideo/tests/performance/results/*.json "$PERF_REPORTS_DIR/" 2>/dev/null || true
+cp -rf fastvideo/tests/performance/results/worker_logs "$PERF_REPORTS_DIR/" 2>/dev/null || true
 
 echo "--- GPU telemetry (clocks.sm vs clocks.max.sm reveals capped hosts) ---"
 cat "$PERF_REPORTS_DIR/gpu_telemetry.csv" || true
