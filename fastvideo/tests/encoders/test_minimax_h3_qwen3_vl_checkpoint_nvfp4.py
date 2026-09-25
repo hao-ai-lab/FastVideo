@@ -117,6 +117,11 @@ def test_converter_metadata_round_trips_and_tolerates_producer_notes() -> None:
     assert MiniMaxH3SerializedNVFP4Config.from_config(mixed).bf16_projections == ("mlp.down_proj", )
     with pytest.raises(ValueError, match="unknown projection kinds"):
         serialized_nvfp4_quantization_config(keep_bf16=("mlp.dwn_proj", ))
+    awq = serialized_nvfp4_quantization_config(pre_quant_scale=True)
+    assert awq["pre_quant_scale"] is True
+    assert MiniMaxH3SerializedNVFP4Config.from_config(awq).pre_quant_scale is True
+    with pytest.raises(ValueError, match="pre_quant_scale must be a boolean"):
+        MiniMaxH3SerializedNVFP4Config.from_config(_checkpoint_quantization_config(pre_quant_scale="yes"))
     assert set(LANGUAGE_PROJECTIONS) == {
         "self_attn.q_proj", "self_attn.k_proj", "self_attn.v_proj", "self_attn.o_proj", "mlp.gate_proj",
         "mlp.up_proj", "mlp.down_proj"
@@ -151,6 +156,17 @@ def test_serialized_nvfp4_allocates_packed_weight_and_scales_without_a_bf16_weig
     assert layer._nvfp4_alpha.dtype == torch.float32
     assert layer._nvfp4_alpha.item() == pytest.approx(0.25)
     assert layer._nvfp4_x_global_scale.item() == 1.0
+
+
+def test_serialized_nvfp4_allocates_awq_pre_quant_scale_only_when_declared(distributed_setup) -> None:
+    plain = _language_linear(MiniMaxH3SerializedNVFP4Config.from_config(_checkpoint_quantization_config()))
+    assert not hasattr(plain, "pre_quant_scale")
+
+    config = MiniMaxH3SerializedNVFP4Config.from_config(_checkpoint_quantization_config(pre_quant_scale=True))
+    awq = _language_linear(config)
+    assert awq.pre_quant_scale.dtype == torch.bfloat16
+    assert awq.pre_quant_scale.shape == (128, )
+    assert callable(awq.pre_quant_scale.weight_loader)
 
 
 def test_serialized_nvfp4_finalization_rejects_tensors_the_checkpoint_never_filled(distributed_setup) -> None:
@@ -399,6 +415,28 @@ def test_apply_flattens_quantizes_and_restores_the_leading_dims(distributed_setu
     assert output.shape == (1, 5, 256)
     assert output.dtype == torch.bfloat16
     assert torch.equal(output, torch.full((1, 5, 256), 3.0, dtype=torch.bfloat16))
+
+
+def test_apply_uses_awq_pre_quant_scale_before_activation_quantization(distributed_setup, monkeypatch) -> None:
+    config = MiniMaxH3SerializedNVFP4Config.from_config(_checkpoint_quantization_config(pre_quant_scale=True))
+    layer = _language_linear(config, input_size=128, output_size=128)
+    _fill_loaded(layer)
+    layer.pre_quant_scale.data.fill_(2.0)
+    layer.quant_method.process_weights_after_loading(layer)
+    seen = {}
+
+    def fake_quantize(x_2d, global_scale):
+        seen["x"] = x_2d.clone()
+        return torch.zeros(x_2d.shape[0], 64, dtype=torch.uint8), torch.zeros(128, 8, dtype=torch.uint8)
+
+    def fake_linear(x_fp4, x_scale, weight_packed, weight_scale, alpha):
+        return torch.zeros(x_fp4.shape[0], weight_packed.shape[0], dtype=torch.bfloat16)
+
+    monkeypatch.setattr(h3_nvfp4, "_quantize_activation_nvfp4", fake_quantize)
+    monkeypatch.setattr(h3_nvfp4, "_nvfp4_linear", fake_linear)
+    MiniMaxH3SerializedNVFP4LinearMethod._apply_finalized(layer, torch.ones(3, 128), None)
+
+    assert torch.equal(seen["x"], torch.full((3, 128), 2.0, dtype=torch.bfloat16))
 
 
 def _tiny_conditioner_config(keep_bf16: tuple[str, ...] = ("mlp.down_proj", )) -> MiniMaxH3Qwen3VLConfig:
