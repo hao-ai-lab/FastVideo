@@ -161,3 +161,27 @@ def test_weights_still_land_in_the_model() -> None:
     for name, value in expected.items():
         assert loaded[name].dtype == torch.bfloat16
         assert loaded[name][0, 0].item() == value
+
+
+@pytest.mark.parametrize(
+    ("cpu_offload", "use_fsdp", "has_unified_memory", "expected"),
+    [
+        (True, False, False, True),
+        (True, True, True, True),
+        (False, True, False, True),
+        (False, True, True, False),
+        (False, False, False, False),
+        (False, False, True, False),
+    ],
+)
+def test_transformer_checkpoint_staging_policy(
+    cpu_offload: bool,
+    use_fsdp: bool,
+    has_unified_memory: bool,
+    expected: bool,
+) -> None:
+    assert fsdp_load._should_stage_transformer_weights_on_cpu(
+        cpu_offload=cpu_offload,
+        use_fsdp=use_fsdp,
+        has_unified_memory=has_unified_memory,
+    ) is expected
