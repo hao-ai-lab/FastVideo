@@ -500,7 +500,32 @@ Sub-steps and gates:
       `MODEL_PATH` at the `h3-tdm-overlay` and one preprocessing run. Then
       replicate the row x4 for the four ranks, as with
       `h3_overfit_t2va_x4`.
-  - Then: finish the VSA gate (480x832), then the full VSA vs dense comparison.
+  - 2026-09-24: **Jobs now go through Slurm** (user direction), not
+    Kubernetes. Setup and the findings that matter:
+    - Login: `ssh vlm-mal004@100.73.17.13` (Slinky login, key-based, works).
+      Cluster: 20 GB200 nodes x4 GPUs, partitions `hpc-rack-2` (13 nodes),
+      `hpc-rack-3` (7), `all` (20). All were fully allocated at recon time;
+      Slurm queues rather than preempting, so a submitted job waits for
+      capacity instead of being killed like the k8s BestEffort pod was.
+    - Runtime: **Pyxis/enroot** `--container-image` is supported, so the same
+      `ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev:py3.12-cuda13.0.0-latest`
+      image runs the job. There is no module system and no venv on Lustre.
+    - Filesystem: `/mnt/lustre` on the login node is the `/workspace` of the
+      k8s pods. Mounting it as `--container-mounts=/mnt/lustre:/workspace`
+      keeps every absolute path in the shipped configs valid unchanged.
+      Code is staged at `/mnt/lustre/vlm-mal004/tdm-port/code`.
+    - **No 480x832 preprocessing is needed.** TDM calls
+      `prepare_batch(latents_source="zeros")`, so the dataset's latent values
+      and shapes are unused; the trajectory geometry comes from the training
+      config. `--training.data.num_height 480 --training.data.num_width 832`
+      therefore switches the canvas with no new asset, which removes the
+      preprocess-script work the previous plan called for.
+    - Runner: `tests/local_tests/tdm/slurm/h3_tdm_vsa.sbatch` (MODE=smoke|gate,
+      HEIGHT/WIDTH/SPARSITY/MAX_STEPS/RUN_NAME env-driven). Job **11099**
+      (VSA smoke, 2 steps, sparsity 0.5, 480x832) submitted 2026-09-24 and
+      pending on `Resources`.
+  - Then: run the VSA smoke, then the VSA gate at 480x832, and compare with
+    the dense 4D result.
 
 - 2026-09-22: Branch renamed to `tdm-port` and pushed to the internal
   origin; stale `fork/issue-775-tdm` ref removed. Phase 0 plan recorded
