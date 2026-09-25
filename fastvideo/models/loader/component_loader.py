@@ -1034,7 +1034,10 @@ class TransformerLoader(ComponentLoader):
         scope = _active_component_attention_backend_scope()
         requested = scope.backend if scope is not None else fastvideo_args.attention_backend
         if hasattr(fastvideo_args, "_loading_teacher_critic_model"):
+            # DMD teachers/critics share the student args, not its VSA request.
             requested = None
+        # Reject an incompatible FullAttn request before reading model metadata
+        # or touching weights, including when this loader is called directly.
         fastvideo_args.pipeline_config.validate_runtime_request(fastvideo_args.workload_type.value, requested)
         config = get_diffusers_config(model=model_path)
         hf_config = deepcopy(config)

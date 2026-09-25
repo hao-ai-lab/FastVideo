@@ -281,7 +281,7 @@ class FastWan2_2_TI2V_5B_Config(Wan2_2_TI2V_5B_Config):
 
 @dataclass
 class FastWan2_2_TI2V_5B_FullAttn_Config(FastWan2_2_TI2V_5B_Config):
-    """Dense, text-to-video-only FastWan 5B (including its old HF alias)."""
+    """Dense T2V configuration for the FullAttn checkpoint and legacy alias."""
 
     ti2v_task: bool = False
 
@@ -296,11 +296,10 @@ class FastWan2_2_TI2V_5B_FullAttn_Config(FastWan2_2_TI2V_5B_Config):
                                                                      AttentionBackendEnum.ATTN_QAT_INFER)
 
     def validate_runtime_request(self, workload: str, attention_backend: AttentionBackendEnum | str | None) -> None:
-        """Reject workloads and sparse backends unsupported by the dense FullAttn variant.
+        """Reject unsupported requests before the dense checkpoint is loaded.
 
-        FullAttn keeps the FastWan 5B checkpoint but forces dense attention and
-        disables TI2V/image conditioning. The legacy HF alias
-        ``FastWan2.2-TI2V-5B-Diffusers`` is routed here via ``model_index.json``.
+        The separate FullAttn-to-VSA LoRA recipe selects a VSA-capable training
+        config; it does not relax this inference-only guard.
         """
         from fastvideo.attention.selector import coerce_attn_backend
 
