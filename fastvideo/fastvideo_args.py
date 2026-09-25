@@ -92,6 +92,38 @@ class WorkloadType(str, Enum):
 
 
 # args for fastvideo framework
+
+
+def probe_h3_attention_heads(model_path: str) -> int | None:
+    """Read the DiT attention head count from the checkpoint's config.json.
+
+    The encoder-split SP validation needs the real head count before any model
+    is built. The released FastH3 exports keep it flat in transformer/
+    config.json (transformer_ref for Ref2VA). Returns None for Hub ids or
+    unreadable configs, which leaves the divisibility check to the DiT's own
+    __init__.
+    """
+    import os
+    for sub in ("transformer", "transformer_ref"):
+        cfg = os.path.join(model_path or "", sub, "config.json")
+        try:
+            if os.path.isfile(cfg):
+                with open(cfg, encoding="utf-8") as f:
+                    heads = json.load(f).get("num_attention_heads")
+                if isinstance(heads, int) and heads > 0:
+                    return heads
+        except (OSError, ValueError):
+            continue
+    return None
+
+
+def h3_split_sp_error(heads: int, denoise_size: int, num_gpus: int) -> str:
+    legal = [n for n in range(1, num_gpus) if heads % (num_gpus - n) == 0]
+    return ("MiniMax-H3 encoder split: the denoise group runs sequence parallelism, so its size must divide "
+            f"the DiT attention head count ({heads}), got denoise_size={denoise_size}. With num_gpus={num_gpus}, "
+            f"valid --h3-encoder-nodes values are {legal}.")
+
+
 @dataclasses.dataclass
 class FastVideoArgs:
     # Model and path configuration (for convenience)
@@ -165,6 +197,19 @@ class FastVideoArgs:
     # later ``generate()`` on the same worker can re-encode. Explicit True /
     # False overrides the probe. Training never defers.
     h3_sequential_load: bool | None = None
+
+    # MiniMax-H3 component-level pipeline parallel: dedicate the first
+    # ``h3_encoder_nodes`` nodes to the Qwen3-VL text encoder. Those ranks run
+    # only the condition stages and NCCL-broadcast ``prompt_embeds``; the
+    # remaining ranks load only DiT + VAEs and form the sequence-parallel
+    # group of size ``num_gpus - h3_encoder_workers``. This is how 720p fits on
+    # 128 GiB GB10 boxes: denoise ranks shed the ~48 GiB encoder entirely.
+    # ``None`` (auto) folds FASTVIDEO_H3_ENCODER_SPLIT; requires the Ray
+    # backend. ``h3_encoder_workers`` is stamped by the Ray executor once
+    # placement is known.
+    h3_encoder_split: bool | None = None
+    h3_encoder_nodes: int = -1
+    h3_encoder_workers: int = 0
 
     # MiniMax-H3 video reconstruction. ``h3-vae`` is the full ViT decoder.
     # ``taeh3`` is Ollin Boer Bohan's tiny preview decoder; it changes quality
@@ -361,7 +406,19 @@ class FastVideoArgs:
             if env_backend is not None and backend_name_to_enum(env_backend) is not None:
                 self.attention_backend = env_backend
         self._fold_vae_parallel_env()
+        self._fold_h3_encoder_split_env()
         self.check_fastvideo_args()
+
+    def _fold_h3_encoder_split_env(self) -> None:
+        """Parse-once adapters for the MiniMax-H3 encoder-split env vars."""
+        import fastvideo.envs as envs
+
+        if self.h3_encoder_split is None:
+            self.h3_encoder_split = envs.FASTVIDEO_H3_ENCODER_SPLIT
+        if self.h3_encoder_nodes < 0:
+            self.h3_encoder_nodes = max(1, envs.FASTVIDEO_H3_ENCODER_NODES)
+        if not self.h3_encoder_split:
+            self.h3_encoder_nodes = max(0, self.h3_encoder_nodes)
 
     def _fold_vae_parallel_env(self) -> None:
         """Parse-once adapters for the sequence-parallel VAE env vars."""
@@ -968,7 +1025,31 @@ class FastVideoArgs:
         if self.hsdp_shard_dim == -1:
             self.hsdp_shard_dim = self.num_gpus
 
-        assert self.sp_size <= self.num_gpus and self.num_gpus % self.sp_size == 0, "num_gpus must >= and be divisible by sp_size"
+        if self.h3_encoder_split:
+            # The denoise group owns SP; its size (num_gpus - encoder workers)
+            # need not divide num_gpus, so the encoder group's ranks are exempt
+            # from the divisibility contract below. The worker-side DiT init
+            # still pins the real constraint (heads % denoise size).
+            if self.distributed_executor_backend != "ray":
+                raise ValueError("MiniMax-H3 h3_encoder_split requires distributed_executor_backend='ray'.")
+            if self.num_gpus < self.h3_encoder_nodes + 1:
+                raise ValueError(f"MiniMax-H3 h3_encoder_split needs num_gpus ({self.num_gpus}) > "
+                                 f"h3_encoder_nodes ({self.h3_encoder_nodes}).")
+            heads = probe_h3_attention_heads(self.model_path)
+            if heads:
+                # Fail at config time with the legal node counts instead of at
+                # DiT construction with the heads-divisibility ValueError.
+                # The executor repeats this against the placement-derived
+                # worker count; a missing checkpoint config defers to the DiT.
+                denoise_workers = self.num_gpus - self.h3_encoder_nodes
+                if denoise_workers > 0 and heads % denoise_workers:
+                    raise ValueError(h3_split_sp_error(heads, denoise_workers, self.num_gpus))
+            if self.sp_size not in (-1, self.num_gpus):
+                logger.info(
+                    "MiniMax-H3 h3_encoder_split: ignoring sp_size=%d; the denoise ranks run SP with "
+                    "num_gpus - h3_encoder_workers.", self.sp_size)
+        else:
+            assert self.sp_size <= self.num_gpus and self.num_gpus % self.sp_size == 0, "num_gpus must >= and be divisible by sp_size"
         assert self.hsdp_replicate_dim <= self.num_gpus and self.num_gpus % self.hsdp_replicate_dim == 0, "num_gpus must >= and be divisible by hsdp_replicate_dim"
         assert self.hsdp_shard_dim <= self.num_gpus and self.num_gpus % self.hsdp_shard_dim == 0, "num_gpus must >= and be divisible by hsdp_shard_dim"
 

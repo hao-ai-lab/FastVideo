@@ -7,13 +7,14 @@ from typing import Any
 
 import torch
 
-from fastvideo.distributed import get_local_torch_device, get_sp_group, get_world_group, model_parallel_is_initialized
+from fastvideo.distributed import get_local_torch_device, get_sp_group, model_parallel_is_initialized
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.models import pinned_offload
 from fastvideo.models.vaes.minimax_h3_audio import MiniMaxH3AudioVAE
 from fastvideo.models.vaes.minimax_h3_parallel import DEFAULT_DECODE_GATHER_STRATEGY, decode_to_pixels_parallel
 from fastvideo.models.vaes.minimax_h3_video import AutoencoderKLMiniMaxH3
+from fastvideo.pipelines.basic.minimax_h3.encoder_split import h3_is_output_worker
 from fastvideo.profiler import nvtx_range
 from fastvideo.pipelines.basic.minimax_h3.packing import (
     MiniMaxH3PackedLayout,
@@ -52,7 +53,7 @@ def _decode_participation(fastvideo_args: FastVideoArgs, want_parallel: bool) ->
     sp_group = get_sp_group()
     if bool(want_parallel) and sp_group.world_size > 1:
         return sp_group, sp_group.is_first_rank, True
-    return sp_group, get_world_group().is_first_rank, False
+    return sp_group, h3_is_output_worker(fastvideo_args), False
 
 
 class MiniMaxH3VideoDecodingStage(PipelineStage):
@@ -184,9 +185,10 @@ class MiniMaxH3AudioDecodingStage(PipelineStage):
     @torch.no_grad()
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         """Decode H3 audio latents into a stereo CPU waveform."""
-        # Audio decode is sub-second, so preserve the serial path's global
-        # rank-zero ownership.
-        if model_parallel_is_initialized() and not get_world_group().is_first_rank:
+        # Audio decode is sub-second, so preserve the serial path's output
+        # ownership (global rank zero, or the first denoise rank under the
+        # MiniMax-H3 encoder split).
+        if model_parallel_is_initialized() and not h3_is_output_worker(fastvideo_args):
             batch.extra["audio"] = torch.empty((0, 2), device="cpu", dtype=torch.float32)
             batch.extra["audio_sample_rate"] = self.audio_vae.sampling_rate
             self._clear_runtime(batch)

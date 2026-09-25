@@ -27,6 +27,8 @@ if TYPE_CHECKING:
     FASTVIDEO_VAE_PARALLEL_DECODE: bool = False
     FASTVIDEO_VAE_PARALLEL_ENCODE: bool = False
     FASTVIDEO_VAE_PARALLEL_DECODE_STRATEGY: str | None = None
+    FASTVIDEO_H3_ENCODER_SPLIT: bool = False
+    FASTVIDEO_H3_ENCODER_NODES: int = 1
     FASTVIDEO_ULYSSES_A2A: str = "off"
     FASTVIDEO_WORKER_MULTIPROC_METHOD: str = "spawn"
     FASTVIDEO_TARGET_DEVICE: str = "cuda"
@@ -255,6 +257,13 @@ environment_variables: dict[str, Callable[[], Any]] = {
     lambda: os.getenv("FASTVIDEO_VAE_PARALLEL_ENCODE", "0") != "0",
     "FASTVIDEO_VAE_PARALLEL_DECODE_STRATEGY":
     lambda: os.getenv("FASTVIDEO_VAE_PARALLEL_DECODE_STRATEGY", None),
+    # MiniMax-H3 component-level pipeline parallel: dedicate the first
+    # FASTVIDEO_H3_ENCODER_NODES nodes to the Qwen3-VL text encoder so the
+    # denoising ranks never load it (720p needs the ~48 GiB headroom on GB10).
+    "FASTVIDEO_H3_ENCODER_SPLIT":
+    lambda: os.getenv("FASTVIDEO_H3_ENCODER_SPLIT", "0") != "0",
+    "FASTVIDEO_H3_ENCODER_NODES":
+    lambda: int(os.getenv("FASTVIDEO_H3_ENCODER_NODES", "1")),
 
     # Opt-in MiniMax-H3 inference-only Triton fusions adapted from the
     # NVlabs/Sana Sol-Engine implementation. Accepts `all`, `1`, or a
