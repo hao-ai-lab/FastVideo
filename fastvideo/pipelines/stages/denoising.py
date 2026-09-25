@@ -77,10 +77,8 @@ class DenoisingStage(PipelineStage):
             head_size=attn_head_size,
             dtype=torch.float16,  # TODO(will): hack
             supported_attention_backends=supported_backends,
-            # Build metadata for the backend this transformer actually resolved
-            # instead of re-deriving it from the environment. The two agreed
-            # only when the request arrived via the env var: a request passed as
-            # `attention_backend` reached the layers but never this stage.
+            # Metadata must match the transformer's built attention layers, not
+            # a later read of the process-wide environment setting.
             requested=component_attention_backend(self.transformer),
         )
 

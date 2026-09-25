@@ -303,9 +303,9 @@ class WanTransformerBlock(nn.Module):
                  requested_backend: AttentionBackendEnum | _NoRequest | None = NO_REQUEST):
         """Build one Wan transformer block.
 
-        ``requested_backend`` threads the component-level attention decision from
-        :func:`component_attention_backend` into every attention layer so dense
-        Wan variants honor API requests without re-reading env vars.
+        Pass the component's backend request to self- and cross-attention at
+        construction time. Each layer may still fall back to a supported dense
+        backend; neither layer needs to reread the process-wide environment.
         """
         super().__init__()
 
@@ -466,6 +466,7 @@ class WanTransformerBlock_VSA(nn.Module):
                  quant_config: QuantizationConfig | None = None,
                  prefix: str = "",
                  requested_backend: AttentionBackendEnum | _NoRequest | None = NO_REQUEST):
+        """Keep VSA self-attention and dense cross-attention on one component request."""
         super().__init__()
 
         # 1. Self-attention

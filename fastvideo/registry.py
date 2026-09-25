@@ -147,10 +147,9 @@ def register_configs(
     workload_types declares which UI workload options this config supports.
     Use () for configs not exposed as workload options.
 
-    model_index_detectors runs after the manifest is loaded and before path/name
-    heuristics. Use it when multiple checkpoints share a pipeline class name
-    but differ in ``model_index.json`` fields (for example FastWan FullAttn vs
-    the sparse TI2V alias).
+    ``model_index_detectors`` run after the manifest is loaded but before broad
+    path/name heuristics. This lets checkpoints with the same pipeline class
+    select different configs using their ``model_index.json`` metadata.
     """
     model_id = str(len(_CONFIG_REGISTRY))
 

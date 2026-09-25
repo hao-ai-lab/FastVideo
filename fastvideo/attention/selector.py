@@ -171,12 +171,12 @@ def component_attention_backend(component: object) -> AttentionBackendEnum | _No
     """
     config = getattr(component, "config", None)
     resolved = getattr(config, "_resolved_attention_backend", None)
-    # Wan threads the component request explicitly through its layers. Other
-    # families retain the historical None -> NO_REQUEST compatibility path.
+    # Only constructed Wan instances preserve automatic selection. Inherited
+    # Wan methods on unported subclasses keep the legacy environment fallback.
     if (getattr(component, "__dict__", {}).get("_preserve_auto_attention_backend", False)
             and getattr(config, "_attention_backend_resolved", False)):
-        # Once built, use the self-attention layer's actual selection for
-        # metadata too (a request outside the instance support set can fall back).
+        # Metadata follows the built self-attention layer, which may have
+        # fallen back because the requested backend was unsupported here.
         return getattr(component, "_self_attention_backend", resolved)
     return NO_REQUEST if resolved is None else resolved
 

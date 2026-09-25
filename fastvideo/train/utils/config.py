@@ -280,10 +280,9 @@ def _parse_pipeline_config(
     if isinstance(pipeline_raw, str):
         kwargs["pipeline_config"] = _resolve_existing_file(pipeline_raw)
 
-    # FullAttn is a dense inference variant of the VSA-capable FastWan 5B
-    # checkpoint. Its guard must still reject VSA at inference time, but the
-    # existing FullAttn -> VSA LoRA recipe needs the 5B training config so
-    # the student can bind sparse attention independently of dense teachers.
+    # The FullAttn inference config rejects VSA, but its LoRA recipe trains a
+    # VSA student from the same 5B weights. Only this training path substitutes
+    # the sparse-capable config; teacher/critic loads remain dense by scope.
     training = cfg.get("training") or {}
     vsa = training.get("vsa") or {}
     if model_path is not None and float(vsa.get("sparsity", 0.0) or 0.0) > 0:
