@@ -120,7 +120,7 @@ def test_reason_covers_every_precondition():
     vbs = torch.full((2, ), 64, dtype=torch.long)
     assert "not installed" in _sm100a_unavailable_reason(None, q, vbs, grad_mode=False)
     ok = _FakeSm100a(supported=True)
-    assert "forward-only" in _sm100a_unavailable_reason(ok, q, vbs, grad_mode=True)
+    assert "require grad" in _sm100a_unavailable_reason(ok, q, vbs, grad_mode=True)
     bad = _FakeSm100a(supported=False)
     assert "is_supported" in _sm100a_unavailable_reason(bad, q, vbs, grad_mode=False)
     assert _sm100a_unavailable_reason(ok, q, vbs, grad_mode=False) is None

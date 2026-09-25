@@ -4,8 +4,10 @@
 Companion of ``block_sparse_attn_sm100a`` (the forward): consumes the forward's ``lse`` in the
 Triton "M format" (``max(qk * sm_scale * log2e) + log2(l)``, ``[B, H, S]`` fp32) unchanged and
 FastVideo's k2q index metadata, returns ``(dq, dk, dv)`` in bf16 with the inputs' layout and the
-Triton backward's scaling (dq and dk carry sm_scale, dv does not). 64-token blocks only; any
-other configuration falls back to Triton via ``is_supported``.
+Triton backward's scaling (dq and dk carry sm_scale, dv does not). Two kernels, picked by the
+metadata's block size: 64-token blocks (``block_sparse_sm100a_bwd``) and 128-token blocks
+(``block_sparse_sm100a_blk128_bwd``); any other configuration falls back to Triton via
+``is_supported``.
 """
 
 from typing import Tuple
@@ -16,45 +18,60 @@ try:
     # The pybind symbols live on fastvideo_kernel_ops, NOT on the _C package that contains it
     # (its __init__ is empty, so hasattr on the package fails with the kernel built and present).
     from fastvideo_kernel._C import fastvideo_kernel_ops as _C
-    _BWD = getattr(_C, "block_sparse_sm100a_bwd", None)
-    _HAS_VSA_BWD_SM100A = _BWD is not None
+    _BWD_BY_BLOCK = {
+        64: getattr(_C, "block_sparse_sm100a_bwd", None),
+        128: getattr(_C, "block_sparse_sm100a_blk128_bwd", None),
+    }
+    _HAS_VSA_BWD_SM100A = any(_BWD_BY_BLOCK.values())
 except ImportError:  # pragma: no cover - extension not built
     _C = None
-    _BWD = None
+    _BWD_BY_BLOCK = {}
     _HAS_VSA_BWD_SM100A = False
 
 _SUPPORTED_COMPUTE_CAPABILITIES = {(10, 0), (10, 3)}
 HEAD_DIM = 128
-BLOCK = 64
+BLOCKS = (64, 128)
 # Must match the -DVSA_BHSD the extension was compiled with (FastVideo builds with true).
 BHSD = True
 
 
 def set_extension(module) -> None:
-    """Use an already-loaded extension module exposing ``block_sparse_sm100a_bwd``.
+    """Use an already-loaded extension module exposing ``block_sparse_sm100a_bwd`` and / or
+    ``block_sparse_sm100a_blk128_bwd``.
 
-    A standalone build of ``block_sparse_bwd_sm100a.cu`` (for example through
+    A standalone build of the binding .cu files (for example through
     ``torch.utils.cpp_extension.load`` with a ten-line pybind wrapper) can be injected here, so
     the backend can be exercised without rebuilding the fastvideo_kernel wheel.
     """
-    global _C, _BWD, _HAS_VSA_BWD_SM100A
+    global _C, _BWD_BY_BLOCK, _HAS_VSA_BWD_SM100A
     _C = module
-    _BWD = getattr(module, "block_sparse_sm100a_bwd", None)
-    _HAS_VSA_BWD_SM100A = _BWD is not None
+    _BWD_BY_BLOCK = {
+        64: getattr(module, "block_sparse_sm100a_bwd", None),
+        128: getattr(module, "block_sparse_sm100a_blk128_bwd", None),
+    }
+    _HAS_VSA_BWD_SM100A = any(_BWD_BY_BLOCK.values())
 
 
 def _seqlen(q: torch.Tensor) -> int:
     return q.shape[2] if BHSD else q.shape[1]
 
 
+def _block_size(q: torch.Tensor, variable_block_sizes: torch.Tensor) -> int:
+    """The block size the metadata implies (seqlen / num_blocks), 0 when it is not integral."""
+    num_blocks = variable_block_sizes.numel()
+    seqlen = _seqlen(q)
+    return 0 if num_blocks == 0 or seqlen % num_blocks else seqlen // num_blocks
+
+
 def is_supported(q: torch.Tensor, variable_block_sizes: torch.Tensor) -> bool:
     """True iff this build can run these tensors; otherwise the caller uses Triton.
 
     Static facts only (shapes, dtypes, arch, layout), never tensor contents, so it is cheap
-    enough for a per-layer dispatch path. The kernel is fixed at 64-token blocks with
-    head_dim 128 and needs seqlen == 64 * num_blocks with an even num_blocks (its preprocess
-    works in 128-token blocks). Per-row k2q counts may be anything in [0, num_q_blocks],
-    including 0: unselected kv blocks get exactly-zero dk/dv rows.
+    enough for a per-layer dispatch path. Both kernels take head_dim 128 and seqlen == block *
+    num_blocks; the 64-token kernel also needs an even num_blocks (its preprocess works in
+    128-token blocks); batch * heads is the launch grid's y extent, so it must be <= 65535.
+    Per-row k2q counts may be anything in [0, num_q_blocks], including 0: unselected kv blocks
+    get exactly-zero dk/dv rows.
     """
     if not _HAS_VSA_BWD_SM100A or not q.is_cuda:
         return False
@@ -64,14 +81,16 @@ def is_supported(q: torch.Tensor, variable_block_sizes: torch.Tensor) -> bool:
         return False
     if not q.is_contiguous():
         return False
+    if q.shape[0] * (q.shape[1] if BHSD else q.shape[2]) > 65535:
+        return False
     # Metadata must be integer-typed so the wrapper's int32 conversion is value-preserving.
     if not variable_block_sizes.is_cuda or variable_block_sizes.dtype not in (torch.int32,
                                                                               torch.int64):
         return False
-    num_blocks = variable_block_sizes.numel()
-    if num_blocks == 0 or num_blocks % 2 != 0:
+    block = _block_size(q, variable_block_sizes)
+    if _BWD_BY_BLOCK.get(block) is None:
         return False
-    if _seqlen(q) != BLOCK * num_blocks:
+    if block == 64 and variable_block_sizes.numel() % 2 != 0:
         return False
     return True
 
@@ -89,15 +108,21 @@ def block_sparse_attn_backward_sm100a_from_k2q(
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Backward from k2q metadata already in hand (``invert_indices`` layout).
 
-    ``k2q_idx`` is ``[B, H, num_kv_blocks, max_q_blocks]`` (or the flat 2-D view) of LOCAL q64
-    block ids, ``k2q_num`` ``[B, H, num_kv_blocks]``; entries past a row's count are never read.
+    ``k2q_idx`` is ``[B, H, num_kv_blocks, max_q_blocks]`` (or the flat 2-D view) of LOCAL q
+    block ids (64- or 128-token blocks, as the metadata's block size), ``k2q_num``
+    ``[B, H, num_kv_blocks]``; entries past a row's count are never read.
     """
+    block = _block_size(q, variable_block_sizes)
+    backward = _BWD_BY_BLOCK.get(block)
+    if backward is None:
+        raise RuntimeError(f"block_sparse_attn_backward_sm100a: no kernel for {block}-token "
+                           f"blocks (built: {sorted(b for b, f in _BWD_BY_BLOCK.items() if f)})")
     sm_scale = 1.0 / (q.shape[-1]**0.5)
     idx = k2q_idx.to(torch.int32).contiguous()
     num = k2q_num.to(torch.int32).contiguous()
     vbs = variable_block_sizes.to(torch.int32).contiguous()
-    res = _BWD(grad_o.contiguous(), q.contiguous(), k.contiguous(), v.contiguous(),
-               o.contiguous(), lse.contiguous(), idx, num, vbs, sm_scale)
+    res = backward(grad_o.contiguous(), q.contiguous(), k.contiguous(), v.contiguous(),
+                   o.contiguous(), lse.contiguous(), idx, num, vbs, sm_scale)
     return res[0], res[1], res[2]
 
 

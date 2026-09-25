@@ -985,3 +985,30 @@ uint64_t make_l2cache_policy_fractional_evict_last_unchanged(float fraction_f32)
       : "f"(fraction_f32));
   return policy;
 }
+
+__device__ __forceinline__
+void cp_async_cg_16(uint32_t smem_dst, const void* gmem_src) {
+  asm volatile("cp.async.cg.shared.global [%0], [%1], 16;\n"
+               :: "r"(smem_dst), "l"(gmem_src) : "memory");
+}
+
+__device__ __forceinline__
+void cp_async_commit_group() {
+  asm volatile("cp.async.commit_group;\n" ::: "memory");
+}
+
+template <int N>
+__device__ __forceinline__
+void cp_async_wait_group() {
+  asm volatile("cp.async.wait_group %0;\n" :: "n"(N) : "memory");
+}
+
+__device__ __forceinline__
+void griddepcontrol_wait() {
+  asm volatile("griddepcontrol.wait;\n" ::: "memory");
+}
+
+__device__ __forceinline__
+void griddepcontrol_launch_dependents() {
+  asm volatile("griddepcontrol.launch_dependents;\n" ::: "memory");
+}

@@ -4,8 +4,9 @@
 ``FASTVIDEO_VSA_SM100A=1`` routes the forward to the sm_100a extension when
 ``block_sparse_attn_sm100a.is_supported`` passes. Its backward is the sm_100a
 CUDA backward where that op is built and ``block_sparse_attn_bwd_sm100a.is_supported``
-passes (64-token blocks on an sm_100a device), the Triton backward otherwise; the
-sm_100a lse is already in Triton's M format, so either pairing needs no conversion.
+passes (64- or 128-token blocks on a data-center Blackwell device), the Triton backward
+otherwise (64-token blocks only); the sm_100a lse is already in Triton's M format, so
+either pairing needs no conversion.
 Everything else -- env unset, unsupported input, ``FASTVIDEO_VSA_TRITON`` override --
 must keep the pre-existing selection, bit-for-bit.
 
@@ -229,10 +230,50 @@ def test_backward_large_seq_matches_triton_and_is_deterministic(monkeypatch):
             f"max|diff|/max|ref|={rel_max:.3e} mean|diff|={mean_abs:.3e}"
 
 
-def test_blk128_backward_raises(monkeypatch):
-    """128-token blocks: forward runs, backward refuses (both backwards are 64-block only)."""
+def _blk128_triton_reference_grads(q, k, v, idx, num, vbs, monkeypatch):
+    """All-Triton grads for 128-token metadata: the logical [B, H, Nq, Nk] map goes through
+    ``block_sparse_attn_128`` (Triton via the 128 -> 64 tile expansion, autograd-capable)."""
+    from fastvideo_kernel.block_sparse_attn_256 import block_sparse_attn_128
+
+    B, H, Nq, Mk = idx.shape
+    rows = B * H * Nq
+    block_map = torch.zeros((rows, vbs.numel()), dtype=torch.bool, device="cuda")
+    valid = torch.arange(Mk, device="cuda").view(1, Mk) < num.view(rows, 1)
+    row_of = torch.arange(rows, device="cuda").view(rows, 1).expand(rows, Mk)
+    block_map[row_of[valid], idx.view(rows, Mk)[valid].long()] = True
+    block_map = block_map.view(B, H, Nq, vbs.numel())
+    q2, k2, v2 = (t.detach().clone().requires_grad_(True) for t in (q, k, v))
+    monkeypatch.setenv("FASTVIDEO_VSA_TRITON", "1")
+    monkeypatch.delenv("FASTVIDEO_VSA_CUTEDSL", raising=False)
+    out2, _ = block_sparse_attn_128(q2, k2, v2, block_map, vbs)
+    out2.float().square().sum().backward()
+    monkeypatch.delenv("FASTVIDEO_VSA_TRITON")
+    return [t.grad.float() for t in (q2, k2, v2)]
+
+
+def test_blk128_backward(monkeypatch):
+    """128-token blocks: with the 128-token backward built the sm_100a route runs it (the Triton
+    backward must not be entered) and its grads match the all-Triton 128 wrapper; without it the
+    backward raises instead of silently falling back to a 64-token kernel."""
+    from fastvideo_kernel import block_sparse_attn_bwd_sm100a as vsa_bwd
+
+    dispatch = importlib.import_module("fastvideo_kernel.block_sparse_attn")
     monkeypatch.setenv(ENV, "1")
     q, k, v, idx, num, vbs = make_case(128, requires_grad=True)
+    if not vsa_bwd.is_supported(q, vbs):
+        out, _ = block_sparse_attn_from_indices(q, k, v, idx, num, vbs)
+        with pytest.raises(RuntimeError, match="128-token"):
+            out.float().sum().backward()
+        return
+
+    # The Triton reference first: the guard below disables the Triton backward for the route.
+    ref = _blk128_triton_reference_grads(q, k, v, idx, num, vbs, monkeypatch)
+
+    def no_triton_backward(*args, **kwargs):
+        raise AssertionError("Triton backward entered on a supported 128-token input")
+
+    monkeypatch.setattr(dispatch, "block_sparse_attn_backward_triton", no_triton_backward)
     out, _ = block_sparse_attn_from_indices(q, k, v, idx, num, vbs)
-    with pytest.raises(RuntimeError, match="64-token"):
-        out.float().sum().backward()
+    out.float().square().sum().backward()
+    got = [t.grad.float() for t in (q, k, v)]
+    _assert_grads_close(got, ref)
