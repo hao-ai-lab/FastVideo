@@ -173,7 +173,36 @@ class CudaPlatformBase(Platform):
 
         logger.info("Trying FASTVIDEO_ATTENTION_BACKEND=%s", envs.FASTVIDEO_ATTENTION_BACKEND)
         logger.info("Selected backend: %s", selected_backend)
-        if selected_backend == AttentionBackendEnum.SAGE_ATTN:
+        if selected_backend == AttentionBackendEnum.FLASHINFER:
+            if not cls.has_device_capability(80):
+                raise RuntimeError("FLASHINFER requires an NVIDIA GPU with compute capability sm80 or newer.")
+            if dtype not in (torch.float16, torch.bfloat16):
+                logger.warning("FLASHINFER will cast %s inputs to bfloat16 for the kernel.", dtype)
+            try:
+                from flashinfer.prefill import single_prefill_with_kv_cache  # noqa: F401
+
+                if envs.FASTVIDEO_FLASHINFER_PREFILL_BACKEND == "cudnn":
+                    from flashinfer.prefill import cudnn_batch_prefill_with_kv_cache  # noqa: F401
+
+                from fastvideo.attention.backends.flashinfer import (  # noqa: F401
+                    FlashInferBackend)
+            except ImportError as e:
+                raise ImportError("FLASHINFER selected but flashinfer-python is not importable. "
+                                  "Install the FastVideo Linux dependencies or "
+                                  "`uv pip install flashinfer-python`.") from e
+            if head_size not in FlashInferBackend.get_supported_head_sizes():
+                raise ValueError(f"FLASHINFER does not safely support head size {head_size}; "
+                                 f"supported sizes are {FlashInferBackend.get_supported_head_sizes()}.")
+            # The cudnn prefill arm narrows FlashInfer's general head-size support to
+            # 128 only (see FlashInferImpl.__init__). Check it here too so a bad
+            # combination fails at backend selection instead of per-layer, deep into
+            # model construction.
+            if envs.FASTVIDEO_FLASHINFER_PREFILL_BACKEND == "cudnn" and head_size != 128:
+                raise ValueError(f"FLASHINFER cuDNN prefill requires head size 128; got {head_size}. "
+                                 "Use FASTVIDEO_FLASHINFER_PREFILL_BACKEND=single instead.")
+            logger.info("Using FlashInfer attention backend.")
+            return "fastvideo.attention.backends.flashinfer.FlashInferBackend"
+        elif selected_backend == AttentionBackendEnum.SAGE_ATTN:
             try:
                 from sageattention import sageattn  # noqa: F401
 
