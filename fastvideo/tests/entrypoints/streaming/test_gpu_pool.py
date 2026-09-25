@@ -12,6 +12,7 @@ import multiprocessing as mp
 import queue
 import threading
 import time
+from concurrent.futures import Future
 from dataclasses import dataclass
 from typing import Any
 
@@ -28,6 +29,7 @@ from fastvideo.entrypoints.streaming.gpu_pool import (
     InProcessGpuPool,
     PoolAcquireTimeout,
     SubprocessGpuPool,
+    _PendingJob,
     _WorkerHandle,
 )
 
@@ -386,6 +388,109 @@ class TestSubprocessGpuPool:
 
 class TestSubprocessGpuPoolFailureModes:
     """Coverage for boot/runtime failures the pool has to absorb."""
+
+    @pytest.mark.parametrize("worker_raises", [False, True])
+    @pytest.mark.parametrize("cancel_during_dispatch", [False, True])
+    def test_cancelled_request_does_not_break_worker(self, monkeypatch, worker_raises, cancel_during_dispatch):
+        """An abandoned result must not take down the reader for later jobs."""
+
+        async def run():
+            loop = asyncio.get_running_loop()
+            started = asyncio.Event()
+            dispatch_started = asyncio.Event()
+            finish_generation = threading.Event()
+            finish_dispatch = threading.Event()
+
+            class _BlockingGenerator:
+
+                def generate(self, request):
+                    if request.prompt == "cancel-me":
+                        loop.call_soon_threadsafe(started.set)
+                        if not finish_generation.wait(timeout=5.0):
+                            raise RuntimeError("test failed to unblock generation")
+                        if worker_raises:
+                            raise RuntimeError("abandoned worker error")
+                    return {"prompt_echo": request.prompt}
+
+            pool = SubprocessGpuPool(
+                generator_config=GeneratorConfig(model_path="/models/fake"),
+                pool_config=GpuPoolConfig(num_workers=1),
+                warmup_config=WarmupConfig(enabled=False),
+                worker_factory=_thread_worker_factory(lambda gpu_id: _BlockingGenerator()),
+            )
+            await pool.start()
+            request_task = None
+            try:
+                await pool.acquire("sess-a")
+                if cancel_during_dispatch:
+                    job_queue = pool._workers[0].job_queue
+                    original_put = job_queue.put
+
+                    def blocked_put(item):
+                        if item is not None and item["request"].prompt == "cancel-me":
+                            loop.call_soon_threadsafe(dispatch_started.set)
+                            if not finish_dispatch.wait(timeout=5.0):
+                                raise RuntimeError("test failed to unblock dispatch")
+                        original_put(item)
+
+                    monkeypatch.setattr(job_queue, "put", blocked_put)
+
+                request_task = asyncio.create_task(pool.run("sess-a", GenerationRequest(prompt="cancel-me")))
+                await asyncio.wait_for(dispatch_started.wait() if cancel_during_dispatch else started.wait(), 2.0)
+                request_task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await request_task
+                # Cancelling the caller cannot stop an executor thread or a
+                # worker already generating, but must detach its pending job.
+                assert not pool._pending
+                finish_dispatch.set()
+                await asyncio.wait_for(started.wait(), 2.0)
+                finish_generation.set()
+
+                # Reuse the same worker for another session. FIFO delivery
+                # ensures its reader sees the abandoned result first.
+                await pool.release("sess-a")
+                await pool.acquire("sess-b", timeout=2.0)
+                result = await asyncio.wait_for(pool.run("sess-b", GenerationRequest(prompt="next")), 2.0)
+                assert result["prompt_echo"] == "next"
+                assert not pool._pending
+                assert all(not task.done() for task in pool._result_reader_tasks)
+            finally:
+                finish_dispatch.set()
+                finish_generation.set()
+                if request_task is not None:
+                    request_task.cancel()
+                    await asyncio.gather(request_task, return_exceptions=True)
+                await pool.shutdown()
+
+        asyncio.run(run())
+
+    @pytest.mark.parametrize("worker_raises", [False, True])
+    def test_reader_ignores_cancelled_future_before_request_cleanup(self, pool_factory, worker_raises):
+        """A cancelled future still in ``_pending`` must not kill the reader."""
+
+        async def run():
+            pool = await pool_factory(num_workers=1)
+            try:
+                handle = pool._workers[0]
+                future = Future()
+                future.cancel()
+                pool._pending["cancelled"] = _PendingJob("cancelled", future, "sess-a", handle.worker_id)
+                handle.result_queue.put({
+                    "job_id": "cancelled",
+                    "kind": "error" if worker_raises else "result",
+                    "error": "abandoned error",
+                    "result": {},
+                })
+                await pool.acquire("sess-b")
+                result = await asyncio.wait_for(pool.run("sess-b", GenerationRequest(prompt="next")), 2.0)
+                assert result["prompt_echo"] == "next"
+                assert not pool._pending
+                assert all(not task.done() for task in pool._result_reader_tasks)
+            finally:
+                await pool.shutdown()
+
+        asyncio.run(run())
 
     def test_failed_boot_excluded_from_available(self):
         """A worker whose factory leaves ``boot_ok`` unset must not be
