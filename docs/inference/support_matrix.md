@@ -23,10 +23,11 @@ documentation grouping: it follows each registration's declared `model_family`,
 except `black-forest-labs/FLUX.1-dev`, which declares none and is listed under
 `flux` for readability. The **Workloads** column shows each
 registration's declared `workload_types`; `—` means the entry is registered
-without a UI workload option but is still loadable by ID. The **Example**
-column links a runnable script in `examples/inference/basic/` where one exists.
+without a UI workload option but is still loadable by ID. The **Example / guide**
+column links a runnable script in `examples/inference/basic/` or a model-specific
+guide with a runnable CLI command where one exists.
 
-| Family | HuggingFace Model ID | Workloads | Example |
+| Family | HuggingFace Model ID | Workloads | Example / guide |
 |--------|----------------------|-----------|---------|
 | cosmos | `nvidia/Cosmos-Predict2-2B-Video2World` | T2V | — |
 | cosmos25 | `KyleShao/Cosmos-Predict2.5-2B-Diffusers` | T2V | [basic_cosmos2_5_t2w.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_cosmos2_5_t2w.py) |
@@ -82,7 +83,7 @@ column links a runnable script in `examples/inference/basic/` where one exists.
 | wan | `IRMChen/Wan2.1-Fun-1.3B-Control-Diffusers` | — | [basic_wan2_2_Fun.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_wan2_2_Fun.py) |
 | wan | `FastVideo/FastWan2.1-T2V-1.3B-Diffusers`<br>`FastVideo/FastWan2.1-T2V-14B-480P-Diffusers` | T2V | [basic_dmd.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_dmd.py) |
 | wan | `Wan-AI/Wan2.2-TI2V-5B-Diffusers` | T2V, I2V | [basic_wan2_2_ti2v.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_wan2_2_ti2v.py) |
-| wan | `FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers`<br>`FastVideo/FastWan2.2-TI2V-5B-Diffusers` | T2V, I2V | [basic_dmd.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_dmd.py) |
+| wan | `FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers`<br>`FastVideo/FastWan2.2-TI2V-5B-Diffusers` | T2V | [5B FullAttn CLI guide](wan_fastwan_fullattn.md) |
 | wan | `decart-ai/Lucy-Edit-Dev`<br>`decart-ai/Lucy-Edit-1.1-Dev` | — | [basic_lucy_edit.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_lucy_edit.py) |
 | wan | `Wan-AI/Wan2.2-T2V-A14B-Diffusers` | T2V | [basic_wan2_2.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_wan2_2.py) |
 | wan | `Wan-AI/Wan2.2-I2V-A14B-Diffusers` | I2V | [basic_wan2_2_i2v.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_wan2_2_i2v.py) |
@@ -155,7 +156,7 @@ optimizations: absence means **untested**, not incompatible.
 | Model Name | HuggingFace Model ID | Resolutions | TeaCache | Sliding Tile Attn (Legacy Branch) | Sage Attn | VSA | BSA |
 |------------|---------------------|-------------|----------|-------------------|-----------|-----|-----|
 | FastWan2.1 T2V 1.3B | `FastVideo/FastWan2.1-T2V-1.3B-Diffusers` | 480P | ⭕ | ⭕ | ⭕ | ✅ | ⭕ |
-| FastWan2.2 TI2V 5B Full Attn | `FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers` | 720P | ⭕ | ⭕ | ⭕ | ✅ | ⭕ |
+| FastWan2.2 TI2V 5B Full Attn | `FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers` | 720P | ⭕ | ⭕ | ⭕ | ❌ | ⭕ |
 | Wan2.2 TI2V 5B | `Wan-AI/Wan2.2-TI2V-5B-Diffusers` | 720P | ⭕ | ⭕ | ✅ | ⭕ | ⭕ |
 | DreamX-World 5B Cam | `FastVideo/DreamX-World-5B-Cam-Diffusers` | 480P | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
 | DreamX-World 5B AR | `FastVideo/DreamX-World-5B-Diffusers` | 704px1280p | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |

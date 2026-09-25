@@ -39,6 +39,8 @@ class ModelConfig:
     # Keyword-only: the loader writes this by attribute assignment, so it must not
     # take a slot in the positional signature that subclasses' fields inherit.
     _resolved_attention_backend: "AttentionBackendEnum | None" = field(default=None, kw_only=True)
+    # Distinguish a loader's automatic decision from an untouched config.
+    _attention_backend_resolved: bool = field(default=False, kw_only=True)
 
     def __getattr__(self, name):
         # Only called if 'name' is not found in ModelConfig directly

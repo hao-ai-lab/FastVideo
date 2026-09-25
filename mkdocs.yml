@@ -185,6 +185,7 @@ nav:
     - Optimizations: inference/optimizations.md
     - ComfyUI: inference/comfyui.md
     - Support Matrix: inference/support_matrix.md
+    - FastWan FullAttn: inference/wan_fastwan_fullattn.md
     - CLI: inference/cli.md
     - Add Pipeline: inference/add_pipeline.md
     - Examples:
